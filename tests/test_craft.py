@@ -19,6 +19,18 @@ from craft_core.mcp import McpServer, main as mcp_main
 from craft_core.paths import data_root, ensure_layout
 from craft_core.service import CraftService
 from craft_core.store import CraftStore
+from craft_core.workflow_runtime import (
+    _git_changed_lines,
+    assertion_step,
+    command_step,
+    coverage_gate,
+    execute_steps,
+    failure_signature,
+    redact_output,
+    resolve_inputs,
+    safe_path,
+    substitute,
+)
 
 
 TEST_TMP_ROOT = Path(__file__).resolve().parent / ".tmp"
@@ -469,7 +481,7 @@ class StoreMigrationTests(unittest.TestCase):
                 sql = migrated.execute("SELECT sql FROM sqlite_master WHERE name='capabilities'").fetchone()["sql"]
                 version = migrated.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()["value"]
             self.assertNotIn("path TEXT NOT NULL UNIQUE", sql)
-            self.assertEqual(version, "3")
+            self.assertEqual(version, "4")
 
     def test_store_falls_back_when_fts5_is_unavailable(self) -> None:
         from craft_core.store import ClosingConnection
@@ -640,6 +652,322 @@ class CrossPlatformInstallTests(unittest.TestCase):
             with patch.object(sys, "argv", ["craft-install", "--target", str(target)]), redirect_stdout(output):
                 installer_main()
             self.assertEqual(json.loads(output.getvalue())["plugin_root"], str(target.resolve()))
+
+
+class WorkflowRuntimeTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory(dir=TEST_TMP_ROOT)
+        self.root = Path(self.temp.name).resolve()
+        self.service = CraftService(CraftStore(self.root / "data"))
+        self.project = self.root / "project"
+        self.project.mkdir()
+
+    def tearDown(self) -> None:
+        self.temp.cleanup()
+
+    def test_plan_run_and_read_passed_workflow(self) -> None:
+        workflow = self.service.workflow_save(
+            "Verified artifact",
+            "Create and verify an artifact",
+            inputs=[{"name": "python", "required": True}],
+            preconditions=[
+                {"id": "root", "type": "assertion", "evaluator": "file_exists", "path": "."}
+            ],
+            steps=[
+                {
+                    "id": "create",
+                    "type": "command",
+                    "command": [
+                        "{{python}}",
+                        "-c",
+                        "import json; open('result.json','w').write(json.dumps({'ok': True}))",
+                    ],
+                }
+            ],
+            success_criteria=[
+                {
+                    "id": "content",
+                    "type": "assertion",
+                    "evaluator": "json_value",
+                    "path": "result.json",
+                    "field": "ok",
+                    "expected": True,
+                }
+            ],
+            repair_policy={"enabled": True, "max_attempts": 3},
+            artifacts=[{"path": "result.json"}],
+        )
+        plan = self.service.workflow_plan(
+            workflow["id"], str(self.project), inputs={"python": sys.executable}
+        )
+        self.assertTrue(plan["requires_execution_approval"])
+        self.assertEqual(plan["steps"][1]["command"][0], sys.executable)
+        with self.assertRaisesRegex(ValueError, "allow_execution"):
+            self.service.workflow_run(
+                workflow["id"], str(self.project), inputs={"python": sys.executable}
+            )
+        receipt = self.service.workflow_run(
+            workflow["id"], str(self.project), inputs={"python": sys.executable},
+            allow_execution=True,
+        )
+        self.assertEqual(receipt["status"], "passed")
+        run = self.service.workflow_run_get(receipt["run_id"])
+        self.assertEqual(run["attempts"][0]["status"], "passed")
+        self.assertEqual(run["inputs"]["python"], sys.executable)
+        self.assertEqual(self.service.workflow_get(workflow["id"])["status"], "tested")
+        with self.assertRaisesRegex(ValueError, "cannot resume"):
+            self.service.workflow_run(
+                workflow["id"], str(self.project), inputs={"python": sys.executable},
+                run_id=receipt["run_id"], allow_execution=True,
+            )
+
+    def test_repair_loop_stops_on_no_progress(self) -> None:
+        workflow = self.service.workflow_save(
+            "Failing check", "Exercise bounded repair",
+            [{"id": "fail", "type": "command", "command": [sys.executable, "-c", "raise SystemExit(2)"]}],
+            repair_policy={"enabled": True, "max_attempts": 4, "no_progress_limit": 1},
+        )
+        first = self.service.workflow_run(
+            workflow["id"], str(self.project), allow_execution=True
+        )
+        self.assertEqual(first["status"], "needs_repair")
+        second = self.service.workflow_run(
+            workflow["id"], str(self.project), run_id=first["run_id"], allow_execution=True
+        )
+        self.assertEqual(second["status"], "no_progress")
+        self.assertIsNone(second["next_action"])
+        with self.assertRaisesRegex(ValueError, "cannot resume"):
+            self.service.workflow_run(
+                workflow["id"], str(self.project), run_id=first["run_id"], allow_execution=True
+            )
+
+    def test_run_validation_and_immediate_failure(self) -> None:
+        workflow = self.service.workflow_save(
+            "One shot", "Fail once",
+            [{"type": "command", "command": [sys.executable, "-c", "raise SystemExit(1)"]}],
+        )
+        failed = self.service.workflow_run(
+            workflow["id"], str(self.project), allow_execution=True
+        )
+        self.assertEqual(failed["status"], "failed")
+        with self.assertRaisesRegex(ValueError, "Unknown workflow run"):
+            self.service.workflow_run_get("missing")
+        with self.assertRaisesRegex(ValueError, "Unknown workflow run"):
+            self.service.workflow_run(
+                workflow["id"], str(self.project), run_id="missing", allow_execution=True
+            )
+        other = self.service.workflow_save(
+            "Other", "Other", [{"type": "assertion", "evaluator": "file_exists", "path": "."}]
+        )
+        with self.service.store.transaction() as db:
+            db.execute("UPDATE workflow_runs SET status='needs_repair' WHERE id=?", (failed["run_id"],))
+        with self.assertRaisesRegex(ValueError, "different workflow"):
+            self.service.workflow_run(
+                other["id"], str(self.project), run_id=failed["run_id"], allow_execution=True
+            )
+        with self.assertRaisesRegex(ValueError, "different project root"):
+            self.service.workflow_run(
+                workflow["id"], str(self.root), run_id=failed["run_id"], allow_execution=True
+            )
+        input_workflow = self.service.workflow_save(
+            "Input run", "Keep inputs stable",
+            [{"type": "command", "command": [sys.executable, "-c", "raise SystemExit(1)"]}],
+            inputs=[{"name": "value", "required": True}],
+            repair_policy={"enabled": True, "max_attempts": 2},
+        )
+        input_run = self.service.workflow_run(
+            input_workflow["id"], str(self.project), inputs={"value": "first"}, allow_execution=True
+        )
+        with self.assertRaisesRegex(ValueError, "different resolved inputs"):
+            self.service.workflow_run(
+                input_workflow["id"], str(self.project), inputs={"value": "second"},
+                run_id=input_run["run_id"], allow_execution=True,
+            )
+
+    def test_plan_validation_and_template_resolution(self) -> None:
+        definitions = [
+            {"name": "defaulted", "default": 3},
+            {"name": "required", "required": True},
+        ]
+        self.assertEqual(resolve_inputs(definitions, {"required": "x"}), {"defaulted": 3, "required": "x"})
+        with self.assertRaisesRegex(ValueError, "non-empty name"):
+            resolve_inputs([{}], {})
+        with self.assertRaisesRegex(ValueError, "Missing required"):
+            resolve_inputs([{"name": "x", "required": True}], {})
+        value = substitute(
+            {"list": ["{{number}}", "prefix-{{text}}", 4]}, {"number": 2, "text": "ok"}
+        )
+        self.assertEqual(value, {"list": [2, "prefix-ok", 4]})
+        with self.assertRaisesRegex(ValueError, "Unknown workflow input"):
+            substitute("{{missing}}", {})
+        with self.assertRaisesRegex(ValueError, "Unknown workflow input"):
+            substitute("x-{{missing}}", {})
+
+        bad = self.service.workflow_save("Bad", "Bad", [{"type": "unknown"}])
+        with self.assertRaisesRegex(ValueError, "Unsupported workflow step"):
+            self.service.workflow_plan(bad["id"], str(self.project))
+        advisory = self.service.workflow_save(
+            "Advisory", "Old format", [{"type": "assertion", "evaluator": "file_exists", "path": "."}],
+            success_criteria=["looks good"],
+        )
+        with self.assertRaisesRegex(ValueError, "structured success_criteria"):
+            self.service.workflow_plan(advisory["id"], str(self.project))
+        with self.assertRaisesRegex(ValueError, "Project root does not exist"):
+            self.service.workflow_plan(bad["id"], str(self.project / "missing"))
+
+    def test_command_assertion_and_path_helpers(self) -> None:
+        with self.assertRaisesRegex(ValueError, "escapes project root"):
+            safe_path(self.project, "../outside")
+        with self.assertRaisesRegex(ValueError, "non-empty string array"):
+            command_step({"command": "echo"}, self.project)
+        with self.assertRaisesRegex(ValueError, "cwd does not exist"):
+            command_step({"command": [sys.executable], "cwd": "missing"}, self.project)
+        completed = command_step(
+            {
+                "command": [sys.executable, "-c", "import os; print(os.environ['CRAFT_TEST_VALUE'])"],
+                "env": {"CRAFT_TEST_VALUE": 7}, "expected_exit_code": 0,
+            },
+            self.project,
+        )
+        self.assertTrue(completed["passed"])
+        self.assertIn("7", completed["stdout"])
+        redacted = command_step(
+            {
+                "command": [sys.executable, "-c", "import os; print('token=' + os.environ['API_KEY'])"],
+                "env": {"API_KEY": "abcd-secret-value"},
+            }, self.project,
+        )
+        self.assertNotIn("abcd-secret-value", redacted["stdout"])
+        self.assertIn("[REDACTED]", redact_output("Authorization: Bearer abc Cookie=xyz"))
+        self.assertEqual(redact_output("value=abc", ["abc"]), "value=abc")
+        timeout = subprocess.TimeoutExpired(["x"], 1, output="out", stderr="err")
+        with patch("craft_core.workflow_runtime.subprocess.run", side_effect=timeout):
+            timed = command_step({"command": ["x"], "timeout_seconds": 0}, self.project)
+        self.assertEqual(timed["error"], "timeout")
+
+        artifact = self.project / "value.json"
+        artifact.write_text('{"items":[{"value":3}]}', encoding="utf-8")
+        self.assertTrue(assertion_step(
+            {"evaluator": "file_exists", "path": "value.json"}, self.project, {}
+        )["passed"])
+        self.assertTrue(assertion_step(
+            {"evaluator": "file_exists", "path": "absent", "expected": False}, self.project, {}
+        )["passed"])
+        self.assertTrue(assertion_step(
+            {"evaluator": "json_value", "path": "value.json", "field": "items.0.value", "expected": 3},
+            self.project, {},
+        )["passed"])
+        self.assertTrue(assertion_step(
+            {"evaluator": "step_exit_code", "step_id": "x"}, self.project,
+            {"x": {"exit_code": 0}},
+        )["passed"])
+        with self.assertRaisesRegex(ValueError, "Unknown assertion step"):
+            assertion_step({"evaluator": "step_exit_code", "step_id": "x"}, self.project, {})
+        with self.assertRaisesRegex(ValueError, "Unsupported assertion"):
+            assertion_step({"evaluator": "unknown"}, self.project, {})
+
+    def test_execute_steps_continuation_and_error_capture(self) -> None:
+        results = execute_steps(
+            [
+                {"id": "bad", "type": "assertion", "evaluator": "file_exists", "path": "absent", "continue_on_failure": True},
+                {"type": "assertion", "evaluator": "file_exists", "path": "."},
+            ], self.project,
+        )
+        self.assertEqual(len(results), 2)
+        self.assertEqual(results[1]["id"], "step_2")
+        unsupported = execute_steps([{"type": "bad"}], self.project)
+        self.assertEqual(unsupported[0]["error"], "ValueError")
+        with patch("craft_core.workflow_runtime.coverage_gate", return_value={"passed": True}):
+            covered = execute_steps([{"type": "coverage_gate"}], self.project)
+        self.assertTrue(covered[0]["passed"])
+        first = failure_signature(unsupported)
+        with_output = [{**unsupported[0], "stdout": "secret", "stderr": "detail"}]
+        self.assertEqual(first, failure_signature(with_output))
+
+    def test_coverage_gate_uses_changed_lines_and_branches(self) -> None:
+        source = self.project / "sample.py"
+        source.write_text("a\nb\n", encoding="utf-8")
+        report = self.project / "coverage.json"
+        report.write_text(
+            json.dumps({"files": {"sample.py": {
+                "executed_lines": [1], "missing_lines": [2],
+                "executed_branches": [[1, 2]], "missing_branches": [[2, 3]],
+            }}}), encoding="utf-8",
+        )
+        with patch("craft_core.workflow_runtime._git_changed_lines", return_value={source: {1, 2}}):
+            result = coverage_gate(
+                {"report": "coverage.json", "baseline": "main", "line_threshold": 100, "branch_threshold": 100},
+                self.project,
+            )
+        self.assertFalse(result["passed"])
+        self.assertEqual(result["line_coverage"], 50.0)
+        self.assertEqual(result["branch_coverage"], 50.0)
+        self.assertEqual(result["uncovered"][0]["lines"], [2])
+
+        with patch("craft_core.workflow_runtime._git_changed_lines", return_value={source: set()}):
+            untracked = coverage_gate({"report": "coverage.json"}, self.project)
+        self.assertEqual(untracked["total_lines"], 2)
+        with patch("craft_core.workflow_runtime._git_changed_lines", return_value={}):
+            empty = coverage_gate({"report": "coverage.json"}, self.project)
+        self.assertTrue(empty["passed"])
+        self.assertFalse(empty["applicable"])
+        report.write_text(
+            json.dumps({"files": {"sample.py": {"executed_lines": [1], "missing_lines": []}}}),
+            encoding="utf-8",
+        )
+        with patch("craft_core.workflow_runtime._git_changed_lines", return_value={source: set()}):
+            complete = coverage_gate({"report": "coverage.json"}, self.project)
+        self.assertEqual(complete["uncovered"], [])
+        missing_source = self.project / "never_imported.py"
+        missing_source.write_text("value = 1\n", encoding="utf-8")
+        with patch(
+            "craft_core.workflow_runtime._git_changed_lines",
+            return_value={missing_source: {1}},
+        ):
+            omitted = coverage_gate({"report": "coverage.json"}, self.project)
+        self.assertFalse(omitted["passed"])
+        self.assertEqual(omitted["uncovered"][0]["file"], "never_imported.py")
+        invalid_source = self.project / "invalid.py"
+        invalid_source.write_bytes(b"\xff")
+        with patch(
+            "craft_core.workflow_runtime._git_changed_lines",
+            return_value={invalid_source: {1}},
+        ):
+            invalid = coverage_gate({"report": "coverage.json"}, self.project)
+        self.assertEqual(invalid["total_lines"], 1)
+        comment_only = self.project / "comment_only.py"
+        comment_only.write_text("# no executable statements\n", encoding="utf-8")
+        with patch(
+            "craft_core.workflow_runtime._git_changed_lines",
+            return_value={comment_only: {1}},
+        ):
+            ignored = coverage_gate({"report": "coverage.json"}, self.project)
+        self.assertFalse(ignored["applicable"])
+        with self.assertRaisesRegex(ValueError, "does not exist"):
+            coverage_gate({"report": "missing.json"}, self.project)
+
+    def test_git_changed_line_parser_and_errors(self) -> None:
+        diff = subprocess.CompletedProcess(
+            [], 0,
+            "diff --git a/a.py b/a.py\n+++ b/a.py\n@@ -1 +2,2 @@\n+x\n+y\n"
+            "diff --git a/old.py b/old.py\n+++ /dev/null\n@@ -1 +0,0 @@\n",
+            "",
+        )
+        untracked = subprocess.CompletedProcess([], 0, "new.py\n", "")
+        with patch("craft_core.workflow_runtime.subprocess.run", side_effect=[diff, untracked]):
+            changed = _git_changed_lines(self.project, "main")
+        self.assertEqual(changed[(self.project / "a.py").resolve()], {2, 3})
+        self.assertEqual(changed[(self.project / "new.py").resolve()], set())
+        failed = subprocess.CompletedProcess([], 1, "", "bad ref")
+        with patch("craft_core.workflow_runtime.subprocess.run", return_value=failed):
+            with self.assertRaisesRegex(ValueError, "Unable to diff"):
+                _git_changed_lines(self.project, "bad")
+        with patch(
+            "craft_core.workflow_runtime.subprocess.run",
+            side_effect=[subprocess.CompletedProcess([], 0, "", ""), failed],
+        ):
+            with self.assertRaisesRegex(ValueError, "Unable to list untracked"):
+                _git_changed_lines(self.project, "main")
 
 
 class McpProcessTests(unittest.TestCase):

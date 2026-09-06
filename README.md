@@ -39,6 +39,12 @@ python3 -m venv .venv
 
 The source commands also support `list-sources`, `scan`, `update-source`, and `remove-source`. Removing a source deletes only Craft's index entries, never the source files.
 
+## Executable workflows
+
+Craft workflows can contain typed inputs, preconditions, ordered command/assertion/coverage steps, structured success criteria, artifact references, and a bounded repair policy. `craft_workflow_plan` resolves inputs without execution. `craft_workflow_run` executes one explicitly authorized attempt and returns one of `passed`, `needs_repair`, `failed`, or `no_progress`; `craft_workflow_run_get` returns the complete receipt history.
+
+Pass/fail is determined by command exit codes and code evaluators, not by model judgment. The Python `coverage_gate` intersects a coverage.py JSON report with changed executable lines and branches from a Git baseline, and treats changed Python files missing from the report as uncovered. When a run needs repair, Codex or another host agent uses the returned evidence to make an authorized change and resumes the same `run_id`; Craft enforces attempt and no-progress limits. See `skills/craft/references/workflow-runtime.md` for the schema and a complete incremental-coverage example.
+
 ## Codex
 
 The Codex manifest is `.codex-plugin/plugin.json`; it loads the Craft Skill and `.mcp.json`. The GitHub repository is also a Codex marketplace through `.agents/plugins/marketplace.json`.

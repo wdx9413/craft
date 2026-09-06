@@ -3,10 +3,12 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
+from pathlib import Path
 from typing import Any
 
 from .catalog import Catalog, utc_now
 from .store import CraftStore
+from .workflow_runtime import execute_steps, failure_signature, resolve_inputs, substitute
 
 
 def new_id(prefix: str) -> str:
@@ -22,7 +24,7 @@ class CraftService:
         with self.store.connect() as db:
             counts = {
                 table: db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-                for table in ("sources", "capabilities", "tasks", "workflows")
+                for table in ("sources", "capabilities", "tasks", "workflows", "workflow_runs")
             }
         return {"version": "0.1.0", "data_root": str(self.store.root), "counts": counts}
 
@@ -187,7 +189,10 @@ class CraftService:
         source_task_id: str | None = None,
         workflow_id: str | None = None,
         inputs: list[dict[str, Any]] | None = None,
-        success_criteria: list[str] | None = None,
+        success_criteria: list[Any] | None = None,
+        preconditions: list[dict[str, Any]] | None = None,
+        repair_policy: dict[str, Any] | None = None,
+        artifacts: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         if not name.strip() or not goal.strip() or not steps:
             raise ValueError("name, goal, and at least one step are required")
@@ -201,6 +206,9 @@ class CraftService:
         workflow = {
             "name": name, "goal": goal, "inputs": inputs or [], "steps": steps,
             "success_criteria": success_criteria or [],
+            "preconditions": preconditions or [],
+            "repair_policy": repair_policy or {"enabled": False, "max_attempts": 1},
+            "artifacts": artifacts or [],
         }
         encoded = json.dumps(workflow, ensure_ascii=False, sort_keys=True)
         digest = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
@@ -221,6 +229,133 @@ class CraftService:
                 (workflow_id, version, name, goal, scope, status, encoded, source_task_id, digest, utc_now()),
             )
         return {"id": workflow_id, "version": version, "status": status, "digest": digest, "workflow": workflow}
+
+    def workflow_plan(
+        self,
+        workflow_id: str,
+        project_root: str,
+        version: int | None = None,
+        inputs: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        loaded = self.workflow_get(workflow_id, version)
+        workflow = loaded["workflow"]
+        root = Path(project_root).expanduser().resolve()
+        if not root.is_dir():
+            raise ValueError(f"Project root does not exist: {root}")
+        resolved = resolve_inputs(workflow.get("inputs", []), inputs or {})
+        criteria = workflow.get("success_criteria", [])
+        if any(not isinstance(item, dict) for item in criteria):
+            raise ValueError("Executable workflows require structured success_criteria objects")
+        planned = [*workflow.get("preconditions", []), *workflow["steps"], *criteria]
+        steps = substitute(planned, resolved)
+        supported = {"command", "coverage_gate", "assertion"}
+        for step in steps:
+            if step.get("type") not in supported:
+                raise ValueError(f"Unsupported workflow step type: {step.get('type')}")
+        return {
+            "workflow_id": workflow_id,
+            "workflow_version": loaded["version"],
+            "project_root": str(root),
+            "inputs": resolved,
+            "steps": steps,
+            "repair_policy": workflow.get("repair_policy", {}),
+            "requires_execution_approval": any(step.get("type") == "command" for step in steps),
+        }
+
+    def workflow_run(
+        self,
+        workflow_id: str,
+        project_root: str,
+        version: int | None = None,
+        inputs: dict[str, Any] | None = None,
+        run_id: str | None = None,
+        allow_execution: bool = False,
+    ) -> dict[str, Any]:
+        if not allow_execution:
+            raise ValueError("allow_execution=true is required to run workflow commands")
+        plan = self.workflow_plan(workflow_id, project_root, version, inputs)
+        policy = plan["repair_policy"]
+        max_attempts = max(1, min(int(policy.get("max_attempts", 1)), 20))
+        no_progress_limit = max(1, min(int(policy.get("no_progress_limit", 2)), 10))
+        now = utc_now()
+        with self.store.transaction() as db:
+            if run_id:
+                row = db.execute("SELECT * FROM workflow_runs WHERE id=?", (run_id,)).fetchone()
+                if not row:
+                    raise ValueError(f"Unknown workflow run: {run_id}")
+                if row["workflow_id"] != workflow_id or row["workflow_version"] != plan["workflow_version"]:
+                    raise ValueError("run_id belongs to a different workflow version")
+                if Path(row["project_root"]) != Path(plan["project_root"]):
+                    raise ValueError("run_id belongs to a different project root")
+                if json.loads(row["inputs_json"]) != plan["inputs"]:
+                    raise ValueError("run_id belongs to different resolved inputs")
+                if row["status"] != "needs_repair":
+                    raise ValueError(f"Workflow run cannot resume from status: {row['status']}")
+                attempt = row["attempt"] + 1
+                previous_signature = row["last_signature"]
+                previous_no_progress = row["no_progress_count"]
+                max_attempts = row["max_attempts"]
+            else:
+                run_id = new_id("run")
+                attempt = 1
+                previous_signature = None
+                previous_no_progress = 0
+                db.execute(
+                    """INSERT INTO workflow_runs(id,workflow_id,workflow_version,project_root,
+                       inputs_json,status,attempt,max_attempts,created_at,updated_at)
+                       VALUES(?,?,?,?,?,'running',0,?,?,?)""",
+                    (run_id, workflow_id, plan["workflow_version"], plan["project_root"],
+                     json.dumps(plan["inputs"], ensure_ascii=False), max_attempts, now, now),
+                )
+        results = execute_steps(plan["steps"], Path(plan["project_root"]))
+        passed = len(results) == len(plan["steps"]) and all(item["passed"] for item in results)
+        signature = "passed" if passed else failure_signature(results)
+        no_progress = previous_no_progress + 1 if signature == previous_signature and not passed else 0
+        if passed:
+            status = "passed"
+        elif no_progress >= no_progress_limit:
+            status = "no_progress"
+        elif policy.get("enabled") and attempt < max_attempts:
+            status = "needs_repair"
+        else:
+            status = "failed"
+        receipt = {
+            "run_id": run_id, "workflow_id": workflow_id,
+            "workflow_version": plan["workflow_version"], "attempt": attempt,
+            "max_attempts": max_attempts, "status": status, "results": results,
+            "next_action": "repair_then_resume" if status == "needs_repair" else None,
+        }
+        with self.store.transaction() as db:
+            db.execute(
+                """INSERT INTO workflow_attempts(run_id,attempt,status,result_json,signature,created_at)
+                   VALUES(?,?,?,?,?,?)""",
+                (run_id, attempt, status, json.dumps(receipt, ensure_ascii=False), signature, now),
+            )
+            db.execute(
+                """UPDATE workflow_runs SET status=?,attempt=?,no_progress_count=?,
+                   last_signature=?,updated_at=? WHERE id=?""",
+                (status, attempt, no_progress, signature, now, run_id),
+            )
+            if passed:
+                db.execute(
+                    "UPDATE workflows SET status='tested' WHERE id=? AND version=? AND status='candidate'",
+                    (workflow_id, plan["workflow_version"]),
+                )
+        return receipt
+
+    def workflow_run_get(self, run_id: str) -> dict[str, Any]:
+        with self.store.connect() as db:
+            run = db.execute("SELECT * FROM workflow_runs WHERE id=?", (run_id,)).fetchone()
+            if not run:
+                raise ValueError(f"Unknown workflow run: {run_id}")
+            attempts = db.execute(
+                "SELECT result_json FROM workflow_attempts WHERE run_id=? ORDER BY attempt",
+                (run_id,),
+            ).fetchall()
+        result = dict(run)
+        result["inputs"] = json.loads(result.pop("inputs_json"))
+        result["attempts"] = [json.loads(row["result_json"]) for row in attempts]
+        return result
 
     def workflow_search(
         self,
