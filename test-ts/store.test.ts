@@ -44,3 +44,25 @@ test("closed stores reject access and legacy databases are only detected", async
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("versioned records and events provide the shared persistence primitives", async () => {
+  const { root, store } = await fixture();
+  try {
+    assert.equal(store.save("thing", "a", { name: "one" }).version, 1);
+    assert.equal(store.save("thing", "a", { name: "two" }).version, 2);
+    assert.equal(store.save("thing", "b", { name: "other" }, 4).version, 4);
+    assert.equal(store.get("thing", "a").name, "two");
+    assert.equal(store.get("thing", "a", 1).name, "one");
+    assert.deepEqual(store.list("thing", 500, (item) => item.name === "two").map((x) => x.id), ["a"]);
+    assert.equal(store.list("thing", 0).length, 1);
+    assert.throws(() => store.get("thing", "missing"), /Unknown thing/);
+    assert.equal(store.appendEvent("a", "started", { ok: true }).sequence, 1);
+    assert.equal(store.appendEvent("a", "finished", {}).sequence, 2);
+    assert.deepEqual(store.events("a").map((x) => x.event_type), ["started", "finished"]);
+    assert.equal(store.remove("thing", "a"), 2);
+    assert.equal(store.remove("thing", "a"), 0);
+  } finally {
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
