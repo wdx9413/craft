@@ -47,6 +47,8 @@ Pass/fail is determined by command exit codes and code evaluators, not by model 
 
 Workflows are not limited to programmatic checks. Mixed sessions add `agent`, `judge`, and `human` nodes alongside deterministic nodes. `craft_workflow_start` advances to the next external request, `craft_workflow_submit` records its structured result and provenance, and `on_result` routes to repair, approval, success, or failure. This lets the current Codex inspect coverage with its own tools, judge a video or document against a rubric, or request human approval without requiring Craft to call a second model or own provider credentials. Model conclusions remain labeled `agent_reported` or `model_judged`, while code evaluators are labeled `program_verified`.
 
+Craft keeps the agent loop thin and the control plane portable. A workflow may declare outcome `invariants` instead of prescribing every action; Craft compiles program, model, and human enforcement into ordinary nodes. Every node declares `read_only`, `local_write`, `external_write`, or `destructive` side effects, and execution stops until the required class is explicitly approved. Passed program checks and human approvals create content-addressed trusted checkpoints. `craft_workflow_restore` branches a new auditable session from one of those checkpoints instead of rewriting history.
+
 ## Codex
 
 The Codex manifest is `.codex-plugin/plugin.json`; it loads the Craft Skill and `.mcp.json`. The GitHub repository is also a Codex marketplace through `.agents/plugins/marketplace.json`.

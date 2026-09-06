@@ -8,6 +8,8 @@ Craft executes structured workflow attempts; the host agent performs repairs. A 
 - `success_criteria`: structured steps executed after the main steps. Plain strings remain valid for storage but make the workflow non-executable until replaced by structured criteria.
 - `repair_policy`: `enabled`, `max_attempts` (1-20), and `no_progress_limit` (1-10).
 - `artifacts`: caller-defined output references.
+- `invariants`: declarative required properties. `enforcement` is `program`, `model`, or `human`; program invariants include a deterministic `validator`, while model and human invariants compile to judge and approval nodes.
+- `permission_policy.allowed_side_effects`: the maximum side-effect classes this workflow may request.
 
 Mixed workflows also support externally performed nodes:
 
@@ -17,6 +19,21 @@ Mixed workflows also support externally performed nodes:
 - `on_result`: route verdicts to another step ID, `passed`, or `failed`. This enables repair loops without embedding a model provider in Craft.
 
 Use `craft_workflow_start` for a mixed workflow. It advances deterministic nodes until it returns `awaiting_agent`, `awaiting_model_judge`, `awaiting_human`, or `needs_execution_approval`. The current Codex or other host performs the pending work and calls `craft_workflow_submit`. `craft_workflow_session_get` returns the pending request, accumulated context, and provenance-bearing event history. `repair_policy.max_transitions` bounds loops.
+
+Every normalized node has one side-effect class: `read_only`, `local_write`, `external_write`, or `destructive`. Read-only work is always eligible. The compatibility flag `allow_execution=true` grants only `local_write`; higher classes must be named in `approved_side_effects`, and must also be allowed by the saved workflow's permission policy. Model execution remains subject to the host's own approval and sandbox controls.
+
+A passed deterministic node or explicit human approval creates a content-addressed trusted checkpoint. List them with `craft_workflow_checkpoint_list`; `craft_workflow_restore` creates a new session branch from the selected snapshot and records `restored_from_checkpoint`. It never erases the failed session or its evidence. Agent/model success alone does not create a trusted checkpoint.
+
+An invariant can require evidence references before accepting a model submission:
+
+```json
+{
+  "id": "quality",
+  "statement": "The final artifact satisfies the brief",
+  "enforcement": "model",
+  "evidence_required": ["artifact", "review_report"]
+}
+```
 
 Plan before execution. `craft_workflow_plan` resolves `{{input}}` placeholders and never runs commands. `craft_workflow_run` requires `allow_execution=true`, runs one attempt, and persists its receipt. If it returns `needs_repair`, the host agent may make an authorized repair and call the tool again with the same `run_id` and resolved inputs.
 

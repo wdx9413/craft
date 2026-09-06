@@ -7,7 +7,10 @@ from pathlib import Path
 from typing import Any
 
 from .catalog import Catalog, utc_now
-from .orchestrator import EXTERNAL_STATES, TERMINALS, external_request, next_cursor, normalize_steps, normalize_submission
+from .orchestrator import (
+    EXTERNAL_STATES, TERMINALS, approved_effects, compile_invariants,
+    external_request, next_cursor, normalize_steps, normalize_submission,
+)
 from .store import CraftStore
 from .workflow_runtime import execute_steps, failure_signature, resolve_inputs, substitute
 
@@ -27,7 +30,7 @@ class CraftService:
                 table: db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
                 for table in (
                     "sources", "capabilities", "tasks", "workflows",
-                    "workflow_runs", "workflow_sessions",
+                    "workflow_runs", "workflow_sessions", "workflow_checkpoints",
                 )
             }
         return {"version": "0.1.0", "data_root": str(self.store.root), "counts": counts}
@@ -197,6 +200,8 @@ class CraftService:
         preconditions: list[dict[str, Any]] | None = None,
         repair_policy: dict[str, Any] | None = None,
         artifacts: list[dict[str, Any]] | None = None,
+        invariants: list[dict[str, Any]] | None = None,
+        permission_policy: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         if not name.strip() or not goal.strip() or not steps:
             raise ValueError("name, goal, and at least one step are required")
@@ -213,6 +218,8 @@ class CraftService:
             "preconditions": preconditions or [],
             "repair_policy": repair_policy or {"enabled": False, "max_attempts": 1},
             "artifacts": artifacts or [],
+            "invariants": invariants or [],
+            "permission_policy": permission_policy or {},
         }
         encoded = json.dumps(workflow, ensure_ascii=False, sort_keys=True)
         digest = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
@@ -250,12 +257,22 @@ class CraftService:
         criteria = workflow.get("success_criteria", [])
         if any(not isinstance(item, dict) for item in criteria):
             raise ValueError("Executable workflows require structured success_criteria objects")
-        planned = [*workflow.get("preconditions", []), *workflow["steps"], *criteria]
+        invariants = compile_invariants(workflow.get("invariants", []))
+        planned = [*workflow.get("preconditions", []), *workflow["steps"], *invariants, *criteria]
         steps = normalize_steps(substitute(planned, resolved))
         supported = {"command", "coverage_gate", "assertion", "agent", "judge", "human"}
+        permission_policy = workflow.get("permission_policy", {})
+        declared_effects = set(permission_policy.get(
+            "allowed_side_effects",
+            ["read_only", "local_write", "external_write", "destructive"],
+        ))
         for step in steps:
             if step.get("type") not in supported:
                 raise ValueError(f"Unsupported workflow step type: {step.get('type')}")
+            if step["side_effect"] not in declared_effects:
+                raise ValueError(
+                    f"Workflow permission policy forbids {step['side_effect']} at {step['id']}"
+                )
         return {
             "workflow_id": workflow_id,
             "workflow_version": loaded["version"],
@@ -263,7 +280,12 @@ class CraftService:
             "inputs": resolved,
             "steps": steps,
             "repair_policy": workflow.get("repair_policy", {}),
-            "requires_execution_approval": any(step.get("type") == "command" for step in steps),
+            "permission_policy": permission_policy,
+            "invariants": workflow.get("invariants", []),
+            "required_approvals": sorted({
+                step["side_effect"] for step in steps if step["side_effect"] != "read_only"
+            }),
+            "requires_execution_approval": any(step["side_effect"] != "read_only" for step in steps),
         }
 
     def workflow_run(
@@ -274,10 +296,18 @@ class CraftService:
         inputs: dict[str, Any] | None = None,
         run_id: str | None = None,
         allow_execution: bool = False,
+        approved_side_effects: list[str] | None = None,
     ) -> dict[str, Any]:
         if not allow_execution:
             raise ValueError("allow_execution=true is required to run workflow commands")
         plan = self.workflow_plan(workflow_id, project_root, version, inputs)
+        allowed = approved_effects(allow_execution, approved_side_effects)
+        blocked = sorted({
+            step["side_effect"] for step in plan["steps"]
+            if step["side_effect"] not in allowed
+        })
+        if blocked:
+            raise ValueError(f"Workflow requires unapproved side effects: {', '.join(blocked)}")
         policy = plan["repair_policy"]
         max_attempts = max(1, min(int(policy.get("max_attempts", 1)), 20))
         no_progress_limit = max(1, min(int(policy.get("no_progress_limit", 2)), 10))
@@ -368,6 +398,7 @@ class CraftService:
         version: int | None = None,
         inputs: dict[str, Any] | None = None,
         allow_execution: bool = False,
+        approved_side_effects: list[str] | None = None,
     ) -> dict[str, Any]:
         plan = self.workflow_plan(workflow_id, project_root, version, inputs)
         policy = plan["repair_policy"]
@@ -384,15 +415,20 @@ class CraftService:
                 (session_id, workflow_id, plan["workflow_version"], plan["project_root"],
                  json.dumps(plan["inputs"], ensure_ascii=False), max_transitions, now, now),
             )
-        return self._workflow_advance(session_id, allow_execution)
+        return self._workflow_advance(
+            session_id, approved_effects(allow_execution, approved_side_effects)
+        )
 
     def workflow_continue(
-        self, session_id: str, allow_execution: bool = False
+        self, session_id: str, allow_execution: bool = False,
+        approved_side_effects: list[str] | None = None,
     ) -> dict[str, Any]:
         session = self.workflow_session_get(session_id)
         if session["status"] not in {"running", "needs_execution_approval"}:
             raise ValueError(f"Workflow session cannot continue from status: {session['status']}")
-        return self._workflow_advance(session_id, allow_execution)
+        return self._workflow_advance(
+            session_id, approved_effects(allow_execution, approved_side_effects)
+        )
 
     def workflow_submit(
         self,
@@ -401,6 +437,7 @@ class CraftService:
         result: dict[str, Any],
         submitted_by: str = "host_agent",
         allow_execution: bool = False,
+        approved_side_effects: list[str] | None = None,
     ) -> dict[str, Any]:
         session = self.workflow_session_get(session_id)
         if session["status"] not in set(EXTERNAL_STATES.values()):
@@ -424,7 +461,9 @@ class CraftService:
         )
         if terminal:
             return self.workflow_session_get(session_id)
-        return self._workflow_advance(session_id, allow_execution)
+        return self._workflow_advance(
+            session_id, approved_effects(allow_execution, approved_side_effects)
+        )
 
     def workflow_session_get(self, session_id: str) -> dict[str, Any]:
         with self.store.connect() as db:
@@ -451,9 +490,18 @@ class CraftService:
                 external_request(step, result["context"])
                 if step["type"] in EXTERNAL_STATES else step
             )
+            if result["status"] == "needs_execution_approval":
+                result["approval"] = {
+                    "required_side_effect": step["side_effect"],
+                    "grant_with": "approved_side_effects",
+                }
         return result
 
-    def _workflow_advance(self, session_id: str, allow_execution: bool) -> dict[str, Any]:
+    def _workflow_advance(
+        self, session_id: str, allowed_effects: set[str] | bool
+    ) -> dict[str, Any]:
+        if isinstance(allowed_effects, bool):
+            allowed_effects = approved_effects(allowed_effects, None)
         while True:
             session = self.workflow_session_get(session_id)
             if session["status"] in TERMINALS:
@@ -477,18 +525,18 @@ class CraftService:
                 return self.workflow_session_get(session_id)
             step = plan["steps"][session["cursor"]]
             kind = str(step.get("type"))
+            if step["side_effect"] not in allowed_effects:
+                with self.store.transaction() as db:
+                    db.execute(
+                        "UPDATE workflow_sessions SET status='needs_execution_approval',updated_at=? WHERE id=?",
+                        (utc_now(), session_id),
+                    )
+                return self.workflow_session_get(session_id)
             if kind in EXTERNAL_STATES:
                 with self.store.transaction() as db:
                     db.execute(
                         "UPDATE workflow_sessions SET status=?,updated_at=? WHERE id=?",
                         (EXTERNAL_STATES[kind], utc_now(), session_id),
-                    )
-                return self.workflow_session_get(session_id)
-            if kind == "command" and not allow_execution:
-                with self.store.transaction() as db:
-                    db.execute(
-                        "UPDATE workflow_sessions SET status='needs_execution_approval',updated_at=? WHERE id=?",
-                        (utc_now(), session_id),
                     )
                 return self.workflow_session_get(session_id)
             detail = execute_steps([step], Path(session["project_root"]))[0]
@@ -528,6 +576,89 @@ class CraftService:
                 """UPDATE workflow_sessions SET context_json=?,cursor=?,status=?,
                    transition_count=?,updated_at=? WHERE id=?""",
                 (json.dumps(context, ensure_ascii=False), cursor, status, sequence, now, session["id"]),
+            )
+        if verdict == "passed" and provenance in {"program_verified", "human_approved"}:
+            self._create_workflow_checkpoint(
+                session, sequence, context, cursor, provenance, f"trusted:{step['id']}"
+            )
+
+    def workflow_checkpoint_list(self, session_id: str) -> dict[str, Any]:
+        self.workflow_session_get(session_id)
+        with self.store.connect() as db:
+            rows = db.execute(
+                """SELECT id,session_id,sequence,workflow_id,workflow_version,cursor,
+                   provenance,reason,digest,created_at FROM workflow_checkpoints
+                   WHERE session_id=? ORDER BY sequence DESC""",
+                (session_id,),
+            ).fetchall()
+        return {"session_id": session_id, "checkpoints": [dict(row) for row in rows]}
+
+    def workflow_restore(
+        self,
+        checkpoint_id: str,
+        allow_execution: bool = False,
+        approved_side_effects: list[str] | None = None,
+    ) -> dict[str, Any]:
+        with self.store.connect() as db:
+            checkpoint = db.execute(
+                "SELECT * FROM workflow_checkpoints WHERE id=?", (checkpoint_id,)
+            ).fetchone()
+            if not checkpoint:
+                raise ValueError(f"Unknown workflow checkpoint: {checkpoint_id}")
+            parent = db.execute(
+                "SELECT max_transitions FROM workflow_sessions WHERE id=?",
+                (checkpoint["session_id"],),
+            ).fetchone()
+        session_id = new_id("session")
+        now = utc_now()
+        with self.store.transaction() as db:
+            db.execute(
+                """INSERT INTO workflow_sessions(
+                   id,workflow_id,workflow_version,project_root,inputs_json,context_json,
+                   cursor,status,max_transitions,restored_from_checkpoint,created_at,updated_at)
+                   VALUES(?,?,?,?,?,?,?,'running',?,?,?,?)""",
+                (
+                    session_id, checkpoint["workflow_id"], checkpoint["workflow_version"],
+                    checkpoint["project_root"], checkpoint["inputs_json"],
+                    checkpoint["context_json"], checkpoint["cursor"],
+                    parent["max_transitions"], checkpoint_id, now, now,
+                ),
+            )
+        return self._workflow_advance(
+            session_id, approved_effects(allow_execution, approved_side_effects)
+        )
+
+    def _create_workflow_checkpoint(
+        self,
+        session: dict[str, Any],
+        sequence: int,
+        context: dict[str, Any],
+        cursor: int,
+        provenance: str,
+        reason: str,
+    ) -> None:
+        snapshot = {
+            "workflow_id": session["workflow_id"],
+            "workflow_version": session["workflow_version"],
+            "project_root": session["project_root"],
+            "inputs": session["inputs"],
+            "context": context,
+            "cursor": cursor,
+        }
+        encoded = json.dumps(snapshot, ensure_ascii=False, sort_keys=True)
+        with self.store.transaction() as db:
+            db.execute(
+                """INSERT INTO workflow_checkpoints(
+                   id,session_id,sequence,workflow_id,workflow_version,project_root,
+                   inputs_json,context_json,cursor,provenance,reason,digest,created_at)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    new_id("wcp"), session["id"], sequence, session["workflow_id"],
+                    session["workflow_version"], session["project_root"],
+                    json.dumps(session["inputs"], ensure_ascii=False),
+                    json.dumps(context, ensure_ascii=False), cursor, provenance, reason,
+                    hashlib.sha256(encoded.encode("utf-8")).hexdigest(), utc_now(),
+                ),
             )
 
     def workflow_search(

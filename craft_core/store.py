@@ -8,7 +8,7 @@ from typing import Iterator
 from .paths import ensure_layout
 
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 
 class ClosingConnection(sqlite3.Connection):
@@ -171,6 +171,7 @@ class CraftStore:
                     status TEXT NOT NULL,
                     transition_count INTEGER NOT NULL DEFAULT 0,
                     max_transitions INTEGER NOT NULL,
+                    restored_from_checkpoint TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     FOREIGN KEY(workflow_id, workflow_version)
@@ -189,8 +190,30 @@ class CraftStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_workflow_events_session
                     ON workflow_events(session_id, sequence);
+                CREATE TABLE IF NOT EXISTS workflow_checkpoints (
+                    id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL REFERENCES workflow_sessions(id),
+                    sequence INTEGER NOT NULL,
+                    workflow_id TEXT NOT NULL,
+                    workflow_version INTEGER NOT NULL,
+                    project_root TEXT NOT NULL,
+                    inputs_json TEXT NOT NULL,
+                    context_json TEXT NOT NULL,
+                    cursor INTEGER NOT NULL,
+                    provenance TEXT NOT NULL,
+                    reason TEXT NOT NULL,
+                    digest TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_workflow_checkpoints_session
+                    ON workflow_checkpoints(session_id, sequence DESC);
                 """
             )
+            session_columns = {
+                row["name"] for row in db.execute("PRAGMA table_info(workflow_sessions)").fetchall()
+            }
+            if "restored_from_checkpoint" not in session_columns:
+                db.execute("ALTER TABLE workflow_sessions ADD COLUMN restored_from_checkpoint TEXT")
             source_columns = {
                 row["name"] for row in db.execute("PRAGMA table_info(sources)").fetchall()
             }

@@ -16,7 +16,10 @@ from craft_core.catalog import iter_skill_files, parse_skill, stable_id
 from craft_core.cli import main as cli_main
 from craft_core.installer import install_plugin, main as installer_main, mcp_config, resolved_python
 from craft_core.mcp import McpServer, main as mcp_main
-from craft_core.orchestrator import external_request, next_cursor, normalize_steps, normalize_submission
+from craft_core.orchestrator import (
+    approved_effects, compile_invariants, external_request, next_cursor,
+    normalize_steps, normalize_submission,
+)
 from craft_core.paths import data_root, ensure_layout
 from craft_core.service import CraftService
 from craft_core.store import CraftStore
@@ -474,6 +477,15 @@ class StoreMigrationTests(unittest.TestCase):
                     version TEXT NOT NULL DEFAULT 'unversioned', path TEXT NOT NULL UNIQUE,
                     relative_path TEXT NOT NULL, digest TEXT NOT NULL,
                     metadata_json TEXT NOT NULL, body TEXT NOT NULL, updated_at TEXT NOT NULL);
+                CREATE TABLE workflow_sessions (
+                    id TEXT PRIMARY KEY, workflow_id TEXT NOT NULL,
+                    workflow_version INTEGER NOT NULL, project_root TEXT NOT NULL,
+                    inputs_json TEXT NOT NULL, context_json TEXT NOT NULL,
+                    cursor INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL,
+                    transition_count INTEGER NOT NULL DEFAULT 0,
+                    max_transitions INTEGER NOT NULL,
+                    created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+                );
                 """
             )
             db.close()
@@ -481,8 +493,12 @@ class StoreMigrationTests(unittest.TestCase):
             with store.connect() as migrated:
                 sql = migrated.execute("SELECT sql FROM sqlite_master WHERE name='capabilities'").fetchone()["sql"]
                 version = migrated.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()["value"]
+                session_columns = {
+                    row["name"] for row in migrated.execute("PRAGMA table_info(workflow_sessions)")
+                }
             self.assertNotIn("path TEXT NOT NULL UNIQUE", sql)
-            self.assertEqual(version, "5")
+            self.assertEqual(version, "6")
+            self.assertIn("restored_from_checkpoint", session_columns)
 
     def test_store_falls_back_when_fts5_is_unavailable(self) -> None:
         from craft_core.store import ClosingConnection
@@ -1084,6 +1100,29 @@ class WorkflowRuntimeTests(unittest.TestCase):
             next_cursor([{"id": "x", "next": "missing"}], 0, "passed")
         with self.assertRaisesRegex(ValueError, "Duplicate workflow step"):
             normalize_steps([{"id": "x"}, {"id": "x"}])
+        with self.assertRaisesRegex(ValueError, "Unsupported side effect"):
+            normalize_steps([{"id": "x", "side_effect": "mystery"}])
+
+        self.assertEqual(approved_effects(True, ["external_write"]), {
+            "read_only", "local_write", "external_write"
+        })
+        with self.assertRaisesRegex(ValueError, "Unsupported approved"):
+            approved_effects(False, ["mystery"])
+        compiled = compile_invariants([
+            {"id": "model", "statement": "Result is useful"},
+            {"id": "human", "statement": "Owner approves", "enforcement": "human"},
+            {"id": "program", "statement": "File exists", "enforcement": "program",
+             "validator": {"type": "assertion", "evaluator": "file_exists", "path": "x"}},
+        ])
+        self.assertEqual([item["type"] for item in compiled], ["judge", "human", "assertion"])
+        with self.assertRaisesRegex(ValueError, "must be objects"):
+            compile_invariants(["bad"])  # type: ignore[list-item]
+        with self.assertRaisesRegex(ValueError, "requires a statement"):
+            compile_invariants([{}])
+        with self.assertRaisesRegex(ValueError, "requires a validator"):
+            compile_invariants([{"statement": "x", "enforcement": "program"}])
+        with self.assertRaisesRegex(ValueError, "Unsupported invariant"):
+            compile_invariants([{"statement": "x", "enforcement": "magic"}])
 
         request = external_request(
             {"id": "j", "type": "judge", "objective": "Review", "rubric": ["good"]},
@@ -1093,6 +1132,73 @@ class WorkflowRuntimeTests(unittest.TestCase):
         self.assertEqual(request["tools"], [])
         with self.assertRaisesRegex(ValueError, "not externally executed"):
             external_request({"id": "x", "type": "command"}, {})
+
+    def test_invariants_permissions_checkpoints_and_restore(self) -> None:
+        (self.project / "ready.txt").write_text("ok", encoding="utf-8")
+        workflow = self.service.workflow_save(
+            "Declarative", "Reach properties without prescribing every action",
+            [{"id": "work", "type": "agent", "objective": "Do the work"}],
+            invariants=[
+                {
+                    "id": "ready", "statement": "The ready artifact exists",
+                    "enforcement": "program",
+                    "validator": {"type": "assertion", "evaluator": "file_exists", "path": "ready.txt"},
+                },
+                {
+                    "id": "quality", "statement": "The artifact is useful",
+                    "enforcement": "model", "evidence_required": ["artifact_review"],
+                },
+            ],
+            permission_policy={"allowed_side_effects": ["read_only"]},
+        )
+        plan = self.service.workflow_plan(workflow["id"], str(self.project))
+        self.assertEqual([step["id"] for step in plan["steps"]], ["work", "ready", "quality"])
+        self.assertEqual(plan["invariants"][0]["enforcement"], "program")
+        session = self.service.workflow_start(workflow["id"], str(self.project))
+        session = self.service.workflow_submit(session["id"], "work", {"output": "done"})
+        self.assertEqual(session["status"], "awaiting_model_judge")
+        checkpoints = self.service.workflow_checkpoint_list(session["id"])["checkpoints"]
+        self.assertEqual(len(checkpoints), 1)
+        self.assertEqual(checkpoints[0]["provenance"], "program_verified")
+        with self.assertRaisesRegex(ValueError, "requires evidence"):
+            self.service.workflow_submit(session["id"], "quality", {"verdict": "passed"})
+        restored = self.service.workflow_restore(checkpoints[0]["id"])
+        self.assertEqual(restored["status"], "awaiting_model_judge")
+        self.assertEqual(restored["restored_from_checkpoint"], checkpoints[0]["id"])
+        with self.assertRaisesRegex(ValueError, "Unknown workflow checkpoint"):
+            self.service.workflow_restore("missing")
+        with self.assertRaisesRegex(ValueError, "Unknown workflow session"):
+            self.service.workflow_checkpoint_list("missing")
+
+        effects = self.service.workflow_save(
+            "Effects", "Require explicit external-write approval",
+            [{"id": "publish", "type": "agent", "side_effect": "external_write"}],
+            permission_policy={"allowed_side_effects": ["read_only", "external_write"]},
+        )
+        blocked = self.service.workflow_start(effects["id"], str(self.project))
+        self.assertEqual(blocked["status"], "needs_execution_approval")
+        self.assertEqual(blocked["approval"]["required_side_effect"], "external_write")
+        allowed = self.service.workflow_continue(
+            blocked["id"], approved_side_effects=["external_write"]
+        )
+        self.assertEqual(allowed["status"], "awaiting_agent")
+
+        forbidden = self.service.workflow_save(
+            "Forbidden", "Reject undeclared effects",
+            [{"type": "command", "command": ["tool"], "side_effect": "destructive"}],
+            permission_policy={"allowed_side_effects": ["read_only"]},
+        )
+        with self.assertRaisesRegex(ValueError, "permission policy forbids"):
+            self.service.workflow_plan(forbidden["id"], str(self.project))
+
+        guarded = self.service.workflow_save(
+            "Guarded run", "Do not let compatibility approval widen effects",
+            [{"type": "command", "command": ["tool"], "side_effect": "destructive"}],
+        )
+        with self.assertRaisesRegex(ValueError, "unapproved side effects: destructive"):
+            self.service.workflow_run(
+                guarded["id"], str(self.project), allow_execution=True
+            )
         self.assertEqual(normalize_submission({"type": "agent"}, {})[0], "passed")
         self.assertEqual(normalize_submission({"type": "judge"}, {"verdict": "unknown"})[1], "model_judged")
         with self.assertRaisesRegex(ValueError, "verdict"):
