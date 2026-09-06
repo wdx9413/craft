@@ -68,6 +68,8 @@ Goal + Invariants + Permission Policy
 
 MCP stdout 只输出 JSON-RPC。运行日志写到 stderr，默认 INFO；逐节点 transition 只在 DEBUG 显示。日志只选择安全元数据，不隐式序列化请求、结果或凭据。
 
+使用 `CRAFT_LOG_LEVEL=DEBUG|INFO|WARNING|ERROR` 调整日志级别。
+
 ## 本地存储
 
 默认数据目录是 `~/.craft_data`，核心状态保存在 SQLite。`CRAFT_DATA_DIR` 仅用于测试和受管部署。业务项目不会被写入 Craft 数据。

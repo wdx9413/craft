@@ -4,9 +4,7 @@
 
 > 让 AI 不只“会做一次”，而是能够找到合适能力、接着上次继续、证明结果可信，并把成功方法沉淀下来。
 
-Craft 是一套让 AI Agent 能发现合适能力、接续长期任务、验证结果并复用成功经验的通用工作系统。它把 Agent 使用的能力和工作过程组织成用户自己的“能力资产”：当前从 Skill 索引开始，并统一保存任务状态、验证证据和可复用 Workflow。Craft 可以通过 MCP、插件和 CLI 接入 Codex、Claude 及其他 Agent 应用。
-
-这里的“能力资产”是 Craft 的总称，不等于“插件”：Skill 描述 Agent 应该怎样完成一类任务；MCP 连接工具、数据和服务；插件负责打包和分发 Skill、MCP 等组件；Workflow 按具体目标组合这些能力。Craft v0.1 已实现 Skill 索引和 Workflow 管理，插件目录与 MCP 服务目录属于后续扩展。
+Craft 是一套让 AI Agent 能发现合适能力、接续长期任务、验证结果并复用成功经验的通用工作系统。它从 Skill 索引开始，把任务状态、验证证据和可复用 Workflow 组织成用户自己的能力资产，并可通过 MCP、插件和 CLI 接入不同 Agent 应用。
 
 ## 为什么需要 Craft
 
@@ -42,7 +40,7 @@ Craft 只扫描用户明确注册的 Skill 来源，并维护本地增量索引�
 
 Craft 不要求产品方预先写完所有行业模板。用户完成真实任务后，可以把有效步骤、约束、反馈和验收条件抽象成候选 Workflow，再经过重复运行逐步提升为可复用能力。
 
-## 可以用在哪些场景
+## 希望解决的场景
 
 | 场景 | Craft 保存什么 | 如何判断完成 |
 |---|---|---|
@@ -52,7 +50,7 @@ Craft 不要求产品方预先写完所有行业模板。用户完成真实任�
 | 教育 | 学习目标、练习记录、反馈 | 答案校验、目标达成、教师确认 |
 | 内容创作 | 资料、稿件版本、编辑要求 | 事实核验、结构评审、发布审批 |
 
-这些场景共用同一个底层闭环，只替换领域 Skill、工具和验证规则。
+这些场景可以共用同一个底层闭环，只替换领域 Skill、工具和验证规则。这是产品的适配方向，不代表 v0.1 已内置相应行业连接器或完整模板；当前首先使用真实研发任务验证通用机制。
 
 ## 当前已经具备
 
@@ -88,7 +86,7 @@ macOS / Linux：
 python3 scripts/install_plugin.py
 ```
 
-默认安装到 `~/plugins/craft`。安装器会记录当前 Python 的绝对路径，避免 Codex 或 Claude 的 GUI 进程找不到 Python。
+默认安装到 `~/plugins/craft`。
 
 也可以只使用 CLI：
 
@@ -158,30 +156,11 @@ craft_workflow_plan
 
 `allow_execution=true` 只授权本地写入。外部写入和破坏性操作必须通过 `approved_side_effects` 单独授权。
 
-## 日志
-
-Craft 默认把简洁 INFO 日志写到 stderr，不占用 MCP 的 stdout，因此不会破坏 STDIO JSON-RPC。日志不自动记录 Prompt、凭据或完整业务正文。
-
-```powershell
-$env:CRAFT_LOG_LEVEL = "WARNING"
-```
-
-macOS / Linux 使用 `export CRAFT_LOG_LEVEL=WARNING`。可选级别为 `DEBUG`、`INFO`、`WARNING`、`ERROR`。
-
 ## 文档
 
 - [架构与可信控制面](docs/architecture.zh-CN.md)
 - [Workflow 字段、状态与示例](skills/craft/references/workflow-runtime.md)
 - [MCP 工具说明](skills/craft/references/tool-contract.md)
-
-## 测试
-
-```powershell
-.venv\Scripts\python -m coverage run --branch -m unittest discover -s tests
-.venv\Scripts\python -m coverage report
-```
-
-项目要求语句和分支覆盖率均为 100%。CI 覆盖 Windows、macOS、Linux 与 Python 3.11/3.13。
 
 ## 当前边界
 

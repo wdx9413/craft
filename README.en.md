@@ -4,9 +4,7 @@
 
 > Help AI find the right capability, continue previous work, prove outcomes, and turn successful methods into reusable workflows.
 
-Craft is a general-purpose work system that helps AI agents discover the right capabilities, continue long-running tasks, verify outcomes, and reuse proven methods. It organizes agent capabilities and work history as user-owned capability assets: today it starts with Skill indexing and preserves task state, evidence, and reusable Workflows. Codex, Claude, and other agent applications can connect through MCP, plugins, or the CLI.
-
-“Capability asset” is Craft's umbrella term, not a synonym for “plugin.” A Skill teaches an agent how to perform a class of tasks; MCP connects tools, data, and services; a plugin packages and distributes components such as Skills and MCP servers; a Workflow composes capabilities for a goal. Craft v0.1 implements Skill indexing and Workflow management. Plugin catalogs and MCP server catalogs remain future extensions.
+Craft is a general-purpose work system that helps AI agents discover the right capabilities, continue long-running tasks, verify outcomes, and reuse proven methods. Starting with Skill indexing, it organizes task state, evidence, and reusable Workflows as user-owned capability assets and connects to agent applications through MCP, plugins, or the CLI.
 
 ## Why Craft
 
@@ -42,7 +40,7 @@ Program verification, model judgment, and human approval are all useful, but the
 
 Craft does not require a vendor to prebuild every industry template. Successful task histories can be abstracted into workflow candidates and promoted through repeated validation.
 
-## Example domains
+## Target scenarios
 
 | Domain | Preserved assets | Completion evidence |
 |---|---|---|
@@ -52,7 +50,7 @@ Craft does not require a vendor to prebuild every industry template. Successful 
 | Education | learning goals, exercises, feedback | answer checks, outcomes, teacher approval |
 | Content | sources, drafts, editorial rules | fact checks, structure review, publish approval |
 
-All domains share one control loop while supplying their own Skills, tools, and validators.
+These domains can share one control loop while supplying their own Skills, tools, and validators. They are adaptation targets, not claims that v0.1 ships complete domain connectors or templates. Real engineering work is the first validation environment.
 
 ## Available today
 
@@ -118,24 +116,11 @@ craft_workflow_plan → craft_workflow_start → craft_workflow_submit
 
 `allow_execution=true` grants local writes only. External writes and destructive actions require an explicit `approved_side_effects` grant.
 
-## Logging
-
-Craft writes concise INFO events to stderr and reserves stdout for MCP JSON-RPC. It does not implicitly log prompts, credentials, or full business content. Set `CRAFT_LOG_LEVEL=WARNING` to reduce output.
-
 ## Documentation
 
 - [Architecture and trusted control plane](docs/architecture.en.md)
 - [Workflow schema, states, and examples](skills/craft/references/workflow-runtime.md)
 - [MCP tool contract](skills/craft/references/tool-contract.md)
-
-## Test
-
-```bash
-.venv/bin/python -m coverage run --branch -m unittest discover -s tests
-.venv/bin/python -m coverage report
-```
-
-The repository enforces 100% statement and branch coverage.
 
 ## Current boundary
 

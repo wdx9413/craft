@@ -43,6 +43,8 @@ Provenance distinguishes `agent_reported`, `model_judged`, `program_verified`, a
 
 Transition and attempt limits provide fail-fast behavior. MCP stdout remains reserved for JSON-RPC; concise metadata-only logs go to stderr. Runtime state defaults to SQLite under `~/.craft_data`.
 
+Set `CRAFT_LOG_LEVEL=DEBUG|INFO|WARNING|ERROR` to control log verbosity.
+
 ## Next steps
 
 Planned adapters include first-class artifact/evidence lineage, workspace snapshots, idempotent external operations and compensation, parallel candidate evaluation, remote hubs, and optional vector retrieval. None should bind Craft to one model provider.
