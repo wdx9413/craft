@@ -8,7 +8,7 @@
     "craft": "src/cli.ts"
   },
   "scripts": {
-    "test:ts": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 test-ts/config.test.ts",
+    "test:ts": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 test-ts/config.test.ts test-ts/store.test.ts",
     "check:ts": "node --experimental-strip-types src/cli.ts --help",
     "typecheck": "node node_modules/typescript/bin/tsc --noEmit"
   },
