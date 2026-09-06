@@ -3,7 +3,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { initializeConfig, loadConfig, setMode } from "../src/config.ts";
+import { initializeConfig, loadConfig, setMode, type InitInput } from "../src/config.ts";
 import { atomicPrivateJson, craftPaths, dataRoot, ensureLayout } from "../src/paths.ts";
 
 async function temporaryRoot(): Promise<string> {
@@ -50,7 +50,7 @@ test("legacy database is detected but never moved implicitly", async () => {
 test("all execution modes serialize their own configuration", async () => {
   const roots: string[] = [];
   try {
-    for (const [input, expected] of [
+    const cases: Array<[InitInput, string | undefined]> = [
       [{ mode: "agent", runtimeKind: "codex-cli" }, "codex"],
       [{ mode: "agent", runtimeKind: "claude-code" }, "claude"],
       [{ mode: "agent" }, undefined],
@@ -59,7 +59,8 @@ test("all execution modes serialize their own configuration", async () => {
       } }, undefined],
       [{ mode: "supervisor", supervisorHosts: ["codex-cli"] }, undefined],
       [{ mode: "supervisor" }, undefined],
-    ] as const) {
+    ];
+    for (const [input, expected] of cases) {
       const root = await temporaryRoot();
       roots.push(root);
       const config = await initializeConfig(input, craftPaths(root));
