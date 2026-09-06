@@ -19,6 +19,7 @@ from .orchestrator import (
     validate_transitions,
 )
 from .store import CraftStore
+from .usage_modes import usage_modes
 from .workflow_runtime import execute_steps, failure_signature, resolve_inputs, substitute
 
 
@@ -59,12 +60,19 @@ class CraftService:
                     "orchestration_events",
                     "artifacts", "evidence", "lineage_edges", "budgets",
                     "budget_usage_events",
+                    "budget_reservations",
                 )
             }
         return {"version": "0.1.0", "data_root": str(self.store.root), "counts": counts}
 
     def host_adapter_probe(self, host: str | None = None) -> dict[str, Any]:
         return probe_adapters(host)
+
+    def usage_mode_list(self) -> dict[str, Any]:
+        return usage_modes()
+
+    def usage_mode_get(self, mode: str) -> dict[str, Any]:
+        return usage_modes(mode)
 
     def store_backup(self, destination: str | None = None) -> dict[str, str]:
         return self.store.backup(Path(destination) if destination else None)
@@ -357,10 +365,13 @@ class CraftService:
                 raise ValueError(f"Unknown budget: {budget_id}")
             limits = db.execute(
                 """SELECT l.metric,l.hard_limit,l.soft_limit,l.unit,
-                          COALESCE(SUM(u.amount),0) AS used
-                   FROM budget_limits l LEFT JOIN budget_usage_events u
-                     ON u.budget_id=l.budget_id AND u.metric=l.metric
-                   WHERE l.budget_id=? GROUP BY l.metric,l.hard_limit,l.soft_limit,l.unit
+                          COALESCE((SELECT SUM(u.amount) FROM budget_usage_events u
+                            WHERE u.budget_id=l.budget_id AND u.metric=l.metric),0) AS used,
+                          COALESCE((SELECT SUM(i.amount) FROM budget_reservation_items i
+                            JOIN budget_reservations r ON r.id=i.reservation_id
+                            WHERE r.budget_id=l.budget_id AND r.status='reserved'
+                              AND i.metric=l.metric),0) AS reserved
+                   FROM budget_limits l WHERE l.budget_id=?
                    ORDER BY l.metric""", (budget_id,),
             ).fetchall()
             events = db.execute(
@@ -375,7 +386,8 @@ class CraftService:
     @staticmethod
     def _budget_limit_card(row: Any, predicted: float = 0.0) -> dict[str, Any]:
         used = float(row["used"])
-        projected = used + predicted
+        reserved = float(row["reserved"])
+        projected = used + reserved + predicted
         if projected >= row["hard_limit"]:
             state = "hard_exceeded"
         elif row["soft_limit"] is not None and projected >= row["soft_limit"]:
@@ -384,7 +396,7 @@ class CraftService:
             state = "ok"
         return {
             "metric": row["metric"], "unit": row["unit"], "used": used,
-            "predicted": predicted, "projected": projected,
+            "reserved": reserved, "predicted": predicted, "projected": projected,
             "soft_limit": row["soft_limit"], "hard_limit": row["hard_limit"], "state": state,
         }
 
@@ -400,10 +412,13 @@ class CraftService:
                 raise ValueError(f"Unknown budget: {budget_id}")
             rows = db.execute(
                 """SELECT l.metric,l.hard_limit,l.soft_limit,l.unit,
-                          COALESCE(SUM(u.amount),0) AS used
-                   FROM budget_limits l LEFT JOIN budget_usage_events u
-                     ON u.budget_id=l.budget_id AND u.metric=l.metric
-                   WHERE l.budget_id=? GROUP BY l.metric,l.hard_limit,l.soft_limit,l.unit""",
+                          COALESCE((SELECT SUM(u.amount) FROM budget_usage_events u
+                            WHERE u.budget_id=l.budget_id AND u.metric=l.metric),0) AS used,
+                          COALESCE((SELECT SUM(i.amount) FROM budget_reservation_items i
+                            JOIN budget_reservations r ON r.id=i.reservation_id
+                            WHERE r.budget_id=l.budget_id AND r.status='reserved'
+                              AND i.metric=l.metric),0) AS reserved
+                   FROM budget_limits l WHERE l.budget_id=?""",
                 (budget_id,),
             ).fetchall()
         known = {row["metric"] for row in rows}
@@ -468,6 +483,163 @@ class CraftService:
             status = "exhausted" if any(row["used"] >= row["hard_limit"] for row in totals) else "active"
             db.execute("UPDATE budgets SET status=?,updated_at=? WHERE id=?", (status, now, budget_id))
         return self.budget_get(budget_id)
+
+    def budget_reserve(
+        self, budget_id: str, usage: dict[str, float], claimed_by: str,
+        idempotency_key: str, ttl_seconds: int = 900,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if not claimed_by.strip() or not idempotency_key.strip() or not usage:
+            raise ValueError("claimed_by, idempotency_key, and usage are required")
+        if isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, int) or not 30 <= ttl_seconds <= 86400:
+            raise ValueError("ttl_seconds must be between 30 and 86400")
+        if metadata is not None and not isinstance(metadata, dict):
+            raise ValueError("metadata must be an object")
+        for metric, amount in usage.items():
+            if not self._positive_number(amount):
+                raise ValueError(f"Reservation for {metric} must be a positive number")
+        now = utc_now()
+        with self.store.transaction() as db:
+            budget = db.execute("SELECT status FROM budgets WHERE id=?", (budget_id,)).fetchone()
+            if not budget:
+                raise ValueError(f"Unknown budget: {budget_id}")
+            if budget["status"] != "active":
+                raise ValueError(f"Budget is not active: {budget['status']}")
+            existing = db.execute(
+                "SELECT id FROM budget_reservations WHERE budget_id=? AND idempotency_key=?",
+                (budget_id, idempotency_key.strip()),
+            ).fetchone()
+            if existing:
+                reservation = self._budget_reservation_from_db(db, existing["id"])
+                return {"allowed": reservation["status"] == "reserved", "reservation": reservation}
+            limits = db.execute(
+                """SELECT l.metric,l.hard_limit,l.soft_limit,l.unit,
+                          COALESCE((SELECT SUM(u.amount) FROM budget_usage_events u
+                            WHERE u.budget_id=l.budget_id AND u.metric=l.metric),0) AS used,
+                          COALESCE((SELECT SUM(i.amount) FROM budget_reservation_items i
+                            JOIN budget_reservations r ON r.id=i.reservation_id
+                            WHERE r.budget_id=l.budget_id AND r.status='reserved'
+                              AND i.metric=l.metric),0) AS reserved
+                   FROM budget_limits l WHERE l.budget_id=?""", (budget_id,),
+            ).fetchall()
+            known = {row["metric"] for row in limits}
+            if set(usage) - known:
+                raise ValueError(f"Unknown budget metrics: {', '.join(sorted(set(usage) - known))}")
+            metrics = [self._budget_limit_card(row, float(usage.get(row["metric"], 0))) for row in limits]
+            if any(item["state"] == "hard_exceeded" for item in metrics):
+                return {"allowed": False, "decision": "stop", "metrics": metrics}
+            reservation_id = new_id("reservation")
+            db.execute(
+                """INSERT INTO budget_reservations(
+                   id,budget_id,status,claimed_by,idempotency_key,expires_at,metadata_json,
+                   created_at,updated_at) VALUES(?,?,'reserved',?,?,?,?,?,?)""",
+                (reservation_id, budget_id, claimed_by.strip(), idempotency_key.strip(),
+                 self._iso_after(now, ttl_seconds), json.dumps(metadata or {}, ensure_ascii=False),
+                 now, now),
+            )
+            db.executemany(
+                "INSERT INTO budget_reservation_items(reservation_id,metric,amount) VALUES(?,?,?)",
+                [(reservation_id, metric, float(amount)) for metric, amount in usage.items()],
+            )
+            reservation = self._budget_reservation_from_db(db, reservation_id)
+        return {"allowed": True, "reservation": reservation}
+
+    @classmethod
+    def _budget_reservation_from_db(cls, db: Any, reservation_id: str) -> dict[str, Any]:
+        row = db.execute("SELECT * FROM budget_reservations WHERE id=?", (reservation_id,)).fetchone()
+        if not row:
+            raise ValueError(f"Unknown budget reservation: {reservation_id}")
+        result = cls._json_card(row, "metadata_json", "metadata")
+        result["actual"] = json.loads(result.pop("actual_json"))
+        result["usage"] = {
+            item["metric"]: item["amount"] for item in db.execute(
+                "SELECT metric,amount FROM budget_reservation_items WHERE reservation_id=? ORDER BY metric",
+                (reservation_id,),
+            ).fetchall()
+        }
+        return result
+
+    def budget_reservation_get(self, reservation_id: str) -> dict[str, Any]:
+        with self.store.connect() as db:
+            return self._budget_reservation_from_db(db, reservation_id)
+
+    def budget_reservation_settle(
+        self, reservation_id: str, actual_usage: dict[str, float] | None = None,
+        source_type: str = "host", source_id: str | None = None,
+        claimed_by: str | None = None, metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if not source_type.strip():
+            raise ValueError("source_type must not be empty")
+        if metadata is not None and not isinstance(metadata, dict):
+            raise ValueError("metadata must be an object")
+        now = utc_now()
+        with self.store.transaction() as db:
+            reservation = self._budget_reservation_from_db(db, reservation_id)
+            if reservation["status"] != "reserved":
+                raise ValueError(f"Budget reservation is already closed: {reservation_id}")
+            if claimed_by is not None and claimed_by != reservation["claimed_by"]:
+                raise ValueError("claimed_by does not own this budget reservation")
+            actual = reservation["usage"] if actual_usage is None else actual_usage
+            if not isinstance(actual, dict) or not actual:
+                raise ValueError("actual_usage must be a non-empty object")
+            if set(actual) - set(reservation["usage"]):
+                raise ValueError("actual_usage contains metrics not present in the reservation")
+            for metric, amount in actual.items():
+                if not self._positive_number(amount):
+                    raise ValueError(f"Actual usage for {metric} must be a positive number")
+                db.execute(
+                    """INSERT INTO budget_usage_events(
+                       id,budget_id,metric,amount,source_type,source_id,idempotency_key,
+                       metadata_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)""",
+                    (new_id("usage"), reservation["budget_id"], metric, float(amount),
+                     source_type.strip(), source_id, reservation_id,
+                     json.dumps(metadata or {}, ensure_ascii=False), now),
+                )
+            db.execute(
+                "UPDATE budget_reservations SET status='settled',actual_json=?,updated_at=? WHERE id=?",
+                (json.dumps(actual, ensure_ascii=False), now, reservation_id),
+            )
+            exhausted = db.execute(
+                """SELECT 1 FROM budget_limits l WHERE l.budget_id=? AND
+                   (SELECT COALESCE(SUM(amount),0) FROM budget_usage_events u
+                    WHERE u.budget_id=l.budget_id AND u.metric=l.metric)>=l.hard_limit LIMIT 1""",
+                (reservation["budget_id"],),
+            ).fetchone()
+            if exhausted:
+                db.execute(
+                    "UPDATE budgets SET status='exhausted',updated_at=? WHERE id=?",
+                    (now, reservation["budget_id"]),
+                )
+            settled = self._budget_reservation_from_db(db, reservation_id)
+        return {"reservation": settled, "budget": self.budget_get(reservation["budget_id"])}
+
+    def budget_reservation_release(
+        self, reservation_id: str, claimed_by: str | None = None,
+    ) -> dict[str, Any]:
+        with self.store.transaction() as db:
+            reservation = self._budget_reservation_from_db(db, reservation_id)
+            if reservation["status"] != "reserved":
+                raise ValueError(f"Budget reservation is already closed: {reservation_id}")
+            if claimed_by is not None and claimed_by != reservation["claimed_by"]:
+                raise ValueError("claimed_by does not own this budget reservation")
+            db.execute(
+                "UPDATE budget_reservations SET status='released',updated_at=? WHERE id=?",
+                (utc_now(), reservation_id),
+            )
+        return self.budget_reservation_get(reservation_id)
+
+    def budget_reservation_reclaim(self, budget_id: str | None = None) -> dict[str, Any]:
+        now = utc_now()
+        with self.store.transaction() as db:
+            if budget_id and not db.execute("SELECT 1 FROM budgets WHERE id=?", (budget_id,)).fetchone():
+                raise ValueError(f"Unknown budget: {budget_id}")
+            sql = "UPDATE budget_reservations SET status='expired',updated_at=? WHERE status='reserved' AND expires_at<=?"
+            params: list[Any] = [now, now]
+            if budget_id:
+                sql += " AND budget_id=?"
+                params.append(budget_id)
+            count = db.execute(sql, params).rowcount
+        return {"expired": count, "budget_id": budget_id}
 
     def budget_control(self, budget_id: str, action: str) -> dict[str, Any]:
         if action not in {"pause", "resume", "close"}:

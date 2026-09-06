@@ -27,6 +27,7 @@ from craft_core.orchestrator import (
 from craft_core.paths import data_root, ensure_layout
 from craft_core.service import CraftService
 from craft_core.store import CraftStore
+from craft_core.usage_modes import usage_modes
 from craft_core.workflow_runtime import (
     _git_changed_lines,
     assertion_step,
@@ -1017,6 +1018,8 @@ class CraftServiceTests(unittest.TestCase):
             return json.loads(output.getvalue())
 
         self.assertEqual(run_cli("info")["version"], "0.1.0")
+        self.assertEqual(len(run_cli("modes")["modes"]), 3)
+        self.assertEqual(run_cli("mode", "capability-provider")["status"], "available")
         self.assertTrue(run_cli("host-adapter-probe", "--host", "generic-mcp")["available"])
         self.assertTrue(run_cli("store-doctor")["healthy"])
         cli_backup = run_cli("store-backup", "--destination", str(self.root / "cli-backup.db"))
@@ -1063,6 +1066,24 @@ class CraftServiceTests(unittest.TestCase):
             "budget-record", budget["id"], '{"tokens":1}', "codex", "--source-id", "turn",
             "--idempotency-key", "cli-1", "--metadata-json", '{"host":"cli"}',
         )
+        reservation = run_cli(
+            "budget-reserve", budget["id"], '{"tokens":1}', "cli-host", "cli-reserve",
+            "--ttl-seconds", "60", "--metadata-json", '{"mode":"cli"}',
+        )["reservation"]
+        self.assertEqual(run_cli("budget-reservation-get", reservation["id"])["status"], "reserved")
+        settled = run_cli(
+            "budget-reservation-settle", reservation["id"], "--actual-usage-json", '{"tokens":1}',
+            "--source-type", "cli", "--source-id", "turn", "--claimed-by", "cli-host",
+            "--metadata-json", '{"done":true}',
+        )
+        self.assertEqual(settled["reservation"]["status"], "settled")
+        released = run_cli(
+            "budget-reserve", budget["id"], '{"tokens":1}', "cli-host", "cli-release"
+        )["reservation"]
+        self.assertEqual(
+            run_cli("budget-reservation-release", released["id"], "--claimed-by", "cli-host")["status"], "released"
+        )
+        self.assertEqual(run_cli("budget-reservation-reclaim", "--budget-id", budget["id"])["expired"], 0)
         self.assertEqual(run_cli("budget-control", budget["id"], "pause")["status"], "paused")
         self.assertEqual(run_cli("workflow-execution-reclaim")["count"], 0)
         with patch.object(
@@ -1196,6 +1217,9 @@ class CraftServiceTests(unittest.TestCase):
         self.assertIn("craft_evidence_record", names)
         self.assertIn("craft_lineage_trace", names)
         self.assertIn("craft_budget_check", names)
+        self.assertIn("craft_budget_reserve", names)
+        self.assertIn("craft_budget_reservation_settle", names)
+        self.assertIn("craft_usage_mode_list", names)
 
     def test_mcp_protocol_errors_and_tool_validation(self) -> None:
         server = McpServer(self.service)
@@ -1536,7 +1560,7 @@ class StoreMigrationTests(unittest.TestCase):
                     row["name"] for row in migrated.execute("PRAGMA table_info(capabilities)")
                 }
             self.assertNotIn("path TEXT NOT NULL UNIQUE", sql)
-            self.assertEqual(version, "12")
+            self.assertEqual(version, "13")
             self.assertIn("restored_from_checkpoint", session_columns)
             self.assertIn("current_execution_id", session_columns)
             self.assertEqual(route_indexes, [2, 1])
@@ -2352,6 +2376,106 @@ class WorkflowRuntimeTests(unittest.TestCase):
             self.assertFalse(result["adapters"][0]["available"])
         with self.assertRaisesRegex(ValueError, "Unknown host adapter"):
             probe_adapters("missing")
+
+    def test_three_usage_modes_are_explicit_and_honest(self) -> None:
+        modes = self.service.usage_mode_list()["modes"]
+        self.assertEqual([item["id"] for item in modes], ["standalone", "supervisor", "capability-provider"])
+        self.assertTrue(self.service.usage_mode_get("standalone")["owns_agent_loop"])
+        self.assertIn("desktop", self.service.usage_mode_get("standalone")["planned_surfaces"])
+        self.assertFalse(self.service.usage_mode_get("capability-provider")["owns_agent_loop"])
+        self.assertEqual(usage_modes("supervisor")["status"], "protocol-available")
+        with self.assertRaisesRegex(ValueError, "Unknown Craft usage mode"):
+            usage_modes("missing")
+
+    def test_budget_reservation_settlement_release_and_reclaim(self) -> None:
+        budget = self.service.budget_create(
+            "task", "reservation-task", "Reserved work",
+            [{"metric": "tokens", "unit": "token", "soft_limit": 60, "hard_limit": 100}],
+        )
+        reserved = self.service.budget_reserve(
+            budget["id"], {"tokens": 40}, "codex-host", "turn-1", 60, {"model": "x"}
+        )
+        self.assertTrue(reserved["allowed"])
+        reservation_id = reserved["reservation"]["id"]
+        self.assertEqual(self.service.budget_check(budget["id"])["metrics"][0]["reserved"], 40)
+        self.assertEqual(
+            self.service.budget_reserve(budget["id"], {"tokens": 40}, "codex-host", "turn-1")["reservation"]["id"],
+            reservation_id,
+        )
+        denied = self.service.budget_reserve(
+            budget["id"], {"tokens": 60}, "claude-host", "turn-2"
+        )
+        self.assertFalse(denied["allowed"])
+        settled = self.service.budget_reservation_settle(
+            reservation_id, {"tokens": 30}, "codex", "turn", "codex-host", {"receipt": True}
+        )
+        self.assertEqual(settled["reservation"]["status"], "settled")
+        self.assertEqual(settled["budget"]["limits"][0]["used"], 30)
+        self.assertEqual(self.service.budget_reservation_get(reservation_id)["actual"]["tokens"], 30)
+        self.assertFalse(
+            self.service.budget_reserve(budget["id"], {"tokens": 40}, "codex-host", "turn-1")["allowed"]
+        )
+        with self.assertRaisesRegex(ValueError, "already closed"):
+            self.service.budget_reservation_settle(reservation_id)
+
+        released = self.service.budget_reserve(
+            budget["id"], {"tokens": 10}, "claude-host", "turn-3"
+        )["reservation"]
+        with self.assertRaisesRegex(ValueError, "does not own"):
+            self.service.budget_reservation_release(released["id"], "other")
+        self.assertEqual(
+            self.service.budget_reservation_release(released["id"], "claude-host")["status"], "released"
+        )
+        with self.assertRaisesRegex(ValueError, "already closed"):
+            self.service.budget_reservation_release(released["id"])
+
+        stale = self.service.budget_reserve(
+            budget["id"], {"tokens": 10}, "dsh-host", "turn-4"
+        )["reservation"]
+        with self.service.store.transaction() as db:
+            db.execute("UPDATE budget_reservations SET expires_at='2000-01-01T00:00:00+00:00' WHERE id=?", (stale["id"],))
+        self.assertEqual(self.service.budget_reservation_reclaim(budget["id"])["expired"], 1)
+        self.assertEqual(self.service.budget_reservation_reclaim()["expired"], 0)
+        with self.assertRaisesRegex(ValueError, "Unknown budget"):
+            self.service.budget_reservation_reclaim("missing")
+
+        validation = self.service.budget_reserve(
+            budget["id"], {"tokens": 10}, "owner", "validation"
+        )["reservation"]
+        for args, message in (
+            ((budget["id"], {}, "", ""), "required"),
+            ((budget["id"], {"tokens": 1}, "host", "key", 29), "ttl_seconds"),
+            ((budget["id"], {"tokens": 1}, "host", "key", 60, []), "metadata"),
+            ((budget["id"], {"tokens": 0}, "host", "key"), "positive"),
+            (("missing", {"tokens": 1}, "host", "key"), "Unknown budget"),
+            ((budget["id"], {"calls": 1}, "host", "key"), "Unknown budget metrics"),
+        ):
+            with self.assertRaisesRegex(ValueError, message):
+                self.service.budget_reserve(*args)  # type: ignore[arg-type]
+        with self.assertRaisesRegex(ValueError, "source_type"):
+            self.service.budget_reservation_settle(validation["id"], source_type=" ")
+        with self.assertRaisesRegex(ValueError, "metadata"):
+            self.service.budget_reservation_settle(validation["id"], metadata=[])  # type: ignore[arg-type]
+        with self.assertRaisesRegex(ValueError, "does not own"):
+            self.service.budget_reservation_settle(validation["id"], claimed_by="other")
+        for actual, message in (([], "non-empty"), ({}, "non-empty"), ({"other": 1}, "not present"), ({"tokens": 0}, "positive")):
+            with self.assertRaisesRegex(ValueError, message):
+                self.service.budget_reservation_settle(validation["id"], actual)  # type: ignore[arg-type]
+        self.assertEqual(
+            self.service.budget_reservation_settle(validation["id"])["reservation"]["actual"]["tokens"], 10
+        )
+        with self.assertRaisesRegex(ValueError, "Unknown budget reservation"):
+            self.service.budget_reservation_get("missing")
+
+        exhaust = self.service.budget_create(
+            "task", "exhaust", "Exhaustion",
+            [{"metric": "calls", "unit": "call", "hard_limit": 10}],
+        )
+        lease = self.service.budget_reserve(exhaust["id"], {"calls": 5}, "host", "call-1")["reservation"]
+        result = self.service.budget_reservation_settle(lease["id"], {"calls": 10})
+        self.assertEqual(result["budget"]["status"], "exhausted")
+        with self.assertRaisesRegex(ValueError, "not active"):
+            self.service.budget_reserve(exhaust["id"], {"calls": 1}, "host", "call-2")
 
     def test_workflow_execution_claim_conflicts_are_rejected(self) -> None:
         workflow = self.service.workflow_save(

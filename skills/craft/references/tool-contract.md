@@ -38,9 +38,19 @@ ID，不代表 Craft 已读取或验证该系统。
 - `craft_budget_check`：叠加可选预计用量，返回 `continue`、`warn` 或 `stop`。
 - `craft_budget_record`：原子记录真实用量；相同 budget、metric 和 idempotency key 不重复累计。
 - `craft_budget_control`：暂停、恢复或关闭预算。
+- `craft_budget_reserve`：在宿主开始工作前原子预留多指标容量；相同幂等键返回原 Reservation。
+- `craft_budget_reservation_get`：读取预计量、实际量、所有者、TTL 和状态。
+- `craft_budget_reservation_settle`：按真实用量结算并释放未使用容量。
+- `craft_budget_reservation_release`：取消任务时释放容量，不记录实际用量。
+- `craft_budget_reservation_reclaim`：将 TTL 已过期的 Reservation 标记为 expired。
 
 指标与单位不写死：可以是 token、second、USD、request、render 或领域自定义值。
 宿主负责把供应商回执转换为创建预算时声明的口径。
+
+## 使用形态
+
+- `craft_usage_mode_list`：列出 standalone、supervisor、capability-provider 三种形态。
+- `craft_usage_mode_get`：读取某一形态由谁拥有 Agent Loop、当前 Surface、规划 Surface 和真实成熟度边界。
 
 ## Workflow
 

@@ -24,6 +24,18 @@ Craft 把这些问题收敛为一条能力生命周期：
 发现 → 管理 → 匹配选择 → 组合执行 → 留存状态与证据 → 验证评测 → 学习复用
 ```
 
+## 一套核心，三种使用方式
+
+| 形态 | 谁拥有 Agent Loop 与用户界面 | Craft 当前提供什么 |
+|---|---|---|
+| Craft Agent | Craft | 独立 CLI/未来桌面端；当前已有控制面 CLI，交互式 Agent Loop 与桌面端待实现 |
+| Craft Supervisor | Craft | 作为上层应用，把执行委派给 Codex、Claude、DSH 或自建 Host；编排协议已可用，原生 Driver 待认证 |
+| Craft Provider | Codex、Claude 或其他 Agent | 通过插件、MCP、Skill、CLI、DSH Adapter 提供能力目录、状态、Workflow、证据和评测；当前已可用 |
+
+三种形态共享 `~/.craft_data`、同一套 Schema 和安全边界，未来桌面端只是新的交互
+Surface，不会另造一套任务、证据或 Workflow 数据。运行 `craft modes` 或
+`craft mode standalone|supervisor|capability-provider` 可以查看机器可读的当前边界。
+
 ## 核心理念
 
 ### 与 Agent 解耦的控制面
@@ -195,12 +207,13 @@ Craft 只登记 URI、摘要、媒体类型、生产者和元数据，不强制�
 
 ```text
 craft_budget_create（token / 秒 / USD / render / 自定义指标）
-→ craft_budget_check（可带预计消耗）
+→ craft_budget_reserve（原子预留预计消耗）
 → 执行宿主工作
-→ craft_budget_record（带幂等键的真实用量）
+→ craft_budget_reservation_settle（按真实用量结算）
+→ 或 release / 超时 reclaim
 ```
 
-Soft limit 返回 `warn`，hard limit 或暂停/关闭状态返回 `stop`。停止判断由程序计算，
+`craft_budget_check` 仍可用于只读预览。Soft limit 返回 `warn`，hard limit 或暂停/关闭状态返回 `stop`。停止判断由程序计算，
 不会询问模型“是不是超预算”。不同宿主负责上报自己的真实计量，Craft 不假设所有
 供应商都使用相同 token 或价格口径。
 
@@ -259,4 +272,4 @@ craft_agent_profile_save（角色、宿主、模型、权限）
 
 ## 当前边界
 
-Craft v0.1 仍是本地技术预览版，覆盖能力检索、长任务接续、验证、恢复、可追溯产物与证据、确定性预算、人工驱动的版本评测，以及带超时恢复和审计事件的宿主介导多 Agent 编排，不是无人值守的后台执行平台。当前暂不包含远程 Skill Hub 同步、向量检索、图形界面、Workspace 文件快照、定时/后台调度和宿主进程自动拉起。预算目前由宿主显式检查和上报，尚未自动拦截所有 Workflow/编排派发。SQLite 是默认检索方式，Embedding Provider 将保持可选。
+Craft v0.1 仍是本地技术预览版，覆盖能力检索、长任务接续、验证、恢复、可追溯产物与证据、原子预算预留与结算、人工驱动的版本评测，以及带超时恢复和审计事件的宿主介导多 Agent 编排，不是无人值守的后台执行平台。当前暂不包含远程 Skill Hub 同步、向量检索、图形界面、Workspace 文件快照、定时/后台调度和宿主进程自动拉起。预算原语已经可靠，但仍需由宿主显式调用，尚未自动嵌入所有 Workflow/编排派发。SQLite 是默认检索方式，Embedding Provider 将保持可选。

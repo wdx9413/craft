@@ -24,6 +24,19 @@ Craft manages a capability lifecycle:
 discover → manage → match/select → compose/execute → preserve state/evidence → evaluate → reuse
 ```
 
+## One core, three ways to use it
+
+| Mode | Who owns the Agent loop and UI | Current Craft role |
+|---|---|---|
+| Craft Agent | Craft | Standalone CLI and future desktop app; the control CLI exists, while the interactive Agent loop and desktop UI are planned |
+| Craft Supervisor | Craft | An upper-layer app delegating execution to Codex, Claude, DSH, or custom hosts; the orchestration protocol exists, while native drivers need certification |
+| Craft Provider | Codex, Claude, or another Agent | Plugin, MCP, Skill, CLI, and DSH adapter capabilities; available today |
+
+All modes share `~/.craft_data`, one schema, and the same safety boundaries. A
+future desktop app is another interaction surface, not a separate task or
+evidence database. Run `craft modes` or `craft mode <mode>` for the
+machine-readable availability contract.
+
 ## Core ideas
 
 ### A control plane decoupled from agents
@@ -155,11 +168,12 @@ Register portable outputs and their proof chain with
 `craft_lineage_trace` to inspect upstream or downstream provenance. Craft stores
 URIs and metadata rather than forcing large files into its database.
 
-For long-running work, create arbitrary metrics with `craft_budget_create`, call
-`craft_budget_check` before dispatch, and submit actual usage through
-`craft_budget_record` with a cross-host idempotency key. Soft limits warn; hard
-limits and inactive budgets stop deterministically without asking a model to
-estimate whether a limit was exceeded.
+For long-running work, create arbitrary metrics with `craft_budget_create`,
+atomically reserve predicted capacity with `craft_budget_reserve`, and settle
+measured usage through `craft_budget_reservation_settle`. Release unused work or
+reclaim expired reservations after a host crash. `craft_budget_check` remains a
+read-only preview. Soft limits warn; hard limits and inactive budgets stop
+deterministically without asking a model to estimate whether a limit was exceeded.
 
 `allow_execution=true` grants local writes only. External writes and destructive actions require an explicit `approved_side_effects` grant.
 
@@ -183,4 +197,4 @@ Use `craft store-backup`, `craft store-doctor`, and the confirmation-gated
 
 ## Current boundary
 
-Craft v0.1 is a local technical preview covering capability retrieval, long-task continuity, verification, recovery, traceable artifacts and evidence, deterministic budgets, human-driven version evaluation, and host-mediated multi-Agent orchestration with lease recovery and audit events; it is not an unattended background execution platform. Remote Skill Hub synchronization, vector retrieval, a graphical interface, workspace snapshots, scheduled/background execution, and automatic host-process startup are not implemented yet. Hosts currently check and report budgets explicitly; budgets do not yet intercept every Workflow or orchestration dispatch automatically. SQLite retrieval is the default; embedding providers will remain optional.
+Craft v0.1 is a local technical preview covering capability retrieval, long-task continuity, verification, recovery, traceable artifacts and evidence, atomic budget reservation and settlement, human-driven version evaluation, and host-mediated multi-Agent orchestration with lease recovery and audit events; it is not an unattended background execution platform. Remote Skill Hub synchronization, vector retrieval, a graphical interface, workspace snapshots, scheduled/background execution, and automatic host-process startup are not implemented yet. Budget primitives are reliable but hosts must call them explicitly; they do not yet intercept every Workflow or orchestration dispatch automatically. SQLite retrieval is the default; embedding providers will remain optional.

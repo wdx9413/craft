@@ -10,7 +10,7 @@ from typing import Iterator
 from .paths import ensure_layout
 
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 
 class ClosingConnection(sqlite3.Connection):
@@ -508,6 +508,27 @@ class CraftStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_budget_usage
                     ON budget_usage_events(budget_id, metric, created_at);
+                CREATE TABLE IF NOT EXISTS budget_reservations (
+                    id TEXT PRIMARY KEY,
+                    budget_id TEXT NOT NULL REFERENCES budgets(id),
+                    status TEXT NOT NULL,
+                    claimed_by TEXT NOT NULL,
+                    idempotency_key TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    actual_json TEXT NOT NULL DEFAULT '{}',
+                    metadata_json TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(budget_id, idempotency_key)
+                );
+                CREATE INDEX IF NOT EXISTS idx_budget_reservations_active
+                    ON budget_reservations(budget_id, status, expires_at);
+                CREATE TABLE IF NOT EXISTS budget_reservation_items (
+                    reservation_id TEXT NOT NULL REFERENCES budget_reservations(id),
+                    metric TEXT NOT NULL,
+                    amount REAL NOT NULL,
+                    PRIMARY KEY(reservation_id, metric)
+                );
                 """
             )
             node_columns = {

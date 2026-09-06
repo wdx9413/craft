@@ -97,11 +97,26 @@ or external stable IDs. Traversal is direction- and depth-bounded so hosts can
 load only the relevant provenance slice into model context.
 
 Budgets support arbitrary metrics such as tokens, seconds, USD, requests, or
-renders. Usage receipts accept cross-host idempotency keys. A soft threshold
-warns and a hard threshold stops deterministically. Provider-specific token and
-price normalization remains the host adapter's responsibility. In this release,
-hosts explicitly check and report budgets; automatic interception of every
-Workflow and orchestration transition remains planned.
+renders. Schema v13 adds atomic reservations before work, measured settlement,
+explicit release, and TTL reclaim after a host crash. Usage receipts accept
+cross-host idempotency keys. Provider-specific token and price normalization
+remains the host adapter's responsibility. Hosts still invoke these primitives
+explicitly; automatic interception of every transition remains planned.
+
+## Three product modes
+
+- `standalone` / Craft Agent owns the conversation, Agent loop, and UI. The
+  management CLI exists; interactive CLI, provider tool loop, streaming,
+  credential storage, and desktop UI are planned.
+- `supervisor` / Craft Supervisor owns the task experience and delegates work to
+  Codex, Claude, DSH, or custom hosts. The protocol exists; native drivers still
+  need compatibility certification.
+- `capability-provider` / another Agent owns the loop and consumes Craft through
+  a plugin, MCP, Skill, CLI, or DSH adapter. This mode is available now.
+
+Machine-readable `usage_mode_list/get` responses keep interfaces honest. Future
+desktop, web, or IDE surfaces call the same application service and do not fork
+the data model.
 
 ## Next steps
 

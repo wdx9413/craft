@@ -12,6 +12,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("info")
+    commands.add_parser("modes")
+    mode_get = commands.add_parser("mode")
+    mode_get.add_argument("mode", choices=["standalone", "supervisor", "capability-provider"])
     adapter_probe = commands.add_parser("host-adapter-probe")
     adapter_probe.add_argument("--host", choices=["codex", "claude-code", "deepseek-harness", "generic-mcp"])
     store_backup = commands.add_parser("store-backup")
@@ -85,6 +88,27 @@ def build_parser() -> argparse.ArgumentParser:
     budget_control = commands.add_parser("budget-control")
     budget_control.add_argument("budget_id")
     budget_control.add_argument("action", choices=["pause", "resume", "close"])
+    budget_reserve = commands.add_parser("budget-reserve")
+    budget_reserve.add_argument("budget_id")
+    budget_reserve.add_argument("usage_json")
+    budget_reserve.add_argument("claimed_by")
+    budget_reserve.add_argument("idempotency_key")
+    budget_reserve.add_argument("--ttl-seconds", type=int, default=900)
+    budget_reserve.add_argument("--metadata-json", default="{}")
+    reservation_get = commands.add_parser("budget-reservation-get")
+    reservation_get.add_argument("reservation_id")
+    reservation_settle = commands.add_parser("budget-reservation-settle")
+    reservation_settle.add_argument("reservation_id")
+    reservation_settle.add_argument("--actual-usage-json")
+    reservation_settle.add_argument("--source-type", default="host")
+    reservation_settle.add_argument("--source-id")
+    reservation_settle.add_argument("--claimed-by")
+    reservation_settle.add_argument("--metadata-json", default="{}")
+    reservation_release = commands.add_parser("budget-reservation-release")
+    reservation_release.add_argument("reservation_id")
+    reservation_release.add_argument("--claimed-by")
+    reservation_reclaim = commands.add_parser("budget-reservation-reclaim")
+    reservation_reclaim.add_argument("--budget-id")
     commands.add_parser("list-sources")
     add = commands.add_parser("add-source")
     add.add_argument("path")
@@ -213,6 +237,10 @@ def main() -> None:
     service = CraftService()
     if args.command == "info":
         result = service.info()
+    elif args.command == "modes":
+        result = service.usage_mode_list()
+    elif args.command == "mode":
+        result = service.usage_mode_get(args.mode)
     elif args.command == "host-adapter-probe":
         result = service.host_adapter_probe(args.host)
     elif args.command == "store-backup":
@@ -265,6 +293,23 @@ def main() -> None:
         )
     elif args.command == "budget-control":
         result = service.budget_control(args.budget_id, args.action)
+    elif args.command == "budget-reserve":
+        result = service.budget_reserve(
+            args.budget_id, json.loads(args.usage_json), args.claimed_by,
+            args.idempotency_key, args.ttl_seconds, json.loads(args.metadata_json),
+        )
+    elif args.command == "budget-reservation-get":
+        result = service.budget_reservation_get(args.reservation_id)
+    elif args.command == "budget-reservation-settle":
+        result = service.budget_reservation_settle(
+            args.reservation_id,
+            None if args.actual_usage_json is None else json.loads(args.actual_usage_json),
+            args.source_type, args.source_id, args.claimed_by, json.loads(args.metadata_json),
+        )
+    elif args.command == "budget-reservation-release":
+        result = service.budget_reservation_release(args.reservation_id, args.claimed_by)
+    elif args.command == "budget-reservation-reclaim":
+        result = service.budget_reservation_reclaim(args.budget_id)
     elif args.command == "workflow-execution-reclaim":
         result = service.workflow_execution_reclaim(args.session_id)
     elif args.command == "workflow-execution-reconcile":

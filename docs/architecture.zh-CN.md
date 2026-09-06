@@ -126,7 +126,7 @@ Python Core 重写成 TypeScript。`host-adapter-probe` 会区分“已声明支
 当前仍需在安装了 Claude Code、Node.js 和 DeepSeek Harness 的环境做真实端到端
 认证；没有完成的宿主实测不能只凭静态清单宣称通过。
 
-## Artifact、Evidence、Lineage 与预算（Schema v12）
+## Artifact、Evidence、Lineage 与预算（Schema v12-v13）
 
 Artifact 是产物引用，不等同于把文件复制进 Craft。它记录 `kind`、名称、URI、
 媒体类型、摘要、大小、生产者和扩展元数据。URI 可以指向本地文件、对象存储、网页
@@ -139,6 +139,18 @@ rejected` 置信状态、可选 Artifact 和精确 locator。Lineage Edge 用有
 格式或本地路径分隔符。
 
 Budget 由 owner 和一组自定义指标组成。每个指标声明 unit、soft limit 和 hard limit；
-Usage Event 带来源及可选幂等键，多个宿主重复上报同一次计量时不会重复累计。检查结果
-是确定性的 `continue / warn / stop`。当前预算是通用控制原语，由宿主在派发前检查并在
-完成后回填；下一阶段才把它原子接入每一种 Workflow 与 Orchestration 状态转换。
+Usage Event 带来源及可选幂等键，多个宿主重复上报同一次计量时不会重复累计。Schema
+v13 增加 Reservation：宿主执行前原子预留多指标容量，执行后按实际用量 settle，取消时
+release，宿主崩溃后按 TTL reclaim。检查结果是确定性的 `continue / warn / stop`。预算仍
+需宿主显式调用，下一阶段再把它自动嵌入每一种 Workflow 与 Orchestration 状态转换。
+
+## 三种产品部署形态
+
+Craft Core 不等于某一种 UI，也不等于必须依赖 Codex/Claude：
+
+1. `standalone`（Craft Agent）：Craft 拥有会话、Agent Loop 和用户界面。管理 CLI 已可用；交互式 CLI、Provider Tool Loop、流式事件、凭据存储和桌面端尚未实现。
+2. `supervisor`（Craft Supervisor）：Craft 拥有任务体验，把具体执行委派给 Codex、Claude、DSH 或自建 Host。编排、Lease、证据和预算协议已可用；原生 Host Driver 尚需兼容认证。
+3. `capability-provider`（Craft Provider）：外部 Agent 拥有 Loop，Craft 通过插件、MCP、Skill、CLI 或 DSH Adapter 提供能力与状态。该形态当前可用。
+
+`usage_mode_list/get` 提供机器可读的 Surface、所有权和成熟度边界。未来 CLI、桌面端、
+Web 或 IDE 只调用同一 Application Service，不复制 SQLite Schema 或业务状态机。
