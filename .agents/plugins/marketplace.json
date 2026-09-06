@@ -1,0 +1,21 @@
+{
+  "name": "craft-marketplace",
+  "interface": {
+    "displayName": "Craft"
+  },
+  "plugins": [
+    {
+      "name": "craft",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/wdx9413/craft.git",
+        "ref": "main"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

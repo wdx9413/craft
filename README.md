@@ -10,6 +10,7 @@ Runtime data defaults to `~/.craft_data` and is never stored in the active proje
 
 - Python 3.11 or newer.
 - Windows, macOS, or Linux.
+- [`uv`](https://docs.astral.sh/uv/getting-started/installation/) when installing the MCP server through a marketplace.
 
 ## Python CLI
 
@@ -40,7 +41,18 @@ The source commands also support `list-sources`, `scan`, `update-source`, and `r
 
 ## Codex
 
-The Codex manifest is `.codex-plugin/plugin.json`; it loads the Craft Skill and `.mcp.json`. First create a platform-resolved plugin copy. The installer records the exact Python executable that ran it, so the resulting MCP config does not depend on `py`, `python`, or `python3` being present in a GUI application's `PATH`.
+The Codex manifest is `.codex-plugin/plugin.json`; it loads the Craft Skill and `.mcp.json`. The GitHub repository is also a Codex marketplace through `.agents/plugins/marketplace.json`.
+
+After `craft-agent-harness==0.1.0` is published to PyPI:
+
+1. Install `uv` and make sure `uvx --version` succeeds in the environment that launches Codex.
+2. Open `/plugins` in Codex and choose **Add Marketplace**.
+3. Enter `https://github.com/wdx9413/craft` as the source, leave the path empty, and select `main` while testing or a release tag for a reproducible install.
+4. Install Craft and start a new Codex session.
+
+The marketplace MCP configuration runs `uvx --from craft-agent-harness==0.1.0 craft-mcp`. `uvx` creates and caches an isolated Python environment, while Craft continues to store runtime data under `~/.craft_data`.
+
+For source development, create a platform-resolved local plugin copy instead. The installer records the exact Python executable that ran it, so the generated MCP config does not depend on `py`, `python`, or `python3` being present in a GUI application's `PATH`.
 
 Windows:
 
@@ -81,7 +93,7 @@ The repository enforces 100% statement and branch coverage with `fail_under = 10
 
 ## Marketplace sources
 
-Marketplace wiring can be added after the repository is published. Codex supports a plugin at a GitHub repository root through a URL source, or a plugin in a repository subdirectory through `git-subdir`. A source may follow a branch or tag with `ref`, or pin a reproducible release with a full commit `sha`. Keep the repository root layout for a standalone Craft repository; use a subdirectory path only if Craft later moves into a larger plugin hub.
+The repository includes a Codex marketplace at `.agents/plugins/marketplace.json`. It currently follows `main` for prerelease testing. Before announcing a stable release, change its `ref` to the corresponding Git tag after the exact Python package version is available on PyPI. A full commit `sha` can be used when installations must remain immutable.
 
 `craft_capability_search` refreshes sources older than five minutes by default, then searches SQLite. It does not send the full library to Codex; only compact matches are returned, and the selected Skill is loaded separately.
 

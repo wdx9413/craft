@@ -518,6 +518,34 @@ class StoreMigrationTests(unittest.TestCase):
 
 
 class CrossPlatformInstallTests(unittest.TestCase):
+    def test_marketplace_and_plugin_distribution_metadata(self) -> None:
+        plugin_root = Path(__file__).resolve().parents[1]
+        marketplace = json.loads(
+            (plugin_root / ".agents" / "plugins" / "marketplace.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        entry = marketplace["plugins"][0]
+        self.assertEqual(marketplace["name"], "craft-marketplace")
+        self.assertEqual(entry["name"], "craft")
+        self.assertEqual(entry["source"]["source"], "url")
+        self.assertEqual(entry["source"]["url"], "https://github.com/wdx9413/craft.git")
+        self.assertEqual(entry["policy"]["installation"], "AVAILABLE")
+
+        manifest = json.loads(
+            (plugin_root / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(manifest["repository"], "https://github.com/wdx9413/craft")
+        self.assertEqual(manifest["mcpServers"], "./.mcp.json")
+
+        mcp = json.loads((plugin_root / ".mcp.json").read_text(encoding="utf-8"))
+        server = mcp["mcpServers"]["craft"]
+        self.assertEqual(server["command"], "uvx")
+        self.assertEqual(
+            server["args"],
+            ["--from", "craft-agent-harness==0.1.0", "craft-mcp"],
+        )
+
     def test_installer_generates_absolute_python_mcp_command(self) -> None:
         plugin_root = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory(dir=TEST_TMP_ROOT) as temp:

@@ -1,9 +1,12 @@
 {
   "mcpServers": {
     "craft": {
-      "command": "python3",
-      "args": ["./scripts/craft_mcp.py"],
-      "cwd": "."
+      "command": "uvx",
+      "args": [
+        "--from",
+        "craft-agent-harness==0.1.0",
+        "craft-mcp"
+      ]
     }
   }
 }

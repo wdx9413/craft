@@ -3,14 +3,19 @@
   "version": "0.1.0",
   "description": "Local-first capability discovery, task continuity, feedback, and reusable workflows for Codex.",
   "author": {
-    "name": "Craft contributors"
+    "name": "wdx9413",
+    "url": "https://github.com/wdx9413"
   },
+  "homepage": "https://github.com/wdx9413/craft",
+  "repository": "https://github.com/wdx9413/craft",
+  "license": "MIT",
+  "keywords": ["agent", "skills", "workflow", "memory", "mcp"],
   "skills": "./skills/",
   "interface": {
     "displayName": "Craft",
     "shortDescription": "Continue tasks and reuse verified workflows.",
     "longDescription": "Craft indexes user-selected local capabilities and helps Codex save task checkpoints, explicit feedback, and versioned workflow candidates under ~/.craft_data.",
-    "developerName": "Craft contributors",
+    "developerName": "wdx9413",
     "category": "Productivity",
     "capabilities": ["Local capability search", "Task continuity", "Workflow learning"],
     "defaultPrompt": [
