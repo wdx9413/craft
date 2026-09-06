@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "craft": {
-      "command": "python",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/craft_mcp.py"]
-    }
-  }
-}

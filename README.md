@@ -9,12 +9,11 @@ Runtime data defaults to `~/.craft_data` and is never stored in the active proje
 ## Requirements
 
 - Python 3.11 or newer.
-- Windows for the bundled Codex MCP launcher in v0.1.
-- Claude Code can load the same plugin on systems where `python` resolves to Python 3.11+.
+- Windows, macOS, or Linux.
 
 ## Python CLI
 
-Install in an isolated environment:
+Install in an isolated environment on Windows:
 
 ```powershell
 py -3 -m venv .venv
@@ -29,18 +28,40 @@ craft add-source D:\path\to\skills
 craft search "diagnose service failure"
 ```
 
+On macOS or Linux:
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -e .
+.venv/bin/craft info
+```
+
 The source commands also support `list-sources`, `scan`, `update-source`, and `remove-source`. Removing a source deletes only Craft's index entries, never the source files.
 
 ## Codex
 
-The Codex manifest is `.codex-plugin/plugin.json`; it loads the Craft Skill and `.mcp.json`. Install the plugin from a local marketplace, start a new Codex conversation, then ask Craft to add a Skill directory or continue a saved task. The v0.1 Codex launcher uses the Windows `py` command.
+The Codex manifest is `.codex-plugin/plugin.json`; it loads the Craft Skill and `.mcp.json`. First create a platform-resolved plugin copy. The installer records the exact Python executable that ran it, so the resulting MCP config does not depend on `py`, `python`, or `python3` being present in a GUI application's `PATH`.
+
+Windows:
+
+```powershell
+py -3 scripts/install_plugin.py
+```
+
+macOS or Linux:
+
+```bash
+python3 scripts/install_plugin.py
+```
+
+The default target is `~/plugins/craft`; `--target` can select another directory. Add that installed copy to a local marketplace, install Craft, and start a new Codex conversation before using its Skill and MCP tools.
 
 ## Claude Code
 
-The Claude manifest is `.claude-plugin/plugin.json`; it selects `.mcp.claude.json`, which uses `${CLAUDE_PLUGIN_ROOT}` so the MCP process keeps working after plugin installation or caching. For local development:
+The Claude manifest is `.claude-plugin/plugin.json` and uses the same generated `.mcp.json`. Point Claude Code at the installed copy:
 
-```powershell
-claude --plugin-dir .
+```bash
+claude --plugin-dir ~/plugins/craft
 ```
 
 Then inspect `/mcp` and invoke `/craft:craft`, or let Claude select the Skill from the task context.
@@ -53,6 +74,8 @@ py -3 -m venv .venv
 .venv\Scripts\python -m coverage run -m unittest discover -s tests
 .venv\Scripts\python -m coverage report
 ```
+
+Use `.venv/bin/python` instead on macOS or Linux. GitHub Actions is configured to run the same coverage gate on Windows, macOS, and Linux with Python 3.11 and 3.13.
 
 The repository enforces branch coverage with `fail_under = 90`.
 

@@ -14,6 +14,7 @@ dependencies = []
 [project.scripts]
 craft = "craft_core.cli:main"
 craft-mcp = "craft_core.mcp:main"
+craft-install = "craft_core.installer:main"
 
 [project.optional-dependencies]
 dev = ["coverage[toml]>=7.6", "PyYAML>=6.0"]

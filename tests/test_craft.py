@@ -14,6 +14,7 @@ from unittest.mock import patch
 
 from craft_core.catalog import iter_skill_files, parse_skill, stable_id
 from craft_core.cli import main as cli_main
+from craft_core.installer import install_plugin, mcp_config, resolved_python
 from craft_core.mcp import McpServer, main as mcp_main
 from craft_core.paths import data_root, ensure_layout
 from craft_core.service import CraftService
@@ -390,6 +391,59 @@ class StoreMigrationTests(unittest.TestCase):
                     os.environ.pop("CRAFT_DATA_DIR", None)
                 else:
                     os.environ["CRAFT_DATA_DIR"] = old
+
+
+class CrossPlatformInstallTests(unittest.TestCase):
+    def test_installer_generates_absolute_python_mcp_command(self) -> None:
+        plugin_root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory(dir=TEST_TMP_ROOT) as temp:
+            target = Path(temp) / "installed" / "craft"
+            result = install_plugin(plugin_root, target, sys.executable)
+            config = json.loads((target / ".mcp.json").read_text(encoding="utf-8"))
+            self.assertEqual(config["mcpServers"]["craft"]["command"], resolved_python())
+            self.assertEqual(result["plugin_root"], str(target.resolve()))
+            self.assertTrue((target / ".codex-plugin" / "plugin.json").is_file())
+            self.assertTrue((target / ".claude-plugin" / "plugin.json").is_file())
+            self.assertFalse((target / "tests").exists())
+            message = json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {"protocolVersion": "2025-11-25"},
+                }
+            )
+            environment = os.environ.copy()
+            environment["CRAFT_DATA_DIR"] = str(Path(temp) / "installed-data")
+            process = subprocess.run(
+                [
+                    config["mcpServers"]["craft"]["command"],
+                    *config["mcpServers"]["craft"]["args"],
+                ],
+                input=message + "\n",
+                text=True,
+                capture_output=True,
+                cwd=target,
+                env=environment,
+                timeout=15,
+                check=False,
+            )
+            self.assertEqual(process.returncode, 0, process.stderr)
+            self.assertEqual(json.loads(process.stdout)["result"]["serverInfo"]["name"], "craft")
+
+    def test_installer_validates_paths_and_supports_atomic_update(self) -> None:
+        plugin_root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory(dir=TEST_TMP_ROOT) as temp:
+            target = Path(temp) / "craft"
+            install_plugin(plugin_root, target)
+            (target / "stale.txt").write_text("old", encoding="utf-8")
+            install_plugin(plugin_root, target)
+            self.assertFalse((target / "stale.txt").exists())
+            with self.assertRaisesRegex(ValueError, "dedicated directory"):
+                install_plugin(plugin_root, plugin_root)
+            with self.assertRaisesRegex(ValueError, "does not exist"):
+                resolved_python(str(Path(temp) / "missing-python"))
+            self.assertEqual(mcp_config()["mcpServers"]["craft"]["cwd"], ".")
 
 
 class McpProcessTests(unittest.TestCase):
