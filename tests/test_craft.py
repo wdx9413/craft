@@ -14,7 +14,7 @@ from unittest.mock import patch
 
 from craft_core.catalog import iter_skill_files, parse_skill, stable_id
 from craft_core.cli import main as cli_main
-from craft_core.installer import install_plugin, mcp_config, resolved_python
+from craft_core.installer import install_plugin, main as installer_main, mcp_config, resolved_python
 from craft_core.mcp import McpServer, main as mcp_main
 from craft_core.paths import data_root, ensure_layout
 from craft_core.service import CraftService
@@ -212,6 +212,10 @@ class CraftServiceTests(unittest.TestCase):
             self.service.task_open(task_id="missing")
         with self.assertRaisesRegex(ValueError, "summary must not be empty"):
             self.service.task_checkpoint("missing", " ")
+        with self.assertRaisesRegex(ValueError, "Unknown task"):
+            self.service.task_checkpoint("missing", "nonempty")
+        with self.assertRaisesRegex(ValueError, "corrected must not be empty"):
+            self.service.feedback_record(" ", scope="user")
         with self.assertRaisesRegex(ValueError, "Unsupported feedback kind"):
             self.service.feedback_record("x", kind="bad", task_id="missing")
         with self.assertRaisesRegex(ValueError, "task_id is required"):
@@ -220,6 +224,8 @@ class CraftServiceTests(unittest.TestCase):
             self.service.workflow_save("", "", [])
         with self.assertRaisesRegex(ValueError, "Unknown workflow"):
             self.service.workflow_get("missing")
+        with self.assertRaisesRegex(ValueError, "query must not be empty"):
+            self.service.workflow_search(" ")
         with self.assertRaisesRegex(ValueError, "Unsupported feedback scope"):
             self.service.feedback_record("x", scope="bad", task_id="missing")
         with self.assertRaisesRegex(ValueError, "Unknown task"):
@@ -248,6 +254,56 @@ class CraftServiceTests(unittest.TestCase):
         self.assertEqual(self.service.info()["counts"]["capabilities"], 1)
         with self.assertRaisesRegex(ValueError, "Unknown capability"):
             self.service.capability_get("missing")
+
+    def test_catalog_fallback_paths_and_scan_failures(self) -> None:
+        library = self.root / "fallback-skills"
+        library.mkdir()
+        for name in ("first", "second"):
+            folder = library / name
+            folder.mkdir()
+            (folder / "SKILL.md").write_text(
+                f"---\nname: {name}\ndescription: fallback searchable {name}\n---\nbody",
+                encoding="utf-8",
+            )
+        source = self.service.source_add(str(library), scan=False)
+        self.assertEqual(self.service.catalog.scan_stale()[0]["added"], 2)
+        self.assertEqual(self.service.catalog.scan_stale(3600), [])
+        self.service.source_update(source["id"], label="fallback-only")
+        with self.assertRaisesRegex(ValueError, "Unknown source"):
+            self.service.source_update("missing", enabled=True)
+
+        self.assertEqual(len(self.service.catalog.search("fallback", kind="skill")), 2)
+        self.assertEqual(self.service.catalog.search("fi", kind="skill")[0]["name"], "first")
+        with self.service.store.transaction() as db:
+            db.execute("DROP TABLE capability_fts")
+        self.assertEqual(self.service.catalog.search("searchable", kind="skill")[0]["kind"], "skill")
+
+        with self.service.store.transaction() as db:
+            db.execute("INSERT OR REPLACE INTO meta(key,value) VALUES('fts','like')")
+        for path in library.rglob("SKILL.md"):
+            path.write_text(path.read_text(encoding="utf-8") + "\nupdated", encoding="utf-8")
+        self.assertEqual(self.service.source_scan(source["id"])["updated"], 2)
+        for path in library.rglob("SKILL.md"):
+            path.unlink()
+        removed = self.service.source_scan(source["id"])
+        self.assertEqual(removed["removed"], 2)
+        empty_remove = self.service.source_remove(source["id"])
+        self.assertEqual(empty_remove["removed_capabilities"], 0)
+
+        unavailable = self.root / "unavailable"
+        unavailable.mkdir()
+        unavailable_source = self.service.source_add(str(unavailable), scan=False)
+        unavailable.rmdir()
+        with self.assertRaisesRegex(ValueError, "unavailable"):
+            self.service.source_scan(unavailable_source["id"])
+
+    def test_invalid_utf8_skill_is_reported_without_aborting_scan(self) -> None:
+        library = self.root / "bad-encoding"
+        library.mkdir()
+        (library / "SKILL.md").write_bytes(b"\xff\xfe")
+        result = self.service.source_add(str(library))["scan"]
+        self.assertEqual(result["failed"], 1)
+        self.assertFalse(result["complete"])
 
     def test_cli_routes_all_source_commands(self) -> None:
         library = self.root / "cli-skills"
@@ -292,6 +348,8 @@ class CraftServiceTests(unittest.TestCase):
         self.assertEqual(unknown["error"]["code"], -32602)
         invalid = server.handle({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "craft_capability_get", "arguments": {"asset_id": "missing"}}})
         self.assertTrue(invalid["result"]["isError"])
+        success = server.handle({"jsonrpc": "2.0", "id": 31, "method": "tools/call", "params": {"name": "craft_info", "arguments": {}}})
+        self.assertFalse(success["result"]["isError"])
         fallback = server.handle({"jsonrpc": "2.0", "id": 4, "method": "initialize", "params": {"protocolVersion": "old"}})
         self.assertEqual(fallback["result"]["protocolVersion"], "2025-11-25")
         self.assertEqual(server.handle({"jsonrpc": "2.0", "id": 5, "method": "ping"})["result"], {})
@@ -302,6 +360,8 @@ class CraftServiceTests(unittest.TestCase):
         server = McpServer(self.service)
         input_stream = StringIO(
             "bad-json\n"
+            + json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"})
+            + "\n"
             + json.dumps({"jsonrpc": "2.0", "id": 1, "method": "ping"})
             + "\n"
         )
@@ -318,6 +378,13 @@ class CraftServiceTests(unittest.TestCase):
             mcp_main()
         fake.run.assert_called_once()
 
+        failing = McpServer(self.service)
+        with patch.object(failing, "handle", side_effect=RuntimeError("boom")), patch(
+            "craft_core.mcp.sys.stdin", StringIO('{"jsonrpc":"2.0","id":2}\n')
+        ), patch("craft_core.mcp.sys.stderr", StringIO()) as stderr:
+            failing.run()
+        self.assertIn("RuntimeError: boom", stderr.getvalue())
+
 
 class CatalogUtilityTests(unittest.TestCase):
     def test_parse_skill_and_stable_id(self) -> None:
@@ -332,6 +399,38 @@ class CatalogUtilityTests(unittest.TestCase):
         malformed, malformed_body = parse_skill("---\nname: never-closed", "fallback")
         self.assertEqual(malformed["name"], "fallback")
         self.assertTrue(malformed_body.startswith("---"))
+        sparse, _ = parse_skill(
+            "---\nno-colon\n: no-key\nempty:\nvalid: yes\n---\nbody", "fallback"
+        )
+        self.assertEqual(sparse["valid"], "yes")
+
+    def test_iterator_handles_cycles_and_entry_errors(self) -> None:
+        class Entry:
+            def __init__(self, name: str, path: Path, mode: str) -> None:
+                self.name = name
+                self.path = str(path)
+                self.mode = mode
+
+            def is_dir(self, follow_symlinks: bool = True) -> bool:
+                if self.mode == "error":
+                    raise OSError("entry denied")
+                return self.mode == "dir"
+
+            def is_file(self, follow_symlinks: bool = True) -> bool:
+                return self.mode == "file"
+
+        with tempfile.TemporaryDirectory(dir=TEST_TMP_ROOT) as temp:
+            root = Path(temp).resolve()
+            errors: list[dict[str, str]] = []
+            entries = [
+                Entry("cycle", root, "dir"),
+                Entry("broken", root / "broken", "error"),
+                Entry("SKILL.md", root / "not-a-file", "other"),
+                Entry("ordinary.txt", root / "ordinary.txt", "file"),
+            ]
+            with patch("craft_core.catalog.os.scandir", return_value=entries):
+                self.assertEqual(list(iter_skill_files(root, errors)), [])
+            self.assertEqual(errors[0]["error"], "entry denied")
 
     def test_iterator_skips_known_directories(self) -> None:
         with tempfile.TemporaryDirectory(dir=TEST_TMP_ROOT) as temp:
@@ -354,7 +453,7 @@ class StoreMigrationTests(unittest.TestCase):
             db.executescript(
                 """
                 CREATE TABLE sources (id TEXT PRIMARY KEY, path TEXT NOT NULL UNIQUE,
-                    requested_path TEXT, label TEXT, enabled INTEGER NOT NULL DEFAULT 1,
+                    label TEXT, enabled INTEGER NOT NULL DEFAULT 1,
                     last_scanned_at TEXT, created_at TEXT NOT NULL);
                 CREATE TABLE capabilities (id TEXT PRIMARY KEY,
                     source_id TEXT NOT NULL REFERENCES sources(id), kind TEXT NOT NULL,
@@ -371,6 +470,31 @@ class StoreMigrationTests(unittest.TestCase):
                 version = migrated.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()["value"]
             self.assertNotIn("path TEXT NOT NULL UNIQUE", sql)
             self.assertEqual(version, "3")
+
+    def test_store_falls_back_when_fts5_is_unavailable(self) -> None:
+        from craft_core.store import ClosingConnection
+
+        original_connect = sqlite3.connect
+
+        class NoFtsConnection(ClosingConnection):
+            def execute(self, sql, parameters=()):  # type: ignore[no-untyped-def]
+                if "CREATE VIRTUAL TABLE" in sql:
+                    raise sqlite3.OperationalError("fts5 unavailable")
+                return super().execute(sql, parameters)
+
+        def no_fts_connect(*args, **kwargs):  # type: ignore[no-untyped-def]
+            kwargs["factory"] = NoFtsConnection
+            return original_connect(*args, **kwargs)
+
+        with tempfile.TemporaryDirectory(dir=TEST_TMP_ROOT) as temp, patch(
+            "craft_core.store.sqlite3.connect", side_effect=no_fts_connect
+        ):
+            store = CraftStore(Path(temp))
+            with store.connect() as db:
+                self.assertEqual(
+                    db.execute("SELECT value FROM meta WHERE key='fts'").fetchone()["value"],
+                    "like",
+                )
 
     def test_transaction_rolls_back_and_layout_is_created(self) -> None:
         with tempfile.TemporaryDirectory(dir=TEST_TMP_ROOT) as temp:
@@ -444,6 +568,50 @@ class CrossPlatformInstallTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "does not exist"):
                 resolved_python(str(Path(temp) / "missing-python"))
             self.assertEqual(mcp_config()["mcpServers"]["craft"]["cwd"], ".")
+
+    def test_installer_missing_item_failure_and_recovery(self) -> None:
+        plugin_root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory(dir=TEST_TMP_ROOT) as temp:
+            temp_root = Path(temp)
+            with self.assertRaisesRegex(ValueError, "Plugin item is missing"):
+                install_plugin(temp_root / "empty-source", temp_root / "target")
+
+            original_copytree = __import__("shutil").copytree
+            target = temp_root / "recover" / "craft"
+            install_plugin(plugin_root, target)
+            marker = target / "marker.txt"
+            marker.write_text("keep", encoding="utf-8")
+
+            def fail_with_partial(source, destination, *args, **kwargs):  # type: ignore[no-untyped-def]
+                if Path(destination) == target:
+                    target.mkdir(parents=True)
+                    raise RuntimeError("copy failed")
+                return original_copytree(source, destination, *args, **kwargs)
+
+            with patch("craft_core.installer.shutil.copytree", side_effect=fail_with_partial):
+                with self.assertRaisesRegex(RuntimeError, "copy failed"):
+                    install_plugin(plugin_root, target)
+            self.assertEqual(marker.read_text(encoding="utf-8"), "keep")
+
+            absent = temp_root / "absent" / "craft"
+
+            def fail_without_partial(source, destination, *args, **kwargs):  # type: ignore[no-untyped-def]
+                if Path(destination) == absent:
+                    raise RuntimeError("copy failed empty")
+                return original_copytree(source, destination, *args, **kwargs)
+
+            with patch("craft_core.installer.shutil.copytree", side_effect=fail_without_partial):
+                with self.assertRaisesRegex(RuntimeError, "copy failed empty"):
+                    install_plugin(plugin_root, absent)
+            self.assertFalse(absent.exists())
+
+    def test_installer_main_prints_result(self) -> None:
+        with tempfile.TemporaryDirectory(dir=TEST_TMP_ROOT) as temp:
+            target = Path(temp) / "craft"
+            output = StringIO()
+            with patch.object(sys, "argv", ["craft-install", "--target", str(target)]), redirect_stdout(output):
+                installer_main()
+            self.assertEqual(json.loads(output.getvalue())["plugin_root"], str(target.resolve()))
 
 
 class McpProcessTests(unittest.TestCase):

@@ -77,7 +77,11 @@ py -3 -m venv .venv
 
 Use `.venv/bin/python` instead on macOS or Linux. GitHub Actions is configured to run the same coverage gate on Windows, macOS, and Linux with Python 3.11 and 3.13.
 
-The repository enforces branch coverage with `fail_under = 90`.
+The repository enforces 100% statement and branch coverage with `fail_under = 100`.
+
+## Marketplace sources
+
+Marketplace wiring can be added after the repository is published. Codex supports a plugin at a GitHub repository root through a URL source, or a plugin in a repository subdirectory through `git-subdir`. A source may follow a branch or tag with `ref`, or pin a reproducible release with a full commit `sha`. Keep the repository root layout for a standalone Craft repository; use a subdirectory path only if Craft later moves into a larger plugin hub.
 
 `craft_capability_search` refreshes sources older than five minutes by default, then searches SQLite. It does not send the full library to Codex; only compact matches are returned, and the selected Skill is loaded separately.
 

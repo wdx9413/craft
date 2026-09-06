@@ -5,6 +5,7 @@ tests/.validation-deps/
 .craft_data/
 .venv/
 .coverage
+coverage.json
 htmlcov/
 dist/
 build/
