@@ -60,5 +60,9 @@ Craft 当前保存和聚合评测事实，不自动调用被测 Agent 或 Grader
 - `craft_orchestration_plan_list`：按关联 Task 或状态找回 Plan。
 - `craft_orchestration_dispatch`：领取当前就绪节点并返回宿主应执行的结构化请求。
 - `craft_orchestration_submit`：提交 Lease 结果；失败且仍有候选时自动进入下一路由。
+- `craft_orchestration_heartbeat`：由 Lease 所有者续租长时间执行。
+- `craft_orchestration_reclaim`：回收超时 Lease；重新派发时保留当前 Profile 路由。
+- `craft_orchestration_plan_control`：暂停、恢复或取消 Plan。
+- `craft_orchestration_node_retry`：人工重试失败/阻塞节点，可选择从首个 Profile 重新路由。
 
 `dispatch` 只修改 Craft 本地状态，不会直接启动 Codex 或 Claude 子 Agent。宿主必须执行 Lease Request 中明确指定的 Profile，并继续遵守自己的 Sandbox 和审批规则。

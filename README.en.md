@@ -6,7 +6,7 @@
 
 Craft is a capability-management and task runtime for AI agents. It treats Skills, Workflows, tools, and service connections as discoverable, composable, and verifiable capability assets, then manages their full lifecycle around real tasks: discover, register, and index capabilities; retrieve, select, and compose them; coordinate and continue execution; preserve state, artifacts, and evidence; use evaluation and regression checks to assess outcomes and capability versions; and turn validated methods into reusable Workflows.
 
-Version 0.1 implements local Skill discovery and management, task continuity, mixed validation, Workflow execution, trusted recovery, reusable Case Suites, cross-version evaluation comparison, cross-host Agent Profiles, dependency orchestration, concurrent leases, and model fallback. Adding plugin and MCP metadata to the capability catalog, automated evaluation execution, and threshold-based promotion remain later stages.
+Version 0.1 implements local Skill discovery and management, task continuity, mixed validation, Workflow execution, trusted recovery, reusable Case Suites, cross-version evaluation comparison, cross-host Agent Profiles, dependency orchestration, recoverable leases, manual controls, and model fallback. Adding plugin and MCP metadata to the capability catalog, automated evaluation execution, and threshold-based promotion remain later stages.
 
 ## Why Craft
 
@@ -71,7 +71,7 @@ These domains can share one control loop while supplying their own Skills, tools
 - Separate `read_only`, `local_write`, `external_write`, and `destructive` gates.
 - Trusted checkpoint recovery without rewriting failed history.
 - Versioned evaluation Case Suites, immutable Case results, aggregate metrics, and same-suite comparisons.
-- Cross-platform Agent Profiles, dependency DAGs, concurrent dispatch, duplicate-safe leases, and ordered fallback.
+- Cross-platform Agent Profiles, dependency DAGs, concurrent dispatch, lease TTL/heartbeat/crash recovery, ordered fallback, and immutable orchestration events.
 - Codex, Claude Code, MCP, and Python CLI integration.
 
 ## Evaluation boundary today
@@ -131,7 +131,7 @@ craft_source_add → craft_capability_search → craft_capability_get
 craft_task_open → craft_task_checkpoint → resume by task_id
 craft_workflow_plan → craft_workflow_start → craft_workflow_submit
 craft_eval_suite_list/save → craft_eval_run_start → craft_eval_result_submit → craft_eval_compare
-craft_agent_profile_save → craft_orchestration_plan_create → dispatch → host execution → submit
+craft_agent_profile_save → craft_orchestration_plan_create → dispatch → host execution / heartbeat → submit
 ```
 
 `allow_execution=true` grants local writes only. External writes and destructive actions require an explicit `approved_side_effects` grant.
@@ -146,4 +146,4 @@ craft_agent_profile_save → craft_orchestration_plan_create → dispatch → ho
 
 ## Current boundary
 
-Craft v0.1 is a local technical preview covering capability retrieval, long-task continuity, verification, recovery, human-driven version evaluation, and host-mediated multi-Agent orchestration; it is not an unattended background execution platform. Remote Skill Hub synchronization, vector retrieval, a graphical interface, workspace snapshots, scheduled/background execution, lease expiry/recovery, and automatic host-process startup are not implemented yet. SQLite retrieval is the default; embedding providers will remain optional.
+Craft v0.1 is a local technical preview covering capability retrieval, long-task continuity, verification, recovery, human-driven version evaluation, and host-mediated multi-Agent orchestration with lease recovery and audit events; it is not an unattended background execution platform. Remote Skill Hub synchronization, vector retrieval, a graphical interface, workspace snapshots, scheduled/background execution, and automatic host-process startup are not implemented yet. SQLite retrieval is the default; embedding providers will remain optional.

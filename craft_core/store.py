@@ -8,7 +8,7 @@ from typing import Iterator
 from .paths import ensure_layout
 
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 
 class ClosingConnection(sqlite3.Connection):
@@ -294,6 +294,7 @@ class CraftStore:
                     side_effect TEXT NOT NULL,
                     status TEXT NOT NULL,
                     attempt INTEGER NOT NULL DEFAULT 0,
+                    route_index INTEGER NOT NULL DEFAULT 0,
                     result_json TEXT NOT NULL DEFAULT '{}',
                     updated_at TEXT NOT NULL,
                     PRIMARY KEY(plan_id, node_id)
@@ -312,6 +313,9 @@ class CraftStore:
                     request_json TEXT NOT NULL,
                     result_json TEXT NOT NULL DEFAULT '{}',
                     provenance TEXT,
+                    expires_at TEXT,
+                    heartbeat_at TEXT,
+                    closed_reason TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     FOREIGN KEY(plan_id, node_id)
@@ -323,8 +327,36 @@ class CraftStore:
                     ON orchestration_leases(plan_id, node_id, attempt);
                 CREATE INDEX IF NOT EXISTS idx_orchestration_leases_plan
                     ON orchestration_leases(plan_id, status, created_at);
+                CREATE TABLE IF NOT EXISTS orchestration_events (
+                    plan_id TEXT NOT NULL REFERENCES orchestration_plans(id),
+                    sequence INTEGER NOT NULL,
+                    event_type TEXT NOT NULL,
+                    node_id TEXT,
+                    lease_id TEXT,
+                    payload_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY(plan_id, sequence)
+                );
+                CREATE INDEX IF NOT EXISTS idx_orchestration_events_plan
+                    ON orchestration_events(plan_id, sequence);
                 """
             )
+            node_columns = {
+                row["name"] for row in db.execute("PRAGMA table_info(orchestration_nodes)").fetchall()
+            }
+            if "route_index" not in node_columns:
+                db.execute("ALTER TABLE orchestration_nodes ADD COLUMN route_index INTEGER NOT NULL DEFAULT 0")
+                db.execute(
+                    """UPDATE orchestration_nodes SET route_index=CASE
+                       WHEN status='pending' AND attempt>0 THEN attempt
+                       WHEN attempt>0 THEN attempt-1 ELSE 0 END"""
+                )
+            lease_columns = {
+                row["name"] for row in db.execute("PRAGMA table_info(orchestration_leases)").fetchall()
+            }
+            for column in ("expires_at", "heartbeat_at", "closed_reason"):
+                if column not in lease_columns:
+                    db.execute(f"ALTER TABLE orchestration_leases ADD COLUMN {column} TEXT")
             session_columns = {
                 row["name"] for row in db.execute("PRAGMA table_info(workflow_sessions)").fetchall()
             }

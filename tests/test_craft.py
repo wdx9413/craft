@@ -487,7 +487,7 @@ class CraftServiceTests(unittest.TestCase):
             self.service.orchestration_plan_get("missing")
         self.assertEqual(self.service.orchestration_plan_list()["plans"], [])
         with self.assertRaisesRegex(ValueError, "Unsupported orchestration plan status"):
-            self.service.orchestration_plan_list(status="cancelled")
+            self.service.orchestration_plan_list(status="unknown")
         with self.assertRaisesRegex(ValueError, "claimed_by"):
             self.service.orchestration_dispatch("missing", " ")
         with self.assertRaisesRegex(ValueError, "Unknown orchestration plan"):
@@ -517,6 +517,124 @@ class CraftServiceTests(unittest.TestCase):
         self.assertEqual(plan_status([{"status": "passed"}]), "completed")
         self.assertEqual(plan_status([{"status": "leased"}]), "running")
         self.assertEqual(plan_status([{"status": "failed"}]), "failed")
+
+    def test_reliable_orchestration_reclaims_controls_and_retries(self) -> None:
+        worker = self.service.agent_profile_save(
+            "worker", "worker", "codex", "openai", "fast",
+            allowed_side_effects=["read_only"],
+        )
+        with self.assertRaisesRegex(ValueError, "policy must be an object"):
+            self.service.orchestration_plan_create("x", [{
+                "id": "a", "role": "worker", "objective": "x", "profile_ids": [worker["id"]],
+            }], policy=[])  # type: ignore[arg-type]
+        for ttl in (True, 29, 86401, "30"):
+            with self.subTest(ttl=ttl), self.assertRaisesRegex(ValueError, "lease_ttl_seconds"):
+                self.service.orchestration_plan_create("x", [{
+                    "id": "a", "role": "worker", "objective": "x", "profile_ids": [worker["id"]],
+                }], policy={"lease_ttl_seconds": ttl})
+
+        plan = self.service.orchestration_plan_create(
+            "recover interrupted work",
+            [{"id": "work", "role": "worker", "objective": "work", "profile_ids": [worker["id"]]}],
+            policy={"lease_ttl_seconds": 30},
+        )
+        first = self.service.orchestration_dispatch(plan["id"], "host-a")["dispatched"][0]
+        self.assertEqual(first["attempt"], 1)
+        self.assertIn("expires_at", first)
+        with self.assertRaisesRegex(ValueError, "claimed_by"):
+            self.service.orchestration_heartbeat(first["lease_id"], " ")
+        for extension in (True, 29, 86401, "30"):
+            with self.subTest(extension=extension), self.assertRaisesRegex(ValueError, "extend_seconds"):
+                self.service.orchestration_heartbeat(first["lease_id"], "host-a", extension)  # type: ignore[arg-type]
+        with self.assertRaisesRegex(ValueError, "Unknown orchestration lease"):
+            self.service.orchestration_heartbeat("missing", "host-a")
+        with self.assertRaisesRegex(ValueError, "does not own"):
+            self.service.orchestration_heartbeat(first["lease_id"], "host-b")
+        renewed = self.service.orchestration_heartbeat(first["lease_id"], "host-a", 60)
+        self.assertEqual(renewed["status"], "leased")
+
+        paused = self.service.orchestration_plan_control(plan["id"], "pause")
+        self.assertEqual(paused["status"], "paused")
+        with self.service.store.transaction() as db:
+            self.service._refresh_orchestration(db, plan["id"], "now")
+        self.assertEqual(self.service.orchestration_plan_list(status="paused")["plans"][0]["id"], plan["id"])
+        with self.assertRaisesRegex(ValueError, "cannot dispatch"):
+            self.service.orchestration_dispatch(plan["id"], "host-a")
+        with self.assertRaisesRegex(ValueError, "Cannot pause"):
+            self.service.orchestration_plan_control(plan["id"], "pause")
+        resumed = self.service.orchestration_plan_control(plan["id"], "resume")
+        self.assertEqual(resumed["status"], "running")
+
+        with self.service.store.transaction() as db:
+            db.execute(
+                "UPDATE orchestration_leases SET expires_at='2000-01-01T00:00:00+00:00' WHERE id=?",
+                (first["lease_id"],),
+            )
+        reclaimed = self.service.orchestration_reclaim(plan["id"])
+        self.assertEqual(reclaimed["expired"], 1)
+        self.assertEqual(reclaimed["plan"]["nodes"][0]["status"], "pending")
+        self.assertEqual(self.service.orchestration_reclaim(plan["id"])["expired"], 0)
+        with self.assertRaisesRegex(ValueError, "already closed"):
+            self.service.orchestration_submit(first["lease_id"], "passed", claimed_by="host-a")
+        with self.assertRaisesRegex(ValueError, "already closed"):
+            self.service.orchestration_heartbeat(first["lease_id"], "host-a")
+        second = self.service.orchestration_dispatch(plan["id"], "host-b")["dispatched"][0]
+        self.assertEqual(second["attempt"], 2)
+        self.assertEqual(second["profile"]["id"], first["profile"]["id"])
+        with self.assertRaisesRegex(ValueError, "does not own"):
+            self.service.orchestration_submit(second["lease_id"], "passed", claimed_by="host-a")
+        completed = self.service.orchestration_submit(
+            second["lease_id"], "passed", claimed_by="host-b"
+        )
+        self.assertEqual(completed["status"], "completed")
+        self.assertEqual(
+            [event["sequence"] for event in completed["events"]],
+            list(range(1, len(completed["events"]) + 1)),
+        )
+        self.assertIn("lease_expired", {event["event_type"] for event in completed["events"]})
+        with self.assertRaisesRegex(ValueError, "Cannot resume"):
+            self.service.orchestration_plan_control(plan["id"], "resume")
+        with self.assertRaisesRegex(ValueError, "Unsupported orchestration control"):
+            self.service.orchestration_plan_control(plan["id"], "stop")
+        with self.assertRaisesRegex(ValueError, "Unknown orchestration plan"):
+            self.service.orchestration_plan_control("missing", "pause")
+        with self.assertRaisesRegex(ValueError, "Unknown orchestration plan"):
+            self.service.orchestration_reclaim("missing")
+        with self.assertRaisesRegex(ValueError, "Unknown orchestration plan"):
+            self.service.orchestration_node_retry("missing", "a")
+        self.assertIn("+00:00", self.service._iso_after("2020-01-01T00:00:00", 30))
+
+        retry_plan = self.service.orchestration_plan_create(
+            "manual retry",
+            [
+                {"id": "a", "role": "worker", "objective": "a", "profile_ids": [worker["id"]]},
+                {"id": "b", "role": "worker", "objective": "b", "profile_ids": [worker["id"]], "depends_on": ["a"]},
+            ],
+        )
+        failed_lease = self.service.orchestration_dispatch(retry_plan["id"], "host")["dispatched"][0]
+        failed = self.service.orchestration_submit(failed_lease["lease_id"], "failed")
+        self.assertEqual([node["status"] for node in failed["nodes"]], ["failed", "blocked"])
+        retried = self.service.orchestration_node_retry(retry_plan["id"], "a", restart_routes=True)
+        self.assertEqual([node["status"] for node in retried["nodes"]], ["pending", "pending"])
+        with self.assertRaisesRegex(ValueError, "requires a failed or paused"):
+            self.service.orchestration_node_retry(retry_plan["id"], "a")
+        retry_lease = self.service.orchestration_dispatch(retry_plan["id"], "host")["dispatched"][0]
+        self.service.orchestration_submit(retry_lease["lease_id"], "passed")
+        with self.assertRaisesRegex(ValueError, "Only failed or blocked"):
+            self.service.orchestration_plan_control(retry_plan["id"], "pause")
+            self.service.orchestration_node_retry(retry_plan["id"], "a")
+        self.service.orchestration_plan_control(retry_plan["id"], "resume")
+        with self.assertRaisesRegex(ValueError, "Unknown orchestration node"):
+            self.service.orchestration_plan_control(retry_plan["id"], "pause")
+            self.service.orchestration_node_retry(retry_plan["id"], "missing")
+        self.service.orchestration_plan_control(retry_plan["id"], "resume")
+        active = self.service.orchestration_dispatch(retry_plan["id"], "host")["dispatched"][0]
+        self.service.orchestration_plan_control(retry_plan["id"], "cancel")
+        self.assertEqual(self.service.orchestration_plan_list(status="cancelled")["plans"][0]["status"], "cancelled")
+        with self.assertRaisesRegex(ValueError, "already closed"):
+            self.service.orchestration_submit(active["lease_id"], "passed")
+        with self.assertRaisesRegex(ValueError, "Cannot cancel"):
+            self.service.orchestration_plan_control(retry_plan["id"], "cancel")
 
     def test_validation_errors_are_actionable(self) -> None:
         with self.assertRaisesRegex(ValueError, "does not exist"):
@@ -717,12 +835,26 @@ class CraftServiceTests(unittest.TestCase):
             plan["id"],
         )
         lease = run_cli("orchestration-dispatch", plan["id"], "cli-host", "--limit", "1")["dispatched"][0]
+        self.assertEqual(
+            run_cli("orchestration-heartbeat", lease["lease_id"], "cli-host", "--extend-seconds", "60")["status"],
+            "leased",
+        )
+        self.assertEqual(run_cli("orchestration-reclaim", plan["id"])["expired"], 0)
         finished = run_cli(
             "orchestration-submit", lease["lease_id"], "passed",
             "--result-json", '{"done":true}', "--evidence-json", '[{"ref":"cli"}]',
-            "--provenance", "agent_reported",
+            "--provenance", "agent_reported", "--claimed-by", "cli-host",
         )
         self.assertEqual(finished["status"], "completed")
+
+        control_plan = run_cli("orchestration-plan-create", "CLI controls", nodes)
+        self.assertEqual(run_cli("orchestration-plan-control", control_plan["id"], "pause")["status"], "paused")
+        self.assertEqual(run_cli("orchestration-plan-control", control_plan["id"], "resume")["status"], "running")
+        control_lease = run_cli("orchestration-dispatch", control_plan["id"], "cli-host")["dispatched"][0]
+        run_cli("orchestration-submit", control_lease["lease_id"], "failed")
+        retried = run_cli("orchestration-node-retry", control_plan["id"], "work", "--restart-routes")
+        self.assertEqual(retried["nodes"][0]["status"], "pending")
+        self.assertEqual(run_cli("orchestration-plan-control", control_plan["id"], "cancel")["status"], "cancelled")
 
     def test_public_mcp_tool_names_are_prefixed(self) -> None:
         server = McpServer(self.service)
@@ -737,6 +869,8 @@ class CraftServiceTests(unittest.TestCase):
         self.assertIn("craft_agent_profile_save", names)
         self.assertIn("craft_orchestration_dispatch", names)
         self.assertIn("craft_orchestration_plan_list", names)
+        self.assertIn("craft_orchestration_heartbeat", names)
+        self.assertIn("craft_orchestration_plan_control", names)
 
     def test_mcp_protocol_errors_and_tool_validation(self) -> None:
         server = McpServer(self.service)
@@ -884,6 +1018,31 @@ class StoreMigrationTests(unittest.TestCase):
                     max_transitions INTEGER NOT NULL,
                     created_at TEXT NOT NULL, updated_at TEXT NOT NULL
                 );
+                CREATE TABLE orchestration_nodes (
+                    plan_id TEXT NOT NULL, node_id TEXT NOT NULL, position INTEGER NOT NULL,
+                    role TEXT NOT NULL, objective TEXT NOT NULL, depends_on_json TEXT NOT NULL,
+                    routes_json TEXT NOT NULL, input_json TEXT NOT NULL,
+                    output_schema_json TEXT NOT NULL, evidence_required_json TEXT NOT NULL,
+                    side_effect TEXT NOT NULL, status TEXT NOT NULL,
+                    attempt INTEGER NOT NULL DEFAULT 0, result_json TEXT NOT NULL DEFAULT '{}',
+                    updated_at TEXT NOT NULL, PRIMARY KEY(plan_id, node_id)
+                );
+                CREATE TABLE orchestration_leases (
+                    id TEXT PRIMARY KEY, plan_id TEXT NOT NULL, node_id TEXT NOT NULL,
+                    attempt INTEGER NOT NULL, profile_id TEXT NOT NULL,
+                    profile_version INTEGER NOT NULL, status TEXT NOT NULL,
+                    claimed_by TEXT NOT NULL, request_json TEXT NOT NULL,
+                    result_json TEXT NOT NULL DEFAULT '{}', provenance TEXT,
+                    created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+                );
+                INSERT INTO orchestration_nodes VALUES(
+                    'p','pending',0,'r','o','[]','[]','{}','{}','[]','read_only',
+                    'pending',2,'{}','now'
+                );
+                INSERT INTO orchestration_nodes VALUES(
+                    'p','leased',1,'r','o','[]','[]','{}','{}','[]','read_only',
+                    'leased',2,'{}','now'
+                );
                 """
             )
             db.close()
@@ -894,9 +1053,19 @@ class StoreMigrationTests(unittest.TestCase):
                 session_columns = {
                     row["name"] for row in migrated.execute("PRAGMA table_info(workflow_sessions)")
                 }
+                lease_columns = {
+                    row["name"] for row in migrated.execute("PRAGMA table_info(orchestration_leases)")
+                }
+                route_indexes = [
+                    row["route_index"] for row in migrated.execute(
+                        "SELECT route_index FROM orchestration_nodes ORDER BY position"
+                    )
+                ]
             self.assertNotIn("path TEXT NOT NULL UNIQUE", sql)
-            self.assertEqual(version, "8")
+            self.assertEqual(version, "9")
             self.assertIn("restored_from_checkpoint", session_columns)
+            self.assertEqual(route_indexes, [2, 1])
+            self.assertTrue({"expires_at", "heartbeat_at", "closed_reason"}.issubset(lease_columns))
 
     def test_store_falls_back_when_fts5_is_unavailable(self) -> None:
         from craft_core.store import ClosingConnection

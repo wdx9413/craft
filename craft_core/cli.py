@@ -99,7 +99,7 @@ def build_parser() -> argparse.ArgumentParser:
     plan_list = commands.add_parser("orchestration-plan-list")
     plan_list.add_argument("--limit", type=int, default=20)
     plan_list.add_argument("--task-id")
-    plan_list.add_argument("--status", choices=["running", "completed", "failed"])
+    plan_list.add_argument("--status", choices=["running", "paused", "completed", "failed", "cancelled"])
     dispatch = commands.add_parser("orchestration-dispatch")
     dispatch.add_argument("plan_id")
     dispatch.add_argument("claimed_by")
@@ -110,6 +110,20 @@ def build_parser() -> argparse.ArgumentParser:
     submit.add_argument("--result-json", default="{}")
     submit.add_argument("--evidence-json", default="[]")
     submit.add_argument("--provenance", default="agent_reported")
+    submit.add_argument("--claimed-by")
+    heartbeat = commands.add_parser("orchestration-heartbeat")
+    heartbeat.add_argument("lease_id")
+    heartbeat.add_argument("claimed_by")
+    heartbeat.add_argument("--extend-seconds", type=int)
+    reclaim = commands.add_parser("orchestration-reclaim")
+    reclaim.add_argument("plan_id")
+    control = commands.add_parser("orchestration-plan-control")
+    control.add_argument("plan_id")
+    control.add_argument("action", choices=["pause", "resume", "cancel"])
+    retry = commands.add_parser("orchestration-node-retry")
+    retry.add_argument("plan_id")
+    retry.add_argument("node_id")
+    retry.add_argument("--restart-routes", action="store_true")
     return parser
 
 
@@ -182,9 +196,17 @@ def main() -> None:
         result = service.orchestration_plan_list(args.limit, args.task_id, args.status)
     elif args.command == "orchestration-dispatch":
         result = service.orchestration_dispatch(args.plan_id, args.claimed_by, args.limit)
-    else:
+    elif args.command == "orchestration-submit":
         result = service.orchestration_submit(
             args.lease_id, args.verdict, json.loads(args.result_json),
-            json.loads(args.evidence_json), args.provenance,
+            json.loads(args.evidence_json), args.provenance, args.claimed_by,
         )
+    elif args.command == "orchestration-heartbeat":
+        result = service.orchestration_heartbeat(args.lease_id, args.claimed_by, args.extend_seconds)
+    elif args.command == "orchestration-reclaim":
+        result = service.orchestration_reclaim(args.plan_id)
+    elif args.command == "orchestration-plan-control":
+        result = service.orchestration_plan_control(args.plan_id, args.action)
+    else:
+        result = service.orchestration_node_retry(args.plan_id, args.node_id, args.restart_routes)
     print(json.dumps(result, ensure_ascii=False, indent=2))

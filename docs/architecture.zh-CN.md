@@ -71,6 +71,8 @@ Goal + Invariants + Permission Policy
 
 Craft 保存宿主无关的 Agent Profile。每个 Plan Node 声明角色、目标、依赖、副作用和按顺序排列的 Profile 候选。`dispatch` 只领取依赖已经通过且未被其他宿主领取的节点，并受 `max_concurrency` 限制；失败提交会在仍有候选时回到 pending，下一次派发选择后续 Profile。前置节点最终失败或 blocked 时，下游节点级联 blocked。
 
+Lease 具有 TTL 和所有者，可通过 heartbeat 续租。宿主中断后的 expired Lease 会被回收，节点仍从同一 Profile 重试；旧 Lease 不能再次提交。Plan 支持 pause、resume、cancel，失败节点支持显式 retry。控制与执行变化写入单调递增的不可变事件流，使新会话可以重建发生过什么，而不依赖旧对话上下文。
+
 MCP Server 无权直接调用 Codex 的 `spawn_agent` 或 Claude 的内部 Task API。当前由 Codex/Claude Skill 或其他宿主读取 Lease Request，调用其原生执行能力，再提交带 provenance 的结果。后续宿主 Adapter 可以自动完成这段翻译，但不得绕过宿主自己的 Sandbox、审批和并发限制。
 
 ## 评测分层
@@ -93,4 +95,4 @@ MCP stdout 只输出 JSON-RPC。运行日志写到 stderr，默认 INFO；逐节
 
 ## 后续演进
 
-下一阶段包括 Lease TTL/心跳与崩溃回收、Codex/Claude/API Host Adapter、预算和成本记录、自动 Eval Runner 与 Grader 适配器、Artifact/Evidence 一等实体和 lineage、Workspace 快照、幂等外部操作与补偿、远程 Hub 同步和可选向量检索。这些能力不应绑定某一家模型。
+下一阶段包括 Codex/Claude/API Host Adapter、token/时间/成本预算、编排结果接入 Eval、自动 Eval Runner 与 Grader 适配器、Artifact/Evidence 一等实体和 lineage、Workspace 快照、幂等外部操作与补偿、远程 Hub 同步和可选向量检索。这些能力不应绑定某一家模型。

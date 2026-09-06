@@ -4,6 +4,7 @@ import hashlib
 import json
 import logging
 import uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -43,6 +44,7 @@ class CraftService:
                     "workflow_runs", "workflow_sessions", "workflow_checkpoints",
                     "evaluation_suites", "evaluation_runs", "evaluation_results",
                     "agent_profiles", "orchestration_plans", "orchestration_leases",
+                    "orchestration_events",
                 )
             }
         return {"version": "0.1.0", "data_root": str(self.store.root), "counts": counts}
@@ -631,6 +633,11 @@ class CraftService:
             raise ValueError("goal must not be empty")
         if isinstance(max_concurrency, bool) or not 1 <= max_concurrency <= 32:
             raise ValueError("max_concurrency must be between 1 and 32")
+        if policy is not None and not isinstance(policy, dict):
+            raise ValueError("policy must be an object")
+        lease_ttl = (policy or {}).get("lease_ttl_seconds", 900)
+        if isinstance(lease_ttl, bool) or not isinstance(lease_ttl, int) or not 30 <= lease_ttl <= 86400:
+            raise ValueError("policy.lease_ttl_seconds must be between 30 and 86400")
         normalized = normalize_orchestration_nodes(nodes)
         resolved: list[dict[str, Any]] = []
         for node in normalized:
@@ -677,6 +684,10 @@ class CraftService:
                         node["side_effect"], now,
                     ),
                 )
+            self._append_orchestration_event(
+                db, plan_id, "plan_created", now,
+                payload={"goal": goal, "node_count": len(resolved), "max_concurrency": max_concurrency},
+            )
         log_event(self.logger, "orchestration_plan_created", plan_id=plan_id, nodes=len(resolved))
         return self.orchestration_plan_get(plan_id)
 
@@ -690,6 +701,9 @@ class CraftService:
             ).fetchall()
             leases = db.execute(
                 "SELECT * FROM orchestration_leases WHERE plan_id=? ORDER BY created_at", (plan_id,)
+            ).fetchall()
+            events = db.execute(
+                "SELECT * FROM orchestration_events WHERE plan_id=? ORDER BY sequence", (plan_id,)
             ).fetchall()
         result = dict(row)
         result["policy"] = json.loads(result.pop("policy_json"))
@@ -709,6 +723,11 @@ class CraftService:
             lease["request"] = json.loads(lease.pop("request_json"))
             lease["result"] = json.loads(lease.pop("result_json"))
             result["leases"].append(lease)
+        result["events"] = []
+        for raw in events:
+            event = dict(raw)
+            event["payload"] = json.loads(event.pop("payload_json"))
+            result["events"].append(event)
         return result
 
     def orchestration_plan_list(
@@ -718,7 +737,7 @@ class CraftService:
         status: str | None = None,
     ) -> dict[str, Any]:
         limit = max(1, min(limit, 50))
-        if status is not None and status not in {"running", "completed", "failed"}:
+        if status is not None and status not in {"running", "paused", "completed", "failed", "cancelled"}:
             raise ValueError(f"Unsupported orchestration plan status: {status}")
         sql = "SELECT id FROM orchestration_plans WHERE 1=1"
         params: list[Any] = []
@@ -745,6 +764,8 @@ class CraftService:
             plan = db.execute("SELECT * FROM orchestration_plans WHERE id=?", (plan_id,)).fetchone()
             if not plan:
                 raise ValueError(f"Unknown orchestration plan: {plan_id}")
+            self._expire_orchestration_leases(db, plan_id, now)
+            plan = db.execute("SELECT * FROM orchestration_plans WHERE id=?", (plan_id,)).fetchone()
             if plan["status"] != "running":
                 raise ValueError(f"Orchestration plan cannot dispatch from status: {plan['status']}")
             self._refresh_orchestration(db, plan_id, now)
@@ -774,9 +795,12 @@ class CraftService:
                     continue
                 routes = json.loads(row["routes_json"])
                 attempt = row["attempt"] + 1
-                route = routes[attempt - 1]
+                route = routes[row["route_index"]]
                 profile = self._profile_from_db(db, route["profile_id"], route["profile_version"])
                 lease_id = new_id("lease")
+                policy = json.loads(plan["policy_json"])
+                ttl_seconds = policy.get("lease_ttl_seconds", 900)
+                expires_at = self._iso_after(now, ttl_seconds)
                 request = {
                     "lease_id": lease_id, "plan_id": plan_id, "node_id": row["node_id"],
                     "objective": row["objective"], "role": row["role"],
@@ -785,6 +809,7 @@ class CraftService:
                     "output_schema": json.loads(row["output_schema_json"]),
                     "evidence_required": json.loads(row["evidence_required_json"]),
                     "goal": plan["goal"], "policy": json.loads(plan["policy_json"]),
+                    "attempt": attempt, "expires_at": expires_at,
                     "dependency_results": {
                         item: dependency_results[item] for item in dependencies
                     },
@@ -792,11 +817,11 @@ class CraftService:
                 db.execute(
                     """INSERT INTO orchestration_leases(
                        id,plan_id,node_id,attempt,profile_id,profile_version,status,claimed_by,
-                       request_json,created_at,updated_at
-                       ) VALUES(?,?,?,?,?,?,'leased',?,?,?,?)""",
+                       request_json,expires_at,heartbeat_at,created_at,updated_at
+                       ) VALUES(?,?,?,?,?,?,'leased',?,?,?,?,?,?)""",
                     (
                         lease_id, plan_id, row["node_id"], attempt, profile["id"], profile["version"],
-                        claimed_by, json.dumps(request, ensure_ascii=False), now, now,
+                        claimed_by, json.dumps(request, ensure_ascii=False), expires_at, now, now, now,
                     ),
                 )
                 db.execute(
@@ -805,6 +830,11 @@ class CraftService:
                 )
                 statuses[row["node_id"]] = "leased"
                 dispatched.append(request)
+                self._append_orchestration_event(
+                    db, plan_id, "lease_dispatched", now, row["node_id"], lease_id,
+                    {"attempt": attempt, "profile_id": profile["id"], "profile_version": profile["version"],
+                     "claimed_by": claimed_by, "expires_at": expires_at},
+                )
             self._refresh_orchestration(db, plan_id, now)
         log_event(self.logger, "orchestration_dispatched", plan_id=plan_id, leases=len(dispatched))
         return {"dispatched": dispatched, "plan": self.orchestration_plan_get(plan_id)}
@@ -816,18 +846,24 @@ class CraftService:
         result: dict[str, Any] | None = None,
         evidence: list[dict[str, Any]] | None = None,
         provenance: str = "agent_reported",
+        claimed_by: str | None = None,
     ) -> dict[str, Any]:
         if verdict not in {"passed", "failed", "blocked"}:
             raise ValueError(f"Unsupported orchestration verdict: {verdict}")
         if provenance not in PROVENANCE:
             raise ValueError(f"Unsupported orchestration provenance: {provenance}")
         now = utc_now()
+        with self.store.connect() as db:
+            existing = db.execute("SELECT plan_id FROM orchestration_leases WHERE id=?", (lease_id,)).fetchone()
+        if not existing:
+            raise ValueError(f"Unknown orchestration lease: {lease_id}")
+        self._commit_expired_leases(existing["plan_id"], now)
         with self.store.transaction() as db:
             lease = db.execute("SELECT * FROM orchestration_leases WHERE id=?", (lease_id,)).fetchone()
-            if not lease:
-                raise ValueError(f"Unknown orchestration lease: {lease_id}")
             if lease["status"] != "leased":
                 raise ValueError(f"Orchestration lease is already closed: {lease_id}")
+            if claimed_by is not None and claimed_by != lease["claimed_by"]:
+                raise ValueError("claimed_by does not own this orchestration lease")
             node = db.execute(
                 "SELECT * FROM orchestration_nodes WHERE plan_id=? AND node_id=?",
                 (lease["plan_id"], lease["node_id"]),
@@ -838,23 +874,32 @@ class CraftService:
             routes = json.loads(node["routes_json"])
             receipt = {"verdict": verdict, "result": result or {}, "evidence": evidence or []}
             db.execute(
-                """UPDATE orchestration_leases SET status='completed',result_json=?,provenance=?,updated_at=?
+                """UPDATE orchestration_leases SET status='completed',result_json=?,provenance=?,
+                   closed_reason='submitted',updated_at=?
                    WHERE id=?""",
                 (json.dumps(receipt, ensure_ascii=False), provenance, now, lease_id),
             )
             if verdict == "passed":
                 node_status = "passed"
-            elif node["attempt"] < len(routes):
+                route_index = node["route_index"]
+            elif node["route_index"] + 1 < len(routes):
                 node_status = "pending"
+                route_index = node["route_index"] + 1
             else:
                 node_status = verdict
+                route_index = node["route_index"]
             db.execute(
-                """UPDATE orchestration_nodes SET status=?,result_json=?,updated_at=?
+                """UPDATE orchestration_nodes SET status=?,route_index=?,result_json=?,updated_at=?
                    WHERE plan_id=? AND node_id=?""",
                 (
-                    node_status, json.dumps(receipt, ensure_ascii=False), now,
+                    node_status, route_index, json.dumps(receipt, ensure_ascii=False), now,
                     lease["plan_id"], lease["node_id"],
                 ),
+            )
+            self._append_orchestration_event(
+                db, lease["plan_id"], "lease_submitted", now, lease["node_id"], lease_id,
+                {"verdict": verdict, "provenance": provenance, "next_status": node_status,
+                 "next_route_index": route_index},
             )
             self._refresh_orchestration(db, lease["plan_id"], now)
             plan_id = lease["plan_id"]
@@ -862,6 +907,120 @@ class CraftService:
             self.logger, "orchestration_submitted", plan_id=plan_id,
             node_id=lease["node_id"], verdict=verdict, provenance=provenance,
         )
+        return self.orchestration_plan_get(plan_id)
+
+    def orchestration_heartbeat(
+        self, lease_id: str, claimed_by: str, extend_seconds: int | None = None
+    ) -> dict[str, Any]:
+        if not claimed_by.strip():
+            raise ValueError("claimed_by must not be empty")
+        if extend_seconds is not None and (
+            isinstance(extend_seconds, bool) or not isinstance(extend_seconds, int)
+            or not 30 <= extend_seconds <= 86400
+        ):
+            raise ValueError("extend_seconds must be between 30 and 86400")
+        now = utc_now()
+        with self.store.connect() as db:
+            existing = db.execute("SELECT plan_id FROM orchestration_leases WHERE id=?", (lease_id,)).fetchone()
+        if not existing:
+            raise ValueError(f"Unknown orchestration lease: {lease_id}")
+        self._commit_expired_leases(existing["plan_id"], now)
+        with self.store.transaction() as db:
+            lease = db.execute("SELECT * FROM orchestration_leases WHERE id=?", (lease_id,)).fetchone()
+            if lease["status"] != "leased":
+                raise ValueError(f"Orchestration lease is already closed: {lease_id}")
+            if claimed_by != lease["claimed_by"]:
+                raise ValueError("claimed_by does not own this orchestration lease")
+            plan = db.execute("SELECT policy_json FROM orchestration_plans WHERE id=?", (lease["plan_id"],)).fetchone()
+            seconds = extend_seconds or json.loads(plan["policy_json"]).get("lease_ttl_seconds", 900)
+            expires_at = self._iso_after(now, seconds)
+            db.execute(
+                "UPDATE orchestration_leases SET heartbeat_at=?,expires_at=?,updated_at=? WHERE id=?",
+                (now, expires_at, now, lease_id),
+            )
+            self._append_orchestration_event(
+                db, lease["plan_id"], "lease_heartbeat", now, lease["node_id"], lease_id,
+                {"claimed_by": claimed_by, "expires_at": expires_at},
+            )
+        return {"lease_id": lease_id, "status": "leased", "expires_at": expires_at}
+
+    def orchestration_reclaim(self, plan_id: str) -> dict[str, Any]:
+        now = utc_now()
+        with self.store.transaction() as db:
+            if not db.execute("SELECT 1 FROM orchestration_plans WHERE id=?", (plan_id,)).fetchone():
+                raise ValueError(f"Unknown orchestration plan: {plan_id}")
+            expired = self._expire_orchestration_leases(db, plan_id, now)
+        return {"expired": expired, "plan": self.orchestration_plan_get(plan_id)}
+
+    def orchestration_plan_control(self, plan_id: str, action: str) -> dict[str, Any]:
+        if action not in {"pause", "resume", "cancel"}:
+            raise ValueError(f"Unsupported orchestration control action: {action}")
+        now = utc_now()
+        with self.store.transaction() as db:
+            plan = db.execute("SELECT * FROM orchestration_plans WHERE id=?", (plan_id,)).fetchone()
+            if not plan:
+                raise ValueError(f"Unknown orchestration plan: {plan_id}")
+            allowed = {"pause": {"running"}, "resume": {"paused"}, "cancel": {"running", "paused"}}
+            if plan["status"] not in allowed[action]:
+                raise ValueError(f"Cannot {action} orchestration plan from status: {plan['status']}")
+            if action == "pause":
+                db.execute("UPDATE orchestration_plans SET status='paused',updated_at=? WHERE id=?", (now, plan_id))
+            elif action == "resume":
+                db.execute("UPDATE orchestration_plans SET status='running',updated_at=? WHERE id=?", (now, plan_id))
+                self._expire_orchestration_leases(db, plan_id, now)
+                self._refresh_orchestration(db, plan_id, now)
+            else:
+                active_leases = db.execute(
+                    "SELECT id,node_id FROM orchestration_leases WHERE plan_id=? AND status='leased'",
+                    (plan_id,),
+                ).fetchall()
+                db.execute(
+                    """UPDATE orchestration_leases SET status='cancelled',closed_reason='plan_cancelled',updated_at=?
+                       WHERE plan_id=? AND status='leased'""", (now, plan_id),
+                )
+                db.execute(
+                    "UPDATE orchestration_nodes SET status='cancelled',updated_at=? WHERE plan_id=? AND status IN ('pending','leased')",
+                    (now, plan_id),
+                )
+                db.execute("UPDATE orchestration_plans SET status='cancelled',updated_at=? WHERE id=?", (now, plan_id))
+                for lease in active_leases:
+                    self._append_orchestration_event(
+                        db, plan_id, "lease_cancelled", now, lease["node_id"], lease["id"]
+                    )
+            event_type = {"pause": "plan_paused", "resume": "plan_resumed", "cancel": "plan_cancelled"}[action]
+            self._append_orchestration_event(db, plan_id, event_type, now)
+        return self.orchestration_plan_get(plan_id)
+
+    def orchestration_node_retry(
+        self, plan_id: str, node_id: str, restart_routes: bool = False
+    ) -> dict[str, Any]:
+        now = utc_now()
+        with self.store.transaction() as db:
+            plan = db.execute("SELECT status FROM orchestration_plans WHERE id=?", (plan_id,)).fetchone()
+            if not plan:
+                raise ValueError(f"Unknown orchestration plan: {plan_id}")
+            if plan["status"] not in {"failed", "paused"}:
+                raise ValueError("Node retry requires a failed or paused orchestration plan")
+            node = db.execute(
+                "SELECT * FROM orchestration_nodes WHERE plan_id=? AND node_id=?", (plan_id, node_id)
+            ).fetchone()
+            if not node:
+                raise ValueError(f"Unknown orchestration node: {node_id}")
+            if node["status"] not in {"failed", "blocked"}:
+                raise ValueError("Only failed or blocked orchestration nodes can be retried")
+            routes = json.loads(node["routes_json"])
+            route_index = 0 if restart_routes else min(node["route_index"], len(routes) - 1)
+            db.execute(
+                "UPDATE orchestration_nodes SET status='pending',route_index=?,result_json='{}',updated_at=? WHERE plan_id=? AND node_id=?",
+                (route_index, now, plan_id, node_id),
+            )
+            self._reset_blocked_descendants(db, plan_id, node_id, now)
+            db.execute("UPDATE orchestration_plans SET status='running',updated_at=? WHERE id=?", (now, plan_id))
+            self._append_orchestration_event(
+                db, plan_id, "node_retried", now, node_id,
+                payload={"restart_routes": restart_routes, "route_index": route_index},
+            )
+            self._refresh_orchestration(db, plan_id, now)
         return self.orchestration_plan_get(plan_id)
 
     @staticmethod
@@ -875,6 +1034,9 @@ class CraftService:
 
     @staticmethod
     def _refresh_orchestration(db: Any, plan_id: str, now: str) -> None:
+        plan = db.execute("SELECT status FROM orchestration_plans WHERE id=?", (plan_id,)).fetchone()
+        if plan and plan["status"] in {"paused", "cancelled"}:
+            return
         changed = True
         while changed:
             changed = False
@@ -900,6 +1062,80 @@ class CraftService:
             "UPDATE orchestration_plans SET status=?,updated_at=? WHERE id=?",
             (status, now, plan_id),
         )
+
+    @staticmethod
+    def _iso_after(now: str, seconds: int) -> str:
+        parsed = datetime.fromisoformat(now)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return (parsed + timedelta(seconds=seconds)).isoformat()
+
+    @staticmethod
+    def _append_orchestration_event(
+        db: Any, plan_id: str, event_type: str, created_at: str,
+        node_id: str | None = None, lease_id: str | None = None,
+        payload: dict[str, Any] | None = None,
+    ) -> None:
+        sequence = db.execute(
+            "SELECT COALESCE(MAX(sequence),0)+1 FROM orchestration_events WHERE plan_id=?", (plan_id,)
+        ).fetchone()[0]
+        db.execute(
+            """INSERT INTO orchestration_events(
+               plan_id,sequence,event_type,node_id,lease_id,payload_json,created_at
+               ) VALUES(?,?,?,?,?,?,?)""",
+            (plan_id, sequence, event_type, node_id, lease_id,
+             json.dumps(payload or {}, ensure_ascii=False), created_at),
+        )
+
+    @classmethod
+    def _expire_orchestration_leases(cls, db: Any, plan_id: str, now: str) -> int:
+        leases = db.execute(
+            """SELECT * FROM orchestration_leases
+               WHERE plan_id=? AND status='leased' AND expires_at IS NOT NULL AND expires_at<=?""",
+            (plan_id, now),
+        ).fetchall()
+        for lease in leases:
+            db.execute(
+                """UPDATE orchestration_leases SET status='expired',closed_reason='ttl_expired',updated_at=?
+                   WHERE id=? AND status='leased'""", (now, lease["id"]),
+            )
+            db.execute(
+                """UPDATE orchestration_nodes SET status='pending',updated_at=?
+                   WHERE plan_id=? AND node_id=? AND status='leased'""",
+                (now, plan_id, lease["node_id"]),
+            )
+            cls._append_orchestration_event(
+                db, plan_id, "lease_expired", now, lease["node_id"], lease["id"],
+                {"claimed_by": lease["claimed_by"], "attempt": lease["attempt"]},
+            )
+        if leases:
+            cls._refresh_orchestration(db, plan_id, now)
+        return len(leases)
+
+    def _commit_expired_leases(self, plan_id: str, now: str) -> int:
+        with self.store.transaction() as db:
+            return self._expire_orchestration_leases(db, plan_id, now)
+
+    @staticmethod
+    def _reset_blocked_descendants(db: Any, plan_id: str, node_id: str, now: str) -> None:
+        frontier = {node_id}
+        while True:
+            rows = db.execute(
+                "SELECT node_id,depends_on_json,status FROM orchestration_nodes WHERE plan_id=?",
+                (plan_id,),
+            ).fetchall()
+            descendants = {
+                row["node_id"] for row in rows
+                if row["status"] == "blocked" and frontier.intersection(json.loads(row["depends_on_json"]))
+            }
+            if not descendants:
+                return
+            for descendant in descendants:
+                db.execute(
+                    "UPDATE orchestration_nodes SET status='pending',result_json='{}',updated_at=? WHERE plan_id=? AND node_id=?",
+                    (now, plan_id, descendant),
+                )
+            frontier = descendants
 
     def workflow_save(
         self,

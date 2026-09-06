@@ -58,10 +58,12 @@ Evaluation should inform promotion from `candidate` to `tested` or `reusable`, b
 
 Each Plan Node declares a role, objective, dependencies, side effect, and ordered Agent Profile candidates. Dispatch leases only nodes whose dependencies passed, respects `max_concurrency`, and prevents duplicate claims. A failed submission returns the node to pending when another candidate exists; terminal failures propagate `blocked` to downstream nodes.
 
+Leases have an owner and TTL and can be renewed with a heartbeat. An expired lease returns its node to the same Profile route, while the old lease can no longer submit. Plans support pause, resume, and cancel; failed nodes support explicit retry. Every dispatch, heartbeat, expiry, submission, and control action is recorded in a monotonic immutable event stream.
+
 An MCP server cannot directly invoke Codex `spawn_agent` or Claude internal task APIs. A Codex/Claude Skill or another host reads the Lease Request, invokes its native execution surface, and submits provenance-bearing results. Future host adapters can automate that translation without bypassing host sandbox, approval, or concurrency controls.
 
 Set `CRAFT_LOG_LEVEL=DEBUG|INFO|WARNING|ERROR` to control log verbosity.
 
 ## Next steps
 
-Planned work includes lease TTL/heartbeat and crash recovery, Codex/Claude/API host adapters, budget and cost records, automatic Eval Runners and Graders, first-class artifact/evidence lineage, workspace snapshots, idempotent external operations and compensation, remote hubs, and optional vector retrieval. None should bind Craft to one model provider.
+Planned work includes Codex/Claude/API host adapters, token/time/cost budgets, orchestration-to-Eval integration, automatic Eval Runners and Graders, first-class artifact/evidence lineage, workspace snapshots, idempotent external operations and compensation, remote hubs, and optional vector retrieval. None should bind Craft to one model provider.
