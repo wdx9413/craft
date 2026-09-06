@@ -36,6 +36,10 @@ Craft incrementally indexes only user-selected Skill sources. It retrieves a sma
 
 Program verification, model judgment, and human approval are all useful, but their provenance stays distinct. A model conclusion never silently becomes deterministic proof.
 
+### Long tasks advance through durable state, not unlimited context
+
+Long tasks drift when sessions end, context is compacted, or repeated repairs preserve bad assumptions. Craft stores goals, progress, decisions, evidence, artifact references, and pending work outside the conversation. Bounded loops stop repeated failure, and a new Session can branch from the latest trusted checkpoint. Work can continue across sessions or clients without replaying the entire history into context.
+
 ### Workflows grow from real work
 
 Craft does not require a vendor to prebuild every industry template. Successful task histories can be abstracted into workflow candidates and promoted through repeated validation.
@@ -124,4 +128,4 @@ craft_workflow_plan → craft_workflow_start → craft_workflow_submit
 
 ## Current boundary
 
-Craft v0.1 is a local technical preview. Remote Skill Hub synchronization, vector retrieval, a graphical interface, workspace snapshots, and parallel-agent scheduling are not implemented yet. SQLite retrieval is the default; embedding providers will remain optional.
+Craft v0.1 is a local technical preview. It addresses continuity, verification, and recovery for long tasks; it is not an unattended background execution platform. Remote Skill Hub synchronization, vector retrieval, a graphical interface, workspace snapshots, scheduled/background execution, and parallel-agent leases are not implemented yet. SQLite retrieval is the default; embedding providers will remain optional.

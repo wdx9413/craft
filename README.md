@@ -36,6 +36,10 @@ Craft 只扫描用户明确注册的 Skill 来源，并维护本地增量索引�
 
 结果可以由程序、模型或人验收，但来源必须明确。测试通过属于 `program_verified`，模型判断属于 `model_judged`，人工批准属于 `human_approved`，它们不能互相冒充。
 
+### 长任务靠持久状态推进，不靠无限上下文
+
+长任务容易在会话中断、上下文压缩或多次修复后丢失目标并逐渐跑偏。Craft 把目标、进度、决策、Evidence、Artifact 引用和待办保存到会话之外；通过有界循环尽早停止重复失败，并从最近的可信 checkpoint 派生新 Session。这样 Agent 可以换会话、换客户端后继续，而不必把全部历史重新塞回上下文。
+
 ### Workflow 从真实工作中生长
 
 Craft 不要求产品方预先写完所有行业模板。用户完成真实任务后，可以把有效步骤、约束、反馈和验收条件抽象成候选 Workflow，再经过重复运行逐步提升为可复用能力。
@@ -164,4 +168,4 @@ craft_workflow_plan
 
 ## 当前边界
 
-Craft v0.1 仍是本地技术预览版，暂不包含远程 Skill Hub 同步、向量检索、图形界面、Workspace 文件快照和并行 Agent 调度。SQLite 是默认检索方式，Embedding Provider 将保持可选。
+Craft v0.1 仍是本地技术预览版，解决的是长任务的状态接续、验证与恢复，不是无人值守的后台执行平台。当前暂不包含远程 Skill Hub 同步、向量检索、图形界面、Workspace 文件快照、定时/后台调度和并行 Agent 租约。SQLite 是默认检索方式，Embedding Provider 将保持可选。
