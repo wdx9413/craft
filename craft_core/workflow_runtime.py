@@ -68,7 +68,9 @@ def redact_output(value: str, secrets: list[str] | None = None) -> str:
     return result
 
 
-def command_step(step: dict[str, Any], root: Path) -> dict[str, Any]:
+def command_step(
+    step: dict[str, Any], root: Path, runtime_env: dict[str, str] | None = None
+) -> dict[str, Any]:
     command = step.get("command")
     if not isinstance(command, list) or not command or not all(isinstance(item, str) for item in command):
         raise ValueError("Command steps require a non-empty string array in command")
@@ -77,6 +79,7 @@ def command_step(step: dict[str, Any], root: Path) -> dict[str, Any]:
         raise ValueError(f"Workflow command cwd does not exist: {cwd}")
     timeout = max(1, min(int(step.get("timeout_seconds", 300)), 3600))
     environment = os.environ.copy()
+    environment.update(runtime_env or {})
     secrets: list[str] = []
     configured_environment = step.get("env", {})
     if configured_environment is None:
@@ -227,7 +230,10 @@ def assertion_step(step: dict[str, Any], root: Path, results: dict[str, dict[str
     raise ValueError(f"Unsupported assertion evaluator: {evaluator}")
 
 
-def execute_steps(steps: list[dict[str, Any]], root: Path) -> list[dict[str, Any]]:
+def execute_steps(
+    steps: list[dict[str, Any]], root: Path,
+    runtime_env: dict[str, str] | None = None,
+) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
     by_id: dict[str, dict[str, Any]] = {}
     for index, step in enumerate(steps):
@@ -235,7 +241,7 @@ def execute_steps(steps: list[dict[str, Any]], root: Path) -> list[dict[str, Any
         kind = step.get("type")
         try:
             if kind == "command":
-                detail = command_step(step, root)
+                detail = command_step(step, root, runtime_env)
             elif kind == "coverage_gate":
                 detail = coverage_gate(step, root)
             elif kind == "assertion":

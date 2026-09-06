@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .catalog import Catalog, utc_now
+from .host_adapters import probe_adapters
 from .log import get_logger, log_event
 from .multi_agent import PROVENANCE, normalize_orchestration_nodes, plan_status
 from .orchestrator import (
@@ -44,12 +45,25 @@ class CraftService:
                 for table in (
                     "sources", "capabilities", "tasks", "workflows",
                     "workflow_runs", "workflow_sessions", "workflow_checkpoints",
+                    "workflow_executions",
                     "evaluation_suites", "evaluation_runs", "evaluation_results",
                     "agent_profiles", "orchestration_plans", "orchestration_leases",
                     "orchestration_events",
                 )
             }
         return {"version": "0.1.0", "data_root": str(self.store.root), "counts": counts}
+
+    def host_adapter_probe(self, host: str | None = None) -> dict[str, Any]:
+        return probe_adapters(host)
+
+    def store_backup(self, destination: str | None = None) -> dict[str, str]:
+        return self.store.backup(Path(destination) if destination else None)
+
+    def store_doctor(self) -> dict[str, object]:
+        return self.store.doctor()
+
+    def store_restore(self, source: str, confirm: bool = False) -> dict[str, str]:
+        return self.store.restore(Path(source), confirm)
 
     def source_add(self, path: str, label: str | None = None, scan: bool = True) -> dict[str, Any]:
         source = self.catalog.add_source(path, label)
@@ -1420,13 +1434,13 @@ class CraftService:
 
     def workflow_continue(
         self, session_id: str, allow_execution: bool = False,
-        approved_side_effects: list[str] | None = None,
+        approved_side_effects: list[str] | None = None, claimed_by: str = "local-host",
     ) -> dict[str, Any]:
         session = self.workflow_session_get(session_id)
         if session["status"] not in {"running", "needs_execution_approval"}:
             raise ValueError(f"Workflow session cannot continue from status: {session['status']}")
         return self._workflow_advance(
-            session_id, approved_effects(allow_execution, approved_side_effects)
+            session_id, approved_effects(allow_execution, approved_side_effects), claimed_by
         )
 
     def workflow_submit(
@@ -1472,6 +1486,11 @@ class CraftService:
             events = db.execute(
                 "SELECT * FROM workflow_events WHERE session_id=? ORDER BY sequence", (session_id,)
             ).fetchall()
+            execution = None
+            if row["current_execution_id"]:
+                execution = db.execute(
+                    "SELECT * FROM workflow_executions WHERE id=?", (row["current_execution_id"],)
+                ).fetchone()
         result = dict(row)
         result["inputs"] = json.loads(result.pop("inputs_json"))
         result["context"] = json.loads(result.pop("context_json"))
@@ -1480,6 +1499,9 @@ class CraftService:
         ]
         for event in result["events"]:
             event.pop("result_json")
+        if execution:
+            result["execution"] = dict(execution)
+            result["execution"]["result"] = json.loads(result["execution"].pop("result_json"))
         if result["status"] in {*EXTERNAL_STATES.values(), "needs_execution_approval"}:
             plan = self.workflow_plan(
                 result["workflow_id"], result["project_root"], result["workflow_version"], result["inputs"]
@@ -1497,7 +1519,8 @@ class CraftService:
         return result
 
     def _workflow_advance(
-        self, session_id: str, allowed_effects: set[str] | bool
+        self, session_id: str, allowed_effects: set[str] | bool,
+        claimed_by: str = "local-host",
     ) -> dict[str, Any]:
         if isinstance(allowed_effects, bool):
             allowed_effects = approved_effects(allowed_effects, None)
@@ -1548,14 +1571,23 @@ class CraftService:
                     step_id=step["id"], step_type=kind, level=logging.DEBUG,
                 )
                 return self.workflow_session_get(session_id)
-            detail = execute_steps([step], Path(session["project_root"]))[0]
+            execution = self._claim_workflow_execution(session, step, claimed_by)
+            if execution is None:
+                current = self.workflow_session_get(session_id)
+                if current["status"] == "executing":
+                    raise ValueError("Workflow step is already executing")
+                continue
+            detail = execute_steps(
+                [step], Path(session["project_root"]),
+                {"CRAFT_IDEMPOTENCY_KEY": execution["idempotency_key"]},
+            )[0]
             verdict = "passed" if detail["passed"] else "failed"
             context = dict(session["context"])
             context[step["id"]] = detail
             cursor, terminal = next_cursor(plan["steps"], session["cursor"], verdict)
             self._record_session_event(
                 session, step, verdict, "program_verified", detail,
-                context, cursor, terminal or "running",
+                context, cursor, terminal or "running", execution["id"],
             )
             if terminal:
                 return self.workflow_session_get(session_id)
@@ -1570,10 +1602,19 @@ class CraftService:
         context: dict[str, Any],
         cursor: int,
         status: str,
+        execution_id: str | None = None,
     ) -> None:
         sequence = session["transition_count"] + 1
         now = utc_now()
         with self.store.transaction() as db:
+            if execution_id:
+                updated = db.execute(
+                    """UPDATE workflow_executions SET status='completed',result_json=?,updated_at=?
+                       WHERE id=? AND session_id=? AND status IN ('executing','result_unknown')""",
+                    (json.dumps(result, ensure_ascii=False), now, execution_id, session["id"]),
+                )
+                if updated.rowcount != 1:
+                    raise ValueError("Workflow execution lease is no longer active")
             db.execute(
                 """INSERT INTO workflow_events(
                    session_id,sequence,step_id,step_type,verdict,provenance,result_json,created_at)
@@ -1583,7 +1624,7 @@ class CraftService:
             )
             db.execute(
                 """UPDATE workflow_sessions SET context_json=?,cursor=?,status=?,
-                   transition_count=?,updated_at=? WHERE id=?""",
+                   transition_count=?,current_execution_id=NULL,updated_at=? WHERE id=?""",
                 (json.dumps(context, ensure_ascii=False), cursor, status, sequence, now, session["id"]),
             )
         log_event(
@@ -1595,6 +1636,120 @@ class CraftService:
             self._create_workflow_checkpoint(
                 session, sequence, context, cursor, provenance, f"trusted:{step['id']}"
             )
+
+    def _claim_workflow_execution(
+        self, session: dict[str, Any], step: dict[str, Any], owner: str
+    ) -> dict[str, Any] | None:
+        owner = owner.strip()
+        if not owner:
+            raise ValueError("claimed_by must not be empty")
+        transition_number = session["transition_count"] + 1
+        stable = f"{session['id']}:{transition_number}:{step['id']}"
+        idempotency_key = hashlib.sha256(stable.encode("utf-8")).hexdigest()
+        timeout = max(1, min(int(step.get("timeout_seconds", 300)), 3600))
+        ttl = max(timeout + 60, 120)
+        now_dt = datetime.now(timezone.utc)
+        now = now_dt.isoformat()
+        execution_id = new_id("execution")
+        with self.store.transaction() as db:
+            current = db.execute(
+                "SELECT status,cursor,transition_count,current_execution_id FROM workflow_sessions WHERE id=?",
+                (session["id"],),
+            ).fetchone()
+            if (
+                not current or current["status"] not in {"running", "needs_execution_approval"}
+                or current["cursor"] != session["cursor"]
+                or current["transition_count"] != session["transition_count"]
+                or current["current_execution_id"] is not None
+            ):
+                return None
+            attempt = db.execute(
+                """SELECT COUNT(*) FROM workflow_executions
+                   WHERE session_id=? AND transition_number=?""",
+                (session["id"], transition_number),
+            ).fetchone()[0] + 1
+            expires_at = (now_dt + timedelta(seconds=ttl)).isoformat()
+            db.execute(
+                """INSERT INTO workflow_executions(
+                   id,session_id,step_id,step_type,transition_number,attempt,idempotency_key,
+                   owner,side_effect,status,expires_at,created_at,updated_at)
+                   VALUES(?,?,?,?,?,?,?,?,?,'executing',?,?,?)""",
+                (execution_id, session["id"], step["id"], step["type"], transition_number,
+                 attempt, idempotency_key, owner, step["side_effect"], expires_at, now, now),
+            )
+            db.execute(
+                """UPDATE workflow_sessions SET status='executing',current_execution_id=?,updated_at=?
+                   WHERE id=?""",
+                (execution_id, now, session["id"]),
+            )
+        return {
+            "id": execution_id, "attempt": attempt, "idempotency_key": idempotency_key,
+            "owner": owner, "expires_at": expires_at,
+        }
+
+    def workflow_execution_reclaim(self, session_id: str | None = None) -> dict[str, Any]:
+        now = utc_now()
+        where = "AND e.session_id=?" if session_id else ""
+        params: tuple[Any, ...] = (now, session_id) if session_id else (now,)
+        with self.store.transaction() as db:
+            rows = db.execute(
+                f"""SELECT e.id,e.session_id FROM workflow_executions e
+                    JOIN workflow_sessions s ON s.current_execution_id=e.id
+                    WHERE e.status='executing' AND e.expires_at<=? {where}""",
+                params,
+            ).fetchall()
+            for row in rows:
+                db.execute(
+                    "UPDATE workflow_executions SET status='result_unknown',updated_at=? WHERE id=?",
+                    (now, row["id"]),
+                )
+                db.execute(
+                    "UPDATE workflow_sessions SET status='result_unknown',updated_at=? WHERE id=?",
+                    (now, row["session_id"]),
+                )
+        return {"reclaimed": [row["id"] for row in rows], "count": len(rows)}
+
+    def workflow_execution_reconcile(
+        self, session_id: str, resolution: str, result: dict[str, Any] | None = None,
+        approved_retry: bool = False, reconciled_by: str = "human",
+    ) -> dict[str, Any]:
+        session = self.workflow_session_get(session_id)
+        if session["status"] != "result_unknown" or "execution" not in session:
+            raise ValueError("Workflow session has no unknown execution to reconcile")
+        execution = session["execution"]
+        if resolution == "retry":
+            if execution["side_effect"] != "read_only" and not approved_retry:
+                raise ValueError("Retrying a side-effecting step requires approved_retry=true")
+            now = utc_now()
+            with self.store.transaction() as db:
+                db.execute(
+                    "UPDATE workflow_executions SET status='retry_approved',updated_at=? WHERE id=?",
+                    (now, execution["id"]),
+                )
+                db.execute(
+                    """UPDATE workflow_sessions SET status='running',current_execution_id=NULL,
+                       updated_at=? WHERE id=?""",
+                    (now, session_id),
+                )
+            return self.workflow_session_get(session_id)
+        if resolution not in {"passed", "failed"}:
+            raise ValueError("resolution must be passed, failed, or retry")
+        detail = dict(result or {})
+        detail.update({"passed": resolution == "passed", "reconciled_by": reconciled_by})
+        plan = self.workflow_plan(
+            session["workflow_id"], session["project_root"], session["workflow_version"], session["inputs"]
+        )
+        step = plan["steps"][session["cursor"]]
+        context = dict(session["context"])
+        context[step["id"]] = detail
+        cursor, terminal = next_cursor(plan["steps"], session["cursor"], resolution)
+        self._record_session_event(
+            session, step, resolution, "human_reconciled", detail, context, cursor,
+            terminal or "running", execution["id"],
+        )
+        if terminal:
+            return self.workflow_session_get(session_id)
+        return self._workflow_advance(session_id, {"read_only"}, reconciled_by)
 
     def workflow_checkpoint_list(self, session_id: str) -> dict[str, Any]:
         self.workflow_session_get(session_id)

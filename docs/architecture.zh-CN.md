@@ -103,4 +103,25 @@ MCP stdout 只输出 JSON-RPC。运行日志写到 stderr，默认 INFO；逐节
 
 ## 后续演进
 
-下一阶段包括 Codex/Claude/API Host Adapter、token/时间/成本预算、编排结果接入 Eval、自动 Eval Runner 与 Grader 适配器、Artifact/Evidence 一等实体和 lineage、Workspace 快照、幂等外部操作与补偿、远程 Hub 同步和可选向量检索。这些能力不应绑定某一家模型。
+下一阶段包括真实宿主兼容认证、token/时间/成本预算、编排结果接入 Eval、自动 Eval Runner 与 Grader 适配器、Artifact/Evidence 一等实体和 lineage、Workspace 快照、外部操作补偿、远程 Hub 同步和可选向量检索。这些能力不应绑定某一家模型。
+
+## 可靠执行与宿主适配（v0.1）
+
+混合 Workflow 的确定性节点在执行前会原子创建 `workflow_execution` Lease，
+Session 同时进入 `executing`。命令会获得稳定的 `CRAFT_IDEMPOTENCY_KEY`，下游
+支持幂等时应使用该值去重。若宿主在命令开始后、回执落库前退出，Lease 过期后
+进入 `result_unknown`，而不是被武断标记为失败或自动重跑。人工或宿主必须根据
+外部证据确认成功、确认失败，或者明确批准重试有副作用的步骤。
+
+SQLite 存储现在支持在线 backup、带确认开关的 restore，以及恢复前自动保留的
+recovery backup。`store-doctor` 检查 SQLite 完整性、外键、Workflow 执行引用和
+能力 FTS 索引漂移。
+
+Codex 与 Claude Code 使用各自的原生插件清单并共享 Craft MCP；Claude 仓库同时
+提供 Marketplace 清单。DeepSeek Harness 使用独立的 Cordis bundle，位于
+`adapters/deepseek-harness`，它把 DSH 工具调用翻译为 Craft MCP 调用，不把
+Python Core 重写成 TypeScript。`host-adapter-probe` 会区分“已声明支持”与“本机
+可执行程序实际存在”。
+
+当前仍需在安装了 Claude Code、Node.js 和 DeepSeek Harness 的环境做真实端到端
+认证；没有完成的宿主实测不能只凭静态清单宣称通过。

@@ -1,0 +1,20 @@
+{
+  "name": "craft-marketplace",
+  "owner": {
+    "name": "wdx9413"
+  },
+  "metadata": {
+    "description": "Craft capability, workflow, evaluation, and orchestration tools"
+  },
+  "plugins": [
+    {
+      "name": "craft",
+      "source": {
+        "source": "github",
+        "repo": "wdx9413/craft",
+        "ref": "main"
+      },
+      "description": "Discover, orchestrate, evaluate, and reuse Agent capabilities."
+    }
+  ]
+}

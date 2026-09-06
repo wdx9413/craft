@@ -44,7 +44,13 @@ Every node declares `read_only`, `local_write`, `external_write`, or `destructiv
 
 Provenance distinguishes `agent_reported`, `model_judged`, `program_verified`, and `human_approved`. Program success and human approval create trusted checkpoints. Restore creates a new session branch and never rewrites failed history.
 
-Transition and attempt limits provide fail-fast behavior. MCP stdout remains reserved for JSON-RPC; concise metadata-only logs go to stderr. Runtime state defaults to SQLite under `~/.craft_data`.
+Before a deterministic Session node executes, Craft atomically records a
+`workflow_execution` lease and marks the Session `executing`. The command
+receives a stable `CRAFT_IDEMPOTENCY_KEY`. If the host disappears before the
+receipt commits, lease expiry produces `result_unknown`; an operator must
+reconcile observed success/failure or explicitly approve retrying side effects.
+
+Transition and attempt limits provide fail-fast behavior. MCP stdout remains reserved for JSON-RPC; concise metadata-only logs go to stderr. Runtime state defaults to SQLite under `~/.craft_data`. The store supports online SQLite backup, confirmation-gated restore with a pre-restore recovery copy, and a doctor covering integrity, foreign keys, execution links, and FTS drift.
 
 ## Evaluation layers
 
@@ -72,6 +78,18 @@ Set `CRAFT_LOG_LEVEL=DEBUG|INFO|WARNING|ERROR` to control log verbosity.
 - A `needs_repair` Run is atomically marked running before commands execute, preventing two clients from claiming the same repair attempt.
 - Eval run state, Case identity, and duplicate-result checks occur in one write transaction. Weights and scores must be finite, rejecting NaN and Infinity.
 
+## Host integration
+
+Codex and Claude Code use native plugin manifests plus the common MCP server.
+Claude also has a repository marketplace catalog. The DeepSeek Harness adapter
+is an isolated Cordis bundle under `adapters/deepseek-harness`; it translates a
+DSH tool call to Craft MCP without rewriting the Python core. Adapter probing
+reports declared capabilities separately from executable availability.
+
 ## Next steps
 
-Planned work includes Codex/Claude/API host adapters, token/time/cost budgets, orchestration-to-Eval integration, automatic Eval Runners and Graders, first-class artifact/evidence lineage, workspace snapshots, idempotent external operations and compensation, remote hubs, and optional vector retrieval. None should bind Craft to one model provider.
+Planned work includes real Codex/Claude/DSH execution-loop certification,
+token/time/cost budgets, orchestration-to-Eval integration, automatic Eval
+Runners and Graders, first-class artifact/evidence lineage, workspace snapshots,
+external compensation, remote hubs, and optional vector retrieval. None should
+bind Craft to one model provider.

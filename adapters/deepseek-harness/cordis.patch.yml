@@ -1,0 +1,3 @@
+- insert:
+    - id: craft-adapter
+      name: dsh-craft-adapter

@@ -8,7 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import closing, redirect_stdout
 from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
@@ -16,6 +16,7 @@ from unittest.mock import patch
 from craft_core.catalog import iter_skill_files, parse_skill, path_identity, stable_id
 from craft_core.cli import main as cli_main
 from craft_core.installer import install_plugin, main as installer_main, mcp_config, resolved_python
+from craft_core.host_adapters import probe_adapters
 from craft_core.log import get_logger, log_event
 from craft_core.mcp import McpServer, main as mcp_main
 from craft_core.multi_agent import normalize_orchestration_nodes, plan_status
@@ -844,6 +845,27 @@ class CraftServiceTests(unittest.TestCase):
             return json.loads(output.getvalue())
 
         self.assertEqual(run_cli("info")["version"], "0.1.0")
+        self.assertTrue(run_cli("host-adapter-probe", "--host", "generic-mcp")["available"])
+        self.assertTrue(run_cli("store-doctor")["healthy"])
+        cli_backup = run_cli("store-backup", "--destination", str(self.root / "cli-backup.db"))
+        self.assertTrue(Path(cli_backup["backup"]).is_file())
+        with patch.object(self.service, "store_restore", return_value={"database": "restored"}):
+            self.assertEqual(
+                run_cli("store-restore", cli_backup["backup"], "--confirm")["database"],
+                "restored",
+            )
+        self.assertEqual(run_cli("workflow-execution-reclaim")["count"], 0)
+        with patch.object(
+            self.service, "workflow_execution_reconcile", return_value={"status": "passed"}
+        ):
+            self.assertEqual(
+                run_cli(
+                    "workflow-execution-reconcile", "session", "passed",
+                    "--result-json", '{"ok":true}', "--approved-retry",
+                    "--reconciled-by", "cli",
+                )["status"],
+                "passed",
+            )
         source = run_cli("add-source", str(library), "--label", "cli")
         source_id = source["id"]
         self.assertEqual(run_cli("list-sources")["sources"][0]["label"], "cli")
@@ -957,6 +979,9 @@ class CraftServiceTests(unittest.TestCase):
         self.assertIn("craft_orchestration_plan_list", names)
         self.assertIn("craft_orchestration_heartbeat", names)
         self.assertIn("craft_orchestration_plan_control", names)
+        self.assertIn("craft_host_adapter_probe", names)
+        self.assertIn("craft_store_doctor", names)
+        self.assertIn("craft_workflow_execution_reconcile", names)
 
     def test_mcp_protocol_errors_and_tool_validation(self) -> None:
         server = McpServer(self.service)
@@ -1087,6 +1112,133 @@ class CatalogUtilityTests(unittest.TestCase):
 
 
 class StoreMigrationTests(unittest.TestCase):
+    def test_store_backup_restore_and_doctor(self) -> None:
+        with tempfile.TemporaryDirectory(dir=TEST_TMP_ROOT) as temp:
+            root = Path(temp) / "data"
+            store = CraftStore(root)
+            with store.transaction() as db:
+                db.execute("INSERT INTO meta(key,value) VALUES('sample','before')")
+            backup = store.backup()
+            self.assertTrue(Path(backup["backup"]).is_file())
+            custom = store.backup(Path(temp) / "custom.db")
+            self.assertTrue(Path(custom["backup"]).is_file())
+            with self.assertRaisesRegex(ValueError, "differ"):
+                store.backup(store.db_path)
+            with store.transaction() as db:
+                db.execute("UPDATE meta SET value='after' WHERE key='sample'")
+            with self.assertRaisesRegex(ValueError, "confirm=true"):
+                store.restore(Path(backup["backup"]))
+            with self.assertRaisesRegex(ValueError, "separate"):
+                store.restore(root / "missing.db", True)
+            with self.assertRaisesRegex(ValueError, "separate"):
+                store.restore(store.db_path, True)
+            corrupt = Path(temp) / "corrupt.db"
+            corrupt.write_text("not sqlite", encoding="utf-8")
+            with self.assertRaises(sqlite3.DatabaseError):
+                store.restore(corrupt, True)
+            restored = store.restore(Path(backup["backup"]), True)
+            self.assertTrue(Path(restored["recovery_backup"]).is_file())
+            with store.connect() as db:
+                self.assertEqual(db.execute("SELECT value FROM meta WHERE key='sample'").fetchone()[0], "before")
+            self.assertTrue(store.doctor()["healthy"])
+            service_backup = CraftService(store).store_backup(str(Path(temp) / "service.db"))
+            self.assertEqual(
+                CraftService(store).store_restore(service_backup["backup"], True)["source"],
+                service_backup["backup"],
+            )
+
+            with closing(sqlite3.connect(store.db_path)) as db:
+                db.execute("PRAGMA foreign_keys=OFF")
+                db.execute(
+                    """INSERT INTO workflow_sessions(id,workflow_id,workflow_version,project_root,
+                       inputs_json,context_json,cursor,status,max_transitions,current_execution_id,
+                       created_at,updated_at) VALUES('s','missing',1,'.','{}','{}',0,'executing',1,
+                       'missing','now','now')"""
+                )
+                db.execute("DELETE FROM capability_fts")
+                db.execute(
+                    """INSERT INTO capabilities(id,source_id,kind,name,description,version,path,
+                       relative_path,digest,metadata_json,body,updated_at)
+                       VALUES('orphan','missing','skill','orphan','','1','x','x','d','{}','','now')"""
+                )
+                db.commit()
+            unhealthy = store.doctor()
+            self.assertFalse(unhealthy["healthy"])
+            checks = {item["check"] for item in unhealthy["issues"]}
+            self.assertIn("foreign_keys", checks)
+            self.assertIn("capability_fts", checks)
+            with store.transaction() as db:
+                db.execute("UPDATE meta SET value='like' WHERE key='fts'")
+            self.assertFalse(store.doctor()["healthy"])
+
+            class FakeResult:
+                def __init__(self, rows):  # type: ignore[no-untyped-def]
+                    self.rows = rows
+                def fetchall(self):  # type: ignore[no-untyped-def]
+                    return self.rows
+                def fetchone(self):  # type: ignore[no-untyped-def]
+                    return self.rows[0] if self.rows else None
+
+            class FakeDoctorDb:
+                def __enter__(self):  # type: ignore[no-untyped-def]
+                    return self
+                def __exit__(self, *args):  # type: ignore[no-untyped-def]
+                    return None
+                def execute(self, sql):  # type: ignore[no-untyped-def]
+                    if "quick_check" in sql:
+                        return FakeResult([("damaged",)])
+                    if "foreign_key_check" in sql:
+                        return FakeResult([])
+                    if "LEFT JOIN" in sql:
+                        return FakeResult([(0,)])
+                    return FakeResult([])
+
+            with patch.object(store, "connect", return_value=FakeDoctorDb()):
+                diagnosis = store.doctor()
+            self.assertEqual(diagnosis["issues"][0]["check"], "quick_check")
+
+            class FakeCandidate:
+                def execute(self, sql):  # type: ignore[no-untyped-def]
+                    return FakeResult([("damaged",)])
+                def close(self) -> None:
+                    pass
+
+            with patch("craft_core.store.sqlite3.connect", return_value=FakeCandidate()):
+                with self.assertRaisesRegex(ValueError, "failed SQLite quick_check"):
+                    store.restore(Path(backup["backup"]), True)
+
+    def test_restore_failure_recovers_previous_database(self) -> None:
+        with tempfile.TemporaryDirectory(dir=TEST_TMP_ROOT) as temp:
+            store = CraftStore(Path(temp) / "data")
+            source = Path(store.backup(Path(temp) / "source.db")["backup"])
+            original_initialize = store.initialize
+            calls = iter([RuntimeError("migration failed"), None])
+
+            def fail_once() -> None:
+                failure = next(calls)
+                if failure:
+                    raise failure
+                original_initialize()
+
+            with patch.object(store, "initialize", side_effect=fail_once):
+                with self.assertRaisesRegex(RuntimeError, "migration failed"):
+                    store.restore(source, True)
+            self.assertTrue(store.doctor()["healthy"])
+
+            real_replace = Path.replace
+            failed = False
+            def fail_staged(path, target):  # type: ignore[no-untyped-def]
+                nonlocal failed
+                if not failed and path.name.startswith(".restore-"):
+                    failed = True
+                    raise PermissionError("replace failed")
+                return real_replace(path, target)
+
+            with patch.object(Path, "replace", new=fail_staged):
+                with self.assertRaisesRegex(PermissionError, "replace failed"):
+                    store.restore(source, True)
+            self.assertTrue(store.doctor()["healthy"])
+
     def test_v2_unique_path_schema_is_migrated(self) -> None:
         with tempfile.TemporaryDirectory(dir=TEST_TMP_ROOT) as temp:
             root = Path(temp)
@@ -1170,8 +1322,9 @@ class StoreMigrationTests(unittest.TestCase):
                     row["name"] for row in migrated.execute("PRAGMA table_info(capabilities)")
                 }
             self.assertNotIn("path TEXT NOT NULL UNIQUE", sql)
-            self.assertEqual(version, "10")
+            self.assertEqual(version, "11")
             self.assertIn("restored_from_checkpoint", session_columns)
+            self.assertIn("current_execution_id", session_columns)
             self.assertEqual(route_indexes, [2, 1])
             self.assertTrue({"expires_at", "heartbeat_at", "closed_reason"}.issubset(lease_columns))
             self.assertIn("scan_generation", source_columns)
@@ -1258,6 +1411,16 @@ class CrossPlatformInstallTests(unittest.TestCase):
             server["args"],
             ["--from", "craft-agent-harness==0.1.0", "craft-mcp"],
         )
+        claude_marketplace = json.loads(
+            (plugin_root / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(claude_marketplace["plugins"][0]["source"]["repo"], "wdx9413/craft")
+        dsh = json.loads(
+            (plugin_root / "adapters" / "deepseek-harness" / "package.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(dsh["dsh"]["bundle"]["patch"], "./cordis.patch.yml")
+        root_dsh = json.loads((plugin_root / "package.json").read_text(encoding="utf-8"))
+        self.assertEqual(root_dsh["main"], "adapters/deepseek-harness/index.js")
 
     def test_installer_generates_absolute_python_mcp_command(self) -> None:
         plugin_root = Path(__file__).resolve().parents[1]
@@ -1269,6 +1432,7 @@ class CrossPlatformInstallTests(unittest.TestCase):
             self.assertEqual(result["plugin_root"], str(target.resolve()))
             self.assertTrue((target / ".codex-plugin" / "plugin.json").is_file())
             self.assertTrue((target / ".claude-plugin" / "plugin.json").is_file())
+            self.assertTrue((target / "adapters" / "deepseek-harness" / "package.json").is_file())
             self.assertTrue((target / "README.en.md").is_file())
             self.assertTrue((target / "docs" / "architecture.zh-CN.md").is_file())
             self.assertFalse((target / "tests").exists())
@@ -1868,6 +2032,145 @@ class WorkflowRuntimeTests(unittest.TestCase):
             )
         with self.assertRaisesRegex(ValueError, "does not match"):
             self.service.workflow_submit(mismatch_session["id"], "agent", {})
+
+    def test_workflow_execution_lease_unknown_result_and_reconcile(self) -> None:
+        workflow = self.service.workflow_save(
+            "Leased", "Protect program execution",
+            [{"id": "write", "type": "command", "command": [sys.executable, "-c", "print('ok')"],
+              "side_effect": "external_write"}],
+        )
+        session = self.service.workflow_start(workflow["id"], str(self.project))
+        self.assertEqual(session["status"], "needs_execution_approval")
+
+        observed = {}
+        def crash_after_claim(steps, root, runtime_env=None):  # type: ignore[no-untyped-def]
+            active = self.service.workflow_session_get(session["id"])
+            self.assertEqual(active["status"], "executing")
+            observed.update(runtime_env or {})
+            with self.assertRaisesRegex(ValueError, "cannot continue"):
+                self.service.workflow_continue(active["id"], allow_execution=True)
+            raise RuntimeError("host crashed")
+
+        with patch("craft_core.service.execute_steps", side_effect=crash_after_claim):
+            with self.assertRaisesRegex(RuntimeError, "host crashed"):
+                self.service.workflow_continue(
+                    session["id"], allow_execution=True,
+                    approved_side_effects=["external_write"], claimed_by="host-a",
+                )
+        active = self.service.workflow_session_get(session["id"])
+        self.assertEqual(active["status"], "executing")
+        self.assertEqual(active["execution"]["owner"], "host-a")
+        self.assertEqual(observed["CRAFT_IDEMPOTENCY_KEY"], active["execution"]["idempotency_key"])
+        self.assertEqual(self.service.workflow_execution_reclaim(session["id"])["count"], 0)
+        with self.service.store.transaction() as db:
+            db.execute(
+                "UPDATE workflow_executions SET expires_at='2000-01-01T00:00:00+00:00' WHERE id=?",
+                (active["execution"]["id"],),
+            )
+        self.assertEqual(self.service.workflow_execution_reclaim(session["id"])["count"], 1)
+        unknown = self.service.workflow_session_get(session["id"])
+        self.assertEqual(unknown["status"], "result_unknown")
+        with self.assertRaisesRegex(ValueError, "approved_retry"):
+            self.service.workflow_execution_reconcile(session["id"], "retry")
+        retried = self.service.workflow_execution_reconcile(
+            session["id"], "retry", approved_retry=True
+        )
+        self.assertEqual(retried["status"], "running")
+        completed = self.service.workflow_continue(
+            session["id"], allow_execution=True,
+            approved_side_effects=["external_write"], claimed_by="host-b",
+        )
+        self.assertEqual(completed["status"], "passed")
+        with self.service.store.connect() as db:
+            executions = db.execute(
+                "SELECT * FROM workflow_executions WHERE session_id=? ORDER BY attempt", (session["id"],)
+            ).fetchall()
+        self.assertEqual([row["status"] for row in executions], ["retry_approved", "completed"])
+        self.assertEqual(executions[0]["idempotency_key"], executions[1]["idempotency_key"])
+
+    def test_workflow_unknown_result_can_be_confirmed(self) -> None:
+        for resolution, terminal in (("passed", "passed"), ("failed", "failed")):
+            workflow = self.service.workflow_save(
+                f"Confirm {resolution}", "Reconcile",
+                [{"id": "check", "type": "assertion", "evaluator": "file_exists", "path": "x"}],
+            )
+            with patch("craft_core.service.execute_steps", side_effect=RuntimeError("crash")):
+                with self.assertRaises(RuntimeError):
+                    self.service.workflow_start(workflow["id"], str(self.project))
+            with self.service.store.transaction() as db:
+                row = db.execute(
+                    "SELECT id,session_id FROM workflow_executions ORDER BY created_at DESC LIMIT 1"
+                ).fetchone()
+                db.execute(
+                    "UPDATE workflow_executions SET expires_at='2000-01-01T00:00:00+00:00' WHERE id=?",
+                    (row["id"],),
+                )
+            self.service.workflow_execution_reclaim()
+            result = self.service.workflow_execution_reconcile(
+                row["session_id"], resolution, {"evidence": "checked"}, reconciled_by="operator"
+            )
+            self.assertEqual(result["status"], terminal)
+            self.assertEqual(result["events"][0]["provenance"], "human_reconciled")
+        with self.assertRaisesRegex(ValueError, "no unknown"):
+            self.service.workflow_execution_reconcile(row["session_id"], "passed")
+        workflow = self.service.workflow_save(
+            "Invalid resolution", "Reconcile", [{"type": "assertion", "evaluator": "file_exists", "path": "x"}]
+        )
+        with patch("craft_core.service.execute_steps", side_effect=RuntimeError("crash")):
+            with self.assertRaises(RuntimeError):
+                self.service.workflow_start(workflow["id"], str(self.project))
+        with self.service.store.transaction() as db:
+            row = db.execute("SELECT id,session_id FROM workflow_executions ORDER BY created_at DESC LIMIT 1").fetchone()
+            db.execute("UPDATE workflow_executions SET expires_at='2000-01-01T00:00:00+00:00' WHERE id=?", (row["id"],))
+        self.service.workflow_execution_reclaim()
+        with self.assertRaisesRegex(ValueError, "resolution must"):
+            self.service.workflow_execution_reconcile(row["session_id"], "maybe")
+        session = self.service.workflow_session_get(row["session_id"])
+        with self.assertRaisesRegex(ValueError, "claimed_by"):
+            self.service._claim_workflow_execution(session, {"id": "x", "type": "assertion", "side_effect": "read_only"}, " ")
+
+    def test_host_adapter_probe_contract(self) -> None:
+        self.assertTrue(probe_adapters("generic-mcp")["available"])
+        with patch("craft_core.host_adapters.shutil.which", return_value="/bin/agent"):
+            self.assertTrue(self.service.host_adapter_probe("codex")["available"])
+        with patch("craft_core.host_adapters.shutil.which", return_value=None):
+            result = self.service.host_adapter_probe()
+            self.assertFalse(result["adapters"][0]["available"])
+        with self.assertRaisesRegex(ValueError, "Unknown host adapter"):
+            probe_adapters("missing")
+
+    def test_workflow_execution_claim_conflicts_are_rejected(self) -> None:
+        workflow = self.service.workflow_save(
+            "Conflict", "Reject duplicate claims",
+            [{"id": "write", "type": "command", "command": ["tool"],
+              "side_effect": "external_write"}],
+        )
+        session = self.service.workflow_start(workflow["id"], str(self.project))
+        plan = self.service.workflow_plan(workflow["id"], str(self.project))
+        step = plan["steps"][0]
+        original_claim = self.service._claim_workflow_execution
+        attempts = 0
+        def miss_once(current, current_step, owner):  # type: ignore[no-untyped-def]
+            nonlocal attempts
+            attempts += 1
+            return None if attempts == 1 else original_claim(current, current_step, owner)
+        with patch.object(self.service, "_claim_workflow_execution", side_effect=miss_once):
+            result = self.service._workflow_advance(session["id"], {"external_write"})
+        self.assertEqual(result["status"], "failed")
+
+        session = self.service.workflow_start(workflow["id"], str(self.project))
+        stale = dict(session)
+        stale["cursor"] = 99
+        self.assertIsNone(self.service._claim_workflow_execution(stale, step, "host"))
+        claimed = self.service._claim_workflow_execution(session, step, "host")
+        self.assertIsNotNone(claimed)
+        with self.assertRaisesRegex(ValueError, "already executing"):
+            self.service._workflow_advance(session["id"], {"external_write"})
+        with self.assertRaisesRegex(ValueError, "no longer active"):
+            self.service._record_session_event(
+                session, step, "passed", "program_verified", {"passed": True}, {}, 1,
+                "passed", "missing",
+            )
 
     def test_orchestrator_helpers(self) -> None:
         steps = normalize_steps([{"type": "agent"}, {"id": "last", "type": "human"}])

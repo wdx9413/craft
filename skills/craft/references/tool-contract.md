@@ -34,6 +34,8 @@
 - `craft_workflow_session_get`：读取当前状态、待执行节点、上下文和带来源的事件历史。
 - `craft_workflow_checkpoint_list`：列出程序验证或人工批准形成的可信恢复点。
 - `craft_workflow_restore`：从可信 checkpoint 派生新 Session，不覆盖原历史。
+- `craft_workflow_execution_reclaim`：把已过期但没有提交回执的执行标记为 `result_unknown`。
+- `craft_workflow_execution_reconcile`：根据外部证据确认未知执行成功/失败，或明确批准重试；有副作用的重试需要 `approved_retry=true`。
 
 `agent_reported`、`model_judged`、`program_verified`、`human_approved` 等标签描述证据来源，不代表相同的可信等级。不得把模型自述当成程序证明。
 
@@ -66,3 +68,10 @@ Craft 当前保存和聚合评测事实，不自动调用被测 Agent 或 Grader
 - `craft_orchestration_node_retry`：人工重试失败/阻塞节点，可选择从首个 Profile 重新路由。
 
 `dispatch` 只修改 Craft 本地状态，不会直接启动 Codex 或 Claude 子 Agent。宿主必须执行 Lease Request 中明确指定的 Profile，并继续遵守自己的 Sandbox 和审批规则。
+
+## 宿主与存储维护
+
+- `craft_host_adapter_probe`：查看 Codex、Claude Code、DeepSeek Harness 或通用 MCP 的声明能力，以及对应可执行程序是否在本机存在。
+- `craft_store_backup`：使用 SQLite backup API 创建一致性备份。
+- `craft_store_doctor`：检查数据库完整性、外键、Workflow 执行引用和 FTS 漂移。
+- `craft_store_restore`：从已通过 SQLite 检查的备份恢复；必须显式 `confirm=true`，并返回恢复前备份的位置。

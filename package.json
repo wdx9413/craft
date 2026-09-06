@@ -1,0 +1,16 @@
+{
+  "name": "dsh-craft-adapter",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "adapters/deepseek-harness/index.js",
+  "dsh": {
+    "bundle": {
+      "patch": "./adapters/deepseek-harness/cordis.patch.yml"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "*",
+    "@deepseek-ai/dsh-tools": "*"
+  }
+}

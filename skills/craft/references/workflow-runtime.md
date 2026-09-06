@@ -139,3 +139,17 @@ This version needs no Craft-specific coverage adapter. The current host agent ch
 The model may run coverage tools without a dedicated Craft evaluator, but it cannot know live coverage without reading existing evidence or invoking a tool. Use a deterministic `coverage_gate` when exact enforcement matters; use the agent-driven form for portability and exploration; combine both for a hybrid workflow.
 
 Command execution uses argument arrays without a shell, restricts `cwd` and artifact paths to the supplied project root, limits output size, and redacts common credential patterns before receipts are stored. Do not place secrets directly in workflow definitions or inputs.
+
+## Reliable program execution
+
+Before a deterministic mixed-Workflow node runs, Craft atomically creates a
+`workflow_execution` lease and marks the Session `executing`. Concurrent hosts
+cannot claim the same transition. Commands receive a stable
+`CRAFT_IDEMPOTENCY_KEY`; downstream writes should use it when supported.
+
+If the host exits after the command starts but before its receipt commits, an
+expired lease is changed to `result_unknown` by
+`craft_workflow_execution_reclaim`. Craft does not guess whether the external
+effect happened. `craft_workflow_execution_reconcile` can record observed
+success or failure, or approve a retry. Retrying `local_write`,
+`external_write`, or `destructive` work requires `approved_retry=true`.

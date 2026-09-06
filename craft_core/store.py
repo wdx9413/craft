@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import sqlite3
-from contextlib import contextmanager
+import uuid
+from contextlib import closing, contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator
 
 from .paths import ensure_layout
 
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 
 class ClosingConnection(sqlite3.Connection):
@@ -47,6 +49,70 @@ class CraftStore:
             raise
         finally:
             connection.close()
+
+    def backup(self, destination: Path | None = None) -> dict[str, str]:
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        generated = self.root / "backups" / f"craft-{stamp}-{uuid.uuid4().hex[:8]}.db"
+        target = (destination or generated).expanduser().resolve()
+        if target == self.db_path:
+            raise ValueError("Backup destination must differ from the active database")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with self.connect() as source, closing(sqlite3.connect(target)) as output:
+            source.backup(output)
+        return {"database": str(self.db_path), "backup": str(target)}
+
+    def doctor(self) -> dict[str, object]:
+        issues: list[dict[str, object]] = []
+        with self.connect() as db:
+            quick = [row[0] for row in db.execute("PRAGMA quick_check").fetchall()]
+            if quick != ["ok"]:
+                issues.append({"check": "quick_check", "details": quick})
+            foreign_keys = [dict(row) for row in db.execute("PRAGMA foreign_key_check").fetchall()]
+            if foreign_keys:
+                issues.append({"check": "foreign_keys", "details": foreign_keys})
+            dangling = db.execute(
+                """SELECT COUNT(*) FROM workflow_sessions s
+                   LEFT JOIN workflow_executions e ON e.id=s.current_execution_id
+                   WHERE s.current_execution_id IS NOT NULL AND e.id IS NULL"""
+            ).fetchone()[0]
+            if dangling:
+                issues.append({"check": "workflow_execution_links", "count": dangling})
+            fts_mode = db.execute("SELECT value FROM meta WHERE key='fts'").fetchone()
+            if fts_mode and fts_mode["value"] == "trigram":
+                capability_count = db.execute("SELECT COUNT(*) FROM capabilities").fetchone()[0]
+                fts_count = db.execute("SELECT COUNT(*) FROM capability_fts").fetchone()[0]
+                if capability_count != fts_count:
+                    issues.append({
+                        "check": "capability_fts", "capabilities": capability_count,
+                        "indexed": fts_count,
+                    })
+        return {"healthy": not issues, "database": str(self.db_path), "issues": issues}
+
+    def restore(self, source: Path, confirm: bool = False) -> dict[str, str]:
+        if not confirm:
+            raise ValueError("confirm=true is required to restore a Craft database")
+        source = source.expanduser().resolve()
+        if not source.is_file() or source == self.db_path:
+            raise ValueError("Restore source must be a separate SQLite backup file")
+        with closing(sqlite3.connect(source)) as candidate:
+            check = candidate.execute("PRAGMA quick_check").fetchone()[0]
+            if check != "ok":
+                raise ValueError(f"Restore source failed SQLite quick_check: {check}")
+        recovery = self.root / "backups" / f"pre-restore-{uuid.uuid4().hex}.db"
+        self.backup(recovery)
+        staged = self.root / f".restore-{uuid.uuid4().hex}.db"
+        try:
+            with closing(sqlite3.connect(source)) as candidate, closing(sqlite3.connect(staged)) as output:
+                candidate.backup(output)
+            staged.replace(self.db_path)
+            self.initialize()
+        except Exception:
+            if staged.exists():
+                staged.unlink()
+            recovery.replace(self.db_path)
+            self.initialize()
+            raise
+        return {"database": str(self.db_path), "source": str(source), "recovery_backup": str(recovery)}
 
     def initialize(self) -> None:
         with self.transaction() as db:
@@ -175,6 +241,7 @@ class CraftStore:
                     transition_count INTEGER NOT NULL DEFAULT 0,
                     max_transitions INTEGER NOT NULL,
                     restored_from_checkpoint TEXT,
+                    current_execution_id TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     FOREIGN KEY(workflow_id, workflow_version)
@@ -193,6 +260,25 @@ class CraftStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_workflow_events_session
                     ON workflow_events(session_id, sequence);
+                CREATE TABLE IF NOT EXISTS workflow_executions (
+                    id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL REFERENCES workflow_sessions(id),
+                    step_id TEXT NOT NULL,
+                    step_type TEXT NOT NULL,
+                    transition_number INTEGER NOT NULL,
+                    attempt INTEGER NOT NULL,
+                    idempotency_key TEXT NOT NULL,
+                    owner TEXT NOT NULL,
+                    side_effect TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    result_json TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(session_id, transition_number, attempt)
+                );
+                CREATE INDEX IF NOT EXISTS idx_workflow_executions_session
+                    ON workflow_executions(session_id, status, created_at);
                 CREATE TABLE IF NOT EXISTS workflow_checkpoints (
                     id TEXT PRIMARY KEY,
                     session_id TEXT NOT NULL REFERENCES workflow_sessions(id),
@@ -365,6 +451,8 @@ class CraftStore:
             }
             if "restored_from_checkpoint" not in session_columns:
                 db.execute("ALTER TABLE workflow_sessions ADD COLUMN restored_from_checkpoint TEXT")
+            if "current_execution_id" not in session_columns:
+                db.execute("ALTER TABLE workflow_sessions ADD COLUMN current_execution_id TEXT")
             source_columns = {
                 row["name"] for row in db.execute("PRAGMA table_info(sources)").fetchall()
             }

@@ -12,6 +12,7 @@ from typing import Any
 PLUGIN_ITEMS = (
     ".claude-plugin",
     ".codex-plugin",
+    "adapters",
     "craft_core",
     "scripts",
     "skills",

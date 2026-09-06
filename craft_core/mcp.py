@@ -16,6 +16,10 @@ def schema(properties: dict[str, Any], required: list[str] | None = None) -> dic
 
 
 TOOLS = [
+    {"name": "craft_host_adapter_probe", "description": "Inspect built-in Codex, Claude Code, DeepSeek Harness, or generic MCP adapter support on this machine.", "inputSchema": schema({"host": {"type": "string", "enum": ["codex", "claude-code", "deepseek-harness", "generic-mcp"]}}), "annotations": {"readOnlyHint": True}},
+    {"name": "craft_store_backup", "description": "Create a transactionally consistent SQLite backup, by default under ~/.craft_data/backups.", "inputSchema": schema({"destination": {"type": "string"}})},
+    {"name": "craft_store_doctor", "description": "Check SQLite integrity, foreign keys, Workflow execution links, and capability search index drift.", "inputSchema": schema({}), "annotations": {"readOnlyHint": True}},
+    {"name": "craft_store_restore", "description": "Restore Craft from a validated SQLite backup while retaining a pre-restore recovery copy.", "inputSchema": schema({"source": {"type": "string"}, "confirm": {"type": "boolean", "default": False}}, ["source", "confirm"]), "annotations": {"destructiveHint": True}},
     {"name": "craft_info", "description": "Show Craft data location and local record counts.", "inputSchema": schema({}), "annotations": {"readOnlyHint": True}},
     {"name": "craft_source_add", "description": "Add a user-selected local capability directory and optionally index its SKILL.md files.", "inputSchema": schema({"path": {"type": "string"}, "label": {"type": "string"}, "scan": {"type": "boolean", "default": True}}, ["path"])},
     {"name": "craft_source_list", "description": "List configured capability sources with requested and resolved real paths.", "inputSchema": schema({}), "annotations": {"readOnlyHint": True}},
@@ -55,11 +59,13 @@ TOOLS = [
     {"name": "craft_workflow_run", "description": "Run one approved deterministic workflow attempt within explicit side-effect grants.", "inputSchema": schema({"workflow_id": {"type": "string"}, "project_root": {"type": "string"}, "version": {"type": "integer", "minimum": 1}, "inputs": {"type": "object"}, "run_id": {"type": "string"}, "allow_execution": {"type": "boolean", "default": False}, "approved_side_effects": {"type": "array", "items": {"type": "string", "enum": ["read_only", "local_write", "external_write", "destructive"]}}}, ["workflow_id", "project_root", "allow_execution"]), "annotations": {"destructiveHint": True}},
     {"name": "craft_workflow_run_get", "description": "Read a workflow run and all deterministic attempt receipts.", "inputSchema": schema({"run_id": {"type": "string"}}, ["run_id"]), "annotations": {"readOnlyHint": True}},
     {"name": "craft_workflow_start", "description": "Start a mixed workflow and stop at external work or an unapproved side-effect boundary.", "inputSchema": schema({"workflow_id": {"type": "string"}, "project_root": {"type": "string"}, "version": {"type": "integer", "minimum": 1}, "inputs": {"type": "object"}, "allow_execution": {"type": "boolean", "default": False}, "approved_side_effects": {"type": "array", "items": {"type": "string", "enum": ["read_only", "local_write", "external_write", "destructive"]}}}, ["workflow_id", "project_root"]), "annotations": {"destructiveHint": True}},
-    {"name": "craft_workflow_continue", "description": "Continue a mixed workflow with explicit side-effect grants.", "inputSchema": schema({"session_id": {"type": "string"}, "allow_execution": {"type": "boolean", "default": False}, "approved_side_effects": {"type": "array", "items": {"type": "string", "enum": ["read_only", "local_write", "external_write", "destructive"]}}}, ["session_id"]), "annotations": {"destructiveHint": True}},
+    {"name": "craft_workflow_continue", "description": "Atomically lease and continue a mixed workflow with explicit side-effect grants.", "inputSchema": schema({"session_id": {"type": "string"}, "allow_execution": {"type": "boolean", "default": False}, "approved_side_effects": {"type": "array", "items": {"type": "string", "enum": ["read_only", "local_write", "external_write", "destructive"]}}, "claimed_by": {"type": "string", "default": "local-host"}}, ["session_id"]), "annotations": {"destructiveHint": True}},
     {"name": "craft_workflow_submit", "description": "Submit structured, provenance-bearing output for the pending external node and advance.", "inputSchema": schema({"session_id": {"type": "string"}, "step_id": {"type": "string"}, "result": {"type": "object"}, "submitted_by": {"type": "string", "default": "host_agent"}, "allow_execution": {"type": "boolean", "default": False}, "approved_side_effects": {"type": "array", "items": {"type": "string", "enum": ["read_only", "local_write", "external_write", "destructive"]}}}, ["session_id", "step_id", "result"]), "annotations": {"destructiveHint": True}},
     {"name": "craft_workflow_session_get", "description": "Read mixed workflow state, pending work, provenance, and event history.", "inputSchema": schema({"session_id": {"type": "string"}}, ["session_id"]), "annotations": {"readOnlyHint": True}},
     {"name": "craft_workflow_checkpoint_list", "description": "List trusted program-verified or human-approved recovery points for a session.", "inputSchema": schema({"session_id": {"type": "string"}}, ["session_id"]), "annotations": {"readOnlyHint": True}},
     {"name": "craft_workflow_restore", "description": "Create a new auditable session branch from a trusted checkpoint.", "inputSchema": schema({"checkpoint_id": {"type": "string"}, "allow_execution": {"type": "boolean", "default": False}, "approved_side_effects": {"type": "array", "items": {"type": "string", "enum": ["read_only", "local_write", "external_write", "destructive"]}}}, ["checkpoint_id"]), "annotations": {"destructiveHint": True}},
+    {"name": "craft_workflow_execution_reclaim", "description": "Mark expired in-flight Workflow executions as result_unknown instead of blindly retrying them.", "inputSchema": schema({"session_id": {"type": "string"}})},
+    {"name": "craft_workflow_execution_reconcile", "description": "Resolve an unknown Workflow result as passed or failed, or explicitly approve a safe retry.", "inputSchema": schema({"session_id": {"type": "string"}, "resolution": {"type": "string", "enum": ["passed", "failed", "retry"]}, "result": {"type": "object"}, "approved_retry": {"type": "boolean", "default": False}, "reconciled_by": {"type": "string", "default": "human"}}, ["session_id", "resolution"]), "annotations": {"destructiveHint": True}},
 ]
 
 
@@ -68,6 +74,8 @@ class McpServer:
         self.service = service or CraftService()
         self.handlers: dict[str, Callable[..., Any]] = {
             f"craft_{name}": getattr(self.service, name) for name in (
+                "host_adapter_probe",
+                "store_backup", "store_doctor", "store_restore",
                 "source_add", "source_list", "source_update", "source_remove",
                 "source_scan", "capability_search", "capability_get",
                 "task_open", "task_list", "task_checkpoint", "feedback_record",
@@ -81,6 +89,7 @@ class McpServer:
                 "workflow_plan", "workflow_run", "workflow_run_get",
                 "workflow_start", "workflow_continue", "workflow_submit", "workflow_session_get",
                 "workflow_checkpoint_list", "workflow_restore",
+                "workflow_execution_reclaim", "workflow_execution_reconcile",
             )
         }
         self.handlers["craft_info"] = self.service.info

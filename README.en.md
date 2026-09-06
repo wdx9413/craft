@@ -6,7 +6,7 @@
 
 Craft is a capability-management and task runtime for AI agents. It treats Skills, Workflows, tools, and service connections as discoverable, composable, and verifiable capability assets, then manages their full lifecycle around real tasks: discover, register, and index capabilities; retrieve, select, and compose them; coordinate and continue execution; preserve state, artifacts, and evidence; use evaluation and regression checks to assess outcomes and capability versions; and turn validated methods into reusable Workflows.
 
-Version 0.1 implements local Skill discovery and management, task continuity, mixed validation, Workflow execution, trusted recovery, reusable Case Suites, cross-version evaluation comparison, cross-host Agent Profiles, dependency orchestration, recoverable leases, manual controls, and model fallback. Adding plugin and MCP metadata to the capability catalog, automated evaluation execution, and threshold-based promotion remain later stages.
+Version 0.1 implements local Skill discovery and management, task continuity, mixed validation, reliable Workflow execution, trusted recovery, reusable Case Suites, cross-version evaluation comparison, cross-host Agent Profiles, dependency orchestration, recoverable leases, manual controls, and model fallback. Adding plugin and MCP metadata to the capability catalog, automated evaluation execution, and threshold-based promotion remain later stages.
 
 ## Why Craft
 
@@ -124,6 +124,20 @@ claude --plugin-dir ~/plugins/craft
 
 Inspect `/mcp`, invoke `/craft:craft`, or let Claude select the Skill from task context.
 
+After the package release is available, the repository also acts as a Claude marketplace:
+
+```text
+/plugin marketplace add wdx9413/craft
+/plugin install craft@craft-marketplace
+```
+
+## DeepSeek Harness
+
+`adapters/deepseek-harness` is a separate Cordis bundle that exposes the same
+Craft MCP tools through `craft_call` while retaining `~/.craft_data`. Because
+DSH is evolving rapidly, this adapter stays outside the Python core. Without
+Node.js and DSH installed, only its static package structure can be validated.
+
 ## Typical flow
 
 ```text
@@ -135,6 +149,16 @@ craft_agent_profile_save → craft_orchestration_plan_create → dispatch → ho
 ```
 
 `allow_execution=true` grants local writes only. External writes and destructive actions require an explicit `approved_side_effects` grant.
+
+## Reliable execution and data recovery
+
+Deterministic nodes atomically acquire a lease before execution. An expired
+in-flight execution becomes `result_unknown` and requires evidence-based
+reconciliation or an explicitly approved retry. Commands receive a stable
+`CRAFT_IDEMPOTENCY_KEY` when downstream systems support deduplication.
+
+Use `craft store-backup`, `craft store-doctor`, and the confirmation-gated
+`craft store-restore` commands to maintain the local store.
 
 ## Documentation
 

@@ -6,7 +6,7 @@
 
 Craft 是面向 AI Agent 的能力管理与任务运行系统。它把 Skill、Workflow、工具与服务连接等统一视为可发现、可组合、可验证的能力资产，并围绕真实任务管理一条完整闭环：发现、登记和索引能力，按任务检索、选择与组合，协调并接续执行，保存状态、产物和验证证据，通过评测与回归判断结果和能力版本是否可靠，最后把经过验证的方法沉淀为可复用 Workflow。
 
-当前 v0.1 已落地本地 Skill 发现与管理、任务接续、混合验证、Workflow 运行、可信恢复、可复用 Case Suite 和跨版本评测对比，并具备跨宿主 Agent Profile、依赖编排、可恢复 Lease、人工控制与模型失败切换。把插件与 MCP 元数据纳入能力目录、自动执行评测与基于门槛的能力晋级仍属于后续阶段。
+当前 v0.1 已落地本地 Skill 发现与管理、任务接续、混合验证、可靠 Workflow 执行、可信恢复、可复用 Case Suite 和跨版本评测对比，并具备跨宿主 Agent Profile、依赖编排、可恢复 Lease、人工控制与模型失败切换。把插件与 MCP 元数据纳入能力目录、自动执行评测与基于门槛的能力晋级仍属于后续阶段。
 
 ## 为什么需要 Craft
 
@@ -134,13 +134,27 @@ macOS / Linux 将 `.venv\Scripts\python` 换成 `.venv/bin/python`。
 
 ## 在 Claude Code 中使用
 
-Craft 包含 `.claude-plugin/plugin.json`，并与 Codex 共用 MCP：
+Craft 包含 `.claude-plugin/plugin.json`、Claude Marketplace 清单，并与 Codex 共用 MCP。源码开发时可以直接加载：
 
 ```bash
 claude --plugin-dir ~/plugins/craft
 ```
 
 随后使用 `/mcp` 检查连接，并调用 `/craft:craft`；也可以让 Claude 根据任务自动选择 Craft Skill。
+
+发布包可用后，也可以安装 Marketplace：
+
+```text
+/plugin marketplace add wdx9413/craft
+/plugin install craft@craft-marketplace
+```
+
+## DeepSeek Harness
+
+`adapters/deepseek-harness` 提供独立的 Cordis bundle，通过 `craft_call`
+调用同一套 Craft MCP 工具，数据仍保存在 `~/.craft_data`。DeepSeek Harness
+仍处于快速演进阶段，因此适配器独立于 Python Core 维护；本机未安装 Node.js
+或 DSH 时只能完成静态结构验证，不能宣称真实运行验收通过。
 
 ## 常见使用流程
 
@@ -197,6 +211,15 @@ craft_agent_profile_save（角色、宿主、模型、权限）
 ```
 
 例如可以配置 Astra 负责架构与审查、Luna 负责实现和测试，也可以把 Claude、DeepSeek 或自建 API Profile 放入同一个计划。当前 MCP 返回结构化派发请求，由宿主调用自己的原生子 Agent；Craft 本身不冒充 Codex/Claude 的进程控制 API。
+
+## 可靠执行与数据恢复
+
+确定性节点执行前会原子领取 Lease。宿主中断且 Lease 过期后，节点进入
+`result_unknown`，需要根据外部证据确认成功、确认失败或显式批准重试，Craft
+不会盲目重复有副作用的操作。命令可读取稳定的 `CRAFT_IDEMPOTENCY_KEY`。
+
+数据维护命令包括 `craft store-backup`、`craft store-doctor` 和需要
+`--confirm` 的 `craft store-restore`。
 
 ## 文档
 

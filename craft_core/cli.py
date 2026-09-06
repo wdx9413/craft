@@ -12,6 +12,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("info")
+    adapter_probe = commands.add_parser("host-adapter-probe")
+    adapter_probe.add_argument("--host", choices=["codex", "claude-code", "deepseek-harness", "generic-mcp"])
+    store_backup = commands.add_parser("store-backup")
+    store_backup.add_argument("--destination")
+    commands.add_parser("store-doctor")
+    store_restore = commands.add_parser("store-restore")
+    store_restore.add_argument("source")
+    store_restore.add_argument("--confirm", action="store_true")
     commands.add_parser("list-sources")
     add = commands.add_parser("add-source")
     add.add_argument("path")
@@ -124,6 +132,14 @@ def build_parser() -> argparse.ArgumentParser:
     retry.add_argument("plan_id")
     retry.add_argument("node_id")
     retry.add_argument("--restart-routes", action="store_true")
+    workflow_reclaim = commands.add_parser("workflow-execution-reclaim")
+    workflow_reclaim.add_argument("--session-id")
+    workflow_reconcile = commands.add_parser("workflow-execution-reconcile")
+    workflow_reconcile.add_argument("session_id")
+    workflow_reconcile.add_argument("resolution", choices=["passed", "failed", "retry"])
+    workflow_reconcile.add_argument("--result-json", default="{}")
+    workflow_reconcile.add_argument("--approved-retry", action="store_true")
+    workflow_reconcile.add_argument("--reconciled-by", default="human")
     return parser
 
 
@@ -132,6 +148,21 @@ def main() -> None:
     service = CraftService()
     if args.command == "info":
         result = service.info()
+    elif args.command == "host-adapter-probe":
+        result = service.host_adapter_probe(args.host)
+    elif args.command == "store-backup":
+        result = service.store_backup(args.destination)
+    elif args.command == "store-doctor":
+        result = service.store_doctor()
+    elif args.command == "store-restore":
+        result = service.store_restore(args.source, args.confirm)
+    elif args.command == "workflow-execution-reclaim":
+        result = service.workflow_execution_reclaim(args.session_id)
+    elif args.command == "workflow-execution-reconcile":
+        result = service.workflow_execution_reconcile(
+            args.session_id, args.resolution, json.loads(args.result_json),
+            args.approved_retry, args.reconciled_by,
+        )
     elif args.command == "list-sources":
         result = service.source_list()
     elif args.command == "add-source":
