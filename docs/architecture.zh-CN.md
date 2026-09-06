@@ -148,7 +148,7 @@ release，宿主崩溃后按 TTL reclaim。检查结果是确定性的 `continue
 
 Craft Core 不等于某一种 UI，也不等于必须依赖 Codex/Claude：
 
-1. `standalone`（Craft Agent）：Craft 拥有会话、Agent Loop 和用户界面。管理 CLI 已可用；交互式 CLI、Provider Tool Loop、流式事件、凭据存储和桌面端尚未实现。
+1. `standalone`（Craft Agent）：Craft 拥有会话和 Agent Loop。交互式 CLI、版本化 Provider Profile、持久 Turn/Event、结构化生命周期事件和受控 Tool Loop 已进入预览；API Key 仅在请求时从 Profile 指定的环境变量读取。桌面端与逐 Token 流尚未实现。
 2. `supervisor`（Craft Supervisor）：Craft 拥有任务体验，把具体执行委派给 Codex、Claude、DSH 或自建 Host。编排、Lease、证据和预算协议已可用；原生 Host Driver 尚需兼容认证。
 3. `capability-provider`（Craft Provider）：外部 Agent 拥有 Loop，Craft 通过插件、MCP、Skill、CLI 或 DSH Adapter 提供能力与状态。该形态当前可用。
 

@@ -1560,7 +1560,7 @@ class StoreMigrationTests(unittest.TestCase):
                     row["name"] for row in migrated.execute("PRAGMA table_info(capabilities)")
                 }
             self.assertNotIn("path TEXT NOT NULL UNIQUE", sql)
-            self.assertEqual(version, "13")
+            self.assertEqual(version, "14")
             self.assertIn("restored_from_checkpoint", session_columns)
             self.assertIn("current_execution_id", session_columns)
             self.assertEqual(route_indexes, [2, 1])

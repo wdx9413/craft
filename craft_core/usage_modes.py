@@ -25,8 +25,9 @@ class UsageMode:
 USAGE_MODES = {
     "standalone": UsageMode(
         "standalone", "Craft Agent", True, "Craft owns the conversation and agent loop",
-        ("management-cli",), ("interactive-cli", "desktop"), "foundation",
-        "Provider execution, streaming tool loop, credentials, and end-user UI are not implemented yet.",
+        ("management-cli", "interactive-cli", "provider-tool-loop", "structured-events"),
+        ("desktop", "token-delta-streaming"), "preview",
+        "The CLI Agent loop is available with environment-resolved credentials and allowlisted read-only Craft tools; desktop UI and token-delta streaming are not implemented yet.",
     ),
     "supervisor": UsageMode(
         "supervisor", "Craft Supervisor", True,

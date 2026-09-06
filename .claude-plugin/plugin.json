@@ -1,5 +1,5 @@
 {
   "name": "craft",
   "version": "0.1.0",
-  "description": "Capability discovery, durable tasks, host-mediated multi-agent orchestration, evaluation, and reusable workflows."
+  "description": "Standalone agent runtime, capability discovery, durable tasks, host-mediated multi-agent orchestration, evaluation, and reusable workflows."
 }

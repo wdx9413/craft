@@ -105,9 +105,11 @@ explicitly; automatic interception of every transition remains planned.
 
 ## Three product modes
 
-- `standalone` / Craft Agent owns the conversation, Agent loop, and UI. The
-  management CLI exists; interactive CLI, provider tool loop, streaming,
-  credential storage, and desktop UI are planned.
+- `standalone` / Craft Agent owns the conversation and Agent loop. The preview
+  includes an interactive CLI, versioned provider profiles, persistent turns and
+  structured lifecycle events, and an allowlisted tool loop. API keys are resolved
+  from named environment variables at request time. Desktop UI and token-delta
+  streaming are planned.
 - `supervisor` / Craft Supervisor owns the task experience and delegates work to
   Codex, Claude, DSH, or custom hosts. The protocol exists; native drivers still
   need compatibility certification.
@@ -117,6 +119,15 @@ explicitly; automatic interception of every transition remains planned.
 Machine-readable `usage_mode_list/get` responses keep interfaces honest. Future
 desktop, web, or IDE surfaces call the same application service and do not fork
 the data model.
+
+Schema v14 adds versioned model providers, persistent Agent sessions and turns,
+and monotonic session events. The runtime supports OpenAI-compatible Chat
+Completions endpoints and Anthropic Messages endpoints through separate adapters.
+Profiles persist only the environment-variable name for credentials. A session
+pins one immutable provider version and starts with no tool permissions; its
+explicit allowlist currently exposes only Craft capability search/read and task
+listing. Structured lifecycle events are available, while token-delta streaming
+and desktop presentation remain future surfaces.
 
 ## Next steps
 

@@ -15,6 +15,43 @@ def build_parser() -> argparse.ArgumentParser:
     commands.add_parser("modes")
     mode_get = commands.add_parser("mode")
     mode_get.add_argument("mode", choices=["standalone", "supervisor", "capability-provider"])
+    provider_save = commands.add_parser("provider-save")
+    provider_save.add_argument("name")
+    provider_save.add_argument("protocol", choices=["openai-compatible", "anthropic"])
+    provider_save.add_argument("base_url")
+    provider_save.add_argument("model")
+    provider_save.add_argument("--api-key-env")
+    provider_save.add_argument("--options-json", default="{}")
+    provider_save.add_argument("--disabled", action="store_true")
+    provider_save.add_argument("--provider-id")
+    provider_get = commands.add_parser("provider-get")
+    provider_get.add_argument("provider_id")
+    provider_get.add_argument("--version", type=int)
+    provider_list = commands.add_parser("provider-list")
+    provider_list.add_argument("--limit", type=int, default=20)
+    provider_list.add_argument("--include-disabled", action="store_true")
+    session_start = commands.add_parser("agent-session-start")
+    session_start.add_argument("provider_id")
+    session_start.add_argument("--provider-version", type=int)
+    session_start.add_argument("--title", default="")
+    session_start.add_argument("--system-prompt", default="")
+    session_start.add_argument("--max-tool-rounds", type=int, default=4)
+    session_start.add_argument("--allowed-tools-json", default="[]")
+    session_start.add_argument("--session-id")
+    session_get = commands.add_parser("agent-session-get")
+    session_get.add_argument("session_id")
+    session_list = commands.add_parser("agent-session-list")
+    session_list.add_argument("--limit", type=int, default=20)
+    session_list.add_argument("--status")
+    chat = commands.add_parser("chat")
+    chat.add_argument("--session-id")
+    chat.add_argument("--provider-id")
+    chat.add_argument("--message")
+    chat.add_argument("--title", default="")
+    chat.add_argument("--system-prompt", default="")
+    chat.add_argument("--max-tool-rounds", type=int, default=4)
+    chat.add_argument("--allowed-tools-json", default="[]")
+    chat.add_argument("--json-events", action="store_true")
     adapter_probe = commands.add_parser("host-adapter-probe")
     adapter_probe.add_argument("--host", choices=["codex", "claude-code", "deepseek-harness", "generic-mcp"])
     store_backup = commands.add_parser("store-backup")
@@ -241,6 +278,53 @@ def main() -> None:
         result = service.usage_mode_list()
     elif args.command == "mode":
         result = service.usage_mode_get(args.mode)
+    elif args.command == "provider-save":
+        result = service.model_provider_save(
+            args.name, args.protocol, args.base_url, args.model, args.api_key_env,
+            json.loads(args.options_json), not args.disabled, args.provider_id,
+        )
+    elif args.command == "provider-get":
+        result = service.model_provider_get(args.provider_id, args.version)
+    elif args.command == "provider-list":
+        result = service.model_provider_list(args.limit, args.include_disabled)
+    elif args.command == "agent-session-start":
+        result = service.agent_session_start(
+            args.provider_id, args.provider_version, args.title, args.system_prompt,
+            args.max_tool_rounds, json.loads(args.allowed_tools_json), args.session_id,
+        )
+    elif args.command == "agent-session-get":
+        result = service.agent_session_get(args.session_id)
+    elif args.command == "agent-session-list":
+        result = service.agent_session_list(args.limit, args.status)
+    elif args.command == "chat":
+        if not args.session_id and not args.provider_id:
+            raise ValueError("chat requires --session-id or --provider-id")
+        session_id = args.session_id
+        if not session_id:
+            session_id = service.agent_session_start(
+                args.provider_id, title=args.title, system_prompt=args.system_prompt,
+                max_tool_rounds=args.max_tool_rounds,
+                allowed_tools=json.loads(args.allowed_tools_json),
+            )["id"]
+        callback = None
+        if args.json_events:
+            callback = lambda event: print(json.dumps(event, ensure_ascii=False))
+        if args.message is not None:
+            result = service.agent_turn_run(session_id, args.message, callback)
+            if args.json_events:
+                return
+        else:
+            while True:
+                try:
+                    prompt = input("you> ")
+                except EOFError:
+                    break
+                if prompt.strip() in {"/exit", "/quit"}:
+                    break
+                turn = service.agent_turn_run(session_id, prompt, callback)
+                if not args.json_events:
+                    print(f"craft> {turn['output_text']}")
+            return
     elif args.command == "host-adapter-probe":
         result = service.host_adapter_probe(args.host)
     elif args.command == "store-backup":

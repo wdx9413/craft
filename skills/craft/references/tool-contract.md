@@ -52,6 +52,16 @@ ID，不代表 Craft 已读取或验证该系统。
 - `craft_usage_mode_list`：列出 standalone、supervisor、capability-provider 三种形态。
 - `craft_usage_mode_get`：读取某一形态由谁拥有 Agent Loop、当前 Surface、规划 Surface 和真实成熟度边界。
 
+## 独立 Agent Runtime（预览）
+
+- `craft_model_provider_save/get/list`：保存或读取版本化模型端点。只保存 `api_key_env`，不保存密钥。
+- `craft_agent_session_start/get/list`：创建和恢复持久会话；`allowed_tools` 是显式白名单，默认空。
+- `craft_agent_turn_run`：执行一个有界模型 Turn，记录请求、工具、完成或失败事件。
+
+Provider 协议当前为 `openai-compatible` 与 `anthropic`。Profile 的 `options` 仅接受
+`timeout_seconds`、`temperature`、`max_tokens` 和 `top_p`，不得通过扩展字段保存 Header、
+Token 或其他凭据。会话固定到 Provider 的具体版本，后续 Profile 更新不会静默改变历史会话。
+
 ## Workflow
 
 - `craft_workflow_save`：保存带版本的 Workflow，支持输入、步骤、声明式不变量、Evidence 要求和权限策略。

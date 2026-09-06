@@ -10,7 +10,7 @@ from typing import Iterator
 from .paths import ensure_layout
 
 
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 
 
 class ClosingConnection(sqlite3.Connection):
@@ -529,6 +529,61 @@ class CraftStore:
                     amount REAL NOT NULL,
                     PRIMARY KEY(reservation_id, metric)
                 );
+                CREATE TABLE IF NOT EXISTS model_providers (
+                    id TEXT NOT NULL,
+                    version INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    protocol TEXT NOT NULL,
+                    base_url TEXT NOT NULL,
+                    model TEXT NOT NULL,
+                    api_key_env TEXT,
+                    options_json TEXT NOT NULL DEFAULT '{}',
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY(id, version)
+                );
+                CREATE INDEX IF NOT EXISTS idx_model_providers_name
+                    ON model_providers(name, enabled, version DESC);
+                CREATE TABLE IF NOT EXISTS agent_sessions (
+                    id TEXT PRIMARY KEY,
+                    provider_id TEXT NOT NULL,
+                    provider_version INTEGER NOT NULL,
+                    title TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    system_prompt TEXT NOT NULL,
+                    max_tool_rounds INTEGER NOT NULL,
+                    allowed_tools_json TEXT NOT NULL DEFAULT '[]',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY(provider_id, provider_version)
+                        REFERENCES model_providers(id, version)
+                );
+                CREATE INDEX IF NOT EXISTS idx_agent_sessions_updated
+                    ON agent_sessions(status, updated_at DESC);
+                CREATE TABLE IF NOT EXISTS agent_turns (
+                    id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL REFERENCES agent_sessions(id),
+                    position INTEGER NOT NULL,
+                    input_text TEXT NOT NULL,
+                    output_text TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL,
+                    usage_json TEXT NOT NULL DEFAULT '{}',
+                    error TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(session_id, position)
+                );
+                CREATE TABLE IF NOT EXISTS agent_events (
+                    session_id TEXT NOT NULL REFERENCES agent_sessions(id),
+                    sequence INTEGER NOT NULL,
+                    turn_id TEXT REFERENCES agent_turns(id),
+                    event_type TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY(session_id, sequence)
+                );
+                CREATE INDEX IF NOT EXISTS idx_agent_events_session
+                    ON agent_events(session_id, sequence);
                 """
             )
             node_columns = {

@@ -7,8 +7,10 @@ import math
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
+from urllib.parse import urlsplit
 
+from .agent_runtime import AgentRuntime
 from .catalog import Catalog, utc_now
 from .host_adapters import probe_adapters
 from .log import get_logger, log_event
@@ -33,6 +35,7 @@ ENTITY_TYPES = {
     "workflow_execution", "workflow_checkpoint", "evaluation_suite",
     "evaluation_run", "evaluation_result", "agent_profile", "orchestration_plan",
     "orchestration_node", "orchestration_lease", "budget", "external",
+    "agent_session", "agent_turn", "model_provider",
 }
 EVIDENCE_CONFIDENCE = {"confirmed", "bounded", "unverified", "rejected"}
 
@@ -61,6 +64,7 @@ class CraftService:
                     "artifacts", "evidence", "lineage_edges", "budgets",
                     "budget_usage_events",
                     "budget_reservations",
+                    "model_providers", "agent_sessions", "agent_turns", "agent_events",
                 )
             }
         return {"version": "0.1.0", "data_root": str(self.store.root), "counts": counts}
@@ -73,6 +77,369 @@ class CraftService:
 
     def usage_mode_get(self, mode: str) -> dict[str, Any]:
         return usage_modes(mode)
+
+    def model_provider_save(
+        self, name: str, protocol: str, base_url: str, model: str,
+        api_key_env: str | None = None, options: dict[str, Any] | None = None,
+        enabled: bool = True, provider_id: str | None = None,
+    ) -> dict[str, Any]:
+        if not all(isinstance(value, str) and value.strip() for value in (name, base_url, model)):
+            raise ValueError("name, base_url, and model must not be empty")
+        if protocol not in {"openai-compatible", "anthropic"}:
+            raise ValueError(f"Unsupported provider protocol: {protocol}")
+        parsed = urlsplit(base_url.strip())
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("base_url must be an absolute HTTP(S) URL")
+        if parsed.username or parsed.password or parsed.query or parsed.fragment:
+            raise ValueError("base_url must not contain credentials, query, or fragment")
+        if api_key_env is not None and (
+            not api_key_env.isidentifier() or api_key_env.upper() != api_key_env
+        ):
+            raise ValueError("api_key_env must be an uppercase environment variable name")
+        if options is not None and not isinstance(options, dict):
+            raise ValueError("options must be an object")
+        unknown_options = set(options or {}) - {
+            "timeout_seconds", "temperature", "max_tokens", "top_p",
+        }
+        if unknown_options:
+            raise ValueError(f"Unsupported provider options: {', '.join(sorted(unknown_options))}")
+        for key in ("timeout_seconds", "temperature", "top_p"):
+            if key in (options or {}):
+                value = options[key]  # type: ignore[index]
+                if (isinstance(value, bool) or not isinstance(value, (int, float))
+                        or not math.isfinite(value)):
+                    raise ValueError(f"Provider option {key} must be a finite number")
+        if "timeout_seconds" in (options or {}) and not 0 < options["timeout_seconds"] <= 600:  # type: ignore[index]
+            raise ValueError("Provider option timeout_seconds must be between 0 and 600")
+        if "temperature" in (options or {}) and not 0 <= options["temperature"] <= 2:  # type: ignore[index]
+            raise ValueError("Provider option temperature must be between 0 and 2")
+        if "top_p" in (options or {}) and not 0 <= options["top_p"] <= 1:  # type: ignore[index]
+            raise ValueError("Provider option top_p must be between 0 and 1")
+        if "max_tokens" in (options or {}):
+            value = options["max_tokens"]  # type: ignore[index]
+            if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+                raise ValueError("Provider option max_tokens must be a positive integer")
+        provider_id = provider_id or new_id("provider")
+        now = utc_now()
+        with self.store.transaction() as db:
+            row = db.execute(
+                "SELECT MAX(version) AS version FROM model_providers WHERE id=?", (provider_id,)
+            ).fetchone()
+            version = int(row["version"] or 0) + 1
+            db.execute(
+                """INSERT INTO model_providers(
+                   id,version,name,protocol,base_url,model,api_key_env,options_json,enabled,created_at
+                   ) VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                (provider_id, version, name.strip(), protocol, base_url.strip().rstrip("/"),
+                 model.strip(), api_key_env, json.dumps(options or {}, ensure_ascii=False),
+                 int(enabled), now),
+            )
+        return self.model_provider_get(provider_id, version)
+
+    def model_provider_get(
+        self, provider_id: str, version: int | None = None
+    ) -> dict[str, Any]:
+        sql = "SELECT * FROM model_providers WHERE id=?"
+        params: list[Any] = [provider_id]
+        if version is None:
+            sql += " ORDER BY version DESC LIMIT 1"
+        else:
+            sql += " AND version=?"
+            params.append(version)
+        with self.store.connect() as db:
+            row = db.execute(sql, params).fetchone()
+        if not row:
+            raise ValueError(f"Unknown model provider: {provider_id}")
+        result = dict(row)
+        result["enabled"] = bool(result["enabled"])
+        result["options"] = json.loads(result.pop("options_json"))
+        return result
+
+    def model_provider_list(
+        self, limit: int = 20, include_disabled: bool = False
+    ) -> dict[str, Any]:
+        limit = max(1, min(limit, 100))
+        enabled = "" if include_disabled else " AND p.enabled=1"
+        with self.store.connect() as db:
+            rows = db.execute(
+                f"""SELECT p.* FROM model_providers p JOIN (
+                    SELECT id,MAX(version) version FROM model_providers GROUP BY id
+                    ) latest ON latest.id=p.id AND latest.version=p.version
+                    WHERE 1=1{enabled} ORDER BY p.created_at DESC,p.id DESC LIMIT ?""",
+                (limit,),
+            ).fetchall()
+        providers = []
+        for row in rows:
+            card = dict(row)
+            card["enabled"] = bool(card["enabled"])
+            card["options"] = json.loads(card.pop("options_json"))
+            providers.append(card)
+        return {"providers": providers}
+
+    @staticmethod
+    def _agent_tool_specs() -> dict[str, dict[str, Any]]:
+        return {
+            "craft_capability_search": {
+                "name": "craft_capability_search",
+                "description": "Search the local Craft capability index.",
+                "parameters": {"type": "object", "properties": {
+                    "query": {"type": "string"}, "limit": {"type": "integer"},
+                }, "required": ["query"], "additionalProperties": False},
+            },
+            "craft_capability_get": {
+                "name": "craft_capability_get",
+                "description": "Read one indexed capability by id.",
+                "parameters": {"type": "object", "properties": {
+                    "asset_id": {"type": "string"},
+                }, "required": ["asset_id"], "additionalProperties": False},
+            },
+            "craft_task_list": {
+                "name": "craft_task_list",
+                "description": "List durable Craft tasks.",
+                "parameters": {"type": "object", "properties": {
+                    "limit": {"type": "integer"}, "status": {"type": "string"},
+                }, "additionalProperties": False},
+            },
+        }
+
+    def agent_session_start(
+        self, provider_id: str, provider_version: int | None = None,
+        title: str = "", system_prompt: str = "", max_tool_rounds: int = 4,
+        allowed_tools: list[str] | None = None, session_id: str | None = None,
+    ) -> dict[str, Any]:
+        provider = self.model_provider_get(provider_id, provider_version)
+        if not provider["enabled"]:
+            raise ValueError("Model provider is disabled")
+        if (isinstance(max_tool_rounds, bool) or not isinstance(max_tool_rounds, int)
+                or not 0 <= max_tool_rounds <= 20):
+            raise ValueError("max_tool_rounds must be between 0 and 20")
+        tools = allowed_tools or []
+        if not isinstance(tools, list) or any(not isinstance(item, str) for item in tools):
+            raise ValueError("allowed_tools must be an array of tool names")
+        unknown = sorted(set(tools) - self._agent_tool_specs().keys())
+        if unknown:
+            raise ValueError(f"Unsupported agent tools: {', '.join(unknown)}")
+        session_id = session_id or new_id("session")
+        now = utc_now()
+        with self.store.transaction() as db:
+            if db.execute("SELECT 1 FROM agent_sessions WHERE id=?", (session_id,)).fetchone():
+                raise ValueError(f"Agent session already exists: {session_id}")
+            db.execute(
+                """INSERT INTO agent_sessions(
+                   id,provider_id,provider_version,title,status,system_prompt,max_tool_rounds,
+                   allowed_tools_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                (session_id, provider["id"], provider["version"], title.strip(), "active",
+                 system_prompt, max_tool_rounds, json.dumps(tools), now, now),
+            )
+            self._agent_event(db, session_id, None, "session.started", {
+                "provider_id": provider["id"], "provider_version": provider["version"]
+            })
+        return self.agent_session_get(session_id)
+
+    def agent_session_get(self, session_id: str) -> dict[str, Any]:
+        with self.store.connect() as db:
+            row = db.execute("SELECT * FROM agent_sessions WHERE id=?", (session_id,)).fetchone()
+            turns = db.execute(
+                "SELECT * FROM agent_turns WHERE session_id=? ORDER BY position", (session_id,)
+            ).fetchall()
+            events = db.execute(
+                "SELECT * FROM agent_events WHERE session_id=? ORDER BY sequence", (session_id,)
+            ).fetchall()
+        if not row:
+            raise ValueError(f"Unknown agent session: {session_id}")
+        result = dict(row)
+        result["allowed_tools"] = json.loads(result.pop("allowed_tools_json"))
+        result["turns"] = [self._agent_json_turn(item) for item in turns]
+        result["events"] = [self._agent_json_event(item) for item in events]
+        return result
+
+    def agent_session_list(
+        self, limit: int = 20, status: str | None = None
+    ) -> dict[str, Any]:
+        limit = max(1, min(limit, 100))
+        sql = "SELECT * FROM agent_sessions WHERE 1=1"
+        params: list[Any] = []
+        if status:
+            sql += " AND status=?"
+            params.append(status)
+        sql += " ORDER BY updated_at DESC,id DESC LIMIT ?"
+        params.append(limit)
+        with self.store.connect() as db:
+            rows = db.execute(sql, params).fetchall()
+        sessions = []
+        for row in rows:
+            card = dict(row)
+            card["allowed_tools"] = json.loads(card.pop("allowed_tools_json"))
+            sessions.append(card)
+        return {"sessions": sessions}
+
+    def agent_turn_run(
+        self, session_id: str, message: str,
+        event_callback: Callable[[dict[str, Any]], None] | None = None,
+        runtime: AgentRuntime | None = None,
+    ) -> dict[str, Any]:
+        if not isinstance(message, str) or not message.strip():
+            raise ValueError("message must not be empty")
+        session = self.agent_session_get(session_id)
+        if session["status"] != "active":
+            raise ValueError("Agent session is not active")
+        provider = self.model_provider_get(session["provider_id"], session["provider_version"])
+        if not provider["enabled"]:
+            raise ValueError("Model provider is disabled")
+        now = utc_now()
+        turn_id = new_id("turn")
+        with self.store.transaction() as db:
+            if db.execute(
+                "SELECT 1 FROM agent_turns WHERE session_id=? AND status='running'",
+                (session_id,),
+            ).fetchone():
+                raise ValueError("Agent session already has a running turn")
+            position = db.execute(
+                "SELECT COALESCE(MAX(position),0)+1 FROM agent_turns WHERE session_id=?",
+                (session_id,),
+            ).fetchone()[0]
+            db.execute(
+                """INSERT INTO agent_turns(
+                   id,session_id,position,input_text,status,created_at,updated_at
+                   ) VALUES(?,?,?,?,?,?,?)""",
+                (turn_id, session_id, position, message.strip(), "running", now, now),
+            )
+            event = self._agent_event(db, session_id, turn_id, "turn.started", {"position": position})
+        self._notify_agent(event_callback, event)
+        messages: list[dict[str, Any]] = []
+        if session["system_prompt"]:
+            messages.append({"role": "system", "content": session["system_prompt"]})
+        for old in session["turns"]:
+            if old["status"] == "completed":
+                messages.extend((
+                    {"role": "user", "content": old["input_text"]},
+                    {"role": "assistant", "content": old["output_text"]},
+                ))
+        messages.append({"role": "user", "content": message.strip()})
+        specs = self._agent_tool_specs()
+        selected = [specs[name] for name in session["allowed_tools"]]
+        usage: dict[str, float] = {}
+        engine = runtime or AgentRuntime()
+        try:
+            round_index = 0
+            while True:
+                self._emit_agent_event(session_id, turn_id, "provider.requested", {
+                    "round": round_index, "model": provider["model"]
+                }, event_callback)
+                response = engine.complete(provider, messages, selected)
+                for key, value in response["usage"].items():
+                    if isinstance(value, (int, float)) and not isinstance(value, bool):
+                        usage[key] = usage.get(key, 0) + value
+                calls = response["tool_calls"]
+                if not calls:
+                    output = response["text"]
+                    with self.store.transaction() as db:
+                        db.execute(
+                            "UPDATE agent_turns SET output_text=?,status='completed',usage_json=?,updated_at=? WHERE id=?",
+                            (output, json.dumps(usage), utc_now(), turn_id),
+                        )
+                        db.execute("UPDATE agent_sessions SET updated_at=? WHERE id=?", (utc_now(), session_id))
+                        event = self._agent_event(db, session_id, turn_id, "assistant.completed", {
+                            "text": output, "usage": usage,
+                        })
+                    self._notify_agent(event_callback, event)
+                    return self.agent_session_get(session_id)["turns"][-1]
+                if round_index >= session["max_tool_rounds"]:
+                    raise RuntimeError("Agent exceeded max_tool_rounds")
+                messages.append(response["assistant_message"])
+                tool_results = []
+                for call in calls:
+                    if call["name"] not in session["allowed_tools"]:
+                        raise RuntimeError(f"Agent requested a tool outside its allowlist: {call['name']}")
+                    self._emit_agent_event(session_id, turn_id, "tool.requested", {
+                        "id": call["id"], "name": call["name"], "arguments": call["arguments"]
+                    }, event_callback)
+                    result = self._run_agent_tool(call["name"], call["arguments"])
+                    self._emit_agent_event(session_id, turn_id, "tool.completed", {
+                        "id": call["id"], "name": call["name"], "result": result,
+                    }, event_callback)
+                    tool_results.append((call, result))
+                if provider["protocol"] == "anthropic":
+                    messages.append({"role": "user", "content": [
+                        {"type": "tool_result", "tool_use_id": call["id"],
+                         "content": json.dumps(result, ensure_ascii=False)}
+                        for call, result in tool_results
+                    ]})
+                else:
+                    messages.extend({
+                        "role": "tool", "tool_call_id": call["id"],
+                        "content": json.dumps(result, ensure_ascii=False),
+                    } for call, result in tool_results)
+                round_index += 1
+        except Exception as exc:
+            error = str(exc)[:1000]
+            with self.store.transaction() as db:
+                db.execute(
+                    "UPDATE agent_turns SET status='failed',error=?,usage_json=?,updated_at=? WHERE id=?",
+                    (error, json.dumps(usage), utc_now(), turn_id),
+                )
+                event = self._agent_event(db, session_id, turn_id, "turn.failed", {"error": error})
+            self._notify_agent(event_callback, event)
+            raise
+    def _run_agent_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        handlers: dict[str, Callable[..., dict[str, Any]]] = {
+            "craft_capability_search": self.capability_search,
+            "craft_capability_get": self.capability_get,
+            "craft_task_list": self.task_list,
+        }
+        try:
+            return handlers[name](**arguments)
+        except KeyError:
+            raise RuntimeError(f"Unknown agent tool: {name}") from None
+
+    def _emit_agent_event(
+        self, session_id: str, turn_id: str, event_type: str, payload: dict[str, Any],
+        callback: Callable[[dict[str, Any]], None] | None,
+    ) -> None:
+        with self.store.transaction() as db:
+            event = self._agent_event(db, session_id, turn_id, event_type, payload)
+        self._notify_agent(callback, event)
+
+    def _notify_agent(
+        self, callback: Callable[[dict[str, Any]], None] | None, event: dict[str, Any]
+    ) -> None:
+        if callback is None:
+            return
+        try:
+            callback(event)
+        except Exception as exc:
+            self.logger.warning(
+                "event=agent_event_callback_failed event_type=%s error_type=%s",
+                event["event_type"], type(exc).__name__,
+            )
+
+    @staticmethod
+    def _agent_event(db: Any, session_id: str, turn_id: str | None,
+                     event_type: str, payload: dict[str, Any]) -> dict[str, Any]:
+        sequence = db.execute(
+            "SELECT COALESCE(MAX(sequence),0)+1 FROM agent_events WHERE session_id=?",
+            (session_id,),
+        ).fetchone()[0]
+        created_at = utc_now()
+        db.execute(
+            "INSERT INTO agent_events(session_id,sequence,turn_id,event_type,payload_json,created_at) VALUES(?,?,?,?,?,?)",
+            (session_id, sequence, turn_id, event_type,
+             json.dumps(payload, ensure_ascii=False), created_at),
+        )
+        return {"session_id": session_id, "sequence": sequence, "turn_id": turn_id,
+                "event_type": event_type, "payload": payload, "created_at": created_at}
+
+    @staticmethod
+    def _agent_json_turn(row: Any) -> dict[str, Any]:
+        result = dict(row)
+        result["usage"] = json.loads(result.pop("usage_json"))
+        return result
+
+    @staticmethod
+    def _agent_json_event(row: Any) -> dict[str, Any]:
+        result = dict(row)
+        result["payload"] = json.loads(result.pop("payload_json"))
+        return result
 
     def store_backup(self, destination: str | None = None) -> dict[str, str]:
         return self.store.backup(Path(destination) if destination else None)

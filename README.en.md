@@ -28,7 +28,7 @@ discover → manage → match/select → compose/execute → preserve state/evid
 
 | Mode | Who owns the Agent loop and UI | Current Craft role |
 |---|---|---|
-| Craft Agent | Craft | Standalone CLI and future desktop app; the control CLI exists, while the interactive Agent loop and desktop UI are planned |
+| Craft Agent | Craft | Interactive CLI, persistent sessions, provider tool loop, and structured events are in preview; desktop remains planned |
 | Craft Supervisor | Craft | An upper-layer app delegating execution to Codex, Claude, DSH, or custom hosts; the orchestration protocol exists, while native drivers need certification |
 | Craft Provider | Codex, Claude, or another Agent | Plugin, MCP, Skill, CLI, and DSH adapter capabilities; available today |
 
@@ -126,6 +126,27 @@ python3 -m venv .venv
 .venv/bin/craft add-source /path/to/skills
 .venv/bin/craft search "diagnose service failure"
 ```
+
+## Use Craft directly as an Agent (preview)
+
+Provider profiles persist an endpoint, model, and API-key environment variable
+name, never the key itself. Use `openai-compatible` for compatible services and
+`anthropic` for Claude:
+
+```bash
+export MY_MODEL_API_KEY="your-key"
+craft provider-save my-model openai-compatible https://example.com/v1 model-name --api-key-env MY_MODEL_API_KEY
+craft provider-list
+craft chat --provider-id provider_xxx --system-prompt "You are my work assistant"
+```
+
+`/exit` closes the interactive prompt while sessions, turns, usage, and events
+remain under `~/.craft_data`. Add `--message "..." --json-events` for JSONL
+lifecycle events. These currently cover requests, tool calls, completion, and
+failure; token-delta streaming is still planned. The tool loop starts with no
+permissions. `--allowed-tools-json` may explicitly enable the built-in read-only
+capability-search, capability-read, and task-list tools; shell and external writes
+are not exposed in this first version.
 
 ## Codex
 

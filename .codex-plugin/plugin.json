@@ -1,7 +1,7 @@
 {
   "name": "craft",
   "version": "0.1.0",
-  "description": "Capability discovery, durable tasks, multi-agent orchestration, evaluation, and reusable workflows.",
+  "description": "Standalone agent runtime, capability discovery, durable tasks, multi-agent orchestration, evaluation, and reusable workflows.",
   "author": {
     "name": "wdx9413",
     "url": "https://github.com/wdx9413"
@@ -14,10 +14,10 @@
   "interface": {
     "displayName": "Craft",
     "shortDescription": "Discover, orchestrate, evaluate, and reuse capabilities.",
-    "longDescription": "Craft indexes user-selected capabilities and manages durable task state, host-mediated multi-agent plans, evidence, evaluations, and reusable workflows under ~/.craft_data.",
+    "longDescription": "Craft provides a preview standalone agent runtime, indexes user-selected capabilities, and manages durable task state, host-mediated multi-agent plans, evidence, evaluations, and reusable workflows under ~/.craft_data.",
     "developerName": "wdx9413",
     "category": "Productivity",
-    "capabilities": ["Capability search", "Task continuity", "Multi-agent orchestration", "Evaluation", "Workflow learning"],
+    "capabilities": ["Standalone agent CLI", "Capability search", "Task continuity", "Multi-agent orchestration", "Evaluation", "Workflow learning"],
     "defaultPrompt": [
       "Use Craft to continue a saved task.",
       "Find relevant capabilities for this task.",

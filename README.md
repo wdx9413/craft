@@ -28,7 +28,7 @@ Craft 把这些问题收敛为一条能力生命周期：
 
 | 形态 | 谁拥有 Agent Loop 与用户界面 | Craft 当前提供什么 |
 |---|---|---|
-| Craft Agent | Craft | 独立 CLI/未来桌面端；当前已有控制面 CLI，交互式 Agent Loop 与桌面端待实现 |
+| Craft Agent | Craft | 独立交互 CLI、持久会话、Provider Tool Loop 与结构化事件已进入预览；桌面端待实现 |
 | Craft Supervisor | Craft | 作为上层应用，把执行委派给 Codex、Claude、DSH 或自建 Host；编排协议已可用，原生 Driver 待认证 |
 | Craft Provider | Codex、Claude 或其他 Agent | 通过插件、MCP、Skill、CLI、DSH Adapter 提供能力目录、状态、Workflow、证据和评测；当前已可用 |
 
@@ -131,6 +131,27 @@ craft search "诊断服务故障"
 ```
 
 macOS / Linux 将 `.venv\Scripts\python` 换成 `.venv/bin/python`。
+
+## 把 Craft 直接当作 Agent 使用（预览）
+
+Provider Profile 只保存端点、模型名和“密钥所在的环境变量名”，不会把 API Key 写进
+`~/.craft_data`。OpenAI-compatible 端点可用于 OpenAI 兼容服务（包括由用户配置的
+DeepSeek、GLM、Kimi、MiniMax、火山引擎等端点）；Claude 使用 `anthropic` 协议。
+
+```powershell
+$env:MY_MODEL_API_KEY = "你的密钥"
+craft provider-save my-model openai-compatible https://example.com/v1 model-name --api-key-env MY_MODEL_API_KEY
+craft provider-list
+craft chat --provider-id provider_xxx --system-prompt "你是我的工作助手"
+```
+
+输入 `/exit` 退出；会话、Turn、用量和事件仍保存在 `~/.craft_data`。用
+`--message "..." --json-events` 可输出适合程序消费的逐行 JSON 生命周期事件。目前事件
+覆盖请求、工具调用、完成与失败，但尚不是逐 Token 文本流。
+
+Tool Loop 默认没有工具权限。可在创建会话时通过 `--allowed-tools-json` 显式开启内置只读
+工具，例如 `craft_capability_search`、`craft_capability_get`、`craft_task_list`；第一版不允许
+模型借此执行 Shell 或外部写操作。
 
 ## 在 Codex 中使用
 
@@ -272,4 +293,4 @@ craft_agent_profile_save（角色、宿主、模型、权限）
 
 ## 当前边界
 
-Craft v0.1 仍是本地技术预览版，覆盖能力检索、长任务接续、验证、恢复、可追溯产物与证据、原子预算预留与结算、人工驱动的版本评测，以及带超时恢复和审计事件的宿主介导多 Agent 编排，不是无人值守的后台执行平台。当前暂不包含远程 Skill Hub 同步、向量检索、图形界面、Workspace 文件快照、定时/后台调度和宿主进程自动拉起。预算原语已经可靠，但仍需由宿主显式调用，尚未自动嵌入所有 Workflow/编排派发。SQLite 是默认检索方式，Embedding Provider 将保持可选。
+Craft v0.1 仍是本地技术预览版，覆盖能力检索、长任务接续、验证、恢复、可追溯产物与证据、原子预算预留与结算、人工驱动的版本评测、带超时恢复和审计事件的宿主介导多 Agent 编排，以及初版独立 Agent CLI，不是无人值守的后台执行平台。当前暂不包含远程 Skill Hub 同步、向量检索、图形界面、逐 Token 流、Workspace 文件快照、定时/后台调度和宿主进程自动拉起。预算原语已经可靠，但仍需由宿主显式调用，尚未自动嵌入所有 Workflow/编排派发。SQLite 是默认检索方式，Embedding Provider 将保持可选。

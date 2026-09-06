@@ -23,6 +23,13 @@ TOOLS = [
     {"name": "craft_info", "description": "Show Craft data location and local record counts.", "inputSchema": schema({}), "annotations": {"readOnlyHint": True}},
     {"name": "craft_usage_mode_list", "description": "List the standalone Agent, supervisor application, and capability-provider product modes with honest availability boundaries.", "inputSchema": schema({}), "annotations": {"readOnlyHint": True}},
     {"name": "craft_usage_mode_get", "description": "Read one Craft product mode, its ownership boundary, and current or planned surfaces.", "inputSchema": schema({"mode": {"type": "string", "enum": ["standalone", "supervisor", "capability-provider"]}}, ["mode"]), "annotations": {"readOnlyHint": True}},
+    {"name": "craft_model_provider_save", "description": "Save a versioned model endpoint profile; only an API-key environment variable name is persisted.", "inputSchema": schema({"name": {"type": "string"}, "protocol": {"type": "string", "enum": ["openai-compatible", "anthropic"]}, "base_url": {"type": "string"}, "model": {"type": "string"}, "api_key_env": {"type": "string"}, "options": {"type": "object"}, "enabled": {"type": "boolean"}, "provider_id": {"type": "string"}}, ["name", "protocol", "base_url", "model"])},
+    {"name": "craft_model_provider_get", "description": "Read a model provider profile without resolving its credential.", "inputSchema": schema({"provider_id": {"type": "string"}, "version": {"type": "integer"}}, ["provider_id"]), "annotations": {"readOnlyHint": True}},
+    {"name": "craft_model_provider_list", "description": "List latest model provider profiles.", "inputSchema": schema({"limit": {"type": "integer"}, "include_disabled": {"type": "boolean"}}), "annotations": {"readOnlyHint": True}},
+    {"name": "craft_agent_session_start", "description": "Start a persistent standalone Agent session with an explicit Craft-tool allowlist.", "inputSchema": schema({"provider_id": {"type": "string"}, "provider_version": {"type": "integer"}, "title": {"type": "string"}, "system_prompt": {"type": "string"}, "max_tool_rounds": {"type": "integer"}, "allowed_tools": {"type": "array", "items": {"type": "string"}}, "session_id": {"type": "string"}}, ["provider_id"])},
+    {"name": "craft_agent_session_get", "description": "Read persistent turns and structured events for an Agent session.", "inputSchema": schema({"session_id": {"type": "string"}}, ["session_id"]), "annotations": {"readOnlyHint": True}},
+    {"name": "craft_agent_session_list", "description": "List persistent standalone Agent sessions.", "inputSchema": schema({"limit": {"type": "integer"}, "status": {"type": "string"}}), "annotations": {"readOnlyHint": True}},
+    {"name": "craft_agent_turn_run", "description": "Run one model turn with a bounded, allowlisted Craft tool loop and persist its event trail.", "inputSchema": schema({"session_id": {"type": "string"}, "message": {"type": "string"}}, ["session_id", "message"])},
     {"name": "craft_artifact_register", "description": "Register a portable artifact reference and immutable producer metadata without copying its content.", "inputSchema": schema({"kind": {"type": "string"}, "name": {"type": "string"}, "uri": {"type": "string"}, "media_type": {"type": "string"}, "digest": {"type": "string"}, "size_bytes": {"type": "integer", "minimum": 0}, "producer_type": {"type": "string"}, "producer_id": {"type": "string"}, "metadata": {"type": "object"}, "artifact_id": {"type": "string"}}, ["kind", "name", "uri"])},
     {"name": "craft_artifact_get", "description": "Read an artifact reference and its producer metadata.", "inputSchema": schema({"artifact_id": {"type": "string"}}, ["artifact_id"]), "annotations": {"readOnlyHint": True}},
     {"name": "craft_artifact_list", "description": "List artifacts by kind or producer across Agent hosts.", "inputSchema": schema({"limit": {"type": "integer", "minimum": 1, "maximum": 100}, "kind": {"type": "string"}, "producer_type": {"type": "string"}, "producer_id": {"type": "string"}}), "annotations": {"readOnlyHint": True}},
@@ -96,6 +103,9 @@ class McpServer:
             f"craft_{name}": getattr(self.service, name) for name in (
                 "host_adapter_probe",
                 "usage_mode_list", "usage_mode_get",
+                "model_provider_save", "model_provider_get", "model_provider_list",
+                "agent_session_start", "agent_session_get", "agent_session_list",
+                "agent_turn_run",
                 "store_backup", "store_doctor", "store_restore",
                 "artifact_register", "artifact_get", "artifact_list",
                 "evidence_record", "evidence_get", "evidence_list",
@@ -145,7 +155,7 @@ class McpServer:
             try:
                 result = self.handlers[name](**(params.get("arguments") or {}))
                 return self._ok(request_id, {"content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False, indent=2)}], "structuredContent": result, "isError": False})
-            except (TypeError, ValueError) as exc:
+            except (TypeError, ValueError, RuntimeError) as exc:
                 self.service.logger.warning(
                     "event=mcp_call_rejected tool=%s error_type=%s", name, type(exc).__name__
                 )
