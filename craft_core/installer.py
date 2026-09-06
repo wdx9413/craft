@@ -18,6 +18,8 @@ PLUGIN_ITEMS = (
     ".mcp.json",
     "LICENSE",
     "README.md",
+    "README.en.md",
+    "docs",
     "pyproject.toml",
 )
 

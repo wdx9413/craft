@@ -84,6 +84,9 @@ class McpServer:
                 result = self.handlers[name](**(params.get("arguments") or {}))
                 return self._ok(request_id, {"content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False, indent=2)}], "structuredContent": result, "isError": False})
             except (TypeError, ValueError) as exc:
+                self.service.logger.warning(
+                    "event=mcp_call_rejected tool=%s error_type=%s", name, type(exc).__name__
+                )
                 return self._ok(request_id, {"content": [{"type": "text", "text": str(exc)}], "isError": True})
         return self._error(request_id, -32601, f"Method not found: {method}")
 

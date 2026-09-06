@@ -1,112 +1,137 @@
 # Craft
 
-Craft is a local-first capability catalog and task continuity layer for AI agents. Version 0.1 indexes user-selected `SKILL.md` libraries, stores explicit task checkpoints and feedback, and saves versioned workflow candidates. It ships as a Codex plugin, a Claude Code-compatible plugin, an MCP server, and a Python CLI.
+[简体中文](README.md) | [English](README.en.md)
 
-The bundled `skills/craft` directory is Craft's own Codex entry skill. User or work skills stay in any external directories the user registers. Craft supports multiple sources, resolves source symlinks and Windows junctions to real paths, follows nested directory links with cycle detection, and stores the real file path for each indexed Skill.
+Craft 是面向 AI Agent 的本地优先能力目录、任务接续和可信工作流工具。它让 Codex、Claude 等宿主复用同一套 Skill 索引、任务状态、验证规则与恢复记录。
 
-Runtime data defaults to `~/.craft_data` and is never stored in the active project. `CRAFT_DATA_DIR` is available for isolated tests and managed deployments.
+## 能做什么
 
-## Requirements
+- 注册多个外部 Skill 文件夹，并增量更新本地索引。
+- 从上万个 Skill 中先检索少量候选，再加载真正需要的内容。
+- 保存任务进度、决策、反馈与 Artifact 引用，供新会话接续。
+- 组合程序验证、模型判断和人工审批。
+- 控制本地写入、外部写入和破坏性操作的授权边界。
+- 在可信 checkpoint 处恢复，同时保留原始失败历史。
 
-- Python 3.11 or newer.
-- Windows, macOS, or Linux.
-- [`uv`](https://docs.astral.sh/uv/getting-started/installation/) when installing the MCP server through a marketplace.
+所有运行数据默认保存在 `~/.craft_data`，不会写入当前业务项目。
 
-## Python CLI
+## 环境要求
 
-Install in an isolated environment on Windows:
+- Python 3.11+
+- Windows、macOS 或 Linux
+- 从 Codex Marketplace 启动 MCP 时需要 [`uv`](https://docs.astral.sh/uv/getting-started/installation/)
 
-```powershell
-py -3 -m venv .venv
-.venv\Scripts\python -m pip install -e .
-```
+## 从源码开始使用
 
-Then run:
+克隆仓库后，在项目根目录执行：
 
-```powershell
-craft info
-craft add-source D:\path\to\skills
-craft search "diagnose service failure"
-```
-
-On macOS or Linux:
-
-```bash
-python3 -m venv .venv
-.venv/bin/python -m pip install -e .
-.venv/bin/craft info
-```
-
-The source commands also support `list-sources`, `scan`, `update-source`, and `remove-source`. Removing a source deletes only Craft's index entries, never the source files.
-
-## Executable workflows
-
-Craft workflows can contain typed inputs, preconditions, ordered command/assertion/coverage steps, structured success criteria, artifact references, and a bounded repair policy. `craft_workflow_plan` resolves inputs without execution. `craft_workflow_run` executes one explicitly authorized attempt and returns one of `passed`, `needs_repair`, `failed`, or `no_progress`; `craft_workflow_run_get` returns the complete receipt history.
-
-Pass/fail is determined by command exit codes and code evaluators, not by model judgment. The Python `coverage_gate` intersects a coverage.py JSON report with changed executable lines and branches from a Git baseline, and treats changed Python files missing from the report as uncovered. When a run needs repair, Codex or another host agent uses the returned evidence to make an authorized change and resumes the same `run_id`; Craft enforces attempt and no-progress limits. See `skills/craft/references/workflow-runtime.md` for the schema and a complete incremental-coverage example.
-
-Workflows are not limited to programmatic checks. Mixed sessions add `agent`, `judge`, and `human` nodes alongside deterministic nodes. `craft_workflow_start` advances to the next external request, `craft_workflow_submit` records its structured result and provenance, and `on_result` routes to repair, approval, success, or failure. This lets the current Codex inspect coverage with its own tools, judge a video or document against a rubric, or request human approval without requiring Craft to call a second model or own provider credentials. Model conclusions remain labeled `agent_reported` or `model_judged`, while code evaluators are labeled `program_verified`.
-
-Craft keeps the agent loop thin and the control plane portable. A workflow may declare outcome `invariants` instead of prescribing every action; Craft compiles program, model, and human enforcement into ordinary nodes. Every node declares `read_only`, `local_write`, `external_write`, or `destructive` side effects, and execution stops until the required class is explicitly approved. Passed program checks and human approvals create content-addressed trusted checkpoints. `craft_workflow_restore` branches a new auditable session from one of those checkpoints instead of rewriting history.
-
-## Codex
-
-The Codex manifest is `.codex-plugin/plugin.json`; it loads the Craft Skill and `.mcp.json`. The GitHub repository is also a Codex marketplace through `.agents/plugins/marketplace.json`.
-
-After `craft-agent-harness==0.1.0` is published to PyPI:
-
-1. Install `uv` and make sure `uvx --version` succeeds in the environment that launches Codex.
-2. Open `/plugins` in Codex and choose **Add Marketplace**.
-3. Enter `https://github.com/wdx9413/craft` as the source, leave the path empty, and select `main` while testing or a release tag for a reproducible install.
-4. Install Craft and start a new Codex session.
-
-The marketplace MCP configuration runs `uvx --from craft-agent-harness==0.1.0 craft-mcp`. `uvx` creates and caches an isolated Python environment, while Craft continues to store runtime data under `~/.craft_data`.
-
-For source development, create a platform-resolved local plugin copy instead. The installer records the exact Python executable that ran it, so the generated MCP config does not depend on `py`, `python`, or `python3` being present in a GUI application's `PATH`.
-
-Windows:
+Windows：
 
 ```powershell
 py -3 scripts/install_plugin.py
 ```
 
-macOS or Linux:
+macOS / Linux：
 
 ```bash
 python3 scripts/install_plugin.py
 ```
 
-The default target is `~/plugins/craft`; `--target` can select another directory. Add that installed copy to a local marketplace, install Craft, and start a new Codex conversation before using its Skill and MCP tools.
+默认安装到 `~/plugins/craft`。安装器会记录当前 Python 的绝对路径，避免 Codex 或 Claude 的 GUI 进程找不到 Python。
 
-## Claude Code
+也可以只使用 CLI：
 
-The Claude manifest is `.claude-plugin/plugin.json` and uses the same generated `.mcp.json`. Point Claude Code at the installed copy:
+```powershell
+py -3 -m venv .venv
+.venv\Scripts\python -m pip install -e .
+craft info
+craft add-source D:\path\to\skills
+craft search "诊断服务故障"
+```
+
+macOS / Linux 将 `.venv\Scripts\python` 换成 `.venv/bin/python`。
+
+## 在 Codex 中使用
+
+仓库包含 `.codex-plugin/plugin.json`、`.mcp.json` 和 `.agents/plugins/marketplace.json`。
+
+当 `craft-agent-harness==0.1.0` 已发布到 PyPI 后：
+
+1. 确认 `uvx --version` 可以执行。
+2. 在 Codex 打开 `/plugins`，选择 **Add Marketplace**。
+3. 来源填写 `https://github.com/wdx9413/craft`。
+4. 稀疏路径留空；测试阶段选 `main`，正式使用建议选 Git Tag。
+5. 安装 Craft，并开始一个新会话。
+
+目前 PyPI 首次发布尚未完成；在此之前请使用上面的源码安装方式。
+
+## 在 Claude Code 中使用
+
+Craft 包含 `.claude-plugin/plugin.json`，并与 Codex 共用 MCP：
 
 ```bash
 claude --plugin-dir ~/plugins/craft
 ```
 
-Then inspect `/mcp` and invoke `/craft:craft`, or let Claude select the Skill from the task context.
+随后使用 `/mcp` 检查连接，并调用 `/craft:craft`；也可以让 Claude 根据任务自动选择 Craft Skill。
 
-## Test and coverage
+## 常见使用流程
+
+### 添加并搜索 Skill 库
+
+让 Agent 调用：
+
+```text
+craft_source_add(path="你的 Skill 文件夹")
+craft_capability_search(query="当前任务需要的能力")
+craft_capability_get(asset_id="选中的能力 ID")
+```
+
+Source 可以是普通目录、symlink 或 Windows junction。删除 Source 只删除索引，不删除原文件。
+
+### 保存并接续任务
+
+```text
+craft_task_open → craft_task_checkpoint → 新会话 craft_task_open(task_id=...)
+```
+
+### 运行可信 Workflow
+
+```text
+craft_workflow_plan
+→ craft_workflow_start
+→ Agent / Judge / Human 节点
+→ craft_workflow_submit
+→ passed / repair / approval / restore
+```
+
+`allow_execution=true` 只授权本地写入。外部写入和破坏性操作必须通过 `approved_side_effects` 单独授权。
+
+## 日志
+
+Craft 默认把简洁 INFO 日志写到 stderr，不占用 MCP 的 stdout，因此不会破坏 STDIO JSON-RPC。日志不自动记录 Prompt、凭据或完整业务正文。
 
 ```powershell
-py -3 -m venv .venv
-.venv\Scripts\python -m pip install -e ".[dev]"
-.venv\Scripts\python -m coverage run -m unittest discover -s tests
+$env:CRAFT_LOG_LEVEL = "WARNING"
+```
+
+macOS / Linux 使用 `export CRAFT_LOG_LEVEL=WARNING`。可选级别为 `DEBUG`、`INFO`、`WARNING`、`ERROR`。
+
+## 文档
+
+- [架构与可信控制面](docs/architecture.zh-CN.md)
+- [Workflow 字段、状态与示例](skills/craft/references/workflow-runtime.md)
+- [MCP 工具说明](skills/craft/references/tool-contract.md)
+
+## 测试
+
+```powershell
+.venv\Scripts\python -m coverage run --branch -m unittest discover -s tests
 .venv\Scripts\python -m coverage report
 ```
 
-Use `.venv/bin/python` instead on macOS or Linux. GitHub Actions is configured to run the same coverage gate on Windows, macOS, and Linux with Python 3.11 and 3.13.
+项目要求语句和分支覆盖率均为 100%。CI 覆盖 Windows、macOS、Linux 与 Python 3.11/3.13。
 
-The repository enforces 100% statement and branch coverage with `fail_under = 100`.
+## 当前边界
 
-## Marketplace sources
-
-The repository includes a Codex marketplace at `.agents/plugins/marketplace.json`. It currently follows `main` for prerelease testing. Before announcing a stable release, change its `ref` to the corresponding Git tag after the exact Python package version is available on PyPI. A full commit `sha` can be used when installations must remain immutable.
-
-`craft_capability_search` refreshes sources older than five minutes by default, then searches SQLite. It does not send the full library to Codex; only compact matches are returned, and the selected Skill is loaded separately.
-
-## v0.1 boundary
-
-Craft v0.1 is a local technical alpha. It does not yet synchronize remote Skill hubs, run vector retrieval, automatically promote workflows without user-visible agent calls, or provide a graphical interface. SQLite keyword search is the default; embedding providers remain an optional later adapter.
+Craft v0.1 仍是本地技术预览版，暂不包含远程 Skill Hub 同步、向量检索、图形界面、Workspace 文件快照和并行 Agent 调度。SQLite 是默认检索方式，Embedding Provider 将保持可选。

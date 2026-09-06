@@ -1,5 +1,17 @@
 # Workflow runtime
 
+本文件说明 Craft 的工作流格式和执行语义。简单理解：宿主 Agent 决定“怎么做”，Craft 负责“做到什么算完成、允许产生什么副作用、证据从哪里来，以及失败后从哪里恢复”。下面保留字段英文名，便于直接对照 MCP 参数。
+
+常用节点：
+
+- `command` / `assertion` / `coverage_gate`：由程序确定性执行或验收。
+- `agent`：由当前 Codex、Claude 等宿主完成任务。
+- `judge`：由模型根据 rubric 和 Evidence 判断。
+- `human`：等待用户明确批准或拒绝。
+- `invariants`：只声明必须满足的性质，不把 Agent 的实现步骤写死。
+
+运行前先调用 `craft_workflow_plan` 查看计划。遇到 `needs_execution_approval` 时，必须根据 `side_effect` 获取对应授权；`allow_execution=true` 只代表本地写入授权。程序验证或人工批准会形成可信 checkpoint，失败后可通过 `craft_workflow_restore` 从该位置派生新 Session。
+
 Craft executes structured workflow attempts; the host agent performs repairs. A workflow can contain:
 
 - `inputs`: named values with `required` and `default`.

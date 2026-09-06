@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sqlite3
 import subprocess
@@ -15,6 +16,7 @@ from unittest.mock import patch
 from craft_core.catalog import iter_skill_files, parse_skill, stable_id
 from craft_core.cli import main as cli_main
 from craft_core.installer import install_plugin, main as installer_main, mcp_config, resolved_python
+from craft_core.log import get_logger, log_event
 from craft_core.mcp import McpServer, main as mcp_main
 from craft_core.orchestrator import (
     approved_effects, compile_invariants, external_request, next_cursor,
@@ -403,6 +405,21 @@ class CraftServiceTests(unittest.TestCase):
 
 
 class CatalogUtilityTests(unittest.TestCase):
+    def test_stderr_logging_is_concise_and_configurable(self) -> None:
+        logger = logging.getLogger("craft")
+        for handler in list(logger.handlers):
+            if getattr(handler, "_craft_handler", False):
+                logger.removeHandler(handler)
+        with patch.dict(os.environ, {"CRAFT_LOG_LEVEL": "not-a-level"}):
+            logger = get_logger()
+        self.assertEqual(logger.level, logging.INFO)
+        self.assertTrue(any(getattr(item, "_craft_handler", False) for item in logger.handlers))
+        with self.assertLogs("craft", level="INFO") as captured:
+            log_event(logger, "empty", omitted=None)
+            log_event(logger, "sample", session_id="session_1", status="passed")
+        self.assertIn("event=empty", captured.output[0])
+        self.assertIn("session_id=session_1 status=passed", captured.output[1])
+
     def test_parse_skill_and_stable_id(self) -> None:
         metadata, body = parse_skill("plain body", "fallback")
         self.assertEqual(metadata, {"name": "fallback", "description": ""})
@@ -585,6 +602,8 @@ class CrossPlatformInstallTests(unittest.TestCase):
             self.assertEqual(result["plugin_root"], str(target.resolve()))
             self.assertTrue((target / ".codex-plugin" / "plugin.json").is_file())
             self.assertTrue((target / ".claude-plugin" / "plugin.json").is_file())
+            self.assertTrue((target / "README.en.md").is_file())
+            self.assertTrue((target / "docs" / "architecture.zh-CN.md").is_file())
             self.assertFalse((target / "tests").exists())
             message = json.dumps(
                 {

@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import uuid
 from pathlib import Path
 from typing import Any
 
 from .catalog import Catalog, utc_now
+from .log import get_logger, log_event
 from .orchestrator import (
     EXTERNAL_STATES, TERMINALS, approved_effects, compile_invariants,
     external_request, next_cursor, normalize_steps, normalize_submission,
@@ -23,6 +25,7 @@ class CraftService:
     def __init__(self, store: CraftStore | None = None) -> None:
         self.store = store or CraftStore()
         self.catalog = Catalog(self.store)
+        self.logger = get_logger()
 
     def info(self) -> dict[str, Any]:
         with self.store.connect() as db:
@@ -239,6 +242,10 @@ class CraftService:
                 ) VALUES(?,?,?,?,?,?,?,?,?,?)""",
                 (workflow_id, version, name, goal, scope, status, encoded, source_task_id, digest, utc_now()),
             )
+        log_event(
+            self.logger, "workflow_saved", workflow_id=workflow_id, version=version,
+            steps=len(steps), level=logging.DEBUG,
+        )
         return {"id": workflow_id, "version": version, "status": status, "digest": digest, "workflow": workflow}
 
     def workflow_plan(
@@ -375,6 +382,10 @@ class CraftService:
                     "UPDATE workflows SET status='tested' WHERE id=? AND version=? AND status='candidate'",
                     (workflow_id, plan["workflow_version"]),
                 )
+        log_event(
+            self.logger, "workflow_run_finished", run_id=run_id, status=status,
+            attempt=attempt, verified_steps=len(results),
+        )
         return receipt
 
     def workflow_run_get(self, run_id: str) -> dict[str, Any]:
@@ -415,6 +426,7 @@ class CraftService:
                 (session_id, workflow_id, plan["workflow_version"], plan["project_root"],
                  json.dumps(plan["inputs"], ensure_ascii=False), max_transitions, now, now),
             )
+        log_event(self.logger, "workflow_session_started", session_id=session_id, workflow_id=workflow_id)
         return self._workflow_advance(
             session_id, approved_effects(allow_execution, approved_side_effects)
         )
@@ -515,6 +527,7 @@ class CraftService:
                         "UPDATE workflow_sessions SET status='passed',updated_at=? WHERE id=?",
                         (utc_now(), session_id),
                     )
+                log_event(self.logger, "workflow_session_finished", session_id=session_id, status="passed")
                 return self.workflow_session_get(session_id)
             if session["transition_count"] >= session["max_transitions"]:
                 with self.store.transaction() as db:
@@ -522,6 +535,7 @@ class CraftService:
                         "UPDATE workflow_sessions SET status='transition_limit',updated_at=? WHERE id=?",
                         (utc_now(), session_id),
                     )
+                log_event(self.logger, "workflow_session_finished", session_id=session_id, status="transition_limit")
                 return self.workflow_session_get(session_id)
             step = plan["steps"][session["cursor"]]
             kind = str(step.get("type"))
@@ -531,6 +545,10 @@ class CraftService:
                         "UPDATE workflow_sessions SET status='needs_execution_approval',updated_at=? WHERE id=?",
                         (utc_now(), session_id),
                     )
+                log_event(
+                    self.logger, "workflow_approval_required", session_id=session_id,
+                    step_id=step["id"], side_effect=step["side_effect"],
+                )
                 return self.workflow_session_get(session_id)
             if kind in EXTERNAL_STATES:
                 with self.store.transaction() as db:
@@ -538,6 +556,10 @@ class CraftService:
                         "UPDATE workflow_sessions SET status=?,updated_at=? WHERE id=?",
                         (EXTERNAL_STATES[kind], utc_now(), session_id),
                     )
+                log_event(
+                    self.logger, "workflow_external_wait", session_id=session_id,
+                    step_id=step["id"], step_type=kind, level=logging.DEBUG,
+                )
                 return self.workflow_session_get(session_id)
             detail = execute_steps([step], Path(session["project_root"]))[0]
             verdict = "passed" if detail["passed"] else "failed"
@@ -577,6 +599,11 @@ class CraftService:
                    transition_count=?,updated_at=? WHERE id=?""",
                 (json.dumps(context, ensure_ascii=False), cursor, status, sequence, now, session["id"]),
             )
+        log_event(
+            self.logger, "workflow_transition", session_id=session["id"],
+            sequence=sequence, step_id=step["id"], verdict=verdict,
+            provenance=provenance, status=status, level=logging.DEBUG,
+        )
         if verdict == "passed" and provenance in {"program_verified", "human_approved"}:
             self._create_workflow_checkpoint(
                 session, sequence, context, cursor, provenance, f"trusted:{step['id']}"
@@ -624,6 +651,10 @@ class CraftService:
                     parent["max_transitions"], checkpoint_id, now, now,
                 ),
             )
+        log_event(
+            self.logger, "workflow_session_restored", session_id=session_id,
+            checkpoint_id=checkpoint_id,
+        )
         return self._workflow_advance(
             session_id, approved_effects(allow_execution, approved_side_effects)
         )
@@ -647,19 +678,24 @@ class CraftService:
         }
         encoded = json.dumps(snapshot, ensure_ascii=False, sort_keys=True)
         with self.store.transaction() as db:
+            checkpoint_id = new_id("wcp")
             db.execute(
                 """INSERT INTO workflow_checkpoints(
                    id,session_id,sequence,workflow_id,workflow_version,project_root,
                    inputs_json,context_json,cursor,provenance,reason,digest,created_at)
                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
-                    new_id("wcp"), session["id"], sequence, session["workflow_id"],
+                    checkpoint_id, session["id"], sequence, session["workflow_id"],
                     session["workflow_version"], session["project_root"],
                     json.dumps(session["inputs"], ensure_ascii=False),
                     json.dumps(context, ensure_ascii=False), cursor, provenance, reason,
                     hashlib.sha256(encoded.encode("utf-8")).hexdigest(), utc_now(),
                 ),
             )
+        log_event(
+            self.logger, "workflow_checkpoint_created", session_id=session["id"],
+            checkpoint_id=checkpoint_id, sequence=sequence, provenance=provenance,
+        )
 
     def workflow_search(
         self,

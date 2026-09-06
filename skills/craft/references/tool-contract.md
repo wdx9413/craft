@@ -1,30 +1,38 @@
-# Craft tool contract
+# Craft 工具说明
 
-All public MCP tool names begin with `craft_`.
+所有公开 MCP 工具统一使用 `craft_` 前缀。
 
-- `craft_info`: read the resolved data directory and counts.
-- `craft_source_add`: register a user-selected directory; `scan` defaults to true.
-- `craft_source_list`: show requested paths, resolved real paths, and refresh state.
-- `craft_source_update`: enable, disable, or relabel one source.
-- `craft_source_remove`: forget one source and its index without deleting source files.
-- `craft_source_scan`: rescan one source by ID, or all sources when omitted.
-- `craft_capability_search`: refresh sources older than `stale_after_seconds` when enabled, then retrieve at most 20 compact candidates; default 6.
-- `craft_capability_get`: retrieve one indexed asset and its full body.
-- `craft_task_open`: pass `task_id` to continue, or `title` and optional `goal/project_id` to create.
-- `craft_task_list`: list recent tasks, optionally filtered by status or project.
-- `craft_task_checkpoint`: save summary plus completed, pending, decisions, artifact references, and optional status.
-- `craft_feedback_record`: use kind `correction`, `preference`, `fact`, `exception`, or `process`; use scope `task`, `project`, or `user`.
-- `craft_workflow_save`: save a versioned workflow with name, goal, structured steps, declarative invariants, and permission policy.
-- `craft_workflow_search`: find the latest non-deprecated workflow versions.
-- `craft_workflow_get`: load the latest or a specified workflow version.
-- `craft_workflow_plan`: resolve inputs and preview command, assertion, and coverage-gate steps without execution.
-- `craft_workflow_run`: execute one explicitly authorized attempt and return `passed`, `needs_repair`, `failed`, or `no_progress` with deterministic evidence.
-- `craft_workflow_run_get`: load a run plus all immutable attempt receipts.
-- `craft_workflow_start`: start a mixed program/model/human workflow and advance until external work or approval is needed.
-- `craft_workflow_continue`: resume a mixed workflow with explicit side-effect grants.
-- `craft_workflow_submit`: submit the pending agent, judge, or human result and follow its transition.
-- `craft_workflow_session_get`: read pending work and provenance-bearing event history.
-- `craft_workflow_checkpoint_list`: list trusted program-verified and human-approved recovery points.
-- `craft_workflow_restore`: branch a new session from a trusted checkpoint without rewriting the original history.
+## Skill 来源与检索
 
-Craft labels records as `agent_reported`, `user_explicit`, or another caller-provided source. These labels describe provenance, not independent verification.
+- `craft_info`：查看数据目录和各类记录数量。
+- `craft_source_add`：注册用户选择的 Skill 目录，默认立即扫描。
+- `craft_source_list`：查看请求路径、解析后的真实路径和刷新状态。
+- `craft_source_update`：启用、停用或修改来源名称。
+- `craft_source_remove`：删除来源及其索引，不删除原始文件。
+- `craft_source_scan`：增量扫描单个来源；不传 ID 时扫描全部启用来源。
+- `craft_capability_search`：刷新过期来源后，从本地索引返回少量候选。
+- `craft_capability_get`：读取选中能力的完整内容和真实路径。
+
+## 任务与反馈
+
+- `craft_task_open`：传入 `task_id` 接续任务；或使用标题、目标创建任务。
+- `craft_task_list`：按状态或项目筛选最近任务。
+- `craft_task_checkpoint`：保存进度、待办、决策和 Artifact 引用。
+- `craft_feedback_record`：记录用户明确给出的纠正、偏好、事实、例外或流程规则，并保留适用范围。
+
+## Workflow
+
+- `craft_workflow_save`：保存带版本的 Workflow，支持输入、步骤、声明式不变量、Evidence 要求和权限策略。
+- `craft_workflow_search`：搜索最新且未废弃的 Workflow。
+- `craft_workflow_get`：读取最新版本或指定版本。
+- `craft_workflow_plan`：解析输入并预览步骤，不执行命令。
+- `craft_workflow_run`：在明确授权范围内执行一次确定性流程，返回 `passed`、`needs_repair`、`failed` 或 `no_progress`。
+- `craft_workflow_run_get`：读取 Run 及其全部不可变 Attempt 回执。
+- `craft_workflow_start`：启动程序、模型、人工混合流程，推进到外部任务或权限边界。
+- `craft_workflow_continue`：提供明确的副作用授权后继续。
+- `craft_workflow_submit`：回填当前 Agent、Judge 或 Human 节点的结构化结果。
+- `craft_workflow_session_get`：读取当前状态、待执行节点、上下文和带来源的事件历史。
+- `craft_workflow_checkpoint_list`：列出程序验证或人工批准形成的可信恢复点。
+- `craft_workflow_restore`：从可信 checkpoint 派生新 Session，不覆盖原历史。
+
+`agent_reported`、`model_judged`、`program_verified`、`human_approved` 等标签描述证据来源，不代表相同的可信等级。不得把模型自述当成程序证明。
