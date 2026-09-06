@@ -103,7 +103,7 @@ MCP stdout 只输出 JSON-RPC。运行日志写到 stderr，默认 INFO；逐节
 
 ## 后续演进
 
-下一阶段包括真实宿主兼容认证、token/时间/成本预算、编排结果接入 Eval、自动 Eval Runner 与 Grader 适配器、Artifact/Evidence 一等实体和 lineage、Workspace 快照、外部操作补偿、远程 Hub 同步和可选向量检索。这些能力不应绑定某一家模型。
+下一阶段包括真实宿主兼容认证、预算自动接入 Workflow/编排派发、编排结果接入 Eval、自动 Eval Runner 与 Grader 适配器、Workspace 快照、外部操作补偿、远程 Hub 同步和可选向量检索。这些能力不应绑定某一家模型。
 
 ## 可靠执行与宿主适配（v0.1）
 
@@ -125,3 +125,20 @@ Python Core 重写成 TypeScript。`host-adapter-probe` 会区分“已声明支
 
 当前仍需在安装了 Claude Code、Node.js 和 DeepSeek Harness 的环境做真实端到端
 认证；没有完成的宿主实测不能只凭静态清单宣称通过。
+
+## Artifact、Evidence、Lineage 与预算（Schema v12）
+
+Artifact 是产物引用，不等同于把文件复制进 Craft。它记录 `kind`、名称、URI、
+媒体类型、摘要、大小、生产者和扩展元数据。URI 可以指向本地文件、对象存储、网页
+或领域系统，因此代码报告、视频镜头、销售材料和学生作业不需要不同的核心表。
+
+Evidence 保存一个明确 claim、来源类型、`confirmed / bounded / unverified /
+rejected` 置信状态、可选 Artifact 和精确 locator。Lineage Edge 用有类型的实体端点
+连接 task、workflow、execution、evaluation、artifact、evidence 或外部对象，并支持
+有界深度的上游、下游与双向遍历。核心只保存关系，不假设某个平台的 Session ID
+格式或本地路径分隔符。
+
+Budget 由 owner 和一组自定义指标组成。每个指标声明 unit、soft limit 和 hard limit；
+Usage Event 带来源及可选幂等键，多个宿主重复上报同一次计量时不会重复累计。检查结果
+是确定性的 `continue / warn / stop`。当前预算是通用控制原语，由宿主在派发前检查并在
+完成后回填；下一阶段才把它原子接入每一种 Workflow 与 Orchestration 状态转换。

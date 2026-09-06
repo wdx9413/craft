@@ -10,7 +10,7 @@ from typing import Iterator
 from .paths import ensure_layout
 
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 
 class ClosingConnection(sqlite3.Connection):
@@ -428,6 +428,86 @@ class CraftStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_orchestration_events_plan
                     ON orchestration_events(plan_id, sequence);
+                CREATE TABLE IF NOT EXISTS artifacts (
+                    id TEXT PRIMARY KEY,
+                    kind TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    uri TEXT NOT NULL,
+                    media_type TEXT,
+                    digest TEXT,
+                    size_bytes INTEGER,
+                    producer_type TEXT,
+                    producer_id TEXT,
+                    metadata_json TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_artifacts_producer
+                    ON artifacts(producer_type, producer_id, created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_artifacts_kind
+                    ON artifacts(kind, created_at DESC);
+                CREATE TABLE IF NOT EXISTS evidence (
+                    id TEXT PRIMARY KEY,
+                    source_type TEXT NOT NULL,
+                    claim TEXT NOT NULL,
+                    confidence TEXT NOT NULL,
+                    artifact_id TEXT REFERENCES artifacts(id),
+                    locator TEXT,
+                    observed_at TEXT NOT NULL,
+                    metadata_json TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_evidence_artifact
+                    ON evidence(artifact_id, created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_evidence_source
+                    ON evidence(source_type, confidence, created_at DESC);
+                CREATE TABLE IF NOT EXISTS lineage_edges (
+                    id TEXT PRIMARY KEY,
+                    from_type TEXT NOT NULL,
+                    from_id TEXT NOT NULL,
+                    to_type TEXT NOT NULL,
+                    to_id TEXT NOT NULL,
+                    relation TEXT NOT NULL,
+                    metadata_json TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    UNIQUE(from_type, from_id, to_type, to_id, relation)
+                );
+                CREATE INDEX IF NOT EXISTS idx_lineage_from
+                    ON lineage_edges(from_type, from_id, created_at);
+                CREATE INDEX IF NOT EXISTS idx_lineage_to
+                    ON lineage_edges(to_type, to_id, created_at);
+                CREATE TABLE IF NOT EXISTS budgets (
+                    id TEXT PRIMARY KEY,
+                    owner_type TEXT NOT NULL,
+                    owner_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_budgets_owner
+                    ON budgets(owner_type, owner_id, created_at DESC);
+                CREATE TABLE IF NOT EXISTS budget_limits (
+                    budget_id TEXT NOT NULL REFERENCES budgets(id),
+                    metric TEXT NOT NULL,
+                    hard_limit REAL NOT NULL,
+                    soft_limit REAL,
+                    unit TEXT NOT NULL,
+                    PRIMARY KEY(budget_id, metric)
+                );
+                CREATE TABLE IF NOT EXISTS budget_usage_events (
+                    id TEXT PRIMARY KEY,
+                    budget_id TEXT NOT NULL REFERENCES budgets(id),
+                    metric TEXT NOT NULL,
+                    amount REAL NOT NULL,
+                    source_type TEXT NOT NULL,
+                    source_id TEXT,
+                    idempotency_key TEXT,
+                    metadata_json TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    UNIQUE(budget_id, metric, idempotency_key)
+                );
+                CREATE INDEX IF NOT EXISTS idx_budget_usage
+                    ON budget_usage_events(budget_id, metric, created_at);
                 """
             )
             node_columns = {

@@ -72,6 +72,8 @@ These domains can share one control loop while supplying their own Skills, tools
 - Trusted checkpoint recovery without rewriting failed history.
 - Versioned evaluation Case Suites, immutable Case results, aggregate metrics, and same-suite comparisons.
 - Cross-platform Agent Profiles, dependency DAGs, concurrent dispatch, lease TTL/heartbeat/crash recovery, ordered fallback, and immutable orchestration events.
+- First-class Artifacts, Evidence, and Lineage shared across tasks, workflows, evaluations, and Agent hosts.
+- Host-neutral multi-metric budgets for tokens, time, cost, calls, renders, or domain-specific units, with deterministic continue/warn/stop decisions.
 - Codex, Claude Code, MCP, and Python CLI integration.
 
 ## Evaluation boundary today
@@ -148,6 +150,17 @@ craft_eval_suite_list/save → craft_eval_run_start → craft_eval_result_submit
 craft_agent_profile_save → craft_orchestration_plan_create → dispatch → host execution / heartbeat → submit
 ```
 
+Register portable outputs and their proof chain with
+`craft_artifact_register → craft_evidence_record → craft_lineage_link`, then use
+`craft_lineage_trace` to inspect upstream or downstream provenance. Craft stores
+URIs and metadata rather than forcing large files into its database.
+
+For long-running work, create arbitrary metrics with `craft_budget_create`, call
+`craft_budget_check` before dispatch, and submit actual usage through
+`craft_budget_record` with a cross-host idempotency key. Soft limits warn; hard
+limits and inactive budgets stop deterministically without asking a model to
+estimate whether a limit was exceeded.
+
 `allow_execution=true` grants local writes only. External writes and destructive actions require an explicit `approved_side_effects` grant.
 
 ## Reliable execution and data recovery
@@ -170,4 +183,4 @@ Use `craft store-backup`, `craft store-doctor`, and the confirmation-gated
 
 ## Current boundary
 
-Craft v0.1 is a local technical preview covering capability retrieval, long-task continuity, verification, recovery, human-driven version evaluation, and host-mediated multi-Agent orchestration with lease recovery and audit events; it is not an unattended background execution platform. Remote Skill Hub synchronization, vector retrieval, a graphical interface, workspace snapshots, scheduled/background execution, and automatic host-process startup are not implemented yet. SQLite retrieval is the default; embedding providers will remain optional.
+Craft v0.1 is a local technical preview covering capability retrieval, long-task continuity, verification, recovery, traceable artifacts and evidence, deterministic budgets, human-driven version evaluation, and host-mediated multi-Agent orchestration with lease recovery and audit events; it is not an unattended background execution platform. Remote Skill Hub synchronization, vector retrieval, a graphical interface, workspace snapshots, scheduled/background execution, and automatic host-process startup are not implemented yet. Hosts currently check and report budgets explicitly; budgets do not yet intercept every Workflow or orchestration dispatch automatically. SQLite retrieval is the default; embedding providers will remain optional.

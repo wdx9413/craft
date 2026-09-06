@@ -26,6 +26,14 @@ EVAL_SUBJECT_KINDS = {
     "capability", "skill", "workflow", "tool", "mcp", "plugin",
     "agent", "model", "system", "combination",
 }
+ENTITY_TYPES = {
+    "artifact", "evidence", "source", "capability", "task", "checkpoint",
+    "feedback", "workflow", "workflow_run", "workflow_session",
+    "workflow_execution", "workflow_checkpoint", "evaluation_suite",
+    "evaluation_run", "evaluation_result", "agent_profile", "orchestration_plan",
+    "orchestration_node", "orchestration_lease", "budget", "external",
+}
+EVIDENCE_CONFIDENCE = {"confirmed", "bounded", "unverified", "rejected"}
 
 
 def new_id(prefix: str) -> str:
@@ -49,6 +57,8 @@ class CraftService:
                     "evaluation_suites", "evaluation_runs", "evaluation_results",
                     "agent_profiles", "orchestration_plans", "orchestration_leases",
                     "orchestration_events",
+                    "artifacts", "evidence", "lineage_edges", "budgets",
+                    "budget_usage_events",
                 )
             }
         return {"version": "0.1.0", "data_root": str(self.store.root), "counts": counts}
@@ -64,6 +74,414 @@ class CraftService:
 
     def store_restore(self, source: str, confirm: bool = False) -> dict[str, str]:
         return self.store.restore(Path(source), confirm)
+
+    def artifact_register(
+        self,
+        kind: str,
+        name: str,
+        uri: str,
+        media_type: str | None = None,
+        digest: str | None = None,
+        size_bytes: int | None = None,
+        producer_type: str | None = None,
+        producer_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        artifact_id: str | None = None,
+    ) -> dict[str, Any]:
+        if not kind.strip() or not name.strip() or not uri.strip():
+            raise ValueError("kind, name, and uri must not be empty")
+        if size_bytes is not None and (
+            isinstance(size_bytes, bool) or not isinstance(size_bytes, int) or size_bytes < 0
+        ):
+            raise ValueError("size_bytes must be a non-negative integer")
+        if (producer_type is None) != (producer_id is None):
+            raise ValueError("producer_type and producer_id must be provided together")
+        if producer_type is not None:
+            self._validate_entity(producer_type, producer_id or "")
+        if metadata is not None and not isinstance(metadata, dict):
+            raise ValueError("metadata must be an object")
+        artifact_id = artifact_id or new_id("artifact")
+        now = utc_now()
+        with self.store.transaction() as db:
+            if db.execute("SELECT 1 FROM artifacts WHERE id=?", (artifact_id,)).fetchone():
+                raise ValueError(f"Artifact already exists: {artifact_id}")
+            db.execute(
+                """INSERT INTO artifacts(
+                   id,kind,name,uri,media_type,digest,size_bytes,producer_type,producer_id,
+                   metadata_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                (artifact_id, kind.strip(), name.strip(), uri.strip(), media_type, digest,
+                 size_bytes, producer_type, producer_id,
+                 json.dumps(metadata or {}, ensure_ascii=False), now),
+            )
+        return self.artifact_get(artifact_id)
+
+    def artifact_get(self, artifact_id: str) -> dict[str, Any]:
+        with self.store.connect() as db:
+            row = db.execute("SELECT * FROM artifacts WHERE id=?", (artifact_id,)).fetchone()
+        if not row:
+            raise ValueError(f"Unknown artifact: {artifact_id}")
+        result = dict(row)
+        result["metadata"] = json.loads(result.pop("metadata_json"))
+        return result
+
+    def artifact_list(
+        self, limit: int = 20, kind: str | None = None,
+        producer_type: str | None = None, producer_id: str | None = None,
+    ) -> dict[str, Any]:
+        limit = max(1, min(limit, 100))
+        if (producer_type is None) != (producer_id is None):
+            raise ValueError("producer_type and producer_id must be provided together")
+        sql = "SELECT * FROM artifacts WHERE 1=1"
+        params: list[Any] = []
+        if kind:
+            sql += " AND kind=?"
+            params.append(kind)
+        if producer_type:
+            self._validate_entity(producer_type, producer_id or "")
+            sql += " AND producer_type=? AND producer_id=?"
+            params.extend([producer_type, producer_id])
+        sql += " ORDER BY created_at DESC,id DESC LIMIT ?"
+        params.append(limit)
+        with self.store.connect() as db:
+            rows = db.execute(sql, params).fetchall()
+        return {"artifacts": [self._json_card(row, "metadata_json", "metadata") for row in rows]}
+
+    def evidence_record(
+        self,
+        source_type: str,
+        claim: str,
+        confidence: str = "unverified",
+        artifact_id: str | None = None,
+        locator: str | None = None,
+        observed_at: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        evidence_id: str | None = None,
+    ) -> dict[str, Any]:
+        if not source_type.strip() or not claim.strip():
+            raise ValueError("source_type and claim must not be empty")
+        if confidence not in EVIDENCE_CONFIDENCE:
+            raise ValueError(f"Unsupported evidence confidence: {confidence}")
+        if metadata is not None and not isinstance(metadata, dict):
+            raise ValueError("metadata must be an object")
+        evidence_id = evidence_id or new_id("evidence")
+        now = utc_now()
+        with self.store.transaction() as db:
+            if artifact_id and not db.execute(
+                "SELECT 1 FROM artifacts WHERE id=?", (artifact_id,)
+            ).fetchone():
+                raise ValueError(f"Unknown artifact: {artifact_id}")
+            if db.execute("SELECT 1 FROM evidence WHERE id=?", (evidence_id,)).fetchone():
+                raise ValueError(f"Evidence already exists: {evidence_id}")
+            db.execute(
+                """INSERT INTO evidence(
+                   id,source_type,claim,confidence,artifact_id,locator,observed_at,
+                   metadata_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)""",
+                (evidence_id, source_type.strip(), claim.strip(), confidence, artifact_id,
+                 locator, observed_at or now, json.dumps(metadata or {}, ensure_ascii=False), now),
+            )
+        return self.evidence_get(evidence_id)
+
+    def evidence_get(self, evidence_id: str) -> dict[str, Any]:
+        with self.store.connect() as db:
+            row = db.execute("SELECT * FROM evidence WHERE id=?", (evidence_id,)).fetchone()
+        if not row:
+            raise ValueError(f"Unknown evidence: {evidence_id}")
+        return self._json_card(row, "metadata_json", "metadata")
+
+    def evidence_list(
+        self, limit: int = 20, source_type: str | None = None,
+        confidence: str | None = None, artifact_id: str | None = None,
+    ) -> dict[str, Any]:
+        limit = max(1, min(limit, 100))
+        if confidence is not None and confidence not in EVIDENCE_CONFIDENCE:
+            raise ValueError(f"Unsupported evidence confidence: {confidence}")
+        sql = "SELECT * FROM evidence WHERE 1=1"
+        params: list[Any] = []
+        for column, value in (
+            ("source_type", source_type), ("confidence", confidence), ("artifact_id", artifact_id)
+        ):
+            if value:
+                sql += f" AND {column}=?"
+                params.append(value)
+        sql += " ORDER BY created_at DESC,id DESC LIMIT ?"
+        params.append(limit)
+        with self.store.connect() as db:
+            rows = db.execute(sql, params).fetchall()
+        return {"evidence": [self._json_card(row, "metadata_json", "metadata") for row in rows]}
+
+    def lineage_link(
+        self, from_type: str, from_id: str, to_type: str, to_id: str,
+        relation: str, metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        self._validate_entity(from_type, from_id)
+        self._validate_entity(to_type, to_id)
+        if not relation.strip():
+            raise ValueError("relation must not be empty")
+        if from_type == to_type and from_id == to_id:
+            raise ValueError("Lineage self-links are not allowed")
+        if metadata is not None and not isinstance(metadata, dict):
+            raise ValueError("metadata must be an object")
+        edge_id = new_id("edge")
+        with self.store.transaction() as db:
+            db.execute(
+                """INSERT OR IGNORE INTO lineage_edges(
+                   id,from_type,from_id,to_type,to_id,relation,metadata_json,created_at
+                   ) VALUES(?,?,?,?,?,?,?,?)""",
+                (edge_id, from_type, from_id, to_type, to_id, relation.strip(),
+                 json.dumps(metadata or {}, ensure_ascii=False), utc_now()),
+            )
+            row = db.execute(
+                """SELECT * FROM lineage_edges WHERE from_type=? AND from_id=?
+                   AND to_type=? AND to_id=? AND relation=?""",
+                (from_type, from_id, to_type, to_id, relation.strip()),
+            ).fetchone()
+        return self._json_card(row, "metadata_json", "metadata")
+
+    def lineage_trace(
+        self, entity_type: str, entity_id: str, direction: str = "both", depth: int = 3,
+    ) -> dict[str, Any]:
+        self._validate_entity(entity_type, entity_id)
+        if direction not in {"upstream", "downstream", "both"}:
+            raise ValueError(f"Unsupported lineage direction: {direction}")
+        if isinstance(depth, bool) or not isinstance(depth, int) or not 1 <= depth <= 10:
+            raise ValueError("depth must be between 1 and 10")
+        frontier = {(entity_type, entity_id)}
+        visited = set(frontier)
+        edges: dict[str, dict[str, Any]] = {}
+        with self.store.connect() as db:
+            for _ in range(depth):
+                if not frontier:
+                    break
+                next_frontier: set[tuple[str, str]] = set()
+                for node_type, node_id in frontier:
+                    rows = []
+                    if direction in {"downstream", "both"}:
+                        rows.extend(db.execute(
+                            "SELECT * FROM lineage_edges WHERE from_type=? AND from_id=?",
+                            (node_type, node_id),
+                        ).fetchall())
+                    if direction in {"upstream", "both"}:
+                        rows.extend(db.execute(
+                            "SELECT * FROM lineage_edges WHERE to_type=? AND to_id=?",
+                            (node_type, node_id),
+                        ).fetchall())
+                    for row in rows:
+                        edge = self._json_card(row, "metadata_json", "metadata")
+                        edges[edge["id"]] = edge
+                        for candidate in (
+                            (edge["from_type"], edge["from_id"]),
+                            (edge["to_type"], edge["to_id"]),
+                        ):
+                            if candidate not in visited:
+                                visited.add(candidate)
+                                next_frontier.add(candidate)
+                frontier = next_frontier
+        return {
+            "root": {"type": entity_type, "id": entity_id}, "direction": direction,
+            "nodes": [{"type": item[0], "id": item[1]} for item in sorted(visited)],
+            "edges": sorted(edges.values(), key=lambda item: (item["created_at"], item["id"])),
+        }
+
+    @staticmethod
+    def _validate_entity(entity_type: str, entity_id: str) -> None:
+        if entity_type not in ENTITY_TYPES:
+            raise ValueError(f"Unsupported entity type: {entity_type}")
+        if not entity_id.strip():
+            raise ValueError("entity_id must not be empty")
+
+    @staticmethod
+    def _json_card(row: Any, source: str, target: str) -> dict[str, Any]:
+        result = dict(row)
+        result[target] = json.loads(result.pop(source))
+        return result
+
+    def budget_create(
+        self, owner_type: str, owner_id: str, name: str,
+        limits: list[dict[str, Any]], budget_id: str | None = None,
+    ) -> dict[str, Any]:
+        self._validate_entity(owner_type, owner_id)
+        if not name.strip() or not limits:
+            raise ValueError("name and at least one budget limit are required")
+        normalized: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for index, item in enumerate(limits):
+            if not isinstance(item, dict):
+                raise ValueError(f"Budget limit at index {index} must be an object")
+            metric = str(item.get("metric", "")).strip()
+            unit = str(item.get("unit", "")).strip()
+            hard = item.get("hard_limit")
+            soft = item.get("soft_limit")
+            if not metric or not unit:
+                raise ValueError(f"Budget limit at index {index} requires metric and unit")
+            if metric in seen:
+                raise ValueError(f"Duplicate budget metric: {metric}")
+            seen.add(metric)
+            if not self._positive_number(hard):
+                raise ValueError(f"Budget metric {metric} hard_limit must be positive")
+            if soft is not None and (
+                not self._positive_number(soft) or float(soft) > float(hard)
+            ):
+                raise ValueError(f"Budget metric {metric} soft_limit must be positive and at most hard_limit")
+            normalized.append({
+                "metric": metric, "unit": unit, "hard_limit": float(hard),
+                "soft_limit": None if soft is None else float(soft),
+            })
+        budget_id = budget_id or new_id("budget")
+        now = utc_now()
+        with self.store.transaction() as db:
+            if db.execute("SELECT 1 FROM budgets WHERE id=?", (budget_id,)).fetchone():
+                raise ValueError(f"Budget already exists: {budget_id}")
+            db.execute(
+                "INSERT INTO budgets(id,owner_type,owner_id,name,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+                (budget_id, owner_type, owner_id, name.strip(), "active", now, now),
+            )
+            db.executemany(
+                "INSERT INTO budget_limits(budget_id,metric,hard_limit,soft_limit,unit) VALUES(?,?,?,?,?)",
+                [(budget_id, item["metric"], item["hard_limit"], item["soft_limit"], item["unit"])
+                 for item in normalized],
+            )
+        return self.budget_get(budget_id)
+
+    @staticmethod
+    def _positive_number(value: Any) -> bool:
+        return (
+            not isinstance(value, bool) and isinstance(value, (int, float))
+            and math.isfinite(value) and value > 0
+        )
+
+    def budget_get(self, budget_id: str, event_limit: int = 50) -> dict[str, Any]:
+        event_limit = max(0, min(event_limit, 500))
+        with self.store.connect() as db:
+            budget = db.execute("SELECT * FROM budgets WHERE id=?", (budget_id,)).fetchone()
+            if not budget:
+                raise ValueError(f"Unknown budget: {budget_id}")
+            limits = db.execute(
+                """SELECT l.metric,l.hard_limit,l.soft_limit,l.unit,
+                          COALESCE(SUM(u.amount),0) AS used
+                   FROM budget_limits l LEFT JOIN budget_usage_events u
+                     ON u.budget_id=l.budget_id AND u.metric=l.metric
+                   WHERE l.budget_id=? GROUP BY l.metric,l.hard_limit,l.soft_limit,l.unit
+                   ORDER BY l.metric""", (budget_id,),
+            ).fetchall()
+            events = db.execute(
+                "SELECT * FROM budget_usage_events WHERE budget_id=? ORDER BY created_at DESC,id DESC LIMIT ?",
+                (budget_id, event_limit),
+            ).fetchall()
+        result = dict(budget)
+        result["limits"] = [self._budget_limit_card(row) for row in limits]
+        result["events"] = [self._json_card(row, "metadata_json", "metadata") for row in events]
+        return result
+
+    @staticmethod
+    def _budget_limit_card(row: Any, predicted: float = 0.0) -> dict[str, Any]:
+        used = float(row["used"])
+        projected = used + predicted
+        if projected >= row["hard_limit"]:
+            state = "hard_exceeded"
+        elif row["soft_limit"] is not None and projected >= row["soft_limit"]:
+            state = "soft_warning"
+        else:
+            state = "ok"
+        return {
+            "metric": row["metric"], "unit": row["unit"], "used": used,
+            "predicted": predicted, "projected": projected,
+            "soft_limit": row["soft_limit"], "hard_limit": row["hard_limit"], "state": state,
+        }
+
+    def budget_check(
+        self, budget_id: str, predicted: dict[str, float] | None = None,
+    ) -> dict[str, Any]:
+        predicted = {} if predicted is None else predicted
+        if not isinstance(predicted, dict):
+            raise ValueError("predicted must be an object")
+        with self.store.connect() as db:
+            budget = db.execute("SELECT * FROM budgets WHERE id=?", (budget_id,)).fetchone()
+            if not budget:
+                raise ValueError(f"Unknown budget: {budget_id}")
+            rows = db.execute(
+                """SELECT l.metric,l.hard_limit,l.soft_limit,l.unit,
+                          COALESCE(SUM(u.amount),0) AS used
+                   FROM budget_limits l LEFT JOIN budget_usage_events u
+                     ON u.budget_id=l.budget_id AND u.metric=l.metric
+                   WHERE l.budget_id=? GROUP BY l.metric,l.hard_limit,l.soft_limit,l.unit""",
+                (budget_id,),
+            ).fetchall()
+        known = {row["metric"] for row in rows}
+        unknown = set(predicted) - known
+        if unknown:
+            raise ValueError(f"Unknown budget metrics: {', '.join(sorted(unknown))}")
+        for metric, value in predicted.items():
+            if (
+                isinstance(value, bool) or not isinstance(value, (int, float))
+                or not math.isfinite(value) or value < 0
+            ):
+                raise ValueError(f"Predicted usage for {metric} must be a non-negative number")
+        metrics = [self._budget_limit_card(row, float(predicted.get(row["metric"], 0))) for row in rows]
+        states = {item["state"] for item in metrics}
+        decision = "stop" if "hard_exceeded" in states else "warn" if "soft_warning" in states else "continue"
+        if budget["status"] != "active":
+            decision = "stop"
+        return {"budget_id": budget_id, "status": budget["status"], "decision": decision, "metrics": metrics}
+
+    def budget_record(
+        self, budget_id: str, usage: dict[str, float], source_type: str,
+        source_id: str | None = None, idempotency_key: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if not source_type.strip() or not usage:
+            raise ValueError("source_type and usage are required")
+        if metadata is not None and not isinstance(metadata, dict):
+            raise ValueError("metadata must be an object")
+        for metric, amount in usage.items():
+            if not self._positive_number(amount):
+                raise ValueError(f"Usage for {metric} must be a positive number")
+        now = utc_now()
+        with self.store.transaction() as db:
+            budget = db.execute("SELECT status FROM budgets WHERE id=?", (budget_id,)).fetchone()
+            if not budget:
+                raise ValueError(f"Unknown budget: {budget_id}")
+            if budget["status"] != "active":
+                raise ValueError(f"Budget is not active: {budget['status']}")
+            known = {
+                row["metric"] for row in db.execute(
+                    "SELECT metric FROM budget_limits WHERE budget_id=?", (budget_id,)
+                ).fetchall()
+            }
+            if set(usage) - known:
+                raise ValueError(f"Unknown budget metrics: {', '.join(sorted(set(usage) - known))}")
+            for metric, amount in usage.items():
+                insert = "INSERT OR IGNORE" if idempotency_key is not None else "INSERT"
+                db.execute(
+                    f"""{insert} INTO budget_usage_events(
+                       id,budget_id,metric,amount,source_type,source_id,idempotency_key,
+                       metadata_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)""",
+                    (new_id("usage"), budget_id, metric, float(amount), source_type.strip(),
+                     source_id, idempotency_key,
+                     json.dumps(metadata or {}, ensure_ascii=False), now),
+                )
+            totals = db.execute(
+                """SELECT l.hard_limit,COALESCE(SUM(u.amount),0) used
+                   FROM budget_limits l LEFT JOIN budget_usage_events u
+                     ON u.budget_id=l.budget_id AND u.metric=l.metric
+                   WHERE l.budget_id=? GROUP BY l.metric,l.hard_limit""", (budget_id,),
+            ).fetchall()
+            status = "exhausted" if any(row["used"] >= row["hard_limit"] for row in totals) else "active"
+            db.execute("UPDATE budgets SET status=?,updated_at=? WHERE id=?", (status, now, budget_id))
+        return self.budget_get(budget_id)
+
+    def budget_control(self, budget_id: str, action: str) -> dict[str, Any]:
+        if action not in {"pause", "resume", "close"}:
+            raise ValueError(f"Unsupported budget control action: {action}")
+        with self.store.transaction() as db:
+            row = db.execute("SELECT status FROM budgets WHERE id=?", (budget_id,)).fetchone()
+            if not row:
+                raise ValueError(f"Unknown budget: {budget_id}")
+            allowed = {"pause": {"active"}, "resume": {"paused"}, "close": {"active", "paused"}}
+            if row["status"] not in allowed[action]:
+                raise ValueError(f"Cannot {action} budget from status: {row['status']}")
+            status = {"pause": "paused", "resume": "active", "close": "closed"}[action]
+            db.execute("UPDATE budgets SET status=?,updated_at=? WHERE id=?", (status, utc_now(), budget_id))
+        return self.budget_get(budget_id)
 
     def source_add(self, path: str, label: str | None = None, scan: bool = True) -> dict[str, Any]:
         source = self.catalog.add_source(path, label)

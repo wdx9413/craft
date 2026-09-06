@@ -20,6 +20,71 @@ def build_parser() -> argparse.ArgumentParser:
     store_restore = commands.add_parser("store-restore")
     store_restore.add_argument("source")
     store_restore.add_argument("--confirm", action="store_true")
+    artifact_add = commands.add_parser("artifact-register")
+    artifact_add.add_argument("kind")
+    artifact_add.add_argument("name")
+    artifact_add.add_argument("uri")
+    artifact_add.add_argument("--media-type")
+    artifact_add.add_argument("--digest")
+    artifact_add.add_argument("--size-bytes", type=int)
+    artifact_add.add_argument("--producer-type")
+    artifact_add.add_argument("--producer-id")
+    artifact_add.add_argument("--metadata-json", default="{}")
+    artifact_get = commands.add_parser("artifact-get")
+    artifact_get.add_argument("artifact_id")
+    artifact_list = commands.add_parser("artifact-list")
+    artifact_list.add_argument("--limit", type=int, default=20)
+    artifact_list.add_argument("--kind")
+    artifact_list.add_argument("--producer-type")
+    artifact_list.add_argument("--producer-id")
+    evidence_add = commands.add_parser("evidence-record")
+    evidence_add.add_argument("source_type")
+    evidence_add.add_argument("claim")
+    evidence_add.add_argument("--confidence", default="unverified", choices=["confirmed", "bounded", "unverified", "rejected"])
+    evidence_add.add_argument("--artifact-id")
+    evidence_add.add_argument("--locator")
+    evidence_add.add_argument("--observed-at")
+    evidence_add.add_argument("--metadata-json", default="{}")
+    evidence_get = commands.add_parser("evidence-get")
+    evidence_get.add_argument("evidence_id")
+    evidence_list = commands.add_parser("evidence-list")
+    evidence_list.add_argument("--limit", type=int, default=20)
+    evidence_list.add_argument("--source-type")
+    evidence_list.add_argument("--confidence", choices=["confirmed", "bounded", "unverified", "rejected"])
+    evidence_list.add_argument("--artifact-id")
+    lineage_link = commands.add_parser("lineage-link")
+    lineage_link.add_argument("from_type")
+    lineage_link.add_argument("from_id")
+    lineage_link.add_argument("to_type")
+    lineage_link.add_argument("to_id")
+    lineage_link.add_argument("relation")
+    lineage_link.add_argument("--metadata-json", default="{}")
+    lineage_trace = commands.add_parser("lineage-trace")
+    lineage_trace.add_argument("entity_type")
+    lineage_trace.add_argument("entity_id")
+    lineage_trace.add_argument("--direction", default="both", choices=["upstream", "downstream", "both"])
+    lineage_trace.add_argument("--depth", type=int, default=3)
+    budget_create = commands.add_parser("budget-create")
+    budget_create.add_argument("owner_type")
+    budget_create.add_argument("owner_id")
+    budget_create.add_argument("name")
+    budget_create.add_argument("limits_json")
+    budget_get = commands.add_parser("budget-get")
+    budget_get.add_argument("budget_id")
+    budget_get.add_argument("--event-limit", type=int, default=50)
+    budget_check = commands.add_parser("budget-check")
+    budget_check.add_argument("budget_id")
+    budget_check.add_argument("--predicted-json", default="{}")
+    budget_record = commands.add_parser("budget-record")
+    budget_record.add_argument("budget_id")
+    budget_record.add_argument("usage_json")
+    budget_record.add_argument("source_type")
+    budget_record.add_argument("--source-id")
+    budget_record.add_argument("--idempotency-key")
+    budget_record.add_argument("--metadata-json", default="{}")
+    budget_control = commands.add_parser("budget-control")
+    budget_control.add_argument("budget_id")
+    budget_control.add_argument("action", choices=["pause", "resume", "close"])
     commands.add_parser("list-sources")
     add = commands.add_parser("add-source")
     add.add_argument("path")
@@ -156,6 +221,50 @@ def main() -> None:
         result = service.store_doctor()
     elif args.command == "store-restore":
         result = service.store_restore(args.source, args.confirm)
+    elif args.command == "artifact-register":
+        result = service.artifact_register(
+            args.kind, args.name, args.uri, args.media_type, args.digest, args.size_bytes,
+            args.producer_type, args.producer_id, json.loads(args.metadata_json),
+        )
+    elif args.command == "artifact-get":
+        result = service.artifact_get(args.artifact_id)
+    elif args.command == "artifact-list":
+        result = service.artifact_list(args.limit, args.kind, args.producer_type, args.producer_id)
+    elif args.command == "evidence-record":
+        result = service.evidence_record(
+            args.source_type, args.claim, args.confidence, args.artifact_id,
+            args.locator, args.observed_at, json.loads(args.metadata_json),
+        )
+    elif args.command == "evidence-get":
+        result = service.evidence_get(args.evidence_id)
+    elif args.command == "evidence-list":
+        result = service.evidence_list(
+            args.limit, args.source_type, args.confidence, args.artifact_id
+        )
+    elif args.command == "lineage-link":
+        result = service.lineage_link(
+            args.from_type, args.from_id, args.to_type, args.to_id,
+            args.relation, json.loads(args.metadata_json),
+        )
+    elif args.command == "lineage-trace":
+        result = service.lineage_trace(
+            args.entity_type, args.entity_id, args.direction, args.depth
+        )
+    elif args.command == "budget-create":
+        result = service.budget_create(
+            args.owner_type, args.owner_id, args.name, json.loads(args.limits_json)
+        )
+    elif args.command == "budget-get":
+        result = service.budget_get(args.budget_id, args.event_limit)
+    elif args.command == "budget-check":
+        result = service.budget_check(args.budget_id, json.loads(args.predicted_json))
+    elif args.command == "budget-record":
+        result = service.budget_record(
+            args.budget_id, json.loads(args.usage_json), args.source_type,
+            args.source_id, args.idempotency_key, json.loads(args.metadata_json),
+        )
+    elif args.command == "budget-control":
+        result = service.budget_control(args.budget_id, args.action)
     elif args.command == "workflow-execution-reclaim":
         result = service.workflow_execution_reclaim(args.session_id)
     elif args.command == "workflow-execution-reconcile":

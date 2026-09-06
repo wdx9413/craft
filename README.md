@@ -72,6 +72,8 @@ Craft 不要求产品方预先写完所有行业模板。用户完成真实任�
 - 从可信 checkpoint 派生恢复，不覆盖原失败历史。
 - 有版本的评测 Case Suite、不可变 Case 结果、聚合指标和同套件版本对比。
 - 跨平台 Agent Profile、依赖 DAG、并发派发、Lease TTL/心跳/崩溃回收、顺序 fallback 和不可变编排事件。
+- 独立 Artifact、Evidence 与 Lineage 图谱，可跨 Task、Workflow、Eval 和不同 Agent 宿主追溯输入、产物与依据。
+- 宿主无关的多指标预算，支持 token、时间、费用、调用次数或领域自定义单位，并确定性返回继续、预警或停止。
 - Codex、Claude Code、MCP 和 Python CLI 接入。
 
 ## 评测能力的当前边界
@@ -176,6 +178,32 @@ Source 可以是普通目录、symlink 或 Windows junction。删除 Source 只�
 craft_task_open → craft_task_checkpoint → 新会话 craft_task_open(task_id=...)
 ```
 
+### 登记产物、证据和来源链
+
+```text
+craft_artifact_register
+→ craft_evidence_record
+→ craft_lineage_link
+→ craft_lineage_trace
+```
+
+Craft 只登记 URI、摘要、媒体类型、生产者和元数据，不强制复制大文件。URI 可以是
+本地 `file:`、对象存储、网页或业务系统标识，因此视频分镜、代码报告、销售资料和
+教学产物使用同一套关系模型。
+
+### 为长任务设置预算与停止条件
+
+```text
+craft_budget_create（token / 秒 / USD / render / 自定义指标）
+→ craft_budget_check（可带预计消耗）
+→ 执行宿主工作
+→ craft_budget_record（带幂等键的真实用量）
+```
+
+Soft limit 返回 `warn`，hard limit 或暂停/关闭状态返回 `stop`。停止判断由程序计算，
+不会询问模型“是不是超预算”。不同宿主负责上报自己的真实计量，Craft 不假设所有
+供应商都使用相同 token 或价格口径。
+
 ### 运行可信 Workflow
 
 ```text
@@ -231,4 +259,4 @@ craft_agent_profile_save（角色、宿主、模型、权限）
 
 ## 当前边界
 
-Craft v0.1 仍是本地技术预览版，覆盖能力检索、长任务接续、验证、恢复、人工驱动的版本评测，以及带超时恢复和审计事件的宿主介导多 Agent 编排，不是无人值守的后台执行平台。当前暂不包含远程 Skill Hub 同步、向量检索、图形界面、Workspace 文件快照、定时/后台调度和宿主进程自动拉起。SQLite 是默认检索方式，Embedding Provider 将保持可选。
+Craft v0.1 仍是本地技术预览版，覆盖能力检索、长任务接续、验证、恢复、可追溯产物与证据、确定性预算、人工驱动的版本评测，以及带超时恢复和审计事件的宿主介导多 Agent 编排，不是无人值守的后台执行平台。当前暂不包含远程 Skill Hub 同步、向量检索、图形界面、Workspace 文件快照、定时/后台调度和宿主进程自动拉起。预算目前由宿主显式检查和上报，尚未自动拦截所有 Workflow/编排派发。SQLite 是默认检索方式，Embedding Provider 将保持可选。

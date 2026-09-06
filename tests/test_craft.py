@@ -829,6 +829,178 @@ class CraftServiceTests(unittest.TestCase):
         self.assertEqual(result["failed"], 1)
         self.assertFalse(result["complete"])
 
+    def test_artifact_evidence_and_lineage_graph(self) -> None:
+        artifact = self.service.artifact_register(
+            "report", "Diagnosis", "file:///tmp/report.json", "application/json",
+            "sha256:abc", 12, "task", "task-1", {"host": "portable"}, "artifact-fixed",
+        )
+        self.assertEqual(artifact["metadata"]["host"], "portable")
+        evidence = self.service.evidence_record(
+            "test", "All checks passed", "confirmed", artifact["id"], "pytest::summary",
+            "2026-01-01T00:00:00+00:00", {"exit_code": 0}, "evidence-fixed",
+        )
+        self.assertEqual(self.service.evidence_get(evidence["id"])["claim"], "All checks passed")
+        self.assertEqual(
+            self.service.artifact_list(kind="report", producer_type="task", producer_id="task-1")["artifacts"][0]["id"],
+            artifact["id"],
+        )
+        self.assertEqual(self.service.artifact_list()["artifacts"][0]["id"], artifact["id"])
+        self.assertEqual(
+            self.service.evidence_list(source_type="test", confidence="confirmed", artifact_id=artifact["id"])["evidence"][0]["id"],
+            evidence["id"],
+        )
+        self.assertEqual(self.service.evidence_list()["evidence"][0]["id"], evidence["id"])
+        first = self.service.lineage_link(
+            "task", "task-1", "artifact", artifact["id"], "produced", {"step": 1}
+        )
+        duplicate = self.service.lineage_link(
+            "task", "task-1", "artifact", artifact["id"], "produced", {"ignored": True}
+        )
+        self.assertEqual(first["id"], duplicate["id"])
+        self.service.lineage_link(
+            "artifact", artifact["id"], "evidence", evidence["id"], "supports"
+        )
+        downstream = self.service.lineage_trace("task", "task-1", "downstream", 2)
+        self.assertEqual(len(downstream["edges"]), 2)
+        self.assertEqual(len(self.service.lineage_trace("evidence", evidence["id"], "upstream", 2)["nodes"]), 3)
+        self.assertEqual(len(self.service.lineage_trace("artifact", artifact["id"], "both", 1)["edges"]), 2)
+        self.assertEqual(self.service.lineage_trace("external", "isolated", depth=2)["edges"], [])
+
+        for args, message in (
+            (("", "n", "u"), "kind, name"),
+            (("x", "n", "u", None, None, -1), "size_bytes"),
+            (("x", "n", "u", None, None, None, "task"), "provided together"),
+        ):
+            with self.assertRaisesRegex(ValueError, message):
+                self.service.artifact_register(*args)
+        with self.assertRaisesRegex(ValueError, "metadata"):
+            self.service.artifact_register("x", "n", "u", metadata=[])  # type: ignore[arg-type]
+        with self.assertRaisesRegex(ValueError, "already exists"):
+            self.service.artifact_register("x", "n", "u", artifact_id=artifact["id"])
+        with self.assertRaisesRegex(ValueError, "Unknown artifact"):
+            self.service.artifact_get("missing")
+        with self.assertRaisesRegex(ValueError, "provided together"):
+            self.service.artifact_list(producer_type="task")
+        with self.assertRaisesRegex(ValueError, "source_type and claim"):
+            self.service.evidence_record("", "")
+        with self.assertRaisesRegex(ValueError, "Unsupported evidence"):
+            self.service.evidence_record("test", "claim", "maybe")
+        with self.assertRaisesRegex(ValueError, "metadata"):
+            self.service.evidence_record("test", "claim", metadata=[])  # type: ignore[arg-type]
+        with self.assertRaisesRegex(ValueError, "Unknown artifact"):
+            self.service.evidence_record("test", "claim", artifact_id="missing")
+        with self.assertRaisesRegex(ValueError, "already exists"):
+            self.service.evidence_record("test", "claim", evidence_id=evidence["id"])
+        with self.assertRaisesRegex(ValueError, "Unknown evidence"):
+            self.service.evidence_get("missing")
+        with self.assertRaisesRegex(ValueError, "Unsupported evidence"):
+            self.service.evidence_list(confidence="maybe")
+        with self.assertRaisesRegex(ValueError, "Unsupported entity"):
+            self.service.lineage_link("mystery", "x", "artifact", artifact["id"], "uses")
+        with self.assertRaisesRegex(ValueError, "entity_id"):
+            self.service.lineage_link("task", " ", "artifact", artifact["id"], "uses")
+        with self.assertRaisesRegex(ValueError, "relation"):
+            self.service.lineage_link("task", "x", "artifact", artifact["id"], " ")
+        with self.assertRaisesRegex(ValueError, "self-links"):
+            self.service.lineage_link("task", "x", "task", "x", "same")
+        with self.assertRaisesRegex(ValueError, "metadata"):
+            self.service.lineage_link("task", "x", "external", "y", "uses", [])  # type: ignore[arg-type]
+        with self.assertRaisesRegex(ValueError, "direction"):
+            self.service.lineage_trace("task", "x", "sideways")
+        for value in (0, 11, True):
+            with self.assertRaisesRegex(ValueError, "depth"):
+                self.service.lineage_trace("task", "x", depth=value)  # type: ignore[arg-type]
+
+    def test_budget_metering_idempotency_and_stop_conditions(self) -> None:
+        budget = self.service.budget_create(
+            "task", "task-1", "Run limits",
+            [
+                {"metric": "tokens", "unit": "token", "soft_limit": 60, "hard_limit": 100},
+                {"metric": "cost", "unit": "USD", "hard_limit": 2.0},
+            ],
+            "budget-fixed",
+        )
+        self.assertEqual(self.service.budget_check(budget["id"])["decision"], "continue")
+        self.assertEqual(
+            self.service.budget_check(budget["id"], {"tokens": 60})["decision"], "warn"
+        )
+        self.assertEqual(
+            self.service.budget_check(budget["id"], {"tokens": 100})["decision"], "stop"
+        )
+        used = self.service.budget_record(
+            budget["id"], {"tokens": 40, "cost": 0.5}, "claude-code", "session-1",
+            "turn-1", {"model": "claude"},
+        )
+        self.assertEqual(len(used["events"]), 2)
+        repeated = self.service.budget_record(
+            budget["id"], {"tokens": 40, "cost": 0.5}, "claude-code", "session-1", "turn-1"
+        )
+        self.assertEqual(len(repeated["events"]), 2)
+        exhausted = self.service.budget_record(
+            budget["id"], {"tokens": 60}, "codex", "session-2"
+        )
+        self.assertEqual(exhausted["status"], "exhausted")
+        self.assertEqual(self.service.budget_check(budget["id"])["decision"], "stop")
+        with self.assertRaisesRegex(ValueError, "not active"):
+            self.service.budget_record(budget["id"], {"cost": 0.1}, "host")
+
+        controlled = self.service.budget_create(
+            "external", "video-project", "Render budget",
+            [{"metric": "renders", "unit": "render", "hard_limit": 3}],
+        )
+        self.assertEqual(self.service.budget_control(controlled["id"], "pause")["status"], "paused")
+        self.assertEqual(self.service.budget_check(controlled["id"])["decision"], "stop")
+        self.assertEqual(self.service.budget_control(controlled["id"], "resume")["status"], "active")
+        self.assertEqual(self.service.budget_control(controlled["id"], "close")["status"], "closed")
+        validation = self.service.budget_create(
+            "task", "validation", "Validation budget",
+            [{"metric": "renders", "unit": "render", "hard_limit": 3}],
+        )
+
+        invalid_limits = (
+            ([], "at least one"),
+            (["bad"], "must be an object"),
+            ([{}], "requires metric"),
+            ([{"metric": "x", "unit": "u", "hard_limit": 0}], "hard_limit"),
+            ([{"metric": "x", "unit": "u", "hard_limit": 2, "soft_limit": 3}], "soft_limit"),
+            ([{"metric": "x", "unit": "u", "hard_limit": 2}, {"metric": "x", "unit": "u", "hard_limit": 3}], "Duplicate"),
+        )
+        for limits, message in invalid_limits:
+            with self.assertRaisesRegex(ValueError, message):
+                self.service.budget_create("task", "x", "name", limits)  # type: ignore[arg-type]
+        with self.assertRaisesRegex(ValueError, "already exists"):
+            self.service.budget_create("task", "x", "name", [{"metric": "x", "unit": "u", "hard_limit": 1}], budget["id"])
+        with self.assertRaisesRegex(ValueError, "Unknown budget"):
+            self.service.budget_get("missing")
+        with self.assertRaisesRegex(ValueError, "Unknown budget"):
+            self.service.budget_check("missing")
+        with self.assertRaisesRegex(ValueError, "predicted"):
+            self.service.budget_check(controlled["id"], [])  # type: ignore[arg-type]
+        with self.assertRaisesRegex(ValueError, "Unknown budget metrics"):
+            self.service.budget_check(controlled["id"], {"unknown": 1})
+        for value in (-1, True, "1"):
+            with self.assertRaisesRegex(ValueError, "Predicted usage"):
+                self.service.budget_check(controlled["id"], {"renders": value})  # type: ignore[dict-item]
+        with self.assertRaisesRegex(ValueError, "source_type and usage"):
+            self.service.budget_record(validation["id"], {}, "")
+        with self.assertRaisesRegex(ValueError, "Unknown budget"):
+            self.service.budget_record("missing", {"renders": 1}, "host")
+        with self.assertRaisesRegex(ValueError, "metadata"):
+            self.service.budget_record(validation["id"], {"renders": 1}, "host", metadata=[])  # type: ignore[arg-type]
+        with self.assertRaisesRegex(ValueError, "Unknown budget metrics"):
+            self.service.budget_record(validation["id"], {"unknown": 1}, "host")
+        with self.assertRaisesRegex(ValueError, "positive number"):
+            self.service.budget_record(validation["id"], {"renders": 0}, "host")
+        for value in (True, "1", float("nan")):
+            with self.assertRaisesRegex(ValueError, "positive number"):
+                self.service.budget_record(validation["id"], {"renders": value}, "host")  # type: ignore[dict-item]
+        with self.assertRaisesRegex(ValueError, "Unsupported budget"):
+            self.service.budget_control(controlled["id"], "reset")
+        with self.assertRaisesRegex(ValueError, "Unknown budget"):
+            self.service.budget_control("missing", "pause")
+        with self.assertRaisesRegex(ValueError, "Cannot resume"):
+            self.service.budget_control(controlled["id"], "resume")
+
     def test_cli_routes_all_source_commands(self) -> None:
         library = self.root / "cli-skills"
         library.mkdir()
@@ -854,6 +1026,44 @@ class CraftServiceTests(unittest.TestCase):
                 run_cli("store-restore", cli_backup["backup"], "--confirm")["database"],
                 "restored",
             )
+        artifact = run_cli(
+            "artifact-register", "report", "CLI report", "file:///tmp/report.json",
+            "--media-type", "application/json", "--digest", "sha256:x",
+            "--size-bytes", "3", "--producer-type", "task", "--producer-id", "cli-task",
+            "--metadata-json", '{"client":"cli"}',
+        )
+        self.assertEqual(run_cli("artifact-get", artifact["id"])["name"], "CLI report")
+        self.assertEqual(
+            run_cli("artifact-list", "--kind", "report", "--producer-type", "task", "--producer-id", "cli-task")["artifacts"][0]["id"],
+            artifact["id"],
+        )
+        evidence = run_cli(
+            "evidence-record", "test", "CLI passed", "--confidence", "confirmed",
+            "--artifact-id", artifact["id"], "--locator", "case::cli",
+            "--observed-at", "2026-01-01T00:00:00+00:00", "--metadata-json", '{"exit":0}',
+        )
+        self.assertEqual(run_cli("evidence-get", evidence["id"])["confidence"], "confirmed")
+        self.assertEqual(
+            run_cli("evidence-list", "--source-type", "test", "--confidence", "confirmed", "--artifact-id", artifact["id"])["evidence"][0]["id"],
+            evidence["id"],
+        )
+        run_cli("lineage-link", "task", "cli-task", "artifact", artifact["id"], "produced", "--metadata-json", '{"cli":true}')
+        self.assertEqual(
+            len(run_cli("lineage-trace", "task", "cli-task", "--direction", "downstream", "--depth", "1")["edges"]), 1
+        )
+        budget = run_cli(
+            "budget-create", "task", "cli-task", "CLI budget",
+            '[{"metric":"tokens","unit":"token","hard_limit":10}]',
+        )
+        self.assertEqual(run_cli("budget-get", budget["id"], "--event-limit", "0")["events"], [])
+        self.assertEqual(
+            run_cli("budget-check", budget["id"], "--predicted-json", '{"tokens":1}')["decision"], "continue"
+        )
+        run_cli(
+            "budget-record", budget["id"], '{"tokens":1}', "codex", "--source-id", "turn",
+            "--idempotency-key", "cli-1", "--metadata-json", '{"host":"cli"}',
+        )
+        self.assertEqual(run_cli("budget-control", budget["id"], "pause")["status"], "paused")
         self.assertEqual(run_cli("workflow-execution-reclaim")["count"], 0)
         with patch.object(
             self.service, "workflow_execution_reconcile", return_value={"status": "passed"}
@@ -982,6 +1192,10 @@ class CraftServiceTests(unittest.TestCase):
         self.assertIn("craft_host_adapter_probe", names)
         self.assertIn("craft_store_doctor", names)
         self.assertIn("craft_workflow_execution_reconcile", names)
+        self.assertIn("craft_artifact_register", names)
+        self.assertIn("craft_evidence_record", names)
+        self.assertIn("craft_lineage_trace", names)
+        self.assertIn("craft_budget_check", names)
 
     def test_mcp_protocol_errors_and_tool_validation(self) -> None:
         server = McpServer(self.service)
@@ -1322,7 +1536,7 @@ class StoreMigrationTests(unittest.TestCase):
                     row["name"] for row in migrated.execute("PRAGMA table_info(capabilities)")
                 }
             self.assertNotIn("path TEXT NOT NULL UNIQUE", sql)
-            self.assertEqual(version, "11")
+            self.assertEqual(version, "12")
             self.assertIn("restored_from_checkpoint", session_columns)
             self.assertIn("current_execution_id", session_columns)
             self.assertEqual(route_indexes, [2, 1])

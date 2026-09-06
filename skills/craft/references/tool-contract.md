@@ -20,6 +20,28 @@
 - `craft_task_checkpoint`：保存进度、待办、决策和 Artifact 引用。
 - `craft_feedback_record`：记录用户明确给出的纠正、偏好、事实、例外或流程规则，并保留适用范围。
 
+## Artifact、Evidence 与 Lineage
+
+- `craft_artifact_register/get/list`：登记和读取产物 URI、摘要、类型、生产者与元数据；不复制产物正文。
+- `craft_evidence_record/get/list`：保存有明确 claim、来源、置信状态、locator 和可选 Artifact 的证据。
+- `craft_lineage_link`：幂等连接两个有类型实体；关系名称由领域定义，例如 `produced`、`supports`、`derived_from`。
+- `craft_lineage_trace`：按 upstream、downstream 或 both 做 1 到 10 层有界遍历。
+
+Lineage 端点可以来自 Task、Workflow、Workflow Session/Execution、Eval Run/Result、
+Orchestration Plan/Lease、Capability、Artifact、Evidence 或外部系统。外部对象只保存稳定
+ID，不代表 Craft 已读取或验证该系统。
+
+## 预算与停止条件
+
+- `craft_budget_create`：为一个实体创建多个自定义指标及 soft/hard limit。
+- `craft_budget_get`：读取当前累计值和计量回执。
+- `craft_budget_check`：叠加可选预计用量，返回 `continue`、`warn` 或 `stop`。
+- `craft_budget_record`：原子记录真实用量；相同 budget、metric 和 idempotency key 不重复累计。
+- `craft_budget_control`：暂停、恢复或关闭预算。
+
+指标与单位不写死：可以是 token、second、USD、request、render 或领域自定义值。
+宿主负责把供应商回执转换为创建预算时声明的口径。
+
 ## Workflow
 
 - `craft_workflow_save`：保存带版本的 Workflow，支持输入、步骤、声明式不变量、Evidence 要求和权限策略。

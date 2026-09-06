@@ -25,7 +25,8 @@ Goal + Invariants + Permission Policy
 - `Checkpoint`: a trusted continuation boundary.
 - `Workflow`: versioned goals, steps, invariants, and policies.
 - `Session / Run`: one execution and its immutable events.
-- `Artifact / Evidence`: references today; planned first-class entities later.
+- `Artifact / Evidence / Lineage`: first-class portable output references, claims, locators, confidence, and typed provenance edges.
+- `Budget`: host-neutral metric limits and idempotent usage receipts with deterministic continue, warn, or stop decisions.
 - `Evaluation`: first-class versioned Case Suites, Eval Runs, and immutable Case Results for capabilities, Skills, Workflows, tools, MCPs, plugins, Agents, models, systems, or combinations.
 - `Agent Profile`: a versioned role, host, provider, model, reasoning effort, capability tags, and side-effect ceiling.
 - `Orchestration Plan / Node / Lease`: a task dependency graph, ordered route candidates, concurrent claiming, and duplicate-safe execution receipts.
@@ -86,10 +87,26 @@ is an isolated Cordis bundle under `adapters/deepseek-harness`; it translates a
 DSH tool call to Craft MCP without rewriting the Python core. Adapter probing
 reports declared capabilities separately from executable availability.
 
+## Portable provenance and budgets
+
+Artifacts store a URI, kind, media type, digest, producer, and metadata without
+forcing large content into SQLite. Evidence records an explicit claim, source,
+confidence, locator, and optional artifact. Typed lineage edges connect these to
+tasks, workflows, executions, evaluations, orchestration records, capabilities,
+or external stable IDs. Traversal is direction- and depth-bounded so hosts can
+load only the relevant provenance slice into model context.
+
+Budgets support arbitrary metrics such as tokens, seconds, USD, requests, or
+renders. Usage receipts accept cross-host idempotency keys. A soft threshold
+warns and a hard threshold stops deterministically. Provider-specific token and
+price normalization remains the host adapter's responsibility. In this release,
+hosts explicitly check and report budgets; automatic interception of every
+Workflow and orchestration transition remains planned.
+
 ## Next steps
 
 Planned work includes real Codex/Claude/DSH execution-loop certification,
-token/time/cost budgets, orchestration-to-Eval integration, automatic Eval
-Runners and Graders, first-class artifact/evidence lineage, workspace snapshots,
-external compensation, remote hubs, and optional vector retrieval. None should
-bind Craft to one model provider.
+automatic budget enforcement in Workflow and orchestration transitions,
+orchestration-to-Eval integration, automatic Eval Runners and Graders, workspace
+snapshots, external compensation, remote hubs, and optional vector retrieval.
+None should bind Craft to one model provider.
