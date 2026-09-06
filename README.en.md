@@ -2,16 +2,65 @@
 
 [简体中文](README.md) | [English](README.en.md)
 
-Craft is a local-first capability catalog, task-continuity layer, and trusted workflow control plane for AI agents. Codex, Claude, and other hosts can share the same Skill index, task state, validation rules, and recovery history.
+> Help AI find the right capability, continue previous work, prove outcomes, and turn successful methods into reusable workflows.
 
-## What it does
+Craft is a local control plane beneath Codex, Claude, and other AI agents. It is not another chatbot and does not replace the model. It organizes Skills, task state, evidence, and reusable workflows so multiple hosts can share the same personal capability assets.
 
-- Index multiple external Skill directories and refresh them incrementally.
-- Retrieve a small candidate set before loading a selected Skill.
-- Preserve progress, decisions, feedback, and artifact references across sessions.
-- Combine program verification, model judgment, and human approval.
-- Gate local writes, external writes, and destructive actions separately.
-- Resume from trusted checkpoints without rewriting failed history.
+## Why Craft
+
+Long-term agent use still has recurring gaps:
+
+- A library of hundreds or thousands of Skills cannot be placed into every context.
+- Progress, decisions, and failure causes are easily lost between sessions.
+- An agent saying “done” is not the same as a tested or approved outcome.
+- Switching agent platforms often means rebuilding the same setup.
+- Repeated work is replanned from scratch instead of evolving into a tested workflow.
+
+Craft closes the loop:
+
+```text
+discover → execute → preserve state and artifacts → verify → recover → reuse
+```
+
+## Core ideas
+
+### Thin agent loop, thick control plane
+
+Models own reasoning and exploration. Craft owns stable state, permissions, evidence, checkpoints, and audit history. Hosts can change without discarding the user's accumulated work assets.
+
+### Retrieve before loading
+
+Craft incrementally indexes only user-selected Skill sources. It retrieves a small candidate set for each task and loads the selected Skill rather than sending the full library to a model.
+
+### Evidence over self-reported success
+
+Program verification, model judgment, and human approval are all useful, but their provenance stays distinct. A model conclusion never silently becomes deterministic proof.
+
+### Workflows grow from real work
+
+Craft does not require a vendor to prebuild every industry template. Successful task histories can be abstracted into workflow candidates and promoted through repeated validation.
+
+## Example domains
+
+| Domain | Preserved assets | Completion evidence |
+|---|---|---|
+| Agent engineering | code, cases, traces, test reports | tests, coverage, compatibility, review |
+| AI video | scripts, shots, references, generations | specifications, consistency, human selection |
+| Sales | customer facts, stages, constraints | field checks, compliance, send approval |
+| Education | learning goals, exercises, feedback | answer checks, outcomes, teacher approval |
+| Content | sources, drafts, editorial rules | fact checks, structure review, publish approval |
+
+All domains share one control loop while supplying their own Skills, tools, and validators.
+
+## Available today
+
+- Multiple Skill sources with real-path resolution and incremental indexing.
+- Candidate retrieval and on-demand loading for large capability libraries.
+- Cross-session tasks, checkpoints, feedback, and versioned workflows.
+- Mixed program, model-judge, and human-approval execution.
+- Separate `read_only`, `local_write`, `external_write`, and `destructive` gates.
+- Trusted checkpoint recovery without rewriting failed history.
+- Codex, Claude Code, MCP, and Python CLI integration.
 
 Runtime data is stored under `~/.craft_data`, never in the active business project.
 
