@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -8,6 +8,7 @@ import { approvedEffects, executeSteps, normalizeSteps, redact, resolveInputs, r
 
 test("workflow inputs, substitution, paths, redaction, and policies are deterministic", () => {
   assert.deepEqual(resolveInputs([{ name: "a", default: 1 }, { name: "b", required: true }], { b: 2 }), { a: 1, b: 2 });
+  assert.throws(() => resolveInputs([null as never], {}), /must be an object/);
   assert.throws(() => resolveInputs([{ name: "" }], {}), /non-empty/);
   assert.throws(() => resolveInputs([{ name: "x", required: true }], {}), /Missing/);
   assert.deepEqual(substitute(["{{x}}", { v: "hello {{ x }}" }, 3], { x: "world" }), ["world", { v: "hello world" }, 3]);
@@ -27,7 +28,10 @@ test("workflow inputs, substitution, paths, redaction, and policies are determin
 
 test("workflow runtime executes commands, assertions, coverage gates, failures, and approvals", async () => {
   const root = join(tmpdir(), `craft-workflow-${process.pid}-${Date.now()}`);
+  const outside = `${root}-outside`;
   await mkdir(join(root, "sub"), { recursive: true });
+  await mkdir(outside, { recursive: true });
+  await symlink(outside, join(root, "outside-link"), process.platform === "win32" ? "junction" : "dir");
   await writeFile(join(root, "value.json"), JSON.stringify({ a: [{ b: 2 }] }));
   await writeFile(join(root, "coverage.json"), JSON.stringify({ total: {
     lines: { pct: 100 }, branches: { pct: 100 }, functions: { pct: 100 }, statements: { pct: 100 } } }));
@@ -36,12 +40,15 @@ test("workflow runtime executes commands, assertions, coverage gates, failures, 
   try {
     const runner = ((command: string, args: readonly string[], options: { env?: NodeJS.ProcessEnv }) => ({
       pid: 1, output: [], signal: null, status: args.includes("fail") ? 2 : 0,
-      stdout: String(options.env?.SECRET_TOKEN ?? "ok"), stderr: "", error: args.includes("missing") ? new Error("missing") : undefined,
+      stdout: String(options.env?.SECRET_TOKEN ?? options.env?.API_TOKEN ?? "ok"), stderr: "", error: args.includes("missing") ? new Error("missing") : undefined,
     })) as unknown as typeof import("node:child_process").spawnSync;
     const command = runStep({ type: "command", command: [process.execPath, "-e", "console.log(process.env.SECRET_TOKEN)"],
       env: { SECRET_TOKEN: "abcd" }, timeout_seconds: 3, expected_exit_code: 0 }, root, {}, runner);
     assert.equal(command.passed, true);
     assert.match(String(command.stdout), /REDACTED/);
+    const runtimeSecret = runStep({ type: "command", command: [process.execPath] }, root,
+      { API_TOKEN: "runtime-secret" }, runner);
+    assert.match(String(runtimeSecret.stdout), /REDACTED/);
     const failedCommand = runStep({ type: "command", command: [process.execPath, "fail"],
       expected_exit_code: 0, timeout_seconds: 9999 }, root, {}, runner);
     assert.equal(failedCommand.passed, false);
@@ -53,15 +60,24 @@ test("workflow runtime executes commands, assertions, coverage gates, failures, 
     assert.throws(() => runStep({ type: "command", command: [process.execPath], cwd: "missing" }, root), /does not exist/);
     assert.throws(() => runStep({ type: "command", command: [process.execPath], cwd: "value.json" }, root), /does not exist/);
     assert.throws(() => runStep({ type: "command", command: [process.execPath], env: [] }, root), /env must be an object/);
+    assert.throws(() => runStep({ type: "command", command: [process.execPath], env: { "BAD=KEY": "x" } }, root), /invalid environment/);
+    assert.throws(() => runStep({ type: "command", command: [process.execPath], timeout_seconds: "bad" }, root), /timeout_seconds/);
+    assert.throws(() => runStep({ type: "command", command: [process.execPath], expected_exit_code: 1.5 }, root), /expected_exit_code/);
+    assert.throws(() => safePath(root, "outside-link/file"), /through a link/);
     assert.equal(runStep({ type: "assertion", evaluator: "file_exists", path: "value.json" }, root).passed, true);
     assert.equal(runStep({ type: "assertion", evaluator: "file_exists", path: "missing", expected: false }, root).passed, true);
     assert.equal(runStep({ type: "assertion", evaluator: "file_exists" }, root).passed, true);
     assert.equal(runStep({ type: "assertion", evaluator: "json_value", path: "value.json", field: "a.0.b", expected: 2 }, root).passed, true);
     assert.equal(runStep({ type: "assertion", evaluator: "json_value", path: "value.json", expected: { a: [] } }, root).passed, false);
+    assert.equal(runStep({ type: "assertion", evaluator: "json_value", path: "value.json", field: "a.bad", expected: undefined }, root).passed, true);
+    assert.equal(runStep({ type: "assertion", evaluator: "json_value", path: "value.json", field: "a.0.b.more", expected: undefined }, root).passed, true);
     assert.throws(() => runStep({ type: "assertion", evaluator: "json_value" }, root));
     assert.throws(() => runStep({ type: "assertion", evaluator: "bad" }, root), /Unsupported assertion/);
     assert.equal(runStep({ type: "coverage_gate", report: "coverage.json" }, root).passed, true);
-    assert.equal(runStep({ type: "coverage_gate", report: "coverage.json", line_threshold: 101 }, root).passed, false);
+    assert.throws(() => runStep({ type: "coverage_gate", report: "coverage.json", line_threshold: 101 }, root), /thresholds/);
+    await writeFile(join(root, "bad-coverage.json"), JSON.stringify({ total: { lines: { pct: "bad" } } }));
+    assert.throws(() => runStep({ type: "coverage_gate", report: "bad-coverage.json", line_threshold: 0,
+      branch_threshold: 0, function_threshold: 0, statement_threshold: 0 }, root), /invalid percentage/);
     assert.equal(runStep({ type: "coverage_gate" }, root).passed, true);
     assert.equal(runStep({ type: "coverage_gate", report: "value.json" }, root).passed, false);
     assert.throws(() => runStep({ type: "other" }, root), /Unsupported workflow/);
@@ -86,5 +102,8 @@ test("workflow runtime executes commands, assertions, coverage gates, failures, 
     assert.equal(executeSteps([{ id: "x" }], root, new Set(["read_only"]), throwString)[0].error, "Error");
     assert.equal(executeSteps([{ id: "x", continue_on_failure: true }, { id: "y" }], root,
       new Set(["read_only"]), throwString).length, 2);
-  } finally { await rm(root, { recursive: true, force: true }); }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
+  }
 });

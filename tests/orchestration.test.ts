@@ -32,6 +32,8 @@ test("orchestration leases ready work, routes failures, and blocks descendants",
   const initial = base();
   assert.equal(planStatus(initial), "running");
   assert.equal(dispatchNodes(initial, 0, "host").leases.length, 0);
+  assert.throws(() => dispatchNodes(initial, Number.NaN, "host"), /capacity/);
+  assert.throws(() => dispatchNodes([{ ...initial[0], route_index: 99 }], 1, "host"), /route_index/);
   const first = dispatchNodes(initial, 1, "host");
   assert.equal(first.leases.length, 1);
   assert.equal(dispatchNodes(first.nodes, 1, "host").leases.length, 0);
@@ -44,6 +46,14 @@ test("orchestration leases ready work, routes failures, and blocks descendants",
   const retried = dispatchNodes(rerouted, 1, "host");
   const failed = submitNode(retried.nodes, String(retried.leases[0].lease_id), "failed", "program_verified");
   assert.equal(failed[1].status, "blocked");
+  const chain = normalizeNodes([
+    { id: "a", role: "r", objective: "a", profile_ids: ["p"] },
+    { id: "b", role: "r", objective: "b", profile_ids: ["p"], depends_on: ["a"] },
+    { id: "c", role: "r", objective: "c", profile_ids: ["p"], depends_on: ["b"] },
+  ]);
+  const leasedChain = dispatchNodes(chain, 1, "host");
+  const blockedChain = submitNode(leasedChain.nodes, String(leasedChain.leases[0].lease_id), "failed", "program_verified");
+  assert.deepEqual(blockedChain.map((node) => node.status), ["failed", "blocked", "blocked"]);
   assert.equal(planStatus(failed), "failed");
   const passedResearch = submitNode(first.nodes, String(first.leases[0].lease_id), "passed", "human_approved");
   const review = dispatchNodes(passedResearch, 2, "host");

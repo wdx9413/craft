@@ -15,6 +15,9 @@ test("MCP negotiates protocols, lists tools, dispatches every handler, and repor
   const server = new McpServer(new CraftService(store));
   try {
     assert.equal((await server.handle(null))?.error instanceof Object, true);
+    assert.equal((await server.handle({ jsonrpc: "1.0", id: 0, method: "ping" }))?.error instanceof Object, true);
+    assert.equal((await server.handle({ jsonrpc: "1.0", method: "ping" }))?.error instanceof Object, true);
+    assert.equal((await server.handle({ id: 0 }))?.error instanceof Object, true);
     assert.equal(await server.handle({ method: "x" }), undefined);
     assert.equal(await server.handle({ id: 1, method: "notifications/initialized" }), undefined);
     assert.equal(((await server.handle({ id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } }))?.result as Record<string, unknown>).protocolVersion, "2025-06-18");
@@ -24,6 +27,8 @@ test("MCP negotiates protocols, lists tools, dispatches every handler, and repor
     assert.equal((await server.handle({ id: 4, method: "missing" }))?.error instanceof Object, true);
     assert.equal((await server.handle({ id: 5, method: "tools/call", params: { name: "missing" } }))?.error instanceof Object, true);
     assert.equal((await server.handle({ id: 5, method: "tools/call" }))?.error instanceof Object, true);
+    assert.equal((await server.handle({ id: 5, method: "tools/call", params: [] }))?.error instanceof Object, true);
+    assert.equal((await server.handle({ id: 5, method: "tools/call", params: { name: "craft_info", arguments: [] } }))?.error instanceof Object, true);
     assert.equal(((await server.handle({ id: 5, method: "tools/call", params: { name: "craft_info" } }))?.result as Record<string, unknown>).isError, false);
     server.handlers.craft_throw_string = () => { throw "string failure"; };
     const stringFailure = await server.handle({ id: 5, method: "tools/call", params: { name: "craft_throw_string" } });

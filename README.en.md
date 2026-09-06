@@ -2,7 +2,7 @@
 
 [中文](README.md) | [English](README.en.md)
 
-Craft is a general-purpose Agent harness. It discovers and manages reusable capabilities, preserves long-running task state and evidence, and turns verified execution paths into reusable Workflows. Craft can run as an application layer or provide capabilities to Codex, Claude Code, DeepSeek Harness, and generic MCP hosts.
+Craft is a general-purpose Agent harness. It discovers and manages reusable capabilities, preserves long-running task state and evidence, and turns verified execution paths into reusable Workflows. The current release provides capabilities to Codex, Claude Code, DeepSeek Harness, and generic MCP hosts; standalone Agent and Supervisor runtimes remain planned modes.
 
 Craft is not tied to one model or industry. Software engineering, AI video production, sales, education, and content workflows share the same primitives: capabilities, tasks, evidence, artifacts, workflows, and evaluations.
 
@@ -17,7 +17,7 @@ Craft is not tied to one model or industry. Software engineering, AI video produ
 ## Implemented
 
 - Multi-directory capability sources, real-path resolution, linked directories, and incremental scans.
-- Skill frontmatter parsing, digests, keyword candidate search, and on-demand reads.
+- Skill frontmatter parsing, SQLite FTS candidate retrieval, and on-demand reads; search results omit full bodies.
 - Durable tasks, checkpoints, feedback, artifacts, and evidence.
 - Versioned Workflows with inputs, safe paths, redaction, side-effect approval, deterministic commands, assertions, coverage gates, and receipts.
 - Versioned evaluation-suite and Agent-profile primitives.

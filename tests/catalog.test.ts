@@ -64,6 +64,7 @@ test("catalog covers aliases, disabled sources, filters, and digest fallback", a
   await writeFile(join(library, "a", "SKILL.md"), "---\nname: alpha\ndescription: red blue\n---\nbody");
   await writeFile(join(other, "SKILL.md"), "---\nname: beta\ndescription: red\n---\nbody");
   await symlink(join(library, "a"), join(library, "alias"), "junction");
+  await symlink(join(root, "missing"), join(library, "broken"), "junction");
   const store = await new CraftStore(craftPaths(join(root, "data"))).open();
   const catalog = new Catalog(store);
   try {
@@ -72,7 +73,9 @@ test("catalog covers aliases, disabled sources, filters, and digest fallback", a
     const second = await catalog.addSource(other, "Other", true);
     assert.equal(catalog.listSources().length, 2);
     catalog.updateSource(String(first.id));
-    assert.equal(((await catalog.scan(String(first.id))).scan as { added: number }).added, 1);
+    const firstScan = (await catalog.scan(String(first.id))).scan as { added: number; issues: unknown[] };
+    assert.equal(firstScan.added, 1);
+    assert.equal(firstScan.issues.length, 1);
     const path = join(library, "a", "SKILL.md");
     const before = store.get("capability", String(catalog.search("alpha")[0].id));
     await utimes(path, new Date(), new Date(Number(before.mtime_ms) + 10_000));

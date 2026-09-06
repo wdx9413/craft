@@ -17,7 +17,7 @@ Craft 不绑定某个模型、Agent 或行业。研发排障、AI 视频分镜�
 ## 当前版本已经实现
 
 - 多能力目录管理、真实路径解析、目录引用/符号链接处理和增量扫描。
-- Skill frontmatter 解析、内容摘要、关键词候选检索和按需读取。
+- Skill frontmatter 解析、SQLite FTS 候选检索和按需读取；搜索结果不携带完整正文。
 - 持久化任务、Checkpoint、显式反馈、Artifact 与 Evidence。
 - 版本化 Workflow、输入替换、路径边界、敏感信息脱敏和副作用授权。
 - 确定性命令、文件/JSON 断言、覆盖率门禁，以及结构化执行回执。
@@ -49,9 +49,9 @@ pnpm test
 
 ## 三种使用方式
 
-1. Agent：Craft 管理对话、模型配置和工具循环。当前配置与持久化底座已提供，模型运行器继续按 Provider 扩展。
-2. Supervisor：Craft 管理任务、预算、证据和验证，把执行交给 Codex、Claude Code 或其他 Host。
-3. Provider：Craft 通过 MCP/插件提供能力发现、任务延续、Workflow 与评测能力。
+1. Agent（规划形态）：未来由 Craft 直接承载对话和模型工具循环；当前版本只提供配置与持久化底座，尚不能替代 Codex 或 Claude Code。
+2. Supervisor（规划形态）：未来由 Craft 调度 Codex、Claude Code 或其他 Host；当前版本已有可并发领取、依赖阻断和失败换路的编排状态机，但还没有自动 Host Driver。
+3. Provider（当前可用）：Craft 通过 MCP/插件提供能力发现、任务延续、Workflow、证据与基础编排能力。
 
 首次运行 `craft init` 会选择模式。配置、SQLite 数据库、索引、日志和备份都位于 `~/.craft_data`；也可用 `CRAFT_DATA_DIR` 指定另一目录。
 

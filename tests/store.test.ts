@@ -25,6 +25,9 @@ test("store initializes once, commits, and rolls back atomically", async () => {
     }), /stop/);
     assert.equal(store.database.prepare("SELECT value FROM meta WHERE key='committed'").get()?.value, "yes");
     assert.equal(store.database.prepare("SELECT value FROM meta WHERE key='rolled_back'").get(), undefined);
+    store.close();
+    await store.open();
+    assert.equal(store.database.prepare("SELECT value FROM meta WHERE key='schema_version'").get()?.value, String(SCHEMA_VERSION));
   } finally {
     store.close();
     await rm(root, { recursive: true, force: true });
@@ -45,16 +48,41 @@ test("closed stores reject access and legacy databases are only detected", async
   }
 });
 
+test("store refuses a database created by a newer Craft schema", async () => {
+  const { root, store } = await fixture();
+  try {
+    store.database.prepare("UPDATE meta SET value='999' WHERE key='schema_version'").run();
+    store.close();
+    await assert.rejects(() => store.open(), /newer than supported/);
+    assert.throws(() => store.database, /not open/);
+  } finally {
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("versioned records and events provide the shared persistence primitives", async () => {
   const { root, store } = await fixture();
   try {
     assert.equal(store.save("thing", "a", { name: "one" }).version, 1);
     assert.equal(store.save("thing", "a", { name: "two" }).version, 2);
     assert.equal(store.save("thing", "b", { name: "other" }, 4).version, 4);
+    const clean = store.save("thing", "clean", { name: "clean", id: "bad", version: 99, created_at: "old" });
+    assert.notEqual(clean.id, "bad");
+    assert.equal(store.count("thing"), 3);
+    assert.deepEqual(store.saveBatch([]), []);
+    assert.equal(store.saveBatch([{ kind: "thing", id: "batch", payload: { name: "batch" } }])[0].version, 1);
+    assert.equal(store.updateIfVersion("thing", "batch", 1, { name: "updated" }).version, 2);
+    assert.throws(() => store.updateIfVersion("thing", "batch", 1, {}), /Concurrent update/);
     assert.equal(store.get("thing", "a").name, "two");
     assert.equal(store.get("thing", "a", 1).name, "one");
     assert.deepEqual(store.list("thing", 500, (item) => item.name === "two").map((x) => x.id), ["a"]);
     assert.equal(store.list("thing", 0).length, 1);
+    assert.throws(() => store.list("thing", Number.NaN), /finite integer/);
+    assert.deepEqual(store.searchCapabilities([], 1), []);
+    store.save("capability", "minimal", {});
+    assert.equal(store.searchCapabilities(["missing"], 1).length, 0);
+    store.remove("capability", "minimal");
     assert.throws(() => store.get("thing", "missing"), /Unknown thing/);
     assert.equal(store.appendEvent("a", "started", { ok: true }).sequence, 1);
     assert.equal(store.appendEvent("a", "finished", {}).sequence, 2);

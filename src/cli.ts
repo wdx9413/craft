@@ -53,8 +53,8 @@ async function promptChoice(question: string, choices: string[]): Promise<number
 async function interactiveInit(): Promise<InitInput> {
   const modes: CraftMode[] = ["agent", "supervisor", "provider"];
   const mode = modes[await promptChoice("How do you want to use Craft?", [
-    "Agent - Craft owns the conversation and model loop",
-    "Supervisor - Craft delegates work to Codex, Claude, or other hosts",
+    "Agent - Prepare a standalone model runtime (model loop is not included yet)",
+    "Supervisor - Configure execution hosts (automatic host drivers are not included yet)",
     "Provider - Craft supplies capabilities to another Agent",
   ])];
   if (mode === "provider") return { mode };

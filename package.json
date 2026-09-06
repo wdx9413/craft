@@ -9,12 +9,13 @@
   },
   "scripts": {
     "test": "pnpm run build && pnpm run typecheck && pnpm run test:ts && pnpm run test:smoke",
-    "build": "pnpm run build:core && pnpm run build:deepseek",
+    "clean": "node --experimental-strip-types scripts/clean.ts",
+    "build": "pnpm run clean && pnpm run build:core && pnpm run build:deepseek",
     "build:core": "node node_modules/typescript/bin/tsc -p tsconfig.build.json",
     "build:deepseek": "node node_modules/typescript/bin/tsc -p adapters/deepseek-harness/tsconfig.json",
     "prepack": "pnpm run build",
     "test:smoke": "node dist/src/cli.js --help",
-    "test:ts": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 test-ts/config.test.ts test-ts/store.test.ts test-ts/catalog.test.ts test-ts/workflow.test.ts test-ts/orchestration.test.ts test-ts/service.test.ts test-ts/mcp.test.ts",
+    "test:ts": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 tests/config.test.ts tests/store.test.ts tests/catalog.test.ts tests/workflow.test.ts tests/orchestration.test.ts tests/service.test.ts tests/mcp.test.ts",
     "check:ts": "node --experimental-strip-types src/cli.ts --help",
     "typecheck": "node node_modules/typescript/bin/tsc --noEmit"
   },
@@ -46,6 +47,10 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/wdx9413/craft.git"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "devDependencies": {
     "@types/node": ">=24 <26",

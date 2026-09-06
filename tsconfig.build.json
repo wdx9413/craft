@@ -10,5 +10,5 @@
     "sourceMap": true
   },
   "include": ["src/**/*.ts", "bin/**/*.ts"],
-  "exclude": ["test-ts", "adapters"]
+  "exclude": ["tests", "adapters"]
 }

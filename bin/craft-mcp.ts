@@ -7,10 +7,11 @@ import { CraftStore, type JsonObject } from "../src/store.ts";
 const store = await new CraftStore().open();
 const server = new McpServer(new CraftService(store));
 const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
-input.on("line", async (line) => {
-  let response: JsonObject;
-  try { response = await server.handle(JSON.parse(line)) ?? {}; }
-  catch { response = { jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } }; }
-  if (Object.keys(response).length) process.stdout.write(`${JSON.stringify(response)}\n`);
-});
-input.on("close", () => store.close());
+try {
+  for await (const line of input) {
+    let response: JsonObject | undefined;
+    try { response = await server.handle(JSON.parse(line)); }
+    catch { response = { jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } }; }
+    if (response) process.stdout.write(`${JSON.stringify(response)}\n`);
+  }
+} finally { store.close(); }

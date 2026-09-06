@@ -6,7 +6,7 @@ Craft is a model-neutral Agent harness. Codex, Claude Code, DeepSeek Harness, a 
 
 The TypeScript application service manages capabilities, durable tasks and checkpoints, artifacts and evidence, versioned workflows and receipts, evaluation suites, Agent profiles, and dependency-aware orchestration plans. State lives under `~/.craft_data` in SQLite; project directories are read or modified only by explicitly approved Workflow steps.
 
-Capability discovery stores both requested and resolved source paths, follows linked directories with cycle protection, skips unchanged files using metadata, and hashes changed content. Search returns a small candidate set and full instructions are loaded only after selection.
+Capability discovery stores both requested and resolved source paths, follows linked directories with cycle protection, skips unchanged files using metadata, and hashes changed content. Local lexical retrieval uses SQLite FTS instead of deserializing every Skill body for each query. Search returns at most 20 summary cards without bodies; full instructions are loaded only after selection.
 
 Workflow steps declare `read_only`, `local_write`, `external_write`, or `destructive` effects. Unapproved effects do not run. Deterministic command, file, JSON, and coverage checks are computed by code rather than accepted from model self-reporting.
 

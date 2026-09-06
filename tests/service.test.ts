@@ -11,17 +11,24 @@ test("service persists capabilities, tasks, feedback, artifacts, evidence, and v
   const root = join(tmpdir(), `craft-service-${process.pid}-${Date.now()}`);
   const skills = join(root, "skills");
   await mkdir(skills, { recursive: true });
+  const otherSkills = join(root, "other-skills");
+  await mkdir(otherSkills, { recursive: true });
   await writeFile(join(skills, "SKILL.md"), "---\nname: diagnose\ndescription: trace failures\n---\nUse evidence.");
   const store = await new CraftStore(craftPaths(join(root, "data"))).open();
   const service = new CraftService(store);
   try {
     const source = await service.sourceAdd({ path: skills });
+    const labelledSource = await service.sourceAdd({ path: otherSkills, label: "Other", scan: false });
+    assert.throws(() => service.sourceAdd({ path: skills, scan: "false" }), /scan must be a boolean/);
     assert.equal(service.sourceList().sources instanceof Array, true);
     assert.equal(service.capabilitySearch({ query: "trace" }).capabilities instanceof Array, true);
     const capability = (service.capabilitySearch({ query: "trace" }).capabilities as Record<string, unknown>[])[0];
     assert.equal(service.capabilityGet({ asset_id: capability.id }).name, "diagnose");
     service.sourceUpdate({ source_id: source.id, label: "Skills" });
+    service.sourceUpdate({ source_id: labelledSource.id, enabled: true });
+    assert.throws(() => service.sourceUpdate({ source_id: source.id, enabled: "false" }), /enabled must be a boolean/);
     await service.sourceScan({ source_id: source.id });
+    await service.sourceScan({});
 
     const opened = service.taskOpen({ title: "Fix", goal: "Find cause", project_id: "p" });
     const taskId = String((opened.task as Record<string, unknown>).id);
@@ -29,6 +36,7 @@ test("service persists capabilities, tasks, feedback, artifacts, evidence, and v
     assert.equal((service.taskList({ project_id: "p", status: "active" }).tasks as unknown[]).length, 1);
     assert.throws(() => service.taskList({ status: "bad" }), /Unsupported task status/);
     assert.throws(() => service.taskCheckpoint({ task_id: taskId, summary: "x", status: "bad" }), /Unsupported task status/);
+    assert.throws(() => service.taskCheckpoint({ task_id: taskId, summary: "x", completed: "bad" }), /completed must be an array/);
     service.feedbackRecord({ corrected: "Prefer proof", task_id: taskId });
     service.taskCheckpoint({ task_id: taskId, summary: "Done", status: "completed" });
     assert.equal((service.taskOpen({ task_id: taskId }).feedback as unknown[]).length, 1);
@@ -46,15 +54,19 @@ test("service persists capabilities, tasks, feedback, artifacts, evidence, and v
     service.evidenceRecord({ source_type: "model", claim: "maybe" });
     assert.equal((service.list("evidence", "items", { query: "passes", limit: 5 }).items as unknown[]).length, 1);
     assert.equal((service.list("evidence", "items", {}).items as unknown[]).length, 2);
+    assert.throws(() => service.list("evidence", "items", { limit: Number.NaN }), /limit/);
 
     const workflow = service.saveVersioned("workflow", "workflow", { name: "Review" }, ["name"]);
     service.saveVersioned("workflow", "workflow", { workflow_id: workflow.id, name: "Review v2" }, ["name"]);
     assert.equal(service.get("workflow", "workflow_id", { workflow_id: workflow.id, version: 1 }).name, "Review");
+    assert.throws(() => service.get("workflow", "workflow_id", { workflow_id: workflow.id, version: 1.5 }), /version/);
     const runnable = service.saveVersioned("workflow", "workflow", { name: "Runnable",
       inputs: [{ name: "file", required: true }], steps: [{ id: "exists", type: "assertion",
         evaluator: "file_exists", path: "{{file}}" }] }, ["name"]);
     const plan = service.workflowPlan({ workflow_id: runnable.id, inputs: { file: "skills/SKILL.md" } });
     assert.equal(plan.executable, true);
+    assert.throws(() => service.workflowPlan({ workflow_id: runnable.id, inputs: [] }), /inputs must be an object/);
+    assert.throws(() => service.workflowPlan({ workflow_id: runnable.id, inputs: { file: "x" }, approved_side_effects: "bad" }), /approved_side_effects/);
     const run = service.workflowRun({ workflow_id: runnable.id, inputs: { file: "skills/SKILL.md" }, project_root: root });
     assert.equal(run.status, "passed");
     assert.equal(service.workflowRun({ workflow_id: runnable.id, inputs: { file: "missing" }, project_root: root }).status, "failed");
@@ -63,15 +75,22 @@ test("service persists capabilities, tasks, feedback, artifacts, evidence, and v
     ] });
     const dispatched = service.orchestrationDispatch({ plan_id: orchestration.id, claimed_by: "host", capacity: 9 });
     const leaseId = String(((dispatched.leases as Record<string, unknown>[])[0]).lease_id);
+    assert.throws(() => service.orchestrationSubmit({ plan_id: orchestration.id, lease_id: leaseId,
+      verdict: "passed", claimed_by: "other" }), /owner/);
     assert.equal(service.orchestrationSubmit({ plan_id: orchestration.id, lease_id: leaseId, verdict: "passed" }).status, "completed");
     assert.throws(() => service.orchestrationDispatch({ plan_id: orchestration.id, claimed_by: "host" }), /not running/);
     assert.throws(() => service.orchestrationCreate({ goal: "x", max_concurrency: 0, nodes: [
       { id: "x", role: "r", objective: "o", profile_ids: ["p"] },
     ] }), /max_concurrency/);
     assert.throws(() => service.orchestrationCreate({ goal: "x" }), /At least one/);
+    const invalidCapacity = service.orchestrationCreate({ goal: "x", nodes: [
+      { id: "x", role: "r", objective: "o", profile_ids: ["p"] },
+    ] });
+    assert.throws(() => service.orchestrationDispatch({ plan_id: invalidCapacity.id, claimed_by: "h", capacity: "bad" }), /capacity/);
     assert.throws(() => service.saveVersioned("workflow", "workflow", {}, ["name"]), /name/);
     assert.equal((service.info().counts as Record<string, number>).workflow, 2);
     service.sourceRemove({ source_id: source.id });
+    service.sourceRemove({ source_id: labelledSource.id });
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 

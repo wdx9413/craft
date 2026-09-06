@@ -2,9 +2,17 @@ import { CraftService, VERSION } from "./service.ts";
 import { type JsonObject } from "./store.ts";
 
 type Tool = { name: string; description: string; inputSchema: JsonObject; annotations?: JsonObject };
+const schemaFor = (name: string): JsonObject => {
+  if (["scan", "enabled", "allow_execution"].includes(name)) return { type: "boolean" };
+  if (["limit", "version", "capacity", "max_concurrency", "size_bytes"].includes(name)) return { type: "integer" };
+  if (["inputs", "metadata", "policy"].includes(name)) return { type: "object" };
+  if (["completed", "pending", "decisions", "artifacts", "steps", "cases", "capabilities",
+    "allowed_side_effects", "approved_side_effects", "nodes"].includes(name)) return { type: "array" };
+  return { type: "string" };
+};
 const objectSchema = (required: string[] = [], optional: string[] = []): JsonObject => ({ type: "object",
-  properties: Object.fromEntries([...required, ...optional].map((name) => [name, {}])), required,
-  additionalProperties: true });
+  properties: Object.fromEntries([...required, ...optional].map((name) => [name, schemaFor(name)])), required,
+  additionalProperties: false });
 const tool = (name: string, description: string, required: string[] = [], readOnly = false,
   optional: string[] = []): Tool => ({
   name, description, inputSchema: objectSchema(required, optional), ...(readOnly ? { annotations: { readOnlyHint: true } } : {}),
@@ -45,7 +53,7 @@ export const TOOLS: Tool[] = [
   tool("craft_orchestration_plan_get", "Read a multi-Agent plan and node states.", ["plan_id"], true),
   tool("craft_orchestration_plan_list", "List multi-Agent plans.", [], true, ["limit", "query"]),
   tool("craft_orchestration_dispatch", "Lease ready nodes to a host within concurrency limits.", ["plan_id", "claimed_by"], false, ["capacity"]),
-  tool("craft_orchestration_submit", "Submit a leased node result with provenance.", ["plan_id", "lease_id", "verdict"], false, ["provenance"]),
+  tool("craft_orchestration_submit", "Submit a leased node result with provenance.", ["plan_id", "lease_id", "verdict"], false, ["provenance", "claimed_by"]),
 ];
 
 export class McpServer {
@@ -89,6 +97,9 @@ export class McpServer {
   async handle(message: unknown): Promise<JsonObject | undefined> {
     if (!message || typeof message !== "object" || Array.isArray(message)) return this.error(null, -32600, "Invalid Request");
     const request = message as JsonObject;
+    if ((request.jsonrpc !== undefined && request.jsonrpc !== "2.0") || typeof request.method !== "string") {
+      return this.error(request.id ?? null, -32600, "Invalid Request");
+    }
     if (request.method === "notifications/initialized" || request.id === undefined) return undefined;
     if (request.method === "initialize") {
       const requested = (request.params as JsonObject | undefined)?.protocolVersion;
@@ -100,11 +111,18 @@ export class McpServer {
     if (request.method === "ping") return this.ok(request.id, {});
     if (request.method === "tools/list") return this.ok(request.id, { tools: TOOLS });
     if (request.method !== "tools/call") return this.error(request.id, -32601, `Method not found: ${request.method}`);
-    const params = (request.params ?? {}) as JsonObject;
+    if (!request.params || typeof request.params !== "object" || Array.isArray(request.params)) {
+      return this.error(request.id, -32602, "Tool call params must be an object");
+    }
+    const params = request.params as JsonObject;
     const handler = this.handlers[String(params.name)];
     if (!handler) return this.error(request.id, -32602, `Unknown tool: ${params.name}`);
     try {
-      const result = await handler((params.arguments ?? {}) as JsonObject);
+      const supplied = params.arguments ?? {};
+      if (!supplied || typeof supplied !== "object" || Array.isArray(supplied)) {
+        return this.error(request.id, -32602, "Tool arguments must be an object");
+      }
+      const result = await handler(supplied as JsonObject);
       return this.ok(request.id, { content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
         structuredContent: result, isError: false });
     } catch (error) {

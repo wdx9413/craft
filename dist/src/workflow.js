@@ -1,12 +1,15 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, statSync } from "node:fs";
-import { isAbsolute, relative, resolve } from "node:path";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { dirname, isAbsolute, relative, resolve } from "node:path";
 const PLACEHOLDER = /\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g;
 const SENSITIVE = /((?:authorization\s*:\s*bearer|api[_-]?key|token|password|secret|cookie)\s*[=:]?\s*)\S+/gi;
 export const SIDE_EFFECTS = new Set(["read_only", "local_write", "external_write", "destructive"]);
 export function resolveInputs(definitions, supplied) {
     const result = { ...supplied };
-    for (const definition of definitions) {
+    for (const [index, definition] of definitions.entries()) {
+        if (!definition || typeof definition !== "object" || Array.isArray(definition)) {
+            throw new Error(`Workflow input at index ${index} must be an object`);
+        }
         const name = definition.name;
         if (typeof name !== "string" || !name)
             throw new Error("Each workflow input requires a non-empty name");
@@ -39,11 +42,20 @@ export function substitute(value, inputs) {
     });
 }
 export function safePath(root, child = ".") {
-    const base = resolve(root);
+    const base = realpathSync(resolve(root));
     const candidate = resolve(base, child);
     const relation = relative(base, candidate);
     if (relation.startsWith("..") || isAbsolute(relation))
         throw new Error(`Workflow path escapes project root: ${child}`);
+    let existing = candidate;
+    while (!existsSync(existing)) {
+        existing = dirname(existing);
+    }
+    const actual = realpathSync(existing);
+    const actualRelation = relative(base, actual);
+    if (actualRelation.startsWith("..") || isAbsolute(actualRelation)) {
+        throw new Error(`Workflow path escapes project root through a link: ${child}`);
+    }
     return candidate;
 }
 export function redact(value, secrets = []) {
@@ -92,12 +104,24 @@ export function runStep(step, root, runtimeEnv = {}, runner = spawnSync) {
         const configured = step.env ?? {};
         if (!configured || typeof configured !== "object" || Array.isArray(configured))
             throw new Error("Command step env must be an object");
-        const env = { ...process.env, ...runtimeEnv, ...Object.fromEntries(Object.entries(configured).map(([k, v]) => [k, String(v)])) };
-        const secrets = Object.entries(configured).filter(([key]) => /token|password|secret|key|cookie/i.test(key)).map(([, value]) => String(value));
-        const timeout = Math.max(1, Math.min(Number(step.timeout_seconds ?? 300), 3600)) * 1000;
+        const configuredEntries = Object.entries(configured);
+        if (configuredEntries.some(([key]) => !key || key.includes("=") || key.includes("\0"))) {
+            throw new Error("Command step env contains an invalid environment-variable name");
+        }
+        const env = { ...process.env, ...runtimeEnv, ...Object.fromEntries(configuredEntries.map(([k, v]) => [k, String(v)])) };
+        const secrets = [...Object.entries(runtimeEnv), ...configuredEntries]
+            .filter(([key, value]) => value !== undefined && /token|password|secret|key|cookie/i.test(key))
+            .map(([, value]) => String(value));
+        const timeoutSeconds = Number(step.timeout_seconds ?? 300);
+        if (!Number.isFinite(timeoutSeconds) || timeoutSeconds <= 0) {
+            throw new Error("timeout_seconds must be greater than 0");
+        }
+        const timeout = Math.min(timeoutSeconds, 3600) * 1000;
         const result = runner(step.command[0], step.command.slice(1), { cwd, env, encoding: "utf8", timeout,
             windowsHide: true, shell: false });
         const expected = Number(step.expected_exit_code ?? 0);
+        if (!Number.isInteger(expected))
+            throw new Error("expected_exit_code must be an integer");
         return { passed: result.status === expected, exit_code: result.status, expected_exit_code: expected,
             stdout: redact((result.stdout ?? "").slice(-12000), secrets), stderr: redact((result.stderr ?? "").slice(-12000), secrets),
             ...(result.error ? { error: result.error.message } : {}) };
@@ -117,7 +141,19 @@ export function runStep(step, root, runtimeEnv = {}, runner = spawnSync) {
         if (step.evaluator === "json_value") {
             let value = JSON.parse(readFileSync(safePath(root, String(step.path ?? "")), "utf8"));
             for (const part of String(step.field ?? "").split(".").filter(Boolean)) {
-                value = Array.isArray(value) ? value[Number(part)] : value[part];
+                if (Array.isArray(value)) {
+                    if (!/^\d+$/.test(part)) {
+                        value = undefined;
+                        break;
+                    }
+                    value = value[Number(part)];
+                }
+                else if (value && typeof value === "object")
+                    value = value[part];
+                else {
+                    value = undefined;
+                    break;
+                }
             }
             return { passed: value === step.expected, actual: value, expected: step.expected };
         }
@@ -129,6 +165,12 @@ export function runStep(step, root, runtimeEnv = {}, runner = spawnSync) {
         const thresholds = { lines: Number(step.line_threshold ?? 100), branches: Number(step.branch_threshold ?? 100),
             functions: Number(step.function_threshold ?? 100), statements: Number(step.statement_threshold ?? 100) };
         const coverage = Object.fromEntries(Object.keys(thresholds).map((key) => [key, Number(total[key]?.pct ?? 0)]));
+        if (Object.values(thresholds).some((value) => !Number.isFinite(value) || value < 0 || value > 100)) {
+            throw new Error("Coverage thresholds must be finite percentages from 0 to 100");
+        }
+        if (Object.values(coverage).some((value) => !Number.isFinite(value) || value < 0 || value > 100)) {
+            throw new Error("Coverage report contains an invalid percentage");
+        }
         return { passed: Object.entries(thresholds).every(([key, threshold]) => Number(coverage[key]) >= threshold),
             coverage, thresholds };
     }

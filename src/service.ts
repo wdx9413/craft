@@ -13,6 +13,22 @@ function text(value: unknown, name: string): string {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
   return value.trim();
 }
+function finiteInteger(value: unknown, name: string, fallback: number, minimum = 1, maximum = Number.MAX_SAFE_INTEGER): number {
+  const number = value === undefined ? fallback : Number(value);
+  if (!Number.isFinite(number) || !Number.isInteger(number) || number < minimum || number > maximum) {
+    throw new Error(`${name} must be an integer between ${minimum} and ${maximum}`);
+  }
+  return number;
+}
+function optionalBoolean(value: unknown, name: string): boolean | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "boolean") throw new Error(`${name} must be a boolean`);
+  return value;
+}
+function array(value: unknown, name: string): unknown[] {
+  if (!Array.isArray(value)) throw new Error(`${name} must be an array`);
+  return value;
+}
 
 export class CraftService {
   readonly store: CraftStore;
@@ -24,26 +40,27 @@ export class CraftService {
       "evidence", "workflow", "evaluation_suite", "evaluation_run", "evaluation_result",
       "agent_profile", "orchestration_plan", "budget", "model_provider", "agent_session"];
     return { version: VERSION, data_root: this.store.paths.root,
-      counts: Object.fromEntries(kinds.map((kind) => [kind, this.store.list(kind, Number.MAX_SAFE_INTEGER).length])) };
+      counts: Object.fromEntries(kinds.map((kind) => [kind, this.store.count(kind)])) };
   }
 
   sourceAdd(args: JsonObject): Promise<JsonObject> {
-    return this.catalog.addSource(text(args.path, "path"), args.label as string | undefined,
-      args.scan === undefined ? true : Boolean(args.scan));
+    const label = args.label === undefined ? undefined : text(args.label, "label");
+    return this.catalog.addSource(text(args.path, "path"), label,
+      optionalBoolean(args.scan, "scan") ?? true);
   }
   sourceList(): JsonObject { return { sources: this.catalog.listSources() }; }
   sourceUpdate(args: JsonObject): JsonObject {
     return this.catalog.updateSource(text(args.source_id, "source_id"),
-      args.enabled as boolean | undefined, args.label as string | undefined);
+      optionalBoolean(args.enabled, "enabled"), args.label === undefined ? undefined : text(args.label, "label"));
   }
   sourceRemove(args: JsonObject): JsonObject {
     return this.catalog.removeSource(text(args.source_id, "source_id"));
   }
   sourceScan(args: JsonObject): Promise<JsonObject> {
-    return this.catalog.scan(args.source_id as string | undefined);
+    return this.catalog.scan(args.source_id === undefined ? undefined : text(args.source_id, "source_id"));
   }
   capabilitySearch(args: JsonObject): JsonObject {
-    return { capabilities: this.catalog.search(text(args.query, "query"), Number(args.limit ?? 6)) };
+    return { capabilities: this.catalog.search(text(args.query, "query"), finiteInteger(args.limit, "limit", 6, 1, 20)) };
   }
   capabilityGet(args: JsonObject): JsonObject {
     return this.catalog.get(text(args.asset_id, "asset_id"));
@@ -68,11 +85,15 @@ export class CraftService {
     const task = this.store.get("task", taskId);
     const status = String(args.status ?? task.status);
     if (!TASK_STATUS.has(status)) throw new Error(`Unsupported task status: ${status}`);
-    const checkpoint = this.store.save("checkpoint", id("checkpoint"), {
-      task_id: taskId, summary: text(args.summary, "summary"), completed: args.completed ?? [],
-      pending: args.pending ?? [], decisions: args.decisions ?? [], artifacts: args.artifacts ?? [],
-      source: args.source ?? "agent_reported" });
-    this.store.save("task", taskId, { ...task, status, latest_checkpoint_id: checkpoint.id });
+    const checkpointId = id("checkpoint");
+    const completed = array(args.completed ?? [], "completed");
+    const pending = array(args.pending ?? [], "pending");
+    const decisions = array(args.decisions ?? [], "decisions");
+    const artifacts = array(args.artifacts ?? [], "artifacts");
+    this.store.saveBatch([{ kind: "checkpoint", id: checkpointId, payload: {
+      task_id: taskId, summary: text(args.summary, "summary"), completed, pending, decisions, artifacts,
+      source: args.source ?? "agent_reported" } }, { kind: "task", id: taskId,
+      payload: { ...task, status, latest_checkpoint_id: checkpointId } }]);
     return this.taskPack(taskId);
   }
   private taskPack(taskId: string): JsonObject {
@@ -111,22 +132,32 @@ export class CraftService {
   saveVersioned(kind: string, prefix: string, args: JsonObject, required: string[]): JsonObject {
     for (const key of required) text(args[key], key);
     const recordId = String(args[`${prefix}_id`] ?? id(prefix));
-    return this.store.save(kind, recordId, args);
+    const payload = { ...args };
+    delete payload[`${prefix}_id`];
+    return this.store.save(kind, recordId, payload);
   }
   list(kind: string, key: string, args: JsonObject): JsonObject {
     const query = String(args.query ?? "").toLowerCase();
-    return { [key]: this.store.list(kind, Number(args.limit ?? 20), (item) =>
+    return { [key]: this.store.list(kind, finiteInteger(args.limit, "limit", 20, 1, 1_000), (item) =>
       !query || JSON.stringify(item).toLowerCase().includes(query)) };
   }
   get(kind: string, idKey: string, args: JsonObject): JsonObject {
-    return this.store.get(kind, text(args[idKey], idKey), args.version as number | undefined);
+    const version = args.version === undefined ? undefined : finiteInteger(args.version, "version", 1);
+    return this.store.get(kind, text(args[idKey], idKey), version);
   }
 
   workflowPlan(args: JsonObject): JsonObject {
     const workflow = this.get("workflow", "workflow_id", args);
-    const inputs = resolveInputs((workflow.inputs ?? []) as JsonObject[], (args.inputs ?? {}) as JsonObject);
-    const steps = normalizeSteps(substitute(workflow.steps ?? [], inputs) as unknown[]);
-    const approved = approvedEffects(Boolean(args.allow_execution), (args.approved_side_effects ?? []) as unknown[]);
+    const definitions = array(workflow.inputs ?? [], "workflow inputs") as JsonObject[];
+    if (typeof (args.inputs ?? {}) !== "object" || Array.isArray(args.inputs)) {
+      throw new Error("inputs must be an object");
+    }
+    const inputs = resolveInputs(definitions, (args.inputs ?? {}) as JsonObject);
+    const stepDefinitions = array(workflow.steps ?? [], "workflow steps");
+    const steps = normalizeSteps(substitute(stepDefinitions, inputs) as unknown[]);
+    const allowExecution = optionalBoolean(args.allow_execution, "allow_execution") ?? false;
+    const sideEffects = array(args.approved_side_effects ?? [], "approved_side_effects");
+    const approved = approvedEffects(allowExecution, sideEffects);
     return { workflow_id: workflow.id, workflow_version: workflow.version, inputs, steps,
       approved_side_effects: [...approved], executable: steps.every((step) => approved.has(String(step.side_effect))) };
   }
@@ -152,16 +183,23 @@ export class CraftService {
     const plan = this.get("orchestration_plan", "plan_id", args);
     if (plan.status !== "running") throw new Error(`Plan is not running: ${plan.status}`);
     const owner = text(args.claimed_by, "claimed_by");
-    const capacity = Math.max(1, Math.min(Number(args.capacity ?? plan.max_concurrency), Number(plan.max_concurrency)));
+    const maximum = finiteInteger(plan.max_concurrency, "plan max_concurrency", 4, 1, 32);
+    const requested = finiteInteger(args.capacity, "capacity", maximum, 1);
+    const capacity = Math.min(requested, maximum);
     const result = dispatchNodes(plan.nodes as PlanNode[], capacity, owner);
-    const saved = this.store.save("orchestration_plan", String(plan.id), { ...plan, nodes: result.nodes,
+    const saved = this.store.updateIfVersion("orchestration_plan", String(plan.id), Number(plan.version), { ...plan, nodes: result.nodes,
       status: planStatus(result.nodes) });
     return { plan: saved, leases: result.leases };
   }
   orchestrationSubmit(args: JsonObject): JsonObject {
     const plan = this.get("orchestration_plan", "plan_id", args);
+    if (args.claimed_by !== undefined) {
+      const leased = (plan.nodes as PlanNode[]).find((node) => node.lease_id === args.lease_id);
+      if (leased && leased.claimed_by !== text(args.claimed_by, "claimed_by")) throw new Error("Lease owner does not match");
+    }
     const nodes = submitNode(plan.nodes as PlanNode[], text(args.lease_id, "lease_id"),
       text(args.verdict, "verdict"), String(args.provenance ?? "agent_reported"));
-    return this.store.save("orchestration_plan", String(plan.id), { ...plan, nodes, status: planStatus(nodes) });
+    return this.store.updateIfVersion("orchestration_plan", String(plan.id), Number(plan.version),
+      { ...plan, nodes, status: planStatus(nodes) });
   }
 }

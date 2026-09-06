@@ -29,7 +29,7 @@ export function parseSkill(text, fallback) {
         metadata,
     };
 }
-export async function skillFiles(root) {
+export async function skillFiles(root, onError) {
     const found = [];
     const visited = new Set();
     async function walk(directory) {
@@ -38,14 +38,21 @@ export async function skillFiles(root) {
         if (visited.has(key))
             return;
         visited.add(key);
-        for (const entry of await readdir(directory, { withFileTypes: true })) {
+        const entries = await readdir(directory, { withFileTypes: true });
+        entries.sort((a, b) => a.name.localeCompare(b.name));
+        for (const entry of entries) {
             const path = join(directory, entry.name);
-            const info = await stat(path);
-            if (info.isDirectory()) {
-                await walk(path);
+            try {
+                const info = await stat(path);
+                if (info.isDirectory()) {
+                    await walk(path);
+                }
+                else if (info.isFile() && entry.name.toLowerCase() === "skill.md") {
+                    found.push(path);
+                }
             }
-            else if (info.isFile() && entry.name.toLowerCase() === "skill.md") {
-                found.push(path);
+            catch (error) {
+                onError?.(path, error);
             }
         }
     }
@@ -61,7 +68,7 @@ export class Catalog {
         if (!(await stat(root)).isDirectory())
             throw new Error("Capability source must be a directory.");
         const duplicate = this.store.list("source", Number.MAX_SAFE_INTEGER)
-            .find((item) => String(item.real_path).toLowerCase() === root.toLowerCase());
+            .find((item) => pathKey(String(item.real_path)) === pathKey(root));
         if (duplicate)
             throw new Error(`Capability source already exists: ${duplicate.id}`);
         const id = stableId("source", root);
@@ -89,7 +96,10 @@ export class Catalog {
         const source = this.getSource(id);
         if (!source.enabled)
             throw new Error(`Capability source is disabled: ${id}`);
-        const files = await skillFiles(String(source.real_path));
+        const issues = [];
+        const files = await skillFiles(String(source.real_path), (path, error) => issues.push({
+            path, error: String(error),
+        }));
         const live = new Set();
         let added = 0;
         let updated = 0;
@@ -134,7 +144,8 @@ export class Catalog {
             }
         }
         this.store.save("source", id, { ...source, scanned_at: new Date().toISOString() });
-        return { ...this.getSource(id), scan: { added, updated, unchanged, removed, total: files.length } };
+        return { ...this.getSource(id), scan: { added, updated, unchanged, removed, total: files.length,
+                issues } };
     }
     async scan(sourceId) {
         if (sourceId)
@@ -149,11 +160,10 @@ export class Catalog {
         const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
         if (!terms.length)
             return [];
-        return this.store.list("capability", Number.MAX_SAFE_INTEGER).map((item) => {
-            const text = `${item.name} ${item.description} ${item.body}`.toLowerCase();
-            return { item, score: terms.reduce((sum, term) => sum + (text.includes(term) ? 1 : 0), 0) };
-        }).filter(({ score }) => score > 0).sort((a, b) => b.score - a.score)
-            .slice(0, Math.max(1, Math.min(limit, 20))).map(({ item, score }) => ({ ...item, score }));
+        return this.store.searchCapabilities(terms, limit).map((item) => {
+            const { body: _body, metadata: _metadata, ...summary } = item;
+            return summary;
+        });
     }
     get(assetId) { return this.store.get("capability", assetId); }
 }

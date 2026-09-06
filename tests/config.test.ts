@@ -85,6 +85,9 @@ test("configuration rejects unsafe or incomplete values", async () => {
       protocol: "anthropic", name: "", baseUrl: "https://example.com", model: "",
     } }, paths), /must not be empty/);
     await assert.rejects(() => initializeConfig({ mode: "agent", runtimeKind: "direct-api", provider: {
+      protocol: "anthropic", name: "x", baseUrl: "not-a-url", model: "m",
+    } }, paths), /valid HTTP/);
+    await assert.rejects(() => initializeConfig({ mode: "agent", runtimeKind: "direct-api", provider: {
       protocol: "anthropic", name: "x", baseUrl: "https://user:pass@example.com?q=x", model: "m",
     } }, paths), /without credentials/);
     await assert.rejects(() => initializeConfig({ mode: "agent", runtimeKind: "direct-api", provider: {
@@ -125,6 +128,19 @@ test("configuration rejects unsafe or incomplete values", async () => {
       storage: { database: "db" },
     }));
     await assert.rejects(() => loadConfig(paths), /invalid storage paths/);
+    const base = { schemaVersion: 1, activeMode: "agent", initializedAt: "now", updatedAt: "now",
+      runtime: { kind: "unconfigured" }, supervisor: { hosts: [] },
+      storage: { database: "db", capabilityIndex: "index" } };
+    await writeFile(paths.configFile, JSON.stringify({ ...base, initializedAt: 1 }));
+    await assert.rejects(() => loadConfig(paths), /invalid string fields/);
+    await writeFile(paths.configFile, JSON.stringify({ ...base, runtime: { kind: "codex-cli" } }));
+    await assert.rejects(() => loadConfig(paths), /requires a command/);
+    await writeFile(paths.configFile, JSON.stringify({ ...base, runtime: { kind: "codex-cli", command: "" } }));
+    await assert.rejects(() => loadConfig(paths), /requires a command/);
+    await writeFile(paths.configFile, JSON.stringify({ ...base, supervisor: { hosts: ["bad"] } }));
+    await assert.rejects(() => loadConfig(paths), /invalid supervisor hosts/);
+    await writeFile(paths.configFile, JSON.stringify({ ...base, runtime: { kind: "direct-api", provider: 1 } }));
+    await assert.rejects(() => loadConfig(paths), /requires provider/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

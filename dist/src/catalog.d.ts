@@ -8,7 +8,7 @@ export interface SkillDocument {
 }
 export declare function pathKey(path: string, platform?: NodeJS.Platform): string;
 export declare function parseSkill(text: string, fallback: string): SkillDocument;
-export declare function skillFiles(root: string): Promise<string[]>;
+export declare function skillFiles(root: string, onError?: (path: string, error: unknown) => void): Promise<string[]>;
 export declare class Catalog {
     readonly store: CraftStore;
     constructor(store: CraftStore);

@@ -51,15 +51,20 @@ export function planStatus(nodes: PlanNode[]): string {
 }
 
 export function dispatchNodes(nodes: PlanNode[], capacity: number, owner: string): { nodes: PlanNode[]; leases: JsonObject[] } {
+  if (!Number.isInteger(capacity) || capacity < 0) throw new Error("capacity must be a non-negative integer");
   const passed = new Set(nodes.filter((node) => node.status === "passed").map((node) => node.id));
   const active = nodes.filter((node) => node.status === "leased").length;
   const available = Math.max(0, capacity - active);
   const leases: JsonObject[] = [];
   const updated = nodes.map((node) => {
     if (leases.length >= available || node.status !== "pending" || !node.depends_on.every((dep) => passed.has(dep))) return node;
+    const routeIndex = Number(node.route_index);
+    if (!Number.isInteger(routeIndex) || routeIndex < 0 || routeIndex >= node.profile_ids.length) {
+      throw new Error(`Node ${node.id} has an invalid route_index`);
+    }
     const leaseId = `lease_${randomUUID().replaceAll("-", "")}`;
     const leased = { ...node, status: "leased", lease_id: leaseId, claimed_by: owner } as PlanNode;
-    leases.push({ lease_id: leaseId, node_id: node.id, profile_id: node.profile_ids[Number(node.route_index)],
+    leases.push({ lease_id: leaseId, node_id: node.id, profile_id: node.profile_ids[routeIndex],
       role: node.role, objective: node.objective, side_effect: node.side_effect });
     return leased;
   });
@@ -81,7 +86,18 @@ export function submitNode(nodes: PlanNode[], leaseId: string, verdict: string, 
     return { ...node, status: verdict, lease_id: null, claimed_by: null, last_provenance: provenance } as PlanNode;
   });
   if (!found) throw new Error(`Unknown lease: ${leaseId}`);
-  const failed = new Set(updated.filter((node) => node.status === "failed" || node.status === "blocked").map((node) => node.id));
-  return updated.map((node) => node.status === "pending" && node.depends_on.some((dep) => failed.has(dep))
-    ? { ...node, status: "blocked" } as PlanNode : node);
+  const propagated = updated.map((node) => ({ ...node }) as PlanNode);
+  const failed = new Set(propagated.filter((node) => node.status === "failed" || node.status === "blocked").map((node) => node.id));
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const node of propagated) {
+      if (node.status === "pending" && node.depends_on.some((dependency) => failed.has(dependency))) {
+        node.status = "blocked";
+        failed.add(node.id);
+        changed = true;
+      }
+    }
+  }
+  return propagated;
 }

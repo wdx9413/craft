@@ -1,8 +1,20 @@
 import { CraftService, VERSION } from "./service.js";
 import {} from "./store.js";
+const schemaFor = (name) => {
+    if (["scan", "enabled", "allow_execution"].includes(name))
+        return { type: "boolean" };
+    if (["limit", "version", "capacity", "max_concurrency", "size_bytes"].includes(name))
+        return { type: "integer" };
+    if (["inputs", "metadata", "policy"].includes(name))
+        return { type: "object" };
+    if (["completed", "pending", "decisions", "artifacts", "steps", "cases", "capabilities",
+        "allowed_side_effects", "approved_side_effects", "nodes"].includes(name))
+        return { type: "array" };
+    return { type: "string" };
+};
 const objectSchema = (required = [], optional = []) => ({ type: "object",
-    properties: Object.fromEntries([...required, ...optional].map((name) => [name, {}])), required,
-    additionalProperties: true });
+    properties: Object.fromEntries([...required, ...optional].map((name) => [name, schemaFor(name)])), required,
+    additionalProperties: false });
 const tool = (name, description, required = [], readOnly = false, optional = []) => ({
     name, description, inputSchema: objectSchema(required, optional), ...(readOnly ? { annotations: { readOnlyHint: true } } : {}),
 });
@@ -41,7 +53,7 @@ export const TOOLS = [
     tool("craft_orchestration_plan_get", "Read a multi-Agent plan and node states.", ["plan_id"], true),
     tool("craft_orchestration_plan_list", "List multi-Agent plans.", [], true, ["limit", "query"]),
     tool("craft_orchestration_dispatch", "Lease ready nodes to a host within concurrency limits.", ["plan_id", "claimed_by"], false, ["capacity"]),
-    tool("craft_orchestration_submit", "Submit a leased node result with provenance.", ["plan_id", "lease_id", "verdict"], false, ["provenance"]),
+    tool("craft_orchestration_submit", "Submit a leased node result with provenance.", ["plan_id", "lease_id", "verdict"], false, ["provenance", "claimed_by"]),
 ];
 export class McpServer {
     service;
@@ -83,6 +95,9 @@ export class McpServer {
         if (!message || typeof message !== "object" || Array.isArray(message))
             return this.error(null, -32600, "Invalid Request");
         const request = message;
+        if ((request.jsonrpc !== undefined && request.jsonrpc !== "2.0") || typeof request.method !== "string") {
+            return this.error(request.id ?? null, -32600, "Invalid Request");
+        }
         if (request.method === "notifications/initialized" || request.id === undefined)
             return undefined;
         if (request.method === "initialize") {
@@ -98,12 +113,19 @@ export class McpServer {
             return this.ok(request.id, { tools: TOOLS });
         if (request.method !== "tools/call")
             return this.error(request.id, -32601, `Method not found: ${request.method}`);
-        const params = (request.params ?? {});
+        if (!request.params || typeof request.params !== "object" || Array.isArray(request.params)) {
+            return this.error(request.id, -32602, "Tool call params must be an object");
+        }
+        const params = request.params;
         const handler = this.handlers[String(params.name)];
         if (!handler)
             return this.error(request.id, -32602, `Unknown tool: ${params.name}`);
         try {
-            const result = await handler((params.arguments ?? {}));
+            const supplied = params.arguments ?? {};
+            if (!supplied || typeof supplied !== "object" || Array.isArray(supplied)) {
+                return this.error(request.id, -32602, "Tool arguments must be an object");
+            }
+            const result = await handler(supplied);
             return this.ok(request.id, { content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
                 structuredContent: result, isError: false });
         }

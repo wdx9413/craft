@@ -74,20 +74,31 @@ function validateInit(input) {
     }
 }
 function validateProvider(provider) {
-    if (!provider)
+    if (!provider || typeof provider !== "object" || Array.isArray(provider)) {
         throw new Error("Direct API runtime requires provider configuration.");
-    if (!["openai-compatible", "anthropic"].includes(provider.protocol)) {
-        throw new Error(`Unsupported provider protocol: ${provider.protocol}`);
     }
-    if (!provider.name.trim() || !provider.model.trim()) {
+    const candidate = provider;
+    if (!["openai-compatible", "anthropic"].includes(String(candidate.protocol))) {
+        throw new Error(`Unsupported provider protocol: ${candidate.protocol}`);
+    }
+    if (typeof candidate.name !== "string" || !candidate.name.trim()
+        || typeof candidate.model !== "string" || !candidate.model.trim()
+        || typeof candidate.baseUrl !== "string") {
         throw new Error("Provider name and model must not be empty.");
     }
-    const url = new URL(provider.baseUrl);
+    let url;
+    try {
+        url = new URL(candidate.baseUrl);
+    }
+    catch {
+        throw new Error("Provider base URL must be a valid HTTP(S) URL.");
+    }
     if (!["http:", "https:"].includes(url.protocol) || url.username || url.password
         || url.search || url.hash) {
         throw new Error("Provider base URL must be an HTTP(S) URL without credentials or query data.");
     }
-    if (provider.apiKeyEnv && !/^[A-Z_][A-Z0-9_]*$/.test(provider.apiKeyEnv)) {
+    if (candidate.apiKeyEnv !== undefined && (typeof candidate.apiKeyEnv !== "string"
+        || !/^[A-Z_][A-Z0-9_]*$/.test(candidate.apiKeyEnv))) {
         throw new Error("apiKeyEnv must be an uppercase environment-variable name.");
     }
 }
@@ -104,6 +115,20 @@ function validateConfig(value) {
     }
     if (!config.storage?.database || !config.storage.capabilityIndex) {
         throw new Error("Craft config has invalid storage paths.");
+    }
+    if (typeof config.initializedAt !== "string" || typeof config.updatedAt !== "string"
+        || typeof config.storage.database !== "string" || typeof config.storage.capabilityIndex !== "string") {
+        throw new Error("Craft config has invalid string fields.");
+    }
+    if (config.runtime.kind === "direct-api")
+        validateProvider(config.runtime.provider);
+    if (["codex-cli", "claude-code"].includes(config.runtime.kind)
+        && (typeof config.runtime.command !== "string" || !config.runtime.command.trim())) {
+        throw new Error("CLI runtime requires a command.");
+    }
+    if (!config.supervisor || !Array.isArray(config.supervisor.hosts)
+        || config.supervisor.hosts.some((host) => !HOSTS.has(host))) {
+        throw new Error("Craft config has invalid supervisor hosts.");
     }
 }
 //# sourceMappingURL=config.js.map

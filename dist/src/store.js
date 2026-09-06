@@ -1,7 +1,17 @@
 import { existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { craftPaths, ensureLayout } from "./paths.js";
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
+const RESERVED_FIELDS = new Set(["id", "version", "created_at", "updated_at"]);
+function payloadOnly(payload) {
+    return Object.fromEntries(Object.entries(payload).filter(([key]) => !RESERVED_FIELDS.has(key)));
+}
+function validLimit(limit) {
+    if (!Number.isFinite(limit) || !Number.isInteger(limit)) {
+        throw new Error("limit must be a finite integer");
+    }
+    return Math.max(1, limit);
+}
 export class CraftStore {
     paths;
     #database = null;
@@ -14,7 +24,9 @@ export class CraftStore {
         await ensureLayout(this.paths);
         const database = new DatabaseSync(this.paths.databaseFile);
         database.exec("PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA busy_timeout=15000;");
-        database.exec(`
+        database.exec("BEGIN IMMEDIATE");
+        try {
+            database.exec(`
       CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS records(
         kind TEXT NOT NULL,id TEXT NOT NULL,version INTEGER NOT NULL,
@@ -28,10 +40,33 @@ export class CraftStore {
         PRIMARY KEY(stream,sequence)
       );
     `);
-        database.prepare("INSERT OR REPLACE INTO meta(key,value) VALUES('schema_version',?)")
-            .run(String(SCHEMA_VERSION));
-        this.#database = database;
-        return this;
+            const schemaRow = database.prepare("SELECT value FROM meta WHERE key='schema_version'").get();
+            const previousVersion = Number(schemaRow?.value ?? 0);
+            if (previousVersion > SCHEMA_VERSION) {
+                throw new Error(`Craft database schema ${previousVersion} is newer than supported schema ${SCHEMA_VERSION}`);
+            }
+            database.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS capability_fts USING fts5(
+      id UNINDEXED,name,description,body,tokenize='unicode61'
+    );`);
+            if (previousVersion < 2) {
+                database.exec(`DELETE FROM capability_fts;
+        INSERT INTO capability_fts(id,name,description,body)
+        SELECT r.id,json_extract(r.payload_json,'$.name'),json_extract(r.payload_json,'$.description'),
+          json_extract(r.payload_json,'$.body') FROM records r JOIN (
+            SELECT id,MAX(version) version FROM records WHERE kind='capability' GROUP BY id
+          ) latest ON latest.id=r.id AND latest.version=r.version WHERE r.kind='capability';`);
+            }
+            database.prepare("INSERT OR REPLACE INTO meta(key,value) VALUES('schema_version',?)")
+                .run(String(SCHEMA_VERSION));
+            database.exec("COMMIT");
+            this.#database = database;
+            return this;
+        }
+        catch (error) {
+            database.exec("ROLLBACK");
+            database.close();
+            throw error;
+        }
     }
     get database() {
         if (!this.#database)
@@ -55,14 +90,35 @@ export class CraftStore {
         return existsSync(this.paths.legacyDatabaseFile);
     }
     save(kind, id, payload, version) {
-        const now = new Date().toISOString();
+        return this.transaction((database) => this.insert(database, { kind, id, payload, version }));
+    }
+    saveBatch(entries) {
+        if (!entries.length)
+            return [];
+        return this.transaction((database) => entries.map((entry) => this.insert(database, entry)));
+    }
+    updateIfVersion(kind, id, expectedVersion, payload) {
         return this.transaction((database) => {
-            const next = version ?? Number(database.prepare("SELECT COALESCE(MAX(version),0)+1 AS version FROM records WHERE kind=? AND id=?").get(kind, id).version);
-            database.prepare(`INSERT INTO records(
-        kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)`)
-                .run(kind, id, next, JSON.stringify(payload), now, now);
-            return { ...payload, id, version: next, created_at: now, updated_at: now };
+            const current = Number(database.prepare("SELECT COALESCE(MAX(version),0) AS version FROM records WHERE kind=? AND id=?").get(kind, id).version);
+            if (current !== expectedVersion)
+                throw new Error(`Concurrent update detected for ${kind}: ${id}`);
+            return this.insert(database, { kind, id, payload, version: current + 1 });
         });
+    }
+    insert(database, entry) {
+        const { kind, id, version } = entry;
+        const payload = payloadOnly(entry.payload);
+        const now = new Date().toISOString();
+        const next = version ?? Number(database.prepare("SELECT COALESCE(MAX(version),0)+1 AS version FROM records WHERE kind=? AND id=?").get(kind, id).version);
+        database.prepare(`INSERT INTO records(
+        kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)`)
+            .run(kind, id, next, JSON.stringify(payload), now, now);
+        if (kind === "capability") {
+            database.prepare("DELETE FROM capability_fts WHERE id=?").run(id);
+            database.prepare("INSERT INTO capability_fts(id,name,description,body) VALUES(?,?,?,?)")
+                .run(id, String(payload.name ?? ""), String(payload.description ?? ""), String(payload.body ?? ""));
+        }
+        return { ...payload, id, version: next, created_at: now, updated_at: now };
     }
     get(kind, id, version) {
         const row = version === undefined
@@ -73,15 +129,43 @@ export class CraftStore {
         return this.record(row);
     }
     list(kind, limit = 20, predicate) {
+        const bounded = validLimit(limit);
         const rows = this.database.prepare(`SELECT r.* FROM records r JOIN (
       SELECT id,MAX(version) version FROM records WHERE kind=? GROUP BY id
       ) latest ON latest.id=r.id AND latest.version=r.version
-      WHERE r.kind=? ORDER BY r.updated_at DESC,r.id DESC`).all(kind, kind);
+      WHERE r.kind=? ORDER BY r.updated_at DESC,r.id DESC ${predicate ? "" : "LIMIT ?"}`)
+            .all(...(predicate ? [kind, kind] : [kind, kind, bounded]));
         const records = rows.map((row) => this.record(row));
-        return (predicate ? records.filter(predicate) : records).slice(0, Math.max(1, limit));
+        return (predicate ? records.filter(predicate) : records).slice(0, bounded);
+    }
+    count(kind) {
+        return Number(this.database.prepare(`SELECT COUNT(*) count FROM records r JOIN (
+      SELECT id,MAX(version) version FROM records WHERE kind=? GROUP BY id
+      ) latest ON latest.id=r.id AND latest.version=r.version WHERE r.kind=?`)
+            .get(kind, kind).count);
+    }
+    searchCapabilities(terms, limit) {
+        const bounded = Math.min(validLimit(limit), 20);
+        if (!terms.length)
+            return [];
+        const expression = terms.map((term) => `"${term.replaceAll('"', '""')}"`).join(" OR ");
+        const rows = this.database.prepare(`SELECT r.*,bm25(capability_fts) rank FROM capability_fts
+      JOIN records r ON r.kind='capability' AND r.id=capability_fts.id
+      JOIN (SELECT id,MAX(version) version FROM records WHERE kind='capability' GROUP BY id) latest
+        ON latest.id=r.id AND latest.version=r.version
+      WHERE capability_fts MATCH ? ORDER BY rank LIMIT ?`).all(expression, bounded);
+        return rows.map((row) => {
+            const item = row;
+            return { ...this.record(item), score: -Number(item.rank) };
+        });
     }
     remove(kind, id) {
-        return Number(this.database.prepare("DELETE FROM records WHERE kind=? AND id=?").run(kind, id).changes);
+        return this.transaction((database) => {
+            const changes = Number(database.prepare("DELETE FROM records WHERE kind=? AND id=?").run(kind, id).changes);
+            if (kind === "capability")
+                database.prepare("DELETE FROM capability_fts WHERE id=?").run(id);
+            return changes;
+        });
     }
     appendEvent(stream, eventType, payload) {
         return this.transaction((database) => {
