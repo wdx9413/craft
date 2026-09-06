@@ -4,7 +4,7 @@
 
 ## 设计原则
 
-Craft 采用“薄 Agent Loop，厚 Control Plane”。Codex、Claude、DeepSeek 等宿主负责理解、规划与探索；Craft 负责跨宿主保持稳定的状态、权限、副作用边界、证据来源、失败限制和恢复记录。
+Craft 是独立的 Agent Harness，不是 Codex、Claude 或某个模型产品的下层组件。它自身不绑定 Agent Loop；任何 Agent 应用或自定义程序都可以作为客户端，通过 MCP、插件或 CLI 使用 Craft。接入方可以负责理解、规划与探索，Craft 独立保持能力目录、状态、权限、副作用边界、证据来源、失败限制和恢复记录。
 
 ```text
 Goal + Invariants + Permission Policy

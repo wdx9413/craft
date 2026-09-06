@@ -4,7 +4,7 @@
 
 > Help AI find the right capability, continue previous work, prove outcomes, and turn successful methods into reusable workflows.
 
-Craft is a local control plane beneath Codex, Claude, and other AI agents. It is not another chatbot and does not replace the model. It organizes Skills, task state, evidence, and reusable workflows so multiple hosts can share the same personal capability assets.
+Craft is a local-first agent harness independent of any specific AI product. It organizes Skills, task state, evidence, and reusable workflows as user-owned capability assets, then exposes them through MCP, plugins, and a CLI. Codex and Claude are supported clients, not layers that Craft belongs to or requires.
 
 ## Why Craft
 
@@ -24,9 +24,9 @@ discover → execute → preserve state and artifacts → verify → recover →
 
 ## Core ideas
 
-### Thin agent loop, thick control plane
+### A control plane decoupled from agents
 
-Models own reasoning and exploration. Craft owns stable state, permissions, evidence, checkpoints, and audit history. Hosts can change without discarding the user's accumulated work assets.
+Craft does not bind itself to one model, agent loop, or interface. A connected client may reason, plan, and execute, while Craft independently manages capability discovery, state, permissions, evidence, checkpoints, and audit history. The client may be Codex, Claude, another agent application, or custom software.
 
 ### Retrieve before loading
 

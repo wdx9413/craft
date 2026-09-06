@@ -4,7 +4,7 @@
 
 ## Principle
 
-Craft keeps the agent loop thin and the control plane thick. Codex, Claude, DeepSeek, and other hosts own reasoning and exploration. Craft preserves stable state, permissions, side-effect boundaries, evidence provenance, failure limits, and recovery records across hosts.
+Craft is an independent agent harness, not a component beneath Codex, Claude, or a model vendor. It does not bind itself to an agent loop. Any agent application or custom program can use Craft through MCP, a plugin, or the CLI. Connected clients may reason and explore while Craft independently preserves the capability catalog, state, permissions, side-effect boundaries, evidence provenance, failure limits, and recovery records.
 
 ```text
 Goal + Invariants + Permission Policy
