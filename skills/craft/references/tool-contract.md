@@ -49,3 +49,16 @@
 - `craft_eval_compare`：比较使用同一 Suite 版本的多个运行，第一个 Run 是基线。
 
 Craft 当前保存和聚合评测事实，不自动调用被测 Agent 或 Grader。执行者必须如实标记结果来源；`blocked` 和 `skipped` 默认不生成分数。
+
+## 多 Agent 编排
+
+- `craft_agent_profile_save`：保存有版本的角色、宿主、供应商、模型、推理强度、能力和权限上限。
+- `craft_agent_profile_get`：读取最新或指定 Profile 版本。
+- `craft_agent_profile_list`：按角色、宿主或启用状态查找 Profile。
+- `craft_orchestration_plan_create`：保存依赖 DAG、每个节点的顺序路由候选和并发上限。
+- `craft_orchestration_plan_get`：读取节点、Lease、路由、结果和当前状态。
+- `craft_orchestration_plan_list`：按关联 Task 或状态找回 Plan。
+- `craft_orchestration_dispatch`：领取当前就绪节点并返回宿主应执行的结构化请求。
+- `craft_orchestration_submit`：提交 Lease 结果；失败且仍有候选时自动进入下一路由。
+
+`dispatch` 只修改 Craft 本地状态，不会直接启动 Codex 或 Claude 子 Agent。宿主必须执行 Lease Request 中明确指定的 Profile，并继续遵守自己的 Sandbox 和审批规则。

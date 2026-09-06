@@ -68,6 +68,48 @@ def build_parser() -> argparse.ArgumentParser:
     run_list.add_argument("--status", choices=["running", "completed"])
     compare = commands.add_parser("eval-compare")
     compare.add_argument("run_ids", nargs="+")
+    profile_save = commands.add_parser("agent-profile-save")
+    profile_save.add_argument("name")
+    profile_save.add_argument("role")
+    profile_save.add_argument("host")
+    profile_save.add_argument("provider")
+    profile_save.add_argument("model")
+    profile_save.add_argument("--reasoning-effort")
+    profile_save.add_argument("--capabilities-json", default="[]")
+    profile_save.add_argument("--allowed-side-effects-json", default='["read_only"]')
+    profile_save.add_argument("--metadata-json", default="{}")
+    profile_save.add_argument("--disabled", action="store_true")
+    profile_save.add_argument("--profile-id")
+    profile_get = commands.add_parser("agent-profile-get")
+    profile_get.add_argument("profile_id")
+    profile_get.add_argument("--version", type=int)
+    profile_list = commands.add_parser("agent-profile-list")
+    profile_list.add_argument("--limit", type=int, default=20)
+    profile_list.add_argument("--role")
+    profile_list.add_argument("--host")
+    profile_list.add_argument("--include-disabled", action="store_true")
+    plan_create = commands.add_parser("orchestration-plan-create")
+    plan_create.add_argument("goal")
+    plan_create.add_argument("nodes_json")
+    plan_create.add_argument("--task-id")
+    plan_create.add_argument("--max-concurrency", type=int, default=4)
+    plan_create.add_argument("--policy-json", default="{}")
+    plan_get = commands.add_parser("orchestration-plan-get")
+    plan_get.add_argument("plan_id")
+    plan_list = commands.add_parser("orchestration-plan-list")
+    plan_list.add_argument("--limit", type=int, default=20)
+    plan_list.add_argument("--task-id")
+    plan_list.add_argument("--status", choices=["running", "completed", "failed"])
+    dispatch = commands.add_parser("orchestration-dispatch")
+    dispatch.add_argument("plan_id")
+    dispatch.add_argument("claimed_by")
+    dispatch.add_argument("--limit", type=int)
+    submit = commands.add_parser("orchestration-submit")
+    submit.add_argument("lease_id")
+    submit.add_argument("verdict", choices=["passed", "failed", "blocked"])
+    submit.add_argument("--result-json", default="{}")
+    submit.add_argument("--evidence-json", default="[]")
+    submit.add_argument("--provenance", default="agent_reported")
     return parser
 
 
@@ -114,6 +156,35 @@ def main() -> None:
         result = service.eval_run_list(
             args.limit, args.suite_id, args.subject_kind, args.subject_id, args.status
         )
-    else:
+    elif args.command == "eval-compare":
         result = service.eval_compare(args.run_ids)
+    elif args.command == "agent-profile-save":
+        result = service.agent_profile_save(
+            args.name, args.role, args.host, args.provider, args.model,
+            args.reasoning_effort, json.loads(args.capabilities_json),
+            json.loads(args.allowed_side_effects_json), json.loads(args.metadata_json),
+            not args.disabled, args.profile_id,
+        )
+    elif args.command == "agent-profile-get":
+        result = service.agent_profile_get(args.profile_id, args.version)
+    elif args.command == "agent-profile-list":
+        result = service.agent_profile_list(
+            args.limit, args.role, args.host, None if args.include_disabled else True
+        )
+    elif args.command == "orchestration-plan-create":
+        result = service.orchestration_plan_create(
+            args.goal, json.loads(args.nodes_json), args.task_id,
+            args.max_concurrency, json.loads(args.policy_json),
+        )
+    elif args.command == "orchestration-plan-get":
+        result = service.orchestration_plan_get(args.plan_id)
+    elif args.command == "orchestration-plan-list":
+        result = service.orchestration_plan_list(args.limit, args.task_id, args.status)
+    elif args.command == "orchestration-dispatch":
+        result = service.orchestration_dispatch(args.plan_id, args.claimed_by, args.limit)
+    else:
+        result = service.orchestration_submit(
+            args.lease_id, args.verdict, json.loads(args.result_json),
+            json.loads(args.evidence_json), args.provenance,
+        )
     print(json.dumps(result, ensure_ascii=False, indent=2))

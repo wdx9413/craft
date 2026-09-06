@@ -27,6 +27,8 @@ Goal + Invariants + Permission Policy
 - `Session / Run`: one execution and its immutable events.
 - `Artifact / Evidence`: references today; planned first-class entities later.
 - `Evaluation`: first-class versioned Case Suites, Eval Runs, and immutable Case Results for capabilities, Skills, Workflows, tools, MCPs, plugins, Agents, models, systems, or combinations.
+- `Agent Profile`: a versioned role, host, provider, model, reasoning effort, capability tags, and side-effect ceiling.
+- `Orchestration Plan / Node / Lease`: a task dependency graph, ordered route candidates, concurrent claiming, and duplicate-safe execution receipts.
 
 ## Skills, MCP, plugins, and Workflows
 
@@ -52,8 +54,14 @@ Transition and attempt limits provide fail-fast behavior. MCP stdout remains res
 
 Evaluation should inform promotion from `candidate` to `tested` or `reusable`, but one successful run must not imply long-term reliability.
 
+## Multi-Agent and model routing
+
+Each Plan Node declares a role, objective, dependencies, side effect, and ordered Agent Profile candidates. Dispatch leases only nodes whose dependencies passed, respects `max_concurrency`, and prevents duplicate claims. A failed submission returns the node to pending when another candidate exists; terminal failures propagate `blocked` to downstream nodes.
+
+An MCP server cannot directly invoke Codex `spawn_agent` or Claude internal task APIs. A Codex/Claude Skill or another host reads the Lease Request, invokes its native execution surface, and submits provenance-bearing results. Future host adapters can automate that translation without bypassing host sandbox, approval, or concurrency controls.
+
 Set `CRAFT_LOG_LEVEL=DEBUG|INFO|WARNING|ERROR` to control log verbosity.
 
 ## Next steps
 
-Planned adapters include automatic Eval Runners and Graders, first-class artifact/evidence lineage, workspace snapshots, idempotent external operations and compensation, parallel candidate execution, remote hubs, and optional vector retrieval. None should bind Craft to one model provider.
+Planned work includes lease TTL/heartbeat and crash recovery, Codex/Claude/API host adapters, budget and cost records, automatic Eval Runners and Graders, first-class artifact/evidence lineage, workspace snapshots, idempotent external operations and compensation, remote hubs, and optional vector retrieval. None should bind Craft to one model provider.

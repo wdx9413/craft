@@ -27,6 +27,8 @@ Goal + Invariants + Permission Policy
 - `Session / Run`：一次具体执行及其不可变事件。
 - `Artifact / Evidence`：当前先以引用和事件字段存在，后续升级为一等实体。
 - `Evaluation`：当前以有版本的 Case Suite、Eval Run 和不可变 Case Result 作为一等实体，可评测 Capability、Skill、Workflow、工具、MCP、插件、Agent、模型、系统或组合。
+- `Agent Profile`：有版本的角色、宿主、供应商、模型、推理强度、能力标签和副作用上限。
+- `Orchestration Plan / Node / Lease`：任务依赖图、节点路由候选、并发领取和不可重复提交的执行凭据。
 
 ## Skill、MCP、插件与 Workflow
 
@@ -65,6 +67,12 @@ Goal + Invariants + Permission Policy
 
 `max_transitions` 限制修复循环；确定性 Run 还使用 `max_attempts` 和 `no_progress_limit`。恢复优先从最近可信边界派生，而不是把旧错误上下文无限重试。
 
+## 多 Agent 与模型路由
+
+Craft 保存宿主无关的 Agent Profile。每个 Plan Node 声明角色、目标、依赖、副作用和按顺序排列的 Profile 候选。`dispatch` 只领取依赖已经通过且未被其他宿主领取的节点，并受 `max_concurrency` 限制；失败提交会在仍有候选时回到 pending，下一次派发选择后续 Profile。前置节点最终失败或 blocked 时，下游节点级联 blocked。
+
+MCP Server 无权直接调用 Codex 的 `spawn_agent` 或 Claude 的内部 Task API。当前由 Codex/Claude Skill 或其他宿主读取 Lease Request，调用其原生执行能力，再提交带 provenance 的结果。后续宿主 Adapter 可以自动完成这段翻译，但不得绕过宿主自己的 Sandbox、审批和并发限制。
+
 ## 评测分层
 
 - `Run validation`：判断一次执行是否满足程序、模型或人工验收条件，当前已实现。
@@ -85,4 +93,4 @@ MCP stdout 只输出 JSON-RPC。运行日志写到 stderr，默认 INFO；逐节
 
 ## 后续演进
 
-下一阶段包括自动 Eval Runner 与 Grader 适配器、Artifact/Evidence 一等实体和 lineage、Workspace 快照、幂等外部操作与补偿、并行候选执行、远程 Hub 同步和可选向量检索。这些能力通过适配器扩展，不应绑定某一家模型。
+下一阶段包括 Lease TTL/心跳与崩溃回收、Codex/Claude/API Host Adapter、预算和成本记录、自动 Eval Runner 与 Grader 适配器、Artifact/Evidence 一等实体和 lineage、Workspace 快照、幂等外部操作与补偿、远程 Hub 同步和可选向量检索。这些能力不应绑定某一家模型。

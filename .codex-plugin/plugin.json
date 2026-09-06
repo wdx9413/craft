@@ -1,7 +1,7 @@
 {
   "name": "craft",
   "version": "0.1.0",
-  "description": "Local-first capability discovery, task continuity, feedback, and reusable workflows for Codex.",
+  "description": "Capability discovery, durable tasks, multi-agent orchestration, evaluation, and reusable workflows.",
   "author": {
     "name": "wdx9413",
     "url": "https://github.com/wdx9413"
@@ -13,15 +13,16 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "Craft",
-    "shortDescription": "Continue tasks and reuse verified workflows.",
-    "longDescription": "Craft indexes user-selected local capabilities and helps Codex save task checkpoints, explicit feedback, and versioned workflow candidates under ~/.craft_data.",
+    "shortDescription": "Discover, orchestrate, evaluate, and reuse capabilities.",
+    "longDescription": "Craft indexes user-selected capabilities and manages durable task state, host-mediated multi-agent plans, evidence, evaluations, and reusable workflows under ~/.craft_data.",
     "developerName": "wdx9413",
     "category": "Productivity",
-    "capabilities": ["Local capability search", "Task continuity", "Workflow learning"],
+    "capabilities": ["Capability search", "Task continuity", "Multi-agent orchestration", "Evaluation", "Workflow learning"],
     "defaultPrompt": [
       "Use Craft to continue a saved task.",
       "Find relevant capabilities for this task.",
-      "Save this correction as a reusable workflow candidate."
+      "Save this correction as a reusable workflow candidate.",
+      "Coordinate this task across suitable agent profiles and verify the result."
     ]
   },
   "mcpServers": "./.mcp.json"

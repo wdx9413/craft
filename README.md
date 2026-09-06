@@ -6,7 +6,7 @@
 
 Craft 是面向 AI Agent 的能力管理与任务运行系统。它把 Skill、Workflow、工具与服务连接等统一视为可发现、可组合、可验证的能力资产，并围绕真实任务管理一条完整闭环：发现、登记和索引能力，按任务检索、选择与组合，协调并接续执行，保存状态、产物和验证证据，通过评测与回归判断结果和能力版本是否可靠，最后把经过验证的方法沉淀为可复用 Workflow。
 
-当前 v0.1 已落地本地 Skill 发现与管理、任务接续、混合验证、Workflow 运行、可信恢复，以及可复用 Case Suite 和跨版本评测对比。把插件与 MCP 元数据纳入能力目录、自动执行评测与基于门槛的能力晋级仍属于后续阶段。
+当前 v0.1 已落地本地 Skill 发现与管理、任务接续、混合验证、Workflow 运行、可信恢复、可复用 Case Suite 和跨版本评测对比，并新增跨宿主 Agent Profile、依赖编排、并发 Lease 与模型失败切换。把插件与 MCP 元数据纳入能力目录、自动执行评测与基于门槛的能力晋级仍属于后续阶段。
 
 ## 为什么需要 Craft
 
@@ -71,6 +71,7 @@ Craft 不要求产品方预先写完所有行业模板。用户完成真实任�
 - `read_only`、`local_write`、`external_write`、`destructive` 四级副作用控制。
 - 从可信 checkpoint 派生恢复，不覆盖原失败历史。
 - 有版本的评测 Case Suite、不可变 Case 结果、聚合指标和同套件版本对比。
+- 跨平台 Agent Profile、依赖 DAG、并发派发、Lease 去重和顺序 fallback。
 - Codex、Claude Code、MCP 和 Python CLI 接入。
 
 ## 评测能力的当前边界
@@ -184,13 +185,26 @@ craft_eval_suite_list / craft_eval_suite_save
 
 当前由宿主 Agent、程序或人工执行 Case；Craft 保存不可变结果并计算可复算指标。
 
+### 编排不同 Agent 和模型
+
+```text
+craft_agent_profile_save（角色、宿主、模型、权限）
+→ craft_orchestration_plan_create（节点、依赖、候选 Profile）
+→ craft_orchestration_dispatch（领取并行就绪节点）
+→ Codex / Claude / API 宿主执行
+→ craft_orchestration_submit（结果、证据、来源）
+```
+
+例如可以配置 Astra 负责架构与审查、Luna 负责实现和测试，也可以把 Claude、DeepSeek 或自建 API Profile 放入同一个计划。当前 MCP 返回结构化派发请求，由宿主调用自己的原生子 Agent；Craft 本身不冒充 Codex/Claude 的进程控制 API。
+
 ## 文档
 
 - [架构与可信控制面](docs/architecture.zh-CN.md)
 - [Workflow 字段、状态与示例](skills/craft/references/workflow-runtime.md)
 - [评测 Case、结果与对比语义](skills/craft/references/evaluation-runtime.md)
+- [多 Agent、模型路由与 Lease](skills/craft/references/multi-agent-runtime.md)
 - [MCP 工具说明](skills/craft/references/tool-contract.md)
 
 ## 当前边界
 
-Craft v0.1 仍是本地技术预览版，覆盖能力检索、长任务接续、验证、恢复和人工驱动的版本评测，不是无人值守的后台执行平台。当前暂不包含远程 Skill Hub 同步、向量检索、图形界面、Workspace 文件快照、定时/后台调度和并行 Agent 租约。SQLite 是默认检索方式，Embedding Provider 将保持可选。
+Craft v0.1 仍是本地技术预览版，覆盖能力检索、长任务接续、验证、恢复、人工驱动的版本评测和宿主介导的多 Agent 编排，不是无人值守的后台执行平台。当前暂不包含远程 Skill Hub 同步、向量检索、图形界面、Workspace 文件快照、定时/后台调度、Lease 超时回收和宿主进程自动拉起。SQLite 是默认检索方式，Embedding Provider 将保持可选。

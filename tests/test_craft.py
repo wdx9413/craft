@@ -18,6 +18,7 @@ from craft_core.cli import main as cli_main
 from craft_core.installer import install_plugin, main as installer_main, mcp_config, resolved_python
 from craft_core.log import get_logger, log_event
 from craft_core.mcp import McpServer, main as mcp_main
+from craft_core.multi_agent import normalize_orchestration_nodes, plan_status
 from craft_core.orchestrator import (
     approved_effects, compile_invariants, external_request, next_cursor,
     normalize_steps, normalize_submission,
@@ -353,6 +354,170 @@ class CraftServiceTests(unittest.TestCase):
             self.service.eval_compare([run["id"], newer_run["id"]])
         self.assertIsNone(self.service._metric_delta(None, 1.0))
 
+    def test_multi_agent_orchestration_with_parallelism_and_fallback(self) -> None:
+        luna = self.service.agent_profile_save(
+            "Luna worker", "worker", "codex", "openai", "gpt-5.6-luna", "max",
+            ["code", "test"], ["read_only", "local_write"], {"tier": "fast"},
+        )
+        luna_fallback = self.service.agent_profile_save(
+            "Terra fallback", "worker", "codex", "openai", "gpt-5.6-terra", "high",
+            allowed_side_effects=["read_only", "local_write"],
+        )
+        astra = self.service.agent_profile_save(
+            "Astra reviewer", "reviewer", "codex", "openai", "gpt-6-astra", "high"
+        )
+        self.assertEqual(self.service.agent_profile_get(luna["id"])["model"], "gpt-5.6-luna")
+        self.assertEqual(
+            self.service.agent_profile_list(role="worker", host="codex")["profiles"][0]["role"],
+            "worker",
+        )
+        nodes = [
+            {
+                "id": "implement", "role": "worker", "objective": "Implement the change",
+                "profile_ids": [luna["id"], luna_fallback["id"]],
+                "side_effect": "local_write", "input": {"scope": "src"},
+                "output_schema": {"files": "array"}, "evidence_required": ["diff"],
+            },
+            {
+                "id": "test", "role": "worker", "objective": "Run focused tests",
+                "profile_ids": [luna["id"]],
+            },
+            {
+                "id": "review", "role": "reviewer", "objective": "Review evidence",
+                "profile_ids": [astra["id"]], "depends_on": ["implement", "test"],
+            },
+        ]
+        task = self.service.task_open(title="orchestration")
+        plan = self.service.orchestration_plan_create(
+            "Ship a verified change", nodes, task["task"]["id"], 2, {"strategy": "quality_cost"}
+        )
+        self.assertEqual(plan["status"], "running")
+        self.assertEqual(
+            self.service.orchestration_plan_list(task_id=task["task"]["id"], status="running")["plans"][0]["id"],
+            plan["id"],
+        )
+        self.assertEqual(
+            self.service.task_open(task_id=task["task"]["id"])["orchestration_plans"][0]["id"],
+            plan["id"],
+        )
+        first = self.service.orchestration_dispatch(plan["id"], "codex-session", limit=8)
+        self.assertEqual({item["node_id"] for item in first["dispatched"]}, {"implement", "test"})
+        self.assertEqual(first["dispatched"][0]["input"], {"scope": "src"})
+        self.assertEqual(self.service.orchestration_dispatch(plan["id"], "codex")["dispatched"], [])
+        leases = {item["node_id"]: item["lease_id"] for item in first["dispatched"]}
+        after_test = self.service.orchestration_submit(
+            leases["test"], "passed", {"tests": 12}, provenance="program_verified"
+        )
+        self.assertEqual(after_test["status"], "running")
+        self.assertEqual(self.service.orchestration_dispatch(plan["id"], "codex")["dispatched"], [])
+        with self.assertRaisesRegex(ValueError, "requires evidence"):
+            self.service.orchestration_submit(leases["implement"], "failed")
+        self.service.orchestration_submit(
+            leases["implement"], "failed", {"error": "model unavailable"}, [{"ref": "attempt-1"}]
+        )
+        fallback = self.service.orchestration_dispatch(plan["id"], "codex")["dispatched"]
+        self.assertEqual(fallback[0]["profile"]["model"], "gpt-5.6-terra")
+        self.service.orchestration_submit(
+            fallback[0]["lease_id"], "passed", {"files": ["app.py"]}, [{"ref": "diff"}]
+        )
+        review = self.service.orchestration_dispatch(plan["id"], "codex")["dispatched"]
+        self.assertEqual(review[0]["profile"]["model"], "gpt-6-astra")
+        self.assertEqual(set(review[0]["dependency_results"]), {"implement", "test"})
+        self.assertEqual(review[0]["dependency_results"]["test"]["result"]["tests"], 12)
+        self.assertEqual(review[0]["policy"], {"strategy": "quality_cost"})
+        completed = self.service.orchestration_submit(
+            review[0]["lease_id"], "passed", {"approved": True}, provenance="model_judged"
+        )
+        self.assertEqual(completed["status"], "completed")
+        self.assertEqual(len(completed["leases"]), 4)
+        self.assertEqual(self.service.orchestration_plan_list(status="completed")["plans"][0]["id"], plan["id"])
+        with self.assertRaisesRegex(ValueError, "cannot dispatch"):
+            self.service.orchestration_dispatch(plan["id"], "codex")
+
+    def test_multi_agent_validation_and_blocked_dependencies(self) -> None:
+        invalid_nodes = [
+            ([], "At least one"),
+            (["bad"], "must be an object"),
+            ([{}], "requires id, role, and objective"),
+            ([{"id": "a", "role": "x", "objective": "x", "profile_ids": ["p"]}, {"id": "a", "role": "x", "objective": "x", "profile_ids": ["p"]}], "Duplicate"),
+            ([{"id": "a", "role": "x", "objective": "x", "profile_ids": ["p"], "depends_on": "b"}], "depends_on"),
+            ([{"id": "a", "role": "x", "objective": "x"}], "profile_ids"),
+            ([{"id": "a", "role": "x", "objective": "x", "profile_ids": ["p", "p"]}], "must be unique"),
+            ([{"id": "a", "role": "x", "objective": "x", "profile_ids": ["p"], "side_effect": "bad"}], "Unsupported side effect"),
+            ([{"id": "a", "role": "x", "objective": "x", "profile_ids": ["p"], "depends_on": ["a"]}], "cannot depend on itself"),
+            ([{"id": "a", "role": "x", "objective": "x", "profile_ids": ["p"], "depends_on": ["missing"]}], "unknown dependency"),
+            ([{"id": "a", "role": "x", "objective": "x", "profile_ids": ["p"], "depends_on": ["b"]}, {"id": "b", "role": "x", "objective": "x", "profile_ids": ["p"], "depends_on": ["a"]}], "dependency cycle"),
+        ]
+        for nodes, message in invalid_nodes:
+            with self.subTest(message=message), self.assertRaisesRegex(ValueError, message):
+                normalize_orchestration_nodes(nodes)  # type: ignore[arg-type]
+        for field in ("name", "role", "host", "provider", "model"):
+            values = {"name": "n", "role": "r", "host": "h", "provider": "p", "model": "m"}
+            values[field] = " "
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, field):
+                self.service.agent_profile_save(**values)
+        with self.assertRaisesRegex(ValueError, "capabilities"):
+            self.service.agent_profile_save("n", "r", "h", "p", "m", capabilities=[""])
+        with self.assertRaisesRegex(ValueError, "allowed_side_effects"):
+            self.service.agent_profile_save("n", "r", "h", "p", "m", allowed_side_effects=[])
+        with self.assertRaisesRegex(ValueError, "Unknown agent profile"):
+            self.service.agent_profile_get("missing")
+
+        disabled = self.service.agent_profile_save("off", "worker", "manual", "x", "m", enabled=False)
+        writer = self.service.agent_profile_save(
+            "writer", "worker", "manual", "x", "m", allowed_side_effects=["read_only", "local_write"]
+        )
+        reviewer = self.service.agent_profile_save("reviewer", "reviewer", "manual", "x", "m")
+        self.assertEqual(len(self.service.agent_profile_list(enabled=None)["profiles"]), 3)
+        with self.assertRaisesRegex(ValueError, "goal must not be empty"):
+            self.service.orchestration_plan_create(" ", [])
+        for value in (True, 0, 33):
+            with self.subTest(concurrency=value), self.assertRaisesRegex(ValueError, "max_concurrency"):
+                self.service.orchestration_plan_create("x", [], max_concurrency=value)  # type: ignore[arg-type]
+        base = {"id": "a", "role": "worker", "objective": "x", "profile_ids": [writer["id"]]}
+        with self.assertRaisesRegex(ValueError, "disabled"):
+            self.service.orchestration_plan_create("x", [{**base, "profile_ids": [disabled["id"]]}])
+        with self.assertRaisesRegex(ValueError, "expected worker"):
+            self.service.orchestration_plan_create("x", [{**base, "profile_ids": [reviewer["id"]]}])
+        with self.assertRaisesRegex(ValueError, "does not allow local_write"):
+            self.service.orchestration_plan_create("x", [{**base, "profile_ids": [reviewer["id"]], "role": "reviewer", "side_effect": "local_write"}])
+        with self.assertRaisesRegex(ValueError, "Unknown task"):
+            self.service.orchestration_plan_create("x", [base], task_id="missing")
+        with self.assertRaisesRegex(ValueError, "Unknown orchestration plan"):
+            self.service.orchestration_plan_get("missing")
+        self.assertEqual(self.service.orchestration_plan_list()["plans"], [])
+        with self.assertRaisesRegex(ValueError, "Unsupported orchestration plan status"):
+            self.service.orchestration_plan_list(status="cancelled")
+        with self.assertRaisesRegex(ValueError, "claimed_by"):
+            self.service.orchestration_dispatch("missing", " ")
+        with self.assertRaisesRegex(ValueError, "Unknown orchestration plan"):
+            self.service.orchestration_dispatch("missing", "host")
+        with self.assertRaisesRegex(ValueError, "Unsupported orchestration verdict"):
+            self.service.orchestration_submit("missing", "unknown")
+        with self.assertRaisesRegex(ValueError, "Unsupported orchestration provenance"):
+            self.service.orchestration_submit("missing", "passed", provenance="guess")
+        with self.assertRaisesRegex(ValueError, "Unknown orchestration lease"):
+            self.service.orchestration_submit("missing", "passed")
+
+        plan = self.service.orchestration_plan_create(
+            "blocked graph",
+            [base, {"id": "b", "role": "worker", "objective": "y", "profile_ids": [writer["id"]], "depends_on": ["a"]},
+             {"id": "c", "role": "worker", "objective": "z", "profile_ids": [writer["id"]], "depends_on": ["b"]}],
+            max_concurrency=1,
+        )
+        lease = self.service.orchestration_dispatch(plan["id"], "manual", limit=0)["dispatched"][0]
+        failed = self.service.orchestration_submit(lease["lease_id"], "blocked")
+        self.assertEqual(failed["status"], "failed")
+        self.assertEqual([node["status"] for node in failed["nodes"]], ["blocked", "blocked", "blocked"])
+        with self.assertRaisesRegex(ValueError, "already closed"):
+            self.service.orchestration_submit(lease["lease_id"], "passed")
+        with self.service.store.connect() as db:
+            with self.assertRaisesRegex(ValueError, "Unknown agent profile"):
+                self.service._profile_from_db(db, "missing", 1)
+        self.assertEqual(plan_status([{"status": "passed"}]), "completed")
+        self.assertEqual(plan_status([{"status": "leased"}]), "running")
+        self.assertEqual(plan_status([{"status": "failed"}]), "failed")
+
     def test_validation_errors_are_actionable(self) -> None:
         with self.assertRaisesRegex(ValueError, "does not exist"):
             self.service.source_add(str(self.root / "missing"))
@@ -518,6 +683,47 @@ class CraftServiceTests(unittest.TestCase):
         run_cli("eval-result-submit", second["id"], "case", "failed")
         self.assertEqual(run_cli("eval-compare", run["id"], second["id"])["runs"][1]["delta"]["pass_rate"], -1.0)
 
+        profile = run_cli(
+            "agent-profile-save", "CLI worker", "worker", "codex", "openai", "gpt-5.6-luna",
+            "--reasoning-effort", "max", "--capabilities-json", '["test"]',
+            "--allowed-side-effects-json", '["read_only"]', "--metadata-json", '{"source":"cli"}',
+        )
+        self.assertEqual(
+            run_cli("agent-profile-get", profile["id"], "--version", "1")["model"],
+            "gpt-5.6-luna",
+        )
+        self.assertEqual(
+            run_cli("agent-profile-list", "--role", "worker", "--host", "codex")["profiles"][0]["id"],
+            profile["id"],
+        )
+        disabled_profile = run_cli(
+            "agent-profile-save", "Disabled", "worker", "manual", "local", "none", "--disabled"
+        )
+        self.assertIn(
+            disabled_profile["id"],
+            {item["id"] for item in run_cli("agent-profile-list", "--include-disabled")["profiles"]},
+        )
+        nodes = json.dumps([{
+            "id": "work", "role": "worker", "objective": "Do CLI work",
+            "profile_ids": [profile["id"]],
+        }])
+        plan = run_cli(
+            "orchestration-plan-create", "CLI orchestration", nodes,
+            "--max-concurrency", "1", "--policy-json", '{"mode":"host"}',
+        )
+        self.assertEqual(run_cli("orchestration-plan-get", plan["id"])["status"], "running")
+        self.assertEqual(
+            run_cli("orchestration-plan-list", "--status", "running")["plans"][0]["id"],
+            plan["id"],
+        )
+        lease = run_cli("orchestration-dispatch", plan["id"], "cli-host", "--limit", "1")["dispatched"][0]
+        finished = run_cli(
+            "orchestration-submit", lease["lease_id"], "passed",
+            "--result-json", '{"done":true}', "--evidence-json", '[{"ref":"cli"}]',
+            "--provenance", "agent_reported",
+        )
+        self.assertEqual(finished["status"], "completed")
+
     def test_public_mcp_tool_names_are_prefixed(self) -> None:
         server = McpServer(self.service)
         response = server.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}})
@@ -528,6 +734,9 @@ class CraftServiceTests(unittest.TestCase):
         self.assertIn("craft_workflow_search", names)
         self.assertIn("craft_eval_suite_save", names)
         self.assertIn("craft_eval_compare", names)
+        self.assertIn("craft_agent_profile_save", names)
+        self.assertIn("craft_orchestration_dispatch", names)
+        self.assertIn("craft_orchestration_plan_list", names)
 
     def test_mcp_protocol_errors_and_tool_validation(self) -> None:
         server = McpServer(self.service)
@@ -686,7 +895,7 @@ class StoreMigrationTests(unittest.TestCase):
                     row["name"] for row in migrated.execute("PRAGMA table_info(workflow_sessions)")
                 }
             self.assertNotIn("path TEXT NOT NULL UNIQUE", sql)
-            self.assertEqual(version, "7")
+            self.assertEqual(version, "8")
             self.assertIn("restored_from_checkpoint", session_columns)
 
     def test_store_falls_back_when_fts5_is_unavailable(self) -> None:

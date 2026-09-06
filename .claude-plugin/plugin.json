@@ -1,5 +1,5 @@
 {
   "name": "craft",
   "version": "0.1.0",
-  "description": "Local-first capability discovery, task continuity, feedback, and reusable workflows for AI agents."
+  "description": "Capability discovery, durable tasks, host-mediated multi-agent orchestration, evaluation, and reusable workflows."
 }

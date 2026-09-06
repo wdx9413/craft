@@ -9,6 +9,7 @@ from typing import Any
 
 from .catalog import Catalog, utc_now
 from .log import get_logger, log_event
+from .multi_agent import PROVENANCE, normalize_orchestration_nodes, plan_status
 from .orchestrator import (
     EXTERNAL_STATES, TERMINALS, approved_effects, compile_invariants,
     external_request, next_cursor, normalize_steps, normalize_submission,
@@ -41,6 +42,7 @@ class CraftService:
                     "sources", "capabilities", "tasks", "workflows",
                     "workflow_runs", "workflow_sessions", "workflow_checkpoints",
                     "evaluation_suites", "evaluation_runs", "evaluation_results",
+                    "agent_profiles", "orchestration_plans", "orchestration_leases",
                 )
             }
         return {"version": "0.1.0", "data_root": str(self.store.root), "counts": counts}
@@ -520,6 +522,384 @@ class CraftService:
             "pass_rate": round(counts["passed"] / evaluated, 6) if evaluated else None,
             "weighted_score": round(weighted_score / weighted_total, 6) if weighted_total else None,
         }
+
+    def agent_profile_save(
+        self,
+        name: str,
+        role: str,
+        host: str,
+        provider: str,
+        model: str,
+        reasoning_effort: str | None = None,
+        capabilities: list[str] | None = None,
+        allowed_side_effects: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
+        enabled: bool = True,
+        profile_id: str | None = None,
+    ) -> dict[str, Any]:
+        values = {"name": name, "role": role, "host": host, "provider": provider, "model": model}
+        for field, value in values.items():
+            if not value.strip():
+                raise ValueError(f"{field} must not be empty")
+        capabilities = capabilities or []
+        effects = ["read_only"] if allowed_side_effects is None else allowed_side_effects
+        if not all(isinstance(item, str) and item for item in capabilities):
+            raise ValueError("capabilities must contain non-empty strings")
+        from .orchestrator import SIDE_EFFECTS
+        if not effects or any(item not in SIDE_EFFECTS for item in effects):
+            raise ValueError("allowed_side_effects contains an unsupported value")
+        profile_id = profile_id or "profile_" + hashlib.sha256(
+            f"{role.casefold()}:{name.casefold()}".encode("utf-8")
+        ).hexdigest()[:20]
+        with self.store.transaction() as db:
+            version = db.execute(
+                "SELECT COALESCE(MAX(version),0)+1 AS version FROM agent_profiles WHERE id=?",
+                (profile_id,),
+            ).fetchone()["version"]
+            db.execute(
+                """INSERT INTO agent_profiles(
+                   id,version,name,role,host,provider,model,reasoning_effort,
+                   capabilities_json,allowed_side_effects_json,metadata_json,enabled,created_at
+                   ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    profile_id, version, name, role, host, provider, model, reasoning_effort,
+                    json.dumps(capabilities, ensure_ascii=False),
+                    json.dumps(effects, ensure_ascii=False),
+                    json.dumps(metadata or {}, ensure_ascii=False), int(enabled), utc_now(),
+                ),
+            )
+        return self.agent_profile_get(profile_id, version)
+
+    def agent_profile_get(self, profile_id: str, version: int | None = None) -> dict[str, Any]:
+        with self.store.connect() as db:
+            if version is None:
+                row = db.execute(
+                    "SELECT * FROM agent_profiles WHERE id=? ORDER BY version DESC LIMIT 1",
+                    (profile_id,),
+                ).fetchone()
+            else:
+                row = db.execute(
+                    "SELECT * FROM agent_profiles WHERE id=? AND version=?", (profile_id, version)
+                ).fetchone()
+        if not row:
+            raise ValueError(f"Unknown agent profile: {profile_id}")
+        return self._agent_profile_card(row)
+
+    def agent_profile_list(
+        self,
+        limit: int = 20,
+        role: str | None = None,
+        host: str | None = None,
+        enabled: bool | None = True,
+    ) -> dict[str, Any]:
+        limit = max(1, min(limit, 50))
+        sql = """SELECT profile.* FROM agent_profiles profile
+                 JOIN (SELECT id, MAX(version) AS version FROM agent_profiles GROUP BY id) latest
+                 ON profile.id=latest.id AND profile.version=latest.version WHERE 1=1"""
+        params: list[Any] = []
+        for column, value in (("role", role), ("host", host)):
+            if value:
+                sql += f" AND profile.{column}=?"
+                params.append(value)
+        if enabled is not None:
+            sql += " AND profile.enabled=?"
+            params.append(int(enabled))
+        sql += " ORDER BY profile.created_at DESC LIMIT ?"
+        params.append(limit)
+        with self.store.connect() as db:
+            rows = db.execute(sql, params).fetchall()
+        return {"profiles": [self._agent_profile_card(row) for row in rows]}
+
+    @staticmethod
+    def _agent_profile_card(row: Any) -> dict[str, Any]:
+        result = dict(row)
+        result["enabled"] = bool(result["enabled"])
+        result["capabilities"] = json.loads(result.pop("capabilities_json"))
+        result["allowed_side_effects"] = json.loads(result.pop("allowed_side_effects_json"))
+        result["metadata"] = json.loads(result.pop("metadata_json"))
+        return result
+
+    def orchestration_plan_create(
+        self,
+        goal: str,
+        nodes: list[dict[str, Any]],
+        task_id: str | None = None,
+        max_concurrency: int = 4,
+        policy: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if not goal.strip():
+            raise ValueError("goal must not be empty")
+        if isinstance(max_concurrency, bool) or not 1 <= max_concurrency <= 32:
+            raise ValueError("max_concurrency must be between 1 and 32")
+        normalized = normalize_orchestration_nodes(nodes)
+        resolved: list[dict[str, Any]] = []
+        for node in normalized:
+            routes = []
+            for profile_id in node["profile_ids"]:
+                profile = self.agent_profile_get(profile_id)
+                if not profile["enabled"]:
+                    raise ValueError(f"Agent profile is disabled: {profile_id}")
+                if profile["role"] != node["role"]:
+                    raise ValueError(
+                        f"Agent profile {profile_id} has role {profile['role']}, expected {node['role']}"
+                    )
+                if node["side_effect"] not in profile["allowed_side_effects"]:
+                    raise ValueError(
+                        f"Agent profile {profile_id} does not allow {node['side_effect']}"
+                    )
+                routes.append({"profile_id": profile["id"], "profile_version": profile["version"]})
+            resolved.append({**node, "routes": routes})
+        plan_id = new_id("orch")
+        now = utc_now()
+        with self.store.transaction() as db:
+            if task_id and not db.execute("SELECT 1 FROM tasks WHERE id=?", (task_id,)).fetchone():
+                raise ValueError(f"Unknown task: {task_id}")
+            db.execute(
+                """INSERT INTO orchestration_plans(
+                   id,task_id,goal,status,max_concurrency,policy_json,created_at,updated_at
+                   ) VALUES(?,?,?,'running',?,?,?,?)""",
+                (plan_id, task_id, goal, max_concurrency, json.dumps(policy or {}, ensure_ascii=False), now, now),
+            )
+            for position, node in enumerate(resolved):
+                db.execute(
+                    """INSERT INTO orchestration_nodes(
+                       plan_id,node_id,position,role,objective,depends_on_json,routes_json,
+                       input_json,output_schema_json,evidence_required_json,
+                       side_effect,status,result_json,updated_at
+                       ) VALUES(?,?,?,?,?,?,?,?,?,?,?,'pending','{}',?)""",
+                    (
+                        plan_id, node["id"], position, node["role"], node["objective"],
+                        json.dumps(node["depends_on"], ensure_ascii=False),
+                        json.dumps(node["routes"], ensure_ascii=False),
+                        json.dumps(node["input"], ensure_ascii=False),
+                        json.dumps(node["output_schema"], ensure_ascii=False),
+                        json.dumps(node["evidence_required"], ensure_ascii=False),
+                        node["side_effect"], now,
+                    ),
+                )
+        log_event(self.logger, "orchestration_plan_created", plan_id=plan_id, nodes=len(resolved))
+        return self.orchestration_plan_get(plan_id)
+
+    def orchestration_plan_get(self, plan_id: str) -> dict[str, Any]:
+        with self.store.connect() as db:
+            row = db.execute("SELECT * FROM orchestration_plans WHERE id=?", (plan_id,)).fetchone()
+            if not row:
+                raise ValueError(f"Unknown orchestration plan: {plan_id}")
+            nodes = db.execute(
+                "SELECT * FROM orchestration_nodes WHERE plan_id=? ORDER BY position", (plan_id,)
+            ).fetchall()
+            leases = db.execute(
+                "SELECT * FROM orchestration_leases WHERE plan_id=? ORDER BY created_at", (plan_id,)
+            ).fetchall()
+        result = dict(row)
+        result["policy"] = json.loads(result.pop("policy_json"))
+        result["nodes"] = []
+        for raw in nodes:
+            node = dict(raw)
+            node["depends_on"] = json.loads(node.pop("depends_on_json"))
+            node["routes"] = json.loads(node.pop("routes_json"))
+            node["input"] = json.loads(node.pop("input_json"))
+            node["output_schema"] = json.loads(node.pop("output_schema_json"))
+            node["evidence_required"] = json.loads(node.pop("evidence_required_json"))
+            node["result"] = json.loads(node.pop("result_json"))
+            result["nodes"].append(node)
+        result["leases"] = []
+        for raw in leases:
+            lease = dict(raw)
+            lease["request"] = json.loads(lease.pop("request_json"))
+            lease["result"] = json.loads(lease.pop("result_json"))
+            result["leases"].append(lease)
+        return result
+
+    def orchestration_plan_list(
+        self,
+        limit: int = 20,
+        task_id: str | None = None,
+        status: str | None = None,
+    ) -> dict[str, Any]:
+        limit = max(1, min(limit, 50))
+        if status is not None and status not in {"running", "completed", "failed"}:
+            raise ValueError(f"Unsupported orchestration plan status: {status}")
+        sql = "SELECT id FROM orchestration_plans WHERE 1=1"
+        params: list[Any] = []
+        if task_id:
+            sql += " AND task_id=?"
+            params.append(task_id)
+        if status:
+            sql += " AND status=?"
+            params.append(status)
+        sql += " ORDER BY updated_at DESC LIMIT ?"
+        params.append(limit)
+        with self.store.connect() as db:
+            ids = [row["id"] for row in db.execute(sql, params).fetchall()]
+        return {"plans": [self.orchestration_plan_get(plan_id) for plan_id in ids]}
+
+    def orchestration_dispatch(
+        self, plan_id: str, claimed_by: str, limit: int | None = None
+    ) -> dict[str, Any]:
+        if not claimed_by.strip():
+            raise ValueError("claimed_by must not be empty")
+        dispatched: list[dict[str, Any]] = []
+        now = utc_now()
+        with self.store.transaction() as db:
+            plan = db.execute("SELECT * FROM orchestration_plans WHERE id=?", (plan_id,)).fetchone()
+            if not plan:
+                raise ValueError(f"Unknown orchestration plan: {plan_id}")
+            if plan["status"] != "running":
+                raise ValueError(f"Orchestration plan cannot dispatch from status: {plan['status']}")
+            self._refresh_orchestration(db, plan_id, now)
+            active = db.execute(
+                "SELECT COUNT(*) FROM orchestration_leases WHERE plan_id=? AND status='leased'",
+                (plan_id,),
+            ).fetchone()[0]
+            requested = plan["max_concurrency"] if limit is None else max(1, min(limit, 32))
+            capacity = max(0, min(requested, plan["max_concurrency"] - active))
+            rows = db.execute(
+                "SELECT * FROM orchestration_nodes WHERE plan_id=? AND status='pending' ORDER BY position",
+                (plan_id,),
+            ).fetchall()
+            state_rows = db.execute(
+                "SELECT node_id,status,result_json FROM orchestration_nodes WHERE plan_id=?",
+                (plan_id,),
+            ).fetchall()
+            statuses = {item["node_id"]: item["status"] for item in state_rows}
+            dependency_results = {
+                item["node_id"]: json.loads(item["result_json"]) for item in state_rows
+            }
+            for row in rows:
+                if len(dispatched) >= capacity:
+                    break
+                dependencies = json.loads(row["depends_on_json"])
+                if not all(statuses[item] == "passed" for item in dependencies):
+                    continue
+                routes = json.loads(row["routes_json"])
+                attempt = row["attempt"] + 1
+                route = routes[attempt - 1]
+                profile = self._profile_from_db(db, route["profile_id"], route["profile_version"])
+                lease_id = new_id("lease")
+                request = {
+                    "lease_id": lease_id, "plan_id": plan_id, "node_id": row["node_id"],
+                    "objective": row["objective"], "role": row["role"],
+                    "side_effect": row["side_effect"], "profile": profile,
+                    "input": json.loads(row["input_json"]),
+                    "output_schema": json.loads(row["output_schema_json"]),
+                    "evidence_required": json.loads(row["evidence_required_json"]),
+                    "goal": plan["goal"], "policy": json.loads(plan["policy_json"]),
+                    "dependency_results": {
+                        item: dependency_results[item] for item in dependencies
+                    },
+                }
+                db.execute(
+                    """INSERT INTO orchestration_leases(
+                       id,plan_id,node_id,attempt,profile_id,profile_version,status,claimed_by,
+                       request_json,created_at,updated_at
+                       ) VALUES(?,?,?,?,?,?,'leased',?,?,?,?)""",
+                    (
+                        lease_id, plan_id, row["node_id"], attempt, profile["id"], profile["version"],
+                        claimed_by, json.dumps(request, ensure_ascii=False), now, now,
+                    ),
+                )
+                db.execute(
+                    "UPDATE orchestration_nodes SET status='leased',attempt=?,updated_at=? WHERE plan_id=? AND node_id=?",
+                    (attempt, now, plan_id, row["node_id"]),
+                )
+                statuses[row["node_id"]] = "leased"
+                dispatched.append(request)
+            self._refresh_orchestration(db, plan_id, now)
+        log_event(self.logger, "orchestration_dispatched", plan_id=plan_id, leases=len(dispatched))
+        return {"dispatched": dispatched, "plan": self.orchestration_plan_get(plan_id)}
+
+    def orchestration_submit(
+        self,
+        lease_id: str,
+        verdict: str,
+        result: dict[str, Any] | None = None,
+        evidence: list[dict[str, Any]] | None = None,
+        provenance: str = "agent_reported",
+    ) -> dict[str, Any]:
+        if verdict not in {"passed", "failed", "blocked"}:
+            raise ValueError(f"Unsupported orchestration verdict: {verdict}")
+        if provenance not in PROVENANCE:
+            raise ValueError(f"Unsupported orchestration provenance: {provenance}")
+        now = utc_now()
+        with self.store.transaction() as db:
+            lease = db.execute("SELECT * FROM orchestration_leases WHERE id=?", (lease_id,)).fetchone()
+            if not lease:
+                raise ValueError(f"Unknown orchestration lease: {lease_id}")
+            if lease["status"] != "leased":
+                raise ValueError(f"Orchestration lease is already closed: {lease_id}")
+            node = db.execute(
+                "SELECT * FROM orchestration_nodes WHERE plan_id=? AND node_id=?",
+                (lease["plan_id"], lease["node_id"]),
+            ).fetchone()
+            required_evidence = json.loads(node["evidence_required_json"])
+            if required_evidence and not evidence:
+                raise ValueError("This orchestration node requires evidence references")
+            routes = json.loads(node["routes_json"])
+            receipt = {"verdict": verdict, "result": result or {}, "evidence": evidence or []}
+            db.execute(
+                """UPDATE orchestration_leases SET status='completed',result_json=?,provenance=?,updated_at=?
+                   WHERE id=?""",
+                (json.dumps(receipt, ensure_ascii=False), provenance, now, lease_id),
+            )
+            if verdict == "passed":
+                node_status = "passed"
+            elif node["attempt"] < len(routes):
+                node_status = "pending"
+            else:
+                node_status = verdict
+            db.execute(
+                """UPDATE orchestration_nodes SET status=?,result_json=?,updated_at=?
+                   WHERE plan_id=? AND node_id=?""",
+                (
+                    node_status, json.dumps(receipt, ensure_ascii=False), now,
+                    lease["plan_id"], lease["node_id"],
+                ),
+            )
+            self._refresh_orchestration(db, lease["plan_id"], now)
+            plan_id = lease["plan_id"]
+        log_event(
+            self.logger, "orchestration_submitted", plan_id=plan_id,
+            node_id=lease["node_id"], verdict=verdict, provenance=provenance,
+        )
+        return self.orchestration_plan_get(plan_id)
+
+    @staticmethod
+    def _profile_from_db(db: Any, profile_id: str, version: int) -> dict[str, Any]:
+        row = db.execute(
+            "SELECT * FROM agent_profiles WHERE id=? AND version=?", (profile_id, version)
+        ).fetchone()
+        if not row:
+            raise ValueError(f"Unknown agent profile: {profile_id}")
+        return CraftService._agent_profile_card(row)
+
+    @staticmethod
+    def _refresh_orchestration(db: Any, plan_id: str, now: str) -> None:
+        changed = True
+        while changed:
+            changed = False
+            rows = db.execute(
+                "SELECT * FROM orchestration_nodes WHERE plan_id=? ORDER BY position", (plan_id,)
+            ).fetchall()
+            statuses = {row["node_id"]: row["status"] for row in rows}
+            for row in rows:
+                dependencies = json.loads(row["depends_on_json"])
+                if row["status"] == "pending" and any(
+                    statuses[item] in {"failed", "blocked"} for item in dependencies
+                ):
+                    db.execute(
+                        "UPDATE orchestration_nodes SET status='blocked',updated_at=? WHERE plan_id=? AND node_id=?",
+                        (now, plan_id, row["node_id"]),
+                    )
+                    changed = True
+        rows = db.execute(
+            "SELECT status FROM orchestration_nodes WHERE plan_id=?", (plan_id,)
+        ).fetchall()
+        status = plan_status([dict(row) for row in rows])
+        db.execute(
+            "UPDATE orchestration_plans SET status=?,updated_at=? WHERE id=?",
+            (status, now, plan_id),
+        )
 
     def workflow_save(
         self,
@@ -1091,6 +1471,11 @@ class CraftService:
             feedback = db.execute(
                 "SELECT * FROM feedback WHERE task_id=? ORDER BY created_at DESC LIMIT 20", (task_id,)
             ).fetchall()
+            plans = db.execute(
+                """SELECT id,goal,status,max_concurrency,created_at,updated_at
+                   FROM orchestration_plans WHERE task_id=? ORDER BY updated_at DESC LIMIT 10""",
+                (task_id,),
+            ).fetchall()
         return {
             "task": dict(task),
             "checkpoints": [
@@ -1105,4 +1490,5 @@ class CraftService:
                 for row in checkpoints
             ],
             "feedback": [dict(row) for row in feedback],
+            "orchestration_plans": [dict(row) for row in plans],
         }

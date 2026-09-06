@@ -8,7 +8,7 @@ from typing import Iterator
 from .paths import ensure_layout
 
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 
 class ClosingConnection(sqlite3.Connection):
@@ -252,6 +252,77 @@ class CraftStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_evaluation_results_run
                     ON evaluation_results(run_id, case_id);
+                CREATE TABLE IF NOT EXISTS agent_profiles (
+                    id TEXT NOT NULL,
+                    version INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    host TEXT NOT NULL,
+                    provider TEXT NOT NULL,
+                    model TEXT NOT NULL,
+                    reasoning_effort TEXT,
+                    capabilities_json TEXT NOT NULL,
+                    allowed_side_effects_json TEXT NOT NULL,
+                    metadata_json TEXT NOT NULL,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY(id, version)
+                );
+                CREATE INDEX IF NOT EXISTS idx_agent_profiles_role
+                    ON agent_profiles(role, host, enabled, version DESC);
+                CREATE TABLE IF NOT EXISTS orchestration_plans (
+                    id TEXT PRIMARY KEY,
+                    task_id TEXT REFERENCES tasks(id),
+                    goal TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    max_concurrency INTEGER NOT NULL,
+                    policy_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS orchestration_nodes (
+                    plan_id TEXT NOT NULL REFERENCES orchestration_plans(id),
+                    node_id TEXT NOT NULL,
+                    position INTEGER NOT NULL,
+                    role TEXT NOT NULL,
+                    objective TEXT NOT NULL,
+                    depends_on_json TEXT NOT NULL,
+                    routes_json TEXT NOT NULL,
+                    input_json TEXT NOT NULL,
+                    output_schema_json TEXT NOT NULL,
+                    evidence_required_json TEXT NOT NULL,
+                    side_effect TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    attempt INTEGER NOT NULL DEFAULT 0,
+                    result_json TEXT NOT NULL DEFAULT '{}',
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY(plan_id, node_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_orchestration_nodes_plan
+                    ON orchestration_nodes(plan_id, status, position);
+                CREATE TABLE IF NOT EXISTS orchestration_leases (
+                    id TEXT PRIMARY KEY,
+                    plan_id TEXT NOT NULL,
+                    node_id TEXT NOT NULL,
+                    attempt INTEGER NOT NULL,
+                    profile_id TEXT NOT NULL,
+                    profile_version INTEGER NOT NULL,
+                    status TEXT NOT NULL,
+                    claimed_by TEXT NOT NULL,
+                    request_json TEXT NOT NULL,
+                    result_json TEXT NOT NULL DEFAULT '{}',
+                    provenance TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY(plan_id, node_id)
+                        REFERENCES orchestration_nodes(plan_id, node_id),
+                    FOREIGN KEY(profile_id, profile_version)
+                        REFERENCES agent_profiles(id, version)
+                );
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_orchestration_lease_attempt
+                    ON orchestration_leases(plan_id, node_id, attempt);
+                CREATE INDEX IF NOT EXISTS idx_orchestration_leases_plan
+                    ON orchestration_leases(plan_id, status, created_at);
                 """
             )
             session_columns = {

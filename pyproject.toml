@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "craft-agent-harness"
 version = "0.1.0"
-description = "Local-first capability discovery, task continuity, and workflow learning for AI agents"
+description = "Capability discovery, durable tasks, multi-agent orchestration, evaluation, and reusable workflows"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
