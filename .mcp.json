@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "craft": {
+      "command": "py",
+      "args": ["-3", "./scripts/craft_mcp.py"],
+      "cwd": "."
+    }
+  }
+}

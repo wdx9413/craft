@@ -1,0 +1,23 @@
+{
+  "name": "craft",
+  "version": "0.1.0",
+  "description": "Local-first capability discovery, task continuity, feedback, and reusable workflows for Codex.",
+  "author": {
+    "name": "Craft contributors"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Craft",
+    "shortDescription": "Continue tasks and reuse verified workflows.",
+    "longDescription": "Craft indexes user-selected local capabilities and helps Codex save task checkpoints, explicit feedback, and versioned workflow candidates under ~/.craft_data.",
+    "developerName": "Craft contributors",
+    "category": "Productivity",
+    "capabilities": ["Local capability search", "Task continuity", "Workflow learning"],
+    "defaultPrompt": [
+      "Use Craft to continue a saved task.",
+      "Find relevant capabilities for this task.",
+      "Save this correction as a reusable workflow candidate."
+    ]
+  },
+  "mcpServers": "./.mcp.json"
+}

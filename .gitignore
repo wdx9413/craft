@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+tests/.tmp/
+tests/.validation-deps/
+.craft_data/
+.venv/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/

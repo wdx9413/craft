@@ -1,0 +1,4 @@
+interface:
+  display_name: "Craft"
+  short_description: "Continue tasks and reuse verified workflows"
+  default_prompt: "Use Craft to find relevant capabilities and continue this task."
