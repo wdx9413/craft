@@ -64,6 +64,14 @@ An MCP server cannot directly invoke Codex `spawn_agent` or Claude internal task
 
 Set `CRAFT_LOG_LEVEL=DEBUG|INFO|WARNING|ERROR` to control log verbosity.
 
+## Core consistency invariants
+
+- A Capability is identified by its logical relative path inside a Source and stores its current real path. Retargeted directory links update location without deleting the same asset, and scan generations prevent an older concurrent snapshot from overwriting a newer one. Rescans compare nanosecond mtime and file size first, avoiding content reads and hashing for unchanged Skills.
+- Path casing follows host filesystem semantics: Windows normalizes case while case-sensitive platforms preserve it.
+- A Workflow validates all transition targets, structured fields, and permission declarations before executing any step. Routed workflows use the auditable Session Runtime; linear `workflow_run` never silently ignores `on_result`.
+- A `needs_repair` Run is atomically marked running before commands execute, preventing two clients from claiming the same repair attempt.
+- Eval run state, Case identity, and duplicate-result checks occur in one write transaction. Weights and scores must be finite, rejecting NaN and Infinity.
+
 ## Next steps
 
 Planned work includes Codex/Claude/API host adapters, token/time/cost budgets, orchestration-to-Eval integration, automatic Eval Runners and Graders, first-class artifact/evidence lineage, workspace snapshots, idempotent external operations and compensation, remote hubs, and optional vector retrieval. None should bind Craft to one model provider.

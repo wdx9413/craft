@@ -8,7 +8,7 @@ from typing import Iterator
 from .paths import ensure_layout
 
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 
 class ClosingConnection(sqlite3.Connection):
@@ -62,6 +62,7 @@ class CraftStore:
                     requested_path TEXT,
                     label TEXT,
                     enabled INTEGER NOT NULL DEFAULT 1,
+                    scan_generation INTEGER NOT NULL DEFAULT 0,
                     last_scanned_at TEXT,
                     created_at TEXT NOT NULL
                 );
@@ -75,6 +76,8 @@ class CraftStore:
                     path TEXT NOT NULL,
                     relative_path TEXT NOT NULL,
                     digest TEXT NOT NULL,
+                    modified_ns INTEGER,
+                    size_bytes INTEGER,
                     metadata_json TEXT NOT NULL,
                     body TEXT NOT NULL,
                     updated_at TEXT NOT NULL
@@ -367,6 +370,8 @@ class CraftStore:
             }
             if "requested_path" not in source_columns:
                 db.execute("ALTER TABLE sources ADD COLUMN requested_path TEXT")
+            if "scan_generation" not in source_columns:
+                db.execute("ALTER TABLE sources ADD COLUMN scan_generation INTEGER NOT NULL DEFAULT 0")
             db.execute("UPDATE sources SET requested_path=path WHERE requested_path IS NULL")
             capability_sql = db.execute(
                 "SELECT sql FROM sqlite_master WHERE type='table' AND name='capabilities'"
@@ -395,6 +400,13 @@ class CraftStore:
                     CREATE INDEX idx_capabilities_name ON capabilities(name);
                     """
                 )
+            capability_columns = {
+                row["name"] for row in db.execute("PRAGMA table_info(capabilities)").fetchall()
+            }
+            if "modified_ns" not in capability_columns:
+                db.execute("ALTER TABLE capabilities ADD COLUMN modified_ns INTEGER")
+            if "size_bytes" not in capability_columns:
+                db.execute("ALTER TABLE capabilities ADD COLUMN size_bytes INTEGER")
             try:
                 db.execute(
                     """CREATE VIRTUAL TABLE IF NOT EXISTS capability_fts
@@ -404,6 +416,19 @@ class CraftStore:
                 db.execute(
                     "INSERT OR REPLACE INTO meta(key, value) VALUES('fts', 'trigram')"
                 )
+                backfilled = db.execute(
+                    "SELECT value FROM meta WHERE key='fts_backfill_schema'"
+                ).fetchone()
+                if not backfilled or backfilled["value"] != str(SCHEMA_VERSION):
+                    db.execute("DELETE FROM capability_fts")
+                    db.execute(
+                        """INSERT INTO capability_fts(asset_id,name,description,body)
+                           SELECT id,name,description,body FROM capabilities"""
+                    )
+                    db.execute(
+                        "INSERT OR REPLACE INTO meta(key,value) VALUES('fts_backfill_schema',?)",
+                        (str(SCHEMA_VERSION),),
+                    )
             except sqlite3.OperationalError:
                 db.execute(
                     "INSERT OR REPLACE INTO meta(key, value) VALUES('fts', 'like')"

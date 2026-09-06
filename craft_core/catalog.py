@@ -21,6 +21,11 @@ def stable_id(prefix: str, value: str) -> str:
     return f"{prefix}_{hashlib.sha256(value.encode('utf-8')).hexdigest()[:20]}"
 
 
+def path_identity(value: str) -> str:
+    """Normalize path identity using the current platform's case semantics."""
+    return os.path.normcase(value).replace("\\", "/")
+
+
 def parse_skill(text: str, fallback_name: str) -> tuple[dict[str, str], str]:
     metadata: dict[str, str] = {}
     body = text
@@ -68,7 +73,9 @@ def iter_skill_files(root: Path, errors: list[dict[str, str]] | None = None) -> 
                 if entry.is_dir(follow_symlinks=True):
                     stack.append((Path(entry.path), logical_child))
                 elif entry.name == "SKILL.md" and entry.is_file(follow_symlinks=True):
-                    yield Path(entry.path).resolve(), logical_child.as_posix().removeprefix("./")
+                    path = Path(entry.path)
+                    real_path = path.resolve() if entry.is_symlink() else path.absolute()
+                    yield real_path, logical_child.as_posix().removeprefix("./")
             except OSError as exc:
                 errors.append({"path": str(Path(entry.path)), "error": str(exc)})
                 continue
@@ -83,7 +90,7 @@ class Catalog:
         root = requested.resolve()
         if not root.is_dir():
             raise ValueError(f"Source directory does not exist: {root}")
-        source_id = stable_id("src", str(root).casefold())
+        source_id = stable_id("src", path_identity(str(root)))
         now = utc_now()
         with self.store.transaction() as db:
             db.execute(
@@ -94,6 +101,9 @@ class Catalog:
                     label=COALESCE(excluded.label, sources.label), enabled=1""",
                 (source_id, str(root), str(requested), label, now),
             )
+            source_id = db.execute(
+                "SELECT id FROM sources WHERE path=?", (str(root),)
+            ).fetchone()["id"]
         return {
             "id": source_id,
             "requested_path": str(requested),
@@ -171,15 +181,20 @@ class Catalog:
         return [self.scan_source(source_id) for source_id in stale]
 
     def scan_source(self, source_id: str) -> dict[str, Any]:
-        with self.store.connect() as db:
+        with self.store.transaction() as db:
             row = db.execute(
                 "SELECT * FROM sources WHERE id=? AND enabled=1", (source_id,)
             ).fetchone()
+            if not row:
+                raise ValueError(f"Unknown or disabled source: {source_id}")
+            generation = row["scan_generation"] + 1
+            db.execute(
+                "UPDATE sources SET scan_generation=? WHERE id=?", (generation, source_id)
+            )
             existing_rows = db.execute(
-                "SELECT id, path, digest FROM capabilities WHERE source_id=?", (source_id,)
+                """SELECT id,path,digest,modified_ns,size_bytes
+                   FROM capabilities WHERE source_id=?""", (source_id,)
             ).fetchall()
-        if not row:
-            raise ValueError(f"Unknown or disabled source: {source_id}")
         root = Path(row["path"])
         if not root.is_dir():
             raise ValueError(f"Source directory is unavailable: {root}")
@@ -189,24 +204,35 @@ class Catalog:
         added = updated = unchanged = failed = 0
         errors: list[dict[str, str]] = []
         changed: list[tuple[Any, ...]] = []
+        metadata_refresh: list[tuple[int, int, str]] = []
         for skill_file, relative in iter_skill_files(root, errors):
             resolved_path = str(skill_file)
-            seen.add(resolved_path)
+            asset_id = stable_id("cap", f"{source_id}:{path_identity(relative)}")
+            seen.add(asset_id)
             try:
+                stat = skill_file.stat()
+                old = existing.get(asset_id)
+                if (
+                    old and old["path"] == resolved_path
+                    and old["modified_ns"] == stat.st_mtime_ns
+                    and old["size_bytes"] == stat.st_size
+                ):
+                    unchanged += 1
+                    continue
                 raw = skill_file.read_bytes()
                 text = raw.decode("utf-8")
                 digest = hashlib.sha256(raw).hexdigest()
-                asset_id = stable_id("cap", f"{source_id}:{relative.casefold()}")
                 metadata, body = parse_skill(text, skill_file.parent.name)
-                old = existing.get(asset_id)
-                if old and old["digest"] == digest:
+                if old and old["digest"] == digest and old["path"] == resolved_path:
                     unchanged += 1
+                    metadata_refresh.append((stat.st_mtime_ns, stat.st_size, asset_id))
                     continue
                 changed.append(
                     (
                         asset_id, source_id, metadata["name"], metadata["description"],
                         metadata.get("version", "unversioned"), resolved_path, relative,
-                        digest, json.dumps(metadata, ensure_ascii=False), body, utc_now(),
+                        digest, stat.st_mtime_ns, stat.st_size,
+                        json.dumps(metadata, ensure_ascii=False), body, utc_now(),
                     )
                 )
                 if old:
@@ -219,17 +245,32 @@ class Catalog:
 
         traversal_failed = bool(errors)
         with self.store.transaction() as db:
+            current = db.execute(
+                "SELECT scan_generation,enabled FROM sources WHERE id=?", (source_id,)
+            ).fetchone()
+            if not current or not current["enabled"] or current["scan_generation"] != generation:
+                return {
+                    "source_id": source_id, "added": 0, "updated": 0,
+                    "unchanged": 0, "removed": 0, "failed": failed,
+                    "errors": errors[:20], "complete": False, "superseded": True,
+                }
             fts_enabled = self._fts_enabled(db)
+            db.executemany(
+                "UPDATE capabilities SET modified_ns=?,size_bytes=? WHERE id=?",
+                metadata_refresh,
+            )
             for item in changed:
                 db.execute(
                     """INSERT INTO capabilities(
                         id, source_id, kind, name, description, version, path,
-                        relative_path, digest, metadata_json, body, updated_at
-                    ) VALUES(?, ?, 'skill', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        relative_path, digest, modified_ns, size_bytes,
+                        metadata_json, body, updated_at
+                    ) VALUES(?, ?, 'skill', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         name=excluded.name, description=excluded.description,
                         version=excluded.version, path=excluded.path,
-                        digest=excluded.digest, metadata_json=excluded.metadata_json,
+                        digest=excluded.digest, modified_ns=excluded.modified_ns,
+                        size_bytes=excluded.size_bytes, metadata_json=excluded.metadata_json,
                         body=excluded.body, updated_at=excluded.updated_at""",
                     item,
                 )
@@ -237,12 +278,12 @@ class Catalog:
                     db.execute("DELETE FROM capability_fts WHERE asset_id=?", (item[0],))
                     db.execute(
                         "INSERT INTO capability_fts(asset_id,name,description,body) VALUES(?,?,?,?)",
-                        (item[0], item[2], item[3], item[9]),
+                        (item[0], item[2], item[3], item[11]),
                     )
             # A partial traversal is not authoritative: preserve older rows so a
             # temporary permission or I/O failure cannot erase the usable index.
             removed = [] if traversal_failed else [
-                item for item in existing_rows if item["path"] not in seen
+                item for item in existing_rows if item["id"] not in seen
             ]
             for item in removed:
                 db.execute("DELETE FROM capabilities WHERE id=?", (item["id"],))
@@ -255,6 +296,7 @@ class Catalog:
             "source_id": source_id, "added": added, "updated": updated,
             "unchanged": unchanged, "removed": len(removed), "failed": failed,
             "errors": errors[:20], "complete": not traversal_failed,
+            "superseded": False,
         }
 
     @staticmethod

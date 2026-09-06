@@ -16,6 +16,8 @@ def normalize_steps(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
     normalized: list[dict[str, Any]] = []
     identifiers: set[str] = set()
     for index, original in enumerate(steps):
+        if not isinstance(original, dict):
+            raise ValueError(f"Workflow step at index {index} must be an object")
         step = dict(original)
         step_id = str(step.get("id") or f"step_{index + 1}")
         if step_id in identifiers:
@@ -28,6 +30,24 @@ def normalize_steps(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
         step["side_effect"] = effect
         normalized.append(step)
     return normalized
+
+
+def validate_transitions(steps: list[dict[str, Any]]) -> None:
+    """Reject invalid control flow before any workflow step can create side effects."""
+    identifiers = {step["id"] for step in steps}
+    terminals = {"end", "passed", "fail", "failed"}
+    for step in steps:
+        mapping = step.get("on_result")
+        if mapping is None:
+            mapping = {}
+        elif not isinstance(mapping, dict):
+            raise ValueError(f"Workflow step {step['id']} on_result must be an object")
+        targets = [*mapping.values()]
+        if step.get("next") is not None:
+            targets.append(step["next"])
+        for target in targets:
+            if not isinstance(target, str) or target not in identifiers | terminals:
+                raise ValueError(f"Unknown workflow transition target: {target}")
 
 
 def compile_invariants(invariants: list[dict[str, Any]]) -> list[dict[str, Any]]:

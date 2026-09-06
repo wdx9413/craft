@@ -39,14 +39,19 @@ def main() -> None:
         result = service.source_add(str(library))
         indexed_seconds = time.perf_counter() - started
         started = time.perf_counter()
+        incremental = service.source_scan(result["id"])
+        incremental_seconds = time.perf_counter() - started
+        started = time.perf_counter()
         found = service.capability_search("video storyboard continuity")
         query_ms = (time.perf_counter() - started) * 1000
         print(json.dumps({
             "count": args.count,
             "generated_seconds": round(generated_seconds, 3),
             "indexed_seconds": round(indexed_seconds, 3),
+            "incremental_seconds": round(incremental_seconds, 3),
             "query_ms": round(query_ms, 3),
             "added": result["scan"]["added"],
+            "unchanged": incremental["unchanged"],
             "first_result": found["results"][0]["name"] if found["results"] else None,
         }, indent=2))
 

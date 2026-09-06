@@ -78,7 +78,12 @@ def command_step(step: dict[str, Any], root: Path) -> dict[str, Any]:
     timeout = max(1, min(int(step.get("timeout_seconds", 300)), 3600))
     environment = os.environ.copy()
     secrets: list[str] = []
-    for key, value in (step.get("env") or {}).items():
+    configured_environment = step.get("env", {})
+    if configured_environment is None:
+        configured_environment = {}
+    if not isinstance(configured_environment, dict):
+        raise ValueError("Command step env must be an object")
+    for key, value in configured_environment.items():
         environment[str(key)] = str(value)
         if any(marker in str(key).casefold() for marker in ("token", "password", "secret", "key", "cookie")):
             secrets.append(str(value))
@@ -237,7 +242,7 @@ def execute_steps(steps: list[dict[str, Any]], root: Path) -> list[dict[str, Any
                 detail = assertion_step(step, root, by_id)
             else:
                 raise ValueError(f"Unsupported workflow step type: {kind}")
-        except (OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
+        except (OSError, TypeError, ValueError, KeyError, json.JSONDecodeError) as exc:
             detail = {"passed": False, "error": type(exc).__name__, "message": str(exc)}
         result = {"id": step_id, "type": kind, **detail}
         results.append(result)

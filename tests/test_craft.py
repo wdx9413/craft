@@ -13,7 +13,7 @@ from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
-from craft_core.catalog import iter_skill_files, parse_skill, stable_id
+from craft_core.catalog import iter_skill_files, parse_skill, path_identity, stable_id
 from craft_core.cli import main as cli_main
 from craft_core.installer import install_plugin, main as installer_main, mcp_config, resolved_python
 from craft_core.log import get_logger, log_event
@@ -81,6 +81,10 @@ class CraftServiceTests(unittest.TestCase):
         self.assertEqual(found["results"][0]["name"], "evidence-diagnose")
         asset = self.service.capability_get(found["results"][0]["id"])
         self.assertIn("verify the result", asset["body"])
+        with patch.object(Path, "read_bytes", side_effect=AssertionError("unchanged file was read")):
+            self.assertEqual(self.service.source_scan(source["id"])["unchanged"], 1)
+        stat = skill.stat()
+        os.utime(skill, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
         self.assertEqual(self.service.source_scan(source["id"])["unchanged"], 1)
 
         skill.write_text(skill.read_text(encoding="utf-8") + "Check deployment fingerprint.\n", encoding="utf-8")
@@ -170,6 +174,49 @@ class CraftServiceTests(unittest.TestCase):
         self.assertEqual(Path(added["real_path"]), target.resolve())
         found = self.service.capability_search("directory link", refresh=False)
         self.assertEqual(Path(found["results"][0]["path"]), (target / "SKILL.md").resolve())
+
+    def test_scan_tracks_logical_identity_when_a_link_target_changes(self) -> None:
+        library = self.root / "library"
+        original = library / "skill" / "SKILL.md"
+        original.parent.mkdir(parents=True)
+        content = "---\nname: movable\ndescription: follows a retargeted link\n---\n"
+        original.write_text(content, encoding="utf-8")
+        source = self.service.source_add(str(library))
+        asset_id = self.service.capability_search("retargeted link", refresh=False)["results"][0]["id"]
+
+        replacement = self.root / "replacement" / "SKILL.md"
+        replacement.parent.mkdir()
+        replacement.write_text(content, encoding="utf-8")
+        with patch(
+            "craft_core.catalog.iter_skill_files",
+            return_value=iter([(replacement.resolve(), "skill/SKILL.md")]),
+        ):
+            scanned = self.service.source_scan(source["id"])
+        self.assertEqual((scanned["updated"], scanned["removed"]), (1, 0))
+        self.assertEqual(Path(self.service.capability_get(asset_id)["path"]), replacement.resolve())
+
+    def test_older_concurrent_scan_cannot_overwrite_a_newer_generation(self) -> None:
+        library = self.root / "library"
+        library.mkdir()
+        skill = library / "SKILL.md"
+        skill.write_text("---\nname: stable\ndescription: original snapshot\n---\n", encoding="utf-8")
+        source = self.service.source_add(str(library))
+        skill.write_text("---\nname: stale\ndescription: stale snapshot\n---\n", encoding="utf-8")
+
+        def superseded_scan(*_args):  # type: ignore[no-untyped-def]
+            with self.service.store.transaction() as db:
+                db.execute(
+                    "UPDATE sources SET scan_generation=scan_generation+1 WHERE id=?", (source["id"],)
+                )
+            yield skill.resolve(), "SKILL.md"
+
+        with patch("craft_core.catalog.iter_skill_files", side_effect=superseded_scan):
+            scanned = self.service.source_scan(source["id"])
+        self.assertTrue(scanned["superseded"])
+        self.assertEqual(
+            self.service.capability_search("original snapshot", refresh=False)["results"][0]["name"],
+            "stable",
+        )
 
     def test_task_feedback_checkpoint_and_workflow_versions(self) -> None:
         opened = self.service.task_open(title="Analyze a case", goal="Find a supported cause", project_id="demo")
@@ -295,6 +342,7 @@ class CraftServiceTests(unittest.TestCase):
             ([{"id": "a", "name": "A"}, {"id": "a", "name": "B"}], "Duplicate"),
             ([{"id": "a", "name": "A", "weight": True}], "positive number"),
             ([{"id": "a", "name": "A", "weight": 0}], "positive number"),
+            ([{"id": "a", "name": "A", "weight": float("nan")}], "positive number"),
             ([{"id": "a", "name": "A", "tags": [1]}], "tags must be strings"),
             ([{"id": "a", "name": "A", "graders": ["judge"]}], "graders must be objects"),
         ]
@@ -322,11 +370,13 @@ class CraftServiceTests(unittest.TestCase):
         run = self.service.eval_run_start(suite["id"], "skill", "sample")
         with self.assertRaisesRegex(ValueError, "Unsupported evaluation verdict"):
             self.service.eval_result_submit(run["id"], "a", "unknown")
-        for score in (True, -0.1, 1.1):
+        for score in (True, -0.1, 1.1, float("nan")):
             with self.subTest(score=score), self.assertRaisesRegex(ValueError, "between 0 and 1"):
                 self.service.eval_result_submit(run["id"], "a", "passed", score)  # type: ignore[arg-type]
         with self.assertRaisesRegex(ValueError, "Unsupported evaluation provenance"):
             self.service.eval_result_submit(run["id"], "a", "passed", provenance="guessed")
+        with self.assertRaisesRegex(ValueError, "Unknown evaluation run"):
+            self.service.eval_result_submit("missing", "a", "passed")
         with self.assertRaisesRegex(ValueError, "Unknown evaluation case"):
             self.service.eval_result_submit(run["id"], "missing", "passed")
         completed = self.service.eval_result_submit(run["id"], "a", "blocked")
@@ -944,6 +994,9 @@ class CatalogUtilityTests(unittest.TestCase):
         self.assertNotIn("nested", metadata)
         self.assertEqual(body, "body")
         self.assertEqual(stable_id("x", "same"), stable_id("x", "same"))
+        self.assertNotIn("\\", path_identity("Folder\\SKILL.md"))
+        with patch("craft_core.catalog.os.path.normcase", side_effect=lambda value: value):
+            self.assertNotEqual(path_identity("Foo/SKILL.md"), path_identity("foo/SKILL.md"))
         malformed, malformed_body = parse_skill("---\nname: never-closed", "fallback")
         self.assertEqual(malformed["name"], "fallback")
         self.assertTrue(malformed_body.startswith("---"))
@@ -965,7 +1018,10 @@ class CatalogUtilityTests(unittest.TestCase):
                 return self.mode == "dir"
 
             def is_file(self, follow_symlinks: bool = True) -> bool:
-                return self.mode == "file"
+                return self.mode in {"file", "link"}
+
+            def is_symlink(self) -> bool:
+                return self.mode == "link"
 
         with tempfile.TemporaryDirectory(dir=TEST_TMP_ROOT) as temp:
             root = Path(temp).resolve()
@@ -974,10 +1030,12 @@ class CatalogUtilityTests(unittest.TestCase):
                 Entry("cycle", root, "dir"),
                 Entry("broken", root / "broken", "error"),
                 Entry("SKILL.md", root / "not-a-file", "other"),
+                Entry("SKILL.md", root / "linked-skill", "link"),
                 Entry("ordinary.txt", root / "ordinary.txt", "file"),
             ]
             with patch("craft_core.catalog.os.scandir", return_value=entries):
-                self.assertEqual(list(iter_skill_files(root, errors)), [])
+                found = list(iter_skill_files(root, errors))
+            self.assertEqual(found[0][1], "SKILL.md")
             self.assertEqual(errors[0]["error"], "entry denied")
 
     def test_iterator_skips_known_directories(self) -> None:
@@ -1035,6 +1093,11 @@ class StoreMigrationTests(unittest.TestCase):
                     result_json TEXT NOT NULL DEFAULT '{}', provenance TEXT,
                     created_at TEXT NOT NULL, updated_at TEXT NOT NULL
                 );
+                INSERT INTO sources VALUES('s','C:/skills','old',1,NULL,'now');
+                INSERT INTO capabilities VALUES(
+                    'c','s','skill','legacy','backfill me','1','C:/skills/SKILL.md',
+                    'SKILL.md','digest','{}','legacy body','now'
+                );
                 INSERT INTO orchestration_nodes VALUES(
                     'p','pending',0,'r','o','[]','[]','{}','{}','[]','read_only',
                     'pending',2,'{}','now'
@@ -1061,11 +1124,29 @@ class StoreMigrationTests(unittest.TestCase):
                         "SELECT route_index FROM orchestration_nodes ORDER BY position"
                     )
                 ]
+                source_columns = {
+                    row["name"] for row in migrated.execute("PRAGMA table_info(sources)")
+                }
+                fts_count = migrated.execute(
+                    "SELECT COUNT(*) FROM capability_fts WHERE asset_id='c'"
+                ).fetchone()[0]
+                capability_columns = {
+                    row["name"] for row in migrated.execute("PRAGMA table_info(capabilities)")
+                }
             self.assertNotIn("path TEXT NOT NULL UNIQUE", sql)
-            self.assertEqual(version, "9")
+            self.assertEqual(version, "10")
             self.assertIn("restored_from_checkpoint", session_columns)
             self.assertEqual(route_indexes, [2, 1])
             self.assertTrue({"expires_at", "heartbeat_at", "closed_reason"}.issubset(lease_columns))
+            self.assertIn("scan_generation", source_columns)
+            self.assertTrue({"modified_ns", "size_bytes"}.issubset(capability_columns))
+            self.assertEqual(fts_count, 1)
+            CraftStore(root)
+            with store.connect() as migrated:
+                self.assertEqual(
+                    migrated.execute("SELECT COUNT(*) FROM capability_fts WHERE asset_id='c'").fetchone()[0],
+                    1,
+                )
 
     def test_store_falls_back_when_fts5_is_unavailable(self) -> None:
         from craft_core.store import ClosingConnection
@@ -1327,6 +1408,30 @@ class WorkflowRuntimeTests(unittest.TestCase):
                 workflow["id"], str(self.project), run_id=first["run_id"], allow_execution=True
             )
 
+    def test_repair_run_is_claimed_before_commands_execute(self) -> None:
+        workflow = self.service.workflow_save(
+            "Claim repair", "Prevent duplicate execution",
+            [{"id": "fail", "type": "command", "command": [sys.executable, "-c", "raise SystemExit(1)"]}],
+            repair_policy={"enabled": True, "max_attempts": 3},
+        )
+        first = self.service.workflow_run(workflow["id"], str(self.project), allow_execution=True)
+        rejected: list[str] = []
+
+        def execute_once(_steps, _root):  # type: ignore[no-untyped-def]
+            try:
+                self.service.workflow_run(
+                    workflow["id"], str(self.project), run_id=first["run_id"], allow_execution=True
+                )
+            except ValueError as exc:
+                rejected.append(str(exc))
+            return [{"id": "fail", "type": "command", "passed": False}]
+
+        with patch("craft_core.service.execute_steps", side_effect=execute_once):
+            self.service.workflow_run(
+                workflow["id"], str(self.project), run_id=first["run_id"], allow_execution=True
+            )
+        self.assertIn("cannot resume from status: running", rejected[0])
+
     def test_run_validation_and_immediate_failure(self) -> None:
         workflow = self.service.workflow_save(
             "One shot", "Fail once",
@@ -1380,6 +1485,8 @@ class WorkflowRuntimeTests(unittest.TestCase):
             resolve_inputs([{}], {})
         with self.assertRaisesRegex(ValueError, "Missing required"):
             resolve_inputs([{"name": "x", "required": True}], {})
+        with self.assertRaisesRegex(ValueError, "must be an object"):
+            normalize_steps(["bad"])  # type: ignore[list-item]
         value = substitute(
             {"list": ["{{number}}", "prefix-{{text}}", 4]}, {"number": 2, "text": "ok"}
         )
@@ -1401,6 +1508,63 @@ class WorkflowRuntimeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Project root does not exist"):
             self.service.workflow_plan(bad["id"], str(self.project / "missing"))
 
+        bad_transition = self.service.workflow_save(
+            "Bad transition", "Reject before execution",
+            [{"id": "write", "type": "command", "command": [sys.executable], "next": "missing"}],
+        )
+        with self.assertRaisesRegex(ValueError, "Unknown workflow transition target"):
+            self.service.workflow_plan(bad_transition["id"], str(self.project))
+        bad_mapping = self.service.workflow_save(
+            "Bad mapping", "Reject malformed routing",
+            [{"id": "step", "type": "assertion", "evaluator": "file_exists", "path": ".", "on_result": []}],
+        )
+        with self.assertRaisesRegex(ValueError, "on_result must be an object"):
+            self.service.workflow_plan(bad_mapping["id"], str(self.project))
+        routed = self.service.workflow_save(
+            "Routed", "Use mixed runtime",
+            [{"id": "step", "type": "assertion", "evaluator": "file_exists", "path": ".", "next": "passed"}],
+        )
+        with self.assertRaisesRegex(ValueError, "must use workflow_start"):
+            self.service.workflow_run(routed["id"], str(self.project), allow_execution=True)
+
+        malformed = {
+            "inputs": {}, "preconditions": {}, "steps": {}, "invariants": {},
+            "success_criteria": {}, "permission_policy": [], "repair_policy": [],
+        }
+        for field, value in malformed.items():
+            saved = self.service.workflow_save(
+                f"Malformed {field}", "Validate structure",
+                [{"id": "step", "type": "assertion", "evaluator": "file_exists", "path": "."}],
+            )
+            with self.service.store.transaction() as db:
+                row = db.execute(
+                    "SELECT workflow_json FROM workflows WHERE id=? AND version=?",
+                    (saved["id"], saved["version"]),
+                ).fetchone()
+                definition = json.loads(row["workflow_json"])
+                definition[field] = value
+                db.execute(
+                    "UPDATE workflows SET workflow_json=? WHERE id=? AND version=?",
+                    (json.dumps(definition), saved["id"], saved["version"]),
+                )
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                self.service.workflow_plan(saved["id"], str(self.project))
+
+        bad_inputs = self.service.workflow_save(
+            "Bad inputs", "Validate input entries",
+            [{"id": "step", "type": "assertion", "evaluator": "file_exists", "path": "."}],
+            inputs=["bad"],  # type: ignore[list-item]
+        )
+        with self.assertRaisesRegex(ValueError, "inputs must contain objects"):
+            self.service.workflow_plan(bad_inputs["id"], str(self.project))
+        bad_effects = self.service.workflow_save(
+            "Bad effects", "Validate effects",
+            [{"id": "step", "type": "assertion", "evaluator": "file_exists", "path": "."}],
+            permission_policy={"allowed_side_effects": ["unknown"]},
+        )
+        with self.assertRaisesRegex(ValueError, "allowed_side_effects is invalid"):
+            self.service.workflow_plan(bad_effects["id"], str(self.project))
+
     def test_command_assertion_and_path_helpers(self) -> None:
         with self.assertRaisesRegex(ValueError, "escapes project root"):
             safe_path(self.project, "../outside")
@@ -1408,6 +1572,11 @@ class WorkflowRuntimeTests(unittest.TestCase):
             command_step({"command": "echo"}, self.project)
         with self.assertRaisesRegex(ValueError, "cwd does not exist"):
             command_step({"command": [sys.executable], "cwd": "missing"}, self.project)
+        with self.assertRaisesRegex(ValueError, "env must be an object"):
+            command_step({"command": [sys.executable], "env": []}, self.project)
+        self.assertTrue(command_step(
+            {"command": [sys.executable, "-c", "pass"], "env": None}, self.project
+        )["passed"])
         completed = command_step(
             {
                 "command": [sys.executable, "-c", "import os; print(os.environ['CRAFT_TEST_VALUE'])"],
@@ -1463,6 +1632,12 @@ class WorkflowRuntimeTests(unittest.TestCase):
         self.assertEqual(results[1]["id"], "step_2")
         unsupported = execute_steps([{"type": "bad"}], self.project)
         self.assertEqual(unsupported[0]["error"], "ValueError")
+        malformed = execute_steps([{"type": "command", "command": [None]}], self.project)  # type: ignore[list-item]
+        self.assertEqual(malformed[0]["error"], "ValueError")
+        type_error = execute_steps([
+            {"type": "command", "command": ["x"], "timeout_seconds": None}
+        ], self.project)
+        self.assertEqual(type_error[0]["error"], "TypeError")
         with patch("craft_core.workflow_runtime.coverage_gate", return_value={"passed": True}):
             covered = execute_steps([{"type": "coverage_gate"}], self.project)
         self.assertTrue(covered[0]["passed"])

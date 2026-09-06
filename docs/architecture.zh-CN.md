@@ -89,6 +89,14 @@ MCP stdout 只输出 JSON-RPC。运行日志写到 stderr，默认 INFO；逐节
 
 使用 `CRAFT_LOG_LEVEL=DEBUG|INFO|WARNING|ERROR` 调整日志级别。
 
+## 核心一致性约束
+
+- Capability 以 Source 内逻辑相对路径作为身份，以真实路径作为当前位置。目录链接改指向后更新位置，不把同一能力先更新再误删；并发扫描使用递增 generation，较早扫描不能覆盖较新快照。复扫先比较 mtime_ns 与文件大小，未变化 Skill 不重读正文或重算摘要。
+- 路径大小写遵循宿主文件系统语义：Windows 归一化大小写，大小写敏感平台保留区别。
+- Workflow 在执行任何步骤前验证全部跳转目标、结构字段和权限声明。带路由的流程只能进入可审计的 Session Runtime；线性 `workflow_run` 不会静默忽略 `on_result`。
+- `needs_repair` Run 在再次执行命令前原子标记为 running，防止两个客户端同时重复领取同一次修复。
+- Eval Result 的运行状态、Case 身份和重复提交检查在同一个写事务内完成；权重与分数必须是有限数，拒绝 NaN 和 Infinity。
+
 ## 本地存储
 
 默认数据目录是 `~/.craft_data`，核心状态保存在 SQLite。`CRAFT_DATA_DIR` 仅用于测试和受管部署。业务项目不会被写入 Craft 数据。

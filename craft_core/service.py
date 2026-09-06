@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -12,8 +13,9 @@ from .catalog import Catalog, utc_now
 from .log import get_logger, log_event
 from .multi_agent import PROVENANCE, normalize_orchestration_nodes, plan_status
 from .orchestrator import (
-    EXTERNAL_STATES, TERMINALS, approved_effects, compile_invariants,
+    EXTERNAL_STATES, SIDE_EFFECTS, TERMINALS, approved_effects, compile_invariants,
     external_request, next_cursor, normalize_steps, normalize_submission,
+    validate_transitions,
 )
 from .store import CraftStore
 from .workflow_runtime import execute_steps, failure_signature, resolve_inputs, substitute
@@ -225,7 +227,10 @@ class CraftService:
                 raise ValueError(f"Duplicate evaluation case id: {case_id}")
             seen.add(case_id)
             weight = item.get("weight", 1.0)
-            if isinstance(weight, bool) or not isinstance(weight, (int, float)) or weight <= 0:
+            if (
+                isinstance(weight, bool) or not isinstance(weight, (int, float))
+                or not math.isfinite(weight) or weight <= 0
+            ):
                 raise ValueError(f"Evaluation case {case_id} weight must be a positive number")
             tags = item.get("tags", [])
             graders = item.get("graders", [])
@@ -364,7 +369,8 @@ class CraftService:
         if score is None and verdict in {"passed", "failed"}:
             score = 1.0 if verdict == "passed" else 0.0
         if score is not None and (
-            isinstance(score, bool) or not isinstance(score, (int, float)) or not 0 <= score <= 1
+            isinstance(score, bool) or not isinstance(score, (int, float))
+            or not math.isfinite(score) or not 0 <= score <= 1
         ):
             raise ValueError("score must be between 0 and 1")
         allowed_provenance = {
@@ -373,16 +379,27 @@ class CraftService:
         }
         if provenance not in allowed_provenance:
             raise ValueError(f"Unsupported evaluation provenance: {provenance}")
-        run = self.eval_run_get(run_id)
-        if run["status"] == "completed":
-            raise ValueError("Evaluation run is already completed")
-        case_ids = {item["id"] for item in run["suite"]["cases"]}
-        if case_id not in case_ids:
-            raise ValueError(f"Unknown evaluation case for this run: {case_id}")
-        if case_id in {item["case_id"] for item in run["results"]}:
-            raise ValueError(f"Evaluation result already exists for case: {case_id}")
         now = utc_now()
         with self.store.transaction() as db:
+            run = db.execute("SELECT * FROM evaluation_runs WHERE id=?", (run_id,)).fetchone()
+            if not run:
+                raise ValueError(f"Unknown evaluation run: {run_id}")
+            if run["status"] == "completed":
+                raise ValueError("Evaluation run is already completed")
+            suite = db.execute(
+                "SELECT definition_json FROM evaluation_suites WHERE id=? AND version=?",
+                (run["suite_id"], run["suite_version"]),
+            ).fetchone()
+            case_ids = {
+                item["id"] for item in json.loads(suite["definition_json"])["cases"]
+            }
+            if case_id not in case_ids:
+                raise ValueError(f"Unknown evaluation case for this run: {case_id}")
+            if db.execute(
+                "SELECT 1 FROM evaluation_results WHERE run_id=? AND case_id=?",
+                (run_id, case_id),
+            ).fetchone():
+                raise ValueError(f"Evaluation result already exists for case: {case_id}")
             db.execute(
                 """INSERT INTO evaluation_results(
                    run_id,case_id,verdict,score,metrics_json,evidence_json,notes,provenance,created_at
@@ -547,7 +564,6 @@ class CraftService:
         effects = ["read_only"] if allowed_side_effects is None else allowed_side_effects
         if not all(isinstance(item, str) and item for item in capabilities):
             raise ValueError("capabilities must contain non-empty strings")
-        from .orchestrator import SIDE_EFFECTS
         if not effects or any(item not in SIDE_EFFECTS for item in effects):
             raise ValueError("allowed_side_effects contains an unsupported value")
         profile_id = profile_id or "profile_" + hashlib.sha256(
@@ -1208,6 +1224,11 @@ class CraftService:
         root = Path(project_root).expanduser().resolve()
         if not root.is_dir():
             raise ValueError(f"Project root does not exist: {root}")
+        for field in ("inputs", "preconditions", "steps", "invariants", "success_criteria"):
+            if not isinstance(workflow.get(field, []), list):
+                raise ValueError(f"Workflow {field} must be an array")
+        if not all(isinstance(item, dict) for item in workflow.get("inputs", [])):
+            raise ValueError("Workflow inputs must contain objects")
         resolved = resolve_inputs(workflow.get("inputs", []), inputs or {})
         criteria = workflow.get("success_criteria", [])
         if any(not isinstance(item, dict) for item in criteria):
@@ -1215,12 +1236,24 @@ class CraftService:
         invariants = compile_invariants(workflow.get("invariants", []))
         planned = [*workflow.get("preconditions", []), *workflow["steps"], *invariants, *criteria]
         steps = normalize_steps(substitute(planned, resolved))
+        validate_transitions(steps)
         supported = {"command", "coverage_gate", "assertion", "agent", "judge", "human"}
         permission_policy = workflow.get("permission_policy", {})
-        declared_effects = set(permission_policy.get(
+        if not isinstance(permission_policy, dict):
+            raise ValueError("Workflow permission_policy must be an object")
+        configured_effects = permission_policy.get(
             "allowed_side_effects",
             ["read_only", "local_write", "external_write", "destructive"],
-        ))
+        )
+        if (
+            not isinstance(configured_effects, list)
+            or any(effect not in SIDE_EFFECTS for effect in configured_effects)
+        ):
+            raise ValueError("Workflow permission_policy.allowed_side_effects is invalid")
+        declared_effects = set(configured_effects)
+        repair_policy = workflow.get("repair_policy", {})
+        if not isinstance(repair_policy, dict):
+            raise ValueError("Workflow repair_policy must be an object")
         for step in steps:
             if step.get("type") not in supported:
                 raise ValueError(f"Unsupported workflow step type: {step.get('type')}")
@@ -1234,7 +1267,7 @@ class CraftService:
             "project_root": str(root),
             "inputs": resolved,
             "steps": steps,
-            "repair_policy": workflow.get("repair_policy", {}),
+            "repair_policy": repair_policy,
             "permission_policy": permission_policy,
             "invariants": workflow.get("invariants", []),
             "required_approvals": sorted({
@@ -1256,6 +1289,8 @@ class CraftService:
         if not allow_execution:
             raise ValueError("allow_execution=true is required to run workflow commands")
         plan = self.workflow_plan(workflow_id, project_root, version, inputs)
+        if any(step.get("on_result") or step.get("next") is not None for step in plan["steps"]):
+            raise ValueError("Routed workflows must use workflow_start instead of workflow_run")
         allowed = approved_effects(allow_execution, approved_side_effects)
         blocked = sorted({
             step["side_effect"] for step in plan["steps"]
@@ -1284,6 +1319,10 @@ class CraftService:
                 previous_signature = row["last_signature"]
                 previous_no_progress = row["no_progress_count"]
                 max_attempts = row["max_attempts"]
+                db.execute(
+                    "UPDATE workflow_runs SET status='running',attempt=?,updated_at=? WHERE id=?",
+                    (attempt, now, run_id),
+                )
             else:
                 run_id = new_id("run")
                 attempt = 1
