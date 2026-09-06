@@ -4,7 +4,9 @@
 
 > Help AI find the right capability, continue previous work, prove outcomes, and turn successful methods into reusable workflows.
 
-Craft is a general-purpose work system that helps AI agents discover the right capabilities, continue long-running tasks, verify outcomes, and reuse proven methods. It organizes Skills, task state, evidence, and reusable workflows as user-owned capability assets. Codex, Claude, and other agent applications can connect through MCP, plugins, or the CLI.
+Craft is a general-purpose work system that helps AI agents discover the right capabilities, continue long-running tasks, verify outcomes, and reuse proven methods. It organizes agent capabilities and work history as user-owned capability assets: today it starts with Skill indexing and preserves task state, evidence, and reusable Workflows. Codex, Claude, and other agent applications can connect through MCP, plugins, or the CLI.
+
+“Capability asset” is Craft's umbrella term, not a synonym for “plugin.” A Skill teaches an agent how to perform a class of tasks; MCP connects tools, data, and services; a plugin packages and distributes components such as Skills and MCP servers; a Workflow composes capabilities for a goal. Craft v0.1 implements Skill indexing and Workflow management. Plugin catalogs and MCP server catalogs remain future extensions.
 
 ## Why Craft
 

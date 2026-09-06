@@ -20,12 +20,24 @@ Goal + Invariants + Permission Policy
 
 ## 核心对象
 
-- `Capability`：索引后的 Skill 或未来的其他能力资产。
+- `Capability`：Craft 对可发现能力资产的统一抽象；当前落地类型是 Skill，未来可以扩展插件和 MCP 服务元数据。
 - `Task`：跨会话持续的用户目标。
 - `Checkpoint`：任务或 Workflow 的可信接续位置。
 - `Workflow`：有版本的目标、步骤、不变量与策略。
 - `Session / Run`：一次具体执行及其不可变事件。
 - `Artifact / Evidence`：当前先以引用和事件字段存在，后续升级为一等实体。
+
+## Skill、MCP、插件与 Workflow
+
+这些概念属于不同层次，不能全部叫插件：
+
+- `Skill` 是方法与指令，告诉 Agent 怎样完成一类任务。
+- `MCP` 是连接协议，Server 向 Client 暴露工具、资源或提示模板。
+- `Plugin` 是面向某个平台的安装和分发包，可以组合 Skill、MCP Server 及其他组件。
+- `Workflow` 是任务编排与验收定义，可以引用多种能力。
+- `Capability` 是 Craft 内部用于检索和关联这些能力资产的上位概念。
+
+当前 Catalog 只扫描并索引 `SKILL.md`。Craft 自身虽然以插件形式接入 Codex/Claude，并通过 MCP 暴露工具，但这不代表 v0.1 已经能够发现和索引任意插件或 MCP 服务。
 
 ## Workflow 节点
 

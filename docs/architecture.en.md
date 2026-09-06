@@ -20,12 +20,18 @@ Goal + Invariants + Permission Policy
 
 ## Core objects
 
-- `Capability`: an indexed Skill or future capability asset.
+- `Capability`: Craft's umbrella abstraction for discoverable capability assets. Skill is the implemented type today; plugin and MCP server metadata can be added later.
 - `Task`: a user goal that continues across sessions.
 - `Checkpoint`: a trusted continuation boundary.
 - `Workflow`: versioned goals, steps, invariants, and policies.
 - `Session / Run`: one execution and its immutable events.
 - `Artifact / Evidence`: references today; planned first-class entities later.
+
+## Skills, MCP, plugins, and Workflows
+
+These are different layers, not interchangeable names. A Skill provides methods and instructions. MCP connects tools, data, and services. A plugin packages and distributes components such as Skills and MCP servers for a platform. A Workflow composes capabilities around a goal. `Capability` is Craft's internal umbrella abstraction for discovery and relationships.
+
+The current catalog scans and indexes `SKILL.md` only. Craft itself can be distributed as a plugin and expose tools through MCP, but v0.1 does not yet discover arbitrary plugins or MCP servers.
 
 ## Execution and validation
 
