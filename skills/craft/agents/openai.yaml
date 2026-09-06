@@ -1,4 +1,4 @@
 interface:
   display_name: "Craft"
   short_description: "Discover, orchestrate, verify, and reuse agent capabilities"
-  default_prompt: "Use Craft to find relevant capabilities, coordinate this task, and preserve verified results."
+  default_prompt: "Use $craft to find relevant capabilities, coordinate this task, and preserve verified results."

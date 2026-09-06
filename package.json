@@ -1,14 +1,20 @@
 {
   "name": "craft-agent-harness",
-  "version": "0.1.0",
-  "private": true,
+  "version": "0.2.0",
   "description": "Cross-platform capability, workflow, evidence, and agent harness",
   "type": "module",
   "bin": {
-    "craft": "src/cli.ts"
+    "craft": "dist/src/cli.js",
+    "craft-mcp": "dist/bin/craft-mcp.js"
   },
   "scripts": {
-    "test:ts": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 test-ts/config.test.ts test-ts/store.test.ts",
+    "test": "pnpm run build && pnpm run typecheck && pnpm run test:ts && pnpm run test:smoke",
+    "build": "pnpm run build:core && pnpm run build:deepseek",
+    "build:core": "node node_modules/typescript/bin/tsc -p tsconfig.build.json",
+    "build:deepseek": "node node_modules/typescript/bin/tsc -p adapters/deepseek-harness/tsconfig.json",
+    "prepack": "pnpm run build",
+    "test:smoke": "node dist/src/cli.js --help",
+    "test:ts": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 test-ts/config.test.ts test-ts/store.test.ts test-ts/catalog.test.ts test-ts/workflow.test.ts test-ts/orchestration.test.ts test-ts/service.test.ts test-ts/mcp.test.ts",
     "check:ts": "node --experimental-strip-types src/cli.ts --help",
     "typecheck": "node node_modules/typescript/bin/tsc --noEmit"
   },
@@ -16,11 +22,18 @@
     "node": ">=24"
   },
   "files": [
+    "bin",
     "src",
+    "dist",
+    "skills",
+    "adapters",
+    ".codex-plugin",
+    ".claude-plugin",
+    ".mcp.json",
     "README.md",
     "README.en.md",
     "LICENSE",
-    "docs/typescript-migration.zh-CN.md"
+    "docs"
   ],
   "keywords": [
     "agent",
@@ -37,5 +50,8 @@
   "devDependencies": {
     "@types/node": ">=24 <26",
     "typescript": ">=5.8 <7"
+  },
+  "dependencies": {
+    "yaml": "^2.9.0"
   }
 }

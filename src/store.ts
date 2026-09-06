@@ -91,7 +91,7 @@ export class CraftStore {
       ) latest ON latest.id=r.id AND latest.version=r.version
       WHERE r.kind=? ORDER BY r.updated_at DESC,r.id DESC`).all(kind, kind);
     const records = rows.map((row) => this.record(row as Record<string, unknown>));
-    return (predicate ? records.filter(predicate) : records).slice(0, Math.max(1, Math.min(limit, 100)));
+    return (predicate ? records.filter(predicate) : records).slice(0, Math.max(1, limit));
   }
 
   remove(kind: string, id: string): number {

@@ -1,10 +1,9 @@
 # Craft adapter for DeepSeek Harness
 
 This Cordis bundle exposes Craft's MCP tools through one `craft_call` tool while
-keeping Craft's Python core and `~/.craft_data` store independent of DSH.
+keeping Craft's TypeScript core and `~/.craft_data` store independent of DSH.
 
-Prerequisites: Node.js, DeepSeek Harness, `uv`, and a published
-`craft-agent-harness==0.1.0` package.
+Prerequisites: Node.js 24+ and DeepSeek Harness. Craft is resolved as an npm package.
 
 Install the repository bundle directly from Git, preferably pinned to a tag or
 commit:

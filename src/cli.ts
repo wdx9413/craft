@@ -5,6 +5,8 @@ import { pathToFileURL } from "node:url";
 import { initializeConfig, loadConfig, setMode, type CraftMode, type DirectProvider,
   type InitInput, type RuntimeKind } from "./config.ts";
 import { craftPaths } from "./paths.ts";
+import { CraftService } from "./service.ts";
+import { CraftStore } from "./store.ts";
 
 const HELP = `Craft
 
@@ -14,6 +16,11 @@ Usage:
   craft config show             Print redacted configuration
   craft mode <name>             Switch agent, supervisor, or provider mode
   craft paths                   Print the ~/.craft_data layout
+  craft source add <path>       Add and scan a capability directory
+  craft source list             List capability directories
+  craft source scan [id]        Incrementally scan sources
+  craft capability search <q>   Search indexed capabilities
+  craft task list               List durable tasks
 
 Init options:
   --mode <agent|supervisor|provider>
@@ -131,6 +138,21 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     stdout.write(`${JSON.stringify(await setMode(args[1] as CraftMode, paths), null, 2)}\n`);
     return;
   }
+  if (["source", "capability", "task"].includes(args[0] ?? "")) {
+    const store = await new CraftStore(paths).open();
+    const service = new CraftService(store);
+    try {
+      let result: unknown;
+      if (args[0] === "source" && args[1] === "add") result = await service.sourceAdd({ path: args[2] });
+      else if (args[0] === "source" && args[1] === "list") result = service.sourceList();
+      else if (args[0] === "source" && args[1] === "scan") result = await service.sourceScan({ source_id: args[2] });
+      else if (args[0] === "capability" && args[1] === "search") result = service.capabilitySearch({ query: args.slice(2).join(" ") });
+      else if (args[0] === "task" && args[1] === "list") result = service.taskList({});
+      else throw new Error(`Unknown command: ${args.join(" ")}`);
+      stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    } finally { store.close(); }
+    return;
+  }
   if (args[0] === "init") {
     const input = args.length === 1 ? await interactiveInit() : nonInteractiveInit(args.slice(1));
     stdout.write(`${JSON.stringify(await initializeConfig(input, paths), null, 2)}\n`);
@@ -145,7 +167,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   }
   stdout.write(`Craft mode: ${config.activeMode}\n`);
   stdout.write(config.activeMode === "agent"
-    ? "Agent runtime migration is in progress; use the existing Python CLI for model turns in this compatibility release.\n"
+    ? "Agent mode configuration is ready; this release does not yet include the standalone model loop.\n"
     : config.activeMode === "supervisor"
       ? `Configured hosts: ${config.supervisor.hosts.join(", ") || "none"}\n`
       : "Provider mode is configured; connect through the Craft plugin or MCP server.\n");

@@ -1,0 +1,31 @@
+import { Catalog } from "./catalog.ts";
+import { CraftStore, type JsonObject } from "./store.ts";
+export declare const VERSION = "0.2.0";
+export declare class CraftService {
+    readonly store: CraftStore;
+    readonly catalog: Catalog;
+    constructor(store: CraftStore);
+    info(): JsonObject;
+    sourceAdd(args: JsonObject): Promise<JsonObject>;
+    sourceList(): JsonObject;
+    sourceUpdate(args: JsonObject): JsonObject;
+    sourceRemove(args: JsonObject): JsonObject;
+    sourceScan(args: JsonObject): Promise<JsonObject>;
+    capabilitySearch(args: JsonObject): JsonObject;
+    capabilityGet(args: JsonObject): JsonObject;
+    taskOpen(args: JsonObject): JsonObject;
+    taskList(args: JsonObject): JsonObject;
+    taskCheckpoint(args: JsonObject): JsonObject;
+    private taskPack;
+    feedbackRecord(args: JsonObject): JsonObject;
+    artifactRegister(args: JsonObject): JsonObject;
+    evidenceRecord(args: JsonObject): JsonObject;
+    saveVersioned(kind: string, prefix: string, args: JsonObject, required: string[]): JsonObject;
+    list(kind: string, key: string, args: JsonObject): JsonObject;
+    get(kind: string, idKey: string, args: JsonObject): JsonObject;
+    workflowPlan(args: JsonObject): JsonObject;
+    workflowRun(args: JsonObject): JsonObject;
+    orchestrationCreate(args: JsonObject): JsonObject;
+    orchestrationDispatch(args: JsonObject): JsonObject;
+    orchestrationSubmit(args: JsonObject): JsonObject;
+}

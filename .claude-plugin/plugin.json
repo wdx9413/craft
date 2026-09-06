@@ -1,5 +1,12 @@
 {
   "name": "craft",
-  "version": "0.1.0",
-  "description": "Standalone agent runtime, capability discovery, durable tasks, host-mediated multi-agent orchestration, evaluation, and reusable workflows."
+  "version": "0.2.0",
+  "description": "Capability discovery, durable tasks, verified workflows, evidence, and host-mediated multi-agent orchestration.",
+  "skills": "./skills/",
+  "mcpServers": {
+    "craft": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/dist/bin/craft-mcp.js"]
+    }
+  }
 }

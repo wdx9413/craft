@@ -1,301 +1,110 @@
 # Craft
 
-[简体中文](README.md) | [English](README.en.md)
+[中文](README.md) | [English](README.en.md)
 
-> 让 Agent 找得到能力、选得对、做得完、验得过，并把有效经验积累下来。
+Craft 是一套通用 Agent Harness：管理可复用能力，保存长任务状态与证据，并把经过验证的做法沉淀为可再次执行的 Workflow。它可以独立使用，也可以通过 MCP 或插件向 Codex、Claude Code、DeepSeek Harness 及其他 Agent 应用提供能力。
 
-Craft 是面向 AI Agent 的能力管理与任务运行系统。它把 Skill、Workflow、工具与服务连接等统一视为可发现、可组合、可验证的能力资产，并围绕真实任务管理一条完整闭环：发现、登记和索引能力，按任务检索、选择与组合，协调并接续执行，保存状态、产物和验证证据，通过评测与回归判断结果和能力版本是否可靠，最后把经过验证的方法沉淀为可复用 Workflow。
-
-当前 v0.1 已落地本地 Skill 发现与管理、任务接续、混合验证、可靠 Workflow 执行、可信恢复、可复用 Case Suite 和跨版本评测对比，并具备跨宿主 Agent Profile、依赖编排、可恢复 Lease、人工控制与模型失败切换。把插件与 MCP 元数据纳入能力目录、自动执行评测与基于门槛的能力晋级仍属于后续阶段。
-
-## 为什么需要 Craft
-
-今天的 Agent 很聪明，但真正长期使用时仍有几个断点：
-
-- 安装几十、几百甚至上万个 Skill 后，不能每次全部塞进上下文。
-- 会话结束后，进度、决定和失败原因容易散失。
-- Agent 说“已经完成”不等于结果真的通过测试或人工验收。
-- Codex、Claude 或其他平台各自保存能力，切换平台就要重新配置。
-- 重复任务每次从零规划，成功方法没有自然演化成可复用 Workflow。
-
-Craft 把这些问题收敛为一条能力生命周期：
-
-```text
-发现 → 管理 → 匹配选择 → 组合执行 → 留存状态与证据 → 验证评测 → 学习复用
-```
-
-## 一套核心，三种使用方式
-
-| 形态 | 谁拥有 Agent Loop 与用户界面 | Craft 当前提供什么 |
-|---|---|---|
-| Craft Agent | Craft | 独立交互 CLI、持久会话、Provider Tool Loop 与结构化事件已进入预览；桌面端待实现 |
-| Craft Supervisor | Craft | 作为上层应用，把执行委派给 Codex、Claude、DSH 或自建 Host；编排协议已可用，原生 Driver 待认证 |
-| Craft Provider | Codex、Claude 或其他 Agent | 通过插件、MCP、Skill、CLI、DSH Adapter 提供能力目录、状态、Workflow、证据和评测；当前已可用 |
-
-三种形态共享 `~/.craft_data`、同一套 Schema 和安全边界，未来桌面端只是新的交互
-Surface，不会另造一套任务、证据或 Workflow 数据。运行 `craft modes` 或
-`craft mode standalone|supervisor|capability-provider` 可以查看机器可读的当前边界。
+Craft 不绑定某个模型、Agent 或行业。研发排障、AI 视频分镜、销售跟进、教学设计和内容生产都使用同一组基础对象：能力、任务、证据、产物、工作流与评测；具体场景通过自己的 Skill 和 Workflow 扩展。
 
 ## 核心理念
 
-### 与 Agent 解耦的控制面
+- 发现而不是全量注入：只索引用户选择的能力目录，先用元数据和文本检索返回少量候选，需要时再读取完整内容。即使能力库很大，也不会把全部 Skill 塞进模型上下文。
+- 长任务可以恢复：目标、进度、待办、决策、反馈、产物和证据保存在用户目录，换 Agent 或换会话仍能继续。
+- 验证方式显式化：确定性条件交给程序门禁，主观质量交给模型或人；结果记录来源和置信度。
+- Workflow 来自真实使用：用户可把成功路径保存为版本化模板，再经过回放和评测逐步提升，而不是依赖平台预置全部行业流程。
+- 数据属于用户：默认写入 `~/.craft_data`，不污染业务项目。API Key 只保存环境变量名，不保存密钥值。
 
-Craft 不绑定某一种模型、Agent Loop 或交互界面。接入方可以负责理解、规划和执行，Craft 独立管理能力发现、状态、权限、证据、检查点与审计。接入方可以是 Codex、Claude、其他 Agent 应用，也可以是用户自己开发的程序。
+## 当前版本已经实现
 
-### 先检索，再加载
+- 多能力目录管理、真实路径解析、目录引用/符号链接处理和增量扫描。
+- Skill frontmatter 解析、内容摘要、关键词候选检索和按需读取。
+- 持久化任务、Checkpoint、显式反馈、Artifact 与 Evidence。
+- 版本化 Workflow、输入替换、路径边界、敏感信息脱敏和副作用授权。
+- 确定性命令、文件/JSON 断言、覆盖率门禁，以及结构化执行回执。
+- 版本化评测集与 Agent Profile 基础数据模型。
+- MCP 服务，以及 Codex、Claude Code、DeepSeek Harness 和通用 MCP Host 接入。
+- Windows、macOS、Linux 共用 TypeScript/Node.js 运行时；不依赖 Python。
 
-Craft 只扫描用户明确注册的 Skill 来源，并维护本地增量索引。任务到来时先用代码检索少量候选，再加载选中的 Skill，不把整个能力库交给模型。
+向量检索不是必需依赖。短期本地库优先使用零配置检索；未来可选接入兼容 OpenAI Embeddings 协议的服务，并与关键词结果融合。
 
-### 不相信“我做完了”，要看证据
+## 安装
 
-结果可以由程序、模型或人验收，但来源必须明确。测试通过属于 `program_verified`，模型判断属于 `model_judged`，人工批准属于 `human_approved`，它们不能互相冒充。
+要求 Node.js 24 或更高版本。用户不需要安装 Python。
 
-### 长任务靠持久状态推进，不靠无限上下文
-
-长任务容易在会话中断、上下文压缩或多次修复后丢失目标并逐渐跑偏。Craft 把目标、进度、决策、Evidence、Artifact 引用和待办保存到会话之外；通过有界循环尽早停止重复失败，并从最近的可信 checkpoint 派生新 Session。这样 Agent 可以换会话、换客户端后继续，而不必把全部历史重新塞回上下文。
-
-### Workflow 从真实工作中生长
-
-Craft 不要求产品方预先写完所有行业模板。用户完成真实任务后，可以把有效步骤、约束、反馈和验收条件抽象成候选 Workflow，再经过重复运行逐步提升为可复用能力。
-
-### 评测贯穿能力生命周期
-
-评测不只是最后生成一张分数表：执行时验证本次结果，复用前用代表性 Case 检查 Skill 或 Workflow 是否稳定，升级后进行回归比较，系统自身还要评测检索是否选对能力、恢复后能否继续以及不同接入端是否行为一致。评测提供可追溯的质量门槛，但不承诺 Agent 永不犯错。
-
-## 希望解决的场景
-
-| 场景 | Craft 保存什么 | 如何判断完成 |
-|---|---|---|
-| Agent 研发 | 代码、Case、调用链、测试报告 | 单测、覆盖率、兼容性和人工 Review |
-| AI 视频 | 剧本、分镜、参考图、生成版本 | 规格检查、角色一致性、人工选片 |
-| 销售 | 客户事实、跟进阶段、话术约束 | 字段核对、合规规则、发送审批 |
-| 教育 | 学习目标、练习记录、反馈 | 答案校验、目标达成、教师确认 |
-| 内容创作 | 资料、稿件版本、编辑要求 | 事实核验、结构评审、发布审批 |
-
-这些场景可以共用同一个底层闭环，只替换领域 Skill、工具和验证规则。这是产品的适配方向，不代表 v0.1 已内置相应行业连接器或完整模板；当前首先使用真实研发任务验证通用机制。
-
-## 当前已经具备
-
-- 多 Skill 文件夹注册、真实路径解析和增量索引。
-- 面向大规模能力库的候选检索与按需加载。
-- 跨会话 Task、Checkpoint、Feedback 和 Workflow 版本。
-- 程序验证、模型 Judge、人工审批的混合流程。
-- `read_only`、`local_write`、`external_write`、`destructive` 四级副作用控制。
-- 从可信 checkpoint 派生恢复，不覆盖原失败历史。
-- 有版本的评测 Case Suite、不可变 Case 结果、聚合指标和同套件版本对比。
-- 跨平台 Agent Profile、依赖 DAG、并发派发、Lease TTL/心跳/崩溃回收、顺序 fallback 和不可变编排事件。
-- 独立 Artifact、Evidence 与 Lineage 图谱，可跨 Task、Workflow、Eval 和不同 Agent 宿主追溯输入、产物与依据。
-- 宿主无关的多指标预算，支持 token、时间、费用、调用次数或领域自定义单位，并确定性返回继续、预警或停止。
-- Codex、Claude Code、MCP 和 Python CLI 接入。
-
-## 评测能力的当前边界
-
-当前已经具备确定性执行验证、Agent/Model/Human 混合验收、来源分级、Workflow 版本与不可变运行记录；也可以保存带版本的 Case Suite，为 Capability、Skill、Workflow、工具、MCP、插件、Agent、模型、系统或组合创建 Eval Run，逐 Case 记录 verdict、score、metrics、evidence 和 provenance，并确定性聚合完成率、通过率、加权得分及版本差异。
-
-当前仍由宿主 Agent、程序或人工执行 Case 并回填结果；自动 Runner、Grader 适配器、Dataset 导入、统计置信度、重复运行退化检测、晋级建议，以及跨接入端和长任务恢复专项评测尚待建设。因此它已经具备最小可复用评测闭环，但还不是完整的 Agent 评测平台。
-
-所有运行数据默认保存在 `~/.craft_data`，不会写入当前业务项目。
-
-## 环境要求
-
-- Python 3.11+
-- Windows、macOS 或 Linux
-- 从 Codex Marketplace 启动 MCP 时需要 [`uv`](https://docs.astral.sh/uv/getting-started/installation/)
-
-Craft 正在迁移到 TypeScript/npm，目标是最终用户不再依赖 Python。当前默认发布仍是已经完成
-全量验收的 Python Core；TypeScript 首次启动与配置层已经落地，但 npm 包在数据服务和 MCP
-完成等价迁移前保持私有，避免把迁移中版本当成成品安装。设计与数据目录契约见
-[TypeScript / npm 迁移](docs/typescript-migration.zh-CN.md)。
-
-## 从源码开始使用
-
-克隆仓库后，在项目根目录执行：
-
-Windows：
-
-```powershell
-py -3 scripts/install_plugin.py
-```
-
-macOS / Linux：
+从 GitHub 安装 CLI：
 
 ```bash
-python3 scripts/install_plugin.py
+npm install -g github:wdx9413/craft
+craft init
 ```
 
-默认安装到 `~/plugins/craft`。
-
-也可以只使用 CLI：
-
-```powershell
-py -3 -m venv .venv
-.venv\Scripts\python -m pip install -e .
-craft info
-craft add-source D:\path\to\skills
-craft search "诊断服务故障"
-```
-
-macOS / Linux 将 `.venv\Scripts\python` 换成 `.venv/bin/python`。
-
-## 把 Craft 直接当作 Agent 使用（预览）
-
-Provider Profile 只保存端点、模型名和“密钥所在的环境变量名”，不会把 API Key 写进
-`~/.craft_data`。OpenAI-compatible 端点可用于 OpenAI 兼容服务（包括由用户配置的
-DeepSeek、GLM、Kimi、MiniMax、火山引擎等端点）；Claude 使用 `anthropic` 协议。
-
-```powershell
-$env:MY_MODEL_API_KEY = "你的密钥"
-craft provider-save my-model openai-compatible https://example.com/v1 model-name --api-key-env MY_MODEL_API_KEY
-craft provider-list
-craft chat --provider-id provider_xxx --system-prompt "你是我的工作助手"
-```
-
-输入 `/exit` 退出；会话、Turn、用量和事件仍保存在 `~/.craft_data`。用
-`--message "..." --json-events` 可输出适合程序消费的逐行 JSON 生命周期事件。目前事件
-覆盖请求、工具调用、完成与失败，但尚不是逐 Token 文本流。
-
-Tool Loop 默认没有工具权限。可在创建会话时通过 `--allowed-tools-json` 显式开启内置只读
-工具，例如 `craft_capability_search`、`craft_capability_get`、`craft_task_list`；第一版不允许
-模型借此执行 Shell 或外部写操作。
-
-## 在 Codex 中使用
-
-仓库包含 `.codex-plugin/plugin.json`、`.mcp.json` 和 `.agents/plugins/marketplace.json`。
-
-当 `craft-agent-harness==0.1.0` 已发布到 PyPI 后：
-
-1. 确认 `uvx --version` 可以执行。
-2. 在 Codex 打开 `/plugins`，选择 **Add Marketplace**。
-3. 来源填写 `https://github.com/wdx9413/craft`。
-4. 稀疏路径留空；测试阶段选 `main`，正式使用建议选 Git Tag。
-5. 安装 Craft，并开始一个新会话。
-
-目前 PyPI 首次发布尚未完成；在此之前请使用上面的源码安装方式。
-
-## 在 Claude Code 中使用
-
-Craft 包含 `.claude-plugin/plugin.json`、Claude Marketplace 清单，并与 Codex 共用 MCP。源码开发时可以直接加载：
+开发者使用 pnpm：
 
 ```bash
-claude --plugin-dir ~/plugins/craft
+git clone https://github.com/wdx9413/craft.git
+cd craft
+pnpm install --frozen-lockfile
+pnpm test
 ```
 
-随后使用 `/mcp` 检查连接，并调用 `/craft:craft`；也可以让 Claude 根据任务自动选择 Craft Skill。
+## 三种使用方式
 
-发布包可用后，也可以安装 Marketplace：
+1. Agent：Craft 管理对话、模型配置和工具循环。当前配置与持久化底座已提供，模型运行器继续按 Provider 扩展。
+2. Supervisor：Craft 管理任务、预算、证据和验证，把执行交给 Codex、Claude Code 或其他 Host。
+3. Provider：Craft 通过 MCP/插件提供能力发现、任务延续、Workflow 与评测能力。
+
+首次运行 `craft init` 会选择模式。配置、SQLite 数据库、索引、日志和备份都位于 `~/.craft_data`；也可用 `CRAFT_DATA_DIR` 指定另一目录。
+
+## 接入 Codex
+
+在 Codex 插件市场添加 Git 来源：
+
+- 仓库：`https://github.com/wdx9413/craft`
+- 分支/Tag：建议固定发布 Tag；开发时可用 `main`
+- 稀疏路径：`.`（插件清单位于仓库根目录）
+
+插件会读取根目录的 `.codex-plugin/plugin.json` 和 `.mcp.json`。也可以只把 `skills/craft` 作为普通 Skill 安装，但这样不会自动获得 MCP 数据层。
+
+## 接入 Claude Code
+
+仓库根目录包含 `.claude-plugin/plugin.json`。把该 Git 仓库作为插件源安装；如果宿主只支持 MCP，则使用下方通用配置。
+
+## 通用 MCP
+
+全局安装后，MCP Host 的配置为：
+
+```json
+{
+  "mcpServers": {
+    "craft": { "command": "craft-mcp", "args": [] }
+  }
+}
+```
+
+当前工具使用 `craft_` 前缀，例如 `craft_source_add`、`craft_capability_search`、`craft_task_checkpoint`、`craft_workflow_run` 和 `craft_evidence_record`，避免与宿主或其他 MCP 冲突。
+
+## 数据目录
 
 ```text
-/plugin marketplace add wdx9413/craft
-/plugin install craft@craft-marketplace
+~/.craft_data/
+├─ config/config.json       # 模式、Host 与模型端点配置
+├─ db/craft.db              # 任务、Workflow、证据、评测等版本化数据
+├─ index/                   # 可重建的能力索引
+├─ logs/                    # 脱敏日志
+├─ backups/                 # 备份
+├─ cache/                   # 可删除缓存
+└─ runtime/                 # 临时运行状态
 ```
 
-## DeepSeek Harness
+Craft 只索引能力来源，不移动或修改来源文件。删除 Source 只删除本地索引记录。
 
-`adapters/deepseek-harness` 提供独立的 Cordis bundle，通过 `craft_call`
-调用同一套 Craft MCP 工具，数据仍保存在 `~/.craft_data`。DeepSeek Harness
-仍处于快速演进阶段，因此适配器独立于 Python Core 维护；本机未安装 Node.js
-或 DSH 时只能完成静态结构验证，不能宣称真实运行验收通过。
+## 验证
 
-## 常见使用流程
-
-### 添加并搜索 Skill 库
-
-让 Agent 调用：
-
-```text
-craft_source_add(path="你的 Skill 文件夹")
-craft_capability_search(query="当前任务需要的能力")
-craft_capability_get(asset_id="选中的能力 ID")
+```bash
+pnpm run typecheck
+pnpm test
 ```
 
-Source 可以是普通目录、symlink 或 Windows junction。删除 Source 只删除索引，不删除原文件。
+测试命令同时强制行、函数和分支覆盖率为 100%。覆盖率是测试工具确定性计算的结果，不由模型自报。
 
-### 保存并接续任务
-
-```text
-craft_task_open → craft_task_checkpoint → 新会话 craft_task_open(task_id=...)
-```
-
-### 登记产物、证据和来源链
-
-```text
-craft_artifact_register
-→ craft_evidence_record
-→ craft_lineage_link
-→ craft_lineage_trace
-```
-
-Craft 只登记 URI、摘要、媒体类型、生产者和元数据，不强制复制大文件。URI 可以是
-本地 `file:`、对象存储、网页或业务系统标识，因此视频分镜、代码报告、销售资料和
-教学产物使用同一套关系模型。
-
-### 为长任务设置预算与停止条件
-
-```text
-craft_budget_create（token / 秒 / USD / render / 自定义指标）
-→ craft_budget_reserve（原子预留预计消耗）
-→ 执行宿主工作
-→ craft_budget_reservation_settle（按真实用量结算）
-→ 或 release / 超时 reclaim
-```
-
-`craft_budget_check` 仍可用于只读预览。Soft limit 返回 `warn`，hard limit 或暂停/关闭状态返回 `stop`。停止判断由程序计算，
-不会询问模型“是不是超预算”。不同宿主负责上报自己的真实计量，Craft 不假设所有
-供应商都使用相同 token 或价格口径。
-
-### 运行可信 Workflow
-
-```text
-craft_workflow_plan
-→ craft_workflow_start
-→ Agent / Judge / Human 节点
-→ craft_workflow_submit
-→ passed / repair / approval / restore
-```
-
-`allow_execution=true` 只授权本地写入。外部写入和破坏性操作必须通过 `approved_side_effects` 单独授权。
-
-### 比较能力或 Agent 版本
-
-```text
-craft_eval_suite_list / craft_eval_suite_save
-→ craft_eval_run_start（每个被测版本一个 Run）
-→ 执行 Case 并调用 craft_eval_result_submit
-→ craft_eval_run_get / craft_eval_compare
-```
-
-当前由宿主 Agent、程序或人工执行 Case；Craft 保存不可变结果并计算可复算指标。
-
-### 编排不同 Agent 和模型
-
-```text
-craft_agent_profile_save（角色、宿主、模型、权限）
-→ craft_orchestration_plan_create（节点、依赖、候选 Profile）
-→ craft_orchestration_dispatch（领取并行就绪节点）
-→ Codex / Claude / API 宿主执行
-→ craft_orchestration_heartbeat（长执行续租）
-→ craft_orchestration_submit（结果、证据、来源）
-```
-
-例如可以配置 Astra 负责架构与审查、Luna 负责实现和测试，也可以把 Claude、DeepSeek 或自建 API Profile 放入同一个计划。当前 MCP 返回结构化派发请求，由宿主调用自己的原生子 Agent；Craft 本身不冒充 Codex/Claude 的进程控制 API。
-
-## 可靠执行与数据恢复
-
-确定性节点执行前会原子领取 Lease。宿主中断且 Lease 过期后，节点进入
-`result_unknown`，需要根据外部证据确认成功、确认失败或显式批准重试，Craft
-不会盲目重复有副作用的操作。命令可读取稳定的 `CRAFT_IDEMPOTENCY_KEY`。
-
-数据维护命令包括 `craft store-backup`、`craft store-doctor` 和需要
-`--confirm` 的 `craft store-restore`。
-
-## 文档
-
-- [架构与可信控制面](docs/architecture.zh-CN.md)
-- [Workflow 字段、状态与示例](skills/craft/references/workflow-runtime.md)
-- [评测 Case、结果与对比语义](skills/craft/references/evaluation-runtime.md)
-- [多 Agent、模型路由与 Lease](skills/craft/references/multi-agent-runtime.md)
-- [MCP 工具说明](skills/craft/references/tool-contract.md)
-
-## 当前边界
-
-Craft v0.1 仍是本地技术预览版，覆盖能力检索、长任务接续、验证、恢复、可追溯产物与证据、原子预算预留与结算、人工驱动的版本评测、带超时恢复和审计事件的宿主介导多 Agent 编排，以及初版独立 Agent CLI，不是无人值守的后台执行平台。当前暂不包含远程 Skill Hub 同步、向量检索、图形界面、逐 Token 流、Workspace 文件快照、定时/后台调度和宿主进程自动拉起。预算原语已经可靠，但仍需由宿主显式调用，尚未自动嵌入所有 Workflow/编排派发。SQLite 是默认检索方式，Embedding Provider 将保持可选。
+更详细的边界与数据模型见 [中文架构说明](docs/architecture.zh-CN.md)。

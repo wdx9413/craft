@@ -1,11 +1,9 @@
 {
   "mcpServers": {
     "craft": {
-      "command": "uvx",
+      "command": "node",
       "args": [
-        "--from",
-        "craft-agent-harness==0.1.0",
-        "craft-mcp"
+        "dist/bin/craft-mcp.js"
       ]
     }
   }
