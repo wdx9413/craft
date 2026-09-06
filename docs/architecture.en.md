@@ -26,6 +26,7 @@ Goal + Invariants + Permission Policy
 - `Workflow`: versioned goals, steps, invariants, and policies.
 - `Session / Run`: one execution and its immutable events.
 - `Artifact / Evidence`: references today; planned first-class entities later.
+- `Evaluation`: cases, graders, and results for Runs, Capabilities, Workflows, Agents, or combinations. Execution-validation foundations exist today; the full entity does not.
 
 ## Skills, MCP, plugins, and Workflows
 
@@ -42,6 +43,14 @@ Every node declares `read_only`, `local_write`, `external_write`, or `destructiv
 Provenance distinguishes `agent_reported`, `model_judged`, `program_verified`, and `human_approved`. Program success and human approval create trusted checkpoints. Restore creates a new session branch and never rewrites failed history.
 
 Transition and attempt limits provide fail-fast behavior. MCP stdout remains reserved for JSON-RPC; concise metadata-only logs go to stderr. Runtime state defaults to SQLite under `~/.craft_data`.
+
+## Evaluation layers
+
+- `Run validation`: program, model, or human checks for one execution; implemented.
+- `Capability evaluation`: representative-case comparisons across Skills, Workflows, Agents, and model combinations; planned.
+- `System evaluation`: retrieval choice, long-task recovery, cross-client consistency, and safety boundaries; planned beyond current unit tests and indexing benchmark.
+
+Evaluation should inform promotion from `candidate` to `tested` or `reusable`, but one successful run must not imply long-term reliability.
 
 Set `CRAFT_LOG_LEVEL=DEBUG|INFO|WARNING|ERROR` to control log verbosity.
 

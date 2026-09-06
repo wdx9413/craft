@@ -2,9 +2,11 @@
 
 [简体中文](README.md) | [English](README.en.md)
 
-> Help AI find the right capability, continue previous work, prove outcomes, and turn successful methods into reusable workflows.
+> Help agents find capabilities, choose well, finish work, pass verification, and accumulate what works.
 
-Craft is a general-purpose work system that helps AI agents discover the right capabilities, continue long-running tasks, verify outcomes, and reuse proven methods. Starting with Skill indexing, it organizes task state, evidence, and reusable Workflows as user-owned capability assets and connects to agent applications through MCP, plugins, or the CLI.
+Craft is a capability-management and task runtime for AI agents. It treats Skills, Workflows, tools, and service connections as discoverable, composable, and verifiable capability assets, then manages their full lifecycle around real tasks: discover, register, and index capabilities; retrieve, select, and compose them; coordinate and continue execution; preserve state, artifacts, and evidence; use evaluation and regression checks to assess outcomes and capability versions; and turn validated methods into reusable Workflows.
+
+That is the product direction. Version 0.1 implements local Skill discovery and management, task continuity, mixed validation, Workflow execution, and trusted recovery. Adding plugin and MCP metadata to the capability catalog, systematic Skill and Agent evaluation, and automated promotion remain later stages.
 
 ## Why Craft
 
@@ -16,10 +18,10 @@ Long-term agent use still has recurring gaps:
 - Switching agent platforms often means rebuilding the same setup.
 - Repeated work is replanned from scratch instead of evolving into a tested workflow.
 
-Craft closes the loop:
+Craft manages a capability lifecycle:
 
 ```text
-discover → execute → preserve state and artifacts → verify → recover → reuse
+discover → manage → match/select → compose/execute → preserve state/evidence → evaluate → reuse
 ```
 
 ## Core ideas
@@ -44,6 +46,10 @@ Long tasks drift when sessions end, context is compacted, or repeated repairs pr
 
 Craft does not require a vendor to prebuild every industry template. Successful task histories can be abstracted into workflow candidates and promoted through repeated validation.
 
+### Evaluation belongs throughout the lifecycle
+
+Evaluation is more than a final score. A run verifies its outcome; representative cases test whether a Skill or Workflow is stable before reuse; upgrades need regression comparisons; and Craft itself should measure retrieval quality, recovery continuity, and consistency across clients. These are traceable quality gates, not a promise that agents never fail.
+
 ## Target scenarios
 
 | Domain | Preserved assets | Completion evidence |
@@ -65,6 +71,12 @@ These domains can share one control loop while supplying their own Skills, tools
 - Separate `read_only`, `local_write`, `external_write`, and `destructive` gates.
 - Trusted checkpoint recovery without rewriting failed history.
 - Codex, Claude Code, MCP, and Python CLI integration.
+
+## Evaluation boundary today
+
+Craft currently provides deterministic run verification, mixed Agent/Model/Human checks, provenance levels, versioned Workflows and immutable run records, plus its own test suite and 10,000-Skill indexing benchmark. It therefore has an execution-validation loop and evaluation foundations.
+
+Reusable Eval Datasets, Case Suites, multidimensional Graders, comparisons across Skill/Workflow/Agent/model combinations, repeated-run regression detection and promotion recommendations, and cross-client or long-task recovery evaluations are still planned. Craft is not yet a complete Agent evaluation platform.
 
 Runtime data is stored under `~/.craft_data`, never in the active business project.
 

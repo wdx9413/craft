@@ -26,6 +26,7 @@ Goal + Invariants + Permission Policy
 - `Workflow`：有版本的目标、步骤、不变量与策略。
 - `Session / Run`：一次具体执行及其不可变事件。
 - `Artifact / Evidence`：当前先以引用和事件字段存在，后续升级为一等实体。
+- `Evaluation`：针对 Run、Capability、Workflow、Agent 或组合版本的 Case、Grader 与结果；当前只有执行验证基础，尚未成为完整一等实体。
 
 ## Skill、MCP、插件与 Workflow
 
@@ -63,6 +64,14 @@ Goal + Invariants + Permission Policy
 ## Fail Fast 与长任务恢复
 
 `max_transitions` 限制修复循环；确定性 Run 还使用 `max_attempts` 和 `no_progress_limit`。恢复优先从最近可信边界派生，而不是把旧错误上下文无限重试。
+
+## 评测分层
+
+- `Run validation`：判断一次执行是否满足程序、模型或人工验收条件，当前已实现。
+- `Capability evaluation`：用代表性 Case 比较 Skill、Workflow、Agent 和模型组合，规划中。
+- `System evaluation`：评测检索选择、长任务恢复、跨客户端一致性和安全边界，规划中；当前只有单元测试与索引基准。
+
+评测结果未来应为资产从 `candidate` 晋级到 `tested` 或 `reusable` 提供依据，但不得仅凭一次成功自动认定为长期可靠。
 
 ## 日志
 
