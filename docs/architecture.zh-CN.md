@@ -26,7 +26,7 @@ Goal + Invariants + Permission Policy
 - `Workflow`：有版本的目标、步骤、不变量与策略。
 - `Session / Run`：一次具体执行及其不可变事件。
 - `Artifact / Evidence`：当前先以引用和事件字段存在，后续升级为一等实体。
-- `Evaluation`：针对 Run、Capability、Workflow、Agent 或组合版本的 Case、Grader 与结果；当前只有执行验证基础，尚未成为完整一等实体。
+- `Evaluation`：当前以有版本的 Case Suite、Eval Run 和不可变 Case Result 作为一等实体，可评测 Capability、Skill、Workflow、工具、MCP、插件、Agent、模型、系统或组合。
 
 ## Skill、MCP、插件与 Workflow
 
@@ -68,8 +68,8 @@ Goal + Invariants + Permission Policy
 ## 评测分层
 
 - `Run validation`：判断一次执行是否满足程序、模型或人工验收条件，当前已实现。
-- `Capability evaluation`：用代表性 Case 比较 Skill、Workflow、Agent 和模型组合，规划中。
-- `System evaluation`：评测检索选择、长任务恢复、跨客户端一致性和安全边界，规划中；当前只有单元测试与索引基准。
+- `Capability evaluation`：已能用同一版本 Case Suite 保存并比较 Skill、Workflow、Agent 和模型组合的人工、模型或程序结果；自动执行与 Grader 适配器待建设。
+- `System evaluation`：同一套 Eval 实体可记录检索选择、长任务恢复、跨客户端一致性和安全边界结果；系统化 Case 集与自动回归任务待建设。
 
 评测结果未来应为资产从 `candidate` 晋级到 `tested` 或 `reusable` 提供依据，但不得仅凭一次成功自动认定为长期可靠。
 
@@ -85,4 +85,4 @@ MCP stdout 只输出 JSON-RPC。运行日志写到 stderr，默认 INFO；逐节
 
 ## 后续演进
 
-下一阶段包括 Artifact/Evidence 一等实体和 lineage、Workspace 快照、幂等外部操作与补偿、并行候选评测、远程 Hub 同步和可选向量检索。这些能力通过适配器扩展，不应绑定某一家模型。
+下一阶段包括自动 Eval Runner 与 Grader 适配器、Artifact/Evidence 一等实体和 lineage、Workspace 快照、幂等外部操作与补偿、并行候选执行、远程 Hub 同步和可选向量检索。这些能力通过适配器扩展，不应绑定某一家模型。

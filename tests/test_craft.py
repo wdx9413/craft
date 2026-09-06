@@ -217,6 +217,142 @@ class CraftServiceTests(unittest.TestCase):
         self.assertEqual(self.service.task_list(status="completed")["tasks"][0]["id"], task_id)
         self.assertEqual(self.service.workflow_search("Evidence", scope="user")["results"][0]["version"], 2)
 
+    def test_evaluation_suite_runs_and_comparison(self) -> None:
+        cases = [
+            {
+                "id": "correct",
+                "name": "Produces the expected answer",
+                "input": {"question": "2+2"},
+                "expected": {"answer": 4},
+                "graders": [{"type": "exact_match", "field": "answer"}],
+                "tags": ["quality"],
+                "weight": 1,
+            },
+            {
+                "id": "safe",
+                "name": "Avoids an unsafe action",
+                "weight": 3,
+            },
+        ]
+        first_suite = self.service.eval_suite_save("Core behavior", cases, "Stable cases")
+        second_suite = self.service.eval_suite_save(
+            "Core behavior", cases, "Stable cases v2", suite_id=first_suite["id"]
+        )
+        self.assertEqual((first_suite["version"], second_suite["version"]), (1, 2))
+        self.assertEqual(self.service.eval_suite_get(first_suite["id"])["version"], 2)
+        self.assertEqual(
+            self.service.eval_suite_list(query="stable cases", scope="user")["suites"][0]["case_count"],
+            2,
+        )
+        self.assertEqual(
+            self.service.eval_suite_get(first_suite["id"], 1)["suite"]["cases"][0]["weight"],
+            1.0,
+        )
+
+        baseline = self.service.eval_run_start(
+            first_suite["id"], "workflow", "answer-flow", 1, "1", {"model": "demo"}
+        )
+        self.assertEqual(baseline["status"], "running")
+        self.assertEqual(baseline["summary"]["completion_rate"], 0.0)
+        baseline = self.service.eval_result_submit(
+            baseline["id"], "correct", "passed", 0.8,
+            {"latency_ms": 12}, [{"ref": "result.json"}], "checked", "program_verified",
+        )
+        self.assertEqual(baseline["summary"]["submitted_cases"], 1)
+        baseline = self.service.eval_result_submit(baseline["id"], "safe", "passed")
+        self.assertEqual(baseline["status"], "completed")
+        self.assertEqual(baseline["summary"]["pass_rate"], 1.0)
+        self.assertEqual(baseline["summary"]["weighted_score"], 0.95)
+        self.assertEqual(baseline["results"][0]["metrics"], {"latency_ms": 12})
+
+        candidate = self.service.eval_run_start(
+            first_suite["id"], "workflow", "answer-flow", 1, "2"
+        )
+        candidate = self.service.eval_result_submit(candidate["id"], "correct", "failed", 0.5)
+        candidate = self.service.eval_result_submit(candidate["id"], "safe", "skipped")
+        self.assertIsNone(candidate["results"][1]["score"])
+        listed_runs = self.service.eval_run_list(
+            suite_id=first_suite["id"], subject_kind="workflow",
+            subject_id="answer-flow", status="completed",
+        )["runs"]
+        self.assertEqual({item["id"] for item in listed_runs}, {baseline["id"], candidate["id"]})
+        compared = self.service.eval_compare([baseline["id"], candidate["id"]])
+        self.assertEqual(compared["baseline_run_id"], baseline["id"])
+        self.assertEqual(compared["runs"][0]["delta"]["pass_rate"], 0.0)
+        self.assertEqual(compared["runs"][1]["delta"]["pass_rate"], -1.0)
+        self.assertEqual(compared["runs"][1]["delta"]["weighted_score"], -0.45)
+        self.assertEqual(self.service.info()["counts"]["evaluation_results"], 4)
+
+    def test_evaluation_validation_and_partial_metrics(self) -> None:
+        with self.assertRaisesRegex(ValueError, "name and at least one"):
+            self.service.eval_suite_save("", [])
+        with self.assertRaisesRegex(ValueError, "Unsupported evaluation suite scope"):
+            self.service.eval_suite_save("x", [{"id": "a", "name": "A"}], scope="bad")
+        invalid_cases = [
+            (["bad"], "must be an object"),
+            ([{"id": "", "name": "A"}], "requires id and name"),
+            ([{"id": "a", "name": "A"}, {"id": "a", "name": "B"}], "Duplicate"),
+            ([{"id": "a", "name": "A", "weight": True}], "positive number"),
+            ([{"id": "a", "name": "A", "weight": 0}], "positive number"),
+            ([{"id": "a", "name": "A", "tags": [1]}], "tags must be strings"),
+            ([{"id": "a", "name": "A", "graders": ["judge"]}], "graders must be objects"),
+        ]
+        for cases, message in invalid_cases:
+            with self.subTest(message=message), self.assertRaisesRegex(ValueError, message):
+                self.service.eval_suite_save("bad", cases)  # type: ignore[arg-type]
+        with self.assertRaisesRegex(ValueError, "Unknown evaluation suite"):
+            self.service.eval_suite_get("missing")
+        with self.assertRaisesRegex(ValueError, "Unsupported evaluation suite scope"):
+            self.service.eval_suite_list(scope="bad")
+        self.assertEqual(self.service.eval_suite_list(query=" ")["suites"], [])
+
+        suite = self.service.eval_suite_save("One", [{"id": "a", "name": "A"}])
+        self.assertEqual(self.service.eval_run_list()["runs"], [])
+        with self.assertRaisesRegex(ValueError, "Unsupported evaluation subject kind"):
+            self.service.eval_run_start(suite["id"], "unknown", "x")
+        with self.assertRaisesRegex(ValueError, "subject_id must not be empty"):
+            self.service.eval_run_start(suite["id"], "skill", " ")
+        with self.assertRaisesRegex(ValueError, "Unknown evaluation run"):
+            self.service.eval_run_get("missing")
+        with self.assertRaisesRegex(ValueError, "Unsupported evaluation subject kind"):
+            self.service.eval_run_list(subject_kind="unknown")
+        with self.assertRaisesRegex(ValueError, "Unsupported evaluation run status"):
+            self.service.eval_run_list(status="failed")
+        run = self.service.eval_run_start(suite["id"], "skill", "sample")
+        with self.assertRaisesRegex(ValueError, "Unsupported evaluation verdict"):
+            self.service.eval_result_submit(run["id"], "a", "unknown")
+        for score in (True, -0.1, 1.1):
+            with self.subTest(score=score), self.assertRaisesRegex(ValueError, "between 0 and 1"):
+                self.service.eval_result_submit(run["id"], "a", "passed", score)  # type: ignore[arg-type]
+        with self.assertRaisesRegex(ValueError, "Unsupported evaluation provenance"):
+            self.service.eval_result_submit(run["id"], "a", "passed", provenance="guessed")
+        with self.assertRaisesRegex(ValueError, "Unknown evaluation case"):
+            self.service.eval_result_submit(run["id"], "missing", "passed")
+        completed = self.service.eval_result_submit(run["id"], "a", "blocked")
+        self.assertIsNone(completed["summary"]["pass_rate"])
+        self.assertIsNone(completed["summary"]["weighted_score"])
+        with self.assertRaisesRegex(ValueError, "already completed"):
+            self.service.eval_result_submit(run["id"], "a", "passed")
+
+        multi_suite = self.service.eval_suite_save(
+            "Multi", [{"id": "a", "name": "A"}, {"id": "b", "name": "B"}]
+        )
+        duplicate_run = self.service.eval_run_start(multi_suite["id"], "agent", "sample")
+        self.service.eval_result_submit(duplicate_run["id"], "a", "failed")
+        with self.assertRaisesRegex(ValueError, "already exists"):
+            self.service.eval_result_submit(duplicate_run["id"], "a", "failed")
+        with self.assertRaisesRegex(ValueError, "At least two"):
+            self.service.eval_compare([run["id"]])
+        with self.assertRaisesRegex(ValueError, "must be unique"):
+            self.service.eval_compare([run["id"], run["id"]])
+        newer_suite = self.service.eval_suite_save(
+            "One", [{"id": "a", "name": "A"}], suite_id=suite["id"]
+        )
+        newer_run = self.service.eval_run_start(newer_suite["id"], "skill", "sample", 2)
+        with self.assertRaisesRegex(ValueError, "same suite version"):
+            self.service.eval_compare([run["id"], newer_run["id"]])
+        self.assertIsNone(self.service._metric_delta(None, 1.0))
+
     def test_validation_errors_are_actionable(self) -> None:
         with self.assertRaisesRegex(ValueError, "does not exist"):
             self.service.source_add(str(self.root / "missing"))
@@ -348,6 +484,40 @@ class CraftServiceTests(unittest.TestCase):
         self.assertEqual(run_cli("search", "command route")["results"][0]["name"], "cli-skill")
         self.assertEqual(run_cli("remove-source", source_id)["removed_capabilities"], 1)
 
+        cases_json = json.dumps([{"id": "case", "name": "CLI case"}])
+        suite = run_cli(
+            "eval-suite-save", "CLI suite", cases_json,
+            "--description", "from cli", "--scope", "project",
+        )
+        loaded = run_cli("eval-suite-get", suite["id"], "--version", "1")
+        self.assertEqual(loaded["suite"]["description"], "from cli")
+        self.assertEqual(
+            run_cli("eval-suite-list", "--query", "CLI", "--scope", "project")["suites"][0]["id"],
+            suite["id"],
+        )
+        run = run_cli(
+            "eval-run-start", suite["id"], "system", "craft",
+            "--suite-version", "1", "--subject-version", "0.1",
+            "--metadata-json", '{"client":"cli"}',
+        )
+        submitted = run_cli(
+            "eval-result-submit", run["id"], "case", "passed", "--score", "0.9",
+            "--metrics-json", '{"latency":1}', "--evidence-json", '[{"ref":"test"}]',
+            "--notes", "ok", "--provenance", "program_verified",
+        )
+        self.assertEqual(submitted["status"], "completed")
+        self.assertEqual(run_cli("eval-run-get", run["id"])["summary"]["weighted_score"], 0.9)
+        self.assertEqual(
+            run_cli(
+                "eval-run-list", "--suite-id", suite["id"], "--subject-kind", "system",
+                "--subject-id", "craft", "--status", "completed",
+            )["runs"][0]["id"],
+            run["id"],
+        )
+        second = run_cli("eval-run-start", suite["id"], "system", "craft-next")
+        run_cli("eval-result-submit", second["id"], "case", "failed")
+        self.assertEqual(run_cli("eval-compare", run["id"], second["id"])["runs"][1]["delta"]["pass_rate"], -1.0)
+
     def test_public_mcp_tool_names_are_prefixed(self) -> None:
         server = McpServer(self.service)
         response = server.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}})
@@ -356,6 +526,8 @@ class CraftServiceTests(unittest.TestCase):
         self.assertIn("craft_source_add", names)
         self.assertIn("craft_source_list", names)
         self.assertIn("craft_workflow_search", names)
+        self.assertIn("craft_eval_suite_save", names)
+        self.assertIn("craft_eval_compare", names)
 
     def test_mcp_protocol_errors_and_tool_validation(self) -> None:
         server = McpServer(self.service)
@@ -514,7 +686,7 @@ class StoreMigrationTests(unittest.TestCase):
                     row["name"] for row in migrated.execute("PRAGMA table_info(workflow_sessions)")
                 }
             self.assertNotIn("path TEXT NOT NULL UNIQUE", sql)
-            self.assertEqual(version, "6")
+            self.assertEqual(version, "7")
             self.assertIn("restored_from_checkpoint", session_columns)
 
     def test_store_falls_back_when_fts5_is_unavailable(self) -> None:

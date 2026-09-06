@@ -26,7 +26,7 @@ Goal + Invariants + Permission Policy
 - `Workflow`: versioned goals, steps, invariants, and policies.
 - `Session / Run`: one execution and its immutable events.
 - `Artifact / Evidence`: references today; planned first-class entities later.
-- `Evaluation`: cases, graders, and results for Runs, Capabilities, Workflows, Agents, or combinations. Execution-validation foundations exist today; the full entity does not.
+- `Evaluation`: first-class versioned Case Suites, Eval Runs, and immutable Case Results for capabilities, Skills, Workflows, tools, MCPs, plugins, Agents, models, systems, or combinations.
 
 ## Skills, MCP, plugins, and Workflows
 
@@ -47,8 +47,8 @@ Transition and attempt limits provide fail-fast behavior. MCP stdout remains res
 ## Evaluation layers
 
 - `Run validation`: program, model, or human checks for one execution; implemented.
-- `Capability evaluation`: representative-case comparisons across Skills, Workflows, Agents, and model combinations; planned.
-- `System evaluation`: retrieval choice, long-task recovery, cross-client consistency, and safety boundaries; planned beyond current unit tests and indexing benchmark.
+- `Capability evaluation`: same-suite comparisons can preserve program, model, or human results across Skills, Workflows, Agents, and model combinations; automatic execution and Grader adapters remain planned.
+- `System evaluation`: the same Eval entities can record retrieval choice, long-task recovery, cross-client consistency, and safety-boundary results; systematic Case collections and scheduled regression runs remain planned.
 
 Evaluation should inform promotion from `candidate` to `tested` or `reusable`, but one successful run must not imply long-term reliability.
 
@@ -56,4 +56,4 @@ Set `CRAFT_LOG_LEVEL=DEBUG|INFO|WARNING|ERROR` to control log verbosity.
 
 ## Next steps
 
-Planned adapters include first-class artifact/evidence lineage, workspace snapshots, idempotent external operations and compensation, parallel candidate evaluation, remote hubs, and optional vector retrieval. None should bind Craft to one model provider.
+Planned adapters include automatic Eval Runners and Graders, first-class artifact/evidence lineage, workspace snapshots, idempotent external operations and compensation, parallel candidate execution, remote hubs, and optional vector retrieval. None should bind Craft to one model provider.

@@ -6,7 +6,7 @@
 
 Craft 是面向 AI Agent 的能力管理与任务运行系统。它把 Skill、Workflow、工具与服务连接等统一视为可发现、可组合、可验证的能力资产，并围绕真实任务管理一条完整闭环：发现、登记和索引能力，按任务检索、选择与组合，协调并接续执行，保存状态、产物和验证证据，通过评测与回归判断结果和能力版本是否可靠，最后把经过验证的方法沉淀为可复用 Workflow。
 
-这是 Craft 的产品目标。当前 v0.1 先落地本地 Skill 发现与管理、任务接续、混合验证、Workflow 运行和可信恢复；把插件与 MCP 元数据纳入能力目录、系统化 Skill/Agent 评测与自动晋级仍属于后续阶段。
+当前 v0.1 已落地本地 Skill 发现与管理、任务接续、混合验证、Workflow 运行、可信恢复，以及可复用 Case Suite 和跨版本评测对比。把插件与 MCP 元数据纳入能力目录、自动执行评测与基于门槛的能力晋级仍属于后续阶段。
 
 ## 为什么需要 Craft
 
@@ -70,13 +70,14 @@ Craft 不要求产品方预先写完所有行业模板。用户完成真实任�
 - 程序验证、模型 Judge、人工审批的混合流程。
 - `read_only`、`local_write`、`external_write`、`destructive` 四级副作用控制。
 - 从可信 checkpoint 派生恢复，不覆盖原失败历史。
+- 有版本的评测 Case Suite、不可变 Case 结果、聚合指标和同套件版本对比。
 - Codex、Claude Code、MCP 和 Python CLI 接入。
 
 ## 评测能力的当前边界
 
-当前已经具备确定性执行验证、Agent/Model/Human 混合验收、来源分级、Workflow 版本与不可变运行记录，以及 Craft 自身的测试和万级 Skill 索引基准。因此可以称为“具备验证闭环和评测基础”。
+当前已经具备确定性执行验证、Agent/Model/Human 混合验收、来源分级、Workflow 版本与不可变运行记录；也可以保存带版本的 Case Suite，为 Capability、Skill、Workflow、工具、MCP、插件、Agent、模型、系统或组合创建 Eval Run，逐 Case 记录 verdict、score、metrics、evidence 和 provenance，并确定性聚合完成率、通过率、加权得分及版本差异。
 
-可复用 Eval Dataset、Case Suite、多维 Grader，Skill/Workflow/Agent/模型组合的版本对比，基于多次运行的退化检测与晋级建议，以及跨接入端和长任务恢复专项评测尚待建设。当前不能称为完整的 Agent 评测平台。
+当前仍由宿主 Agent、程序或人工执行 Case 并回填结果；自动 Runner、Grader 适配器、Dataset 导入、统计置信度、重复运行退化检测、晋级建议，以及跨接入端和长任务恢复专项评测尚待建设。因此它已经具备最小可复用评测闭环，但还不是完整的 Agent 评测平台。
 
 所有运行数据默认保存在 `~/.craft_data`，不会写入当前业务项目。
 
@@ -172,12 +173,24 @@ craft_workflow_plan
 
 `allow_execution=true` 只授权本地写入。外部写入和破坏性操作必须通过 `approved_side_effects` 单独授权。
 
+### 比较能力或 Agent 版本
+
+```text
+craft_eval_suite_list / craft_eval_suite_save
+→ craft_eval_run_start（每个被测版本一个 Run）
+→ 执行 Case 并调用 craft_eval_result_submit
+→ craft_eval_run_get / craft_eval_compare
+```
+
+当前由宿主 Agent、程序或人工执行 Case；Craft 保存不可变结果并计算可复算指标。
+
 ## 文档
 
 - [架构与可信控制面](docs/architecture.zh-CN.md)
 - [Workflow 字段、状态与示例](skills/craft/references/workflow-runtime.md)
+- [评测 Case、结果与对比语义](skills/craft/references/evaluation-runtime.md)
 - [MCP 工具说明](skills/craft/references/tool-contract.md)
 
 ## 当前边界
 
-Craft v0.1 仍是本地技术预览版，解决的是长任务的状态接续、验证与恢复，不是无人值守的后台执行平台。当前暂不包含远程 Skill Hub 同步、向量检索、图形界面、Workspace 文件快照、定时/后台调度和并行 Agent 租约。SQLite 是默认检索方式，Embedding Provider 将保持可选。
+Craft v0.1 仍是本地技术预览版，覆盖能力检索、长任务接续、验证、恢复和人工驱动的版本评测，不是无人值守的后台执行平台。当前暂不包含远程 Skill Hub 同步、向量检索、图形界面、Workspace 文件快照、定时/后台调度和并行 Agent 租约。SQLite 是默认检索方式，Embedding Provider 将保持可选。

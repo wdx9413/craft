@@ -8,7 +8,7 @@ from typing import Iterator
 from .paths import ensure_layout
 
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 
 class ClosingConnection(sqlite3.Connection):
@@ -207,6 +207,51 @@ class CraftStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_workflow_checkpoints_session
                     ON workflow_checkpoints(session_id, sequence DESC);
+                CREATE TABLE IF NOT EXISTS evaluation_suites (
+                    id TEXT NOT NULL,
+                    version INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    description TEXT NOT NULL DEFAULT '',
+                    scope TEXT NOT NULL,
+                    definition_json TEXT NOT NULL,
+                    digest TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY(id, version)
+                );
+                CREATE INDEX IF NOT EXISTS idx_evaluation_suites_name
+                    ON evaluation_suites(name, scope, version DESC);
+                CREATE TABLE IF NOT EXISTS evaluation_runs (
+                    id TEXT PRIMARY KEY,
+                    suite_id TEXT NOT NULL,
+                    suite_version INTEGER NOT NULL,
+                    subject_kind TEXT NOT NULL,
+                    subject_id TEXT NOT NULL,
+                    subject_version TEXT,
+                    metadata_json TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY(suite_id, suite_version)
+                        REFERENCES evaluation_suites(id, version)
+                );
+                CREATE INDEX IF NOT EXISTS idx_evaluation_runs_suite
+                    ON evaluation_runs(suite_id, suite_version, created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_evaluation_runs_subject
+                    ON evaluation_runs(subject_kind, subject_id, subject_version, created_at DESC);
+                CREATE TABLE IF NOT EXISTS evaluation_results (
+                    run_id TEXT NOT NULL REFERENCES evaluation_runs(id),
+                    case_id TEXT NOT NULL,
+                    verdict TEXT NOT NULL,
+                    score REAL,
+                    metrics_json TEXT NOT NULL,
+                    evidence_json TEXT NOT NULL,
+                    notes TEXT NOT NULL DEFAULT '',
+                    provenance TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY(run_id, case_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_evaluation_results_run
+                    ON evaluation_results(run_id, case_id);
                 """
             )
             session_columns = {

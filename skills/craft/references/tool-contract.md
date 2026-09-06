@@ -36,3 +36,16 @@
 - `craft_workflow_restore`：从可信 checkpoint 派生新 Session，不覆盖原历史。
 
 `agent_reported`、`model_judged`、`program_verified`、`human_approved` 等标签描述证据来源，不代表相同的可信等级。不得把模型自述当成程序证明。
+
+## 评测
+
+- `craft_eval_suite_save`：保存有版本的 Case Suite；Case ID 在版本间应保持稳定。
+- `craft_eval_suite_get`：读取最新或指定版本的 Suite。
+- `craft_eval_suite_list`：按关键词或 scope 查找可复用 Suite 的最新版本。
+- `craft_eval_run_start`：为 Capability、Skill、Workflow、工具、MCP、插件、Agent、模型、系统或组合创建一次评测运行。
+- `craft_eval_result_submit`：提交一个不可变 Case 结果，包括 verdict、score、metrics、evidence 和 provenance。
+- `craft_eval_run_get`：读取运行进度、逐 Case 结果与确定性聚合指标。
+- `craft_eval_run_list`：按 Suite、被测对象或状态查找历史 Eval Run。
+- `craft_eval_compare`：比较使用同一 Suite 版本的多个运行，第一个 Run 是基线。
+
+Craft 当前保存和聚合评测事实，不自动调用被测 Agent 或 Grader。执行者必须如实标记结果来源；`blocked` 和 `skipped` 默认不生成分数。

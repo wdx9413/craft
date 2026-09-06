@@ -21,6 +21,7 @@ Craft stores local task state and reusable work assets under `~/.craft_data`. Us
 - For workflows containing `agent`, `judge`, or `human` nodes, use `craft_workflow_start`. Perform an `awaiting_agent` request with the current host's tools, evaluate an `awaiting_model_judge` request against its rubric, or ask for the explicit decision required by `awaiting_human`; then submit structured output with `craft_workflow_submit`. Preserve the returned evidence and provenance. Use `on_result` transitions for repair loops and never pretend an agent-reported result was program-verified.
 - Prefer declarative `invariants` for required outcomes and keep implementation freedom in `agent` nodes. Respect each node's side-effect class. `allow_execution=true` grants only local writes; use `approved_side_effects` only for classes the user has actually authorized. Never infer permission for external writes or destructive work.
 - On failure, inspect trusted points with `craft_workflow_checkpoint_list`. Use `craft_workflow_restore` to branch from a verified checkpoint when recovery is safer than continuing contaminated context. A checkpoint marks a trusted boundary, not proof that every earlier model statement is true.
+- When comparing a capability, Skill, Workflow, tool, MCP, plugin, Agent, model, system, or combination, reuse an existing Case Suite or save one with `craft_eval_suite_save`. Start one Eval Run per subject, submit each observed result with its real provenance, and use `craft_eval_compare` only for runs against the same suite version. Do not invent scores for blocked or unexecuted cases.
 
 Only call `craft_source_add` for a directory the user has selected. Multiple sources are supported. Craft resolves a source symlink or Windows junction and stores both the requested path and real path. Nested linked directories are followed with cycle detection. Scanning is read-only; Craft writes its index and operational data to `~/.craft_data`, never into the scanned project.
 
@@ -28,3 +29,4 @@ Do not store secrets, credentials, cookies, sensitive raw payloads, or unnecessa
 
 For tool fields and source labels, read [tool contract](references/tool-contract.md) only when constructing or debugging a Craft call.
 For executable workflow fields, deterministic coverage semantics, and repair-loop states, read [workflow runtime](references/workflow-runtime.md).
+For reusable Case Suites, result provenance, aggregate metrics, and comparison rules, read [evaluation runtime](references/evaluation-runtime.md).

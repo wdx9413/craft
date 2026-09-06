@@ -6,7 +6,7 @@
 
 Craft is a capability-management and task runtime for AI agents. It treats Skills, Workflows, tools, and service connections as discoverable, composable, and verifiable capability assets, then manages their full lifecycle around real tasks: discover, register, and index capabilities; retrieve, select, and compose them; coordinate and continue execution; preserve state, artifacts, and evidence; use evaluation and regression checks to assess outcomes and capability versions; and turn validated methods into reusable Workflows.
 
-That is the product direction. Version 0.1 implements local Skill discovery and management, task continuity, mixed validation, Workflow execution, and trusted recovery. Adding plugin and MCP metadata to the capability catalog, systematic Skill and Agent evaluation, and automated promotion remain later stages.
+Version 0.1 implements local Skill discovery and management, task continuity, mixed validation, Workflow execution, trusted recovery, reusable Case Suites, and cross-version evaluation comparison. Adding plugin and MCP metadata to the capability catalog, automated evaluation execution, and threshold-based promotion remain later stages.
 
 ## Why Craft
 
@@ -70,13 +70,14 @@ These domains can share one control loop while supplying their own Skills, tools
 - Mixed program, model-judge, and human-approval execution.
 - Separate `read_only`, `local_write`, `external_write`, and `destructive` gates.
 - Trusted checkpoint recovery without rewriting failed history.
+- Versioned evaluation Case Suites, immutable Case results, aggregate metrics, and same-suite comparisons.
 - Codex, Claude Code, MCP, and Python CLI integration.
 
 ## Evaluation boundary today
 
-Craft currently provides deterministic run verification, mixed Agent/Model/Human checks, provenance levels, versioned Workflows and immutable run records, plus its own test suite and 10,000-Skill indexing benchmark. It therefore has an execution-validation loop and evaluation foundations.
+Craft provides deterministic run verification, mixed Agent/Model/Human checks, provenance levels, versioned Workflows, and immutable run records. It can also save versioned Case Suites, create Eval Runs for capabilities, Skills, Workflows, tools, MCPs, plugins, Agents, models, systems, or combinations, record per-Case verdicts, scores, metrics, evidence, and provenance, then deterministically aggregate completion rate, pass rate, weighted score, and version deltas.
 
-Reusable Eval Datasets, Case Suites, multidimensional Graders, comparisons across Skill/Workflow/Agent/model combinations, repeated-run regression detection and promotion recommendations, and cross-client or long-task recovery evaluations are still planned. Craft is not yet a complete Agent evaluation platform.
+The host Agent, a program, or a human still executes each Case and submits its result. Automatic runners, Grader adapters, Dataset import, statistical confidence, repeated-run regression detection, promotion recommendations, and dedicated cross-client or long-task recovery evaluations are still planned. Craft now has a minimal reusable evaluation loop, but it is not yet a complete Agent evaluation platform.
 
 Runtime data is stored under `~/.craft_data`, never in the active business project.
 
@@ -128,6 +129,7 @@ Inspect `/mcp`, invoke `/craft:craft`, or let Claude select the Skill from task 
 craft_source_add → craft_capability_search → craft_capability_get
 craft_task_open → craft_task_checkpoint → resume by task_id
 craft_workflow_plan → craft_workflow_start → craft_workflow_submit
+craft_eval_suite_list/save → craft_eval_run_start → craft_eval_result_submit → craft_eval_compare
 ```
 
 `allow_execution=true` grants local writes only. External writes and destructive actions require an explicit `approved_side_effects` grant.
@@ -136,8 +138,9 @@ craft_workflow_plan → craft_workflow_start → craft_workflow_submit
 
 - [Architecture and trusted control plane](docs/architecture.en.md)
 - [Workflow schema, states, and examples](skills/craft/references/workflow-runtime.md)
+- [Evaluation cases, results, and comparison semantics](skills/craft/references/evaluation-runtime.md)
 - [MCP tool contract](skills/craft/references/tool-contract.md)
 
 ## Current boundary
 
-Craft v0.1 is a local technical preview. It addresses continuity, verification, and recovery for long tasks; it is not an unattended background execution platform. Remote Skill Hub synchronization, vector retrieval, a graphical interface, workspace snapshots, scheduled/background execution, and parallel-agent leases are not implemented yet. SQLite retrieval is the default; embedding providers will remain optional.
+Craft v0.1 is a local technical preview covering capability retrieval, long-task continuity, verification, recovery, and human-driven version evaluation; it is not an unattended background execution platform. Remote Skill Hub synchronization, vector retrieval, a graphical interface, workspace snapshots, scheduled/background execution, and parallel-agent leases are not implemented yet. SQLite retrieval is the default; embedding providers will remain optional.

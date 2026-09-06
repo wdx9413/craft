@@ -17,6 +17,12 @@ from .store import CraftStore
 from .workflow_runtime import execute_steps, failure_signature, resolve_inputs, substitute
 
 
+EVAL_SUBJECT_KINDS = {
+    "capability", "skill", "workflow", "tool", "mcp", "plugin",
+    "agent", "model", "system", "combination",
+}
+
+
 def new_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex}"
 
@@ -34,6 +40,7 @@ class CraftService:
                 for table in (
                     "sources", "capabilities", "tasks", "workflows",
                     "workflow_runs", "workflow_sessions", "workflow_checkpoints",
+                    "evaluation_suites", "evaluation_runs", "evaluation_results",
                 )
             }
         return {"version": "0.1.0", "data_root": str(self.store.root), "counts": counts}
@@ -188,6 +195,331 @@ class CraftService:
                 (feedback_id, task_id, kind, scope, original, corrected, applies_to, source, utc_now()),
             )
         return {"feedback_id": feedback_id, "kind": kind, "scope": scope, "task_id": task_id}
+
+    def eval_suite_save(
+        self,
+        name: str,
+        cases: list[dict[str, Any]],
+        description: str = "",
+        scope: str = "user",
+        suite_id: str | None = None,
+    ) -> dict[str, Any]:
+        if not name.strip() or not cases:
+            raise ValueError("name and at least one case are required")
+        if scope not in {"task", "project", "user"}:
+            raise ValueError(f"Unsupported evaluation suite scope: {scope}")
+        normalized_cases: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for index, item in enumerate(cases):
+            if not isinstance(item, dict):
+                raise ValueError(f"Evaluation case at index {index} must be an object")
+            case_id = str(item.get("id", "")).strip()
+            case_name = str(item.get("name", "")).strip()
+            if not case_id or not case_name:
+                raise ValueError(f"Evaluation case at index {index} requires id and name")
+            if case_id in seen:
+                raise ValueError(f"Duplicate evaluation case id: {case_id}")
+            seen.add(case_id)
+            weight = item.get("weight", 1.0)
+            if isinstance(weight, bool) or not isinstance(weight, (int, float)) or weight <= 0:
+                raise ValueError(f"Evaluation case {case_id} weight must be a positive number")
+            tags = item.get("tags", [])
+            graders = item.get("graders", [])
+            if not isinstance(tags, list) or not all(isinstance(tag, str) for tag in tags):
+                raise ValueError(f"Evaluation case {case_id} tags must be strings")
+            if not isinstance(graders, list) or not all(isinstance(grader, dict) for grader in graders):
+                raise ValueError(f"Evaluation case {case_id} graders must be objects")
+            normalized_cases.append({
+                "id": case_id,
+                "name": case_name,
+                "input": item.get("input", {}),
+                "expected": item.get("expected"),
+                "graders": graders,
+                "tags": tags,
+                "weight": float(weight),
+            })
+        suite_id = suite_id or "eval_" + hashlib.sha256(
+            f"{scope}:{name.casefold()}".encode("utf-8")
+        ).hexdigest()[:20]
+        definition = {"name": name, "description": description, "cases": normalized_cases}
+        encoded = json.dumps(definition, ensure_ascii=False, sort_keys=True)
+        digest = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+        with self.store.transaction() as db:
+            version = db.execute(
+                "SELECT COALESCE(MAX(version),0)+1 AS version FROM evaluation_suites WHERE id=?",
+                (suite_id,),
+            ).fetchone()["version"]
+            db.execute(
+                """INSERT INTO evaluation_suites(
+                   id,version,name,description,scope,definition_json,digest,created_at
+                   ) VALUES(?,?,?,?,?,?,?,?)""",
+                (suite_id, version, name, description, scope, encoded, digest, utc_now()),
+            )
+        log_event(
+            self.logger, "eval_suite_saved", suite_id=suite_id, version=version,
+            cases=len(normalized_cases), level=logging.DEBUG,
+        )
+        return {
+            "id": suite_id, "version": version, "scope": scope,
+            "digest": digest, "suite": definition,
+        }
+
+    def eval_suite_get(self, suite_id: str, version: int | None = None) -> dict[str, Any]:
+        with self.store.connect() as db:
+            if version is None:
+                row = db.execute(
+                    "SELECT * FROM evaluation_suites WHERE id=? ORDER BY version DESC LIMIT 1",
+                    (suite_id,),
+                ).fetchone()
+            else:
+                row = db.execute(
+                    "SELECT * FROM evaluation_suites WHERE id=? AND version=?",
+                    (suite_id, version),
+                ).fetchone()
+        if not row:
+            raise ValueError(f"Unknown evaluation suite: {suite_id}")
+        result = dict(row)
+        result["suite"] = json.loads(result.pop("definition_json"))
+        return result
+
+    def eval_suite_list(
+        self, limit: int = 20, query: str | None = None, scope: str | None = None
+    ) -> dict[str, Any]:
+        limit = max(1, min(limit, 50))
+        if scope is not None and scope not in {"task", "project", "user"}:
+            raise ValueError(f"Unsupported evaluation suite scope: {scope}")
+        sql = """SELECT suite.* FROM evaluation_suites suite
+                 JOIN (SELECT id, MAX(version) AS version FROM evaluation_suites GROUP BY id) latest
+                 ON suite.id=latest.id AND suite.version=latest.version WHERE 1=1"""
+        params: list[Any] = []
+        if query and query.strip():
+            sql += " AND (LOWER(suite.name) LIKE ? OR LOWER(suite.description) LIKE ?)"
+            needle = f"%{query.strip().lower()}%"
+            params.extend([needle, needle])
+        if scope:
+            sql += " AND suite.scope=?"
+            params.append(scope)
+        sql += " ORDER BY suite.created_at DESC LIMIT ?"
+        params.append(limit)
+        with self.store.connect() as db:
+            rows = db.execute(sql, params).fetchall()
+        suites = []
+        for row in rows:
+            item = dict(row)
+            definition = json.loads(item.pop("definition_json"))
+            item["case_count"] = len(definition["cases"])
+            suites.append(item)
+        return {"suites": suites}
+
+    def eval_run_start(
+        self,
+        suite_id: str,
+        subject_kind: str,
+        subject_id: str,
+        suite_version: int | None = None,
+        subject_version: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if subject_kind not in EVAL_SUBJECT_KINDS:
+            raise ValueError(f"Unsupported evaluation subject kind: {subject_kind}")
+        if not subject_id.strip():
+            raise ValueError("subject_id must not be empty")
+        suite = self.eval_suite_get(suite_id, suite_version)
+        run_id = new_id("evalrun")
+        now = utc_now()
+        with self.store.transaction() as db:
+            db.execute(
+                """INSERT INTO evaluation_runs(
+                   id,suite_id,suite_version,subject_kind,subject_id,subject_version,
+                   metadata_json,status,created_at,updated_at
+                   ) VALUES(?,?,?,?,?,?,?,'running',?,?)""",
+                (
+                    run_id, suite_id, suite["version"], subject_kind, subject_id,
+                    subject_version, json.dumps(metadata or {}, ensure_ascii=False), now, now,
+                ),
+            )
+        log_event(
+            self.logger, "eval_run_started", run_id=run_id, suite_id=suite_id,
+            subject_kind=subject_kind, subject_id=subject_id,
+        )
+        return self.eval_run_get(run_id)
+
+    def eval_result_submit(
+        self,
+        run_id: str,
+        case_id: str,
+        verdict: str,
+        score: float | None = None,
+        metrics: dict[str, Any] | None = None,
+        evidence: list[dict[str, Any]] | None = None,
+        notes: str = "",
+        provenance: str = "agent_reported",
+    ) -> dict[str, Any]:
+        if verdict not in {"passed", "failed", "blocked", "skipped"}:
+            raise ValueError(f"Unsupported evaluation verdict: {verdict}")
+        if score is None and verdict in {"passed", "failed"}:
+            score = 1.0 if verdict == "passed" else 0.0
+        if score is not None and (
+            isinstance(score, bool) or not isinstance(score, (int, float)) or not 0 <= score <= 1
+        ):
+            raise ValueError("score must be between 0 and 1")
+        allowed_provenance = {
+            "agent_reported", "model_judged", "program_verified",
+            "human_approved", "human_rejected",
+        }
+        if provenance not in allowed_provenance:
+            raise ValueError(f"Unsupported evaluation provenance: {provenance}")
+        run = self.eval_run_get(run_id)
+        if run["status"] == "completed":
+            raise ValueError("Evaluation run is already completed")
+        case_ids = {item["id"] for item in run["suite"]["cases"]}
+        if case_id not in case_ids:
+            raise ValueError(f"Unknown evaluation case for this run: {case_id}")
+        if case_id in {item["case_id"] for item in run["results"]}:
+            raise ValueError(f"Evaluation result already exists for case: {case_id}")
+        now = utc_now()
+        with self.store.transaction() as db:
+            db.execute(
+                """INSERT INTO evaluation_results(
+                   run_id,case_id,verdict,score,metrics_json,evidence_json,notes,provenance,created_at
+                   ) VALUES(?,?,?,?,?,?,?,?,?)""",
+                (
+                    run_id, case_id, verdict, score,
+                    json.dumps(metrics or {}, ensure_ascii=False),
+                    json.dumps(evidence or [], ensure_ascii=False),
+                    notes, provenance, now,
+                ),
+            )
+            submitted = db.execute(
+                "SELECT COUNT(*) FROM evaluation_results WHERE run_id=?", (run_id,)
+            ).fetchone()[0]
+            status = "completed" if submitted == len(case_ids) else "running"
+            db.execute(
+                "UPDATE evaluation_runs SET status=?,updated_at=? WHERE id=?",
+                (status, now, run_id),
+            )
+        log_event(
+            self.logger, "eval_result_submitted", run_id=run_id, case_id=case_id,
+            verdict=verdict, provenance=provenance, level=logging.DEBUG,
+        )
+        return self.eval_run_get(run_id)
+
+    def eval_run_get(self, run_id: str) -> dict[str, Any]:
+        with self.store.connect() as db:
+            row = db.execute("SELECT * FROM evaluation_runs WHERE id=?", (run_id,)).fetchone()
+            if not row:
+                raise ValueError(f"Unknown evaluation run: {run_id}")
+            results = db.execute(
+                "SELECT * FROM evaluation_results WHERE run_id=? ORDER BY case_id", (run_id,)
+            ).fetchall()
+        run = dict(row)
+        run["metadata"] = json.loads(run.pop("metadata_json"))
+        suite = self.eval_suite_get(run["suite_id"], run["suite_version"])
+        run["suite"] = suite["suite"]
+        run["results"] = []
+        for item in results:
+            result = dict(item)
+            result["metrics"] = json.loads(result.pop("metrics_json"))
+            result["evidence"] = json.loads(result.pop("evidence_json"))
+            run["results"].append(result)
+        run["summary"] = self._eval_summary(run["suite"]["cases"], run["results"])
+        return run
+
+    def eval_run_list(
+        self,
+        limit: int = 20,
+        suite_id: str | None = None,
+        subject_kind: str | None = None,
+        subject_id: str | None = None,
+        status: str | None = None,
+    ) -> dict[str, Any]:
+        limit = max(1, min(limit, 50))
+        if subject_kind is not None and subject_kind not in EVAL_SUBJECT_KINDS:
+            raise ValueError(f"Unsupported evaluation subject kind: {subject_kind}")
+        if status is not None and status not in {"running", "completed"}:
+            raise ValueError(f"Unsupported evaluation run status: {status}")
+        sql = "SELECT id FROM evaluation_runs WHERE 1=1"
+        params: list[Any] = []
+        for column, value in (
+            ("suite_id", suite_id), ("subject_kind", subject_kind),
+            ("subject_id", subject_id), ("status", status),
+        ):
+            if value:
+                sql += f" AND {column}=?"
+                params.append(value)
+        sql += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+        with self.store.connect() as db:
+            ids = [row["id"] for row in db.execute(sql, params).fetchall()]
+        return {"runs": [self.eval_run_get(run_id) for run_id in ids]}
+
+    def eval_compare(self, run_ids: list[str]) -> dict[str, Any]:
+        if len(run_ids) < 2:
+            raise ValueError("At least two evaluation runs are required")
+        if len(set(run_ids)) != len(run_ids):
+            raise ValueError("Evaluation run IDs must be unique")
+        runs = [self.eval_run_get(run_id) for run_id in run_ids]
+        first = runs[0]
+        for run in runs[1:]:
+            if (run["suite_id"], run["suite_version"]) != (
+                first["suite_id"], first["suite_version"]
+            ):
+                raise ValueError("Evaluation runs must use the same suite version")
+        baseline = first["summary"]
+        comparisons = []
+        for run in runs:
+            summary = run["summary"]
+            comparisons.append({
+                "run_id": run["id"],
+                "subject": {
+                    "kind": run["subject_kind"], "id": run["subject_id"],
+                    "version": run["subject_version"],
+                },
+                "status": run["status"],
+                "summary": summary,
+                "delta": {
+                    "pass_rate": self._metric_delta(summary["pass_rate"], baseline["pass_rate"]),
+                    "weighted_score": self._metric_delta(
+                        summary["weighted_score"], baseline["weighted_score"]
+                    ),
+                },
+            })
+        return {
+            "suite_id": first["suite_id"], "suite_version": first["suite_version"],
+            "baseline_run_id": first["id"], "runs": comparisons,
+        }
+
+    @staticmethod
+    def _metric_delta(value: float | None, baseline: float | None) -> float | None:
+        if value is None or baseline is None:
+            return None
+        return round(value - baseline, 6)
+
+    @staticmethod
+    def _eval_summary(
+        cases: list[dict[str, Any]], results: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        by_id = {item["case_id"]: item for item in results}
+        counts = {key: 0 for key in ("passed", "failed", "blocked", "skipped")}
+        weighted_total = 0.0
+        weighted_score = 0.0
+        for case in cases:
+            result = by_id.get(case["id"])
+            if not result:
+                continue
+            counts[result["verdict"]] += 1
+            if result["score"] is not None:
+                weighted_total += case["weight"]
+                weighted_score += case["weight"] * result["score"]
+        evaluated = counts["passed"] + counts["failed"]
+        return {
+            "total_cases": len(cases),
+            "submitted_cases": len(results),
+            "completion_rate": round(len(results) / len(cases), 6),
+            "counts": counts,
+            "pass_rate": round(counts["passed"] / evaluated, 6) if evaluated else None,
+            "weighted_score": round(weighted_score / weighted_total, 6) if weighted_total else None,
+        }
 
     def workflow_save(
         self,
