@@ -187,6 +187,19 @@ class Catalog:
             ).fetchone()
             if not row:
                 raise ValueError(f"Unknown or disabled source: {source_id}")
+            requested = Path(row["requested_path"] or row["path"])
+            root = requested.resolve()
+            if not root.is_dir():
+                raise ValueError(f"Source directory is unavailable: {root}")
+            if str(root) != row["path"]:
+                conflict = db.execute(
+                    "SELECT id FROM sources WHERE path=? AND id<>?", (str(root), source_id)
+                ).fetchone()
+                if conflict:
+                    raise ValueError(
+                        f"Retargeted source conflicts with registered source: {conflict['id']}"
+                    )
+                db.execute("UPDATE sources SET path=? WHERE id=?", (str(root), source_id))
             generation = row["scan_generation"] + 1
             db.execute(
                 "UPDATE sources SET scan_generation=? WHERE id=?", (generation, source_id)
@@ -195,10 +208,6 @@ class Catalog:
                 """SELECT id,path,digest,modified_ns,size_bytes
                    FROM capabilities WHERE source_id=?""", (source_id,)
             ).fetchall()
-        root = Path(row["path"])
-        if not root.is_dir():
-            raise ValueError(f"Source directory is unavailable: {root}")
-
         existing = {item["id"]: item for item in existing_rows}
         seen: set[str] = set()
         added = updated = unchanged = failed = 0

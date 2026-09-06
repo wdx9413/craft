@@ -195,6 +195,42 @@ class CraftServiceTests(unittest.TestCase):
         self.assertEqual((scanned["updated"], scanned["removed"]), (1, 0))
         self.assertEqual(Path(self.service.capability_get(asset_id)["path"]), replacement.resolve())
 
+    def test_scan_refreshes_a_retargeted_source_root_and_rejects_conflicts(self) -> None:
+        original = self.root / "original"
+        replacement = self.root / "replacement"
+        original.mkdir()
+        replacement.mkdir()
+        (original / "SKILL.md").write_text(
+            "---\nname: original\ndescription: old root\n---\n", encoding="utf-8"
+        )
+        (replacement / "SKILL.md").write_text(
+            "---\nname: replacement\ndescription: new root\n---\n", encoding="utf-8"
+        )
+        source = self.service.source_add(str(original))
+        with self.service.store.transaction() as db:
+            db.execute(
+                "UPDATE sources SET requested_path=? WHERE id=?", (str(replacement), source["id"])
+            )
+        scanned = self.service.source_scan(source["id"])
+        self.assertEqual((scanned["added"], scanned["removed"]), (0, 0))
+        listed = self.service.source_list()["sources"][0]
+        self.assertEqual(Path(listed["real_path"]), replacement.resolve())
+        self.assertEqual(
+            self.service.capability_search("new root", refresh=False)["results"][0]["name"],
+            "replacement",
+        )
+
+        other = self.root / "other"
+        other.mkdir()
+        (other / "SKILL.md").write_text("---\nname: other\n---\n", encoding="utf-8")
+        other_source = self.service.source_add(str(other))
+        with self.service.store.transaction() as db:
+            db.execute(
+                "UPDATE sources SET requested_path=? WHERE id=?", (str(replacement), other_source["id"])
+            )
+        with self.assertRaisesRegex(ValueError, "conflicts with registered source"):
+            self.service.source_scan(other_source["id"])
+
     def test_older_concurrent_scan_cannot_overwrite_a_newer_generation(self) -> None:
         library = self.root / "library"
         library.mkdir()

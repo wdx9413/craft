@@ -91,7 +91,7 @@ MCP stdout 只输出 JSON-RPC。运行日志写到 stderr，默认 INFO；逐节
 
 ## 核心一致性约束
 
-- Capability 以 Source 内逻辑相对路径作为身份，以真实路径作为当前位置。目录链接改指向后更新位置，不把同一能力先更新再误删；并发扫描使用递增 generation，较早扫描不能覆盖较新快照。复扫先比较 mtime_ns 与文件大小，未变化 Skill 不重读正文或重算摘要。
+- Capability 以 Source 内逻辑相对路径作为身份，以真实路径作为当前位置。Source 根目录或嵌套目录链接改指向后都会刷新真实位置，不把同一能力先更新再误删；新目标已被其他 Source 注册时明确拒绝冲突。并发扫描使用递增 generation，较早扫描不能覆盖较新快照。复扫先比较 mtime_ns 与文件大小，未变化 Skill 不重读正文或重算摘要。
 - 路径大小写遵循宿主文件系统语义：Windows 归一化大小写，大小写敏感平台保留区别。
 - Workflow 在执行任何步骤前验证全部跳转目标、结构字段和权限声明。带路由的流程只能进入可审计的 Session Runtime；线性 `workflow_run` 不会静默忽略 `on_result`。
 - `needs_repair` Run 在再次执行命令前原子标记为 running，防止两个客户端同时重复领取同一次修复。

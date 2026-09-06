@@ -66,7 +66,7 @@ Set `CRAFT_LOG_LEVEL=DEBUG|INFO|WARNING|ERROR` to control log verbosity.
 
 ## Core consistency invariants
 
-- A Capability is identified by its logical relative path inside a Source and stores its current real path. Retargeted directory links update location without deleting the same asset, and scan generations prevent an older concurrent snapshot from overwriting a newer one. Rescans compare nanosecond mtime and file size first, avoiding content reads and hashing for unchanged Skills.
+- A Capability is identified by its logical relative path inside a Source and stores its current real path. Retargeted Source roots and nested directory links refresh their real location without deleting the same asset; a target already registered by another Source is rejected as a conflict. Scan generations prevent an older concurrent snapshot from overwriting a newer one. Rescans compare nanosecond mtime and file size first, avoiding content reads and hashing for unchanged Skills.
 - Path casing follows host filesystem semantics: Windows normalizes case while case-sensitive platforms preserve it.
 - A Workflow validates all transition targets, structured fields, and permission declarations before executing any step. Routed workflows use the auditable Session Runtime; linear `workflow_run` never silently ignores `on_result`.
 - A `needs_repair` Run is atomically marked running before commands execute, preventing two clients from claiming the same repair attempt.
