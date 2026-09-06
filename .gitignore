@@ -11,3 +11,5 @@ dist/
 build/
 *.egg-info/
 .test-install/
+node_modules/
+.node-coverage/

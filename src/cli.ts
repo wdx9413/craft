@@ -1,0 +1,159 @@
+#!/usr/bin/env node
+import { createInterface } from "node:readline/promises";
+import { stdin, stdout } from "node:process";
+import { pathToFileURL } from "node:url";
+import { initializeConfig, loadConfig, setMode, type CraftMode, type DirectProvider,
+  type InitInput, type RuntimeKind } from "./config.ts";
+import { craftPaths } from "./paths.ts";
+
+const HELP = `Craft
+
+Usage:
+  craft                         Start onboarding or open the active mode
+  craft init [options]          Configure Craft
+  craft config show             Print redacted configuration
+  craft mode <name>             Switch agent, supervisor, or provider mode
+  craft paths                   Print the ~/.craft_data layout
+
+Init options:
+  --mode <agent|supervisor|provider>
+  --runtime <direct-api|codex-cli|claude-code|unconfigured>
+  --provider-protocol <openai-compatible|anthropic>
+  --provider-name <name> --base-url <url> --model <model>
+  --api-key-env <ENV_NAME>
+  --hosts <codex-cli,claude-code,generic-mcp>
+`;
+
+function option(args: string[], name: string): string | undefined {
+  const index = args.indexOf(name);
+  return index >= 0 ? args[index + 1] : undefined;
+}
+
+async function promptChoice(question: string, choices: string[]): Promise<number> {
+  const terminal = createInterface({ input: stdin, output: stdout });
+  try {
+    stdout.write(`${question}\n${choices.map((item, i) => `  ${i + 1}. ${item}`).join("\n")}\n`);
+    const answer = Number.parseInt(await terminal.question("> "), 10);
+    if (!Number.isInteger(answer) || answer < 1 || answer > choices.length) {
+      throw new Error("Invalid selection.");
+    }
+    return answer - 1;
+  } finally {
+    terminal.close();
+  }
+}
+
+async function interactiveInit(): Promise<InitInput> {
+  const modes: CraftMode[] = ["agent", "supervisor", "provider"];
+  const mode = modes[await promptChoice("How do you want to use Craft?", [
+    "Agent - Craft owns the conversation and model loop",
+    "Supervisor - Craft delegates work to Codex, Claude, or other hosts",
+    "Provider - Craft supplies capabilities to another Agent",
+  ])];
+  if (mode === "provider") return { mode };
+  if (mode === "supervisor") {
+    const selected = await promptChoice("Choose the first execution host:", [
+      "Codex CLI", "Claude Code", "Generic MCP host", "Configure later",
+    ]);
+    const hosts: InitInput["supervisorHosts"] = selected === 3 ? []
+      : [["codex-cli", "claude-code", "generic-mcp"][selected] as "codex-cli"];
+    return { mode, supervisorHosts: hosts };
+  }
+  const kinds: RuntimeKind[] = ["direct-api", "codex-cli", "claude-code", "unconfigured"];
+  const runtimeKind = kinds[await promptChoice("How should Craft Agent run models?", [
+    "Direct model API", "Use Codex CLI", "Use Claude Code", "Configure later",
+  ])];
+  if (runtimeKind !== "direct-api") return { mode, runtimeKind };
+  const terminal = createInterface({ input: stdin, output: stdout });
+  try {
+    const protocolAnswer = await terminal.question("Protocol (openai-compatible/anthropic): ");
+    const protocol = protocolAnswer.trim() as DirectProvider["protocol"];
+    if (!["openai-compatible", "anthropic"].includes(protocol)) {
+      throw new Error("Unsupported provider protocol.");
+    }
+    const provider = {
+      protocol,
+      name: (await terminal.question("Provider name: ")).trim(),
+      baseUrl: (await terminal.question("Base URL: ")).trim(),
+      model: (await terminal.question("Model: ")).trim(),
+      apiKeyEnv: (await terminal.question("API key environment variable (optional): ")).trim() || undefined,
+    };
+    return { mode, runtimeKind, provider };
+  } finally {
+    terminal.close();
+  }
+}
+
+function nonInteractiveInit(args: string[]): InitInput {
+  const mode = option(args, "--mode") as CraftMode | undefined;
+  if (!mode) throw new Error("Non-interactive init requires --mode.");
+  const runtimeKind = option(args, "--runtime") as RuntimeKind | undefined;
+  const hosts = option(args, "--hosts")?.split(",").filter(Boolean) as InitInput["supervisorHosts"];
+  let provider: DirectProvider | undefined;
+  if (runtimeKind === "direct-api") {
+    provider = {
+      protocol: option(args, "--provider-protocol") as DirectProvider["protocol"],
+      name: option(args, "--provider-name") || "",
+      baseUrl: option(args, "--base-url") || "",
+      model: option(args, "--model") || "",
+      apiKeyEnv: option(args, "--api-key-env"),
+    };
+  }
+  return { mode, runtimeKind, provider, supervisorHosts: hosts };
+}
+
+function publicConfig(config: Awaited<ReturnType<typeof loadConfig>>): unknown {
+  if (!config) return null;
+  return {
+    ...config,
+    runtime: config.runtime.provider
+      ? { ...config.runtime, provider: { ...config.runtime.provider, apiKeyConfiguredBy: config.runtime.provider.apiKeyEnv || null } }
+      : config.runtime,
+  };
+}
+
+export async function main(args = process.argv.slice(2)): Promise<void> {
+  const paths = craftPaths();
+  if (args.includes("--help") || args.includes("-h")) {
+    stdout.write(HELP);
+    return;
+  }
+  if (args[0] === "paths") {
+    stdout.write(`${JSON.stringify(paths, null, 2)}\n`);
+    return;
+  }
+  if (args[0] === "config" && args[1] === "show") {
+    stdout.write(`${JSON.stringify(publicConfig(await loadConfig(paths)), null, 2)}\n`);
+    return;
+  }
+  if (args[0] === "mode") {
+    if (!args[1]) throw new Error("mode requires agent, supervisor, or provider.");
+    stdout.write(`${JSON.stringify(await setMode(args[1] as CraftMode, paths), null, 2)}\n`);
+    return;
+  }
+  if (args[0] === "init") {
+    const input = args.length === 1 ? await interactiveInit() : nonInteractiveInit(args.slice(1));
+    stdout.write(`${JSON.stringify(await initializeConfig(input, paths), null, 2)}\n`);
+    return;
+  }
+  if (args.length > 0) throw new Error(`Unknown command: ${args[0]}`);
+  const config = await loadConfig(paths);
+  if (!config) {
+    stdout.write("Craft is not initialized. Let's configure it first.\n");
+    stdout.write(`${JSON.stringify(await initializeConfig(await interactiveInit(), paths), null, 2)}\n`);
+    return;
+  }
+  stdout.write(`Craft mode: ${config.activeMode}\n`);
+  stdout.write(config.activeMode === "agent"
+    ? "Agent runtime migration is in progress; use the existing Python CLI for model turns in this compatibility release.\n"
+    : config.activeMode === "supervisor"
+      ? `Configured hosts: ${config.supervisor.hosts.join(", ") || "none"}\n`
+      : "Provider mode is configured; connect through the Craft plugin or MCP server.\n");
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error: unknown) => {
+    process.stderr.write(`craft: ${error instanceof Error ? error.message : String(error)}\n`);
+    process.exitCode = 1;
+  });
+}

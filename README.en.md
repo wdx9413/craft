@@ -103,6 +103,11 @@ Runtime data is stored under `~/.craft_data`, never in the active business proje
 - Windows, macOS, or Linux
 - [`uv`](https://docs.astral.sh/uv/getting-started/installation/) for Marketplace-launched MCP
 
+Craft is migrating to TypeScript/npm so the finished product will not require
+Python. The verified Python core remains the default release while the TypeScript
+data service and MCP are ported. The npm package stays private during this
+compatibility window to prevent accidental installation of an incomplete runtime.
+
 ## Install from source
 
 Windows:

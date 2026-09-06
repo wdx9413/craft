@@ -1,16 +1,41 @@
 {
-  "name": "dsh-craft-adapter",
+  "name": "craft-agent-harness",
   "version": "0.1.0",
   "private": true,
+  "description": "Cross-platform capability, workflow, evidence, and agent harness",
   "type": "module",
-  "main": "adapters/deepseek-harness/index.js",
-  "dsh": {
-    "bundle": {
-      "patch": "./adapters/deepseek-harness/cordis.patch.yml"
-    }
+  "bin": {
+    "craft": "src/cli.ts"
   },
-  "peerDependencies": {
-    "@deepseek-ai/cordis": "*",
-    "@deepseek-ai/dsh-tools": "*"
+  "scripts": {
+    "test:ts": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 test-ts/config.test.ts",
+    "check:ts": "node --experimental-strip-types src/cli.ts --help",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "README.en.md",
+    "LICENSE",
+    "docs/typescript-migration.zh-CN.md"
+  ],
+  "keywords": [
+    "agent",
+    "mcp",
+    "skills",
+    "workflow",
+    "harness"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wdx9413/craft.git"
+  },
+  "devDependencies": {
+    "@types/node": ">=24 <26",
+    "typescript": ">=5.8 <7"
   }
 }

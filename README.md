@@ -102,6 +102,11 @@ Craft 不要求产品方预先写完所有行业模板。用户完成真实任�
 - Windows、macOS 或 Linux
 - 从 Codex Marketplace 启动 MCP 时需要 [`uv`](https://docs.astral.sh/uv/getting-started/installation/)
 
+Craft 正在迁移到 TypeScript/npm，目标是最终用户不再依赖 Python。当前默认发布仍是已经完成
+全量验收的 Python Core；TypeScript 首次启动与配置层已经落地，但 npm 包在数据服务和 MCP
+完成等价迁移前保持私有，避免把迁移中版本当成成品安装。设计与数据目录契约见
+[TypeScript / npm 迁移](docs/typescript-migration.zh-CN.md)。
+
 ## 从源码开始使用
 
 克隆仓库后，在项目根目录执行：
