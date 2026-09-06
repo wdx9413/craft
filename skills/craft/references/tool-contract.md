@@ -20,5 +20,9 @@ All public MCP tool names begin with `craft_`.
 - `craft_workflow_plan`: resolve inputs and preview command, assertion, and coverage-gate steps without execution.
 - `craft_workflow_run`: execute one explicitly authorized attempt and return `passed`, `needs_repair`, `failed`, or `no_progress` with deterministic evidence.
 - `craft_workflow_run_get`: load a run plus all immutable attempt receipts.
+- `craft_workflow_start`: start a mixed program/model/human workflow and advance until external work or approval is needed.
+- `craft_workflow_continue`: resume a mixed workflow after explicit command approval.
+- `craft_workflow_submit`: submit the pending agent, judge, or human result and follow its transition.
+- `craft_workflow_session_get`: read pending work and provenance-bearing event history.
 
 Craft labels records as `agent_reported`, `user_explicit`, or another caller-provided source. These labels describe provenance, not independent verification.

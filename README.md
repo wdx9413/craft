@@ -45,6 +45,8 @@ Craft workflows can contain typed inputs, preconditions, ordered command/asserti
 
 Pass/fail is determined by command exit codes and code evaluators, not by model judgment. The Python `coverage_gate` intersects a coverage.py JSON report with changed executable lines and branches from a Git baseline, and treats changed Python files missing from the report as uncovered. When a run needs repair, Codex or another host agent uses the returned evidence to make an authorized change and resumes the same `run_id`; Craft enforces attempt and no-progress limits. See `skills/craft/references/workflow-runtime.md` for the schema and a complete incremental-coverage example.
 
+Workflows are not limited to programmatic checks. Mixed sessions add `agent`, `judge`, and `human` nodes alongside deterministic nodes. `craft_workflow_start` advances to the next external request, `craft_workflow_submit` records its structured result and provenance, and `on_result` routes to repair, approval, success, or failure. This lets the current Codex inspect coverage with its own tools, judge a video or document against a rubric, or request human approval without requiring Craft to call a second model or own provider credentials. Model conclusions remain labeled `agent_reported` or `model_judged`, while code evaluators are labeled `program_verified`.
+
 ## Codex
 
 The Codex manifest is `.codex-plugin/plugin.json`; it loads the Craft Skill and `.mcp.json`. The GitHub repository is also a Codex marketplace through `.agents/plugins/marketplace.json`.

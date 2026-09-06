@@ -34,6 +34,10 @@ TOOLS = [
     {"name": "craft_workflow_plan", "description": "Resolve workflow inputs and preview executable steps without running them.", "inputSchema": schema({"workflow_id": {"type": "string"}, "project_root": {"type": "string"}, "version": {"type": "integer", "minimum": 1}, "inputs": {"type": "object"}}, ["workflow_id", "project_root"]), "annotations": {"readOnlyHint": True}},
     {"name": "craft_workflow_run", "description": "Run one approved workflow attempt and return deterministic repair evidence on failure.", "inputSchema": schema({"workflow_id": {"type": "string"}, "project_root": {"type": "string"}, "version": {"type": "integer", "minimum": 1}, "inputs": {"type": "object"}, "run_id": {"type": "string"}, "allow_execution": {"type": "boolean", "default": False}}, ["workflow_id", "project_root", "allow_execution"]), "annotations": {"destructiveHint": True}},
     {"name": "craft_workflow_run_get", "description": "Read a workflow run and all deterministic attempt receipts.", "inputSchema": schema({"run_id": {"type": "string"}}, ["run_id"]), "annotations": {"readOnlyHint": True}},
+    {"name": "craft_workflow_start", "description": "Start a mixed workflow and advance until it needs an agent, model judge, human, or command approval.", "inputSchema": schema({"workflow_id": {"type": "string"}, "project_root": {"type": "string"}, "version": {"type": "integer", "minimum": 1}, "inputs": {"type": "object"}, "allow_execution": {"type": "boolean", "default": False}}, ["workflow_id", "project_root"]), "annotations": {"destructiveHint": True}},
+    {"name": "craft_workflow_continue", "description": "Continue a mixed workflow after granting execution approval.", "inputSchema": schema({"session_id": {"type": "string"}, "allow_execution": {"type": "boolean", "default": False}}, ["session_id"]), "annotations": {"destructiveHint": True}},
+    {"name": "craft_workflow_submit", "description": "Submit structured output for the pending agent, judge, or human node and advance the workflow.", "inputSchema": schema({"session_id": {"type": "string"}, "step_id": {"type": "string"}, "result": {"type": "object"}, "submitted_by": {"type": "string", "default": "host_agent"}, "allow_execution": {"type": "boolean", "default": False}}, ["session_id", "step_id", "result"]), "annotations": {"destructiveHint": True}},
+    {"name": "craft_workflow_session_get", "description": "Read mixed workflow state, pending work, provenance, and event history.", "inputSchema": schema({"session_id": {"type": "string"}}, ["session_id"]), "annotations": {"readOnlyHint": True}},
 ]
 
 
@@ -47,6 +51,7 @@ class McpServer:
                 "task_open", "task_list", "task_checkpoint", "feedback_record",
                 "workflow_save", "workflow_search", "workflow_get",
                 "workflow_plan", "workflow_run", "workflow_run_get",
+                "workflow_start", "workflow_continue", "workflow_submit", "workflow_session_get",
             )
         }
         self.handlers["craft_info"] = self.service.info

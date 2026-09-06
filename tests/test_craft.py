@@ -16,6 +16,7 @@ from craft_core.catalog import iter_skill_files, parse_skill, stable_id
 from craft_core.cli import main as cli_main
 from craft_core.installer import install_plugin, main as installer_main, mcp_config, resolved_python
 from craft_core.mcp import McpServer, main as mcp_main
+from craft_core.orchestrator import external_request, next_cursor, normalize_steps, normalize_submission
 from craft_core.paths import data_root, ensure_layout
 from craft_core.service import CraftService
 from craft_core.store import CraftStore
@@ -481,7 +482,7 @@ class StoreMigrationTests(unittest.TestCase):
                 sql = migrated.execute("SELECT sql FROM sqlite_master WHERE name='capabilities'").fetchone()["sql"]
                 version = migrated.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()["value"]
             self.assertNotIn("path TEXT NOT NULL UNIQUE", sql)
-            self.assertEqual(version, "4")
+            self.assertEqual(version, "5")
 
     def test_store_falls_back_when_fts5_is_unavailable(self) -> None:
         from craft_core.store import ClosingConnection
@@ -968,6 +969,136 @@ class WorkflowRuntimeTests(unittest.TestCase):
         ):
             with self.assertRaisesRegex(ValueError, "Unable to list untracked"):
                 _git_changed_lines(self.project, "main")
+
+    def test_mixed_agent_judge_human_and_command_workflow(self) -> None:
+        workflow = self.service.workflow_save(
+            "Mixed review", "Mix model, human, and program evidence",
+            [
+                {"id": "analyze", "type": "agent", "objective": "Inspect coverage", "tools": ["shell"], "output_schema": {"coverage": "number"}},
+                {"id": "judge", "type": "judge", "objective": "Judge evidence", "rubric": ["Coverage is complete"], "on_result": {"failed": "repair", "passed": "approve"}},
+                {"id": "repair", "type": "agent", "objective": "Repair tests", "next": "judge"},
+                {"id": "approve", "type": "human", "objective": "Approve execution"},
+                {"id": "write", "type": "command", "command": [sys.executable, "-c", "open('done.txt','w').write('ok')"]},
+                {"id": "verify", "type": "assertion", "evaluator": "file_exists", "path": "done.txt"},
+            ],
+            repair_policy={"max_transitions": 10},
+        )
+        session = self.service.workflow_start(workflow["id"], str(self.project))
+        self.assertEqual(session["status"], "awaiting_agent")
+        self.assertEqual(session["pending"]["step_id"], "analyze")
+        with self.assertRaisesRegex(ValueError, "cannot continue"):
+            self.service.workflow_continue(session["id"])
+        with self.assertRaisesRegex(ValueError, "awaiting step"):
+            self.service.workflow_submit(session["id"], "wrong", {})
+
+        session = self.service.workflow_submit(
+            session["id"], "analyze", {"output": {"coverage": 80}, "evidence": ["report"]}
+        )
+        self.assertEqual(session["status"], "awaiting_model_judge")
+        self.assertEqual(session["pending"]["context"]["analyze"]["output"]["coverage"], 80)
+        session = self.service.workflow_submit(
+            session["id"], "judge", {"verdict": "failed", "critique": "missing lines"},
+            submitted_by="review_model",
+        )
+        self.assertEqual(session["pending"]["step_id"], "repair")
+        session = self.service.workflow_submit(session["id"], "repair", {"output": "tests added"})
+        self.assertEqual(session["pending"]["step_id"], "judge")
+        session = self.service.workflow_submit(session["id"], "judge", {"verdict": "passed"})
+        self.assertEqual(session["status"], "awaiting_human")
+        with self.assertRaisesRegex(ValueError, "approved"):
+            self.service.workflow_submit(session["id"], "approve", {})
+        session = self.service.workflow_submit(session["id"], "approve", {"approved": True})
+        self.assertEqual(session["status"], "needs_execution_approval")
+        self.assertEqual(self.service.workflow_continue(session["id"])["status"], "needs_execution_approval")
+        session = self.service.workflow_continue(session["id"], allow_execution=True)
+        self.assertEqual(session["status"], "passed")
+        self.assertEqual(self.service._workflow_advance(session["id"], True)["status"], "passed")
+        self.assertEqual(len(session["events"]), 7)
+        self.assertEqual(session["events"][0]["provenance"], "agent_reported")
+        self.assertEqual(session["events"][1]["provenance"], "model_judged")
+        self.assertEqual(session["events"][4]["provenance"], "human_approved")
+        self.assertEqual(session["events"][5]["provenance"], "program_verified")
+        with self.assertRaisesRegex(ValueError, "cannot continue"):
+            self.service.workflow_continue(session["id"], allow_execution=True)
+        with self.assertRaisesRegex(ValueError, "not awaiting external"):
+            self.service.workflow_submit(session["id"], "verify", {"verdict": "passed"})
+
+    def test_mixed_workflow_terminal_and_validation_paths(self) -> None:
+        limited = self.service.workflow_save(
+            "Limited", "Stop loops",
+            [{"id": "again", "type": "agent", "on_result": {"passed": "again"}}],
+            repair_policy={"max_transitions": 1},
+        )
+        session = self.service.workflow_start(limited["id"], str(self.project))
+        session = self.service.workflow_submit(session["id"], "again", {})
+        self.assertEqual(session["status"], "transition_limit")
+
+        failed = self.service.workflow_save(
+            "Deterministic fail", "Fail without a transition",
+            [{"type": "assertion", "evaluator": "file_exists", "path": "missing"}],
+        )
+        failed_session = self.service.workflow_start(failed["id"], str(self.project))
+        self.assertEqual(failed_session["status"], "failed")
+        self.assertEqual(failed_session["events"][0]["provenance"], "program_verified")
+
+        rejected = self.service.workflow_save(
+            "Rejected", "Human rejects",
+            [{"id": "approval", "type": "human"}],
+        )
+        rejected_session = self.service.workflow_start(rejected["id"], str(self.project))
+        rejected_session = self.service.workflow_submit(
+            rejected_session["id"], "approval", {"approved": False}
+        )
+        self.assertEqual(rejected_session["status"], "failed")
+        self.assertEqual(rejected_session["events"][0]["provenance"], "human_rejected")
+
+        with self.assertRaisesRegex(ValueError, "Unknown workflow session"):
+            self.service.workflow_session_get("missing")
+        duplicate = self.service.workflow_save(
+            "Duplicate", "Duplicate ids",
+            [{"id": "same", "type": "agent"}, {"id": "same", "type": "judge"}],
+        )
+        with self.assertRaisesRegex(ValueError, "Duplicate workflow step"):
+            self.service.workflow_start(duplicate["id"], str(self.project))
+
+        mismatch = self.service.workflow_save(
+            "Mismatch", "Corrupted state", [{"id": "agent", "type": "agent"}]
+        )
+        mismatch_session = self.service.workflow_start(mismatch["id"], str(self.project))
+        with self.service.store.transaction() as db:
+            db.execute(
+                "UPDATE workflow_sessions SET status='awaiting_human' WHERE id=?",
+                (mismatch_session["id"],),
+            )
+        with self.assertRaisesRegex(ValueError, "does not match"):
+            self.service.workflow_submit(mismatch_session["id"], "agent", {})
+
+    def test_orchestrator_helpers(self) -> None:
+        steps = normalize_steps([{"type": "agent"}, {"id": "last", "type": "human"}])
+        self.assertEqual(steps[0]["id"], "step_1")
+        self.assertEqual(next_cursor(steps, 0, "passed"), (1, None))
+        self.assertEqual(next_cursor([{"id": "x", "next": "end"}], 0, "passed"), (1, "passed"))
+        self.assertEqual(next_cursor([{"id": "x", "next": "fail"}], 0, "passed"), (0, "failed"))
+        self.assertEqual(next_cursor([{"id": "x"}], 0, "unknown"), (0, "failed"))
+        with self.assertRaisesRegex(ValueError, "Unknown workflow transition"):
+            next_cursor([{"id": "x", "next": "missing"}], 0, "passed")
+        with self.assertRaisesRegex(ValueError, "Duplicate workflow step"):
+            normalize_steps([{"id": "x"}, {"id": "x"}])
+
+        request = external_request(
+            {"id": "j", "type": "judge", "objective": "Review", "rubric": ["good"]},
+            {"prior": {"output": 1}},
+        )
+        self.assertEqual(request["rubric"], ["good"])
+        self.assertEqual(request["tools"], [])
+        with self.assertRaisesRegex(ValueError, "not externally executed"):
+            external_request({"id": "x", "type": "command"}, {})
+        self.assertEqual(normalize_submission({"type": "agent"}, {})[0], "passed")
+        self.assertEqual(normalize_submission({"type": "judge"}, {"verdict": "unknown"})[1], "model_judged")
+        with self.assertRaisesRegex(ValueError, "verdict"):
+            normalize_submission({"type": "judge"}, {"verdict": "maybe"})
+        with self.assertRaisesRegex(ValueError, "approved"):
+            normalize_submission({"type": "human"}, {})
 
 
 class McpProcessTests(unittest.TestCase):

@@ -8,7 +8,7 @@ from typing import Iterator
 from .paths import ensure_layout
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 
 class ClosingConnection(sqlite3.Connection):
@@ -160,6 +160,35 @@ class CraftStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_workflow_attempts_run
                     ON workflow_attempts(run_id, attempt DESC);
+                CREATE TABLE IF NOT EXISTS workflow_sessions (
+                    id TEXT PRIMARY KEY,
+                    workflow_id TEXT NOT NULL,
+                    workflow_version INTEGER NOT NULL,
+                    project_root TEXT NOT NULL,
+                    inputs_json TEXT NOT NULL,
+                    context_json TEXT NOT NULL,
+                    cursor INTEGER NOT NULL DEFAULT 0,
+                    status TEXT NOT NULL,
+                    transition_count INTEGER NOT NULL DEFAULT 0,
+                    max_transitions INTEGER NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY(workflow_id, workflow_version)
+                        REFERENCES workflows(id, version)
+                );
+                CREATE TABLE IF NOT EXISTS workflow_events (
+                    session_id TEXT NOT NULL REFERENCES workflow_sessions(id),
+                    sequence INTEGER NOT NULL,
+                    step_id TEXT NOT NULL,
+                    step_type TEXT NOT NULL,
+                    verdict TEXT NOT NULL,
+                    provenance TEXT NOT NULL,
+                    result_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY(session_id, sequence)
+                );
+                CREATE INDEX IF NOT EXISTS idx_workflow_events_session
+                    ON workflow_events(session_id, sequence);
                 """
             )
             source_columns = {

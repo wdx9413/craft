@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .catalog import Catalog, utc_now
+from .orchestrator import EXTERNAL_STATES, TERMINALS, external_request, next_cursor, normalize_steps, normalize_submission
 from .store import CraftStore
 from .workflow_runtime import execute_steps, failure_signature, resolve_inputs, substitute
 
@@ -24,7 +25,10 @@ class CraftService:
         with self.store.connect() as db:
             counts = {
                 table: db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-                for table in ("sources", "capabilities", "tasks", "workflows", "workflow_runs")
+                for table in (
+                    "sources", "capabilities", "tasks", "workflows",
+                    "workflow_runs", "workflow_sessions",
+                )
             }
         return {"version": "0.1.0", "data_root": str(self.store.root), "counts": counts}
 
@@ -247,8 +251,8 @@ class CraftService:
         if any(not isinstance(item, dict) for item in criteria):
             raise ValueError("Executable workflows require structured success_criteria objects")
         planned = [*workflow.get("preconditions", []), *workflow["steps"], *criteria]
-        steps = substitute(planned, resolved)
-        supported = {"command", "coverage_gate", "assertion"}
+        steps = normalize_steps(substitute(planned, resolved))
+        supported = {"command", "coverage_gate", "assertion", "agent", "judge", "human"}
         for step in steps:
             if step.get("type") not in supported:
                 raise ValueError(f"Unsupported workflow step type: {step.get('type')}")
@@ -356,6 +360,175 @@ class CraftService:
         result["inputs"] = json.loads(result.pop("inputs_json"))
         result["attempts"] = [json.loads(row["result_json"]) for row in attempts]
         return result
+
+    def workflow_start(
+        self,
+        workflow_id: str,
+        project_root: str,
+        version: int | None = None,
+        inputs: dict[str, Any] | None = None,
+        allow_execution: bool = False,
+    ) -> dict[str, Any]:
+        plan = self.workflow_plan(workflow_id, project_root, version, inputs)
+        policy = plan["repair_policy"]
+        default_limit = max(20, len(plan["steps"]) * 3)
+        max_transitions = max(1, min(int(policy.get("max_transitions", default_limit)), 200))
+        session_id = new_id("session")
+        now = utc_now()
+        with self.store.transaction() as db:
+            db.execute(
+                """INSERT INTO workflow_sessions(
+                   id,workflow_id,workflow_version,project_root,inputs_json,context_json,
+                   cursor,status,max_transitions,created_at,updated_at)
+                   VALUES(?,?,?,?,?,'{}',0,'running',?,?,?)""",
+                (session_id, workflow_id, plan["workflow_version"], plan["project_root"],
+                 json.dumps(plan["inputs"], ensure_ascii=False), max_transitions, now, now),
+            )
+        return self._workflow_advance(session_id, allow_execution)
+
+    def workflow_continue(
+        self, session_id: str, allow_execution: bool = False
+    ) -> dict[str, Any]:
+        session = self.workflow_session_get(session_id)
+        if session["status"] not in {"running", "needs_execution_approval"}:
+            raise ValueError(f"Workflow session cannot continue from status: {session['status']}")
+        return self._workflow_advance(session_id, allow_execution)
+
+    def workflow_submit(
+        self,
+        session_id: str,
+        step_id: str,
+        result: dict[str, Any],
+        submitted_by: str = "host_agent",
+        allow_execution: bool = False,
+    ) -> dict[str, Any]:
+        session = self.workflow_session_get(session_id)
+        if session["status"] not in set(EXTERNAL_STATES.values()):
+            raise ValueError(f"Workflow session is not awaiting external input: {session['status']}")
+        plan = self.workflow_plan(
+            session["workflow_id"], session["project_root"], session["workflow_version"], session["inputs"]
+        )
+        step = plan["steps"][session["cursor"]]
+        if step["id"] != step_id:
+            raise ValueError(f"Workflow session is awaiting step: {step['id']}")
+        expected_state = EXTERNAL_STATES.get(str(step.get("type")))
+        if expected_state != session["status"]:
+            raise ValueError("Workflow session state does not match its pending step")
+        verdict, provenance = normalize_submission(step, result)
+        recorded = {**result, "submitted_by": submitted_by}
+        context = dict(session["context"])
+        context[step_id] = recorded
+        cursor, terminal = next_cursor(plan["steps"], session["cursor"], verdict)
+        self._record_session_event(
+            session, step, verdict, provenance, recorded, context, cursor, terminal or "running"
+        )
+        if terminal:
+            return self.workflow_session_get(session_id)
+        return self._workflow_advance(session_id, allow_execution)
+
+    def workflow_session_get(self, session_id: str) -> dict[str, Any]:
+        with self.store.connect() as db:
+            row = db.execute("SELECT * FROM workflow_sessions WHERE id=?", (session_id,)).fetchone()
+            if not row:
+                raise ValueError(f"Unknown workflow session: {session_id}")
+            events = db.execute(
+                "SELECT * FROM workflow_events WHERE session_id=? ORDER BY sequence", (session_id,)
+            ).fetchall()
+        result = dict(row)
+        result["inputs"] = json.loads(result.pop("inputs_json"))
+        result["context"] = json.loads(result.pop("context_json"))
+        result["events"] = [
+            {**dict(event), "result": json.loads(event["result_json"])} for event in events
+        ]
+        for event in result["events"]:
+            event.pop("result_json")
+        if result["status"] in {*EXTERNAL_STATES.values(), "needs_execution_approval"}:
+            plan = self.workflow_plan(
+                result["workflow_id"], result["project_root"], result["workflow_version"], result["inputs"]
+            )
+            step = plan["steps"][result["cursor"]]
+            result["pending"] = (
+                external_request(step, result["context"])
+                if step["type"] in EXTERNAL_STATES else step
+            )
+        return result
+
+    def _workflow_advance(self, session_id: str, allow_execution: bool) -> dict[str, Any]:
+        while True:
+            session = self.workflow_session_get(session_id)
+            if session["status"] in TERMINALS:
+                return session
+            plan = self.workflow_plan(
+                session["workflow_id"], session["project_root"], session["workflow_version"], session["inputs"]
+            )
+            if session["cursor"] >= len(plan["steps"]):
+                with self.store.transaction() as db:
+                    db.execute(
+                        "UPDATE workflow_sessions SET status='passed',updated_at=? WHERE id=?",
+                        (utc_now(), session_id),
+                    )
+                return self.workflow_session_get(session_id)
+            if session["transition_count"] >= session["max_transitions"]:
+                with self.store.transaction() as db:
+                    db.execute(
+                        "UPDATE workflow_sessions SET status='transition_limit',updated_at=? WHERE id=?",
+                        (utc_now(), session_id),
+                    )
+                return self.workflow_session_get(session_id)
+            step = plan["steps"][session["cursor"]]
+            kind = str(step.get("type"))
+            if kind in EXTERNAL_STATES:
+                with self.store.transaction() as db:
+                    db.execute(
+                        "UPDATE workflow_sessions SET status=?,updated_at=? WHERE id=?",
+                        (EXTERNAL_STATES[kind], utc_now(), session_id),
+                    )
+                return self.workflow_session_get(session_id)
+            if kind == "command" and not allow_execution:
+                with self.store.transaction() as db:
+                    db.execute(
+                        "UPDATE workflow_sessions SET status='needs_execution_approval',updated_at=? WHERE id=?",
+                        (utc_now(), session_id),
+                    )
+                return self.workflow_session_get(session_id)
+            detail = execute_steps([step], Path(session["project_root"]))[0]
+            verdict = "passed" if detail["passed"] else "failed"
+            context = dict(session["context"])
+            context[step["id"]] = detail
+            cursor, terminal = next_cursor(plan["steps"], session["cursor"], verdict)
+            self._record_session_event(
+                session, step, verdict, "program_verified", detail,
+                context, cursor, terminal or "running",
+            )
+            if terminal:
+                return self.workflow_session_get(session_id)
+
+    def _record_session_event(
+        self,
+        session: dict[str, Any],
+        step: dict[str, Any],
+        verdict: str,
+        provenance: str,
+        result: dict[str, Any],
+        context: dict[str, Any],
+        cursor: int,
+        status: str,
+    ) -> None:
+        sequence = session["transition_count"] + 1
+        now = utc_now()
+        with self.store.transaction() as db:
+            db.execute(
+                """INSERT INTO workflow_events(
+                   session_id,sequence,step_id,step_type,verdict,provenance,result_json,created_at)
+                   VALUES(?,?,?,?,?,?,?,?)""",
+                (session["id"], sequence, step["id"], step["type"], verdict, provenance,
+                 json.dumps(result, ensure_ascii=False), now),
+            )
+            db.execute(
+                """UPDATE workflow_sessions SET context_json=?,cursor=?,status=?,
+                   transition_count=?,updated_at=? WHERE id=?""",
+                (json.dumps(context, ensure_ascii=False), cursor, status, sequence, now, session["id"]),
+            )
 
     def workflow_search(
         self,
