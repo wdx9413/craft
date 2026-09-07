@@ -44,7 +44,7 @@ test("MCP negotiates protocols, lists tools, dispatches every handler, and repor
       craft_artifact_register: { kind: "file", name: "a", uri: "file:///a", artifact_id: "artifact_a" },
       craft_evidence_record: { source_type: "test", claim: "ok", evidence_id: "evidence_a" },
       craft_workflow_save: { name: "W", workflow_id: "workflow_a" },
-      craft_eval_suite_save: { name: "E", suite_id: "suite_a" },
+      craft_eval_suite_save: { name: "E", suite_id: "suite_a", cases: [{ case_id: "held", split: "held_out" }] },
       craft_agent_profile_save: { name: "A", role: "worker", host: "codex", model: "m", profile_id: "profile_a" },
       craft_artifact_get: { artifact_id: "artifact_a" }, craft_evidence_get: { evidence_id: "evidence_a" },
       craft_workflow_get: { workflow_id: "workflow_a" }, craft_eval_suite_get: { suite_id: "suite_a" },
@@ -94,6 +94,34 @@ test("MCP negotiates protocols, lists tools, dispatches every handler, and repor
       name: "craft_task_list", arguments: {} } });
     const taskId = String(((((listed?.result as Record<string, unknown>).structuredContent as Record<string, unknown>)
       .tasks as Record<string, unknown>[])[0]).id);
+    const call = async (name: string, arguments_: Record<string, unknown>): Promise<Record<string, unknown>> => {
+      const response = await server.handle({ id: name, method: "tools/call", params: { name, arguments: arguments_ } });
+      assert.equal((response?.result as Record<string, unknown>).isError, false, name);
+      return (response?.result as Record<string, unknown>).structuredContent as Record<string, unknown>;
+    };
+    const harness = await call("craft_harness_configuration_save", { name: "H", dimensions: {} });
+    await call("craft_harness_configuration_get", { configuration_id: harness.id });
+    await call("craft_harness_configuration_list", {});
+    const candidate = await call("craft_workflow_transition", {
+      workflow_id: "workflow_a", target: "candidate", reason: "evaluate",
+    });
+    const trial = await call("craft_trial_start", { trial_id: "trial_mcp", task_id: taskId, case_id: "held",
+      subject_type: "workflow", subject_id: "workflow_a", subject_version: candidate.version,
+      harness_configuration_id: harness.id });
+    await call("craft_trial_trace_append", { trial_id: trial.id, event_type: "completed", data: { ok: true } });
+    await call("craft_outcome_record", { trial_id: trial.id, verdict: "passed", summary: "ok" });
+    await call("craft_trial_get", { trial_id: trial.id });
+    await call("craft_trial_list", {});
+    const evaluation = await call("craft_evaluation_run_record", { run_id: "eval_mcp", suite_id: "suite_a",
+      split: "held_out", subject_type: "workflow", subject_id: "workflow_a",
+      subject_version: candidate.version, trial_ids: [trial.id] });
+    await call("craft_evaluation_run_get", { run_id: evaluation.id });
+    await call("craft_evaluation_run_list", {});
+    const verified = await call("craft_workflow_transition", { workflow_id: "workflow_a", target: "verified",
+      reason: "passed", evaluation_run_id: evaluation.id });
+    await call("craft_workflow_transition", { workflow_id: "workflow_a", target: "deprecated", reason: "replace" });
+    await call("craft_workflow_rollback", { workflow_id: "workflow_a", target_version: verified.version,
+      reason: "restore" });
     for (const [name, arguments_] of Object.entries({
       craft_task_checkpoint: { task_id: taskId, summary: "checkpoint" },
       craft_feedback_record: { task_id: taskId, corrected: "correction" },

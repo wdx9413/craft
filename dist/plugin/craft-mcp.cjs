@@ -7498,6 +7498,13 @@ var CraftStore = class {
   save(kind, id2, payload, version) {
     return this.transaction((database) => this.insert(database, { kind, id: id2, payload, version }));
   }
+  create(kind, id2, payload) {
+    return this.transaction((database) => {
+      const existing = database.prepare("SELECT 1 present FROM records WHERE kind=? AND id=? LIMIT 1").get(kind, id2);
+      if (existing) throw new Error(`${kind} already exists: ${id2}`);
+      return this.insert(database, { kind, id: id2, payload, version: 1 });
+    });
+  }
   saveBatch(entries) {
     if (!entries.length) return [];
     return this.transaction((database) => entries.map((entry) => this.insert(database, entry)));
@@ -7526,14 +7533,18 @@ var CraftStore = class {
     }
     return { ...payload, id: id2, version: next, created_at: now, updated_at: now };
   }
-  get(kind, id2, version) {
+  find(kind, id2, version) {
     const row = version === void 0 ? this.database.prepare(
       "SELECT * FROM records WHERE kind=? AND id=? ORDER BY version DESC LIMIT 1"
     ).get(kind, id2) : this.database.prepare(
       "SELECT * FROM records WHERE kind=? AND id=? AND version=?"
     ).get(kind, id2, version);
-    if (!row) throw new Error(`Unknown ${kind}: ${id2}`);
-    return this.record(row);
+    return row ? this.record(row) : null;
+  }
+  get(kind, id2, version) {
+    const record = this.find(kind, id2, version);
+    if (!record) throw new Error(`Unknown ${kind}: ${id2}`);
+    return record;
   }
   list(kind, limit = 20, predicate) {
     const bounded = validLimit(limit);
@@ -8111,9 +8122,13 @@ function submitNode(nodes, leaseId, verdict, provenance) {
 }
 
 // src/service.ts
-var VERSION = "0.2.1";
+var VERSION = "0.3.0";
 var CONFIDENCE = /* @__PURE__ */ new Set(["confirmed", "bounded", "unverified", "rejected"]);
 var TASK_STATUS = /* @__PURE__ */ new Set(["active", "paused", "completed", "cancelled"]);
+var WORKFLOW_LIFECYCLE = /* @__PURE__ */ new Set(["draft", "candidate", "verified", "deprecated"]);
+var TRIAL_VERDICTS = /* @__PURE__ */ new Set(["passed", "failed", "blocked", "cancelled"]);
+var EVAL_SPLITS = /* @__PURE__ */ new Set(["search", "development", "held_out"]);
+var HARNESS_DIMENSIONS = /* @__PURE__ */ new Set(["context", "tools", "generation", "orchestration", "memory", "output"]);
 function id(prefix) {
   return `${prefix}_${(0, import_node_crypto3.randomUUID)().replaceAll("-", "")}`;
 }
@@ -8137,6 +8152,14 @@ function array(value, name) {
   if (!Array.isArray(value)) throw new Error(`${name} must be an array`);
   return value;
 }
+function object(value, name) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${name} must be an object`);
+  return value;
+}
+function recordPayload(record) {
+  const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...payload } = record;
+  return payload;
+}
 var CraftService = class {
   store;
   catalog;
@@ -8154,11 +8177,14 @@ var CraftService = class {
       "artifact",
       "evidence",
       "workflow",
+      "workflow_run",
       "evaluation_suite",
       "evaluation_run",
-      "evaluation_result",
       "agent_profile",
       "orchestration_plan",
+      "harness_configuration",
+      "trial",
+      "outcome",
       "budget",
       "model_provider",
       "agent_session"
@@ -8307,6 +8333,181 @@ var CraftService = class {
     const version = args.version === void 0 ? void 0 : finiteInteger(args.version, "version", 1);
     return this.store.get(kind, text(args[idKey], idKey), version);
   }
+  harnessConfigurationSave(args) {
+    const dimensions = object(args.dimensions, "dimensions");
+    for (const key of Object.keys(dimensions)) {
+      if (!HARNESS_DIMENSIONS.has(key)) throw new Error(`Unsupported harness dimension: ${key}`);
+      object(dimensions[key], `dimensions.${key}`);
+    }
+    return this.saveVersioned("harness_configuration", "configuration", {
+      ...args,
+      name: text(args.name, "name"),
+      dimensions
+    }, ["name"]);
+  }
+  evaluationSuiteSave(args) {
+    const cases = array(args.cases ?? [], "cases").map((value, index) => {
+      const item = object(value, `cases[${index}]`);
+      const caseId = text(item.case_id, `cases[${index}].case_id`);
+      const split = String(item.split ?? "development");
+      if (!EVAL_SPLITS.has(split)) throw new Error(`Unsupported evaluation split: ${split}`);
+      return { ...item, case_id: caseId, split };
+    });
+    if (new Set(cases.map((item) => item.case_id)).size !== cases.length) {
+      throw new Error("Evaluation case_id values must be unique");
+    }
+    return this.saveVersioned("evaluation_suite", "suite", { ...args, cases }, ["name"]);
+  }
+  trialStart(args) {
+    const taskId = text(args.task_id, "task_id");
+    this.store.get("task", taskId);
+    const subjectType = text(args.subject_type, "subject_type");
+    const subjectId = text(args.subject_id, "subject_id");
+    const subjectVersion = finiteInteger(args.subject_version, "subject_version", 1);
+    this.store.get(subjectType, subjectId, subjectVersion);
+    let harness;
+    if (args.harness_configuration_id !== void 0) {
+      harness = this.store.get("harness_configuration", text(
+        args.harness_configuration_id,
+        "harness_configuration_id"
+      ), args.harness_configuration_version === void 0 ? void 0 : finiteInteger(args.harness_configuration_version, "harness_configuration_version", 1));
+    }
+    return this.store.create("trial", String(args.trial_id ?? id("trial")), {
+      task_id: taskId,
+      case_id: args.case_id === void 0 ? null : text(args.case_id, "case_id"),
+      subject_type: subjectType,
+      subject_id: subjectId,
+      subject_version: subjectVersion,
+      harness_configuration_id: harness?.id ?? null,
+      harness_configuration_version: harness?.version ?? null,
+      environment: object(args.environment ?? {}, "environment"),
+      budget: object(args.budget ?? {}, "budget"),
+      status: "started"
+    });
+  }
+  trialTraceAppend(args) {
+    const trialId = text(args.trial_id, "trial_id");
+    this.store.get("trial", trialId);
+    const artifactIds = array(args.artifact_ids ?? [], "artifact_ids").map((value) => text(value, "artifact_id"));
+    const evidenceIds = array(args.evidence_ids ?? [], "evidence_ids").map((value) => text(value, "evidence_id"));
+    for (const artifactId of artifactIds) this.store.get("artifact", artifactId);
+    for (const evidenceId of evidenceIds) this.store.get("evidence", evidenceId);
+    return this.store.appendEvent(`trial:${trialId}`, text(args.event_type, "event_type"), {
+      trial_id: trialId,
+      source: args.source ?? "agent_reported",
+      data: object(args.data ?? {}, "data"),
+      artifact_ids: artifactIds,
+      evidence_ids: evidenceIds
+    });
+  }
+  outcomeRecord(args) {
+    const trialId = text(args.trial_id, "trial_id");
+    this.store.get("trial", trialId);
+    const verdict = String(args.verdict);
+    if (!TRIAL_VERDICTS.has(verdict)) throw new Error(`Unsupported trial verdict: ${verdict}`);
+    const evidenceIds = array(args.evidence_ids ?? [], "evidence_ids").map((value) => text(value, "evidence_id"));
+    for (const evidenceId of evidenceIds) this.store.get("evidence", evidenceId);
+    return this.store.create("outcome", `outcome_${trialId}`, {
+      trial_id: trialId,
+      verdict,
+      summary: text(args.summary, "summary"),
+      scores: object(args.scores ?? {}, "scores"),
+      costs: object(args.costs ?? {}, "costs"),
+      evidence_ids: evidenceIds,
+      source: args.source ?? "program_verified"
+    });
+  }
+  trialGet(args) {
+    const trialId = text(args.trial_id, "trial_id");
+    const trial = this.store.get("trial", trialId);
+    const outcome = this.store.find("outcome", `outcome_${trialId}`);
+    return { trial, trace: this.store.events(`trial:${trialId}`), outcome };
+  }
+  evaluationRunRecord(args) {
+    const suite = this.store.get(
+      "evaluation_suite",
+      text(args.suite_id, "suite_id"),
+      args.suite_version === void 0 ? void 0 : finiteInteger(args.suite_version, "suite_version", 1)
+    );
+    const split = String(args.split);
+    if (!EVAL_SPLITS.has(split)) throw new Error(`Unsupported evaluation split: ${split}`);
+    const subjectType = text(args.subject_type, "subject_type");
+    const subjectId = text(args.subject_id, "subject_id");
+    const subjectVersion = finiteInteger(args.subject_version, "subject_version", 1);
+    this.store.get(subjectType, subjectId, subjectVersion);
+    const trialIds = array(args.trial_ids, "trial_ids").map((value) => text(value, "trial_id"));
+    if (!trialIds.length || new Set(trialIds).size !== trialIds.length) {
+      throw new Error("trial_ids must contain unique trials");
+    }
+    const cases = array(suite.cases ?? [], "suite cases");
+    const allowedCases = new Set(cases.filter((item) => item.split === split).map((item) => String(item.case_id)));
+    const outcomes = trialIds.map((trialId) => {
+      const trial = this.store.get("trial", trialId);
+      if (trial.subject_type !== subjectType || trial.subject_id !== subjectId || Number(trial.subject_version) !== subjectVersion) throw new Error(`Trial subject mismatch: ${trialId}`);
+      if (!trial.case_id || !allowedCases.has(String(trial.case_id))) {
+        throw new Error(`Trial case is not in the ${split} suite partition: ${trialId}`);
+      }
+      const outcome = this.store.find("outcome", `outcome_${trialId}`);
+      if (!outcome) throw new Error(`Trial has no outcome: ${trialId}`);
+      return outcome;
+    });
+    const verdict = outcomes.every((outcome) => outcome.verdict === "passed") ? "passed" : "failed";
+    return this.store.create("evaluation_run", String(args.run_id ?? id("evalrun")), {
+      suite_id: suite.id,
+      suite_version: suite.version,
+      split,
+      subject_type: subjectType,
+      subject_id: subjectId,
+      subject_version: subjectVersion,
+      trial_ids: trialIds,
+      verdict,
+      metrics: object(args.metrics ?? {}, "metrics")
+    });
+  }
+  workflowSave(args) {
+    return this.saveVersioned("workflow", "workflow", { ...args, lifecycle: "draft" }, ["name"]);
+  }
+  workflowTransition(args) {
+    const workflow = this.store.get("workflow", text(args.workflow_id, "workflow_id"));
+    const current = String(workflow.lifecycle ?? "draft");
+    const target = text(args.target, "target");
+    if (!WORKFLOW_LIFECYCLE.has(target)) throw new Error(`Unsupported workflow lifecycle: ${target}`);
+    const allowed = {
+      draft: ["candidate", "deprecated"],
+      candidate: ["verified", "deprecated"],
+      verified: ["deprecated"],
+      deprecated: []
+    };
+    if (!allowed[current]?.includes(target)) throw new Error(`Invalid workflow transition: ${current} -> ${target}`);
+    let evaluationRunId = null;
+    if (target === "verified") {
+      evaluationRunId = text(args.evaluation_run_id, "evaluation_run_id");
+      const run = this.store.get("evaluation_run", evaluationRunId);
+      if (run.verdict !== "passed" || run.split !== "held_out" || run.subject_type !== "workflow" || run.subject_id !== workflow.id || Number(run.subject_version) !== Number(workflow.version)) {
+        throw new Error("Verification requires a passed held-out evaluation for this exact workflow version");
+      }
+    }
+    return this.store.save("workflow", String(workflow.id), {
+      ...recordPayload(workflow),
+      lifecycle: target,
+      previous_version: workflow.version,
+      transition_reason: text(args.reason, "reason"),
+      evaluation_run_id: evaluationRunId
+    });
+  }
+  workflowRollback(args) {
+    const workflowId = text(args.workflow_id, "workflow_id");
+    const current = this.store.get("workflow", workflowId);
+    const target = this.store.get("workflow", workflowId, finiteInteger(args.target_version, "target_version", 1));
+    if (target.lifecycle !== "verified") throw new Error("Rollback target must be a verified workflow version");
+    return this.store.save("workflow", workflowId, {
+      ...recordPayload(target),
+      lifecycle: "verified",
+      rollback_from_version: current.version,
+      rollback_to_version: target.version,
+      rollback_reason: text(args.reason, "reason")
+    });
+  }
   workflowPlan(args) {
     const workflow = this.get("workflow", "workflow_id", args);
     const definitions = array(workflow.inputs ?? [], "workflow inputs");
@@ -8398,8 +8599,30 @@ var CraftService = class {
 // src/mcp.ts
 var schemaFor = (name) => {
   if (["scan", "enabled", "allow_execution"].includes(name)) return { type: "boolean" };
-  if (["limit", "version", "capacity", "max_concurrency", "size_bytes"].includes(name)) return { type: "integer" };
-  if (["inputs", "metadata", "policy"].includes(name)) return { type: "object" };
+  if ([
+    "limit",
+    "version",
+    "capacity",
+    "max_concurrency",
+    "size_bytes",
+    "subject_version",
+    "suite_version",
+    "configuration_version",
+    "harness_configuration_version",
+    "target_version"
+  ].includes(name)) return { type: "integer" };
+  if ([
+    "inputs",
+    "metadata",
+    "policy",
+    "dimensions",
+    "environment",
+    "budget",
+    "data",
+    "scores",
+    "costs",
+    "metrics"
+  ].includes(name)) return { type: "object" };
   if ([
     "completed",
     "pending",
@@ -8410,7 +8633,10 @@ var schemaFor = (name) => {
     "capabilities",
     "allowed_side_effects",
     "approved_side_effects",
-    "nodes"
+    "nodes",
+    "artifact_ids",
+    "evidence_ids",
+    "trial_ids"
   ].includes(name)) return { type: "array" };
   return { type: "string" };
 };
@@ -8445,15 +8671,74 @@ var TOOLS = [
   tool("craft_evidence_record", "Record a claim with source and confidence.", ["source_type", "claim"], false, ["evidence_id", "confidence", "artifact_id", "locator", "observed_at", "metadata"]),
   tool("craft_evidence_get", "Read an evidence record.", ["evidence_id"], true),
   tool("craft_evidence_list", "List evidence records.", [], true, ["limit", "query"]),
-  tool("craft_workflow_save", "Save an immutable workflow version.", ["name"], false, ["workflow_id", "inputs", "steps", "description"]),
+  tool("craft_workflow_save", "Save a new draft workflow version.", ["name"], false, ["workflow_id", "inputs", "steps", "description"]),
   tool("craft_workflow_get", "Read a workflow version.", ["workflow_id"], true, ["version"]),
   tool("craft_workflow_search", "Search reusable workflows.", [], true, ["limit", "query"]),
   tool("craft_workflow_plan", "Resolve inputs and side-effect approvals without executing.", ["workflow_id"], true, ["version", "inputs", "allow_execution", "approved_side_effects"]),
   tool("craft_workflow_run", "Execute deterministic Workflow steps with explicit side-effect approval.", ["workflow_id", "project_root"], false, ["version", "inputs", "allow_execution", "approved_side_effects"]),
   tool("craft_workflow_run_get", "Read a durable Workflow execution receipt.", ["run_id"], true),
+  tool(
+    "craft_workflow_transition",
+    "Move a workflow through draft, candidate, verified, or deprecated with evidence gates.",
+    ["workflow_id", "target", "reason"],
+    false,
+    ["evaluation_run_id"]
+  ),
+  tool(
+    "craft_workflow_rollback",
+    "Restore a previously verified workflow version as the latest version.",
+    ["workflow_id", "target_version", "reason"]
+  ),
   tool("craft_eval_suite_save", "Save an immutable evaluation suite.", ["name"], false, ["suite_id", "cases", "description", "scope"]),
   tool("craft_eval_suite_get", "Read an evaluation suite.", ["suite_id"], true, ["version"]),
   tool("craft_eval_suite_list", "Search evaluation suites.", [], true, ["limit", "query"]),
+  tool(
+    "craft_harness_configuration_save",
+    "Save a versioned six-dimensional harness configuration.",
+    ["name", "dimensions"],
+    false,
+    ["configuration_id", "description"]
+  ),
+  tool(
+    "craft_harness_configuration_get",
+    "Read a harness configuration version.",
+    ["configuration_id"],
+    true,
+    ["version"]
+  ),
+  tool("craft_harness_configuration_list", "List harness configurations.", [], true, ["limit", "query"]),
+  tool(
+    "craft_trial_start",
+    "Create an immutable execution trial linked to a task and exact subject version.",
+    ["task_id", "subject_type", "subject_id", "subject_version"],
+    false,
+    ["trial_id", "case_id", "harness_configuration_id", "harness_configuration_version", "environment", "budget"]
+  ),
+  tool(
+    "craft_trial_trace_append",
+    "Append an immutable trace event to a trial.",
+    ["trial_id", "event_type"],
+    false,
+    ["source", "data", "artifact_ids", "evidence_ids"]
+  ),
+  tool("craft_trial_get", "Read a trial with its trace and outcome.", ["trial_id"], true),
+  tool("craft_trial_list", "List immutable trials.", [], true, ["limit", "query"]),
+  tool(
+    "craft_outcome_record",
+    "Record the single immutable outcome for a trial.",
+    ["trial_id", "verdict", "summary"],
+    false,
+    ["scores", "costs", "evidence_ids", "source"]
+  ),
+  tool(
+    "craft_evaluation_run_record",
+    "Record a reproducible evaluation from completed trials in one suite partition.",
+    ["suite_id", "split", "subject_type", "subject_id", "subject_version", "trial_ids"],
+    false,
+    ["run_id", "suite_version", "metrics"]
+  ),
+  tool("craft_evaluation_run_get", "Read an immutable evaluation run.", ["run_id"], true),
+  tool("craft_evaluation_run_list", "List evaluation runs.", [], true, ["limit", "query"]),
   tool("craft_agent_profile_save", "Save a versioned cross-host agent profile.", ["name", "role", "host", "model"], false, ["profile_id", "provider", "reasoning_effort", "capabilities", "allowed_side_effects", "metadata"]),
   tool("craft_agent_profile_get", "Read an agent profile.", ["profile_id"], true, ["version"]),
   tool("craft_agent_profile_list", "List agent profiles.", [], true, ["limit", "query"]),
@@ -8487,15 +8772,28 @@ var McpServer = class {
       craft_evidence_record: (a) => service.evidenceRecord(a),
       craft_evidence_get: (a) => service.get("evidence", "evidence_id", a),
       craft_evidence_list: (a) => service.list("evidence", "evidence", a),
-      craft_workflow_save: (a) => service.saveVersioned("workflow", "workflow", a, ["name"]),
+      craft_workflow_save: (a) => service.workflowSave(a),
       craft_workflow_get: (a) => service.get("workflow", "workflow_id", a),
       craft_workflow_search: (a) => service.list("workflow", "workflows", a),
       craft_workflow_plan: (a) => service.workflowPlan(a),
       craft_workflow_run: (a) => service.workflowRun(a),
       craft_workflow_run_get: (a) => service.get("workflow_run", "run_id", a),
-      craft_eval_suite_save: (a) => service.saveVersioned("evaluation_suite", "suite", a, ["name"]),
+      craft_workflow_transition: (a) => service.workflowTransition(a),
+      craft_workflow_rollback: (a) => service.workflowRollback(a),
+      craft_eval_suite_save: (a) => service.evaluationSuiteSave(a),
       craft_eval_suite_get: (a) => service.get("evaluation_suite", "suite_id", a),
       craft_eval_suite_list: (a) => service.list("evaluation_suite", "suites", a),
+      craft_harness_configuration_save: (a) => service.harnessConfigurationSave(a),
+      craft_harness_configuration_get: (a) => service.get("harness_configuration", "configuration_id", a),
+      craft_harness_configuration_list: (a) => service.list("harness_configuration", "configurations", a),
+      craft_trial_start: (a) => service.trialStart(a),
+      craft_trial_trace_append: (a) => service.trialTraceAppend(a),
+      craft_trial_get: (a) => service.trialGet(a),
+      craft_trial_list: (a) => service.list("trial", "trials", a),
+      craft_outcome_record: (a) => service.outcomeRecord(a),
+      craft_evaluation_run_record: (a) => service.evaluationRunRecord(a),
+      craft_evaluation_run_get: (a) => service.get("evaluation_run", "run_id", a),
+      craft_evaluation_run_list: (a) => service.list("evaluation_run", "runs", a),
       craft_agent_profile_save: (a) => service.saveVersioned(
         "agent_profile",
         "profile",

@@ -101,6 +101,15 @@ export class CraftStore {
     return this.transaction((database) => this.insert(database, { kind, id, payload, version }));
   }
 
+  create(kind: string, id: string, payload: JsonObject): JsonObject {
+    return this.transaction((database) => {
+      const existing = database.prepare("SELECT 1 present FROM records WHERE kind=? AND id=? LIMIT 1")
+        .get(kind, id);
+      if (existing) throw new Error(`${kind} already exists: ${id}`);
+      return this.insert(database, { kind, id, payload, version: 1 });
+    });
+  }
+
   saveBatch(entries: SaveEntry[]): JsonObject[] {
     if (!entries.length) return [];
     return this.transaction((database) => entries.map((entry) => this.insert(database, entry)));
@@ -134,7 +143,7 @@ export class CraftStore {
       return { ...payload, id, version: next, created_at: now, updated_at: now };
   }
 
-  get(kind: string, id: string, version?: number): JsonObject {
+  find(kind: string, id: string, version?: number): JsonObject | null {
     const row = version === undefined
       ? this.database.prepare(
         "SELECT * FROM records WHERE kind=? AND id=? ORDER BY version DESC LIMIT 1",
@@ -142,8 +151,13 @@ export class CraftStore {
       : this.database.prepare(
         "SELECT * FROM records WHERE kind=? AND id=? AND version=?",
       ).get(kind, id, version);
-    if (!row) throw new Error(`Unknown ${kind}: ${id}`);
-    return this.record(row as Record<string, unknown>);
+    return row ? this.record(row as Record<string, unknown>) : null;
+  }
+
+  get(kind: string, id: string, version?: number): JsonObject {
+    const record = this.find(kind, id, version);
+    if (!record) throw new Error(`Unknown ${kind}: ${id}`);
+    return record;
   }
 
   list(kind: string, limit = 20, predicate?: (record: JsonObject) => boolean): JsonObject[] {

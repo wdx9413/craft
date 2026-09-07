@@ -1,7 +1,7 @@
 {
   "name": "craft",
-  "version": "0.2.1",
-  "description": "Capability discovery, durable tasks, verified workflows, evidence, and host-mediated multi-agent orchestration.",
+  "version": "0.3.0",
+  "description": "Capability discovery, durable tasks, immutable execution trials, evaluation signoff, and verified workflows.",
   "skills": "./skills/",
   "mcpServers": {
     "craft": {

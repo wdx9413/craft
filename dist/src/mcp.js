@@ -3,12 +3,15 @@ import {} from "./store.js";
 const schemaFor = (name) => {
     if (["scan", "enabled", "allow_execution"].includes(name))
         return { type: "boolean" };
-    if (["limit", "version", "capacity", "max_concurrency", "size_bytes"].includes(name))
+    if (["limit", "version", "capacity", "max_concurrency", "size_bytes", "subject_version",
+        "suite_version", "configuration_version", "harness_configuration_version", "target_version"].includes(name))
         return { type: "integer" };
-    if (["inputs", "metadata", "policy"].includes(name))
+    if (["inputs", "metadata", "policy", "dimensions", "environment", "budget", "data", "scores",
+        "costs", "metrics"].includes(name))
         return { type: "object" };
     if (["completed", "pending", "decisions", "artifacts", "steps", "cases", "capabilities",
-        "allowed_side_effects", "approved_side_effects", "nodes"].includes(name))
+        "allowed_side_effects", "approved_side_effects", "nodes", "artifact_ids", "evidence_ids",
+        "trial_ids"].includes(name))
         return { type: "array" };
     return { type: "string" };
 };
@@ -37,15 +40,28 @@ export const TOOLS = [
     tool("craft_evidence_record", "Record a claim with source and confidence.", ["source_type", "claim"], false, ["evidence_id", "confidence", "artifact_id", "locator", "observed_at", "metadata"]),
     tool("craft_evidence_get", "Read an evidence record.", ["evidence_id"], true),
     tool("craft_evidence_list", "List evidence records.", [], true, ["limit", "query"]),
-    tool("craft_workflow_save", "Save an immutable workflow version.", ["name"], false, ["workflow_id", "inputs", "steps", "description"]),
+    tool("craft_workflow_save", "Save a new draft workflow version.", ["name"], false, ["workflow_id", "inputs", "steps", "description"]),
     tool("craft_workflow_get", "Read a workflow version.", ["workflow_id"], true, ["version"]),
     tool("craft_workflow_search", "Search reusable workflows.", [], true, ["limit", "query"]),
     tool("craft_workflow_plan", "Resolve inputs and side-effect approvals without executing.", ["workflow_id"], true, ["version", "inputs", "allow_execution", "approved_side_effects"]),
     tool("craft_workflow_run", "Execute deterministic Workflow steps with explicit side-effect approval.", ["workflow_id", "project_root"], false, ["version", "inputs", "allow_execution", "approved_side_effects"]),
     tool("craft_workflow_run_get", "Read a durable Workflow execution receipt.", ["run_id"], true),
+    tool("craft_workflow_transition", "Move a workflow through draft, candidate, verified, or deprecated with evidence gates.", ["workflow_id", "target", "reason"], false, ["evaluation_run_id"]),
+    tool("craft_workflow_rollback", "Restore a previously verified workflow version as the latest version.", ["workflow_id", "target_version", "reason"]),
     tool("craft_eval_suite_save", "Save an immutable evaluation suite.", ["name"], false, ["suite_id", "cases", "description", "scope"]),
     tool("craft_eval_suite_get", "Read an evaluation suite.", ["suite_id"], true, ["version"]),
     tool("craft_eval_suite_list", "Search evaluation suites.", [], true, ["limit", "query"]),
+    tool("craft_harness_configuration_save", "Save a versioned six-dimensional harness configuration.", ["name", "dimensions"], false, ["configuration_id", "description"]),
+    tool("craft_harness_configuration_get", "Read a harness configuration version.", ["configuration_id"], true, ["version"]),
+    tool("craft_harness_configuration_list", "List harness configurations.", [], true, ["limit", "query"]),
+    tool("craft_trial_start", "Create an immutable execution trial linked to a task and exact subject version.", ["task_id", "subject_type", "subject_id", "subject_version"], false, ["trial_id", "case_id", "harness_configuration_id", "harness_configuration_version", "environment", "budget"]),
+    tool("craft_trial_trace_append", "Append an immutable trace event to a trial.", ["trial_id", "event_type"], false, ["source", "data", "artifact_ids", "evidence_ids"]),
+    tool("craft_trial_get", "Read a trial with its trace and outcome.", ["trial_id"], true),
+    tool("craft_trial_list", "List immutable trials.", [], true, ["limit", "query"]),
+    tool("craft_outcome_record", "Record the single immutable outcome for a trial.", ["trial_id", "verdict", "summary"], false, ["scores", "costs", "evidence_ids", "source"]),
+    tool("craft_evaluation_run_record", "Record a reproducible evaluation from completed trials in one suite partition.", ["suite_id", "split", "subject_type", "subject_id", "subject_version", "trial_ids"], false, ["run_id", "suite_version", "metrics"]),
+    tool("craft_evaluation_run_get", "Read an immutable evaluation run.", ["run_id"], true),
+    tool("craft_evaluation_run_list", "List evaluation runs.", [], true, ["limit", "query"]),
     tool("craft_agent_profile_save", "Save a versioned cross-host agent profile.", ["name", "role", "host", "model"], false, ["profile_id", "provider", "reasoning_effort", "capabilities", "allowed_side_effects", "metadata"]),
     tool("craft_agent_profile_get", "Read an agent profile.", ["profile_id"], true, ["version"]),
     tool("craft_agent_profile_list", "List agent profiles.", [], true, ["limit", "query"]),
@@ -73,14 +89,27 @@ export class McpServer {
             craft_evidence_record: (a) => service.evidenceRecord(a),
             craft_evidence_get: (a) => service.get("evidence", "evidence_id", a),
             craft_evidence_list: (a) => service.list("evidence", "evidence", a),
-            craft_workflow_save: (a) => service.saveVersioned("workflow", "workflow", a, ["name"]),
+            craft_workflow_save: (a) => service.workflowSave(a),
             craft_workflow_get: (a) => service.get("workflow", "workflow_id", a),
             craft_workflow_search: (a) => service.list("workflow", "workflows", a),
             craft_workflow_plan: (a) => service.workflowPlan(a), craft_workflow_run: (a) => service.workflowRun(a),
             craft_workflow_run_get: (a) => service.get("workflow_run", "run_id", a),
-            craft_eval_suite_save: (a) => service.saveVersioned("evaluation_suite", "suite", a, ["name"]),
+            craft_workflow_transition: (a) => service.workflowTransition(a),
+            craft_workflow_rollback: (a) => service.workflowRollback(a),
+            craft_eval_suite_save: (a) => service.evaluationSuiteSave(a),
             craft_eval_suite_get: (a) => service.get("evaluation_suite", "suite_id", a),
             craft_eval_suite_list: (a) => service.list("evaluation_suite", "suites", a),
+            craft_harness_configuration_save: (a) => service.harnessConfigurationSave(a),
+            craft_harness_configuration_get: (a) => service.get("harness_configuration", "configuration_id", a),
+            craft_harness_configuration_list: (a) => service.list("harness_configuration", "configurations", a),
+            craft_trial_start: (a) => service.trialStart(a),
+            craft_trial_trace_append: (a) => service.trialTraceAppend(a),
+            craft_trial_get: (a) => service.trialGet(a),
+            craft_trial_list: (a) => service.list("trial", "trials", a),
+            craft_outcome_record: (a) => service.outcomeRecord(a),
+            craft_evaluation_run_record: (a) => service.evaluationRunRecord(a),
+            craft_evaluation_run_get: (a) => service.get("evaluation_run", "run_id", a),
+            craft_evaluation_run_list: (a) => service.list("evaluation_run", "runs", a),
             craft_agent_profile_save: (a) => service.saveVersioned("agent_profile", "profile", a, ["name", "role", "host", "model"]),
             craft_agent_profile_get: (a) => service.get("agent_profile", "profile_id", a),
             craft_agent_profile_list: (a) => service.list("agent_profile", "profiles", a),

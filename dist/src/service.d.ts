@@ -1,6 +1,6 @@
 import { Catalog } from "./catalog.ts";
 import { CraftStore, type JsonObject } from "./store.ts";
-export declare const VERSION = "0.2.1";
+export declare const VERSION = "0.3.0";
 export declare class CraftService {
     readonly store: CraftStore;
     readonly catalog: Catalog;
@@ -23,6 +23,16 @@ export declare class CraftService {
     saveVersioned(kind: string, prefix: string, args: JsonObject, required: string[]): JsonObject;
     list(kind: string, key: string, args: JsonObject): JsonObject;
     get(kind: string, idKey: string, args: JsonObject): JsonObject;
+    harnessConfigurationSave(args: JsonObject): JsonObject;
+    evaluationSuiteSave(args: JsonObject): JsonObject;
+    trialStart(args: JsonObject): JsonObject;
+    trialTraceAppend(args: JsonObject): JsonObject;
+    outcomeRecord(args: JsonObject): JsonObject;
+    trialGet(args: JsonObject): JsonObject;
+    evaluationRunRecord(args: JsonObject): JsonObject;
+    workflowSave(args: JsonObject): JsonObject;
+    workflowTransition(args: JsonObject): JsonObject;
+    workflowRollback(args: JsonObject): JsonObject;
     workflowPlan(args: JsonObject): JsonObject;
     workflowRun(args: JsonObject): JsonObject;
     orchestrationCreate(args: JsonObject): JsonObject;

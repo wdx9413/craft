@@ -16,8 +16,11 @@ Craft stores its own state under `~/.craft_data`. Use Craft at meaningful bounda
 - Register outputs with `craft_artifact_register` and decision-relevant claims with `craft_evidence_record`. Use `confirmed`, `bounded`, `unverified`, or `rejected` accurately.
 - Save reusable processes with `craft_workflow_save`. Replace task-specific values with inputs.
 - Call `craft_workflow_plan` before execution. Only pass side-effect approvals already granted by the user or host. Deterministic results from `craft_workflow_run` take precedence over model self-reporting.
+- Use a Trial when an execution will inform comparison, qualification, or reusable experience; do not create one for every trivial read. Bind the exact subject and Harness Configuration versions, append decision-relevant Trace events, and record one Outcome with real evidence and cost.
+- Treat `search` and `development` cases as design inputs. Promote a Workflow to `verified` only with the matching passed `held_out` Evaluation Run. Never relabel development evidence as held-out evidence.
+- Roll back only to a version Craft already recorded as `verified`; preserve the reason instead of overwriting history.
 - For multi-Agent work, create a DAG whose nodes have roles, objectives, dependencies, profile candidates, and side-effect classes. Dispatch only host capacity you can actually execute. Submit the observed verdict with real provenance.
 - Add a Source only when the user selected that directory. Removing a Source deletes only its Craft index, never source files.
 - Never store credentials, cookies, sensitive raw payloads, or unnecessary business text. Store references and concise derived state.
 
-Read [tool contract](references/tool-contract.md) when constructing a call, [Workflow runtime](references/workflow-runtime.md) for deterministic execution, and [multi-Agent runtime](references/multi-agent-runtime.md) for routing.
+Read [tool contract](references/tool-contract.md) when constructing a call, [Workflow runtime](references/workflow-runtime.md) for deterministic execution and promotion, and [multi-Agent runtime](references/multi-agent-runtime.md) for routing.

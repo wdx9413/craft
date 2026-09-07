@@ -54,7 +54,7 @@ function callCraft(command: string, packageSpec: string, args: ToolArgs, dataDir
       resolveOnce(response.result?.structuredContent ?? response.result);
     });
     child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize",
-      params: { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "dsh-craft-adapter", version: "0.2.1" } } })}\n`);
+      params: { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "dsh-craft-adapter", version: "0.3.0" } } })}\n`);
     child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`);
     child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call",
       params: { name: args.tool, arguments: toolArguments } })}\n`);
@@ -73,6 +73,6 @@ export function apply(ctx: Context, config: AdapterConfig = {}): void {
     output: { schema: { type: "object" }, render: (_args: unknown, value: unknown) =>
       [{ type: "text", text: JSON.stringify(value, null, 2) }] },
     execute: (args: ToolArgs) => callCraft(config.npxCommand || "npx",
-      config.packageSpec || "craft-agent-harness@0.2.1", args, config.dataDir),
+      config.packageSpec || "craft-agent-harness@0.3.0", args, config.dataDir),
   }));
 }

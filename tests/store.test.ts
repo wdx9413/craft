@@ -67,9 +67,11 @@ test("versioned records and events provide the shared persistence primitives", a
     assert.equal(store.save("thing", "a", { name: "one" }).version, 1);
     assert.equal(store.save("thing", "a", { name: "two" }).version, 2);
     assert.equal(store.save("thing", "b", { name: "other" }, 4).version, 4);
+    assert.equal(store.create("thing", "immutable", { name: "fixed" }).version, 1);
+    assert.throws(() => store.create("thing", "immutable", { name: "changed" }), /already exists/);
     const clean = store.save("thing", "clean", { name: "clean", id: "bad", version: 99, created_at: "old" });
     assert.notEqual(clean.id, "bad");
-    assert.equal(store.count("thing"), 3);
+    assert.equal(store.count("thing"), 4);
     assert.deepEqual(store.saveBatch([]), []);
     assert.equal(store.saveBatch([{ kind: "thing", id: "batch", payload: { name: "batch" } }])[0].version, 1);
     assert.equal(store.updateIfVersion("thing", "batch", 1, { name: "updated" }).version, 2);

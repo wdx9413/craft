@@ -4,9 +4,13 @@ import { CraftStore, type JsonObject } from "./store.ts";
 import { approvedEffects, executeSteps, normalizeSteps, resolveInputs, substitute } from "./workflow.ts";
 import { dispatchNodes, normalizeNodes, planStatus, submitNode, type PlanNode } from "./orchestration.ts";
 
-export const VERSION = "0.2.1";
+export const VERSION = "0.3.0";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
+const WORKFLOW_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
+const TRIAL_VERDICTS = new Set(["passed", "failed", "blocked", "cancelled"]);
+const EVAL_SPLITS = new Set(["search", "development", "held_out"]);
+const HARNESS_DIMENSIONS = new Set(["context", "tools", "generation", "orchestration", "memory", "output"]);
 
 function id(prefix: string): string { return `${prefix}_${randomUUID().replaceAll("-", "")}`; }
 function text(value: unknown, name: string): string {
@@ -29,6 +33,14 @@ function array(value: unknown, name: string): unknown[] {
   if (!Array.isArray(value)) throw new Error(`${name} must be an array`);
   return value;
 }
+function object(value: unknown, name: string): JsonObject {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${name} must be an object`);
+  return value as JsonObject;
+}
+function recordPayload(record: JsonObject): JsonObject {
+  const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...payload } = record;
+  return payload;
+}
 
 export class CraftService {
   readonly store: CraftStore;
@@ -37,8 +49,9 @@ export class CraftService {
 
   info(): JsonObject {
     const kinds = ["source", "capability", "task", "checkpoint", "feedback", "artifact",
-      "evidence", "workflow", "evaluation_suite", "evaluation_run", "evaluation_result",
-      "agent_profile", "orchestration_plan", "budget", "model_provider", "agent_session"];
+      "evidence", "workflow", "workflow_run", "evaluation_suite", "evaluation_run",
+      "agent_profile", "orchestration_plan", "harness_configuration", "trial", "outcome",
+      "budget", "model_provider", "agent_session"];
     return { version: VERSION, data_root: this.store.paths.root,
       counts: Object.fromEntries(kinds.map((kind) => [kind, this.store.count(kind)])) };
   }
@@ -144,6 +157,160 @@ export class CraftService {
   get(kind: string, idKey: string, args: JsonObject): JsonObject {
     const version = args.version === undefined ? undefined : finiteInteger(args.version, "version", 1);
     return this.store.get(kind, text(args[idKey], idKey), version);
+  }
+
+  harnessConfigurationSave(args: JsonObject): JsonObject {
+    const dimensions = object(args.dimensions, "dimensions");
+    for (const key of Object.keys(dimensions)) {
+      if (!HARNESS_DIMENSIONS.has(key)) throw new Error(`Unsupported harness dimension: ${key}`);
+      object(dimensions[key], `dimensions.${key}`);
+    }
+    return this.saveVersioned("harness_configuration", "configuration", {
+      ...args, name: text(args.name, "name"), dimensions,
+    }, ["name"]);
+  }
+
+  evaluationSuiteSave(args: JsonObject): JsonObject {
+    const cases = array(args.cases ?? [], "cases").map((value, index) => {
+      const item = object(value, `cases[${index}]`);
+      const caseId = text(item.case_id, `cases[${index}].case_id`);
+      const split = String(item.split ?? "development");
+      if (!EVAL_SPLITS.has(split)) throw new Error(`Unsupported evaluation split: ${split}`);
+      return { ...item, case_id: caseId, split };
+    });
+    if (new Set(cases.map((item) => item.case_id)).size !== cases.length) {
+      throw new Error("Evaluation case_id values must be unique");
+    }
+    return this.saveVersioned("evaluation_suite", "suite", { ...args, cases }, ["name"]);
+  }
+
+  trialStart(args: JsonObject): JsonObject {
+    const taskId = text(args.task_id, "task_id");
+    this.store.get("task", taskId);
+    const subjectType = text(args.subject_type, "subject_type");
+    const subjectId = text(args.subject_id, "subject_id");
+    const subjectVersion = finiteInteger(args.subject_version, "subject_version", 1);
+    this.store.get(subjectType, subjectId, subjectVersion);
+    let harness: JsonObject | undefined;
+    if (args.harness_configuration_id !== undefined) {
+      harness = this.store.get("harness_configuration", text(args.harness_configuration_id,
+        "harness_configuration_id"), args.harness_configuration_version === undefined ? undefined
+          : finiteInteger(args.harness_configuration_version, "harness_configuration_version", 1));
+    }
+    return this.store.create("trial", String(args.trial_id ?? id("trial")), {
+      task_id: taskId, case_id: args.case_id === undefined ? null : text(args.case_id, "case_id"),
+      subject_type: subjectType, subject_id: subjectId, subject_version: subjectVersion,
+      harness_configuration_id: harness?.id ?? null,
+      harness_configuration_version: harness?.version ?? null,
+      environment: object(args.environment ?? {}, "environment"),
+      budget: object(args.budget ?? {}, "budget"), status: "started",
+    });
+  }
+
+  trialTraceAppend(args: JsonObject): JsonObject {
+    const trialId = text(args.trial_id, "trial_id");
+    this.store.get("trial", trialId);
+    const artifactIds = array(args.artifact_ids ?? [], "artifact_ids").map((value) => text(value, "artifact_id"));
+    const evidenceIds = array(args.evidence_ids ?? [], "evidence_ids").map((value) => text(value, "evidence_id"));
+    for (const artifactId of artifactIds) this.store.get("artifact", artifactId);
+    for (const evidenceId of evidenceIds) this.store.get("evidence", evidenceId);
+    return this.store.appendEvent(`trial:${trialId}`, text(args.event_type, "event_type"), {
+      trial_id: trialId, source: args.source ?? "agent_reported",
+      data: object(args.data ?? {}, "data"), artifact_ids: artifactIds, evidence_ids: evidenceIds,
+    });
+  }
+
+  outcomeRecord(args: JsonObject): JsonObject {
+    const trialId = text(args.trial_id, "trial_id");
+    this.store.get("trial", trialId);
+    const verdict = String(args.verdict);
+    if (!TRIAL_VERDICTS.has(verdict)) throw new Error(`Unsupported trial verdict: ${verdict}`);
+    const evidenceIds = array(args.evidence_ids ?? [], "evidence_ids").map((value) => text(value, "evidence_id"));
+    for (const evidenceId of evidenceIds) this.store.get("evidence", evidenceId);
+    return this.store.create("outcome", `outcome_${trialId}`, {
+      trial_id: trialId, verdict, summary: text(args.summary, "summary"),
+      scores: object(args.scores ?? {}, "scores"), costs: object(args.costs ?? {}, "costs"),
+      evidence_ids: evidenceIds, source: args.source ?? "program_verified",
+    });
+  }
+
+  trialGet(args: JsonObject): JsonObject {
+    const trialId = text(args.trial_id, "trial_id");
+    const trial = this.store.get("trial", trialId);
+    const outcome = this.store.find("outcome", `outcome_${trialId}`);
+    return { trial, trace: this.store.events(`trial:${trialId}`), outcome };
+  }
+
+  evaluationRunRecord(args: JsonObject): JsonObject {
+    const suite = this.store.get("evaluation_suite", text(args.suite_id, "suite_id"),
+      args.suite_version === undefined ? undefined : finiteInteger(args.suite_version, "suite_version", 1));
+    const split = String(args.split);
+    if (!EVAL_SPLITS.has(split)) throw new Error(`Unsupported evaluation split: ${split}`);
+    const subjectType = text(args.subject_type, "subject_type");
+    const subjectId = text(args.subject_id, "subject_id");
+    const subjectVersion = finiteInteger(args.subject_version, "subject_version", 1);
+    this.store.get(subjectType, subjectId, subjectVersion);
+    const trialIds = array(args.trial_ids, "trial_ids").map((value) => text(value, "trial_id"));
+    if (!trialIds.length || new Set(trialIds).size !== trialIds.length) {
+      throw new Error("trial_ids must contain unique trials");
+    }
+    const cases = array(suite.cases ?? [], "suite cases") as JsonObject[];
+    const allowedCases = new Set(cases.filter((item) => item.split === split).map((item) => String(item.case_id)));
+    const outcomes = trialIds.map((trialId) => {
+      const trial = this.store.get("trial", trialId);
+      if (trial.subject_type !== subjectType || trial.subject_id !== subjectId ||
+          Number(trial.subject_version) !== subjectVersion) throw new Error(`Trial subject mismatch: ${trialId}`);
+      if (!trial.case_id || !allowedCases.has(String(trial.case_id))) {
+        throw new Error(`Trial case is not in the ${split} suite partition: ${trialId}`);
+      }
+      const outcome = this.store.find("outcome", `outcome_${trialId}`);
+      if (!outcome) throw new Error(`Trial has no outcome: ${trialId}`);
+      return outcome;
+    });
+    const verdict = outcomes.every((outcome) => outcome.verdict === "passed") ? "passed" : "failed";
+    return this.store.create("evaluation_run", String(args.run_id ?? id("evalrun")), {
+      suite_id: suite.id, suite_version: suite.version, split, subject_type: subjectType,
+      subject_id: subjectId, subject_version: subjectVersion, trial_ids: trialIds, verdict,
+      metrics: object(args.metrics ?? {}, "metrics"),
+    });
+  }
+
+  workflowSave(args: JsonObject): JsonObject {
+    return this.saveVersioned("workflow", "workflow", { ...args, lifecycle: "draft" }, ["name"]);
+  }
+
+  workflowTransition(args: JsonObject): JsonObject {
+    const workflow = this.store.get("workflow", text(args.workflow_id, "workflow_id"));
+    const current = String(workflow.lifecycle ?? "draft");
+    const target = text(args.target, "target");
+    if (!WORKFLOW_LIFECYCLE.has(target)) throw new Error(`Unsupported workflow lifecycle: ${target}`);
+    const allowed: Record<string, string[]> = {
+      draft: ["candidate", "deprecated"], candidate: ["verified", "deprecated"],
+      verified: ["deprecated"], deprecated: [],
+    };
+    if (!allowed[current]?.includes(target)) throw new Error(`Invalid workflow transition: ${current} -> ${target}`);
+    let evaluationRunId: string | null = null;
+    if (target === "verified") {
+      evaluationRunId = text(args.evaluation_run_id, "evaluation_run_id");
+      const run = this.store.get("evaluation_run", evaluationRunId);
+      if (run.verdict !== "passed" || run.split !== "held_out" || run.subject_type !== "workflow" ||
+          run.subject_id !== workflow.id || Number(run.subject_version) !== Number(workflow.version)) {
+        throw new Error("Verification requires a passed held-out evaluation for this exact workflow version");
+      }
+    }
+    return this.store.save("workflow", String(workflow.id), { ...recordPayload(workflow), lifecycle: target,
+      previous_version: workflow.version, transition_reason: text(args.reason, "reason"),
+      evaluation_run_id: evaluationRunId });
+  }
+
+  workflowRollback(args: JsonObject): JsonObject {
+    const workflowId = text(args.workflow_id, "workflow_id");
+    const current = this.store.get("workflow", workflowId);
+    const target = this.store.get("workflow", workflowId, finiteInteger(args.target_version, "target_version", 1));
+    if (target.lifecycle !== "verified") throw new Error("Rollback target must be a verified workflow version");
+    return this.store.save("workflow", workflowId, { ...recordPayload(target), lifecycle: "verified",
+      rollback_from_version: current.version, rollback_to_version: target.version,
+      rollback_reason: text(args.reason, "reason") });
   }
 
   workflowPlan(args: JsonObject): JsonObject {

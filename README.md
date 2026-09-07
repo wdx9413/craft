@@ -22,6 +22,7 @@ Craft 不绑定某个模型、Agent 或行业。研发排障、AI 视频分镜�
 - 版本化 Workflow、输入替换、路径边界、敏感信息脱敏和副作用授权。
 - 确定性命令、文件/JSON 断言、覆盖率门禁，以及结构化执行回执。
 - 版本化评测集与 Agent Profile 基础数据模型。
+- 六维 Harness Configuration、不可变 Trial/Outcome、只追加 Trace，以及 held-out Eval 驱动的 Workflow 晋级与回滚。
 - MCP 服务，以及 Codex、Claude Code、DeepSeek Harness 和通用 MCP Host 接入。
 - Windows、macOS、Linux 共用 TypeScript/Node.js 运行时；不依赖 Python。
 
@@ -109,4 +110,4 @@ pnpm test
 
 测试命令同时强制行、函数和分支覆盖率为 100%。覆盖率是测试工具确定性计算的结果，不由模型自报。
 
-更详细的边界与数据模型见 [中文架构说明](docs/architecture.zh-CN.md)。
+产品定义、路线和模块化技术方案见 [Craft 文档中心](docs/README.md)；当前实现边界见 [中文架构说明](docs/architecture.zh-CN.md)。

@@ -92,6 +92,15 @@ export class CraftStore {
     save(kind, id, payload, version) {
         return this.transaction((database) => this.insert(database, { kind, id, payload, version }));
     }
+    create(kind, id, payload) {
+        return this.transaction((database) => {
+            const existing = database.prepare("SELECT 1 present FROM records WHERE kind=? AND id=? LIMIT 1")
+                .get(kind, id);
+            if (existing)
+                throw new Error(`${kind} already exists: ${id}`);
+            return this.insert(database, { kind, id, payload, version: 1 });
+        });
+    }
     saveBatch(entries) {
         if (!entries.length)
             return [];
@@ -120,13 +129,17 @@ export class CraftStore {
         }
         return { ...payload, id, version: next, created_at: now, updated_at: now };
     }
-    get(kind, id, version) {
+    find(kind, id, version) {
         const row = version === undefined
             ? this.database.prepare("SELECT * FROM records WHERE kind=? AND id=? ORDER BY version DESC LIMIT 1").get(kind, id)
             : this.database.prepare("SELECT * FROM records WHERE kind=? AND id=? AND version=?").get(kind, id, version);
-        if (!row)
+        return row ? this.record(row) : null;
+    }
+    get(kind, id, version) {
+        const record = this.find(kind, id, version);
+        if (!record)
             throw new Error(`Unknown ${kind}: ${id}`);
-        return this.record(row);
+        return record;
     }
     list(kind, limit = 20, predicate) {
         const bounded = validLimit(limit);

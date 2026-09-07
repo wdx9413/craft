@@ -21,6 +21,7 @@ Craft is not tied to one model or industry. Software engineering, AI video produ
 - Durable tasks, checkpoints, feedback, artifacts, and evidence.
 - Versioned Workflows with inputs, safe paths, redaction, side-effect approval, deterministic commands, assertions, coverage gates, and receipts.
 - Versioned evaluation-suite and Agent-profile primitives.
+- Six-dimensional Harness Configurations, immutable Trials and Outcomes, append-only Traces, and held-out-eval-gated Workflow promotion and rollback.
 - MCP plus Codex, Claude Code, DeepSeek Harness, and generic MCP integration surfaces.
 - One TypeScript/Node.js runtime on Windows, macOS, and Linux, with no Python dependency.
 
@@ -75,4 +76,4 @@ pnpm test
 
 The test command enforces 100% line, function, and branch coverage. Coverage is calculated by the test runtime, never self-reported by a model.
 
-See [architecture](docs/architecture.en.md) for boundaries and data models.
+See the [documentation index](docs/README.md) and [architecture](docs/architecture.en.md) for product direction, boundaries, and data models.

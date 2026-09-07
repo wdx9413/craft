@@ -103,3 +103,160 @@ test("service validates required text", async () => {
     assert.throws(() => service.sourceAdd({ path: "" }), /path/);
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
+
+test("experience kernel qualifies and rolls back workflows with immutable trials", async () => {
+  const root = join(tmpdir(), `craft-experience-${process.pid}-${Date.now()}`);
+  const store = await new CraftStore(craftPaths(root)).open();
+  const service = new CraftService(store);
+  try {
+    const taskPack = service.taskOpen({ title: "Qualification", goal: "Verify a workflow" });
+    const taskId = String((taskPack.task as Record<string, unknown>).id);
+    assert.equal((service.evaluationSuiteSave({ name: "Empty" }).cases as unknown[]).length, 0);
+    const harness = service.harnessConfigurationSave({ name: "Careful", dimensions: {
+      context: { retrieval: "bounded" }, tools: { allow: ["tests"] }, generation: { budget: 1 },
+      orchestration: { topology: "single" }, memory: { policy: "task" }, output: { validator: "tests" },
+    } });
+    const harnessV2 = service.harnessConfigurationSave({ configuration_id: harness.id,
+      name: "Careful 2", dimensions: {} });
+    assert.equal(harnessV2.version, 2);
+    assert.throws(() => service.harnessConfigurationSave({ name: "bad", dimensions: { unknown: {} } }), /dimension/);
+    assert.throws(() => service.harnessConfigurationSave({ name: "bad", dimensions: { context: [] } }), /must be an object/);
+
+    const draft = service.workflowSave({ workflow_id: "workflow_qualified", name: "Qualified", steps: [] });
+    assert.equal(draft.lifecycle, "draft");
+    const legacy = service.saveVersioned("workflow", "workflow", { workflow_id: "workflow_legacy", name: "Legacy" }, ["name"]);
+    assert.equal(service.workflowTransition({ workflow_id: legacy.id, target: "candidate", reason: "migrate" }).lifecycle, "candidate");
+    assert.throws(() => service.workflowTransition({ workflow_id: draft.id, target: "verified", reason: "skip" }), /Invalid/);
+    assert.throws(() => service.workflowTransition({ workflow_id: draft.id, target: "unknown", reason: "x" }), /Unsupported/);
+    const corrupt = store.save("workflow", "workflow_corrupt", { name: "Corrupt", lifecycle: "other" });
+    assert.throws(() => service.workflowTransition({ workflow_id: corrupt.id, target: "candidate", reason: "x" }), /Invalid/);
+    const candidate = service.workflowTransition({ workflow_id: draft.id, target: "candidate", reason: "ready" });
+    assert.equal(candidate.lifecycle, "candidate");
+
+    const suite = service.evaluationSuiteSave({ name: "Held out", cases: [
+      { case_id: "dev-1" }, { case_id: "held-1", split: "held_out" },
+      { case_id: "held-2", split: "held_out" },
+    ] });
+    assert.throws(() => service.evaluationSuiteSave({ name: "bad", cases: [{ case_id: "x", split: "bad" }] }), /split/);
+    assert.throws(() => service.evaluationSuiteSave({ name: "bad", cases: [
+      { case_id: "x" }, { case_id: "x" },
+    ] }), /unique/);
+    assert.throws(() => service.evaluationSuiteSave({ name: "bad", cases: ["x"] }), /must be an object/);
+
+    const trial = service.trialStart({ trial_id: "trial_pass", task_id: taskId, case_id: "held-1",
+      subject_type: "workflow", subject_id: candidate.id, subject_version: candidate.version,
+      harness_configuration_id: harness.id, harness_configuration_version: 1,
+      environment: { host: "codex" }, budget: { tokens: 1000 } });
+    assert.equal(trial.harness_configuration_version, 1);
+    assert.throws(() => service.trialStart({ trial_id: "trial_pass", task_id: taskId,
+      subject_type: "workflow", subject_id: candidate.id, subject_version: candidate.version }), /already exists/);
+    const pending = service.trialStart({ task_id: taskId, case_id: "held-2", subject_type: "workflow",
+      subject_id: candidate.id, subject_version: candidate.version, harness_configuration_id: harness.id });
+    assert.equal(service.trialGet({ trial_id: pending.id }).outcome, null);
+    const traceArtifact = service.artifactRegister({ kind: "log", name: "trace", uri: "file:///trace" });
+    const evidence = service.evidenceRecord({ source_type: "test", claim: "held-out passed", confidence: "confirmed",
+      artifact_id: traceArtifact.id });
+    service.trialTraceAppend({ trial_id: trial.id, event_type: "tool.completed", source: "program",
+      data: { exit_code: 0 }, artifact_ids: [traceArtifact.id], evidence_ids: [evidence.id] });
+    service.trialTraceAppend({ trial_id: trial.id, event_type: "assistant.completed" });
+    assert.throws(() => service.trialTraceAppend({ trial_id: trial.id, event_type: "bad",
+      artifact_ids: ["missing"] }), /Unknown artifact/);
+    assert.throws(() => service.trialTraceAppend({ trial_id: trial.id, event_type: "bad",
+      evidence_ids: ["missing"] }), /Unknown evidence/);
+    const outcome = service.outcomeRecord({ trial_id: trial.id, verdict: "passed", summary: "All checks passed",
+      scores: { correctness: 1 }, costs: { tokens: 120 }, evidence_ids: [evidence.id], source: "program_verified" });
+    assert.equal(outcome.verdict, "passed");
+    assert.equal((service.trialGet({ trial_id: trial.id }).trace as unknown[]).length, 2);
+    assert.throws(() => service.outcomeRecord({ trial_id: trial.id, verdict: "passed", summary: "again" }), /already exists/);
+    assert.throws(() => service.outcomeRecord({ trial_id: pending.id, verdict: "unknown", summary: "x" }), /verdict/);
+    assert.throws(() => service.outcomeRecord({ trial_id: pending.id, verdict: "passed", summary: "x",
+      evidence_ids: ["missing"] }), /Unknown evidence/);
+    store.save("evaluation_suite", "suite_legacy", { name: "Legacy suite" });
+    assert.throws(() => service.evaluationRunRecord({ suite_id: "suite_legacy", split: "held_out",
+      subject_type: "workflow", subject_id: candidate.id, subject_version: candidate.version,
+      trial_ids: [trial.id] }), /partition/);
+
+    assert.throws(() => service.evaluationRunRecord({ suite_id: suite.id, split: "bad",
+      subject_type: "workflow", subject_id: candidate.id, subject_version: candidate.version, trial_ids: [trial.id] }), /split/);
+    assert.throws(() => service.evaluationRunRecord({ suite_id: suite.id, split: "held_out",
+      subject_type: "workflow", subject_id: candidate.id, subject_version: candidate.version, trial_ids: [] }), /trial_ids/);
+    assert.throws(() => service.evaluationRunRecord({ suite_id: suite.id, split: "held_out",
+      subject_type: "workflow", subject_id: candidate.id, subject_version: candidate.version,
+      trial_ids: [trial.id, trial.id] }), /trial_ids/);
+    assert.throws(() => service.evaluationRunRecord({ suite_id: suite.id, split: "held_out",
+      subject_type: "workflow", subject_id: draft.id, subject_version: draft.version, trial_ids: [trial.id] }), /subject mismatch/);
+    assert.throws(() => service.evaluationRunRecord({ suite_id: suite.id, split: "development",
+      subject_type: "workflow", subject_id: candidate.id, subject_version: candidate.version, trial_ids: [trial.id] }), /partition/);
+    assert.throws(() => service.evaluationRunRecord({ suite_id: suite.id, split: "held_out",
+      subject_type: "workflow", subject_id: candidate.id, subject_version: candidate.version, trial_ids: [pending.id] }), /no outcome/);
+
+    const noCase = service.trialStart({ task_id: taskId, subject_type: "workflow",
+      subject_id: candidate.id, subject_version: candidate.version });
+    assert.throws(() => service.evaluationRunRecord({ suite_id: suite.id, split: "held_out",
+      subject_type: "workflow", subject_id: candidate.id, subject_version: candidate.version, trial_ids: [noCase.id] }), /partition/);
+    const otherWorkflow = service.workflowSave({ workflow_id: "workflow_other", name: "Other" });
+    const otherTrial = service.trialStart({ task_id: taskId, case_id: "held-1", subject_type: "workflow",
+      subject_id: otherWorkflow.id, subject_version: otherWorkflow.version });
+    assert.throws(() => service.evaluationRunRecord({ suite_id: suite.id, split: "held_out",
+      subject_type: "workflow", subject_id: candidate.id, subject_version: candidate.version, trial_ids: [otherTrial.id] }), /subject mismatch/);
+    const profile = service.saveVersioned("agent_profile", "profile", {
+      profile_id: "profile_eval", name: "Evaluator", role: "judge", host: "local", model: "test",
+    }, ["name", "role", "host", "model"]);
+    const profileTrial = service.trialStart({ task_id: taskId, case_id: "held-1", subject_type: "agent_profile",
+      subject_id: profile.id, subject_version: profile.version });
+    assert.throws(() => service.evaluationRunRecord({ suite_id: suite.id, split: "held_out",
+      subject_type: "workflow", subject_id: candidate.id, subject_version: candidate.version, trial_ids: [profileTrial.id] }), /subject mismatch/);
+
+    const evalRun = service.evaluationRunRecord({ run_id: "eval_pass", suite_id: suite.id,
+      suite_version: suite.version, split: "held_out", subject_type: "workflow",
+      subject_id: candidate.id, subject_version: candidate.version, trial_ids: [trial.id], metrics: { pass_rate: 1 } });
+    assert.equal(evalRun.verdict, "passed");
+    const devTrial = service.trialStart({ task_id: taskId, case_id: "dev-1", subject_type: "workflow",
+      subject_id: candidate.id, subject_version: candidate.version });
+    service.outcomeRecord({ trial_id: devTrial.id, verdict: "passed", summary: "development passed" });
+    const devRun = service.evaluationRunRecord({ suite_id: suite.id, split: "development",
+      subject_type: "workflow", subject_id: candidate.id, subject_version: candidate.version, trial_ids: [devTrial.id] });
+    assert.throws(() => service.workflowTransition({ workflow_id: candidate.id, target: "verified",
+      reason: "not held out", evaluation_run_id: devRun.id }), /passed held-out/);
+    service.outcomeRecord({ trial_id: profileTrial.id, verdict: "passed", summary: "profile passed" });
+    const profileRun = service.evaluationRunRecord({ suite_id: suite.id, split: "held_out",
+      subject_type: "agent_profile", subject_id: profile.id, subject_version: profile.version,
+      trial_ids: [profileTrial.id] });
+    assert.throws(() => service.workflowTransition({ workflow_id: candidate.id, target: "verified",
+      reason: "wrong subject type", evaluation_run_id: profileRun.id }), /passed held-out/);
+    service.outcomeRecord({ trial_id: otherTrial.id, verdict: "passed", summary: "other passed" });
+    const otherRun = service.evaluationRunRecord({ suite_id: suite.id, split: "held_out",
+      subject_type: "workflow", subject_id: otherWorkflow.id, subject_version: otherWorkflow.version,
+      trial_ids: [otherTrial.id] });
+    assert.throws(() => service.workflowTransition({ workflow_id: candidate.id, target: "verified",
+      reason: "wrong subject", evaluation_run_id: otherRun.id }), /passed held-out/);
+    assert.throws(() => service.workflowTransition({ workflow_id: candidate.id, target: "verified",
+      reason: "wrong", evaluation_run_id: "missing" }), /Unknown evaluation_run/);
+    const verified = service.workflowTransition({ workflow_id: candidate.id, target: "verified",
+      reason: "qualified", evaluation_run_id: evalRun.id });
+    assert.equal(verified.lifecycle, "verified");
+    const deprecated = service.workflowTransition({ workflow_id: verified.id, target: "deprecated", reason: "regression" });
+    assert.equal(deprecated.lifecycle, "deprecated");
+    assert.throws(() => service.workflowTransition({ workflow_id: deprecated.id, target: "candidate", reason: "x" }), /Invalid/);
+    assert.throws(() => service.workflowRollback({ workflow_id: deprecated.id, target_version: draft.version,
+      reason: "bad target" }), /verified/);
+    const restored = service.workflowRollback({ workflow_id: deprecated.id, target_version: verified.version,
+      reason: "restore known good" });
+    assert.equal(restored.rollback_to_version, verified.version);
+
+    const failedTrial = service.trialStart({ task_id: taskId, case_id: "held-2", subject_type: "workflow",
+      subject_id: restored.id, subject_version: restored.version });
+    service.outcomeRecord({ trial_id: failedTrial.id, verdict: "failed", summary: "Regression" });
+    const failedRun = service.evaluationRunRecord({ suite_id: suite.id, split: "held_out",
+      subject_type: "workflow", subject_id: restored.id, subject_version: restored.version,
+      trial_ids: [failedTrial.id] });
+    assert.equal(failedRun.verdict, "failed");
+    const restoredCandidate = service.workflowSave({ workflow_id: restored.id, name: "Changed" });
+    const promotedCandidate = service.workflowTransition({ workflow_id: restoredCandidate.id,
+      target: "candidate", reason: "retry" });
+    assert.throws(() => service.workflowTransition({ workflow_id: promotedCandidate.id, target: "verified",
+      reason: "old version", evaluation_run_id: evalRun.id }), /passed held-out/);
+    assert.throws(() => service.workflowTransition({ workflow_id: promotedCandidate.id, target: "verified",
+      reason: "failed eval", evaluation_run_id: failedRun.id }), /passed held-out/);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});

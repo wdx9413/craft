@@ -55,7 +55,7 @@ Craft 后续不会把“学习”简化成不断增长的对话摘要，而会�
 
 经验分为两层：具体 Case 的完整执行记录，以及由多个 Case 归纳出的可复用模式。候选 Workflow 或 Harness 配置必须通过独立评测集后才能晋级，并保留版本、适用条件和回滚路径。排序优先保证正确性，再比较 token、耗时和费用；模型判断可以参与诊断，但不能替代确定性证据或人工审批。
 
-这是路线设计，不是 v0.2.1 已完成能力。当前已经有 Task、Evidence、Workflow、Evaluation Suite 与基础编排对象，但尚未实现自动 Harness 搜索、双层经验库、Grader 和按 Case 自适应装配。
+v0.3.0 已实现六维 Harness Configuration、不可变 Trial/Outcome、只追加 Trace、评测分区，以及 Workflow 晋级/回滚门禁。自动 Harness 搜索、双层经验库、Grader 和按 Case 自适应装配仍是路线设计。
 
 ## 存储与跨平台
 
@@ -65,4 +65,4 @@ Craft 后续不会把“学习”简化成不断增长的对话摘要，而会�
 
 ## 当前边界
 
-当前版本已提供 Provider 模式的完整 MCP 路径、能力目录、任务/证据、确定性 Workflow 和基础多 Agent 路由。Codex 与 Claude 插件使用不依赖 `node_modules` 的单文件 MCP bundle。独立 Agent 的模型循环、向量 Provider、远程 Hub、桌面端、自动 Grader、自适应 Harness 搜索、Lease TTL/Heartbeat、预算和补偿事务是后续增量，不应在文档中被描述成已完成。
+当前版本已提供 Provider 模式的完整 MCP 路径、能力目录、任务/证据、确定性 Workflow、Experience/Eval Kernel 第一层和基础多 Agent 路由。Codex 与 Claude 插件使用不依赖 `node_modules` 的单文件 MCP bundle。独立 Agent 的模型循环、Agent IR Compiler、Capability Kit Registry、向量 Provider、远程 Hub、桌面端、自动 Grader、自适应 Harness 搜索、Lease TTL/Heartbeat、预算和补偿事务是后续增量，不应在文档中被描述成已完成。

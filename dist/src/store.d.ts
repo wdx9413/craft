@@ -17,9 +17,11 @@ export declare class CraftStore {
     transaction<T>(operation: (database: DatabaseSync) => T): T;
     legacyDatabaseDetected(): boolean;
     save(kind: string, id: string, payload: JsonObject, version?: number): JsonObject;
+    create(kind: string, id: string, payload: JsonObject): JsonObject;
     saveBatch(entries: SaveEntry[]): JsonObject[];
     updateIfVersion(kind: string, id: string, expectedVersion: number, payload: JsonObject): JsonObject;
     private insert;
+    find(kind: string, id: string, version?: number): JsonObject | null;
     get(kind: string, id: string, version?: number): JsonObject;
     list(kind: string, limit?: number, predicate?: (record: JsonObject) => boolean): JsonObject[];
     count(kind: string): number;
