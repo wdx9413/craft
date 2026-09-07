@@ -1,6 +1,6 @@
 {
   "name": "craft",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Capability discovery, durable tasks, immutable execution trials, evaluation signoff, and verified workflows.",
   "skills": "./skills/",
   "mcpServers": {

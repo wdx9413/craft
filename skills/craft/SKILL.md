@@ -15,7 +15,7 @@ Craft stores its own state under `~/.craft_data`. Use Craft at meaningful bounda
 - Record explicit corrections with `craft_feedback_record` at the narrowest correct scope.
 - Register outputs with `craft_artifact_register` and decision-relevant claims with `craft_evidence_record`. Use `confirmed`, `bounded`, `unverified`, or `rejected` accurately.
 - Save reusable processes with `craft_workflow_save`. Replace task-specific values with inputs.
-- Call `craft_workflow_plan` before execution. Only pass side-effect approvals already granted by the user or host. Deterministic results from `craft_workflow_run` take precedence over model self-reporting.
+- Call `craft_workflow_plan` before execution. Only pass side-effect approvals already granted by the user or host. Deterministic results take precedence over model self-reporting. Use `craft_workflow_trial_run` when the run should become evaluation or reusable experience; it captures the Trial, Trace, receipt Artifact, Evidence, and Outcome together. Use `craft_workflow_run` for an ordinary execution that does not need that lifecycle.
 - Use a Trial when an execution will inform comparison, qualification, or reusable experience; do not create one for every trivial read. Bind the exact subject and Harness Configuration versions, append decision-relevant Trace events, and record one Outcome with real evidence and cost.
 - Treat `search` and `development` cases as design inputs. Promote a Workflow to `verified` only with the matching passed `held_out` Evaluation Run. Never relabel development evidence as held-out evidence.
 - Roll back only to a version Craft already recorded as `verified`; preserve the reason instead of overwriting history.

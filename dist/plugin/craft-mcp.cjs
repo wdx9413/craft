@@ -8122,7 +8122,7 @@ function submitNode(nodes, leaseId, verdict, provenance) {
 }
 
 // src/service.ts
-var VERSION = "0.3.0";
+var VERSION = "0.3.1";
 var CONFIDENCE = /* @__PURE__ */ new Set(["confirmed", "bounded", "unverified", "rejected"]);
 var TASK_STATUS = /* @__PURE__ */ new Set(["active", "paused", "completed", "cancelled"]);
 var WORKFLOW_LIFECYCLE = /* @__PURE__ */ new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -8547,6 +8547,92 @@ var CraftService = class {
       status: passed ? "passed" : "failed"
     });
   }
+  workflowTrialRun(args) {
+    const plan = this.workflowPlan(args);
+    const trial = this.trialStart({
+      trial_id: args.trial_id,
+      task_id: args.task_id,
+      case_id: args.case_id,
+      subject_type: "workflow",
+      subject_id: plan.workflow_id,
+      subject_version: plan.workflow_version,
+      harness_configuration_id: args.harness_configuration_id,
+      harness_configuration_version: args.harness_configuration_version,
+      environment: args.environment ?? {},
+      budget: args.budget ?? {}
+    });
+    const trialId = String(trial.id);
+    this.trialTraceAppend({
+      trial_id: trialId,
+      event_type: "workflow.started",
+      source: "program_verified",
+      data: { workflow_id: plan.workflow_id, workflow_version: plan.workflow_version }
+    });
+    let run;
+    try {
+      run = this.workflowRun({ ...args, version: plan.workflow_version });
+    } catch {
+      const evidence2 = this.evidenceRecord({
+        source_type: "program",
+        confidence: "confirmed",
+        claim: "Workflow execution crashed before a durable run receipt was produced.",
+        locator: { workflow_id: plan.workflow_id, workflow_version: plan.workflow_version }
+      });
+      this.trialTraceAppend({
+        trial_id: trialId,
+        event_type: "workflow.crashed",
+        source: "program_verified",
+        data: { error_type: "ExecutionError" },
+        evidence_ids: [evidence2.id]
+      });
+      this.outcomeRecord({
+        trial_id: trialId,
+        verdict: "failed",
+        summary: "Workflow execution crashed before completion.",
+        scores: {},
+        costs: {},
+        evidence_ids: [evidence2.id],
+        source: "program_verified"
+      });
+      return { workflow_run: null, artifact: null, evidence: evidence2, ...this.trialGet({ trial_id: trialId }) };
+    }
+    const artifact = this.artifactRegister({
+      kind: "workflow_receipt",
+      name: `Workflow run ${run.id}`,
+      uri: `craft://workflow-runs/${run.id}`,
+      media_type: "application/json",
+      producer_type: "workflow_run",
+      producer_id: run.id,
+      metadata: { workflow_id: plan.workflow_id, workflow_version: plan.workflow_version }
+    });
+    const passed = run.status === "passed";
+    const evidence = this.evidenceRecord({
+      source_type: "program",
+      confidence: "confirmed",
+      claim: `Workflow run ${run.id} ${passed ? "passed" : "failed"} deterministic checks.`,
+      artifact_id: artifact.id,
+      locator: { workflow_run_id: run.id }
+    });
+    this.trialTraceAppend({
+      trial_id: trialId,
+      event_type: "workflow.completed",
+      source: "program_verified",
+      data: { status: run.status, workflow_run_id: run.id },
+      artifact_ids: [artifact.id],
+      evidence_ids: [evidence.id]
+    });
+    const results = run.results;
+    this.outcomeRecord({
+      trial_id: trialId,
+      verdict: passed ? "passed" : "failed",
+      summary: passed ? "Workflow passed deterministic checks." : "Workflow failed deterministic checks.",
+      scores: { passed_steps: results.filter((item) => item.passed).length, total_steps: results.length },
+      costs: {},
+      evidence_ids: [evidence.id],
+      source: "program_verified"
+    });
+    return { workflow_run: run, artifact, evidence, ...this.trialGet({ trial_id: trialId }) };
+  }
   orchestrationCreate(args) {
     const nodes = normalizeNodes(args.nodes ?? []);
     const max = Number(args.max_concurrency ?? 4);
@@ -8676,6 +8762,24 @@ var TOOLS = [
   tool("craft_workflow_search", "Search reusable workflows.", [], true, ["limit", "query"]),
   tool("craft_workflow_plan", "Resolve inputs and side-effect approvals without executing.", ["workflow_id"], true, ["version", "inputs", "allow_execution", "approved_side_effects"]),
   tool("craft_workflow_run", "Execute deterministic Workflow steps with explicit side-effect approval.", ["workflow_id", "project_root"], false, ["version", "inputs", "allow_execution", "approved_side_effects"]),
+  tool(
+    "craft_workflow_trial_run",
+    "Execute a Workflow and automatically capture its Trial, Trace, Artifact, Evidence, and Outcome.",
+    ["task_id", "workflow_id", "project_root"],
+    false,
+    [
+      "trial_id",
+      "case_id",
+      "version",
+      "inputs",
+      "allow_execution",
+      "approved_side_effects",
+      "harness_configuration_id",
+      "harness_configuration_version",
+      "environment",
+      "budget"
+    ]
+  ),
   tool("craft_workflow_run_get", "Read a durable Workflow execution receipt.", ["run_id"], true),
   tool(
     "craft_workflow_transition",
@@ -8777,6 +8881,7 @@ var McpServer = class {
       craft_workflow_search: (a) => service.list("workflow", "workflows", a),
       craft_workflow_plan: (a) => service.workflowPlan(a),
       craft_workflow_run: (a) => service.workflowRun(a),
+      craft_workflow_trial_run: (a) => service.workflowTrialRun(a),
       craft_workflow_run_get: (a) => service.get("workflow_run", "run_id", a),
       craft_workflow_transition: (a) => service.workflowTransition(a),
       craft_workflow_rollback: (a) => service.workflowRollback(a),

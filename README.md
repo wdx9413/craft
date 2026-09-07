@@ -22,7 +22,7 @@ Craft 不绑定某个模型、Agent 或行业。研发排障、AI 视频分镜�
 - 版本化 Workflow、输入替换、路径边界、敏感信息脱敏和副作用授权。
 - 确定性命令、文件/JSON 断言、覆盖率门禁，以及结构化执行回执。
 - 版本化评测集与 Agent Profile 基础数据模型。
-- 六维 Harness Configuration、不可变 Trial/Outcome、只追加 Trace，以及 held-out Eval 驱动的 Workflow 晋级与回滚。
+- 六维 Harness Configuration、不可变 Trial/Outcome、只追加 Trace、Workflow 自动取证闭环，以及 held-out Eval 驱动的晋级与回滚。
 - MCP 服务，以及 Codex、Claude Code、DeepSeek Harness 和通用 MCP Host 接入。
 - Windows、macOS、Linux 共用 TypeScript/Node.js 运行时；不依赖 Python。
 
@@ -84,7 +84,7 @@ pnpm test
 }
 ```
 
-当前工具使用 `craft_` 前缀，例如 `craft_source_add`、`craft_capability_search`、`craft_task_checkpoint`、`craft_workflow_run` 和 `craft_evidence_record`，避免与宿主或其他 MCP 冲突。
+当前工具使用 `craft_` 前缀，例如 `craft_source_add`、`craft_capability_search`、`craft_task_checkpoint`、`craft_workflow_run`、`craft_workflow_trial_run` 和 `craft_evidence_record`，避免与宿主或其他 MCP 冲突。
 
 ## 数据目录
 

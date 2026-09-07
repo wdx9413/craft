@@ -1,6 +1,6 @@
 import { Catalog } from "./catalog.ts";
 import { CraftStore, type JsonObject } from "./store.ts";
-export declare const VERSION = "0.3.0";
+export declare const VERSION = "0.3.1";
 export declare class CraftService {
     readonly store: CraftStore;
     readonly catalog: Catalog;
@@ -35,6 +35,7 @@ export declare class CraftService {
     workflowRollback(args: JsonObject): JsonObject;
     workflowPlan(args: JsonObject): JsonObject;
     workflowRun(args: JsonObject): JsonObject;
+    workflowTrialRun(args: JsonObject): JsonObject;
     orchestrationCreate(args: JsonObject): JsonObject;
     orchestrationDispatch(args: JsonObject): JsonObject;
     orchestrationSubmit(args: JsonObject): JsonObject;

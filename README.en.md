@@ -21,7 +21,7 @@ Craft is not tied to one model or industry. Software engineering, AI video produ
 - Durable tasks, checkpoints, feedback, artifacts, and evidence.
 - Versioned Workflows with inputs, safe paths, redaction, side-effect approval, deterministic commands, assertions, coverage gates, and receipts.
 - Versioned evaluation-suite and Agent-profile primitives.
-- Six-dimensional Harness Configurations, immutable Trials and Outcomes, append-only Traces, and held-out-eval-gated Workflow promotion and rollback.
+- Six-dimensional Harness Configurations, immutable Trials and Outcomes, append-only Traces, automatic evidence capture for Workflow runs, and held-out-eval-gated promotion and rollback.
 - MCP plus Codex, Claude Code, DeepSeek Harness, and generic MCP integration surfaces.
 - One TypeScript/Node.js runtime on Windows, macOS, and Linux, with no Python dependency.
 
@@ -65,7 +65,7 @@ Claude metadata is in `.claude-plugin/plugin.json`. Any MCP host can use a globa
 }
 ```
 
-Tools use the `craft_` prefix to avoid collisions, including `craft_source_add`, `craft_capability_search`, `craft_task_checkpoint`, `craft_workflow_run`, and `craft_evidence_record`.
+Tools use the `craft_` prefix to avoid collisions, including `craft_source_add`, `craft_capability_search`, `craft_task_checkpoint`, `craft_workflow_run`, `craft_workflow_trial_run`, and `craft_evidence_record`.
 
 ## Verification
 

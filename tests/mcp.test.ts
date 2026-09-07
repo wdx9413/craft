@@ -99,6 +99,10 @@ test("MCP negotiates protocols, lists tools, dispatches every handler, and repor
       assert.equal((response?.result as Record<string, unknown>).isError, false, name);
       return (response?.result as Record<string, unknown>).structuredContent as Record<string, unknown>;
     };
+    const captured = await call("craft_workflow_trial_run", {
+      task_id: taskId, workflow_id: "workflow_a", project_root: root,
+    });
+    assert.equal((captured.outcome as Record<string, unknown>).verdict, "passed");
     const harness = await call("craft_harness_configuration_save", { name: "H", dimensions: {} });
     await call("craft_harness_configuration_get", { configuration_id: harness.id });
     await call("craft_harness_configuration_list", {});

@@ -19,6 +19,6 @@ draft → candidate → verified → deprecated
 - Human：明确审批或领域专家评分。
 - Operational：发布后业务指标或延迟结果。
 
-当前版本实现程序门禁和 Workflow 生命周期；完整多来源 Grader 与 Signoff Policy 正在建设。
+当前版本实现程序门禁、Workflow 生命周期，以及 `craft_workflow_trial_run` 的自动取证闭环；完整多来源 Grader 与 Signoff Policy 正在建设。
 
 关联：[Experience/Eval](experience-eval.md) · [Agent IR](agent-ir.md) · [Runtime 接入](runtime-integration.md)

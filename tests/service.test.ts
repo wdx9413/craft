@@ -70,6 +70,24 @@ test("service persists capabilities, tasks, feedback, artifacts, evidence, and v
     const run = service.workflowRun({ workflow_id: runnable.id, inputs: { file: "skills/SKILL.md" }, project_root: root });
     assert.equal(run.status, "passed");
     assert.equal(service.workflowRun({ workflow_id: runnable.id, inputs: { file: "missing" }, project_root: root }).status, "failed");
+    const passedTrial = service.workflowTrialRun({ task_id: taskId, workflow_id: runnable.id,
+      inputs: { file: "skills/SKILL.md" }, project_root: root });
+    assert.equal((passedTrial.workflow_run as Record<string, unknown>).status, "passed");
+    assert.equal((passedTrial.outcome as Record<string, unknown>).verdict, "passed");
+    assert.equal((passedTrial.trace as unknown[]).length, 2);
+    assert.equal((passedTrial.artifact as Record<string, unknown>).kind, "workflow_receipt");
+    const failedTrial = service.workflowTrialRun({ task_id: taskId, workflow_id: runnable.id,
+      inputs: { file: "missing" }, project_root: root });
+    assert.equal((failedTrial.outcome as Record<string, unknown>).verdict, "failed");
+    const originalWorkflowRun = service.workflowRun;
+    service.workflowRun = () => { throw new Error("sensitive crash detail"); };
+    const crashedTrial = service.workflowTrialRun({ task_id: taskId, workflow_id: runnable.id,
+      inputs: { file: "skills/SKILL.md" }, project_root: root });
+    service.workflowRun = originalWorkflowRun;
+    assert.equal(crashedTrial.workflow_run, null);
+    assert.equal(crashedTrial.artifact, null);
+    assert.equal((crashedTrial.outcome as Record<string, unknown>).verdict, "failed");
+    assert.equal(JSON.stringify(crashedTrial).includes("sensitive crash detail"), false);
     const orchestration = service.orchestrationCreate({ goal: "Build", max_concurrency: 2, nodes: [
       { id: "work", role: "worker", objective: "do", profile_ids: ["p"] },
     ] });

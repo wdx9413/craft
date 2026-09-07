@@ -4,7 +4,7 @@ import { CraftStore, type JsonObject } from "./store.ts";
 import { approvedEffects, executeSteps, normalizeSteps, resolveInputs, substitute } from "./workflow.ts";
 import { dispatchNodes, normalizeNodes, planStatus, submitNode, type PlanNode } from "./orchestration.ts";
 
-export const VERSION = "0.3.0";
+export const VERSION = "0.3.1";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const WORKFLOW_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -337,6 +337,57 @@ export class CraftService {
     return this.store.save("workflow_run", id("run"), { workflow_id: plan.workflow_id,
       workflow_version: plan.workflow_version, project_root: root, inputs: plan.inputs, results,
       status: passed ? "passed" : "failed" });
+  }
+
+  workflowTrialRun(args: JsonObject): JsonObject {
+    const plan = this.workflowPlan(args);
+    const trial = this.trialStart({
+      trial_id: args.trial_id,
+      task_id: args.task_id,
+      case_id: args.case_id,
+      subject_type: "workflow",
+      subject_id: plan.workflow_id,
+      subject_version: plan.workflow_version,
+      harness_configuration_id: args.harness_configuration_id,
+      harness_configuration_version: args.harness_configuration_version,
+      environment: args.environment ?? {},
+      budget: args.budget ?? {},
+    });
+    const trialId = String(trial.id);
+    this.trialTraceAppend({ trial_id: trialId, event_type: "workflow.started", source: "program_verified",
+      data: { workflow_id: plan.workflow_id, workflow_version: plan.workflow_version } });
+
+    let run: JsonObject;
+    try {
+      run = this.workflowRun({ ...args, version: plan.workflow_version });
+    } catch {
+      const evidence = this.evidenceRecord({ source_type: "program", confidence: "confirmed",
+        claim: "Workflow execution crashed before a durable run receipt was produced.",
+        locator: { workflow_id: plan.workflow_id, workflow_version: plan.workflow_version } });
+      this.trialTraceAppend({ trial_id: trialId, event_type: "workflow.crashed", source: "program_verified",
+        data: { error_type: "ExecutionError" }, evidence_ids: [evidence.id] });
+      this.outcomeRecord({ trial_id: trialId, verdict: "failed",
+        summary: "Workflow execution crashed before completion.", scores: {}, costs: {},
+        evidence_ids: [evidence.id], source: "program_verified" });
+      return { workflow_run: null, artifact: null, evidence, ...this.trialGet({ trial_id: trialId }) };
+    }
+    const artifact = this.artifactRegister({ kind: "workflow_receipt", name: `Workflow run ${run.id}`,
+      uri: `craft://workflow-runs/${run.id}`, media_type: "application/json",
+      producer_type: "workflow_run", producer_id: run.id,
+      metadata: { workflow_id: plan.workflow_id, workflow_version: plan.workflow_version } });
+    const passed = run.status === "passed";
+    const evidence = this.evidenceRecord({ source_type: "program", confidence: "confirmed",
+      claim: `Workflow run ${run.id} ${passed ? "passed" : "failed"} deterministic checks.`,
+      artifact_id: artifact.id, locator: { workflow_run_id: run.id } });
+    this.trialTraceAppend({ trial_id: trialId, event_type: "workflow.completed", source: "program_verified",
+      data: { status: run.status, workflow_run_id: run.id }, artifact_ids: [artifact.id],
+      evidence_ids: [evidence.id] });
+    const results = run.results as JsonObject[];
+    this.outcomeRecord({ trial_id: trialId, verdict: passed ? "passed" : "failed",
+      summary: passed ? "Workflow passed deterministic checks." : "Workflow failed deterministic checks.",
+      scores: { passed_steps: results.filter((item) => item.passed).length, total_steps: results.length },
+      costs: {}, evidence_ids: [evidence.id], source: "program_verified" });
+    return { workflow_run: run, artifact, evidence, ...this.trialGet({ trial_id: trialId }) };
   }
 
   orchestrationCreate(args: JsonObject): JsonObject {
