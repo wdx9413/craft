@@ -25,6 +25,7 @@ Its core objects and protocols are not tied to one model or industry. Craft can 
 - Versioned evaluation-suite and Agent-profile primitives.
 - Six-dimensional Harness Configurations, immutable Trials and Outcomes, append-only Traces, automatic evidence capture for Workflow runs, and held-out-eval-gated promotion and rollback.
 - Versioned Graders, provenance-preserving Grades, and Signoff Policies; a model judgment cannot masquerade as program proof.
+- Same-benchmark comparisons for Workflow, Agent Profile, and Harness Configuration versions, with aggregate quality, cost, duration, and failure-type deltas. Comparability requires the exact suite version, split, subject type, and case set.
 - MCP plus Codex, Claude Code, DeepSeek Harness, and generic MCP integration surfaces.
 - One TypeScript/Node.js runtime on Windows, macOS, and Linux, with no Python dependency.
 
@@ -68,7 +69,7 @@ Claude metadata is in `.claude-plugin/plugin.json`. Any MCP host can use a globa
 }
 ```
 
-Tools use the `craft_` prefix to avoid collisions, including `craft_source_add`, `craft_capability_search`, `craft_task_checkpoint`, `craft_workflow_run`, `craft_workflow_trial_run`, and `craft_evidence_record`.
+Tools use the `craft_` prefix to avoid collisions, including `craft_source_add`, `craft_capability_search`, `craft_task_checkpoint`, `craft_workflow_trial_run`, `craft_evaluation_run_aggregate`, and `craft_evaluation_compare`.
 
 ## Verification
 

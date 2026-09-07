@@ -26,6 +26,7 @@ Craft 的核心对象和协议不绑定某个模型或行业。它既能通过 M
 - 版本化评测集与 Agent Profile 基础数据模型。
 - 六维 Harness Configuration、不可变 Trial/Outcome、只追加 Trace、Workflow 自动取证闭环，以及 held-out Eval 驱动的晋级与回滚。
 - 版本化 Grader、多来源 Grade 和 Signoff Policy；模型判断不会被记录成程序证明。
+- 同评测集版本对比：在 Suite 精确版本、分区、Subject 类型和 Case 集合一致时，聚合比较 Workflow、Agent Profile 或 Harness Configuration 的质量、成本、耗时与失败类型。
 - MCP 服务，以及 Codex、Claude Code、DeepSeek Harness 和通用 MCP Host 接入。
 - Windows、macOS、Linux 共用 TypeScript/Node.js 运行时；不依赖 Python。
 
@@ -87,7 +88,7 @@ pnpm test
 }
 ```
 
-当前工具使用 `craft_` 前缀，例如 `craft_source_add`、`craft_capability_search`、`craft_task_checkpoint`、`craft_workflow_run`、`craft_workflow_trial_run` 和 `craft_evidence_record`，避免与宿主或其他 MCP 冲突。
+当前工具使用 `craft_` 前缀，例如 `craft_source_add`、`craft_capability_search`、`craft_task_checkpoint`、`craft_workflow_trial_run`、`craft_evaluation_run_aggregate` 和 `craft_evaluation_compare`，避免与宿主或其他 MCP 冲突。
 
 ## 数据目录
 

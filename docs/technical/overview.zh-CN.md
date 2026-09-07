@@ -33,6 +33,7 @@ Task ──compiled to──> Agent IR ──lowered to──> Workflow / Orches
 Task + Subject Version + Harness Configuration ──creates──> Trial
 Trial ──appends──> Trace ──produces──> Artifact / Evidence
 Trial ──closes with──> Outcome ──aggregated by──> Evaluation Run
+Comparable Evaluation Runs ──produce──> Evaluation Comparison
 Trial + Grader Version ──produces──> Grade
 Evaluation Run + Grades + Signoff Policy ──produces──> Signoff
 Signoff ──authorizes──> Workflow or Configuration Promotion
@@ -42,6 +43,7 @@ Signoff ──authorizes──> Workflow or Configuration Promotion
 
 - 版本引用必须精确，不用“当前最新版本”替代历史执行事实。
 - Trial、Outcome 和 Evaluation Run 创建后不可覆盖；Trace 只能追加。
+- Comparison 只接受相同 Suite 精确版本、分区、Subject 类型和 Case 集合；原始 delta 不冒充统计显著性。
 - 程序、模型、人工和业务结果分别记录 provenance。
 - Search/Development Case 不得作为 `verified` 晋级证据。
 - 副作用、预算和宿主 Sandbox 是不同边界，不能互相替代。

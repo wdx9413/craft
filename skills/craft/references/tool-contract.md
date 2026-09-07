@@ -9,7 +9,7 @@ All public tools use a `craft_` prefix. IDs returned by Craft are opaque and mus
 - Workflows: `craft_workflow_save/get/search/plan/run/trial_run/run_get/transition/rollback`
 - Harness configurations: `craft_harness_configuration_save/get/list`
 - Experience: `craft_trial_start/get/list`, `craft_trial_trace_append`, `craft_outcome_record`
-- Evaluations: `craft_eval_suite_save/get/list`, `craft_evaluation_run_record/get/list`
+- Evaluations: `craft_eval_suite_save/get/list`, `craft_evaluation_run_record/get/list/aggregate`, `craft_evaluation_compare`, `craft_evaluation_comparison_get/list`
 - Grading: `craft_grader_save/get/list`, `craft_grade_record/get/list`
 - Signoff: `craft_signoff_policy_save/get/list`, `craft_signoff_evaluate/get/list`
 - Agent routing: `craft_agent_profile_save/get/list`, `craft_orchestration_plan_create/get/list`, `craft_orchestration_dispatch/submit`
@@ -17,6 +17,8 @@ All public tools use a `craft_` prefix. IDs returned by Craft are opaque and mus
 Optional arguments can be omitted. Do not pass secrets in metadata. Treat an MCP result with `isError: true` as a rejected operation, even though the JSON-RPC request itself succeeded.
 
 Trial, Outcome, and Evaluation Run records are immutable. A Trace is append-only. Evaluation Case `split` is one of `search`, `development`, or `held_out`; only a passed held-out run for the exact candidate Workflow version can authorize `verified`.
+
+An Outcome may store a concise `failure_type`; failed records without one aggregate as `unspecified`. `craft_evaluation_run_aggregate` computes pass rate, verdict counts, numeric score summaries, numeric cost summaries, and failure counts from immutable Outcomes. `craft_evaluation_compare` persists an immutable comparison only when both runs use the same Suite ID and version, split, Subject type, and exact Case multiset. A delta is descriptive evidence, not a confidence interval or statistical-significance claim.
 
 `craft_workflow_trial_run` requires an existing Task. It pins the planned Workflow version, executes it, and automatically creates the Trial lifecycle records. A failed deterministic step is a normal failed run; a runtime crash is captured as a sanitized failed Outcome without storing the raw exception message.
 

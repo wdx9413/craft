@@ -3,8 +3,9 @@ import { Catalog } from "./catalog.ts";
 import { CraftStore, type JsonObject } from "./store.ts";
 import { approvedEffects, executeSteps, normalizeSteps, resolveInputs, substitute } from "./workflow.ts";
 import { dispatchNodes, normalizeNodes, planStatus, submitNode, type PlanNode } from "./orchestration.ts";
+import { aggregateEvaluation, compareEvaluationAggregates, type EvaluationAggregate } from "./evaluation.ts";
 
-export const VERSION = "0.4.0";
+export const VERSION = "0.5.0";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const WORKFLOW_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -58,6 +59,7 @@ export class CraftService {
   info(): JsonObject {
     const kinds = ["source", "capability", "task", "checkpoint", "feedback", "artifact",
       "evidence", "workflow", "workflow_run", "evaluation_suite", "evaluation_run",
+      "evaluation_comparison",
       "agent_profile", "orchestration_plan", "harness_configuration", "trial", "outcome",
       "grader", "grade", "signoff_policy", "signoff", "budget", "model_provider", "agent_session"];
     return { version: VERSION, data_root: this.store.paths.root,
@@ -310,8 +312,11 @@ export class CraftService {
     if (!TRIAL_VERDICTS.has(verdict)) throw new Error(`Unsupported trial verdict: ${verdict}`);
     const evidenceIds = array(args.evidence_ids ?? [], "evidence_ids").map((value) => text(value, "evidence_id"));
     for (const evidenceId of evidenceIds) this.store.get("evidence", evidenceId);
+    const failureType = args.failure_type === undefined ? (verdict === "passed" ? null : "unspecified")
+      : text(args.failure_type, "failure_type");
     return this.store.create("outcome", `outcome_${trialId}`, {
       trial_id: trialId, verdict, summary: text(args.summary, "summary"),
+      failure_type: failureType,
       scores: object(args.scores ?? {}, "scores"), costs: object(args.costs ?? {}, "costs"),
       evidence_ids: evidenceIds, source: args.source ?? "program_verified",
     });
@@ -355,6 +360,33 @@ export class CraftService {
       suite_id: suite.id, suite_version: suite.version, split, subject_type: subjectType,
       subject_id: subjectId, subject_version: subjectVersion, trial_ids: trialIds, verdict,
       metrics: object(args.metrics ?? {}, "metrics"),
+    });
+  }
+
+  evaluationRunAggregate(args: JsonObject): JsonObject {
+    const run = this.store.get("evaluation_run", text(args.run_id, "run_id"));
+    const trials = (run.trial_ids as string[]).map((trialId) => this.store.get("trial", trialId));
+    const outcomes = trials.map((trial) => this.store.get("outcome", `outcome_${trial.id}`));
+    return aggregateEvaluation(run, trials, outcomes);
+  }
+
+  evaluationCompare(args: JsonObject): JsonObject {
+    const baselineId = text(args.baseline_run_id, "baseline_run_id");
+    const candidateId = text(args.candidate_run_id, "candidate_run_id");
+    if (baselineId === candidateId) throw new Error("Evaluation comparison requires two different runs");
+    const baseline = this.evaluationRunAggregate({ run_id: baselineId }) as EvaluationAggregate;
+    const candidate = this.evaluationRunAggregate({ run_id: candidateId }) as EvaluationAggregate;
+    for (const field of ["suite_id", "suite_version", "split", "subject_type"] as const) {
+      if (baseline[field] !== candidate[field]) throw new Error(`Evaluation runs are not comparable: ${field} differs`);
+    }
+    if (JSON.stringify(baseline.case_ids) !== JSON.stringify(candidate.case_ids)) {
+      throw new Error("Evaluation runs are not comparable: case_ids differ");
+    }
+    return this.store.create("evaluation_comparison", String(args.comparison_id ?? id("comparison")), {
+      baseline_run_id: baselineId, candidate_run_id: candidateId,
+      suite_id: baseline.suite_id, suite_version: baseline.suite_version, split: baseline.split,
+      subject_type: baseline.subject_type, case_ids: baseline.case_ids,
+      baseline, candidate, comparison: compareEvaluationAggregates(baseline, candidate),
     });
   }
 
@@ -453,6 +485,7 @@ export class CraftService {
     this.trialTraceAppend({ trial_id: trialId, event_type: "workflow.started", source: "program_verified",
       data: { workflow_id: plan.workflow_id, workflow_version: plan.workflow_version } });
 
+    const startedAt = Date.now();
     let run: JsonObject;
     try {
       run = this.workflowRun({ ...args, version: plan.workflow_version });
@@ -463,7 +496,8 @@ export class CraftService {
       this.trialTraceAppend({ trial_id: trialId, event_type: "workflow.crashed", source: "program_verified",
         data: { error_type: "ExecutionError" }, evidence_ids: [evidence.id] });
       this.outcomeRecord({ trial_id: trialId, verdict: "failed",
-        summary: "Workflow execution crashed before completion.", scores: {}, costs: {},
+        summary: "Workflow execution crashed before completion.", failure_type: "execution_error",
+        scores: {}, costs: { duration_ms: Date.now() - startedAt },
         evidence_ids: [evidence.id], source: "program_verified" });
       return { workflow_run: null, artifact: null, evidence, ...this.trialGet({ trial_id: trialId }) };
     }
@@ -481,8 +515,9 @@ export class CraftService {
     const results = run.results as JsonObject[];
     this.outcomeRecord({ trial_id: trialId, verdict: passed ? "passed" : "failed",
       summary: passed ? "Workflow passed deterministic checks." : "Workflow failed deterministic checks.",
+      ...(passed ? {} : { failure_type: "deterministic_check_failed" }),
       scores: { passed_steps: results.filter((item) => item.passed).length, total_steps: results.length },
-      costs: {}, evidence_ids: [evidence.id], source: "program_verified" });
+      costs: { duration_ms: Date.now() - startedAt }, evidence_ids: [evidence.id], source: "program_verified" });
     return { workflow_run: run, artifact, evidence, ...this.trialGet({ trial_id: trialId }) };
   }
 

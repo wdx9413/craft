@@ -121,6 +121,18 @@ test("MCP negotiates protocols, lists tools, dispatches every handler, and repor
       subject_version: candidate.version, trial_ids: [trial.id] });
     await call("craft_evaluation_run_get", { run_id: evaluation.id });
     await call("craft_evaluation_run_list", {});
+    await call("craft_evaluation_run_aggregate", { run_id: evaluation.id });
+    const comparisonTrial = await call("craft_trial_start", { trial_id: "trial_mcp_comparison",
+      task_id: taskId, case_id: "held", subject_type: "workflow", subject_id: "workflow_a",
+      subject_version: candidate.version });
+    await call("craft_outcome_record", { trial_id: comparisonTrial.id, verdict: "passed", summary: "ok" });
+    const comparisonEvaluation = await call("craft_evaluation_run_record", { run_id: "eval_mcp_comparison",
+      suite_id: "suite_a", split: "held_out", subject_type: "workflow", subject_id: "workflow_a",
+      subject_version: candidate.version, trial_ids: [comparisonTrial.id] });
+    const comparison = await call("craft_evaluation_compare", { comparison_id: "comparison_mcp",
+      baseline_run_id: evaluation.id, candidate_run_id: comparisonEvaluation.id });
+    await call("craft_evaluation_comparison_get", { comparison_id: comparison.id });
+    await call("craft_evaluation_comparison_list", {});
     const grader = await call("craft_grader_save", { name: "Program", grader_type: "program" });
     await call("craft_grader_get", { grader_id: grader.id });
     await call("craft_grader_list", {});

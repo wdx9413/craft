@@ -55,7 +55,7 @@ Craft 后续不会把“学习”简化成不断增长的对话摘要，而会�
 
 经验分为两层：具体 Case 的完整执行记录，以及由多个 Case 归纳出的可复用模式。候选 Workflow 或 Harness 配置必须通过独立评测集后才能晋级，并保留版本、适用条件和回滚路径。排序优先保证正确性，再比较 token、耗时和费用；模型判断可以参与诊断，但不能替代确定性证据或人工审批。
 
-v0.4.0 已实现六维 Harness Configuration、不可变 Trial/Outcome、只追加 Trace、评测分区、Workflow 自动取证、多来源 Grader、Signoff Policy，以及 Workflow 晋级/回滚门禁。自动执行模型/业务 Grader、自动 Harness 搜索、双层经验库和按 Case 自适应装配仍是路线设计。
+v0.5.0 已实现六维 Harness Configuration、不可变 Trial/Outcome、只追加 Trace、评测分区、Workflow 自动取证、多来源 Grader、Signoff Policy、Workflow 晋级/回滚门禁，以及同评测集版本的质量、成本、耗时和失败类型聚合对比。重复采样与统计置信度、自动执行模型/业务 Grader、自动 Harness 搜索、双层经验库和按 Case 自适应装配仍是路线设计。
 
 ## 存储与跨平台
 

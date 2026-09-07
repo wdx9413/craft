@@ -8121,8 +8121,106 @@ function submitNode(nodes, leaseId, verdict, provenance) {
   return propagated;
 }
 
+// src/evaluation.ts
+function numericValues(records, field) {
+  const values = /* @__PURE__ */ new Map();
+  for (const record of records) {
+    const metrics = record[field];
+    for (const [name, value] of Object.entries(metrics)) {
+      if (typeof value !== "number" || !Number.isFinite(value)) continue;
+      values.set(name, [...values.get(name) ?? [], value]);
+    }
+  }
+  return values;
+}
+function summarize(records, field, includeSum) {
+  return Object.fromEntries([...numericValues(records, field)].sort(([left], [right]) => left.localeCompare(right)).map(([name, values]) => {
+    const sum = values.reduce((total, value) => total + value, 0);
+    return [name, {
+      count: values.length,
+      mean: sum / values.length,
+      min: Math.min(...values),
+      max: Math.max(...values),
+      ...includeSum ? { sum } : {}
+    }];
+  }));
+}
+function aggregateEvaluation(run, trials, outcomes) {
+  const verdictCounts = {};
+  const failureTypes = {};
+  for (const outcome of outcomes) {
+    const verdict = String(outcome.verdict);
+    verdictCounts[verdict] = (verdictCounts[verdict] ?? 0) + 1;
+    if (verdict !== "passed") {
+      const failureType = typeof outcome.failure_type === "string" && outcome.failure_type ? outcome.failure_type : "unspecified";
+      failureTypes[failureType] = (failureTypes[failureType] ?? 0) + 1;
+    }
+  }
+  return {
+    evaluation_run_id: run.id,
+    suite_id: run.suite_id,
+    suite_version: run.suite_version,
+    split: run.split,
+    subject_type: run.subject_type,
+    subject_id: run.subject_id,
+    subject_version: run.subject_version,
+    trial_ids: trials.map((trial) => trial.id),
+    case_ids: trials.map((trial) => trial.case_id).sort(),
+    total: outcomes.length,
+    verdict_counts: verdictCounts,
+    pass_rate: outcomes.filter((outcome) => outcome.verdict === "passed").length / outcomes.length,
+    scores: summarize(outcomes, "scores", false),
+    costs: summarize(outcomes, "costs", true),
+    failure_types: failureTypes
+  };
+}
+function metricDeltas(baseline, candidate) {
+  const names = [.../* @__PURE__ */ new Set([...Object.keys(baseline), ...Object.keys(candidate)])].sort();
+  return Object.fromEntries(names.map((name) => {
+    const baselineMean = baseline[name]?.mean;
+    const candidateMean = candidate[name]?.mean;
+    return [name, {
+      baseline: baselineMean ?? null,
+      candidate: candidateMean ?? null,
+      delta: typeof baselineMean === "number" && typeof candidateMean === "number" ? candidateMean - baselineMean : null
+    }];
+  }));
+}
+function countDeltas(baseline, candidate) {
+  const names = [.../* @__PURE__ */ new Set([...Object.keys(baseline), ...Object.keys(candidate)])].sort();
+  return Object.fromEntries(names.map((name) => {
+    const baselineCount = Number(baseline[name] ?? 0);
+    const candidateCount = Number(candidate[name] ?? 0);
+    return [name, { baseline: baselineCount, candidate: candidateCount, delta: candidateCount - baselineCount }];
+  }));
+}
+function compareEvaluationAggregates(baseline, candidate) {
+  const scores = metricDeltas(baseline.scores, candidate.scores);
+  const costs = metricDeltas(baseline.costs, candidate.costs);
+  const signals = [
+    candidate.pass_rate - baseline.pass_rate,
+    ...Object.values(scores).map((item) => item.delta).filter((value) => typeof value === "number"),
+    ...Object.values(costs).map((item) => item.delta).filter((value) => typeof value === "number").map((value) => -value)
+  ];
+  const improved = signals.some((value) => value > 0);
+  const regressed = signals.some((value) => value < 0);
+  const assessment = improved && regressed ? "mixed" : improved ? "improved" : regressed ? "regressed" : "equivalent";
+  return {
+    pass_rate: {
+      baseline: baseline.pass_rate,
+      candidate: candidate.pass_rate,
+      delta: candidate.pass_rate - baseline.pass_rate
+    },
+    scores,
+    costs,
+    verdict_counts: countDeltas(baseline.verdict_counts, candidate.verdict_counts),
+    failure_types: countDeltas(baseline.failure_types, candidate.failure_types),
+    assessment
+  };
+}
+
 // src/service.ts
-var VERSION = "0.4.0";
+var VERSION = "0.5.0";
 var CONFIDENCE = /* @__PURE__ */ new Set(["confirmed", "bounded", "unverified", "rejected"]);
 var TASK_STATUS = /* @__PURE__ */ new Set(["active", "paused", "completed", "cancelled"]);
 var WORKFLOW_LIFECYCLE = /* @__PURE__ */ new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -8188,6 +8286,7 @@ var CraftService = class {
       "workflow_run",
       "evaluation_suite",
       "evaluation_run",
+      "evaluation_comparison",
       "agent_profile",
       "orchestration_plan",
       "harness_configuration",
@@ -8521,10 +8620,12 @@ var CraftService = class {
     if (!TRIAL_VERDICTS.has(verdict)) throw new Error(`Unsupported trial verdict: ${verdict}`);
     const evidenceIds = array(args.evidence_ids ?? [], "evidence_ids").map((value) => text(value, "evidence_id"));
     for (const evidenceId of evidenceIds) this.store.get("evidence", evidenceId);
+    const failureType = args.failure_type === void 0 ? verdict === "passed" ? null : "unspecified" : text(args.failure_type, "failure_type");
     return this.store.create("outcome", `outcome_${trialId}`, {
       trial_id: trialId,
       verdict,
       summary: text(args.summary, "summary"),
+      failure_type: failureType,
       scores: object(args.scores ?? {}, "scores"),
       costs: object(args.costs ?? {}, "costs"),
       evidence_ids: evidenceIds,
@@ -8576,6 +8677,37 @@ var CraftService = class {
       trial_ids: trialIds,
       verdict,
       metrics: object(args.metrics ?? {}, "metrics")
+    });
+  }
+  evaluationRunAggregate(args) {
+    const run = this.store.get("evaluation_run", text(args.run_id, "run_id"));
+    const trials = run.trial_ids.map((trialId) => this.store.get("trial", trialId));
+    const outcomes = trials.map((trial) => this.store.get("outcome", `outcome_${trial.id}`));
+    return aggregateEvaluation(run, trials, outcomes);
+  }
+  evaluationCompare(args) {
+    const baselineId = text(args.baseline_run_id, "baseline_run_id");
+    const candidateId = text(args.candidate_run_id, "candidate_run_id");
+    if (baselineId === candidateId) throw new Error("Evaluation comparison requires two different runs");
+    const baseline = this.evaluationRunAggregate({ run_id: baselineId });
+    const candidate = this.evaluationRunAggregate({ run_id: candidateId });
+    for (const field of ["suite_id", "suite_version", "split", "subject_type"]) {
+      if (baseline[field] !== candidate[field]) throw new Error(`Evaluation runs are not comparable: ${field} differs`);
+    }
+    if (JSON.stringify(baseline.case_ids) !== JSON.stringify(candidate.case_ids)) {
+      throw new Error("Evaluation runs are not comparable: case_ids differ");
+    }
+    return this.store.create("evaluation_comparison", String(args.comparison_id ?? id("comparison")), {
+      baseline_run_id: baselineId,
+      candidate_run_id: candidateId,
+      suite_id: baseline.suite_id,
+      suite_version: baseline.suite_version,
+      split: baseline.split,
+      subject_type: baseline.subject_type,
+      case_ids: baseline.case_ids,
+      baseline,
+      candidate,
+      comparison: compareEvaluationAggregates(baseline, candidate)
     });
   }
   workflowSave(args) {
@@ -8694,6 +8826,7 @@ var CraftService = class {
       source: "program_verified",
       data: { workflow_id: plan.workflow_id, workflow_version: plan.workflow_version }
     });
+    const startedAt = Date.now();
     let run;
     try {
       run = this.workflowRun({ ...args, version: plan.workflow_version });
@@ -8715,8 +8848,9 @@ var CraftService = class {
         trial_id: trialId,
         verdict: "failed",
         summary: "Workflow execution crashed before completion.",
+        failure_type: "execution_error",
         scores: {},
-        costs: {},
+        costs: { duration_ms: Date.now() - startedAt },
         evidence_ids: [evidence2.id],
         source: "program_verified"
       });
@@ -8752,8 +8886,9 @@ var CraftService = class {
       trial_id: trialId,
       verdict: passed ? "passed" : "failed",
       summary: passed ? "Workflow passed deterministic checks." : "Workflow failed deterministic checks.",
+      ...passed ? {} : { failure_type: "deterministic_check_failed" },
       scores: { passed_steps: results.filter((item) => item.passed).length, total_steps: results.length },
-      costs: {},
+      costs: { duration_ms: Date.now() - startedAt },
       evidence_ids: [evidence.id],
       source: "program_verified"
     });
@@ -8964,7 +9099,7 @@ var TOOLS = [
     "Record the single immutable outcome for a trial.",
     ["trial_id", "verdict", "summary"],
     false,
-    ["scores", "costs", "evidence_ids", "source"]
+    ["failure_type", "scores", "costs", "evidence_ids", "source"]
   ),
   tool(
     "craft_evaluation_run_record",
@@ -8975,6 +9110,16 @@ var TOOLS = [
   ),
   tool("craft_evaluation_run_get", "Read an immutable evaluation run.", ["run_id"], true),
   tool("craft_evaluation_run_list", "List evaluation runs.", [], true, ["limit", "query"]),
+  tool("craft_evaluation_run_aggregate", "Compute reproducible quality, score, cost, duration, and failure aggregates for an evaluation run.", ["run_id"], true),
+  tool(
+    "craft_evaluation_compare",
+    "Compare two runs only when suite version, split, subject type, and case set match.",
+    ["baseline_run_id", "candidate_run_id"],
+    false,
+    ["comparison_id"]
+  ),
+  tool("craft_evaluation_comparison_get", "Read an immutable evaluation comparison.", ["comparison_id"], true),
+  tool("craft_evaluation_comparison_list", "List immutable evaluation comparisons.", [], true, ["limit", "query"]),
   tool(
     "craft_grader_save",
     "Save a versioned program, model, human, or operational grader.",
@@ -9067,6 +9212,10 @@ var McpServer = class {
       craft_evaluation_run_record: (a) => service.evaluationRunRecord(a),
       craft_evaluation_run_get: (a) => service.get("evaluation_run", "run_id", a),
       craft_evaluation_run_list: (a) => service.list("evaluation_run", "runs", a),
+      craft_evaluation_run_aggregate: (a) => service.evaluationRunAggregate(a),
+      craft_evaluation_compare: (a) => service.evaluationCompare(a),
+      craft_evaluation_comparison_get: (a) => service.get("evaluation_comparison", "comparison_id", a),
+      craft_evaluation_comparison_list: (a) => service.list("evaluation_comparison", "comparisons", a),
       craft_grader_save: (a) => service.graderSave(a),
       craft_grader_get: (a) => service.get("grader", "grader_id", a),
       craft_grader_list: (a) => service.list("grader", "graders", a),

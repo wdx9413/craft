@@ -27,6 +27,6 @@ draft → candidate → verified → deprecated
 - Policy 可要求 held-out 分区和基础 Outcome 全通过；Signoff 保存逐项 checks，失败也可审计。
 - Workflow 可使用 passed Signoff 晋级，同时保留旧的 held-out Evaluation Run 兼容入口。咨询型 Policy 可以忽略 held-out 或 Outcome，但其 Signoff 不能用于 Workflow 晋级；晋级仍额外要求底层 Evaluation Run 是 held-out 且全部通过。
 
-下一步是聚合指标、版本对比、人工复核任务和延迟 Operational Grade 的回填协议。
+Evaluation Run 聚合与同评测集版本对比已实现，但 Comparison 不自动授权晋级；Signoff 仍是发布/复用门禁。下一步是人工复核任务、重复采样置信度和延迟 Operational Grade 的回填协议。
 
 关联：[Experience/Eval](experience-eval.md) · [Agent IR](agent-ir.md) · [Runtime 接入](runtime-integration.md)

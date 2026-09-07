@@ -1,7 +1,7 @@
 {
   "name": "craft",
-  "version": "0.4.0",
-  "description": "Capability discovery, durable tasks, immutable execution trials, multi-source grading, signoff, and verified workflows.",
+  "version": "0.5.0",
+  "description": "Capability discovery, durable tasks, immutable execution trials, multi-source grading, comparable evaluations, signoff, and verified workflows.",
   "skills": "./skills/",
   "mcpServers": {
     "craft": {
