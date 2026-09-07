@@ -1,12 +1,12 @@
 {
   "name": "craft",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Capability discovery, durable tasks, verified workflows, evidence, and host-mediated multi-agent orchestration.",
   "skills": "./skills/",
   "mcpServers": {
     "craft": {
       "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/dist/bin/craft-mcp.js"]
+      "args": ["${CLAUDE_PLUGIN_ROOT}/dist/plugin/craft-mcp.cjs"]
     }
   }
 }

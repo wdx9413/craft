@@ -65,6 +65,8 @@ pnpm test
 
 插件会读取根目录的 `.codex-plugin/plugin.json` 和 `.mcp.json`。也可以只把 `skills/craft` 作为普通 Skill 安装，但这样不会自动获得 MCP 数据层。
 
+从 v0.2.1 起，插件 MCP 使用仓库内随版本发布的单文件 bundle；Codex 把插件复制到缓存目录后无需再执行 `npm install`，也不会依赖源码仓库的 `node_modules`。升级旧版本后请重新安装插件，并在新会话中验证 `craft_info`。
+
 ## 接入 Claude Code
 
 仓库根目录包含 `.claude-plugin/plugin.json`。把该 Git 仓库作为插件源安装；如果宿主只支持 MCP，则使用下方通用配置。

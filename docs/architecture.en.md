@@ -13,3 +13,11 @@ Workflow steps declare `read_only`, `local_write`, `external_write`, or `destruc
 Orchestration plans are DAGs. Dispatch leases only ready nodes within host capacity. Failed routes can advance to another Agent Profile, terminal failures block descendants, and submissions require a valid lease plus provenance. Craft never bypasses host sandbox or approval rules.
 
 The current release implements the MCP provider path, local catalog, durable task/evidence primitives, deterministic Workflow execution, and basic multi-Agent routing. A standalone model loop, vector providers, remote hubs, desktop UI, automatic graders, lease heartbeats, budgets, and compensation transactions remain future work.
+
+## Learning from execution experience
+
+Future learning is modeled as `Task → Trial → Trace → Outcome`, not as an ever-growing conversation summary. Harness configurations are divided into six diagnosable control surfaces: context assembly, tools and retrieval, generation budget, orchestration, memory, and output validation. Every change should retain the configuration version and delta, cost, evidence, and failure diagnosis.
+
+Experience has two layers: complete case-level executions and reusable patterns distilled across cases. Workflow or harness candidates must pass a held-out evaluation suite before promotion and retain applicability conditions plus rollback history. Correctness ranks before token, latency, and monetary cost. Model judgments may support diagnosis but cannot replace deterministic evidence or explicit human approval.
+
+This is roadmap design, not a claim that v0.2.1 already performs automatic harness optimization. The current release has Task, Evidence, Workflow, Evaluation Suite, and basic orchestration primitives. Automated search, a dual-layer experience bank, graders, and case-adaptive assembly remain future work. Codex and Claude plugin distributions do use a dependency-free single-file MCP bundle.

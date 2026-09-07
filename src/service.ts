@@ -4,7 +4,7 @@ import { CraftStore, type JsonObject } from "./store.ts";
 import { approvedEffects, executeSteps, normalizeSteps, resolveInputs, substitute } from "./workflow.ts";
 import { dispatchNodes, normalizeNodes, planStatus, submitNode, type PlanNode } from "./orchestration.ts";
 
-export const VERSION = "0.2.0";
+export const VERSION = "0.2.1";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 

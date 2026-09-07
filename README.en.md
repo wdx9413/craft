@@ -50,6 +50,8 @@ pnpm test
 
 Add `https://github.com/wdx9413/craft` as a Git marketplace source. Pin a release tag when possible and use `.` as the sparse path because the plugin manifest is at repository root.
 
+Since v0.2.1, the plugin MCP starts from a versioned single-file bundle committed with the plugin. A Codex cache copy therefore needs neither `npm install` nor the source repository's `node_modules`. Reinstall after upgrading from an older version and verify `craft_info` in a new session.
+
 ## Claude Code and MCP
 
 Claude metadata is in `.claude-plugin/plugin.json`. Any MCP host can use a global installation:

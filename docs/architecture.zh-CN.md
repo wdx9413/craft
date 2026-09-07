@@ -49,6 +49,14 @@ Plan 是带依赖的有向无环图。Node 指定角色、目标、候选 Agent 
 
 Craft 不绕过 Host 的 Sandbox、审批或并发限制，也不直接假定 Codex/Claude 的内部任务 API。插件负责把 Lease 翻译成宿主原生执行，再把真实结果交回 Craft。
 
+## 从执行经验中改进 Harness
+
+Craft 后续不会把“学习”简化成不断增长的对话摘要，而会把一次执行明确记录为 `Task → Trial → Trace → Outcome`。Harness 配置按六个可诊断面组织：上下文装配、工具与检索、生成预算、编排方式、记忆策略、输出验证。每次变更都应保存配置版本、差异、成本、证据和失败归因。
+
+经验分为两层：具体 Case 的完整执行记录，以及由多个 Case 归纳出的可复用模式。候选 Workflow 或 Harness 配置必须通过独立评测集后才能晋级，并保留版本、适用条件和回滚路径。排序优先保证正确性，再比较 token、耗时和费用；模型判断可以参与诊断，但不能替代确定性证据或人工审批。
+
+这是路线设计，不是 v0.2.1 已完成能力。当前已经有 Task、Evidence、Workflow、Evaluation Suite 与基础编排对象，但尚未实现自动 Harness 搜索、双层经验库、Grader 和按 Case 自适应装配。
+
 ## 存储与跨平台
 
 默认根目录是 `~/.craft_data`，可用 `CRAFT_DATA_DIR` 覆盖。配置写入 `config/`，版本化状态写入 `db/craft.db`，其余目录用于可重建索引、日志、备份、缓存和运行时文件。业务项目仅作为读取或明确授权的 Workflow 工作目录，不存放 Craft 内部数据。
@@ -57,4 +65,4 @@ Craft 不绕过 Host 的 Sandbox、审批或并发限制，也不直接假定 Co
 
 ## 当前边界
 
-当前版本已提供 Provider 模式的完整 MCP 路径、能力目录、任务/证据、确定性 Workflow 和基础多 Agent 路由。独立 Agent 的模型循环、向量 Provider、远程 Hub、桌面端、自动 Grader、Lease TTL/Heartbeat、预算和补偿事务是后续增量，不应在文档中被描述成已完成。
+当前版本已提供 Provider 模式的完整 MCP 路径、能力目录、任务/证据、确定性 Workflow 和基础多 Agent 路由。Codex 与 Claude 插件使用不依赖 `node_modules` 的单文件 MCP bundle。独立 Agent 的模型循环、向量 Provider、远程 Hub、桌面端、自动 Grader、自适应 Harness 搜索、Lease TTL/Heartbeat、预算和补偿事务是后续增量，不应在文档中被描述成已完成。

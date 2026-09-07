@@ -3,7 +3,7 @@
     "craft": {
       "command": "node",
       "args": [
-        "dist/bin/craft-mcp.js"
+        "dist/plugin/craft-mcp.cjs"
       ]
     }
   }

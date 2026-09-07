@@ -3,7 +3,7 @@ import { Catalog } from "./catalog.js";
 import { CraftStore } from "./store.js";
 import { approvedEffects, executeSteps, normalizeSteps, resolveInputs, substitute } from "./workflow.js";
 import { dispatchNodes, normalizeNodes, planStatus, submitNode } from "./orchestration.js";
-export const VERSION = "0.2.0";
+export const VERSION = "0.2.1";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 function id(prefix) { return `${prefix}_${randomUUID().replaceAll("-", "")}`; }
