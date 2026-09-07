@@ -29,6 +29,7 @@ test("layout and provider config stay under the selected Craft root", async () =
     assert.equal((await setMode("provider", paths, "later")).activeMode, "provider");
     await assert.rejects(() => setMode("bad" as never, paths), /Unsupported Craft mode/);
     await atomicPrivateJson(join(root, "unix", "private.json"), { ok: true }, "linux");
+    await atomicPrivateJson(join(root, "windows", "private.json"), { ok: true }, "win32");
   } finally {
     await rm(root, { recursive: true, force: true });
   }
