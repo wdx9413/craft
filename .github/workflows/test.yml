@@ -21,4 +21,13 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm test
+      - name: Build all distributions
+        run: pnpm run build
+      - name: Typecheck
+        run: pnpm run typecheck
+      - name: Unit tests and 100% coverage
+        run: pnpm run test:ts
+      - name: CLI smoke test
+        run: pnpm run test:smoke
+      - name: Isolated plugin smoke test
+        run: pnpm run test:plugin
