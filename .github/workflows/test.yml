@@ -21,8 +21,14 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Build all distributions
-        run: pnpm run build
+      - name: Clean distributions
+        run: pnpm run clean
+      - name: Build core
+        run: pnpm run build:core
+      - name: Build plugin bundle
+        run: pnpm run build:plugin
+      - name: Build DeepSeek adapter
+        run: pnpm run build:deepseek
       - name: Typecheck
         run: pnpm run typecheck
       - name: Unit tests and 100% coverage
