@@ -278,3 +278,134 @@ test("experience kernel qualifies and rolls back workflows with immutable trials
       reason: "failed eval", evaluation_run_id: failedRun.id }), /passed held-out/);
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
+
+test("graders and signoff policies preserve provenance and gate exact versions", async () => {
+  const root = join(tmpdir(), `craft-signoff-${process.pid}-${Date.now()}`);
+  const store = await new CraftStore(craftPaths(root)).open();
+  const service = new CraftService(store);
+  try {
+    const taskPack = service.taskOpen({ title: "Signoff", goal: "Apply independent graders" });
+    const taskId = String((taskPack.task as Record<string, unknown>).id);
+    const draft = service.workflowSave({ workflow_id: "workflow_signoff", name: "Signoff workflow" });
+    const candidate = service.workflowTransition({ workflow_id: draft.id, target: "candidate", reason: "grade it" });
+    const suite = service.evaluationSuiteSave({ name: "Signoff suite", cases: [
+      { case_id: "held", split: "held_out" }, { case_id: "dev", split: "development" },
+    ] });
+    const trial = service.trialStart({ task_id: taskId, case_id: "held", subject_type: "workflow",
+      subject_id: candidate.id, subject_version: candidate.version });
+    service.outcomeRecord({ trial_id: trial.id, verdict: "passed", summary: "base checks passed" });
+    const evaluation = service.evaluationRunRecord({ suite_id: suite.id, split: "held_out",
+      subject_type: "workflow", subject_id: candidate.id, subject_version: candidate.version,
+      trial_ids: [trial.id] });
+
+    assert.throws(() => service.graderSave({ name: "bad", grader_type: "unknown" }), /grader type/);
+    assert.throws(() => service.graderSave({ name: "bad", grader_type: "program", configuration: [] }), /configuration/);
+    const program = service.graderSave({ grader_id: "grader_program", name: "Program gate",
+      grader_type: "program", configuration: { command: "test" } });
+    const model = service.graderSave({ grader_id: "grader_model", name: "Rubric", grader_type: "model" });
+    const human = service.graderSave({ grader_id: "grader_human", name: "Reviewer", grader_type: "human" });
+    const humanNoScore = service.graderSave({ grader_id: "grader_human_no_score", name: "Reviewer 2",
+      grader_type: "human" });
+    service.graderSave({ grader_id: "grader_operational", name: "Business result", grader_type: "operational" });
+    const evidence = service.evidenceRecord({ source_type: "test", claim: "program passed", confidence: "confirmed" });
+    assert.throws(() => service.gradeRecord({ trial_id: trial.id, grader_id: program.id,
+      grader_version: program.version, verdict: "unknown", summary: "bad" }), /grade verdict/);
+    assert.throws(() => service.gradeRecord({ trial_id: trial.id, grader_id: program.id,
+      grader_version: program.version, verdict: "passed", summary: "bad", score: 2 }), /score/);
+    assert.throws(() => service.gradeRecord({ trial_id: trial.id, grader_id: program.id,
+      grader_version: program.version, verdict: "passed", summary: "bad", evidence_ids: ["missing"] }), /Unknown evidence/);
+    const programGrade = service.gradeRecord({ trial_id: trial.id, grader_id: program.id,
+      grader_version: program.version, verdict: "passed", summary: "tests passed", score: 0.9,
+      evidence_ids: [evidence.id], metadata: { runner: "node:test" } });
+    assert.throws(() => service.gradeRecord({ trial_id: trial.id, grader_id: program.id,
+      grader_version: program.version, verdict: "passed", summary: "duplicate" }), /already exists/);
+    const modelGrade = service.gradeRecord({ trial_id: trial.id, grader_id: model.id,
+      grader_version: model.version, verdict: "passed", summary: "rubric passed" });
+    const humanGrade = service.gradeRecord({ trial_id: trial.id, grader_id: human.id,
+      grader_version: human.version, verdict: "inconclusive", summary: "needs review", score: null });
+    const humanNoScoreGrade = service.gradeRecord({ trial_id: trial.id, grader_id: humanNoScore.id,
+      grader_version: humanNoScore.version, verdict: "passed", summary: "approved" });
+
+    assert.throws(() => service.signoffPolicySave({ name: "bad", requirements: ["program"] }), /must be an object/);
+    assert.throws(() => service.signoffPolicySave({ name: "bad", requirements: [{ grader_type: "bad" }] }), /grader type/);
+    assert.throws(() => service.signoffPolicySave({ name: "bad", requirements: [
+      { grader_type: "program" }, { grader_type: "program" },
+    ] }), /unique/);
+    assert.throws(() => service.signoffPolicySave({ name: "bad", require_held_out: "yes" }), /boolean/);
+    const policy = service.signoffPolicySave({ policy_id: "policy_strict", name: "Strict",
+      requirements: [{ grader_type: "program", minimum_score: 0.8 },
+        { grader_type: "model", minimum_score: null }] });
+    const signoff = service.signoffEvaluate({ signoff_id: "signoff_pass", policy_id: policy.id,
+      policy_version: policy.version, evaluation_run_id: evaluation.id,
+      grade_ids: [programGrade.id, modelGrade.id] });
+    assert.equal(signoff.decision, "passed");
+    assert.equal(service.workflowTransition({ workflow_id: candidate.id, target: "verified",
+      reason: "policy passed", signoff_id: signoff.id }).signoff_id, signoff.id);
+
+    const scorePolicy = service.signoffPolicySave({ name: "Higher score",
+      requirements: [{ grader_type: "program", minimum_score: 0.95 }] });
+    const failedSignoff = service.signoffEvaluate({ policy_id: scorePolicy.id, evaluation_run_id: evaluation.id,
+      grade_ids: [programGrade.id] });
+    assert.equal(failedSignoff.decision, "failed");
+    const humanPolicy = service.signoffPolicySave({ name: "Human required",
+      requirements: [{ grader_type: "human" }] });
+    assert.equal(service.signoffEvaluate({ policy_id: humanPolicy.id, evaluation_run_id: evaluation.id,
+      grade_ids: [humanGrade.id] }).decision, "failed");
+    const scoredHumanPolicy = service.signoffPolicySave({ name: "Scored human",
+      requirements: [{ grader_type: "human", minimum_score: 0.5 }] });
+    assert.equal(service.signoffEvaluate({ policy_id: scoredHumanPolicy.id, evaluation_run_id: evaluation.id,
+      grade_ids: [humanNoScoreGrade.id] }).decision, "failed");
+    assert.throws(() => service.signoffEvaluate({ policy_id: policy.id, evaluation_run_id: evaluation.id,
+      grade_ids: [programGrade.id, programGrade.id] }), /grade_ids/);
+
+    const other = service.workflowSave({ name: "Other" });
+    const otherCandidate = service.workflowTransition({ workflow_id: other.id, target: "candidate", reason: "test" });
+    assert.throws(() => service.workflowTransition({ workflow_id: otherCandidate.id, target: "verified",
+      reason: "wrong signoff", signoff_id: failedSignoff.id }), /passed signoff/);
+    const otherTrial = service.trialStart({ task_id: taskId, subject_type: "workflow",
+      subject_id: other.id, subject_version: other.version });
+    const otherGrade = service.gradeRecord({ trial_id: otherTrial.id, grader_id: model.id,
+      grader_version: model.version, verdict: "failed", summary: "outside" });
+    assert.throws(() => service.signoffEvaluate({ policy_id: policy.id, evaluation_run_id: evaluation.id,
+      grade_ids: [otherGrade.id] }), /outside/);
+
+    const devTrial = service.trialStart({ task_id: taskId, case_id: "dev", subject_type: "workflow",
+      subject_id: candidate.id, subject_version: candidate.version });
+    service.outcomeRecord({ trial_id: devTrial.id, verdict: "failed", summary: "development failed" });
+    const devEvaluation = service.evaluationRunRecord({ suite_id: suite.id, split: "development",
+      subject_type: "workflow", subject_id: candidate.id, subject_version: candidate.version,
+      trial_ids: [devTrial.id] });
+    const permissive = service.signoffPolicySave({ name: "Advisory", requirements: [],
+      require_held_out: false, require_outcome_passed: false });
+    assert.equal(service.signoffEvaluate({ policy_id: permissive.id, evaluation_run_id: devEvaluation.id }).decision,
+      "passed");
+
+    const advisoryDraft = service.workflowSave({ name: "Advisory development" });
+    const advisoryCandidate = service.workflowTransition({ workflow_id: advisoryDraft.id,
+      target: "candidate", reason: "advisory" });
+    const advisoryTrial = service.trialStart({ task_id: taskId, case_id: "dev", subject_type: "workflow",
+      subject_id: advisoryCandidate.id, subject_version: advisoryCandidate.version });
+    service.outcomeRecord({ trial_id: advisoryTrial.id, verdict: "passed", summary: "development passed" });
+    const advisoryEvaluation = service.evaluationRunRecord({ suite_id: suite.id, split: "development",
+      subject_type: "workflow", subject_id: advisoryCandidate.id, subject_version: advisoryCandidate.version,
+      trial_ids: [advisoryTrial.id] });
+    const advisorySignoff = service.signoffEvaluate({ policy_id: permissive.id,
+      evaluation_run_id: advisoryEvaluation.id });
+    assert.throws(() => service.workflowTransition({ workflow_id: advisoryCandidate.id, target: "verified",
+      reason: "development cannot promote", signoff_id: advisorySignoff.id }), /passed signoff/);
+
+    const failedDraft = service.workflowSave({ name: "Advisory failure" });
+    const failedCandidate = service.workflowTransition({ workflow_id: failedDraft.id,
+      target: "candidate", reason: "advisory" });
+    const heldFailure = service.trialStart({ task_id: taskId, case_id: "held", subject_type: "workflow",
+      subject_id: failedCandidate.id, subject_version: failedCandidate.version });
+    service.outcomeRecord({ trial_id: heldFailure.id, verdict: "failed", summary: "held-out failed" });
+    const failedEvaluation = service.evaluationRunRecord({ suite_id: suite.id, split: "held_out",
+      subject_type: "workflow", subject_id: failedCandidate.id, subject_version: failedCandidate.version,
+      trial_ids: [heldFailure.id] });
+    const advisoryFailure = service.signoffEvaluate({ policy_id: permissive.id,
+      evaluation_run_id: failedEvaluation.id });
+    assert.throws(() => service.workflowTransition({ workflow_id: failedCandidate.id, target: "verified",
+      reason: "failure cannot promote", signoff_id: advisoryFailure.id }), /passed signoff/);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});

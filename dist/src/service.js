@@ -1,15 +1,17 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { Catalog } from "./catalog.js";
 import { CraftStore } from "./store.js";
 import { approvedEffects, executeSteps, normalizeSteps, resolveInputs, substitute } from "./workflow.js";
 import { dispatchNodes, normalizeNodes, planStatus, submitNode } from "./orchestration.js";
-export const VERSION = "0.3.1";
+export const VERSION = "0.4.0";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const WORKFLOW_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
 const TRIAL_VERDICTS = new Set(["passed", "failed", "blocked", "cancelled"]);
 const EVAL_SPLITS = new Set(["search", "development", "held_out"]);
 const HARNESS_DIMENSIONS = new Set(["context", "tools", "generation", "orchestration", "memory", "output"]);
+const GRADER_TYPES = new Set(["program", "model", "human", "operational"]);
+const GRADE_VERDICTS = new Set(["passed", "failed", "inconclusive"]);
 function id(prefix) { return `${prefix}_${randomUUID().replaceAll("-", "")}`; }
 function text(value, name) {
     if (typeof value !== "string" || !value.trim())
@@ -29,6 +31,14 @@ function optionalBoolean(value, name) {
     if (typeof value !== "boolean")
         throw new Error(`${name} must be a boolean`);
     return value;
+}
+function optionalScore(value, name) {
+    if (value === undefined || value === null)
+        return null;
+    const score = Number(value);
+    if (!Number.isFinite(score) || score < 0 || score > 1)
+        throw new Error(`${name} must be between 0 and 1`);
+    return score;
 }
 function array(value, name) {
     if (!Array.isArray(value))
@@ -52,7 +62,7 @@ export class CraftService {
         const kinds = ["source", "capability", "task", "checkpoint", "feedback", "artifact",
             "evidence", "workflow", "workflow_run", "evaluation_suite", "evaluation_run",
             "agent_profile", "orchestration_plan", "harness_configuration", "trial", "outcome",
-            "budget", "model_provider", "agent_session"];
+            "grader", "grade", "signoff_policy", "signoff", "budget", "model_provider", "agent_session"];
         return { version: VERSION, data_root: this.store.paths.root,
             counts: Object.fromEntries(kinds.map((kind) => [kind, this.store.count(kind)])) };
     }
@@ -184,6 +194,81 @@ export class CraftService {
         }
         return this.saveVersioned("evaluation_suite", "suite", { ...args, cases }, ["name"]);
     }
+    graderSave(args) {
+        const graderType = text(args.grader_type, "grader_type");
+        if (!GRADER_TYPES.has(graderType))
+            throw new Error(`Unsupported grader type: ${graderType}`);
+        return this.saveVersioned("grader", "grader", { ...args, grader_type: graderType,
+            configuration: object(args.configuration ?? {}, "configuration") }, ["name", "grader_type"]);
+    }
+    gradeRecord(args) {
+        const trialId = text(args.trial_id, "trial_id");
+        this.store.get("trial", trialId);
+        const grader = this.store.get("grader", text(args.grader_id, "grader_id"), finiteInteger(args.grader_version, "grader_version", 1));
+        const verdict = text(args.verdict, "verdict");
+        if (!GRADE_VERDICTS.has(verdict))
+            throw new Error(`Unsupported grade verdict: ${verdict}`);
+        const evidenceIds = array(args.evidence_ids ?? [], "evidence_ids").map((value) => text(value, "evidence_id"));
+        for (const evidenceId of evidenceIds)
+            this.store.get("evidence", evidenceId);
+        const gradeId = `grade_${createHash("sha256").update(JSON.stringify([trialId, grader.id, grader.version])).digest("hex")}`;
+        return this.store.create("grade", gradeId, { trial_id: trialId, grader_id: grader.id,
+            grader_version: grader.version, grader_type: grader.grader_type, verdict,
+            score: optionalScore(args.score, "score"), summary: text(args.summary, "summary"), evidence_ids: evidenceIds,
+            metadata: object(args.metadata ?? {}, "metadata") });
+    }
+    signoffPolicySave(args) {
+        const requirements = array(args.requirements ?? [], "requirements").map((value, index) => {
+            const requirement = object(value, `requirements[${index}]`);
+            const graderType = text(requirement.grader_type, `requirements[${index}].grader_type`);
+            if (!GRADER_TYPES.has(graderType))
+                throw new Error(`Unsupported grader type: ${graderType}`);
+            return { grader_type: graderType, minimum_score: optionalScore(requirement.minimum_score, `requirements[${index}].minimum_score`) };
+        });
+        if (new Set(requirements.map((item) => item.grader_type)).size !== requirements.length) {
+            throw new Error("Signoff grader_type requirements must be unique");
+        }
+        return this.saveVersioned("signoff_policy", "policy", { ...args, requirements,
+            require_held_out: optionalBoolean(args.require_held_out, "require_held_out") ?? true,
+            require_outcome_passed: optionalBoolean(args.require_outcome_passed, "require_outcome_passed") ?? true,
+        }, ["name"]);
+    }
+    signoffEvaluate(args) {
+        const policy = this.store.get("signoff_policy", text(args.policy_id, "policy_id"), args.policy_version === undefined ? undefined : finiteInteger(args.policy_version, "policy_version", 1));
+        const evaluation = this.store.get("evaluation_run", text(args.evaluation_run_id, "evaluation_run_id"));
+        const gradeIds = array(args.grade_ids ?? [], "grade_ids").map((value) => text(value, "grade_id"));
+        if (new Set(gradeIds).size !== gradeIds.length)
+            throw new Error("grade_ids must be unique");
+        const trialIds = evaluation.trial_ids;
+        const grades = gradeIds.map((gradeId) => {
+            const grade = this.store.get("grade", gradeId);
+            if (!trialIds.includes(String(grade.trial_id)))
+                throw new Error(`Grade is outside the evaluation run: ${gradeId}`);
+            return grade;
+        });
+        const checks = [];
+        if (policy.require_held_out)
+            checks.push({ check: "held_out", passed: evaluation.split === "held_out" });
+        if (policy.require_outcome_passed)
+            checks.push({ check: "outcome", passed: evaluation.verdict === "passed" });
+        for (const requirement of policy.requirements) {
+            const graderType = String(requirement.grader_type);
+            const minimumScore = requirement.minimum_score;
+            for (const trialId of trialIds) {
+                const matching = grades.filter((grade) => grade.trial_id === trialId && grade.grader_type === graderType);
+                checks.push({ check: "grader", trial_id: trialId, grader_type: graderType,
+                    passed: matching.some((grade) => grade.verdict === "passed" &&
+                        (minimumScore === null || (grade.score !== null && Number(grade.score) >= minimumScore))),
+                    grade_ids: matching.map((grade) => grade.id), minimum_score: minimumScore });
+            }
+        }
+        const decision = checks.every((check) => check.passed) ? "passed" : "failed";
+        return this.store.create("signoff", String(args.signoff_id ?? id("signoff")), {
+            policy_id: policy.id, policy_version: policy.version, evaluation_run_id: evaluation.id,
+            subject_type: evaluation.subject_type, subject_id: evaluation.subject_id,
+            subject_version: evaluation.subject_version, grade_ids: gradeIds, checks, decision,
+        });
+    }
     trialStart(args) {
         const taskId = text(args.task_id, "task_id");
         this.store.get("task", taskId);
@@ -291,17 +376,31 @@ export class CraftService {
         if (!allowed[current]?.includes(target))
             throw new Error(`Invalid workflow transition: ${current} -> ${target}`);
         let evaluationRunId = null;
+        let signoffId = null;
         if (target === "verified") {
-            evaluationRunId = text(args.evaluation_run_id, "evaluation_run_id");
-            const run = this.store.get("evaluation_run", evaluationRunId);
-            if (run.verdict !== "passed" || run.split !== "held_out" || run.subject_type !== "workflow" ||
-                run.subject_id !== workflow.id || Number(run.subject_version) !== Number(workflow.version)) {
-                throw new Error("Verification requires a passed held-out evaluation for this exact workflow version");
+            if (args.signoff_id !== undefined) {
+                signoffId = text(args.signoff_id, "signoff_id");
+                const signoff = this.store.get("signoff", signoffId);
+                evaluationRunId = String(signoff.evaluation_run_id);
+                const run = this.store.get("evaluation_run", evaluationRunId);
+                if (signoff.decision !== "passed" || signoff.subject_type !== "workflow" ||
+                    signoff.subject_id !== workflow.id || Number(signoff.subject_version) !== Number(workflow.version) ||
+                    run.verdict !== "passed" || run.split !== "held_out") {
+                    throw new Error("Verification requires a passed signoff for this exact workflow version");
+                }
+            }
+            else {
+                evaluationRunId = text(args.evaluation_run_id, "evaluation_run_id");
+                const run = this.store.get("evaluation_run", evaluationRunId);
+                if (run.verdict !== "passed" || run.split !== "held_out" || run.subject_type !== "workflow" ||
+                    run.subject_id !== workflow.id || Number(run.subject_version) !== Number(workflow.version)) {
+                    throw new Error("Verification requires a passed held-out evaluation for this exact workflow version");
+                }
             }
         }
         return this.store.save("workflow", String(workflow.id), { ...recordPayload(workflow), lifecycle: target,
             previous_version: workflow.version, transition_reason: text(args.reason, "reason"),
-            evaluation_run_id: evaluationRunId });
+            evaluation_run_id: evaluationRunId, signoff_id: signoffId });
     }
     workflowRollback(args) {
         const workflowId = text(args.workflow_id, "workflow_id");

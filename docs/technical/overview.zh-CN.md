@@ -33,7 +33,9 @@ Task ──compiled to──> Agent IR ──lowered to──> Workflow / Orches
 Task + Subject Version + Harness Configuration ──creates──> Trial
 Trial ──appends──> Trace ──produces──> Artifact / Evidence
 Trial ──closes with──> Outcome ──aggregated by──> Evaluation Run
-Evaluation Run ──authorizes──> Workflow or Configuration Promotion
+Trial + Grader Version ──produces──> Grade
+Evaluation Run + Grades + Signoff Policy ──produces──> Signoff
+Signoff ──authorizes──> Workflow or Configuration Promotion
 ```
 
 ## 设计约束

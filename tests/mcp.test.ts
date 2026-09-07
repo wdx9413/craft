@@ -121,8 +121,23 @@ test("MCP negotiates protocols, lists tools, dispatches every handler, and repor
       subject_version: candidate.version, trial_ids: [trial.id] });
     await call("craft_evaluation_run_get", { run_id: evaluation.id });
     await call("craft_evaluation_run_list", {});
+    const grader = await call("craft_grader_save", { name: "Program", grader_type: "program" });
+    await call("craft_grader_get", { grader_id: grader.id });
+    await call("craft_grader_list", {});
+    const grade = await call("craft_grade_record", { trial_id: trial.id, grader_id: grader.id,
+      grader_version: grader.version, verdict: "passed", summary: "passed" });
+    await call("craft_grade_get", { grade_id: grade.id });
+    await call("craft_grade_list", {});
+    const policy = await call("craft_signoff_policy_save", { name: "Policy",
+      requirements: [{ grader_type: "program" }] });
+    await call("craft_signoff_policy_get", { policy_id: policy.id });
+    await call("craft_signoff_policy_list", {});
+    const signoff = await call("craft_signoff_evaluate", { policy_id: policy.id,
+      evaluation_run_id: evaluation.id, grade_ids: [grade.id] });
+    await call("craft_signoff_get", { signoff_id: signoff.id });
+    await call("craft_signoff_list", {});
     const verified = await call("craft_workflow_transition", { workflow_id: "workflow_a", target: "verified",
-      reason: "passed", evaluation_run_id: evaluation.id });
+      reason: "passed", signoff_id: signoff.id });
     await call("craft_workflow_transition", { workflow_id: "workflow_a", target: "deprecated", reason: "replace" });
     await call("craft_workflow_rollback", { workflow_id: "workflow_a", target_version: verified.version,
       reason: "restore" });

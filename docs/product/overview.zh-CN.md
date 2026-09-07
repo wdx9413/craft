@@ -41,7 +41,7 @@ Craft 不替代 Codex、Claude 或其他模型；它们可以作为执行宿主�
 
 ## 当前边界
 
-当前版本已实现 Provider MCP、Capability Catalog、持久 Task/Evidence、确定性 Workflow、基础编排，以及 Experience/Eval Kernel 的第一层。Agent IR 编译器、领域 Kit Registry、自动 Grader、自动 Harness 搜索和桌面端仍是后续方向。
+当前版本已实现 Provider MCP、Capability Catalog、持久 Task/Evidence、确定性 Workflow、基础编排、Experience/Eval Kernel，以及多来源 Grader/Signoff 的基础协议。自动执行模型 Grader、Agent IR 编译器、领域 Kit Registry、自动 Harness 搜索和桌面端仍是后续方向。
 
 ## 形成行业基础层的条件
 

@@ -8122,13 +8122,15 @@ function submitNode(nodes, leaseId, verdict, provenance) {
 }
 
 // src/service.ts
-var VERSION = "0.3.1";
+var VERSION = "0.4.0";
 var CONFIDENCE = /* @__PURE__ */ new Set(["confirmed", "bounded", "unverified", "rejected"]);
 var TASK_STATUS = /* @__PURE__ */ new Set(["active", "paused", "completed", "cancelled"]);
 var WORKFLOW_LIFECYCLE = /* @__PURE__ */ new Set(["draft", "candidate", "verified", "deprecated"]);
 var TRIAL_VERDICTS = /* @__PURE__ */ new Set(["passed", "failed", "blocked", "cancelled"]);
 var EVAL_SPLITS = /* @__PURE__ */ new Set(["search", "development", "held_out"]);
 var HARNESS_DIMENSIONS = /* @__PURE__ */ new Set(["context", "tools", "generation", "orchestration", "memory", "output"]);
+var GRADER_TYPES = /* @__PURE__ */ new Set(["program", "model", "human", "operational"]);
+var GRADE_VERDICTS = /* @__PURE__ */ new Set(["passed", "failed", "inconclusive"]);
 function id(prefix) {
   return `${prefix}_${(0, import_node_crypto3.randomUUID)().replaceAll("-", "")}`;
 }
@@ -8147,6 +8149,12 @@ function optionalBoolean(value, name) {
   if (value === void 0) return void 0;
   if (typeof value !== "boolean") throw new Error(`${name} must be a boolean`);
   return value;
+}
+function optionalScore(value, name) {
+  if (value === void 0 || value === null) return null;
+  const score = Number(value);
+  if (!Number.isFinite(score) || score < 0 || score > 1) throw new Error(`${name} must be between 0 and 1`);
+  return score;
 }
 function array(value, name) {
   if (!Array.isArray(value)) throw new Error(`${name} must be an array`);
@@ -8185,6 +8193,10 @@ var CraftService = class {
       "harness_configuration",
       "trial",
       "outcome",
+      "grader",
+      "grade",
+      "signoff_policy",
+      "signoff",
       "budget",
       "model_provider",
       "agent_session"
@@ -8358,6 +8370,108 @@ var CraftService = class {
     }
     return this.saveVersioned("evaluation_suite", "suite", { ...args, cases }, ["name"]);
   }
+  graderSave(args) {
+    const graderType = text(args.grader_type, "grader_type");
+    if (!GRADER_TYPES.has(graderType)) throw new Error(`Unsupported grader type: ${graderType}`);
+    return this.saveVersioned("grader", "grader", {
+      ...args,
+      grader_type: graderType,
+      configuration: object(args.configuration ?? {}, "configuration")
+    }, ["name", "grader_type"]);
+  }
+  gradeRecord(args) {
+    const trialId = text(args.trial_id, "trial_id");
+    this.store.get("trial", trialId);
+    const grader = this.store.get(
+      "grader",
+      text(args.grader_id, "grader_id"),
+      finiteInteger(args.grader_version, "grader_version", 1)
+    );
+    const verdict = text(args.verdict, "verdict");
+    if (!GRADE_VERDICTS.has(verdict)) throw new Error(`Unsupported grade verdict: ${verdict}`);
+    const evidenceIds = array(args.evidence_ids ?? [], "evidence_ids").map((value) => text(value, "evidence_id"));
+    for (const evidenceId of evidenceIds) this.store.get("evidence", evidenceId);
+    const gradeId = `grade_${(0, import_node_crypto3.createHash)("sha256").update(JSON.stringify(
+      [trialId, grader.id, grader.version]
+    )).digest("hex")}`;
+    return this.store.create("grade", gradeId, {
+      trial_id: trialId,
+      grader_id: grader.id,
+      grader_version: grader.version,
+      grader_type: grader.grader_type,
+      verdict,
+      score: optionalScore(args.score, "score"),
+      summary: text(args.summary, "summary"),
+      evidence_ids: evidenceIds,
+      metadata: object(args.metadata ?? {}, "metadata")
+    });
+  }
+  signoffPolicySave(args) {
+    const requirements = array(args.requirements ?? [], "requirements").map((value, index) => {
+      const requirement = object(value, `requirements[${index}]`);
+      const graderType = text(requirement.grader_type, `requirements[${index}].grader_type`);
+      if (!GRADER_TYPES.has(graderType)) throw new Error(`Unsupported grader type: ${graderType}`);
+      return { grader_type: graderType, minimum_score: optionalScore(
+        requirement.minimum_score,
+        `requirements[${index}].minimum_score`
+      ) };
+    });
+    if (new Set(requirements.map((item) => item.grader_type)).size !== requirements.length) {
+      throw new Error("Signoff grader_type requirements must be unique");
+    }
+    return this.saveVersioned("signoff_policy", "policy", {
+      ...args,
+      requirements,
+      require_held_out: optionalBoolean(args.require_held_out, "require_held_out") ?? true,
+      require_outcome_passed: optionalBoolean(args.require_outcome_passed, "require_outcome_passed") ?? true
+    }, ["name"]);
+  }
+  signoffEvaluate(args) {
+    const policy = this.store.get(
+      "signoff_policy",
+      text(args.policy_id, "policy_id"),
+      args.policy_version === void 0 ? void 0 : finiteInteger(args.policy_version, "policy_version", 1)
+    );
+    const evaluation = this.store.get("evaluation_run", text(args.evaluation_run_id, "evaluation_run_id"));
+    const gradeIds = array(args.grade_ids ?? [], "grade_ids").map((value) => text(value, "grade_id"));
+    if (new Set(gradeIds).size !== gradeIds.length) throw new Error("grade_ids must be unique");
+    const trialIds = evaluation.trial_ids;
+    const grades = gradeIds.map((gradeId) => {
+      const grade = this.store.get("grade", gradeId);
+      if (!trialIds.includes(String(grade.trial_id))) throw new Error(`Grade is outside the evaluation run: ${gradeId}`);
+      return grade;
+    });
+    const checks = [];
+    if (policy.require_held_out) checks.push({ check: "held_out", passed: evaluation.split === "held_out" });
+    if (policy.require_outcome_passed) checks.push({ check: "outcome", passed: evaluation.verdict === "passed" });
+    for (const requirement of policy.requirements) {
+      const graderType = String(requirement.grader_type);
+      const minimumScore = requirement.minimum_score;
+      for (const trialId of trialIds) {
+        const matching = grades.filter((grade) => grade.trial_id === trialId && grade.grader_type === graderType);
+        checks.push({
+          check: "grader",
+          trial_id: trialId,
+          grader_type: graderType,
+          passed: matching.some((grade) => grade.verdict === "passed" && (minimumScore === null || grade.score !== null && Number(grade.score) >= minimumScore)),
+          grade_ids: matching.map((grade) => grade.id),
+          minimum_score: minimumScore
+        });
+      }
+    }
+    const decision = checks.every((check) => check.passed) ? "passed" : "failed";
+    return this.store.create("signoff", String(args.signoff_id ?? id("signoff")), {
+      policy_id: policy.id,
+      policy_version: policy.version,
+      evaluation_run_id: evaluation.id,
+      subject_type: evaluation.subject_type,
+      subject_id: evaluation.subject_id,
+      subject_version: evaluation.subject_version,
+      grade_ids: gradeIds,
+      checks,
+      decision
+    });
+  }
   trialStart(args) {
     const taskId = text(args.task_id, "task_id");
     this.store.get("task", taskId);
@@ -8480,11 +8594,22 @@ var CraftService = class {
     };
     if (!allowed[current]?.includes(target)) throw new Error(`Invalid workflow transition: ${current} -> ${target}`);
     let evaluationRunId = null;
+    let signoffId = null;
     if (target === "verified") {
-      evaluationRunId = text(args.evaluation_run_id, "evaluation_run_id");
-      const run = this.store.get("evaluation_run", evaluationRunId);
-      if (run.verdict !== "passed" || run.split !== "held_out" || run.subject_type !== "workflow" || run.subject_id !== workflow.id || Number(run.subject_version) !== Number(workflow.version)) {
-        throw new Error("Verification requires a passed held-out evaluation for this exact workflow version");
+      if (args.signoff_id !== void 0) {
+        signoffId = text(args.signoff_id, "signoff_id");
+        const signoff = this.store.get("signoff", signoffId);
+        evaluationRunId = String(signoff.evaluation_run_id);
+        const run = this.store.get("evaluation_run", evaluationRunId);
+        if (signoff.decision !== "passed" || signoff.subject_type !== "workflow" || signoff.subject_id !== workflow.id || Number(signoff.subject_version) !== Number(workflow.version) || run.verdict !== "passed" || run.split !== "held_out") {
+          throw new Error("Verification requires a passed signoff for this exact workflow version");
+        }
+      } else {
+        evaluationRunId = text(args.evaluation_run_id, "evaluation_run_id");
+        const run = this.store.get("evaluation_run", evaluationRunId);
+        if (run.verdict !== "passed" || run.split !== "held_out" || run.subject_type !== "workflow" || run.subject_id !== workflow.id || Number(run.subject_version) !== Number(workflow.version)) {
+          throw new Error("Verification requires a passed held-out evaluation for this exact workflow version");
+        }
       }
     }
     return this.store.save("workflow", String(workflow.id), {
@@ -8492,7 +8617,8 @@ var CraftService = class {
       lifecycle: target,
       previous_version: workflow.version,
       transition_reason: text(args.reason, "reason"),
-      evaluation_run_id: evaluationRunId
+      evaluation_run_id: evaluationRunId,
+      signoff_id: signoffId
     });
   }
   workflowRollback(args) {
@@ -8684,7 +8810,7 @@ var CraftService = class {
 
 // src/mcp.ts
 var schemaFor = (name) => {
-  if (["scan", "enabled", "allow_execution"].includes(name)) return { type: "boolean" };
+  if (["scan", "enabled", "allow_execution", "require_held_out", "require_outcome_passed"].includes(name)) return { type: "boolean" };
   if ([
     "limit",
     "version",
@@ -8695,8 +8821,11 @@ var schemaFor = (name) => {
     "suite_version",
     "configuration_version",
     "harness_configuration_version",
-    "target_version"
+    "target_version",
+    "grader_version",
+    "policy_version"
   ].includes(name)) return { type: "integer" };
+  if (["score"].includes(name)) return { type: "number" };
   if ([
     "inputs",
     "metadata",
@@ -8707,7 +8836,8 @@ var schemaFor = (name) => {
     "data",
     "scores",
     "costs",
-    "metrics"
+    "metrics",
+    "configuration"
   ].includes(name)) return { type: "object" };
   if ([
     "completed",
@@ -8722,7 +8852,9 @@ var schemaFor = (name) => {
     "nodes",
     "artifact_ids",
     "evidence_ids",
-    "trial_ids"
+    "trial_ids",
+    "requirements",
+    "grade_ids"
   ].includes(name)) return { type: "array" };
   return { type: "string" };
 };
@@ -8786,7 +8918,7 @@ var TOOLS = [
     "Move a workflow through draft, candidate, verified, or deprecated with evidence gates.",
     ["workflow_id", "target", "reason"],
     false,
-    ["evaluation_run_id"]
+    ["evaluation_run_id", "signoff_id"]
   ),
   tool(
     "craft_workflow_rollback",
@@ -8843,6 +8975,42 @@ var TOOLS = [
   ),
   tool("craft_evaluation_run_get", "Read an immutable evaluation run.", ["run_id"], true),
   tool("craft_evaluation_run_list", "List evaluation runs.", [], true, ["limit", "query"]),
+  tool(
+    "craft_grader_save",
+    "Save a versioned program, model, human, or operational grader.",
+    ["name", "grader_type"],
+    false,
+    ["grader_id", "description", "configuration"]
+  ),
+  tool("craft_grader_get", "Read an exact grader version.", ["grader_id"], true, ["version"]),
+  tool("craft_grader_list", "List graders.", [], true, ["limit", "query"]),
+  tool(
+    "craft_grade_record",
+    "Record one immutable grade for a Trial and exact Grader version.",
+    ["trial_id", "grader_id", "grader_version", "verdict", "summary"],
+    false,
+    ["score", "evidence_ids", "metadata"]
+  ),
+  tool("craft_grade_get", "Read an immutable grade.", ["grade_id"], true),
+  tool("craft_grade_list", "List grades.", [], true, ["limit", "query"]),
+  tool(
+    "craft_signoff_policy_save",
+    "Save a versioned policy for evaluation and grader requirements.",
+    ["name"],
+    false,
+    ["policy_id", "description", "requirements", "require_held_out", "require_outcome_passed"]
+  ),
+  tool("craft_signoff_policy_get", "Read a signoff policy version.", ["policy_id"], true, ["version"]),
+  tool("craft_signoff_policy_list", "List signoff policies.", [], true, ["limit", "query"]),
+  tool(
+    "craft_signoff_evaluate",
+    "Evaluate an immutable signoff decision from an Evaluation Run and explicit Grades.",
+    ["policy_id", "evaluation_run_id"],
+    false,
+    ["signoff_id", "policy_version", "grade_ids"]
+  ),
+  tool("craft_signoff_get", "Read an immutable signoff decision.", ["signoff_id"], true),
+  tool("craft_signoff_list", "List signoff decisions.", [], true, ["limit", "query"]),
   tool("craft_agent_profile_save", "Save a versioned cross-host agent profile.", ["name", "role", "host", "model"], false, ["profile_id", "provider", "reasoning_effort", "capabilities", "allowed_side_effects", "metadata"]),
   tool("craft_agent_profile_get", "Read an agent profile.", ["profile_id"], true, ["version"]),
   tool("craft_agent_profile_list", "List agent profiles.", [], true, ["limit", "query"]),
@@ -8899,6 +9067,18 @@ var McpServer = class {
       craft_evaluation_run_record: (a) => service.evaluationRunRecord(a),
       craft_evaluation_run_get: (a) => service.get("evaluation_run", "run_id", a),
       craft_evaluation_run_list: (a) => service.list("evaluation_run", "runs", a),
+      craft_grader_save: (a) => service.graderSave(a),
+      craft_grader_get: (a) => service.get("grader", "grader_id", a),
+      craft_grader_list: (a) => service.list("grader", "graders", a),
+      craft_grade_record: (a) => service.gradeRecord(a),
+      craft_grade_get: (a) => service.get("grade", "grade_id", a),
+      craft_grade_list: (a) => service.list("grade", "grades", a),
+      craft_signoff_policy_save: (a) => service.signoffPolicySave(a),
+      craft_signoff_policy_get: (a) => service.get("signoff_policy", "policy_id", a),
+      craft_signoff_policy_list: (a) => service.list("signoff_policy", "policies", a),
+      craft_signoff_evaluate: (a) => service.signoffEvaluate(a),
+      craft_signoff_get: (a) => service.get("signoff", "signoff_id", a),
+      craft_signoff_list: (a) => service.list("signoff", "signoffs", a),
       craft_agent_profile_save: (a) => service.saveVersioned(
         "agent_profile",
         "profile",

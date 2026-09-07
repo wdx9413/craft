@@ -3,14 +3,16 @@ import { type JsonObject } from "./store.ts";
 
 type Tool = { name: string; description: string; inputSchema: JsonObject; annotations?: JsonObject };
 const schemaFor = (name: string): JsonObject => {
-  if (["scan", "enabled", "allow_execution"].includes(name)) return { type: "boolean" };
+  if (["scan", "enabled", "allow_execution", "require_held_out", "require_outcome_passed"].includes(name)) return { type: "boolean" };
   if (["limit", "version", "capacity", "max_concurrency", "size_bytes", "subject_version",
-    "suite_version", "configuration_version", "harness_configuration_version", "target_version"].includes(name)) return { type: "integer" };
+    "suite_version", "configuration_version", "harness_configuration_version", "target_version",
+    "grader_version", "policy_version"].includes(name)) return { type: "integer" };
+  if (["score"].includes(name)) return { type: "number" };
   if (["inputs", "metadata", "policy", "dimensions", "environment", "budget", "data", "scores",
-    "costs", "metrics"].includes(name)) return { type: "object" };
+    "costs", "metrics", "configuration"].includes(name)) return { type: "object" };
   if (["completed", "pending", "decisions", "artifacts", "steps", "cases", "capabilities",
     "allowed_side_effects", "approved_side_effects", "nodes", "artifact_ids", "evidence_ids",
-    "trial_ids"].includes(name)) return { type: "array" };
+    "trial_ids", "requirements", "grade_ids"].includes(name)) return { type: "array" };
   return { type: "string" };
 };
 const objectSchema = (required: string[] = [], optional: string[] = []): JsonObject => ({ type: "object",
@@ -51,7 +53,7 @@ export const TOOLS: Tool[] = [
       "harness_configuration_version", "environment", "budget"]),
   tool("craft_workflow_run_get", "Read a durable Workflow execution receipt.", ["run_id"], true),
   tool("craft_workflow_transition", "Move a workflow through draft, candidate, verified, or deprecated with evidence gates.",
-    ["workflow_id", "target", "reason"], false, ["evaluation_run_id"]),
+    ["workflow_id", "target", "reason"], false, ["evaluation_run_id", "signoff_id"]),
   tool("craft_workflow_rollback", "Restore a previously verified workflow version as the latest version.",
     ["workflow_id", "target_version", "reason"]),
   tool("craft_eval_suite_save", "Save an immutable evaluation suite.", ["name"], false, ["suite_id", "cases", "description", "scope"]),
@@ -76,6 +78,23 @@ export const TOOLS: Tool[] = [
     ["run_id", "suite_version", "metrics"]),
   tool("craft_evaluation_run_get", "Read an immutable evaluation run.", ["run_id"], true),
   tool("craft_evaluation_run_list", "List evaluation runs.", [], true, ["limit", "query"]),
+  tool("craft_grader_save", "Save a versioned program, model, human, or operational grader.",
+    ["name", "grader_type"], false, ["grader_id", "description", "configuration"]),
+  tool("craft_grader_get", "Read an exact grader version.", ["grader_id"], true, ["version"]),
+  tool("craft_grader_list", "List graders.", [], true, ["limit", "query"]),
+  tool("craft_grade_record", "Record one immutable grade for a Trial and exact Grader version.",
+    ["trial_id", "grader_id", "grader_version", "verdict", "summary"], false,
+    ["score", "evidence_ids", "metadata"]),
+  tool("craft_grade_get", "Read an immutable grade.", ["grade_id"], true),
+  tool("craft_grade_list", "List grades.", [], true, ["limit", "query"]),
+  tool("craft_signoff_policy_save", "Save a versioned policy for evaluation and grader requirements.",
+    ["name"], false, ["policy_id", "description", "requirements", "require_held_out", "require_outcome_passed"]),
+  tool("craft_signoff_policy_get", "Read a signoff policy version.", ["policy_id"], true, ["version"]),
+  tool("craft_signoff_policy_list", "List signoff policies.", [], true, ["limit", "query"]),
+  tool("craft_signoff_evaluate", "Evaluate an immutable signoff decision from an Evaluation Run and explicit Grades.",
+    ["policy_id", "evaluation_run_id"], false, ["signoff_id", "policy_version", "grade_ids"]),
+  tool("craft_signoff_get", "Read an immutable signoff decision.", ["signoff_id"], true),
+  tool("craft_signoff_list", "List signoff decisions.", [], true, ["limit", "query"]),
   tool("craft_agent_profile_save", "Save a versioned cross-host agent profile.", ["name", "role", "host", "model"], false, ["profile_id", "provider", "reasoning_effort", "capabilities", "allowed_side_effects", "metadata"]),
   tool("craft_agent_profile_get", "Read an agent profile.", ["profile_id"], true, ["version"]),
   tool("craft_agent_profile_list", "List agent profiles.", [], true, ["limit", "query"]),
@@ -126,6 +145,18 @@ export class McpServer {
       craft_evaluation_run_record: (a) => service.evaluationRunRecord(a),
       craft_evaluation_run_get: (a) => service.get("evaluation_run", "run_id", a),
       craft_evaluation_run_list: (a) => service.list("evaluation_run", "runs", a),
+      craft_grader_save: (a) => service.graderSave(a),
+      craft_grader_get: (a) => service.get("grader", "grader_id", a),
+      craft_grader_list: (a) => service.list("grader", "graders", a),
+      craft_grade_record: (a) => service.gradeRecord(a),
+      craft_grade_get: (a) => service.get("grade", "grade_id", a),
+      craft_grade_list: (a) => service.list("grade", "grades", a),
+      craft_signoff_policy_save: (a) => service.signoffPolicySave(a),
+      craft_signoff_policy_get: (a) => service.get("signoff_policy", "policy_id", a),
+      craft_signoff_policy_list: (a) => service.list("signoff_policy", "policies", a),
+      craft_signoff_evaluate: (a) => service.signoffEvaluate(a),
+      craft_signoff_get: (a) => service.get("signoff", "signoff_id", a),
+      craft_signoff_list: (a) => service.list("signoff", "signoffs", a),
       craft_agent_profile_save: (a) => service.saveVersioned("agent_profile", "profile", a,
         ["name", "role", "host", "model"]),
       craft_agent_profile_get: (a) => service.get("agent_profile", "profile_id", a),

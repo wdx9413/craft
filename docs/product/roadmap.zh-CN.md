@@ -19,7 +19,7 @@
 ## 下一阶段：Experience/Eval 闭环
 
 - Workflow Run 自动登记 Trial、Trace、Artifact、Evidence 与 Outcome。（v0.3.1 已实现）
-- 确定性、模型 Rubric、人工和延迟业务结果四类 Grader。
+- 确定性、模型 Rubric、人工和业务结果四类 Grader，以及版本化 Signoff Policy。（v0.4.0 已实现基础协议）
 - Search/Development 与 held-out 数据隔离、回归对比和成本指标。
 - Capability、Agent Profile、Workflow 与 Harness Configuration 使用同一评测协议。
 

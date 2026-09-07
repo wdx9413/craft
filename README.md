@@ -2,15 +2,17 @@
 
 [中文](README.md) | [English](README.en.md)
 
-Craft 是一套通用 Agent Harness：管理可复用能力，保存长任务状态与证据，并把经过验证的做法沉淀为可再次执行的 Workflow。它可以独立使用，也可以通过 MCP 或插件向 Codex、Claude Code、DeepSeek Harness 及其他 Agent 应用提供能力。
+## 简版产品介绍
 
-Craft 不绑定某个模型、Agent 或行业。研发排障、AI 视频分镜、销售跟进、教学设计和内容生产都使用同一组基础对象：能力、任务、证据、产物、工作流与评测；具体场景通过自己的 Skill 和 Workflow 扩展。
+Craft 是面向 AI Agent 工作的能力管理与验证系统。它让 Agent 能从大量能力中找到合适的一小部分，跨会话持续完成长任务，用证据而不是自述确认结果，并把成功路径沉淀为可评测、可回滚的 Workflow。
+
+Craft 的核心对象和协议不绑定某个模型或行业。它既能通过 MCP、插件或 Adapter 为 Codex、Claude Code、DeepSeek Harness 等宿主提供能力，也能作为未来独立 Agent 和 Supervisor 产品的基础。研发、AI 视频、销售、教育和内容创作可以共享同一套任务、产物、证据、工作流和评测内核，再用各自的 Skill、Validator 和领域 Kit 扩展。
 
 ## 核心理念
 
 - 发现而不是全量注入：只索引用户选择的能力目录，先用元数据和文本检索返回少量候选，需要时再读取完整内容。即使能力库很大，也不会把全部 Skill 塞进模型上下文。
 - 长任务可以恢复：目标、进度、待办、决策、反馈、产物和证据保存在用户目录，换 Agent 或换会话仍能继续。
-- 验证方式显式化：确定性条件交给程序门禁，主观质量交给模型或人；结果记录来源和置信度。
+- 验证方式显式化：程序、模型、人工和业务结果使用不同 Grader；Signoff Policy 决定一个精确版本是否达到复用标准。
 - Workflow 来自真实使用：用户可把成功路径保存为版本化模板，再经过回放和评测逐步提升，而不是依赖平台预置全部行业流程。
 - 数据属于用户：默认写入 `~/.craft_data`，不污染业务项目。API Key 只保存环境变量名，不保存密钥值。
 
@@ -23,6 +25,7 @@ Craft 不绑定某个模型、Agent 或行业。研发排障、AI 视频分镜�
 - 确定性命令、文件/JSON 断言、覆盖率门禁，以及结构化执行回执。
 - 版本化评测集与 Agent Profile 基础数据模型。
 - 六维 Harness Configuration、不可变 Trial/Outcome、只追加 Trace、Workflow 自动取证闭环，以及 held-out Eval 驱动的晋级与回滚。
+- 版本化 Grader、多来源 Grade 和 Signoff Policy；模型判断不会被记录成程序证明。
 - MCP 服务，以及 Codex、Claude Code、DeepSeek Harness 和通用 MCP Host 接入。
 - Windows、macOS、Linux 共用 TypeScript/Node.js 运行时；不依赖 Python。
 

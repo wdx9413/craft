@@ -10,6 +10,8 @@ All public tools use a `craft_` prefix. IDs returned by Craft are opaque and mus
 - Harness configurations: `craft_harness_configuration_save/get/list`
 - Experience: `craft_trial_start/get/list`, `craft_trial_trace_append`, `craft_outcome_record`
 - Evaluations: `craft_eval_suite_save/get/list`, `craft_evaluation_run_record/get/list`
+- Grading: `craft_grader_save/get/list`, `craft_grade_record/get/list`
+- Signoff: `craft_signoff_policy_save/get/list`, `craft_signoff_evaluate/get/list`
 - Agent routing: `craft_agent_profile_save/get/list`, `craft_orchestration_plan_create/get/list`, `craft_orchestration_dispatch/submit`
 
 Optional arguments can be omitted. Do not pass secrets in metadata. Treat an MCP result with `isError: true` as a rejected operation, even though the JSON-RPC request itself succeeded.
@@ -17,3 +19,7 @@ Optional arguments can be omitted. Do not pass secrets in metadata. Treat an MCP
 Trial, Outcome, and Evaluation Run records are immutable. A Trace is append-only. Evaluation Case `split` is one of `search`, `development`, or `held_out`; only a passed held-out run for the exact candidate Workflow version can authorize `verified`.
 
 `craft_workflow_trial_run` requires an existing Task. It pins the planned Workflow version, executes it, and automatically creates the Trial lifecycle records. A failed deterministic step is a normal failed run; a runtime crash is captured as a sanitized failed Outcome without storing the raw exception message.
+
+A Grade is immutable and binds one Trial to one exact Grader version. A Signoff evaluates only the explicitly supplied Grade IDs, so the decision is reproducible. Policy requirements apply to every Trial in the Evaluation Run; a required provenance type cannot be substituted by another type.
+
+An advisory Signoff may pass under a Policy that does not require held-out data or passed Outcomes, but it cannot promote a Workflow. Workflow verification always additionally requires the underlying Evaluation Run to be held-out and passed.

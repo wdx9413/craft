@@ -2,15 +2,17 @@
 
 [中文](README.md) | [English](README.en.md)
 
-Craft is a general-purpose Agent harness. It discovers and manages reusable capabilities, preserves long-running task state and evidence, and turns verified execution paths into reusable Workflows. The current release provides capabilities to Codex, Claude Code, DeepSeek Harness, and generic MCP hosts; standalone Agent and Supervisor runtimes remain planned modes.
+## Product in brief
 
-Craft is not tied to one model or industry. Software engineering, AI video production, sales, education, and content workflows share the same primitives: capabilities, tasks, evidence, artifacts, workflows, and evaluations.
+Craft is a capability-management and verification system for AI Agent work. It helps an Agent retrieve a small relevant capability set, continue long tasks across sessions, verify results with evidence instead of self-reporting, and turn successful paths into evaluable and rollback-safe Workflows.
+
+Its core objects and protocols are not tied to one model or industry. Craft can provide capabilities to Codex, Claude Code, DeepSeek Harness, and other hosts through MCP, plugins, or adapters, while also forming the base of future standalone Agent and Supervisor products. Software engineering, AI video, sales, education, and content workflows share the same task, artifact, evidence, workflow, and evaluation kernel, then extend it with domain Skills, validators, and Kits.
 
 ## Principles
 
 - Discover, then load: index user-selected directories and return a small candidate set instead of injecting every Skill into model context.
 - Durable long tasks: keep goals, checkpoints, decisions, feedback, artifacts, and evidence across sessions and hosts.
-- Explicit verification: deterministic gates are executed by programs; subjective quality can be judged by a model or human with provenance.
+- Explicit verification: program, model, human, and operational results use distinct Graders; a Signoff Policy decides whether an exact version is reusable.
 - Workflows evolve from use: version successful paths, replay them, and improve them through evaluations.
 - User-owned data: store data under `~/.craft_data` by default. Persist credential environment-variable names, never secret values.
 
@@ -22,6 +24,7 @@ Craft is not tied to one model or industry. Software engineering, AI video produ
 - Versioned Workflows with inputs, safe paths, redaction, side-effect approval, deterministic commands, assertions, coverage gates, and receipts.
 - Versioned evaluation-suite and Agent-profile primitives.
 - Six-dimensional Harness Configurations, immutable Trials and Outcomes, append-only Traces, automatic evidence capture for Workflow runs, and held-out-eval-gated promotion and rollback.
+- Versioned Graders, provenance-preserving Grades, and Signoff Policies; a model judgment cannot masquerade as program proof.
 - MCP plus Codex, Claude Code, DeepSeek Harness, and generic MCP integration surfaces.
 - One TypeScript/Node.js runtime on Windows, macOS, and Linux, with no Python dependency.
 
