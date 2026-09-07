@@ -22,6 +22,7 @@
 - 确定性、模型 Rubric、人工和业务结果四类 Grader，以及版本化 Signoff Policy。（v0.4.0 已实现基础协议）
 - Search/Development 与 held-out 数据隔离；同一评测集的质量、成本、耗时和失败类型聚合对比。（v0.5.0 已实现确定性基础协议）
 - Workflow、Agent Profile 与 Harness Configuration 使用同一评测协议。（v0.5.0 已实现版本对比；Capability 评测待实现）
+- Orchestration 执行自动形成 Trial、Trace、Evidence、成本和 Outcome，并锁定 Agent Profile 路由版本。（v0.6.0 已实现）
 
 验收：同一真实任务集能比较两个版本的质量、成本、耗时和失败类型，并阻止无证据晋级。
 

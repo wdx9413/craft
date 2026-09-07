@@ -15,6 +15,7 @@ Craft Core 通过 CLI、MCP、平台 Plugin 和专用 Adapter 暴露。Codex 与
 - 保留精确版本、状态机、权限上限和执行谱系。
 - 统一不同 Host 的结果语义。
 - 提供评测、晋级、回滚和跨会话恢复。
+- 在评测型编排中锁定 Agent Profile 版本，并自动归档 Dispatch、重路由、Submit、成本和终态 Outcome。
 
 Craft 不绕过宿主权限，也不假定某个平台私有 API 永久稳定。Adapter 必须拥有独立兼容矩阵和真实安装测试。
 

@@ -99,6 +99,20 @@ test("MCP negotiates protocols, lists tools, dispatches every handler, and repor
       assert.equal((response?.result as Record<string, unknown>).isError, false, name);
       return (response?.result as Record<string, unknown>).structuredContent as Record<string, unknown>;
     };
+    const orchestrationTrial = await call("craft_orchestration_trial_start", { plan_id: "plan_trial_mcp",
+      trial_id: "orchestration_trial_mcp", task_id: taskId, goal: "Capture orchestration", nodes: [
+        { id: "node", role: "worker", objective: "work", profile_ids: ["profile_a"] },
+      ] });
+    const orchestrationTrialDispatch = await call("craft_orchestration_dispatch", {
+      plan_id: (orchestrationTrial.plan as Record<string, unknown>).id, claimed_by: "host",
+    });
+    await call("craft_orchestration_submit", { plan_id: (orchestrationTrial.plan as Record<string, unknown>).id,
+      lease_id: (orchestrationTrialDispatch.leases as Record<string, unknown>[])[0].lease_id,
+      verdict: "passed", costs: { tokens: 1 } });
+    await call("craft_orchestration_trial_finalize", {
+      plan_id: (orchestrationTrial.plan as Record<string, unknown>).id,
+    });
+    await call("craft_trial_get", { trial_id: (orchestrationTrial.trial as Record<string, unknown>).id });
     const captured = await call("craft_workflow_trial_run", {
       task_id: taskId, workflow_id: "workflow_a", project_root: root,
     });

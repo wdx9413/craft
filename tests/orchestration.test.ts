@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { dispatchNodes, normalizeNodes, planStatus, submitNode } from "../src/orchestration.ts";
+import { addCosts, dispatchNodes, normalizeNodes, orchestrationOutcome, planStatus,
+  submitNode } from "../src/orchestration.ts";
 
 const base = () => normalizeNodes([
   { id: "research", role: "researcher", objective: "find", profile_ids: ["astra", "luna"] },
@@ -61,4 +62,19 @@ test("orchestration leases ready work, routes failures, and blocks descendants",
   assert.equal(planStatus(completed), "completed");
   const stale = completed.map((node, index) => index ? node : { ...node, lease_id: "old" });
   assert.throws(() => submitNode(stale, "old", "passed", "agent_reported"), /not active/);
+});
+
+test("orchestration pins profile versions and computes cost and outcome summaries", () => {
+  assert.deepEqual(addCosts({ tokens: 2 }, { tokens: 3, dollars: 1 }), { tokens: 5, dollars: 1 });
+  assert.deepEqual(addCosts({}, JSON.parse('{"__proto__":1}')), JSON.parse('{"__proto__":1}'));
+  assert.throws(() => addCosts({}, { bad: "1" }), /Cost bad/);
+  assert.throws(() => addCosts({}, { bad: Infinity }), /Cost bad/);
+  assert.throws(() => addCosts({}, { bad: -1 }), /Cost bad/);
+  const versioned = normalizeNodes([{ id: "x", role: "r", objective: "o", profile_ids: ["p"],
+    profile_versions: [3] }]);
+  assert.equal(dispatchNodes(versioned, 1, "host").leases[0].profile_version, 3);
+  assert.deepEqual(orchestrationOutcome([{ ...versioned[0], status: "passed", route_index: 1 }]).scores,
+    { passed_nodes: 1, failed_nodes: 0, blocked_nodes: 0, total_nodes: 1, route_retries: 1 });
+  assert.equal(orchestrationOutcome([{ ...versioned[0], status: "failed" }]).failure_type, "node_failed");
+  assert.equal(orchestrationOutcome([{ ...versioned[0], status: "blocked" }]).failure_type, "node_blocked");
 });

@@ -47,6 +47,8 @@ Source 同时保存用户输入路径和解析后的真实路径。扫描器跟�
 
 Plan 是带依赖的有向无环图。Node 指定角色、目标、候选 Agent Profile 和副作用级别。`dispatch` 只领取依赖已通过且并发容量允许的节点；失败时可以切换到下一个 Profile，最终失败会阻塞下游。`submit` 必须引用有效 Lease 并声明 provenance。
 
+v0.6.0 起，Plan 创建时会锁定每个候选 Agent Profile 的精确版本。需要进入评测历史的编排使用 Orchestration Trial：Dispatch、失败换路、Submit、Artifact、Evidence 和成本自动写入 Trace；Plan 到达终态时自动生成回执与 Outcome。普通 Plan 仍可用于不需要评测留痕的临时协调。
+
 Craft 不绕过 Host 的 Sandbox、审批或并发限制，也不直接假定 Codex/Claude 的内部任务 API。插件负责把 Lease 翻译成宿主原生执行，再把真实结果交回 Craft。
 
 ## 从执行经验中改进 Harness
@@ -55,7 +57,7 @@ Craft 后续不会把“学习”简化成不断增长的对话摘要，而会�
 
 经验分为两层：具体 Case 的完整执行记录，以及由多个 Case 归纳出的可复用模式。候选 Workflow 或 Harness 配置必须通过独立评测集后才能晋级，并保留版本、适用条件和回滚路径。排序优先保证正确性，再比较 token、耗时和费用；模型判断可以参与诊断，但不能替代确定性证据或人工审批。
 
-v0.5.0 已实现六维 Harness Configuration、不可变 Trial/Outcome、只追加 Trace、评测分区、Workflow 自动取证、多来源 Grader、Signoff Policy、Workflow 晋级/回滚门禁，以及同评测集版本的质量、成本、耗时和失败类型聚合对比。重复采样与统计置信度、自动执行模型/业务 Grader、自动 Harness 搜索、双层经验库和按 Case 自适应装配仍是路线设计。
+v0.6.0 已进一步实现 Orchestration Trial 自动归档和 Agent Profile 路由版本锁定。重复采样与统计置信度、Lease TTL/Heartbeat、自动 Host Driver、自动执行模型/业务 Grader、自动 Harness 搜索、双层经验库和按 Case 自适应装配仍是路线设计。
 
 ## 存储与跨平台
 

@@ -31,6 +31,7 @@ CLI / Desktop / Codex / Claude / DSH / MCP Host
 Capability Kit ──contains──> Capability / Validator / Policy / Eval Suite
 Task ──compiled to──> Agent IR ──lowered to──> Workflow / Orchestration Plan
 Task + Subject Version + Harness Configuration ──creates──> Trial
+Orchestration Plan + pinned Agent Profile Versions ──auto-captures──> Trial / Trace / Outcome
 Trial ──appends──> Trace ──produces──> Artifact / Evidence
 Trial ──closes with──> Outcome ──aggregated by──> Evaluation Run
 Comparable Evaluation Runs ──produce──> Evaluation Comparison
@@ -48,6 +49,7 @@ Signoff ──authorizes──> Workflow or Configuration Promotion
 - Search/Development Case 不得作为 `verified` 晋级证据。
 - 副作用、预算和宿主 Sandbox 是不同边界，不能互相替代。
 - 自动优化只操作明确声明的设计空间，并保留回滚点。
+- 运行中路由使用 Plan 创建时锁定的 Agent Profile 版本，不随“最新版本”漂移。
 
 ## 模块文档
 

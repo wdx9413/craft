@@ -2,9 +2,9 @@ import { createHash, randomUUID } from "node:crypto";
 import { Catalog } from "./catalog.js";
 import { CraftStore } from "./store.js";
 import { approvedEffects, executeSteps, normalizeSteps, resolveInputs, substitute } from "./workflow.js";
-import { dispatchNodes, normalizeNodes, planStatus, submitNode } from "./orchestration.js";
+import { addCosts, dispatchNodes, normalizeNodes, orchestrationOutcome, planStatus, submitNode } from "./orchestration.js";
 import { aggregateEvaluation, compareEvaluationAggregates } from "./evaluation.js";
-export const VERSION = "0.5.0";
+export const VERSION = "0.6.0";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const WORKFLOW_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -522,12 +522,41 @@ export class CraftService {
         return { workflow_run: run, artifact, evidence, ...this.trialGet({ trial_id: trialId }) };
     }
     orchestrationCreate(args) {
-        const nodes = normalizeNodes((args.nodes ?? []));
+        const nodes = normalizeNodes((args.nodes ?? [])).map((node) => ({ ...node,
+            profile_versions: node.profile_ids.map((profileId) => Number(this.store.get("agent_profile", profileId).version)),
+        }));
         const max = Number(args.max_concurrency ?? 4);
         if (!Number.isInteger(max) || max < 1 || max > 32)
             throw new Error("max_concurrency must be between 1 and 32");
-        return this.store.save("orchestration_plan", id("plan"), { goal: text(args.goal, "goal"),
-            task_id: args.task_id ?? null, max_concurrency: max, status: "running", nodes, policy: args.policy ?? {} });
+        const planId = args.plan_id === undefined ? id("plan") : text(args.plan_id, "plan_id");
+        return this.store.create("orchestration_plan", planId, { goal: text(args.goal, "goal"),
+            task_id: args.task_id ?? null, trial_id: args.trial_id ?? null,
+            trial_started_at: args.trial_started_at ?? null, accumulated_costs: {},
+            max_concurrency: max, status: "running", nodes, policy: object(args.policy ?? {}, "policy") });
+    }
+    orchestrationTrialStart(args) {
+        const taskId = text(args.task_id, "task_id");
+        this.store.get("task", taskId);
+        const trialId = args.trial_id === undefined ? id("trial") : text(args.trial_id, "trial_id");
+        if (this.store.find("trial", trialId))
+            throw new Error(`Trial already exists: ${trialId}`);
+        const caseId = args.case_id === undefined ? undefined : text(args.case_id, "case_id");
+        const environment = object(args.environment ?? {}, "environment");
+        const budget = object(args.budget ?? {}, "budget");
+        if (args.harness_configuration_id !== undefined) {
+            this.store.get("harness_configuration", text(args.harness_configuration_id, "harness_configuration_id"), args.harness_configuration_version === undefined ? undefined
+                : finiteInteger(args.harness_configuration_version, "harness_configuration_version", 1));
+        }
+        const plan = this.orchestrationCreate({ ...args, task_id: taskId, trial_id: trialId,
+            trial_started_at: new Date().toISOString() });
+        const trial = this.trialStart({ trial_id: trialId, task_id: taskId, case_id: caseId,
+            subject_type: "orchestration_plan", subject_id: plan.id, subject_version: plan.version,
+            harness_configuration_id: args.harness_configuration_id,
+            harness_configuration_version: args.harness_configuration_version,
+            environment, budget });
+        this.trialTraceAppend({ trial_id: trial.id, event_type: "orchestration.started", source: "program_verified",
+            data: { plan_id: plan.id, plan_version: plan.version } });
+        return { plan, ...this.trialGet({ trial_id: trial.id }) };
     }
     orchestrationDispatch(args) {
         const plan = this.get("orchestration_plan", "plan_id", args);
@@ -540,17 +569,84 @@ export class CraftService {
         const result = dispatchNodes(plan.nodes, capacity, owner);
         const saved = this.store.updateIfVersion("orchestration_plan", String(plan.id), Number(plan.version), { ...plan, nodes: result.nodes,
             status: planStatus(result.nodes) });
+        if (plan.trial_id && result.leases.length) {
+            this.trialTraceAppend({ trial_id: plan.trial_id, event_type: "orchestration.dispatched",
+                source: "program_verified", data: { leases: result.leases } });
+        }
         return { plan: saved, leases: result.leases };
     }
     orchestrationSubmit(args) {
         const plan = this.get("orchestration_plan", "plan_id", args);
+        const leaseId = text(args.lease_id, "lease_id");
+        const leased = plan.nodes.find((node) => node.lease_id === leaseId);
+        if (!leased)
+            throw new Error(`Unknown lease: ${leaseId}`);
         if (args.claimed_by !== undefined) {
-            const leased = plan.nodes.find((node) => node.lease_id === args.lease_id);
-            if (leased && leased.claimed_by !== text(args.claimed_by, "claimed_by"))
+            if (leased.claimed_by !== text(args.claimed_by, "claimed_by"))
                 throw new Error("Lease owner does not match");
         }
-        const nodes = submitNode(plan.nodes, text(args.lease_id, "lease_id"), text(args.verdict, "verdict"), String(args.provenance ?? "agent_reported"));
-        return this.store.updateIfVersion("orchestration_plan", String(plan.id), Number(plan.version), { ...plan, nodes, status: planStatus(nodes) });
+        const provenance = String(args.provenance ?? "agent_reported");
+        const verdict = text(args.verdict, "verdict");
+        const costs = object(args.costs ?? {}, "costs");
+        const accumulatedCosts = addCosts(object(plan.accumulated_costs ?? {}, "accumulated costs"), costs);
+        const artifactIds = array(args.artifact_ids ?? [], "artifact_ids").map((value) => text(value, "artifact_id"));
+        const evidenceIds = array(args.evidence_ids ?? [], "evidence_ids").map((value) => text(value, "evidence_id"));
+        for (const artifactId of artifactIds)
+            this.store.get("artifact", artifactId);
+        for (const evidenceId of evidenceIds)
+            this.store.get("evidence", evidenceId);
+        const summary = args.summary === undefined ? null : text(args.summary, "summary");
+        const nodes = submitNode(plan.nodes, leaseId, verdict, provenance);
+        const status = planStatus(nodes);
+        const saved = this.store.updateIfVersion("orchestration_plan", String(plan.id), Number(plan.version), { ...plan, nodes, status, accumulated_costs: accumulatedCosts });
+        if (plan.trial_id) {
+            this.trialTraceAppend({ trial_id: plan.trial_id, event_type: "orchestration.node_submitted",
+                source: provenance, data: { node_id: leased.id,
+                    profile_id: leased.profile_ids[Number(leased.route_index)],
+                    profile_version: leased.profile_versions[Number(leased.route_index)],
+                    verdict, summary, costs }, artifact_ids: artifactIds, evidence_ids: evidenceIds });
+            if (status !== "running")
+                this.orchestrationTrialFinalize({ plan_id: saved.id });
+        }
+        return saved;
+    }
+    orchestrationTrialFinalize(args) {
+        const plan = this.get("orchestration_plan", "plan_id", args);
+        if (!plan.trial_id)
+            throw new Error("Orchestration plan is not linked to a Trial");
+        if (plan.status === "running")
+            throw new Error("Orchestration plan is still running");
+        const trialId = String(plan.trial_id);
+        if (this.store.find("outcome", `outcome_${trialId}`)) {
+            return { plan, ...this.trialGet({ trial_id: trialId }) };
+        }
+        const result = orchestrationOutcome(plan.nodes);
+        const stableKey = createHash("sha256").update(`${plan.id}:${trialId}`).digest("hex");
+        const artifactId = `artifact_${stableKey}`;
+        const artifact = this.store.find("artifact", artifactId) ?? this.artifactRegister({ artifact_id: artifactId,
+            kind: "orchestration_receipt",
+            name: `Orchestration plan ${plan.id}`, uri: `craft://orchestration-plans/${plan.id}/versions/${plan.version}`,
+            media_type: "application/json", producer_type: "orchestration_plan", producer_id: plan.id,
+            metadata: { plan_version: plan.version } });
+        const evidenceId = `evidence_${stableKey}`;
+        const evidence = this.store.find("evidence", evidenceId) ?? this.evidenceRecord({ evidence_id: evidenceId,
+            source_type: "orchestration", confidence: "confirmed",
+            claim: `Orchestration plan ${plan.id} reached ${plan.status} from recorded node submissions.`,
+            artifact_id: artifact.id, locator: { plan_id: plan.id, plan_version: plan.version } });
+        const events = this.store.events(`trial:${trialId}`);
+        if (!events.some((event) => event.event_type === "orchestration.completed")) {
+            this.trialTraceAppend({ trial_id: trialId, event_type: "orchestration.completed", source: "program_verified",
+                data: { status: plan.status, plan_version: plan.version }, artifact_ids: [artifact.id],
+                evidence_ids: [evidence.id] });
+        }
+        const traceEvidence = this.store.events(`trial:${trialId}`).flatMap((event) => (event.payload.evidence_ids ?? []));
+        const startedAt = Date.parse(String(plan.trial_started_at));
+        this.outcomeRecord({ trial_id: trialId, verdict: result.verdict, failure_type: result.failure_type ?? undefined,
+            summary: result.verdict === "passed" ? "Orchestration completed all nodes." : "Orchestration did not complete all nodes.",
+            scores: result.scores, costs: { ...plan.accumulated_costs,
+                wall_duration_ms: Math.max(0, Date.now() - startedAt) },
+            evidence_ids: [...new Set(traceEvidence)], source: "orchestration_aggregated" });
+        return { plan, ...this.trialGet({ trial_id: trialId }) };
     }
 }
 //# sourceMappingURL=service.js.map

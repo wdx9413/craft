@@ -88,6 +88,8 @@ test("service persists capabilities, tasks, feedback, artifacts, evidence, and v
     assert.equal(crashedTrial.artifact, null);
     assert.equal((crashedTrial.outcome as Record<string, unknown>).verdict, "failed");
     assert.equal(JSON.stringify(crashedTrial).includes("sensitive crash detail"), false);
+    service.saveVersioned("agent_profile", "profile", { profile_id: "p", name: "P", role: "worker",
+      host: "local", model: "test" }, ["name", "role", "host", "model"]);
     const orchestration = service.orchestrationCreate({ goal: "Build", max_concurrency: 2, nodes: [
       { id: "work", role: "worker", objective: "do", profile_ids: ["p"] },
     ] });
@@ -101,6 +103,9 @@ test("service persists capabilities, tasks, feedback, artifacts, evidence, and v
       { id: "x", role: "r", objective: "o", profile_ids: ["p"] },
     ] }), /max_concurrency/);
     assert.throws(() => service.orchestrationCreate({ goal: "x" }), /At least one/);
+    assert.throws(() => service.orchestrationCreate({ goal: "x", policy: [], nodes: [
+      { id: "x", role: "r", objective: "o", profile_ids: ["p"] },
+    ] }), /policy must be an object/);
     const invalidCapacity = service.orchestrationCreate({ goal: "x", nodes: [
       { id: "x", role: "r", objective: "o", profile_ids: ["p"] },
     ] });

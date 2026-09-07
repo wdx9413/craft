@@ -103,11 +103,18 @@ export const TOOLS: Tool[] = [
   tool("craft_agent_profile_save", "Save a versioned cross-host agent profile.", ["name", "role", "host", "model"], false, ["profile_id", "provider", "reasoning_effort", "capabilities", "allowed_side_effects", "metadata"]),
   tool("craft_agent_profile_get", "Read an agent profile.", ["profile_id"], true, ["version"]),
   tool("craft_agent_profile_list", "List agent profiles.", [], true, ["limit", "query"]),
-  tool("craft_orchestration_plan_create", "Create a dependency-aware multi-Agent plan.", ["goal", "nodes"], false, ["task_id", "max_concurrency", "policy"]),
+  tool("craft_orchestration_plan_create", "Create a dependency-aware multi-Agent plan with pinned Agent Profile versions.", ["goal", "nodes"], false, ["plan_id", "task_id", "max_concurrency", "policy"]),
+  tool("craft_orchestration_trial_start", "Create an orchestration plan and automatically capture its Trial lifecycle.",
+    ["task_id", "goal", "nodes"], false, ["plan_id", "trial_id", "case_id", "max_concurrency", "policy",
+      "harness_configuration_id", "harness_configuration_version", "environment", "budget"]),
   tool("craft_orchestration_plan_get", "Read a multi-Agent plan and node states.", ["plan_id"], true),
   tool("craft_orchestration_plan_list", "List multi-Agent plans.", [], true, ["limit", "query"]),
   tool("craft_orchestration_dispatch", "Lease ready nodes to a host within concurrency limits.", ["plan_id", "claimed_by"], false, ["capacity"]),
-  tool("craft_orchestration_submit", "Submit a leased node result with provenance.", ["plan_id", "lease_id", "verdict"], false, ["provenance", "claimed_by"]),
+  tool("craft_orchestration_submit", "Submit a leased node result; trial-backed plans capture trace, cost, evidence, and terminal outcome automatically.",
+    ["plan_id", "lease_id", "verdict"], false,
+    ["provenance", "claimed_by", "summary", "costs", "artifact_ids", "evidence_ids"]),
+  tool("craft_orchestration_trial_finalize", "Idempotently reconcile a terminal trial-backed plan into its receipt, evidence, and outcome.",
+    ["plan_id"], false),
 ];
 
 export class McpServer {
@@ -171,10 +178,12 @@ export class McpServer {
       craft_agent_profile_get: (a) => service.get("agent_profile", "profile_id", a),
       craft_agent_profile_list: (a) => service.list("agent_profile", "profiles", a),
       craft_orchestration_plan_create: (a) => service.orchestrationCreate(a),
+      craft_orchestration_trial_start: (a) => service.orchestrationTrialStart(a),
       craft_orchestration_plan_get: (a) => service.get("orchestration_plan", "plan_id", a),
       craft_orchestration_plan_list: (a) => service.list("orchestration_plan", "plans", a),
       craft_orchestration_dispatch: (a) => service.orchestrationDispatch(a),
       craft_orchestration_submit: (a) => service.orchestrationSubmit(a),
+      craft_orchestration_trial_finalize: (a) => service.orchestrationTrialFinalize(a),
     };
   }
 

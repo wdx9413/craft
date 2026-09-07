@@ -10,6 +10,7 @@
 - Evaluation Aggregate：从 Outcome 复算通过率、verdict、数值 score、cost、duration 和 failure type 分布，不依赖模型总结。
 - Evaluation Comparison：只比较同一 Suite 精确版本、同一分区、同一 Subject 类型和相同 Case 集合，并保存两侧聚合快照与 delta。
 - Workflow Trial Run：一次调用锁定 Workflow 精确版本，并自动登记 Trial、起止 Trace、执行回执 Artifact、程序 Evidence 和唯一 Outcome。确定性检查不通过与运行时崩溃都会形成可追踪的失败结果，崩溃详情默认脱敏。
+- Orchestration Trial：创建时锁定 Plan 初始版本和所有 Agent Profile 路由版本；Dispatch、失败换路和 Submit 自动进入 Trace，终态自动登记回执、Evidence、节点统计、累计成本和 Outcome。
 - Grader / Grade / Signoff：区分程序、模型、人工和业务来源，以显式 Grade 集合和版本化 Policy 生成可复算的晋级决定。
 
 ## 关键门禁
@@ -20,6 +21,6 @@ Workflow、Agent Profile 和 Harness Configuration 都可以作为被测 Subject
 
 ## 下一步
 
-继续把 Orchestration 执行转换为 Trial；加入置信区间、重复采样、等预算基线和 Operational Grade 回填；最后才建设 Case 经验与全局模式的双层检索和受控 Harness 搜索。
+下一步加入 Lease TTL/Heartbeat 与中断恢复，再建设置信区间、重复采样、等预算基线和 Operational Grade 回填；最后才建设 Case 经验与全局模式的双层检索和受控 Harness 搜索。
 
 关联：[Workflow/Signoff](workflow-signoff.md) · [Agent IR](agent-ir.md) · [Capability Kit](capability-kit.md)

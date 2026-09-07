@@ -25,6 +25,7 @@ Craft 的核心对象和协议不绑定某个模型或行业。它既能通过 M
 - 确定性命令、文件/JSON 断言、覆盖率门禁，以及结构化执行回执。
 - 版本化评测集与 Agent Profile 基础数据模型。
 - 六维 Harness Configuration、不可变 Trial/Outcome、只追加 Trace、Workflow 自动取证闭环，以及 held-out Eval 驱动的晋级与回滚。
+- Orchestration Trial 自动归档：锁定 Agent Profile 精确版本，记录 Dispatch、重路由、节点结果、成本和证据，并在终态自动生成 Outcome。
 - 版本化 Grader、多来源 Grade 和 Signoff Policy；模型判断不会被记录成程序证明。
 - 同评测集版本对比：在 Suite 精确版本、分区、Subject 类型和 Case 集合一致时，聚合比较 Workflow、Agent Profile 或 Harness Configuration 的质量、成本、耗时与失败类型。
 - MCP 服务，以及 Codex、Claude Code、DeepSeek Harness 和通用 MCP Host 接入。

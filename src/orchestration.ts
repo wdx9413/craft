@@ -3,7 +3,32 @@ import type { JsonObject } from "./store.ts";
 import { SIDE_EFFECTS } from "./workflow.ts";
 
 export const PROVENANCE = new Set(["agent_reported", "model_judged", "program_verified", "human_approved", "human_rejected"]);
-export type PlanNode = JsonObject & { id: string; depends_on: string[]; profile_ids: string[]; status: string };
+export type PlanNode = JsonObject & { id: string; depends_on: string[]; profile_ids: string[];
+  profile_versions?: number[]; status: string };
+
+export function addCosts(current: JsonObject, addition: JsonObject): JsonObject {
+  const result = new Map<string, number>();
+  for (const [name, value] of [...Object.entries(current), ...Object.entries(addition)]) {
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+      throw new Error(`Cost ${name} must be a non-negative finite number`);
+    }
+    result.set(name, (result.get(name) ?? 0) + value);
+  }
+  return Object.fromEntries(result);
+}
+
+export function orchestrationOutcome(nodes: PlanNode[]): JsonObject {
+  const counts = (status: string): number => nodes.filter((node) => node.status === status).length;
+  const failed = counts("failed");
+  const blocked = counts("blocked");
+  const passed = counts("passed");
+  return {
+    verdict: failed || blocked ? "failed" : "passed",
+    failure_type: failed ? "node_failed" : blocked ? "node_blocked" : null,
+    scores: { passed_nodes: passed, failed_nodes: failed, blocked_nodes: blocked,
+      total_nodes: nodes.length, route_retries: nodes.reduce((total, node) => total + Number(node.route_index), 0) },
+  };
+}
 
 export function normalizeNodes(input: unknown[]): PlanNode[] {
   if (!input.length) throw new Error("At least one orchestration node is required");
@@ -65,6 +90,7 @@ export function dispatchNodes(nodes: PlanNode[], capacity: number, owner: string
     const leaseId = `lease_${randomUUID().replaceAll("-", "")}`;
     const leased = { ...node, status: "leased", lease_id: leaseId, claimed_by: owner } as PlanNode;
     leases.push({ lease_id: leaseId, node_id: node.id, profile_id: node.profile_ids[routeIndex],
+      profile_version: node.profile_versions?.[routeIndex] ?? null,
       role: node.role, objective: node.objective, side_effect: node.side_effect });
     return leased;
   });
