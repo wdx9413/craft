@@ -12,7 +12,7 @@
     "clean": "node --experimental-strip-types scripts/clean.ts",
     "build": "pnpm run clean && pnpm run build:core && pnpm run build:plugin && pnpm run build:deepseek",
     "build:core": "node node_modules/typescript/bin/tsc -p tsconfig.build.json",
-    "build:plugin": "node node_modules/esbuild/bin/esbuild bin/craft-mcp.ts --bundle --platform=node --format=cjs --target=node24 --outfile=dist/plugin/craft-mcp.cjs",
+    "build:plugin": "esbuild bin/craft-mcp.ts --bundle --platform=node --format=cjs --target=node24 --outfile=dist/plugin/craft-mcp.cjs",
     "build:deepseek": "node node_modules/typescript/bin/tsc -p adapters/deepseek-harness/tsconfig.json",
     "prepack": "pnpm run build",
     "test:smoke": "node dist/src/cli.js --help",
