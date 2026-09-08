@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import { basename, join, relative, resolve } from "node:path";
 import { parse } from "yaml";
+import { cosine, sanitizeEmbeddingText, semanticFailureReason } from "./semantic.js";
 import { CraftStore } from "./store.js";
 function stableId(prefix, value) {
     return `${prefix}_${createHash("sha256").update(value).digest("hex").slice(0, 20)}`;
@@ -81,7 +82,16 @@ export async function skillFiles(root, onError) {
 }
 export class Catalog {
     store;
-    constructor(store) { this.store = store; }
+    semanticProvider;
+    #semanticStatus;
+    #degradedUntil = 0;
+    constructor(store, semanticProvider) {
+        this.store = store;
+        this.semanticProvider = semanticProvider;
+        this.#semanticStatus = semanticProvider
+            ? { mode: "configured", provider: semanticProvider.label, indexed_capabilities: 0 }
+            : { mode: "disabled", reason: "not_configured", indexed_capabilities: 0 };
+    }
     async addSource(path, label, scan = true) {
         const requested_path = resolve(path);
         const root = await realpath(requested_path);
@@ -193,6 +203,84 @@ export class Catalog {
             return summary;
         });
     }
+    semanticStatus() { return { ...this.#semanticStatus }; }
+    async searchHybrid(query, limit = 6) {
+        const lexical = this.search(query, 20);
+        const provider = this.semanticProvider;
+        if (!provider)
+            return lexical.slice(0, Math.min(Math.max(1, limit), 20));
+        if (Date.now() < this.#degradedUntil) {
+            this.#semanticStatus = { ...this.#semanticStatus, mode: "degraded", reason: "cooldown",
+                degraded_until: new Date(this.#degradedUntil).toISOString() };
+            return lexical.slice(0, Math.min(Math.max(1, limit), 20));
+        }
+        try {
+            const vectors = await this.capabilityVectors(provider);
+            if (!vectors.length)
+                return lexical.slice(0, Math.min(Math.max(1, limit), 20));
+            const [queryVector] = await provider.embed([sanitizeEmbeddingText(query)]);
+            const semantic = vectors.map(({ capability, vector }) => ({ capability, semantic_score: cosine(queryVector, vector) }))
+                .sort((left, right) => right.semantic_score - left.semantic_score || String(left.capability.id).localeCompare(String(right.capability.id)));
+            const ranks = new Map();
+            lexical.forEach((item, index) => ranks.set(String(item.id), 1 / (60 + index + 1)));
+            semantic.forEach((item, index) => ranks.set(String(item.capability.id), (ranks.get(String(item.capability.id)) ?? 0) + 1 / (60 + index + 1)));
+            const candidates = new Map();
+            lexical.forEach((item) => candidates.set(String(item.id), item));
+            semantic.forEach((item) => candidates.set(String(item.capability.id), { ...item.capability, semantic_score: item.semantic_score }));
+            const merged = [...candidates.values()].sort((left, right) => String(left.id).localeCompare(String(right.id)))
+                .map((item) => ({ ...item, score: ranks.get(String(item.id)) * 1_000 }))
+                .map((item) => rerank(query, item))
+                .sort((left, right) => Number(right.score) - Number(left.score))
+                .slice(0, Math.min(Math.max(1, limit), 20));
+            this.#semanticStatus = { mode: "ready", provider: provider.label, indexed_capabilities: vectors.length,
+                last_success_at: new Date().toISOString() };
+            return merged.map(summary);
+        }
+        catch (error) {
+            this.#degradedUntil = Date.now() + 60_000;
+            this.#semanticStatus = { mode: "degraded", provider: provider.label, reason: semanticFailureReason(error),
+                indexed_capabilities: this.store.count("capability_embedding"), degraded_until: new Date(this.#degradedUntil).toISOString() };
+            return lexical.slice(0, Math.min(Math.max(1, limit), 20));
+        }
+    }
+    async capabilityVectors(provider) {
+        const capabilities = this.store.list("capability", Number.MAX_SAFE_INTEGER);
+        const cached = [];
+        const missing = [];
+        for (const capability of capabilities) {
+            const record = this.store.find("capability_embedding", embeddingId(String(capability.id), provider.fingerprint));
+            if (record && record.capability_digest === capability.digest && record.provider_fingerprint === provider.fingerprint && Array.isArray(record.vector)) {
+                cached.push({ capability, vector: record.vector });
+            }
+            else
+                missing.push(capability);
+        }
+        if (!missing.length)
+            return cached;
+        const embeddings = await provider.embed(missing.map(embeddingText));
+        if (embeddings.length !== missing.length)
+            throw new Error("Invalid embedding response");
+        const dimension = [...cached.map((item) => item.vector.length), ...embeddings.map((vector) => vector.length)].find(Boolean);
+        if (!dimension || embeddings.some((vector) => vector.length !== dimension))
+            throw new Error("Embedding dimensions differ");
+        const created = missing.map((capability, index) => {
+            const vector = embeddings[index];
+            this.store.save("capability_embedding", embeddingId(String(capability.id), provider.fingerprint), {
+                capability_id: capability.id, capability_digest: capability.digest, provider_fingerprint: provider.fingerprint, vector,
+            });
+            return { capability, vector };
+        });
+        return [...cached, ...created];
+    }
     get(assetId) { return this.store.get("capability", assetId); }
+}
+function embeddingId(capabilityId, fingerprint) { return stableId("embedding", `${capabilityId}:${fingerprint}`); }
+function embeddingText(capability) {
+    return sanitizeEmbeddingText([capability.name, capability.description, metadataTerms(capability.metadata).join("\n")]
+        .filter((value) => typeof value === "string" && value.trim()).join("\n"));
+}
+function summary(item) {
+    const { body: _body, metadata: _metadata, search_text: _searchText, ...value } = item;
+    return value;
 }
 //# sourceMappingURL=catalog.js.map

@@ -7361,13 +7361,92 @@ var require_dist = __commonJS({
 var import_node_readline = require("node:readline");
 
 // src/service.ts
-var import_node_crypto4 = require("node:crypto");
+var import_node_crypto5 = require("node:crypto");
 
 // src/catalog.ts
-var import_node_crypto = require("node:crypto");
+var import_node_crypto2 = require("node:crypto");
 var import_promises2 = require("node:fs/promises");
 var import_node_path2 = require("node:path");
 var import_yaml = __toESM(require_dist(), 1);
+
+// src/semantic.ts
+var import_node_crypto = require("node:crypto");
+var DEFAULT_TIMEOUT_MS = 5e3;
+function endpoint(baseUrl) {
+  return `${baseUrl.replace(/\/$/, "")}/embeddings`;
+}
+function failureReason(error) {
+  if (error instanceof DOMException && ["TimeoutError", "AbortError"].includes(error.name)) return "timeout";
+  const message = error instanceof Error ? error.message : "";
+  if (/^HTTP (401|403)\b/.test(message)) return "authentication";
+  if (/invalid embedding response|embedding dimensions/i.test(message)) return "invalid_response";
+  return "provider_error";
+}
+function validateVectors(value, expected) {
+  if (!Array.isArray(value) || value.length !== expected) throw new Error("Invalid embedding response");
+  const vectors = value.map((vector) => {
+    if (!Array.isArray(vector) || !vector.length || vector.some((number) => typeof number !== "number" || !Number.isFinite(number))) {
+      throw new Error("Invalid embedding response");
+    }
+    return vector;
+  });
+  if (new Set(vectors.map((vector) => vector.length)).size !== 1) throw new Error("Embedding dimensions differ");
+  return vectors;
+}
+function embeddingFingerprint(config) {
+  return (0, import_node_crypto.createHash)("sha256").update(JSON.stringify({ protocol: config.protocol, baseUrl: config.baseUrl, model: config.model })).digest("hex").slice(0, 24);
+}
+function semanticFailureReason(error) {
+  return failureReason(error);
+}
+var OpenAiCompatibleEmbeddingProvider = class {
+  fingerprint;
+  label;
+  config;
+  constructor(config) {
+    this.config = config;
+    this.fingerprint = embeddingFingerprint(config);
+    this.label = { name: config.name, model: config.model };
+  }
+  async embed(texts) {
+    if (!texts.length) return [];
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.config.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+    try {
+      const key = this.config.apiKeyEnv ? process.env[this.config.apiKeyEnv] : void 0;
+      const response = await fetch(endpoint(this.config.baseUrl), {
+        method: "POST",
+        signal: controller.signal,
+        headers: { "content-type": "application/json", ...key ? { authorization: `Bearer ${key}` } : {} },
+        body: JSON.stringify({ model: this.config.model, input: texts })
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const payload = await response.json();
+      const data = payload && typeof payload === "object" && !Array.isArray(payload) ? payload.data : void 0;
+      if (!Array.isArray(data)) throw new Error("Invalid embedding response");
+      const ordered = [...data].sort((left, right) => Number(left.index) - Number(right.index)).map((item) => item && typeof item === "object" && !Array.isArray(item) ? item.embedding : void 0);
+      return validateVectors(ordered, texts.length);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+};
+function sanitizeEmbeddingText(value) {
+  return value.replace(/(?:api[_-]?key|authorization|cookie|password|secret|token)\s*[:=]\s*[^\s]+/giu, "[redacted]");
+}
+function cosine(left, right) {
+  if (left.length !== right.length || !left.length) throw new Error("Embedding dimensions differ");
+  let dot = 0;
+  let leftNorm = 0;
+  let rightNorm = 0;
+  for (let index = 0; index < left.length; index += 1) {
+    dot += left[index] * right[index];
+    leftNorm += left[index] ** 2;
+    rightNorm += right[index] ** 2;
+  }
+  if (!leftNorm || !rightNorm) return 0;
+  return dot / Math.sqrt(leftNorm * rightNorm);
+}
 
 // src/store.ts
 var import_node_fs = require("node:fs");
@@ -7602,7 +7681,7 @@ var CraftStore = class {
 
 // src/catalog.ts
 function stableId(prefix, value) {
-  return `${prefix}_${(0, import_node_crypto.createHash)("sha256").update(value).digest("hex").slice(0, 20)}`;
+  return `${prefix}_${(0, import_node_crypto2.createHash)("sha256").update(value).digest("hex").slice(0, 20)}`;
 }
 function metadataTerms(metadata) {
   const aliases = metadata.aliases;
@@ -7679,8 +7758,13 @@ async function skillFiles(root, onError) {
 }
 var Catalog = class {
   store;
-  constructor(store) {
+  semanticProvider;
+  #semanticStatus;
+  #degradedUntil = 0;
+  constructor(store, semanticProvider) {
     this.store = store;
+    this.semanticProvider = semanticProvider;
+    this.#semanticStatus = semanticProvider ? { mode: "configured", provider: semanticProvider.label, indexed_capabilities: 0 } : { mode: "disabled", reason: "not_configured", indexed_capabilities: 0 };
   }
   async addSource(path, label, scan = true) {
     const requested_path = (0, import_node_path2.resolve)(path);
@@ -7748,7 +7832,7 @@ var Catalog = class {
         continue;
       }
       const text2 = await (0, import_promises2.readFile)(path, "utf8");
-      const digest2 = (0, import_node_crypto.createHash)("sha256").update(text2).digest("hex");
+      const digest2 = (0, import_node_crypto2.createHash)("sha256").update(text2).digest("hex");
       if (previous?.digest === digest2) {
         this.store.save("capability", assetId, { ...previous, size: fileStat.size, mtime_ms: fileStat.mtimeMs });
         unchanged += 1;
@@ -7804,14 +7888,98 @@ ${metadataTerms(skill.metadata).join("\n")}`,
       return terms.every((term) => aliases.includes(term));
     });
     return [...lexical, ...aliasFallback].filter((item, index, values) => values.findIndex((candidate) => candidate.id === item.id) === index).map((item) => rerank(query, item)).sort((left, right) => Number(right.score) - Number(left.score) || String(left.id).localeCompare(String(right.id))).slice(0, Math.min(Math.max(1, limit), 20)).map((item) => {
-      const { body: _body, metadata: _metadata, search_text: _searchText, ...summary } = item;
-      return summary;
+      const { body: _body, metadata: _metadata, search_text: _searchText, ...summary2 } = item;
+      return summary2;
     });
+  }
+  semanticStatus() {
+    return { ...this.#semanticStatus };
+  }
+  async searchHybrid(query, limit = 6) {
+    const lexical = this.search(query, 20);
+    const provider = this.semanticProvider;
+    if (!provider) return lexical.slice(0, Math.min(Math.max(1, limit), 20));
+    if (Date.now() < this.#degradedUntil) {
+      this.#semanticStatus = {
+        ...this.#semanticStatus,
+        mode: "degraded",
+        reason: "cooldown",
+        degraded_until: new Date(this.#degradedUntil).toISOString()
+      };
+      return lexical.slice(0, Math.min(Math.max(1, limit), 20));
+    }
+    try {
+      const vectors = await this.capabilityVectors(provider);
+      if (!vectors.length) return lexical.slice(0, Math.min(Math.max(1, limit), 20));
+      const [queryVector] = await provider.embed([sanitizeEmbeddingText(query)]);
+      const semantic = vectors.map(({ capability, vector }) => ({ capability, semantic_score: cosine(queryVector, vector) })).sort((left, right) => right.semantic_score - left.semantic_score || String(left.capability.id).localeCompare(String(right.capability.id)));
+      const ranks = /* @__PURE__ */ new Map();
+      lexical.forEach((item, index) => ranks.set(String(item.id), 1 / (60 + index + 1)));
+      semantic.forEach((item, index) => ranks.set(String(item.capability.id), (ranks.get(String(item.capability.id)) ?? 0) + 1 / (60 + index + 1)));
+      const candidates = /* @__PURE__ */ new Map();
+      lexical.forEach((item) => candidates.set(String(item.id), item));
+      semantic.forEach((item) => candidates.set(String(item.capability.id), { ...item.capability, semantic_score: item.semantic_score }));
+      const merged = [...candidates.values()].sort((left, right) => String(left.id).localeCompare(String(right.id))).map((item) => ({ ...item, score: ranks.get(String(item.id)) * 1e3 })).map((item) => rerank(query, item)).sort((left, right) => Number(right.score) - Number(left.score)).slice(0, Math.min(Math.max(1, limit), 20));
+      this.#semanticStatus = {
+        mode: "ready",
+        provider: provider.label,
+        indexed_capabilities: vectors.length,
+        last_success_at: (/* @__PURE__ */ new Date()).toISOString()
+      };
+      return merged.map(summary);
+    } catch (error) {
+      this.#degradedUntil = Date.now() + 6e4;
+      this.#semanticStatus = {
+        mode: "degraded",
+        provider: provider.label,
+        reason: semanticFailureReason(error),
+        indexed_capabilities: this.store.count("capability_embedding"),
+        degraded_until: new Date(this.#degradedUntil).toISOString()
+      };
+      return lexical.slice(0, Math.min(Math.max(1, limit), 20));
+    }
+  }
+  async capabilityVectors(provider) {
+    const capabilities = this.store.list("capability", Number.MAX_SAFE_INTEGER);
+    const cached = [];
+    const missing = [];
+    for (const capability of capabilities) {
+      const record = this.store.find("capability_embedding", embeddingId(String(capability.id), provider.fingerprint));
+      if (record && record.capability_digest === capability.digest && record.provider_fingerprint === provider.fingerprint && Array.isArray(record.vector)) {
+        cached.push({ capability, vector: record.vector });
+      } else missing.push(capability);
+    }
+    if (!missing.length) return cached;
+    const embeddings = await provider.embed(missing.map(embeddingText));
+    if (embeddings.length !== missing.length) throw new Error("Invalid embedding response");
+    const dimension = [...cached.map((item) => item.vector.length), ...embeddings.map((vector) => vector.length)].find(Boolean);
+    if (!dimension || embeddings.some((vector) => vector.length !== dimension)) throw new Error("Embedding dimensions differ");
+    const created = missing.map((capability, index) => {
+      const vector = embeddings[index];
+      this.store.save("capability_embedding", embeddingId(String(capability.id), provider.fingerprint), {
+        capability_id: capability.id,
+        capability_digest: capability.digest,
+        provider_fingerprint: provider.fingerprint,
+        vector
+      });
+      return { capability, vector };
+    });
+    return [...cached, ...created];
   }
   get(assetId) {
     return this.store.get("capability", assetId);
   }
 };
+function embeddingId(capabilityId, fingerprint) {
+  return stableId("embedding", `${capabilityId}:${fingerprint}`);
+}
+function embeddingText(capability) {
+  return sanitizeEmbeddingText([capability.name, capability.description, metadataTerms(capability.metadata).join("\n")].filter((value) => typeof value === "string" && value.trim()).join("\n"));
+}
+function summary(item) {
+  const { body: _body, metadata: _metadata, search_text: _searchText, ...value } = item;
+  return value;
+}
 
 // src/workflow.ts
 var import_node_child_process = require("node:child_process");
@@ -8012,7 +8180,7 @@ function executeSteps(steps, root, approved, executor = runStep) {
 }
 
 // src/orchestration.ts
-var import_node_crypto2 = require("node:crypto");
+var import_node_crypto3 = require("node:crypto");
 var PROVENANCE = /* @__PURE__ */ new Set(["agent_reported", "model_judged", "program_verified", "human_approved", "human_rejected"]);
 function addCosts(current, addition) {
   const result = /* @__PURE__ */ new Map();
@@ -8110,7 +8278,7 @@ function dispatchNodes(nodes, capacity, owner, leaseTtlSeconds = 300, now = Date
     if (!Number.isInteger(routeIndex) || routeIndex < 0 || routeIndex >= node.profile_ids.length) {
       throw new Error(`Node ${node.id} has an invalid route_index`);
     }
-    const leaseId = `lease_${(0, import_node_crypto2.randomUUID)().replaceAll("-", "")}`;
+    const leaseId = `lease_${(0, import_node_crypto3.randomUUID)().replaceAll("-", "")}`;
     const leased = {
       ...node,
       status: "leased",
@@ -8292,10 +8460,10 @@ function compareEvaluationAggregates(baseline, candidate) {
 }
 
 // src/skill-publisher.ts
-var import_node_crypto3 = require("node:crypto");
+var import_node_crypto4 = require("node:crypto");
 var import_promises3 = require("node:fs/promises");
 var import_node_path4 = require("node:path");
-var digest = (value) => (0, import_node_crypto3.createHash)("sha256").update(value).digest("hex");
+var digest = (value) => (0, import_node_crypto4.createHash)("sha256").update(value).digest("hex");
 function targetInsideSource(sourceRoot, targetPath) {
   if ((0, import_node_path4.basename)(targetPath).toLowerCase() !== "skill.md") throw new Error("target_path must name SKILL.md");
   if (!targetPath.startsWith(`${(0, import_node_path4.resolve)(sourceRoot)}${import_node_path4.sep}`)) {
@@ -8341,8 +8509,108 @@ async function rollbackSkillPublication(args) {
   await replaceAtomically(targetPath, backup, (await (0, import_promises3.stat)(targetPath)).mode);
 }
 
+// src/config.ts
+var import_promises4 = require("node:fs/promises");
+var import_node_fs3 = require("node:fs");
+var MODES = /* @__PURE__ */ new Set(["agent", "supervisor", "provider"]);
+var RUNTIMES = /* @__PURE__ */ new Set([
+  "direct-api",
+  "codex-cli",
+  "claude-code",
+  "unconfigured"
+]);
+var HOSTS = /* @__PURE__ */ new Set(["codex-cli", "claude-code", "generic-mcp"]);
+async function exists(path) {
+  try {
+    await (0, import_promises4.access)(path, import_node_fs3.constants.F_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function loadConfig(paths = craftPaths()) {
+  if (!await exists(paths.configFile)) return null;
+  const parsed = JSON.parse(await (0, import_promises4.readFile)(paths.configFile, "utf8"));
+  validateConfig(parsed);
+  return parsed;
+}
+function validateProvider(provider) {
+  if (!provider || typeof provider !== "object" || Array.isArray(provider)) {
+    throw new Error("Direct API runtime requires provider configuration.");
+  }
+  const candidate = provider;
+  if (!["openai-compatible", "anthropic"].includes(String(candidate.protocol))) {
+    throw new Error(`Unsupported provider protocol: ${candidate.protocol}`);
+  }
+  if (typeof candidate.name !== "string" || !candidate.name.trim() || typeof candidate.model !== "string" || !candidate.model.trim() || typeof candidate.baseUrl !== "string") {
+    throw new Error("Provider name and model must not be empty.");
+  }
+  validateProviderUrl(candidate.baseUrl);
+  if (candidate.apiKeyEnv !== void 0 && (typeof candidate.apiKeyEnv !== "string" || !/^[A-Z_][A-Z0-9_]*$/.test(candidate.apiKeyEnv))) {
+    throw new Error("apiKeyEnv must be an uppercase environment-variable name.");
+  }
+}
+function validateProviderUrl(value) {
+  if (typeof value !== "string" || !value.trim()) throw new Error("Provider base URL must not be empty.");
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error("Provider base URL must be a valid HTTP(S) URL.");
+  }
+  if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
+    throw new Error("Provider base URL must be an HTTP(S) URL without credentials or query data.");
+  }
+}
+function validateSemanticSearch(value) {
+  if (value === void 0) return;
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Semantic search must be an object.");
+  const provider = value.provider;
+  if (!provider || typeof provider !== "object" || Array.isArray(provider)) {
+    throw new Error("Semantic search requires embedding provider configuration.");
+  }
+  const candidate = provider;
+  if (candidate.protocol !== "openai-compatible") throw new Error("Semantic search supports openai-compatible embeddings only.");
+  if (typeof candidate.name !== "string" || !candidate.name.trim() || typeof candidate.model !== "string" || !candidate.model.trim()) {
+    throw new Error("Embedding provider name and model must not be empty.");
+  }
+  validateProviderUrl(candidate.baseUrl);
+  if (candidate.apiKeyEnv !== void 0 && (typeof candidate.apiKeyEnv !== "string" || !/^[A-Z_][A-Z0-9_]*$/.test(candidate.apiKeyEnv))) {
+    throw new Error("Embedding apiKeyEnv must be an uppercase environment-variable name.");
+  }
+  if (candidate.timeoutMs !== void 0 && (!Number.isInteger(candidate.timeoutMs) || candidate.timeoutMs < 100 || candidate.timeoutMs > 3e4)) {
+    throw new Error("Embedding timeoutMs must be an integer between 100 and 30000.");
+  }
+}
+function validateConfig(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Craft config must be an object.");
+  }
+  const config = value;
+  if (config.schemaVersion !== 1 || !config.activeMode || !MODES.has(config.activeMode)) {
+    throw new Error("Unsupported or invalid Craft config schema.");
+  }
+  if (!config.runtime || !RUNTIMES.has(config.runtime.kind)) {
+    throw new Error("Craft config has an invalid runtime.");
+  }
+  if (!config.storage?.database || !config.storage.capabilityIndex) {
+    throw new Error("Craft config has invalid storage paths.");
+  }
+  if (typeof config.initializedAt !== "string" || typeof config.updatedAt !== "string" || typeof config.storage.database !== "string" || typeof config.storage.capabilityIndex !== "string") {
+    throw new Error("Craft config has invalid string fields.");
+  }
+  if (config.runtime.kind === "direct-api") validateProvider(config.runtime.provider);
+  if (["codex-cli", "claude-code"].includes(config.runtime.kind) && (typeof config.runtime.command !== "string" || !config.runtime.command.trim())) {
+    throw new Error("CLI runtime requires a command.");
+  }
+  if (!config.supervisor || !Array.isArray(config.supervisor.hosts) || config.supervisor.hosts.some((host) => !HOSTS.has(host))) {
+    throw new Error("Craft config has invalid supervisor hosts.");
+  }
+  validateSemanticSearch(config.semanticSearch);
+}
+
 // src/service.ts
-var VERSION = "0.9.3";
+var VERSION = "0.9.4";
 var CONFIDENCE = /* @__PURE__ */ new Set(["confirmed", "bounded", "unverified", "rejected"]);
 var TASK_STATUS = /* @__PURE__ */ new Set(["active", "paused", "completed", "cancelled"]);
 var VERSIONED_LIFECYCLE = /* @__PURE__ */ new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -8352,7 +8620,7 @@ var HARNESS_DIMENSIONS = /* @__PURE__ */ new Set(["context", "tools", "generatio
 var GRADER_TYPES = /* @__PURE__ */ new Set(["program", "model", "human", "operational"]);
 var GRADE_VERDICTS = /* @__PURE__ */ new Set(["passed", "failed", "inconclusive"]);
 function id(prefix) {
-  return `${prefix}_${(0, import_node_crypto4.randomUUID)().replaceAll("-", "")}`;
+  return `${prefix}_${(0, import_node_crypto5.randomUUID)().replaceAll("-", "")}`;
 }
 function text(value, name) {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
@@ -8460,12 +8728,17 @@ function assertNoSecret(value, name) {
   if (SECRET_ASSIGNMENT.test(value)) throw new Error(`${name} must not contain sensitive assignments`);
   return value;
 }
-var CraftService = class {
+var CraftService = class _CraftService {
   store;
   catalog;
-  constructor(store) {
+  constructor(store, semanticProvider) {
     this.store = store;
-    this.catalog = new Catalog(store);
+    this.catalog = new Catalog(store, semanticProvider);
+  }
+  static async open(store) {
+    const config = await loadConfig(store.paths);
+    const semanticProvider = config?.semanticSearch ? new OpenAiCompatibleEmbeddingProvider(config.semanticSearch.provider) : void 0;
+    return new _CraftService(store, semanticProvider);
   }
   info() {
     const kinds = [
@@ -8533,8 +8806,14 @@ var CraftService = class {
   sourceScan(args) {
     return this.catalog.scan(args.source_id === void 0 ? void 0 : text(args.source_id, "source_id"));
   }
-  capabilitySearch(args) {
-    return { capabilities: this.catalog.search(text(args.query, "query"), finiteInteger(args.limit, "limit", 6, 1, 20)) };
+  async capabilitySearch(args) {
+    return {
+      capabilities: await this.catalog.searchHybrid(text(args.query, "query"), finiteInteger(args.limit, "limit", 6, 1, 20)),
+      semantic_search: this.catalog.semanticStatus()
+    };
+  }
+  semanticSearchStatus() {
+    return this.catalog.semanticStatus();
   }
   capabilityGet(args) {
     return this.catalog.get(text(args.asset_id, "asset_id"));
@@ -8543,7 +8822,7 @@ var CraftService = class {
     const projectId = text(args.project_id, "project_id");
     const enforcement = String(args.enforcement ?? "required");
     if (!(/* @__PURE__ */ new Set(["required", "advisory"])).has(enforcement)) throw new Error(`Unsupported policy enforcement: ${enforcement}`);
-    const policyId = String(args.policy_id ?? `project_policy_${(0, import_node_crypto4.createHash)("sha256").update(projectId).digest("hex").slice(0, 24)}`);
+    const policyId = String(args.policy_id ?? `project_policy_${(0, import_node_crypto5.createHash)("sha256").update(projectId).digest("hex").slice(0, 24)}`);
     return this.saveVersioned("project_policy", "policy", {
       ...args,
       policy_id: policyId,
@@ -8606,14 +8885,14 @@ var CraftService = class {
     if (dispatch.status !== "pending") throw new Error("Host dispatch is already terminal");
     const status = text(args.status, "status");
     if (!(/* @__PURE__ */ new Set(["completed", "failed", "cancelled"])).has(status)) throw new Error(`Unsupported host dispatch status: ${status}`);
-    const summary = assertNoSecret(text(args.summary, "summary"), "summary");
-    const updated = this.store.save("host_dispatch", String(dispatch.id), { ...recordPayload(dispatch), status, summary });
+    const summary2 = assertNoSecret(text(args.summary, "summary"), "summary");
+    const updated = this.store.save("host_dispatch", String(dispatch.id), { ...recordPayload(dispatch), status, summary: summary2 });
     const route = this.store.get("route", String(dispatch.route_id));
     if (route.trial_id) this.trialTraceAppend({
       trial_id: String(route.trial_id),
       event_type: "host.report",
       source: "host_reported",
-      data: { dispatch_id: dispatch.id, status, summary }
+      data: { dispatch_id: dispatch.id, status, summary: summary2 }
     });
     return { dispatch: updated, next_action: this.routeNextAction(route) };
   }
@@ -8628,7 +8907,7 @@ var CraftService = class {
     const status = text(args.status, "status");
     if (!ROUTE_RECEIPT_STATUS.has(status)) throw new Error(`Unsupported route receipt status: ${status}`);
     const command = assertNoSecret(text(args.command, "command"), "command");
-    const summary = assertNoSecret(text(args.summary, "summary"), "summary");
+    const summary2 = assertNoSecret(text(args.summary, "summary"), "summary");
     const receiptId = String(args.receipt_id ?? id("receipt"));
     const artifact = this.artifactRegister({
       artifact_id: `artifact_${receiptId}`,
@@ -8642,7 +8921,7 @@ var CraftService = class {
     const evidence = this.evidenceRecord({
       evidence_id: `evidence_${receiptId}`,
       source_type: "program",
-      claim: summary,
+      claim: summary2,
       confidence: status === "passed" ? "confirmed" : status === "failed" ? "rejected" : "bounded",
       artifact_id: artifact.id,
       metadata: { route_id: route.id, stage_id: stageId, kind, status, command }
@@ -8653,13 +8932,13 @@ var CraftService = class {
       kind,
       status,
       command,
-      summary,
+      summary: summary2,
       artifact_id: artifact.id,
       evidence_id: evidence.id
     });
     return { receipt, artifact, evidence };
   }
-  defaultRoute(args) {
+  defaultRoute(args, selectedCapabilities) {
     const goal = text(args.goal, "goal");
     const title = args.title === void 0 ? goal.slice(0, 120) : text(args.title, "title");
     const mode = String(args.mode ?? "default");
@@ -8671,10 +8950,10 @@ var CraftService = class {
     const tokens = goal.toLowerCase().match(/[\p{L}\p{N}_-]+/gu) ?? [];
     const workflows = this.store.list("workflow", 1e3, (workflow2) => workflow2.lifecycle === "verified").map((workflow2) => ({ workflow: workflow2, score: tokens.filter((token) => JSON.stringify(workflow2).toLowerCase().includes(token)).length })).filter((candidate) => candidate.score > 0).sort((left, right) => right.score - left.score || String(left.workflow.id).localeCompare(String(right.workflow.id)));
     const workflow = mode === "safe_incremental_development" ? null : workflows[0]?.workflow ?? null;
-    const capabilities = this.catalog.search(goal, 6);
+    const capabilities = selectedCapabilities ?? this.catalog.search(goal, 6);
     const developmentPlan = workflow === null ? { stages: SAFE_INCREMENTAL_STAGES.map((stage) => ({ ...stage })) } : null;
     const strategyCapabilities = developmentPlan === null ? [] : capabilities.slice(0, 3).map((capability) => String(capability.id));
-    const strategyId = strategyCapabilities.length ? `route_strategy_${(0, import_node_crypto4.createHash)("sha256").update(JSON.stringify({ mode: "safe_incremental_development", capability_ids: strategyCapabilities })).digest("hex").slice(0, 24)}` : null;
+    const strategyId = strategyCapabilities.length ? `route_strategy_${(0, import_node_crypto5.createHash)("sha256").update(JSON.stringify({ mode: "safe_incremental_development", capability_ids: strategyCapabilities })).digest("hex").slice(0, 24)}` : null;
     const strategy = strategyId === null ? null : this.store.find("route_strategy", strategyId) ?? this.store.create(
       "route_strategy",
       strategyId,
@@ -8725,6 +9004,10 @@ var CraftService = class {
       executable: workflow !== null,
       next_action: this.routeNextAction(route)
     };
+  }
+  async defaultRouteWithSemanticSearch(args) {
+    const goal = text(args.goal, "goal");
+    return this.defaultRoute(args, await this.catalog.searchHybrid(goal, 6));
   }
   defaultRouteResume(args) {
     const taskId = text(args.task_id, "task_id");
@@ -8820,7 +9103,7 @@ ${task.goal}`.toLowerCase();
     const index = states.findIndex((state) => state.status !== "completed");
     if (index < 0 || !stages[index]) throw new Error("Route has no pending stage");
     const stageId = text(args.stage_id, "stage_id");
-    const summary = text(args.summary, "summary");
+    const summary2 = text(args.summary, "summary");
     if (stageId !== stages[index].id) throw new Error(`Route next required stage is ${stages[index].id}`);
     const receiptIds = array(args.receipt_ids ?? [], "receipt_ids").map((value) => text(value, "receipt_id"));
     if (new Set(receiptIds).size !== receiptIds.length) throw new Error("receipt_ids must be unique");
@@ -8847,11 +9130,11 @@ ${task.goal}`.toLowerCase();
     if (!isFinal && verdict !== void 0) throw new Error("verdict is only allowed for the final route stage");
     if (isFinal && verdict === void 0) throw new Error("verdict is required for the final route stage");
     if (verdict !== void 0 && !TRIAL_VERDICTS.has(verdict)) throw new Error(`Unsupported trial verdict: ${verdict}`);
-    const updatedStates = states.map((state, stateIndex) => stateIndex === index ? { ...state, status: "completed", summary, artifact_ids: artifactIds, evidence_ids: evidenceIds } : state);
+    const updatedStates = states.map((state, stateIndex) => stateIndex === index ? { ...state, status: "completed", summary: summary2, artifact_ids: artifactIds, evidence_ids: evidenceIds } : state);
     const taskStatus = verdict === void 0 ? "active" : verdict === "passed" ? "completed" : verdict === "cancelled" ? "cancelled" : "paused";
     const task = this.taskCheckpoint({
       task_id: route.task_id,
-      summary,
+      summary: summary2,
       status: taskStatus,
       completed: updatedStates.filter((state) => state.status === "completed").map((state) => state.id),
       pending: updatedStates.filter((state) => state.status !== "completed").map((state) => state.id),
@@ -8864,14 +9147,14 @@ ${task.goal}`.toLowerCase();
       trial_id: trialId,
       event_type: "route_stage_completed",
       source: "host_reported",
-      data: { route_id: route.id, stage_id: stageId, summary, receipt_ids: receiptIds },
+      data: { route_id: route.id, stage_id: stageId, summary: summary2, receipt_ids: receiptIds },
       artifact_ids: artifactIds,
       evidence_ids: evidenceIds
     });
     const outcome = verdict === void 0 ? null : this.outcomeRecord({
       trial_id: trialId,
       verdict,
-      summary,
+      summary: summary2,
       evidence_ids: evidenceIds,
       source: "host_reported"
     });
@@ -9128,7 +9411,7 @@ ${task.goal}`.toLowerCase();
     if (!GRADE_VERDICTS.has(verdict)) throw new Error(`Unsupported grade verdict: ${verdict}`);
     const evidenceIds = array(args.evidence_ids ?? [], "evidence_ids").map((value) => text(value, "evidence_id"));
     for (const evidenceId of evidenceIds) this.store.get("evidence", evidenceId);
-    const gradeId = `grade_${(0, import_node_crypto4.createHash)("sha256").update(JSON.stringify(
+    const gradeId = `grade_${(0, import_node_crypto5.createHash)("sha256").update(JSON.stringify(
       [trialId, grader.id, grader.version]
     )).digest("hex")}`;
     return this.store.create("grade", gradeId, {
@@ -9746,7 +10029,7 @@ ${task.goal}`.toLowerCase();
     const evidenceIds = array(args.evidence_ids ?? [], "evidence_ids").map((value) => text(value, "evidence_id"));
     for (const artifactId of artifactIds) this.store.get("artifact", artifactId);
     for (const evidenceId of evidenceIds) this.store.get("evidence", evidenceId);
-    const summary = args.summary === void 0 ? null : text(args.summary, "summary");
+    const summary2 = args.summary === void 0 ? null : text(args.summary, "summary");
     const submitted = submitNode(plan.nodes, leaseId, verdict, provenance);
     const nodes = exceedsBudget ? submitted.map((node) => node.status === "pending" ? { ...node, status: "blocked", last_provenance: "budget_exceeded" } : node) : submitted;
     const status = planStatus(nodes);
@@ -9777,7 +10060,7 @@ ${task.goal}`.toLowerCase();
           profile_id: leased.profile_ids[Number(leased.route_index)],
           profile_version: leased.profile_versions[Number(leased.route_index)],
           verdict,
-          summary,
+          summary: summary2,
           costs
         },
         artifact_ids: artifactIds,
@@ -9796,7 +10079,7 @@ ${task.goal}`.toLowerCase();
       return { plan, ...this.trialGet({ trial_id: trialId }) };
     }
     const result = orchestrationOutcome(plan.nodes, Boolean(plan.budget_exceeded));
-    const stableKey = (0, import_node_crypto4.createHash)("sha256").update(`${plan.id}:${trialId}`).digest("hex");
+    const stableKey = (0, import_node_crypto5.createHash)("sha256").update(`${plan.id}:${trialId}`).digest("hex");
     const artifactId = `artifact_${stableKey}`;
     const artifact = this.store.find("artifact", artifactId) ?? this.artifactRegister({
       artifact_id: artifactId,
@@ -9922,7 +10205,8 @@ var TOOLS = [
   tool("craft_source_update", "Enable, disable, or relabel a source.", ["source_id"], false, ["enabled", "label"]),
   tool("craft_source_remove", "Remove a source index without deleting its files.", ["source_id"]),
   tool("craft_source_scan", "Incrementally scan one or all enabled sources.", [], false, ["source_id"]),
-  tool("craft_capability_search", "Return a small ranked set of matching capabilities.", ["query"], true, ["limit"]),
+  tool("craft_capability_search", "Return a small hybrid-ranked set of matching capabilities; semantic retrieval is optional and safely falls back to keywords.", ["query"], true, ["limit"]),
+  tool("craft_semantic_status", "Show whether optional semantic capability retrieval is disabled, configured, ready, or temporarily degraded.", [], true),
   tool("craft_capability_get", "Read one indexed capability.", ["asset_id"], true),
   tool(
     "craft_default_route",
@@ -10250,8 +10534,9 @@ var McpServer = class {
       craft_source_remove: (a) => service.sourceRemove(a),
       craft_source_scan: (a) => service.sourceScan(a),
       craft_capability_search: (a) => service.capabilitySearch(a),
+      craft_semantic_status: () => service.semanticSearchStatus(),
       craft_capability_get: (a) => service.capabilityGet(a),
-      craft_default_route: (a) => service.defaultRoute(a),
+      craft_default_route: (a) => service.defaultRouteWithSemanticSearch(a),
       craft_default_route_execute: (a) => service.defaultRouteExecute(a),
       craft_default_route_resume: (a) => service.defaultRouteResume(a),
       craft_default_route_find: (a) => service.defaultRouteFind(a),
@@ -10400,7 +10685,7 @@ var McpServer = class {
 // bin/craft-mcp.ts
 async function main() {
   const store = await new CraftStore().open();
-  const server = new McpServer(new CraftService(store));
+  const server = new McpServer(await CraftService.open(store));
   const input = (0, import_node_readline.createInterface)({ input: process.stdin, crlfDelay: Infinity });
   try {
     for await (const line of input) {

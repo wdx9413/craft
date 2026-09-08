@@ -36,7 +36,7 @@ Codex / Claude / DSH / CLI / future desktop
 
 Source 同时保存用户输入路径和解析后的真实路径。扫描器跟随目录链接并用真实路径避免循环；同一真实来源不会重复注册。增量扫描先比较大小和修改时间，变化时才读取正文并计算摘要。
 
-本地关键词召回返回最多 20 个候选卡片且不携带正文，Client 选择后才用 `craft_capability_get` 读取完整内容。当前 Node 运行时没有 FTS5 时，Craft 在持久化的名称、描述、别名和正文索引上做关键词排序；这里节省的是模型上下文和重复查询成本，首次扫描仍需读取来源文件。未来可接入 Hub 清单增量同步，以及与关键词结果融合的向量召回器。
+本地关键词召回返回最多 20 个候选卡片且不携带正文，Client 选择后才用 `craft_capability_get` 读取完整内容。当前 Node 运行时没有 FTS5 时，Craft 在持久化的名称、描述、别名和正文索引上做关键词排序；这里节省的是模型上下文和重复查询成本，首次扫描仍需读取来源文件。v0.9.4 可选接入与关键词结果融合的 OpenAI-compatible 向量召回；未来可接入 Hub 清单增量同步。
 
 ## Workflow 与验证
 
@@ -53,6 +53,7 @@ v0.6.0 起，Plan 创建时会锁定每个候选 Agent Profile 的精确版本�
 Craft 不绕过 Host 的 Sandbox、审批或并发限制，也不直接假定 Codex/Claude 的内部任务 API。插件负责把 Lease 翻译成宿主原生执行，再把真实结果交回 Craft。
 
 v0.9.0 将默认编排变为 Craft Skill 的默认策略，而非要求用户重复固定话术：复杂目标先经 `craft_default_route` 创建 Task、检索少量 Capability、优先选择匹配的 `verified` Workflow；只有已验证 Workflow 才能经 `craft_default_route_execute` 执行并自动形成 Trial/Trace/Outcome。短问答和一次性读取不创建路线。v0.9.1 增加 `craft_default_route_find`：用户用自然语言续接时，只恢复唯一匹配的 `active` Task；最高分并列、没有匹配或已完成任务都不会被猜测性恢复。v0.9.2 仅在同一策略积累至少两条通过且带 Evidence 的路线后，允许 Host 通过 `craft_route_workflow_proposal_create` 写入带溯源的 `draft` Workflow；步骤由 Host 抽象提供，不能复制原始业务文本，且仍需已有 held-out Eval/Signoff Gate 晋级。v0.9.3 增加版本化 Project Policy、结构化 Route Receipt 和 Host Adapter 协议：严格项目会在服务端要求 Git 基线、聚焦测试、覆盖率和 Review 的真实回执；Adapter 只能领取它声明支持的下一安全动作并上报结果，不能绕过 Host 审批。经验候选还会区分通过率、独立 Task 数和 confirmed/bounded Evidence，避免由未验证自述生成草案。
+v0.9.4 增加可选的 OpenAI-compatible Embeddings 混合检索：未配置时不发网络请求并保持关键词排序；配置后仅为 Capability 的名称、描述和别名建立与 Provider 指纹、内容摘要绑定的缓存，查询和索引均成功才参与排序。超时、鉴权、格式或维度错误会记录脱敏状态并自动回退关键词结果；向量分数只影响候选召回，不能绕过 Workflow 的验证、Signoff 或 Host 审批。
 
 没有匹配 Workflow 时，Craft 自动创建安全增量研发 Kit：先锁定 Git 基线和原有行为，再最小改动、运行测试/覆盖率、复查 Diff。它是给 Host 的可验证计划，不是假装已经替 Host 修改了代码。`craft_default_route_update` 必须按顺序记录每个已完成阶段的真实 Artifact/Evidence，并把最终 Review 写成 Outcome；Project Policy 设为 `required` 时，更新还必须引用同阶段的通过回执。`craft_default_route_resume` 在跨会话时只返回下一步。带有同一能力组合的路线以 `route_strategy` 作为 Trial Subject，只有两个以上独立 Task 的通过路线且带 confirmed/bounded Evidence 才可生成一个 Workflow 草案，仍不能自动发布或替代 Workflow。
 
@@ -66,7 +67,7 @@ Craft 后续不会把“学习”简化成不断增长的对话摘要，而会�
 
 Craft 默认只索引能力 Source。已验证 Proposal 只有在调用方明确批准 `allow_external_write=true` 后，才可写入已存在且位于所选 Source 内的 `SKILL.md`。Publisher 写前校验调用方提供的 SHA-256 摘要，备份原文件，并在原子替换前再次校验；发布和回滚各保存回执。回滚也要求当前文件仍等于已发布摘要，因此不会覆盖用户并发修改。
 
-v0.7.0 已实现 Experience Pattern、Skill Proposal 和受控 Publisher；v0.8.0 会从多个同 Subject、且带 Evidence 的已完成 Trial 自动列出 Experience Candidate，仍须人工补充适用条件后才可创建 Pattern。v0.9.3 记录候选通过率和独立 Task 数，但不把它们伪装成统计显著性。自动 Host Driver、自动执行模型/业务 Grader、自动 Harness 搜索和按 Case 自适应装配仍是路线设计。
+v0.7.0 已实现 Experience Pattern、Skill Proposal 和受控 Publisher；v0.8.0 会从多个同 Subject、且带 Evidence 的已完成 Trial 自动列出 Experience Candidate，仍须人工补充适用条件后才可创建 Pattern。v0.9.3 记录候选通过率和独立 Task 数，但不把它们伪装成统计显著性。v0.9.4 已实现可选向量召回，但自动 Host Driver、自动执行模型/业务 Grader、自动 Harness 搜索和按 Case 自适应装配仍是路线设计。
 
 ## 存储与跨平台
 

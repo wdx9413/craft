@@ -13,6 +13,6 @@ Capability Catalog 发现、索引和按需读取 Skill 等能力资产。Capabi
 
 ## 边界
 
-当前 Catalog 只正式索引 `SKILL.md`；Kit Registry、依赖求解和远程 Hub 尚未实现。向量检索未来只是候选召回器，不承担版本、权限或质量判断。
+当前 Catalog 只正式索引 `SKILL.md`；Kit Registry、依赖求解和远程 Hub 尚未实现。v0.9.4 的可选向量检索只是候选召回器，不承担版本、权限或质量判断。
 
 关联：[Agent IR](agent-ir.md) · [Experience/Eval](experience-eval.md) · [Runtime 接入](runtime-integration.md)

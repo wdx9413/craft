@@ -1,6 +1,7 @@
 import { access, readFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import { atomicPrivateJson, craftPaths, ensureLayout } from "./paths.js";
+import {} from "./semantic.js";
 const MODES = new Set(["agent", "supervisor", "provider"]);
 const RUNTIMES = new Set([
     "direct-api", "codex-cli", "claude-code", "unconfigured",
@@ -46,7 +47,9 @@ export async function initializeConfig(input, paths = craftPaths()) {
             capabilityIndex: paths.indexFile,
             ...(legacy ? { legacyDatabase: paths.legacyDatabaseFile } : {}),
         },
+        ...(input.semanticSearch ? { semanticSearch: input.semanticSearch } : {}),
     };
+    validateSemanticSearch(config.semanticSearch);
     await atomicPrivateJson(paths.configFile, config);
     return config;
 }
@@ -57,6 +60,17 @@ export async function setMode(mode, paths = craftPaths(), now = new Date().toISO
     if (!MODES.has(mode))
         throw new Error(`Unsupported Craft mode: ${mode}`);
     const updated = { ...current, activeMode: mode, updatedAt: now };
+    await atomicPrivateJson(paths.configFile, updated);
+    return updated;
+}
+export async function configureSemanticSearch(semanticSearch, paths = craftPaths(), now = new Date().toISOString()) {
+    const current = await loadConfig(paths);
+    if (!current)
+        throw new Error("Craft is not initialized; run `craft init` first.");
+    validateSemanticSearch(semanticSearch);
+    const updated = { ...current, updatedAt: now, ...(semanticSearch ? { semanticSearch } : {}) };
+    if (!semanticSearch)
+        delete updated.semanticSearch;
     await atomicPrivateJson(paths.configFile, updated);
     return updated;
 }
@@ -86,9 +100,18 @@ function validateProvider(provider) {
         || typeof candidate.baseUrl !== "string") {
         throw new Error("Provider name and model must not be empty.");
     }
+    validateProviderUrl(candidate.baseUrl);
+    if (candidate.apiKeyEnv !== undefined && (typeof candidate.apiKeyEnv !== "string"
+        || !/^[A-Z_][A-Z0-9_]*$/.test(candidate.apiKeyEnv))) {
+        throw new Error("apiKeyEnv must be an uppercase environment-variable name.");
+    }
+}
+function validateProviderUrl(value) {
+    if (typeof value !== "string" || !value.trim())
+        throw new Error("Provider base URL must not be empty.");
     let url;
     try {
-        url = new URL(candidate.baseUrl);
+        url = new URL(value);
     }
     catch {
         throw new Error("Provider base URL must be a valid HTTP(S) URL.");
@@ -97,9 +120,28 @@ function validateProvider(provider) {
         || url.search || url.hash) {
         throw new Error("Provider base URL must be an HTTP(S) URL without credentials or query data.");
     }
-    if (candidate.apiKeyEnv !== undefined && (typeof candidate.apiKeyEnv !== "string"
-        || !/^[A-Z_][A-Z0-9_]*$/.test(candidate.apiKeyEnv))) {
-        throw new Error("apiKeyEnv must be an uppercase environment-variable name.");
+}
+function validateSemanticSearch(value) {
+    if (value === undefined)
+        return;
+    if (!value || typeof value !== "object" || Array.isArray(value))
+        throw new Error("Semantic search must be an object.");
+    const provider = value.provider;
+    if (!provider || typeof provider !== "object" || Array.isArray(provider)) {
+        throw new Error("Semantic search requires embedding provider configuration.");
+    }
+    const candidate = provider;
+    if (candidate.protocol !== "openai-compatible")
+        throw new Error("Semantic search supports openai-compatible embeddings only.");
+    if (typeof candidate.name !== "string" || !candidate.name.trim() || typeof candidate.model !== "string" || !candidate.model.trim()) {
+        throw new Error("Embedding provider name and model must not be empty.");
+    }
+    validateProviderUrl(candidate.baseUrl);
+    if (candidate.apiKeyEnv !== undefined && (typeof candidate.apiKeyEnv !== "string" || !/^[A-Z_][A-Z0-9_]*$/.test(candidate.apiKeyEnv))) {
+        throw new Error("Embedding apiKeyEnv must be an uppercase environment-variable name.");
+    }
+    if (candidate.timeoutMs !== undefined && (!Number.isInteger(candidate.timeoutMs) || candidate.timeoutMs < 100 || candidate.timeoutMs > 30_000)) {
+        throw new Error("Embedding timeoutMs must be an integer between 100 and 30000.");
     }
 }
 function validateConfig(value) {
@@ -130,5 +172,6 @@ function validateConfig(value) {
         || config.supervisor.hosts.some((host) => !HOSTS.has(host))) {
         throw new Error("Craft config has invalid supervisor hosts.");
     }
+    validateSemanticSearch(config.semanticSearch);
 }
 //# sourceMappingURL=config.js.map

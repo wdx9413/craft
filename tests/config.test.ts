@@ -3,7 +3,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { initializeConfig, loadConfig, setMode, type InitInput } from "../src/config.ts";
+import { configureSemanticSearch, initializeConfig, loadConfig, setMode, type InitInput } from "../src/config.ts";
 import { atomicPrivateJson, craftPaths, dataRoot, ensureLayout } from "../src/paths.ts";
 
 async function temporaryRoot(): Promise<string> {
@@ -151,4 +151,25 @@ test("dataRoot honors CRAFT_DATA_DIR", () => {
   assert.equal(dataRoot({ CRAFT_DATA_DIR: "./custom" }), join(process.cwd(), "custom"));
   assert.equal(dataRoot({ CRAFT_DATA_DIR: "  " }), join(homedir(), ".craft_data"));
   assert.equal(craftPaths().root, dataRoot());
+});
+
+test("optional semantic search is versioned, validated, and can be disabled", async () => {
+  const root = await temporaryRoot();
+  const paths = craftPaths(root);
+  const provider = { protocol: "openai-compatible" as const, name: "Embeddings", baseUrl: "https://embed.example/v1", model: "embed", apiKeyEnv: "EMBED_KEY", timeoutMs: 500 };
+  try {
+    await assert.rejects(() => configureSemanticSearch({ provider }, paths), /not initialized/);
+    await initializeConfig({ mode: "provider" }, paths);
+    const configured = await configureSemanticSearch({ provider }, paths, "later");
+    assert.equal(configured.semanticSearch?.provider.model, "embed");
+    assert.equal((await configureSemanticSearch(undefined, paths)).semanticSearch, undefined);
+    for (const invalid of [null, {}, { provider: null }, { provider: { ...provider, protocol: "anthropic" } },
+      { provider: { ...provider, name: "" } }, { provider: { ...provider, model: "" } },
+      { provider: { ...provider, baseUrl: "ftp://embed.example" } }, { provider: { ...provider, apiKeyEnv: "bad-key" } },
+      { provider: { ...provider, timeoutMs: 99 } }, { provider: { ...provider, timeoutMs: 30_001 } },
+      { provider: { ...provider, timeoutMs: 1.5 } }]) {
+      await assert.rejects(() => configureSemanticSearch(invalid as never, paths));
+    }
+    await assert.rejects(() => configureSemanticSearch({ provider: { ...provider, baseUrl: "" } }, paths), /must not be empty/);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });

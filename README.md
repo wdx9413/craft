@@ -20,6 +20,7 @@ Craft 的核心对象和协议不绑定某个模型或行业。它既能通过 M
 
 - 多能力目录管理、真实路径解析、目录引用/符号链接处理和增量扫描。
 - Skill frontmatter 解析、SQLite 关键词候选检索和按需读取；搜索结果不携带完整正文。当前 Node 无 FTS5 时使用持久化内容的关键词排序降级。
+- 可选 OpenAI-compatible Embeddings 混合检索：未配置时零网络请求；已配置时只索引 Skill 名称、描述和别名，并在调用成功后与关键词结果融合。超时、鉴权、响应格式或维度异常会自动降级为关键词结果。
 - 持久化任务、Checkpoint、显式反馈、Artifact 与 Evidence。
 - 版本化 Workflow、输入替换、路径边界、敏感信息脱敏和副作用授权。
 - 确定性命令、文件/JSON 断言、覆盖率门禁，以及结构化执行回执。
@@ -35,7 +36,7 @@ Craft 的核心对象和协议不绑定某个模型或行业。它既能通过 M
 - MCP 服务，以及 Codex、Claude Code、DeepSeek Harness 和通用 MCP Host 接入。
 - Windows、macOS、Linux 共用 TypeScript/Node.js 运行时；不依赖 Python。
 
-向量检索不是必需依赖。短期本地库优先使用零配置检索；未来可选接入兼容 OpenAI Embeddings 协议的服务，并与关键词结果融合。
+向量检索不是必需依赖。短期本地库优先使用零配置检索；需要时可显式配置兼容 OpenAI Embeddings 协议的服务，并与关键词结果融合。
 
 ## 安装
 
@@ -46,6 +47,7 @@ Craft 的核心对象和协议不绑定某个模型或行业。它既能通过 M
 ```bash
 npm install -g github:wdx9413/craft
 craft init
+craft semantic configure --provider-name local --base-url https://embedding.example/v1 --model text-embedding --api-key-env EMBEDDING_API_KEY
 ```
 
 开发者使用 pnpm：
@@ -120,5 +122,7 @@ pnpm test
 ```
 
 测试命令同时强制行、函数和分支覆盖率为 100%。覆盖率是测试工具确定性计算的结果，不由模型自报。
+
+用 `craft semantic status` 查看当前状态；`craft semantic disable` 会立即回到纯关键词检索。配置只保存端点、模型和环境变量名，不保存 API Key。MCP 也提供只读的 `craft_semantic_status`；`craft_capability_search` 和默认路由会在语义服务就绪时自动使用混合检索。
 
 产品定义、路线和模块化技术方案见 [Craft 文档中心](docs/README.md)；当前实现边界见 [中文架构说明](docs/architecture.zh-CN.md)。

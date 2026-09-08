@@ -1,17 +1,20 @@
 import { Catalog } from "./catalog.ts";
 import { CraftStore, type JsonObject } from "./store.ts";
-export declare const VERSION = "0.9.3";
+import { type EmbeddingProvider } from "./semantic.ts";
+export declare const VERSION = "0.9.4";
 export declare class CraftService {
     readonly store: CraftStore;
     readonly catalog: Catalog;
-    constructor(store: CraftStore);
+    constructor(store: CraftStore, semanticProvider?: EmbeddingProvider);
+    static open(store: CraftStore): Promise<CraftService>;
     info(): JsonObject;
     sourceAdd(args: JsonObject): Promise<JsonObject>;
     sourceList(): JsonObject;
     sourceUpdate(args: JsonObject): JsonObject;
     sourceRemove(args: JsonObject): JsonObject;
     sourceScan(args: JsonObject): Promise<JsonObject>;
-    capabilitySearch(args: JsonObject): JsonObject;
+    capabilitySearch(args: JsonObject): Promise<JsonObject>;
+    semanticSearchStatus(): JsonObject;
     capabilityGet(args: JsonObject): JsonObject;
     projectPolicySave(args: JsonObject): JsonObject;
     private projectPolicy;
@@ -19,7 +22,8 @@ export declare class CraftService {
     hostAdapterDispatch(args: JsonObject): JsonObject;
     hostAdapterReport(args: JsonObject): JsonObject;
     routeReceiptRecord(args: JsonObject): JsonObject;
-    defaultRoute(args: JsonObject): JsonObject;
+    defaultRoute(args: JsonObject, selectedCapabilities?: JsonObject[]): JsonObject;
+    defaultRouteWithSemanticSearch(args: JsonObject): Promise<JsonObject>;
     defaultRouteResume(args: JsonObject): JsonObject;
     defaultRouteFind(args: JsonObject): JsonObject;
     routeWorkflowProposalCreate(args: JsonObject): JsonObject;

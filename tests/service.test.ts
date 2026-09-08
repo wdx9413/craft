@@ -21,8 +21,8 @@ test("service persists capabilities, tasks, feedback, artifacts, evidence, and v
     const labelledSource = await service.sourceAdd({ path: otherSkills, label: "Other", scan: false });
     assert.throws(() => service.sourceAdd({ path: skills, scan: "false" }), /scan must be a boolean/);
     assert.equal(service.sourceList().sources instanceof Array, true);
-    assert.equal(service.capabilitySearch({ query: "trace" }).capabilities instanceof Array, true);
-    const capability = (service.capabilitySearch({ query: "trace" }).capabilities as Record<string, unknown>[])[0];
+    assert.equal((await service.capabilitySearch({ query: "trace" })).capabilities instanceof Array, true);
+    const capability = ((await service.capabilitySearch({ query: "trace" })).capabilities as Record<string, unknown>[])[0];
     assert.equal(service.capabilityGet({ asset_id: capability.id }).name, "diagnose");
     service.sourceUpdate({ source_id: source.id, label: "Skills" });
     service.sourceUpdate({ source_id: labelledSource.id, enabled: true });

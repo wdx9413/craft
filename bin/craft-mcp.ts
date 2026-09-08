@@ -6,7 +6,7 @@ import { CraftStore, type JsonObject } from "../src/store.ts";
 
 async function main(): Promise<void> {
   const store = await new CraftStore().open();
-  const server = new McpServer(new CraftService(store));
+  const server = new McpServer(await CraftService.open(store));
   const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
   try {
     for await (const line of input) {

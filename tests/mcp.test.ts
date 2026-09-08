@@ -37,7 +37,7 @@ test("MCP negotiates protocols, lists tools, dispatches every handler, and repor
     assert.equal(((failed?.result as Record<string, unknown>).isError), true);
 
     const calls: Record<string, Record<string, unknown>> = {
-      craft_info: {}, craft_source_list: {}, craft_task_list: {}, craft_artifact_list: {},
+      craft_info: {}, craft_source_list: {}, craft_semantic_status: {}, craft_task_list: {}, craft_artifact_list: {},
       craft_evidence_list: {}, craft_workflow_search: {}, craft_eval_suite_list: {}, craft_agent_profile_list: {},
       craft_orchestration_plan_list: {}, craft_experience_candidate_list: {},
       craft_task_open: { title: "T", goal: "G" },

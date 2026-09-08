@@ -1,3 +1,4 @@
+import { type EmbeddingProvider, type SemanticStatus } from "./semantic.ts";
 import { CraftStore, type JsonObject } from "./store.ts";
 export interface SkillDocument {
     name: string;
@@ -10,8 +11,10 @@ export declare function pathKey(path: string, platform?: NodeJS.Platform): strin
 export declare function parseSkill(text: string, fallback: string): SkillDocument;
 export declare function skillFiles(root: string, onError?: (path: string, error: unknown) => void): Promise<string[]>;
 export declare class Catalog {
+    #private;
     readonly store: CraftStore;
-    constructor(store: CraftStore);
+    readonly semanticProvider?: EmbeddingProvider;
+    constructor(store: CraftStore, semanticProvider?: EmbeddingProvider);
     addSource(path: string, label?: string, scan?: boolean): Promise<JsonObject>;
     listSources(): JsonObject[];
     getSource(id: string): JsonObject;
@@ -20,5 +23,8 @@ export declare class Catalog {
     scanSource(id: string): Promise<JsonObject>;
     scan(sourceId?: string): Promise<JsonObject>;
     search(query: string, limit?: number): JsonObject[];
+    semanticStatus(): SemanticStatus;
+    searchHybrid(query: string, limit?: number): Promise<JsonObject[]>;
+    private capabilityVectors;
     get(assetId: string): JsonObject;
 }

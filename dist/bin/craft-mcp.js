@@ -5,7 +5,7 @@ import { CraftService } from "../src/service.js";
 import { CraftStore } from "../src/store.js";
 async function main() {
     const store = await new CraftStore().open();
-    const server = new McpServer(new CraftService(store));
+    const server = new McpServer(await CraftService.open(store));
     const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
     try {
         for await (const line of input) {

@@ -6,8 +6,10 @@ import { addCosts, dispatchNodes, normalizeNodes, orchestrationOutcome, planStat
   type PlanNode } from "./orchestration.ts";
 import { aggregateEvaluation, compareEvaluationAggregates, type EvaluationAggregate } from "./evaluation.ts";
 import { publishSkill, rollbackSkillPublication } from "./skill-publisher.ts";
+import { loadConfig } from "./config.ts";
+import { OpenAiCompatibleEmbeddingProvider, type EmbeddingProvider } from "./semantic.ts";
 
-export const VERSION = "0.9.3";
+export const VERSION = "0.9.4";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -116,7 +118,13 @@ function assertNoSecret(value: string, name: string): string {
 export class CraftService {
   readonly store: CraftStore;
   readonly catalog: Catalog;
-  constructor(store: CraftStore) { this.store = store; this.catalog = new Catalog(store); }
+  constructor(store: CraftStore, semanticProvider?: EmbeddingProvider) { this.store = store; this.catalog = new Catalog(store, semanticProvider); }
+
+  static async open(store: CraftStore): Promise<CraftService> {
+    const config = await loadConfig(store.paths);
+    const semanticProvider = config?.semanticSearch ? new OpenAiCompatibleEmbeddingProvider(config.semanticSearch.provider) : undefined;
+    return new CraftService(store, semanticProvider);
+  }
 
   info(): JsonObject {
     const kinds = ["source", "capability", "task", "checkpoint", "feedback", "artifact",
@@ -146,9 +154,11 @@ export class CraftService {
   sourceScan(args: JsonObject): Promise<JsonObject> {
     return this.catalog.scan(args.source_id === undefined ? undefined : text(args.source_id, "source_id"));
   }
-  capabilitySearch(args: JsonObject): JsonObject {
-    return { capabilities: this.catalog.search(text(args.query, "query"), finiteInteger(args.limit, "limit", 6, 1, 20)) };
+  async capabilitySearch(args: JsonObject): Promise<JsonObject> {
+    return { capabilities: await this.catalog.searchHybrid(text(args.query, "query"), finiteInteger(args.limit, "limit", 6, 1, 20)),
+      semantic_search: this.catalog.semanticStatus() };
   }
+  semanticSearchStatus(): JsonObject { return this.catalog.semanticStatus(); }
   capabilityGet(args: JsonObject): JsonObject {
     return this.catalog.get(text(args.asset_id, "asset_id"));
   }
@@ -234,7 +244,7 @@ export class CraftService {
     return { receipt, artifact, evidence };
   }
 
-  defaultRoute(args: JsonObject): JsonObject {
+  defaultRoute(args: JsonObject, selectedCapabilities?: JsonObject[]): JsonObject {
     const goal = text(args.goal, "goal");
     const title = args.title === undefined ? goal.slice(0, 120) : text(args.title, "title");
     const mode = String(args.mode ?? "default");
@@ -250,7 +260,7 @@ export class CraftService {
       .filter((candidate) => candidate.score > 0)
       .sort((left, right) => right.score - left.score || String(left.workflow.id).localeCompare(String(right.workflow.id)));
     const workflow = mode === "safe_incremental_development" ? null : workflows[0]?.workflow ?? null;
-    const capabilities = this.catalog.search(goal, 6);
+    const capabilities = selectedCapabilities ?? this.catalog.search(goal, 6);
     const developmentPlan = workflow === null ? { stages: SAFE_INCREMENTAL_STAGES.map((stage) => ({ ...stage })) } : null;
     const strategyCapabilities = developmentPlan === null ? [] : capabilities.slice(0, 3).map((capability) => String(capability.id));
     const strategyId = strategyCapabilities.length ? `route_strategy_${createHash("sha256")
@@ -274,6 +284,11 @@ export class CraftService {
     }
     return { route_id: route.id, task, workflow, capabilities, development_plan: developmentPlan, policy,
       executable: workflow !== null, next_action: this.routeNextAction(route) };
+  }
+
+  async defaultRouteWithSemanticSearch(args: JsonObject): Promise<JsonObject> {
+    const goal = text(args.goal, "goal");
+    return this.defaultRoute(args, await this.catalog.searchHybrid(goal, 6));
   }
 
   defaultRouteResume(args: JsonObject): JsonObject {

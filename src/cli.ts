@@ -3,7 +3,8 @@ import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { pathToFileURL } from "node:url";
 import { initializeConfig, loadConfig, setMode, type CraftMode, type DirectProvider,
-  type InitInput, type RuntimeKind } from "./config.ts";
+  type InitInput, type RuntimeKind, configureSemanticSearch } from "./config.ts";
+import { type EmbeddingProviderConfig } from "./semantic.ts";
 import { craftPaths } from "./paths.ts";
 import { CraftService } from "./service.ts";
 import { CraftStore } from "./store.ts";
@@ -20,6 +21,9 @@ Usage:
   craft source list             List capability directories
   craft source scan [id]        Incrementally scan sources
   craft capability search <q>   Search indexed capabilities
+  craft semantic configure ...  Configure optional OpenAI-compatible embeddings
+  craft semantic disable         Disable semantic retrieval and use keywords only
+  craft semantic status          Show semantic retrieval health
   craft task list               List durable tasks
 
 Init options:
@@ -29,6 +33,10 @@ Init options:
   --provider-name <name> --base-url <url> --model <model>
   --api-key-env <ENV_NAME>
   --hosts <codex-cli,claude-code,generic-mcp>
+
+Semantic options:
+  --provider-name <name> --base-url <url> --model <model>
+  --api-key-env <ENV_NAME> [--timeout-ms <100-30000>]
 `;
 
 function option(args: string[], name: string): string | undefined {
@@ -109,13 +117,23 @@ function nonInteractiveInit(args: string[]): InitInput {
   return { mode, runtimeKind, provider, supervisorHosts: hosts };
 }
 
+function embeddingProvider(args: string[]): EmbeddingProviderConfig {
+  const timeout = option(args, "--timeout-ms");
+  return { protocol: "openai-compatible", name: option(args, "--provider-name") || "", baseUrl: option(args, "--base-url") || "",
+    model: option(args, "--model") || "", apiKeyEnv: option(args, "--api-key-env"),
+    ...(timeout === undefined ? {} : { timeoutMs: Number(timeout) }) };
+}
+
 function publicConfig(config: Awaited<ReturnType<typeof loadConfig>>): unknown {
   if (!config) return null;
+  const semanticSearch = config.semanticSearch ? { provider: { ...config.semanticSearch.provider,
+    apiKeyConfiguredBy: config.semanticSearch.provider.apiKeyEnv || null } } : undefined;
   return {
     ...config,
     runtime: config.runtime.provider
       ? { ...config.runtime, provider: { ...config.runtime.provider, apiKeyConfiguredBy: config.runtime.provider.apiKeyEnv || null } }
       : config.runtime,
+    ...(semanticSearch ? { semanticSearch } : {}),
   };
 }
 
@@ -138,15 +156,32 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     stdout.write(`${JSON.stringify(await setMode(args[1] as CraftMode, paths), null, 2)}\n`);
     return;
   }
+  if (args[0] === "semantic") {
+    if (args[1] === "configure") {
+      stdout.write(`${JSON.stringify(publicConfig(await configureSemanticSearch({ provider: embeddingProvider(args.slice(2)) }, paths)), null, 2)}\n`);
+      return;
+    }
+    if (args[1] === "disable") {
+      stdout.write(`${JSON.stringify(publicConfig(await configureSemanticSearch(undefined, paths)), null, 2)}\n`);
+      return;
+    }
+    if (args[1] === "status") {
+      const store = await new CraftStore(paths).open();
+      try { stdout.write(`${JSON.stringify((await CraftService.open(store)).semanticSearchStatus(), null, 2)}\n`); }
+      finally { store.close(); }
+      return;
+    }
+    throw new Error("semantic requires configure, disable, or status.");
+  }
   if (["source", "capability", "task"].includes(args[0] ?? "")) {
     const store = await new CraftStore(paths).open();
-    const service = new CraftService(store);
+    const service = await CraftService.open(store);
     try {
       let result: unknown;
       if (args[0] === "source" && args[1] === "add") result = await service.sourceAdd({ path: args[2] });
       else if (args[0] === "source" && args[1] === "list") result = service.sourceList();
       else if (args[0] === "source" && args[1] === "scan") result = await service.sourceScan({ source_id: args[2] });
-      else if (args[0] === "capability" && args[1] === "search") result = service.capabilitySearch({ query: args.slice(2).join(" ") });
+      else if (args[0] === "capability" && args[1] === "search") result = await service.capabilitySearch({ query: args.slice(2).join(" ") });
       else if (args[0] === "task" && args[1] === "list") result = service.taskList({});
       else throw new Error(`Unknown command: ${args.join(" ")}`);
       stdout.write(`${JSON.stringify(result, null, 2)}\n`);

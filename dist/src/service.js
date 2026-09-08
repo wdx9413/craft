@@ -5,7 +5,9 @@ import { approvedEffects, executeSteps, normalizeSteps, resolveInputs, substitut
 import { addCosts, dispatchNodes, normalizeNodes, orchestrationOutcome, planStatus, recoverExpiredLeases, submitNode } from "./orchestration.js";
 import { aggregateEvaluation, compareEvaluationAggregates } from "./evaluation.js";
 import { publishSkill, rollbackSkillPublication } from "./skill-publisher.js";
-export const VERSION = "0.9.3";
+import { loadConfig } from "./config.js";
+import { OpenAiCompatibleEmbeddingProvider } from "./semantic.js";
+export const VERSION = "0.9.4";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -120,7 +122,12 @@ function assertNoSecret(value, name) {
 export class CraftService {
     store;
     catalog;
-    constructor(store) { this.store = store; this.catalog = new Catalog(store); }
+    constructor(store, semanticProvider) { this.store = store; this.catalog = new Catalog(store, semanticProvider); }
+    static async open(store) {
+        const config = await loadConfig(store.paths);
+        const semanticProvider = config?.semanticSearch ? new OpenAiCompatibleEmbeddingProvider(config.semanticSearch.provider) : undefined;
+        return new CraftService(store, semanticProvider);
+    }
     info() {
         const kinds = ["source", "capability", "task", "checkpoint", "feedback", "artifact",
             "evidence", "workflow", "workflow_run", "evaluation_suite", "evaluation_run",
@@ -146,9 +153,11 @@ export class CraftService {
     sourceScan(args) {
         return this.catalog.scan(args.source_id === undefined ? undefined : text(args.source_id, "source_id"));
     }
-    capabilitySearch(args) {
-        return { capabilities: this.catalog.search(text(args.query, "query"), finiteInteger(args.limit, "limit", 6, 1, 20)) };
+    async capabilitySearch(args) {
+        return { capabilities: await this.catalog.searchHybrid(text(args.query, "query"), finiteInteger(args.limit, "limit", 6, 1, 20)),
+            semantic_search: this.catalog.semanticStatus() };
     }
+    semanticSearchStatus() { return this.catalog.semanticStatus(); }
     capabilityGet(args) {
         return this.catalog.get(text(args.asset_id, "asset_id"));
     }
@@ -238,7 +247,7 @@ export class CraftService {
             summary, artifact_id: artifact.id, evidence_id: evidence.id });
         return { receipt, artifact, evidence };
     }
-    defaultRoute(args) {
+    defaultRoute(args, selectedCapabilities) {
         const goal = text(args.goal, "goal");
         const title = args.title === undefined ? goal.slice(0, 120) : text(args.title, "title");
         const mode = String(args.mode ?? "default");
@@ -253,7 +262,7 @@ export class CraftService {
             .filter((candidate) => candidate.score > 0)
             .sort((left, right) => right.score - left.score || String(left.workflow.id).localeCompare(String(right.workflow.id)));
         const workflow = mode === "safe_incremental_development" ? null : workflows[0]?.workflow ?? null;
-        const capabilities = this.catalog.search(goal, 6);
+        const capabilities = selectedCapabilities ?? this.catalog.search(goal, 6);
         const developmentPlan = workflow === null ? { stages: SAFE_INCREMENTAL_STAGES.map((stage) => ({ ...stage })) } : null;
         const strategyCapabilities = developmentPlan === null ? [] : capabilities.slice(0, 3).map((capability) => String(capability.id));
         const strategyId = strategyCapabilities.length ? `route_strategy_${createHash("sha256")
@@ -276,6 +285,10 @@ export class CraftService {
         }
         return { route_id: route.id, task, workflow, capabilities, development_plan: developmentPlan, policy,
             executable: workflow !== null, next_action: this.routeNextAction(route) };
+    }
+    async defaultRouteWithSemanticSearch(args) {
+        const goal = text(args.goal, "goal");
+        return this.defaultRoute(args, await this.catalog.searchHybrid(goal, 6));
     }
     defaultRouteResume(args) {
         const taskId = text(args.task_id, "task_id");
