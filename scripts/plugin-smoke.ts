@@ -56,9 +56,9 @@ try {
     responsesPromise,
     new Promise<never>((_, reject) => setTimeout(() => reject(new Error(errors || "MCP smoke test timed out")), 5_000)),
   ]) as Array<any>;
-  assert.equal(responses[0].result.serverInfo.version, "0.9.11");
+  assert.equal(responses[0].result.serverInfo.version, "0.9.12");
   assert(!(responses[1].result.tools as Array<{ name: string }>).some((tool) => tool.name === "craft_skill_proposal_publish"));
-  assert.equal(responses[2].result.structuredContent.version, "0.9.11");
+  assert.equal(responses[2].result.structuredContent.version, "0.9.12");
   console.log("Bundled plugin MCP starts without node_modules.");
 } finally {
   if (child && child.exitCode === null) {

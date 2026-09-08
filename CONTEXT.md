@@ -47,3 +47,7 @@
 ## Trajectory Script Proposal
 
 从同一 Task 的 passed Trial 编译出的受限脚本候选。当前只含版本锁定的 Workflow 和 Checkpoint IR，并由固定 TypeScript 模板渲染；不接受任意源码、不执行动态代码。只有 exact passed Signoff 才能从 `draft` 变为 `verified`。
+
+## Verified Script Run
+
+把一个 verified Trajectory Script Proposal 与同一 Workspace 的 prepared Transaction 绑定后产生的精确 Host 操作单。Host 的逐项回执只能结束该 Run，不能绕过原有 Runtime Policy、评测 Gate 或把任意 TypeScript 变成本地可执行代码。

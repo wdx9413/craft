@@ -20,3 +20,7 @@ prepared baseline checkpoint → committed checkpoint
 - Proposal 初始为 `draft`。只有 held-out Evaluation 的精确 passed Signoff 指向同一 Proposal 版本后，才能变为 `verified`。
 
 下一版的 Runner 只应消费 `verified` Proposal，并在 Workspace Transaction、Effect Policy 和 Host Adapter 边界内解释其 IR；不得直接 `eval` 生成的 TypeScript。
+
+## 已签发脚本运行
+
+v0.9.12 已实现这个交接边界：`verified` Proposal 只能绑定到同一 Workspace 的 `prepared` Transaction，生成一次性的 `verified_script_run` 与精确 Host 操作单。Host 回执必须逐项匹配，状态才会变为 completed/failed/cancelled。Craft 仍不在本模块执行 TypeScript；真实 Host 执行、隔离和外部 Effect 继续受 Runtime Adapter/Policy 约束。

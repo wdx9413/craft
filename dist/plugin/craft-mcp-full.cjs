@@ -995,14 +995,14 @@ var require_foldFlowLines = __commonJS({
     var FOLD_FLOW = "flow";
     var FOLD_BLOCK = "block";
     var FOLD_QUOTED = "quoted";
-    function foldFlowLines(text4, indent, mode = "flow", { indentAtStart, lineWidth = 80, minContentWidth = 20, onFold, onOverflow } = {}) {
+    function foldFlowLines(text5, indent, mode = "flow", { indentAtStart, lineWidth = 80, minContentWidth = 20, onFold, onOverflow } = {}) {
       if (!lineWidth || lineWidth < 0)
-        return text4;
+        return text5;
       if (lineWidth < minContentWidth)
         minContentWidth = 0;
       const endStep = Math.max(1 + minContentWidth, 1 + lineWidth - indent.length);
-      if (text4.length <= endStep)
-        return text4;
+      if (text5.length <= endStep)
+        return text5;
       const folds = [];
       const escapedFolds = {};
       let end = lineWidth - indent.length;
@@ -1019,14 +1019,14 @@ var require_foldFlowLines = __commonJS({
       let escStart = -1;
       let escEnd = -1;
       if (mode === FOLD_BLOCK) {
-        i = consumeMoreIndentedLines(text4, i, indent.length);
+        i = consumeMoreIndentedLines(text5, i, indent.length);
         if (i !== -1)
           end = i + endStep;
       }
-      for (let ch; ch = text4[i += 1]; ) {
+      for (let ch; ch = text5[i += 1]; ) {
         if (mode === FOLD_QUOTED && ch === "\\") {
           escStart = i;
-          switch (text4[i + 1]) {
+          switch (text5[i + 1]) {
             case "x":
               i += 3;
               break;
@@ -1043,12 +1043,12 @@ var require_foldFlowLines = __commonJS({
         }
         if (ch === "\n") {
           if (mode === FOLD_BLOCK)
-            i = consumeMoreIndentedLines(text4, i, indent.length);
+            i = consumeMoreIndentedLines(text5, i, indent.length);
           end = i + indent.length + endStep;
           split = void 0;
         } else {
           if (ch === " " && prev && prev !== " " && prev !== "\n" && prev !== "	") {
-            const next = text4[i + 1];
+            const next = text5[i + 1];
             if (next && next !== " " && next !== "\n" && next !== "	")
               split = i;
           }
@@ -1060,12 +1060,12 @@ var require_foldFlowLines = __commonJS({
             } else if (mode === FOLD_QUOTED) {
               while (prev === " " || prev === "	") {
                 prev = ch;
-                ch = text4[i += 1];
+                ch = text5[i += 1];
                 overflow = true;
               }
               const j = i > escEnd + 1 ? i - 2 : escStart - 1;
               if (escapedFolds[j])
-                return text4;
+                return text5;
               folds.push(j);
               escapedFolds[j] = true;
               end = j + endStep;
@@ -1080,39 +1080,39 @@ var require_foldFlowLines = __commonJS({
       if (overflow && onOverflow)
         onOverflow();
       if (folds.length === 0)
-        return text4;
+        return text5;
       if (onFold)
         onFold();
-      let res = text4.slice(0, folds[0]);
+      let res = text5.slice(0, folds[0]);
       for (let i2 = 0; i2 < folds.length; ++i2) {
         const fold = folds[i2];
-        const end2 = folds[i2 + 1] || text4.length;
+        const end2 = folds[i2 + 1] || text5.length;
         if (fold === 0)
           res = `
-${indent}${text4.slice(0, end2)}`;
+${indent}${text5.slice(0, end2)}`;
         else {
           if (mode === FOLD_QUOTED && escapedFolds[fold])
-            res += `${text4[fold]}\\`;
+            res += `${text5[fold]}\\`;
           res += `
-${indent}${text4.slice(fold + 1, end2)}`;
+${indent}${text5.slice(fold + 1, end2)}`;
         }
       }
       return res;
     }
-    function consumeMoreIndentedLines(text4, i, indent) {
+    function consumeMoreIndentedLines(text5, i, indent) {
       let end = i;
       let start = i + 1;
-      let ch = text4[start];
+      let ch = text5[start];
       while (ch === " " || ch === "	") {
         if (i < start + indent) {
-          ch = text4[++i];
+          ch = text5[++i];
         } else {
           do {
-            ch = text4[++i];
+            ch = text5[++i];
           } while (ch && ch !== "\n");
           end = i;
           start = i + 1;
-          ch = text4[start];
+          ch = text5[start];
         }
       }
       return end;
@@ -7361,7 +7361,7 @@ var require_dist = __commonJS({
 var import_node_readline = require("node:readline");
 
 // src/service.ts
-var import_node_crypto8 = require("node:crypto");
+var import_node_crypto9 = require("node:crypto");
 
 // src/catalog.ts
 var import_node_crypto2 = require("node:crypto");
@@ -7563,51 +7563,51 @@ var CraftStore = class {
   legacyDatabaseDetected() {
     return (0, import_node_fs.existsSync)(this.paths.legacyDatabaseFile);
   }
-  save(kind, id4, payload, version) {
-    return this.transaction((database) => this.insert(database, { kind, id: id4, payload, version }));
+  save(kind, id5, payload, version) {
+    return this.transaction((database) => this.insert(database, { kind, id: id5, payload, version }));
   }
-  create(kind, id4, payload) {
+  create(kind, id5, payload) {
     return this.transaction((database) => {
-      const existing = database.prepare("SELECT 1 present FROM records WHERE kind=? AND id=? LIMIT 1").get(kind, id4);
-      if (existing) throw new Error(`${kind} already exists: ${id4}`);
-      return this.insert(database, { kind, id: id4, payload, version: 1 });
+      const existing = database.prepare("SELECT 1 present FROM records WHERE kind=? AND id=? LIMIT 1").get(kind, id5);
+      if (existing) throw new Error(`${kind} already exists: ${id5}`);
+      return this.insert(database, { kind, id: id5, payload, version: 1 });
     });
   }
   saveBatch(entries) {
     if (!entries.length) return [];
     return this.transaction((database) => entries.map((entry) => this.insert(database, entry)));
   }
-  updateIfVersion(kind, id4, expectedVersion, payload) {
+  updateIfVersion(kind, id5, expectedVersion, payload) {
     return this.transaction((database) => {
       const current = Number(database.prepare(
         "SELECT COALESCE(MAX(version),0) AS version FROM records WHERE kind=? AND id=?"
-      ).get(kind, id4).version);
-      if (current !== expectedVersion) throw new Error(`Concurrent update detected for ${kind}: ${id4}`);
-      return this.insert(database, { kind, id: id4, payload, version: current + 1 });
+      ).get(kind, id5).version);
+      if (current !== expectedVersion) throw new Error(`Concurrent update detected for ${kind}: ${id5}`);
+      return this.insert(database, { kind, id: id5, payload, version: current + 1 });
     });
   }
   insert(database, entry) {
-    const { kind, id: id4, version } = entry;
+    const { kind, id: id5, version } = entry;
     const payload = payloadOnly(entry.payload);
     const now = (/* @__PURE__ */ new Date()).toISOString();
     const next = version ?? Number(database.prepare(
       "SELECT COALESCE(MAX(version),0)+1 AS version FROM records WHERE kind=? AND id=?"
-    ).get(kind, id4).version);
+    ).get(kind, id5).version);
     database.prepare(`INSERT INTO records(
-        kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)`).run(kind, id4, next, JSON.stringify(payload), now, now);
-    return { ...payload, id: id4, version: next, created_at: now, updated_at: now };
+        kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)`).run(kind, id5, next, JSON.stringify(payload), now, now);
+    return { ...payload, id: id5, version: next, created_at: now, updated_at: now };
   }
-  find(kind, id4, version) {
+  find(kind, id5, version) {
     const row = version === void 0 ? this.database.prepare(
       "SELECT * FROM records WHERE kind=? AND id=? ORDER BY version DESC LIMIT 1"
-    ).get(kind, id4) : this.database.prepare(
+    ).get(kind, id5) : this.database.prepare(
       "SELECT * FROM records WHERE kind=? AND id=? AND version=?"
-    ).get(kind, id4, version);
+    ).get(kind, id5, version);
     return row ? this.record(row) : null;
   }
-  get(kind, id4, version) {
-    const record = this.find(kind, id4, version);
-    if (!record) throw new Error(`Unknown ${kind}: ${id4}`);
+  get(kind, id5, version) {
+    const record = this.find(kind, id5, version);
+    if (!record) throw new Error(`Unknown ${kind}: ${id5}`);
     return record;
   }
   list(kind, limit = 20, predicate) {
@@ -7628,14 +7628,14 @@ var CraftStore = class {
     const bounded = Math.min(validLimit(limit), 20);
     if (!terms.length) return [];
     return this.list("capability", Number.MAX_SAFE_INTEGER).map((item) => {
-      const text4 = [item.name, item.description, item.search_text ?? item.body].join(" ").toLowerCase();
-      const score = terms.reduce((total, term) => total + Number(text4.includes(term.toLowerCase())), 0);
+      const text5 = [item.name, item.description, item.search_text ?? item.body].join(" ").toLowerCase();
+      const score = terms.reduce((total, term) => total + Number(text5.includes(term.toLowerCase())), 0);
       return { ...item, score };
     }).filter((item) => Number(item.score) > 0).sort((left, right) => Number(right.score) - Number(left.score)).slice(0, bounded);
   }
-  remove(kind, id4) {
+  remove(kind, id5) {
     return this.transaction((database) => {
-      const changes = Number(database.prepare("DELETE FROM records WHERE kind=? AND id=?").run(kind, id4).changes);
+      const changes = Number(database.prepare("DELETE FROM records WHERE kind=? AND id=?").run(kind, id5).changes);
       return changes;
     });
   }
@@ -7710,15 +7710,15 @@ ${aliases}`.includes(term));
 function pathKey(path, platform = process.platform) {
   return platform === "win32" ? path.toLowerCase() : path;
 }
-function parseSkill(text4, fallback) {
+function parseSkill(text5, fallback) {
   let metadata = {};
-  let body = text4;
-  if (text4.startsWith("---\n") || text4.startsWith("---\r\n")) {
-    const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(text4);
+  let body = text5;
+  if (text5.startsWith("---\n") || text5.startsWith("---\r\n")) {
+    const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(text5);
     if (match) {
       const parsed = (0, import_yaml.parse)(match[1]);
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) metadata = parsed;
-      body = text4.slice(match[0].length);
+      body = text5.slice(match[0].length);
     }
   }
   return {
@@ -7772,41 +7772,41 @@ var Catalog = class {
     if (!(await (0, import_promises2.stat)(root)).isDirectory()) throw new Error("Capability source must be a directory.");
     const duplicate = this.store.list("source", Number.MAX_SAFE_INTEGER).find((item) => pathKey(String(item.real_path)) === pathKey(root));
     if (duplicate) throw new Error(`Capability source already exists: ${duplicate.id}`);
-    const id4 = stableId("source", root);
-    this.store.save("source", id4, {
+    const id5 = stableId("source", root);
+    this.store.save("source", id5, {
       label: label || (0, import_node_path2.basename)(root),
       requested_path,
       real_path: root,
       enabled: true,
       scanned_at: null
     });
-    return scan ? this.scanSource(id4) : this.getSource(id4);
+    return scan ? this.scanSource(id5) : this.getSource(id5);
   }
   listSources() {
     return this.store.list("source", Number.MAX_SAFE_INTEGER);
   }
-  getSource(id4) {
-    return this.store.get("source", id4);
+  getSource(id5) {
+    return this.store.get("source", id5);
   }
-  updateSource(id4, enabled, label) {
-    const current = this.getSource(id4);
-    return this.store.save("source", id4, {
+  updateSource(id5, enabled, label) {
+    const current = this.getSource(id5);
+    return this.store.save("source", id5, {
       ...current,
       enabled: enabled ?? current.enabled,
       label: label ?? current.label
     });
   }
-  removeSource(id4) {
-    this.getSource(id4);
+  removeSource(id5) {
+    this.getSource(id5);
     for (const capability of this.store.list("capability", Number.MAX_SAFE_INTEGER)) {
-      if (capability.source_id === id4) this.store.remove("capability", String(capability.id));
+      if (capability.source_id === id5) this.store.remove("capability", String(capability.id));
     }
-    this.store.remove("source", id4);
-    return { id: id4, removed: true };
+    this.store.remove("source", id5);
+    return { id: id5, removed: true };
   }
-  async scanSource(id4) {
-    const source = this.getSource(id4);
-    if (!source.enabled) throw new Error(`Capability source is disabled: ${id4}`);
+  async scanSource(id5) {
+    const source = this.getSource(id5);
+    if (!source.enabled) throw new Error(`Capability source is disabled: ${id5}`);
     const issues = [];
     const files2 = await skillFiles(String(source.real_path), (path, error) => issues.push({
       path,
@@ -7818,7 +7818,7 @@ var Catalog = class {
     let unchanged = 0;
     for (const path of files2) {
       const relative_path = (0, import_node_path2.relative)(String(source.real_path), path).replaceAll("\\", "/");
-      const assetId = stableId("cap", `${id4}:${relative_path}`);
+      const assetId = stableId("cap", `${id5}:${relative_path}`);
       live.add(assetId);
       const fileStat = await (0, import_promises2.stat)(path);
       let previous;
@@ -7831,18 +7831,18 @@ var Catalog = class {
         unchanged += 1;
         continue;
       }
-      const text4 = await (0, import_promises2.readFile)(path, "utf8");
-      const digest3 = (0, import_node_crypto2.createHash)("sha256").update(text4).digest("hex");
+      const text5 = await (0, import_promises2.readFile)(path, "utf8");
+      const digest3 = (0, import_node_crypto2.createHash)("sha256").update(text5).digest("hex");
       if (previous?.digest === digest3) {
         this.store.save("capability", assetId, { ...previous, size: fileStat.size, mtime_ms: fileStat.mtimeMs });
         unchanged += 1;
         continue;
       }
-      const skill = parseSkill(text4, (0, import_node_path2.basename)((0, import_node_path2.resolve)(path, "..")));
+      const skill = parseSkill(text5, (0, import_node_path2.basename)((0, import_node_path2.resolve)(path, "..")));
       this.store.save("capability", assetId, {
         ...skill,
         kind: "skill",
-        source_id: id4,
+        source_id: id5,
         search_text: `${skill.body}
 ${metadataTerms(skill.metadata).join("\n")}`,
         relative_path,
@@ -7856,13 +7856,13 @@ ${metadataTerms(skill.metadata).join("\n")}`,
     }
     let removed = 0;
     for (const item of this.store.list("capability", Number.MAX_SAFE_INTEGER)) {
-      if (item.source_id === id4 && !live.has(String(item.id))) {
+      if (item.source_id === id5 && !live.has(String(item.id))) {
         this.store.remove("capability", String(item.id));
         removed += 1;
       }
     }
-    this.store.save("source", id4, { ...source, scanned_at: (/* @__PURE__ */ new Date()).toISOString() });
-    return { ...this.getSource(id4), scan: {
+    this.store.save("source", id5, { ...source, scanned_at: (/* @__PURE__ */ new Date()).toISOString() });
+    return { ...this.getSource(id5), scan: {
       added,
       updated,
       unchanged,
@@ -9021,8 +9021,76 @@ var TrajectoryCompiler = class {
   }
 };
 
+// src/script-run.ts
+var import_node_crypto8 = require("node:crypto");
+function id3(value, name, prefix) {
+  const result = value === void 0 ? `${prefix}_${(0, import_node_crypto8.randomUUID)().replaceAll("-", "")}` : String(value).trim();
+  if (!/^[a-zA-Z0-9_-]+$/.test(result)) throw new Error(`${name} must contain only letters, numbers, _ or -`);
+  return result;
+}
+function text3(value, name) {
+  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
+  return value.trim();
+}
+function recordPayload4(record) {
+  const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...payload } = record;
+  return payload;
+}
+var VerifiedScriptRunner = class {
+  store;
+  constructor(store) {
+    this.store = store;
+  }
+  issue(args) {
+    const proposal = this.store.get("trajectory_script_proposal", id3(args.proposal_id, "proposal_id", "trajectory_script"));
+    const workspace = this.store.get("workspace", id3(args.workspace_id, "workspace_id", "workspace"));
+    const transaction = this.store.get("workspace_transaction", id3(args.transaction_id, "transaction_id", "workspace_transaction"));
+    if (proposal.lifecycle !== "verified") throw new Error("verified script run requires a verified proposal");
+    if (transaction.status !== "prepared" || transaction.workspace_id !== workspace.id) throw new Error("verified script run requires its workspace's prepared transaction");
+    if (this.store.list("verified_script_run", 1e3, (item) => item.transaction_id === transaction.id).length) {
+      throw new Error("verified script run transaction is already associated with a run");
+    }
+    const operations = proposal.operations;
+    const run = this.store.create("verified_script_run", id3(args.run_id, "run_id", "verified_script_run"), {
+      proposal_id: proposal.id,
+      proposal_version: proposal.version,
+      workspace_id: workspace.id,
+      transaction_id: transaction.id,
+      status: "issued",
+      operations: operations.map((operation) => ({ operation_id: operation.operation_id, kind: operation.kind, status: "awaiting_host_receipt" }))
+    });
+    return { run, host_execution: { root_path: workspace.root_path, operations } };
+  }
+  receipt(args) {
+    const run = this.store.get("verified_script_run", id3(args.run_id, "run_id", "verified_script_run"));
+    if (run.status !== "issued") throw new Error("verified script run cannot accept more receipts");
+    if (!Array.isArray(args.receipts)) throw new Error("receipts must be an array");
+    const expected = run.operations.map((operation) => String(operation.operation_id)).sort();
+    const receipts = args.receipts.map((raw, index) => {
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error(`receipts[${index}] must be an object`);
+      const receipt = raw;
+      const verdict = text3(receipt.verdict, `receipts[${index}].verdict`);
+      if (!(/* @__PURE__ */ new Set(["passed", "failed", "cancelled"])).has(verdict)) throw new Error("verified script receipt verdict is unsupported");
+      return {
+        operation_id: id3(receipt.operation_id, `receipts[${index}].operation_id`, "operation"),
+        verdict,
+        summary: text3(receipt.summary, `receipts[${index}].summary`)
+      };
+    });
+    if (JSON.stringify(receipts.map((receipt) => receipt.operation_id).sort()) !== JSON.stringify(expected)) throw new Error("verified script receipts must exactly match issued operations");
+    const status = receipts.every((receipt) => receipt.verdict === "passed") ? "completed" : receipts.some((receipt) => receipt.verdict === "cancelled") ? "cancelled" : "failed";
+    const saved = this.store.save("verified_script_run", String(run.id), {
+      ...recordPayload4(run),
+      status,
+      host_adapter_id: text3(args.host_adapter_id, "host_adapter_id"),
+      receipts
+    });
+    return { run: saved };
+  }
+};
+
 // src/service.ts
-var VERSION = "0.9.11";
+var VERSION = "0.9.12";
 var CONFIDENCE = /* @__PURE__ */ new Set(["confirmed", "bounded", "unverified", "rejected"]);
 var TASK_STATUS = /* @__PURE__ */ new Set(["active", "paused", "completed", "cancelled"]);
 var VERSIONED_LIFECYCLE = /* @__PURE__ */ new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -9035,10 +9103,10 @@ var CAPABILITY_ASSET_TYPES = /* @__PURE__ */ new Set(["skill", "mcp_server", "to
 var CAPABILITY_TRUST = /* @__PURE__ */ new Set(["trusted", "untrusted", "verified"]);
 var CAPABILITY_HEALTH = /* @__PURE__ */ new Set(["healthy", "stale", "failed", "unknown"]);
 var EXPERT_TYPES = /* @__PURE__ */ new Set(["diagnostic_research"]);
-function id3(prefix) {
-  return `${prefix}_${(0, import_node_crypto8.randomUUID)().replaceAll("-", "")}`;
+function id4(prefix) {
+  return `${prefix}_${(0, import_node_crypto9.randomUUID)().replaceAll("-", "")}`;
 }
-function text3(value, name) {
+function text4(value, name) {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
   return value.trim();
 }
@@ -9072,12 +9140,12 @@ function object2(value, name) {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${name} must be an object`);
   return value;
 }
-function recordPayload4(record) {
+function recordPayload5(record) {
   const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...payload } = record;
   return payload;
 }
 function uniqueTextArray(value, name, minimum = 1) {
-  const values = array(value, name).map((item) => text3(item, name));
+  const values = array(value, name).map((item) => text4(item, name));
   if (values.length < minimum || new Set(values).size !== values.length) {
     throw new Error(`${name} must contain at least ${minimum} unique values`);
   }
@@ -9085,7 +9153,7 @@ function uniqueTextArray(value, name, minimum = 1) {
 }
 function optionalTextArray(value, name, fallback = []) {
   if (value === void 0) return fallback;
-  const values = array(value, name).map((item) => text3(item, name));
+  const values = array(value, name).map((item) => text4(item, name));
   if (new Set(values).size !== values.length) throw new Error(`${name} must contain unique values`);
   return values;
 }
@@ -9141,7 +9209,7 @@ function receiptRequirements(value, name) {
   const normalized = {};
   for (const [stage, kinds] of Object.entries(requirements)) {
     if (!Object.hasOwn(DEFAULT_RECEIPT_REQUIREMENTS, stage)) throw new Error(`Unsupported receipt stage: ${stage}`);
-    const values = array(kinds, `${name}.${stage}`).map((kind) => text3(kind, `${name}.${stage}`));
+    const values = array(kinds, `${name}.${stage}`).map((kind) => text4(kind, `${name}.${stage}`));
     if (values.some((kind) => !ROUTE_RECEIPT_KINDS.has(kind)) || new Set(values).size !== values.length) {
       throw new Error(`${name}.${stage} must contain supported unique receipt kinds`);
     }
@@ -9161,7 +9229,7 @@ function canonical(value) {
   return JSON.stringify(value);
 }
 function fingerprint(value) {
-  return (0, import_node_crypto8.createHash)("sha256").update(canonical(value)).digest("hex");
+  return (0, import_node_crypto9.createHash)("sha256").update(canonical(value)).digest("hex");
 }
 function policyAllowsPath(value, prefixes) {
   const normalized = value.replaceAll("\\", "/").replace(/^\.\//u, "");
@@ -9172,7 +9240,7 @@ function policyAllowsPath(value, prefixes) {
   });
 }
 function validIsoTime(value, name) {
-  const parsed = Date.parse(text3(value, name));
+  const parsed = Date.parse(text4(value, name));
   if (Number.isNaN(parsed)) throw new Error(`${name} must be an ISO timestamp`);
   return parsed;
 }
@@ -9192,6 +9260,7 @@ var CraftService = class _CraftService {
   workspace;
   transaction;
   trajectory;
+  scriptRunner;
   constructor(store, semanticProvider, isolatedAdapter = new LocalIsolatedAdapter()) {
     this.store = store;
     this.catalog = new Catalog(store, semanticProvider);
@@ -9199,6 +9268,7 @@ var CraftService = class _CraftService {
     this.workspace = new WorkspaceState(store, store.paths);
     this.transaction = new TransactionCoordinator(store, this.workspace);
     this.trajectory = new TrajectoryCompiler(store);
+    this.scriptRunner = new VerifiedScriptRunner(store);
   }
   static async open(store) {
     const config = await loadConfig(store.paths);
@@ -9269,7 +9339,8 @@ var CraftService = class _CraftService {
       "workspace_checkpoint",
       "workspace_change",
       "workspace_transaction",
-      "trajectory_script_proposal"
+      "trajectory_script_proposal",
+      "verified_script_run"
     ];
     return {
       version: VERSION,
@@ -9278,9 +9349,9 @@ var CraftService = class _CraftService {
     };
   }
   sourceAdd(args) {
-    const label = args.label === void 0 ? void 0 : text3(args.label, "label");
+    const label = args.label === void 0 ? void 0 : text4(args.label, "label");
     return this.catalog.addSource(
-      text3(args.path, "path"),
+      text4(args.path, "path"),
       label,
       optionalBoolean(args.scan, "scan") ?? true
     );
@@ -9290,20 +9361,20 @@ var CraftService = class _CraftService {
   }
   sourceUpdate(args) {
     return this.catalog.updateSource(
-      text3(args.source_id, "source_id"),
+      text4(args.source_id, "source_id"),
       optionalBoolean(args.enabled, "enabled"),
-      args.label === void 0 ? void 0 : text3(args.label, "label")
+      args.label === void 0 ? void 0 : text4(args.label, "label")
     );
   }
   sourceRemove(args) {
-    return this.catalog.removeSource(text3(args.source_id, "source_id"));
+    return this.catalog.removeSource(text4(args.source_id, "source_id"));
   }
   sourceScan(args) {
-    return this.catalog.scan(args.source_id === void 0 ? void 0 : text3(args.source_id, "source_id"));
+    return this.catalog.scan(args.source_id === void 0 ? void 0 : text4(args.source_id, "source_id"));
   }
   async capabilitySearch(args) {
     return {
-      capabilities: await this.catalog.searchHybrid(text3(args.query, "query"), finiteInteger(args.limit, "limit", 6, 1, 20)),
+      capabilities: await this.catalog.searchHybrid(text4(args.query, "query"), finiteInteger(args.limit, "limit", 6, 1, 20)),
       semantic_search: this.catalog.semanticStatus()
     };
   }
@@ -9314,17 +9385,17 @@ var CraftService = class _CraftService {
     return decideExecution(args);
   }
   capabilityGet(args) {
-    return this.catalog.get(text3(args.asset_id, "asset_id"));
+    return this.catalog.get(text4(args.asset_id, "asset_id"));
   }
   capabilityAssetSave(args) {
-    const assetType = text3(args.asset_type, "asset_type");
+    const assetType = text4(args.asset_type, "asset_type");
     const trust = String(args.trust ?? "untrusted");
     const health = String(args.health ?? "unknown");
-    const effect = text3(args.effect, "effect");
+    const effect = text4(args.effect, "effect");
     if (!CAPABILITY_ASSET_TYPES.has(assetType) || !CAPABILITY_TRUST.has(trust) || !CAPABILITY_HEALTH.has(health) || !SIDE_EFFECTS.has(effect)) {
       throw new Error("Capability asset type, trust, health, or effect is unsupported");
     }
-    const sourceUri = assertNoSecret(text3(args.source_uri, "source_uri"), "source_uri");
+    const sourceUri = assertNoSecret(text4(args.source_uri, "source_uri"), "source_uri");
     const dependencies = optionalTextArray(args.dependencies, "dependencies");
     const aliases = optionalTextArray(args.aliases, "aliases");
     return this.saveVersioned("capability_asset", "asset", {
@@ -9342,8 +9413,8 @@ var CraftService = class _CraftService {
     }, ["name", "asset_type", "source_uri", "effect"]);
   }
   capabilityAccessPlan(args) {
-    const task = this.store.get("task", text3(args.task_id, "task_id"));
-    const goal = text3(args.goal, "goal");
+    const task = this.store.get("task", text4(args.task_id, "task_id"));
+    const goal = text4(args.goal, "goal");
     const allowedEffects = uniqueTextArray(args.allowed_effects ?? ["read_only"], "allowed_effects");
     if (allowedEffects.some((effect) => !SIDE_EFFECTS.has(effect))) throw new Error("allowed_effects must be supported");
     const tokens = goal.toLowerCase().match(/[\p{L}\p{N}_-]+/gu) ?? [];
@@ -9369,63 +9440,63 @@ var CraftService = class _CraftService {
     const selected = candidates.filter((item) => item.eligible && item.matched > 0).slice(0, 3);
     if (!selected.length) throw new Error("No eligible capability assets match this task");
     const profile = this.saveVersioned("activation_profile", "profile", { task_id: task.id, goal_fingerprint: fingerprint({ goal }), asset_ids: selected.map((item) => item.asset.id), asset_versions: Object.fromEntries(selected.map((item) => [String(item.asset.id), item.asset.version])), allowed_effects: allowedEffects, activation: "host_mediated", status: "recommended" }, []);
-    const receipt = this.store.create("tool_selection_receipt", String(args.receipt_id ?? id3("selection_receipt")), { task_id: task.id, profile_id: profile.id, profile_version: profile.version, candidate_asset_ids: candidates.map((item) => item.asset.id), filtered_asset_ids: candidates.filter((item) => !item.eligible).map((item) => ({ id: item.asset.id, reason: item.reason })), selected_asset_ids: selected.map((item) => item.asset.id), order: ["semantic", "effect", "verified_workflow", "history", "cost_latency"] });
+    const receipt = this.store.create("tool_selection_receipt", String(args.receipt_id ?? id4("selection_receipt")), { task_id: task.id, profile_id: profile.id, profile_version: profile.version, candidate_asset_ids: candidates.map((item) => item.asset.id), filtered_asset_ids: candidates.filter((item) => !item.eligible).map((item) => ({ id: item.asset.id, reason: item.reason })), selected_asset_ids: selected.map((item) => item.asset.id), order: ["semantic", "effect", "verified_workflow", "history", "cost_latency"] });
     return { profile, receipt, candidates: candidates.map((item) => ({ asset_id: item.asset.id, matched: item.matched, verified_workflow: item.verified_workflow, historical_success_rate: item.historical, cost: item.cost, latency: item.latency, eligible: item.eligible, reason: item.reason })) };
   }
   capabilityCallIssue(args) {
-    const profile = this.store.get("activation_profile", text3(args.profile_id, "profile_id"));
-    const assetId = text3(args.asset_id, "asset_id");
+    const profile = this.store.get("activation_profile", text4(args.profile_id, "profile_id"));
+    const assetId = text4(args.asset_id, "asset_id");
     if (!profile.asset_ids.includes(assetId)) throw new Error("Capability asset is not in the activation profile");
-    const call = this.store.create("capability_call", String(args.call_id ?? id3("capability_call")), { profile_id: profile.id, profile_version: profile.version, asset_id: assetId, operation: assertNoSecret(text3(args.operation, "operation"), "operation"), status: "issued", expires_at: args.expires_at ?? new Date(Date.now() + 3e5).toISOString() });
+    const call = this.store.create("capability_call", String(args.call_id ?? id4("capability_call")), { profile_id: profile.id, profile_version: profile.version, asset_id: assetId, operation: assertNoSecret(text4(args.operation, "operation"), "operation"), status: "issued", expires_at: args.expires_at ?? new Date(Date.now() + 3e5).toISOString() });
     return { call_id: call.id, call };
   }
   capabilityCallConsume(args) {
-    const call = this.store.get("capability_call", text3(args.call_id, "call_id"));
-    if (call.profile_id !== text3(args.profile_id, "profile_id")) throw new Error("Capability call profile does not match");
+    const call = this.store.get("capability_call", text4(args.call_id, "call_id"));
+    if (call.profile_id !== text4(args.profile_id, "profile_id")) throw new Error("Capability call profile does not match");
     if (call.status !== "issued") throw new Error("Capability call was already consumed");
     if (validIsoTime(call.expires_at, "expires_at") < Date.now()) throw new Error("Capability call has expired");
-    return { receipt: this.store.save("capability_call", String(call.id), { ...recordPayload4(call), status: "consumed", consumed_at: (/* @__PURE__ */ new Date()).toISOString() }) };
+    return { receipt: this.store.save("capability_call", String(call.id), { ...recordPayload5(call), status: "consumed", consumed_at: (/* @__PURE__ */ new Date()).toISOString() }) };
   }
   expertProfileSave(args) {
-    const expertType = text3(args.expert_type, "expert_type");
+    const expertType = text4(args.expert_type, "expert_type");
     const effects = uniqueTextArray(args.allowed_effects, "allowed_effects");
     if (!EXPERT_TYPES.has(expertType) || effects.some((effect) => effect !== "read_only")) throw new Error("Only read-only diagnostic_research Expert is supported");
     return this.saveVersioned("expert_profile", "expert", { ...args, expert_type: expertType, allowed_effects: effects, output_contract: uniqueTextArray(args.output_contract, "output_contract"), max_subagents: 5 }, ["name", "expert_type"]);
   }
   contextCapsuleCreate(args) {
-    const task = this.store.get("task", text3(args.task_id, "task_id"));
-    const profile = this.store.get("expert_profile", text3(args.profile_id, "profile_id"));
+    const task = this.store.get("task", text4(args.task_id, "task_id"));
+    const profile = this.store.get("expert_profile", text4(args.profile_id, "profile_id"));
     const artifactIds = optionalTextArray(args.artifact_ids, "artifact_ids");
     const evidenceIds = optionalTextArray(args.evidence_ids, "evidence_ids");
     for (const artifactId of artifactIds) this.store.get("artifact", artifactId);
     for (const evidenceId of evidenceIds) this.store.get("evidence", evidenceId);
-    return this.store.create("context_capsule", String(args.capsule_id ?? id3("capsule")), { task_id: task.id, expert_id: profile.id, expert_version: profile.version, artifact_ids: artifactIds, evidence_ids: evidenceIds, input_boundary: assertNoSecret(text3(args.input_boundary, "input_boundary"), "input_boundary") });
+    return this.store.create("context_capsule", String(args.capsule_id ?? id4("capsule")), { task_id: task.id, expert_id: profile.id, expert_version: profile.version, artifact_ids: artifactIds, evidence_ids: evidenceIds, input_boundary: assertNoSecret(text4(args.input_boundary, "input_boundary"), "input_boundary") });
   }
   expertSubagentCreate(args) {
-    const run = this.store.get("runtime_run", text3(args.run_id, "run_id"));
-    const parent = this.store.get("runtime_operation", text3(args.parent_operation_id, "parent_operation_id"));
-    const expert = this.store.get("expert_profile", text3(args.expert_id, "expert_id"));
-    const capsule = this.store.get("context_capsule", text3(args.capsule_id, "capsule_id"));
+    const run = this.store.get("runtime_run", text4(args.run_id, "run_id"));
+    const parent = this.store.get("runtime_operation", text4(args.parent_operation_id, "parent_operation_id"));
+    const expert = this.store.get("expert_profile", text4(args.expert_id, "expert_id"));
+    const capsule = this.store.get("context_capsule", text4(args.capsule_id, "capsule_id"));
     if (parent.run_id !== run.id || capsule.task_id !== run.task_id || capsule.expert_id !== expert.id) throw new Error("Expert Sub-agent inputs are incompatible");
     if (this.runtimeOperations(String(run.id)).filter((operation) => operation.parent_operation_id === parent.id).length >= Number(expert.max_subagents)) throw new Error("Expert may create at most 5 Sub-agent Runs");
-    return this.store.create("runtime_operation", String(args.operation_id ?? id3("subagent")), { run_id: run.id, parent_operation_id: parent.id, depends_on: [parent.id], kind: "agent", effect: "read_only", objective: assertNoSecret(text3(args.objective, "objective"), "objective"), agent_profile_id: expert.id, expert_id: expert.id, expert_version: expert.version, capsule_id: capsule.id, status: "pending", attempts: 0, submission_receipts: [] });
+    return this.store.create("runtime_operation", String(args.operation_id ?? id4("subagent")), { run_id: run.id, parent_operation_id: parent.id, depends_on: [parent.id], kind: "agent", effect: "read_only", objective: assertNoSecret(text4(args.objective, "objective"), "objective"), agent_profile_id: expert.id, expert_id: expert.id, expert_version: expert.version, capsule_id: capsule.id, status: "pending", attempts: 0, submission_receipts: [] });
   }
   expertSubagentReport(args) {
-    const operation = this.store.get("runtime_operation", text3(args.operation_id, "operation_id"));
+    const operation = this.store.get("runtime_operation", text4(args.operation_id, "operation_id"));
     const report = object2(args.report, "report");
     const required = ["hypotheses", "counterexamples", "evidence_ids", "confidence", "next_action"];
     if (required.some((key) => report[key] === void 0) || !Array.isArray(report.hypotheses) || !Array.isArray(report.counterexamples)) throw new Error("Expert report violates output contract");
     if (!Array.isArray(report.evidence_ids) || !report.evidence_ids.length) throw new Error("Evidence is required for an Expert report");
     const evidenceIds = uniqueTextArray(report.evidence_ids, "report.evidence_ids");
     for (const evidenceId of evidenceIds) this.store.get("evidence", evidenceId);
-    if (!CONFIDENCE.has(text3(report.confidence, "report.confidence"))) throw new Error("Expert report confidence is unsupported");
-    return this.runtimeOperationSubmit({ operation_id: operation.id, lease_id: text3(args.lease_id, "lease_id"), claimed_by: text3(args.claimed_by, "claimed_by"), verdict: text3(args.verdict, "verdict"), summary: assertNoSecret(JSON.stringify(report), "report"), evidence_ids: evidenceIds, costs: args.costs ?? {} });
+    if (!CONFIDENCE.has(text4(report.confidence, "report.confidence"))) throw new Error("Expert report confidence is unsupported");
+    return this.runtimeOperationSubmit({ operation_id: operation.id, lease_id: text4(args.lease_id, "lease_id"), claimed_by: text4(args.claimed_by, "claimed_by"), verdict: text4(args.verdict, "verdict"), summary: assertNoSecret(JSON.stringify(report), "report"), evidence_ids: evidenceIds, costs: args.costs ?? {} });
   }
   projectPolicySave(args) {
-    const projectId = text3(args.project_id, "project_id");
+    const projectId = text4(args.project_id, "project_id");
     const enforcement = String(args.enforcement ?? "required");
     if (!(/* @__PURE__ */ new Set(["required", "advisory"])).has(enforcement)) throw new Error(`Unsupported policy enforcement: ${enforcement}`);
-    const policyId = String(args.policy_id ?? `project_policy_${(0, import_node_crypto8.createHash)("sha256").update(projectId).digest("hex").slice(0, 24)}`);
+    const policyId = String(args.policy_id ?? `project_policy_${(0, import_node_crypto9.createHash)("sha256").update(projectId).digest("hex").slice(0, 24)}`);
     return this.saveVersioned("project_policy", "policy", {
       ...args,
       policy_id: policyId,
@@ -9471,12 +9542,12 @@ var CraftService = class _CraftService {
   runtimePolicy(args) {
     return this.store.get(
       "runtime_policy",
-      text3(args.policy_id, "policy_id"),
+      text4(args.policy_id, "policy_id"),
       args.policy_version === void 0 ? void 0 : finiteInteger(args.policy_version, "policy_version", 1)
     );
   }
   runtimeAdapterSave(args) {
-    const host = text3(args.host, "host");
+    const host = text4(args.host, "host");
     if (!RUNTIME_ADAPTER_HOSTS.has(host)) throw new Error("Runtime adapter host is unsupported");
     const allowedKinds = uniqueTextArray(args.allowed_kinds, "allowed_kinds");
     const allowedEffects = uniqueTextArray(args.allowed_effects, "allowed_effects");
@@ -9505,12 +9576,12 @@ var CraftService = class _CraftService {
   runtimeAdapterDispatch(args) {
     const adapter = this.store.get(
       "runtime_adapter",
-      text3(args.runtime_adapter_id, "runtime_adapter_id"),
+      text4(args.runtime_adapter_id, "runtime_adapter_id"),
       args.runtime_adapter_version === void 0 ? void 0 : finiteInteger(args.runtime_adapter_version, "runtime_adapter_version", 1)
     );
     const capacity = finiteInteger(args.capacity, "capacity", Number(adapter.max_concurrency), 1, Number(adapter.max_concurrency));
     const dispatch = this.runtimeDispatch({
-      run_id: text3(args.run_id, "run_id"),
+      run_id: text4(args.run_id, "run_id"),
       claimed_by: this.runtimeAdapterOwner(adapter),
       capacity,
       kinds: adapter.allowed_kinds,
@@ -9521,14 +9592,14 @@ var CraftService = class _CraftService {
   runtimeAdapterReport(args) {
     const adapter = this.store.get(
       "runtime_adapter",
-      text3(args.runtime_adapter_id, "runtime_adapter_id"),
+      text4(args.runtime_adapter_id, "runtime_adapter_id"),
       args.runtime_adapter_version === void 0 ? void 0 : finiteInteger(args.runtime_adapter_version, "runtime_adapter_version", 1)
     );
-    const operation = this.store.get("runtime_operation", text3(args.operation_id, "operation_id"));
+    const operation = this.store.get("runtime_operation", text4(args.operation_id, "operation_id"));
     if (!adapter.allowed_kinds.includes(String(operation.kind)) || !adapter.allowed_effects.includes(String(operation.effect))) {
       throw new Error("Runtime adapter is not authorized for this operation");
     }
-    const summary2 = assertNoSecret(text3(args.summary, "summary"), "summary");
+    const summary2 = assertNoSecret(text4(args.summary, "summary"), "summary");
     const artifact = this.artifactRegister({
       kind: "runtime_adapter_receipt",
       name: `Runtime adapter ${operation.id}`,
@@ -9551,24 +9622,24 @@ var CraftService = class _CraftService {
     });
     const submitted = this.runtimeOperationSubmit({
       operation_id: operation.id,
-      lease_id: text3(args.lease_id, "lease_id"),
+      lease_id: text4(args.lease_id, "lease_id"),
       claimed_by: this.runtimeAdapterOwner(adapter),
-      verdict: text3(args.verdict, "verdict"),
+      verdict: text4(args.verdict, "verdict"),
       summary: summary2,
       costs: args.costs ?? {},
       retryable: optionalBoolean(args.retryable, "retryable") ?? false,
-      artifact_ids: [...array(args.artifact_ids ?? [], "artifact_ids").map((value) => text3(value, "artifact_id")), artifact.id],
-      evidence_ids: [...array(args.evidence_ids ?? [], "evidence_ids").map((value) => text3(value, "evidence_id")), evidence.id],
+      artifact_ids: [...array(args.artifact_ids ?? [], "artifact_ids").map((value) => text4(value, "artifact_id")), artifact.id],
+      evidence_ids: [...array(args.evidence_ids ?? [], "evidence_ids").map((value) => text4(value, "evidence_id")), evidence.id],
       idempotency_key: args.idempotency_key ?? `adapter:${adapter.id}:${operation.id}:${operation.attempts}`
     });
     return { adapter, artifact, evidence, ...submitted };
   }
   async localIsolatedExecute(args) {
-    const run = this.store.get("runtime_run", text3(args.run_id, "run_id"));
-    const operation = this.store.get("runtime_operation", text3(args.operation_id, "operation_id"));
+    const run = this.store.get("runtime_run", text4(args.run_id, "run_id"));
+    const operation = this.store.get("runtime_operation", text4(args.operation_id, "operation_id"));
     if (operation.run_id !== run.id) throw new Error("Runtime operation does not belong to run");
     const policy = this.runtimePolicy({ policy_id: run.policy_id, policy_version: run.policy_version });
-    const command = text3(args.command, "command");
+    const command = text4(args.command, "command");
     const result = await this.isolatedAdapter.execute({
       run_id: String(run.id),
       command,
@@ -9577,7 +9648,7 @@ var CraftService = class _CraftService {
       command_allowlist: policy.command_allowlist,
       path_allowlist: policy.path_allowlist,
       effect: String(operation.effect),
-      cwd: args.cwd === void 0 ? "." : text3(args.cwd, "cwd"),
+      cwd: args.cwd === void 0 ? "." : text4(args.cwd, "cwd"),
       requires_credential: optionalBoolean(args.requires_credential, "requires_credential") ?? false,
       compensation: args.compensation === void 0 ? null : object2(args.compensation, "compensation")
     });
@@ -9592,8 +9663,8 @@ var CraftService = class _CraftService {
     const evidence = this.evidenceRecord({ source_type: "program", confidence: String(result.status) === "passed" ? "confirmed" : "rejected", claim: `Local isolated execution ${result.status}.`, artifact_id: artifact.id });
     const submitted = this.runtimeOperationSubmit({
       operation_id: operation.id,
-      lease_id: text3(args.lease_id, "lease_id"),
-      claimed_by: text3(args.claimed_by, "claimed_by"),
+      lease_id: text4(args.lease_id, "lease_id"),
+      claimed_by: text4(args.claimed_by, "claimed_by"),
       verdict: String(result.status) === "passed" ? "passed" : "failed",
       summary: "Local isolated adapter receipt",
       artifact_ids: [artifact.id],
@@ -9618,7 +9689,7 @@ var CraftService = class _CraftService {
     return "failed";
   }
   runtimeRunStart(args) {
-    const task = this.store.get("task", text3(args.task_id, "task_id"));
+    const task = this.store.get("task", text4(args.task_id, "task_id"));
     const policy = this.runtimePolicy(args);
     const environment = object2(args.environment, "environment");
     const requested = array(args.operations, "operations");
@@ -9626,15 +9697,15 @@ var CraftService = class _CraftService {
     const operationIds = /* @__PURE__ */ new Set();
     const operations = requested.map((raw, index) => {
       const input = object2(raw, `operations[${index}]`);
-      const operationId = text3(input.operation_id, `operations[${index}].operation_id`);
+      const operationId = text4(input.operation_id, `operations[${index}].operation_id`);
       if (operationIds.has(operationId)) throw new Error("operation_id must be unique within a run");
       operationIds.add(operationId);
-      const kind = text3(input.kind, `operations[${index}].kind`);
-      const effect = text3(input.effect, `operations[${index}].effect`);
+      const kind = text4(input.kind, `operations[${index}].kind`);
+      const effect = text4(input.effect, `operations[${index}].effect`);
       if (!RUNTIME_KINDS.has(kind) || !SIDE_EFFECTS.has(effect) || !policy.allowed_effects.includes(effect)) {
         throw new Error("Runtime operation kind or effect is not allowed by policy");
       }
-      const parentOperationId = input.parent_operation_id === void 0 ? null : text3(input.parent_operation_id, `operations[${index}].parent_operation_id`);
+      const parentOperationId = input.parent_operation_id === void 0 ? null : text4(input.parent_operation_id, `operations[${index}].parent_operation_id`);
       if (parentOperationId === operationId) throw new Error("Runtime operation cannot parent itself");
       const dependencies = input.depends_on === void 0 ? parentOperationId === null ? [] : [parentOperationId] : optionalTextArray(input.depends_on, `operations[${index}].depends_on`);
       if (dependencies.includes(operationId)) throw new Error("Runtime operation cannot depend on itself");
@@ -9644,7 +9715,7 @@ var CraftService = class _CraftService {
         operation_id: operationId,
         kind,
         effect,
-        objective: assertNoSecret(text3(input.objective, `operations[${index}].objective`), "objective"),
+        objective: assertNoSecret(text4(input.objective, `operations[${index}].objective`), "objective"),
         agent_profile_id: input.agent_profile_id ?? null,
         parent_operation_id: parentOperationId,
         depends_on: dependencies,
@@ -9662,13 +9733,13 @@ var CraftService = class _CraftService {
         throw new Error("Runtime operation already exists");
       }
     }
-    const runId = String(args.run_id ?? id3("runtime_run"));
+    const runId = String(args.run_id ?? id4("runtime_run"));
     const run = this.store.create("runtime_run", runId, {
       task_id: task.id,
       trial_id: args.trial_id ?? null,
       policy_id: policy.id,
       policy_version: policy.version,
-      policy_fingerprint: fingerprint(recordPayload4(policy)),
+      policy_fingerprint: fingerprint(recordPayload5(policy)),
       environment_fingerprint: fingerprint(environment),
       status: "running",
       resource_ledger: {},
@@ -9684,15 +9755,15 @@ var CraftService = class _CraftService {
     return { run, operations: this.runtimeOperations(String(run.id)) };
   }
   runtimeRunGet(args) {
-    const run = this.store.get("runtime_run", text3(args.run_id, "run_id"));
+    const run = this.store.get("runtime_run", text4(args.run_id, "run_id"));
     return { run, operations: this.runtimeOperations(String(run.id)), trace: this.store.events(`runtime:${run.id}`) };
   }
   runtimeDispatch(args) {
-    const run = this.store.get("runtime_run", text3(args.run_id, "run_id"));
+    const run = this.store.get("runtime_run", text4(args.run_id, "run_id"));
     if (RUNTIME_RUN_TERMINAL.has(String(run.status))) return { run, operations: [] };
     if (run.status !== "running") return { run, operations: [], paused: run.status };
     const policy = this.runtimePolicy({ policy_id: run.policy_id, policy_version: run.policy_version });
-    const claimedBy = text3(args.claimed_by, "claimed_by");
+    const claimedBy = text4(args.claimed_by, "claimed_by");
     const capacity = finiteInteger(args.capacity, "capacity", Number(policy.max_concurrency), 1, Number(policy.max_concurrency));
     const kinds = args.kinds === void 0 ? void 0 : uniqueTextArray(args.kinds, "kinds");
     if (kinds?.some((kind) => !RUNTIME_KINDS.has(kind))) throw new Error("Runtime dispatch kinds must be supported");
@@ -9706,14 +9777,14 @@ var CraftService = class _CraftService {
       const dependencies = Array.isArray(operation.depends_on) ? operation.depends_on.map(String) : operation.parent_operation_id ? [String(operation.parent_operation_id)] : [];
       if (dispatched.length >= Math.max(0, capacity - active) || operation.status !== "pending" || kinds !== void 0 && !kinds.includes(String(operation.kind)) || effects !== void 0 && !effects.includes(String(operation.effect)) || dependencies.some((dependency) => !passed.has(dependency))) continue;
       if (policy.require_approval_for.includes(String(operation.effect)) && operation.approval?.decision !== "approve") {
-        const waiting = this.store.save("runtime_operation", String(operation.id), { ...recordPayload4(operation), status: "awaiting_approval" });
+        const waiting = this.store.save("runtime_operation", String(operation.id), { ...recordPayload5(operation), status: "awaiting_approval" });
         this.runtimeTrace(run, "awaiting_approval", { operation_id: waiting.id, effect: waiting.effect });
         continue;
       }
-      const leaseId = id3("runtime_lease");
+      const leaseId = id4("runtime_lease");
       const leaseExpiresAt = new Date(Date.now() + Number(policy.lease_ttl_seconds) * 1e3).toISOString();
       const leased = this.store.save("runtime_operation", String(operation.id), {
-        ...recordPayload4(operation),
+        ...recordPayload5(operation),
         status: "leased",
         lease_id: leaseId,
         claimed_by: claimedBy,
@@ -9734,17 +9805,17 @@ var CraftService = class _CraftService {
     return { run: this.store.get("runtime_run", String(run.id)), operations: dispatched };
   }
   runtimeOperationGet(args) {
-    return { operation: this.store.get("runtime_operation", text3(args.operation_id, "operation_id")) };
+    return { operation: this.store.get("runtime_operation", text4(args.operation_id, "operation_id")) };
   }
   runtimeOperationDecision(args) {
-    const operation = this.store.get("runtime_operation", text3(args.operation_id, "operation_id"));
+    const operation = this.store.get("runtime_operation", text4(args.operation_id, "operation_id"));
     if (operation.status !== "awaiting_approval") throw new Error("Runtime operation is not awaiting approval");
-    const decision = text3(args.decision, "decision");
+    const decision = text4(args.decision, "decision");
     if (!(/* @__PURE__ */ new Set(["approve", "reject"])).has(decision)) throw new Error("Runtime approval decision must be approve or reject");
-    const actor = text3(args.actor, "actor");
+    const actor = text4(args.actor, "actor");
     const status = decision === "approve" ? "pending" : "rejected";
     const saved = this.store.save("runtime_operation", String(operation.id), {
-      ...recordPayload4(operation),
+      ...recordPayload5(operation),
       status,
       approval: { decision, actor, at: (/* @__PURE__ */ new Date()).toISOString() }
     });
@@ -9757,37 +9828,37 @@ var CraftService = class _CraftService {
     const resourceLedger = ledger ?? run.resource_ledger;
     const budget = run.budget;
     const status = budgetExceeded(resourceLedger, budget) ? "paused_budget" : this.runtimeRunStatus(this.runtimeOperations(String(run.id)));
-    return this.store.save("runtime_run", String(run.id), { ...recordPayload4(run), status, resource_ledger: resourceLedger });
+    return this.store.save("runtime_run", String(run.id), { ...recordPayload5(run), status, resource_ledger: resourceLedger });
   }
   runtimeOperationSubmit(args) {
-    const operation = this.store.get("runtime_operation", text3(args.operation_id, "operation_id"));
-    const receiptKey = args.idempotency_key === void 0 ? null : text3(args.idempotency_key, "idempotency_key");
+    const operation = this.store.get("runtime_operation", text4(args.operation_id, "operation_id"));
+    const receiptKey = args.idempotency_key === void 0 ? null : text4(args.idempotency_key, "idempotency_key");
     const receipts = array(operation.submission_receipts, "submission_receipts");
     if (receiptKey !== null && receipts.some((receipt) => receipt.idempotency_key === receiptKey)) {
       return this.runtimeRunGet({ run_id: operation.run_id });
     }
-    if (operation.status !== "leased" || operation.lease_id !== text3(args.lease_id, "lease_id") || operation.claimed_by !== text3(args.claimed_by, "claimed_by")) {
+    if (operation.status !== "leased" || operation.lease_id !== text4(args.lease_id, "lease_id") || operation.claimed_by !== text4(args.claimed_by, "claimed_by")) {
       throw new Error("Runtime operation lease does not match");
     }
-    const verdict = text3(args.verdict, "verdict");
+    const verdict = text4(args.verdict, "verdict");
     if (!(/* @__PURE__ */ new Set(["passed", "failed", "cancelled"])).has(verdict)) throw new Error("Unsupported runtime operation verdict");
     const costs = args.costs === void 0 ? {} : budgetLimits(object2(args.costs, "costs"));
     const run = this.store.get("runtime_run", String(operation.run_id));
     const policy = this.runtimePolicy({ policy_id: run.policy_id, policy_version: run.policy_version });
-    const artifactIds = array(args.artifact_ids ?? [], "artifact_ids").map((value) => text3(value, "artifact_id"));
-    const evidenceIds = array(args.evidence_ids ?? [], "evidence_ids").map((value) => text3(value, "evidence_id"));
+    const artifactIds = array(args.artifact_ids ?? [], "artifact_ids").map((value) => text4(value, "artifact_id"));
+    const evidenceIds = array(args.evidence_ids ?? [], "evidence_ids").map((value) => text4(value, "evidence_id"));
     for (const artifactId of artifactIds) this.store.get("artifact", artifactId);
     for (const evidenceId of evidenceIds) this.store.get("evidence", evidenceId);
     const childIds = /* @__PURE__ */ new Set();
     const children = (args.children === void 0 ? [] : array(args.children, "children")).map((raw, index) => {
       const child = object2(raw, `children[${index}]`);
-      const childId = text3(child.operation_id, `children[${index}].operation_id`);
+      const childId = text4(child.operation_id, `children[${index}].operation_id`);
       if (childIds.has(childId) || this.store.find("runtime_operation", childId)) {
         throw new Error("Runtime child operation already exists");
       }
       childIds.add(childId);
-      const kind = text3(child.kind, `children[${index}].kind`);
-      const effect = text3(child.effect, `children[${index}].effect`);
+      const kind = text4(child.kind, `children[${index}].kind`);
+      const effect = text4(child.effect, `children[${index}].effect`);
       if (!RUNTIME_KINDS.has(kind) || !SIDE_EFFECTS.has(effect) || !policy.allowed_effects.includes(effect)) {
         throw new Error("Runtime child kind or effect is not allowed by policy");
       }
@@ -9795,14 +9866,14 @@ var CraftService = class _CraftService {
         operation_id: childId,
         kind,
         effect,
-        objective: assertNoSecret(text3(child.objective, `children[${index}].objective`), "objective"),
+        objective: assertNoSecret(text4(child.objective, `children[${index}].objective`), "objective"),
         agent_profile_id: child.agent_profile_id ?? null
       };
     });
     const retryable = optionalBoolean(args.retryable, "retryable") ?? false;
     const status = verdict === "failed" && retryable && Number(operation.attempts) < Number(policy.max_attempts) ? "pending" : verdict;
     const saved = this.store.save("runtime_operation", String(operation.id), {
-      ...recordPayload4(operation),
+      ...recordPayload5(operation),
       status,
       lease_id: null,
       lease_expires_at: null,
@@ -9836,7 +9907,7 @@ var CraftService = class _CraftService {
     return { operation: saved, run: updatedRun, operations: this.runtimeOperations(String(run.id)) };
   }
   runtimeLeaseRecover(args) {
-    const run = this.store.get("runtime_run", text3(args.run_id, "run_id"));
+    const run = this.store.get("runtime_run", text4(args.run_id, "run_id"));
     const now = args.now === void 0 ? Date.now() : validIsoTime(args.now, "now");
     const policy = this.runtimePolicy({ policy_id: run.policy_id, policy_version: run.policy_version });
     const recovered = [];
@@ -9844,7 +9915,7 @@ var CraftService = class _CraftService {
       if (operation.status !== "leased" || validIsoTime(operation.lease_expires_at, "lease_expires_at") > now) continue;
       const exhausted = Number(operation.attempts) >= Number(policy.max_attempts);
       this.store.save("runtime_operation", String(operation.id), {
-        ...recordPayload4(operation),
+        ...recordPayload5(operation),
         status: exhausted ? "failed" : "pending",
         lease_id: null,
         lease_expires_at: null,
@@ -9857,9 +9928,9 @@ var CraftService = class _CraftService {
   }
   runtimeAuthorizeWorkflow(operation, policy) {
     const execution = object2(operation.execution, "runtime operation execution");
-    const projectRoot = text3(execution.project_root, "execution.project_root");
+    const projectRoot = text4(execution.project_root, "execution.project_root");
     const plan = this.workflowPlan({
-      workflow_id: text3(execution.workflow_id, "execution.workflow_id"),
+      workflow_id: text4(execution.workflow_id, "execution.workflow_id"),
       version: execution.workflow_version,
       inputs: object2(execution.inputs, "execution.inputs"),
       approved_side_effects: policy.allowed_effects
@@ -9887,8 +9958,8 @@ var CraftService = class _CraftService {
     return { execution, project_root: projectRoot, plan };
   }
   runtimeDriverTick(args) {
-    const run = this.store.get("runtime_run", text3(args.run_id, "run_id"));
-    const driverId = text3(args.driver_id, "driver_id");
+    const run = this.store.get("runtime_run", text4(args.run_id, "run_id"));
+    const driverId = text4(args.driver_id, "driver_id");
     const policy = this.runtimePolicy({ policy_id: run.policy_id, policy_version: run.policy_version });
     if (!policy.trusted_hosts.includes(driverId)) throw new Error("Runtime Driver is not a trusted host for this policy");
     this.runtimeLeaseRecover({ run_id: run.id });
@@ -9962,14 +10033,14 @@ var CraftService = class _CraftService {
     };
   }
   runtimeRunResume(args) {
-    const run = this.store.get("runtime_run", text3(args.run_id, "run_id"));
+    const run = this.store.get("runtime_run", text4(args.run_id, "run_id"));
     const nextAction = RUNTIME_RUN_TERMINAL.has(String(run.status)) ? { kind: "completed", status: run.status } : run.status === "paused_budget" ? { kind: "await_budget", status: run.status } : { kind: "dispatch", status: run.status };
     return { run, next_action: nextAction };
   }
   runtimePromotionEligibility(args) {
-    const run = this.store.get("runtime_run", text3(args.run_id, "run_id"));
+    const run = this.store.get("runtime_run", text4(args.run_id, "run_id"));
     const policy = this.runtimePolicy(args);
-    const policyMatches = run.policy_id === policy.id && Number(run.policy_version) === Number(policy.version) && run.policy_fingerprint === fingerprint(recordPayload4(policy));
+    const policyMatches = run.policy_id === policy.id && Number(run.policy_version) === Number(policy.version) && run.policy_fingerprint === fingerprint(recordPayload5(policy));
     const environmentMatches = run.environment_fingerprint === fingerprint(object2(args.environment, "environment"));
     return {
       eligible: policyMatches && environmentMatches,
@@ -9979,14 +10050,14 @@ var CraftService = class _CraftService {
     };
   }
   harnessSelect(args) {
-    const task = this.store.get("task", text3(args.task_id, "task_id"));
-    const risk = text3(args.risk, "risk");
+    const task = this.store.get("task", text4(args.task_id, "task_id"));
+    const risk = text4(args.risk, "risk");
     if (!(/* @__PURE__ */ new Set(["low", "medium", "high"])).has(risk)) throw new Error("Harness risk must be low, medium, or high");
     const budget = budgetLimits(object2(args.budget ?? {}, "budget"));
     const external = optionalBoolean(args.requires_external_effect, "requires_external_effect") ?? false;
     const topology = risk === "high" || external ? "planner_executor_evaluator" : risk === "medium" ? "incremental" : "single";
     const harness = this.harnessConfigurationSave({
-      configuration_id: String(args.harness_id ?? id3("harness")),
+      configuration_id: String(args.harness_id ?? id4("harness")),
       name: `Adaptive ${risk} harness`,
       dimensions: {
         context: { checkpoint_required: risk !== "low" },
@@ -9997,7 +10068,7 @@ var CraftService = class _CraftService {
         output: { independent_evaluator: topology === "planner_executor_evaluator" }
       }
     });
-    const strategy = this.store.create("adaptive_harness", String(args.strategy_id ?? id3("adaptive_harness")), {
+    const strategy = this.store.create("adaptive_harness", String(args.strategy_id ?? id4("adaptive_harness")), {
       task_id: task.id,
       risk,
       budget,
@@ -10010,17 +10081,17 @@ var CraftService = class _CraftService {
     return { strategy, harness };
   }
   agentIrCompile(args) {
-    const task = this.store.get("task", text3(args.task_id, "task_id"));
+    const task = this.store.get("task", text4(args.task_id, "task_id"));
     const harness = this.store.get(
       "harness_configuration",
-      text3(args.harness_id, "harness_id"),
+      text4(args.harness_id, "harness_id"),
       args.harness_version === void 0 ? void 0 : finiteInteger(args.harness_version, "harness_version", 1)
     );
     const operations = array(args.operations, "operations").map((raw, index) => {
       const item = object2(raw, `operations[${index}]`);
-      const operationId = text3(item.id, `operations[${index}].id`);
-      const kind = text3(item.kind, `operations[${index}].kind`);
-      const effect = text3(item.effect, `operations[${index}].effect`);
+      const operationId = text4(item.id, `operations[${index}].id`);
+      const kind = text4(item.kind, `operations[${index}].kind`);
+      const effect = text4(item.effect, `operations[${index}].effect`);
       if (!RUNTIME_KINDS.has(kind) || !SIDE_EFFECTS.has(effect)) throw new Error("Agent IR operation kind or effect is unsupported");
       const dependsOn = optionalTextArray(item.depends_on, `operations[${index}].depends_on`);
       if (dependsOn.includes(operationId)) throw new Error("Agent IR operation cannot depend on itself");
@@ -10030,7 +10101,7 @@ var CraftService = class _CraftService {
         id: operationId,
         kind,
         effect,
-        objective: assertNoSecret(text3(item.objective, `operations[${index}].objective`), "objective"),
+        objective: assertNoSecret(text4(item.objective, `operations[${index}].objective`), "objective"),
         depends_on: dependsOn,
         agent_profile_id: item.agent_profile_id ?? null,
         execution
@@ -10043,9 +10114,9 @@ var CraftService = class _CraftService {
     if (operations.some((item) => item.depends_on.some((dependency) => !ids.has(dependency)))) {
       throw new Error("Agent IR dependencies must belong to the same IR");
     }
-    return this.store.create("agent_ir", String(args.ir_id ?? id3("agent_ir")), {
+    return this.store.create("agent_ir", String(args.ir_id ?? id4("agent_ir")), {
       task_id: task.id,
-      goal: text3(args.goal, "goal"),
+      goal: text4(args.goal, "goal"),
       harness_configuration_id: harness.id,
       harness_configuration_version: harness.version,
       operations,
@@ -10055,16 +10126,16 @@ var CraftService = class _CraftService {
   agentIrLower(args) {
     const ir = this.store.get(
       "agent_ir",
-      text3(args.ir_id, "ir_id"),
+      text4(args.ir_id, "ir_id"),
       args.ir_version === void 0 ? void 0 : finiteInteger(args.ir_version, "ir_version", 1)
     );
-    const runId = args.run_id === void 0 ? id3("runtime_run") : text3(args.run_id, "run_id");
+    const runId = args.run_id === void 0 ? id4("runtime_run") : text4(args.run_id, "run_id");
     const operations = ir.operations;
     const operationIds = new Map(operations.map((operation) => [String(operation.id), `${runId}:${operation.id}`]));
     const started = this.runtimeRunStart({
       run_id: runId,
       task_id: ir.task_id,
-      policy_id: text3(args.policy_id, "policy_id"),
+      policy_id: text4(args.policy_id, "policy_id"),
       policy_version: args.policy_version,
       trial_id: args.trial_id,
       environment: object2(args.environment, "environment"),
@@ -10081,13 +10152,13 @@ var CraftService = class _CraftService {
     return { ir, ...started };
   }
   experienceShadowExperimentCreate(args) {
-    const task = this.store.get("task", text3(args.task_id, "task_id"));
-    const candidateId = text3(args.mining_candidate_id, "mining_candidate_id");
+    const task = this.store.get("task", text4(args.task_id, "task_id"));
+    const candidateId = text4(args.mining_candidate_id, "mining_candidate_id");
     const candidate = this.store.find("experience_mining_candidate", candidateId);
     if (!candidate || candidate.lifecycle !== "proposal_only") {
       return { status: "rejected", reason: "Only an existing proposal-only mining candidate can enter shadow evaluation." };
     }
-    const experiment = this.store.create("experience_shadow_experiment", String(args.experiment_id ?? id3("shadow_experiment")), {
+    const experiment = this.store.create("experience_shadow_experiment", String(args.experiment_id ?? id4("shadow_experiment")), {
       task_id: task.id,
       mining_candidate_id: candidate.id,
       mining_candidate_version: candidate.version,
@@ -10101,7 +10172,7 @@ var CraftService = class _CraftService {
     if (unsafe) throw new Error("Shadow evaluation accepts read-only Workflow steps only");
   }
   experienceShadowExperimentEvaluate(args) {
-    const experiment = this.store.get("experience_shadow_experiment", text3(args.experiment_id, "experiment_id"));
+    const experiment = this.store.get("experience_shadow_experiment", text4(args.experiment_id, "experiment_id"));
     if (experiment.status !== "planned") throw new Error("Only a planned shadow experiment can be evaluated");
     const candidate = this.store.get(
       "experience_mining_candidate",
@@ -10111,7 +10182,7 @@ var CraftService = class _CraftService {
     if (candidate.lifecycle !== "proposal_only") throw new Error("Shadow evaluation requires a proposal-only mining candidate");
     const suite = this.store.get(
       "evaluation_suite",
-      text3(args.suite_id, "suite_id"),
+      text4(args.suite_id, "suite_id"),
       args.suite_version === void 0 ? void 0 : finiteInteger(args.suite_version, "suite_version", 1)
     );
     if (!suite.cases.some((item) => item.split === "held_out")) {
@@ -10119,19 +10190,19 @@ var CraftService = class _CraftService {
     }
     const baseline = this.store.get(
       "workflow",
-      text3(args.baseline_workflow_id, "baseline_workflow_id"),
+      text4(args.baseline_workflow_id, "baseline_workflow_id"),
       finiteInteger(args.baseline_workflow_version, "baseline_workflow_version", 1)
     );
     const proposed = this.store.get(
       "workflow",
-      text3(args.candidate_workflow_id, "candidate_workflow_id"),
+      text4(args.candidate_workflow_id, "candidate_workflow_id"),
       finiteInteger(args.candidate_workflow_version, "candidate_workflow_version", 1)
     );
     this.assertShadowWorkflowReadOnly(baseline);
     this.assertShadowWorkflowReadOnly(proposed);
     const policy = this.store.get(
       "signoff_policy",
-      text3(args.signoff_policy_id, "signoff_policy_id"),
+      text4(args.signoff_policy_id, "signoff_policy_id"),
       finiteInteger(args.signoff_policy_version, "signoff_policy_version", 1)
     );
     const runner = this.evaluationRunnerRun({
@@ -10139,7 +10210,7 @@ var CraftService = class _CraftService {
       suite_id: suite.id,
       suite_version: suite.version,
       split: "held_out",
-      project_root: text3(args.project_root, "project_root"),
+      project_root: text4(args.project_root, "project_root"),
       trials_per_case: args.trials_per_case ?? 1,
       environment: args.environment ?? {},
       budget: args.budget ?? {},
@@ -10158,7 +10229,7 @@ var CraftService = class _CraftService {
       max_duration_regression_ratio: args.max_duration_regression_ratio
     });
     const status = promotion.eligible ? "signoff_ready" : "rejected";
-    const shadowEvaluation = this.store.create("experience_shadow_evaluation", String(args.shadow_evaluation_id ?? id3("shadow_evaluation")), {
+    const shadowEvaluation = this.store.create("experience_shadow_evaluation", String(args.shadow_evaluation_id ?? id4("shadow_evaluation")), {
       experiment_id: experiment.id,
       experiment_version: experiment.version,
       mining_candidate_id: candidate.id,
@@ -10178,7 +10249,7 @@ var CraftService = class _CraftService {
       next_action: status === "signoff_ready" ? "Run the named Signoff Policy with independent Grades; publication remains disabled." : "Revise the proposal and create a new shadow experiment; publication remains disabled."
     });
     const updated = this.store.save("experience_shadow_experiment", String(experiment.id), {
-      ...recordPayload4(experiment),
+      ...recordPayload5(experiment),
       status,
       shadow_evaluation_id: shadowEvaluation.id,
       promotion_id: promotion.promotion.id
@@ -10198,7 +10269,7 @@ var CraftService = class _CraftService {
     };
   }
   hostAdapterSave(args) {
-    const host = text3(args.host, "host");
+    const host = text4(args.host, "host");
     if (!(/* @__PURE__ */ new Set(["codex", "claude", "generic"])).has(host)) throw new Error(`Unsupported host adapter: ${host}`);
     const operations = uniqueTextArray(args.allowed_operations, "allowed_operations");
     if (operations.some((operation) => !HOST_OPERATIONS.has(operation))) throw new Error("allowed_operations contains an unsupported operation");
@@ -10207,16 +10278,16 @@ var CraftService = class _CraftService {
   hostAdapterDispatch(args) {
     const adapter = this.store.get(
       "host_adapter",
-      text3(args.host_adapter_id, "host_adapter_id"),
+      text4(args.host_adapter_id, "host_adapter_id"),
       args.host_adapter_version === void 0 ? void 0 : finiteInteger(args.host_adapter_version, "host_adapter_version", 1)
     );
-    const route = this.store.get("route", text3(args.route_id, "route_id"));
+    const route = this.store.get("route", text4(args.route_id, "route_id"));
     const action = this.routeNextAction(route);
     const operation = String(action.kind);
     if (!HOST_OPERATIONS.has(operation) || !adapter.allowed_operations.includes(operation)) {
       throw new Error(`Host adapter cannot dispatch route action: ${operation}`);
     }
-    const dispatch = this.store.create("host_dispatch", String(args.dispatch_id ?? id3("host_dispatch")), {
+    const dispatch = this.store.create("host_dispatch", String(args.dispatch_id ?? id4("host_dispatch")), {
       host_adapter_id: adapter.id,
       host_adapter_version: adapter.version,
       route_id: route.id,
@@ -10232,12 +10303,12 @@ var CraftService = class _CraftService {
     return { dispatch, action };
   }
   hostAdapterReport(args) {
-    const dispatch = this.store.get("host_dispatch", text3(args.dispatch_id, "dispatch_id"));
+    const dispatch = this.store.get("host_dispatch", text4(args.dispatch_id, "dispatch_id"));
     if (dispatch.status !== "pending") throw new Error("Host dispatch is already terminal");
-    const status = text3(args.status, "status");
+    const status = text4(args.status, "status");
     if (!(/* @__PURE__ */ new Set(["completed", "failed", "cancelled"])).has(status)) throw new Error(`Unsupported host dispatch status: ${status}`);
-    const summary2 = assertNoSecret(text3(args.summary, "summary"), "summary");
-    const updated = this.store.save("host_dispatch", String(dispatch.id), { ...recordPayload4(dispatch), status, summary: summary2 });
+    const summary2 = assertNoSecret(text4(args.summary, "summary"), "summary");
+    const updated = this.store.save("host_dispatch", String(dispatch.id), { ...recordPayload5(dispatch), status, summary: summary2 });
     const route = this.store.get("route", String(dispatch.route_id));
     if (route.trial_id) this.trialTraceAppend({
       trial_id: String(route.trial_id),
@@ -10248,23 +10319,23 @@ var CraftService = class _CraftService {
     return { dispatch: updated, next_action: this.routeNextAction(route) };
   }
   routeReceiptRecord(args) {
-    const route = this.store.get("route", text3(args.route_id, "route_id"));
+    const route = this.store.get("route", text4(args.route_id, "route_id"));
     if (route.workflow_id || ROUTE_TERMINAL.has(String(route.status))) throw new Error("Route receipts require an active safe route");
     const action = this.routeNextAction(route);
-    const stageId = text3(args.stage_id, "stage_id");
+    const stageId = text4(args.stage_id, "stage_id");
     if (action.kind !== "complete_stage" || action.stage_id !== stageId) throw new Error(`Route next required stage is ${action.stage_id ?? "none"}`);
-    const kind = text3(args.kind, "kind");
+    const kind = text4(args.kind, "kind");
     if (!ROUTE_RECEIPT_KINDS.has(kind)) throw new Error(`Unsupported route receipt kind: ${kind}`);
-    const status = text3(args.status, "status");
+    const status = text4(args.status, "status");
     if (!ROUTE_RECEIPT_STATUS.has(status)) throw new Error(`Unsupported route receipt status: ${status}`);
-    const command = assertNoSecret(text3(args.command, "command"), "command");
-    const summary2 = assertNoSecret(text3(args.summary, "summary"), "summary");
-    const receiptId = String(args.receipt_id ?? id3("receipt"));
+    const command = assertNoSecret(text4(args.command, "command"), "command");
+    const summary2 = assertNoSecret(text4(args.summary, "summary"), "summary");
+    const receiptId = String(args.receipt_id ?? id4("receipt"));
     const artifact = this.artifactRegister({
       artifact_id: `artifact_${receiptId}`,
       kind: "route_receipt",
       name: `${stageId}:${kind}`,
-      uri: args.uri === void 0 ? `craft://route-receipt/${receiptId}` : text3(args.uri, "uri"),
+      uri: args.uri === void 0 ? `craft://route-receipt/${receiptId}` : text4(args.uri, "uri"),
       producer_type: "host",
       producer_id: args.host_adapter_id ?? null,
       metadata: { route_id: route.id, stage_id: stageId, kind, status, command }
@@ -10290,8 +10361,8 @@ var CraftService = class _CraftService {
     return { receipt, artifact, evidence };
   }
   defaultRoute(args, selectedCapabilities) {
-    const goal = text3(args.goal, "goal");
-    const title = args.title === void 0 ? goal.slice(0, 120) : text3(args.title, "title");
+    const goal = text4(args.goal, "goal");
+    const title = args.title === void 0 ? goal.slice(0, 120) : text4(args.title, "title");
     const mode = String(args.mode ?? "default");
     if (!(/* @__PURE__ */ new Set(["default", "safe_incremental_development"])).has(mode)) {
       throw new Error(`Unsupported route mode: ${mode}`);
@@ -10304,13 +10375,13 @@ var CraftService = class _CraftService {
     const capabilities = selectedCapabilities ?? this.catalog.search(goal, 6);
     const developmentPlan = workflow === null ? { stages: SAFE_INCREMENTAL_STAGES.map((stage) => ({ ...stage })) } : null;
     const strategyCapabilities = developmentPlan === null ? [] : capabilities.slice(0, 3).map((capability) => String(capability.id));
-    const strategyId = strategyCapabilities.length ? `route_strategy_${(0, import_node_crypto8.createHash)("sha256").update(JSON.stringify({ mode: "safe_incremental_development", capability_ids: strategyCapabilities })).digest("hex").slice(0, 24)}` : null;
+    const strategyId = strategyCapabilities.length ? `route_strategy_${(0, import_node_crypto9.createHash)("sha256").update(JSON.stringify({ mode: "safe_incremental_development", capability_ids: strategyCapabilities })).digest("hex").slice(0, 24)}` : null;
     const strategy = strategyId === null ? null : this.store.find("route_strategy", strategyId) ?? this.store.create(
       "route_strategy",
       strategyId,
       { mode: "safe_incremental_development", capability_ids: strategyCapabilities }
     );
-    let route = this.store.create("route", id3("route"), {
+    let route = this.store.create("route", id4("route"), {
       task_id: task.id,
       goal,
       mode,
@@ -10343,7 +10414,7 @@ var CraftService = class _CraftService {
         source: "craft",
         data: { route_id: route.id, mode, strategy_id: strategy?.id ?? null }
       });
-      route = this.store.save("route", String(route.id), { ...recordPayload4(route), trial_id: trial.id });
+      route = this.store.save("route", String(route.id), { ...recordPayload5(route), trial_id: trial.id });
     }
     return {
       route_id: route.id,
@@ -10357,11 +10428,11 @@ var CraftService = class _CraftService {
     };
   }
   async defaultRouteWithSemanticSearch(args) {
-    const goal = text3(args.goal, "goal");
+    const goal = text4(args.goal, "goal");
     return this.defaultRoute(args, await this.catalog.searchHybrid(goal, 6));
   }
   defaultRouteResume(args) {
-    const taskId = text3(args.task_id, "task_id");
+    const taskId = text4(args.task_id, "task_id");
     const task = this.taskPack(taskId);
     const route = this.store.list("route", 1e3, (item) => item.task_id === taskId)[0];
     if (!route) throw new Error(`No route exists for task: ${taskId}`);
@@ -10369,9 +10440,9 @@ var CraftService = class _CraftService {
     return { ...task, route, trial, next_action: this.routeNextAction(route) };
   }
   defaultRouteFind(args) {
-    const rawQuery = text3(args.query, "query").toLowerCase();
+    const rawQuery = text4(args.query, "query").toLowerCase();
     const query = rawQuery.replace(/^(继续|接着|恢复)(上次|之前|刚才|上一个|上回|上轮)?的?[\s,，:：]*/u, "").trim();
-    const projectId = args.project_id === void 0 ? void 0 : text3(args.project_id, "project_id");
+    const projectId = args.project_id === void 0 ? void 0 : text4(args.project_id, "project_id");
     const tokens = query.match(/[\p{L}\p{N}_-]+/gu) ?? [];
     const candidates = query ? this.store.list("task", 1e3, (task) => {
       if (task.status !== "active" || projectId !== void 0 && task.project_id !== projectId) return false;
@@ -10398,11 +10469,11 @@ ${task.goal}`.toLowerCase();
     return { status: "matched", query, candidates: summaries, ...this.defaultRouteResume({ task_id: best[0].task.id }) };
   }
   routeWorkflowProposalCreate(args) {
-    const route = this.store.get("route", text3(args.route_id, "route_id"));
+    const route = this.store.get("route", text4(args.route_id, "route_id"));
     if (route.workflow_id || route.status !== "completed") {
       throw new Error("Workflow proposals require a completed safe route");
     }
-    const routeTrialId = text3(route.trial_id, "route trial_id");
+    const routeTrialId = text4(route.trial_id, "route trial_id");
     const routeOutcome = this.store.get("outcome", `outcome_${routeTrialId}`);
     if (routeOutcome.verdict !== "passed" || !route.strategy_id) {
       throw new Error("Workflow proposals require a passed route with a reusable strategy");
@@ -10424,7 +10495,7 @@ ${task.goal}`.toLowerCase();
     if (!stepsInput.length) throw new Error("Workflow proposals require at least one step");
     const workflow = this.workflowSave({
       workflow_id: args.workflow_id,
-      name: text3(args.name, "name"),
+      name: text4(args.name, "name"),
       description: args.description === void 0 ? "Evidence-backed draft derived from safe routes." : document(args.description, "description"),
       inputs: array(args.inputs ?? [], "inputs"),
       steps: normalizeSteps(stepsInput),
@@ -10445,7 +10516,7 @@ ${task.goal}`.toLowerCase();
     };
   }
   defaultRouteUpdate(args) {
-    const route = this.store.get("route", text3(args.route_id, "route_id"));
+    const route = this.store.get("route", text4(args.route_id, "route_id"));
     if (ROUTE_TERMINAL.has(String(route.status))) throw new Error("Route is already terminal");
     if (route.workflow_id) throw new Error("Verified Workflow routes must use craft_default_route_execute");
     const developmentPlan = object2(route.development_plan, "route development_plan");
@@ -10453,10 +10524,10 @@ ${task.goal}`.toLowerCase();
     const states = array(route.stage_state, "route stage_state");
     const index = states.findIndex((state) => state.status !== "completed");
     if (index < 0 || !stages[index]) throw new Error("Route has no pending stage");
-    const stageId = text3(args.stage_id, "stage_id");
-    const summary2 = text3(args.summary, "summary");
+    const stageId = text4(args.stage_id, "stage_id");
+    const summary2 = text4(args.summary, "summary");
     if (stageId !== stages[index].id) throw new Error(`Route next required stage is ${stages[index].id}`);
-    const receiptIds = array(args.receipt_ids ?? [], "receipt_ids").map((value) => text3(value, "receipt_id"));
+    const receiptIds = array(args.receipt_ids ?? [], "receipt_ids").map((value) => text4(value, "receipt_id"));
     if (new Set(receiptIds).size !== receiptIds.length) throw new Error("receipt_ids must be unique");
     const receipts = receiptIds.map((receiptId) => this.store.get("route_receipt", receiptId));
     if (receipts.some((receipt) => receipt.route_id !== route.id || receipt.stage_id !== stageId)) {
@@ -10467,17 +10538,17 @@ ${task.goal}`.toLowerCase();
       throw new Error(`Route stage requires required receipts: ${requiredKinds.join(", ")}`);
     }
     const artifactIds = [.../* @__PURE__ */ new Set([
-      ...array(args.artifact_ids ?? [], "artifact_ids").map((value) => text3(value, "artifact_id")),
+      ...array(args.artifact_ids ?? [], "artifact_ids").map((value) => text4(value, "artifact_id")),
       ...receipts.map((receipt) => String(receipt.artifact_id))
     ])];
     const evidenceIds = [.../* @__PURE__ */ new Set([
-      ...array(args.evidence_ids ?? [], "evidence_ids").map((value) => text3(value, "evidence_id")),
+      ...array(args.evidence_ids ?? [], "evidence_ids").map((value) => text4(value, "evidence_id")),
       ...receipts.map((receipt) => String(receipt.evidence_id))
     ])];
     for (const artifactId of artifactIds) this.store.get("artifact", artifactId);
     for (const evidenceId of evidenceIds) this.store.get("evidence", evidenceId);
     const isFinal = index === stages.length - 1;
-    const verdict = args.verdict === void 0 ? void 0 : text3(args.verdict, "verdict");
+    const verdict = args.verdict === void 0 ? void 0 : text4(args.verdict, "verdict");
     if (!isFinal && verdict !== void 0) throw new Error("verdict is only allowed for the final route stage");
     if (isFinal && verdict === void 0) throw new Error("verdict is required for the final route stage");
     if (verdict !== void 0 && !TRIAL_VERDICTS.has(verdict)) throw new Error(`Unsupported trial verdict: ${verdict}`);
@@ -10493,7 +10564,7 @@ ${task.goal}`.toLowerCase();
       artifacts: artifactIds,
       source: "craft_route"
     });
-    const trialId = text3(route.trial_id, "route trial_id");
+    const trialId = text4(route.trial_id, "route trial_id");
     this.trialTraceAppend({
       trial_id: trialId,
       event_type: "route_stage_completed",
@@ -10510,7 +10581,7 @@ ${task.goal}`.toLowerCase();
       source: "host_reported"
     });
     const updated = this.store.save("route", String(route.id), {
-      ...recordPayload4(route),
+      ...recordPayload5(route),
       stage_state: updatedStates,
       status: verdict === void 0 ? "awaiting_host" : verdict === "passed" ? "completed" : verdict
     });
@@ -10547,7 +10618,7 @@ ${task.goal}`.toLowerCase();
     };
   }
   defaultRouteExecute(args) {
-    const route = this.store.get("route", text3(args.route_id, "route_id"));
+    const route = this.store.get("route", text4(args.route_id, "route_id"));
     if (!route.workflow_id) throw new Error("Route has no verified Workflow to execute; complete the host plan first");
     const workflow = this.store.get("workflow", String(route.workflow_id), Number(route.workflow_version));
     if (workflow.lifecycle !== "verified") throw new Error("Route Workflow is no longer verified");
@@ -10558,7 +10629,7 @@ ${task.goal}`.toLowerCase();
       version: route.workflow_version
     });
     const completed = this.store.save("route", String(route.id), {
-      ...recordPayload4(route),
+      ...recordPayload5(route),
       status: "completed",
       workflow_run_id: result.workflow_run?.id ?? null,
       trial_id: result.trial.id
@@ -10610,10 +10681,10 @@ ${task.goal}`.toLowerCase();
   }
   taskOpen(args) {
     if (args.task_id) return this.taskPack(String(args.task_id));
-    const taskId = id3("task");
+    const taskId = id4("task");
     this.store.save("task", taskId, {
-      title: text3(args.title, "title"),
-      goal: text3(args.goal, "goal"),
+      title: text4(args.title, "title"),
+      goal: text4(args.goal, "goal"),
       project_id: args.project_id ?? null,
       status: "active"
     });
@@ -10625,18 +10696,18 @@ ${task.goal}`.toLowerCase();
     return { tasks: this.store.list("task", Number(args.limit ?? 10), (item) => (status === void 0 || item.status === status) && (args.project_id === void 0 || item.project_id === args.project_id)) };
   }
   taskCheckpoint(args) {
-    const taskId = text3(args.task_id, "task_id");
+    const taskId = text4(args.task_id, "task_id");
     const task = this.store.get("task", taskId);
     const status = String(args.status ?? task.status);
     if (!TASK_STATUS.has(status)) throw new Error(`Unsupported task status: ${status}`);
-    const checkpointId = id3("checkpoint");
+    const checkpointId = id4("checkpoint");
     const completed = array(args.completed ?? [], "completed");
     const pending = array(args.pending ?? [], "pending");
     const decisions = array(args.decisions ?? [], "decisions");
     const artifacts = array(args.artifacts ?? [], "artifacts");
     this.store.saveBatch([{ kind: "checkpoint", id: checkpointId, payload: {
       task_id: taskId,
-      summary: text3(args.summary, "summary"),
+      summary: text4(args.summary, "summary"),
       completed,
       pending,
       decisions,
@@ -10682,6 +10753,12 @@ ${task.goal}`.toLowerCase();
   trajectoryScriptAuthorize(args) {
     return this.trajectory.authorize(args);
   }
+  verifiedScriptIssue(args) {
+    return this.scriptRunner.issue(args);
+  }
+  verifiedScriptReceipt(args) {
+    return this.scriptRunner.receipt(args);
+  }
   taskPack(taskId) {
     return { task: this.store.get("task", taskId), checkpoints: this.store.list(
       "checkpoint",
@@ -10697,8 +10774,8 @@ ${task.goal}`.toLowerCase();
     const scope = String(args.scope ?? "task");
     if (!(/* @__PURE__ */ new Set(["task", "project", "user"])).has(scope)) throw new Error(`Unsupported feedback scope: ${scope}`);
     if (scope === "task" && !args.task_id) throw new Error("task_id is required for task feedback");
-    return this.store.save("feedback", id3("feedback"), {
-      corrected: text3(args.corrected, "corrected"),
+    return this.store.save("feedback", id4("feedback"), {
+      corrected: text4(args.corrected, "corrected"),
       original: args.original ?? null,
       kind: args.kind ?? "correction",
       scope,
@@ -10708,10 +10785,10 @@ ${task.goal}`.toLowerCase();
     });
   }
   artifactRegister(args) {
-    return this.store.save("artifact", String(args.artifact_id ?? id3("artifact")), {
-      kind: text3(args.kind, "kind"),
-      name: text3(args.name, "name"),
-      uri: text3(args.uri, "uri"),
+    return this.store.save("artifact", String(args.artifact_id ?? id4("artifact")), {
+      kind: text4(args.kind, "kind"),
+      name: text4(args.name, "name"),
+      uri: text4(args.uri, "uri"),
       media_type: args.media_type ?? null,
       digest: args.digest ?? null,
       size_bytes: args.size_bytes ?? null,
@@ -10724,9 +10801,9 @@ ${task.goal}`.toLowerCase();
     const confidence = String(args.confidence ?? "unverified");
     if (!CONFIDENCE.has(confidence)) throw new Error(`Unsupported confidence: ${confidence}`);
     if (args.artifact_id) this.store.get("artifact", String(args.artifact_id));
-    return this.store.save("evidence", String(args.evidence_id ?? id3("evidence")), {
-      source_type: text3(args.source_type, "source_type"),
-      claim: text3(args.claim, "claim"),
+    return this.store.save("evidence", String(args.evidence_id ?? id4("evidence")), {
+      source_type: text4(args.source_type, "source_type"),
+      claim: text4(args.claim, "claim"),
       confidence,
       artifact_id: args.artifact_id ?? null,
       locator: args.locator ?? null,
@@ -10735,8 +10812,8 @@ ${task.goal}`.toLowerCase();
     });
   }
   saveVersioned(kind, prefix, args, required) {
-    for (const key of required) text3(args[key], key);
-    const recordId = String(args[`${prefix}_id`] ?? id3(prefix));
+    for (const key of required) text4(args[key], key);
+    const recordId = String(args[`${prefix}_id`] ?? id4(prefix));
     const payload = { ...args };
     delete payload[`${prefix}_id`];
     return this.store.save(kind, recordId, payload);
@@ -10747,7 +10824,7 @@ ${task.goal}`.toLowerCase();
   }
   get(kind, idKey, args) {
     const version = args.version === void 0 ? void 0 : finiteInteger(args.version, "version", 1);
-    return this.store.get(kind, text3(args[idKey], idKey), version);
+    return this.store.get(kind, text4(args[idKey], idKey), version);
   }
   harnessConfigurationSave(args) {
     const dimensions = object2(args.dimensions, "dimensions");
@@ -10757,14 +10834,14 @@ ${task.goal}`.toLowerCase();
     }
     return this.saveVersioned("harness_configuration", "configuration", {
       ...args,
-      name: text3(args.name, "name"),
+      name: text4(args.name, "name"),
       dimensions
     }, ["name"]);
   }
   evaluationSuiteSave(args) {
     const cases = array(args.cases ?? [], "cases").map((value, index) => {
       const item = object2(value, `cases[${index}]`);
-      const caseId = text3(item.case_id, `cases[${index}].case_id`);
+      const caseId = text4(item.case_id, `cases[${index}].case_id`);
       const split = String(item.split ?? "development");
       if (!EVAL_SPLITS.has(split)) throw new Error(`Unsupported evaluation split: ${split}`);
       return { ...item, case_id: caseId, split };
@@ -10775,7 +10852,7 @@ ${task.goal}`.toLowerCase();
     return this.saveVersioned("evaluation_suite", "suite", { ...args, cases }, ["name"]);
   }
   graderSave(args) {
-    const graderType = text3(args.grader_type, "grader_type");
+    const graderType = text4(args.grader_type, "grader_type");
     if (!GRADER_TYPES.has(graderType)) throw new Error(`Unsupported grader type: ${graderType}`);
     return this.saveVersioned("grader", "grader", {
       ...args,
@@ -10784,18 +10861,18 @@ ${task.goal}`.toLowerCase();
     }, ["name", "grader_type"]);
   }
   gradeRecord(args) {
-    const trialId = text3(args.trial_id, "trial_id");
+    const trialId = text4(args.trial_id, "trial_id");
     this.store.get("trial", trialId);
     const grader = this.store.get(
       "grader",
-      text3(args.grader_id, "grader_id"),
+      text4(args.grader_id, "grader_id"),
       finiteInteger(args.grader_version, "grader_version", 1)
     );
-    const verdict = text3(args.verdict, "verdict");
+    const verdict = text4(args.verdict, "verdict");
     if (!GRADE_VERDICTS.has(verdict)) throw new Error(`Unsupported grade verdict: ${verdict}`);
-    const evidenceIds = array(args.evidence_ids ?? [], "evidence_ids").map((value) => text3(value, "evidence_id"));
+    const evidenceIds = array(args.evidence_ids ?? [], "evidence_ids").map((value) => text4(value, "evidence_id"));
     for (const evidenceId of evidenceIds) this.store.get("evidence", evidenceId);
-    const gradeId = `grade_${(0, import_node_crypto8.createHash)("sha256").update(JSON.stringify(
+    const gradeId = `grade_${(0, import_node_crypto9.createHash)("sha256").update(JSON.stringify(
       [trialId, grader.id, grader.version]
     )).digest("hex")}`;
     return this.store.create("grade", gradeId, {
@@ -10805,7 +10882,7 @@ ${task.goal}`.toLowerCase();
       grader_type: grader.grader_type,
       verdict,
       score: optionalScore(args.score, "score"),
-      summary: text3(args.summary, "summary"),
+      summary: text4(args.summary, "summary"),
       evidence_ids: evidenceIds,
       metadata: object2(args.metadata ?? {}, "metadata")
     });
@@ -10813,7 +10890,7 @@ ${task.goal}`.toLowerCase();
   signoffPolicySave(args) {
     const requirements = array(args.requirements ?? [], "requirements").map((value, index) => {
       const requirement = object2(value, `requirements[${index}]`);
-      const graderType = text3(requirement.grader_type, `requirements[${index}].grader_type`);
+      const graderType = text4(requirement.grader_type, `requirements[${index}].grader_type`);
       if (!GRADER_TYPES.has(graderType)) throw new Error(`Unsupported grader type: ${graderType}`);
       return { grader_type: graderType, minimum_score: optionalScore(
         requirement.minimum_score,
@@ -10833,11 +10910,11 @@ ${task.goal}`.toLowerCase();
   signoffEvaluate(args) {
     const policy = this.store.get(
       "signoff_policy",
-      text3(args.policy_id, "policy_id"),
+      text4(args.policy_id, "policy_id"),
       args.policy_version === void 0 ? void 0 : finiteInteger(args.policy_version, "policy_version", 1)
     );
-    const evaluation = this.store.get("evaluation_run", text3(args.evaluation_run_id, "evaluation_run_id"));
-    const gradeIds = array(args.grade_ids ?? [], "grade_ids").map((value) => text3(value, "grade_id"));
+    const evaluation = this.store.get("evaluation_run", text4(args.evaluation_run_id, "evaluation_run_id"));
+    const gradeIds = array(args.grade_ids ?? [], "grade_ids").map((value) => text4(value, "grade_id"));
     if (new Set(gradeIds).size !== gradeIds.length) throw new Error("grade_ids must be unique");
     const trialIds = evaluation.trial_ids;
     const grades = gradeIds.map((gradeId) => {
@@ -10864,7 +10941,7 @@ ${task.goal}`.toLowerCase();
       }
     }
     const decision = checks.every((check) => check.passed) ? "passed" : "failed";
-    return this.store.create("signoff", String(args.signoff_id ?? id3("signoff")), {
+    return this.store.create("signoff", String(args.signoff_id ?? id4("signoff")), {
       policy_id: policy.id,
       policy_version: policy.version,
       evaluation_run_id: evaluation.id,
@@ -10877,22 +10954,22 @@ ${task.goal}`.toLowerCase();
     });
   }
   trialStart(args) {
-    const taskId = text3(args.task_id, "task_id");
+    const taskId = text4(args.task_id, "task_id");
     this.store.get("task", taskId);
-    const subjectType = text3(args.subject_type, "subject_type");
-    const subjectId = text3(args.subject_id, "subject_id");
+    const subjectType = text4(args.subject_type, "subject_type");
+    const subjectId = text4(args.subject_id, "subject_id");
     const subjectVersion = finiteInteger(args.subject_version, "subject_version", 1);
     this.store.get(subjectType, subjectId, subjectVersion);
     let harness;
     if (args.harness_configuration_id !== void 0) {
-      harness = this.store.get("harness_configuration", text3(
+      harness = this.store.get("harness_configuration", text4(
         args.harness_configuration_id,
         "harness_configuration_id"
       ), args.harness_configuration_version === void 0 ? void 0 : finiteInteger(args.harness_configuration_version, "harness_configuration_version", 1));
     }
-    return this.store.create("trial", String(args.trial_id ?? id3("trial")), {
+    return this.store.create("trial", String(args.trial_id ?? id4("trial")), {
       task_id: taskId,
-      case_id: args.case_id === void 0 ? null : text3(args.case_id, "case_id"),
+      case_id: args.case_id === void 0 ? null : text4(args.case_id, "case_id"),
       subject_type: subjectType,
       subject_id: subjectId,
       subject_version: subjectVersion,
@@ -10904,13 +10981,13 @@ ${task.goal}`.toLowerCase();
     });
   }
   trialTraceAppend(args) {
-    const trialId = text3(args.trial_id, "trial_id");
+    const trialId = text4(args.trial_id, "trial_id");
     this.store.get("trial", trialId);
-    const artifactIds = array(args.artifact_ids ?? [], "artifact_ids").map((value) => text3(value, "artifact_id"));
-    const evidenceIds = array(args.evidence_ids ?? [], "evidence_ids").map((value) => text3(value, "evidence_id"));
+    const artifactIds = array(args.artifact_ids ?? [], "artifact_ids").map((value) => text4(value, "artifact_id"));
+    const evidenceIds = array(args.evidence_ids ?? [], "evidence_ids").map((value) => text4(value, "evidence_id"));
     for (const artifactId of artifactIds) this.store.get("artifact", artifactId);
     for (const evidenceId of evidenceIds) this.store.get("evidence", evidenceId);
-    return this.store.appendEvent(`trial:${trialId}`, text3(args.event_type, "event_type"), {
+    return this.store.appendEvent(`trial:${trialId}`, text4(args.event_type, "event_type"), {
       trial_id: trialId,
       source: args.source ?? "agent_reported",
       data: object2(args.data ?? {}, "data"),
@@ -10919,17 +10996,17 @@ ${task.goal}`.toLowerCase();
     });
   }
   outcomeRecord(args) {
-    const trialId = text3(args.trial_id, "trial_id");
+    const trialId = text4(args.trial_id, "trial_id");
     this.store.get("trial", trialId);
     const verdict = String(args.verdict);
     if (!TRIAL_VERDICTS.has(verdict)) throw new Error(`Unsupported trial verdict: ${verdict}`);
-    const evidenceIds = array(args.evidence_ids ?? [], "evidence_ids").map((value) => text3(value, "evidence_id"));
+    const evidenceIds = array(args.evidence_ids ?? [], "evidence_ids").map((value) => text4(value, "evidence_id"));
     for (const evidenceId of evidenceIds) this.store.get("evidence", evidenceId);
-    const failureType = args.failure_type === void 0 ? verdict === "passed" ? null : "unspecified" : text3(args.failure_type, "failure_type");
+    const failureType = args.failure_type === void 0 ? verdict === "passed" ? null : "unspecified" : text4(args.failure_type, "failure_type");
     return this.store.create("outcome", `outcome_${trialId}`, {
       trial_id: trialId,
       verdict,
-      summary: text3(args.summary, "summary"),
+      summary: text4(args.summary, "summary"),
       failure_type: failureType,
       scores: object2(args.scores ?? {}, "scores"),
       costs: object2(args.costs ?? {}, "costs"),
@@ -10938,7 +11015,7 @@ ${task.goal}`.toLowerCase();
     });
   }
   trialGet(args) {
-    const trialId = text3(args.trial_id, "trial_id");
+    const trialId = text4(args.trial_id, "trial_id");
     const trial = this.store.get("trial", trialId);
     const outcome = this.store.find("outcome", `outcome_${trialId}`);
     return { trial, trace: this.store.events(`trial:${trialId}`), outcome };
@@ -10946,16 +11023,16 @@ ${task.goal}`.toLowerCase();
   evaluationRunRecord(args) {
     const suite = this.store.get(
       "evaluation_suite",
-      text3(args.suite_id, "suite_id"),
+      text4(args.suite_id, "suite_id"),
       args.suite_version === void 0 ? void 0 : finiteInteger(args.suite_version, "suite_version", 1)
     );
     const split = String(args.split);
     if (!EVAL_SPLITS.has(split)) throw new Error(`Unsupported evaluation split: ${split}`);
-    const subjectType = text3(args.subject_type, "subject_type");
-    const subjectId = text3(args.subject_id, "subject_id");
+    const subjectType = text4(args.subject_type, "subject_type");
+    const subjectId = text4(args.subject_id, "subject_id");
     const subjectVersion = finiteInteger(args.subject_version, "subject_version", 1);
     this.store.get(subjectType, subjectId, subjectVersion);
-    const trialIds = array(args.trial_ids, "trial_ids").map((value) => text3(value, "trial_id"));
+    const trialIds = array(args.trial_ids, "trial_ids").map((value) => text4(value, "trial_id"));
     if (!trialIds.length || new Set(trialIds).size !== trialIds.length) {
       throw new Error("trial_ids must contain unique trials");
     }
@@ -10972,7 +11049,7 @@ ${task.goal}`.toLowerCase();
       return outcome;
     });
     const verdict = outcomes.every((outcome) => outcome.verdict === "passed") ? "passed" : "failed";
-    return this.store.create("evaluation_run", String(args.run_id ?? id3("evalrun")), {
+    return this.store.create("evaluation_run", String(args.run_id ?? id4("evalrun")), {
       suite_id: suite.id,
       suite_version: suite.version,
       split,
@@ -10985,14 +11062,14 @@ ${task.goal}`.toLowerCase();
     });
   }
   evaluationRunAggregate(args) {
-    const run = this.store.get("evaluation_run", text3(args.run_id, "run_id"));
+    const run = this.store.get("evaluation_run", text4(args.run_id, "run_id"));
     const trials = run.trial_ids.map((trialId) => this.store.get("trial", trialId));
     const outcomes = trials.map((trial) => this.store.get("outcome", `outcome_${trial.id}`));
     return aggregateEvaluation(run, trials, outcomes);
   }
   evaluationCompare(args) {
-    const baselineId = text3(args.baseline_run_id, "baseline_run_id");
-    const candidateId = text3(args.candidate_run_id, "candidate_run_id");
+    const baselineId = text4(args.baseline_run_id, "baseline_run_id");
+    const candidateId = text4(args.candidate_run_id, "candidate_run_id");
     if (baselineId === candidateId) throw new Error("Evaluation comparison requires two different runs");
     const baseline = this.evaluationRunAggregate({ run_id: baselineId });
     const candidate = this.evaluationRunAggregate({ run_id: candidateId });
@@ -11002,7 +11079,7 @@ ${task.goal}`.toLowerCase();
     if (JSON.stringify(baseline.case_ids) !== JSON.stringify(candidate.case_ids)) {
       throw new Error("Evaluation runs are not comparable: case_ids differ");
     }
-    return this.store.create("evaluation_comparison", String(args.comparison_id ?? id3("comparison")), {
+    return this.store.create("evaluation_comparison", String(args.comparison_id ?? id4("comparison")), {
       baseline_run_id: baselineId,
       candidate_run_id: candidateId,
       suite_id: baseline.suite_id,
@@ -11016,33 +11093,33 @@ ${task.goal}`.toLowerCase();
     });
   }
   evaluationRunnerRun(args) {
-    const taskId = text3(args.task_id, "task_id");
+    const taskId = text4(args.task_id, "task_id");
     this.store.get("task", taskId);
     const suite = this.store.get(
       "evaluation_suite",
-      text3(args.suite_id, "suite_id"),
+      text4(args.suite_id, "suite_id"),
       args.suite_version === void 0 ? void 0 : finiteInteger(args.suite_version, "suite_version", 1)
     );
-    const split = text3(args.split, "split");
+    const split = text4(args.split, "split");
     if (!EVAL_SPLITS.has(split)) throw new Error(`Unsupported evaluation split: ${split}`);
-    const projectRoot = text3(args.project_root, "project_root");
+    const projectRoot = text4(args.project_root, "project_root");
     const trialsPerCase = finiteInteger(args.trials_per_case, "trials_per_case", 1, 1, 20);
     const subjects = array(args.subjects, "subjects").map((raw, index) => {
       const subject = object2(raw, `subjects[${index}]`);
-      if (text3(subject.subject_type, `subjects[${index}].subject_type`) !== "workflow") {
+      if (text4(subject.subject_type, `subjects[${index}].subject_type`) !== "workflow") {
         throw new Error("Automatic Eval Runner currently executes only workflow subjects; Agent subjects require a Host runtime operation");
       }
-      const subjectId = text3(subject.subject_id, `subjects[${index}].subject_id`);
+      const subjectId = text4(subject.subject_id, `subjects[${index}].subject_id`);
       const subjectVersion = finiteInteger(subject.subject_version, `subjects[${index}].subject_version`, 1);
       this.store.get("workflow", subjectId, subjectVersion);
-      return { label: text3(subject.label, `subjects[${index}].label`), subject_id: subjectId, subject_version: subjectVersion };
+      return { label: text4(subject.label, `subjects[${index}].label`), subject_id: subjectId, subject_version: subjectVersion };
     });
     if (subjects.length < 2 || new Set(subjects.map((subject) => subject.label)).size !== subjects.length) {
       throw new Error("Eval Runner requires at least two uniquely labelled subjects");
     }
     const cases = suite.cases.filter((item) => item.split === split);
     if (!cases.length) throw new Error(`Evaluation Suite has no ${split} cases`);
-    const runner = this.store.create("evaluation_runner", String(args.runner_id ?? id3("eval_runner")), {
+    const runner = this.store.create("evaluation_runner", String(args.runner_id ?? id4("eval_runner")), {
       task_id: taskId,
       suite_id: suite.id,
       suite_version: suite.version,
@@ -11056,7 +11133,7 @@ ${task.goal}`.toLowerCase();
       const trialIds = [];
       for (const item of cases) for (let attempt = 1; attempt <= trialsPerCase; attempt += 1) {
         const trial = this.workflowTrialRun({
-          trial_id: id3("trial"),
+          trial_id: id4("trial"),
           task_id: taskId,
           workflow_id: subject.subject_id,
           version: subject.subject_version,
@@ -11084,7 +11161,7 @@ ${task.goal}`.toLowerCase();
       comparison_id: `${runner.id}_${index + 1}`
     }));
     const completed = this.store.save("evaluation_runner", String(runner.id), {
-      ...recordPayload4(runner),
+      ...recordPayload5(runner),
       status: "completed",
       evaluation_run_ids: evaluationRuns.map((run) => run.id),
       comparison_ids: comparisons.map((comparison) => comparison.id)
@@ -11103,10 +11180,10 @@ ${task.goal}`.toLowerCase();
     };
   }
   evaluationProgramGrade(args) {
-    const evaluation = this.store.get("evaluation_run", text3(args.evaluation_run_id, "evaluation_run_id"));
+    const evaluation = this.store.get("evaluation_run", text4(args.evaluation_run_id, "evaluation_run_id"));
     const grader = this.store.get(
       "grader",
-      text3(args.grader_id, "grader_id"),
+      text4(args.grader_id, "grader_id"),
       args.grader_version === void 0 ? void 0 : finiteInteger(args.grader_version, "grader_version", 1)
     );
     if (grader.grader_type !== "program") throw new Error("Automatic evaluation grading requires a program grader");
@@ -11120,7 +11197,7 @@ ${task.goal}`.toLowerCase();
     const duration = aggregate.costs.duration_ms;
     const passed = Number(aggregate.pass_rate) >= minimumPassRate && (duration?.mean === void 0 || Number(duration.mean) <= maximumDuration);
     const grades = evaluation.trial_ids.map((trialId) => {
-      const gradeId = `grade_${(0, import_node_crypto8.createHash)("sha256").update(JSON.stringify([trialId, grader.id, grader.version])).digest("hex")}`;
+      const gradeId = `grade_${(0, import_node_crypto9.createHash)("sha256").update(JSON.stringify([trialId, grader.id, grader.version])).digest("hex")}`;
       const existing = this.store.find("grade", gradeId);
       if (existing) return existing;
       const outcome = this.store.get("outcome", `outcome_${trialId}`);
@@ -11176,14 +11253,14 @@ ${task.goal}`.toLowerCase();
     };
   }
   evaluationPromotionAssess(args) {
-    const comparison = this.store.get("evaluation_comparison", text3(args.comparison_id, "comparison_id"));
+    const comparison = this.store.get("evaluation_comparison", text4(args.comparison_id, "comparison_id"));
     const baselineRun = this.store.get("evaluation_run", String(comparison.baseline_run_id));
     const candidateRun = this.store.get("evaluation_run", String(comparison.candidate_run_id));
     const minTrials = finiteInteger(args.min_trials, "min_trials", 2, 1, 1e4);
     const minimumDelta = args.min_pass_rate_delta === void 0 ? 0 : Number(args.min_pass_rate_delta);
     const maximumCostRatio = args.max_cost_regression_ratio === void 0 ? Number.POSITIVE_INFINITY : Number(args.max_cost_regression_ratio);
     const maximumDurationRatio = args.max_duration_regression_ratio === void 0 ? Number.POSITIVE_INFINITY : Number(args.max_duration_regression_ratio);
-    const costMetric = args.cost_metric === void 0 ? "tokens" : text3(args.cost_metric, "cost_metric");
+    const costMetric = args.cost_metric === void 0 ? "tokens" : text4(args.cost_metric, "cost_metric");
     if (!Number.isFinite(minimumDelta) || minimumDelta < -1 || minimumDelta > 1 || !Number.isFinite(maximumCostRatio) && maximumCostRatio !== Number.POSITIVE_INFINITY || maximumCostRatio < 0 || !Number.isFinite(maximumDurationRatio) && maximumDurationRatio !== Number.POSITIVE_INFINITY || maximumDurationRatio < 0) {
       throw new Error("Promotion thresholds are invalid");
     }
@@ -11205,7 +11282,7 @@ ${task.goal}`.toLowerCase();
       { check: "paired_cases", passed: Number(paired.matched_trials) >= minTrials }
     ];
     const eligible = checks.every((check) => check.passed);
-    const promotion = this.store.create("evaluation_promotion", String(args.promotion_id ?? id3("promotion")), {
+    const promotion = this.store.create("evaluation_promotion", String(args.promotion_id ?? id4("promotion")), {
       comparison_id: comparison.id,
       baseline_run_id: baselineRun.id,
       candidate_run_id: candidateRun.id,
@@ -11229,7 +11306,7 @@ ${task.goal}`.toLowerCase();
     } };
   }
   evaluationReliabilityAssess(args) {
-    const comparison = this.store.get("evaluation_comparison", text3(args.comparison_id, "comparison_id"));
+    const comparison = this.store.get("evaluation_comparison", text4(args.comparison_id, "comparison_id"));
     const baselineRun = this.store.get("evaluation_run", String(comparison.baseline_run_id));
     const candidateRun = this.store.get("evaluation_run", String(comparison.candidate_run_id));
     const minTrials = finiteInteger(args.min_trials, "min_trials", 20, 2, 1e4);
@@ -11248,87 +11325,87 @@ ${task.goal}`.toLowerCase();
     const decisive = Number(paired.candidate_wins) + Number(paired.baseline_wins);
     const pValue = decisive === 0 ? 1 : 2 ** -decisive * Array.from({ length: Number(paired.baseline_wins) + 1 }, (_, index) => binomial(decisive, Number(paired.candidate_wins) + index)).reduce((sum, value) => sum + value, 0);
     const status = Number(paired.matched_trials) < minTrials || !environmentsMatch || !budgetsMatch ? "inconclusive" : pValue <= 0.05 && Number(paired.candidate_wins) > Number(paired.baseline_wins) ? "eligible" : "rejected";
-    const assessment = this.store.create("evaluation_reliability", String(args.assessment_id ?? id3("reliability")), { comparison_id: comparison.id, status, min_trials: minTrials, max_budget_ratio: maxBudgetRatio, paired, p_value: pValue, environments_match: environmentsMatch, budgets_match: budgetsMatch });
+    const assessment = this.store.create("evaluation_reliability", String(args.assessment_id ?? id4("reliability")), { comparison_id: comparison.id, status, min_trials: minTrials, max_budget_ratio: maxBudgetRatio, paired, p_value: pValue, environments_match: environmentsMatch, budgets_match: budgetsMatch });
     return { status, assessment };
   }
   judgeAdapterSave(args) {
-    const graderType = text3(args.grader_type, "grader_type");
+    const graderType = text4(args.grader_type, "grader_type");
     if (!(/* @__PURE__ */ new Set(["model", "human"])).has(graderType)) throw new Error("Judge adapter must be model or human");
     return this.saveVersioned("judge_adapter", "judge", { ...args, grader_type: graderType, status: "uncalibrated" }, ["name", "grader_type"]);
   }
   judgeCalibrationRecord(args) {
-    const judge = this.store.get("judge_adapter", text3(args.judge_id, "judge_id"));
+    const judge = this.store.get("judge_adapter", text4(args.judge_id, "judge_id"));
     const total = finiteInteger(args.total, "total", 1, 1);
     const agreed = finiteInteger(args.agreed, "agreed", 0, 0, total);
     const minimum = Number(args.minimum_agreement ?? 0.8);
     if (!Number.isFinite(minimum) || minimum < 0 || minimum > 1) throw new Error("minimum_agreement must be between 0 and 1");
     const agreement = agreed / total;
-    const calibration = this.store.create("judge_calibration", String(args.calibration_id ?? id3("calibration")), { judge_id: judge.id, judge_version: judge.version, total, agreed, agreement, minimum_agreement: minimum, status: agreement >= minimum ? "calibrated" : "advisory" });
-    this.store.save("judge_adapter", String(judge.id), { ...recordPayload4(judge), status: calibration.status, calibration_id: calibration.id });
+    const calibration = this.store.create("judge_calibration", String(args.calibration_id ?? id4("calibration")), { judge_id: judge.id, judge_version: judge.version, total, agreed, agreement, minimum_agreement: minimum, status: agreement >= minimum ? "calibrated" : "advisory" });
+    this.store.save("judge_adapter", String(judge.id), { ...recordPayload5(judge), status: calibration.status, calibration_id: calibration.id });
     return { calibration };
   }
   judgePromotionEligible(args) {
-    const judge = this.store.get("judge_adapter", text3(args.judge_id, "judge_id"));
+    const judge = this.store.get("judge_adapter", text4(args.judge_id, "judge_id"));
     return { eligible: judge.status === "calibrated", judge };
   }
   adaptationCandidateCreate(args) {
-    const task = this.store.get("task", text3(args.task_id, "task_id"));
+    const task = this.store.get("task", text4(args.task_id, "task_id"));
     const trialIds = uniqueTextArray(args.trial_ids, "trial_ids", 2);
     const evidenceIds = uniqueTextArray(args.evidence_ids, "evidence_ids");
     for (const trialId of trialIds) this.store.get("trial", trialId);
     for (const evidenceId of evidenceIds) this.store.get("evidence", evidenceId);
     const axes = object2(args.design_axes, "design_axes");
     if (!Object.keys(axes).length || Object.keys(axes).length > 2 || Object.keys(axes).some((key) => !HARNESS_DIMENSIONS.has(key))) throw new Error("Adaptation Candidate changes at most two supported design axes");
-    const candidate = this.store.create("adaptation_candidate", String(args.candidate_id ?? id3("adaptation")), { task_id: task.id, trial_ids: trialIds, evidence_ids: evidenceIds, hypothesis: assertNoSecret(text3(args.hypothesis, "hypothesis"), "hypothesis"), applicability: assertNoSecret(text3(args.applicability, "applicability"), "applicability"), design_axes: axes, lifecycle: "draft", publication_allowed: false });
+    const candidate = this.store.create("adaptation_candidate", String(args.candidate_id ?? id4("adaptation")), { task_id: task.id, trial_ids: trialIds, evidence_ids: evidenceIds, hypothesis: assertNoSecret(text4(args.hypothesis, "hypothesis"), "hypothesis"), applicability: assertNoSecret(text4(args.applicability, "applicability"), "applicability"), design_axes: axes, lifecycle: "draft", publication_allowed: false });
     return { candidate };
   }
   adaptationCandidateAuthorizeCanary(args) {
-    const candidate = this.store.get("adaptation_candidate", text3(args.candidate_id, "candidate_id"));
-    const assessment = this.store.get("evaluation_reliability", text3(args.assessment_id, "assessment_id"));
+    const candidate = this.store.get("adaptation_candidate", text4(args.candidate_id, "candidate_id"));
+    const assessment = this.store.get("evaluation_reliability", text4(args.assessment_id, "assessment_id"));
     if (assessment.status !== "eligible") throw new Error("Adaptation Candidate requires an eligible reliability assessment");
     const comparison = this.store.get("evaluation_comparison", String(assessment.comparison_id));
-    const signoff = this.store.get("signoff", text3(args.signoff_id, "signoff_id"));
+    const signoff = this.store.get("signoff", text4(args.signoff_id, "signoff_id"));
     if (signoff.decision !== "passed" || signoff.evaluation_run_id !== comparison.candidate_run_id) {
       throw new Error("Adaptation Candidate requires a passed Signoff for the compared candidate run");
     }
-    const authorized = this.store.save("adaptation_candidate", String(candidate.id), { ...recordPayload4(candidate), lifecycle: "canary_ready", reliability_assessment_id: assessment.id, signoff_id: signoff.id, publication_allowed: false });
+    const authorized = this.store.save("adaptation_candidate", String(candidate.id), { ...recordPayload5(candidate), lifecycle: "canary_ready", reliability_assessment_id: assessment.id, signoff_id: signoff.id, publication_allowed: false });
     return { candidate: authorized };
   }
   feedbackIntakeCreate(args) {
-    const task = this.store.get("task", text3(args.task_id, "task_id"));
-    const summary2 = assertNoSecret(text3(args.summary, "summary"), "summary");
-    const intake = this.store.create("feedback_intake", String(args.intake_id ?? id3("feedback_intake")), { task_id: task.id, source_uri: assertNoSecret(text3(args.source_uri, "source_uri"), "source_uri"), summary: summary2, metric: args.metric === void 0 ? null : text3(args.metric, "metric"), status: "pending_review" });
+    const task = this.store.get("task", text4(args.task_id, "task_id"));
+    const summary2 = assertNoSecret(text4(args.summary, "summary"), "summary");
+    const intake = this.store.create("feedback_intake", String(args.intake_id ?? id4("feedback_intake")), { task_id: task.id, source_uri: assertNoSecret(text4(args.source_uri, "source_uri"), "source_uri"), summary: summary2, metric: args.metric === void 0 ? null : text4(args.metric, "metric"), status: "pending_review" });
     return { intake };
   }
   feedbackCaseApprove(args) {
-    const intake = this.store.get("feedback_intake", text3(args.intake_id, "intake_id"));
-    const split = text3(args.split, "split");
+    const intake = this.store.get("feedback_intake", text4(args.intake_id, "intake_id"));
+    const split = text4(args.split, "split");
     if (split !== "development") throw new Error("Feedback intake may only create development cases; held-out requires an independent curator");
-    const reviewer = assertNoSecret(text3(args.reviewer, "reviewer"), "reviewer");
-    const caseRecord = this.store.create("feedback_case", String(args.case_id ?? id3("feedback_case")), { intake_id: intake.id, task_id: intake.task_id, split, reviewer, source_uri: intake.source_uri, summary: intake.summary, immutable: true });
-    this.store.save("feedback_intake", String(intake.id), { ...recordPayload4(intake), status: "approved", feedback_case_id: caseRecord.id, reviewer });
+    const reviewer = assertNoSecret(text4(args.reviewer, "reviewer"), "reviewer");
+    const caseRecord = this.store.create("feedback_case", String(args.case_id ?? id4("feedback_case")), { intake_id: intake.id, task_id: intake.task_id, split, reviewer, source_uri: intake.source_uri, summary: intake.summary, immutable: true });
+    this.store.save("feedback_intake", String(intake.id), { ...recordPayload5(intake), status: "approved", feedback_case_id: caseRecord.id, reviewer });
     return { case: caseRecord };
   }
   canaryStart(args) {
-    const candidate = this.store.get("adaptation_candidate", text3(args.candidate_id, "candidate_id"));
+    const candidate = this.store.get("adaptation_candidate", text4(args.candidate_id, "candidate_id"));
     if (candidate.lifecycle !== "canary_ready") throw new Error("Adaptation Candidate must pass shadow reliability and Signoff before Canary");
-    const canary = this.store.create("canary", String(args.canary_id ?? id3("canary")), { candidate_id: candidate.id, candidate_version: candidate.version, baseline_id: text3(args.baseline_id, "baseline_id"), environment_fingerprint: fingerprint(object2(args.environment, "environment")), status: "running" });
+    const canary = this.store.create("canary", String(args.canary_id ?? id4("canary")), { candidate_id: candidate.id, candidate_version: candidate.version, baseline_id: text4(args.baseline_id, "baseline_id"), environment_fingerprint: fingerprint(object2(args.environment, "environment")), status: "running" });
     return { canary };
   }
   canaryObserve(args) {
-    const canary = this.store.get("canary", text3(args.canary_id, "canary_id"));
+    const canary = this.store.get("canary", text4(args.canary_id, "canary_id"));
     const baseline = Number(args.baseline);
     const candidate = Number(args.candidate);
     const threshold = Number(args.threshold);
     if (![baseline, candidate, threshold].every((value) => Number.isFinite(value) && value >= 0)) throw new Error("Canary metrics must be non-negative finite numbers");
     const regression = candidate - baseline > threshold;
     const status = regression ? "rolled_back" : "running";
-    const saved = this.store.save("canary", String(canary.id), { ...recordPayload4(canary), status, metric: text3(args.metric, "metric"), baseline, candidate, threshold, rollback_to: regression ? canary.baseline_id : null });
+    const saved = this.store.save("canary", String(canary.id), { ...recordPayload5(canary), status, metric: text4(args.metric, "metric"), baseline, candidate, threshold, rollback_to: regression ? canary.baseline_id : null });
     return { status, canary: saved };
   }
   experienceMine(args) {
-    const subjectType = text3(args.subject_type, "subject_type");
-    const subjectId = text3(args.subject_id, "subject_id");
+    const subjectType = text4(args.subject_type, "subject_type");
+    const subjectId = text4(args.subject_id, "subject_id");
     const subjectVersion = finiteInteger(args.subject_version, "subject_version", 1);
     const groups = /* @__PURE__ */ new Map();
     for (const trial of this.store.list("trial", 1e4, (item) => item.subject_type === subjectType && item.subject_id === subjectId && Number(item.subject_version) === subjectVersion)) {
@@ -11346,7 +11423,7 @@ ${task.goal}`.toLowerCase();
     const candidates = [...groups.values()].filter((group) => group.trial_ids.length >= 2).map((group) => {
       const trialIds = [...group.trial_ids].sort();
       const evidenceIds = [...new Set(group.evidence_ids)].sort();
-      const candidateId = `experience_mining_${(0, import_node_crypto8.createHash)("sha256").update(`${subjectType}:${subjectId}:${subjectVersion}:${group.pattern_kind}:${group.failure_type}:${trialIds.join(",")}`).digest("hex")}`;
+      const candidateId = `experience_mining_${(0, import_node_crypto9.createHash)("sha256").update(`${subjectType}:${subjectId}:${subjectVersion}:${group.pattern_kind}:${group.failure_type}:${trialIds.join(",")}`).digest("hex")}`;
       const payload = {
         subject_type: subjectType,
         subject_id: subjectId,
@@ -11364,15 +11441,15 @@ ${task.goal}`.toLowerCase();
     return { candidates };
   }
   operationalSignalRecord(args) {
-    const taskId = args.task_id === void 0 ? null : text3(args.task_id, "task_id");
+    const taskId = args.task_id === void 0 ? null : text4(args.task_id, "task_id");
     if (taskId) this.store.get("task", taskId);
     const value = Number(args.value);
     if (!Number.isFinite(value) || value < 0) throw new Error("value must be a non-negative finite number");
-    const subjectType = text3(args.subject_type, "subject_type");
-    const subjectId = text3(args.subject_id, "subject_id");
-    const metric = text3(args.metric, "metric");
+    const subjectType = text4(args.subject_type, "subject_type");
+    const subjectId = text4(args.subject_id, "subject_id");
+    const metric = text4(args.metric, "metric");
     const sequence = this.store.list("operational_signal", 1e4, (signal) => signal.subject_type === subjectType && signal.subject_id === subjectId && signal.metric === metric).length + 1;
-    return this.store.create("operational_signal", String(args.signal_id ?? id3("signal")), {
+    return this.store.create("operational_signal", String(args.signal_id ?? id4("signal")), {
       task_id: taskId,
       subject_type: subjectType,
       subject_id: subjectId,
@@ -11382,11 +11459,11 @@ ${task.goal}`.toLowerCase();
     });
   }
   operationalDriftEvaluate(args) {
-    const subjectType = text3(args.subject_type, "subject_type");
-    const subjectId = text3(args.subject_id, "subject_id");
-    const metric = text3(args.metric, "metric");
+    const subjectType = text4(args.subject_type, "subject_type");
+    const subjectId = text4(args.subject_id, "subject_id");
+    const metric = text4(args.metric, "metric");
     const windowSize = finiteInteger(args.window_size, "window_size", 10, 1, 1e3);
-    const direction = text3(args.direction, "direction");
+    const direction = text4(args.direction, "direction");
     if (!(/* @__PURE__ */ new Set(["lower", "higher"])).has(direction)) throw new Error("direction must be lower or higher");
     const threshold = Number(args.threshold);
     if (!Number.isFinite(threshold) || threshold < 0) throw new Error("threshold must be non-negative");
@@ -11398,7 +11475,7 @@ ${task.goal}`.toLowerCase();
     const relative_change = (current - baseline) / Math.max(Math.abs(baseline), 1);
     const alert = direction === "lower" ? relative_change > threshold : relative_change < -threshold;
     const result = { alert, baseline, current, relative_change, samples: values.length, direction, threshold };
-    if (alert) this.store.create("operational_alert", String(args.alert_id ?? id3("alert")), {
+    if (alert) this.store.create("operational_alert", String(args.alert_id ?? id4("alert")), {
       subject_type: subjectType,
       subject_id: subjectId,
       metric,
@@ -11414,27 +11491,27 @@ ${task.goal}`.toLowerCase();
   }
   verificationGate(subjectType, subject, args) {
     if (args.signoff_id !== void 0) {
-      const signoff = this.store.get("signoff", text3(args.signoff_id, "signoff_id"));
+      const signoff = this.store.get("signoff", text4(args.signoff_id, "signoff_id"));
       const run2 = this.store.get("evaluation_run", String(signoff.evaluation_run_id));
       if (signoff.decision !== "passed" || signoff.subject_type !== subjectType || signoff.subject_id !== subject.id || Number(signoff.subject_version) !== Number(subject.version) || run2.verdict !== "passed" || run2.split !== "held_out") {
         throw new Error(`Verification requires a passed signoff for this exact ${subjectType} version`);
       }
       return { evaluation_run_id: run2.id, signoff_id: signoff.id, promotion_id: null };
     }
-    const run = this.store.get("evaluation_run", text3(args.evaluation_run_id, "evaluation_run_id"));
+    const run = this.store.get("evaluation_run", text4(args.evaluation_run_id, "evaluation_run_id"));
     if (run.verdict !== "passed" || run.split !== "held_out" || run.subject_type !== subjectType || run.subject_id !== subject.id || Number(run.subject_version) !== Number(subject.version)) {
       throw new Error(`Verification requires a passed held-out evaluation for this exact ${subjectType} version`);
     }
-    const promotion = this.store.get("evaluation_promotion", text3(args.promotion_id, "promotion_id"));
+    const promotion = this.store.get("evaluation_promotion", text4(args.promotion_id, "promotion_id"));
     if (!promotion.eligible || promotion.candidate_run_id !== run.id) {
       throw new Error(`Verification requires an eligible promotion for this exact ${subjectType} evaluation`);
     }
     return { evaluation_run_id: run.id, signoff_id: null, promotion_id: promotion.id };
   }
   transitionVersionedSubject(kind, idKey, subjectType, args) {
-    const subject = this.store.get(kind, text3(args[idKey], idKey));
+    const subject = this.store.get(kind, text4(args[idKey], idKey));
     const current = String(subject.lifecycle ?? "draft");
-    const target = text3(args.target, "target");
+    const target = text4(args.target, "target");
     if (!VERSIONED_LIFECYCLE.has(target)) throw new Error(`Unsupported ${subjectType} lifecycle: ${target}`);
     const allowed = {
       draft: ["candidate", "deprecated"],
@@ -11445,10 +11522,10 @@ ${task.goal}`.toLowerCase();
     if (!allowed[current]?.includes(target)) throw new Error(`Invalid ${subjectType} transition: ${current} -> ${target}`);
     const verification = target === "verified" ? this.verificationGate(subjectType, subject, args) : { evaluation_run_id: null, signoff_id: null, promotion_id: null };
     return this.store.save(kind, String(subject.id), {
-      ...recordPayload4(subject),
+      ...recordPayload5(subject),
       lifecycle: target,
       previous_version: subject.version,
-      transition_reason: text3(args.reason, "reason"),
+      transition_reason: text4(args.reason, "reason"),
       ...verification
     });
   }
@@ -11456,20 +11533,20 @@ ${task.goal}`.toLowerCase();
     return this.rollbackVersionedSubject("workflow", "workflow_id", "workflow", args);
   }
   rollbackVersionedSubject(kind, idKey, subjectType, args) {
-    const subjectId = text3(args[idKey], idKey);
+    const subjectId = text4(args[idKey], idKey);
     const current = this.store.get(kind, subjectId);
     const target = this.store.get(kind, subjectId, finiteInteger(args.target_version, "target_version", 1));
     if (target.lifecycle !== "verified") throw new Error(`Rollback target must be a verified ${subjectType} version`);
     return this.store.save(kind, subjectId, {
-      ...recordPayload4(target),
+      ...recordPayload5(target),
       lifecycle: "verified",
       rollback_from_version: current.version,
       rollback_to_version: target.version,
-      rollback_reason: text3(args.reason, "reason")
+      rollback_reason: text4(args.reason, "reason")
     });
   }
   experiencePatternCreate(args) {
-    const taskId = text3(args.task_id, "task_id");
+    const taskId = text4(args.task_id, "task_id");
     this.store.get("task", taskId);
     const trialIds = uniqueTextArray(args.trial_ids, "trial_ids", 2);
     const evidenceIds = uniqueTextArray(args.evidence_ids, "evidence_ids");
@@ -11485,9 +11562,9 @@ ${task.goal}`.toLowerCase();
       trial_ids: trialIds,
       evidence_ids: evidenceIds,
       outcomes,
-      success_strategy: text3(args.success_strategy, "success_strategy"),
-      failure_modes: array(args.failure_modes, "failure_modes").map((item) => text3(item, "failure_mode")),
-      applicability: text3(args.applicability, "applicability")
+      success_strategy: text4(args.success_strategy, "success_strategy"),
+      failure_modes: array(args.failure_modes, "failure_modes").map((item) => text4(item, "failure_mode")),
+      applicability: text4(args.applicability, "applicability")
     }, ["summary"]);
   }
   skillProposalCreate(args) {
@@ -11507,19 +11584,19 @@ ${task.goal}`.toLowerCase();
     return this.rollbackVersionedSubject("skill_proposal", "proposal_id", "skill_proposal", args);
   }
   async skillProposalPublish(args) {
-    const proposal = this.store.get("skill_proposal", text3(args.proposal_id, "proposal_id"));
+    const proposal = this.store.get("skill_proposal", text4(args.proposal_id, "proposal_id"));
     if (proposal.lifecycle !== "verified") throw new Error("Skill proposal must be verified before publication");
-    const source = this.catalog.getSource(text3(args.source_id, "source_id"));
+    const source = this.catalog.getSource(text4(args.source_id, "source_id"));
     const publication = await publishSkill({
       sourceRoot: String(source.real_path),
-      targetPath: text3(args.target_path, "target_path"),
-      expectedDigest: text3(args.expected_digest, "expected_digest"),
+      targetPath: text4(args.target_path, "target_path"),
+      expectedDigest: text4(args.expected_digest, "expected_digest"),
       content: String(proposal.skill_markdown),
       backupsDir: this.store.paths.backupsDir,
       proposalId: String(proposal.id),
       allowExternalWrite: args.allow_external_write
     });
-    const record = this.store.create("skill_publication", String(args.publication_id ?? id3("publication")), {
+    const record = this.store.create("skill_publication", String(args.publication_id ?? id4("publication")), {
       proposal_id: proposal.id,
       proposal_version: proposal.version,
       source_id: source.id,
@@ -11530,16 +11607,16 @@ ${task.goal}`.toLowerCase();
     return record;
   }
   async skillPublicationRollback(args) {
-    const publication = this.store.get("skill_publication", text3(args.publication_id, "publication_id"));
+    const publication = this.store.get("skill_publication", text4(args.publication_id, "publication_id"));
     if (publication.status !== "published") throw new Error("Only a published Skill publication can be rolled back");
     await rollbackSkillPublication({
       targetPath: String(publication.target_path),
-      expectedDigest: text3(args.expected_digest, "expected_digest"),
+      expectedDigest: text4(args.expected_digest, "expected_digest"),
       publishedDigest: String(publication.published_digest),
       backupPath: String(publication.backup_path),
       allowExternalWrite: args.allow_external_write
     });
-    const restored = this.store.save("skill_publication", String(publication.id), { ...recordPayload4(publication), status: "rolled_back" });
+    const restored = this.store.save("skill_publication", String(publication.id), { ...recordPayload5(publication), status: "rolled_back" });
     await this.catalog.scanSource(String(publication.source_id));
     return restored;
   }
@@ -11566,14 +11643,14 @@ ${task.goal}`.toLowerCase();
   }
   workflowRun(args) {
     const plan = this.workflowPlan(args);
-    const root = text3(args.project_root, "project_root");
+    const root = text4(args.project_root, "project_root");
     const results = executeSteps(
       plan.steps,
       root,
       new Set(plan.approved_side_effects)
     );
     const passed = results.length === plan.steps.length && results.every((item) => item.passed);
-    return this.store.save("workflow_run", id3("run"), {
+    return this.store.save("workflow_run", id4("run"), {
       workflow_id: plan.workflow_id,
       workflow_version: plan.workflow_version,
       project_root: root,
@@ -11680,9 +11757,9 @@ ${task.goal}`.toLowerCase();
     if (!Number.isInteger(max) || max < 1 || max > 32) throw new Error("max_concurrency must be between 1 and 32");
     const leaseTtl = finiteInteger(args.lease_ttl_seconds, "lease_ttl_seconds", 300, 1, 3600);
     const budget = budgetLimits(object2(args.budget ?? {}, "budget"));
-    const planId = args.plan_id === void 0 ? id3("plan") : text3(args.plan_id, "plan_id");
+    const planId = args.plan_id === void 0 ? id4("plan") : text4(args.plan_id, "plan_id");
     return this.store.create("orchestration_plan", planId, {
-      goal: text3(args.goal, "goal"),
+      goal: text4(args.goal, "goal"),
       task_id: args.task_id ?? null,
       trial_id: args.trial_id ?? null,
       trial_started_at: args.trial_started_at ?? null,
@@ -11697,17 +11774,17 @@ ${task.goal}`.toLowerCase();
     });
   }
   orchestrationTrialStart(args) {
-    const taskId = text3(args.task_id, "task_id");
+    const taskId = text4(args.task_id, "task_id");
     this.store.get("task", taskId);
-    const trialId = args.trial_id === void 0 ? id3("trial") : text3(args.trial_id, "trial_id");
+    const trialId = args.trial_id === void 0 ? id4("trial") : text4(args.trial_id, "trial_id");
     if (this.store.find("trial", trialId)) throw new Error(`Trial already exists: ${trialId}`);
-    const caseId = args.case_id === void 0 ? void 0 : text3(args.case_id, "case_id");
+    const caseId = args.case_id === void 0 ? void 0 : text4(args.case_id, "case_id");
     const environment = object2(args.environment ?? {}, "environment");
     const budget = object2(args.budget ?? {}, "budget");
     if (args.harness_configuration_id !== void 0) {
       this.store.get(
         "harness_configuration",
-        text3(args.harness_configuration_id, "harness_configuration_id"),
+        text4(args.harness_configuration_id, "harness_configuration_id"),
         args.harness_configuration_version === void 0 ? void 0 : finiteInteger(args.harness_configuration_version, "harness_configuration_version", 1)
       );
     }
@@ -11740,7 +11817,7 @@ ${task.goal}`.toLowerCase();
   orchestrationDispatch(args) {
     const plan = this.get("orchestration_plan", "plan_id", args);
     if (plan.status !== "running") throw new Error(`Plan is not running: ${plan.status}`);
-    const owner = text3(args.claimed_by, "claimed_by");
+    const owner = text4(args.claimed_by, "claimed_by");
     const maximum = finiteInteger(plan.max_concurrency, "plan max_concurrency", 4, 1, 32);
     const requested = finiteInteger(args.capacity, "capacity", maximum, 1);
     const capacity = Math.min(requested, maximum);
@@ -11769,8 +11846,8 @@ ${task.goal}`.toLowerCase();
   orchestrationRenew(args) {
     const plan = this.get("orchestration_plan", "plan_id", args);
     if (plan.status !== "running") throw new Error(`Plan is not running: ${plan.status}`);
-    const leaseId = text3(args.lease_id, "lease_id");
-    const owner = text3(args.claimed_by, "claimed_by");
+    const leaseId = text4(args.lease_id, "lease_id");
+    const owner = text4(args.claimed_by, "claimed_by");
     const ttl = finiteInteger(plan.lease_ttl_seconds, "plan lease_ttl_seconds", 300, 1, 3600);
     let found = false;
     const nodes = plan.nodes.map((node) => {
@@ -11784,8 +11861,8 @@ ${task.goal}`.toLowerCase();
   }
   orchestrationSubmit(args) {
     const plan = this.get("orchestration_plan", "plan_id", args);
-    const leaseId = text3(args.lease_id, "lease_id");
-    const idempotencyKey = args.idempotency_key === void 0 ? null : text3(args.idempotency_key, "idempotency_key");
+    const leaseId = text4(args.lease_id, "lease_id");
+    const idempotencyKey = args.idempotency_key === void 0 ? null : text4(args.idempotency_key, "idempotency_key");
     const receipts = array(plan.submission_receipts ?? [], "submission_receipts");
     const existing = idempotencyKey === null ? void 0 : receipts.find((receipt) => receipt.idempotency_key === idempotencyKey);
     if (existing) {
@@ -11797,18 +11874,18 @@ ${task.goal}`.toLowerCase();
     const leased = plan.nodes.find((node) => node.lease_id === leaseId);
     if (!leased) throw new Error(`Unknown lease: ${leaseId}`);
     if (args.claimed_by !== void 0) {
-      if (leased.claimed_by !== text3(args.claimed_by, "claimed_by")) throw new Error("Lease owner does not match");
+      if (leased.claimed_by !== text4(args.claimed_by, "claimed_by")) throw new Error("Lease owner does not match");
     }
     const provenance = String(args.provenance ?? "agent_reported");
-    const verdict = text3(args.verdict, "verdict");
+    const verdict = text4(args.verdict, "verdict");
     const costs = object2(args.costs ?? {}, "costs");
     const accumulatedCosts = addCosts(object2(plan.accumulated_costs ?? {}, "accumulated costs"), costs);
     const exceedsBudget = budgetExceeded(accumulatedCosts, budgetLimits(object2(plan.budget ?? {}, "plan budget")));
-    const artifactIds = array(args.artifact_ids ?? [], "artifact_ids").map((value) => text3(value, "artifact_id"));
-    const evidenceIds = array(args.evidence_ids ?? [], "evidence_ids").map((value) => text3(value, "evidence_id"));
+    const artifactIds = array(args.artifact_ids ?? [], "artifact_ids").map((value) => text4(value, "artifact_id"));
+    const evidenceIds = array(args.evidence_ids ?? [], "evidence_ids").map((value) => text4(value, "evidence_id"));
     for (const artifactId of artifactIds) this.store.get("artifact", artifactId);
     for (const evidenceId of evidenceIds) this.store.get("evidence", evidenceId);
-    const summary2 = args.summary === void 0 ? null : text3(args.summary, "summary");
+    const summary2 = args.summary === void 0 ? null : text4(args.summary, "summary");
     const submitted = submitNode(plan.nodes, leaseId, verdict, provenance);
     const nodes = exceedsBudget ? submitted.map((node) => node.status === "pending" ? { ...node, status: "blocked", last_provenance: "budget_exceeded" } : node) : submitted;
     const status = planStatus(nodes);
@@ -11858,7 +11935,7 @@ ${task.goal}`.toLowerCase();
       return { plan, ...this.trialGet({ trial_id: trialId }) };
     }
     const result = orchestrationOutcome(plan.nodes, Boolean(plan.budget_exceeded));
-    const stableKey = (0, import_node_crypto8.createHash)("sha256").update(`${plan.id}:${trialId}`).digest("hex");
+    const stableKey = (0, import_node_crypto9.createHash)("sha256").update(`${plan.id}:${trialId}`).digest("hex");
     const artifactId = `artifact_${stableKey}`;
     const artifact = this.store.find("artifact", artifactId) ?? this.artifactRegister({
       artifact_id: artifactId,
@@ -12204,6 +12281,9 @@ var TOOLS = [
   tool("craft_trajectory_script_authorize", "Mark a compiled script verified only after an exact passed Signoff.", ["proposal_id", "signoff_id"]),
   tool("craft_trajectory_script_get", "Read one trajectory script proposal.", ["proposal_id"], true, ["version"]),
   tool("craft_trajectory_script_list", "List trajectory script proposals.", [], true, ["limit", "query"]),
+  tool("craft_verified_script_issue", "Bind one verified script proposal to its prepared Workspace transaction and issue exact Host operations.", ["proposal_id", "workspace_id", "transaction_id"], false, ["run_id"]),
+  tool("craft_verified_script_receipt", "Record one exact Host receipt set for an issued verified script run.", ["run_id", "host_adapter_id", "receipts"]),
+  tool("craft_verified_script_run_get", "Read a verified script run and its Host receipts.", ["run_id"], true),
   tool("craft_feedback_record", "Record an explicit scoped correction or preference.", ["corrected"], false, ["kind", "scope", "task_id", "original", "applies_to", "source"]),
   tool("craft_artifact_register", "Register a portable artifact reference.", ["kind", "name", "uri"], false, ["artifact_id", "media_type", "digest", "size_bytes", "producer_type", "producer_id", "metadata"]),
   tool("craft_artifact_get", "Read an artifact reference.", ["artifact_id"], true),
@@ -12625,6 +12705,9 @@ var McpServer = class {
       craft_trajectory_script_authorize: (a) => service.trajectoryScriptAuthorize(a),
       craft_trajectory_script_get: (a) => service.get("trajectory_script_proposal", "proposal_id", a),
       craft_trajectory_script_list: (a) => service.list("trajectory_script_proposal", "proposals", a),
+      craft_verified_script_issue: (a) => service.verifiedScriptIssue(a),
+      craft_verified_script_receipt: (a) => service.verifiedScriptReceipt(a),
+      craft_verified_script_run_get: (a) => service.get("verified_script_run", "run_id", a),
       craft_artifact_register: (a) => service.artifactRegister(a),
       craft_artifact_get: (a) => service.get("artifact", "artifact_id", a),
       craft_artifact_list: (a) => service.list("artifact", "artifacts", a),

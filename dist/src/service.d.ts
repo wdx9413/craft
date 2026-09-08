@@ -5,7 +5,8 @@ import { LocalIsolatedAdapter } from "./isolated.ts";
 import { WorkspaceState } from "./workspace.ts";
 import { TransactionCoordinator } from "./transaction.ts";
 import { TrajectoryCompiler } from "./trajectory.ts";
-export declare const VERSION = "0.9.11";
+import { VerifiedScriptRunner } from "./script-run.ts";
+export declare const VERSION = "0.9.12";
 export declare class CraftService {
     readonly store: CraftStore;
     readonly catalog: Catalog;
@@ -13,6 +14,7 @@ export declare class CraftService {
     readonly workspace: WorkspaceState;
     readonly transaction: TransactionCoordinator;
     readonly trajectory: TrajectoryCompiler;
+    readonly scriptRunner: VerifiedScriptRunner;
     constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter?: LocalIsolatedAdapter);
     static open(store: CraftStore): Promise<CraftService>;
     info(): JsonObject;
@@ -90,6 +92,8 @@ export declare class CraftService {
     workspaceTransactionRollback(args: JsonObject): JsonObject;
     trajectoryScriptCompile(args: JsonObject): JsonObject;
     trajectoryScriptAuthorize(args: JsonObject): JsonObject;
+    verifiedScriptIssue(args: JsonObject): JsonObject;
+    verifiedScriptReceipt(args: JsonObject): JsonObject;
     private taskPack;
     feedbackRecord(args: JsonObject): JsonObject;
     artifactRegister(args: JsonObject): JsonObject;

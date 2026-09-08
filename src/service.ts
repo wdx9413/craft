@@ -13,8 +13,9 @@ import { decideExecution } from "./execution-policy.ts";
 import { WorkspaceState } from "./workspace.ts";
 import { TransactionCoordinator } from "./transaction.ts";
 import { TrajectoryCompiler } from "./trajectory.ts";
+import { VerifiedScriptRunner } from "./script-run.ts";
 
-export const VERSION = "0.9.11";
+export const VERSION = "0.9.12";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -179,10 +180,12 @@ export class CraftService {
   readonly workspace: WorkspaceState;
   readonly transaction: TransactionCoordinator;
   readonly trajectory: TrajectoryCompiler;
+  readonly scriptRunner: VerifiedScriptRunner;
   constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter = new LocalIsolatedAdapter()) {
     this.store = store; this.catalog = new Catalog(store, semanticProvider); this.isolatedAdapter = isolatedAdapter;
     this.workspace = new WorkspaceState(store, store.paths);
     this.transaction = new TransactionCoordinator(store, this.workspace); this.trajectory = new TrajectoryCompiler(store);
+    this.scriptRunner = new VerifiedScriptRunner(store);
   }
 
   static async open(store: CraftStore): Promise<CraftService> {
@@ -203,7 +206,7 @@ export class CraftService {
       "experience_shadow_experiment", "adaptive_harness", "agent_ir", "operational_signal", "operational_alert",
       "capability_asset", "activation_profile", "tool_selection_receipt", "capability_call", "expert_profile", "context_capsule",
       "evaluation_reliability", "judge_adapter", "judge_calibration", "adaptation_candidate", "feedback_intake", "feedback_case", "canary",
-      "workspace", "workspace_checkpoint", "workspace_change", "workspace_transaction", "trajectory_script_proposal"];
+      "workspace", "workspace_checkpoint", "workspace_change", "workspace_transaction", "trajectory_script_proposal", "verified_script_run"];
     return { version: VERSION, data_root: this.store.paths.root,
       counts: Object.fromEntries(kinds.map((kind) => [kind, this.store.count(kind)])) };
   }
@@ -1190,6 +1193,8 @@ export class CraftService {
   workspaceTransactionRollback(args: JsonObject): JsonObject { return this.transaction.rollback(args); }
   trajectoryScriptCompile(args: JsonObject): JsonObject { return this.trajectory.compile(args); }
   trajectoryScriptAuthorize(args: JsonObject): JsonObject { return this.trajectory.authorize(args); }
+  verifiedScriptIssue(args: JsonObject): JsonObject { return this.scriptRunner.issue(args); }
+  verifiedScriptReceipt(args: JsonObject): JsonObject { return this.scriptRunner.receipt(args); }
   private taskPack(taskId: string): JsonObject {
     return { task: this.store.get("task", taskId), checkpoints: this.store.list("checkpoint", 100,
       (item) => item.task_id === taskId), feedback: this.store.list("feedback", 100,
