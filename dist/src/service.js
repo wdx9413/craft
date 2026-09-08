@@ -10,7 +10,9 @@ import { OpenAiCompatibleEmbeddingProvider } from "./semantic.js";
 import { LocalIsolatedAdapter } from "./isolated.js";
 import { decideExecution } from "./execution-policy.js";
 import { WorkspaceState } from "./workspace.js";
-export const VERSION = "0.9.10";
+import { TransactionCoordinator } from "./transaction.js";
+import { TrajectoryCompiler } from "./trajectory.js";
+export const VERSION = "0.9.11";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -179,11 +181,15 @@ export class CraftService {
     catalog;
     isolatedAdapter;
     workspace;
+    transaction;
+    trajectory;
     constructor(store, semanticProvider, isolatedAdapter = new LocalIsolatedAdapter()) {
         this.store = store;
         this.catalog = new Catalog(store, semanticProvider);
         this.isolatedAdapter = isolatedAdapter;
         this.workspace = new WorkspaceState(store, store.paths);
+        this.transaction = new TransactionCoordinator(store, this.workspace);
+        this.trajectory = new TrajectoryCompiler(store);
     }
     static async open(store) {
         const config = await loadConfig(store.paths);
@@ -202,7 +208,7 @@ export class CraftService {
             "experience_shadow_experiment", "adaptive_harness", "agent_ir", "operational_signal", "operational_alert",
             "capability_asset", "activation_profile", "tool_selection_receipt", "capability_call", "expert_profile", "context_capsule",
             "evaluation_reliability", "judge_adapter", "judge_calibration", "adaptation_candidate", "feedback_intake", "feedback_case", "canary",
-            "workspace", "workspace_checkpoint", "workspace_change"];
+            "workspace", "workspace_checkpoint", "workspace_change", "workspace_transaction", "trajectory_script_proposal"];
         return { version: VERSION, data_root: this.store.paths.root,
             counts: Object.fromEntries(kinds.map((kind) => [kind, this.store.count(kind)])) };
     }
@@ -1216,6 +1222,11 @@ export class CraftService {
     workspaceDiff(args) { return this.workspace.diff(args); }
     workspaceHumanChange(args) { return this.workspace.humanChange(args); }
     workspaceRestore(args) { return this.workspace.restore(args); }
+    workspaceTransactionBegin(args) { return this.transaction.begin(args); }
+    workspaceTransactionCommit(args) { return this.transaction.commit(args); }
+    workspaceTransactionRollback(args) { return this.transaction.rollback(args); }
+    trajectoryScriptCompile(args) { return this.trajectory.compile(args); }
+    trajectoryScriptAuthorize(args) { return this.trajectory.authorize(args); }
     taskPack(taskId) {
         return { task: this.store.get("task", taskId), checkpoints: this.store.list("checkpoint", 100, (item) => item.task_id === taskId), feedback: this.store.list("feedback", 100, (item) => item.task_id === taskId) };
     }

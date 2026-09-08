@@ -39,3 +39,11 @@
 ## Workspace Checkpoint
 
 对 Workspace 已声明路径的不可变普通文件快照，每个文件都有内容摘要。比较两个 Checkpoint 只产生路径级 added/deleted/modified 结果；Restore 必须得到显式批准，且不能覆盖整个 Workspace 根。
+
+## Workspace Transaction
+
+只覆盖 Workspace 已声明本地写入的协调记录：先保存 baseline Checkpoint，再提交一个同 Workspace 的精确 Checkpoint，或经明确批准恢复 baseline。它不是外部 API、数据库或网络写入的通用回滚承诺。
+
+## Trajectory Script Proposal
+
+从同一 Task 的 passed Trial 编译出的受限脚本候选。当前只含版本锁定的 Workflow 和 Checkpoint IR，并由固定 TypeScript 模板渲染；不接受任意源码、不执行动态代码。只有 exact passed Signoff 才能从 `draft` 变为 `verified`。

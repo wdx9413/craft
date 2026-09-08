@@ -8,6 +8,7 @@
 - [产品路线](product/roadmap.zh-CN.md)：当前、下一阶段与长期方向，以及各阶段验收标准。
 - [能力访问、诊断 Expert 与 Sub-agent 规划](product/capability-expert-subagent-plan.zh-CN.md)：v0.9.9 已实现边界、验收与后续项。
 - [Agent-Native Workspace](technical/modules/agent-native-workspace.md)：v0.9.10 的共享文件状态、Checkpoint、人工改动与受批准恢复边界。
+- [Transactional Runtime 与 Trajectory Compiler](technical/modules/transactional-runtime.md)：v0.9.11 的本地写事务、脚本候选和 Signoff 边界。
 
 ## 技术方案
 
