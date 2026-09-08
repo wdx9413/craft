@@ -2,12 +2,12 @@ import { createHash, randomUUID } from "node:crypto";
 import { Catalog } from "./catalog.ts";
 import { CraftStore, type JsonObject } from "./store.ts";
 import { approvedEffects, executeSteps, normalizeSteps, resolveInputs, substitute } from "./workflow.ts";
-import { addCosts, dispatchNodes, normalizeNodes, orchestrationOutcome, planStatus, submitNode,
+import { addCosts, dispatchNodes, normalizeNodes, orchestrationOutcome, planStatus, recoverExpiredLeases, submitNode,
   type PlanNode } from "./orchestration.ts";
 import { aggregateEvaluation, compareEvaluationAggregates, type EvaluationAggregate } from "./evaluation.ts";
 import { publishSkill, rollbackSkillPublication } from "./skill-publisher.ts";
 
-export const VERSION = "0.7.1";
+export const VERSION = "0.8.0";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -63,6 +63,17 @@ function uniqueTextArray(value: unknown, name: string, minimum = 1): string[] {
   }
   return values;
 }
+function budgetLimits(value: JsonObject): JsonObject {
+  for (const [key, limit] of Object.entries(value)) {
+    if (typeof limit !== "number" || !Number.isFinite(limit) || limit < 0) {
+      throw new Error(`budget limit ${key} must be a non-negative finite number`);
+    }
+  }
+  return value;
+}
+function budgetExceeded(costs: JsonObject, budget: JsonObject): boolean {
+  return Object.entries(budget).some(([key, limit]) => Number(costs[key] ?? 0) > Number(limit));
+}
 
 export class CraftService {
   readonly store: CraftStore;
@@ -101,6 +112,75 @@ export class CraftService {
   }
   capabilityGet(args: JsonObject): JsonObject {
     return this.catalog.get(text(args.asset_id, "asset_id"));
+  }
+
+  defaultRoute(args: JsonObject): JsonObject {
+    const goal = text(args.goal, "goal");
+    const title = text(args.title, "title");
+    const mode = String(args.mode ?? "default");
+    if (!new Set(["default", "safe_incremental_development"]).has(mode)) {
+      throw new Error(`Unsupported route mode: ${mode}`);
+    }
+    const task = this.taskOpen({ title, goal, project_id: args.project_id ?? null }).task;
+    const tokens = goal.toLowerCase().match(/[\p{L}\p{N}_-]+/gu) ?? [];
+    const workflows = this.store.list("workflow", 1_000, (workflow) => workflow.lifecycle === "verified")
+      .map((workflow) => ({ workflow, score: tokens.filter((token) =>
+        JSON.stringify(workflow).toLowerCase().includes(token)).length }))
+      .filter((candidate) => candidate.score > 0)
+      .sort((left, right) => right.score - left.score || String(left.workflow.id).localeCompare(String(right.workflow.id)));
+    const workflow = workflows[0]?.workflow ?? null;
+    const capabilities = this.catalog.search(goal, 6);
+    const developmentPlan = mode === "safe_incremental_development" ? {
+      stages: [
+        { id: "baseline", constraints: "先检查 Git 增量并为原有逻辑补充或运行聚焦单元测试；不得先改业务逻辑。",
+          evidence: ["git diff --check", "baseline focused test receipt"] },
+        { id: "minimal_change", constraints: "只做满足目标的最小增量改动，保留既有接口、数据与未涉及路径。",
+          evidence: ["changed files", "decision note"] },
+        { id: "verification", constraints: "运行受影响测试、覆盖率门禁和必要静态检查；增量覆盖率阈值由已选 Workflow 的确定性命令计算。",
+          evidence: ["test receipt", "coverage report"] },
+        { id: "review", constraints: "复查 Git diff、失败类型和未验证风险；仅有真实证据的结论才能沉淀为经验。",
+          evidence: ["git diff --check", "review evidence"] },
+      ],
+    } : null;
+    const route = this.store.create("route", id("route"), { task_id: (task as JsonObject).id, goal, mode,
+      workflow_id: workflow?.id ?? null, workflow_version: workflow?.version ?? null,
+      capability_ids: capabilities.map((capability) => capability.id), status: workflow ? "ready" : "awaiting_host",
+      development_plan: developmentPlan });
+    return { route_id: route.id, task, workflow, capabilities, development_plan: developmentPlan,
+      executable: workflow !== null };
+  }
+
+  defaultRouteExecute(args: JsonObject): JsonObject {
+    const route = this.store.get("route", text(args.route_id, "route_id"));
+    if (!route.workflow_id) throw new Error("Route has no verified Workflow to execute; complete the host plan first");
+    const workflow = this.store.get("workflow", String(route.workflow_id), Number(route.workflow_version));
+    if (workflow.lifecycle !== "verified") throw new Error("Route Workflow is no longer verified");
+    const result = this.workflowTrialRun({ ...args, task_id: route.task_id, workflow_id: route.workflow_id,
+      version: route.workflow_version });
+    const completed = this.store.save("route", String(route.id), { ...recordPayload(route), status: "completed",
+      workflow_run_id: (result.workflow_run as JsonObject | null)?.id ?? null,
+      trial_id: (result.trial as JsonObject).id });
+    return { route: completed, ...result, experience_candidates: this.experienceCandidateList({}).experience_candidates };
+  }
+
+  experienceCandidateList(_args: JsonObject): JsonObject {
+    const groups = new Map<string, { subject_type: string; subject_id: string; subject_version: number;
+      trial_ids: string[]; evidence_ids: string[] }>();
+    for (const trial of this.store.list("trial", 1_000)) {
+      const outcome = this.store.find("outcome", `outcome_${trial.id}`);
+      const evidence = outcome?.evidence_ids;
+      if (!outcome || !Array.isArray(evidence) || !evidence.length) continue;
+      const key = `${trial.subject_type}:${trial.subject_id}:${trial.subject_version}`;
+      const group = groups.get(key) ?? { subject_type: String(trial.subject_type), subject_id: String(trial.subject_id),
+        subject_version: Number(trial.subject_version), trial_ids: [], evidence_ids: [] };
+      group.trial_ids.push(String(trial.id));
+      group.evidence_ids.push(...evidence.map((evidenceId) => String(evidenceId)));
+      groups.set(key, group);
+    }
+    const experienceCandidates = [...groups.values()].filter((group) => group.trial_ids.length >= 2)
+      .map((group) => ({ ...group, trial_ids: [...group.trial_ids].sort(), evidence_ids: [...new Set(group.evidence_ids)].sort(),
+        status: "ready_for_pattern", next_action: "Review applicability and create an Experience Pattern." }));
+    return { experience_candidates: experienceCandidates };
   }
 
   taskOpen(args: JsonObject): JsonObject {
@@ -604,10 +684,13 @@ export class CraftService {
     }));
     const max = Number(args.max_concurrency ?? 4);
     if (!Number.isInteger(max) || max < 1 || max > 32) throw new Error("max_concurrency must be between 1 and 32");
+    const leaseTtl = finiteInteger(args.lease_ttl_seconds, "lease_ttl_seconds", 300, 1, 3_600);
+    const budget = budgetLimits(object(args.budget ?? {}, "budget"));
     const planId = args.plan_id === undefined ? id("plan") : text(args.plan_id, "plan_id");
     return this.store.create("orchestration_plan", planId, { goal: text(args.goal, "goal"),
       task_id: args.task_id ?? null, trial_id: args.trial_id ?? null,
       trial_started_at: args.trial_started_at ?? null, accumulated_costs: {},
+      submission_receipts: [], budget, lease_ttl_seconds: leaseTtl,
       max_concurrency: max, status: "running", nodes, policy: object(args.policy ?? {}, "policy") });
   }
   orchestrationTrialStart(args: JsonObject): JsonObject {
@@ -641,7 +724,9 @@ export class CraftService {
     const maximum = finiteInteger(plan.max_concurrency, "plan max_concurrency", 4, 1, 32);
     const requested = finiteInteger(args.capacity, "capacity", maximum, 1);
     const capacity = Math.min(requested, maximum);
-    const result = dispatchNodes(plan.nodes as PlanNode[], capacity, owner);
+    const recovered = recoverExpiredLeases(plan.nodes as PlanNode[]);
+    const result = dispatchNodes(recovered.nodes, capacity, owner,
+      finiteInteger(plan.lease_ttl_seconds, "plan lease_ttl_seconds", 300, 1, 3_600));
     const saved = this.store.updateIfVersion("orchestration_plan", String(plan.id), Number(plan.version), { ...plan, nodes: result.nodes,
       status: planStatus(result.nodes) });
     if (plan.trial_id && result.leases.length) {
@@ -650,9 +735,34 @@ export class CraftService {
     }
     return { plan: saved, leases: result.leases };
   }
+  orchestrationRenew(args: JsonObject): JsonObject {
+    const plan = this.get("orchestration_plan", "plan_id", args);
+    if (plan.status !== "running") throw new Error(`Plan is not running: ${plan.status}`);
+    const leaseId = text(args.lease_id, "lease_id");
+    const owner = text(args.claimed_by, "claimed_by");
+    const ttl = finiteInteger(plan.lease_ttl_seconds, "plan lease_ttl_seconds", 300, 1, 3_600);
+    let found = false;
+    const nodes = (plan.nodes as PlanNode[]).map((node) => {
+      if (node.lease_id !== leaseId) return node;
+      found = true;
+      if (node.status !== "leased" || node.claimed_by !== owner) throw new Error("Lease owner does not match");
+      return { ...node, lease_expires_at: new Date(Date.now() + ttl * 1_000).toISOString() } as PlanNode;
+    });
+    if (!found) throw new Error(`Unknown lease: ${leaseId}`);
+    return this.store.updateIfVersion("orchestration_plan", String(plan.id), Number(plan.version), { ...plan, nodes });
+  }
   orchestrationSubmit(args: JsonObject): JsonObject {
     const plan = this.get("orchestration_plan", "plan_id", args);
     const leaseId = text(args.lease_id, "lease_id");
+    const idempotencyKey = args.idempotency_key === undefined ? null : text(args.idempotency_key, "idempotency_key");
+    const receipts = array(plan.submission_receipts ?? [], "submission_receipts") as JsonObject[];
+    const existing = idempotencyKey === null ? undefined : receipts.find((receipt) => receipt.idempotency_key === idempotencyKey);
+    if (existing) {
+      if (existing.lease_id !== leaseId || existing.verdict !== args.verdict) {
+        throw new Error("idempotency_key belongs to a different submission");
+      }
+      return plan;
+    }
     const leased = (plan.nodes as PlanNode[]).find((node) => node.lease_id === leaseId);
     if (!leased) throw new Error(`Unknown lease: ${leaseId}`);
     if (args.claimed_by !== undefined) {
@@ -662,15 +772,20 @@ export class CraftService {
     const verdict = text(args.verdict, "verdict");
     const costs = object(args.costs ?? {}, "costs");
     const accumulatedCosts = addCosts(object(plan.accumulated_costs ?? {}, "accumulated costs"), costs);
+    const exceedsBudget = budgetExceeded(accumulatedCosts, budgetLimits(object(plan.budget ?? {}, "plan budget")));
     const artifactIds = array(args.artifact_ids ?? [], "artifact_ids").map((value) => text(value, "artifact_id"));
     const evidenceIds = array(args.evidence_ids ?? [], "evidence_ids").map((value) => text(value, "evidence_id"));
     for (const artifactId of artifactIds) this.store.get("artifact", artifactId);
     for (const evidenceId of evidenceIds) this.store.get("evidence", evidenceId);
     const summary = args.summary === undefined ? null : text(args.summary, "summary");
-    const nodes = submitNode(plan.nodes as PlanNode[], leaseId, verdict, provenance);
+    const submitted = submitNode(plan.nodes as PlanNode[], leaseId, verdict, provenance);
+    const nodes = exceedsBudget ? submitted.map((node) => node.status === "pending"
+      ? { ...node, status: "blocked", last_provenance: "budget_exceeded" } as PlanNode : node) : submitted;
     const status = planStatus(nodes);
     const saved = this.store.updateIfVersion("orchestration_plan", String(plan.id), Number(plan.version),
-      { ...plan, nodes, status, accumulated_costs: accumulatedCosts });
+      { ...plan, nodes, status, accumulated_costs: accumulatedCosts, budget_exceeded: exceedsBudget,
+        submission_receipts: idempotencyKey === null ? receipts : [...receipts, { idempotency_key: idempotencyKey,
+          lease_id: leaseId, verdict }] });
     if (plan.trial_id) {
       this.trialTraceAppend({ trial_id: plan.trial_id, event_type: "orchestration.node_submitted",
         source: provenance, data: { node_id: leased.id,
@@ -689,7 +804,7 @@ export class CraftService {
     if (this.store.find("outcome", `outcome_${trialId}`)) {
       return { plan, ...this.trialGet({ trial_id: trialId }) };
     }
-    const result = orchestrationOutcome(plan.nodes as PlanNode[]);
+    const result = orchestrationOutcome(plan.nodes as PlanNode[], Boolean(plan.budget_exceeded));
     const stableKey = createHash("sha256").update(`${plan.id}:${trialId}`).digest("hex");
     const artifactId = `artifact_${stableKey}`;
     const artifact = this.store.find("artifact", artifactId) ?? this.artifactRegister({ artifact_id: artifactId,

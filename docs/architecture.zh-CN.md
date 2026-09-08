@@ -52,6 +52,10 @@ v0.6.0 起，Plan 创建时会锁定每个候选 Agent Profile 的精确版本�
 
 Craft 不绕过 Host 的 Sandbox、审批或并发限制，也不直接假定 Codex/Claude 的内部任务 API。插件负责把 Lease 翻译成宿主原生执行，再把真实结果交回 Craft。
 
+v0.8.0 增加默认编排 Interface。`craft_default_route` 负责创建 Task、检索少量 Capability、优先选择匹配的 `verified` Workflow；只有已验证 Workflow 才能经 `craft_default_route_execute` 执行并自动形成 Trial/Trace/Outcome。没有匹配 Workflow 时，Craft 返回安全增量研发 Kit：先锁定 Git 基线和原有行为，再最小改动、运行测试/覆盖率、复查 Diff。它是给 Host 的可验证计划，不是假装已经替 Host 修改了代码。
+
+Plan 的 Lease 带 TTL，可由同一 owner 续租；下次 Dispatch 自动回收过期 Lease，且不改变已锁定的 Profile 路由。Submit 支持显式幂等键。Plan 可声明成本预算；实际成本超限后，已完成节点和成本仍会保留，未开始节点被阻断并产生 `budget_exceeded` 的终态原因。
+
 ## 从执行经验中改进 Harness
 
 Craft 后续不会把“学习”简化成不断增长的对话摘要，而会把一次执行明确记录为 `Task → Trial → Trace → Outcome`。Harness 配置按六个可诊断面组织：上下文装配、工具与检索、生成预算、编排方式、记忆策略、输出验证。每次变更都应保存配置版本、差异、成本、证据和失败归因。
@@ -60,7 +64,7 @@ Craft 后续不会把“学习”简化成不断增长的对话摘要，而会�
 
 Craft 默认只索引能力 Source。已验证 Proposal 只有在调用方明确批准 `allow_external_write=true` 后，才可写入已存在且位于所选 Source 内的 `SKILL.md`。Publisher 写前校验调用方提供的 SHA-256 摘要，备份原文件，并在原子替换前再次校验；发布和回滚各保存回执。回滚也要求当前文件仍等于已发布摘要，因此不会覆盖用户并发修改。
 
-v0.7.0 已实现 Experience Pattern、Skill Proposal 和受控 Publisher；重复采样与统计置信度、Lease TTL/Heartbeat、自动 Host Driver、自动执行模型/业务 Grader、自动 Harness 搜索和按 Case 自适应装配仍是路线设计。
+v0.7.0 已实现 Experience Pattern、Skill Proposal 和受控 Publisher；v0.8.0 会从多个同 Subject、且带 Evidence 的已完成 Trial 自动列出 Experience Candidate，仍须人工补充适用条件后才可创建 Pattern。重复采样与统计置信度、自动 Host Driver、自动执行模型/业务 Grader、自动 Harness 搜索和按 Case 自适应装配仍是路线设计。
 
 ## 存储与跨平台
 
@@ -70,4 +74,4 @@ v0.7.0 已实现 Experience Pattern、Skill Proposal 和受控 Publisher；重�
 
 ## 当前边界
 
-当前版本已提供 Provider 模式的完整 MCP 路径、能力目录、任务/证据、确定性 Workflow、Experience/Eval Kernel 第一层和基础多 Agent 路由。Codex 与 Claude 插件使用不依赖 `node_modules` 的单文件 MCP bundle。独立 Agent 的模型循环、Agent IR Compiler、Capability Kit Registry、向量 Provider、远程 Hub、桌面端、自动 Grader、自适应 Harness 搜索、Lease TTL/Heartbeat、预算和补偿事务是后续增量，不应在文档中被描述成已完成。
+当前版本已提供 Provider 模式的完整 MCP 路径、能力目录、任务/证据、确定性 Workflow、Experience/Eval Kernel 第一层、默认编排和可恢复的基础多 Agent 路由。Codex 与 Claude 插件使用不依赖 `node_modules` 的单文件 MCP bundle。独立 Agent 的模型循环、Agent IR Compiler、Capability Kit Registry、向量 Provider、远程 Hub、桌面端、自动 Grader、自适应 Harness 搜索、预算预估和补偿事务是后续增量，不应在文档中被描述成已完成。

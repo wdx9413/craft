@@ -11,14 +11,14 @@ export function addCosts(current, addition) {
     }
     return Object.fromEntries(result);
 }
-export function orchestrationOutcome(nodes) {
+export function orchestrationOutcome(nodes, budgetExceeded = false) {
     const counts = (status) => nodes.filter((node) => node.status === status).length;
     const failed = counts("failed");
     const blocked = counts("blocked");
     const passed = counts("passed");
     return {
         verdict: failed || blocked ? "failed" : "passed",
-        failure_type: failed ? "node_failed" : blocked ? "node_blocked" : null,
+        failure_type: budgetExceeded ? "budget_exceeded" : failed ? "node_failed" : blocked ? "node_blocked" : null,
         scores: { passed_nodes: passed, failed_nodes: failed, blocked_nodes: blocked,
             total_nodes: nodes.length, route_retries: nodes.reduce((total, node) => total + Number(node.route_index), 0) },
     };
@@ -85,9 +85,12 @@ export function planStatus(nodes) {
         return "running";
     return "failed";
 }
-export function dispatchNodes(nodes, capacity, owner) {
+export function dispatchNodes(nodes, capacity, owner, leaseTtlSeconds = 300, now = Date.now()) {
     if (!Number.isInteger(capacity) || capacity < 0)
         throw new Error("capacity must be a non-negative integer");
+    if (!Number.isInteger(leaseTtlSeconds) || leaseTtlSeconds < 1 || leaseTtlSeconds > 3_600) {
+        throw new Error("lease_ttl_seconds must be an integer between 1 and 3600");
+    }
     const passed = new Set(nodes.filter((node) => node.status === "passed").map((node) => node.id));
     const active = nodes.filter((node) => node.status === "leased").length;
     const available = Math.max(0, capacity - active);
@@ -100,13 +103,26 @@ export function dispatchNodes(nodes, capacity, owner) {
             throw new Error(`Node ${node.id} has an invalid route_index`);
         }
         const leaseId = `lease_${randomUUID().replaceAll("-", "")}`;
-        const leased = { ...node, status: "leased", lease_id: leaseId, claimed_by: owner };
+        const leased = { ...node, status: "leased", lease_id: leaseId, claimed_by: owner,
+            lease_expires_at: new Date(now + leaseTtlSeconds * 1_000).toISOString() };
         leases.push({ lease_id: leaseId, node_id: node.id, profile_id: node.profile_ids[routeIndex],
             profile_version: node.profile_versions?.[routeIndex] ?? null,
             role: node.role, objective: node.objective, side_effect: node.side_effect });
         return leased;
     });
     return { nodes: updated, leases };
+}
+export function recoverExpiredLeases(nodes, now = Date.now()) {
+    const recovered = [];
+    const updated = nodes.map((node) => {
+        const expiresAt = Date.parse(String(node.lease_expires_at ?? ""));
+        if (node.status !== "leased" || !Number.isFinite(expiresAt) || expiresAt > now)
+            return node;
+        recovered.push(String(node.id));
+        return { ...node, status: "pending", lease_id: null, claimed_by: null, lease_expires_at: null,
+            last_provenance: "lease_expired" };
+    });
+    return { nodes: updated, recovered };
 }
 export function submitNode(nodes, leaseId, verdict, provenance) {
     if (!PROVENANCE.has(provenance))
@@ -122,9 +138,10 @@ export function submitNode(nodes, leaseId, verdict, provenance) {
             throw new Error(`Lease is not active: ${leaseId}`);
         if (verdict === "failed" && Number(node.route_index) + 1 < node.profile_ids.length) {
             return { ...node, status: "pending", route_index: Number(node.route_index) + 1,
-                lease_id: null, claimed_by: null, last_provenance: provenance };
+                lease_id: null, claimed_by: null, lease_expires_at: null, last_provenance: provenance };
         }
-        return { ...node, status: verdict, lease_id: null, claimed_by: null, last_provenance: provenance };
+        return { ...node, status: verdict, lease_id: null, claimed_by: null, lease_expires_at: null,
+            last_provenance: provenance };
     });
     if (!found)
         throw new Error(`Unknown lease: ${leaseId}`);

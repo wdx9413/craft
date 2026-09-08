@@ -1,6 +1,6 @@
 import { Catalog } from "./catalog.ts";
 import { CraftStore, type JsonObject } from "./store.ts";
-export declare const VERSION = "0.7.1";
+export declare const VERSION = "0.8.0";
 export declare class CraftService {
     readonly store: CraftStore;
     readonly catalog: Catalog;
@@ -13,6 +13,9 @@ export declare class CraftService {
     sourceScan(args: JsonObject): Promise<JsonObject>;
     capabilitySearch(args: JsonObject): JsonObject;
     capabilityGet(args: JsonObject): JsonObject;
+    defaultRoute(args: JsonObject): JsonObject;
+    defaultRouteExecute(args: JsonObject): JsonObject;
+    experienceCandidateList(_args: JsonObject): JsonObject;
     taskOpen(args: JsonObject): JsonObject;
     taskList(args: JsonObject): JsonObject;
     taskCheckpoint(args: JsonObject): JsonObject;
@@ -54,6 +57,7 @@ export declare class CraftService {
     orchestrationCreate(args: JsonObject): JsonObject;
     orchestrationTrialStart(args: JsonObject): JsonObject;
     orchestrationDispatch(args: JsonObject): JsonObject;
+    orchestrationRenew(args: JsonObject): JsonObject;
     orchestrationSubmit(args: JsonObject): JsonObject;
     orchestrationTrialFinalize(args: JsonObject): JsonObject;
 }

@@ -8028,14 +8028,14 @@ function addCosts(current, addition) {
   }
   return Object.fromEntries(result);
 }
-function orchestrationOutcome(nodes) {
+function orchestrationOutcome(nodes, budgetExceeded2 = false) {
   const counts = (status) => nodes.filter((node) => node.status === status).length;
   const failed = counts("failed");
   const blocked = counts("blocked");
   const passed = counts("passed");
   return {
     verdict: failed || blocked ? "failed" : "passed",
-    failure_type: failed ? "node_failed" : blocked ? "node_blocked" : null,
+    failure_type: budgetExceeded2 ? "budget_exceeded" : failed ? "node_failed" : blocked ? "node_blocked" : null,
     scores: {
       passed_nodes: passed,
       failed_nodes: failed,
@@ -8099,8 +8099,11 @@ function planStatus(nodes) {
   if (nodes.some((node) => node.status === "pending" || node.status === "leased")) return "running";
   return "failed";
 }
-function dispatchNodes(nodes, capacity, owner) {
+function dispatchNodes(nodes, capacity, owner, leaseTtlSeconds = 300, now = Date.now()) {
   if (!Number.isInteger(capacity) || capacity < 0) throw new Error("capacity must be a non-negative integer");
+  if (!Number.isInteger(leaseTtlSeconds) || leaseTtlSeconds < 1 || leaseTtlSeconds > 3600) {
+    throw new Error("lease_ttl_seconds must be an integer between 1 and 3600");
+  }
   const passed = new Set(nodes.filter((node) => node.status === "passed").map((node) => node.id));
   const active = nodes.filter((node) => node.status === "leased").length;
   const available = Math.max(0, capacity - active);
@@ -8112,7 +8115,13 @@ function dispatchNodes(nodes, capacity, owner) {
       throw new Error(`Node ${node.id} has an invalid route_index`);
     }
     const leaseId = `lease_${(0, import_node_crypto2.randomUUID)().replaceAll("-", "")}`;
-    const leased = { ...node, status: "leased", lease_id: leaseId, claimed_by: owner };
+    const leased = {
+      ...node,
+      status: "leased",
+      lease_id: leaseId,
+      claimed_by: owner,
+      lease_expires_at: new Date(now + leaseTtlSeconds * 1e3).toISOString()
+    };
     leases.push({
       lease_id: leaseId,
       node_id: node.id,
@@ -8125,6 +8134,23 @@ function dispatchNodes(nodes, capacity, owner) {
     return leased;
   });
   return { nodes: updated, leases };
+}
+function recoverExpiredLeases(nodes, now = Date.now()) {
+  const recovered = [];
+  const updated = nodes.map((node) => {
+    const expiresAt = Date.parse(String(node.lease_expires_at ?? ""));
+    if (node.status !== "leased" || !Number.isFinite(expiresAt) || expiresAt > now) return node;
+    recovered.push(String(node.id));
+    return {
+      ...node,
+      status: "pending",
+      lease_id: null,
+      claimed_by: null,
+      lease_expires_at: null,
+      last_provenance: "lease_expired"
+    };
+  });
+  return { nodes: updated, recovered };
 }
 function submitNode(nodes, leaseId, verdict, provenance) {
   if (!PROVENANCE.has(provenance)) throw new Error(`Unsupported provenance: ${provenance}`);
@@ -8141,10 +8167,18 @@ function submitNode(nodes, leaseId, verdict, provenance) {
         route_index: Number(node.route_index) + 1,
         lease_id: null,
         claimed_by: null,
+        lease_expires_at: null,
         last_provenance: provenance
       };
     }
-    return { ...node, status: verdict, lease_id: null, claimed_by: null, last_provenance: provenance };
+    return {
+      ...node,
+      status: verdict,
+      lease_id: null,
+      claimed_by: null,
+      lease_expires_at: null,
+      last_provenance: provenance
+    };
   });
   if (!found) throw new Error(`Unknown lease: ${leaseId}`);
   const propagated = updated.map((node) => ({ ...node }));
@@ -8312,7 +8346,7 @@ async function rollbackSkillPublication(args) {
 }
 
 // src/service.ts
-var VERSION = "0.7.1";
+var VERSION = "0.8.0";
 var CONFIDENCE = /* @__PURE__ */ new Set(["confirmed", "bounded", "unverified", "rejected"]);
 var TASK_STATUS = /* @__PURE__ */ new Set(["active", "paused", "completed", "cancelled"]);
 var VERSIONED_LIFECYCLE = /* @__PURE__ */ new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -8368,6 +8402,17 @@ function uniqueTextArray(value, name, minimum = 1) {
     throw new Error(`${name} must contain at least ${minimum} unique values`);
   }
   return values;
+}
+function budgetLimits(value) {
+  for (const [key, limit] of Object.entries(value)) {
+    if (typeof limit !== "number" || !Number.isFinite(limit) || limit < 0) {
+      throw new Error(`budget limit ${key} must be a non-negative finite number`);
+    }
+  }
+  return value;
+}
+function budgetExceeded(costs, budget) {
+  return Object.entries(budget).some(([key, limit]) => Number(costs[key] ?? 0) > Number(limit));
 }
 var CraftService = class {
   store;
@@ -8441,6 +8486,107 @@ var CraftService = class {
   }
   capabilityGet(args) {
     return this.catalog.get(text(args.asset_id, "asset_id"));
+  }
+  defaultRoute(args) {
+    const goal = text(args.goal, "goal");
+    const title = text(args.title, "title");
+    const mode = String(args.mode ?? "default");
+    if (!(/* @__PURE__ */ new Set(["default", "safe_incremental_development"])).has(mode)) {
+      throw new Error(`Unsupported route mode: ${mode}`);
+    }
+    const task = this.taskOpen({ title, goal, project_id: args.project_id ?? null }).task;
+    const tokens = goal.toLowerCase().match(/[\p{L}\p{N}_-]+/gu) ?? [];
+    const workflows = this.store.list("workflow", 1e3, (workflow2) => workflow2.lifecycle === "verified").map((workflow2) => ({ workflow: workflow2, score: tokens.filter((token) => JSON.stringify(workflow2).toLowerCase().includes(token)).length })).filter((candidate) => candidate.score > 0).sort((left, right) => right.score - left.score || String(left.workflow.id).localeCompare(String(right.workflow.id)));
+    const workflow = workflows[0]?.workflow ?? null;
+    const capabilities = this.catalog.search(goal, 6);
+    const developmentPlan = mode === "safe_incremental_development" ? {
+      stages: [
+        {
+          id: "baseline",
+          constraints: "\u5148\u68C0\u67E5 Git \u589E\u91CF\u5E76\u4E3A\u539F\u6709\u903B\u8F91\u8865\u5145\u6216\u8FD0\u884C\u805A\u7126\u5355\u5143\u6D4B\u8BD5\uFF1B\u4E0D\u5F97\u5148\u6539\u4E1A\u52A1\u903B\u8F91\u3002",
+          evidence: ["git diff --check", "baseline focused test receipt"]
+        },
+        {
+          id: "minimal_change",
+          constraints: "\u53EA\u505A\u6EE1\u8DB3\u76EE\u6807\u7684\u6700\u5C0F\u589E\u91CF\u6539\u52A8\uFF0C\u4FDD\u7559\u65E2\u6709\u63A5\u53E3\u3001\u6570\u636E\u4E0E\u672A\u6D89\u53CA\u8DEF\u5F84\u3002",
+          evidence: ["changed files", "decision note"]
+        },
+        {
+          id: "verification",
+          constraints: "\u8FD0\u884C\u53D7\u5F71\u54CD\u6D4B\u8BD5\u3001\u8986\u76D6\u7387\u95E8\u7981\u548C\u5FC5\u8981\u9759\u6001\u68C0\u67E5\uFF1B\u589E\u91CF\u8986\u76D6\u7387\u9608\u503C\u7531\u5DF2\u9009 Workflow \u7684\u786E\u5B9A\u6027\u547D\u4EE4\u8BA1\u7B97\u3002",
+          evidence: ["test receipt", "coverage report"]
+        },
+        {
+          id: "review",
+          constraints: "\u590D\u67E5 Git diff\u3001\u5931\u8D25\u7C7B\u578B\u548C\u672A\u9A8C\u8BC1\u98CE\u9669\uFF1B\u4EC5\u6709\u771F\u5B9E\u8BC1\u636E\u7684\u7ED3\u8BBA\u624D\u80FD\u6C89\u6DC0\u4E3A\u7ECF\u9A8C\u3002",
+          evidence: ["git diff --check", "review evidence"]
+        }
+      ]
+    } : null;
+    const route = this.store.create("route", id("route"), {
+      task_id: task.id,
+      goal,
+      mode,
+      workflow_id: workflow?.id ?? null,
+      workflow_version: workflow?.version ?? null,
+      capability_ids: capabilities.map((capability) => capability.id),
+      status: workflow ? "ready" : "awaiting_host",
+      development_plan: developmentPlan
+    });
+    return {
+      route_id: route.id,
+      task,
+      workflow,
+      capabilities,
+      development_plan: developmentPlan,
+      executable: workflow !== null
+    };
+  }
+  defaultRouteExecute(args) {
+    const route = this.store.get("route", text(args.route_id, "route_id"));
+    if (!route.workflow_id) throw new Error("Route has no verified Workflow to execute; complete the host plan first");
+    const workflow = this.store.get("workflow", String(route.workflow_id), Number(route.workflow_version));
+    if (workflow.lifecycle !== "verified") throw new Error("Route Workflow is no longer verified");
+    const result = this.workflowTrialRun({
+      ...args,
+      task_id: route.task_id,
+      workflow_id: route.workflow_id,
+      version: route.workflow_version
+    });
+    const completed = this.store.save("route", String(route.id), {
+      ...recordPayload(route),
+      status: "completed",
+      workflow_run_id: result.workflow_run?.id ?? null,
+      trial_id: result.trial.id
+    });
+    return { route: completed, ...result, experience_candidates: this.experienceCandidateList({}).experience_candidates };
+  }
+  experienceCandidateList(_args) {
+    const groups = /* @__PURE__ */ new Map();
+    for (const trial of this.store.list("trial", 1e3)) {
+      const outcome = this.store.find("outcome", `outcome_${trial.id}`);
+      const evidence = outcome?.evidence_ids;
+      if (!outcome || !Array.isArray(evidence) || !evidence.length) continue;
+      const key = `${trial.subject_type}:${trial.subject_id}:${trial.subject_version}`;
+      const group = groups.get(key) ?? {
+        subject_type: String(trial.subject_type),
+        subject_id: String(trial.subject_id),
+        subject_version: Number(trial.subject_version),
+        trial_ids: [],
+        evidence_ids: []
+      };
+      group.trial_ids.push(String(trial.id));
+      group.evidence_ids.push(...evidence.map((evidenceId) => String(evidenceId)));
+      groups.set(key, group);
+    }
+    const experienceCandidates = [...groups.values()].filter((group) => group.trial_ids.length >= 2).map((group) => ({
+      ...group,
+      trial_ids: [...group.trial_ids].sort(),
+      evidence_ids: [...new Set(group.evidence_ids)].sort(),
+      status: "ready_for_pattern",
+      next_action: "Review applicability and create an Experience Pattern."
+    }));
+    return { experience_candidates: experienceCandidates };
   }
   taskOpen(args) {
     if (args.task_id) return this.taskPack(String(args.task_id));
@@ -9084,6 +9230,8 @@ var CraftService = class {
     }));
     const max = Number(args.max_concurrency ?? 4);
     if (!Number.isInteger(max) || max < 1 || max > 32) throw new Error("max_concurrency must be between 1 and 32");
+    const leaseTtl = finiteInteger(args.lease_ttl_seconds, "lease_ttl_seconds", 300, 1, 3600);
+    const budget = budgetLimits(object(args.budget ?? {}, "budget"));
     const planId = args.plan_id === void 0 ? id("plan") : text(args.plan_id, "plan_id");
     return this.store.create("orchestration_plan", planId, {
       goal: text(args.goal, "goal"),
@@ -9091,6 +9239,9 @@ var CraftService = class {
       trial_id: args.trial_id ?? null,
       trial_started_at: args.trial_started_at ?? null,
       accumulated_costs: {},
+      submission_receipts: [],
+      budget,
+      lease_ttl_seconds: leaseTtl,
       max_concurrency: max,
       status: "running",
       nodes,
@@ -9145,7 +9296,13 @@ var CraftService = class {
     const maximum = finiteInteger(plan.max_concurrency, "plan max_concurrency", 4, 1, 32);
     const requested = finiteInteger(args.capacity, "capacity", maximum, 1);
     const capacity = Math.min(requested, maximum);
-    const result = dispatchNodes(plan.nodes, capacity, owner);
+    const recovered = recoverExpiredLeases(plan.nodes);
+    const result = dispatchNodes(
+      recovered.nodes,
+      capacity,
+      owner,
+      finiteInteger(plan.lease_ttl_seconds, "plan lease_ttl_seconds", 300, 1, 3600)
+    );
     const saved = this.store.updateIfVersion("orchestration_plan", String(plan.id), Number(plan.version), {
       ...plan,
       nodes: result.nodes,
@@ -9161,9 +9318,34 @@ var CraftService = class {
     }
     return { plan: saved, leases: result.leases };
   }
+  orchestrationRenew(args) {
+    const plan = this.get("orchestration_plan", "plan_id", args);
+    if (plan.status !== "running") throw new Error(`Plan is not running: ${plan.status}`);
+    const leaseId = text(args.lease_id, "lease_id");
+    const owner = text(args.claimed_by, "claimed_by");
+    const ttl = finiteInteger(plan.lease_ttl_seconds, "plan lease_ttl_seconds", 300, 1, 3600);
+    let found = false;
+    const nodes = plan.nodes.map((node) => {
+      if (node.lease_id !== leaseId) return node;
+      found = true;
+      if (node.status !== "leased" || node.claimed_by !== owner) throw new Error("Lease owner does not match");
+      return { ...node, lease_expires_at: new Date(Date.now() + ttl * 1e3).toISOString() };
+    });
+    if (!found) throw new Error(`Unknown lease: ${leaseId}`);
+    return this.store.updateIfVersion("orchestration_plan", String(plan.id), Number(plan.version), { ...plan, nodes });
+  }
   orchestrationSubmit(args) {
     const plan = this.get("orchestration_plan", "plan_id", args);
     const leaseId = text(args.lease_id, "lease_id");
+    const idempotencyKey = args.idempotency_key === void 0 ? null : text(args.idempotency_key, "idempotency_key");
+    const receipts = array(plan.submission_receipts ?? [], "submission_receipts");
+    const existing = idempotencyKey === null ? void 0 : receipts.find((receipt) => receipt.idempotency_key === idempotencyKey);
+    if (existing) {
+      if (existing.lease_id !== leaseId || existing.verdict !== args.verdict) {
+        throw new Error("idempotency_key belongs to a different submission");
+      }
+      return plan;
+    }
     const leased = plan.nodes.find((node) => node.lease_id === leaseId);
     if (!leased) throw new Error(`Unknown lease: ${leaseId}`);
     if (args.claimed_by !== void 0) {
@@ -9173,18 +9355,31 @@ var CraftService = class {
     const verdict = text(args.verdict, "verdict");
     const costs = object(args.costs ?? {}, "costs");
     const accumulatedCosts = addCosts(object(plan.accumulated_costs ?? {}, "accumulated costs"), costs);
+    const exceedsBudget = budgetExceeded(accumulatedCosts, budgetLimits(object(plan.budget ?? {}, "plan budget")));
     const artifactIds = array(args.artifact_ids ?? [], "artifact_ids").map((value) => text(value, "artifact_id"));
     const evidenceIds = array(args.evidence_ids ?? [], "evidence_ids").map((value) => text(value, "evidence_id"));
     for (const artifactId of artifactIds) this.store.get("artifact", artifactId);
     for (const evidenceId of evidenceIds) this.store.get("evidence", evidenceId);
     const summary = args.summary === void 0 ? null : text(args.summary, "summary");
-    const nodes = submitNode(plan.nodes, leaseId, verdict, provenance);
+    const submitted = submitNode(plan.nodes, leaseId, verdict, provenance);
+    const nodes = exceedsBudget ? submitted.map((node) => node.status === "pending" ? { ...node, status: "blocked", last_provenance: "budget_exceeded" } : node) : submitted;
     const status = planStatus(nodes);
     const saved = this.store.updateIfVersion(
       "orchestration_plan",
       String(plan.id),
       Number(plan.version),
-      { ...plan, nodes, status, accumulated_costs: accumulatedCosts }
+      {
+        ...plan,
+        nodes,
+        status,
+        accumulated_costs: accumulatedCosts,
+        budget_exceeded: exceedsBudget,
+        submission_receipts: idempotencyKey === null ? receipts : [...receipts, {
+          idempotency_key: idempotencyKey,
+          lease_id: leaseId,
+          verdict
+        }]
+      }
     );
     if (plan.trial_id) {
       this.trialTraceAppend({
@@ -9214,7 +9409,7 @@ var CraftService = class {
     if (this.store.find("outcome", `outcome_${trialId}`)) {
       return { plan, ...this.trialGet({ trial_id: trialId }) };
     }
-    const result = orchestrationOutcome(plan.nodes);
+    const result = orchestrationOutcome(plan.nodes, Boolean(plan.budget_exceeded));
     const stableKey = (0, import_node_crypto4.createHash)("sha256").update(`${plan.id}:${trialId}`).digest("hex");
     const artifactId = `artifact_${stableKey}`;
     const artifact = this.store.find("artifact", artifactId) ?? this.artifactRegister({
@@ -9281,7 +9476,8 @@ var schemaFor = (name) => {
     "harness_configuration_version",
     "target_version",
     "grader_version",
-    "policy_version"
+    "policy_version",
+    "lease_ttl_seconds"
   ].includes(name)) return { type: "integer" };
   if (["score"].includes(name)) return { type: "number" };
   if ([
@@ -9339,6 +9535,29 @@ var TOOLS = [
   tool("craft_source_scan", "Incrementally scan one or all enabled sources.", [], false, ["source_id"]),
   tool("craft_capability_search", "Return a small ranked set of matching capabilities.", ["query"], true, ["limit"]),
   tool("craft_capability_get", "Read one indexed capability.", ["asset_id"], true),
+  tool(
+    "craft_default_route",
+    "Create a durable route that prefers matching verified Workflows and otherwise returns the shortest safe host plan.",
+    ["title", "goal"],
+    false,
+    ["project_id", "mode"]
+  ),
+  tool(
+    "craft_default_route_execute",
+    "Run the exact verified Workflow selected by a route and capture its Trial lifecycle.",
+    ["route_id", "project_root"],
+    false,
+    [
+      "inputs",
+      "allow_execution",
+      "approved_side_effects",
+      "case_id",
+      "harness_configuration_id",
+      "harness_configuration_version",
+      "environment",
+      "budget"
+    ]
+  ),
   tool("craft_task_open", "Create a durable task or resume one by ID.", [], false, ["task_id", "title", "goal", "project_id"]),
   tool("craft_task_list", "List durable tasks.", [], true, ["limit", "status", "project_id"]),
   tool("craft_task_checkpoint", "Persist task progress, evidence references, and pending work.", ["task_id", "summary"], false, ["completed", "pending", "decisions", "artifacts", "status", "source"]),
@@ -9394,6 +9613,7 @@ var TOOLS = [
   ),
   tool("craft_experience_pattern_get", "Read an experience pattern.", ["pattern_id"], true, ["version"]),
   tool("craft_experience_pattern_list", "List reusable experience patterns.", [], true, ["limit", "query"]),
+  tool("craft_experience_candidate_list", "List automatic Experience Pattern candidates backed by at least two completed Trials with Evidence.", [], true),
   tool(
     "craft_skill_proposal_create",
     "Save a versioned SKILL.md candidate derived from Experience Patterns; this does not change any source file.",
@@ -9528,7 +9748,7 @@ var TOOLS = [
   tool("craft_agent_profile_save", "Save a versioned cross-host agent profile.", ["name", "role", "host", "model"], false, ["profile_id", "provider", "reasoning_effort", "capabilities", "allowed_side_effects", "metadata"]),
   tool("craft_agent_profile_get", "Read an agent profile.", ["profile_id"], true, ["version"]),
   tool("craft_agent_profile_list", "List agent profiles.", [], true, ["limit", "query"]),
-  tool("craft_orchestration_plan_create", "Create a dependency-aware multi-Agent plan with pinned Agent Profile versions.", ["goal", "nodes"], false, ["plan_id", "task_id", "max_concurrency", "policy"]),
+  tool("craft_orchestration_plan_create", "Create a dependency-aware multi-Agent plan with pinned Agent Profile versions.", ["goal", "nodes"], false, ["plan_id", "task_id", "max_concurrency", "lease_ttl_seconds", "budget", "policy"]),
   tool(
     "craft_orchestration_trial_start",
     "Create an orchestration plan and automatically capture its Trial lifecycle.",
@@ -9539,6 +9759,7 @@ var TOOLS = [
       "trial_id",
       "case_id",
       "max_concurrency",
+      "lease_ttl_seconds",
       "policy",
       "harness_configuration_id",
       "harness_configuration_version",
@@ -9550,11 +9771,16 @@ var TOOLS = [
   tool("craft_orchestration_plan_list", "List multi-Agent plans.", [], true, ["limit", "query"]),
   tool("craft_orchestration_dispatch", "Lease ready nodes to a host within concurrency limits.", ["plan_id", "claimed_by"], false, ["capacity"]),
   tool(
+    "craft_orchestration_renew",
+    "Renew an owned orchestration lease before its TTL expires.",
+    ["plan_id", "lease_id", "claimed_by"]
+  ),
+  tool(
     "craft_orchestration_submit",
     "Submit a leased node result; trial-backed plans capture trace, cost, evidence, and terminal outcome automatically.",
     ["plan_id", "lease_id", "verdict"],
     false,
-    ["provenance", "claimed_by", "summary", "costs", "artifact_ids", "evidence_ids"]
+    ["provenance", "claimed_by", "summary", "costs", "artifact_ids", "evidence_ids", "idempotency_key"]
   ),
   tool(
     "craft_orchestration_trial_finalize",
@@ -9577,6 +9803,8 @@ var McpServer = class {
       craft_source_scan: (a) => service.sourceScan(a),
       craft_capability_search: (a) => service.capabilitySearch(a),
       craft_capability_get: (a) => service.capabilityGet(a),
+      craft_default_route: (a) => service.defaultRoute(a),
+      craft_default_route_execute: (a) => service.defaultRouteExecute(a),
       craft_task_open: (a) => service.taskOpen(a),
       craft_task_list: (a) => service.taskList(a),
       craft_task_checkpoint: (a) => service.taskCheckpoint(a),
@@ -9599,6 +9827,7 @@ var McpServer = class {
       craft_experience_pattern_create: (a) => service.experiencePatternCreate(a),
       craft_experience_pattern_get: (a) => service.get("experience_pattern", "pattern_id", a),
       craft_experience_pattern_list: (a) => service.list("experience_pattern", "patterns", a),
+      craft_experience_candidate_list: (a) => service.experienceCandidateList(a),
       craft_skill_proposal_create: (a) => service.skillProposalCreate(a),
       craft_skill_proposal_get: (a) => service.get("skill_proposal", "proposal_id", a),
       craft_skill_proposal_list: (a) => service.list("skill_proposal", "proposals", a),
@@ -9651,6 +9880,7 @@ var McpServer = class {
       craft_orchestration_plan_get: (a) => service.get("orchestration_plan", "plan_id", a),
       craft_orchestration_plan_list: (a) => service.list("orchestration_plan", "plans", a),
       craft_orchestration_dispatch: (a) => service.orchestrationDispatch(a),
+      craft_orchestration_renew: (a) => service.orchestrationRenew(a),
       craft_orchestration_submit: (a) => service.orchestrationSubmit(a),
       craft_orchestration_trial_finalize: (a) => service.orchestrationTrialFinalize(a)
     };

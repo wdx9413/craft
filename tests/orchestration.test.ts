@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { addCosts, dispatchNodes, normalizeNodes, orchestrationOutcome, planStatus,
-  submitNode } from "../src/orchestration.ts";
+  recoverExpiredLeases, submitNode } from "../src/orchestration.ts";
 
 const base = () => normalizeNodes([
   { id: "research", role: "researcher", objective: "find", profile_ids: ["astra", "luna"] },
@@ -77,4 +77,19 @@ test("orchestration pins profile versions and computes cost and outcome summarie
     { passed_nodes: 1, failed_nodes: 0, blocked_nodes: 0, total_nodes: 1, route_retries: 1 });
   assert.equal(orchestrationOutcome([{ ...versioned[0], status: "failed" }]).failure_type, "node_failed");
   assert.equal(orchestrationOutcome([{ ...versioned[0], status: "blocked" }]).failure_type, "node_blocked");
+  assert.equal(orchestrationOutcome([{ ...versioned[0], status: "blocked" }], true).failure_type, "budget_exceeded");
+});
+
+test("orchestration recovers expired leases without changing their selected route", () => {
+  const initial = normalizeNodes([{ id: "x", role: "worker", objective: "work", profile_ids: ["p"] }]);
+  assert.throws(() => dispatchNodes(initial, 1, "host", 0), /lease_ttl_seconds/);
+  const leased = dispatchNodes(initial, 1, "host", 10, 1_000);
+  assert.equal(typeof leased.nodes[0].lease_expires_at, "string");
+  const active = recoverExpiredLeases(leased.nodes, 10_999);
+  assert.equal(active.recovered.length, 0);
+  const recovered = recoverExpiredLeases(leased.nodes, 11_000);
+  assert.deepEqual(recovered.recovered, ["x"]);
+  assert.equal(recovered.nodes[0].status, "pending");
+  assert.equal(recovered.nodes[0].lease_id, null);
+  assert.equal(recovered.nodes[0].route_index, 0);
 });

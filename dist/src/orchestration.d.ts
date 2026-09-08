@@ -8,11 +8,15 @@ export type PlanNode = JsonObject & {
     status: string;
 };
 export declare function addCosts(current: JsonObject, addition: JsonObject): JsonObject;
-export declare function orchestrationOutcome(nodes: PlanNode[]): JsonObject;
+export declare function orchestrationOutcome(nodes: PlanNode[], budgetExceeded?: boolean): JsonObject;
 export declare function normalizeNodes(input: unknown[]): PlanNode[];
 export declare function planStatus(nodes: PlanNode[]): string;
-export declare function dispatchNodes(nodes: PlanNode[], capacity: number, owner: string): {
+export declare function dispatchNodes(nodes: PlanNode[], capacity: number, owner: string, leaseTtlSeconds?: number, now?: number): {
     nodes: PlanNode[];
     leases: JsonObject[];
+};
+export declare function recoverExpiredLeases(nodes: PlanNode[], now?: number): {
+    nodes: PlanNode[];
+    recovered: string[];
 };
 export declare function submitNode(nodes: PlanNode[], leaseId: string, verdict: string, provenance: string): PlanNode[];

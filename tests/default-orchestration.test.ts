@@ -1,0 +1,85 @@
+import assert from "node:assert/strict";
+import { mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+import { craftPaths } from "../src/paths.ts";
+import { CraftService } from "../src/service.ts";
+import { CraftStore, type JsonObject } from "../src/store.ts";
+
+test("默认编排优先已验证 Workflow，并为无匹配任务给出安全增量研发计划", async () => {
+  const root = join(tmpdir(), `craft-default-route-${process.pid}-${Date.now()}`);
+  const skills = join(root, "skills");
+  await mkdir(skills, { recursive: true });
+  await writeFile(join(skills, "SKILL.md"), "---\nname: java-timeout\ndescription: Diagnose Java timeout safely\n---\nUse a focused test.");
+  await writeFile(join(root, "existing.txt"), "ok");
+  const store = await new CraftStore(craftPaths(join(root, "data"))).open();
+  const service = new CraftService(store);
+  try {
+    await service.sourceAdd({ path: skills });
+    const verified = store.save("workflow", "workflow_timeout", { name: "Java timeout safe repair",
+      description: "Run focused proof", lifecycle: "verified", inputs: [], steps: [{ id: "proof", type: "assertion",
+        evaluator: "file_exists", path: "existing.txt" }] });
+    const route = service.defaultRoute({ title: "修复超时", goal: "Java timeout safe repair" });
+    assert.equal((route.workflow as JsonObject).id, verified.id);
+    assert.equal((route.task as JsonObject).status, "active");
+    assert.equal((route.capabilities as JsonObject[]).length, 1);
+    const executed = service.defaultRouteExecute({ route_id: route.route_id, project_root: root });
+    assert.equal((executed.outcome as JsonObject).verdict, "passed");
+    assert.equal((executed.experience_candidates as JsonObject[]).length, 0);
+
+    store.save("workflow", "workflow_timeout_tie", { name: "Java timeout second repair", lifecycle: "verified", inputs: [], steps: [] });
+    assert.equal((service.defaultRoute({ title: "Tie", goal: "Java timeout" }).workflow as JsonObject).id, "workflow_timeout");
+    assert.equal((service.defaultRoute({ title: "Emoji", goal: "😀" }).workflow as JsonObject | null), null);
+    store.save("workflow", "workflow_timeout_tie", { name: "Java timeout second repair", lifecycle: "deprecated", inputs: [], steps: [] });
+    const obsolete = service.defaultRoute({ title: "Obsolete", goal: "Java timeout safe repair" });
+    const brokenPayload = { name: "Java timeout safe repair", lifecycle: "deprecated", inputs: [], steps: [] };
+    store.database.prepare("UPDATE records SET payload_json=? WHERE kind=? AND id=? AND version=?")
+      .run(JSON.stringify(brokenPayload), "workflow", "workflow_timeout", 1);
+    assert.throws(() => service.defaultRouteExecute({ route_id: obsolete.route_id, project_root: root }), /no longer verified/);
+    store.database.prepare("UPDATE records SET payload_json=? WHERE kind=? AND id=? AND version=?")
+      .run(JSON.stringify({ ...brokenPayload, lifecycle: "verified" }), "workflow", "workflow_timeout", 1);
+    const crashing = service.defaultRoute({ title: "Crash", goal: "Java timeout safe repair" });
+    const originalRun = service.workflowRun;
+    service.workflowRun = () => { throw new Error("crash"); };
+    assert.equal((service.defaultRouteExecute({ route_id: crashing.route_id, project_root: root }).route as JsonObject).workflow_run_id, null);
+    service.workflowRun = originalRun;
+
+    const planned = service.defaultRoute({ title: "增量改造", goal: "Change Python controller safely",
+      mode: "safe_incremental_development" });
+    assert.equal((planned.workflow as JsonObject | null), null);
+    const development = planned.development_plan as JsonObject;
+    assert.deepEqual((development.stages as JsonObject[]).map((stage) => stage.id),
+      ["baseline", "minimal_change", "verification", "review"]);
+    assert.match(String((development.stages as JsonObject[])[0].constraints), /原有逻辑/);
+    assert.throws(() => service.defaultRouteExecute({ route_id: planned.route_id, project_root: root }), /verified Workflow/);
+    assert.throws(() => service.defaultRoute({ title: "Bad", goal: "bad", mode: "unsafe" }), /Unsupported route mode/);
+  } finally {
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("经验候选只从同一 Subject 的多个有证据 Trial 中自动浮现", async () => {
+  const root = join(tmpdir(), `craft-experience-candidates-${process.pid}-${Date.now()}`);
+  const store = await new CraftStore(craftPaths(root)).open();
+  const service = new CraftService(store);
+  try {
+    const task = service.taskOpen({ title: "经验", goal: "提炼" }).task as JsonObject;
+    const workflow = service.workflowSave({ workflow_id: "workflow_candidate", name: "Candidate" });
+    const evidence = service.evidenceRecord({ evidence_id: "evidence_candidate", source_type: "program",
+      claim: "test passed", confidence: "confirmed" });
+    for (const trialId of ["trial_candidate_1", "trial_candidate_2"]) {
+      service.trialStart({ trial_id: trialId, task_id: task.id, subject_type: "workflow",
+        subject_id: workflow.id, subject_version: workflow.version });
+      service.outcomeRecord({ trial_id: trialId, verdict: "passed", summary: "passed", evidence_ids: [evidence.id] });
+    }
+    const candidates = service.experienceCandidateList({});
+    assert.equal((candidates.experience_candidates as JsonObject[]).length, 1);
+    assert.deepEqual((candidates.experience_candidates as JsonObject[])[0].trial_ids,
+      ["trial_candidate_1", "trial_candidate_2"]);
+  } finally {
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});

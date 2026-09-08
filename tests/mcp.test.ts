@@ -39,8 +39,9 @@ test("MCP negotiates protocols, lists tools, dispatches every handler, and repor
     const calls: Record<string, Record<string, unknown>> = {
       craft_info: {}, craft_source_list: {}, craft_task_list: {}, craft_artifact_list: {},
       craft_evidence_list: {}, craft_workflow_search: {}, craft_eval_suite_list: {}, craft_agent_profile_list: {},
-      craft_orchestration_plan_list: {},
+      craft_orchestration_plan_list: {}, craft_experience_candidate_list: {},
       craft_task_open: { title: "T", goal: "G" },
+      craft_default_route: { title: "Route", goal: "G" },
       craft_artifact_register: { kind: "file", name: "a", uri: "file:///a", artifact_id: "artifact_a" },
       craft_evidence_record: { source_type: "test", claim: "ok", evidence_id: "evidence_a" },
       craft_workflow_save: { name: "W", workflow_id: "workflow_a" },
@@ -61,6 +62,8 @@ test("MCP negotiates protocols, lists tools, dispatches every handler, and repor
     const dispatch = await server.handle({ id: 8, method: "tools/call", params: { name: "craft_orchestration_dispatch",
       arguments: { plan_id: planId, claimed_by: "host" } } });
     const leaseId = String(((((dispatch?.result as Record<string, unknown>).structuredContent as Record<string, unknown>).leases as Record<string, unknown>[])[0]).lease_id);
+    assert.equal(((await server.handle({ id: 8, method: "tools/call", params: { name: "craft_orchestration_renew",
+      arguments: { plan_id: planId, lease_id: leaseId, claimed_by: "host" } } }))?.result as Record<string, unknown>).isError, false);
     assert.equal(((await server.handle({ id: 8, method: "tools/call", params: { name: "craft_orchestration_submit",
       arguments: { plan_id: planId, lease_id: leaseId, verdict: "passed" } } }))?.result as Record<string, unknown>).isError, false);
     const workflowPlan = await server.handle({ id: 9, method: "tools/call", params: { name: "craft_workflow_plan",
@@ -167,6 +170,8 @@ test("MCP negotiates protocols, lists tools, dispatches every handler, and repor
     await call("craft_workflow_transition", { workflow_id: "workflow_a", target: "deprecated", reason: "replace" });
     await call("craft_workflow_rollback", { workflow_id: "workflow_a", target_version: verified.version,
       reason: "restore" });
+    const defaultRoute = await call("craft_default_route", { title: "Run verified", goal: "W" });
+    await call("craft_default_route_execute", { route_id: defaultRoute.route_id, project_root: root });
     for (const [name, arguments_] of Object.entries({
       craft_task_checkpoint: { task_id: taskId, summary: "checkpoint" },
       craft_feedback_record: { task_id: taskId, corrected: "correction" },

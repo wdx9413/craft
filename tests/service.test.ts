@@ -110,6 +110,39 @@ test("service persists capabilities, tasks, feedback, artifacts, evidence, and v
       { id: "x", role: "r", objective: "o", profile_ids: ["p"] },
     ] });
     assert.throws(() => service.orchestrationDispatch({ plan_id: invalidCapacity.id, claimed_by: "h", capacity: "bad" }), /capacity/);
+    const recoverable = service.orchestrationCreate({ goal: "Recover", lease_ttl_seconds: 60, budget: { tokens: 1 }, nodes: [
+      { id: "recover", role: "worker", objective: "do", profile_ids: ["p"] },
+      { id: "blocked", role: "reviewer", objective: "review", profile_ids: ["p"], depends_on: ["recover"] },
+    ] });
+    const recoverDispatch = service.orchestrationDispatch({ plan_id: recoverable.id, claimed_by: "h" });
+    const recoverLease = (recoverDispatch.leases as Record<string, unknown>[])[0];
+    assert.throws(() => service.orchestrationRenew({ plan_id: recoverable.id, lease_id: recoverLease.lease_id,
+      claimed_by: "other" }), /owner/);
+    assert.throws(() => service.orchestrationRenew({ plan_id: recoverable.id, lease_id: "missing", claimed_by: "h" }), /Unknown lease/);
+    const renewed = service.orchestrationRenew({ plan_id: recoverable.id, lease_id: recoverLease.lease_id, claimed_by: "h" });
+    assert.equal(renewed.status, "running");
+    const firstSubmit = service.orchestrationSubmit({ plan_id: recoverable.id, lease_id: recoverLease.lease_id,
+      claimed_by: "h", verdict: "passed", costs: { tokens: 2 }, idempotency_key: "once" });
+    assert.equal(firstSubmit.budget_exceeded, true);
+    assert.equal(firstSubmit.status, "failed");
+    const duplicateSubmit = service.orchestrationSubmit({ plan_id: recoverable.id, lease_id: recoverLease.lease_id,
+      claimed_by: "h", verdict: "passed", costs: { tokens: 2 }, idempotency_key: "once" });
+    assert.equal(duplicateSubmit.version, firstSubmit.version);
+    assert.throws(() => service.orchestrationSubmit({ plan_id: recoverable.id, lease_id: recoverLease.lease_id,
+      verdict: "failed", idempotency_key: "once" }), /different submission/);
+    assert.throws(() => service.orchestrationCreate({ goal: "bad budget", budget: { tokens: -1 }, nodes: [
+      { id: "x", role: "r", objective: "o", profile_ids: ["p"] },
+    ] }), /budget limit/);
+    assert.throws(() => service.orchestrationRenew({ plan_id: recoverable.id, lease_id: recoverLease.lease_id,
+      claimed_by: "h" }), /not running/);
+    const legacyPlan = service.orchestrationCreate({ goal: "Legacy submit", nodes: [
+      { id: "legacy", role: "worker", objective: "do", profile_ids: ["p"] },
+    ] });
+    const { budget: _budget, submission_receipts: _receipts, ...legacyPayload } = legacyPlan;
+    store.save("orchestration_plan", String(legacyPlan.id), legacyPayload);
+    const legacyDispatch = service.orchestrationDispatch({ plan_id: legacyPlan.id, claimed_by: "h" });
+    assert.equal(service.orchestrationSubmit({ plan_id: legacyPlan.id,
+      lease_id: (legacyDispatch.leases as Record<string, unknown>[])[0].lease_id, verdict: "passed" }).status, "completed");
     assert.throws(() => service.saveVersioned("workflow", "workflow", {}, ["name"]), /name/);
     assert.equal((service.info().counts as Record<string, number>).workflow, 2);
     service.sourceRemove({ source_id: source.id });

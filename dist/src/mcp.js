@@ -5,7 +5,7 @@ const schemaFor = (name) => {
         return { type: "boolean" };
     if (["limit", "version", "capacity", "max_concurrency", "size_bytes", "subject_version",
         "suite_version", "configuration_version", "harness_configuration_version", "target_version",
-        "grader_version", "policy_version"].includes(name))
+        "grader_version", "policy_version", "lease_ttl_seconds"].includes(name))
         return { type: "integer" };
     if (["score"].includes(name))
         return { type: "number" };
@@ -33,6 +33,9 @@ export const TOOLS = [
     tool("craft_source_scan", "Incrementally scan one or all enabled sources.", [], false, ["source_id"]),
     tool("craft_capability_search", "Return a small ranked set of matching capabilities.", ["query"], true, ["limit"]),
     tool("craft_capability_get", "Read one indexed capability.", ["asset_id"], true),
+    tool("craft_default_route", "Create a durable route that prefers matching verified Workflows and otherwise returns the shortest safe host plan.", ["title", "goal"], false, ["project_id", "mode"]),
+    tool("craft_default_route_execute", "Run the exact verified Workflow selected by a route and capture its Trial lifecycle.", ["route_id", "project_root"], false, ["inputs", "allow_execution", "approved_side_effects", "case_id",
+        "harness_configuration_id", "harness_configuration_version", "environment", "budget"]),
     tool("craft_task_open", "Create a durable task or resume one by ID.", [], false, ["task_id", "title", "goal", "project_id"]),
     tool("craft_task_list", "List durable tasks.", [], true, ["limit", "status", "project_id"]),
     tool("craft_task_checkpoint", "Persist task progress, evidence references, and pending work.", ["task_id", "summary"], false, ["completed", "pending", "decisions", "artifacts", "status", "source"]),
@@ -57,6 +60,7 @@ export const TOOLS = [
     tool("craft_experience_pattern_create", "Derive a reusable experience pattern from at least two completed Trials and their Evidence references.", ["task_id", "summary", "success_strategy", "applicability", "trial_ids", "evidence_ids", "failure_modes"], false, ["pattern_id"]),
     tool("craft_experience_pattern_get", "Read an experience pattern.", ["pattern_id"], true, ["version"]),
     tool("craft_experience_pattern_list", "List reusable experience patterns.", [], true, ["limit", "query"]),
+    tool("craft_experience_candidate_list", "List automatic Experience Pattern candidates backed by at least two completed Trials with Evidence.", [], true),
     tool("craft_skill_proposal_create", "Save a versioned SKILL.md candidate derived from Experience Patterns; this does not change any source file.", ["name", "summary", "skill_markdown", "pattern_ids"], false, ["proposal_id"]),
     tool("craft_skill_proposal_get", "Read a versioned Skill candidate.", ["proposal_id"], true, ["version"]),
     tool("craft_skill_proposal_list", "List Skill candidates.", [], true, ["limit", "query"]),
@@ -99,13 +103,14 @@ export const TOOLS = [
     tool("craft_agent_profile_save", "Save a versioned cross-host agent profile.", ["name", "role", "host", "model"], false, ["profile_id", "provider", "reasoning_effort", "capabilities", "allowed_side_effects", "metadata"]),
     tool("craft_agent_profile_get", "Read an agent profile.", ["profile_id"], true, ["version"]),
     tool("craft_agent_profile_list", "List agent profiles.", [], true, ["limit", "query"]),
-    tool("craft_orchestration_plan_create", "Create a dependency-aware multi-Agent plan with pinned Agent Profile versions.", ["goal", "nodes"], false, ["plan_id", "task_id", "max_concurrency", "policy"]),
-    tool("craft_orchestration_trial_start", "Create an orchestration plan and automatically capture its Trial lifecycle.", ["task_id", "goal", "nodes"], false, ["plan_id", "trial_id", "case_id", "max_concurrency", "policy",
+    tool("craft_orchestration_plan_create", "Create a dependency-aware multi-Agent plan with pinned Agent Profile versions.", ["goal", "nodes"], false, ["plan_id", "task_id", "max_concurrency", "lease_ttl_seconds", "budget", "policy"]),
+    tool("craft_orchestration_trial_start", "Create an orchestration plan and automatically capture its Trial lifecycle.", ["task_id", "goal", "nodes"], false, ["plan_id", "trial_id", "case_id", "max_concurrency", "lease_ttl_seconds", "policy",
         "harness_configuration_id", "harness_configuration_version", "environment", "budget"]),
     tool("craft_orchestration_plan_get", "Read a multi-Agent plan and node states.", ["plan_id"], true),
     tool("craft_orchestration_plan_list", "List multi-Agent plans.", [], true, ["limit", "query"]),
     tool("craft_orchestration_dispatch", "Lease ready nodes to a host within concurrency limits.", ["plan_id", "claimed_by"], false, ["capacity"]),
-    tool("craft_orchestration_submit", "Submit a leased node result; trial-backed plans capture trace, cost, evidence, and terminal outcome automatically.", ["plan_id", "lease_id", "verdict"], false, ["provenance", "claimed_by", "summary", "costs", "artifact_ids", "evidence_ids"]),
+    tool("craft_orchestration_renew", "Renew an owned orchestration lease before its TTL expires.", ["plan_id", "lease_id", "claimed_by"]),
+    tool("craft_orchestration_submit", "Submit a leased node result; trial-backed plans capture trace, cost, evidence, and terminal outcome automatically.", ["plan_id", "lease_id", "verdict"], false, ["provenance", "claimed_by", "summary", "costs", "artifact_ids", "evidence_ids", "idempotency_key"]),
     tool("craft_orchestration_trial_finalize", "Idempotently reconcile a terminal trial-backed plan into its receipt, evidence, and outcome.", ["plan_id"], false),
 ];
 export class McpServer {
@@ -118,6 +123,7 @@ export class McpServer {
             craft_source_list: () => service.sourceList(), craft_source_update: (a) => service.sourceUpdate(a),
             craft_source_remove: (a) => service.sourceRemove(a), craft_source_scan: (a) => service.sourceScan(a),
             craft_capability_search: (a) => service.capabilitySearch(a), craft_capability_get: (a) => service.capabilityGet(a),
+            craft_default_route: (a) => service.defaultRoute(a), craft_default_route_execute: (a) => service.defaultRouteExecute(a),
             craft_task_open: (a) => service.taskOpen(a), craft_task_list: (a) => service.taskList(a),
             craft_task_checkpoint: (a) => service.taskCheckpoint(a), craft_feedback_record: (a) => service.feedbackRecord(a),
             craft_artifact_register: (a) => service.artifactRegister(a),
@@ -137,6 +143,7 @@ export class McpServer {
             craft_experience_pattern_create: (a) => service.experiencePatternCreate(a),
             craft_experience_pattern_get: (a) => service.get("experience_pattern", "pattern_id", a),
             craft_experience_pattern_list: (a) => service.list("experience_pattern", "patterns", a),
+            craft_experience_candidate_list: (a) => service.experienceCandidateList(a),
             craft_skill_proposal_create: (a) => service.skillProposalCreate(a),
             craft_skill_proposal_get: (a) => service.get("skill_proposal", "proposal_id", a),
             craft_skill_proposal_list: (a) => service.list("skill_proposal", "proposals", a),
@@ -184,6 +191,7 @@ export class McpServer {
             craft_orchestration_plan_get: (a) => service.get("orchestration_plan", "plan_id", a),
             craft_orchestration_plan_list: (a) => service.list("orchestration_plan", "plans", a),
             craft_orchestration_dispatch: (a) => service.orchestrationDispatch(a),
+            craft_orchestration_renew: (a) => service.orchestrationRenew(a),
             craft_orchestration_submit: (a) => service.orchestrationSubmit(a),
             craft_orchestration_trial_finalize: (a) => service.orchestrationTrialFinalize(a),
         };
