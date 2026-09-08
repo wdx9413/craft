@@ -216,7 +216,7 @@ test("MCP negotiates protocols, lists tools, dispatches every handler, and repor
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
-test("MCP exposes the 0.9.6 executable runtime, evaluation gate, and adaptive harness controls", async () => {
+test("MCP exposes the 0.9.7 controlled host adapter, promotion gate, and adaptive harness controls", async () => {
   const root = join(tmpdir(), `craft-mcp-runtime-${process.pid}-${Date.now()}`);
   await mkdir(root, { recursive: true });
   await writeFile(join(root, "ok.txt"), "ok");
@@ -242,6 +242,15 @@ test("MCP exposes the 0.9.6 executable runtime, evaluation gate, and adaptive ha
       claimed_by: "host", verdict: "passed" });
     await call("craft_runtime_run_resume", { run_id: "run" });
     await call("craft_runtime_promotion_eligibility", { run_id: "run", policy_id: policy.id, environment: { image: "test" } });
+    const runtimeAdapter = await call("craft_runtime_adapter_save", { name: "MCP Adapter", host: "generic",
+      allowed_kinds: ["agent"], allowed_effects: ["read_only"], supports_evidence_receipts: true });
+    await call("craft_runtime_adapter_get", { runtime_adapter_id: runtimeAdapter.id });
+    await call("craft_runtime_adapter_list", {});
+    await call("craft_runtime_run_start", { run_id: "adapter-run", task_id: taskId, policy_id: policy.id, environment: {},
+      operations: [{ operation_id: "adapter-op", kind: "agent", effect: "read_only", objective: "adapter" }] });
+    const adapterDispatch = await call("craft_runtime_adapter_dispatch", { runtime_adapter_id: runtimeAdapter.id, run_id: "adapter-run" });
+    await call("craft_runtime_adapter_report", { runtime_adapter_id: runtimeAdapter.id, operation_id: "adapter-op",
+      lease_id: (adapterDispatch.operations as Record<string, unknown>[])[0].lease_id, verdict: "passed", summary: "reported" });
 
     const approvalPolicy = await call("craft_runtime_policy_save", { name: "Approval", allowed_effects: ["local_write"],
       require_approval_for: ["local_write"] });
@@ -270,7 +279,8 @@ test("MCP exposes the 0.9.6 executable runtime, evaluation gate, and adaptive ha
     const evaluationRun = (evaluation.evaluation_runs as Record<string, unknown>[])[0];
     await call("craft_evaluation_program_grade", { evaluation_run_id: evaluationRun.id, grader_id: grader.id, grader_version: grader.version });
     const comparison = (evaluation.comparisons as Record<string, unknown>[])[0];
-    await call("craft_evaluation_promotion_assess", { comparison_id: comparison.id, min_trials: 1 });
+    await call("craft_evaluation_promotion_assess", { comparison_id: comparison.id, min_trials: 1,
+      max_duration_regression_ratio: 1, cost_metric: "tokens" });
     const harness = await call("craft_harness_select", { task_id: taskId, risk: "high", budget: {} });
     const ir = await call("craft_agent_ir_compile", { task_id: taskId, harness_id: (harness.harness as Record<string, unknown>).id,
       goal: "inspect", operations: [{ id: "inspect", kind: "agent", effect: "read_only", objective: "inspect" }] });

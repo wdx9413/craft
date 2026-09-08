@@ -10,7 +10,7 @@ Runtime Policy → Runtime Run → Operation DAG → Lease / Approval → Receip
                                   └── parent-child resource ledger
 ```
 
-## 0.9.5 基础、0.9.6 可执行闭环
+## 0.9.5 基础、0.9.6/0.9.7 可执行闭环
 
 - Policy 限制允许 effect、审批 effect、最大并发和预算。
 - Run 固定 Policy 精确版本、Policy 摘要和环境摘要；晋级前会检查三者是否仍匹配。
@@ -21,6 +21,8 @@ Runtime Policy → Runtime Run → Operation DAG → Lease / Approval → Receip
 - 0.9.6 的 `runtime_driver_tick` 仅在受信任 Host 上自动运行已签发的确定性 `workflow` Operation；每个执行参数必须显式给出 `inputs`，并经 effect、命令、路径白名单校验。
 - Operation 可声明依赖 DAG、有限重试与 Lease 到期恢复；Driver 的结果、失败或暂停均写入 Artifact、Evidence、Trace 和持久 RunState。
 - 外部写入、破坏性动作及未在 Driver 中实现的 `agent`/`grader` Operation 仍停留在 Host Adapter，不会被伪装成已自动执行。
+- 0.9.7 增加版本化 Runtime Adapter：Adapter 公开声明可领取的 Operation kind、Effect、并发、暂停/恢复与回执能力；领取与上报会使用精确 Adapter 版本，并自动登记 Artifact 与 bounded Evidence。
+- 本地 Adapter 不能声明 `external_write` 或 `destructive`；这类 Effect 只能由明确标为 `isolated` 的 Adapter 接管，且仍须满足 Run Policy 与审批要求。
 
 ## 边界
 

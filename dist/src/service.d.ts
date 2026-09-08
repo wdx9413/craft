@@ -1,7 +1,7 @@
 import { Catalog } from "./catalog.ts";
 import { CraftStore, type JsonObject } from "./store.ts";
 import { type EmbeddingProvider } from "./semantic.ts";
-export declare const VERSION = "0.9.6";
+export declare const VERSION = "0.9.7";
 export declare class CraftService {
     readonly store: CraftStore;
     readonly catalog: Catalog;
@@ -20,6 +20,10 @@ export declare class CraftService {
     private projectPolicy;
     runtimePolicySave(args: JsonObject): JsonObject;
     private runtimePolicy;
+    runtimeAdapterSave(args: JsonObject): JsonObject;
+    private runtimeAdapterOwner;
+    runtimeAdapterDispatch(args: JsonObject): JsonObject;
+    runtimeAdapterReport(args: JsonObject): JsonObject;
     private runtimeOperations;
     private runtimeTrace;
     private runtimeRunStatus;

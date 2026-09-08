@@ -288,8 +288,10 @@ test("experience kernel qualifies and rolls back workflows with immutable trials
       reason: "wrong subject", evaluation_run_id: otherRun.id }), /passed held-out/);
     assert.throws(() => service.workflowTransition({ workflow_id: candidate.id, target: "verified",
       reason: "wrong", evaluation_run_id: "missing" }), /Unknown evaluation_run/);
+    const compatibilityPolicy = service.signoffPolicySave({ name: "Compatibility signoff", requirements: [] });
+    const compatibilitySignoff = service.signoffEvaluate({ policy_id: compatibilityPolicy.id, evaluation_run_id: evalRun.id });
     const verified = service.workflowTransition({ workflow_id: candidate.id, target: "verified",
-      reason: "qualified", evaluation_run_id: evalRun.id });
+      reason: "qualified", signoff_id: compatibilitySignoff.id });
     assert.equal(verified.lifecycle, "verified");
     const deprecated = service.workflowTransition({ workflow_id: verified.id, target: "deprecated", reason: "regression" });
     assert.equal(deprecated.lifecycle, "deprecated");

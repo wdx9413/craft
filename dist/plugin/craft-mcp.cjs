@@ -8610,7 +8610,7 @@ function validateConfig(value) {
 }
 
 // src/service.ts
-var VERSION = "0.9.6";
+var VERSION = "0.9.7";
 var CONFIDENCE = /* @__PURE__ */ new Set(["confirmed", "bounded", "unverified", "rejected"]);
 var TASK_STATUS = /* @__PURE__ */ new Set(["active", "paused", "completed", "cancelled"]);
 var VERSIONED_LIFECYCLE = /* @__PURE__ */ new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -8711,6 +8711,7 @@ var ROUTE_RECEIPT_KINDS = /* @__PURE__ */ new Set(["git_diff", "focused_test", "
 var ROUTE_RECEIPT_STATUS = /* @__PURE__ */ new Set(["passed", "failed", "skipped"]);
 var HOST_OPERATIONS = /* @__PURE__ */ new Set(["complete_stage", "execute_verified_workflow"]);
 var RUNTIME_KINDS = /* @__PURE__ */ new Set(["agent", "workflow", "grader"]);
+var RUNTIME_ADAPTER_HOSTS = /* @__PURE__ */ new Set(["codex", "claude", "generic"]);
 var RUNTIME_RUN_TERMINAL = /* @__PURE__ */ new Set(["completed", "failed", "cancelled"]);
 var SECRET_ASSIGNMENT = /(?:api[_-]?key|authorization|cookie|password|secret|token)\s*[:=]\s*[^\s]+/iu;
 var DEFAULT_RECEIPT_REQUIREMENTS = {
@@ -8758,6 +8759,10 @@ function validIsoTime(value, name) {
   const parsed = Date.parse(text(value, name));
   if (Number.isNaN(parsed)) throw new Error(`${name} must be an ISO timestamp`);
   return parsed;
+}
+function metricMean(aggregate, metric) {
+  const summary2 = aggregate.costs[metric];
+  return typeof summary2?.mean === "number" && Number.isFinite(summary2.mean) ? summary2.mean : null;
 }
 var CraftService = class _CraftService {
   store;
@@ -8809,6 +8814,7 @@ var CraftService = class _CraftService {
       "runtime_policy",
       "runtime_run",
       "runtime_operation",
+      "runtime_adapter",
       "evaluation_runner",
       "evaluation_promotion",
       "experience_mining_candidate",
@@ -8914,6 +8920,94 @@ var CraftService = class _CraftService {
       args.policy_version === void 0 ? void 0 : finiteInteger(args.policy_version, "policy_version", 1)
     );
   }
+  runtimeAdapterSave(args) {
+    const host = text(args.host, "host");
+    if (!RUNTIME_ADAPTER_HOSTS.has(host)) throw new Error("Runtime adapter host is unsupported");
+    const allowedKinds = uniqueTextArray(args.allowed_kinds, "allowed_kinds");
+    const allowedEffects = uniqueTextArray(args.allowed_effects, "allowed_effects");
+    if (allowedKinds.some((kind) => !RUNTIME_KINDS.has(kind)) || allowedEffects.some((effect) => !SIDE_EFFECTS.has(effect))) {
+      throw new Error("Runtime adapter kinds or effects are unsupported");
+    }
+    const environment = String(args.execution_environment ?? "local");
+    if (!(/* @__PURE__ */ new Set(["local", "isolated"])).has(environment)) throw new Error("Runtime adapter execution_environment is unsupported");
+    if (environment === "local" && allowedEffects.some((effect) => ["external_write", "destructive"].includes(effect))) {
+      throw new Error("Runtime adapter local effects must not include external_write or destructive");
+    }
+    return this.saveVersioned("runtime_adapter", "runtime_adapter", {
+      ...args,
+      host,
+      allowed_kinds: allowedKinds,
+      allowed_effects: allowedEffects,
+      execution_environment: environment,
+      max_concurrency: finiteInteger(args.max_concurrency, "max_concurrency", 1, 1, 32),
+      supports_pause_resume: optionalBoolean(args.supports_pause_resume, "supports_pause_resume") ?? false,
+      supports_evidence_receipts: optionalBoolean(args.supports_evidence_receipts, "supports_evidence_receipts") ?? false
+    }, ["name", "host"]);
+  }
+  runtimeAdapterOwner(adapter) {
+    return `runtime_adapter:${adapter.id}:${adapter.version}`;
+  }
+  runtimeAdapterDispatch(args) {
+    const adapter = this.store.get(
+      "runtime_adapter",
+      text(args.runtime_adapter_id, "runtime_adapter_id"),
+      args.runtime_adapter_version === void 0 ? void 0 : finiteInteger(args.runtime_adapter_version, "runtime_adapter_version", 1)
+    );
+    const capacity = finiteInteger(args.capacity, "capacity", Number(adapter.max_concurrency), 1, Number(adapter.max_concurrency));
+    const dispatch = this.runtimeDispatch({
+      run_id: text(args.run_id, "run_id"),
+      claimed_by: this.runtimeAdapterOwner(adapter),
+      capacity,
+      kinds: adapter.allowed_kinds,
+      effects: adapter.allowed_effects
+    });
+    return { adapter, ...dispatch };
+  }
+  runtimeAdapterReport(args) {
+    const adapter = this.store.get(
+      "runtime_adapter",
+      text(args.runtime_adapter_id, "runtime_adapter_id"),
+      args.runtime_adapter_version === void 0 ? void 0 : finiteInteger(args.runtime_adapter_version, "runtime_adapter_version", 1)
+    );
+    const operation = this.store.get("runtime_operation", text(args.operation_id, "operation_id"));
+    if (!adapter.allowed_kinds.includes(String(operation.kind)) || !adapter.allowed_effects.includes(String(operation.effect))) {
+      throw new Error("Runtime adapter is not authorized for this operation");
+    }
+    const summary2 = assertNoSecret(text(args.summary, "summary"), "summary");
+    const artifact = this.artifactRegister({
+      kind: "runtime_adapter_receipt",
+      name: `Runtime adapter ${operation.id}`,
+      uri: `craft://runtime-adapter-receipts/${operation.id}/${operation.attempts}`,
+      producer_type: "runtime_adapter",
+      producer_id: adapter.id,
+      metadata: {
+        runtime_operation_id: operation.id,
+        runtime_adapter_id: adapter.id,
+        runtime_adapter_version: adapter.version,
+        host: adapter.host
+      }
+    });
+    const evidence = this.evidenceRecord({
+      source_type: "runtime_adapter",
+      confidence: "bounded",
+      claim: summary2,
+      artifact_id: artifact.id,
+      locator: { runtime_operation_id: operation.id, runtime_adapter_id: adapter.id }
+    });
+    const submitted = this.runtimeOperationSubmit({
+      operation_id: operation.id,
+      lease_id: text(args.lease_id, "lease_id"),
+      claimed_by: this.runtimeAdapterOwner(adapter),
+      verdict: text(args.verdict, "verdict"),
+      summary: summary2,
+      costs: args.costs ?? {},
+      retryable: optionalBoolean(args.retryable, "retryable") ?? false,
+      artifact_ids: [...array(args.artifact_ids ?? [], "artifact_ids").map((value) => text(value, "artifact_id")), artifact.id],
+      evidence_ids: [...array(args.evidence_ids ?? [], "evidence_ids").map((value) => text(value, "evidence_id")), evidence.id],
+      idempotency_key: args.idempotency_key ?? `adapter:${adapter.id}:${operation.id}:${operation.attempts}`
+    });
+    return { adapter, artifact, evidence, ...submitted };
+  }
   runtimeOperations(runId) {
     return this.store.list("runtime_operation", 1e4, (operation) => operation.run_id === runId).sort((left, right) => String(left.id).localeCompare(String(right.id)));
   }
@@ -9007,13 +9101,15 @@ var CraftService = class _CraftService {
     const capacity = finiteInteger(args.capacity, "capacity", Number(policy.max_concurrency), 1, Number(policy.max_concurrency));
     const kinds = args.kinds === void 0 ? void 0 : uniqueTextArray(args.kinds, "kinds");
     if (kinds?.some((kind) => !RUNTIME_KINDS.has(kind))) throw new Error("Runtime dispatch kinds must be supported");
+    const effects = args.effects === void 0 ? void 0 : uniqueTextArray(args.effects, "effects");
+    if (effects?.some((effect) => !SIDE_EFFECTS.has(effect))) throw new Error("Runtime dispatch effects must be supported");
     const operations = this.runtimeOperations(String(run.id));
     const active = operations.filter((operation) => operation.status === "leased").length;
     const passed = new Set(operations.filter((operation) => operation.status === "passed").map((operation) => String(operation.id)));
     const dispatched = [];
     for (const operation of operations) {
       const dependencies = Array.isArray(operation.depends_on) ? operation.depends_on.map(String) : operation.parent_operation_id ? [String(operation.parent_operation_id)] : [];
-      if (dispatched.length >= Math.max(0, capacity - active) || operation.status !== "pending" || kinds !== void 0 && !kinds.includes(String(operation.kind)) || dependencies.some((dependency) => !passed.has(dependency))) continue;
+      if (dispatched.length >= Math.max(0, capacity - active) || operation.status !== "pending" || kinds !== void 0 && !kinds.includes(String(operation.kind)) || effects !== void 0 && !effects.includes(String(operation.effect)) || dependencies.some((dependency) => !passed.has(dependency))) continue;
       if (policy.require_approval_for.includes(String(operation.effect)) && operation.approval?.decision !== "approve") {
         const waiting = this.store.save("runtime_operation", String(operation.id), { ...recordPayload(operation), status: "awaiting_approval" });
         this.runtimeTrace(run, "awaiting_approval", { operation_id: waiting.id, effect: waiting.effect });
@@ -10357,20 +10453,26 @@ ${task.goal}`.toLowerCase();
     const minTrials = finiteInteger(args.min_trials, "min_trials", 2, 1, 1e4);
     const minimumDelta = args.min_pass_rate_delta === void 0 ? 0 : Number(args.min_pass_rate_delta);
     const maximumCostRatio = args.max_cost_regression_ratio === void 0 ? Number.POSITIVE_INFINITY : Number(args.max_cost_regression_ratio);
-    if (!Number.isFinite(minimumDelta) || minimumDelta < -1 || minimumDelta > 1 || !Number.isFinite(maximumCostRatio) && maximumCostRatio !== Number.POSITIVE_INFINITY || maximumCostRatio < 0) {
+    const maximumDurationRatio = args.max_duration_regression_ratio === void 0 ? Number.POSITIVE_INFINITY : Number(args.max_duration_regression_ratio);
+    const costMetric = args.cost_metric === void 0 ? "tokens" : text(args.cost_metric, "cost_metric");
+    if (!Number.isFinite(minimumDelta) || minimumDelta < -1 || minimumDelta > 1 || !Number.isFinite(maximumCostRatio) && maximumCostRatio !== Number.POSITIVE_INFINITY || maximumCostRatio < 0 || !Number.isFinite(maximumDurationRatio) && maximumDurationRatio !== Number.POSITIVE_INFINITY || maximumDurationRatio < 0) {
       throw new Error("Promotion thresholds are invalid");
     }
     const baseline = comparison.baseline;
     const candidate = comparison.candidate;
     const paired = this.evaluationPairedComparison(baselineRun, candidateRun);
-    const baselineDuration = baseline.costs.duration_ms?.mean;
-    const candidateDuration = candidate.costs.duration_ms?.mean;
-    const costRatio = Number(candidateDuration) / Math.max(1, Number(baselineDuration));
+    const baselineCost = metricMean(baseline, costMetric);
+    const candidateCost = metricMean(candidate, costMetric);
+    const baselineDuration = metricMean(baseline, "duration_ms");
+    const candidateDuration = metricMean(candidate, "duration_ms");
+    const costRatio = baselineCost === null || candidateCost === null ? null : candidateCost / Math.max(1, baselineCost);
+    const durationRatio = baselineDuration === null || candidateDuration === null ? null : candidateDuration / Math.max(1, baselineDuration);
     const checks = [
       { check: "held_out", passed: comparison.split === "held_out" },
       { check: "minimum_trials", passed: Number(baseline.total) >= minTrials && Number(candidate.total) >= minTrials },
       { check: "pass_rate", passed: Number(candidate.pass_rate) - Number(baseline.pass_rate) >= minimumDelta },
-      { check: "cost_regression", passed: costRatio <= maximumCostRatio },
+      { check: "cost_regression", passed: maximumCostRatio === Number.POSITIVE_INFINITY || costRatio !== null && costRatio <= maximumCostRatio },
+      { check: "duration_regression", passed: maximumDurationRatio === Number.POSITIVE_INFINITY || durationRatio !== null && durationRatio <= maximumDurationRatio },
       { check: "paired_cases", passed: Number(paired.matched_trials) >= minTrials }
     ];
     const eligible = checks.every((check) => check.passed);
@@ -10381,9 +10483,21 @@ ${task.goal}`.toLowerCase();
       eligible,
       checks,
       paired,
-      thresholds: { min_trials: minTrials, min_pass_rate_delta: minimumDelta, max_cost_regression_ratio: maximumCostRatio }
+      thresholds: {
+        min_trials: minTrials,
+        min_pass_rate_delta: minimumDelta,
+        cost_metric: costMetric,
+        max_cost_regression_ratio: maximumCostRatio,
+        max_duration_regression_ratio: maximumDurationRatio
+      }
     });
-    return { eligible, promotion, comparison: { ...comparison, paired, cost_regression_ratio: costRatio } };
+    return { eligible, promotion, comparison: {
+      ...comparison,
+      paired,
+      cost_metric: costMetric,
+      cost_regression_ratio: costRatio,
+      duration_regression_ratio: durationRatio
+    } };
   }
   experienceMine(args) {
     const subjectType = text(args.subject_type, "subject_type");
@@ -10475,13 +10589,17 @@ ${task.goal}`.toLowerCase();
       if (signoff.decision !== "passed" || signoff.subject_type !== subjectType || signoff.subject_id !== subject.id || Number(signoff.subject_version) !== Number(subject.version) || run2.verdict !== "passed" || run2.split !== "held_out") {
         throw new Error(`Verification requires a passed signoff for this exact ${subjectType} version`);
       }
-      return { evaluation_run_id: run2.id, signoff_id: signoff.id };
+      return { evaluation_run_id: run2.id, signoff_id: signoff.id, promotion_id: null };
     }
     const run = this.store.get("evaluation_run", text(args.evaluation_run_id, "evaluation_run_id"));
     if (run.verdict !== "passed" || run.split !== "held_out" || run.subject_type !== subjectType || run.subject_id !== subject.id || Number(run.subject_version) !== Number(subject.version)) {
       throw new Error(`Verification requires a passed held-out evaluation for this exact ${subjectType} version`);
     }
-    return { evaluation_run_id: run.id, signoff_id: null };
+    const promotion = this.store.get("evaluation_promotion", text(args.promotion_id, "promotion_id"));
+    if (!promotion.eligible || promotion.candidate_run_id !== run.id) {
+      throw new Error(`Verification requires an eligible promotion for this exact ${subjectType} evaluation`);
+    }
+    return { evaluation_run_id: run.id, signoff_id: null, promotion_id: promotion.id };
   }
   transitionVersionedSubject(kind, idKey, subjectType, args) {
     const subject = this.store.get(kind, text(args[idKey], idKey));
@@ -10495,7 +10613,7 @@ ${task.goal}`.toLowerCase();
       deprecated: []
     };
     if (!allowed[current]?.includes(target)) throw new Error(`Invalid ${subjectType} transition: ${current} -> ${target}`);
-    const verification = target === "verified" ? this.verificationGate(subjectType, subject, args) : { evaluation_run_id: null, signoff_id: null };
+    const verification = target === "verified" ? this.verificationGate(subjectType, subject, args) : { evaluation_run_id: null, signoff_id: null, promotion_id: null };
     return this.store.save(kind, String(subject.id), {
       ...recordPayload(subject),
       lifecycle: target,
@@ -10963,7 +11081,7 @@ ${task.goal}`.toLowerCase();
 
 // src/mcp.ts
 var schemaFor = (name) => {
-  if (["scan", "enabled", "allow_execution", "allow_external_write", "require_held_out", "require_outcome_passed", "retryable", "requires_external_effect"].includes(name)) return { type: "boolean" };
+  if (["scan", "enabled", "allow_execution", "allow_external_write", "require_held_out", "require_outcome_passed", "retryable", "requires_external_effect", "supports_pause_resume", "supports_evidence_receipts"].includes(name)) return { type: "boolean" };
   if ([
     "limit",
     "version",
@@ -10983,9 +11101,10 @@ var schemaFor = (name) => {
     "max_attempts",
     "min_trials",
     "harness_version",
-    "ir_version"
+    "ir_version",
+    "runtime_adapter_version"
   ].includes(name)) return { type: "integer" };
-  if (["score", "value", "threshold", "min_pass_rate_delta", "max_cost_regression_ratio"].includes(name)) return { type: "number" };
+  if (["score", "value", "threshold", "min_pass_rate_delta", "max_cost_regression_ratio", "max_duration_regression_ratio"].includes(name)) return { type: "number" };
   if ([
     "inputs",
     "metadata",
@@ -11030,7 +11149,9 @@ var schemaFor = (name) => {
     "trusted_hosts",
     "command_allowlist",
     "path_allowlist",
-    "kinds"
+    "kinds",
+    "effects",
+    "allowed_kinds"
   ].includes(name)) return { type: "array" };
   return { type: "string" };
 };
@@ -11146,7 +11267,7 @@ var TOOLS = [
     "Lease only pending policy-approved runtime operations to a host.",
     ["run_id", "claimed_by"],
     false,
-    ["capacity", "kinds"]
+    ["capacity", "kinds", "effects"]
   ),
   tool("craft_runtime_operation_get", "Read one runtime operation.", ["operation_id"], true),
   tool(
@@ -11176,6 +11297,29 @@ var TOOLS = [
     ["run_id", "policy_id", "environment"],
     true,
     ["policy_version"]
+  ),
+  tool(
+    "craft_runtime_adapter_save",
+    "Save a versioned Host execution contract that limits operation kinds, effects, concurrency, and receipt support.",
+    ["name", "host", "allowed_kinds", "allowed_effects"],
+    false,
+    ["runtime_adapter_id", "max_concurrency", "execution_environment", "supports_pause_resume", "supports_evidence_receipts"]
+  ),
+  tool("craft_runtime_adapter_get", "Read an exact Runtime Adapter contract.", ["runtime_adapter_id"], true, ["version"]),
+  tool("craft_runtime_adapter_list", "List registered Runtime Adapter contracts.", [], true, ["limit", "query"]),
+  tool(
+    "craft_runtime_adapter_dispatch",
+    "Lease only operations declared by one Runtime Adapter contract.",
+    ["runtime_adapter_id", "run_id"],
+    false,
+    ["runtime_adapter_version", "capacity"]
+  ),
+  tool(
+    "craft_runtime_adapter_report",
+    "Submit an adapter-attributed operation receipt with bounded Evidence.",
+    ["runtime_adapter_id", "operation_id", "lease_id", "verdict", "summary"],
+    false,
+    ["runtime_adapter_version", "costs", "artifact_ids", "evidence_ids", "retryable", "idempotency_key"]
   ),
   tool(
     "craft_route_workflow_proposal_create",
@@ -11230,7 +11374,7 @@ var TOOLS = [
     "Move a workflow through draft, candidate, verified, or deprecated with evidence gates.",
     ["workflow_id", "target", "reason"],
     false,
-    ["evaluation_run_id", "signoff_id"]
+    ["evaluation_run_id", "signoff_id", "promotion_id"]
   ),
   tool(
     "craft_workflow_rollback",
@@ -11403,10 +11547,10 @@ var TOOLS = [
   ),
   tool(
     "craft_evaluation_promotion_assess",
-    "Apply held-out repeated-trial, paired comparison, and cost regression thresholds before promotion.",
+    "Apply held-out repeated-trial, paired comparison, cost, and duration regression thresholds before promotion.",
     ["comparison_id"],
     false,
-    ["promotion_id", "min_trials", "min_pass_rate_delta", "max_cost_regression_ratio"]
+    ["promotion_id", "min_trials", "min_pass_rate_delta", "cost_metric", "max_cost_regression_ratio", "max_duration_regression_ratio"]
   ),
   tool("craft_evaluation_comparison_get", "Read an immutable evaluation comparison.", ["comparison_id"], true),
   tool("craft_evaluation_comparison_list", "List immutable evaluation comparisons.", [], true, ["limit", "query"]),
@@ -11531,6 +11675,11 @@ var McpServer = class {
       craft_runtime_lease_recover: (a) => service.runtimeLeaseRecover(a),
       craft_runtime_driver_tick: (a) => service.runtimeDriverTick(a),
       craft_runtime_promotion_eligibility: (a) => service.runtimePromotionEligibility(a),
+      craft_runtime_adapter_save: (a) => service.runtimeAdapterSave(a),
+      craft_runtime_adapter_get: (a) => service.get("runtime_adapter", "runtime_adapter_id", a),
+      craft_runtime_adapter_list: (a) => service.list("runtime_adapter", "runtime_adapters", a),
+      craft_runtime_adapter_dispatch: (a) => service.runtimeAdapterDispatch(a),
+      craft_runtime_adapter_report: (a) => service.runtimeAdapterReport(a),
       craft_route_workflow_proposal_create: (a) => service.routeWorkflowProposalCreate(a),
       craft_default_route_update: (a) => service.defaultRouteUpdate(a),
       craft_task_open: (a) => service.taskOpen(a),

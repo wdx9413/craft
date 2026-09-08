@@ -9,7 +9,7 @@ import { publishSkill, rollbackSkillPublication } from "./skill-publisher.ts";
 import { loadConfig } from "./config.ts";
 import { OpenAiCompatibleEmbeddingProvider, type EmbeddingProvider } from "./semantic.ts";
 
-export const VERSION = "0.9.6";
+export const VERSION = "0.9.7";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -97,6 +97,7 @@ const ROUTE_RECEIPT_KINDS = new Set(["git_diff", "focused_test", "coverage", "st
 const ROUTE_RECEIPT_STATUS = new Set(["passed", "failed", "skipped"]);
 const HOST_OPERATIONS = new Set(["complete_stage", "execute_verified_workflow"]);
 const RUNTIME_KINDS = new Set(["agent", "workflow", "grader"]);
+const RUNTIME_ADAPTER_HOSTS = new Set(["codex", "claude", "generic"]);
 const RUNTIME_RUN_TERMINAL = new Set(["completed", "failed", "cancelled"]);
 const SECRET_ASSIGNMENT = /(?:api[_-]?key|authorization|cookie|password|secret|token)\s*[:=]\s*[^\s]+/iu;
 const DEFAULT_RECEIPT_REQUIREMENTS: JsonObject = {
@@ -151,6 +152,11 @@ function validIsoTime(value: unknown, name: string): number {
   return parsed;
 }
 
+function metricMean(aggregate: JsonObject, metric: string): number | null {
+  const summary = (aggregate.costs as JsonObject)[metric] as JsonObject | undefined;
+  return typeof summary?.mean === "number" && Number.isFinite(summary.mean) ? summary.mean : null;
+}
+
 export class CraftService {
   readonly store: CraftStore;
   readonly catalog: Catalog;
@@ -170,7 +176,7 @@ export class CraftService {
       "grader", "grade", "signoff_policy", "signoff", "experience_pattern", "skill_proposal",
       "skill_publication", "budget", "model_provider", "agent_session", "route", "route_strategy",
       "project_policy", "route_receipt", "host_adapter", "host_dispatch", "runtime_policy", "runtime_run",
-      "runtime_operation", "evaluation_runner", "evaluation_promotion", "experience_mining_candidate",
+      "runtime_operation", "runtime_adapter", "evaluation_runner", "evaluation_promotion", "experience_mining_candidate",
       "experience_shadow_experiment", "adaptive_harness", "agent_ir", "operational_signal", "operational_alert"];
     return { version: VERSION, data_root: this.store.paths.root,
       counts: Object.fromEntries(kinds.map((kind) => [kind, this.store.count(kind)])) };
@@ -240,6 +246,64 @@ export class CraftService {
   private runtimePolicy(args: JsonObject): JsonObject {
     return this.store.get("runtime_policy", text(args.policy_id, "policy_id"),
       args.policy_version === undefined ? undefined : finiteInteger(args.policy_version, "policy_version", 1));
+  }
+
+  runtimeAdapterSave(args: JsonObject): JsonObject {
+    const host = text(args.host, "host");
+    if (!RUNTIME_ADAPTER_HOSTS.has(host)) throw new Error("Runtime adapter host is unsupported");
+    const allowedKinds = uniqueTextArray(args.allowed_kinds, "allowed_kinds");
+    const allowedEffects = uniqueTextArray(args.allowed_effects, "allowed_effects");
+    if (allowedKinds.some((kind) => !RUNTIME_KINDS.has(kind)) || allowedEffects.some((effect) => !SIDE_EFFECTS.has(effect))) {
+      throw new Error("Runtime adapter kinds or effects are unsupported");
+    }
+    const environment = String(args.execution_environment ?? "local");
+    if (!new Set(["local", "isolated"]).has(environment)) throw new Error("Runtime adapter execution_environment is unsupported");
+    if (environment === "local" && allowedEffects.some((effect) => ["external_write", "destructive"].includes(effect))) {
+      throw new Error("Runtime adapter local effects must not include external_write or destructive");
+    }
+    return this.saveVersioned("runtime_adapter", "runtime_adapter", { ...args, host, allowed_kinds: allowedKinds,
+      allowed_effects: allowedEffects, execution_environment: environment,
+      max_concurrency: finiteInteger(args.max_concurrency, "max_concurrency", 1, 1, 32),
+      supports_pause_resume: optionalBoolean(args.supports_pause_resume, "supports_pause_resume") ?? false,
+      supports_evidence_receipts: optionalBoolean(args.supports_evidence_receipts, "supports_evidence_receipts") ?? false,
+    }, ["name", "host"]);
+  }
+
+  private runtimeAdapterOwner(adapter: JsonObject): string {
+    return `runtime_adapter:${adapter.id}:${adapter.version}`;
+  }
+
+  runtimeAdapterDispatch(args: JsonObject): JsonObject {
+    const adapter = this.store.get("runtime_adapter", text(args.runtime_adapter_id, "runtime_adapter_id"),
+      args.runtime_adapter_version === undefined ? undefined : finiteInteger(args.runtime_adapter_version, "runtime_adapter_version", 1));
+    const capacity = finiteInteger(args.capacity, "capacity", Number(adapter.max_concurrency), 1, Number(adapter.max_concurrency));
+    const dispatch = this.runtimeDispatch({ run_id: text(args.run_id, "run_id"), claimed_by: this.runtimeAdapterOwner(adapter), capacity,
+      kinds: adapter.allowed_kinds, effects: adapter.allowed_effects });
+    return { adapter, ...dispatch };
+  }
+
+  runtimeAdapterReport(args: JsonObject): JsonObject {
+    const adapter = this.store.get("runtime_adapter", text(args.runtime_adapter_id, "runtime_adapter_id"),
+      args.runtime_adapter_version === undefined ? undefined : finiteInteger(args.runtime_adapter_version, "runtime_adapter_version", 1));
+    const operation = this.store.get("runtime_operation", text(args.operation_id, "operation_id"));
+    if (!(adapter.allowed_kinds as string[]).includes(String(operation.kind)) ||
+        !(adapter.allowed_effects as string[]).includes(String(operation.effect))) {
+      throw new Error("Runtime adapter is not authorized for this operation");
+    }
+    const summary = assertNoSecret(text(args.summary, "summary"), "summary");
+    const artifact = this.artifactRegister({ kind: "runtime_adapter_receipt", name: `Runtime adapter ${operation.id}`,
+      uri: `craft://runtime-adapter-receipts/${operation.id}/${operation.attempts}`, producer_type: "runtime_adapter",
+      producer_id: adapter.id, metadata: { runtime_operation_id: operation.id, runtime_adapter_id: adapter.id,
+        runtime_adapter_version: adapter.version, host: adapter.host } });
+    const evidence = this.evidenceRecord({ source_type: "runtime_adapter", confidence: "bounded", claim: summary,
+      artifact_id: artifact.id, locator: { runtime_operation_id: operation.id, runtime_adapter_id: adapter.id } });
+    const submitted = this.runtimeOperationSubmit({ operation_id: operation.id, lease_id: text(args.lease_id, "lease_id"),
+      claimed_by: this.runtimeAdapterOwner(adapter), verdict: text(args.verdict, "verdict"), summary,
+      costs: args.costs ?? {}, retryable: optionalBoolean(args.retryable, "retryable") ?? false,
+      artifact_ids: [...array(args.artifact_ids ?? [], "artifact_ids").map((value) => text(value, "artifact_id")), artifact.id],
+      evidence_ids: [...array(args.evidence_ids ?? [], "evidence_ids").map((value) => text(value, "evidence_id")), evidence.id],
+      idempotency_key: args.idempotency_key ?? `adapter:${adapter.id}:${operation.id}:${operation.attempts}` });
+    return { adapter, artifact, evidence, ...submitted };
   }
 
   private runtimeOperations(runId: string): JsonObject[] {
@@ -322,6 +386,8 @@ export class CraftService {
     const capacity = finiteInteger(args.capacity, "capacity", Number(policy.max_concurrency), 1, Number(policy.max_concurrency));
     const kinds = args.kinds === undefined ? undefined : uniqueTextArray(args.kinds, "kinds");
     if (kinds?.some((kind) => !RUNTIME_KINDS.has(kind))) throw new Error("Runtime dispatch kinds must be supported");
+    const effects = args.effects === undefined ? undefined : uniqueTextArray(args.effects, "effects");
+    if (effects?.some((effect) => !SIDE_EFFECTS.has(effect))) throw new Error("Runtime dispatch effects must be supported");
     const operations = this.runtimeOperations(String(run.id));
     const active = operations.filter((operation) => operation.status === "leased").length;
     const passed = new Set(operations.filter((operation) => operation.status === "passed").map((operation) => String(operation.id)));
@@ -330,7 +396,8 @@ export class CraftService {
       const dependencies = Array.isArray(operation.depends_on) ? operation.depends_on.map(String)
         : operation.parent_operation_id ? [String(operation.parent_operation_id)] : [];
       if (dispatched.length >= Math.max(0, capacity - active) || operation.status !== "pending" ||
-        (kinds !== undefined && !kinds.includes(String(operation.kind))) || dependencies.some((dependency) => !passed.has(dependency))) continue;
+        (kinds !== undefined && !kinds.includes(String(operation.kind))) ||
+        (effects !== undefined && !effects.includes(String(operation.effect))) || dependencies.some((dependency) => !passed.has(dependency))) continue;
       if ((policy.require_approval_for as string[]).includes(String(operation.effect)) &&
         (operation.approval as JsonObject | undefined)?.decision !== "approve") {
         const waiting = this.store.save("runtime_operation", String(operation.id), { ...recordPayload(operation), status: "awaiting_approval" });
@@ -1309,28 +1376,35 @@ export class CraftService {
     const minTrials = finiteInteger(args.min_trials, "min_trials", 2, 1, 10_000);
     const minimumDelta = args.min_pass_rate_delta === undefined ? 0 : Number(args.min_pass_rate_delta);
     const maximumCostRatio = args.max_cost_regression_ratio === undefined ? Number.POSITIVE_INFINITY : Number(args.max_cost_regression_ratio);
+    const maximumDurationRatio = args.max_duration_regression_ratio === undefined ? Number.POSITIVE_INFINITY : Number(args.max_duration_regression_ratio);
+    const costMetric = args.cost_metric === undefined ? "tokens" : text(args.cost_metric, "cost_metric");
     if (!Number.isFinite(minimumDelta) || minimumDelta < -1 || minimumDelta > 1 ||
-      (!Number.isFinite(maximumCostRatio) && maximumCostRatio !== Number.POSITIVE_INFINITY) || maximumCostRatio < 0) {
+      (!Number.isFinite(maximumCostRatio) && maximumCostRatio !== Number.POSITIVE_INFINITY) || maximumCostRatio < 0 ||
+      (!Number.isFinite(maximumDurationRatio) && maximumDurationRatio !== Number.POSITIVE_INFINITY) || maximumDurationRatio < 0) {
       throw new Error("Promotion thresholds are invalid");
     }
     const baseline = comparison.baseline as JsonObject; const candidate = comparison.candidate as JsonObject;
     const paired = this.evaluationPairedComparison(baselineRun, candidateRun);
-    const baselineDuration = ((baseline.costs as JsonObject).duration_ms as JsonObject | undefined)?.mean;
-    const candidateDuration = ((candidate.costs as JsonObject).duration_ms as JsonObject | undefined)?.mean;
-    const costRatio = Number(candidateDuration) / Math.max(1, Number(baselineDuration));
+    const baselineCost = metricMean(baseline, costMetric); const candidateCost = metricMean(candidate, costMetric);
+    const baselineDuration = metricMean(baseline, "duration_ms"); const candidateDuration = metricMean(candidate, "duration_ms");
+    const costRatio = baselineCost === null || candidateCost === null ? null : candidateCost / Math.max(1, baselineCost);
+    const durationRatio = baselineDuration === null || candidateDuration === null ? null : candidateDuration / Math.max(1, baselineDuration);
     const checks = [
       { check: "held_out", passed: comparison.split === "held_out" },
       { check: "minimum_trials", passed: Number(baseline.total) >= minTrials && Number(candidate.total) >= minTrials },
       { check: "pass_rate", passed: Number(candidate.pass_rate) - Number(baseline.pass_rate) >= minimumDelta },
-      { check: "cost_regression", passed: costRatio <= maximumCostRatio },
+      { check: "cost_regression", passed: maximumCostRatio === Number.POSITIVE_INFINITY || (costRatio !== null && costRatio <= maximumCostRatio) },
+      { check: "duration_regression", passed: maximumDurationRatio === Number.POSITIVE_INFINITY || (durationRatio !== null && durationRatio <= maximumDurationRatio) },
       { check: "paired_cases", passed: Number(paired.matched_trials) >= minTrials },
     ];
     const eligible = checks.every((check) => check.passed);
     const promotion = this.store.create("evaluation_promotion", String(args.promotion_id ?? id("promotion")), {
       comparison_id: comparison.id, baseline_run_id: baselineRun.id, candidate_run_id: candidateRun.id, eligible, checks,
-      paired, thresholds: { min_trials: minTrials, min_pass_rate_delta: minimumDelta, max_cost_regression_ratio: maximumCostRatio },
+      paired, thresholds: { min_trials: minTrials, min_pass_rate_delta: minimumDelta, cost_metric: costMetric,
+        max_cost_regression_ratio: maximumCostRatio, max_duration_regression_ratio: maximumDurationRatio },
     });
-    return { eligible, promotion, comparison: { ...comparison, paired, cost_regression_ratio: costRatio } };
+    return { eligible, promotion, comparison: { ...comparison, paired, cost_metric: costMetric,
+      cost_regression_ratio: costRatio, duration_regression_ratio: durationRatio } };
   }
 
   experienceMine(args: JsonObject): JsonObject {
@@ -1408,14 +1482,18 @@ export class CraftService {
           run.verdict !== "passed" || run.split !== "held_out") {
         throw new Error(`Verification requires a passed signoff for this exact ${subjectType} version`);
       }
-      return { evaluation_run_id: run.id, signoff_id: signoff.id };
+      return { evaluation_run_id: run.id, signoff_id: signoff.id, promotion_id: null };
     }
     const run = this.store.get("evaluation_run", text(args.evaluation_run_id, "evaluation_run_id"));
     if (run.verdict !== "passed" || run.split !== "held_out" || run.subject_type !== subjectType ||
         run.subject_id !== subject.id || Number(run.subject_version) !== Number(subject.version)) {
       throw new Error(`Verification requires a passed held-out evaluation for this exact ${subjectType} version`);
     }
-    return { evaluation_run_id: run.id, signoff_id: null };
+    const promotion = this.store.get("evaluation_promotion", text(args.promotion_id, "promotion_id"));
+    if (!promotion.eligible || promotion.candidate_run_id !== run.id) {
+      throw new Error(`Verification requires an eligible promotion for this exact ${subjectType} evaluation`);
+    }
+    return { evaluation_run_id: run.id, signoff_id: null, promotion_id: promotion.id };
   }
 
   private transitionVersionedSubject(kind: string, idKey: string, subjectType: string, args: JsonObject): JsonObject {
@@ -1429,7 +1507,7 @@ export class CraftService {
     };
     if (!allowed[current]?.includes(target)) throw new Error(`Invalid ${subjectType} transition: ${current} -> ${target}`);
     const verification = target === "verified" ? this.verificationGate(subjectType, subject, args)
-      : { evaluation_run_id: null, signoff_id: null };
+      : { evaluation_run_id: null, signoff_id: null, promotion_id: null };
     return this.store.save(kind, String(subject.id), { ...recordPayload(subject), lifecycle: target,
       previous_version: subject.version, transition_reason: text(args.reason, "reason"), ...verification });
   }

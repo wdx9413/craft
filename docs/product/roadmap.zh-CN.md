@@ -33,6 +33,7 @@
 - 自动 Eval Runner：对确定性 Workflow 运行 `Case × Subject × N Trial`，自动归档 Trial/Trace/Outcome、Evaluation Run 与可比 Comparison；程序 Grader 可自动出 Grade，Promotion Assessment 对 held-out baseline/candidate 检查最少 Trial、通过率、成本与配对胜负；模型/业务 Agent Subject 必须通过 Host Runtime 提交真实 Outcome。（v0.9.6 已实现）
 - Experience Miner 与 Operational Drift：重复失败 Trace 只产出 proposal-only 候选；候选只能创建 shadow 实验并经 Eval/Signoff/Publisher Gate 发布，数值线上信号以滑动窗口生成可审计告警。（v0.9.6 已实现）
 - 按风险、预算和副作用选择最小 Harness，并将 Operation DAG 编译为版本化 Agent IR、Lower 到 Runtime Run。（v0.9.6 已实现）
+- Runtime Adapter 将宿主 Agent/Grader 领取与回执约束为版本化契约；本地 Adapter 不能声明外部/破坏性 Effect。直接 Eval 晋级必须经过 held-out 的 Candidate/Baseline Promotion，成本与时延分别受阈值控制。（v0.9.7 已实现）
 - Lease TTL/续租、显式幂等提交和实际成本超限阻断。（v0.8.0 已实现基础协议）
 
 验收：同一真实任务集能比较两个版本的质量、成本、耗时和失败类型，并阻止无证据晋级；默认入口不能绕过 Host 审批或把未验证 Skill 当作可执行流程。Runtime 的每个子 Operation 必须归属根 Task，控制/环境指纹变化必须使旧证据失去新晋级资格。

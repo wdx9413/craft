@@ -3,17 +3,17 @@ import { type JsonObject } from "./store.ts";
 
 type Tool = { name: string; description: string; inputSchema: JsonObject; annotations?: JsonObject };
 const schemaFor = (name: string): JsonObject => {
-  if (["scan", "enabled", "allow_execution", "allow_external_write", "require_held_out", "require_outcome_passed", "retryable", "requires_external_effect"].includes(name)) return { type: "boolean" };
+  if (["scan", "enabled", "allow_execution", "allow_external_write", "require_held_out", "require_outcome_passed", "retryable", "requires_external_effect", "supports_pause_resume", "supports_evidence_receipts"].includes(name)) return { type: "boolean" };
   if (["limit", "version", "capacity", "max_concurrency", "size_bytes", "subject_version",
     "suite_version", "configuration_version", "harness_configuration_version", "target_version",
-    "grader_version", "policy_version", "lease_ttl_seconds", "trials_per_case", "window_size", "max_attempts", "min_trials", "harness_version", "ir_version"].includes(name)) return { type: "integer" };
-  if (["score", "value", "threshold", "min_pass_rate_delta", "max_cost_regression_ratio"].includes(name)) return { type: "number" };
+    "grader_version", "policy_version", "lease_ttl_seconds", "trials_per_case", "window_size", "max_attempts", "min_trials", "harness_version", "ir_version", "runtime_adapter_version"].includes(name)) return { type: "integer" };
+  if (["score", "value", "threshold", "min_pass_rate_delta", "max_cost_regression_ratio", "max_duration_regression_ratio"].includes(name)) return { type: "number" };
   if (["inputs", "metadata", "policy", "dimensions", "environment", "budget", "data", "scores",
     "costs", "metrics", "configuration", "receipt_requirements", "execution", "rules"].includes(name)) return { type: "object" };
   if (["completed", "pending", "decisions", "artifacts", "steps", "cases", "capabilities",
     "allowed_side_effects", "approved_side_effects", "nodes", "artifact_ids", "evidence_ids",
     "trial_ids", "requirements", "grade_ids", "pattern_ids", "failure_modes", "receipt_ids",
-    "allowed_operations", "allowed_effects", "require_approval_for", "operations", "subjects", "children", "trusted_hosts", "command_allowlist", "path_allowlist", "kinds"].includes(name)) return { type: "array" };
+    "allowed_operations", "allowed_effects", "require_approval_for", "operations", "subjects", "children", "trusted_hosts", "command_allowlist", "path_allowlist", "kinds", "effects", "allowed_kinds"].includes(name)) return { type: "array" };
   return { type: "string" };
 };
 const objectSchema = (required: string[] = [], optional: string[] = []): JsonObject => ({ type: "object",
@@ -64,7 +64,7 @@ export const TOOLS: Tool[] = [
     ["task_id", "policy_id", "environment", "operations"], false, ["run_id", "policy_version", "trial_id"]),
   tool("craft_runtime_run_get", "Read a durable runtime run, operations, and immutable trace.", ["run_id"], true),
   tool("craft_runtime_dispatch", "Lease only pending policy-approved runtime operations to a host.",
-    ["run_id", "claimed_by"], false, ["capacity", "kinds"]),
+    ["run_id", "claimed_by"], false, ["capacity", "kinds", "effects"]),
   tool("craft_runtime_operation_get", "Read one runtime operation.", ["operation_id"], true),
   tool("craft_runtime_operation_decision", "Approve or reject an effect that is awaiting human approval.",
     ["operation_id", "decision", "actor"]),
@@ -76,6 +76,16 @@ export const TOOLS: Tool[] = [
   tool("craft_runtime_run_resume", "Return the next durable runtime action without guessing.", ["run_id"], true),
   tool("craft_runtime_promotion_eligibility", "Check exact policy and environment fingerprints before promotion.",
     ["run_id", "policy_id", "environment"], true, ["policy_version"]),
+  tool("craft_runtime_adapter_save", "Save a versioned Host execution contract that limits operation kinds, effects, concurrency, and receipt support.",
+    ["name", "host", "allowed_kinds", "allowed_effects"], false,
+    ["runtime_adapter_id", "max_concurrency", "execution_environment", "supports_pause_resume", "supports_evidence_receipts"]),
+  tool("craft_runtime_adapter_get", "Read an exact Runtime Adapter contract.", ["runtime_adapter_id"], true, ["version"]),
+  tool("craft_runtime_adapter_list", "List registered Runtime Adapter contracts.", [], true, ["limit", "query"]),
+  tool("craft_runtime_adapter_dispatch", "Lease only operations declared by one Runtime Adapter contract.",
+    ["runtime_adapter_id", "run_id"], false, ["runtime_adapter_version", "capacity"]),
+  tool("craft_runtime_adapter_report", "Submit an adapter-attributed operation receipt with bounded Evidence.",
+    ["runtime_adapter_id", "operation_id", "lease_id", "verdict", "summary"], false,
+    ["runtime_adapter_version", "costs", "artifact_ids", "evidence_ids", "retryable", "idempotency_key"]),
   tool("craft_route_workflow_proposal_create", "Create only a draft Workflow from two or more passed evidence-backed safe routes; promotion still requires evaluation.",
     ["route_id", "name", "steps"], false, ["workflow_id", "description", "inputs"]),
   tool("craft_default_route_update", "Record one required safe-plan stage with real evidence; the final stage records the route Outcome.",
@@ -101,7 +111,7 @@ export const TOOLS: Tool[] = [
       "harness_configuration_version", "environment", "budget"]),
   tool("craft_workflow_run_get", "Read a durable Workflow execution receipt.", ["run_id"], true),
   tool("craft_workflow_transition", "Move a workflow through draft, candidate, verified, or deprecated with evidence gates.",
-    ["workflow_id", "target", "reason"], false, ["evaluation_run_id", "signoff_id"]),
+    ["workflow_id", "target", "reason"], false, ["evaluation_run_id", "signoff_id", "promotion_id"]),
   tool("craft_workflow_rollback", "Restore a previously verified workflow version as the latest version.",
     ["workflow_id", "target_version", "reason"]),
   tool("craft_experience_pattern_create", "Derive a reusable experience pattern from at least two completed Trials and their Evidence references.",
@@ -169,8 +179,8 @@ export const TOOLS: Tool[] = [
     ["runner_id", "suite_version", "trials_per_case", "environment", "budget"]),
   tool("craft_evaluation_program_grade", "Run a versioned deterministic program grader across every Trial of an Evaluation Run.",
     ["evaluation_run_id", "grader_id"], false, ["grader_version"]),
-  tool("craft_evaluation_promotion_assess", "Apply held-out repeated-trial, paired comparison, and cost regression thresholds before promotion.",
-    ["comparison_id"], false, ["promotion_id", "min_trials", "min_pass_rate_delta", "max_cost_regression_ratio"]),
+  tool("craft_evaluation_promotion_assess", "Apply held-out repeated-trial, paired comparison, cost, and duration regression thresholds before promotion.",
+    ["comparison_id"], false, ["promotion_id", "min_trials", "min_pass_rate_delta", "cost_metric", "max_cost_regression_ratio", "max_duration_regression_ratio"]),
   tool("craft_evaluation_comparison_get", "Read an immutable evaluation comparison.", ["comparison_id"], true),
   tool("craft_evaluation_comparison_list", "List immutable evaluation comparisons.", [], true, ["limit", "query"]),
   tool("craft_grader_save", "Save a versioned program, model, human, or operational grader.",
@@ -240,6 +250,11 @@ export class McpServer {
       craft_runtime_operation_submit: (a) => service.runtimeOperationSubmit(a), craft_runtime_run_resume: (a) => service.runtimeRunResume(a),
       craft_runtime_lease_recover: (a) => service.runtimeLeaseRecover(a), craft_runtime_driver_tick: (a) => service.runtimeDriverTick(a),
       craft_runtime_promotion_eligibility: (a) => service.runtimePromotionEligibility(a),
+      craft_runtime_adapter_save: (a) => service.runtimeAdapterSave(a),
+      craft_runtime_adapter_get: (a) => service.get("runtime_adapter", "runtime_adapter_id", a),
+      craft_runtime_adapter_list: (a) => service.list("runtime_adapter", "runtime_adapters", a),
+      craft_runtime_adapter_dispatch: (a) => service.runtimeAdapterDispatch(a),
+      craft_runtime_adapter_report: (a) => service.runtimeAdapterReport(a),
       craft_route_workflow_proposal_create: (a) => service.routeWorkflowProposalCreate(a),
       craft_default_route_update: (a) => service.defaultRouteUpdate(a),
       craft_task_open: (a) => service.taskOpen(a), craft_task_list: (a) => service.taskList(a),
