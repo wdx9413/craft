@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { craftPaths } from "../src/paths.ts";
 import { CraftStore, SCHEMA_VERSION } from "../src/store.ts";
@@ -84,6 +85,8 @@ test("versioned records and events provide the shared persistence primitives", a
     assert.deepEqual(store.searchCapabilities([], 1), []);
     store.save("capability", "minimal", {});
     assert.equal(store.searchCapabilities(["missing"], 1).length, 0);
+    store.save("capability", "ranked", { name: "needle", description: "searchable capability", body: "needle body" });
+    assert.equal(store.searchCapabilities(["needle"], 1)[0].id, "ranked");
     store.remove("capability", "minimal");
     assert.throws(() => store.get("thing", "missing"), /Unknown thing/);
     assert.equal(store.appendEvent("a", "started", { ok: true }).sequence, 1);
@@ -91,6 +94,29 @@ test("versioned records and events provide the shared persistence primitives", a
     assert.deepEqual(store.events("a").map((x) => x.event_type), ["started", "finished"]);
     assert.equal(store.remove("thing", "a"), 2);
     assert.equal(store.remove("thing", "a"), 0);
+  } finally {
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("store rebuilds a legacy FTS index when available and falls back when FTS initialization fails", async () => {
+  const root = join(tmpdir(), `craft-store-fts-${process.pid}-${Date.now()}-${Math.random()}`);
+  const paths = craftPaths(root);
+  await mkdir(paths.databaseDir, { recursive: true });
+  const database = new DatabaseSync(paths.databaseFile);
+  database.exec(`CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+    INSERT INTO meta(key,value) VALUES('schema_version','1');
+    CREATE TABLE records(kind TEXT NOT NULL,id TEXT NOT NULL,version INTEGER NOT NULL,payload_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,updated_at TEXT NOT NULL,PRIMARY KEY(kind,id,version));
+    CREATE TABLE capability_fts(broken TEXT);`);
+  database.close();
+  const store = await new CraftStore(paths).open();
+  try {
+    assert.equal(store.database.prepare("SELECT value FROM meta WHERE key='schema_version'").get()?.value, String(SCHEMA_VERSION));
+    store.save("capability", "fallback", { name: "fallback needle", description: "keyword", body: "body" });
+    store.save("capability", "fallback-two", { name: "needle two", description: "keyword", body: "needle" });
+    assert.equal(store.searchCapabilities(["needle"], 2).length, 2);
   } finally {
     store.close();
     await rm(root, { recursive: true, force: true });
