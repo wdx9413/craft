@@ -7,6 +7,8 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const codexManifest = JSON.parse(await readFile(join(projectRoot, ".codex-plugin", "plugin.json"), "utf8"));
+assert(codexManifest.interface.defaultPrompt.length <= 3, "Codex accepts at most three default prompts");
 const manifest = JSON.parse(await readFile(join(projectRoot, ".mcp.json"), "utf8"));
 assert.deepEqual(Object.keys(manifest), ["mcpServers"], ".mcp.json must use the Codex companion-file shape");
 assert.deepEqual(Object.keys(manifest.mcpServers), ["craft"]);
@@ -54,9 +56,9 @@ try {
     responsesPromise,
     new Promise<never>((_, reject) => setTimeout(() => reject(new Error(errors || "MCP smoke test timed out")), 5_000)),
   ]) as Array<any>;
-  assert.equal(responses[0].result.serverInfo.version, "0.7.0");
+  assert.equal(responses[0].result.serverInfo.version, "0.7.1");
   assert((responses[1].result.tools as Array<{ name: string }>).some((tool) => tool.name === "craft_skill_proposal_publish"));
-  assert.equal(responses[2].result.structuredContent.version, "0.7.0");
+  assert.equal(responses[2].result.structuredContent.version, "0.7.1");
   console.log("Bundled plugin MCP starts without node_modules.");
 } finally {
   if (child && child.exitCode === null) {

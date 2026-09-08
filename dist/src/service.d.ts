@@ -1,6 +1,6 @@
 import { Catalog } from "./catalog.ts";
 import { CraftStore, type JsonObject } from "./store.ts";
-export declare const VERSION = "0.7.0";
+export declare const VERSION = "0.7.1";
 export declare class CraftService {
     readonly store: CraftStore;
     readonly catalog: Catalog;

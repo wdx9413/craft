@@ -1,6 +1,6 @@
 {
   "name": "craft",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "Capability discovery, durable tasks, verified workflows, evidence, and multi-agent orchestration.",
   "author": {
     "name": "wdx9413",
@@ -21,8 +21,7 @@
     "defaultPrompt": [
       "Use Craft to continue a saved task.",
       "Find relevant capabilities for this task.",
-      "Save this correction as a reusable workflow candidate.",
-      "Coordinate this task across suitable agent profiles and verify the result."
+      "Save this correction as a reusable workflow candidate."
     ]
   },
   "mcpServers": "./.mcp.json"

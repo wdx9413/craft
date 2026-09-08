@@ -5,7 +5,7 @@ import { approvedEffects, executeSteps, normalizeSteps, resolveInputs, substitut
 import { addCosts, dispatchNodes, normalizeNodes, orchestrationOutcome, planStatus, submitNode } from "./orchestration.js";
 import { aggregateEvaluation, compareEvaluationAggregates } from "./evaluation.js";
 import { publishSkill, rollbackSkillPublication } from "./skill-publisher.js";
-export const VERSION = "0.7.0";
+export const VERSION = "0.7.1";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
