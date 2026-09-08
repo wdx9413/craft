@@ -52,7 +52,9 @@ v0.6.0 起，Plan 创建时会锁定每个候选 Agent Profile 的精确版本�
 
 Craft 不绕过 Host 的 Sandbox、审批或并发限制，也不直接假定 Codex/Claude 的内部任务 API。插件负责把 Lease 翻译成宿主原生执行，再把真实结果交回 Craft。
 
-v0.8.0 增加默认编排 Interface。`craft_default_route` 负责创建 Task、检索少量 Capability、优先选择匹配的 `verified` Workflow；只有已验证 Workflow 才能经 `craft_default_route_execute` 执行并自动形成 Trial/Trace/Outcome。没有匹配 Workflow 时，Craft 返回安全增量研发 Kit：先锁定 Git 基线和原有行为，再最小改动、运行测试/覆盖率、复查 Diff。它是给 Host 的可验证计划，不是假装已经替 Host 修改了代码。
+v0.9.0 将默认编排变为 Craft Skill 的默认策略，而非要求用户重复固定话术：复杂目标先经 `craft_default_route` 创建 Task、检索少量 Capability、优先选择匹配的 `verified` Workflow；只有已验证 Workflow 才能经 `craft_default_route_execute` 执行并自动形成 Trial/Trace/Outcome。短问答和一次性读取不创建路线。
+
+没有匹配 Workflow 时，Craft 自动创建安全增量研发 Kit：先锁定 Git 基线和原有行为，再最小改动、运行测试/覆盖率、复查 Diff。它是给 Host 的可验证计划，不是假装已经替 Host 修改了代码。`craft_default_route_update` 必须按顺序记录每个已完成阶段的真实 Artifact/Evidence，并把最终 Review 写成 Outcome；`craft_default_route_resume` 在跨会话时只返回下一步。带有同一能力组合的路线以 `route_strategy` 作为 Trial Subject，两个以上有 Evidence 的完成路线才会进入 Experience Candidate，仍不能自动发布或替代 Workflow。
 
 Plan 的 Lease 带 TTL，可由同一 owner 续租；下次 Dispatch 自动回收过期 Lease，且不改变已锁定的 Profile 路由。Submit 支持显式幂等键。Plan 可声明成本预算；实际成本超限后，已完成节点和成本仍会保留，未开始节点被阻断并产生 `budget_exceeded` 的终态原因。
 
@@ -74,4 +76,4 @@ v0.7.0 已实现 Experience Pattern、Skill Proposal 和受控 Publisher；v0.8.
 
 ## 当前边界
 
-当前版本已提供 Provider 模式的完整 MCP 路径、能力目录、任务/证据、确定性 Workflow、Experience/Eval Kernel 第一层、默认编排和可恢复的基础多 Agent 路由。Codex 与 Claude 插件使用不依赖 `node_modules` 的单文件 MCP bundle。独立 Agent 的模型循环、Agent IR Compiler、Capability Kit Registry、向量 Provider、远程 Hub、桌面端、自动 Grader、自适应 Harness 搜索、预算预估和补偿事务是后续增量，不应在文档中被描述成已完成。
+当前版本已提供 Provider 模式的完整 MCP 路径、能力目录、任务/证据、确定性 Workflow、可续接的默认编排和可恢复的基础多 Agent 路由。Codex 与 Claude 插件使用不依赖 `node_modules` 的单文件 MCP bundle。独立 Agent 的模型循环、Agent IR Compiler、Capability Kit Registry、向量 Provider、远程 Hub、桌面端、自动 Grader、自适应 Harness 搜索、预算预估和补偿事务是后续增量，不应在文档中被描述成已完成。

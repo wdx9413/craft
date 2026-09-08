@@ -7,7 +7,7 @@ import { addCosts, dispatchNodes, normalizeNodes, orchestrationOutcome, planStat
 import { aggregateEvaluation, compareEvaluationAggregates, type EvaluationAggregate } from "./evaluation.ts";
 import { publishSkill, rollbackSkillPublication } from "./skill-publisher.ts";
 
-export const VERSION = "0.8.0";
+export const VERSION = "0.9.0";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -74,6 +74,17 @@ function budgetLimits(value: JsonObject): JsonObject {
 function budgetExceeded(costs: JsonObject, budget: JsonObject): boolean {
   return Object.entries(budget).some(([key, limit]) => Number(costs[key] ?? 0) > Number(limit));
 }
+const SAFE_INCREMENTAL_STAGES = [
+  { id: "baseline", constraints: "先检查 Git 增量并为原有逻辑补充或运行聚焦单元测试；不得先改业务逻辑。",
+    evidence: ["git diff --check", "baseline focused test receipt"] },
+  { id: "minimal_change", constraints: "只做满足目标的最小增量改动，保留既有接口、数据与未涉及路径。",
+    evidence: ["changed files", "decision note"] },
+  { id: "verification", constraints: "运行受影响测试、覆盖率门禁和必要静态检查；增量覆盖率阈值由已选 Workflow 的确定性命令计算。",
+    evidence: ["test receipt", "coverage report"] },
+  { id: "review", constraints: "复查 Git diff、失败类型和未验证风险；仅有真实证据的结论才能沉淀为经验。",
+    evidence: ["git diff --check", "review evidence"] },
+] as const;
+const ROUTE_TERMINAL = new Set(["completed", "failed", "cancelled"]);
 
 export class CraftService {
   readonly store: CraftStore;
@@ -86,7 +97,7 @@ export class CraftService {
       "evaluation_comparison",
       "agent_profile", "orchestration_plan", "harness_configuration", "trial", "outcome",
       "grader", "grade", "signoff_policy", "signoff", "experience_pattern", "skill_proposal",
-      "skill_publication", "budget", "model_provider", "agent_session"];
+      "skill_publication", "budget", "model_provider", "agent_session", "route", "route_strategy"];
     return { version: VERSION, data_root: this.store.paths.root,
       counts: Object.fromEntries(kinds.map((kind) => [kind, this.store.count(kind)])) };
   }
@@ -116,7 +127,7 @@ export class CraftService {
 
   defaultRoute(args: JsonObject): JsonObject {
     const goal = text(args.goal, "goal");
-    const title = text(args.title, "title");
+    const title = args.title === undefined ? goal.slice(0, 120) : text(args.title, "title");
     const mode = String(args.mode ?? "default");
     if (!new Set(["default", "safe_incremental_development"]).has(mode)) {
       throw new Error(`Unsupported route mode: ${mode}`);
@@ -128,26 +139,92 @@ export class CraftService {
         JSON.stringify(workflow).toLowerCase().includes(token)).length }))
       .filter((candidate) => candidate.score > 0)
       .sort((left, right) => right.score - left.score || String(left.workflow.id).localeCompare(String(right.workflow.id)));
-    const workflow = workflows[0]?.workflow ?? null;
+    const workflow = mode === "safe_incremental_development" ? null : workflows[0]?.workflow ?? null;
     const capabilities = this.catalog.search(goal, 6);
-    const developmentPlan = mode === "safe_incremental_development" ? {
-      stages: [
-        { id: "baseline", constraints: "先检查 Git 增量并为原有逻辑补充或运行聚焦单元测试；不得先改业务逻辑。",
-          evidence: ["git diff --check", "baseline focused test receipt"] },
-        { id: "minimal_change", constraints: "只做满足目标的最小增量改动，保留既有接口、数据与未涉及路径。",
-          evidence: ["changed files", "decision note"] },
-        { id: "verification", constraints: "运行受影响测试、覆盖率门禁和必要静态检查；增量覆盖率阈值由已选 Workflow 的确定性命令计算。",
-          evidence: ["test receipt", "coverage report"] },
-        { id: "review", constraints: "复查 Git diff、失败类型和未验证风险；仅有真实证据的结论才能沉淀为经验。",
-          evidence: ["git diff --check", "review evidence"] },
-      ],
-    } : null;
-    const route = this.store.create("route", id("route"), { task_id: (task as JsonObject).id, goal, mode,
+    const developmentPlan = workflow === null ? { stages: SAFE_INCREMENTAL_STAGES.map((stage) => ({ ...stage })) } : null;
+    const strategyCapabilities = developmentPlan === null ? [] : capabilities.slice(0, 3).map((capability) => String(capability.id));
+    const strategyId = strategyCapabilities.length ? `route_strategy_${createHash("sha256")
+      .update(JSON.stringify({ mode: "safe_incremental_development", capability_ids: strategyCapabilities })).digest("hex").slice(0, 24)}` : null;
+    const strategy = strategyId === null ? null : this.store.find("route_strategy", strategyId) ?? this.store.create(
+      "route_strategy", strategyId, { mode: "safe_incremental_development", capability_ids: strategyCapabilities });
+    let route = this.store.create("route", id("route"), { task_id: (task as JsonObject).id, goal, mode,
       workflow_id: workflow?.id ?? null, workflow_version: workflow?.version ?? null,
       capability_ids: capabilities.map((capability) => capability.id), status: workflow ? "ready" : "awaiting_host",
-      development_plan: developmentPlan });
+      development_plan: developmentPlan, stage_state: developmentPlan?.stages.map((stage) => ({ id: stage.id, status: "pending" })) ?? [],
+      strategy_id: strategy?.id ?? null, strategy_version: strategy?.version ?? null, trial_id: null });
+    if (developmentPlan !== null) {
+      const subject = strategy ?? route;
+      const trial = this.trialStart({ task_id: route.task_id, subject_type: strategy ? "route_strategy" : "route",
+        subject_id: subject.id, subject_version: subject.version, environment: { route_id: route.id } });
+      this.trialTraceAppend({ trial_id: trial.id, event_type: "route_started", source: "craft",
+        data: { route_id: route.id, mode, strategy_id: strategy?.id ?? null } });
+      route = this.store.save("route", String(route.id), { ...recordPayload(route), trial_id: trial.id });
+    }
     return { route_id: route.id, task, workflow, capabilities, development_plan: developmentPlan,
-      executable: workflow !== null };
+      executable: workflow !== null, next_action: this.routeNextAction(route) };
+  }
+
+  defaultRouteResume(args: JsonObject): JsonObject {
+    const taskId = text(args.task_id, "task_id");
+    const task = this.taskPack(taskId);
+    const route = this.store.list("route", 1_000, (item) => item.task_id === taskId)[0];
+    if (!route) throw new Error(`No route exists for task: ${taskId}`);
+    const trial = route.trial_id ? this.trialGet({ trial_id: String(route.trial_id) }) : null;
+    return { ...task, route, trial, next_action: this.routeNextAction(route) };
+  }
+
+  defaultRouteUpdate(args: JsonObject): JsonObject {
+    const route = this.store.get("route", text(args.route_id, "route_id"));
+    if (ROUTE_TERMINAL.has(String(route.status))) throw new Error("Route is already terminal");
+    if (route.workflow_id) throw new Error("Verified Workflow routes must use craft_default_route_execute");
+    const developmentPlan = object(route.development_plan, "route development_plan");
+    const stages = array(developmentPlan.stages, "route development_plan stages") as JsonObject[];
+    const states = array(route.stage_state, "route stage_state") as JsonObject[];
+    const index = states.findIndex((state) => state.status !== "completed");
+    if (index < 0 || !stages[index]) throw new Error("Route has no pending stage");
+    const stageId = text(args.stage_id, "stage_id");
+    const summary = text(args.summary, "summary");
+    if (stageId !== stages[index].id) throw new Error(`Route next required stage is ${stages[index].id}`);
+    const artifactIds = array(args.artifact_ids ?? [], "artifact_ids").map((value) => text(value, "artifact_id"));
+    const evidenceIds = array(args.evidence_ids ?? [], "evidence_ids").map((value) => text(value, "evidence_id"));
+    for (const artifactId of artifactIds) this.store.get("artifact", artifactId);
+    for (const evidenceId of evidenceIds) this.store.get("evidence", evidenceId);
+    const isFinal = index === stages.length - 1;
+    const verdict = args.verdict === undefined ? undefined : text(args.verdict, "verdict");
+    if (!isFinal && verdict !== undefined) throw new Error("verdict is only allowed for the final route stage");
+    if (isFinal && verdict === undefined) throw new Error("verdict is required for the final route stage");
+    if (verdict !== undefined && !TRIAL_VERDICTS.has(verdict)) throw new Error(`Unsupported trial verdict: ${verdict}`);
+    const updatedStates = states.map((state, stateIndex) => stateIndex === index
+      ? { ...state, status: "completed", summary, artifact_ids: artifactIds, evidence_ids: evidenceIds }
+      : state);
+    const taskStatus = verdict === undefined ? "active" : verdict === "passed" ? "completed" : verdict === "cancelled" ? "cancelled" : "paused";
+    const task = this.taskCheckpoint({ task_id: route.task_id, summary, status: taskStatus,
+      completed: updatedStates.filter((state) => state.status === "completed").map((state) => state.id),
+      pending: updatedStates.filter((state) => state.status !== "completed").map((state) => state.id),
+      decisions: [`Route ${route.id} completed stage ${stageId}`], artifacts: artifactIds, source: "craft_route" });
+    const trialId = text(route.trial_id, "route trial_id");
+    this.trialTraceAppend({ trial_id: trialId, event_type: "route_stage_completed", source: "host_reported",
+      data: { route_id: route.id, stage_id: stageId, summary }, artifact_ids: artifactIds, evidence_ids: evidenceIds });
+    const outcome = verdict === undefined ? null : this.outcomeRecord({ trial_id: trialId, verdict,
+      summary, evidence_ids: evidenceIds, source: "host_reported" });
+    const updated = this.store.save("route", String(route.id), { ...recordPayload(route), stage_state: updatedStates,
+      status: verdict === undefined ? "awaiting_host" : verdict === "passed" ? "completed" : verdict });
+    return { route: updated, task: task.task, checkpoint: (task.checkpoints as JsonObject[])[0], outcome,
+      trace: (this.trialGet({ trial_id: trialId }).trace), next_action: this.routeNextAction(updated),
+      experience_candidates: verdict === undefined ? [] : this.experienceCandidateList({}).experience_candidates };
+  }
+
+  private routeNextAction(route: JsonObject): JsonObject {
+    if (ROUTE_TERMINAL.has(String(route.status))) return { kind: "completed", route_id: route.id, status: route.status };
+    if (route.workflow_id) return { kind: "execute_verified_workflow", route_id: route.id,
+      workflow_id: route.workflow_id, workflow_version: route.workflow_version };
+    const plan = object(route.development_plan, "route development_plan");
+    const stages = array(plan.stages, "route development plan stages") as JsonObject[];
+    const states = array(route.stage_state, "route stage_state") as JsonObject[];
+    const index = states.findIndex((state) => state.status !== "completed");
+    if (index < 0 || !stages[index]) return { kind: "complete_route", route_id: route.id };
+    return { kind: "complete_stage", route_id: route.id, stage_id: stages[index].id,
+      constraints: stages[index].constraints, expected_evidence: stages[index].evidence };
   }
 
   defaultRouteExecute(args: JsonObject): JsonObject {

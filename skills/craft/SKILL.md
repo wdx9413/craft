@@ -1,15 +1,26 @@
 ---
 name: craft
-description: Discover user-managed capabilities, continue durable work, preserve evidence, run verified workflows, or coordinate a dependency-aware Agent plan with Craft.
+description: "Default orchestrator for substantial user work: route goals to verified workflows or a safe host plan, continue durable tasks, preserve evidence, and improve only through gated evaluation."
 ---
 
 # Craft
 
 Craft stores its own state under `~/.craft_data`. Use Craft at meaningful boundaries; do not checkpoint every conversational sentence.
 
+## Default routing
+
+For substantial work—multi-step development, diagnosis, research, a recurring task, a request to select Skills, or any task whose result should be reusable—use Craft as the default orchestrator. Do this without asking the user to repeat an orchestration prompt:
+
+1. Call `craft_default_route` with the user's goal. `title` is optional; Craft derives it from the goal when omitted.
+2. If it returns `next_action.kind=execute_verified_workflow`, read only the selected capabilities as needed, then use `craft_default_route_execute`. It can run only the exact Workflow version Craft selected and only with Host-approved side effects.
+3. If it returns `next_action.kind=complete_stage`, carry out that one Host-mediated stage. Register real artifacts/evidence where available, then call `craft_default_route_update`. The final `review` update records the observed Outcome and surfaces evidence-backed experience candidates.
+4. When continuing a known task, call `craft_default_route_resume` with its `task_id` and do only the returned next action. If the user only says “continue” and the task is not known, list active tasks and ask only when the match is ambiguous.
+
+Skip default routing for a short self-contained answer, a simple rewrite, or a one-step read that has no durable value. Craft never treats an unverified Skill, a model assertion, or an unapproved command as an executable Workflow.
+
 ## Operating rules
 
-- For a known task, call `craft_task_open` with `task_id`. Otherwise use `craft_task_list` or create a task with a concise title and goal.
+- `craft_default_route` owns normal Task creation and route selection. Use `craft_task_open` only for a direct Task lookup or when a caller deliberately manages a Task outside the default route.
 - Search capabilities with `craft_capability_search`. Read only the selected candidate with `craft_capability_get`; never load the whole catalog into context.
 - Call `craft_task_checkpoint` after material progress or before handoff. Separate completed work, pending work, decisions, and artifact references. Do not label an unobserved claim verified.
 - Record explicit corrections with `craft_feedback_record` at the narrowest correct scope.

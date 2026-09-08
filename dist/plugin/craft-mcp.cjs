@@ -8346,7 +8346,7 @@ async function rollbackSkillPublication(args) {
 }
 
 // src/service.ts
-var VERSION = "0.8.0";
+var VERSION = "0.9.0";
 var CONFIDENCE = /* @__PURE__ */ new Set(["confirmed", "bounded", "unverified", "rejected"]);
 var TASK_STATUS = /* @__PURE__ */ new Set(["active", "paused", "completed", "cancelled"]);
 var VERSIONED_LIFECYCLE = /* @__PURE__ */ new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -8414,6 +8414,29 @@ function budgetLimits(value) {
 function budgetExceeded(costs, budget) {
   return Object.entries(budget).some(([key, limit]) => Number(costs[key] ?? 0) > Number(limit));
 }
+var SAFE_INCREMENTAL_STAGES = [
+  {
+    id: "baseline",
+    constraints: "\u5148\u68C0\u67E5 Git \u589E\u91CF\u5E76\u4E3A\u539F\u6709\u903B\u8F91\u8865\u5145\u6216\u8FD0\u884C\u805A\u7126\u5355\u5143\u6D4B\u8BD5\uFF1B\u4E0D\u5F97\u5148\u6539\u4E1A\u52A1\u903B\u8F91\u3002",
+    evidence: ["git diff --check", "baseline focused test receipt"]
+  },
+  {
+    id: "minimal_change",
+    constraints: "\u53EA\u505A\u6EE1\u8DB3\u76EE\u6807\u7684\u6700\u5C0F\u589E\u91CF\u6539\u52A8\uFF0C\u4FDD\u7559\u65E2\u6709\u63A5\u53E3\u3001\u6570\u636E\u4E0E\u672A\u6D89\u53CA\u8DEF\u5F84\u3002",
+    evidence: ["changed files", "decision note"]
+  },
+  {
+    id: "verification",
+    constraints: "\u8FD0\u884C\u53D7\u5F71\u54CD\u6D4B\u8BD5\u3001\u8986\u76D6\u7387\u95E8\u7981\u548C\u5FC5\u8981\u9759\u6001\u68C0\u67E5\uFF1B\u589E\u91CF\u8986\u76D6\u7387\u9608\u503C\u7531\u5DF2\u9009 Workflow \u7684\u786E\u5B9A\u6027\u547D\u4EE4\u8BA1\u7B97\u3002",
+    evidence: ["test receipt", "coverage report"]
+  },
+  {
+    id: "review",
+    constraints: "\u590D\u67E5 Git diff\u3001\u5931\u8D25\u7C7B\u578B\u548C\u672A\u9A8C\u8BC1\u98CE\u9669\uFF1B\u4EC5\u6709\u771F\u5B9E\u8BC1\u636E\u7684\u7ED3\u8BBA\u624D\u80FD\u6C89\u6DC0\u4E3A\u7ECF\u9A8C\u3002",
+    evidence: ["git diff --check", "review evidence"]
+  }
+];
+var ROUTE_TERMINAL = /* @__PURE__ */ new Set(["completed", "failed", "cancelled"]);
 var CraftService = class {
   store;
   catalog;
@@ -8449,7 +8472,9 @@ var CraftService = class {
       "skill_publication",
       "budget",
       "model_provider",
-      "agent_session"
+      "agent_session",
+      "route",
+      "route_strategy"
     ];
     return {
       version: VERSION,
@@ -8489,7 +8514,7 @@ var CraftService = class {
   }
   defaultRoute(args) {
     const goal = text(args.goal, "goal");
-    const title = text(args.title, "title");
+    const title = args.title === void 0 ? goal.slice(0, 120) : text(args.title, "title");
     const mode = String(args.mode ?? "default");
     if (!(/* @__PURE__ */ new Set(["default", "safe_incremental_development"])).has(mode)) {
       throw new Error(`Unsupported route mode: ${mode}`);
@@ -8497,33 +8522,17 @@ var CraftService = class {
     const task = this.taskOpen({ title, goal, project_id: args.project_id ?? null }).task;
     const tokens = goal.toLowerCase().match(/[\p{L}\p{N}_-]+/gu) ?? [];
     const workflows = this.store.list("workflow", 1e3, (workflow2) => workflow2.lifecycle === "verified").map((workflow2) => ({ workflow: workflow2, score: tokens.filter((token) => JSON.stringify(workflow2).toLowerCase().includes(token)).length })).filter((candidate) => candidate.score > 0).sort((left, right) => right.score - left.score || String(left.workflow.id).localeCompare(String(right.workflow.id)));
-    const workflow = workflows[0]?.workflow ?? null;
+    const workflow = mode === "safe_incremental_development" ? null : workflows[0]?.workflow ?? null;
     const capabilities = this.catalog.search(goal, 6);
-    const developmentPlan = mode === "safe_incremental_development" ? {
-      stages: [
-        {
-          id: "baseline",
-          constraints: "\u5148\u68C0\u67E5 Git \u589E\u91CF\u5E76\u4E3A\u539F\u6709\u903B\u8F91\u8865\u5145\u6216\u8FD0\u884C\u805A\u7126\u5355\u5143\u6D4B\u8BD5\uFF1B\u4E0D\u5F97\u5148\u6539\u4E1A\u52A1\u903B\u8F91\u3002",
-          evidence: ["git diff --check", "baseline focused test receipt"]
-        },
-        {
-          id: "minimal_change",
-          constraints: "\u53EA\u505A\u6EE1\u8DB3\u76EE\u6807\u7684\u6700\u5C0F\u589E\u91CF\u6539\u52A8\uFF0C\u4FDD\u7559\u65E2\u6709\u63A5\u53E3\u3001\u6570\u636E\u4E0E\u672A\u6D89\u53CA\u8DEF\u5F84\u3002",
-          evidence: ["changed files", "decision note"]
-        },
-        {
-          id: "verification",
-          constraints: "\u8FD0\u884C\u53D7\u5F71\u54CD\u6D4B\u8BD5\u3001\u8986\u76D6\u7387\u95E8\u7981\u548C\u5FC5\u8981\u9759\u6001\u68C0\u67E5\uFF1B\u589E\u91CF\u8986\u76D6\u7387\u9608\u503C\u7531\u5DF2\u9009 Workflow \u7684\u786E\u5B9A\u6027\u547D\u4EE4\u8BA1\u7B97\u3002",
-          evidence: ["test receipt", "coverage report"]
-        },
-        {
-          id: "review",
-          constraints: "\u590D\u67E5 Git diff\u3001\u5931\u8D25\u7C7B\u578B\u548C\u672A\u9A8C\u8BC1\u98CE\u9669\uFF1B\u4EC5\u6709\u771F\u5B9E\u8BC1\u636E\u7684\u7ED3\u8BBA\u624D\u80FD\u6C89\u6DC0\u4E3A\u7ECF\u9A8C\u3002",
-          evidence: ["git diff --check", "review evidence"]
-        }
-      ]
-    } : null;
-    const route = this.store.create("route", id("route"), {
+    const developmentPlan = workflow === null ? { stages: SAFE_INCREMENTAL_STAGES.map((stage) => ({ ...stage })) } : null;
+    const strategyCapabilities = developmentPlan === null ? [] : capabilities.slice(0, 3).map((capability) => String(capability.id));
+    const strategyId = strategyCapabilities.length ? `route_strategy_${(0, import_node_crypto4.createHash)("sha256").update(JSON.stringify({ mode: "safe_incremental_development", capability_ids: strategyCapabilities })).digest("hex").slice(0, 24)}` : null;
+    const strategy = strategyId === null ? null : this.store.find("route_strategy", strategyId) ?? this.store.create(
+      "route_strategy",
+      strategyId,
+      { mode: "safe_incremental_development", capability_ids: strategyCapabilities }
+    );
+    let route = this.store.create("route", id("route"), {
       task_id: task.id,
       goal,
       mode,
@@ -8531,15 +8540,130 @@ var CraftService = class {
       workflow_version: workflow?.version ?? null,
       capability_ids: capabilities.map((capability) => capability.id),
       status: workflow ? "ready" : "awaiting_host",
-      development_plan: developmentPlan
+      development_plan: developmentPlan,
+      stage_state: developmentPlan?.stages.map((stage) => ({ id: stage.id, status: "pending" })) ?? [],
+      strategy_id: strategy?.id ?? null,
+      strategy_version: strategy?.version ?? null,
+      trial_id: null
     });
+    if (developmentPlan !== null) {
+      const subject = strategy ?? route;
+      const trial = this.trialStart({
+        task_id: route.task_id,
+        subject_type: strategy ? "route_strategy" : "route",
+        subject_id: subject.id,
+        subject_version: subject.version,
+        environment: { route_id: route.id }
+      });
+      this.trialTraceAppend({
+        trial_id: trial.id,
+        event_type: "route_started",
+        source: "craft",
+        data: { route_id: route.id, mode, strategy_id: strategy?.id ?? null }
+      });
+      route = this.store.save("route", String(route.id), { ...recordPayload(route), trial_id: trial.id });
+    }
     return {
       route_id: route.id,
       task,
       workflow,
       capabilities,
       development_plan: developmentPlan,
-      executable: workflow !== null
+      executable: workflow !== null,
+      next_action: this.routeNextAction(route)
+    };
+  }
+  defaultRouteResume(args) {
+    const taskId = text(args.task_id, "task_id");
+    const task = this.taskPack(taskId);
+    const route = this.store.list("route", 1e3, (item) => item.task_id === taskId)[0];
+    if (!route) throw new Error(`No route exists for task: ${taskId}`);
+    const trial = route.trial_id ? this.trialGet({ trial_id: String(route.trial_id) }) : null;
+    return { ...task, route, trial, next_action: this.routeNextAction(route) };
+  }
+  defaultRouteUpdate(args) {
+    const route = this.store.get("route", text(args.route_id, "route_id"));
+    if (ROUTE_TERMINAL.has(String(route.status))) throw new Error("Route is already terminal");
+    if (route.workflow_id) throw new Error("Verified Workflow routes must use craft_default_route_execute");
+    const developmentPlan = object(route.development_plan, "route development_plan");
+    const stages = array(developmentPlan.stages, "route development_plan stages");
+    const states = array(route.stage_state, "route stage_state");
+    const index = states.findIndex((state) => state.status !== "completed");
+    if (index < 0 || !stages[index]) throw new Error("Route has no pending stage");
+    const stageId = text(args.stage_id, "stage_id");
+    const summary = text(args.summary, "summary");
+    if (stageId !== stages[index].id) throw new Error(`Route next required stage is ${stages[index].id}`);
+    const artifactIds = array(args.artifact_ids ?? [], "artifact_ids").map((value) => text(value, "artifact_id"));
+    const evidenceIds = array(args.evidence_ids ?? [], "evidence_ids").map((value) => text(value, "evidence_id"));
+    for (const artifactId of artifactIds) this.store.get("artifact", artifactId);
+    for (const evidenceId of evidenceIds) this.store.get("evidence", evidenceId);
+    const isFinal = index === stages.length - 1;
+    const verdict = args.verdict === void 0 ? void 0 : text(args.verdict, "verdict");
+    if (!isFinal && verdict !== void 0) throw new Error("verdict is only allowed for the final route stage");
+    if (isFinal && verdict === void 0) throw new Error("verdict is required for the final route stage");
+    if (verdict !== void 0 && !TRIAL_VERDICTS.has(verdict)) throw new Error(`Unsupported trial verdict: ${verdict}`);
+    const updatedStates = states.map((state, stateIndex) => stateIndex === index ? { ...state, status: "completed", summary, artifact_ids: artifactIds, evidence_ids: evidenceIds } : state);
+    const taskStatus = verdict === void 0 ? "active" : verdict === "passed" ? "completed" : verdict === "cancelled" ? "cancelled" : "paused";
+    const task = this.taskCheckpoint({
+      task_id: route.task_id,
+      summary,
+      status: taskStatus,
+      completed: updatedStates.filter((state) => state.status === "completed").map((state) => state.id),
+      pending: updatedStates.filter((state) => state.status !== "completed").map((state) => state.id),
+      decisions: [`Route ${route.id} completed stage ${stageId}`],
+      artifacts: artifactIds,
+      source: "craft_route"
+    });
+    const trialId = text(route.trial_id, "route trial_id");
+    this.trialTraceAppend({
+      trial_id: trialId,
+      event_type: "route_stage_completed",
+      source: "host_reported",
+      data: { route_id: route.id, stage_id: stageId, summary },
+      artifact_ids: artifactIds,
+      evidence_ids: evidenceIds
+    });
+    const outcome = verdict === void 0 ? null : this.outcomeRecord({
+      trial_id: trialId,
+      verdict,
+      summary,
+      evidence_ids: evidenceIds,
+      source: "host_reported"
+    });
+    const updated = this.store.save("route", String(route.id), {
+      ...recordPayload(route),
+      stage_state: updatedStates,
+      status: verdict === void 0 ? "awaiting_host" : verdict === "passed" ? "completed" : verdict
+    });
+    return {
+      route: updated,
+      task: task.task,
+      checkpoint: task.checkpoints[0],
+      outcome,
+      trace: this.trialGet({ trial_id: trialId }).trace,
+      next_action: this.routeNextAction(updated),
+      experience_candidates: verdict === void 0 ? [] : this.experienceCandidateList({}).experience_candidates
+    };
+  }
+  routeNextAction(route) {
+    if (ROUTE_TERMINAL.has(String(route.status))) return { kind: "completed", route_id: route.id, status: route.status };
+    if (route.workflow_id) return {
+      kind: "execute_verified_workflow",
+      route_id: route.id,
+      workflow_id: route.workflow_id,
+      workflow_version: route.workflow_version
+    };
+    const plan = object(route.development_plan, "route development_plan");
+    const stages = array(plan.stages, "route development plan stages");
+    const states = array(route.stage_state, "route stage_state");
+    const index = states.findIndex((state) => state.status !== "completed");
+    if (index < 0 || !stages[index]) return { kind: "complete_route", route_id: route.id };
+    return {
+      kind: "complete_stage",
+      route_id: route.id,
+      stage_id: stages[index].id,
+      constraints: stages[index].constraints,
+      expected_evidence: stages[index].evidence
     };
   }
   defaultRouteExecute(args) {
@@ -9538,9 +9662,9 @@ var TOOLS = [
   tool(
     "craft_default_route",
     "Create a durable route that prefers matching verified Workflows and otherwise returns the shortest safe host plan.",
-    ["title", "goal"],
+    ["goal"],
     false,
-    ["project_id", "mode"]
+    ["title", "project_id", "mode"]
   ),
   tool(
     "craft_default_route_execute",
@@ -9557,6 +9681,14 @@ var TOOLS = [
       "environment",
       "budget"
     ]
+  ),
+  tool("craft_default_route_resume", "Resume a durable default route and return only its next safe action.", ["task_id"], true),
+  tool(
+    "craft_default_route_update",
+    "Record one required safe-plan stage with real evidence; the final stage records the route Outcome.",
+    ["route_id", "stage_id", "summary"],
+    false,
+    ["artifact_ids", "evidence_ids", "verdict"]
   ),
   tool("craft_task_open", "Create a durable task or resume one by ID.", [], false, ["task_id", "title", "goal", "project_id"]),
   tool("craft_task_list", "List durable tasks.", [], true, ["limit", "status", "project_id"]),
@@ -9805,6 +9937,8 @@ var McpServer = class {
       craft_capability_get: (a) => service.capabilityGet(a),
       craft_default_route: (a) => service.defaultRoute(a),
       craft_default_route_execute: (a) => service.defaultRouteExecute(a),
+      craft_default_route_resume: (a) => service.defaultRouteResume(a),
+      craft_default_route_update: (a) => service.defaultRouteUpdate(a),
       craft_task_open: (a) => service.taskOpen(a),
       craft_task_list: (a) => service.taskList(a),
       craft_task_checkpoint: (a) => service.taskCheckpoint(a),

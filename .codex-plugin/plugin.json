@@ -1,6 +1,6 @@
 {
   "name": "craft",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Capability discovery, durable tasks, verified workflows, evidence, and multi-agent orchestration.",
   "author": {
     "name": "wdx9413",
@@ -19,7 +19,7 @@
     "category": "Productivity",
     "capabilities": ["Capability search", "Task continuity", "Execution trials", "Evidence records", "Multi-agent orchestration", "Orchestration trial capture", "Multi-source graders", "Evaluation signoff", "Version comparison", "Verified workflows", "Experience patterns", "Safe Skill publishing"],
     "defaultPrompt": [
-      "Use Craft to route this goal, prefer a verified Workflow, and return the shortest safe plan.",
+      "Use Craft as the default orchestrator for this substantial goal.",
       "Use Craft to create a safe incremental-development plan: preserve behavior, make the smallest change, then verify tests, coverage, and Git diff.",
       "Use Craft to list experience candidates with enough Trial and Evidence history; do not publish anything."
     ]

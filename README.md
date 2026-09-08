@@ -29,7 +29,7 @@ Craft 的核心对象和协议不绑定某个模型或行业。它既能通过 M
 - 版本化 Grader、多来源 Grade 和 Signoff Policy；模型判断不会被记录成程序证明。
 - 同评测集版本对比：在 Suite 精确版本、分区、Subject 类型和 Case 集合一致时，聚合比较 Workflow、Agent Profile 或 Harness Configuration 的质量、成本、耗时与失败类型。
 - 经验模式与 Skill 候选：从多个 Trial、Outcome 与 Evidence 引用提炼适用条件、成功策略和失败模式；候选复用现有 held-out Eval/Signoff Gate，只有已验证版本才可在显式授权、摘要校验和本地备份保护下写入既有 `SKILL.md`，且可安全回滚。
-- 默认编排入口：根据目标优先选择相关的 `verified` Workflow；无匹配时返回最短的 Host 执行计划和少量 Skill 候选，不会把 Skill 正文当作可执行代码。
+- 默认编排入口：复杂目标自动优先选择相关的 `verified` Workflow；无匹配时创建可续接的安全 Host 路线，每阶段记录真实证据和检查点，才可能形成经验候选。
 - 安全增量研发 Kit：固定“Git 基线与原逻辑测试 → 最小改动 → 测试/覆盖率 → Diff 审查”的顺序，要求每个结论附带命令或产物证据。
 - 可恢复基础编排：Lease 有 TTL 和续租；显式幂等键可安全重试提交；声明的预算耗尽后会阻断未开始节点，同时保留已发生的成本。
 - MCP 服务，以及 Codex、Claude Code、DeepSeek Harness 和通用 MCP Host 接入。
@@ -95,7 +95,7 @@ pnpm test
 
 当前工具使用 `craft_` 前缀，例如 `craft_source_add`、`craft_capability_search`、`craft_task_checkpoint`、`craft_workflow_trial_run`、`craft_evaluation_run_aggregate` 和 `craft_evaluation_compare`，避免与宿主或其他 MCP 冲突。
 
-日常优先使用高层入口：先调用 `craft_default_route`。它会创建 Task、优先选中匹配的已验证 Workflow，并返回少量候选能力；只有返回 `executable=true` 时，才使用 `craft_default_route_execute` 运行该精确版本并自动归档 Trial/Trace/Outcome。若返回研发计划，则 Host 先按计划完成“先测后改”的人工/模型工作，再把确定性命令交给 Workflow 执行和取证。
+日常由 Craft Skill 自动走高层入口：对复杂目标先调用 `craft_default_route`，无需用户重复“优先已验证 Workflow”等编排话术。它会创建 Task、优先选中匹配的已验证 Workflow，并返回少量候选能力；只有返回 `next_action.kind=execute_verified_workflow` 时，才使用 `craft_default_route_execute` 运行该精确版本并自动归档 Trial/Trace/Outcome。无匹配时默认返回安全增量研发计划；Host 每完成一个阶段就通过 `craft_default_route_update` 写入真实证据和检查点，最终 Review 记录 Outcome。跨会话使用 `craft_default_route_resume` 只取下一步。短问答和一次性读取不创建 Craft 路线。
 
 ## 数据目录
 

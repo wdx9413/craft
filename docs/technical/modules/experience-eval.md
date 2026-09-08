@@ -23,6 +23,6 @@ Workflow、Agent Profile 和 Harness Configuration 都可以作为被测 Subject
 
 ## 下一步
 
-下一步加入 Lease TTL/Heartbeat 与中断恢复，再建设置信区间、重复采样、等预算基线和 Operational Grade 回填；最后建设全局模式检索、候选生成器和受控 Harness 搜索。
+Lease TTL/续租与中断恢复、默认路线的 Trial/Trace/Outcome 归档已实现。下一步建设置信区间、重复采样、等预算基线和 Operational Grade 回填；再建设全局模式检索、候选生成器和受控 Harness 搜索。自动 Host Driver 仍必须尊重宿主审批，不能由经验模块绕过。
 
 关联：[Workflow/Signoff](workflow-signoff.md) · [Agent IR](agent-ir.md) · [Capability Kit](capability-kit.md)

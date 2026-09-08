@@ -21,6 +21,7 @@ Its core objects and protocols are not tied to one model or industry. Craft can 
 - Multi-directory capability sources, real-path resolution, linked directories, and incremental scans.
 - Skill frontmatter parsing, SQLite FTS candidate retrieval, and on-demand reads; search results omit full bodies.
 - Durable tasks, checkpoints, feedback, artifacts, and evidence.
+- Default routing for substantial work: verified Workflows execute only at their exact selected version; unmatched goals become resumable, evidence-backed safe host plans.
 - Versioned Workflows with inputs, safe paths, redaction, side-effect approval, deterministic commands, assertions, coverage gates, and receipts.
 - Versioned evaluation-suite and Agent-profile primitives.
 - Six-dimensional Harness Configurations, immutable Trials and Outcomes, append-only Traces, automatic evidence capture for Workflow runs, and held-out-eval-gated promotion and rollback.
@@ -71,7 +72,7 @@ Claude metadata is in `.claude-plugin/plugin.json`. Any MCP host can use a globa
 }
 ```
 
-Tools use the `craft_` prefix to avoid collisions, including `craft_source_add`, `craft_capability_search`, `craft_task_checkpoint`, `craft_workflow_trial_run`, `craft_evaluation_run_aggregate`, and `craft_evaluation_compare`.
+Tools use the `craft_` prefix to avoid collisions. For substantial work the Craft Skill automatically starts with `craft_default_route`, without requiring a repeated orchestration prompt. A matching verified Workflow is executed via `craft_default_route_execute`; an unmatched safe plan is progressed with `craft_default_route_update` and resumed in a later session with `craft_default_route_resume`.
 
 ## Verification
 
