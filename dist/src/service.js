@@ -4,7 +4,7 @@ import { CraftStore } from "./store.js";
 import { approvedEffects, executeSteps, normalizeSteps, resolveInputs, substitute } from "./workflow.js";
 import { addCosts, dispatchNodes, normalizeNodes, orchestrationOutcome, planStatus, submitNode } from "./orchestration.js";
 import { aggregateEvaluation, compareEvaluationAggregates } from "./evaluation.js";
-export const VERSION = "0.6.1";
+export const VERSION = "0.6.2";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const WORKFLOW_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);

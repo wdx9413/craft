@@ -12,6 +12,7 @@ assert.deepEqual(Object.keys(manifest), ["mcpServers"], ".mcp.json must use the 
 assert.deepEqual(Object.keys(manifest.mcpServers), ["craft"]);
 const server = manifest.mcpServers.craft;
 assert.equal(server.command, "node");
+assert.equal(server.cwd, ".");
 
 const pluginRoot = await mkdtemp(join(tmpdir(), "craft-plugin-smoke-"));
 let child: ReturnType<typeof spawn> | undefined;
@@ -25,7 +26,7 @@ try {
     { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "craft_info", arguments: {} } },
   ].map((item) => JSON.stringify(item)).join("\n");
   child = spawn(server.command, server.args, {
-    cwd: pluginRoot,
+    cwd: resolve(pluginRoot, server.cwd),
     env: { ...process.env, CRAFT_DATA_DIR: join(pluginRoot, "data") },
     stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
   });
@@ -52,8 +53,8 @@ try {
     responsesPromise,
     new Promise<never>((_, reject) => setTimeout(() => reject(new Error(errors || "MCP smoke test timed out")), 5_000)),
   ]) as Array<any>;
-  assert.equal(responses[0].result.serverInfo.version, "0.6.1");
-  assert.equal(responses[1].result.structuredContent.version, "0.6.1");
+  assert.equal(responses[0].result.serverInfo.version, "0.6.2");
+  assert.equal(responses[1].result.structuredContent.version, "0.6.2");
   console.log("Bundled plugin MCP starts without node_modules.");
 } finally {
   if (child && child.exitCode === null) {

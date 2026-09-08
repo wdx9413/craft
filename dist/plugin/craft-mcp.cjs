@@ -8261,7 +8261,7 @@ function compareEvaluationAggregates(baseline, candidate) {
 }
 
 // src/service.ts
-var VERSION = "0.6.1";
+var VERSION = "0.6.2";
 var CONFIDENCE = /* @__PURE__ */ new Set(["confirmed", "bounded", "unverified", "rejected"]);
 var TASK_STATUS = /* @__PURE__ */ new Set(["active", "paused", "completed", "cancelled"]);
 var WORKFLOW_LIFECYCLE = /* @__PURE__ */ new Set(["draft", "candidate", "verified", "deprecated"]);

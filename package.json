@@ -1,6 +1,6 @@
 {
   "name": "craft-agent-harness",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "Cross-platform capability, workflow, evidence, and agent harness",
   "type": "module",
   "bin": {
