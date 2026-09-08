@@ -97,6 +97,10 @@ pnpm test
 
 当前工具使用 `craft_` 前缀，例如 `craft_source_add`、`craft_capability_search`、`craft_task_checkpoint`、`craft_workflow_trial_run`、`craft_evaluation_run_aggregate` 和 `craft_evaluation_compare`，避免与宿主或其他 MCP 冲突。
 
+v0.9.9 的默认 `craft-mcp` 是精简核心面：路由、能力检索、Task/Evidence、Activation Profile、已签发调用和状态查询，避免把全部工具同时塞进模型上下文。历史集成可显式改用 `craft-mcp-full`，它保留全部旧 `craft_*` 工具。Craft 只生成 Activation Profile 与 profile-bound、会过期的 `call_id`；Host 决定是否实际启停 MCP Server，不能通过通用入口绕过 Policy。
+
+执行按风险分级：读取和规划可在普通 Host 上运行；本地生成代码写入才要求 `LocalIsolatedAdapter` 的网络拒绝隔离；外部写入需审批；无补偿的破坏性动作和未接入受信任 Credential Broker 的调用会失败关闭。Windows 因此可以正常做读/规划和审批流；缺少等价隔离器只会阻止高风险动作的自主运行。
+
 日常由 Craft Skill 自动走高层入口：对复杂目标先调用 `craft_default_route`，无需用户重复“优先已验证 Workflow”等编排话术。它会创建 Task、优先选中匹配的已验证 Workflow，并返回少量候选能力；只有返回 `next_action.kind=execute_verified_workflow` 时，才使用 `craft_default_route_execute` 运行该精确版本并自动归档 Trial/Trace/Outcome。无匹配时默认返回安全增量研发计划；严格项目先用 `craft_project_policy_save` 固化回执要求，Host 在每阶段通过 `craft_route_receipt_record` 写入真实命令结果后，才能用 `craft_default_route_update` 推进。`craft_host_adapter_dispatch` 只把下一安全动作交给已声明支持它的 Adapter。跨会话可直接说“继续上次的 X”：`craft_default_route_find` 只恢复唯一活动路线，并列时绝不猜测；已知 `task_id` 才使用 `craft_default_route_resume`。同一策略只有积累两条不同 Task 的通过路线、且 Evidence 至少为 confirmed/bounded 后，才可生成一个带溯源的 `draft` Workflow，仍必须通过既有评测门禁。短问答和一次性读取不创建 Craft 路线。
 
 ## 数据目录

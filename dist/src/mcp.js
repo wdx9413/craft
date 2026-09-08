@@ -1,21 +1,21 @@
 import { CraftService, VERSION } from "./service.js";
 import {} from "./store.js";
 const schemaFor = (name) => {
-    if (["scan", "enabled", "allow_execution", "allow_external_write", "require_held_out", "require_outcome_passed", "retryable", "requires_external_effect", "supports_pause_resume", "supports_evidence_receipts"].includes(name))
+    if (["scan", "enabled", "allow_execution", "allow_external_write", "require_held_out", "require_outcome_passed", "retryable", "requires_external_effect", "supports_pause_resume", "supports_evidence_receipts", "generated_code", "requires_credential", "has_compensation"].includes(name))
         return { type: "boolean" };
     if (["limit", "version", "capacity", "max_concurrency", "size_bytes", "subject_version",
         "suite_version", "configuration_version", "harness_configuration_version", "target_version",
-        "grader_version", "policy_version", "signoff_policy_version", "lease_ttl_seconds", "trials_per_case", "window_size", "max_attempts", "min_trials", "harness_version", "ir_version", "runtime_adapter_version"].includes(name))
+        "grader_version", "policy_version", "signoff_policy_version", "lease_ttl_seconds", "trials_per_case", "window_size", "max_attempts", "min_trials", "harness_version", "ir_version", "runtime_adapter_version", "agreed", "total"].includes(name))
         return { type: "integer" };
-    if (["score", "value", "threshold", "min_pass_rate_delta", "max_cost_regression_ratio", "max_duration_regression_ratio"].includes(name))
+    if (["score", "value", "threshold", "min_pass_rate_delta", "max_cost_regression_ratio", "max_duration_regression_ratio", "max_budget_ratio", "baseline", "candidate", "minimum_agreement"].includes(name))
         return { type: "number" };
     if (["inputs", "metadata", "policy", "dimensions", "environment", "budget", "data", "scores",
-        "costs", "metrics", "configuration", "receipt_requirements", "execution", "rules"].includes(name))
+        "costs", "metrics", "configuration", "receipt_requirements", "execution", "rules", "cost_hint", "design_axes", "report"].includes(name))
         return { type: "object" };
     if (["completed", "pending", "decisions", "artifacts", "steps", "cases", "capabilities",
         "allowed_side_effects", "approved_side_effects", "nodes", "artifact_ids", "evidence_ids",
         "trial_ids", "requirements", "grade_ids", "pattern_ids", "failure_modes", "receipt_ids",
-        "allowed_operations", "allowed_effects", "require_approval_for", "operations", "subjects", "children", "trusted_hosts", "command_allowlist", "path_allowlist", "kinds", "effects", "allowed_kinds"].includes(name))
+        "allowed_operations", "allowed_effects", "require_approval_for", "operations", "subjects", "children", "trusted_hosts", "command_allowlist", "path_allowlist", "kinds", "effects", "allowed_kinds", "dependencies", "aliases", "artifact_ids", "evidence_ids", "output_contract", "trial_ids"].includes(name))
         return { type: "array" };
     return { type: "string" };
 };
@@ -34,6 +34,7 @@ export const TOOLS = [
     tool("craft_source_scan", "Incrementally scan one or all enabled sources.", [], false, ["source_id"]),
     tool("craft_capability_search", "Return a small hybrid-ranked set of matching capabilities; semantic retrieval is optional and safely falls back to keywords.", ["query"], true, ["limit"]),
     tool("craft_semantic_status", "Show whether optional semantic capability retrieval is disabled, configured, ready, or temporarily degraded.", [], true),
+    tool("craft_execution_policy_decide", "Classify an effect into normal host execution, isolation, approval, or a fail-closed block.", ["effect", "platform"], true, ["generated_code", "requires_credential", "has_compensation"]),
     tool("craft_capability_get", "Read one indexed capability.", ["asset_id"], true),
     tool("craft_default_route", "Create a durable route that prefers matching verified Workflows and otherwise returns the shortest safe host plan.", ["goal"], false, ["title", "project_id", "mode"]),
     tool("craft_default_route_execute", "Run the exact verified Workflow selected by a route and capture its Trial lifecycle.", ["route_id", "project_root"], false, ["inputs", "allow_execution", "approved_side_effects", "case_id",
@@ -67,6 +68,7 @@ export const TOOLS = [
     tool("craft_runtime_adapter_list", "List registered Runtime Adapter contracts.", [], true, ["limit", "query"]),
     tool("craft_runtime_adapter_dispatch", "Lease only operations declared by one Runtime Adapter contract.", ["runtime_adapter_id", "run_id"], false, ["runtime_adapter_version", "capacity"]),
     tool("craft_runtime_adapter_report", "Submit an adapter-attributed operation receipt with bounded Evidence.", ["runtime_adapter_id", "operation_id", "lease_id", "verdict", "summary"], false, ["runtime_adapter_version", "costs", "artifact_ids", "evidence_ids", "retryable", "idempotency_key"]),
+    tool("craft_local_isolated_execute", "Execute one leased local operation in a fail-closed network-denied platform sandbox.", ["run_id", "operation_id", "lease_id", "claimed_by", "command"], false, ["args", "cwd", "requires_credential", "compensation", "costs", "idempotency_key"]),
     tool("craft_route_workflow_proposal_create", "Create only a draft Workflow from two or more passed evidence-backed safe routes; promotion still requires evaluation.", ["route_id", "name", "steps"], false, ["workflow_id", "description", "inputs"]),
     tool("craft_default_route_update", "Record one required safe-plan stage with real evidence; the final stage records the route Outcome.", ["route_id", "stage_id", "summary"], false, ["artifact_ids", "evidence_ids", "receipt_ids", "verdict"]),
     tool("craft_task_open", "Create a durable task or resume one by ID.", [], false, ["task_id", "title", "goal", "project_id"]),
@@ -156,17 +158,44 @@ export const TOOLS = [
     tool("craft_orchestration_renew", "Renew an owned orchestration lease before its TTL expires.", ["plan_id", "lease_id", "claimed_by"]),
     tool("craft_orchestration_submit", "Submit a leased node result; trial-backed plans capture trace, cost, evidence, and terminal outcome automatically.", ["plan_id", "lease_id", "verdict"], false, ["provenance", "claimed_by", "summary", "costs", "artifact_ids", "evidence_ids", "idempotency_key"]),
     tool("craft_orchestration_trial_finalize", "Idempotently reconcile a terminal trial-backed plan into its receipt, evidence, and outcome.", ["plan_id"], false),
+    tool("craft_capability_asset_save", "Register a versioned, trusted capability asset without activating it.", ["name", "asset_type", "source_uri", "effect"], false, ["asset_id", "trust", "health", "dependencies", "aliases", "requires_credential", "cost_hint", "source_digest"]),
+    tool("craft_capability_access_plan", "Recommend the minimal trusted activation profile and persist its selection receipt.", ["task_id", "goal"], false, ["allowed_effects", "receipt_id"]),
+    tool("craft_capability_call_issue", "Issue one expiring, profile-bound capability call token.", ["profile_id", "asset_id", "operation"], false, ["call_id", "expires_at"]),
+    tool("craft_capability_call_consume", "Consume an issued capability call only for its original profile.", ["call_id", "profile_id"], false),
+    tool("craft_expert_profile_save", "Save the only supported read-only diagnostic research Expert profile.", ["name", "expert_type", "allowed_effects", "output_contract"], false, ["expert_id"]),
+    tool("craft_context_capsule_create", "Create a bounded reference-only Context Capsule for a diagnostic Expert.", ["task_id", "profile_id", "input_boundary"], false, ["capsule_id", "artifact_ids", "evidence_ids"]),
+    tool("craft_expert_subagent_create", "Create one bounded read-only diagnostic Sub-agent Run.", ["run_id", "parent_operation_id", "expert_id", "capsule_id", "objective"], false, ["operation_id"]),
+    tool("craft_expert_subagent_report", "Submit a structured diagnostic Expert result with Evidence references.", ["operation_id", "lease_id", "claimed_by", "verdict", "report"], false, ["costs"]),
+    tool("craft_evaluation_reliability_assess", "Assess repeated paired evaluation reliability; it can return inconclusive.", ["comparison_id"], false, ["assessment_id", "min_trials", "max_budget_ratio"]),
+    tool("craft_judge_adapter_save", "Save a model or human Judge adapter; it is advisory until calibrated.", ["name", "grader_type"], false, ["judge_id"]),
+    tool("craft_judge_calibration_record", "Record blind human agreement for a Judge adapter.", ["judge_id", "total", "agreed"], false, ["calibration_id", "minimum_agreement"]),
+    tool("craft_judge_promotion_eligible", "Check whether a Judge has passed calibration.", ["judge_id"], true),
+    tool("craft_adaptation_candidate_create", "Create only a draft candidate with at most two Harness design-axis changes.", ["task_id", "trial_ids", "evidence_ids", "hypothesis", "applicability", "design_axes"], false, ["candidate_id"]),
+    tool("craft_adaptation_candidate_authorize_canary", "Authorize a candidate only after eligible paired reliability and exact passed Signoff.", ["candidate_id", "assessment_id", "signoff_id"]),
+    tool("craft_feedback_intake_create", "Receive a redacted online feedback reference for human review.", ["task_id", "source_uri", "summary"], false, ["intake_id", "metric"]),
+    tool("craft_feedback_case_approve", "Approve reviewed feedback only into an immutable development case.", ["intake_id", "split", "reviewer"], false, ["case_id"]),
+    tool("craft_canary_start", "Start a gated candidate canary with an exact baseline and environment.", ["candidate_id", "baseline_id", "environment"], false, ["canary_id"]),
+    tool("craft_canary_observe", "Observe a canary metric and roll back on a configured regression.", ["canary_id", "metric", "baseline", "candidate", "threshold"], false),
 ];
+const CORE_TOOL_NAMES = new Set(["craft_info", "craft_source_list", "craft_capability_search", "craft_capability_get", "craft_semantic_status", "craft_execution_policy_decide",
+    "craft_default_route", "craft_default_route_resume", "craft_default_route_find", "craft_task_open", "craft_task_list", "craft_task_checkpoint",
+    "craft_artifact_register", "craft_evidence_record", "craft_capability_access_plan", "craft_capability_call_issue", "craft_capability_call_consume"]);
+export const CORE_TOOLS = TOOLS.filter((tool) => CORE_TOOL_NAMES.has(tool.name));
 export class McpServer {
     service;
     handlers;
-    constructor(service) {
+    tools;
+    mode;
+    constructor(service, mode = "full") {
         this.service = service;
+        this.mode = mode;
+        this.tools = mode === "core" ? CORE_TOOLS : TOOLS;
         this.handlers = {
             craft_info: () => service.info(), craft_source_add: (a) => service.sourceAdd(a),
             craft_source_list: () => service.sourceList(), craft_source_update: (a) => service.sourceUpdate(a),
             craft_source_remove: (a) => service.sourceRemove(a), craft_source_scan: (a) => service.sourceScan(a),
             craft_capability_search: (a) => service.capabilitySearch(a), craft_semantic_status: () => service.semanticSearchStatus(),
+            craft_execution_policy_decide: service.executionPolicyDecide.bind(service),
             craft_capability_get: (a) => service.capabilityGet(a),
             craft_default_route: (a) => service.defaultRouteWithSemanticSearch(a), craft_default_route_execute: (a) => service.defaultRouteExecute(a),
             craft_default_route_resume: (a) => service.defaultRouteResume(a), craft_default_route_find: (a) => service.defaultRouteFind(a),
@@ -193,6 +222,7 @@ export class McpServer {
             craft_runtime_adapter_list: (a) => service.list("runtime_adapter", "runtime_adapters", a),
             craft_runtime_adapter_dispatch: (a) => service.runtimeAdapterDispatch(a),
             craft_runtime_adapter_report: (a) => service.runtimeAdapterReport(a),
+            craft_local_isolated_execute: service.localIsolatedExecute.bind(service),
             craft_route_workflow_proposal_create: (a) => service.routeWorkflowProposalCreate(a),
             craft_default_route_update: (a) => service.defaultRouteUpdate(a),
             craft_task_open: (a) => service.taskOpen(a), craft_task_list: (a) => service.taskList(a),
@@ -275,6 +305,14 @@ export class McpServer {
             craft_orchestration_renew: (a) => service.orchestrationRenew(a),
             craft_orchestration_submit: (a) => service.orchestrationSubmit(a),
             craft_orchestration_trial_finalize: (a) => service.orchestrationTrialFinalize(a),
+            craft_capability_asset_save: service.capabilityAssetSave.bind(service), craft_capability_access_plan: service.capabilityAccessPlan.bind(service),
+            craft_capability_call_issue: service.capabilityCallIssue.bind(service), craft_capability_call_consume: service.capabilityCallConsume.bind(service),
+            craft_expert_profile_save: service.expertProfileSave.bind(service), craft_context_capsule_create: service.contextCapsuleCreate.bind(service),
+            craft_expert_subagent_create: service.expertSubagentCreate.bind(service), craft_expert_subagent_report: service.expertSubagentReport.bind(service),
+            craft_evaluation_reliability_assess: service.evaluationReliabilityAssess.bind(service), craft_judge_adapter_save: service.judgeAdapterSave.bind(service),
+            craft_judge_calibration_record: service.judgeCalibrationRecord.bind(service), craft_judge_promotion_eligible: service.judgePromotionEligible.bind(service),
+            craft_adaptation_candidate_create: service.adaptationCandidateCreate.bind(service), craft_adaptation_candidate_authorize_canary: service.adaptationCandidateAuthorizeCanary.bind(service), craft_feedback_intake_create: service.feedbackIntakeCreate.bind(service),
+            craft_feedback_case_approve: service.feedbackCaseApprove.bind(service), craft_canary_start: service.canaryStart.bind(service), craft_canary_observe: service.canaryObserve.bind(service),
         };
     }
     async handle(message) {
@@ -296,7 +334,7 @@ export class McpServer {
         if (request.method === "ping")
             return this.ok(request.id, {});
         if (request.method === "tools/list")
-            return this.ok(request.id, { tools: TOOLS });
+            return this.ok(request.id, { tools: this.tools });
         if (request.method !== "tools/call")
             return this.error(request.id, -32601, `Method not found: ${request.method}`);
         if (!request.params || typeof request.params !== "object" || Array.isArray(request.params)) {
@@ -304,7 +342,7 @@ export class McpServer {
         }
         const params = request.params;
         const handler = this.handlers[String(params.name)];
-        if (!handler)
+        if (!handler || (this.mode === "core" && !this.tools.some((tool) => tool.name === params.name)))
             return this.error(request.id, -32602, `Unknown tool: ${params.name}`);
         try {
             const supplied = params.arguments ?? {};

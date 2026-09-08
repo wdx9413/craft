@@ -14,7 +14,9 @@
 - Orchestration Trial：创建时锁定 Plan 初始版本和所有 Agent Profile 路由版本；Dispatch、失败换路和 Submit 自动进入 Trace，终态自动登记回执、Evidence、节点统计、累计成本和 Outcome。
 - Grader / Grade / Signoff：区分程序、模型、人工和业务来源，以显式 Grade 集合和版本化 Policy 生成可复算的晋级决定。
 - Program Grader：0.9.6 可按通过率、平均时延等确定性规则对一个 Evaluation Run 的每个 Trial 生成 Grade；模型、人工和业务 Grader 仍要求兼容 Host 回填观察结果。
-- Promotion Assessment：0.9.6/0.9.7 将 held-out 的 baseline/candidate Comparison 做配对 Case 对照，检查最少 Trial 数、通过率增量，以及分离的指定成本指标与 `duration_ms` 回归阈值，并持久化可复算的晋级建议；它不是统计显著性声明。
+- Promotion Assessment：0.9.6/0.9.7 将 held-out 的 baseline/candidate Comparison 做配对 Case 对照，检查最少 Trial 数、通过率增量，以及分离的指定成本指标与 `duration_ms` 回归阈值，并持久化可复算的晋级建议。
+- Evaluation Reliability：v0.9.9 对同 Case、同环境、等预算的重复配对 Trial 做单侧精确配对检验，明确返回 `eligible`、`rejected` 或 `inconclusive`；环境、预算或样本量不满足时不得晋级。模型/人工 Judge 必须先有金标一致性校准，未校准时只能提供诊断。
+- Adaptation Candidate：成功/失败证据可形成最多两个 Harness 设计轴差异的 `draft`；它必须经过可靠性评估和候选 Run 的 exact passed Signoff 才能进入 Canary。Canary 指标回归会保存精确 rollback 目标，候选从不直接改写 Skill、Workflow 或默认拓扑。
 - Experience Pattern：至少引用两个已完成 Trial 与 Evidence，保存成功策略、失败模式、适用条件和从 Outcome 派生的结果摘要；不复制 Trace。0.9.8 的 Experience Miner 从重复的成功策略和失败模式生成 `proposal_only` 候选，仅保留事件类型和 Evidence 引用，不自动创建或发布 Skill。
 - Shadow Experiment：0.9.8 只能将 `proposal_only` 候选送入只读 Workflow 的 held-out baseline/candidate 对照；它保存 Runner、Comparison、Promotion 和精确 Signoff Policy 的准备态。Promotion 通过仅为 `signoff_ready`，不产生 Signoff、更不允许发布。
 - Skill Proposal / Publication：版本化的 `SKILL.md` 候选复用 Evaluation/Signoff Gate；仅在明确授权、Source 内路径校验、摘要校验与备份完成后发布，回滚同样受摘要保护。
@@ -25,10 +27,10 @@ Evaluation Suite 的 Case 显式属于 `search`、`development` 或 `held_out`�
 
 若 Workflow 使用 Evaluation Run 的直接晋级入口，v0.9.7 还必须引用同一 Candidate Run 的 `eligible` Promotion Assessment；缺少成本或时延指标而又配置相应阈值时，Gate 失败而不是把缺失数据视为通过。v0.9.8 的 Shadow 只为指定 Policy 准备独立 Grade/Signoff 输入，Signoff 仍是需要模型/人工/业务 Grade 的精确门禁。
 
-Workflow、Agent Profile 和 Harness Configuration 都可以作为被测 Subject，但不同 Subject 类型不能直接比较。质量和 score 越高越好，cost 与 duration 越低越好；指标方向冲突时结果为 `mixed`，而不是强行给出赢家。第一版输出是确定性描述统计，不提供置信区间或显著性结论。
+Workflow、Agent Profile 和 Harness Configuration 都可以作为被测 Subject，但不同 Subject 类型不能直接比较。质量和 score 越高越好，cost 与 duration 越低越好；指标方向冲突时结果为 `mixed`，而不是强行给出赢家。除 v0.9.9 的成对可靠性检验外，其余聚合仍是确定性描述统计；内置脱敏 fixture 只证明机制，不证明真实业务质量。
 
 ## 边界与下一步
 
-Lease TTL/续租与中断恢复、默认路线的 Trial/Trace/Outcome 归档已实现。Runtime Core 增加了审批等待、父子 Operation 账本、环境/Policy 指纹和预算暂停；Operational Signal 可产生窗口化漂移告警。下一步建设置信区间/显著性、等预算基线、自动模型/业务 Grader 回填、从 Trace 自动聚类生成候选，以及在线回流验证；任何自动 Driver 仍必须尊重宿主审批，不能由经验模块绕过。
+Lease TTL/续租与中断恢复、默认路线的 Trial/Trace/Outcome 归档已实现。Runtime Core 增加了审批等待、父子 Operation 账本、环境/Policy 指纹和预算暂停；Operational Signal 可产生窗口化漂移告警。v0.9.9 的线上反馈入口只接收脱敏摘要/指标引用，经人工审核后仅能进入 immutable development Case，不能污染 held-out。下一步是自动模型/业务 Grader 回填、Trace 自动聚类归因、真实业务金标和线上反馈验证；任何自动 Driver 仍必须尊重宿主审批，不能由经验模块绕过。
 
 关联：[Workflow/Signoff](workflow-signoff.md) · [Agent IR](agent-ir.md) · [Capability Kit](capability-kit.md)

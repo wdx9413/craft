@@ -13,6 +13,8 @@ Capability Catalog 发现、索引和按需读取 Skill 等能力资产。Capabi
 
 ## 边界
 
-当前 Catalog 只正式索引 `SKILL.md`；Kit Registry、依赖求解和远程 Hub 尚未实现。v0.9.4 的可选向量检索只是候选召回器，不承担版本、权限或质量判断。
+v0.9.9 的本地 Capability Asset Registry 已可登记 Skill、MCP Server/Tool、Workflow、Adapter、Validator、Grader 和 Eval Suite 的来源摘要、版本、依赖、信任、health、effect、凭据要求与成本提示。`Activation Profile` 只选择健康且 trusted/verified、权限匹配且不需要未配置凭据的最小集合；`Tool Selection Receipt` 记录候选、过滤理由、Profile 精确版本和授权边界。
+
+发现、激活、授权、调用是四件不同的事：Craft 不替 Host 修改 MCP 配置；调用必须消费绑定 Profile 且会过期的 `call_id`。这是一套本地资产注册表，不是远程 Hub、依赖自动安装器或领域 Kit 编排器。v0.9.4 的可选向量检索仍只负责候选召回，不能承担权限或质量判断。
 
 关联：[Agent IR](agent-ir.md) · [Experience/Eval](experience-eval.md) · [Runtime 接入](runtime-integration.md)

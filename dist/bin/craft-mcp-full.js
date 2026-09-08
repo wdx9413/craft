@@ -5,7 +5,7 @@ import { CraftService } from "../src/service.js";
 import { CraftStore } from "../src/store.js";
 async function main() {
     const store = await new CraftStore().open();
-    const server = new McpServer(await CraftService.open(store), "core");
+    const server = new McpServer(await CraftService.open(store), "full");
     const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
     try {
         for await (const line of input) {
@@ -24,8 +24,5 @@ async function main() {
         store.close();
     }
 }
-main().catch(() => {
-    process.stderr.write("Craft MCP failed to start.\n");
-    process.exitCode = 1;
-});
-//# sourceMappingURL=craft-mcp.js.map
+main().catch(() => { process.stderr.write("Craft full MCP failed to start.\n"); process.exitCode = 1; });
+//# sourceMappingURL=craft-mcp-full.js.map

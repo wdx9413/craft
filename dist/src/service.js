@@ -7,7 +7,9 @@ import { aggregateEvaluation, compareEvaluationAggregates } from "./evaluation.j
 import { publishSkill, rollbackSkillPublication } from "./skill-publisher.js";
 import { loadConfig } from "./config.js";
 import { OpenAiCompatibleEmbeddingProvider } from "./semantic.js";
-export const VERSION = "0.9.8";
+import { LocalIsolatedAdapter } from "./isolated.js";
+import { decideExecution } from "./execution-policy.js";
+export const VERSION = "0.9.9";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -16,6 +18,10 @@ const EVAL_SPLITS = new Set(["search", "development", "held_out"]);
 const HARNESS_DIMENSIONS = new Set(["context", "tools", "generation", "orchestration", "memory", "output"]);
 const GRADER_TYPES = new Set(["program", "model", "human", "operational"]);
 const GRADE_VERDICTS = new Set(["passed", "failed", "inconclusive"]);
+const CAPABILITY_ASSET_TYPES = new Set(["skill", "mcp_server", "tool", "workflow", "adapter", "validator", "grader", "eval_suite"]);
+const CAPABILITY_TRUST = new Set(["trusted", "untrusted", "verified"]);
+const CAPABILITY_HEALTH = new Set(["healthy", "stale", "failed", "unknown"]);
+const EXPERT_TYPES = new Set(["diagnostic_research"]);
 function id(prefix) { return `${prefix}_${randomUUID().replaceAll("-", "")}`; }
 function text(value, name) {
     if (typeof value !== "string" || !value.trim())
@@ -161,10 +167,17 @@ function metricMean(aggregate, metric) {
     const summary = aggregate.costs[metric];
     return typeof summary?.mean === "number" && Number.isFinite(summary.mean) ? summary.mean : null;
 }
+function binomial(n, k) {
+    let value = 1;
+    for (let index = 1; index <= k; index += 1)
+        value = value * (n - k + index) / index;
+    return value;
+}
 export class CraftService {
     store;
     catalog;
-    constructor(store, semanticProvider) { this.store = store; this.catalog = new Catalog(store, semanticProvider); }
+    isolatedAdapter;
+    constructor(store, semanticProvider, isolatedAdapter = new LocalIsolatedAdapter()) { this.store = store; this.catalog = new Catalog(store, semanticProvider); this.isolatedAdapter = isolatedAdapter; }
     static async open(store) {
         const config = await loadConfig(store.paths);
         const semanticProvider = config?.semanticSearch ? new OpenAiCompatibleEmbeddingProvider(config.semanticSearch.provider) : undefined;
@@ -179,7 +192,9 @@ export class CraftService {
             "skill_publication", "budget", "model_provider", "agent_session", "route", "route_strategy",
             "project_policy", "route_receipt", "host_adapter", "host_dispatch", "runtime_policy", "runtime_run",
             "runtime_operation", "runtime_adapter", "evaluation_runner", "evaluation_promotion", "experience_mining_candidate",
-            "experience_shadow_experiment", "adaptive_harness", "agent_ir", "operational_signal", "operational_alert"];
+            "experience_shadow_experiment", "adaptive_harness", "agent_ir", "operational_signal", "operational_alert",
+            "capability_asset", "activation_profile", "tool_selection_receipt", "capability_call", "expert_profile", "context_capsule",
+            "evaluation_reliability", "judge_adapter", "judge_calibration", "adaptation_candidate", "feedback_intake", "feedback_case", "canary"];
         return { version: VERSION, data_root: this.store.paths.root,
             counts: Object.fromEntries(kinds.map((kind) => [kind, this.store.count(kind)])) };
     }
@@ -202,8 +217,113 @@ export class CraftService {
             semantic_search: this.catalog.semanticStatus() };
     }
     semanticSearchStatus() { return this.catalog.semanticStatus(); }
+    executionPolicyDecide(args) { return decideExecution(args); }
     capabilityGet(args) {
         return this.catalog.get(text(args.asset_id, "asset_id"));
+    }
+    capabilityAssetSave(args) {
+        const assetType = text(args.asset_type, "asset_type");
+        const trust = String(args.trust ?? "untrusted");
+        const health = String(args.health ?? "unknown");
+        const effect = text(args.effect, "effect");
+        if (!CAPABILITY_ASSET_TYPES.has(assetType) || !CAPABILITY_TRUST.has(trust) || !CAPABILITY_HEALTH.has(health) || !SIDE_EFFECTS.has(effect)) {
+            throw new Error("Capability asset type, trust, health, or effect is unsupported");
+        }
+        const sourceUri = assertNoSecret(text(args.source_uri, "source_uri"), "source_uri");
+        const dependencies = optionalTextArray(args.dependencies, "dependencies");
+        const aliases = optionalTextArray(args.aliases, "aliases");
+        return this.saveVersioned("capability_asset", "asset", { ...args, asset_type: assetType, trust, health, effect, source_uri: sourceUri,
+            dependencies, aliases, requires_credential: optionalBoolean(args.requires_credential, "requires_credential") ?? false,
+            cost_hint: object(args.cost_hint ?? {}, "cost_hint"), source_digest: args.source_digest ?? fingerprint({ source_uri: sourceUri, asset_type: assetType }) }, ["name", "asset_type", "source_uri", "effect"]);
+    }
+    capabilityAccessPlan(args) {
+        const task = this.store.get("task", text(args.task_id, "task_id"));
+        const goal = text(args.goal, "goal");
+        const allowedEffects = uniqueTextArray(args.allowed_effects ?? ["read_only"], "allowed_effects");
+        if (allowedEffects.some((effect) => !SIDE_EFFECTS.has(effect)))
+            throw new Error("allowed_effects must be supported");
+        const tokens = goal.toLowerCase().match(/[\p{L}\p{N}_-]+/gu) ?? [];
+        const candidates = this.store.list("capability_asset", 10000).map((asset) => {
+            const searchable = `${String(asset.name)} ${asset.aliases.join(" ")} ${String(asset.source_uri)}`.toLowerCase();
+            const matched = tokens.filter((token) => searchable.includes(token)).length;
+            const eligible = (asset.trust === "trusted" || asset.trust === "verified") && asset.health === "healthy" && allowedEffects.includes(String(asset.effect)) && !asset.requires_credential;
+            const costHint = asset.cost_hint;
+            const historical = Number(asset.historical_success_rate);
+            const cost = Number(costHint.tokens);
+            const latency = Number(costHint.latency_ms);
+            return { asset, matched, eligible, verified_workflow: asset.asset_type === "workflow" && asset.trust === "verified" ? 1 : 0,
+                historical: Number.isFinite(historical) ? historical : -1, cost: Number.isFinite(cost) ? cost : Number.MAX_SAFE_INTEGER,
+                latency: Number.isFinite(latency) ? latency : Number.MAX_SAFE_INTEGER,
+                reason: eligible ? "eligible" : asset.requires_credential ? "credential_broker_required" : asset.trust === "untrusted" ? "untrusted" : asset.health !== "healthy" ? `health_${asset.health}` : "effect_not_allowed" };
+        }).sort((left, right) => right.matched - left.matched || right.verified_workflow - left.verified_workflow || right.historical - left.historical || left.cost - right.cost || left.latency - right.latency || String(left.asset.id).localeCompare(String(right.asset.id)));
+        const selected = candidates.filter((item) => item.eligible && item.matched > 0).slice(0, 3);
+        if (!selected.length)
+            throw new Error("No eligible capability assets match this task");
+        const profile = this.saveVersioned("activation_profile", "profile", { task_id: task.id, goal_fingerprint: fingerprint({ goal }), asset_ids: selected.map((item) => item.asset.id), asset_versions: Object.fromEntries(selected.map((item) => [String(item.asset.id), item.asset.version])), allowed_effects: allowedEffects, activation: "host_mediated", status: "recommended" }, []);
+        const receipt = this.store.create("tool_selection_receipt", String(args.receipt_id ?? id("selection_receipt")), { task_id: task.id, profile_id: profile.id, profile_version: profile.version, candidate_asset_ids: candidates.map((item) => item.asset.id), filtered_asset_ids: candidates.filter((item) => !item.eligible).map((item) => ({ id: item.asset.id, reason: item.reason })), selected_asset_ids: selected.map((item) => item.asset.id), order: ["semantic", "effect", "verified_workflow", "history", "cost_latency"] });
+        return { profile, receipt, candidates: candidates.map((item) => ({ asset_id: item.asset.id, matched: item.matched, verified_workflow: item.verified_workflow, historical_success_rate: item.historical, cost: item.cost, latency: item.latency, eligible: item.eligible, reason: item.reason })) };
+    }
+    capabilityCallIssue(args) {
+        const profile = this.store.get("activation_profile", text(args.profile_id, "profile_id"));
+        const assetId = text(args.asset_id, "asset_id");
+        if (!profile.asset_ids.includes(assetId))
+            throw new Error("Capability asset is not in the activation profile");
+        const call = this.store.create("capability_call", String(args.call_id ?? id("capability_call")), { profile_id: profile.id, profile_version: profile.version, asset_id: assetId, operation: assertNoSecret(text(args.operation, "operation"), "operation"), status: "issued", expires_at: args.expires_at ?? new Date(Date.now() + 300000).toISOString() });
+        return { call_id: call.id, call };
+    }
+    capabilityCallConsume(args) {
+        const call = this.store.get("capability_call", text(args.call_id, "call_id"));
+        if (call.profile_id !== text(args.profile_id, "profile_id"))
+            throw new Error("Capability call profile does not match");
+        if (call.status !== "issued")
+            throw new Error("Capability call was already consumed");
+        if (validIsoTime(call.expires_at, "expires_at") < Date.now())
+            throw new Error("Capability call has expired");
+        return { receipt: this.store.save("capability_call", String(call.id), { ...recordPayload(call), status: "consumed", consumed_at: new Date().toISOString() }) };
+    }
+    expertProfileSave(args) {
+        const expertType = text(args.expert_type, "expert_type");
+        const effects = uniqueTextArray(args.allowed_effects, "allowed_effects");
+        if (!EXPERT_TYPES.has(expertType) || effects.some((effect) => effect !== "read_only"))
+            throw new Error("Only read-only diagnostic_research Expert is supported");
+        return this.saveVersioned("expert_profile", "expert", { ...args, expert_type: expertType, allowed_effects: effects, output_contract: uniqueTextArray(args.output_contract, "output_contract"), max_subagents: 5 }, ["name", "expert_type"]);
+    }
+    contextCapsuleCreate(args) {
+        const task = this.store.get("task", text(args.task_id, "task_id"));
+        const profile = this.store.get("expert_profile", text(args.profile_id, "profile_id"));
+        const artifactIds = optionalTextArray(args.artifact_ids, "artifact_ids");
+        const evidenceIds = optionalTextArray(args.evidence_ids, "evidence_ids");
+        for (const artifactId of artifactIds)
+            this.store.get("artifact", artifactId);
+        for (const evidenceId of evidenceIds)
+            this.store.get("evidence", evidenceId);
+        return this.store.create("context_capsule", String(args.capsule_id ?? id("capsule")), { task_id: task.id, expert_id: profile.id, expert_version: profile.version, artifact_ids: artifactIds, evidence_ids: evidenceIds, input_boundary: assertNoSecret(text(args.input_boundary, "input_boundary"), "input_boundary") });
+    }
+    expertSubagentCreate(args) {
+        const run = this.store.get("runtime_run", text(args.run_id, "run_id"));
+        const parent = this.store.get("runtime_operation", text(args.parent_operation_id, "parent_operation_id"));
+        const expert = this.store.get("expert_profile", text(args.expert_id, "expert_id"));
+        const capsule = this.store.get("context_capsule", text(args.capsule_id, "capsule_id"));
+        if (parent.run_id !== run.id || capsule.task_id !== run.task_id || capsule.expert_id !== expert.id)
+            throw new Error("Expert Sub-agent inputs are incompatible");
+        if (this.runtimeOperations(String(run.id)).filter((operation) => operation.parent_operation_id === parent.id).length >= Number(expert.max_subagents))
+            throw new Error("Expert may create at most 5 Sub-agent Runs");
+        return this.store.create("runtime_operation", String(args.operation_id ?? id("subagent")), { run_id: run.id, parent_operation_id: parent.id, depends_on: [parent.id], kind: "agent", effect: "read_only", objective: assertNoSecret(text(args.objective, "objective"), "objective"), agent_profile_id: expert.id, expert_id: expert.id, expert_version: expert.version, capsule_id: capsule.id, status: "pending", attempts: 0, submission_receipts: [] });
+    }
+    expertSubagentReport(args) {
+        const operation = this.store.get("runtime_operation", text(args.operation_id, "operation_id"));
+        const report = object(args.report, "report");
+        const required = ["hypotheses", "counterexamples", "evidence_ids", "confidence", "next_action"];
+        if (required.some((key) => report[key] === undefined) || !Array.isArray(report.hypotheses) || !Array.isArray(report.counterexamples))
+            throw new Error("Expert report violates output contract");
+        if (!Array.isArray(report.evidence_ids) || !report.evidence_ids.length)
+            throw new Error("Evidence is required for an Expert report");
+        const evidenceIds = uniqueTextArray(report.evidence_ids, "report.evidence_ids");
+        for (const evidenceId of evidenceIds)
+            this.store.get("evidence", evidenceId);
+        if (!CONFIDENCE.has(text(report.confidence, "report.confidence")))
+            throw new Error("Expert report confidence is unsupported");
+        return this.runtimeOperationSubmit({ operation_id: operation.id, lease_id: text(args.lease_id, "lease_id"), claimed_by: text(args.claimed_by, "claimed_by"), verdict: text(args.verdict, "verdict"), summary: assertNoSecret(JSON.stringify(report), "report"), evidence_ids: evidenceIds, costs: args.costs ?? {} });
     }
     projectPolicySave(args) {
         const projectId = text(args.project_id, "project_id");
@@ -296,6 +416,24 @@ export class CraftService {
             evidence_ids: [...array(args.evidence_ids ?? [], "evidence_ids").map((value) => text(value, "evidence_id")), evidence.id],
             idempotency_key: args.idempotency_key ?? `adapter:${adapter.id}:${operation.id}:${operation.attempts}` });
         return { adapter, artifact, evidence, ...submitted };
+    }
+    async localIsolatedExecute(args) {
+        const run = this.store.get("runtime_run", text(args.run_id, "run_id"));
+        const operation = this.store.get("runtime_operation", text(args.operation_id, "operation_id"));
+        if (operation.run_id !== run.id)
+            throw new Error("Runtime operation does not belong to run");
+        const policy = this.runtimePolicy({ policy_id: run.policy_id, policy_version: run.policy_version });
+        const command = text(args.command, "command");
+        const result = await this.isolatedAdapter.execute({ run_id: String(run.id), command,
+            args: optionalTextArray(args.args, "args"), runtime_root: this.store.paths.runtimeDir, command_allowlist: policy.command_allowlist,
+            path_allowlist: policy.path_allowlist, effect: String(operation.effect), cwd: args.cwd === undefined ? "." : text(args.cwd, "cwd"),
+            requires_credential: optionalBoolean(args.requires_credential, "requires_credential") ?? false, compensation: args.compensation === undefined ? null : object(args.compensation, "compensation") });
+        const artifact = this.artifactRegister({ kind: "local_isolated_receipt", name: `Local isolated ${operation.id}`, uri: `craft://isolated/${run.id}/${operation.id}`,
+            producer_type: "local_isolated_adapter", producer_id: "builtin", metadata: { helper: result.helper, network: result.network, workspace: result.workspace } });
+        const evidence = this.evidenceRecord({ source_type: "program", confidence: String(result.status) === "passed" ? "confirmed" : "rejected", claim: `Local isolated execution ${result.status}.`, artifact_id: artifact.id });
+        const submitted = this.runtimeOperationSubmit({ operation_id: operation.id, lease_id: text(args.lease_id, "lease_id"), claimed_by: text(args.claimed_by, "claimed_by"),
+            verdict: String(result.status) === "passed" ? "passed" : "failed", summary: "Local isolated adapter receipt", artifact_ids: [artifact.id], evidence_ids: [evidence.id], costs: args.costs ?? {}, idempotency_key: args.idempotency_key ?? `isolated:${operation.id}:${operation.attempts}` });
+        return { result, artifact, evidence, ...submitted };
     }
     runtimeOperations(runId) {
         return this.store.list("runtime_operation", 10_000, (operation) => operation.run_id === runId)
@@ -1485,6 +1623,114 @@ export class CraftService {
         });
         return { eligible, promotion, comparison: { ...comparison, paired, cost_metric: costMetric,
                 cost_regression_ratio: costRatio, duration_regression_ratio: durationRatio } };
+    }
+    evaluationReliabilityAssess(args) {
+        const comparison = this.store.get("evaluation_comparison", text(args.comparison_id, "comparison_id"));
+        const baselineRun = this.store.get("evaluation_run", String(comparison.baseline_run_id));
+        const candidateRun = this.store.get("evaluation_run", String(comparison.candidate_run_id));
+        const minTrials = finiteInteger(args.min_trials, "min_trials", 20, 2, 10_000);
+        const maxBudgetRatio = Number(args.max_budget_ratio ?? 1);
+        if (!Number.isFinite(maxBudgetRatio) || maxBudgetRatio < 0)
+            throw new Error("max_budget_ratio must be non-negative");
+        const paired = this.evaluationPairedComparison(baselineRun, candidateRun);
+        const baselineTrials = baselineRun.trial_ids.map((trialId) => this.store.get("trial", trialId));
+        const candidateTrials = candidateRun.trial_ids.map((trialId) => this.store.get("trial", trialId));
+        const baselineEnvironment = object(baselineTrials[0].environment, "baseline environment");
+        const environmentsMatch = [...baselineTrials, ...candidateTrials].every((trial) => fingerprint(object(trial.environment, "trial environment")) === fingerprint(baselineEnvironment));
+        const budgetsMatch = [...baselineTrials, ...candidateTrials].every((trial) => {
+            const baselineBudget = object(baselineTrials[0].budget, "baseline budget");
+            const ratio = Number(Object.entries(object(trial.budget, "trial budget")).every(([key, value]) => Number(value) <= Number(baselineBudget[key]) * maxBudgetRatio));
+            return ratio === 1;
+        });
+        const decisive = Number(paired.candidate_wins) + Number(paired.baseline_wins);
+        const pValue = decisive === 0 ? 1 : 2 ** -decisive * Array.from({ length: Number(paired.baseline_wins) + 1 }, (_, index) => binomial(decisive, Number(paired.candidate_wins) + index)).reduce((sum, value) => sum + value, 0);
+        const status = Number(paired.matched_trials) < minTrials || !environmentsMatch || !budgetsMatch ? "inconclusive" : pValue <= 0.05 && Number(paired.candidate_wins) > Number(paired.baseline_wins) ? "eligible" : "rejected";
+        const assessment = this.store.create("evaluation_reliability", String(args.assessment_id ?? id("reliability")), { comparison_id: comparison.id, status, min_trials: minTrials, max_budget_ratio: maxBudgetRatio, paired, p_value: pValue, environments_match: environmentsMatch, budgets_match: budgetsMatch });
+        return { status, assessment };
+    }
+    judgeAdapterSave(args) {
+        const graderType = text(args.grader_type, "grader_type");
+        if (!new Set(["model", "human"]).has(graderType))
+            throw new Error("Judge adapter must be model or human");
+        return this.saveVersioned("judge_adapter", "judge", { ...args, grader_type: graderType, status: "uncalibrated" }, ["name", "grader_type"]);
+    }
+    judgeCalibrationRecord(args) {
+        const judge = this.store.get("judge_adapter", text(args.judge_id, "judge_id"));
+        const total = finiteInteger(args.total, "total", 1, 1);
+        const agreed = finiteInteger(args.agreed, "agreed", 0, 0, total);
+        const minimum = Number(args.minimum_agreement ?? 0.8);
+        if (!Number.isFinite(minimum) || minimum < 0 || minimum > 1)
+            throw new Error("minimum_agreement must be between 0 and 1");
+        const agreement = agreed / total;
+        const calibration = this.store.create("judge_calibration", String(args.calibration_id ?? id("calibration")), { judge_id: judge.id, judge_version: judge.version, total, agreed, agreement, minimum_agreement: minimum, status: agreement >= minimum ? "calibrated" : "advisory" });
+        this.store.save("judge_adapter", String(judge.id), { ...recordPayload(judge), status: calibration.status, calibration_id: calibration.id });
+        return { calibration };
+    }
+    judgePromotionEligible(args) {
+        const judge = this.store.get("judge_adapter", text(args.judge_id, "judge_id"));
+        return { eligible: judge.status === "calibrated", judge };
+    }
+    adaptationCandidateCreate(args) {
+        const task = this.store.get("task", text(args.task_id, "task_id"));
+        const trialIds = uniqueTextArray(args.trial_ids, "trial_ids", 2);
+        const evidenceIds = uniqueTextArray(args.evidence_ids, "evidence_ids");
+        for (const trialId of trialIds)
+            this.store.get("trial", trialId);
+        for (const evidenceId of evidenceIds)
+            this.store.get("evidence", evidenceId);
+        const axes = object(args.design_axes, "design_axes");
+        if (!Object.keys(axes).length || Object.keys(axes).length > 2 || Object.keys(axes).some((key) => !HARNESS_DIMENSIONS.has(key)))
+            throw new Error("Adaptation Candidate changes at most two supported design axes");
+        const candidate = this.store.create("adaptation_candidate", String(args.candidate_id ?? id("adaptation")), { task_id: task.id, trial_ids: trialIds, evidence_ids: evidenceIds, hypothesis: assertNoSecret(text(args.hypothesis, "hypothesis"), "hypothesis"), applicability: assertNoSecret(text(args.applicability, "applicability"), "applicability"), design_axes: axes, lifecycle: "draft", publication_allowed: false });
+        return { candidate };
+    }
+    adaptationCandidateAuthorizeCanary(args) {
+        const candidate = this.store.get("adaptation_candidate", text(args.candidate_id, "candidate_id"));
+        const assessment = this.store.get("evaluation_reliability", text(args.assessment_id, "assessment_id"));
+        if (assessment.status !== "eligible")
+            throw new Error("Adaptation Candidate requires an eligible reliability assessment");
+        const comparison = this.store.get("evaluation_comparison", String(assessment.comparison_id));
+        const signoff = this.store.get("signoff", text(args.signoff_id, "signoff_id"));
+        if (signoff.decision !== "passed" || signoff.evaluation_run_id !== comparison.candidate_run_id) {
+            throw new Error("Adaptation Candidate requires a passed Signoff for the compared candidate run");
+        }
+        const authorized = this.store.save("adaptation_candidate", String(candidate.id), { ...recordPayload(candidate), lifecycle: "canary_ready", reliability_assessment_id: assessment.id, signoff_id: signoff.id, publication_allowed: false });
+        return { candidate: authorized };
+    }
+    feedbackIntakeCreate(args) {
+        const task = this.store.get("task", text(args.task_id, "task_id"));
+        const summary = assertNoSecret(text(args.summary, "summary"), "summary");
+        const intake = this.store.create("feedback_intake", String(args.intake_id ?? id("feedback_intake")), { task_id: task.id, source_uri: assertNoSecret(text(args.source_uri, "source_uri"), "source_uri"), summary, metric: args.metric === undefined ? null : text(args.metric, "metric"), status: "pending_review" });
+        return { intake };
+    }
+    feedbackCaseApprove(args) {
+        const intake = this.store.get("feedback_intake", text(args.intake_id, "intake_id"));
+        const split = text(args.split, "split");
+        if (split !== "development")
+            throw new Error("Feedback intake may only create development cases; held-out requires an independent curator");
+        const reviewer = assertNoSecret(text(args.reviewer, "reviewer"), "reviewer");
+        const caseRecord = this.store.create("feedback_case", String(args.case_id ?? id("feedback_case")), { intake_id: intake.id, task_id: intake.task_id, split, reviewer, source_uri: intake.source_uri, summary: intake.summary, immutable: true });
+        this.store.save("feedback_intake", String(intake.id), { ...recordPayload(intake), status: "approved", feedback_case_id: caseRecord.id, reviewer });
+        return { case: caseRecord };
+    }
+    canaryStart(args) {
+        const candidate = this.store.get("adaptation_candidate", text(args.candidate_id, "candidate_id"));
+        if (candidate.lifecycle !== "canary_ready")
+            throw new Error("Adaptation Candidate must pass shadow reliability and Signoff before Canary");
+        const canary = this.store.create("canary", String(args.canary_id ?? id("canary")), { candidate_id: candidate.id, candidate_version: candidate.version, baseline_id: text(args.baseline_id, "baseline_id"), environment_fingerprint: fingerprint(object(args.environment, "environment")), status: "running" });
+        return { canary };
+    }
+    canaryObserve(args) {
+        const canary = this.store.get("canary", text(args.canary_id, "canary_id"));
+        const baseline = Number(args.baseline);
+        const candidate = Number(args.candidate);
+        const threshold = Number(args.threshold);
+        if (![baseline, candidate, threshold].every((value) => Number.isFinite(value) && value >= 0))
+            throw new Error("Canary metrics must be non-negative finite numbers");
+        const regression = candidate - baseline > threshold;
+        const status = regression ? "rolled_back" : "running";
+        const saved = this.store.save("canary", String(canary.id), { ...recordPayload(canary), status, metric: text(args.metric, "metric"), baseline, candidate, threshold, rollback_to: regression ? canary.baseline_id : null });
+        return { status, canary: saved };
     }
     experienceMine(args) {
         const subjectType = text(args.subject_type, "subject_type");

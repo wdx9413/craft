@@ -34,11 +34,16 @@
 - Experience Miner 与 Operational Drift：重复成功策略与失败模式只产出 proposal-only 候选；shadow 仅执行只读 held-out baseline/candidate 对照，Promotion 通过后只准备指定 Signoff Policy，仍须独立 Grade/Signoff/Publisher Gate 才能发布。数值线上信号以滑动窗口生成可审计告警。（v0.9.8 已实现）
 - 按风险、预算和副作用选择最小 Harness，并将 Operation DAG 编译为版本化 Agent IR、Lower 到 Runtime Run。（v0.9.6 已实现）
 - Runtime Adapter 将宿主 Agent/Grader 领取与回执约束为版本化契约；本地 Adapter 不能声明外部/破坏性 Effect。直接 Eval 晋级必须经过 held-out 的 Candidate/Baseline Promotion，成本与时延分别受阈值控制。（v0.9.7 已实现）
+- Capability Asset Registry、最小 Activation Profile、profile-bound 过期调用回执、唯一只读 `diagnostic_research` Expert 与最多五个 Context Capsule Sub-agent。（v0.9.9 已实现）
+- 评测可靠性、Judge 校准、受审核 development 反馈、最多两个设计轴的 Adaptation Candidate、Signoff 后 Canary/精确回滚。（v0.9.9 已实现）
+- 执行按风险分级：普通读/规划可跨平台运行；仅本地生成代码写入依赖 macOS/Linux 网络拒绝隔离；外部写入审批、无补偿破坏性或未受信任 Broker 的凭据请求失败关闭。（v0.9.9 已实现）
 - Lease TTL/续租、显式幂等提交和实际成本超限阻断。（v0.8.0 已实现基础协议）
 
 验收：同一真实任务集能比较两个版本的质量、成本、耗时和失败类型，并阻止无证据晋级；默认入口不能绕过 Host 审批或把未验证 Skill 当作可执行流程。Runtime 的每个子 Operation 必须归属根 Task，控制/环境指纹变化必须使旧证据失去新晋级资格。
 
 ## 中期：领域 Kit 与跨 Host 运行
+
+能力访问治理、`diagnostic_research` Expert 与只读 Sub-agent 的实现边界、证据和后续项见：[专项规划](capability-expert-subagent-plan.zh-CN.md)。
 
 - 将现有 IR Lower 到至少两个真实 Host 的执行计划。
 - 用“研发 Kit”和“AI 视频 Kit”验证同一内核能否跨领域复用。

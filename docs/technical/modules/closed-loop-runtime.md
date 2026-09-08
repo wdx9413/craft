@@ -23,9 +23,10 @@ Runtime Policy → Runtime Run → Operation DAG → Lease / Approval → Receip
 - 外部写入、破坏性动作及未在 Driver 中实现的 `agent`/`grader` Operation 仍停留在 Host Adapter，不会被伪装成已自动执行。
 - 0.9.7 增加版本化 Runtime Adapter：Adapter 公开声明可领取的 Operation kind、Effect、并发、暂停/恢复与回执能力；领取与上报会使用精确 Adapter 版本，并自动登记 Artifact 与 bounded Evidence。
 - 本地 Adapter 不能声明 `external_write` 或 `destructive`；这类 Effect 只能由明确标为 `isolated` 的 Adapter 接管，且仍须满足 Run Policy 与审批要求。
+- 0.9.9 新增风险分级决策：`read_only` 为普通 Host 的可移植执行；macOS/Linux 的本地生成代码写入才选择网络拒绝的 `LocalIsolatedAdapter`；外部写入进入人工审批；不可补偿的破坏性动作、未接入受信任 Broker 的凭据请求直接阻断。Windows 不因缺少本地隔离器失去读/规划和审批能力，只是不允许自主执行需要硬隔离的写入。
 
 ## 边界
 
-Craft 的白名单是执行前控制，不等同于容器隔离、网络拦截、短期凭据代理或补偿事务；部署方必须在 Host 外提供这些边界。Eval Runner 可自动执行确定性 Workflow；Runtime 中的通用 Agent/模型 Operation 必须由兼容 Host 领取并提交观察到的结果。Runtime 不声明任何 Host 私有子 Agent API 已被支持，也不允许 Proposal 绕过 Eval、Signoff 或 Publisher。
+`LocalIsolatedAdapter` 当前使用 macOS `sandbox-exec` 或 Linux 已检测到的隔离器，网络默认拒绝、命令/路径需白名单；隔离器不可用时仅该高风险执行失败关闭。内置 Credential Broker 永远拒绝发放凭据，外部受信任 Broker 是后续接入 seam。它不是容器、远程网络策略或完整 Saga 实现；部署方仍需在 Host 外提供这些边界。Eval Runner 可自动执行确定性 Workflow；Runtime 中的通用 Agent/模型 Operation 必须由兼容 Host 领取并提交观察到的结果。Runtime 不声明任何 Host 私有子 Agent API 已被支持，也不允许 Proposal 绕过 Eval、Signoff 或 Publisher。
 
 关联：[Runtime 与宿主接入](runtime-integration.md) · [Experience/Eval](experience-eval.md) · [Workflow/Signoff](workflow-signoff.md)

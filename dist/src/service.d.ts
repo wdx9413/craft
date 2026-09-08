@@ -1,11 +1,13 @@
 import { Catalog } from "./catalog.ts";
 import { CraftStore, type JsonObject } from "./store.ts";
 import { type EmbeddingProvider } from "./semantic.ts";
-export declare const VERSION = "0.9.8";
+import { LocalIsolatedAdapter } from "./isolated.ts";
+export declare const VERSION = "0.9.9";
 export declare class CraftService {
     readonly store: CraftStore;
     readonly catalog: Catalog;
-    constructor(store: CraftStore, semanticProvider?: EmbeddingProvider);
+    readonly isolatedAdapter: LocalIsolatedAdapter;
+    constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter?: LocalIsolatedAdapter);
     static open(store: CraftStore): Promise<CraftService>;
     info(): JsonObject;
     sourceAdd(args: JsonObject): Promise<JsonObject>;
@@ -15,7 +17,16 @@ export declare class CraftService {
     sourceScan(args: JsonObject): Promise<JsonObject>;
     capabilitySearch(args: JsonObject): Promise<JsonObject>;
     semanticSearchStatus(): JsonObject;
+    executionPolicyDecide(args: JsonObject): JsonObject;
     capabilityGet(args: JsonObject): JsonObject;
+    capabilityAssetSave(args: JsonObject): JsonObject;
+    capabilityAccessPlan(args: JsonObject): JsonObject;
+    capabilityCallIssue(args: JsonObject): JsonObject;
+    capabilityCallConsume(args: JsonObject): JsonObject;
+    expertProfileSave(args: JsonObject): JsonObject;
+    contextCapsuleCreate(args: JsonObject): JsonObject;
+    expertSubagentCreate(args: JsonObject): JsonObject;
+    expertSubagentReport(args: JsonObject): JsonObject;
     projectPolicySave(args: JsonObject): JsonObject;
     private projectPolicy;
     runtimePolicySave(args: JsonObject): JsonObject;
@@ -24,6 +35,7 @@ export declare class CraftService {
     private runtimeAdapterOwner;
     runtimeAdapterDispatch(args: JsonObject): JsonObject;
     runtimeAdapterReport(args: JsonObject): JsonObject;
+    localIsolatedExecute(args: JsonObject): Promise<JsonObject>;
     private runtimeOperations;
     private runtimeTrace;
     private runtimeRunStatus;
@@ -85,6 +97,16 @@ export declare class CraftService {
     evaluationProgramGrade(args: JsonObject): JsonObject;
     private evaluationPairedComparison;
     evaluationPromotionAssess(args: JsonObject): JsonObject;
+    evaluationReliabilityAssess(args: JsonObject): JsonObject;
+    judgeAdapterSave(args: JsonObject): JsonObject;
+    judgeCalibrationRecord(args: JsonObject): JsonObject;
+    judgePromotionEligible(args: JsonObject): JsonObject;
+    adaptationCandidateCreate(args: JsonObject): JsonObject;
+    adaptationCandidateAuthorizeCanary(args: JsonObject): JsonObject;
+    feedbackIntakeCreate(args: JsonObject): JsonObject;
+    feedbackCaseApprove(args: JsonObject): JsonObject;
+    canaryStart(args: JsonObject): JsonObject;
+    canaryObserve(args: JsonObject): JsonObject;
     experienceMine(args: JsonObject): JsonObject;
     operationalSignalRecord(args: JsonObject): JsonObject;
     operationalDriftEvaluate(args: JsonObject): JsonObject;

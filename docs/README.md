@@ -6,6 +6,7 @@
 
 - [产品概览](product/overview.zh-CN.md)：Craft 解决什么问题、核心闭环和差异点。
 - [产品路线](product/roadmap.zh-CN.md)：当前、下一阶段与长期方向，以及各阶段验收标准。
+- [能力访问、诊断 Expert 与 Sub-agent 规划](product/capability-expert-subagent-plan.zh-CN.md)：v0.9.9 已实现边界、验收与后续项。
 
 ## 技术方案
 
@@ -16,6 +17,7 @@
 - [Workflow / Verification / Signoff](technical/modules/workflow-signoff.md)
 - [Runtime 与宿主接入](technical/modules/runtime-integration.md)
 - [Closed-loop Runtime](technical/modules/closed-loop-runtime.md)
+- [风险分级执行](technical/modules/execution-policy.md)
 
 ## 当前实现参考
 

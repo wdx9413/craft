@@ -7357,7 +7357,7 @@ var require_dist = __commonJS({
   }
 });
 
-// bin/craft-mcp.ts
+// bin/craft-mcp-full.ts
 var import_node_readline = require("node:readline");
 
 // src/service.ts
@@ -12373,10 +12373,10 @@ var McpServer = class {
   }
 };
 
-// bin/craft-mcp.ts
+// bin/craft-mcp-full.ts
 async function main() {
   const store = await new CraftStore().open();
-  const server = new McpServer(await CraftService.open(store), "core");
+  const server = new McpServer(await CraftService.open(store), "full");
   const input = (0, import_node_readline.createInterface)({ input: process.stdin, crlfDelay: Infinity });
   try {
     for await (const line of input) {
@@ -12394,6 +12394,6 @@ async function main() {
   }
 }
 main().catch(() => {
-  process.stderr.write("Craft MCP failed to start.\n");
+  process.stderr.write("Craft full MCP failed to start.\n");
   process.exitCode = 1;
 });

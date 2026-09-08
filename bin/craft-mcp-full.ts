@@ -5,8 +5,7 @@ import { CraftService } from "../src/service.ts";
 import { CraftStore, type JsonObject } from "../src/store.ts";
 
 async function main(): Promise<void> {
-  const store = await new CraftStore().open();
-  const server = new McpServer(await CraftService.open(store), "core");
+  const store = await new CraftStore().open(); const server = new McpServer(await CraftService.open(store), "full");
   const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
   try {
     for await (const line of input) {
@@ -18,7 +17,4 @@ async function main(): Promise<void> {
   } finally { store.close(); }
 }
 
-main().catch(() => {
-  process.stderr.write("Craft MCP failed to start.\n");
-  process.exitCode = 1;
-});
+main().catch(() => { process.stderr.write("Craft full MCP failed to start.\n"); process.exitCode = 1; });
