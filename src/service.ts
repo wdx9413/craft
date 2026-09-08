@@ -9,7 +9,7 @@ import { publishSkill, rollbackSkillPublication } from "./skill-publisher.ts";
 import { loadConfig } from "./config.ts";
 import { OpenAiCompatibleEmbeddingProvider, type EmbeddingProvider } from "./semantic.ts";
 
-export const VERSION = "0.9.7";
+export const VERSION = "0.9.8";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -671,6 +671,61 @@ export class CraftService {
       rule: "Candidate changes must be evaluated in a separate held-out Suite and pass Promotion/Signoff before publication.",
     });
     return { status: "planned", experiment, candidate };
+  }
+
+  private assertShadowWorkflowReadOnly(workflow: JsonObject): void {
+    const unsafe = (workflow.steps as JsonObject[] ?? []).find((step) => String(step.side_effect ?? "read_only") !== "read_only");
+    if (unsafe) throw new Error("Shadow evaluation accepts read-only Workflow steps only");
+  }
+
+  experienceShadowExperimentEvaluate(args: JsonObject): JsonObject {
+    const experiment = this.store.get("experience_shadow_experiment", text(args.experiment_id, "experiment_id"));
+    if (experiment.status !== "planned") throw new Error("Only a planned shadow experiment can be evaluated");
+    const candidate = this.store.get("experience_mining_candidate", String(experiment.mining_candidate_id),
+      Number(experiment.mining_candidate_version));
+    if (candidate.lifecycle !== "proposal_only") throw new Error("Shadow evaluation requires a proposal-only mining candidate");
+    const suite = this.store.get("evaluation_suite", text(args.suite_id, "suite_id"),
+      args.suite_version === undefined ? undefined : finiteInteger(args.suite_version, "suite_version", 1));
+    if (!(suite.cases as JsonObject[]).some((item) => item.split === "held_out")) {
+      throw new Error("Shadow evaluation requires an Evaluation Suite with held_out cases");
+    }
+    const baseline = this.store.get("workflow", text(args.baseline_workflow_id, "baseline_workflow_id"),
+      finiteInteger(args.baseline_workflow_version, "baseline_workflow_version", 1));
+    const proposed = this.store.get("workflow", text(args.candidate_workflow_id, "candidate_workflow_id"),
+      finiteInteger(args.candidate_workflow_version, "candidate_workflow_version", 1));
+    this.assertShadowWorkflowReadOnly(baseline); this.assertShadowWorkflowReadOnly(proposed);
+    const policy = this.store.get("signoff_policy", text(args.signoff_policy_id, "signoff_policy_id"),
+      finiteInteger(args.signoff_policy_version, "signoff_policy_version", 1));
+    const runner = this.evaluationRunnerRun({ task_id: experiment.task_id, suite_id: suite.id, suite_version: suite.version,
+      split: "held_out", project_root: text(args.project_root, "project_root"), trials_per_case: args.trials_per_case ?? 1,
+      environment: args.environment ?? {}, budget: args.budget ?? {}, subjects: [
+        { label: "baseline", subject_type: "workflow", subject_id: baseline.id, subject_version: baseline.version },
+        { label: "candidate", subject_type: "workflow", subject_id: proposed.id, subject_version: proposed.version },
+      ] });
+    const comparison = (runner.comparisons as JsonObject[])[0];
+    const promotion = this.evaluationPromotionAssess({ comparison_id: comparison.id, min_trials: args.min_trials,
+      min_pass_rate_delta: args.min_pass_rate_delta, cost_metric: args.cost_metric,
+      max_cost_regression_ratio: args.max_cost_regression_ratio,
+      max_duration_regression_ratio: args.max_duration_regression_ratio });
+    const status = promotion.eligible ? "signoff_ready" : "rejected";
+    const shadowEvaluation = this.store.create("experience_shadow_evaluation", String(args.shadow_evaluation_id ?? id("shadow_evaluation")), {
+      experiment_id: experiment.id, experiment_version: experiment.version, mining_candidate_id: candidate.id,
+      mining_candidate_version: candidate.version, suite_id: suite.id, suite_version: suite.version,
+      baseline_workflow_id: baseline.id, baseline_workflow_version: baseline.version,
+      candidate_workflow_id: proposed.id, candidate_workflow_version: proposed.version,
+      evaluation_runner_id: (runner.runner as JsonObject).id, comparison_id: comparison.id,
+      promotion_id: (promotion.promotion as JsonObject).id, signoff_policy_id: policy.id,
+      signoff_policy_version: policy.version, status,
+      next_action: status === "signoff_ready"
+        ? "Run the named Signoff Policy with independent Grades; publication remains disabled."
+        : "Revise the proposal and create a new shadow experiment; publication remains disabled.",
+    });
+    const updated = this.store.save("experience_shadow_experiment", String(experiment.id), { ...recordPayload(experiment), status,
+      shadow_evaluation_id: shadowEvaluation.id, promotion_id: (promotion.promotion as JsonObject).id });
+    return { status, experiment: updated, shadow_evaluation: shadowEvaluation, runner, promotion,
+      signoff_preparation: { policy, candidate_evaluation_run_id: (runner.evaluation_runs as JsonObject[])[1].id,
+        eligible_promotion_id: promotion.eligible ? (promotion.promotion as JsonObject).id : null },
+      publication_allowed: false };
   }
 
   hostAdapterSave(args: JsonObject): JsonObject {
@@ -1411,23 +1466,25 @@ export class CraftService {
     const subjectType = text(args.subject_type, "subject_type");
     const subjectId = text(args.subject_id, "subject_id");
     const subjectVersion = finiteInteger(args.subject_version, "subject_version", 1);
-    const groups = new Map<string, { failure_type: string; trial_ids: string[]; evidence_ids: string[]; event_types: string[] }>();
+    const groups = new Map<string, { pattern_kind: "failure" | "success"; failure_type: string | null; trial_ids: string[]; evidence_ids: string[]; event_types: string[] }>();
     for (const trial of this.store.list("trial", 10_000, (item) => item.subject_type === subjectType && item.subject_id === subjectId &&
       Number(item.subject_version) === subjectVersion)) {
       const outcome = this.store.find("outcome", `outcome_${trial.id}`);
-      if (!outcome || outcome.verdict === "passed" || !Array.isArray(outcome.evidence_ids) || !outcome.evidence_ids.length) continue;
-      const failureType = String(outcome.failure_type ?? "unspecified");
-      const group = groups.get(failureType) ?? { failure_type: failureType, trial_ids: [], evidence_ids: [], event_types: [] };
+      if (!outcome || !Array.isArray(outcome.evidence_ids) || !outcome.evidence_ids.length) continue;
+      const patternKind = outcome.verdict === "passed" ? "success" : "failure";
+      const failureType = patternKind === "failure" ? String(outcome.failure_type ?? "unspecified") : null;
+      const key = `${patternKind}:${failureType ?? "evidence_backed_strategy"}`;
+      const group = groups.get(key) ?? { pattern_kind: patternKind, failure_type: failureType, trial_ids: [], evidence_ids: [], event_types: [] };
       group.trial_ids.push(String(trial.id)); group.evidence_ids.push(...outcome.evidence_ids.map(String));
       group.event_types.push(...this.store.events(`trial:${trial.id}`).map((event) => String(event.event_type)));
-      groups.set(failureType, group);
+      groups.set(key, group);
     }
     const candidates = [...groups.values()].filter((group) => group.trial_ids.length >= 2).map((group) => {
       const trialIds = [...group.trial_ids].sort(); const evidenceIds = [...new Set(group.evidence_ids)].sort();
-      const candidateId = `experience_mining_${createHash("sha256").update(`${subjectType}:${subjectId}:${subjectVersion}:${group.failure_type}:${trialIds.join(",")}`).digest("hex")}`;
+      const candidateId = `experience_mining_${createHash("sha256").update(`${subjectType}:${subjectId}:${subjectVersion}:${group.pattern_kind}:${group.failure_type}:${trialIds.join(",")}`).digest("hex")}`;
       const payload = { subject_type: subjectType, subject_id: subjectId, subject_version: subjectVersion, lifecycle: "proposal_only",
-        failure_type: group.failure_type, trial_ids: trialIds, evidence_ids: evidenceIds, event_types: [...new Set(group.event_types)].sort(),
-        next_action: "Generate a bounded proposal, then compare it in an isolated held-out evaluation before Signoff." };
+        pattern_kind: group.pattern_kind, failure_type: group.failure_type, trial_ids: trialIds, evidence_ids: evidenceIds,
+        event_types: [...new Set(group.event_types)].sort(), next_action: "Generate a bounded proposal, then compare it in an isolated held-out evaluation before Signoff." };
       return this.store.find("experience_mining_candidate", candidateId) ?? this.store.create("experience_mining_candidate", candidateId, payload);
     });
     return { candidates };

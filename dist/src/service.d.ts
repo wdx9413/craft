@@ -1,7 +1,7 @@
 import { Catalog } from "./catalog.ts";
 import { CraftStore, type JsonObject } from "./store.ts";
 import { type EmbeddingProvider } from "./semantic.ts";
-export declare const VERSION = "0.9.7";
+export declare const VERSION = "0.9.8";
 export declare class CraftService {
     readonly store: CraftStore;
     readonly catalog: Catalog;
@@ -43,6 +43,8 @@ export declare class CraftService {
     agentIrCompile(args: JsonObject): JsonObject;
     agentIrLower(args: JsonObject): JsonObject;
     experienceShadowExperimentCreate(args: JsonObject): JsonObject;
+    private assertShadowWorkflowReadOnly;
+    experienceShadowExperimentEvaluate(args: JsonObject): JsonObject;
     hostAdapterSave(args: JsonObject): JsonObject;
     hostAdapterDispatch(args: JsonObject): JsonObject;
     hostAdapterReport(args: JsonObject): JsonObject;

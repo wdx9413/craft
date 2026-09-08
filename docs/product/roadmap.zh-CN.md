@@ -31,7 +31,7 @@
 - 受控 Runtime Core：版本化 Policy 限定 effect、审批、并发和预算；持久 Run/Operation 记录父子归属、环境/Policy 指纹、审批与幂等回执，预算耗尽安全暂停。（v0.9.5 已实现）
 - 受信任 Host 的确定性 Driver：只执行已签发、显式输入且通过命令/路径/effect Policy 校验的 Workflow Operation；DAG 依赖、有限重试、Lease 过期恢复以及 Trace/Artifact/Evidence 回执均持久化。通用 Agent/Grader 仍交给 Host Adapter。（v0.9.6 已实现）
 - 自动 Eval Runner：对确定性 Workflow 运行 `Case × Subject × N Trial`，自动归档 Trial/Trace/Outcome、Evaluation Run 与可比 Comparison；程序 Grader 可自动出 Grade，Promotion Assessment 对 held-out baseline/candidate 检查最少 Trial、通过率、成本与配对胜负；模型/业务 Agent Subject 必须通过 Host Runtime 提交真实 Outcome。（v0.9.6 已实现）
-- Experience Miner 与 Operational Drift：重复失败 Trace 只产出 proposal-only 候选；候选只能创建 shadow 实验并经 Eval/Signoff/Publisher Gate 发布，数值线上信号以滑动窗口生成可审计告警。（v0.9.6 已实现）
+- Experience Miner 与 Operational Drift：重复成功策略与失败模式只产出 proposal-only 候选；shadow 仅执行只读 held-out baseline/candidate 对照，Promotion 通过后只准备指定 Signoff Policy，仍须独立 Grade/Signoff/Publisher Gate 才能发布。数值线上信号以滑动窗口生成可审计告警。（v0.9.8 已实现）
 - 按风险、预算和副作用选择最小 Harness，并将 Operation DAG 编译为版本化 Agent IR、Lower 到 Runtime Run。（v0.9.6 已实现）
 - Runtime Adapter 将宿主 Agent/Grader 领取与回执约束为版本化契约；本地 Adapter 不能声明外部/破坏性 Effect。直接 Eval 晋级必须经过 held-out 的 Candidate/Baseline Promotion，成本与时延分别受阈值控制。（v0.9.7 已实现）
 - Lease TTL/续租、显式幂等提交和实际成本超限阻断。（v0.8.0 已实现基础协议）

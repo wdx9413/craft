@@ -5,7 +5,7 @@ const schemaFor = (name) => {
         return { type: "boolean" };
     if (["limit", "version", "capacity", "max_concurrency", "size_bytes", "subject_version",
         "suite_version", "configuration_version", "harness_configuration_version", "target_version",
-        "grader_version", "policy_version", "lease_ttl_seconds", "trials_per_case", "window_size", "max_attempts", "min_trials", "harness_version", "ir_version", "runtime_adapter_version"].includes(name))
+        "grader_version", "policy_version", "signoff_policy_version", "lease_ttl_seconds", "trials_per_case", "window_size", "max_attempts", "min_trials", "harness_version", "ir_version", "runtime_adapter_version"].includes(name))
         return { type: "integer" };
     if (["score", "value", "threshold", "min_pass_rate_delta", "max_cost_regression_ratio", "max_duration_regression_ratio"].includes(name))
         return { type: "number" };
@@ -94,8 +94,9 @@ export const TOOLS = [
     tool("craft_experience_pattern_get", "Read an experience pattern.", ["pattern_id"], true, ["version"]),
     tool("craft_experience_pattern_list", "List reusable experience patterns.", [], true, ["limit", "query"]),
     tool("craft_experience_candidate_list", "List automatic Experience Pattern candidates backed by at least two completed Trials with Evidence.", [], true),
-    tool("craft_experience_mine", "Extract repeated evidence-backed failure modes as proposal-only candidates; it never publishes changes.", ["subject_type", "subject_id", "subject_version"]),
+    tool("craft_experience_mine", "Extract repeated evidence-backed success strategies and failure modes as proposal-only candidates; it never publishes changes.", ["subject_type", "subject_id", "subject_version"]),
     tool("craft_experience_shadow_experiment_create", "Create a shadow-only experiment from a mined proposal candidate; it cannot publish a change.", ["task_id", "mining_candidate_id"], false, ["experiment_id"]),
+    tool("craft_experience_shadow_experiment_evaluate", "Run a planned mining candidate only through read-only held-out Workflow evaluation and Promotion; it prepares, but never grants, Signoff or publication.", ["experiment_id", "suite_id", "project_root", "baseline_workflow_id", "baseline_workflow_version", "candidate_workflow_id", "candidate_workflow_version", "signoff_policy_id", "signoff_policy_version"], false, ["shadow_evaluation_id", "suite_version", "trials_per_case", "environment", "budget", "min_trials", "min_pass_rate_delta", "cost_metric", "max_cost_regression_ratio", "max_duration_regression_ratio"]),
     tool("craft_operational_signal_record", "Record one observed online metric without storing raw payloads.", ["subject_type", "subject_id", "metric", "value"], false, ["signal_id", "task_id"]),
     tool("craft_operational_drift_evaluate", "Evaluate recent operational metric drift and record only a bounded alert.", ["subject_type", "subject_id", "metric", "direction", "threshold"], false, ["window_size", "alert_id"]),
     tool("craft_skill_proposal_create", "Save a versioned SKILL.md candidate derived from Experience Patterns; this does not change any source file.", ["name", "summary", "skill_markdown", "pattern_ids"], false, ["proposal_id"]),
@@ -216,6 +217,7 @@ export class McpServer {
             craft_experience_candidate_list: (a) => service.experienceCandidateList(a),
             craft_experience_mine: (a) => service.experienceMine(a),
             craft_experience_shadow_experiment_create: (a) => service.experienceShadowExperimentCreate(a),
+            craft_experience_shadow_experiment_evaluate: (a) => service.experienceShadowExperimentEvaluate(a),
             craft_operational_signal_record: (a) => service.operationalSignalRecord(a),
             craft_operational_drift_evaluate: (a) => service.operationalDriftEvaluate(a),
             craft_skill_proposal_create: (a) => service.skillProposalCreate(a),

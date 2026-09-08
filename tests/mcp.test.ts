@@ -293,3 +293,34 @@ test("MCP exposes the 0.9.7 controlled host adapter, promotion gate, and adaptiv
       direction: "lower", threshold: 0.5, window_size: 2 });
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
+
+test("MCP runs bounded experience shadow evaluation without granting publication", async () => {
+  const root = join(tmpdir(), `craft-mcp-shadow-${process.pid}-${Date.now()}`);
+  await mkdir(root, { recursive: true }); await writeFile(join(root, "ok.txt"), "ok");
+  const store = await new CraftStore(craftPaths(join(root, "data"))).open(); const service = new CraftService(store);
+  const server = new McpServer(service);
+  try {
+    const task = service.taskOpen({ title: "Shadow", goal: "Shadow" }).task as Record<string, unknown>;
+    const suite = service.evaluationSuiteSave({ name: "Held", cases: [{ case_id: "one", split: "held_out" }, { case_id: "two", split: "held_out" }] });
+    const baseline = service.workflowSave({ workflow_id: "baseline", name: "Baseline", steps: [{ id: "ok", type: "assertion", evaluator: "file_exists", path: "ok.txt" }] });
+    const candidate = service.workflowSave({ workflow_id: "candidate", name: "Candidate", steps: [{ id: "ok", type: "assertion", evaluator: "file_exists", path: "ok.txt" }] });
+    const evidence = service.evidenceRecord({ source_type: "program", confidence: "confirmed", claim: "ok" });
+    for (const trialId of ["one", "two"]) {
+      service.trialStart({ trial_id: trialId, task_id: task.id, subject_type: "workflow", subject_id: candidate.id, subject_version: candidate.version });
+      service.outcomeRecord({ trial_id: trialId, verdict: "passed", summary: "passed", evidence_ids: [evidence.id] });
+    }
+    const mined = service.experienceMine({ subject_type: "workflow", subject_id: candidate.id, subject_version: candidate.version });
+    const experiment = service.experienceShadowExperimentCreate({ task_id: task.id,
+      mining_candidate_id: ((mined.candidates as Record<string, unknown>[])[0]).id });
+    const policy = service.signoffPolicySave({ name: "Policy", requirements: [] });
+    const response = await server.handle({ id: 1, method: "tools/call", params: { name: "craft_experience_shadow_experiment_evaluate", arguments: {
+      experiment_id: (experiment.experiment as Record<string, unknown>).id, suite_id: suite.id, suite_version: suite.version, project_root: root,
+      baseline_workflow_id: baseline.id, baseline_workflow_version: baseline.version,
+      candidate_workflow_id: candidate.id, candidate_workflow_version: candidate.version,
+      signoff_policy_id: policy.id, signoff_policy_version: policy.version, min_trials: 2,
+    } } });
+    const body = (response?.result as Record<string, unknown>).structuredContent as Record<string, unknown>;
+    assert.equal((response?.result as Record<string, unknown>).isError, false);
+    assert.equal(body.status, "signoff_ready"); assert.equal(body.publication_allowed, false);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
