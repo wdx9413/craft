@@ -31,3 +31,11 @@
 ## Adaptation Candidate
 
 来自 Trial/Evidence 的 Harness 改动草案，最多改变两个设计轴。它必须先有同环境、等预算的可靠性评估和候选 Run 的 passed Signoff，才能进入 Canary；Canary 回归保存精确 rollback 目标，不能直接改写默认 Prompt、Skill 或 Workflow。
+
+## Workspace
+
+供人和 Agent 共享的版本化状态根。它保存显式本地根目录、纳入的相对路径、可选 Git 基线引用、文件 Checkpoint、人工改动和 Artifact/Evidence 引用；它不是完整对话历史，也不自动执行 Git。
+
+## Workspace Checkpoint
+
+对 Workspace 已声明路径的不可变普通文件快照，每个文件都有内容摘要。比较两个 Checkpoint 只产生路径级 added/deleted/modified 结果；Restore 必须得到显式批准，且不能覆盖整个 Workspace 根。

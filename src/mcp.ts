@@ -3,7 +3,7 @@ import { type JsonObject } from "./store.ts";
 
 type Tool = { name: string; description: string; inputSchema: JsonObject; annotations?: JsonObject };
 const schemaFor = (name: string): JsonObject => {
-  if (["scan", "enabled", "allow_execution", "allow_external_write", "require_held_out", "require_outcome_passed", "retryable", "requires_external_effect", "supports_pause_resume", "supports_evidence_receipts", "generated_code", "requires_credential", "has_compensation"].includes(name)) return { type: "boolean" };
+  if (["scan", "enabled", "allow_execution", "allow_external_write", "require_held_out", "require_outcome_passed", "retryable", "requires_external_effect", "supports_pause_resume", "supports_evidence_receipts", "generated_code", "requires_credential", "has_compensation", "approved"].includes(name)) return { type: "boolean" };
   if (["limit", "version", "capacity", "max_concurrency", "size_bytes", "subject_version",
     "suite_version", "configuration_version", "harness_configuration_version", "target_version",
     "grader_version", "policy_version", "signoff_policy_version", "lease_ttl_seconds", "trials_per_case", "window_size", "max_attempts", "min_trials", "harness_version", "ir_version", "runtime_adapter_version", "agreed", "total"].includes(name)) return { type: "integer" };
@@ -13,7 +13,7 @@ const schemaFor = (name: string): JsonObject => {
   if (["completed", "pending", "decisions", "artifacts", "steps", "cases", "capabilities",
     "allowed_side_effects", "approved_side_effects", "nodes", "artifact_ids", "evidence_ids",
     "trial_ids", "requirements", "grade_ids", "pattern_ids", "failure_modes", "receipt_ids",
-    "allowed_operations", "allowed_effects", "require_approval_for", "operations", "subjects", "children", "trusted_hosts", "command_allowlist", "path_allowlist", "kinds", "effects", "allowed_kinds", "dependencies", "aliases", "artifact_ids", "evidence_ids", "output_contract", "trial_ids"].includes(name)) return { type: "array" };
+    "allowed_operations", "allowed_effects", "require_approval_for", "operations", "subjects", "children", "trusted_hosts", "command_allowlist", "path_allowlist", "kinds", "effects", "allowed_kinds", "dependencies", "aliases", "artifact_ids", "evidence_ids", "output_contract", "trial_ids", "include_paths", "affected_paths"].includes(name)) return { type: "array" };
   return { type: "string" };
 };
 const objectSchema = (required: string[] = [], optional: string[] = []): JsonObject => ({ type: "object",
@@ -97,6 +97,12 @@ export const TOOLS: Tool[] = [
   tool("craft_task_open", "Create a durable task or resume one by ID.", [], false, ["task_id", "title", "goal", "project_id"]),
   tool("craft_task_list", "List durable tasks.", [], true, ["limit", "status", "project_id"]),
   tool("craft_task_checkpoint", "Persist task progress, evidence references, and pending work.", ["task_id", "summary"], false, ["completed", "pending", "decisions", "artifacts", "status", "source"]),
+  tool("craft_workspace_open", "Register an explicit local Agent-Native Workspace; no files are copied until a checkpoint.", ["name", "root_path", "include_paths"], false, ["workspace_id", "git_baseline_ref"]),
+  tool("craft_workspace_get", "Read one workspace state, checkpoints, and human changes.", ["workspace_id"], true),
+  tool("craft_workspace_checkpoint", "Create a content-addressed file snapshot for the workspace's declared paths.", ["workspace_id", "label"], false, ["checkpoint_id", "artifact_ids", "evidence_ids"]),
+  tool("craft_workspace_diff", "Compare two immutable workspace checkpoints.", ["workspace_id", "from_checkpoint_id", "to_checkpoint_id"], true),
+  tool("craft_workspace_human_change", "Record a human state intervention without importing its raw content.", ["workspace_id", "summary"], false, ["change_id", "affected_paths", "source"]),
+  tool("craft_workspace_restore", "Restore declared workspace paths only after explicit approval.", ["workspace_id", "checkpoint_id", "approved"]),
   tool("craft_feedback_record", "Record an explicit scoped correction or preference.", ["corrected"], false, ["kind", "scope", "task_id", "original", "applies_to", "source"]),
   tool("craft_artifact_register", "Register a portable artifact reference.", ["kind", "name", "uri"], false, ["artifact_id", "media_type", "digest", "size_bytes", "producer_type", "producer_id", "metadata"]),
   tool("craft_artifact_get", "Read an artifact reference.", ["artifact_id"], true),
@@ -246,7 +252,7 @@ export const TOOLS: Tool[] = [
 ];
 
 const CORE_TOOL_NAMES = new Set(["craft_info", "craft_source_list", "craft_capability_search", "craft_capability_get", "craft_semantic_status", "craft_execution_policy_decide",
-  "craft_default_route", "craft_default_route_resume", "craft_default_route_find", "craft_task_open", "craft_task_list", "craft_task_checkpoint",
+  "craft_default_route", "craft_default_route_resume", "craft_default_route_find", "craft_task_open", "craft_task_list", "craft_task_checkpoint", "craft_workspace_get", "craft_workspace_diff",
   "craft_artifact_register", "craft_evidence_record", "craft_capability_access_plan", "craft_capability_call_issue", "craft_capability_call_consume"]);
 export const CORE_TOOLS: Tool[] = TOOLS.filter((tool) => CORE_TOOL_NAMES.has(tool.name));
 
@@ -296,6 +302,9 @@ export class McpServer {
       craft_default_route_update: (a) => service.defaultRouteUpdate(a),
       craft_task_open: (a) => service.taskOpen(a), craft_task_list: (a) => service.taskList(a),
       craft_task_checkpoint: (a) => service.taskCheckpoint(a), craft_feedback_record: (a) => service.feedbackRecord(a),
+      craft_workspace_open: (a) => service.workspaceOpen(a), craft_workspace_get: (a) => service.workspaceGet(a),
+      craft_workspace_checkpoint: (a) => service.workspaceCheckpoint(a), craft_workspace_diff: (a) => service.workspaceDiff(a),
+      craft_workspace_human_change: (a) => service.workspaceHumanChange(a), craft_workspace_restore: (a) => service.workspaceRestore(a),
       craft_artifact_register: (a) => service.artifactRegister(a),
       craft_artifact_get: (a) => service.get("artifact", "artifact_id", a),
       craft_artifact_list: (a) => service.list("artifact", "artifacts", a),

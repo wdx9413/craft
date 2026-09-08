@@ -1,6 +1,6 @@
 {
   "name": "craft-agent-harness",
-  "version": "0.9.9",
+  "version": "0.9.10",
   "description": "Cross-platform capability, workflow, evidence, and agent harness",
   "type": "module",
   "bin": {
@@ -18,7 +18,7 @@
     "prepack": "pnpm run build",
     "test:smoke": "node dist/src/cli.js --help",
     "test:plugin": "node --experimental-strip-types scripts/plugin-smoke.ts && node --experimental-strip-types scripts/plugin-full-smoke.ts",
-    "test:ts": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-exclude=tests/** --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 tests/config.test.ts tests/store.test.ts tests/catalog.test.ts tests/semantic.test.ts tests/workflow.test.ts tests/orchestration.test.ts tests/orchestration-trial.test.ts tests/default-orchestration.test.ts tests/evaluation.test.ts tests/service.test.ts tests/experience-publisher.test.ts tests/runtime.test.ts tests/closed-loop.test.ts tests/v096.test.ts tests/v097.test.ts tests/v098.test.ts tests/v099.test.ts tests/mcp.test.ts",
+    "test:ts": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-exclude=tests/** --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 tests/config.test.ts tests/store.test.ts tests/catalog.test.ts tests/semantic.test.ts tests/workflow.test.ts tests/orchestration.test.ts tests/orchestration-trial.test.ts tests/default-orchestration.test.ts tests/evaluation.test.ts tests/service.test.ts tests/experience-publisher.test.ts tests/runtime.test.ts tests/closed-loop.test.ts tests/v096.test.ts tests/v097.test.ts tests/v098.test.ts tests/v099.test.ts tests/v0910.test.ts tests/mcp.test.ts",
     "check:ts": "node --experimental-strip-types src/cli.ts --help",
     "typecheck": "node node_modules/typescript/bin/tsc --noEmit"
   },

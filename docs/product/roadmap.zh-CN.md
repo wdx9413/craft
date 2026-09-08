@@ -37,6 +37,7 @@
 - Capability Asset Registry、最小 Activation Profile、profile-bound 过期调用回执、唯一只读 `diagnostic_research` Expert 与最多五个 Context Capsule Sub-agent。（v0.9.9 已实现）
 - 评测可靠性、Judge 校准、受审核 development 反馈、最多两个设计轴的 Adaptation Candidate、Signoff 后 Canary/精确回滚。（v0.9.9 已实现）
 - 执行按风险分级：普通读/规划可跨平台运行；仅本地生成代码写入依赖 macOS/Linux 网络拒绝隔离；外部写入审批、无补偿破坏性或未受信任 Broker 的凭据请求失败关闭。（v0.9.9 已实现）
+- Agent-Native Workspace：显式文件根/纳入路径、可选 Git 基线引用、不可变文件 Checkpoint、摘要 Diff、人工改动记录和显式批准恢复。它是 CLI/插件与未来 Canvas 的共同状态源，不自动执行 Git 或覆盖工作区根。（v0.9.10 已实现）
 - Lease TTL/续租、显式幂等提交和实际成本超限阻断。（v0.8.0 已实现基础协议）
 
 验收：同一真实任务集能比较两个版本的质量、成本、耗时和失败类型，并阻止无证据晋级；默认入口不能绕过 Host 审批或把未验证 Skill 当作可执行流程。Runtime 的每个子 Operation 必须归属根 Task，控制/环境指纹变化必须使旧证据失去新晋级资格。

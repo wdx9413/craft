@@ -41,7 +41,7 @@ Craft 不替代 Codex、Claude 或其他模型；它们可以作为执行宿主�
 
 ## 当前边界
 
-当前版本已实现核心/完整双 MCP 面、Capability Asset Registry、持久 Task/Evidence、确定性 Workflow、可续接的默认安全路线、受限 `diagnostic_research` Expert、Experience/Eval Kernel、多来源 Grader/Signoff，以及同评测集版本的聚合对比。v0.9.9 增加最小 Activation Profile、profile-bound 调用回执、最多五个只读 Sub-agent、配对可靠性检验、Judge 校准、Signoff 后 Canary 与精确回滚；本地生成代码写入按平台隔离，读/规划不强制沙箱。真实容器或 Windows 隔离 Adapter、外部短期凭据 Broker、模型 Grader 自动执行、真实业务金标、远程 Hub/A2A 与桌面端仍是后续方向。
+当前版本已实现核心/完整双 MCP 面、Capability Asset Registry、持久 Task/Evidence、确定性 Workflow、可续接的默认安全路线、受限 `diagnostic_research` Expert、Experience/Eval Kernel、多来源 Grader/Signoff，以及同评测集版本的聚合对比。v0.9.9 增加最小 Activation Profile、profile-bound 调用回执、最多五个只读 Sub-agent、配对可靠性检验、Judge 校准、Signoff 后 Canary 与精确回滚；v0.9.10 进一步把显式文件根、不可变 Checkpoint、摘要差异和人工打断做成共享 Workspace 状态源。本地生成代码写入按平台隔离，读/规划不强制沙箱。真实容器或 Windows 隔离 Adapter、外部短期凭据 Broker、模型 Grader 自动执行、真实业务金标、远程 Hub/A2A 与桌面端仍是后续方向。
 
 ## 形成行业基础层的条件
 

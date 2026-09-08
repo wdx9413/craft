@@ -10,8 +10,9 @@ import { loadConfig } from "./config.ts";
 import { OpenAiCompatibleEmbeddingProvider, type EmbeddingProvider } from "./semantic.ts";
 import { LocalIsolatedAdapter } from "./isolated.ts";
 import { decideExecution } from "./execution-policy.ts";
+import { WorkspaceState } from "./workspace.ts";
 
-export const VERSION = "0.9.9";
+export const VERSION = "0.9.10";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -173,7 +174,11 @@ export class CraftService {
   readonly store: CraftStore;
   readonly catalog: Catalog;
   readonly isolatedAdapter: LocalIsolatedAdapter;
-  constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter = new LocalIsolatedAdapter()) { this.store = store; this.catalog = new Catalog(store, semanticProvider); this.isolatedAdapter = isolatedAdapter; }
+  readonly workspace: WorkspaceState;
+  constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter = new LocalIsolatedAdapter()) {
+    this.store = store; this.catalog = new Catalog(store, semanticProvider); this.isolatedAdapter = isolatedAdapter;
+    this.workspace = new WorkspaceState(store, store.paths);
+  }
 
   static async open(store: CraftStore): Promise<CraftService> {
     const config = await loadConfig(store.paths);
@@ -192,7 +197,8 @@ export class CraftService {
       "runtime_operation", "runtime_adapter", "evaluation_runner", "evaluation_promotion", "experience_mining_candidate",
       "experience_shadow_experiment", "adaptive_harness", "agent_ir", "operational_signal", "operational_alert",
       "capability_asset", "activation_profile", "tool_selection_receipt", "capability_call", "expert_profile", "context_capsule",
-      "evaluation_reliability", "judge_adapter", "judge_calibration", "adaptation_candidate", "feedback_intake", "feedback_case", "canary"];
+      "evaluation_reliability", "judge_adapter", "judge_calibration", "adaptation_candidate", "feedback_intake", "feedback_case", "canary",
+      "workspace", "workspace_checkpoint", "workspace_change"];
     return { version: VERSION, data_root: this.store.paths.root,
       counts: Object.fromEntries(kinds.map((kind) => [kind, this.store.count(kind)])) };
   }
@@ -1168,6 +1174,12 @@ export class CraftService {
       payload: { ...task, status, latest_checkpoint_id: checkpointId } }]);
     return this.taskPack(taskId);
   }
+  workspaceOpen(args: JsonObject): JsonObject { return this.workspace.open(args); }
+  workspaceGet(args: JsonObject): JsonObject { return this.workspace.get(args); }
+  workspaceCheckpoint(args: JsonObject): JsonObject { return this.workspace.checkpoint(args); }
+  workspaceDiff(args: JsonObject): JsonObject { return this.workspace.diff(args); }
+  workspaceHumanChange(args: JsonObject): JsonObject { return this.workspace.humanChange(args); }
+  workspaceRestore(args: JsonObject): JsonObject { return this.workspace.restore(args); }
   private taskPack(taskId: string): JsonObject {
     return { task: this.store.get("task", taskId), checkpoints: this.store.list("checkpoint", 100,
       (item) => item.task_id === taskId), feedback: this.store.list("feedback", 100,

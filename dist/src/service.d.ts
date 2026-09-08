@@ -2,11 +2,13 @@ import { Catalog } from "./catalog.ts";
 import { CraftStore, type JsonObject } from "./store.ts";
 import { type EmbeddingProvider } from "./semantic.ts";
 import { LocalIsolatedAdapter } from "./isolated.ts";
-export declare const VERSION = "0.9.9";
+import { WorkspaceState } from "./workspace.ts";
+export declare const VERSION = "0.9.10";
 export declare class CraftService {
     readonly store: CraftStore;
     readonly catalog: Catalog;
     readonly isolatedAdapter: LocalIsolatedAdapter;
+    readonly workspace: WorkspaceState;
     constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter?: LocalIsolatedAdapter);
     static open(store: CraftStore): Promise<CraftService>;
     info(): JsonObject;
@@ -73,6 +75,12 @@ export declare class CraftService {
     taskOpen(args: JsonObject): JsonObject;
     taskList(args: JsonObject): JsonObject;
     taskCheckpoint(args: JsonObject): JsonObject;
+    workspaceOpen(args: JsonObject): JsonObject;
+    workspaceGet(args: JsonObject): JsonObject;
+    workspaceCheckpoint(args: JsonObject): JsonObject;
+    workspaceDiff(args: JsonObject): JsonObject;
+    workspaceHumanChange(args: JsonObject): JsonObject;
+    workspaceRestore(args: JsonObject): JsonObject;
     private taskPack;
     feedbackRecord(args: JsonObject): JsonObject;
     artifactRegister(args: JsonObject): JsonObject;
