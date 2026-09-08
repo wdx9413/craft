@@ -8346,7 +8346,7 @@ async function rollbackSkillPublication(args) {
 }
 
 // src/service.ts
-var VERSION = "0.9.1";
+var VERSION = "0.9.2";
 var CONFIDENCE = /* @__PURE__ */ new Set(["confirmed", "bounded", "unverified", "rejected"]);
 var TASK_STATUS = /* @__PURE__ */ new Set(["active", "paused", "completed", "cancelled"]);
 var VERSIONED_LIFECYCLE = /* @__PURE__ */ new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -8609,6 +8609,47 @@ ${task.goal}`.toLowerCase();
     if (!best.length) return { status: "not_found", query, candidates: [] };
     if (best.length > 1) return { status: "ambiguous", query, candidates: summaries };
     return { status: "matched", query, candidates: summaries, ...this.defaultRouteResume({ task_id: best[0].task.id }) };
+  }
+  routeWorkflowProposalCreate(args) {
+    const route = this.store.get("route", text(args.route_id, "route_id"));
+    if (route.workflow_id || route.status !== "completed") {
+      throw new Error("Workflow proposals require a completed safe route");
+    }
+    const routeTrialId = text(route.trial_id, "route trial_id");
+    const routeOutcome = this.store.get("outcome", `outcome_${routeTrialId}`);
+    if (routeOutcome.verdict !== "passed" || !route.strategy_id) {
+      throw new Error("Workflow proposals require a passed route with a reusable strategy");
+    }
+    const strategyId = String(route.strategy_id);
+    const strategyVersion = Number(route.strategy_version);
+    const candidate = this.experienceCandidateList({}).experience_candidates.find((item) => item.subject_type === "route_strategy" && item.subject_id === strategyId && Number(item.subject_version) === strategyVersion);
+    const candidateTrialIds = candidate?.trial_ids ?? [];
+    const trialIds = candidateTrialIds.filter((trialId) => this.store.get("outcome", `outcome_${trialId}`).verdict === "passed");
+    if (trialIds.length < 2) throw new Error("Workflow proposals require two passed evidence-backed routes");
+    const evidenceIds = [...new Set(trialIds.flatMap((trialId) => this.store.get("outcome", `outcome_${trialId}`).evidence_ids))];
+    const stepsInput = array(args.steps, "steps");
+    if (!stepsInput.length) throw new Error("Workflow proposals require at least one step");
+    const workflow = this.workflowSave({
+      workflow_id: args.workflow_id,
+      name: text(args.name, "name"),
+      description: args.description === void 0 ? "Evidence-backed draft derived from safe routes." : document(args.description, "description"),
+      inputs: array(args.inputs ?? [], "inputs"),
+      steps: normalizeSteps(stepsInput),
+      derived_from: {
+        route_id: route.id,
+        route_trial_id: routeTrialId,
+        route_strategy_id: strategyId,
+        route_strategy_version: strategyVersion,
+        trial_ids: trialIds,
+        evidence_ids: evidenceIds
+      }
+    });
+    return {
+      workflow,
+      trial_ids: trialIds,
+      evidence_ids: evidenceIds,
+      next_action: "Run development and held-out evaluations before promoting this draft Workflow."
+    };
   }
   defaultRouteUpdate(args) {
     const route = this.store.get("route", text(args.route_id, "route_id"));
@@ -9720,6 +9761,13 @@ var TOOLS = [
     ["project_id"]
   ),
   tool(
+    "craft_route_workflow_proposal_create",
+    "Create only a draft Workflow from two or more passed evidence-backed safe routes; promotion still requires evaluation.",
+    ["route_id", "name", "steps"],
+    false,
+    ["workflow_id", "description", "inputs"]
+  ),
+  tool(
     "craft_default_route_update",
     "Record one required safe-plan stage with real evidence; the final stage records the route Outcome.",
     ["route_id", "stage_id", "summary"],
@@ -9975,6 +10023,7 @@ var McpServer = class {
       craft_default_route_execute: (a) => service.defaultRouteExecute(a),
       craft_default_route_resume: (a) => service.defaultRouteResume(a),
       craft_default_route_find: (a) => service.defaultRouteFind(a),
+      craft_route_workflow_proposal_create: (a) => service.routeWorkflowProposalCreate(a),
       craft_default_route_update: (a) => service.defaultRouteUpdate(a),
       craft_task_open: (a) => service.taskOpen(a),
       craft_task_list: (a) => service.taskList(a),

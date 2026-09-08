@@ -102,14 +102,22 @@ test("MCP negotiates protocols, lists tools, dispatches every handler, and repor
       assert.equal((response?.result as Record<string, unknown>).isError, false, name);
       return (response?.result as Record<string, unknown>).structuredContent as Record<string, unknown>;
     };
-    const lifecycleRoute = await call("craft_default_route", { goal: "MCP safe route lifecycle" });
+    const lifecycleRoute = await call("craft_default_route", { goal: "searchable safe route" });
     await call("craft_default_route_resume", { task_id: (lifecycleRoute.task as Record<string, unknown>).id });
-    await call("craft_default_route_find", { query: "继续 MCP safe route lifecycle" });
+    await call("craft_default_route_find", { query: "继续 searchable safe route" });
     for (const stageId of ["baseline", "minimal_change", "verification"]) {
       await call("craft_default_route_update", { route_id: lifecycleRoute.route_id, stage_id: stageId, summary: stageId });
     }
     await call("craft_default_route_update", { route_id: lifecycleRoute.route_id, stage_id: "review",
       summary: "review", verdict: "passed", evidence_ids: ["evidence_a"] });
+    const repeatedLifecycleRoute = await call("craft_default_route", { goal: "searchable safe route" });
+    for (const stageId of ["baseline", "minimal_change", "verification"]) {
+      await call("craft_default_route_update", { route_id: repeatedLifecycleRoute.route_id, stage_id: stageId, summary: stageId });
+    }
+    await call("craft_default_route_update", { route_id: repeatedLifecycleRoute.route_id, stage_id: "review",
+      summary: "review", verdict: "passed", evidence_ids: ["evidence_a"] });
+    await call("craft_route_workflow_proposal_create", { route_id: lifecycleRoute.route_id, name: "MCP safe route",
+      workflow_id: "workflow_mcp_safe_route", steps: [{ id: "proof", type: "assertion", evaluator: "file_exists", path: "." }] });
     const orchestrationTrial = await call("craft_orchestration_trial_start", { plan_id: "plan_trial_mcp",
       trial_id: "orchestration_trial_mcp", task_id: taskId, goal: "Capture orchestration", nodes: [
         { id: "node", role: "worker", objective: "work", profile_ids: ["profile_a"] },

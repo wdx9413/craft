@@ -191,3 +191,64 @@ test("自然续接只恢复唯一的活动路线，不猜测并列或已完成�
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("重复通过的安全路线只能生成证据溯源的 Workflow 草案", async () => {
+  const root = join(tmpdir(), `craft-route-workflow-proposal-${process.pid}-${Date.now()}`);
+  const skills = join(root, "skills");
+  await mkdir(skills, { recursive: true });
+  await writeFile(join(skills, "SKILL.md"), "---\nname: safe-repair\ndescription: Repair services safely\n---\nUse evidence.");
+  await writeFile(join(root, "proof.txt"), "ok");
+  const store = await new CraftStore(craftPaths(join(root, "data"))).open();
+  const service = new CraftService(store);
+  try {
+    await service.sourceAdd({ path: skills });
+    const evidence = service.evidenceRecord({ source_type: "program", claim: "focused test passed", confidence: "confirmed" });
+    const completeRoute = (): JsonObject => {
+      const route = service.defaultRoute({ goal: "Repair service safely" });
+      for (const stageId of ["baseline", "minimal_change", "verification"]) {
+        service.defaultRouteUpdate({ route_id: route.route_id, stage_id: stageId, summary: stageId });
+      }
+      service.defaultRouteUpdate({ route_id: route.route_id, stage_id: "review", summary: "passed",
+        verdict: "passed", evidence_ids: [evidence.id] });
+      return route;
+    };
+    const first = completeRoute();
+    const proposalArgs = { route_id: first.route_id, workflow_id: "workflow_safe_repair", name: "Safe repair",
+      description: "Reusable verified path candidate", steps: [{ id: "proof", type: "assertion", evaluator: "file_exists", path: "proof.txt" }] };
+    const pending = service.defaultRoute({ goal: "Repair service safely" });
+    assert.throws(() => service.routeWorkflowProposalCreate({ ...proposalArgs, route_id: pending.route_id }), /completed safe route/);
+    store.save("workflow", "workflow_already_verified", { name: "Already verified", lifecycle: "verified", steps: [] });
+    const verifiedRoute = service.defaultRoute({ goal: "Already verified" });
+    assert.throws(() => service.routeWorkflowProposalCreate({ ...proposalArgs, route_id: verifiedRoute.route_id }), /completed safe route/);
+    assert.throws(() => service.routeWorkflowProposalCreate(proposalArgs), /two passed/);
+    completeRoute();
+    assert.throws(() => service.routeWorkflowProposalCreate({ ...proposalArgs, workflow_id: "workflow_empty", steps: [] }), /at least one/);
+    const proposal = service.routeWorkflowProposalCreate(proposalArgs);
+    assert.equal((proposal.workflow as JsonObject).lifecycle, "draft");
+    assert.equal(((proposal.workflow as JsonObject).derived_from as JsonObject).route_id, first.route_id);
+    assert.equal((((proposal.workflow as JsonObject).derived_from as JsonObject).trial_ids as string[]).length, 2);
+    assert.equal(service.workflowPlan({ workflow_id: "workflow_safe_repair" }).executable, true);
+
+    const noStrategy = service.defaultRoute({ goal: "😀" });
+    for (const stageId of ["baseline", "minimal_change", "verification"]) {
+      service.defaultRouteUpdate({ route_id: noStrategy.route_id, stage_id: stageId, summary: stageId });
+    }
+    service.defaultRouteUpdate({ route_id: noStrategy.route_id, stage_id: "review", summary: "passed",
+      verdict: "passed", evidence_ids: [evidence.id] });
+    assert.throws(() => service.routeWorkflowProposalCreate({ ...proposalArgs, route_id: noStrategy.route_id }), /reusable strategy/);
+    const failed = service.defaultRoute({ goal: "Repair service safely" });
+    for (const stageId of ["baseline", "minimal_change", "verification"]) {
+      service.defaultRouteUpdate({ route_id: failed.route_id, stage_id: stageId, summary: stageId });
+    }
+    service.defaultRouteUpdate({ route_id: failed.route_id, stage_id: "review", summary: "failed",
+      verdict: "failed", evidence_ids: [evidence.id] });
+    assert.throws(() => service.routeWorkflowProposalCreate({ ...proposalArgs, route_id: failed.route_id }), /completed safe route/);
+    const failedRoute = store.get("route", String(failed.route_id));
+    const { id: _failedId, version: _failedVersion, created_at: _failedCreatedAt, updated_at: _failedUpdatedAt, ...failedPayload } = failedRoute;
+    store.save("route", String(failed.route_id), { ...failedPayload, status: "completed" });
+    assert.throws(() => service.routeWorkflowProposalCreate({ ...proposalArgs, route_id: failed.route_id }), /passed route/);
+  } finally {
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});

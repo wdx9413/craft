@@ -5,7 +5,7 @@ import { approvedEffects, executeSteps, normalizeSteps, resolveInputs, substitut
 import { addCosts, dispatchNodes, normalizeNodes, orchestrationOutcome, planStatus, recoverExpiredLeases, submitNode } from "./orchestration.js";
 import { aggregateEvaluation, compareEvaluationAggregates } from "./evaluation.js";
 import { publishSkill, rollbackSkillPublication } from "./skill-publisher.js";
-export const VERSION = "0.9.1";
+export const VERSION = "0.9.2";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -194,6 +194,36 @@ export class CraftService {
         if (best.length > 1)
             return { status: "ambiguous", query, candidates: summaries };
         return { status: "matched", query, candidates: summaries, ...this.defaultRouteResume({ task_id: best[0].task.id }) };
+    }
+    routeWorkflowProposalCreate(args) {
+        const route = this.store.get("route", text(args.route_id, "route_id"));
+        if (route.workflow_id || route.status !== "completed") {
+            throw new Error("Workflow proposals require a completed safe route");
+        }
+        const routeTrialId = text(route.trial_id, "route trial_id");
+        const routeOutcome = this.store.get("outcome", `outcome_${routeTrialId}`);
+        if (routeOutcome.verdict !== "passed" || !route.strategy_id) {
+            throw new Error("Workflow proposals require a passed route with a reusable strategy");
+        }
+        const strategyId = String(route.strategy_id);
+        const strategyVersion = Number(route.strategy_version);
+        const candidate = this.experienceCandidateList({}).experience_candidates.find((item) => item.subject_type === "route_strategy" && item.subject_id === strategyId && Number(item.subject_version) === strategyVersion);
+        const candidateTrialIds = (candidate?.trial_ids ?? []);
+        const trialIds = candidateTrialIds.filter((trialId) => this.store.get("outcome", `outcome_${trialId}`).verdict === "passed");
+        if (trialIds.length < 2)
+            throw new Error("Workflow proposals require two passed evidence-backed routes");
+        const evidenceIds = [...new Set(trialIds.flatMap((trialId) => this.store.get("outcome", `outcome_${trialId}`).evidence_ids))];
+        const stepsInput = array(args.steps, "steps");
+        if (!stepsInput.length)
+            throw new Error("Workflow proposals require at least one step");
+        const workflow = this.workflowSave({ workflow_id: args.workflow_id, name: text(args.name, "name"),
+            description: args.description === undefined ? "Evidence-backed draft derived from safe routes." : document(args.description, "description"),
+            inputs: array(args.inputs ?? [], "inputs"), steps: normalizeSteps(stepsInput), derived_from: {
+                route_id: route.id, route_trial_id: routeTrialId, route_strategy_id: strategyId, route_strategy_version: strategyVersion,
+                trial_ids: trialIds, evidence_ids: evidenceIds,
+            } });
+        return { workflow, trial_ids: trialIds, evidence_ids: evidenceIds,
+            next_action: "Run development and held-out evaluations before promoting this draft Workflow." };
     }
     defaultRouteUpdate(args) {
         const route = this.store.get("route", text(args.route_id, "route_id"));
