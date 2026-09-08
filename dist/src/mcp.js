@@ -1,21 +1,21 @@
 import { CraftService, VERSION } from "./service.js";
 import {} from "./store.js";
 const schemaFor = (name) => {
-    if (["scan", "enabled", "allow_execution", "allow_external_write", "require_held_out", "require_outcome_passed"].includes(name))
+    if (["scan", "enabled", "allow_execution", "allow_external_write", "require_held_out", "require_outcome_passed", "retryable", "requires_external_effect"].includes(name))
         return { type: "boolean" };
     if (["limit", "version", "capacity", "max_concurrency", "size_bytes", "subject_version",
         "suite_version", "configuration_version", "harness_configuration_version", "target_version",
-        "grader_version", "policy_version", "lease_ttl_seconds"].includes(name))
+        "grader_version", "policy_version", "lease_ttl_seconds", "trials_per_case", "window_size", "max_attempts", "min_trials", "harness_version", "ir_version"].includes(name))
         return { type: "integer" };
-    if (["score"].includes(name))
+    if (["score", "value", "threshold", "min_pass_rate_delta", "max_cost_regression_ratio"].includes(name))
         return { type: "number" };
     if (["inputs", "metadata", "policy", "dimensions", "environment", "budget", "data", "scores",
-        "costs", "metrics", "configuration", "receipt_requirements"].includes(name))
+        "costs", "metrics", "configuration", "receipt_requirements", "execution", "rules"].includes(name))
         return { type: "object" };
     if (["completed", "pending", "decisions", "artifacts", "steps", "cases", "capabilities",
         "allowed_side_effects", "approved_side_effects", "nodes", "artifact_ids", "evidence_ids",
         "trial_ids", "requirements", "grade_ids", "pattern_ids", "failure_modes", "receipt_ids",
-        "allowed_operations"].includes(name))
+        "allowed_operations", "allowed_effects", "require_approval_for", "operations", "subjects", "children", "trusted_hosts", "command_allowlist", "path_allowlist", "kinds"].includes(name))
         return { type: "array" };
     return { type: "string" };
 };
@@ -49,6 +49,19 @@ export const TOOLS = [
     tool("craft_host_adapter_list", "List Host Adapter contracts.", [], true, ["limit", "query"]),
     tool("craft_host_adapter_dispatch", "Lease only the next safe route action to a compatible Host Adapter.", ["host_adapter_id", "route_id"], false, ["host_adapter_version", "dispatch_id"]),
     tool("craft_host_adapter_report", "Record a Host Adapter dispatch completion without fabricating route evidence.", ["dispatch_id", "status", "summary"]),
+    tool("craft_runtime_policy_save", "Save a versioned runtime effect, approval, concurrency, budget, and deterministic-driver policy.", ["name", "allowed_effects"], false, ["runtime_policy_id", "require_approval_for", "max_concurrency", "budget", "max_attempts", "lease_ttl_seconds", "trusted_hosts", "command_allowlist", "path_allowlist"]),
+    tool("craft_runtime_policy_get", "Read an exact runtime policy version.", ["runtime_policy_id"], true, ["version"]),
+    tool("craft_runtime_policy_list", "List runtime policies.", [], true, ["limit", "query"]),
+    tool("craft_runtime_run_start", "Create a durable controlled run with policy and environment fingerprints.", ["task_id", "policy_id", "environment", "operations"], false, ["run_id", "policy_version", "trial_id"]),
+    tool("craft_runtime_run_get", "Read a durable runtime run, operations, and immutable trace.", ["run_id"], true),
+    tool("craft_runtime_dispatch", "Lease only pending policy-approved runtime operations to a host.", ["run_id", "claimed_by"], false, ["capacity", "kinds"]),
+    tool("craft_runtime_operation_get", "Read one runtime operation.", ["operation_id"], true),
+    tool("craft_runtime_operation_decision", "Approve or reject an effect that is awaiting human approval.", ["operation_id", "decision", "actor"]),
+    tool("craft_runtime_operation_submit", "Submit an observed leased operation result and optional child operations.", ["operation_id", "lease_id", "claimed_by", "verdict"], false, ["costs", "children", "idempotency_key", "artifact_ids", "evidence_ids", "retryable"]),
+    tool("craft_runtime_lease_recover", "Recover expired runtime leases or terminally fail exhausted attempts.", ["run_id"], false, ["now"]),
+    tool("craft_runtime_driver_tick", "Execute only trusted, policy-approved deterministic Workflow operations; leave Agent work to a compatible Host.", ["run_id", "driver_id"], false, ["capacity"]),
+    tool("craft_runtime_run_resume", "Return the next durable runtime action without guessing.", ["run_id"], true),
+    tool("craft_runtime_promotion_eligibility", "Check exact policy and environment fingerprints before promotion.", ["run_id", "policy_id", "environment"], true, ["policy_version"]),
     tool("craft_route_workflow_proposal_create", "Create only a draft Workflow from two or more passed evidence-backed safe routes; promotion still requires evaluation.", ["route_id", "name", "steps"], false, ["workflow_id", "description", "inputs"]),
     tool("craft_default_route_update", "Record one required safe-plan stage with real evidence; the final stage records the route Outcome.", ["route_id", "stage_id", "summary"], false, ["artifact_ids", "evidence_ids", "receipt_ids", "verdict"]),
     tool("craft_task_open", "Create a durable task or resume one by ID.", [], false, ["task_id", "title", "goal", "project_id"]),
@@ -76,6 +89,10 @@ export const TOOLS = [
     tool("craft_experience_pattern_get", "Read an experience pattern.", ["pattern_id"], true, ["version"]),
     tool("craft_experience_pattern_list", "List reusable experience patterns.", [], true, ["limit", "query"]),
     tool("craft_experience_candidate_list", "List automatic Experience Pattern candidates backed by at least two completed Trials with Evidence.", [], true),
+    tool("craft_experience_mine", "Extract repeated evidence-backed failure modes as proposal-only candidates; it never publishes changes.", ["subject_type", "subject_id", "subject_version"]),
+    tool("craft_experience_shadow_experiment_create", "Create a shadow-only experiment from a mined proposal candidate; it cannot publish a change.", ["task_id", "mining_candidate_id"], false, ["experiment_id"]),
+    tool("craft_operational_signal_record", "Record one observed online metric without storing raw payloads.", ["subject_type", "subject_id", "metric", "value"], false, ["signal_id", "task_id"]),
+    tool("craft_operational_drift_evaluate", "Evaluate recent operational metric drift and record only a bounded alert.", ["subject_type", "subject_id", "metric", "direction", "threshold"], false, ["window_size", "alert_id"]),
     tool("craft_skill_proposal_create", "Save a versioned SKILL.md candidate derived from Experience Patterns; this does not change any source file.", ["name", "summary", "skill_markdown", "pattern_ids"], false, ["proposal_id"]),
     tool("craft_skill_proposal_get", "Read a versioned Skill candidate.", ["proposal_id"], true, ["version"]),
     tool("craft_skill_proposal_list", "List Skill candidates.", [], true, ["limit", "query"]),
@@ -91,6 +108,9 @@ export const TOOLS = [
     tool("craft_harness_configuration_save", "Save a versioned six-dimensional harness configuration.", ["name", "dimensions"], false, ["configuration_id", "description"]),
     tool("craft_harness_configuration_get", "Read a harness configuration version.", ["configuration_id"], true, ["version"]),
     tool("craft_harness_configuration_list", "List harness configurations.", [], true, ["limit", "query"]),
+    tool("craft_harness_select", "Select the smallest risk- and budget-appropriate Harness and persist the decision.", ["task_id", "risk"], false, ["budget", "requires_external_effect", "harness_id", "strategy_id"]),
+    tool("craft_agent_ir_compile", "Compile host-neutral operations and constraints into a versioned Agent IR.", ["task_id", "harness_id", "goal", "operations"], false, ["harness_version", "ir_id"]),
+    tool("craft_agent_ir_lower", "Lower a versioned Agent IR into one controlled Runtime Run.", ["ir_id", "policy_id", "environment"], false, ["ir_version", "policy_version", "run_id", "trial_id"]),
     tool("craft_trial_start", "Create an immutable execution trial linked to a task and exact subject version.", ["task_id", "subject_type", "subject_id", "subject_version"], false, ["trial_id", "case_id", "harness_configuration_id", "harness_configuration_version", "environment", "budget"]),
     tool("craft_trial_trace_append", "Append an immutable trace event to a trial.", ["trial_id", "event_type"], false, ["source", "data", "artifact_ids", "evidence_ids"]),
     tool("craft_trial_get", "Read a trial with its trace and outcome.", ["trial_id"], true),
@@ -101,9 +121,12 @@ export const TOOLS = [
     tool("craft_evaluation_run_list", "List evaluation runs.", [], true, ["limit", "query"]),
     tool("craft_evaluation_run_aggregate", "Compute reproducible quality, score, cost, duration, and failure aggregates for an evaluation run.", ["run_id"], true),
     tool("craft_evaluation_compare", "Compare two runs only when suite version, split, subject type, and case set match.", ["baseline_run_id", "candidate_run_id"], false, ["comparison_id"]),
+    tool("craft_evaluation_runner_run", "Execute comparable held-out deterministic Workflow trials and record Evaluation Runs.", ["task_id", "suite_id", "split", "project_root", "subjects"], false, ["runner_id", "suite_version", "trials_per_case", "environment", "budget"]),
+    tool("craft_evaluation_program_grade", "Run a versioned deterministic program grader across every Trial of an Evaluation Run.", ["evaluation_run_id", "grader_id"], false, ["grader_version"]),
+    tool("craft_evaluation_promotion_assess", "Apply held-out repeated-trial, paired comparison, and cost regression thresholds before promotion.", ["comparison_id"], false, ["promotion_id", "min_trials", "min_pass_rate_delta", "max_cost_regression_ratio"]),
     tool("craft_evaluation_comparison_get", "Read an immutable evaluation comparison.", ["comparison_id"], true),
     tool("craft_evaluation_comparison_list", "List immutable evaluation comparisons.", [], true, ["limit", "query"]),
-    tool("craft_grader_save", "Save a versioned program, model, human, or operational grader.", ["name", "grader_type"], false, ["grader_id", "description", "configuration"]),
+    tool("craft_grader_save", "Save a versioned program, model, human, or operational grader.", ["name", "grader_type"], false, ["grader_id", "description", "configuration", "rules"]),
     tool("craft_grader_get", "Read an exact grader version.", ["grader_id"], true, ["version"]),
     tool("craft_grader_list", "List graders.", [], true, ["limit", "query"]),
     tool("craft_grade_record", "Record one immutable grade for a Trial and exact Grader version.", ["trial_id", "grader_id", "grader_version", "verdict", "summary"], false, ["score", "evidence_ids", "metadata"]),
@@ -150,6 +173,15 @@ export class McpServer {
             craft_host_adapter_list: (a) => service.list("host_adapter", "host_adapters", a),
             craft_host_adapter_dispatch: (a) => service.hostAdapterDispatch(a),
             craft_host_adapter_report: (a) => service.hostAdapterReport(a),
+            craft_runtime_policy_save: (a) => service.runtimePolicySave(a),
+            craft_runtime_policy_get: (a) => service.get("runtime_policy", "runtime_policy_id", a),
+            craft_runtime_policy_list: (a) => service.list("runtime_policy", "runtime_policies", a),
+            craft_runtime_run_start: (a) => service.runtimeRunStart(a), craft_runtime_run_get: (a) => service.runtimeRunGet(a),
+            craft_runtime_dispatch: (a) => service.runtimeDispatch(a), craft_runtime_operation_get: (a) => service.runtimeOperationGet(a),
+            craft_runtime_operation_decision: (a) => service.runtimeOperationDecision(a),
+            craft_runtime_operation_submit: (a) => service.runtimeOperationSubmit(a), craft_runtime_run_resume: (a) => service.runtimeRunResume(a),
+            craft_runtime_lease_recover: (a) => service.runtimeLeaseRecover(a), craft_runtime_driver_tick: (a) => service.runtimeDriverTick(a),
+            craft_runtime_promotion_eligibility: (a) => service.runtimePromotionEligibility(a),
             craft_route_workflow_proposal_create: (a) => service.routeWorkflowProposalCreate(a),
             craft_default_route_update: (a) => service.defaultRouteUpdate(a),
             craft_task_open: (a) => service.taskOpen(a), craft_task_list: (a) => service.taskList(a),
@@ -172,6 +204,10 @@ export class McpServer {
             craft_experience_pattern_get: (a) => service.get("experience_pattern", "pattern_id", a),
             craft_experience_pattern_list: (a) => service.list("experience_pattern", "patterns", a),
             craft_experience_candidate_list: (a) => service.experienceCandidateList(a),
+            craft_experience_mine: (a) => service.experienceMine(a),
+            craft_experience_shadow_experiment_create: (a) => service.experienceShadowExperimentCreate(a),
+            craft_operational_signal_record: (a) => service.operationalSignalRecord(a),
+            craft_operational_drift_evaluate: (a) => service.operationalDriftEvaluate(a),
             craft_skill_proposal_create: (a) => service.skillProposalCreate(a),
             craft_skill_proposal_get: (a) => service.get("skill_proposal", "proposal_id", a),
             craft_skill_proposal_list: (a) => service.list("skill_proposal", "proposals", a),
@@ -187,6 +223,8 @@ export class McpServer {
             craft_harness_configuration_save: (a) => service.harnessConfigurationSave(a),
             craft_harness_configuration_get: (a) => service.get("harness_configuration", "configuration_id", a),
             craft_harness_configuration_list: (a) => service.list("harness_configuration", "configurations", a),
+            craft_harness_select: (a) => service.harnessSelect(a), craft_agent_ir_compile: (a) => service.agentIrCompile(a),
+            craft_agent_ir_lower: (a) => service.agentIrLower(a),
             craft_trial_start: (a) => service.trialStart(a),
             craft_trial_trace_append: (a) => service.trialTraceAppend(a),
             craft_trial_get: (a) => service.trialGet(a),
@@ -197,6 +235,9 @@ export class McpServer {
             craft_evaluation_run_list: (a) => service.list("evaluation_run", "runs", a),
             craft_evaluation_run_aggregate: (a) => service.evaluationRunAggregate(a),
             craft_evaluation_compare: (a) => service.evaluationCompare(a),
+            craft_evaluation_runner_run: (a) => service.evaluationRunnerRun(a),
+            craft_evaluation_program_grade: (a) => service.evaluationProgramGrade(a),
+            craft_evaluation_promotion_assess: (a) => service.evaluationPromotionAssess(a),
             craft_evaluation_comparison_get: (a) => service.get("evaluation_comparison", "comparison_id", a),
             craft_evaluation_comparison_list: (a) => service.list("evaluation_comparison", "comparisons", a),
             craft_grader_save: (a) => service.graderSave(a),

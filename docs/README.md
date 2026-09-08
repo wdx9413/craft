@@ -15,6 +15,7 @@
 - [Experience / Eval Kernel](technical/modules/experience-eval.md)
 - [Workflow / Verification / Signoff](technical/modules/workflow-signoff.md)
 - [Runtime 与宿主接入](technical/modules/runtime-integration.md)
+- [Closed-loop Runtime](technical/modules/closed-loop-runtime.md)
 
 ## 当前实现参考
 

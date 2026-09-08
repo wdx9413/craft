@@ -215,3 +215,71 @@ test("MCP negotiates protocols, lists tools, dispatches every handler, and repor
     }
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
+
+test("MCP exposes the 0.9.6 executable runtime, evaluation gate, and adaptive harness controls", async () => {
+  const root = join(tmpdir(), `craft-mcp-runtime-${process.pid}-${Date.now()}`);
+  await mkdir(root, { recursive: true });
+  await writeFile(join(root, "ok.txt"), "ok");
+  const store = await new CraftStore(craftPaths(join(root, "data"))).open();
+  const server = new McpServer(new CraftService(store));
+  const call = async (name: string, arguments_: Record<string, unknown>): Promise<Record<string, unknown>> => {
+    const response = await server.handle({ id: name, method: "tools/call", params: { name, arguments: arguments_ } });
+    assert.equal((response?.result as Record<string, unknown>).isError, false, name);
+    return (response?.result as Record<string, unknown>).structuredContent as Record<string, unknown>;
+  };
+  try {
+    const task = await call("craft_task_open", { title: "Runtime", goal: "Runtime" });
+    const taskId = String((task.task as Record<string, unknown>).id);
+    const policy = await call("craft_runtime_policy_save", { name: "P", allowed_effects: ["read_only"] });
+    await call("craft_runtime_policy_get", { runtime_policy_id: policy.id }); await call("craft_runtime_policy_list", {});
+    const run = await call("craft_runtime_run_start", { run_id: "run", task_id: taskId, policy_id: policy.id,
+      environment: { image: "test" }, operations: [{ operation_id: "op", kind: "agent", effect: "read_only", objective: "read" }] });
+    await call("craft_runtime_run_get", { run_id: "run" });
+    const dispatched = await call("craft_runtime_dispatch", { run_id: "run", claimed_by: "host" });
+    const operation = (dispatched.operations as Record<string, unknown>[])[0];
+    await call("craft_runtime_operation_get", { operation_id: "op" });
+    await call("craft_runtime_operation_submit", { operation_id: "op", lease_id: operation.lease_id,
+      claimed_by: "host", verdict: "passed" });
+    await call("craft_runtime_run_resume", { run_id: "run" });
+    await call("craft_runtime_promotion_eligibility", { run_id: "run", policy_id: policy.id, environment: { image: "test" } });
+
+    const approvalPolicy = await call("craft_runtime_policy_save", { name: "Approval", allowed_effects: ["local_write"],
+      require_approval_for: ["local_write"] });
+    await call("craft_runtime_run_start", { run_id: "approval-run", task_id: taskId, policy_id: approvalPolicy.id,
+      environment: {}, operations: [{ operation_id: "approval-op", kind: "agent", effect: "local_write", objective: "write" }] });
+    await call("craft_runtime_dispatch", { run_id: "approval-run", claimed_by: "host" });
+    await call("craft_runtime_operation_decision", { operation_id: "approval-op", decision: "approve", actor: "human" });
+
+    const suite = await call("craft_eval_suite_save", { name: "Suite", cases: [{ case_id: "held", split: "held_out" }] });
+    const workflow = await call("craft_workflow_save", { workflow_id: "eval-workflow", name: "Eval", steps: [
+      { id: "proof", type: "assertion", evaluator: "file_exists", path: "ok.txt" },
+    ] });
+    const evaluation = await call("craft_evaluation_runner_run", { task_id: taskId, suite_id: suite.id, split: "held_out", project_root: root,
+      subjects: [{ label: "left", subject_type: "workflow", subject_id: workflow.id, subject_version: workflow.version },
+        { label: "right", subject_type: "workflow", subject_id: workflow.id, subject_version: workflow.version }] });
+    const driverPolicy = await call("craft_runtime_policy_save", { name: "Driver", allowed_effects: ["read_only"],
+      trusted_hosts: ["driver"], path_allowlist: ["ok.txt"] });
+    await call("craft_runtime_run_start", { run_id: "driver-run", task_id: taskId, policy_id: driverPolicy.id, environment: {}, operations: [{
+      operation_id: "driver-op", kind: "workflow", effect: "read_only", objective: "proof", execution: {
+        workflow_id: workflow.id, workflow_version: workflow.version, project_root: root, inputs: {},
+      },
+    }] });
+    await call("craft_runtime_driver_tick", { run_id: "driver-run", driver_id: "driver" });
+    await call("craft_runtime_lease_recover", { run_id: "driver-run" });
+    const grader = await call("craft_grader_save", { name: "Program", grader_type: "program", rules: { minimum_pass_rate: 1 } });
+    const evaluationRun = (evaluation.evaluation_runs as Record<string, unknown>[])[0];
+    await call("craft_evaluation_program_grade", { evaluation_run_id: evaluationRun.id, grader_id: grader.id, grader_version: grader.version });
+    const comparison = (evaluation.comparisons as Record<string, unknown>[])[0];
+    await call("craft_evaluation_promotion_assess", { comparison_id: comparison.id, min_trials: 1 });
+    const harness = await call("craft_harness_select", { task_id: taskId, risk: "high", budget: {} });
+    const ir = await call("craft_agent_ir_compile", { task_id: taskId, harness_id: (harness.harness as Record<string, unknown>).id,
+      goal: "inspect", operations: [{ id: "inspect", kind: "agent", effect: "read_only", objective: "inspect" }] });
+    await call("craft_agent_ir_lower", { ir_id: ir.id, policy_id: policy.id, environment: {} });
+    await call("craft_experience_mine", { subject_type: "workflow", subject_id: workflow.id, subject_version: workflow.version });
+    await call("craft_experience_shadow_experiment_create", { task_id: taskId, mining_candidate_id: "missing" });
+    for (const value of [1, 1, 3, 3]) await call("craft_operational_signal_record", { subject_type: "workflow",
+      subject_id: workflow.id, metric: "latency", value });
+    await call("craft_operational_drift_evaluate", { subject_type: "workflow", subject_id: workflow.id, metric: "latency",
+      direction: "lower", threshold: 0.5, window_size: 2 });
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});

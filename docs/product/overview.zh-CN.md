@@ -41,7 +41,7 @@ Craft 不替代 Codex、Claude 或其他模型；它们可以作为执行宿主�
 
 ## 当前边界
 
-当前版本已实现 Provider MCP、Capability Catalog、持久 Task/Evidence、确定性 Workflow、可自动归档 Trial 的基础编排、可续接的默认安全路线、Experience/Eval Kernel、多来源 Grader/Signoff，以及同评测集版本的聚合对比。当前对比是可复算的描述统计；Lease TTL/恢复已作为基础协议实现。重复试验置信度、自动 Host Driver、自动执行模型 Grader、Agent IR 编译器、领域 Kit Registry、自动 Harness 搜索和桌面端仍是后续方向。
+当前版本已实现 Provider MCP、Capability Catalog、持久 Task/Evidence、确定性 Workflow、可续接的默认安全路线、Experience/Eval Kernel、多来源 Grader/Signoff，以及同评测集版本的聚合对比。v0.9.6 增加受信任 Host 的确定性 Driver、程序 Grader、Promotion Assessment、shadow 实验、按风险选择 Harness 和 Agent IR 编译/Lowering。当前对比仍是可复算的描述统计；模型 Grader 自动执行、显著性结论、真实隔离沙箱/凭据代理、领域 Kit Registry 与桌面端仍是后续方向。
 
 ## 形成行业基础层的条件
 

@@ -28,14 +28,18 @@
 - 重复通过且带证据的安全路线可生成带溯源的 Workflow 草案；草案仍须走已有评测门禁，不能自动晋级或发布。（v0.9.2 已实现）
 - Project Policy 可将 Git 基线、聚焦测试、覆盖率和 Review 回执变成服务端硬门禁；Host Adapter 只能领取已声明支持的下一安全动作。候选按通过率、独立 Task 和 confirmed/bounded Evidence 资格化，检索按名称、描述和别名重排。（v0.9.3 已实现）
 - 可选 OpenAI-compatible Embeddings：未配置时严格保持关键词检索；配置后只为 Skill 名称、描述和别名建立按 Provider 指纹隔离的缓存，查询成功时以混合排序增强召回，超时、鉴权、格式或维度失败时自动退回关键词结果。（v0.9.4 已实现）
+- 受控 Runtime Core：版本化 Policy 限定 effect、审批、并发和预算；持久 Run/Operation 记录父子归属、环境/Policy 指纹、审批与幂等回执，预算耗尽安全暂停。（v0.9.5 已实现）
+- 受信任 Host 的确定性 Driver：只执行已签发、显式输入且通过命令/路径/effect Policy 校验的 Workflow Operation；DAG 依赖、有限重试、Lease 过期恢复以及 Trace/Artifact/Evidence 回执均持久化。通用 Agent/Grader 仍交给 Host Adapter。（v0.9.6 已实现）
+- 自动 Eval Runner：对确定性 Workflow 运行 `Case × Subject × N Trial`，自动归档 Trial/Trace/Outcome、Evaluation Run 与可比 Comparison；程序 Grader 可自动出 Grade，Promotion Assessment 对 held-out baseline/candidate 检查最少 Trial、通过率、成本与配对胜负；模型/业务 Agent Subject 必须通过 Host Runtime 提交真实 Outcome。（v0.9.6 已实现）
+- Experience Miner 与 Operational Drift：重复失败 Trace 只产出 proposal-only 候选；候选只能创建 shadow 实验并经 Eval/Signoff/Publisher Gate 发布，数值线上信号以滑动窗口生成可审计告警。（v0.9.6 已实现）
+- 按风险、预算和副作用选择最小 Harness，并将 Operation DAG 编译为版本化 Agent IR、Lower 到 Runtime Run。（v0.9.6 已实现）
 - Lease TTL/续租、显式幂等提交和实际成本超限阻断。（v0.8.0 已实现基础协议）
 
-验收：同一真实任务集能比较两个版本的质量、成本、耗时和失败类型，并阻止无证据晋级；默认入口不能绕过 Host 审批或把未验证 Skill 当作可执行流程。
+验收：同一真实任务集能比较两个版本的质量、成本、耗时和失败类型，并阻止无证据晋级；默认入口不能绕过 Host 审批或把未验证 Skill 当作可执行流程。Runtime 的每个子 Operation 必须归属根 Task，控制/环境指纹变化必须使旧证据失去新晋级资格。
 
-## 中期：Agent IR 与领域 Kit
+## 中期：领域 Kit 与跨 Host 运行
 
-- 定义 Goal、Constraint、Artifact、Operation、Route、Validator 和 Policy 的稳定 IR。
-- 将 IR 渐进式编译成不同 Host 的执行计划。
+- 将现有 IR Lower 到至少两个真实 Host 的执行计划。
 - 用“研发 Kit”和“AI 视频 Kit”验证同一内核能否跨领域复用。
 
 验收：同一 IR 可在至少两个宿主执行；两个领域共用核心协议，只扩展 Kit。

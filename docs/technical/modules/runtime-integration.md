@@ -16,6 +16,9 @@ Craft Core 通过 CLI、MCP、平台 Plugin 和专用 Adapter 暴露。Codex 与
 - 统一不同 Host 的结果语义。
 - 提供评测、晋级、回滚和跨会话恢复。
 - 在评测型编排中锁定 Agent Profile 版本，并自动归档 Dispatch、重路由、Submit、成本和终态 Outcome。
+- 为兼容 Host 提供受控 Runtime Operation：只领取 Policy 允许的 effect，返回 Lease、审批、回执和父子资源账本所需信息。
+- 对模型/业务 Agent 的评测，由 Host 提交真实 Outcome；确定性 Workflow 可由 Core Eval Runner 直接执行。
+- v0.9.6 的受信任 Host 可调用 `runtime_driver_tick` 执行服务端签发的确定性 Workflow；驱动只接受明确输入，并检查 effect、命令和路径白名单。它不替代 Host 的真实 sandbox、网络限制或凭据代理。
 
 Craft 不绕过宿主权限，也不假定某个平台私有 API 永久稳定。Adapter 必须拥有独立兼容矩阵和真实安装测试。
 

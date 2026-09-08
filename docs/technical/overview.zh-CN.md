@@ -31,6 +31,7 @@ CLI / Desktop / Codex / Claude / DSH / MCP Host
 Capability Kit ──contains──> Capability / Validator / Policy / Eval Suite
 Task ──compiled to──> Agent IR ──lowered to──> Workflow / Orchestration Plan
 Task + Subject Version + Harness Configuration ──creates──> Trial
+Runtime Policy + Environment Fingerprint ──controls──> Runtime Run / Operation DAG
 Orchestration Plan + pinned Agent Profile Versions ──auto-captures──> Trial / Trace / Outcome
 Trial ──appends──> Trace ──produces──> Artifact / Evidence
 Trial ──closes with──> Outcome ──aggregated by──> Evaluation Run
@@ -58,3 +59,4 @@ Signoff ──authorizes──> Workflow or Configuration Promotion
 - [Experience / Eval Kernel](modules/experience-eval.md)
 - [Workflow / Verification / Signoff](modules/workflow-signoff.md)
 - [Runtime 与宿主接入](modules/runtime-integration.md)
+- [Closed-loop Runtime](modules/closed-loop-runtime.md)
