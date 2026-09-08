@@ -72,7 +72,7 @@ Claude metadata is in `.claude-plugin/plugin.json`. Any MCP host can use a globa
 }
 ```
 
-Tools use the `craft_` prefix to avoid collisions. For substantial work the Craft Skill automatically starts with `craft_default_route`, without requiring a repeated orchestration prompt. A matching verified Workflow is executed via `craft_default_route_execute`; an unmatched safe plan is progressed with `craft_default_route_update` and resumed in a later session with `craft_default_route_resume`.
+Tools use the `craft_` prefix to avoid collisions. For substantial work the Craft Skill automatically starts with `craft_default_route`, without requiring a repeated orchestration prompt. A matching verified Workflow is executed via `craft_default_route_execute`; an unmatched safe plan is progressed with `craft_default_route_update`. In a later session, `craft_default_route_find` resolves a uniquely matching active task from a natural-language continuation and never guesses on a tie; `craft_default_route_resume` resumes a known task ID.
 
 ## Verification
 

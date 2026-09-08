@@ -8346,7 +8346,7 @@ async function rollbackSkillPublication(args) {
 }
 
 // src/service.ts
-var VERSION = "0.9.0";
+var VERSION = "0.9.1";
 var CONFIDENCE = /* @__PURE__ */ new Set(["confirmed", "bounded", "unverified", "rejected"]);
 var TASK_STATUS = /* @__PURE__ */ new Set(["active", "paused", "completed", "cancelled"]);
 var VERSIONED_LIFECYCLE = /* @__PURE__ */ new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -8580,6 +8580,35 @@ var CraftService = class {
     if (!route) throw new Error(`No route exists for task: ${taskId}`);
     const trial = route.trial_id ? this.trialGet({ trial_id: String(route.trial_id) }) : null;
     return { ...task, route, trial, next_action: this.routeNextAction(route) };
+  }
+  defaultRouteFind(args) {
+    const rawQuery = text(args.query, "query").toLowerCase();
+    const query = rawQuery.replace(/^(继续|接着|恢复)(上次|之前|刚才|上一个|上回|上轮)?的?[\s,，:：]*/u, "").trim();
+    const projectId = args.project_id === void 0 ? void 0 : text(args.project_id, "project_id");
+    const tokens = query.match(/[\p{L}\p{N}_-]+/gu) ?? [];
+    const candidates = query ? this.store.list("task", 1e3, (task) => {
+      if (task.status !== "active" || projectId !== void 0 && task.project_id !== projectId) return false;
+      const searchable = `${task.title}
+${task.goal}`.toLowerCase();
+      return searchable.includes(query) || tokens.some((token) => searchable.includes(token));
+    }).map((task) => {
+      const searchable = `${task.title}
+${task.goal}`.toLowerCase();
+      const score = searchable.includes(query) ? 1e3 + query.length : tokens.filter((token) => searchable.includes(token)).length;
+      return { task, score };
+    }).filter((candidate) => candidate.score > 0) : [];
+    const highest = candidates.reduce((score, candidate) => Math.max(score, candidate.score), 0);
+    const best = candidates.filter((candidate) => candidate.score === highest).sort((left, right) => String(left.task.id).localeCompare(String(right.task.id)));
+    const summaries = best.map((candidate) => ({
+      task_id: candidate.task.id,
+      title: candidate.task.title,
+      goal: candidate.task.goal,
+      project_id: candidate.task.project_id,
+      score: candidate.score
+    }));
+    if (!best.length) return { status: "not_found", query, candidates: [] };
+    if (best.length > 1) return { status: "ambiguous", query, candidates: summaries };
+    return { status: "matched", query, candidates: summaries, ...this.defaultRouteResume({ task_id: best[0].task.id }) };
   }
   defaultRouteUpdate(args) {
     const route = this.store.get("route", text(args.route_id, "route_id"));
@@ -9684,6 +9713,13 @@ var TOOLS = [
   ),
   tool("craft_default_route_resume", "Resume a durable default route and return only its next safe action.", ["task_id"], true),
   tool(
+    "craft_default_route_find",
+    "Find one uniquely matching active default route for a natural-language continuation; never guess on a tie.",
+    ["query"],
+    true,
+    ["project_id"]
+  ),
+  tool(
     "craft_default_route_update",
     "Record one required safe-plan stage with real evidence; the final stage records the route Outcome.",
     ["route_id", "stage_id", "summary"],
@@ -9938,6 +9974,7 @@ var McpServer = class {
       craft_default_route: (a) => service.defaultRoute(a),
       craft_default_route_execute: (a) => service.defaultRouteExecute(a),
       craft_default_route_resume: (a) => service.defaultRouteResume(a),
+      craft_default_route_find: (a) => service.defaultRouteFind(a),
       craft_default_route_update: (a) => service.defaultRouteUpdate(a),
       craft_task_open: (a) => service.taskOpen(a),
       craft_task_list: (a) => service.taskList(a),

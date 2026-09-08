@@ -7,7 +7,7 @@ import { addCosts, dispatchNodes, normalizeNodes, orchestrationOutcome, planStat
 import { aggregateEvaluation, compareEvaluationAggregates, type EvaluationAggregate } from "./evaluation.ts";
 import { publishSkill, rollbackSkillPublication } from "./skill-publisher.ts";
 
-export const VERSION = "0.9.0";
+export const VERSION = "0.9.1";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -171,6 +171,30 @@ export class CraftService {
     if (!route) throw new Error(`No route exists for task: ${taskId}`);
     const trial = route.trial_id ? this.trialGet({ trial_id: String(route.trial_id) }) : null;
     return { ...task, route, trial, next_action: this.routeNextAction(route) };
+  }
+
+  defaultRouteFind(args: JsonObject): JsonObject {
+    const rawQuery = text(args.query, "query").toLowerCase();
+    const query = rawQuery.replace(/^(继续|接着|恢复)(上次|之前|刚才|上一个|上回|上轮)?的?[\s,，:：]*/u, "").trim();
+    const projectId = args.project_id === undefined ? undefined : text(args.project_id, "project_id");
+    const tokens = query.match(/[\p{L}\p{N}_-]+/gu) ?? [];
+    const candidates = query ? this.store.list("task", 1_000, (task) => {
+      if (task.status !== "active" || (projectId !== undefined && task.project_id !== projectId)) return false;
+      const searchable = `${task.title}\n${task.goal}`.toLowerCase();
+      return searchable.includes(query) || tokens.some((token) => searchable.includes(token));
+    }).map((task) => {
+      const searchable = `${task.title}\n${task.goal}`.toLowerCase();
+      const score = searchable.includes(query) ? 1_000 + query.length : tokens.filter((token) => searchable.includes(token)).length;
+      return { task, score };
+    }).filter((candidate) => candidate.score > 0) : [];
+    const highest = candidates.reduce((score, candidate) => Math.max(score, candidate.score), 0);
+    const best = candidates.filter((candidate) => candidate.score === highest)
+      .sort((left, right) => String(left.task.id).localeCompare(String(right.task.id)));
+    const summaries = best.map((candidate) => ({ task_id: candidate.task.id, title: candidate.task.title,
+      goal: candidate.task.goal, project_id: candidate.task.project_id, score: candidate.score }));
+    if (!best.length) return { status: "not_found", query, candidates: [] };
+    if (best.length > 1) return { status: "ambiguous", query, candidates: summaries };
+    return { status: "matched", query, candidates: summaries, ...this.defaultRouteResume({ task_id: best[0].task.id }) };
   }
 
   defaultRouteUpdate(args: JsonObject): JsonObject {

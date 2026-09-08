@@ -1,6 +1,6 @@
 import { Catalog } from "./catalog.ts";
 import { CraftStore, type JsonObject } from "./store.ts";
-export declare const VERSION = "0.9.0";
+export declare const VERSION = "0.9.1";
 export declare class CraftService {
     readonly store: CraftStore;
     readonly catalog: Catalog;
@@ -15,6 +15,7 @@ export declare class CraftService {
     capabilityGet(args: JsonObject): JsonObject;
     defaultRoute(args: JsonObject): JsonObject;
     defaultRouteResume(args: JsonObject): JsonObject;
+    defaultRouteFind(args: JsonObject): JsonObject;
     defaultRouteUpdate(args: JsonObject): JsonObject;
     private routeNextAction;
     defaultRouteExecute(args: JsonObject): JsonObject;

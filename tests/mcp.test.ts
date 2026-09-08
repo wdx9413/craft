@@ -104,6 +104,7 @@ test("MCP negotiates protocols, lists tools, dispatches every handler, and repor
     };
     const lifecycleRoute = await call("craft_default_route", { goal: "MCP safe route lifecycle" });
     await call("craft_default_route_resume", { task_id: (lifecycleRoute.task as Record<string, unknown>).id });
+    await call("craft_default_route_find", { query: "继续 MCP safe route lifecycle" });
     for (const stageId of ["baseline", "minimal_change", "verification"]) {
       await call("craft_default_route_update", { route_id: lifecycleRoute.route_id, stage_id: stageId, summary: stageId });
     }

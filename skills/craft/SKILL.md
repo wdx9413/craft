@@ -14,7 +14,7 @@ For substantial work—multi-step development, diagnosis, research, a recurring 
 1. Call `craft_default_route` with the user's goal. `title` is optional; Craft derives it from the goal when omitted.
 2. If it returns `next_action.kind=execute_verified_workflow`, read only the selected capabilities as needed, then use `craft_default_route_execute`. It can run only the exact Workflow version Craft selected and only with Host-approved side effects.
 3. If it returns `next_action.kind=complete_stage`, carry out that one Host-mediated stage. Register real artifacts/evidence where available, then call `craft_default_route_update`. The final `review` update records the observed Outcome and surfaces evidence-backed experience candidates.
-4. When continuing a known task, call `craft_default_route_resume` with its `task_id` and do only the returned next action. If the user only says “continue” and the task is not known, list active tasks and ask only when the match is ambiguous.
+4. When continuing a known task, call `craft_default_route_resume` with its `task_id` and do only the returned next action. If the user says “continue” with identifying words but the task is not known, call `craft_default_route_find` first; it resumes a unique active match and returns `ambiguous` rather than guessing. Ask only when it is ambiguous or not found.
 
 Skip default routing for a short self-contained answer, a simple rewrite, or a one-step read that has no durable value. Craft never treats an unverified Skill, a model assertion, or an unapproved command as an executable Workflow.
 

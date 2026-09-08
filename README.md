@@ -95,7 +95,7 @@ pnpm test
 
 当前工具使用 `craft_` 前缀，例如 `craft_source_add`、`craft_capability_search`、`craft_task_checkpoint`、`craft_workflow_trial_run`、`craft_evaluation_run_aggregate` 和 `craft_evaluation_compare`，避免与宿主或其他 MCP 冲突。
 
-日常由 Craft Skill 自动走高层入口：对复杂目标先调用 `craft_default_route`，无需用户重复“优先已验证 Workflow”等编排话术。它会创建 Task、优先选中匹配的已验证 Workflow，并返回少量候选能力；只有返回 `next_action.kind=execute_verified_workflow` 时，才使用 `craft_default_route_execute` 运行该精确版本并自动归档 Trial/Trace/Outcome。无匹配时默认返回安全增量研发计划；Host 每完成一个阶段就通过 `craft_default_route_update` 写入真实证据和检查点，最终 Review 记录 Outcome。跨会话使用 `craft_default_route_resume` 只取下一步。短问答和一次性读取不创建 Craft 路线。
+日常由 Craft Skill 自动走高层入口：对复杂目标先调用 `craft_default_route`，无需用户重复“优先已验证 Workflow”等编排话术。它会创建 Task、优先选中匹配的已验证 Workflow，并返回少量候选能力；只有返回 `next_action.kind=execute_verified_workflow` 时，才使用 `craft_default_route_execute` 运行该精确版本并自动归档 Trial/Trace/Outcome。无匹配时默认返回安全增量研发计划；Host 每完成一个阶段就通过 `craft_default_route_update` 写入真实证据和检查点，最终 Review 记录 Outcome。跨会话可直接说“继续上次的 X”：`craft_default_route_find` 只恢复唯一活动路线，并列时绝不猜测；已知 `task_id` 才使用 `craft_default_route_resume`。短问答和一次性读取不创建 Craft 路线。
 
 ## 数据目录
 

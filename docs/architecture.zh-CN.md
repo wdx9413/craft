@@ -52,7 +52,7 @@ v0.6.0 起，Plan 创建时会锁定每个候选 Agent Profile 的精确版本�
 
 Craft 不绕过 Host 的 Sandbox、审批或并发限制，也不直接假定 Codex/Claude 的内部任务 API。插件负责把 Lease 翻译成宿主原生执行，再把真实结果交回 Craft。
 
-v0.9.0 将默认编排变为 Craft Skill 的默认策略，而非要求用户重复固定话术：复杂目标先经 `craft_default_route` 创建 Task、检索少量 Capability、优先选择匹配的 `verified` Workflow；只有已验证 Workflow 才能经 `craft_default_route_execute` 执行并自动形成 Trial/Trace/Outcome。短问答和一次性读取不创建路线。
+v0.9.0 将默认编排变为 Craft Skill 的默认策略，而非要求用户重复固定话术：复杂目标先经 `craft_default_route` 创建 Task、检索少量 Capability、优先选择匹配的 `verified` Workflow；只有已验证 Workflow 才能经 `craft_default_route_execute` 执行并自动形成 Trial/Trace/Outcome。短问答和一次性读取不创建路线。v0.9.1 增加 `craft_default_route_find`：用户用自然语言续接时，只恢复唯一匹配的 `active` Task；最高分并列、没有匹配或已完成任务都不会被猜测性恢复。
 
 没有匹配 Workflow 时，Craft 自动创建安全增量研发 Kit：先锁定 Git 基线和原有行为，再最小改动、运行测试/覆盖率、复查 Diff。它是给 Host 的可验证计划，不是假装已经替 Host 修改了代码。`craft_default_route_update` 必须按顺序记录每个已完成阶段的真实 Artifact/Evidence，并把最终 Review 写成 Outcome；`craft_default_route_resume` 在跨会话时只返回下一步。带有同一能力组合的路线以 `route_strategy` 作为 Trial Subject，两个以上有 Evidence 的完成路线才会进入 Experience Candidate，仍不能自动发布或替代 Workflow。
 

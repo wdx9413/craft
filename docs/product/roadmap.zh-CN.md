@@ -24,6 +24,7 @@
 - Workflow、Agent Profile 与 Harness Configuration 使用同一评测协议。（v0.5.0 已实现版本对比；Capability 评测待实现）
 - Orchestration 执行自动形成 Trial、Trace、Evidence、成本和 Outcome，并锁定 Agent Profile 路由版本。（v0.6.0 已实现）
 - 默认编排已成为复杂任务的默认 Skill 策略；优先复用已验证 Workflow，无匹配时自动创建可续接的安全增量研发 Kit，并从同策略完成 Trial 自动列出 Experience Candidate。（v0.9.0 已实现）
+- 自然语言续接仅恢复唯一匹配的活动路线；并列、已完成和无匹配任务不猜测。（v0.9.1 已实现）
 - Lease TTL/续租、显式幂等提交和实际成本超限阻断。（v0.8.0 已实现基础协议）
 
 验收：同一真实任务集能比较两个版本的质量、成本、耗时和失败类型，并阻止无证据晋级；默认入口不能绕过 Host 审批或把未验证 Skill 当作可执行流程。

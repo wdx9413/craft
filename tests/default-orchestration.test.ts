@@ -165,3 +165,29 @@ test("默认安全路线可按阶段续接、归档证据并形成可复用经�
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("自然续接只恢复唯一的活动路线，不猜测并列或已完成任务", async () => {
+  const root = join(tmpdir(), `craft-route-find-${process.pid}-${Date.now()}`);
+  const store = await new CraftStore(craftPaths(root)).open();
+  const service = new CraftService(store);
+  try {
+    const current = service.defaultRoute({ goal: "研发工作流改造", project_id: "craft" });
+    const completed = service.taskOpen({ title: "研发工作流改造", goal: "旧任务", project_id: "craft" }).task as JsonObject;
+    service.taskCheckpoint({ task_id: completed.id, summary: "done", status: "completed" });
+    const found = service.defaultRouteFind({ query: "继续上次的研发工作流改造", project_id: "craft" });
+    assert.equal(found.status, "matched");
+    assert.equal((found.task as JsonObject).id, (current.task as JsonObject).id);
+    assert.equal((found.next_action as JsonObject).stage_id, "baseline");
+    assert.equal(service.defaultRouteFind({ query: "继续" }).status, "not_found");
+
+    service.defaultRoute({ goal: "Java timeout repair", project_id: "craft" });
+    service.defaultRoute({ goal: "Java timeout repair", project_id: "craft" });
+    const ambiguous = service.defaultRouteFind({ query: "继续 Java timeout repair", project_id: "craft" });
+    assert.equal(ambiguous.status, "ambiguous");
+    assert.equal((ambiguous.candidates as JsonObject[]).length, 2);
+    assert.equal(service.defaultRouteFind({ query: "Java timeout repair", project_id: "other" }).status, "not_found");
+  } finally {
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
