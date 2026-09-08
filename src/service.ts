@@ -5,11 +5,12 @@ import { approvedEffects, executeSteps, normalizeSteps, resolveInputs, substitut
 import { addCosts, dispatchNodes, normalizeNodes, orchestrationOutcome, planStatus, submitNode,
   type PlanNode } from "./orchestration.ts";
 import { aggregateEvaluation, compareEvaluationAggregates, type EvaluationAggregate } from "./evaluation.ts";
+import { publishSkill, rollbackSkillPublication } from "./skill-publisher.ts";
 
-export const VERSION = "0.6.2";
+export const VERSION = "0.7.0";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
-const WORKFLOW_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
+const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
 const TRIAL_VERDICTS = new Set(["passed", "failed", "blocked", "cancelled"]);
 const EVAL_SPLITS = new Set(["search", "development", "held_out"]);
 const HARNESS_DIMENSIONS = new Set(["context", "tools", "generation", "orchestration", "memory", "output"]);
@@ -20,6 +21,10 @@ function id(prefix: string): string { return `${prefix}_${randomUUID().replaceAl
 function text(value: unknown, name: string): string {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
   return value.trim();
+}
+function document(value: unknown, name: string): string {
+  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
+  return value;
 }
 function finiteInteger(value: unknown, name: string, fallback: number, minimum = 1, maximum = Number.MAX_SAFE_INTEGER): number {
   const number = value === undefined ? fallback : Number(value);
@@ -51,6 +56,13 @@ function recordPayload(record: JsonObject): JsonObject {
   const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...payload } = record;
   return payload;
 }
+function uniqueTextArray(value: unknown, name: string, minimum = 1): string[] {
+  const values = array(value, name).map((item) => text(item, name));
+  if (values.length < minimum || new Set(values).size !== values.length) {
+    throw new Error(`${name} must contain at least ${minimum} unique values`);
+  }
+  return values;
+}
 
 export class CraftService {
   readonly store: CraftStore;
@@ -62,7 +74,8 @@ export class CraftService {
       "evidence", "workflow", "workflow_run", "evaluation_suite", "evaluation_run",
       "evaluation_comparison",
       "agent_profile", "orchestration_plan", "harness_configuration", "trial", "outcome",
-      "grader", "grade", "signoff_policy", "signoff", "budget", "model_provider", "agent_session"];
+      "grader", "grade", "signoff_policy", "signoff", "experience_pattern", "skill_proposal",
+      "skill_publication", "budget", "model_provider", "agent_session"];
     return { version: VERSION, data_root: this.store.paths.root,
       counts: Object.fromEntries(kinds.map((kind) => [kind, this.store.count(kind)])) };
   }
@@ -396,50 +409,113 @@ export class CraftService {
   }
 
   workflowTransition(args: JsonObject): JsonObject {
-    const workflow = this.store.get("workflow", text(args.workflow_id, "workflow_id"));
-    const current = String(workflow.lifecycle ?? "draft");
+    return this.transitionVersionedSubject("workflow", "workflow_id", "workflow", args);
+  }
+
+  private verificationGate(subjectType: string, subject: JsonObject, args: JsonObject): JsonObject {
+    if (args.signoff_id !== undefined) {
+      const signoff = this.store.get("signoff", text(args.signoff_id, "signoff_id"));
+      const run = this.store.get("evaluation_run", String(signoff.evaluation_run_id));
+      if (signoff.decision !== "passed" || signoff.subject_type !== subjectType ||
+          signoff.subject_id !== subject.id || Number(signoff.subject_version) !== Number(subject.version) ||
+          run.verdict !== "passed" || run.split !== "held_out") {
+        throw new Error(`Verification requires a passed signoff for this exact ${subjectType} version`);
+      }
+      return { evaluation_run_id: run.id, signoff_id: signoff.id };
+    }
+    const run = this.store.get("evaluation_run", text(args.evaluation_run_id, "evaluation_run_id"));
+    if (run.verdict !== "passed" || run.split !== "held_out" || run.subject_type !== subjectType ||
+        run.subject_id !== subject.id || Number(run.subject_version) !== Number(subject.version)) {
+      throw new Error(`Verification requires a passed held-out evaluation for this exact ${subjectType} version`);
+    }
+    return { evaluation_run_id: run.id, signoff_id: null };
+  }
+
+  private transitionVersionedSubject(kind: string, idKey: string, subjectType: string, args: JsonObject): JsonObject {
+    const subject = this.store.get(kind, text(args[idKey], idKey));
+    const current = String(subject.lifecycle ?? "draft");
     const target = text(args.target, "target");
-    if (!WORKFLOW_LIFECYCLE.has(target)) throw new Error(`Unsupported workflow lifecycle: ${target}`);
+    if (!VERSIONED_LIFECYCLE.has(target)) throw new Error(`Unsupported ${subjectType} lifecycle: ${target}`);
     const allowed: Record<string, string[]> = {
       draft: ["candidate", "deprecated"], candidate: ["verified", "deprecated"],
       verified: ["deprecated"], deprecated: [],
     };
-    if (!allowed[current]?.includes(target)) throw new Error(`Invalid workflow transition: ${current} -> ${target}`);
-    let evaluationRunId: string | null = null;
-    let signoffId: string | null = null;
-    if (target === "verified") {
-      if (args.signoff_id !== undefined) {
-        signoffId = text(args.signoff_id, "signoff_id");
-        const signoff = this.store.get("signoff", signoffId);
-        evaluationRunId = String(signoff.evaluation_run_id);
-        const run = this.store.get("evaluation_run", evaluationRunId);
-        if (signoff.decision !== "passed" || signoff.subject_type !== "workflow" ||
-            signoff.subject_id !== workflow.id || Number(signoff.subject_version) !== Number(workflow.version) ||
-            run.verdict !== "passed" || run.split !== "held_out") {
-          throw new Error("Verification requires a passed signoff for this exact workflow version");
-        }
-      } else {
-        evaluationRunId = text(args.evaluation_run_id, "evaluation_run_id");
-        const run = this.store.get("evaluation_run", evaluationRunId);
-        if (run.verdict !== "passed" || run.split !== "held_out" || run.subject_type !== "workflow" ||
-            run.subject_id !== workflow.id || Number(run.subject_version) !== Number(workflow.version)) {
-          throw new Error("Verification requires a passed held-out evaluation for this exact workflow version");
-        }
-      }
-    }
-    return this.store.save("workflow", String(workflow.id), { ...recordPayload(workflow), lifecycle: target,
-      previous_version: workflow.version, transition_reason: text(args.reason, "reason"),
-      evaluation_run_id: evaluationRunId, signoff_id: signoffId });
+    if (!allowed[current]?.includes(target)) throw new Error(`Invalid ${subjectType} transition: ${current} -> ${target}`);
+    const verification = target === "verified" ? this.verificationGate(subjectType, subject, args)
+      : { evaluation_run_id: null, signoff_id: null };
+    return this.store.save(kind, String(subject.id), { ...recordPayload(subject), lifecycle: target,
+      previous_version: subject.version, transition_reason: text(args.reason, "reason"), ...verification });
   }
 
   workflowRollback(args: JsonObject): JsonObject {
-    const workflowId = text(args.workflow_id, "workflow_id");
-    const current = this.store.get("workflow", workflowId);
-    const target = this.store.get("workflow", workflowId, finiteInteger(args.target_version, "target_version", 1));
-    if (target.lifecycle !== "verified") throw new Error("Rollback target must be a verified workflow version");
-    return this.store.save("workflow", workflowId, { ...recordPayload(target), lifecycle: "verified",
+    return this.rollbackVersionedSubject("workflow", "workflow_id", "workflow", args);
+  }
+
+  private rollbackVersionedSubject(kind: string, idKey: string, subjectType: string, args: JsonObject): JsonObject {
+    const subjectId = text(args[idKey], idKey);
+    const current = this.store.get(kind, subjectId);
+    const target = this.store.get(kind, subjectId, finiteInteger(args.target_version, "target_version", 1));
+    if (target.lifecycle !== "verified") throw new Error(`Rollback target must be a verified ${subjectType} version`);
+    return this.store.save(kind, subjectId, { ...recordPayload(target), lifecycle: "verified",
       rollback_from_version: current.version, rollback_to_version: target.version,
       rollback_reason: text(args.reason, "reason") });
+  }
+
+  experiencePatternCreate(args: JsonObject): JsonObject {
+    const taskId = text(args.task_id, "task_id");
+    this.store.get("task", taskId);
+    const trialIds = uniqueTextArray(args.trial_ids, "trial_ids", 2);
+    const evidenceIds = uniqueTextArray(args.evidence_ids, "evidence_ids");
+    for (const evidenceId of evidenceIds) this.store.get("evidence", evidenceId);
+    const outcomes = trialIds.map((trialId) => {
+      this.store.get("trial", trialId);
+      const outcome = this.store.get("outcome", `outcome_${trialId}`);
+      return { trial_id: trialId, verdict: outcome.verdict, failure_type: outcome.failure_type };
+    });
+    return this.saveVersioned("experience_pattern", "pattern", { ...args, task_id: taskId, trial_ids: trialIds,
+      evidence_ids: evidenceIds, outcomes, success_strategy: text(args.success_strategy, "success_strategy"),
+      failure_modes: array(args.failure_modes, "failure_modes").map((item) => text(item, "failure_mode")),
+      applicability: text(args.applicability, "applicability") }, ["summary"]);
+  }
+
+  skillProposalCreate(args: JsonObject): JsonObject {
+    const patternIds = uniqueTextArray(args.pattern_ids, "pattern_ids");
+    for (const patternId of patternIds) this.store.get("experience_pattern", patternId);
+    return this.saveVersioned("skill_proposal", "proposal", { ...args, lifecycle: "draft", pattern_ids: patternIds,
+      skill_markdown: document(args.skill_markdown, "skill_markdown") }, ["name", "summary"]);
+  }
+
+  skillProposalTransition(args: JsonObject): JsonObject {
+    return this.transitionVersionedSubject("skill_proposal", "proposal_id", "skill_proposal", args);
+  }
+
+  skillProposalRollback(args: JsonObject): JsonObject {
+    return this.rollbackVersionedSubject("skill_proposal", "proposal_id", "skill_proposal", args);
+  }
+
+  async skillProposalPublish(args: JsonObject): Promise<JsonObject> {
+    const proposal = this.store.get("skill_proposal", text(args.proposal_id, "proposal_id"));
+    if (proposal.lifecycle !== "verified") throw new Error("Skill proposal must be verified before publication");
+    const source = this.catalog.getSource(text(args.source_id, "source_id"));
+    const publication = await publishSkill({ sourceRoot: String(source.real_path), targetPath: text(args.target_path, "target_path"),
+      expectedDigest: text(args.expected_digest, "expected_digest"), content: String(proposal.skill_markdown),
+      backupsDir: this.store.paths.backupsDir, proposalId: String(proposal.id), allowExternalWrite: args.allow_external_write });
+    const record = this.store.create("skill_publication", String(args.publication_id ?? id("publication")), {
+      proposal_id: proposal.id, proposal_version: proposal.version, source_id: source.id, status: "published", ...publication,
+    });
+    await this.catalog.scanSource(String(source.id));
+    return record;
+  }
+
+  async skillPublicationRollback(args: JsonObject): Promise<JsonObject> {
+    const publication = this.store.get("skill_publication", text(args.publication_id, "publication_id"));
+    if (publication.status !== "published") throw new Error("Only a published Skill publication can be rolled back");
+    await rollbackSkillPublication({ targetPath: String(publication.target_path), expectedDigest: text(args.expected_digest, "expected_digest"),
+      publishedDigest: String(publication.published_digest), backupPath: String(publication.backup_path),
+      allowExternalWrite: args.allow_external_write });
+    const restored = this.store.save("skill_publication", String(publication.id), { ...recordPayload(publication), status: "rolled_back" });
+    await this.catalog.scanSource(String(publication.source_id));
+    return restored;
   }
 
   workflowPlan(args: JsonObject): JsonObject {

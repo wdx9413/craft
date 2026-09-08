@@ -1,6 +1,6 @@
 import { Catalog } from "./catalog.ts";
 import { CraftStore, type JsonObject } from "./store.ts";
-export declare const VERSION = "0.6.2";
+export declare const VERSION = "0.7.0";
 export declare class CraftService {
     readonly store: CraftStore;
     readonly catalog: Catalog;
@@ -38,7 +38,16 @@ export declare class CraftService {
     evaluationCompare(args: JsonObject): JsonObject;
     workflowSave(args: JsonObject): JsonObject;
     workflowTransition(args: JsonObject): JsonObject;
+    private verificationGate;
+    private transitionVersionedSubject;
     workflowRollback(args: JsonObject): JsonObject;
+    private rollbackVersionedSubject;
+    experiencePatternCreate(args: JsonObject): JsonObject;
+    skillProposalCreate(args: JsonObject): JsonObject;
+    skillProposalTransition(args: JsonObject): JsonObject;
+    skillProposalRollback(args: JsonObject): JsonObject;
+    skillProposalPublish(args: JsonObject): Promise<JsonObject>;
+    skillPublicationRollback(args: JsonObject): Promise<JsonObject>;
     workflowPlan(args: JsonObject): JsonObject;
     workflowRun(args: JsonObject): JsonObject;
     workflowTrialRun(args: JsonObject): JsonObject;

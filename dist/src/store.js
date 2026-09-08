@@ -48,16 +48,16 @@ export class CraftStore {
             }
             try {
                 database.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS capability_fts USING fts5(
-      id UNINDEXED,name,description,body,tokenize='unicode61'
-    );`);
+        id UNINDEXED,name,description,body,tokenize='unicode61'
+      );`);
                 this.#ftsAvailable = true;
                 if (previousVersion < 2) {
                     database.exec(`DELETE FROM capability_fts;
-        INSERT INTO capability_fts(id,name,description,body)
-        SELECT r.id,json_extract(r.payload_json,'$.name'),json_extract(r.payload_json,'$.description'),
-          json_extract(r.payload_json,'$.body') FROM records r JOIN (
-            SELECT id,MAX(version) version FROM records WHERE kind='capability' GROUP BY id
-          ) latest ON latest.id=r.id AND latest.version=r.version WHERE r.kind='capability';`);
+          INSERT INTO capability_fts(id,name,description,body)
+          SELECT r.id,json_extract(r.payload_json,'$.name'),json_extract(r.payload_json,'$.description'),
+            json_extract(r.payload_json,'$.body') FROM records r JOIN (
+              SELECT id,MAX(version) version FROM records WHERE kind='capability' GROUP BY id
+            ) latest ON latest.id=r.id AND latest.version=r.version WHERE r.kind='capability';`);
                 }
             }
             catch {
@@ -171,10 +171,10 @@ export class CraftStore {
         if (this.#ftsAvailable) {
             const expression = terms.map((term) => `"${term.replaceAll('"', '""')}"`).join(" OR ");
             const rows = this.database.prepare(`SELECT r.*,bm25(capability_fts) rank FROM capability_fts
-      JOIN records r ON r.kind='capability' AND r.id=capability_fts.id
-      JOIN (SELECT id,MAX(version) version FROM records WHERE kind='capability' GROUP BY id) latest
-        ON latest.id=r.id AND latest.version=r.version
-      WHERE capability_fts MATCH ? ORDER BY rank LIMIT ?`).all(expression, bounded);
+        JOIN records r ON r.kind='capability' AND r.id=capability_fts.id
+        JOIN (SELECT id,MAX(version) version FROM records WHERE kind='capability' GROUP BY id) latest
+          ON latest.id=r.id AND latest.version=r.version
+        WHERE capability_fts MATCH ? ORDER BY rank LIMIT ?`).all(expression, bounded);
             return rows.map((row) => {
                 const item = row;
                 return { ...this.record(item), score: -Number(item.rank) };

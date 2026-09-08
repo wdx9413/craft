@@ -1,6 +1,6 @@
 {
   "name": "craft",
-  "version": "0.6.2",
+  "version": "0.7.0",
   "description": "Capability discovery, durable tasks, verified workflows, evidence, and multi-agent orchestration.",
   "author": {
     "name": "wdx9413",
@@ -17,7 +17,7 @@
     "longDescription": "Craft indexes user-selected capabilities and manages durable tasks, execution trials and traces, evidence-gated evaluations, host-mediated plans, and reusable workflows under ~/.craft_data.",
     "developerName": "wdx9413",
     "category": "Productivity",
-    "capabilities": ["Capability search", "Task continuity", "Execution trials", "Evidence records", "Multi-agent orchestration", "Orchestration trial capture", "Multi-source graders", "Evaluation signoff", "Version comparison", "Verified workflows"],
+    "capabilities": ["Capability search", "Task continuity", "Execution trials", "Evidence records", "Multi-agent orchestration", "Orchestration trial capture", "Multi-source graders", "Evaluation signoff", "Version comparison", "Verified workflows", "Experience patterns", "Safe Skill publishing"],
     "defaultPrompt": [
       "Use Craft to continue a saved task.",
       "Find relevant capabilities for this task.",

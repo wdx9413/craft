@@ -28,6 +28,7 @@ Craft 的核心对象和协议不绑定某个模型或行业。它既能通过 M
 - Orchestration Trial 自动归档：锁定 Agent Profile 精确版本，记录 Dispatch、重路由、节点结果、成本和证据，并在终态自动生成 Outcome。
 - 版本化 Grader、多来源 Grade 和 Signoff Policy；模型判断不会被记录成程序证明。
 - 同评测集版本对比：在 Suite 精确版本、分区、Subject 类型和 Case 集合一致时，聚合比较 Workflow、Agent Profile 或 Harness Configuration 的质量、成本、耗时与失败类型。
+- 经验模式与 Skill 候选：从多个 Trial、Outcome 与 Evidence 引用提炼适用条件、成功策略和失败模式；候选复用现有 held-out Eval/Signoff Gate，只有已验证版本才可在显式授权、摘要校验和本地备份保护下写入既有 `SKILL.md`，且可安全回滚。
 - MCP 服务，以及 Codex、Claude Code、DeepSeek Harness 和通用 MCP Host 接入。
 - Windows、macOS、Linux 共用 TypeScript/Node.js 运行时；不依赖 Python。
 

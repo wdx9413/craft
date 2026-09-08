@@ -27,6 +27,7 @@ Its core objects and protocols are not tied to one model or industry. Craft can 
 - Automatic Orchestration Trial capture with pinned Agent Profile versions, dispatch and reroute traces, node costs and evidence, and terminal Outcomes.
 - Versioned Graders, provenance-preserving Grades, and Signoff Policies; a model judgment cannot masquerade as program proof.
 - Same-benchmark comparisons for Workflow, Agent Profile, and Harness Configuration versions, with aggregate quality, cost, duration, and failure-type deltas. Comparability requires the exact suite version, split, subject type, and case set.
+- Experience patterns and Skill proposals: derive applicability, successful strategies, failure modes, and Evidence references from multiple Trials and Outcomes. Proposals reuse the existing held-out Eval/Signoff Gate; only a verified version can write an existing `SKILL.md` with explicit approval, digest protection, local backup, and safe rollback.
 - MCP plus Codex, Claude Code, DeepSeek Harness, and generic MCP integration surfaces.
 - One TypeScript/Node.js runtime on Windows, macOS, and Linux, with no Python dependency.
 

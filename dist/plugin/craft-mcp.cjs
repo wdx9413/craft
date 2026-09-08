@@ -3991,10 +3991,10 @@ var require_resolve_block_map = __commonJS({
       let offset = bm.offset;
       let commentEnd = null;
       for (const collItem of bm.items) {
-        const { start, key, sep, value } = collItem;
+        const { start, key, sep: sep2, value } = collItem;
         const keyProps = resolveProps.resolveProps(start, {
           indicator: "explicit-key-ind",
-          next: key ?? sep?.[0],
+          next: key ?? sep2?.[0],
           offset,
           onError,
           parentIndent: bm.indent,
@@ -4008,7 +4008,7 @@ var require_resolve_block_map = __commonJS({
             else if ("indent" in key && key.indent !== bm.indent)
               onError(offset, "BAD_INDENT", startColMsg);
           }
-          if (!keyProps.anchor && !keyProps.tag && !sep) {
+          if (!keyProps.anchor && !keyProps.tag && !sep2) {
             commentEnd = keyProps.end;
             if (keyProps.comment) {
               if (map.comment)
@@ -4032,7 +4032,7 @@ var require_resolve_block_map = __commonJS({
         ctx.atKey = false;
         if (utilMapIncludes.mapIncludes(ctx, map.items, keyNode))
           onError(keyStart, "DUPLICATE_KEY", "Map keys must be unique");
-        const valueProps = resolveProps.resolveProps(sep ?? [], {
+        const valueProps = resolveProps.resolveProps(sep2 ?? [], {
           indicator: "map-value-ind",
           next: value,
           offset: keyNode.range[2],
@@ -4048,7 +4048,7 @@ var require_resolve_block_map = __commonJS({
             if (ctx.options.strict && keyProps.start < valueProps.found.offset - 1024)
               onError(keyNode.range, "KEY_OVER_1024_CHARS", "The : indicator must be at most 1024 chars after the start of an implicit block mapping key");
           }
-          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : composeEmptyNode(ctx, offset, sep, null, valueProps, onError);
+          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : composeEmptyNode(ctx, offset, sep2, null, valueProps, onError);
           if (ctx.schema.compat)
             utilFlowIndentCheck.flowIndentCheck(bm.indent, value, onError);
           offset = valueNode.range[2];
@@ -4139,7 +4139,7 @@ var require_resolve_end = __commonJS({
       let comment = "";
       if (end) {
         let hasSpace = false;
-        let sep = "";
+        let sep2 = "";
         for (const token of end) {
           const { source, type } = token;
           switch (type) {
@@ -4153,13 +4153,13 @@ var require_resolve_end = __commonJS({
               if (!comment)
                 comment = cb;
               else
-                comment += sep + cb;
-              sep = "";
+                comment += sep2 + cb;
+              sep2 = "";
               break;
             }
             case "newline":
               if (comment)
-                sep += source;
+                sep2 += source;
               hasSpace = true;
               break;
             default:
@@ -4202,18 +4202,18 @@ var require_resolve_flow_collection = __commonJS({
       let offset = fc.offset + fc.start.source.length;
       for (let i = 0; i < fc.items.length; ++i) {
         const collItem = fc.items[i];
-        const { start, key, sep, value } = collItem;
+        const { start, key, sep: sep2, value } = collItem;
         const props = resolveProps.resolveProps(start, {
           flow: fcName,
           indicator: "explicit-key-ind",
-          next: key ?? sep?.[0],
+          next: key ?? sep2?.[0],
           offset,
           onError,
           parentIndent: fc.indent,
           startOnNewline: false
         });
         if (!props.found) {
-          if (!props.anchor && !props.tag && !sep && !value) {
+          if (!props.anchor && !props.tag && !sep2 && !value) {
             if (i === 0 && props.comma)
               onError(props.comma, "UNEXPECTED_TOKEN", `Unexpected , in ${fcName}`);
             else if (i < fc.items.length - 1)
@@ -4267,8 +4267,8 @@ var require_resolve_flow_collection = __commonJS({
             }
           }
         }
-        if (!isMap && !sep && !props.found) {
-          const valueNode = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, sep, null, props, onError);
+        if (!isMap && !sep2 && !props.found) {
+          const valueNode = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, sep2, null, props, onError);
           coll.items.push(valueNode);
           offset = valueNode.range[2];
           if (isBlock(value))
@@ -4280,7 +4280,7 @@ var require_resolve_flow_collection = __commonJS({
           if (isBlock(key))
             onError(keyNode.range, "BLOCK_IN_FLOW", blockMsg);
           ctx.atKey = false;
-          const valueProps = resolveProps.resolveProps(sep ?? [], {
+          const valueProps = resolveProps.resolveProps(sep2 ?? [], {
             flow: fcName,
             indicator: "map-value-ind",
             next: value,
@@ -4291,8 +4291,8 @@ var require_resolve_flow_collection = __commonJS({
           });
           if (valueProps.found) {
             if (!isMap && !props.found && ctx.options.strict) {
-              if (sep)
-                for (const st of sep) {
+              if (sep2)
+                for (const st of sep2) {
                   if (st === valueProps.found)
                     break;
                   if (st.type === "newline") {
@@ -4309,7 +4309,7 @@ var require_resolve_flow_collection = __commonJS({
             else
               onError(valueProps.start, "MISSING_CHAR", `Missing , or : between ${fcName} items`);
           }
-          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : valueProps.found ? composeEmptyNode(ctx, valueProps.end, sep, null, valueProps, onError) : null;
+          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : valueProps.found ? composeEmptyNode(ctx, valueProps.end, sep2, null, valueProps, onError) : null;
           if (valueNode) {
             if (isBlock(value))
               onError(valueNode.range, "BLOCK_IN_FLOW", blockMsg);
@@ -4489,7 +4489,7 @@ var require_resolve_block_scalar = __commonJS({
           chompStart = i + 1;
       }
       let value = "";
-      let sep = "";
+      let sep2 = "";
       let prevMoreIndented = false;
       for (let i = 0; i < contentStart; ++i)
         value += lines[i][0].slice(trimIndent) + "\n";
@@ -4506,24 +4506,24 @@ var require_resolve_block_scalar = __commonJS({
           indent = "";
         }
         if (type === Scalar.Scalar.BLOCK_LITERAL) {
-          value += sep + indent.slice(trimIndent) + content;
-          sep = "\n";
+          value += sep2 + indent.slice(trimIndent) + content;
+          sep2 = "\n";
         } else if (indent.length > trimIndent || content[0] === "	") {
-          if (sep === " ")
-            sep = "\n";
-          else if (!prevMoreIndented && sep === "\n")
-            sep = "\n\n";
-          value += sep + indent.slice(trimIndent) + content;
-          sep = "\n";
+          if (sep2 === " ")
+            sep2 = "\n";
+          else if (!prevMoreIndented && sep2 === "\n")
+            sep2 = "\n\n";
+          value += sep2 + indent.slice(trimIndent) + content;
+          sep2 = "\n";
           prevMoreIndented = true;
         } else if (content === "") {
-          if (sep === "\n")
+          if (sep2 === "\n")
             value += "\n";
           else
-            sep = "\n";
+            sep2 = "\n";
         } else {
-          value += sep + content;
-          sep = " ";
+          value += sep2 + content;
+          sep2 = " ";
           prevMoreIndented = false;
         }
       }
@@ -4705,25 +4705,25 @@ var require_resolve_flow_scalar = __commonJS({
       if (!match)
         return source;
       let res = match[1];
-      let sep = " ";
+      let sep2 = " ";
       let pos = first.lastIndex;
       line.lastIndex = pos;
       while (match = line.exec(source)) {
         if (match[1] === "") {
-          if (sep === "\n")
-            res += sep;
+          if (sep2 === "\n")
+            res += sep2;
           else
-            sep = "\n";
+            sep2 = "\n";
         } else {
-          res += sep + match[1];
-          sep = " ";
+          res += sep2 + match[1];
+          sep2 = " ";
         }
         pos = line.lastIndex;
       }
       const last = /[ \t]*(.*)/sy;
       last.lastIndex = pos;
       match = last.exec(source);
-      return res + sep + (match?.[1] ?? "");
+      return res + sep2 + (match?.[1] ?? "");
     }
     function doubleQuotedValue(source, onError) {
       let res = "";
@@ -5533,14 +5533,14 @@ var require_cst_stringify = __commonJS({
         }
       }
     }
-    function stringifyItem({ start, key, sep, value }) {
+    function stringifyItem({ start, key, sep: sep2, value }) {
       let res = "";
       for (const st of start)
         res += st.source;
       if (key)
         res += stringifyToken(key);
-      if (sep)
-        for (const st of sep)
+      if (sep2)
+        for (const st of sep2)
           res += st.source;
       if (value)
         res += stringifyToken(value);
@@ -6707,18 +6707,18 @@ var require_parser = __commonJS({
         if (this.type === "map-value-ind") {
           const prev = getPrevProps(this.peek(2));
           const start = getFirstKeyStartProps(prev);
-          let sep;
+          let sep2;
           if (scalar.end) {
-            sep = scalar.end;
-            sep.push(this.sourceToken);
+            sep2 = scalar.end;
+            sep2.push(this.sourceToken);
             delete scalar.end;
           } else
-            sep = [this.sourceToken];
+            sep2 = [this.sourceToken];
           const map = {
             type: "block-map",
             offset: scalar.offset,
             indent: scalar.indent,
-            items: [{ start, key: scalar, sep }]
+            items: [{ start, key: scalar, sep: sep2 }]
           };
           this.onKeyLine = true;
           this.stack[this.stack.length - 1] = map;
@@ -6871,15 +6871,15 @@ var require_parser = __commonJS({
                 } else if (isFlowToken(it.key) && !includesToken(it.sep, "newline")) {
                   const start2 = getFirstKeyStartProps(it.start);
                   const key = it.key;
-                  const sep = it.sep;
-                  sep.push(this.sourceToken);
+                  const sep2 = it.sep;
+                  sep2.push(this.sourceToken);
                   delete it.key;
                   delete it.sep;
                   this.stack.push({
                     type: "block-map",
                     offset: this.offset,
                     indent: this.indent,
-                    items: [{ start: start2, key, sep }]
+                    items: [{ start: start2, key, sep: sep2 }]
                   });
                 } else if (start.length > 0) {
                   it.sep = it.sep.concat(start, this.sourceToken);
@@ -7073,13 +7073,13 @@ var require_parser = __commonJS({
             const prev = getPrevProps(parent);
             const start = getFirstKeyStartProps(prev);
             fixFlowSeqItems(fc);
-            const sep = fc.end.splice(1, fc.end.length);
-            sep.push(this.sourceToken);
+            const sep2 = fc.end.splice(1, fc.end.length);
+            sep2.push(this.sourceToken);
             const map = {
               type: "block-map",
               offset: fc.offset,
               indent: fc.indent,
-              items: [{ start, key: fc, sep }]
+              items: [{ start, key: fc, sep: sep2 }]
             };
             this.onKeyLine = true;
             this.stack[this.stack.length - 1] = map;
@@ -7361,7 +7361,7 @@ var require_dist = __commonJS({
 var import_node_readline = require("node:readline");
 
 // src/service.ts
-var import_node_crypto3 = require("node:crypto");
+var import_node_crypto4 = require("node:crypto");
 
 // src/catalog.ts
 var import_node_crypto = require("node:crypto");
@@ -7458,16 +7458,16 @@ var CraftStore = class {
       }
       try {
         database.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS capability_fts USING fts5(
-      id UNINDEXED,name,description,body,tokenize='unicode61'
-    );`);
+        id UNINDEXED,name,description,body,tokenize='unicode61'
+      );`);
         this.#ftsAvailable = true;
         if (previousVersion < 2) {
           database.exec(`DELETE FROM capability_fts;
-        INSERT INTO capability_fts(id,name,description,body)
-        SELECT r.id,json_extract(r.payload_json,'$.name'),json_extract(r.payload_json,'$.description'),
-          json_extract(r.payload_json,'$.body') FROM records r JOIN (
-            SELECT id,MAX(version) version FROM records WHERE kind='capability' GROUP BY id
-          ) latest ON latest.id=r.id AND latest.version=r.version WHERE r.kind='capability';`);
+          INSERT INTO capability_fts(id,name,description,body)
+          SELECT r.id,json_extract(r.payload_json,'$.name'),json_extract(r.payload_json,'$.description'),
+            json_extract(r.payload_json,'$.body') FROM records r JOIN (
+              SELECT id,MAX(version) version FROM records WHERE kind='capability' GROUP BY id
+            ) latest ON latest.id=r.id AND latest.version=r.version WHERE r.kind='capability';`);
         }
       } catch {
         this.#ftsAvailable = false;
@@ -7572,18 +7572,18 @@ var CraftStore = class {
     if (this.#ftsAvailable) {
       const expression = terms.map((term) => `"${term.replaceAll('"', '""')}"`).join(" OR ");
       const rows = this.database.prepare(`SELECT r.*,bm25(capability_fts) rank FROM capability_fts
-      JOIN records r ON r.kind='capability' AND r.id=capability_fts.id
-      JOIN (SELECT id,MAX(version) version FROM records WHERE kind='capability' GROUP BY id) latest
-        ON latest.id=r.id AND latest.version=r.version
-      WHERE capability_fts MATCH ? ORDER BY rank LIMIT ?`).all(expression, bounded);
+        JOIN records r ON r.kind='capability' AND r.id=capability_fts.id
+        JOIN (SELECT id,MAX(version) version FROM records WHERE kind='capability' GROUP BY id) latest
+          ON latest.id=r.id AND latest.version=r.version
+        WHERE capability_fts MATCH ? ORDER BY rank LIMIT ?`).all(expression, bounded);
       return rows.map((row) => {
         const item = row;
         return { ...this.record(item), score: -Number(item.rank) };
       });
     }
     return this.list("capability", Number.MAX_SAFE_INTEGER).map((item) => {
-      const text = [item.name, item.description, item.body].join(" ").toLowerCase();
-      const score = terms.reduce((total, term) => total + Number(text.includes(term.toLowerCase())), 0);
+      const text2 = [item.name, item.description, item.body].join(" ").toLowerCase();
+      const score = terms.reduce((total, term) => total + Number(text2.includes(term.toLowerCase())), 0);
       return { ...item, score };
     }).filter((item) => Number(item.score) > 0).sort((left, right) => Number(right.score) - Number(left.score)).slice(0, bounded);
   }
@@ -7631,6 +7631,7 @@ var CraftStore = class {
   close() {
     this.#database?.close();
     this.#database = null;
+    this.#ftsAvailable = false;
   }
 };
 
@@ -7758,8 +7759,8 @@ var Catalog = class {
         continue;
       }
       const text2 = await (0, import_promises2.readFile)(path, "utf8");
-      const digest = (0, import_node_crypto.createHash)("sha256").update(text2).digest("hex");
-      if (previous?.digest === digest) {
+      const digest2 = (0, import_node_crypto.createHash)("sha256").update(text2).digest("hex");
+      if (previous?.digest === digest2) {
         this.store.save("capability", assetId, { ...previous, size: fileStat.size, mtime_ms: fileStat.mtimeMs });
         unchanged += 1;
         continue;
@@ -7771,7 +7772,7 @@ var Catalog = class {
         source_id: id2,
         relative_path,
         path: await (0, import_promises2.realpath)(path),
-        digest,
+        digest: digest2,
         size: fileStat.size,
         mtime_ms: fileStat.mtimeMs
       });
@@ -8260,22 +8261,76 @@ function compareEvaluationAggregates(baseline, candidate) {
   };
 }
 
+// src/skill-publisher.ts
+var import_node_crypto3 = require("node:crypto");
+var import_promises3 = require("node:fs/promises");
+var import_node_path4 = require("node:path");
+var digest = (value) => (0, import_node_crypto3.createHash)("sha256").update(value).digest("hex");
+function targetInsideSource(sourceRoot, targetPath) {
+  if ((0, import_node_path4.basename)(targetPath).toLowerCase() !== "skill.md") throw new Error("target_path must name SKILL.md");
+  if (!targetPath.startsWith(`${(0, import_node_path4.resolve)(sourceRoot)}${import_node_path4.sep}`)) {
+    throw new Error("target_path must be inside the selected capability source");
+  }
+}
+function requireExternalWrite(value) {
+  if (value !== true) throw new Error("allow_external_write must be true for Skill publication");
+}
+async function replaceAtomically(path, content, mode) {
+  const temporary = `${path}.${process.pid}.${Date.now()}.tmp`;
+  await (0, import_promises3.writeFile)(temporary, content, { encoding: "utf8", mode });
+  await (0, import_promises3.rename)(temporary, path);
+}
+async function publishSkill(args) {
+  requireExternalWrite(args.allowExternalWrite);
+  const targetPath = await (0, import_promises3.realpath)(args.targetPath);
+  targetInsideSource(args.sourceRoot, targetPath);
+  const previous = await (0, import_promises3.readFile)(targetPath, "utf8");
+  const previousDigest = digest(previous);
+  if (previousDigest !== args.expectedDigest) throw new Error("target digest mismatch; file changed since it was reviewed");
+  const backupPath = (0, import_node_path4.join)(args.backupsDir, "skill-publications", args.proposalId, `${previousDigest}.SKILL.md`);
+  await (0, import_promises3.mkdir)((0, import_node_path4.dirname)(backupPath), { recursive: true });
+  await (0, import_promises3.writeFile)(backupPath, previous, { encoding: "utf8", mode: 384 });
+  if (args.onBeforeFinalCheck) await args.onBeforeFinalCheck();
+  const current = await (0, import_promises3.readFile)(targetPath, "utf8");
+  if (digest(current) !== args.expectedDigest) throw new Error("target digest mismatch; file changed during publication");
+  const mode = (await (0, import_promises3.stat)(targetPath)).mode;
+  await replaceAtomically(targetPath, args.content, mode);
+  return { target_path: targetPath, previous_digest: previousDigest, published_digest: digest(args.content), backup_path: backupPath };
+}
+async function rollbackSkillPublication(args) {
+  requireExternalWrite(args.allowExternalWrite);
+  const targetPath = await (0, import_promises3.realpath)(args.targetPath);
+  const current = await (0, import_promises3.readFile)(targetPath, "utf8");
+  if (digest(current) !== args.expectedDigest) {
+    throw new Error("target digest mismatch; refusing to overwrite a changed Skill");
+  }
+  if (args.expectedDigest !== args.publishedDigest) {
+    throw new Error("target digest mismatch; refusing to overwrite a changed Skill");
+  }
+  const backup = await (0, import_promises3.readFile)(args.backupPath, "utf8");
+  await replaceAtomically(targetPath, backup, (await (0, import_promises3.stat)(targetPath)).mode);
+}
+
 // src/service.ts
-var VERSION = "0.6.2";
+var VERSION = "0.7.0";
 var CONFIDENCE = /* @__PURE__ */ new Set(["confirmed", "bounded", "unverified", "rejected"]);
 var TASK_STATUS = /* @__PURE__ */ new Set(["active", "paused", "completed", "cancelled"]);
-var WORKFLOW_LIFECYCLE = /* @__PURE__ */ new Set(["draft", "candidate", "verified", "deprecated"]);
+var VERSIONED_LIFECYCLE = /* @__PURE__ */ new Set(["draft", "candidate", "verified", "deprecated"]);
 var TRIAL_VERDICTS = /* @__PURE__ */ new Set(["passed", "failed", "blocked", "cancelled"]);
 var EVAL_SPLITS = /* @__PURE__ */ new Set(["search", "development", "held_out"]);
 var HARNESS_DIMENSIONS = /* @__PURE__ */ new Set(["context", "tools", "generation", "orchestration", "memory", "output"]);
 var GRADER_TYPES = /* @__PURE__ */ new Set(["program", "model", "human", "operational"]);
 var GRADE_VERDICTS = /* @__PURE__ */ new Set(["passed", "failed", "inconclusive"]);
 function id(prefix) {
-  return `${prefix}_${(0, import_node_crypto3.randomUUID)().replaceAll("-", "")}`;
+  return `${prefix}_${(0, import_node_crypto4.randomUUID)().replaceAll("-", "")}`;
 }
 function text(value, name) {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
   return value.trim();
+}
+function document(value, name) {
+  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
+  return value;
 }
 function finiteInteger(value, name, fallback, minimum = 1, maximum = Number.MAX_SAFE_INTEGER) {
   const number = value === void 0 ? fallback : Number(value);
@@ -8307,6 +8362,13 @@ function recordPayload(record) {
   const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...payload } = record;
   return payload;
 }
+function uniqueTextArray(value, name, minimum = 1) {
+  const values = array(value, name).map((item) => text(item, name));
+  if (values.length < minimum || new Set(values).size !== values.length) {
+    throw new Error(`${name} must contain at least ${minimum} unique values`);
+  }
+  return values;
+}
 var CraftService = class {
   store;
   catalog;
@@ -8337,6 +8399,9 @@ var CraftService = class {
       "grade",
       "signoff_policy",
       "signoff",
+      "experience_pattern",
+      "skill_proposal",
+      "skill_publication",
       "budget",
       "model_provider",
       "agent_session"
@@ -8531,7 +8596,7 @@ var CraftService = class {
     if (!GRADE_VERDICTS.has(verdict)) throw new Error(`Unsupported grade verdict: ${verdict}`);
     const evidenceIds = array(args.evidence_ids ?? [], "evidence_ids").map((value) => text(value, "evidence_id"));
     for (const evidenceId of evidenceIds) this.store.get("evidence", evidenceId);
-    const gradeId = `grade_${(0, import_node_crypto3.createHash)("sha256").update(JSON.stringify(
+    const gradeId = `grade_${(0, import_node_crypto4.createHash)("sha256").update(JSON.stringify(
       [trialId, grader.id, grader.version]
     )).digest("hex")}`;
     return this.store.create("grade", gradeId, {
@@ -8755,57 +8820,134 @@ var CraftService = class {
     return this.saveVersioned("workflow", "workflow", { ...args, lifecycle: "draft" }, ["name"]);
   }
   workflowTransition(args) {
-    const workflow = this.store.get("workflow", text(args.workflow_id, "workflow_id"));
-    const current = String(workflow.lifecycle ?? "draft");
+    return this.transitionVersionedSubject("workflow", "workflow_id", "workflow", args);
+  }
+  verificationGate(subjectType, subject, args) {
+    if (args.signoff_id !== void 0) {
+      const signoff = this.store.get("signoff", text(args.signoff_id, "signoff_id"));
+      const run2 = this.store.get("evaluation_run", String(signoff.evaluation_run_id));
+      if (signoff.decision !== "passed" || signoff.subject_type !== subjectType || signoff.subject_id !== subject.id || Number(signoff.subject_version) !== Number(subject.version) || run2.verdict !== "passed" || run2.split !== "held_out") {
+        throw new Error(`Verification requires a passed signoff for this exact ${subjectType} version`);
+      }
+      return { evaluation_run_id: run2.id, signoff_id: signoff.id };
+    }
+    const run = this.store.get("evaluation_run", text(args.evaluation_run_id, "evaluation_run_id"));
+    if (run.verdict !== "passed" || run.split !== "held_out" || run.subject_type !== subjectType || run.subject_id !== subject.id || Number(run.subject_version) !== Number(subject.version)) {
+      throw new Error(`Verification requires a passed held-out evaluation for this exact ${subjectType} version`);
+    }
+    return { evaluation_run_id: run.id, signoff_id: null };
+  }
+  transitionVersionedSubject(kind, idKey, subjectType, args) {
+    const subject = this.store.get(kind, text(args[idKey], idKey));
+    const current = String(subject.lifecycle ?? "draft");
     const target = text(args.target, "target");
-    if (!WORKFLOW_LIFECYCLE.has(target)) throw new Error(`Unsupported workflow lifecycle: ${target}`);
+    if (!VERSIONED_LIFECYCLE.has(target)) throw new Error(`Unsupported ${subjectType} lifecycle: ${target}`);
     const allowed = {
       draft: ["candidate", "deprecated"],
       candidate: ["verified", "deprecated"],
       verified: ["deprecated"],
       deprecated: []
     };
-    if (!allowed[current]?.includes(target)) throw new Error(`Invalid workflow transition: ${current} -> ${target}`);
-    let evaluationRunId = null;
-    let signoffId = null;
-    if (target === "verified") {
-      if (args.signoff_id !== void 0) {
-        signoffId = text(args.signoff_id, "signoff_id");
-        const signoff = this.store.get("signoff", signoffId);
-        evaluationRunId = String(signoff.evaluation_run_id);
-        const run = this.store.get("evaluation_run", evaluationRunId);
-        if (signoff.decision !== "passed" || signoff.subject_type !== "workflow" || signoff.subject_id !== workflow.id || Number(signoff.subject_version) !== Number(workflow.version) || run.verdict !== "passed" || run.split !== "held_out") {
-          throw new Error("Verification requires a passed signoff for this exact workflow version");
-        }
-      } else {
-        evaluationRunId = text(args.evaluation_run_id, "evaluation_run_id");
-        const run = this.store.get("evaluation_run", evaluationRunId);
-        if (run.verdict !== "passed" || run.split !== "held_out" || run.subject_type !== "workflow" || run.subject_id !== workflow.id || Number(run.subject_version) !== Number(workflow.version)) {
-          throw new Error("Verification requires a passed held-out evaluation for this exact workflow version");
-        }
-      }
-    }
-    return this.store.save("workflow", String(workflow.id), {
-      ...recordPayload(workflow),
+    if (!allowed[current]?.includes(target)) throw new Error(`Invalid ${subjectType} transition: ${current} -> ${target}`);
+    const verification = target === "verified" ? this.verificationGate(subjectType, subject, args) : { evaluation_run_id: null, signoff_id: null };
+    return this.store.save(kind, String(subject.id), {
+      ...recordPayload(subject),
       lifecycle: target,
-      previous_version: workflow.version,
+      previous_version: subject.version,
       transition_reason: text(args.reason, "reason"),
-      evaluation_run_id: evaluationRunId,
-      signoff_id: signoffId
+      ...verification
     });
   }
   workflowRollback(args) {
-    const workflowId = text(args.workflow_id, "workflow_id");
-    const current = this.store.get("workflow", workflowId);
-    const target = this.store.get("workflow", workflowId, finiteInteger(args.target_version, "target_version", 1));
-    if (target.lifecycle !== "verified") throw new Error("Rollback target must be a verified workflow version");
-    return this.store.save("workflow", workflowId, {
+    return this.rollbackVersionedSubject("workflow", "workflow_id", "workflow", args);
+  }
+  rollbackVersionedSubject(kind, idKey, subjectType, args) {
+    const subjectId = text(args[idKey], idKey);
+    const current = this.store.get(kind, subjectId);
+    const target = this.store.get(kind, subjectId, finiteInteger(args.target_version, "target_version", 1));
+    if (target.lifecycle !== "verified") throw new Error(`Rollback target must be a verified ${subjectType} version`);
+    return this.store.save(kind, subjectId, {
       ...recordPayload(target),
       lifecycle: "verified",
       rollback_from_version: current.version,
       rollback_to_version: target.version,
       rollback_reason: text(args.reason, "reason")
     });
+  }
+  experiencePatternCreate(args) {
+    const taskId = text(args.task_id, "task_id");
+    this.store.get("task", taskId);
+    const trialIds = uniqueTextArray(args.trial_ids, "trial_ids", 2);
+    const evidenceIds = uniqueTextArray(args.evidence_ids, "evidence_ids");
+    for (const evidenceId of evidenceIds) this.store.get("evidence", evidenceId);
+    const outcomes = trialIds.map((trialId) => {
+      this.store.get("trial", trialId);
+      const outcome = this.store.get("outcome", `outcome_${trialId}`);
+      return { trial_id: trialId, verdict: outcome.verdict, failure_type: outcome.failure_type };
+    });
+    return this.saveVersioned("experience_pattern", "pattern", {
+      ...args,
+      task_id: taskId,
+      trial_ids: trialIds,
+      evidence_ids: evidenceIds,
+      outcomes,
+      success_strategy: text(args.success_strategy, "success_strategy"),
+      failure_modes: array(args.failure_modes, "failure_modes").map((item) => text(item, "failure_mode")),
+      applicability: text(args.applicability, "applicability")
+    }, ["summary"]);
+  }
+  skillProposalCreate(args) {
+    const patternIds = uniqueTextArray(args.pattern_ids, "pattern_ids");
+    for (const patternId of patternIds) this.store.get("experience_pattern", patternId);
+    return this.saveVersioned("skill_proposal", "proposal", {
+      ...args,
+      lifecycle: "draft",
+      pattern_ids: patternIds,
+      skill_markdown: document(args.skill_markdown, "skill_markdown")
+    }, ["name", "summary"]);
+  }
+  skillProposalTransition(args) {
+    return this.transitionVersionedSubject("skill_proposal", "proposal_id", "skill_proposal", args);
+  }
+  skillProposalRollback(args) {
+    return this.rollbackVersionedSubject("skill_proposal", "proposal_id", "skill_proposal", args);
+  }
+  async skillProposalPublish(args) {
+    const proposal = this.store.get("skill_proposal", text(args.proposal_id, "proposal_id"));
+    if (proposal.lifecycle !== "verified") throw new Error("Skill proposal must be verified before publication");
+    const source = this.catalog.getSource(text(args.source_id, "source_id"));
+    const publication = await publishSkill({
+      sourceRoot: String(source.real_path),
+      targetPath: text(args.target_path, "target_path"),
+      expectedDigest: text(args.expected_digest, "expected_digest"),
+      content: String(proposal.skill_markdown),
+      backupsDir: this.store.paths.backupsDir,
+      proposalId: String(proposal.id),
+      allowExternalWrite: args.allow_external_write
+    });
+    const record = this.store.create("skill_publication", String(args.publication_id ?? id("publication")), {
+      proposal_id: proposal.id,
+      proposal_version: proposal.version,
+      source_id: source.id,
+      status: "published",
+      ...publication
+    });
+    await this.catalog.scanSource(String(source.id));
+    return record;
+  }
+  async skillPublicationRollback(args) {
+    const publication = this.store.get("skill_publication", text(args.publication_id, "publication_id"));
+    if (publication.status !== "published") throw new Error("Only a published Skill publication can be rolled back");
+    await rollbackSkillPublication({
+      targetPath: String(publication.target_path),
+      expectedDigest: text(args.expected_digest, "expected_digest"),
+      publishedDigest: String(publication.published_digest),
+      backupPath: String(publication.backup_path),
+      allowExternalWrite: args.allow_external_write
+    });
+    const restored = this.store.save("skill_publication", String(publication.id), { ...recordPayload(publication), status: "rolled_back" });
+    await this.catalog.scanSource(String(publication.source_id));
+    return restored;
   }
   workflowPlan(args) {
     const workflow = this.get("workflow", "workflow_id", args);
@@ -9073,7 +9215,7 @@ var CraftService = class {
       return { plan, ...this.trialGet({ trial_id: trialId }) };
     }
     const result = orchestrationOutcome(plan.nodes);
-    const stableKey = (0, import_node_crypto3.createHash)("sha256").update(`${plan.id}:${trialId}`).digest("hex");
+    const stableKey = (0, import_node_crypto4.createHash)("sha256").update(`${plan.id}:${trialId}`).digest("hex");
     const artifactId = `artifact_${stableKey}`;
     const artifact = this.store.find("artifact", artifactId) ?? this.artifactRegister({
       artifact_id: artifactId,
@@ -9126,7 +9268,7 @@ var CraftService = class {
 
 // src/mcp.ts
 var schemaFor = (name) => {
-  if (["scan", "enabled", "allow_execution", "require_held_out", "require_outcome_passed"].includes(name)) return { type: "boolean" };
+  if (["scan", "enabled", "allow_execution", "allow_external_write", "require_held_out", "require_outcome_passed"].includes(name)) return { type: "boolean" };
   if ([
     "limit",
     "version",
@@ -9170,7 +9312,9 @@ var schemaFor = (name) => {
     "evidence_ids",
     "trial_ids",
     "requirements",
-    "grade_ids"
+    "grade_ids",
+    "pattern_ids",
+    "failure_modes"
   ].includes(name)) return { type: "array" };
   return { type: "string" };
 };
@@ -9240,6 +9384,50 @@ var TOOLS = [
     "craft_workflow_rollback",
     "Restore a previously verified workflow version as the latest version.",
     ["workflow_id", "target_version", "reason"]
+  ),
+  tool(
+    "craft_experience_pattern_create",
+    "Derive a reusable experience pattern from at least two completed Trials and their Evidence references.",
+    ["task_id", "summary", "success_strategy", "applicability", "trial_ids", "evidence_ids", "failure_modes"],
+    false,
+    ["pattern_id"]
+  ),
+  tool("craft_experience_pattern_get", "Read an experience pattern.", ["pattern_id"], true, ["version"]),
+  tool("craft_experience_pattern_list", "List reusable experience patterns.", [], true, ["limit", "query"]),
+  tool(
+    "craft_skill_proposal_create",
+    "Save a versioned SKILL.md candidate derived from Experience Patterns; this does not change any source file.",
+    ["name", "summary", "skill_markdown", "pattern_ids"],
+    false,
+    ["proposal_id"]
+  ),
+  tool("craft_skill_proposal_get", "Read a versioned Skill candidate.", ["proposal_id"], true, ["version"]),
+  tool("craft_skill_proposal_list", "List Skill candidates.", [], true, ["limit", "query"]),
+  tool(
+    "craft_skill_proposal_transition",
+    "Move a Skill candidate through the existing held-out Evaluation and Signoff Gate.",
+    ["proposal_id", "target", "reason"],
+    false,
+    ["evaluation_run_id", "signoff_id"]
+  ),
+  tool(
+    "craft_skill_proposal_rollback",
+    "Restore a previously verified Skill candidate version as the latest version.",
+    ["proposal_id", "target_version", "reason"]
+  ),
+  tool(
+    "craft_skill_proposal_publish",
+    "Write only a verified Skill candidate to an existing SKILL.md with explicit authorization, digest protection, and backup.",
+    ["proposal_id", "source_id", "target_path", "expected_digest", "allow_external_write"],
+    false,
+    ["publication_id"]
+  ),
+  tool("craft_skill_publication_get", "Read a Skill publication receipt.", ["publication_id"], true, ["version"]),
+  tool("craft_skill_publication_list", "List Skill publication receipts.", [], true, ["limit", "query"]),
+  tool(
+    "craft_skill_publication_rollback",
+    "Restore a published SKILL.md only when its digest still matches the published candidate.",
+    ["publication_id", "expected_digest", "allow_external_write"]
   ),
   tool("craft_eval_suite_save", "Save an immutable evaluation suite.", ["name"], false, ["suite_id", "cases", "description", "scope"]),
   tool("craft_eval_suite_get", "Read an evaluation suite.", ["suite_id"], true, ["version"]),
@@ -9408,6 +9596,18 @@ var McpServer = class {
       craft_workflow_run_get: (a) => service.get("workflow_run", "run_id", a),
       craft_workflow_transition: (a) => service.workflowTransition(a),
       craft_workflow_rollback: (a) => service.workflowRollback(a),
+      craft_experience_pattern_create: (a) => service.experiencePatternCreate(a),
+      craft_experience_pattern_get: (a) => service.get("experience_pattern", "pattern_id", a),
+      craft_experience_pattern_list: (a) => service.list("experience_pattern", "patterns", a),
+      craft_skill_proposal_create: (a) => service.skillProposalCreate(a),
+      craft_skill_proposal_get: (a) => service.get("skill_proposal", "proposal_id", a),
+      craft_skill_proposal_list: (a) => service.list("skill_proposal", "proposals", a),
+      craft_skill_proposal_transition: (a) => service.skillProposalTransition(a),
+      craft_skill_proposal_rollback: (a) => service.skillProposalRollback(a),
+      craft_skill_proposal_publish: (a) => service.skillProposalPublish(a),
+      craft_skill_publication_get: (a) => service.get("skill_publication", "publication_id", a),
+      craft_skill_publication_list: (a) => service.list("skill_publication", "publications", a),
+      craft_skill_publication_rollback: (a) => service.skillPublicationRollback(a),
       craft_eval_suite_save: (a) => service.evaluationSuiteSave(a),
       craft_eval_suite_get: (a) => service.get("evaluation_suite", "suite_id", a),
       craft_eval_suite_list: (a) => service.list("evaluation_suite", "suites", a),

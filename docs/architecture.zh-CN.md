@@ -12,7 +12,8 @@ Craft Core 管理六类稳定对象：
 - Task / Checkpoint：跨会话任务状态和可信接续点。
 - Artifact / Evidence：产物引用、明确主张、来源与置信度。
 - Workflow / Run：版本化步骤、输入、权限和执行回执。
-- Evaluation Suite：可复用评测用例定义。
+- Evaluation Suite / Signoff：可复用评测用例与精确版本的晋级决定。
+- Experience Pattern / Skill Proposal / Publication：多个 Trial 的可复用经验、版本化 Skill 候选与受控发布回执。
 - Agent Profile / Orchestration Plan：模型角色、宿主路由与依赖图。
 
 ## 运行结构
@@ -55,9 +56,11 @@ Craft 不绕过 Host 的 Sandbox、审批或并发限制，也不直接假定 Co
 
 Craft 后续不会把“学习”简化成不断增长的对话摘要，而会把一次执行明确记录为 `Task → Trial → Trace → Outcome`。Harness 配置按六个可诊断面组织：上下文装配、工具与检索、生成预算、编排方式、记忆策略、输出验证。每次变更都应保存配置版本、差异、成本、证据和失败归因。
 
-经验分为两层：具体 Case 的完整执行记录，以及由多个 Case 归纳出的可复用模式。候选 Workflow 或 Harness 配置必须通过独立评测集后才能晋级，并保留版本、适用条件和回滚路径。排序优先保证正确性，再比较 token、耗时和费用；模型判断可以参与诊断，但不能替代确定性证据或人工审批。
+经验分为两层：具体 Case 的完整执行记录，以及由多个 Case 归纳出的可复用模式。`Experience Pattern` 至少引用两个已完成 Trial 和 Evidence，保存成功策略、失败模式、适用条件及从 Outcome 派生的结果摘要；它不复制 Trace 或创建第二套评测状态。Pattern 可生成版本化 `Skill Proposal`，候选与 Workflow 一样复用既有 held-out Evaluation/Signoff Gate 才能进入 `verified`。
 
-v0.6.0 已进一步实现 Orchestration Trial 自动归档和 Agent Profile 路由版本锁定。重复采样与统计置信度、Lease TTL/Heartbeat、自动 Host Driver、自动执行模型/业务 Grader、自动 Harness 搜索、双层经验库和按 Case 自适应装配仍是路线设计。
+Craft 默认只索引能力 Source。已验证 Proposal 只有在调用方明确批准 `allow_external_write=true` 后，才可写入已存在且位于所选 Source 内的 `SKILL.md`。Publisher 写前校验调用方提供的 SHA-256 摘要，备份原文件，并在原子替换前再次校验；发布和回滚各保存回执。回滚也要求当前文件仍等于已发布摘要，因此不会覆盖用户并发修改。
+
+v0.7.0 已实现 Experience Pattern、Skill Proposal 和受控 Publisher；重复采样与统计置信度、Lease TTL/Heartbeat、自动 Host Driver、自动执行模型/业务 Grader、自动 Harness 搜索和按 Case 自适应装配仍是路线设计。
 
 ## 存储与跨平台
 

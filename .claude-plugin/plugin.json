@@ -1,7 +1,7 @@
 {
   "name": "craft",
-  "version": "0.6.0",
-  "description": "Capability discovery, durable tasks, Workflow and orchestration trials, multi-source grading, comparable evaluations, signoff, and verified workflows.",
+  "version": "0.7.0",
+  "description": "Capability discovery, durable tasks, Workflow and orchestration trials, multi-source grading, comparable evaluations, Signoff-gated Skill proposals, and safe Skill publishing.",
   "skills": "./skills/",
   "mcpServers": {
     "craft": {

@@ -3,7 +3,7 @@ import { type JsonObject } from "./store.ts";
 
 type Tool = { name: string; description: string; inputSchema: JsonObject; annotations?: JsonObject };
 const schemaFor = (name: string): JsonObject => {
-  if (["scan", "enabled", "allow_execution", "require_held_out", "require_outcome_passed"].includes(name)) return { type: "boolean" };
+  if (["scan", "enabled", "allow_execution", "allow_external_write", "require_held_out", "require_outcome_passed"].includes(name)) return { type: "boolean" };
   if (["limit", "version", "capacity", "max_concurrency", "size_bytes", "subject_version",
     "suite_version", "configuration_version", "harness_configuration_version", "target_version",
     "grader_version", "policy_version"].includes(name)) return { type: "integer" };
@@ -12,7 +12,7 @@ const schemaFor = (name: string): JsonObject => {
     "costs", "metrics", "configuration"].includes(name)) return { type: "object" };
   if (["completed", "pending", "decisions", "artifacts", "steps", "cases", "capabilities",
     "allowed_side_effects", "approved_side_effects", "nodes", "artifact_ids", "evidence_ids",
-    "trial_ids", "requirements", "grade_ids"].includes(name)) return { type: "array" };
+    "trial_ids", "requirements", "grade_ids", "pattern_ids", "failure_modes"].includes(name)) return { type: "array" };
   return { type: "string" };
 };
 const objectSchema = (required: string[] = [], optional: string[] = []): JsonObject => ({ type: "object",
@@ -56,6 +56,26 @@ export const TOOLS: Tool[] = [
     ["workflow_id", "target", "reason"], false, ["evaluation_run_id", "signoff_id"]),
   tool("craft_workflow_rollback", "Restore a previously verified workflow version as the latest version.",
     ["workflow_id", "target_version", "reason"]),
+  tool("craft_experience_pattern_create", "Derive a reusable experience pattern from at least two completed Trials and their Evidence references.",
+    ["task_id", "summary", "success_strategy", "applicability", "trial_ids", "evidence_ids", "failure_modes"], false,
+    ["pattern_id"]),
+  tool("craft_experience_pattern_get", "Read an experience pattern.", ["pattern_id"], true, ["version"]),
+  tool("craft_experience_pattern_list", "List reusable experience patterns.", [], true, ["limit", "query"]),
+  tool("craft_skill_proposal_create", "Save a versioned SKILL.md candidate derived from Experience Patterns; this does not change any source file.",
+    ["name", "summary", "skill_markdown", "pattern_ids"], false, ["proposal_id"]),
+  tool("craft_skill_proposal_get", "Read a versioned Skill candidate.", ["proposal_id"], true, ["version"]),
+  tool("craft_skill_proposal_list", "List Skill candidates.", [], true, ["limit", "query"]),
+  tool("craft_skill_proposal_transition", "Move a Skill candidate through the existing held-out Evaluation and Signoff Gate.",
+    ["proposal_id", "target", "reason"], false, ["evaluation_run_id", "signoff_id"]),
+  tool("craft_skill_proposal_rollback", "Restore a previously verified Skill candidate version as the latest version.",
+    ["proposal_id", "target_version", "reason"]),
+  tool("craft_skill_proposal_publish", "Write only a verified Skill candidate to an existing SKILL.md with explicit authorization, digest protection, and backup.",
+    ["proposal_id", "source_id", "target_path", "expected_digest", "allow_external_write"], false,
+    ["publication_id"]),
+  tool("craft_skill_publication_get", "Read a Skill publication receipt.", ["publication_id"], true, ["version"]),
+  tool("craft_skill_publication_list", "List Skill publication receipts.", [], true, ["limit", "query"]),
+  tool("craft_skill_publication_rollback", "Restore a published SKILL.md only when its digest still matches the published candidate.",
+    ["publication_id", "expected_digest", "allow_external_write"]),
   tool("craft_eval_suite_save", "Save an immutable evaluation suite.", ["name"], false, ["suite_id", "cases", "description", "scope"]),
   tool("craft_eval_suite_get", "Read an evaluation suite.", ["suite_id"], true, ["version"]),
   tool("craft_eval_suite_list", "Search evaluation suites.", [], true, ["limit", "query"]),
@@ -143,6 +163,18 @@ export class McpServer {
       craft_workflow_run_get: (a) => service.get("workflow_run", "run_id", a),
       craft_workflow_transition: (a) => service.workflowTransition(a),
       craft_workflow_rollback: (a) => service.workflowRollback(a),
+      craft_experience_pattern_create: (a) => service.experiencePatternCreate(a),
+      craft_experience_pattern_get: (a) => service.get("experience_pattern", "pattern_id", a),
+      craft_experience_pattern_list: (a) => service.list("experience_pattern", "patterns", a),
+      craft_skill_proposal_create: (a) => service.skillProposalCreate(a),
+      craft_skill_proposal_get: (a) => service.get("skill_proposal", "proposal_id", a),
+      craft_skill_proposal_list: (a) => service.list("skill_proposal", "proposals", a),
+      craft_skill_proposal_transition: (a) => service.skillProposalTransition(a),
+      craft_skill_proposal_rollback: (a) => service.skillProposalRollback(a),
+      craft_skill_proposal_publish: (a) => service.skillProposalPublish(a),
+      craft_skill_publication_get: (a) => service.get("skill_publication", "publication_id", a),
+      craft_skill_publication_list: (a) => service.list("skill_publication", "publications", a),
+      craft_skill_publication_rollback: (a) => service.skillPublicationRollback(a),
       craft_eval_suite_save: (a) => service.evaluationSuiteSave(a),
       craft_eval_suite_get: (a) => service.get("evaluation_suite", "suite_id", a),
       craft_eval_suite_list: (a) => service.list("evaluation_suite", "suites", a),

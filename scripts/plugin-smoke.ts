@@ -23,7 +23,8 @@ try {
   await copyFile(join(projectRoot, relativeBundle), copiedBundle);
   const request = [
     { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-11-25" } },
-    { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "craft_info", arguments: {} } },
+    { jsonrpc: "2.0", id: 2, method: "tools/list" },
+    { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "craft_info", arguments: {} } },
   ].map((item) => JSON.stringify(item)).join("\n");
   child = spawn(server.command, server.args, {
     cwd: resolve(pluginRoot, server.cwd),
@@ -41,11 +42,11 @@ try {
     stdout.on("data", (chunk) => {
       output += chunk;
       const lines = output.trim().split(/\r?\n/);
-      if (lines.length >= 2) resolveResponses(lines.slice(0, 2).map((line) => JSON.parse(line)));
+      if (lines.length >= 3) resolveResponses(lines.slice(0, 3).map((line) => JSON.parse(line)));
     });
     child!.once("error", reject);
     child!.once("exit", (code) => {
-      if (code && output.trim().split(/\r?\n/).length < 2) reject(new Error(errors || `MCP exited with ${code}`));
+      if (code && output.trim().split(/\r?\n/).length < 3) reject(new Error(errors || `MCP exited with ${code}`));
     });
   });
   stdin.end(`${request}\n`);
@@ -53,8 +54,9 @@ try {
     responsesPromise,
     new Promise<never>((_, reject) => setTimeout(() => reject(new Error(errors || "MCP smoke test timed out")), 5_000)),
   ]) as Array<any>;
-  assert.equal(responses[0].result.serverInfo.version, "0.6.2");
-  assert.equal(responses[1].result.structuredContent.version, "0.6.2");
+  assert.equal(responses[0].result.serverInfo.version, "0.7.0");
+  assert((responses[1].result.tools as Array<{ name: string }>).some((tool) => tool.name === "craft_skill_proposal_publish"));
+  assert.equal(responses[2].result.structuredContent.version, "0.7.0");
   console.log("Bundled plugin MCP starts without node_modules.");
 } finally {
   if (child && child.exitCode === null) {
