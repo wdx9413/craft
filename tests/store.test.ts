@@ -100,7 +100,7 @@ test("versioned records and events provide the shared persistence primitives", a
   }
 });
 
-test("store rebuilds a legacy FTS index when available and falls back when FTS initialization fails", async () => {
+test("store preserves schema migration safety and uses keyword fallback when FTS5 is unavailable", async () => {
   const root = join(tmpdir(), `craft-store-fts-${process.pid}-${Date.now()}-${Math.random()}`);
   const paths = craftPaths(root);
   await mkdir(paths.databaseDir, { recursive: true });

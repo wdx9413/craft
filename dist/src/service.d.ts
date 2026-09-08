@@ -1,6 +1,6 @@
 import { Catalog } from "./catalog.ts";
 import { CraftStore, type JsonObject } from "./store.ts";
-export declare const VERSION = "0.9.2";
+export declare const VERSION = "0.9.3";
 export declare class CraftService {
     readonly store: CraftStore;
     readonly catalog: Catalog;
@@ -13,6 +13,12 @@ export declare class CraftService {
     sourceScan(args: JsonObject): Promise<JsonObject>;
     capabilitySearch(args: JsonObject): JsonObject;
     capabilityGet(args: JsonObject): JsonObject;
+    projectPolicySave(args: JsonObject): JsonObject;
+    private projectPolicy;
+    hostAdapterSave(args: JsonObject): JsonObject;
+    hostAdapterDispatch(args: JsonObject): JsonObject;
+    hostAdapterReport(args: JsonObject): JsonObject;
+    routeReceiptRecord(args: JsonObject): JsonObject;
     defaultRoute(args: JsonObject): JsonObject;
     defaultRouteResume(args: JsonObject): JsonObject;
     defaultRouteFind(args: JsonObject): JsonObject;

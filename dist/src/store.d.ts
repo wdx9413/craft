@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { type CraftPaths } from "./paths.ts";
-export declare const SCHEMA_VERSION = 2;
+export declare const SCHEMA_VERSION = 3;
 export type JsonObject = Record<string, unknown>;
 export type SaveEntry = {
     kind: string;

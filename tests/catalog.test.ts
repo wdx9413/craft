@@ -12,13 +12,14 @@ test("catalog adds, incrementally scans, searches, updates, and removes sources"
   const library = join(root, "library");
   await mkdir(join(library, "diagnose"), { recursive: true });
   const file = join(library, "diagnose", "SKILL.md");
-  await writeFile(file, "---\nname: diagnose\ndescription: Find failures\nversion: 1\n---\nTrace evidence.");
+  await writeFile(file, "---\nname: diagnose\ndescription: Find failures\naliases: incident trace\nversion: 1\n---\nTrace evidence.");
   const store = await new CraftStore(craftPaths(join(root, "data"))).open();
   const catalog = new Catalog(store);
   try {
     const source = await catalog.addSource(library);
     assert.equal((source.scan as { added: number }).added, 1);
     assert.equal(catalog.search("failures")[0].name, "diagnose");
+    assert.equal(catalog.search("incident trace")[0].name, "diagnose");
     assert.equal(catalog.search("   ").length, 0);
     assert.equal(catalog.get(String(catalog.search("evidence")[0].id)).version, 1);
     assert.equal(((await catalog.scanSource(String(source.id))).scan as { unchanged: number }).unchanged, 1);
@@ -61,7 +62,7 @@ test("catalog covers aliases, disabled sources, filters, and digest fallback", a
   await mkdir(join(library, "a"), { recursive: true });
   await mkdir(other, { recursive: true });
   await writeFile(join(library, "ignore.txt"), "ignored");
-  await writeFile(join(library, "a", "SKILL.md"), "---\nname: alpha\ndescription: red blue\n---\nbody");
+  await writeFile(join(library, "a", "SKILL.md"), "---\nname: alpha\ndescription: red blue\naliases:\n  - urgent outage\n  - 42\n---\nbody");
   await writeFile(join(other, "SKILL.md"), "---\nname: beta\ndescription: red\n---\nbody");
   await symlink(join(library, "a"), join(library, "alias"), "junction");
   await symlink(join(root, "missing"), join(library, "broken"), "junction");
@@ -84,6 +85,9 @@ test("catalog covers aliases, disabled sources, filters, and digest fallback", a
     assert.equal(((await catalog.scan()).sources as unknown[]).length, 1);
     const ranked = catalog.search("red blue", 0);
     assert.equal(ranked.length, 1);
+    const aliasRanked = catalog.search("urgent outage");
+    assert.equal(aliasRanked[0].name, "alpha");
+    assert.equal((aliasRanked[0].match as Record<string, unknown>).alias_match, true);
     assert.equal(catalog.search("red", 50).length, 2);
     catalog.removeSource(String(first.id));
     catalog.removeSource(String(second.id));

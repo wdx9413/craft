@@ -13,15 +13,16 @@ For substantial work—multi-step development, diagnosis, research, a recurring 
 
 1. Call `craft_default_route` with the user's goal. `title` is optional; Craft derives it from the goal when omitted.
 2. If it returns `next_action.kind=execute_verified_workflow`, read only the selected capabilities as needed, then use `craft_default_route_execute`. It can run only the exact Workflow version Craft selected and only with Host-approved side effects.
-3. If it returns `next_action.kind=complete_stage`, carry out that one Host-mediated stage. Register real artifacts/evidence where available, then call `craft_default_route_update`. The final `review` update records the observed Outcome and surfaces evidence-backed experience candidates.
+3. If it returns `next_action.kind=complete_stage`, carry out that one Host-mediated stage. When `required_receipts` is non-empty, first call `craft_route_receipt_record` for each observed command result and include its ID in `craft_default_route_update`. The final `review` update records the observed Outcome and surfaces evidence-backed experience candidates.
 4. When continuing a known task, call `craft_default_route_resume` with its `task_id` and do only the returned next action. If the user says “continue” with identifying words but the task is not known, call `craft_default_route_find` first; it resumes a unique active match and returns `ambiguous` rather than guessing. Ask only when it is ambiguous or not found.
-5. After two or more passed, evidence-backed routes share the same strategy, the Host may distill project-neutral executable steps and call `craft_route_workflow_proposal_create`. It creates only a `draft` Workflow with evidence references. Never copy raw business text, credentials, or unverified commands into the proposal; use the normal held-out Evaluation/Signoff Gate before promotion.
+5. After two or more distinct passed routes with confirmed or bounded evidence share the same strategy, the Host may distill project-neutral executable steps and call `craft_route_workflow_proposal_create`. It creates one provenance-linked `draft` Workflow per strategy. Never copy raw business text, credentials, or unverified commands into the proposal; use the normal held-out Evaluation/Signoff Gate before promotion.
 
 Skip default routing for a short self-contained answer, a simple rewrite, or a one-step read that has no durable value. Craft never treats an unverified Skill, a model assertion, or an unapproved command as an executable Workflow.
 
 ## Operating rules
 
 - `craft_default_route` owns normal Task creation and route selection. Use `craft_task_open` only for a direct Task lookup or when a caller deliberately manages a Task outside the default route.
+- For a recurring project, save `craft_project_policy` once. A `required` policy makes route receipts server-enforced; a Host Adapter may dispatch only the next operation it explicitly supports. Neither bypasses Host approval.
 - Search capabilities with `craft_capability_search`. Read only the selected candidate with `craft_capability_get`; never load the whole catalog into context.
 - Call `craft_task_checkpoint` after material progress or before handoff. Separate completed work, pending work, decisions, and artifact references. Do not label an unobserved claim verified.
 - Record explicit corrections with `craft_feedback_record` at the narrowest correct scope.

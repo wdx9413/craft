@@ -74,6 +74,8 @@ test("经验候选只从同一 Subject 的多个有证据 Trial 中自动浮现"
     const workflow = service.workflowSave({ workflow_id: "workflow_candidate", name: "Candidate" });
     const evidence = service.evidenceRecord({ evidence_id: "evidence_candidate", source_type: "program",
       claim: "test passed", confidence: "confirmed" });
+    const boundedEvidence = service.evidenceRecord({ evidence_id: "evidence_candidate_bounded", source_type: "program",
+      claim: "manual boundary", confidence: "bounded" });
     for (const trialId of ["trial_candidate_1", "trial_candidate_2"]) {
       service.trialStart({ trial_id: trialId, task_id: task.id, subject_type: "workflow",
         subject_id: workflow.id, subject_version: workflow.version });
@@ -83,6 +85,11 @@ test("经验候选只从同一 Subject 的多个有证据 Trial 中自动浮现"
     assert.equal((candidates.experience_candidates as JsonObject[]).length, 1);
     assert.deepEqual((candidates.experience_candidates as JsonObject[])[0].trial_ids,
       ["trial_candidate_1", "trial_candidate_2"]);
+    const boundedTrial = service.trialStart({ trial_id: "trial_candidate_3", task_id: task.id, subject_type: "workflow",
+      subject_id: workflow.id, subject_version: workflow.version });
+    service.outcomeRecord({ trial_id: boundedTrial.id, verdict: "passed", summary: "bounded", evidence_ids: [boundedEvidence.id] });
+    assert.equal(((service.experienceCandidateList({}).experience_candidates as JsonObject[])[0].confirmed_evidence_ids as string[])
+      .includes(String(boundedEvidence.id)), true);
   } finally {
     store.close();
     await rm(root, { recursive: true, force: true });
@@ -228,6 +235,7 @@ test("重复通过的安全路线只能生成证据溯源的 Workflow 草案", a
     assert.equal(((proposal.workflow as JsonObject).derived_from as JsonObject).route_id, first.route_id);
     assert.equal((((proposal.workflow as JsonObject).derived_from as JsonObject).trial_ids as string[]).length, 2);
     assert.equal(service.workflowPlan({ workflow_id: "workflow_safe_repair" }).executable, true);
+    assert.throws(() => service.routeWorkflowProposalCreate({ ...proposalArgs, workflow_id: "workflow_duplicate" }), /already exists/);
 
     const noStrategy = service.defaultRoute({ goal: "😀" });
     for (const stageId of ["baseline", "minimal_change", "verification"]) {
@@ -247,6 +255,94 @@ test("重复通过的安全路线只能生成证据溯源的 Workflow 草案", a
     const { id: _failedId, version: _failedVersion, created_at: _failedCreatedAt, updated_at: _failedUpdatedAt, ...failedPayload } = failedRoute;
     store.save("route", String(failed.route_id), { ...failedPayload, status: "completed" });
     assert.throws(() => service.routeWorkflowProposalCreate({ ...proposalArgs, route_id: failed.route_id }), /passed route/);
+  } finally {
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("项目 Policy 用结构化回执强制安全路线，并允许 Host Adapter 只领取下一安全动作", async () => {
+  const root = join(tmpdir(), `craft-route-policy-${process.pid}-${Date.now()}`);
+  const store = await new CraftStore(craftPaths(root)).open();
+  const service = new CraftService(store);
+  try {
+    service.projectPolicySave({ project_id: "craft", name: "严格研发", enforcement: "required" });
+    const policy = service.projectPolicySave({ policy_id: "project_policy_secondary", project_id: "craft",
+      name: "严格研发第二版", enforcement: "required" });
+    assert.throws(() => service.projectPolicySave({ project_id: "bad", name: "Bad", enforcement: "bad" }), /enforcement/);
+    assert.throws(() => service.projectPolicySave({ project_id: "bad", name: "Bad", receipt_requirements: { unknown: [] } }), /receipt stage/);
+    assert.throws(() => service.projectPolicySave({ project_id: "bad", name: "Bad", receipt_requirements: { baseline: ["git_diff", "git_diff"] } }), /unique/);
+    assert.deepEqual(service.projectPolicySave({ project_id: "partial", name: "Partial", receipt_requirements: { baseline: ["git_diff"] } }).receipt_requirements,
+      { baseline: ["git_diff"], minimal_change: [], verification: [], review: [] });
+    assert.equal(service.projectPolicySave({ project_id: "advisory", name: "Advisory", enforcement: "advisory" }).enforcement, "advisory");
+    assert.throws(() => service.hostAdapterSave({ name: "Bad", host: "bad", allowed_operations: ["complete_stage"] }), /adapter/);
+    assert.throws(() => service.hostAdapterSave({ name: "Bad", host: "codex", allowed_operations: ["bad"] }), /unsupported operation/);
+    const adapter = service.hostAdapterSave({ host_adapter_id: "adapter_codex", name: "Codex", host: "codex",
+      allowed_operations: ["complete_stage"] });
+    const route = service.defaultRoute({ goal: "安全改造服务", project_id: "craft" });
+    assert.equal((route.policy as JsonObject).id, policy.id);
+    const incompatible = service.hostAdapterSave({ name: "Only workflow", host: "generic", allowed_operations: ["execute_verified_workflow"] });
+    assert.throws(() => service.hostAdapterDispatch({ host_adapter_id: incompatible.id, route_id: route.route_id }), /cannot dispatch/);
+    const verified = store.save("workflow", "workflow_receipt_block", { name: "Verified", lifecycle: "verified", steps: [] });
+    const verifiedRoute = service.defaultRoute({ goal: "Verified" });
+    assert.equal((verifiedRoute.workflow as JsonObject).id, verified.id);
+    assert.throws(() => service.routeReceiptRecord({ route_id: verifiedRoute.route_id, stage_id: "baseline", kind: "git_diff",
+      status: "passed", command: "git diff --check", summary: "not a safe route" }), /active safe route/);
+    assert.throws(() => service.defaultRouteUpdate({ route_id: route.route_id, stage_id: "baseline", summary: "无回执" }),
+      /required receipts/);
+    const dispatch = service.hostAdapterDispatch({ host_adapter_id: adapter.id, host_adapter_version: adapter.version, route_id: route.route_id });
+    assert.equal((dispatch.action as JsonObject).kind, "complete_stage");
+    const diff = service.routeReceiptRecord({ route_id: route.route_id, stage_id: "baseline", kind: "git_diff",
+      status: "passed", command: "git diff --check", summary: "diff clean" });
+    const testReceipt = service.routeReceiptRecord({ route_id: route.route_id, stage_id: "baseline", kind: "focused_test",
+      status: "passed", command: "pnpm test -- route", summary: "focused test passed" });
+    const updated = service.defaultRouteUpdate({ route_id: route.route_id, stage_id: "baseline", summary: "baseline done",
+      receipt_ids: [(diff.receipt as JsonObject).id, (testReceipt.receipt as JsonObject).id] });
+    assert.equal((updated.next_action as JsonObject).stage_id, "minimal_change");
+    assert.throws(() => service.defaultRouteUpdate({ route_id: route.route_id, stage_id: "minimal_change", summary: "duplicate",
+      receipt_ids: [(diff.receipt as JsonObject).id, (diff.receipt as JsonObject).id] }), /unique/);
+    service.defaultRouteUpdate({ route_id: route.route_id, stage_id: "minimal_change", summary: "change done" });
+    const failedReceipt = service.routeReceiptRecord({ route_id: route.route_id, stage_id: "verification", kind: "coverage",
+      status: "failed", command: "pnpm coverage", summary: "coverage below threshold", uri: "file:///coverage" });
+    assert.equal((failedReceipt.evidence as JsonObject).confidence, "rejected");
+    const skippedReceipt = service.routeReceiptRecord({ route_id: route.route_id, stage_id: "verification", kind: "static_check",
+      status: "skipped", command: "pnpm lint", summary: "not applicable" });
+    assert.equal((skippedReceipt.evidence as JsonObject).confidence, "bounded");
+    assert.throws(() => service.hostAdapterReport({ dispatch_id: (dispatch.dispatch as JsonObject).id, status: "unknown", summary: "bad" }), /status/);
+    const report = service.hostAdapterReport({ dispatch_id: (dispatch.dispatch as JsonObject).id, status: "completed", summary: "baseline handed off" });
+    assert.equal((report.dispatch as JsonObject).status, "completed");
+    assert.throws(() => service.hostAdapterReport({ dispatch_id: (dispatch.dispatch as JsonObject).id, status: "completed", summary: "again" }), /terminal/);
+    const other = service.defaultRoute({ goal: "其他安全改造", project_id: "craft" });
+    const otherDiff = service.routeReceiptRecord({ route_id: other.route_id, stage_id: "baseline", kind: "git_diff",
+      status: "passed", command: "git diff --check", summary: "other clean" });
+    assert.throws(() => service.defaultRouteUpdate({ route_id: route.route_id, stage_id: "verification", summary: "wrong receipt",
+      receipt_ids: [(otherDiff.receipt as JsonObject).id] }), /belong/);
+    assert.throws(() => service.routeReceiptRecord({ route_id: route.route_id, stage_id: "verification", kind: "bad",
+      status: "passed", command: "ok", summary: "bad" }), /receipt kind/);
+    assert.throws(() => service.routeReceiptRecord({ route_id: route.route_id, stage_id: "verification", kind: "review",
+      status: "bad", command: "ok", summary: "bad" }), /receipt status/);
+    assert.throws(() => service.routeReceiptRecord({ route_id: route.route_id, stage_id: "verification", kind: "focused_test",
+      status: "passed", command: "TOKEN=secret", summary: "bad" }), /sensitive/);
+    const terminal = service.defaultRoute({ goal: "终态路线" });
+    const terminalRecord = store.get("route", String(terminal.route_id));
+    const { id: _terminalId, version: _terminalVersion, created_at: _terminalCreatedAt, updated_at: _terminalUpdatedAt, ...terminalPayload } = terminalRecord;
+    store.save("route", String(terminal.route_id), { ...terminalPayload, status: "completed" });
+    assert.throws(() => service.routeReceiptRecord({ route_id: terminal.route_id, stage_id: "baseline", kind: "git_diff",
+      status: "passed", command: "git diff --check", summary: "terminal" }), /active safe route/);
+    const malformed = service.defaultRoute({ goal: "无下一阶段" });
+    const malformedRecord = store.get("route", String(malformed.route_id));
+    const { id: _malformedId, version: _malformedVersion, created_at: _malformedCreatedAt, updated_at: _malformedUpdatedAt, ...malformedPayload } = malformedRecord;
+    store.save("route", String(malformed.route_id), { ...malformedPayload, status: "awaiting_host",
+      stage_state: (malformedPayload.stage_state as JsonObject[]).map((state) => ({ ...state, status: "completed" })) });
+    assert.throws(() => service.routeReceiptRecord({ route_id: malformed.route_id, stage_id: "baseline", kind: "git_diff",
+      status: "passed", command: "git diff --check", summary: "no action" }), /next required stage is none/);
+    const legacy = service.defaultRoute({ goal: "旧路线兼容" });
+    const legacyRecord = store.get("route", String(legacy.route_id));
+    const { id: _legacyId, version: _legacyVersion, created_at: _legacyCreatedAt, updated_at: _legacyUpdatedAt, receipt_requirements: _legacyRequirements, ...legacyPayload } = legacyRecord;
+    store.save("route", String(legacy.route_id), legacyPayload);
+    assert.deepEqual((service.defaultRouteResume({ task_id: (legacy.task as JsonObject).id }).next_action as JsonObject).required_receipts, []);
+    assert.equal((service.defaultRouteUpdate({ route_id: legacy.route_id, stage_id: "baseline", summary: "legacy baseline" }).route as JsonObject).status,
+      "awaiting_host");
   } finally {
     store.close();
     await rm(root, { recursive: true, force: true });

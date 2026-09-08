@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { craftPaths, ensureLayout } from "./paths.js";
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 const RESERVED_FIELDS = new Set(["id", "version", "created_at", "updated_at"]);
 function payloadOnly(payload) {
     return Object.fromEntries(Object.entries(payload).filter(([key]) => !RESERVED_FIELDS.has(key)));
@@ -15,7 +15,6 @@ function validLimit(limit) {
 export class CraftStore {
     paths;
     #database = null;
-    #ftsAvailable = false;
     constructor(paths = craftPaths()) {
         this.paths = paths;
     }
@@ -45,23 +44,6 @@ export class CraftStore {
             const previousVersion = Number(schemaRow?.value ?? 0);
             if (previousVersion > SCHEMA_VERSION) {
                 throw new Error(`Craft database schema ${previousVersion} is newer than supported schema ${SCHEMA_VERSION}`);
-            }
-            try {
-                database.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS capability_fts USING fts5(
-        id UNINDEXED,name,description,body,tokenize='unicode61'
-      );`);
-                this.#ftsAvailable = true;
-                if (previousVersion < 2) {
-                    database.exec(`DELETE FROM capability_fts;
-          INSERT INTO capability_fts(id,name,description,body)
-          SELECT r.id,json_extract(r.payload_json,'$.name'),json_extract(r.payload_json,'$.description'),
-            json_extract(r.payload_json,'$.body') FROM records r JOIN (
-              SELECT id,MAX(version) version FROM records WHERE kind='capability' GROUP BY id
-            ) latest ON latest.id=r.id AND latest.version=r.version WHERE r.kind='capability';`);
-                }
-            }
-            catch {
-                this.#ftsAvailable = false;
             }
             database.prepare("INSERT OR REPLACE INTO meta(key,value) VALUES('schema_version',?)")
                 .run(String(SCHEMA_VERSION));
@@ -129,11 +111,6 @@ export class CraftStore {
         database.prepare(`INSERT INTO records(
         kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)`)
             .run(kind, id, next, JSON.stringify(payload), now, now);
-        if (kind === "capability" && this.#ftsAvailable) {
-            database.prepare("DELETE FROM capability_fts WHERE id=?").run(id);
-            database.prepare("INSERT INTO capability_fts(id,name,description,body) VALUES(?,?,?,?)")
-                .run(id, String(payload.name ?? ""), String(payload.description ?? ""), String(payload.body ?? ""));
-        }
         return { ...payload, id, version: next, created_at: now, updated_at: now };
     }
     find(kind, id, version) {
@@ -168,20 +145,8 @@ export class CraftStore {
         const bounded = Math.min(validLimit(limit), 20);
         if (!terms.length)
             return [];
-        if (this.#ftsAvailable) {
-            const expression = terms.map((term) => `"${term.replaceAll('"', '""')}"`).join(" OR ");
-            const rows = this.database.prepare(`SELECT r.*,bm25(capability_fts) rank FROM capability_fts
-        JOIN records r ON r.kind='capability' AND r.id=capability_fts.id
-        JOIN (SELECT id,MAX(version) version FROM records WHERE kind='capability' GROUP BY id) latest
-          ON latest.id=r.id AND latest.version=r.version
-        WHERE capability_fts MATCH ? ORDER BY rank LIMIT ?`).all(expression, bounded);
-            return rows.map((row) => {
-                const item = row;
-                return { ...this.record(item), score: -Number(item.rank) };
-            });
-        }
         return this.list("capability", Number.MAX_SAFE_INTEGER).map((item) => {
-            const text = [item.name, item.description, item.body].join(" ").toLowerCase();
+            const text = [item.name, item.description, item.search_text ?? item.body].join(" ").toLowerCase();
             const score = terms.reduce((total, term) => total + Number(text.includes(term.toLowerCase())), 0);
             return { ...item, score };
         }).filter((item) => Number(item.score) > 0)
@@ -191,8 +156,6 @@ export class CraftStore {
     remove(kind, id) {
         return this.transaction((database) => {
             const changes = Number(database.prepare("DELETE FROM records WHERE kind=? AND id=?").run(kind, id).changes);
-            if (kind === "capability" && this.#ftsAvailable)
-                database.prepare("DELETE FROM capability_fts WHERE id=?").run(id);
             return changes;
         });
     }
@@ -220,7 +183,6 @@ export class CraftStore {
     close() {
         this.#database?.close();
         this.#database = null;
-        this.#ftsAvailable = false;
     }
 }
 //# sourceMappingURL=store.js.map

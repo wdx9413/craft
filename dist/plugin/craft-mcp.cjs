@@ -7412,7 +7412,7 @@ async function ensureLayout(paths = craftPaths()) {
 }
 
 // src/store.ts
-var SCHEMA_VERSION = 2;
+var SCHEMA_VERSION = 3;
 var RESERVED_FIELDS = /* @__PURE__ */ new Set(["id", "version", "created_at", "updated_at"]);
 function payloadOnly(payload) {
   return Object.fromEntries(Object.entries(payload).filter(([key]) => !RESERVED_FIELDS.has(key)));
@@ -7426,7 +7426,6 @@ function validLimit(limit) {
 var CraftStore = class {
   paths;
   #database = null;
-  #ftsAvailable = false;
   constructor(paths = craftPaths()) {
     this.paths = paths;
   }
@@ -7455,22 +7454,6 @@ var CraftStore = class {
       const previousVersion = Number(schemaRow?.value ?? 0);
       if (previousVersion > SCHEMA_VERSION) {
         throw new Error(`Craft database schema ${previousVersion} is newer than supported schema ${SCHEMA_VERSION}`);
-      }
-      try {
-        database.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS capability_fts USING fts5(
-        id UNINDEXED,name,description,body,tokenize='unicode61'
-      );`);
-        this.#ftsAvailable = true;
-        if (previousVersion < 2) {
-          database.exec(`DELETE FROM capability_fts;
-          INSERT INTO capability_fts(id,name,description,body)
-          SELECT r.id,json_extract(r.payload_json,'$.name'),json_extract(r.payload_json,'$.description'),
-            json_extract(r.payload_json,'$.body') FROM records r JOIN (
-              SELECT id,MAX(version) version FROM records WHERE kind='capability' GROUP BY id
-            ) latest ON latest.id=r.id AND latest.version=r.version WHERE r.kind='capability';`);
-        }
-      } catch {
-        this.#ftsAvailable = false;
       }
       database.prepare("INSERT OR REPLACE INTO meta(key,value) VALUES('schema_version',?)").run(String(SCHEMA_VERSION));
       database.exec("COMMIT");
@@ -7533,10 +7516,6 @@ var CraftStore = class {
     ).get(kind, id2).version);
     database.prepare(`INSERT INTO records(
         kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)`).run(kind, id2, next, JSON.stringify(payload), now, now);
-    if (kind === "capability" && this.#ftsAvailable) {
-      database.prepare("DELETE FROM capability_fts WHERE id=?").run(id2);
-      database.prepare("INSERT INTO capability_fts(id,name,description,body) VALUES(?,?,?,?)").run(id2, String(payload.name ?? ""), String(payload.description ?? ""), String(payload.body ?? ""));
-    }
     return { ...payload, id: id2, version: next, created_at: now, updated_at: now };
   }
   find(kind, id2, version) {
@@ -7569,20 +7548,8 @@ var CraftStore = class {
   searchCapabilities(terms, limit) {
     const bounded = Math.min(validLimit(limit), 20);
     if (!terms.length) return [];
-    if (this.#ftsAvailable) {
-      const expression = terms.map((term) => `"${term.replaceAll('"', '""')}"`).join(" OR ");
-      const rows = this.database.prepare(`SELECT r.*,bm25(capability_fts) rank FROM capability_fts
-        JOIN records r ON r.kind='capability' AND r.id=capability_fts.id
-        JOIN (SELECT id,MAX(version) version FROM records WHERE kind='capability' GROUP BY id) latest
-          ON latest.id=r.id AND latest.version=r.version
-        WHERE capability_fts MATCH ? ORDER BY rank LIMIT ?`).all(expression, bounded);
-      return rows.map((row) => {
-        const item = row;
-        return { ...this.record(item), score: -Number(item.rank) };
-      });
-    }
     return this.list("capability", Number.MAX_SAFE_INTEGER).map((item) => {
-      const text2 = [item.name, item.description, item.body].join(" ").toLowerCase();
+      const text2 = [item.name, item.description, item.search_text ?? item.body].join(" ").toLowerCase();
       const score = terms.reduce((total, term) => total + Number(text2.includes(term.toLowerCase())), 0);
       return { ...item, score };
     }).filter((item) => Number(item.score) > 0).sort((left, right) => Number(right.score) - Number(left.score)).slice(0, bounded);
@@ -7590,7 +7557,6 @@ var CraftStore = class {
   remove(kind, id2) {
     return this.transaction((database) => {
       const changes = Number(database.prepare("DELETE FROM records WHERE kind=? AND id=?").run(kind, id2).changes);
-      if (kind === "capability" && this.#ftsAvailable) database.prepare("DELETE FROM capability_fts WHERE id=?").run(id2);
       return changes;
     });
   }
@@ -7631,13 +7597,36 @@ var CraftStore = class {
   close() {
     this.#database?.close();
     this.#database = null;
-    this.#ftsAvailable = false;
   }
 };
 
 // src/catalog.ts
 function stableId(prefix, value) {
   return `${prefix}_${(0, import_node_crypto.createHash)("sha256").update(value).digest("hex").slice(0, 20)}`;
+}
+function metadataTerms(metadata) {
+  const aliases = metadata.aliases;
+  if (typeof aliases === "string") return [aliases];
+  return Array.isArray(aliases) ? aliases.filter((value) => typeof value === "string") : [];
+}
+function rerank(query, item) {
+  const normalized = query.trim().toLowerCase();
+  const terms = normalized.split(/\s+/).filter(Boolean);
+  const name = String(item.name).toLowerCase();
+  const description = String(item.description).toLowerCase();
+  const aliases = metadataTerms(item.metadata).join(" ").toLowerCase();
+  const matchedTerms = terms.filter((term) => `${name}
+${description}
+${aliases}`.includes(term));
+  const exactName = name === normalized;
+  const exactDescription = description.includes(normalized);
+  const aliasMatch = aliases.includes(normalized);
+  const lexical = Number(item.score);
+  return {
+    ...item,
+    score: lexical + matchedTerms.length * 10 + Number(exactName) * 100 + Number(exactDescription) * 40 + Number(aliasMatch) * 60,
+    match: { matched_terms: matchedTerms, exact_name: exactName, exact_description: exactDescription, alias_match: aliasMatch }
+  };
 }
 function pathKey(path, platform = process.platform) {
   return platform === "win32" ? path.toLowerCase() : path;
@@ -7770,6 +7759,8 @@ var Catalog = class {
         ...skill,
         kind: "skill",
         source_id: id2,
+        search_text: `${skill.body}
+${metadataTerms(skill.metadata).join("\n")}`,
         relative_path,
         path: await (0, import_promises2.realpath)(path),
         digest: digest2,
@@ -7807,8 +7798,13 @@ var Catalog = class {
   search(query, limit = 6) {
     const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
     if (!terms.length) return [];
-    return this.store.searchCapabilities(terms, limit).map((item) => {
-      const { body: _body, metadata: _metadata, ...summary } = item;
+    const lexical = this.store.searchCapabilities(terms, 20);
+    const aliasFallback = lexical.length ? [] : this.store.list("capability", Number.MAX_SAFE_INTEGER, (item) => {
+      const aliases = metadataTerms(item.metadata).join(" ").toLowerCase();
+      return terms.every((term) => aliases.includes(term));
+    });
+    return [...lexical, ...aliasFallback].filter((item, index, values) => values.findIndex((candidate) => candidate.id === item.id) === index).map((item) => rerank(query, item)).sort((left, right) => Number(right.score) - Number(left.score) || String(left.id).localeCompare(String(right.id))).slice(0, Math.min(Math.max(1, limit), 20)).map((item) => {
+      const { body: _body, metadata: _metadata, search_text: _searchText, ...summary } = item;
       return summary;
     });
   }
@@ -8346,7 +8342,7 @@ async function rollbackSkillPublication(args) {
 }
 
 // src/service.ts
-var VERSION = "0.9.2";
+var VERSION = "0.9.3";
 var CONFIDENCE = /* @__PURE__ */ new Set(["confirmed", "bounded", "unverified", "rejected"]);
 var TASK_STATUS = /* @__PURE__ */ new Set(["active", "paused", "completed", "cancelled"]);
 var VERSIONED_LIFECYCLE = /* @__PURE__ */ new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -8437,6 +8433,33 @@ var SAFE_INCREMENTAL_STAGES = [
   }
 ];
 var ROUTE_TERMINAL = /* @__PURE__ */ new Set(["completed", "failed", "cancelled"]);
+var ROUTE_RECEIPT_KINDS = /* @__PURE__ */ new Set(["git_diff", "focused_test", "coverage", "static_check", "review"]);
+var ROUTE_RECEIPT_STATUS = /* @__PURE__ */ new Set(["passed", "failed", "skipped"]);
+var HOST_OPERATIONS = /* @__PURE__ */ new Set(["complete_stage", "execute_verified_workflow"]);
+var SECRET_ASSIGNMENT = /(?:api[_-]?key|authorization|cookie|password|secret|token)\s*[:=]\s*[^\s]+/iu;
+var DEFAULT_RECEIPT_REQUIREMENTS = {
+  baseline: ["git_diff", "focused_test"],
+  minimal_change: [],
+  verification: ["focused_test", "coverage"],
+  review: ["git_diff", "review"]
+};
+function receiptRequirements(value, name) {
+  const requirements = object(value ?? DEFAULT_RECEIPT_REQUIREMENTS, name);
+  const normalized = {};
+  for (const [stage, kinds] of Object.entries(requirements)) {
+    if (!Object.hasOwn(DEFAULT_RECEIPT_REQUIREMENTS, stage)) throw new Error(`Unsupported receipt stage: ${stage}`);
+    const values = array(kinds, `${name}.${stage}`).map((kind) => text(kind, `${name}.${stage}`));
+    if (values.some((kind) => !ROUTE_RECEIPT_KINDS.has(kind)) || new Set(values).size !== values.length) {
+      throw new Error(`${name}.${stage} must contain supported unique receipt kinds`);
+    }
+    normalized[stage] = values;
+  }
+  return Object.fromEntries(Object.keys(DEFAULT_RECEIPT_REQUIREMENTS).map((stage) => [stage, normalized[stage] ?? []]));
+}
+function assertNoSecret(value, name) {
+  if (SECRET_ASSIGNMENT.test(value)) throw new Error(`${name} must not contain sensitive assignments`);
+  return value;
+}
 var CraftService = class {
   store;
   catalog;
@@ -8474,7 +8497,11 @@ var CraftService = class {
       "model_provider",
       "agent_session",
       "route",
-      "route_strategy"
+      "route_strategy",
+      "project_policy",
+      "route_receipt",
+      "host_adapter",
+      "host_dispatch"
     ];
     return {
       version: VERSION,
@@ -8512,6 +8539,126 @@ var CraftService = class {
   capabilityGet(args) {
     return this.catalog.get(text(args.asset_id, "asset_id"));
   }
+  projectPolicySave(args) {
+    const projectId = text(args.project_id, "project_id");
+    const enforcement = String(args.enforcement ?? "required");
+    if (!(/* @__PURE__ */ new Set(["required", "advisory"])).has(enforcement)) throw new Error(`Unsupported policy enforcement: ${enforcement}`);
+    const policyId = String(args.policy_id ?? `project_policy_${(0, import_node_crypto4.createHash)("sha256").update(projectId).digest("hex").slice(0, 24)}`);
+    return this.saveVersioned("project_policy", "policy", {
+      ...args,
+      policy_id: policyId,
+      project_id: projectId,
+      enforcement,
+      receipt_requirements: receiptRequirements(args.receipt_requirements, "receipt_requirements")
+    }, ["name"]);
+  }
+  projectPolicy(projectId) {
+    if (typeof projectId !== "string" || !projectId) return {
+      id: null,
+      version: null,
+      enforcement: "advisory",
+      receipt_requirements: receiptRequirements(void 0, "default_receipt_requirements")
+    };
+    const policies = this.store.list("project_policy", 1e3, (policy) => policy.project_id === projectId).sort((left, right) => Number(right.version) - Number(left.version) || String(right.id).localeCompare(String(left.id)));
+    return policies[0] ?? {
+      id: null,
+      version: null,
+      enforcement: "advisory",
+      receipt_requirements: receiptRequirements(void 0, "default_receipt_requirements")
+    };
+  }
+  hostAdapterSave(args) {
+    const host = text(args.host, "host");
+    if (!(/* @__PURE__ */ new Set(["codex", "claude", "generic"])).has(host)) throw new Error(`Unsupported host adapter: ${host}`);
+    const operations = uniqueTextArray(args.allowed_operations, "allowed_operations");
+    if (operations.some((operation) => !HOST_OPERATIONS.has(operation))) throw new Error("allowed_operations contains an unsupported operation");
+    return this.saveVersioned("host_adapter", "host_adapter", { ...args, host, allowed_operations: operations }, ["name", "host"]);
+  }
+  hostAdapterDispatch(args) {
+    const adapter = this.store.get(
+      "host_adapter",
+      text(args.host_adapter_id, "host_adapter_id"),
+      args.host_adapter_version === void 0 ? void 0 : finiteInteger(args.host_adapter_version, "host_adapter_version", 1)
+    );
+    const route = this.store.get("route", text(args.route_id, "route_id"));
+    const action = this.routeNextAction(route);
+    const operation = String(action.kind);
+    if (!HOST_OPERATIONS.has(operation) || !adapter.allowed_operations.includes(operation)) {
+      throw new Error(`Host adapter cannot dispatch route action: ${operation}`);
+    }
+    const dispatch = this.store.create("host_dispatch", String(args.dispatch_id ?? id("host_dispatch")), {
+      host_adapter_id: adapter.id,
+      host_adapter_version: adapter.version,
+      route_id: route.id,
+      action,
+      status: "pending"
+    });
+    if (route.trial_id) this.trialTraceAppend({
+      trial_id: String(route.trial_id),
+      event_type: "host.dispatch",
+      source: "craft",
+      data: { dispatch_id: dispatch.id, host_adapter_id: adapter.id, action: operation }
+    });
+    return { dispatch, action };
+  }
+  hostAdapterReport(args) {
+    const dispatch = this.store.get("host_dispatch", text(args.dispatch_id, "dispatch_id"));
+    if (dispatch.status !== "pending") throw new Error("Host dispatch is already terminal");
+    const status = text(args.status, "status");
+    if (!(/* @__PURE__ */ new Set(["completed", "failed", "cancelled"])).has(status)) throw new Error(`Unsupported host dispatch status: ${status}`);
+    const summary = assertNoSecret(text(args.summary, "summary"), "summary");
+    const updated = this.store.save("host_dispatch", String(dispatch.id), { ...recordPayload(dispatch), status, summary });
+    const route = this.store.get("route", String(dispatch.route_id));
+    if (route.trial_id) this.trialTraceAppend({
+      trial_id: String(route.trial_id),
+      event_type: "host.report",
+      source: "host_reported",
+      data: { dispatch_id: dispatch.id, status, summary }
+    });
+    return { dispatch: updated, next_action: this.routeNextAction(route) };
+  }
+  routeReceiptRecord(args) {
+    const route = this.store.get("route", text(args.route_id, "route_id"));
+    if (route.workflow_id || ROUTE_TERMINAL.has(String(route.status))) throw new Error("Route receipts require an active safe route");
+    const action = this.routeNextAction(route);
+    const stageId = text(args.stage_id, "stage_id");
+    if (action.kind !== "complete_stage" || action.stage_id !== stageId) throw new Error(`Route next required stage is ${action.stage_id ?? "none"}`);
+    const kind = text(args.kind, "kind");
+    if (!ROUTE_RECEIPT_KINDS.has(kind)) throw new Error(`Unsupported route receipt kind: ${kind}`);
+    const status = text(args.status, "status");
+    if (!ROUTE_RECEIPT_STATUS.has(status)) throw new Error(`Unsupported route receipt status: ${status}`);
+    const command = assertNoSecret(text(args.command, "command"), "command");
+    const summary = assertNoSecret(text(args.summary, "summary"), "summary");
+    const receiptId = String(args.receipt_id ?? id("receipt"));
+    const artifact = this.artifactRegister({
+      artifact_id: `artifact_${receiptId}`,
+      kind: "route_receipt",
+      name: `${stageId}:${kind}`,
+      uri: args.uri === void 0 ? `craft://route-receipt/${receiptId}` : text(args.uri, "uri"),
+      producer_type: "host",
+      producer_id: args.host_adapter_id ?? null,
+      metadata: { route_id: route.id, stage_id: stageId, kind, status, command }
+    });
+    const evidence = this.evidenceRecord({
+      evidence_id: `evidence_${receiptId}`,
+      source_type: "program",
+      claim: summary,
+      confidence: status === "passed" ? "confirmed" : status === "failed" ? "rejected" : "bounded",
+      artifact_id: artifact.id,
+      metadata: { route_id: route.id, stage_id: stageId, kind, status, command }
+    });
+    const receipt = this.store.create("route_receipt", receiptId, {
+      route_id: route.id,
+      stage_id: stageId,
+      kind,
+      status,
+      command,
+      summary,
+      artifact_id: artifact.id,
+      evidence_id: evidence.id
+    });
+    return { receipt, artifact, evidence };
+  }
   defaultRoute(args) {
     const goal = text(args.goal, "goal");
     const title = args.title === void 0 ? goal.slice(0, 120) : text(args.title, "title");
@@ -8520,6 +8667,7 @@ var CraftService = class {
       throw new Error(`Unsupported route mode: ${mode}`);
     }
     const task = this.taskOpen({ title, goal, project_id: args.project_id ?? null }).task;
+    const policy = this.projectPolicy(args.project_id);
     const tokens = goal.toLowerCase().match(/[\p{L}\p{N}_-]+/gu) ?? [];
     const workflows = this.store.list("workflow", 1e3, (workflow2) => workflow2.lifecycle === "verified").map((workflow2) => ({ workflow: workflow2, score: tokens.filter((token) => JSON.stringify(workflow2).toLowerCase().includes(token)).length })).filter((candidate) => candidate.score > 0).sort((left, right) => right.score - left.score || String(left.workflow.id).localeCompare(String(right.workflow.id)));
     const workflow = mode === "safe_incremental_development" ? null : workflows[0]?.workflow ?? null;
@@ -8544,7 +8692,11 @@ var CraftService = class {
       stage_state: developmentPlan?.stages.map((stage) => ({ id: stage.id, status: "pending" })) ?? [],
       strategy_id: strategy?.id ?? null,
       strategy_version: strategy?.version ?? null,
-      trial_id: null
+      trial_id: null,
+      policy_id: policy.id,
+      policy_version: policy.version,
+      policy_enforcement: policy.enforcement,
+      receipt_requirements: policy.receipt_requirements
     });
     if (developmentPlan !== null) {
       const subject = strategy ?? route;
@@ -8569,6 +8721,7 @@ var CraftService = class {
       workflow,
       capabilities,
       development_plan: developmentPlan,
+      policy,
       executable: workflow !== null,
       next_action: this.routeNextAction(route)
     };
@@ -8623,10 +8776,16 @@ ${task.goal}`.toLowerCase();
     const strategyId = String(route.strategy_id);
     const strategyVersion = Number(route.strategy_version);
     const candidate = this.experienceCandidateList({}).experience_candidates.find((item) => item.subject_type === "route_strategy" && item.subject_id === strategyId && Number(item.subject_version) === strategyVersion);
-    const candidateTrialIds = candidate?.trial_ids ?? [];
-    const trialIds = candidateTrialIds.filter((trialId) => this.store.get("outcome", `outcome_${trialId}`).verdict === "passed");
-    if (trialIds.length < 2) throw new Error("Workflow proposals require two passed evidence-backed routes");
+    const trialIds = candidate?.passed_trial_ids ?? [];
+    if (candidate?.status !== "ready_for_workflow_draft" || trialIds.length < 2) {
+      throw new Error("Workflow proposals require two passed distinct routes with confirmed evidence");
+    }
     const evidenceIds = [...new Set(trialIds.flatMap((trialId) => this.store.get("outcome", `outcome_${trialId}`).evidence_ids))];
+    const duplicate = this.store.list("workflow", 1e3, (workflow2) => {
+      const derived = workflow2.derived_from;
+      return workflow2.lifecycle !== "deprecated" && derived?.route_strategy_id === strategyId && Number(derived.route_strategy_version) === strategyVersion;
+    });
+    if (duplicate.length) throw new Error("A non-deprecated Workflow draft already exists for this route strategy");
     const stepsInput = array(args.steps, "steps");
     if (!stepsInput.length) throw new Error("Workflow proposals require at least one step");
     const workflow = this.workflowSave({
@@ -8663,8 +8822,24 @@ ${task.goal}`.toLowerCase();
     const stageId = text(args.stage_id, "stage_id");
     const summary = text(args.summary, "summary");
     if (stageId !== stages[index].id) throw new Error(`Route next required stage is ${stages[index].id}`);
-    const artifactIds = array(args.artifact_ids ?? [], "artifact_ids").map((value) => text(value, "artifact_id"));
-    const evidenceIds = array(args.evidence_ids ?? [], "evidence_ids").map((value) => text(value, "evidence_id"));
+    const receiptIds = array(args.receipt_ids ?? [], "receipt_ids").map((value) => text(value, "receipt_id"));
+    if (new Set(receiptIds).size !== receiptIds.length) throw new Error("receipt_ids must be unique");
+    const receipts = receiptIds.map((receiptId) => this.store.get("route_receipt", receiptId));
+    if (receipts.some((receipt) => receipt.route_id !== route.id || receipt.stage_id !== stageId)) {
+      throw new Error("Route receipts must belong to the current route stage");
+    }
+    const requiredKinds = array(route.receipt_requirements?.[stageId] ?? [], "receipt requirements").map((kind) => String(kind));
+    if (route.policy_enforcement === "required" && requiredKinds.some((kind) => !receipts.some((receipt) => receipt.kind === kind && receipt.status === "passed"))) {
+      throw new Error(`Route stage requires required receipts: ${requiredKinds.join(", ")}`);
+    }
+    const artifactIds = [.../* @__PURE__ */ new Set([
+      ...array(args.artifact_ids ?? [], "artifact_ids").map((value) => text(value, "artifact_id")),
+      ...receipts.map((receipt) => String(receipt.artifact_id))
+    ])];
+    const evidenceIds = [.../* @__PURE__ */ new Set([
+      ...array(args.evidence_ids ?? [], "evidence_ids").map((value) => text(value, "evidence_id")),
+      ...receipts.map((receipt) => String(receipt.evidence_id))
+    ])];
     for (const artifactId of artifactIds) this.store.get("artifact", artifactId);
     for (const evidenceId of evidenceIds) this.store.get("evidence", evidenceId);
     const isFinal = index === stages.length - 1;
@@ -8689,7 +8864,7 @@ ${task.goal}`.toLowerCase();
       trial_id: trialId,
       event_type: "route_stage_completed",
       source: "host_reported",
-      data: { route_id: route.id, stage_id: stageId, summary },
+      data: { route_id: route.id, stage_id: stageId, summary, receipt_ids: receiptIds },
       artifact_ids: artifactIds,
       evidence_ids: evidenceIds
     });
@@ -8733,7 +8908,8 @@ ${task.goal}`.toLowerCase();
       route_id: route.id,
       stage_id: stages[index].id,
       constraints: stages[index].constraints,
-      expected_evidence: stages[index].evidence
+      expected_evidence: stages[index].evidence,
+      required_receipts: route.receipt_requirements?.[String(stages[index].id)] ?? []
     };
   }
   defaultRouteExecute(args) {
@@ -8767,19 +8943,35 @@ ${task.goal}`.toLowerCase();
         subject_id: String(trial.subject_id),
         subject_version: Number(trial.subject_version),
         trial_ids: [],
-        evidence_ids: []
+        passed_trial_ids: [],
+        task_ids: [],
+        evidence_ids: [],
+        confirmed_evidence_ids: []
       };
+      const confirmed = evidence.map((evidenceId) => this.store.get("evidence", String(evidenceId))).filter((item) => item.confidence === "confirmed" || item.confidence === "bounded").map((item) => String(item.id));
       group.trial_ids.push(String(trial.id));
+      group.task_ids.push(String(trial.task_id));
+      if (outcome.verdict === "passed" && confirmed.length) group.passed_trial_ids.push(String(trial.id));
       group.evidence_ids.push(...evidence.map((evidenceId) => String(evidenceId)));
+      group.confirmed_evidence_ids.push(...confirmed);
       groups.set(key, group);
     }
-    const experienceCandidates = [...groups.values()].filter((group) => group.trial_ids.length >= 2).map((group) => ({
-      ...group,
-      trial_ids: [...group.trial_ids].sort(),
-      evidence_ids: [...new Set(group.evidence_ids)].sort(),
-      status: "ready_for_pattern",
-      next_action: "Review applicability and create an Experience Pattern."
-    }));
+    const experienceCandidates = [...groups.values()].filter((group) => group.trial_ids.length >= 2).map((group) => {
+      const passedTrialIds = [...group.passed_trial_ids].sort();
+      const taskIds = [...new Set(group.task_ids)].sort();
+      const ready = passedTrialIds.length >= 2 && taskIds.length >= 2;
+      return {
+        ...group,
+        trial_ids: [...group.trial_ids].sort(),
+        passed_trial_ids: passedTrialIds,
+        task_ids: taskIds,
+        evidence_ids: [...new Set(group.evidence_ids)].sort(),
+        confirmed_evidence_ids: [...new Set(group.confirmed_evidence_ids)].sort(),
+        pass_rate: passedTrialIds.length / group.trial_ids.length,
+        status: ready ? "ready_for_workflow_draft" : "insufficient_confirmed_evidence",
+        next_action: ready ? "Review applicability and create an Experience Pattern or draft Workflow." : "Collect independent passed routes with confirmed or bounded evidence."
+      };
+    });
     return { experience_candidates: experienceCandidates };
   }
   taskOpen(args) {
@@ -9685,7 +9877,8 @@ var schemaFor = (name) => {
     "scores",
     "costs",
     "metrics",
-    "configuration"
+    "configuration",
+    "receipt_requirements"
   ].includes(name)) return { type: "object" };
   if ([
     "completed",
@@ -9704,7 +9897,9 @@ var schemaFor = (name) => {
     "requirements",
     "grade_ids",
     "pattern_ids",
-    "failure_modes"
+    "failure_modes",
+    "receipt_ids",
+    "allowed_operations"
   ].includes(name)) return { type: "array" };
   return { type: "string" };
 };
@@ -9761,6 +9956,43 @@ var TOOLS = [
     ["project_id"]
   ),
   tool(
+    "craft_project_policy_save",
+    "Save a versioned project policy that can require evidence-backed route receipts.",
+    ["project_id", "name"],
+    false,
+    ["policy_id", "enforcement", "receipt_requirements"]
+  ),
+  tool("craft_project_policy_get", "Read a project policy version.", ["policy_id"], true, ["version"]),
+  tool("craft_project_policy_list", "List project policies.", [], true, ["limit", "query"]),
+  tool(
+    "craft_route_receipt_record",
+    "Register a structured command receipt for the current safe route stage; secrets are rejected.",
+    ["route_id", "stage_id", "kind", "status", "command", "summary"],
+    false,
+    ["receipt_id", "uri", "host_adapter_id"]
+  ),
+  tool(
+    "craft_host_adapter_save",
+    "Save a versioned Host Adapter contract; it grants only listed route operations.",
+    ["name", "host", "allowed_operations"],
+    false,
+    ["host_adapter_id"]
+  ),
+  tool("craft_host_adapter_get", "Read a Host Adapter version.", ["host_adapter_id"], true, ["version"]),
+  tool("craft_host_adapter_list", "List Host Adapter contracts.", [], true, ["limit", "query"]),
+  tool(
+    "craft_host_adapter_dispatch",
+    "Lease only the next safe route action to a compatible Host Adapter.",
+    ["host_adapter_id", "route_id"],
+    false,
+    ["host_adapter_version", "dispatch_id"]
+  ),
+  tool(
+    "craft_host_adapter_report",
+    "Record a Host Adapter dispatch completion without fabricating route evidence.",
+    ["dispatch_id", "status", "summary"]
+  ),
+  tool(
     "craft_route_workflow_proposal_create",
     "Create only a draft Workflow from two or more passed evidence-backed safe routes; promotion still requires evaluation.",
     ["route_id", "name", "steps"],
@@ -9772,7 +10004,7 @@ var TOOLS = [
     "Record one required safe-plan stage with real evidence; the final stage records the route Outcome.",
     ["route_id", "stage_id", "summary"],
     false,
-    ["artifact_ids", "evidence_ids", "verdict"]
+    ["artifact_ids", "evidence_ids", "receipt_ids", "verdict"]
   ),
   tool("craft_task_open", "Create a durable task or resume one by ID.", [], false, ["task_id", "title", "goal", "project_id"]),
   tool("craft_task_list", "List durable tasks.", [], true, ["limit", "status", "project_id"]),
@@ -10023,6 +10255,15 @@ var McpServer = class {
       craft_default_route_execute: (a) => service.defaultRouteExecute(a),
       craft_default_route_resume: (a) => service.defaultRouteResume(a),
       craft_default_route_find: (a) => service.defaultRouteFind(a),
+      craft_project_policy_save: (a) => service.projectPolicySave(a),
+      craft_project_policy_get: (a) => service.get("project_policy", "policy_id", a),
+      craft_project_policy_list: (a) => service.list("project_policy", "policies", a),
+      craft_route_receipt_record: (a) => service.routeReceiptRecord(a),
+      craft_host_adapter_save: (a) => service.hostAdapterSave(a),
+      craft_host_adapter_get: (a) => service.get("host_adapter", "host_adapter_id", a),
+      craft_host_adapter_list: (a) => service.list("host_adapter", "host_adapters", a),
+      craft_host_adapter_dispatch: (a) => service.hostAdapterDispatch(a),
+      craft_host_adapter_report: (a) => service.hostAdapterReport(a),
       craft_route_workflow_proposal_create: (a) => service.routeWorkflowProposalCreate(a),
       craft_default_route_update: (a) => service.defaultRouteUpdate(a),
       craft_task_open: (a) => service.taskOpen(a),

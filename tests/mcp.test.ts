@@ -43,7 +43,7 @@ test("MCP negotiates protocols, lists tools, dispatches every handler, and repor
       craft_task_open: { title: "T", goal: "G" },
       craft_default_route: { title: "Route", goal: "G" },
       craft_artifact_register: { kind: "file", name: "a", uri: "file:///a", artifact_id: "artifact_a" },
-      craft_evidence_record: { source_type: "test", claim: "ok", evidence_id: "evidence_a" },
+      craft_evidence_record: { source_type: "test", claim: "ok", confidence: "confirmed", evidence_id: "evidence_a" },
       craft_workflow_save: { name: "W", workflow_id: "workflow_a" },
       craft_eval_suite_save: { name: "E", suite_id: "suite_a", cases: [{ case_id: "held", split: "held_out" }] },
       craft_agent_profile_save: { name: "A", role: "worker", host: "codex", model: "m", profile_id: "profile_a" },
@@ -188,6 +188,23 @@ test("MCP negotiates protocols, lists tools, dispatches every handler, and repor
       reason: "restore" });
     const defaultRoute = await call("craft_default_route", { title: "Run verified", goal: "W" });
     await call("craft_default_route_execute", { route_id: defaultRoute.route_id, project_root: root });
+    const projectPolicy = await call("craft_project_policy_save", { project_id: "mcp-project", name: "Strict MCP" });
+    await call("craft_project_policy_get", { policy_id: projectPolicy.id });
+    await call("craft_project_policy_list", {});
+    const adapter = await call("craft_host_adapter_save", { host_adapter_id: "adapter_mcp", name: "MCP host",
+      host: "generic", allowed_operations: ["complete_stage"] });
+    await call("craft_host_adapter_get", { host_adapter_id: adapter.id });
+    await call("craft_host_adapter_list", {});
+    const strictRoute = await call("craft_default_route", { goal: "mcp governed route", project_id: "mcp-project",
+      mode: "safe_incremental_development" });
+    const strictDispatch = await call("craft_host_adapter_dispatch", { host_adapter_id: adapter.id, route_id: strictRoute.route_id });
+    const strictDiff = await call("craft_route_receipt_record", { route_id: strictRoute.route_id, stage_id: "baseline",
+      kind: "git_diff", status: "passed", command: "git diff --check", summary: "clean" });
+    const strictTest = await call("craft_route_receipt_record", { route_id: strictRoute.route_id, stage_id: "baseline",
+      kind: "focused_test", status: "passed", command: "pnpm test", summary: "passed" });
+    await call("craft_default_route_update", { route_id: strictRoute.route_id, stage_id: "baseline", summary: "done",
+      receipt_ids: [(strictDiff.receipt as Record<string, unknown>).id, (strictTest.receipt as Record<string, unknown>).id] });
+    await call("craft_host_adapter_report", { dispatch_id: (strictDispatch.dispatch as Record<string, unknown>).id, status: "completed", summary: "done" });
     for (const [name, arguments_] of Object.entries({
       craft_task_checkpoint: { task_id: taskId, summary: "checkpoint" },
       craft_feedback_record: { task_id: taskId, corrected: "correction" },

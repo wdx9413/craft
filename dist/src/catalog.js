@@ -6,6 +6,26 @@ import { CraftStore } from "./store.js";
 function stableId(prefix, value) {
     return `${prefix}_${createHash("sha256").update(value).digest("hex").slice(0, 20)}`;
 }
+function metadataTerms(metadata) {
+    const aliases = metadata.aliases;
+    if (typeof aliases === "string")
+        return [aliases];
+    return Array.isArray(aliases) ? aliases.filter((value) => typeof value === "string") : [];
+}
+function rerank(query, item) {
+    const normalized = query.trim().toLowerCase();
+    const terms = normalized.split(/\s+/).filter(Boolean);
+    const name = String(item.name).toLowerCase();
+    const description = String(item.description).toLowerCase();
+    const aliases = metadataTerms(item.metadata).join(" ").toLowerCase();
+    const matchedTerms = terms.filter((term) => `${name}\n${description}\n${aliases}`.includes(term));
+    const exactName = name === normalized;
+    const exactDescription = description.includes(normalized);
+    const aliasMatch = aliases.includes(normalized);
+    const lexical = Number(item.score);
+    return { ...item, score: lexical + matchedTerms.length * 10 + Number(exactName) * 100 + Number(exactDescription) * 40 + Number(aliasMatch) * 60,
+        match: { matched_terms: matchedTerms, exact_name: exactName, exact_description: exactDescription, alias_match: aliasMatch } };
+}
 export function pathKey(path, platform = process.platform) {
     return platform === "win32" ? path.toLowerCase() : path;
 }
@@ -129,6 +149,7 @@ export class Catalog {
             }
             const skill = parseSkill(text, basename(resolve(path, "..")));
             this.store.save("capability", assetId, { ...skill, kind: "skill", source_id: id,
+                search_text: `${skill.body}\n${metadataTerms(skill.metadata).join("\n")}`,
                 relative_path, path: await realpath(path), digest, size: fileStat.size,
                 mtime_ms: fileStat.mtimeMs });
             if (previous)
@@ -160,8 +181,15 @@ export class Catalog {
         const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
         if (!terms.length)
             return [];
-        return this.store.searchCapabilities(terms, limit).map((item) => {
-            const { body: _body, metadata: _metadata, ...summary } = item;
+        const lexical = this.store.searchCapabilities(terms, 20);
+        const aliasFallback = lexical.length ? [] : this.store.list("capability", Number.MAX_SAFE_INTEGER, (item) => {
+            const aliases = metadataTerms(item.metadata).join(" ").toLowerCase();
+            return terms.every((term) => aliases.includes(term));
+        });
+        return [...lexical, ...aliasFallback].filter((item, index, values) => values.findIndex((candidate) => candidate.id === item.id) === index).map((item) => rerank(query, item))
+            .sort((left, right) => Number(right.score) - Number(left.score) || String(left.id).localeCompare(String(right.id)))
+            .slice(0, Math.min(Math.max(1, limit), 20)).map((item) => {
+            const { body: _body, metadata: _metadata, search_text: _searchText, ...summary } = item;
             return summary;
         });
     }

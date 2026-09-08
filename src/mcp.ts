@@ -9,10 +9,11 @@ const schemaFor = (name: string): JsonObject => {
     "grader_version", "policy_version", "lease_ttl_seconds"].includes(name)) return { type: "integer" };
   if (["score"].includes(name)) return { type: "number" };
   if (["inputs", "metadata", "policy", "dimensions", "environment", "budget", "data", "scores",
-    "costs", "metrics", "configuration"].includes(name)) return { type: "object" };
+    "costs", "metrics", "configuration", "receipt_requirements"].includes(name)) return { type: "object" };
   if (["completed", "pending", "decisions", "artifacts", "steps", "cases", "capabilities",
     "allowed_side_effects", "approved_side_effects", "nodes", "artifact_ids", "evidence_ids",
-    "trial_ids", "requirements", "grade_ids", "pattern_ids", "failure_modes"].includes(name)) return { type: "array" };
+    "trial_ids", "requirements", "grade_ids", "pattern_ids", "failure_modes", "receipt_ids",
+    "allowed_operations"].includes(name)) return { type: "array" };
   return { type: "string" };
 };
 const objectSchema = (required: string[] = [], optional: string[] = []): JsonObject => ({ type: "object",
@@ -40,10 +41,24 @@ export const TOOLS: Tool[] = [
   tool("craft_default_route_resume", "Resume a durable default route and return only its next safe action.", ["task_id"], true),
   tool("craft_default_route_find", "Find one uniquely matching active default route for a natural-language continuation; never guess on a tie.",
     ["query"], true, ["project_id"]),
+  tool("craft_project_policy_save", "Save a versioned project policy that can require evidence-backed route receipts.",
+    ["project_id", "name"], false, ["policy_id", "enforcement", "receipt_requirements"]),
+  tool("craft_project_policy_get", "Read a project policy version.", ["policy_id"], true, ["version"]),
+  tool("craft_project_policy_list", "List project policies.", [], true, ["limit", "query"]),
+  tool("craft_route_receipt_record", "Register a structured command receipt for the current safe route stage; secrets are rejected.",
+    ["route_id", "stage_id", "kind", "status", "command", "summary"], false, ["receipt_id", "uri", "host_adapter_id"]),
+  tool("craft_host_adapter_save", "Save a versioned Host Adapter contract; it grants only listed route operations.",
+    ["name", "host", "allowed_operations"], false, ["host_adapter_id"]),
+  tool("craft_host_adapter_get", "Read a Host Adapter version.", ["host_adapter_id"], true, ["version"]),
+  tool("craft_host_adapter_list", "List Host Adapter contracts.", [], true, ["limit", "query"]),
+  tool("craft_host_adapter_dispatch", "Lease only the next safe route action to a compatible Host Adapter.",
+    ["host_adapter_id", "route_id"], false, ["host_adapter_version", "dispatch_id"]),
+  tool("craft_host_adapter_report", "Record a Host Adapter dispatch completion without fabricating route evidence.",
+    ["dispatch_id", "status", "summary"]),
   tool("craft_route_workflow_proposal_create", "Create only a draft Workflow from two or more passed evidence-backed safe routes; promotion still requires evaluation.",
     ["route_id", "name", "steps"], false, ["workflow_id", "description", "inputs"]),
   tool("craft_default_route_update", "Record one required safe-plan stage with real evidence; the final stage records the route Outcome.",
-    ["route_id", "stage_id", "summary"], false, ["artifact_ids", "evidence_ids", "verdict"]),
+    ["route_id", "stage_id", "summary"], false, ["artifact_ids", "evidence_ids", "receipt_ids", "verdict"]),
   tool("craft_task_open", "Create a durable task or resume one by ID.", [], false, ["task_id", "title", "goal", "project_id"]),
   tool("craft_task_list", "List durable tasks.", [], true, ["limit", "status", "project_id"]),
   tool("craft_task_checkpoint", "Persist task progress, evidence references, and pending work.", ["task_id", "summary"], false, ["completed", "pending", "decisions", "artifacts", "status", "source"]),
@@ -164,6 +179,15 @@ export class McpServer {
       craft_capability_search: (a) => service.capabilitySearch(a), craft_capability_get: (a) => service.capabilityGet(a),
       craft_default_route: (a) => service.defaultRoute(a), craft_default_route_execute: (a) => service.defaultRouteExecute(a),
       craft_default_route_resume: (a) => service.defaultRouteResume(a), craft_default_route_find: (a) => service.defaultRouteFind(a),
+      craft_project_policy_save: (a) => service.projectPolicySave(a),
+      craft_project_policy_get: (a) => service.get("project_policy", "policy_id", a),
+      craft_project_policy_list: (a) => service.list("project_policy", "policies", a),
+      craft_route_receipt_record: (a) => service.routeReceiptRecord(a),
+      craft_host_adapter_save: (a) => service.hostAdapterSave(a),
+      craft_host_adapter_get: (a) => service.get("host_adapter", "host_adapter_id", a),
+      craft_host_adapter_list: (a) => service.list("host_adapter", "host_adapters", a),
+      craft_host_adapter_dispatch: (a) => service.hostAdapterDispatch(a),
+      craft_host_adapter_report: (a) => service.hostAdapterReport(a),
       craft_route_workflow_proposal_create: (a) => service.routeWorkflowProposalCreate(a),
       craft_default_route_update: (a) => service.defaultRouteUpdate(a),
       craft_task_open: (a) => service.taskOpen(a), craft_task_list: (a) => service.taskList(a),

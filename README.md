@@ -19,7 +19,7 @@ Craft 的核心对象和协议不绑定某个模型或行业。它既能通过 M
 ## 当前版本已经实现
 
 - 多能力目录管理、真实路径解析、目录引用/符号链接处理和增量扫描。
-- Skill frontmatter 解析、SQLite FTS 候选检索和按需读取；搜索结果不携带完整正文。
+- Skill frontmatter 解析、SQLite 关键词候选检索和按需读取；搜索结果不携带完整正文。当前 Node 无 FTS5 时使用持久化内容的关键词排序降级。
 - 持久化任务、Checkpoint、显式反馈、Artifact 与 Evidence。
 - 版本化 Workflow、输入替换、路径边界、敏感信息脱敏和副作用授权。
 - 确定性命令、文件/JSON 断言、覆盖率门禁，以及结构化执行回执。
@@ -29,7 +29,7 @@ Craft 的核心对象和协议不绑定某个模型或行业。它既能通过 M
 - 版本化 Grader、多来源 Grade 和 Signoff Policy；模型判断不会被记录成程序证明。
 - 同评测集版本对比：在 Suite 精确版本、分区、Subject 类型和 Case 集合一致时，聚合比较 Workflow、Agent Profile 或 Harness Configuration 的质量、成本、耗时与失败类型。
 - 经验模式与 Skill 候选：从多个 Trial、Outcome 与 Evidence 引用提炼适用条件、成功策略和失败模式；候选复用现有 held-out Eval/Signoff Gate，只有已验证版本才可在显式授权、摘要校验和本地备份保护下写入既有 `SKILL.md`，且可安全回滚。
-- 默认编排入口：复杂目标自动优先选择相关的 `verified` Workflow；无匹配时创建可续接的安全 Host 路线，每阶段记录真实证据和检查点，才可能形成经验候选。
+- 默认编排入口：复杂目标自动优先选择相关的 `verified` Workflow；无匹配时创建可续接的安全 Host 路线。项目可启用 Policy，将每阶段的 Git 基线、测试、覆盖率和 Review 回执变成服务端门禁；Host Adapter 只领取声明支持的下一安全动作。
 - 安全增量研发 Kit：固定“Git 基线与原逻辑测试 → 最小改动 → 测试/覆盖率 → Diff 审查”的顺序，要求每个结论附带命令或产物证据。
 - 可恢复基础编排：Lease 有 TTL 和续租；显式幂等键可安全重试提交；声明的预算耗尽后会阻断未开始节点，同时保留已发生的成本。
 - MCP 服务，以及 Codex、Claude Code、DeepSeek Harness 和通用 MCP Host 接入。
@@ -95,7 +95,7 @@ pnpm test
 
 当前工具使用 `craft_` 前缀，例如 `craft_source_add`、`craft_capability_search`、`craft_task_checkpoint`、`craft_workflow_trial_run`、`craft_evaluation_run_aggregate` 和 `craft_evaluation_compare`，避免与宿主或其他 MCP 冲突。
 
-日常由 Craft Skill 自动走高层入口：对复杂目标先调用 `craft_default_route`，无需用户重复“优先已验证 Workflow”等编排话术。它会创建 Task、优先选中匹配的已验证 Workflow，并返回少量候选能力；只有返回 `next_action.kind=execute_verified_workflow` 时，才使用 `craft_default_route_execute` 运行该精确版本并自动归档 Trial/Trace/Outcome。无匹配时默认返回安全增量研发计划；Host 每完成一个阶段就通过 `craft_default_route_update` 写入真实证据和检查点，最终 Review 记录 Outcome。跨会话可直接说“继续上次的 X”：`craft_default_route_find` 只恢复唯一活动路线，并列时绝不猜测；已知 `task_id` 才使用 `craft_default_route_resume`。同一策略积累两条以上已通过路线后，Host 可用 `craft_route_workflow_proposal_create` 抽象出带 Evidence 引用的 `draft` Workflow，仍必须通过既有评测门禁。短问答和一次性读取不创建 Craft 路线。
+日常由 Craft Skill 自动走高层入口：对复杂目标先调用 `craft_default_route`，无需用户重复“优先已验证 Workflow”等编排话术。它会创建 Task、优先选中匹配的已验证 Workflow，并返回少量候选能力；只有返回 `next_action.kind=execute_verified_workflow` 时，才使用 `craft_default_route_execute` 运行该精确版本并自动归档 Trial/Trace/Outcome。无匹配时默认返回安全增量研发计划；严格项目先用 `craft_project_policy_save` 固化回执要求，Host 在每阶段通过 `craft_route_receipt_record` 写入真实命令结果后，才能用 `craft_default_route_update` 推进。`craft_host_adapter_dispatch` 只把下一安全动作交给已声明支持它的 Adapter。跨会话可直接说“继续上次的 X”：`craft_default_route_find` 只恢复唯一活动路线，并列时绝不猜测；已知 `task_id` 才使用 `craft_default_route_resume`。同一策略只有积累两条不同 Task 的通过路线、且 Evidence 至少为 confirmed/bounded 后，才可生成一个带溯源的 `draft` Workflow，仍必须通过既有评测门禁。短问答和一次性读取不创建 Craft 路线。
 
 ## 数据目录
 
