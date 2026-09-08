@@ -34,7 +34,7 @@ Vector search is optional rather than required. A future provider interface can 
 
 ## Install
 
-Node.js 24+ is required. Python is not required.
+Node.js 23+ is required. Python is not required.
 
 ```bash
 npm install -g github:wdx9413/craft

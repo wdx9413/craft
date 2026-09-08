@@ -1,6 +1,6 @@
 {
   "name": "craft-agent-harness",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Cross-platform capability, workflow, evidence, and agent harness",
   "type": "module",
   "bin": {
@@ -12,7 +12,7 @@
     "clean": "node --experimental-strip-types scripts/clean.ts",
     "build": "pnpm run clean && pnpm run build:core && pnpm run build:plugin && pnpm run build:deepseek",
     "build:core": "node node_modules/typescript/bin/tsc -p tsconfig.build.json",
-    "build:plugin": "esbuild bin/craft-mcp.ts --bundle --platform=node --format=cjs --target=node24 --outfile=dist/plugin/craft-mcp.cjs",
+    "build:plugin": "esbuild bin/craft-mcp.ts --bundle --platform=node --format=cjs --target=node23 --outfile=dist/plugin/craft-mcp.cjs",
     "build:deepseek": "node node_modules/typescript/bin/tsc -p adapters/deepseek-harness/tsconfig.json",
     "prepack": "pnpm run build",
     "test:smoke": "node dist/src/cli.js --help",
@@ -22,7 +22,7 @@
     "typecheck": "node node_modules/typescript/bin/tsc --noEmit"
   },
   "engines": {
-    "node": ">=24"
+    "node": ">=23"
   },
   "files": [
     "bin",
@@ -55,7 +55,7 @@
     "provenance": true
   },
   "devDependencies": {
-    "@types/node": ">=24 <26",
+    "@types/node": ">=23 <26",
     "esbuild": "^0.28.2",
     "typescript": ">=5.8 <7"
   },

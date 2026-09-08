@@ -6,7 +6,7 @@ import { addCosts, dispatchNodes, normalizeNodes, orchestrationOutcome, planStat
   type PlanNode } from "./orchestration.ts";
 import { aggregateEvaluation, compareEvaluationAggregates, type EvaluationAggregate } from "./evaluation.ts";
 
-export const VERSION = "0.6.0";
+export const VERSION = "0.6.1";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const WORKFLOW_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);

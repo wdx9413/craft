@@ -13,7 +13,7 @@ importers:
         version: 2.9.0
     devDependencies:
       '@types/node':
-        specifier: '>=24 <26'
+        specifier: '>=23 <26'
         version: 25.9.5
       esbuild:
         specifier: ^0.28.2

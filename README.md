@@ -35,7 +35,7 @@ Craft 的核心对象和协议不绑定某个模型或行业。它既能通过 M
 
 ## 安装
 
-要求 Node.js 24 或更高版本。用户不需要安装 Python。
+要求 Node.js 23 或更高版本。用户不需要安装 Python。
 
 从 GitHub 安装 CLI：
 

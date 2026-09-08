@@ -29,7 +29,7 @@ Codex / Claude / DSH / CLI / future desktop
               SQLite + ~/.craft_data
 ```
 
-运行时统一使用 TypeScript 和 Node.js 24+。SQLite 使用 Node 内置驱动，不需要额外数据库服务。
+运行时统一使用 TypeScript 和 Node.js 23+。SQLite 使用 Node 内置驱动；在不带 FTS5 的运行时自动降级为关键词检索。
 
 ## 能力发现
 

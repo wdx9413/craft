@@ -3,7 +3,7 @@
 This Cordis bundle exposes Craft's MCP tools through one `craft_call` tool while
 keeping Craft's TypeScript core and `~/.craft_data` store independent of DSH.
 
-Prerequisites: Node.js 24+ and DeepSeek Harness. Craft is resolved as an npm package.
+Prerequisites: Node.js 23+ and DeepSeek Harness. Craft is resolved as an npm package.
 
 Install the repository bundle directly from Git, preferably pinned to a tag or
 commit:
