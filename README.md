@@ -4,9 +4,21 @@
 
 ## 简版产品介绍
 
-Craft 是面向 AI Agent 工作的能力管理与验证系统。它让 Agent 能从大量能力中找到合适的一小部分，跨会话持续完成长任务，用证据而不是自述确认结果，并把成功路径沉淀为可评测、可回滚的 Workflow。
+Craft 的产品目标是一个人和 AI 共同工作的数字工作台：理解目标、组织能力、执行任务、维护成果，并从经过验证的工作中积累经验。
 
-Craft 的核心对象和协议不绑定某个模型或行业。它既能通过 MCP、插件或 Adapter 为 Codex、Claude Code、DeepSeek Harness 等宿主提供能力，也能作为未来独立 Agent 和 Supervisor 产品的基础。研发、AI 视频、销售、教育和内容创作可以共享同一套任务、产物、证据、工作流和评测内核，再用各自的 Skill、Validator 和领域 Kit 扩展。
+产品面向视频、销售、教育、内容创作、研发等各行业工作者。你可以提出目标、组织资料与工具、一起完成和修改成果，并把有效方法留作下次使用；专业对象和界面由领域扩展提供，不要求所有用户采用编程工作方式。
+
+当前 v0.11.20 可用的是 TypeScript/Node.js CLI、插件内核、本地维护 Worker、回环 Workbench 和本地 Supervisor。能力目录可以作为多个 Source Mount 保留；相同内容的镜像只形成一个逻辑能力供检索选择，同时保留所有来源、实际选中的实例和优先级。同一声明身份而内容不同的能力会形成显式冲突，绝不静默覆盖。Domain Action 目前已覆盖 Contract 锁定、Schema 校验、一次性授权和证据化报告；自动派发到 Host、Domain Kit 原子应用、完整桌面壳、跨设备同步和自动经验编译仍是规划。
+
+Sandbox 能力采用“声明、诊断、黑盒一致性验证、精确版本票据、观察回执”协议，可由本地进程、容器或远程执行平台实现。当前仓库提供有限本地适配和首个 Docker CLI 驱动：普通 Probe 不授予可信状态；只有禁网、只读根、Workspace 可写、环境无常见 Secret、超时取消和无残留容器全部通过，Profile 才能成为 `verified`。是否安装 Docker、Daemon 安全配置与各平台内核隔离仍由部署方验收，不能把一致性测试解释为完整安全认证。
+
+| 产品支柱 | 核心能力（目标） |
+| --- | --- |
+| 工作与协作 | 理解目标、共享工作空间、可编辑成果、能力与上下文 |
+| 执行与保障 | 规划调度、工具连接、沙箱与权限、暂停恢复、验证与观察 |
+| 学习与改进 | **评测与实验**、记忆与知识、学习适应、编译与复用 |
+
+完整范围与实施状态见 [产品架构](docs/product/architecture.zh-CN.md) 和 [路线](docs/product/roadmap.zh-CN.md)。
 
 ## 核心理念
 
@@ -15,6 +27,7 @@ Craft 的核心对象和协议不绑定某个模型或行业。它既能通过 M
 - 验证方式显式化：程序、模型、人工和业务结果使用不同 Grader；Signoff Policy 决定一个精确版本是否达到复用标准。
 - Workflow 来自真实使用：用户可把成功路径保存为版本化模板，再经过回放和评测逐步提升，而不是依赖平台预置全部行业流程。
 - 数据属于用户：默认写入 `~/.craft_data`，不污染业务项目。API Key 只保存环境变量名，不保存密钥值。
+- 可修改、可掌控：目标体验包括局部编辑、版本对比与执行控制；沙箱按实际后端能力提供保证，文件恢复与外部操作补偿分别处理。
 
 ## 当前版本已经实现
 
@@ -33,8 +46,25 @@ Craft 的核心对象和协议不绑定某个模型或行业。它既能通过 M
 - 默认编排入口：复杂目标自动优先选择相关的 `verified` Workflow；无匹配时创建可续接的安全 Host 路线。项目可启用 Policy，将每阶段的 Git 基线、测试、覆盖率和 Review 回执变成服务端门禁；Host Adapter 只领取声明支持的下一安全动作。
 - 安全增量研发 Kit：固定“Git 基线与原逻辑测试 → 最小改动 → 测试/覆盖率 → Diff 审查”的顺序，要求每个结论附带命令或产物证据。
 - 可恢复基础编排：Lease 有 TTL 和续租；显式幂等键可安全重试提交；声明的预算耗尽后会阻断未开始节点，同时保留已发生的成本。
+- 持久恢复队列：有界扫描到期等待、未知 Effect/补偿和失败 Saga，生成稳定的优先级工作项；跨平台 Worker 按能力短租领取，过期自动回收，完成回执必须通过来源状态和 Evidence 校验。
+- 授权主动触发：签名 Webhook Subscription 提供 HMAC 验签、重放防御、确定性过滤、节流、白名单字段投影和资源预算预留；原始请求体不落库，投影数据没有执行权限。
+- 受控投机准备：授权事件可以生成固定输入摘要、预算和 TTL 的索引、总结、草稿或元数据候选；Worker 使用短 Lease，成果必须带 Artifact 与 Evidence。候选全程自动记录 Trial、Trace、实际成本和 Outcome，人工修改沉淀为偏好信号，但不会冒充程序证明、直接晋级或自动执行外部写操作。
+- 对象级成果血缘：用精确版本连接 Source、Output、Workflow/Capability 转换器和 Evidence，支持段落、单元格、镜头等 Locator、上下游影响追溯、环检测及新版本陈旧提示，不复制业务正文。
+- 长任务冻结与恢复：把 Task、Workspace 修订、Wait、Runtime 指纹、预算和恢复项固定为不含原始对话及凭据的最小 Snapshot；恢复前区分继续等待、直接续接或重新规划，并用短 Lease 和 Evidence 防止并发或虚假恢复。
+- 分级自主权：按动作配置自动、仅通知、单人审批或多人联签；授权绑定精确任务、目标、请求摘要和有效期，并且只能消费一次。
+- 统一 Host 门禁：External Effect、Runtime Adapter 与 Computer Use Operation 在派发时原子消费授权；子任务也携带自己的稳定动作身份。
+- 动态契约推导：用多次脱敏观测形成 API、MCP 或 GUI Contract 候选，经过人工修订、沙箱证明和证据 Trial 后才成为 verified；版本 Diff 识别 breaking change，独立批准后才能发布 Capability Adapter，并可按精确版本安全撤回。
+- 能力灰度：对新旧 Capability 做稳定双臂分流，达到最小样本后比较失败、成本、时延和人工修正，退化时停止候选流量并给出回滚建议。
+- 能力共享：把已验证 Capability 变成可人工审查和脱敏的版本化能力包，供个人、团队或组织精确订阅，并支持发布方统一撤销。
+- Hub 增量目录：通过固定 Ed25519 公钥验证分页目录，以单调游标和前页摘要阻止丢页及分叉；查询只走本地元数据索引，不扫描一万个远程 Skill。
+- 按需能力落地：只在选中候选后按目录摘要接收有限文件，写入 `~/.craft_data/cache` 隔离区；路径、体积、原生二进制、疑似凭据和 lifecycle scripts 经过门禁及人工审查，最终只登记成待评测 candidate。
+- 候选能力认证：精确绑定 held-out Evaluation、每个 Trial 的 Sandbox Receipt、Evidence、program Grade 与 Signoff；只有无漂移且由独立角色批准的版本才能原子晋级 verified，认证本身不授予执行权。
+- 持续供应链治理：来源停用、条目撤回、摘要漂移或高危安全公告会原子阻断认证资产、使精确 Activation Profile 失效，并投影可恢复的再认证工作。
+- 本地维护 Worker：以单实例前台进程或一次性 Tick 回收过期 Lease、清理过期候选、复核 Hub 供应链并刷新 Recovery Queue；只维护控制面，不擅自执行用户任务。
 - MCP 服务，以及 Codex、Claude Code、DeepSeek Harness 和通用 MCP Host 接入。
 - Windows、macOS、Linux 共用 TypeScript/Node.js 运行时；不依赖 Python。
+
+v0.9.10–v0.10.2 还提供声明范围内的文件快照、本地事务记录、受限 TypeScript 脚本候选和 Host 执行交接。v0.10.0 新增共享结构化工作对象；v0.10.1 用字段级 ChangeSet 阻止同字段覆盖；v0.10.2 新增持久等待、幂等资源结算、Fallback Contract 与 Effect/Saga Kernel。外部写入预声明请求、幂等键、审批和可选补偿；未知结果可先通过预授权只读 GET 对账，未映射状态仍需人工消歧。补偿 Adapter 只执行精确授权且预先冻结解释契约，网络模糊保持未知，补偿失败不会伪装成回滚成功。候选操作尚不是自动从原始轨迹提炼程序；平台与安全缺口见 [执行策略](docs/technical/modules/execution-policy.md)。
 
 向量检索不是必需依赖。短期本地库优先使用零配置检索；需要时可显式配置兼容 OpenAI Embeddings 协议的服务，并与关键词结果融合。
 
@@ -65,7 +95,7 @@ pnpm test
 2. Supervisor（规划形态）：未来由 Craft 调度 Codex、Claude Code 或其他 Host；当前版本已有可并发领取、依赖阻断和失败换路的编排状态机，但还没有自动 Host Driver。
 3. Provider（当前可用）：Craft 通过 MCP/插件提供能力发现、任务延续、Workflow、证据与基础编排能力。
 
-首次运行 `craft init` 会选择模式。配置、SQLite 数据库、索引、日志和备份都位于 `~/.craft_data`；也可用 `CRAFT_DATA_DIR` 指定另一目录。
+首次运行 `craft init` 目前仍会选择模式。规划中的普通用户入口将从目标和资料开始，把技术模式移到高级设置，此引导尚未改造。配置、SQLite 数据库、索引、日志和备份都位于 `~/.craft_data`；也可用 `CRAFT_DATA_DIR` 指定另一目录。
 
 ## 接入 Codex
 
@@ -99,7 +129,7 @@ pnpm test
 
 v0.9.9 的默认 `craft-mcp` 是精简核心面：路由、能力检索、Task/Evidence、Activation Profile、已签发调用和状态查询，避免把全部工具同时塞进模型上下文。历史集成可显式改用 `craft-mcp-full`，它保留全部旧 `craft_*` 工具。Craft 只生成 Activation Profile 与 profile-bound、会过期的 `call_id`；Host 决定是否实际启停 MCP Server，不能通过通用入口绕过 Policy。
 
-执行按风险分级：读取和规划可在普通 Host 上运行；本地生成代码写入才要求 `LocalIsolatedAdapter` 的网络拒绝隔离；外部写入需审批；无补偿的破坏性动作和未接入受信任 Credential Broker 的调用会失败关闭。Windows 因此可以正常做读/规划和审批流；缺少等价隔离器只会阻止高风险动作的自主运行。
+执行按风险分级：普通读取和规划可由 Host 执行；策略要求部分本地生成代码写入使用隔离适配；外部写入需审批，缺少补偿或受信任凭据条件的相关请求被阻断。策略决定不等于后端已经安全隔离：当前文件访问限制、环境凭据清洗、资源/进程控制和 Windows 等价后端仍待补齐，详见 [沙箱边界](docs/technical/modules/execution-policy.md)。
 
 日常由 Craft Skill 自动走高层入口：对复杂目标先调用 `craft_default_route`，无需用户重复“优先已验证 Workflow”等编排话术。它会创建 Task、优先选中匹配的已验证 Workflow，并返回少量候选能力；只有返回 `next_action.kind=execute_verified_workflow` 时，才使用 `craft_default_route_execute` 运行该精确版本并自动归档 Trial/Trace/Outcome。无匹配时默认返回安全增量研发计划；严格项目先用 `craft_project_policy_save` 固化回执要求，Host 在每阶段通过 `craft_route_receipt_record` 写入真实命令结果后，才能用 `craft_default_route_update` 推进。`craft_host_adapter_dispatch` 只把下一安全动作交给已声明支持它的 Adapter。跨会话可直接说“继续上次的 X”：`craft_default_route_find` 只恢复唯一活动路线，并列时绝不猜测；已知 `task_id` 才使用 `craft_default_route_resume`。同一策略只有积累两条不同 Task 的通过路线、且 Evidence 至少为 confirmed/bounded 后，才可生成一个带溯源的 `draft` Workflow，仍必须通过既有评测门禁。短问答和一次性读取不创建 Craft 路线。
 

@@ -21,6 +21,7 @@ type Options = {
     helperAvailable?: (path: string) => boolean;
     runner?: Runner;
 };
+export declare function processExitCode(code: number | null): number;
 export declare function runLocalProcess(request: JsonObject): Promise<{
     code: number;
     stdout: string;

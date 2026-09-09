@@ -4,9 +4,19 @@
 
 ## Product in brief
 
-Craft is a capability-management and verification system for AI Agent work. It helps an Agent retrieve a small relevant capability set, continue long tasks across sessions, verify results with evidence instead of self-reporting, and turn successful paths into evaluable and rollback-safe Workflows.
+Craft aims to be a shared digital workbench for people and AI: understand goals, organize capabilities, execute tasks, maintain results, and learn from verified work.
 
-Its core objects and protocols are not tied to one model or industry. Craft can provide capabilities to Codex, Claude Code, DeepSeek Harness, and other hosts through MCP, plugins, or adapters, while also forming the base of future standalone Agent and Supervisor products. Software engineering, AI video, sales, education, and content workflows share the same task, artifact, evidence, workflow, and evaluation kernel, then extend it with domain Skills, validators, and Kits.
+The product is intended for workers across video, sales, education, content creation, software engineering, and other fields. Domain extensions provide appropriate objects, views, tools, and acceptance criteria; users should not need programming knowledge to use the future workbench.
+
+Version 0.11.20 keeps local directories as multiple Source Mounts while indexing identical content as one logical capability. Search returns one selected instance with provenance and priority, while same declared identity with divergent content is an explicit conflict rather than a silent override. Domain Actions currently provide Contract locking, Schema validation, one-time authorization, and evidence-backed reporting; automatic Host dispatch, atomic Domain Kit application, packaged desktop distribution, cross-device synchronization, and automatic experience compilation remain planned.
+
+| Product pillar | Target capabilities |
+| --- | --- |
+| Work and collaboration | Goals, shared workspace, editable results, capabilities and context |
+| Execution and assurance | Planning, tools, sandboxing and permissions, recovery, verification and observation |
+| Learning and improvement | **Evaluation and experiments**, knowledge and memory, adaptation, compilation and reuse |
+
+See the [product architecture (Chinese)](docs/product/architecture.zh-CN.md) and [roadmap (Chinese)](docs/product/roadmap.zh-CN.md) for scope and implementation status.
 
 ## Principles
 
@@ -15,11 +25,12 @@ Its core objects and protocols are not tied to one model or industry. Craft can 
 - Explicit verification: program, model, human, and operational results use distinct Graders; a Signoff Policy decides whether an exact version is reusable.
 - Workflows evolve from use: version successful paths, replay them, and improve them through evaluations.
 - User-owned data: store data under `~/.craft_data` by default. Persist credential environment-variable names, never secret values.
+- Editable and controllable work: the target experience includes partial edits, version comparison, and execution controls. Guarantees depend on the execution backend; file restoration and external compensation are distinct operations.
 
 ## Implemented
 
 - Multi-directory capability sources, real-path resolution, linked directories, and incremental scans.
-- Skill frontmatter parsing, SQLite FTS candidate retrieval, and on-demand reads; search results omit full bodies.
+- Skill frontmatter parsing, SQLite lexical candidate retrieval with a keyword-ranking fallback when FTS5 is unavailable, and on-demand reads; search results omit full bodies.
 - Durable tasks, checkpoints, feedback, artifacts, and evidence.
 - Default routing for substantial work: verified Workflows execute only at their exact selected version; unmatched goals become resumable, evidence-backed safe host plans.
 - Versioned Workflows with inputs, safe paths, redaction, side-effect approval, deterministic commands, assertions, coverage gates, and receipts.
@@ -30,9 +41,25 @@ Its core objects and protocols are not tied to one model or industry. Craft can 
 - Same-benchmark comparisons for Workflow, Agent Profile, and Harness Configuration versions, with aggregate quality, cost, duration, and failure-type deltas. Comparability requires the exact suite version, split, subject type, and case set.
 - Experience patterns and Skill proposals: derive applicability, successful strategies, failure modes, and Evidence references from multiple Trials and Outcomes. Proposals reuse the existing held-out Eval/Signoff Gate; only a verified version can write an existing `SKILL.md` with explicit approval, digest protection, local backup, and safe rollback.
 - MCP plus Codex, Claude Code, DeepSeek Harness, and generic MCP integration surfaces.
+- A persistent recovery queue that projects due waits, ambiguous effects and failed Sagas into bounded priority work; compatible workers use expiring leases and evidence-backed stale-state checks.
+- Signed webhook subscriptions with HMAC verification, replay defense, deterministic filtering, throttling, allowlisted scalar projection, and optional resource-budget reservation; raw request bodies are not persisted and projected data has no execution authority.
+- Controlled speculative preparation for indexing, summaries, drafts, and metadata prefetch: candidates pin input fingerprints, policy versions, budgets, and TTLs; workers use short leases and ready results require Artifact and Evidence references. Trial, Trace, actual cost, and Outcome are captured automatically; human edits become preference signals but cannot masquerade as program proof, promote a policy by themselves, or authorize external writes.
+- Object-level provenance: immutable exact-version links connect sources, outputs, Workflow/Capability transforms, and Evidence. Optional locators support paragraphs, cells, shots, or domain objects; bounded upstream/downstream traversal, cycle rejection, and newer-version warnings avoid copying business content into the graph.
+- Capability canaries use sticky baseline/candidate routing and evidence-backed quality, cost, latency, and human-correction samples. Regressions stop new candidate traffic and recommend rollback; promotion and rollback are never silently executed.
+- Capability federation packages healthy verified assets without raw trajectories, supports human redaction and independent publication, pins consumers to exact release/asset versions, and fails closed after revocation. Remote hubs and enterprise identity remain adapter work.
+- Hub Sync verifies paginated metadata catalogs against pinned Ed25519 keys, advances a hash-linked monotonic cursor atomically, propagates withdrawals, and searches only the local catalog instead of scanning every remote Skill. Network fetching and content materialization remain adapter work.
+- On-demand materialization verifies a bounded package against the signed catalog digest, writes only safe relative files into `~/.craft_data/cache`, blocks critical findings, gates high-risk findings on security review, and registers only a non-executable candidate asset.
+- Candidate certification binds an exact materialized asset to held-out evaluation, per-Trial Sandbox receipts, evidence-backed program Grades, and Signoff. Independent promotion atomically marks an unchanged asset verified but still grants no execution authority.
+- Continuous supply-chain governance propagates source disablement, catalog withdrawal, digest drift, and high-risk advisories into blocked assets, invalid Activation Profiles, and recoverable recertification work.
+- A single-instance local maintenance worker reclaims expired leases, expires speculative candidates, reconciles Hub supply-chain state, and refreshes recovery work without silently executing user tasks.
+- Long-task dehydration and hydration: freeze minimal references to Task, Workspace revision, Wait, Runtime fingerprints, budgets, and recovery work without raw conversation context or credentials. Revalidation distinguishes still waiting, resume, and replan; short Host leases and Evidence-backed completion prevent concurrent or fabricated restoration.
 - One TypeScript/Node.js runtime on Windows, macOS, and Linux, with no Python dependency.
 
-Vector search is optional rather than required. A future provider interface can combine compatible embedding endpoints with zero-configuration lexical retrieval.
+Versions 0.9.10–0.10.2 also provide scoped file snapshots, local transaction records, restricted TypeScript proposals, and host execution handoffs. Version 0.10.0 adds shared typed work objects; v0.10.1 adds field-level ChangeSets; v0.10.2 adds durable waits, hierarchical budgets, fallback contracts, isolated parsing, trusted egress, an external Effect/Saga Kernel, and tiered autonomy policies. An authorization can require automatic execution, notification, one human approval, or multi-signature approval and is bound to an exact task, action, target, digest, TTL, and single consumption. Ambiguous effects can use pre-authorized read-only reconciliation. The compensation adapter freezes authorization, request digest, approval, and HTTP outcome mappings before dispatch; transport uncertainty and compensation failure remain explicit. Proposal operations are still supplied by the caller, not inferred automatically from raw traces. See [execution boundaries (Chinese)](docs/technical/modules/execution-policy.md).
+
+External Effects and Runtime Host Adapters atomically consume those authorizations when dispatching. Computer Use is a first-class operation kind with an exact action identity, while the actual browser or desktop driver remains a host responsibility.
+
+Vector search is optional. Configured OpenAI-compatible embeddings augment lexical retrieval; absent configuration or service failures retain the lexical path.
 
 ## Install
 
@@ -52,7 +79,7 @@ pnpm install --frozen-lockfile
 pnpm test
 ```
 
-`craft init` selects Agent, Supervisor, or Provider mode. Configuration, SQLite data, indexes, logs, and backups live under `~/.craft_data`; set `CRAFT_DATA_DIR` to override it.
+`craft init` currently selects Agent, Supervisor, or Provider mode. Planned onboarding will start with goals and materials and move technical modes into advanced settings; that UI change is not implemented yet. Configuration, SQLite data, indexes, logs, and backups live under `~/.craft_data`; set `CRAFT_DATA_DIR` to override it.
 
 ## Codex plugin
 

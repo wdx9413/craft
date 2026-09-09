@@ -1,0 +1,71 @@
+import assert from "node:assert/strict";
+import { createServer } from "node:http";
+import { type AddressInfo } from "node:net";
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import test from "node:test";
+import { craftPaths } from "../src/paths.ts";
+import { CraftService, VERSION } from "../src/service.ts";
+import { CraftStore } from "../src/store.ts";
+import { LocalWorkbenchServer, WorkbenchWebApp } from "../src/workbench-server.ts";
+
+async function fixture() { const root = await mkdtemp(path.join(tmpdir(), "craft-web-")); const store = await new CraftStore(craftPaths(root)).open(); const service = new CraftService(store); return { store, service }; }
+
+test("Workbench web application exposes a token-gated same-origin API and bounded JSON actions", async () => {
+  const f = await fixture(); const app = new WorkbenchWebApp(f.service, "secret", "http://127.0.0.1:4173");
+  assert.match(app.handle({ method: "GET", path: "/" }).body, /Craft Workbench/); assert.deepEqual(JSON.parse(app.handle({ method: "GET", path: "/health" }).body), { status: "ok", version: VERSION });
+  assert.equal(app.handle({ method: "GET", path: "/api/home", token: "secret", origin: "https://evil.example" }).status, 403);
+  assert.equal(app.handle({ method: "GET", path: "/api/home" }).status, 401); assert.equal(app.handle({ method: "GET", path: "/api/home", token: "x" }).status, 401); assert.equal(app.handle({ method: "GET", path: "/api/home", token: "xxxxxx" }).status, 401);
+  assert.equal(app.handle({ method: "GET", path: "/api/home", token: "secret" }).status, 200);
+  assert.equal(JSON.parse(app.handle({ method: "GET", path: "/api/domain-kits", token: "secret" }).body).kits.length, 2);
+  assert.equal(app.handle({ method: "POST", path: "/api/inbox/refresh", token: "secret" }).status, 200);
+  assert.equal(app.handle({ method: "POST", path: "/api/inbox/refresh", token: "secret", body: "{" }).status, 400);
+  assert.equal(app.handle({ method: "POST", path: "/api/inbox/refresh", token: "secret", body: "[]" }).status, 422);
+  assert.equal(app.handle({ method: "POST", path: "/api/inbox/refresh", token: "secret", body: "null" }).status, 422); assert.equal(app.handle({ method: "POST", path: "/api/inbox/refresh", token: "secret", body: "1" }).status, 422);
+  assert.equal(app.handle({ method: "POST", path: "/api/inbox/refresh", token: "secret", body: `{"x":"${"a".repeat(66_000)}"}` }).status, 413);
+  f.store.create("attention_item", "card", { status: "open" }); assert.equal(app.handle({ method: "POST", path: "/api/inbox/decide", token: "secret", origin: "http://127.0.0.1:4173", body: JSON.stringify({ item_id: "card", decision: "acknowledge", decided_by: "user" }) }).status, 200);
+  const created = app.handle({ method: "POST", path: "/api/tasks", token: "secret", body: JSON.stringify({ title: "Lesson", goal: "Teach fractions" }) }); assert.equal(created.status, 201); const taskId = JSON.parse(created.body).task.id; assert.equal(app.handle({ method: "GET", path: `/api/tasks/${encodeURIComponent(taskId)}`, token: "secret" }).status, 200); assert.equal(app.handle({ method: "GET", path: "/api/tasks/%", token: "secret" }).status, 422);
+  f.store.create("host_run", "finished", { host: "codex-cli", status: "completed", owner_id: "runner", event_count: 1 }); f.store.appendEvent("host-run:finished", "host.finished", { status: "completed", receipt_id: "receipt" });
+  assert.equal(JSON.parse(app.handle({ method: "GET", path: "/api/host-runs", token: "secret" }).body).runs.length, 1); assert.equal(JSON.parse(app.handle({ method: "GET", path: "/api/host-runs/finished?after=0", token: "secret" }).body).events.length, 1); assert.equal(JSON.parse(app.handle({ method: "GET", path: "/api/host-runs/finished", token: "secret" }).body).events.length, 1); assert.equal(JSON.parse(app.handle({ method: "POST", path: "/api/host-runs/finished/cancel", token: "secret", body: JSON.stringify({ reason: "user" }) }).body).idempotent, true);
+  const launch = JSON.parse(app.handle({ method: "POST", path: "/api/work-launches", token: "secret", body: JSON.stringify({ launch_id: "web-launch", title: "Edit", goal: "Update", host: "codex-cli", workspace: f.store.paths.root, prompt: "edit", sandbox: "workspace-write" }) }).body).launch; assert.equal(launch.status, "awaiting_approval"); assert.equal(JSON.parse(app.handle({ method: "GET", path: "/api/work-launches/web-launch", token: "secret" }).body).launch.effective_status, "awaiting_approval"); assert.equal(JSON.parse(app.handle({ method: "POST", path: "/api/work-launches/web-launch/decide", token: "secret", body: JSON.stringify({ actor: "user", approved: false }) }).body).launch.status, "denied"); assert.equal(app.handle({ method: "POST", path: "/api/work-launches/web-launch/retry", token: "secret", body: JSON.stringify({ prompt: "again" }) }).status, 422);
+  const accepted = JSON.parse(app.handle({ method: "POST", path: "/api/work-launches", token: "secret", body: JSON.stringify({ launch_id: "accepted", title: "Review", goal: "Approve", host: "codex-cli", workspace: f.store.paths.root, prompt: "review", sandbox: "workspace-write", acceptance_criteria: [{ id: "owner", name: "Owner accepts", method: "human" }, { id: "file", name: "File exists", method: "program" }] }) }).body).launch; const reviewed = app.handle({ method: "POST", path: `/api/acceptance-plans/${accepted.acceptance_plan_id}/human-review`, token: "secret", body: JSON.stringify({ review_id: "web-review", criterion_id: "owner", reviewer: "user", result: "passed", summary: "Approved in Workbench" }) }); assert.equal(JSON.parse(reviewed.body).assessment.status, "pending");
+  const fileJob = app.handle({ method: "POST", path: `/api/acceptance-plans/${accepted.acceptance_plan_id}/file-evaluation`, token: "secret", body: JSON.stringify({ job_id: "web-file", criterion_id: "file", workspace: f.store.paths.root, relative_path: "result.txt", allowed_extensions: [".txt"], max_bytes: 100 }) }); assert.equal(fileJob.status, 201); assert.equal(JSON.parse(fileJob.body).job.adapter_id, "builtin:file-artifact");
+  const kitLaunch = JSON.parse(app.handle({ method: "POST", path: "/api/work-launches", token: "secret", body: JSON.stringify({ launch_id: "kit-launch", title: "Video", goal: "Deliver", host: "codex-cli", workspace: f.store.paths.root, prompt: "video", sandbox: "workspace-write" }) }).body).launch; const kitApplied = app.handle({ method: "POST", path: "/api/domain-kits/builtin.video-delivery/apply", token: "secret", body: JSON.stringify({ launch_id: kitLaunch.id, values: { video_path: "final.mp4" } }) }); assert.equal(JSON.parse(kitApplied.body).jobs.length, 1);
+  assert.equal(app.handle({ method: "DELETE", path: "/api/nope", token: "secret" }).status, 404);
+  f.service.attentionRefresh = (() => { throw "failure"; }) as typeof f.service.attentionRefresh; assert.equal(JSON.parse(app.handle({ method: "POST", path: "/api/inbox/refresh", token: "secret", body: "{}" }).body).error, "failure"); f.store.close();
+});
+
+test("local Workbench server binds loopback, serves headers, handles bodies, and owns its lifecycle", async () => {
+  const f = await fixture(); const server = new LocalWorkbenchServer(f.service, "network-token"); const started = await server.start(0); const origin = started.url.split("/#")[0];
+  assert.equal(started.token, "network-token"); assert.equal((await fetch(`${origin}/`)).status, 200); const health = await fetch(`${origin}/health`); assert.equal(health.headers.get("x-content-type-options"), "nosniff");
+  assert.equal((await fetch(`${origin}/api/home`, { headers: { authorization: "Basic x" } })).status, 401);
+  assert.equal((await fetch(`${origin}/api/home`, { headers: { authorization: "Bearer network-token" } })).status, 200);
+  assert.equal((await fetch(`${origin}/api/inbox/refresh`, { method: "POST", headers: { authorization: "Bearer network-token", origin }, body: "{}" })).status, 200);
+  assert.equal((await fetch(`${origin}/api/inbox/refresh`, { method: "POST", headers: { authorization: "Bearer network-token" }, body: "x".repeat(66_000) })).status, 413);
+  await assert.rejects(() => server.start(0), /already running/); await server.close(); await server.close(); f.store.close();
+});
+
+test("local Workbench evaluates registered file acceptance after its Host Run completes", async () => {
+  const f = await fixture(); await writeFile(path.join(f.store.paths.root, "result.txt"), "done");
+  f.store.create("host_run", "completed-run", { host: "codex-cli", status: "completed", owner_id: "runner", event_count: 0 });
+  f.store.create("work_launch", "file-launch", { task_id: "file-task", run_id: "completed-run" });
+  f.store.create("task", "file-task", { title: "File", goal: "Verify", status: "open" });
+  const plan = f.service.acceptancePlanSave({ plan_id: "file-plan", task_id: "file-task", launch_id: "file-launch", criteria: [{ id: "file", name: "File exists", method: "program" }] }).plan as Record<string, unknown>;
+  f.service.acceptanceFileEvaluationPrepare({ plan_id: plan.id, criterion_id: "file", workspace: f.store.paths.root, relative_path: "result.txt" });
+  const server = new LocalWorkbenchServer(f.service, "file-token"); await server.start(0);
+  try { const deadline = Date.now() + 2_500; let status = "pending"; while (Date.now() < deadline && status === "pending") { await new Promise((resolve) => setTimeout(resolve, 100)); const assessment = f.service.acceptancePlanGet({ plan_id: plan.id }).assessment as Record<string, unknown> | null; status = assessment ? String(assessment.status) : "pending"; } assert.equal(status, "passed"); }
+  finally { await server.close(); f.store.close(); }
+});
+
+test("Workbench server validates ports, generates tokens, and reports occupied loopback ports", async () => {
+  const f = await fixture(); const generated = new LocalWorkbenchServer(f.service); assert.equal(generated.token.length > 20, true);
+  await assert.rejects(() => generated.start(-1), /port/); await assert.rejects(() => generated.start(65536), /port/); await assert.rejects(() => generated.start(1.5), /port/);
+  const busy = createServer(); await new Promise<void>((resolve) => busy.listen(0, "127.0.0.1", resolve)); const port = (busy.address() as AddressInfo).port;
+  const collision = new LocalWorkbenchServer(f.service, "token"); await assert.rejects(() => collision.start(port)); await new Promise<void>((resolve) => busy.close(() => resolve())); f.store.close();
+});
+
+test("Workbench acceptance polling skips overlap and isolates adapter failures", async () => {
+  const f = await fixture(); let ticks = 0; const server = new LocalWorkbenchServer(f.service, "timer-token", { acceptanceTick: async () => { ticks += 1; await new Promise((resolve) => setTimeout(resolve, 650)); throw new Error("isolated"); } });
+  await server.start(0); await new Promise((resolve) => setTimeout(resolve, 1_250)); await server.close(); assert.equal(ticks, 1); f.store.close();
+});

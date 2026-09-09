@@ -15,10 +15,12 @@ export declare class Catalog {
     readonly store: CraftStore;
     readonly semanticProvider?: EmbeddingProvider;
     constructor(store: CraftStore, semanticProvider?: EmbeddingProvider);
-    addSource(path: string, label?: string, scan?: boolean): Promise<JsonObject>;
+    addSource(path: string, label?: string, scan?: boolean, priority?: number): Promise<JsonObject>;
     listSources(): JsonObject[];
+    listLogicalCapabilities(): JsonObject[];
     getSource(id: string): JsonObject;
-    updateSource(id: string, enabled?: boolean, label?: string): JsonObject;
+    updateSource(id: string, enabled?: boolean, label?: string, priority?: number): JsonObject;
+    private rebuildLogicalCapabilities;
     removeSource(id: string): JsonObject;
     scanSource(id: string): Promise<JsonObject>;
     scan(sourceId?: string): Promise<JsonObject>;

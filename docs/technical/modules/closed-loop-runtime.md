@@ -27,6 +27,6 @@ Runtime Policy → Runtime Run → Operation DAG → Lease / Approval → Receip
 
 ## 边界
 
-`LocalIsolatedAdapter` 当前使用 macOS `sandbox-exec` 或 Linux 已检测到的隔离器，网络默认拒绝、命令/路径需白名单；隔离器不可用时仅该高风险执行失败关闭。内置 Credential Broker 永远拒绝发放凭据，外部受信任 Broker 是后续接入 seam。它不是容器、远程网络策略或完整 Saga 实现；部署方仍需在 Host 外提供这些边界。Eval Runner 可自动执行确定性 Workflow；Runtime 中的通用 Agent/模型 Operation 必须由兼容 Host 领取并提交观察到的结果。Runtime 不声明任何 Host 私有子 Agent API 已被支持，也不允许 Proposal 绕过 Eval、Signoff 或 Publisher。
+`LocalIsolatedAdapter` 当前使用 macOS `sandbox-exec` 或 Linux 已检测到的隔离器，网络默认拒绝、命令/路径需白名单；隔离器不可用时仅该高风险执行失败关闭。v0.10.2 已增加本地 HTTPS Egress Broker 与 Sandbox Inbox Bridge：Sandbox 本身继续断网且不获得凭据，由宿主 Broker 代办精确请求，再将脱敏、不可信且零执行权限的响应投递到 Ticket 私有目录。它不是透明企业代理、远程网络策略或完整 Saga 实现。Eval Runner 可自动执行确定性 Workflow；Runtime 中的通用 Agent/模型 Operation 必须由兼容 Host 领取并提交观察到的结果。
 
 关联：[Runtime 与宿主接入](runtime-integration.md) · [Experience/Eval](experience-eval.md) · [Workflow/Signoff](workflow-signoff.md)

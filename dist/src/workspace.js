@@ -42,6 +42,13 @@ function nested(root, path) {
 function digest(path) {
     return createHash("sha256").update(readFileSync(path)).digest("hex");
 }
+export function snapshotNodeKind(stat, path) {
+    if (stat.isFile())
+        return "file";
+    if (stat.isDirectory())
+        return "directory";
+    throw new Error(`workspace snapshots support regular files only: ${path}`);
+}
 function files(root, path) {
     const absolute = nested(root, path);
     if (!existsSync(absolute))
@@ -49,10 +56,8 @@ function files(root, path) {
     const stat = lstatSync(absolute);
     if (stat.isSymbolicLink())
         throw new Error(`workspace snapshots do not follow symbolic links: ${path}`);
-    if (stat.isFile())
+    if (snapshotNodeKind(stat, path) === "file")
         return [{ path, digest: digest(absolute), size_bytes: stat.size }];
-    if (!stat.isDirectory())
-        throw new Error(`workspace snapshots support regular files only: ${path}`);
     return readdirSync(absolute, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name))
         .flatMap((entry) => files(root, join(path, entry.name).replaceAll("\\", "/")));
 }

@@ -35,6 +35,27 @@ test("MCP negotiates protocols, lists tools, dispatches every handler, and repor
     assert.equal((((stringFailure?.result as Record<string, unknown>).content as Record<string, unknown>[])[0]).text, "string failure");
     const failed = await server.handle({ id: 6, method: "tools/call", params: { name: "craft_task_open", arguments: {} } });
     assert.equal(((failed?.result as Record<string, unknown>).isError), true);
+    for (const name of ["craft_capability_bundle_propose", "craft_capability_bundle_review", "craft_capability_bundle_publish",
+      "craft_capability_release_subscribe", "craft_capability_subscription_resolve", "craft_capability_release_revoke"]) {
+      const response = await server.handle({ id: name, method: "tools/call", params: { name, arguments: {} } });
+      assert.equal((response?.result as Record<string, unknown>).isError, true, name);
+    }
+    for (const name of ["craft_hub_source_register", "craft_hub_catalog_ingest", "craft_hub_catalog_search", "craft_hub_source_disable"]) {
+      const response = await server.handle({ id: name, method: "tools/call", params: { name, arguments: {} } });
+      assert.equal((response?.result as Record<string, unknown>).isError, true, name);
+    }
+    for (const name of ["craft_capability_materialize_stage", "craft_capability_materialize_review", "craft_capability_materialize_activate"]) {
+      const response = await server.handle({ id: name, method: "tools/call", params: { name, arguments: {} } });
+      assert.equal((response?.result as Record<string, unknown>).isError, true, name);
+    }
+    for (const name of ["craft_capability_certification_assess", "craft_capability_certification_promote"]) {
+      const response = await server.handle({ id: name, method: "tools/call", params: { name, arguments: {} } });
+      assert.equal((response?.result as Record<string, unknown>).isError, true, name);
+    }
+    for (const name of ["craft_supply_chain_advisory_record", "craft_supply_chain_advisory_resolve", "craft_supply_chain_reconcile"]) {
+      const response = await server.handle({ id: name, method: "tools/call", params: { name, arguments: {} } });
+      assert.equal((response?.result as Record<string, unknown>).isError, true, name);
+    }
 
     const calls: Record<string, Record<string, unknown>> = {
       craft_info: {}, craft_source_list: {}, craft_semantic_status: {}, craft_task_list: {}, craft_artifact_list: {},

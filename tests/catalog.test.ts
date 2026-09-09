@@ -32,7 +32,7 @@ test("catalog adds, incrementally scans, searches, updates, and removes sources"
     assert.equal((await catalog.addSource(join(root, "empty"), "Empty", false).catch(async (error) => {
       await mkdir(join(root, "empty")); return catalog.addSource(join(root, "empty"), "Empty", false);
     })).label, "Empty");
-    await assert.rejects(() => catalog.addSource(library), /already exists/);
+    assert.equal(String((await catalog.addSource(library)).id), String(source.id));
     catalog.updateSource(String(source.id), true);
     await unlink(file);
     assert.equal(((await catalog.scanSource(String(source.id))).scan as { removed: number }).removed, 1);
@@ -42,6 +42,24 @@ test("catalog adds, incrementally scans, searches, updates, and removes sources"
     assert.throws(() => catalog.removeSource(String(source.id)), /Unknown source/);
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
+
+test("catalog keeps source mounts but exposes mirrors as one logical capability and names divergent content as conflicts", async () => {
+  const root = join(tmpdir(), `craft-catalog-logical-${process.pid}-${Date.now()}`); const primary = join(root, "primary"); const mirror = join(root, "mirror"); const divergent = join(root, "divergent");
+  await mkdir(primary, { recursive: true }); await mkdir(mirror, { recursive: true }); await mkdir(divergent, { recursive: true });
+  const shared = "---\nname: reconcile\ncapability_id: reconcile\ndescription: Read status\n---\nUse a safe GET.";
+  await writeFile(join(primary, "SKILL.md"), shared); await writeFile(join(mirror, "SKILL.md"), shared); await writeFile(join(divergent, "SKILL.md"), "---\nname: reconcile\ncapability_id: reconcile\ndescription: Write status\n---\nUse a POST.");
+  const store = await new CraftStore(craftPaths(join(root, "data"))).open(); const catalog = new Catalog(store);
+  try {
+    const first = await catalog.addSource(primary, "Primary", true, 1); const second = await catalog.addSource(mirror, "Mirror", true, 9);
+    assert.notEqual(first.id, second.id); assert.equal(catalog.listSources().length, 2); assert.equal((await catalog.addSource(primary, "Primary")).id, first.id);
+    const selected = catalog.search("read status"); assert.equal(selected.length, 1); assert.equal(selected[0].source_id, second.id); assert.equal((selected[0].source_instances as unknown[]).length, 2);
+    await catalog.addSource(divergent, "Divergent"); const logical = catalog.listLogicalCapabilities(); const conflicted = logical.filter((item) => (item.conflicts as unknown[]).length > 0);
+    assert.equal(conflicted.length, 2); assert.equal(store.list("capability_conflict", 10).length, 1); assert.equal(catalog.search("status", 10).length, 2);
+    catalog.updateSource(String(second.id), false); assert.equal(catalog.search("read status")[0].source_id, first.id);
+    assert.throws(() => catalog.updateSource(String(first.id), undefined, undefined, 1001), /priority/);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
 
 test("skill parser supports defaults, frontmatter, and non-object YAML", () => {
   assert.equal(pathKey("A/B", "win32"), "a/b");
@@ -88,7 +106,7 @@ test("catalog covers aliases, disabled sources, filters, and digest fallback", a
     const aliasRanked = catalog.search("urgent outage");
     assert.equal(aliasRanked[0].name, "alpha");
     assert.equal((aliasRanked[0].match as Record<string, unknown>).alias_match, true);
-    assert.equal(catalog.search("red", 50).length, 2);
+    assert.equal(catalog.search("red", 50).length, 1);
     catalog.removeSource(String(first.id));
     catalog.removeSource(String(second.id));
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }

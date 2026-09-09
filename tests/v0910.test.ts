@@ -8,6 +8,7 @@ import test from "node:test";
 import { craftPaths } from "../src/paths.ts";
 import { CraftService } from "../src/service.ts";
 import { CraftStore, type JsonObject } from "../src/store.ts";
+import { snapshotNodeKind } from "../src/workspace.ts";
 
 test("v0.9.10 keeps an explicit workspace file-state timeline and restores only an approved checkpoint", async () => {
   const root = join(tmpdir(), `craft-workspace-${process.pid}-${Date.now()}`);
@@ -66,6 +67,7 @@ test("v0.9.10 rejects workspace roots, paths, and snapshots that escape the decl
 });
 
 test("v0.9.10 covers snapshot lifecycle boundaries and exposes its read-only state in the compact MCP surface", async () => {
+  assert.throws(() => snapshotNodeKind({ isFile: () => false, isDirectory: () => false }, "special"), /regular files/);
   const root = join(tmpdir(), `craft-workspace-lifecycle-${process.pid}-${Date.now()}`);
   const worktree = join(root, "worktree");
   const store = await new CraftStore(craftPaths(join(root, "craft"))).open();
@@ -88,13 +90,17 @@ test("v0.9.10 covers snapshot lifecycle boundaries and exposes its read-only sta
     service.workspaceOpen({ workspace_id: "root", name: "Root", root_path: worktree, include_paths: ["."] });
     const rootCheckpoint = service.workspaceCheckpoint({ workspace_id: "root", label: "root" }).checkpoint as JsonObject;
     assert.throws(() => service.workspaceRestore({ workspace_id: "root", checkpoint_id: rootCheckpoint.id, approved: true }), /workspace root/);
-    await symlink(join(worktree, "dir", "nested.txt"), join(worktree, "linked.txt"));
-    service.workspaceOpen({ workspace_id: "link", name: "Link", root_path: worktree, include_paths: ["linked.txt"] });
+    const linkPath = process.platform === "win32" ? join(worktree, "linked-dir") : join(worktree, "linked.txt");
+    await symlink(process.platform === "win32" ? join(worktree, "dir") : join(worktree, "dir", "nested.txt"), linkPath,
+      process.platform === "win32" ? "junction" : undefined);
+    service.workspaceOpen({ workspace_id: "link", name: "Link", root_path: worktree, include_paths: [process.platform === "win32" ? "linked-dir" : "linked.txt"] });
     assert.throws(() => service.workspaceCheckpoint({ workspace_id: "link", label: "link" }), /symbolic links/);
-    const fifoPath = join(worktree, "fifo");
-    execFileSync("/usr/bin/mkfifo", [fifoPath]);
-    service.workspaceOpen({ workspace_id: "fifo", name: "Fifo", root_path: worktree, include_paths: ["fifo"] });
-    assert.throws(() => service.workspaceCheckpoint({ workspace_id: "fifo", label: "fifo" }), /regular files/);
+    if (process.platform !== "win32") {
+      const fifoPath = join(worktree, "fifo");
+      execFileSync("/usr/bin/mkfifo", [fifoPath]);
+      service.workspaceOpen({ workspace_id: "fifo", name: "Fifo", root_path: worktree, include_paths: ["fifo"] });
+      assert.throws(() => service.workspaceCheckpoint({ workspace_id: "fifo", label: "fifo" }), /regular files/);
+    }
     service.workspaceOpen({ workspace_id: "overlap", name: "Overlap", root_path: worktree, include_paths: ["dir", "dir/nested.txt"] });
     assert.throws(() => service.workspaceCheckpoint({ workspace_id: "overlap", label: "overlap" }), /must not overlap/);
 

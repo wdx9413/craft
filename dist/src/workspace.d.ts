@@ -1,5 +1,7 @@
+import { type Stats } from "node:fs";
 import type { CraftPaths } from "./paths.ts";
 import { CraftStore, type JsonObject } from "./store.ts";
+export declare function snapshotNodeKind(stat: Pick<Stats, "isFile" | "isDirectory">, path: string): "file" | "directory";
 export declare class WorkspaceState {
     readonly store: CraftStore;
     readonly paths: CraftPaths;

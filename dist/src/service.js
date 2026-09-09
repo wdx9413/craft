@@ -1,5 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
+import { mkdir, writeFile } from "node:fs/promises";
+import { isAbsolute, join, resolve, win32 } from "node:path";
+import { pathToFileURL } from "node:url";
 import { Catalog } from "./catalog.js";
+import { validateJsonSchema } from "./json-schema.js";
 import { CraftStore } from "./store.js";
 import { approvedEffects, executeSteps, normalizeSteps, resolveInputs, SIDE_EFFECTS, substitute } from "./workflow.js";
 import { addCosts, dispatchNodes, normalizeNodes, orchestrationOutcome, planStatus, recoverExpiredLeases, submitNode } from "./orchestration.js";
@@ -13,7 +17,35 @@ import { WorkspaceState } from "./workspace.js";
 import { TransactionCoordinator } from "./transaction.js";
 import { TrajectoryCompiler } from "./trajectory.js";
 import { VerifiedScriptRunner } from "./script-run.js";
-export const VERSION = "0.9.12";
+import { WorkbenchKernel } from "./workbench.js";
+import { ChangeSetKernel } from "./changeset.js";
+import { ControlPlaneKernel } from "./control-plane.js";
+import { SecurityBrokerKernel } from "./security.js";
+import { DataOnlyParserAdapter } from "./untrusted-parser.js";
+import { ParserProcessAdapter } from "./parser-process.js";
+import { SandboxKernel } from "./sandbox.js";
+import { DockerSandboxAdapter, dockerRequestDigest } from "./docker-sandbox.js";
+import { TrustedEgressBroker, egressRequestDigest } from "./egress.js";
+import { ExternalEffectKernel } from "./effects.js";
+import { RecoveryQueueKernel } from "./recovery.js";
+import { TriggerKernel } from "./trigger.js";
+import { SpeculativeKernel } from "./speculative.js";
+import { LineageKernel } from "./lineage.js";
+import { HydrationKernel } from "./hydration.js";
+import { AutonomyKernel } from "./autonomy.js";
+import { ContractInferenceKernel } from "./contracts.js";
+import { CapabilityCanaryKernel } from "./capability-canary.js";
+import { CapabilityFederationKernel } from "./federation.js";
+import { HubSyncKernel } from "./hub-sync.js";
+import { MaterializationKernel } from "./materialization.js";
+import { CapabilityCertificationKernel } from "./certification.js";
+import { SupplyChainKernel } from "./supply-chain.js";
+import { AttentionKernel } from "./attention.js";
+import { HomeKernel } from "./home.js";
+import { CodexHostKernel } from "./codex-driver.js";
+import { ClaudeHostKernel } from "./claude-driver.js";
+import { HostRunKernel } from "./host-run.js";
+export const VERSION = "0.11.20";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -26,7 +58,11 @@ const CAPABILITY_ASSET_TYPES = new Set(["skill", "mcp_server", "tool", "workflow
 const CAPABILITY_TRUST = new Set(["trusted", "untrusted", "verified"]);
 const CAPABILITY_HEALTH = new Set(["healthy", "stale", "failed", "unknown"]);
 const EXPERT_TYPES = new Set(["diagnostic_research"]);
+const ACCEPTANCE_METHODS = new Set(["program", "model", "human", "business_signal"]);
+const ACCEPTANCE_RESULTS = new Set(["passed", "failed", "blocked"]);
+const DOMAIN_FIELD_TYPES = new Set(["text", "path", "integer", "boolean", "choice"]);
 function id(prefix) { return `${prefix}_${randomUUID().replaceAll("-", "")}`; }
+function valueDigest(value) { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
 function text(value, name) {
     if (typeof value !== "string" || !value.trim())
         throw new Error(`${name} must not be empty`);
@@ -113,10 +149,10 @@ const ROUTE_TERMINAL = new Set(["completed", "failed", "cancelled"]);
 const ROUTE_RECEIPT_KINDS = new Set(["git_diff", "focused_test", "coverage", "static_check", "review"]);
 const ROUTE_RECEIPT_STATUS = new Set(["passed", "failed", "skipped"]);
 const HOST_OPERATIONS = new Set(["complete_stage", "execute_verified_workflow"]);
-const RUNTIME_KINDS = new Set(["agent", "workflow", "grader"]);
+const RUNTIME_KINDS = new Set(["agent", "workflow", "grader", "computer_use"]);
 const RUNTIME_ADAPTER_HOSTS = new Set(["codex", "claude", "generic"]);
 const RUNTIME_RUN_TERMINAL = new Set(["completed", "failed", "cancelled"]);
-const SECRET_ASSIGNMENT = /(?:api[_-]?key|authorization|cookie|password|secret|token)\s*[:=]\s*[^\s]+/iu;
+const SECRET_ASSIGNMENT = /(?:api[_-]?key|authorization|cookie|password|secret|token)["']?\s*[:=]\s*[^\s]+/iu;
 const DEFAULT_RECEIPT_REQUIREMENTS = {
     baseline: ["git_diff", "focused_test"], minimal_change: [],
     verification: ["focused_test", "coverage"], review: ["git_diff", "review"],
@@ -152,6 +188,16 @@ function canonical(value) {
 function fingerprint(value) {
     return createHash("sha256").update(canonical(value)).digest("hex");
 }
+function runtimeAuthorization(runId, operation) {
+    const kind = String(operation.kind);
+    const effect = String(operation.effect);
+    const action = kind === "computer_use" ? "computer_use" : { read_only: "read", local_write: "sandbox_write",
+        external_write: "external_write", destructive: "destructive" }[effect];
+    const target = operation.target === undefined ? `runtime:${runId}:${String(operation.operation_id)}` : String(operation.target);
+    return { autonomy_action: action, authorization_target: target,
+        request_digest: `sha256:${fingerprint({ operation_id: operation.operation_id, kind, effect,
+            objective: operation.objective, target, execution: operation.execution ?? null })}` };
+}
 function policyAllowsPath(value, prefixes) {
     const normalized = value.replaceAll("\\", "/").replace(/^\.\//u, "");
     if (!normalized || normalized.startsWith("/") || normalized.split("/").includes(".."))
@@ -185,7 +231,35 @@ export class CraftService {
     transaction;
     trajectory;
     scriptRunner;
-    constructor(store, semanticProvider, isolatedAdapter = new LocalIsolatedAdapter()) {
+    workbench;
+    changeSets;
+    controlPlane;
+    security;
+    dataOnlyParser;
+    parserProcess;
+    sandbox;
+    dockerSandbox;
+    egressBroker;
+    effects;
+    recovery;
+    triggers;
+    speculative;
+    lineage;
+    hydration;
+    autonomy;
+    contracts;
+    capabilityCanary;
+    federation;
+    hubSync;
+    materialization;
+    certification;
+    supplyChain;
+    attention;
+    home;
+    codexHost;
+    claudeHost;
+    hostRuns;
+    constructor(store, semanticProvider, isolatedAdapter = new LocalIsolatedAdapter(), dockerSandbox = new DockerSandboxAdapter(), egressBroker = new TrustedEgressBroker(), hostOwnerId) {
         this.store = store;
         this.catalog = new Catalog(store, semanticProvider);
         this.isolatedAdapter = isolatedAdapter;
@@ -193,11 +267,39 @@ export class CraftService {
         this.transaction = new TransactionCoordinator(store, this.workspace);
         this.trajectory = new TrajectoryCompiler(store);
         this.scriptRunner = new VerifiedScriptRunner(store);
+        this.workbench = new WorkbenchKernel(store);
+        this.changeSets = new ChangeSetKernel(store, this.workbench);
+        this.controlPlane = new ControlPlaneKernel(store);
+        this.security = new SecurityBrokerKernel(store);
+        this.dataOnlyParser = new DataOnlyParserAdapter(this.security);
+        this.parserProcess = new ParserProcessAdapter(this.security);
+        this.sandbox = new SandboxKernel(store);
+        this.dockerSandbox = dockerSandbox;
+        this.egressBroker = egressBroker;
+        this.effects = new ExternalEffectKernel(store);
+        this.recovery = new RecoveryQueueKernel(store);
+        this.triggers = new TriggerKernel(store, egressBroker.env);
+        this.speculative = new SpeculativeKernel(store);
+        this.lineage = new LineageKernel(store);
+        this.hydration = new HydrationKernel(store);
+        this.autonomy = new AutonomyKernel(store);
+        this.contracts = new ContractInferenceKernel(store);
+        this.capabilityCanary = new CapabilityCanaryKernel(store);
+        this.federation = new CapabilityFederationKernel(store);
+        this.hubSync = new HubSyncKernel(store);
+        this.materialization = new MaterializationKernel(store);
+        this.certification = new CapabilityCertificationKernel(store);
+        this.supplyChain = new SupplyChainKernel(store);
+        this.attention = new AttentionKernel(store);
+        this.home = new HomeKernel(store, this.attention);
+        this.codexHost = new CodexHostKernel(store);
+        this.claudeHost = new ClaudeHostKernel(store);
+        this.hostRuns = new HostRunKernel(store, [this.codexHost, this.claudeHost], hostOwnerId, (run, receipt) => this.finalizeWorkLaunch(run, receipt));
     }
-    static async open(store) {
+    static async open(store, hostOwnerId) {
         const config = await loadConfig(store.paths);
         const semanticProvider = config?.semanticSearch ? new OpenAiCompatibleEmbeddingProvider(config.semanticSearch.provider) : undefined;
-        return new CraftService(store, semanticProvider);
+        return new CraftService(store, semanticProvider, undefined, undefined, undefined, hostOwnerId);
     }
     info() {
         const kinds = ["source", "capability", "task", "checkpoint", "feedback", "artifact",
@@ -211,17 +313,37 @@ export class CraftService {
             "experience_shadow_experiment", "adaptive_harness", "agent_ir", "operational_signal", "operational_alert",
             "capability_asset", "activation_profile", "tool_selection_receipt", "capability_call", "expert_profile", "context_capsule",
             "evaluation_reliability", "judge_adapter", "judge_calibration", "adaptation_candidate", "feedback_intake", "feedback_case", "canary",
-            "workspace", "workspace_checkpoint", "workspace_change", "workspace_transaction", "trajectory_script_proposal", "verified_script_run"];
+            "workspace", "workspace_checkpoint", "workspace_change", "workspace_transaction", "work_object", "memory_item", "change_set",
+            "budget_account", "budget_reservation", "durable_wait", "external_event", "fallback_contract", "fallback_event",
+            "credential_handle", "credential_lease", "egress_authorization", "egress_execution", "parser_security_evaluation", "parser_process_receipt",
+            "sandbox_profile", "sandbox_assessment", "sandbox_ticket", "sandbox_receipt", "sandbox_egress_binding",
+            "external_effect", "external_effect_receipt", "effect_compensation", "effect_reconciliation", "effect_saga", "recovery_item",
+            "trigger_subscription", "trigger_event", "speculative_policy", "speculative_candidate", "preference_signal", "lineage_edge", "dehydration_snapshot",
+            "autonomy_policy", "autonomy_request", "autonomy_consumption",
+            "contract_observation", "contract_candidate",
+            "contract_publication",
+            "capability_canary", "capability_canary_sample",
+            "capability_bundle", "capability_release", "capability_subscription",
+            "hub_source", "hub_catalog_entry", "hub_sync_receipt",
+            "capability_materialization",
+            "capability_certification",
+            "supply_chain_advisory",
+            "maintenance_status",
+            "maintenance_tick",
+            "maintenance_component", "maintenance_failure", "attention_item", "work_launch", "acceptance_plan", "acceptance_check", "acceptance_assessment", "acceptance_evaluator", "acceptance_evaluation_job",
+            "trajectory_script_proposal", "verified_script_run"];
+        kinds.push("untrusted_content", "untrusted_extraction", "decision_projection");
         return { version: VERSION, data_root: this.store.paths.root,
             counts: Object.fromEntries(kinds.map((kind) => [kind, this.store.count(kind)])) };
     }
     sourceAdd(args) {
         const label = args.label === undefined ? undefined : text(args.label, "label");
-        return this.catalog.addSource(text(args.path, "path"), label, optionalBoolean(args.scan, "scan") ?? true);
+        return this.catalog.addSource(text(args.path, "path"), label, optionalBoolean(args.scan, "scan") ?? true, args.priority === undefined ? 0 : finiteInteger(args.priority, "priority", 0, -1000, 1000));
     }
     sourceList() { return { sources: this.catalog.listSources() }; }
+    logicalCapabilityList() { return { capabilities: this.catalog.listLogicalCapabilities() }; }
     sourceUpdate(args) {
-        return this.catalog.updateSource(text(args.source_id, "source_id"), optionalBoolean(args.enabled, "enabled"), args.label === undefined ? undefined : text(args.label, "label"));
+        return this.catalog.updateSource(text(args.source_id, "source_id"), optionalBoolean(args.enabled, "enabled"), args.label === undefined ? undefined : text(args.label, "label"), args.priority === undefined ? undefined : finiteInteger(args.priority, "priority", 0, -1000, 1000));
     }
     sourceRemove(args) {
         return this.catalog.removeSource(text(args.source_id, "source_id"));
@@ -325,7 +447,12 @@ export class CraftService {
             throw new Error("Expert Sub-agent inputs are incompatible");
         if (this.runtimeOperations(String(run.id)).filter((operation) => operation.parent_operation_id === parent.id).length >= Number(expert.max_subagents))
             throw new Error("Expert may create at most 5 Sub-agent Runs");
-        return this.store.create("runtime_operation", String(args.operation_id ?? id("subagent")), { run_id: run.id, parent_operation_id: parent.id, depends_on: [parent.id], kind: "agent", effect: "read_only", objective: assertNoSecret(text(args.objective, "objective"), "objective"), agent_profile_id: expert.id, expert_id: expert.id, expert_version: expert.version, capsule_id: capsule.id, status: "pending", attempts: 0, submission_receipts: [] });
+        const operationId = String(args.operation_id ?? id("subagent"));
+        const operation = { operation_id: operationId,
+            kind: "agent", effect: "read_only", objective: assertNoSecret(text(args.objective, "objective"), "objective") };
+        return this.store.create("runtime_operation", operationId, { run_id: run.id, parent_operation_id: parent.id, depends_on: [parent.id],
+            ...operation, ...runtimeAuthorization(String(run.id), operation), agent_profile_id: expert.id, expert_id: expert.id,
+            expert_version: expert.version, capsule_id: capsule.id, status: "pending", attempts: 0, submission_receipts: [] });
     }
     expertSubagentReport(args) {
         const operation = this.store.get("runtime_operation", text(args.operation_id, "operation_id"));
@@ -409,7 +536,8 @@ export class CraftService {
         const adapter = this.store.get("runtime_adapter", text(args.runtime_adapter_id, "runtime_adapter_id"), args.runtime_adapter_version === undefined ? undefined : finiteInteger(args.runtime_adapter_version, "runtime_adapter_version", 1));
         const capacity = finiteInteger(args.capacity, "capacity", Number(adapter.max_concurrency), 1, Number(adapter.max_concurrency));
         const dispatch = this.runtimeDispatch({ run_id: text(args.run_id, "run_id"), claimed_by: this.runtimeAdapterOwner(adapter), capacity,
-            kinds: adapter.allowed_kinds, effects: adapter.allowed_effects });
+            kinds: adapter.allowed_kinds, effects: adapter.allowed_effects, authorization_requests: args.authorization_requests,
+            notification_refs: args.notification_refs, now: args.now });
         return { adapter, ...dispatch };
     }
     runtimeAdapterReport(args) {
@@ -476,6 +604,7 @@ export class CraftService {
         const requested = array(args.operations, "operations");
         if (!requested.length)
             throw new Error("operations must not be empty");
+        const runId = String(args.run_id ?? id("runtime_run"));
         const operationIds = new Set();
         const operations = requested.map((raw, index) => {
             const input = object(raw, `operations[${index}]`);
@@ -498,7 +627,10 @@ export class CraftService {
             const execution = input.execution === undefined ? null : object(input.execution, `operations[${index}].execution`);
             if (execution !== null)
                 assertNoSecret(canonical(execution), `operations[${index}].execution`);
-            return { operation_id: operationId, kind, effect, objective: assertNoSecret(text(input.objective, `operations[${index}].objective`), "objective"),
+            const objective = assertNoSecret(text(input.objective, `operations[${index}].objective`), "objective");
+            const target = input.target === undefined ? undefined : text(input.target, `operations[${index}].target`);
+            const operation = { operation_id: operationId, kind, effect, objective, execution, ...(target === undefined ? {} : { target }) };
+            return { ...operation, ...runtimeAuthorization(runId, operation),
                 agent_profile_id: input.agent_profile_id ?? null, parent_operation_id: parentOperationId,
                 depends_on: dependencies, execution, status: "pending",
                 attempts: 0, submission_receipts: [] };
@@ -511,7 +643,6 @@ export class CraftService {
                 throw new Error("Runtime operation already exists");
             }
         }
-        const runId = String(args.run_id ?? id("runtime_run"));
         const run = this.store.create("runtime_run", runId, { task_id: task.id, trial_id: args.trial_id ?? null,
             policy_id: policy.id, policy_version: policy.version, policy_fingerprint: fingerprint(recordPayload(policy)),
             environment_fingerprint: fingerprint(environment), status: "running", resource_ledger: {}, budget: policy.budget,
@@ -542,6 +673,12 @@ export class CraftService {
         if (effects?.some((effect) => !SIDE_EFFECTS.has(effect)))
             throw new Error("Runtime dispatch effects must be supported");
         const operations = this.runtimeOperations(String(run.id));
+        const authorizationRequests = args.authorization_requests === undefined ? {} : object(args.authorization_requests, "authorization_requests");
+        const notificationRefs = args.notification_refs === undefined ? {} : object(args.notification_refs, "notification_refs");
+        const autonomyPolicies = this.store.list("autonomy_policy", Number.MAX_SAFE_INTEGER, (item) => item.task_id === run.task_id && item.status === "active");
+        if (autonomyPolicies.length > 1)
+            throw new Error("Runtime dispatch requires one unambiguous active autonomy policy");
+        const autonomyPolicy = autonomyPolicies[0];
         const active = operations.filter((operation) => operation.status === "leased").length;
         const passed = new Set(operations.filter((operation) => operation.status === "passed").map((operation) => String(operation.id)));
         const dispatched = [];
@@ -560,10 +697,28 @@ export class CraftService {
             }
             const leaseId = id("runtime_lease");
             const leaseExpiresAt = new Date(Date.now() + Number(policy.lease_ttl_seconds) * 1_000).toISOString();
-            const leased = this.store.save("runtime_operation", String(operation.id), { ...recordPayload(operation), status: "leased",
-                lease_id: leaseId, claimed_by: claimedBy, lease_expires_at: leaseExpiresAt, attempts: Number(operation.attempts) + 1 });
+            const leasePayload = { ...recordPayload(operation), status: "leased", lease_id: leaseId, claimed_by: claimedBy,
+                lease_expires_at: leaseExpiresAt, attempts: Number(operation.attempts) + 1 };
+            let leased;
+            if (autonomyPolicy) {
+                const authorization = this.autonomy.consumptionPlan({ request_id: authorizationRequests[String(operation.id)],
+                    task_id: run.task_id, action: operation.autonomy_action, target: operation.authorization_target,
+                    request_digest: operation.request_digest, idempotency_key: `runtime:${run.id}:${operation.id}:${Number(operation.attempts) + 1}`,
+                    notification_ref: notificationRefs[String(operation.id)], now: args.now });
+                if (authorization.request.policy_id !== autonomyPolicy.id || authorization.request.policy_version !== autonomyPolicy.version) {
+                    throw new Error("Runtime authorization does not match the active autonomy policy");
+                }
+                if (authorization.existing)
+                    throw new Error("Runtime authorization was already consumed");
+                const saved = this.store.saveBatch([...authorization.entries, { kind: "runtime_operation", id: String(operation.id),
+                        version: Number(operation.version) + 1, payload: leasePayload }]);
+                leased = saved[saved.length - 1];
+            }
+            else
+                leased = this.store.save("runtime_operation", String(operation.id), leasePayload);
             dispatched.push({ operation_id: leased.id, lease_id: leaseId, kind: leased.kind, effect: leased.effect,
-                objective: leased.objective, agent_profile_id: leased.agent_profile_id, parent_operation_id: leased.parent_operation_id });
+                objective: leased.objective, agent_profile_id: leased.agent_profile_id, parent_operation_id: leased.parent_operation_id,
+                autonomy_action: leased.autonomy_action, authorization_target: leased.authorization_target, request_digest: leased.request_digest });
             this.runtimeTrace(run, "dispatched", { operation_id: leased.id, lease_id: leaseId, lease_expires_at: leaseExpiresAt, claimed_by: claimedBy });
         }
         return { run: this.store.get("runtime_run", String(run.id)), operations: dispatched };
@@ -629,9 +784,10 @@ export class CraftService {
             if (!RUNTIME_KINDS.has(kind) || !SIDE_EFFECTS.has(effect) || !policy.allowed_effects.includes(effect)) {
                 throw new Error("Runtime child kind or effect is not allowed by policy");
             }
-            return { operation_id: childId, kind, effect,
-                objective: assertNoSecret(text(child.objective, `children[${index}].objective`), "objective"),
-                agent_profile_id: child.agent_profile_id ?? null };
+            const objective = assertNoSecret(text(child.objective, `children[${index}].objective`), "objective");
+            const target = child.target === undefined ? undefined : text(child.target, `children[${index}].target`);
+            const next = { operation_id: childId, kind, effect, objective, ...(target === undefined ? {} : { target }) };
+            return { ...next, ...runtimeAuthorization(String(run.id), next), agent_profile_id: child.agent_profile_id ?? null };
         });
         const retryable = optionalBoolean(args.retryable, "retryable") ?? false;
         const status = verdict === "failed" && retryable && Number(operation.attempts) < Number(policy.max_attempts) ? "pending" : verdict;
@@ -1225,6 +1381,1140 @@ export class CraftService {
     workspaceDiff(args) { return this.workspace.diff(args); }
     workspaceHumanChange(args) { return this.workspace.humanChange(args); }
     workspaceRestore(args) { return this.workspace.restore(args); }
+    workObjectPut(args) { return this.workbench.objectPut(args); }
+    workObjectList(args) { return this.workbench.objectList(args); }
+    workspaceImpact(args) { return this.workbench.impact(args); }
+    workspaceChangeApply(args) { return this.workbench.changeApply(args); }
+    memoryRemember(args) { return this.workbench.remember(args); }
+    memoryTransition(args) { return this.workbench.memoryTransition(args); }
+    contextAssemble(args) { return this.workbench.contextAssemble(args); }
+    changeSetCreate(args) { return this.changeSets.create(args); }
+    changeSetPreview(args) { return this.changeSets.preview(args); }
+    changeSetApply(args) { return this.changeSets.apply(args); }
+    budgetOpen(args) { return this.controlPlane.budgetOpen(args); }
+    controlTrial(trialId, taskId) {
+        const trial = this.store.get("trial", text(trialId, "trial_id"));
+        if (taskId !== undefined && trial.task_id !== taskId)
+            throw new Error("Control-plane trial does not belong to the task");
+        return trial;
+    }
+    controlTrace(trialId, eventType, data) {
+        return this.trialTraceAppend({ trial_id: trialId, event_type: eventType, source: "craft_control_plane", data });
+    }
+    budgetReserve(args) {
+        if (args.trial_id !== undefined)
+            this.controlTrial(args.trial_id);
+        const result = this.controlPlane.budgetReserve(args);
+        if (args.trial_id !== undefined && !result.idempotent)
+            this.controlTrace(args.trial_id, "budget_reserved", {
+                reservation_id: result.reservation.id, budget_id: args.budget_id, resources: args.resources
+            });
+        return result;
+    }
+    budgetSettle(args) {
+        if (args.trial_id !== undefined)
+            this.controlTrial(args.trial_id);
+        const result = this.controlPlane.budgetSettle(args);
+        if (args.trial_id !== undefined && !result.idempotent)
+            this.controlTrace(args.trial_id, "budget_settled", {
+                reservation_id: args.reservation_id, actual: result.reservation.actual
+            });
+        return result;
+    }
+    budgetClose(args) { return this.controlPlane.budgetClose(args); }
+    durableWaitCreate(args) {
+        if (args.trial_id !== undefined)
+            this.controlTrial(args.trial_id, args.task_id);
+        const result = this.controlPlane.waitCreate(args);
+        if (args.trial_id !== undefined)
+            this.controlTrace(args.trial_id, "execution_waiting", {
+                wait_id: result.wait.id, condition: args.condition, execution_environment: result.execution_environment
+            });
+        return result;
+    }
+    durableWaitResume(args) {
+        const result = this.controlPlane.waitResume(args);
+        const wait = result.wait;
+        if (wait.trial_id && !result.idempotent)
+            this.controlTrace(wait.trial_id, "execution_resumed", {
+                wait_id: wait.id, status: wait.status, reason: wait.resume_reason
+            });
+        return result;
+    }
+    externalEventIngest(args) {
+        const eventId = text(args.event_id, "event_id");
+        const eventKey = text(args.event_key, "event_key");
+        const taskId = args.task_id === undefined ? null : text(args.task_id, "task_id");
+        const eventPayload = object(args.payload ?? {}, "payload");
+        const source = String(args.source ?? "external_untrusted");
+        const requestFingerprint = fingerprint({ event_key: eventKey, task_id: taskId, source, payload: eventPayload });
+        const existing = this.store.find("external_event", eventId);
+        if (existing) {
+            if (existing.request_fingerprint !== requestFingerprint)
+                throw new Error("External event idempotency conflict");
+            return { event: existing, deliveries: existing.deliveries, idempotent: true };
+        }
+        if (taskId)
+            this.store.get("task", taskId);
+        const observedAt = args.observed_at === undefined ? new Date().toISOString() : text(args.observed_at, "observed_at");
+        if (Number.isNaN(Date.parse(observedAt)))
+            throw new Error("observed_at must be an ISO timestamp");
+        const waits = this.store.list("durable_wait", 10_000, (item) => item.status === "waiting" && item.condition === "event" &&
+            item.event_key === eventKey && (taskId === null || item.task_id === taskId));
+        const deliveries = waits.map((wait) => {
+            const resumed = this.durableWaitResume({ wait_id: wait.id, signal: "event", signal_key: eventKey,
+                policy_fingerprint: args.policy_fingerprint });
+            return { wait_id: wait.id, task_id: wait.task_id, status: resumed.wait.status,
+                reason: resumed.wait.resume_reason ?? null };
+        });
+        const event = this.store.create("external_event", eventId, { event_key: eventKey, task_id: taskId,
+            source, observed_at: observedAt, payload: eventPayload, request_fingerprint: requestFingerprint, trust: "untrusted_data", deliveries });
+        return { event, deliveries, idempotent: false };
+    }
+    durableWaitSweep(args) {
+        const nowText = args.now === undefined ? new Date().toISOString() : text(args.now, "now");
+        const now = Date.parse(nowText);
+        if (Number.isNaN(now))
+            throw new Error("now must be an ISO timestamp");
+        const limit = finiteInteger(args.limit, "limit", 100, 1, 10_000);
+        const policyFingerprints = object(args.policy_fingerprints ?? {}, "policy_fingerprints");
+        const due = this.store.list("durable_wait", 10_000, (item) => item.status === "waiting" && item.condition === "time" &&
+            Date.parse(String(item.resume_after)) <= now).slice(0, limit);
+        const deliveries = due.map((wait) => {
+            const result = this.durableWaitResume({ wait_id: wait.id, signal: "time", now: nowText,
+                policy_fingerprint: policyFingerprints[String(wait.id)] });
+            return { wait_id: wait.id, task_id: wait.task_id, status: result.wait.status,
+                reason: result.wait.resume_reason ?? null };
+        });
+        return { scanned_at: nowText, due: due.length, deliveries };
+    }
+    fallbackContractSave(args) { return this.controlPlane.fallbackSave(args); }
+    fallbackEvaluate(args) {
+        const contract = this.store.get("fallback_contract", text(args.contract_id, "contract_id"));
+        const result = this.controlPlane.fallbackEvaluate(args);
+        let trial = null;
+        if (args.trial_id !== undefined) {
+            trial = this.controlTrial(args.trial_id, args.task_id);
+            if (trial.subject_type !== contract.subject_type || trial.subject_id !== contract.subject_id ||
+                trial.subject_version !== contract.subject_version)
+                throw new Error("Fallback trial subject does not match the contract");
+        }
+        else if (args.start_trial === true && result.decision === "fallback") {
+            trial = this.trialStart({ task_id: text(args.task_id, "task_id"), case_id: args.case_id,
+                subject_type: contract.subject_type, subject_id: contract.subject_id, subject_version: contract.subject_version,
+                environment: args.environment ?? {}, budget: args.trial_budget ?? {} });
+            const event = result.event;
+            result.event = this.store.save("fallback_event", String(event.id), { ...recordPayload(event), trial_id: trial.id });
+        }
+        if (trial && result.trigger_matched)
+            this.controlTrace(trial.id, "fallback_evaluated", {
+                fallback_event_id: result.event.id, contract_id: contract.id, trigger: args.trigger,
+                decision: result.decision, reservation_id: result.reservation?.id ?? null
+            });
+        return trial ? { ...result, trial } : result;
+    }
+    fallbackComplete(args) {
+        const event = this.store.get("fallback_event", text(args.event_id, "event_id"));
+        if (event.status === "completed")
+            return { event, outcome: this.store.get("outcome", String(event.outcome_id)), idempotent: true };
+        if (event.decision !== "fallback" || event.status !== "running")
+            throw new Error("Only a running fallback can be completed");
+        const trialId = text(args.trial_id ?? event.trial_id, "trial_id");
+        const trial = this.controlTrial(trialId, event.task_id);
+        const contract = this.store.get("fallback_contract", String(event.contract_id));
+        if (trial.subject_type !== contract.subject_type || trial.subject_id !== contract.subject_id ||
+            trial.subject_version !== contract.subject_version)
+            throw new Error("Fallback trial subject does not match the contract");
+        const evidenceIds = array(args.evidence_ids ?? [], "evidence_ids").map((value) => text(value, "evidence_id"));
+        for (const evidenceId of evidenceIds)
+            this.store.get("evidence", evidenceId);
+        const verdict = String(args.verdict);
+        if (!TRIAL_VERDICTS.has(verdict))
+            throw new Error(`Unsupported trial verdict: ${verdict}`);
+        const summary = text(args.summary, "summary");
+        const costs = object(args.costs ?? {}, "costs");
+        if (this.store.find("outcome", `outcome_${trial.id}`))
+            throw new Error(`Outcome already exists for trial: ${trial.id}`);
+        const actualResources = budgetLimits(object(args.actual_resources ?? costs, "actual_resources"));
+        if (event.reservation_id) {
+            const reservation = this.store.get("budget_reservation", String(event.reservation_id));
+            if (reservation.status !== "reserved" || Object.entries(actualResources).some(([key, value]) => !Object.hasOwn(reservation.resources, key) || Number(value) > Number(reservation.resources[key]))) {
+                throw new Error("Fallback actual resources exceed or do not match the active reservation");
+            }
+        }
+        const outcome = this.outcomeRecord({ trial_id: trial.id, verdict: args.verdict, summary: args.summary,
+            failure_type: args.failure_type, scores: args.scores ?? {}, costs, evidence_ids: evidenceIds, source: args.source ?? "fallback_host_receipt" });
+        let settlement = null;
+        if (event.reservation_id)
+            settlement = this.budgetSettle({ reservation_id: event.reservation_id,
+                actual: actualResources, trial_id: trial.id });
+        const saved = this.store.save("fallback_event", String(event.id), { ...recordPayload(event), trial_id: trial.id,
+            status: "completed", outcome_id: outcome.id, completed_at: new Date().toISOString(), settlement_id: settlement ? settlement.reservation.id : null });
+        this.controlTrace(trial.id, "fallback_completed", { fallback_event_id: saved.id, outcome_id: outcome.id,
+            settlement_id: saved.settlement_id });
+        return { event: saved, trial, outcome, settlement, idempotent: false };
+    }
+    credentialHandleRegister(args) { return this.security.handleRegister(args); }
+    credentialLeaseIssue(args) { return this.security.leaseIssue(args); }
+    credentialLeaseRevoke(args) { return this.security.leaseRevoke(args); }
+    egressAuthorize(args) { return this.security.egressAuthorize(args); }
+    egressRequestDigest(args) {
+        return { request_digest: egressRequestDigest(args.method, args.url, args.headers, args.body) };
+    }
+    async egressExecute(args) {
+        const authorization = this.store.get("egress_authorization", text(args.authorization_id, "authorization_id"));
+        const existing = this.store.find("egress_execution", `execution_${authorization.id}`);
+        if (existing) {
+            if (existing.status === "pending" || existing.status === "indeterminate")
+                throw new Error("Egress execution outcome is ambiguous and cannot be retried automatically");
+            return { execution: existing, idempotent: true };
+        }
+        if (authorization.status !== "authorized")
+            throw new Error("Egress authorization is not executable");
+        const lease = this.store.get("credential_lease", String(authorization.lease_id));
+        if (lease.status !== "active" || Date.now() >= Date.parse(String(lease.expires_at)))
+            throw new Error("Credential lease is inactive or expired");
+        const handle = this.store.get("credential_handle", String(authorization.handle_id));
+        if (handle.status !== "active")
+            throw new Error("Credential handle is not active");
+        const requestDigest = egressRequestDigest(args.method, authorization.url, args.headers, args.body);
+        if (requestDigest !== authorization.request_digest)
+            throw new Error("Authorized egress request digest mismatch");
+        let execution = this.store.create("egress_execution", `execution_${authorization.id}`, {
+            authorization_id: authorization.id, task_id: authorization.task_id, lease_id: lease.id, handle_id: handle.id,
+            url: authorization.url, action: authorization.action, method: text(args.method, "method").toUpperCase(),
+            request_digest: requestDigest, status: "pending", response_digest: null, evidence_id: null
+        });
+        try {
+            const response = await this.egressBroker.execute({ url: authorization.url, method: args.method, headers: args.headers,
+                body: args.body, request_digest: requestDigest, secret_ref: handle.secret_ref,
+                header_name: handle.header_name, prefix: handle.prefix, timeout_ms: args.timeout_ms, output_limit: args.output_limit });
+            const responseDigest = fingerprint(response);
+            const artifact = this.artifactRegister({ kind: "egress_receipt",
+                name: `Egress ${authorization.action}`, uri: `craft://egress/${execution.id}`, producer_type: "egress_broker",
+                producer_id: "local-https", metadata: { authorization_id: authorization.id, request_digest: requestDigest,
+                    response_digest: responseDigest, status: response.status, output_limited: response.output_limited } });
+            const evidence = this.evidenceRecord({ source_type: "program", confidence: "confirmed",
+                claim: `Authorized egress completed with HTTP ${response.status}.`, artifact_id: artifact.id,
+                locator: { authorization_id: authorization.id, execution_id: execution.id } });
+            execution = this.store.save("egress_execution", String(execution.id), { ...recordPayload(execution), status: "completed",
+                response_digest: responseDigest, http_status: response.status, output_limited: response.output_limited,
+                resolved_address_digest: response.resolved_address_digest, evidence_id: evidence.id });
+            this.store.save("egress_authorization", String(authorization.id), { ...recordPayload(authorization), status: "consumed",
+                execution_id: execution.id });
+            return { execution, response, artifact, evidence, idempotent: false };
+        }
+        catch (error) {
+            this.store.save("egress_execution", String(execution.id), { ...recordPayload(execution), status: "indeterminate",
+                error_class: error instanceof Error ? error.name : "UnknownError" });
+            throw error;
+        }
+    }
+    async sandboxEgressDeliver(args) {
+        const ticket = this.store.get("sandbox_ticket", text(args.ticket_id, "ticket_id"));
+        if (ticket.status !== "issued")
+            throw new Error("Sandbox egress requires an active ticket");
+        const profile = this.store.get("sandbox_profile", String(ticket.profile_id), Number(ticket.profile_version));
+        const capabilities = profile.capabilities;
+        if (capabilities.network !== "denied" || capabilities.filesystem !== "workspace_overlay") {
+            throw new Error("Sandbox egress delivery requires denied network and a workspace overlay");
+        }
+        const authorization = this.store.get("egress_authorization", text(args.authorization_id, "authorization_id"));
+        if (authorization.task_id !== ticket.task_id)
+            throw new Error("Sandbox ticket and egress authorization must belong to the same task");
+        const outputName = args.output_name === undefined ? "response.json" : text(args.output_name, "output_name");
+        if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}\.json$/u.test(outputName))
+            throw new Error("output_name must be a safe JSON filename");
+        const bindingId = text(args.binding_id, "binding_id");
+        const bindingFingerprint = fingerprint({ ticket_id: ticket.id, authorization_id: authorization.id, output_name: outputName });
+        const existing = this.store.find("sandbox_egress_binding", bindingId);
+        if (existing) {
+            if (existing.binding_fingerprint !== bindingFingerprint)
+                throw new Error("Sandbox egress binding idempotency conflict");
+            if (existing.status !== "completed")
+                throw new Error("Sandbox egress outcome is ambiguous and cannot be retried automatically");
+            return { binding: existing, idempotent: true };
+        }
+        if (authorization.status !== "authorized")
+            throw new Error("Sandbox egress authorization is not executable");
+        let binding = this.store.create("sandbox_egress_binding", bindingId, { ticket_id: ticket.id, task_id: ticket.task_id,
+            authorization_id: authorization.id, output_name: outputName, binding_fingerprint: bindingFingerprint,
+            status: "pending", artifact_id: null, evidence_id: null });
+        try {
+            const executed = await this.egressExecute({ authorization_id: authorization.id, method: args.method,
+                headers: args.headers, body: args.body, timeout_ms: args.timeout_ms, output_limit: args.output_limit });
+            if (!executed.response)
+                throw new Error("Egress response is unavailable for sandbox delivery");
+            const response = executed.response;
+            const ticketHash = createHash("sha256").update(String(ticket.id)).digest("hex").slice(0, 24);
+            const bindingHash = createHash("sha256").update(bindingId).digest("hex").slice(0, 24);
+            const inbox = join(this.store.paths.runtimeDir, "sandbox-inbox", ticketHash);
+            await mkdir(inbox, { recursive: true });
+            const outputPath = join(inbox, `${bindingHash}-${outputName}`);
+            const envelope = { trust: "untrusted_external_response", execution_authority: false,
+                authorization_id: authorization.id, request_digest: authorization.request_digest,
+                response_digest: executed.execution.response_digest, status: response.status,
+                headers: response.headers, body: response.body, output_limited: response.output_limited };
+            await writeFile(outputPath, `${JSON.stringify(envelope, null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
+            const artifact = this.artifactRegister({ kind: "sandbox_egress_inbox", name: `Sandbox egress ${binding.id}`,
+                uri: pathToFileURL(outputPath).toString(), producer_type: "egress_broker", producer_id: "local-https",
+                digest: fingerprint(envelope), metadata: { ticket_id: ticket.id, authorization_id: authorization.id,
+                    response_digest: envelope.response_digest, trust: envelope.trust, execution_authority: false } });
+            const evidence = this.evidenceRecord({ source_type: "program", confidence: "bounded",
+                claim: "A sanitized untrusted external response was delivered to the isolated sandbox inbox.", artifact_id: artifact.id,
+                locator: { ticket_id: ticket.id, binding_id: binding.id } });
+            binding = this.store.save("sandbox_egress_binding", bindingId, { ...recordPayload(binding), status: "completed",
+                output_uri: artifact.uri, response_digest: envelope.response_digest, artifact_id: artifact.id, evidence_id: evidence.id });
+            return { binding, artifact, evidence, idempotent: false };
+        }
+        catch (error) {
+            this.store.save("sandbox_egress_binding", bindingId, { ...recordPayload(binding), status: "indeterminate",
+                error_class: error instanceof Error ? error.name : "UnknownError" });
+            throw error;
+        }
+    }
+    externalEffectPrepare(args) { const result = this.effects.prepare(args); this.effectTrace(result.effect, "effect.prepared"); return result; }
+    externalEffectStart(args) {
+        const plan = this.effects.startPlan(args);
+        if (plan.idempotent)
+            return { effect: plan.operation, idempotent: true };
+        const policies = this.store.list("autonomy_policy", Number.MAX_SAFE_INTEGER, (item) => item.task_id === plan.operation.task_id && item.status === "active");
+        if (!policies.length) {
+            const result = this.effects.start(args);
+            this.effectTrace(result.effect, "effect.started");
+            return result;
+        }
+        if (policies.length !== 1)
+            throw new Error("External effect requires one unambiguous active autonomy policy");
+        const authorization = this.autonomy.consumptionPlan({ request_id: args.authorization_request_id,
+            task_id: plan.operation.task_id, action: plan.operation.effect, target: plan.operation.target,
+            request_digest: plan.operation.request_digest, idempotency_key: plan.operation.idempotency_key,
+            notification_ref: args.notification_ref, now: args.now });
+        if (authorization.request.policy_id !== policies[0].id || authorization.request.policy_version !== policies[0].version) {
+            throw new Error("External effect autonomy authorization does not match the active policy");
+        }
+        if (authorization.existing)
+            throw new Error("External effect autonomy authorization was already consumed");
+        const [consumption, request, effect] = this.store.saveBatch([...authorization.entries,
+            { kind: "external_effect", id: String(plan.operation.id), version: Number(plan.operation.version) + 1, payload: plan.payload }]);
+        this.effectTrace(effect, "effect.started");
+        return { effect, authorization: request, consumption, dispatch: plan.dispatch, idempotent: false };
+    }
+    externalEffectReport(args) { const result = this.effects.report(args); this.effectTrace(result.effect, "effect.reported"); return result; }
+    externalEffectResolve(args) { const result = this.effects.resolve(args); this.effectTrace(result.effect, "effect.resolved"); return result; }
+    async effectReconciliationExecute(args) {
+        const issued = this.effects.reconcileIssue(args);
+        const reconciliation = issued.reconciliation;
+        if (issued.idempotent && reconciliation.status !== "executing")
+            return issued;
+        try {
+            const executed = await this.egressExecute({ authorization_id: reconciliation.authorization_id, method: "GET",
+                headers: args.headers, timeout_ms: args.timeout_ms, output_limit: args.output_limit });
+            const result = this.effects.reconcileReport({ reconciliation_id: reconciliation.id,
+                execution_id: executed.execution.id });
+            this.effectTrace(result.effect, "effect.reconciled");
+            return { ...result, execution: executed.execution, idempotent: executed.idempotent };
+        }
+        catch (error) {
+            this.effects.reconcileFail({ reconciliation_id: reconciliation.id,
+                error_class: error instanceof Error ? error.name : "UnknownError" });
+            throw error;
+        }
+    }
+    effectCompensationIssue(args) { const result = this.effects.compensateIssue(args); this.effectTrace(result.effect, "effect.compensation_started"); return result; }
+    effectCompensationReport(args) { const result = this.effects.compensateReport(args); this.effectTrace(result.effect, "effect.compensation_reported"); return result; }
+    async effectCompensationExecute(args) {
+        const issued = this.effects.compensateIssue(args);
+        const compensation = issued.compensation;
+        if (issued.idempotent && compensation.status !== "executing")
+            return issued;
+        try {
+            const executed = await this.egressExecute({ authorization_id: compensation.authorization_id,
+                method: args.method, headers: args.headers, body: args.body, timeout_ms: args.timeout_ms, output_limit: args.output_limit });
+            const result = this.effects.compensateFromExecution({ compensation_id: compensation.id,
+                execution_id: executed.execution.id });
+            this.effectTrace(result.effect, "effect.compensation_reported");
+            return { ...result, execution: executed.execution, idempotent: executed.idempotent };
+        }
+        catch (error) {
+            const execution = this.store.find("egress_execution", `execution_${compensation.authorization_id}`);
+            const errorClass = error instanceof Error ? error.name : "UnknownError";
+            if (!execution || !new Set(["pending", "indeterminate"]).has(String(execution.status))) {
+                this.effects.compensateCancel({ compensation_id: compensation.id, error_class: errorClass });
+                throw error;
+            }
+            const evidence = this.evidenceRecord({ source_type: "program", confidence: "bounded",
+                claim: "Compensation transport ended without a definitive remote result.",
+                locator: { compensation_id: compensation.id, execution_id: execution.id, error_class: errorClass } });
+            const result = this.effects.compensateReport({ compensation_id: compensation.id, status: "indeterminate",
+                evidence_ids: [evidence.id] });
+            this.effectTrace(result.effect, "effect.compensation_reported");
+            return { ...result, execution, evidence, idempotent: false };
+        }
+    }
+    effectSagaCreate(args) { return this.effects.sagaCreate(args); }
+    effectSagaGet(args) { return this.effects.sagaGet(args); }
+    recoveryQueueRefresh(args) { return this.recovery.refresh(args); }
+    recoveryWorkClaim(args) { return this.recovery.claim(args); }
+    recoveryWorkReport(args) { return this.recovery.report(args); }
+    recoveryLeaseRecover(args) { return this.recovery.recoverExpired(args); }
+    triggerSubscriptionSave(args) { return this.triggers.subscriptionSave(args); }
+    webhookTriggerIngest(args) {
+        const result = this.triggers.webhookIngest(args);
+        const triggerEvent = result.trigger_event;
+        if (!result.dispatch || triggerEvent.status === "delivered")
+            return result;
+        let reservation = null;
+        const resources = triggerEvent.per_event_resources;
+        if (triggerEvent.budget_id && Object.keys(resources).length) {
+            try {
+                reservation = this.budgetReserve({ budget_id: triggerEvent.budget_id,
+                    reservation_id: `trigger_${triggerEvent.subscription_id}_${triggerEvent.event_id}`, resources,
+                    purpose: `trigger:${triggerEvent.subscription_id}` }).reservation;
+            }
+            catch (error) {
+                this.store.save("trigger_event", String(triggerEvent.id), { ...recordPayload(triggerEvent), status: "awaiting_budget" });
+                throw error;
+            }
+        }
+        const dispatch = result.dispatch;
+        const delivered = this.externalEventIngest({ event_id: `trigger_${triggerEvent.subscription_id}_${triggerEvent.event_id}`,
+            event_key: dispatch.event_key, task_id: dispatch.task_id, payload: dispatch.payload, source: "signed_webhook",
+            observed_at: triggerEvent.timestamp });
+        const saved = this.store.save("trigger_event", String(triggerEvent.id), { ...recordPayload(triggerEvent), status: "delivered",
+            external_event_id: delivered.event.id, reservation_id: reservation?.id ?? null });
+        return { trigger_event: saved, dispatch, delivery: delivered, reservation, idempotent: result.idempotent };
+    }
+    speculativePolicySave(args) { return this.speculative.policySave(args); }
+    speculativeEnqueue(args) {
+        const policy = this.store.get("speculative_policy", text(args.policy_id, "policy_id"), finiteInteger(args.policy_version, "policy_version", 0));
+        const event = this.store.get("trigger_event", text(args.trigger_event_id, "trigger_event_id"));
+        const reservationId = `spec_${policy.id}_v${policy.version}_${event.id}`;
+        const reservation = this.budgetReserve({ budget_id: policy.budget_id, reservation_id: reservationId,
+            resources: policy.estimated_resources, purpose: `speculative:${policy.id}:v${policy.version}` });
+        try {
+            const result = this.speculative.enqueue({ ...args, reservation_id: reservationId });
+            let candidate = result.candidate;
+            if (!candidate.trial_id) {
+                const trial = this.trialStart({ trial_id: `trial_${candidate.id}`, task_id: candidate.task_id,
+                    subject_type: "speculative_policy", subject_id: policy.id, subject_version: policy.version,
+                    environment: { trigger_event_id: event.id, input_fingerprint: candidate.input_fingerprint },
+                    budget: policy.estimated_resources });
+                candidate = this.store.save("speculative_candidate", String(candidate.id), { ...recordPayload(candidate), trial_id: trial.id });
+                this.trialTraceAppend({ trial_id: trial.id, event_type: "speculative.queued", source: "craft",
+                    data: { candidate_id: candidate.id, operation: candidate.operation, execution_authority: false } });
+            }
+            return { ...result, candidate, trial: this.store.get("trial", String(candidate.trial_id)), reservation: reservation.reservation };
+        }
+        catch (error) {
+            if (!reservation.idempotent)
+                this.budgetSettle({ reservation_id: reservationId, actual: {} });
+            throw error;
+        }
+    }
+    speculativeClaim(args) {
+        const result = this.speculative.claim(args);
+        const candidate = result.candidate;
+        if (candidate?.trial_id)
+            this.trialTraceAppend({ trial_id: candidate.trial_id, event_type: "speculative.leased", source: "craft",
+                data: { candidate_id: candidate.id, claimed_by: candidate.claimed_by, lease_expires_at: candidate.lease_expires_at } });
+        return result;
+    }
+    speculativeSubmit(args) {
+        const artifactIds = optionalTextArray(args.artifact_ids, "artifact_ids");
+        const evidenceIds = optionalTextArray(args.evidence_ids, "evidence_ids");
+        for (const artifactId of artifactIds)
+            this.store.get("artifact", artifactId);
+        for (const evidenceId of evidenceIds)
+            this.store.get("evidence", evidenceId);
+        const candidate = this.store.get("speculative_candidate", text(args.candidate_id, "candidate_id"));
+        const reservation = this.store.get("budget_reservation", String(candidate.reservation_id));
+        const actual = object(args.actual_resources ?? {}, "actual_resources");
+        for (const [name, amount] of Object.entries(actual))
+            if (typeof amount !== "number" || !Number.isFinite(amount) || amount < 0 ||
+                !Object.hasOwn(reservation.resources, name) || amount > Number(reservation.resources[name])) {
+                throw new Error(`actual_resources.${name} exceeds the speculative reservation`);
+            }
+        const result = this.speculative.submit({ ...args, artifact_ids: artifactIds, evidence_ids: evidenceIds });
+        const settled = this.budgetSettle({ reservation_id: reservation.id, actual });
+        const saved = result.candidate;
+        if (saved.trial_id) {
+            this.trialTraceAppend({ trial_id: saved.trial_id, event_type: `speculative.${saved.status}`, source: "craft",
+                data: { candidate_id: saved.id, summary: saved.summary }, artifact_ids: artifactIds, evidence_ids: evidenceIds });
+            if (saved.status === "failed")
+                this.outcomeRecord({ trial_id: saved.trial_id, verdict: "failed", summary: saved.summary,
+                    failure_type: "speculative_worker_failed", costs: actual, evidence_ids: evidenceIds, source: "worker_observed" });
+        }
+        return { ...result, settlement: settled.reservation,
+            outcome: saved.status === "failed" && saved.trial_id ? this.store.get("outcome", `outcome_${saved.trial_id}`) : null };
+    }
+    speculativeDecide(args) {
+        const finalIds = optionalTextArray(args.final_artifact_ids, "final_artifact_ids");
+        for (const artifactId of finalIds)
+            this.store.get("artifact", artifactId);
+        const current = this.store.get("speculative_candidate", text(args.candidate_id, "candidate_id"));
+        const reservation = current.trial_id ? this.store.get("budget_reservation", String(current.reservation_id)) : null;
+        if (reservation && reservation.status !== "settled")
+            throw new Error("Speculative candidate budget must be settled before evaluation");
+        const result = this.speculative.decide({ ...args, ...(args.final_artifact_ids === undefined ? {} : { final_artifact_ids: finalIds }) });
+        const candidate = result.candidate;
+        if (!candidate.trial_id)
+            return result;
+        const signal = result.preference_signal;
+        this.trialTraceAppend({ trial_id: candidate.trial_id, event_type: `speculative.${candidate.status}`, source: "human_observed",
+            data: { candidate_id: candidate.id, reviewer: candidate.reviewer, changed: signal.changed },
+            artifact_ids: candidate.final_artifact_ids, evidence_ids: candidate.evidence_ids });
+        const outcome = this.outcomeRecord({ trial_id: candidate.trial_id, verdict: candidate.status === "accepted" ? "passed" : "failed",
+            summary: candidate.correction ?? `Candidate ${candidate.status} by ${candidate.reviewer}`,
+            failure_type: candidate.status === "accepted" ? undefined : "human_rejected",
+            scores: { human_acceptance: candidate.status === "accepted" ? 1 : 0, human_changed: signal.changed ? 1 : 0 },
+            costs: reservation.actual, evidence_ids: candidate.evidence_ids, source: "human_observed" });
+        return { ...result, outcome };
+    }
+    speculativeExpire(args) {
+        const result = this.speculative.expire(args);
+        const settlements = result.expired.map((candidate) => this.budgetSettle({ reservation_id: candidate.reservation_id, actual: {} }).reservation);
+        const outcomes = result.expired.filter((candidate) => candidate.trial_id).map((candidate) => {
+            this.trialTraceAppend({ trial_id: candidate.trial_id, event_type: "speculative.expired", source: "craft",
+                data: { candidate_id: candidate.id, expired_at: candidate.expired_at } });
+            return this.outcomeRecord({ trial_id: candidate.trial_id, verdict: "cancelled", summary: "Speculative candidate expired unused.",
+                failure_type: "candidate_expired", costs: {}, source: "craft_runtime" });
+        });
+        return { ...result, settlements, outcomes };
+    }
+    lineageRecord(args) { return this.lineage.record(args); }
+    lineageTrace(args) { return this.lineage.trace(args); }
+    lineageVerify(args) { return this.lineage.verify(args); }
+    dehydrationCapture(args) { return this.hydration.capture(args); }
+    hydrationInspect(args) { return this.hydration.inspect(args); }
+    hydrationClaim(args) { return this.hydration.claim(args); }
+    hydrationReport(args) { return this.hydration.report(args); }
+    hydrationLeaseRecover(args) { return this.hydration.recover(args); }
+    autonomyPolicySave(args) { return this.autonomy.policySave(args); }
+    autonomyRequest(args) { return this.autonomy.request(args); }
+    autonomyDecide(args) { return this.autonomy.decide(args); }
+    autonomyConsume(args) { return this.autonomy.consume(args); }
+    contractObservationRecord(args) { return this.contracts.observe(args); }
+    contractCandidateInfer(args) { return this.contracts.infer(args); }
+    contractCandidateReview(args) { return this.contracts.review(args); }
+    contractCandidateVerify(args) { return this.contracts.verify(args); }
+    contractDiff(args) { return this.contracts.diff(args); }
+    contractPublish(args) { return this.contracts.publish(args); }
+    contractPublicationRollback(args) { return this.contracts.rollback(args); }
+    capabilityCanaryStart(args) { return this.capabilityCanary.start(args); }
+    capabilityCanaryRoute(args) { return this.capabilityCanary.route(args); }
+    capabilityCanaryObserve(args) { return this.capabilityCanary.observe(args); }
+    capabilityCanaryEvaluate(args) { return this.capabilityCanary.evaluate(args); }
+    capabilityBundlePropose(args) { return this.federation.propose(args); }
+    capabilityBundleReview(args) { return this.federation.review(args); }
+    capabilityBundlePublish(args) { return this.federation.publish(args); }
+    capabilityReleaseSubscribe(args) { return this.federation.subscribe(args); }
+    capabilitySubscriptionResolve(args) { return this.federation.resolve(args); }
+    capabilityReleaseRevoke(args) { return this.federation.revoke(args); }
+    hubSourceRegister(args) { return this.hubSync.sourceRegister(args); }
+    hubCatalogIngest(args) { return this.hubSync.ingest(args); }
+    hubCatalogSearch(args) { return this.hubSync.search(args); }
+    hubSourceDisable(args) { return this.hubSync.sourceDisable(args); }
+    capabilityMaterializeStage(args) { return this.materialization.stage(args); }
+    capabilityMaterializeReview(args) { return this.materialization.review(args); }
+    capabilityMaterializeActivate(args) { return this.materialization.activate(args); }
+    capabilityCertificationAssess(args) { return this.certification.assess(args); }
+    capabilityCertificationPromote(args) { return this.certification.promote(args); }
+    supplyChainAdvisoryRecord(args) { return this.supplyChain.advisoryRecord(args); }
+    supplyChainAdvisoryResolve(args) { return this.supplyChain.advisoryResolve(args); }
+    supplyChainReconcile(args) { return this.supplyChain.reconcile(args); }
+    attentionRefresh(args) { return this.attention.refresh(args); }
+    attentionList(args) { return this.attention.list(args); }
+    attentionDecide(args) { return this.attention.decide(args); }
+    homeView(args) { return this.home.view(args); }
+    homeTask(args) { return this.home.task(args); }
+    homeHostRuns(args) { return this.home.hostRuns(args); }
+    homeHostRun(args) { return this.home.hostRun(args); }
+    codexDispatchPrepare(args) { return this.codexHost.prepare(args); }
+    async codexDispatchExecute(args) { return this.codexHost.execute(args); }
+    claudeDispatchPrepare(args) { return this.claudeHost.prepare(args); }
+    async claudeDispatchExecute(args) { return this.claudeHost.execute(args); }
+    hostRunStart(args) { return this.hostRuns.start(args); }
+    hostRunGet(args) { return this.hostRuns.get(args); }
+    hostRunCancel(args) { return this.hostRuns.cancel(args); }
+    hostRunRecover(args) { return this.hostRuns.recover(args); }
+    acceptancePlanSave(args) {
+        const task = this.store.get("task", text(args.task_id, "task_id"));
+        const launch = this.store.get("work_launch", text(args.launch_id, "launch_id"));
+        if (launch.task_id !== task.id)
+            throw new Error("Acceptance plan task does not match the Work Launch");
+        const criteria = array(args.criteria, "criteria").map((value, index) => { const item = object(value, `criteria[${index}]`); const criterionId = text(item.id, `criteria[${index}].id`); const method = text(item.method, `criteria[${index}].method`); if (!ACCEPTANCE_METHODS.has(method))
+            throw new Error(`criteria[${index}].method is unsupported`); return { id: criterionId, name: text(item.name, `criteria[${index}].name`), method, required: item.required === undefined ? true : optionalBoolean(item.required, `criteria[${index}].required`), instructions: item.instructions == null ? null : text(item.instructions, `criteria[${index}].instructions`) }; });
+        if (!criteria.length || new Set(criteria.map((item) => item.id)).size !== criteria.length)
+            throw new Error("Acceptance criteria must be non-empty with unique ids");
+        const planId = String(args.plan_id ?? `acceptance_${launch.id}`);
+        const existing = this.store.find("acceptance_plan", planId);
+        const digest = valueDigest({ task_id: task.id, launch_id: launch.id, criteria });
+        if (existing) {
+            if (existing.definition_digest !== digest)
+                throw new Error("Acceptance plan idempotency conflict");
+            return { plan: existing, trial: this.store.get("trial", String(existing.trial_id)), idempotent: true };
+        }
+        let plan = this.store.create("acceptance_plan", planId, { task_id: task.id, launch_id: launch.id, name: text(args.name ?? "Work acceptance", "name"), criteria, definition_digest: digest, status: "active" });
+        const trial = this.trialStart({ trial_id: `trial_${plan.id}`, task_id: task.id, subject_type: "acceptance_plan", subject_id: plan.id, subject_version: plan.version, environment: { work_launch_id: launch.id }, budget: {} });
+        plan = this.store.save("acceptance_plan", planId, { ...plan, trial_id: trial.id });
+        this.trialTraceAppend({ trial_id: trial.id, event_type: "acceptance.planned", source: "craft_runtime", data: { plan_id: plan.id, criterion_count: criteria.length } });
+        return { plan, trial, idempotent: false };
+    }
+    acceptancePlanGet(args) { const plan = this.store.get("acceptance_plan", text(args.plan_id, "plan_id")); const checks = this.store.list("acceptance_check", 10_000, (item) => item.plan_id === plan.id); const assessment = this.store.find("acceptance_assessment", `assessment_${plan.id}`); return { plan, checks, assessment, outcome: plan.trial_id ? this.store.find("outcome", `outcome_${plan.trial_id}`) : null }; }
+    acceptanceCheckRecord(args) {
+        const plan = this.store.get("acceptance_plan", text(args.plan_id, "plan_id"));
+        if (plan.status !== "active")
+            throw new Error("Acceptance plan is not active");
+        const criterionId = text(args.criterion_id, "criterion_id");
+        const criterion = plan.criteria.find((item) => item.id === criterionId);
+        if (!criterion)
+            throw new Error("Acceptance criterion is unknown");
+        const evaluatorType = text(args.evaluator_type, "evaluator_type");
+        if (evaluatorType !== criterion.method)
+            throw new Error("Evaluator type does not match the acceptance method");
+        const result = text(args.result, "result");
+        if (!ACCEPTANCE_RESULTS.has(result))
+            throw new Error("Acceptance result is unsupported");
+        const evidenceIds = array(args.evidence_ids, "evidence_ids").map((value) => text(value, "evidence_id"));
+        if (!evidenceIds.length)
+            throw new Error("Acceptance check requires evidence");
+        for (const evidenceId of evidenceIds)
+            this.store.get("evidence", evidenceId);
+        const checkId = String(args.check_id ?? id("acceptance_check"));
+        const identity = { plan_id: plan.id, plan_version: plan.version, criterion_id: criterionId, evaluator_type: evaluatorType, evaluator_id: text(args.evaluator_id, "evaluator_id"), result, summary: text(args.summary, "summary"), evidence_ids: evidenceIds };
+        const digest = valueDigest(identity);
+        const existing = this.store.find("acceptance_check", checkId);
+        if (existing) {
+            if (existing.check_digest !== digest)
+                throw new Error("Acceptance check idempotency conflict");
+            return { check: existing, idempotent: true };
+        }
+        return { check: this.store.create("acceptance_check", checkId, { ...identity, check_digest: digest }), idempotent: false };
+    }
+    acceptanceHumanReview(args) {
+        const plan = this.store.get("acceptance_plan", text(args.plan_id, "plan_id"));
+        const criterionId = text(args.criterion_id, "criterion_id");
+        const criterion = plan.criteria.find((item) => item.id === criterionId);
+        if (!criterion)
+            throw new Error("Acceptance criterion is unknown");
+        if (criterion.method !== "human")
+            throw new Error("Workbench human review only accepts human criteria");
+        const result = text(args.result, "result");
+        if (!ACCEPTANCE_RESULTS.has(result))
+            throw new Error("Acceptance result is unsupported");
+        const summary = text(args.summary, "summary");
+        const reviewer = text(args.reviewer, "reviewer");
+        const reviewId = args.review_id === undefined ? id("human_review") : text(args.review_id, "review_id");
+        const evidence = this.evidenceRecord({ evidence_id: `evidence_${reviewId}`, source_type: "human", confidence: result === "passed" ? "confirmed" : result === "failed" ? "rejected" : "bounded", claim: summary, locator: `acceptance:${plan.id}:${criterionId}`, metadata: { reviewer, criterion_name: criterion.name } });
+        const check = this.acceptanceCheckRecord({ check_id: `check_${reviewId}`, plan_id: plan.id, criterion_id: criterionId, evaluator_type: "human", evaluator_id: reviewer, result, summary, evidence_ids: [evidence.id] });
+        const assessed = this.acceptanceAssess({ plan_id: plan.id });
+        return { evidence, check: check.check, assessment: assessed.assessment, outcome: assessed.outcome };
+    }
+    acceptanceEvaluatorSave(args) {
+        const method = text(args.method, "method");
+        if (!ACCEPTANCE_METHODS.has(method) || method === "human")
+            throw new Error("Automated acceptance evaluator method must be program, model, or business_signal");
+        const configuration = object(args.configuration ?? {}, "configuration");
+        assertNoSecret(canonical(configuration), "configuration");
+        return this.store.save("acceptance_evaluator", String(args.evaluator_id ?? id("acceptance_evaluator")), { name: text(args.name, "name"), method, adapter_id: text(args.adapter_id, "adapter_id"), configuration, max_attempts: finiteInteger(args.max_attempts, "max_attempts", 3, 1, 20), enabled: args.enabled === undefined ? true : optionalBoolean(args.enabled, "enabled") });
+    }
+    acceptanceEvaluationPrepare(args) {
+        const plan = this.store.get("acceptance_plan", text(args.plan_id, "plan_id"));
+        if (plan.status !== "active")
+            throw new Error("Acceptance plan is not active");
+        const criterionId = text(args.criterion_id, "criterion_id");
+        const criterion = plan.criteria.find((item) => item.id === criterionId);
+        if (!criterion)
+            throw new Error("Acceptance criterion is unknown");
+        if (criterion.method === "human")
+            throw new Error("Human criteria are reviewed directly, not dispatched");
+        const evaluator = this.store.get("acceptance_evaluator", text(args.evaluator_id, "evaluator_id"), args.evaluator_version === undefined ? undefined : finiteInteger(args.evaluator_version, "evaluator_version", 1));
+        if (evaluator.enabled !== true)
+            throw new Error("Acceptance evaluator is disabled");
+        if (evaluator.method !== criterion.method)
+            throw new Error("Acceptance evaluator method does not match the criterion");
+        const jobId = String(args.job_id ?? `acceptance_job_${plan.id}_${criterionId}`);
+        const input = object(args.input ?? {}, "input");
+        assertNoSecret(canonical(input), "input");
+        const identity = { plan_id: plan.id, plan_version: plan.version, criterion_id: criterionId, evaluator_id: evaluator.id, evaluator_version: evaluator.version, adapter_id: evaluator.adapter_id, evaluator_configuration: evaluator.configuration, max_attempts: evaluator.max_attempts, input };
+        const requestDigest = valueDigest(identity);
+        const existing = this.store.find("acceptance_evaluation_job", jobId);
+        if (existing) {
+            if (existing.request_digest !== requestDigest)
+                throw new Error("Acceptance evaluation job idempotency conflict");
+            return { job: existing, idempotent: true };
+        }
+        return { job: this.store.create("acceptance_evaluation_job", jobId, { ...identity, request_digest: requestDigest, status: "ready", attempts: 0, lease_id: null, lease_expires_at: null }), idempotent: false };
+    }
+    acceptanceFileEvaluationPrepare(args) {
+        const configuration = { ...(args.allowed_extensions === undefined ? {} : { allowed_extensions: array(args.allowed_extensions, "allowed_extensions").map((item) => text(item, "allowed_extension")) }), ...(args.max_bytes === undefined ? {} : { max_bytes: finiteInteger(args.max_bytes, "max_bytes", 1, 1) }) };
+        const evaluatorId = `builtin_file_artifact_${valueDigest(configuration).slice(0, 16)}`;
+        let evaluator = this.store.find("acceptance_evaluator", evaluatorId);
+        if (!evaluator)
+            evaluator = this.acceptanceEvaluatorSave({ evaluator_id: evaluatorId, name: "Built-in file artifact validator", method: "program", adapter_id: "builtin:file-artifact", configuration, max_attempts: 3 });
+        return this.acceptanceEvaluationPrepare({ plan_id: args.plan_id, criterion_id: args.criterion_id, evaluator_id: evaluator.id, evaluator_version: evaluator.version, job_id: args.job_id, input: { workspace: text(args.workspace, "workspace"), relative_path: text(args.relative_path, "relative_path"), ...(args.expected_sha256 === undefined ? {} : { expected_sha256: text(args.expected_sha256, "expected_sha256") }) } });
+    }
+    acceptanceCoverageEvaluationPrepare(args) { const names = ["lines", "branches", "functions", "statements"]; const configuration = {}; for (const name of names)
+        if (args[`${name}_threshold`] !== undefined) {
+            const value = Number(args[`${name}_threshold`]);
+            if (!Number.isFinite(value) || value < 0 || value > 100)
+                throw new Error(`${name}_threshold must be between 0 and 100`);
+            configuration[`${name}_threshold`] = value;
+        } const evaluatorId = `builtin_coverage_report_${valueDigest(configuration).slice(0, 16)}`; let evaluator = this.store.find("acceptance_evaluator", evaluatorId); if (!evaluator)
+        evaluator = this.acceptanceEvaluatorSave({ evaluator_id: evaluatorId, name: "Built-in coverage report validator", method: "program", adapter_id: "builtin:coverage-report", configuration }); return this.acceptanceEvaluationPrepare({ plan_id: args.plan_id, criterion_id: args.criterion_id, evaluator_id: evaluator.id, evaluator_version: evaluator.version, job_id: args.job_id, input: { workspace: text(args.workspace, "workspace"), relative_path: text(args.relative_path, "relative_path") } }); }
+    acceptanceMediaProbePrepare(args) { const names = ["min_duration_seconds", "min_width", "min_height"]; const configuration = {}; for (const name of names)
+        if (args[name] !== undefined) {
+            const value = Number(args[name]);
+            if (!Number.isFinite(value) || value < 0)
+                throw new Error(`${name} must be a non-negative finite number`);
+            configuration[name] = value;
+        } const evaluatorId = `builtin_media_probe_${valueDigest(configuration).slice(0, 16)}`; let evaluator = this.store.find("acceptance_evaluator", evaluatorId); if (!evaluator)
+        evaluator = this.acceptanceEvaluatorSave({ evaluator_id: evaluatorId, name: "Built-in ffprobe JSON validator", method: "program", adapter_id: "builtin:media-probe", configuration }); return this.acceptanceEvaluationPrepare({ plan_id: args.plan_id, criterion_id: args.criterion_id, evaluator_id: evaluator.id, evaluator_version: evaluator.version, job_id: args.job_id, input: { workspace: text(args.workspace, "workspace"), relative_path: text(args.relative_path, "relative_path") } }); }
+    domainKitSave(args) {
+        const fields = array(args.fields, "fields").map((value, index) => { const item = object(value, `fields[${index}]`); const type = text(item.type, `fields[${index}].type`); if (!DOMAIN_FIELD_TYPES.has(type))
+            throw new Error(`fields[${index}].type is unsupported`); const options = item.options === undefined ? [] : array(item.options, `fields[${index}].options`).map((option) => text(option, `fields[${index}].option`)); if (type === "choice" && !options.length)
+            throw new Error(`fields[${index}].options must not be empty for choice`); if (type !== "choice" && options.length)
+            throw new Error(`fields[${index}].options are only valid for choice`); return { id: text(item.id, `fields[${index}].id`), label: text(item.label, `fields[${index}].label`), type, required: item.required === undefined ? true : optionalBoolean(item.required, `fields[${index}].required`), options }; });
+        if (!fields.length || new Set(fields.map((item) => item.id)).size !== fields.length)
+            throw new Error("Domain Kit fields must be non-empty with unique ids");
+        const fieldMap = new Map(fields.map((item) => [item.id, item]));
+        const criteria = array(args.criteria, "criteria").map((value, index) => {
+            const item = object(value, `criteria[${index}]`);
+            const method = text(item.method, `criteria[${index}].method`);
+            if (!ACCEPTANCE_METHODS.has(method))
+                throw new Error(`criteria[${index}].method is unsupported`);
+            const evaluator = item.evaluator == null ? null : object(item.evaluator, `criteria[${index}].evaluator`);
+            if (evaluator) {
+                const evaluatorType = text(evaluator.type, `criteria[${index}].evaluator.type`);
+                if (!new Set(["file", "coverage_report", "media_probe"]).has(evaluatorType) || method !== "program")
+                    throw new Error("Domain Kit supports only declared built-in evaluators on program criteria");
+                const pathField = text(evaluator.path_field, `criteria[${index}].evaluator.path_field`);
+                if (fieldMap.get(pathField)?.type !== "path")
+                    throw new Error("Evaluator path_field must reference a path field");
+            }
+            return { id: text(item.id, `criteria[${index}].id`), name: text(item.name, `criteria[${index}].name`), method, required: item.required === undefined ? true : optionalBoolean(item.required, `criteria[${index}].required`), evaluator };
+        });
+        if (!criteria.length || new Set(criteria.map((item) => item.id)).size !== criteria.length)
+            throw new Error("Domain Kit criteria must be non-empty with unique ids");
+        const capabilityRequirements = array(args.capability_requirements ?? [], "capability_requirements").map((value, index) => { const item = object(value, `capability_requirements[${index}]`); const trust = text(item.required_trust ?? "trusted", `capability_requirements[${index}].required_trust`); const effect = text(item.effect, `capability_requirements[${index}].effect`); if (!new Set(["trusted", "verified"]).has(trust) || !SIDE_EFFECTS.has(effect))
+            throw new Error("Domain Kit capability trust or effect is unsupported"); return { asset_id: text(item.asset_id, `capability_requirements[${index}].asset_id`), asset_version: finiteInteger(item.asset_version, `capability_requirements[${index}].asset_version`, 1), required_trust: trust, effect }; });
+        if (new Set(capabilityRequirements.map((item) => item.asset_id)).size !== capabilityRequirements.length)
+            throw new Error("Domain Kit capability requirements must be unique");
+        const objectSchemas = array(args.object_schemas ?? [], "object_schemas").map((value, index) => { const item = object(value, `object_schemas[${index}]`); return { id: text(item.id, `object_schemas[${index}].id`), name: text(item.name, `object_schemas[${index}].name`), schema: object(item.schema, `object_schemas[${index}].schema`) }; });
+        if (new Set(objectSchemas.map((item) => item.id)).size !== objectSchemas.length)
+            throw new Error("Domain Kit object schemas must be unique");
+        const components = array(args.components ?? [], "components").map((value, index) => { const item = object(value, `components[${index}]`); const type = text(item.type, `components[${index}].type`); if (!new Set(["form", "artifact_preview", "checklist", "status"]).has(type))
+            throw new Error("Domain Kit component type is unsupported"); return { id: text(item.id, `components[${index}].id`), type, binds_to: text(item.binds_to, `components[${index}].binds_to`), read_only: item.read_only === undefined ? true : optionalBoolean(item.read_only, `components[${index}].read_only`) }; });
+        if (new Set(components.map((item) => item.id)).size !== components.length)
+            throw new Error("Domain Kit components must be unique");
+        const actionContracts = array(args.action_contracts ?? [], "action_contracts").map((value, index) => { const item = object(value, `action_contracts[${index}]`); const effect = text(item.effect, `action_contracts[${index}].effect`); if (!SIDE_EFFECTS.has(effect))
+            throw new Error("Domain Kit action effect is unsupported"); const contractRef = item.contract_ref == null ? null : object(item.contract_ref, `action_contracts[${index}].contract_ref`); return { id: text(item.id, `action_contracts[${index}].id`), effect, requires_approval: item.requires_approval === undefined ? effect !== "read_only" : optionalBoolean(item.requires_approval, `action_contracts[${index}].requires_approval`), contract_ref: contractRef ? { contract_id: text(contractRef.contract_id, `action_contracts[${index}].contract_ref.contract_id`), contract_version: finiteInteger(contractRef.contract_version, `action_contracts[${index}].contract_ref.contract_version`, 1), asset_id: text(contractRef.asset_id, `action_contracts[${index}].contract_ref.asset_id`), asset_version: finiteInteger(contractRef.asset_version, `action_contracts[${index}].contract_ref.asset_version`, 1) } : null }; });
+        if (new Set(actionContracts.map((item) => item.id)).size !== actionContracts.length)
+            throw new Error("Domain Kit actions must be unique");
+        const budgetLimits = object(args.budget_limits ?? {}, "budget_limits");
+        for (const [name, amount] of Object.entries(budgetLimits))
+            if (!/^[a-z][a-z0-9_]*$/u.test(name) || typeof amount !== "number" || !Number.isFinite(amount) || amount <= 0)
+                throw new Error("Domain Kit budget limits must be positive finite named numbers");
+        const sandboxRequirements = args.sandbox_requirements == null ? null : object(args.sandbox_requirements, "sandbox_requirements");
+        const evalSuiteRef = args.eval_suite_ref == null ? null : object(args.eval_suite_ref, "eval_suite_ref");
+        if (evalSuiteRef) {
+            text(evalSuiteRef.suite_id, "eval_suite_ref.suite_id");
+            finiteInteger(evalSuiteRef.suite_version, "eval_suite_ref.suite_version", 1);
+        }
+        const kitId = String(args.kit_id ?? id("domain_kit"));
+        const definition = { name: text(args.name, "name"), domain: text(args.domain, "domain"), description: text(args.description, "description"), fields, criteria, capability_requirements: capabilityRequirements, object_schemas: objectSchemas, components, action_contracts: actionContracts, budget_limits: budgetLimits, sandbox_requirements: sandboxRequirements, eval_suite_ref: evalSuiteRef, builtin: args.builtin === true };
+        const definitionDigest = valueDigest(definition);
+        return this.store.save("domain_kit", kitId, { ...definition, definition_digest: definitionDigest });
+    }
+    domainKitGet(args) { return this.store.get("domain_kit", text(args.kit_id, "kit_id"), args.kit_version === undefined ? undefined : finiteInteger(args.kit_version, "kit_version", 1)); }
+    domainKitList(args) { return { kits: this.store.list("domain_kit", finiteInteger(args.limit, "limit", 20, 1, 100)) }; }
+    domainKitInstallBuiltins() {
+        const definitions = [
+            { kit_id: "builtin.developer-delivery", name: "研发交付", domain: "software", description: "验证研发任务声明的主要文件成果，并保留人工验收扩展空间。", builtin: true, fields: [{ id: "artifact_path", label: "主要成果相对路径", type: "path", required: true, options: [] }], criteria: [{ id: "artifact", name: "主要文件成果有效", method: "program", required: true, evaluator: { type: "file", path_field: "artifact_path" } }] },
+            { kit_id: "builtin.video-delivery", name: "视频交付", domain: "video", description: "验证视频文件成果，并由人判断叙事与审美质量。", builtin: true, fields: [{ id: "video_path", label: "视频相对路径", type: "path", required: true, options: [] }], criteria: [{ id: "video_file", name: "视频文件有效", method: "program", required: true, evaluator: { type: "file", path_field: "video_path", allowed_extensions: [".mp4", ".mov", ".webm"], max_bytes: 10_000_000_000 } }, { id: "creative_quality", name: "叙事与审美达到目标", method: "human", required: true, evaluator: null }] },
+        ];
+        const kits = definitions.map((definition) => { const existing = this.store.find("domain_kit", String(definition.kit_id)); if (existing && (existing.builtin !== true || existing.name !== definition.name || existing.domain !== definition.domain))
+            throw new Error(`Built-in Domain Kit identity conflict: ${definition.kit_id}`); return existing ?? this.domainKitSave(definition); });
+        return { kits };
+    }
+    domainKitDependencyLock(kit) {
+        const locked = new Map();
+        const visiting = new Set();
+        const allowedEffects = new Set([...kit.action_contracts.map((action) => String(action.effect)), ...kit.capability_requirements.map((requirement) => String(requirement.effect))]);
+        const visit = (assetId, version, requiredBy) => { const key = `${assetId}@${version}`; if (visiting.has(key))
+            throw new Error(`Domain Kit capability dependency cycle: ${key}`); if (locked.has(key))
+            return; visiting.add(key); const asset = this.store.get("capability_asset", assetId, version); if (asset.health !== "healthy" || !new Set(["trusted", "verified"]).has(String(asset.trust)) || !allowedEffects.has(String(asset.effect)))
+            throw new Error(`Domain Kit transitive capability is not eligible: ${key}`); const dependencies = asset.dependencies; for (const dependency of dependencies) {
+            const match = dependency.match(/^(.+)@([1-9][0-9]*)$/);
+            if (!match)
+                throw new Error(`Domain Kit dependency must pin asset@version: ${dependency}`);
+            visit(match[1], Number(match[2]), key);
+        } visiting.delete(key); locked.set(key, { asset_id: asset.id, asset_version: asset.version, source_digest: asset.source_digest, effect: asset.effect, trust: asset.trust, required_by: requiredBy }); };
+        for (const requirement of kit.capability_requirements) {
+            const asset = this.store.get("capability_asset", String(requirement.asset_id), Number(requirement.asset_version));
+            if (asset.health !== "healthy" || (requirement.required_trust === "verified" ? asset.trust !== "verified" : !new Set(["trusted", "verified"]).has(String(asset.trust))) || asset.effect !== requirement.effect)
+                throw new Error(`Domain Kit capability requirement is not eligible: ${requirement.asset_id}`);
+            visit(String(asset.id), Number(asset.version), null);
+        }
+        return [...locked.values()].sort((left, right) => `${left.asset_id}@${left.asset_version}`.localeCompare(`${right.asset_id}@${right.asset_version}`));
+    }
+    domainKitActionLock(kit, assets) { const assetKeys = new Set(assets.map((asset) => `${asset.asset_id}@${asset.asset_version}`)); return kit.action_contracts.map((action) => { const ref = action.contract_ref; if (!ref)
+        return { action_id: action.id, effect: action.effect, contract: null, executable: false }; const contract = this.store.get("contract_candidate", String(ref.contract_id), Number(ref.contract_version)); if (contract.status !== "verified")
+        throw new Error(`Domain Kit action Contract is not verified: ${action.id}`); const reviewed = object(contract.reviewed_contract, "reviewed_contract"); if (reviewed.effect !== action.effect)
+        throw new Error(`Domain Kit action Contract effect mismatch: ${action.id}`); const publication = this.store.list("contract_publication", 10_000, (item) => item.status === "active" && item.candidate_id === contract.id && Number(item.candidate_version) === Number(contract.version) && item.asset_id === ref.asset_id && Number(item.asset_version) === Number(ref.asset_version))[0]; if (!publication)
+        throw new Error(`Domain Kit action Contract is not actively published: ${action.id}`); if (!assetKeys.has(`${ref.asset_id}@${ref.asset_version}`))
+        throw new Error(`Domain Kit action Contract capability is not pinned: ${action.id}`); const asset = this.store.get("capability_asset", String(ref.asset_id), Number(ref.asset_version)); if (asset.contract_id !== contract.id || Number(asset.contract_version) !== Number(contract.version) || asset.effect !== action.effect || asset.health !== "healthy" || asset.trust !== "verified")
+        throw new Error(`Domain Kit action Contract capability drifted: ${action.id}`); return { action_id: action.id, effect: action.effect, requires_approval: action.requires_approval, contract_id: contract.id, contract_version: contract.version, contract_digest: asset.source_digest, capability_asset_id: asset.id, capability_asset_version: asset.version, input_schema: reviewed.input_schema, output_schema: reviewed.output_schema, idempotency: reviewed.idempotency, compensation: reviewed.compensation, credential_handles_required: reviewed.credential_handles_required, executable: true }; }); }
+    domainKitApply(args) {
+        const kit = this.domainKitGet(args);
+        const launch = this.store.get("work_launch", text(args.launch_id, "launch_id"));
+        const values = object(args.values, "values");
+        const fields = kit.fields;
+        const known = new Set(fields.map((field) => String(field.id)));
+        for (const key of Object.keys(values))
+            if (!known.has(key))
+                throw new Error(`Unknown Domain Kit field: ${key}`);
+        const normalized = {};
+        for (const field of fields) {
+            const key = String(field.id);
+            const value = values[key];
+            if (value === undefined) {
+                if (field.required === true)
+                    throw new Error(`Missing required Domain Kit field: ${key}`);
+                continue;
+            }
+            if (field.type === "boolean") {
+                if (typeof value !== "boolean")
+                    throw new Error(`${key} must be boolean`);
+                normalized[key] = value;
+            }
+            else if (field.type === "integer")
+                normalized[key] = finiteInteger(value, key, 1, 0);
+            else {
+                const stringValue = text(value, key);
+                if (field.type === "choice" && !field.options.includes(stringValue))
+                    throw new Error(`${key} must be one of the declared choices`);
+                if (field.type === "path" && (isAbsolute(stringValue) || win32.isAbsolute(stringValue) || stringValue.split(/[\\/]/).includes("..")))
+                    throw new Error(`${key} must be a workspace-relative contained path`);
+                normalized[key] = stringValue;
+            }
+        }
+        const resolvedAssets = this.domainKitDependencyLock(kit);
+        const resolvedActions = this.domainKitActionLock(kit, resolvedAssets);
+        const actionLockId = `domain_kit_action_lock_${kit.id}_${kit.version}_${launch.id}`;
+        const evalSuite = kit.eval_suite_ref ? this.store.get("evaluation_suite", String(kit.eval_suite_ref.suite_id), Number(kit.eval_suite_ref.suite_version)) : null;
+        const budgetLimits = kit.budget_limits;
+        const budgetId = Object.keys(budgetLimits).length ? text(args.budget_id, "budget_id") : null;
+        if (!Object.keys(budgetLimits).length && args.budget_id !== undefined)
+            throw new Error("Domain Kit without budget limits cannot reserve a budget");
+        if (budgetId) {
+            const account = this.store.get("budget_account", budgetId);
+            if (account.owner_id !== launch.task_id)
+                throw new Error("Domain Kit budget must belong to the Work Launch task");
+        }
+        const sandboxIdentity = kit.sandbox_requirements ? { profile_id: text(args.sandbox_profile_id, "sandbox_profile_id"), profile_version: finiteInteger(args.sandbox_profile_version, "sandbox_profile_version", 1) } : null;
+        const identity = { kit_id: kit.id, kit_version: kit.version, launch_id: launch.id, values: normalized, resolved_assets: resolvedAssets, eval_suite: evalSuite ? { suite_id: evalSuite.id, suite_version: evalSuite.version } : null, sandbox: sandboxIdentity, budget_id: budgetId, budget_limits: budgetLimits };
+        const digest = valueDigest(identity);
+        const applicationId = String(args.application_id ?? `domain_kit_application_${launch.id}`);
+        const existing = this.store.find("domain_kit_application", applicationId);
+        if (existing) {
+            if (existing.application_digest !== digest)
+                throw new Error("Domain Kit application idempotency conflict");
+            return { application: existing, lock: this.store.get("domain_kit_lock", String(existing.lock_id)), plan: this.store.get("acceptance_plan", String(existing.plan_id)), jobs: this.store.list("acceptance_evaluation_job", 10_000, (job) => job.plan_id === existing.plan_id), sandbox: existing.sandbox_ticket_id ? { compatible: true, ticket: this.store.get("sandbox_ticket", String(existing.sandbox_ticket_id)) } : null, budget_reservation: existing.budget_reservation_id ? this.store.get("budget_reservation", String(existing.budget_reservation_id)) : null, idempotent: true };
+        }
+        const sandboxPreview = kit.sandbox_requirements ? this.sandboxPlan({ task_id: launch.task_id, profile_id: sandboxIdentity?.profile_id, profile_version: sandboxIdentity?.profile_version, requirements: kit.sandbox_requirements, request_digest: digest, dry_run: true }) : null;
+        if (sandboxPreview && sandboxPreview.compatible !== true)
+            throw new Error(`Domain Kit sandbox requirements are not satisfied: ${sandboxPreview.missing.join(", ")}`);
+        const criteria = kit.criteria.map(({ evaluator: _evaluator, ...criterion }) => criterion);
+        const plan = this.acceptancePlanSave({ task_id: launch.task_id, launch_id: launch.id, name: `${kit.name}验收`, criteria }).plan;
+        const jobs = [];
+        for (const criterion of kit.criteria) {
+            const evaluator = criterion.evaluator;
+            if (!evaluator)
+                continue;
+            const common = { plan_id: plan.id, criterion_id: criterion.id, workspace: launch.workspace, relative_path: normalized[String(evaluator.path_field)] };
+            const prepared = evaluator.type === "coverage_report" ? this.acceptanceCoverageEvaluationPrepare({ ...common, ...evaluator }) : evaluator.type === "media_probe" ? this.acceptanceMediaProbePrepare({ ...common, ...evaluator }) : this.acceptanceFileEvaluationPrepare({ ...common, allowed_extensions: evaluator.allowed_extensions, max_bytes: evaluator.max_bytes });
+            jobs.push(prepared.job);
+        }
+        const budgetReservation = budgetId ? this.budgetReserve({ budget_id: budgetId, reservation_id: `domain_kit_budget_${applicationId}`, resources: budgetLimits, purpose: `domain_kit:${kit.id}` }).reservation : null;
+        const sandbox = kit.sandbox_requirements ? this.sandboxPlan({ task_id: launch.task_id, profile_id: sandboxIdentity?.profile_id, profile_version: sandboxIdentity?.profile_version, requirements: kit.sandbox_requirements, request_digest: digest, ticket_id: `sandbox_ticket_${applicationId}` }) : null;
+        const actionLock = this.store.create("domain_kit_action_lock", actionLockId, { application_id: applicationId, kit_id: kit.id, kit_version: kit.version, actions: resolvedActions, lock_digest: valueDigest(resolvedActions) });
+        const lock = this.store.create("domain_kit_lock", `domain_kit_lock_${applicationId}`, { application_id: applicationId, kit_id: kit.id, kit_version: kit.version, kit_digest: kit.definition_digest, assets: resolvedAssets, action_lock_id: actionLock.id, action_lock_digest: actionLock.lock_digest, eval_suite: identity.eval_suite, sandbox_profile: sandboxIdentity, budget_id: budgetId, budget_reservation_id: budgetReservation?.id ?? null, lock_digest: valueDigest(identity) });
+        const application = this.store.create("domain_kit_application", applicationId, { ...identity, application_digest: digest, lock_id: lock.id, action_lock_id: actionLock.id, plan_id: plan.id, job_ids: jobs.map((job) => job.id), sandbox_ticket_id: sandbox?.ticket?.id ?? null, budget_reservation_id: budgetReservation?.id ?? null, status: "active" });
+        return { application, lock, action_lock: actionLock, plan, jobs, sandbox, budget_reservation: budgetReservation, idempotent: false };
+    }
+    domainKitSettle(args) { const application = this.store.get("domain_kit_application", text(args.application_id, "application_id")); if (!application.budget_reservation_id) {
+        if (Object.keys(object(args.actual ?? {}, "actual")).length)
+            throw new Error("Domain Kit application has no budget reservation");
+        return { application, reservation: null, idempotent: true };
+    } if (application.status === "settled")
+        return { application, reservation: this.store.get("budget_reservation", String(application.budget_reservation_id)), idempotent: true }; const settled = this.budgetSettle({ reservation_id: application.budget_reservation_id, actual: object(args.actual ?? {}, "actual"), trial_id: args.trial_id }); const saved = this.store.save("domain_kit_application", String(application.id), { ...application, status: "settled", settled_at: new Date().toISOString() }); return { application: saved, reservation: settled.reservation, idempotent: settled.idempotent }; }
+    domainKitActionLockGet(args) { const application = this.store.get("domain_kit_application", text(args.application_id, "application_id")); return this.store.get("domain_kit_action_lock", String(application.action_lock_id)); }
+    domainKitActionPrepare(args) {
+        const application = this.store.get("domain_kit_application", text(args.application_id, "application_id"));
+        if (application.status !== "active")
+            throw new Error("Domain Kit application is not active");
+        const lock = this.domainKitActionLockGet({ application_id: application.id });
+        const actionId = text(args.action_id, "action_id");
+        const action = lock.actions.find((item) => item.action_id === actionId);
+        if (!action)
+            throw new Error("Domain Kit action is unknown");
+        if (action.executable !== true)
+            throw new Error("Domain Kit action has no verified executable Contract");
+        const legacy = args.input === undefined && args.input_digest !== undefined;
+        if (args.input === undefined && !legacy)
+            throw new Error("Domain Kit action input is required for Schema validation");
+        const input = legacy ? {} : args.input;
+        validateJsonSchema(input, action.input_schema);
+        const inputDigest = legacy ? text(args.input_digest, "input_digest") : valueDigest(input);
+        const target = args.target === undefined && legacy ? String(action.capability_asset_id) : text(args.target, "target");
+        const requestId = String(args.request_id ?? `domain_kit_action_${application.id}_${actionId}`);
+        const identity = { application_id: application.id, application_version: application.version, action_id: actionId, effect: action.effect, target, contract_id: action.contract_id, contract_version: action.contract_version, capability_asset_id: action.capability_asset_id, capability_asset_version: action.capability_asset_version, input_digest: inputDigest };
+        const requestDigest = valueDigest(identity);
+        const existing = this.store.find("domain_kit_action_request", requestId);
+        if (existing) {
+            if (existing.request_digest !== requestDigest)
+                throw new Error("Domain Kit action request idempotency conflict");
+            return { request: existing, action, authorization: existing.authorization_request_id ? this.store.get("autonomy_request", String(existing.authorization_request_id)) : null, idempotent: true };
+        }
+        if (legacy) {
+            const request = this.store.create("domain_kit_action_request", requestId, { ...identity, request_digest: requestDigest, authorization_request_id: null, requires_approval: action.requires_approval, idempotency: action.idempotency, compensation: action.compensation, credential_handles_required: action.credential_handles_required, status: action.requires_approval === true ? "awaiting_authorization" : "prepared", execution_authority: false, raw_input_stored: false, legacy_prevalidated_digest: true });
+            return { request, action, authorization: null, idempotent: false };
+        }
+        const launch = this.store.get("work_launch", String(application.launch_id));
+        const autonomyAction = action.effect === "read_only" ? "read" : action.effect === "local_write" ? "sandbox_write" : String(action.effect);
+        const authorization = this.autonomyRequest({ request_id: `authorization_${requestId}`, policy_id: args.policy_id, policy_version: args.policy_version, task_id: launch.task_id, action: autonomyAction, target, request_digest: requestDigest, requested_by: text(args.requested_by ?? "domain_kit", "requested_by") }).request;
+        const request = this.store.create("domain_kit_action_request", requestId, { ...identity, request_digest: requestDigest, authorization_request_id: authorization.id, requires_approval: action.requires_approval, idempotency: action.idempotency, compensation: action.compensation, credential_handles_required: action.credential_handles_required, status: authorization.status === "authorized" ? "authorized" : "awaiting_authorization", execution_authority: false, raw_input_stored: false, legacy_prevalidated_digest: false });
+        return { request, action, authorization, idempotent: false };
+    }
+    domainKitActionReport(args) { const request = this.store.get("domain_kit_action_request", text(args.request_id, "request_id")); if (new Set(["completed", "failed"]).has(String(request.status))) {
+        const digest = valueDigest(args.output ?? null);
+        if (request.output_digest !== digest || request.outcome !== args.outcome)
+            throw new Error("Domain Kit action report idempotency conflict");
+        return { request, idempotent: true };
+    } const authorization = this.store.get("autonomy_request", String(request.authorization_request_id)); if (authorization.status !== "consumed")
+        throw new Error("Domain Kit action authorization has not been consumed"); const outcome = text(args.outcome, "outcome"); if (!new Set(["succeeded", "failed"]).has(outcome))
+        throw new Error("Domain Kit action outcome is unsupported"); const application = this.store.get("domain_kit_application", String(request.application_id)); const lock = this.domainKitActionLockGet({ application_id: application.id }); const action = lock.actions.find((item) => item.action_id === request.action_id); if (outcome === "succeeded")
+        validateJsonSchema(args.output, action.output_schema); const evidenceIds = array(args.evidence_ids, "evidence_ids").map((item) => text(item, "evidence_id")); if (!evidenceIds.length)
+        throw new Error("Domain Kit action report requires evidence"); for (const evidenceId of evidenceIds)
+        this.store.get("evidence", evidenceId); const saved = this.store.save("domain_kit_action_request", String(request.id), { ...request, status: outcome === "succeeded" ? "completed" : "failed", outcome, output_digest: valueDigest(args.output ?? null), evidence_ids: evidenceIds, raw_output_stored: false }); return { request: saved, idempotent: false }; }
+    acceptanceEvaluationClaim(args) {
+        const adapterId = text(args.adapter_id, "adapter_id");
+        const limit = finiteInteger(args.limit, "limit", 10, 1, 100);
+        const leaseSeconds = finiteInteger(args.lease_seconds, "lease_seconds", 60, 1, 3600);
+        const planId = args.plan_id === undefined ? null : text(args.plan_id, "plan_id");
+        const jobs = this.store.list("acceptance_evaluation_job", 10_000, (item) => { if (item.status !== "ready" || Number(item.attempts) >= Number(item.max_attempts) || item.adapter_id !== adapterId || (planId && item.plan_id !== planId))
+            return false; const plan = this.store.find("acceptance_plan", String(item.plan_id)); const launch = plan ? this.store.find("work_launch", String(plan.launch_id)) : null; const run = launch?.run_id ? this.store.find("host_run", String(launch.run_id)) : null; return run?.status === "completed"; }).slice(0, limit).map((job) => this.store.save("acceptance_evaluation_job", String(job.id), { ...job, status: "leased", attempts: Number(job.attempts) + 1, lease_id: id("lease"), lease_expires_at: new Date(Date.now() + leaseSeconds * 1000).toISOString() }));
+        return { jobs };
+    }
+    acceptanceEvaluationRecover(args) {
+        const now = args.now === undefined ? new Date().toISOString() : text(args.now, "now");
+        const nowMs = Date.parse(now);
+        if (Number.isNaN(nowMs))
+            throw new Error("now must be an ISO timestamp");
+        const limit = finiteInteger(args.limit, "limit", 100, 1, 1000);
+        const recovered = [];
+        for (const job of this.store.list("acceptance_evaluation_job", 10_000, (item) => item.status === "leased" && Date.parse(String(item.lease_expires_at)) <= nowMs).slice(0, limit)) {
+            const exhausted = Number(job.attempts) >= Number(job.max_attempts);
+            recovered.push(this.store.save("acceptance_evaluation_job", String(job.id), { ...job, status: exhausted ? "exhausted" : "ready", lease_id: null, lease_expires_at: null }));
+        }
+        return { recovered: recovered.length, exhausted: recovered.filter((job) => job.status === "exhausted").length, jobs: recovered };
+    }
+    acceptanceEvaluationReport(args) {
+        const job = this.store.get("acceptance_evaluation_job", text(args.job_id, "job_id"));
+        const result = text(args.result, "result");
+        if (!ACCEPTANCE_RESULTS.has(result))
+            throw new Error("Acceptance result is unsupported");
+        const summary = assertNoSecret(text(args.summary, "summary"), "summary");
+        const receipt = object(args.receipt ?? {}, "receipt");
+        assertNoSecret(canonical(receipt), "receipt");
+        const reportDigest = valueDigest({ result, summary, receipt });
+        if (job.status === "completed") {
+            if (job.report_digest !== reportDigest)
+                throw new Error("Acceptance evaluation report idempotency conflict");
+            return { job, evidence: this.store.get("evidence", String(job.evidence_id)), check: this.store.get("acceptance_check", String(job.check_id)), assessment: this.store.get("acceptance_assessment", `assessment_${job.plan_id}`), outcome: this.store.find("outcome", `outcome_trial_${job.plan_id}`), idempotent: true };
+        }
+        if (job.status !== "leased" || job.lease_id !== text(args.lease_id, "lease_id"))
+            throw new Error("Acceptance evaluation lease does not match");
+        if (Date.parse(String(job.lease_expires_at)) <= Date.now())
+            throw new Error("Acceptance evaluation lease expired");
+        const evaluator = this.store.get("acceptance_evaluator", String(job.evaluator_id), Number(job.evaluator_version));
+        if (evaluator.adapter_id !== text(args.adapter_id, "adapter_id") || evaluator.enabled !== true)
+            throw new Error("Acceptance evaluator adapter is not authorized");
+        const artifactId = receipt.artifact_id === undefined ? null : text(receipt.artifact_id, "receipt.artifact_id");
+        if (artifactId)
+            this.store.get("artifact", artifactId);
+        const evidence = this.evidenceRecord({ evidence_id: `evidence_${job.id}`, source_type: evaluator.method, confidence: result === "passed" ? "confirmed" : result === "failed" ? "rejected" : "bounded", claim: summary, artifact_id: artifactId, locator: `acceptance-job:${job.id}`, metadata: { evaluator_id: evaluator.id, evaluator_version: evaluator.version, adapter_id: evaluator.adapter_id, receipt_digest: valueDigest(receipt) } });
+        const recorded = this.acceptanceCheckRecord({ check_id: `check_${job.id}`, plan_id: job.plan_id, criterion_id: job.criterion_id, evaluator_type: evaluator.method, evaluator_id: evaluator.id, result, summary, evidence_ids: [evidence.id] });
+        const assessed = this.acceptanceAssess({ plan_id: job.plan_id });
+        const completed = this.store.save("acceptance_evaluation_job", String(job.id), { ...job, status: "completed", report_digest: reportDigest, evidence_id: evidence.id, check_id: recorded.check.id, lease_id: null, lease_expires_at: null });
+        return { job: completed, evidence, check: recorded.check, assessment: assessed.assessment, outcome: assessed.outcome, idempotent: false };
+    }
+    acceptanceAssess(args) {
+        const plan = this.store.get("acceptance_plan", text(args.plan_id, "plan_id"));
+        const latest = new Map();
+        for (const check of this.store.list("acceptance_check", 10_000, (item) => item.plan_id === plan.id && item.plan_version === plan.version))
+            if (!latest.has(String(check.criterion_id)))
+                latest.set(String(check.criterion_id), check);
+        const criteria = plan.criteria;
+        const required = criteria.filter((item) => item.required === true);
+        const missing = required.filter((item) => !latest.has(String(item.id))).map((item) => item.id);
+        const failed = required.filter((item) => latest.get(String(item.id))?.result === "failed").map((item) => item.id);
+        const blocked = required.filter((item) => latest.get(String(item.id))?.result === "blocked").map((item) => item.id);
+        const status = missing.length ? "pending" : failed.length ? "failed" : blocked.length ? "blocked" : "passed";
+        const assessment = this.store.save("acceptance_assessment", `assessment_${plan.id}`, { plan_id: plan.id, plan_version: plan.version, task_id: plan.task_id, launch_id: plan.launch_id, status, missing, failed, blocked, checked: latest.size, total: criteria.length });
+        if (status === "pending")
+            return { assessment, outcome: null };
+        const evidenceIds = [...new Set([...latest.values()].flatMap((item) => item.evidence_ids))];
+        const existing = this.store.find("outcome", `outcome_${plan.trial_id}`);
+        if (existing)
+            return { assessment, outcome: existing };
+        this.trialTraceAppend({ trial_id: plan.trial_id, event_type: `acceptance.${status}`, source: "craft_runtime", data: { assessment_id: assessment.id, checked: latest.size, total: criteria.length }, evidence_ids: evidenceIds });
+        const outcome = this.outcomeRecord({ trial_id: plan.trial_id, verdict: status === "passed" ? "passed" : status === "blocked" ? "blocked" : "failed", summary: `Business acceptance ${status}.`, failure_type: status === "passed" ? undefined : `acceptance_${status}`, scores: { required_pass_rate: required.length ? (required.length - failed.length - blocked.length) / required.length : 1 }, costs: {}, evidence_ids: evidenceIds, source: "multi_method_acceptance" });
+        return { assessment, outcome };
+    }
+    workLaunchPrepare(args) {
+        const host = text(args.host, "host");
+        if (!new Set(["codex-cli", "claude-code"]).has(host))
+            throw new Error("Work launch host is unsupported");
+        const sandbox = String(args.sandbox ?? "read-only");
+        if (!new Set(["read-only", "workspace-write"]).has(sandbox))
+            throw new Error("Work launch sandbox is unsupported");
+        const prompt = text(args.prompt, "prompt");
+        const workspace = resolve(text(args.workspace, "workspace"));
+        const launchId = args.launch_id === undefined ? id("work_launch") : text(args.launch_id, "launch_id");
+        const existing = this.store.find("work_launch", launchId);
+        if (existing) {
+            if (existing.host !== host || existing.sandbox !== sandbox || existing.workspace !== workspace || existing.prompt_digest !== valueDigest(prompt))
+                throw new Error("Work launch idempotency conflict");
+            return { launch: existing, task: this.store.get("task", String(existing.task_id)), dispatch: this.store.get(host === "codex-cli" ? "codex_dispatch" : "claude_dispatch", String(existing.dispatch_id)), approval_required: existing.status === "awaiting_approval", idempotent: true };
+        }
+        const task = args.task_id ? this.store.get("task", text(args.task_id, "task_id")) : this.taskOpen({ title: args.title, goal: args.goal, project_id: args.project_id }).task;
+        const dispatchId = `${host === "codex-cli" ? "codex_dispatch" : "claude_dispatch"}_${launchId}`;
+        const common = { dispatch_id: dispatchId, task_id: task.id, workspace, prompt, sandbox, model: args.model, timeout_ms: args.timeout_ms, output_limit: args.output_limit };
+        const dispatch = (host === "codex-cli" ? this.codexDispatchPrepare(common) : this.claudeDispatchPrepare({ ...common, max_turns: args.max_turns, max_budget_usd: args.max_budget_usd })).dispatch;
+        let launch = this.store.create("work_launch", launchId, { task_id: task.id, host, dispatch_id: dispatch.id, workspace: dispatch.workspace, sandbox, prompt_digest: dispatch.prompt_digest, retry_of: args.retry_of ?? null, status: sandbox === "workspace-write" ? "awaiting_approval" : "prepared" });
+        const trial = this.trialStart({ trial_id: `trial_${launchId}`, task_id: task.id, subject_type: "work_launch", subject_id: launchId, subject_version: launch.version, environment: { host, workspace: dispatch.workspace, sandbox, dispatch_id: dispatch.id }, budget: {} });
+        this.trialTraceAppend({ trial_id: trial.id, event_type: "work_launch.prepared", source: "craft_runtime", data: { launch_id: launchId, dispatch_id: dispatch.id, host, sandbox } });
+        launch = this.store.save("work_launch", launchId, { ...launch, trial_id: trial.id });
+        if (args.acceptance_criteria !== undefined) {
+            const acceptance = this.acceptancePlanSave({ task_id: task.id, launch_id: launch.id, criteria: args.acceptance_criteria, name: args.acceptance_name });
+            const plan = acceptance.plan;
+            launch = this.store.save("work_launch", launchId, { ...launch, acceptance_plan_id: plan.id, acceptance_trial_id: plan.trial_id });
+        }
+        if (sandbox === "read-only") {
+            const started = this.hostRunStart({ host, dispatch_id: dispatch.id, prompt });
+            const run = started.run;
+            launch = this.store.save("work_launch", launchId, { ...launch, status: "running", run_id: run.id });
+        }
+        return { launch, task, dispatch, approval_required: sandbox === "workspace-write", idempotent: false };
+    }
+    workLaunchDecide(args) {
+        const launch = this.store.get("work_launch", text(args.launch_id, "launch_id"));
+        if (launch.status !== "awaiting_approval")
+            throw new Error("Work launch is not awaiting approval");
+        const actor = text(args.actor, "actor");
+        if (args.approved !== true)
+            return { launch: this.store.save("work_launch", String(launch.id), { ...launch, status: "denied", decided_by: actor }), started: false };
+        const prompt = text(args.prompt, "prompt");
+        if (valueDigest(prompt) !== launch.prompt_digest)
+            throw new Error("Work launch prompt does not match the prepared digest");
+        const policy = this.autonomyPolicySave({ policy_id: `launch_policy_${launch.id}`, task_id: launch.task_id, name: "Workbench workspace write", rules: { sandbox_write: { level: "human_approval" } } }).policy;
+        const authorization = this.autonomyRequest({ request_id: `launch_authorization_${launch.id}`, policy_id: policy.id, policy_version: policy.version, task_id: launch.task_id, action: "sandbox_write", target: launch.workspace, request_digest: this.store.get(String(launch.host) === "codex-cli" ? "codex_dispatch" : "claude_dispatch", String(launch.dispatch_id)).request_digest, requested_by: "craft_workbench" }).request;
+        this.autonomyDecide({ request_id: authorization.id, decision: "approve", actor, approval_ref: `work_launch:${launch.id}` });
+        const started = this.hostRunStart({ host: launch.host, dispatch_id: launch.dispatch_id, prompt, authorization_request_id: authorization.id });
+        const run = started.run;
+        return { launch: this.store.save("work_launch", String(launch.id), { ...launch, status: "running", decided_by: actor, authorization_request_id: authorization.id, run_id: run.id }), started: true };
+    }
+    workLaunchGet(args) { const launch = this.store.get("work_launch", text(args.launch_id, "launch_id")); const run = launch.run_id ? this.store.find("host_run", String(launch.run_id)) : null; return { launch: { ...launch, effective_status: run?.status ?? launch.status }, run: run ? this.homeHostRun({ run_id: run.id, after_sequence: args.after_sequence, limit: args.limit }) : null, acceptance: launch.acceptance_plan_id ? this.acceptancePlanGet({ plan_id: launch.acceptance_plan_id }) : null }; }
+    workLaunchRetry(args) { const previous = this.workLaunchGet({ launch_id: args.launch_id }).launch; if (!new Set(["failed", "cancelled", "interrupted"]).has(String(previous.effective_status)))
+        throw new Error("Only a failed, cancelled, or interrupted launch can be retried"); const task = this.store.get("task", String(previous.task_id)); const dispatch = this.store.get(previous.host === "codex-cli" ? "codex_dispatch" : "claude_dispatch", String(previous.dispatch_id)); const acceptance = previous.acceptance_plan_id ? this.store.get("acceptance_plan", String(previous.acceptance_plan_id)) : null; return this.workLaunchPrepare({ task_id: task.id, host: previous.host, workspace: previous.workspace, sandbox: previous.sandbox, prompt: args.prompt, launch_id: args.new_launch_id === undefined ? undefined : text(args.new_launch_id, "new_launch_id"), retry_of: previous.id, model: args.model ?? dispatch.model ?? undefined, timeout_ms: args.timeout_ms ?? dispatch.timeout_ms, output_limit: args.output_limit ?? dispatch.output_limit, max_turns: args.max_turns ?? dispatch.max_turns, max_budget_usd: args.max_budget_usd ?? dispatch.max_budget_usd ?? undefined, acceptance_name: acceptance?.name, acceptance_criteria: acceptance?.criteria }); }
+    finalizeWorkLaunch(run, receipt) {
+        const launch = this.store.list("work_launch", 10_000, (item) => item.run_id === run.id)[0];
+        if (!launch?.trial_id || this.store.find("outcome", `outcome_${launch.trial_id}`))
+            return;
+        const artifact = this.artifactRegister({ artifact_id: `artifact_${run.id}`, kind: "host_run_receipt", name: `Host run ${run.id}`, uri: receipt?.uri ?? `craft://host-run/${run.id}`, digest: receipt?.digest ?? null, producer_type: "host_run", producer_id: run.id, metadata: { host: run.host, dispatch_id: run.dispatch_id, receipt_id: run.receipt_id ?? null } });
+        const confidence = run.status === "interrupted" ? "bounded" : "confirmed";
+        const evidence = this.evidenceRecord({ evidence_id: `evidence_${run.id}`, source_type: "program", confidence, claim: `Host execution ended with status ${run.status}.`, artifact_id: artifact.id, locator: `host-run:${run.id}`, observed_at: run.finished_at });
+        const started = Date.parse(String(run.started_at));
+        const finished = Date.parse(String(run.finished_at));
+        const durationMs = Math.max(0, finished - started);
+        const verdict = run.status === "completed" ? "passed" : run.status === "cancelled" ? "cancelled" : run.status === "interrupted" ? "blocked" : "failed";
+        this.trialTraceAppend({ trial_id: launch.trial_id, event_type: `work_launch.${run.status}`, source: "craft_runtime", data: { launch_id: launch.id, run_id: run.id, receipt_id: run.receipt_id ?? null, duration_ms: durationMs }, artifact_ids: [artifact.id], evidence_ids: [evidence.id] });
+        const costs = { duration_ms: durationMs };
+        if (typeof receipt?.cost_usd === "number")
+            costs.cost_usd = receipt.cost_usd;
+        if (receipt?.usage && typeof receipt.usage === "object" && !Array.isArray(receipt.usage))
+            costs.usage = receipt.usage;
+        this.outcomeRecord({ trial_id: launch.trial_id, verdict, summary: `Host execution ${run.status}.`, failure_type: verdict === "passed" ? undefined : run.error_class ?? `host_${run.status}`, scores: { host_execution_success: verdict === "passed" ? 1 : 0 }, costs, evidence_ids: [evidence.id], source: "program_verified" });
+    }
+    effectTrace(effect, eventType) {
+        if (effect.trial_id)
+            this.trialTraceAppend({ trial_id: effect.trial_id, event_type: eventType, source: "craft",
+                data: { effect_id: effect.id, status: effect.status, remote_operation_id: effect.remote_operation_id ?? null } });
+    }
+    untrustedContentRegister(args) { return this.security.contentRegister(args); }
+    untrustedExtractionRecord(args) { return this.security.extractionRecord(args); }
+    decisionProjectionRelease(args) { return this.security.projectionRelease(args); }
+    decisionProjectionExplain(args) { return this.security.projectionExplain(args); }
+    untrustedContentParse(args) { return this.dataOnlyParser.parse(args); }
+    parserSecurityEvaluate(args) { return this.dataOnlyParser.evaluate(args); }
+    untrustedContentParseProcess(args) { return this.parserProcess.parse(args); }
+    sandboxProfileSave(args) { return this.sandbox.profileSave(args); }
+    sandboxProfileVerify(args) { return this.sandbox.profileVerify(args); }
+    sandboxPlan(args) { return this.sandbox.plan(args); }
+    sandboxReceipt(args) { return this.sandbox.receipt(args); }
+    dockerSandboxRequestDigest(args) {
+        return { request_digest: dockerRequestDigest(text(args.image, "image"), array(args.argv, "argv").map((item) => text(item, "argv"))) };
+    }
+    async dockerSandboxProbe(args) {
+        const profile = this.store.get("sandbox_profile", text(args.profile_id, "profile_id"), finiteInteger(args.profile_version, "profile_version", 0));
+        if (profile.lifecycle !== "declared" || profile.backend !== "container" || profile.adapter_id !== "docker") {
+            throw new Error("Docker probe requires an exact declared container profile for adapter docker");
+        }
+        const probe = await this.dockerSandbox.probe(args.image, profile.capabilities);
+        const artifact = this.artifactRegister({ kind: "docker_sandbox_probe", name: `Docker probe ${profile.id} v${profile.version}`,
+            uri: `craft://sandbox-probes/${profile.id}/${profile.version}`, producer_type: "sandbox_adapter", producer_id: "docker",
+            metadata: { profile_id: profile.id, profile_version: profile.version, image: probe.image, probe_digest: probe.probe_digest } });
+        const evidence = this.evidenceRecord({ source_type: "program", confidence: "bounded", claim: "Docker Sandbox boundary probe passed.",
+            artifact_id: artifact.id, locator: { profile_id: profile.id, profile_version: profile.version } });
+        return { probe, artifact, evidence, profile };
+    }
+    async dockerSandboxConformance(args) {
+        const profile = this.store.get("sandbox_profile", text(args.profile_id, "profile_id"), finiteInteger(args.profile_version, "profile_version", 0));
+        if (profile.lifecycle !== "declared" || profile.backend !== "container" || profile.adapter_id !== "docker") {
+            throw new Error("Docker conformance requires an exact declared container profile for adapter docker");
+        }
+        const conformance = await this.dockerSandbox.conformance(String(args.probe_id ?? `probe_${id("docker")}`), args.image, profile.capabilities, this.store.paths.runtimeDir);
+        const artifact = this.artifactRegister({ kind: "docker_sandbox_conformance", name: `Docker conformance ${profile.id} v${profile.version}`,
+            uri: `craft://sandbox-conformance/${profile.id}/${profile.version}`, producer_type: "sandbox_adapter", producer_id: "docker",
+            metadata: { profile_id: profile.id, profile_version: profile.version, image: conformance.image,
+                conformance_version: conformance.conformance_version, checks: conformance.checks } });
+        const evidence = this.evidenceRecord({ source_type: "program", confidence: "bounded", claim: "Docker Sandbox conformance passed.",
+            artifact_id: artifact.id, locator: { profile_id: profile.id, profile_version: profile.version } });
+        const verification = this.sandbox.profileVerify({ profile_id: profile.id, profile_version: profile.version,
+            observed_capabilities: conformance.observed_capabilities, evidence_ids: [evidence.id], verifier: "docker-conformance-v1" });
+        return { conformance, artifact, evidence, ...verification };
+    }
+    async dockerSandboxExecute(args) {
+        const ticket = this.store.get("sandbox_ticket", text(args.ticket_id, "ticket_id"));
+        const profile = this.store.get("sandbox_profile", String(ticket.profile_id), Number(ticket.profile_version));
+        if (profile.backend !== "container" || profile.adapter_id !== "docker")
+            throw new Error("Sandbox ticket is not assigned to Docker");
+        const result = await this.dockerSandbox.execute({ ticket_id: ticket.id, runtime_root: this.store.paths.runtimeDir,
+            image: args.image, command: args.argv, request_digest: ticket.request_digest, capabilities: profile.capabilities });
+        const artifact = this.artifactRegister({ kind: "docker_sandbox_receipt", name: `Docker execution ${ticket.id}`,
+            uri: `craft://docker-sandbox/${ticket.id}`, producer_type: "sandbox_adapter", producer_id: "docker",
+            metadata: { ticket_id: ticket.id, image: result.image, command_digest: result.command_digest,
+                exit_code: result.exit_code, output_limited: result.output_limited } });
+        const evidence = this.evidenceRecord({ source_type: "program", confidence: result.status === "passed" ? "confirmed" : "rejected",
+            claim: `Docker Sandbox execution ${result.status}.`, artifact_id: artifact.id, locator: { ticket_id: ticket.id } });
+        const receipt = this.sandbox.receipt({ ticket_id: ticket.id, receipt_id: text(args.receipt_id, "receipt_id"), adapter_id: "docker",
+            profile_version: profile.version, status: result.status, observed_capabilities: result.observed_capabilities,
+            evidence_ids: [evidence.id] });
+        return { result, artifact, evidence, ...receipt };
+    }
     workspaceTransactionBegin(args) { return this.transaction.begin(args); }
     workspaceTransactionCommit(args) { return this.transaction.commit(args); }
     workspaceTransactionRollback(args) { return this.transaction.rollback(args); }

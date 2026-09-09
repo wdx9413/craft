@@ -1,5 +1,23 @@
 # Experience / Eval Kernel
 
+## 在产品架构中的位置
+
+**评测与实验属于第三支柱“学习与改进”**，与记忆与知识、学习与适应、编译与复用并列。独立模块表示职责清晰，不表示第四支柱。第二支柱“执行与保障”的验证与观察负责本次工作的结果和运行状态；评测使用跨案例/版本证据判断方法是否值得复用。
+
+## 通用评测范围（目标）
+
+| 对象 | 关键问题 |
+| --- | --- |
+| 能力检索与上下文 | 是否找到所需工具/资料、引用正确版本，是否混入无关或无权限内容 |
+| 记忆与偏好 | 是否减少重复解释，是否出现过期知识、跨项目混用和错误泛化 |
+| Agent、模型与规划 | 任务完成质量、资源使用、分工、询问/停止时机和人工接管 |
+| Workflow、脚本与 Harness | 稳定性、新输入适用性、质量/成本/时延和历史能力保持 |
+| 整项交付 | 格式与可编辑性、来源、遗漏、用户接受程度及后续业务效果 |
+
+这是完整目标范围。当前正式版本对比支持 Workflow、Agent Profile、Harness Configuration；其他对象的通用评测执行与真实行业数据仍待建设，不因注册了 Validator/Capability 就视为已覆盖。
+
+程序检查用于可计算条件，模型量表需校准，人工可做成对偏好选择，延迟业务信号保留观察窗口与归因限制。研发覆盖率、视频审美、销售结果和教学反馈不能统一伪装成程序证明。
+
 ## 已实现对象
 
 - Harness Configuration：版本化的 context、tools、generation、orchestration、memory、output 六维配置。
@@ -33,4 +51,10 @@ Workflow、Agent Profile 和 Harness Configuration 都可以作为被测 Subject
 
 Lease TTL/续租与中断恢复、默认路线的 Trial/Trace/Outcome 归档已实现。Runtime Core 增加了审批等待、父子 Operation 账本、环境/Policy 指纹和预算暂停；Operational Signal 可产生窗口化漂移告警。v0.9.9 的线上反馈入口只接收脱敏摘要/指标引用，经人工审核后仅能进入 immutable development Case，不能污染 held-out。下一步是自动模型/业务 Grader 回填、Trace 自动聚类归因、真实业务金标和线上反馈验证；任何自动 Driver 仍必须尊重宿主审批，不能由经验模块绕过。
 
-关联：[Workflow/Signoff](workflow-signoff.md) · [Agent IR](agent-ir.md) · [Capability Kit](capability-kit.md)
+## 反馈、实验与用户价值（目标）
+
+保留用户在何处修改/否决结果、修改范围与可选理由，用于失败归因和候选生成。当前任务适应、项目维护、跨任务学习采用不同生效范围。开发反馈与 held-out 分离；反复查看测试集后选版本会泄漏选择信号，需要独立最终验收。
+
+比较质量、人工修正与接管时间、重复解释/重做、恢复成功率、时延和总费用。总费用计入候选生成、后台整理、编译、评测及运行维护；不把少调用几次模型直接宣传成净收益。按验收条件选择最小验证配置，不要求简单任务承担全部评测流程。
+
+关联：[Workflow/Signoff](workflow-signoff.md) · [Agent IR](agent-ir.md) · [Capability Kit](capability-kit.md) · [上下文与记忆](context-memory.md) · [产品架构](../../product/architecture.zh-CN.md)

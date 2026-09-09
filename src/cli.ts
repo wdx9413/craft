@@ -8,6 +8,10 @@ import { type EmbeddingProviderConfig } from "./semantic.ts";
 import { craftPaths } from "./paths.ts";
 import { CraftService } from "./service.ts";
 import { CraftStore } from "./store.ts";
+import { LocalMaintenanceWorker, MaintenanceKernel } from "./maintenance.ts";
+import { runBuiltinAcceptanceTicks } from "./acceptance-worker.ts";
+import { LocalWorkbenchServer } from "./workbench-server.ts";
+import { LocalSupervisor, SupervisorClient } from "./supervisor.ts";
 
 const HELP = `Craft
 
@@ -25,6 +29,27 @@ Usage:
   craft semantic disable         Disable semantic retrieval and use keywords only
   craft semantic status          Show semantic retrieval health
   craft task list               List durable tasks
+  craft codex prepare ...       Prepare a digest-bound Codex CLI dispatch
+  craft codex execute ...       Execute a prepared Codex CLI dispatch
+  craft claude prepare ...      Prepare a bounded Claude Code dispatch
+  craft claude execute ...      Execute a prepared Claude Code dispatch
+  craft host-run get <id>       Inspect a background Host run
+  craft host-run cancel <id>    Cancel a live Host run
+  craft host-run start ...      Start through the local Supervisor
+  craft host-run recover --owner <id> --confirmed
+                                Mark confirmed orphaned runs interrupted
+  craft supervisor run [--port 0]
+                                Run the authenticated local Supervisor
+  craft supervisor status       Check the local Supervisor
+  craft home                    Show the unified Workbench Home projection
+  craft serve [--port 4173]     Start the local-only Workbench web app
+  craft inbox refresh           Refresh the unified attention inbox
+  craft inbox list [options]    List prioritized attention cards
+  craft inbox ack <id>          Acknowledge a card without resolving its source
+  craft inbox defer <id> ...    Hide a card until --until <ISO time>
+  craft worker tick             Run one safe local maintenance cycle
+  craft worker run [options]    Run the persistent local maintenance worker
+  craft worker status           Read the last local worker heartbeat
 
 Init options:
   --mode <agent|supervisor|provider>
@@ -37,6 +62,9 @@ Init options:
 Semantic options:
   --provider-name <name> --base-url <url> --model <model>
   --api-key-env <ENV_NAME> [--timeout-ms <100-30000>]
+
+Worker options:
+  --interval-ms <100-3600000>
 `;
 
 function option(args: string[], name: string): string | undefined {
@@ -173,7 +201,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     }
     throw new Error("semantic requires configure, disable, or status.");
   }
-  if (["source", "capability", "task"].includes(args[0] ?? "")) {
+  if (["source", "capability", "task", "worker", "inbox", "home", "serve", "codex", "claude", "host-run", "supervisor"].includes(args[0] ?? "")) {
     const store = await new CraftStore(paths).open();
     const service = await CraftService.open(store);
     try {
@@ -183,6 +211,39 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
       else if (args[0] === "source" && args[1] === "scan") result = await service.sourceScan({ source_id: args[2] });
       else if (args[0] === "capability" && args[1] === "search") result = await service.capabilitySearch({ query: args.slice(2).join(" ") });
       else if (args[0] === "task" && args[1] === "list") result = service.taskList({});
+      else if (args[0] === "codex" && args[1] === "prepare") result = service.codexDispatchPrepare({ task_id: option(args, "--task"), workspace: option(args, "--workspace"), prompt: option(args, "--prompt"), dispatch_id: option(args, "--id"), sandbox: option(args, "--sandbox"), model: option(args, "--model"), timeout_ms: option(args, "--timeout-ms"), output_limit: option(args, "--output-limit") });
+      else if (args[0] === "codex" && args[1] === "execute") result = await service.codexDispatchExecute({ dispatch_id: option(args, "--id"), prompt: option(args, "--prompt"), authorization_request_id: option(args, "--authorization"), notification_ref: option(args, "--notification-ref") });
+      else if (args[0] === "claude" && args[1] === "prepare") result = service.claudeDispatchPrepare({ task_id: option(args, "--task"), workspace: option(args, "--workspace"), prompt: option(args, "--prompt"), dispatch_id: option(args, "--id"), sandbox: option(args, "--sandbox"), model: option(args, "--model"), max_turns: option(args, "--max-turns"), max_budget_usd: option(args, "--max-budget-usd"), timeout_ms: option(args, "--timeout-ms"), output_limit: option(args, "--output-limit") });
+      else if (args[0] === "claude" && args[1] === "execute") result = await service.claudeDispatchExecute({ dispatch_id: option(args, "--id"), prompt: option(args, "--prompt"), authorization_request_id: option(args, "--authorization"), notification_ref: option(args, "--notification-ref") });
+      else if (args[0] === "host-run" && args[1] === "start") result = await new SupervisorClient(paths).call("POST", "/runs/start", { host: option(args, "--host"), dispatch_id: option(args, "--dispatch"), prompt: option(args, "--prompt"), run_id: option(args, "--id"), authorization_request_id: option(args, "--authorization"), notification_ref: option(args, "--notification-ref") });
+      else if (args[0] === "host-run" && args[1] === "get") result = await new SupervisorClient(paths).call("GET", `/runs/${encodeURIComponent(String(args[2] ?? ""))}`);
+      else if (args[0] === "host-run" && args[1] === "cancel") result = await new SupervisorClient(paths).call("POST", `/runs/${encodeURIComponent(String(args[2] ?? ""))}/cancel`, { reason: option(args, "--reason") ?? "user_requested" });
+      else if (args[0] === "host-run" && args[1] === "recover") result = service.hostRunRecover({ owner_id: option(args, "--owner"), confirmed_original_runner_stopped: args.includes("--confirmed") });
+      else if (args[0] === "home" && args.length === 1) result = service.homeView({ limit: option(args, "--limit") });
+      else if (args[0] === "supervisor" && args[1] === "status") result = await new SupervisorClient(paths).status();
+      else if (args[0] === "supervisor" && args[1] === "run") {
+        const supervisor = new LocalSupervisor(service, paths); const started = await supervisor.start(option(args, "--port") === undefined ? 0 : Number(option(args, "--port")));
+        stdout.write(`Craft Supervisor: ${String(started.url)}\n`); await new Promise<void>((resolve) => { const stop = () => resolve(); process.once("SIGINT", stop); process.once("SIGTERM", stop); }); await supervisor.close(); return;
+      }
+      else if (args[0] === "serve") {
+        const supervisor = new LocalSupervisor(service, paths); await supervisor.start(0); const server = new LocalWorkbenchServer(service);
+        try { const started = await server.start(option(args, "--port") === undefined ? 4173 : Number(option(args, "--port"))); stdout.write(`Craft Workbench: ${started.url}\n`); await new Promise<void>((resolve) => { const stop = () => resolve(); process.once("SIGINT", stop); process.once("SIGTERM", stop); }); }
+        finally { await server.close(); await supervisor.close(); } return;
+      }
+      else if (args[0] === "inbox" && args[1] === "refresh") result = service.attentionRefresh({ limit: option(args, "--limit") });
+      else if (args[0] === "inbox" && args[1] === "list") result = service.attentionList({ audience: option(args, "--audience"), limit: option(args, "--limit") });
+      else if (args[0] === "inbox" && args[1] === "ack") result = service.attentionDecide({ item_id: args[2], decision: "acknowledge", decided_by: option(args, "--by") ?? "local-user", reason: option(args, "--reason") });
+      else if (args[0] === "inbox" && args[1] === "defer") result = service.attentionDecide({ item_id: args[2], decision: "defer", decided_by: option(args, "--by") ?? "local-user", deferred_until: option(args, "--until"), reason: option(args, "--reason") });
+      else if (args[0] === "worker") {
+        const runFileAcceptance = () => runBuiltinAcceptanceTicks(service); const worker = new LocalMaintenanceWorker(new MaintenanceKernel(service), paths, { afterTick: runFileAcceptance });
+        if (args[1] === "tick") result = { maintenance: new MaintenanceKernel(service).tick(), acceptance: await runFileAcceptance() };
+        else if (args[1] === "status") result = await worker.status();
+        else if (args[1] === "run") {
+          const controller = new AbortController(); const stop = () => controller.abort(); process.once("SIGINT", stop); process.once("SIGTERM", stop);
+          try { result = await worker.run({ intervalMs: option(args, "--interval-ms") === undefined ? undefined : Number(option(args, "--interval-ms")), signal: controller.signal }); }
+          finally { process.off("SIGINT", stop); process.off("SIGTERM", stop); }
+        } else throw new Error("worker requires tick, run, or status.");
+      }
       else throw new Error(`Unknown command: ${args.join(" ")}`);
       stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     } finally { store.close(); }

@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, type Stats } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { CraftPaths } from "./paths.ts";
 import { CraftStore, type JsonObject } from "./store.ts";
@@ -47,13 +47,18 @@ function digest(path: string): string {
   return createHash("sha256").update(readFileSync(path)).digest("hex");
 }
 
+export function snapshotNodeKind(stat: Pick<Stats, "isFile" | "isDirectory">, path: string): "file" | "directory" {
+  if (stat.isFile()) return "file";
+  if (stat.isDirectory()) return "directory";
+  throw new Error(`workspace snapshots support regular files only: ${path}`);
+}
+
 function files(root: string, path: string): SnapshotEntry[] {
   const absolute = nested(root, path);
   if (!existsSync(absolute)) return [];
   const stat = lstatSync(absolute);
   if (stat.isSymbolicLink()) throw new Error(`workspace snapshots do not follow symbolic links: ${path}`);
-  if (stat.isFile()) return [{ path, digest: digest(absolute), size_bytes: stat.size }];
-  if (!stat.isDirectory()) throw new Error(`workspace snapshots support regular files only: ${path}`);
+  if (snapshotNodeKind(stat, path) === "file") return [{ path, digest: digest(absolute), size_bytes: stat.size }];
   return readdirSync(absolute, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name))
     .flatMap((entry) => files(root, join(path, entry.name).replaceAll("\\", "/")));
 }

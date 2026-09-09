@@ -13,6 +13,11 @@ function metadataTerms(metadata) {
         return [aliases];
     return Array.isArray(aliases) ? aliases.filter((value) => typeof value === "string") : [];
 }
+function declarationKey(item) {
+    const metadata = item.metadata;
+    const explicit = metadata.capability_id ?? metadata.id;
+    return `${item.kind}:${typeof explicit === "string" && explicit.trim() ? explicit.trim().toLowerCase() : String(item.name).trim().toLowerCase()}`;
+}
 function rerank(query, item) {
     const normalized = query.trim().toLowerCase();
     const terms = normalized.split(/\s+/).filter(Boolean);
@@ -92,26 +97,75 @@ export class Catalog {
             ? { mode: "configured", provider: semanticProvider.label, indexed_capabilities: 0 }
             : { mode: "disabled", reason: "not_configured", indexed_capabilities: 0 };
     }
-    async addSource(path, label, scan = true) {
+    async addSource(path, label, scan = true, priority = 0) {
         const requested_path = resolve(path);
         const root = await realpath(requested_path);
         if (!(await stat(root)).isDirectory())
             throw new Error("Capability source must be a directory.");
-        const duplicate = this.store.list("source", Number.MAX_SAFE_INTEGER)
-            .find((item) => pathKey(String(item.real_path)) === pathKey(root));
+        if (!Number.isInteger(priority) || priority < -1000 || priority > 1000)
+            throw new Error("Capability source priority must be an integer between -1000 and 1000.");
+        const mountKey = `${pathKey(requested_path)}:${label ?? ""}`;
+        const duplicate = this.store.list("source", Number.MAX_SAFE_INTEGER).find((item) => item.mount_key === mountKey);
         if (duplicate)
-            throw new Error(`Capability source already exists: ${duplicate.id}`);
-        const id = stableId("source", root);
-        this.store.save("source", id, { label: label || basename(root), requested_path,
-            real_path: root, enabled: true, scanned_at: null });
+            return scan && duplicate.enabled ? this.scanSource(String(duplicate.id)) : duplicate;
+        const id = stableId("source", mountKey);
+        this.store.save("source", id, { label: label || basename(root), requested_path, real_path: root, mount_key: mountKey,
+            priority, enabled: true, scanned_at: null });
         return scan ? this.scanSource(id) : this.getSource(id);
     }
     listSources() { return this.store.list("source", Number.MAX_SAFE_INTEGER); }
+    listLogicalCapabilities() {
+        return this.store.list("logical_capability", Number.MAX_SAFE_INTEGER).map((logical) => ({ ...logical,
+            conflicts: this.store.list("capability_conflict", Number.MAX_SAFE_INTEGER, (conflict) => conflict.logical_capability_ids.includes(String(logical.id))) }));
+    }
     getSource(id) { return this.store.get("source", id); }
-    updateSource(id, enabled, label) {
+    updateSource(id, enabled, label, priority) {
         const current = this.getSource(id);
-        return this.store.save("source", id, { ...current,
-            enabled: enabled ?? current.enabled, label: label ?? current.label });
+        if (priority !== undefined && (!Number.isInteger(priority) || priority < -1000 || priority > 1000))
+            throw new Error("Capability source priority must be an integer between -1000 and 1000.");
+        const updated = this.store.save("source", id, { ...current,
+            enabled: enabled ?? current.enabled, label: label ?? current.label, priority: priority ?? current.priority ?? 0 });
+        this.rebuildLogicalCapabilities();
+        return updated;
+    }
+    rebuildLogicalCapabilities() {
+        const sources = new Map(this.listSources().map((source) => [String(source.id), source]));
+        const observations = this.store.list("capability", Number.MAX_SAFE_INTEGER).filter((item) => sources.get(String(item.source_id))?.enabled === true);
+        const byDigest = new Map();
+        for (const item of observations) {
+            const digest = String(item.digest);
+            byDigest.set(digest, [...(byDigest.get(digest) ?? []), item]);
+        }
+        const current = new Set();
+        const logicalByDigest = new Map();
+        for (const [digest, group] of byDigest) {
+            const logicalId = stableId("logical_capability", digest);
+            current.add(logicalId);
+            logicalByDigest.set(digest, logicalId);
+            const ordered = [...group].sort((left, right) => Number(sources.get(String(right.source_id))?.priority ?? 0) - Number(sources.get(String(left.source_id))?.priority ?? 0) || String(left.id).localeCompare(String(right.id)));
+            const selected = ordered[0];
+            const instances = ordered.map((item) => ({ capability_id: item.id, source_id: item.source_id, source_priority: Number(sources.get(String(item.source_id))?.priority ?? 0), path: item.path }));
+            this.store.save("logical_capability", logicalId, { content_digest: digest, kind: selected.kind, name: selected.name, description: selected.description, version: selected.version, metadata: selected.metadata, selected_capability_id: selected.id, selected_source_id: selected.source_id, instances, declaration_keys: [...new Set(group.map(declarationKey))].sort(), health: "healthy" });
+        }
+        for (const item of this.store.list("logical_capability", Number.MAX_SAFE_INTEGER))
+            if (!current.has(String(item.id)))
+                this.store.remove("logical_capability", String(item.id));
+        const byDeclaration = new Map();
+        for (const item of observations) {
+            const key = declarationKey(item);
+            byDeclaration.set(key, new Set([...(byDeclaration.get(key) ?? []), String(item.digest)]));
+        }
+        const conflictIds = new Set();
+        for (const [key, digests] of byDeclaration)
+            if (digests.size > 1) {
+                const conflictId = stableId("capability_conflict", key);
+                conflictIds.add(conflictId);
+                const logicalIds = [...digests].map((digest) => logicalByDigest.get(digest)).sort();
+                this.store.save("capability_conflict", conflictId, { declaration_key: key, logical_capability_ids: logicalIds, content_digests: [...digests].sort(), status: "open" });
+            }
+        for (const item of this.store.list("capability_conflict", Number.MAX_SAFE_INTEGER))
+            if (!conflictIds.has(String(item.id)))
+                this.store.remove("capability_conflict", String(item.id));
     }
     removeSource(id) {
         this.getSource(id);
@@ -120,6 +174,7 @@ export class Catalog {
                 this.store.remove("capability", String(capability.id));
         }
         this.store.remove("source", id);
+        this.rebuildLogicalCapabilities();
         return { id, removed: true };
     }
     async scanSource(id) {
@@ -175,6 +230,7 @@ export class Catalog {
             }
         }
         this.store.save("source", id, { ...source, scanned_at: new Date().toISOString() });
+        this.rebuildLogicalCapabilities();
         return { ...this.getSource(id), scan: { added, updated, unchanged, removed, total: files.length,
                 issues } };
     }
@@ -196,11 +252,27 @@ export class Catalog {
             const aliases = metadataTerms(item.metadata).join(" ").toLowerCase();
             return terms.every((term) => aliases.includes(term));
         });
-        return [...lexical, ...aliasFallback].filter((item, index, values) => values.findIndex((candidate) => candidate.id === item.id) === index).map((item) => rerank(query, item))
+        const activeSourceIds = new Set(this.listSources().filter((source) => source.enabled === true).map((source) => String(source.id)));
+        const candidates = [...lexical, ...aliasFallback].filter((item, index, values) => (item.source_id === undefined || activeSourceIds.has(String(item.source_id))) &&
+            values.findIndex((candidate) => candidate.id === item.id) === index).map((item) => rerank(query, item))
+            .sort((left, right) => Number(right.score) - Number(left.score) || String(left.id).localeCompare(String(right.id)));
+        const sources = new Map(this.listSources().map((source) => [String(source.id), source]));
+        const selected = new Map();
+        for (const item of candidates) {
+            const key = String(item.digest);
+            const previous = selected.get(key);
+            const priority = Number(sources.get(String(item.source_id))?.priority ?? 0);
+            const previousPriority = previous ? Number(sources.get(String(previous.source_id))?.priority ?? 0) : -Infinity;
+            if (!previous || priority > previousPriority || (priority === previousPriority && String(item.id) < String(previous.id)))
+                selected.set(key, item);
+        }
+        return [...selected.values()]
             .sort((left, right) => Number(right.score) - Number(left.score) || String(left.id).localeCompare(String(right.id)))
             .slice(0, Math.min(Math.max(1, limit), 20)).map((item) => {
             const { body: _body, metadata: _metadata, search_text: _searchText, ...summary } = item;
-            return summary;
+            const logical = this.store.find("logical_capability", stableId("logical_capability", String(item.digest)));
+            const conflicts = logical ? this.store.list("capability_conflict", Number.MAX_SAFE_INTEGER, (conflict) => conflict.logical_capability_ids.includes(String(logical.id))) : [];
+            return { ...summary, logical_capability_id: logical?.id ?? null, source_instances: logical?.instances ?? [{ capability_id: item.id, source_id: item.source_id ?? null, source_priority: 0, path: item.path ?? null }], conflicts };
         });
     }
     semanticStatus() { return { ...this.#semanticStatus }; }

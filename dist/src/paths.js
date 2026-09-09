@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { chmod, mkdir, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -20,18 +21,19 @@ export function craftPaths(root = dataRoot()) {
         cacheDir: join(resolved, "cache"),
         backupsDir: join(resolved, "backups"),
         runtimeDir: join(resolved, "runtime"),
+        artifactsDir: join(resolved, "artifacts"),
     };
 }
 export async function ensureLayout(paths = craftPaths()) {
     await Promise.all([
         paths.configDir, paths.databaseDir, paths.indexDir, paths.logsDir,
-        paths.cacheDir, paths.backupsDir, paths.runtimeDir,
+        paths.cacheDir, paths.backupsDir, paths.runtimeDir, paths.artifactsDir,
     ].map((path) => mkdir(path, { recursive: true })));
     return paths;
 }
 export async function atomicPrivateJson(path, value, platform = process.platform) {
     await mkdir(dirname(path), { recursive: true });
-    const temporary = `${path}.${process.pid}.${Date.now()}.tmp`;
+    const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
     await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, {
         encoding: "utf8", mode: 0o600,
     });

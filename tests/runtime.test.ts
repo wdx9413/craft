@@ -34,7 +34,7 @@ test("runtime driver pauses effects for approval, resumes exactly once, and aggr
     assert.equal(parent.operation_id, "parent");
     const completed = service.runtimeOperationSubmit({ operation_id: "parent", lease_id: parent.lease_id, claimed_by: "host",
       verdict: "passed", costs: { tokens: 3 }, children: [{ operation_id: "child", kind: "agent", effect: "read_only",
-        objective: "review", agent_profile_id: "reviewer" }] });
+        objective: "review", target: "workspace:review", agent_profile_id: "reviewer" }] });
     assert.equal((completed.run as JsonObject).status, "running");
     const child = (service.runtimeDispatch({ run_id: "run", claimed_by: "host" }).operations as JsonObject[])[0];
     service.runtimeOperationSubmit({ operation_id: "child", lease_id: child.lease_id, claimed_by: "host",
@@ -142,5 +142,61 @@ test("runtime policy and environment fingerprints invalidate promotion eligibili
     service.runtimeOperationSubmit({ operation_id: "null-parent", lease_id: nullParent.lease_id, claimed_by: "host", verdict: "passed",
       children: [{ operation_id: "null-child-op", kind: "agent", effect: "read_only", objective: "child" }] });
     assert.equal((service.runtimeOperationGet({ operation_id: "null-child-op" }).operation as JsonObject).agent_profile_id, null);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("runtime adapters treat computer use as a first-class exact authorized action", async () => {
+  const root = join(tmpdir(), `craft-runtime-autonomy-${process.pid}-${Date.now()}`);
+  const store = await new CraftStore(craftPaths(root)).open(); const service = new CraftService(store);
+  try {
+    const task = service.taskOpen({ title: "Browser", goal: "Use a legacy UI safely" }).task as JsonObject;
+    const runtimePolicy = service.runtimePolicySave({ name: "UI", allowed_effects: ["local_write"] });
+    const adapter = service.runtimeAdapterSave({ name: "Computer use", host: "generic", allowed_kinds: ["computer_use"],
+      allowed_effects: ["local_write"], execution_environment: "isolated" });
+    service.runtimeRunStart({ run_id: "ui-run", task_id: task.id, policy_id: runtimePolicy.id, environment: { browser: "isolated" },
+      operations: [{ operation_id: "click", kind: "computer_use", effect: "local_write", objective: "Fill the draft form",
+        target: "browser:tab-1:form" }] });
+    const operation = service.runtimeOperationGet({ operation_id: "click" }).operation as JsonObject;
+    assert.equal(operation.autonomy_action, "computer_use"); assert.equal(operation.authorization_target, "browser:tab-1:form");
+    assert.match(String(operation.request_digest), /^sha256:[a-f0-9]{64}$/u);
+    const autonomy = service.autonomyPolicySave({ policy_id: "ui-autonomy", task_id: task.id, name: "UI autonomy",
+      rules: { computer_use: { level: "notify_only" } } }).policy as JsonObject;
+    assert.throws(() => service.runtimeAdapterDispatch({ runtime_adapter_id: adapter.id, run_id: "ui-run" }), /request_id/);
+    const request = service.autonomyRequest({ request_id: "ui-auth", policy_id: autonomy.id, policy_version: autonomy.version,
+      task_id: task.id, action: operation.autonomy_action, target: operation.authorization_target,
+      request_digest: operation.request_digest, requested_by: "agent" }).request as JsonObject;
+    assert.throws(() => service.runtimeAdapterDispatch({ runtime_adapter_id: adapter.id, run_id: "ui-run",
+      authorization_requests: { click: request.id } }), /notification_ref/);
+    const dispatched = service.runtimeAdapterDispatch({ runtime_adapter_id: adapter.id, run_id: "ui-run",
+      authorization_requests: { click: request.id }, notification_refs: { click: "notice:ui" } });
+    assert.equal((dispatched.operations as JsonObject[])[0].autonomy_action, "computer_use");
+    assert.equal(store.get("autonomy_request", String(request.id)).status, "consumed");
+    assert.throws(() => service.runtimeDispatch({ run_id: "ui-run", claimed_by: "other",
+      authorization_requests: [], notification_refs: {} }), /authorization_requests must be an object/);
+
+    const secondRun = service.runtimeRunStart({ run_id: "stale-ui", task_id: task.id, policy_id: runtimePolicy.id, environment: {},
+      operations: [{ operation_id: "second-click", kind: "computer_use", effect: "local_write", objective: "Click", target: "browser:2" }] });
+    const secondOperation = (secondRun.operations as JsonObject[])[0]; assert.equal(secondOperation.autonomy_action, "computer_use");
+    const stale = service.autonomyRequest({ request_id: "stale-ui-auth", policy_id: autonomy.id, policy_version: autonomy.version,
+      task_id: task.id, action: secondOperation.autonomy_action, target: secondOperation.authorization_target,
+      request_digest: secondOperation.request_digest, requested_by: "agent" }).request as JsonObject;
+    const latest = service.autonomyPolicySave({ policy_id: "ui-autonomy", task_id: task.id, name: "UI autonomy v2",
+      rules: { computer_use: { level: "automatic" } }, expected_version: autonomy.version }).policy as JsonObject;
+    assert.throws(() => service.runtimeDispatch({ run_id: "stale-ui", claimed_by: "host",
+      authorization_requests: { "second-click": stale.id }, notification_refs: { "second-click": "notice" } }), /does not match/);
+    const used = service.autonomyRequest({ request_id: "used-ui-auth", policy_id: latest.id, policy_version: latest.version,
+      task_id: task.id, action: secondOperation.autonomy_action, target: secondOperation.authorization_target,
+      request_digest: secondOperation.request_digest, requested_by: "agent" }).request as JsonObject;
+    service.autonomyConsume({ request_id: used.id, task_id: task.id, action: secondOperation.autonomy_action,
+      target: secondOperation.authorization_target, request_digest: secondOperation.request_digest,
+      idempotency_key: "runtime:stale-ui:second-click:1" });
+    assert.throws(() => service.runtimeDispatch({ run_id: "stale-ui", claimed_by: "host",
+      authorization_requests: { "second-click": used.id } }), /already consumed/);
+
+    service.runtimeRunStart({ run_id: "ambiguous-ui", task_id: task.id, policy_id: runtimePolicy.id, environment: {},
+      operations: [{ operation_id: "third-click", kind: "computer_use", effect: "local_write", objective: "Click", target: "browser:3" }] });
+    service.autonomyPolicySave({ policy_id: "other-autonomy", task_id: task.id, name: "Other",
+      rules: { computer_use: { level: "automatic" } } });
+    assert.throws(() => service.runtimeDispatch({ run_id: "ambiguous-ui", claimed_by: "host" }), /unambiguous active/);
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });

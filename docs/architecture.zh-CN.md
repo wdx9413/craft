@@ -4,9 +4,11 @@
 
 ## 产品边界
 
-Craft 是通用 Agent Harness，不属于某个模型或 Agent 产品。Codex、Claude Code、DeepSeek Harness、桌面端或自建程序都可以成为 Craft 的 Host 或 Client。
+Craft 的产品目标是面向各行业的人机共同数字工作台；本页记录现有 Agent Harness 内核及版本演进。Codex、Claude Code、DeepSeek Harness、未来桌面端或自建程序都可以成为 Host 或 Client。
 
-Craft Core 管理六类稳定对象：
+完整目标见 [三大支柱与十个模块](product/architecture.zh-CN.md)，后续取舍见 [路线](product/roadmap.zh-CN.md)。评测属于“学习与改进”支柱，沙箱属于“执行与保障”。历史章节中的隔离描述不得解释为已完成安全认证；当前实际缺口见 [沙箱与执行策略](technical/modules/execution-policy.md)。
+
+Craft Core 管理以下稳定对象：
 
 - Capability：可检索的能力资产。当前扫描 `SKILL.md`，未来扩展插件与 MCP 元数据。
 - Task / Checkpoint：跨会话任务状态和可信接续点。

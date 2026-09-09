@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { McpServer, CORE_TOOLS, TOOLS } from "../src/mcp.ts";
-import { LocalIsolatedAdapter, runLocalProcess } from "../src/isolated.ts";
+import { LocalIsolatedAdapter, processExitCode, runLocalProcess } from "../src/isolated.ts";
 import { decideExecution } from "../src/execution-policy.ts";
 import { craftPaths } from "../src/paths.ts";
 import { CraftService } from "../src/service.ts";
@@ -194,6 +194,7 @@ test("v0.9.9 MCP core is compact while full mode remains compatible", async () =
 });
 
 test("v0.9.9 local isolation fails closed and denies network through the platform adapter", async () => {
+  assert.equal(processExitCode(null), 1);
   const calls: JsonObject[] = [];
   const unavailable = new LocalIsolatedAdapter({ platform: "win32", helperAvailable: () => false });
   await assert.rejects(() => unavailable.execute({ run_id: "r", command: "/usr/bin/true", args: [], runtime_root: tmpdir(),
@@ -218,10 +219,10 @@ test("v0.9.9 local isolation fails closed and denies network through the platfor
     command_allowlist: ["/usr/bin/true"], path_allowlist: ["logs"], effect: "read_only" }), /path/);
   const linux = new LocalIsolatedAdapter({ platform: "linux", helperAvailable: () => true, runner: async () => ({ code: 1, stdout: "", stderr: "failed" }) });
   assert.equal((await linux.execute({ run_id: "linux", command: "/usr/bin/true", args: [], runtime_root: tmpdir(), command_allowlist: ["/usr/bin/true"], path_allowlist: ["."], effect: "local_write", compensation: {} })).status, "failed");
-  assert.equal((await runLocalProcess({ helper: "/usr/bin/true", argv: [], cwd: tmpdir() })).code, 0);
-  const output = await runLocalProcess({ helper: "/bin/sh", argv: ["-c", "echo out; echo err >&2"], cwd: tmpdir() });
+  assert.equal((await runLocalProcess({ helper: process.execPath, argv: ["-e", ""], cwd: tmpdir() })).code, 0);
+  const output = await runLocalProcess({ helper: process.execPath, argv: ["-e", "console.log('out'); console.error('err')"], cwd: tmpdir() });
   assert.match(output.stdout, /out/); assert.match(output.stderr, /err/);
-  assert.equal((await runLocalProcess({ helper: "/bin/sh", argv: ["-c", "kill -TERM $$"], cwd: tmpdir() })).code, 1);
+  assert.equal((await runLocalProcess({ helper: process.execPath, argv: ["-e", "process.kill(process.pid, 'SIGTERM')"], cwd: tmpdir() })).code, 1);
   await assert.rejects(() => runLocalProcess({ helper: "/not/a-command", argv: [], cwd: tmpdir() }));
   const root = join(tmpdir(), `craft-v099-isolated-${process.pid}-${Date.now()}`); const store = await new CraftStore(craftPaths(root)).open(); const service = new CraftService(store, undefined,
     new LocalIsolatedAdapter({ platform: "darwin", helperAvailable: () => true, runner: async () => ({ code: 0, stdout: "", stderr: "" }) }));

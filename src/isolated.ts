@@ -11,6 +11,8 @@ export type IsolatedExecution = {
 type Runner = (request: JsonObject) => Promise<{ code: number; stdout: string; stderr: string }>;
 type Options = { platform?: NodeJS.Platform; helperAvailable?: (path: string) => boolean; runner?: Runner };
 
+export function processExitCode(code: number | null): number { return code ?? 1; }
+
 function pathAllowed(path: string, prefixes: string[]): boolean {
   const normalized = path.replaceAll("\\", "/").replace(/^\.\//u, "");
   return !!normalized && !normalized.startsWith("/") && !normalized.split("/").includes("..") && prefixes.some((prefix) => prefix === "." || normalized === prefix || normalized.startsWith(`${prefix}/`));
@@ -23,9 +25,9 @@ function helperFor(platform: NodeJS.Platform): string | null {
 export async function runLocalProcess(request: JsonObject): Promise<{ code: number; stdout: string; stderr: string }> {
   const environment = { ...process.env }; delete environment.NODE_V8_COVERAGE;
   const child = spawn(String(request.helper), request.argv as string[], { cwd: String(request.cwd), env: environment, shell: false, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
-  let stdout = ""; let stderr = ""; child.stdout?.setEncoding("utf8"); child.stderr?.setEncoding("utf8");
-  child.stdout?.on("data", (chunk) => { stdout += chunk; }); child.stderr?.on("data", (chunk) => { stderr += chunk; });
-  return new Promise((resolveResult, reject) => { child.once("error", reject); child.once("close", (code) => resolveResult({ code: code ?? 1, stdout, stderr })); });
+  let stdout = ""; let stderr = ""; child.stdout!.setEncoding("utf8"); child.stderr!.setEncoding("utf8");
+  child.stdout!.on("data", (chunk) => { stdout += chunk; }); child.stderr!.on("data", (chunk) => { stderr += chunk; });
+  return new Promise((resolveResult, reject) => { child.once("error", reject); child.once("close", (code) => resolveResult({ code: processExitCode(code), stdout, stderr })); });
 }
 
 export class LocalIsolatedAdapter {

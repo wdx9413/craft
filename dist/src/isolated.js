@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { resolve } from "node:path";
+export function processExitCode(code) { return code ?? 1; }
 function pathAllowed(path, prefixes) {
     const normalized = path.replaceAll("\\", "/").replace(/^\.\//u, "");
     return !!normalized && !normalized.startsWith("/") && !normalized.split("/").includes("..") && prefixes.some((prefix) => prefix === "." || normalized === prefix || normalized.startsWith(`${prefix}/`));
@@ -15,11 +16,11 @@ export async function runLocalProcess(request) {
     const child = spawn(String(request.helper), request.argv, { cwd: String(request.cwd), env: environment, shell: false, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
     let stdout = "";
     let stderr = "";
-    child.stdout?.setEncoding("utf8");
-    child.stderr?.setEncoding("utf8");
-    child.stdout?.on("data", (chunk) => { stdout += chunk; });
-    child.stderr?.on("data", (chunk) => { stderr += chunk; });
-    return new Promise((resolveResult, reject) => { child.once("error", reject); child.once("close", (code) => resolveResult({ code: code ?? 1, stdout, stderr })); });
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    return new Promise((resolveResult, reject) => { child.once("error", reject); child.once("close", (code) => resolveResult({ code: processExitCode(code), stdout, stderr })); });
 }
 export class LocalIsolatedAdapter {
     platform;

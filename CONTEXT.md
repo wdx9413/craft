@@ -46,7 +46,13 @@
 
 ## Trajectory Script Proposal
 
-从同一 Task 的 passed Trial 编译出的受限脚本候选。当前只含版本锁定的 Workflow 和 Checkpoint IR，并由固定 TypeScript 模板渲染；不接受任意源码、不执行动态代码。只有 exact passed Signoff 才能从 `draft` 变为 `verified`。
+引用同一 Task 的 passed Trial、由调用方提供 operations 的受限脚本候选。当前只含版本锁定的 Workflow 和 Checkpoint IR，并由固定 TypeScript 模板渲染；尚不从原始 Trace 自动推导程序，不接受任意源码、不执行动态代码。只有 exact passed Signoff 才能从 `draft` 变为 `verified`。
+
+## 产品支柱与目标边界
+
+工作与协作包含目标、共享工作空间、能力与上下文；执行与保障包含规划调度、连接与沙箱、验证与观察；学习与改进包含评测与实验、记忆与知识、学习适应、编译与复用。评测是第三支柱内部模块，不是第四支柱。
+
+Generative/Dual-Mode UI、CVMM 类比下的通用工作集管理、后台 Memory Consolidation、自动轨迹编译均是目标，不能用已有状态对象代称完整实现。当前隔离 Adapter 也不是完整安全沙箱。产品面向各行业，研发/视频只是首批验证场景。详见 [产品架构](docs/product/architecture.zh-CN.md) 与 [执行边界](docs/technical/modules/execution-policy.md)。
 
 ## Verified Script Run
 
