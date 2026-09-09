@@ -14332,7 +14332,7 @@ var HostRunKernel = class {
 };
 
 // src/service.ts
-var VERSION = "0.11.22";
+var VERSION = "0.11.23";
 var CONFIDENCE = /* @__PURE__ */ new Set(["confirmed", "bounded", "unverified", "rejected"]);
 var TASK_STATUS = /* @__PURE__ */ new Set(["active", "paused", "completed", "cancelled"]);
 var VERSIONED_LIFECYCLE = /* @__PURE__ */ new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -14655,6 +14655,7 @@ var CraftService = class _CraftService {
       "capability_call",
       "logical_activation_plan",
       "logical_activation_audit",
+      "logical_activation_resolution",
       "expert_profile",
       "context_capsule",
       "evaluation_reliability",
@@ -14836,6 +14837,42 @@ var CraftService = class _CraftService {
       findings: findings2
     });
     return { plan: savedPlan, audit };
+  }
+  async logicalActivationResolve(args) {
+    const planId = text30(args.plan_id, "plan_id");
+    const audited = this.logicalActivationAudit({ plan_id: planId, audit_id: args.audit_id ?? id9("logical_activation_audit") });
+    const plan = audited.plan;
+    const audit = audited.audit;
+    if (audit.status !== "active") throw new Error("Activation plan is stale and cannot load local capability content");
+    const maxChars = finiteInteger(args.max_chars, "max_chars", 16e3, 1, 1e5);
+    const capabilities = await Promise.all(plan.selected.map(async (selected) => {
+      const logical = this.store.get("logical_capability", String(selected.logical_capability_id));
+      const capability = this.store.get("capability", String(logical.selected_capability_id));
+      const content = await (0, import_promises11.readFile)(text30(capability.path, "capability.path"), "utf8");
+      const digest18 = (0, import_node_crypto35.createHash)("sha256").update(content).digest("hex");
+      if (digest18 !== selected.content_digest) throw new Error("Capability file digest drifted; rescan the source before loading it");
+      assertNoSecret(content, "capability content");
+      if (content.length > maxChars) throw new Error("Capability content exceeds the requested context limit");
+      return {
+        logical_capability_id: logical.id,
+        content_digest: digest18,
+        selected_capability_id: capability.id,
+        selected_source_id: logical.selected_source_id,
+        path: capability.path,
+        name: capability.name,
+        description: capability.description,
+        metadata: capability.metadata,
+        content
+      };
+    }));
+    const resolution = this.store.create("logical_activation_resolution", String(args.resolution_id ?? id9("logical_activation_resolution")), {
+      plan_id: plan.id,
+      plan_version: plan.version,
+      audit_id: audit.id,
+      capabilities: capabilities.map(({ content: _content, ...summary2 }) => summary2),
+      max_chars: maxChars
+    });
+    return { plan, audit, resolution, capabilities };
   }
   semanticSearchStatus() {
     return this.catalog.semanticStatus();
@@ -19325,6 +19362,15 @@ var TOOLS = [
   tool("craft_logical_activation_plan_get", "Read one digest-pinned logical capability activation plan.", ["plan_id"], true, ["version"]),
   tool("craft_logical_activation_plan_list", "List digest-pinned logical capability activation plans.", [], true, ["limit", "query"]),
   tool("craft_logical_activation_audit", "Audit one activation plan for missing content, content drift, or safe mirror reselection; it never executes a capability.", ["plan_id"], false, ["audit_id"]),
+  tool(
+    "craft_logical_activation_resolve",
+    "Revalidate and load digest-pinned local capability documents as bounded read-only context. It never executes their instructions.",
+    ["plan_id"],
+    false,
+    ["resolution_id", "audit_id", "max_chars"]
+  ),
+  tool("craft_logical_activation_resolution_get", "Read one content-free logical capability resolution receipt.", ["resolution_id"], true, ["version"]),
+  tool("craft_logical_activation_resolution_list", "List content-free logical capability resolution receipts.", [], true, ["limit", "query"]),
   tool("craft_semantic_status", "Show whether optional semantic capability retrieval is disabled, configured, ready, or temporarily degraded.", [], true),
   tool("craft_execution_policy_decide", "Classify an effect into normal host execution, isolation, approval, or a fail-closed block.", ["effect", "platform"], true, ["generated_code", "requires_credential", "has_compensation"]),
   tool("craft_capability_get", "Read one indexed capability.", ["asset_id"], true),
@@ -20554,6 +20600,9 @@ var McpServer = class {
       craft_logical_activation_plan_list: (a) => service.list("logical_activation_plan", "plans", a),
       craft_logical_activation_audit: (a) => service.logicalActivationAudit(a),
       craft_semantic_status: () => service.semanticSearchStatus(),
+      craft_logical_activation_resolve: (a) => service.logicalActivationResolve(a),
+      craft_logical_activation_resolution_get: (a) => service.get("logical_activation_resolution", "resolution_id", a),
+      craft_logical_activation_resolution_list: (a) => service.list("logical_activation_resolution", "resolutions", a),
       craft_execution_policy_decide: service.executionPolicyDecide.bind(service),
       craft_capability_get: (a) => service.capabilityGet(a),
       craft_default_route: (a) => service.defaultRouteWithSemanticSearch(a),

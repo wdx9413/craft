@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { isAbsolute, join, resolve, win32 } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Catalog } from "./catalog.ts";
@@ -47,7 +47,7 @@ import { CodexHostKernel } from "./codex-driver.ts";
 import { ClaudeHostKernel } from "./claude-driver.ts";
 import { HostRunKernel } from "./host-run.ts";
 
-export const VERSION = "0.11.22";
+export const VERSION = "0.11.23";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -305,7 +305,7 @@ export class CraftService {
       "project_policy", "route_receipt", "host_adapter", "host_dispatch", "runtime_policy", "runtime_run",
       "runtime_operation", "runtime_adapter", "evaluation_runner", "evaluation_promotion", "experience_mining_candidate",
       "experience_shadow_experiment", "adaptive_harness", "agent_ir", "operational_signal", "operational_alert",
-      "capability_asset", "activation_profile", "tool_selection_receipt", "capability_call", "logical_activation_plan", "logical_activation_audit", "expert_profile", "context_capsule",
+      "capability_asset", "activation_profile", "tool_selection_receipt", "capability_call", "logical_activation_plan", "logical_activation_audit", "logical_activation_resolution", "expert_profile", "context_capsule",
       "evaluation_reliability", "judge_adapter", "judge_calibration", "adaptation_candidate", "feedback_intake", "feedback_case", "canary",
       "workspace", "workspace_checkpoint", "workspace_change", "workspace_transaction", "work_object", "memory_item", "context_profile", "task_graph", "change_set",
       "budget_account", "budget_reservation", "durable_wait", "external_event", "fallback_contract", "fallback_event",
@@ -392,6 +392,30 @@ export class CraftService {
     const audit = this.store.create("logical_activation_audit", String(args.audit_id ?? id("logical_activation_audit")), { plan_id: plan.id,
       plan_version: plan.version, status, findings });
     return { plan: savedPlan, audit };
+  }
+  async logicalActivationResolve(args: JsonObject): Promise<JsonObject> {
+    const planId = text(args.plan_id, "plan_id");
+    const audited = this.logicalActivationAudit({ plan_id: planId, audit_id: args.audit_id ?? id("logical_activation_audit") });
+    const plan = audited.plan as JsonObject; const audit = audited.audit as JsonObject;
+    if (audit.status !== "active") throw new Error("Activation plan is stale and cannot load local capability content");
+    const maxChars = finiteInteger(args.max_chars, "max_chars", 16_000, 1, 100_000);
+    const capabilities = await Promise.all((plan.selected as JsonObject[]).map(async (selected) => {
+      const logical = this.store.get("logical_capability", String(selected.logical_capability_id));
+      const capability = this.store.get("capability", String(logical.selected_capability_id));
+      const content = await readFile(text(capability.path, "capability.path"), "utf8");
+      const digest = createHash("sha256").update(content).digest("hex");
+      if (digest !== selected.content_digest) throw new Error("Capability file digest drifted; rescan the source before loading it");
+      assertNoSecret(content, "capability content");
+      if (content.length > maxChars) throw new Error("Capability content exceeds the requested context limit");
+      return { logical_capability_id: logical.id, content_digest: digest, selected_capability_id: capability.id,
+        selected_source_id: logical.selected_source_id, path: capability.path, name: capability.name,
+        description: capability.description, metadata: capability.metadata, content };
+    }));
+    const resolution = this.store.create("logical_activation_resolution", String(args.resolution_id ?? id("logical_activation_resolution")), {
+      plan_id: plan.id, plan_version: plan.version, audit_id: audit.id,
+      capabilities: capabilities.map(({ content: _content, ...summary }) => summary), max_chars: maxChars,
+    });
+    return { plan, audit, resolution, capabilities };
   }
   semanticSearchStatus(): JsonObject { return this.catalog.semanticStatus(); }
   executionPolicyDecide(args: JsonObject): JsonObject { return decideExecution(args); }
