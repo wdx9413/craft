@@ -50,6 +50,7 @@ test("catalog keeps source mounts but exposes mirrors as one logical capability 
   await writeFile(join(primary, "SKILL.md"), shared); await writeFile(join(mirror, "SKILL.md"), shared); await writeFile(join(divergent, "SKILL.md"), "---\nname: reconcile\ncapability_id: reconcile\ndescription: Write status\n---\nUse a POST.");
   const store = await new CraftStore(craftPaths(join(root, "data"))).open(); const catalog = new Catalog(store);
   try {
+    await assert.rejects(() => catalog.addSource(primary, "Invalid", true, 1001), /priority/);
     const first = await catalog.addSource(primary, "Primary", true, 1); const second = await catalog.addSource(mirror, "Mirror", true, 9);
     assert.notEqual(first.id, second.id); assert.equal(catalog.listSources().length, 2); assert.equal((await catalog.addSource(primary, "Primary")).id, first.id);
     const selected = catalog.search("read status"); assert.equal(selected.length, 1); assert.equal(selected[0].source_id, second.id); assert.equal((selected[0].source_instances as unknown[]).length, 2);
@@ -57,6 +58,19 @@ test("catalog keeps source mounts but exposes mirrors as one logical capability 
     assert.equal(conflicted.length, 2); assert.equal(store.list("capability_conflict", 10).length, 1); assert.equal(catalog.search("status", 10).length, 2);
     catalog.updateSource(String(second.id), false); assert.equal(catalog.search("read status")[0].source_id, first.id);
     assert.throws(() => catalog.updateSource(String(first.id), undefined, undefined, 1001), /priority/);
+    catalog.updateSource(String(second.id), true, undefined, 1);
+    const ties = store.list("capability", 10_000).filter((item) => item.source_id === first.id || item.source_id === second.id).map((item) => String(item.id)).sort();
+    assert.equal(catalog.search("read status")[0].id, ties[0]);
+    store.save("source", "legacy_priority", { label: "Legacy", requested_path: primary, real_path: primary, mount_key: "legacy", enabled: true, scanned_at: null });
+    store.save("source", "legacy_priority_2", { label: "Legacy 2", requested_path: mirror, real_path: mirror, mount_key: "legacy-2", enabled: true, scanned_at: null });
+    const sharedCapability = store.list("capability", 10_000).find((item) => item.source_id === first.id)!;
+    store.save("capability", "a_legacy_capability", { ...sharedCapability, source_id: "legacy_priority", path: "legacy", mtime_ms: 1 });
+    store.save("capability", "b_legacy_capability", { ...sharedCapability, source_id: "legacy_priority_2", path: "legacy-2", mtime_ms: 1 });
+    catalog.updateSource(String(first.id));
+    assert.notEqual(catalog.search("read status")[0].source_id, "legacy_priority");
+    assert.equal(catalog.updateSource("legacy_priority").priority, 0);
+    catalog.removeSource(String((await catalog.addSource(divergent, "Divergent")).id));
+    assert.equal(store.list("capability_conflict", 10).length, 0);
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 

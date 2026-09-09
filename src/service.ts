@@ -47,7 +47,7 @@ import { CodexHostKernel } from "./codex-driver.ts";
 import { ClaudeHostKernel } from "./claude-driver.ts";
 import { HostRunKernel } from "./host-run.ts";
 
-export const VERSION = "0.11.20";
+export const VERSION = "0.11.21";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -307,7 +307,7 @@ export class CraftService {
       "experience_shadow_experiment", "adaptive_harness", "agent_ir", "operational_signal", "operational_alert",
       "capability_asset", "activation_profile", "tool_selection_receipt", "capability_call", "expert_profile", "context_capsule",
       "evaluation_reliability", "judge_adapter", "judge_calibration", "adaptation_candidate", "feedback_intake", "feedback_case", "canary",
-      "workspace", "workspace_checkpoint", "workspace_change", "workspace_transaction", "work_object", "memory_item", "change_set",
+      "workspace", "workspace_checkpoint", "workspace_change", "workspace_transaction", "work_object", "memory_item", "context_profile", "task_graph", "change_set",
       "budget_account", "budget_reservation", "durable_wait", "external_event", "fallback_contract", "fallback_event",
       "credential_handle", "credential_lease", "egress_authorization", "egress_execution", "parser_security_evaluation", "parser_process_receipt",
       "sandbox_profile", "sandbox_assessment", "sandbox_ticket", "sandbox_receipt", "sandbox_egress_binding",
@@ -1345,6 +1345,10 @@ export class CraftService {
   memoryRemember(args: JsonObject): JsonObject { return this.workbench.remember(args); }
   memoryTransition(args: JsonObject): JsonObject { return this.workbench.memoryTransition(args); }
   contextAssemble(args: JsonObject): JsonObject { return this.workbench.contextAssemble(args); }
+  contextProfileSave(args: JsonObject): JsonObject { return this.workbench.contextProfileSave(args); }
+  contextProfileAssemble(args: JsonObject): JsonObject { return this.workbench.contextProfileAssemble(args); }
+  taskGraphCreate(args: JsonObject): JsonObject { return this.workbench.taskGraphCreate(args); }
+  taskGraphAdvance(args: JsonObject): JsonObject { return this.workbench.taskGraphAdvance(args); }
   changeSetCreate(args: JsonObject): JsonObject { return this.changeSets.create(args); }
   changeSetPreview(args: JsonObject): JsonObject { return this.changeSets.preview(args); }
   changeSetApply(args: JsonObject): JsonObject { return this.changeSets.apply(args); }

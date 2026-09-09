@@ -34,7 +34,7 @@ import { HomeKernel } from "./home.ts";
 import { CodexHostKernel } from "./codex-driver.ts";
 import { ClaudeHostKernel } from "./claude-driver.ts";
 import { HostRunKernel } from "./host-run.ts";
-export declare const VERSION = "0.11.20";
+export declare const VERSION = "0.11.21";
 export declare class CraftService {
     readonly store: CraftStore;
     readonly catalog: Catalog;
@@ -151,6 +151,10 @@ export declare class CraftService {
     memoryRemember(args: JsonObject): JsonObject;
     memoryTransition(args: JsonObject): JsonObject;
     contextAssemble(args: JsonObject): JsonObject;
+    contextProfileSave(args: JsonObject): JsonObject;
+    contextProfileAssemble(args: JsonObject): JsonObject;
+    taskGraphCreate(args: JsonObject): JsonObject;
+    taskGraphAdvance(args: JsonObject): JsonObject;
     changeSetCreate(args: JsonObject): JsonObject;
     changeSetPreview(args: JsonObject): JsonObject;
     changeSetApply(args: JsonObject): JsonObject;

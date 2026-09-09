@@ -6,7 +6,7 @@ const schemaFor = (name: string): JsonObject => {
   if (["scan", "enabled", "allow_execution", "allow_external_write", "require_held_out", "require_outcome_passed", "retryable", "requires_external_effect", "supports_pause_resume", "supports_evidence_receipts", "generated_code", "requires_credential", "has_compensation", "approved", "start_trial", "untrusted_input", "confirmed_original_runner_stopped"].includes(name)) return { type: "boolean" };
   if (["limit", "version", "capacity", "max_concurrency", "size_bytes", "subject_version", "expected_version", "max_candidates",
     "suite_version", "configuration_version", "harness_configuration_version", "target_version", "profile_version",
-    "grader_version", "policy_version", "signoff_policy_version", "lease_ttl_seconds", "ttl_seconds", "trials_per_case", "window_size", "max_attempts", "min_trials", "harness_version", "ir_version", "runtime_adapter_version", "agreed", "total", "expected_state_revision", "max_chars", "timeout_ms", "output_limit", "max_turns", "after_sequence"].includes(name)) return { type: "integer" };
+    "grader_version", "policy_version", "signoff_policy_version", "lease_ttl_seconds", "ttl_seconds", "trials_per_case", "window_size", "max_attempts", "min_trials", "harness_version", "ir_version", "runtime_adapter_version", "agreed", "total", "expected_state_revision", "max_chars", "max_items", "timeout_ms", "output_limit", "max_turns", "after_sequence"].includes(name)) return { type: "integer" };
   if (["score", "value", "threshold", "min_pass_rate_delta", "max_cost_regression_ratio", "max_duration_regression_ratio", "max_budget_ratio", "baseline", "candidate", "minimum_agreement", "max_budget_usd"].includes(name)) return { type: "number" };
   if (["input", "inputs", "metadata", "policy", "dimensions", "environment", "budget", "data", "scores",
     "costs", "metrics", "configuration", "receipt_requirements", "execution", "rules", "authorization_requests", "notification_refs", "cost_hint", "design_axes", "report",
@@ -15,7 +15,7 @@ const schemaFor = (name: string): JsonObject => {
   if (["completed", "pending", "decisions", "artifacts", "steps", "cases", "capabilities",
     "allowed_side_effects", "approved_side_effects", "nodes", "artifact_ids", "evidence_ids",
     "trial_ids", "requirements", "grade_ids", "pattern_ids", "failure_modes", "receipt_ids", "criteria", "acceptance_criteria", "allowed_extensions", "fields", "capability_requirements", "object_schemas", "components", "action_contracts",
-    "allowed_operations", "allowed_effects", "require_approval_for", "operations", "subjects", "children", "trusted_hosts", "command_allowlist", "path_allowlist", "kinds", "effects", "allowed_kinds", "dependencies", "aliases", "artifact_ids", "final_artifact_ids", "evidence_ids", "output_contract", "trial_ids", "include_paths", "affected_paths", "object_ids", "depends_on", "source_paths", "applies_to", "patches", "snapshot_refs", "triggers", "allowed_hosts", "allowed_actions", "approval_required_actions", "detected_instructions", "citations", "allowed_fields", "argv", "sources", "budget_ids", "recovery_item_ids"].includes(name)) return { type: "array" };
+    "allowed_operations", "allowed_effects", "require_approval_for", "operations", "subjects", "children", "trusted_hosts", "command_allowlist", "path_allowlist", "kinds", "effects", "allowed_kinds", "dependencies", "aliases", "artifact_ids", "final_artifact_ids", "evidence_ids", "output_contract", "trial_ids", "include_paths", "affected_paths", "object_ids", "depends_on", "source_paths", "applies_to", "patches", "snapshot_refs", "triggers", "allowed_hosts", "allowed_actions", "approval_required_actions", "detected_instructions", "citations", "allowed_fields", "argv", "sources", "budget_ids", "recovery_item_ids", "memory_kinds", "object_types", "required_memory_ids", "required_object_ids"].includes(name)) return { type: "array" };
   return { type: "string" };
 };
 const objectSchema = (required: string[] = [], optional: string[] = []): JsonObject => ({ type: "object",
@@ -152,6 +152,17 @@ export const TOOLS: Tool[] = [
   tool("craft_memory_transition", "Supersede, expire, or reject a memory item without deleting its history.", ["memory_id", "status"], false, ["replacement_id", "reason"]),
   tool("craft_context_assemble", "Build a bounded context capsule from current workspace objects and valid scoped memories.", ["query"], true,
     ["task_id", "workspace_id", "limit", "max_chars"]),
+  tool("craft_context_profile_save", "Save a versioned, scoped context selection policy; it does not grant execution authority.", ["name"], false,
+    ["profile_id", "task_id", "workspace_id", "memory_kinds", "object_types", "required_memory_ids", "required_object_ids", "max_items", "max_chars"]),
+  tool("craft_context_profile_get", "Read one exact context profile version.", ["profile_id"], true, ["version"]),
+  tool("craft_context_profile_list", "List stored context profiles.", [], true, ["limit", "query"]),
+  tool("craft_context_profile_assemble", "Assemble a bounded, attributable context using one exact Context Profile.", ["profile_id", "query"], true,
+    ["profile_version", "task_id", "workspace_id"]),
+  tool("craft_task_graph_create", "Create a domain-neutral task dependency graph with optional exact Context Profile bindings; it does not dispatch Agents.", ["name", "nodes"], false,
+    ["graph_id", "task_id", "workspace_id"]),
+  tool("craft_task_graph_get", "Read one collaborative task graph.", ["graph_id"], true, ["version"]),
+  tool("craft_task_graph_list", "List task graphs.", [], true, ["limit", "query"]),
+  tool("craft_task_graph_advance", "Advance one task graph node after its dependencies are complete; blocked nodes propagate to pending descendants.", ["graph_id", "node_id", "status"]),
   tool("craft_change_set_create", "Create a durable field-level ActionPatch set against exact work-object versions.", ["workspace_id", "summary", "author", "patches"], false,
     ["change_set_id", "intent"]),
   tool("craft_change_set_preview", "Classify ChangeSet patches as auto-applicable or conflicting and preview transitive impact.", ["change_set_id"], true),
@@ -565,6 +576,14 @@ export class McpServer {
       craft_workspace_impact: (a) => service.workspaceImpact(a), craft_workspace_change_apply: (a) => service.workspaceChangeApply(a),
       craft_memory_remember: (a) => service.memoryRemember(a), craft_memory_transition: (a) => service.memoryTransition(a),
       craft_context_assemble: (a) => service.contextAssemble(a),
+      craft_context_profile_save: (a) => service.contextProfileSave(a),
+      craft_context_profile_get: (a) => service.get("context_profile", "profile_id", a),
+      craft_context_profile_list: (a) => service.list("context_profile", "profiles", a),
+      craft_context_profile_assemble: (a) => service.contextProfileAssemble(a),
+      craft_task_graph_create: (a) => service.taskGraphCreate(a),
+      craft_task_graph_get: (a) => service.get("task_graph", "graph_id", a),
+      craft_task_graph_list: (a) => service.list("task_graph", "graphs", a),
+      craft_task_graph_advance: (a) => service.taskGraphAdvance(a),
       craft_change_set_create: (a) => service.changeSetCreate(a), craft_change_set_preview: (a) => service.changeSetPreview(a),
       craft_change_set_apply: (a) => service.changeSetApply(a), craft_budget_open: (a) => service.budgetOpen(a),
       craft_budget_reserve: (a) => service.budgetReserve(a), craft_budget_settle: (a) => service.budgetSettle(a),
