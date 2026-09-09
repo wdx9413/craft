@@ -5,7 +5,7 @@ const schemaFor = (name) => {
         return { type: "boolean" };
     if (["limit", "version", "capacity", "max_concurrency", "size_bytes", "subject_version", "expected_version", "max_candidates",
         "suite_version", "configuration_version", "harness_configuration_version", "target_version", "profile_version",
-        "grader_version", "policy_version", "signoff_policy_version", "lease_ttl_seconds", "ttl_seconds", "trials_per_case", "window_size", "max_attempts", "min_trials", "harness_version", "ir_version", "runtime_adapter_version", "agreed", "total", "expected_state_revision", "max_chars", "max_items", "timeout_ms", "output_limit", "max_turns", "after_sequence"].includes(name))
+        "grader_version", "policy_version", "signoff_policy_version", "lease_ttl_seconds", "ttl_seconds", "trials_per_case", "window_size", "max_attempts", "min_trials", "harness_version", "ir_version", "runtime_adapter_version", "agreed", "total", "expected_state_revision", "max_chars", "max_items", "timeout_ms", "output_limit", "max_turns", "after_sequence", "context_profile_version"].includes(name))
         return { type: "integer" };
     if (["score", "value", "threshold", "min_pass_rate_delta", "max_cost_regression_ratio", "max_duration_regression_ratio", "max_budget_ratio", "baseline", "candidate", "minimum_agreement", "max_budget_usd"].includes(name))
         return { type: "number" };
@@ -36,6 +36,10 @@ export const TOOLS = [
     tool("craft_source_scan", "Incrementally scan one or all enabled sources.", [], false, ["source_id"]),
     tool("craft_capability_search", "Return a small hybrid-ranked set of matching capabilities; semantic retrieval is optional and safely falls back to keywords.", ["query"], true, ["limit"]),
     tool("craft_logical_capability_list", "List logical capabilities, their source instances, selected mount, and explicit content conflicts.", [], true),
+    tool("craft_logical_activation_plan", "Select matching logical capabilities for one task, pin their content digests, and optionally bind an exact Context Profile. This only activates read-only context.", ["task_id", "query"], false, ["plan_id", "limit", "allowed_effects", "context_profile_id", "context_profile_version"]),
+    tool("craft_logical_activation_plan_get", "Read one digest-pinned logical capability activation plan.", ["plan_id"], true, ["version"]),
+    tool("craft_logical_activation_plan_list", "List digest-pinned logical capability activation plans.", [], true, ["limit", "query"]),
+    tool("craft_logical_activation_audit", "Audit one activation plan for missing content, content drift, or safe mirror reselection; it never executes a capability.", ["plan_id"], false, ["audit_id"]),
     tool("craft_semantic_status", "Show whether optional semantic capability retrieval is disabled, configured, ready, or temporarily degraded.", [], true),
     tool("craft_execution_policy_decide", "Classify an effect into normal host execution, isolation, approval, or a fail-closed block.", ["effect", "platform"], true, ["generated_code", "requires_credential", "has_compensation"]),
     tool("craft_capability_get", "Read one indexed capability.", ["asset_id"], true),
@@ -367,7 +371,11 @@ export class McpServer {
             craft_info: () => service.info(), craft_source_add: (a) => service.sourceAdd(a),
             craft_source_list: () => service.sourceList(), craft_source_update: (a) => service.sourceUpdate(a),
             craft_source_remove: (a) => service.sourceRemove(a), craft_source_scan: (a) => service.sourceScan(a),
-            craft_capability_search: (a) => service.capabilitySearch(a), craft_logical_capability_list: () => service.logicalCapabilityList(), craft_semantic_status: () => service.semanticSearchStatus(),
+            craft_capability_search: (a) => service.capabilitySearch(a), craft_logical_capability_list: () => service.logicalCapabilityList(),
+            craft_logical_activation_plan: (a) => service.logicalActivationPlan(a),
+            craft_logical_activation_plan_get: (a) => service.get("logical_activation_plan", "plan_id", a),
+            craft_logical_activation_plan_list: (a) => service.list("logical_activation_plan", "plans", a),
+            craft_logical_activation_audit: (a) => service.logicalActivationAudit(a), craft_semantic_status: () => service.semanticSearchStatus(),
             craft_execution_policy_decide: service.executionPolicyDecide.bind(service),
             craft_capability_get: (a) => service.capabilityGet(a),
             craft_default_route: (a) => service.defaultRouteWithSemanticSearch(a), craft_default_route_execute: (a) => service.defaultRouteExecute(a),

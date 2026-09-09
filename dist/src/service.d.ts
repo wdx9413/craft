@@ -34,7 +34,7 @@ import { HomeKernel } from "./home.ts";
 import { CodexHostKernel } from "./codex-driver.ts";
 import { ClaudeHostKernel } from "./claude-driver.ts";
 import { HostRunKernel } from "./host-run.ts";
-export declare const VERSION = "0.11.21";
+export declare const VERSION = "0.11.22";
 export declare class CraftService {
     readonly store: CraftStore;
     readonly catalog: Catalog;
@@ -81,6 +81,8 @@ export declare class CraftService {
     sourceRemove(args: JsonObject): JsonObject;
     sourceScan(args: JsonObject): Promise<JsonObject>;
     capabilitySearch(args: JsonObject): Promise<JsonObject>;
+    logicalActivationPlan(args: JsonObject): Promise<JsonObject>;
+    logicalActivationAudit(args: JsonObject): JsonObject;
     semanticSearchStatus(): JsonObject;
     executionPolicyDecide(args: JsonObject): JsonObject;
     capabilityGet(args: JsonObject): JsonObject;

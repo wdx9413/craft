@@ -14332,7 +14332,7 @@ var HostRunKernel = class {
 };
 
 // src/service.ts
-var VERSION = "0.11.21";
+var VERSION = "0.11.22";
 var CONFIDENCE = /* @__PURE__ */ new Set(["confirmed", "bounded", "unverified", "rejected"]);
 var TASK_STATUS = /* @__PURE__ */ new Set(["active", "paused", "completed", "cancelled"]);
 var VERSIONED_LIFECYCLE = /* @__PURE__ */ new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -14653,6 +14653,8 @@ var CraftService = class _CraftService {
       "activation_profile",
       "tool_selection_receipt",
       "capability_call",
+      "logical_activation_plan",
+      "logical_activation_audit",
       "expert_profile",
       "context_capsule",
       "evaluation_reliability",
@@ -14773,6 +14775,67 @@ var CraftService = class _CraftService {
       capabilities: await this.catalog.searchHybrid(text30(args.query, "query"), finiteInteger(args.limit, "limit", 6, 1, 20)),
       semantic_search: this.catalog.semanticStatus()
     };
+  }
+  async logicalActivationPlan(args) {
+    const task = this.store.get("task", text30(args.task_id, "task_id"));
+    const query = text30(args.query, "query");
+    const allowedEffects = uniqueTextArray(args.allowed_effects ?? ["read_only"], "allowed_effects");
+    if (allowedEffects.some((effect) => effect !== "read_only")) throw new Error("Indexed local capabilities may only be activated as read_only context");
+    const profileId = args.context_profile_id === void 0 ? null : text30(args.context_profile_id, "context_profile_id");
+    const profileVersion = args.context_profile_version === void 0 ? null : finiteInteger(args.context_profile_version, "context_profile_version", 1);
+    if (profileId === null !== (profileVersion === null)) throw new Error("Context profile id and version must be supplied together");
+    if (profileId !== null) {
+      const profile = this.store.get("context_profile", profileId, profileVersion);
+      if (profile.task_id !== null && profile.task_id !== task.id) throw new Error("Context profile does not belong to the task");
+    }
+    const candidates = await this.catalog.searchHybrid(query, finiteInteger(args.limit, "limit", 3, 1, 10));
+    const selected = candidates.filter((candidate) => candidate.logical_capability_id !== null).map((candidate) => {
+      const logical = this.store.get("logical_capability", String(candidate.logical_capability_id));
+      return {
+        logical_capability_id: logical.id,
+        content_digest: logical.content_digest,
+        selected_capability_id: logical.selected_capability_id,
+        selected_source_id: logical.selected_source_id,
+        declaration_keys: logical.declaration_keys
+      };
+    });
+    if (!selected.length) throw new Error("No logical capabilities match this task");
+    const plan = this.store.create("logical_activation_plan", String(args.plan_id ?? id9("logical_activation_plan")), {
+      task_id: task.id,
+      query,
+      query_fingerprint: fingerprint2({ query }),
+      context_profile_id: profileId,
+      context_profile_version: profileVersion,
+      allowed_effects: allowedEffects,
+      selected,
+      status: "active"
+    });
+    return { plan, candidates: selected };
+  }
+  logicalActivationAudit(args) {
+    const plan = this.store.get("logical_activation_plan", text30(args.plan_id, "plan_id"));
+    const findings2 = plan.selected.map((selected) => {
+      const current = this.store.find("logical_capability", String(selected.logical_capability_id));
+      const replacement = current ? null : this.store.list("logical_capability", Number.MAX_SAFE_INTEGER).find((logical) => logical.declaration_keys.some((key2) => selected.declaration_keys.includes(key2))) ?? null;
+      const observed = current ?? replacement;
+      const status2 = !current ? replacement ? "content_changed" : "missing" : current.selected_capability_id !== selected.selected_capability_id ? "reselected" : "unchanged";
+      return {
+        logical_capability_id: selected.logical_capability_id,
+        status: status2,
+        current_content_digest: observed?.content_digest ?? null,
+        current_selected_capability_id: observed?.selected_capability_id ?? null,
+        current_selected_source_id: observed?.selected_source_id ?? null
+      };
+    });
+    const status = findings2.some((finding) => finding.status === "missing" || finding.status === "content_changed") ? "stale" : "active";
+    const savedPlan = plan.status === status ? plan : this.store.save("logical_activation_plan", String(plan.id), { ...recordPayload5(plan), status });
+    const audit = this.store.create("logical_activation_audit", String(args.audit_id ?? id9("logical_activation_audit")), {
+      plan_id: plan.id,
+      plan_version: plan.version,
+      status,
+      findings: findings2
+    });
+    return { plan: savedPlan, audit };
   }
   semanticSearchStatus() {
     return this.catalog.semanticStatus();
@@ -19113,7 +19176,8 @@ var schemaFor = (name) => {
     "timeout_ms",
     "output_limit",
     "max_turns",
-    "after_sequence"
+    "after_sequence",
+    "context_profile_version"
   ].includes(name)) return { type: "integer" };
   if (["score", "value", "threshold", "min_pass_rate_delta", "max_cost_regression_ratio", "max_duration_regression_ratio", "max_budget_ratio", "baseline", "candidate", "minimum_agreement", "max_budget_usd"].includes(name)) return { type: "number" };
   if ([
@@ -19251,6 +19315,16 @@ var TOOLS = [
   tool("craft_source_scan", "Incrementally scan one or all enabled sources.", [], false, ["source_id"]),
   tool("craft_capability_search", "Return a small hybrid-ranked set of matching capabilities; semantic retrieval is optional and safely falls back to keywords.", ["query"], true, ["limit"]),
   tool("craft_logical_capability_list", "List logical capabilities, their source instances, selected mount, and explicit content conflicts.", [], true),
+  tool(
+    "craft_logical_activation_plan",
+    "Select matching logical capabilities for one task, pin their content digests, and optionally bind an exact Context Profile. This only activates read-only context.",
+    ["task_id", "query"],
+    false,
+    ["plan_id", "limit", "allowed_effects", "context_profile_id", "context_profile_version"]
+  ),
+  tool("craft_logical_activation_plan_get", "Read one digest-pinned logical capability activation plan.", ["plan_id"], true, ["version"]),
+  tool("craft_logical_activation_plan_list", "List digest-pinned logical capability activation plans.", [], true, ["limit", "query"]),
+  tool("craft_logical_activation_audit", "Audit one activation plan for missing content, content drift, or safe mirror reselection; it never executes a capability.", ["plan_id"], false, ["audit_id"]),
   tool("craft_semantic_status", "Show whether optional semantic capability retrieval is disabled, configured, ready, or temporarily degraded.", [], true),
   tool("craft_execution_policy_decide", "Classify an effect into normal host execution, isolation, approval, or a fail-closed block.", ["effect", "platform"], true, ["generated_code", "requires_credential", "has_compensation"]),
   tool("craft_capability_get", "Read one indexed capability.", ["asset_id"], true),
@@ -20475,6 +20549,10 @@ var McpServer = class {
       craft_source_scan: (a) => service.sourceScan(a),
       craft_capability_search: (a) => service.capabilitySearch(a),
       craft_logical_capability_list: () => service.logicalCapabilityList(),
+      craft_logical_activation_plan: (a) => service.logicalActivationPlan(a),
+      craft_logical_activation_plan_get: (a) => service.get("logical_activation_plan", "plan_id", a),
+      craft_logical_activation_plan_list: (a) => service.list("logical_activation_plan", "plans", a),
+      craft_logical_activation_audit: (a) => service.logicalActivationAudit(a),
       craft_semantic_status: () => service.semanticSearchStatus(),
       craft_execution_policy_decide: service.executionPolicyDecide.bind(service),
       craft_capability_get: (a) => service.capabilityGet(a),

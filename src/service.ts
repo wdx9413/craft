@@ -47,7 +47,7 @@ import { CodexHostKernel } from "./codex-driver.ts";
 import { ClaudeHostKernel } from "./claude-driver.ts";
 import { HostRunKernel } from "./host-run.ts";
 
-export const VERSION = "0.11.21";
+export const VERSION = "0.11.22";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -305,7 +305,7 @@ export class CraftService {
       "project_policy", "route_receipt", "host_adapter", "host_dispatch", "runtime_policy", "runtime_run",
       "runtime_operation", "runtime_adapter", "evaluation_runner", "evaluation_promotion", "experience_mining_candidate",
       "experience_shadow_experiment", "adaptive_harness", "agent_ir", "operational_signal", "operational_alert",
-      "capability_asset", "activation_profile", "tool_selection_receipt", "capability_call", "expert_profile", "context_capsule",
+      "capability_asset", "activation_profile", "tool_selection_receipt", "capability_call", "logical_activation_plan", "logical_activation_audit", "expert_profile", "context_capsule",
       "evaluation_reliability", "judge_adapter", "judge_calibration", "adaptation_candidate", "feedback_intake", "feedback_case", "canary",
       "workspace", "workspace_checkpoint", "workspace_change", "workspace_transaction", "work_object", "memory_item", "context_profile", "task_graph", "change_set",
       "budget_account", "budget_reservation", "durable_wait", "external_event", "fallback_contract", "fallback_event",
@@ -351,6 +351,47 @@ export class CraftService {
   async capabilitySearch(args: JsonObject): Promise<JsonObject> {
     return { capabilities: await this.catalog.searchHybrid(text(args.query, "query"), finiteInteger(args.limit, "limit", 6, 1, 20)),
       semantic_search: this.catalog.semanticStatus() };
+  }
+  async logicalActivationPlan(args: JsonObject): Promise<JsonObject> {
+    const task = this.store.get("task", text(args.task_id, "task_id")); const query = text(args.query, "query");
+    const allowedEffects = uniqueTextArray(args.allowed_effects ?? ["read_only"], "allowed_effects");
+    if (allowedEffects.some((effect) => effect !== "read_only")) throw new Error("Indexed local capabilities may only be activated as read_only context");
+    const profileId = args.context_profile_id === undefined ? null : text(args.context_profile_id, "context_profile_id");
+    const profileVersion = args.context_profile_version === undefined ? null : finiteInteger(args.context_profile_version, "context_profile_version", 1);
+    if ((profileId === null) !== (profileVersion === null)) throw new Error("Context profile id and version must be supplied together");
+    if (profileId !== null) {
+      const profile = this.store.get("context_profile", profileId, profileVersion!);
+      if (profile.task_id !== null && profile.task_id !== task.id) throw new Error("Context profile does not belong to the task");
+    }
+    const candidates = await this.catalog.searchHybrid(query, finiteInteger(args.limit, "limit", 3, 1, 10));
+    const selected = candidates.filter((candidate) => candidate.logical_capability_id !== null).map((candidate) => {
+      const logical = this.store.get("logical_capability", String(candidate.logical_capability_id));
+      return { logical_capability_id: logical.id, content_digest: logical.content_digest, selected_capability_id: logical.selected_capability_id,
+        selected_source_id: logical.selected_source_id, declaration_keys: logical.declaration_keys };
+    });
+    if (!selected.length) throw new Error("No logical capabilities match this task");
+    const plan = this.store.create("logical_activation_plan", String(args.plan_id ?? id("logical_activation_plan")), { task_id: task.id, query,
+      query_fingerprint: fingerprint({ query }), context_profile_id: profileId, context_profile_version: profileVersion,
+      allowed_effects: allowedEffects, selected, status: "active" });
+    return { plan, candidates: selected };
+  }
+  logicalActivationAudit(args: JsonObject): JsonObject {
+    const plan = this.store.get("logical_activation_plan", text(args.plan_id, "plan_id"));
+    const findings = (plan.selected as JsonObject[]).map((selected) => {
+      const current = this.store.find("logical_capability", String(selected.logical_capability_id));
+      const replacement = current ? null : this.store.list("logical_capability", Number.MAX_SAFE_INTEGER).find((logical) =>
+        (logical.declaration_keys as string[]).some((key) => (selected.declaration_keys as string[]).includes(key))) ?? null;
+      const observed = current ?? replacement;
+      const status = !current ? replacement ? "content_changed" : "missing" :
+        current.selected_capability_id !== selected.selected_capability_id ? "reselected" : "unchanged";
+      return { logical_capability_id: selected.logical_capability_id, status, current_content_digest: observed?.content_digest ?? null,
+        current_selected_capability_id: observed?.selected_capability_id ?? null, current_selected_source_id: observed?.selected_source_id ?? null };
+    });
+    const status = findings.some((finding) => finding.status === "missing" || finding.status === "content_changed") ? "stale" : "active";
+    const savedPlan = plan.status === status ? plan : this.store.save("logical_activation_plan", String(plan.id), { ...recordPayload(plan), status });
+    const audit = this.store.create("logical_activation_audit", String(args.audit_id ?? id("logical_activation_audit")), { plan_id: plan.id,
+      plan_version: plan.version, status, findings });
+    return { plan: savedPlan, audit };
   }
   semanticSearchStatus(): JsonObject { return this.catalog.semanticStatus(); }
   executionPolicyDecide(args: JsonObject): JsonObject { return decideExecution(args); }
