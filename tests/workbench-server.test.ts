@@ -18,7 +18,7 @@ test("Workbench web application exposes a token-gated same-origin API and bounde
   assert.equal(app.handle({ method: "GET", path: "/api/home", token: "secret", origin: "https://evil.example" }).status, 403);
   assert.equal(app.handle({ method: "GET", path: "/api/home" }).status, 401); assert.equal(app.handle({ method: "GET", path: "/api/home", token: "x" }).status, 401); assert.equal(app.handle({ method: "GET", path: "/api/home", token: "xxxxxx" }).status, 401);
   assert.equal(app.handle({ method: "GET", path: "/api/home", token: "secret" }).status, 200);
-  assert.equal(JSON.parse(app.handle({ method: "GET", path: "/api/domain-kits", token: "secret" }).body).kits.length, 2);
+  assert.equal(JSON.parse(app.handle({ method: "GET", path: "/api/domain-kits", token: "secret" }).body).kits.length, 4);
   assert.equal(app.handle({ method: "POST", path: "/api/inbox/refresh", token: "secret" }).status, 200);
   assert.equal(app.handle({ method: "POST", path: "/api/inbox/refresh", token: "secret", body: "{" }).status, 400);
   assert.equal(app.handle({ method: "POST", path: "/api/inbox/refresh", token: "secret", body: "[]" }).status, 422);

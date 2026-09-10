@@ -47,7 +47,7 @@ import { CodexHostKernel } from "./codex-driver.ts";
 import { ClaudeHostKernel } from "./claude-driver.ts";
 import { HostRunKernel } from "./host-run.ts";
 
-export const VERSION = "0.11.27";
+export const VERSION = "0.11.28";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -1984,6 +1984,8 @@ export class CraftService {
     const definitions: JsonObject[] = [
       { kit_id: "builtin.developer-delivery", name: "研发交付", domain: "software", description: "验证研发任务声明的主要文件成果，并保留人工验收扩展空间。", builtin: true, fields: [{ id: "artifact_path", label: "主要成果相对路径", type: "path", required: true, options: [] }], criteria: [{ id: "artifact", name: "主要文件成果有效", method: "program", required: true, evaluator: { type: "file", path_field: "artifact_path" } }] },
       { kit_id: "builtin.video-delivery", name: "视频交付", domain: "video", description: "验证视频文件成果，并由人判断叙事与审美质量。", builtin: true, fields: [{ id: "video_path", label: "视频相对路径", type: "path", required: true, options: [] }], criteria: [{ id: "video_file", name: "视频文件有效", method: "program", required: true, evaluator: { type: "file", path_field: "video_path", allowed_extensions: [".mp4", ".mov", ".webm"], max_bytes: 10_000_000_000 } }, { id: "creative_quality", name: "叙事与审美达到目标", method: "human", required: true, evaluator: null }] },
+      { kit_id: "builtin.content-delivery", name: "内容交付", domain: "content", description: "验证文稿或素材文件存在且格式合规，把事实、品牌语气和表达质量留给独立人工或模型验收。", builtin: true, fields: [{ id: "content_path", label: "内容成果相对路径", type: "path", required: true, options: [] }], criteria: [{ id: "content_file", name: "内容文件有效", method: "program", required: true, evaluator: { type: "file", path_field: "content_path", allowed_extensions: [".md", ".txt", ".html", ".json"] } }, { id: "editorial_quality", name: "事实和表达符合目标", method: "human", required: true, evaluator: null }] },
+      { kit_id: "builtin.sales-delivery", name: "销售交付", domain: "sales", description: "验证报价或客户交付物存在并可审计；价格、承诺和外发仍需要业务验收与授权。", builtin: true, fields: [{ id: "proposal_path", label: "方案或报价相对路径", type: "path", required: true, options: [] }], criteria: [{ id: "proposal_file", name: "方案文件有效", method: "program", required: true, evaluator: { type: "file", path_field: "proposal_path", allowed_extensions: [".md", ".txt", ".json", ".pdf"] } }, { id: "commercial_approval", name: "商业承诺已批准", method: "human", required: true, evaluator: null }] },
     ]; const kits = definitions.map((definition) => { const existing = this.store.find("domain_kit", String(definition.kit_id)); if (existing && (existing.builtin !== true || existing.name !== definition.name || existing.domain !== definition.domain)) throw new Error(`Built-in Domain Kit identity conflict: ${definition.kit_id}`); return existing ?? this.domainKitSave(definition); }); return { kits };
   }
   private domainKitDependencyLock(kit: JsonObject): JsonObject[] {
