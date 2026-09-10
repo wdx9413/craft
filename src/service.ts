@@ -47,7 +47,7 @@ import { CodexHostKernel } from "./codex-driver.ts";
 import { ClaudeHostKernel } from "./claude-driver.ts";
 import { HostRunKernel } from "./host-run.ts";
 
-export const VERSION = "0.11.26";
+export const VERSION = "0.11.27";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -324,7 +324,7 @@ export class CraftService {
       "supply_chain_advisory",
       "maintenance_status",
       "maintenance_tick",
-      "maintenance_component", "maintenance_failure", "attention_item", "work_launch", "acceptance_plan", "acceptance_check", "acceptance_assessment", "acceptance_evaluator", "acceptance_evaluation_job", "verified_iteration", "iteration_attempt",
+      "maintenance_component", "maintenance_failure", "attention_item", "work_launch", "acceptance_plan", "acceptance_check", "acceptance_assessment", "acceptance_evaluator", "acceptance_evaluation_job", "verified_iteration", "iteration_attempt", "strategy_recommendation",
       "trajectory_script_proposal", "verified_script_run"];
     kinds.push("untrusted_content", "untrusted_extraction", "decision_projection");
     return { version: VERSION, data_root: this.store.paths.root,
@@ -2068,6 +2068,17 @@ export class CraftService {
     const saved = this.store.save("verified_iteration", String(iteration.id), { ...recordPayload(iteration), status, attempts_started: attemptNo, last_assessment_id: assessment.id, terminal_reason: terminalReason });
     const next = action === "retry" ? { action: "retry", prompt_feedback: feedback, remaining_attempts: Number(saved.max_attempts) - attemptNo, allowed_paths: saved.allowed_paths } : { action, reason: terminalReason };
     return { iteration: saved, attempt, next, idempotent: false };
+  }
+  strategyRecommend(args: JsonObject): JsonObject {
+    const task = this.store.get("task", text(args.task_id, "task_id")); const comparison = this.store.get("evaluation_comparison", text(args.comparison_id, "comparison_id"));
+    const baseline = object(comparison.baseline, "comparison.baseline"); const candidate = object(comparison.candidate, "comparison.candidate"); const costMetric = args.cost_metric === undefined ? null : text(args.cost_metric, "cost_metric");
+    const passDelta = Number(candidate.pass_rate) - Number(baseline.pass_rate); const costDelta = costMetric ? Number((((comparison.comparison as JsonObject).costs as JsonObject)[costMetric] as JsonObject | undefined)?.delta) : 0;
+    const comparable = comparison.split === "held_out" && Number.isFinite(passDelta) && (!costMetric || Number.isFinite(costDelta));
+    const recommended = comparable && passDelta >= 0 && costDelta <= 0 && comparison.assessment !== "regressed";
+    const recommendationId = String(args.recommendation_id ?? id("strategy_recommendation")); const existing = this.store.find("strategy_recommendation", recommendationId); const identity = { task_id: task.id, comparison_id: comparison.id, cost_metric: costMetric };
+    if (existing) { if (existing.identity_digest !== valueDigest(identity)) throw new Error("Strategy recommendation idempotency conflict"); return { recommendation: existing, idempotent: true }; }
+    const recommendation = this.store.create("strategy_recommendation", recommendationId, { ...identity, identity_digest: valueDigest(identity), status: recommended ? "recommended" : "insufficient", selected_subject: recommended ? { type: candidate.subject_type, id: candidate.subject_id, version: candidate.subject_version } : null, rationale: { comparable, pass_rate_delta: passDelta, cost_delta: costMetric ? costDelta : null, assessment: comparison.assessment }, automation_authority: false });
+    return { recommendation, idempotent: false };
   }
   workLaunchPrepare(args: JsonObject): JsonObject {
     const host = text(args.host, "host"); if (!new Set(["codex-cli", "claude-code"]).has(host)) throw new Error("Work launch host is unsupported");

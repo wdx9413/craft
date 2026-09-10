@@ -14332,7 +14332,7 @@ var HostRunKernel = class {
 };
 
 // src/service.ts
-var VERSION = "0.11.26";
+var VERSION = "0.11.27";
 var CONFIDENCE = /* @__PURE__ */ new Set(["confirmed", "bounded", "unverified", "rejected"]);
 var TASK_STATUS = /* @__PURE__ */ new Set(["active", "paused", "completed", "cancelled"]);
 var VERSIONED_LIFECYCLE = /* @__PURE__ */ new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -14734,6 +14734,7 @@ var CraftService = class _CraftService {
       "acceptance_evaluation_job",
       "verified_iteration",
       "iteration_attempt",
+      "strategy_recommendation",
       "trajectory_script_proposal",
       "verified_script_run"
     ];
@@ -17826,6 +17827,26 @@ ${material}
     const next = action === "retry" ? { action: "retry", prompt_feedback: feedback, remaining_attempts: Number(saved.max_attempts) - attemptNo, allowed_paths: saved.allowed_paths } : { action, reason: terminalReason };
     return { iteration: saved, attempt, next, idempotent: false };
   }
+  strategyRecommend(args) {
+    const task = this.store.get("task", text30(args.task_id, "task_id"));
+    const comparison = this.store.get("evaluation_comparison", text30(args.comparison_id, "comparison_id"));
+    const baseline = object13(comparison.baseline, "comparison.baseline");
+    const candidate = object13(comparison.candidate, "comparison.candidate");
+    const costMetric = args.cost_metric === void 0 ? null : text30(args.cost_metric, "cost_metric");
+    const passDelta = Number(candidate.pass_rate) - Number(baseline.pass_rate);
+    const costDelta = costMetric ? Number(comparison.comparison.costs[costMetric]?.delta) : 0;
+    const comparable = comparison.split === "held_out" && Number.isFinite(passDelta) && (!costMetric || Number.isFinite(costDelta));
+    const recommended = comparable && passDelta >= 0 && costDelta <= 0 && comparison.assessment !== "regressed";
+    const recommendationId = String(args.recommendation_id ?? id9("strategy_recommendation"));
+    const existing = this.store.find("strategy_recommendation", recommendationId);
+    const identity = { task_id: task.id, comparison_id: comparison.id, cost_metric: costMetric };
+    if (existing) {
+      if (existing.identity_digest !== valueDigest(identity)) throw new Error("Strategy recommendation idempotency conflict");
+      return { recommendation: existing, idempotent: true };
+    }
+    const recommendation = this.store.create("strategy_recommendation", recommendationId, { ...identity, identity_digest: valueDigest(identity), status: recommended ? "recommended" : "insufficient", selected_subject: recommended ? { type: candidate.subject_type, id: candidate.subject_id, version: candidate.subject_version } : null, rationale: { comparable, pass_rate_delta: passDelta, cost_delta: costMetric ? costDelta : null, assessment: comparison.assessment }, automation_authority: false });
+    return { recommendation, idempotent: false };
+  }
   workLaunchPrepare(args) {
     const host = text30(args.host, "host");
     if (!(/* @__PURE__ */ new Set(["codex-cli", "claude-code"])).has(host)) throw new Error("Work launch host is unsupported");
@@ -19715,6 +19736,7 @@ var TOOLS = [
   tool("craft_verified_iteration_create", "Bind a bounded verification-driven iteration to one exact Work Launch and independent acceptance plan; it grants no additional write authority.", ["task_id", "launch_id", "acceptance_plan_id"], false, ["iteration_id", "max_attempts", "allowed_paths"]),
   tool("craft_verified_iteration_get", "Read a verification-driven iteration and its content-free attempt history.", ["iteration_id"], true),
   tool("craft_verified_iteration_assess", "Classify one independent acceptance assessment as pass, retry, block, or human handoff; only task failures can retry within budget.", ["iteration_id", "assessment_id", "classification"], false, ["attempt_id", "feedback"]),
+  tool("craft_strategy_recommend", "Recommend a candidate strategy only from a comparable held-out evaluation; it never changes routing or executes work.", ["task_id", "comparison_id"], false, ["recommendation_id", "cost_metric"]),
   tool("craft_domain_kit_save", "Save a versioned domain form, object, capability, sandbox, budget, evaluation, action, and acceptance contract without binding it to one Host.", ["name", "domain", "description", "fields", "criteria"], false, ["kit_id", "capability_requirements", "object_schemas", "components", "action_contracts", "budget_limits", "sandbox_requirements", "eval_suite_ref"]),
   tool("craft_domain_kit_get", "Read one exact Domain Kit version.", ["kit_id"], true, ["kit_version"]),
   tool("craft_domain_kit_list", "List locally installed Domain Kits.", [], true, ["limit"]),
@@ -20881,6 +20903,7 @@ var McpServer = class {
       craft_verified_iteration_create: (a) => service.verifiedIterationCreate(a),
       craft_verified_iteration_get: (a) => service.verifiedIterationGet(a),
       craft_verified_iteration_assess: (a) => service.verifiedIterationAssess(a),
+      craft_strategy_recommend: (a) => service.strategyRecommend(a),
       craft_domain_kit_save: (a) => service.domainKitSave(a),
       craft_domain_kit_get: (a) => service.domainKitGet(a),
       craft_domain_kit_list: (a) => service.domainKitList(a),

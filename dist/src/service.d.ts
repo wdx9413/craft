@@ -34,7 +34,7 @@ import { HomeKernel } from "./home.ts";
 import { CodexHostKernel } from "./codex-driver.ts";
 import { ClaudeHostKernel } from "./claude-driver.ts";
 import { HostRunKernel } from "./host-run.ts";
-export declare const VERSION = "0.11.26";
+export declare const VERSION = "0.11.27";
 export declare class CraftService {
     readonly store: CraftStore;
     readonly catalog: Catalog;
@@ -291,6 +291,7 @@ export declare class CraftService {
     verifiedIterationCreate(args: JsonObject): JsonObject;
     verifiedIterationGet(args: JsonObject): JsonObject;
     verifiedIterationAssess(args: JsonObject): JsonObject;
+    strategyRecommend(args: JsonObject): JsonObject;
     workLaunchPrepare(args: JsonObject): JsonObject;
     workLaunchDecide(args: JsonObject): JsonObject;
     workLaunchGet(args: JsonObject): JsonObject;
