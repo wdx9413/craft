@@ -16,7 +16,7 @@ test("v0.10.0 maintains a shared object graph, invalidates dependents, and preve
   try {
     await mkdir(worktree, { recursive: true });
     const opened = service.workspaceOpen({ workspace_id: "ws", name: "Video", root_path: worktree, include_paths: ["assets"] });
-    assert.equal(VERSION, "0.11.25");
+    assert.equal(VERSION, "0.11.26");
     assert.equal((opened.workspace as JsonObject).state_revision, 1);
     const brief = service.workObjectPut({ workspace_id: "ws", object_id: "brief", object_type: "brief", name: "人物设定",
       data: { character: "A" }, source_paths: ["assets/brief.md"], expected_state_revision: 1 }).object as JsonObject;

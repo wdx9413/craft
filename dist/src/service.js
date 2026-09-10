@@ -45,7 +45,7 @@ import { HomeKernel } from "./home.js";
 import { CodexHostKernel } from "./codex-driver.js";
 import { ClaudeHostKernel } from "./claude-driver.js";
 import { HostRunKernel } from "./host-run.js";
-export const VERSION = "0.11.25";
+export const VERSION = "0.11.26";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -2052,6 +2052,25 @@ export class CraftService {
             throw new Error("Capability context changed since dispatch preparation");
         const result = host === "codex-cli" ? await this.codexHost.execute({ ...args, prompt: bound.prompt }) : await this.claudeHost.execute({ ...args, prompt: bound.prompt });
         return { ...result, resolution: bound.resolution };
+    }
+    async capabilityContextWorkLaunchPrepare(args) {
+        const bound = await this.activationBoundPrompt(args);
+        const prepared = this.workLaunchPrepare({ ...args, prompt: bound.prompt });
+        const launch = prepared.launch;
+        const dispatch = prepared.dispatch;
+        const savedLaunch = this.store.save("work_launch", String(launch.id), { ...recordPayload(launch), activation_plan_id: bound.plan.id, activation_plan_version: bound.plan.version, activation_context_digest: bound.context_digest, activation_max_chars: bound.max_chars, activation_resolution_id: bound.resolution.id });
+        const kind = savedLaunch.host === "codex-cli" ? "codex_dispatch" : "claude_dispatch";
+        const savedDispatch = this.store.save(kind, String(dispatch.id), { ...recordPayload(dispatch), activation_plan_id: bound.plan.id, activation_plan_version: bound.plan.version, activation_context_digest: bound.context_digest, activation_max_chars: bound.max_chars, activation_resolution_id: bound.resolution.id });
+        return { ...prepared, launch: savedLaunch, dispatch: savedDispatch, resolution: bound.resolution };
+    }
+    async capabilityContextWorkLaunchDecide(args) {
+        const launch = this.store.get("work_launch", text(args.launch_id, "launch_id"));
+        if (typeof launch.activation_plan_id !== "string" || typeof launch.activation_context_digest !== "string")
+            throw new Error("Work Launch has no capability context binding");
+        const bound = await this.activationBoundPrompt({ task_id: launch.task_id, prompt: document(args.prompt, "prompt"), plan_id: launch.activation_plan_id, max_chars: launch.activation_max_chars });
+        if (bound.context_digest !== launch.activation_context_digest)
+            throw new Error("Capability context changed since Work Launch preparation");
+        return { ...this.workLaunchDecide({ ...args, prompt: bound.prompt }), resolution: bound.resolution };
     }
     hostRunStart(args) { return this.hostRuns.start(args); }
     hostRunGet(args) { return this.hostRuns.get(args); }

@@ -91,6 +91,6 @@ test("v0.11.21 pins bounded context profiles and keeps generic task graphs separ
       arguments: { graph_id: "mcp_graph", node_id: "one", status: "done" } } });
     assert.equal((advanced?.result as JsonObject).isError, false);
     assert.equal(((service.contextProfileAssemble({ profile_id: "mcp_context", query: "anything" }).profile as JsonObject).id), "mcp_context");
-    assert.equal(VERSION, "0.11.25");
+    assert.equal(VERSION, "0.11.26");
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });

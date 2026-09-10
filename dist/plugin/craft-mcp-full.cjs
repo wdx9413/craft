@@ -14332,7 +14332,7 @@ var HostRunKernel = class {
 };
 
 // src/service.ts
-var VERSION = "0.11.25";
+var VERSION = "0.11.26";
 var CONFIDENCE = /* @__PURE__ */ new Set(["confirmed", "bounded", "unverified", "rejected"]);
 var TASK_STATUS = /* @__PURE__ */ new Set(["active", "paused", "completed", "cancelled"]);
 var VERSIONED_LIFECYCLE = /* @__PURE__ */ new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -17277,6 +17277,23 @@ ${material}
     const result = host === "codex-cli" ? await this.codexHost.execute({ ...args, prompt: bound.prompt }) : await this.claudeHost.execute({ ...args, prompt: bound.prompt });
     return { ...result, resolution: bound.resolution };
   }
+  async capabilityContextWorkLaunchPrepare(args) {
+    const bound = await this.activationBoundPrompt(args);
+    const prepared = this.workLaunchPrepare({ ...args, prompt: bound.prompt });
+    const launch = prepared.launch;
+    const dispatch = prepared.dispatch;
+    const savedLaunch = this.store.save("work_launch", String(launch.id), { ...recordPayload5(launch), activation_plan_id: bound.plan.id, activation_plan_version: bound.plan.version, activation_context_digest: bound.context_digest, activation_max_chars: bound.max_chars, activation_resolution_id: bound.resolution.id });
+    const kind = savedLaunch.host === "codex-cli" ? "codex_dispatch" : "claude_dispatch";
+    const savedDispatch = this.store.save(kind, String(dispatch.id), { ...recordPayload5(dispatch), activation_plan_id: bound.plan.id, activation_plan_version: bound.plan.version, activation_context_digest: bound.context_digest, activation_max_chars: bound.max_chars, activation_resolution_id: bound.resolution.id });
+    return { ...prepared, launch: savedLaunch, dispatch: savedDispatch, resolution: bound.resolution };
+  }
+  async capabilityContextWorkLaunchDecide(args) {
+    const launch = this.store.get("work_launch", text30(args.launch_id, "launch_id"));
+    if (typeof launch.activation_plan_id !== "string" || typeof launch.activation_context_digest !== "string") throw new Error("Work Launch has no capability context binding");
+    const bound = await this.activationBoundPrompt({ task_id: launch.task_id, prompt: document(args.prompt, "prompt"), plan_id: launch.activation_plan_id, max_chars: launch.activation_max_chars });
+    if (bound.context_digest !== launch.activation_context_digest) throw new Error("Capability context changed since Work Launch preparation");
+    return { ...this.workLaunchDecide({ ...args, prompt: bound.prompt }), resolution: bound.resolution };
+  }
   hostRunStart(args) {
     return this.hostRuns.start(args);
   }
@@ -19680,6 +19697,8 @@ var TOOLS = [
   tool("craft_work_launch_decide", "Approve or deny one exact prepared workspace-write launch.", ["launch_id", "actor", "approved"], false, ["prompt"]),
   tool("craft_work_launch_get", "Read a launch, effective Host status, and incremental sanitized events.", ["launch_id"], true, ["after_sequence", "limit"]),
   tool("craft_work_launch_retry", "Create a new traceable attempt for a failed, cancelled, or interrupted launch without replaying a stored prompt.", ["launch_id", "prompt"], false, ["new_launch_id", "model", "timeout_ms", "output_limit", "max_turns", "max_budget_usd"]),
+  tool("craft_capability_context_work_launch_prepare", "Prepare a Work Launch with an exact digest-pinned read-only capability context; it never grants extra write authority.", ["task_id", "host", "workspace", "prompt", "plan_id"], false, ["launch_id", "sandbox", "model", "timeout_ms", "output_limit", "max_turns", "max_budget_usd", "max_chars", "acceptance_name", "acceptance_criteria"]),
+  tool("craft_capability_context_work_launch_decide", "Approve or deny one capability-bound workspace-write launch after revalidating the exact local context.", ["launch_id", "actor", "approved", "prompt"], false),
   tool("craft_acceptance_plan_save", "Attach explicit program, model, human, or business-signal acceptance criteria to one Work Launch.", ["task_id", "launch_id", "name", "criteria"], false, ["plan_id"]),
   tool("craft_acceptance_plan_get", "Read one acceptance plan, its evidence-backed checks, assessment, and business outcome.", ["plan_id"], true),
   tool("craft_acceptance_check_record", "Record one criterion result from the evaluator type declared by the plan.", ["plan_id", "criterion_id", "evaluator_type", "evaluator_id", "result", "summary", "evidence_ids"], false, ["check_id"]),
@@ -20844,6 +20863,8 @@ var McpServer = class {
       craft_work_launch_decide: (a) => service.workLaunchDecide(a),
       craft_work_launch_get: (a) => service.workLaunchGet(a),
       craft_work_launch_retry: (a) => service.workLaunchRetry(a),
+      craft_capability_context_work_launch_prepare: (a) => service.capabilityContextWorkLaunchPrepare(a),
+      craft_capability_context_work_launch_decide: (a) => service.capabilityContextWorkLaunchDecide(a),
       craft_acceptance_plan_save: (a) => service.acceptancePlanSave(a),
       craft_acceptance_plan_get: (a) => service.acceptancePlanGet(a),
       craft_acceptance_check_record: (a) => service.acceptanceCheckRecord(a),

@@ -34,7 +34,7 @@ import { HomeKernel } from "./home.ts";
 import { CodexHostKernel } from "./codex-driver.ts";
 import { ClaudeHostKernel } from "./claude-driver.ts";
 import { HostRunKernel } from "./host-run.ts";
-export declare const VERSION = "0.11.25";
+export declare const VERSION = "0.11.26";
 export declare class CraftService {
     readonly store: CraftStore;
     readonly catalog: Catalog;
@@ -258,6 +258,8 @@ export declare class CraftService {
     private activationBoundPrompt;
     capabilityContextDispatchPrepare(args: JsonObject): Promise<JsonObject>;
     capabilityContextDispatchExecute(args: JsonObject): Promise<JsonObject>;
+    capabilityContextWorkLaunchPrepare(args: JsonObject): Promise<JsonObject>;
+    capabilityContextWorkLaunchDecide(args: JsonObject): Promise<JsonObject>;
     hostRunStart(args: JsonObject): JsonObject;
     hostRunGet(args: JsonObject): JsonObject;
     hostRunCancel(args: JsonObject): JsonObject;
