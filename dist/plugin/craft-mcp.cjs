@@ -14332,7 +14332,7 @@ var HostRunKernel = class {
 };
 
 // src/service.ts
-var VERSION = "0.11.31";
+var VERSION = "0.11.32";
 var CONFIDENCE = /* @__PURE__ */ new Set(["confirmed", "bounded", "unverified", "rejected"]);
 var TASK_STATUS = /* @__PURE__ */ new Set(["active", "paused", "completed", "cancelled"]);
 var VERSIONED_LIFECYCLE = /* @__PURE__ */ new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -14744,7 +14744,9 @@ var CraftService = class _CraftService {
       "wiki_page",
       "knowledge_relation",
       "wiki_context_bundle",
-      "wiki_skill_candidate"
+      "wiki_skill_candidate",
+      "knowledge_evaluation_case",
+      "knowledge_evaluation_run"
     ];
     kinds.push("untrusted_content", "untrusted_extraction", "decision_projection");
     return {
@@ -18038,6 +18040,59 @@ Evidence: ${item.evidence_ids.join(", ")}
     const reason = assertNoSecret(document(args.reason, "reason"), "reason");
     return { candidate: this.store.save("wiki_skill_candidate", String(candidate.id), { ...recordPayload5(candidate), status, review: { reviewer, reason_digest: valueDigest(reason), reviewed_at: (/* @__PURE__ */ new Date()).toISOString() } }) };
   }
+  knowledgeEvaluationCaseSave(args) {
+    const query = assertNoSecret(text30(args.query, "query"), "query");
+    const scope = String(args.scope ?? "global");
+    const expected = uniqueTextArray(args.expected_claim_ids, "expected_claim_ids");
+    expected.forEach((item) => this.store.get("knowledge_claim", item));
+    const caseId = String(args.case_id ?? id9("knowledge_evaluation_case"));
+    const existing = this.store.find("knowledge_evaluation_case", caseId);
+    const identity = { query, scope, expected_claim_ids: expected };
+    if (existing) {
+      if (existing.identity_digest !== valueDigest(identity)) throw new Error("Knowledge evaluation case idempotency conflict");
+      return { case: existing, idempotent: true };
+    }
+    return { case: this.store.create("knowledge_evaluation_case", caseId, { ...identity, identity_digest: valueDigest(identity) }), idempotent: false };
+  }
+  knowledgeEvaluationCaseList(args) {
+    return this.list("knowledge_evaluation_case", "cases", args);
+  }
+  knowledgeEvaluationRun(args) {
+    const caseIds = args.case_ids === void 0 ? this.store.list("knowledge_evaluation_case", 1e4).map((item) => String(item.id)) : uniqueTextArray(args.case_ids, "case_ids");
+    if (!caseIds.length) throw new Error("Knowledge evaluation requires at least one case");
+    const topK = finiteInteger(args.top_k, "top_k", 5, 1, 50);
+    const now = args.now ?? (/* @__PURE__ */ new Date()).toISOString();
+    const results = caseIds.map((caseId) => {
+      const item = this.store.get("knowledge_evaluation_case", caseId);
+      const compiled = this.wikiContextCompile({ query: item.query, scope: item.scope, max_items: topK, max_chars: 1e5, now });
+      const selected = compiled.included.map((claim) => String(claim.claim_id));
+      const expected = item.expected_claim_ids;
+      const matched = expected.filter((claim) => selected.includes(claim));
+      const evidenceCovered = matched.filter((claim) => Array.isArray(this.store.get("knowledge_claim", claim).evidence_ids) && this.store.get("knowledge_claim", claim).evidence_ids.length > 0);
+      return { case_id: item.id, selected_claim_ids: selected, expected_claim_ids: expected, matched_claim_ids: matched, recall: matched.length / expected.length, evidence_coverage: evidenceCovered.length / expected.length, candidate_leaks: selected.filter((claim) => this.store.get("knowledge_claim", claim).status !== "reviewed") };
+    });
+    const recall = results.reduce((total, item) => total + item.recall, 0) / results.length;
+    const evidenceCoverage = results.reduce((total, item) => total + item.evidence_coverage, 0) / results.length;
+    const leaked = results.reduce((total, item) => total + item.candidate_leaks.length, 0);
+    const minRecall = Number(args.min_recall ?? 1);
+    const minEvidence = Number(args.min_evidence_coverage ?? 1);
+    if (![minRecall, minEvidence].every((value) => Number.isFinite(value) && value >= 0 && value <= 1)) throw new Error("Knowledge evaluation thresholds must be between 0 and 1");
+    const runId = String(args.run_id ?? id9("knowledge_evaluation_run"));
+    const existing = this.store.find("knowledge_evaluation_run", runId);
+    const identity = { case_ids: caseIds, top_k: topK, now, min_recall: minRecall, min_evidence_coverage: minEvidence };
+    if (existing) {
+      if (existing.identity_digest !== valueDigest(identity)) throw new Error("Knowledge evaluation run idempotency conflict");
+      return { run: existing, idempotent: true };
+    }
+    const run = this.store.create("knowledge_evaluation_run", runId, { ...identity, identity_digest: valueDigest(identity), results, metrics: { recall, evidence_coverage: evidenceCoverage, candidate_leaks: leaked }, status: recall >= minRecall && evidenceCoverage >= minEvidence && leaked === 0 ? "eligible" : "insufficient", changes_routing: false });
+    return { run, idempotent: false };
+  }
+  knowledgeEvaluationRunGet(args) {
+    return { run: this.store.get("knowledge_evaluation_run", text30(args.run_id, "run_id"), args.version === void 0 ? void 0 : finiteInteger(args.version, "version", 1)) };
+  }
+  knowledgeEvaluationRunList(args) {
+    return this.list("knowledge_evaluation_run", "runs", args);
+  }
   workLaunchPrepare(args) {
     const host = text30(args.host, "host");
     if (!(/* @__PURE__ */ new Set(["codex-cli", "claude-code"])).has(host)) throw new Error("Work launch host is unsupported");
@@ -19630,6 +19685,8 @@ var schemaFor = (name) => {
     "tags",
     "claim_ids",
     "evidence_ids",
+    "expected_claim_ids",
+    "case_ids",
     "allowed_operations",
     "allowed_effects",
     "require_approval_for",
@@ -19947,6 +20004,11 @@ var TOOLS = [
   tool("craft_wiki_skill_candidate_get", "Read one exact Wiki-derived capability candidate.", ["candidate_id"], true, ["version"]),
   tool("craft_wiki_skill_candidate_list", "List local Wiki-derived capability candidates.", [], true, ["limit", "query"]),
   tool("craft_wiki_skill_candidate_review", "Mark a Wiki-derived candidate ready for independent evaluation or reject it; neither choice publishes it.", ["candidate_id", "status", "reviewer", "reason"], false),
+  tool("craft_knowledge_evaluation_case_save", "Save a fixed query-to-expected-claim knowledge evaluation case.", ["query", "expected_claim_ids"], false, ["case_id", "scope"]),
+  tool("craft_knowledge_evaluation_case_list", "List fixed knowledge evaluation cases.", [], true, ["limit", "query"]),
+  tool("craft_knowledge_evaluation_run", "Run deterministic recall, evidence-coverage, and candidate-leak checks; it never changes routing or publication.", [], false, ["run_id", "case_ids", "top_k", "now", "min_recall", "min_evidence_coverage"]),
+  tool("craft_knowledge_evaluation_run_get", "Read one exact knowledge evaluation result.", ["run_id"], true, ["version"]),
+  tool("craft_knowledge_evaluation_run_list", "List knowledge evaluation results.", [], true, ["limit", "query"]),
   tool("craft_domain_kit_save", "Save a versioned domain form, object, capability, sandbox, budget, evaluation, action, and acceptance contract without binding it to one Host.", ["name", "domain", "description", "fields", "criteria"], false, ["kit_id", "capability_requirements", "object_schemas", "components", "action_contracts", "budget_limits", "sandbox_requirements", "eval_suite_ref"]),
   tool("craft_domain_kit_get", "Read one exact Domain Kit version.", ["kit_id"], true, ["kit_version"]),
   tool("craft_domain_kit_list", "List locally installed Domain Kits.", [], true, ["limit"]),
@@ -21130,6 +21192,11 @@ var McpServer = class {
       craft_wiki_skill_candidate_get: (a) => service.wikiSkillCandidateGet(a),
       craft_wiki_skill_candidate_list: (a) => service.wikiSkillCandidateList(a),
       craft_wiki_skill_candidate_review: (a) => service.wikiSkillCandidateReview(a),
+      craft_knowledge_evaluation_case_save: (a) => service.knowledgeEvaluationCaseSave(a),
+      craft_knowledge_evaluation_case_list: (a) => service.knowledgeEvaluationCaseList(a),
+      craft_knowledge_evaluation_run: (a) => service.knowledgeEvaluationRun(a),
+      craft_knowledge_evaluation_run_get: (a) => service.knowledgeEvaluationRunGet(a),
+      craft_knowledge_evaluation_run_list: (a) => service.knowledgeEvaluationRunList(a),
       craft_domain_kit_save: (a) => service.domainKitSave(a),
       craft_domain_kit_get: (a) => service.domainKitGet(a),
       craft_domain_kit_list: (a) => service.domainKitList(a),

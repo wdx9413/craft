@@ -14,7 +14,7 @@ const schemaFor = (name: string): JsonObject => {
     "capabilities", "observed_capabilities", "requirements", "output", "transform", "entity", "values", "budget_limits", "sandbox_requirements", "eval_suite_ref"].includes(name)) return { type: "object" };
   if (["completed", "pending", "decisions", "artifacts", "steps", "cases", "capabilities",
     "allowed_side_effects", "approved_side_effects", "nodes", "artifact_ids", "evidence_ids",
-    "trial_ids", "requirements", "grade_ids", "pattern_ids", "failure_modes", "receipt_ids", "criteria", "acceptance_criteria", "allowed_extensions", "fields", "capability_requirements", "object_schemas", "components", "action_contracts", "tags", "claim_ids", "evidence_ids",
+    "trial_ids", "requirements", "grade_ids", "pattern_ids", "failure_modes", "receipt_ids", "criteria", "acceptance_criteria", "allowed_extensions", "fields", "capability_requirements", "object_schemas", "components", "action_contracts", "tags", "claim_ids", "evidence_ids", "expected_claim_ids", "case_ids",
     "allowed_operations", "allowed_effects", "require_approval_for", "operations", "subjects", "children", "trusted_hosts", "command_allowlist", "path_allowlist", "kinds", "effects", "allowed_kinds", "dependencies", "aliases", "artifact_ids", "final_artifact_ids", "evidence_ids", "output_contract", "trial_ids", "include_paths", "affected_paths", "object_ids", "depends_on", "source_paths", "applies_to", "patches", "snapshot_refs", "triggers", "allowed_hosts", "allowed_actions", "approval_required_actions", "detected_instructions", "citations", "allowed_fields", "argv", "sources", "budget_ids", "recovery_item_ids", "memory_kinds", "object_types", "required_memory_ids", "required_object_ids"].includes(name)) return { type: "array" };
   return { type: "string" };
 };
@@ -160,6 +160,11 @@ export const TOOLS: Tool[] = [
   tool("craft_wiki_skill_candidate_get", "Read one exact Wiki-derived capability candidate.", ["candidate_id"], true, ["version"]),
   tool("craft_wiki_skill_candidate_list", "List local Wiki-derived capability candidates.", [], true, ["limit", "query"]),
   tool("craft_wiki_skill_candidate_review", "Mark a Wiki-derived candidate ready for independent evaluation or reject it; neither choice publishes it.", ["candidate_id", "status", "reviewer", "reason"], false),
+  tool("craft_knowledge_evaluation_case_save", "Save a fixed query-to-expected-claim knowledge evaluation case.", ["query", "expected_claim_ids"], false, ["case_id", "scope"]),
+  tool("craft_knowledge_evaluation_case_list", "List fixed knowledge evaluation cases.", [], true, ["limit", "query"]),
+  tool("craft_knowledge_evaluation_run", "Run deterministic recall, evidence-coverage, and candidate-leak checks; it never changes routing or publication.", [], false, ["run_id", "case_ids", "top_k", "now", "min_recall", "min_evidence_coverage"]),
+  tool("craft_knowledge_evaluation_run_get", "Read one exact knowledge evaluation result.", ["run_id"], true, ["version"]),
+  tool("craft_knowledge_evaluation_run_list", "List knowledge evaluation results.", [], true, ["limit", "query"]),
   tool("craft_domain_kit_save", "Save a versioned domain form, object, capability, sandbox, budget, evaluation, action, and acceptance contract without binding it to one Host.", ["name", "domain", "description", "fields", "criteria"], false, ["kit_id", "capability_requirements", "object_schemas", "components", "action_contracts", "budget_limits", "sandbox_requirements", "eval_suite_ref"]),
   tool("craft_domain_kit_get", "Read one exact Domain Kit version.", ["kit_id"], true, ["kit_version"]),
   tool("craft_domain_kit_list", "List locally installed Domain Kits.", [], true, ["limit"]),
@@ -688,6 +693,7 @@ export class McpServer {
       craft_wiki_page_save: (a) => service.wikiPageSave(a), craft_wiki_page_get: (a) => service.wikiPageGet(a), craft_wiki_page_list: (a) => service.wikiPageList(a), craft_wiki_page_refresh: (a) => service.wikiPageRefresh(a), craft_knowledge_relation_save: (a) => service.knowledgeRelationSave(a),
       craft_wiki_context_compile: (a) => service.wikiContextCompile(a), craft_wiki_context_bundle_get: (a) => service.wikiContextBundleGet(a), craft_wiki_context_bundle_list: (a) => service.wikiContextBundleList(a),
       craft_wiki_skill_candidate_create: (a) => service.wikiSkillCandidateCreate(a), craft_wiki_skill_candidate_get: (a) => service.wikiSkillCandidateGet(a), craft_wiki_skill_candidate_list: (a) => service.wikiSkillCandidateList(a), craft_wiki_skill_candidate_review: (a) => service.wikiSkillCandidateReview(a),
+      craft_knowledge_evaluation_case_save: (a) => service.knowledgeEvaluationCaseSave(a), craft_knowledge_evaluation_case_list: (a) => service.knowledgeEvaluationCaseList(a), craft_knowledge_evaluation_run: (a) => service.knowledgeEvaluationRun(a), craft_knowledge_evaluation_run_get: (a) => service.knowledgeEvaluationRunGet(a), craft_knowledge_evaluation_run_list: (a) => service.knowledgeEvaluationRunList(a),
       craft_domain_kit_save: (a) => service.domainKitSave(a), craft_domain_kit_get: (a) => service.domainKitGet(a), craft_domain_kit_list: (a) => service.domainKitList(a),
       craft_domain_kit_install_builtins: () => service.domainKitInstallBuiltins(), craft_domain_kit_apply: (a) => service.domainKitApply(a),
       craft_domain_kit_settle: (a) => service.domainKitSettle(a),

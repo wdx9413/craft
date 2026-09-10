@@ -1,6 +1,6 @@
 # Craft
 
-> 当前发布版本：v0.11.30。最新能力包括 Markdown 优先的证据 Wiki、可复算的有界 Context Compiler，以及跨领域验收 Kit。
+> 当前发布版本：v0.11.32。最新能力包括 Markdown 优先的证据 Wiki、可复算的 Context Compiler、受控能力候选，以及知识质量评测门禁。
 
 [中文](README.md) | [English](README.en.md)
 

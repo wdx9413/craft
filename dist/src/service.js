@@ -45,7 +45,7 @@ import { HomeKernel } from "./home.js";
 import { CodexHostKernel } from "./codex-driver.js";
 import { ClaudeHostKernel } from "./claude-driver.js";
 import { HostRunKernel } from "./host-run.js";
-export const VERSION = "0.11.31";
+export const VERSION = "0.11.32";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -334,7 +334,7 @@ export class CraftService {
             "maintenance_status",
             "maintenance_tick",
             "maintenance_component", "maintenance_failure", "attention_item", "work_launch", "acceptance_plan", "acceptance_check", "acceptance_assessment", "acceptance_evaluator", "acceptance_evaluation_job", "verified_iteration", "iteration_attempt", "strategy_recommendation",
-            "trajectory_script_proposal", "verified_script_run", "knowledge_claim", "wiki_page", "knowledge_relation", "wiki_context_bundle", "wiki_skill_candidate"];
+            "trajectory_script_proposal", "verified_script_run", "knowledge_claim", "wiki_page", "knowledge_relation", "wiki_context_bundle", "wiki_skill_candidate", "knowledge_evaluation_case", "knowledge_evaluation_run"];
         kinds.push("untrusted_content", "untrusted_extraction", "decision_projection");
         return { version: VERSION, data_root: this.store.paths.root,
             counts: Object.fromEntries(kinds.map((kind) => [kind, this.store.count(kind)])) };
@@ -2776,6 +2776,49 @@ export class CraftService {
         const reason = assertNoSecret(document(args.reason, "reason"), "reason");
         return { candidate: this.store.save("wiki_skill_candidate", String(candidate.id), { ...recordPayload(candidate), status, review: { reviewer, reason_digest: valueDigest(reason), reviewed_at: new Date().toISOString() } }) };
     }
+    knowledgeEvaluationCaseSave(args) {
+        const query = assertNoSecret(text(args.query, "query"), "query");
+        const scope = String(args.scope ?? "global");
+        const expected = uniqueTextArray(args.expected_claim_ids, "expected_claim_ids");
+        expected.forEach((item) => this.store.get("knowledge_claim", item));
+        const caseId = String(args.case_id ?? id("knowledge_evaluation_case"));
+        const existing = this.store.find("knowledge_evaluation_case", caseId);
+        const identity = { query, scope, expected_claim_ids: expected };
+        if (existing) {
+            if (existing.identity_digest !== valueDigest(identity))
+                throw new Error("Knowledge evaluation case idempotency conflict");
+            return { case: existing, idempotent: true };
+        }
+        return { case: this.store.create("knowledge_evaluation_case", caseId, { ...identity, identity_digest: valueDigest(identity) }), idempotent: false };
+    }
+    knowledgeEvaluationCaseList(args) { return this.list("knowledge_evaluation_case", "cases", args); }
+    knowledgeEvaluationRun(args) {
+        const caseIds = args.case_ids === undefined ? this.store.list("knowledge_evaluation_case", 10_000).map((item) => String(item.id)) : uniqueTextArray(args.case_ids, "case_ids");
+        if (!caseIds.length)
+            throw new Error("Knowledge evaluation requires at least one case");
+        const topK = finiteInteger(args.top_k, "top_k", 5, 1, 50);
+        const now = args.now ?? new Date().toISOString();
+        const results = caseIds.map((caseId) => { const item = this.store.get("knowledge_evaluation_case", caseId); const compiled = this.wikiContextCompile({ query: item.query, scope: item.scope, max_items: topK, max_chars: 100_000, now }); const selected = compiled.included.map((claim) => String(claim.claim_id)); const expected = item.expected_claim_ids; const matched = expected.filter((claim) => selected.includes(claim)); const evidenceCovered = matched.filter((claim) => Array.isArray(this.store.get("knowledge_claim", claim).evidence_ids) && this.store.get("knowledge_claim", claim).evidence_ids.length > 0); return { case_id: item.id, selected_claim_ids: selected, expected_claim_ids: expected, matched_claim_ids: matched, recall: matched.length / expected.length, evidence_coverage: evidenceCovered.length / expected.length, candidate_leaks: selected.filter((claim) => this.store.get("knowledge_claim", claim).status !== "reviewed") }; });
+        const recall = results.reduce((total, item) => total + item.recall, 0) / results.length;
+        const evidenceCoverage = results.reduce((total, item) => total + item.evidence_coverage, 0) / results.length;
+        const leaked = results.reduce((total, item) => total + item.candidate_leaks.length, 0);
+        const minRecall = Number(args.min_recall ?? 1);
+        const minEvidence = Number(args.min_evidence_coverage ?? 1);
+        if (![minRecall, minEvidence].every((value) => Number.isFinite(value) && value >= 0 && value <= 1))
+            throw new Error("Knowledge evaluation thresholds must be between 0 and 1");
+        const runId = String(args.run_id ?? id("knowledge_evaluation_run"));
+        const existing = this.store.find("knowledge_evaluation_run", runId);
+        const identity = { case_ids: caseIds, top_k: topK, now, min_recall: minRecall, min_evidence_coverage: minEvidence };
+        if (existing) {
+            if (existing.identity_digest !== valueDigest(identity))
+                throw new Error("Knowledge evaluation run idempotency conflict");
+            return { run: existing, idempotent: true };
+        }
+        const run = this.store.create("knowledge_evaluation_run", runId, { ...identity, identity_digest: valueDigest(identity), results, metrics: { recall, evidence_coverage: evidenceCoverage, candidate_leaks: leaked }, status: recall >= minRecall && evidenceCoverage >= minEvidence && leaked === 0 ? "eligible" : "insufficient", changes_routing: false });
+        return { run, idempotent: false };
+    }
+    knowledgeEvaluationRunGet(args) { return { run: this.store.get("knowledge_evaluation_run", text(args.run_id, "run_id"), args.version === undefined ? undefined : finiteInteger(args.version, "version", 1)) }; }
+    knowledgeEvaluationRunList(args) { return this.list("knowledge_evaluation_run", "runs", args); }
     workLaunchPrepare(args) {
         const host = text(args.host, "host");
         if (!new Set(["codex-cli", "claude-code"]).has(host))

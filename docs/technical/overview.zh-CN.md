@@ -111,6 +111,7 @@ Signoff ──authorizes──> Workflow or Configuration Promotion
 - [Evidence Wiki：带证据的项目知识层](modules/evidence-wiki.md)
 - [Context Compiler：有界知识上下文](modules/context-compiler.md)
 - [Wiki 到能力候选：受控提炼](modules/wiki-capability-candidates.md)
+- [Knowledge Evaluation：检索质量门禁](modules/knowledge-evaluation.md)
 - [控制面安全、资源与长任务护栏](modules/control-plane-guardrails.md)
 - [Provenance 与对象级 Lineage](modules/provenance-lineage.md)
 - [长任务 Dehydration / Hydration](modules/long-task-hydration.md)
