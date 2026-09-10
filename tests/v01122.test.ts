@@ -50,6 +50,6 @@ test("v0.11.22 pins logical capability content for a task and audits reselection
       const result = await mcp.handle({ id: name, method: "tools/call", params: { name, arguments: arguments_ } });
       assert.equal((result?.result as JsonObject).isError, false, name);
     }
-    assert.equal(VERSION, "0.11.28");
+    assert.equal(VERSION, "0.11.29");
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });

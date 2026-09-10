@@ -1,6 +1,6 @@
 # Craft
 
-> 当前发布版本：v0.11.28。最新能力包括验证驱动迭代、Capability-bound Work Launch、held-out 证据策略推荐，以及研发/视频/内容/销售交付验收 Kit。
+> 当前发布版本：v0.11.29。最新能力包括验证驱动迭代、Capability-bound Work Launch、跨领域验收 Kit，以及 Markdown 优先的证据 Wiki。
 
 [中文](README.md) | [English](README.en.md)
 

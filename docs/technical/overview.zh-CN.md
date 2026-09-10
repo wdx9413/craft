@@ -108,6 +108,7 @@ Signoff ──authorizes──> Workflow or Configuration Promotion
 - [沙箱与风险分级执行](modules/execution-policy.md)
 - [Transactional Runtime 与 Trajectory Compiler](modules/transactional-runtime.md)
 - [上下文与记忆管理](modules/context-memory.md)
+- [Evidence Wiki：带证据的项目知识层](modules/evidence-wiki.md)
 - [控制面安全、资源与长任务护栏](modules/control-plane-guardrails.md)
 - [Provenance 与对象级 Lineage](modules/provenance-lineage.md)
 - [长任务 Dehydration / Hydration](modules/long-task-hydration.md)

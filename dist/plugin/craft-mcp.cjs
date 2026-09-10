@@ -14332,7 +14332,7 @@ var HostRunKernel = class {
 };
 
 // src/service.ts
-var VERSION = "0.11.28";
+var VERSION = "0.11.29";
 var CONFIDENCE = /* @__PURE__ */ new Set(["confirmed", "bounded", "unverified", "rejected"]);
 var TASK_STATUS = /* @__PURE__ */ new Set(["active", "paused", "completed", "cancelled"]);
 var VERSIONED_LIFECYCLE = /* @__PURE__ */ new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -14348,6 +14348,9 @@ var EXPERT_TYPES = /* @__PURE__ */ new Set(["diagnostic_research"]);
 var ACCEPTANCE_METHODS = /* @__PURE__ */ new Set(["program", "model", "human", "business_signal"]);
 var ACCEPTANCE_RESULTS = /* @__PURE__ */ new Set(["passed", "failed", "blocked"]);
 var DOMAIN_FIELD_TYPES = /* @__PURE__ */ new Set(["text", "path", "integer", "boolean", "choice"]);
+var KNOWLEDGE_KINDS = /* @__PURE__ */ new Set(["fact", "rule", "decision", "term", "failure_mode"]);
+var KNOWLEDGE_STATUSES = /* @__PURE__ */ new Set(["candidate", "reviewed", "disputed", "superseded", "expired"]);
+var KNOWLEDGE_RELATIONS = /* @__PURE__ */ new Set(["supports", "contradicts", "supersedes", "applies_to", "depends_on"]);
 function id9(prefix) {
   return `${prefix}_${(0, import_node_crypto35.randomUUID)().replaceAll("-", "")}`;
 }
@@ -14736,7 +14739,10 @@ var CraftService = class _CraftService {
       "iteration_attempt",
       "strategy_recommendation",
       "trajectory_script_proposal",
-      "verified_script_run"
+      "verified_script_run",
+      "knowledge_claim",
+      "wiki_page",
+      "knowledge_relation"
     ];
     kinds.push("untrusted_content", "untrusted_extraction", "decision_projection");
     return {
@@ -17849,6 +17855,89 @@ ${material}
     const recommendation = this.store.create("strategy_recommendation", recommendationId, { ...identity, identity_digest: valueDigest(identity), status: recommended ? "recommended" : "insufficient", selected_subject: recommended ? { type: candidate.subject_type, id: candidate.subject_id, version: candidate.subject_version } : null, rationale: { comparable, pass_rate_delta: passDelta, cost_delta: costMetric ? costDelta : null, assessment: comparison.assessment }, automation_authority: false });
     return { recommendation, idempotent: false };
   }
+  knowledgeClaimSave(args) {
+    const kind = text30(args.kind, "kind");
+    if (!KNOWLEDGE_KINDS.has(kind)) throw new Error("Knowledge claim kind is unsupported");
+    const content = assertNoSecret(document(args.content, "content"), "content");
+    const scope = String(args.scope ?? "global");
+    const evidenceIds = uniqueTextArray(args.evidence_ids, "evidence_ids");
+    evidenceIds.forEach((item) => this.store.get("evidence", item));
+    const tags = optionalTextArray(args.tags, "tags");
+    const validUntil = args.valid_until === void 0 ? null : new Date(validIsoTime(args.valid_until, "valid_until")).toISOString();
+    const claimId = String(args.claim_id ?? id9("knowledge_claim"));
+    const existing = this.store.find("knowledge_claim", claimId);
+    const identity = { kind, content, scope, evidence_ids: evidenceIds, tags, valid_until: validUntil };
+    if (existing) {
+      if (existing.identity_digest !== valueDigest(identity)) throw new Error("Knowledge claim idempotency conflict");
+      return { claim: existing, idempotent: true };
+    }
+    const claim = this.store.create("knowledge_claim", claimId, { ...identity, identity_digest: valueDigest(identity), status: "candidate", review: null });
+    return { claim, idempotent: false };
+  }
+  knowledgeClaimGet(args) {
+    return { claim: this.store.get("knowledge_claim", text30(args.claim_id, "claim_id"), args.version === void 0 ? void 0 : finiteInteger(args.version, "version", 1)) };
+  }
+  knowledgeClaimList(args) {
+    return this.list("knowledge_claim", "claims", args);
+  }
+  knowledgeClaimReview(args) {
+    const claim = this.store.get("knowledge_claim", text30(args.claim_id, "claim_id"));
+    const status = text30(args.status, "status");
+    if (!KNOWLEDGE_STATUSES.has(status) || status === "candidate") throw new Error("Knowledge claim review status is unsupported");
+    const reviewer = text30(args.reviewer, "reviewer");
+    const reason = assertNoSecret(document(args.reason, "reason"), "reason");
+    const saved = this.store.save("knowledge_claim", String(claim.id), { ...recordPayload5(claim), status, review: { reviewer, reason_digest: valueDigest(reason), reviewed_at: (/* @__PURE__ */ new Date()).toISOString() } });
+    return { claim: saved };
+  }
+  async wikiPageSave(args) {
+    const title = assertNoSecret(text30(args.title, "title"), "title");
+    const body2 = assertNoSecret(document(args.body, "body"), "body");
+    const scope = String(args.scope ?? "global");
+    const claimIds = optionalTextArray(args.claim_ids, "claim_ids");
+    claimIds.forEach((item) => this.store.get("knowledge_claim", item));
+    const pageId = String(args.page_id ?? id9("wiki_page"));
+    const existing = this.store.find("wiki_page", pageId);
+    const identity = { title, body: body2, scope, claim_ids: claimIds };
+    if (existing && existing.identity_digest === valueDigest(identity)) return { page: existing, idempotent: true };
+    const filePath = (0, import_node_path12.join)(this.store.paths.root, "wiki", `${pageId}.v${existing ? Number(existing.version) + 1 : 1}.md`);
+    if (existing) {
+      const current = await (0, import_promises11.readFile)(String(existing.file_path), "utf8");
+      if (valueDigest(current) !== existing.body_digest) throw new Error("Wiki page file has unrecorded changes; refresh it before saving");
+    }
+    await (0, import_promises11.mkdir)((0, import_node_path12.join)(this.store.paths.root, "wiki"), { recursive: true });
+    await (0, import_promises11.writeFile)(filePath, body2, "utf8");
+    const page = this.store.save("wiki_page", pageId, { title, scope, claim_ids: claimIds, identity_digest: valueDigest(identity), body_digest: valueDigest(body2), file_path: filePath, revision_source: String(args.author ?? "human") });
+    return { page, idempotent: false };
+  }
+  async wikiPageGet(args) {
+    const page = this.store.get("wiki_page", text30(args.page_id, "page_id"), args.version === void 0 ? void 0 : finiteInteger(args.version, "version", 1));
+    return { page, body: await (0, import_promises11.readFile)(String(page.file_path), "utf8") };
+  }
+  wikiPageList(args) {
+    return this.list("wiki_page", "pages", args);
+  }
+  async wikiPageRefresh(args) {
+    const page = this.store.get("wiki_page", text30(args.page_id, "page_id"));
+    const body2 = assertNoSecret(document(await (0, import_promises11.readFile)(String(page.file_path), "utf8"), "body"), "body");
+    if (valueDigest(body2) === page.body_digest) return { page, changed: false };
+    const saved = this.store.save("wiki_page", String(page.id), { ...recordPayload5(page), body_digest: valueDigest(body2), identity_digest: null, revision_source: "filesystem" });
+    return { page: saved, changed: true };
+  }
+  knowledgeRelationSave(args) {
+    const relation = text30(args.relation, "relation");
+    if (!KNOWLEDGE_RELATIONS.has(relation)) throw new Error("Knowledge relation is unsupported");
+    const fromClaim = this.store.get("knowledge_claim", text30(args.from_claim_id, "from_claim_id"));
+    const toClaim = this.store.get("knowledge_claim", text30(args.to_claim_id, "to_claim_id"));
+    if (fromClaim.id === toClaim.id) throw new Error("Knowledge relation endpoints must differ");
+    const relationId = String(args.relation_id ?? id9("knowledge_relation"));
+    const existing = this.store.find("knowledge_relation", relationId);
+    const identity = { from_claim_id: fromClaim.id, to_claim_id: toClaim.id, relation };
+    if (existing) {
+      if (existing.identity_digest !== valueDigest(identity)) throw new Error("Knowledge relation idempotency conflict");
+      return { relation: existing, idempotent: true };
+    }
+    return { relation: this.store.create("knowledge_relation", relationId, { ...identity, identity_digest: valueDigest(identity) }), idempotent: false };
+  }
   workLaunchPrepare(args) {
     const host = text30(args.host, "host");
     if (!(/* @__PURE__ */ new Set(["codex-cli", "claude-code"])).has(host)) throw new Error("Work launch host is unsupported");
@@ -19438,6 +19527,9 @@ var schemaFor = (name) => {
     "object_schemas",
     "components",
     "action_contracts",
+    "tags",
+    "claim_ids",
+    "evidence_ids",
     "allowed_operations",
     "allowed_effects",
     "require_approval_for",
@@ -19739,6 +19831,15 @@ var TOOLS = [
   tool("craft_verified_iteration_get", "Read a verification-driven iteration and its content-free attempt history.", ["iteration_id"], true),
   tool("craft_verified_iteration_assess", "Classify one independent acceptance assessment as pass, retry, block, or human handoff; only task failures can retry within budget.", ["iteration_id", "assessment_id", "classification"], false, ["attempt_id", "feedback"]),
   tool("craft_strategy_recommend", "Recommend a candidate strategy only from a comparable held-out evaluation; it never changes routing or executes work.", ["task_id", "comparison_id"], false, ["recommendation_id", "cost_metric"]),
+  tool("craft_knowledge_claim_save", "Save a candidate fact, rule, decision, term, or failure mode only with existing evidence; it is not automatically trusted or executable.", ["kind", "content", "evidence_ids"], false, ["claim_id", "scope", "tags", "valid_until"]),
+  tool("craft_knowledge_claim_get", "Read one exact evidence-backed knowledge claim.", ["claim_id"], true, ["version"]),
+  tool("craft_knowledge_claim_list", "List locally stored evidence-backed knowledge claims.", [], true, ["limit", "query"]),
+  tool("craft_knowledge_claim_review", "Explicitly review, dispute, supersede, or expire a candidate knowledge claim without deleting history.", ["claim_id", "status", "reviewer", "reason"], false),
+  tool("craft_wiki_page_save", "Save or revise an editable Wiki page whose referenced claims retain their evidence identity.", ["title", "body"], false, ["page_id", "scope", "claim_ids", "author"]),
+  tool("craft_wiki_page_get", "Read one exact Wiki page revision.", ["page_id"], true, ["version"]),
+  tool("craft_wiki_page_list", "List locally stored Wiki pages.", [], true, ["limit", "query"]),
+  tool("craft_wiki_page_refresh", "Record a human Markdown edit as a new Wiki page revision; it never infers trust from the edit.", ["page_id"], false),
+  tool("craft_knowledge_relation_save", "Create a typed support, contradiction, supersession, applicability, or dependency relation between two evidence-backed claims.", ["from_claim_id", "to_claim_id", "relation"], false, ["relation_id"]),
   tool("craft_domain_kit_save", "Save a versioned domain form, object, capability, sandbox, budget, evaluation, action, and acceptance contract without binding it to one Host.", ["name", "domain", "description", "fields", "criteria"], false, ["kit_id", "capability_requirements", "object_schemas", "components", "action_contracts", "budget_limits", "sandbox_requirements", "eval_suite_ref"]),
   tool("craft_domain_kit_get", "Read one exact Domain Kit version.", ["kit_id"], true, ["kit_version"]),
   tool("craft_domain_kit_list", "List locally installed Domain Kits.", [], true, ["limit"]),
@@ -20906,6 +21007,15 @@ var McpServer = class {
       craft_verified_iteration_get: (a) => service.verifiedIterationGet(a),
       craft_verified_iteration_assess: (a) => service.verifiedIterationAssess(a),
       craft_strategy_recommend: (a) => service.strategyRecommend(a),
+      craft_knowledge_claim_save: (a) => service.knowledgeClaimSave(a),
+      craft_knowledge_claim_get: (a) => service.knowledgeClaimGet(a),
+      craft_knowledge_claim_list: (a) => service.knowledgeClaimList(a),
+      craft_knowledge_claim_review: (a) => service.knowledgeClaimReview(a),
+      craft_wiki_page_save: (a) => service.wikiPageSave(a),
+      craft_wiki_page_get: (a) => service.wikiPageGet(a),
+      craft_wiki_page_list: (a) => service.wikiPageList(a),
+      craft_wiki_page_refresh: (a) => service.wikiPageRefresh(a),
+      craft_knowledge_relation_save: (a) => service.knowledgeRelationSave(a),
       craft_domain_kit_save: (a) => service.domainKitSave(a),
       craft_domain_kit_get: (a) => service.domainKitGet(a),
       craft_domain_kit_list: (a) => service.domainKitList(a),

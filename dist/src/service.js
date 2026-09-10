@@ -45,7 +45,7 @@ import { HomeKernel } from "./home.js";
 import { CodexHostKernel } from "./codex-driver.js";
 import { ClaudeHostKernel } from "./claude-driver.js";
 import { HostRunKernel } from "./host-run.js";
-export const VERSION = "0.11.28";
+export const VERSION = "0.11.29";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -61,6 +61,9 @@ const EXPERT_TYPES = new Set(["diagnostic_research"]);
 const ACCEPTANCE_METHODS = new Set(["program", "model", "human", "business_signal"]);
 const ACCEPTANCE_RESULTS = new Set(["passed", "failed", "blocked"]);
 const DOMAIN_FIELD_TYPES = new Set(["text", "path", "integer", "boolean", "choice"]);
+const KNOWLEDGE_KINDS = new Set(["fact", "rule", "decision", "term", "failure_mode"]);
+const KNOWLEDGE_STATUSES = new Set(["candidate", "reviewed", "disputed", "superseded", "expired"]);
+const KNOWLEDGE_RELATIONS = new Set(["supports", "contradicts", "supersedes", "applies_to", "depends_on"]);
 function id(prefix) { return `${prefix}_${randomUUID().replaceAll("-", "")}`; }
 function valueDigest(value) { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
 function text(value, name) {
@@ -331,7 +334,7 @@ export class CraftService {
             "maintenance_status",
             "maintenance_tick",
             "maintenance_component", "maintenance_failure", "attention_item", "work_launch", "acceptance_plan", "acceptance_check", "acceptance_assessment", "acceptance_evaluator", "acceptance_evaluation_job", "verified_iteration", "iteration_attempt", "strategy_recommendation",
-            "trajectory_script_proposal", "verified_script_run"];
+            "trajectory_script_proposal", "verified_script_run", "knowledge_claim", "wiki_page", "knowledge_relation"];
         kinds.push("untrusted_content", "untrusted_extraction", "decision_projection");
         return { version: VERSION, data_root: this.store.paths.root,
             counts: Object.fromEntries(kinds.map((kind) => [kind, this.store.count(kind)])) };
@@ -2600,6 +2603,89 @@ export class CraftService {
         }
         const recommendation = this.store.create("strategy_recommendation", recommendationId, { ...identity, identity_digest: valueDigest(identity), status: recommended ? "recommended" : "insufficient", selected_subject: recommended ? { type: candidate.subject_type, id: candidate.subject_id, version: candidate.subject_version } : null, rationale: { comparable, pass_rate_delta: passDelta, cost_delta: costMetric ? costDelta : null, assessment: comparison.assessment }, automation_authority: false });
         return { recommendation, idempotent: false };
+    }
+    knowledgeClaimSave(args) {
+        const kind = text(args.kind, "kind");
+        if (!KNOWLEDGE_KINDS.has(kind))
+            throw new Error("Knowledge claim kind is unsupported");
+        const content = assertNoSecret(document(args.content, "content"), "content");
+        const scope = String(args.scope ?? "global");
+        const evidenceIds = uniqueTextArray(args.evidence_ids, "evidence_ids");
+        evidenceIds.forEach((item) => this.store.get("evidence", item));
+        const tags = optionalTextArray(args.tags, "tags");
+        const validUntil = args.valid_until === undefined ? null : new Date(validIsoTime(args.valid_until, "valid_until")).toISOString();
+        const claimId = String(args.claim_id ?? id("knowledge_claim"));
+        const existing = this.store.find("knowledge_claim", claimId);
+        const identity = { kind, content, scope, evidence_ids: evidenceIds, tags, valid_until: validUntil };
+        if (existing) {
+            if (existing.identity_digest !== valueDigest(identity))
+                throw new Error("Knowledge claim idempotency conflict");
+            return { claim: existing, idempotent: true };
+        }
+        const claim = this.store.create("knowledge_claim", claimId, { ...identity, identity_digest: valueDigest(identity), status: "candidate", review: null });
+        return { claim, idempotent: false };
+    }
+    knowledgeClaimGet(args) { return { claim: this.store.get("knowledge_claim", text(args.claim_id, "claim_id"), args.version === undefined ? undefined : finiteInteger(args.version, "version", 1)) }; }
+    knowledgeClaimList(args) { return this.list("knowledge_claim", "claims", args); }
+    knowledgeClaimReview(args) {
+        const claim = this.store.get("knowledge_claim", text(args.claim_id, "claim_id"));
+        const status = text(args.status, "status");
+        if (!KNOWLEDGE_STATUSES.has(status) || status === "candidate")
+            throw new Error("Knowledge claim review status is unsupported");
+        const reviewer = text(args.reviewer, "reviewer");
+        const reason = assertNoSecret(document(args.reason, "reason"), "reason");
+        const saved = this.store.save("knowledge_claim", String(claim.id), { ...recordPayload(claim), status, review: { reviewer, reason_digest: valueDigest(reason), reviewed_at: new Date().toISOString() } });
+        return { claim: saved };
+    }
+    async wikiPageSave(args) {
+        const title = assertNoSecret(text(args.title, "title"), "title");
+        const body = assertNoSecret(document(args.body, "body"), "body");
+        const scope = String(args.scope ?? "global");
+        const claimIds = optionalTextArray(args.claim_ids, "claim_ids");
+        claimIds.forEach((item) => this.store.get("knowledge_claim", item));
+        const pageId = String(args.page_id ?? id("wiki_page"));
+        const existing = this.store.find("wiki_page", pageId);
+        const identity = { title, body, scope, claim_ids: claimIds };
+        if (existing && existing.identity_digest === valueDigest(identity))
+            return { page: existing, idempotent: true };
+        const filePath = join(this.store.paths.root, "wiki", `${pageId}.v${existing ? Number(existing.version) + 1 : 1}.md`);
+        if (existing) {
+            const current = await readFile(String(existing.file_path), "utf8");
+            if (valueDigest(current) !== existing.body_digest)
+                throw new Error("Wiki page file has unrecorded changes; refresh it before saving");
+        }
+        await mkdir(join(this.store.paths.root, "wiki"), { recursive: true });
+        await writeFile(filePath, body, "utf8");
+        const page = this.store.save("wiki_page", pageId, { title, scope, claim_ids: claimIds, identity_digest: valueDigest(identity), body_digest: valueDigest(body), file_path: filePath, revision_source: String(args.author ?? "human") });
+        return { page, idempotent: false };
+    }
+    async wikiPageGet(args) { const page = this.store.get("wiki_page", text(args.page_id, "page_id"), args.version === undefined ? undefined : finiteInteger(args.version, "version", 1)); return { page, body: await readFile(String(page.file_path), "utf8") }; }
+    wikiPageList(args) { return this.list("wiki_page", "pages", args); }
+    async wikiPageRefresh(args) {
+        const page = this.store.get("wiki_page", text(args.page_id, "page_id"));
+        const body = assertNoSecret(document(await readFile(String(page.file_path), "utf8"), "body"), "body");
+        if (valueDigest(body) === page.body_digest)
+            return { page, changed: false };
+        const saved = this.store.save("wiki_page", String(page.id), { ...recordPayload(page), body_digest: valueDigest(body), identity_digest: null, revision_source: "filesystem" });
+        return { page: saved, changed: true };
+    }
+    knowledgeRelationSave(args) {
+        const relation = text(args.relation, "relation");
+        if (!KNOWLEDGE_RELATIONS.has(relation))
+            throw new Error("Knowledge relation is unsupported");
+        const fromClaim = this.store.get("knowledge_claim", text(args.from_claim_id, "from_claim_id"));
+        const toClaim = this.store.get("knowledge_claim", text(args.to_claim_id, "to_claim_id"));
+        if (fromClaim.id === toClaim.id)
+            throw new Error("Knowledge relation endpoints must differ");
+        const relationId = String(args.relation_id ?? id("knowledge_relation"));
+        const existing = this.store.find("knowledge_relation", relationId);
+        const identity = { from_claim_id: fromClaim.id, to_claim_id: toClaim.id, relation };
+        if (existing) {
+            if (existing.identity_digest !== valueDigest(identity))
+                throw new Error("Knowledge relation idempotency conflict");
+            return { relation: existing, idempotent: true };
+        }
+        return { relation: this.store.create("knowledge_relation", relationId, { ...identity, identity_digest: valueDigest(identity) }), idempotent: false };
     }
     workLaunchPrepare(args) {
         const host = text(args.host, "host");

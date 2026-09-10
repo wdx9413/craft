@@ -14,7 +14,7 @@ const schemaFor = (name: string): JsonObject => {
     "capabilities", "observed_capabilities", "requirements", "output", "transform", "entity", "values", "budget_limits", "sandbox_requirements", "eval_suite_ref"].includes(name)) return { type: "object" };
   if (["completed", "pending", "decisions", "artifacts", "steps", "cases", "capabilities",
     "allowed_side_effects", "approved_side_effects", "nodes", "artifact_ids", "evidence_ids",
-    "trial_ids", "requirements", "grade_ids", "pattern_ids", "failure_modes", "receipt_ids", "criteria", "acceptance_criteria", "allowed_extensions", "fields", "capability_requirements", "object_schemas", "components", "action_contracts",
+    "trial_ids", "requirements", "grade_ids", "pattern_ids", "failure_modes", "receipt_ids", "criteria", "acceptance_criteria", "allowed_extensions", "fields", "capability_requirements", "object_schemas", "components", "action_contracts", "tags", "claim_ids", "evidence_ids",
     "allowed_operations", "allowed_effects", "require_approval_for", "operations", "subjects", "children", "trusted_hosts", "command_allowlist", "path_allowlist", "kinds", "effects", "allowed_kinds", "dependencies", "aliases", "artifact_ids", "final_artifact_ids", "evidence_ids", "output_contract", "trial_ids", "include_paths", "affected_paths", "object_ids", "depends_on", "source_paths", "applies_to", "patches", "snapshot_refs", "triggers", "allowed_hosts", "allowed_actions", "approval_required_actions", "detected_instructions", "citations", "allowed_fields", "argv", "sources", "budget_ids", "recovery_item_ids", "memory_kinds", "object_types", "required_memory_ids", "required_object_ids"].includes(name)) return { type: "array" };
   return { type: "string" };
 };
@@ -144,6 +144,15 @@ export const TOOLS: Tool[] = [
   tool("craft_verified_iteration_get", "Read a verification-driven iteration and its content-free attempt history.", ["iteration_id"], true),
   tool("craft_verified_iteration_assess", "Classify one independent acceptance assessment as pass, retry, block, or human handoff; only task failures can retry within budget.", ["iteration_id", "assessment_id", "classification"], false, ["attempt_id", "feedback"]),
   tool("craft_strategy_recommend", "Recommend a candidate strategy only from a comparable held-out evaluation; it never changes routing or executes work.", ["task_id", "comparison_id"], false, ["recommendation_id", "cost_metric"]),
+  tool("craft_knowledge_claim_save", "Save a candidate fact, rule, decision, term, or failure mode only with existing evidence; it is not automatically trusted or executable.", ["kind", "content", "evidence_ids"], false, ["claim_id", "scope", "tags", "valid_until"]),
+  tool("craft_knowledge_claim_get", "Read one exact evidence-backed knowledge claim.", ["claim_id"], true, ["version"]),
+  tool("craft_knowledge_claim_list", "List locally stored evidence-backed knowledge claims.", [], true, ["limit", "query"]),
+  tool("craft_knowledge_claim_review", "Explicitly review, dispute, supersede, or expire a candidate knowledge claim without deleting history.", ["claim_id", "status", "reviewer", "reason"], false),
+  tool("craft_wiki_page_save", "Save or revise an editable Wiki page whose referenced claims retain their evidence identity.", ["title", "body"], false, ["page_id", "scope", "claim_ids", "author"]),
+  tool("craft_wiki_page_get", "Read one exact Wiki page revision.", ["page_id"], true, ["version"]),
+  tool("craft_wiki_page_list", "List locally stored Wiki pages.", [], true, ["limit", "query"]),
+  tool("craft_wiki_page_refresh", "Record a human Markdown edit as a new Wiki page revision; it never infers trust from the edit.", ["page_id"], false),
+  tool("craft_knowledge_relation_save", "Create a typed support, contradiction, supersession, applicability, or dependency relation between two evidence-backed claims.", ["from_claim_id", "to_claim_id", "relation"], false, ["relation_id"]),
   tool("craft_domain_kit_save", "Save a versioned domain form, object, capability, sandbox, budget, evaluation, action, and acceptance contract without binding it to one Host.", ["name", "domain", "description", "fields", "criteria"], false, ["kit_id", "capability_requirements", "object_schemas", "components", "action_contracts", "budget_limits", "sandbox_requirements", "eval_suite_ref"]),
   tool("craft_domain_kit_get", "Read one exact Domain Kit version.", ["kit_id"], true, ["kit_version"]),
   tool("craft_domain_kit_list", "List locally installed Domain Kits.", [], true, ["limit"]),
@@ -668,6 +677,8 @@ export class McpServer {
       craft_verified_iteration_get: (a) => service.verifiedIterationGet(a),
       craft_verified_iteration_assess: (a) => service.verifiedIterationAssess(a),
       craft_strategy_recommend: (a) => service.strategyRecommend(a),
+      craft_knowledge_claim_save: (a) => service.knowledgeClaimSave(a), craft_knowledge_claim_get: (a) => service.knowledgeClaimGet(a), craft_knowledge_claim_list: (a) => service.knowledgeClaimList(a), craft_knowledge_claim_review: (a) => service.knowledgeClaimReview(a),
+      craft_wiki_page_save: (a) => service.wikiPageSave(a), craft_wiki_page_get: (a) => service.wikiPageGet(a), craft_wiki_page_list: (a) => service.wikiPageList(a), craft_wiki_page_refresh: (a) => service.wikiPageRefresh(a), craft_knowledge_relation_save: (a) => service.knowledgeRelationSave(a),
       craft_domain_kit_save: (a) => service.domainKitSave(a), craft_domain_kit_get: (a) => service.domainKitGet(a), craft_domain_kit_list: (a) => service.domainKitList(a),
       craft_domain_kit_install_builtins: () => service.domainKitInstallBuiltins(), craft_domain_kit_apply: (a) => service.domainKitApply(a),
       craft_domain_kit_settle: (a) => service.domainKitSettle(a),
