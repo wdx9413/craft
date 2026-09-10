@@ -1,6 +1,6 @@
 # Craft
 
-> 当前发布版本：v0.11.34。最新能力包括可复算的 Evidence Wiki Context Bundle、失败关闭的 Knowledge-bound Work Launch，以及知识质量评测门禁。
+> 当前发布版本：v0.11.35。最新能力包括可复算的 Evidence Wiki Context Bundle、失败关闭的 Knowledge-bound Work Launch，以及 Wiki 候选的 held-out/Signoff/人工发布授权证据链。
 
 [中文](README.md) | [English](README.en.md)
 

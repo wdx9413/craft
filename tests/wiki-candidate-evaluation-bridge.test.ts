@@ -1,0 +1,44 @@
+import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+import { McpServer } from "../src/mcp.ts";
+import { craftPaths } from "../src/paths.ts";
+import { CraftService, VERSION } from "../src/service.ts";
+import { CraftStore, type JsonObject } from "../src/store.ts";
+
+test("Wiki candidates require retrieval quality, held-out proof, Signoff, then explicit human publication authorization", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-wiki-bridge-")); const store = await new CraftStore(craftPaths(root)).open(); const service = new CraftService(store);
+  try {
+    const evidence = service.evidenceRecord({ evidence_id: "e", source_type: "program", claim: "Observed." });
+    const claim = (claimId: string) => service.knowledgeClaimSave({ claim_id: claimId, kind: "rule", content: `checked ${claimId} facts`, evidence_ids: [evidence.id] }).claim as JsonObject;
+    const a = claim("a"); const b = claim("b"); for (const item of [a, b]) service.knowledgeClaimReview({ claim_id: item.id, status: "reviewed", reviewer: "reviewer", reason: "checked" });
+    const candidate = service.wikiSkillCandidateCreate({ candidate_id: "candidate", title: "Checked helper", kind: "skill", claim_ids: [a.id, b.id], instructions: "Use checked facts.", applicability: "Only for checked facts.", fallback_condition: "Ask a human." }).candidate as JsonObject;
+    const ready = service.wikiSkillCandidateReview({ candidate_id: candidate.id, status: "ready_for_evaluation", reviewer: "reviewer", reason: "ready" }).candidate as JsonObject;
+    const case_ = service.knowledgeEvaluationCaseSave({ case_id: "knowledge-case", query: "checked facts", expected_claim_ids: [a.id, b.id] }).case as JsonObject;
+    const knowledge = service.knowledgeEvaluationRun({ run_id: "knowledge-run", case_ids: [case_.id], top_k: 2 }).run as JsonObject; assert.equal(knowledge.status, "eligible");
+    const task = service.taskOpen({ title: "Evaluate candidate", goal: "Verify a helper" }).task as JsonObject;
+    const suite = service.evaluationSuiteSave({ suite_id: "suite", name: "Candidate held-out", cases: [{ case_id: "held", split: "held_out" }] });
+    const trial = service.trialStart({ trial_id: "trial", task_id: task.id, case_id: "held", subject_type: "wiki_skill_candidate", subject_id: ready.id, subject_version: ready.version }); service.outcomeRecord({ trial_id: trial.id, verdict: "passed", summary: "Program checks passed." });
+    const evaluation = service.evaluationRunRecord({ run_id: "held-run", suite_id: suite.id, split: "held_out", subject_type: "wiki_skill_candidate", subject_id: ready.id, subject_version: ready.version, trial_ids: [trial.id] });
+    const policy = service.signoffPolicySave({ policy_id: "policy", name: "Held-out signoff", requirements: [] });
+    const signoff = service.signoffEvaluate({ signoff_id: "signoff", policy_id: policy.id, evaluation_run_id: evaluation.id }); assert.equal(signoff.decision, "passed");
+    const input = { candidate_id: ready.id, knowledge_evaluation_run_id: knowledge.id, evaluation_run_id: evaluation.id, signoff_id: signoff.id, attestation_id: "attestation" };
+    const attested = service.wikiSkillCandidateEvaluationAttest(input); const evaluated = attested.candidate as JsonObject; assert.equal(evaluated.status, "evaluation_passed"); assert.equal((attested.attestation as JsonObject).execution_authority, undefined); assert.equal((service.wikiSkillCandidateEvaluationAttest(input) as JsonObject).idempotent, true); assert.throws(() => service.wikiSkillCandidateEvaluationAttest({ ...input, evaluation_run_id: "other" }), /idempotency/);
+    const authorizationInput = { candidate_id: ready.id, attestation_id: "attestation", reviewer: "publisher", reason: "Release approved.", authorization_id: "authorization" };
+    const attestationRecord = store.get("wiki_candidate_evaluation_attestation", "attestation"); store.save("wiki_candidate_evaluation_attestation", "attestation", { ...attestationRecord, status: "failed" }); assert.throws(() => service.wikiSkillCandidatePublicationAuthorize(authorizationInput), /attestation drifted/); store.save("wiki_candidate_evaluation_attestation", "attestation", { ...attestationRecord });
+    const authorized = service.wikiSkillCandidatePublicationAuthorize(authorizationInput); assert.equal((authorized.candidate as JsonObject).status, "publication_authorized"); assert.equal((authorized.authorization as JsonObject).execution_authority, false); assert.equal((service.wikiSkillCandidatePublicationAuthorize(authorizationInput) as JsonObject).idempotent, true); assert.throws(() => service.wikiSkillCandidatePublicationAuthorize({ ...authorizationInput, reviewer: "other" }), /idempotency/);
+    const mcp = new McpServer(service, "full"); for (const [name, arguments_] of [["craft_wiki_skill_candidate_evaluation_attest", input], ["craft_wiki_skill_candidate_publication_authorize", authorizationInput]] as [string, JsonObject][]) { const result = await mcp.handle({ id: name, method: "tools/call", params: { name, arguments: arguments_ } }); assert.equal((result?.result as JsonObject).isError, false); }
+    const draft = service.wikiSkillCandidateCreate({ candidate_id: "draft", title: "Draft", kind: "workflow", claim_ids: [a.id, b.id], instructions: "Draft.", applicability: "When checked.", fallback_condition: "Ask." }).candidate as JsonObject;
+    store.create("wiki_skill_candidate", "bad-refs", { status: "ready_for_evaluation", claim_refs: [{ claim_id: a.id, claim_version: a.version }], identity_digest: "sha256:bad" });
+    assert.throws(() => service.wikiSkillCandidateEvaluationAttest({ ...input, candidate_id: "bad-refs", attestation_id: "bad-refs-attestation" }), /unique claim references/);
+    const refs = [a, b].map((claim) => { const current = service.knowledgeClaimGet({ claim_id: claim.id }).claim as JsonObject; return { claim_id: current.id, claim_version: current.version }; }); store.create("wiki_skill_candidate", "bad-claim", { status: "ready_for_evaluation", claim_refs: [{ claim_id: a.id, claim_version: 99 }, refs[1]], identity_digest: "sha256:bad-claim" }); assert.throws(() => service.wikiSkillCandidateEvaluationAttest({ ...input, candidate_id: "bad-claim", attestation_id: "bad-claim-attestation" }), /Claim drifted/);
+    store.create("wiki_skill_candidate", "bad-knowledge", { status: "ready_for_evaluation", claim_refs: refs, identity_digest: "sha256:bad-knowledge" }); const knowledgeRecord = store.get("knowledge_evaluation_run", String(knowledge.id)); store.save("knowledge_evaluation_run", String(knowledge.id), { ...knowledgeRecord, status: "insufficient" }); assert.throws(() => service.wikiSkillCandidateEvaluationAttest({ ...input, candidate_id: "bad-knowledge", attestation_id: "bad-knowledge-attestation" }), /leak-free knowledge evaluation/); store.save("knowledge_evaluation_run", String(knowledge.id), { ...knowledgeRecord });
+    store.create("wiki_skill_candidate", "bad-evaluation", { status: "ready_for_evaluation", claim_refs: refs, identity_digest: "sha256:bad-evaluation" }); assert.throws(() => service.wikiSkillCandidateEvaluationAttest({ ...input, candidate_id: "bad-evaluation", attestation_id: "bad-evaluation-attestation" }), /held-out evaluation/);
+    store.create("wiki_skill_candidate", "bad-signoff", { status: "ready_for_evaluation", claim_refs: refs, identity_digest: "sha256:bad-signoff" }); const signoffTrial = service.trialStart({ trial_id: "signoff-trial", task_id: task.id, case_id: "held", subject_type: "wiki_skill_candidate", subject_id: "bad-signoff", subject_version: 1 }); service.outcomeRecord({ trial_id: signoffTrial.id, verdict: "passed", summary: "passed" }); const signoffEvaluation = service.evaluationRunRecord({ run_id: "bad-signoff-run", suite_id: suite.id, split: "held_out", subject_type: "wiki_skill_candidate", subject_id: "bad-signoff", subject_version: 1, trial_ids: [signoffTrial.id] }); assert.throws(() => service.wikiSkillCandidateEvaluationAttest({ ...input, candidate_id: "bad-signoff", evaluation_run_id: signoffEvaluation.id, attestation_id: "bad-signoff-attestation" }), /Signoff/);
+    const { attestation_id: _attestationId, ...draftAttestation } = input; const { authorization_id: _authorizationId, ...draftAuthorization } = authorizationInput;
+    assert.throws(() => service.wikiSkillCandidateEvaluationAttest({ ...draftAttestation, candidate_id: draft.id }), /ready_for_evaluation/); assert.throws(() => service.wikiSkillCandidatePublicationAuthorize({ ...draftAuthorization, candidate_id: draft.id }), /passed evaluation/);
+    assert.equal(VERSION, "0.11.35");
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});

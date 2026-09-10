@@ -44,6 +44,7 @@
 - [受治理能力接入示例](governed-capability-intake.md)：从签名目录到非可执行候选的端到端路径，以及跨宿主边界。
 - [Knowledge-bound Work Launch](technical/modules/knowledge-bound-work-launch.md)：把受审核、可复算的 Wiki Context Bundle 固定到真实 Host 任务，并在变化时失败关闭。
 - [Knowledge Workbench](technical/modules/knowledge-workbench.md)：在本机 Workbench 中审阅 Claim、Markdown Wiki、Bundle、冲突、评测和知识绑定的工作启动。
+- [Wiki Candidate Evaluation Bridge](technical/modules/wiki-candidate-evaluation-bridge.md)：把知识候选的检索质量、held-out 评测、Signoff 和人工发布授权固定为独立且可复核的证据链。
 
 ## 研究证据
 

@@ -1,6 +1,6 @@
 import { CraftStore, type JsonObject } from "./store.ts";
 import { ServiceFoundation } from "./service-foundation.ts";
-export declare const VERSION = "0.11.34";
+export declare const VERSION = "0.11.35";
 export declare class CraftService extends ServiceFoundation {
     static open(store: CraftStore, hostOwnerId?: string): Promise<CraftService>;
     info(): JsonObject;
@@ -251,6 +251,10 @@ export declare class CraftService extends ServiceFoundation {
     wikiSkillCandidateGet(args: JsonObject): JsonObject;
     wikiSkillCandidateList(args: JsonObject): JsonObject;
     wikiSkillCandidateReview(args: JsonObject): JsonObject;
+    private wikiCandidateClaimsCurrent;
+    private wikiCandidateEvaluationProof;
+    wikiSkillCandidateEvaluationAttest(args: JsonObject): JsonObject;
+    wikiSkillCandidatePublicationAuthorize(args: JsonObject): JsonObject;
     knowledgeEvaluationCaseSave(args: JsonObject): JsonObject;
     knowledgeEvaluationCaseList(args: JsonObject): JsonObject;
     knowledgeEvaluationRun(args: JsonObject): JsonObject;

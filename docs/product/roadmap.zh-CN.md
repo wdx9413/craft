@@ -13,7 +13,7 @@
 
 ## 建设原则
 
-以 [产品架构](architecture.zh-CN.md) 的三大支柱为目标：工作与协作、执行与保障、学习与改进。**评测与实验是第三支柱内的核心模块**，不另设第四支柱。以下里程碑是规划；当前实现基线已推进到 v0.11.34。
+以 [产品架构](architecture.zh-CN.md) 的三大支柱为目标：工作与协作、执行与保障、学习与改进。**评测与实验是第三支柱内的核心模块**，不另设第四支柱。以下里程碑是规划；当前实现基线已推进到 v0.11.35。
 
 **两步定位**：短期做**跨宿主治理插件层**——以 MCP/插件形式接入 Codex CLI、Claude Code、DeepSeek Harness 等宿主，统一能力发现、授权门禁、证据链与评测门禁，执行留在宿主内；长期做**自主 Agent 平台**——自有对话循环、宿主调度与评测驱动的自我改进。Provider 是当前主线，Supervisor/Agent 是长期形态；本路线图中 v0.11.x 的能力全部属于两步共用的内核。
 
@@ -46,6 +46,8 @@
 **v0.11.33：Knowledge-bound Work Launch。** 指定精确 Wiki Context Bundle 后，启动与批准前均重验 Claim 版本、审核状态、有效期、scope、Evidence 和 context digest；只读有限知识进入 Host Prompt，Launch/Dispatch/Trial/Outcome 均保留血缘。变化时失败关闭。
 
 **v0.11.34：Knowledge Workbench。** 本机 Workbench 显示 Claim、可编辑 Markdown 页面、Bundle、冲突、评测、候选和知识绑定启动；可人工审核 Claim、刷新页面、预览 Bundle，并在一次 Work Launch 中选择 Bundle。UI 不替代服务端复核，知识漂移仍失败关闭。
+
+**v0.11.35：Wiki Candidate Evaluation Bridge。** Wiki Skill/Workflow 候选须先通过无泄漏的知识检索评测，再绑定其精确版本的 held-out Evaluation Run 与 passed Signoff。之后仍需人工单独授权“可发布”；授权只保存血缘与决定，不写入宿主文件、不自动发布或执行。
 
 - 面向各行业工作者，研发是首批验证场景，视频用于检验跨领域复用；后续扩展销售、教育与内容创作，不同时自建所有专业编辑器。
 - 先把真实工作从目标到成果跑通，同时提供可操作的最小界面；不长期只增加协议与配置。

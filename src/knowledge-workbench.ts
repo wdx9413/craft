@@ -47,7 +47,7 @@ export class KnowledgeWorkbenchKernel {
       pages: pages.slice(0, max).map((page) => pick(page, ["id", "version", "title", "scope", "claim_ids", "body_digest", "revision_source", "updated_at"])),
       bundles: bundles.slice(0, max).map((bundle) => pick(bundle, ["id", "version", "query", "scope", "max_items", "max_chars", "context_digest", "claim_refs", "excluded", "used_chars", "updated_at"])),
       conflicts: conflicts.slice(0, max),
-      candidates: candidates.slice(0, max).map((candidate) => pick(candidate, ["id", "version", "name", "status", "source_page_ids", "evaluation_run_ids", "review", "updated_at"])),
+      candidates: candidates.slice(0, max).map((candidate) => pick(candidate, ["id", "version", "title", "kind", "status", "claim_refs", "evaluation_attestation_id", "publication_authorization_id", "publication_allowed", "execution_authority", "review", "updated_at"])),
       evaluations: evaluations.slice(0, max).map((run) => pick(run, ["id", "version", "status", "suite_id", "split", "summary", "updated_at"])),
       knowledge_bound_launches: launches.slice(0, max),
     };
