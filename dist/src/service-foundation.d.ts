@@ -37,6 +37,7 @@ import { HostRunKernel } from "./host-run.ts";
 import { KnowledgeBoundLaunchKernel } from "./knowledge-bound-launch.ts";
 import { KnowledgeWorkbenchKernel } from "./knowledge-workbench.ts";
 import { WikiCandidateGovernanceKernel } from "./wiki-candidate-governance.ts";
+import { GuidedWorkKernel } from "./guided-work.ts";
 /**
  * Stable composition root for the service. Domain behavior stays in focused
  * kernels; CraftService is the backwards-compatible API facade.
@@ -80,6 +81,7 @@ export declare abstract class ServiceFoundation {
     readonly knowledgeLaunch: KnowledgeBoundLaunchKernel;
     readonly knowledgeWorkbench: KnowledgeWorkbenchKernel;
     readonly wikiCandidateGovernance: WikiCandidateGovernanceKernel;
+    readonly guidedWork: GuidedWorkKernel;
     constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter?: LocalIsolatedAdapter, dockerSandbox?: DockerSandboxAdapter, egressBroker?: TrustedEgressBroker, hostOwnerId?: string);
     protected abstract finalizeWorkLaunch(run: JsonObject, receipt: JsonObject | null): void;
 }

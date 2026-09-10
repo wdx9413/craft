@@ -101,6 +101,7 @@ Signoff ──authorizes──> Workflow or Configuration Promotion
 - [Managed Host Runs：后台运行、进度与取消](modules/managed-host-runs.md)
 - [Local Supervisor：单实例 Runner 与认证 IPC](modules/local-supervisor.md)
 - [Work Launch：从目标到受控运行](modules/work-launch.md)
+- [Guided Work：从用户目标到受控启动](modules/guided-work.md)
 - [领域验收计划：执行成功与业务正确分层](modules/acceptance-plan.md)
 - [领域验收执行器：版本化 Evaluator 与租约 Job](modules/acceptance-execution.md)
 - [Closed-loop Runtime](modules/closed-loop-runtime.md)

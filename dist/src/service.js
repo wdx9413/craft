@@ -15,7 +15,7 @@ import { decideExecution } from "./execution-policy.js";
 import { dockerRequestDigest } from "./docker-sandbox.js";
 import { egressRequestDigest } from "./egress.js";
 import { ServiceFoundation } from "./service-foundation.js";
-export const VERSION = "0.11.36";
+export const VERSION = "0.11.37";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -232,7 +232,7 @@ export class CraftService extends ServiceFoundation {
             "maintenance_status",
             "maintenance_tick",
             "maintenance_component", "maintenance_failure", "attention_item", "work_launch", "acceptance_plan", "acceptance_check", "acceptance_assessment", "acceptance_evaluator", "acceptance_evaluation_job", "verified_iteration", "iteration_attempt", "strategy_recommendation",
-            "trajectory_script_proposal", "verified_script_run", "knowledge_claim", "wiki_page", "knowledge_relation", "wiki_context_bundle", "wiki_skill_candidate", "knowledge_evaluation_case", "knowledge_evaluation_run", "wiki_candidate_evaluation_attestation", "wiki_candidate_publication_authorization", "wiki_candidate_publication_package"];
+            "trajectory_script_proposal", "verified_script_run", "knowledge_claim", "wiki_page", "knowledge_relation", "wiki_context_bundle", "wiki_skill_candidate", "knowledge_evaluation_case", "knowledge_evaluation_run", "wiki_candidate_evaluation_attestation", "wiki_candidate_publication_authorization", "wiki_candidate_publication_package", "guided_work_brief"];
         kinds.push("untrusted_content", "untrusted_extraction", "decision_projection");
         return { version: VERSION, data_root: this.store.paths.root,
             counts: Object.fromEntries(kinds.map((kind) => [kind, this.store.count(kind)])) };
@@ -2749,6 +2749,12 @@ export class CraftService extends ServiceFoundation {
     wikiSkillCandidatePublicationPackagePrepare(args) { return this.wikiCandidateGovernance.packagePrepare(args); }
     wikiSkillCandidatePublicationPackageGet(args) { return { package: this.store.get("wiki_candidate_publication_package", text(args.package_id, "package_id"), args.version === undefined ? undefined : finiteInteger(args.version, "version", 1)) }; }
     wikiSkillCandidatePublicationPackageList(args) { return this.list("wiki_candidate_publication_package", "packages", args); }
+    guidedWorkCreate(args) { const existing = args.brief_id === undefined ? null : this.store.find("guided_work_brief", text(args.brief_id, "brief_id")); const task = existing ? this.store.get("task", String(existing.task_id)) : this.taskOpen({ title: args.title, goal: args.goal, project_id: args.project_id ?? null }).task; if (existing && [task.title !== text(args.title, "title"), task.goal !== text(args.goal, "goal")].some(Boolean))
+        throw new Error("Guided work brief idempotency conflict"); return this.guidedWork.create({ ...args, task_id: task.id }); }
+    guidedWorkDecide(args) { return this.guidedWork.decide(args); }
+    guidedWorkGet(args) { return this.guidedWork.get(args); }
+    guidedWorkLaunchPrepare(args) { const brief = this.store.get("guided_work_brief", text(args.brief_id, "brief_id")); if (brief.status !== "ready_to_launch")
+        throw new Error("Guided work brief requires all decisions before launch"); const prepared = this.workLaunchPrepare({ ...args, task_id: brief.task_id }); const bound = this.guidedWork.bindLaunch({ brief_id: brief.id, launch_id: prepared.launch.id }); return { ...prepared, brief: bound.brief }; }
     knowledgeEvaluationCaseSave(args) {
         const query = assertNoSecret(text(args.query, "query"), "query");
         const scope = String(args.scope ?? "global");
