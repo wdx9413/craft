@@ -14332,7 +14332,7 @@ var HostRunKernel = class {
 };
 
 // src/service.ts
-var VERSION = "0.11.29";
+var VERSION = "0.11.30";
 var CONFIDENCE = /* @__PURE__ */ new Set(["confirmed", "bounded", "unverified", "rejected"]);
 var TASK_STATUS = /* @__PURE__ */ new Set(["active", "paused", "completed", "cancelled"]);
 var VERSIONED_LIFECYCLE = /* @__PURE__ */ new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -14742,7 +14742,8 @@ var CraftService = class _CraftService {
       "verified_script_run",
       "knowledge_claim",
       "wiki_page",
-      "knowledge_relation"
+      "knowledge_relation",
+      "wiki_context_bundle"
     ];
     kinds.push("untrusted_content", "untrusted_extraction", "decision_projection");
     return {
@@ -17938,6 +17939,70 @@ ${material}
     }
     return { relation: this.store.create("knowledge_relation", relationId, { ...identity, identity_digest: valueDigest(identity) }), idempotent: false };
   }
+  wikiContextCompile(args) {
+    const query = assertNoSecret(text30(args.query, "query"), "query");
+    const scope = String(args.scope ?? "global");
+    const maxItems = finiteInteger(args.max_items, "max_items", 8, 1, 50);
+    const maxChars = finiteInteger(args.max_chars, "max_chars", 6e3, 100, 1e5);
+    const now = args.now === void 0 ? Date.now() : validIsoTime(args.now, "now");
+    const terms = [...new Set(query.toLowerCase().match(/[\p{L}\p{N}_-]+/gu) ?? [])];
+    const excluded = [];
+    const matched = this.store.list("knowledge_claim", 1e4).flatMap((claim) => {
+      if (claim.status !== "reviewed") {
+        excluded.push({ claim_id: claim.id, reason: "not_reviewed" });
+        return [];
+      }
+      if (claim.valid_until && Date.parse(String(claim.valid_until)) < now) {
+        excluded.push({ claim_id: claim.id, reason: "expired" });
+        return [];
+      }
+      if (claim.scope !== "global" && claim.scope !== scope) {
+        excluded.push({ claim_id: claim.id, reason: "out_of_scope" });
+        return [];
+      }
+      const haystack = `${String(claim.content)} ${claim.tags.join(" ")}`.toLowerCase();
+      const score = terms.reduce((total, term) => total + Number(haystack.includes(term)), 0);
+      if (!score) {
+        excluded.push({ claim_id: claim.id, reason: "not_matched" });
+        return [];
+      }
+      return [{ claim, score }];
+    }).sort((left, right) => right.score - left.score || String(left.claim.id).localeCompare(String(right.claim.id)));
+    const included = [];
+    let usedChars = 0;
+    for (const item of matched) {
+      const content = assertNoSecret(text30(item.claim.content, "claim.content"), "claim.content");
+      const rendered = `[Knowledge ${item.claim.id}]
+${content}
+Evidence: ${item.claim.evidence_ids.join(", ")}
+`;
+      if (included.length >= maxItems || usedChars + rendered.length > maxChars) {
+        excluded.push({ claim_id: item.claim.id, reason: "budget" });
+        continue;
+      }
+      usedChars += rendered.length;
+      included.push({ claim_id: item.claim.id, claim_version: item.claim.version, content, evidence_ids: item.claim.evidence_ids, score: item.score, valid_until: item.claim.valid_until });
+    }
+    const context = included.map((item) => `[Knowledge ${item.claim_id}]
+${item.content}
+Evidence: ${item.evidence_ids.join(", ")}
+`).join("\n");
+    const bundleId = String(args.bundle_id ?? id9("wiki_context_bundle"));
+    const existing = this.store.find("wiki_context_bundle", bundleId);
+    const identity = { query, scope, max_items: maxItems, max_chars: maxChars, now: args.now ?? null };
+    if (existing) {
+      if (existing.identity_digest !== valueDigest(identity)) throw new Error("Wiki context bundle idempotency conflict");
+      return { bundle: existing, context, included, excluded, idempotent: true };
+    }
+    const bundle = this.store.create("wiki_context_bundle", bundleId, { ...identity, identity_digest: valueDigest(identity), context_digest: valueDigest(context), claim_refs: included.map((item) => ({ claim_id: item.claim_id, claim_version: item.claim_version })), excluded, used_chars: usedChars, semantic_retrieval: "disabled_by_default" });
+    return { bundle, context, included, excluded, idempotent: false };
+  }
+  wikiContextBundleGet(args) {
+    return { bundle: this.store.get("wiki_context_bundle", text30(args.bundle_id, "bundle_id"), args.version === void 0 ? void 0 : finiteInteger(args.version, "version", 1)) };
+  }
+  wikiContextBundleList(args) {
+    return this.list("wiki_context_bundle", "bundles", args);
+  }
   workLaunchPrepare(args) {
     const host = text30(args.host, "host");
     if (!(/* @__PURE__ */ new Set(["codex-cli", "claude-code"])).has(host)) throw new Error("Work launch host is unsupported");
@@ -19840,6 +19905,9 @@ var TOOLS = [
   tool("craft_wiki_page_list", "List locally stored Wiki pages.", [], true, ["limit", "query"]),
   tool("craft_wiki_page_refresh", "Record a human Markdown edit as a new Wiki page revision; it never infers trust from the edit.", ["page_id"], false),
   tool("craft_knowledge_relation_save", "Create a typed support, contradiction, supersession, applicability, or dependency relation between two evidence-backed claims.", ["from_claim_id", "to_claim_id", "relation"], false, ["relation_id"]),
+  tool("craft_wiki_context_compile", "Compile only reviewed, current, scope-matching evidence-backed claims into a bounded Agent context using deterministic keyword matching by default.", ["query"], true, ["bundle_id", "scope", "max_items", "max_chars", "now"]),
+  tool("craft_wiki_context_bundle_get", "Read a content-free Wiki context compilation receipt.", ["bundle_id"], true, ["version"]),
+  tool("craft_wiki_context_bundle_list", "List local Wiki context compilation receipts.", [], true, ["limit", "query"]),
   tool("craft_domain_kit_save", "Save a versioned domain form, object, capability, sandbox, budget, evaluation, action, and acceptance contract without binding it to one Host.", ["name", "domain", "description", "fields", "criteria"], false, ["kit_id", "capability_requirements", "object_schemas", "components", "action_contracts", "budget_limits", "sandbox_requirements", "eval_suite_ref"]),
   tool("craft_domain_kit_get", "Read one exact Domain Kit version.", ["kit_id"], true, ["kit_version"]),
   tool("craft_domain_kit_list", "List locally installed Domain Kits.", [], true, ["limit"]),
@@ -21016,6 +21084,9 @@ var McpServer = class {
       craft_wiki_page_list: (a) => service.wikiPageList(a),
       craft_wiki_page_refresh: (a) => service.wikiPageRefresh(a),
       craft_knowledge_relation_save: (a) => service.knowledgeRelationSave(a),
+      craft_wiki_context_compile: (a) => service.wikiContextCompile(a),
+      craft_wiki_context_bundle_get: (a) => service.wikiContextBundleGet(a),
+      craft_wiki_context_bundle_list: (a) => service.wikiContextBundleList(a),
       craft_domain_kit_save: (a) => service.domainKitSave(a),
       craft_domain_kit_get: (a) => service.domainKitGet(a),
       craft_domain_kit_list: (a) => service.domainKitList(a),

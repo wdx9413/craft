@@ -47,7 +47,7 @@ import { CodexHostKernel } from "./codex-driver.ts";
 import { ClaudeHostKernel } from "./claude-driver.ts";
 import { HostRunKernel } from "./host-run.ts";
 
-export const VERSION = "0.11.29";
+export const VERSION = "0.11.30";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -328,7 +328,7 @@ export class CraftService {
       "maintenance_status",
       "maintenance_tick",
       "maintenance_component", "maintenance_failure", "attention_item", "work_launch", "acceptance_plan", "acceptance_check", "acceptance_assessment", "acceptance_evaluator", "acceptance_evaluation_job", "verified_iteration", "iteration_attempt", "strategy_recommendation",
-      "trajectory_script_proposal", "verified_script_run", "knowledge_claim", "wiki_page", "knowledge_relation"];
+      "trajectory_script_proposal", "verified_script_run", "knowledge_claim", "wiki_page", "knowledge_relation", "wiki_context_bundle"];
     kinds.push("untrusted_content", "untrusted_extraction", "decision_projection");
     return { version: VERSION, data_root: this.store.paths.root,
       counts: Object.fromEntries(kinds.map((kind) => [kind, this.store.count(kind)])) };
@@ -2136,6 +2136,31 @@ export class CraftService {
     if (existing) { if (existing.identity_digest !== valueDigest(identity)) throw new Error("Knowledge relation idempotency conflict"); return { relation: existing, idempotent: true }; }
     return { relation: this.store.create("knowledge_relation", relationId, { ...identity, identity_digest: valueDigest(identity) }), idempotent: false };
   }
+  wikiContextCompile(args: JsonObject): JsonObject {
+    const query = assertNoSecret(text(args.query, "query"), "query"); const scope = String(args.scope ?? "global"); const maxItems = finiteInteger(args.max_items, "max_items", 8, 1, 50); const maxChars = finiteInteger(args.max_chars, "max_chars", 6_000, 100, 100_000);
+    const now = args.now === undefined ? Date.now() : validIsoTime(args.now, "now"); const terms = [...new Set(query.toLowerCase().match(/[\p{L}\p{N}_-]+/gu) ?? [])]; const excluded: JsonObject[] = [];
+    const matched = this.store.list("knowledge_claim", 10_000).flatMap((claim) => {
+      if (claim.status !== "reviewed") { excluded.push({ claim_id: claim.id, reason: "not_reviewed" }); return []; }
+      if (claim.valid_until && Date.parse(String(claim.valid_until)) < now) { excluded.push({ claim_id: claim.id, reason: "expired" }); return []; }
+      if (claim.scope !== "global" && claim.scope !== scope) { excluded.push({ claim_id: claim.id, reason: "out_of_scope" }); return []; }
+      const haystack = `${String(claim.content)} ${(claim.tags as string[]).join(" ")}`.toLowerCase(); const score = terms.reduce((total, term) => total + Number(haystack.includes(term)), 0);
+      if (!score) { excluded.push({ claim_id: claim.id, reason: "not_matched" }); return []; }
+      return [{ claim, score }];
+    }).sort((left, right) => right.score - left.score || String(left.claim.id).localeCompare(String(right.claim.id)));
+    const included: JsonObject[] = []; let usedChars = 0;
+    for (const item of matched) {
+      const content = assertNoSecret(text(item.claim.content, "claim.content"), "claim.content"); const rendered = `[Knowledge ${item.claim.id}]\n${content}\nEvidence: ${(item.claim.evidence_ids as string[]).join(", ")}\n`;
+      if (included.length >= maxItems || usedChars + rendered.length > maxChars) { excluded.push({ claim_id: item.claim.id, reason: "budget" }); continue; }
+      usedChars += rendered.length; included.push({ claim_id: item.claim.id, claim_version: item.claim.version, content, evidence_ids: item.claim.evidence_ids, score: item.score, valid_until: item.claim.valid_until });
+    }
+    const context = included.map((item) => `[Knowledge ${item.claim_id}]\n${item.content}\nEvidence: ${(item.evidence_ids as string[]).join(", ")}\n`).join("\n"); const bundleId = String(args.bundle_id ?? id("wiki_context_bundle")); const existing = this.store.find("wiki_context_bundle", bundleId);
+    const identity = { query, scope, max_items: maxItems, max_chars: maxChars, now: args.now ?? null };
+    if (existing) { if (existing.identity_digest !== valueDigest(identity)) throw new Error("Wiki context bundle idempotency conflict"); return { bundle: existing, context, included, excluded, idempotent: true }; }
+    const bundle = this.store.create("wiki_context_bundle", bundleId, { ...identity, identity_digest: valueDigest(identity), context_digest: valueDigest(context), claim_refs: included.map((item) => ({ claim_id: item.claim_id, claim_version: item.claim_version })), excluded, used_chars: usedChars, semantic_retrieval: "disabled_by_default" });
+    return { bundle, context, included, excluded, idempotent: false };
+  }
+  wikiContextBundleGet(args: JsonObject): JsonObject { return { bundle: this.store.get("wiki_context_bundle", text(args.bundle_id, "bundle_id"), args.version === undefined ? undefined : finiteInteger(args.version, "version", 1)) }; }
+  wikiContextBundleList(args: JsonObject): JsonObject { return this.list("wiki_context_bundle", "bundles", args); }
   workLaunchPrepare(args: JsonObject): JsonObject {
     const host = text(args.host, "host"); if (!new Set(["codex-cli", "claude-code"]).has(host)) throw new Error("Work launch host is unsupported");
     const sandbox = String(args.sandbox ?? "read-only"); if (!new Set(["read-only", "workspace-write"]).has(sandbox)) throw new Error("Work launch sandbox is unsupported");
