@@ -17,6 +17,6 @@ test("v0.11.28 installs cross-domain acceptance Kits without treating subjective
     const sales = service.domainKitGet({ kit_id: "builtin.sales-delivery" }) as JsonObject; assert.equal(sales.domain, "sales"); assert.equal(((sales.criteria as JsonObject[])[0].evaluator as JsonObject).path_field, "proposal_path");
     assert.equal((service.domainKitInstallBuiltins().kits as JsonObject[]).length, 4);
     const mcp = new McpServer(service, "full"); const result = await mcp.handle({ id: "kits", method: "tools/call", params: { name: "craft_domain_kit_list", arguments: {} } }); assert.equal(((result?.result as JsonObject).structuredContent as JsonObject).kits instanceof Array, true);
-    assert.equal(VERSION, "0.11.30");
+    assert.equal(VERSION, "0.11.31");
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });

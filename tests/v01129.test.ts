@@ -35,6 +35,6 @@ test("v0.11.29 keeps editable Wiki material separate from evidence-backed claim 
     for (const [name, arguments_] of [["craft_knowledge_claim_get", { claim_id: claim.id }], ["craft_knowledge_claim_list", {}], ["craft_knowledge_claim_review", { claim_id: claim.id, status: "disputed", reviewer: "human", reason: "newer source" }], ["craft_wiki_page_get", { page_id: page.id }], ["craft_wiki_page_list", {}], ["craft_wiki_page_refresh", { page_id: page.id }], ["craft_knowledge_relation_save", { from_claim_id: claim.id, to_claim_id: relation.to_claim_id, relation: "contradicts" }], ["craft_knowledge_claim_save", { kind: "term", content: "A named concept.", evidence_ids: [evidence.id] }], ["craft_wiki_page_save", { title: "MCP", body: "A page." }]] as [string, JsonObject][]) {
       const result = await mcp.handle({ id: name, method: "tools/call", params: { name, arguments: arguments_ } }); assert.equal((result?.result as JsonObject).isError, false);
     }
-    assert.equal(VERSION, "0.11.30");
+    assert.equal(VERSION, "0.11.31");
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });

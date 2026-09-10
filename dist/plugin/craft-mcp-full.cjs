@@ -14332,7 +14332,7 @@ var HostRunKernel = class {
 };
 
 // src/service.ts
-var VERSION = "0.11.30";
+var VERSION = "0.11.31";
 var CONFIDENCE = /* @__PURE__ */ new Set(["confirmed", "bounded", "unverified", "rejected"]);
 var TASK_STATUS = /* @__PURE__ */ new Set(["active", "paused", "completed", "cancelled"]);
 var VERSIONED_LIFECYCLE = /* @__PURE__ */ new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -14743,7 +14743,8 @@ var CraftService = class _CraftService {
       "knowledge_claim",
       "wiki_page",
       "knowledge_relation",
-      "wiki_context_bundle"
+      "wiki_context_bundle",
+      "wiki_skill_candidate"
     ];
     kinds.push("untrusted_content", "untrusted_extraction", "decision_projection");
     return {
@@ -18003,6 +18004,40 @@ Evidence: ${item.evidence_ids.join(", ")}
   wikiContextBundleList(args) {
     return this.list("wiki_context_bundle", "bundles", args);
   }
+  wikiSkillCandidateCreate(args) {
+    const title = assertNoSecret(text30(args.title, "title"), "title");
+    const kind = text30(args.kind, "kind");
+    if (!(/* @__PURE__ */ new Set(["skill", "workflow"])).has(kind)) throw new Error("Wiki capability candidate kind is unsupported");
+    const claimIds = uniqueTextArray(args.claim_ids, "claim_ids", 2);
+    const claims = claimIds.map((item) => this.store.get("knowledge_claim", item));
+    if (claims.some((item) => item.status !== "reviewed")) throw new Error("Wiki capability candidate requires reviewed claims");
+    const instructions = assertNoSecret(document(args.instructions, "instructions"), "instructions");
+    const applicability = assertNoSecret(document(args.applicability, "applicability"), "applicability");
+    const fallback = assertNoSecret(document(args.fallback_condition, "fallback_condition"), "fallback_condition");
+    const candidateId = String(args.candidate_id ?? id9("wiki_skill_candidate"));
+    const existing = this.store.find("wiki_skill_candidate", candidateId);
+    const identity = { title, kind, claim_ids: claimIds, instructions, applicability, fallback_condition: fallback };
+    if (existing) {
+      if (existing.identity_digest !== valueDigest(identity)) throw new Error("Wiki capability candidate idempotency conflict");
+      return { candidate: existing, idempotent: true };
+    }
+    const candidate = this.store.create("wiki_skill_candidate", candidateId, { ...identity, claim_refs: claims.map((item) => ({ claim_id: item.id, claim_version: item.version })), identity_digest: valueDigest(identity), status: "draft", evaluation_required: true, execution_authority: false });
+    return { candidate, idempotent: false };
+  }
+  wikiSkillCandidateGet(args) {
+    return { candidate: this.store.get("wiki_skill_candidate", text30(args.candidate_id, "candidate_id"), args.version === void 0 ? void 0 : finiteInteger(args.version, "version", 1)) };
+  }
+  wikiSkillCandidateList(args) {
+    return this.list("wiki_skill_candidate", "candidates", args);
+  }
+  wikiSkillCandidateReview(args) {
+    const candidate = this.store.get("wiki_skill_candidate", text30(args.candidate_id, "candidate_id"));
+    const status = text30(args.status, "status");
+    if (!(/* @__PURE__ */ new Set(["ready_for_evaluation", "rejected"])).has(status)) throw new Error("Wiki capability candidate review status is unsupported");
+    const reviewer = text30(args.reviewer, "reviewer");
+    const reason = assertNoSecret(document(args.reason, "reason"), "reason");
+    return { candidate: this.store.save("wiki_skill_candidate", String(candidate.id), { ...recordPayload5(candidate), status, review: { reviewer, reason_digest: valueDigest(reason), reviewed_at: (/* @__PURE__ */ new Date()).toISOString() } }) };
+  }
   workLaunchPrepare(args) {
     const host = text30(args.host, "host");
     if (!(/* @__PURE__ */ new Set(["codex-cli", "claude-code"])).has(host)) throw new Error("Work launch host is unsupported");
@@ -19908,6 +19943,10 @@ var TOOLS = [
   tool("craft_wiki_context_compile", "Compile only reviewed, current, scope-matching evidence-backed claims into a bounded Agent context using deterministic keyword matching by default.", ["query"], true, ["bundle_id", "scope", "max_items", "max_chars", "now"]),
   tool("craft_wiki_context_bundle_get", "Read a content-free Wiki context compilation receipt.", ["bundle_id"], true, ["version"]),
   tool("craft_wiki_context_bundle_list", "List local Wiki context compilation receipts.", [], true, ["limit", "query"]),
+  tool("craft_wiki_skill_candidate_create", "Create a proposal-only Skill or Workflow candidate from at least two reviewed knowledge claims; it cannot publish or execute.", ["title", "kind", "claim_ids", "instructions", "applicability", "fallback_condition"], false, ["candidate_id"]),
+  tool("craft_wiki_skill_candidate_get", "Read one exact Wiki-derived capability candidate.", ["candidate_id"], true, ["version"]),
+  tool("craft_wiki_skill_candidate_list", "List local Wiki-derived capability candidates.", [], true, ["limit", "query"]),
+  tool("craft_wiki_skill_candidate_review", "Mark a Wiki-derived candidate ready for independent evaluation or reject it; neither choice publishes it.", ["candidate_id", "status", "reviewer", "reason"], false),
   tool("craft_domain_kit_save", "Save a versioned domain form, object, capability, sandbox, budget, evaluation, action, and acceptance contract without binding it to one Host.", ["name", "domain", "description", "fields", "criteria"], false, ["kit_id", "capability_requirements", "object_schemas", "components", "action_contracts", "budget_limits", "sandbox_requirements", "eval_suite_ref"]),
   tool("craft_domain_kit_get", "Read one exact Domain Kit version.", ["kit_id"], true, ["kit_version"]),
   tool("craft_domain_kit_list", "List locally installed Domain Kits.", [], true, ["limit"]),
@@ -21087,6 +21126,10 @@ var McpServer = class {
       craft_wiki_context_compile: (a) => service.wikiContextCompile(a),
       craft_wiki_context_bundle_get: (a) => service.wikiContextBundleGet(a),
       craft_wiki_context_bundle_list: (a) => service.wikiContextBundleList(a),
+      craft_wiki_skill_candidate_create: (a) => service.wikiSkillCandidateCreate(a),
+      craft_wiki_skill_candidate_get: (a) => service.wikiSkillCandidateGet(a),
+      craft_wiki_skill_candidate_list: (a) => service.wikiSkillCandidateList(a),
+      craft_wiki_skill_candidate_review: (a) => service.wikiSkillCandidateReview(a),
       craft_domain_kit_save: (a) => service.domainKitSave(a),
       craft_domain_kit_get: (a) => service.domainKitGet(a),
       craft_domain_kit_list: (a) => service.domainKitList(a),

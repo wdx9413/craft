@@ -34,7 +34,7 @@ import { HomeKernel } from "./home.ts";
 import { CodexHostKernel } from "./codex-driver.ts";
 import { ClaudeHostKernel } from "./claude-driver.ts";
 import { HostRunKernel } from "./host-run.ts";
-export declare const VERSION = "0.11.30";
+export declare const VERSION = "0.11.31";
 export declare class CraftService {
     readonly store: CraftStore;
     readonly catalog: Catalog;
@@ -304,6 +304,10 @@ export declare class CraftService {
     wikiContextCompile(args: JsonObject): JsonObject;
     wikiContextBundleGet(args: JsonObject): JsonObject;
     wikiContextBundleList(args: JsonObject): JsonObject;
+    wikiSkillCandidateCreate(args: JsonObject): JsonObject;
+    wikiSkillCandidateGet(args: JsonObject): JsonObject;
+    wikiSkillCandidateList(args: JsonObject): JsonObject;
+    wikiSkillCandidateReview(args: JsonObject): JsonObject;
     workLaunchPrepare(args: JsonObject): JsonObject;
     workLaunchDecide(args: JsonObject): JsonObject;
     workLaunchGet(args: JsonObject): JsonObject;

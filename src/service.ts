@@ -47,7 +47,7 @@ import { CodexHostKernel } from "./codex-driver.ts";
 import { ClaudeHostKernel } from "./claude-driver.ts";
 import { HostRunKernel } from "./host-run.ts";
 
-export const VERSION = "0.11.30";
+export const VERSION = "0.11.31";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -328,7 +328,7 @@ export class CraftService {
       "maintenance_status",
       "maintenance_tick",
       "maintenance_component", "maintenance_failure", "attention_item", "work_launch", "acceptance_plan", "acceptance_check", "acceptance_assessment", "acceptance_evaluator", "acceptance_evaluation_job", "verified_iteration", "iteration_attempt", "strategy_recommendation",
-      "trajectory_script_proposal", "verified_script_run", "knowledge_claim", "wiki_page", "knowledge_relation", "wiki_context_bundle"];
+      "trajectory_script_proposal", "verified_script_run", "knowledge_claim", "wiki_page", "knowledge_relation", "wiki_context_bundle", "wiki_skill_candidate"];
     kinds.push("untrusted_content", "untrusted_extraction", "decision_projection");
     return { version: VERSION, data_root: this.store.paths.root,
       counts: Object.fromEntries(kinds.map((kind) => [kind, this.store.count(kind)])) };
@@ -2161,6 +2161,21 @@ export class CraftService {
   }
   wikiContextBundleGet(args: JsonObject): JsonObject { return { bundle: this.store.get("wiki_context_bundle", text(args.bundle_id, "bundle_id"), args.version === undefined ? undefined : finiteInteger(args.version, "version", 1)) }; }
   wikiContextBundleList(args: JsonObject): JsonObject { return this.list("wiki_context_bundle", "bundles", args); }
+  wikiSkillCandidateCreate(args: JsonObject): JsonObject {
+    const title = assertNoSecret(text(args.title, "title"), "title"); const kind = text(args.kind, "kind"); if (!new Set(["skill", "workflow"]).has(kind)) throw new Error("Wiki capability candidate kind is unsupported");
+    const claimIds = uniqueTextArray(args.claim_ids, "claim_ids", 2); const claims = claimIds.map((item) => this.store.get("knowledge_claim", item)); if (claims.some((item) => item.status !== "reviewed")) throw new Error("Wiki capability candidate requires reviewed claims");
+    const instructions = assertNoSecret(document(args.instructions, "instructions"), "instructions"); const applicability = assertNoSecret(document(args.applicability, "applicability"), "applicability"); const fallback = assertNoSecret(document(args.fallback_condition, "fallback_condition"), "fallback_condition");
+    const candidateId = String(args.candidate_id ?? id("wiki_skill_candidate")); const existing = this.store.find("wiki_skill_candidate", candidateId); const identity = { title, kind, claim_ids: claimIds, instructions, applicability, fallback_condition: fallback };
+    if (existing) { if (existing.identity_digest !== valueDigest(identity)) throw new Error("Wiki capability candidate idempotency conflict"); return { candidate: existing, idempotent: true }; }
+    const candidate = this.store.create("wiki_skill_candidate", candidateId, { ...identity, claim_refs: claims.map((item) => ({ claim_id: item.id, claim_version: item.version })), identity_digest: valueDigest(identity), status: "draft", evaluation_required: true, execution_authority: false });
+    return { candidate, idempotent: false };
+  }
+  wikiSkillCandidateGet(args: JsonObject): JsonObject { return { candidate: this.store.get("wiki_skill_candidate", text(args.candidate_id, "candidate_id"), args.version === undefined ? undefined : finiteInteger(args.version, "version", 1)) }; }
+  wikiSkillCandidateList(args: JsonObject): JsonObject { return this.list("wiki_skill_candidate", "candidates", args); }
+  wikiSkillCandidateReview(args: JsonObject): JsonObject {
+    const candidate = this.store.get("wiki_skill_candidate", text(args.candidate_id, "candidate_id")); const status = text(args.status, "status"); if (!new Set(["ready_for_evaluation", "rejected"]).has(status)) throw new Error("Wiki capability candidate review status is unsupported");
+    const reviewer = text(args.reviewer, "reviewer"); const reason = assertNoSecret(document(args.reason, "reason"), "reason"); return { candidate: this.store.save("wiki_skill_candidate", String(candidate.id), { ...recordPayload(candidate), status, review: { reviewer, reason_digest: valueDigest(reason), reviewed_at: new Date().toISOString() } }) };
+  }
   workLaunchPrepare(args: JsonObject): JsonObject {
     const host = text(args.host, "host"); if (!new Set(["codex-cli", "claude-code"]).has(host)) throw new Error("Work launch host is unsupported");
     const sandbox = String(args.sandbox ?? "read-only"); if (!new Set(["read-only", "workspace-write"]).has(sandbox)) throw new Error("Work launch sandbox is unsupported");
