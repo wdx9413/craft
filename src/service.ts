@@ -17,7 +17,7 @@ import { dockerRequestDigest } from "./docker-sandbox.ts";
 import { egressRequestDigest } from "./egress.ts";
 import { ServiceFoundation } from "./service-foundation.ts";
 
-export const VERSION = "0.11.39";
+export const VERSION = "0.11.40";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -2156,6 +2156,9 @@ export class CraftService extends ServiceFoundation {
   safetyWorkLaunchDecide(args: JsonObject): JsonObject { const launch = this.store.get("work_launch", text(args.launch_id, "launch_id")); const binding = object(launch.safety_preflight, "Work Launch safety preflight"); const checked = this.executionSafety.validate({ preflight_id: binding.preflight_id, version: binding.preflight_version }); const dispatch = this.store.get(launch.host === "codex-cli" ? "codex_dispatch" : "claude_dispatch", String(launch.dispatch_id)); const contract = { timeout_ms: dispatch.timeout_ms, output_limit: dispatch.output_limit, max_turns: launch.host === "claude-code" ? dispatch.max_turns : null, max_budget_usd: launch.host === "claude-code" ? dispatch.max_budget_usd : null }; if (valueDigest(contract) !== valueDigest((checked.preflight as JsonObject).resources)) throw new Error("Safety preflight resource contract does not match Work Launch dispatch"); return this.workLaunchDecide(args); }
   wikiCandidateLocalImport(args: JsonObject): Promise<JsonObject> { return this.localCandidateImport.import(args); }
   wikiCandidateLocalImportGet(args: JsonObject): JsonObject { return this.localCandidateImport.get(args); }
+  a2aAgentCardDiscover(args: JsonObject): Promise<JsonObject> { return this.a2aDiscovery.discover(args); }
+  a2aAgentCardGet(args: JsonObject): JsonObject { return this.a2aDiscovery.get(args); }
+  a2aAgentCardList(args: JsonObject): JsonObject { return this.a2aDiscovery.list(args); }
   knowledgeEvaluationCaseSave(args: JsonObject): JsonObject {
     const query = assertNoSecret(text(args.query, "query"), "query"); const scope = String(args.scope ?? "global"); const expected = uniqueTextArray(args.expected_claim_ids, "expected_claim_ids"); expected.forEach((item) => this.store.get("knowledge_claim", item));
     const caseId = String(args.case_id ?? id("knowledge_evaluation_case")); const existing = this.store.find("knowledge_evaluation_case", caseId); const identity = { query, scope, expected_claim_ids: expected };

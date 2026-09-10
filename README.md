@@ -1,6 +1,6 @@
 # Craft
 
-> 当前发布版本：v0.11.39。最新能力包括可复算的 Evidence Wiki Context Bundle、失败关闭的 Knowledge-bound Work Launch，以及可人工导入、带完整评测血缘的跨宿主 Wiki 候选交付包。
+> 当前发布版本：v0.11.40。最新能力包括可复算的 Evidence Wiki Context Bundle、失败关闭的 Knowledge-bound Work Launch，以及可人工导入、带完整评测血缘的跨宿主 Wiki 候选交付包。
 
 [中文](README.md) | [English](README.en.md)
 

@@ -15,7 +15,7 @@ import { decideExecution } from "./execution-policy.js";
 import { dockerRequestDigest } from "./docker-sandbox.js";
 import { egressRequestDigest } from "./egress.js";
 import { ServiceFoundation } from "./service-foundation.js";
-export const VERSION = "0.11.39";
+export const VERSION = "0.11.40";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -2762,6 +2762,9 @@ export class CraftService extends ServiceFoundation {
         throw new Error("Safety preflight resource contract does not match Work Launch dispatch"); return this.workLaunchDecide(args); }
     wikiCandidateLocalImport(args) { return this.localCandidateImport.import(args); }
     wikiCandidateLocalImportGet(args) { return this.localCandidateImport.get(args); }
+    a2aAgentCardDiscover(args) { return this.a2aDiscovery.discover(args); }
+    a2aAgentCardGet(args) { return this.a2aDiscovery.get(args); }
+    a2aAgentCardList(args) { return this.a2aDiscovery.list(args); }
     knowledgeEvaluationCaseSave(args) {
         const query = assertNoSecret(text(args.query, "query"), "query");
         const scope = String(args.scope ?? "global");
