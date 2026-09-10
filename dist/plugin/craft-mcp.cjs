@@ -14332,7 +14332,7 @@ var HostRunKernel = class {
 };
 
 // src/service.ts
-var VERSION = "0.11.24";
+var VERSION = "0.11.25";
 var CONFIDENCE = /* @__PURE__ */ new Set(["confirmed", "bounded", "unverified", "rejected"]);
 var TASK_STATUS = /* @__PURE__ */ new Set(["active", "paused", "completed", "cancelled"]);
 var VERSIONED_LIFECYCLE = /* @__PURE__ */ new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -14732,6 +14732,8 @@ var CraftService = class _CraftService {
       "acceptance_assessment",
       "acceptance_evaluator",
       "acceptance_evaluation_job",
+      "verified_iteration",
+      "iteration_attempt",
       "trajectory_script_proposal",
       "verified_script_run"
     ];
@@ -17750,6 +17752,63 @@ ${material}
     const outcome = this.outcomeRecord({ trial_id: plan.trial_id, verdict: status === "passed" ? "passed" : status === "blocked" ? "blocked" : "failed", summary: `Business acceptance ${status}.`, failure_type: status === "passed" ? void 0 : `acceptance_${status}`, scores: { required_pass_rate: required2.length ? (required2.length - failed.length - blocked.length) / required2.length : 1 }, costs: {}, evidence_ids: evidenceIds, source: "multi_method_acceptance" });
     return { assessment, outcome };
   }
+  verifiedIterationCreate(args) {
+    const task = this.store.get("task", text30(args.task_id, "task_id"));
+    const launch = this.store.get("work_launch", text30(args.launch_id, "launch_id"));
+    const plan = this.store.get("acceptance_plan", text30(args.acceptance_plan_id, "acceptance_plan_id"));
+    if (launch.task_id !== task.id || plan.task_id !== task.id || plan.launch_id !== launch.id) throw new Error("Verified iteration bindings must belong to the same Task and Work Launch");
+    const maxAttempts = finiteInteger(args.max_attempts, "max_attempts", 3, 1, 20);
+    const allowedPaths = optionalTextArray(args.allowed_paths, "allowed_paths", ["."]);
+    if (allowedPaths.some((path2) => !policyAllowsPath(path2, ["."]))) throw new Error("allowed_paths must be relative workspace paths");
+    const iterationId = String(args.iteration_id ?? id9("verified_iteration"));
+    const existing = this.store.find("verified_iteration", iterationId);
+    const identity = { task_id: task.id, launch_id: launch.id, acceptance_plan_id: plan.id, max_attempts: maxAttempts, allowed_paths: allowedPaths };
+    if (existing) {
+      if (existing.identity_digest !== valueDigest(identity)) throw new Error("Verified iteration idempotency conflict");
+      return { iteration: existing, idempotent: true };
+    }
+    const iteration = this.store.create("verified_iteration", iterationId, { ...identity, identity_digest: valueDigest(identity), status: "active", attempts_started: 0, last_assessment_id: null, terminal_reason: null });
+    return { iteration, idempotent: false };
+  }
+  verifiedIterationGet(args) {
+    const iteration = this.store.get("verified_iteration", text30(args.iteration_id, "iteration_id"));
+    return { iteration, attempts: this.store.list("iteration_attempt", 1e4, (item) => item.iteration_id === iteration.id) };
+  }
+  verifiedIterationAssess(args) {
+    const iteration = this.store.get("verified_iteration", text30(args.iteration_id, "iteration_id"));
+    if (iteration.status !== "active") return { iteration, action: "terminal", idempotent: true };
+    const assessment = this.store.get("acceptance_assessment", text30(args.assessment_id, "assessment_id"));
+    const plan = this.store.get("acceptance_plan", String(iteration.acceptance_plan_id));
+    if (assessment.plan_id !== plan.id) throw new Error("Acceptance assessment does not belong to this verified iteration");
+    const classification = text30(args.classification, "classification");
+    if (!(/* @__PURE__ */ new Set(["task_failure", "verification_configuration", "environment", "scope_violation", "no_progress"])).has(classification)) throw new Error("Verified iteration classification is unsupported");
+    const attemptNo = Number(iteration.attempts_started) + 1;
+    const feedback = assertNoSecret(document(args.feedback ?? `Acceptance ${assessment.status}.`, "feedback"), "feedback");
+    const attempt = this.store.create("iteration_attempt", String(args.attempt_id ?? id9("iteration_attempt")), { iteration_id: iteration.id, number: attemptNo, assessment_id: assessment.id, assessment_status: assessment.status, classification, feedback_digest: valueDigest(feedback), raw_feedback_stored: false });
+    let status = "active";
+    let action = "retry";
+    let terminalReason = null;
+    if (assessment.status === "passed") {
+      status = "passed";
+      action = "passed";
+      terminalReason = "acceptance_passed";
+    } else if (classification === "verification_configuration" || classification === "environment") {
+      status = "blocked";
+      action = "handoff";
+      terminalReason = classification;
+    } else if (classification === "scope_violation" || classification === "no_progress") {
+      status = "unresolved";
+      action = "handoff";
+      terminalReason = classification;
+    } else if (attemptNo >= Number(iteration.max_attempts)) {
+      status = "unresolved";
+      action = "handoff";
+      terminalReason = "attempt_budget_exhausted";
+    }
+    const saved = this.store.save("verified_iteration", String(iteration.id), { ...recordPayload5(iteration), status, attempts_started: attemptNo, last_assessment_id: assessment.id, terminal_reason: terminalReason });
+    const next = action === "retry" ? { action: "retry", prompt_feedback: feedback, remaining_attempts: Number(saved.max_attempts) - attemptNo, allowed_paths: saved.allowed_paths } : { action, reason: terminalReason };
+    return { iteration: saved, attempt, next, idempotent: false };
+  }
   workLaunchPrepare(args) {
     const host = text30(args.host, "host");
     if (!(/* @__PURE__ */ new Set(["codex-cli", "claude-code"])).has(host)) throw new Error("Work launch host is unsupported");
@@ -19634,6 +19693,9 @@ var TOOLS = [
   tool("craft_acceptance_evaluation_recover", "Return expired evaluation leases to ready state or mark retry-exhausted jobs for operator attention.", [], false, ["now", "limit"]),
   tool("craft_acceptance_evaluation_report", "Submit an evidence-backed adapter receipt for one exact leased acceptance job.", ["job_id", "lease_id", "adapter_id", "result", "summary"], false, ["receipt"]),
   tool("craft_acceptance_assess", "Aggregate required acceptance checks without treating Host success as business success.", ["plan_id"]),
+  tool("craft_verified_iteration_create", "Bind a bounded verification-driven iteration to one exact Work Launch and independent acceptance plan; it grants no additional write authority.", ["task_id", "launch_id", "acceptance_plan_id"], false, ["iteration_id", "max_attempts", "allowed_paths"]),
+  tool("craft_verified_iteration_get", "Read a verification-driven iteration and its content-free attempt history.", ["iteration_id"], true),
+  tool("craft_verified_iteration_assess", "Classify one independent acceptance assessment as pass, retry, block, or human handoff; only task failures can retry within budget.", ["iteration_id", "assessment_id", "classification"], false, ["attempt_id", "feedback"]),
   tool("craft_domain_kit_save", "Save a versioned domain form, object, capability, sandbox, budget, evaluation, action, and acceptance contract without binding it to one Host.", ["name", "domain", "description", "fields", "criteria"], false, ["kit_id", "capability_requirements", "object_schemas", "components", "action_contracts", "budget_limits", "sandbox_requirements", "eval_suite_ref"]),
   tool("craft_domain_kit_get", "Read one exact Domain Kit version.", ["kit_id"], true, ["kit_version"]),
   tool("craft_domain_kit_list", "List locally installed Domain Kits.", [], true, ["limit"]),
@@ -20795,6 +20857,9 @@ var McpServer = class {
       craft_acceptance_evaluation_recover: (a) => service.acceptanceEvaluationRecover(a),
       craft_acceptance_evaluation_report: (a) => service.acceptanceEvaluationReport(a),
       craft_acceptance_assess: (a) => service.acceptanceAssess(a),
+      craft_verified_iteration_create: (a) => service.verifiedIterationCreate(a),
+      craft_verified_iteration_get: (a) => service.verifiedIterationGet(a),
+      craft_verified_iteration_assess: (a) => service.verifiedIterationAssess(a),
       craft_domain_kit_save: (a) => service.domainKitSave(a),
       craft_domain_kit_get: (a) => service.domainKitGet(a),
       craft_domain_kit_list: (a) => service.domainKitList(a),

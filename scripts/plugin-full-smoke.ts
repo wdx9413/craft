@@ -19,7 +19,7 @@ try {
   await Promise.race([once(child.stdout, "data"), new Promise<never>((_, reject) => setTimeout(() => reject(new Error(errors || "Full MCP smoke test timed out")), 5_000))]);
   await new Promise((resolveOutput) => setTimeout(resolveOutput, 25));
   const responses = output.trim().split(/\r?\n/).map((line) => JSON.parse(line));
-  assert.equal(responses[0].result.serverInfo.version, "0.11.24");
+  assert.equal(responses[0].result.serverInfo.version, "0.11.25");
   assert((responses[1].result.tools as Array<{ name: string }>).some((tool) => tool.name === "craft_skill_proposal_publish"));
   console.log("Bundled full MCP starts and retains legacy tools.");
 } finally {

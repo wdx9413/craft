@@ -47,7 +47,7 @@ import { CodexHostKernel } from "./codex-driver.ts";
 import { ClaudeHostKernel } from "./claude-driver.ts";
 import { HostRunKernel } from "./host-run.ts";
 
-export const VERSION = "0.11.24";
+export const VERSION = "0.11.25";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -324,7 +324,7 @@ export class CraftService {
       "supply_chain_advisory",
       "maintenance_status",
       "maintenance_tick",
-      "maintenance_component", "maintenance_failure", "attention_item", "work_launch", "acceptance_plan", "acceptance_check", "acceptance_assessment", "acceptance_evaluator", "acceptance_evaluation_job",
+      "maintenance_component", "maintenance_failure", "attention_item", "work_launch", "acceptance_plan", "acceptance_check", "acceptance_assessment", "acceptance_evaluator", "acceptance_evaluation_job", "verified_iteration", "iteration_attempt",
       "trajectory_script_proposal", "verified_script_run"];
     kinds.push("untrusted_content", "untrusted_extraction", "decision_projection");
     return { version: VERSION, data_root: this.store.paths.root,
@@ -2015,6 +2015,44 @@ export class CraftService {
     const plan = this.store.get("acceptance_plan", text(args.plan_id, "plan_id")); const latest = new Map<string, JsonObject>(); for (const check of this.store.list("acceptance_check", 10_000, (item) => item.plan_id === plan.id && item.plan_version === plan.version)) if (!latest.has(String(check.criterion_id))) latest.set(String(check.criterion_id), check); const criteria = plan.criteria as JsonObject[]; const required = criteria.filter((item) => item.required === true); const missing = required.filter((item) => !latest.has(String(item.id))).map((item) => item.id); const failed = required.filter((item) => latest.get(String(item.id))?.result === "failed").map((item) => item.id); const blocked = required.filter((item) => latest.get(String(item.id))?.result === "blocked").map((item) => item.id); const status = missing.length ? "pending" : failed.length ? "failed" : blocked.length ? "blocked" : "passed"; const assessment = this.store.save("acceptance_assessment", `assessment_${plan.id}`, { plan_id: plan.id, plan_version: plan.version, task_id: plan.task_id, launch_id: plan.launch_id, status, missing, failed, blocked, checked: latest.size, total: criteria.length }); if (status === "pending") return { assessment, outcome: null };
     const evidenceIds = [...new Set([...latest.values()].flatMap((item) => item.evidence_ids as string[]))]; const existing = this.store.find("outcome", `outcome_${plan.trial_id}`); if (existing) return { assessment, outcome: existing };
     this.trialTraceAppend({ trial_id: plan.trial_id, event_type: `acceptance.${status}`, source: "craft_runtime", data: { assessment_id: assessment.id, checked: latest.size, total: criteria.length }, evidence_ids: evidenceIds }); const outcome = this.outcomeRecord({ trial_id: plan.trial_id, verdict: status === "passed" ? "passed" : status === "blocked" ? "blocked" : "failed", summary: `Business acceptance ${status}.`, failure_type: status === "passed" ? undefined : `acceptance_${status}`, scores: { required_pass_rate: required.length ? (required.length - failed.length - blocked.length) / required.length : 1 }, costs: {}, evidence_ids: evidenceIds, source: "multi_method_acceptance" }); return { assessment, outcome };
+  }
+  verifiedIterationCreate(args: JsonObject): JsonObject {
+    const task = this.store.get("task", text(args.task_id, "task_id"));
+    const launch = this.store.get("work_launch", text(args.launch_id, "launch_id"));
+    const plan = this.store.get("acceptance_plan", text(args.acceptance_plan_id, "acceptance_plan_id"));
+    if (launch.task_id !== task.id || plan.task_id !== task.id || plan.launch_id !== launch.id) throw new Error("Verified iteration bindings must belong to the same Task and Work Launch");
+    const maxAttempts = finiteInteger(args.max_attempts, "max_attempts", 3, 1, 20);
+    const allowedPaths = optionalTextArray(args.allowed_paths, "allowed_paths", ["."]);
+    if (allowedPaths.some((path) => !policyAllowsPath(path, ["."]))) throw new Error("allowed_paths must be relative workspace paths");
+    const iterationId = String(args.iteration_id ?? id("verified_iteration")); const existing = this.store.find("verified_iteration", iterationId);
+    const identity = { task_id: task.id, launch_id: launch.id, acceptance_plan_id: plan.id, max_attempts: maxAttempts, allowed_paths: allowedPaths };
+    if (existing) { if (existing.identity_digest !== valueDigest(identity)) throw new Error("Verified iteration idempotency conflict"); return { iteration: existing, idempotent: true }; }
+    const iteration = this.store.create("verified_iteration", iterationId, { ...identity, identity_digest: valueDigest(identity), status: "active", attempts_started: 0, last_assessment_id: null, terminal_reason: null });
+    return { iteration, idempotent: false };
+  }
+  verifiedIterationGet(args: JsonObject): JsonObject {
+    const iteration = this.store.get("verified_iteration", text(args.iteration_id, "iteration_id"));
+    return { iteration, attempts: this.store.list("iteration_attempt", 10_000, (item) => item.iteration_id === iteration.id) };
+  }
+  verifiedIterationAssess(args: JsonObject): JsonObject {
+    const iteration = this.store.get("verified_iteration", text(args.iteration_id, "iteration_id"));
+    if (iteration.status !== "active") return { iteration, action: "terminal", idempotent: true };
+    const assessment = this.store.get("acceptance_assessment", text(args.assessment_id, "assessment_id"));
+    const plan = this.store.get("acceptance_plan", String(iteration.acceptance_plan_id));
+    if (assessment.plan_id !== plan.id) throw new Error("Acceptance assessment does not belong to this verified iteration");
+    const classification = text(args.classification, "classification");
+    if (!new Set(["task_failure", "verification_configuration", "environment", "scope_violation", "no_progress"]).has(classification)) throw new Error("Verified iteration classification is unsupported");
+    const attemptNo = Number(iteration.attempts_started) + 1;
+    const feedback = assertNoSecret(document(args.feedback ?? `Acceptance ${assessment.status}.`, "feedback"), "feedback");
+    const attempt = this.store.create("iteration_attempt", String(args.attempt_id ?? id("iteration_attempt")), { iteration_id: iteration.id, number: attemptNo, assessment_id: assessment.id, assessment_status: assessment.status, classification, feedback_digest: valueDigest(feedback), raw_feedback_stored: false });
+    let status = "active"; let action = "retry"; let terminalReason: string | null = null;
+    if (assessment.status === "passed") { status = "passed"; action = "passed"; terminalReason = "acceptance_passed"; }
+    else if (classification === "verification_configuration" || classification === "environment") { status = "blocked"; action = "handoff"; terminalReason = classification; }
+    else if (classification === "scope_violation" || classification === "no_progress") { status = "unresolved"; action = "handoff"; terminalReason = classification; }
+    else if (attemptNo >= Number(iteration.max_attempts)) { status = "unresolved"; action = "handoff"; terminalReason = "attempt_budget_exhausted"; }
+    const saved = this.store.save("verified_iteration", String(iteration.id), { ...recordPayload(iteration), status, attempts_started: attemptNo, last_assessment_id: assessment.id, terminal_reason: terminalReason });
+    const next = action === "retry" ? { action: "retry", prompt_feedback: feedback, remaining_attempts: Number(saved.max_attempts) - attemptNo, allowed_paths: saved.allowed_paths } : { action, reason: terminalReason };
+    return { iteration: saved, attempt, next, idempotent: false };
   }
   workLaunchPrepare(args: JsonObject): JsonObject {
     const host = text(args.host, "host"); if (!new Set(["codex-cli", "claude-code"]).has(host)) throw new Error("Work launch host is unsupported");
