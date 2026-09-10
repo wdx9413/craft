@@ -27,7 +27,7 @@ test("Workbench Home provides one bounded UI-safe projection without copying aut
   const view = f.home.view({ now: "2030-01-01T00:00:00Z", limit: 10 }); const summary = view.summary as Record<string, unknown>;
   assert.deepEqual(summary, { active_tasks: 1, workspaces: 1, attention: 1, active_runs: 1, active_budgets: 1, health: "healthy" });
   assert.deepEqual((view.resources as Record<string, unknown>[])[0].remaining, { usd: 5, token: 90, storage: 4 });
-  assert.equal((view.workspaces as Record<string, unknown>[])[0].object_count, 1); const launches = view.work_launches as Record<string, unknown>[]; assert.deepEqual(launches.map((item) => item.effective_status), ["completed", "awaiting_approval", "running"]); assert.deepEqual(launches.map((item) => item.acceptance_status), ["passed", "pending", "not_configured"]); assert.equal(JSON.stringify(view).includes("hidden"), false); f.store.close();
+  assert.equal((view.workspaces as Record<string, unknown>[])[0].object_count, 1); const launches = view.work_launches as Record<string, unknown>[]; const launchStates = Object.fromEntries(launches.map((item) => [item.id, [item.effective_status, item.acceptance_status]])); assert.deepEqual(launchStates, { launch: ["running", "not_configured"], pending: ["awaiting_approval", "pending"], linked: ["completed", "passed"] }); assert.equal(JSON.stringify(view).includes("hidden"), false); f.store.close();
 });
 
 test("Workbench projects Host runs and incremental content-free events", async () => {

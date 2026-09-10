@@ -15,7 +15,7 @@ import { decideExecution } from "./execution-policy.js";
 import { dockerRequestDigest } from "./docker-sandbox.js";
 import { egressRequestDigest } from "./egress.js";
 import { ServiceFoundation } from "./service-foundation.js";
-export const VERSION = "0.11.35";
+export const VERSION = "0.11.36";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -232,7 +232,7 @@ export class CraftService extends ServiceFoundation {
             "maintenance_status",
             "maintenance_tick",
             "maintenance_component", "maintenance_failure", "attention_item", "work_launch", "acceptance_plan", "acceptance_check", "acceptance_assessment", "acceptance_evaluator", "acceptance_evaluation_job", "verified_iteration", "iteration_attempt", "strategy_recommendation",
-            "trajectory_script_proposal", "verified_script_run", "knowledge_claim", "wiki_page", "knowledge_relation", "wiki_context_bundle", "wiki_skill_candidate", "knowledge_evaluation_case", "knowledge_evaluation_run", "wiki_candidate_evaluation_attestation", "wiki_candidate_publication_authorization"];
+            "trajectory_script_proposal", "verified_script_run", "knowledge_claim", "wiki_page", "knowledge_relation", "wiki_context_bundle", "wiki_skill_candidate", "knowledge_evaluation_case", "knowledge_evaluation_run", "wiki_candidate_evaluation_attestation", "wiki_candidate_publication_authorization", "wiki_candidate_publication_package"];
         kinds.push("untrusted_content", "untrusted_extraction", "decision_projection");
         return { version: VERSION, data_root: this.store.paths.root,
             counts: Object.fromEntries(kinds.map((kind) => [kind, this.store.count(kind)])) };
@@ -2744,70 +2744,11 @@ export class CraftService extends ServiceFoundation {
         const reason = assertNoSecret(document(args.reason, "reason"), "reason");
         return { candidate: this.store.save("wiki_skill_candidate", String(candidate.id), { ...recordPayload(candidate), status, review: { reviewer, reason_digest: valueDigest(reason), reviewed_at: new Date().toISOString() } }) };
     }
-    wikiCandidateClaimsCurrent(candidate) {
-        const refs = array(candidate.claim_refs, "Wiki candidate claim_refs");
-        if ([refs.length < 2, new Set(refs.map((ref) => `${ref.claim_id}@${ref.claim_version}`)).size !== refs.length].some(Boolean))
-            throw new Error("Wiki candidate requires unique claim references");
-        for (const ref of refs) {
-            const claim = this.store.get("knowledge_claim", text(ref.claim_id, "claim_ref.claim_id"));
-            if ([Number(claim.version) !== finiteInteger(ref.claim_version, "claim_ref.claim_version", 1), claim.status !== "reviewed"].some(Boolean))
-                throw new Error("Wiki candidate Claim drifted or is no longer reviewed");
-            for (const evidenceId of uniqueTextArray(claim.evidence_ids, "claim.evidence_ids"))
-                this.store.get("evidence", evidenceId);
-        }
-    }
-    wikiCandidateEvaluationProof(candidate, candidateVersion, args) {
-        this.wikiCandidateClaimsCurrent(candidate);
-        const knowledgeRun = this.store.get("knowledge_evaluation_run", text(args.knowledge_evaluation_run_id, "knowledge_evaluation_run_id"));
-        if ([knowledgeRun.status !== "eligible", Number(knowledgeRun.metrics.candidate_leaks) !== 0].some(Boolean))
-            throw new Error("Wiki candidate requires an eligible leak-free knowledge evaluation");
-        const evaluation = this.store.get("evaluation_run", text(args.evaluation_run_id, "evaluation_run_id"));
-        if ([evaluation.split !== "held_out", evaluation.verdict !== "passed", evaluation.subject_type !== "wiki_skill_candidate", evaluation.subject_id !== candidate.id, Number(evaluation.subject_version) !== candidateVersion].some(Boolean))
-            throw new Error("Wiki candidate requires a passed held-out evaluation for its exact version");
-        const signoff = this.store.get("signoff", text(args.signoff_id, "signoff_id"));
-        if ([signoff.decision !== "passed", signoff.evaluation_run_id !== evaluation.id, signoff.subject_type !== "wiki_skill_candidate", signoff.subject_id !== candidate.id, Number(signoff.subject_version) !== candidateVersion].some(Boolean))
-            throw new Error("Wiki candidate requires a passed Signoff for its exact held-out evaluation");
-        return { candidate_id: candidate.id, candidate_version: candidateVersion, candidate_identity_digest: candidate.identity_digest, knowledge_evaluation_run_id: knowledgeRun.id, knowledge_evaluation_run_version: knowledgeRun.version, evaluation_run_id: evaluation.id, signoff_id: signoff.id };
-    }
-    wikiSkillCandidateEvaluationAttest(args) {
-        const candidate = this.store.get("wiki_skill_candidate", text(args.candidate_id, "candidate_id"));
-        const attestationId = String(args.attestation_id ?? id("wiki_candidate_evaluation"));
-        const existing = this.store.find("wiki_candidate_evaluation_attestation", attestationId);
-        if (existing) {
-            if ([existing.candidate_id !== candidate.id, existing.knowledge_evaluation_run_id !== text(args.knowledge_evaluation_run_id, "knowledge_evaluation_run_id"), existing.evaluation_run_id !== text(args.evaluation_run_id, "evaluation_run_id"), existing.signoff_id !== text(args.signoff_id, "signoff_id")].some(Boolean))
-                throw new Error("Wiki candidate evaluation attestation idempotency conflict");
-            return { attestation: existing, candidate, idempotent: true };
-        }
-        if (candidate.status !== "ready_for_evaluation")
-            throw new Error("Wiki candidate must be ready_for_evaluation before attestation");
-        const proof = this.wikiCandidateEvaluationProof(candidate, Number(candidate.version), args);
-        const identity = { ...proof };
-        const attestation = this.store.create("wiki_candidate_evaluation_attestation", attestationId, { ...identity, identity_digest: valueDigest(identity), status: "passed" });
-        const saved = this.store.save("wiki_skill_candidate", String(candidate.id), { ...recordPayload(candidate), status: "evaluation_passed", evaluation_attestation_id: attestation.id, evaluated_candidate_version: candidate.version });
-        return { attestation, candidate: saved, idempotent: false };
-    }
-    wikiSkillCandidatePublicationAuthorize(args) {
-        const candidate = this.store.get("wiki_skill_candidate", text(args.candidate_id, "candidate_id"));
-        const authorizationId = String(args.authorization_id ?? id("wiki_candidate_publication"));
-        const existing = this.store.find("wiki_candidate_publication_authorization", authorizationId);
-        if (existing) {
-            if ([existing.candidate_id !== candidate.id, existing.attestation_id !== text(args.attestation_id, "attestation_id"), existing.reviewer !== text(args.reviewer, "reviewer"), existing.reason_digest !== valueDigest(assertNoSecret(document(args.reason, "reason"), "reason"))].some(Boolean))
-                throw new Error("Wiki candidate publication authorization idempotency conflict");
-            return { authorization: existing, candidate, idempotent: true };
-        }
-        if (candidate.status !== "evaluation_passed")
-            throw new Error("Wiki candidate must have a passed evaluation before publication authorization");
-        const attestation = this.store.get("wiki_candidate_evaluation_attestation", text(args.attestation_id, "attestation_id"));
-        if ([attestation.candidate_id !== candidate.id, attestation.candidate_identity_digest !== candidate.identity_digest, attestation.status !== "passed"].some(Boolean))
-            throw new Error("Wiki candidate evaluation attestation drifted");
-        const proof = this.wikiCandidateEvaluationProof(candidate, finiteInteger(attestation.candidate_version, "attestation.candidate_version", 1), attestation);
-        const reviewer = text(args.reviewer, "reviewer");
-        const reason = assertNoSecret(document(args.reason, "reason"), "reason");
-        const identity = { ...proof, attestation_id: attestation.id, reviewer, reason_digest: valueDigest(reason) };
-        const authorization = this.store.create("wiki_candidate_publication_authorization", authorizationId, { ...identity, identity_digest: valueDigest(identity), publication_allowed: true, execution_authority: false });
-        const saved = this.store.save("wiki_skill_candidate", String(candidate.id), { ...recordPayload(candidate), status: "publication_authorized", publication_authorization_id: authorization.id, publication_allowed: true, execution_authority: false, publication_review: { reviewer, reason_digest: identity.reason_digest, authorized_at: new Date().toISOString() } });
-        return { authorization, candidate: saved, idempotent: false };
-    }
+    wikiSkillCandidateEvaluationAttest(args) { return this.wikiCandidateGovernance.attest(args); }
+    wikiSkillCandidatePublicationAuthorize(args) { return this.wikiCandidateGovernance.authorize(args); }
+    wikiSkillCandidatePublicationPackagePrepare(args) { return this.wikiCandidateGovernance.packagePrepare(args); }
+    wikiSkillCandidatePublicationPackageGet(args) { return { package: this.store.get("wiki_candidate_publication_package", text(args.package_id, "package_id"), args.version === undefined ? undefined : finiteInteger(args.version, "version", 1)) }; }
+    wikiSkillCandidatePublicationPackageList(args) { return this.list("wiki_candidate_publication_package", "packages", args); }
     knowledgeEvaluationCaseSave(args) {
         const query = assertNoSecret(text(args.query, "query"), "query");
         const scope = String(args.scope ?? "global");

@@ -1,6 +1,6 @@
 # Craft
 
-> Current release: v0.11.35. Recent additions include reproducible Evidence Wiki Context Bundles, fail-closed knowledge-bound Work Launches, and a held-out/Signoff/human-publication authorization chain for Wiki candidates.
+> Current release: v0.11.36. Recent additions include reproducible Evidence Wiki Context Bundles, fail-closed knowledge-bound Work Launches, and human-imported cross-host Wiki candidate packages with complete evaluation lineage.
 
 [中文](README.md) | [English](README.en.md)
 

@@ -1,6 +1,6 @@
 # 可插拔能力源与最小默认能力
 
-> 状态：架构与接入准则。基线 v0.11.35。当前已实现本地 Source Mount、签名 Hub 目录同步、隔离落地、候选认证和 Codex/Claude/DeepSeek Harness/通用 MCP 接入；下述远程 Registry Adapter、A2A Adapter 和 Source 连接器尚未实现。
+> 状态：架构与接入准则。基线 v0.11.36。当前已实现本地 Source Mount、签名 Hub 目录同步、隔离落地、候选认证，以及面向 Codex/Claude/DeepSeek Harness/通用 MCP 的可人工导入候选交付包；下述远程 Registry Adapter、A2A Adapter 和 Source 连接器尚未实现。
 
 Craft 的短期定位不是经营又一个 Skill/MCP 商店，而是在不同来源和宿主之间提供**可审计的接入与治理层**。一个来源可以是本地目录、Git/包仓库、MCP Registry、Skill 库、领域专家服务或未来的 A2A Agent；它们不会因为“能发现”就自动进入模型上下文，更不会获得执行权。
 

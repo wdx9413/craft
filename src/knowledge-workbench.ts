@@ -22,6 +22,7 @@ export class KnowledgeWorkbenchKernel {
     const bundles = this.store.list("wiki_context_bundle", 10_000);
     const candidates = this.store.list("wiki_skill_candidate", 10_000);
     const evaluations = this.store.list("knowledge_evaluation_run", 10_000);
+    const packages = this.store.list("wiki_candidate_publication_package", 10_000);
     const claimById = new Map(claims.map((claim) => [String(claim.id), claim]));
     const conflicts = this.store.list("knowledge_relation", 10_000, (relation) => relation.relation === "contradicts").map((relation) => ({
       ...pick(relation, ["id", "from_claim_id", "to_claim_id", "relation", "created_at"]),
@@ -41,6 +42,7 @@ export class KnowledgeWorkbenchKernel {
         conflicts: conflicts.length,
         candidates: candidates.length,
         evaluations: evaluations.length,
+        publication_packages: packages.length,
         knowledge_bound_launches: launches.length,
       },
       claims: claims.slice(0, max).map((claim) => pick(claim, ["id", "version", "kind", "content", "scope", "evidence_ids", "tags", "valid_until", "status", "review", "updated_at"])),
@@ -48,6 +50,7 @@ export class KnowledgeWorkbenchKernel {
       bundles: bundles.slice(0, max).map((bundle) => pick(bundle, ["id", "version", "query", "scope", "max_items", "max_chars", "context_digest", "claim_refs", "excluded", "used_chars", "updated_at"])),
       conflicts: conflicts.slice(0, max),
       candidates: candidates.slice(0, max).map((candidate) => pick(candidate, ["id", "version", "title", "kind", "status", "claim_refs", "evaluation_attestation_id", "publication_authorization_id", "publication_allowed", "execution_authority", "review", "updated_at"])),
+      publication_packages: packages.slice(0, max).map((packageRecord) => pick(packageRecord, ["id", "version", "candidate_id", "candidate_version", "authorization_id", "target_host", "package_format", "content_digest", "manual_import_required", "execution_authority", "status", "updated_at"])),
       evaluations: evaluations.slice(0, max).map((run) => pick(run, ["id", "version", "status", "suite_id", "split", "summary", "updated_at"])),
       knowledge_bound_launches: launches.slice(0, max),
     };

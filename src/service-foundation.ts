@@ -36,6 +36,7 @@ import { ClaudeHostKernel } from "./claude-driver.ts";
 import { HostRunKernel } from "./host-run.ts";
 import { KnowledgeBoundLaunchKernel } from "./knowledge-bound-launch.ts";
 import { KnowledgeWorkbenchKernel } from "./knowledge-workbench.ts";
+import { WikiCandidateGovernanceKernel } from "./wiki-candidate-governance.ts";
 
 /**
  * Stable composition root for the service. Domain behavior stays in focused
@@ -79,6 +80,7 @@ export abstract class ServiceFoundation {
   readonly hostRuns: HostRunKernel;
   readonly knowledgeLaunch: KnowledgeBoundLaunchKernel;
   readonly knowledgeWorkbench: KnowledgeWorkbenchKernel;
+  readonly wikiCandidateGovernance: WikiCandidateGovernanceKernel;
 
   constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter = new LocalIsolatedAdapter(),
     dockerSandbox = new DockerSandboxAdapter(), egressBroker = new TrustedEgressBroker(), hostOwnerId?: string) {
@@ -101,6 +103,7 @@ export abstract class ServiceFoundation {
     this.claudeHost = new ClaudeHostKernel(store);
     this.knowledgeLaunch = new KnowledgeBoundLaunchKernel(store);
     this.knowledgeWorkbench = new KnowledgeWorkbenchKernel(store);
+    this.wikiCandidateGovernance = new WikiCandidateGovernanceKernel(store);
     this.hostRuns = new HostRunKernel(store, [this.codexHost, this.claudeHost], hostOwnerId,
       (run, receipt) => this.finalizeWorkLaunch(run, receipt));
   }

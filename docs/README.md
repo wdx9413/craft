@@ -45,6 +45,7 @@
 - [Knowledge-bound Work Launch](technical/modules/knowledge-bound-work-launch.md)：把受审核、可复算的 Wiki Context Bundle 固定到真实 Host 任务，并在变化时失败关闭。
 - [Knowledge Workbench](technical/modules/knowledge-workbench.md)：在本机 Workbench 中审阅 Claim、Markdown Wiki、Bundle、冲突、评测和知识绑定的工作启动。
 - [Wiki Candidate Evaluation Bridge](technical/modules/wiki-candidate-evaluation-bridge.md)：把知识候选的检索质量、held-out 评测、Signoff 和人工发布授权固定为独立且可复核的证据链。
+- [Wiki Candidate Publication Package](technical/modules/wiki-candidate-publication-package.md)：把已授权的知识候选固定为可人工导入、可跨宿主审阅的便携包，仍不自动安装或执行。
 
 ## 研究证据
 
