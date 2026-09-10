@@ -8,11 +8,11 @@ import { craftPaths } from "../src/paths.ts";
 import { CraftService, VERSION } from "../src/service.ts";
 import { CraftStore, type JsonObject } from "../src/store.ts";
 
-test("v0.10.2 reserves and settles hard resource budgets idempotently", async () => {
+test("control-plane budgets reserve and settle resources idempotently", async () => {
   const root = join(tmpdir(), `craft-budget-${process.pid}-${Date.now()}`); const store = await new CraftStore(craftPaths(root)).open();
   const service = new CraftService(store);
   try {
-    assert.equal(VERSION, "0.11.32");
+    assert.equal(VERSION, "0.11.33");
     const task = service.taskOpen({ title: "Budget trace", goal: "Trace control costs" }).task as JsonObject;
     const workflow = service.workflowSave({ workflow_id: "budget_workflow", name: "Budget workflow" });
     const trial = service.trialStart({ trial_id: "budget_trial", task_id: task.id, subject_type: "workflow",

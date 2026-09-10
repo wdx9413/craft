@@ -2,6 +2,8 @@
 
 本目录以两套文档为主：简洁的产品文档和稍详细的技术方案。README 介绍产品与当前使用方法；研究证据放在独立的 `research/`，仓库外 `TT.md` 是早期讨论记录，不是理解当前产品的前置条件。
 
+**第一次接触 Craft？** 先读 [快速入门（5 分钟）](quickstart.md)：安装、挂载能力目录、接入宿主、跑通一次最小闭环，并附概念地图和最小术语表。
+
 ## 产品文档
 
 - [产品概览](product/overview.zh-CN.md)：Craft 解决什么问题、核心闭环和差异点。
@@ -38,6 +40,9 @@
 - [Attention Inbox](technical/modules/attention-inbox.md)：把审批、恢复、后台异常和候选成果投影为统一待处理卡片。
 - [Workbench Home](technical/modules/workbench-home.md)：为 CLI、MCP 和未来 UI 组合任务、成果、预算、运行与健康状态。
 - [Local Workbench Web](technical/modules/local-workbench-web.md)：只监听本机、令牌保护的首个可见工作台。
+- [可插拔能力源与最小默认能力](technical/modules/pluggable-capability-sources.md)：把 Skill、MCP、Registry、专家和未来 A2A Agent 接入同一治理链，同时限制内置 Prompt 负担。
+- [受治理能力接入示例](governed-capability-intake.md)：从签名目录到非可执行候选的端到端路径，以及跨宿主边界。
+- [Knowledge-bound Work Launch](technical/modules/knowledge-bound-work-launch.md)：把受审核、可复算的 Wiki Context Bundle 固定到真实 Host 任务，并在变化时失败关闭。
 
 ## 研究证据
 

@@ -3,6 +3,14 @@
 > as_of: 2026-09-08
 > 范围：自进化、自适应 Harness、Agent/多 Agent/子 Agent、Agent 评测；结合 Craft v0.9.8 与已确认的 v0.9.9 规划。
 > 证据规则：**事实**只来自官方文档、官方规范或原始公开研究；**推论/建议**明确标注，不把预印本或厂商产品说明写成已被普遍证明的行业结论。
+>
+> **时效警示**：本文撰写于 v0.9.8/v0.9.9 时期，文中"缺口/规划"多数已在后续版本实现或调整。阅读时请把它当作历史调研基线，实施状态以 [技术模块文档](../technical/overview.zh-CN.md) 和 [产品路线](../product/roadmap.zh-CN.md) 为准。
+
+## 2026-09-10 当前阅读说明（v0.11.33）
+
+本文不再作为当前缺口清单。自该基线之后，Capability Asset/Activation Profile、受控 Host Dispatch/Run、Docker Conformance、可恢复 Worker、供应链认证、Evidence Wiki、Context Compiler、Wiki 候选与知识评测均已形成代码接口和测试；真实跨宿主链路、业务质量与生产安全仍需分别验收。当前决策是：短期以跨宿主治理插件层积累证据与评测数据，长期再把可替换的模型循环、Planner 与 Driver 做成自主 Agent 平台。
+
+默认 Harness 保持最小；只有任务类、模型、预算和 held-out 证据支持时才增加 Skill、检索、Expert 或多 Agent 拓扑。策略是可替换 Capability，而不是永久写死在核心。新来源、Registry 与 A2A 接入边界见[可插拔能力源](../technical/modules/pluggable-capability-sources.md)。
 
 ## 简要结论
 

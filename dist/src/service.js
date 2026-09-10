@@ -2,7 +2,6 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { isAbsolute, join, resolve, win32 } from "node:path";
 import { pathToFileURL } from "node:url";
-import { Catalog } from "./catalog.js";
 import { validateJsonSchema } from "./json-schema.js";
 import { CraftStore } from "./store.js";
 import { approvedEffects, executeSteps, normalizeSteps, resolveInputs, SIDE_EFFECTS, substitute } from "./workflow.js";
@@ -11,41 +10,11 @@ import { aggregateEvaluation, compareEvaluationAggregates } from "./evaluation.j
 import { publishSkill, rollbackSkillPublication } from "./skill-publisher.js";
 import { loadConfig } from "./config.js";
 import { OpenAiCompatibleEmbeddingProvider } from "./semantic.js";
-import { LocalIsolatedAdapter } from "./isolated.js";
 import { decideExecution } from "./execution-policy.js";
-import { WorkspaceState } from "./workspace.js";
-import { TransactionCoordinator } from "./transaction.js";
-import { TrajectoryCompiler } from "./trajectory.js";
-import { VerifiedScriptRunner } from "./script-run.js";
-import { WorkbenchKernel } from "./workbench.js";
-import { ChangeSetKernel } from "./changeset.js";
-import { ControlPlaneKernel } from "./control-plane.js";
-import { SecurityBrokerKernel } from "./security.js";
-import { DataOnlyParserAdapter } from "./untrusted-parser.js";
-import { ParserProcessAdapter } from "./parser-process.js";
-import { SandboxKernel } from "./sandbox.js";
-import { DockerSandboxAdapter, dockerRequestDigest } from "./docker-sandbox.js";
-import { TrustedEgressBroker, egressRequestDigest } from "./egress.js";
-import { ExternalEffectKernel } from "./effects.js";
-import { RecoveryQueueKernel } from "./recovery.js";
-import { TriggerKernel } from "./trigger.js";
-import { SpeculativeKernel } from "./speculative.js";
-import { LineageKernel } from "./lineage.js";
-import { HydrationKernel } from "./hydration.js";
-import { AutonomyKernel } from "./autonomy.js";
-import { ContractInferenceKernel } from "./contracts.js";
-import { CapabilityCanaryKernel } from "./capability-canary.js";
-import { CapabilityFederationKernel } from "./federation.js";
-import { HubSyncKernel } from "./hub-sync.js";
-import { MaterializationKernel } from "./materialization.js";
-import { CapabilityCertificationKernel } from "./certification.js";
-import { SupplyChainKernel } from "./supply-chain.js";
-import { AttentionKernel } from "./attention.js";
-import { HomeKernel } from "./home.js";
-import { CodexHostKernel } from "./codex-driver.js";
-import { ClaudeHostKernel } from "./claude-driver.js";
-import { HostRunKernel } from "./host-run.js";
-export const VERSION = "0.11.32";
+import { dockerRequestDigest } from "./docker-sandbox.js";
+import { egressRequestDigest } from "./egress.js";
+import { ServiceFoundation } from "./service-foundation.js";
+export const VERSION = "0.11.33";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -226,79 +195,7 @@ function binomial(n, k) {
         value = value * (n - k + index) / index;
     return value;
 }
-export class CraftService {
-    store;
-    catalog;
-    isolatedAdapter;
-    workspace;
-    transaction;
-    trajectory;
-    scriptRunner;
-    workbench;
-    changeSets;
-    controlPlane;
-    security;
-    dataOnlyParser;
-    parserProcess;
-    sandbox;
-    dockerSandbox;
-    egressBroker;
-    effects;
-    recovery;
-    triggers;
-    speculative;
-    lineage;
-    hydration;
-    autonomy;
-    contracts;
-    capabilityCanary;
-    federation;
-    hubSync;
-    materialization;
-    certification;
-    supplyChain;
-    attention;
-    home;
-    codexHost;
-    claudeHost;
-    hostRuns;
-    constructor(store, semanticProvider, isolatedAdapter = new LocalIsolatedAdapter(), dockerSandbox = new DockerSandboxAdapter(), egressBroker = new TrustedEgressBroker(), hostOwnerId) {
-        this.store = store;
-        this.catalog = new Catalog(store, semanticProvider);
-        this.isolatedAdapter = isolatedAdapter;
-        this.workspace = new WorkspaceState(store, store.paths);
-        this.transaction = new TransactionCoordinator(store, this.workspace);
-        this.trajectory = new TrajectoryCompiler(store);
-        this.scriptRunner = new VerifiedScriptRunner(store);
-        this.workbench = new WorkbenchKernel(store);
-        this.changeSets = new ChangeSetKernel(store, this.workbench);
-        this.controlPlane = new ControlPlaneKernel(store);
-        this.security = new SecurityBrokerKernel(store);
-        this.dataOnlyParser = new DataOnlyParserAdapter(this.security);
-        this.parserProcess = new ParserProcessAdapter(this.security);
-        this.sandbox = new SandboxKernel(store);
-        this.dockerSandbox = dockerSandbox;
-        this.egressBroker = egressBroker;
-        this.effects = new ExternalEffectKernel(store);
-        this.recovery = new RecoveryQueueKernel(store);
-        this.triggers = new TriggerKernel(store, egressBroker.env);
-        this.speculative = new SpeculativeKernel(store);
-        this.lineage = new LineageKernel(store);
-        this.hydration = new HydrationKernel(store);
-        this.autonomy = new AutonomyKernel(store);
-        this.contracts = new ContractInferenceKernel(store);
-        this.capabilityCanary = new CapabilityCanaryKernel(store);
-        this.federation = new CapabilityFederationKernel(store);
-        this.hubSync = new HubSyncKernel(store);
-        this.materialization = new MaterializationKernel(store);
-        this.certification = new CapabilityCertificationKernel(store);
-        this.supplyChain = new SupplyChainKernel(store);
-        this.attention = new AttentionKernel(store);
-        this.home = new HomeKernel(store, this.attention);
-        this.codexHost = new CodexHostKernel(store);
-        this.claudeHost = new ClaudeHostKernel(store);
-        this.hostRuns = new HostRunKernel(store, [this.codexHost, this.claudeHost], hostOwnerId, (run, receipt) => this.finalizeWorkLaunch(run, receipt));
-    }
+export class CraftService extends ServiceFoundation {
     static async open(store, hostOwnerId) {
         const config = await loadConfig(store.paths);
         const semanticProvider = config?.semanticSearch ? new OpenAiCompatibleEmbeddingProvider(config.semanticSearch.provider) : undefined;
@@ -2011,9 +1908,19 @@ export class CraftService {
     homeHostRuns(args) { return this.home.hostRuns(args); }
     homeHostRun(args) { return this.home.hostRun(args); }
     codexDispatchPrepare(args) { return this.codexHost.prepare(args); }
-    async codexDispatchExecute(args) { return this.codexHost.execute(args); }
+    async codexDispatchExecute(args) {
+        const dispatch = this.store.get("codex_dispatch", text(args.dispatch_id, "dispatch_id"));
+        if (dispatch.knowledge_binding !== undefined)
+            throw new Error("Knowledge-bound dispatch must execute through its Knowledge Work Launch");
+        return this.codexHost.execute(args);
+    }
     claudeDispatchPrepare(args) { return this.claudeHost.prepare(args); }
-    async claudeDispatchExecute(args) { return this.claudeHost.execute(args); }
+    async claudeDispatchExecute(args) {
+        const dispatch = this.store.get("claude_dispatch", text(args.dispatch_id, "dispatch_id"));
+        if (dispatch.knowledge_binding !== undefined)
+            throw new Error("Knowledge-bound dispatch must execute through its Knowledge Work Launch");
+        return this.claudeHost.execute(args);
+    }
     async activationBoundPrompt(args) {
         const taskId = text(args.task_id, "task_id");
         const prompt = document(args.prompt, "prompt");
@@ -2075,7 +1982,54 @@ export class CraftService {
             throw new Error("Capability context changed since Work Launch preparation");
         return { ...this.workLaunchDecide({ ...args, prompt: bound.prompt }), resolution: bound.resolution };
     }
-    hostRunStart(args) { return this.hostRuns.start(args); }
+    knowledgeBoundPrompt(args) {
+        this.store.get("task", text(args.task_id, "task_id"));
+        const binding = this.knowledgeLaunch.bind({ bundle_id: text(args.bundle_id, "bundle_id"),
+            ...(args.bundle_version === undefined ? {} : { bundle_version: finiteInteger(args.bundle_version, "bundle_version", 1) }),
+            ...(args.now === undefined ? {} : { now: text(args.now, "now") }) });
+        return { binding, prompt: this.knowledgeLaunch.prompt(binding, document(args.prompt, "prompt")) };
+    }
+    knowledgeBoundPromptForLaunch(launch, args) {
+        const binding = object(launch.knowledge_binding, "Work Launch knowledge binding");
+        const validated = this.knowledgeLaunch.revalidate(binding, args.now === undefined ? undefined : text(args.now, "now"));
+        return { binding: validated, prompt: this.knowledgeLaunch.prompt(validated, document(args.prompt, "prompt")) };
+    }
+    async knowledgeContextWorkLaunchPrepare(args) {
+        const bound = this.knowledgeBoundPrompt(args);
+        const prepared = this.workLaunchPrepareInternal({ ...args, prompt: bound.prompt }, bound.binding);
+        return { ...prepared, knowledge_binding: bound.binding };
+    }
+    async knowledgeContextWorkLaunchDecide(args) {
+        const launch = this.store.get("work_launch", text(args.launch_id, "launch_id"));
+        const bound = this.knowledgeBoundPromptForLaunch(launch, args);
+        return this.workLaunchDecideInternal({ ...args, prompt: bound.prompt }, bound.binding);
+    }
+    async knowledgeContextWorkLaunchRetry(args) {
+        const previous = this.workLaunchGet({ launch_id: args.launch_id }).launch;
+        if (!new Set(["failed", "cancelled", "interrupted"]).has(String(previous.effective_status)))
+            throw new Error("Only a failed, cancelled, or interrupted launch can be retried");
+        const binding = object(previous.knowledge_binding, "Work Launch knowledge binding");
+        const dispatch = this.store.get(previous.host === "codex-cli" ? "codex_dispatch" : "claude_dispatch", String(previous.dispatch_id));
+        const acceptance = previous.acceptance_plan_id ? this.store.get("acceptance_plan", String(previous.acceptance_plan_id)) : null;
+        return this.knowledgeContextWorkLaunchPrepare({ task_id: previous.task_id, host: previous.host, workspace: previous.workspace, sandbox: previous.sandbox,
+            prompt: document(args.prompt, "prompt"), bundle_id: binding.bundle_id, bundle_version: binding.bundle_version, now: args.now,
+            launch_id: args.new_launch_id === undefined ? undefined : text(args.new_launch_id, "new_launch_id"), retry_of: previous.id,
+            model: args.model ?? dispatch.model ?? undefined, timeout_ms: args.timeout_ms ?? dispatch.timeout_ms, output_limit: args.output_limit ?? dispatch.output_limit,
+            max_turns: args.max_turns ?? dispatch.max_turns, max_budget_usd: args.max_budget_usd ?? dispatch.max_budget_usd ?? undefined,
+            acceptance_name: acceptance?.name, acceptance_criteria: acceptance?.criteria });
+    }
+    hostRunStart(args) {
+        const host = text(args.host, "host");
+        const kind = host === "codex-cli" ? "codex_dispatch" : host === "claude-code" ? "claude_dispatch" : null;
+        if (!kind)
+            throw new Error("Host run host is unsupported");
+        if (args.run_id !== undefined && this.store.find("host_run", text(args.run_id, "run_id")))
+            return this.hostRuns.start(args);
+        const dispatch = this.store.get(kind, text(args.dispatch_id, "dispatch_id"));
+        if (dispatch.knowledge_binding !== undefined)
+            throw new Error("Knowledge-bound dispatch must start through its Knowledge Work Launch");
+        return this.hostRuns.start(args);
+    }
     hostRunGet(args) { return this.hostRuns.get(args); }
     hostRunCancel(args) { return this.hostRuns.cancel(args); }
     hostRunRecover(args) { return this.hostRuns.recover(args); }
@@ -2819,7 +2773,8 @@ export class CraftService {
     }
     knowledgeEvaluationRunGet(args) { return { run: this.store.get("knowledge_evaluation_run", text(args.run_id, "run_id"), args.version === undefined ? undefined : finiteInteger(args.version, "version", 1)) }; }
     knowledgeEvaluationRunList(args) { return this.list("knowledge_evaluation_run", "runs", args); }
-    workLaunchPrepare(args) {
+    workLaunchPrepare(args) { return this.workLaunchPrepareInternal(args); }
+    workLaunchPrepareInternal(args, knowledgeBinding) {
         const host = text(args.host, "host");
         if (!new Set(["codex-cli", "claude-code"]).has(host))
             throw new Error("Work launch host is unsupported");
@@ -2831,34 +2786,39 @@ export class CraftService {
         const launchId = args.launch_id === undefined ? id("work_launch") : text(args.launch_id, "launch_id");
         const existing = this.store.find("work_launch", launchId);
         if (existing) {
-            if (existing.host !== host || existing.sandbox !== sandbox || existing.workspace !== workspace || existing.prompt_digest !== valueDigest(prompt))
+            if (existing.host !== host || existing.sandbox !== sandbox || existing.workspace !== workspace || existing.prompt_digest !== valueDigest(prompt) || valueDigest(existing.knowledge_binding ?? null) !== valueDigest(knowledgeBinding ?? null))
                 throw new Error("Work launch idempotency conflict");
             return { launch: existing, task: this.store.get("task", String(existing.task_id)), dispatch: this.store.get(host === "codex-cli" ? "codex_dispatch" : "claude_dispatch", String(existing.dispatch_id)), approval_required: existing.status === "awaiting_approval", idempotent: true };
         }
         const task = args.task_id ? this.store.get("task", text(args.task_id, "task_id")) : this.taskOpen({ title: args.title, goal: args.goal, project_id: args.project_id }).task;
         const dispatchId = `${host === "codex-cli" ? "codex_dispatch" : "claude_dispatch"}_${launchId}`;
         const common = { dispatch_id: dispatchId, task_id: task.id, workspace, prompt, sandbox, model: args.model, timeout_ms: args.timeout_ms, output_limit: args.output_limit };
-        const dispatch = (host === "codex-cli" ? this.codexDispatchPrepare(common) : this.claudeDispatchPrepare({ ...common, max_turns: args.max_turns, max_budget_usd: args.max_budget_usd })).dispatch;
-        let launch = this.store.create("work_launch", launchId, { task_id: task.id, host, dispatch_id: dispatch.id, workspace: dispatch.workspace, sandbox, prompt_digest: dispatch.prompt_digest, retry_of: args.retry_of ?? null, status: sandbox === "workspace-write" ? "awaiting_approval" : "prepared" });
-        const trial = this.trialStart({ trial_id: `trial_${launchId}`, task_id: task.id, subject_type: "work_launch", subject_id: launchId, subject_version: launch.version, environment: { host, workspace: dispatch.workspace, sandbox, dispatch_id: dispatch.id }, budget: {} });
-        this.trialTraceAppend({ trial_id: trial.id, event_type: "work_launch.prepared", source: "craft_runtime", data: { launch_id: launchId, dispatch_id: dispatch.id, host, sandbox } });
-        launch = this.store.save("work_launch", launchId, { ...launch, trial_id: trial.id });
+        let dispatch = (host === "codex-cli" ? this.codexDispatchPrepare(common) : this.claudeDispatchPrepare({ ...common, max_turns: args.max_turns, max_budget_usd: args.max_budget_usd })).dispatch;
+        if (knowledgeBinding)
+            dispatch = this.store.save(host === "codex-cli" ? "codex_dispatch" : "claude_dispatch", String(dispatch.id), { ...recordPayload(dispatch), knowledge_binding: knowledgeBinding });
+        let launch = this.store.create("work_launch", launchId, { task_id: task.id, host, dispatch_id: dispatch.id, workspace: dispatch.workspace, sandbox, prompt_digest: dispatch.prompt_digest, retry_of: args.retry_of ?? null, status: sandbox === "workspace-write" ? "awaiting_approval" : "prepared", ...(knowledgeBinding ? { knowledge_binding: knowledgeBinding } : {}) });
+        const trial = this.trialStart({ trial_id: `trial_${launchId}`, task_id: task.id, subject_type: "work_launch", subject_id: launchId, subject_version: launch.version, environment: { host, workspace: dispatch.workspace, sandbox, dispatch_id: dispatch.id, dispatch_version: dispatch.version, ...(knowledgeBinding ? { knowledge_binding: knowledgeBinding } : {}) }, budget: {} });
+        this.trialTraceAppend({ trial_id: trial.id, event_type: "work_launch.prepared", source: "craft_runtime", data: { launch_id: launchId, dispatch_id: dispatch.id, host, sandbox, ...(knowledgeBinding ? { knowledge_bundle_id: knowledgeBinding.bundle_id, knowledge_bundle_version: knowledgeBinding.bundle_version, knowledge_context_digest: knowledgeBinding.context_digest } : {}) } });
+        launch = this.store.save("work_launch", launchId, { ...recordPayload(launch), trial_id: trial.id });
         if (args.acceptance_criteria !== undefined) {
             const acceptance = this.acceptancePlanSave({ task_id: task.id, launch_id: launch.id, criteria: args.acceptance_criteria, name: args.acceptance_name });
             const plan = acceptance.plan;
             launch = this.store.save("work_launch", launchId, { ...launch, acceptance_plan_id: plan.id, acceptance_trial_id: plan.trial_id });
         }
         if (sandbox === "read-only") {
-            const started = this.hostRunStart({ host, dispatch_id: dispatch.id, prompt });
+            const started = knowledgeBinding ? this.hostRuns.start({ host, dispatch_id: dispatch.id, prompt }) : this.hostRunStart({ host, dispatch_id: dispatch.id, prompt });
             const run = started.run;
-            launch = this.store.save("work_launch", launchId, { ...launch, status: "running", run_id: run.id });
+            launch = this.store.save("work_launch", launchId, { ...recordPayload(launch), status: "running", run_id: run.id });
         }
         return { launch, task, dispatch, approval_required: sandbox === "workspace-write", idempotent: false };
     }
-    workLaunchDecide(args) {
+    workLaunchDecide(args) { return this.workLaunchDecideInternal(args); }
+    workLaunchDecideInternal(args, knowledgeBinding) {
         const launch = this.store.get("work_launch", text(args.launch_id, "launch_id"));
         if (launch.status !== "awaiting_approval")
             throw new Error("Work launch is not awaiting approval");
+        if (launch.knowledge_binding !== undefined && valueDigest(launch.knowledge_binding) !== valueDigest(knowledgeBinding ?? null))
+            throw new Error("Knowledge-bound Work Launch must be decided through its Knowledge Work Launch");
         const actor = text(args.actor, "actor");
         if (args.approved !== true)
             return { launch: this.store.save("work_launch", String(launch.id), { ...launch, status: "denied", decided_by: actor }), started: false };
@@ -2868,12 +2828,13 @@ export class CraftService {
         const policy = this.autonomyPolicySave({ policy_id: `launch_policy_${launch.id}`, task_id: launch.task_id, name: "Workbench workspace write", rules: { sandbox_write: { level: "human_approval" } } }).policy;
         const authorization = this.autonomyRequest({ request_id: `launch_authorization_${launch.id}`, policy_id: policy.id, policy_version: policy.version, task_id: launch.task_id, action: "sandbox_write", target: launch.workspace, request_digest: this.store.get(String(launch.host) === "codex-cli" ? "codex_dispatch" : "claude_dispatch", String(launch.dispatch_id)).request_digest, requested_by: "craft_workbench" }).request;
         this.autonomyDecide({ request_id: authorization.id, decision: "approve", actor, approval_ref: `work_launch:${launch.id}` });
-        const started = this.hostRunStart({ host: launch.host, dispatch_id: launch.dispatch_id, prompt, authorization_request_id: authorization.id });
+        const started = knowledgeBinding ? this.hostRuns.start({ host: launch.host, dispatch_id: launch.dispatch_id, prompt, authorization_request_id: authorization.id }) : this.hostRunStart({ host: launch.host, dispatch_id: launch.dispatch_id, prompt, authorization_request_id: authorization.id });
         const run = started.run;
-        return { launch: this.store.save("work_launch", String(launch.id), { ...launch, status: "running", decided_by: actor, authorization_request_id: authorization.id, run_id: run.id }), started: true };
+        return { launch: this.store.save("work_launch", String(launch.id), { ...recordPayload(launch), status: "running", decided_by: actor, authorization_request_id: authorization.id, run_id: run.id }), started: true };
     }
     workLaunchGet(args) { const launch = this.store.get("work_launch", text(args.launch_id, "launch_id")); const run = launch.run_id ? this.store.find("host_run", String(launch.run_id)) : null; return { launch: { ...launch, effective_status: run?.status ?? launch.status }, run: run ? this.homeHostRun({ run_id: run.id, after_sequence: args.after_sequence, limit: args.limit }) : null, acceptance: launch.acceptance_plan_id ? this.acceptancePlanGet({ plan_id: launch.acceptance_plan_id }) : null }; }
-    workLaunchRetry(args) { const previous = this.workLaunchGet({ launch_id: args.launch_id }).launch; if (!new Set(["failed", "cancelled", "interrupted"]).has(String(previous.effective_status)))
+    workLaunchRetry(args) { const previous = this.workLaunchGet({ launch_id: args.launch_id }).launch; if (previous.knowledge_binding !== undefined)
+        throw new Error("Knowledge-bound Work Launch must retry through its Knowledge Work Launch"); if (!new Set(["failed", "cancelled", "interrupted"]).has(String(previous.effective_status)))
         throw new Error("Only a failed, cancelled, or interrupted launch can be retried"); const task = this.store.get("task", String(previous.task_id)); const dispatch = this.store.get(previous.host === "codex-cli" ? "codex_dispatch" : "claude_dispatch", String(previous.dispatch_id)); const acceptance = previous.acceptance_plan_id ? this.store.get("acceptance_plan", String(previous.acceptance_plan_id)) : null; return this.workLaunchPrepare({ task_id: task.id, host: previous.host, workspace: previous.workspace, sandbox: previous.sandbox, prompt: args.prompt, launch_id: args.new_launch_id === undefined ? undefined : text(args.new_launch_id, "new_launch_id"), retry_of: previous.id, model: args.model ?? dispatch.model ?? undefined, timeout_ms: args.timeout_ms ?? dispatch.timeout_ms, output_limit: args.output_limit ?? dispatch.output_limit, max_turns: args.max_turns ?? dispatch.max_turns, max_budget_usd: args.max_budget_usd ?? dispatch.max_budget_usd ?? undefined, acceptance_name: acceptance?.name, acceptance_criteria: acceptance?.criteria }); }
     finalizeWorkLaunch(run, receipt) {
         const launch = this.store.list("work_launch", 10_000, (item) => item.run_id === run.id)[0];
@@ -2892,7 +2853,7 @@ export class CraftService {
             costs.cost_usd = receipt.cost_usd;
         if (receipt?.usage && typeof receipt.usage === "object" && !Array.isArray(receipt.usage))
             costs.usage = receipt.usage;
-        this.outcomeRecord({ trial_id: launch.trial_id, verdict, summary: `Host execution ${run.status}.`, failure_type: verdict === "passed" ? undefined : run.error_class ?? `host_${run.status}`, scores: { host_execution_success: verdict === "passed" ? 1 : 0 }, costs, evidence_ids: [evidence.id], source: "program_verified" });
+        this.outcomeRecord({ trial_id: launch.trial_id, verdict, summary: `Host execution ${run.status}.`, failure_type: verdict === "passed" ? undefined : run.error_class ?? `host_${run.status}`, scores: { host_execution_success: verdict === "passed" ? 1 : 0 }, costs, evidence_ids: [evidence.id], source: "program_verified", ...(launch.knowledge_binding === undefined ? {} : { knowledge_binding: launch.knowledge_binding }) });
     }
     effectTrace(effect, eventType) {
         if (effect.trial_id)
@@ -3168,6 +3129,7 @@ export class CraftService {
             failure_type: failureType,
             scores: object(args.scores ?? {}, "scores"), costs: object(args.costs ?? {}, "costs"),
             evidence_ids: evidenceIds, source: args.source ?? "program_verified",
+            ...(args.knowledge_binding === undefined ? {} : { knowledge_binding: object(args.knowledge_binding, "knowledge_binding") }),
         });
     }
     trialGet(args) {

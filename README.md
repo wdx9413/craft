@@ -1,6 +1,6 @@
 # Craft
 
-> 当前发布版本：v0.11.32。最新能力包括 Markdown 优先的证据 Wiki、可复算的 Context Compiler、受控能力候选，以及知识质量评测门禁。
+> 当前发布版本：v0.11.33。最新能力包括可复算的 Evidence Wiki Context Bundle、失败关闭的 Knowledge-bound Work Launch，以及知识质量评测门禁。
 
 [中文](README.md) | [English](README.en.md)
 
@@ -10,7 +10,9 @@ Craft 的产品目标是一个人和 AI 共同工作的数字工作台：理解�
 
 产品面向视频、销售、教育、内容创作、研发等各行业工作者。你可以提出目标、组织资料与工具、一起完成和修改成果，并把有效方法留作下次使用；专业对象和界面由领域扩展提供，不要求所有用户采用编程工作方式。
 
-当前 v0.11.25 可用的是 TypeScript/Node.js CLI、插件内核、本地维护 Worker、回环 Workbench 和本地 Supervisor。能力目录可以作为多个 Source Mount 保留；相同内容的镜像只形成一个逻辑能力供检索选择，同时保留所有来源、实际选中的实例和优先级。同一声明身份而内容不同的能力会形成显式冲突，绝不静默覆盖。Activation Plan 与 Resolution 会固定、复核并有界加载只读能力内容；新的跨宿主 Dispatch 可把这份内容精确绑定给 Codex CLI 或 Claude Code，并在执行前再次检查上下文摘要，变化即失败关闭。它不会自动执行本地 Skill，也不会增加工具或写入权限。验证驱动迭代控制器把独立验收结果分类为通过、有限重试、环境/配置阻塞或人工交接；它不把 Agent 自述当作验收，也不自动扩大写入权限。任务图可按依赖组织探索、制作、验证、复核和交付节点，但不替代现有 Runtime 自动派发 Agent。
+产品路线分两步：**短期做跨宿主治理插件层**——以 MCP/插件形式接入 Codex CLI、Claude Code、DeepSeek Harness 等宿主，提供统一的能力发现、授权门禁、证据链与评测门禁，执行仍发生在宿主内，Craft 只治理不越权；**长期做自主 Agent 平台**——由 Craft 直接承载对话循环、调度宿主并依靠评测门禁自我改进。两个阶段共用同一套内核。
+
+当前版本提供的是 TypeScript/Node.js CLI、插件内核、本地维护 Worker、回环 Workbench 和本地 Supervisor。能力目录可以作为多个 Source Mount 保留；相同内容的镜像只形成一个逻辑能力供检索选择，同时保留所有来源、实际选中的实例和优先级。同一声明身份而内容不同的能力会形成显式冲突，绝不静默覆盖。Activation Plan 与 Resolution 会固定、复核并有界加载只读能力内容；新的跨宿主 Dispatch 可把这份内容精确绑定给 Codex CLI、Claude Code 或 DeepSeek Harness，并在执行前再次检查上下文摘要，变化即失败关闭。它不会自动执行本地 Skill，也不会增加工具或写入权限。验证驱动迭代控制器把独立验收结果分类为通过、有限重试、环境/配置阻塞或人工交接；它不把 Agent 自述当作验收，也不自动扩大写入权限。任务图可按依赖组织探索、制作、验证、复核和交付节点，但不替代现有 Runtime 自动派发 Agent。
 
 Sandbox 能力采用“声明、诊断、黑盒一致性验证、精确版本票据、观察回执”协议，可由本地进程、容器或远程执行平台实现。当前仓库提供有限本地适配和首个 Docker CLI 驱动：普通 Probe 不授予可信状态；只有禁网、只读根、Workspace 可写、环境无常见 Secret、超时取消和无残留容器全部通过，Profile 才能成为 `verified`。是否安装 Docker、Daemon 安全配置与各平台内核隔离仍由部署方验收，不能把一致性测试解释为完整安全认证。
 
@@ -93,9 +95,11 @@ pnpm test
 
 ## 三种使用方式
 
-1. Agent（规划形态）：未来由 Craft 直接承载对话和模型工具循环；当前版本只提供配置与持久化底座，尚不能替代 Codex 或 Claude Code。
-2. Supervisor（规划形态）：未来由 Craft 调度 Codex、Claude Code 或其他 Host；当前版本已有可并发领取、依赖阻断和失败换路的编排状态机，但还没有自动 Host Driver。
-3. Provider（当前可用）：Craft 通过 MCP/插件提供能力发现、任务延续、Workflow、证据与基础编排能力。
+1. Provider（当前主线，跨宿主治理插件层）：Craft 通过 MCP/插件接入 Codex CLI、Claude Code、DeepSeek Harness 等宿主，提供能力发现、任务延续、Workflow、证据、授权与评测门禁；执行仍发生在宿主内，Craft 只治理、不越权。
+2. Supervisor（规划形态）：未来由 Craft 调度 Codex、Claude Code 或其他 Host；当前版本已有可并发领取、依赖阻断和失败换路的编排状态机与 Host Run 生命周期，但还没有自动通用 Host Driver。
+3. Agent（规划形态）：未来由 Craft 直接承载对话和模型工具循环；当前版本只提供配置与持久化底座，尚不能替代 Codex 或 Claude Code。
+
+三者共用同一内核，Provider 阶段积累的授权、证据与评测数据是后续自主化的基础。
 
 首次运行 `craft init` 目前仍会选择模式。规划中的普通用户入口将从目标和资料开始，把技术模式移到高级设置，此引导尚未改造。配置、SQLite 数据库、索引、日志和备份都位于 `~/.craft_data`；也可用 `CRAFT_DATA_DIR` 指定另一目录。
 

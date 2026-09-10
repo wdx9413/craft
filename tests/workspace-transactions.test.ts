@@ -8,7 +8,7 @@ import { craftPaths } from "../src/paths.ts";
 import { CraftService } from "../src/service.ts";
 import { CraftStore, type JsonObject } from "../src/store.ts";
 
-test("v0.9.11 coordinates an approved workspace transaction through an exact baseline and rollback", async () => {
+test("workspace transactions use an exact baseline and approved rollback", async () => {
   const root = join(tmpdir(), `craft-transaction-${process.pid}-${Date.now()}`);
   const worktree = join(root, "worktree");
   const store = await new CraftStore(craftPaths(join(root, "craft"))).open();

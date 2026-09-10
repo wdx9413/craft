@@ -8,7 +8,7 @@ import { craftPaths } from "../src/paths.ts";
 import { CraftService, VERSION } from "../src/service.ts";
 import { CraftStore, type JsonObject } from "../src/store.ts";
 
-test("v0.11.23 loads only digest-pinned local capability documents as bounded read-only context", async () => {
+test("capability resolution loads only digest-pinned local documents as bounded context", async () => {
   const root = join(tmpdir(), `craft-logical-resolve-${process.pid}-${Date.now()}`); const sourcePath = join(root, "skills");
   const store = await new CraftStore(craftPaths(join(root, "data"))).open(); const service = new CraftService(store);
   try {
@@ -38,6 +38,6 @@ test("v0.11.23 loads only digest-pinned local capability documents as bounded re
     await assert.rejects(service.logicalActivationResolve({ plan_id: plan.id }), /digest drifted/);
     await service.sourceScan({ source_id: source.id });
     await assert.rejects(service.logicalActivationResolve({ plan_id: plan.id }), /stale/);
-    assert.equal(VERSION, "0.11.32");
+    assert.equal(VERSION, "0.11.33");
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });

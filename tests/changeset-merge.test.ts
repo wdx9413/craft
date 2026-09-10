@@ -8,7 +8,7 @@ import { craftPaths } from "../src/paths.ts";
 import { CraftService } from "../src/service.ts";
 import { CraftStore, type JsonObject } from "../src/store.ts";
 
-test("v0.10.1 applies non-conflicting field patches and invalidates only transitive dependents", async () => {
+test("ChangeSets merge non-conflicting fields and invalidate only transitive dependents", async () => {
   const root = join(tmpdir(), `craft-patch-${process.pid}-${Date.now()}`); const worktree = join(root, "worktree");
   const store = await new CraftStore(craftPaths(join(root, "craft"))).open(); const service = new CraftService(store);
   try {

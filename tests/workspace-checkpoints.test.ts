@@ -10,7 +10,7 @@ import { CraftService } from "../src/service.ts";
 import { CraftStore, type JsonObject } from "../src/store.ts";
 import { snapshotNodeKind } from "../src/workspace.ts";
 
-test("v0.9.10 keeps an explicit workspace file-state timeline and restores only an approved checkpoint", async () => {
+test("workspace checkpoints preserve a file-state timeline and require approval to restore", async () => {
   const root = join(tmpdir(), `craft-workspace-${process.pid}-${Date.now()}`);
   const worktree = join(root, "worktree");
   const store = await new CraftStore(craftPaths(join(root, "craft"))).open();

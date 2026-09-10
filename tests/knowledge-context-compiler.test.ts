@@ -7,9 +7,7 @@ import { McpServer } from "../src/mcp.ts";
 import { craftPaths } from "../src/paths.ts";
 import { CraftService, VERSION } from "../src/service.ts";
 import { CraftStore, type JsonObject } from "../src/store.ts";
-await import("./v01131.test.ts");
-
-test("v0.11.30 compiles only reviewed, current, scoped knowledge into bounded deterministic context", async () => {
+test("knowledge context compilation uses only reviewed, current, scoped claims", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-context-wiki-")); const store = await new CraftStore(craftPaths(root)).open(); const service = new CraftService(store);
   try {
     const evidence = service.evidenceRecord({ source_type: "program", claim: "Observed." });
@@ -23,6 +21,6 @@ test("v0.11.30 compiles only reviewed, current, scoped knowledge into bounded de
     const bounded = service.wikiContextCompile({ query: "alpha", scope: "project:a", max_items: 1, max_chars: 100 }); assert.equal((bounded.included as JsonObject[]).length, 1); assert.equal((bounded.excluded as JsonObject[]).some((item) => item.reason === "budget"), true);
     const receipt = service.wikiContextBundleGet({ bundle_id: "bundle", version: 1 }).bundle as JsonObject; assert.equal(receipt.claim_refs instanceof Array, true); assert.equal((service.wikiContextBundleList({ query: "bundle" }).bundles as JsonObject[]).some((item) => item.id === "bundle"), true);
     const mcp = new McpServer(service, "full"); for (const [name, arguments_] of [["craft_wiki_context_compile", { query: "alpha" }], ["craft_wiki_context_bundle_get", { bundle_id: "bundle" }], ["craft_wiki_context_bundle_list", {}]] as [string, JsonObject][]) { const result = await mcp.handle({ id: name, method: "tools/call", params: { name, arguments: arguments_ } }); assert.equal((result?.result as JsonObject).isError, false); }
-    assert.equal(VERSION, "0.11.32");
+    assert.equal(VERSION, "0.11.33");
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });

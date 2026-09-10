@@ -1,6 +1,6 @@
 # Craft 产品架构：三大支柱与十个核心模块
 
-> 状态：目标架构。基线为 v0.11.20；本页不宣称所有模块已形成可用产品。
+> 状态：目标架构。基线为 v0.11.33；本页不宣称所有模块已形成可用产品。
 
 ## 目录
 
@@ -81,6 +81,7 @@ Craft 可以由对话、文件变化、Webhook、定时事件或监控信号触�
 | 能力运行灰度 | 用真实任务比较新旧能力并控制退化半径 | 已有精确版本双臂 Canary、稳定分流、最小样本、失败/成本/时延/人工修正指标和自动停止候选流量；统计置信、自动扩量和领域指标 Adapter 尚待实现 |
 | GUI 兜底执行 | 无标准 API 时通过受控 Computer Use Adapter 完成必要操作 | 规划能力；GUI 操作低于结构化 API 的可信等级，必须重新观察页面并加强审批，验证码和身份确认交还用户 |
 | 组织能力共享 | 在成员授权下复用去标识且经过验证的能力 | 已有 Federation、签名 Hub 增量目录、Materialization，以及将精确 candidate 绑定 held-out Eval、逐 Trial Sandbox Receipt、Evidence、program Grade 与 Signoff 的 Certification；独立批准后才原子晋级 verified，且不自动上传个人轨迹。主动网络传输、深度供应链分析、组织身份、删除治理和管理 UI 尚未实现 |
+| 跨宿主治理插件层 | 将多个 Host、Skill/MCP 来源与未来外部 Agent 接到同一证据和权限内核 | 已有 Codex、Claude、DeepSeek Harness 与通用 MCP 接入；本地 Source Mount、签名 Hub、隔离候选与认证形成供给链。远程 Registry Discovery Adapter、A2A Adapter、组织身份和远程执行仍待实现；来源发现不等于信任、激活或执行授权 |
 
 底层采用追加事件、版本化记录和可重建投影表达时间状态；这是一组稳定存储接口，不等于现在就需要自研 Temporal Graph Database。只有当 SQLite/对象存储在并发、查询或规模上出现经测量的瓶颈时再替换后端。
 
@@ -93,6 +94,7 @@ Craft 可以由对话、文件变化、Webhook、定时事件或监控信号触�
 - Event Sourcing、关系库、对象存储和图索引是可替换实现。Craft 的壁垒是稳定语义、证据和可重建状态，不是过早自研数据库。
 - 主动能力默认限于授权读取、索引、恢复和候选草稿；组织经验必须去标识、可审计、可撤销且经过独立验证，不能自动传播个人原始轨迹。
 - 轨迹编译必须声明适用域和 Fallback Contract，收益通过实际质量、成本与耗时评测，不承诺固定倍数。
+- 默认 Skill 保持小而可替换：只内置稳定治理和最小澄清边界；模型变强或已验证的领域能力更合适时，应跳过或替换它们。详见[可插拔能力源](../technical/modules/pluggable-capability-sources.md)。
 
 编译可以保留模型判断节点；输入或环境不适用时转回探索。WASM 可作为未来可选执行后端，不能天然提供安全性；Craft 不恢复 Python 运行时依赖。收益按总成本实测，不承诺所有任务都完全跳过推理。
 

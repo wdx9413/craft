@@ -1,6 +1,6 @@
 {
   "name": "craft-agent-harness",
-  "version": "0.11.32",
+  "version": "0.11.33",
   "description": "Cross-platform capability, workflow, evidence, and agent harness",
   "type": "module",
   "bin": {
@@ -18,7 +18,8 @@
     "prepack": "pnpm run build",
     "test:smoke": "node dist/src/cli.js --help",
     "test:plugin": "node --experimental-strip-types scripts/plugin-smoke.ts && node --experimental-strip-types scripts/plugin-full-smoke.ts",
-    "test:ts": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-exclude=tests/** --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 tests/json-schema.test.ts tests/acceptance-worker.test.ts tests/attention.test.ts tests/home.test.ts tests/workbench-server.test.ts tests/config.test.ts tests/store.test.ts tests/catalog.test.ts tests/semantic.test.ts tests/security.test.ts tests/egress.test.ts tests/effects.test.ts tests/recovery.test.ts tests/trigger.test.ts tests/speculative.test.ts tests/lineage.test.ts tests/hydration.test.ts tests/autonomy.test.ts tests/sandbox.test.ts tests/docker-sandbox.test.ts tests/workflow.test.ts tests/orchestration.test.ts tests/orchestration-trial.test.ts tests/default-orchestration.test.ts tests/evaluation.test.ts tests/service.test.ts tests/experience-publisher.test.ts tests/runtime.test.ts tests/closed-loop.test.ts tests/v096.test.ts tests/v097.test.ts tests/v098.test.ts tests/v099.test.ts tests/v0910.test.ts tests/v0911.test.ts tests/v0912.test.ts tests/v0100.test.ts tests/v0101.test.ts tests/v0102.test.ts tests/v01121.test.ts tests/v01122.test.ts tests/v01123.test.ts tests/v01124.test.ts tests/v01125.test.ts tests/supply-chain.test.ts tests/maintenance.test.ts tests/mcp.test.ts",
+    "version:check": "node --experimental-strip-types scripts/check-version.ts",
+    "test:ts": "pnpm run version:check && node --test --test-isolation=none --experimental-test-coverage --test-coverage-exclude=tests/** --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 tests/json-schema.test.ts tests/acceptance-worker.test.ts tests/attention.test.ts tests/home.test.ts tests/workbench-server.test.ts tests/config.test.ts tests/store.test.ts tests/catalog.test.ts tests/semantic.test.ts tests/security.test.ts tests/egress.test.ts tests/effects.test.ts tests/recovery.test.ts tests/trigger.test.ts tests/speculative.test.ts tests/lineage.test.ts tests/hydration.test.ts tests/autonomy.test.ts tests/sandbox.test.ts tests/docker-sandbox.test.ts tests/workflow.test.ts tests/orchestration.test.ts tests/orchestration-trial.test.ts tests/default-orchestration.test.ts tests/evaluation.test.ts tests/service.test.ts tests/experience-publisher.test.ts tests/runtime.test.ts tests/closed-loop.test.ts tests/runtime-driver.test.ts tests/promotion-gates.test.ts tests/experience-mining.test.ts tests/capability-access.test.ts tests/workspace-checkpoints.test.ts tests/workspace-transactions.test.ts tests/verified-scripts.test.ts tests/work-object-graph.test.ts tests/changeset-merge.test.ts tests/control-plane-budget.test.ts tests/context-profiles.test.ts tests/capability-activation.test.ts tests/capability-resolution.test.ts tests/host-context-dispatch.test.ts tests/verified-iteration.test.ts tests/work-launch-context.test.ts tests/strategy-recommendations.test.ts tests/cross-domain-acceptance.test.ts tests/evidence-wiki.test.ts tests/knowledge-context-compiler.test.ts tests/wiki-capability-candidates.test.ts tests/knowledge-evaluation.test.ts tests/knowledge-bound-work-launch.test.ts tests/governed-capability-intake.test.ts tests/supply-chain.test.ts tests/maintenance.test.ts tests/mcp.test.ts",
     "check:ts": "node --experimental-strip-types src/cli.ts --help",
     "typecheck": "node node_modules/typescript/bin/tsc --noEmit"
   },
@@ -62,5 +63,6 @@
   },
   "dependencies": {
     "yaml": "^2.9.0"
-  }
+  },
+  "packageManager": "pnpm@12.3.4+sha512.961aa41fb077da3a04a441d9f8e15ebc0c96da8ef710b2eb67bf9ee7cb0610eabd48f1fd85f51cffe73846785fa0f87c56a3a872a1d893f8446741b5cce45457"
 }

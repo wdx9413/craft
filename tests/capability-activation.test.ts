@@ -8,7 +8,7 @@ import { craftPaths } from "../src/paths.ts";
 import { CraftService, VERSION } from "../src/service.ts";
 import { CraftStore, type JsonObject } from "../src/store.ts";
 
-test("v0.11.22 pins logical capability content for a task and audits reselection or drift", async () => {
+test("logical capability content is pinned and audit detects reselection or drift", async () => {
   const root = join(tmpdir(), `craft-logical-activation-${process.pid}-${Date.now()}`); const primary = join(root, "primary"); const mirror = join(root, "mirror");
   const store = await new CraftStore(craftPaths(join(root, "data"))).open(); const service = new CraftService(store);
   try {
@@ -50,6 +50,6 @@ test("v0.11.22 pins logical capability content for a task and audits reselection
       const result = await mcp.handle({ id: name, method: "tools/call", params: { name, arguments: arguments_ } });
       assert.equal((result?.result as JsonObject).isError, false, name);
     }
-    assert.equal(VERSION, "0.11.32");
+    assert.equal(VERSION, "0.11.33");
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });

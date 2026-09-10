@@ -7,9 +7,7 @@ import { McpServer } from "../src/mcp.ts";
 import { craftPaths } from "../src/paths.ts";
 import { CraftService, VERSION } from "../src/service.ts";
 import { CraftStore, type JsonObject } from "../src/store.ts";
-await import("./v01127.test.ts");
-
-test("v0.11.26 binds and rechecks local capability context across Work Launch approval", async () => {
+test("Work Launch binds and rechecks local capability context across approval", async () => {
   const root = join(tmpdir(), `craft-context-launch-${Date.now()}`); const skills = join(root, "skills"); const store = await new CraftStore(craftPaths(join(root, "data"))).open(); const service = new CraftService(store);
   try {
     await mkdir(skills, { recursive: true }); const content = "---\nname: safe helper\ndescription: helps work\ncapability_id: safe-helper\n---\nUse evidence."; await writeFile(join(skills, "SKILL.md"), content);
@@ -26,6 +24,6 @@ test("v0.11.26 binds and rechecks local capability context across Work Launch ap
     const tampered = await service.capabilityContextWorkLaunchPrepare({ ...args, launch_id: "tampered" }); store.save("work_launch", String((tampered.launch as JsonObject).id), { ...(tampered.launch as JsonObject), activation_context_digest: "wrong" }); await assert.rejects(service.capabilityContextWorkLaunchDecide({ launch_id: (tampered.launch as JsonObject).id, actor: "human", approved: true, prompt: args.prompt }), /changed since/);
     const claude = await service.capabilityContextWorkLaunchPrepare({ ...args, host: "claude-code", launch_id: "claude" }); assert.equal((claude.dispatch as JsonObject).kind, undefined);
     const stale = await service.capabilityContextWorkLaunchPrepare({ ...args, launch_id: "stale" }); await writeFile(join(skills, "SKILL.md"), `${content}\nChanged.`); await assert.rejects(service.capabilityContextWorkLaunchDecide({ launch_id: (stale.launch as JsonObject).id, actor: "human", approved: true, prompt: args.prompt }), /digest drifted/);
-    await service.sourceScan({ source_id: source.id }); assert.equal(VERSION, "0.11.32");
+    await service.sourceScan({ source_id: source.id }); assert.equal(VERSION, "0.11.33");
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });

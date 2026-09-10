@@ -8,7 +8,7 @@ import { craftPaths } from "../src/paths.ts";
 import { CraftService } from "../src/service.ts";
 import { CraftStore, type JsonObject } from "../src/store.ts";
 
-test("v0.9.12 issues a verified script only into its prepared workspace transaction and records exact host receipts", async () => {
+test("verified scripts require a prepared workspace transaction and exact host receipts", async () => {
   const root = join(tmpdir(), `craft-script-run-${process.pid}-${Date.now()}`);
   const worktree = join(root, "worktree");
   const store = await new CraftStore(craftPaths(join(root, "craft"))).open();

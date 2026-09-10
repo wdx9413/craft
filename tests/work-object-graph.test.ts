@@ -8,7 +8,7 @@ import { craftPaths } from "../src/paths.ts";
 import { CraftService, VERSION } from "../src/service.ts";
 import { CraftStore, type JsonObject } from "../src/store.ts";
 
-test("v0.10.0 maintains a shared object graph, invalidates dependents, and prevents stale writes", async () => {
+test("shared object graphs invalidate dependents and prevent stale writes", async () => {
   const root = join(tmpdir(), `craft-workbench-${process.pid}-${Date.now()}`);
   const worktree = join(root, "worktree");
   const store = await new CraftStore(craftPaths(join(root, "craft"))).open();
@@ -16,7 +16,7 @@ test("v0.10.0 maintains a shared object graph, invalidates dependents, and preve
   try {
     await mkdir(worktree, { recursive: true });
     const opened = service.workspaceOpen({ workspace_id: "ws", name: "Video", root_path: worktree, include_paths: ["assets"] });
-    assert.equal(VERSION, "0.11.32");
+    assert.equal(VERSION, "0.11.33");
     assert.equal((opened.workspace as JsonObject).state_revision, 1);
     const brief = service.workObjectPut({ workspace_id: "ws", object_id: "brief", object_type: "brief", name: "人物设定",
       data: { character: "A" }, source_paths: ["assets/brief.md"], expected_state_revision: 1 }).object as JsonObject;

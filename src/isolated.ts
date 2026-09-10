@@ -27,7 +27,10 @@ export async function runLocalProcess(request: JsonObject): Promise<{ code: numb
   const child = spawn(String(request.helper), request.argv as string[], { cwd: String(request.cwd), env: environment, shell: false, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
   let stdout = ""; let stderr = ""; child.stdout!.setEncoding("utf8"); child.stderr!.setEncoding("utf8");
   child.stdout!.on("data", (chunk) => { stdout += chunk; }); child.stderr!.on("data", (chunk) => { stderr += chunk; });
-  return new Promise((resolveResult, reject) => { child.once("error", reject); child.once("close", (code) => resolveResult({ code: processExitCode(code), stdout, stderr })); });
+  return new Promise((resolveResult) => {
+    child.once("error", (error) => resolveResult({ code: 1, stdout, stderr: `${stderr}${error.message}` }));
+    child.once("close", (code) => resolveResult({ code: processExitCode(code), stdout, stderr }));
+  });
 }
 
 export class LocalIsolatedAdapter {

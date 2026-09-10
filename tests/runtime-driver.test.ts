@@ -167,7 +167,7 @@ test("driver blocks unsafe deterministic execution, retries deterministic failur
       operation_id: "secret-op", kind: "workflow", effect: "read_only", objective: "secret", execution: { workflow_id: secret.id, workflow_version: secret.version, project_root: root, inputs: {} },
     }] });
     service.runtimeDriverTick({ run_id: "secret-run", driver_id: "driver" });
-    const cleanCommand = service.workflowSave({ workflow_id: "clean-command", name: "Clean command", steps: [
+  const cleanCommand = service.workflowSave({ workflow_id: "clean-command", name: "Clean command", steps: [
       { id: "clean", type: "command", command: [process.execPath, "-e", ""], side_effect: "read_only" },
     ] });
     service.runtimeRunStart({ run_id: "clean-command-run", task_id: task.id, policy_id: allowedCommand.id, environment: {}, operations: [{

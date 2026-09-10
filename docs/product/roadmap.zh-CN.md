@@ -13,7 +13,9 @@
 
 ## 建设原则
 
-以 [产品架构](architecture.zh-CN.md) 的三大支柱为目标：工作与协作、执行与保障、学习与改进。**评测与实验是第三支柱内的核心模块**，不另设第四支柱。以下里程碑是规划；当前实现基线已推进到 v0.11.32。
+以 [产品架构](architecture.zh-CN.md) 的三大支柱为目标：工作与协作、执行与保障、学习与改进。**评测与实验是第三支柱内的核心模块**，不另设第四支柱。以下里程碑是规划；当前实现基线已推进到 v0.11.33。
+
+**两步定位**：短期做**跨宿主治理插件层**——以 MCP/插件形式接入 Codex CLI、Claude Code、DeepSeek Harness 等宿主，统一能力发现、授权门禁、证据链与评测门禁，执行留在宿主内；长期做**自主 Agent 平台**——自有对话循环、宿主调度与评测驱动的自我改进。Provider 是当前主线，Supervisor/Agent 是长期形态；本路线图中 v0.11.x 的能力全部属于两步共用的内核。
 
 **v0.11.20：逻辑能力索引。** Capability Source 是可重复登记的来源 Mount，不要求用户通过禁用目录来去重。相同挂载请求保持幂等；不同来源的同内容 Skill 由内容摘要归并为一个逻辑能力，搜索只返回按显式优先级选定的一个实例，同时保留所有来源。相同 `capability_id`（或名称）而内容不同会形成显式 Conflict，不静默覆盖。`craft_logical_capability_list` 可读取逻辑能力、来源实例、当前选中项与冲突。Workflow scope、Task Context Profile、Activation Profile 与生命周期 Integrity Audit 是下一阶段，当前不能宣称已实现。
 
@@ -40,6 +42,8 @@
 **v0.11.31：Wiki 到能力候选。** 至少两条已审核 Claim 才能生成 Skill 或 Workflow 候选，并固定其版本、适用条件、指令草案和回退条件。候选只可进入独立评测；不自动写入 `SKILL.md`、发布、路由或执行。
 
 **v0.11.32：Knowledge Quality Evaluation。** 用户可维护固定的 Query→Expected Claim 案例，计算检索 Recall、Evidence Coverage 和未审核候选泄漏，并以显式阈值得出 `eligible` 或 `insufficient`。结果不自动调整 Context Compiler、路由或发布。
+
+**v0.11.33：Knowledge-bound Work Launch。** 指定精确 Wiki Context Bundle 后，启动与批准前均重验 Claim 版本、审核状态、有效期、scope、Evidence 和 context digest；只读有限知识进入 Host Prompt，Launch/Dispatch/Trial/Outcome 均保留血缘。变化时失败关闭。
 
 - 面向各行业工作者，研发是首批验证场景，视频用于检验跨领域复用；后续扩展销售、教育与内容创作，不同时自建所有专业编辑器。
 - 先把真实工作从目标到成果跑通，同时提供可操作的最小界面；不长期只增加协议与配置。

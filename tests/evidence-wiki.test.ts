@@ -7,9 +7,7 @@ import { McpServer } from "../src/mcp.ts";
 import { craftPaths } from "../src/paths.ts";
 import { CraftService, VERSION } from "../src/service.ts";
 import { CraftStore, type JsonObject } from "../src/store.ts";
-await import("./v01130.test.ts");
-
-test("v0.11.29 keeps editable Wiki material separate from evidence-backed claim review", async () => {
+test("editable Wiki material remains separate from evidence-backed claim review", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-wiki-")); const store = await new CraftStore(craftPaths(root)).open(); const service = new CraftService(store);
   try {
     const evidence = service.evidenceRecord({ evidence_id: "e1", source_type: "program", claim: "Observed stable result.", confidence: "confirmed" });
@@ -26,7 +24,7 @@ test("v0.11.29 keeps editable Wiki material separate from evidence-backed claim 
     const revised = (await service.wikiPageSave({ page_id: "page", title: "Playbook", body: "Revised explanation.", claim_ids: [] })).page as JsonObject; assert.equal(revised.version, 2); assert.equal((await service.wikiPageGet({ page_id: page.id, version: 1 })).body, "Editable explanation.");
     await writeFile(String(revised.file_path), "Human revision.", "utf8"); assert.equal((await service.wikiPageGet({ page_id: page.id })).body, "Human revision."); await assert.rejects(service.wikiPageSave({ page_id: page.id, title: "Playbook", body: "Overwrite.", claim_ids: [] }), /unrecorded/); assert.equal(((await service.wikiPageRefresh({ page_id: page.id })) as JsonObject).changed, true); assert.equal(((await service.wikiPageRefresh({ page_id: page.id })) as JsonObject).changed, false);
     await assert.rejects(service.wikiPageSave({ title: "x", body: "password=leak" }), /sensitive/);
-    const relation = service.knowledgeRelationSave({ relation_id: "r", from_claim_id: claim.id, to_claim_id: service.knowledgeClaimSave({ kind: "fact", content: "Another observed result.", evidence_ids: [evidence.id] }).claim.id, relation: "supports" }).relation as JsonObject; assert.equal(relation.relation, "supports");
+    const relation = service.knowledgeRelationSave({ relation_id: "r", from_claim_id: claim.id, to_claim_id: (service.knowledgeClaimSave({ kind: "fact", content: "Another observed result.", evidence_ids: [evidence.id] }).claim as JsonObject).id, relation: "supports" }).relation as JsonObject; assert.equal(relation.relation, "supports");
     assert.equal((service.knowledgeRelationSave({ relation_id: "r", from_claim_id: relation.from_claim_id, to_claim_id: relation.to_claim_id, relation: "supports" }) as JsonObject).idempotent, true);
     await assert.rejects(Promise.resolve().then(() => service.knowledgeRelationSave({ relation_id: "r", from_claim_id: relation.from_claim_id, to_claim_id: relation.to_claim_id, relation: "contradicts" })), /idempotency/);
     await assert.rejects(Promise.resolve().then(() => service.knowledgeRelationSave({ from_claim_id: claim.id, to_claim_id: claim.id, relation: "supports" })), /differ/);
@@ -35,6 +33,6 @@ test("v0.11.29 keeps editable Wiki material separate from evidence-backed claim 
     for (const [name, arguments_] of [["craft_knowledge_claim_get", { claim_id: claim.id }], ["craft_knowledge_claim_list", {}], ["craft_knowledge_claim_review", { claim_id: claim.id, status: "disputed", reviewer: "human", reason: "newer source" }], ["craft_wiki_page_get", { page_id: page.id }], ["craft_wiki_page_list", {}], ["craft_wiki_page_refresh", { page_id: page.id }], ["craft_knowledge_relation_save", { from_claim_id: claim.id, to_claim_id: relation.to_claim_id, relation: "contradicts" }], ["craft_knowledge_claim_save", { kind: "term", content: "A named concept.", evidence_ids: [evidence.id] }], ["craft_wiki_page_save", { title: "MCP", body: "A page." }]] as [string, JsonObject][]) {
       const result = await mcp.handle({ id: name, method: "tools/call", params: { name, arguments: arguments_ } }); assert.equal((result?.result as JsonObject).isError, false);
     }
-    assert.equal(VERSION, "0.11.32");
+    assert.equal(VERSION, "0.11.33");
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });

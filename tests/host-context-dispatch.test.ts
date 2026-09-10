@@ -8,7 +8,7 @@ import { craftPaths } from "../src/paths.ts";
 import { CraftService, VERSION } from "../src/service.ts";
 import { CraftStore, type JsonObject } from "../src/store.ts";
 
-test("v0.11.24 binds validated capability context to Codex and Claude dispatches", async () => {
+test("validated capability context is bound to Codex and Claude dispatches", async () => {
   const root = join(tmpdir(), `craft-context-dispatch-${process.pid}-${Date.now()}`); const sourcePath = join(root, "skills");
   const store = await new CraftStore(craftPaths(join(root, "data"))).open(); const service = new CraftService(store);
   try {
@@ -42,6 +42,6 @@ test("v0.11.24 binds validated capability context to Codex and Claude dispatches
     await writeFile(join(sourcePath, "SKILL.md"), `${skill}\nChanged.`);
     await assert.rejects(service.capabilityContextDispatchExecute({ host: "codex-cli", dispatch_id: codexDispatch.id, prompt: common.prompt }), /digest drifted/);
     await service.sourceScan({ source_id: source.id });
-    assert.equal(VERSION, "0.11.32");
+    assert.equal(VERSION, "0.11.33");
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });

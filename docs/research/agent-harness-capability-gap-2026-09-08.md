@@ -2,6 +2,14 @@
 
 > as_of: 2026-09-08  
 > 范围：只评估 Craft v0.9.4 的编排、执行控制、评测与经验演进；不把固定 BRD/PRD 等产物当作能力目标。
+>
+> **时效警示**：本文是 v0.9.4/v0.9.5 时期的历史基线调研，下文缺口大多已在后续版本补齐或调整，实施状态以 [技术模块文档](../technical/overview.zh-CN.md) 和 [产品路线](../product/roadmap.zh-CN.md) 为准。
+
+## 2026-09-10 当前阅读说明（v0.11.33）
+
+本文保留问题发现过程，不再代表当前 capability gap。短期定位已明确为跨宿主治理插件层：Codex、Claude、DeepSeek Harness 与通用 MCP 接入共享能力发现、授权、Evidence 与 Eval/Signoff；执行仍由宿主承担。长期定位是自主 Agent 平台，但 conversation loop、Host Driver、Planner 和 UI 都将作为可评测、可替换组件，而不会被单一模型 Harness 锁死。
+
+Skill、MCP、专家服务和市场/Registry 的统一接入模型与当前实现边界见[可插拔能力源](../technical/modules/pluggable-capability-sources.md)。
 
 ## 结论
 

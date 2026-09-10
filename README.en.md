@@ -1,5 +1,7 @@
 # Craft
 
+> Current release: v0.11.33. Recent additions include reproducible Evidence Wiki Context Bundles, fail-closed knowledge-bound Work Launches, and knowledge-quality evaluation gates.
+
 [中文](README.md) | [English](README.en.md)
 
 ## Product in brief
@@ -8,7 +10,9 @@ Craft aims to be a shared digital workbench for people and AI: understand goals,
 
 The product is intended for workers across video, sales, education, content creation, software engineering, and other fields. Domain extensions provide appropriate objects, views, tools, and acceptance criteria; users should not need programming knowledge to use the future workbench.
 
-Version 0.11.25 keeps local directories as multiple Source Mounts while indexing identical content as one logical capability. Activation Plans and Resolution pin, recheck, and bound read-only capability content. Capability-bound Dispatches can provide that exact context to Codex CLI or Claude Code, then recheck it just before execution and fail closed on drift; this never executes a local Skill or grants extra tool or write permissions. A verification-driven iteration controller classifies independent acceptance as pass, bounded retry, environment/configuration block, or human handoff without granting extra write authority.
+The roadmap has two steps. Short term, Craft is a cross-host governance plugin layer: it plugs into hosts such as Codex CLI, Claude Code, and DeepSeek Harness through MCP/plugins and provides unified capability discovery, authorization gates, evidence chains, and evaluation gates, while execution stays inside the host. Long term, Craft aims to become an autonomous agent platform that carries its own conversation loop, schedules hosts, and improves through gated evaluation. Both steps share one kernel.
+
+The current version keeps local directories as multiple Source Mounts while indexing identical content as one logical capability. Activation Plans and Resolution pin, recheck, and bound read-only capability content. Capability-bound Dispatches can provide that exact context to Codex CLI or Claude Code, then recheck it just before execution and fail closed on drift; this never executes a local Skill or grants extra tool or write permissions. A verification-driven iteration controller classifies independent acceptance as pass, bounded retry, environment/configuration block, or human handoff without granting extra write authority.
 
 | Product pillar | Target capabilities |
 | --- | --- |

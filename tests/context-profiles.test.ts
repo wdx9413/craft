@@ -8,7 +8,7 @@ import { craftPaths } from "../src/paths.ts";
 import { CraftService, VERSION } from "../src/service.ts";
 import { CraftStore, type JsonObject } from "../src/store.ts";
 
-test("v0.11.21 pins bounded context profiles and keeps generic task graphs separate from execution", async () => {
+test("bounded context profiles remain separate from generic task-graph execution", async () => {
   const root = join(tmpdir(), `craft-context-profile-${process.pid}-${Date.now()}`); const worktree = join(root, "workspace");
   const store = await new CraftStore(craftPaths(join(root, "craft"))).open(); const service = new CraftService(store);
   try {
@@ -91,6 +91,6 @@ test("v0.11.21 pins bounded context profiles and keeps generic task graphs separ
       arguments: { graph_id: "mcp_graph", node_id: "one", status: "done" } } });
     assert.equal((advanced?.result as JsonObject).isError, false);
     assert.equal(((service.contextProfileAssemble({ profile_id: "mcp_context", query: "anything" }).profile as JsonObject).id), "mcp_context");
-    assert.equal(VERSION, "0.11.32");
+    assert.equal(VERSION, "0.11.33");
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });

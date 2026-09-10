@@ -1,5 +1,25 @@
 # Craft 领域词汇
 
+## 术语分层速览
+
+先建立三层心智模型，再读下面的逐条定义：
+
+| 层 | 回答的问题 | 术语 |
+| --- | --- | --- |
+| 能力与上下文 | 用什么能力、给多少上下文？ | Capability Asset、Activation Profile、Expert、Context Capsule、Tool Selection Receipt |
+| 执行与治理 | 谁来执行、允许做什么？ | Sub-agent Run、Execution Decision、Workspace、Workspace Checkpoint、Workspace Transaction |
+| 验证与沉淀 | 结果可信吗、如何复用？ | Trajectory Script Proposal、Verified Script Run、Adaptation Candidate |
+
+```mermaid
+flowchart LR
+  CA[Capability Asset] --> AP[Activation Profile]
+  AP --> EX[Expert] --> CC[Context Capsule] --> SR[Sub-agent Run]
+  SR --> ED[Execution Decision]
+  SR --> WS[Workspace / Checkpoint / Transaction]
+  SR --> TR[Trial + Evidence] --> SP[Trajectory Script Proposal] --> VR[Verified Script Run]
+  TR --> AC[Adaptation Candidate]
+```
+
 ## Capability Asset
 
 可被发现、选择和授权的能力单元，例如 Skill、MCP Server、Tool、Workflow、Runtime Adapter、Validator 或 Eval Suite。它不是某次执行，也不意味着已经被加载到宿主。
