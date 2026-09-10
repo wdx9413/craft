@@ -15,7 +15,7 @@ import { decideExecution } from "./execution-policy.js";
 import { dockerRequestDigest } from "./docker-sandbox.js";
 import { egressRequestDigest } from "./egress.js";
 import { ServiceFoundation } from "./service-foundation.js";
-export const VERSION = "0.11.38";
+export const VERSION = "0.11.39";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -232,7 +232,7 @@ export class CraftService extends ServiceFoundation {
             "maintenance_status",
             "maintenance_tick",
             "maintenance_component", "maintenance_failure", "attention_item", "work_launch", "acceptance_plan", "acceptance_check", "acceptance_assessment", "acceptance_evaluator", "acceptance_evaluation_job", "verified_iteration", "iteration_attempt", "strategy_recommendation",
-            "trajectory_script_proposal", "verified_script_run", "knowledge_claim", "wiki_page", "knowledge_relation", "wiki_context_bundle", "wiki_skill_candidate", "knowledge_evaluation_case", "knowledge_evaluation_run", "wiki_candidate_evaluation_attestation", "wiki_candidate_publication_authorization", "wiki_candidate_publication_package", "guided_work_brief"];
+            "trajectory_script_proposal", "verified_script_run", "knowledge_claim", "wiki_page", "knowledge_relation", "wiki_context_bundle", "wiki_skill_candidate", "knowledge_evaluation_case", "knowledge_evaluation_run", "wiki_candidate_evaluation_attestation", "wiki_candidate_publication_authorization", "wiki_candidate_publication_package", "guided_work_brief", "execution_safety_preflight", "wiki_candidate_local_import"];
         kinds.push("untrusted_content", "untrusted_extraction", "decision_projection");
         return { version: VERSION, data_root: this.store.paths.root,
             counts: Object.fromEntries(kinds.map((kind) => [kind, this.store.count(kind)])) };
@@ -2760,6 +2760,8 @@ export class CraftService extends ServiceFoundation {
     safetyWorkLaunchPrepare(args) { const prepared = this.executionSafety.preflight(args); const preflight = prepared.preflight; const launched = this.workLaunchPrepare({ ...args, task_id: preflight.task_id, timeout_ms: preflight.resources.timeout_ms, output_limit: preflight.resources.output_limit, max_turns: preflight.resources.max_turns ?? undefined, max_budget_usd: preflight.resources.max_budget_usd ?? undefined }); const bound = this.executionSafety.bind({ preflight_id: preflight.id, launch_id: launched.launch.id }); return { ...launched, launch: bound.launch, preflight, idempotent: launched.idempotent }; }
     safetyWorkLaunchDecide(args) { const launch = this.store.get("work_launch", text(args.launch_id, "launch_id")); const binding = object(launch.safety_preflight, "Work Launch safety preflight"); const checked = this.executionSafety.validate({ preflight_id: binding.preflight_id, version: binding.preflight_version }); const dispatch = this.store.get(launch.host === "codex-cli" ? "codex_dispatch" : "claude_dispatch", String(launch.dispatch_id)); const contract = { timeout_ms: dispatch.timeout_ms, output_limit: dispatch.output_limit, max_turns: launch.host === "claude-code" ? dispatch.max_turns : null, max_budget_usd: launch.host === "claude-code" ? dispatch.max_budget_usd : null }; if (valueDigest(contract) !== valueDigest(checked.preflight.resources))
         throw new Error("Safety preflight resource contract does not match Work Launch dispatch"); return this.workLaunchDecide(args); }
+    wikiCandidateLocalImport(args) { return this.localCandidateImport.import(args); }
+    wikiCandidateLocalImportGet(args) { return this.localCandidateImport.get(args); }
     knowledgeEvaluationCaseSave(args) {
         const query = assertNoSecret(text(args.query, "query"), "query");
         const scope = String(args.scope ?? "global");

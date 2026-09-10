@@ -39,6 +39,7 @@ import { KnowledgeWorkbenchKernel } from "./knowledge-workbench.ts";
 import { WikiCandidateGovernanceKernel } from "./wiki-candidate-governance.ts";
 import { GuidedWorkKernel } from "./guided-work.ts";
 import { ExecutionSafetyKernel } from "./execution-safety.ts";
+import { LocalCandidateImportKernel } from "./local-candidate-import.ts";
 
 /**
  * Stable composition root for the service. Domain behavior stays in focused
@@ -85,6 +86,7 @@ export abstract class ServiceFoundation {
   readonly wikiCandidateGovernance: WikiCandidateGovernanceKernel;
   readonly guidedWork: GuidedWorkKernel;
   readonly executionSafety: ExecutionSafetyKernel;
+  readonly localCandidateImport: LocalCandidateImportKernel;
 
   constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter = new LocalIsolatedAdapter(),
     dockerSandbox = new DockerSandboxAdapter(), egressBroker = new TrustedEgressBroker(), hostOwnerId?: string) {
@@ -110,6 +112,7 @@ export abstract class ServiceFoundation {
     this.wikiCandidateGovernance = new WikiCandidateGovernanceKernel(store);
     this.guidedWork = new GuidedWorkKernel(store);
     this.executionSafety = new ExecutionSafetyKernel(store, this.sandbox);
+    this.localCandidateImport = new LocalCandidateImportKernel(store);
     this.hostRuns = new HostRunKernel(store, [this.codexHost, this.claudeHost], hostOwnerId,
       (run, receipt) => this.finalizeWorkLaunch(run, receipt));
   }

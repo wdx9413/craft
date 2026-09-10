@@ -48,6 +48,7 @@
 - [Wiki Candidate Publication Package](technical/modules/wiki-candidate-publication-package.md)：把已授权的知识候选固定为可人工导入、可跨宿主审阅的便携包，仍不自动安装或执行。
 - [Guided Work](technical/modules/guided-work.md)：用目标、资料引用和显式决策形成可恢复的普通用户工作入口，再进入原有受控启动协议。
 - [Execution Safety Preflight](technical/modules/execution-safety-preflight.md)：把已验证 Sandbox Profile 和 Host 资源上限固定到工作启动，且不夸大为系统级隔离。
+- [Local Candidate Import](technical/modules/local-candidate-import.md)：以显式确认、目录边界和不可覆盖写入落地已审核交付包，仍默认不启用。
 
 ## 研究证据
 
