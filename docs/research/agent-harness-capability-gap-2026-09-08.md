@@ -5,7 +5,7 @@
 >
 > **时效警示**：本文是 v0.9.4/v0.9.5 时期的历史基线调研，下文缺口大多已在后续版本补齐或调整，实施状态以 [技术模块文档](../technical/overview.zh-CN.md) 和 [产品路线](../product/roadmap.zh-CN.md) 为准。
 
-## 2026-09-10 当前阅读说明（v0.11.40）
+## 2026-09-10 当前阅读说明（v0.11.41）
 
 本文保留问题发现过程，不再代表当前 capability gap。短期定位已明确为跨宿主治理插件层：Codex、Claude、DeepSeek Harness 与通用 MCP 接入共享能力发现、授权、Evidence 与 Eval/Signoff；执行仍由宿主承担。长期定位是自主 Agent 平台，但 conversation loop、Host Driver、Planner 和 UI 都将作为可评测、可替换组件，而不会被单一模型 Harness 锁死。
 

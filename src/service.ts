@@ -17,7 +17,7 @@ import { dockerRequestDigest } from "./docker-sandbox.ts";
 import { egressRequestDigest } from "./egress.ts";
 import { ServiceFoundation } from "./service-foundation.ts";
 
-export const VERSION = "0.11.40";
+export const VERSION = "0.11.41";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -2149,6 +2149,7 @@ export class CraftService extends ServiceFoundation {
   guidedWorkCreate(args: JsonObject): JsonObject { const existing = args.brief_id === undefined ? null : this.store.find("guided_work_brief", text(args.brief_id, "brief_id")); const task = existing ? this.store.get("task", String(existing.task_id)) : this.taskOpen({ title: args.title, goal: args.goal, project_id: args.project_id ?? null }).task as JsonObject; if (existing && [task.title !== text(args.title, "title"), task.goal !== text(args.goal, "goal")].some(Boolean)) throw new Error("Guided work brief idempotency conflict"); return this.guidedWork.create({ ...args, task_id: task.id }); }
   guidedWorkDecide(args: JsonObject): JsonObject { return this.guidedWork.decide(args); }
   guidedWorkGet(args: JsonObject): JsonObject { return this.guidedWork.get(args); }
+  guidedWorkList(args: JsonObject): JsonObject { return this.list("guided_work_brief", "briefs", args); }
   guidedWorkLaunchPrepare(args: JsonObject): JsonObject { const brief = this.store.get("guided_work_brief", text(args.brief_id, "brief_id")); if (brief.status !== "ready_to_launch") throw new Error("Guided work brief requires all decisions before launch"); const prepared = this.workLaunchPrepare({ ...args, task_id: brief.task_id }); const bound = this.guidedWork.bindLaunch({ brief_id: brief.id, launch_id: (prepared.launch as JsonObject).id }); return { ...prepared, brief: bound.brief }; }
   executionSafetyPreflight(args: JsonObject): JsonObject { return this.executionSafety.preflight(args); }
   executionSafetyGet(args: JsonObject): JsonObject { return this.executionSafety.get(args); }

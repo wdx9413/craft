@@ -14984,7 +14984,7 @@ var ServiceFoundation = class {
 };
 
 // src/service.ts
-var VERSION = "0.11.40";
+var VERSION = "0.11.41";
 var CONFIDENCE = /* @__PURE__ */ new Set(["confirmed", "bounded", "unverified", "rejected"]);
 var TASK_STATUS = /* @__PURE__ */ new Set(["active", "paused", "completed", "cancelled"]);
 var VERSIONED_LIFECYCLE = /* @__PURE__ */ new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -18741,6 +18741,9 @@ Evidence: ${item.evidence_ids.join(", ")}
   }
   guidedWorkGet(args) {
     return this.guidedWork.get(args);
+  }
+  guidedWorkList(args) {
+    return this.list("guided_work_brief", "briefs", args);
   }
   guidedWorkLaunchPrepare(args) {
     const brief = this.store.get("guided_work_brief", text36(args.brief_id, "brief_id"));

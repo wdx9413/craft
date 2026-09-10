@@ -1,6 +1,6 @@
 # Craft
 
-> Current release: v0.11.40. Recent additions include reproducible Evidence Wiki Context Bundles, fail-closed knowledge-bound Work Launches, and human-imported cross-host Wiki candidate packages with complete evaluation lineage.
+> Current release: v0.11.41. Recent additions include reproducible Evidence Wiki Context Bundles, fail-closed knowledge-bound Work Launches, and a visible Goal-Material-Decision-Result guided-work flow in Workbench.
 
 [中文](README.md) | [English](README.en.md)
 

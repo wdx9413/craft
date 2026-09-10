@@ -15,7 +15,7 @@ import { decideExecution } from "./execution-policy.js";
 import { dockerRequestDigest } from "./docker-sandbox.js";
 import { egressRequestDigest } from "./egress.js";
 import { ServiceFoundation } from "./service-foundation.js";
-export const VERSION = "0.11.40";
+export const VERSION = "0.11.41";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -2753,6 +2753,7 @@ export class CraftService extends ServiceFoundation {
         throw new Error("Guided work brief idempotency conflict"); return this.guidedWork.create({ ...args, task_id: task.id }); }
     guidedWorkDecide(args) { return this.guidedWork.decide(args); }
     guidedWorkGet(args) { return this.guidedWork.get(args); }
+    guidedWorkList(args) { return this.list("guided_work_brief", "briefs", args); }
     guidedWorkLaunchPrepare(args) { const brief = this.store.get("guided_work_brief", text(args.brief_id, "brief_id")); if (brief.status !== "ready_to_launch")
         throw new Error("Guided work brief requires all decisions before launch"); const prepared = this.workLaunchPrepare({ ...args, task_id: brief.task_id }); const bound = this.guidedWork.bindLaunch({ brief_id: brief.id, launch_id: prepared.launch.id }); return { ...prepared, brief: bound.brief }; }
     executionSafetyPreflight(args) { return this.executionSafety.preflight(args); }
