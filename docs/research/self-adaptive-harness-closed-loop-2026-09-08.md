@@ -6,7 +6,7 @@
 >
 > **时效警示**：本文撰写于 v0.9.8/v0.9.9 时期，文中"缺口/规划"多数已在后续版本实现或调整。阅读时请把它当作历史调研基线，实施状态以 [技术模块文档](../technical/overview.zh-CN.md) 和 [产品路线](../product/roadmap.zh-CN.md) 为准。
 
-## 2026-09-10 当前阅读说明（v0.11.33）
+## 2026-09-10 当前阅读说明（v0.11.34）
 
 本文不再作为当前缺口清单。自该基线之后，Capability Asset/Activation Profile、受控 Host Dispatch/Run、Docker Conformance、可恢复 Worker、供应链认证、Evidence Wiki、Context Compiler、Wiki 候选与知识评测均已形成代码接口和测试；真实跨宿主链路、业务质量与生产安全仍需分别验收。当前决策是：短期以跨宿主治理插件层积累证据与评测数据，长期再把可替换的模型循环、Planner 与 Driver 做成自主 Agent 平台。
 

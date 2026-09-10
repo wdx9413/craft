@@ -39,7 +39,7 @@ export class HomeKernel {
                 attention: attention.length, active_runs: activeRuns.length, active_budgets: budgets.length,
                 health: maintenance?.status ?? "not_started" },
             attention: attention.map((item) => pick(item, ["id", "audience", "priority", "reason", "action", "task_id", "source_kind", "source_id", "status", "deferred_until"])),
-            work_launches: this.store.list("work_launch", limit).map((item) => ({ ...pick(item, ["id", "task_id", "host", "workspace", "sandbox", "status", "retry_of", "run_id", "acceptance_plan_id", "acceptance_trial_id", "updated_at"]),
+            work_launches: this.store.list("work_launch", limit).map((item) => ({ ...pick(item, ["id", "task_id", "host", "workspace", "sandbox", "status", "retry_of", "run_id", "acceptance_plan_id", "acceptance_trial_id", "knowledge_binding", "updated_at"]),
                 effective_status: item.run_id ? this.store.find("host_run", String(item.run_id))?.status ?? item.status : item.status,
                 acceptance_status: item.acceptance_plan_id ? this.store.find("acceptance_assessment", `assessment_${item.acceptance_plan_id}`)?.status ?? "pending" : "not_configured" })),
             tasks: tasks.slice(0, limit).map((item) => pick(item, ["id", "title", "goal", "status", "updated_at"])),

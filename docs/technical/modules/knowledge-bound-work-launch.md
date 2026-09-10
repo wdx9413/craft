@@ -1,6 +1,6 @@
 # Knowledge-bound Work Launch：可复现知识进入真实任务
 
-> 状态：v0.11.33 已实现。它把一份已存在的 Wiki Context Bundle 固定到一次 Work Launch；不自动抓取知识、不让模型自行挑选 Claim，也不将知识赋予任何工具或写入权限。
+> 状态：v0.11.34 已实现。它把一份已存在的 Wiki Context Bundle 固定到一次 Work Launch；不自动抓取知识、不让模型自行挑选 Claim，也不将知识赋予任何工具或写入权限。
 
 Knowledge Context Bundle 是可审阅的检索收据；Knowledge-bound Work Launch 则是它真正产生运行影响的边界。启动时把 Bundle 的精确版本、Claim 精确版本、Evidence 引用、范围、字符预算和摘要固定到 Launch、Host Dispatch 和 Trial。Host 完成时，同一绑定进入 Outcome。
 

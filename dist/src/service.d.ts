@@ -1,6 +1,6 @@
 import { CraftStore, type JsonObject } from "./store.ts";
 import { ServiceFoundation } from "./service-foundation.ts";
-export declare const VERSION = "0.11.33";
+export declare const VERSION = "0.11.34";
 export declare class CraftService extends ServiceFoundation {
     static open(store: CraftStore, hostOwnerId?: string): Promise<CraftService>;
     info(): JsonObject;
@@ -192,9 +192,15 @@ export declare class CraftService extends ServiceFoundation {
     capabilityContextWorkLaunchDecide(args: JsonObject): Promise<JsonObject>;
     private knowledgeBoundPrompt;
     private knowledgeBoundPromptForLaunch;
+    private knowledgeContextWorkLaunchPrepareSync;
+    private knowledgeContextWorkLaunchDecideSync;
+    private knowledgeContextWorkLaunchRetrySync;
     knowledgeContextWorkLaunchPrepare(args: JsonObject): Promise<JsonObject>;
     knowledgeContextWorkLaunchDecide(args: JsonObject): Promise<JsonObject>;
     knowledgeContextWorkLaunchRetry(args: JsonObject): Promise<JsonObject>;
+    knowledgeWorkbenchWorkLaunchPrepare(args: JsonObject): JsonObject;
+    knowledgeWorkbenchWorkLaunchDecide(args: JsonObject): JsonObject;
+    knowledgeWorkbenchWorkLaunchRetry(args: JsonObject): JsonObject;
     hostRunStart(args: JsonObject): JsonObject;
     hostRunGet(args: JsonObject): JsonObject;
     hostRunCancel(args: JsonObject): JsonObject;
@@ -232,9 +238,11 @@ export declare class CraftService extends ServiceFoundation {
     knowledgeClaimList(args: JsonObject): JsonObject;
     knowledgeClaimReview(args: JsonObject): JsonObject;
     wikiPageSave(args: JsonObject): Promise<JsonObject>;
-    wikiPageGet(args: JsonObject): Promise<JsonObject>;
+    wikiPageGet(args: JsonObject): JsonObject;
     wikiPageList(args: JsonObject): JsonObject;
-    wikiPageRefresh(args: JsonObject): Promise<JsonObject>;
+    wikiPageRefresh(args: JsonObject): JsonObject;
+    knowledgeWorkbenchView(args?: JsonObject): JsonObject;
+    knowledgeContextBundlePreview(args: JsonObject): JsonObject;
     knowledgeRelationSave(args: JsonObject): JsonObject;
     wikiContextCompile(args: JsonObject): JsonObject;
     wikiContextBundleGet(args: JsonObject): JsonObject;

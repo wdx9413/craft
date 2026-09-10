@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { isAbsolute, join, resolve, win32 } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -16,7 +17,7 @@ import { dockerRequestDigest } from "./docker-sandbox.ts";
 import { egressRequestDigest } from "./egress.ts";
 import { ServiceFoundation } from "./service-foundation.ts";
 
-export const VERSION = "0.11.33";
+export const VERSION = "0.11.34";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -1853,29 +1854,35 @@ export class CraftService extends ServiceFoundation {
     const validated = this.knowledgeLaunch.revalidate(binding, args.now === undefined ? undefined : text(args.now, "now"));
     return { binding: validated, prompt: this.knowledgeLaunch.prompt(validated, document(args.prompt, "prompt")) };
   }
-  async knowledgeContextWorkLaunchPrepare(args: JsonObject): Promise<JsonObject> {
+  private knowledgeContextWorkLaunchPrepareSync(args: JsonObject): JsonObject {
     const bound = this.knowledgeBoundPrompt(args);
     const prepared = this.workLaunchPrepareInternal({ ...args, prompt: bound.prompt }, bound.binding);
     return { ...prepared, knowledge_binding: bound.binding };
   }
-  async knowledgeContextWorkLaunchDecide(args: JsonObject): Promise<JsonObject> {
+  private knowledgeContextWorkLaunchDecideSync(args: JsonObject): JsonObject {
     const launch = this.store.get("work_launch", text(args.launch_id, "launch_id"));
     const bound = this.knowledgeBoundPromptForLaunch(launch, args);
     return this.workLaunchDecideInternal({ ...args, prompt: bound.prompt }, bound.binding);
   }
-  async knowledgeContextWorkLaunchRetry(args: JsonObject): Promise<JsonObject> {
+  private knowledgeContextWorkLaunchRetrySync(args: JsonObject): JsonObject {
     const previous = this.workLaunchGet({ launch_id: args.launch_id }).launch as JsonObject;
     if (!new Set(["failed", "cancelled", "interrupted"]).has(String(previous.effective_status))) throw new Error("Only a failed, cancelled, or interrupted launch can be retried");
     const binding = object(previous.knowledge_binding, "Work Launch knowledge binding");
     const dispatch = this.store.get(previous.host === "codex-cli" ? "codex_dispatch" : "claude_dispatch", String(previous.dispatch_id));
     const acceptance = previous.acceptance_plan_id ? this.store.get("acceptance_plan", String(previous.acceptance_plan_id)) : null;
-    return this.knowledgeContextWorkLaunchPrepare({ task_id: previous.task_id, host: previous.host, workspace: previous.workspace, sandbox: previous.sandbox,
+    return this.knowledgeContextWorkLaunchPrepareSync({ task_id: previous.task_id, host: previous.host, workspace: previous.workspace, sandbox: previous.sandbox,
       prompt: document(args.prompt, "prompt"), bundle_id: binding.bundle_id, bundle_version: binding.bundle_version, now: args.now,
       launch_id: args.new_launch_id === undefined ? undefined : text(args.new_launch_id, "new_launch_id"), retry_of: previous.id,
       model: args.model ?? dispatch.model ?? undefined, timeout_ms: args.timeout_ms ?? dispatch.timeout_ms, output_limit: args.output_limit ?? dispatch.output_limit,
       max_turns: args.max_turns ?? dispatch.max_turns, max_budget_usd: args.max_budget_usd ?? dispatch.max_budget_usd ?? undefined,
       acceptance_name: acceptance?.name, acceptance_criteria: acceptance?.criteria });
   }
+  async knowledgeContextWorkLaunchPrepare(args: JsonObject): Promise<JsonObject> { return this.knowledgeContextWorkLaunchPrepareSync(args); }
+  async knowledgeContextWorkLaunchDecide(args: JsonObject): Promise<JsonObject> { return this.knowledgeContextWorkLaunchDecideSync(args); }
+  async knowledgeContextWorkLaunchRetry(args: JsonObject): Promise<JsonObject> { return this.knowledgeContextWorkLaunchRetrySync(args); }
+  knowledgeWorkbenchWorkLaunchPrepare(args: JsonObject): JsonObject { return this.knowledgeContextWorkLaunchPrepareSync(args); }
+  knowledgeWorkbenchWorkLaunchDecide(args: JsonObject): JsonObject { return this.knowledgeContextWorkLaunchDecideSync(args); }
+  knowledgeWorkbenchWorkLaunchRetry(args: JsonObject): JsonObject { return this.knowledgeContextWorkLaunchRetrySync(args); }
   hostRunStart(args: JsonObject): JsonObject {
     const host = text(args.host, "host"); const kind = host === "codex-cli" ? "codex_dispatch" : host === "claude-code" ? "claude_dispatch" : null;
     if (!kind) throw new Error("Host run host is unsupported");
@@ -2071,13 +2078,20 @@ export class CraftService extends ServiceFoundation {
     const page = this.store.save("wiki_page", pageId, { title, scope, claim_ids: claimIds, identity_digest: valueDigest(identity), body_digest: valueDigest(body), file_path: filePath, revision_source: String(args.author ?? "human") });
     return { page, idempotent: false };
   }
-  async wikiPageGet(args: JsonObject): Promise<JsonObject> { const page = this.store.get("wiki_page", text(args.page_id, "page_id"), args.version === undefined ? undefined : finiteInteger(args.version, "version", 1)); return { page, body: await readFile(String(page.file_path), "utf8") }; }
+  wikiPageGet(args: JsonObject): JsonObject { const page = this.store.get("wiki_page", text(args.page_id, "page_id"), args.version === undefined ? undefined : finiteInteger(args.version, "version", 1)); return { page, body: readFileSync(String(page.file_path), "utf8") }; }
   wikiPageList(args: JsonObject): JsonObject { return this.list("wiki_page", "pages", args); }
-  async wikiPageRefresh(args: JsonObject): Promise<JsonObject> {
-    const page = this.store.get("wiki_page", text(args.page_id, "page_id")); const body = assertNoSecret(document(await readFile(String(page.file_path), "utf8"), "body"), "body");
+  wikiPageRefresh(args: JsonObject): JsonObject {
+    const page = this.store.get("wiki_page", text(args.page_id, "page_id")); const body = assertNoSecret(document(readFileSync(String(page.file_path), "utf8"), "body"), "body");
     if (valueDigest(body) === page.body_digest) return { page, changed: false };
     const saved = this.store.save("wiki_page", String(page.id), { ...recordPayload(page), body_digest: valueDigest(body), identity_digest: null, revision_source: "filesystem" });
     return { page: saved, changed: true };
+  }
+  knowledgeWorkbenchView(args: JsonObject = {}): JsonObject { return this.knowledgeWorkbench.view(args); }
+  knowledgeContextBundlePreview(args: JsonObject): JsonObject {
+    const binding = this.knowledgeLaunch.bind({ bundle_id: text(args.bundle_id, "bundle_id"),
+      ...(args.bundle_version === undefined ? {} : { bundle_version: finiteInteger(args.bundle_version, "bundle_version", 1) }),
+      ...(args.now === undefined ? {} : { now: text(args.now, "now") }) });
+    return { binding, prompt: this.knowledgeLaunch.prompt(binding, "Preview only. Do not execute actions.") };
   }
   knowledgeRelationSave(args: JsonObject): JsonObject {
     const relation = text(args.relation, "relation"); if (!KNOWLEDGE_RELATIONS.has(relation)) throw new Error("Knowledge relation is unsupported");

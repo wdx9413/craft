@@ -43,6 +43,7 @@
 - [可插拔能力源与最小默认能力](technical/modules/pluggable-capability-sources.md)：把 Skill、MCP、Registry、专家和未来 A2A Agent 接入同一治理链，同时限制内置 Prompt 负担。
 - [受治理能力接入示例](governed-capability-intake.md)：从签名目录到非可执行候选的端到端路径，以及跨宿主边界。
 - [Knowledge-bound Work Launch](technical/modules/knowledge-bound-work-launch.md)：把受审核、可复算的 Wiki Context Bundle 固定到真实 Host 任务，并在变化时失败关闭。
+- [Knowledge Workbench](technical/modules/knowledge-workbench.md)：在本机 Workbench 中审阅 Claim、Markdown Wiki、Bundle、冲突、评测和知识绑定的工作启动。
 
 ## 研究证据
 

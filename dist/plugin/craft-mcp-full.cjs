@@ -1139,16 +1139,16 @@ var require_stringifyString = __commonJS({
     function lineLengthOverLimit(str, lineWidth, indentLength) {
       if (!lineWidth || lineWidth < 0)
         return false;
-      const limit = lineWidth - indentLength;
+      const limit2 = lineWidth - indentLength;
       const strLen = str.length;
-      if (strLen <= limit)
+      if (strLen <= limit2)
         return false;
       for (let i = 0, start = 0; i < strLen; ++i) {
         if (str[i] === "\n") {
-          if (i - start > limit)
+          if (i - start > limit2)
             return true;
           start = i + 1;
-          if (strLen - start <= limit)
+          if (strLen - start <= limit2)
             return false;
         }
       }
@@ -7362,6 +7362,7 @@ var import_node_readline = require("node:readline");
 
 // src/service.ts
 var import_node_crypto36 = require("node:crypto");
+var import_node_fs7 = require("node:fs");
 var import_promises11 = require("node:fs/promises");
 var import_node_path12 = require("node:path");
 var import_node_url3 = require("node:url");
@@ -7416,11 +7417,11 @@ var RESERVED_FIELDS = /* @__PURE__ */ new Set(["id", "version", "created_at", "u
 function payloadOnly(payload22) {
   return Object.fromEntries(Object.entries(payload22).filter(([key2]) => !RESERVED_FIELDS.has(key2)));
 }
-function validLimit(limit) {
-  if (!Number.isFinite(limit) || !Number.isInteger(limit)) {
+function validLimit(limit2) {
+  if (!Number.isFinite(limit2) || !Number.isInteger(limit2)) {
     throw new Error("limit must be a finite integer");
   }
-  return Math.max(1, limit);
+  return Math.max(1, limit2);
 }
 var CraftStore = class {
   paths;
@@ -7530,8 +7531,8 @@ var CraftStore = class {
     if (!record) throw new Error(`Unknown ${kind}: ${id10}`);
     return record;
   }
-  list(kind, limit = 20, predicate) {
-    const bounded2 = validLimit(limit);
+  list(kind, limit2 = 20, predicate) {
+    const bounded2 = validLimit(limit2);
     const rows = this.database.prepare(`SELECT r.* FROM records r JOIN (
       SELECT id,MAX(version) version FROM records WHERE kind=? GROUP BY id
       ) latest ON latest.id=r.id AND latest.version=r.version
@@ -7544,8 +7545,8 @@ var CraftStore = class {
       SELECT id,MAX(version) version FROM records WHERE kind=? GROUP BY id
       ) latest ON latest.id=r.id AND latest.version=r.version WHERE r.kind=?`).get(kind, kind).count);
   }
-  searchCapabilities(terms, limit) {
-    const bounded2 = Math.min(validLimit(limit), 20);
+  searchCapabilities(terms, limit2) {
+    const bounded2 = Math.min(validLimit(limit2), 20);
     if (!terms.length) return [];
     return this.list("capability", Number.MAX_SAFE_INTEGER).map((item) => {
       const text32 = [item.name, item.description, item.search_text ?? item.body].join(" ").toLowerCase();
@@ -9020,7 +9021,7 @@ ${metadataTerms(skill.metadata).join("\n")}`,
     }
     return { sources: results };
   }
-  search(query, limit = 6) {
+  search(query, limit2 = 6) {
     const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
     if (!terms.length) return [];
     const lexical = this.store.searchCapabilities(terms, 20);
@@ -9039,7 +9040,7 @@ ${metadataTerms(skill.metadata).join("\n")}`,
       const previousPriority = previous ? Number(sources.get(String(previous.source_id))?.priority ?? 0) : -Infinity;
       if (!previous || priority > previousPriority || priority === previousPriority && String(item.id) < String(previous.id)) selected.set(key2, item);
     }
-    return [...selected.values()].sort((left, right) => Number(right.score) - Number(left.score) || String(left.id).localeCompare(String(right.id))).slice(0, Math.min(Math.max(1, limit), 20)).map((item) => {
+    return [...selected.values()].sort((left, right) => Number(right.score) - Number(left.score) || String(left.id).localeCompare(String(right.id))).slice(0, Math.min(Math.max(1, limit2), 20)).map((item) => {
       const { body: _body, metadata: _metadata, search_text: _searchText, ...summary2 } = item;
       const logical = this.store.find("logical_capability", stableId("logical_capability", String(item.digest)));
       const conflicts = logical ? this.store.list("capability_conflict", Number.MAX_SAFE_INTEGER, (conflict) => conflict.logical_capability_ids.includes(String(logical.id))) : [];
@@ -9049,10 +9050,10 @@ ${metadataTerms(skill.metadata).join("\n")}`,
   semanticStatus() {
     return { ...this.#semanticStatus };
   }
-  async searchHybrid(query, limit = 6) {
+  async searchHybrid(query, limit2 = 6) {
     const lexical = this.search(query, 20);
     const provider = this.semanticProvider;
-    if (!provider) return lexical.slice(0, Math.min(Math.max(1, limit), 20));
+    if (!provider) return lexical.slice(0, Math.min(Math.max(1, limit2), 20));
     if (Date.now() < this.#degradedUntil) {
       this.#semanticStatus = {
         ...this.#semanticStatus,
@@ -9060,11 +9061,11 @@ ${metadataTerms(skill.metadata).join("\n")}`,
         reason: "cooldown",
         degraded_until: new Date(this.#degradedUntil).toISOString()
       };
-      return lexical.slice(0, Math.min(Math.max(1, limit), 20));
+      return lexical.slice(0, Math.min(Math.max(1, limit2), 20));
     }
     try {
       const vectors = await this.capabilityVectors(provider);
-      if (!vectors.length) return lexical.slice(0, Math.min(Math.max(1, limit), 20));
+      if (!vectors.length) return lexical.slice(0, Math.min(Math.max(1, limit2), 20));
       const [queryVector] = await provider.embed([sanitizeEmbeddingText(query)]);
       const semantic = vectors.map(({ capability, vector }) => ({ capability, semantic_score: cosine(queryVector, vector) })).sort((left, right) => right.semantic_score - left.semantic_score || String(left.capability.id).localeCompare(String(right.capability.id)));
       const ranks = /* @__PURE__ */ new Map();
@@ -9073,7 +9074,7 @@ ${metadataTerms(skill.metadata).join("\n")}`,
       const candidates = /* @__PURE__ */ new Map();
       lexical.forEach((item) => candidates.set(String(item.id), item));
       semantic.forEach((item) => candidates.set(String(item.capability.id), { ...item.capability, semantic_score: item.semantic_score }));
-      const merged = [...candidates.values()].sort((left, right) => String(left.id).localeCompare(String(right.id))).map((item) => ({ ...item, score: ranks.get(String(item.id)) * 1e3 })).map((item) => rerank(query, item)).sort((left, right) => Number(right.score) - Number(left.score)).slice(0, Math.min(Math.max(1, limit), 20));
+      const merged = [...candidates.values()].sort((left, right) => String(left.id).localeCompare(String(right.id))).map((item) => ({ ...item, score: ranks.get(String(item.id)) * 1e3 })).map((item) => rerank(query, item)).sort((left, right) => Number(right.score) - Number(left.score)).slice(0, Math.min(Math.max(1, limit2), 20));
       this.#semanticStatus = {
         mode: "ready",
         provider: provider.label,
@@ -9090,7 +9091,7 @@ ${metadataTerms(skill.metadata).join("\n")}`,
         indexed_capabilities: this.store.count("capability_embedding"),
         degraded_until: new Date(this.#degradedUntil).toISOString()
       };
-      return lexical.slice(0, Math.min(Math.max(1, limit), 20));
+      return lexical.slice(0, Math.min(Math.max(1, limit2), 20));
     }
   }
   async capabilityVectors(provider) {
@@ -10227,7 +10228,7 @@ function available(account) {
   const limits = account.limits;
   const used = account.used;
   const reserved = account.reserved;
-  return Object.fromEntries(Object.entries(limits).map(([key2, limit]) => [key2, Number(limit) - Number(used[key2] ?? 0) - Number(reserved[key2] ?? 0)]));
+  return Object.fromEntries(Object.entries(limits).map(([key2, limit2]) => [key2, Number(limit2) - Number(used[key2] ?? 0) - Number(reserved[key2] ?? 0)]));
 }
 function fits(requested, capacity) {
   return Object.entries(requested).every(([key2, amount]) => Object.hasOwn(capacity, key2) && Number(amount) <= Number(capacity[key2]));
@@ -11604,9 +11605,9 @@ var RecoveryQueueKernel = class {
   }
   refresh(args = {}) {
     const now = instant(args.now, "now");
-    const limit = positiveInteger(args.limit, "limit", 100, 1e3);
-    this.recoverExpired({ now: new Date(now).toISOString(), limit });
-    const candidates = this.candidates(now).slice(0, limit);
+    const limit2 = positiveInteger(args.limit, "limit", 100, 1e3);
+    this.recoverExpired({ now: new Date(now).toISOString(), limit: limit2 });
+    const candidates = this.candidates(now).slice(0, limit2);
     const active = new Set(candidates.map((item) => item.id));
     const items = candidates.map((candidate) => {
       const existing = this.store.find("recovery_item", candidate.id);
@@ -11674,9 +11675,9 @@ var RecoveryQueueKernel = class {
   }
   recoverExpired(args = {}) {
     const now = instant(args.now, "now");
-    const limit = positiveInteger(args.limit, "limit", 100, 1e3);
+    const limit2 = positiveInteger(args.limit, "limit", 100, 1e3);
     let recovered = 0;
-    for (const item of this.store.list("recovery_item", 1e4, (entry2) => entry2.status === "leased").slice(0, limit)) {
+    for (const item of this.store.list("recovery_item", 1e4, (entry2) => entry2.status === "leased").slice(0, limit2)) {
       const lease = item.lease;
       if (now >= Date.parse(String(lease.expires_at))) {
         this.store.updateIfVersion("recovery_item", String(item.id), Number(item.version), {
@@ -12089,9 +12090,9 @@ var SpeculativeKernel = class {
   }
   expire(args) {
     const now = instant3(args.now, "now");
-    const limit = integer3(args.limit, "limit", 100, 1, 1e3);
+    const limit2 = integer3(args.limit, "limit", 100, 1, 1e3);
     const expired = [];
-    for (const candidate of this.store.list("speculative_candidate", 1e4, (item) => (/* @__PURE__ */ new Set(["queued", "leased", "ready"])).has(String(item.status)) && Date.parse(String(item.expires_at)) <= now).slice(0, limit)) {
+    for (const candidate of this.store.list("speculative_candidate", 1e4, (item) => (/* @__PURE__ */ new Set(["queued", "leased", "ready"])).has(String(item.status)) && Date.parse(String(item.expires_at)) <= now).slice(0, limit2)) {
       expired.push(this.store.updateIfVersion("speculative_candidate", String(candidate.id), Number(candidate.version), {
         ...payload8(candidate),
         status: "expired",
@@ -12456,9 +12457,9 @@ var HydrationKernel = class {
   }
   recover(args) {
     const now = instant4(args.now, "now");
-    const limit = integer5(args.limit, "limit", 100, 1, 1e3);
+    const limit2 = integer5(args.limit, "limit", 100, 1, 1e3);
     const recovered = [];
-    for (const snapshot of this.store.list("dehydration_snapshot", 1e4, (item) => item.status === "hydrating" && Date.parse(String(item.lease_expires_at)) <= now).slice(0, limit)) recovered.push(this.store.updateIfVersion(
+    for (const snapshot of this.store.list("dehydration_snapshot", 1e4, (item) => item.status === "hydrating" && Date.parse(String(item.lease_expires_at)) <= now).slice(0, limit2)) recovered.push(this.store.updateIfVersion(
       "dehydration_snapshot",
       String(snapshot.id),
       Number(snapshot.version),
@@ -13307,11 +13308,11 @@ var HubSyncKernel = class {
   }
   search(args) {
     const terms = text22(args.query, "query").toLowerCase().split(/\s+/u);
-    const limit = integer8(args.limit ?? 10, "limit", 1, 50);
+    const limit2 = integer8(args.limit ?? 10, "limit", 1, 50);
     const entries = this.store.list("hub_catalog_entry", 1e5, (item) => item.status === "active").map((item) => {
       const haystack = `${item.name} ${item.description} ${item.tags.join(" ")}`.toLowerCase();
       return { ...item, score: terms.reduce((sum, term) => sum + Number(haystack.includes(term)), 0) };
-    }).filter((item) => Number(item.score) > 0).sort((left, right) => Number(right.score) - Number(left.score) || String(left.id).localeCompare(String(right.id))).slice(0, limit);
+    }).filter((item) => Number(item.score) > 0).sort((left, right) => Number(right.score) - Number(left.score) || String(left.id).localeCompare(String(right.id))).slice(0, limit2);
     return { entries, retrieval: "local_signed_catalog", scanned_remote: false };
   }
   sourceDisable(args) {
@@ -13853,10 +13854,10 @@ var HomeKernel = class {
   }
   view(args = {}) {
     const now = instant7(args.now);
-    const limit = bounded(args.limit);
+    const limit2 = bounded(args.limit);
     const tasks = this.store.list("task", 1e4);
     const workspaces = this.store.list("workspace", 1e4);
-    const attention = this.attention.list({ now, limit }).items;
+    const attention = this.attention.list({ now, limit: limit2 }).items;
     const runs = [
       ...this.store.list("runtime_run", 1e4).map((item) => ({ ...item, run_kind: "runtime" })),
       ...this.store.list("workflow_run", 1e4).map((item) => ({ ...item, run_kind: "workflow" })),
@@ -13883,39 +13884,39 @@ var HomeKernel = class {
         health: maintenance?.status ?? "not_started"
       },
       attention: attention.map((item) => pick(item, ["id", "audience", "priority", "reason", "action", "task_id", "source_kind", "source_id", "status", "deferred_until"])),
-      work_launches: this.store.list("work_launch", limit).map((item) => ({
-        ...pick(item, ["id", "task_id", "host", "workspace", "sandbox", "status", "retry_of", "run_id", "acceptance_plan_id", "acceptance_trial_id", "updated_at"]),
+      work_launches: this.store.list("work_launch", limit2).map((item) => ({
+        ...pick(item, ["id", "task_id", "host", "workspace", "sandbox", "status", "retry_of", "run_id", "acceptance_plan_id", "acceptance_trial_id", "knowledge_binding", "updated_at"]),
         effective_status: item.run_id ? this.store.find("host_run", String(item.run_id))?.status ?? item.status : item.status,
         acceptance_status: item.acceptance_plan_id ? this.store.find("acceptance_assessment", `assessment_${item.acceptance_plan_id}`)?.status ?? "pending" : "not_configured"
       })),
-      tasks: tasks.slice(0, limit).map((item) => pick(item, ["id", "title", "goal", "status", "updated_at"])),
-      workspaces: workspaces.slice(0, limit).map((item) => ({
+      tasks: tasks.slice(0, limit2).map((item) => pick(item, ["id", "title", "goal", "status", "updated_at"])),
+      workspaces: workspaces.slice(0, limit2).map((item) => ({
         ...pick(item, ["id", "name", "root", "state_revision", "updated_at"]),
         object_count: this.store.list("work_object", 1e4, (object15) => object15.workspace_id === item.id).length
       })),
-      runs: activeRuns.slice(0, limit).map((item) => pick(item, ["id", "run_kind", "task_id", "status", "current_stage", "updated_at"])),
-      resources: resources2.slice(0, limit),
-      recent_outputs: this.store.list("artifact", limit).map((item) => pick(item, ["id", "task_id", "kind", "path", "uri", "description", "created_at"])),
+      runs: activeRuns.slice(0, limit2).map((item) => pick(item, ["id", "run_kind", "task_id", "status", "current_stage", "updated_at"])),
+      resources: resources2.slice(0, limit2),
+      recent_outputs: this.store.list("artifact", limit2).map((item) => pick(item, ["id", "task_id", "kind", "path", "uri", "description", "created_at"])),
       maintenance: maintenance ? pick(maintenance, ["status", "last_tick_at", "last_tick_id", "attention_count", "recovery_count", "invalidated_count"]) : null
     };
   }
   hostRuns(args = {}) {
-    const limit = bounded(args.limit);
-    return { runs: this.store.list("host_run", limit).map((item) => pick(item, ["id", "host", "dispatch_id", "task_id", "owner_id", "status", "cancel_requested", "event_count", "started_at", "finished_at", "updated_at"])) };
+    const limit2 = bounded(args.limit);
+    return { runs: this.store.list("host_run", limit2).map((item) => pick(item, ["id", "host", "dispatch_id", "task_id", "owner_id", "status", "cancel_requested", "event_count", "started_at", "finished_at", "updated_at"])) };
   }
   hostRun(args) {
     const runId = required(args.run_id, "run_id");
     const after = args.after_sequence === void 0 ? 0 : Number(args.after_sequence);
     if (!Number.isInteger(after) || after < 0) throw new Error("after_sequence must be a non-negative integer");
-    const limit = bounded(args.limit);
+    const limit2 = bounded(args.limit);
     const run = this.store.get("host_run", runId);
-    const events = this.store.events(`host-run:${runId}`).filter((item) => Number(item.sequence) > after).slice(0, limit).map((item) => ({ ...pick(item, ["stream", "sequence", "event_type", "created_at"]), payload: pick(item.payload, ["stream", "bytes", "digest", "status", "receipt_id"]) }));
+    const events = this.store.events(`host-run:${runId}`).filter((item) => Number(item.sequence) > after).slice(0, limit2).map((item) => ({ ...pick(item, ["stream", "sequence", "event_type", "created_at"]), payload: pick(item.payload, ["stream", "bytes", "digest", "status", "receipt_id"]) }));
     return { run: pick(run, ["id", "host", "dispatch_id", "task_id", "owner_id", "status", "cancel_requested", "cancel_reason", "event_count", "receipt_id", "error_class", "started_at", "finished_at", "updated_at"]), events, next_sequence: events.length ? events.at(-1).sequence : after };
   }
   task(args) {
     const taskId = required(args.task_id, "task_id");
     const task = this.store.get("task", taskId);
-    const limit = bounded(args.limit);
+    const limit2 = bounded(args.limit);
     const trials = this.store.list("trial", 1e4, (item) => item.task_id === taskId);
     const trialIds = new Set(trials.map((item) => String(item.id)));
     const outcomes = this.store.list("outcome", 1e4, (item) => trialIds.has(String(item.trial_id)));
@@ -13935,17 +13936,17 @@ var HomeKernel = class {
     const runs = ["runtime_run", "workflow_run", "orchestration_plan"].flatMap((kind) => this.store.list(kind, 1e4, (item) => item.task_id === taskId).map((item) => ({ ...item, run_kind: kind })));
     return {
       task: pick(task, ["id", "title", "goal", "project_id", "status", "created_at", "updated_at"]),
-      checkpoints: this.store.list("checkpoint", limit, (item) => item.task_id === taskId).map((item) => pick(item, ["id", "summary", "completed", "pending", "decisions", "status", "created_at"])),
-      feedback: this.store.list("feedback", limit, (item) => item.task_id === taskId).map((item) => pick(item, ["id", "kind", "original", "corrected", "source", "created_at"])),
-      runs: runs.slice(0, limit).map((item) => pick(item, ["id", "run_kind", "status", "current_stage", "updated_at"])),
-      trials: trials.slice(0, limit).map((item) => pick(item, ["id", "subject_type", "subject_id", "subject_version", "status", "created_at"])),
-      outcomes: outcomes.slice(0, limit).map((item) => pick(item, ["id", "trial_id", "verdict", "summary", "failure_type", "scores", "costs", "created_at"])),
-      evidence: evidence.slice(0, limit).map((item) => pick(item, ["id", "source_type", "claim", "confidence", "artifact_id", "locator", "observed_at"])),
-      artifacts: artifacts.slice(0, limit).map((item) => pick(item, ["id", "kind", "name", "uri", "media_type", "digest", "created_at"])),
-      lineage: this.store.list("lineage_edge", limit, (item) => item.task_id === taskId).map((item) => pick(item, ["id", "workspace_id", "output", "inputs", "transform", "actor_type", "summary", "evidence_ids"])),
-      waits: this.store.list("durable_wait", limit, (item) => item.task_id === taskId).map((item) => pick(item, ["id", "condition", "status", "resume_at", "event_key", "updated_at"])),
-      attention: this.store.list("attention_item", limit, (item) => item.task_id === taskId && item.status !== "resolved").map((item) => pick(item, ["id", "audience", "priority", "reason", "action", "status"])),
-      trace: traces.slice(0, limit).map((item) => pick(item, ["stream", "sequence", "event_type", "created_at"]))
+      checkpoints: this.store.list("checkpoint", limit2, (item) => item.task_id === taskId).map((item) => pick(item, ["id", "summary", "completed", "pending", "decisions", "status", "created_at"])),
+      feedback: this.store.list("feedback", limit2, (item) => item.task_id === taskId).map((item) => pick(item, ["id", "kind", "original", "corrected", "source", "created_at"])),
+      runs: runs.slice(0, limit2).map((item) => pick(item, ["id", "run_kind", "status", "current_stage", "updated_at"])),
+      trials: trials.slice(0, limit2).map((item) => pick(item, ["id", "subject_type", "subject_id", "subject_version", "status", "created_at"])),
+      outcomes: outcomes.slice(0, limit2).map((item) => pick(item, ["id", "trial_id", "verdict", "summary", "failure_type", "scores", "costs", "created_at"])),
+      evidence: evidence.slice(0, limit2).map((item) => pick(item, ["id", "source_type", "claim", "confidence", "artifact_id", "locator", "observed_at"])),
+      artifacts: artifacts.slice(0, limit2).map((item) => pick(item, ["id", "kind", "name", "uri", "media_type", "digest", "created_at"])),
+      lineage: this.store.list("lineage_edge", limit2, (item) => item.task_id === taskId).map((item) => pick(item, ["id", "workspace_id", "output", "inputs", "transform", "actor_type", "summary", "evidence_ids"])),
+      waits: this.store.list("durable_wait", limit2, (item) => item.task_id === taskId).map((item) => pick(item, ["id", "condition", "status", "resume_at", "event_key", "updated_at"])),
+      attention: this.store.list("attention_item", limit2, (item) => item.task_id === taskId && item.status !== "resolved").map((item) => pick(item, ["id", "audience", "priority", "reason", "action", "status"])),
+      trace: traces.slice(0, limit2).map((item) => pick(item, ["stream", "sequence", "event_type", "created_at"]))
     };
   }
 };
@@ -14436,6 +14437,59 @@ Evidence: ${claim.evidence_ids.join(", ")}
   }
 };
 
+// src/knowledge-workbench.ts
+function limit(value) {
+  const result = value === void 0 ? 50 : Number(value);
+  if (!Number.isInteger(result) || result < 1 || result > 100) throw new Error("limit must be an integer between 1 and 100");
+  return result;
+}
+function pick2(record, fields2) {
+  return Object.fromEntries(fields2.filter((field) => record[field] !== void 0).map((field) => [field, record[field]]));
+}
+var KnowledgeWorkbenchKernel = class {
+  store;
+  constructor(store) {
+    this.store = store;
+  }
+  view(args = {}) {
+    const max = limit(args.limit);
+    const claims = this.store.list("knowledge_claim", 1e4);
+    const pages = this.store.list("wiki_page", 1e4);
+    const bundles = this.store.list("wiki_context_bundle", 1e4);
+    const candidates = this.store.list("wiki_skill_candidate", 1e4);
+    const evaluations = this.store.list("knowledge_evaluation_run", 1e4);
+    const claimById = new Map(claims.map((claim) => [String(claim.id), claim]));
+    const conflicts = this.store.list("knowledge_relation", 1e4, (relation) => relation.relation === "contradicts").map((relation) => ({
+      ...pick2(relation, ["id", "from_claim_id", "to_claim_id", "relation", "created_at"]),
+      from_status: claimById.get(String(relation.from_claim_id))?.status ?? "missing",
+      to_status: claimById.get(String(relation.to_claim_id))?.status ?? "missing"
+    }));
+    const launches = this.store.list("work_launch", 1e4, (launch) => launch.knowledge_binding !== void 0).map((launch) => ({
+      ...pick2(launch, ["id", "task_id", "host", "workspace", "status", "updated_at"]),
+      knowledge_binding: pick2(launch.knowledge_binding, ["bundle_id", "bundle_version", "bundle_digest", "context_digest", "scope", "claim_refs"])
+    }));
+    return {
+      summary: {
+        claims: claims.length,
+        reviewed_claims: claims.filter((claim) => claim.status === "reviewed").length,
+        pages: pages.length,
+        bundles: bundles.length,
+        conflicts: conflicts.length,
+        candidates: candidates.length,
+        evaluations: evaluations.length,
+        knowledge_bound_launches: launches.length
+      },
+      claims: claims.slice(0, max).map((claim) => pick2(claim, ["id", "version", "kind", "content", "scope", "evidence_ids", "tags", "valid_until", "status", "review", "updated_at"])),
+      pages: pages.slice(0, max).map((page) => pick2(page, ["id", "version", "title", "scope", "claim_ids", "body_digest", "revision_source", "updated_at"])),
+      bundles: bundles.slice(0, max).map((bundle) => pick2(bundle, ["id", "version", "query", "scope", "max_items", "max_chars", "context_digest", "claim_refs", "excluded", "used_chars", "updated_at"])),
+      conflicts: conflicts.slice(0, max),
+      candidates: candidates.slice(0, max).map((candidate) => pick2(candidate, ["id", "version", "name", "status", "source_page_ids", "evaluation_run_ids", "review", "updated_at"])),
+      evaluations: evaluations.slice(0, max).map((run) => pick2(run, ["id", "version", "status", "suite_id", "split", "summary", "updated_at"])),
+      knowledge_bound_launches: launches.slice(0, max)
+    };
+  }
+};
+
 // src/service-foundation.ts
 var ServiceFoundation = class {
   store;
@@ -14474,6 +14528,7 @@ var ServiceFoundation = class {
   claudeHost;
   hostRuns;
   knowledgeLaunch;
+  knowledgeWorkbench;
   constructor(store, semanticProvider, isolatedAdapter = new LocalIsolatedAdapter(), dockerSandbox = new DockerSandboxAdapter(), egressBroker = new TrustedEgressBroker(), hostOwnerId) {
     this.store = store;
     this.catalog = new Catalog(store, semanticProvider);
@@ -14510,6 +14565,7 @@ var ServiceFoundation = class {
     this.codexHost = new CodexHostKernel(store);
     this.claudeHost = new ClaudeHostKernel(store);
     this.knowledgeLaunch = new KnowledgeBoundLaunchKernel(store);
+    this.knowledgeWorkbench = new KnowledgeWorkbenchKernel(store);
     this.hostRuns = new HostRunKernel(
       store,
       [this.codexHost, this.claudeHost],
@@ -14520,7 +14576,7 @@ var ServiceFoundation = class {
 };
 
 // src/service.ts
-var VERSION = "0.11.33";
+var VERSION = "0.11.34";
 var CONFIDENCE = /* @__PURE__ */ new Set(["confirmed", "bounded", "unverified", "rejected"]);
 var TASK_STATUS = /* @__PURE__ */ new Set(["active", "paused", "completed", "cancelled"]);
 var VERSIONED_LIFECYCLE = /* @__PURE__ */ new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -14597,15 +14653,15 @@ function optionalTextArray(value, name, fallback = []) {
   return values;
 }
 function budgetLimits(value) {
-  for (const [key2, limit] of Object.entries(value)) {
-    if (typeof limit !== "number" || !Number.isFinite(limit) || limit < 0) {
+  for (const [key2, limit2] of Object.entries(value)) {
+    if (typeof limit2 !== "number" || !Number.isFinite(limit2) || limit2 < 0) {
       throw new Error(`budget limit ${key2} must be a non-negative finite number`);
     }
   }
   return value;
 }
 function budgetExceeded(costs, budget) {
-  return Object.entries(budget).some(([key2, limit]) => Number(costs[key2] ?? 0) > Number(limit));
+  return Object.entries(budget).some(([key2, limit2]) => Number(costs[key2] ?? 0) > Number(limit2));
 }
 var SAFE_INCREMENTAL_STAGES = [
   {
@@ -16561,9 +16617,9 @@ ${task.goal}`.toLowerCase();
     const nowText = args.now === void 0 ? (/* @__PURE__ */ new Date()).toISOString() : text31(args.now, "now");
     const now = Date.parse(nowText);
     if (Number.isNaN(now)) throw new Error("now must be an ISO timestamp");
-    const limit = finiteInteger(args.limit, "limit", 100, 1, 1e4);
+    const limit2 = finiteInteger(args.limit, "limit", 100, 1, 1e4);
     const policyFingerprints = object14(args.policy_fingerprints ?? {}, "policy_fingerprints");
-    const due = this.store.list("durable_wait", 1e4, (item) => item.status === "waiting" && item.condition === "time" && Date.parse(String(item.resume_after)) <= now).slice(0, limit);
+    const due = this.store.list("durable_wait", 1e4, (item) => item.status === "waiting" && item.condition === "time" && Date.parse(String(item.resume_after)) <= now).slice(0, limit2);
     const deliveries = due.map((wait) => {
       const result = this.durableWaitResume({
         wait_id: wait.id,
@@ -17439,23 +17495,23 @@ ${material}
     const validated = this.knowledgeLaunch.revalidate(binding, args.now === void 0 ? void 0 : text31(args.now, "now"));
     return { binding: validated, prompt: this.knowledgeLaunch.prompt(validated, document(args.prompt, "prompt")) };
   }
-  async knowledgeContextWorkLaunchPrepare(args) {
+  knowledgeContextWorkLaunchPrepareSync(args) {
     const bound = this.knowledgeBoundPrompt(args);
     const prepared = this.workLaunchPrepareInternal({ ...args, prompt: bound.prompt }, bound.binding);
     return { ...prepared, knowledge_binding: bound.binding };
   }
-  async knowledgeContextWorkLaunchDecide(args) {
+  knowledgeContextWorkLaunchDecideSync(args) {
     const launch = this.store.get("work_launch", text31(args.launch_id, "launch_id"));
     const bound = this.knowledgeBoundPromptForLaunch(launch, args);
     return this.workLaunchDecideInternal({ ...args, prompt: bound.prompt }, bound.binding);
   }
-  async knowledgeContextWorkLaunchRetry(args) {
+  knowledgeContextWorkLaunchRetrySync(args) {
     const previous = this.workLaunchGet({ launch_id: args.launch_id }).launch;
     if (!(/* @__PURE__ */ new Set(["failed", "cancelled", "interrupted"])).has(String(previous.effective_status))) throw new Error("Only a failed, cancelled, or interrupted launch can be retried");
     const binding = object14(previous.knowledge_binding, "Work Launch knowledge binding");
     const dispatch = this.store.get(previous.host === "codex-cli" ? "codex_dispatch" : "claude_dispatch", String(previous.dispatch_id));
     const acceptance = previous.acceptance_plan_id ? this.store.get("acceptance_plan", String(previous.acceptance_plan_id)) : null;
-    return this.knowledgeContextWorkLaunchPrepare({
+    return this.knowledgeContextWorkLaunchPrepareSync({
       task_id: previous.task_id,
       host: previous.host,
       workspace: previous.workspace,
@@ -17474,6 +17530,24 @@ ${material}
       acceptance_name: acceptance?.name,
       acceptance_criteria: acceptance?.criteria
     });
+  }
+  async knowledgeContextWorkLaunchPrepare(args) {
+    return this.knowledgeContextWorkLaunchPrepareSync(args);
+  }
+  async knowledgeContextWorkLaunchDecide(args) {
+    return this.knowledgeContextWorkLaunchDecideSync(args);
+  }
+  async knowledgeContextWorkLaunchRetry(args) {
+    return this.knowledgeContextWorkLaunchRetrySync(args);
+  }
+  knowledgeWorkbenchWorkLaunchPrepare(args) {
+    return this.knowledgeContextWorkLaunchPrepareSync(args);
+  }
+  knowledgeWorkbenchWorkLaunchDecide(args) {
+    return this.knowledgeContextWorkLaunchDecideSync(args);
+  }
+  knowledgeWorkbenchWorkLaunchRetry(args) {
+    return this.knowledgeContextWorkLaunchRetrySync(args);
   }
   hostRunStart(args) {
     const host = text31(args.host, "host");
@@ -17891,7 +17965,7 @@ ${material}
   }
   acceptanceEvaluationClaim(args) {
     const adapterId = text31(args.adapter_id, "adapter_id");
-    const limit = finiteInteger(args.limit, "limit", 10, 1, 100);
+    const limit2 = finiteInteger(args.limit, "limit", 10, 1, 100);
     const leaseSeconds = finiteInteger(args.lease_seconds, "lease_seconds", 60, 1, 3600);
     const planId = args.plan_id === void 0 ? null : text31(args.plan_id, "plan_id");
     const jobs = this.store.list("acceptance_evaluation_job", 1e4, (item) => {
@@ -17900,16 +17974,16 @@ ${material}
       const launch = plan ? this.store.find("work_launch", String(plan.launch_id)) : null;
       const run = launch?.run_id ? this.store.find("host_run", String(launch.run_id)) : null;
       return run?.status === "completed";
-    }).slice(0, limit).map((job) => this.store.save("acceptance_evaluation_job", String(job.id), { ...job, status: "leased", attempts: Number(job.attempts) + 1, lease_id: id9("lease"), lease_expires_at: new Date(Date.now() + leaseSeconds * 1e3).toISOString() }));
+    }).slice(0, limit2).map((job) => this.store.save("acceptance_evaluation_job", String(job.id), { ...job, status: "leased", attempts: Number(job.attempts) + 1, lease_id: id9("lease"), lease_expires_at: new Date(Date.now() + leaseSeconds * 1e3).toISOString() }));
     return { jobs };
   }
   acceptanceEvaluationRecover(args) {
     const now = args.now === void 0 ? (/* @__PURE__ */ new Date()).toISOString() : text31(args.now, "now");
     const nowMs = Date.parse(now);
     if (Number.isNaN(nowMs)) throw new Error("now must be an ISO timestamp");
-    const limit = finiteInteger(args.limit, "limit", 100, 1, 1e3);
+    const limit2 = finiteInteger(args.limit, "limit", 100, 1, 1e3);
     const recovered = [];
-    for (const job of this.store.list("acceptance_evaluation_job", 1e4, (item) => item.status === "leased" && Date.parse(String(item.lease_expires_at)) <= nowMs).slice(0, limit)) {
+    for (const job of this.store.list("acceptance_evaluation_job", 1e4, (item) => item.status === "leased" && Date.parse(String(item.lease_expires_at)) <= nowMs).slice(0, limit2)) {
       const exhausted = Number(job.attempts) >= Number(job.max_attempts);
       recovered.push(this.store.save("acceptance_evaluation_job", String(job.id), { ...job, status: exhausted ? "exhausted" : "ready", lease_id: null, lease_expires_at: null }));
     }
@@ -18089,19 +18163,30 @@ ${material}
     const page = this.store.save("wiki_page", pageId, { title, scope, claim_ids: claimIds, identity_digest: valueDigest(identity), body_digest: valueDigest(body2), file_path: filePath, revision_source: String(args.author ?? "human") });
     return { page, idempotent: false };
   }
-  async wikiPageGet(args) {
+  wikiPageGet(args) {
     const page = this.store.get("wiki_page", text31(args.page_id, "page_id"), args.version === void 0 ? void 0 : finiteInteger(args.version, "version", 1));
-    return { page, body: await (0, import_promises11.readFile)(String(page.file_path), "utf8") };
+    return { page, body: (0, import_node_fs7.readFileSync)(String(page.file_path), "utf8") };
   }
   wikiPageList(args) {
     return this.list("wiki_page", "pages", args);
   }
-  async wikiPageRefresh(args) {
+  wikiPageRefresh(args) {
     const page = this.store.get("wiki_page", text31(args.page_id, "page_id"));
-    const body2 = assertNoSecret(document(await (0, import_promises11.readFile)(String(page.file_path), "utf8"), "body"), "body");
+    const body2 = assertNoSecret(document((0, import_node_fs7.readFileSync)(String(page.file_path), "utf8"), "body"), "body");
     if (valueDigest(body2) === page.body_digest) return { page, changed: false };
     const saved = this.store.save("wiki_page", String(page.id), { ...recordPayload5(page), body_digest: valueDigest(body2), identity_digest: null, revision_source: "filesystem" });
     return { page: saved, changed: true };
+  }
+  knowledgeWorkbenchView(args = {}) {
+    return this.knowledgeWorkbench.view(args);
+  }
+  knowledgeContextBundlePreview(args) {
+    const binding = this.knowledgeLaunch.bind({
+      bundle_id: text31(args.bundle_id, "bundle_id"),
+      ...args.bundle_version === void 0 ? {} : { bundle_version: finiteInteger(args.bundle_version, "bundle_version", 1) },
+      ...args.now === void 0 ? {} : { now: text31(args.now, "now") }
+    });
+    return { binding, prompt: this.knowledgeLaunch.prompt(binding, "Preview only. Do not execute actions.") };
   }
   knowledgeRelationSave(args) {
     const relation = text31(args.relation, "relation");
@@ -20185,6 +20270,8 @@ var TOOLS = [
   tool("craft_wiki_page_get", "Read one exact Wiki page revision.", ["page_id"], true, ["version"]),
   tool("craft_wiki_page_list", "List locally stored Wiki pages.", [], true, ["limit", "query"]),
   tool("craft_wiki_page_refresh", "Record a human Markdown edit as a new Wiki page revision; it never infers trust from the edit.", ["page_id"], false),
+  tool("craft_knowledge_workbench_view", "Read the bounded Workbench projection of Claims, Wiki pages, Context Bundles, conflicts, evaluations, candidates, and knowledge-bound launches.", [], true, ["limit"]),
+  tool("craft_knowledge_context_bundle_preview", "Revalidate one exact Context Bundle and render its bounded read-only knowledge preview without preparing or starting a Work Launch.", ["bundle_id"], true, ["bundle_version", "now"]),
   tool("craft_knowledge_relation_save", "Create a typed support, contradiction, supersession, applicability, or dependency relation between two evidence-backed claims.", ["from_claim_id", "to_claim_id", "relation"], false, ["relation_id"]),
   tool("craft_wiki_context_compile", "Compile only reviewed, current, scope-matching evidence-backed claims into a bounded Agent context using deterministic keyword matching by default.", ["query"], true, ["bundle_id", "scope", "max_items", "max_chars", "now"]),
   tool("craft_wiki_context_bundle_get", "Read a content-free Wiki context compilation receipt.", ["bundle_id"], true, ["version"]),
@@ -21377,6 +21464,8 @@ var McpServer = class {
       craft_wiki_page_list: (a) => service.wikiPageList(a),
       craft_wiki_page_refresh: (a) => service.wikiPageRefresh(a),
       craft_knowledge_relation_save: (a) => service.knowledgeRelationSave(a),
+      craft_knowledge_workbench_view: (a) => service.knowledgeWorkbenchView(a),
+      craft_knowledge_context_bundle_preview: (a) => service.knowledgeContextBundlePreview(a),
       craft_wiki_context_compile: (a) => service.wikiContextCompile(a),
       craft_wiki_context_bundle_get: (a) => service.wikiContextBundleGet(a),
       craft_wiki_context_bundle_list: (a) => service.wikiContextBundleList(a),
