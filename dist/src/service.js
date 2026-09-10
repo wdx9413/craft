@@ -15,7 +15,7 @@ import { decideExecution } from "./execution-policy.js";
 import { dockerRequestDigest } from "./docker-sandbox.js";
 import { egressRequestDigest } from "./egress.js";
 import { ServiceFoundation } from "./service-foundation.js";
-export const VERSION = "0.11.37";
+export const VERSION = "0.11.38";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -2755,6 +2755,11 @@ export class CraftService extends ServiceFoundation {
     guidedWorkGet(args) { return this.guidedWork.get(args); }
     guidedWorkLaunchPrepare(args) { const brief = this.store.get("guided_work_brief", text(args.brief_id, "brief_id")); if (brief.status !== "ready_to_launch")
         throw new Error("Guided work brief requires all decisions before launch"); const prepared = this.workLaunchPrepare({ ...args, task_id: brief.task_id }); const bound = this.guidedWork.bindLaunch({ brief_id: brief.id, launch_id: prepared.launch.id }); return { ...prepared, brief: bound.brief }; }
+    executionSafetyPreflight(args) { return this.executionSafety.preflight(args); }
+    executionSafetyGet(args) { return this.executionSafety.get(args); }
+    safetyWorkLaunchPrepare(args) { const prepared = this.executionSafety.preflight(args); const preflight = prepared.preflight; const launched = this.workLaunchPrepare({ ...args, task_id: preflight.task_id, timeout_ms: preflight.resources.timeout_ms, output_limit: preflight.resources.output_limit, max_turns: preflight.resources.max_turns ?? undefined, max_budget_usd: preflight.resources.max_budget_usd ?? undefined }); const bound = this.executionSafety.bind({ preflight_id: preflight.id, launch_id: launched.launch.id }); return { ...launched, launch: bound.launch, preflight, idempotent: launched.idempotent }; }
+    safetyWorkLaunchDecide(args) { const launch = this.store.get("work_launch", text(args.launch_id, "launch_id")); const binding = object(launch.safety_preflight, "Work Launch safety preflight"); const checked = this.executionSafety.validate({ preflight_id: binding.preflight_id, version: binding.preflight_version }); const dispatch = this.store.get(launch.host === "codex-cli" ? "codex_dispatch" : "claude_dispatch", String(launch.dispatch_id)); const contract = { timeout_ms: dispatch.timeout_ms, output_limit: dispatch.output_limit, max_turns: launch.host === "claude-code" ? dispatch.max_turns : null, max_budget_usd: launch.host === "claude-code" ? dispatch.max_budget_usd : null }; if (valueDigest(contract) !== valueDigest(checked.preflight.resources))
+        throw new Error("Safety preflight resource contract does not match Work Launch dispatch"); return this.workLaunchDecide(args); }
     knowledgeEvaluationCaseSave(args) {
         const query = assertNoSecret(text(args.query, "query"), "query");
         const scope = String(args.scope ?? "global");

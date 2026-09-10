@@ -13,7 +13,7 @@
 
 ## 建设原则
 
-以 [产品架构](architecture.zh-CN.md) 的三大支柱为目标：工作与协作、执行与保障、学习与改进。**评测与实验是第三支柱内的核心模块**，不另设第四支柱。以下里程碑是规划；当前实现基线已推进到 v0.11.37。
+以 [产品架构](architecture.zh-CN.md) 的三大支柱为目标：工作与协作、执行与保障、学习与改进。**评测与实验是第三支柱内的核心模块**，不另设第四支柱。以下里程碑是规划；当前实现基线已推进到 v0.11.38。
 
 **两步定位**：短期做**跨宿主治理插件层**——以 MCP/插件形式接入 Codex CLI、Claude Code、DeepSeek Harness 等宿主，统一能力发现、授权门禁、证据链与评测门禁，执行留在宿主内；长期做**自主 Agent 平台**——自有对话循环、宿主调度与评测驱动的自我改进。Provider 是当前主线，Supervisor/Agent 是长期形态；本路线图中 v0.11.x 的能力全部属于两步共用的内核。
 
@@ -52,6 +52,8 @@
 **v0.11.36：Governed Candidate Delivery。** 已授权的知识候选可编译为带内容摘要、Claim/Evidence 引用、评测与 Signoff 血缘的便携交付包；Skill 明确面向 Codex、Claude、DeepSeek Harness 或通用 MCP，Workflow 面向 Craft Workflow。所有目标都仍要求人工导入，Package 不写入宿主、不启用工具也不授予执行权。候选评测/发布逻辑从 `CraftService` 门面拆至专用 Kernel，避免这条增长最快的治理链继续膨胀主服务。
 
 **v0.11.37：Guided Work Brief。** 普通用户可从目标、资料引用和必须先回答的决策创建可恢复 Brief；Craft 建立普通 Task，资料只存引用、答案只存脱敏摘要。所有必要决策完成后才能准备普通 Work Launch，仍经过原有 Host 审批、Trial、Evidence 与 Outcome；Brief 不自动规划、不执行，也不授予额外权限。
+
+**v0.11.38：Execution Safety Preflight。** 经 Evidence 验证的 Sandbox Profile、Host、工作目录、读写模式和资源上限可固定并绑定到 Work Launch；写入型启动会在人工批准前重新核验 Profile 摘要与 Dispatch 的 timeout/output（以及 Claude 的 turns/budget）契约。它不把宿主设置宣称为操作系统级隔离。
 
 - 面向各行业工作者，研发是首批验证场景，视频用于检验跨领域复用；后续扩展销售、教育与内容创作，不同时自建所有专业编辑器。
 - 先把真实工作从目标到成果跑通，同时提供可操作的最小界面；不长期只增加协议与配置。

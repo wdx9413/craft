@@ -102,6 +102,7 @@ Signoff ──authorizes──> Workflow or Configuration Promotion
 - [Local Supervisor：单实例 Runner 与认证 IPC](modules/local-supervisor.md)
 - [Work Launch：从目标到受控运行](modules/work-launch.md)
 - [Guided Work：从用户目标到受控启动](modules/guided-work.md)
+- [Execution Safety Preflight：已验证边界与资源契约](modules/execution-safety-preflight.md)
 - [领域验收计划：执行成功与业务正确分层](modules/acceptance-plan.md)
 - [领域验收执行器：版本化 Evaluator 与租约 Job](modules/acceptance-execution.md)
 - [Closed-loop Runtime](modules/closed-loop-runtime.md)

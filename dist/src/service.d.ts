@@ -1,6 +1,6 @@
 import { CraftStore, type JsonObject } from "./store.ts";
 import { ServiceFoundation } from "./service-foundation.ts";
-export declare const VERSION = "0.11.37";
+export declare const VERSION = "0.11.38";
 export declare class CraftService extends ServiceFoundation {
     static open(store: CraftStore, hostOwnerId?: string): Promise<CraftService>;
     info(): JsonObject;
@@ -260,6 +260,10 @@ export declare class CraftService extends ServiceFoundation {
     guidedWorkDecide(args: JsonObject): JsonObject;
     guidedWorkGet(args: JsonObject): JsonObject;
     guidedWorkLaunchPrepare(args: JsonObject): JsonObject;
+    executionSafetyPreflight(args: JsonObject): JsonObject;
+    executionSafetyGet(args: JsonObject): JsonObject;
+    safetyWorkLaunchPrepare(args: JsonObject): JsonObject;
+    safetyWorkLaunchDecide(args: JsonObject): JsonObject;
     knowledgeEvaluationCaseSave(args: JsonObject): JsonObject;
     knowledgeEvaluationCaseList(args: JsonObject): JsonObject;
     knowledgeEvaluationRun(args: JsonObject): JsonObject;

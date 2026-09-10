@@ -37,6 +37,7 @@ import { KnowledgeBoundLaunchKernel } from "./knowledge-bound-launch.js";
 import { KnowledgeWorkbenchKernel } from "./knowledge-workbench.js";
 import { WikiCandidateGovernanceKernel } from "./wiki-candidate-governance.js";
 import { GuidedWorkKernel } from "./guided-work.js";
+import { ExecutionSafetyKernel } from "./execution-safety.js";
 /**
  * Stable composition root for the service. Domain behavior stays in focused
  * kernels; CraftService is the backwards-compatible API facade.
@@ -81,6 +82,7 @@ export class ServiceFoundation {
     knowledgeWorkbench;
     wikiCandidateGovernance;
     guidedWork;
+    executionSafety;
     constructor(store, semanticProvider, isolatedAdapter = new LocalIsolatedAdapter(), dockerSandbox = new DockerSandboxAdapter(), egressBroker = new TrustedEgressBroker(), hostOwnerId) {
         this.store = store;
         this.catalog = new Catalog(store, semanticProvider);
@@ -120,6 +122,7 @@ export class ServiceFoundation {
         this.knowledgeWorkbench = new KnowledgeWorkbenchKernel(store);
         this.wikiCandidateGovernance = new WikiCandidateGovernanceKernel(store);
         this.guidedWork = new GuidedWorkKernel(store);
+        this.executionSafety = new ExecutionSafetyKernel(store, this.sandbox);
         this.hostRuns = new HostRunKernel(store, [this.codexHost, this.claudeHost], hostOwnerId, (run, receipt) => this.finalizeWorkLaunch(run, receipt));
     }
 }
