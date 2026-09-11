@@ -1,6 +1,6 @@
 # Craft
 
-> 当前发布版本：v0.11.55。新增可验证执行与演进平台：本地写入 Fabric 有范围内事务与人工恢复边界；Eval Campaign 生成真实 Delivery 的对照报告；只有 Signoff 与带证据 Canary 均通过的候选才可被推荐。
+> 当前发布版本：v0.11.56。新增 Managed Run 与 Evaluation Lab：跨会话接力只保存可复核引用，评测按显式槽位交给 Host，未校准 Judge 不能作为晋级依据；已有本地写入恢复、Delivery 对照报告和 Evidence Canary 门禁继续生效。
 
 [中文](README.md) | [English](README.en.md)
 

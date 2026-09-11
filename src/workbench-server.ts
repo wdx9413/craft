@@ -35,6 +35,8 @@ export class WorkbenchWebApp {
     if (path.startsWith("/api/") && !authorized(request.token, this.token)) return json(401, { error: "Workbench token required" });
     try {
       if (request.method === "GET" && path === "/api/home") return json(200, this.service.homeView({}));
+      if (request.method === "GET" && path.startsWith("/api/managed-runs/")) return json(200, this.service.managedRunGet({ managed_run_id: decodeURIComponent(path.slice(18)) }));
+      if (request.method === "GET" && path.startsWith("/api/campaign-runners/")) return json(200, this.service.campaignRunnerGet({ runner_id: decodeURIComponent(path.slice(22)) }));
       if (request.method === "GET" && path === "/api/host-runs") return json(200, this.service.homeHostRuns({}));
       if (request.method === "GET" && path === "/api/domain-kits") return json(200, this.service.domainKitInstallBuiltins());
       if (request.method === "POST" && path.startsWith("/api/domain-kits/") && path.endsWith("/apply")) return json(201, this.service.domainKitApply({ ...bodyObject(request.body), kit_id: decodeURIComponent(path.slice(17, -6)) }));

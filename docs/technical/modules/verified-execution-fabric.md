@@ -1,6 +1,6 @@
 # Verified Execution Fabric
 
-> 状态：v0.11.55 将已有的 `Verified Work Loop`、Activation Profile、Host Dispatch、Workspace State、Acceptance 与 Eval Runner 收敛为一个可审计的运行面，并将本地 Host 启动接到精确 Manifest。它证明机制和边界，不宣称已经提升任意业务任务的效果。
+> 状态：v0.11.54 将已有的 `Verified Work Loop`、Activation Profile、Host Dispatch、Workspace State、Acceptance 与 Eval Runner 收敛为一个可审计的运行面，并将本地 Host 启动接到精确 Manifest。它证明机制和边界，不宣称已经提升任意业务任务的效果。
 
 ## 目标
 

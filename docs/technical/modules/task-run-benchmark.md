@@ -1,6 +1,6 @@
 # Task Run、平台 Conformance 与 Benchmark
 
-> 状态：v0.11.55 已实现机制；内置样例只证明控制链路，不代表业务质量已提升。
+> 状态：v0.11.55 已实现机制；v0.11.56 在其上增加 Host-bound Campaign Slot；内置样例只证明控制链路，不代表业务质量已提升。
 
 ## 三个模块
 
@@ -33,7 +33,7 @@ Task Benchmark Pair → held-out aggregate → draft candidate → Signoff → C
 
 Benchmark 只配对已经产生 `WorkDelivery` 的两个 Task Run，不会为了评测悄悄启动模型或 Host。它要求相同环境与预算摘要；缺少一侧交付则等待，发生漂移则 `inconclusive`。
 
-多个可比的 held-out Pair 可以复用既有 Delivery Evaluation 聚合。只有 `eligible_for_signoff` 的聚合才能产生仅保存摘要 digest、且最多两个 Harness 设计轴的 draft candidate；candidate 仍必须引用既有 passed Signoff 才能进入 Canary。Canary 固定评测时的环境与预算摘要，只接受脱敏聚合质量；一旦低于基线减阈值，返回精确 `rollback_to` 基线引用。v0.11.55 额外要求可用于路由的 Sample 带 Evidence，且由 reviewer 明确确认后才成为 `routing_eligible`；选择器无匹配时固定回到调用方给出的最小 Harness。它永远不直接发布、改 Prompt、写 Skill 或执行生成脚本。
+多个可比的 held-out Pair 可以复用既有 Delivery Evaluation 聚合。只有 `eligible_for_signoff` 的聚合才能产生仅保存摘要 digest、且最多两个 Harness 设计轴的 draft candidate；candidate 仍必须引用既有 passed Signoff 才能进入 Canary。Canary 固定评测时的环境与预算摘要，只接受脱敏聚合质量；一旦低于基线减阈值，返回精确 `rollback_to` 基线引用。v0.11.55 要求可用于路由的 Sample 带 Evidence，且由 reviewer 明确确认后才成为 `routing_eligible`；选择器无匹配时固定回到调用方给出的最小 Harness。v0.11.56 的 `CampaignRunner` 再固定每次 Host 交接的 Case、Harness、Trial、环境和预算，仍不直接发布、改 Prompt、写 Skill 或执行生成脚本。
 
 ## 非目标
 

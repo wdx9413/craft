@@ -17,7 +17,7 @@ import { dockerRequestDigest } from "./docker-sandbox.ts";
 import { egressRequestDigest } from "./egress.ts";
 import { ServiceFoundation } from "./service-foundation.ts";
 
-export const VERSION = "0.11.55";
+export const VERSION = "0.11.56";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -2273,6 +2273,19 @@ export class CraftService extends ServiceFoundation {
   adaptiveHarnessRecommend(args: JsonObject): JsonObject { return this.adaptiveHarnesses.recommend(args); }
   managedWriteGet(args: JsonObject): JsonObject { return this.managedWrites.get(args); }
   managedWriteRollback(args: JsonObject): JsonObject { return this.managedWrites.rollback(args); }
+  /** v0.11.56 durable, host-neutral continuation boundary. */
+  managedRunCreate(args: JsonObject): JsonObject { return this.managedRuns.create(args); }
+  managedRunObserve(args: JsonObject): JsonObject { return this.managedRuns.observe(args); }
+  managedRunHandoff(args: JsonObject): JsonObject { return this.managedRuns.handoff(args); }
+  managedRunResume(args: JsonObject): JsonObject { return this.managedRuns.resume(args); }
+  managedRunForkShadow(args: JsonObject): JsonObject { return this.managedRuns.forkShadow(args); }
+  managedRunGet(args: JsonObject): JsonObject { return this.managedRuns.get(args); }
+  /** Campaign dispatch is a receipt-producing Host handoff, never a hidden model start. */
+  campaignRunnerCreate(args: JsonObject): JsonObject { return this.campaignRunners.create(args); }
+  campaignRunnerClaim(args: JsonObject): JsonObject { return this.campaignRunners.claim(args); }
+  campaignRunnerBind(args: JsonObject): JsonObject { return this.campaignRunners.bind(args); }
+  campaignRunnerAdvance(args: JsonObject): JsonObject { return this.campaignRunners.advance(args); }
+  campaignRunnerGet(args: JsonObject): JsonObject { return this.campaignRunners.get(args); }
   projectKnowledgeDiscover(args: JsonObject): JsonObject { return this.projectKnowledge.discover(args); }
   projectKnowledgeResolve(args: JsonObject): JsonObject { return this.projectKnowledge.resolve(args); }
   projectKnowledgeProposeUpdate(args: JsonObject): JsonObject { return this.projectKnowledge.proposeUpdate(args); }
@@ -2829,13 +2842,25 @@ export class CraftService extends ServiceFoundation {
   judgeCalibrationRecord(args: JsonObject): JsonObject {
     const judge = this.store.get("judge_adapter", text(args.judge_id, "judge_id")); const total = finiteInteger(args.total, "total", 1, 1); const agreed = finiteInteger(args.agreed, "agreed", 0, 0, total);
     const minimum = Number(args.minimum_agreement ?? 0.8); if (!Number.isFinite(minimum) || minimum < 0 || minimum > 1) throw new Error("minimum_agreement must be between 0 and 1");
-    const agreement = agreed / total; const calibration = this.store.create("judge_calibration", String(args.calibration_id ?? id("calibration")), { judge_id: judge.id, judge_version: judge.version, total, agreed, agreement, minimum_agreement: minimum, status: agreement >= minimum ? "calibrated" : "advisory" });
+    const goldCaseIds = optionalTextArray(args.gold_case_ids, "gold_case_ids"); const evidenceIds = optionalTextArray(args.evidence_ids, "evidence_ids");
+    if (goldCaseIds.length && goldCaseIds.length !== total) throw new Error("gold_case_ids must match total calibration examples"); for (const evidenceId of evidenceIds) this.store.get("evidence", evidenceId);
+    const agreement = agreed / total; const calibration = this.store.create("judge_calibration", String(args.calibration_id ?? id("calibration")), { judge_id: judge.id, judge_version: judge.version, total, agreed, agreement, minimum_agreement: minimum, gold_case_ids: goldCaseIds, evidence_ids: evidenceIds, status: agreement >= minimum ? "calibrated" : "advisory" });
     this.store.save("judge_adapter", String(judge.id), { ...recordPayload(judge), status: calibration.status, calibration_id: calibration.id });
     return { calibration };
   }
 
   judgePromotionEligible(args: JsonObject): JsonObject {
     const judge = this.store.get("judge_adapter", text(args.judge_id, "judge_id")); return { eligible: judge.status === "calibrated", judge };
+  }
+
+  evaluationJudgeGate(args: JsonObject): JsonObject {
+    const assessment = this.store.get("evaluation_reliability", text(args.assessment_id, "assessment_id")); const judge = this.store.get("judge_adapter", text(args.judge_id, "judge_id"));
+    const evidenceIds = optionalTextArray(args.evidence_ids, "evidence_ids"); for (const evidenceId of evidenceIds) this.store.get("evidence", evidenceId);
+    const eligible = assessment.status === "eligible" && judge.status === "calibrated";
+    const identity = { assessment_id: assessment.id, assessment_version: assessment.version, judge_id: judge.id, judge_version: judge.version, calibration_id: judge.calibration_id ?? null, evidence_ids: evidenceIds, eligible };
+    const gateId = String(args.gate_id ?? `evaluation_judge_gate_${valueDigest(identity).slice(-16)}`); const existing = this.store.find("evaluation_judge_gate", gateId); const gateDigest = valueDigest(identity);
+    if (existing) { if (existing.gate_digest !== gateDigest) throw new Error("Evaluation Judge Gate idempotency conflict"); return { gate: existing, idempotent: true }; }
+    return { gate: this.store.create("evaluation_judge_gate", gateId, { ...identity, gate_digest: gateDigest, status: eligible ? "eligible" : "inconclusive" }), idempotent: false };
   }
 
   adaptationCandidateCreate(args: JsonObject): JsonObject {
@@ -2855,7 +2880,9 @@ export class CraftService extends ServiceFoundation {
     if (signoff.decision !== "passed" || signoff.evaluation_run_id !== comparison.candidate_run_id) {
       throw new Error("Adaptation Candidate requires a passed Signoff for the compared candidate run");
     }
-    const authorized = this.store.save("adaptation_candidate", String(candidate.id), { ...recordPayload(candidate), lifecycle: "canary_ready", reliability_assessment_id: assessment.id, signoff_id: signoff.id, publication_allowed: false });
+    const judgeGateId = args.judge_gate_id === undefined ? null : text(args.judge_gate_id, "judge_gate_id");
+    if (judgeGateId && this.store.get("evaluation_judge_gate", judgeGateId).status !== "eligible") throw new Error("Adaptation Candidate requires an eligible calibrated Judge Gate");
+    const authorized = this.store.save("adaptation_candidate", String(candidate.id), { ...recordPayload(candidate), lifecycle: "canary_ready", reliability_assessment_id: assessment.id, signoff_id: signoff.id, judge_gate_id: judgeGateId, publication_allowed: false });
     return { candidate: authorized };
   }
 

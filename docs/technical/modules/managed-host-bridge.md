@@ -1,6 +1,6 @@
 # Managed Host Bridge
 
-> 状态：v0.11.55 已实现本地 Codex CLI / Claude Code 的受控启动闭环。它不是远程 Agent 平台，也不会修改宿主的 MCP 配置或自动安装能力。
+> 状态：v0.11.54 已实现本地 Codex CLI / Claude Code 的受控启动闭环。它不是远程 Agent 平台，也不会修改宿主的 MCP 配置或自动安装能力。
 
 `HostBridgeKernel` 连接已准备的 `Execution Fabric` 与一次真实 Host Run。它只保存 Fabric、Manifest、Launch、Dispatch、Host Run 与 Activation Receipt 的精确引用和 Prompt 摘要；Prompt 正文只在启动调用期间传给 Host。
 

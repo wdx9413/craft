@@ -1,6 +1,6 @@
 # Craft
 
-> Current release: v0.11.55. The verified evolution platform adds scoped local-write recovery, observed-delivery Campaign reports, and evidence-backed Canary gating before a Harness candidate can be recommended.
+> Current release: v0.11.56. Managed Run and Evaluation Lab add reference-only long-task handoffs, explicit Host-bound campaign slots, and calibrated-Judge promotion gating; scoped local-write recovery and evidence-backed Canary gates remain in force.
 
 [中文](README.md) | [English](README.en.md)
 
