@@ -42,6 +42,7 @@ import { LocalCandidateImportKernel } from "./local-candidate-import.js";
 import { A2ADiscoveryKernel } from "./a2a-discovery.js";
 import { WorkDeliveryKernel } from "./work-delivery.js";
 import { DeliveryEvaluationKernel } from "./delivery-evaluation.js";
+import { PlatformExecutionKernel } from "./platform-execution.js";
 /**
  * Stable composition root for the service. Domain behavior stays in focused
  * kernels; CraftService is the backwards-compatible API facade.
@@ -91,6 +92,7 @@ export class ServiceFoundation {
     a2aDiscovery;
     workDelivery;
     deliveryEvaluation;
+    platformExecution;
     constructor(store, semanticProvider, isolatedAdapter = new LocalIsolatedAdapter(), dockerSandbox = new DockerSandboxAdapter(), egressBroker = new TrustedEgressBroker(), hostOwnerId) {
         this.store = store;
         this.catalog = new Catalog(store, semanticProvider);
@@ -135,6 +137,7 @@ export class ServiceFoundation {
         this.a2aDiscovery = new A2ADiscoveryKernel(store);
         this.workDelivery = new WorkDeliveryKernel(store);
         this.deliveryEvaluation = new DeliveryEvaluationKernel(store);
+        this.platformExecution = new PlatformExecutionKernel(store);
         this.hostRuns = new HostRunKernel(store, [this.codexHost, this.claudeHost], hostOwnerId, (run, receipt) => this.finalizeWorkLaunch(run, receipt));
     }
 }

@@ -1,7 +1,7 @@
 import { CraftService, VERSION } from "./service.js";
 import {} from "./store.js";
 const schemaFor = (name) => {
-    if (["scan", "enabled", "allow_execution", "allow_external_write", "require_held_out", "require_outcome_passed", "retryable", "requires_external_effect", "supports_pause_resume", "supports_evidence_receipts", "generated_code", "requires_credential", "has_compensation", "approved", "start_trial", "untrusted_input", "confirmed_original_runner_stopped", "sanitized"].includes(name))
+    if (["scan", "enabled", "allow_execution", "allow_external_write", "require_held_out", "require_outcome_passed", "retryable", "requires_external_effect", "supports_pause_resume", "supports_evidence_receipts", "generated_code", "requires_credential", "has_compensation", "approved", "start_trial", "untrusted_input", "confirmed_original_runner_stopped", "sanitized", "active"].includes(name))
         return { type: "boolean" };
     if (["limit", "version", "capacity", "max_concurrency", "size_bytes", "subject_version", "expected_version", "max_candidates",
         "suite_version", "configuration_version", "harness_configuration_version", "target_version", "profile_version",
@@ -102,6 +102,8 @@ export const TOOLS = [
     tool("craft_work_delivery_get", "Read one immutable delivery observation.", ["delivery_id"], true),
     tool("craft_delivery_evaluation_case_save", "Register a sanitized development or independently approved held-out delivery Case.", ["case_id", "name", "domain", "partition", "acceptance_contract_ref", "sanitized"], false, ["approved_by"]),
     tool("craft_delivery_evaluation_compare", "Compare two observed deliveries under one explicit environment and budget fingerprint. It never promotes a candidate.", ["case_id", "baseline_delivery_id", "candidate_delivery_id", "environment_fingerprint", "budget_fingerprint"], false, ["comparison_id"]),
+    tool("craft_platform_execution_profile_save", "Register one platform execution boundary; only verified network-denied boundaries may authorize writes.", ["profile_id", "platform", "isolation", "network"], false, ["verified_by", "active"]),
+    tool("craft_platform_execution_preflight", "Check whether a requested effect is portable read-only or bound to an exact verified platform boundary.", ["platform", "effect"], false, ["profile_id", "preflight_id"]),
     tool("craft_capability_context_work_launch_prepare", "Prepare a Work Launch with an exact digest-pinned read-only capability context; it never grants extra write authority.", ["task_id", "host", "workspace", "prompt", "plan_id"], false, ["launch_id", "sandbox", "model", "timeout_ms", "output_limit", "max_turns", "max_budget_usd", "max_chars", "acceptance_name", "acceptance_criteria"]),
     tool("craft_capability_context_work_launch_decide", "Approve or deny one capability-bound workspace-write launch after revalidating the exact local context.", ["launch_id", "actor", "approved", "prompt"], false),
     tool("craft_knowledge_context_work_launch_prepare", "Prepare a Work Launch with one exact Wiki Context Bundle. Every Claim, Evidence reference, scope, expiry, and digest is revalidated before any Host run; the rendered knowledge is bounded read-only context.", ["task_id", "host", "workspace", "prompt", "bundle_id"], false, ["bundle_version", "launch_id", "sandbox", "model", "timeout_ms", "output_limit", "max_turns", "max_budget_usd", "acceptance_name", "acceptance_criteria", "now"]),
@@ -414,7 +416,7 @@ export const TOOLS = [
     tool("craft_canary_observe", "Observe a canary metric and roll back on a configured regression.", ["canary_id", "metric", "baseline", "candidate", "threshold"], false),
 ];
 const CORE_TOOL_NAMES = new Set(["craft_info", "craft_source_list", "craft_capability_search", "craft_capability_get", "craft_semantic_status", "craft_execution_policy_decide",
-    "craft_default_route", "craft_default_route_resume", "craft_default_route_find", "craft_task_open", "craft_task_list", "craft_task_checkpoint", "craft_work_launch_get", "craft_work_delivery_observe", "craft_work_delivery_get", "craft_delivery_evaluation_compare", "craft_workspace_get", "craft_workspace_diff", "craft_work_object_list", "craft_workspace_impact", "craft_context_assemble", "craft_change_set_preview",
+    "craft_default_route", "craft_default_route_resume", "craft_default_route_find", "craft_task_open", "craft_task_list", "craft_task_checkpoint", "craft_work_launch_get", "craft_work_delivery_observe", "craft_work_delivery_get", "craft_delivery_evaluation_compare", "craft_platform_execution_preflight", "craft_workspace_get", "craft_workspace_diff", "craft_work_object_list", "craft_workspace_impact", "craft_context_assemble", "craft_change_set_preview",
     "craft_artifact_register", "craft_evidence_record", "craft_capability_access_plan", "craft_capability_call_issue", "craft_capability_call_consume"]);
 export const CORE_TOOLS = TOOLS.filter((tool) => CORE_TOOL_NAMES.has(tool.name));
 export class McpServer {
@@ -526,6 +528,7 @@ export class McpServer {
             craft_work_launch_retry: (a) => service.workLaunchRetry(a),
             craft_work_delivery_observe: (a) => service.workDeliveryObserve(a), craft_work_delivery_get: (a) => service.workDeliveryGet(a),
             craft_delivery_evaluation_case_save: (a) => service.deliveryEvaluationCaseSave(a), craft_delivery_evaluation_compare: (a) => service.deliveryEvaluationCompare(a),
+            craft_platform_execution_profile_save: (a) => service.platformExecutionProfileSave(a), craft_platform_execution_preflight: (a) => service.platformExecutionPreflight(a),
             craft_execution_safety_preflight: (a) => service.executionSafetyPreflight(a),
             craft_execution_safety_get: (a) => service.executionSafetyGet(a),
             craft_safety_work_launch_prepare: (a) => service.safetyWorkLaunchPrepare(a),

@@ -43,6 +43,7 @@ import { LocalCandidateImportKernel } from "./local-candidate-import.ts";
 import { A2ADiscoveryKernel } from "./a2a-discovery.ts";
 import { WorkDeliveryKernel } from "./work-delivery.ts";
 import { DeliveryEvaluationKernel } from "./delivery-evaluation.ts";
+import { PlatformExecutionKernel } from "./platform-execution.ts";
 /**
  * Stable composition root for the service. Domain behavior stays in focused
  * kernels; CraftService is the backwards-compatible API facade.
@@ -92,6 +93,7 @@ export declare abstract class ServiceFoundation {
     readonly a2aDiscovery: A2ADiscoveryKernel;
     readonly workDelivery: WorkDeliveryKernel;
     readonly deliveryEvaluation: DeliveryEvaluationKernel;
+    readonly platformExecution: PlatformExecutionKernel;
     constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter?: LocalIsolatedAdapter, dockerSandbox?: DockerSandboxAdapter, egressBroker?: TrustedEgressBroker, hostOwnerId?: string);
     protected abstract finalizeWorkLaunch(run: JsonObject, receipt: JsonObject | null): void;
 }

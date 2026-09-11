@@ -1,0 +1,22 @@
+import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+import { McpServer } from "../src/mcp.ts";
+import { craftPaths } from "../src/paths.ts";
+import { CraftService } from "../src/service.ts";
+import { CraftStore, type JsonObject } from "../src/store.ts";
+
+test("platform execution permits portable reads and fails closed for writes without a verified boundary", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-platform-")); const store = await new CraftStore(craftPaths(root)).open(); const service = new CraftService(store);
+  try {
+    assert.equal(service.platformExecutionPreflight({ platform: "win32", effect: "read_only" }).mode, "portable_read"); assert.equal(service.platformExecutionPreflight({ platform: "darwin", effect: "read_only", profile_id: "missing" }).receipt instanceof Object, true);
+    assert.throws(() => service.platformExecutionPreflight({ platform: "win32", effect: "local_write" }), /verified/);
+    const none = service.platformExecutionProfileSave({ profile_id: "none", platform: "win32", isolation: "none", network: "deny" }).profile as JsonObject; assert.equal(none.verified_by, null); assert.throws(() => service.platformExecutionPreflight({ platform: "win32", effect: "local_write", profile_id: "none" }), /verified/);
+    const verified = service.platformExecutionProfileSave({ profile_id: "verified", platform: "win32", isolation: "verified", network: "deny", verified_by: "probe" }).profile as JsonObject; assert.equal(service.platformExecutionProfileSave({ profile_id: "verified", platform: "win32", isolation: "verified", network: "deny", verified_by: "probe" }).idempotent, true);
+    const preflight = service.platformExecutionPreflight({ platform: "win32", effect: "local_write", profile_id: verified.id, preflight_id: "fixed" }).preflight as JsonObject; assert.equal(preflight.allowed, true); assert.equal(service.platformExecutionPreflight({ platform: "win32", effect: "local_write", profile_id: verified.id, preflight_id: "fixed" }).idempotent, true); assert.throws(() => service.platformExecutionPreflight({ platform: "win32", effect: "external_write", profile_id: verified.id, preflight_id: "fixed" }), /conflict/);
+    const mcp = new McpServer(service, "full"); assert.equal((((await mcp.handlers.craft_platform_execution_preflight({ platform: "win32", effect: "external_write", profile_id: verified.id })).preflight as JsonObject).allowed), true); assert.equal(((await mcp.handlers.craft_platform_execution_profile_save({ profile_id: "mcp-profile", platform: "darwin", isolation: "verified", network: "deny", verified_by: "probe" })).profile as JsonObject).id, "mcp-profile");
+    assert.throws(() => service.platformExecutionProfileSave({ profile_id: "bad", platform: "x", isolation: "bad", network: "deny" }), /unsupported/); assert.throws(() => service.platformExecutionProfileSave({ profile_id: "unverified", platform: "x", isolation: "verified", network: "deny" }), /verified_by/); assert.throws(() => service.platformExecutionPreflight({ platform: "darwin", effect: "local_write", profile_id: verified.id }), /verified/); assert.throws(() => service.platformExecutionPreflight({ platform: "win32", effect: "local_write", profile_id: "missing" }), /Unknown/); assert.throws(() => service.platformExecutionProfileSave({ profile_id: "verified", platform: "win32", isolation: "verified", network: "allow", verified_by: "probe" }), /conflict/); assert.throws(() => service.platformExecutionPreflight({ platform: " ", effect: "read_only" }), /platform/);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
