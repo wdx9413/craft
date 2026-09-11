@@ -17,7 +17,7 @@ import { dockerRequestDigest } from "./docker-sandbox.ts";
 import { egressRequestDigest } from "./egress.ts";
 import { ServiceFoundation } from "./service-foundation.ts";
 
-export const VERSION = "0.11.41";
+export const VERSION = "0.11.42";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);

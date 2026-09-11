@@ -1101,18 +1101,18 @@ ${indent}${text37.slice(fold + 1, end2)}`;
     }
     function consumeMoreIndentedLines(text37, i, indent) {
       let end = i;
-      let start = i + 1;
-      let ch = text37[start];
+      let start2 = i + 1;
+      let ch = text37[start2];
       while (ch === " " || ch === "	") {
-        if (i < start + indent) {
+        if (i < start2 + indent) {
           ch = text37[++i];
         } else {
           do {
             ch = text37[++i];
           } while (ch && ch !== "\n");
           end = i;
-          start = i + 1;
-          ch = text37[start];
+          start2 = i + 1;
+          ch = text37[start2];
         }
       }
       return end;
@@ -1143,12 +1143,12 @@ var require_stringifyString = __commonJS({
       const strLen = str.length;
       if (strLen <= limit2)
         return false;
-      for (let i = 0, start = 0; i < strLen; ++i) {
+      for (let i = 0, start2 = 0; i < strLen; ++i) {
         if (str[i] === "\n") {
-          if (i - start > limit2)
+          if (i - start2 > limit2)
             return true;
-          start = i + 1;
-          if (strLen - start <= limit2)
+          start2 = i + 1;
+          if (strLen - start2 <= limit2)
             return false;
         }
       }
@@ -1162,19 +1162,19 @@ var require_stringifyString = __commonJS({
       const minMultiLineLength = ctx.options.doubleQuotedMinMultiLineLength;
       const indent = ctx.indent || (containsDocumentMarker(value) ? "  " : "");
       let str = "";
-      let start = 0;
+      let start2 = 0;
       for (let i = 0, ch = json[i]; ch; ch = json[++i]) {
         if (ch === " " && json[i + 1] === "\\" && json[i + 2] === "n") {
-          str += json.slice(start, i) + "\\ ";
+          str += json.slice(start2, i) + "\\ ";
           i += 1;
-          start = i;
+          start2 = i;
           ch = "\\";
         }
         if (ch === "\\")
           switch (json[i + 1]) {
             case "u":
               {
-                str += json.slice(start, i);
+                str += json.slice(start2, i);
                 const code = json.substr(i + 2, 4);
                 switch (code) {
                   case "0000":
@@ -1208,14 +1208,14 @@ var require_stringifyString = __commonJS({
                       str += json.substr(i, 6);
                 }
                 i += 5;
-                start = i + 1;
+                start2 = i + 1;
               }
               break;
             case "n":
               if (implicitKey || json[i + 2] === '"' || json.length < minMultiLineLength) {
                 i += 1;
               } else {
-                str += json.slice(start, i) + "\n\n";
+                str += json.slice(start2, i) + "\n\n";
                 while (json[i + 2] === "\\" && json[i + 3] === "n" && json[i + 4] !== '"') {
                   str += "\n";
                   i += 2;
@@ -1224,14 +1224,14 @@ var require_stringifyString = __commonJS({
                 if (json[i + 2] === " ")
                   str += "\\";
                 i += 1;
-                start = i + 1;
+                start2 = i + 1;
               }
               break;
             default:
               i += 1;
           }
       }
-      str = start ? str + json.slice(start) : json;
+      str = start2 ? str + json.slice(start2) : json;
       return implicitKey ? str : foldFlowLines.foldFlowLines(str, indent, foldFlowLines.FOLD_QUOTED, getFoldOptions(ctx, false));
     }
     function singleQuotedString(value, ctx) {
@@ -1310,10 +1310,10 @@ ${indent}`) + "'";
         else
           break;
       }
-      let start = value.substring(0, startNlPos < startEnd ? startNlPos + 1 : startEnd);
-      if (start) {
-        value = value.substring(start.length);
-        start = start.replace(/\n+/g, `$&${indent}`);
+      let start2 = value.substring(0, startNlPos < startEnd ? startNlPos + 1 : startEnd);
+      if (start2) {
+        value = value.substring(start2.length);
+        start2 = start2.replace(/\n+/g, `$&${indent}`);
       }
       const indentSize = indent ? "2" : "1";
       let header = (startWithSpace ? indentSize : "") + chomp;
@@ -1331,14 +1331,14 @@ ${indent}`) + "'";
             literalFallback = true;
           };
         }
-        const body2 = foldFlowLines.foldFlowLines(`${start}${foldedValue}${end}`, indent, foldFlowLines.FOLD_BLOCK, foldOptions);
+        const body2 = foldFlowLines.foldFlowLines(`${start2}${foldedValue}${end}`, indent, foldFlowLines.FOLD_BLOCK, foldOptions);
         if (!literalFallback)
           return `>${header}
 ${indent}${body2}`;
       }
       value = value.replace(/\n+/g, `$&${indent}`);
       return `|${header}
-${indent}${start}${value}${end}`;
+${indent}${start2}${value}${end}`;
     }
     function plainString(item, ctx, onComment, onChompKeep) {
       const { type, value } = item;
@@ -1969,23 +1969,23 @@ ${indent}${line}` : "\n";
         lines.push(str);
         linesAtValue = lines.length;
       }
-      const { start, end } = flowChars;
+      const { start: start2, end } = flowChars;
       if (lines.length === 0) {
-        return start + end;
+        return start2 + end;
       } else {
         if (!reqNewline) {
           const len = lines.reduce((sum, line) => sum + line.length + 2, 2);
           reqNewline = ctx.options.lineWidth > 0 && len > ctx.options.lineWidth;
         }
         if (reqNewline) {
-          let str = start;
+          let str = start2;
           for (const line of lines)
             str += line ? `
 ${indentStep}${indent}${line}` : "\n";
           return `${str}
 ${indent}${end}`;
         } else {
-          return `${start}${fcPadding}${lines.join(" ")}${fcPadding}${end}`;
+          return `${start2}${fcPadding}${lines.join(" ")}${fcPadding}${end}`;
         }
       }
     }
@@ -3780,7 +3780,7 @@ var require_resolve_props = __commonJS({
       let newlineAfterProp = null;
       let comma = null;
       let found = null;
-      let start = null;
+      let start2 = null;
       for (const token of tokens) {
         if (reqSpace) {
           if (token.type !== "space" && token.type !== "newline" && token.type !== "comma")
@@ -3832,7 +3832,7 @@ var require_resolve_props = __commonJS({
             if (token.source.endsWith(":"))
               onError(token.offset + token.source.length - 1, "BAD_ALIAS", "Anchor ending in : is ambiguous", true);
             anchor = token;
-            start ?? (start = token.offset);
+            start2 ?? (start2 = token.offset);
             atNewline = false;
             hasSpace = false;
             reqSpace = true;
@@ -3841,7 +3841,7 @@ var require_resolve_props = __commonJS({
             if (tag)
               onError(token, "MULTIPLE_TAGS", "A node can have at most one tag");
             tag = token;
-            start ?? (start = token.offset);
+            start2 ?? (start2 = token.offset);
             atNewline = false;
             hasSpace = false;
             reqSpace = true;
@@ -3889,7 +3889,7 @@ var require_resolve_props = __commonJS({
         tag,
         newlineAfterProp,
         end,
-        start: start ?? end
+        start: start2 ?? end
       };
     }
     exports2.resolveProps = resolveProps;
@@ -3991,8 +3991,8 @@ var require_resolve_block_map = __commonJS({
       let offset = bm.offset;
       let commentEnd = null;
       for (const collItem of bm.items) {
-        const { start, key: key2, sep: sep2, value } = collItem;
-        const keyProps = resolveProps.resolveProps(start, {
+        const { start: start2, key: key2, sep: sep2, value } = collItem;
+        const keyProps = resolveProps.resolveProps(start2, {
           indicator: "explicit-key-ind",
           next: key2 ?? sep2?.[0],
           offset,
@@ -4019,14 +4019,14 @@ var require_resolve_block_map = __commonJS({
             continue;
           }
           if (keyProps.newlineAfterProp || utilContainsNewline.containsNewline(key2)) {
-            onError(key2 ?? start[start.length - 1], "MULTILINE_IMPLICIT_KEY", "Implicit keys need to be on a single line");
+            onError(key2 ?? start2[start2.length - 1], "MULTILINE_IMPLICIT_KEY", "Implicit keys need to be on a single line");
           }
         } else if (keyProps.found?.indent !== bm.indent) {
           onError(offset, "BAD_INDENT", startColMsg);
         }
         ctx.atKey = true;
         const keyStart = keyProps.end;
-        const keyNode = key2 ? composeNode(ctx, key2, keyProps, onError) : composeEmptyNode(ctx, keyStart, start, null, keyProps, onError);
+        const keyNode = key2 ? composeNode(ctx, key2, keyProps, onError) : composeEmptyNode(ctx, keyStart, start2, null, keyProps, onError);
         if (ctx.schema.compat)
           utilFlowIndentCheck.flowIndentCheck(bm.indent, key2, onError);
         ctx.atKey = false;
@@ -4096,8 +4096,8 @@ var require_resolve_block_seq = __commonJS({
         ctx.atKey = false;
       let offset = bs.offset;
       let commentEnd = null;
-      for (const { start, value } of bs.items) {
-        const props = resolveProps.resolveProps(start, {
+      for (const { start: start2, value } of bs.items) {
+        const props = resolveProps.resolveProps(start2, {
           indicator: "seq-item-ind",
           next: value,
           offset,
@@ -4118,7 +4118,7 @@ var require_resolve_block_seq = __commonJS({
             continue;
           }
         }
-        const node = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, start, null, props, onError);
+        const node = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, start2, null, props, onError);
         if (ctx.schema.compat)
           utilFlowIndentCheck.flowIndentCheck(bs.indent, value, onError);
         offset = node.range[2];
@@ -4202,8 +4202,8 @@ var require_resolve_flow_collection = __commonJS({
       let offset = fc.offset + fc.start.source.length;
       for (let i = 0; i < fc.items.length; ++i) {
         const collItem = fc.items[i];
-        const { start, key: key2, sep: sep2, value } = collItem;
-        const props = resolveProps.resolveProps(start, {
+        const { start: start2, key: key2, sep: sep2, value } = collItem;
+        const props = resolveProps.resolveProps(start2, {
           flow: fcName,
           indicator: "explicit-key-ind",
           next: key2 ?? sep2?.[0],
@@ -4243,7 +4243,7 @@ var require_resolve_flow_collection = __commonJS({
             onError(props.start, "MISSING_CHAR", `Missing , between ${fcName} items`);
           if (props.comment) {
             let prevItemComment = "";
-            loop: for (const st of start) {
+            loop: for (const st of start2) {
               switch (st.type) {
                 case "comma":
                 case "space":
@@ -4276,7 +4276,7 @@ var require_resolve_flow_collection = __commonJS({
         } else {
           ctx.atKey = true;
           const keyStart = props.end;
-          const keyNode = key2 ? composeNode(ctx, key2, props, onError) : composeEmptyNode(ctx, keyStart, start, null, props, onError);
+          const keyNode = key2 ? composeNode(ctx, key2, props, onError) : composeEmptyNode(ctx, keyStart, start2, null, props, onError);
           if (isBlock(key2))
             onError(keyNode.range, "BLOCK_IN_FLOW", blockMsg);
           ctx.atKey = false;
@@ -4439,10 +4439,10 @@ var require_resolve_block_scalar = __commonJS({
     "use strict";
     var Scalar = require_Scalar();
     function resolveBlockScalar(ctx, scalar2, onError) {
-      const start = scalar2.offset;
+      const start2 = scalar2.offset;
       const header = parseBlockScalarHeader(scalar2, ctx.options.strict, onError);
       if (!header)
-        return { value: "", type: null, comment: "", range: [start, start, start] };
+        return { value: "", type: null, comment: "", range: [start2, start2, start2] };
       const type = header.mode === ">" ? Scalar.Scalar.BLOCK_FOLDED : Scalar.Scalar.BLOCK_LITERAL;
       const lines = scalar2.source ? splitLines(scalar2.source) : [];
       let chompStart = lines.length;
@@ -4455,10 +4455,10 @@ var require_resolve_block_scalar = __commonJS({
       }
       if (chompStart === 0) {
         const value2 = header.chomp === "+" && lines.length > 0 ? "\n".repeat(Math.max(1, lines.length - 1)) : "";
-        let end2 = start + header.length;
+        let end2 = start2 + header.length;
         if (scalar2.source)
           end2 += scalar2.source.length;
-        return { value: value2, type, comment: header.comment, range: [start, end2, end2] };
+        return { value: value2, type, comment: header.comment, range: [start2, end2, end2] };
       }
       let trimIndent = scalar2.indent + header.indent;
       let offset = scalar2.offset + header.length;
@@ -4539,8 +4539,8 @@ var require_resolve_block_scalar = __commonJS({
         default:
           value += "\n";
       }
-      const end = start + header.length + scalar2.source.length;
-      return { value, type, comment: header.comment, range: [start, end, end] };
+      const end = start2 + header.length + scalar2.source.length;
+      return { value, type, comment: header.comment, range: [start2, end, end] };
     }
     function parseBlockScalarHeader({ offset, props }, strict, onError) {
       if (props[0].type !== "block-scalar-header") {
@@ -5061,7 +5061,7 @@ var require_compose_doc = __commonJS({
     var composeNode = require_compose_node();
     var resolveEnd = require_resolve_end();
     var resolveProps = require_resolve_props();
-    function composeDoc(options, directives, { offset, start, value, end }, onError) {
+    function composeDoc(options, directives, { offset, start: start2, value, end }, onError) {
       const opts = Object.assign({ _directives: directives }, options);
       const doc = new Document.Document(void 0, opts);
       const ctx = {
@@ -5071,7 +5071,7 @@ var require_compose_doc = __commonJS({
         options: doc.options,
         schema: doc.schema
       };
-      const props = resolveProps.resolveProps(start, {
+      const props = resolveProps.resolveProps(start2, {
         indicator: "doc-start",
         next: value ?? end?.[0],
         offset,
@@ -5084,7 +5084,7 @@ var require_compose_doc = __commonJS({
         if (value && (value.type === "block-map" || value.type === "block-seq") && !props.hasNewline)
           onError(props.end, "MISSING_CHAR", "Block collection cannot start on same line with directives-end marker");
       }
-      doc.contents = value ? composeNode.composeNode(ctx, value, props, onError) : composeNode.composeEmptyNode(ctx, props.end, start, null, props, onError);
+      doc.contents = value ? composeNode.composeNode(ctx, value, props, onError) : composeNode.composeEmptyNode(ctx, props.end, start2, null, props, onError);
       const contentEnd = doc.contents.range[2];
       const re = resolveEnd.resolveEnd(end, contentEnd, false, onError);
       if (re.comment)
@@ -5533,9 +5533,9 @@ var require_cst_stringify = __commonJS({
         }
       }
     }
-    function stringifyItem({ start, key: key2, sep: sep2, value }) {
+    function stringifyItem({ start: start2, key: key2, sep: sep2, value }) {
       let res = "";
-      for (const st of start)
+      for (const st of start2)
         res += st.source;
       if (key2)
         res += stringifyToken(key2);
@@ -6325,8 +6325,8 @@ var require_line_counter = __commonJS({
             return { line: low + 1, col: 1 };
           if (low === 0)
             return { line: 0, col: offset };
-          const start = this.lineStarts[low - 1];
-          return { line: low, col: offset - start + 1 };
+          const start2 = this.lineStarts[low - 1];
+          return { line: low, col: offset - start2 + 1 };
         };
       }
     };
@@ -6706,7 +6706,7 @@ var require_parser = __commonJS({
       *scalar(scalar2) {
         if (this.type === "map-value-ind") {
           const prev = getPrevProps(this.peek(2));
-          const start = getFirstKeyStartProps(prev);
+          const start2 = getFirstKeyStartProps(prev);
           let sep2;
           if (scalar2.end) {
             sep2 = scalar2.end;
@@ -6718,7 +6718,7 @@ var require_parser = __commonJS({
             type: "block-map",
             offset: scalar2.offset,
             indent: scalar2.indent,
-            items: [{ start, key: scalar2, sep: sep2 }]
+            items: [{ start: start2, key: scalar2, sep: sep2 }]
           };
           this.onKeyLine = true;
           this.stack[this.stack.length - 1] = map;
@@ -6793,7 +6793,7 @@ var require_parser = __commonJS({
         if (this.indent >= map.indent) {
           const atMapIndent = !this.onKeyLine && this.indent === map.indent;
           const atNextItem = atMapIndent && (it.sep || it.explicitKey) && this.type !== "seq-item-ind";
-          let start = [];
+          let start2 = [];
           if (atNextItem && it.sep && !it.value) {
             const nl = [];
             for (let i = 0; i < it.sep.length; ++i) {
@@ -6813,14 +6813,14 @@ var require_parser = __commonJS({
               }
             }
             if (nl.length >= 2)
-              start = it.sep.splice(nl[1]);
+              start2 = it.sep.splice(nl[1]);
           }
           switch (this.type) {
             case "anchor":
             case "tag":
               if (atNextItem || it.value) {
-                start.push(this.sourceToken);
-                map.items.push({ start });
+                start2.push(this.sourceToken);
+                map.items.push({ start: start2 });
                 this.onKeyLine = true;
               } else if (it.sep) {
                 it.sep.push(this.sourceToken);
@@ -6833,8 +6833,8 @@ var require_parser = __commonJS({
                 it.start.push(this.sourceToken);
                 it.explicitKey = true;
               } else if (atNextItem || it.value) {
-                start.push(this.sourceToken);
-                map.items.push({ start, explicitKey: true });
+                start2.push(this.sourceToken);
+                map.items.push({ start: start2, explicitKey: true });
               } else {
                 this.stack.push({
                   type: "block-map",
@@ -6851,12 +6851,12 @@ var require_parser = __commonJS({
                   if (includesToken(it.start, "newline")) {
                     Object.assign(it, { key: null, sep: [this.sourceToken] });
                   } else {
-                    const start2 = getFirstKeyStartProps(it.start);
+                    const start3 = getFirstKeyStartProps(it.start);
                     this.stack.push({
                       type: "block-map",
                       offset: this.offset,
                       indent: this.indent,
-                      items: [{ start: start2, key: null, sep: [this.sourceToken] }]
+                      items: [{ start: start3, key: null, sep: [this.sourceToken] }]
                     });
                   }
                 } else if (it.value) {
@@ -6866,10 +6866,10 @@ var require_parser = __commonJS({
                     type: "block-map",
                     offset: this.offset,
                     indent: this.indent,
-                    items: [{ start, key: null, sep: [this.sourceToken] }]
+                    items: [{ start: start2, key: null, sep: [this.sourceToken] }]
                   });
                 } else if (isFlowToken(it.key) && !includesToken(it.sep, "newline")) {
-                  const start2 = getFirstKeyStartProps(it.start);
+                  const start3 = getFirstKeyStartProps(it.start);
                   const key2 = it.key;
                   const sep2 = it.sep;
                   sep2.push(this.sourceToken);
@@ -6879,10 +6879,10 @@ var require_parser = __commonJS({
                     type: "block-map",
                     offset: this.offset,
                     indent: this.indent,
-                    items: [{ start: start2, key: key2, sep: sep2 }]
+                    items: [{ start: start3, key: key2, sep: sep2 }]
                   });
-                } else if (start.length > 0) {
-                  it.sep = it.sep.concat(start, this.sourceToken);
+                } else if (start2.length > 0) {
+                  it.sep = it.sep.concat(start2, this.sourceToken);
                 } else {
                   it.sep.push(this.sourceToken);
                 }
@@ -6890,7 +6890,7 @@ var require_parser = __commonJS({
                 if (!it.sep) {
                   Object.assign(it, { key: null, sep: [this.sourceToken] });
                 } else if (it.value || atNextItem) {
-                  map.items.push({ start, key: null, sep: [this.sourceToken] });
+                  map.items.push({ start: start2, key: null, sep: [this.sourceToken] });
                 } else if (includesToken(it.sep, "map-value-ind")) {
                   this.stack.push({
                     type: "block-map",
@@ -6910,7 +6910,7 @@ var require_parser = __commonJS({
             case "double-quoted-scalar": {
               const fs = this.flowScalar(this.type);
               if (atNextItem || it.value) {
-                map.items.push({ start, key: fs, sep: [] });
+                map.items.push({ start: start2, key: fs, sep: [] });
                 this.onKeyLine = true;
               } else if (it.sep) {
                 this.stack.push(fs);
@@ -6934,7 +6934,7 @@ var require_parser = __commonJS({
                     return;
                   }
                 } else if (atMapIndent) {
-                  map.items.push({ start });
+                  map.items.push({ start: start2 });
                 }
                 this.stack.push(bv);
                 return;
@@ -7071,7 +7071,7 @@ var require_parser = __commonJS({
             yield* this.step();
           } else if (this.type === "map-value-ind" && parent.type !== "flow-collection") {
             const prev = getPrevProps(parent);
-            const start = getFirstKeyStartProps(prev);
+            const start2 = getFirstKeyStartProps(prev);
             fixFlowSeqItems(fc);
             const sep2 = fc.end.splice(1, fc.end.length);
             sep2.push(this.sourceToken);
@@ -7079,7 +7079,7 @@ var require_parser = __commonJS({
               type: "block-map",
               offset: fc.offset,
               indent: fc.indent,
-              items: [{ start, key: fc, sep: sep2 }]
+              items: [{ start: start2, key: fc, sep: sep2 }]
             };
             this.onKeyLine = true;
             this.stack[this.stack.length - 1] = map;
@@ -7138,35 +7138,35 @@ var require_parser = __commonJS({
           case "explicit-key-ind": {
             this.onKeyLine = true;
             const prev = getPrevProps(parent);
-            const start = getFirstKeyStartProps(prev);
-            start.push(this.sourceToken);
+            const start2 = getFirstKeyStartProps(prev);
+            start2.push(this.sourceToken);
             return {
               type: "block-map",
               offset: this.offset,
               indent: this.indent,
-              items: [{ start, explicitKey: true }]
+              items: [{ start: start2, explicitKey: true }]
             };
           }
           case "map-value-ind": {
             this.onKeyLine = true;
             const prev = getPrevProps(parent);
-            const start = getFirstKeyStartProps(prev);
+            const start2 = getFirstKeyStartProps(prev);
             return {
               type: "block-map",
               offset: this.offset,
               indent: this.indent,
-              items: [{ start, key: null, sep: [this.sourceToken] }]
+              items: [{ start: start2, key: null, sep: [this.sourceToken] }]
             };
           }
         }
         return null;
       }
-      atIndentedComment(start, indent) {
+      atIndentedComment(start2, indent) {
         if (this.type !== "comment")
           return false;
         if (this.indent <= indent)
           return false;
-        return start.every((st) => st.type === "newline" || st.type === "space");
+        return start2.every((st) => st.type === "newline" || st.type === "space");
       }
       *documentEnd(docEnd) {
         if (this.type !== "doc-mode") {
@@ -7357,7 +7357,7 @@ var require_dist = __commonJS({
   }
 });
 
-// bin/craft-mcp-full.ts
+// src/mcp-stdio.ts
 var import_node_readline = require("node:readline");
 
 // src/service.ts
@@ -12223,8 +12223,8 @@ var LineageKernel = class {
     const workspace = this.store.get("workspace", text16(args.workspace_id, "workspace_id"));
     const direction = String(args.direction ?? "upstream");
     if (!(/* @__PURE__ */ new Set(["upstream", "downstream"])).has(direction)) throw new Error("Lineage direction is unsupported");
-    const start = this.reference(args.entity, "entity", String(workspace.id), null);
-    const startKey = key(start);
+    const start2 = this.reference(args.entity, "entity", String(workspace.id), null);
+    const startKey = key(start2);
     const maxDepth = integer4(args.max_depth, "max_depth", 8, 1, 20);
     const edges = this.store.list(
       "lineage_edge",
@@ -12250,7 +12250,7 @@ var LineageKernel = class {
       }
       frontier = next;
     }
-    return { workspace_id: workspace.id, direction, start, node_keys: [...nodes].sort(), edges: selected, truncated: frontier.size > 0 };
+    return { workspace_id: workspace.id, direction, start: start2, node_keys: [...nodes].sort(), edges: selected, truncated: frontier.size > 0 };
   }
   verify(args) {
     const lineage = this.store.get("lineage_edge", text16(args.lineage_id, "lineage_id"));
@@ -13386,6 +13386,10 @@ function findings(items) {
   }
   return result;
 }
+async function discardPartialMaterialization(temporary, error) {
+  await (0, import_promises8.rm)(temporary, { recursive: true, force: true });
+  throw error;
+}
 var MaterializationKernel = class {
   store;
   constructor(store) {
@@ -13424,8 +13428,7 @@ var MaterializationKernel = class {
       await (0, import_promises8.mkdir)(import_node_path9.default.dirname(root), { recursive: true });
       await (0, import_promises8.rename)(temporary, root);
     } catch (error) {
-      await (0, import_promises8.rm)(temporary, { recursive: true, force: true });
-      throw error;
+      return discardPartialMaterialization(temporary, error);
     }
     const riskLevel = scan.some((item) => item.severity === "high") ? "high" : "low";
     return { materialization: this.store.create("capability_materialization", materializationId, {
@@ -14984,7 +14987,7 @@ var ServiceFoundation = class {
 };
 
 // src/service.ts
-var VERSION = "0.11.41";
+var VERSION = "0.11.42";
 var CONFIDENCE = /* @__PURE__ */ new Set(["confirmed", "bounded", "unverified", "rejected"]);
 var TASK_STATUS = /* @__PURE__ */ new Set(["active", "paused", "completed", "cancelled"]);
 var VERSIONED_LIFECYCLE = /* @__PURE__ */ new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -22245,27 +22248,52 @@ var McpServer = class {
   }
 };
 
-// bin/craft-mcp-full.ts
-async function main() {
+// src/mcp-stdio.ts
+async function start(mode) {
   const store = await new CraftStore().open();
-  const server = new McpServer(await CraftService.open(store), "full");
-  const input = (0, import_node_readline.createInterface)({ input: process.stdin, crlfDelay: Infinity });
+  return { server: new McpServer(await CraftService.open(store), mode), close: () => store.close() };
+}
+function parseError() {
+  return { jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } };
+}
+async function serveMcpStdio(options) {
+  const input = (0, import_node_readline.createInterface)({ input: options.input, crlfDelay: Infinity });
+  const pending = [];
+  let closed = false;
+  let wake;
+  input.on("line", (line) => {
+    pending.push(line);
+    wake?.();
+  });
+  input.on("close", () => {
+    closed = true;
+    wake?.();
+  });
+  const runtime = await (options.start ?? start)(options.mode);
   try {
-    for await (const line of input) {
+    while (pending.length || !closed) {
+      if (!pending.length) await new Promise((resolve13) => {
+        wake = resolve13;
+      });
+      wake = void 0;
+      const line = pending.shift();
+      if (line === void 0) continue;
       let response;
       try {
-        response = await server.handle(JSON.parse(line));
+        response = await runtime.server.handle(JSON.parse(line));
       } catch {
-        response = { jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } };
+        response = parseError();
       }
-      if (response) process.stdout.write(`${JSON.stringify(response)}
+      if (response) options.write(`${JSON.stringify(response)}
 `);
     }
   } finally {
-    store.close();
+    runtime.close();
   }
 }
-main().catch(() => {
+
+// bin/craft-mcp-full.ts
+serveMcpStdio({ mode: "full", input: process.stdin, write: (line) => process.stdout.write(line) }).catch(() => {
   process.stderr.write("Craft full MCP failed to start.\n");
   process.exitCode = 1;
 });

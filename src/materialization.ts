@@ -25,6 +25,11 @@ function findings(items: { path: string; content: Buffer }[]): JsonObject[] {
   } return result;
 }
 
+async function discardPartialMaterialization(temporary: string, error: unknown): Promise<never> {
+  await rm(temporary, { recursive: true, force: true });
+  throw error;
+}
+
 export class MaterializationKernel {
   readonly store: CraftStore;
   constructor(store: CraftStore) { this.store = store; }
@@ -42,7 +47,7 @@ export class MaterializationKernel {
     if (path.relative(base, root).startsWith("..")) throw new Error("Materialization target escaped the cache root"); const temporary = `${root}.tmp-${process.pid}-${randomUUID()}`;
     try { await mkdir(temporary, { recursive: true }); for (const item of packageFiles) { const target = path.resolve(temporary, ...item.path.split("/")); await mkdir(path.dirname(target), { recursive: true }); await writeFile(target, item.content, { flag: "wx" }); }
       await mkdir(path.dirname(root), { recursive: true }); await rename(temporary, root);
-    } catch (error) { await rm(temporary, { recursive: true, force: true }); throw error; }
+    } catch (error) { return discardPartialMaterialization(temporary, error); }
     const riskLevel = scan.some((item) => item.severity === "high") ? "high" : "low";
     return { materialization: this.store.create("capability_materialization", materializationId, { source_id: source.id, source_revision: entry.source_revision,
       entry_id: entry.entry_id, entry_record_id: entry.id, content_digest: contentDigest, package_root: root, manifest, findings: scan, risk_level: riskLevel,

@@ -381,6 +381,11 @@ test("parser worker fails closed on timeout, output overflow, spawn failure, inv
   const fakeChild = new EventEmitter() as EventEmitter & { stdin: Writable; stdout: PassThrough; stderr: PassThrough; kill: () => boolean };
   fakeChild.stdin = new Writable({ write: (_chunk, _encoding, callback) => callback() });
   fakeChild.stdout = new PassThrough(); fakeChild.stderr = new PassThrough(); fakeChild.kill = () => true;
+  const invalidChild = new EventEmitter() as EventEmitter & { stdin: Writable; stdout: PassThrough; stderr: PassThrough; kill: () => boolean };
+  invalidChild.stdin = new Writable({ write: (_chunk, _encoding, callback) => callback() });
+  invalidChild.stdout = new PassThrough(); invalidChild.stderr = new PassThrough(); invalidChild.kill = () => true;
+  await assert.rejects(runParserWorker(request, { workerPath: fixture("parser-success.js"),
+    spawnProcess: (() => { queueMicrotask(() => { invalidChild.stdout.end("not-json"); invalidChild.emit("close", 0); }); return invalidChild; }) as unknown as typeof import("node:child_process").spawn }), /invalid JSON/);
   await assert.rejects(runParserWorker(request, { workerPath: fixture("parser-success.js"),
     spawnProcess: (() => { queueMicrotask(() => fakeChild.emit("error", new Error("async spawn error"))); return fakeChild; }) as unknown as typeof import("node:child_process").spawn }), /async spawn error/);
   assert.throws(() => runParserWorker(request, { workerPath: fixture("parser-hang.ts"), timeoutMs: 9 }), /between 10 and 30000/);

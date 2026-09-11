@@ -27,7 +27,7 @@ flowchart LR
   K --> 长期["长期：自主 Agent 平台<br/>自有对话循环 · 宿主调度 · 评测驱动改进"]
 ```
 
-面向各行业的工作者，不要求用户会编程或理解 Agent 的技术术语。通用内核负责共同的工作机制，领域扩展提供专业对象、视图、工具和验收方式。当前版本交付的是 CLI/插件能力内核与本地 Workbench：已加入共享工作对象、依赖影响分析、范围化记忆、上下文装配、字段级 ChangeSet、持久等待、资源预算、受限 Fallback、能力灰度和可审查的本地能力共享。Source Mount 可保留目录、软链接和镜像等来源；同内容镜像归并为一个逻辑能力，冲突内容明确呈现。Domain Action 已覆盖准备、Schema 校验、一次性授权和证据化报告；受限 Dispatch Bridge、Domain Kit 原子应用、完整数字工作台和远程 Hub 仍在建设规划中。
+面向各行业的工作者，不要求用户会编程或理解 Agent 的技术术语。通用内核负责共同的工作机制，领域扩展提供专业对象、视图、工具和验收方式。当前版本交付的是 CLI/插件能力内核与本地 Workbench：已加入共享工作对象、依赖影响分析、范围化记忆、上下文装配、字段级 ChangeSet、持久等待、资源预算、受限 Fallback、能力灰度和可审查的本地能力共享。Source Mount 可保留目录、软链接和镜像等来源；同内容镜像归并为一个逻辑能力，冲突内容明确呈现。Domain Action 已覆盖准备、Schema 校验、一次性授权和证据化报告；受限 Dispatch Bridge 与 Domain Kit 原子应用已具备内核，完整数字工作台和远程 Hub 仍在建设规划中。
 
 ## 用户得到什么
 
@@ -66,7 +66,7 @@ flowchart LR
 
 长期支持独立工作台/CLI、调度已有 AI 应用、作为其他应用的能力提供方，三者共享内核。Agent、Supervisor、Provider 是执行部署方式，不应成为普通用户开始工作前必须理解的分类。
 
-当前 `craft init` 仍要求选择模式；新的目标驱动引导尚未实现。当前可用入口是 Provider/CLI：能力检索、持久任务与证据、确定性 Workflow、受控编排和评测协议；已有文件快照、本地事务记录、静态脚本候选、精确的 Domain Action Dispatch Bridge 及 Host 交接。桌面 Canvas、自动通用 Host Driver、通用跨设备同步和自主经验编译尚未完成。
+当前 `craft init` 仍要求选择模式；Workbench 已提供“目标—资料—决策—结果”的目标驱动引导，但 CLI 首次初始化尚未改为同一入口。当前可用入口是 Provider/CLI：能力检索、持久任务与证据、确定性 Workflow、受控编排和评测协议；已有文件快照、本地事务记录、静态脚本候选、精确的 Domain Action Dispatch Bridge 及 Host 交接。桌面 Canvas、自动通用 Host Driver、通用跨设备同步和自主经验编译尚未完成。
 
 已有本地隔离适配雏形与 Docker CLI Adapter/Conformance Suite，但不能宣称完整安全沙箱：远程 Adapter、真实 Secret Broker/出站代理、镜像供应链及 Docker Desktop/Linux Engine 的平台认证仍需补齐。文件快照不等于外部 API 或数据库的无损撤销。详见 [沙箱与执行策略](../technical/modules/execution-policy.md)。
 

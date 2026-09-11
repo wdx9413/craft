@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { PassThrough } from "node:stream";
 import test from "node:test";
 import { McpServer, TOOLS } from "../src/mcp.ts";
+import { serveMcpStdio } from "../src/mcp-stdio.ts";
 import { craftPaths } from "../src/paths.ts";
 import { CraftService } from "../src/service.ts";
 import { CraftStore } from "../src/store.ts";
@@ -344,4 +346,37 @@ test("MCP runs bounded experience shadow evaluation without granting publication
     assert.equal((response?.result as Record<string, unknown>).isError, false);
     assert.equal(body.status, "signoff_ready"); assert.equal(body.publication_allowed, false);
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("MCP stdio buffers an eager Host request, serializes responses, and closes its runtime", async () => {
+  const input = new PassThrough(); const output: string[] = []; let closed = false; let mode = "";
+  const serving = serveMcpStdio({ mode: "core", input, write: (line) => output.push(line), start: async (selected) => {
+    mode = selected;
+    return { server: { handle: async (request) => request === "bad" ? undefined : { jsonrpc: "2.0", id: 1, result: { ok: true } } }, close: () => { closed = true; } };
+  } });
+  input.end('{"jsonrpc":"2.0","id":1,"method":"ping"}\n"bad"\n{\n');
+  await serving;
+  assert.equal(mode, "core"); assert.equal(closed, true); assert.equal(output.length, 2);
+  assert.deepEqual(JSON.parse(output[0]), { jsonrpc: "2.0", id: 1, result: { ok: true } });
+  assert.equal((JSON.parse(output[1]) as { error: { code: number } }).error.code, -32700);
+});
+
+test("MCP stdio waits for a Host request that arrives after startup", async () => {
+  const input = new PassThrough(); const output: string[] = [];
+  const serving = serveMcpStdio({ mode: "core", input, write: (line) => output.push(line), start: async () => ({
+    server: { handle: async () => ({ jsonrpc: "2.0", id: 2, result: {} }) }, close: () => undefined,
+  }) });
+  await Promise.resolve(); input.end('{"jsonrpc":"2.0","id":2,"method":"ping"}\n'); await serving;
+  assert.equal((JSON.parse(output[0]) as { id: number }).id, 2);
+});
+
+test("MCP stdio default runtime accepts buffered initialization", async () => {
+  const root = join(tmpdir(), `craft-mcp-stdio-${process.pid}-${Date.now()}`); const input = new PassThrough(); const output: string[] = [];
+  const original = process.env.CRAFT_DATA_DIR; process.env.CRAFT_DATA_DIR = root;
+  try {
+    const serving = serveMcpStdio({ mode: "full", input, write: (line) => output.push(line) });
+    input.end('{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}\n');
+    await serving;
+    assert.equal((JSON.parse(output[0]) as { result: { serverInfo: { version: string } } }).result.serverInfo.version, "0.11.42");
+  } finally { if (original === undefined) delete process.env.CRAFT_DATA_DIR; else process.env.CRAFT_DATA_DIR = original; await rm(root, { recursive: true, force: true }); }
 });

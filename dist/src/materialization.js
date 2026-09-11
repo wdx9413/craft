@@ -49,6 +49,10 @@ function findings(items) {
     }
     return result;
 }
+async function discardPartialMaterialization(temporary, error) {
+    await rm(temporary, { recursive: true, force: true });
+    throw error;
+}
 export class MaterializationKernel {
     store;
     constructor(store) { this.store = store; }
@@ -93,8 +97,7 @@ export class MaterializationKernel {
             await rename(temporary, root);
         }
         catch (error) {
-            await rm(temporary, { recursive: true, force: true });
-            throw error;
+            return discardPartialMaterialization(temporary, error);
         }
         const riskLevel = scan.some((item) => item.severity === "high") ? "high" : "low";
         return { materialization: this.store.create("capability_materialization", materializationId, { source_id: source.id, source_revision: entry.source_revision,

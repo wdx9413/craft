@@ -1,6 +1,6 @@
 {
   "name": "craft-agent-harness",
-  "version": "0.11.41",
+  "version": "0.11.42",
   "description": "Cross-platform capability, workflow, evidence, and agent harness",
   "type": "module",
   "bin": {
@@ -19,7 +19,7 @@
     "test:smoke": "node dist/src/cli.js --help",
     "test:plugin": "node --experimental-strip-types scripts/plugin-smoke.ts && node --experimental-strip-types scripts/plugin-full-smoke.ts",
     "version:check": "node --experimental-strip-types scripts/check-version.ts",
-    "test:ts": "pnpm run version:check && node --test --test-isolation=none --experimental-test-coverage --test-coverage-exclude=tests/** --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 tests/json-schema.test.ts tests/acceptance-worker.test.ts tests/attention.test.ts tests/home.test.ts tests/workbench-server.test.ts tests/config.test.ts tests/store.test.ts tests/catalog.test.ts tests/semantic.test.ts tests/security.test.ts tests/egress.test.ts tests/effects.test.ts tests/recovery.test.ts tests/trigger.test.ts tests/speculative.test.ts tests/lineage.test.ts tests/hydration.test.ts tests/autonomy.test.ts tests/sandbox.test.ts tests/docker-sandbox.test.ts tests/workflow.test.ts tests/orchestration.test.ts tests/orchestration-trial.test.ts tests/default-orchestration.test.ts tests/evaluation.test.ts tests/service.test.ts tests/experience-publisher.test.ts tests/runtime.test.ts tests/closed-loop.test.ts tests/runtime-driver.test.ts tests/promotion-gates.test.ts tests/experience-mining.test.ts tests/capability-access.test.ts tests/workspace-checkpoints.test.ts tests/workspace-transactions.test.ts tests/verified-scripts.test.ts tests/work-object-graph.test.ts tests/changeset-merge.test.ts tests/control-plane-budget.test.ts tests/context-profiles.test.ts tests/capability-activation.test.ts tests/capability-resolution.test.ts tests/host-context-dispatch.test.ts tests/verified-iteration.test.ts tests/work-launch-context.test.ts tests/strategy-recommendations.test.ts tests/cross-domain-acceptance.test.ts tests/evidence-wiki.test.ts tests/knowledge-context-compiler.test.ts tests/wiki-capability-candidates.test.ts tests/knowledge-evaluation.test.ts tests/knowledge-bound-work-launch.test.ts tests/wiki-candidate-evaluation-bridge.test.ts tests/governed-capability-intake.test.ts tests/supply-chain.test.ts tests/maintenance.test.ts tests/mcp.test.ts",
+    "test:ts": "pnpm run version:check && node --experimental-strip-types scripts/test.ts",
     "check:ts": "node --experimental-strip-types src/cli.ts --help",
     "typecheck": "node node_modules/typescript/bin/tsc --noEmit"
   },

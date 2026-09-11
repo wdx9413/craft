@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { access, mkdtemp, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -39,7 +39,7 @@ test("materialization findings, review, withdrawal, bounds, and idempotency fail
   assert.throws(() => f.service.capabilityMaterializeActivate({ materialization_id: auto.id, asset_id: "a", asset_type: "skill", effect: "read_only" }), /withdrawn or changed/);
   await assert.rejects(() => f.service.capabilityMaterializeStage({ source_id: "hub", entry_id: "entry", files: risky }), /entry is not active/);
   f.store.save("hub_source", "hub", { ...f.store.get("hub_source", "hub"), status: "disabled" });
-  assert.rejects(() => f.service.capabilityMaterializeStage({ source_id: "hub", entry_id: "entry", files: risky }), /source is not active/);
+  await assert.rejects(() => f.service.capabilityMaterializeStage({ source_id: "hub", entry_id: "entry", files: risky }), /source is not active/);
   f.store.save("hub_source", "hub", { ...f.store.get("hub_source", "hub"), status: "active" });
   f.store.save("hub_catalog_entry", "hub:entry", { ...f.store.get("hub_catalog_entry", "hub:entry"), status: "active", content_digest: "sha256:changed" });
   assert.throws(() => f.service.capabilityMaterializeActivate({ materialization_id: auto.id, asset_id: "a", asset_type: "skill", effect: "read_only" }), /withdrawn or changed/);
@@ -68,6 +68,9 @@ test("materialization findings, review, withdrawal, bounds, and idempotency fail
   await assert.rejects(() => escaped.service.capabilityMaterializeStage({ source_id: "..", entry_id: "entry", files: rejectItems }), /escaped the cache root/); escaped.store.close();
   const blocked = await fixture(rejectItems); const blockedCache = path.join(blocked.root, "cache-file"); await writeFile(blockedCache, "block"); blocked.store.paths.cacheDir = blockedCache;
   await assert.rejects(() => blocked.service.capabilityMaterializeStage({ source_id: "hub", entry_id: "entry", files: rejectItems })); blocked.store.close();
+  const occupied = await fixture(rejectItems); const destination = path.join(occupied.store.paths.cacheDir, "hub-packages", "hub", "entry", packageDigest(rejectItems).slice(7));
+  await mkdir(path.dirname(destination), { recursive: true }); await writeFile(destination, "occupied");
+  await assert.rejects(() => occupied.service.capabilityMaterializeStage({ source_id: "hub", entry_id: "entry", files: rejectItems })); occupied.store.close();
   f.store.close(); g.store.close();
 });
 

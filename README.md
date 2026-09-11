@@ -1,6 +1,6 @@
 # Craft
 
-> 当前发布版本：v0.11.41。最新能力包括可复算的 Evidence Wiki Context Bundle、失败关闭的 Knowledge-bound Work Launch，以及 Workbench 中可见的“目标—资料—决策—结果”引导工作流程。
+> 当前发布版本：v0.11.42。最新能力包括可复算的 Evidence Wiki Context Bundle、失败关闭的 Knowledge-bound Work Launch，以及 Workbench 中可见的“目标—资料—决策—结果”引导工作流程。
 
 [中文](README.md) | [English](README.en.md)
 
