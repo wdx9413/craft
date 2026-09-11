@@ -53,6 +53,9 @@ import { VerifiedWorkLoopKernel } from "./verified-work-loop.ts";
 import { EvalCampaignKernel } from "./eval-campaign.ts";
 import { ProjectKnowledgeKernel } from "./project-knowledge.ts";
 import { CapabilityConnectorKernel } from "./capability-connector.ts";
+import { CapabilityAccessKernel } from "./capability-access.ts";
+import { HostActivationManifestKernel } from "./host-activation-manifest.ts";
+import { ExecutionFabricKernel } from "./execution-fabric.ts";
 
 /**
  * Stable composition root for the service. Domain behavior stays in focused
@@ -113,6 +116,9 @@ export abstract class ServiceFoundation {
   readonly evalCampaigns: EvalCampaignKernel;
   readonly projectKnowledge: ProjectKnowledgeKernel;
   readonly capabilityConnectors: CapabilityConnectorKernel;
+  readonly capabilityAccess: CapabilityAccessKernel;
+  readonly hostActivationManifests: HostActivationManifestKernel;
+  readonly executionFabric: ExecutionFabricKernel;
 
   constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter = new LocalIsolatedAdapter(),
     dockerSandbox = new DockerSandboxAdapter(), egressBroker = new TrustedEgressBroker(), hostOwnerId?: string) {
@@ -152,6 +158,9 @@ export abstract class ServiceFoundation {
     this.evalCampaigns = new EvalCampaignKernel(store, this.taskBenchmarks);
     this.projectKnowledge = new ProjectKnowledgeKernel(store);
     this.capabilityConnectors = new CapabilityConnectorKernel(store);
+    this.capabilityAccess = new CapabilityAccessKernel(store, this.catalog);
+    this.hostActivationManifests = new HostActivationManifestKernel(store);
+    this.executionFabric = new ExecutionFabricKernel(store);
     this.hostRuns = new HostRunKernel(store, [this.codexHost, this.claudeHost], hostOwnerId,
       (run, receipt) => this.finalizeWorkLaunch(run, receipt));
   }

@@ -28,12 +28,22 @@ test("capability planning creates an auditable minimal activation profile and re
     service.capabilityAssetSave({ asset_id: "asset_effect", name: "Write logs", asset_type: "tool", source_uri: "local://write",
       trust: "trusted", effect: "local_write", health: "healthy" });
     assert.throws(() => service.capabilityAssetSave({ name: "Bad", asset_type: "unknown", source_uri: "local://bad", effect: "read_only" }), /unsupported/);
+    assert.throws(() => service.capabilityAssetSave({ name: "", asset_type: "tool", source_uri: "local://empty-name", effect: "read_only" }), /must not be empty/);
+    assert.throws(() => service.capabilityAssetSave({ name: "Bad trust", asset_type: "tool", source_uri: "local://bad-trust", trust: "unsafe", effect: "read_only" }), /unsupported/);
+    assert.throws(() => service.capabilityAssetSave({ name: "Bad health", asset_type: "tool", source_uri: "local://bad-health", health: "broken", effect: "read_only" }), /unsupported/);
+    assert.throws(() => service.capabilityAssetSave({ name: "Bad effect", asset_type: "tool", source_uri: "local://bad-effect", effect: "unknown" }), /unsupported/);
+    assert.throws(() => service.capabilityAssetSave({ name: "Bad credential", asset_type: "tool", source_uri: "local://bad-credential", effect: "read_only", requires_credential: "true" }), /boolean/);
+    assert.throws(() => service.capabilityAssetSave({ name: "Bad aliases", asset_type: "tool", source_uri: "local://bad-aliases", effect: "read_only", aliases: "logs" }), /array/);
+    assert.throws(() => service.capabilityAssetSave({ name: "Bad dependency", asset_type: "tool", source_uri: "local://bad-dependency", effect: "read_only", dependencies: ["same", "same"] }), /unique/);
+    assert.throws(() => service.capabilityAssetSave({ name: "Bad cost", asset_type: "tool", source_uri: "local://bad-cost", effect: "read_only", cost_hint: "low" }), /object/);
+    assert.throws(() => service.capabilityAssetSave({ name: "Bad source", asset_type: "tool", source_uri: "local://token=secret", effect: "read_only" }), /sensitive/);
     const planned = service.capabilityAccessPlan({ task_id: task.id, goal: "diagnose logs", allowed_effects: ["read_only"] });
     assert.deepEqual((planned.profile as JsonObject).asset_ids, [verifiedWorkflow.id, safe.id]);
     assert.equal((planned.receipt as JsonObject).filtered_asset_ids instanceof Array, true);
     assert.equal(JSON.stringify(planned).includes("asset_unsafe"), true);
     assert.equal((service.capabilityAccessPlan({ task_id: task.id, goal: "diagnose logs" }).profile as JsonObject).status, "recommended");
     assert.throws(() => service.capabilityAccessPlan({ task_id: task.id, goal: "!!!", allowed_effects: ["unknown"] }), /supported/);
+    assert.throws(() => service.capabilityAccessPlan({ task_id: task.id, goal: "logs", allowed_effects: [] }), /at least 1/);
     assert.throws(() => service.capabilityAccessPlan({ task_id: task.id, goal: "!!!", allowed_effects: ["read_only"] }), /No eligible/);
     assert.throws(() => service.capabilityAccessPlan({ task_id: task.id, goal: "deploy", allowed_effects: ["read_only"] }), /No eligible capability assets/);
     const call = service.capabilityCallIssue({ profile_id: (planned.profile as JsonObject).id, asset_id: safe.id, operation: "inspect" });
@@ -43,6 +53,15 @@ test("capability planning creates an auditable minimal activation profile and re
     assert.throws(() => service.capabilityCallConsume({ call_id: call.call_id, profile_id: (planned.profile as JsonObject).id }), /already consumed/);
     const expired = service.capabilityCallIssue({ profile_id: (planned.profile as JsonObject).id, asset_id: safe.id, operation: "inspect", expires_at: "2000-01-01T00:00:00.000Z" });
     assert.throws(() => service.capabilityCallConsume({ call_id: expired.call_id, profile_id: (planned.profile as JsonObject).id }), /expired/);
+    const malformedExpiry = service.capabilityCallIssue({ profile_id: (planned.profile as JsonObject).id, asset_id: safe.id, operation: "inspect", expires_at: "never" });
+    assert.throws(() => service.capabilityCallConsume({ call_id: malformedExpiry.call_id, profile_id: (planned.profile as JsonObject).id }), /ISO timestamp/);
+    const connectorAsset = service.capabilityAssetSave({ asset_id: "asset_embedded_connector", name: "Embedded connector", asset_type: "tool", source_uri: "connector://embedded",
+      trust: "trusted", effect: "read_only", health: "healthy", aliases: ["embedded"], connector_id: "connector_embedded" });
+    const connectorProfile = service.capabilityAccessPlan({ task_id: task.id, goal: "embedded" }).profile as JsonObject;
+    assert.throws(() => service.capabilityCallIssue({ profile_id: connectorProfile.id, asset_id: connectorAsset.id, operation: "inspect" }), /Connector ticket/);
+    store.create("capability_call", "connector-call", { profile_id: connectorProfile.id, profile_version: connectorProfile.version, asset_id: connectorAsset.id,
+      connector_id: "connector_embedded", operation: "inspect", status: "issued", expires_at: "2099-01-01T00:00:00.000Z" });
+    assert.throws(() => service.capabilityCallConsume({ call_id: "connector-call", profile_id: connectorProfile.id }), /Connector ticket/);
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 

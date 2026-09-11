@@ -1,6 +1,6 @@
 # Craft
 
-> Current release: v0.11.52. Capability Connector lets users explicitly connect Serena, Skill sources, or MCP metadata; Core MCP exposes the full Verified Work Loop and hands hosts short-lived tickets pinned to an Activation Profile and source digest.
+> Current release: v0.11.53. Verified Execution Fabric joins Activation Profiles, Host Activation Manifests, the Verified Work Loop, and state re-observation into one auditable execution path; the host still controls actual activation and calls.
 
 [中文](README.md) | [English](README.en.md)
 

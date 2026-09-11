@@ -39,7 +39,7 @@ test("Knowledge-bound Work Launch pins reviewed Wiki knowledge across Dispatch, 
     const outcome = f.store.get("outcome", `outcome_${launch.trial_id}`); assert.deepEqual(outcome.knowledge_binding, binding);
     const mcp = new McpServer(f.service, "full"); const mcpPrepared = await mcp.handle({ id: "mcp", method: "tools/call", params: { name: "craft_knowledge_context_work_launch_prepare", arguments: { ...args, launch_id: "mcp-launch" } } }); assert.equal((mcpPrepared?.result as JsonObject).isError, false);
     const mcpDecided = await mcp.handle({ id: "mcp-decide", method: "tools/call", params: { name: "craft_knowledge_context_work_launch_decide", arguments: { launch_id: "mcp-launch", actor: "human", approved: false, prompt: args.prompt, now: args.now } } }); assert.equal((mcpDecided?.result as JsonObject).isError, false);
-    assert.equal(VERSION, "0.11.52");
+    assert.equal(VERSION, "0.11.53");
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 

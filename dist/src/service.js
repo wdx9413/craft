@@ -15,7 +15,7 @@ import { decideExecution } from "./execution-policy.js";
 import { dockerRequestDigest } from "./docker-sandbox.js";
 import { egressRequestDigest } from "./egress.js";
 import { ServiceFoundation } from "./service-foundation.js";
-export const VERSION = "0.11.52";
+export const VERSION = "0.11.53";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -24,9 +24,6 @@ const EVAL_SPLITS = new Set(["search", "development", "held_out"]);
 const HARNESS_DIMENSIONS = new Set(["context", "tools", "generation", "orchestration", "memory", "output"]);
 const GRADER_TYPES = new Set(["program", "model", "human", "operational"]);
 const GRADE_VERDICTS = new Set(["passed", "failed", "inconclusive"]);
-const CAPABILITY_ASSET_TYPES = new Set(["skill", "mcp_server", "tool", "workflow", "adapter", "validator", "grader", "eval_suite"]);
-const CAPABILITY_TRUST = new Set(["trusted", "untrusted", "verified"]);
-const CAPABILITY_HEALTH = new Set(["healthy", "stale", "failed", "unknown"]);
 const EXPERT_TYPES = new Set(["diagnostic_research"]);
 const ACCEPTANCE_METHODS = new Set(["program", "model", "human", "business_signal"]);
 const ACCEPTANCE_RESULTS = new Set(["passed", "failed", "blocked"]);
@@ -256,149 +253,18 @@ export class CraftService extends ServiceFoundation {
         return { capabilities: await this.catalog.searchHybrid(text(args.query, "query"), finiteInteger(args.limit, "limit", 6, 1, 20)),
             semantic_search: this.catalog.semanticStatus() };
     }
-    async logicalActivationPlan(args) {
-        const task = this.store.get("task", text(args.task_id, "task_id"));
-        const query = text(args.query, "query");
-        const allowedEffects = uniqueTextArray(args.allowed_effects ?? ["read_only"], "allowed_effects");
-        if (allowedEffects.some((effect) => effect !== "read_only"))
-            throw new Error("Indexed local capabilities may only be activated as read_only context");
-        const profileId = args.context_profile_id === undefined ? null : text(args.context_profile_id, "context_profile_id");
-        const profileVersion = args.context_profile_version === undefined ? null : finiteInteger(args.context_profile_version, "context_profile_version", 1);
-        if ((profileId === null) !== (profileVersion === null))
-            throw new Error("Context profile id and version must be supplied together");
-        if (profileId !== null) {
-            const profile = this.store.get("context_profile", profileId, profileVersion);
-            if (profile.task_id !== null && profile.task_id !== task.id)
-                throw new Error("Context profile does not belong to the task");
-        }
-        const candidates = await this.catalog.searchHybrid(query, finiteInteger(args.limit, "limit", 3, 1, 10));
-        const selected = candidates.filter((candidate) => candidate.logical_capability_id !== null).map((candidate) => {
-            const logical = this.store.get("logical_capability", String(candidate.logical_capability_id));
-            return { logical_capability_id: logical.id, content_digest: logical.content_digest, selected_capability_id: logical.selected_capability_id,
-                selected_source_id: logical.selected_source_id, declaration_keys: logical.declaration_keys };
-        });
-        if (!selected.length)
-            throw new Error("No logical capabilities match this task");
-        const plan = this.store.create("logical_activation_plan", String(args.plan_id ?? id("logical_activation_plan")), { task_id: task.id, query,
-            query_fingerprint: fingerprint({ query }), context_profile_id: profileId, context_profile_version: profileVersion,
-            allowed_effects: allowedEffects, selected, status: "active" });
-        return { plan, candidates: selected };
-    }
-    logicalActivationAudit(args) {
-        const plan = this.store.get("logical_activation_plan", text(args.plan_id, "plan_id"));
-        const findings = plan.selected.map((selected) => {
-            const current = this.store.find("logical_capability", String(selected.logical_capability_id));
-            const replacement = current ? null : this.store.list("logical_capability", Number.MAX_SAFE_INTEGER).find((logical) => logical.declaration_keys.some((key) => selected.declaration_keys.includes(key))) ?? null;
-            const observed = current ?? replacement;
-            const status = !current ? replacement ? "content_changed" : "missing" :
-                current.selected_capability_id !== selected.selected_capability_id ? "reselected" : "unchanged";
-            return { logical_capability_id: selected.logical_capability_id, status, current_content_digest: observed?.content_digest ?? null,
-                current_selected_capability_id: observed?.selected_capability_id ?? null, current_selected_source_id: observed?.selected_source_id ?? null };
-        });
-        const status = findings.some((finding) => finding.status === "missing" || finding.status === "content_changed") ? "stale" : "active";
-        const savedPlan = plan.status === status ? plan : this.store.save("logical_activation_plan", String(plan.id), { ...recordPayload(plan), status });
-        const audit = this.store.create("logical_activation_audit", String(args.audit_id ?? id("logical_activation_audit")), { plan_id: plan.id,
-            plan_version: plan.version, status, findings });
-        return { plan: savedPlan, audit };
-    }
-    async logicalActivationResolve(args) {
-        const planId = text(args.plan_id, "plan_id");
-        const audited = this.logicalActivationAudit({ plan_id: planId, audit_id: args.audit_id ?? id("logical_activation_audit") });
-        const plan = audited.plan;
-        const audit = audited.audit;
-        if (audit.status !== "active")
-            throw new Error("Activation plan is stale and cannot load local capability content");
-        const maxChars = finiteInteger(args.max_chars, "max_chars", 16_000, 1, 100_000);
-        const capabilities = await Promise.all(plan.selected.map(async (selected) => {
-            const logical = this.store.get("logical_capability", String(selected.logical_capability_id));
-            const capability = this.store.get("capability", String(logical.selected_capability_id));
-            const content = await readFile(text(capability.path, "capability.path"), "utf8");
-            const digest = createHash("sha256").update(content).digest("hex");
-            if (digest !== selected.content_digest)
-                throw new Error("Capability file digest drifted; rescan the source before loading it");
-            assertNoSecret(content, "capability content");
-            if (content.length > maxChars)
-                throw new Error("Capability content exceeds the requested context limit");
-            return { logical_capability_id: logical.id, content_digest: digest, selected_capability_id: capability.id,
-                selected_source_id: logical.selected_source_id, path: capability.path, name: capability.name,
-                description: capability.description, metadata: capability.metadata, content };
-        }));
-        const resolution = this.store.create("logical_activation_resolution", String(args.resolution_id ?? id("logical_activation_resolution")), {
-            plan_id: plan.id, plan_version: plan.version, audit_id: audit.id,
-            capabilities: capabilities.map(({ content: _content, ...summary }) => summary), max_chars: maxChars,
-        });
-        return { plan, audit, resolution, capabilities };
-    }
+    logicalActivationPlan(args) { return this.capabilityAccess.logicalActivationPlan(args); }
+    logicalActivationAudit(args) { return this.capabilityAccess.logicalActivationAudit(args); }
+    logicalActivationResolve(args) { return this.capabilityAccess.logicalActivationResolve(args); }
     semanticSearchStatus() { return this.catalog.semanticStatus(); }
     executionPolicyDecide(args) { return decideExecution(args); }
     capabilityGet(args) {
         return this.catalog.get(text(args.asset_id, "asset_id"));
     }
-    capabilityAssetSave(args) {
-        const assetType = text(args.asset_type, "asset_type");
-        const trust = String(args.trust ?? "untrusted");
-        const health = String(args.health ?? "unknown");
-        const effect = text(args.effect, "effect");
-        if (!CAPABILITY_ASSET_TYPES.has(assetType) || !CAPABILITY_TRUST.has(trust) || !CAPABILITY_HEALTH.has(health) || !SIDE_EFFECTS.has(effect)) {
-            throw new Error("Capability asset type, trust, health, or effect is unsupported");
-        }
-        const sourceUri = assertNoSecret(text(args.source_uri, "source_uri"), "source_uri");
-        const dependencies = optionalTextArray(args.dependencies, "dependencies");
-        const aliases = optionalTextArray(args.aliases, "aliases");
-        return this.saveVersioned("capability_asset", "asset", { ...args, asset_type: assetType, trust, health, effect, source_uri: sourceUri,
-            dependencies, aliases, requires_credential: optionalBoolean(args.requires_credential, "requires_credential") ?? false,
-            cost_hint: object(args.cost_hint ?? {}, "cost_hint"), source_digest: args.source_digest ?? fingerprint({ source_uri: sourceUri, asset_type: assetType }) }, ["name", "asset_type", "source_uri", "effect"]);
-    }
-    capabilityAccessPlan(args) {
-        const task = this.store.get("task", text(args.task_id, "task_id"));
-        const goal = text(args.goal, "goal");
-        const allowedEffects = uniqueTextArray(args.allowed_effects ?? ["read_only"], "allowed_effects");
-        if (allowedEffects.some((effect) => !SIDE_EFFECTS.has(effect)))
-            throw new Error("allowed_effects must be supported");
-        const tokens = goal.toLowerCase().match(/[\p{L}\p{N}_-]+/gu) ?? [];
-        const candidates = this.store.list("capability_asset", 10000).map((asset) => {
-            const searchable = `${String(asset.name)} ${asset.aliases.join(" ")} ${String(asset.source_uri)}`.toLowerCase();
-            const matched = tokens.filter((token) => searchable.includes(token)).length;
-            const eligible = (asset.trust === "trusted" || asset.trust === "verified") && asset.health === "healthy" && allowedEffects.includes(String(asset.effect)) && !asset.requires_credential;
-            const costHint = asset.cost_hint;
-            const historical = Number(asset.historical_success_rate);
-            const cost = Number(costHint.tokens);
-            const latency = Number(costHint.latency_ms);
-            return { asset, matched, eligible, verified_workflow: asset.asset_type === "workflow" && asset.trust === "verified" ? 1 : 0,
-                historical: Number.isFinite(historical) ? historical : -1, cost: Number.isFinite(cost) ? cost : Number.MAX_SAFE_INTEGER,
-                latency: Number.isFinite(latency) ? latency : Number.MAX_SAFE_INTEGER,
-                reason: eligible ? "eligible" : asset.requires_credential ? "credential_broker_required" : asset.trust === "untrusted" ? "untrusted" : asset.health !== "healthy" ? `health_${asset.health}` : "effect_not_allowed" };
-        }).sort((left, right) => right.matched - left.matched || right.verified_workflow - left.verified_workflow || right.historical - left.historical || left.cost - right.cost || left.latency - right.latency || String(left.asset.id).localeCompare(String(right.asset.id)));
-        const selected = candidates.filter((item) => item.eligible && item.matched > 0).slice(0, 3);
-        if (!selected.length)
-            throw new Error("No eligible capability assets match this task");
-        const profile = this.saveVersioned("activation_profile", "profile", { task_id: task.id, goal_fingerprint: fingerprint({ goal }), asset_ids: selected.map((item) => item.asset.id), asset_versions: Object.fromEntries(selected.map((item) => [String(item.asset.id), item.asset.version])), allowed_effects: allowedEffects, activation: "host_mediated", status: "recommended" }, []);
-        const receipt = this.store.create("tool_selection_receipt", String(args.receipt_id ?? id("selection_receipt")), { task_id: task.id, profile_id: profile.id, profile_version: profile.version, candidate_asset_ids: candidates.map((item) => item.asset.id), filtered_asset_ids: candidates.filter((item) => !item.eligible).map((item) => ({ id: item.asset.id, reason: item.reason })), selected_asset_ids: selected.map((item) => item.asset.id), order: ["semantic", "effect", "verified_workflow", "history", "cost_latency"] });
-        return { profile, receipt, candidates: candidates.map((item) => ({ asset_id: item.asset.id, matched: item.matched, verified_workflow: item.verified_workflow, historical_success_rate: item.historical, cost: item.cost, latency: item.latency, eligible: item.eligible, reason: item.reason })) };
-    }
-    capabilityCallIssue(args) {
-        const profile = this.store.get("activation_profile", text(args.profile_id, "profile_id"));
-        const assetId = text(args.asset_id, "asset_id");
-        if (!profile.asset_ids.includes(assetId))
-            throw new Error("Capability asset is not in the activation profile");
-        const asset = this.store.get("capability_asset", assetId);
-        if (asset.connector_id !== undefined)
-            throw new Error("Connector capability assets require a Connector ticket");
-        const call = this.store.create("capability_call", String(args.call_id ?? id("capability_call")), { profile_id: profile.id, profile_version: profile.version, asset_id: assetId, operation: assertNoSecret(text(args.operation, "operation"), "operation"), status: "issued", expires_at: args.expires_at ?? new Date(Date.now() + 300000).toISOString() });
-        return { call_id: call.id, call };
-    }
-    capabilityCallConsume(args) {
-        const call = this.store.get("capability_call", text(args.call_id, "call_id"));
-        if (call.profile_id !== text(args.profile_id, "profile_id"))
-            throw new Error("Capability call profile does not match");
-        if (call.connector_id !== undefined)
-            throw new Error("Connector capability calls require Connector ticket consumption");
-        if (call.status !== "issued")
-            throw new Error("Capability call was already consumed");
-        if (validIsoTime(call.expires_at, "expires_at") < Date.now())
-            throw new Error("Capability call has expired");
-        return { receipt: this.store.save("capability_call", String(call.id), { ...recordPayload(call), status: "consumed", consumed_at: new Date().toISOString() }) };
-    }
+    capabilityAssetSave(args) { return this.capabilityAccess.assetSave(args); }
+    capabilityAccessPlan(args) { return this.capabilityAccess.accessPlan(args); }
+    capabilityCallIssue(args) { return this.capabilityAccess.callIssue(args); }
+    capabilityCallConsume(args) { return this.capabilityAccess.callConsume(args); }
     capabilityConnectorRegister(args) { return this.capabilityConnectors.register(args); }
     capabilityConnectorDiscover(args) { return this.capabilityConnectors.discover(args); }
     capabilityConnectorUpdate(args) { return this.capabilityConnectors.update(args); }
@@ -406,6 +272,10 @@ export class CraftService extends ServiceFoundation {
     capabilityConnectorList(args) { return this.capabilityConnectors.list(args); }
     capabilityConnectorTicketIssue(args) { return this.capabilityConnectors.ticketIssue(args); }
     capabilityConnectorTicketConsume(args) { return this.capabilityConnectors.ticketConsume(args); }
+    hostActivationManifestPrepare(args) { return this.hostActivationManifests.prepare(args); }
+    hostActivationManifestValidate(args) { return this.hostActivationManifests.validate(args); }
+    hostActivationManifestConsume(args) { return this.hostActivationManifests.consume(args); }
+    hostActivationManifestGet(args) { return this.hostActivationManifests.get(args); }
     expertProfileSave(args) {
         const expertType = text(args.expert_type, "expert_type");
         const effects = uniqueTextArray(args.allowed_effects, "allowed_effects");
@@ -3018,6 +2888,55 @@ export class CraftService extends ServiceFoundation {
         return { resumed, advance: this.verifiedWorkLoopAdvance({ work_loop_id: loop.id, environment: args.environment, budget: args.budget, state_adapter: args.state_adapter, state_paths: args.state_paths }) };
     }
     verifiedWorkLoopGet(args) { return this.verifiedWorkLoops.get(args); }
+    executionFabricPrepare(args) {
+        const task = args.task_id === undefined ? this.taskOpen({ title: args.title, goal: args.goal, project_id: args.project_id }).task : this.store.get("task", text(args.task_id, "task_id"));
+        const allowedEffects = uniqueTextArray(args.allowed_effects ?? [args.sandbox === "workspace-write" ? "local_write" : "read_only"], "allowed_effects");
+        let profile;
+        if (args.activation_profile_id !== undefined) {
+            profile = this.store.get("activation_profile", text(args.activation_profile_id, "activation_profile_id"), args.activation_profile_version === undefined ? undefined : finiteInteger(args.activation_profile_version, "activation_profile_version", 1));
+            if (profile.task_id !== task.id)
+                throw new Error("Activation Profile does not match task");
+        }
+        else {
+            const assets = this.store.list("capability_asset", 10_000, (asset) => asset.trust !== "untrusted" && asset.health === "healthy");
+            const selected = assets.filter((asset) => allowedEffects.includes(asset.effect)).slice(0, 3);
+            const profileId = String(args.profile_id ?? `profile_${task.id}`);
+            const identity = { task_id: task.id, goal_fingerprint: valueDigest(text(args.goal, "goal")), asset_ids: selected.map((asset) => asset.id), asset_versions: Object.fromEntries(selected.map((asset) => [String(asset.id), asset.version])), allowed_effects: allowedEffects, activation: "host_mediated", status: "recommended", selection: selected.length ? "eligible_local_assets" : "no_capability_required" };
+            const existing = this.store.find("activation_profile", profileId);
+            if (existing) {
+                const existingIdentityDigest = valueDigest(recordPayload(existing));
+                const expectedIdentityDigest = valueDigest(identity);
+                if (existingIdentityDigest !== expectedIdentityDigest)
+                    throw new Error("Execution Fabric Activation Profile idempotency conflict");
+                profile = existing;
+            }
+            else
+                profile = this.store.create("activation_profile", profileId, identity);
+        }
+        const manifest = this.hostActivationManifestPrepare({ manifest_id: args.manifest_id, task_id: task.id, profile_id: profile.id, profile_version: profile.version, host: args.host, asset_ids: args.asset_ids, connector_ticket_ids: args.connector_ticket_ids }).manifest;
+        const prepared = this.verifiedWorkLoopPrepare({ ...args, task_id: task.id, activation_profile_id: profile.id, activation_profile_version: profile.version });
+        const loop = prepared.work_loop;
+        const fabric = this.executionFabric.create({ fabric_id: args.fabric_id, work_loop_id: loop.id, manifest_id: manifest.id });
+        return { ...prepared, activation_profile: profile, host_activation_manifest: manifest, execution_fabric: fabric.fabric, fabric_idempotent: fabric.idempotent };
+    }
+    executionFabricAdvance(args) {
+        const fabric = this.store.get("execution_fabric", text(args.fabric_id, "fabric_id"));
+        this.hostActivationManifestValidate({ manifest_id: fabric.manifest_id });
+        const observed = this.verifiedWorkLoopAdvance({ work_loop_id: fabric.work_loop_id, environment: args.environment, budget: args.budget, state_adapter: args.state_adapter, state_paths: args.state_paths, artifact_ids: args.artifact_ids, snapshot_id: args.snapshot_id, receipt_id: args.work_loop_receipt_id });
+        const receipt = observed.receipt;
+        const advanced = this.executionFabric.advance({ fabric_id: fabric.id, work_loop_receipt_id: receipt.id, activation_receipt_id: args.activation_receipt_id, advance_id: args.advance_id });
+        return { ...advanced, work_loop: observed };
+    }
+    executionFabricConsume(args) {
+        const fabric = this.store.get("execution_fabric", text(args.fabric_id, "fabric_id"));
+        const activation = this.hostActivationManifestConsume({ manifest_id: fabric.manifest_id, call_id: args.call_id, host: args.host });
+        return this.executionFabric.advance({ fabric_id: fabric.id, work_loop_receipt_id: text(args.work_loop_receipt_id, "work_loop_receipt_id"), activation_receipt_id: activation.receipt.id, advance_id: args.advance_id });
+    }
+    executionFabricGet(args) {
+        const result = this.executionFabric.get(args);
+        const fabric = result.fabric;
+        return { ...result, work_loop: this.verifiedWorkLoopGet({ work_loop_id: fabric.work_loop_id }), host_activation: this.hostActivationManifestGet({ manifest_id: fabric.manifest_id }) };
+    }
     stateWorkspaceObserve(args) { return this.stateWorkspace.observe(args); }
     stateWorkspaceCompare(args) { return this.stateWorkspace.compare(args); }
     evalCampaignCreate(args) { return this.evalCampaigns.create(args); }

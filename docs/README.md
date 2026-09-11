@@ -2,7 +2,7 @@
 
 本目录以两套文档为主：简洁的产品文档和稍详细的技术方案。README 介绍产品与当前使用方法；研究证据放在独立的 `research/`，仓库外 `TT.md` 是早期讨论记录，不是理解当前产品的前置条件。
 
-**第一次接触 Craft？** 先读 [快速入门（5 分钟）](quickstart.md)：安装、挂载能力目录、接入宿主、跑通一次最小闭环，并附概念地图和最小术语表。
+**第一次接触 Craft？** 先读 [总览：受控 Agent 工作运行时](introduction.zh-CN.md)，再读 [快速入门（5 分钟）](quickstart.md)：安装、挂载能力目录、接入宿主、跑通一次最小闭环，并附概念地图和最小术语表。
 
 ## 产品文档
 
@@ -15,6 +15,8 @@
 
 - [技术总览](technical/overview.zh-CN.md)：架构分层、核心对象与模块关系。
 - [Capability 与领域 Kit](technical/modules/capability-kit.md)
+- [Capability Access：上下文、能力选择与短期调用票据](technical/modules/capability-access.md)
+- [Verified Execution Fabric](technical/modules/verified-execution-fabric.md)：将 Profile、Host Manifest、Work Loop 与状态再观察收敛为一条可复核执行链。
 - [Agent IR](technical/modules/agent-ir.md)
 - [Experience / Eval Kernel](technical/modules/experience-eval.md)
 - [Workflow / Verification / Signoff](technical/modules/workflow-signoff.md)

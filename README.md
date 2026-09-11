@@ -1,6 +1,6 @@
 # Craft
 
-> 当前发布版本：v0.11.52。新增 Capability Connector：用户可显式接入 Serena、Skill 来源或 MCP 元数据；默认 MCP Core 公开完整 Verified Work Loop，并用绑定 Activation Profile 与来源摘要的短期 ticket 交给 Host 实际调用。
+> 当前发布版本：v0.11.53。新增 Verified Execution Fabric：将 Activation Profile、Host Activation Manifest、Verified Work Loop 与状态再观察收敛为一条可复核执行链；宿主仍决定实际启停与调用。
 
 [中文](README.md) | [English](README.en.md)
 

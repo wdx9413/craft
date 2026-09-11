@@ -52,6 +52,9 @@ import { VerifiedWorkLoopKernel } from "./verified-work-loop.js";
 import { EvalCampaignKernel } from "./eval-campaign.js";
 import { ProjectKnowledgeKernel } from "./project-knowledge.js";
 import { CapabilityConnectorKernel } from "./capability-connector.js";
+import { CapabilityAccessKernel } from "./capability-access.js";
+import { HostActivationManifestKernel } from "./host-activation-manifest.js";
+import { ExecutionFabricKernel } from "./execution-fabric.js";
 /**
  * Stable composition root for the service. Domain behavior stays in focused
  * kernels; CraftService is the backwards-compatible API facade.
@@ -111,6 +114,9 @@ export class ServiceFoundation {
     evalCampaigns;
     projectKnowledge;
     capabilityConnectors;
+    capabilityAccess;
+    hostActivationManifests;
+    executionFabric;
     constructor(store, semanticProvider, isolatedAdapter = new LocalIsolatedAdapter(), dockerSandbox = new DockerSandboxAdapter(), egressBroker = new TrustedEgressBroker(), hostOwnerId) {
         this.store = store;
         this.catalog = new Catalog(store, semanticProvider);
@@ -165,6 +171,9 @@ export class ServiceFoundation {
         this.evalCampaigns = new EvalCampaignKernel(store, this.taskBenchmarks);
         this.projectKnowledge = new ProjectKnowledgeKernel(store);
         this.capabilityConnectors = new CapabilityConnectorKernel(store);
+        this.capabilityAccess = new CapabilityAccessKernel(store, this.catalog);
+        this.hostActivationManifests = new HostActivationManifestKernel(store);
+        this.executionFabric = new ExecutionFabricKernel(store);
         this.hostRuns = new HostRunKernel(store, [this.codexHost, this.claudeHost], hostOwnerId, (run, receipt) => this.finalizeWorkLaunch(run, receipt));
     }
 }

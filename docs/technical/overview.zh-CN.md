@@ -49,7 +49,9 @@ v0.11.20 固定第一条能力平面边界：**Source Mount 是 provenance，逻
 
 ```text
 Capability Kit ──contains──> Capability / Validator / Policy / Eval Suite
-Capability Source(s) ──mirror──> Logical Capability ──pins──> Activation Profile ──issues──> Capability Call / Receipt
+Capability Source(s) ──mirror──> Logical Capability ──pins──> Logical Activation Plan ──resolves──> bounded read-only context
+Capability Connector / Capability Asset ──selected by──> Activation Profile ──issues──> Capability Ticket / Call Receipt
+Activation Profile ──pins──> Host Activation Manifest ──joins──> Execution Fabric ──re-observes──> Verified Work Loop Receipt
 Task ──compiled to──> Agent IR ──lowered to──> Workflow / Orchestration Plan
 Task ──has sourced, correctable──> Context Profile
 Task + Subject Version + Harness Configuration ──creates──> Trial
@@ -92,6 +94,7 @@ Signoff ──authorizes──> Workflow or Configuration Promotion
 - [Local Workbench Web：本地可见工作台](modules/local-workbench-web.md)
 
 - [Capability 与领域 Kit](modules/capability-kit.md)
+- [Capability Access：上下文、能力选择与短期调用票据](modules/capability-access.md)
 - [Agent IR](modules/agent-ir.md)
 - [Experience / Eval Kernel](modules/experience-eval.md)
 - [Workflow / Verification / Signoff](modules/workflow-signoff.md)

@@ -2,7 +2,7 @@
 
 ## 状态与目标
 
-v0.9.9 已实现本规划的受限闭环：本地 Capability Asset Registry、Activation Profile、调用回执、唯一只读 Expert、Context Capsule、最多五个只读 Sub-agent、可靠性评估、Judge 校准、受审核 feedback Case 与 Signoff 后 Canary。这里保留设计理由、验收边界和仍未实现项。
+v0.9.9 已实现本规划的受限闭环：本地 Capability Asset Registry、Activation Profile、调用回执、唯一只读 Expert、Context Capsule、最多五个只读 Sub-agent Operation、可靠性评估、Judge 校准、受审核 feedback Case 与 Signoff 后 Canary。这里保留设计理由、验收边界和仍未实现项。
 
 目标是让 Craft 在不把全部工具常驻给模型的前提下，为任务选择最小能力集；先支持一个只读的“诊断研究 Expert”，再把工具路由、Expert 与 Sub-agent 的表现纳入同一套评测闭环。
 
@@ -25,7 +25,7 @@ Capability Asset Catalog ──→ Activation Profile ──→ Tool Selection R
                                       ↓
                                Expert Profile
                                       ↓
-                    Orchestrator → Sub-agent Run(s)
+                    Orchestrator → Sub-agent Operation(s)
                                       ↓
                   Runtime / Host Adapter / Evidence
                                       ↓
@@ -37,8 +37,8 @@ Capability Asset Catalog ──→ Activation Profile ──→ Tool Selection R
 | Capability Asset | 可发现的 Skill、MCP Server、Tool、Workflow、Adapter、Validator 或 Eval | 被发现不等于被加载或获授权 |
 | Activation Profile | 当前 Task 的最小可用资产、精确版本和权限 | 由 Craft 推荐，Host 实际执行 |
 | Expert Profile | 专业策略、默认能力包、约束、预算和 Eval | 不是一次 Agent 执行 |
-| Sub-agent Run | Expert 面向子目标的一次受控执行 | 绑定 Context Capsule、预算、Trace 和 Outcome |
-| Tool Selection Receipt | 从候选到激活、再到调用结果的审计记录 | 选择正确不等于执行成功 |
+| Sub-agent Operation | Expert 面向子目标的一次受控执行 | 作为父 Runtime Operation 的子 Operation，绑定 Context Capsule、预算、Trace 和 Outcome |
+| Tool Selection Receipt | 从候选到 Activation Profile 的审计记录 | 选择正确不等于执行成功，调用 Receipt 独立记录 |
 
 ## v0.9.9 交付范围
 
@@ -56,7 +56,7 @@ Capability Asset Catalog ──→ Activation Profile ──→ Tool Selection R
 ### 切片 B：`diagnostic_research` Expert 与只读 Sub-agent
 
 - Expert Profile 版本化，初始只定义适用范围、只读能力分类、预算、输出合同和 Eval Suite。
-- Orchestrator 可将可独立验证的诊断假设分派为只读 Sub-agent Run。
+- Orchestrator 可将可独立验证的诊断假设分派为只读 Sub-agent Operation。
 - 每个子运行接收 Context Capsule，并输出假设、Evidence 引用、反例、置信边界和下一步建议；父任务统一裁决，不把子结论直接当事实。
 - Runtime Policy 强制只读 Effect；超预算、无证据、冲突结论或宿主中断均形成可恢复 Outcome。
 

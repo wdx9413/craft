@@ -42,6 +42,9 @@ test("logical capability content is pinned and audit detects reselection or drif
     const stale = service.logicalActivationAudit({ plan_id: plan.id, audit_id: "stale" });
     assert.equal((stale.plan as JsonObject).status, "stale"); assert.equal(((stale.audit as JsonObject).findings as JsonObject[])[0].status, "missing");
     await assert.rejects(service.logicalActivationPlan({ task_id: task.id, query: "research", allowed_effects: ["local_write"] }), /read_only/);
+    await assert.rejects(service.logicalActivationPlan({ task_id: task.id, query: "research", limit: 0 }), /integer/);
+    await assert.rejects(service.logicalActivationPlan({ task_id: task.id, query: "research", limit: "many" }), /integer/);
+    await assert.rejects(service.logicalActivationPlan({ task_id: task.id, query: "research", limit: 11 }), /integer/);
     await assert.rejects(service.logicalActivationPlan({ task_id: task.id, query: "research", context_profile_id: "missing" }), /together/);
     await assert.rejects(service.logicalActivationPlan({ task_id: task.id, query: "research" }), /No logical/);
     for (const [name, arguments_] of Object.entries({
@@ -50,6 +53,6 @@ test("logical capability content is pinned and audit detects reselection or drif
       const result = await mcp.handle({ id: name, method: "tools/call", params: { name, arguments: arguments_ } });
       assert.equal((result?.result as JsonObject).isError, false, name);
     }
-    assert.equal(VERSION, "0.11.52");
+    assert.equal(VERSION, "0.11.53");
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });

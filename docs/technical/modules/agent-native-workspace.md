@@ -2,7 +2,7 @@
 
 ## 定位
 
-`WorkspaceState` 是 Craft 的共享状态源，而不是新的聊天记录。它把一个明确的本地根目录、允许纳入的相对路径、Checkpoint、人工改动和关联 Artifact/Evidence 放进同一条可查询谱系。v0.11.52 在其上增加只保存摘要的 State Workspace Observation：工作循环以“预期状态 → Action/Receipt → 再观察 Snapshot”收口，不以模型自述收口。
+`WorkspaceState` 是 Craft 的共享状态源，而不是新的聊天记录。它把一个明确的本地根目录、允许纳入的相对路径、Checkpoint、人工改动和关联 Artifact/Evidence 放进同一条可查询谱系。v0.11.52 在其上增加只保存摘要的 State Workspace Observation；v0.11.53 的 Execution Fabric 将“预期状态 → Action/Receipt → 再观察 Snapshot”与精确 Host Manifest 相连，不以模型自述收口。
 
 ## 对外深模块
 

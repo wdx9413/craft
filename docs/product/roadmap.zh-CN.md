@@ -13,7 +13,7 @@
 
 ## 建设原则
 
-以 [产品架构](architecture.zh-CN.md) 的三大支柱为目标：工作与协作、执行与保障、学习与改进。**评测与实验是第三支柱内的核心模块**，不另设第四支柱。以下里程碑是规划；当前实现基线已推进到 v0.11.52。
+以 [产品架构](architecture.zh-CN.md) 的三大支柱为目标：工作与协作、执行与保障、学习与改进。**评测与实验是第三支柱内的核心模块**，不另设第四支柱。以下里程碑是规划；当前实现基线已推进到 v0.11.53。
 
 **两步定位**：短期做**跨宿主治理插件层**——以 MCP/插件形式接入 Codex CLI、Claude Code、DeepSeek Harness 等宿主，统一能力发现、授权门禁、证据链与评测门禁，执行留在宿主内；长期做**自主 Agent 平台**——自有对话循环、宿主调度与评测驱动的自我改进。Provider 是当前主线，Supervisor/Agent 是长期形态；本路线图中 v0.11.x 的能力全部属于两步共用的内核。
 
@@ -77,7 +77,9 @@
 
 **v0.11.51：Verified Work Loop、State Workspace、Eval Campaign 与 Serena 桥接。** 主入口将 Task Contract、初始状态、Launch、Task Run、Receipt、再观察、Acceptance、Outcome 和 Checkpoint 串成一条可恢复路径；Host 完成不能绕过成果验收。文件树与文件 Artifact 的 State Adapter 只保存摘要/版本/差异；人工编辑成为 `HumanStateEvent` 并使旧路径 `needs_replan`。Eval Campaign 计划并绑定 held-out 的 Case × Harness × N Trial，不暗中启动 Host；它复用 Benchmark/Signoff/Canary gate。Project Knowledge Adapter 只按需读取受信任项目的 Serena Memory，并仅可提出带 Evidence 的更新草案。详见 [专项模块](../technical/modules/verified-work-loop.md)。
 
-**v0.11.52：外接 Capability Connector 与 Core WorkLoop。** 用户可显式登记内置能力、GitHub/火山引擎 Skill 来源以及 stdio/HTTPS MCP；Craft 只保存无凭据元数据、用户审批引用、来源摘要与版本，Host 才负责真实发现、安装、启停和调用。已批准的只读 Asset 才能进入 Activation Profile；调用 ticket 同时绑定 Profile、Capability Asset、Connector Asset、来源摘要和过期时间，消费时重新检查状态与版本。Serena MCP 仅允许只读 Asset。默认 `craft-mcp` 现在公开 `VerifiedWorkLoop` 的 `prepare / advance / decide / resume / get` 及已签发 ticket，而 Connector 注册/发现/批准仍在显式 `craft-mcp-full`，避免配置型工具污染默认面。详见 [Capability Connector](../technical/modules/capability-connectors.md)。
+**v0.11.52：外接 Capability Connector 与 Core WorkLoop。** 用户可显式登记内置能力、GitHub/火山引擎 Skill 来源以及 stdio/HTTPS MCP；Craft 只保存无凭据元数据、用户审批引用、来源摘要与版本，Host 才负责真实发现、安装、启停和调用。已批准的只读 Asset 才能进入 Activation Profile；调用 ticket 同时绑定 Profile、Capability Asset、Connector Asset、来源摘要和过期时间，消费时重新检查状态与版本。Serena MCP 仅允许只读 Asset。默认 `craft-mcp` 现在公开 `VerifiedWorkLoop` 的 `prepare / advance / decide / resume / get` 及已签发 ticket，而 Connector 注册、发现、启停和批准仍在显式 `craft-mcp-full`，避免配置型工具污染默认面。详见 [Capability Connector](../technical/modules/capability-connectors.md)。
+
+**v0.11.53：Verified Execution Fabric。** 将 Task Contract、Activation Profile、Host Dispatch、Verified Work Loop、State Snapshot、Acceptance、Outcome 与 Eval Runner 收敛为同一条可复核执行链。新增无正文 `Host Activation Manifest`：固定 Host、Profile/Asset 版本、effect、来源摘要和 Connector ticket 引用；校验失败即拒绝，且不改 Codex/Claude/MCP 配置、不启动 Connector。新增 `Execution Fabric`：只有重新验证 Manifest、重新观察状态并追加 receipt 后才推进，输入/权限/能力/环境/状态漂移不能复用旧事实。确定性 Workflow Eval Runner 继续实际运行 Case × Subject × N Trial；通用 Host 评测仍必须绑定真实 Host 事实，不能伪造。详见 [Verified Execution Fabric](../technical/modules/verified-execution-fabric.md)。
 
 - 面向各行业工作者，研发是首批验证场景，视频用于检验跨领域复用；后续扩展销售、教育与内容创作，不同时自建所有专业编辑器。
 - 先把真实工作从目标到成果跑通，同时提供可操作的最小界面；不长期只增加协议与配置。

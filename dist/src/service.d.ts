@@ -1,6 +1,6 @@
 import { CraftStore, type JsonObject } from "./store.ts";
 import { ServiceFoundation } from "./service-foundation.ts";
-export declare const VERSION = "0.11.52";
+export declare const VERSION = "0.11.53";
 export declare class CraftService extends ServiceFoundation {
     static open(store: CraftStore, hostOwnerId?: string): Promise<CraftService>;
     info(): JsonObject;
@@ -28,6 +28,10 @@ export declare class CraftService extends ServiceFoundation {
     capabilityConnectorList(args: JsonObject): JsonObject;
     capabilityConnectorTicketIssue(args: JsonObject): JsonObject;
     capabilityConnectorTicketConsume(args: JsonObject): JsonObject;
+    hostActivationManifestPrepare(args: JsonObject): JsonObject;
+    hostActivationManifestValidate(args: JsonObject): JsonObject;
+    hostActivationManifestConsume(args: JsonObject): JsonObject;
+    hostActivationManifestGet(args: JsonObject): JsonObject;
     expertProfileSave(args: JsonObject): JsonObject;
     contextCapsuleCreate(args: JsonObject): JsonObject;
     expertSubagentCreate(args: JsonObject): JsonObject;
@@ -311,6 +315,10 @@ export declare class CraftService extends ServiceFoundation {
     verifiedWorkLoopDecide(args: JsonObject): JsonObject;
     verifiedWorkLoopResume(args: JsonObject): JsonObject;
     verifiedWorkLoopGet(args: JsonObject): JsonObject;
+    executionFabricPrepare(args: JsonObject): JsonObject;
+    executionFabricAdvance(args: JsonObject): JsonObject;
+    executionFabricConsume(args: JsonObject): JsonObject;
+    executionFabricGet(args: JsonObject): JsonObject;
     stateWorkspaceObserve(args: JsonObject): JsonObject;
     stateWorkspaceCompare(args: JsonObject): JsonObject;
     evalCampaignCreate(args: JsonObject): JsonObject;
