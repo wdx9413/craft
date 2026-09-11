@@ -125,6 +125,8 @@ export const TOOLS: Tool[] = [
   tool("craft_work_launch_decide", "Approve or deny one exact prepared workspace-write launch.", ["launch_id", "actor", "approved"], false, ["prompt"]),
   tool("craft_work_launch_get", "Read a launch, effective Host status, and incremental sanitized events.", ["launch_id"], true, ["after_sequence", "limit"]),
   tool("craft_work_launch_retry", "Create a new traceable attempt for a failed, cancelled, or interrupted launch without replaying a stored prompt.", ["launch_id", "prompt"], false, ["new_launch_id", "model", "timeout_ms", "output_limit", "max_turns", "max_budget_usd"]),
+  tool("craft_work_delivery_observe", "Create an immutable delivery observation from an exact terminal Host receipt and independent acceptance state.", ["launch_id"], false, ["delivery_id"]),
+  tool("craft_work_delivery_get", "Read one immutable delivery observation.", ["delivery_id"], true),
   tool("craft_capability_context_work_launch_prepare", "Prepare a Work Launch with an exact digest-pinned read-only capability context; it never grants extra write authority.", ["task_id", "host", "workspace", "prompt", "plan_id"], false, ["launch_id", "sandbox", "model", "timeout_ms", "output_limit", "max_turns", "max_budget_usd", "max_chars", "acceptance_name", "acceptance_criteria"]),
   tool("craft_capability_context_work_launch_decide", "Approve or deny one capability-bound workspace-write launch after revalidating the exact local context.", ["launch_id", "actor", "approved", "prompt"], false),
   tool("craft_knowledge_context_work_launch_prepare", "Prepare a Work Launch with one exact Wiki Context Bundle. Every Claim, Evidence reference, scope, expiry, and digest is revalidated before any Host run; the rendered knowledge is bounded read-only context.", ["task_id", "host", "workspace", "prompt", "bundle_id"], false, ["bundle_version", "launch_id", "sandbox", "model", "timeout_ms", "output_limit", "max_turns", "max_budget_usd", "acceptance_name", "acceptance_criteria", "now"]),
@@ -582,7 +584,7 @@ export const TOOLS: Tool[] = [
 ];
 
 const CORE_TOOL_NAMES = new Set(["craft_info", "craft_source_list", "craft_capability_search", "craft_capability_get", "craft_semantic_status", "craft_execution_policy_decide",
-  "craft_default_route", "craft_default_route_resume", "craft_default_route_find", "craft_task_open", "craft_task_list", "craft_task_checkpoint", "craft_workspace_get", "craft_workspace_diff", "craft_work_object_list", "craft_workspace_impact", "craft_context_assemble", "craft_change_set_preview",
+  "craft_default_route", "craft_default_route_resume", "craft_default_route_find", "craft_task_open", "craft_task_list", "craft_task_checkpoint", "craft_work_launch_get", "craft_work_delivery_observe", "craft_work_delivery_get", "craft_workspace_get", "craft_workspace_diff", "craft_work_object_list", "craft_workspace_impact", "craft_context_assemble", "craft_change_set_preview",
   "craft_artifact_register", "craft_evidence_record", "craft_capability_access_plan", "craft_capability_call_issue", "craft_capability_call_consume"]);
 export const CORE_TOOLS: Tool[] = TOOLS.filter((tool) => CORE_TOOL_NAMES.has(tool.name));
 
@@ -693,6 +695,7 @@ export class McpServer {
       craft_work_launch_decide: (a) => service.workLaunchDecide(a),
       craft_work_launch_get: (a) => service.workLaunchGet(a),
       craft_work_launch_retry: (a) => service.workLaunchRetry(a),
+      craft_work_delivery_observe: (a) => service.workDeliveryObserve(a), craft_work_delivery_get: (a) => service.workDeliveryGet(a),
       craft_execution_safety_preflight: (a) => service.executionSafetyPreflight(a),
       craft_execution_safety_get: (a) => service.executionSafetyGet(a),
       craft_safety_work_launch_prepare: (a) => service.safetyWorkLaunchPrepare(a),
