@@ -42,6 +42,7 @@ import { ExecutionSafetyKernel } from "./execution-safety.ts";
 import { LocalCandidateImportKernel } from "./local-candidate-import.ts";
 import { A2ADiscoveryKernel } from "./a2a-discovery.ts";
 import { WorkDeliveryKernel } from "./work-delivery.ts";
+import { DeliveryEvaluationKernel } from "./delivery-evaluation.ts";
 
 /**
  * Stable composition root for the service. Domain behavior stays in focused
@@ -91,6 +92,7 @@ export abstract class ServiceFoundation {
   readonly localCandidateImport: LocalCandidateImportKernel;
   readonly a2aDiscovery: A2ADiscoveryKernel;
   readonly workDelivery: WorkDeliveryKernel;
+  readonly deliveryEvaluation: DeliveryEvaluationKernel;
 
   constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter = new LocalIsolatedAdapter(),
     dockerSandbox = new DockerSandboxAdapter(), egressBroker = new TrustedEgressBroker(), hostOwnerId?: string) {
@@ -119,6 +121,7 @@ export abstract class ServiceFoundation {
     this.localCandidateImport = new LocalCandidateImportKernel(store);
     this.a2aDiscovery = new A2ADiscoveryKernel(store);
     this.workDelivery = new WorkDeliveryKernel(store);
+    this.deliveryEvaluation = new DeliveryEvaluationKernel(store);
     this.hostRuns = new HostRunKernel(store, [this.codexHost, this.claudeHost], hostOwnerId,
       (run, receipt) => this.finalizeWorkLaunch(run, receipt));
   }

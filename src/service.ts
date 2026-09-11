@@ -17,7 +17,7 @@ import { dockerRequestDigest } from "./docker-sandbox.ts";
 import { egressRequestDigest } from "./egress.ts";
 import { ServiceFoundation } from "./service-foundation.ts";
 
-export const VERSION = "0.11.43";
+export const VERSION = "0.11.44";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -229,7 +229,7 @@ export class CraftService extends ServiceFoundation {
       "supply_chain_advisory",
       "maintenance_status",
       "maintenance_tick",
-      "maintenance_component", "maintenance_failure", "attention_item", "work_launch", "work_delivery", "acceptance_plan", "acceptance_check", "acceptance_assessment", "acceptance_evaluator", "acceptance_evaluation_job", "verified_iteration", "iteration_attempt", "strategy_recommendation",
+      "maintenance_component", "maintenance_failure", "attention_item", "work_launch", "work_delivery", "delivery_evaluation_case", "delivery_evaluation_comparison", "acceptance_plan", "acceptance_check", "acceptance_assessment", "acceptance_evaluator", "acceptance_evaluation_job", "verified_iteration", "iteration_attempt", "strategy_recommendation",
       "trajectory_script_proposal", "verified_script_run", "knowledge_claim", "wiki_page", "knowledge_relation", "wiki_context_bundle", "wiki_skill_candidate", "knowledge_evaluation_case", "knowledge_evaluation_run", "wiki_candidate_evaluation_attestation", "wiki_candidate_publication_authorization", "wiki_candidate_publication_package", "guided_work_brief", "execution_safety_preflight", "wiki_candidate_local_import"];
     kinds.push("untrusted_content", "untrusted_extraction", "decision_projection");
     return { version: VERSION, data_root: this.store.paths.root,
@@ -2206,6 +2206,8 @@ export class CraftService extends ServiceFoundation {
   workLaunchGet(args: JsonObject): JsonObject { const launch = this.store.get("work_launch", text(args.launch_id, "launch_id")); const run = launch.run_id ? this.store.find("host_run", String(launch.run_id)) : null; return { launch: { ...launch, effective_status: run?.status ?? launch.status }, run: run ? this.homeHostRun({ run_id: run.id, after_sequence: args.after_sequence, limit: args.limit }) : null, acceptance: launch.acceptance_plan_id ? this.acceptancePlanGet({ plan_id: launch.acceptance_plan_id }) : null }; }
   workDeliveryObserve(args: JsonObject): JsonObject { return this.workDelivery.observe(args); }
   workDeliveryGet(args: JsonObject): JsonObject { return this.workDelivery.get(args); }
+  deliveryEvaluationCaseSave(args: JsonObject): JsonObject { return this.deliveryEvaluation.caseSave(args); }
+  deliveryEvaluationCompare(args: JsonObject): JsonObject { return this.deliveryEvaluation.compare(args); }
   workLaunchRetry(args: JsonObject): JsonObject { const previous = this.workLaunchGet({ launch_id: args.launch_id }).launch as JsonObject; if (previous.knowledge_binding !== undefined) throw new Error("Knowledge-bound Work Launch must retry through its Knowledge Work Launch"); if (!new Set(["failed", "cancelled", "interrupted"]).has(String(previous.effective_status))) throw new Error("Only a failed, cancelled, or interrupted launch can be retried"); const task = this.store.get("task", String(previous.task_id)); const dispatch = this.store.get(previous.host === "codex-cli" ? "codex_dispatch" : "claude_dispatch", String(previous.dispatch_id)); const acceptance = previous.acceptance_plan_id ? this.store.get("acceptance_plan", String(previous.acceptance_plan_id)) : null; return this.workLaunchPrepare({ task_id: task.id, host: previous.host, workspace: previous.workspace, sandbox: previous.sandbox, prompt: args.prompt, launch_id: args.new_launch_id === undefined ? undefined : text(args.new_launch_id, "new_launch_id"), retry_of: previous.id, model: args.model ?? dispatch.model ?? undefined, timeout_ms: args.timeout_ms ?? dispatch.timeout_ms, output_limit: args.output_limit ?? dispatch.output_limit, max_turns: args.max_turns ?? dispatch.max_turns, max_budget_usd: args.max_budget_usd ?? dispatch.max_budget_usd ?? undefined, acceptance_name: acceptance?.name, acceptance_criteria: acceptance?.criteria }); }
   protected finalizeWorkLaunch(run: JsonObject, receipt: JsonObject | null): void {
     const launch = this.store.list("work_launch", 10_000, (item) => item.run_id === run.id)[0]; if (!launch?.trial_id || this.store.find("outcome", `outcome_${launch.trial_id}`)) return;
