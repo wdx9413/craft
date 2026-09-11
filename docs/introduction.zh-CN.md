@@ -1,6 +1,6 @@
 # Craft：受控 Agent 工作运行时
 
-> 本文是 Craft 的总览入口。它解释产品解决的问题、关键概念如何连接、当前实现做到哪里，以及在面试或架构评审中应如何准确回答。实现基线为 v0.11.54。
+> 本文是 Craft 的总览入口。它解释产品解决的问题、关键概念如何连接、当前实现做到哪里，以及在面试或架构评审中应如何准确回答。实现基线为 v0.11.55。
 
 ## 一句话
 
@@ -65,6 +65,8 @@ Acceptance 与 Work Delivery
         ↓
 Outcome，或 needs_replan / handoff
 ```
+
+对于本地写入，v0.11.55 在 Fabric 启动前增加范围内基线 Checkpoint，终态后形成提交 Checkpoint 或待人工恢复状态；这只覆盖声明的文件路径。真实 Delivery 可进入 `Eval Campaign` 生成配对报告；候选必须经过 held-out、Signoff、带 Evidence 的 Canary 和人工结论后，才会被 `Adaptive Harness Recommendation` 推荐。无合格证据时系统返回最小 baseline，不靠“多 Agent 看起来更强”扩大 Harness。
 
 三个规则最重要：
 

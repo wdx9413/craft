@@ -1,6 +1,6 @@
 {
   "name": "craft",
-  "version": "0.11.54",
+  "version": "0.11.55",
   "description": "Capability discovery, durable tasks, verified workflows, evidence, and multi-agent orchestration.",
   "author": {
     "name": "wdx9413",

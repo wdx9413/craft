@@ -57,6 +57,9 @@ import { CapabilityAccessKernel } from "./capability-access.ts";
 import { HostActivationManifestKernel } from "./host-activation-manifest.ts";
 import { ExecutionFabricKernel } from "./execution-fabric.ts";
 import { HostBridgeKernel } from "./host-bridge.ts";
+import { ManagedWriteKernel } from "./managed-write.ts";
+import { EvalCampaignReportKernel } from "./eval-campaign-report.ts";
+import { AdaptiveHarnessKernel } from "./adaptive-harness.ts";
 
 /**
  * Stable composition root for the service. Domain behavior stays in focused
@@ -121,6 +124,9 @@ export abstract class ServiceFoundation {
   readonly hostActivationManifests: HostActivationManifestKernel;
   readonly executionFabric: ExecutionFabricKernel;
   readonly hostBridge: HostBridgeKernel;
+  readonly managedWrites: ManagedWriteKernel;
+  readonly evalCampaignReports: EvalCampaignReportKernel;
+  readonly adaptiveHarnesses: AdaptiveHarnessKernel;
 
   constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter = new LocalIsolatedAdapter(),
     dockerSandbox = new DockerSandboxAdapter(), egressBroker = new TrustedEgressBroker(), hostOwnerId?: string) {
@@ -164,6 +170,9 @@ export abstract class ServiceFoundation {
     this.hostActivationManifests = new HostActivationManifestKernel(store);
     this.executionFabric = new ExecutionFabricKernel(store);
     this.hostBridge = new HostBridgeKernel(store);
+    this.managedWrites = new ManagedWriteKernel(store, this.transaction, this.workspace);
+    this.evalCampaignReports = new EvalCampaignReportKernel(store);
+    this.adaptiveHarnesses = new AdaptiveHarnessKernel(store);
     this.hostRuns = new HostRunKernel(store, [this.codexHost, this.claudeHost], hostOwnerId,
       (run, receipt) => this.finalizeWorkLaunch(run, receipt));
   }

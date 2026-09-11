@@ -1,6 +1,6 @@
 # Verified Execution Fabric
 
-> 状态：v0.11.54 将已有的 `Verified Work Loop`、Activation Profile、Host Dispatch、Workspace State、Acceptance 与 Eval Runner 收敛为一个可审计的运行面，并将本地 Host 启动接到精确 Manifest。它证明机制和边界，不宣称已经提升任意业务任务的效果。
+> 状态：v0.11.55 将已有的 `Verified Work Loop`、Activation Profile、Host Dispatch、Workspace State、Acceptance 与 Eval Runner 收敛为一个可审计的运行面，并将本地 Host 启动接到精确 Manifest。它证明机制和边界，不宣称已经提升任意业务任务的效果。
 
 ## 目标
 
@@ -32,7 +32,7 @@ Manifest 是给 Host 的无正文清单，固定任务、Profile 版本、Host�
 
 Fabric 固定同一条 Task、Task Contract、Activation Profile、Work Loop、Task Run 与 Manifest。v0.11.54 的 `Host Bridge` 再将它与一次真实 Host Run 相连：`execute` 先重新验证 Manifest、核对不持久化的 Prompt 摘要并消费一次 Activation Receipt，之后才启动 Host；Host 终态自动触发状态再观察与 Fabric receipt。Profile、Connector ticket、环境、预算或文件状态漂移时，既有失败关闭或 `needs_replan` 路径生效，旧 Receipt 不可当作新事实。
 
-它的生命周期是投影：`prepared`、当前 Work Loop 状态或 `needs_replan`。它不会偷偷重试、分裂子 Agent、扩大权限或执行模型生成的脚本。
+它的生命周期是投影：`prepared`、当前 Work Loop 状态或 `needs_replan`。它不会偷偷重试、分裂子 Agent、扩大权限或执行模型生成的脚本。对 `workspace-write` Fabric，v0.11.55 在同一条链上附加范围内的事务基线、终态提交和人工批准恢复；这不扩大为外部系统的回滚承诺，详见[可验证执行与演进平台](evolution-platform.md)。
 
 ## 评测与自适应
 

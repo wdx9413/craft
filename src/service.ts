@@ -17,7 +17,7 @@ import { dockerRequestDigest } from "./docker-sandbox.ts";
 import { egressRequestDigest } from "./egress.ts";
 import { ServiceFoundation } from "./service-foundation.ts";
 
-export const VERSION = "0.11.54";
+export const VERSION = "0.11.55";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -226,7 +226,7 @@ export class CraftService extends ServiceFoundation {
       "supply_chain_advisory",
       "maintenance_status",
       "maintenance_tick",
-      "maintenance_component", "maintenance_failure", "attention_item", "work_launch", "work_delivery", "delivery_loop", "delivery_evaluation_case", "delivery_evaluation_comparison", "delivery_evaluation_run", "platform_execution_profile", "platform_execution_preflight", "platform_execution_probe", "platform_execution_conformance", "task_run", "task_run_state", "task_run_handoff", "task_benchmark", "task_benchmark_pair", "state_snapshot", "verified_work_loop", "verified_work_loop_receipt", "verified_work_loop_decision", "human_state_event", "work_loop_invalidation", "eval_campaign", "eval_campaign_slot", "project_knowledge_discovery", "project_knowledge_resolution", "project_knowledge_proposal", "acceptance_plan", "acceptance_check", "acceptance_assessment", "acceptance_evaluator", "acceptance_evaluation_job", "verified_iteration", "iteration_attempt", "strategy_recommendation",
+      "maintenance_component", "maintenance_failure", "attention_item", "work_launch", "work_delivery", "delivery_loop", "delivery_evaluation_case", "delivery_evaluation_comparison", "delivery_evaluation_run", "platform_execution_profile", "platform_execution_preflight", "platform_execution_probe", "platform_execution_conformance", "task_run", "task_run_state", "task_run_handoff", "task_benchmark", "task_benchmark_pair", "task_benchmark_canary_sample", "state_snapshot", "verified_work_loop", "verified_work_loop_receipt", "verified_work_loop_decision", "human_state_event", "work_loop_invalidation", "eval_campaign", "eval_campaign_slot", "eval_campaign_report", "managed_write_guard", "managed_write_settlement", "adaptive_harness_recommendation", "project_knowledge_discovery", "project_knowledge_resolution", "project_knowledge_proposal", "acceptance_plan", "acceptance_check", "acceptance_assessment", "acceptance_evaluator", "acceptance_evaluation_job", "verified_iteration", "iteration_attempt", "strategy_recommendation",
       "trajectory_script_proposal", "verified_script_run", "knowledge_claim", "wiki_page", "knowledge_relation", "wiki_context_bundle", "wiki_skill_candidate", "knowledge_evaluation_case", "knowledge_evaluation_run", "wiki_candidate_evaluation_attestation", "wiki_candidate_publication_authorization", "wiki_candidate_publication_package", "guided_work_brief", "execution_safety_preflight", "wiki_candidate_local_import"];
     kinds.push("untrusted_content", "untrusted_extraction", "decision_projection");
     return { version: VERSION, data_root: this.store.paths.root,
@@ -2227,7 +2227,7 @@ export class CraftService extends ServiceFoundation {
     if (invocation.status === "running") return { ...prepared, run: this.store.get("host_run", String(invocation.run_id)), activation_receipt: this.store.get("host_activation_receipt", String(invocation.activation_receipt_id)) };
     this.hostActivationManifestValidate({ manifest_id: fabric.manifest_id });
     const activation = this.hostActivationManifestConsume({ manifest_id: fabric.manifest_id, call_id: args.call_id ?? invocation.id, host: launch.host });
-    let started: JsonObject;
+    let started: JsonObject; let managedWrite: JsonObject | null = null;
     if (launch.sandbox === "read-only") {
       if (launch.status !== "prepared") throw new Error("Fabric-managed read-only Work Launch is not prepared");
       const hostRun = this.hostRunStart({ host: launch.host, dispatch_id: launch.dispatch_id, prompt }).run as JsonObject;
@@ -2237,12 +2237,14 @@ export class CraftService extends ServiceFoundation {
       if (launch.status !== "awaiting_approval") throw new Error("Fabric-managed write Work Launch is not awaiting approval");
       if (args.approved !== true) throw new Error("Execution Fabric workspace write requires approved=true");
       const actor = text(args.actor, "actor");
+      this.managedWrites.prepare({ fabric_id: fabric.id });
       this.verifiedWorkLoops.decide({ work_loop_id: loop.id, decision: "approve", actor, summary: "Approved exact Execution Fabric launch." });
       const result = this.workLaunchDecideInternal({ launch_id: launch.id, actor, approved: true, prompt }, undefined, true);
       const decidedLaunch = result.launch as JsonObject; started = { launch: decidedLaunch, run: this.store.get("host_run", text(decidedLaunch.run_id, "run_id")) };
+      managedWrite = this.managedWrites.start({ fabric_id: fabric.id, run_id: (started.run as JsonObject).id }).guard as JsonObject;
     }
     const run = started.run as JsonObject; const bridge = this.hostBridge.start({ invocation_id: invocation.id, run_id: run.id, activation_receipt_id: (activation.receipt as JsonObject).id });
-    return { ...prepared, ...started, activation_receipt: activation.receipt, bridge, completed: false };
+    return { ...prepared, ...started, activation_receipt: activation.receipt, bridge, managed_write: managedWrite, completed: false };
   }
   executionFabricConsume(args: JsonObject): JsonObject {
     const fabric = this.store.get("execution_fabric", text(args.fabric_id, "fabric_id"));
@@ -2267,6 +2269,10 @@ export class CraftService extends ServiceFoundation {
   evalCampaignBind(args: JsonObject): JsonObject { return this.evalCampaigns.bind(args); }
   evalCampaignAdvance(args: JsonObject): JsonObject { return this.evalCampaigns.advance(args); }
   evalCampaignGet(args: JsonObject): JsonObject { return this.evalCampaigns.get(args); }
+  evalCampaignReport(args: JsonObject): JsonObject { return this.evalCampaignReports.report(args); }
+  adaptiveHarnessRecommend(args: JsonObject): JsonObject { return this.adaptiveHarnesses.recommend(args); }
+  managedWriteGet(args: JsonObject): JsonObject { return this.managedWrites.get(args); }
+  managedWriteRollback(args: JsonObject): JsonObject { return this.managedWrites.rollback(args); }
   projectKnowledgeDiscover(args: JsonObject): JsonObject { return this.projectKnowledge.discover(args); }
   projectKnowledgeResolve(args: JsonObject): JsonObject { return this.projectKnowledge.resolve(args); }
   projectKnowledgeProposeUpdate(args: JsonObject): JsonObject { return this.projectKnowledge.proposeUpdate(args); }
@@ -2277,6 +2283,7 @@ export class CraftService extends ServiceFoundation {
   taskBenchmarkCandidateAuthorizeCanary(args: JsonObject): JsonObject { return this.taskBenchmarks.candidateAuthorizeCanary(args); }
   taskBenchmarkCandidateCanaryStart(args: JsonObject): JsonObject { return this.taskBenchmarks.candidateCanaryStart(args); }
   taskBenchmarkCandidateCanaryObserve(args: JsonObject): JsonObject { return this.taskBenchmarks.candidateCanaryObserve(args); }
+  taskBenchmarkCandidateCanaryConclude(args: JsonObject): JsonObject { return this.taskBenchmarks.candidateCanaryConclude(args); }
   deliveryEvaluationCaseSave(args: JsonObject): JsonObject { return this.deliveryEvaluation.caseSave(args); }
   deliveryEvaluationCompare(args: JsonObject): JsonObject { return this.deliveryEvaluation.compare(args); }
   deliveryEvaluationRun(args: JsonObject): JsonObject { return this.deliveryEvaluation.run(args); }
@@ -2287,14 +2294,15 @@ export class CraftService extends ServiceFoundation {
   platformExecutionProbeGet(args: JsonObject): JsonObject { return this.platformExecution.probeGet(args); }
   workLaunchRetry(args: JsonObject): JsonObject { const previous = this.workLaunchGet({ launch_id: args.launch_id }).launch as JsonObject; if (previous.knowledge_binding !== undefined) throw new Error("Knowledge-bound Work Launch must retry through its Knowledge Work Launch"); if (!new Set(["failed", "cancelled", "interrupted"]).has(String(previous.effective_status))) throw new Error("Only a failed, cancelled, or interrupted launch can be retried"); const task = this.store.get("task", String(previous.task_id)); const dispatch = this.store.get(previous.host === "codex-cli" ? "codex_dispatch" : "claude_dispatch", String(previous.dispatch_id)); const acceptance = previous.acceptance_plan_id ? this.store.get("acceptance_plan", String(previous.acceptance_plan_id)) : null; return this.workLaunchPrepare({ task_id: task.id, host: previous.host, workspace: previous.workspace, sandbox: previous.sandbox, prompt: args.prompt, launch_id: args.new_launch_id === undefined ? undefined : text(args.new_launch_id, "new_launch_id"), retry_of: previous.id, model: args.model ?? dispatch.model ?? undefined, timeout_ms: args.timeout_ms ?? dispatch.timeout_ms, output_limit: args.output_limit ?? dispatch.output_limit, max_turns: args.max_turns ?? dispatch.max_turns, max_budget_usd: args.max_budget_usd ?? dispatch.max_budget_usd ?? undefined, acceptance_name: acceptance?.name, acceptance_criteria: acceptance?.criteria }); }
   protected finalizeWorkLaunch(run: JsonObject, receipt: JsonObject | null): void {
-    const launch = this.store.list("work_launch", 10_000, (item) => item.run_id === run.id)[0]; if (!launch?.trial_id || this.store.find("outcome", `outcome_${launch.trial_id}`)) { this.finishFabricHostBridge(run); return; }
+    const launch = this.store.list("work_launch", 10_000, (item) => item.run_id === run.id)[0]; if (!launch?.trial_id || this.store.find("outcome", `outcome_${launch.trial_id}`)) { this.settleManagedWrite(run); this.finishFabricHostBridge(run); return; }
     const artifact = this.artifactRegister({ artifact_id: `artifact_${run.id}`, kind: "host_run_receipt", name: `Host run ${run.id}`, uri: receipt?.uri ?? `craft://host-run/${run.id}`, digest: receipt?.digest ?? null, producer_type: "host_run", producer_id: run.id, metadata: { host: run.host, dispatch_id: run.dispatch_id, receipt_id: run.receipt_id ?? null } });
     const confidence = run.status === "interrupted" ? "bounded" : "confirmed"; const evidence = this.evidenceRecord({ evidence_id: `evidence_${run.id}`, source_type: "program", confidence, claim: `Host execution ended with status ${run.status}.`, artifact_id: artifact.id, locator: `host-run:${run.id}`, observed_at: run.finished_at });
     const started = Date.parse(String(run.started_at)); const finished = Date.parse(String(run.finished_at)); const durationMs = Math.max(0, finished - started); const verdict = run.status === "completed" ? "passed" : run.status === "cancelled" ? "cancelled" : run.status === "interrupted" ? "blocked" : "failed";
     this.trialTraceAppend({ trial_id: launch.trial_id, event_type: `work_launch.${run.status}`, source: "craft_runtime", data: { launch_id: launch.id, run_id: run.id, receipt_id: run.receipt_id ?? null, duration_ms: durationMs }, artifact_ids: [artifact.id], evidence_ids: [evidence.id] });
     const costs: JsonObject = { duration_ms: durationMs }; if (typeof receipt?.cost_usd === "number") costs.cost_usd = receipt.cost_usd; if (receipt?.usage && typeof receipt.usage === "object" && !Array.isArray(receipt.usage)) costs.usage = receipt.usage;
-    this.outcomeRecord({ trial_id: launch.trial_id, verdict, summary: `Host execution ${run.status}.`, failure_type: verdict === "passed" ? undefined : run.error_class ?? `host_${run.status}`, scores: { host_execution_success: verdict === "passed" ? 1 : 0 }, costs, evidence_ids: [evidence.id], source: "program_verified", ...(launch.knowledge_binding === undefined ? {} : { knowledge_binding: launch.knowledge_binding }) }); this.deliveryLoop.refresh({ launch_id: launch.id }); this.refreshTaskControlForLaunch(launch.id); this.refreshTaskRunForLaunch(launch.id); this.finishFabricHostBridge(run);
+    this.outcomeRecord({ trial_id: launch.trial_id, verdict, summary: `Host execution ${run.status}.`, failure_type: verdict === "passed" ? undefined : run.error_class ?? `host_${run.status}`, scores: { host_execution_success: verdict === "passed" ? 1 : 0 }, costs, evidence_ids: [evidence.id], source: "program_verified", ...(launch.knowledge_binding === undefined ? {} : { knowledge_binding: launch.knowledge_binding }) }); this.deliveryLoop.refresh({ launch_id: launch.id }); this.refreshTaskControlForLaunch(launch.id); this.refreshTaskRunForLaunch(launch.id); this.settleManagedWrite(run); this.finishFabricHostBridge(run);
   }
+  private settleManagedWrite(run: JsonObject): void { try { const settled = this.managedWrites.settleForRun(run); if (settled) this.store.appendEvent(`host-run:${run.id}`, "managed_write.settled", { guard_id: (settled.guard as JsonObject).id, status: (settled.guard as JsonObject).status }); } catch (error) { this.store.appendEvent(`host-run:${run.id}`, "managed_write.settlement_failed", { error_class: error instanceof Error ? error.name : "UnknownError" }); } }
   private finishFabricHostBridge(run: JsonObject): void {
     for (const invocation of this.store.list("host_bridge_invocation", 10_000, (item) => item.run_id === run.id)) {
       try {

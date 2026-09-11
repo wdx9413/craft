@@ -1,6 +1,6 @@
 # Craft
 
-> Current release: v0.11.54. Managed Host Bridge defers Fabric-created host starts until the exact Manifest, prompt digest, and activation receipt are revalidated; terminal host facts flow back into state re-observation and do not imply delivery.
+> Current release: v0.11.55. The verified evolution platform adds scoped local-write recovery, observed-delivery Campaign reports, and evidence-backed Canary gating before a Harness candidate can be recommended.
 
 [中文](README.md) | [English](README.en.md)
 

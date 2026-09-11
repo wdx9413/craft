@@ -1,6 +1,6 @@
 # Craft
 
-> 当前发布版本：v0.11.54。新增 Managed Host Bridge：Fabric 创建的工作启动会先固定 Manifest、核对 Prompt 摘要并消费精确回执，随后才可启动宿主；终态自动回流为状态再观察，Host 完成不等于交付完成。
+> 当前发布版本：v0.11.55。新增可验证执行与演进平台：本地写入 Fabric 有范围内事务与人工恢复边界；Eval Campaign 生成真实 Delivery 的对照报告；只有 Signoff 与带证据 Canary 均通过的候选才可被推荐。
 
 [中文](README.md) | [English](README.en.md)
 
@@ -71,6 +71,7 @@ Sandbox 能力采用“声明、诊断、黑盒一致性验证、精确版本票
 - Task Run / Benchmark：Task Run 固定一次 Host 工作的版本和摘要，在漂移时停止重规划；Benchmark 只比较已观察交付，同环境/预算的 held-out 结果才能生成不可自动发布的候选。
 - Verified Work Loop / State Workspace / Eval Campaign：Host 自述完成不等于交付；文件状态、人工修改、环境与预算漂移均形成可追溯事实并要求重规划。Campaign 以真实 Outcome 比较最小 Harness 与有限候选，不默认增加多 Agent。Serena 仅作为受信任项目的按需只读上下文，Craft 只提出更新建议、绝不自动改写其记忆。
 - Managed Host Bridge / Execution Fabric：Fabric 生成的 Launch 会延后 Host 启动；只有精确 Manifest、Prompt 摘要和 Activation Receipt 再次通过，才可启动 Codex CLI 或 Claude Code。写入仍需显式审批；Host 终态自动触发状态再观察，不能冒充交付结果。
+- 可验证演进：本地 `workspace-write` 有基线/提交 Checkpoint 和显式恢复，外部 effect 不在回滚承诺内；Campaign 用已观察 Delivery 生成无正文配对报告，Candidate 必须经 held-out、Signoff、Evidence Canary 和人工结论才可被最小 Harness 选择器推荐。
 - Capability Connector：内置、用户批准的 GitHub/火山引擎 Skill 来源和 stdio/HTTPS MCP 统一登记为无敏感正文的来源元数据；发现、批准、Activation Profile 和调用 ticket 严格分离。Serena MCP 只允许只读 Asset。Connector 不自动安装、启停第三方服务、改写宿主 MCP 配置或保存凭据。
 - Windows、macOS、Linux 共用 TypeScript/Node.js 运行时；不依赖 Python。
 

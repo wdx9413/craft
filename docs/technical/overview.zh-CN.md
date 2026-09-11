@@ -52,6 +52,7 @@ Capability Kit ──contains──> Capability / Validator / Policy / Eval Suit
 Capability Source(s) ──mirror──> Logical Capability ──pins──> Logical Activation Plan ──resolves──> bounded read-only context
 Capability Connector / Capability Asset ──selected by──> Activation Profile ──issues──> Capability Ticket / Call Receipt
 Activation Profile ──pins──> Host Activation Manifest ──authorizes──> Managed Host Bridge ──joins──> Execution Fabric ──re-observes──> Verified Work Loop Receipt
+Execution Fabric (local_write) ──scopes──> Managed Write Transaction ──commits/approved restores──> Workspace Checkpoint
 Task ──compiled to──> Agent IR ──lowered to──> Workflow / Orchestration Plan
 Task ──has sourced, correctable──> Context Profile
 Task + Subject Version + Harness Configuration ──creates──> Trial
@@ -66,6 +67,7 @@ Comparable Evaluation Runs ──produce──> Evaluation Comparison
 Trial + Grader Version ──produces──> Grade
 Evaluation Run + Grades + Signoff Policy ──produces──> Signoff
 Signoff ──authorizes──> Workflow or Configuration Promotion
+Observed Delivery ──pairs──> Eval Campaign Report ──with Canary Evidence──> Adaptive Harness Recommendation
 ```
 
 ## 设计约束

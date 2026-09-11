@@ -1,6 +1,6 @@
 # Managed Host Bridge
 
-> 状态：v0.11.54 已实现本地 Codex CLI / Claude Code 的受控启动闭环。它不是远程 Agent 平台，也不会修改宿主的 MCP 配置或自动安装能力。
+> 状态：v0.11.55 已实现本地 Codex CLI / Claude Code 的受控启动闭环。它不是远程 Agent 平台，也不会修改宿主的 MCP 配置或自动安装能力。
 
 `HostBridgeKernel` 连接已准备的 `Execution Fabric` 与一次真实 Host Run。它只保存 Fabric、Manifest、Launch、Dispatch、Host Run 与 Activation Receipt 的精确引用和 Prompt 摘要；Prompt 正文只在启动调用期间传给 Host。
 
@@ -20,7 +20,7 @@ Fabric prepare
 - 直接 `Work Launch` 保持兼容行为；由 Fabric 创建的 Launch 标记为 `deferred_start`，不能通过旧的通用启动入口绕过 Manifest。
 - 只读 Launch 在 `craft_execution_fabric_execute` 中重新验证 Manifest、核对 Prompt 摘要并消费 Activation Receipt 后才启动。
 - `workspace-write` 仍要求 `approved=true` 和 actor；Bridge 先消费精确 Manifest，再沿用既有一次性授权与 Host Run 路径。
-- Host 终态由现有 `HostRunKernel` 回调。Craft 先归档 Host/Delivery 事实，再完成 Bridge 并重新观察 Work Loop；任何投影失败只形成可见事件，不能篡改 Host Receipt。
+- Host 终态由现有 `HostRunKernel` 回调。Craft 先归档 Host/Delivery 事实，再完成 Bridge 并重新观察 Work Loop；`workspace-write` Fabric 同时结算范围内本地事务，失败只记录可见事件，不能篡改 Host Receipt。
 
 ## Workbench 与 MCP
 
