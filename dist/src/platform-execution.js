@@ -15,7 +15,10 @@ export class PlatformExecutionKernel {
         const network = text(args.network, "network");
         if (!new Set(["none", "verified"]).has(isolation) || !new Set(["deny", "allow"]).has(network))
             throw new Error("Execution profile boundary is unsupported");
-        const item = { platform, isolation, network, verified_by: isolation === "verified" ? text(args.verified_by, "verified_by") : null, active: args.active !== false };
+        const conformance = args.conformance_id === undefined ? null : this.store.get("platform_execution_conformance", text(args.conformance_id, "conformance_id"), args.conformance_version === undefined ? undefined : Number(args.conformance_version));
+        if (conformance && (conformance.status !== "verified" || conformance.platform !== platform))
+            throw new Error("Execution profile conformance is not verified for this platform");
+        const item = { platform, isolation, network, verified_by: isolation === "verified" ? text(args.verified_by, "verified_by") : null, conformance: conformance ? { id: conformance.id, version: conformance.version } : null, active: args.active !== false };
         const existing = this.store.find("platform_execution_profile", profileId);
         const definitionDigest = digest(item);
         if (existing) {
@@ -24,6 +27,26 @@ export class PlatformExecutionKernel {
             return { profile: existing, idempotent: true };
         }
         return { profile: this.store.create("platform_execution_profile", profileId, { ...item, definition_digest: definitionDigest }), idempotent: false };
+    }
+    conformanceRecord(args) {
+        const platform = text(args.platform, "platform");
+        const verifier = text(args.verifier, "verifier");
+        const checks = args.checks;
+        if (!checks || typeof checks !== "object" || Array.isArray(checks))
+            throw new Error("checks must be an object");
+        const required = ["network_denied", "workspace_contained", "credentials_absent", "cancel_cleanup", "resource_limits"];
+        if (required.some((key) => checks[key] !== true))
+            throw new Error("Platform conformance requires every execution boundary check");
+        const identity = { platform, verifier, checks: required.map((key) => key) };
+        const conformanceId = String(args.conformance_id ?? `platform_execution_conformance_${platform}`);
+        const existing = this.store.find("platform_execution_conformance", conformanceId);
+        const conformanceDigest = digest(identity);
+        if (existing) {
+            if (existing.conformance_digest !== conformanceDigest)
+                throw new Error("Platform conformance idempotency conflict");
+            return { conformance: existing, idempotent: true };
+        }
+        return { conformance: this.store.create("platform_execution_conformance", conformanceId, { ...identity, conformance_digest: conformanceDigest, status: "verified" }), idempotent: false };
     }
     preflight(args) {
         const effect = text(args.effect, "effect");
@@ -34,6 +57,8 @@ export class PlatformExecutionKernel {
         const profile = args.profile_id === undefined ? null : this.store.get("platform_execution_profile", text(args.profile_id, "profile_id"));
         if (!profile || profile.active !== true || profile.platform !== platform || profile.isolation !== "verified" || profile.network !== "deny")
             throw new Error("Write effect requires an active verified network-denied platform boundary");
+        if (profile.conformance)
+            this.conformanceValidate(profile.conformance, platform);
         const identity = { profile_id: profile.id, profile_version: profile.version, platform, effect };
         const preflightId = String(args.preflight_id ?? `platform_preflight_${profile.id}_${effect}`);
         const existing = this.store.find("platform_execution_preflight", preflightId);
@@ -52,6 +77,8 @@ export class PlatformExecutionKernel {
         const requiredBoundary = JSON.stringify([true, true, "verified", "deny", preflight.platform]);
         if (observedBoundary !== requiredBoundary)
             throw new Error("Platform preflight is no longer valid");
+        if (profile.conformance)
+            this.conformanceValidate(profile.conformance, String(preflight.platform));
         return { preflight, profile, valid: true };
     }
     probe(args) {
@@ -70,5 +97,7 @@ export class PlatformExecutionKernel {
         return { probe: this.store.create("platform_execution_probe", probeId, { ...observed, probe_digest: probeDigest }), idempotent: false };
     }
     probeGet(args) { return { probe: this.store.get("platform_execution_probe", text(args.probe_id, "probe_id")) }; }
+    conformanceValidate(reference, platform) { const record = this.store.get("platform_execution_conformance", text(reference.id, "conformance.id"), Number(reference.version)); if (record.status !== "verified" || record.platform !== platform)
+        throw new Error("Platform conformance is no longer valid"); }
 }
 //# sourceMappingURL=platform-execution.js.map

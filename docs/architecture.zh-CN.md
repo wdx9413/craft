@@ -87,4 +87,4 @@ v0.7.0 已实现 Experience Pattern、Skill Proposal 和受控 Publisher；v0.8.
 
 ## 当前边界
 
-当前版本已提供 Provider 模式的核心/完整 MCP 路径、Capability Asset Registry、任务/证据、确定性 Workflow、可续接默认编排、受限诊断 Sub-agent、受控确定性 Driver、Runtime Adapter 契约、程序化晋级评测、配对可靠性检查、Agent IR 编译/Lowering，以及将一个 Contract、Work Launch、Host 回执、验收和 Delivery Loop 收敛为单一下一动作的 Task Control。Codex 与 Claude 插件使用不依赖 `node_modules` 的单文件 MCP bundle。真实容器/Windows 隔离 Adapter、外部短期凭据 Broker、自动模型/业务 Grader 执行、真实业务金标、远程 Hub/A2A、桌面端、预算预估和通用补偿事务是后续增量，不应在文档中被描述成已完成。
+当前版本已提供 Provider 模式的核心/完整 MCP 路径、Capability Asset Registry、任务/证据、确定性 Workflow、可续接默认编排、受限诊断 Sub-agent、受控确定性 Driver、Runtime Adapter 契约、程序化晋级评测、配对可靠性检查、Agent IR 编译/Lowering、Task Control，以及将一次真实 Host 工作固定为 Task Run Manifest 的受控恢复路径。平台 Conformance 可固定 verifier 提交的边界检查，Task Benchmark 可将已观察交付汇聚为 held-out 候选；两者都不等于自动安全执行或业务效果。Codex 与 Claude 插件使用不依赖 `node_modules` 的单文件 MCP bundle。真实容器/Windows 隔离 Adapter、外部短期凭据 Broker、自动模型/业务 Grader 执行、真实业务金标、远程 Hub/A2A、桌面端、预算预估和通用补偿事务是后续增量，不应在文档中被描述成已完成。

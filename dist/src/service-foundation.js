@@ -45,6 +45,8 @@ import { DeliveryEvaluationKernel } from "./delivery-evaluation.js";
 import { PlatformExecutionKernel } from "./platform-execution.js";
 import { DeliveryLoopKernel } from "./delivery-loop.js";
 import { TaskControlKernel } from "./task-control.js";
+import { TaskRunKernel } from "./task-run.js";
+import { TaskBenchmarkKernel } from "./task-benchmark.js";
 /**
  * Stable composition root for the service. Domain behavior stays in focused
  * kernels; CraftService is the backwards-compatible API facade.
@@ -97,6 +99,8 @@ export class ServiceFoundation {
     platformExecution;
     deliveryLoop;
     taskControl;
+    taskRuns;
+    taskBenchmarks;
     constructor(store, semanticProvider, isolatedAdapter = new LocalIsolatedAdapter(), dockerSandbox = new DockerSandboxAdapter(), egressBroker = new TrustedEgressBroker(), hostOwnerId) {
         this.store = store;
         this.catalog = new Catalog(store, semanticProvider);
@@ -144,6 +148,8 @@ export class ServiceFoundation {
         this.platformExecution = new PlatformExecutionKernel(store);
         this.deliveryLoop = new DeliveryLoopKernel(store, this.workDelivery);
         this.taskControl = new TaskControlKernel(store, this.deliveryLoop);
+        this.taskRuns = new TaskRunKernel(store);
+        this.taskBenchmarks = new TaskBenchmarkKernel(store, this.deliveryEvaluation);
         this.hostRuns = new HostRunKernel(store, [this.codexHost, this.claudeHost], hostOwnerId, (run, receipt) => this.finalizeWorkLaunch(run, receipt));
     }
 }

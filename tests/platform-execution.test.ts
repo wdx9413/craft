@@ -21,3 +21,22 @@ test("platform execution permits portable reads and fails closed for writes with
     assert.throws(() => service.platformExecutionProfileSave({ profile_id: "bad", platform: "x", isolation: "bad", network: "deny" }), /unsupported/); assert.throws(() => service.platformExecutionProfileSave({ profile_id: "unverified", platform: "x", isolation: "verified", network: "deny" }), /verified_by/); assert.throws(() => service.platformExecutionPreflight({ platform: "darwin", effect: "local_write", profile_id: verified.id }), /verified/); assert.throws(() => service.platformExecutionPreflight({ platform: "win32", effect: "local_write", profile_id: "missing" }), /Unknown/); assert.throws(() => service.platformExecutionProfileSave({ profile_id: "verified", platform: "win32", isolation: "verified", network: "allow", verified_by: "probe" }), /conflict/); assert.throws(() => service.platformExecutionPreflight({ platform: " ", effect: "read_only" }), /platform/);
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
+
+test("platform conformance binds verifier evidence to a profile without treating a health probe as proof", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-platform-conformance-")); const store = await new CraftStore(craftPaths(root)).open(); const service = new CraftService(store);
+  try {
+    const checks = { network_denied: true, workspace_contained: true, credentials_absent: true, cancel_cleanup: true, resource_limits: true };
+    const conformance = service.platformExecutionConformanceRecord({ conformance_id: "darwin", platform: "darwin", verifier: "conformance-suite", checks }).conformance as JsonObject;
+    assert.equal(service.platformExecutionConformanceRecord({ conformance_id: "darwin", platform: "darwin", verifier: "conformance-suite", checks }).idempotent, true);
+    assert.equal(((await new McpServer(service, "full").handlers.craft_platform_execution_conformance_record({ conformance_id: "mcp", platform: "linux", verifier: "conformance-suite", checks })).conformance as JsonObject).id, "mcp");
+    assert.throws(() => service.platformExecutionConformanceRecord({ conformance_id: "darwin", platform: "darwin", verifier: "other-suite", checks }), /conflict/);
+    const implicit = service.platformExecutionConformanceRecord({ platform: "win32", verifier: "conformance-suite", checks }).conformance as JsonObject;
+    assert.equal((service.platformExecutionProfileSave({ profile_id: "implicit", platform: "win32", isolation: "verified", network: "deny", verified_by: "conformance-suite", conformance_id: implicit.id }).profile as JsonObject).conformance instanceof Object, true);
+    const profile = service.platformExecutionProfileSave({ profile_id: "bound", platform: "darwin", isolation: "verified", network: "deny", verified_by: "conformance-suite", conformance_id: conformance.id, conformance_version: conformance.version }).profile as JsonObject;
+    const preflight = service.platformExecutionPreflight({ platform: "darwin", effect: "local_write", profile_id: profile.id }).preflight as JsonObject; assert.equal(service.platformExecution.validate({ preflight_id: preflight.id }).valid, true);
+    assert.throws(() => service.platformExecutionConformanceRecord({ platform: "darwin", verifier: "bad", checks: { ...checks, network_denied: false } }), /every/);
+    assert.throws(() => service.platformExecutionConformanceRecord({ platform: "darwin", verifier: "bad", checks: [] }), /object/);
+    assert.throws(() => service.platformExecutionProfileSave({ profile_id: "wrong", platform: "win32", isolation: "verified", network: "deny", verified_by: "x", conformance_id: conformance.id }), /platform/);
+    const invalid = store.create("platform_execution_conformance", "invalid", { platform: "darwin", status: "invalid" }); const invalidProfile = store.create("platform_execution_profile", "invalid-profile", { platform: "darwin", active: true, isolation: "verified", network: "deny", conformance: { id: invalid.id, version: invalid.version } }); store.create("platform_execution_preflight", "invalid-preflight", { profile_id: invalidProfile.id, profile_version: invalidProfile.version, platform: "darwin", effect: "local_write", allowed: true }); assert.throws(() => service.platformExecution.validate({ preflight_id: "invalid-preflight" }), /no longer valid/);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});

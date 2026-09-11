@@ -15,7 +15,7 @@ import { decideExecution } from "./execution-policy.js";
 import { dockerRequestDigest } from "./docker-sandbox.js";
 import { egressRequestDigest } from "./egress.js";
 import { ServiceFoundation } from "./service-foundation.js";
-export const VERSION = "0.11.47";
+export const VERSION = "0.11.50";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -231,7 +231,7 @@ export class CraftService extends ServiceFoundation {
             "supply_chain_advisory",
             "maintenance_status",
             "maintenance_tick",
-            "maintenance_component", "maintenance_failure", "attention_item", "work_launch", "work_delivery", "delivery_loop", "delivery_evaluation_case", "delivery_evaluation_comparison", "delivery_evaluation_run", "platform_execution_profile", "platform_execution_preflight", "platform_execution_probe", "acceptance_plan", "acceptance_check", "acceptance_assessment", "acceptance_evaluator", "acceptance_evaluation_job", "verified_iteration", "iteration_attempt", "strategy_recommendation",
+            "maintenance_component", "maintenance_failure", "attention_item", "work_launch", "work_delivery", "delivery_loop", "delivery_evaluation_case", "delivery_evaluation_comparison", "delivery_evaluation_run", "platform_execution_profile", "platform_execution_preflight", "platform_execution_probe", "platform_execution_conformance", "task_run", "task_run_state", "task_run_handoff", "task_benchmark", "task_benchmark_pair", "acceptance_plan", "acceptance_check", "acceptance_assessment", "acceptance_evaluator", "acceptance_evaluation_job", "verified_iteration", "iteration_attempt", "strategy_recommendation",
             "trajectory_script_proposal", "verified_script_run", "knowledge_claim", "wiki_page", "knowledge_relation", "wiki_context_bundle", "wiki_skill_candidate", "knowledge_evaluation_case", "knowledge_evaluation_run", "wiki_candidate_evaluation_attestation", "wiki_candidate_publication_authorization", "wiki_candidate_publication_package", "guided_work_brief", "execution_safety_preflight", "wiki_candidate_local_import"];
         kinds.push("untrusted_content", "untrusted_extraction", "decision_projection");
         return { version: VERSION, data_root: this.store.paths.root,
@@ -2471,6 +2471,7 @@ export class CraftService extends ServiceFoundation {
         if (status === "pending") {
             this.deliveryLoop.refresh({ launch_id: plan.launch_id });
             this.refreshTaskControlForLaunch(plan.launch_id);
+            this.refreshTaskRunForLaunch(plan.launch_id);
             return { assessment, outcome: null };
         }
         const evidenceIds = [...new Set([...latest.values()].flatMap((item) => item.evidence_ids))];
@@ -2478,12 +2479,14 @@ export class CraftService extends ServiceFoundation {
         if (existing) {
             this.deliveryLoop.refresh({ launch_id: plan.launch_id });
             this.refreshTaskControlForLaunch(plan.launch_id);
+            this.refreshTaskRunForLaunch(plan.launch_id);
             return { assessment, outcome: existing };
         }
         this.trialTraceAppend({ trial_id: plan.trial_id, event_type: `acceptance.${status}`, source: "craft_runtime", data: { assessment_id: assessment.id, checked: latest.size, total: criteria.length }, evidence_ids: evidenceIds });
         const outcome = this.outcomeRecord({ trial_id: plan.trial_id, verdict: status === "passed" ? "passed" : status === "blocked" ? "blocked" : "failed", summary: `Business acceptance ${status}.`, failure_type: status === "passed" ? undefined : `acceptance_${status}`, scores: { required_pass_rate: required.length ? (required.length - failed.length - blocked.length) / required.length : 1 }, costs: {}, evidence_ids: evidenceIds, source: "multi_method_acceptance" });
         this.deliveryLoop.refresh({ launch_id: plan.launch_id });
         this.refreshTaskControlForLaunch(plan.launch_id);
+        this.refreshTaskRunForLaunch(plan.launch_id);
         return { assessment, outcome };
     }
     verifiedIterationCreate(args) {
@@ -2922,10 +2925,43 @@ export class CraftService extends ServiceFoundation {
     taskControlRefresh(args) { return this.taskControl.refresh(args); }
     taskControlGet(args) { return this.taskControl.get(args); }
     taskControlHandoff(args) { return this.taskControl.handoff(args); }
+    taskRunPrepare(args) {
+        const contract = this.store.get("task_control_contract", text(args.contract_id, "contract_id"));
+        if (contract.launch_id !== null)
+            throw new Error("Task Control contract is already bound to a Work Launch");
+        const prepared = this.workLaunchPrepare({ ...args, task_id: contract.task_id, workspace: contract.workspace });
+        const launch = prepared.launch;
+        this.taskControlBindLaunch({ contract_id: contract.id, launch_id: launch.id });
+        const taskRun = this.taskRuns.create({ task_run_id: args.task_run_id, contract_id: contract.id, launch_id: launch.id, environment: args.environment, budget: args.budget });
+        return { ...prepared, task_run: taskRun.run, task_run_idempotent: taskRun.idempotent };
+    }
+    taskRunRefresh(args) { return this.taskRuns.refresh(args); }
+    taskRunGet(args) { return this.taskRuns.get(args); }
+    taskRunPause(args) { return this.taskRuns.pause(args); }
+    taskRunResume(args) { return this.taskRuns.resume(args); }
+    taskRunHandoff(args) { return this.taskRuns.handoff(args); }
+    taskRunCancel(args) {
+        const run = this.store.get("task_run", text(args.task_run_id, "task_run_id"));
+        const launch = this.store.get("work_launch", String(run.launch_id));
+        if (launch.run_id) {
+            const host = this.store.get("host_run", String(launch.run_id));
+            if (!new Set(["completed", "failed", "cancelled", "interrupted"]).has(String(host.status)))
+                this.hostRunCancel({ run_id: host.id, reason: args.reason });
+        }
+        return this.taskRuns.cancel(args);
+    }
+    taskBenchmarkCreate(args) { return this.taskBenchmarks.create(args); }
+    taskBenchmarkEvaluate(args) { return this.taskBenchmarks.evaluate(args); }
+    taskBenchmarkAggregate(args) { return this.taskBenchmarks.aggregate(args); }
+    taskBenchmarkCandidatePropose(args) { return this.taskBenchmarks.candidatePropose(args); }
+    taskBenchmarkCandidateAuthorizeCanary(args) { return this.taskBenchmarks.candidateAuthorizeCanary(args); }
+    taskBenchmarkCandidateCanaryStart(args) { return this.taskBenchmarks.candidateCanaryStart(args); }
+    taskBenchmarkCandidateCanaryObserve(args) { return this.taskBenchmarks.candidateCanaryObserve(args); }
     deliveryEvaluationCaseSave(args) { return this.deliveryEvaluation.caseSave(args); }
     deliveryEvaluationCompare(args) { return this.deliveryEvaluation.compare(args); }
     deliveryEvaluationRun(args) { return this.deliveryEvaluation.run(args); }
     platformExecutionProfileSave(args) { return this.platformExecution.profileSave(args); }
+    platformExecutionConformanceRecord(args) { return this.platformExecution.conformanceRecord(args); }
     platformExecutionPreflight(args) { return this.platformExecution.preflight(args); }
     platformExecutionProbe(args) { return this.platformExecution.probe(args); }
     platformExecutionProbeGet(args) { return this.platformExecution.probeGet(args); }
@@ -2952,9 +2988,12 @@ export class CraftService extends ServiceFoundation {
         this.outcomeRecord({ trial_id: launch.trial_id, verdict, summary: `Host execution ${run.status}.`, failure_type: verdict === "passed" ? undefined : run.error_class ?? `host_${run.status}`, scores: { host_execution_success: verdict === "passed" ? 1 : 0 }, costs, evidence_ids: [evidence.id], source: "program_verified", ...(launch.knowledge_binding === undefined ? {} : { knowledge_binding: launch.knowledge_binding }) });
         this.deliveryLoop.refresh({ launch_id: launch.id });
         this.refreshTaskControlForLaunch(launch.id);
+        this.refreshTaskRunForLaunch(launch.id);
     }
     refreshTaskControlForLaunch(launchId) { for (const contract of this.store.list("task_control_contract", 10_000, (item) => item.launch_id === launchId))
         this.taskControl.refresh({ contract_id: contract.id }); }
+    refreshTaskRunForLaunch(launchId) { for (const taskRun of this.store.list("task_run", 10_000, (item) => item.launch_id === launchId))
+        this.taskRuns.refresh({ task_run_id: taskRun.id }); }
     effectTrace(effect, eventType) {
         if (effect.trial_id)
             this.trialTraceAppend({ trial_id: effect.trial_id, event_type: eventType, source: "craft",

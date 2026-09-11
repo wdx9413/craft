@@ -37,7 +37,8 @@ export class HomeKernel {
             generated_at: now,
             summary: { active_tasks: tasks.filter((item) => item.status === "active").length, workspaces: workspaces.length,
                 attention: attention.length, active_runs: activeRuns.length, active_budgets: budgets.length,
-                active_task_controls: this.store.list("task_control_contract", 10_000, (item) => item.status === "active").length, health: maintenance?.status ?? "not_started" },
+                active_task_controls: this.store.list("task_control_contract", 10_000, (item) => item.status === "active").length,
+                active_task_runs: this.store.list("task_run", 10_000, (item) => item.lifecycle === "active").length, health: maintenance?.status ?? "not_started" },
             attention: attention.map((item) => pick(item, ["id", "audience", "priority", "reason", "action", "task_id", "source_kind", "source_id", "status", "deferred_until"])),
             work_launches: this.store.list("work_launch", limit).map((item) => {
                 const loop = this.store.find("delivery_loop", `delivery_loop_${item.id}`);
@@ -46,6 +47,7 @@ export class HomeKernel {
                     acceptance_status: item.acceptance_plan_id ? this.store.find("acceptance_assessment", `assessment_${item.acceptance_plan_id}`)?.status ?? "pending" : "not_configured", delivery_status: loop?.delivery_status ?? "not_materialized", delivery_action: loop?.action ?? "refresh_delivery_loop" };
             }),
             task_controls: this.store.list("task_control_contract", limit).map((item) => { const state = this.store.find("task_control_state", `task_control_state_${item.id}`); return { ...pick(item, ["id", "task_id", "workspace", "allowed_effects", "acceptance_required", "launch_id", "updated_at"]), status: state?.status ?? "not_refreshed", action: state?.action ?? "refresh_task_control", actor: state?.actor ?? "host" }; }),
+            task_runs: this.store.list("task_run", limit).map((item) => { const state = this.store.find("task_run_state", `task_run_state_${item.id}`); return { ...pick(item, ["id", "contract_id", "launch_id", "lifecycle", "updated_at"]), status: state?.status ?? "not_refreshed", action: state?.action ?? "refresh_task_run", actor: state?.actor ?? "host" }; }),
             tasks: tasks.slice(0, limit).map((item) => pick(item, ["id", "title", "goal", "status", "updated_at"])),
             workspaces: workspaces.slice(0, limit).map((item) => ({ ...pick(item, ["id", "name", "root", "state_revision", "updated_at"]),
                 object_count: this.store.list("work_object", 10_000, (object) => object.workspace_id === item.id).length })),

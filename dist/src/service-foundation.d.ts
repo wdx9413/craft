@@ -46,6 +46,8 @@ import { DeliveryEvaluationKernel } from "./delivery-evaluation.ts";
 import { PlatformExecutionKernel } from "./platform-execution.ts";
 import { DeliveryLoopKernel } from "./delivery-loop.ts";
 import { TaskControlKernel } from "./task-control.ts";
+import { TaskRunKernel } from "./task-run.ts";
+import { TaskBenchmarkKernel } from "./task-benchmark.ts";
 /**
  * Stable composition root for the service. Domain behavior stays in focused
  * kernels; CraftService is the backwards-compatible API facade.
@@ -98,6 +100,8 @@ export declare abstract class ServiceFoundation {
     readonly platformExecution: PlatformExecutionKernel;
     readonly deliveryLoop: DeliveryLoopKernel;
     readonly taskControl: TaskControlKernel;
+    readonly taskRuns: TaskRunKernel;
+    readonly taskBenchmarks: TaskBenchmarkKernel;
     constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter?: LocalIsolatedAdapter, dockerSandbox?: DockerSandboxAdapter, egressBroker?: TrustedEgressBroker, hostOwnerId?: string);
     protected abstract finalizeWorkLaunch(run: JsonObject, receipt: JsonObject | null): void;
 }

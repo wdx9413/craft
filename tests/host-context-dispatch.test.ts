@@ -42,6 +42,6 @@ test("validated capability context is bound to Codex and Claude dispatches", asy
     await writeFile(join(sourcePath, "SKILL.md"), `${skill}\nChanged.`);
     await assert.rejects(service.capabilityContextDispatchExecute({ host: "codex-cli", dispatch_id: codexDispatch.id, prompt: common.prompt }), /digest drifted/);
     await service.sourceScan({ source_id: source.id });
-    assert.equal(VERSION, "0.11.47");
+    assert.equal(VERSION, "0.11.50");
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });

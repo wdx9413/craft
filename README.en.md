@@ -1,6 +1,6 @@
 # Craft
 
-> Current release: v0.11.47. The latest release turns a pinned task contract, Host receipts, independent acceptance, and the delivery loop into one recoverable, auditable task-control surface.
+> Current release: v0.11.50. The latest release connects real Task Runs, platform-boundary conformance, and gated Benchmark candidates to the existing task, acceptance, and delivery loop.
 
 [中文](README.md) | [English](README.en.md)
 

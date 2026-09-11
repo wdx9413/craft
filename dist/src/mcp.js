@@ -5,19 +5,19 @@ const schemaFor = (name) => {
         return { type: "boolean" };
     if (["limit", "version", "capacity", "max_concurrency", "size_bytes", "subject_version", "expected_version", "max_candidates",
         "suite_version", "configuration_version", "harness_configuration_version", "target_version", "profile_version",
-        "grader_version", "policy_version", "signoff_policy_version", "lease_ttl_seconds", "ttl_seconds", "trials_per_case", "window_size", "max_attempts", "min_trials", "harness_version", "ir_version", "runtime_adapter_version", "agreed", "total", "expected_state_revision", "max_chars", "max_items", "timeout_ms", "output_limit", "max_turns", "after_sequence", "context_profile_version", "activation_profile_version", "budget_account_version", "contract_version"].includes(name))
+        "grader_version", "policy_version", "signoff_policy_version", "lease_ttl_seconds", "ttl_seconds", "trials_per_case", "window_size", "max_attempts", "min_trials", "harness_version", "ir_version", "runtime_adapter_version", "agreed", "total", "expected_state_revision", "max_chars", "max_items", "timeout_ms", "output_limit", "max_turns", "after_sequence", "context_profile_version", "activation_profile_version", "budget_account_version", "contract_version", "conformance_version"].includes(name))
         return { type: "integer" };
     if (["score", "value", "threshold", "min_pass_rate_delta", "max_cost_regression_ratio", "max_duration_regression_ratio", "max_budget_ratio", "baseline", "candidate", "minimum_agreement", "max_budget_usd"].includes(name))
         return { type: "number" };
     if (["input", "inputs", "metadata", "policy", "dimensions", "environment", "budget", "data", "scores",
         "costs", "metrics", "configuration", "receipt_requirements", "execution", "rules", "authorization_requests", "notification_refs", "cost_hint", "design_axes", "report",
         "limits", "resources", "actual", "actual_resources", "estimated_resources", "observation", "trial_budget", "policy_fingerprints", "structured_data", "field_sources",
-        "capabilities", "observed_capabilities", "requirements", "output", "transform", "entity", "values", "budget_limits", "sandbox_requirements", "eval_suite_ref"].includes(name))
+        "capabilities", "observed_capabilities", "requirements", "output", "transform", "entity", "values", "budget_limits", "sandbox_requirements", "eval_suite_ref", "checks"].includes(name))
         return { type: "object" };
     if (["completed", "pending", "decisions", "artifacts", "steps", "cases", "capabilities",
         "allowed_side_effects", "approved_side_effects", "nodes", "artifact_ids", "evidence_ids",
         "trial_ids", "requirements", "grade_ids", "pattern_ids", "failure_modes", "receipt_ids", "criteria", "acceptance_criteria", "allowed_extensions", "fields", "capability_requirements", "object_schemas", "components", "action_contracts", "tags", "claim_ids", "evidence_ids", "expected_claim_ids", "case_ids",
-        "allowed_operations", "allowed_effects", "require_approval_for", "operations", "subjects", "children", "trusted_hosts", "command_allowlist", "path_allowlist", "kinds", "effects", "allowed_kinds", "dependencies", "aliases", "artifact_ids", "final_artifact_ids", "evidence_ids", "output_contract", "trial_ids", "include_paths", "affected_paths", "object_ids", "depends_on", "source_paths", "applies_to", "patches", "snapshot_refs", "triggers", "allowed_hosts", "allowed_actions", "approval_required_actions", "detected_instructions", "citations", "allowed_fields", "argv", "sources", "budget_ids", "recovery_item_ids", "memory_kinds", "object_types", "required_memory_ids", "required_object_ids"].includes(name))
+        "allowed_operations", "allowed_effects", "require_approval_for", "operations", "subjects", "children", "trusted_hosts", "command_allowlist", "path_allowlist", "kinds", "effects", "allowed_kinds", "dependencies", "aliases", "artifact_ids", "final_artifact_ids", "evidence_ids", "output_contract", "trial_ids", "include_paths", "affected_paths", "object_ids", "depends_on", "source_paths", "applies_to", "patches", "snapshot_refs", "triggers", "allowed_hosts", "allowed_actions", "approval_required_actions", "detected_instructions", "citations", "allowed_fields", "argv", "sources", "budget_ids", "recovery_item_ids", "memory_kinds", "object_types", "required_memory_ids", "required_object_ids", "benchmark_ids"].includes(name))
         return { type: "array" };
     return { type: "string" };
 };
@@ -89,6 +89,20 @@ export const TOOLS = [
     tool("craft_task_control_refresh", "Materialize the current Task Control status and its one safe next action from observed facts.", ["contract_id"], false),
     tool("craft_task_control_get", "Read a Task Control contract, latest state, delivery loop, and content-free handoffs.", ["contract_id"], true),
     tool("craft_task_control_handoff", "Create a content-free, resumable Task Control handoff without storing prompts or business data.", ["contract_id", "reason"], false, ["handoff_id"]),
+    tool("craft_task_run_prepare", "Bind one exact Work Launch to its Task Control contract and create a durable Task Run manifest. Read-only launches may start through the existing Host path; writes still await approval.", ["contract_id", "host", "workspace", "prompt"], false, ["task_run_id", "sandbox", "model", "timeout_ms", "output_limit", "max_turns", "max_budget_usd", "acceptance_name", "acceptance_criteria", "environment", "budget"]),
+    tool("craft_task_run_refresh", "Re-observe one Task Run and return its only safe next action; environment or budget drift enters needs_replan.", ["task_run_id"], false, ["environment", "budget"]),
+    tool("craft_task_run_get", "Read a Task Run, its latest state, and content-free handoffs.", ["task_run_id"], true),
+    tool("craft_task_run_pause", "Pause one Task Run without dispatching or changing its Host permissions.", ["task_run_id", "reason"]),
+    tool("craft_task_run_resume", "Resume a paused Task Run only after re-observing optional environment and budget inputs.", ["task_run_id"], false, ["environment", "budget"]),
+    tool("craft_task_run_cancel", "Cancel a locally owned live Host Run when possible, then mark the Task Run cancelled.", ["task_run_id", "reason"]),
+    tool("craft_task_run_handoff", "Create a content-free Task Run handoff with its current resume action.", ["task_run_id", "reason"], false, ["handoff_id"]),
+    tool("craft_task_benchmark_create", "Pair two observed Task Runs for one sanitized evaluation Case; it does not start hidden Hosts.", ["case_id", "baseline_task_run_id", "candidate_task_run_id"], false, ["benchmark_id"]),
+    tool("craft_task_benchmark_evaluate", "Materialize a pair comparison only after both Task Runs have immutable deliveries.", ["benchmark_id"]),
+    tool("craft_task_benchmark_aggregate", "Aggregate comparable Task Benchmark pairs into an existing held-out delivery evaluation recommendation.", ["benchmark_ids"], false, ["run_id", "min_trials"]),
+    tool("craft_task_benchmark_candidate_propose", "Create a digest-only candidate from an eligible held-out benchmark; it cannot publish or route by itself.", ["evaluation_run_id", "summary", "candidate_axes"], false, ["candidate_id"]),
+    tool("craft_task_benchmark_candidate_authorize_canary", "Allow an eligible Task Benchmark candidate into Canary only after an existing passed Signoff.", ["candidate_id", "signoff_id"]),
+    tool("craft_task_benchmark_candidate_canary_start", "Start an observation-only Canary at the exact evaluated environment and budget; it cannot publish.", ["candidate_id", "baseline_id"], false, ["canary_id", "environment", "budget"]),
+    tool("craft_task_benchmark_candidate_canary_observe", "Record an aggregate Canary observation and return an exact baseline rollback reference on quality regression.", ["canary_id", "baseline_quality", "candidate_quality"], false, ["regression_threshold"]),
     tool("craft_codex_dispatch_prepare", "Prepare an exact, digest-bound Codex CLI dispatch. The prompt is not persisted and workspace writes still require Craft authorization.", ["task_id", "workspace", "prompt"], false, ["dispatch_id", "sandbox", "model", "timeout_ms", "output_limit"]),
     tool("craft_codex_dispatch_execute", "Execute a prepared Codex CLI dispatch with shell disabled, bounded JSONL capture, and a durable receipt.", ["dispatch_id", "prompt"], false, ["authorization_request_id", "notification_ref", "now"]),
     tool("craft_claude_dispatch_prepare", "Prepare an exact Claude Code dispatch with bounded turns, optional cost cap, and a restricted tool set.", ["task_id", "workspace", "prompt"], false, ["dispatch_id", "sandbox", "model", "max_turns", "max_budget_usd", "timeout_ms", "output_limit"]),
@@ -111,6 +125,7 @@ export const TOOLS = [
     tool("craft_delivery_evaluation_compare", "Compare two observed deliveries under one explicit environment and budget fingerprint. It never promotes a candidate.", ["case_id", "baseline_delivery_id", "candidate_delivery_id", "environment_fingerprint", "budget_fingerprint"], false, ["comparison_id"]),
     tool("craft_delivery_evaluation_run", "Aggregate explicit delivery comparisons under one environment and budget. It can recommend Signoff but never promotes.", ["environment_fingerprint", "budget_fingerprint", "items"], false, ["run_id", "min_trials"]),
     tool("craft_platform_execution_profile_save", "Register one platform execution boundary; only verified network-denied boundaries may authorize writes.", ["profile_id", "platform", "isolation", "network"], false, ["verified_by", "active"]),
+    tool("craft_platform_execution_conformance_record", "Record a verifier-attributed platform boundary conformance result. It does not execute probes or create a sandbox.", ["platform", "verifier", "checks"], false, ["conformance_id"]),
     tool("craft_platform_execution_preflight", "Check whether a requested effect is portable read-only or bound to an exact verified platform boundary.", ["platform", "effect"], false, ["profile_id", "preflight_id"]),
     tool("craft_platform_execution_probe", "Record actual local platform health only; it never certifies a security boundary.", [], false, ["platform", "probe_id"]),
     tool("craft_platform_execution_probe_get", "Read one local platform health probe receipt.", ["probe_id"], true),
@@ -426,7 +441,7 @@ export const TOOLS = [
     tool("craft_canary_observe", "Observe a canary metric and roll back on a configured regression.", ["canary_id", "metric", "baseline", "candidate", "threshold"], false),
 ];
 const CORE_TOOL_NAMES = new Set(["craft_info", "craft_source_list", "craft_capability_search", "craft_capability_get", "craft_semantic_status", "craft_execution_policy_decide",
-    "craft_default_route", "craft_default_route_resume", "craft_default_route_find", "craft_task_open", "craft_task_list", "craft_task_checkpoint", "craft_task_control_refresh", "craft_task_control_get", "craft_work_launch_get", "craft_work_delivery_observe", "craft_work_delivery_get", "craft_delivery_loop_refresh", "craft_delivery_loop_get", "craft_delivery_evaluation_compare", "craft_delivery_evaluation_run", "craft_platform_execution_preflight", "craft_platform_execution_probe", "craft_platform_execution_probe_get", "craft_workspace_get", "craft_workspace_diff", "craft_work_object_list", "craft_workspace_impact", "craft_context_assemble", "craft_change_set_preview",
+    "craft_default_route", "craft_default_route_resume", "craft_default_route_find", "craft_task_open", "craft_task_list", "craft_task_checkpoint", "craft_task_control_refresh", "craft_task_control_get", "craft_task_run_refresh", "craft_task_run_get", "craft_work_launch_get", "craft_work_delivery_observe", "craft_work_delivery_get", "craft_delivery_loop_refresh", "craft_delivery_loop_get", "craft_delivery_evaluation_compare", "craft_delivery_evaluation_run", "craft_platform_execution_preflight", "craft_platform_execution_probe", "craft_platform_execution_probe_get", "craft_workspace_get", "craft_workspace_diff", "craft_work_object_list", "craft_workspace_impact", "craft_context_assemble", "craft_change_set_preview",
     "craft_artifact_register", "craft_evidence_record", "craft_capability_access_plan", "craft_capability_call_issue", "craft_capability_call_consume"]);
 export const CORE_TOOLS = TOOLS.filter((tool) => CORE_TOOL_NAMES.has(tool.name));
 export class McpServer {
@@ -484,6 +499,8 @@ export class McpServer {
             craft_task_checkpoint: (a) => service.taskCheckpoint(a), craft_feedback_record: (a) => service.feedbackRecord(a),
             craft_task_control_save: (a) => service.taskControlSave(a), craft_task_control_bind_launch: (a) => service.taskControlBindLaunch(a),
             craft_task_control_refresh: (a) => service.taskControlRefresh(a), craft_task_control_get: (a) => service.taskControlGet(a), craft_task_control_handoff: (a) => service.taskControlHandoff(a),
+            craft_task_run_prepare: (a) => service.taskRunPrepare(a), craft_task_run_refresh: (a) => service.taskRunRefresh(a), craft_task_run_get: (a) => service.taskRunGet(a),
+            craft_task_run_pause: (a) => service.taskRunPause(a), craft_task_run_resume: (a) => service.taskRunResume(a), craft_task_run_cancel: (a) => service.taskRunCancel(a), craft_task_run_handoff: (a) => service.taskRunHandoff(a),
             craft_workspace_open: (a) => service.workspaceOpen(a), craft_workspace_get: (a) => service.workspaceGet(a),
             craft_workspace_checkpoint: (a) => service.workspaceCheckpoint(a), craft_workspace_diff: (a) => service.workspaceDiff(a),
             craft_workspace_human_change: (a) => service.workspaceHumanChange(a), craft_workspace_restore: (a) => service.workspaceRestore(a),
@@ -541,7 +558,8 @@ export class McpServer {
             craft_work_delivery_observe: (a) => service.workDeliveryObserve(a), craft_work_delivery_get: (a) => service.workDeliveryGet(a),
             craft_delivery_loop_refresh: (a) => service.deliveryLoopRefresh(a), craft_delivery_loop_get: (a) => service.deliveryLoopGet(a),
             craft_delivery_evaluation_case_save: (a) => service.deliveryEvaluationCaseSave(a), craft_delivery_evaluation_compare: (a) => service.deliveryEvaluationCompare(a), craft_delivery_evaluation_run: (a) => service.deliveryEvaluationRun(a),
-            craft_platform_execution_profile_save: (a) => service.platformExecutionProfileSave(a), craft_platform_execution_preflight: (a) => service.platformExecutionPreflight(a),
+            craft_task_benchmark_create: (a) => service.taskBenchmarkCreate(a), craft_task_benchmark_evaluate: (a) => service.taskBenchmarkEvaluate(a), craft_task_benchmark_aggregate: (a) => service.taskBenchmarkAggregate(a), craft_task_benchmark_candidate_propose: (a) => service.taskBenchmarkCandidatePropose(a), craft_task_benchmark_candidate_authorize_canary: (a) => service.taskBenchmarkCandidateAuthorizeCanary(a), craft_task_benchmark_candidate_canary_start: (a) => service.taskBenchmarkCandidateCanaryStart(a), craft_task_benchmark_candidate_canary_observe: (a) => service.taskBenchmarkCandidateCanaryObserve(a),
+            craft_platform_execution_profile_save: (a) => service.platformExecutionProfileSave(a), craft_platform_execution_conformance_record: (a) => service.platformExecutionConformanceRecord(a), craft_platform_execution_preflight: (a) => service.platformExecutionPreflight(a),
             craft_platform_execution_probe: (a) => service.platformExecutionProbe(a), craft_platform_execution_probe_get: (a) => service.platformExecutionProbeGet(a),
             craft_execution_safety_preflight: (a) => service.executionSafetyPreflight(a),
             craft_execution_safety_get: (a) => service.executionSafetyGet(a),

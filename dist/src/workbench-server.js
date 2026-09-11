@@ -102,6 +102,20 @@ export class WorkbenchWebApp {
                 return json(200, this.service.taskControlBindLaunch({ ...bodyObject(request.body), contract_id: decodeURIComponent(path.slice(19, -12)) }));
             if (request.method === "POST" && path.startsWith("/api/task-controls/") && path.endsWith("/handoff"))
                 return json(201, this.service.taskControlHandoff({ ...bodyObject(request.body), contract_id: decodeURIComponent(path.slice(19, -8)) }));
+            if (request.method === "POST" && path === "/api/task-runs")
+                return json(201, this.service.taskRunPrepare(bodyObject(request.body)));
+            if (request.method === "GET" && path.startsWith("/api/task-runs/"))
+                return json(200, this.service.taskRunGet({ task_run_id: decodeURIComponent(path.slice(15)) }));
+            if (request.method === "POST" && path.startsWith("/api/task-runs/") && path.endsWith("/refresh"))
+                return json(200, this.service.taskRunRefresh({ ...bodyObject(request.body), task_run_id: decodeURIComponent(path.slice(15, -8)) }));
+            if (request.method === "POST" && path.startsWith("/api/task-runs/") && path.endsWith("/pause"))
+                return json(200, this.service.taskRunPause({ ...bodyObject(request.body), task_run_id: decodeURIComponent(path.slice(15, -6)) }));
+            if (request.method === "POST" && path.startsWith("/api/task-runs/") && path.endsWith("/resume"))
+                return json(200, this.service.taskRunResume({ ...bodyObject(request.body), task_run_id: decodeURIComponent(path.slice(15, -7)) }));
+            if (request.method === "POST" && path.startsWith("/api/task-runs/") && path.endsWith("/cancel"))
+                return json(200, this.service.taskRunCancel({ ...bodyObject(request.body), task_run_id: decodeURIComponent(path.slice(15, -7)) }));
+            if (request.method === "POST" && path.startsWith("/api/task-runs/") && path.endsWith("/handoff"))
+                return json(201, this.service.taskRunHandoff({ ...bodyObject(request.body), task_run_id: decodeURIComponent(path.slice(15, -8)) }));
             if (request.method === "POST" && path === "/api/inbox/refresh")
                 return json(200, this.service.attentionRefresh(bodyObject(request.body)));
             if (request.method === "POST" && path === "/api/inbox/decide")
