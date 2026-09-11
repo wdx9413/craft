@@ -33,7 +33,7 @@ export class TaskRunKernel {
                 throw new Error("Task Run idempotency conflict");
             return { run: existing, idempotent: true };
         }
-        const stabilityDigest = digest({ contract_status: contract.status, task_id: launch.task_id, workspace: launch.workspace, prompt_digest: launch.prompt_digest, environment_digest: environmentDigest, budget_digest: budgetDigest });
+        const stabilityDigest = digest({ contract_status: contract.status, contract_version: contract.version, activation_profile: contract.activation_profile ?? null, budget_account: contract.budget_account ?? null, task_id: launch.task_id, workspace: launch.workspace, prompt_digest: launch.prompt_digest, environment_digest: environmentDigest, budget_digest: budgetDigest });
         return { run: this.store.create("task_run", runId, { ...identity, identity_digest: identityDigest, stability_digest: stabilityDigest, lifecycle: "active", paused_reason: null, handoff_reason: null }), idempotent: false };
     }
     refresh(args) {
@@ -42,7 +42,7 @@ export class TaskRunKernel {
         const launch = current(this.store, "work_launch", run.launch_id);
         const observedEnvironment = args.environment === undefined ? String(run.environment_digest) : digest(args.environment);
         const observedBudget = args.budget === undefined ? String(run.budget_digest) : digest(args.budget);
-        const observedStability = digest({ contract_status: contract.status, task_id: launch.task_id, workspace: launch.workspace, prompt_digest: launch.prompt_digest, environment_digest: observedEnvironment, budget_digest: observedBudget });
+        const observedStability = digest({ contract_status: contract.status, contract_version: contract.version, activation_profile: contract.activation_profile ?? null, budget_account: contract.budget_account ?? null, task_id: launch.task_id, workspace: launch.workspace, prompt_digest: launch.prompt_digest, environment_digest: observedEnvironment, budget_digest: observedBudget });
         const drift = observedStability !== run.stability_digest;
         const hostRun = launch.run_id ? this.store.find("host_run", String(launch.run_id)) : null;
         const loop = this.store.find("delivery_loop", `delivery_loop_${launch.id}`);

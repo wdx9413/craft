@@ -1,6 +1,6 @@
 # Craft
 
-> Current release: v0.11.50. The latest release connects real Task Runs, platform-boundary conformance, and gated Benchmark candidates to the existing task, acceptance, and delivery loop.
+> Current release: v0.11.51. Verified Work Loop joins task contracts, re-observed state, acceptance, recovery, and evaluation campaigns into one controlled path; Serena project memories are read only and loaded on demand.
 
 [中文](README.md) | [English](README.en.md)
 

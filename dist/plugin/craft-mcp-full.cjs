@@ -995,14 +995,14 @@ var require_foldFlowLines = __commonJS({
     var FOLD_FLOW = "flow";
     var FOLD_BLOCK = "block";
     var FOLD_QUOTED = "quoted";
-    function foldFlowLines(text44, indent, mode = "flow", { indentAtStart, lineWidth = 80, minContentWidth = 20, onFold, onOverflow } = {}) {
+    function foldFlowLines(text48, indent, mode = "flow", { indentAtStart, lineWidth = 80, minContentWidth = 20, onFold, onOverflow } = {}) {
       if (!lineWidth || lineWidth < 0)
-        return text44;
+        return text48;
       if (lineWidth < minContentWidth)
         minContentWidth = 0;
       const endStep = Math.max(1 + minContentWidth, 1 + lineWidth - indent.length);
-      if (text44.length <= endStep)
-        return text44;
+      if (text48.length <= endStep)
+        return text48;
       const folds = [];
       const escapedFolds = {};
       let end = lineWidth - indent.length;
@@ -1019,14 +1019,14 @@ var require_foldFlowLines = __commonJS({
       let escStart = -1;
       let escEnd = -1;
       if (mode === FOLD_BLOCK) {
-        i = consumeMoreIndentedLines(text44, i, indent.length);
+        i = consumeMoreIndentedLines(text48, i, indent.length);
         if (i !== -1)
           end = i + endStep;
       }
-      for (let ch; ch = text44[i += 1]; ) {
+      for (let ch; ch = text48[i += 1]; ) {
         if (mode === FOLD_QUOTED && ch === "\\") {
           escStart = i;
-          switch (text44[i + 1]) {
+          switch (text48[i + 1]) {
             case "x":
               i += 3;
               break;
@@ -1043,12 +1043,12 @@ var require_foldFlowLines = __commonJS({
         }
         if (ch === "\n") {
           if (mode === FOLD_BLOCK)
-            i = consumeMoreIndentedLines(text44, i, indent.length);
+            i = consumeMoreIndentedLines(text48, i, indent.length);
           end = i + indent.length + endStep;
           split = void 0;
         } else {
           if (ch === " " && prev && prev !== " " && prev !== "\n" && prev !== "	") {
-            const next = text44[i + 1];
+            const next = text48[i + 1];
             if (next && next !== " " && next !== "\n" && next !== "	")
               split = i;
           }
@@ -1060,12 +1060,12 @@ var require_foldFlowLines = __commonJS({
             } else if (mode === FOLD_QUOTED) {
               while (prev === " " || prev === "	") {
                 prev = ch;
-                ch = text44[i += 1];
+                ch = text48[i += 1];
                 overflow = true;
               }
               const j = i > escEnd + 1 ? i - 2 : escStart - 1;
               if (escapedFolds[j])
-                return text44;
+                return text48;
               folds.push(j);
               escapedFolds[j] = true;
               end = j + endStep;
@@ -1080,39 +1080,39 @@ var require_foldFlowLines = __commonJS({
       if (overflow && onOverflow)
         onOverflow();
       if (folds.length === 0)
-        return text44;
+        return text48;
       if (onFold)
         onFold();
-      let res = text44.slice(0, folds[0]);
+      let res = text48.slice(0, folds[0]);
       for (let i2 = 0; i2 < folds.length; ++i2) {
         const fold = folds[i2];
-        const end2 = folds[i2 + 1] || text44.length;
+        const end2 = folds[i2 + 1] || text48.length;
         if (fold === 0)
           res = `
-${indent}${text44.slice(0, end2)}`;
+${indent}${text48.slice(0, end2)}`;
         else {
           if (mode === FOLD_QUOTED && escapedFolds[fold])
-            res += `${text44[fold]}\\`;
+            res += `${text48[fold]}\\`;
           res += `
-${indent}${text44.slice(fold + 1, end2)}`;
+${indent}${text48.slice(fold + 1, end2)}`;
         }
       }
       return res;
     }
-    function consumeMoreIndentedLines(text44, i, indent) {
+    function consumeMoreIndentedLines(text48, i, indent) {
       let end = i;
       let start2 = i + 1;
-      let ch = text44[start2];
+      let ch = text48[start2];
       while (ch === " " || ch === "	") {
         if (i < start2 + indent) {
-          ch = text44[++i];
+          ch = text48[++i];
         } else {
           do {
-            ch = text44[++i];
+            ch = text48[++i];
           } while (ch && ch !== "\n");
           end = i;
           start2 = i + 1;
-          ch = text44[start2];
+          ch = text48[start2];
         }
       }
       return end;
@@ -7361,10 +7361,10 @@ var require_dist = __commonJS({
 var import_node_readline = require("node:readline");
 
 // src/service.ts
-var import_node_crypto48 = require("node:crypto");
-var import_node_fs8 = require("node:fs");
+var import_node_crypto52 = require("node:crypto");
+var import_node_fs10 = require("node:fs");
 var import_promises12 = require("node:fs/promises");
-var import_node_path15 = require("node:path");
+var import_node_path17 = require("node:path");
 var import_node_url3 = require("node:url");
 
 // src/store.ts
@@ -7414,8 +7414,8 @@ async function ensureLayout(paths = craftPaths()) {
 // src/store.ts
 var SCHEMA_VERSION = 3;
 var RESERVED_FIELDS = /* @__PURE__ */ new Set(["id", "version", "created_at", "updated_at"]);
-function payloadOnly(payload27) {
-  return Object.fromEntries(Object.entries(payload27).filter(([key2]) => !RESERVED_FIELDS.has(key2)));
+function payloadOnly(payload29) {
+  return Object.fromEntries(Object.entries(payload29).filter(([key2]) => !RESERVED_FIELDS.has(key2)));
 }
 function validLimit(limit2) {
   if (!Number.isFinite(limit2) || !Number.isInteger(limit2)) {
@@ -7484,91 +7484,91 @@ var CraftStore = class {
   legacyDatabaseDetected() {
     return (0, import_node_fs.existsSync)(this.paths.legacyDatabaseFile);
   }
-  save(kind, id12, payload27, version) {
-    return this.transaction((database) => this.insert(database, { kind, id: id12, payload: payload27, version }));
+  save(kind2, id12, payload29, version) {
+    return this.transaction((database) => this.insert(database, { kind: kind2, id: id12, payload: payload29, version }));
   }
-  create(kind, id12, payload27) {
+  create(kind2, id12, payload29) {
     return this.transaction((database) => {
-      const existing = database.prepare("SELECT 1 present FROM records WHERE kind=? AND id=? LIMIT 1").get(kind, id12);
-      if (existing) throw new Error(`${kind} already exists: ${id12}`);
-      return this.insert(database, { kind, id: id12, payload: payload27, version: 1 });
+      const existing = database.prepare("SELECT 1 present FROM records WHERE kind=? AND id=? LIMIT 1").get(kind2, id12);
+      if (existing) throw new Error(`${kind2} already exists: ${id12}`);
+      return this.insert(database, { kind: kind2, id: id12, payload: payload29, version: 1 });
     });
   }
   saveBatch(entries2) {
     if (!entries2.length) return [];
     return this.transaction((database) => entries2.map((entry2) => this.insert(database, entry2)));
   }
-  updateIfVersion(kind, id12, expectedVersion, payload27) {
+  updateIfVersion(kind2, id12, expectedVersion, payload29) {
     return this.transaction((database) => {
       const current2 = Number(database.prepare(
         "SELECT COALESCE(MAX(version),0) AS version FROM records WHERE kind=? AND id=?"
-      ).get(kind, id12).version);
-      if (current2 !== expectedVersion) throw new Error(`Concurrent update detected for ${kind}: ${id12}`);
-      return this.insert(database, { kind, id: id12, payload: payload27, version: current2 + 1 });
+      ).get(kind2, id12).version);
+      if (current2 !== expectedVersion) throw new Error(`Concurrent update detected for ${kind2}: ${id12}`);
+      return this.insert(database, { kind: kind2, id: id12, payload: payload29, version: current2 + 1 });
     });
   }
   insert(database, entry2) {
-    const { kind, id: id12, version } = entry2;
-    const payload27 = payloadOnly(entry2.payload);
+    const { kind: kind2, id: id12, version } = entry2;
+    const payload29 = payloadOnly(entry2.payload);
     const now = (/* @__PURE__ */ new Date()).toISOString();
     const next = version ?? Number(database.prepare(
       "SELECT COALESCE(MAX(version),0)+1 AS version FROM records WHERE kind=? AND id=?"
-    ).get(kind, id12).version);
+    ).get(kind2, id12).version);
     database.prepare(`INSERT INTO records(
-        kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)`).run(kind, id12, next, JSON.stringify(payload27), now, now);
-    return { ...payload27, id: id12, version: next, created_at: now, updated_at: now };
+        kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)`).run(kind2, id12, next, JSON.stringify(payload29), now, now);
+    return { ...payload29, id: id12, version: next, created_at: now, updated_at: now };
   }
-  find(kind, id12, version) {
+  find(kind2, id12, version) {
     const row = version === void 0 ? this.database.prepare(
       "SELECT * FROM records WHERE kind=? AND id=? ORDER BY version DESC LIMIT 1"
-    ).get(kind, id12) : this.database.prepare(
+    ).get(kind2, id12) : this.database.prepare(
       "SELECT * FROM records WHERE kind=? AND id=? AND version=?"
-    ).get(kind, id12, version);
+    ).get(kind2, id12, version);
     return row ? this.record(row) : null;
   }
-  get(kind, id12, version) {
-    const record = this.find(kind, id12, version);
-    if (!record) throw new Error(`Unknown ${kind}: ${id12}`);
+  get(kind2, id12, version) {
+    const record = this.find(kind2, id12, version);
+    if (!record) throw new Error(`Unknown ${kind2}: ${id12}`);
     return record;
   }
-  list(kind, limit2 = 20, predicate) {
+  list(kind2, limit2 = 20, predicate) {
     const bounded2 = validLimit(limit2);
     const rows = this.database.prepare(`SELECT r.* FROM records r JOIN (
       SELECT id,MAX(version) version FROM records WHERE kind=? GROUP BY id
       ) latest ON latest.id=r.id AND latest.version=r.version
-      WHERE r.kind=? ORDER BY r.updated_at DESC,r.id DESC ${predicate ? "" : "LIMIT ?"}`).all(...predicate ? [kind, kind] : [kind, kind, bounded2]);
+      WHERE r.kind=? ORDER BY r.updated_at DESC,r.id DESC ${predicate ? "" : "LIMIT ?"}`).all(...predicate ? [kind2, kind2] : [kind2, kind2, bounded2]);
     const records2 = rows.map((row) => this.record(row));
     return (predicate ? records2.filter(predicate) : records2).slice(0, bounded2);
   }
-  count(kind) {
+  count(kind2) {
     return Number(this.database.prepare(`SELECT COUNT(*) count FROM records r JOIN (
       SELECT id,MAX(version) version FROM records WHERE kind=? GROUP BY id
-      ) latest ON latest.id=r.id AND latest.version=r.version WHERE r.kind=?`).get(kind, kind).count);
+      ) latest ON latest.id=r.id AND latest.version=r.version WHERE r.kind=?`).get(kind2, kind2).count);
   }
   searchCapabilities(terms, limit2) {
     const bounded2 = Math.min(validLimit(limit2), 20);
     if (!terms.length) return [];
     return this.list("capability", Number.MAX_SAFE_INTEGER).map((item) => {
-      const text44 = [item.name, item.description, item.search_text ?? item.body].join(" ").toLowerCase();
-      const score = terms.reduce((total, term) => total + Number(text44.includes(term.toLowerCase())), 0);
+      const text48 = [item.name, item.description, item.search_text ?? item.body].join(" ").toLowerCase();
+      const score = terms.reduce((total, term) => total + Number(text48.includes(term.toLowerCase())), 0);
       return { ...item, score };
     }).filter((item) => Number(item.score) > 0).sort((left, right) => Number(right.score) - Number(left.score)).slice(0, bounded2);
   }
-  remove(kind, id12) {
+  remove(kind2, id12) {
     return this.transaction((database) => {
-      const changes = Number(database.prepare("DELETE FROM records WHERE kind=? AND id=?").run(kind, id12).changes);
+      const changes = Number(database.prepare("DELETE FROM records WHERE kind=? AND id=?").run(kind2, id12).changes);
       return changes;
     });
   }
-  appendEvent(stream, eventType, payload27) {
+  appendEvent(stream, eventType, payload29) {
     return this.transaction((database) => {
       const sequence = Number(database.prepare(
         "SELECT COALESCE(MAX(sequence),0)+1 AS sequence FROM events WHERE stream=?"
       ).get(stream).sequence);
       const created_at = (/* @__PURE__ */ new Date()).toISOString();
       database.prepare(`INSERT INTO events(
-        stream,sequence,event_type,payload_json,created_at) VALUES(?,?,?,?,?)`).run(stream, sequence, eventType, JSON.stringify(payload27), created_at);
-      return { stream, sequence, event_type: eventType, payload: payload27, created_at };
+        stream,sequence,event_type,payload_json,created_at) VALUES(?,?,?,?,?)`).run(stream, sequence, eventType, JSON.stringify(payload29), created_at);
+      return { stream, sequence, event_type: eventType, payload: payload29, created_at };
     });
   }
   events(stream) {
@@ -7745,8 +7745,8 @@ function approvedEffects(allowExecution, effects = []) {
   return approved;
 }
 function runStep(step, root, runtimeEnv = {}, runner = import_node_child_process.spawnSync) {
-  const kind = String(step.type);
-  if (kind === "command") {
+  const kind2 = String(step.type);
+  if (kind2 === "command") {
     if (!Array.isArray(step.command) || !step.command.length || !step.command.every((part) => typeof part === "string")) {
       throw new Error("Command steps require a non-empty string array in command");
     }
@@ -7784,7 +7784,7 @@ function runStep(step, root, runtimeEnv = {}, runner = import_node_child_process
       ...result.error ? { error: result.error.message } : {}
     };
   }
-  if (kind === "assertion") {
+  if (kind2 === "assertion") {
     if (step.evaluator === "file_exists") {
       let actual = true;
       try {
@@ -7814,7 +7814,7 @@ function runStep(step, root, runtimeEnv = {}, runner = import_node_child_process
     }
     throw new Error(`Unsupported assertion evaluator: ${step.evaluator}`);
   }
-  if (kind === "coverage_gate") {
+  if (kind2 === "coverage_gate") {
     const report = JSON.parse((0, import_node_fs2.readFileSync)(safePath(root, String(step.report ?? "coverage-summary.json")), "utf8"));
     const total = report.total ?? report;
     const thresholds = {
@@ -7836,7 +7836,7 @@ function runStep(step, root, runtimeEnv = {}, runner = import_node_child_process
       thresholds
     };
   }
-  throw new Error(`Unsupported workflow step type: ${kind}`);
+  throw new Error(`Unsupported workflow step type: ${kind2}`);
 }
 function executeSteps(steps, root, approved, executor = runStep) {
   const results = [];
@@ -8250,8 +8250,8 @@ var OpenAiCompatibleEmbeddingProvider = class {
         body: JSON.stringify({ model: this.config.model, input: texts })
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const payload27 = await response.json();
-      const data = payload27 && typeof payload27 === "object" && !Array.isArray(payload27) ? payload27.data : void 0;
+      const payload29 = await response.json();
+      const data = payload29 && typeof payload29 === "object" && !Array.isArray(payload29) ? payload29.data : void 0;
       if (!Array.isArray(data)) throw new Error("Invalid embedding response");
       const ordered = [...data].sort((left, right) => Number(left.index) - Number(right.index)).map((item) => item && typeof item === "object" && !Array.isArray(item) ? item.embedding : void 0);
       return validateVectors(ordered, texts.length);
@@ -8802,15 +8802,15 @@ ${aliases}`.includes(term));
 function pathKey(path2, platform = process.platform) {
   return platform === "win32" ? path2.toLowerCase() : path2;
 }
-function parseSkill(text44, fallback) {
+function parseSkill(text48, fallback) {
   let metadata = {};
-  let body2 = text44;
-  if (text44.startsWith("---\n") || text44.startsWith("---\r\n")) {
-    const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(text44);
+  let body2 = text48;
+  if (text48.startsWith("---\n") || text48.startsWith("---\r\n")) {
+    const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(text48);
     if (match) {
       const parsed = (0, import_yaml.parse)(match[1]);
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) metadata = parsed;
-      body2 = text44.slice(match[0].length);
+      body2 = text48.slice(match[0].length);
     }
   }
   return {
@@ -8907,19 +8907,19 @@ var Catalog = class {
     const observations = this.store.list("capability", Number.MAX_SAFE_INTEGER).filter((item) => sources.get(String(item.source_id))?.enabled === true);
     const byDigest = /* @__PURE__ */ new Map();
     for (const item of observations) {
-      const digest31 = String(item.digest);
-      byDigest.set(digest31, [...byDigest.get(digest31) ?? [], item]);
+      const digest35 = String(item.digest);
+      byDigest.set(digest35, [...byDigest.get(digest35) ?? [], item]);
     }
     const current2 = /* @__PURE__ */ new Set();
     const logicalByDigest = /* @__PURE__ */ new Map();
-    for (const [digest31, group] of byDigest) {
-      const logicalId = stableId("logical_capability", digest31);
+    for (const [digest35, group] of byDigest) {
+      const logicalId = stableId("logical_capability", digest35);
       current2.add(logicalId);
-      logicalByDigest.set(digest31, logicalId);
+      logicalByDigest.set(digest35, logicalId);
       const ordered = [...group].sort((left, right) => Number(sources.get(String(right.source_id))?.priority ?? 0) - Number(sources.get(String(left.source_id))?.priority ?? 0) || String(left.id).localeCompare(String(right.id)));
       const selected = ordered[0];
       const instances = ordered.map((item) => ({ capability_id: item.id, source_id: item.source_id, source_priority: Number(sources.get(String(item.source_id))?.priority ?? 0), path: item.path }));
-      this.store.save("logical_capability", logicalId, { content_digest: digest31, kind: selected.kind, name: selected.name, description: selected.description, version: selected.version, metadata: selected.metadata, selected_capability_id: selected.id, selected_source_id: selected.source_id, instances, declaration_keys: [...new Set(group.map(declarationKey))].sort(), health: "healthy" });
+      this.store.save("logical_capability", logicalId, { content_digest: digest35, kind: selected.kind, name: selected.name, description: selected.description, version: selected.version, metadata: selected.metadata, selected_capability_id: selected.id, selected_source_id: selected.source_id, instances, declaration_keys: [...new Set(group.map(declarationKey))].sort(), health: "healthy" });
     }
     for (const item of this.store.list("logical_capability", Number.MAX_SAFE_INTEGER)) if (!current2.has(String(item.id))) this.store.remove("logical_capability", String(item.id));
     const byDeclaration = /* @__PURE__ */ new Map();
@@ -8931,7 +8931,7 @@ var Catalog = class {
     for (const [key2, digests] of byDeclaration) if (digests.size > 1) {
       const conflictId = stableId("capability_conflict", key2);
       conflictIds.add(conflictId);
-      const logicalIds = [...digests].map((digest31) => logicalByDigest.get(digest31)).sort();
+      const logicalIds = [...digests].map((digest35) => logicalByDigest.get(digest35)).sort();
       this.store.save("capability_conflict", conflictId, { declaration_key: key2, logical_capability_ids: logicalIds, content_digests: [...digests].sort(), status: "open" });
     }
     for (const item of this.store.list("capability_conflict", Number.MAX_SAFE_INTEGER)) if (!conflictIds.has(String(item.id))) this.store.remove("capability_conflict", String(item.id));
@@ -8949,7 +8949,7 @@ var Catalog = class {
     const source = this.getSource(id12);
     if (!source.enabled) throw new Error(`Capability source is disabled: ${id12}`);
     const issues = [];
-    const files3 = await skillFiles(String(source.real_path), (path2, error) => issues.push({
+    const files4 = await skillFiles(String(source.real_path), (path2, error) => issues.push({
       path: path2,
       error: String(error)
     }));
@@ -8957,7 +8957,7 @@ var Catalog = class {
     let added = 0;
     let updated = 0;
     let unchanged = 0;
-    for (const path2 of files3) {
+    for (const path2 of files4) {
       const relative_path = (0, import_node_path5.relative)(String(source.real_path), path2).replaceAll("\\", "/");
       const assetId = stableId("cap", `${id12}:${relative_path}`);
       live.add(assetId);
@@ -8972,14 +8972,14 @@ var Catalog = class {
         unchanged += 1;
         continue;
       }
-      const text44 = await (0, import_promises6.readFile)(path2, "utf8");
-      const digest31 = (0, import_node_crypto6.createHash)("sha256").update(text44).digest("hex");
-      if (previous?.digest === digest31) {
+      const text48 = await (0, import_promises6.readFile)(path2, "utf8");
+      const digest35 = (0, import_node_crypto6.createHash)("sha256").update(text48).digest("hex");
+      if (previous?.digest === digest35) {
         this.store.save("capability", assetId, { ...previous, size: fileStat.size, mtime_ms: fileStat.mtimeMs });
         unchanged += 1;
         continue;
       }
-      const skill = parseSkill(text44, (0, import_node_path5.basename)((0, import_node_path5.resolve)(path2, "..")));
+      const skill = parseSkill(text48, (0, import_node_path5.basename)((0, import_node_path5.resolve)(path2, "..")));
       this.store.save("capability", assetId, {
         ...skill,
         kind: "skill",
@@ -8988,7 +8988,7 @@ var Catalog = class {
 ${metadataTerms(skill.metadata).join("\n")}`,
         relative_path,
         path: await (0, import_promises6.realpath)(path2),
-        digest: digest31,
+        digest: digest35,
         size: fileStat.size,
         mtime_ms: fileStat.mtimeMs
       });
@@ -9009,7 +9009,7 @@ ${metadataTerms(skill.metadata).join("\n")}`,
       updated,
       unchanged,
       removed,
-      total: files3.length,
+      total: files4.length,
       issues
     } };
   }
@@ -9211,8 +9211,8 @@ function requiredText(value, name) {
   return value.trim();
 }
 function recordPayload(record) {
-  const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...payload27 } = record;
-  return payload27;
+  const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...payload29 } = record;
+  return payload29;
 }
 function relativePath(value, name) {
   const path2 = requiredText(value, name);
@@ -9376,8 +9376,8 @@ function text3(value, name) {
   return value.trim();
 }
 function recordPayload2(record) {
-  const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...payload27 } = record;
-  return payload27;
+  const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...payload29 } = record;
+  return payload29;
 }
 var TransactionCoordinator = class {
   store;
@@ -9460,8 +9460,8 @@ function object2(value, name) {
   return value;
 }
 function recordPayload3(record) {
-  const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...payload27 } = record;
-  return payload27;
+  const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...payload29 } = record;
+  return payload29;
 }
 function render(name, operations) {
   return `export type CraftScriptOperation =
@@ -9519,9 +9519,9 @@ var TrajectoryCompiler = class {
     const operations = value.map((raw, index) => {
       const operation = object2(raw, `operations[${index}]`);
       const operation_id = id2(operation.operation_id, `operations[${index}].operation_id`, "operation");
-      const kind = text4(operation.kind, `operations[${index}].kind`);
-      if (kind === "checkpoint") return { operation_id, kind, label: text4(operation.label, `operations[${index}].label`) };
-      if (kind !== "workflow") throw new Error("trajectory script operation kind is unsupported");
+      const kind2 = text4(operation.kind, `operations[${index}].kind`);
+      if (kind2 === "checkpoint") return { operation_id, kind: kind2, label: text4(operation.label, `operations[${index}].label`) };
+      if (kind2 !== "workflow") throw new Error("trajectory script operation kind is unsupported");
       const workflow_id = id2(operation.workflow_id, `operations[${index}].workflow_id`, "workflow");
       const workflow_version = Number(operation.workflow_version ?? 1);
       if (!Number.isInteger(workflow_version) || workflow_version < 1) throw new Error("workflow_version must be a positive integer");
@@ -9545,8 +9545,8 @@ function text5(value, name) {
   return value.trim();
 }
 function recordPayload4(record) {
-  const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...payload27 } = record;
-  return payload27;
+  const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...payload29 } = record;
+  return payload29;
 }
 var VerifiedScriptRunner = class {
   store;
@@ -9654,15 +9654,15 @@ function graphNodes(value) {
     const nodeId = id4(input.id, `nodes[${index}].id`, "node");
     if (seen.has(nodeId)) throw new Error(`Duplicate task graph node id: ${nodeId}`);
     seen.add(nodeId);
-    const kind = text6(input.kind, `nodes[${index}].kind`);
-    if (!TASK_GRAPH_NODE_KINDS.has(kind)) throw new Error(`Unsupported task graph node kind: ${kind}`);
+    const kind2 = text6(input.kind, `nodes[${index}].kind`);
+    if (!TASK_GRAPH_NODE_KINDS.has(kind2)) throw new Error(`Unsupported task graph node kind: ${kind2}`);
     const dependencies = strings(input.depends_on, `nodes[${index}].depends_on`);
     if (dependencies.includes(nodeId)) throw new Error(`Task graph node ${nodeId} cannot depend on itself`);
     return {
       id: nodeId,
       title: text6(input.title, `nodes[${index}].title`),
       objective: text6(input.objective, `nodes[${index}].objective`),
-      kind,
+      kind: kind2,
       depends_on: dependencies,
       context_profile_id: input.context_profile_id === void 0 ? null : text6(input.context_profile_id, `nodes[${index}].context_profile_id`),
       context_profile_version: input.context_profile_version === void 0 ? null : Number(input.context_profile_version),
@@ -9815,9 +9815,9 @@ var WorkbenchKernel = class {
     return { objects: this.store.list("work_object", Number(args.limit ?? 100), (item) => item.workspace_id === workspaceId && (args.status === void 0 || item.status === args.status)) };
   }
   remember(args) {
-    const kind = String(args.kind);
+    const kind2 = String(args.kind);
     const scope = String(args.scope);
-    if (!MEMORY_KINDS.has(kind)) throw new Error("Memory kind is unsupported");
+    if (!MEMORY_KINDS.has(kind2)) throw new Error("Memory kind is unsupported");
     if (!(/* @__PURE__ */ new Set(["user", "workspace", "task"])).has(scope)) throw new Error("Memory scope is unsupported");
     if (scope === "workspace") this.store.get("workspace", text6(args.workspace_id, "workspace_id"));
     if (scope === "task") this.store.get("task", text6(args.task_id, "task_id"));
@@ -9829,7 +9829,7 @@ var WorkbenchKernel = class {
       throw new Error("Replacement memory must keep the same scope target");
     }
     const memory = this.store.create("memory_item", id4(args.memory_id, "memory_id", "memory"), {
-      kind,
+      kind: kind2,
       scope,
       content: text6(args.content, "content"),
       source: text6(args.source, "source"),
@@ -10924,7 +10924,7 @@ function runParserWorker(request2, options = {}) {
   const path2 = options.workerPath ?? resolveParserWorkerPath();
   const timeoutMs = options.timeoutMs ?? 5e3;
   if (!Number.isInteger(timeoutMs) || timeoutMs < 10 || timeoutMs > 3e4) throw new Error("timeout_ms must be an integer between 10 and 30000");
-  return new Promise((resolve14, reject) => {
+  return new Promise((resolve16, reject) => {
     const args = [...path2.endsWith(".ts") ? ["--experimental-strip-types"] : [], "--max-old-space-size=64", path2];
     const child = (options.spawnProcess ?? import_node_child_process4.spawn)(process.execPath, args, { stdio: ["pipe", "pipe", "pipe"], env: scrubParserEnvironment(), windowsHide: true });
     let stdout = "";
@@ -10933,7 +10933,7 @@ function runParserWorker(request2, options = {}) {
     const finish = (error, result) => {
       settled = true;
       clearTimeout(timer);
-      error ? reject(error) : resolve14(result);
+      error ? reject(error) : resolve16(result);
     };
     const timer = setTimeout(() => {
       child.kill();
@@ -10977,8 +10977,8 @@ var ParserProcessAdapter = class {
     const contentId = text10(args.content_id, "content_id").trim();
     const raw = text10(args.raw_content, "raw_content");
     const content = this.security.store.get("untrusted_content", contentId);
-    const digest31 = `sha256:${(0, import_node_crypto16.createHash)("sha256").update(raw).digest("hex")}`;
-    if (content.content_digest !== digest31) throw new Error("raw_content digest does not match the registered content envelope");
+    const digest35 = `sha256:${(0, import_node_crypto16.createHash)("sha256").update(raw).digest("hex")}`;
+    if (content.content_digest !== digest35) throw new Error("raw_content digest does not match the registered content envelope");
     const receiptId = typeof args.receipt_id === "string" && args.receipt_id.trim() ? args.receipt_id.trim() : `parser_process_${(0, import_node_crypto16.randomUUID)().replaceAll("-", "")}`;
     const started = Date.now();
     try {
@@ -11001,7 +11001,7 @@ var ParserProcessAdapter = class {
       });
       const receipt = this.security.store.create("parser_process_receipt", receiptId, {
         content_id: contentId,
-        content_digest: digest31,
+        content_digest: digest35,
         worker_protocol: 1,
         status: "passed",
         duration_ms: Date.now() - started,
@@ -11012,7 +11012,7 @@ var ParserProcessAdapter = class {
     } catch (error) {
       this.security.store.create("parser_process_receipt", receiptId, {
         content_id: contentId,
-        content_digest: digest31,
+        content_digest: digest35,
         worker_protocol: 1,
         status: "failed",
         duration_ms: Date.now() - started,
@@ -11723,13 +11723,13 @@ var RecoveryQueueKernel = class {
     }
     return candidates.sort((left, right) => right.priority - left.priority || left.id.localeCompare(right.id));
   }
-  candidate(subject, kind, action, priority, details) {
+  candidate(subject, kind2, action, priority, details) {
     return {
-      id: `recovery:${kind}:${subject.id}:${action}`,
+      id: `recovery:${kind2}:${subject.id}:${action}`,
       task_id: String(subject.task_id),
       action,
       priority,
-      subject_kind: kind,
+      subject_kind: kind2,
       subject_id: String(subject.id),
       subject_version: Number(subject.version),
       subject_status: String(subject.status),
@@ -12157,14 +12157,14 @@ var LineageKernel = class {
   }
   reference(value, name, workspaceId, taskId) {
     const input = object8(value, name);
-    const kind = text16(input.kind, `${name}.kind`);
-    if (!ENTITY_KINDS.has(kind)) throw new Error(`${name}.kind is unsupported`);
+    const kind2 = text16(input.kind, `${name}.kind`);
+    if (!ENTITY_KINDS.has(kind2)) throw new Error(`${name}.kind is unsupported`);
     const id12 = text16(input.id, `${name}.id`);
     const version = integer4(input.version, `${name}.version`, 0);
-    const record = this.store.get(kind, id12, version);
-    if (kind === "work_object" && record.workspace_id !== workspaceId) throw new Error(`${name} work object belongs to another workspace`);
+    const record = this.store.get(kind2, id12, version);
+    if (kind2 === "work_object" && record.workspace_id !== workspaceId) throw new Error(`${name} work object belongs to another workspace`);
     if (taskId && record.task_id && record.task_id !== taskId) throw new Error(`${name} belongs to another task`);
-    return { kind, id: id12, version, locator: locator(input.locator, `${name}.locator`) };
+    return { kind: kind2, id: id12, version, locator: locator(input.locator, `${name}.locator`) };
   }
   record(args) {
     const workspace = this.store.get("workspace", text16(args.workspace_id, "workspace_id"));
@@ -13283,8 +13283,8 @@ var HubSyncKernel = class {
     if (previousDigest !== source.cursor_digest) throw new Error("Hub previous digest does not match the trusted cursor");
     const saved = this.store.transaction((database) => {
       const now = (/* @__PURE__ */ new Date()).toISOString();
-      const insert = (kind, id12, data, version) => {
-        database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)").run(kind, id12, version, JSON.stringify(data), now, now);
+      const insert = (kind2, id12, data, version) => {
+        database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)").run(kind2, id12, version, JSON.stringify(data), now, now);
         return { ...data, id: id12, version, created_at: now, updated_at: now };
       };
       for (const item of entries2) {
@@ -13402,7 +13402,7 @@ var MaterializationKernel = class {
     if (entry2.status !== "active") throw new Error("Hub catalog entry is not active");
     const packageFiles = files2(args.files);
     if (!packageFiles.some((item) => (/* @__PURE__ */ new Set(["skill.md", "capability.json", "plugin.json"])).has(import_node_path9.default.posix.basename(item.path).toLowerCase()))) throw new Error("Materialized package requires a capability descriptor");
-    const manifest = packageFiles.map(({ path: filePath, size, digest: fileDigest }) => ({ path: filePath, size, digest: fileDigest }));
+    const manifest = packageFiles.map(({ path: filePath, size, digest: fileDigest2 }) => ({ path: filePath, size, digest: fileDigest2 }));
     const contentDigest = digest13(manifest);
     if (contentDigest !== entry2.content_digest) throw new Error("Materialized package digest does not match the signed catalog");
     const scan = findings(packageFiles);
@@ -13952,7 +13952,7 @@ var HomeKernel = class {
       for (const artifactId of Array.isArray(eventPayload.artifact_ids) ? eventPayload.artifact_ids : []) artifactIds.add(String(artifactId));
     }
     const artifacts = [...artifactIds].map((id12) => this.store.find("artifact", id12)).filter((item) => item !== null);
-    const runs = ["runtime_run", "workflow_run", "orchestration_plan"].flatMap((kind) => this.store.list(kind, 1e4, (item) => item.task_id === taskId).map((item) => ({ ...item, run_kind: kind })));
+    const runs = ["runtime_run", "workflow_run", "orchestration_plan"].flatMap((kind2) => this.store.list(kind2, 1e4, (item) => item.task_id === taskId).map((item) => ({ ...item, run_kind: kind2 })));
     return {
       task: pick(task, ["id", "title", "goal", "project_id", "status", "created_at", "updated_at"]),
       checkpoints: this.store.list("checkpoint", limit2, (item) => item.task_id === taskId).map((item) => pick(item, ["id", "summary", "completed", "pending", "decisions", "status", "created_at"])),
@@ -14292,8 +14292,8 @@ var HostRunKernel = class {
       if (existing.host !== host || existing.dispatch_id !== dispatchId) throw new Error("Host run idempotency conflict");
       return { run: existing, idempotent: true };
     }
-    const kind = host === "codex-cli" ? "codex_dispatch" : "claude_dispatch";
-    const dispatch = this.store.get(kind, dispatchId);
+    const kind2 = host === "codex-cli" ? "codex_dispatch" : "claude_dispatch";
+    const dispatch = this.store.get(kind2, dispatchId);
     if (dispatch.status !== "prepared") throw new Error("Host dispatch must be prepared");
     const run = this.store.create("host_run", runId, { host, dispatch_id: dispatchId, task_id: dispatch.task_id, owner_id: this.ownerId, status: "running", cancel_requested: false, event_count: 0, started_at: (/* @__PURE__ */ new Date()).toISOString() });
     const controller = new AbortController();
@@ -14543,8 +14543,8 @@ function uniqueTextArray(value, name, minimum = 1) {
   return result;
 }
 function recordPayload5(record) {
-  const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...payload27 } = record;
-  return payload27;
+  const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...payload29 } = record;
+  return payload29;
 }
 function assertNoSecret(value, name) {
   if (/(?:api[_-]?key|authorization|cookie|password|secret|token)["']?\s*[:=]\s*[^\s]+/iu.test(value)) throw new Error(`${name} must not contain sensitive assignments`);
@@ -15198,11 +15198,11 @@ function payload24(record) {
   const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record;
   return rest;
 }
-function ref(store, kind, idValue, versionValue) {
+function ref(store, kind2, idValue, versionValue) {
   if (idValue === void 0 && versionValue === void 0) return null;
-  if (idValue === void 0) throw new Error(`${kind}_id is required when ${kind}_version is set`);
-  const item = store.get(kind, text40(idValue, `${kind}_id`));
-  if (versionValue !== void 0 && Number(versionValue) !== Number(item.version)) throw new Error(`${kind} version does not match current state`);
+  if (idValue === void 0) throw new Error(`${kind2}_id is required when ${kind2}_version is set`);
+  const item = store.get(kind2, text40(idValue, `${kind2}_id`));
+  if (versionValue !== void 0 && Number(versionValue) !== Number(item.version)) throw new Error(`${kind2} version does not match current state`);
   return item;
 }
 function launchEffect(launch) {
@@ -15338,8 +15338,8 @@ function payload25(record) {
   const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record;
   return rest;
 }
-function current(store, kind, id12) {
-  return store.get(kind, text41(id12, `${kind}_id`));
+function current(store, kind2, id12) {
+  return store.get(kind2, text41(id12, `${kind2}_id`));
 }
 var TaskRunKernel = class {
   store;
@@ -15363,7 +15363,7 @@ var TaskRunKernel = class {
       if (existing.identity_digest !== identityDigest) throw new Error("Task Run idempotency conflict");
       return { run: existing, idempotent: true };
     }
-    const stabilityDigest = digest29({ contract_status: contract.status, task_id: launch.task_id, workspace: launch.workspace, prompt_digest: launch.prompt_digest, environment_digest: environmentDigest, budget_digest: budgetDigest });
+    const stabilityDigest = digest29({ contract_status: contract.status, contract_version: contract.version, activation_profile: contract.activation_profile ?? null, budget_account: contract.budget_account ?? null, task_id: launch.task_id, workspace: launch.workspace, prompt_digest: launch.prompt_digest, environment_digest: environmentDigest, budget_digest: budgetDigest });
     return { run: this.store.create("task_run", runId, { ...identity, identity_digest: identityDigest, stability_digest: stabilityDigest, lifecycle: "active", paused_reason: null, handoff_reason: null }), idempotent: false };
   }
   refresh(args) {
@@ -15372,7 +15372,7 @@ var TaskRunKernel = class {
     const launch = current(this.store, "work_launch", run.launch_id);
     const observedEnvironment = args.environment === void 0 ? String(run.environment_digest) : digest29(args.environment);
     const observedBudget = args.budget === void 0 ? String(run.budget_digest) : digest29(args.budget);
-    const observedStability = digest29({ contract_status: contract.status, task_id: launch.task_id, workspace: launch.workspace, prompt_digest: launch.prompt_digest, environment_digest: observedEnvironment, budget_digest: observedBudget });
+    const observedStability = digest29({ contract_status: contract.status, contract_version: contract.version, activation_profile: contract.activation_profile ?? null, budget_account: contract.budget_account ?? null, task_id: launch.task_id, workspace: launch.workspace, prompt_digest: launch.prompt_digest, environment_digest: observedEnvironment, budget_digest: observedBudget });
     const drift = observedStability !== run.stability_digest;
     const hostRun = launch.run_id ? this.store.find("host_run", String(launch.run_id)) : null;
     const loop = this.store.find("delivery_loop", `delivery_loop_${launch.id}`);
@@ -15555,8 +15555,8 @@ var TaskBenchmarkKernel = class {
     const records2 = this.store.list("work_delivery", 1e4, (item) => item.launch_id === run.launch_id);
     return records2.at(-1) ?? null;
   }
-  save(kind, record, changes) {
-    return this.store.save(kind, String(record.id), { ...payload26(record), ...changes });
+  save(kind2, record, changes) {
+    return this.store.save(kind2, String(record.id), { ...payload26(record), ...changes });
   }
 };
 function finite(value, name) {
@@ -15569,6 +15569,347 @@ function axes(value) {
   if (!items2.length || items2.length > 2 || new Set(items2).size !== items2.length) throw new Error("candidate_axes must name one or two distinct design axes");
   return items2;
 }
+
+// src/state-workspace.ts
+var import_node_crypto48 = require("node:crypto");
+var import_node_fs8 = require("node:fs");
+var import_node_path15 = require("node:path");
+function text43(value, name) {
+  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
+  return value.trim();
+}
+function digest31(value) {
+  return `sha256:${(0, import_node_crypto48.createHash)("sha256").update(JSON.stringify(value)).digest("hex")}`;
+}
+function fileDigest(path2) {
+  return `sha256:${(0, import_node_crypto48.createHash)("sha256").update((0, import_node_fs8.readFileSync)(path2)).digest("hex")}`;
+}
+function relativePath2(value, name) {
+  const item = text43(value, name).replaceAll("\\", "/");
+  if ((0, import_node_path15.isAbsolute)(item) || item.split("/").includes("..")) throw new Error(`${name} must be relative to the workspace`);
+  return item.replace(/^\.\//, "") || ".";
+}
+function nested2(root, path2) {
+  const target = (0, import_node_path15.resolve)(root, path2);
+  if ((0, import_node_path15.relative)(root, target).startsWith("..")) throw new Error("workspace state path escapes root");
+  return target;
+}
+function kind(stat3, path2) {
+  if (stat3.isFile()) return "file";
+  if (stat3.isDirectory()) return "directory";
+  throw new Error(`state adapters support regular files only: ${path2}`);
+}
+function files3(root, path2) {
+  const target = nested2(root, path2);
+  if (!(0, import_node_fs8.existsSync)(target)) return [];
+  const stat3 = (0, import_node_fs8.lstatSync)(target);
+  if (stat3.isSymbolicLink()) throw new Error(`state adapters do not follow symbolic links: ${path2}`);
+  if (kind(stat3, path2) === "file") return [{ path: path2, digest: fileDigest(target), size_bytes: stat3.size }];
+  return (0, import_node_fs8.readdirSync)(target, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name)).flatMap((entry2) => files3(root, (0, import_node_path15.join)(path2, entry2.name).replaceAll("\\", "/")));
+}
+var StateWorkspaceKernel = class {
+  store;
+  constructor(store) {
+    this.store = store;
+  }
+  observe(args) {
+    const workspace = this.store.get("workspace", text43(args.workspace_id, "workspace_id"));
+    const adapter = args.adapter === void 0 ? "file_tree" : text43(args.adapter, "adapter");
+    if (!["file_tree", "file_artifact"].includes(adapter)) throw new Error("State Workspace adapter is unsupported");
+    const root = text43(workspace.root_path, "workspace.root_path");
+    const paths = adapter === "file_tree" ? workspace.include_paths.map((item) => relativePath2(item, "workspace.include_paths")).sort() : (args.paths ?? []).map((item) => relativePath2(item, "paths")).sort();
+    if (!paths.length) throw new Error("file_artifact observation requires at least one declared path");
+    if (new Set(paths).size !== paths.length) throw new Error("State Workspace paths must be unique");
+    const entries2 = paths.flatMap((path2) => files3(root, path2)).sort((a, b) => a.path.localeCompare(b.path));
+    if (new Set(entries2.map((item) => item.path)).size !== entries2.length) throw new Error("State Workspace paths must not overlap");
+    const artifactIds = args.artifact_ids === void 0 ? [] : args.artifact_ids.map((item) => text43(item, "artifact_ids"));
+    for (const artifactId of artifactIds) this.store.get("artifact", artifactId);
+    const identity = { workspace_id: workspace.id, workspace_version: workspace.version, workspace_state_revision: workspace.state_revision, adapter, paths, entries: entries2, artifact_ids: artifactIds };
+    const snapshotId = String(args.snapshot_id ?? `state_snapshot_${workspace.id}_${digest31(identity).slice(-16)}`);
+    const existing = this.store.find("state_snapshot", snapshotId);
+    const snapshotDigest = digest31(identity);
+    if (existing) {
+      if (existing.snapshot_digest !== snapshotDigest) throw new Error("State Snapshot idempotency conflict");
+      return { snapshot: existing, idempotent: true };
+    }
+    return { snapshot: this.store.create("state_snapshot", snapshotId, { ...identity, snapshot_digest: snapshotDigest }), idempotent: false };
+  }
+  compare(args) {
+    const before = this.store.get("state_snapshot", text43(args.before_snapshot_id, "before_snapshot_id"));
+    const after = this.store.get("state_snapshot", text43(args.after_snapshot_id, "after_snapshot_id"));
+    if (before.workspace_id !== after.workspace_id) throw new Error("State Snapshots must belong to one workspace");
+    const left = new Map(before.entries.map((entry2) => [entry2.path, entry2]));
+    const right = new Map(after.entries.map((entry2) => [entry2.path, entry2]));
+    const paths = [.../* @__PURE__ */ new Set([...left.keys(), ...right.keys()])].sort();
+    return { difference: {
+      workspace_id: before.workspace_id,
+      before_snapshot_id: before.id,
+      after_snapshot_id: after.id,
+      added_paths: paths.filter((path2) => !left.has(path2)),
+      deleted_paths: paths.filter((path2) => !right.has(path2)),
+      modified_paths: paths.filter((path2) => left.has(path2) && right.has(path2) && left.get(path2).digest !== right.get(path2).digest),
+      changed: before.snapshot_digest !== after.snapshot_digest
+    } };
+  }
+};
+
+// src/verified-work-loop.ts
+var import_node_crypto49 = require("node:crypto");
+function text44(value, name) {
+  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
+  return value.trim();
+}
+function digest32(value) {
+  return `sha256:${(0, import_node_crypto49.createHash)("sha256").update(JSON.stringify(value)).digest("hex")}`;
+}
+function payload27(record) {
+  const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record;
+  return rest;
+}
+var VerifiedWorkLoopKernel = class {
+  store;
+  constructor(store) {
+    this.store = store;
+  }
+  create(args) {
+    const task = this.store.get("task", text44(args.task_id, "task_id"));
+    const contract = this.store.get("task_control_contract", text44(args.contract_id, "contract_id"));
+    const run = this.store.get("task_run", text44(args.task_run_id, "task_run_id"));
+    const snapshot = this.store.get("state_snapshot", text44(args.snapshot_id, "snapshot_id"));
+    if (contract.task_id !== task.id || run.contract_id !== contract.id) throw new Error("Verified Work Loop facts are not bound to one Task");
+    const identity = { task_id: task.id, contract_id: contract.id, contract_version: contract.version, task_run_id: run.id, task_run_version: run.version, workspace_id: snapshot.workspace_id, initial_snapshot_id: snapshot.id, initial_snapshot_digest: snapshot.snapshot_digest };
+    const loopId = String(args.work_loop_id ?? `work_loop_${run.id}`);
+    const existing = this.store.find("verified_work_loop", loopId);
+    const identityDigest = digest32(identity);
+    if (existing) {
+      if (existing.identity_digest !== identityDigest) throw new Error("Verified Work Loop idempotency conflict");
+      return { loop: existing, idempotent: true };
+    }
+    return { loop: this.store.create("verified_work_loop", loopId, { ...identity, identity_digest: identityDigest, lifecycle: "active", latest_snapshot_id: snapshot.id, latest_task_run_state_id: null, needs_replan_reason: null }), idempotent: false };
+  }
+  advance(args) {
+    const loop = this.store.get("verified_work_loop", text44(args.work_loop_id, "work_loop_id"));
+    const state = this.store.get("task_run_state", text44(args.task_run_state_id, "task_run_state_id"));
+    const snapshot = this.store.get("state_snapshot", text44(args.snapshot_id, "snapshot_id"));
+    if (state.task_run_id !== loop.task_run_id || snapshot.workspace_id !== loop.workspace_id) throw new Error("Verified Work Loop observation does not belong to this Run");
+    const previous = this.store.get("state_snapshot", String(loop.latest_snapshot_id));
+    const changed = previous.snapshot_digest !== snapshot.snapshot_digest || previous.workspace_state_revision !== snapshot.workspace_state_revision;
+    const hostTerminal = ["ready_for_delivery", "awaiting_acceptance", "recovery", "blocked"].includes(String(state.status));
+    const status = loop.lifecycle === "needs_replan" || changed && !hostTerminal || state.status === "needs_replan" ? "needs_replan" : state.status;
+    const reason = status === "needs_replan" ? changed ? "workspace_changed_without_terminal_receipt" : "task_run_drift" : null;
+    const saved = this.store.save("verified_work_loop", String(loop.id), { ...payload27(loop), latest_snapshot_id: snapshot.id, latest_task_run_state_id: state.id, lifecycle: status === "needs_replan" ? "needs_replan" : loop.lifecycle, needs_replan_reason: reason });
+    const receiptId = String(args.receipt_id ?? `work_loop_receipt_${saved.id}_${snapshot.version}_${state.version}`);
+    const identity = { work_loop_id: saved.id, work_loop_version: saved.version, task_run_state_id: state.id, task_run_state_version: state.version, snapshot_id: snapshot.id, snapshot_version: snapshot.version, status, reason };
+    const receipt = this.store.find("verified_work_loop_receipt", receiptId) ?? this.store.create("verified_work_loop_receipt", receiptId, { ...identity, receipt_digest: digest32(identity) });
+    return { loop: saved, state: { status, action: status === "needs_replan" ? "replan" : state.action, actor: status === "needs_replan" ? "human" : state.actor }, receipt };
+  }
+  decide(args) {
+    const loop = this.store.get("verified_work_loop", text44(args.work_loop_id, "work_loop_id"));
+    const decision = text44(args.decision, "decision");
+    if (!["approve", "replan", "accept", "reject", "human_change"].includes(decision)) throw new Error("Verified Work Loop decision is unsupported");
+    const identity = { work_loop_id: loop.id, decision, actor: text44(args.actor, "actor"), summary_digest: digest32(text44(args.summary, "summary")) };
+    const decisionId = String(args.decision_id ?? `work_loop_decision_${loop.id}_${digest32(identity).slice(-16)}`);
+    const existing = this.store.find("verified_work_loop_decision", decisionId);
+    const decisionDigest = digest32(identity);
+    if (existing) {
+      if (existing.decision_digest !== decisionDigest) throw new Error("Verified Work Loop decision idempotency conflict");
+      return { decision: existing, idempotent: true };
+    }
+    const saved = this.store.create("verified_work_loop_decision", decisionId, { ...identity, work_loop_version: loop.version, decision_digest: decisionDigest });
+    if (["human_change", "replan", "reject"].includes(decision)) this.store.save("verified_work_loop", String(loop.id), { ...payload27(loop), lifecycle: "needs_replan", needs_replan_reason: decision });
+    return { decision: saved, idempotent: false };
+  }
+  get(args) {
+    const loop = this.store.get("verified_work_loop", text44(args.work_loop_id, "work_loop_id"));
+    return { loop, receipts: this.store.list("verified_work_loop_receipt", 1e3, (item) => item.work_loop_id === loop.id), decisions: this.store.list("verified_work_loop_decision", 1e3, (item) => item.work_loop_id === loop.id) };
+  }
+};
+
+// src/eval-campaign.ts
+var import_node_crypto50 = require("node:crypto");
+function text45(value, name) {
+  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
+  return value.trim();
+}
+function digest33(value) {
+  return `sha256:${(0, import_node_crypto50.createHash)("sha256").update(JSON.stringify(value)).digest("hex")}`;
+}
+function positive2(value, name) {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 2 || parsed > 20) throw new Error(`${name} must be an integer between 2 and 20`);
+  return parsed;
+}
+function payload28(record) {
+  const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record;
+  return rest;
+}
+var EvalCampaignKernel = class {
+  store;
+  benchmarks;
+  constructor(store, benchmarks) {
+    this.store = store;
+    this.benchmarks = benchmarks;
+  }
+  create(args) {
+    const caseIds = Array.isArray(args.case_ids) ? args.case_ids.map((item) => text45(item, "case_ids")) : [];
+    if (!caseIds.length || new Set(caseIds).size !== caseIds.length) throw new Error("case_ids must be a unique non-empty array");
+    const cases = caseIds.map((caseId) => this.store.get("delivery_evaluation_case", caseId));
+    if (cases.some((item) => item.partition !== "held_out" || item.sanitized !== true)) throw new Error("Eval Campaign requires sanitized held_out Cases");
+    const trials = positive2(args.trials_per_case, "trials_per_case");
+    const environment = digest33(args.environment ?? {});
+    const budget = digest33(args.budget ?? {});
+    const acceptance = text45(args.acceptance_ref, "acceptance_ref");
+    const identity = { case_ids: caseIds, case_versions: cases.map((item) => ({ id: item.id, version: item.version })), baseline_harness: text45(args.baseline_harness, "baseline_harness"), candidate_harness: text45(args.candidate_harness, "candidate_harness"), trials_per_case: trials, environment_digest: environment, budget_digest: budget, acceptance_ref: acceptance };
+    const campaignId = String(args.campaign_id ?? `eval_campaign_${digest33(identity).slice(-16)}`);
+    const existing = this.store.find("eval_campaign", campaignId);
+    const identityDigest = digest33(identity);
+    if (existing) {
+      if (existing.identity_digest !== identityDigest) throw new Error("Eval Campaign idempotency conflict");
+      return { campaign: existing, slots: this.slots(String(existing.id)), idempotent: true };
+    }
+    const campaign = this.store.create("eval_campaign", campaignId, { ...identity, identity_digest: identityDigest, lifecycle: "collecting", publication_allowed: false });
+    const slots = cases.flatMap((item) => Array.from({ length: trials }, (_, index) => ["baseline", "candidate"].map((arm) => this.store.create("eval_campaign_slot", `eval_slot_${campaign.id}_${item.id}_${index + 1}_${arm}`, { campaign_id: campaign.id, case_id: item.id, case_version: item.version, trial: index + 1, arm, harness: arm === "baseline" ? identity.baseline_harness : identity.candidate_harness, task_run_id: null, status: "pending" })))).flat();
+    return { campaign, slots, idempotent: false };
+  }
+  bind(args) {
+    const slot = this.store.get("eval_campaign_slot", text45(args.slot_id, "slot_id"));
+    const campaign = this.store.get("eval_campaign", String(slot.campaign_id));
+    const run = this.store.get("task_run", text45(args.task_run_id, "task_run_id"));
+    if (slot.status === "bound" && slot.task_run_id === run.id) return { slot, idempotent: true };
+    if (slot.status !== "pending") throw new Error("Eval Campaign Slot is already bound");
+    if (run.environment_digest !== campaign.environment_digest || run.budget_digest !== campaign.budget_digest) throw new Error("Eval Campaign Run does not meet the campaign environment or budget");
+    return { slot: this.store.save("eval_campaign_slot", String(slot.id), { ...payload28(slot), task_run_id: run.id, task_run_version: run.version, status: "bound" }), idempotent: false };
+  }
+  advance(args) {
+    const campaign = this.store.get("eval_campaign", text45(args.campaign_id, "campaign_id"));
+    const slots = this.slots(String(campaign.id));
+    if (slots.some((slot) => slot.status !== "bound")) return { campaign, status: "collecting", benchmarks: [], evaluation: null };
+    const pairs = /* @__PURE__ */ new Map();
+    for (const slot of slots) {
+      const key2 = `${slot.case_id}:${slot.trial}`;
+      pairs.set(key2, [...pairs.get(key2) ?? [], slot]);
+    }
+    const benchmarks = [...pairs.entries()].map(([key2, pair]) => {
+      const baseline = pair.find((slot) => slot.arm === "baseline");
+      const candidate = pair.find((slot) => slot.arm === "candidate");
+      if (!baseline || !candidate) throw new Error("Eval Campaign pair is incomplete");
+      const benchmark = this.benchmarks.create({ benchmark_id: `eval_campaign_benchmark_${campaign.id}_${key2.replace(":", "_")}`, case_id: baseline.case_id, baseline_task_run_id: baseline.task_run_id, candidate_task_run_id: candidate.task_run_id }).benchmark;
+      return this.benchmarks.evaluate({ benchmark_id: benchmark.id }).benchmark;
+    });
+    if (benchmarks.some((item) => item.status === "awaiting_delivery")) return { campaign, status: "awaiting_delivery", benchmarks, evaluation: null };
+    if (benchmarks.some((item) => item.status !== "ready_for_aggregate")) return { campaign: this.store.save("eval_campaign", String(campaign.id), { ...payload28(campaign), lifecycle: "inconclusive" }), status: "inconclusive", benchmarks, evaluation: null };
+    const evaluation = this.benchmarks.aggregate({ benchmark_ids: benchmarks.map((item) => item.id), run_id: `eval_campaign_run_${campaign.id}`, min_trials: campaign.trials_per_case }).evaluation;
+    const lifecycle = evaluation.status === "eligible_for_signoff" ? "eligible" : evaluation.status === "rejected" ? "rejected" : "inconclusive";
+    return { campaign: this.store.save("eval_campaign", String(campaign.id), { ...payload28(campaign), lifecycle, evaluation_run_id: evaluation.id, evaluation_run_version: evaluation.version }), status: lifecycle, benchmarks, evaluation };
+  }
+  get(args) {
+    const campaign = this.store.get("eval_campaign", text45(args.campaign_id, "campaign_id"));
+    return { campaign, slots: this.slots(String(campaign.id)) };
+  }
+  slots(campaignId) {
+    return this.store.list("eval_campaign_slot", 1e4, (item) => item.campaign_id === campaignId);
+  }
+};
+
+// src/project-knowledge.ts
+var import_node_crypto51 = require("node:crypto");
+var import_node_fs9 = require("node:fs");
+var import_node_path16 = require("node:path");
+function text46(value, name) {
+  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
+  return value.trim();
+}
+function digest34(value) {
+  return `sha256:${(0, import_node_crypto51.createHash)("sha256").update(String(value)).digest("hex")}`;
+}
+function recordDigest(value) {
+  return `sha256:${(0, import_node_crypto51.createHash)("sha256").update(JSON.stringify(value)).digest("hex")}`;
+}
+function safeChild(root, path2) {
+  const target = (0, import_node_path16.resolve)(root, path2);
+  if ((0, import_node_path16.relative)(root, target).startsWith("..")) throw new Error("Project Knowledge path escapes the trusted project root");
+  return target;
+}
+function noSecret2(value) {
+  if (/(?:api[_-]?key|password|secret|token)\s*[:=]\s*[^\s]{8,}/i.test(value)) throw new Error("Project Knowledge content appears to contain a secret");
+}
+var ProjectKnowledgeKernel = class {
+  store;
+  constructor(store) {
+    this.store = store;
+  }
+  discover(args) {
+    if (args.trusted !== true) throw new Error("Project Knowledge discovery requires trusted=true");
+    const projectRoot = (0, import_node_path16.resolve)(text46(args.project_root, "project_root"));
+    const memoriesRoot = safeChild(projectRoot, ".serena/memories");
+    const children = (0, import_node_fs9.existsSync)(memoriesRoot) ? (0, import_node_fs9.readdirSync)(memoriesRoot, { withFileTypes: true }) : [];
+    if (children.some((entry2) => entry2.isSymbolicLink())) throw new Error("Project Knowledge does not follow symbolic links");
+    const entries2 = children.filter((entry2) => entry2.isFile() && entry2.name.endsWith(".md")).sort((a, b) => a.name.localeCompare(b.name)).map((entry2) => {
+      const path2 = safeChild(memoriesRoot, entry2.name);
+      const stat3 = (0, import_node_fs9.lstatSync)(path2);
+      if (stat3.isSymbolicLink()) throw new Error("Project Knowledge does not follow symbolic links");
+      const content = (0, import_node_fs9.readFileSync)(path2, "utf8");
+      return { memory_id: `serena:${entry2.name.slice(0, -3)}`, path: `.serena/memories/${entry2.name}`, name: entry2.name.slice(0, -3), digest: digest34(content), size_bytes: stat3.size };
+    });
+    const identity = { project_root: projectRoot, provider: "serena_project_memory", descriptors: entries2 };
+    const discoveryId = String(args.discovery_id ?? `project_knowledge_${recordDigest(identity).slice(-16)}`);
+    const existing = this.store.find("project_knowledge_discovery", discoveryId);
+    const discoveryDigest = recordDigest(identity);
+    if (existing) {
+      if (existing.discovery_digest !== discoveryDigest) throw new Error("Project Knowledge discovery idempotency conflict");
+      return { discovery: existing, idempotent: true };
+    }
+    return { discovery: this.store.create("project_knowledge_discovery", discoveryId, { ...identity, discovery_digest: discoveryDigest }), idempotent: false };
+  }
+  resolve(args) {
+    const discovery = this.store.get("project_knowledge_discovery", text46(args.discovery_id, "discovery_id"));
+    const requested = Array.isArray(args.memory_ids) ? args.memory_ids.map((item) => text46(item, "memory_ids")) : [];
+    if (!requested.length || requested.length > 3 || new Set(requested).size !== requested.length) throw new Error("Project Knowledge resolve accepts one to three unique memory_ids");
+    const maxChars = args.max_chars === void 0 ? 12e3 : Number(args.max_chars);
+    if (!Number.isInteger(maxChars) || maxChars < 1 || maxChars > 1e5) throw new Error("max_chars must be an integer between 1 and 100000");
+    const descriptors = new Map(discovery.descriptors.map((item) => [item.memory_id, item]));
+    const root = text46(discovery.project_root, "project_root");
+    let used = 0;
+    const memories = requested.map((memoryId) => {
+      const entry2 = descriptors.get(memoryId);
+      if (!entry2) throw new Error("Project Knowledge memory is not in this discovery");
+      const path2 = safeChild(root, entry2.path);
+      const stat3 = (0, import_node_fs9.lstatSync)(path2);
+      if (stat3.isSymbolicLink()) throw new Error("Project Knowledge does not follow symbolic links");
+      const content = (0, import_node_fs9.readFileSync)(path2, "utf8");
+      if (digest34(content) !== entry2.digest) throw new Error("Project Knowledge memory changed since discovery");
+      noSecret2(content);
+      used += content.length;
+      if (used > maxChars) throw new Error("Project Knowledge exceeds max_chars");
+      return { memory_id: entry2.memory_id, name: entry2.name, content, digest: entry2.digest };
+    });
+    const identity = { discovery_id: discovery.id, discovery_version: discovery.version, selected: memories.map(({ memory_id, name, digest: itemDigest }) => ({ memory_id, name, digest: itemDigest })), max_chars: maxChars };
+    const resolutionId = String(args.resolution_id ?? `project_knowledge_resolution_${recordDigest(identity).slice(-16)}`);
+    const existing = this.store.find("project_knowledge_resolution", resolutionId);
+    const resolutionDigest = recordDigest(identity);
+    if (existing) {
+      if (existing.resolution_digest !== resolutionDigest) throw new Error("Project Knowledge resolution idempotency conflict");
+      return { resolution: existing, memories, idempotent: true };
+    }
+    return { resolution: this.store.create("project_knowledge_resolution", resolutionId, { ...identity, resolution_digest: resolutionDigest }), memories, idempotent: false };
+  }
+  proposeUpdate(args) {
+    const discovery = this.store.get("project_knowledge_discovery", text46(args.discovery_id, "discovery_id"));
+    const evidenceIds = Array.isArray(args.evidence_ids) ? args.evidence_ids.map((item) => text46(item, "evidence_ids")) : [];
+    if (!evidenceIds.length) throw new Error("Project Knowledge update proposal requires evidence_ids");
+    for (const evidenceId of evidenceIds) this.store.get("evidence", evidenceId);
+    const identity = { discovery_id: discovery.id, discovery_version: discovery.version, memory_id: text46(args.memory_id, "memory_id"), evidence_ids: evidenceIds, summary_digest: recordDigest(text46(args.summary, "summary")) };
+    if (!discovery.descriptors.some((item) => item.memory_id === identity.memory_id)) throw new Error("Project Knowledge update target is not in discovery");
+    const proposalId = String(args.proposal_id ?? `project_knowledge_proposal_${recordDigest(identity).slice(-16)}`);
+    const existing = this.store.find("project_knowledge_proposal", proposalId);
+    const proposalDigest = recordDigest(identity);
+    if (existing) {
+      if (existing.proposal_digest !== proposalDigest) throw new Error("Project Knowledge proposal idempotency conflict");
+      return { proposal: existing, idempotent: true };
+    }
+    return { proposal: this.store.create("project_knowledge_proposal", proposalId, { ...identity, proposal_digest: proposalDigest, lifecycle: "draft", writes_external_memory: false }), idempotent: false };
+  }
+};
 
 // src/service-foundation.ts
 var ServiceFoundation = class {
@@ -15621,6 +15962,10 @@ var ServiceFoundation = class {
   taskControl;
   taskRuns;
   taskBenchmarks;
+  stateWorkspace;
+  verifiedWorkLoops;
+  evalCampaigns;
+  projectKnowledge;
   constructor(store, semanticProvider, isolatedAdapter = new LocalIsolatedAdapter(), dockerSandbox = new DockerSandboxAdapter(), egressBroker = new TrustedEgressBroker(), hostOwnerId) {
     this.store = store;
     this.catalog = new Catalog(store, semanticProvider);
@@ -15670,6 +16015,10 @@ var ServiceFoundation = class {
     this.taskControl = new TaskControlKernel(store, this.deliveryLoop);
     this.taskRuns = new TaskRunKernel(store);
     this.taskBenchmarks = new TaskBenchmarkKernel(store, this.deliveryEvaluation);
+    this.stateWorkspace = new StateWorkspaceKernel(store);
+    this.verifiedWorkLoops = new VerifiedWorkLoopKernel(store);
+    this.evalCampaigns = new EvalCampaignKernel(store, this.taskBenchmarks);
+    this.projectKnowledge = new ProjectKnowledgeKernel(store);
     this.hostRuns = new HostRunKernel(
       store,
       [this.codexHost, this.claudeHost],
@@ -15680,7 +16029,7 @@ var ServiceFoundation = class {
 };
 
 // src/service.ts
-var VERSION = "0.11.50";
+var VERSION = "0.11.51";
 var CONFIDENCE = /* @__PURE__ */ new Set(["confirmed", "bounded", "unverified", "rejected"]);
 var TASK_STATUS = /* @__PURE__ */ new Set(["active", "paused", "completed", "cancelled"]);
 var VERSIONED_LIFECYCLE = /* @__PURE__ */ new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -15700,12 +16049,12 @@ var KNOWLEDGE_KINDS = /* @__PURE__ */ new Set(["fact", "rule", "decision", "term
 var KNOWLEDGE_STATUSES = /* @__PURE__ */ new Set(["candidate", "reviewed", "disputed", "superseded", "expired"]);
 var KNOWLEDGE_RELATIONS = /* @__PURE__ */ new Set(["supports", "contradicts", "supersedes", "applies_to", "depends_on"]);
 function id11(prefix) {
-  return `${prefix}_${(0, import_node_crypto48.randomUUID)().replaceAll("-", "")}`;
+  return `${prefix}_${(0, import_node_crypto52.randomUUID)().replaceAll("-", "")}`;
 }
 function valueDigest(value) {
-  return `sha256:${(0, import_node_crypto48.createHash)("sha256").update(JSON.stringify(value)).digest("hex")}`;
+  return `sha256:${(0, import_node_crypto52.createHash)("sha256").update(JSON.stringify(value)).digest("hex")}`;
 }
-function text43(value, name) {
+function text47(value, name) {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
   return value.trim();
 }
@@ -15740,11 +16089,11 @@ function object15(value, name) {
   return value;
 }
 function recordPayload6(record) {
-  const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...payload27 } = record;
-  return payload27;
+  const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...payload29 } = record;
+  return payload29;
 }
 function uniqueTextArray2(value, name, minimum = 1) {
-  const values2 = array3(value, name).map((item) => text43(item, name));
+  const values2 = array3(value, name).map((item) => text47(item, name));
   if (values2.length < minimum || new Set(values2).size !== values2.length) {
     throw new Error(`${name} must contain at least ${minimum} unique values`);
   }
@@ -15752,7 +16101,7 @@ function uniqueTextArray2(value, name, minimum = 1) {
 }
 function optionalTextArray(value, name, fallback = []) {
   if (value === void 0) return fallback;
-  const values2 = array3(value, name).map((item) => text43(item, name));
+  const values2 = array3(value, name).map((item) => text47(item, name));
   if (new Set(values2).size !== values2.length) throw new Error(`${name} must contain unique values`);
   return values2;
 }
@@ -15808,8 +16157,8 @@ function receiptRequirements(value, name) {
   const normalized = {};
   for (const [stage, kinds] of Object.entries(requirements)) {
     if (!Object.hasOwn(DEFAULT_RECEIPT_REQUIREMENTS, stage)) throw new Error(`Unsupported receipt stage: ${stage}`);
-    const values2 = array3(kinds, `${name}.${stage}`).map((kind) => text43(kind, `${name}.${stage}`));
-    if (values2.some((kind) => !ROUTE_RECEIPT_KINDS.has(kind)) || new Set(values2).size !== values2.length) {
+    const values2 = array3(kinds, `${name}.${stage}`).map((kind2) => text47(kind2, `${name}.${stage}`));
+    if (values2.some((kind2) => !ROUTE_RECEIPT_KINDS.has(kind2)) || new Set(values2).size !== values2.length) {
       throw new Error(`${name}.${stage} must contain supported unique receipt kinds`);
     }
     normalized[stage] = values2;
@@ -15828,12 +16177,12 @@ function canonical7(value) {
   return JSON.stringify(value);
 }
 function fingerprint2(value) {
-  return (0, import_node_crypto48.createHash)("sha256").update(canonical7(value)).digest("hex");
+  return (0, import_node_crypto52.createHash)("sha256").update(canonical7(value)).digest("hex");
 }
 function runtimeAuthorization(runId, operation) {
-  const kind = String(operation.kind);
+  const kind2 = String(operation.kind);
   const effect = String(operation.effect);
-  const action = kind === "computer_use" ? "computer_use" : {
+  const action = kind2 === "computer_use" ? "computer_use" : {
     read_only: "read",
     local_write: "sandbox_write",
     external_write: "external_write",
@@ -15845,7 +16194,7 @@ function runtimeAuthorization(runId, operation) {
     authorization_target: target,
     request_digest: `sha256:${fingerprint2({
       operation_id: operation.operation_id,
-      kind,
+      kind: kind2,
       effect,
       objective: operation.objective,
       target,
@@ -15862,7 +16211,7 @@ function policyAllowsPath(value, prefixes) {
   });
 }
 function validIsoTime(value, name) {
-  const parsed = Date.parse(text43(value, name));
+  const parsed = Date.parse(text47(value, name));
   if (Number.isNaN(parsed)) throw new Error(`${name} must be an ISO timestamp`);
   return parsed;
 }
@@ -16020,6 +16369,17 @@ var CraftService = class _CraftService extends ServiceFoundation {
       "task_run_handoff",
       "task_benchmark",
       "task_benchmark_pair",
+      "state_snapshot",
+      "verified_work_loop",
+      "verified_work_loop_receipt",
+      "verified_work_loop_decision",
+      "human_state_event",
+      "work_loop_invalidation",
+      "eval_campaign",
+      "eval_campaign_slot",
+      "project_knowledge_discovery",
+      "project_knowledge_resolution",
+      "project_knowledge_proposal",
       "acceptance_plan",
       "acceptance_check",
       "acceptance_assessment",
@@ -16048,13 +16408,13 @@ var CraftService = class _CraftService extends ServiceFoundation {
     return {
       version: VERSION,
       data_root: this.store.paths.root,
-      counts: Object.fromEntries(kinds.map((kind) => [kind, this.store.count(kind)]))
+      counts: Object.fromEntries(kinds.map((kind2) => [kind2, this.store.count(kind2)]))
     };
   }
   sourceAdd(args) {
-    const label = args.label === void 0 ? void 0 : text43(args.label, "label");
+    const label = args.label === void 0 ? void 0 : text47(args.label, "label");
     return this.catalog.addSource(
-      text43(args.path, "path"),
+      text47(args.path, "path"),
       label,
       optionalBoolean(args.scan, "scan") ?? true,
       args.priority === void 0 ? 0 : finiteInteger(args.priority, "priority", 0, -1e3, 1e3)
@@ -16068,30 +16428,30 @@ var CraftService = class _CraftService extends ServiceFoundation {
   }
   sourceUpdate(args) {
     return this.catalog.updateSource(
-      text43(args.source_id, "source_id"),
+      text47(args.source_id, "source_id"),
       optionalBoolean(args.enabled, "enabled"),
-      args.label === void 0 ? void 0 : text43(args.label, "label"),
+      args.label === void 0 ? void 0 : text47(args.label, "label"),
       args.priority === void 0 ? void 0 : finiteInteger(args.priority, "priority", 0, -1e3, 1e3)
     );
   }
   sourceRemove(args) {
-    return this.catalog.removeSource(text43(args.source_id, "source_id"));
+    return this.catalog.removeSource(text47(args.source_id, "source_id"));
   }
   sourceScan(args) {
-    return this.catalog.scan(args.source_id === void 0 ? void 0 : text43(args.source_id, "source_id"));
+    return this.catalog.scan(args.source_id === void 0 ? void 0 : text47(args.source_id, "source_id"));
   }
   async capabilitySearch(args) {
     return {
-      capabilities: await this.catalog.searchHybrid(text43(args.query, "query"), finiteInteger(args.limit, "limit", 6, 1, 20)),
+      capabilities: await this.catalog.searchHybrid(text47(args.query, "query"), finiteInteger(args.limit, "limit", 6, 1, 20)),
       semantic_search: this.catalog.semanticStatus()
     };
   }
   async logicalActivationPlan(args) {
-    const task = this.store.get("task", text43(args.task_id, "task_id"));
-    const query = text43(args.query, "query");
+    const task = this.store.get("task", text47(args.task_id, "task_id"));
+    const query = text47(args.query, "query");
     const allowedEffects = uniqueTextArray2(args.allowed_effects ?? ["read_only"], "allowed_effects");
     if (allowedEffects.some((effect) => effect !== "read_only")) throw new Error("Indexed local capabilities may only be activated as read_only context");
-    const profileId = args.context_profile_id === void 0 ? null : text43(args.context_profile_id, "context_profile_id");
+    const profileId = args.context_profile_id === void 0 ? null : text47(args.context_profile_id, "context_profile_id");
     const profileVersion = args.context_profile_version === void 0 ? null : finiteInteger(args.context_profile_version, "context_profile_version", 1);
     if (profileId === null !== (profileVersion === null)) throw new Error("Context profile id and version must be supplied together");
     if (profileId !== null) {
@@ -16123,7 +16483,7 @@ var CraftService = class _CraftService extends ServiceFoundation {
     return { plan, candidates: selected };
   }
   logicalActivationAudit(args) {
-    const plan = this.store.get("logical_activation_plan", text43(args.plan_id, "plan_id"));
+    const plan = this.store.get("logical_activation_plan", text47(args.plan_id, "plan_id"));
     const findings2 = plan.selected.map((selected) => {
       const current2 = this.store.find("logical_capability", String(selected.logical_capability_id));
       const replacement = current2 ? null : this.store.list("logical_capability", Number.MAX_SAFE_INTEGER).find((logical) => logical.declaration_keys.some((key2) => selected.declaration_keys.includes(key2))) ?? null;
@@ -16148,7 +16508,7 @@ var CraftService = class _CraftService extends ServiceFoundation {
     return { plan: savedPlan, audit };
   }
   async logicalActivationResolve(args) {
-    const planId = text43(args.plan_id, "plan_id");
+    const planId = text47(args.plan_id, "plan_id");
     const audited = this.logicalActivationAudit({ plan_id: planId, audit_id: args.audit_id ?? id11("logical_activation_audit") });
     const plan = audited.plan;
     const audit = audited.audit;
@@ -16157,14 +16517,14 @@ var CraftService = class _CraftService extends ServiceFoundation {
     const capabilities = await Promise.all(plan.selected.map(async (selected) => {
       const logical = this.store.get("logical_capability", String(selected.logical_capability_id));
       const capability = this.store.get("capability", String(logical.selected_capability_id));
-      const content = await (0, import_promises12.readFile)(text43(capability.path, "capability.path"), "utf8");
-      const digest31 = (0, import_node_crypto48.createHash)("sha256").update(content).digest("hex");
-      if (digest31 !== selected.content_digest) throw new Error("Capability file digest drifted; rescan the source before loading it");
+      const content = await (0, import_promises12.readFile)(text47(capability.path, "capability.path"), "utf8");
+      const digest35 = (0, import_node_crypto52.createHash)("sha256").update(content).digest("hex");
+      if (digest35 !== selected.content_digest) throw new Error("Capability file digest drifted; rescan the source before loading it");
       assertNoSecret2(content, "capability content");
       if (content.length > maxChars) throw new Error("Capability content exceeds the requested context limit");
       return {
         logical_capability_id: logical.id,
-        content_digest: digest31,
+        content_digest: digest35,
         selected_capability_id: capability.id,
         selected_source_id: logical.selected_source_id,
         path: capability.path,
@@ -16190,17 +16550,17 @@ var CraftService = class _CraftService extends ServiceFoundation {
     return decideExecution(args);
   }
   capabilityGet(args) {
-    return this.catalog.get(text43(args.asset_id, "asset_id"));
+    return this.catalog.get(text47(args.asset_id, "asset_id"));
   }
   capabilityAssetSave(args) {
-    const assetType = text43(args.asset_type, "asset_type");
+    const assetType = text47(args.asset_type, "asset_type");
     const trust = String(args.trust ?? "untrusted");
     const health = String(args.health ?? "unknown");
-    const effect = text43(args.effect, "effect");
+    const effect = text47(args.effect, "effect");
     if (!CAPABILITY_ASSET_TYPES.has(assetType) || !CAPABILITY_TRUST.has(trust) || !CAPABILITY_HEALTH.has(health) || !SIDE_EFFECTS.has(effect)) {
       throw new Error("Capability asset type, trust, health, or effect is unsupported");
     }
-    const sourceUri = assertNoSecret2(text43(args.source_uri, "source_uri"), "source_uri");
+    const sourceUri = assertNoSecret2(text47(args.source_uri, "source_uri"), "source_uri");
     const dependencies = optionalTextArray(args.dependencies, "dependencies");
     const aliases = optionalTextArray(args.aliases, "aliases");
     return this.saveVersioned("capability_asset", "asset", {
@@ -16218,8 +16578,8 @@ var CraftService = class _CraftService extends ServiceFoundation {
     }, ["name", "asset_type", "source_uri", "effect"]);
   }
   capabilityAccessPlan(args) {
-    const task = this.store.get("task", text43(args.task_id, "task_id"));
-    const goal = text43(args.goal, "goal");
+    const task = this.store.get("task", text47(args.task_id, "task_id"));
+    const goal = text47(args.goal, "goal");
     const allowedEffects = uniqueTextArray2(args.allowed_effects ?? ["read_only"], "allowed_effects");
     if (allowedEffects.some((effect) => !SIDE_EFFECTS.has(effect))) throw new Error("allowed_effects must be supported");
     const tokens = goal.toLowerCase().match(/[\p{L}\p{N}_-]+/gu) ?? [];
@@ -16249,39 +16609,39 @@ var CraftService = class _CraftService extends ServiceFoundation {
     return { profile, receipt, candidates: candidates.map((item) => ({ asset_id: item.asset.id, matched: item.matched, verified_workflow: item.verified_workflow, historical_success_rate: item.historical, cost: item.cost, latency: item.latency, eligible: item.eligible, reason: item.reason })) };
   }
   capabilityCallIssue(args) {
-    const profile = this.store.get("activation_profile", text43(args.profile_id, "profile_id"));
-    const assetId = text43(args.asset_id, "asset_id");
+    const profile = this.store.get("activation_profile", text47(args.profile_id, "profile_id"));
+    const assetId = text47(args.asset_id, "asset_id");
     if (!profile.asset_ids.includes(assetId)) throw new Error("Capability asset is not in the activation profile");
-    const call = this.store.create("capability_call", String(args.call_id ?? id11("capability_call")), { profile_id: profile.id, profile_version: profile.version, asset_id: assetId, operation: assertNoSecret2(text43(args.operation, "operation"), "operation"), status: "issued", expires_at: args.expires_at ?? new Date(Date.now() + 3e5).toISOString() });
+    const call = this.store.create("capability_call", String(args.call_id ?? id11("capability_call")), { profile_id: profile.id, profile_version: profile.version, asset_id: assetId, operation: assertNoSecret2(text47(args.operation, "operation"), "operation"), status: "issued", expires_at: args.expires_at ?? new Date(Date.now() + 3e5).toISOString() });
     return { call_id: call.id, call };
   }
   capabilityCallConsume(args) {
-    const call = this.store.get("capability_call", text43(args.call_id, "call_id"));
-    if (call.profile_id !== text43(args.profile_id, "profile_id")) throw new Error("Capability call profile does not match");
+    const call = this.store.get("capability_call", text47(args.call_id, "call_id"));
+    if (call.profile_id !== text47(args.profile_id, "profile_id")) throw new Error("Capability call profile does not match");
     if (call.status !== "issued") throw new Error("Capability call was already consumed");
     if (validIsoTime(call.expires_at, "expires_at") < Date.now()) throw new Error("Capability call has expired");
     return { receipt: this.store.save("capability_call", String(call.id), { ...recordPayload6(call), status: "consumed", consumed_at: (/* @__PURE__ */ new Date()).toISOString() }) };
   }
   expertProfileSave(args) {
-    const expertType = text43(args.expert_type, "expert_type");
+    const expertType = text47(args.expert_type, "expert_type");
     const effects = uniqueTextArray2(args.allowed_effects, "allowed_effects");
     if (!EXPERT_TYPES.has(expertType) || effects.some((effect) => effect !== "read_only")) throw new Error("Only read-only diagnostic_research Expert is supported");
     return this.saveVersioned("expert_profile", "expert", { ...args, expert_type: expertType, allowed_effects: effects, output_contract: uniqueTextArray2(args.output_contract, "output_contract"), max_subagents: 5 }, ["name", "expert_type"]);
   }
   contextCapsuleCreate(args) {
-    const task = this.store.get("task", text43(args.task_id, "task_id"));
-    const profile = this.store.get("expert_profile", text43(args.profile_id, "profile_id"));
+    const task = this.store.get("task", text47(args.task_id, "task_id"));
+    const profile = this.store.get("expert_profile", text47(args.profile_id, "profile_id"));
     const artifactIds = optionalTextArray(args.artifact_ids, "artifact_ids");
     const evidenceIds = optionalTextArray(args.evidence_ids, "evidence_ids");
     for (const artifactId of artifactIds) this.store.get("artifact", artifactId);
     for (const evidenceId of evidenceIds) this.store.get("evidence", evidenceId);
-    return this.store.create("context_capsule", String(args.capsule_id ?? id11("capsule")), { task_id: task.id, expert_id: profile.id, expert_version: profile.version, artifact_ids: artifactIds, evidence_ids: evidenceIds, input_boundary: assertNoSecret2(text43(args.input_boundary, "input_boundary"), "input_boundary") });
+    return this.store.create("context_capsule", String(args.capsule_id ?? id11("capsule")), { task_id: task.id, expert_id: profile.id, expert_version: profile.version, artifact_ids: artifactIds, evidence_ids: evidenceIds, input_boundary: assertNoSecret2(text47(args.input_boundary, "input_boundary"), "input_boundary") });
   }
   expertSubagentCreate(args) {
-    const run = this.store.get("runtime_run", text43(args.run_id, "run_id"));
-    const parent = this.store.get("runtime_operation", text43(args.parent_operation_id, "parent_operation_id"));
-    const expert = this.store.get("expert_profile", text43(args.expert_id, "expert_id"));
-    const capsule = this.store.get("context_capsule", text43(args.capsule_id, "capsule_id"));
+    const run = this.store.get("runtime_run", text47(args.run_id, "run_id"));
+    const parent = this.store.get("runtime_operation", text47(args.parent_operation_id, "parent_operation_id"));
+    const expert = this.store.get("expert_profile", text47(args.expert_id, "expert_id"));
+    const capsule = this.store.get("context_capsule", text47(args.capsule_id, "capsule_id"));
     if (parent.run_id !== run.id || capsule.task_id !== run.task_id || capsule.expert_id !== expert.id) throw new Error("Expert Sub-agent inputs are incompatible");
     if (this.runtimeOperations(String(run.id)).filter((operation2) => operation2.parent_operation_id === parent.id).length >= Number(expert.max_subagents)) throw new Error("Expert may create at most 5 Sub-agent Runs");
     const operationId = String(args.operation_id ?? id11("subagent"));
@@ -16289,7 +16649,7 @@ var CraftService = class _CraftService extends ServiceFoundation {
       operation_id: operationId,
       kind: "agent",
       effect: "read_only",
-      objective: assertNoSecret2(text43(args.objective, "objective"), "objective")
+      objective: assertNoSecret2(text47(args.objective, "objective"), "objective")
     };
     return this.store.create("runtime_operation", operationId, {
       run_id: run.id,
@@ -16307,21 +16667,21 @@ var CraftService = class _CraftService extends ServiceFoundation {
     });
   }
   expertSubagentReport(args) {
-    const operation = this.store.get("runtime_operation", text43(args.operation_id, "operation_id"));
+    const operation = this.store.get("runtime_operation", text47(args.operation_id, "operation_id"));
     const report = object15(args.report, "report");
     const required2 = ["hypotheses", "counterexamples", "evidence_ids", "confidence", "next_action"];
     if (required2.some((key2) => report[key2] === void 0) || !Array.isArray(report.hypotheses) || !Array.isArray(report.counterexamples)) throw new Error("Expert report violates output contract");
     if (!Array.isArray(report.evidence_ids) || !report.evidence_ids.length) throw new Error("Evidence is required for an Expert report");
     const evidenceIds = uniqueTextArray2(report.evidence_ids, "report.evidence_ids");
     for (const evidenceId of evidenceIds) this.store.get("evidence", evidenceId);
-    if (!CONFIDENCE.has(text43(report.confidence, "report.confidence"))) throw new Error("Expert report confidence is unsupported");
-    return this.runtimeOperationSubmit({ operation_id: operation.id, lease_id: text43(args.lease_id, "lease_id"), claimed_by: text43(args.claimed_by, "claimed_by"), verdict: text43(args.verdict, "verdict"), summary: assertNoSecret2(JSON.stringify(report), "report"), evidence_ids: evidenceIds, costs: args.costs ?? {} });
+    if (!CONFIDENCE.has(text47(report.confidence, "report.confidence"))) throw new Error("Expert report confidence is unsupported");
+    return this.runtimeOperationSubmit({ operation_id: operation.id, lease_id: text47(args.lease_id, "lease_id"), claimed_by: text47(args.claimed_by, "claimed_by"), verdict: text47(args.verdict, "verdict"), summary: assertNoSecret2(JSON.stringify(report), "report"), evidence_ids: evidenceIds, costs: args.costs ?? {} });
   }
   projectPolicySave(args) {
-    const projectId = text43(args.project_id, "project_id");
+    const projectId = text47(args.project_id, "project_id");
     const enforcement = String(args.enforcement ?? "required");
     if (!(/* @__PURE__ */ new Set(["required", "advisory"])).has(enforcement)) throw new Error(`Unsupported policy enforcement: ${enforcement}`);
-    const policyId = String(args.policy_id ?? `project_policy_${(0, import_node_crypto48.createHash)("sha256").update(projectId).digest("hex").slice(0, 24)}`);
+    const policyId = String(args.policy_id ?? `project_policy_${(0, import_node_crypto52.createHash)("sha256").update(projectId).digest("hex").slice(0, 24)}`);
     return this.saveVersioned("project_policy", "policy", {
       ...args,
       policy_id: policyId,
@@ -16367,16 +16727,16 @@ var CraftService = class _CraftService extends ServiceFoundation {
   runtimePolicy(args) {
     return this.store.get(
       "runtime_policy",
-      text43(args.policy_id, "policy_id"),
+      text47(args.policy_id, "policy_id"),
       args.policy_version === void 0 ? void 0 : finiteInteger(args.policy_version, "policy_version", 1)
     );
   }
   runtimeAdapterSave(args) {
-    const host = text43(args.host, "host");
+    const host = text47(args.host, "host");
     if (!RUNTIME_ADAPTER_HOSTS.has(host)) throw new Error("Runtime adapter host is unsupported");
     const allowedKinds = uniqueTextArray2(args.allowed_kinds, "allowed_kinds");
     const allowedEffects = uniqueTextArray2(args.allowed_effects, "allowed_effects");
-    if (allowedKinds.some((kind) => !RUNTIME_KINDS.has(kind)) || allowedEffects.some((effect) => !SIDE_EFFECTS.has(effect))) {
+    if (allowedKinds.some((kind2) => !RUNTIME_KINDS.has(kind2)) || allowedEffects.some((effect) => !SIDE_EFFECTS.has(effect))) {
       throw new Error("Runtime adapter kinds or effects are unsupported");
     }
     const environment = String(args.execution_environment ?? "local");
@@ -16401,12 +16761,12 @@ var CraftService = class _CraftService extends ServiceFoundation {
   runtimeAdapterDispatch(args) {
     const adapter = this.store.get(
       "runtime_adapter",
-      text43(args.runtime_adapter_id, "runtime_adapter_id"),
+      text47(args.runtime_adapter_id, "runtime_adapter_id"),
       args.runtime_adapter_version === void 0 ? void 0 : finiteInteger(args.runtime_adapter_version, "runtime_adapter_version", 1)
     );
     const capacity = finiteInteger(args.capacity, "capacity", Number(adapter.max_concurrency), 1, Number(adapter.max_concurrency));
     const dispatch = this.runtimeDispatch({
-      run_id: text43(args.run_id, "run_id"),
+      run_id: text47(args.run_id, "run_id"),
       claimed_by: this.runtimeAdapterOwner(adapter),
       capacity,
       kinds: adapter.allowed_kinds,
@@ -16420,14 +16780,14 @@ var CraftService = class _CraftService extends ServiceFoundation {
   runtimeAdapterReport(args) {
     const adapter = this.store.get(
       "runtime_adapter",
-      text43(args.runtime_adapter_id, "runtime_adapter_id"),
+      text47(args.runtime_adapter_id, "runtime_adapter_id"),
       args.runtime_adapter_version === void 0 ? void 0 : finiteInteger(args.runtime_adapter_version, "runtime_adapter_version", 1)
     );
-    const operation = this.store.get("runtime_operation", text43(args.operation_id, "operation_id"));
+    const operation = this.store.get("runtime_operation", text47(args.operation_id, "operation_id"));
     if (!adapter.allowed_kinds.includes(String(operation.kind)) || !adapter.allowed_effects.includes(String(operation.effect))) {
       throw new Error("Runtime adapter is not authorized for this operation");
     }
-    const summary2 = assertNoSecret2(text43(args.summary, "summary"), "summary");
+    const summary2 = assertNoSecret2(text47(args.summary, "summary"), "summary");
     const artifact = this.artifactRegister({
       kind: "runtime_adapter_receipt",
       name: `Runtime adapter ${operation.id}`,
@@ -16450,24 +16810,24 @@ var CraftService = class _CraftService extends ServiceFoundation {
     });
     const submitted = this.runtimeOperationSubmit({
       operation_id: operation.id,
-      lease_id: text43(args.lease_id, "lease_id"),
+      lease_id: text47(args.lease_id, "lease_id"),
       claimed_by: this.runtimeAdapterOwner(adapter),
-      verdict: text43(args.verdict, "verdict"),
+      verdict: text47(args.verdict, "verdict"),
       summary: summary2,
       costs: args.costs ?? {},
       retryable: optionalBoolean(args.retryable, "retryable") ?? false,
-      artifact_ids: [...array3(args.artifact_ids ?? [], "artifact_ids").map((value) => text43(value, "artifact_id")), artifact.id],
-      evidence_ids: [...array3(args.evidence_ids ?? [], "evidence_ids").map((value) => text43(value, "evidence_id")), evidence.id],
+      artifact_ids: [...array3(args.artifact_ids ?? [], "artifact_ids").map((value) => text47(value, "artifact_id")), artifact.id],
+      evidence_ids: [...array3(args.evidence_ids ?? [], "evidence_ids").map((value) => text47(value, "evidence_id")), evidence.id],
       idempotency_key: args.idempotency_key ?? `adapter:${adapter.id}:${operation.id}:${operation.attempts}`
     });
     return { adapter, artifact, evidence, ...submitted };
   }
   async localIsolatedExecute(args) {
-    const run = this.store.get("runtime_run", text43(args.run_id, "run_id"));
-    const operation = this.store.get("runtime_operation", text43(args.operation_id, "operation_id"));
+    const run = this.store.get("runtime_run", text47(args.run_id, "run_id"));
+    const operation = this.store.get("runtime_operation", text47(args.operation_id, "operation_id"));
     if (operation.run_id !== run.id) throw new Error("Runtime operation does not belong to run");
     const policy = this.runtimePolicy({ policy_id: run.policy_id, policy_version: run.policy_version });
-    const command2 = text43(args.command, "command");
+    const command2 = text47(args.command, "command");
     const result = await this.isolatedAdapter.execute({
       run_id: String(run.id),
       command: command2,
@@ -16476,7 +16836,7 @@ var CraftService = class _CraftService extends ServiceFoundation {
       command_allowlist: policy.command_allowlist,
       path_allowlist: policy.path_allowlist,
       effect: String(operation.effect),
-      cwd: args.cwd === void 0 ? "." : text43(args.cwd, "cwd"),
+      cwd: args.cwd === void 0 ? "." : text47(args.cwd, "cwd"),
       requires_credential: optionalBoolean(args.requires_credential, "requires_credential") ?? false,
       compensation: args.compensation === void 0 ? null : object15(args.compensation, "compensation")
     });
@@ -16491,8 +16851,8 @@ var CraftService = class _CraftService extends ServiceFoundation {
     const evidence = this.evidenceRecord({ source_type: "program", confidence: String(result.status) === "passed" ? "confirmed" : "rejected", claim: `Local isolated execution ${result.status}.`, artifact_id: artifact.id });
     const submitted = this.runtimeOperationSubmit({
       operation_id: operation.id,
-      lease_id: text43(args.lease_id, "lease_id"),
-      claimed_by: text43(args.claimed_by, "claimed_by"),
+      lease_id: text47(args.lease_id, "lease_id"),
+      claimed_by: text47(args.claimed_by, "claimed_by"),
       verdict: String(result.status) === "passed" ? "passed" : "failed",
       summary: "Local isolated adapter receipt",
       artifact_ids: [artifact.id],
@@ -16517,7 +16877,7 @@ var CraftService = class _CraftService extends ServiceFoundation {
     return "failed";
   }
   runtimeRunStart(args) {
-    const task = this.store.get("task", text43(args.task_id, "task_id"));
+    const task = this.store.get("task", text47(args.task_id, "task_id"));
     const policy = this.runtimePolicy(args);
     const environment = object15(args.environment, "environment");
     const requested = array3(args.operations, "operations");
@@ -16526,23 +16886,23 @@ var CraftService = class _CraftService extends ServiceFoundation {
     const operationIds = /* @__PURE__ */ new Set();
     const operations = requested.map((raw, index) => {
       const input = object15(raw, `operations[${index}]`);
-      const operationId = text43(input.operation_id, `operations[${index}].operation_id`);
+      const operationId = text47(input.operation_id, `operations[${index}].operation_id`);
       if (operationIds.has(operationId)) throw new Error("operation_id must be unique within a run");
       operationIds.add(operationId);
-      const kind = text43(input.kind, `operations[${index}].kind`);
-      const effect = text43(input.effect, `operations[${index}].effect`);
-      if (!RUNTIME_KINDS.has(kind) || !SIDE_EFFECTS.has(effect) || !policy.allowed_effects.includes(effect)) {
+      const kind2 = text47(input.kind, `operations[${index}].kind`);
+      const effect = text47(input.effect, `operations[${index}].effect`);
+      if (!RUNTIME_KINDS.has(kind2) || !SIDE_EFFECTS.has(effect) || !policy.allowed_effects.includes(effect)) {
         throw new Error("Runtime operation kind or effect is not allowed by policy");
       }
-      const parentOperationId = input.parent_operation_id === void 0 ? null : text43(input.parent_operation_id, `operations[${index}].parent_operation_id`);
+      const parentOperationId = input.parent_operation_id === void 0 ? null : text47(input.parent_operation_id, `operations[${index}].parent_operation_id`);
       if (parentOperationId === operationId) throw new Error("Runtime operation cannot parent itself");
       const dependencies = input.depends_on === void 0 ? parentOperationId === null ? [] : [parentOperationId] : optionalTextArray(input.depends_on, `operations[${index}].depends_on`);
       if (dependencies.includes(operationId)) throw new Error("Runtime operation cannot depend on itself");
       const execution = input.execution === void 0 ? null : object15(input.execution, `operations[${index}].execution`);
       if (execution !== null) assertNoSecret2(canonical7(execution), `operations[${index}].execution`);
-      const objective = assertNoSecret2(text43(input.objective, `operations[${index}].objective`), "objective");
-      const target = input.target === void 0 ? void 0 : text43(input.target, `operations[${index}].target`);
-      const operation = { operation_id: operationId, kind, effect, objective, execution, ...target === void 0 ? {} : { target } };
+      const objective = assertNoSecret2(text47(input.objective, `operations[${index}].objective`), "objective");
+      const target = input.target === void 0 ? void 0 : text47(input.target, `operations[${index}].target`);
+      const operation = { operation_id: operationId, kind: kind2, effect, objective, execution, ...target === void 0 ? {} : { target } };
       return {
         ...operation,
         ...runtimeAuthorization(runId, operation),
@@ -16584,18 +16944,18 @@ var CraftService = class _CraftService extends ServiceFoundation {
     return { run, operations: this.runtimeOperations(String(run.id)) };
   }
   runtimeRunGet(args) {
-    const run = this.store.get("runtime_run", text43(args.run_id, "run_id"));
+    const run = this.store.get("runtime_run", text47(args.run_id, "run_id"));
     return { run, operations: this.runtimeOperations(String(run.id)), trace: this.store.events(`runtime:${run.id}`) };
   }
   runtimeDispatch(args) {
-    const run = this.store.get("runtime_run", text43(args.run_id, "run_id"));
+    const run = this.store.get("runtime_run", text47(args.run_id, "run_id"));
     if (RUNTIME_RUN_TERMINAL.has(String(run.status))) return { run, operations: [] };
     if (run.status !== "running") return { run, operations: [], paused: run.status };
     const policy = this.runtimePolicy({ policy_id: run.policy_id, policy_version: run.policy_version });
-    const claimedBy = text43(args.claimed_by, "claimed_by");
+    const claimedBy = text47(args.claimed_by, "claimed_by");
     const capacity = finiteInteger(args.capacity, "capacity", Number(policy.max_concurrency), 1, Number(policy.max_concurrency));
     const kinds = args.kinds === void 0 ? void 0 : uniqueTextArray2(args.kinds, "kinds");
-    if (kinds?.some((kind) => !RUNTIME_KINDS.has(kind))) throw new Error("Runtime dispatch kinds must be supported");
+    if (kinds?.some((kind2) => !RUNTIME_KINDS.has(kind2))) throw new Error("Runtime dispatch kinds must be supported");
     const effects = args.effects === void 0 ? void 0 : uniqueTextArray2(args.effects, "effects");
     if (effects?.some((effect) => !SIDE_EFFECTS.has(effect))) throw new Error("Runtime dispatch effects must be supported");
     const operations = this.runtimeOperations(String(run.id));
@@ -16670,14 +17030,14 @@ var CraftService = class _CraftService extends ServiceFoundation {
     return { run: this.store.get("runtime_run", String(run.id)), operations: dispatched };
   }
   runtimeOperationGet(args) {
-    return { operation: this.store.get("runtime_operation", text43(args.operation_id, "operation_id")) };
+    return { operation: this.store.get("runtime_operation", text47(args.operation_id, "operation_id")) };
   }
   runtimeOperationDecision(args) {
-    const operation = this.store.get("runtime_operation", text43(args.operation_id, "operation_id"));
+    const operation = this.store.get("runtime_operation", text47(args.operation_id, "operation_id"));
     if (operation.status !== "awaiting_approval") throw new Error("Runtime operation is not awaiting approval");
-    const decision = text43(args.decision, "decision");
+    const decision = text47(args.decision, "decision");
     if (!(/* @__PURE__ */ new Set(["approve", "reject"])).has(decision)) throw new Error("Runtime approval decision must be approve or reject");
-    const actor = text43(args.actor, "actor");
+    const actor = text47(args.actor, "actor");
     const status = decision === "approve" ? "pending" : "rejected";
     const saved = this.store.save("runtime_operation", String(operation.id), {
       ...recordPayload6(operation),
@@ -16696,40 +17056,40 @@ var CraftService = class _CraftService extends ServiceFoundation {
     return this.store.save("runtime_run", String(run.id), { ...recordPayload6(run), status, resource_ledger: resourceLedger });
   }
   runtimeOperationSubmit(args) {
-    const operation = this.store.get("runtime_operation", text43(args.operation_id, "operation_id"));
-    const receiptKey = args.idempotency_key === void 0 ? null : text43(args.idempotency_key, "idempotency_key");
+    const operation = this.store.get("runtime_operation", text47(args.operation_id, "operation_id"));
+    const receiptKey = args.idempotency_key === void 0 ? null : text47(args.idempotency_key, "idempotency_key");
     const receipts = array3(operation.submission_receipts, "submission_receipts");
     if (receiptKey !== null && receipts.some((receipt) => receipt.idempotency_key === receiptKey)) {
       return this.runtimeRunGet({ run_id: operation.run_id });
     }
-    if (operation.status !== "leased" || operation.lease_id !== text43(args.lease_id, "lease_id") || operation.claimed_by !== text43(args.claimed_by, "claimed_by")) {
+    if (operation.status !== "leased" || operation.lease_id !== text47(args.lease_id, "lease_id") || operation.claimed_by !== text47(args.claimed_by, "claimed_by")) {
       throw new Error("Runtime operation lease does not match");
     }
-    const verdict = text43(args.verdict, "verdict");
+    const verdict = text47(args.verdict, "verdict");
     if (!(/* @__PURE__ */ new Set(["passed", "failed", "cancelled"])).has(verdict)) throw new Error("Unsupported runtime operation verdict");
     const costs = args.costs === void 0 ? {} : budgetLimits(object15(args.costs, "costs"));
     const run = this.store.get("runtime_run", String(operation.run_id));
     const policy = this.runtimePolicy({ policy_id: run.policy_id, policy_version: run.policy_version });
-    const artifactIds = array3(args.artifact_ids ?? [], "artifact_ids").map((value) => text43(value, "artifact_id"));
-    const evidenceIds = array3(args.evidence_ids ?? [], "evidence_ids").map((value) => text43(value, "evidence_id"));
+    const artifactIds = array3(args.artifact_ids ?? [], "artifact_ids").map((value) => text47(value, "artifact_id"));
+    const evidenceIds = array3(args.evidence_ids ?? [], "evidence_ids").map((value) => text47(value, "evidence_id"));
     for (const artifactId of artifactIds) this.store.get("artifact", artifactId);
     for (const evidenceId of evidenceIds) this.store.get("evidence", evidenceId);
     const childIds = /* @__PURE__ */ new Set();
     const children = (args.children === void 0 ? [] : array3(args.children, "children")).map((raw, index) => {
       const child = object15(raw, `children[${index}]`);
-      const childId = text43(child.operation_id, `children[${index}].operation_id`);
+      const childId = text47(child.operation_id, `children[${index}].operation_id`);
       if (childIds.has(childId) || this.store.find("runtime_operation", childId)) {
         throw new Error("Runtime child operation already exists");
       }
       childIds.add(childId);
-      const kind = text43(child.kind, `children[${index}].kind`);
-      const effect = text43(child.effect, `children[${index}].effect`);
-      if (!RUNTIME_KINDS.has(kind) || !SIDE_EFFECTS.has(effect) || !policy.allowed_effects.includes(effect)) {
+      const kind2 = text47(child.kind, `children[${index}].kind`);
+      const effect = text47(child.effect, `children[${index}].effect`);
+      if (!RUNTIME_KINDS.has(kind2) || !SIDE_EFFECTS.has(effect) || !policy.allowed_effects.includes(effect)) {
         throw new Error("Runtime child kind or effect is not allowed by policy");
       }
-      const objective = assertNoSecret2(text43(child.objective, `children[${index}].objective`), "objective");
-      const target = child.target === void 0 ? void 0 : text43(child.target, `children[${index}].target`);
-      const next = { operation_id: childId, kind, effect, objective, ...target === void 0 ? {} : { target } };
+      const objective = assertNoSecret2(text47(child.objective, `children[${index}].objective`), "objective");
+      const target = child.target === void 0 ? void 0 : text47(child.target, `children[${index}].target`);
+      const next = { operation_id: childId, kind: kind2, effect, objective, ...target === void 0 ? {} : { target } };
       return { ...next, ...runtimeAuthorization(String(run.id), next), agent_profile_id: child.agent_profile_id ?? null };
     });
     const retryable = optionalBoolean(args.retryable, "retryable") ?? false;
@@ -16769,7 +17129,7 @@ var CraftService = class _CraftService extends ServiceFoundation {
     return { operation: saved, run: updatedRun, operations: this.runtimeOperations(String(run.id)) };
   }
   runtimeLeaseRecover(args) {
-    const run = this.store.get("runtime_run", text43(args.run_id, "run_id"));
+    const run = this.store.get("runtime_run", text47(args.run_id, "run_id"));
     const now = args.now === void 0 ? Date.now() : validIsoTime(args.now, "now");
     const policy = this.runtimePolicy({ policy_id: run.policy_id, policy_version: run.policy_version });
     const recovered = [];
@@ -16790,9 +17150,9 @@ var CraftService = class _CraftService extends ServiceFoundation {
   }
   runtimeAuthorizeWorkflow(operation, policy) {
     const execution = object15(operation.execution, "runtime operation execution");
-    const projectRoot = text43(execution.project_root, "execution.project_root");
+    const projectRoot = text47(execution.project_root, "execution.project_root");
     const plan = this.workflowPlan({
-      workflow_id: text43(execution.workflow_id, "execution.workflow_id"),
+      workflow_id: text47(execution.workflow_id, "execution.workflow_id"),
       version: execution.workflow_version,
       inputs: object15(execution.inputs, "execution.inputs"),
       approved_side_effects: policy.allowed_effects
@@ -16820,8 +17180,8 @@ var CraftService = class _CraftService extends ServiceFoundation {
     return { execution, project_root: projectRoot, plan };
   }
   runtimeDriverTick(args) {
-    const run = this.store.get("runtime_run", text43(args.run_id, "run_id"));
-    const driverId = text43(args.driver_id, "driver_id");
+    const run = this.store.get("runtime_run", text47(args.run_id, "run_id"));
+    const driverId = text47(args.driver_id, "driver_id");
     const policy = this.runtimePolicy({ policy_id: run.policy_id, policy_version: run.policy_version });
     if (!policy.trusted_hosts.includes(driverId)) throw new Error("Runtime Driver is not a trusted host for this policy");
     this.runtimeLeaseRecover({ run_id: run.id });
@@ -16895,12 +17255,12 @@ var CraftService = class _CraftService extends ServiceFoundation {
     };
   }
   runtimeRunResume(args) {
-    const run = this.store.get("runtime_run", text43(args.run_id, "run_id"));
+    const run = this.store.get("runtime_run", text47(args.run_id, "run_id"));
     const nextAction2 = RUNTIME_RUN_TERMINAL.has(String(run.status)) ? { kind: "completed", status: run.status } : run.status === "paused_budget" ? { kind: "await_budget", status: run.status } : { kind: "dispatch", status: run.status };
     return { run, next_action: nextAction2 };
   }
   runtimePromotionEligibility(args) {
-    const run = this.store.get("runtime_run", text43(args.run_id, "run_id"));
+    const run = this.store.get("runtime_run", text47(args.run_id, "run_id"));
     const policy = this.runtimePolicy(args);
     const policyMatches = run.policy_id === policy.id && Number(run.policy_version) === Number(policy.version) && run.policy_fingerprint === fingerprint2(recordPayload6(policy));
     const environmentMatches = run.environment_fingerprint === fingerprint2(object15(args.environment, "environment"));
@@ -16912,8 +17272,8 @@ var CraftService = class _CraftService extends ServiceFoundation {
     };
   }
   harnessSelect(args) {
-    const task = this.store.get("task", text43(args.task_id, "task_id"));
-    const risk = text43(args.risk, "risk");
+    const task = this.store.get("task", text47(args.task_id, "task_id"));
+    const risk = text47(args.risk, "risk");
     if (!(/* @__PURE__ */ new Set(["low", "medium", "high"])).has(risk)) throw new Error("Harness risk must be low, medium, or high");
     const budget = budgetLimits(object15(args.budget ?? {}, "budget"));
     const external = optionalBoolean(args.requires_external_effect, "requires_external_effect") ?? false;
@@ -16943,27 +17303,27 @@ var CraftService = class _CraftService extends ServiceFoundation {
     return { strategy, harness };
   }
   agentIrCompile(args) {
-    const task = this.store.get("task", text43(args.task_id, "task_id"));
+    const task = this.store.get("task", text47(args.task_id, "task_id"));
     const harness = this.store.get(
       "harness_configuration",
-      text43(args.harness_id, "harness_id"),
+      text47(args.harness_id, "harness_id"),
       args.harness_version === void 0 ? void 0 : finiteInteger(args.harness_version, "harness_version", 1)
     );
     const operations = array3(args.operations, "operations").map((raw, index) => {
       const item = object15(raw, `operations[${index}]`);
-      const operationId = text43(item.id, `operations[${index}].id`);
-      const kind = text43(item.kind, `operations[${index}].kind`);
-      const effect = text43(item.effect, `operations[${index}].effect`);
-      if (!RUNTIME_KINDS.has(kind) || !SIDE_EFFECTS.has(effect)) throw new Error("Agent IR operation kind or effect is unsupported");
+      const operationId = text47(item.id, `operations[${index}].id`);
+      const kind2 = text47(item.kind, `operations[${index}].kind`);
+      const effect = text47(item.effect, `operations[${index}].effect`);
+      if (!RUNTIME_KINDS.has(kind2) || !SIDE_EFFECTS.has(effect)) throw new Error("Agent IR operation kind or effect is unsupported");
       const dependsOn = optionalTextArray(item.depends_on, `operations[${index}].depends_on`);
       if (dependsOn.includes(operationId)) throw new Error("Agent IR operation cannot depend on itself");
       const execution = item.execution === void 0 ? null : object15(item.execution, `operations[${index}].execution`);
       if (execution !== null) assertNoSecret2(canonical7(execution), "Agent IR execution");
       return {
         id: operationId,
-        kind,
+        kind: kind2,
         effect,
-        objective: assertNoSecret2(text43(item.objective, `operations[${index}].objective`), "objective"),
+        objective: assertNoSecret2(text47(item.objective, `operations[${index}].objective`), "objective"),
         depends_on: dependsOn,
         agent_profile_id: item.agent_profile_id ?? null,
         execution
@@ -16978,7 +17338,7 @@ var CraftService = class _CraftService extends ServiceFoundation {
     }
     return this.store.create("agent_ir", String(args.ir_id ?? id11("agent_ir")), {
       task_id: task.id,
-      goal: text43(args.goal, "goal"),
+      goal: text47(args.goal, "goal"),
       harness_configuration_id: harness.id,
       harness_configuration_version: harness.version,
       operations,
@@ -16988,16 +17348,16 @@ var CraftService = class _CraftService extends ServiceFoundation {
   agentIrLower(args) {
     const ir = this.store.get(
       "agent_ir",
-      text43(args.ir_id, "ir_id"),
+      text47(args.ir_id, "ir_id"),
       args.ir_version === void 0 ? void 0 : finiteInteger(args.ir_version, "ir_version", 1)
     );
-    const runId = args.run_id === void 0 ? id11("runtime_run") : text43(args.run_id, "run_id");
+    const runId = args.run_id === void 0 ? id11("runtime_run") : text47(args.run_id, "run_id");
     const operations = ir.operations;
     const operationIds = new Map(operations.map((operation) => [String(operation.id), `${runId}:${operation.id}`]));
     const started = this.runtimeRunStart({
       run_id: runId,
       task_id: ir.task_id,
-      policy_id: text43(args.policy_id, "policy_id"),
+      policy_id: text47(args.policy_id, "policy_id"),
       policy_version: args.policy_version,
       trial_id: args.trial_id,
       environment: object15(args.environment, "environment"),
@@ -17014,8 +17374,8 @@ var CraftService = class _CraftService extends ServiceFoundation {
     return { ir, ...started };
   }
   experienceShadowExperimentCreate(args) {
-    const task = this.store.get("task", text43(args.task_id, "task_id"));
-    const candidateId = text43(args.mining_candidate_id, "mining_candidate_id");
+    const task = this.store.get("task", text47(args.task_id, "task_id"));
+    const candidateId = text47(args.mining_candidate_id, "mining_candidate_id");
     const candidate = this.store.find("experience_mining_candidate", candidateId);
     if (!candidate || candidate.lifecycle !== "proposal_only") {
       return { status: "rejected", reason: "Only an existing proposal-only mining candidate can enter shadow evaluation." };
@@ -17034,7 +17394,7 @@ var CraftService = class _CraftService extends ServiceFoundation {
     if (unsafe) throw new Error("Shadow evaluation accepts read-only Workflow steps only");
   }
   experienceShadowExperimentEvaluate(args) {
-    const experiment = this.store.get("experience_shadow_experiment", text43(args.experiment_id, "experiment_id"));
+    const experiment = this.store.get("experience_shadow_experiment", text47(args.experiment_id, "experiment_id"));
     if (experiment.status !== "planned") throw new Error("Only a planned shadow experiment can be evaluated");
     const candidate = this.store.get(
       "experience_mining_candidate",
@@ -17044,7 +17404,7 @@ var CraftService = class _CraftService extends ServiceFoundation {
     if (candidate.lifecycle !== "proposal_only") throw new Error("Shadow evaluation requires a proposal-only mining candidate");
     const suite = this.store.get(
       "evaluation_suite",
-      text43(args.suite_id, "suite_id"),
+      text47(args.suite_id, "suite_id"),
       args.suite_version === void 0 ? void 0 : finiteInteger(args.suite_version, "suite_version", 1)
     );
     if (!suite.cases.some((item) => item.split === "held_out")) {
@@ -17052,19 +17412,19 @@ var CraftService = class _CraftService extends ServiceFoundation {
     }
     const baseline = this.store.get(
       "workflow",
-      text43(args.baseline_workflow_id, "baseline_workflow_id"),
+      text47(args.baseline_workflow_id, "baseline_workflow_id"),
       finiteInteger(args.baseline_workflow_version, "baseline_workflow_version", 1)
     );
     const proposed = this.store.get(
       "workflow",
-      text43(args.candidate_workflow_id, "candidate_workflow_id"),
+      text47(args.candidate_workflow_id, "candidate_workflow_id"),
       finiteInteger(args.candidate_workflow_version, "candidate_workflow_version", 1)
     );
     this.assertShadowWorkflowReadOnly(baseline);
     this.assertShadowWorkflowReadOnly(proposed);
     const policy = this.store.get(
       "signoff_policy",
-      text43(args.signoff_policy_id, "signoff_policy_id"),
+      text47(args.signoff_policy_id, "signoff_policy_id"),
       finiteInteger(args.signoff_policy_version, "signoff_policy_version", 1)
     );
     const runner = this.evaluationRunnerRun({
@@ -17072,7 +17432,7 @@ var CraftService = class _CraftService extends ServiceFoundation {
       suite_id: suite.id,
       suite_version: suite.version,
       split: "held_out",
-      project_root: text43(args.project_root, "project_root"),
+      project_root: text47(args.project_root, "project_root"),
       trials_per_case: args.trials_per_case ?? 1,
       environment: args.environment ?? {},
       budget: args.budget ?? {},
@@ -17131,7 +17491,7 @@ var CraftService = class _CraftService extends ServiceFoundation {
     };
   }
   hostAdapterSave(args) {
-    const host = text43(args.host, "host");
+    const host = text47(args.host, "host");
     if (!(/* @__PURE__ */ new Set(["codex", "claude", "generic"])).has(host)) throw new Error(`Unsupported host adapter: ${host}`);
     const operations = uniqueTextArray2(args.allowed_operations, "allowed_operations");
     if (operations.some((operation) => !HOST_OPERATIONS.has(operation))) throw new Error("allowed_operations contains an unsupported operation");
@@ -17140,10 +17500,10 @@ var CraftService = class _CraftService extends ServiceFoundation {
   hostAdapterDispatch(args) {
     const adapter = this.store.get(
       "host_adapter",
-      text43(args.host_adapter_id, "host_adapter_id"),
+      text47(args.host_adapter_id, "host_adapter_id"),
       args.host_adapter_version === void 0 ? void 0 : finiteInteger(args.host_adapter_version, "host_adapter_version", 1)
     );
-    const route = this.store.get("route", text43(args.route_id, "route_id"));
+    const route = this.store.get("route", text47(args.route_id, "route_id"));
     const action = this.routeNextAction(route);
     const operation = String(action.kind);
     if (!HOST_OPERATIONS.has(operation) || !adapter.allowed_operations.includes(operation)) {
@@ -17165,11 +17525,11 @@ var CraftService = class _CraftService extends ServiceFoundation {
     return { dispatch, action };
   }
   hostAdapterReport(args) {
-    const dispatch = this.store.get("host_dispatch", text43(args.dispatch_id, "dispatch_id"));
+    const dispatch = this.store.get("host_dispatch", text47(args.dispatch_id, "dispatch_id"));
     if (dispatch.status !== "pending") throw new Error("Host dispatch is already terminal");
-    const status = text43(args.status, "status");
+    const status = text47(args.status, "status");
     if (!(/* @__PURE__ */ new Set(["completed", "failed", "cancelled"])).has(status)) throw new Error(`Unsupported host dispatch status: ${status}`);
-    const summary2 = assertNoSecret2(text43(args.summary, "summary"), "summary");
+    const summary2 = assertNoSecret2(text47(args.summary, "summary"), "summary");
     const updated = this.store.save("host_dispatch", String(dispatch.id), { ...recordPayload6(dispatch), status, summary: summary2 });
     const route = this.store.get("route", String(dispatch.route_id));
     if (route.trial_id) this.trialTraceAppend({
@@ -17181,26 +17541,26 @@ var CraftService = class _CraftService extends ServiceFoundation {
     return { dispatch: updated, next_action: this.routeNextAction(route) };
   }
   routeReceiptRecord(args) {
-    const route = this.store.get("route", text43(args.route_id, "route_id"));
+    const route = this.store.get("route", text47(args.route_id, "route_id"));
     if (route.workflow_id || ROUTE_TERMINAL.has(String(route.status))) throw new Error("Route receipts require an active safe route");
     const action = this.routeNextAction(route);
-    const stageId = text43(args.stage_id, "stage_id");
+    const stageId = text47(args.stage_id, "stage_id");
     if (action.kind !== "complete_stage" || action.stage_id !== stageId) throw new Error(`Route next required stage is ${action.stage_id ?? "none"}`);
-    const kind = text43(args.kind, "kind");
-    if (!ROUTE_RECEIPT_KINDS.has(kind)) throw new Error(`Unsupported route receipt kind: ${kind}`);
-    const status = text43(args.status, "status");
+    const kind2 = text47(args.kind, "kind");
+    if (!ROUTE_RECEIPT_KINDS.has(kind2)) throw new Error(`Unsupported route receipt kind: ${kind2}`);
+    const status = text47(args.status, "status");
     if (!ROUTE_RECEIPT_STATUS.has(status)) throw new Error(`Unsupported route receipt status: ${status}`);
-    const command2 = assertNoSecret2(text43(args.command, "command"), "command");
-    const summary2 = assertNoSecret2(text43(args.summary, "summary"), "summary");
+    const command2 = assertNoSecret2(text47(args.command, "command"), "command");
+    const summary2 = assertNoSecret2(text47(args.summary, "summary"), "summary");
     const receiptId = String(args.receipt_id ?? id11("receipt"));
     const artifact = this.artifactRegister({
       artifact_id: `artifact_${receiptId}`,
       kind: "route_receipt",
-      name: `${stageId}:${kind}`,
-      uri: args.uri === void 0 ? `craft://route-receipt/${receiptId}` : text43(args.uri, "uri"),
+      name: `${stageId}:${kind2}`,
+      uri: args.uri === void 0 ? `craft://route-receipt/${receiptId}` : text47(args.uri, "uri"),
       producer_type: "host",
       producer_id: args.host_adapter_id ?? null,
-      metadata: { route_id: route.id, stage_id: stageId, kind, status, command: command2 }
+      metadata: { route_id: route.id, stage_id: stageId, kind: kind2, status, command: command2 }
     });
     const evidence = this.evidenceRecord({
       evidence_id: `evidence_${receiptId}`,
@@ -17208,12 +17568,12 @@ var CraftService = class _CraftService extends ServiceFoundation {
       claim: summary2,
       confidence: status === "passed" ? "confirmed" : status === "failed" ? "rejected" : "bounded",
       artifact_id: artifact.id,
-      metadata: { route_id: route.id, stage_id: stageId, kind, status, command: command2 }
+      metadata: { route_id: route.id, stage_id: stageId, kind: kind2, status, command: command2 }
     });
     const receipt = this.store.create("route_receipt", receiptId, {
       route_id: route.id,
       stage_id: stageId,
-      kind,
+      kind: kind2,
       status,
       command: command2,
       summary: summary2,
@@ -17223,8 +17583,8 @@ var CraftService = class _CraftService extends ServiceFoundation {
     return { receipt, artifact, evidence };
   }
   defaultRoute(args, selectedCapabilities) {
-    const goal = text43(args.goal, "goal");
-    const title = args.title === void 0 ? goal.slice(0, 120) : text43(args.title, "title");
+    const goal = text47(args.goal, "goal");
+    const title = args.title === void 0 ? goal.slice(0, 120) : text47(args.title, "title");
     const mode = String(args.mode ?? "default");
     if (!(/* @__PURE__ */ new Set(["default", "safe_incremental_development"])).has(mode)) {
       throw new Error(`Unsupported route mode: ${mode}`);
@@ -17237,7 +17597,7 @@ var CraftService = class _CraftService extends ServiceFoundation {
     const capabilities = selectedCapabilities ?? this.catalog.search(goal, 6);
     const developmentPlan = workflow === null ? { stages: SAFE_INCREMENTAL_STAGES.map((stage) => ({ ...stage })) } : null;
     const strategyCapabilities = developmentPlan === null ? [] : capabilities.slice(0, 3).map((capability) => String(capability.id));
-    const strategyId = strategyCapabilities.length ? `route_strategy_${(0, import_node_crypto48.createHash)("sha256").update(JSON.stringify({ mode: "safe_incremental_development", capability_ids: strategyCapabilities })).digest("hex").slice(0, 24)}` : null;
+    const strategyId = strategyCapabilities.length ? `route_strategy_${(0, import_node_crypto52.createHash)("sha256").update(JSON.stringify({ mode: "safe_incremental_development", capability_ids: strategyCapabilities })).digest("hex").slice(0, 24)}` : null;
     const strategy = strategyId === null ? null : this.store.find("route_strategy", strategyId) ?? this.store.create(
       "route_strategy",
       strategyId,
@@ -17290,11 +17650,11 @@ var CraftService = class _CraftService extends ServiceFoundation {
     };
   }
   async defaultRouteWithSemanticSearch(args) {
-    const goal = text43(args.goal, "goal");
+    const goal = text47(args.goal, "goal");
     return this.defaultRoute(args, await this.catalog.searchHybrid(goal, 6));
   }
   defaultRouteResume(args) {
-    const taskId = text43(args.task_id, "task_id");
+    const taskId = text47(args.task_id, "task_id");
     const task = this.taskPack(taskId);
     const route = this.store.list("route", 1e3, (item) => item.task_id === taskId)[0];
     if (!route) throw new Error(`No route exists for task: ${taskId}`);
@@ -17302,9 +17662,9 @@ var CraftService = class _CraftService extends ServiceFoundation {
     return { ...task, route, trial, next_action: this.routeNextAction(route) };
   }
   defaultRouteFind(args) {
-    const rawQuery = text43(args.query, "query").toLowerCase();
+    const rawQuery = text47(args.query, "query").toLowerCase();
     const query = rawQuery.replace(/^(继续|接着|恢复)(上次|之前|刚才|上一个|上回|上轮)?的?[\s,，:：]*/u, "").trim();
-    const projectId = args.project_id === void 0 ? void 0 : text43(args.project_id, "project_id");
+    const projectId = args.project_id === void 0 ? void 0 : text47(args.project_id, "project_id");
     const tokens = query.match(/[\p{L}\p{N}_-]+/gu) ?? [];
     const candidates = query ? this.store.list("task", 1e3, (task) => {
       if (task.status !== "active" || projectId !== void 0 && task.project_id !== projectId) return false;
@@ -17331,11 +17691,11 @@ ${task.goal}`.toLowerCase();
     return { status: "matched", query, candidates: summaries, ...this.defaultRouteResume({ task_id: best[0].task.id }) };
   }
   routeWorkflowProposalCreate(args) {
-    const route = this.store.get("route", text43(args.route_id, "route_id"));
+    const route = this.store.get("route", text47(args.route_id, "route_id"));
     if (route.workflow_id || route.status !== "completed") {
       throw new Error("Workflow proposals require a completed safe route");
     }
-    const routeTrialId = text43(route.trial_id, "route trial_id");
+    const routeTrialId = text47(route.trial_id, "route trial_id");
     const routeOutcome = this.store.get("outcome", `outcome_${routeTrialId}`);
     if (routeOutcome.verdict !== "passed" || !route.strategy_id) {
       throw new Error("Workflow proposals require a passed route with a reusable strategy");
@@ -17357,7 +17717,7 @@ ${task.goal}`.toLowerCase();
     if (!stepsInput.length) throw new Error("Workflow proposals require at least one step");
     const workflow = this.workflowSave({
       workflow_id: args.workflow_id,
-      name: text43(args.name, "name"),
+      name: text47(args.name, "name"),
       description: args.description === void 0 ? "Evidence-backed draft derived from safe routes." : document(args.description, "description"),
       inputs: array3(args.inputs ?? [], "inputs"),
       steps: normalizeSteps(stepsInput),
@@ -17378,7 +17738,7 @@ ${task.goal}`.toLowerCase();
     };
   }
   defaultRouteUpdate(args) {
-    const route = this.store.get("route", text43(args.route_id, "route_id"));
+    const route = this.store.get("route", text47(args.route_id, "route_id"));
     if (ROUTE_TERMINAL.has(String(route.status))) throw new Error("Route is already terminal");
     if (route.workflow_id) throw new Error("Verified Workflow routes must use craft_default_route_execute");
     const developmentPlan = object15(route.development_plan, "route development_plan");
@@ -17386,31 +17746,31 @@ ${task.goal}`.toLowerCase();
     const states = array3(route.stage_state, "route stage_state");
     const index = states.findIndex((state) => state.status !== "completed");
     if (index < 0 || !stages[index]) throw new Error("Route has no pending stage");
-    const stageId = text43(args.stage_id, "stage_id");
-    const summary2 = text43(args.summary, "summary");
+    const stageId = text47(args.stage_id, "stage_id");
+    const summary2 = text47(args.summary, "summary");
     if (stageId !== stages[index].id) throw new Error(`Route next required stage is ${stages[index].id}`);
-    const receiptIds = array3(args.receipt_ids ?? [], "receipt_ids").map((value) => text43(value, "receipt_id"));
+    const receiptIds = array3(args.receipt_ids ?? [], "receipt_ids").map((value) => text47(value, "receipt_id"));
     if (new Set(receiptIds).size !== receiptIds.length) throw new Error("receipt_ids must be unique");
     const receipts = receiptIds.map((receiptId) => this.store.get("route_receipt", receiptId));
     if (receipts.some((receipt) => receipt.route_id !== route.id || receipt.stage_id !== stageId)) {
       throw new Error("Route receipts must belong to the current route stage");
     }
-    const requiredKinds = array3(route.receipt_requirements?.[stageId] ?? [], "receipt requirements").map((kind) => String(kind));
-    if (route.policy_enforcement === "required" && requiredKinds.some((kind) => !receipts.some((receipt) => receipt.kind === kind && receipt.status === "passed"))) {
+    const requiredKinds = array3(route.receipt_requirements?.[stageId] ?? [], "receipt requirements").map((kind2) => String(kind2));
+    if (route.policy_enforcement === "required" && requiredKinds.some((kind2) => !receipts.some((receipt) => receipt.kind === kind2 && receipt.status === "passed"))) {
       throw new Error(`Route stage requires required receipts: ${requiredKinds.join(", ")}`);
     }
     const artifactIds = [.../* @__PURE__ */ new Set([
-      ...array3(args.artifact_ids ?? [], "artifact_ids").map((value) => text43(value, "artifact_id")),
+      ...array3(args.artifact_ids ?? [], "artifact_ids").map((value) => text47(value, "artifact_id")),
       ...receipts.map((receipt) => String(receipt.artifact_id))
     ])];
     const evidenceIds = [.../* @__PURE__ */ new Set([
-      ...array3(args.evidence_ids ?? [], "evidence_ids").map((value) => text43(value, "evidence_id")),
+      ...array3(args.evidence_ids ?? [], "evidence_ids").map((value) => text47(value, "evidence_id")),
       ...receipts.map((receipt) => String(receipt.evidence_id))
     ])];
     for (const artifactId of artifactIds) this.store.get("artifact", artifactId);
     for (const evidenceId of evidenceIds) this.store.get("evidence", evidenceId);
     const isFinal = index === stages.length - 1;
-    const verdict = args.verdict === void 0 ? void 0 : text43(args.verdict, "verdict");
+    const verdict = args.verdict === void 0 ? void 0 : text47(args.verdict, "verdict");
     if (!isFinal && verdict !== void 0) throw new Error("verdict is only allowed for the final route stage");
     if (isFinal && verdict === void 0) throw new Error("verdict is required for the final route stage");
     if (verdict !== void 0 && !TRIAL_VERDICTS.has(verdict)) throw new Error(`Unsupported trial verdict: ${verdict}`);
@@ -17426,7 +17786,7 @@ ${task.goal}`.toLowerCase();
       artifacts: artifactIds,
       source: "craft_route"
     });
-    const trialId = text43(route.trial_id, "route trial_id");
+    const trialId = text47(route.trial_id, "route trial_id");
     this.trialTraceAppend({
       trial_id: trialId,
       event_type: "route_stage_completed",
@@ -17480,7 +17840,7 @@ ${task.goal}`.toLowerCase();
     };
   }
   defaultRouteExecute(args) {
-    const route = this.store.get("route", text43(args.route_id, "route_id"));
+    const route = this.store.get("route", text47(args.route_id, "route_id"));
     if (!route.workflow_id) throw new Error("Route has no verified Workflow to execute; complete the host plan first");
     const workflow = this.store.get("workflow", String(route.workflow_id), Number(route.workflow_version));
     if (workflow.lifecycle !== "verified") throw new Error("Route Workflow is no longer verified");
@@ -17545,8 +17905,8 @@ ${task.goal}`.toLowerCase();
     if (args.task_id) return this.taskPack(String(args.task_id));
     const taskId = id11("task");
     this.store.save("task", taskId, {
-      title: text43(args.title, "title"),
-      goal: text43(args.goal, "goal"),
+      title: text47(args.title, "title"),
+      goal: text47(args.goal, "goal"),
       project_id: args.project_id ?? null,
       status: "active"
     });
@@ -17558,7 +17918,7 @@ ${task.goal}`.toLowerCase();
     return { tasks: this.store.list("task", Number(args.limit ?? 10), (item) => (status === void 0 || item.status === status) && (args.project_id === void 0 || item.project_id === args.project_id)) };
   }
   taskCheckpoint(args) {
-    const taskId = text43(args.task_id, "task_id");
+    const taskId = text47(args.task_id, "task_id");
     const task = this.store.get("task", taskId);
     const status = String(args.status ?? task.status);
     if (!TASK_STATUS.has(status)) throw new Error(`Unsupported task status: ${status}`);
@@ -17569,7 +17929,7 @@ ${task.goal}`.toLowerCase();
     const artifacts = array3(args.artifacts ?? [], "artifacts");
     this.store.saveBatch([{ kind: "checkpoint", id: checkpointId, payload: {
       task_id: taskId,
-      summary: text43(args.summary, "summary"),
+      summary: text47(args.summary, "summary"),
       completed,
       pending,
       decisions,
@@ -17646,7 +18006,7 @@ ${task.goal}`.toLowerCase();
     return this.controlPlane.budgetOpen(args);
   }
   controlTrial(trialId, taskId) {
-    const trial = this.store.get("trial", text43(trialId, "trial_id"));
+    const trial = this.store.get("trial", text47(trialId, "trial_id"));
     if (taskId !== void 0 && trial.task_id !== taskId) throw new Error("Control-plane trial does not belong to the task");
     return trial;
   }
@@ -17696,9 +18056,9 @@ ${task.goal}`.toLowerCase();
     return result;
   }
   externalEventIngest(args) {
-    const eventId = text43(args.event_id, "event_id");
-    const eventKey = text43(args.event_key, "event_key");
-    const taskId = args.task_id === void 0 ? null : text43(args.task_id, "task_id");
+    const eventId = text47(args.event_id, "event_id");
+    const eventKey = text47(args.event_key, "event_key");
+    const taskId = args.task_id === void 0 ? null : text47(args.task_id, "task_id");
     const eventPayload = object15(args.payload ?? {}, "payload");
     const source = String(args.source ?? "external_untrusted");
     const requestFingerprint = fingerprint2({ event_key: eventKey, task_id: taskId, source, payload: eventPayload });
@@ -17708,7 +18068,7 @@ ${task.goal}`.toLowerCase();
       return { event: existing, deliveries: existing.deliveries, idempotent: true };
     }
     if (taskId) this.store.get("task", taskId);
-    const observedAt = args.observed_at === void 0 ? (/* @__PURE__ */ new Date()).toISOString() : text43(args.observed_at, "observed_at");
+    const observedAt = args.observed_at === void 0 ? (/* @__PURE__ */ new Date()).toISOString() : text47(args.observed_at, "observed_at");
     if (Number.isNaN(Date.parse(observedAt))) throw new Error("observed_at must be an ISO timestamp");
     const waits = this.store.list("durable_wait", 1e4, (item) => item.status === "waiting" && item.condition === "event" && item.event_key === eventKey && (taskId === null || item.task_id === taskId));
     const deliveries = waits.map((wait) => {
@@ -17738,7 +18098,7 @@ ${task.goal}`.toLowerCase();
     return { event, deliveries, idempotent: false };
   }
   durableWaitSweep(args) {
-    const nowText = args.now === void 0 ? (/* @__PURE__ */ new Date()).toISOString() : text43(args.now, "now");
+    const nowText = args.now === void 0 ? (/* @__PURE__ */ new Date()).toISOString() : text47(args.now, "now");
     const now = Date.parse(nowText);
     if (Number.isNaN(now)) throw new Error("now must be an ISO timestamp");
     const limit2 = finiteInteger(args.limit, "limit", 100, 1, 1e4);
@@ -17764,7 +18124,7 @@ ${task.goal}`.toLowerCase();
     return this.controlPlane.fallbackSave(args);
   }
   fallbackEvaluate(args) {
-    const contract = this.store.get("fallback_contract", text43(args.contract_id, "contract_id"));
+    const contract = this.store.get("fallback_contract", text47(args.contract_id, "contract_id"));
     const result = this.controlPlane.fallbackEvaluate(args);
     let trial = null;
     if (args.trial_id !== void 0) {
@@ -17772,7 +18132,7 @@ ${task.goal}`.toLowerCase();
       if (trial.subject_type !== contract.subject_type || trial.subject_id !== contract.subject_id || trial.subject_version !== contract.subject_version) throw new Error("Fallback trial subject does not match the contract");
     } else if (args.start_trial === true && result.decision === "fallback") {
       trial = this.trialStart({
-        task_id: text43(args.task_id, "task_id"),
+        task_id: text47(args.task_id, "task_id"),
         case_id: args.case_id,
         subject_type: contract.subject_type,
         subject_id: contract.subject_id,
@@ -17793,18 +18153,18 @@ ${task.goal}`.toLowerCase();
     return trial ? { ...result, trial } : result;
   }
   fallbackComplete(args) {
-    const event = this.store.get("fallback_event", text43(args.event_id, "event_id"));
+    const event = this.store.get("fallback_event", text47(args.event_id, "event_id"));
     if (event.status === "completed") return { event, outcome: this.store.get("outcome", String(event.outcome_id)), idempotent: true };
     if (event.decision !== "fallback" || event.status !== "running") throw new Error("Only a running fallback can be completed");
-    const trialId = text43(args.trial_id ?? event.trial_id, "trial_id");
+    const trialId = text47(args.trial_id ?? event.trial_id, "trial_id");
     const trial = this.controlTrial(trialId, event.task_id);
     const contract = this.store.get("fallback_contract", String(event.contract_id));
     if (trial.subject_type !== contract.subject_type || trial.subject_id !== contract.subject_id || trial.subject_version !== contract.subject_version) throw new Error("Fallback trial subject does not match the contract");
-    const evidenceIds = array3(args.evidence_ids ?? [], "evidence_ids").map((value) => text43(value, "evidence_id"));
+    const evidenceIds = array3(args.evidence_ids ?? [], "evidence_ids").map((value) => text47(value, "evidence_id"));
     for (const evidenceId of evidenceIds) this.store.get("evidence", evidenceId);
     const verdict = String(args.verdict);
     if (!TRIAL_VERDICTS.has(verdict)) throw new Error(`Unsupported trial verdict: ${verdict}`);
-    const summary2 = text43(args.summary, "summary");
+    const summary2 = text47(args.summary, "summary");
     const costs = object15(args.costs ?? {}, "costs");
     if (this.store.find("outcome", `outcome_${trial.id}`)) throw new Error(`Outcome already exists for trial: ${trial.id}`);
     const actualResources = budgetLimits(object15(args.actual_resources ?? costs, "actual_resources"));
@@ -17861,7 +18221,7 @@ ${task.goal}`.toLowerCase();
     return { request_digest: egressRequestDigest(args.method, args.url, args.headers, args.body) };
   }
   async egressExecute(args) {
-    const authorization = this.store.get("egress_authorization", text43(args.authorization_id, "authorization_id"));
+    const authorization = this.store.get("egress_authorization", text47(args.authorization_id, "authorization_id"));
     const existing = this.store.find("egress_execution", `execution_${authorization.id}`);
     if (existing) {
       if (existing.status === "pending" || existing.status === "indeterminate") throw new Error("Egress execution outcome is ambiguous and cannot be retried automatically");
@@ -17881,7 +18241,7 @@ ${task.goal}`.toLowerCase();
       handle_id: handle.id,
       url: authorization.url,
       action: authorization.action,
-      method: text43(args.method, "method").toUpperCase(),
+      method: text47(args.method, "method").toUpperCase(),
       request_digest: requestDigest,
       status: "pending",
       response_digest: null,
@@ -17947,18 +18307,18 @@ ${task.goal}`.toLowerCase();
     }
   }
   async sandboxEgressDeliver(args) {
-    const ticket = this.store.get("sandbox_ticket", text43(args.ticket_id, "ticket_id"));
+    const ticket = this.store.get("sandbox_ticket", text47(args.ticket_id, "ticket_id"));
     if (ticket.status !== "issued") throw new Error("Sandbox egress requires an active ticket");
     const profile = this.store.get("sandbox_profile", String(ticket.profile_id), Number(ticket.profile_version));
     const capabilities = profile.capabilities;
     if (capabilities.network !== "denied" || capabilities.filesystem !== "workspace_overlay") {
       throw new Error("Sandbox egress delivery requires denied network and a workspace overlay");
     }
-    const authorization = this.store.get("egress_authorization", text43(args.authorization_id, "authorization_id"));
+    const authorization = this.store.get("egress_authorization", text47(args.authorization_id, "authorization_id"));
     if (authorization.task_id !== ticket.task_id) throw new Error("Sandbox ticket and egress authorization must belong to the same task");
-    const outputName = args.output_name === void 0 ? "response.json" : text43(args.output_name, "output_name");
+    const outputName = args.output_name === void 0 ? "response.json" : text47(args.output_name, "output_name");
     if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}\.json$/u.test(outputName)) throw new Error("output_name must be a safe JSON filename");
-    const bindingId = text43(args.binding_id, "binding_id");
+    const bindingId = text47(args.binding_id, "binding_id");
     const bindingFingerprint = fingerprint2({ ticket_id: ticket.id, authorization_id: authorization.id, output_name: outputName });
     const existing = this.store.find("sandbox_egress_binding", bindingId);
     if (existing) {
@@ -17988,11 +18348,11 @@ ${task.goal}`.toLowerCase();
       });
       if (!executed.response) throw new Error("Egress response is unavailable for sandbox delivery");
       const response = executed.response;
-      const ticketHash = (0, import_node_crypto48.createHash)("sha256").update(String(ticket.id)).digest("hex").slice(0, 24);
-      const bindingHash = (0, import_node_crypto48.createHash)("sha256").update(bindingId).digest("hex").slice(0, 24);
-      const inbox = (0, import_node_path15.join)(this.store.paths.runtimeDir, "sandbox-inbox", ticketHash);
+      const ticketHash = (0, import_node_crypto52.createHash)("sha256").update(String(ticket.id)).digest("hex").slice(0, 24);
+      const bindingHash = (0, import_node_crypto52.createHash)("sha256").update(bindingId).digest("hex").slice(0, 24);
+      const inbox = (0, import_node_path17.join)(this.store.paths.runtimeDir, "sandbox-inbox", ticketHash);
       await (0, import_promises12.mkdir)(inbox, { recursive: true });
-      const outputPath = (0, import_node_path15.join)(inbox, `${bindingHash}-${outputName}`);
+      const outputPath = (0, import_node_path17.join)(inbox, `${bindingHash}-${outputName}`);
       const envelope = {
         trust: "untrusted_external_response",
         execution_authority: false,
@@ -18236,10 +18596,10 @@ ${task.goal}`.toLowerCase();
   speculativeEnqueue(args) {
     const policy = this.store.get(
       "speculative_policy",
-      text43(args.policy_id, "policy_id"),
+      text47(args.policy_id, "policy_id"),
       finiteInteger(args.policy_version, "policy_version", 0)
     );
-    const event = this.store.get("trigger_event", text43(args.trigger_event_id, "trigger_event_id"));
+    const event = this.store.get("trigger_event", text47(args.trigger_event_id, "trigger_event_id"));
     const reservationId = `spec_${policy.id}_v${policy.version}_${event.id}`;
     const reservation = this.budgetReserve({
       budget_id: policy.budget_id,
@@ -18290,7 +18650,7 @@ ${task.goal}`.toLowerCase();
     const evidenceIds = optionalTextArray(args.evidence_ids, "evidence_ids");
     for (const artifactId of artifactIds) this.store.get("artifact", artifactId);
     for (const evidenceId of evidenceIds) this.store.get("evidence", evidenceId);
-    const candidate = this.store.get("speculative_candidate", text43(args.candidate_id, "candidate_id"));
+    const candidate = this.store.get("speculative_candidate", text47(args.candidate_id, "candidate_id"));
     const reservation = this.store.get("budget_reservation", String(candidate.reservation_id));
     const actual = object15(args.actual_resources ?? {}, "actual_resources");
     for (const [name, amount] of Object.entries(actual)) if (typeof amount !== "number" || !Number.isFinite(amount) || amount < 0 || !Object.hasOwn(reservation.resources, name) || amount > Number(reservation.resources[name])) {
@@ -18327,7 +18687,7 @@ ${task.goal}`.toLowerCase();
   speculativeDecide(args) {
     const finalIds = optionalTextArray(args.final_artifact_ids, "final_artifact_ids");
     for (const artifactId of finalIds) this.store.get("artifact", artifactId);
-    const current2 = this.store.get("speculative_candidate", text43(args.candidate_id, "candidate_id"));
+    const current2 = this.store.get("speculative_candidate", text47(args.candidate_id, "candidate_id"));
     const reservation = current2.trial_id ? this.store.get("budget_reservation", String(current2.reservation_id)) : null;
     if (reservation && reservation.status !== "settled") throw new Error("Speculative candidate budget must be settled before evaluation");
     const result = this.speculative.decide({ ...args, ...args.final_artifact_ids === void 0 ? {} : { final_artifact_ids: finalIds } });
@@ -18523,7 +18883,7 @@ ${task.goal}`.toLowerCase();
     return this.codexHost.prepare(args);
   }
   async codexDispatchExecute(args) {
-    const dispatch = this.store.get("codex_dispatch", text43(args.dispatch_id, "dispatch_id"));
+    const dispatch = this.store.get("codex_dispatch", text47(args.dispatch_id, "dispatch_id"));
     if (dispatch.knowledge_binding !== void 0) throw new Error("Knowledge-bound dispatch must execute through its Knowledge Work Launch");
     return this.codexHost.execute(args);
   }
@@ -18531,15 +18891,15 @@ ${task.goal}`.toLowerCase();
     return this.claudeHost.prepare(args);
   }
   async claudeDispatchExecute(args) {
-    const dispatch = this.store.get("claude_dispatch", text43(args.dispatch_id, "dispatch_id"));
+    const dispatch = this.store.get("claude_dispatch", text47(args.dispatch_id, "dispatch_id"));
     if (dispatch.knowledge_binding !== void 0) throw new Error("Knowledge-bound dispatch must execute through its Knowledge Work Launch");
     return this.claudeHost.execute(args);
   }
   async activationBoundPrompt(args) {
-    const taskId = text43(args.task_id, "task_id");
+    const taskId = text47(args.task_id, "task_id");
     const prompt = document(args.prompt, "prompt");
     const maxChars = finiteInteger(args.max_chars, "max_chars", 16e3, 1, 1e5);
-    const resolved = await this.logicalActivationResolve({ plan_id: text43(args.plan_id, "plan_id"), max_chars: maxChars });
+    const resolved = await this.logicalActivationResolve({ plan_id: text47(args.plan_id, "plan_id"), max_chars: maxChars });
     const plan = resolved.plan;
     if (plan.task_id !== taskId) throw new Error("Activation plan does not belong to the dispatch task");
     const capabilities = resolved.capabilities;
@@ -18561,7 +18921,7 @@ ${material}
     };
   }
   async capabilityContextDispatchPrepare(args) {
-    const host = text43(args.host, "host");
+    const host = text47(args.host, "host");
     if (!(/* @__PURE__ */ new Set(["codex-cli", "claude-code"])).has(host)) throw new Error("Capability-context dispatch host is unsupported");
     const bound = await this.activationBoundPrompt(args);
     const dispatchArgs = { ...args, prompt: bound.prompt };
@@ -18578,10 +18938,10 @@ ${material}
     return { ...prepared, dispatch: saved, resolution: bound.resolution };
   }
   async capabilityContextDispatchExecute(args) {
-    const host = text43(args.host, "host");
-    const kind = host === "codex-cli" ? "codex_dispatch" : host === "claude-code" ? "claude_dispatch" : null;
-    if (!kind) throw new Error("Capability-context dispatch host is unsupported");
-    const dispatch = this.store.get(kind, text43(args.dispatch_id, "dispatch_id"));
+    const host = text47(args.host, "host");
+    const kind2 = host === "codex-cli" ? "codex_dispatch" : host === "claude-code" ? "claude_dispatch" : null;
+    if (!kind2) throw new Error("Capability-context dispatch host is unsupported");
+    const dispatch = this.store.get(kind2, text47(args.dispatch_id, "dispatch_id"));
     if (typeof dispatch.activation_plan_id !== "string" || typeof dispatch.activation_context_digest !== "string") throw new Error("Dispatch has no capability context binding");
     const bound = await this.activationBoundPrompt({ task_id: dispatch.task_id, prompt: document(args.prompt, "prompt"), plan_id: dispatch.activation_plan_id, max_chars: dispatch.activation_max_chars });
     if (bound.context_digest !== dispatch.activation_context_digest) throw new Error("Capability context changed since dispatch preparation");
@@ -18594,29 +18954,29 @@ ${material}
     const launch = prepared.launch;
     const dispatch = prepared.dispatch;
     const savedLaunch = this.store.save("work_launch", String(launch.id), { ...recordPayload6(launch), activation_plan_id: bound.plan.id, activation_plan_version: bound.plan.version, activation_context_digest: bound.context_digest, activation_max_chars: bound.max_chars, activation_resolution_id: bound.resolution.id });
-    const kind = savedLaunch.host === "codex-cli" ? "codex_dispatch" : "claude_dispatch";
-    const savedDispatch = this.store.save(kind, String(dispatch.id), { ...recordPayload6(dispatch), activation_plan_id: bound.plan.id, activation_plan_version: bound.plan.version, activation_context_digest: bound.context_digest, activation_max_chars: bound.max_chars, activation_resolution_id: bound.resolution.id });
+    const kind2 = savedLaunch.host === "codex-cli" ? "codex_dispatch" : "claude_dispatch";
+    const savedDispatch = this.store.save(kind2, String(dispatch.id), { ...recordPayload6(dispatch), activation_plan_id: bound.plan.id, activation_plan_version: bound.plan.version, activation_context_digest: bound.context_digest, activation_max_chars: bound.max_chars, activation_resolution_id: bound.resolution.id });
     return { ...prepared, launch: savedLaunch, dispatch: savedDispatch, resolution: bound.resolution };
   }
   async capabilityContextWorkLaunchDecide(args) {
-    const launch = this.store.get("work_launch", text43(args.launch_id, "launch_id"));
+    const launch = this.store.get("work_launch", text47(args.launch_id, "launch_id"));
     if (typeof launch.activation_plan_id !== "string" || typeof launch.activation_context_digest !== "string") throw new Error("Work Launch has no capability context binding");
     const bound = await this.activationBoundPrompt({ task_id: launch.task_id, prompt: document(args.prompt, "prompt"), plan_id: launch.activation_plan_id, max_chars: launch.activation_max_chars });
     if (bound.context_digest !== launch.activation_context_digest) throw new Error("Capability context changed since Work Launch preparation");
     return { ...this.workLaunchDecide({ ...args, prompt: bound.prompt }), resolution: bound.resolution };
   }
   knowledgeBoundPrompt(args) {
-    this.store.get("task", text43(args.task_id, "task_id"));
+    this.store.get("task", text47(args.task_id, "task_id"));
     const binding = this.knowledgeLaunch.bind({
-      bundle_id: text43(args.bundle_id, "bundle_id"),
+      bundle_id: text47(args.bundle_id, "bundle_id"),
       ...args.bundle_version === void 0 ? {} : { bundle_version: finiteInteger(args.bundle_version, "bundle_version", 1) },
-      ...args.now === void 0 ? {} : { now: text43(args.now, "now") }
+      ...args.now === void 0 ? {} : { now: text47(args.now, "now") }
     });
     return { binding, prompt: this.knowledgeLaunch.prompt(binding, document(args.prompt, "prompt")) };
   }
   knowledgeBoundPromptForLaunch(launch, args) {
     const binding = object15(launch.knowledge_binding, "Work Launch knowledge binding");
-    const validated = this.knowledgeLaunch.revalidate(binding, args.now === void 0 ? void 0 : text43(args.now, "now"));
+    const validated = this.knowledgeLaunch.revalidate(binding, args.now === void 0 ? void 0 : text47(args.now, "now"));
     return { binding: validated, prompt: this.knowledgeLaunch.prompt(validated, document(args.prompt, "prompt")) };
   }
   knowledgeContextWorkLaunchPrepareSync(args) {
@@ -18625,7 +18985,7 @@ ${material}
     return { ...prepared, knowledge_binding: bound.binding };
   }
   knowledgeContextWorkLaunchDecideSync(args) {
-    const launch = this.store.get("work_launch", text43(args.launch_id, "launch_id"));
+    const launch = this.store.get("work_launch", text47(args.launch_id, "launch_id"));
     const bound = this.knowledgeBoundPromptForLaunch(launch, args);
     return this.workLaunchDecideInternal({ ...args, prompt: bound.prompt }, bound.binding);
   }
@@ -18644,7 +19004,7 @@ ${material}
       bundle_id: binding.bundle_id,
       bundle_version: binding.bundle_version,
       now: args.now,
-      launch_id: args.new_launch_id === void 0 ? void 0 : text43(args.new_launch_id, "new_launch_id"),
+      launch_id: args.new_launch_id === void 0 ? void 0 : text47(args.new_launch_id, "new_launch_id"),
       retry_of: previous.id,
       model: args.model ?? dispatch.model ?? void 0,
       timeout_ms: args.timeout_ms ?? dispatch.timeout_ms,
@@ -18674,11 +19034,11 @@ ${material}
     return this.knowledgeContextWorkLaunchRetrySync(args);
   }
   hostRunStart(args) {
-    const host = text43(args.host, "host");
-    const kind = host === "codex-cli" ? "codex_dispatch" : host === "claude-code" ? "claude_dispatch" : null;
-    if (!kind) throw new Error("Host run host is unsupported");
-    if (args.run_id !== void 0 && this.store.find("host_run", text43(args.run_id, "run_id"))) return this.hostRuns.start(args);
-    const dispatch = this.store.get(kind, text43(args.dispatch_id, "dispatch_id"));
+    const host = text47(args.host, "host");
+    const kind2 = host === "codex-cli" ? "codex_dispatch" : host === "claude-code" ? "claude_dispatch" : null;
+    if (!kind2) throw new Error("Host run host is unsupported");
+    if (args.run_id !== void 0 && this.store.find("host_run", text47(args.run_id, "run_id"))) return this.hostRuns.start(args);
+    const dispatch = this.store.get(kind2, text47(args.dispatch_id, "dispatch_id"));
     if (dispatch.knowledge_binding !== void 0) throw new Error("Knowledge-bound dispatch must start through its Knowledge Work Launch");
     return this.hostRuns.start(args);
   }
@@ -18692,90 +19052,90 @@ ${material}
     return this.hostRuns.recover(args);
   }
   acceptancePlanSave(args) {
-    const task = this.store.get("task", text43(args.task_id, "task_id"));
-    const launch = this.store.get("work_launch", text43(args.launch_id, "launch_id"));
+    const task = this.store.get("task", text47(args.task_id, "task_id"));
+    const launch = this.store.get("work_launch", text47(args.launch_id, "launch_id"));
     if (launch.task_id !== task.id) throw new Error("Acceptance plan task does not match the Work Launch");
     const criteria = array3(args.criteria, "criteria").map((value, index) => {
       const item = object15(value, `criteria[${index}]`);
-      const criterionId = text43(item.id, `criteria[${index}].id`);
-      const method = text43(item.method, `criteria[${index}].method`);
+      const criterionId = text47(item.id, `criteria[${index}].id`);
+      const method = text47(item.method, `criteria[${index}].method`);
       if (!ACCEPTANCE_METHODS.has(method)) throw new Error(`criteria[${index}].method is unsupported`);
-      return { id: criterionId, name: text43(item.name, `criteria[${index}].name`), method, required: item.required === void 0 ? true : optionalBoolean(item.required, `criteria[${index}].required`), instructions: item.instructions == null ? null : text43(item.instructions, `criteria[${index}].instructions`) };
+      return { id: criterionId, name: text47(item.name, `criteria[${index}].name`), method, required: item.required === void 0 ? true : optionalBoolean(item.required, `criteria[${index}].required`), instructions: item.instructions == null ? null : text47(item.instructions, `criteria[${index}].instructions`) };
     });
     if (!criteria.length || new Set(criteria.map((item) => item.id)).size !== criteria.length) throw new Error("Acceptance criteria must be non-empty with unique ids");
     const planId = String(args.plan_id ?? `acceptance_${launch.id}`);
     const existing = this.store.find("acceptance_plan", planId);
-    const digest31 = valueDigest({ task_id: task.id, launch_id: launch.id, criteria });
+    const digest35 = valueDigest({ task_id: task.id, launch_id: launch.id, criteria });
     if (existing) {
-      if (existing.definition_digest !== digest31) throw new Error("Acceptance plan idempotency conflict");
+      if (existing.definition_digest !== digest35) throw new Error("Acceptance plan idempotency conflict");
       return { plan: existing, trial: this.store.get("trial", String(existing.trial_id)), idempotent: true };
     }
-    let plan = this.store.create("acceptance_plan", planId, { task_id: task.id, launch_id: launch.id, name: text43(args.name ?? "Work acceptance", "name"), criteria, definition_digest: digest31, status: "active" });
+    let plan = this.store.create("acceptance_plan", planId, { task_id: task.id, launch_id: launch.id, name: text47(args.name ?? "Work acceptance", "name"), criteria, definition_digest: digest35, status: "active" });
     const trial = this.trialStart({ trial_id: `trial_${plan.id}`, task_id: task.id, subject_type: "acceptance_plan", subject_id: plan.id, subject_version: plan.version, environment: { work_launch_id: launch.id }, budget: {} });
     plan = this.store.save("acceptance_plan", planId, { ...plan, trial_id: trial.id });
     this.trialTraceAppend({ trial_id: trial.id, event_type: "acceptance.planned", source: "craft_runtime", data: { plan_id: plan.id, criterion_count: criteria.length } });
     return { plan, trial, idempotent: false };
   }
   acceptancePlanGet(args) {
-    const plan = this.store.get("acceptance_plan", text43(args.plan_id, "plan_id"));
+    const plan = this.store.get("acceptance_plan", text47(args.plan_id, "plan_id"));
     const checks = this.store.list("acceptance_check", 1e4, (item) => item.plan_id === plan.id);
     const assessment = this.store.find("acceptance_assessment", `assessment_${plan.id}`);
     return { plan, checks, assessment, outcome: plan.trial_id ? this.store.find("outcome", `outcome_${plan.trial_id}`) : null };
   }
   acceptanceCheckRecord(args) {
-    const plan = this.store.get("acceptance_plan", text43(args.plan_id, "plan_id"));
+    const plan = this.store.get("acceptance_plan", text47(args.plan_id, "plan_id"));
     if (plan.status !== "active") throw new Error("Acceptance plan is not active");
-    const criterionId = text43(args.criterion_id, "criterion_id");
+    const criterionId = text47(args.criterion_id, "criterion_id");
     const criterion = plan.criteria.find((item) => item.id === criterionId);
     if (!criterion) throw new Error("Acceptance criterion is unknown");
-    const evaluatorType = text43(args.evaluator_type, "evaluator_type");
+    const evaluatorType = text47(args.evaluator_type, "evaluator_type");
     if (evaluatorType !== criterion.method) throw new Error("Evaluator type does not match the acceptance method");
-    const result = text43(args.result, "result");
+    const result = text47(args.result, "result");
     if (!ACCEPTANCE_RESULTS.has(result)) throw new Error("Acceptance result is unsupported");
-    const evidenceIds = array3(args.evidence_ids, "evidence_ids").map((value) => text43(value, "evidence_id"));
+    const evidenceIds = array3(args.evidence_ids, "evidence_ids").map((value) => text47(value, "evidence_id"));
     if (!evidenceIds.length) throw new Error("Acceptance check requires evidence");
     for (const evidenceId of evidenceIds) this.store.get("evidence", evidenceId);
     const checkId = String(args.check_id ?? id11("acceptance_check"));
-    const identity = { plan_id: plan.id, plan_version: plan.version, criterion_id: criterionId, evaluator_type: evaluatorType, evaluator_id: text43(args.evaluator_id, "evaluator_id"), result, summary: text43(args.summary, "summary"), evidence_ids: evidenceIds };
-    const digest31 = valueDigest(identity);
+    const identity = { plan_id: plan.id, plan_version: plan.version, criterion_id: criterionId, evaluator_type: evaluatorType, evaluator_id: text47(args.evaluator_id, "evaluator_id"), result, summary: text47(args.summary, "summary"), evidence_ids: evidenceIds };
+    const digest35 = valueDigest(identity);
     const existing = this.store.find("acceptance_check", checkId);
     if (existing) {
-      if (existing.check_digest !== digest31) throw new Error("Acceptance check idempotency conflict");
+      if (existing.check_digest !== digest35) throw new Error("Acceptance check idempotency conflict");
       return { check: existing, idempotent: true };
     }
-    return { check: this.store.create("acceptance_check", checkId, { ...identity, check_digest: digest31 }), idempotent: false };
+    return { check: this.store.create("acceptance_check", checkId, { ...identity, check_digest: digest35 }), idempotent: false };
   }
   acceptanceHumanReview(args) {
-    const plan = this.store.get("acceptance_plan", text43(args.plan_id, "plan_id"));
-    const criterionId = text43(args.criterion_id, "criterion_id");
+    const plan = this.store.get("acceptance_plan", text47(args.plan_id, "plan_id"));
+    const criterionId = text47(args.criterion_id, "criterion_id");
     const criterion = plan.criteria.find((item) => item.id === criterionId);
     if (!criterion) throw new Error("Acceptance criterion is unknown");
     if (criterion.method !== "human") throw new Error("Workbench human review only accepts human criteria");
-    const result = text43(args.result, "result");
+    const result = text47(args.result, "result");
     if (!ACCEPTANCE_RESULTS.has(result)) throw new Error("Acceptance result is unsupported");
-    const summary2 = text43(args.summary, "summary");
-    const reviewer = text43(args.reviewer, "reviewer");
-    const reviewId = args.review_id === void 0 ? id11("human_review") : text43(args.review_id, "review_id");
+    const summary2 = text47(args.summary, "summary");
+    const reviewer = text47(args.reviewer, "reviewer");
+    const reviewId = args.review_id === void 0 ? id11("human_review") : text47(args.review_id, "review_id");
     const evidence = this.evidenceRecord({ evidence_id: `evidence_${reviewId}`, source_type: "human", confidence: result === "passed" ? "confirmed" : result === "failed" ? "rejected" : "bounded", claim: summary2, locator: `acceptance:${plan.id}:${criterionId}`, metadata: { reviewer, criterion_name: criterion.name } });
     const check = this.acceptanceCheckRecord({ check_id: `check_${reviewId}`, plan_id: plan.id, criterion_id: criterionId, evaluator_type: "human", evaluator_id: reviewer, result, summary: summary2, evidence_ids: [evidence.id] });
     const assessed = this.acceptanceAssess({ plan_id: plan.id });
     return { evidence, check: check.check, assessment: assessed.assessment, outcome: assessed.outcome };
   }
   acceptanceEvaluatorSave(args) {
-    const method = text43(args.method, "method");
+    const method = text47(args.method, "method");
     if (!ACCEPTANCE_METHODS.has(method) || method === "human") throw new Error("Automated acceptance evaluator method must be program, model, or business_signal");
     const configuration = object15(args.configuration ?? {}, "configuration");
     assertNoSecret2(canonical7(configuration), "configuration");
-    return this.store.save("acceptance_evaluator", String(args.evaluator_id ?? id11("acceptance_evaluator")), { name: text43(args.name, "name"), method, adapter_id: text43(args.adapter_id, "adapter_id"), configuration, max_attempts: finiteInteger(args.max_attempts, "max_attempts", 3, 1, 20), enabled: args.enabled === void 0 ? true : optionalBoolean(args.enabled, "enabled") });
+    return this.store.save("acceptance_evaluator", String(args.evaluator_id ?? id11("acceptance_evaluator")), { name: text47(args.name, "name"), method, adapter_id: text47(args.adapter_id, "adapter_id"), configuration, max_attempts: finiteInteger(args.max_attempts, "max_attempts", 3, 1, 20), enabled: args.enabled === void 0 ? true : optionalBoolean(args.enabled, "enabled") });
   }
   acceptanceEvaluationPrepare(args) {
-    const plan = this.store.get("acceptance_plan", text43(args.plan_id, "plan_id"));
+    const plan = this.store.get("acceptance_plan", text47(args.plan_id, "plan_id"));
     if (plan.status !== "active") throw new Error("Acceptance plan is not active");
-    const criterionId = text43(args.criterion_id, "criterion_id");
+    const criterionId = text47(args.criterion_id, "criterion_id");
     const criterion = plan.criteria.find((item) => item.id === criterionId);
     if (!criterion) throw new Error("Acceptance criterion is unknown");
     if (criterion.method === "human") throw new Error("Human criteria are reviewed directly, not dispatched");
-    const evaluator = this.store.get("acceptance_evaluator", text43(args.evaluator_id, "evaluator_id"), args.evaluator_version === void 0 ? void 0 : finiteInteger(args.evaluator_version, "evaluator_version", 1));
+    const evaluator = this.store.get("acceptance_evaluator", text47(args.evaluator_id, "evaluator_id"), args.evaluator_version === void 0 ? void 0 : finiteInteger(args.evaluator_version, "evaluator_version", 1));
     if (evaluator.enabled !== true) throw new Error("Acceptance evaluator is disabled");
     if (evaluator.method !== criterion.method) throw new Error("Acceptance evaluator method does not match the criterion");
     const jobId = String(args.job_id ?? `acceptance_job_${plan.id}_${criterionId}`);
@@ -18791,11 +19151,11 @@ ${material}
     return { job: this.store.create("acceptance_evaluation_job", jobId, { ...identity, request_digest: requestDigest, status: "ready", attempts: 0, lease_id: null, lease_expires_at: null }), idempotent: false };
   }
   acceptanceFileEvaluationPrepare(args) {
-    const configuration = { ...args.allowed_extensions === void 0 ? {} : { allowed_extensions: array3(args.allowed_extensions, "allowed_extensions").map((item) => text43(item, "allowed_extension")) }, ...args.max_bytes === void 0 ? {} : { max_bytes: finiteInteger(args.max_bytes, "max_bytes", 1, 1) } };
+    const configuration = { ...args.allowed_extensions === void 0 ? {} : { allowed_extensions: array3(args.allowed_extensions, "allowed_extensions").map((item) => text47(item, "allowed_extension")) }, ...args.max_bytes === void 0 ? {} : { max_bytes: finiteInteger(args.max_bytes, "max_bytes", 1, 1) } };
     const evaluatorId = `builtin_file_artifact_${valueDigest(configuration).slice(0, 16)}`;
     let evaluator = this.store.find("acceptance_evaluator", evaluatorId);
     if (!evaluator) evaluator = this.acceptanceEvaluatorSave({ evaluator_id: evaluatorId, name: "Built-in file artifact validator", method: "program", adapter_id: "builtin:file-artifact", configuration, max_attempts: 3 });
-    return this.acceptanceEvaluationPrepare({ plan_id: args.plan_id, criterion_id: args.criterion_id, evaluator_id: evaluator.id, evaluator_version: evaluator.version, job_id: args.job_id, input: { workspace: text43(args.workspace, "workspace"), relative_path: text43(args.relative_path, "relative_path"), ...args.expected_sha256 === void 0 ? {} : { expected_sha256: text43(args.expected_sha256, "expected_sha256") } } });
+    return this.acceptanceEvaluationPrepare({ plan_id: args.plan_id, criterion_id: args.criterion_id, evaluator_id: evaluator.id, evaluator_version: evaluator.version, job_id: args.job_id, input: { workspace: text47(args.workspace, "workspace"), relative_path: text47(args.relative_path, "relative_path"), ...args.expected_sha256 === void 0 ? {} : { expected_sha256: text47(args.expected_sha256, "expected_sha256") } } });
   }
   acceptanceCoverageEvaluationPrepare(args) {
     const names = ["lines", "branches", "functions", "statements"];
@@ -18808,7 +19168,7 @@ ${material}
     const evaluatorId = `builtin_coverage_report_${valueDigest(configuration).slice(0, 16)}`;
     let evaluator = this.store.find("acceptance_evaluator", evaluatorId);
     if (!evaluator) evaluator = this.acceptanceEvaluatorSave({ evaluator_id: evaluatorId, name: "Built-in coverage report validator", method: "program", adapter_id: "builtin:coverage-report", configuration });
-    return this.acceptanceEvaluationPrepare({ plan_id: args.plan_id, criterion_id: args.criterion_id, evaluator_id: evaluator.id, evaluator_version: evaluator.version, job_id: args.job_id, input: { workspace: text43(args.workspace, "workspace"), relative_path: text43(args.relative_path, "relative_path") } });
+    return this.acceptanceEvaluationPrepare({ plan_id: args.plan_id, criterion_id: args.criterion_id, evaluator_id: evaluator.id, evaluator_version: evaluator.version, job_id: args.job_id, input: { workspace: text47(args.workspace, "workspace"), relative_path: text47(args.relative_path, "relative_path") } });
   }
   acceptanceMediaProbePrepare(args) {
     const names = ["min_duration_seconds", "min_width", "min_height"];
@@ -18821,60 +19181,60 @@ ${material}
     const evaluatorId = `builtin_media_probe_${valueDigest(configuration).slice(0, 16)}`;
     let evaluator = this.store.find("acceptance_evaluator", evaluatorId);
     if (!evaluator) evaluator = this.acceptanceEvaluatorSave({ evaluator_id: evaluatorId, name: "Built-in ffprobe JSON validator", method: "program", adapter_id: "builtin:media-probe", configuration });
-    return this.acceptanceEvaluationPrepare({ plan_id: args.plan_id, criterion_id: args.criterion_id, evaluator_id: evaluator.id, evaluator_version: evaluator.version, job_id: args.job_id, input: { workspace: text43(args.workspace, "workspace"), relative_path: text43(args.relative_path, "relative_path") } });
+    return this.acceptanceEvaluationPrepare({ plan_id: args.plan_id, criterion_id: args.criterion_id, evaluator_id: evaluator.id, evaluator_version: evaluator.version, job_id: args.job_id, input: { workspace: text47(args.workspace, "workspace"), relative_path: text47(args.relative_path, "relative_path") } });
   }
   domainKitSave(args) {
     const fields2 = array3(args.fields, "fields").map((value, index) => {
       const item = object15(value, `fields[${index}]`);
-      const type = text43(item.type, `fields[${index}].type`);
+      const type = text47(item.type, `fields[${index}].type`);
       if (!DOMAIN_FIELD_TYPES.has(type)) throw new Error(`fields[${index}].type is unsupported`);
-      const options = item.options === void 0 ? [] : array3(item.options, `fields[${index}].options`).map((option) => text43(option, `fields[${index}].option`));
+      const options = item.options === void 0 ? [] : array3(item.options, `fields[${index}].options`).map((option) => text47(option, `fields[${index}].option`));
       if (type === "choice" && !options.length) throw new Error(`fields[${index}].options must not be empty for choice`);
       if (type !== "choice" && options.length) throw new Error(`fields[${index}].options are only valid for choice`);
-      return { id: text43(item.id, `fields[${index}].id`), label: text43(item.label, `fields[${index}].label`), type, required: item.required === void 0 ? true : optionalBoolean(item.required, `fields[${index}].required`), options };
+      return { id: text47(item.id, `fields[${index}].id`), label: text47(item.label, `fields[${index}].label`), type, required: item.required === void 0 ? true : optionalBoolean(item.required, `fields[${index}].required`), options };
     });
     if (!fields2.length || new Set(fields2.map((item) => item.id)).size !== fields2.length) throw new Error("Domain Kit fields must be non-empty with unique ids");
     const fieldMap = new Map(fields2.map((item) => [item.id, item]));
     const criteria = array3(args.criteria, "criteria").map((value, index) => {
       const item = object15(value, `criteria[${index}]`);
-      const method = text43(item.method, `criteria[${index}].method`);
+      const method = text47(item.method, `criteria[${index}].method`);
       if (!ACCEPTANCE_METHODS.has(method)) throw new Error(`criteria[${index}].method is unsupported`);
       const evaluator = item.evaluator == null ? null : object15(item.evaluator, `criteria[${index}].evaluator`);
       if (evaluator) {
-        const evaluatorType = text43(evaluator.type, `criteria[${index}].evaluator.type`);
+        const evaluatorType = text47(evaluator.type, `criteria[${index}].evaluator.type`);
         if (!(/* @__PURE__ */ new Set(["file", "coverage_report", "media_probe"])).has(evaluatorType) || method !== "program") throw new Error("Domain Kit supports only declared built-in evaluators on program criteria");
-        const pathField = text43(evaluator.path_field, `criteria[${index}].evaluator.path_field`);
+        const pathField = text47(evaluator.path_field, `criteria[${index}].evaluator.path_field`);
         if (fieldMap.get(pathField)?.type !== "path") throw new Error("Evaluator path_field must reference a path field");
       }
-      return { id: text43(item.id, `criteria[${index}].id`), name: text43(item.name, `criteria[${index}].name`), method, required: item.required === void 0 ? true : optionalBoolean(item.required, `criteria[${index}].required`), evaluator };
+      return { id: text47(item.id, `criteria[${index}].id`), name: text47(item.name, `criteria[${index}].name`), method, required: item.required === void 0 ? true : optionalBoolean(item.required, `criteria[${index}].required`), evaluator };
     });
     if (!criteria.length || new Set(criteria.map((item) => item.id)).size !== criteria.length) throw new Error("Domain Kit criteria must be non-empty with unique ids");
     const capabilityRequirements = array3(args.capability_requirements ?? [], "capability_requirements").map((value, index) => {
       const item = object15(value, `capability_requirements[${index}]`);
-      const trust = text43(item.required_trust ?? "trusted", `capability_requirements[${index}].required_trust`);
-      const effect = text43(item.effect, `capability_requirements[${index}].effect`);
+      const trust = text47(item.required_trust ?? "trusted", `capability_requirements[${index}].required_trust`);
+      const effect = text47(item.effect, `capability_requirements[${index}].effect`);
       if (!(/* @__PURE__ */ new Set(["trusted", "verified"])).has(trust) || !SIDE_EFFECTS.has(effect)) throw new Error("Domain Kit capability trust or effect is unsupported");
-      return { asset_id: text43(item.asset_id, `capability_requirements[${index}].asset_id`), asset_version: finiteInteger(item.asset_version, `capability_requirements[${index}].asset_version`, 1), required_trust: trust, effect };
+      return { asset_id: text47(item.asset_id, `capability_requirements[${index}].asset_id`), asset_version: finiteInteger(item.asset_version, `capability_requirements[${index}].asset_version`, 1), required_trust: trust, effect };
     });
     if (new Set(capabilityRequirements.map((item) => item.asset_id)).size !== capabilityRequirements.length) throw new Error("Domain Kit capability requirements must be unique");
     const objectSchemas = array3(args.object_schemas ?? [], "object_schemas").map((value, index) => {
       const item = object15(value, `object_schemas[${index}]`);
-      return { id: text43(item.id, `object_schemas[${index}].id`), name: text43(item.name, `object_schemas[${index}].name`), schema: object15(item.schema, `object_schemas[${index}].schema`) };
+      return { id: text47(item.id, `object_schemas[${index}].id`), name: text47(item.name, `object_schemas[${index}].name`), schema: object15(item.schema, `object_schemas[${index}].schema`) };
     });
     if (new Set(objectSchemas.map((item) => item.id)).size !== objectSchemas.length) throw new Error("Domain Kit object schemas must be unique");
     const components = array3(args.components ?? [], "components").map((value, index) => {
       const item = object15(value, `components[${index}]`);
-      const type = text43(item.type, `components[${index}].type`);
+      const type = text47(item.type, `components[${index}].type`);
       if (!(/* @__PURE__ */ new Set(["form", "artifact_preview", "checklist", "status"])).has(type)) throw new Error("Domain Kit component type is unsupported");
-      return { id: text43(item.id, `components[${index}].id`), type, binds_to: text43(item.binds_to, `components[${index}].binds_to`), read_only: item.read_only === void 0 ? true : optionalBoolean(item.read_only, `components[${index}].read_only`) };
+      return { id: text47(item.id, `components[${index}].id`), type, binds_to: text47(item.binds_to, `components[${index}].binds_to`), read_only: item.read_only === void 0 ? true : optionalBoolean(item.read_only, `components[${index}].read_only`) };
     });
     if (new Set(components.map((item) => item.id)).size !== components.length) throw new Error("Domain Kit components must be unique");
     const actionContracts = array3(args.action_contracts ?? [], "action_contracts").map((value, index) => {
       const item = object15(value, `action_contracts[${index}]`);
-      const effect = text43(item.effect, `action_contracts[${index}].effect`);
+      const effect = text47(item.effect, `action_contracts[${index}].effect`);
       if (!SIDE_EFFECTS.has(effect)) throw new Error("Domain Kit action effect is unsupported");
       const contractRef = item.contract_ref == null ? null : object15(item.contract_ref, `action_contracts[${index}].contract_ref`);
-      return { id: text43(item.id, `action_contracts[${index}].id`), effect, requires_approval: item.requires_approval === void 0 ? effect !== "read_only" : optionalBoolean(item.requires_approval, `action_contracts[${index}].requires_approval`), contract_ref: contractRef ? { contract_id: text43(contractRef.contract_id, `action_contracts[${index}].contract_ref.contract_id`), contract_version: finiteInteger(contractRef.contract_version, `action_contracts[${index}].contract_ref.contract_version`, 1), asset_id: text43(contractRef.asset_id, `action_contracts[${index}].contract_ref.asset_id`), asset_version: finiteInteger(contractRef.asset_version, `action_contracts[${index}].contract_ref.asset_version`, 1) } : null };
+      return { id: text47(item.id, `action_contracts[${index}].id`), effect, requires_approval: item.requires_approval === void 0 ? effect !== "read_only" : optionalBoolean(item.requires_approval, `action_contracts[${index}].requires_approval`), contract_ref: contractRef ? { contract_id: text47(contractRef.contract_id, `action_contracts[${index}].contract_ref.contract_id`), contract_version: finiteInteger(contractRef.contract_version, `action_contracts[${index}].contract_ref.contract_version`, 1), asset_id: text47(contractRef.asset_id, `action_contracts[${index}].contract_ref.asset_id`), asset_version: finiteInteger(contractRef.asset_version, `action_contracts[${index}].contract_ref.asset_version`, 1) } : null };
     });
     if (new Set(actionContracts.map((item) => item.id)).size !== actionContracts.length) throw new Error("Domain Kit actions must be unique");
     const budgetLimits2 = object15(args.budget_limits ?? {}, "budget_limits");
@@ -18882,16 +19242,16 @@ ${material}
     const sandboxRequirements = args.sandbox_requirements == null ? null : object15(args.sandbox_requirements, "sandbox_requirements");
     const evalSuiteRef = args.eval_suite_ref == null ? null : object15(args.eval_suite_ref, "eval_suite_ref");
     if (evalSuiteRef) {
-      text43(evalSuiteRef.suite_id, "eval_suite_ref.suite_id");
+      text47(evalSuiteRef.suite_id, "eval_suite_ref.suite_id");
       finiteInteger(evalSuiteRef.suite_version, "eval_suite_ref.suite_version", 1);
     }
     const kitId = String(args.kit_id ?? id11("domain_kit"));
-    const definition = { name: text43(args.name, "name"), domain: text43(args.domain, "domain"), description: text43(args.description, "description"), fields: fields2, criteria, capability_requirements: capabilityRequirements, object_schemas: objectSchemas, components, action_contracts: actionContracts, budget_limits: budgetLimits2, sandbox_requirements: sandboxRequirements, eval_suite_ref: evalSuiteRef, builtin: args.builtin === true };
+    const definition = { name: text47(args.name, "name"), domain: text47(args.domain, "domain"), description: text47(args.description, "description"), fields: fields2, criteria, capability_requirements: capabilityRequirements, object_schemas: objectSchemas, components, action_contracts: actionContracts, budget_limits: budgetLimits2, sandbox_requirements: sandboxRequirements, eval_suite_ref: evalSuiteRef, builtin: args.builtin === true };
     const definitionDigest = valueDigest(definition);
     return this.store.save("domain_kit", kitId, { ...definition, definition_digest: definitionDigest });
   }
   domainKitGet(args) {
-    return this.store.get("domain_kit", text43(args.kit_id, "kit_id"), args.kit_version === void 0 ? void 0 : finiteInteger(args.kit_version, "kit_version", 1));
+    return this.store.get("domain_kit", text47(args.kit_id, "kit_id"), args.kit_version === void 0 ? void 0 : finiteInteger(args.kit_version, "kit_version", 1));
   }
   domainKitList(args) {
     return { kits: this.store.list("domain_kit", finiteInteger(args.limit, "limit", 20, 1, 100)) };
@@ -18956,7 +19316,7 @@ ${material}
   }
   domainKitApply(args) {
     const kit = this.domainKitGet(args);
-    const launch = this.store.get("work_launch", text43(args.launch_id, "launch_id"));
+    const launch = this.store.get("work_launch", text47(args.launch_id, "launch_id"));
     const values2 = object15(args.values, "values");
     const fields2 = kit.fields;
     const known = new Set(fields2.map((field) => String(field.id)));
@@ -18974,9 +19334,9 @@ ${material}
         normalized[key2] = value;
       } else if (field.type === "integer") normalized[key2] = finiteInteger(value, key2, 1, 0);
       else {
-        const stringValue = text43(value, key2);
+        const stringValue = text47(value, key2);
         if (field.type === "choice" && !field.options.includes(stringValue)) throw new Error(`${key2} must be one of the declared choices`);
-        if (field.type === "path" && ((0, import_node_path15.isAbsolute)(stringValue) || import_node_path15.win32.isAbsolute(stringValue) || stringValue.split(/[\\/]/).includes(".."))) throw new Error(`${key2} must be a workspace-relative contained path`);
+        if (field.type === "path" && ((0, import_node_path17.isAbsolute)(stringValue) || import_node_path17.win32.isAbsolute(stringValue) || stringValue.split(/[\\/]/).includes(".."))) throw new Error(`${key2} must be a workspace-relative contained path`);
         normalized[key2] = stringValue;
       }
     }
@@ -18985,22 +19345,22 @@ ${material}
     const actionLockId = `domain_kit_action_lock_${kit.id}_${kit.version}_${launch.id}`;
     const evalSuite = kit.eval_suite_ref ? this.store.get("evaluation_suite", String(kit.eval_suite_ref.suite_id), Number(kit.eval_suite_ref.suite_version)) : null;
     const budgetLimits2 = kit.budget_limits;
-    const budgetId = Object.keys(budgetLimits2).length ? text43(args.budget_id, "budget_id") : null;
+    const budgetId = Object.keys(budgetLimits2).length ? text47(args.budget_id, "budget_id") : null;
     if (!Object.keys(budgetLimits2).length && args.budget_id !== void 0) throw new Error("Domain Kit without budget limits cannot reserve a budget");
     if (budgetId) {
       const account = this.store.get("budget_account", budgetId);
       if (account.owner_id !== launch.task_id) throw new Error("Domain Kit budget must belong to the Work Launch task");
     }
-    const sandboxIdentity = kit.sandbox_requirements ? { profile_id: text43(args.sandbox_profile_id, "sandbox_profile_id"), profile_version: finiteInteger(args.sandbox_profile_version, "sandbox_profile_version", 1) } : null;
+    const sandboxIdentity = kit.sandbox_requirements ? { profile_id: text47(args.sandbox_profile_id, "sandbox_profile_id"), profile_version: finiteInteger(args.sandbox_profile_version, "sandbox_profile_version", 1) } : null;
     const identity = { kit_id: kit.id, kit_version: kit.version, launch_id: launch.id, values: normalized, resolved_assets: resolvedAssets, eval_suite: evalSuite ? { suite_id: evalSuite.id, suite_version: evalSuite.version } : null, sandbox: sandboxIdentity, budget_id: budgetId, budget_limits: budgetLimits2 };
-    const digest31 = valueDigest(identity);
+    const digest35 = valueDigest(identity);
     const applicationId = String(args.application_id ?? `domain_kit_application_${launch.id}`);
     const existing = this.store.find("domain_kit_application", applicationId);
     if (existing) {
-      if (existing.application_digest !== digest31) throw new Error("Domain Kit application idempotency conflict");
+      if (existing.application_digest !== digest35) throw new Error("Domain Kit application idempotency conflict");
       return { application: existing, lock: this.store.get("domain_kit_lock", String(existing.lock_id)), plan: this.store.get("acceptance_plan", String(existing.plan_id)), jobs: this.store.list("acceptance_evaluation_job", 1e4, (job) => job.plan_id === existing.plan_id), sandbox: existing.sandbox_ticket_id ? { compatible: true, ticket: this.store.get("sandbox_ticket", String(existing.sandbox_ticket_id)) } : null, budget_reservation: existing.budget_reservation_id ? this.store.get("budget_reservation", String(existing.budget_reservation_id)) : null, idempotent: true };
     }
-    const sandboxPreview = kit.sandbox_requirements ? this.sandboxPlan({ task_id: launch.task_id, profile_id: sandboxIdentity?.profile_id, profile_version: sandboxIdentity?.profile_version, requirements: kit.sandbox_requirements, request_digest: digest31, dry_run: true }) : null;
+    const sandboxPreview = kit.sandbox_requirements ? this.sandboxPlan({ task_id: launch.task_id, profile_id: sandboxIdentity?.profile_id, profile_version: sandboxIdentity?.profile_version, requirements: kit.sandbox_requirements, request_digest: digest35, dry_run: true }) : null;
     if (sandboxPreview && sandboxPreview.compatible !== true) throw new Error(`Domain Kit sandbox requirements are not satisfied: ${sandboxPreview.missing.join(", ")}`);
     const criteria = kit.criteria.map(({ evaluator: _evaluator, ...criterion }) => criterion);
     const plan = this.acceptancePlanSave({ task_id: launch.task_id, launch_id: launch.id, name: `${kit.name}\u9A8C\u6536`, criteria }).plan;
@@ -19013,14 +19373,14 @@ ${material}
       jobs.push(prepared.job);
     }
     const budgetReservation = budgetId ? this.budgetReserve({ budget_id: budgetId, reservation_id: `domain_kit_budget_${applicationId}`, resources: budgetLimits2, purpose: `domain_kit:${kit.id}` }).reservation : null;
-    const sandbox = kit.sandbox_requirements ? this.sandboxPlan({ task_id: launch.task_id, profile_id: sandboxIdentity?.profile_id, profile_version: sandboxIdentity?.profile_version, requirements: kit.sandbox_requirements, request_digest: digest31, ticket_id: `sandbox_ticket_${applicationId}` }) : null;
+    const sandbox = kit.sandbox_requirements ? this.sandboxPlan({ task_id: launch.task_id, profile_id: sandboxIdentity?.profile_id, profile_version: sandboxIdentity?.profile_version, requirements: kit.sandbox_requirements, request_digest: digest35, ticket_id: `sandbox_ticket_${applicationId}` }) : null;
     const actionLock = this.store.create("domain_kit_action_lock", actionLockId, { application_id: applicationId, kit_id: kit.id, kit_version: kit.version, actions: resolvedActions, lock_digest: valueDigest(resolvedActions) });
     const lock = this.store.create("domain_kit_lock", `domain_kit_lock_${applicationId}`, { application_id: applicationId, kit_id: kit.id, kit_version: kit.version, kit_digest: kit.definition_digest, assets: resolvedAssets, action_lock_id: actionLock.id, action_lock_digest: actionLock.lock_digest, eval_suite: identity.eval_suite, sandbox_profile: sandboxIdentity, budget_id: budgetId, budget_reservation_id: budgetReservation?.id ?? null, lock_digest: valueDigest(identity) });
-    const application = this.store.create("domain_kit_application", applicationId, { ...identity, application_digest: digest31, lock_id: lock.id, action_lock_id: actionLock.id, plan_id: plan.id, job_ids: jobs.map((job) => job.id), sandbox_ticket_id: sandbox?.ticket?.id ?? null, budget_reservation_id: budgetReservation?.id ?? null, status: "active" });
+    const application = this.store.create("domain_kit_application", applicationId, { ...identity, application_digest: digest35, lock_id: lock.id, action_lock_id: actionLock.id, plan_id: plan.id, job_ids: jobs.map((job) => job.id), sandbox_ticket_id: sandbox?.ticket?.id ?? null, budget_reservation_id: budgetReservation?.id ?? null, status: "active" });
     return { application, lock, action_lock: actionLock, plan, jobs, sandbox, budget_reservation: budgetReservation, idempotent: false };
   }
   domainKitSettle(args) {
-    const application = this.store.get("domain_kit_application", text43(args.application_id, "application_id"));
+    const application = this.store.get("domain_kit_application", text47(args.application_id, "application_id"));
     if (!application.budget_reservation_id) {
       if (Object.keys(object15(args.actual ?? {}, "actual")).length) throw new Error("Domain Kit application has no budget reservation");
       return { application, reservation: null, idempotent: true };
@@ -19031,14 +19391,14 @@ ${material}
     return { application: saved, reservation: settled.reservation, idempotent: settled.idempotent };
   }
   domainKitActionLockGet(args) {
-    const application = this.store.get("domain_kit_application", text43(args.application_id, "application_id"));
+    const application = this.store.get("domain_kit_application", text47(args.application_id, "application_id"));
     return this.store.get("domain_kit_action_lock", String(application.action_lock_id));
   }
   domainKitActionPrepare(args) {
-    const application = this.store.get("domain_kit_application", text43(args.application_id, "application_id"));
+    const application = this.store.get("domain_kit_application", text47(args.application_id, "application_id"));
     if (application.status !== "active") throw new Error("Domain Kit application is not active");
     const lock = this.domainKitActionLockGet({ application_id: application.id });
-    const actionId = text43(args.action_id, "action_id");
+    const actionId = text47(args.action_id, "action_id");
     const action = lock.actions.find((item) => item.action_id === actionId);
     if (!action) throw new Error("Domain Kit action is unknown");
     if (action.executable !== true) throw new Error("Domain Kit action has no verified executable Contract");
@@ -19046,8 +19406,8 @@ ${material}
     if (args.input === void 0 && !legacy) throw new Error("Domain Kit action input is required for Schema validation");
     const input = legacy ? {} : args.input;
     validateJsonSchema(input, action.input_schema);
-    const inputDigest = legacy ? text43(args.input_digest, "input_digest") : valueDigest(input);
-    const target = args.target === void 0 && legacy ? String(action.capability_asset_id) : text43(args.target, "target");
+    const inputDigest = legacy ? text47(args.input_digest, "input_digest") : valueDigest(input);
+    const target = args.target === void 0 && legacy ? String(action.capability_asset_id) : text47(args.target, "target");
     const requestId = String(args.request_id ?? `domain_kit_action_${application.id}_${actionId}`);
     const identity = { application_id: application.id, application_version: application.version, action_id: actionId, effect: action.effect, target, contract_id: action.contract_id, contract_version: action.contract_version, capability_asset_id: action.capability_asset_id, capability_asset_version: action.capability_asset_version, input_digest: inputDigest };
     const requestDigest = valueDigest(identity);
@@ -19062,36 +19422,36 @@ ${material}
     }
     const launch = this.store.get("work_launch", String(application.launch_id));
     const autonomyAction = action.effect === "read_only" ? "read" : action.effect === "local_write" ? "sandbox_write" : String(action.effect);
-    const authorization = this.autonomyRequest({ request_id: `authorization_${requestId}`, policy_id: args.policy_id, policy_version: args.policy_version, task_id: launch.task_id, action: autonomyAction, target, request_digest: requestDigest, requested_by: text43(args.requested_by ?? "domain_kit", "requested_by") }).request;
+    const authorization = this.autonomyRequest({ request_id: `authorization_${requestId}`, policy_id: args.policy_id, policy_version: args.policy_version, task_id: launch.task_id, action: autonomyAction, target, request_digest: requestDigest, requested_by: text47(args.requested_by ?? "domain_kit", "requested_by") }).request;
     const request2 = this.store.create("domain_kit_action_request", requestId, { ...identity, request_digest: requestDigest, authorization_request_id: authorization.id, requires_approval: action.requires_approval, idempotency: action.idempotency, compensation: action.compensation, credential_handles_required: action.credential_handles_required, status: authorization.status === "authorized" ? "authorized" : "awaiting_authorization", execution_authority: false, raw_input_stored: false, legacy_prevalidated_digest: false });
     return { request: request2, action, authorization, idempotent: false };
   }
   domainKitActionReport(args) {
-    const request2 = this.store.get("domain_kit_action_request", text43(args.request_id, "request_id"));
+    const request2 = this.store.get("domain_kit_action_request", text47(args.request_id, "request_id"));
     if ((/* @__PURE__ */ new Set(["completed", "failed"])).has(String(request2.status))) {
-      const digest31 = valueDigest(args.output ?? null);
-      if (request2.output_digest !== digest31 || request2.outcome !== args.outcome) throw new Error("Domain Kit action report idempotency conflict");
+      const digest35 = valueDigest(args.output ?? null);
+      if (request2.output_digest !== digest35 || request2.outcome !== args.outcome) throw new Error("Domain Kit action report idempotency conflict");
       return { request: request2, idempotent: true };
     }
     const authorization = this.store.get("autonomy_request", String(request2.authorization_request_id));
     if (authorization.status !== "consumed") throw new Error("Domain Kit action authorization has not been consumed");
-    const outcome2 = text43(args.outcome, "outcome");
+    const outcome2 = text47(args.outcome, "outcome");
     if (!(/* @__PURE__ */ new Set(["succeeded", "failed"])).has(outcome2)) throw new Error("Domain Kit action outcome is unsupported");
     const application = this.store.get("domain_kit_application", String(request2.application_id));
     const lock = this.domainKitActionLockGet({ application_id: application.id });
     const action = lock.actions.find((item) => item.action_id === request2.action_id);
     if (outcome2 === "succeeded") validateJsonSchema(args.output, action.output_schema);
-    const evidenceIds = array3(args.evidence_ids, "evidence_ids").map((item) => text43(item, "evidence_id"));
+    const evidenceIds = array3(args.evidence_ids, "evidence_ids").map((item) => text47(item, "evidence_id"));
     if (!evidenceIds.length) throw new Error("Domain Kit action report requires evidence");
     for (const evidenceId of evidenceIds) this.store.get("evidence", evidenceId);
     const saved = this.store.save("domain_kit_action_request", String(request2.id), { ...request2, status: outcome2 === "succeeded" ? "completed" : "failed", outcome: outcome2, output_digest: valueDigest(args.output ?? null), evidence_ids: evidenceIds, raw_output_stored: false });
     return { request: saved, idempotent: false };
   }
   acceptanceEvaluationClaim(args) {
-    const adapterId = text43(args.adapter_id, "adapter_id");
+    const adapterId = text47(args.adapter_id, "adapter_id");
     const limit2 = finiteInteger(args.limit, "limit", 10, 1, 100);
     const leaseSeconds = finiteInteger(args.lease_seconds, "lease_seconds", 60, 1, 3600);
-    const planId = args.plan_id === void 0 ? null : text43(args.plan_id, "plan_id");
+    const planId = args.plan_id === void 0 ? null : text47(args.plan_id, "plan_id");
     const jobs = this.store.list("acceptance_evaluation_job", 1e4, (item) => {
       if (item.status !== "ready" || Number(item.attempts) >= Number(item.max_attempts) || item.adapter_id !== adapterId || planId && item.plan_id !== planId) return false;
       const plan = this.store.find("acceptance_plan", String(item.plan_id));
@@ -19102,7 +19462,7 @@ ${material}
     return { jobs };
   }
   acceptanceEvaluationRecover(args) {
-    const now = args.now === void 0 ? (/* @__PURE__ */ new Date()).toISOString() : text43(args.now, "now");
+    const now = args.now === void 0 ? (/* @__PURE__ */ new Date()).toISOString() : text47(args.now, "now");
     const nowMs = Date.parse(now);
     if (Number.isNaN(nowMs)) throw new Error("now must be an ISO timestamp");
     const limit2 = finiteInteger(args.limit, "limit", 100, 1, 1e3);
@@ -19114,10 +19474,10 @@ ${material}
     return { recovered: recovered.length, exhausted: recovered.filter((job) => job.status === "exhausted").length, jobs: recovered };
   }
   acceptanceEvaluationReport(args) {
-    const job = this.store.get("acceptance_evaluation_job", text43(args.job_id, "job_id"));
-    const result = text43(args.result, "result");
+    const job = this.store.get("acceptance_evaluation_job", text47(args.job_id, "job_id"));
+    const result = text47(args.result, "result");
     if (!ACCEPTANCE_RESULTS.has(result)) throw new Error("Acceptance result is unsupported");
-    const summary2 = assertNoSecret2(text43(args.summary, "summary"), "summary");
+    const summary2 = assertNoSecret2(text47(args.summary, "summary"), "summary");
     const receipt = object15(args.receipt ?? {}, "receipt");
     assertNoSecret2(canonical7(receipt), "receipt");
     const reportDigest = valueDigest({ result, summary: summary2, receipt });
@@ -19125,11 +19485,11 @@ ${material}
       if (job.report_digest !== reportDigest) throw new Error("Acceptance evaluation report idempotency conflict");
       return { job, evidence: this.store.get("evidence", String(job.evidence_id)), check: this.store.get("acceptance_check", String(job.check_id)), assessment: this.store.get("acceptance_assessment", `assessment_${job.plan_id}`), outcome: this.store.find("outcome", `outcome_trial_${job.plan_id}`), idempotent: true };
     }
-    if (job.status !== "leased" || job.lease_id !== text43(args.lease_id, "lease_id")) throw new Error("Acceptance evaluation lease does not match");
+    if (job.status !== "leased" || job.lease_id !== text47(args.lease_id, "lease_id")) throw new Error("Acceptance evaluation lease does not match");
     if (Date.parse(String(job.lease_expires_at)) <= Date.now()) throw new Error("Acceptance evaluation lease expired");
     const evaluator = this.store.get("acceptance_evaluator", String(job.evaluator_id), Number(job.evaluator_version));
-    if (evaluator.adapter_id !== text43(args.adapter_id, "adapter_id") || evaluator.enabled !== true) throw new Error("Acceptance evaluator adapter is not authorized");
-    const artifactId = receipt.artifact_id === void 0 ? null : text43(receipt.artifact_id, "receipt.artifact_id");
+    if (evaluator.adapter_id !== text47(args.adapter_id, "adapter_id") || evaluator.enabled !== true) throw new Error("Acceptance evaluator adapter is not authorized");
+    const artifactId = receipt.artifact_id === void 0 ? null : text47(receipt.artifact_id, "receipt.artifact_id");
     if (artifactId) this.store.get("artifact", artifactId);
     const evidence = this.evidenceRecord({ evidence_id: `evidence_${job.id}`, source_type: evaluator.method, confidence: result === "passed" ? "confirmed" : result === "failed" ? "rejected" : "bounded", claim: summary2, artifact_id: artifactId, locator: `acceptance-job:${job.id}`, metadata: { evaluator_id: evaluator.id, evaluator_version: evaluator.version, adapter_id: evaluator.adapter_id, receipt_digest: valueDigest(receipt) } });
     const recorded = this.acceptanceCheckRecord({ check_id: `check_${job.id}`, plan_id: job.plan_id, criterion_id: job.criterion_id, evaluator_type: evaluator.method, evaluator_id: evaluator.id, result, summary: summary2, evidence_ids: [evidence.id] });
@@ -19138,7 +19498,7 @@ ${material}
     return { job: completed, evidence, check: recorded.check, assessment: assessed.assessment, outcome: assessed.outcome, idempotent: false };
   }
   acceptanceAssess(args) {
-    const plan = this.store.get("acceptance_plan", text43(args.plan_id, "plan_id"));
+    const plan = this.store.get("acceptance_plan", text47(args.plan_id, "plan_id"));
     const latest = /* @__PURE__ */ new Map();
     for (const check of this.store.list("acceptance_check", 1e4, (item) => item.plan_id === plan.id && item.plan_version === plan.version)) if (!latest.has(String(check.criterion_id))) latest.set(String(check.criterion_id), check);
     const criteria = plan.criteria;
@@ -19170,9 +19530,9 @@ ${material}
     return { assessment, outcome: outcome2 };
   }
   verifiedIterationCreate(args) {
-    const task = this.store.get("task", text43(args.task_id, "task_id"));
-    const launch = this.store.get("work_launch", text43(args.launch_id, "launch_id"));
-    const plan = this.store.get("acceptance_plan", text43(args.acceptance_plan_id, "acceptance_plan_id"));
+    const task = this.store.get("task", text47(args.task_id, "task_id"));
+    const launch = this.store.get("work_launch", text47(args.launch_id, "launch_id"));
+    const plan = this.store.get("acceptance_plan", text47(args.acceptance_plan_id, "acceptance_plan_id"));
     if (launch.task_id !== task.id || plan.task_id !== task.id || plan.launch_id !== launch.id) throw new Error("Verified iteration bindings must belong to the same Task and Work Launch");
     const maxAttempts = finiteInteger(args.max_attempts, "max_attempts", 3, 1, 20);
     const allowedPaths = optionalTextArray(args.allowed_paths, "allowed_paths", ["."]);
@@ -19188,16 +19548,16 @@ ${material}
     return { iteration, idempotent: false };
   }
   verifiedIterationGet(args) {
-    const iteration = this.store.get("verified_iteration", text43(args.iteration_id, "iteration_id"));
+    const iteration = this.store.get("verified_iteration", text47(args.iteration_id, "iteration_id"));
     return { iteration, attempts: this.store.list("iteration_attempt", 1e4, (item) => item.iteration_id === iteration.id) };
   }
   verifiedIterationAssess(args) {
-    const iteration = this.store.get("verified_iteration", text43(args.iteration_id, "iteration_id"));
+    const iteration = this.store.get("verified_iteration", text47(args.iteration_id, "iteration_id"));
     if (iteration.status !== "active") return { iteration, action: "terminal", idempotent: true };
-    const assessment = this.store.get("acceptance_assessment", text43(args.assessment_id, "assessment_id"));
+    const assessment = this.store.get("acceptance_assessment", text47(args.assessment_id, "assessment_id"));
     const plan = this.store.get("acceptance_plan", String(iteration.acceptance_plan_id));
     if (assessment.plan_id !== plan.id) throw new Error("Acceptance assessment does not belong to this verified iteration");
-    const classification = text43(args.classification, "classification");
+    const classification = text47(args.classification, "classification");
     if (!(/* @__PURE__ */ new Set(["task_failure", "verification_configuration", "environment", "scope_violation", "no_progress"])).has(classification)) throw new Error("Verified iteration classification is unsupported");
     const attemptNo = Number(iteration.attempts_started) + 1;
     const feedback = assertNoSecret2(document(args.feedback ?? `Acceptance ${assessment.status}.`, "feedback"), "feedback");
@@ -19227,11 +19587,11 @@ ${material}
     return { iteration: saved, attempt, next, idempotent: false };
   }
   strategyRecommend(args) {
-    const task = this.store.get("task", text43(args.task_id, "task_id"));
-    const comparison = this.store.get("evaluation_comparison", text43(args.comparison_id, "comparison_id"));
+    const task = this.store.get("task", text47(args.task_id, "task_id"));
+    const comparison = this.store.get("evaluation_comparison", text47(args.comparison_id, "comparison_id"));
     const baseline = object15(comparison.baseline, "comparison.baseline");
     const candidate = object15(comparison.candidate, "comparison.candidate");
-    const costMetric = args.cost_metric === void 0 ? null : text43(args.cost_metric, "cost_metric");
+    const costMetric = args.cost_metric === void 0 ? null : text47(args.cost_metric, "cost_metric");
     const passDelta = Number(candidate.pass_rate) - Number(baseline.pass_rate);
     const costDelta = costMetric ? Number(comparison.comparison.costs[costMetric]?.delta) : 0;
     const comparable = comparison.split === "held_out" && Number.isFinite(passDelta) && (!costMetric || Number.isFinite(costDelta));
@@ -19247,8 +19607,8 @@ ${material}
     return { recommendation, idempotent: false };
   }
   knowledgeClaimSave(args) {
-    const kind = text43(args.kind, "kind");
-    if (!KNOWLEDGE_KINDS.has(kind)) throw new Error("Knowledge claim kind is unsupported");
+    const kind2 = text47(args.kind, "kind");
+    if (!KNOWLEDGE_KINDS.has(kind2)) throw new Error("Knowledge claim kind is unsupported");
     const content = assertNoSecret2(document(args.content, "content"), "content");
     const scope = String(args.scope ?? "global");
     const evidenceIds = uniqueTextArray2(args.evidence_ids, "evidence_ids");
@@ -19257,7 +19617,7 @@ ${material}
     const validUntil = args.valid_until === void 0 ? null : new Date(validIsoTime(args.valid_until, "valid_until")).toISOString();
     const claimId = String(args.claim_id ?? id11("knowledge_claim"));
     const existing = this.store.find("knowledge_claim", claimId);
-    const identity = { kind, content, scope, evidence_ids: evidenceIds, tags, valid_until: validUntil };
+    const identity = { kind: kind2, content, scope, evidence_ids: evidenceIds, tags, valid_until: validUntil };
     if (existing) {
       if (existing.identity_digest !== valueDigest(identity)) throw new Error("Knowledge claim idempotency conflict");
       return { claim: existing, idempotent: true };
@@ -19266,22 +19626,22 @@ ${material}
     return { claim, idempotent: false };
   }
   knowledgeClaimGet(args) {
-    return { claim: this.store.get("knowledge_claim", text43(args.claim_id, "claim_id"), args.version === void 0 ? void 0 : finiteInteger(args.version, "version", 1)) };
+    return { claim: this.store.get("knowledge_claim", text47(args.claim_id, "claim_id"), args.version === void 0 ? void 0 : finiteInteger(args.version, "version", 1)) };
   }
   knowledgeClaimList(args) {
     return this.list("knowledge_claim", "claims", args);
   }
   knowledgeClaimReview(args) {
-    const claim = this.store.get("knowledge_claim", text43(args.claim_id, "claim_id"));
-    const status = text43(args.status, "status");
+    const claim = this.store.get("knowledge_claim", text47(args.claim_id, "claim_id"));
+    const status = text47(args.status, "status");
     if (!KNOWLEDGE_STATUSES.has(status) || status === "candidate") throw new Error("Knowledge claim review status is unsupported");
-    const reviewer = text43(args.reviewer, "reviewer");
+    const reviewer = text47(args.reviewer, "reviewer");
     const reason = assertNoSecret2(document(args.reason, "reason"), "reason");
     const saved = this.store.save("knowledge_claim", String(claim.id), { ...recordPayload6(claim), status, review: { reviewer, reason_digest: valueDigest(reason), reviewed_at: (/* @__PURE__ */ new Date()).toISOString() } });
     return { claim: saved };
   }
   async wikiPageSave(args) {
-    const title = assertNoSecret2(text43(args.title, "title"), "title");
+    const title = assertNoSecret2(text47(args.title, "title"), "title");
     const body2 = assertNoSecret2(document(args.body, "body"), "body");
     const scope = String(args.scope ?? "global");
     const claimIds = optionalTextArray(args.claim_ids, "claim_ids");
@@ -19290,26 +19650,26 @@ ${material}
     const existing = this.store.find("wiki_page", pageId);
     const identity = { title, body: body2, scope, claim_ids: claimIds };
     if (existing && existing.identity_digest === valueDigest(identity)) return { page: existing, idempotent: true };
-    const filePath = (0, import_node_path15.join)(this.store.paths.root, "wiki", `${pageId}.v${existing ? Number(existing.version) + 1 : 1}.md`);
+    const filePath = (0, import_node_path17.join)(this.store.paths.root, "wiki", `${pageId}.v${existing ? Number(existing.version) + 1 : 1}.md`);
     if (existing) {
       const current2 = await (0, import_promises12.readFile)(String(existing.file_path), "utf8");
       if (valueDigest(current2) !== existing.body_digest) throw new Error("Wiki page file has unrecorded changes; refresh it before saving");
     }
-    await (0, import_promises12.mkdir)((0, import_node_path15.join)(this.store.paths.root, "wiki"), { recursive: true });
+    await (0, import_promises12.mkdir)((0, import_node_path17.join)(this.store.paths.root, "wiki"), { recursive: true });
     await (0, import_promises12.writeFile)(filePath, body2, "utf8");
     const page = this.store.save("wiki_page", pageId, { title, scope, claim_ids: claimIds, identity_digest: valueDigest(identity), body_digest: valueDigest(body2), file_path: filePath, revision_source: String(args.author ?? "human") });
     return { page, idempotent: false };
   }
   wikiPageGet(args) {
-    const page = this.store.get("wiki_page", text43(args.page_id, "page_id"), args.version === void 0 ? void 0 : finiteInteger(args.version, "version", 1));
-    return { page, body: (0, import_node_fs8.readFileSync)(String(page.file_path), "utf8") };
+    const page = this.store.get("wiki_page", text47(args.page_id, "page_id"), args.version === void 0 ? void 0 : finiteInteger(args.version, "version", 1));
+    return { page, body: (0, import_node_fs10.readFileSync)(String(page.file_path), "utf8") };
   }
   wikiPageList(args) {
     return this.list("wiki_page", "pages", args);
   }
   wikiPageRefresh(args) {
-    const page = this.store.get("wiki_page", text43(args.page_id, "page_id"));
-    const body2 = assertNoSecret2(document((0, import_node_fs8.readFileSync)(String(page.file_path), "utf8"), "body"), "body");
+    const page = this.store.get("wiki_page", text47(args.page_id, "page_id"));
+    const body2 = assertNoSecret2(document((0, import_node_fs10.readFileSync)(String(page.file_path), "utf8"), "body"), "body");
     if (valueDigest(body2) === page.body_digest) return { page, changed: false };
     const saved = this.store.save("wiki_page", String(page.id), { ...recordPayload6(page), body_digest: valueDigest(body2), identity_digest: null, revision_source: "filesystem" });
     return { page: saved, changed: true };
@@ -19319,17 +19679,17 @@ ${material}
   }
   knowledgeContextBundlePreview(args) {
     const binding = this.knowledgeLaunch.bind({
-      bundle_id: text43(args.bundle_id, "bundle_id"),
+      bundle_id: text47(args.bundle_id, "bundle_id"),
       ...args.bundle_version === void 0 ? {} : { bundle_version: finiteInteger(args.bundle_version, "bundle_version", 1) },
-      ...args.now === void 0 ? {} : { now: text43(args.now, "now") }
+      ...args.now === void 0 ? {} : { now: text47(args.now, "now") }
     });
     return { binding, prompt: this.knowledgeLaunch.prompt(binding, "Preview only. Do not execute actions.") };
   }
   knowledgeRelationSave(args) {
-    const relation = text43(args.relation, "relation");
+    const relation = text47(args.relation, "relation");
     if (!KNOWLEDGE_RELATIONS.has(relation)) throw new Error("Knowledge relation is unsupported");
-    const fromClaim = this.store.get("knowledge_claim", text43(args.from_claim_id, "from_claim_id"));
-    const toClaim = this.store.get("knowledge_claim", text43(args.to_claim_id, "to_claim_id"));
+    const fromClaim = this.store.get("knowledge_claim", text47(args.from_claim_id, "from_claim_id"));
+    const toClaim = this.store.get("knowledge_claim", text47(args.to_claim_id, "to_claim_id"));
     if (fromClaim.id === toClaim.id) throw new Error("Knowledge relation endpoints must differ");
     const relationId = String(args.relation_id ?? id11("knowledge_relation"));
     const existing = this.store.find("knowledge_relation", relationId);
@@ -19341,7 +19701,7 @@ ${material}
     return { relation: this.store.create("knowledge_relation", relationId, { ...identity, identity_digest: valueDigest(identity) }), idempotent: false };
   }
   wikiContextCompile(args) {
-    const query = assertNoSecret2(text43(args.query, "query"), "query");
+    const query = assertNoSecret2(text47(args.query, "query"), "query");
     const scope = String(args.scope ?? "global");
     const maxItems = finiteInteger(args.max_items, "max_items", 8, 1, 50);
     const maxChars = finiteInteger(args.max_chars, "max_chars", 6e3, 100, 1e5);
@@ -19372,7 +19732,7 @@ ${material}
     const included = [];
     let usedChars = 0;
     for (const item of matched) {
-      const content = assertNoSecret2(text43(item.claim.content, "claim.content"), "claim.content");
+      const content = assertNoSecret2(text47(item.claim.content, "claim.content"), "claim.content");
       const rendered = `[Knowledge ${item.claim.id}]
 ${content}
 Evidence: ${item.claim.evidence_ids.join(", ")}
@@ -19399,15 +19759,15 @@ Evidence: ${item.evidence_ids.join(", ")}
     return { bundle, context, included, excluded, idempotent: false };
   }
   wikiContextBundleGet(args) {
-    return { bundle: this.store.get("wiki_context_bundle", text43(args.bundle_id, "bundle_id"), args.version === void 0 ? void 0 : finiteInteger(args.version, "version", 1)) };
+    return { bundle: this.store.get("wiki_context_bundle", text47(args.bundle_id, "bundle_id"), args.version === void 0 ? void 0 : finiteInteger(args.version, "version", 1)) };
   }
   wikiContextBundleList(args) {
     return this.list("wiki_context_bundle", "bundles", args);
   }
   wikiSkillCandidateCreate(args) {
-    const title = assertNoSecret2(text43(args.title, "title"), "title");
-    const kind = text43(args.kind, "kind");
-    if (!(/* @__PURE__ */ new Set(["skill", "workflow"])).has(kind)) throw new Error("Wiki capability candidate kind is unsupported");
+    const title = assertNoSecret2(text47(args.title, "title"), "title");
+    const kind2 = text47(args.kind, "kind");
+    if (!(/* @__PURE__ */ new Set(["skill", "workflow"])).has(kind2)) throw new Error("Wiki capability candidate kind is unsupported");
     const claimIds = uniqueTextArray2(args.claim_ids, "claim_ids", 2);
     const claims = claimIds.map((item) => this.store.get("knowledge_claim", item));
     if (claims.some((item) => item.status !== "reviewed")) throw new Error("Wiki capability candidate requires reviewed claims");
@@ -19416,7 +19776,7 @@ Evidence: ${item.evidence_ids.join(", ")}
     const fallback = assertNoSecret2(document(args.fallback_condition, "fallback_condition"), "fallback_condition");
     const candidateId = String(args.candidate_id ?? id11("wiki_skill_candidate"));
     const existing = this.store.find("wiki_skill_candidate", candidateId);
-    const identity = { title, kind, claim_ids: claimIds, instructions, applicability, fallback_condition: fallback };
+    const identity = { title, kind: kind2, claim_ids: claimIds, instructions, applicability, fallback_condition: fallback };
     if (existing) {
       if (existing.identity_digest !== valueDigest(identity)) throw new Error("Wiki capability candidate idempotency conflict");
       return { candidate: existing, idempotent: true };
@@ -19425,16 +19785,16 @@ Evidence: ${item.evidence_ids.join(", ")}
     return { candidate, idempotent: false };
   }
   wikiSkillCandidateGet(args) {
-    return { candidate: this.store.get("wiki_skill_candidate", text43(args.candidate_id, "candidate_id"), args.version === void 0 ? void 0 : finiteInteger(args.version, "version", 1)) };
+    return { candidate: this.store.get("wiki_skill_candidate", text47(args.candidate_id, "candidate_id"), args.version === void 0 ? void 0 : finiteInteger(args.version, "version", 1)) };
   }
   wikiSkillCandidateList(args) {
     return this.list("wiki_skill_candidate", "candidates", args);
   }
   wikiSkillCandidateReview(args) {
-    const candidate = this.store.get("wiki_skill_candidate", text43(args.candidate_id, "candidate_id"));
-    const status = text43(args.status, "status");
+    const candidate = this.store.get("wiki_skill_candidate", text47(args.candidate_id, "candidate_id"));
+    const status = text47(args.status, "status");
     if (!(/* @__PURE__ */ new Set(["ready_for_evaluation", "rejected"])).has(status)) throw new Error("Wiki capability candidate review status is unsupported");
-    const reviewer = text43(args.reviewer, "reviewer");
+    const reviewer = text47(args.reviewer, "reviewer");
     const reason = assertNoSecret2(document(args.reason, "reason"), "reason");
     return { candidate: this.store.save("wiki_skill_candidate", String(candidate.id), { ...recordPayload6(candidate), status, review: { reviewer, reason_digest: valueDigest(reason), reviewed_at: (/* @__PURE__ */ new Date()).toISOString() } }) };
   }
@@ -19448,15 +19808,15 @@ Evidence: ${item.evidence_ids.join(", ")}
     return this.wikiCandidateGovernance.packagePrepare(args);
   }
   wikiSkillCandidatePublicationPackageGet(args) {
-    return { package: this.store.get("wiki_candidate_publication_package", text43(args.package_id, "package_id"), args.version === void 0 ? void 0 : finiteInteger(args.version, "version", 1)) };
+    return { package: this.store.get("wiki_candidate_publication_package", text47(args.package_id, "package_id"), args.version === void 0 ? void 0 : finiteInteger(args.version, "version", 1)) };
   }
   wikiSkillCandidatePublicationPackageList(args) {
     return this.list("wiki_candidate_publication_package", "packages", args);
   }
   guidedWorkCreate(args) {
-    const existing = args.brief_id === void 0 ? null : this.store.find("guided_work_brief", text43(args.brief_id, "brief_id"));
+    const existing = args.brief_id === void 0 ? null : this.store.find("guided_work_brief", text47(args.brief_id, "brief_id"));
     const task = existing ? this.store.get("task", String(existing.task_id)) : this.taskOpen({ title: args.title, goal: args.goal, project_id: args.project_id ?? null }).task;
-    if (existing && [task.title !== text43(args.title, "title"), task.goal !== text43(args.goal, "goal")].some(Boolean)) throw new Error("Guided work brief idempotency conflict");
+    if (existing && [task.title !== text47(args.title, "title"), task.goal !== text47(args.goal, "goal")].some(Boolean)) throw new Error("Guided work brief idempotency conflict");
     return this.guidedWork.create({ ...args, task_id: task.id });
   }
   guidedWorkDecide(args) {
@@ -19469,7 +19829,7 @@ Evidence: ${item.evidence_ids.join(", ")}
     return this.list("guided_work_brief", "briefs", args);
   }
   guidedWorkLaunchPrepare(args) {
-    const brief = this.store.get("guided_work_brief", text43(args.brief_id, "brief_id"));
+    const brief = this.store.get("guided_work_brief", text47(args.brief_id, "brief_id"));
     if (brief.status !== "ready_to_launch") throw new Error("Guided work brief requires all decisions before launch");
     const prepared = this.workLaunchPrepare({ ...args, task_id: brief.task_id });
     const bound = this.guidedWork.bindLaunch({ brief_id: brief.id, launch_id: prepared.launch.id });
@@ -19482,9 +19842,9 @@ Evidence: ${item.evidence_ids.join(", ")}
     return this.executionSafety.get(args);
   }
   platformPreflightForLaunch(args) {
-    const platform = args.platform === void 0 ? null : text43(args.platform, "platform");
-    const profileId = args.platform_profile_id === void 0 ? null : text43(args.platform_profile_id, "platform_profile_id");
-    const effect = args.platform_effect === void 0 ? null : text43(args.platform_effect, "platform_effect");
+    const platform = args.platform === void 0 ? null : text47(args.platform, "platform");
+    const profileId = args.platform_profile_id === void 0 ? null : text47(args.platform_profile_id, "platform_profile_id");
+    const effect = args.platform_effect === void 0 ? null : text47(args.platform_effect, "platform_effect");
     const missingFields = [platform, profileId, effect].filter((value) => value === null).length;
     if (![0, 3].includes(missingFields)) throw new Error("Platform execution binding requires platform, profile, and effect together");
     if (effect === null) return null;
@@ -19520,7 +19880,7 @@ Evidence: ${item.evidence_ids.join(", ")}
     return { ...launched, launch: this.bindPlatformPreflight(safetyBound.launch, platform), preflight, platform_preflight: platform, idempotent: launched.idempotent };
   }
   safetyWorkLaunchDecide(args) {
-    const launch = this.store.get("work_launch", text43(args.launch_id, "launch_id"));
+    const launch = this.store.get("work_launch", text47(args.launch_id, "launch_id"));
     this.validateSafetyLaunch(launch);
     return this.workLaunchDecide(args);
   }
@@ -19540,7 +19900,7 @@ Evidence: ${item.evidence_ids.join(", ")}
     return this.a2aDiscovery.list(args);
   }
   knowledgeEvaluationCaseSave(args) {
-    const query = assertNoSecret2(text43(args.query, "query"), "query");
+    const query = assertNoSecret2(text47(args.query, "query"), "query");
     const scope = String(args.scope ?? "global");
     const expected = uniqueTextArray2(args.expected_claim_ids, "expected_claim_ids");
     expected.forEach((item) => this.store.get("knowledge_claim", item));
@@ -19587,7 +19947,7 @@ Evidence: ${item.evidence_ids.join(", ")}
     return { run, idempotent: false };
   }
   knowledgeEvaluationRunGet(args) {
-    return { run: this.store.get("knowledge_evaluation_run", text43(args.run_id, "run_id"), args.version === void 0 ? void 0 : finiteInteger(args.version, "version", 1)) };
+    return { run: this.store.get("knowledge_evaluation_run", text47(args.run_id, "run_id"), args.version === void 0 ? void 0 : finiteInteger(args.version, "version", 1)) };
   }
   knowledgeEvaluationRunList(args) {
     return this.list("knowledge_evaluation_run", "runs", args);
@@ -19596,19 +19956,19 @@ Evidence: ${item.evidence_ids.join(", ")}
     return this.workLaunchPrepareInternal(args);
   }
   workLaunchPrepareInternal(args, knowledgeBinding) {
-    const host = text43(args.host, "host");
+    const host = text47(args.host, "host");
     if (!(/* @__PURE__ */ new Set(["codex-cli", "claude-code"])).has(host)) throw new Error("Work launch host is unsupported");
     const sandbox = String(args.sandbox ?? "read-only");
     if (!(/* @__PURE__ */ new Set(["read-only", "workspace-write"])).has(sandbox)) throw new Error("Work launch sandbox is unsupported");
-    const prompt = text43(args.prompt, "prompt");
-    const workspace = (0, import_node_path15.resolve)(text43(args.workspace, "workspace"));
-    const launchId = args.launch_id === void 0 ? id11("work_launch") : text43(args.launch_id, "launch_id");
+    const prompt = text47(args.prompt, "prompt");
+    const workspace = (0, import_node_path17.resolve)(text47(args.workspace, "workspace"));
+    const launchId = args.launch_id === void 0 ? id11("work_launch") : text47(args.launch_id, "launch_id");
     const existing = this.store.find("work_launch", launchId);
     if (existing) {
       if (existing.host !== host || existing.sandbox !== sandbox || existing.workspace !== workspace || existing.prompt_digest !== valueDigest(prompt) || valueDigest(existing.knowledge_binding ?? null) !== valueDigest(knowledgeBinding ?? null)) throw new Error("Work launch idempotency conflict");
       return { launch: existing, task: this.store.get("task", String(existing.task_id)), dispatch: this.store.get(host === "codex-cli" ? "codex_dispatch" : "claude_dispatch", String(existing.dispatch_id)), approval_required: existing.status === "awaiting_approval", idempotent: true };
     }
-    const task = args.task_id ? this.store.get("task", text43(args.task_id, "task_id")) : this.taskOpen({ title: args.title, goal: args.goal, project_id: args.project_id }).task;
+    const task = args.task_id ? this.store.get("task", text47(args.task_id, "task_id")) : this.taskOpen({ title: args.title, goal: args.goal, project_id: args.project_id }).task;
     const dispatchId = `${host === "codex-cli" ? "codex_dispatch" : "claude_dispatch"}_${launchId}`;
     const common = { dispatch_id: dispatchId, task_id: task.id, workspace, prompt, sandbox, model: args.model, timeout_ms: args.timeout_ms, output_limit: args.output_limit };
     let dispatch = (host === "codex-cli" ? this.codexDispatchPrepare(common) : this.claudeDispatchPrepare({ ...common, max_turns: args.max_turns, max_budget_usd: args.max_budget_usd })).dispatch;
@@ -19633,12 +19993,12 @@ Evidence: ${item.evidence_ids.join(", ")}
     return this.workLaunchDecideInternal(args);
   }
   workLaunchDecideInternal(args, knowledgeBinding) {
-    const launch = this.store.get("work_launch", text43(args.launch_id, "launch_id"));
+    const launch = this.store.get("work_launch", text47(args.launch_id, "launch_id"));
     if (launch.status !== "awaiting_approval") throw new Error("Work launch is not awaiting approval");
     if (launch.knowledge_binding !== void 0 && valueDigest(launch.knowledge_binding) !== valueDigest(knowledgeBinding ?? null)) throw new Error("Knowledge-bound Work Launch must be decided through its Knowledge Work Launch");
-    const actor = text43(args.actor, "actor");
+    const actor = text47(args.actor, "actor");
     if (args.approved !== true) return { launch: this.store.save("work_launch", String(launch.id), { ...launch, status: "denied", decided_by: actor }), started: false };
-    const prompt = text43(args.prompt, "prompt");
+    const prompt = text47(args.prompt, "prompt");
     if (valueDigest(prompt) !== launch.prompt_digest) throw new Error("Work launch prompt does not match the prepared digest");
     const policy = this.autonomyPolicySave({ policy_id: `launch_policy_${launch.id}`, task_id: launch.task_id, name: "Workbench workspace write", rules: { sandbox_write: { level: "human_approval" } } }).policy;
     const authorization = this.autonomyRequest({ request_id: `launch_authorization_${launch.id}`, policy_id: policy.id, policy_version: policy.version, task_id: launch.task_id, action: "sandbox_write", target: launch.workspace, request_digest: this.store.get(String(launch.host) === "codex-cli" ? "codex_dispatch" : "claude_dispatch", String(launch.dispatch_id)).request_digest, requested_by: "craft_workbench" }).request;
@@ -19648,7 +20008,7 @@ Evidence: ${item.evidence_ids.join(", ")}
     return { launch: this.store.save("work_launch", String(launch.id), { ...recordPayload6(launch), status: "running", decided_by: actor, authorization_request_id: authorization.id, run_id: run.id }), started: true };
   }
   workLaunchGet(args) {
-    const launch = this.store.get("work_launch", text43(args.launch_id, "launch_id"));
+    const launch = this.store.get("work_launch", text47(args.launch_id, "launch_id"));
     const run = launch.run_id ? this.store.find("host_run", String(launch.run_id)) : null;
     const loop = this.store.find("delivery_loop", `delivery_loop_${launch.id}`);
     return { launch: { ...launch, effective_status: run?.status ?? launch.status }, run: run ? this.homeHostRun({ run_id: run.id, after_sequence: args.after_sequence, limit: args.limit }) : null, acceptance: launch.acceptance_plan_id ? this.acceptancePlanGet({ plan_id: launch.acceptance_plan_id }) : null, delivery_loop: loop };
@@ -19681,7 +20041,7 @@ Evidence: ${item.evidence_ids.join(", ")}
     return this.taskControl.handoff(args);
   }
   taskRunPrepare(args) {
-    const contract = this.store.get("task_control_contract", text43(args.contract_id, "contract_id"));
+    const contract = this.store.get("task_control_contract", text47(args.contract_id, "contract_id"));
     if (contract.launch_id !== null) throw new Error("Task Control contract is already bound to a Work Launch");
     const prepared = this.workLaunchPrepare({ ...args, task_id: contract.task_id, workspace: contract.workspace });
     const launch = prepared.launch;
@@ -19705,13 +20065,98 @@ Evidence: ${item.evidence_ids.join(", ")}
     return this.taskRuns.handoff(args);
   }
   taskRunCancel(args) {
-    const run = this.store.get("task_run", text43(args.task_run_id, "task_run_id"));
+    const run = this.store.get("task_run", text47(args.task_run_id, "task_run_id"));
     const launch = this.store.get("work_launch", String(run.launch_id));
     if (launch.run_id) {
       const host = this.store.get("host_run", String(launch.run_id));
       if (!(/* @__PURE__ */ new Set(["completed", "failed", "cancelled", "interrupted"])).has(String(host.status))) this.hostRunCancel({ run_id: host.id, reason: args.reason });
     }
     return this.taskRuns.cancel(args);
+  }
+  verifiedWorkLoopPrepare(args) {
+    const workspace = this.store.get("workspace", text47(args.workspace_id, "workspace_id"));
+    const task = args.task_id === void 0 ? this.taskOpen({ title: args.title, goal: args.goal, project_id: args.project_id }).task : this.store.get("task", text47(args.task_id, "task_id"));
+    const control = this.taskControlSave({
+      contract_id: args.contract_id,
+      task_id: task.id,
+      workspace: workspace.root_path,
+      allowed_effects: args.allowed_effects ?? [args.sandbox === "workspace-write" ? "local_write" : "read_only"],
+      acceptance_required: args.acceptance_criteria !== void 0,
+      activation_profile_id: args.activation_profile_id,
+      activation_profile_version: args.activation_profile_version,
+      budget_account_id: args.budget_account_id,
+      budget_account_version: args.budget_account_version
+    }).contract;
+    const baseline = this.stateWorkspace.observe({ workspace_id: workspace.id, adapter: args.state_adapter ?? "file_tree", paths: args.state_paths, artifact_ids: args.artifact_ids });
+    const prepared = this.taskRunPrepare({ ...args, contract_id: control.id, workspace: workspace.root_path });
+    const taskRun = prepared.task_run;
+    const loop = this.verifiedWorkLoops.create({ work_loop_id: args.work_loop_id, task_id: task.id, contract_id: control.id, task_run_id: taskRun.id, snapshot_id: baseline.snapshot.id });
+    return { task, contract: control, baseline_snapshot: baseline.snapshot, ...prepared, work_loop: loop.loop, work_loop_idempotent: loop.idempotent };
+  }
+  verifiedWorkLoopAdvance(args) {
+    const loop = this.store.get("verified_work_loop", text47(args.work_loop_id, "work_loop_id"));
+    const taskRun = this.store.get("task_run", String(loop.task_run_id));
+    const state = this.taskRunRefresh({ task_run_id: taskRun.id, environment: args.environment, budget: args.budget }).state;
+    const snapshot = this.stateWorkspace.observe({ workspace_id: loop.workspace_id, adapter: args.state_adapter ?? "file_tree", paths: args.state_paths, artifact_ids: args.artifact_ids, snapshot_id: args.snapshot_id }).snapshot;
+    return this.verifiedWorkLoops.advance({ work_loop_id: loop.id, task_run_state_id: state.id, snapshot_id: snapshot.id, receipt_id: args.receipt_id });
+  }
+  verifiedWorkLoopDecide(args) {
+    const loop = this.store.get("verified_work_loop", text47(args.work_loop_id, "work_loop_id"));
+    const run = this.store.get("task_run", String(loop.task_run_id));
+    const launch = this.store.get("work_launch", String(run.launch_id));
+    const decision = String(args.decision);
+    if (decision === "approve" && args.approved !== true) throw new Error("Verified Work Loop approve requires approved=true");
+    if ((decision === "accept" || decision === "reject") && (launch.acceptance_plan_id === void 0 || args.criterion_id === void 0)) throw new Error("Verified Work Loop acceptance decision requires an Acceptance Plan and criterion_id");
+    const recorded = this.verifiedWorkLoops.decide(args);
+    if (recorded.idempotent === true) return recorded;
+    if (decision === "approve") return { ...recorded, launch: this.workLaunchDecide({ launch_id: launch.id, actor: args.actor, approved: true, prompt: args.prompt }) };
+    if (decision === "human_change") {
+      const change = this.workspaceHumanChange({ workspace_id: loop.workspace_id, summary: args.summary, affected_paths: args.affected_paths ?? [], source: "human", change_id: args.change_id });
+      const event = this.store.create("human_state_event", `human_state_event_${recorded.decision.id}`, { work_loop_id: loop.id, workspace_id: loop.workspace_id, workspace_change_id: change.change.id, actor: args.actor, summary_digest: valueDigest(args.summary) });
+      const invalidation = this.store.create("work_loop_invalidation", `work_loop_invalidation_${recorded.decision.id}`, { work_loop_id: loop.id, task_run_id: loop.task_run_id, launch_id: run.launch_id, acceptance_plan_id: launch.acceptance_plan_id ?? null, reason: "human_state_event", state_event_id: event.id, status: "needs_replan" });
+      return { ...recorded, workspace_change: change.change, human_state_event: event, invalidation, advance: this.verifiedWorkLoopAdvance({ work_loop_id: loop.id, state_adapter: args.state_adapter, state_paths: args.state_paths }) };
+    }
+    if (decision === "accept" || decision === "reject") return { ...recorded, review: this.acceptanceHumanReview({ plan_id: launch.acceptance_plan_id, criterion_id: args.criterion_id, reviewer: args.actor, result: decision === "accept" ? "passed" : "failed", summary: args.summary }) };
+    return recorded;
+  }
+  verifiedWorkLoopResume(args) {
+    const loop = this.store.get("verified_work_loop", text47(args.work_loop_id, "work_loop_id"));
+    if (loop.lifecycle === "needs_replan") throw new Error("Verified Work Loop requires a fresh prepare after input or workspace drift");
+    const beforeResume = this.verifiedWorkLoopAdvance({ work_loop_id: loop.id, environment: args.environment, budget: args.budget, state_adapter: args.state_adapter, state_paths: args.state_paths });
+    if (beforeResume.state.status === "needs_replan") throw new Error("Verified Work Loop requires a fresh prepare after input or workspace drift");
+    const run = this.store.get("task_run", String(loop.task_run_id));
+    const resumed = this.taskRunResume({ task_run_id: run.id, environment: args.environment, budget: args.budget });
+    return { resumed, advance: this.verifiedWorkLoopAdvance({ work_loop_id: loop.id, environment: args.environment, budget: args.budget, state_adapter: args.state_adapter, state_paths: args.state_paths }) };
+  }
+  verifiedWorkLoopGet(args) {
+    return this.verifiedWorkLoops.get(args);
+  }
+  stateWorkspaceObserve(args) {
+    return this.stateWorkspace.observe(args);
+  }
+  stateWorkspaceCompare(args) {
+    return this.stateWorkspace.compare(args);
+  }
+  evalCampaignCreate(args) {
+    return this.evalCampaigns.create(args);
+  }
+  evalCampaignBind(args) {
+    return this.evalCampaigns.bind(args);
+  }
+  evalCampaignAdvance(args) {
+    return this.evalCampaigns.advance(args);
+  }
+  evalCampaignGet(args) {
+    return this.evalCampaigns.get(args);
+  }
+  projectKnowledgeDiscover(args) {
+    return this.projectKnowledge.discover(args);
+  }
+  projectKnowledgeResolve(args) {
+    return this.projectKnowledge.resolve(args);
+  }
+  projectKnowledgeProposeUpdate(args) {
+    return this.projectKnowledge.proposeUpdate(args);
   }
   taskBenchmarkCreate(args) {
     return this.taskBenchmarks.create(args);
@@ -19765,7 +20210,7 @@ Evidence: ${item.evidence_ids.join(", ")}
     const task = this.store.get("task", String(previous.task_id));
     const dispatch = this.store.get(previous.host === "codex-cli" ? "codex_dispatch" : "claude_dispatch", String(previous.dispatch_id));
     const acceptance = previous.acceptance_plan_id ? this.store.get("acceptance_plan", String(previous.acceptance_plan_id)) : null;
-    return this.workLaunchPrepare({ task_id: task.id, host: previous.host, workspace: previous.workspace, sandbox: previous.sandbox, prompt: args.prompt, launch_id: args.new_launch_id === void 0 ? void 0 : text43(args.new_launch_id, "new_launch_id"), retry_of: previous.id, model: args.model ?? dispatch.model ?? void 0, timeout_ms: args.timeout_ms ?? dispatch.timeout_ms, output_limit: args.output_limit ?? dispatch.output_limit, max_turns: args.max_turns ?? dispatch.max_turns, max_budget_usd: args.max_budget_usd ?? dispatch.max_budget_usd ?? void 0, acceptance_name: acceptance?.name, acceptance_criteria: acceptance?.criteria });
+    return this.workLaunchPrepare({ task_id: task.id, host: previous.host, workspace: previous.workspace, sandbox: previous.sandbox, prompt: args.prompt, launch_id: args.new_launch_id === void 0 ? void 0 : text47(args.new_launch_id, "new_launch_id"), retry_of: previous.id, model: args.model ?? dispatch.model ?? void 0, timeout_ms: args.timeout_ms ?? dispatch.timeout_ms, output_limit: args.output_limit ?? dispatch.output_limit, max_turns: args.max_turns ?? dispatch.max_turns, max_budget_usd: args.max_budget_usd ?? dispatch.max_budget_usd ?? void 0, acceptance_name: acceptance?.name, acceptance_criteria: acceptance?.criteria });
   }
   finalizeWorkLaunch(run, receipt) {
     const launch = this.store.list("work_launch", 1e4, (item) => item.run_id === run.id)[0];
@@ -19835,12 +20280,12 @@ Evidence: ${item.evidence_ids.join(", ")}
   }
   dockerSandboxRequestDigest(args) {
     return { request_digest: dockerRequestDigest(
-      text43(args.image, "image"),
-      array3(args.argv, "argv").map((item) => text43(item, "argv"))
+      text47(args.image, "image"),
+      array3(args.argv, "argv").map((item) => text47(item, "argv"))
     ) };
   }
   async dockerSandboxProbe(args) {
-    const profile = this.store.get("sandbox_profile", text43(args.profile_id, "profile_id"), finiteInteger(args.profile_version, "profile_version", 0));
+    const profile = this.store.get("sandbox_profile", text47(args.profile_id, "profile_id"), finiteInteger(args.profile_version, "profile_version", 0));
     if (profile.lifecycle !== "declared" || profile.backend !== "container" || profile.adapter_id !== "docker") {
       throw new Error("Docker probe requires an exact declared container profile for adapter docker");
     }
@@ -19863,7 +20308,7 @@ Evidence: ${item.evidence_ids.join(", ")}
     return { probe, artifact, evidence, profile };
   }
   async dockerSandboxConformance(args) {
-    const profile = this.store.get("sandbox_profile", text43(args.profile_id, "profile_id"), finiteInteger(args.profile_version, "profile_version", 0));
+    const profile = this.store.get("sandbox_profile", text47(args.profile_id, "profile_id"), finiteInteger(args.profile_version, "profile_version", 0));
     if (profile.lifecycle !== "declared" || profile.backend !== "container" || profile.adapter_id !== "docker") {
       throw new Error("Docker conformance requires an exact declared container profile for adapter docker");
     }
@@ -19904,7 +20349,7 @@ Evidence: ${item.evidence_ids.join(", ")}
     return { conformance, artifact, evidence, ...verification };
   }
   async dockerSandboxExecute(args) {
-    const ticket = this.store.get("sandbox_ticket", text43(args.ticket_id, "ticket_id"));
+    const ticket = this.store.get("sandbox_ticket", text47(args.ticket_id, "ticket_id"));
     const profile = this.store.get("sandbox_profile", String(ticket.profile_id), Number(ticket.profile_version));
     if (profile.backend !== "container" || profile.adapter_id !== "docker") throw new Error("Sandbox ticket is not assigned to Docker");
     const result = await this.dockerSandbox.execute({
@@ -19938,7 +20383,7 @@ Evidence: ${item.evidence_ids.join(", ")}
     });
     const receipt = this.sandbox.receipt({
       ticket_id: ticket.id,
-      receipt_id: text43(args.receipt_id, "receipt_id"),
+      receipt_id: text47(args.receipt_id, "receipt_id"),
       adapter_id: "docker",
       profile_version: profile.version,
       status: result.status,
@@ -19984,7 +20429,7 @@ Evidence: ${item.evidence_ids.join(", ")}
     if (!(/* @__PURE__ */ new Set(["task", "project", "user"])).has(scope)) throw new Error(`Unsupported feedback scope: ${scope}`);
     if (scope === "task" && !args.task_id) throw new Error("task_id is required for task feedback");
     return this.store.save("feedback", id11("feedback"), {
-      corrected: text43(args.corrected, "corrected"),
+      corrected: text47(args.corrected, "corrected"),
       original: args.original ?? null,
       kind: args.kind ?? "correction",
       scope,
@@ -19995,9 +20440,9 @@ Evidence: ${item.evidence_ids.join(", ")}
   }
   artifactRegister(args) {
     return this.store.save("artifact", String(args.artifact_id ?? id11("artifact")), {
-      kind: text43(args.kind, "kind"),
-      name: text43(args.name, "name"),
-      uri: text43(args.uri, "uri"),
+      kind: text47(args.kind, "kind"),
+      name: text47(args.name, "name"),
+      uri: text47(args.uri, "uri"),
       media_type: args.media_type ?? null,
       digest: args.digest ?? null,
       size_bytes: args.size_bytes ?? null,
@@ -20011,8 +20456,8 @@ Evidence: ${item.evidence_ids.join(", ")}
     if (!CONFIDENCE.has(confidence)) throw new Error(`Unsupported confidence: ${confidence}`);
     if (args.artifact_id) this.store.get("artifact", String(args.artifact_id));
     return this.store.save("evidence", String(args.evidence_id ?? id11("evidence")), {
-      source_type: text43(args.source_type, "source_type"),
-      claim: text43(args.claim, "claim"),
+      source_type: text47(args.source_type, "source_type"),
+      claim: text47(args.claim, "claim"),
       confidence,
       artifact_id: args.artifact_id ?? null,
       locator: args.locator ?? null,
@@ -20020,20 +20465,20 @@ Evidence: ${item.evidence_ids.join(", ")}
       metadata: args.metadata ?? {}
     });
   }
-  saveVersioned(kind, prefix, args, required2) {
-    for (const key2 of required2) text43(args[key2], key2);
+  saveVersioned(kind2, prefix, args, required2) {
+    for (const key2 of required2) text47(args[key2], key2);
     const recordId = String(args[`${prefix}_id`] ?? id11(prefix));
-    const payload27 = { ...args };
-    delete payload27[`${prefix}_id`];
-    return this.store.save(kind, recordId, payload27);
+    const payload29 = { ...args };
+    delete payload29[`${prefix}_id`];
+    return this.store.save(kind2, recordId, payload29);
   }
-  list(kind, key2, args) {
+  list(kind2, key2, args) {
     const query = String(args.query ?? "").toLowerCase();
-    return { [key2]: this.store.list(kind, finiteInteger(args.limit, "limit", 20, 1, 1e3), (item) => !query || JSON.stringify(item).toLowerCase().includes(query)) };
+    return { [key2]: this.store.list(kind2, finiteInteger(args.limit, "limit", 20, 1, 1e3), (item) => !query || JSON.stringify(item).toLowerCase().includes(query)) };
   }
-  get(kind, idKey, args) {
+  get(kind2, idKey, args) {
     const version = args.version === void 0 ? void 0 : finiteInteger(args.version, "version", 1);
-    return this.store.get(kind, text43(args[idKey], idKey), version);
+    return this.store.get(kind2, text47(args[idKey], idKey), version);
   }
   harnessConfigurationSave(args) {
     const dimensions = object15(args.dimensions, "dimensions");
@@ -20043,14 +20488,14 @@ Evidence: ${item.evidence_ids.join(", ")}
     }
     return this.saveVersioned("harness_configuration", "configuration", {
       ...args,
-      name: text43(args.name, "name"),
+      name: text47(args.name, "name"),
       dimensions
     }, ["name"]);
   }
   evaluationSuiteSave(args) {
     const cases = array3(args.cases ?? [], "cases").map((value, index) => {
       const item = object15(value, `cases[${index}]`);
-      const caseId = text43(item.case_id, `cases[${index}].case_id`);
+      const caseId = text47(item.case_id, `cases[${index}].case_id`);
       const split = String(item.split ?? "development");
       if (!EVAL_SPLITS.has(split)) throw new Error(`Unsupported evaluation split: ${split}`);
       return { ...item, case_id: caseId, split };
@@ -20061,7 +20506,7 @@ Evidence: ${item.evidence_ids.join(", ")}
     return this.saveVersioned("evaluation_suite", "suite", { ...args, cases }, ["name"]);
   }
   graderSave(args) {
-    const graderType = text43(args.grader_type, "grader_type");
+    const graderType = text47(args.grader_type, "grader_type");
     if (!GRADER_TYPES.has(graderType)) throw new Error(`Unsupported grader type: ${graderType}`);
     return this.saveVersioned("grader", "grader", {
       ...args,
@@ -20070,18 +20515,18 @@ Evidence: ${item.evidence_ids.join(", ")}
     }, ["name", "grader_type"]);
   }
   gradeRecord(args) {
-    const trialId = text43(args.trial_id, "trial_id");
+    const trialId = text47(args.trial_id, "trial_id");
     this.store.get("trial", trialId);
     const grader = this.store.get(
       "grader",
-      text43(args.grader_id, "grader_id"),
+      text47(args.grader_id, "grader_id"),
       finiteInteger(args.grader_version, "grader_version", 1)
     );
-    const verdict = text43(args.verdict, "verdict");
+    const verdict = text47(args.verdict, "verdict");
     if (!GRADE_VERDICTS.has(verdict)) throw new Error(`Unsupported grade verdict: ${verdict}`);
-    const evidenceIds = array3(args.evidence_ids ?? [], "evidence_ids").map((value) => text43(value, "evidence_id"));
+    const evidenceIds = array3(args.evidence_ids ?? [], "evidence_ids").map((value) => text47(value, "evidence_id"));
     for (const evidenceId of evidenceIds) this.store.get("evidence", evidenceId);
-    const gradeId = `grade_${(0, import_node_crypto48.createHash)("sha256").update(JSON.stringify(
+    const gradeId = `grade_${(0, import_node_crypto52.createHash)("sha256").update(JSON.stringify(
       [trialId, grader.id, grader.version]
     )).digest("hex")}`;
     return this.store.create("grade", gradeId, {
@@ -20091,7 +20536,7 @@ Evidence: ${item.evidence_ids.join(", ")}
       grader_type: grader.grader_type,
       verdict,
       score: optionalScore(args.score, "score"),
-      summary: text43(args.summary, "summary"),
+      summary: text47(args.summary, "summary"),
       evidence_ids: evidenceIds,
       metadata: object15(args.metadata ?? {}, "metadata")
     });
@@ -20099,7 +20544,7 @@ Evidence: ${item.evidence_ids.join(", ")}
   signoffPolicySave(args) {
     const requirements = array3(args.requirements ?? [], "requirements").map((value, index) => {
       const requirement = object15(value, `requirements[${index}]`);
-      const graderType = text43(requirement.grader_type, `requirements[${index}].grader_type`);
+      const graderType = text47(requirement.grader_type, `requirements[${index}].grader_type`);
       if (!GRADER_TYPES.has(graderType)) throw new Error(`Unsupported grader type: ${graderType}`);
       return { grader_type: graderType, minimum_score: optionalScore(
         requirement.minimum_score,
@@ -20119,11 +20564,11 @@ Evidence: ${item.evidence_ids.join(", ")}
   signoffEvaluate(args) {
     const policy = this.store.get(
       "signoff_policy",
-      text43(args.policy_id, "policy_id"),
+      text47(args.policy_id, "policy_id"),
       args.policy_version === void 0 ? void 0 : finiteInteger(args.policy_version, "policy_version", 1)
     );
-    const evaluation = this.store.get("evaluation_run", text43(args.evaluation_run_id, "evaluation_run_id"));
-    const gradeIds = array3(args.grade_ids ?? [], "grade_ids").map((value) => text43(value, "grade_id"));
+    const evaluation = this.store.get("evaluation_run", text47(args.evaluation_run_id, "evaluation_run_id"));
+    const gradeIds = array3(args.grade_ids ?? [], "grade_ids").map((value) => text47(value, "grade_id"));
     if (new Set(gradeIds).size !== gradeIds.length) throw new Error("grade_ids must be unique");
     const trialIds = evaluation.trial_ids;
     const grades = gradeIds.map((gradeId) => {
@@ -20163,22 +20608,22 @@ Evidence: ${item.evidence_ids.join(", ")}
     });
   }
   trialStart(args) {
-    const taskId = text43(args.task_id, "task_id");
+    const taskId = text47(args.task_id, "task_id");
     this.store.get("task", taskId);
-    const subjectType = text43(args.subject_type, "subject_type");
-    const subjectId = text43(args.subject_id, "subject_id");
+    const subjectType = text47(args.subject_type, "subject_type");
+    const subjectId = text47(args.subject_id, "subject_id");
     const subjectVersion = finiteInteger(args.subject_version, "subject_version", 1);
     this.store.get(subjectType, subjectId, subjectVersion);
     let harness;
     if (args.harness_configuration_id !== void 0) {
-      harness = this.store.get("harness_configuration", text43(
+      harness = this.store.get("harness_configuration", text47(
         args.harness_configuration_id,
         "harness_configuration_id"
       ), args.harness_configuration_version === void 0 ? void 0 : finiteInteger(args.harness_configuration_version, "harness_configuration_version", 1));
     }
     return this.store.create("trial", String(args.trial_id ?? id11("trial")), {
       task_id: taskId,
-      case_id: args.case_id === void 0 ? null : text43(args.case_id, "case_id"),
+      case_id: args.case_id === void 0 ? null : text47(args.case_id, "case_id"),
       subject_type: subjectType,
       subject_id: subjectId,
       subject_version: subjectVersion,
@@ -20190,13 +20635,13 @@ Evidence: ${item.evidence_ids.join(", ")}
     });
   }
   trialTraceAppend(args) {
-    const trialId = text43(args.trial_id, "trial_id");
+    const trialId = text47(args.trial_id, "trial_id");
     this.store.get("trial", trialId);
-    const artifactIds = array3(args.artifact_ids ?? [], "artifact_ids").map((value) => text43(value, "artifact_id"));
-    const evidenceIds = array3(args.evidence_ids ?? [], "evidence_ids").map((value) => text43(value, "evidence_id"));
+    const artifactIds = array3(args.artifact_ids ?? [], "artifact_ids").map((value) => text47(value, "artifact_id"));
+    const evidenceIds = array3(args.evidence_ids ?? [], "evidence_ids").map((value) => text47(value, "evidence_id"));
     for (const artifactId of artifactIds) this.store.get("artifact", artifactId);
     for (const evidenceId of evidenceIds) this.store.get("evidence", evidenceId);
-    return this.store.appendEvent(`trial:${trialId}`, text43(args.event_type, "event_type"), {
+    return this.store.appendEvent(`trial:${trialId}`, text47(args.event_type, "event_type"), {
       trial_id: trialId,
       source: args.source ?? "agent_reported",
       data: object15(args.data ?? {}, "data"),
@@ -20205,17 +20650,17 @@ Evidence: ${item.evidence_ids.join(", ")}
     });
   }
   outcomeRecord(args) {
-    const trialId = text43(args.trial_id, "trial_id");
+    const trialId = text47(args.trial_id, "trial_id");
     this.store.get("trial", trialId);
     const verdict = String(args.verdict);
     if (!TRIAL_VERDICTS.has(verdict)) throw new Error(`Unsupported trial verdict: ${verdict}`);
-    const evidenceIds = array3(args.evidence_ids ?? [], "evidence_ids").map((value) => text43(value, "evidence_id"));
+    const evidenceIds = array3(args.evidence_ids ?? [], "evidence_ids").map((value) => text47(value, "evidence_id"));
     for (const evidenceId of evidenceIds) this.store.get("evidence", evidenceId);
-    const failureType = args.failure_type === void 0 ? verdict === "passed" ? null : "unspecified" : text43(args.failure_type, "failure_type");
+    const failureType = args.failure_type === void 0 ? verdict === "passed" ? null : "unspecified" : text47(args.failure_type, "failure_type");
     return this.store.create("outcome", `outcome_${trialId}`, {
       trial_id: trialId,
       verdict,
-      summary: text43(args.summary, "summary"),
+      summary: text47(args.summary, "summary"),
       failure_type: failureType,
       scores: object15(args.scores ?? {}, "scores"),
       costs: object15(args.costs ?? {}, "costs"),
@@ -20225,7 +20670,7 @@ Evidence: ${item.evidence_ids.join(", ")}
     });
   }
   trialGet(args) {
-    const trialId = text43(args.trial_id, "trial_id");
+    const trialId = text47(args.trial_id, "trial_id");
     const trial = this.store.get("trial", trialId);
     const outcome2 = this.store.find("outcome", `outcome_${trialId}`);
     return { trial, trace: this.store.events(`trial:${trialId}`), outcome: outcome2 };
@@ -20233,16 +20678,16 @@ Evidence: ${item.evidence_ids.join(", ")}
   evaluationRunRecord(args) {
     const suite = this.store.get(
       "evaluation_suite",
-      text43(args.suite_id, "suite_id"),
+      text47(args.suite_id, "suite_id"),
       args.suite_version === void 0 ? void 0 : finiteInteger(args.suite_version, "suite_version", 1)
     );
     const split = String(args.split);
     if (!EVAL_SPLITS.has(split)) throw new Error(`Unsupported evaluation split: ${split}`);
-    const subjectType = text43(args.subject_type, "subject_type");
-    const subjectId = text43(args.subject_id, "subject_id");
+    const subjectType = text47(args.subject_type, "subject_type");
+    const subjectId = text47(args.subject_id, "subject_id");
     const subjectVersion = finiteInteger(args.subject_version, "subject_version", 1);
     this.store.get(subjectType, subjectId, subjectVersion);
-    const trialIds = array3(args.trial_ids, "trial_ids").map((value) => text43(value, "trial_id"));
+    const trialIds = array3(args.trial_ids, "trial_ids").map((value) => text47(value, "trial_id"));
     if (!trialIds.length || new Set(trialIds).size !== trialIds.length) {
       throw new Error("trial_ids must contain unique trials");
     }
@@ -20272,14 +20717,14 @@ Evidence: ${item.evidence_ids.join(", ")}
     });
   }
   evaluationRunAggregate(args) {
-    const run = this.store.get("evaluation_run", text43(args.run_id, "run_id"));
+    const run = this.store.get("evaluation_run", text47(args.run_id, "run_id"));
     const trials = run.trial_ids.map((trialId) => this.store.get("trial", trialId));
     const outcomes = trials.map((trial) => this.store.get("outcome", `outcome_${trial.id}`));
     return aggregateEvaluation(run, trials, outcomes);
   }
   evaluationCompare(args) {
-    const baselineId = text43(args.baseline_run_id, "baseline_run_id");
-    const candidateId = text43(args.candidate_run_id, "candidate_run_id");
+    const baselineId = text47(args.baseline_run_id, "baseline_run_id");
+    const candidateId = text47(args.candidate_run_id, "candidate_run_id");
     if (baselineId === candidateId) throw new Error("Evaluation comparison requires two different runs");
     const baseline = this.evaluationRunAggregate({ run_id: baselineId });
     const candidate = this.evaluationRunAggregate({ run_id: candidateId });
@@ -20303,26 +20748,26 @@ Evidence: ${item.evidence_ids.join(", ")}
     });
   }
   evaluationRunnerRun(args) {
-    const taskId = text43(args.task_id, "task_id");
+    const taskId = text47(args.task_id, "task_id");
     this.store.get("task", taskId);
     const suite = this.store.get(
       "evaluation_suite",
-      text43(args.suite_id, "suite_id"),
+      text47(args.suite_id, "suite_id"),
       args.suite_version === void 0 ? void 0 : finiteInteger(args.suite_version, "suite_version", 1)
     );
-    const split = text43(args.split, "split");
+    const split = text47(args.split, "split");
     if (!EVAL_SPLITS.has(split)) throw new Error(`Unsupported evaluation split: ${split}`);
-    const projectRoot = text43(args.project_root, "project_root");
+    const projectRoot = text47(args.project_root, "project_root");
     const trialsPerCase = finiteInteger(args.trials_per_case, "trials_per_case", 1, 1, 20);
     const subjects = array3(args.subjects, "subjects").map((raw, index) => {
       const subject = object15(raw, `subjects[${index}]`);
-      if (text43(subject.subject_type, `subjects[${index}].subject_type`) !== "workflow") {
+      if (text47(subject.subject_type, `subjects[${index}].subject_type`) !== "workflow") {
         throw new Error("Automatic Eval Runner currently executes only workflow subjects; Agent subjects require a Host runtime operation");
       }
-      const subjectId = text43(subject.subject_id, `subjects[${index}].subject_id`);
+      const subjectId = text47(subject.subject_id, `subjects[${index}].subject_id`);
       const subjectVersion = finiteInteger(subject.subject_version, `subjects[${index}].subject_version`, 1);
       this.store.get("workflow", subjectId, subjectVersion);
-      return { label: text43(subject.label, `subjects[${index}].label`), subject_id: subjectId, subject_version: subjectVersion };
+      return { label: text47(subject.label, `subjects[${index}].label`), subject_id: subjectId, subject_version: subjectVersion };
     });
     if (subjects.length < 2 || new Set(subjects.map((subject) => subject.label)).size !== subjects.length) {
       throw new Error("Eval Runner requires at least two uniquely labelled subjects");
@@ -20390,10 +20835,10 @@ Evidence: ${item.evidence_ids.join(", ")}
     };
   }
   evaluationProgramGrade(args) {
-    const evaluation = this.store.get("evaluation_run", text43(args.evaluation_run_id, "evaluation_run_id"));
+    const evaluation = this.store.get("evaluation_run", text47(args.evaluation_run_id, "evaluation_run_id"));
     const grader = this.store.get(
       "grader",
-      text43(args.grader_id, "grader_id"),
+      text47(args.grader_id, "grader_id"),
       args.grader_version === void 0 ? void 0 : finiteInteger(args.grader_version, "grader_version", 1)
     );
     if (grader.grader_type !== "program") throw new Error("Automatic evaluation grading requires a program grader");
@@ -20407,7 +20852,7 @@ Evidence: ${item.evidence_ids.join(", ")}
     const duration = aggregate.costs.duration_ms;
     const passed = Number(aggregate.pass_rate) >= minimumPassRate && (duration?.mean === void 0 || Number(duration.mean) <= maximumDuration);
     const grades = evaluation.trial_ids.map((trialId) => {
-      const gradeId = `grade_${(0, import_node_crypto48.createHash)("sha256").update(JSON.stringify([trialId, grader.id, grader.version])).digest("hex")}`;
+      const gradeId = `grade_${(0, import_node_crypto52.createHash)("sha256").update(JSON.stringify([trialId, grader.id, grader.version])).digest("hex")}`;
       const existing = this.store.find("grade", gradeId);
       if (existing) return existing;
       const outcome2 = this.store.get("outcome", `outcome_${trialId}`);
@@ -20463,14 +20908,14 @@ Evidence: ${item.evidence_ids.join(", ")}
     };
   }
   evaluationPromotionAssess(args) {
-    const comparison = this.store.get("evaluation_comparison", text43(args.comparison_id, "comparison_id"));
+    const comparison = this.store.get("evaluation_comparison", text47(args.comparison_id, "comparison_id"));
     const baselineRun = this.store.get("evaluation_run", String(comparison.baseline_run_id));
     const candidateRun = this.store.get("evaluation_run", String(comparison.candidate_run_id));
     const minTrials = finiteInteger(args.min_trials, "min_trials", 2, 1, 1e4);
     const minimumDelta = args.min_pass_rate_delta === void 0 ? 0 : Number(args.min_pass_rate_delta);
     const maximumCostRatio = args.max_cost_regression_ratio === void 0 ? Number.POSITIVE_INFINITY : Number(args.max_cost_regression_ratio);
     const maximumDurationRatio = args.max_duration_regression_ratio === void 0 ? Number.POSITIVE_INFINITY : Number(args.max_duration_regression_ratio);
-    const costMetric = args.cost_metric === void 0 ? "tokens" : text43(args.cost_metric, "cost_metric");
+    const costMetric = args.cost_metric === void 0 ? "tokens" : text47(args.cost_metric, "cost_metric");
     if (!Number.isFinite(minimumDelta) || minimumDelta < -1 || minimumDelta > 1 || !Number.isFinite(maximumCostRatio) && maximumCostRatio !== Number.POSITIVE_INFINITY || maximumCostRatio < 0 || !Number.isFinite(maximumDurationRatio) && maximumDurationRatio !== Number.POSITIVE_INFINITY || maximumDurationRatio < 0) {
       throw new Error("Promotion thresholds are invalid");
     }
@@ -20516,7 +20961,7 @@ Evidence: ${item.evidence_ids.join(", ")}
     } };
   }
   evaluationReliabilityAssess(args) {
-    const comparison = this.store.get("evaluation_comparison", text43(args.comparison_id, "comparison_id"));
+    const comparison = this.store.get("evaluation_comparison", text47(args.comparison_id, "comparison_id"));
     const baselineRun = this.store.get("evaluation_run", String(comparison.baseline_run_id));
     const candidateRun = this.store.get("evaluation_run", String(comparison.candidate_run_id));
     const minTrials = finiteInteger(args.min_trials, "min_trials", 20, 2, 1e4);
@@ -20539,12 +20984,12 @@ Evidence: ${item.evidence_ids.join(", ")}
     return { status, assessment };
   }
   judgeAdapterSave(args) {
-    const graderType = text43(args.grader_type, "grader_type");
+    const graderType = text47(args.grader_type, "grader_type");
     if (!(/* @__PURE__ */ new Set(["model", "human"])).has(graderType)) throw new Error("Judge adapter must be model or human");
     return this.saveVersioned("judge_adapter", "judge", { ...args, grader_type: graderType, status: "uncalibrated" }, ["name", "grader_type"]);
   }
   judgeCalibrationRecord(args) {
-    const judge = this.store.get("judge_adapter", text43(args.judge_id, "judge_id"));
+    const judge = this.store.get("judge_adapter", text47(args.judge_id, "judge_id"));
     const total = finiteInteger(args.total, "total", 1, 1);
     const agreed = finiteInteger(args.agreed, "agreed", 0, 0, total);
     const minimum = Number(args.minimum_agreement ?? 0.8);
@@ -20555,26 +21000,26 @@ Evidence: ${item.evidence_ids.join(", ")}
     return { calibration };
   }
   judgePromotionEligible(args) {
-    const judge = this.store.get("judge_adapter", text43(args.judge_id, "judge_id"));
+    const judge = this.store.get("judge_adapter", text47(args.judge_id, "judge_id"));
     return { eligible: judge.status === "calibrated", judge };
   }
   adaptationCandidateCreate(args) {
-    const task = this.store.get("task", text43(args.task_id, "task_id"));
+    const task = this.store.get("task", text47(args.task_id, "task_id"));
     const trialIds = uniqueTextArray2(args.trial_ids, "trial_ids", 2);
     const evidenceIds = uniqueTextArray2(args.evidence_ids, "evidence_ids");
     for (const trialId of trialIds) this.store.get("trial", trialId);
     for (const evidenceId of evidenceIds) this.store.get("evidence", evidenceId);
     const axes2 = object15(args.design_axes, "design_axes");
     if (!Object.keys(axes2).length || Object.keys(axes2).length > 2 || Object.keys(axes2).some((key2) => !HARNESS_DIMENSIONS.has(key2))) throw new Error("Adaptation Candidate changes at most two supported design axes");
-    const candidate = this.store.create("adaptation_candidate", String(args.candidate_id ?? id11("adaptation")), { task_id: task.id, trial_ids: trialIds, evidence_ids: evidenceIds, hypothesis: assertNoSecret2(text43(args.hypothesis, "hypothesis"), "hypothesis"), applicability: assertNoSecret2(text43(args.applicability, "applicability"), "applicability"), design_axes: axes2, lifecycle: "draft", publication_allowed: false });
+    const candidate = this.store.create("adaptation_candidate", String(args.candidate_id ?? id11("adaptation")), { task_id: task.id, trial_ids: trialIds, evidence_ids: evidenceIds, hypothesis: assertNoSecret2(text47(args.hypothesis, "hypothesis"), "hypothesis"), applicability: assertNoSecret2(text47(args.applicability, "applicability"), "applicability"), design_axes: axes2, lifecycle: "draft", publication_allowed: false });
     return { candidate };
   }
   adaptationCandidateAuthorizeCanary(args) {
-    const candidate = this.store.get("adaptation_candidate", text43(args.candidate_id, "candidate_id"));
-    const assessment = this.store.get("evaluation_reliability", text43(args.assessment_id, "assessment_id"));
+    const candidate = this.store.get("adaptation_candidate", text47(args.candidate_id, "candidate_id"));
+    const assessment = this.store.get("evaluation_reliability", text47(args.assessment_id, "assessment_id"));
     if (assessment.status !== "eligible") throw new Error("Adaptation Candidate requires an eligible reliability assessment");
     const comparison = this.store.get("evaluation_comparison", String(assessment.comparison_id));
-    const signoff = this.store.get("signoff", text43(args.signoff_id, "signoff_id"));
+    const signoff = this.store.get("signoff", text47(args.signoff_id, "signoff_id"));
     if (signoff.decision !== "passed" || signoff.evaluation_run_id !== comparison.candidate_run_id) {
       throw new Error("Adaptation Candidate requires a passed Signoff for the compared candidate run");
     }
@@ -20582,40 +21027,40 @@ Evidence: ${item.evidence_ids.join(", ")}
     return { candidate: authorized };
   }
   feedbackIntakeCreate(args) {
-    const task = this.store.get("task", text43(args.task_id, "task_id"));
-    const summary2 = assertNoSecret2(text43(args.summary, "summary"), "summary");
-    const intake = this.store.create("feedback_intake", String(args.intake_id ?? id11("feedback_intake")), { task_id: task.id, source_uri: assertNoSecret2(text43(args.source_uri, "source_uri"), "source_uri"), summary: summary2, metric: args.metric === void 0 ? null : text43(args.metric, "metric"), status: "pending_review" });
+    const task = this.store.get("task", text47(args.task_id, "task_id"));
+    const summary2 = assertNoSecret2(text47(args.summary, "summary"), "summary");
+    const intake = this.store.create("feedback_intake", String(args.intake_id ?? id11("feedback_intake")), { task_id: task.id, source_uri: assertNoSecret2(text47(args.source_uri, "source_uri"), "source_uri"), summary: summary2, metric: args.metric === void 0 ? null : text47(args.metric, "metric"), status: "pending_review" });
     return { intake };
   }
   feedbackCaseApprove(args) {
-    const intake = this.store.get("feedback_intake", text43(args.intake_id, "intake_id"));
-    const split = text43(args.split, "split");
+    const intake = this.store.get("feedback_intake", text47(args.intake_id, "intake_id"));
+    const split = text47(args.split, "split");
     if (split !== "development") throw new Error("Feedback intake may only create development cases; held-out requires an independent curator");
-    const reviewer = assertNoSecret2(text43(args.reviewer, "reviewer"), "reviewer");
+    const reviewer = assertNoSecret2(text47(args.reviewer, "reviewer"), "reviewer");
     const caseRecord = this.store.create("feedback_case", String(args.case_id ?? id11("feedback_case")), { intake_id: intake.id, task_id: intake.task_id, split, reviewer, source_uri: intake.source_uri, summary: intake.summary, immutable: true });
     this.store.save("feedback_intake", String(intake.id), { ...recordPayload6(intake), status: "approved", feedback_case_id: caseRecord.id, reviewer });
     return { case: caseRecord };
   }
   canaryStart(args) {
-    const candidate = this.store.get("adaptation_candidate", text43(args.candidate_id, "candidate_id"));
+    const candidate = this.store.get("adaptation_candidate", text47(args.candidate_id, "candidate_id"));
     if (candidate.lifecycle !== "canary_ready") throw new Error("Adaptation Candidate must pass shadow reliability and Signoff before Canary");
-    const canary = this.store.create("canary", String(args.canary_id ?? id11("canary")), { candidate_id: candidate.id, candidate_version: candidate.version, baseline_id: text43(args.baseline_id, "baseline_id"), environment_fingerprint: fingerprint2(object15(args.environment, "environment")), status: "running" });
+    const canary = this.store.create("canary", String(args.canary_id ?? id11("canary")), { candidate_id: candidate.id, candidate_version: candidate.version, baseline_id: text47(args.baseline_id, "baseline_id"), environment_fingerprint: fingerprint2(object15(args.environment, "environment")), status: "running" });
     return { canary };
   }
   canaryObserve(args) {
-    const canary = this.store.get("canary", text43(args.canary_id, "canary_id"));
+    const canary = this.store.get("canary", text47(args.canary_id, "canary_id"));
     const baseline = Number(args.baseline);
     const candidate = Number(args.candidate);
     const threshold = Number(args.threshold);
     if (![baseline, candidate, threshold].every((value) => Number.isFinite(value) && value >= 0)) throw new Error("Canary metrics must be non-negative finite numbers");
     const regression = candidate - baseline > threshold;
     const status = regression ? "rolled_back" : "running";
-    const saved = this.store.save("canary", String(canary.id), { ...recordPayload6(canary), status, metric: text43(args.metric, "metric"), baseline, candidate, threshold, rollback_to: regression ? canary.baseline_id : null });
+    const saved = this.store.save("canary", String(canary.id), { ...recordPayload6(canary), status, metric: text47(args.metric, "metric"), baseline, candidate, threshold, rollback_to: regression ? canary.baseline_id : null });
     return { status, canary: saved };
   }
   experienceMine(args) {
-    const subjectType = text43(args.subject_type, "subject_type");
-    const subjectId = text43(args.subject_id, "subject_id");
+    const subjectType = text47(args.subject_type, "subject_type");
+    const subjectId = text47(args.subject_id, "subject_id");
     const subjectVersion = finiteInteger(args.subject_version, "subject_version", 1);
     const groups = /* @__PURE__ */ new Map();
     for (const trial of this.store.list("trial", 1e4, (item) => item.subject_type === subjectType && item.subject_id === subjectId && Number(item.subject_version) === subjectVersion)) {
@@ -20633,8 +21078,8 @@ Evidence: ${item.evidence_ids.join(", ")}
     const candidates = [...groups.values()].filter((group) => group.trial_ids.length >= 2).map((group) => {
       const trialIds = [...group.trial_ids].sort();
       const evidenceIds = [...new Set(group.evidence_ids)].sort();
-      const candidateId = `experience_mining_${(0, import_node_crypto48.createHash)("sha256").update(`${subjectType}:${subjectId}:${subjectVersion}:${group.pattern_kind}:${group.failure_type}:${trialIds.join(",")}`).digest("hex")}`;
-      const payload27 = {
+      const candidateId = `experience_mining_${(0, import_node_crypto52.createHash)("sha256").update(`${subjectType}:${subjectId}:${subjectVersion}:${group.pattern_kind}:${group.failure_type}:${trialIds.join(",")}`).digest("hex")}`;
+      const payload29 = {
         subject_type: subjectType,
         subject_id: subjectId,
         subject_version: subjectVersion,
@@ -20646,18 +21091,18 @@ Evidence: ${item.evidence_ids.join(", ")}
         event_types: [...new Set(group.event_types)].sort(),
         next_action: "Generate a bounded proposal, then compare it in an isolated held-out evaluation before Signoff."
       };
-      return this.store.find("experience_mining_candidate", candidateId) ?? this.store.create("experience_mining_candidate", candidateId, payload27);
+      return this.store.find("experience_mining_candidate", candidateId) ?? this.store.create("experience_mining_candidate", candidateId, payload29);
     });
     return { candidates };
   }
   operationalSignalRecord(args) {
-    const taskId = args.task_id === void 0 ? null : text43(args.task_id, "task_id");
+    const taskId = args.task_id === void 0 ? null : text47(args.task_id, "task_id");
     if (taskId) this.store.get("task", taskId);
     const value = Number(args.value);
     if (!Number.isFinite(value) || value < 0) throw new Error("value must be a non-negative finite number");
-    const subjectType = text43(args.subject_type, "subject_type");
-    const subjectId = text43(args.subject_id, "subject_id");
-    const metric = text43(args.metric, "metric");
+    const subjectType = text47(args.subject_type, "subject_type");
+    const subjectId = text47(args.subject_id, "subject_id");
+    const metric = text47(args.metric, "metric");
     const sequence = this.store.list("operational_signal", 1e4, (signal) => signal.subject_type === subjectType && signal.subject_id === subjectId && signal.metric === metric).length + 1;
     return this.store.create("operational_signal", String(args.signal_id ?? id11("signal")), {
       task_id: taskId,
@@ -20669,11 +21114,11 @@ Evidence: ${item.evidence_ids.join(", ")}
     });
   }
   operationalDriftEvaluate(args) {
-    const subjectType = text43(args.subject_type, "subject_type");
-    const subjectId = text43(args.subject_id, "subject_id");
-    const metric = text43(args.metric, "metric");
+    const subjectType = text47(args.subject_type, "subject_type");
+    const subjectId = text47(args.subject_id, "subject_id");
+    const metric = text47(args.metric, "metric");
     const windowSize = finiteInteger(args.window_size, "window_size", 10, 1, 1e3);
-    const direction = text43(args.direction, "direction");
+    const direction = text47(args.direction, "direction");
     if (!(/* @__PURE__ */ new Set(["lower", "higher"])).has(direction)) throw new Error("direction must be lower or higher");
     const threshold = Number(args.threshold);
     if (!Number.isFinite(threshold) || threshold < 0) throw new Error("threshold must be non-negative");
@@ -20701,27 +21146,27 @@ Evidence: ${item.evidence_ids.join(", ")}
   }
   verificationGate(subjectType, subject, args) {
     if (args.signoff_id !== void 0) {
-      const signoff = this.store.get("signoff", text43(args.signoff_id, "signoff_id"));
+      const signoff = this.store.get("signoff", text47(args.signoff_id, "signoff_id"));
       const run2 = this.store.get("evaluation_run", String(signoff.evaluation_run_id));
       if (signoff.decision !== "passed" || signoff.subject_type !== subjectType || signoff.subject_id !== subject.id || Number(signoff.subject_version) !== Number(subject.version) || run2.verdict !== "passed" || run2.split !== "held_out") {
         throw new Error(`Verification requires a passed signoff for this exact ${subjectType} version`);
       }
       return { evaluation_run_id: run2.id, signoff_id: signoff.id, promotion_id: null };
     }
-    const run = this.store.get("evaluation_run", text43(args.evaluation_run_id, "evaluation_run_id"));
+    const run = this.store.get("evaluation_run", text47(args.evaluation_run_id, "evaluation_run_id"));
     if (run.verdict !== "passed" || run.split !== "held_out" || run.subject_type !== subjectType || run.subject_id !== subject.id || Number(run.subject_version) !== Number(subject.version)) {
       throw new Error(`Verification requires a passed held-out evaluation for this exact ${subjectType} version`);
     }
-    const promotion = this.store.get("evaluation_promotion", text43(args.promotion_id, "promotion_id"));
+    const promotion = this.store.get("evaluation_promotion", text47(args.promotion_id, "promotion_id"));
     if (!promotion.eligible || promotion.candidate_run_id !== run.id) {
       throw new Error(`Verification requires an eligible promotion for this exact ${subjectType} evaluation`);
     }
     return { evaluation_run_id: run.id, signoff_id: null, promotion_id: promotion.id };
   }
-  transitionVersionedSubject(kind, idKey, subjectType, args) {
-    const subject = this.store.get(kind, text43(args[idKey], idKey));
+  transitionVersionedSubject(kind2, idKey, subjectType, args) {
+    const subject = this.store.get(kind2, text47(args[idKey], idKey));
     const current2 = String(subject.lifecycle ?? "draft");
-    const target = text43(args.target, "target");
+    const target = text47(args.target, "target");
     if (!VERSIONED_LIFECYCLE.has(target)) throw new Error(`Unsupported ${subjectType} lifecycle: ${target}`);
     const allowed = {
       draft: ["candidate", "deprecated"],
@@ -20731,32 +21176,32 @@ Evidence: ${item.evidence_ids.join(", ")}
     };
     if (!allowed[current2]?.includes(target)) throw new Error(`Invalid ${subjectType} transition: ${current2} -> ${target}`);
     const verification = target === "verified" ? this.verificationGate(subjectType, subject, args) : { evaluation_run_id: null, signoff_id: null, promotion_id: null };
-    return this.store.save(kind, String(subject.id), {
+    return this.store.save(kind2, String(subject.id), {
       ...recordPayload6(subject),
       lifecycle: target,
       previous_version: subject.version,
-      transition_reason: text43(args.reason, "reason"),
+      transition_reason: text47(args.reason, "reason"),
       ...verification
     });
   }
   workflowRollback(args) {
     return this.rollbackVersionedSubject("workflow", "workflow_id", "workflow", args);
   }
-  rollbackVersionedSubject(kind, idKey, subjectType, args) {
-    const subjectId = text43(args[idKey], idKey);
-    const current2 = this.store.get(kind, subjectId);
-    const target = this.store.get(kind, subjectId, finiteInteger(args.target_version, "target_version", 1));
+  rollbackVersionedSubject(kind2, idKey, subjectType, args) {
+    const subjectId = text47(args[idKey], idKey);
+    const current2 = this.store.get(kind2, subjectId);
+    const target = this.store.get(kind2, subjectId, finiteInteger(args.target_version, "target_version", 1));
     if (target.lifecycle !== "verified") throw new Error(`Rollback target must be a verified ${subjectType} version`);
-    return this.store.save(kind, subjectId, {
+    return this.store.save(kind2, subjectId, {
       ...recordPayload6(target),
       lifecycle: "verified",
       rollback_from_version: current2.version,
       rollback_to_version: target.version,
-      rollback_reason: text43(args.reason, "reason")
+      rollback_reason: text47(args.reason, "reason")
     });
   }
   experiencePatternCreate(args) {
-    const taskId = text43(args.task_id, "task_id");
+    const taskId = text47(args.task_id, "task_id");
     this.store.get("task", taskId);
     const trialIds = uniqueTextArray2(args.trial_ids, "trial_ids", 2);
     const evidenceIds = uniqueTextArray2(args.evidence_ids, "evidence_ids");
@@ -20772,9 +21217,9 @@ Evidence: ${item.evidence_ids.join(", ")}
       trial_ids: trialIds,
       evidence_ids: evidenceIds,
       outcomes,
-      success_strategy: text43(args.success_strategy, "success_strategy"),
-      failure_modes: array3(args.failure_modes, "failure_modes").map((item) => text43(item, "failure_mode")),
-      applicability: text43(args.applicability, "applicability")
+      success_strategy: text47(args.success_strategy, "success_strategy"),
+      failure_modes: array3(args.failure_modes, "failure_modes").map((item) => text47(item, "failure_mode")),
+      applicability: text47(args.applicability, "applicability")
     }, ["summary"]);
   }
   skillProposalCreate(args) {
@@ -20794,13 +21239,13 @@ Evidence: ${item.evidence_ids.join(", ")}
     return this.rollbackVersionedSubject("skill_proposal", "proposal_id", "skill_proposal", args);
   }
   async skillProposalPublish(args) {
-    const proposal = this.store.get("skill_proposal", text43(args.proposal_id, "proposal_id"));
+    const proposal = this.store.get("skill_proposal", text47(args.proposal_id, "proposal_id"));
     if (proposal.lifecycle !== "verified") throw new Error("Skill proposal must be verified before publication");
-    const source = this.catalog.getSource(text43(args.source_id, "source_id"));
+    const source = this.catalog.getSource(text47(args.source_id, "source_id"));
     const publication = await publishSkill({
       sourceRoot: String(source.real_path),
-      targetPath: text43(args.target_path, "target_path"),
-      expectedDigest: text43(args.expected_digest, "expected_digest"),
+      targetPath: text47(args.target_path, "target_path"),
+      expectedDigest: text47(args.expected_digest, "expected_digest"),
       content: String(proposal.skill_markdown),
       backupsDir: this.store.paths.backupsDir,
       proposalId: String(proposal.id),
@@ -20817,11 +21262,11 @@ Evidence: ${item.evidence_ids.join(", ")}
     return record;
   }
   async skillPublicationRollback(args) {
-    const publication = this.store.get("skill_publication", text43(args.publication_id, "publication_id"));
+    const publication = this.store.get("skill_publication", text47(args.publication_id, "publication_id"));
     if (publication.status !== "published") throw new Error("Only a published Skill publication can be rolled back");
     await rollbackSkillPublication({
       targetPath: String(publication.target_path),
-      expectedDigest: text43(args.expected_digest, "expected_digest"),
+      expectedDigest: text47(args.expected_digest, "expected_digest"),
       publishedDigest: String(publication.published_digest),
       backupPath: String(publication.backup_path),
       allowExternalWrite: args.allow_external_write
@@ -20853,7 +21298,7 @@ Evidence: ${item.evidence_ids.join(", ")}
   }
   workflowRun(args) {
     const plan = this.workflowPlan(args);
-    const root = text43(args.project_root, "project_root");
+    const root = text47(args.project_root, "project_root");
     const results = executeSteps(
       plan.steps,
       root,
@@ -20967,9 +21412,9 @@ Evidence: ${item.evidence_ids.join(", ")}
     if (!Number.isInteger(max) || max < 1 || max > 32) throw new Error("max_concurrency must be between 1 and 32");
     const leaseTtl = finiteInteger(args.lease_ttl_seconds, "lease_ttl_seconds", 300, 1, 3600);
     const budget = budgetLimits(object15(args.budget ?? {}, "budget"));
-    const planId = args.plan_id === void 0 ? id11("plan") : text43(args.plan_id, "plan_id");
+    const planId = args.plan_id === void 0 ? id11("plan") : text47(args.plan_id, "plan_id");
     return this.store.create("orchestration_plan", planId, {
-      goal: text43(args.goal, "goal"),
+      goal: text47(args.goal, "goal"),
       task_id: args.task_id ?? null,
       trial_id: args.trial_id ?? null,
       trial_started_at: args.trial_started_at ?? null,
@@ -20984,17 +21429,17 @@ Evidence: ${item.evidence_ids.join(", ")}
     });
   }
   orchestrationTrialStart(args) {
-    const taskId = text43(args.task_id, "task_id");
+    const taskId = text47(args.task_id, "task_id");
     this.store.get("task", taskId);
-    const trialId = args.trial_id === void 0 ? id11("trial") : text43(args.trial_id, "trial_id");
+    const trialId = args.trial_id === void 0 ? id11("trial") : text47(args.trial_id, "trial_id");
     if (this.store.find("trial", trialId)) throw new Error(`Trial already exists: ${trialId}`);
-    const caseId = args.case_id === void 0 ? void 0 : text43(args.case_id, "case_id");
+    const caseId = args.case_id === void 0 ? void 0 : text47(args.case_id, "case_id");
     const environment = object15(args.environment ?? {}, "environment");
     const budget = object15(args.budget ?? {}, "budget");
     if (args.harness_configuration_id !== void 0) {
       this.store.get(
         "harness_configuration",
-        text43(args.harness_configuration_id, "harness_configuration_id"),
+        text47(args.harness_configuration_id, "harness_configuration_id"),
         args.harness_configuration_version === void 0 ? void 0 : finiteInteger(args.harness_configuration_version, "harness_configuration_version", 1)
       );
     }
@@ -21027,7 +21472,7 @@ Evidence: ${item.evidence_ids.join(", ")}
   orchestrationDispatch(args) {
     const plan = this.get("orchestration_plan", "plan_id", args);
     if (plan.status !== "running") throw new Error(`Plan is not running: ${plan.status}`);
-    const owner = text43(args.claimed_by, "claimed_by");
+    const owner = text47(args.claimed_by, "claimed_by");
     const maximum = finiteInteger(plan.max_concurrency, "plan max_concurrency", 4, 1, 32);
     const requested = finiteInteger(args.capacity, "capacity", maximum, 1);
     const capacity = Math.min(requested, maximum);
@@ -21056,8 +21501,8 @@ Evidence: ${item.evidence_ids.join(", ")}
   orchestrationRenew(args) {
     const plan = this.get("orchestration_plan", "plan_id", args);
     if (plan.status !== "running") throw new Error(`Plan is not running: ${plan.status}`);
-    const leaseId = text43(args.lease_id, "lease_id");
-    const owner = text43(args.claimed_by, "claimed_by");
+    const leaseId = text47(args.lease_id, "lease_id");
+    const owner = text47(args.claimed_by, "claimed_by");
     const ttl = finiteInteger(plan.lease_ttl_seconds, "plan lease_ttl_seconds", 300, 1, 3600);
     let found = false;
     const nodes = plan.nodes.map((node) => {
@@ -21071,8 +21516,8 @@ Evidence: ${item.evidence_ids.join(", ")}
   }
   orchestrationSubmit(args) {
     const plan = this.get("orchestration_plan", "plan_id", args);
-    const leaseId = text43(args.lease_id, "lease_id");
-    const idempotencyKey = args.idempotency_key === void 0 ? null : text43(args.idempotency_key, "idempotency_key");
+    const leaseId = text47(args.lease_id, "lease_id");
+    const idempotencyKey = args.idempotency_key === void 0 ? null : text47(args.idempotency_key, "idempotency_key");
     const receipts = array3(plan.submission_receipts ?? [], "submission_receipts");
     const existing = idempotencyKey === null ? void 0 : receipts.find((receipt) => receipt.idempotency_key === idempotencyKey);
     if (existing) {
@@ -21084,18 +21529,18 @@ Evidence: ${item.evidence_ids.join(", ")}
     const leased = plan.nodes.find((node) => node.lease_id === leaseId);
     if (!leased) throw new Error(`Unknown lease: ${leaseId}`);
     if (args.claimed_by !== void 0) {
-      if (leased.claimed_by !== text43(args.claimed_by, "claimed_by")) throw new Error("Lease owner does not match");
+      if (leased.claimed_by !== text47(args.claimed_by, "claimed_by")) throw new Error("Lease owner does not match");
     }
     const provenance = String(args.provenance ?? "agent_reported");
-    const verdict = text43(args.verdict, "verdict");
+    const verdict = text47(args.verdict, "verdict");
     const costs = object15(args.costs ?? {}, "costs");
     const accumulatedCosts = addCosts(object15(plan.accumulated_costs ?? {}, "accumulated costs"), costs);
     const exceedsBudget = budgetExceeded(accumulatedCosts, budgetLimits(object15(plan.budget ?? {}, "plan budget")));
-    const artifactIds = array3(args.artifact_ids ?? [], "artifact_ids").map((value) => text43(value, "artifact_id"));
-    const evidenceIds = array3(args.evidence_ids ?? [], "evidence_ids").map((value) => text43(value, "evidence_id"));
+    const artifactIds = array3(args.artifact_ids ?? [], "artifact_ids").map((value) => text47(value, "artifact_id"));
+    const evidenceIds = array3(args.evidence_ids ?? [], "evidence_ids").map((value) => text47(value, "evidence_id"));
     for (const artifactId of artifactIds) this.store.get("artifact", artifactId);
     for (const evidenceId of evidenceIds) this.store.get("evidence", evidenceId);
-    const summary2 = args.summary === void 0 ? null : text43(args.summary, "summary");
+    const summary2 = args.summary === void 0 ? null : text47(args.summary, "summary");
     const submitted = submitNode(plan.nodes, leaseId, verdict, provenance);
     const nodes = exceedsBudget ? submitted.map((node) => node.status === "pending" ? { ...node, status: "blocked", last_provenance: "budget_exceeded" } : node) : submitted;
     const status = planStatus(nodes);
@@ -21145,7 +21590,7 @@ Evidence: ${item.evidence_ids.join(", ")}
       return { plan, ...this.trialGet({ trial_id: trialId }) };
     }
     const result = orchestrationOutcome(plan.nodes, Boolean(plan.budget_exceeded));
-    const stableKey = (0, import_node_crypto48.createHash)("sha256").update(`${plan.id}:${trialId}`).digest("hex");
+    const stableKey = (0, import_node_crypto52.createHash)("sha256").update(`${plan.id}:${trialId}`).digest("hex");
     const artifactId = `artifact_${stableKey}`;
     const artifact = this.store.find("artifact", artifactId) ?? this.artifactRegister({
       artifact_id: artifactId,
@@ -21198,7 +21643,7 @@ Evidence: ${item.evidence_ids.join(", ")}
 
 // src/mcp.ts
 var schemaFor = (name) => {
-  if (["scan", "enabled", "allow_execution", "allow_external_write", "require_held_out", "require_outcome_passed", "retryable", "requires_external_effect", "supports_pause_resume", "supports_evidence_receipts", "generated_code", "requires_credential", "has_compensation", "approved", "start_trial", "untrusted_input", "confirmed_original_runner_stopped", "sanitized", "active", "acceptance_required"].includes(name)) return { type: "boolean" };
+  if (["scan", "enabled", "allow_execution", "allow_external_write", "require_held_out", "require_outcome_passed", "retryable", "requires_external_effect", "supports_pause_resume", "supports_evidence_receipts", "generated_code", "requires_credential", "has_compensation", "approved", "start_trial", "untrusted_input", "confirmed_original_runner_stopped", "sanitized", "active", "acceptance_required", "trusted"].includes(name)) return { type: "boolean" };
   if ([
     "limit",
     "version",
@@ -21358,7 +21803,10 @@ var schemaFor = (name) => {
     "object_types",
     "required_memory_ids",
     "required_object_ids",
-    "benchmark_ids"
+    "benchmark_ids",
+    "memory_ids",
+    "paths",
+    "state_paths"
   ].includes(name)) return { type: "array" };
   return { type: "string" };
 };
@@ -21585,6 +22033,20 @@ var TOOLS = [
   tool("craft_task_run_resume", "Resume a paused Task Run only after re-observing optional environment and budget inputs.", ["task_run_id"], false, ["environment", "budget"]),
   tool("craft_task_run_cancel", "Cancel a locally owned live Host Run when possible, then mark the Task Run cancelled.", ["task_run_id", "reason"]),
   tool("craft_task_run_handoff", "Create a content-free Task Run handoff with its current resume action.", ["task_run_id", "reason"], false, ["handoff_id"]),
+  tool("craft_verified_work_loop_prepare", "Prepare Craft's single verified work loop: Task Contract, initial State Snapshot, Work Launch, Task Run and durable loop manifest.", ["workspace_id", "goal", "host", "prompt"], false, ["work_loop_id", "task_id", "title", "project_id", "contract_id", "allowed_effects", "sandbox", "model", "timeout_ms", "output_limit", "max_turns", "max_budget_usd", "acceptance_name", "acceptance_criteria", "environment", "budget", "state_adapter", "state_paths", "artifact_ids", "activation_profile_id", "activation_profile_version", "budget_account_id", "budget_account_version"]),
+  tool("craft_verified_work_loop_advance", "Re-observe a verified work loop after Host progress; workspace or input drift becomes needs_replan rather than a model claim.", ["work_loop_id"], false, ["environment", "budget", "state_adapter", "state_paths", "artifact_ids", "snapshot_id", "receipt_id"]),
+  tool("craft_verified_work_loop_decide", "Record one human decision and apply only the corresponding approved launch, acceptance, or human-change action.", ["work_loop_id", "decision", "actor", "summary"], false, ["approved", "prompt", "criterion_id", "affected_paths", "change_id", "state_adapter", "state_paths"]),
+  tool("craft_verified_work_loop_resume", "Resume a non-drifted verified work loop only after re-observing its environment, budget and workspace.", ["work_loop_id"], false, ["environment", "budget", "state_adapter", "state_paths"]),
+  tool("craft_verified_work_loop_get", "Read one verified work loop with content-free receipts and human decisions.", ["work_loop_id"], true),
+  tool("craft_state_workspace_observe", "Create a content-free file-tree or file-artifact State Snapshot for one declared Workspace.", ["workspace_id"], false, ["adapter", "paths", "artifact_ids", "snapshot_id"]),
+  tool("craft_state_workspace_compare", "Compare two State Snapshots by digest and paths without reading raw business content into Craft records.", ["before_snapshot_id", "after_snapshot_id"], true),
+  tool("craft_eval_campaign_create", "Plan comparable held-out Case \xD7 Harness \xD7 Trial slots; it never starts a hidden model or Host.", ["case_ids", "baseline_harness", "candidate_harness", "trials_per_case", "acceptance_ref"], false, ["campaign_id", "environment", "budget"]),
+  tool("craft_eval_campaign_bind", "Bind one observed Task Run to exactly one planned Eval Campaign slot.", ["slot_id", "task_run_id"]),
+  tool("craft_eval_campaign_advance", "Evaluate only fully observed Eval Campaign pairs and return eligible, rejected, or inconclusive.", ["campaign_id"]),
+  tool("craft_eval_campaign_get", "Read an Eval Campaign and all planned slots.", ["campaign_id"], true),
+  tool("craft_project_knowledge_discover", "Discover only trusted project-local Serena memory descriptors; global memory is never imported.", ["project_root", "trusted"], false, ["discovery_id"]),
+  tool("craft_project_knowledge_resolve", "Resolve one to three digest-pinned Serena memories as bounded read-only task context; Craft stores only the receipt.", ["discovery_id", "memory_ids"], false, ["resolution_id", "max_chars"]),
+  tool("craft_project_knowledge_propose_update", "Create an evidence-backed draft suggestion for Serena memory maintenance without writing external files.", ["discovery_id", "memory_id", "evidence_ids", "summary"], false, ["proposal_id"]),
   tool("craft_task_benchmark_create", "Pair two observed Task Runs for one sanitized evaluation Case; it does not start hidden Hosts.", ["case_id", "baseline_task_run_id", "candidate_task_run_id"], false, ["benchmark_id"]),
   tool("craft_task_benchmark_evaluate", "Materialize a pair comparison only after both Task Runs have immutable deliveries.", ["benchmark_id"]),
   tool("craft_task_benchmark_aggregate", "Aggregate comparable Task Benchmark pairs into an existing held-out delivery evaluation recommendation.", ["benchmark_ids"], false, ["run_id", "min_trials"]),
@@ -22694,6 +23156,7 @@ var CORE_TOOL_NAMES = /* @__PURE__ */ new Set([
   "craft_task_control_get",
   "craft_task_run_refresh",
   "craft_task_run_get",
+  "craft_verified_work_loop_get",
   "craft_work_launch_get",
   "craft_work_delivery_observe",
   "craft_work_delivery_get",
@@ -22795,6 +23258,20 @@ var McpServer = class {
       craft_task_run_resume: (a) => service.taskRunResume(a),
       craft_task_run_cancel: (a) => service.taskRunCancel(a),
       craft_task_run_handoff: (a) => service.taskRunHandoff(a),
+      craft_verified_work_loop_prepare: (a) => service.verifiedWorkLoopPrepare(a),
+      craft_verified_work_loop_advance: (a) => service.verifiedWorkLoopAdvance(a),
+      craft_verified_work_loop_decide: (a) => service.verifiedWorkLoopDecide(a),
+      craft_verified_work_loop_resume: (a) => service.verifiedWorkLoopResume(a),
+      craft_verified_work_loop_get: (a) => service.verifiedWorkLoopGet(a),
+      craft_state_workspace_observe: (a) => service.stateWorkspaceObserve(a),
+      craft_state_workspace_compare: (a) => service.stateWorkspaceCompare(a),
+      craft_eval_campaign_create: (a) => service.evalCampaignCreate(a),
+      craft_eval_campaign_bind: (a) => service.evalCampaignBind(a),
+      craft_eval_campaign_advance: (a) => service.evalCampaignAdvance(a),
+      craft_eval_campaign_get: (a) => service.evalCampaignGet(a),
+      craft_project_knowledge_discover: (a) => service.projectKnowledgeDiscover(a),
+      craft_project_knowledge_resolve: (a) => service.projectKnowledgeResolve(a),
+      craft_project_knowledge_propose_update: (a) => service.projectKnowledgeProposeUpdate(a),
       craft_workspace_open: (a) => service.workspaceOpen(a),
       craft_workspace_get: (a) => service.workspaceGet(a),
       craft_workspace_checkpoint: (a) => service.workspaceCheckpoint(a),
@@ -23216,8 +23693,8 @@ async function serveMcpStdio(options) {
   const runtime = await (options.start ?? start)(options.mode);
   try {
     while (pending.length || !closed) {
-      if (!pending.length) await new Promise((resolve14) => {
-        wake = resolve14;
+      if (!pending.length) await new Promise((resolve16) => {
+        wake = resolve16;
       });
       wake = void 0;
       const line = pending.shift();

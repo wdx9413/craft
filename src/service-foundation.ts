@@ -48,6 +48,10 @@ import { DeliveryLoopKernel } from "./delivery-loop.ts";
 import { TaskControlKernel } from "./task-control.ts";
 import { TaskRunKernel } from "./task-run.ts";
 import { TaskBenchmarkKernel } from "./task-benchmark.ts";
+import { StateWorkspaceKernel } from "./state-workspace.ts";
+import { VerifiedWorkLoopKernel } from "./verified-work-loop.ts";
+import { EvalCampaignKernel } from "./eval-campaign.ts";
+import { ProjectKnowledgeKernel } from "./project-knowledge.ts";
 
 /**
  * Stable composition root for the service. Domain behavior stays in focused
@@ -103,6 +107,10 @@ export abstract class ServiceFoundation {
   readonly taskControl: TaskControlKernel;
   readonly taskRuns: TaskRunKernel;
   readonly taskBenchmarks: TaskBenchmarkKernel;
+  readonly stateWorkspace: StateWorkspaceKernel;
+  readonly verifiedWorkLoops: VerifiedWorkLoopKernel;
+  readonly evalCampaigns: EvalCampaignKernel;
+  readonly projectKnowledge: ProjectKnowledgeKernel;
 
   constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter = new LocalIsolatedAdapter(),
     dockerSandbox = new DockerSandboxAdapter(), egressBroker = new TrustedEgressBroker(), hostOwnerId?: string) {
@@ -137,6 +145,10 @@ export abstract class ServiceFoundation {
     this.taskControl = new TaskControlKernel(store, this.deliveryLoop);
     this.taskRuns = new TaskRunKernel(store);
     this.taskBenchmarks = new TaskBenchmarkKernel(store, this.deliveryEvaluation);
+    this.stateWorkspace = new StateWorkspaceKernel(store);
+    this.verifiedWorkLoops = new VerifiedWorkLoopKernel(store);
+    this.evalCampaigns = new EvalCampaignKernel(store, this.taskBenchmarks);
+    this.projectKnowledge = new ProjectKnowledgeKernel(store);
     this.hostRuns = new HostRunKernel(store, [this.codexHost, this.claudeHost], hostOwnerId,
       (run, receipt) => this.finalizeWorkLaunch(run, receipt));
   }

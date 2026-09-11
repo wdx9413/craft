@@ -15,7 +15,7 @@ import { decideExecution } from "./execution-policy.js";
 import { dockerRequestDigest } from "./docker-sandbox.js";
 import { egressRequestDigest } from "./egress.js";
 import { ServiceFoundation } from "./service-foundation.js";
-export const VERSION = "0.11.50";
+export const VERSION = "0.11.51";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -231,7 +231,7 @@ export class CraftService extends ServiceFoundation {
             "supply_chain_advisory",
             "maintenance_status",
             "maintenance_tick",
-            "maintenance_component", "maintenance_failure", "attention_item", "work_launch", "work_delivery", "delivery_loop", "delivery_evaluation_case", "delivery_evaluation_comparison", "delivery_evaluation_run", "platform_execution_profile", "platform_execution_preflight", "platform_execution_probe", "platform_execution_conformance", "task_run", "task_run_state", "task_run_handoff", "task_benchmark", "task_benchmark_pair", "acceptance_plan", "acceptance_check", "acceptance_assessment", "acceptance_evaluator", "acceptance_evaluation_job", "verified_iteration", "iteration_attempt", "strategy_recommendation",
+            "maintenance_component", "maintenance_failure", "attention_item", "work_launch", "work_delivery", "delivery_loop", "delivery_evaluation_case", "delivery_evaluation_comparison", "delivery_evaluation_run", "platform_execution_profile", "platform_execution_preflight", "platform_execution_probe", "platform_execution_conformance", "task_run", "task_run_state", "task_run_handoff", "task_benchmark", "task_benchmark_pair", "state_snapshot", "verified_work_loop", "verified_work_loop_receipt", "verified_work_loop_decision", "human_state_event", "work_loop_invalidation", "eval_campaign", "eval_campaign_slot", "project_knowledge_discovery", "project_knowledge_resolution", "project_knowledge_proposal", "acceptance_plan", "acceptance_check", "acceptance_assessment", "acceptance_evaluator", "acceptance_evaluation_job", "verified_iteration", "iteration_attempt", "strategy_recommendation",
             "trajectory_script_proposal", "verified_script_run", "knowledge_claim", "wiki_page", "knowledge_relation", "wiki_context_bundle", "wiki_skill_candidate", "knowledge_evaluation_case", "knowledge_evaluation_run", "wiki_candidate_evaluation_attestation", "wiki_candidate_publication_authorization", "wiki_candidate_publication_package", "guided_work_brief", "execution_safety_preflight", "wiki_candidate_local_import"];
         kinds.push("untrusted_content", "untrusted_extraction", "decision_projection");
         return { version: VERSION, data_root: this.store.paths.root,
@@ -2950,6 +2950,71 @@ export class CraftService extends ServiceFoundation {
         }
         return this.taskRuns.cancel(args);
     }
+    verifiedWorkLoopPrepare(args) {
+        const workspace = this.store.get("workspace", text(args.workspace_id, "workspace_id"));
+        const task = args.task_id === undefined ? this.taskOpen({ title: args.title, goal: args.goal, project_id: args.project_id }).task : this.store.get("task", text(args.task_id, "task_id"));
+        const control = this.taskControlSave({ contract_id: args.contract_id, task_id: task.id, workspace: workspace.root_path,
+            allowed_effects: args.allowed_effects ?? [args.sandbox === "workspace-write" ? "local_write" : "read_only"], acceptance_required: args.acceptance_criteria !== undefined,
+            activation_profile_id: args.activation_profile_id, activation_profile_version: args.activation_profile_version,
+            budget_account_id: args.budget_account_id, budget_account_version: args.budget_account_version }).contract;
+        const baseline = this.stateWorkspace.observe({ workspace_id: workspace.id, adapter: args.state_adapter ?? "file_tree", paths: args.state_paths, artifact_ids: args.artifact_ids });
+        const prepared = this.taskRunPrepare({ ...args, contract_id: control.id, workspace: workspace.root_path });
+        const taskRun = prepared.task_run;
+        const loop = this.verifiedWorkLoops.create({ work_loop_id: args.work_loop_id, task_id: task.id, contract_id: control.id, task_run_id: taskRun.id, snapshot_id: baseline.snapshot.id });
+        return { task, contract: control, baseline_snapshot: baseline.snapshot, ...prepared, work_loop: loop.loop, work_loop_idempotent: loop.idempotent };
+    }
+    verifiedWorkLoopAdvance(args) {
+        const loop = this.store.get("verified_work_loop", text(args.work_loop_id, "work_loop_id"));
+        const taskRun = this.store.get("task_run", String(loop.task_run_id));
+        const state = this.taskRunRefresh({ task_run_id: taskRun.id, environment: args.environment, budget: args.budget }).state;
+        const snapshot = this.stateWorkspace.observe({ workspace_id: loop.workspace_id, adapter: args.state_adapter ?? "file_tree", paths: args.state_paths, artifact_ids: args.artifact_ids, snapshot_id: args.snapshot_id }).snapshot;
+        return this.verifiedWorkLoops.advance({ work_loop_id: loop.id, task_run_state_id: state.id, snapshot_id: snapshot.id, receipt_id: args.receipt_id });
+    }
+    verifiedWorkLoopDecide(args) {
+        const loop = this.store.get("verified_work_loop", text(args.work_loop_id, "work_loop_id"));
+        const run = this.store.get("task_run", String(loop.task_run_id));
+        const launch = this.store.get("work_launch", String(run.launch_id));
+        const decision = String(args.decision);
+        if (decision === "approve" && args.approved !== true)
+            throw new Error("Verified Work Loop approve requires approved=true");
+        if ((decision === "accept" || decision === "reject") && (launch.acceptance_plan_id === undefined || args.criterion_id === undefined))
+            throw new Error("Verified Work Loop acceptance decision requires an Acceptance Plan and criterion_id");
+        const recorded = this.verifiedWorkLoops.decide(args);
+        if (recorded.idempotent === true)
+            return recorded;
+        if (decision === "approve")
+            return { ...recorded, launch: this.workLaunchDecide({ launch_id: launch.id, actor: args.actor, approved: true, prompt: args.prompt }) };
+        if (decision === "human_change") {
+            const change = this.workspaceHumanChange({ workspace_id: loop.workspace_id, summary: args.summary, affected_paths: args.affected_paths ?? [], source: "human", change_id: args.change_id });
+            const event = this.store.create("human_state_event", `human_state_event_${recorded.decision.id}`, { work_loop_id: loop.id, workspace_id: loop.workspace_id, workspace_change_id: change.change.id, actor: args.actor, summary_digest: valueDigest(args.summary) });
+            const invalidation = this.store.create("work_loop_invalidation", `work_loop_invalidation_${recorded.decision.id}`, { work_loop_id: loop.id, task_run_id: loop.task_run_id, launch_id: run.launch_id, acceptance_plan_id: launch.acceptance_plan_id ?? null, reason: "human_state_event", state_event_id: event.id, status: "needs_replan" });
+            return { ...recorded, workspace_change: change.change, human_state_event: event, invalidation, advance: this.verifiedWorkLoopAdvance({ work_loop_id: loop.id, state_adapter: args.state_adapter, state_paths: args.state_paths }) };
+        }
+        if (decision === "accept" || decision === "reject")
+            return { ...recorded, review: this.acceptanceHumanReview({ plan_id: launch.acceptance_plan_id, criterion_id: args.criterion_id, reviewer: args.actor, result: decision === "accept" ? "passed" : "failed", summary: args.summary }) };
+        return recorded;
+    }
+    verifiedWorkLoopResume(args) {
+        const loop = this.store.get("verified_work_loop", text(args.work_loop_id, "work_loop_id"));
+        if (loop.lifecycle === "needs_replan")
+            throw new Error("Verified Work Loop requires a fresh prepare after input or workspace drift");
+        const beforeResume = this.verifiedWorkLoopAdvance({ work_loop_id: loop.id, environment: args.environment, budget: args.budget, state_adapter: args.state_adapter, state_paths: args.state_paths });
+        if (beforeResume.state.status === "needs_replan")
+            throw new Error("Verified Work Loop requires a fresh prepare after input or workspace drift");
+        const run = this.store.get("task_run", String(loop.task_run_id));
+        const resumed = this.taskRunResume({ task_run_id: run.id, environment: args.environment, budget: args.budget });
+        return { resumed, advance: this.verifiedWorkLoopAdvance({ work_loop_id: loop.id, environment: args.environment, budget: args.budget, state_adapter: args.state_adapter, state_paths: args.state_paths }) };
+    }
+    verifiedWorkLoopGet(args) { return this.verifiedWorkLoops.get(args); }
+    stateWorkspaceObserve(args) { return this.stateWorkspace.observe(args); }
+    stateWorkspaceCompare(args) { return this.stateWorkspace.compare(args); }
+    evalCampaignCreate(args) { return this.evalCampaigns.create(args); }
+    evalCampaignBind(args) { return this.evalCampaigns.bind(args); }
+    evalCampaignAdvance(args) { return this.evalCampaigns.advance(args); }
+    evalCampaignGet(args) { return this.evalCampaigns.get(args); }
+    projectKnowledgeDiscover(args) { return this.projectKnowledge.discover(args); }
+    projectKnowledgeResolve(args) { return this.projectKnowledge.resolve(args); }
+    projectKnowledgeProposeUpdate(args) { return this.projectKnowledge.proposeUpdate(args); }
     taskBenchmarkCreate(args) { return this.taskBenchmarks.create(args); }
     taskBenchmarkEvaluate(args) { return this.taskBenchmarks.evaluate(args); }
     taskBenchmarkAggregate(args) { return this.taskBenchmarks.aggregate(args); }

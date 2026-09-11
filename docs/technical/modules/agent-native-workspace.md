@@ -2,7 +2,7 @@
 
 ## 定位
 
-`WorkspaceState` 是 Craft 的共享状态源，而不是新的聊天记录。它把一个明确的本地根目录、允许纳入的相对路径、Checkpoint、人工改动和关联 Artifact/Evidence 放进同一条可查询谱系。
+`WorkspaceState` 是 Craft 的共享状态源，而不是新的聊天记录。它把一个明确的本地根目录、允许纳入的相对路径、Checkpoint、人工改动和关联 Artifact/Evidence 放进同一条可查询谱系。v0.11.51 在其上增加只保存摘要的 State Workspace Observation：工作循环以“预期状态 → Action/Receipt → 再观察 Snapshot”收口，不以模型自述收口。
 
 ## 对外深模块
 
@@ -17,7 +17,7 @@ WorkspaceState
 
 - Snapshot 仅复制声明路径内的普通文件，拒绝绝对路径、`..` 越界和符号链接。
 - 每个条目保存 SHA-256 与大小；`diff` 只比较两个不可变 Checkpoint 的摘要。
-- 人工改动只记录摘要和受影响路径，不吸收原始业务文本，并递增 Workspace 状态版本。
+- 人工改动只记录摘要和受影响路径，不吸收原始业务文本，并递增 Workspace 状态版本。被 Verified Work Loop 登记时会形成 `HumanStateEvent`，依赖旧 Snapshot 的路径进入 `needs_replan`。
 - Restore 只恢复声明路径，必须 `approved=true`；包含工作区根 `.` 的 Snapshot 不允许直接 Restore，避免一次调用删除整个工作树。
 
 ## 当前边界

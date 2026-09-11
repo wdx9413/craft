@@ -47,6 +47,10 @@ import { DeliveryLoopKernel } from "./delivery-loop.js";
 import { TaskControlKernel } from "./task-control.js";
 import { TaskRunKernel } from "./task-run.js";
 import { TaskBenchmarkKernel } from "./task-benchmark.js";
+import { StateWorkspaceKernel } from "./state-workspace.js";
+import { VerifiedWorkLoopKernel } from "./verified-work-loop.js";
+import { EvalCampaignKernel } from "./eval-campaign.js";
+import { ProjectKnowledgeKernel } from "./project-knowledge.js";
 /**
  * Stable composition root for the service. Domain behavior stays in focused
  * kernels; CraftService is the backwards-compatible API facade.
@@ -101,6 +105,10 @@ export class ServiceFoundation {
     taskControl;
     taskRuns;
     taskBenchmarks;
+    stateWorkspace;
+    verifiedWorkLoops;
+    evalCampaigns;
+    projectKnowledge;
     constructor(store, semanticProvider, isolatedAdapter = new LocalIsolatedAdapter(), dockerSandbox = new DockerSandboxAdapter(), egressBroker = new TrustedEgressBroker(), hostOwnerId) {
         this.store = store;
         this.catalog = new Catalog(store, semanticProvider);
@@ -150,6 +158,10 @@ export class ServiceFoundation {
         this.taskControl = new TaskControlKernel(store, this.deliveryLoop);
         this.taskRuns = new TaskRunKernel(store);
         this.taskBenchmarks = new TaskBenchmarkKernel(store, this.deliveryEvaluation);
+        this.stateWorkspace = new StateWorkspaceKernel(store);
+        this.verifiedWorkLoops = new VerifiedWorkLoopKernel(store);
+        this.evalCampaigns = new EvalCampaignKernel(store, this.taskBenchmarks);
+        this.projectKnowledge = new ProjectKnowledgeKernel(store);
         this.hostRuns = new HostRunKernel(store, [this.codexHost, this.claudeHost], hostOwnerId, (run, receipt) => this.finalizeWorkLaunch(run, receipt));
     }
 }

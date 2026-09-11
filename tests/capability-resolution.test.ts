@@ -38,6 +38,6 @@ test("capability resolution loads only digest-pinned local documents as bounded 
     await assert.rejects(service.logicalActivationResolve({ plan_id: plan.id }), /digest drifted/);
     await service.sourceScan({ source_id: source.id });
     await assert.rejects(service.logicalActivationResolve({ plan_id: plan.id }), /stale/);
-    assert.equal(VERSION, "0.11.50");
+    assert.equal(VERSION, "0.11.51");
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });

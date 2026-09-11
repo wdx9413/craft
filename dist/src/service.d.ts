@@ -1,6 +1,6 @@
 import { CraftStore, type JsonObject } from "./store.ts";
 import { ServiceFoundation } from "./service-foundation.ts";
-export declare const VERSION = "0.11.50";
+export declare const VERSION = "0.11.51";
 export declare class CraftService extends ServiceFoundation {
     static open(store: CraftStore, hostOwnerId?: string): Promise<CraftService>;
     info(): JsonObject;
@@ -299,6 +299,20 @@ export declare class CraftService extends ServiceFoundation {
     taskRunResume(args: JsonObject): JsonObject;
     taskRunHandoff(args: JsonObject): JsonObject;
     taskRunCancel(args: JsonObject): JsonObject;
+    verifiedWorkLoopPrepare(args: JsonObject): JsonObject;
+    verifiedWorkLoopAdvance(args: JsonObject): JsonObject;
+    verifiedWorkLoopDecide(args: JsonObject): JsonObject;
+    verifiedWorkLoopResume(args: JsonObject): JsonObject;
+    verifiedWorkLoopGet(args: JsonObject): JsonObject;
+    stateWorkspaceObserve(args: JsonObject): JsonObject;
+    stateWorkspaceCompare(args: JsonObject): JsonObject;
+    evalCampaignCreate(args: JsonObject): JsonObject;
+    evalCampaignBind(args: JsonObject): JsonObject;
+    evalCampaignAdvance(args: JsonObject): JsonObject;
+    evalCampaignGet(args: JsonObject): JsonObject;
+    projectKnowledgeDiscover(args: JsonObject): JsonObject;
+    projectKnowledgeResolve(args: JsonObject): JsonObject;
+    projectKnowledgeProposeUpdate(args: JsonObject): JsonObject;
     taskBenchmarkCreate(args: JsonObject): JsonObject;
     taskBenchmarkEvaluate(args: JsonObject): JsonObject;
     taskBenchmarkAggregate(args: JsonObject): JsonObject;

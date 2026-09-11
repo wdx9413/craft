@@ -1,6 +1,6 @@
 # Craft
 
-> 当前发布版本：v0.11.50。最新能力将真实任务运行、平台边界 Conformance 和受门禁 Benchmark 候选连接到既有任务、验收与交付闭环。
+> 当前发布版本：v0.11.51。新增 Verified Work Loop 将任务契约、状态再观察、验收、恢复和评测 Campaign 收束为一条受控主链；Serena 项目记忆只按需、只读接入。
 
 [中文](README.md) | [English](README.en.md)
 
@@ -69,6 +69,7 @@ Sandbox 能力采用“声明、诊断、黑盒一致性验证、精确版本票
 - Delivery Control Loop：Host/验收事实自动投影为 deliver、collect acceptance、retry-or-handoff 或 human-handoff；批量比较仅建议进入 Signoff，绝不自动发布或执行。
 - Task Control：将任务、工作目录、允许 effect、验收要求和可选能力/预算版本固定为不可变 Contract；一个兼容 Launch 的所有实际事实被收敛成一个下一安全动作，可生成不含 Prompt 的恢复交接。
 - Task Run / Benchmark：Task Run 固定一次 Host 工作的版本和摘要，在漂移时停止重规划；Benchmark 只比较已观察交付，同环境/预算的 held-out 结果才能生成不可自动发布的候选。
+- Verified Work Loop / State Workspace / Eval Campaign：Host 自述完成不等于交付；文件状态、人工修改、环境与预算漂移均形成可追溯事实并要求重规划。Campaign 以真实 Outcome 比较最小 Harness 与有限候选，不默认增加多 Agent。Serena 仅作为受信任项目的按需只读上下文，Craft 只提出更新建议、绝不自动改写其记忆。
 - Windows、macOS、Linux 共用 TypeScript/Node.js 运行时；不依赖 Python。
 
 v0.9.10–v0.10.2 还提供声明范围内的文件快照、本地事务记录、受限 TypeScript 脚本候选和 Host 执行交接。v0.10.0 新增共享结构化工作对象；v0.10.1 用字段级 ChangeSet 阻止同字段覆盖；v0.10.2 新增持久等待、幂等资源结算、Fallback Contract 与 Effect/Saga Kernel。外部写入预声明请求、幂等键、审批和可选补偿；未知结果可先通过预授权只读 GET 对账，未映射状态仍需人工消歧。补偿 Adapter 只执行精确授权且预先冻结解释契约，网络模糊保持未知，补偿失败不会伪装成回滚成功。候选操作尚不是自动从原始轨迹提炼程序；平台与安全缺口见 [执行策略](docs/technical/modules/execution-policy.md)。
