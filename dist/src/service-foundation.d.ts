@@ -56,6 +56,7 @@ import { CapabilityConnectorKernel } from "./capability-connector.ts";
 import { CapabilityAccessKernel } from "./capability-access.ts";
 import { HostActivationManifestKernel } from "./host-activation-manifest.ts";
 import { ExecutionFabricKernel } from "./execution-fabric.ts";
+import { HostBridgeKernel } from "./host-bridge.ts";
 /**
  * Stable composition root for the service. Domain behavior stays in focused
  * kernels; CraftService is the backwards-compatible API facade.
@@ -118,6 +119,7 @@ export declare abstract class ServiceFoundation {
     readonly capabilityAccess: CapabilityAccessKernel;
     readonly hostActivationManifests: HostActivationManifestKernel;
     readonly executionFabric: ExecutionFabricKernel;
+    readonly hostBridge: HostBridgeKernel;
     constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter?: LocalIsolatedAdapter, dockerSandbox?: DockerSandboxAdapter, egressBroker?: TrustedEgressBroker, hostOwnerId?: string);
     protected abstract finalizeWorkLaunch(run: JsonObject, receipt: JsonObject | null): void;
 }

@@ -1,6 +1,6 @@
 # Craft：受控 Agent 工作运行时
 
-> 本文是 Craft 的总览入口。它解释产品解决的问题、关键概念如何连接、当前实现做到哪里，以及在面试或架构评审中应如何准确回答。实现基线为 v0.11.53。
+> 本文是 Craft 的总览入口。它解释产品解决的问题、关键概念如何连接、当前实现做到哪里，以及在面试或架构评审中应如何准确回答。实现基线为 v0.11.54。
 
 ## 一句话
 
@@ -12,8 +12,9 @@
 flowchart LR
   U[用户目标] --> T[Task / Task Contract]
   T --> C[能力与上下文选择]
-  C --> L[Work Launch]
-  L --> H[Host 实际执行]
+  C --> M[Activation Manifest]
+  M --> L[Work Launch]
+  L --> H[Host Bridge 和实际执行]
   H --> R[Receipt]
   R --> S[重新观察状态]
   S --> A[Acceptance / Delivery]
@@ -54,9 +55,9 @@ Craft 把这些问题放到同一个持久化控制面。它保存摘要、引�
 ```text
 Task + Task Contract + 初始 State Snapshot
         ↓
-Work Launch / Task Run
+Execution Fabric + Host Activation Manifest
         ↓
-Host 执行并回传 Receipt
+Managed Host Bridge 启动 Host / Task Run 并回传 Receipt
         ↓
 重新观察 State Snapshot
         ↓
@@ -71,7 +72,7 @@ Outcome，或 needs_replan / handoff
 - 文件、输入、权限、能力版本、环境或预算发生漂移时，旧路径进入 `needs_replan`，不会借用旧 Receipt。
 - 人工修改是 `HumanStateEvent`，是新的事实，不要求模型“记住”人刚才改了什么。
 
-这条主链是对外应优先理解的 **Module**；`Task Control`、`Task Run`、State Workspace、Acceptance、Delivery Loop 是它内部协作的 Module。这样调用方只需理解少量动作：`prepare`、`advance`、`decide`、`resume`、`get`。
+这条主链是对外应优先理解的 **Module**；`Task Control`、`Task Run`、Execution Fabric、Host Bridge、State Workspace、Acceptance、Delivery Loop 是它内部协作的 Module。Fabric 创建的 Launch 不会走旧入口直接启动；Bridge 必须重验 Manifest、Prompt 摘要和调用回执。这样调用方只需理解少量动作：`prepare`、`advance`、`decide`、`resume`、`get`。
 
 ## 能力链：发现不等于可用，更不等于调用
 

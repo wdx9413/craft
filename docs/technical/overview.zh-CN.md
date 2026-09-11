@@ -51,7 +51,7 @@ v0.11.20 固定第一条能力平面边界：**Source Mount 是 provenance，逻
 Capability Kit ──contains──> Capability / Validator / Policy / Eval Suite
 Capability Source(s) ──mirror──> Logical Capability ──pins──> Logical Activation Plan ──resolves──> bounded read-only context
 Capability Connector / Capability Asset ──selected by──> Activation Profile ──issues──> Capability Ticket / Call Receipt
-Activation Profile ──pins──> Host Activation Manifest ──joins──> Execution Fabric ──re-observes──> Verified Work Loop Receipt
+Activation Profile ──pins──> Host Activation Manifest ──authorizes──> Managed Host Bridge ──joins──> Execution Fabric ──re-observes──> Verified Work Loop Receipt
 Task ──compiled to──> Agent IR ──lowered to──> Workflow / Orchestration Plan
 Task ──has sourced, correctable──> Context Profile
 Task + Subject Version + Harness Configuration ──creates──> Trial

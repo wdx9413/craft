@@ -46,7 +46,7 @@ test("Capability Connectors require explicit source approval, retain only metada
     assert.match(String((f.service.capabilityConnectorApprove({ connector_asset_id: automatic.id, approval_ref: "review-2" }).asset as JsonObject).id), /^asset_/);
     assert.equal((f.service.capabilityConnectorList({ limit: 1 }).connectors as JsonObject[]).length, 1);
     assert.throws(() => f.service.capabilityConnectorList({ limit: 0 }), /between/);
-    assert.equal(VERSION, "0.11.53");
+    assert.equal(VERSION, "0.11.54");
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 

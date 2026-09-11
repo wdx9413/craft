@@ -17,6 +17,7 @@
 - [Capability 与领域 Kit](technical/modules/capability-kit.md)
 - [Capability Access：上下文、能力选择与短期调用票据](technical/modules/capability-access.md)
 - [Verified Execution Fabric](technical/modules/verified-execution-fabric.md)：将 Profile、Host Manifest、Work Loop 与状态再观察收敛为一条可复核执行链。
+- [Managed Host Bridge](technical/modules/managed-host-bridge.md)：先验证 Manifest 再启动本地 Host，并把终态回流为状态再观察。
 - [Agent IR](technical/modules/agent-ir.md)
 - [Experience / Eval Kernel](technical/modules/experience-eval.md)
 - [Workflow / Verification / Signoff](technical/modules/workflow-signoff.md)

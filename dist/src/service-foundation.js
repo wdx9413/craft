@@ -55,6 +55,7 @@ import { CapabilityConnectorKernel } from "./capability-connector.js";
 import { CapabilityAccessKernel } from "./capability-access.js";
 import { HostActivationManifestKernel } from "./host-activation-manifest.js";
 import { ExecutionFabricKernel } from "./execution-fabric.js";
+import { HostBridgeKernel } from "./host-bridge.js";
 /**
  * Stable composition root for the service. Domain behavior stays in focused
  * kernels; CraftService is the backwards-compatible API facade.
@@ -117,6 +118,7 @@ export class ServiceFoundation {
     capabilityAccess;
     hostActivationManifests;
     executionFabric;
+    hostBridge;
     constructor(store, semanticProvider, isolatedAdapter = new LocalIsolatedAdapter(), dockerSandbox = new DockerSandboxAdapter(), egressBroker = new TrustedEgressBroker(), hostOwnerId) {
         this.store = store;
         this.catalog = new Catalog(store, semanticProvider);
@@ -174,6 +176,7 @@ export class ServiceFoundation {
         this.capabilityAccess = new CapabilityAccessKernel(store, this.catalog);
         this.hostActivationManifests = new HostActivationManifestKernel(store);
         this.executionFabric = new ExecutionFabricKernel(store);
+        this.hostBridge = new HostBridgeKernel(store);
         this.hostRuns = new HostRunKernel(store, [this.codexHost, this.claudeHost], hostOwnerId, (run, receipt) => this.finalizeWorkLaunch(run, receipt));
     }
 }

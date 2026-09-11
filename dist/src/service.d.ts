@@ -1,6 +1,6 @@
 import { CraftStore, type JsonObject } from "./store.ts";
 import { ServiceFoundation } from "./service-foundation.ts";
-export declare const VERSION = "0.11.53";
+export declare const VERSION = "0.11.54";
 export declare class CraftService extends ServiceFoundation {
     static open(store: CraftStore, hostOwnerId?: string): Promise<CraftService>;
     info(): JsonObject;
@@ -317,8 +317,11 @@ export declare class CraftService extends ServiceFoundation {
     verifiedWorkLoopGet(args: JsonObject): JsonObject;
     executionFabricPrepare(args: JsonObject): JsonObject;
     executionFabricAdvance(args: JsonObject): JsonObject;
+    executionFabricExecute(args: JsonObject): JsonObject;
     executionFabricConsume(args: JsonObject): JsonObject;
     executionFabricGet(args: JsonObject): JsonObject;
+    hostBridgeGet(args: JsonObject): JsonObject;
+    executionFabricWorkbenchPrepare(args: JsonObject): JsonObject;
     stateWorkspaceObserve(args: JsonObject): JsonObject;
     stateWorkspaceCompare(args: JsonObject): JsonObject;
     evalCampaignCreate(args: JsonObject): JsonObject;
@@ -345,6 +348,7 @@ export declare class CraftService extends ServiceFoundation {
     platformExecutionProbeGet(args: JsonObject): JsonObject;
     workLaunchRetry(args: JsonObject): JsonObject;
     protected finalizeWorkLaunch(run: JsonObject, receipt: JsonObject | null): void;
+    private finishFabricHostBridge;
     private refreshTaskControlForLaunch;
     private refreshTaskRunForLaunch;
     private effectTrace;

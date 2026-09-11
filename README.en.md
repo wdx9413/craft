@@ -1,6 +1,6 @@
 # Craft
 
-> Current release: v0.11.53. Verified Execution Fabric joins Activation Profiles, Host Activation Manifests, the Verified Work Loop, and state re-observation into one auditable execution path; the host still controls actual activation and calls.
+> Current release: v0.11.54. Managed Host Bridge defers Fabric-created host starts until the exact Manifest, prompt digest, and activation receipt are revalidated; terminal host facts flow back into state re-observation and do not imply delivery.
 
 [中文](README.md) | [English](README.en.md)
 

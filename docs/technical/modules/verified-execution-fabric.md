@@ -1,6 +1,6 @@
 # Verified Execution Fabric
 
-> 状态：v0.11.53 将已有的 `Verified Work Loop`、Activation Profile、Host Dispatch、Workspace State、Acceptance 与 Eval Runner 收敛为一个可审计的运行面。它证明机制和边界，不宣称已经提升任意业务任务的效果。
+> 状态：v0.11.54 将已有的 `Verified Work Loop`、Activation Profile、Host Dispatch、Workspace State、Acceptance 与 Eval Runner 收敛为一个可审计的运行面，并将本地 Host 启动接到精确 Manifest。它证明机制和边界，不宣称已经提升任意业务任务的效果。
 
 ## 目标
 
@@ -30,7 +30,7 @@ Manifest 是给 Host 的无正文清单，固定任务、Profile 版本、Host�
 
 ## Execution Fabric
 
-Fabric 固定同一条 Task、Task Contract、Activation Profile、Work Loop、Task Run 与 Manifest。`advance` 的顺序固定为：重新验证 Manifest → 重新观察 Work Loop/Workspace → 写入 Fabric receipt。Profile、Connector ticket、环境、预算或文件状态漂移时，既有失败关闭或 `needs_replan` 路径生效，旧 Receipt 不可当作新事实。
+Fabric 固定同一条 Task、Task Contract、Activation Profile、Work Loop、Task Run 与 Manifest。v0.11.54 的 `Host Bridge` 再将它与一次真实 Host Run 相连：`execute` 先重新验证 Manifest、核对不持久化的 Prompt 摘要并消费一次 Activation Receipt，之后才启动 Host；Host 终态自动触发状态再观察与 Fabric receipt。Profile、Connector ticket、环境、预算或文件状态漂移时，既有失败关闭或 `needs_replan` 路径生效，旧 Receipt 不可当作新事实。
 
 它的生命周期是投影：`prepared`、当前 Work Loop 状态或 `needs_replan`。它不会偷偷重试、分裂子 Agent、扩大权限或执行模型生成的脚本。
 
@@ -42,6 +42,6 @@ Fabric 固定同一条 Task、Task Contract、Activation Profile、Work Loop、T
 
 ## MCP 与非目标
 
-Core 新增 `craft_execution_fabric_*` 和 `craft_host_activation_manifest_*`；Full 面仍负责 Connector 注册、发现和审批，避免管理型工具污染默认面。
+Core 提供 `craft_execution_fabric_prepare / execute / advance / get`、`craft_host_bridge_get` 和 Host Manifest 查询；Full 面仍负责 Connector 注册、发现和审批，避免管理型工具污染默认面。
 
 本版不默认多 Agent、不做通用世界模型/MCTS、不自动同步远端 Hub/A2A，也不自动写入 Prompt、Skill、Workflow 或 Serena Memory。读任务不强制 OS 沙箱；写入和外部 effect 继续受既有审批、Platform Profile、egress 与补偿边界约束。

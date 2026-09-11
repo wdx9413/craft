@@ -15,7 +15,7 @@ import { decideExecution } from "./execution-policy.js";
 import { dockerRequestDigest } from "./docker-sandbox.js";
 import { egressRequestDigest } from "./egress.js";
 import { ServiceFoundation } from "./service-foundation.js";
-export const VERSION = "0.11.53";
+export const VERSION = "0.11.54";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -2748,10 +2748,11 @@ export class CraftService extends ServiceFoundation {
             throw new Error("Work launch sandbox is unsupported");
         const prompt = text(args.prompt, "prompt");
         const workspace = resolve(text(args.workspace, "workspace"));
+        const deferredStart = args.defer_host_start === true;
         const launchId = args.launch_id === undefined ? id("work_launch") : text(args.launch_id, "launch_id");
         const existing = this.store.find("work_launch", launchId);
         if (existing) {
-            if (existing.host !== host || existing.sandbox !== sandbox || existing.workspace !== workspace || existing.prompt_digest !== valueDigest(prompt) || valueDigest(existing.knowledge_binding ?? null) !== valueDigest(knowledgeBinding ?? null))
+            if (existing.host !== host || existing.sandbox !== sandbox || existing.workspace !== workspace || existing.prompt_digest !== valueDigest(prompt) || (existing.deferred_start === true) !== deferredStart || valueDigest(existing.knowledge_binding ?? null) !== valueDigest(knowledgeBinding ?? null))
                 throw new Error("Work launch idempotency conflict");
             return { launch: existing, task: this.store.get("task", String(existing.task_id)), dispatch: this.store.get(host === "codex-cli" ? "codex_dispatch" : "claude_dispatch", String(existing.dispatch_id)), approval_required: existing.status === "awaiting_approval", idempotent: true };
         }
@@ -2761,7 +2762,7 @@ export class CraftService extends ServiceFoundation {
         let dispatch = (host === "codex-cli" ? this.codexDispatchPrepare(common) : this.claudeDispatchPrepare({ ...common, max_turns: args.max_turns, max_budget_usd: args.max_budget_usd })).dispatch;
         if (knowledgeBinding)
             dispatch = this.store.save(host === "codex-cli" ? "codex_dispatch" : "claude_dispatch", String(dispatch.id), { ...recordPayload(dispatch), knowledge_binding: knowledgeBinding });
-        let launch = this.store.create("work_launch", launchId, { task_id: task.id, host, dispatch_id: dispatch.id, workspace: dispatch.workspace, sandbox, prompt_digest: dispatch.prompt_digest, retry_of: args.retry_of ?? null, status: sandbox === "workspace-write" ? "awaiting_approval" : "prepared", ...(knowledgeBinding ? { knowledge_binding: knowledgeBinding } : {}) });
+        let launch = this.store.create("work_launch", launchId, { task_id: task.id, host, dispatch_id: dispatch.id, workspace: dispatch.workspace, sandbox, prompt_digest: dispatch.prompt_digest, retry_of: args.retry_of ?? null, deferred_start: deferredStart, status: sandbox === "workspace-write" ? "awaiting_approval" : "prepared", ...(knowledgeBinding ? { knowledge_binding: knowledgeBinding } : {}) });
         const trial = this.trialStart({ trial_id: `trial_${launchId}`, task_id: task.id, subject_type: "work_launch", subject_id: launchId, subject_version: launch.version, environment: { host, workspace: dispatch.workspace, sandbox, dispatch_id: dispatch.id, dispatch_version: dispatch.version, ...(knowledgeBinding ? { knowledge_binding: knowledgeBinding } : {}) }, budget: {} });
         this.trialTraceAppend({ trial_id: trial.id, event_type: "work_launch.prepared", source: "craft_runtime", data: { launch_id: launchId, dispatch_id: dispatch.id, host, sandbox, ...(knowledgeBinding ? { knowledge_bundle_id: knowledgeBinding.bundle_id, knowledge_bundle_version: knowledgeBinding.bundle_version, knowledge_context_digest: knowledgeBinding.context_digest } : {}) } });
         launch = this.store.save("work_launch", launchId, { ...recordPayload(launch), trial_id: trial.id });
@@ -2770,7 +2771,7 @@ export class CraftService extends ServiceFoundation {
             const plan = acceptance.plan;
             launch = this.store.save("work_launch", launchId, { ...launch, acceptance_plan_id: plan.id, acceptance_trial_id: plan.trial_id });
         }
-        if (sandbox === "read-only") {
+        if (sandbox === "read-only" && !deferredStart) {
             const started = knowledgeBinding ? this.hostRuns.start({ host, dispatch_id: dispatch.id, prompt }) : this.hostRunStart({ host, dispatch_id: dispatch.id, prompt });
             const run = started.run;
             launch = this.store.save("work_launch", launchId, { ...recordPayload(launch), status: "running", run_id: run.id });
@@ -2778,10 +2779,12 @@ export class CraftService extends ServiceFoundation {
         return { launch, task, dispatch, approval_required: sandbox === "workspace-write", idempotent: false };
     }
     workLaunchDecide(args) { return this.workLaunchDecideInternal(args); }
-    workLaunchDecideInternal(args, knowledgeBinding) {
+    workLaunchDecideInternal(args, knowledgeBinding, fabricManaged = false) {
         const launch = this.store.get("work_launch", text(args.launch_id, "launch_id"));
         if (launch.status !== "awaiting_approval")
             throw new Error("Work launch is not awaiting approval");
+        if (launch.deferred_start === true && !fabricManaged)
+            throw new Error("Fabric-managed Work Launch must start through Execution Fabric");
         if (launch.knowledge_binding !== undefined && valueDigest(launch.knowledge_binding) !== valueDigest(knowledgeBinding ?? null))
             throw new Error("Knowledge-bound Work Launch must be decided through its Knowledge Work Launch");
         const actor = text(args.actor, "actor");
@@ -2914,7 +2917,7 @@ export class CraftService extends ServiceFoundation {
                 profile = this.store.create("activation_profile", profileId, identity);
         }
         const manifest = this.hostActivationManifestPrepare({ manifest_id: args.manifest_id, task_id: task.id, profile_id: profile.id, profile_version: profile.version, host: args.host, asset_ids: args.asset_ids, connector_ticket_ids: args.connector_ticket_ids }).manifest;
-        const prepared = this.verifiedWorkLoopPrepare({ ...args, task_id: task.id, activation_profile_id: profile.id, activation_profile_version: profile.version });
+        const prepared = this.verifiedWorkLoopPrepare({ ...args, task_id: task.id, activation_profile_id: profile.id, activation_profile_version: profile.version, defer_host_start: true });
         const loop = prepared.work_loop;
         const fabric = this.executionFabric.create({ fabric_id: args.fabric_id, work_loop_id: loop.id, manifest_id: manifest.id });
         return { ...prepared, activation_profile: profile, host_activation_manifest: manifest, execution_fabric: fabric.fabric, fabric_idempotent: fabric.idempotent };
@@ -2927,6 +2930,45 @@ export class CraftService extends ServiceFoundation {
         const advanced = this.executionFabric.advance({ fabric_id: fabric.id, work_loop_receipt_id: receipt.id, activation_receipt_id: args.activation_receipt_id, advance_id: args.advance_id });
         return { ...advanced, work_loop: observed };
     }
+    executionFabricExecute(args) {
+        const prepared = this.hostBridge.prepare({ fabric_id: args.fabric_id, invocation_id: args.invocation_id });
+        const invocation = prepared.invocation;
+        const fabric = this.store.get("execution_fabric", text(args.fabric_id, "fabric_id"));
+        const loop = this.store.get("verified_work_loop", String(fabric.work_loop_id));
+        const taskRun = this.store.get("task_run", String(loop.task_run_id));
+        const launch = this.store.get("work_launch", String(taskRun.launch_id));
+        const prompt = text(args.prompt, "prompt");
+        if (valueDigest(prompt) !== launch.prompt_digest)
+            throw new Error("Execution Fabric prompt does not match the prepared digest");
+        if (["completed", "failed", "cancelled", "interrupted"].includes(String(invocation.status)))
+            return { ...prepared, completed: true };
+        if (invocation.status === "running")
+            return { ...prepared, run: this.store.get("host_run", String(invocation.run_id)), activation_receipt: this.store.get("host_activation_receipt", String(invocation.activation_receipt_id)) };
+        this.hostActivationManifestValidate({ manifest_id: fabric.manifest_id });
+        const activation = this.hostActivationManifestConsume({ manifest_id: fabric.manifest_id, call_id: args.call_id ?? invocation.id, host: launch.host });
+        let started;
+        if (launch.sandbox === "read-only") {
+            if (launch.status !== "prepared")
+                throw new Error("Fabric-managed read-only Work Launch is not prepared");
+            const hostRun = this.hostRunStart({ host: launch.host, dispatch_id: launch.dispatch_id, prompt }).run;
+            const savedLaunch = this.store.save("work_launch", String(launch.id), { ...recordPayload(launch), status: "running", run_id: hostRun.id });
+            started = { launch: savedLaunch, run: hostRun };
+        }
+        else {
+            if (launch.status !== "awaiting_approval")
+                throw new Error("Fabric-managed write Work Launch is not awaiting approval");
+            if (args.approved !== true)
+                throw new Error("Execution Fabric workspace write requires approved=true");
+            const actor = text(args.actor, "actor");
+            this.verifiedWorkLoops.decide({ work_loop_id: loop.id, decision: "approve", actor, summary: "Approved exact Execution Fabric launch." });
+            const result = this.workLaunchDecideInternal({ launch_id: launch.id, actor, approved: true, prompt }, undefined, true);
+            const decidedLaunch = result.launch;
+            started = { launch: decidedLaunch, run: this.store.get("host_run", text(decidedLaunch.run_id, "run_id")) };
+        }
+        const run = started.run;
+        const bridge = this.hostBridge.start({ invocation_id: invocation.id, run_id: run.id, activation_receipt_id: activation.receipt.id });
+        return { ...prepared, ...started, activation_receipt: activation.receipt, bridge, completed: false };
+    }
     executionFabricConsume(args) {
         const fabric = this.store.get("execution_fabric", text(args.fabric_id, "fabric_id"));
         const activation = this.hostActivationManifestConsume({ manifest_id: fabric.manifest_id, call_id: args.call_id, host: args.host });
@@ -2935,7 +2977,18 @@ export class CraftService extends ServiceFoundation {
     executionFabricGet(args) {
         const result = this.executionFabric.get(args);
         const fabric = result.fabric;
-        return { ...result, work_loop: this.verifiedWorkLoopGet({ work_loop_id: fabric.work_loop_id }), host_activation: this.hostActivationManifestGet({ manifest_id: fabric.manifest_id }) };
+        return { ...result, work_loop: this.verifiedWorkLoopGet({ work_loop_id: fabric.work_loop_id }), host_activation: this.hostActivationManifestGet({ manifest_id: fabric.manifest_id }), bridge_invocations: this.store.list("host_bridge_invocation", 1000, (item) => item.fabric_id === fabric.id) };
+    }
+    hostBridgeGet(args) { return this.hostBridge.get(args); }
+    executionFabricWorkbenchPrepare(args) {
+        const root = resolve(text(args.workspace, "workspace"));
+        const includePaths = uniqueTextArray(args.include_paths ?? ["."], "include_paths").sort();
+        const workspaceId = args.workspace_id === undefined ? `workspace_fabric_${valueDigest(root).slice(-16)}` : text(args.workspace_id, "workspace_id");
+        const existing = this.store.find("workspace", workspaceId);
+        const workspace = existing ?? this.workspaceOpen({ workspace_id: workspaceId, name: args.workspace_name ?? args.title ?? "Craft Task Workspace", root_path: root, include_paths: includePaths }).workspace;
+        if (workspace.root_path !== root || valueDigest(workspace.include_paths) !== valueDigest(includePaths))
+            throw new Error("Task Workspace id is already bound to another root or observation scope");
+        return this.executionFabricPrepare({ ...args, workspace_id: workspace.id });
     }
     stateWorkspaceObserve(args) { return this.stateWorkspace.observe(args); }
     stateWorkspaceCompare(args) { return this.stateWorkspace.compare(args); }
@@ -2966,8 +3019,10 @@ export class CraftService extends ServiceFoundation {
         throw new Error("Only a failed, cancelled, or interrupted launch can be retried"); const task = this.store.get("task", String(previous.task_id)); const dispatch = this.store.get(previous.host === "codex-cli" ? "codex_dispatch" : "claude_dispatch", String(previous.dispatch_id)); const acceptance = previous.acceptance_plan_id ? this.store.get("acceptance_plan", String(previous.acceptance_plan_id)) : null; return this.workLaunchPrepare({ task_id: task.id, host: previous.host, workspace: previous.workspace, sandbox: previous.sandbox, prompt: args.prompt, launch_id: args.new_launch_id === undefined ? undefined : text(args.new_launch_id, "new_launch_id"), retry_of: previous.id, model: args.model ?? dispatch.model ?? undefined, timeout_ms: args.timeout_ms ?? dispatch.timeout_ms, output_limit: args.output_limit ?? dispatch.output_limit, max_turns: args.max_turns ?? dispatch.max_turns, max_budget_usd: args.max_budget_usd ?? dispatch.max_budget_usd ?? undefined, acceptance_name: acceptance?.name, acceptance_criteria: acceptance?.criteria }); }
     finalizeWorkLaunch(run, receipt) {
         const launch = this.store.list("work_launch", 10_000, (item) => item.run_id === run.id)[0];
-        if (!launch?.trial_id || this.store.find("outcome", `outcome_${launch.trial_id}`))
+        if (!launch?.trial_id || this.store.find("outcome", `outcome_${launch.trial_id}`)) {
+            this.finishFabricHostBridge(run);
             return;
+        }
         const artifact = this.artifactRegister({ artifact_id: `artifact_${run.id}`, kind: "host_run_receipt", name: `Host run ${run.id}`, uri: receipt?.uri ?? `craft://host-run/${run.id}`, digest: receipt?.digest ?? null, producer_type: "host_run", producer_id: run.id, metadata: { host: run.host, dispatch_id: run.dispatch_id, receipt_id: run.receipt_id ?? null } });
         const confidence = run.status === "interrupted" ? "bounded" : "confirmed";
         const evidence = this.evidenceRecord({ evidence_id: `evidence_${run.id}`, source_type: "program", confidence, claim: `Host execution ended with status ${run.status}.`, artifact_id: artifact.id, locator: `host-run:${run.id}`, observed_at: run.finished_at });
@@ -2985,6 +3040,19 @@ export class CraftService extends ServiceFoundation {
         this.deliveryLoop.refresh({ launch_id: launch.id });
         this.refreshTaskControlForLaunch(launch.id);
         this.refreshTaskRunForLaunch(launch.id);
+        this.finishFabricHostBridge(run);
+    }
+    finishFabricHostBridge(run) {
+        for (const invocation of this.store.list("host_bridge_invocation", 10_000, (item) => item.run_id === run.id)) {
+            try {
+                const finished = this.hostBridge.finish({ invocation_id: invocation.id, run_id: run.id }).invocation;
+                const advanced = this.executionFabricAdvance({ fabric_id: finished.fabric_id, activation_receipt_id: finished.activation_receipt_id });
+                this.store.appendEvent(`execution-fabric:${finished.fabric_id}`, "fabric.host_observed", { invocation_id: finished.id, run_id: run.id, advance_id: advanced.advance.id, status: run.status });
+            }
+            catch (error) {
+                this.store.appendEvent(`host-run:${run.id}`, "fabric.projection_failed", { error_class: error instanceof Error ? error.name : "UnknownError" });
+            }
+        }
     }
     refreshTaskControlForLaunch(launchId) { for (const contract of this.store.list("task_control_contract", 10_000, (item) => item.launch_id === launchId))
         this.taskControl.refresh({ contract_id: contract.id }); }

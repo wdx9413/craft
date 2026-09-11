@@ -1,6 +1,6 @@
 # Verified Work Loop、State Workspace 与 Eval Campaign
 
-> 状态：v0.11.53 提供主链机制、Host Manifest 连接面和脱敏 fixture；它不宣称任意业务 Harness 已经带来质量收益。
+> 状态：v0.11.54 提供主链机制、Host Manifest、受控 Host Bridge 与脱敏 fixture；它不宣称任意业务 Harness 已经带来质量收益。
 
 ## 一个主入口，三个内部深模块
 
@@ -25,7 +25,7 @@ VerifiedWorkLoop
 
 Snapshot 保存路径、文件 SHA-256、大小、Workspace revision 和 Artifact ID，不保存文件正文。绝对路径、`..`、重叠路径、符号链接、非常规文件以及未声明 Workspace 都失败关闭。差异只给出新增、删除和修改的路径。
 
-读任务不要求 OS 级沙箱；它仍受 Workspace 范围、只读 effect 和 Receipt 限制。`workspace-write` 继续经过既有审批/Platform Profile。外部写入仍由现有 effect/egress/compensation 机制处理，v0.11.53 不将其声称为通用事务回滚。
+读任务不要求 OS 级沙箱；它仍受 Workspace 范围、只读 effect 和 Receipt 限制。由 Fabric 启动的读任务也必须先消费精确 Manifest。`workspace-write` 继续经过既有审批/Platform Profile。外部写入仍由现有 effect/egress/compensation 机制处理，v0.11.54 不将其声称为通用事务回滚。
 
 ## Eval Campaign
 

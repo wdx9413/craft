@@ -56,6 +56,7 @@ import { CapabilityConnectorKernel } from "./capability-connector.ts";
 import { CapabilityAccessKernel } from "./capability-access.ts";
 import { HostActivationManifestKernel } from "./host-activation-manifest.ts";
 import { ExecutionFabricKernel } from "./execution-fabric.ts";
+import { HostBridgeKernel } from "./host-bridge.ts";
 
 /**
  * Stable composition root for the service. Domain behavior stays in focused
@@ -119,6 +120,7 @@ export abstract class ServiceFoundation {
   readonly capabilityAccess: CapabilityAccessKernel;
   readonly hostActivationManifests: HostActivationManifestKernel;
   readonly executionFabric: ExecutionFabricKernel;
+  readonly hostBridge: HostBridgeKernel;
 
   constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter = new LocalIsolatedAdapter(),
     dockerSandbox = new DockerSandboxAdapter(), egressBroker = new TrustedEgressBroker(), hostOwnerId?: string) {
@@ -161,6 +163,7 @@ export abstract class ServiceFoundation {
     this.capabilityAccess = new CapabilityAccessKernel(store, this.catalog);
     this.hostActivationManifests = new HostActivationManifestKernel(store);
     this.executionFabric = new ExecutionFabricKernel(store);
+    this.hostBridge = new HostBridgeKernel(store);
     this.hostRuns = new HostRunKernel(store, [this.codexHost, this.claudeHost], hostOwnerId,
       (run, receipt) => this.finalizeWorkLaunch(run, receipt));
   }

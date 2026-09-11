@@ -1,6 +1,6 @@
 # Craft
 
-> 当前发布版本：v0.11.53。新增 Verified Execution Fabric：将 Activation Profile、Host Activation Manifest、Verified Work Loop 与状态再观察收敛为一条可复核执行链；宿主仍决定实际启停与调用。
+> 当前发布版本：v0.11.54。新增 Managed Host Bridge：Fabric 创建的工作启动会先固定 Manifest、核对 Prompt 摘要并消费精确回执，随后才可启动宿主；终态自动回流为状态再观察，Host 完成不等于交付完成。
 
 [中文](README.md) | [English](README.en.md)
 
@@ -70,6 +70,7 @@ Sandbox 能力采用“声明、诊断、黑盒一致性验证、精确版本票
 - Task Control：将任务、工作目录、允许 effect、验收要求和可选能力/预算版本固定为不可变 Contract；一个兼容 Launch 的所有实际事实被收敛成一个下一安全动作，可生成不含 Prompt 的恢复交接。
 - Task Run / Benchmark：Task Run 固定一次 Host 工作的版本和摘要，在漂移时停止重规划；Benchmark 只比较已观察交付，同环境/预算的 held-out 结果才能生成不可自动发布的候选。
 - Verified Work Loop / State Workspace / Eval Campaign：Host 自述完成不等于交付；文件状态、人工修改、环境与预算漂移均形成可追溯事实并要求重规划。Campaign 以真实 Outcome 比较最小 Harness 与有限候选，不默认增加多 Agent。Serena 仅作为受信任项目的按需只读上下文，Craft 只提出更新建议、绝不自动改写其记忆。
+- Managed Host Bridge / Execution Fabric：Fabric 生成的 Launch 会延后 Host 启动；只有精确 Manifest、Prompt 摘要和 Activation Receipt 再次通过，才可启动 Codex CLI 或 Claude Code。写入仍需显式审批；Host 终态自动触发状态再观察，不能冒充交付结果。
 - Capability Connector：内置、用户批准的 GitHub/火山引擎 Skill 来源和 stdio/HTTPS MCP 统一登记为无敏感正文的来源元数据；发现、批准、Activation Profile 和调用 ticket 严格分离。Serena MCP 只允许只读 Asset。Connector 不自动安装、启停第三方服务、改写宿主 MCP 配置或保存凭据。
 - Windows、macOS、Linux 共用 TypeScript/Node.js 运行时；不依赖 Python。
 

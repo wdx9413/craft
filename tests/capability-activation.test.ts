@@ -53,6 +53,6 @@ test("logical capability content is pinned and audit detects reselection or drif
       const result = await mcp.handle({ id: name, method: "tools/call", params: { name, arguments: arguments_ } });
       assert.equal((result?.result as JsonObject).isError, false, name);
     }
-    assert.equal(VERSION, "0.11.53");
+    assert.equal(VERSION, "0.11.54");
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
