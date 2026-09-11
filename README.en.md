@@ -1,6 +1,6 @@
 # Craft
 
-> Current release: v0.11.57. Agent-Native Workspace Runtime joins Fabric, Host, Receipt, and re-observation into one fact chain; it distinguishes portable reads, human-approved local writes, and verified isolated writes while binding real Host attempts to comparable evaluation slots.
+> Current release: v0.11.58. It adds reviewed real-case evaluation scheduling, fail-closed short-lived enterprise access contracts, and read-only A2A collaboration only after a proven single-agent baseline. Existing Agent-Native Workspace Runtime controls remain in place; a real broker, remote transport, and business-quality proof still require deployment adapters and sanitized cases.
 
 [中文](README.md) | [English](README.en.md)
 

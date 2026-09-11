@@ -1,6 +1,6 @@
 # Craft
 
-> 当前发布版本：v0.11.57。新增 Agent-Native Workspace Runtime：统一协调 Fabric、Host、Receipt 与再观察；区分跨平台只读、人工批准本地写和已验证隔离写入，并将真实 Host Attempt 接入可比较评测；已有本地写入恢复、Delivery 对照报告和 Evidence Canary 门禁继续生效。
+> 当前发布版本：v0.11.58。新增可运营的真实 Case 评测计划、失败关闭的企业短期访问契约，以及以单 Agent 基线为前提的只读 A2A 协作控制面；已有 Agent-Native Workspace Runtime、受控本地写入恢复、Delivery 对照报告和 Evidence Canary 门禁继续生效。真实 Broker、远程传输和业务质量仍须由部署 Adapter 与脱敏 Case 验证。
 
 [中文](README.md) | [English](README.en.md)
 

@@ -15,7 +15,7 @@ import { decideExecution } from "./execution-policy.js";
 import { dockerRequestDigest } from "./docker-sandbox.js";
 import { egressRequestDigest } from "./egress.js";
 import { ServiceFoundation } from "./service-foundation.js";
-export const VERSION = "0.11.57";
+export const VERSION = "0.11.58";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -229,7 +229,7 @@ export class CraftService extends ServiceFoundation {
             "maintenance_status",
             "maintenance_tick",
             "maintenance_component", "maintenance_failure", "attention_item", "work_launch", "work_delivery", "delivery_loop", "delivery_evaluation_case", "delivery_evaluation_comparison", "delivery_evaluation_run", "platform_execution_profile", "platform_execution_preflight", "platform_execution_probe", "platform_execution_conformance", "task_run", "task_run_state", "task_run_handoff", "task_benchmark", "task_benchmark_pair", "task_benchmark_canary_sample", "state_snapshot", "verified_work_loop", "verified_work_loop_receipt", "verified_work_loop_decision", "human_state_event", "work_loop_invalidation", "eval_campaign", "eval_campaign_slot", "eval_campaign_report", "managed_write_guard", "managed_write_settlement", "adaptive_harness_recommendation", "project_knowledge_discovery", "project_knowledge_resolution", "project_knowledge_proposal", "acceptance_plan", "acceptance_check", "acceptance_assessment", "acceptance_evaluator", "acceptance_evaluation_job", "verified_iteration", "iteration_attempt", "strategy_recommendation",
-            "trajectory_script_proposal", "verified_script_run", "knowledge_claim", "wiki_page", "knowledge_relation", "wiki_context_bundle", "wiki_skill_candidate", "knowledge_evaluation_case", "knowledge_evaluation_run", "wiki_candidate_evaluation_attestation", "wiki_candidate_publication_authorization", "wiki_candidate_publication_package", "guided_work_brief", "execution_safety_preflight", "wiki_candidate_local_import", "autonomy_ladder_decision", "workspace_observation", "work_coordinator", "agent_eval_lab", "agent_eval_attempt"];
+            "trajectory_script_proposal", "verified_script_run", "knowledge_claim", "wiki_page", "knowledge_relation", "wiki_context_bundle", "wiki_skill_candidate", "knowledge_evaluation_case", "knowledge_evaluation_run", "wiki_candidate_evaluation_attestation", "wiki_candidate_publication_authorization", "wiki_candidate_publication_package", "guided_work_brief", "execution_safety_preflight", "wiki_candidate_local_import", "autonomy_ladder_decision", "workspace_observation", "work_coordinator", "agent_eval_lab", "agent_eval_attempt", "evaluation_program", "evaluation_program_run", "enterprise_identity_provider", "enterprise_principal", "enterprise_adapter_binding", "enterprise_access_ticket", "a2a_agent_trust", "a2a_collaboration_session", "a2a_delegation", "a2a_delegation_receipt"];
         kinds.push("untrusted_content", "untrusted_extraction", "decision_projection");
         return { version: VERSION, data_root: this.store.paths.root,
             counts: Object.fromEntries(kinds.map((kind) => [kind, this.store.count(kind)])) };
@@ -2695,6 +2695,12 @@ export class CraftService extends ServiceFoundation {
     a2aAgentCardDiscover(args) { return this.a2aDiscovery.discover(args); }
     a2aAgentCardGet(args) { return this.a2aDiscovery.get(args); }
     a2aAgentCardList(args) { return this.a2aDiscovery.list(args); }
+    a2aAgentTrustApprove(args) { return this.a2aDelegation.trustApprove(args); }
+    a2aCollaborationSessionCreate(args) { return this.a2aDelegation.sessionCreate(args); }
+    a2aDelegationPrepare(args) { return this.a2aDelegation.delegationPrepare(args); }
+    a2aDelegationDispatch(args) { return this.a2aDelegation.dispatch(args); }
+    a2aDelegationReport(args) { return this.a2aDelegation.report(args); }
+    a2aDelegationGet(args) { return this.a2aDelegation.get(args); }
     knowledgeEvaluationCaseSave(args) {
         const query = assertNoSecret(text(args.query, "query"), "query");
         const scope = String(args.scope ?? "global");
@@ -3015,6 +3021,10 @@ export class CraftService extends ServiceFoundation {
     evalCampaignAdvance(args) { return this.evalCampaigns.advance(args); }
     evalCampaignGet(args) { return this.evalCampaigns.get(args); }
     evalCampaignReport(args) { return this.evalCampaignReports.report(args); }
+    evaluationProgramSave(args) { return this.evaluationOperations.programSave(args); }
+    evaluationProgramDue(args) { return this.evaluationOperations.due(args); }
+    evaluationProgramPlan(args) { return this.evaluationOperations.plan(args); }
+    evaluationProgramReport(args) { return this.evaluationOperations.report(args); }
     adaptiveHarnessRecommend(args) { return this.adaptiveHarnesses.recommend(args); }
     managedWriteGet(args) { return this.managedWrites.get(args); }
     managedWriteRollback(args) { return this.managedWrites.rollback(args); }
@@ -3078,6 +3088,13 @@ export class CraftService extends ServiceFoundation {
     platformExecutionPreflight(args) { return this.platformExecution.preflight(args); }
     platformExecutionProbe(args) { return this.platformExecution.probe(args); }
     platformExecutionProbeGet(args) { return this.platformExecution.probeGet(args); }
+    enterpriseIdentityProviderRegister(args) { return this.enterpriseAccess.providerRegister(args); }
+    enterpriseIdentityProviderVerify(args) { return this.enterpriseAccess.providerVerify(args); }
+    enterprisePrincipalBind(args) { return this.enterpriseAccess.principalBind(args); }
+    enterpriseAdapterBind(args) { return this.enterpriseAccess.adapterBind(args); }
+    enterpriseAccessTicketIssue(args) { return this.enterpriseAccess.ticketIssue(args); }
+    enterpriseAccessTicketConsume(args) { return this.enterpriseAccess.ticketConsume(args); }
+    enterpriseAccessTicketGet(args) { return this.enterpriseAccess.get(args); }
     workLaunchRetry(args) { const previous = this.workLaunchGet({ launch_id: args.launch_id }).launch; if (previous.knowledge_binding !== undefined)
         throw new Error("Knowledge-bound Work Launch must retry through its Knowledge Work Launch"); if (!new Set(["failed", "cancelled", "interrupted"]).has(String(previous.effective_status)))
         throw new Error("Only a failed, cancelled, or interrupted launch can be retried"); const task = this.store.get("task", String(previous.task_id)); const dispatch = this.store.get(previous.host === "codex-cli" ? "codex_dispatch" : "claude_dispatch", String(previous.dispatch_id)); const acceptance = previous.acceptance_plan_id ? this.store.get("acceptance_plan", String(previous.acceptance_plan_id)) : null; return this.workLaunchPrepare({ task_id: task.id, host: previous.host, workspace: previous.workspace, sandbox: previous.sandbox, prompt: args.prompt, launch_id: args.new_launch_id === undefined ? undefined : text(args.new_launch_id, "new_launch_id"), retry_of: previous.id, model: args.model ?? dispatch.model ?? undefined, timeout_ms: args.timeout_ms ?? dispatch.timeout_ms, output_limit: args.output_limit ?? dispatch.output_limit, max_turns: args.max_turns ?? dispatch.max_turns, max_budget_usd: args.max_budget_usd ?? dispatch.max_budget_usd ?? undefined, acceptance_name: acceptance?.name, acceptance_criteria: acceptance?.criteria }); }

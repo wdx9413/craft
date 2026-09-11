@@ -1,6 +1,6 @@
 # Craft：受控 Agent 工作运行时
 
-> 本文是 Craft 的总览入口。它解释产品解决的问题、关键概念如何连接、当前实现做到哪里，以及在面试或架构评审中应如何准确回答。实现基线为 v0.11.57。
+> 本文是 Craft 的总览入口。它解释产品解决的问题、关键概念如何连接、当前实现做到哪里，以及在面试或架构评审中应如何准确回答。实现基线为 v0.11.58。
 
 ## 一句话
 
@@ -66,7 +66,7 @@ Acceptance 与 Work Delivery
 Outcome，或 needs_replan / handoff
 ```
 
-对于本地写入，Fabric 在启动前增加范围内基线 Checkpoint，终态后形成提交 Checkpoint 或待人工恢复状态；这只覆盖声明的文件路径。v0.11.56 将跨会话接力收敛为 `Managed Run`；v0.11.57 再由 `Work Coordinator` 将 Fabric、Managed Run、Host Run、Receipt 与再观察串成一个事实链。`Workspace Observer` 只保存声明范围的摘要差异，无法证明归属的修改直接标记为外部漂移。真实 Delivery 可进入 `Eval Campaign`，`Agent Eval Lab` 只接受同环境、同预算且经过终态再观察的 Host Attempt；候选仍必须经过 held-out、可靠性/校准 Judge Gate（若使用 Judge）、Signoff、带 Evidence 的 Canary 和人工结论后，才会被 `Adaptive Harness Recommendation` 推荐。无合格证据时系统返回最小 baseline，不靠“多 Agent 看起来更强”扩大 Harness。
+对于本地写入，Fabric 在启动前增加范围内基线 Checkpoint，终态后形成提交 Checkpoint 或待人工恢复状态；这只覆盖声明的文件路径。v0.11.56 将跨会话接力收敛为 `Managed Run`；`Work Coordinator` 将 Fabric、Managed Run、Host Run、Receipt 与再观察串成一个事实链。`Workspace Observer` 只保存声明范围的摘要差异，无法证明归属的修改直接标记为外部漂移。v0.11.58 的 `EvaluationProgram` 只排程已脱敏 development Case 和独立批准的 held-out Case，绝不偷偷启动 Host；真实 Delivery 可进入 `Eval Campaign`，`Agent Eval Lab` 只接受同环境、同预算且经过终态再观察的 Host Attempt。候选仍必须经过 held-out、可靠性/校准 Judge Gate（若使用 Judge）、Signoff、带 Evidence 的 Canary 和人工结论后，才会被 `Adaptive Harness Recommendation` 推荐。无合格证据时系统返回最小 baseline，不靠“多 Agent 看起来更强”扩大 Harness。
 
 三个规则最重要：
 
@@ -152,7 +152,7 @@ Trial / Evaluation / Signoff：某个方法在可比较样本上是否值得复�
 
 ## 多 Agent 与 Expert
 
-Craft 不默认多 Agent。只有当子目标可独立验证、上下文可以切分、额外成本能在评测中抵消时，才应该增加 Expert 或子操作。
+Craft 不默认多 Agent。只有当子目标可独立验证、上下文可以切分、额外成本能在评测中抵消时，才应该增加 Expert 或子操作。v0.11.58 的远程 A2A 还额外要求 eligible 单 Agent 基线、confirmed Evidence、人工信任决定和只读 effect；它传递 Artifact/Evidence 引用而非原始上下文，真实传输仍由 Host Adapter 负责。
 
 当前 `diagnostic_research` Expert 是受限的只读诊断角色；子操作必须给出假设、反例、Evidence 引用、置信边界与下一步，父任务负责裁决。历史文档中“Sub-agent Run”统一理解为 **Sub-agent Operation**：代码中它是父 Runtime Operation 下的子 Operation，而非一个新的根 Task Run。
 

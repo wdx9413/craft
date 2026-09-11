@@ -65,6 +65,9 @@ import { AutonomyLadderKernel } from "./autonomy-ladder.js";
 import { WorkspaceObserverKernel } from "./workspace-observer.js";
 import { WorkCoordinatorKernel } from "./work-coordinator.js";
 import { AgentEvalLabKernel } from "./agent-eval-lab.js";
+import { EvaluationOperationsKernel } from "./evaluation-operations.js";
+import { EnterpriseAccessKernel } from "./enterprise-access.js";
+import { A2ADelegationKernel } from "./a2a-delegation.js";
 /**
  * Stable composition root for the service. Domain behavior stays in focused
  * kernels; CraftService is the backwards-compatible API facade.
@@ -137,6 +140,9 @@ export class ServiceFoundation {
     workspaceObserver;
     workCoordinators;
     agentEvalLab;
+    evaluationOperations;
+    enterpriseAccess;
+    a2aDelegation;
     constructor(store, semanticProvider, isolatedAdapter = new LocalIsolatedAdapter(), dockerSandbox = new DockerSandboxAdapter(), egressBroker = new TrustedEgressBroker(), hostOwnerId) {
         this.store = store;
         this.catalog = new Catalog(store, semanticProvider);
@@ -204,6 +210,9 @@ export class ServiceFoundation {
         this.workspaceObserver = new WorkspaceObserverKernel(store, this.stateWorkspace);
         this.workCoordinators = new WorkCoordinatorKernel(store, this.managedRuns);
         this.agentEvalLab = new AgentEvalLabKernel(store);
+        this.evaluationOperations = new EvaluationOperationsKernel(store, this.evalCampaigns);
+        this.enterpriseAccess = new EnterpriseAccessKernel(store);
+        this.a2aDelegation = new A2ADelegationKernel(store);
         this.hostRuns = new HostRunKernel(store, [this.codexHost, this.claudeHost], hostOwnerId, (run, receipt) => this.finalizeWorkLaunch(run, receipt));
     }
 }

@@ -1,6 +1,6 @@
 import { CraftStore, type JsonObject } from "./store.ts";
 import { ServiceFoundation } from "./service-foundation.ts";
-export declare const VERSION = "0.11.57";
+export declare const VERSION = "0.11.58";
 export declare class CraftService extends ServiceFoundation {
     static open(store: CraftStore, hostOwnerId?: string): Promise<CraftService>;
     info(): JsonObject;
@@ -284,6 +284,12 @@ export declare class CraftService extends ServiceFoundation {
     a2aAgentCardDiscover(args: JsonObject): Promise<JsonObject>;
     a2aAgentCardGet(args: JsonObject): JsonObject;
     a2aAgentCardList(args: JsonObject): JsonObject;
+    a2aAgentTrustApprove(args: JsonObject): JsonObject;
+    a2aCollaborationSessionCreate(args: JsonObject): JsonObject;
+    a2aDelegationPrepare(args: JsonObject): JsonObject;
+    a2aDelegationDispatch(args: JsonObject): JsonObject;
+    a2aDelegationReport(args: JsonObject): JsonObject;
+    a2aDelegationGet(args: JsonObject): JsonObject;
     knowledgeEvaluationCaseSave(args: JsonObject): JsonObject;
     knowledgeEvaluationCaseList(args: JsonObject): JsonObject;
     knowledgeEvaluationRun(args: JsonObject): JsonObject;
@@ -338,6 +344,10 @@ export declare class CraftService extends ServiceFoundation {
     evalCampaignAdvance(args: JsonObject): JsonObject;
     evalCampaignGet(args: JsonObject): JsonObject;
     evalCampaignReport(args: JsonObject): JsonObject;
+    evaluationProgramSave(args: JsonObject): JsonObject;
+    evaluationProgramDue(args: JsonObject): JsonObject;
+    evaluationProgramPlan(args: JsonObject): JsonObject;
+    evaluationProgramReport(args: JsonObject): JsonObject;
     adaptiveHarnessRecommend(args: JsonObject): JsonObject;
     managedWriteGet(args: JsonObject): JsonObject;
     managedWriteRollback(args: JsonObject): JsonObject;
@@ -378,6 +388,13 @@ export declare class CraftService extends ServiceFoundation {
     platformExecutionPreflight(args: JsonObject): JsonObject;
     platformExecutionProbe(args: JsonObject): JsonObject;
     platformExecutionProbeGet(args: JsonObject): JsonObject;
+    enterpriseIdentityProviderRegister(args: JsonObject): JsonObject;
+    enterpriseIdentityProviderVerify(args: JsonObject): JsonObject;
+    enterprisePrincipalBind(args: JsonObject): JsonObject;
+    enterpriseAdapterBind(args: JsonObject): JsonObject;
+    enterpriseAccessTicketIssue(args: JsonObject): JsonObject;
+    enterpriseAccessTicketConsume(args: JsonObject): JsonObject;
+    enterpriseAccessTicketGet(args: JsonObject): JsonObject;
     workLaunchRetry(args: JsonObject): JsonObject;
     protected finalizeWorkLaunch(run: JsonObject, receipt: JsonObject | null): void;
     private settleManagedWrite;

@@ -18,6 +18,6 @@ test("strategy recommendations stay conservative when based on held-out comparis
     for (const [id, split, assessment, pass, cost] of [["nonheld", "development", "improved", 1, -1], ["regressed", "held_out", "regressed", 1, -1], ["quality", "held_out", "improved", 0.4, -1], ["cost", "held_out", "improved", 1, 1]] as const) assert.equal(((service.strategyRecommend({ task_id: task.id, comparison_id: make(id, split, assessment, pass, cost).id, cost_metric: "cost_usd" }).recommendation as JsonObject).status), "insufficient");
     const noCost = service.strategyRecommend({ task_id: task.id, comparison_id: make("no-cost").id }).recommendation as JsonObject; assert.equal(noCost.status, "recommended");
     const mcp = new McpServer(service, "full"); const result = await mcp.handle({ id: "strategy", method: "tools/call", params: { name: "craft_strategy_recommend", arguments: { task_id: task.id, comparison_id: "good-comparison", recommendation_id: "mcp" } } }); assert.equal((result?.result as JsonObject).isError, false);
-    assert.equal(VERSION, "0.11.57");
+    assert.equal(VERSION, "0.11.58");
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });

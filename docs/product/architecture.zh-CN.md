@@ -1,6 +1,6 @@
 # Craft 产品架构：三大支柱与十个核心模块
 
-> 状态：目标架构。基线为 v0.11.57；本页不宣称所有模块已形成可用产品。
+> 状态：目标架构。基线为 v0.11.58；本页不宣称所有模块已形成可用产品。
 
 ## 目录
 
@@ -26,7 +26,7 @@
 | 学习与改进 | 学习与适应 | 从结果、失败及用户修改差异中提出候选改进；检验迁移和历史保持，受控采用或撤回；用户编辑是偏好信号而非自动 Ground Truth |
 | 学习与改进 | 编译与复用 | 将稳定方法沉淀为模板、流程、规则、TypeScript 程序或可操作小工具，维护参数、依赖、验证条件和显式 Fallback Trigger |
 
-归属代表主要职责，不是数据隔离：能力选择参考评测，执行读取有效记忆，用户在工作空间查看并修正结果。专业对象和验收方式由领域扩展提供，核心模块不使用研发流程作为所有任务的默认专业模板。v0.11.55 已把受限本地写入恢复、真实 Delivery 的 Campaign 报告和只读 Harness 推荐串入执行与学习边界；v0.11.56 在其上增加 Managed Run、显式 Campaign Slot 与校准 Judge Gate；v0.11.57 再以 Work Coordinator、content-free Workspace Observation、分级自主权和 Agent Eval Lab 形成从 Host 到可比较 Outcome 的受控事实链。具体承诺见[可验证执行与演进平台](../technical/modules/evolution-platform.md)、[Managed Run 与 Evaluation Lab](../technical/modules/managed-run-evaluation-lab.md)和[Agent-Native Workspace Runtime](../technical/modules/agent-native-runtime.md)。
+归属代表主要职责，不是数据隔离：能力选择参考评测，执行读取有效记忆，用户在工作空间查看并修正结果。专业对象和验收方式由领域扩展提供，核心模块不使用研发流程作为所有任务的默认专业模板。v0.11.55 已把受限本地写入恢复、真实 Delivery 的 Campaign 报告和只读 Harness 推荐串入执行与学习边界；v0.11.56 在其上增加 Managed Run、显式 Campaign Slot 与校准 Judge Gate；`Work Coordinator`、content-free Workspace Observation、分级自主权和 Agent Eval Lab 形成从 Host 到可比较 Outcome 的受控事实链。v0.11.58 新增 reviewed Evaluation Program、失败关闭的企业短期访问契约、以及只有单 Agent 基线通过后才可建立的只读 A2A 协作控制面。具体承诺见[可验证执行与演进平台](../technical/modules/evolution-platform.md)、[Managed Run 与 Evaluation Lab](../technical/modules/managed-run-evaluation-lab.md)、[Agent-Native Workspace Runtime](../technical/modules/agent-native-runtime.md)和[可运营评测、企业访问与受控远程协作](../technical/modules/operational-evaluation-enterprise-collaboration.md)。
 
 ## 贯穿产品的能力
 
@@ -81,7 +81,7 @@ Craft 可以由对话、文件变化、Webhook、定时事件或监控信号触�
 | 能力运行灰度 | 用真实任务比较新旧能力并控制退化半径 | 已有精确版本双臂 Canary、稳定分流、最小样本、失败/成本/时延/人工修正指标和自动停止候选流量；统计置信、自动扩量和领域指标 Adapter 尚待实现 |
 | GUI 兜底执行 | 无标准 API 时通过受控 Computer Use Adapter 完成必要操作 | 规划能力；GUI 操作低于结构化 API 的可信等级，必须重新观察页面并加强审批，验证码和身份确认交还用户 |
 | 组织能力共享 | 在成员授权下复用去标识且经过验证的能力 | 已有 Federation、签名 Hub 增量目录、Materialization，以及将精确 candidate 绑定 held-out Eval、逐 Trial Sandbox Receipt、Evidence、program Grade 与 Signoff 的 Certification；独立批准后才原子晋级 verified，且不自动上传个人轨迹。主动网络传输、深度供应链分析、组织身份、删除治理和管理 UI 尚未实现 |
-| 跨宿主治理插件层 | 将多个 Host、Skill/MCP 来源与未来外部 Agent 接到同一证据和权限内核 | 已有 Codex、Claude、DeepSeek Harness 与通用 MCP 接入；本地 Source Mount、签名 Hub、隔离候选与认证形成供给链。远程 Registry Discovery Adapter、A2A Adapter、组织身份和远程执行仍待实现；来源发现不等于信任、激活或执行授权 |
+| 跨宿主治理插件层 | 将多个 Host、Skill/MCP 来源与未来外部 Agent 接到同一证据和权限内核 | 已有 Codex、Claude、DeepSeek Harness 与通用 MCP 接入；本地 Source Mount、签名 Hub、隔离候选与认证形成供给链。v0.11.58 已提供组织身份/短期访问与只读 A2A 的本地控制面契约；真实 Provider/Broker、A2A transport、远程 Registry 与远程执行仍待部署 Adapter。来源发现不等于信任、激活或执行授权 |
 
 底层采用追加事件、版本化记录和可重建投影表达时间状态；这是一组稳定存储接口，不等于现在就需要自研 Temporal Graph Database。只有当 SQLite/对象存储在并发、查询或规模上出现经测量的瓶颈时再替换后端。
 

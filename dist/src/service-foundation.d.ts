@@ -66,6 +66,9 @@ import { AutonomyLadderKernel } from "./autonomy-ladder.ts";
 import { WorkspaceObserverKernel } from "./workspace-observer.ts";
 import { WorkCoordinatorKernel } from "./work-coordinator.ts";
 import { AgentEvalLabKernel } from "./agent-eval-lab.ts";
+import { EvaluationOperationsKernel } from "./evaluation-operations.ts";
+import { EnterpriseAccessKernel } from "./enterprise-access.ts";
+import { A2ADelegationKernel } from "./a2a-delegation.ts";
 /**
  * Stable composition root for the service. Domain behavior stays in focused
  * kernels; CraftService is the backwards-compatible API facade.
@@ -138,6 +141,9 @@ export declare abstract class ServiceFoundation {
     readonly workspaceObserver: WorkspaceObserverKernel;
     readonly workCoordinators: WorkCoordinatorKernel;
     readonly agentEvalLab: AgentEvalLabKernel;
+    readonly evaluationOperations: EvaluationOperationsKernel;
+    readonly enterpriseAccess: EnterpriseAccessKernel;
+    readonly a2aDelegation: A2ADelegationKernel;
     constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter?: LocalIsolatedAdapter, dockerSandbox?: DockerSandboxAdapter, egressBroker?: TrustedEgressBroker, hostOwnerId?: string);
     protected abstract finalizeWorkLaunch(run: JsonObject, receipt: JsonObject | null): void;
 }

@@ -66,6 +66,9 @@ import { AutonomyLadderKernel } from "./autonomy-ladder.ts";
 import { WorkspaceObserverKernel } from "./workspace-observer.ts";
 import { WorkCoordinatorKernel } from "./work-coordinator.ts";
 import { AgentEvalLabKernel } from "./agent-eval-lab.ts";
+import { EvaluationOperationsKernel } from "./evaluation-operations.ts";
+import { EnterpriseAccessKernel } from "./enterprise-access.ts";
+import { A2ADelegationKernel } from "./a2a-delegation.ts";
 
 /**
  * Stable composition root for the service. Domain behavior stays in focused
@@ -139,6 +142,9 @@ export abstract class ServiceFoundation {
   readonly workspaceObserver: WorkspaceObserverKernel;
   readonly workCoordinators: WorkCoordinatorKernel;
   readonly agentEvalLab: AgentEvalLabKernel;
+  readonly evaluationOperations: EvaluationOperationsKernel;
+  readonly enterpriseAccess: EnterpriseAccessKernel;
+  readonly a2aDelegation: A2ADelegationKernel;
 
   constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter = new LocalIsolatedAdapter(),
     dockerSandbox = new DockerSandboxAdapter(), egressBroker = new TrustedEgressBroker(), hostOwnerId?: string) {
@@ -191,6 +197,9 @@ export abstract class ServiceFoundation {
     this.workspaceObserver = new WorkspaceObserverKernel(store, this.stateWorkspace);
     this.workCoordinators = new WorkCoordinatorKernel(store, this.managedRuns);
     this.agentEvalLab = new AgentEvalLabKernel(store);
+    this.evaluationOperations = new EvaluationOperationsKernel(store, this.evalCampaigns);
+    this.enterpriseAccess = new EnterpriseAccessKernel(store);
+    this.a2aDelegation = new A2ADelegationKernel(store);
     this.hostRuns = new HostRunKernel(store, [this.codexHost, this.claudeHost], hostOwnerId,
       (run, receipt) => this.finalizeWorkLaunch(run, receipt));
   }
