@@ -15,7 +15,7 @@ import { decideExecution } from "./execution-policy.js";
 import { dockerRequestDigest } from "./docker-sandbox.js";
 import { egressRequestDigest } from "./egress.js";
 import { ServiceFoundation } from "./service-foundation.js";
-export const VERSION = "0.11.45";
+export const VERSION = "0.11.46";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -231,7 +231,7 @@ export class CraftService extends ServiceFoundation {
             "supply_chain_advisory",
             "maintenance_status",
             "maintenance_tick",
-            "maintenance_component", "maintenance_failure", "attention_item", "work_launch", "work_delivery", "delivery_evaluation_case", "delivery_evaluation_comparison", "platform_execution_profile", "platform_execution_preflight", "acceptance_plan", "acceptance_check", "acceptance_assessment", "acceptance_evaluator", "acceptance_evaluation_job", "verified_iteration", "iteration_attempt", "strategy_recommendation",
+            "maintenance_component", "maintenance_failure", "attention_item", "work_launch", "work_delivery", "delivery_loop", "delivery_evaluation_case", "delivery_evaluation_comparison", "delivery_evaluation_run", "platform_execution_profile", "platform_execution_preflight", "platform_execution_probe", "acceptance_plan", "acceptance_check", "acceptance_assessment", "acceptance_evaluator", "acceptance_evaluation_job", "verified_iteration", "iteration_attempt", "strategy_recommendation",
             "trajectory_script_proposal", "verified_script_run", "knowledge_claim", "wiki_page", "knowledge_relation", "wiki_context_bundle", "wiki_skill_candidate", "knowledge_evaluation_case", "knowledge_evaluation_run", "wiki_candidate_evaluation_attestation", "wiki_candidate_publication_authorization", "wiki_candidate_publication_package", "guided_work_brief", "execution_safety_preflight", "wiki_candidate_local_import"];
         kinds.push("untrusted_content", "untrusted_extraction", "decision_projection");
         return { version: VERSION, data_root: this.store.paths.root,
@@ -2468,14 +2468,19 @@ export class CraftService extends ServiceFoundation {
         const blocked = required.filter((item) => latest.get(String(item.id))?.result === "blocked").map((item) => item.id);
         const status = missing.length ? "pending" : failed.length ? "failed" : blocked.length ? "blocked" : "passed";
         const assessment = this.store.save("acceptance_assessment", `assessment_${plan.id}`, { plan_id: plan.id, plan_version: plan.version, task_id: plan.task_id, launch_id: plan.launch_id, status, missing, failed, blocked, checked: latest.size, total: criteria.length });
-        if (status === "pending")
+        if (status === "pending") {
+            this.deliveryLoop.refresh({ launch_id: plan.launch_id });
             return { assessment, outcome: null };
+        }
         const evidenceIds = [...new Set([...latest.values()].flatMap((item) => item.evidence_ids))];
         const existing = this.store.find("outcome", `outcome_${plan.trial_id}`);
-        if (existing)
+        if (existing) {
+            this.deliveryLoop.refresh({ launch_id: plan.launch_id });
             return { assessment, outcome: existing };
+        }
         this.trialTraceAppend({ trial_id: plan.trial_id, event_type: `acceptance.${status}`, source: "craft_runtime", data: { assessment_id: assessment.id, checked: latest.size, total: criteria.length }, evidence_ids: evidenceIds });
         const outcome = this.outcomeRecord({ trial_id: plan.trial_id, verdict: status === "passed" ? "passed" : status === "blocked" ? "blocked" : "failed", summary: `Business acceptance ${status}.`, failure_type: status === "passed" ? undefined : `acceptance_${status}`, scores: { required_pass_rate: required.length ? (required.length - failed.length - blocked.length) / required.length : 1 }, costs: {}, evidence_ids: evidenceIds, source: "multi_method_acceptance" });
+        this.deliveryLoop.refresh({ launch_id: plan.launch_id });
         return { assessment, outcome };
     }
     verifiedIterationCreate(args) {
@@ -2758,9 +2763,45 @@ export class CraftService extends ServiceFoundation {
         throw new Error("Guided work brief requires all decisions before launch"); const prepared = this.workLaunchPrepare({ ...args, task_id: brief.task_id }); const bound = this.guidedWork.bindLaunch({ brief_id: brief.id, launch_id: prepared.launch.id }); return { ...prepared, brief: bound.brief }; }
     executionSafetyPreflight(args) { return this.executionSafety.preflight(args); }
     executionSafetyGet(args) { return this.executionSafety.get(args); }
-    safetyWorkLaunchPrepare(args) { const prepared = this.executionSafety.preflight(args); const preflight = prepared.preflight; const launched = this.workLaunchPrepare({ ...args, task_id: preflight.task_id, timeout_ms: preflight.resources.timeout_ms, output_limit: preflight.resources.output_limit, max_turns: preflight.resources.max_turns ?? undefined, max_budget_usd: preflight.resources.max_budget_usd ?? undefined }); const bound = this.executionSafety.bind({ preflight_id: preflight.id, launch_id: launched.launch.id }); return { ...launched, launch: bound.launch, preflight, idempotent: launched.idempotent }; }
-    safetyWorkLaunchDecide(args) { const launch = this.store.get("work_launch", text(args.launch_id, "launch_id")); const binding = object(launch.safety_preflight, "Work Launch safety preflight"); const checked = this.executionSafety.validate({ preflight_id: binding.preflight_id, version: binding.preflight_version }); const dispatch = this.store.get(launch.host === "codex-cli" ? "codex_dispatch" : "claude_dispatch", String(launch.dispatch_id)); const contract = { timeout_ms: dispatch.timeout_ms, output_limit: dispatch.output_limit, max_turns: launch.host === "claude-code" ? dispatch.max_turns : null, max_budget_usd: launch.host === "claude-code" ? dispatch.max_budget_usd : null }; if (valueDigest(contract) !== valueDigest(checked.preflight.resources))
-        throw new Error("Safety preflight resource contract does not match Work Launch dispatch"); return this.workLaunchDecide(args); }
+    platformPreflightForLaunch(args) {
+        const platform = args.platform === undefined ? null : text(args.platform, "platform");
+        const profileId = args.platform_profile_id === undefined ? null : text(args.platform_profile_id, "platform_profile_id");
+        const effect = args.platform_effect === undefined ? null : text(args.platform_effect, "platform_effect");
+        const missingFields = [platform, profileId, effect].filter((value) => value === null).length;
+        if (![0, 3].includes(missingFields))
+            throw new Error("Platform execution binding requires platform, profile, and effect together");
+        if (effect === null)
+            return null;
+        const expected = String(args.sandbox).replace("workspace-write", "local_write").replace("read-only", "read_only");
+        if (effect !== expected)
+            throw new Error("Platform execution effect does not match Work Launch sandbox");
+        return this.platformExecution.preflight({ platform: platform, profile_id: profileId, effect }).preflight;
+    }
+    bindPlatformPreflight(launch, platform) {
+        if (platform === null)
+            return launch;
+        const binding = { preflight_id: platform.id, preflight_version: platform.version, profile_id: platform.profile_id, profile_version: platform.profile_version, platform: platform.platform, effect: platform.effect };
+        const existing = launch.platform_execution_preflight;
+        if (existing) {
+            if (valueDigest(existing) !== valueDigest(binding))
+                throw new Error("Work Launch is already bound to another platform preflight");
+            return launch;
+        }
+        return this.store.save("work_launch", String(launch.id), { ...recordPayload(launch), platform_execution_preflight: binding });
+    }
+    validateSafetyLaunch(launch) {
+        const binding = object(launch.safety_preflight, "Work Launch safety preflight");
+        const checked = this.executionSafety.validate({ preflight_id: binding.preflight_id, version: binding.preflight_version });
+        const platform = launch.platform_execution_preflight;
+        if (platform)
+            this.platformExecution.validate({ preflight_id: platform.preflight_id, version: platform.preflight_version });
+        const dispatch = this.store.get(launch.host === "codex-cli" ? "codex_dispatch" : "claude_dispatch", String(launch.dispatch_id));
+        const contract = { timeout_ms: dispatch.timeout_ms, output_limit: dispatch.output_limit, max_turns: launch.host === "claude-code" ? dispatch.max_turns : null, max_budget_usd: launch.host === "claude-code" ? dispatch.max_budget_usd : null };
+        if (valueDigest(contract) !== valueDigest(checked.preflight.resources))
+            throw new Error("Safety preflight resource contract does not match Work Launch dispatch");
+    }
+    safetyWorkLaunchPrepare(args) { const prepared = this.executionSafety.preflight(args); const preflight = prepared.preflight; const platform = this.platformPreflightForLaunch(args); const launched = this.workLaunchPrepare({ ...args, task_id: preflight.task_id, timeout_ms: preflight.resources.timeout_ms, output_limit: preflight.resources.output_limit, max_turns: preflight.resources.max_turns ?? undefined, max_budget_usd: preflight.resources.max_budget_usd ?? undefined }); const safetyBound = this.executionSafety.bind({ preflight_id: preflight.id, launch_id: launched.launch.id }); return { ...launched, launch: this.bindPlatformPreflight(safetyBound.launch, platform), preflight, platform_preflight: platform, idempotent: launched.idempotent }; }
+    safetyWorkLaunchDecide(args) { const launch = this.store.get("work_launch", text(args.launch_id, "launch_id")); this.validateSafetyLaunch(launch); return this.workLaunchDecide(args); }
     wikiCandidateLocalImport(args) { return this.localCandidateImport.import(args); }
     wikiCandidateLocalImportGet(args) { return this.localCandidateImport.get(args); }
     a2aAgentCardDiscover(args) { return this.a2aDiscovery.discover(args); }
@@ -2868,13 +2909,18 @@ export class CraftService extends ServiceFoundation {
         const run = started.run;
         return { launch: this.store.save("work_launch", String(launch.id), { ...recordPayload(launch), status: "running", decided_by: actor, authorization_request_id: authorization.id, run_id: run.id }), started: true };
     }
-    workLaunchGet(args) { const launch = this.store.get("work_launch", text(args.launch_id, "launch_id")); const run = launch.run_id ? this.store.find("host_run", String(launch.run_id)) : null; return { launch: { ...launch, effective_status: run?.status ?? launch.status }, run: run ? this.homeHostRun({ run_id: run.id, after_sequence: args.after_sequence, limit: args.limit }) : null, acceptance: launch.acceptance_plan_id ? this.acceptancePlanGet({ plan_id: launch.acceptance_plan_id }) : null }; }
+    workLaunchGet(args) { const launch = this.store.get("work_launch", text(args.launch_id, "launch_id")); const run = launch.run_id ? this.store.find("host_run", String(launch.run_id)) : null; const loop = this.store.find("delivery_loop", `delivery_loop_${launch.id}`); return { launch: { ...launch, effective_status: run?.status ?? launch.status }, run: run ? this.homeHostRun({ run_id: run.id, after_sequence: args.after_sequence, limit: args.limit }) : null, acceptance: launch.acceptance_plan_id ? this.acceptancePlanGet({ plan_id: launch.acceptance_plan_id }) : null, delivery_loop: loop }; }
     workDeliveryObserve(args) { return this.workDelivery.observe(args); }
     workDeliveryGet(args) { return this.workDelivery.get(args); }
+    deliveryLoopRefresh(args) { return this.deliveryLoop.refresh(args); }
+    deliveryLoopGet(args) { return this.deliveryLoop.get(args); }
     deliveryEvaluationCaseSave(args) { return this.deliveryEvaluation.caseSave(args); }
     deliveryEvaluationCompare(args) { return this.deliveryEvaluation.compare(args); }
+    deliveryEvaluationRun(args) { return this.deliveryEvaluation.run(args); }
     platformExecutionProfileSave(args) { return this.platformExecution.profileSave(args); }
     platformExecutionPreflight(args) { return this.platformExecution.preflight(args); }
+    platformExecutionProbe(args) { return this.platformExecution.probe(args); }
+    platformExecutionProbeGet(args) { return this.platformExecution.probeGet(args); }
     workLaunchRetry(args) { const previous = this.workLaunchGet({ launch_id: args.launch_id }).launch; if (previous.knowledge_binding !== undefined)
         throw new Error("Knowledge-bound Work Launch must retry through its Knowledge Work Launch"); if (!new Set(["failed", "cancelled", "interrupted"]).has(String(previous.effective_status)))
         throw new Error("Only a failed, cancelled, or interrupted launch can be retried"); const task = this.store.get("task", String(previous.task_id)); const dispatch = this.store.get(previous.host === "codex-cli" ? "codex_dispatch" : "claude_dispatch", String(previous.dispatch_id)); const acceptance = previous.acceptance_plan_id ? this.store.get("acceptance_plan", String(previous.acceptance_plan_id)) : null; return this.workLaunchPrepare({ task_id: task.id, host: previous.host, workspace: previous.workspace, sandbox: previous.sandbox, prompt: args.prompt, launch_id: args.new_launch_id === undefined ? undefined : text(args.new_launch_id, "new_launch_id"), retry_of: previous.id, model: args.model ?? dispatch.model ?? undefined, timeout_ms: args.timeout_ms ?? dispatch.timeout_ms, output_limit: args.output_limit ?? dispatch.output_limit, max_turns: args.max_turns ?? dispatch.max_turns, max_budget_usd: args.max_budget_usd ?? dispatch.max_budget_usd ?? undefined, acceptance_name: acceptance?.name, acceptance_criteria: acceptance?.criteria }); }
@@ -2896,6 +2942,7 @@ export class CraftService extends ServiceFoundation {
         if (receipt?.usage && typeof receipt.usage === "object" && !Array.isArray(receipt.usage))
             costs.usage = receipt.usage;
         this.outcomeRecord({ trial_id: launch.trial_id, verdict, summary: `Host execution ${run.status}.`, failure_type: verdict === "passed" ? undefined : run.error_class ?? `host_${run.status}`, scores: { host_execution_success: verdict === "passed" ? 1 : 0 }, costs, evidence_ids: [evidence.id], source: "program_verified", ...(launch.knowledge_binding === undefined ? {} : { knowledge_binding: launch.knowledge_binding }) });
+        this.deliveryLoop.refresh({ launch_id: launch.id });
     }
     effectTrace(effect, eventType) {
         if (effect.trial_id)

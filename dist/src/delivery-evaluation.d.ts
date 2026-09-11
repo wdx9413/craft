@@ -5,4 +5,5 @@ export declare class DeliveryEvaluationKernel {
     constructor(store: CraftStore);
     caseSave(args: JsonObject): JsonObject;
     compare(args: JsonObject): JsonObject;
+    run(args: JsonObject): JsonObject;
 }

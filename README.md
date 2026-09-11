@@ -1,6 +1,6 @@
 # Craft
 
-> 当前发布版本：v0.11.45。最新能力包括可复算的 Evidence Wiki Context Bundle、失败关闭的 Knowledge-bound Work Launch，以及 Workbench 中可见的“目标—资料—决策—结果”引导工作流程。
+> 当前发布版本：v0.11.46。最新能力将终态 Host 回执、独立验收、可恢复交付下一动作、脱敏批量比较和可选平台预检连接为受限闭环。
 
 [中文](README.md) | [English](README.en.md)
 
@@ -66,6 +66,7 @@ Sandbox 能力采用“声明、诊断、黑盒一致性验证、精确版本票
 - 持续供应链治理：来源停用、条目撤回、摘要漂移或高危安全公告会原子阻断认证资产、使精确 Activation Profile 失效，并投影可恢复的再认证工作。
 - 本地维护 Worker：以单实例前台进程或一次性 Tick 回收过期 Lease、清理过期候选、复核 Hub 供应链并刷新 Recovery Queue；只维护控制面，不擅自执行用户任务。
 - MCP 服务，以及 Codex、Claude Code、DeepSeek Harness 和通用 MCP Host 接入。
+- Delivery Control Loop：Host/验收事实自动投影为 deliver、collect acceptance、retry-or-handoff 或 human-handoff；批量比较仅建议进入 Signoff，绝不自动发布或执行。
 - Windows、macOS、Linux 共用 TypeScript/Node.js 运行时；不依赖 Python。
 
 v0.9.10–v0.10.2 还提供声明范围内的文件快照、本地事务记录、受限 TypeScript 脚本候选和 Host 执行交接。v0.10.0 新增共享结构化工作对象；v0.10.1 用字段级 ChangeSet 阻止同字段覆盖；v0.10.2 新增持久等待、幂等资源结算、Fallback Contract 与 Effect/Saga Kernel。外部写入预声明请求、幂等键、审批和可选补偿；未知结果可先通过预授权只读 GET 对账，未映射状态仍需人工消歧。补偿 Adapter 只执行精确授权且预先冻结解释契约，网络模糊保持未知，补偿失败不会伪装成回滚成功。候选操作尚不是自动从原始轨迹提炼程序；平台与安全缺口见 [执行策略](docs/technical/modules/execution-policy.md)。

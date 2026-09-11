@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import { CraftStore } from "./store.js";
 function text(value, name) { if (typeof value !== "string" || !value.trim())
     throw new Error(`${name} must not be empty`); return value.trim(); }
@@ -44,5 +45,30 @@ export class PlatformExecutionKernel {
         }
         return { preflight: this.store.create("platform_execution_preflight", preflightId, { ...identity, preflight_digest: preflightDigest, allowed: true }), idempotent: false };
     }
+    validate(args) {
+        const preflight = this.store.get("platform_execution_preflight", text(args.preflight_id, "preflight_id"), args.version === undefined ? undefined : Number(args.version));
+        const profile = this.store.get("platform_execution_profile", String(preflight.profile_id), Number(preflight.profile_version));
+        const observedBoundary = JSON.stringify([preflight.allowed, profile.active, profile.isolation, profile.network, profile.platform]);
+        const requiredBoundary = JSON.stringify([true, true, "verified", "deny", preflight.platform]);
+        if (observedBoundary !== requiredBoundary)
+            throw new Error("Platform preflight is no longer valid");
+        return { preflight, profile, valid: true };
+    }
+    probe(args) {
+        const platform = args.platform === undefined ? process.platform : text(args.platform, "platform");
+        if (platform !== process.platform)
+            throw new Error("Platform probe must target the current local platform");
+        const observed = { platform, node_version: process.version, sandbox_exec_available: existsSync("/usr/bin/sandbox-exec"), verified: false, note: "Probe is health telemetry only and never verifies an execution boundary." };
+        const probeId = String(args.probe_id ?? `platform_execution_probe_${platform}`);
+        const existing = this.store.find("platform_execution_probe", probeId);
+        const probeDigest = digest(observed);
+        if (existing) {
+            if (existing.probe_digest !== probeDigest)
+                throw new Error("Platform probe idempotency conflict");
+            return { probe: existing, idempotent: true };
+        }
+        return { probe: this.store.create("platform_execution_probe", probeId, { ...observed, probe_digest: probeDigest }), idempotent: false };
+    }
+    probeGet(args) { return { probe: this.store.get("platform_execution_probe", text(args.probe_id, "probe_id")) }; }
 }
 //# sourceMappingURL=platform-execution.js.map

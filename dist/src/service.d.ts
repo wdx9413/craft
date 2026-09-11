@@ -1,6 +1,6 @@
 import { CraftStore, type JsonObject } from "./store.ts";
 import { ServiceFoundation } from "./service-foundation.ts";
-export declare const VERSION = "0.11.45";
+export declare const VERSION = "0.11.46";
 export declare class CraftService extends ServiceFoundation {
     static open(store: CraftStore, hostOwnerId?: string): Promise<CraftService>;
     info(): JsonObject;
@@ -263,6 +263,9 @@ export declare class CraftService extends ServiceFoundation {
     guidedWorkLaunchPrepare(args: JsonObject): JsonObject;
     executionSafetyPreflight(args: JsonObject): JsonObject;
     executionSafetyGet(args: JsonObject): JsonObject;
+    private platformPreflightForLaunch;
+    private bindPlatformPreflight;
+    private validateSafetyLaunch;
     safetyWorkLaunchPrepare(args: JsonObject): JsonObject;
     safetyWorkLaunchDecide(args: JsonObject): JsonObject;
     wikiCandidateLocalImport(args: JsonObject): Promise<JsonObject>;
@@ -282,10 +285,15 @@ export declare class CraftService extends ServiceFoundation {
     workLaunchGet(args: JsonObject): JsonObject;
     workDeliveryObserve(args: JsonObject): JsonObject;
     workDeliveryGet(args: JsonObject): JsonObject;
+    deliveryLoopRefresh(args: JsonObject): JsonObject;
+    deliveryLoopGet(args: JsonObject): JsonObject;
     deliveryEvaluationCaseSave(args: JsonObject): JsonObject;
     deliveryEvaluationCompare(args: JsonObject): JsonObject;
+    deliveryEvaluationRun(args: JsonObject): JsonObject;
     platformExecutionProfileSave(args: JsonObject): JsonObject;
     platformExecutionPreflight(args: JsonObject): JsonObject;
+    platformExecutionProbe(args: JsonObject): JsonObject;
+    platformExecutionProbeGet(args: JsonObject): JsonObject;
     workLaunchRetry(args: JsonObject): JsonObject;
     protected finalizeWorkLaunch(run: JsonObject, receipt: JsonObject | null): void;
     private effectTrace;

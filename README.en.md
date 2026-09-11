@@ -1,6 +1,6 @@
 # Craft
 
-> Current release: v0.11.45. Recent additions include reproducible Evidence Wiki Context Bundles, fail-closed knowledge-bound Work Launches, and a visible Goal-Material-Decision-Result guided-work flow in Workbench.
+> Current release: v0.11.46. The latest bounded control loop joins terminal Host receipts, independent acceptance, recoverable delivery actions, sanitized comparison batches, and optional platform preflight.
 
 [中文](README.md) | [English](README.en.md)
 

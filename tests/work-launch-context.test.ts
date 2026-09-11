@@ -24,6 +24,6 @@ test("Work Launch binds and rechecks local capability context across approval", 
     const tampered = await service.capabilityContextWorkLaunchPrepare({ ...args, launch_id: "tampered" }); store.save("work_launch", String((tampered.launch as JsonObject).id), { ...(tampered.launch as JsonObject), activation_context_digest: "wrong" }); await assert.rejects(service.capabilityContextWorkLaunchDecide({ launch_id: (tampered.launch as JsonObject).id, actor: "human", approved: true, prompt: args.prompt }), /changed since/);
     const claude = await service.capabilityContextWorkLaunchPrepare({ ...args, host: "claude-code", launch_id: "claude" }); assert.equal((claude.dispatch as JsonObject).kind, undefined);
     const stale = await service.capabilityContextWorkLaunchPrepare({ ...args, launch_id: "stale" }); await writeFile(join(skills, "SKILL.md"), `${content}\nChanged.`); await assert.rejects(service.capabilityContextWorkLaunchDecide({ launch_id: (stale.launch as JsonObject).id, actor: "human", approved: true, prompt: args.prompt }), /digest drifted/);
-    await service.sourceScan({ source_id: source.id }); assert.equal(VERSION, "0.11.45");
+    await service.sourceScan({ source_id: source.id }); assert.equal(VERSION, "0.11.46");
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
