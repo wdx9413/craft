@@ -17,7 +17,7 @@ import { dockerRequestDigest } from "./docker-sandbox.ts";
 import { egressRequestDigest } from "./egress.ts";
 import { ServiceFoundation } from "./service-foundation.ts";
 
-export const VERSION = "0.11.51";
+export const VERSION = "0.11.52";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -210,7 +210,7 @@ export class CraftService extends ServiceFoundation {
       "project_policy", "route_receipt", "host_adapter", "host_dispatch", "runtime_policy", "runtime_run",
       "runtime_operation", "runtime_adapter", "evaluation_runner", "evaluation_promotion", "experience_mining_candidate",
       "experience_shadow_experiment", "adaptive_harness", "agent_ir", "operational_signal", "operational_alert",
-      "capability_asset", "activation_profile", "tool_selection_receipt", "capability_call", "logical_activation_plan", "logical_activation_audit", "logical_activation_resolution", "expert_profile", "context_capsule",
+      "capability_asset", "activation_profile", "tool_selection_receipt", "capability_call", "capability_connector", "capability_connector_asset", "capability_connector_ticket", "logical_activation_plan", "logical_activation_audit", "logical_activation_resolution", "expert_profile", "context_capsule",
       "evaluation_reliability", "judge_adapter", "judge_calibration", "adaptation_candidate", "feedback_intake", "feedback_case", "canary",
       "workspace", "workspace_checkpoint", "workspace_change", "workspace_transaction", "work_object", "memory_item", "context_profile", "task_graph", "change_set",
       "budget_account", "budget_reservation", "durable_wait", "external_event", "fallback_contract", "fallback_event",
@@ -369,6 +369,8 @@ export class CraftService extends ServiceFoundation {
   capabilityCallIssue(args: JsonObject): JsonObject {
     const profile = this.store.get("activation_profile", text(args.profile_id, "profile_id")); const assetId = text(args.asset_id, "asset_id");
     if (!(profile.asset_ids as string[]).includes(assetId)) throw new Error("Capability asset is not in the activation profile");
+    const asset = this.store.get("capability_asset", assetId);
+    if (asset.connector_id !== undefined) throw new Error("Connector capability assets require a Connector ticket");
     const call = this.store.create("capability_call", String(args.call_id ?? id("capability_call")), { profile_id: profile.id, profile_version: profile.version, asset_id: assetId, operation: assertNoSecret(text(args.operation, "operation"), "operation"), status: "issued", expires_at: args.expires_at ?? new Date(Date.now() + 300000).toISOString() });
     return { call_id: call.id, call };
   }
@@ -376,10 +378,19 @@ export class CraftService extends ServiceFoundation {
   capabilityCallConsume(args: JsonObject): JsonObject {
     const call = this.store.get("capability_call", text(args.call_id, "call_id"));
     if (call.profile_id !== text(args.profile_id, "profile_id")) throw new Error("Capability call profile does not match");
+    if (call.connector_id !== undefined) throw new Error("Connector capability calls require Connector ticket consumption");
     if (call.status !== "issued") throw new Error("Capability call was already consumed");
     if (validIsoTime(call.expires_at, "expires_at") < Date.now()) throw new Error("Capability call has expired");
     return { receipt: this.store.save("capability_call", String(call.id), { ...recordPayload(call), status: "consumed", consumed_at: new Date().toISOString() }) };
   }
+
+  capabilityConnectorRegister(args: JsonObject): JsonObject { return this.capabilityConnectors.register(args); }
+  capabilityConnectorDiscover(args: JsonObject): JsonObject { return this.capabilityConnectors.discover(args); }
+  capabilityConnectorUpdate(args: JsonObject): JsonObject { return this.capabilityConnectors.update(args); }
+  capabilityConnectorApprove(args: JsonObject): JsonObject { return this.capabilityConnectors.approve(args); }
+  capabilityConnectorList(args: JsonObject): JsonObject { return this.capabilityConnectors.list(args); }
+  capabilityConnectorTicketIssue(args: JsonObject): JsonObject { return this.capabilityConnectors.ticketIssue(args); }
+  capabilityConnectorTicketConsume(args: JsonObject): JsonObject { return this.capabilityConnectors.ticketConsume(args); }
 
   expertProfileSave(args: JsonObject): JsonObject {
     const expertType = text(args.expert_type, "expert_type"); const effects = uniqueTextArray(args.allowed_effects, "allowed_effects");

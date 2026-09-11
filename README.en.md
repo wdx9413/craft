@@ -1,6 +1,6 @@
 # Craft
 
-> Current release: v0.11.51. Verified Work Loop joins task contracts, re-observed state, acceptance, recovery, and evaluation campaigns into one controlled path; Serena project memories are read only and loaded on demand.
+> Current release: v0.11.52. Capability Connector lets users explicitly connect Serena, Skill sources, or MCP metadata; Core MCP exposes the full Verified Work Loop and hands hosts short-lived tickets pinned to an Activation Profile and source digest.
 
 [中文](README.md) | [English](README.en.md)
 
@@ -58,6 +58,7 @@ See the [product architecture (Chinese)](docs/product/architecture.zh-CN.md) and
 - A single-instance local maintenance worker reclaims expired leases, expires speculative candidates, reconciles Hub supply-chain state, and refreshes recovery work without silently executing user tasks.
 - Long-task dehydration and hydration: freeze minimal references to Task, Workspace revision, Wait, Runtime fingerprints, budgets, and recovery work without raw conversation context or credentials. Revalidation distinguishes still waiting, resume, and replan; short Host leases and Evidence-backed completion prevent concurrent or fabricated restoration.
 - One TypeScript/Node.js runtime on Windows, macOS, and Linux, with no Python dependency.
+- Capability Connector registers built-in and user-approved GitHub/Volcengine Skill sources plus stdio/HTTPS MCP metadata without storing credentials or raw third-party content. Discovery, approval, Activation Profile, and ticketed invocation are separate; Serena MCP assets are read-only. Connectors never install, start, or reconfigure third-party services by themselves.
 
 Versions 0.9.10–0.10.2 also provide scoped file snapshots, local transaction records, restricted TypeScript proposals, and host execution handoffs. Version 0.10.0 adds shared typed work objects; v0.10.1 adds field-level ChangeSets; v0.10.2 adds durable waits, hierarchical budgets, fallback contracts, isolated parsing, trusted egress, an external Effect/Saga Kernel, and tiered autonomy policies. An authorization can require automatic execution, notification, one human approval, or multi-signature approval and is bound to an exact task, action, target, digest, TTL, and single consumption. Ambiguous effects can use pre-authorized read-only reconciliation. The compensation adapter freezes authorization, request digest, approval, and HTTP outcome mappings before dispatch; transport uncertainty and compensation failure remain explicit. Proposal operations are still supplied by the caller, not inferred automatically from raw traces. See [execution boundaries (Chinese)](docs/technical/modules/execution-policy.md).
 

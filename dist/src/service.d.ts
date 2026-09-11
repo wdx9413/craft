@@ -1,6 +1,6 @@
 import { CraftStore, type JsonObject } from "./store.ts";
 import { ServiceFoundation } from "./service-foundation.ts";
-export declare const VERSION = "0.11.51";
+export declare const VERSION = "0.11.52";
 export declare class CraftService extends ServiceFoundation {
     static open(store: CraftStore, hostOwnerId?: string): Promise<CraftService>;
     info(): JsonObject;
@@ -21,6 +21,13 @@ export declare class CraftService extends ServiceFoundation {
     capabilityAccessPlan(args: JsonObject): JsonObject;
     capabilityCallIssue(args: JsonObject): JsonObject;
     capabilityCallConsume(args: JsonObject): JsonObject;
+    capabilityConnectorRegister(args: JsonObject): JsonObject;
+    capabilityConnectorDiscover(args: JsonObject): JsonObject;
+    capabilityConnectorUpdate(args: JsonObject): JsonObject;
+    capabilityConnectorApprove(args: JsonObject): JsonObject;
+    capabilityConnectorList(args: JsonObject): JsonObject;
+    capabilityConnectorTicketIssue(args: JsonObject): JsonObject;
+    capabilityConnectorTicketConsume(args: JsonObject): JsonObject;
     expertProfileSave(args: JsonObject): JsonObject;
     contextCapsuleCreate(args: JsonObject): JsonObject;
     expertSubagentCreate(args: JsonObject): JsonObject;

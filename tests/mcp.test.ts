@@ -377,6 +377,6 @@ test("MCP stdio default runtime accepts buffered initialization", async () => {
     const serving = serveMcpStdio({ mode: "full", input, write: (line) => output.push(line) });
     input.end('{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}\n');
     await serving;
-    assert.equal((JSON.parse(output[0]) as { result: { serverInfo: { version: string } } }).result.serverInfo.version, "0.11.51");
+    assert.equal((JSON.parse(output[0]) as { result: { serverInfo: { version: string } } }).result.serverInfo.version, "0.11.52");
   } finally { if (original === undefined) delete process.env.CRAFT_DATA_DIR; else process.env.CRAFT_DATA_DIR = original; await rm(root, { recursive: true, force: true }); }
 });

@@ -15,7 +15,7 @@ const schemaFor = (name: string): JsonObject => {
   if (["completed", "pending", "decisions", "artifacts", "steps", "cases", "capabilities",
     "allowed_side_effects", "approved_side_effects", "nodes", "artifact_ids", "evidence_ids",
     "trial_ids", "requirements", "grade_ids", "pattern_ids", "failure_modes", "receipt_ids", "criteria", "acceptance_criteria", "allowed_extensions", "fields", "capability_requirements", "object_schemas", "components", "action_contracts", "tags", "claim_ids", "evidence_ids", "expected_claim_ids", "case_ids",
-    "allowed_operations", "allowed_effects", "require_approval_for", "operations", "subjects", "children", "trusted_hosts", "command_allowlist", "path_allowlist", "kinds", "effects", "allowed_kinds", "dependencies", "aliases", "artifact_ids", "final_artifact_ids", "evidence_ids", "output_contract", "trial_ids", "include_paths", "affected_paths", "object_ids", "depends_on", "source_paths", "applies_to", "patches", "snapshot_refs", "triggers", "allowed_hosts", "allowed_actions", "approval_required_actions", "detected_instructions", "citations", "allowed_fields", "argv", "sources", "budget_ids", "recovery_item_ids", "memory_kinds", "object_types", "required_memory_ids", "required_object_ids", "benchmark_ids", "memory_ids", "paths", "state_paths"].includes(name)) return { type: "array" };
+    "allowed_operations", "allowed_effects", "require_approval_for", "operations", "subjects", "children", "trusted_hosts", "command_allowlist", "path_allowlist", "kinds", "effects", "allowed_kinds", "dependencies", "aliases", "assets", "artifact_ids", "final_artifact_ids", "evidence_ids", "output_contract", "trial_ids", "include_paths", "affected_paths", "object_ids", "depends_on", "source_paths", "applies_to", "patches", "snapshot_refs", "triggers", "allowed_hosts", "allowed_actions", "approval_required_actions", "detected_instructions", "citations", "allowed_fields", "argv", "sources", "budget_ids", "recovery_item_ids", "memory_kinds", "object_types", "required_memory_ids", "required_object_ids", "benchmark_ids", "memory_ids", "paths", "state_paths"].includes(name)) return { type: "array" };
   return { type: "string" };
 };
 const objectSchema = (required: string[] = [], optional: string[] = []): JsonObject => ({ type: "object",
@@ -610,6 +610,13 @@ export const TOOLS: Tool[] = [
   tool("craft_capability_access_plan", "Recommend the minimal trusted activation profile and persist its selection receipt.", ["task_id", "goal"], false, ["allowed_effects", "receipt_id"]),
   tool("craft_capability_call_issue", "Issue one expiring, profile-bound capability call token.", ["profile_id", "asset_id", "operation"], false, ["call_id", "expires_at"]),
   tool("craft_capability_call_consume", "Consume an issued capability call only for its original profile.", ["call_id", "profile_id"], false),
+  tool("craft_capability_connector_register", "Register one user-approved built-in, Skill-source, or MCP connector without storing credentials or starting it.", ["kind", "name"], false, ["connector_id", "endpoint", "approved", "approval_ref", "metadata"]),
+  tool("craft_capability_connector_discover", "Record host-discovered, content-free metadata from one configured connector; Craft never fetches or installs it itself.", ["connector_id", "assets"], false),
+  tool("craft_capability_connector_update", "Enable or disable one Connector; disabling it invalidates future ticket consumption.", ["connector_id", "active"], false),
+  tool("craft_capability_connector_approve", "Approve one discovered connector asset and publish a provenance-pinned Capability Asset; write-capable assets remain non-activatable.", ["connector_asset_id", "approval_ref"], false, ["asset_id"]),
+  tool("craft_capability_connector_list", "List registered connectors and content-free discovered assets.", [], true, ["limit"]),
+  tool("craft_capability_connector_ticket_issue", "Issue one expiring capability ticket pinned to an Activation Profile, connector asset, and source digest.", ["profile_id", "connector_asset_id", "operation"], false, ["ticket_id", "call_id", "expires_at"]),
+  tool("craft_capability_connector_ticket_consume", "Consume a connector ticket exactly once after rechecking connector state and source version.", ["ticket_id", "profile_id"], false),
   tool("craft_expert_profile_save", "Save the only supported read-only diagnostic research Expert profile.", ["name", "expert_type", "allowed_effects", "output_contract"], false, ["expert_id"]),
   tool("craft_context_capsule_create", "Create a bounded reference-only Context Capsule for a diagnostic Expert.", ["task_id", "profile_id", "input_boundary"], false, ["capsule_id", "artifact_ids", "evidence_ids"]),
   tool("craft_expert_subagent_create", "Create one bounded read-only diagnostic Sub-agent Run.", ["run_id", "parent_operation_id", "expert_id", "capsule_id", "objective"], false, ["operation_id"]),
@@ -627,8 +634,8 @@ export const TOOLS: Tool[] = [
 ];
 
 const CORE_TOOL_NAMES = new Set(["craft_info", "craft_source_list", "craft_capability_search", "craft_capability_get", "craft_semantic_status", "craft_execution_policy_decide",
-  "craft_default_route", "craft_default_route_resume", "craft_default_route_find", "craft_task_open", "craft_task_list", "craft_task_checkpoint", "craft_task_control_refresh", "craft_task_control_get", "craft_task_run_refresh", "craft_task_run_get", "craft_verified_work_loop_get", "craft_work_launch_get", "craft_work_delivery_observe", "craft_work_delivery_get", "craft_delivery_loop_refresh", "craft_delivery_loop_get", "craft_delivery_evaluation_compare", "craft_delivery_evaluation_run", "craft_platform_execution_preflight", "craft_platform_execution_probe", "craft_platform_execution_probe_get", "craft_workspace_get", "craft_workspace_diff", "craft_work_object_list", "craft_workspace_impact", "craft_context_assemble", "craft_change_set_preview",
-  "craft_artifact_register", "craft_evidence_record", "craft_capability_access_plan", "craft_capability_call_issue", "craft_capability_call_consume"]);
+  "craft_default_route", "craft_default_route_resume", "craft_default_route_find", "craft_task_open", "craft_task_list", "craft_task_checkpoint", "craft_task_control_refresh", "craft_task_control_get", "craft_task_run_refresh", "craft_task_run_get", "craft_verified_work_loop_prepare", "craft_verified_work_loop_advance", "craft_verified_work_loop_decide", "craft_verified_work_loop_resume", "craft_verified_work_loop_get", "craft_work_launch_get", "craft_work_delivery_observe", "craft_work_delivery_get", "craft_delivery_loop_refresh", "craft_delivery_loop_get", "craft_delivery_evaluation_compare", "craft_delivery_evaluation_run", "craft_platform_execution_preflight", "craft_platform_execution_probe", "craft_platform_execution_probe_get", "craft_workspace_get", "craft_workspace_diff", "craft_work_object_list", "craft_workspace_impact", "craft_context_assemble", "craft_change_set_preview",
+  "craft_artifact_register", "craft_evidence_record", "craft_capability_access_plan", "craft_capability_call_issue", "craft_capability_call_consume", "craft_capability_connector_list", "craft_capability_connector_ticket_issue", "craft_capability_connector_ticket_consume"]);
 export const CORE_TOOLS: Tool[] = TOOLS.filter((tool) => CORE_TOOL_NAMES.has(tool.name));
 
 export class McpServer {
@@ -928,6 +935,10 @@ export class McpServer {
       craft_orchestration_trial_finalize: (a) => service.orchestrationTrialFinalize(a),
       craft_capability_asset_save: service.capabilityAssetSave.bind(service), craft_capability_access_plan: service.capabilityAccessPlan.bind(service),
       craft_capability_call_issue: service.capabilityCallIssue.bind(service), craft_capability_call_consume: service.capabilityCallConsume.bind(service),
+      craft_capability_connector_register: service.capabilityConnectorRegister.bind(service), craft_capability_connector_discover: service.capabilityConnectorDiscover.bind(service),
+      craft_capability_connector_update: service.capabilityConnectorUpdate.bind(service),
+      craft_capability_connector_approve: service.capabilityConnectorApprove.bind(service), craft_capability_connector_list: service.capabilityConnectorList.bind(service),
+      craft_capability_connector_ticket_issue: service.capabilityConnectorTicketIssue.bind(service), craft_capability_connector_ticket_consume: service.capabilityConnectorTicketConsume.bind(service),
       craft_expert_profile_save: service.expertProfileSave.bind(service), craft_context_capsule_create: service.contextCapsuleCreate.bind(service),
       craft_expert_subagent_create: service.expertSubagentCreate.bind(service), craft_expert_subagent_report: service.expertSubagentReport.bind(service),
       craft_evaluation_reliability_assess: service.evaluationReliabilityAssess.bind(service), craft_judge_adapter_save: service.judgeAdapterSave.bind(service),
