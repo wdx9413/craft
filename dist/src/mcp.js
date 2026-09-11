@@ -1,11 +1,11 @@
 import { CraftService, VERSION } from "./service.js";
 import {} from "./store.js";
 const schemaFor = (name) => {
-    if (["scan", "enabled", "allow_execution", "allow_external_write", "require_held_out", "require_outcome_passed", "retryable", "requires_external_effect", "supports_pause_resume", "supports_evidence_receipts", "generated_code", "requires_credential", "has_compensation", "approved", "start_trial", "untrusted_input", "confirmed_original_runner_stopped", "sanitized", "active"].includes(name))
+    if (["scan", "enabled", "allow_execution", "allow_external_write", "require_held_out", "require_outcome_passed", "retryable", "requires_external_effect", "supports_pause_resume", "supports_evidence_receipts", "generated_code", "requires_credential", "has_compensation", "approved", "start_trial", "untrusted_input", "confirmed_original_runner_stopped", "sanitized", "active", "acceptance_required"].includes(name))
         return { type: "boolean" };
     if (["limit", "version", "capacity", "max_concurrency", "size_bytes", "subject_version", "expected_version", "max_candidates",
         "suite_version", "configuration_version", "harness_configuration_version", "target_version", "profile_version",
-        "grader_version", "policy_version", "signoff_policy_version", "lease_ttl_seconds", "ttl_seconds", "trials_per_case", "window_size", "max_attempts", "min_trials", "harness_version", "ir_version", "runtime_adapter_version", "agreed", "total", "expected_state_revision", "max_chars", "max_items", "timeout_ms", "output_limit", "max_turns", "after_sequence", "context_profile_version"].includes(name))
+        "grader_version", "policy_version", "signoff_policy_version", "lease_ttl_seconds", "ttl_seconds", "trials_per_case", "window_size", "max_attempts", "min_trials", "harness_version", "ir_version", "runtime_adapter_version", "agreed", "total", "expected_state_revision", "max_chars", "max_items", "timeout_ms", "output_limit", "max_turns", "after_sequence", "context_profile_version", "activation_profile_version", "budget_account_version", "contract_version"].includes(name))
         return { type: "integer" };
     if (["score", "value", "threshold", "min_pass_rate_delta", "max_cost_regression_ratio", "max_duration_regression_ratio", "max_budget_ratio", "baseline", "candidate", "minimum_agreement", "max_budget_usd"].includes(name))
         return { type: "number" };
@@ -84,6 +84,11 @@ export const TOOLS = [
     tool("craft_task_open", "Create a durable task or resume one by ID.", [], false, ["task_id", "title", "goal", "project_id"]),
     tool("craft_task_list", "List durable tasks.", [], true, ["limit", "status", "project_id"]),
     tool("craft_task_checkpoint", "Persist task progress, evidence references, and pending work.", ["task_id", "summary"], false, ["completed", "pending", "decisions", "artifacts", "status", "source"]),
+    tool("craft_task_control_save", "Pin one Task's workspace, allowed effects, optional capability/budget references, and acceptance requirement. It never starts a Host.", ["task_id", "workspace"], false, ["contract_id", "allowed_effects", "acceptance_required", "activation_profile_id", "activation_profile_version", "budget_account_id", "budget_account_version"]),
+    tool("craft_task_control_bind_launch", "Bind exactly one compatible Work Launch to a pinned Task Control contract.", ["contract_id", "launch_id"], false),
+    tool("craft_task_control_refresh", "Materialize the current Task Control status and its one safe next action from observed facts.", ["contract_id"], false),
+    tool("craft_task_control_get", "Read a Task Control contract, latest state, delivery loop, and content-free handoffs.", ["contract_id"], true),
+    tool("craft_task_control_handoff", "Create a content-free, resumable Task Control handoff without storing prompts or business data.", ["contract_id", "reason"], false, ["handoff_id"]),
     tool("craft_codex_dispatch_prepare", "Prepare an exact, digest-bound Codex CLI dispatch. The prompt is not persisted and workspace writes still require Craft authorization.", ["task_id", "workspace", "prompt"], false, ["dispatch_id", "sandbox", "model", "timeout_ms", "output_limit"]),
     tool("craft_codex_dispatch_execute", "Execute a prepared Codex CLI dispatch with shell disabled, bounded JSONL capture, and a durable receipt.", ["dispatch_id", "prompt"], false, ["authorization_request_id", "notification_ref", "now"]),
     tool("craft_claude_dispatch_prepare", "Prepare an exact Claude Code dispatch with bounded turns, optional cost cap, and a restricted tool set.", ["task_id", "workspace", "prompt"], false, ["dispatch_id", "sandbox", "model", "max_turns", "max_budget_usd", "timeout_ms", "output_limit"]),
@@ -421,7 +426,7 @@ export const TOOLS = [
     tool("craft_canary_observe", "Observe a canary metric and roll back on a configured regression.", ["canary_id", "metric", "baseline", "candidate", "threshold"], false),
 ];
 const CORE_TOOL_NAMES = new Set(["craft_info", "craft_source_list", "craft_capability_search", "craft_capability_get", "craft_semantic_status", "craft_execution_policy_decide",
-    "craft_default_route", "craft_default_route_resume", "craft_default_route_find", "craft_task_open", "craft_task_list", "craft_task_checkpoint", "craft_work_launch_get", "craft_work_delivery_observe", "craft_work_delivery_get", "craft_delivery_loop_refresh", "craft_delivery_loop_get", "craft_delivery_evaluation_compare", "craft_delivery_evaluation_run", "craft_platform_execution_preflight", "craft_platform_execution_probe", "craft_platform_execution_probe_get", "craft_workspace_get", "craft_workspace_diff", "craft_work_object_list", "craft_workspace_impact", "craft_context_assemble", "craft_change_set_preview",
+    "craft_default_route", "craft_default_route_resume", "craft_default_route_find", "craft_task_open", "craft_task_list", "craft_task_checkpoint", "craft_task_control_refresh", "craft_task_control_get", "craft_work_launch_get", "craft_work_delivery_observe", "craft_work_delivery_get", "craft_delivery_loop_refresh", "craft_delivery_loop_get", "craft_delivery_evaluation_compare", "craft_delivery_evaluation_run", "craft_platform_execution_preflight", "craft_platform_execution_probe", "craft_platform_execution_probe_get", "craft_workspace_get", "craft_workspace_diff", "craft_work_object_list", "craft_workspace_impact", "craft_context_assemble", "craft_change_set_preview",
     "craft_artifact_register", "craft_evidence_record", "craft_capability_access_plan", "craft_capability_call_issue", "craft_capability_call_consume"]);
 export const CORE_TOOLS = TOOLS.filter((tool) => CORE_TOOL_NAMES.has(tool.name));
 export class McpServer {
@@ -477,6 +482,8 @@ export class McpServer {
             craft_default_route_update: (a) => service.defaultRouteUpdate(a),
             craft_task_open: (a) => service.taskOpen(a), craft_task_list: (a) => service.taskList(a),
             craft_task_checkpoint: (a) => service.taskCheckpoint(a), craft_feedback_record: (a) => service.feedbackRecord(a),
+            craft_task_control_save: (a) => service.taskControlSave(a), craft_task_control_bind_launch: (a) => service.taskControlBindLaunch(a),
+            craft_task_control_refresh: (a) => service.taskControlRefresh(a), craft_task_control_get: (a) => service.taskControlGet(a), craft_task_control_handoff: (a) => service.taskControlHandoff(a),
             craft_workspace_open: (a) => service.workspaceOpen(a), craft_workspace_get: (a) => service.workspaceGet(a),
             craft_workspace_checkpoint: (a) => service.workspaceCheckpoint(a), craft_workspace_diff: (a) => service.workspaceDiff(a),
             craft_workspace_human_change: (a) => service.workspaceHumanChange(a), craft_workspace_restore: (a) => service.workspaceRestore(a),

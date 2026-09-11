@@ -45,6 +45,7 @@ import { WorkDeliveryKernel } from "./work-delivery.ts";
 import { DeliveryEvaluationKernel } from "./delivery-evaluation.ts";
 import { PlatformExecutionKernel } from "./platform-execution.ts";
 import { DeliveryLoopKernel } from "./delivery-loop.ts";
+import { TaskControlKernel } from "./task-control.ts";
 
 /**
  * Stable composition root for the service. Domain behavior stays in focused
@@ -97,6 +98,7 @@ export abstract class ServiceFoundation {
   readonly deliveryEvaluation: DeliveryEvaluationKernel;
   readonly platformExecution: PlatformExecutionKernel;
   readonly deliveryLoop: DeliveryLoopKernel;
+  readonly taskControl: TaskControlKernel;
 
   constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter = new LocalIsolatedAdapter(),
     dockerSandbox = new DockerSandboxAdapter(), egressBroker = new TrustedEgressBroker(), hostOwnerId?: string) {
@@ -128,6 +130,7 @@ export abstract class ServiceFoundation {
     this.deliveryEvaluation = new DeliveryEvaluationKernel(store);
     this.platformExecution = new PlatformExecutionKernel(store);
     this.deliveryLoop = new DeliveryLoopKernel(store, this.workDelivery);
+    this.taskControl = new TaskControlKernel(store, this.deliveryLoop);
     this.hostRuns = new HostRunKernel(store, [this.codexHost, this.claudeHost], hostOwnerId,
       (run, receipt) => this.finalizeWorkLaunch(run, receipt));
   }

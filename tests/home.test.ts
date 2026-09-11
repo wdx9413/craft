@@ -24,9 +24,11 @@ test("Workbench Home provides one bounded UI-safe projection without copying aut
   f.store.create("work_launch", "launch", { task_id: "active", host: "codex-cli", workspace: "C:/work", sandbox: "read-only", status: "running", run_id: "missing" });
   f.store.create("work_launch", "pending", { task_id: "active", host: "claude-code", workspace: "C:/work", sandbox: "workspace-write", status: "awaiting_approval", acceptance_plan_id: "pending-plan" });
   f.store.create("work_launch", "linked", { task_id: "active", host: "codex-cli", workspace: "C:/work", sandbox: "read-only", status: "running", run_id: "linked-run", acceptance_plan_id: "linked-plan" }); f.store.create("host_run", "linked-run", { status: "completed" }); f.store.create("acceptance_assessment", "assessment_linked-plan", { status: "passed" });
+  f.store.create("task_control_contract", "control", { task_id: "active", workspace: "C:/work", allowed_effects: ["read_only"], acceptance_required: false, launch_id: "linked", status: "active" }); f.store.create("task_control_contract", "unrefreshed", { task_id: "active", workspace: "C:/work", allowed_effects: ["read_only"], acceptance_required: false, launch_id: null, status: "active" }); f.store.create("task_control_state", "task_control_state_control", { task_id: "active", status: "ready_for_delivery", action: "deliver", actor: "human" });
   const view = f.home.view({ now: "2030-01-01T00:00:00Z", limit: 10 }); const summary = view.summary as Record<string, unknown>;
-  assert.deepEqual(summary, { active_tasks: 1, workspaces: 1, attention: 1, active_runs: 1, active_budgets: 1, health: "healthy" });
+  assert.deepEqual(summary, { active_tasks: 1, workspaces: 1, attention: 1, active_runs: 1, active_budgets: 1, active_task_controls: 2, health: "healthy" });
   assert.deepEqual((view.resources as Record<string, unknown>[])[0].remaining, { usd: 5, token: 90, storage: 4 });
+  assert.deepEqual((view.task_controls as Record<string, unknown>[]).map((item) => item.action).sort(), ["deliver", "refresh_task_control"]);
   assert.equal((view.workspaces as Record<string, unknown>[])[0].object_count, 1); const launches = view.work_launches as Record<string, unknown>[]; const launchStates = Object.fromEntries(launches.map((item) => [item.id, [item.effective_status, item.acceptance_status]])); assert.deepEqual(launchStates, { launch: ["running", "not_configured"], pending: ["awaiting_approval", "pending"], linked: ["completed", "passed"] }); assert.equal(JSON.stringify(view).includes("hidden"), false); f.store.close();
 });
 

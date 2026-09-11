@@ -51,6 +51,7 @@
 - [Local Candidate Import](technical/modules/local-candidate-import.md)：以显式确认、目录边界和不可覆盖写入落地已审核交付包，仍默认不启用。
 - [A2A Discovery](technical/modules/a2a-discovery.md)：以不可信、只读 Receipt 发现 HTTPS Agent Card，不委派任务或授予权限。
 - [Delivery Control Loop](technical/modules/delivery-control-loop.md)：将终态回执、独立验收、可恢复下一动作、脱敏批量比较和可选平台预检连接为受限闭环。
+- [Task Control](technical/modules/task-control.md)：用不可变任务契约把启动、回执、验收、交付和交接收敛为一个可复算的下一安全动作。
 
 ## 研究证据
 

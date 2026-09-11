@@ -1,6 +1,6 @@
 # Craft
 
-> Current release: v0.11.46. The latest bounded control loop joins terminal Host receipts, independent acceptance, recoverable delivery actions, sanitized comparison batches, and optional platform preflight.
+> Current release: v0.11.47. The latest release turns a pinned task contract, Host receipts, independent acceptance, and the delivery loop into one recoverable, auditable task-control surface.
 
 [中文](README.md) | [English](README.en.md)
 

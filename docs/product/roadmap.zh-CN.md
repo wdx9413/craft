@@ -13,7 +13,7 @@
 
 ## 建设原则
 
-以 [产品架构](architecture.zh-CN.md) 的三大支柱为目标：工作与协作、执行与保障、学习与改进。**评测与实验是第三支柱内的核心模块**，不另设第四支柱。以下里程碑是规划；当前实现基线已推进到 v0.11.46。
+以 [产品架构](architecture.zh-CN.md) 的三大支柱为目标：工作与协作、执行与保障、学习与改进。**评测与实验是第三支柱内的核心模块**，不另设第四支柱。以下里程碑是规划；当前实现基线已推进到 v0.11.47。
 
 **两步定位**：短期做**跨宿主治理插件层**——以 MCP/插件形式接入 Codex CLI、Claude Code、DeepSeek Harness 等宿主，统一能力发现、授权门禁、证据链与评测门禁，执行留在宿主内；长期做**自主 Agent 平台**——自有对话循环、宿主调度与评测驱动的自我改进。Provider 是当前主线，Supervisor/Agent 是长期形态；本路线图中 v0.11.x 的能力全部属于两步共用的内核。
 
@@ -70,6 +70,8 @@
 **v0.11.45：平台执行矩阵。** 只读操作不依赖沙箱，可在 Windows/macOS/Linux 作为便携读取正常运行；任何本地或外部写入都必须精确命中当前平台已验证且默认拒绝网络的边界 Profile，否则失败关闭。该矩阵是启动前决策记录，不会把 Profile 声明误称为真实隔离器，也不会自行执行命令。
 
 **v0.11.46：交付控制闭环包。** 本次合并十项相互依赖的小能力，而不拆成十次版本发布：终态 Host 与独立验收自动形成可版本化的 Delivery Loop，并给出 deliver / collect acceptance / retry-or-handoff / human-handoff 等有限下一动作；Workbench 与 Work Launch 查询显示该投影。脱敏 Delivery Case 可在同环境、同预算下批量聚合比较，只有足量、无回归、全 held-out 样本才建议送 Signoff，永不自动晋级。平台 Probe 仅记录本机健康，Safety Work Launch 可选绑定精确平台预检；写入绑定漂移即失败关闭。详见 [Delivery Control Loop](../technical/modules/delivery-control-loop.md)。
+
+**v0.11.47：任务控制面。** `Task Control` 将 Task、工作目录、允许 effect、可选 Capability/Budget 精确版本和验收要求固定为不可变 Contract，并且只能绑定一个兼容的 Work Launch。它从 Host 回执、独立验收与 Delivery Loop 导出一个有限且可复算的状态/下一动作，形成准备、审批、运行、验收、交付、恢复和交接的单任务闭环。Host/验收变化自动刷新投影，Attention、Home 和 Workbench 显示它；交接记录只保留版本和引用，不保存 Prompt 或业务正文。默认核心 MCP 只能读/刷新状态；完整 MCP 才能显式保存、绑定或交接。它不自动交付、重试、发布或扩大权限。详见 [Task Control](../technical/modules/task-control.md)。
 
 - 面向各行业工作者，研发是首批验证场景，视频用于检验跨领域复用；后续扩展销售、教育与内容创作，不同时自建所有专业编辑器。
 - 先把真实工作从目标到成果跑通，同时提供可操作的最小界面；不长期只增加协议与配置。

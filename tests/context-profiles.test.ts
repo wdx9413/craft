@@ -91,6 +91,6 @@ test("bounded context profiles remain separate from generic task-graph execution
       arguments: { graph_id: "mcp_graph", node_id: "one", status: "done" } } });
     assert.equal((advanced?.result as JsonObject).isError, false);
     assert.equal(((service.contextProfileAssemble({ profile_id: "mcp_context", query: "anything" }).profile as JsonObject).id), "mcp_context");
-    assert.equal(VERSION, "0.11.46");
+    assert.equal(VERSION, "0.11.47");
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
