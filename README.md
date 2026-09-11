@@ -1,6 +1,6 @@
 # Craft
 
-> 当前发布版本：v0.11.56。新增 Managed Run 与 Evaluation Lab：跨会话接力只保存可复核引用，评测按显式槽位交给 Host，未校准 Judge 不能作为晋级依据；已有本地写入恢复、Delivery 对照报告和 Evidence Canary 门禁继续生效。
+> 当前发布版本：v0.11.57。新增 Agent-Native Workspace Runtime：统一协调 Fabric、Host、Receipt 与再观察；区分跨平台只读、人工批准本地写和已验证隔离写入，并将真实 Host Attempt 接入可比较评测；已有本地写入恢复、Delivery 对照报告和 Evidence Canary 门禁继续生效。
 
 [中文](README.md) | [English](README.en.md)
 

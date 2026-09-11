@@ -15,7 +15,7 @@ import { decideExecution } from "./execution-policy.js";
 import { dockerRequestDigest } from "./docker-sandbox.js";
 import { egressRequestDigest } from "./egress.js";
 import { ServiceFoundation } from "./service-foundation.js";
-export const VERSION = "0.11.54";
+export const VERSION = "0.11.57";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -228,8 +228,8 @@ export class CraftService extends ServiceFoundation {
             "supply_chain_advisory",
             "maintenance_status",
             "maintenance_tick",
-            "maintenance_component", "maintenance_failure", "attention_item", "work_launch", "work_delivery", "delivery_loop", "delivery_evaluation_case", "delivery_evaluation_comparison", "delivery_evaluation_run", "platform_execution_profile", "platform_execution_preflight", "platform_execution_probe", "platform_execution_conformance", "task_run", "task_run_state", "task_run_handoff", "task_benchmark", "task_benchmark_pair", "state_snapshot", "verified_work_loop", "verified_work_loop_receipt", "verified_work_loop_decision", "human_state_event", "work_loop_invalidation", "eval_campaign", "eval_campaign_slot", "project_knowledge_discovery", "project_knowledge_resolution", "project_knowledge_proposal", "acceptance_plan", "acceptance_check", "acceptance_assessment", "acceptance_evaluator", "acceptance_evaluation_job", "verified_iteration", "iteration_attempt", "strategy_recommendation",
-            "trajectory_script_proposal", "verified_script_run", "knowledge_claim", "wiki_page", "knowledge_relation", "wiki_context_bundle", "wiki_skill_candidate", "knowledge_evaluation_case", "knowledge_evaluation_run", "wiki_candidate_evaluation_attestation", "wiki_candidate_publication_authorization", "wiki_candidate_publication_package", "guided_work_brief", "execution_safety_preflight", "wiki_candidate_local_import"];
+            "maintenance_component", "maintenance_failure", "attention_item", "work_launch", "work_delivery", "delivery_loop", "delivery_evaluation_case", "delivery_evaluation_comparison", "delivery_evaluation_run", "platform_execution_profile", "platform_execution_preflight", "platform_execution_probe", "platform_execution_conformance", "task_run", "task_run_state", "task_run_handoff", "task_benchmark", "task_benchmark_pair", "task_benchmark_canary_sample", "state_snapshot", "verified_work_loop", "verified_work_loop_receipt", "verified_work_loop_decision", "human_state_event", "work_loop_invalidation", "eval_campaign", "eval_campaign_slot", "eval_campaign_report", "managed_write_guard", "managed_write_settlement", "adaptive_harness_recommendation", "project_knowledge_discovery", "project_knowledge_resolution", "project_knowledge_proposal", "acceptance_plan", "acceptance_check", "acceptance_assessment", "acceptance_evaluator", "acceptance_evaluation_job", "verified_iteration", "iteration_attempt", "strategy_recommendation",
+            "trajectory_script_proposal", "verified_script_run", "knowledge_claim", "wiki_page", "knowledge_relation", "wiki_context_bundle", "wiki_skill_candidate", "knowledge_evaluation_case", "knowledge_evaluation_run", "wiki_candidate_evaluation_attestation", "wiki_candidate_publication_authorization", "wiki_candidate_publication_package", "guided_work_brief", "execution_safety_preflight", "wiki_candidate_local_import", "autonomy_ladder_decision", "workspace_observation", "work_coordinator", "agent_eval_lab", "agent_eval_attempt"];
         kinds.push("untrusted_content", "untrusted_extraction", "decision_projection");
         return { version: VERSION, data_root: this.store.paths.root,
             counts: Object.fromEntries(kinds.map((kind) => [kind, this.store.count(kind)])) };
@@ -2920,7 +2920,8 @@ export class CraftService extends ServiceFoundation {
         const prepared = this.verifiedWorkLoopPrepare({ ...args, task_id: task.id, activation_profile_id: profile.id, activation_profile_version: profile.version, defer_host_start: true });
         const loop = prepared.work_loop;
         const fabric = this.executionFabric.create({ fabric_id: args.fabric_id, work_loop_id: loop.id, manifest_id: manifest.id });
-        return { ...prepared, activation_profile: profile, host_activation_manifest: manifest, execution_fabric: fabric.fabric, fabric_idempotent: fabric.idempotent };
+        const coordinator = this.workCoordinatorPrepare({ fabric_id: fabric.fabric.id, coordinator_id: args.coordinator_id, managed_run_id: args.managed_run_id });
+        return { ...prepared, activation_profile: profile, host_activation_manifest: manifest, execution_fabric: fabric.fabric, fabric_idempotent: fabric.idempotent, work_coordinator: coordinator.coordinator };
     }
     executionFabricAdvance(args) {
         const fabric = this.store.get("execution_fabric", text(args.fabric_id, "fabric_id"));
@@ -2947,6 +2948,8 @@ export class CraftService extends ServiceFoundation {
         this.hostActivationManifestValidate({ manifest_id: fabric.manifest_id });
         const activation = this.hostActivationManifestConsume({ manifest_id: fabric.manifest_id, call_id: args.call_id ?? invocation.id, host: launch.host });
         let started;
+        let managedWrite = null;
+        let autonomyDecision = null;
         if (launch.sandbox === "read-only") {
             if (launch.status !== "prepared")
                 throw new Error("Fabric-managed read-only Work Launch is not prepared");
@@ -2960,14 +2963,19 @@ export class CraftService extends ServiceFoundation {
             if (args.approved !== true)
                 throw new Error("Execution Fabric workspace write requires approved=true");
             const actor = text(args.actor, "actor");
+            autonomyDecision = this.autonomyLadderDecide({ task_id: loop.task_id, effect: "local_write", workspace_id: loop.workspace_id, approved: true, unattended: false, action_digest: launch.prompt_digest }).decision;
+            this.managedWrites.prepare({ fabric_id: fabric.id });
             this.verifiedWorkLoops.decide({ work_loop_id: loop.id, decision: "approve", actor, summary: "Approved exact Execution Fabric launch." });
             const result = this.workLaunchDecideInternal({ launch_id: launch.id, actor, approved: true, prompt }, undefined, true);
             const decidedLaunch = result.launch;
             started = { launch: decidedLaunch, run: this.store.get("host_run", text(decidedLaunch.run_id, "run_id")) };
+            managedWrite = this.managedWrites.start({ fabric_id: fabric.id, run_id: started.run.id }).guard;
         }
         const run = started.run;
         const bridge = this.hostBridge.start({ invocation_id: invocation.id, run_id: run.id, activation_receipt_id: activation.receipt.id });
-        return { ...prepared, ...started, activation_receipt: activation.receipt, bridge, completed: false };
+        const coordinator = this.store.list("work_coordinator", 2, (item) => item.fabric_id === fabric.id)[0] ?? null;
+        const coordinated = coordinator ? this.workCoordinatorAttachHostRun({ coordinator_id: coordinator.id, host_run_id: run.id }) : null;
+        return { ...prepared, ...started, activation_receipt: activation.receipt, bridge, coordinator: coordinated?.coordinator ?? null, autonomy_decision: autonomyDecision, managed_write: managedWrite, completed: false };
     }
     executionFabricConsume(args) {
         const fabric = this.store.get("execution_fabric", text(args.fabric_id, "fabric_id"));
@@ -2977,7 +2985,8 @@ export class CraftService extends ServiceFoundation {
     executionFabricGet(args) {
         const result = this.executionFabric.get(args);
         const fabric = result.fabric;
-        return { ...result, work_loop: this.verifiedWorkLoopGet({ work_loop_id: fabric.work_loop_id }), host_activation: this.hostActivationManifestGet({ manifest_id: fabric.manifest_id }), bridge_invocations: this.store.list("host_bridge_invocation", 1000, (item) => item.fabric_id === fabric.id) };
+        const coordinator = this.store.list("work_coordinator", 2, (item) => item.fabric_id === fabric.id)[0] ?? null;
+        return { ...result, work_loop: this.verifiedWorkLoopGet({ work_loop_id: fabric.work_loop_id }), host_activation: this.hostActivationManifestGet({ manifest_id: fabric.manifest_id }), coordinator: coordinator ? this.workCoordinatorGet({ coordinator_id: coordinator.id }) : null, bridge_invocations: this.store.list("host_bridge_invocation", 1000, (item) => item.fabric_id === fabric.id) };
     }
     hostBridgeGet(args) { return this.hostBridge.get(args); }
     executionFabricWorkbenchPrepare(args) {
@@ -2992,10 +3001,64 @@ export class CraftService extends ServiceFoundation {
     }
     stateWorkspaceObserve(args) { return this.stateWorkspace.observe(args); }
     stateWorkspaceCompare(args) { return this.stateWorkspace.compare(args); }
+    workspaceObserverObserve(args) { return this.workspaceObserver.observe(args); }
+    workspaceObserverGet(args) { return this.workspaceObserver.get(args); }
+    autonomyLadderDecide(args) { return this.autonomyLadder.decide(args); }
+    autonomyLadderGet(args) { return this.autonomyLadder.get(args); }
+    workCoordinatorPrepare(args) { return this.workCoordinators.prepare(args); }
+    workCoordinatorAttachHostRun(args) { return this.workCoordinators.attachHostRun(args); }
+    workCoordinatorObserve(args) { return this.workCoordinators.observe(args); }
+    workCoordinatorHandoff(args) { return this.workCoordinators.handoff(args); }
+    workCoordinatorGet(args) { return this.workCoordinators.get(args); }
     evalCampaignCreate(args) { return this.evalCampaigns.create(args); }
     evalCampaignBind(args) { return this.evalCampaigns.bind(args); }
     evalCampaignAdvance(args) { return this.evalCampaigns.advance(args); }
     evalCampaignGet(args) { return this.evalCampaigns.get(args); }
+    evalCampaignReport(args) { return this.evalCampaignReports.report(args); }
+    adaptiveHarnessRecommend(args) { return this.adaptiveHarnesses.recommend(args); }
+    managedWriteGet(args) { return this.managedWrites.get(args); }
+    managedWriteRollback(args) { return this.managedWrites.rollback(args); }
+    /** v0.11.56 durable, host-neutral continuation boundary. */
+    managedRunCreate(args) { return this.managedRuns.create(args); }
+    managedRunObserve(args) { return this.managedRuns.observe(args); }
+    managedRunHandoff(args) { return this.managedRuns.handoff(args); }
+    managedRunResume(args) { return this.managedRuns.resume(args); }
+    managedRunForkShadow(args) { return this.managedRuns.forkShadow(args); }
+    managedRunGet(args) { return this.managedRuns.get(args); }
+    /** Campaign dispatch is a receipt-producing Host handoff, never a hidden model start. */
+    campaignRunnerCreate(args) { return this.campaignRunners.create(args); }
+    campaignRunnerClaim(args) { return this.campaignRunners.claim(args); }
+    campaignRunnerBind(args) { return this.campaignRunners.bind(args); }
+    campaignRunnerAdvance(args) { return this.campaignRunners.advance(args); }
+    campaignRunnerGet(args) { return this.campaignRunners.get(args); }
+    agentEvalLabCreate(args) { return this.agentEvalLab.create(args); }
+    agentEvalLabAttach(args) { return this.agentEvalLab.attach(args); }
+    agentEvalLabStart(args) {
+        const lab = this.store.get("agent_eval_lab", text(args.lab_id, "lab_id"));
+        const preview = this.campaignRunners.preview({ runner_id: lab.runner_id });
+        const slot = preview.slot;
+        if (!slot)
+            throw new Error("Agent Eval Lab has no pending Campaign slot");
+        if (args.harness !== undefined && text(args.harness, "harness") !== slot.harness)
+            throw new Error("Agent Eval Lab Harness does not match the pinned Campaign slot");
+        const claim = this.campaignRunnerClaim({ runner_id: lab.runner_id, dispatch_id: args.dispatch_id });
+        const dispatch = claim.dispatch;
+        if (!dispatch)
+            throw new Error("Agent Eval Lab Campaign slot changed before claim");
+        const fabric = this.store.get("execution_fabric", text(args.fabric_id, "fabric_id"));
+        const loop = this.store.get("verified_work_loop", String(fabric.work_loop_id));
+        const run = this.store.get("task_run", String(loop.task_run_id));
+        const bound = this.campaignRunnerBind({ dispatch_id: dispatch.id, task_run_id: run.id });
+        const execution = this.executionFabricExecute({ fabric_id: fabric.id, prompt: text(args.prompt, "prompt"), approved: args.approved, actor: args.actor, invocation_id: args.invocation_id, call_id: args.call_id });
+        const hostRun = execution.run;
+        const coordinator = this.store.list("work_coordinator", 2, (item) => item.fabric_id === fabric.id)[0];
+        if (!coordinator)
+            throw new Error("Agent Eval Lab requires a Work Coordinator");
+        const attached = this.agentEvalLabAttach({ lab_id: lab.id, dispatch_id: dispatch.id, task_run_id: run.id, host_run_id: hostRun.id, coordinator_id: coordinator.id, attempt_id: args.attempt_id });
+        return { lab: attached.lab, dispatch, binding: bound, execution, attempt: attached.attempt };
+    }
+    agentEvalLabObserve(args) { return this.agentEvalLab.observe(args); }
+    agentEvalLabGet(args) { return this.agentEvalLab.get(args); }
     projectKnowledgeDiscover(args) { return this.projectKnowledge.discover(args); }
     projectKnowledgeResolve(args) { return this.projectKnowledge.resolve(args); }
     projectKnowledgeProposeUpdate(args) { return this.projectKnowledge.proposeUpdate(args); }
@@ -3006,6 +3069,7 @@ export class CraftService extends ServiceFoundation {
     taskBenchmarkCandidateAuthorizeCanary(args) { return this.taskBenchmarks.candidateAuthorizeCanary(args); }
     taskBenchmarkCandidateCanaryStart(args) { return this.taskBenchmarks.candidateCanaryStart(args); }
     taskBenchmarkCandidateCanaryObserve(args) { return this.taskBenchmarks.candidateCanaryObserve(args); }
+    taskBenchmarkCandidateCanaryConclude(args) { return this.taskBenchmarks.candidateCanaryConclude(args); }
     deliveryEvaluationCaseSave(args) { return this.deliveryEvaluation.caseSave(args); }
     deliveryEvaluationCompare(args) { return this.deliveryEvaluation.compare(args); }
     deliveryEvaluationRun(args) { return this.deliveryEvaluation.run(args); }
@@ -3020,6 +3084,7 @@ export class CraftService extends ServiceFoundation {
     finalizeWorkLaunch(run, receipt) {
         const launch = this.store.list("work_launch", 10_000, (item) => item.run_id === run.id)[0];
         if (!launch?.trial_id || this.store.find("outcome", `outcome_${launch.trial_id}`)) {
+            this.settleManagedWrite(run);
             this.finishFabricHostBridge(run);
             return;
         }
@@ -3040,13 +3105,27 @@ export class CraftService extends ServiceFoundation {
         this.deliveryLoop.refresh({ launch_id: launch.id });
         this.refreshTaskControlForLaunch(launch.id);
         this.refreshTaskRunForLaunch(launch.id);
+        this.settleManagedWrite(run);
         this.finishFabricHostBridge(run);
     }
+    settleManagedWrite(run) { try {
+        const settled = this.managedWrites.settleForRun(run);
+        if (settled)
+            this.store.appendEvent(`host-run:${run.id}`, "managed_write.settled", { guard_id: settled.guard.id, status: settled.guard.status });
+    }
+    catch (error) {
+        this.store.appendEvent(`host-run:${run.id}`, "managed_write.settlement_failed", { error_class: error instanceof Error ? error.name : "UnknownError" });
+    } }
     finishFabricHostBridge(run) {
         for (const invocation of this.store.list("host_bridge_invocation", 10_000, (item) => item.run_id === run.id)) {
             try {
                 const finished = this.hostBridge.finish({ invocation_id: invocation.id, run_id: run.id }).invocation;
                 const advanced = this.executionFabricAdvance({ fabric_id: finished.fabric_id, activation_receipt_id: finished.activation_receipt_id });
+                const coordinator = this.store.list("work_coordinator", 2, (item) => item.fabric_id === finished.fabric_id)[0] ?? null;
+                const loop = advanced.work_loop;
+                const receipt = loop.receipt;
+                if (coordinator)
+                    this.workCoordinatorObserve({ coordinator_id: coordinator.id, task_run_state_id: receipt.task_run_state_id, snapshot_id: receipt.snapshot_id, work_loop_receipt_id: receipt.id });
                 this.store.appendEvent(`execution-fabric:${finished.fabric_id}`, "fabric.host_observed", { invocation_id: finished.id, run_id: run.id, advance_id: advanced.advance.id, status: run.status });
             }
             catch (error) {
@@ -3591,14 +3670,38 @@ export class CraftService extends ServiceFoundation {
         const minimum = Number(args.minimum_agreement ?? 0.8);
         if (!Number.isFinite(minimum) || minimum < 0 || minimum > 1)
             throw new Error("minimum_agreement must be between 0 and 1");
+        const goldCaseIds = optionalTextArray(args.gold_case_ids, "gold_case_ids");
+        const evidenceIds = optionalTextArray(args.evidence_ids, "evidence_ids");
+        if (goldCaseIds.length && goldCaseIds.length !== total)
+            throw new Error("gold_case_ids must match total calibration examples");
+        for (const evidenceId of evidenceIds)
+            this.store.get("evidence", evidenceId);
         const agreement = agreed / total;
-        const calibration = this.store.create("judge_calibration", String(args.calibration_id ?? id("calibration")), { judge_id: judge.id, judge_version: judge.version, total, agreed, agreement, minimum_agreement: minimum, status: agreement >= minimum ? "calibrated" : "advisory" });
+        const calibration = this.store.create("judge_calibration", String(args.calibration_id ?? id("calibration")), { judge_id: judge.id, judge_version: judge.version, total, agreed, agreement, minimum_agreement: minimum, gold_case_ids: goldCaseIds, evidence_ids: evidenceIds, status: agreement >= minimum ? "calibrated" : "advisory" });
         this.store.save("judge_adapter", String(judge.id), { ...recordPayload(judge), status: calibration.status, calibration_id: calibration.id });
         return { calibration };
     }
     judgePromotionEligible(args) {
         const judge = this.store.get("judge_adapter", text(args.judge_id, "judge_id"));
         return { eligible: judge.status === "calibrated", judge };
+    }
+    evaluationJudgeGate(args) {
+        const assessment = this.store.get("evaluation_reliability", text(args.assessment_id, "assessment_id"));
+        const judge = this.store.get("judge_adapter", text(args.judge_id, "judge_id"));
+        const evidenceIds = optionalTextArray(args.evidence_ids, "evidence_ids");
+        for (const evidenceId of evidenceIds)
+            this.store.get("evidence", evidenceId);
+        const eligible = assessment.status === "eligible" && judge.status === "calibrated";
+        const identity = { assessment_id: assessment.id, assessment_version: assessment.version, judge_id: judge.id, judge_version: judge.version, calibration_id: judge.calibration_id ?? null, evidence_ids: evidenceIds, eligible };
+        const gateId = String(args.gate_id ?? `evaluation_judge_gate_${valueDigest(identity).slice(-16)}`);
+        const existing = this.store.find("evaluation_judge_gate", gateId);
+        const gateDigest = valueDigest(identity);
+        if (existing) {
+            if (existing.gate_digest !== gateDigest)
+                throw new Error("Evaluation Judge Gate idempotency conflict");
+            return { gate: existing, idempotent: true };
+        }
+        return { gate: this.store.create("evaluation_judge_gate", gateId, { ...identity, gate_digest: gateDigest, status: eligible ? "eligible" : "inconclusive" }), idempotent: false };
     }
     adaptationCandidateCreate(args) {
         const task = this.store.get("task", text(args.task_id, "task_id"));
@@ -3624,7 +3727,10 @@ export class CraftService extends ServiceFoundation {
         if (signoff.decision !== "passed" || signoff.evaluation_run_id !== comparison.candidate_run_id) {
             throw new Error("Adaptation Candidate requires a passed Signoff for the compared candidate run");
         }
-        const authorized = this.store.save("adaptation_candidate", String(candidate.id), { ...recordPayload(candidate), lifecycle: "canary_ready", reliability_assessment_id: assessment.id, signoff_id: signoff.id, publication_allowed: false });
+        const judgeGateId = args.judge_gate_id === undefined ? null : text(args.judge_gate_id, "judge_gate_id");
+        if (judgeGateId && this.store.get("evaluation_judge_gate", judgeGateId).status !== "eligible")
+            throw new Error("Adaptation Candidate requires an eligible calibrated Judge Gate");
+        const authorized = this.store.save("adaptation_candidate", String(candidate.id), { ...recordPayload(candidate), lifecycle: "canary_ready", reliability_assessment_id: assessment.id, signoff_id: signoff.id, judge_gate_id: judgeGateId, publication_allowed: false });
         return { candidate: authorized };
     }
     feedbackIntakeCreate(args) {

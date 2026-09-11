@@ -51,7 +51,7 @@ test("Verified Work Loop is the small public seam over launch, observed state, a
     const noPaths = f.service.verifiedWorkLoopPrepare({ work_loop_id: "no-paths", workspace_id: f.workspace.id, title: "No paths", goal: "read", host: "codex-cli", prompt: "read" }); await f.service.hostRuns.wait(String((noPaths.launch as JsonObject).run_id)); assert.ok((f.service.verifiedWorkLoopDecide({ work_loop_id: (noPaths.work_loop as JsonObject).id, decision: "human_change", actor: "user", summary: "external edit" }).human_state_event as JsonObject).id);
     const rejection = f.service.verifiedWorkLoopPrepare({ work_loop_id: "reject-loop", workspace_id: f.workspace.id, title: "Reject", goal: "read", host: "codex-cli", prompt: "read", acceptance_name: "manual", acceptance_criteria: [{ id: "manual", name: "Manual", method: "human", required: true }] }); assert.ok((f.service.verifiedWorkLoopDecide({ work_loop_id: (rejection.work_loop as JsonObject).id, decision: "reject", actor: "user", summary: "not acceptable", criterion_id: "manual" }).decision as JsonObject).id); await f.service.hostRuns.wait(String((rejection.launch as JsonObject).run_id));
     const resumeDrift = f.service.verifiedWorkLoopPrepare({ work_loop_id: "resume-drift", workspace_id: f.workspace.id, title: "Resume drift", goal: "read", host: "codex-cli", prompt: "read" }); const resumeRun = resumeDrift.task_run as JsonObject; f.service.taskRunPause({ task_run_id: resumeRun.id, reason: "wait" }); await writeFile(join(f.root, "note.txt"), "resume drift"); assert.throws(() => f.service.verifiedWorkLoopResume({ work_loop_id: (resumeDrift.work_loop as JsonObject).id }), /fresh prepare/); await f.service.hostRuns.wait(String((resumeDrift.launch as JsonObject).run_id));
-    assert.equal(VERSION, "0.11.56");
+    assert.equal(VERSION, "0.11.57");
   } finally { await Promise.all(f.store.list("host_run", 100).map((run) => f.service.hostRuns.wait(String(run.id)))); f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
@@ -165,7 +165,7 @@ test("State, campaign, and project-knowledge failures remain explicit instead of
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("v0.11.56 retains deterministic rejection and idempotency branches", async () => {
+test("v0.11.57 retains deterministic rejection and idempotency branches", async () => {
   const f = await fixture();
   let directHostRunId = "";
   try {

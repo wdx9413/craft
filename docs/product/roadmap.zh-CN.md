@@ -13,7 +13,7 @@
 
 ## 建设原则
 
-以 [产品架构](architecture.zh-CN.md) 的三大支柱为目标：工作与协作、执行与保障、学习与改进。**评测与实验是第三支柱内的核心模块**，不另设第四支柱。以下里程碑是规划；当前实现基线已推进到 v0.11.56。
+以 [产品架构](architecture.zh-CN.md) 的三大支柱为目标：工作与协作、执行与保障、学习与改进。**评测与实验是第三支柱内的核心模块**，不另设第四支柱。以下里程碑是规划；当前实现基线已推进到 v0.11.57。
 
 **两步定位**：短期做**跨宿主治理插件层**——以 MCP/插件形式接入 Codex CLI、Claude Code、DeepSeek Harness 等宿主，统一能力发现、授权门禁、证据链与评测门禁，执行留在宿主内；长期做**自主 Agent 平台**——自有对话循环、宿主调度与评测驱动的自我改进。Provider 是当前主线，Supervisor/Agent 是长期形态；本路线图中 v0.11.x 的能力全部属于两步共用的内核。
 
@@ -86,6 +86,8 @@
 **v0.11.55：可验证执行与演进平台。** `workspace-write` Fabric 在启动前建立已声明路径的本地事务基线，成功终态才提交新 Checkpoint，失败停在可人工批准恢复的状态；它不覆盖外部 effect。Eval Campaign 增加从真实 Delivery 汇总的无正文报告，展示配对样本、交付率、改进/回归率而不冒充业务质量。Candidate 只有经过 held-out Evaluation、Signoff、带 Evidence 的 Canary 和 reviewer 结论后才成为 `routing_eligible`；自适应选择器否则返回最小 baseline Harness，不自动执行、发布或默认多 Agent。详见 [可验证执行与演进平台](../technical/modules/evolution-platform.md)。
 
 **v0.11.56：Managed Run 与 Evaluation Lab。** 将已有 Verified Work Loop 的 Task Run、状态快照与 receipt 收敛为引用化的跨会话交接；恢复必须重新观察，漂移转入 `needs_replan`，Shadow 固定只读且不重放外部 effect。Campaign Runner 按固定 `Case × Harness × Trial` 槽位向 Host 签发任务、只绑定同环境同预算的真实 Task Run，再复用已有 held-out、Signoff 与 Canary 门禁。Judge 默认 advisory；只有带人工金标/Evidence 的校准 Judge 与 eligible reliability assessment 组成 Gate 后，才可被依赖它的 Candidate 使用。Core MCP 只暴露这些对象的只读状态，管理动作留在 Full MCP。详见 [Managed Run 与 Evaluation Lab](../technical/modules/managed-run-evaluation-lab.md)。
+
+**v0.11.57：Agent-Native Workspace Runtime。** `Work Coordinator` 将已有 Fabric、Managed Run、Host Run、Receipt、再观察与后续验收收敛为单一的可恢复状态链；它不保存 Prompt 或模型思考，也不拥有隐藏的 Agent Loop。`Workspace Observer` 仅以 Snapshot/Diff 观察显式范围，未归属变化不猜测来源。`Autonomy Ladder` 区分跨平台只读、人工批准的受控本地写、已验证隔离的无人值守写与外部 Gateway，避免把普通本地写冒充为沙箱。`Agent Eval Lab` 将显式启动的 Host Attempt 固定到 Campaign Slot，只有同环境、同预算、终态回执且再观察完成的 Attempt 才能参与评测。详见 [Agent-Native Workspace Runtime](../technical/modules/agent-native-runtime.md)。
 
 - 面向各行业工作者，研发是首批验证场景，视频用于检验跨领域复用；后续扩展销售、教育与内容创作，不同时自建所有专业编辑器。
 - 先把真实工作从目标到成果跑通，同时提供可操作的最小界面；不长期只增加协议与配置。

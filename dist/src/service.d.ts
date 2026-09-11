@@ -1,6 +1,6 @@
 import { CraftStore, type JsonObject } from "./store.ts";
 import { ServiceFoundation } from "./service-foundation.ts";
-export declare const VERSION = "0.11.54";
+export declare const VERSION = "0.11.57";
 export declare class CraftService extends ServiceFoundation {
     static open(store: CraftStore, hostOwnerId?: string): Promise<CraftService>;
     info(): JsonObject;
@@ -324,10 +324,41 @@ export declare class CraftService extends ServiceFoundation {
     executionFabricWorkbenchPrepare(args: JsonObject): JsonObject;
     stateWorkspaceObserve(args: JsonObject): JsonObject;
     stateWorkspaceCompare(args: JsonObject): JsonObject;
+    workspaceObserverObserve(args: JsonObject): JsonObject;
+    workspaceObserverGet(args: JsonObject): JsonObject;
+    autonomyLadderDecide(args: JsonObject): JsonObject;
+    autonomyLadderGet(args: JsonObject): JsonObject;
+    workCoordinatorPrepare(args: JsonObject): JsonObject;
+    workCoordinatorAttachHostRun(args: JsonObject): JsonObject;
+    workCoordinatorObserve(args: JsonObject): JsonObject;
+    workCoordinatorHandoff(args: JsonObject): JsonObject;
+    workCoordinatorGet(args: JsonObject): JsonObject;
     evalCampaignCreate(args: JsonObject): JsonObject;
     evalCampaignBind(args: JsonObject): JsonObject;
     evalCampaignAdvance(args: JsonObject): JsonObject;
     evalCampaignGet(args: JsonObject): JsonObject;
+    evalCampaignReport(args: JsonObject): JsonObject;
+    adaptiveHarnessRecommend(args: JsonObject): JsonObject;
+    managedWriteGet(args: JsonObject): JsonObject;
+    managedWriteRollback(args: JsonObject): JsonObject;
+    /** v0.11.56 durable, host-neutral continuation boundary. */
+    managedRunCreate(args: JsonObject): JsonObject;
+    managedRunObserve(args: JsonObject): JsonObject;
+    managedRunHandoff(args: JsonObject): JsonObject;
+    managedRunResume(args: JsonObject): JsonObject;
+    managedRunForkShadow(args: JsonObject): JsonObject;
+    managedRunGet(args: JsonObject): JsonObject;
+    /** Campaign dispatch is a receipt-producing Host handoff, never a hidden model start. */
+    campaignRunnerCreate(args: JsonObject): JsonObject;
+    campaignRunnerClaim(args: JsonObject): JsonObject;
+    campaignRunnerBind(args: JsonObject): JsonObject;
+    campaignRunnerAdvance(args: JsonObject): JsonObject;
+    campaignRunnerGet(args: JsonObject): JsonObject;
+    agentEvalLabCreate(args: JsonObject): JsonObject;
+    agentEvalLabAttach(args: JsonObject): JsonObject;
+    agentEvalLabStart(args: JsonObject): JsonObject;
+    agentEvalLabObserve(args: JsonObject): JsonObject;
+    agentEvalLabGet(args: JsonObject): JsonObject;
     projectKnowledgeDiscover(args: JsonObject): JsonObject;
     projectKnowledgeResolve(args: JsonObject): JsonObject;
     projectKnowledgeProposeUpdate(args: JsonObject): JsonObject;
@@ -338,6 +369,7 @@ export declare class CraftService extends ServiceFoundation {
     taskBenchmarkCandidateAuthorizeCanary(args: JsonObject): JsonObject;
     taskBenchmarkCandidateCanaryStart(args: JsonObject): JsonObject;
     taskBenchmarkCandidateCanaryObserve(args: JsonObject): JsonObject;
+    taskBenchmarkCandidateCanaryConclude(args: JsonObject): JsonObject;
     deliveryEvaluationCaseSave(args: JsonObject): JsonObject;
     deliveryEvaluationCompare(args: JsonObject): JsonObject;
     deliveryEvaluationRun(args: JsonObject): JsonObject;
@@ -348,6 +380,7 @@ export declare class CraftService extends ServiceFoundation {
     platformExecutionProbeGet(args: JsonObject): JsonObject;
     workLaunchRetry(args: JsonObject): JsonObject;
     protected finalizeWorkLaunch(run: JsonObject, receipt: JsonObject | null): void;
+    private settleManagedWrite;
     private finishFabricHostBridge;
     private refreshTaskControlForLaunch;
     private refreshTaskRunForLaunch;
@@ -402,6 +435,7 @@ export declare class CraftService extends ServiceFoundation {
     judgeAdapterSave(args: JsonObject): JsonObject;
     judgeCalibrationRecord(args: JsonObject): JsonObject;
     judgePromotionEligible(args: JsonObject): JsonObject;
+    evaluationJudgeGate(args: JsonObject): JsonObject;
     adaptationCandidateCreate(args: JsonObject): JsonObject;
     adaptationCandidateAuthorizeCanary(args: JsonObject): JsonObject;
     feedbackIntakeCreate(args: JsonObject): JsonObject;

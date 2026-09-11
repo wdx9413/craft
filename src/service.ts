@@ -17,7 +17,7 @@ import { dockerRequestDigest } from "./docker-sandbox.ts";
 import { egressRequestDigest } from "./egress.ts";
 import { ServiceFoundation } from "./service-foundation.ts";
 
-export const VERSION = "0.11.56";
+export const VERSION = "0.11.57";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -227,7 +227,7 @@ export class CraftService extends ServiceFoundation {
       "maintenance_status",
       "maintenance_tick",
       "maintenance_component", "maintenance_failure", "attention_item", "work_launch", "work_delivery", "delivery_loop", "delivery_evaluation_case", "delivery_evaluation_comparison", "delivery_evaluation_run", "platform_execution_profile", "platform_execution_preflight", "platform_execution_probe", "platform_execution_conformance", "task_run", "task_run_state", "task_run_handoff", "task_benchmark", "task_benchmark_pair", "task_benchmark_canary_sample", "state_snapshot", "verified_work_loop", "verified_work_loop_receipt", "verified_work_loop_decision", "human_state_event", "work_loop_invalidation", "eval_campaign", "eval_campaign_slot", "eval_campaign_report", "managed_write_guard", "managed_write_settlement", "adaptive_harness_recommendation", "project_knowledge_discovery", "project_knowledge_resolution", "project_knowledge_proposal", "acceptance_plan", "acceptance_check", "acceptance_assessment", "acceptance_evaluator", "acceptance_evaluation_job", "verified_iteration", "iteration_attempt", "strategy_recommendation",
-      "trajectory_script_proposal", "verified_script_run", "knowledge_claim", "wiki_page", "knowledge_relation", "wiki_context_bundle", "wiki_skill_candidate", "knowledge_evaluation_case", "knowledge_evaluation_run", "wiki_candidate_evaluation_attestation", "wiki_candidate_publication_authorization", "wiki_candidate_publication_package", "guided_work_brief", "execution_safety_preflight", "wiki_candidate_local_import"];
+      "trajectory_script_proposal", "verified_script_run", "knowledge_claim", "wiki_page", "knowledge_relation", "wiki_context_bundle", "wiki_skill_candidate", "knowledge_evaluation_case", "knowledge_evaluation_run", "wiki_candidate_evaluation_attestation", "wiki_candidate_publication_authorization", "wiki_candidate_publication_package", "guided_work_brief", "execution_safety_preflight", "wiki_candidate_local_import", "autonomy_ladder_decision", "workspace_observation", "work_coordinator", "agent_eval_lab", "agent_eval_attempt"];
     kinds.push("untrusted_content", "untrusted_extraction", "decision_projection");
     return { version: VERSION, data_root: this.store.paths.root,
       counts: Object.fromEntries(kinds.map((kind) => [kind, this.store.count(kind)])) };
@@ -2210,7 +2210,8 @@ export class CraftService extends ServiceFoundation {
     const manifest = this.hostActivationManifestPrepare({ manifest_id: args.manifest_id, task_id: task.id, profile_id: profile.id, profile_version: profile.version, host: args.host, asset_ids: args.asset_ids, connector_ticket_ids: args.connector_ticket_ids }).manifest as JsonObject;
     const prepared = this.verifiedWorkLoopPrepare({ ...args, task_id: task.id, activation_profile_id: profile.id, activation_profile_version: profile.version, defer_host_start: true });
     const loop = prepared.work_loop as JsonObject; const fabric = this.executionFabric.create({ fabric_id: args.fabric_id, work_loop_id: loop.id, manifest_id: manifest.id });
-    return { ...prepared, activation_profile: profile, host_activation_manifest: manifest, execution_fabric: fabric.fabric, fabric_idempotent: fabric.idempotent };
+    const coordinator = this.workCoordinatorPrepare({ fabric_id: (fabric.fabric as JsonObject).id, coordinator_id: args.coordinator_id, managed_run_id: args.managed_run_id });
+    return { ...prepared, activation_profile: profile, host_activation_manifest: manifest, execution_fabric: fabric.fabric, fabric_idempotent: fabric.idempotent, work_coordinator: coordinator.coordinator };
   }
   executionFabricAdvance(args: JsonObject): JsonObject {
     const fabric = this.store.get("execution_fabric", text(args.fabric_id, "fabric_id"));
@@ -2227,7 +2228,7 @@ export class CraftService extends ServiceFoundation {
     if (invocation.status === "running") return { ...prepared, run: this.store.get("host_run", String(invocation.run_id)), activation_receipt: this.store.get("host_activation_receipt", String(invocation.activation_receipt_id)) };
     this.hostActivationManifestValidate({ manifest_id: fabric.manifest_id });
     const activation = this.hostActivationManifestConsume({ manifest_id: fabric.manifest_id, call_id: args.call_id ?? invocation.id, host: launch.host });
-    let started: JsonObject; let managedWrite: JsonObject | null = null;
+    let started: JsonObject; let managedWrite: JsonObject | null = null; let autonomyDecision: JsonObject | null = null;
     if (launch.sandbox === "read-only") {
       if (launch.status !== "prepared") throw new Error("Fabric-managed read-only Work Launch is not prepared");
       const hostRun = this.hostRunStart({ host: launch.host, dispatch_id: launch.dispatch_id, prompt }).run as JsonObject;
@@ -2237,6 +2238,7 @@ export class CraftService extends ServiceFoundation {
       if (launch.status !== "awaiting_approval") throw new Error("Fabric-managed write Work Launch is not awaiting approval");
       if (args.approved !== true) throw new Error("Execution Fabric workspace write requires approved=true");
       const actor = text(args.actor, "actor");
+      autonomyDecision = this.autonomyLadderDecide({ task_id: loop.task_id, effect: "local_write", workspace_id: loop.workspace_id, approved: true, unattended: false, action_digest: launch.prompt_digest }).decision as JsonObject;
       this.managedWrites.prepare({ fabric_id: fabric.id });
       this.verifiedWorkLoops.decide({ work_loop_id: loop.id, decision: "approve", actor, summary: "Approved exact Execution Fabric launch." });
       const result = this.workLaunchDecideInternal({ launch_id: launch.id, actor, approved: true, prompt }, undefined, true);
@@ -2244,7 +2246,9 @@ export class CraftService extends ServiceFoundation {
       managedWrite = this.managedWrites.start({ fabric_id: fabric.id, run_id: (started.run as JsonObject).id }).guard as JsonObject;
     }
     const run = started.run as JsonObject; const bridge = this.hostBridge.start({ invocation_id: invocation.id, run_id: run.id, activation_receipt_id: (activation.receipt as JsonObject).id });
-    return { ...prepared, ...started, activation_receipt: activation.receipt, bridge, managed_write: managedWrite, completed: false };
+    const coordinator = this.store.list("work_coordinator", 2, (item) => item.fabric_id === fabric.id)[0] ?? null;
+    const coordinated = coordinator ? this.workCoordinatorAttachHostRun({ coordinator_id: coordinator.id, host_run_id: run.id }) : null;
+    return { ...prepared, ...started, activation_receipt: activation.receipt, bridge, coordinator: coordinated?.coordinator ?? null, autonomy_decision: autonomyDecision, managed_write: managedWrite, completed: false };
   }
   executionFabricConsume(args: JsonObject): JsonObject {
     const fabric = this.store.get("execution_fabric", text(args.fabric_id, "fabric_id"));
@@ -2253,7 +2257,8 @@ export class CraftService extends ServiceFoundation {
   }
   executionFabricGet(args: JsonObject): JsonObject {
     const result = this.executionFabric.get(args); const fabric = result.fabric as JsonObject;
-    return { ...result, work_loop: this.verifiedWorkLoopGet({ work_loop_id: fabric.work_loop_id }), host_activation: this.hostActivationManifestGet({ manifest_id: fabric.manifest_id }), bridge_invocations: this.store.list("host_bridge_invocation", 1000, (item) => item.fabric_id === fabric.id) };
+    const coordinator = this.store.list("work_coordinator", 2, (item) => item.fabric_id === fabric.id)[0] ?? null;
+    return { ...result, work_loop: this.verifiedWorkLoopGet({ work_loop_id: fabric.work_loop_id }), host_activation: this.hostActivationManifestGet({ manifest_id: fabric.manifest_id }), coordinator: coordinator ? this.workCoordinatorGet({ coordinator_id: coordinator.id }) : null, bridge_invocations: this.store.list("host_bridge_invocation", 1000, (item) => item.fabric_id === fabric.id) };
   }
   hostBridgeGet(args: JsonObject): JsonObject { return this.hostBridge.get(args); }
   executionFabricWorkbenchPrepare(args: JsonObject): JsonObject {
@@ -2265,6 +2270,15 @@ export class CraftService extends ServiceFoundation {
   }
   stateWorkspaceObserve(args: JsonObject): JsonObject { return this.stateWorkspace.observe(args); }
   stateWorkspaceCompare(args: JsonObject): JsonObject { return this.stateWorkspace.compare(args); }
+  workspaceObserverObserve(args: JsonObject): JsonObject { return this.workspaceObserver.observe(args); }
+  workspaceObserverGet(args: JsonObject): JsonObject { return this.workspaceObserver.get(args); }
+  autonomyLadderDecide(args: JsonObject): JsonObject { return this.autonomyLadder.decide(args); }
+  autonomyLadderGet(args: JsonObject): JsonObject { return this.autonomyLadder.get(args); }
+  workCoordinatorPrepare(args: JsonObject): JsonObject { return this.workCoordinators.prepare(args); }
+  workCoordinatorAttachHostRun(args: JsonObject): JsonObject { return this.workCoordinators.attachHostRun(args); }
+  workCoordinatorObserve(args: JsonObject): JsonObject { return this.workCoordinators.observe(args); }
+  workCoordinatorHandoff(args: JsonObject): JsonObject { return this.workCoordinators.handoff(args); }
+  workCoordinatorGet(args: JsonObject): JsonObject { return this.workCoordinators.get(args); }
   evalCampaignCreate(args: JsonObject): JsonObject { return this.evalCampaigns.create(args); }
   evalCampaignBind(args: JsonObject): JsonObject { return this.evalCampaigns.bind(args); }
   evalCampaignAdvance(args: JsonObject): JsonObject { return this.evalCampaigns.advance(args); }
@@ -2286,6 +2300,23 @@ export class CraftService extends ServiceFoundation {
   campaignRunnerBind(args: JsonObject): JsonObject { return this.campaignRunners.bind(args); }
   campaignRunnerAdvance(args: JsonObject): JsonObject { return this.campaignRunners.advance(args); }
   campaignRunnerGet(args: JsonObject): JsonObject { return this.campaignRunners.get(args); }
+  agentEvalLabCreate(args: JsonObject): JsonObject { return this.agentEvalLab.create(args); }
+  agentEvalLabAttach(args: JsonObject): JsonObject { return this.agentEvalLab.attach(args); }
+  agentEvalLabStart(args: JsonObject): JsonObject {
+    const lab = this.store.get("agent_eval_lab", text(args.lab_id, "lab_id"));
+    const preview = this.campaignRunners.preview({ runner_id: lab.runner_id }); const slot = preview.slot as JsonObject | null;
+    if (!slot) throw new Error("Agent Eval Lab has no pending Campaign slot");
+    if (args.harness !== undefined && text(args.harness, "harness") !== slot.harness) throw new Error("Agent Eval Lab Harness does not match the pinned Campaign slot");
+    const claim = this.campaignRunnerClaim({ runner_id: lab.runner_id, dispatch_id: args.dispatch_id }); const dispatch = claim.dispatch as JsonObject | null;
+    if (!dispatch) throw new Error("Agent Eval Lab Campaign slot changed before claim");
+    const fabric = this.store.get("execution_fabric", text(args.fabric_id, "fabric_id")); const loop = this.store.get("verified_work_loop", String(fabric.work_loop_id)); const run = this.store.get("task_run", String(loop.task_run_id));
+    const bound = this.campaignRunnerBind({ dispatch_id: dispatch.id, task_run_id: run.id }); const execution = this.executionFabricExecute({ fabric_id: fabric.id, prompt: text(args.prompt, "prompt"), approved: args.approved, actor: args.actor, invocation_id: args.invocation_id, call_id: args.call_id }); const hostRun = execution.run as JsonObject;
+    const coordinator = this.store.list("work_coordinator", 2, (item) => item.fabric_id === fabric.id)[0]; if (!coordinator) throw new Error("Agent Eval Lab requires a Work Coordinator");
+    const attached = this.agentEvalLabAttach({ lab_id: lab.id, dispatch_id: dispatch.id, task_run_id: run.id, host_run_id: hostRun.id, coordinator_id: coordinator.id, attempt_id: args.attempt_id });
+    return { lab: attached.lab, dispatch, binding: bound, execution, attempt: attached.attempt };
+  }
+  agentEvalLabObserve(args: JsonObject): JsonObject { return this.agentEvalLab.observe(args); }
+  agentEvalLabGet(args: JsonObject): JsonObject { return this.agentEvalLab.get(args); }
   projectKnowledgeDiscover(args: JsonObject): JsonObject { return this.projectKnowledge.discover(args); }
   projectKnowledgeResolve(args: JsonObject): JsonObject { return this.projectKnowledge.resolve(args); }
   projectKnowledgeProposeUpdate(args: JsonObject): JsonObject { return this.projectKnowledge.proposeUpdate(args); }
@@ -2321,6 +2352,8 @@ export class CraftService extends ServiceFoundation {
       try {
         const finished = this.hostBridge.finish({ invocation_id: invocation.id, run_id: run.id }).invocation as JsonObject;
         const advanced = this.executionFabricAdvance({ fabric_id: finished.fabric_id, activation_receipt_id: finished.activation_receipt_id });
+        const coordinator = this.store.list("work_coordinator", 2, (item) => item.fabric_id === finished.fabric_id)[0] ?? null; const loop = advanced.work_loop as JsonObject; const receipt = loop.receipt as JsonObject;
+        if (coordinator) this.workCoordinatorObserve({ coordinator_id: coordinator.id, task_run_state_id: receipt.task_run_state_id, snapshot_id: receipt.snapshot_id, work_loop_receipt_id: receipt.id });
         this.store.appendEvent(`execution-fabric:${finished.fabric_id}`, "fabric.host_observed", { invocation_id: finished.id, run_id: run.id, advance_id: (advanced.advance as JsonObject).id, status: run.status });
       } catch (error) {
         this.store.appendEvent(`host-run:${run.id}`, "fabric.projection_failed", { error_class: error instanceof Error ? error.name : "UnknownError" });

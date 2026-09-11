@@ -35,6 +35,14 @@ export class CampaignRunnerKernel {
     return { runner: saved, dispatch, next_action: "prepare_bound_task_run" };
   }
 
+  preview(args: JsonObject): JsonObject {
+    const runner = this.store.get("campaign_runner", text(args.runner_id, "runner_id"));
+    if (runner.lifecycle === "completed") throw new Error("Campaign Runner is completed");
+    const issued = new Set(runner.issued_slot_ids as string[]);
+    const slot = this.slots(runner).find((item) => item.status === "pending" && !issued.has(String(item.id))) ?? null;
+    return { runner, slot, next_action: slot ? "claim_campaign_slot" : "advance_campaign" };
+  }
+
   bind(args: JsonObject): JsonObject {
     const dispatch = this.store.get("campaign_runner_dispatch", text(args.dispatch_id, "dispatch_id")); const runner = this.store.get("campaign_runner", String(dispatch.runner_id)); const taskRunId = text(args.task_run_id, "task_run_id");
     if (dispatch.status === "bound" && dispatch.task_run_id === taskRunId) return { runner, dispatch, slot: this.store.get("eval_campaign_slot", String(dispatch.slot_id)), idempotent: true };

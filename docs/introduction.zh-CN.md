@@ -1,6 +1,6 @@
 # Craft：受控 Agent 工作运行时
 
-> 本文是 Craft 的总览入口。它解释产品解决的问题、关键概念如何连接、当前实现做到哪里，以及在面试或架构评审中应如何准确回答。实现基线为 v0.11.56。
+> 本文是 Craft 的总览入口。它解释产品解决的问题、关键概念如何连接、当前实现做到哪里，以及在面试或架构评审中应如何准确回答。实现基线为 v0.11.57。
 
 ## 一句话
 
@@ -66,7 +66,7 @@ Acceptance 与 Work Delivery
 Outcome，或 needs_replan / handoff
 ```
 
-对于本地写入，Fabric 在启动前增加范围内基线 Checkpoint，终态后形成提交 Checkpoint 或待人工恢复状态；这只覆盖声明的文件路径。v0.11.56 进一步把跨会话接力收敛为 `Managed Run`：只固定 Work Loop、Task Run、Snapshot、Receipt 和 Artifact/Evidence 引用；恢复前必须重新观察，漂移直接进入 `needs_replan`。真实 Delivery 可进入 `Eval Campaign`，再由 `Campaign Runner` 一次签发一个固定的 Case × Harness × Trial 槽位给 Host；候选必须经过 held-out、可靠性/校准 Judge Gate（若使用 Judge）、Signoff、带 Evidence 的 Canary 和人工结论后，才会被 `Adaptive Harness Recommendation` 推荐。无合格证据时系统返回最小 baseline，不靠“多 Agent 看起来更强”扩大 Harness。
+对于本地写入，Fabric 在启动前增加范围内基线 Checkpoint，终态后形成提交 Checkpoint 或待人工恢复状态；这只覆盖声明的文件路径。v0.11.56 将跨会话接力收敛为 `Managed Run`；v0.11.57 再由 `Work Coordinator` 将 Fabric、Managed Run、Host Run、Receipt 与再观察串成一个事实链。`Workspace Observer` 只保存声明范围的摘要差异，无法证明归属的修改直接标记为外部漂移。真实 Delivery 可进入 `Eval Campaign`，`Agent Eval Lab` 只接受同环境、同预算且经过终态再观察的 Host Attempt；候选仍必须经过 held-out、可靠性/校准 Judge Gate（若使用 Judge）、Signoff、带 Evidence 的 Canary 和人工结论后，才会被 `Adaptive Harness Recommendation` 推荐。无合格证据时系统返回最小 baseline，不靠“多 Agent 看起来更强”扩大 Harness。
 
 三个规则最重要：
 

@@ -37,6 +37,8 @@ export class WorkbenchWebApp {
       if (request.method === "GET" && path === "/api/home") return json(200, this.service.homeView({}));
       if (request.method === "GET" && path.startsWith("/api/managed-runs/")) return json(200, this.service.managedRunGet({ managed_run_id: decodeURIComponent(path.slice(18)) }));
       if (request.method === "GET" && path.startsWith("/api/campaign-runners/")) return json(200, this.service.campaignRunnerGet({ runner_id: decodeURIComponent(path.slice(22)) }));
+      if (request.method === "GET" && path.startsWith("/api/work-coordinators/")) return json(200, this.service.workCoordinatorGet({ coordinator_id: decodeURIComponent(path.slice(23)) }));
+      if (request.method === "GET" && path.startsWith("/api/agent-eval-labs/")) return json(200, this.service.agentEvalLabGet({ lab_id: decodeURIComponent(path.slice(21)) }));
       if (request.method === "GET" && path === "/api/host-runs") return json(200, this.service.homeHostRuns({}));
       if (request.method === "GET" && path === "/api/domain-kits") return json(200, this.service.domainKitInstallBuiltins());
       if (request.method === "POST" && path.startsWith("/api/domain-kits/") && path.endsWith("/apply")) return json(201, this.service.domainKitApply({ ...bodyObject(request.body), kit_id: decodeURIComponent(path.slice(17, -6)) }));

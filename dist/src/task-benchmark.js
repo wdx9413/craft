@@ -57,7 +57,9 @@ export class TaskBenchmarkKernel {
         const evaluation = this.store.get("delivery_evaluation_run", text(args.evaluation_run_id, "evaluation_run_id"));
         if (evaluation.status !== "eligible_for_signoff")
             throw new Error("Task Benchmark candidate requires held-out eligible evaluation");
-        const identity = { evaluation_run_id: evaluation.id, evaluation_run_version: evaluation.version, summary_digest: digest(text(args.summary, "summary")), design_axes: axes(args.candidate_axes) };
+        const candidateHarness = args.candidate_harness === undefined ? null : text(args.candidate_harness, "candidate_harness");
+        const applicabilityTerms = args.applicability_terms === undefined ? [] : terms(args.applicability_terms);
+        const identity = { evaluation_run_id: evaluation.id, evaluation_run_version: evaluation.version, summary_digest: digest(text(args.summary, "summary")), design_axes: axes(args.candidate_axes), candidate_harness: candidateHarness, applicability_terms: applicabilityTerms };
         const candidateId = String(args.candidate_id ?? `task_benchmark_candidate_${evaluation.id}`);
         const existing = this.store.find("task_benchmark_candidate", candidateId);
         const identityDigest = digest(identity);
@@ -105,8 +107,40 @@ export class TaskBenchmarkKernel {
             return { canary, idempotent: true };
         if (canary.status !== "running")
             throw new Error("Task Benchmark Canary is not running");
+        const evidenceId = args.evidence_id === undefined ? null : text(args.evidence_id, "evidence_id");
+        if (evidenceId)
+            this.store.get("evidence", evidenceId);
+        const sampleIdentity = { canary_id: canary.id, evidence_id: evidenceId, baseline_quality: baseline, candidate_quality: candidate, regression_threshold: threshold };
+        const sampleId = String(args.sample_id ?? `task_benchmark_canary_sample_${digest(sampleIdentity).slice(-16)}`);
+        const existing = this.store.find("task_benchmark_canary_sample", sampleId);
+        const sampleDigest = digest(sampleIdentity);
+        if (existing) {
+            if (existing.sample_digest !== sampleDigest)
+                throw new Error("Task Benchmark Canary sample idempotency conflict");
+            return { canary, sample: existing, idempotent: true };
+        }
+        const sample = this.store.create("task_benchmark_canary_sample", sampleId, { ...sampleIdentity, sample_digest: sampleDigest });
         const regressed = candidate < baseline - threshold;
-        return { canary: this.save("task_benchmark_canary", canary, { status: regressed ? "rolled_back" : "running", baseline_quality: baseline, candidate_quality: candidate, regression_threshold: threshold, rollback_to: regressed ? canary.baseline_id : null, publication_allowed: false }), idempotent: false };
+        return { canary: this.save("task_benchmark_canary", canary, { status: regressed ? "rolled_back" : "running", baseline_quality: baseline, candidate_quality: candidate, regression_threshold: threshold, rollback_to: regressed ? canary.baseline_id : null, publication_allowed: false, sample_count: Number(canary.sample_count ?? 0) + 1 }), sample, idempotent: false };
+    }
+    /** A candidate becomes selectable only after the already-passed Signoff and confirmed Canary samples. */
+    candidateCanaryConclude(args) {
+        const candidate = this.store.get("task_benchmark_candidate", text(args.candidate_id, "candidate_id"));
+        const canary = this.store.get("task_benchmark_canary", text(args.canary_id, "canary_id"));
+        const minSamples = positive(args.min_samples, "min_samples", 2);
+        text(args.reviewer, "reviewer");
+        if (candidate.lifecycle === "routing_eligible")
+            return { candidate, idempotent: true };
+        if (candidate.lifecycle !== "canary_ready" || canary.candidate_id !== candidate.id || canary.status !== "running")
+            throw new Error("Task Benchmark candidate requires a non-regressed running Canary");
+        const evaluation = this.store.get("delivery_evaluation_run", String(candidate.evaluation_run_id));
+        if (evaluation.status !== "eligible_for_signoff")
+            throw new Error("Task Benchmark candidate evaluation is no longer eligible");
+        const samples = this.store.list("task_benchmark_canary_sample", 10_000, (item) => item.canary_id === canary.id && item.evidence_id !== null);
+        if (samples.length < minSamples)
+            throw new Error("Task Benchmark candidate requires enough evidence-backed Canary samples");
+        const saved = this.save("task_benchmark_candidate", candidate, { lifecycle: "routing_eligible", publication_allowed: false, routing_evidence: { canary_id: canary.id, canary_version: canary.version, sample_ids: samples.map((item) => item.id).sort(), reviewer: text(args.reviewer, "reviewer") } });
+        return { candidate: saved, idempotent: false };
     }
     delivery(taskRunId) { const run = this.store.get("task_run", taskRunId); const records = this.store.list("work_delivery", 10_000, (item) => item.launch_id === run.launch_id); return records.at(-1) ?? null; }
     save(kind, record, changes) { return this.store.save(kind, String(record.id), { ...payload(record), ...changes }); }
@@ -115,4 +149,7 @@ function finite(value, name) { const parsed = Number(value); if (![Number.isFini
     throw new Error(`${name} must be a non-negative finite number`); return parsed; }
 function axes(value) { const items = text(value, "candidate_axes").split(/[\n,]/).map((item) => item.trim()).filter(Boolean); if (!items.length || items.length > 2 || new Set(items).size !== items.length)
     throw new Error("candidate_axes must name one or two distinct design axes"); return items; }
+function terms(value) { if (!Array.isArray(value) || !value.length)
+    throw new Error("applicability_terms must be a non-empty array"); const items = value.map((item) => text(item, "applicability_terms").toLowerCase()); if (new Set(items).size !== items.length || items.length > 12)
+    throw new Error("applicability_terms must contain at most 12 unique terms"); return items.sort(); }
 //# sourceMappingURL=task-benchmark.js.map

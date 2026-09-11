@@ -62,6 +62,10 @@ import { EvalCampaignReportKernel } from "./eval-campaign-report.ts";
 import { AdaptiveHarnessKernel } from "./adaptive-harness.ts";
 import { ManagedRunKernel } from "./managed-run.ts";
 import { CampaignRunnerKernel } from "./campaign-runner.ts";
+import { AutonomyLadderKernel } from "./autonomy-ladder.ts";
+import { WorkspaceObserverKernel } from "./workspace-observer.ts";
+import { WorkCoordinatorKernel } from "./work-coordinator.ts";
+import { AgentEvalLabKernel } from "./agent-eval-lab.ts";
 
 /**
  * Stable composition root for the service. Domain behavior stays in focused
@@ -131,6 +135,10 @@ export abstract class ServiceFoundation {
   readonly adaptiveHarnesses: AdaptiveHarnessKernel;
   readonly managedRuns: ManagedRunKernel;
   readonly campaignRunners: CampaignRunnerKernel;
+  readonly autonomyLadder: AutonomyLadderKernel;
+  readonly workspaceObserver: WorkspaceObserverKernel;
+  readonly workCoordinators: WorkCoordinatorKernel;
+  readonly agentEvalLab: AgentEvalLabKernel;
 
   constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter = new LocalIsolatedAdapter(),
     dockerSandbox = new DockerSandboxAdapter(), egressBroker = new TrustedEgressBroker(), hostOwnerId?: string) {
@@ -179,6 +187,10 @@ export abstract class ServiceFoundation {
     this.adaptiveHarnesses = new AdaptiveHarnessKernel(store);
     this.managedRuns = new ManagedRunKernel(store);
     this.campaignRunners = new CampaignRunnerKernel(store, this.evalCampaigns);
+    this.autonomyLadder = new AutonomyLadderKernel(store);
+    this.workspaceObserver = new WorkspaceObserverKernel(store, this.stateWorkspace);
+    this.workCoordinators = new WorkCoordinatorKernel(store, this.managedRuns);
+    this.agentEvalLab = new AgentEvalLabKernel(store);
     this.hostRuns = new HostRunKernel(store, [this.codexHost, this.claudeHost], hostOwnerId,
       (run, receipt) => this.finalizeWorkLaunch(run, receipt));
   }

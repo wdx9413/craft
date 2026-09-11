@@ -56,6 +56,15 @@ import { CapabilityAccessKernel } from "./capability-access.js";
 import { HostActivationManifestKernel } from "./host-activation-manifest.js";
 import { ExecutionFabricKernel } from "./execution-fabric.js";
 import { HostBridgeKernel } from "./host-bridge.js";
+import { ManagedWriteKernel } from "./managed-write.js";
+import { EvalCampaignReportKernel } from "./eval-campaign-report.js";
+import { AdaptiveHarnessKernel } from "./adaptive-harness.js";
+import { ManagedRunKernel } from "./managed-run.js";
+import { CampaignRunnerKernel } from "./campaign-runner.js";
+import { AutonomyLadderKernel } from "./autonomy-ladder.js";
+import { WorkspaceObserverKernel } from "./workspace-observer.js";
+import { WorkCoordinatorKernel } from "./work-coordinator.js";
+import { AgentEvalLabKernel } from "./agent-eval-lab.js";
 /**
  * Stable composition root for the service. Domain behavior stays in focused
  * kernels; CraftService is the backwards-compatible API facade.
@@ -119,6 +128,15 @@ export class ServiceFoundation {
     hostActivationManifests;
     executionFabric;
     hostBridge;
+    managedWrites;
+    evalCampaignReports;
+    adaptiveHarnesses;
+    managedRuns;
+    campaignRunners;
+    autonomyLadder;
+    workspaceObserver;
+    workCoordinators;
+    agentEvalLab;
     constructor(store, semanticProvider, isolatedAdapter = new LocalIsolatedAdapter(), dockerSandbox = new DockerSandboxAdapter(), egressBroker = new TrustedEgressBroker(), hostOwnerId) {
         this.store = store;
         this.catalog = new Catalog(store, semanticProvider);
@@ -177,6 +195,15 @@ export class ServiceFoundation {
         this.hostActivationManifests = new HostActivationManifestKernel(store);
         this.executionFabric = new ExecutionFabricKernel(store);
         this.hostBridge = new HostBridgeKernel(store);
+        this.managedWrites = new ManagedWriteKernel(store, this.transaction, this.workspace);
+        this.evalCampaignReports = new EvalCampaignReportKernel(store);
+        this.adaptiveHarnesses = new AdaptiveHarnessKernel(store);
+        this.managedRuns = new ManagedRunKernel(store);
+        this.campaignRunners = new CampaignRunnerKernel(store, this.evalCampaigns);
+        this.autonomyLadder = new AutonomyLadderKernel(store);
+        this.workspaceObserver = new WorkspaceObserverKernel(store, this.stateWorkspace);
+        this.workCoordinators = new WorkCoordinatorKernel(store, this.managedRuns);
+        this.agentEvalLab = new AgentEvalLabKernel(store);
         this.hostRuns = new HostRunKernel(store, [this.codexHost, this.claudeHost], hostOwnerId, (run, receipt) => this.finalizeWorkLaunch(run, receipt));
     }
 }

@@ -58,6 +58,7 @@
 - [Task Run、平台 Conformance 与 Benchmark](technical/modules/task-run-benchmark.md)：把一个真实 Host 工作收敛为可恢复运行记录，并以同环境、同预算的交付对照形成受门禁候选。
 - [可验证执行与演进平台](technical/modules/evolution-platform.md)：范围内本地写入恢复、Campaign 报告、Evidence Canary 与最小 Harness 推荐。
 - [Managed Run 与 Evaluation Lab](technical/modules/managed-run-evaluation-lab.md)：长任务的引用化交接、只读 Shadow、显式 Campaign 槽位与校准 Judge Gate。
+- [Agent-Native Workspace Runtime](technical/modules/agent-native-runtime.md)：统一协调 Host 事实链、内容无关状态观察、分级自主权和真实 Attempt 对照评测。
 
 ## 研究证据
 

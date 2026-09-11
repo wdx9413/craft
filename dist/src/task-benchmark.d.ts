@@ -13,6 +13,8 @@ export declare class TaskBenchmarkKernel {
     /** Canary is observation-only: a regression returns an exact baseline reference, never a publication. */
     candidateCanaryStart(args: JsonObject): JsonObject;
     candidateCanaryObserve(args: JsonObject): JsonObject;
+    /** A candidate becomes selectable only after the already-passed Signoff and confirmed Canary samples. */
+    candidateCanaryConclude(args: JsonObject): JsonObject;
     private delivery;
     private save;
 }

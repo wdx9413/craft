@@ -113,6 +113,7 @@ Observed Delivery ──pairs──> Eval Campaign Report ──with Canary Evid
 - [领域验收执行器：版本化 Evaluator 与租约 Job](modules/acceptance-execution.md)
 - [Closed-loop Runtime](modules/closed-loop-runtime.md)
 - [Agent-Native Workspace 与生成界面](modules/agent-native-workspace.md)
+- [Agent-Native Workspace Runtime](modules/agent-native-runtime.md)：将 Host 事实、状态再观察、分级自主权和评测 Attempt 收敛为可恢复链。
 - [沙箱与风险分级执行](modules/execution-policy.md)
 - [Transactional Runtime 与 Trajectory Compiler](modules/transactional-runtime.md)
 - [上下文与记忆管理](modules/context-memory.md)

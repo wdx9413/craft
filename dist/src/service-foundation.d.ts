@@ -57,6 +57,15 @@ import { CapabilityAccessKernel } from "./capability-access.ts";
 import { HostActivationManifestKernel } from "./host-activation-manifest.ts";
 import { ExecutionFabricKernel } from "./execution-fabric.ts";
 import { HostBridgeKernel } from "./host-bridge.ts";
+import { ManagedWriteKernel } from "./managed-write.ts";
+import { EvalCampaignReportKernel } from "./eval-campaign-report.ts";
+import { AdaptiveHarnessKernel } from "./adaptive-harness.ts";
+import { ManagedRunKernel } from "./managed-run.ts";
+import { CampaignRunnerKernel } from "./campaign-runner.ts";
+import { AutonomyLadderKernel } from "./autonomy-ladder.ts";
+import { WorkspaceObserverKernel } from "./workspace-observer.ts";
+import { WorkCoordinatorKernel } from "./work-coordinator.ts";
+import { AgentEvalLabKernel } from "./agent-eval-lab.ts";
 /**
  * Stable composition root for the service. Domain behavior stays in focused
  * kernels; CraftService is the backwards-compatible API facade.
@@ -120,6 +129,15 @@ export declare abstract class ServiceFoundation {
     readonly hostActivationManifests: HostActivationManifestKernel;
     readonly executionFabric: ExecutionFabricKernel;
     readonly hostBridge: HostBridgeKernel;
+    readonly managedWrites: ManagedWriteKernel;
+    readonly evalCampaignReports: EvalCampaignReportKernel;
+    readonly adaptiveHarnesses: AdaptiveHarnessKernel;
+    readonly managedRuns: ManagedRunKernel;
+    readonly campaignRunners: CampaignRunnerKernel;
+    readonly autonomyLadder: AutonomyLadderKernel;
+    readonly workspaceObserver: WorkspaceObserverKernel;
+    readonly workCoordinators: WorkCoordinatorKernel;
+    readonly agentEvalLab: AgentEvalLabKernel;
     constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter?: LocalIsolatedAdapter, dockerSandbox?: DockerSandboxAdapter, egressBroker?: TrustedEgressBroker, hostOwnerId?: string);
     protected abstract finalizeWorkLaunch(run: JsonObject, receipt: JsonObject | null): void;
 }

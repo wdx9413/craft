@@ -44,7 +44,7 @@ test("task control pins one task boundary and materializes a deterministic deliv
     assert.equal((view.contract as JsonObject).launch_id, launch.id); assert.equal((view.delivery_loop as JsonObject).action, "deliver");
     const home = f.service.homeView({ limit: 10 });
     assert.equal(((home.task_controls as JsonObject[])[0]).action, "deliver");
-    assert.equal(VERSION, "0.11.56");
+    assert.equal(VERSION, "0.11.57");
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 

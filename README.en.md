@@ -1,6 +1,6 @@
 # Craft
 
-> Current release: v0.11.56. Managed Run and Evaluation Lab add reference-only long-task handoffs, explicit Host-bound campaign slots, and calibrated-Judge promotion gating; scoped local-write recovery and evidence-backed Canary gates remain in force.
+> Current release: v0.11.57. Agent-Native Workspace Runtime joins Fabric, Host, Receipt, and re-observation into one fact chain; it distinguishes portable reads, human-approved local writes, and verified isolated writes while binding real Host attempts to comparable evaluation slots.
 
 [中文](README.md) | [English](README.en.md)
 
