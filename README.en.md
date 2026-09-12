@@ -1,6 +1,6 @@
 # Craft
 
-> Current release: v0.11.58. It adds reviewed real-case evaluation scheduling, fail-closed short-lived enterprise access contracts, and read-only A2A collaboration only after a proven single-agent baseline. Existing Agent-Native Workspace Runtime controls remain in place; a real broker, remote transport, and business-quality proof still require deployment adapters and sanitized cases.
+> Current release: v0.11.59. It adds reviewable TraeWork and WorkBuddy integration packages: both share the full Craft MCP surface and a lightweight Skill entry point. TraeWork cloud execution, WorkBuddy marketplace publication, and remote MCP still require a deployment adapter or platform review; they are not claimed as shipped services.
 
 [中文](README.md) | [English](README.en.md)
 
@@ -105,6 +105,14 @@ Claude metadata is in `.claude-plugin/plugin.json`. Any MCP host can use a globa
 ```
 
 Tools use the `craft_` prefix to avoid collisions. For substantial work the Craft Skill automatically starts with `craft_default_route`, without requiring a repeated orchestration prompt. A matching verified Workflow is executed via `craft_default_route_execute`; an unmatched safe plan is progressed with `craft_default_route_update`. A required Project Policy makes structured Git, test, coverage, and review receipts server-enforced; a Host Adapter can receive only its declared next safe action. In a later session, `craft_default_route_find` resolves a uniquely matching active task from a natural-language continuation and never guesses on a tie; `craft_default_route_resume` resumes a known task ID. After two or more passed routes from distinct tasks with confirmed or bounded evidence share a strategy, `craft_route_workflow_proposal_create` may save one Host-distilled, project-neutral `draft` Workflow; it cannot promote or publish it.
+
+## TraeWork
+
+`adapters/trae-work/` is a copyable/importable TraeWork package. `mcp.json` selects `craft-mcp-full` and `mcp-core.json` selects the smaller core surface; upload folders under `skills/` to TraeWork or place them under `.trae/skills/`. Install Craft globally first, then import `mcp.json` through TraeWork Desktop Settings → MCP → Local → Manual configuration. Local stdio MCP cannot serve TraeWork web/cloud tasks; those require a deployed HTTPS MCP adapter and a renewed security/evidence review.
+
+## WorkBuddy
+
+`adapters/workbuddy-connector/` is a WorkBuddy Connector submission package with one local stdio MCP, marketplace metadata, icon, and a lightweight Skill. It defaults to the full `craft-mcp-full` surface. It is suitable for local validation or WorkBuddy submission, not a claim that Craft is already in that marketplace. Install Craft first so `craft-mcp-full` is on `PATH`; marketplace distribution additionally needs a controlled installer or remote HTTPS MCP and WorkBuddy review.
 
 ## Verification
 

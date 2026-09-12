@@ -154,7 +154,7 @@ test("Execution Fabric joins the verified loop and Host activation without a sec
     const forcedProfile = f.store.create("activation_profile", "forced-profile", { task_id: forcedTask.id, goal_fingerprint: `sha256:${createHash("sha256").update(JSON.stringify("forced")).digest("hex")}`, asset_ids: [], asset_versions: {}, allowed_effects: ["local_write"], activation: "host_mediated", status: "recommended", selection: "no_capability_required" });
     assert.equal((f.service.executionFabricPrepare({ workspace_id: f.workspace.id, task_id: forcedTask.id, goal: "forced", host: "codex-cli", prompt: "forced", sandbox: "workspace-write", profile_id: forcedProfile.id }).activation_profile as JsonObject).id, forcedProfile.id);
     const core = new McpServer(f.service, "core"); for (const name of ["craft_execution_fabric_prepare", "craft_execution_fabric_execute", "craft_execution_fabric_advance", "craft_execution_fabric_consume", "craft_execution_fabric_get", "craft_host_bridge_get", "craft_host_activation_manifest_prepare"]) assert.ok(core.tools.some((tool) => tool.name === name), name);
-    assert.equal(VERSION, "0.11.58");
+    assert.equal(VERSION, "0.11.59");
   } finally { await Promise.all(f.store.list("host_run", 100).map((run) => f.service.hostRuns.wait(String(run.id)))); f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 

@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { CraftStore } from "./store.js";
 const TYPES = new Set(["skill", "workflow", "tool", "mcp", "script", "adapter", "agent", "template"]);
@@ -94,6 +94,14 @@ export class MaterializationKernel {
                 await writeFile(target, item.content, { flag: "wx" });
             }
             await mkdir(path.dirname(root), { recursive: true });
+            let destinationExists = false;
+            try {
+                await access(root);
+                destinationExists = true;
+            }
+            catch { /* The destination is expected not to exist. */ }
+            if (destinationExists)
+                throw new Error("Materialization target is already occupied");
             await rename(temporary, root);
         }
         catch (error) {

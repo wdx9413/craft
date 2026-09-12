@@ -13426,6 +13426,13 @@ var MaterializationKernel = class {
         await (0, import_promises8.writeFile)(target, item.content, { flag: "wx" });
       }
       await (0, import_promises8.mkdir)(import_node_path9.default.dirname(root), { recursive: true });
+      let destinationExists = false;
+      try {
+        await (0, import_promises8.access)(root);
+        destinationExists = true;
+      } catch {
+      }
+      if (destinationExists) throw new Error("Materialization target is already occupied");
       await (0, import_promises8.rename)(temporary, root);
     } catch (error) {
       return discardPartialMaterialization(temporary, error);
@@ -17994,7 +18001,7 @@ var ServiceFoundation = class {
 };
 
 // src/service.ts
-var VERSION = "0.11.58";
+var VERSION = "0.11.59";
 var CONFIDENCE = /* @__PURE__ */ new Set(["confirmed", "bounded", "unverified", "rejected"]);
 var TASK_STATUS = /* @__PURE__ */ new Set(["active", "paused", "completed", "cancelled"]);
 var VERSIONED_LIFECYCLE = /* @__PURE__ */ new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -24379,7 +24386,7 @@ var TOOLS = [
   tool("craft_a2a_agent_card_discover", "Fetch one HTTPS A2A Agent Card as untrusted read-only metadata. It never dispatches work, sends credentials, or grants execution authority.", ["url"], false, ["card_id"]),
   tool("craft_a2a_agent_card_get", "Read one discovered untrusted A2A Agent Card receipt.", ["card_id"], true),
   tool("craft_a2a_agent_card_list", "List untrusted read-only A2A Agent Card receipts.", [], true, ["limit"]),
-  tool("craft_a2a_agent_trust_approve", "Approve a discovered Agent Card only with enterprise identity and confirmed evidence; v0.11.58 trust remains read-only.", ["trust_id", "card_id", "provider_id", "allowed_effects", "evidence_ids", "approval_ref"], false),
+  tool("craft_a2a_agent_trust_approve", "Approve a discovered Agent Card only with enterprise identity and confirmed evidence; trust remains read-only.", ["trust_id", "card_id", "provider_id", "allowed_effects", "evidence_ids", "approval_ref"], false),
   tool("craft_a2a_collaboration_session_create", "Create bounded remote collaboration only after an eligible single-Agent baseline and confirmed justification evidence.", ["session_id", "task_id", "trust_id", "evaluation_run_id", "justification_evidence_id", "budget"], false, ["max_delegations"]),
   tool("craft_a2a_delegation_prepare", "Prepare a content-free, read-only remote delegation with Artifact/Evidence references.", ["delegation_id", "session_id", "objective", "evidence_ids"], false, ["artifact_ids", "ttl_seconds", "now"]),
   tool("craft_a2a_delegation_dispatch", "Issue a sealed A2A envelope after a trusted transport records confirmed dispatch Evidence; Craft does not perform network transport.", ["delegation_id", "transport_evidence_id", "dispatched_by"], false, ["now"]),

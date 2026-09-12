@@ -22,6 +22,7 @@
 - [Experience / Eval Kernel](technical/modules/experience-eval.md)
 - [Workflow / Verification / Signoff](technical/modules/workflow-signoff.md)
 - [Runtime 与宿主接入](technical/modules/runtime-integration.md)
+- [TraeWork / WorkBuddy 宿主适配](technical/modules/host-ecosystem-adapters.md)：可复制的本地 MCP、轻量 Skill 与市场提交边界。
 - [Closed-loop Runtime](technical/modules/closed-loop-runtime.md)
 - [Agent-Native Workspace 与生成界面](technical/modules/agent-native-workspace.md)
 - [沙箱与风险分级执行](technical/modules/execution-policy.md)：现有隔离雏形、平台缺口、Shadow/补偿和安全验收。

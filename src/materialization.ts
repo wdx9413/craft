@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { CraftStore, type JsonObject } from "./store.ts";
 
@@ -46,7 +46,9 @@ export class MaterializationKernel {
     const root = path.resolve(this.store.paths.cacheDir, "hub-packages", String(source.id), String(entry.entry_id), contentDigest.slice(7)); const base = path.resolve(this.store.paths.cacheDir, "hub-packages");
     if (path.relative(base, root).startsWith("..")) throw new Error("Materialization target escaped the cache root"); const temporary = `${root}.tmp-${process.pid}-${randomUUID()}`;
     try { await mkdir(temporary, { recursive: true }); for (const item of packageFiles) { const target = path.resolve(temporary, ...item.path.split("/")); await mkdir(path.dirname(target), { recursive: true }); await writeFile(target, item.content, { flag: "wx" }); }
-      await mkdir(path.dirname(root), { recursive: true }); await rename(temporary, root);
+      await mkdir(path.dirname(root), { recursive: true }); let destinationExists = false; try { await access(root); destinationExists = true; } catch { /* The destination is expected not to exist. */ }
+      if (destinationExists) throw new Error("Materialization target is already occupied");
+      await rename(temporary, root);
     } catch (error) { return discardPartialMaterialization(temporary, error); }
     const riskLevel = scan.some((item) => item.severity === "high") ? "high" : "low";
     return { materialization: this.store.create("capability_materialization", materializationId, { source_id: source.id, source_revision: entry.source_revision,

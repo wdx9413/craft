@@ -1,0 +1,19 @@
+{
+  "name": "Craft",
+  "name_zh": "Craft 工作治理",
+  "name_en": "Craft Work Governance",
+  "description": "Use durable tasks, evidence, verification, and reusable workflows for substantial work.",
+  "description_zh": "为复杂工作提供可续接任务、证据、验证和可复用工作流。",
+  "description_en": "Use durable tasks, evidence, verification, and reusable workflows for substantial work.",
+  "source": "craft-agent-harness",
+  "type": "mcp",
+  "version": "0.11.59",
+  "examples_zh": [
+    "为这项工作建立可续接目标，列出下一步和验收证据",
+    "根据已有资料选择已验证流程，避免直接执行未审核能力"
+  ],
+  "examples_en": [
+    "Create a resumable goal with the next action and acceptance evidence.",
+    "Select a verified workflow from the available evidence before execution."
+  ]
+}

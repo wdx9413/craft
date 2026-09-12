@@ -1,6 +1,6 @@
 # Craft
 
-> 当前发布版本：v0.11.58。新增可运营的真实 Case 评测计划、失败关闭的企业短期访问契约，以及以单 Agent 基线为前提的只读 A2A 协作控制面；已有 Agent-Native Workspace Runtime、受控本地写入恢复、Delivery 对照报告和 Evidence Canary 门禁继续生效。真实 Broker、远程传输和业务质量仍须由部署 Adapter 与脱敏 Case 验证。
+> 当前发布版本：v0.11.59。新增 TraeWork 与 WorkBuddy 的可审查接入包：两者共享完整 Craft MCP 和轻量 Skill 入口；TraeWork 云端、WorkBuddy 市场发布和远程 MCP 仍须由部署 Adapter 或平台审核完成，不能被当作已上线服务。
 
 [中文](README.md) | [English](README.en.md)
 
@@ -125,6 +125,14 @@ pnpm test
 ## 接入 Claude Code
 
 仓库根目录包含 `.claude-plugin/plugin.json`。把该 Git 仓库作为插件源安装；如果宿主只支持 MCP，则使用下方通用配置。
+
+## 接入 TraeWork
+
+`adapters/trae-work/` 是可复制或导入的 TraeWork 包：`mcp.json` 默认连接完整的 `craft-mcp-full`，`mcp-core.json` 则保留低上下文的核心面；`skills/` 可直接压缩上传到 TraeWork 技能市场，或放到 `.trae/skills/`。先全局安装 Craft，再在 TraeWork 桌面端的“设置 → MCP → 本地 → 手动配置”导入 `mcp.json`。本地 stdio MCP 不能供 TraeWork 网页/云端任务使用；云端需要部署 HTTPS MCP Adapter，并重新完成权限与证据验收。
+
+## 接入 WorkBuddy
+
+`adapters/workbuddy-connector/` 是 WorkBuddy Connector 提交包，包含一个本地 stdio MCP、市场元数据、图标和轻量 Skill；默认开放完整的 `craft-mcp-full`。它可用于本地联调或提交 WorkBuddy 审核，但不代表已在其市场发布。使用前先安装 Craft，使 `craft-mcp-full` 在 `PATH` 中；市场化分发前还需要提供受控安装包或远程 HTTPS MCP，并通过 WorkBuddy 审核。
 
 ## 通用 MCP
 
