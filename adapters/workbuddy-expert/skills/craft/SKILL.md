@@ -6,7 +6,7 @@ description: Use Craft for substantial work that needs durable goals, evidence, 
 description_zh: 为复杂工作建立可续接目标、证据和验证边界。
 description_en: Establish durable goals, evidence, and verification boundaries for substantial work.
 category: productivity
-version: 0.11.60
+version: 0.11.61
 author: wdx9413
 ---
 

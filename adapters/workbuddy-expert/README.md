@@ -11,7 +11,7 @@ npm install -g github:wdx9413/craft
 craft init --mode provider
 ```
 
-The Expert declares one local stdio dependency, `craft-mcp-full`. On first summon, WorkBuddy should present the connection dependency. This package does not embed a Craft binary or credentials.
+The Expert declares one local stdio dependency, `craft-mcp`, the route-first Core surface. On first summon, WorkBuddy should present the connection dependency. This package does not embed a Craft binary or credentials. Its `craft-route` Skill chooses the smallest governed path; a separately configured `craft-mcp-full` remains available only for user-approved capability administration.
 
 ## Boundaries
 

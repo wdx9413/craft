@@ -1,28 +1,29 @@
 # TraeWork / WorkBuddy host adapters
 
-> Implementation baseline: v0.11.60. These are local integration and marketplace-submission packages, not claims that Craft has been approved by either marketplace or that a cloud MCP service exists.
+> Implementation baseline: v0.11.61. These are local integration and marketplace-submission packages, not claims that Craft has been approved by either marketplace or that a cloud MCP service exists.
 
 ## Goal
 
 Craft's provider phase must not be tied to one coding Host. The portable boundary is MCP: the same `CraftService`, local state store, evidence rules and activation policy are exposed through a stdio server. A Skill is intentionally small and tells a Host when to use the high-level routing tools; it does not reimplement Craft's policy in prose.
 
 ```text
-TraeWork / WorkBuddy
-   ├─ portable Skill: select the high-level Craft route
-   └─ MCP client ── craft-mcp-full (local stdio) ── Craft core ── ~/.craft_data
-                                                   ├─ Task / Evidence / Workflow
-                                                   └─ approval and evaluation gates
+Codex / Claude / TraeWork / WorkBuddy
+   ├─ craft-route Skill ── decide whether Craft is needed
+   ├─ MCP client ── craft-mcp (Core) ── Craft core ── ~/.craft_data
+   │                                     ├─ Task / Evidence / Workflow
+   │                                     └─ approval and evaluation gates
+   └─ craft-mcp-full ─ explicit user-approved administration only
 ```
 
-`craft-mcp-full` is the default in the new adapter packages because the request is for complete Craft compatibility. `craft-mcp` remains an explicit compact alternative for Hosts that need fewer tools and better tool-selection precision. The two modes share data and enforcement; neither turns an unapproved effect into an approved one.
+`craft-mcp` is the default in Codex, Claude, TraeWork and the WorkBuddy Expert because routing, continuity, bounded context, evidence and profile-bound tickets cover ordinary governed work without polluting tool selection. `craft-mcp-full` remains the explicit compatibility endpoint for registering, reviewing or changing external capability sources; the WorkBuddy Connector packages this advanced surface for users who deliberately need it. The two modes share data and enforcement; neither turns an unapproved effect into an approved one.
 
 ## TraeWork
 
-[`adapters/trae-work/`](../../../adapters/trae-work/README.md) provides the exact JSON accepted by TraeWork's manual local MCP configuration and uploadable `craft` / `craft-clarify` Skills. Local stdio MCP runs only on TraeWork Desktop. Web and cloud tasks require a deployment-owned HTTPS MCP Adapter, its own identity and authorization design, and a new evidence review. The package deliberately does not claim that local Craft state is reachable from cloud tasks.
+[`adapters/trae-work/`](../../../adapters/trae-work/README.md) provides the exact JSON accepted by TraeWork's manual local MCP configuration and uploadable `craft-route` / `craft` / `craft-clarify` Skills. Its `mcp.json` starts Core; `mcp-full.json` is the deliberate advanced alternative. Local stdio MCP runs only on TraeWork Desktop. Web and cloud tasks require a deployment-owned HTTPS MCP Adapter, its own identity and authorization design, and a new evidence review. The package deliberately does not claim that local Craft state is reachable from cloud tasks.
 
 ## WorkBuddy
 
-[`adapters/workbuddy-connector/`](../../../adapters/workbuddy-connector/README.md) follows WorkBuddy's MCP + Skill connector structure: one MCP server, `connector-meta.json`, market icon and an optional Skill. It is for the Connector entry, not the Expert entry. [`adapters/workbuddy-expert/`](../../../adapters/workbuddy-expert/README.md) is the separately uploadable Expert package: `.codebuddy-plugin/plugin.json`, a PNG avatar, one Agent, the Craft Skill, and an explicit MCP dependency. The local command expects a separately installed Craft executable; this avoids a brittle Git bootstrap during Connector startup. Publishing remains a WorkBuddy review step. A future remote connector must use HTTPS and preserve Craft's approval/evidence boundary rather than forwarding raw user context to an untrusted service.
+[`adapters/workbuddy-connector/`](../../../adapters/workbuddy-connector/README.md) follows WorkBuddy's MCP + Skill connector structure: one MCP server, `connector-meta.json`, market icon and route Skill. It is the explicit Full-MCP Connector, not the Expert entry. [`adapters/workbuddy-expert/`](../../../adapters/workbuddy-expert/README.md) is the separately uploadable, route-first Expert package: `.codebuddy-plugin/plugin.json`, a PNG avatar, one Agent, `craft-route` / Craft Skills, and a Core MCP dependency. The local command expects a separately installed Craft executable; this avoids a brittle Git bootstrap during Connector startup. Publishing remains a WorkBuddy review step. A future remote connector must use HTTPS and preserve Craft's approval/evidence boundary rather than forwarding raw user context to an untrusted service.
 
 ## Non-goals and next deployment step
 

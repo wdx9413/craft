@@ -2,7 +2,7 @@
   "mcpServers": {
     "craft": {
       "type": "stdio",
-      "command": "craft-mcp-full",
+      "command": "craft-mcp",
       "args": [],
       "timeout": 30000,
       "x-workbuddy": {

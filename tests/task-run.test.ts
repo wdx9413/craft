@@ -39,7 +39,7 @@ test("Task Run binds a real read-only launch, persists only digests, and safely 
     assert.equal((f.service.taskRunCancel({ task_run_id: taskRun.id, reason: "done" }).run as JsonObject).lifecycle, "cancelled"); assert.equal(f.service.taskRunCancel({ task_run_id: taskRun.id, reason: "done" }).idempotent, true);
     assert.equal((f.service.taskRunRefresh({ task_run_id: taskRun.id }).state as JsonObject).status, "cancelled"); assert.throws(() => f.service.taskRunPause({ task_run_id: taskRun.id, reason: "again" }), /Cancelled/); assert.throws(() => f.service.taskRunResume({ task_run_id: taskRun.id }), /Cancelled/);
     assert.throws(() => f.service.taskRunGet({ task_run_id: "" }), /task_run_id/);
-    assert.equal(VERSION, "0.11.60");
+    assert.equal(VERSION, "0.11.61");
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 

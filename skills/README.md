@@ -2,6 +2,7 @@
 
 Craft bundles a deliberately small baseline:
 
+- `craft-route`: decide whether Craft is needed, then select the smallest safe route and MCP surface.
 - `craft`: durable routing, evidence, and evaluation boundaries for substantial work.
 - `craft-clarify`: a bounded clarification contract for genuinely consequential ambiguity.
 
