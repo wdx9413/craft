@@ -1,6 +1,6 @@
 # Craft
 
-> 当前发布版本：v0.11.59。新增 TraeWork 与 WorkBuddy 的可审查接入包：两者共享完整 Craft MCP 和轻量 Skill 入口；TraeWork 云端、WorkBuddy 市场发布和远程 MCP 仍须由部署 Adapter 或平台审核完成，不能被当作已上线服务。
+> 当前发布版本：v0.11.60。新增可直接上传到 WorkBuddy“专家”配置页的 Expert 包：它带有专家身份、头像、Agent 定义、轻量 Skill 与完整 Craft MCP 依赖；云端运行、市场审核和远程 MCP 仍须由部署 Adapter 或平台审核完成，不能被当作已上线服务。
 
 [中文](README.md) | [English](README.en.md)
 
@@ -132,7 +132,7 @@ pnpm test
 
 ## 接入 WorkBuddy
 
-`adapters/workbuddy-connector/` 是 WorkBuddy Connector 提交包，包含一个本地 stdio MCP、市场元数据、图标和轻量 Skill；默认开放完整的 `craft-mcp-full`。它可用于本地联调或提交 WorkBuddy 审核，但不代表已在其市场发布。使用前先安装 Craft，使 `craft-mcp-full` 在 `PATH` 中；市场化分发前还需要提供受控安装包或远程 HTTPS MCP，并通过 WorkBuddy 审核。
+`adapters/workbuddy-expert/` 是 WorkBuddy Expert 上传包，包含 `.codebuddy-plugin/plugin.json`、PNG 头像、Agent 定义、轻量 Skill 及本地 stdio MCP 依赖；默认开放完整的 `craft-mcp-full`。`adapters/workbuddy-connector/` 仍用于单独发布 Connector，不能上传到“专家”页面。Expert 包可用于本地联调或提交 WorkBuddy 审核，但不代表已在其市场发布。使用前先安装 Craft，使 `craft-mcp-full` 在 `PATH` 中；市场化分发前还需要提供受控安装包或远程 HTTPS MCP，并通过 WorkBuddy 审核。
 
 ## 通用 MCP
 

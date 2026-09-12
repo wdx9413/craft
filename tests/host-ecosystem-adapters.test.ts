@@ -37,7 +37,7 @@ test("WorkBuddy connector keeps exactly one full local MCP and complete market m
   const server = onlyServer(await json("adapters/workbuddy-connector/mcp.json"));
   assert.equal(connector.source, "craft-agent-harness");
   assert.equal(connector.type, "mcp");
-  assert.equal(connector.version, "0.11.59");
+  assert.equal(connector.version, "0.11.60");
   assert(Array.isArray(connector.examples_zh) && connector.examples_zh.length >= 2);
   assert(Array.isArray(connector.examples_en) && connector.examples_en.length >= 2);
   assert.equal(server.type, "stdio");

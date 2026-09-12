@@ -1,6 +1,6 @@
 # Craft
 
-> Current release: v0.11.59. It adds reviewable TraeWork and WorkBuddy integration packages: both share the full Craft MCP surface and a lightweight Skill entry point. TraeWork cloud execution, WorkBuddy marketplace publication, and remote MCP still require a deployment adapter or platform review; they are not claimed as shipped services.
+> Current release: v0.11.60. It adds a WorkBuddy Expert upload package with an expert identity, avatar, Agent definition, lightweight Skill, and full Craft MCP dependency. Cloud execution, marketplace publication, and remote MCP still require a deployment adapter or platform review; they are not claimed as shipped services.
 
 [中文](README.md) | [English](README.en.md)
 
@@ -112,7 +112,7 @@ Tools use the `craft_` prefix to avoid collisions. For substantial work the Craf
 
 ## WorkBuddy
 
-`adapters/workbuddy-connector/` is a WorkBuddy Connector submission package with one local stdio MCP, marketplace metadata, icon, and a lightweight Skill. It defaults to the full `craft-mcp-full` surface. It is suitable for local validation or WorkBuddy submission, not a claim that Craft is already in that marketplace. Install Craft first so `craft-mcp-full` is on `PATH`; marketplace distribution additionally needs a controlled installer or remote HTTPS MCP and WorkBuddy review.
+`adapters/workbuddy-expert/` is a WorkBuddy Expert upload package with `.codebuddy-plugin/plugin.json`, a PNG avatar, Agent definition, lightweight Skill, and local stdio MCP dependency. `adapters/workbuddy-connector/` remains for publishing a Connector alone and must not be uploaded to the Expert page. Install Craft first so `craft-mcp-full` is on `PATH`; marketplace distribution additionally needs a controlled installer or remote HTTPS MCP and WorkBuddy review.
 
 ## Verification
 

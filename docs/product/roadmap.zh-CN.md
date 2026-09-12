@@ -13,7 +13,7 @@
 
 ## 建设原则
 
-以 [产品架构](architecture.zh-CN.md) 的三大支柱为目标：工作与协作、执行与保障、学习与改进。**评测与实验是第三支柱内的核心模块**，不另设第四支柱。以下里程碑是规划；当前实现基线已推进到 v0.11.59。
+以 [产品架构](architecture.zh-CN.md) 的三大支柱为目标：工作与协作、执行与保障、学习与改进。**评测与实验是第三支柱内的核心模块**，不另设第四支柱。以下里程碑是规划；当前实现基线已推进到 v0.11.60。
 
 **两步定位**：短期做**跨宿主治理插件层**——以 MCP/插件形式接入 Codex CLI、Claude Code、DeepSeek Harness 等宿主，统一能力发现、授权门禁、证据链与评测门禁，执行留在宿主内；长期做**自主 Agent 平台**——自有对话循环、宿主调度与评测驱动的自我改进。Provider 是当前主线，Supervisor/Agent 是长期形态；本路线图中 v0.11.x 的能力全部属于两步共用的内核。
 
@@ -90,6 +90,8 @@
 **v0.11.58：可运营评测、企业访问与受控远程协作。** `EvaluationProgram` 仅排程已脱敏 development Case 与独立批准 held-out Case；development 只产生显式 Host 试验计划，held-out 才固定为 Campaign，均不自动启动 Host。`EnterpriseAccessKernel` 用已确认 Evidence 验证的 OIDC/短期 Broker、主体摘要、Adapter Binding、短期 Lease/Ticket 表达外部访问，写入必须同时具备审批与 autonomy 消耗；没有外部可信 Broker 就拒绝。`A2ADelegationKernel` 只有在 single-Agent baseline 已 eligible、人工信任和 confirmed Evidence 都满足时才允许最多五个只读 delegation，且只传引用化 Envelope。它不实现远程 HTTP、真实企业认证或自动多 Agent。详见 [可运营评测、企业访问与受控远程协作](../technical/modules/operational-evaluation-enterprise-collaboration.md)。
 
 **v0.11.59：跨宿主生态适配包。** TraeWork 与 WorkBuddy 共享完整 `craft-mcp-full` 和按需加载的轻量 Craft Skill；配置、市场元数据与文档均作为可审查包随仓库发布。TraeWork 本地 stdio 只适用于桌面端，WorkBuddy Connector 仍须平台审核；远程 HTTPS MCP、云端运行和自动安装都没有被提前承诺。详见 [TraeWork / WorkBuddy 宿主适配](../technical/modules/host-ecosystem-adapters.md)。
+
+**v0.11.60：WorkBuddy Expert 上传包。** `workbuddy-expert` 以 WorkBuddy 的 `.codebuddy-plugin/plugin.json`、PNG 头像、单个 Agent、Skill 与内置 MCP 依赖表达 Craft 的工作治理专家；它和 Connector 包分开，避免把 `connector-meta.json` 错传到 Expert 配置入口。Agent 只通过高层 Craft 路由管理可续接工作，MCP 仍须由用户本机安装的 `craft-mcp-full` 启动。详见 [TraeWork / WorkBuddy 宿主适配](../technical/modules/host-ecosystem-adapters.md)。
 
 - 面向各行业工作者，研发是首批验证场景，视频用于检验跨领域复用；后续扩展销售、教育与内容创作，不同时自建所有专业编辑器。
 - 先把真实工作从目标到成果跑通，同时提供可操作的最小界面；不长期只增加协议与配置。

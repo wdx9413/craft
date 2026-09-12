@@ -1,0 +1,57 @@
+{
+  "name": "craft-work-governance",
+  "version": "0.11.60",
+  "description": "Governs substantial work with durable tasks, evidence, verification, and reusable workflows.",
+  "author": {
+    "name": "wdx9413",
+    "email": "wdx9413@users.noreply.github.com"
+  },
+  "agents": ["./agents/craft-work-governance.md"],
+  "skills": ["./skills/craft"],
+  "homepage": "https://github.com/wdx9413/craft",
+  "license": "MIT",
+  "keywords": ["workflow", "evidence", "evaluation"],
+  "expertType": "agent",
+  "agentName": "craft-work-governance",
+  "displayName": {
+    "zh": "Craft 工作治理",
+    "en": "Craft Work Governance"
+  },
+  "profession": {
+    "zh": "复杂工作治理专家",
+    "en": "Complex Work Governance Expert"
+  },
+  "displayDescription": {
+    "zh": "为复杂工作建立可续接目标、证据、验证与复用流程，在授权边界内推进任务并保留可审计成果血缘。",
+    "en": "Builds resumable goals, evidence, verification, and reusable workflows while preserving approval boundaries and auditable lineage."
+  },
+  "avatar": "avatars/craft-work-governance.png",
+  "categoryId": "10-ProjectQuality",
+  "defaultInitPrompt": {
+    "zh": "请为当前复杂任务建立可续接目标、下一步与验收证据。",
+    "en": "Create a resumable goal, next action, and acceptance evidence for this substantial task."
+  },
+  "plugin": "craft-work-governance",
+  "tags": [
+    { "zh": "工作流", "en": "Workflow" },
+    { "zh": "证据链", "en": "Evidence" },
+    { "zh": "评测治理", "en": "Evaluation Governance" }
+  ],
+  "quickPrompts": [
+    {
+      "zh": "请为当前复杂任务建立可续接目标、下一步与验收证据。",
+      "en": "Create a resumable goal, next action, and acceptance evidence for this substantial task."
+    },
+    {
+      "zh": "根据现有资料选择已验证工作流，并说明仍需人工决定的事项。",
+      "en": "Select a verified workflow from the available material and identify remaining human decisions."
+    },
+    {
+      "zh": "整理当前工作的成果、证据和下一步，形成可续接交接。",
+      "en": "Summarize outcomes, evidence, and next action as a resumable handoff."
+    }
+  ],
+  "dependencies": {
+    "mcpServers": "./.mcp.json"
+  }
+}

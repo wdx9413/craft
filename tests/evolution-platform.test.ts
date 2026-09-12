@@ -28,7 +28,7 @@ function observedRun(store: CraftStore, id: string, deliveryStatus: string, envi
   store.create("work_delivery", `delivery-${id}`, { launch_id: launchId, status: deliveryStatus });
 }
 
-test("v0.11.59 closes a local write with a scoped transaction and explicit rollback", async () => {
+test("v0.11.60 closes a local write with a scoped transaction and explicit rollback", async () => {
   const f = await fixture();
   try {
     let release: (() => void) | undefined;
@@ -56,7 +56,7 @@ test("v0.11.59 closes a local write with a scoped transaction and explicit rollb
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("v0.11.59 reports a repeated held-out Campaign and routes only a reviewed canary candidate", async () => {
+test("v0.11.60 reports a repeated held-out Campaign and routes only a reviewed canary candidate", async () => {
   const f = await fixture();
   try {
     for (const id of ["code", "file"]) f.service.deliveryEvaluationCaseSave({ case_id: id, name: id, domain: id === "code" ? "software" : "media", partition: "held_out", acceptance_contract_ref: "contract", sanitized: true, approved_by: "curator" });
@@ -99,7 +99,7 @@ test("v0.11.59 reports a repeated held-out Campaign and routes only a reviewed c
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("v0.11.59 keeps recovery, report, and routing rejection branches explicit", async () => {
+test("v0.11.60 keeps recovery, report, and routing rejection branches explicit", async () => {
   const f = await fixture();
   try {
     const read = f.service.executionFabricPrepare({ fabric_id: "read", manifest_id: "read-manifest", workspace_id: f.workspace.id, title: "Read", goal: "read", host: "codex-cli", prompt: "read" });

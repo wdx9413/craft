@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Craft MCP">
+  <rect width="64" height="64" rx="14" fill="#17324d"/>
+  <path d="M17 22.5 32 14l15 8.5v19L32 50 17 41.5z" fill="none" stroke="#d9f3ff" stroke-width="4" stroke-linejoin="round"/>
+  <path d="m24 31 5 5 11-11" fill="none" stroke="#55d6be" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

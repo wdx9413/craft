@@ -1,0 +1,22 @@
+{
+  "mcpServers": {
+    "craft": {
+      "type": "stdio",
+      "command": "craft-mcp-full",
+      "args": [],
+      "timeout": 30000,
+      "x-workbuddy": {
+        "displayName": {
+          "zh": "Craft 工作治理 MCP",
+          "en": "Craft Work Governance MCP"
+        },
+        "description": {
+          "zh": "连接本机 Craft，管理可续接任务、证据、验证和工作流。",
+          "en": "Connect local Craft for resumable tasks, evidence, verification, and workflows."
+        },
+        "icon": "./avatars/craft-mcp.svg",
+        "auth": { "type": "none" }
+      }
+    }
+  }
+}
