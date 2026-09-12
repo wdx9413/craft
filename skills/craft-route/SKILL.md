@@ -10,7 +10,7 @@ Use this lightweight entry point before choosing detailed Craft or third-party t
 ## Decide first
 
 - For a short answer, simple rewrite, or one-step read with no durable value, answer directly and do not call Craft.
-- When a missing decision materially changes the deliverable, external effect, or acceptance rule, use the `craft-clarify` contract first. Ask only decision-changing questions.
+- When a missing decision materially changes the deliverable, external effect, or acceptance rule, state a short working contract and ask at most three decision-changing questions. Do not require another Skill to do this.
 - For a known durable task, call `craft_default_route_resume`. If only a natural-language continuation is available, call `craft_default_route_find`; never select an ambiguous task.
 - For other substantial work, call `craft_default_route` once. Follow only the returned next safe action.
 

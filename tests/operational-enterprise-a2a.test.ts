@@ -17,7 +17,7 @@ async function fixture() {
   return { root, store, service, task, confirmed, bounded };
 }
 
-test("v0.11.61 schedules reviewed real-case evaluation without starting a Host", async () => {
+test("v0.11.62 schedules reviewed real-case evaluation without starting a Host", async () => {
   const f = await fixture();
   try {
     f.service.deliveryEvaluationCaseSave({ case_id: "development", name: "研发故障", domain: "software", partition: "development", acceptance_contract_ref: "test", sanitized: true });
@@ -44,7 +44,7 @@ test("v0.11.61 schedules reviewed real-case evaluation without starting a Host",
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("v0.11.61 requires verified enterprise identity, a short lease, and exact adapter boundaries", async () => {
+test("v0.11.62 requires verified enterprise identity, a short lease, and exact adapter boundaries", async () => {
   const f = await fixture();
   try {
     assert.throws(() => f.service.enterpriseIdentityProviderRegister({ provider_id: "bad", kind: "oidc_workload_identity", issuer: "http://issuer", audience: "craft", broker_ref: "broker", organization_ref: "org" }), /HTTPS/);
@@ -76,7 +76,7 @@ test("v0.11.61 requires verified enterprise identity, a short lease, and exact a
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("v0.11.61 governs A2A delegation with a proven baseline and no raw remote context", async () => {
+test("v0.11.62 governs A2A delegation with a proven baseline and no raw remote context", async () => {
   const f = await fixture();
   try {
     const provider = f.service.enterpriseIdentityProviderRegister({ provider_id: "idp", kind: "short_lived_broker", issuer: "https://issuer.example.test", audience: "craft", broker_ref: "broker", organization_ref: "org" }).provider as JsonObject;
@@ -106,7 +106,7 @@ test("v0.11.61 governs A2A delegation with a proven baseline and no raw remote c
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("v0.11.61 keeps operational, enterprise, and remote-collaboration rejection paths explicit", async () => {
+test("v0.11.62 keeps operational, enterprise, and remote-collaboration rejection paths explicit", async () => {
   const f = await fixture();
   try {
     f.service.deliveryEvaluationCaseSave({ case_id: "development", name: "dev", domain: "software", partition: "development", acceptance_contract_ref: "test", sanitized: true });
@@ -161,7 +161,7 @@ test("v0.11.61 keeps operational, enterprise, and remote-collaboration rejection
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("v0.11.61 evaluation programs reject malformed, conflicting, and unapproved planning inputs", async () => {
+test("v0.11.62 evaluation programs reject malformed, conflicting, and unapproved planning inputs", async () => {
   const f = await fixture();
   try {
     f.service.deliveryEvaluationCaseSave({ case_id: "development", name: "dev", domain: "software", partition: "development", acceptance_contract_ref: "test", sanitized: true });
@@ -180,7 +180,7 @@ test("v0.11.61 evaluation programs reject malformed, conflicting, and unapproved
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("v0.11.61 enterprise contracts reject every inactive, widened, or stale boundary", async () => {
+test("v0.11.62 enterprise contracts reject every inactive, widened, or stale boundary", async () => {
   const f = await fixture();
   try {
     const args = { provider_id: "provider", kind: "short_lived_broker", issuer: "https://issuer.example.test", audience: "craft", broker_ref: "broker", organization_ref: "org" };
@@ -222,7 +222,7 @@ test("v0.11.61 enterprise contracts reject every inactive, widened, or stale bou
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("v0.11.61 A2A controls reject inactive sessions and conflicting delegation identities", async () => {
+test("v0.11.62 A2A controls reject inactive sessions and conflicting delegation identities", async () => {
   const f = await fixture();
   try {
     const provider = f.service.enterpriseIdentityProviderRegister({ provider_id: "provider", kind: "short_lived_broker", issuer: "https://issuer.example.test", audience: "craft", broker_ref: "broker", organization_ref: "org" }).provider as JsonObject;

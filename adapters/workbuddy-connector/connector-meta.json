@@ -7,7 +7,7 @@
   "description_en": "Use durable tasks, evidence, verification, and reusable workflows for substantial work.",
   "source": "craft-agent-harness",
   "type": "mcp",
-  "version": "0.11.61",
+  "version": "0.11.62",
   "examples_zh": [
     "为这项工作建立可续接目标，列出下一步和验收证据",
     "根据已有资料选择已验证流程，避免直接执行未审核能力"

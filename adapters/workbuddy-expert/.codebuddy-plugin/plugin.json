@@ -1,13 +1,13 @@
 {
   "name": "craft-work-governance",
-  "version": "0.11.61",
+  "version": "0.11.62",
   "description": "Governs substantial work with durable tasks, evidence, verification, and reusable workflows.",
   "author": {
     "name": "wdx9413",
     "email": "wdx9413@users.noreply.github.com"
   },
   "agents": ["./agents/craft-work-governance.md"],
-  "skills": ["./skills/craft-route", "./skills/craft"],
+  "skills": ["./skills/craft-route"],
   "homepage": "https://github.com/wdx9413/craft",
   "license": "MIT",
   "keywords": ["workflow", "evidence", "evaluation"],

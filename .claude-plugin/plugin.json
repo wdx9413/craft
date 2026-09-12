@@ -1,8 +1,8 @@
 {
   "name": "craft",
-  "version": "0.11.61",
+  "version": "0.11.62",
   "description": "Capability discovery, durable tasks, Workflow and orchestration trials, multi-source grading, comparable evaluations, Signoff-gated Skill proposals, and safe Skill publishing.",
-  "skills": "./skills/",
+  "skills": "./skills/craft-route/",
   "mcpServers": {
     "craft": {
       "command": "node",

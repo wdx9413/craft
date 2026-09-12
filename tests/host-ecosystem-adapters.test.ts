@@ -40,14 +40,14 @@ test("WorkBuddy connector keeps the explicit advanced MCP with a route-first Ski
   const server = onlyServer(await json("adapters/workbuddy-connector/mcp.json"));
   assert.equal(connector.source, "craft-agent-harness");
   assert.equal(connector.type, "mcp");
-  assert.equal(connector.version, "0.11.61");
+  assert.equal(connector.version, "0.11.62");
   assert(Array.isArray(connector.examples_zh) && connector.examples_zh.length >= 2);
   assert(Array.isArray(connector.examples_en) && connector.examples_en.length >= 2);
   assert.equal(server.type, "stdio");
   assert.equal(server.command, "craft-mcp-full");
   assert.equal(server.timeout, 30000);
-  assert.match(await text("adapters/workbuddy-connector/skills/craft/SKILL.md"), /craft_default_route/);
   assert.match(await text("adapters/workbuddy-connector/skills/craft-route/SKILL.md"), /craft_default_route/);
+  await assert.rejects(readFile(resolve(root, "adapters/workbuddy-connector/skills/craft/SKILL.md")), { code: "ENOENT" });
   assert.match(await text("adapters/workbuddy-connector/icon.svg"), /<svg/);
   assert.match(await text("adapters/workbuddy-connector/README.md"), /not a claim of marketplace availability/i);
 });
@@ -58,6 +58,8 @@ test("every portable host defaults to the same route-first Core and retains an e
   const rootMcp = await json(".mcp.json");
   const expertMcp = await json("adapters/workbuddy-expert/.mcp.json");
   assert.equal(codex.mcpServers, "./.mcp.json");
+  assert.equal(codex.skills, "./skills/craft-route/");
+  assert.equal(claude.skills, "./skills/craft-route/");
   assert.deepEqual((rootMcp.mcpServers as Record<string, Record<string, unknown>>).craft.args, ["dist/plugin/craft-mcp.cjs"]);
   assert.deepEqual((claude.mcpServers as Record<string, Record<string, unknown>>).craft.args, ["${CLAUDE_PLUGIN_ROOT}/dist/plugin/craft-mcp.cjs"]);
   assert.equal(onlyServer(expertMcp).command, "craft-mcp");

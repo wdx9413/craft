@@ -1,6 +1,6 @@
 # Craft
 
-> 当前发布版本：v0.11.61。所有宿主接入统一采用“Route-first”：Codex/Claude 插件、TraeWork、WorkBuddy Expert 默认使用精简 Core MCP 与轻量 `craft-route` Skill；完整 MCP 仍作为显式、经批准的高级治理入口保留。云端运行、市场审核和远程 MCP 仍须由部署 Adapter 或平台审核完成，不能被当作已上线服务。
+> 当前发布版本：v0.11.62。所有宿主接入统一采用“Route-first”：Codex/Claude 插件、TraeWork、WorkBuddy Expert 默认只安装一个轻量 `craft-route` Skill，并连接精简 Core MCP；`craft` 与 `craft-clarify` 是单独的可选包。完整 MCP 仍作为显式、经批准的高级治理入口保留。云端运行、市场审核和远程 MCP 仍须由部署 Adapter 或平台审核完成，不能被当作已上线服务。
 
 [中文](README.md) | [English](README.en.md)
 
@@ -118,7 +118,7 @@ pnpm test
 - 分支/Tag：建议固定发布 Tag；开发时可用 `main`
 - 稀疏路径：`.`（插件清单位于仓库根目录）
 
-插件会读取根目录的 `.codex-plugin/plugin.json` 和 `.mcp.json`。也可以只把 `skills/craft` 作为普通 Skill 安装，但这样不会自动获得 MCP 数据层。
+插件会读取根目录的 `.codex-plugin/plugin.json` 和 `.mcp.json`，默认只加载 `skills/craft-route`。`skills/craft` 与 `skills/craft-clarify` 可作为独立可选包安装，但这样不会自动获得 MCP 数据层。
 
 从 v0.2.1 起，插件 MCP 使用仓库内随版本发布的单文件 bundle；Codex 把插件复制到缓存目录后无需再执行 `npm install`，也不会依赖源码仓库的 `node_modules`。升级旧版本后请重新安装插件，并在新会话中验证 `craft_info`。
 
@@ -128,11 +128,11 @@ pnpm test
 
 ## 接入 TraeWork
 
-`adapters/trae-work/` 是可复制或导入的 TraeWork 包：`mcp.json` 和兼容的 `mcp-core.json` 默认连接低上下文的 `craft-mcp`；只有已批准的高级配置才导入 `mcp-full.json`。`skills/` 可直接压缩上传到 TraeWork 技能市场，或放到 `.trae/skills/`；其中 `craft-route` 先决定是否需要 Craft，再按需加载 `craft` 或 `craft-clarify`。先全局安装 Craft，再在 TraeWork 桌面端的“设置 → MCP → 本地 → 手动配置”导入 `mcp.json`。本地 stdio MCP 不能供 TraeWork 网页/云端任务使用；云端需要部署 HTTPS MCP Adapter，并重新完成权限与证据验收。
+`adapters/trae-work/` 是可复制或导入的 TraeWork 包：`mcp.json` 和兼容的 `mcp-core.json` 默认连接低上下文的 `craft-mcp`；只有已批准的高级配置才导入 `mcp-full.json`。默认只上传或放置 `skills/craft-route/`；`craft` 和 `craft-clarify` 是可单独安装的可选包。先全局安装 Craft，再在 TraeWork 桌面端的“设置 → MCP → 本地 → 手动配置”导入 `mcp.json`。本地 stdio MCP 不能供 TraeWork 网页/云端任务使用；云端需要部署 HTTPS MCP Adapter，并重新完成权限与证据验收。
 
 ## 接入 WorkBuddy
 
-`adapters/workbuddy-expert/` 是 WorkBuddy Expert 上传包，包含 `.codebuddy-plugin/plugin.json`、PNG 头像、Agent 定义、`craft-route` / Craft 轻量 Skill 及本地 Core MCP 依赖；默认只开放 `craft-mcp`。`adapters/workbuddy-connector/` 是单独的完整治理 Connector，适用于用户明确批准的来源/连接器管理，不能上传到“专家”页面。两者共享同一 Craft 数据、Evidence 和 Policy，不会产生能力分叉。Expert 包可用于本地联调或提交 WorkBuddy 审核，但不代表已在其市场发布。使用前先安装 Craft，使相应的 `craft-mcp` 或 `craft-mcp-full` 在 `PATH` 中；市场化分发前还需要提供受控安装包或远程 HTTPS MCP，并通过 WorkBuddy 审核。
+`adapters/workbuddy-expert/` 是 WorkBuddy Expert 上传包，包含 `.codebuddy-plugin/plugin.json`、PNG 头像、Agent 定义、唯一的 `craft-route` Skill 及本地 Core MCP 依赖；默认只开放 `craft-mcp`。`adapters/workbuddy-connector/` 是单独的完整治理 Connector，也只携带 `craft-route`，适用于用户明确批准的来源/连接器管理，不能上传到“专家”页面。两者共享同一 Craft 数据、Evidence 和 Policy，不会产生能力分叉。Expert 包可用于本地联调或提交 WorkBuddy 审核，但不代表已在其市场发布。使用前先安装 Craft，使相应的 `craft-mcp` 或 `craft-mcp-full` 在 `PATH` 中；市场化分发前还需要提供受控安装包或远程 HTTPS MCP，并通过 WorkBuddy 审核。
 
 ## 通用 MCP
 

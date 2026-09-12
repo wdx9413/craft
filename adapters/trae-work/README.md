@@ -18,7 +18,7 @@ The local stdio process can serve only desktop-local tasks. TraeWork web/cloud t
 
 ## Skills
 
-Upload folders in [`skills/`](skills/) as `.zip`/`.skill` packages through the TraeWork Skills marketplace, or copy them under `.trae/skills/` in a local project. `craft-route` is the smallest routing entry point, `craft` adds durable governance guidance, and `craft-clarify` triggers only for decision-changing ambiguity. None grants additional permissions.
+Upload [`skills/craft-route/`](skills/craft-route/) as the default `.zip`/`.skill` package through the TraeWork Skills marketplace, or copy it under `.trae/skills/` in a local project. `craft` and `craft-clarify` remain separate optional packages for teams that deliberately want their longer governance or clarification contracts; do not install all three by default. None grants additional permissions.
 
 ## Safety and state
 

@@ -1,6 +1,6 @@
 {
   "name": "craft",
-  "version": "0.11.61",
+  "version": "0.11.62",
   "description": "Capability discovery, durable tasks, verified workflows, evidence, and multi-agent orchestration.",
   "author": {
     "name": "wdx9413",
@@ -10,7 +10,7 @@
   "repository": "https://github.com/wdx9413/craft",
   "license": "MIT",
   "keywords": ["agent", "skills", "workflow", "memory", "mcp"],
-  "skills": "./skills/",
+  "skills": "./skills/craft-route/",
   "interface": {
     "displayName": "Craft",
     "shortDescription": "Discover, orchestrate, evaluate, and reuse capabilities.",

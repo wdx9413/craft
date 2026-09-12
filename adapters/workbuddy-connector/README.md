@@ -1,6 +1,6 @@
 # Craft WorkBuddy Connector
 
-This directory is a WorkBuddy **MCP + Skill** Connector submission package. It is the explicit advanced entry point: it exposes one local stdio server, `craft-mcp-full`, so complete Craft compatibility remains available through one controlled provider endpoint. Add `craft-route` to ordinary conversations so the model still begins with the smallest governed route.
+This directory is a WorkBuddy **MCP + Skill** Connector submission package. It is the explicit advanced entry point: it exposes one local stdio server, `craft-mcp-full`, so complete Craft compatibility remains available through one controlled provider endpoint. It packages exactly one default Skill, `craft-route`, so the model still begins with the smallest governed route.
 
 ## Local validation
 

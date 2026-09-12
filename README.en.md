@@ -1,6 +1,6 @@
 # Craft
 
-> Current release: v0.11.61. Every host now follows a route-first boundary: Codex/Claude plugins, TraeWork, and the WorkBuddy Expert default to the compact Core MCP plus a lightweight `craft-route` Skill; the Full MCP remains an explicit, approved advanced-governance entry point. Cloud execution, marketplace publication, and remote MCP still require a deployment adapter or platform review; they are not claimed as shipped services.
+> Current release: v0.11.62. Every host now follows a route-first boundary: Codex/Claude plugins, TraeWork, and the WorkBuddy Expert install exactly one default `craft-route` Skill with the compact Core MCP; `craft` and `craft-clarify` are separate opt-in packages. The Full MCP remains an explicit, approved advanced-governance entry point. Cloud execution, marketplace publication, and remote MCP still require a deployment adapter or platform review; they are not claimed as shipped services.
 
 [中文](README.md) | [English](README.en.md)
 
@@ -108,11 +108,11 @@ Tools use the `craft_` prefix to avoid collisions. For substantial work the Craf
 
 ## TraeWork
 
-`adapters/trae-work/` is a copyable/importable TraeWork package. `mcp.json` and the compatible `mcp-core.json` select the smaller `craft-mcp` surface; use `mcp-full.json` only for an approved advanced configuration. Upload folders under `skills/` to TraeWork or place them under `.trae/skills/`; `craft-route` decides whether Craft is needed before `craft` or `craft-clarify` is loaded. Install Craft globally first, then import `mcp.json` through TraeWork Desktop Settings → MCP → Local → Manual configuration. Local stdio MCP cannot serve TraeWork web/cloud tasks; those require a deployed HTTPS MCP adapter and a renewed security/evidence review.
+`adapters/trae-work/` is a copyable/importable TraeWork package. `mcp.json` and the compatible `mcp-core.json` select the smaller `craft-mcp` surface; use `mcp-full.json` only for an approved advanced configuration. Upload or place only `skills/craft-route/` under `.trae/skills/` by default; `craft` and `craft-clarify` are separately installable opt-in packages. Install Craft globally first, then import `mcp.json` through TraeWork Desktop Settings → MCP → Local → Manual configuration. Local stdio MCP cannot serve TraeWork web/cloud tasks; those require a deployed HTTPS MCP adapter and a renewed security/evidence review.
 
 ## WorkBuddy
 
-`adapters/workbuddy-expert/` is a route-first WorkBuddy Expert upload package with `.codebuddy-plugin/plugin.json`, a PNG avatar, Agent definition, `craft-route` / Craft Skills, and a local Core MCP dependency. `adapters/workbuddy-connector/` is the separate full-governance Connector and must not be uploaded to the Expert page. They share the same Craft state, Evidence, and Policy rather than fork capabilities. Install Craft first so the appropriate `craft-mcp` or `craft-mcp-full` command is on `PATH`; marketplace distribution additionally needs a controlled installer or remote HTTPS MCP and WorkBuddy review.
+`adapters/workbuddy-expert/` is a route-first WorkBuddy Expert upload package with `.codebuddy-plugin/plugin.json`, a PNG avatar, Agent definition, exactly one `craft-route` Skill, and a local Core MCP dependency. `adapters/workbuddy-connector/` is the separate full-governance Connector, also with only `craft-route`, and must not be uploaded to the Expert page. They share the same Craft state, Evidence, and Policy rather than fork capabilities. Install Craft first so the appropriate `craft-mcp` or `craft-mcp-full` command is on `PATH`; marketplace distribution additionally needs a controlled installer or remote HTTPS MCP and WorkBuddy review.
 
 ## Verification
 
