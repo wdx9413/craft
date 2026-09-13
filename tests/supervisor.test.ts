@@ -16,7 +16,8 @@ function noAuth(url: string): Promise<number> { return new Promise((resolve, rej
 test("local Supervisor owns Host processes across authenticated client calls", async () => {
   const f = await fixture("lifecycle"); const supervisor = new LocalSupervisor(f.service, f.paths, { heartbeatMs: 20 });
   try {
-    await assert.rejects(supervisor.start(-1), /port/); const state = await supervisor.start(0); await assert.rejects(supervisor.start(0), /already/);
+    await assert.rejects(supervisor.start(-1), /port/); await assert.rejects(supervisor.startOrReuse(-1), /port/); const state = await supervisor.start(0); await assert.rejects(supervisor.start(0), /already/);
+    const reused = await new LocalSupervisor(f.service, f.paths).startOrReuse(0); assert.equal(reused.owned, false); assert.equal(reused.state.url, state.url);
     const client = new SupervisorClient(f.paths); const health = await client.status(); assert.equal(health.status, "ok"); assert.equal(health.owner_id, f.service.hostRuns.ownerId); await new Promise((resolve) => setTimeout(resolve, 25));
     const task = f.service.taskOpen({ title: "supervised", goal: "run" }).task as JsonObject; f.service.codexDispatchPrepare({ dispatch_id: "dispatch", task_id: task.id, workspace: f.root, prompt: "inspect" });
     f.service.codexHost.executor = (execution) => new Promise((resolve) => execution.signal?.addEventListener("abort", () => resolve({ exitCode: null, signal: "SIGTERM", stdout: "", stderr: "", timedOut: false, cancelled: true, outputLimited: false }), { once: true }));

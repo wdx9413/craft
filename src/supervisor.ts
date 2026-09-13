@@ -43,6 +43,17 @@ export class LocalSupervisor {
     try { await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(port, "127.0.0.1", resolve); }); } catch (error) { await this.release(); throw error; }
     this.#server = server; const activePort = (server.address() as AddressInfo).port; const state = { status: "running", pid: process.pid, host: this.host, owner_id: this.ownerId, url: `http://127.0.0.1:${activePort}`, started_at: new Date().toISOString() }; await atomicPrivateJson(this.statePath, state); await this.heartbeat(); this.#heartbeat = setInterval(() => { this.#heartbeatWork = this.#heartbeatWork.then(() => this.heartbeat()); }, this.heartbeatMs); this.#heartbeat.unref(); return state;
   }
+  /** Start the local supervisor, or reuse a healthy one owned by another
+   * Craft process (for example the MCP host) without taking its lock. */
+  async startOrReuse(port = 0): Promise<{ state: JsonObject; owned: boolean }> {
+    try { return { state: await this.start(port), owned: true }; }
+    catch (error) {
+      if (!(error instanceof Error) || !error.message.includes("already running")) throw error;
+      const health = await new SupervisorClient(this.paths).status();
+      const state = JSON.parse(await readFile(this.statePath, "utf8")) as JsonObject;
+      return { state: { ...state, ...health }, owned: false };
+    }
+  }
   async close(): Promise<void> { if (this.#heartbeat) clearInterval(this.#heartbeat); this.#heartbeat = null; await this.#heartbeatWork; const server = this.#server; this.#server = null; if (server) await new Promise<void>((resolve) => server.close(() => resolve())); await this.release(); await atomicPrivateJson(this.statePath, { status: "stopped", pid: process.pid, host: this.host, owner_id: this.ownerId, stopped_at: new Date().toISOString() }); }
   private async acquire(retry = true): Promise<string | null> { try { const handle = await open(this.lockPath, "wx", 0o600); try { await handle.writeFile(JSON.stringify({ pid: process.pid, host: this.host, owner_id: this.ownerId, heartbeat_at: new Date().toISOString() })); } finally { await handle.close(); } return null; }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; if (!retry) throw new Error("Supervisor lock changed during recovery"); const previous = JSON.parse(await readFile(this.lockPath, "utf8")) as JsonObject; if (previous.host !== this.host || this.isProcessAlive(Number(previous.pid))) throw new Error("Craft Supervisor is already running"); const recovered = join(this.paths.runtimeDir, `supervisor.lock.recovered.${Date.now()}.${String(previous.owner_id)}.json`); await rename(this.lockPath, recovered); const moved = JSON.parse(await readFile(recovered, "utf8")) as JsonObject; assertSupervisorOwner(previous.owner_id, moved.owner_id); await this.acquire(false); return String(previous.owner_id); } }

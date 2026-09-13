@@ -7632,6 +7632,14 @@ function validLimit(limit2) {
   }
   return Math.max(1, limit2);
 }
+function storedSchemaVersion(database) {
+  try {
+    const row = database.prepare("SELECT value FROM meta WHERE key='schema_version'").get();
+    return Number(row?.value ?? 0);
+  } catch {
+    return 0;
+  }
+}
 var CraftStore = class {
   paths;
   #database = null;
@@ -7641,9 +7649,14 @@ var CraftStore = class {
   async open() {
     if (this.#database) return this;
     await ensureLayout(this.paths);
+    const existed = (0, import_node_fs4.existsSync)(this.paths.databaseFile);
     const database = new import_node_sqlite.DatabaseSync(this.paths.databaseFile);
     database.exec("PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA busy_timeout=15000;");
     try {
+      if (existed && storedSchemaVersion(database) < SCHEMA_VERSION) {
+        database.exec("PRAGMA wal_checkpoint(FULL)");
+        this.backup();
+      }
       applyMigrations(database, SCHEMA_VERSION);
     } catch (error) {
       database.close();

@@ -98,6 +98,20 @@ export class LocalSupervisor {
         this.#heartbeat.unref();
         return state;
     }
+    /** Start the local supervisor, or reuse a healthy one owned by another
+     * Craft process (for example the MCP host) without taking its lock. */
+    async startOrReuse(port = 0) {
+        try {
+            return { state: await this.start(port), owned: true };
+        }
+        catch (error) {
+            if (!(error instanceof Error) || !error.message.includes("already running"))
+                throw error;
+            const health = await new SupervisorClient(this.paths).status();
+            const state = JSON.parse(await readFile(this.statePath, "utf8"));
+            return { state: { ...state, ...health }, owned: false };
+        }
+    }
     async close() { if (this.#heartbeat)
         clearInterval(this.#heartbeat); this.#heartbeat = null; await this.#heartbeatWork; const server = this.#server; this.#server = null; if (server)
         await new Promise((resolve) => server.close(() => resolve())); await this.release(); await atomicPrivateJson(this.statePath, { status: "stopped", pid: process.pid, host: this.host, owner_id: this.ownerId, stopped_at: new Date().toISOString() }); }

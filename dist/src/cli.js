@@ -341,7 +341,7 @@ export async function main(args = process.argv.slice(2)) {
                 result = service.settingsUpdate(JSON.parse(option(args, "--json") ?? "{}"));
             else if (args[0] === "serve" || args[0] === "gui") {
                 const supervisor = new LocalSupervisor(service, paths);
-                await supervisor.start(0);
+                const supervisorRun = await supervisor.startOrReuse(0);
                 const server = new LocalWorkbenchServer(service);
                 try {
                     const started = await server.start(option(args, "--port") === undefined ? 4173 : Number(option(args, "--port")));
@@ -350,7 +350,8 @@ export async function main(args = process.argv.slice(2)) {
                 }
                 finally {
                     await server.close();
-                    await supervisor.close();
+                    if (supervisorRun.owned)
+                        await supervisor.close();
                 }
                 return;
             }

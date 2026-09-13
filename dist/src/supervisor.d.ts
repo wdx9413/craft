@@ -19,6 +19,12 @@ export declare class LocalSupervisor {
     private get lockPath();
     private get statePath();
     start(port?: number): Promise<JsonObject>;
+    /** Start the local supervisor, or reuse a healthy one owned by another
+     * Craft process (for example the MCP host) without taking its lock. */
+    startOrReuse(port?: number): Promise<{
+        state: JsonObject;
+        owned: boolean;
+    }>;
     close(): Promise<void>;
     private acquire;
     private heartbeat;
