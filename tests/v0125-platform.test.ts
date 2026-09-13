@@ -11,7 +11,7 @@ import { UsageKernel } from "../src/usage.ts";
 import { McpServer } from "../src/mcp.ts";
 import { WorkbenchWebApp } from "../src/workbench-server.ts";
 
-test("v0.12.5 settings persist, validate, and support a relocatable data root", async () => {
+test("settings persist, validate, and support a relocatable data root", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-settings-"));
   const paths = craftPaths(root);
   const initial = await loadSettings(paths);
@@ -43,7 +43,7 @@ test("v0.12.5 settings persist, validate, and support a relocatable data root", 
   assert.equal(dataRoot({ CRAFT_SETTINGS_FILE: bootstrap }), join(root, "from-settings"));
 });
 
-test("v0.12.5 usage report aggregates facts by day, ISO week, month, year, and host", async () => {
+test("usage report aggregates facts by day, ISO week, month, year, and host", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-usage-"));
   const store = await new CraftStore(craftPaths(root)).open();
   const usage = new UsageKernel(store);
@@ -83,7 +83,7 @@ test("v0.12.5 usage report aggregates facts by day, ISO week, month, year, and h
   }
 });
 
-test("v0.12.5 settings, usage, MCP, and Workbench surfaces are exposed", async () => {
+test("settings, usage, MCP, and Workbench surfaces are exposed", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-control-center-"));
   const store = await new CraftStore(craftPaths(root)).open();
   const service = new CraftService(store);

@@ -1,7 +1,7 @@
 import { CraftStore, type JsonObject } from "./store.ts";
 import { type EmbeddingProvider } from "./semantic.ts";
 import { ServiceFoundation } from "./service-foundation.ts";
-export declare const VERSION = "0.12.5";
+export declare const VERSION = "0.12.6";
 export declare class CraftService extends ServiceFoundation {
     constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter?: unknown, dockerSandbox?: unknown, egressBroker?: unknown, hostOwnerId?: string, hostProfiles?: readonly import("./host-registry.ts").HostProfile[], modelProviders?: readonly import("./model-gateway.ts").ModelProviderSpec[], modelTransport?: import("./model-gateway.ts").ModelTransport);
     /**
@@ -100,6 +100,11 @@ export declare class CraftService extends ServiceFoundation {
     experienceCandidateList(_args: JsonObject): JsonObject;
     taskOpen(args: JsonObject): JsonObject;
     taskList(args: JsonObject): JsonObject;
+    /** Compile the same natural-language intent for GUI, CLI, and every Host Adapter. */
+    intentCompile(args: JsonObject): JsonObject;
+    intentGet(args: JsonObject): JsonObject;
+    acceptanceCompile(args: JsonObject): JsonObject;
+    acceptanceContractGet(args: JsonObject): JsonObject;
     taskCheckpoint(args: JsonObject): JsonObject;
     workspaceOpen(args: JsonObject): JsonObject;
     workspaceGet(args: JsonObject): JsonObject;

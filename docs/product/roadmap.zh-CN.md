@@ -13,9 +13,9 @@
 
 ## 建设原则
 
-以 [产品架构](architecture.zh-CN.md) 的三大支柱为目标：工作与协作、执行与保障、学习与改进。**评测与实验是第三支柱内的核心模块**，不另设第四支柱。以下里程碑是规划；当前实现基线已推进到 v0.12.4。
+以 [产品架构](architecture.zh-CN.md) 的三大支柱为目标：工作与协作、执行与保障、学习与改进。**评测与实验是第三支柱内的核心模块**，不另设第四支柱。当前实现基线已推进到 v0.12.6。
 
-**v0.12.4：自主运行与平台化内核。** 本版增加受限 Provider-neutral Autonomous Runtime（步骤/Token 熔断、Action 结果、持久 Checkpoint、Resume、Cancel），统一 Capability 生命周期，Episodic→Semantic 记忆整合，HTTPS-only Remote Interop 契约，成员角色授权与内容无关观测导出。Full MCP 暴露这些能力，默认 syscall 面不扩张。真实 OS 沙箱、生产 A2A Transport、云端 Registry、OTel 和多用户身份仍必须由外部 Adapter/平台验收，不能将本地契约当作生产服务。
+**v0.12.6：通用意图与验收闭环。** 本版在 v0.12.4 的运行时基础上增加跨入口 Intent/Acceptance Contract 编译器：GUI、CLI、插件和专家对同一句目标得到相同的任务合同，覆盖率只是可插拔的程序验收器。Full MCP 暴露高级能力，默认 syscall 面保持低 Token。真实 OS 沙箱、生产 A2A Transport、云端 Registry、OTel 和多用户身份仍必须由外部 Adapter/平台验收，不能将本地契约当作生产服务。
 
 **v0.12.3：低 token 默认面与可恢复自主入口。** 默认 MCP 从 Core 收缩为固定 syscall 面（约 15 个工具），按 `resource + operation` 动态寻址；WorkBuddy、TraeWork、Expert 和本地 CLI 统一采用该边界，Full MCP 仍是显式的管理入口。本版增加 `craft run --resume` 对中断/运行中 dispatch 的显式重放保护，并同步所有接入层版本与发布包。真实容器隔离、远程 A2A transport、生产级 checkpoint、真实业务 Eval Runner 和云端服务仍属于后续部署能力，不在本版虚假宣称已完成。
 

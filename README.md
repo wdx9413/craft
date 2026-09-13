@@ -1,6 +1,6 @@
 # Craft
 
-> 当前发布版本：v0.12.5。所有宿主接入统一采用“Route-first”：Codex/Claude 插件、TraeWork、WorkBuddy Expert 默认只安装一个轻量 `craft-route` Skill，并连接约 15 个工具的 syscall MCP；`craft` 与 `craft-clarify` 是单独的可选包。Craft 现在也内置受限自主运行时、持久 Checkpoint、统一能力生命周期、记忆整合、HTTPS 远程互操作契约、可导出的观测记录，以及 Workbench 设置与 Token 用量控制中心。真实云端执行、市场审核和 OS 级隔离仍须由部署 Adapter 或平台审核完成，不能把本地契约伪装成已上线服务。
+> 当前发布版本：v0.12.6。所有宿主接入统一采用“Route-first”：Codex/Claude 插件、TraeWork、WorkBuddy Expert 默认只安装一个轻量 `craft-route` Skill，并连接低 Token syscall MCP；`craft` 与 `craft-clarify` 是单独的可选包。Craft 现在也提供通用 Intent/Acceptance Contract 编译器：同一自然语言目标可被 GUI、CLI、插件和专家解析成相同的任务合同，再进入受控执行、验收和证据闭环。真实云端执行、市场审核和 OS 级隔离仍须由部署 Adapter 或平台审核完成，不能把本地契约伪装成已上线服务。
 
 [中文](README.md) | [English](README.en.md)
 

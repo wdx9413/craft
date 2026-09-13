@@ -25,7 +25,7 @@ import { decideExecution } from "./execution-policy.js";
 import { dockerRequestDigest } from "./docker-sandbox.js";
 import { egressRequestDigest } from "./egress.js";
 import { ServiceFoundation } from "./service-foundation.js";
-export const VERSION = "0.12.5";
+export const VERSION = "0.12.6";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -294,7 +294,7 @@ export class CraftService extends ServiceFoundation {
             "external_effect", "external_effect_receipt", "effect_compensation", "effect_reconciliation", "effect_saga", "recovery_item",
             "trigger_subscription", "trigger_event", "speculative_policy", "speculative_candidate", "preference_signal", "lineage_edge", "dehydration_snapshot",
             "autonomy_policy", "autonomy_request", "autonomy_consumption",
-            "contract_observation", "contract_candidate",
+            "contract_observation", "contract_candidate", "task_intent", "acceptance_contract",
             "contract_publication",
             "capability_canary", "capability_canary_sample",
             "capability_bundle", "capability_release", "capability_subscription",
@@ -1289,6 +1289,11 @@ export class CraftService extends ServiceFoundation {
         return { tasks: this.store.list("task", Number(args.limit ?? 10), (item) => (status === undefined || item.status === status) &&
                 (args.project_id === undefined || item.project_id === args.project_id)) };
     }
+    /** Compile the same natural-language intent for GUI, CLI, and every Host Adapter. */
+    intentCompile(args) { return this.intentCompiler.compile(args); }
+    intentGet(args) { return this.intentCompiler.get(args); }
+    acceptanceCompile(args) { return this.intentCompiler.acceptanceCompile(args); }
+    acceptanceContractGet(args) { return this.intentCompiler.acceptanceGet(args); }
     taskCheckpoint(args) {
         const taskId = text(args.task_id, "task_id");
         const task = this.store.get("task", taskId);
