@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { type CraftPaths } from "./paths.ts";
-export declare const SCHEMA_VERSION = 3;
+export declare const SCHEMA_VERSION = 4;
 export type JsonObject = Record<string, unknown>;
 export type SaveEntry = {
     kind: string;
@@ -13,6 +13,16 @@ export declare class CraftStore {
     readonly paths: CraftPaths;
     constructor(paths?: CraftPaths);
     open(): Promise<this>;
+    /**
+     * Apply pending migrations to an already-open database. Returns a
+     * description of what changed. Caller is responsible for closing the
+     * connection if they want to re-open from disk after a rollback.
+     */
+    applyMigrationsNow(target?: number, options?: {
+        dryRun?: boolean;
+    }): import("./store-migrations.ts").ApplyResult;
+    /** Copy the live database file to `paths.backupsDir`. */
+    backup(backupsDir?: string): string;
     get database(): DatabaseSync;
     transaction<T>(operation: (database: DatabaseSync) => T): T;
     legacyDatabaseDetected(): boolean;

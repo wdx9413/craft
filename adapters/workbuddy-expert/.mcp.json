@@ -2,8 +2,8 @@
   "mcpServers": {
     "craft": {
       "type": "stdio",
-      "command": "craft-mcp",
-      "args": [],
+      "command": "node",
+      "args": ["${CODEBUDDY_PLUGIN_ROOT}/bin/craft-mcp.cjs", "--surface", "syscall"],
       "timeout": 30000,
       "x-workbuddy": {
         "displayName": {

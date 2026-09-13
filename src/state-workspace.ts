@@ -14,7 +14,10 @@ function nested(root: string, path: string): string { const target = resolve(roo
   if (relative(root, target).startsWith("..")) throw new Error("workspace state path escapes root");
   return target;
 }
-function kind(stat: Pick<Stats, "isFile" | "isDirectory">, path: string): "file" | "directory" { if (stat.isFile()) return "file"; if (stat.isDirectory()) return "directory"; throw new Error(`state adapters support regular files only: ${path}`); }
+// Windows exposes no filesystem entry that is neither a regular file, a
+// directory, nor a link, so the guard below can only be reached on POSIX.
+// Exporting it keeps that branch covered on every platform.
+export function kind(stat: Pick<Stats, "isFile" | "isDirectory">, path: string): "file" | "directory" { if (stat.isFile()) return "file"; if (stat.isDirectory()) return "directory"; throw new Error(`state adapters support regular files only: ${path}`); }
 function files(root: string, path: string): Entry[] {
   const target = nested(root, path); if (!existsSync(target)) return [];
   const stat = lstatSync(target); if (stat.isSymbolicLink()) throw new Error(`state adapters do not follow symbolic links: ${path}`);

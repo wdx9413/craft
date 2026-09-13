@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { configureSemanticSearch, initializeConfig, loadConfig, setMode, type InitInput } from "../src/config.ts";
 import { atomicPrivateJson, craftPaths, dataRoot, ensureLayout } from "../src/paths.ts";
+import type { JsonObject } from "../src/store.ts";
 
 async function temporaryRoot(): Promise<string> {
   const root = join(tmpdir(), `craft-ts-${process.pid}-${Date.now()}-${Math.random()}`);
@@ -76,6 +77,7 @@ test("configuration rejects unsafe or incomplete values", async () => {
   const root = await temporaryRoot();
   const paths = craftPaths(root);
   try {
+    await assert.rejects(() => setMode("agent", paths), /not initialized/);
     await assert.rejects(() => initializeConfig({ mode: "bad" as never }, paths), /Unsupported Craft mode/);
     await assert.rejects(() => initializeConfig({ mode: "agent", runtimeKind: "bad" as never }, paths), /Unsupported runtime/);
     await assert.rejects(() => initializeConfig({ mode: "agent", runtimeKind: "direct-api" }, paths), /requires provider/);
@@ -104,7 +106,11 @@ test("configuration rejects unsafe or incomplete values", async () => {
       }, paths), /without credentials/);
     }
     await assert.rejects(() => initializeConfig({ mode: "supervisor", supervisorHosts: ["bad" as never] }, paths), /Unsupported supervisor host/);
-    await assert.rejects(() => setMode("agent", paths), /not initialized/);
+    // Declared hostProfiles let custom supervisor hosts through; a declared host
+    // that doesn't match the supervisorHosts list still rejects.
+    await assert.rejects(() => initializeConfig({ mode: "supervisor", supervisorHosts: ["custom"] as never, hostProfiles: [{ host: "other", kind: "agent-cli", command: "x", output_format: "text", argv_template: ["x"] }] }, paths), /Unsupported supervisor host/);
+    const withHost = await initializeConfig({ mode: "supervisor", supervisorHosts: ["custom"] as never, hostProfiles: [{ host: "custom", kind: "agent-cli", command: "x", output_format: "text", argv_template: ["x"] }] }, paths);
+    assert.equal(withHost.hostProfiles?.length, 1);
     await ensureLayout(paths);
     await writeFile(paths.configFile, "[]");
     await assert.rejects(() => loadConfig(paths), /must be an object/);
@@ -151,6 +157,24 @@ test("dataRoot honors CRAFT_DATA_DIR", () => {
   assert.equal(dataRoot({ CRAFT_DATA_DIR: "./custom" }), join(process.cwd(), "custom"));
   assert.equal(dataRoot({ CRAFT_DATA_DIR: "  " }), join(homedir(), ".craft_data"));
   assert.equal(craftPaths().root, dataRoot());
+});
+
+test("loadConfig re-validates hostProfiles persisted on disk", async () => {
+  const root = await temporaryRoot();
+  const paths = craftPaths(root);
+  try {
+    await initializeConfig({ mode: "supervisor", supervisorHosts: ["custom"] as never, hostProfiles: [{ host: "custom", kind: "agent-cli", command: "x", output_format: "text", argv_template: ["x"] }] }, paths);
+    const loaded = await loadConfig(paths);
+    assert.ok(loaded);
+    assert.equal((loaded?.hostProfiles as JsonObject[]).length, 1);
+    // A saved config whose declared hostProfiles no longer covers its supervisor hosts must fail closed.
+    const base = { schemaVersion: 1, activeMode: "agent", initializedAt: "now", updatedAt: "now",
+      runtime: { kind: "unconfigured" }, supervisor: { hosts: ["custom"] },
+      storage: { database: "db", capabilityIndex: "index" } };
+    await ensureLayout(paths);
+    await writeFile(paths.configFile, JSON.stringify(base));
+    await assert.rejects(() => loadConfig(paths), /invalid supervisor hosts/);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
 
 test("optional semantic search is versioned, validated, and can be disabled", async () => {

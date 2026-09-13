@@ -32,7 +32,12 @@ import { AttentionKernel } from "./attention.js";
 import { HomeKernel } from "./home.js";
 import { CodexHostKernel } from "./codex-driver.js";
 import { ClaudeHostKernel } from "./claude-driver.js";
+import { GenericCliHostKernel } from "./generic-driver.js";
 import { HostRunKernel } from "./host-run.js";
+import { mergeHostProfiles } from "./host-registry.js";
+import { InternalHostDriver } from "./internal-host-driver.js";
+import { MetricsKernel } from "./metrics.js";
+import { PROVIDER_CATALOG } from "./model-gateway.js";
 import { KnowledgeBoundLaunchKernel } from "./knowledge-bound-launch.js";
 import { KnowledgeWorkbenchKernel } from "./knowledge-workbench.js";
 import { WikiCandidateGovernanceKernel } from "./wiki-candidate-governance.js";
@@ -107,7 +112,10 @@ export class ServiceFoundation {
     home;
     codexHost;
     claudeHost;
+    hostProfiles;
+    hostDrivers;
     hostRuns;
+    hostDriver(host) { return this.hostDrivers.get(host); }
     knowledgeLaunch;
     knowledgeWorkbench;
     wikiCandidateGovernance;
@@ -143,7 +151,10 @@ export class ServiceFoundation {
     evaluationOperations;
     enterpriseAccess;
     a2aDelegation;
-    constructor(store, semanticProvider, isolatedAdapter = new LocalIsolatedAdapter(), dockerSandbox = new DockerSandboxAdapter(), egressBroker = new TrustedEgressBroker(), hostOwnerId) {
+    modelProviders;
+    internalHost;
+    metrics;
+    constructor(store, semanticProvider, isolatedAdapter = new LocalIsolatedAdapter(), dockerSandbox = new DockerSandboxAdapter(), egressBroker = new TrustedEgressBroker(), hostOwnerId, hostProfiles, modelProviders, modelTransport) {
         this.store = store;
         this.catalog = new Catalog(store, semanticProvider);
         this.isolatedAdapter = isolatedAdapter;
@@ -178,6 +189,18 @@ export class ServiceFoundation {
         this.home = new HomeKernel(store, this.attention);
         this.codexHost = new CodexHostKernel(store);
         this.claudeHost = new ClaudeHostKernel(store);
+        this.hostProfiles = mergeHostProfiles([...(hostProfiles ?? [])]);
+        this.modelProviders = modelProviders && modelProviders.length ? modelProviders : PROVIDER_CATALOG;
+        this.internalHost = new InternalHostDriver(store, { providers: this.modelProviders, transport: modelTransport,
+            invokeAction: (action, args) => this.invokeInternalAction(action, args) });
+        const drivers = [
+            ["codex-cli", this.codexHost],
+            ["claude-code", this.claudeHost],
+            ["internal", this.internalHost],
+            ...this.hostProfiles.filter((profile) => !profile.builtin && profile.kind === "agent-cli")
+                .map((profile) => [profile.host, new GenericCliHostKernel(store, profile)]),
+        ];
+        this.hostDrivers = new Map(drivers);
         this.knowledgeLaunch = new KnowledgeBoundLaunchKernel(store);
         this.knowledgeWorkbench = new KnowledgeWorkbenchKernel(store);
         this.wikiCandidateGovernance = new WikiCandidateGovernanceKernel(store);
@@ -198,7 +221,7 @@ export class ServiceFoundation {
         this.projectKnowledge = new ProjectKnowledgeKernel(store);
         this.capabilityConnectors = new CapabilityConnectorKernel(store);
         this.capabilityAccess = new CapabilityAccessKernel(store, this.catalog);
-        this.hostActivationManifests = new HostActivationManifestKernel(store);
+        this.hostActivationManifests = new HostActivationManifestKernel(store, this.hostProfiles);
         this.executionFabric = new ExecutionFabricKernel(store);
         this.hostBridge = new HostBridgeKernel(store);
         this.managedWrites = new ManagedWriteKernel(store, this.transaction, this.workspace);
@@ -213,7 +236,8 @@ export class ServiceFoundation {
         this.evaluationOperations = new EvaluationOperationsKernel(store, this.evalCampaigns);
         this.enterpriseAccess = new EnterpriseAccessKernel(store);
         this.a2aDelegation = new A2ADelegationKernel(store);
-        this.hostRuns = new HostRunKernel(store, [this.codexHost, this.claudeHost], hostOwnerId, (run, receipt) => this.finalizeWorkLaunch(run, receipt));
+        this.metrics = new MetricsKernel(store);
+        this.hostRuns = new HostRunKernel(store, [...this.hostDrivers.values()], hostOwnerId, (run, receipt) => this.finalizeWorkLaunch(run, receipt));
     }
 }
 //# sourceMappingURL=service-foundation.js.map

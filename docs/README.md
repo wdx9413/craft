@@ -56,6 +56,10 @@
 - [A2A Discovery](technical/modules/a2a-discovery.md)：以不可信、只读 Receipt 发现 HTTPS Agent Card，不委派任务或授予权限。
 - [Delivery Control Loop](technical/modules/delivery-control-loop.md)：将终态回执、独立验收、可恢复下一动作、脱敏批量比较和可选平台预检连接为受限闭环。
 - [Task Control](technical/modules/task-control.md)：用不可变任务契约把启动、回执、验收、交付和交接收敛为一个可复算的下一安全动作。
+- [Tool Plane：通用动词与资源注册表](technical/modules/tool-plane.md)：工具面 O(1)、能力走数据的 syscall 接入面。
+- [Model Gateway：声明式模型接入](technical/modules/model-gateway.md)：8 家模型族的声明、分层选择与纯函数请求/响应。
+- [Internal Host：Craft 自己跑循环](technical/modules/internal-host.md)：第三个 Host Driver 与六道熔断。
+- [Asset Envelope、路由与跨模型可比性](technical/modules/asset-routing.md)：三类资产的统一信封、只读路由与跨模型闸门。
 - [Task Run、平台 Conformance 与 Benchmark](technical/modules/task-run-benchmark.md)：把一个真实 Host 工作收敛为可恢复运行记录，并以同环境、同预算的交付对照形成受门禁候选。
 - [可验证执行与演进平台](technical/modules/evolution-platform.md)：范围内本地写入恢复、Campaign 报告、Evidence Canary 与最小 Harness 推荐。
 - [Managed Run 与 Evaluation Lab](technical/modules/managed-run-evaluation-lab.md)：长任务的引用化交接、只读 Shadow、显式 Campaign 槽位与校准 Judge Gate。
@@ -65,6 +69,11 @@
 ## 研究证据
 
 - [工作台用户诉求与行业决策（2026-09-08）](research/workbench-user-needs-2026-09-08.md)：原帖、官方进展、研究边界及对 Craft 的影响；不是市场统计。
+- [Agent Runtime / Harness 下一阶段业界调研（2026-09-11）](research/industry-agent-runtime-next-2026-09-11.md)：理想态五个面、N1–N4 切片与真实进展。
+- [Agent-Native 运行时理想态调研（2026-09-09）](research/agent-native-runtime-ideal-state-2026-09-09.md)：受限自由、五面架构与不建议现在做的事。
+- [v0.11.63 差距分析与迭代方案（2026-09-12）](research/craft-next-version-plan-2026-09-12.md)：工具面分片的依据与实施记录。
+- [N1 验收报告（2026-09-12）](research/n1-acceptance-report-2026-09-12.md)：六项验收 40/40 与诚实边界。
+- [**v0.12.1 方案（2026-09-13）**](research/craft-v0.12.1-plan-2026-09-13.md)：syscall 工具面、模型网关、内建宿主、资产路由与跨模型可比性的完整方案与依据。
 - [自适应 Harness 研究基线](research/self-adaptive-harness-closed-loop-2026-09-08.md)：较早版本的研究记录，实施状态以当前模块说明为准。
 
 ## 当前实现参考

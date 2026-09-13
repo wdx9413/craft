@@ -31,6 +31,8 @@ jobs:
         run: pnpm run build:plugin
       - name: Build DeepSeek adapter
         run: pnpm run build:deepseek
+      - name: Package host adapters
+        run: pnpm run pack:adapters
       - name: Typecheck
         run: pnpm run typecheck
       - name: Unit tests and 100% coverage

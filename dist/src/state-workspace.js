@@ -15,7 +15,10 @@ function nested(root, path) {
         throw new Error("workspace state path escapes root");
     return target;
 }
-function kind(stat, path) { if (stat.isFile())
+// Windows exposes no filesystem entry that is neither a regular file, a
+// directory, nor a link, so the guard below can only be reached on POSIX.
+// Exporting it keeps that branch covered on every platform.
+export function kind(stat, path) { if (stat.isFile())
     return "file"; if (stat.isDirectory())
     return "directory"; throw new Error(`state adapters support regular files only: ${path}`); }
 function files(root, path) {

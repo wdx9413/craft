@@ -70,8 +70,8 @@ test("managed Host runs cancel only inside their owning process", async () => {
 test("Host run recovery is explicit and failures remain attributable", async () => {
   const f = await fixture("recovery");
   try {
-    const rejecting: HostDriver = { host: "codex-cli", prepare: (args) => args, execute: async (_args, options) => new Promise((_resolve, reject) => { options?.signal?.addEventListener("abort", () => reject(new Error("driver crash")), { once: true }); }) };
-    const unknown: HostDriver = { host: "claude-code", prepare: (args) => args, execute: async () => { throw "driver crash"; } };
+    const rejecting: HostDriver = { host: "codex-cli", dispatchKind: "codex_dispatch", prepare: (args) => args, execute: async (_args, options) => new Promise((_resolve, reject) => { options?.signal?.addEventListener("abort", () => reject(new Error("driver crash")), { once: true }); }) };
+    const unknown: HostDriver = { host: "claude-code", dispatchKind: "claude_dispatch", prepare: (args) => args, execute: async () => { throw "driver crash"; } };
     let projections = 0; const kernel = new HostRunKernel(f.store, [rejecting, unknown], undefined, () => { projections += 1; if (projections === 1) throw new Error("projection failed"); throw "projection failed"; });
     f.store.create("codex_dispatch", "crash", { task_id: f.task.id, status: "prepared" });
     f.store.create("claude_dispatch", "unknown", { task_id: f.task.id, status: "prepared" });

@@ -10,12 +10,21 @@ import { addCosts, dispatchNodes, normalizeNodes, orchestrationOutcome, planStat
 import { aggregateEvaluation, compareEvaluationAggregates } from "./evaluation.js";
 import { publishSkill, rollbackSkillPublication } from "./skill-publisher.js";
 import { loadConfig } from "./config.js";
+import { hostProfilesFromConfig, resolveHostProfile } from "./host-registry.js";
+import { actionDigest, beginLoop, budgetBand, defineLoopLimits } from "./agent-loop.js";
+import { assetRef, defineAsset, routeAssets } from "./assets.js";
+import { compareAcrossModels, defineTrials } from "./model-independence.js";
+import { credentialStatus, publicProvider, selectModel, unconfiguredTransport } from "./model-gateway.js";
 import { OpenAiCompatibleEmbeddingProvider } from "./semantic.js";
+import { discoverWorkflows, diffWorkflowCatalog, planWorkflowRetirement } from "./workflow-registry.js";
+import { KnowledgeIndex, diffKnowledgeBase, scanKnowledgeBase } from "./knowledge-index.js";
+import { classifyComplexity, createBudgetState, estimatePromptTokens, routeModel, spendTokens, truncateToBudget } from "./token-budget.js";
+import { defaultHooks, defineHooks, runHooks } from "./hooks.js";
 import { decideExecution } from "./execution-policy.js";
 import { dockerRequestDigest } from "./docker-sandbox.js";
 import { egressRequestDigest } from "./egress.js";
 import { ServiceFoundation } from "./service-foundation.js";
-export const VERSION = "0.11.62";
+export const VERSION = "0.12.1";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -194,10 +203,76 @@ function binomial(n, k) {
     return value;
 }
 export class CraftService extends ServiceFoundation {
+    constructor(store, semanticProvider, isolatedAdapter, dockerSandbox, egressBroker, hostOwnerId, hostProfiles, modelProviders, modelTransport) {
+        super(store, semanticProvider, isolatedAdapter, dockerSandbox, egressBroker, hostOwnerId, hostProfiles, modelProviders, modelTransport);
+    }
+    /**
+     * The only operations the internal host may invoke.
+     *
+     * Read-and-record only: a loop Craft runs itself must not be able to reach an
+     * operation a governed host would have needed an approval for. Anything absent
+     * here fails closed, so widening the loop's authority is always an explicit
+     * edit to this list rather than a side effect of a registry change.
+     */
+    async invokeInternalAction(action, args) {
+        const permitted = {
+            capability_search: (input) => this.capabilitySearch(input),
+            knowledge_search: (input) => this.knowledgeSearch(input),
+            task_checkpoint: (input) => this.taskCheckpoint(input),
+            evidence_record: (input) => this.evidenceRecord(input),
+            artifact_register: (input) => this.artifactRegister(input),
+        };
+        const handler = permitted[action];
+        if (!handler)
+            throw new Error(`Internal host action is not permitted: ${action}`);
+        return handler(args);
+    }
+    modelProviderList() {
+        return { count: this.modelProviders.length,
+            configured: this.modelProviders.filter((spec) => credentialStatus(spec).configured).length,
+            providers: this.modelProviders.map((spec) => publicProvider(spec)) };
+    }
+    modelProviderGet(args) {
+        const provider = text(args.provider, "provider");
+        const spec = this.modelProviders.find((item) => item.provider === provider);
+        if (!spec)
+            throw new Error(`Unknown model provider: ${provider}`);
+        const tier = args.tier === undefined ? undefined : String(args.tier);
+        return { provider: publicProvider(spec),
+            ...(tier === undefined ? {} : { selection: selectModel(spec, tier) }),
+            transport_installed: this.internalHost.transport !== unconfiguredTransport };
+    }
+    /** Where the circuit breakers would sit for a given plan, without running anything. */
+    agentLoopPlan(args) {
+        const limits = defineLoopLimits((args.limits ?? {}));
+        const state = beginLoop(0);
+        return { limits, band: budgetBand(state, limits), action_digest_example: actionDigest("capability_search", { query: "x" }),
+            guards: ["step_limit", "token_limit", "wall_clock", "no_progress", "repeated_action", "budget_fuse"] };
+    }
+    /** Route one task to the smallest credible set of declared assets. Read-only: it selects, it does not activate. */
+    assetRoute(args) {
+        const assets = Array.isArray(args.assets) ? args.assets.map((item) => defineAsset(item)) : [];
+        // A missing declaration is a mistake, not an empty catalog.
+        if (!Array.isArray(args.assets))
+            throw new Error("asset_route requires an assets array");
+        const signals = args.signals;
+        const decision = routeAssets(signals, assets);
+        return { ...decision, selected: decision.selected.map((asset) => ({ ...asset, ref: assetRef(asset) })),
+            baseline: decision.baseline ? assetRef(decision.baseline) : null };
+    }
+    /** Compare one subject's trials across models; a single model is reported inconclusive rather than passed. */
+    modelIndependenceCompare(args) {
+        const trials = defineTrials(args.trials);
+        const invariants = Array.isArray(args.invariants) ? args.invariants.map((item) => String(item)) : [];
+        if (!Array.isArray(args.invariants))
+            throw new Error("model_independence_compare requires an invariants array");
+        return { ...compareAcrossModels(trials, invariants) };
+    }
     static async open(store, hostOwnerId) {
         const config = await loadConfig(store.paths);
         const semanticProvider = config?.semanticSearch ? new OpenAiCompatibleEmbeddingProvider(config.semanticSearch.provider) : undefined;
-        return new CraftService(store, semanticProvider, undefined, undefined, undefined, hostOwnerId);
+        const declared = hostProfilesFromConfig(config?.hostProfiles);
+        return new CraftService(store, semanticProvider, undefined, undefined, undefined, hostOwnerId, declared);
     }
     info() {
         const kinds = ["source", "capability", "task", "checkpoint", "feedback", "artifact",
@@ -1820,13 +1895,14 @@ export class CraftService extends ServiceFoundation {
     }
     async capabilityContextDispatchPrepare(args) {
         const host = text(args.host, "host");
-        if (!new Set(["codex-cli", "claude-code"]).has(host))
+        const driver = this.hostDriver(host);
+        if (!driver)
             throw new Error("Capability-context dispatch host is unsupported");
         const bound = await this.activationBoundPrompt(args);
         const dispatchArgs = { ...args, prompt: bound.prompt };
-        const prepared = host === "codex-cli" ? this.codexHost.prepare(dispatchArgs) : this.claudeHost.prepare(dispatchArgs);
+        const prepared = driver.prepare(dispatchArgs);
         const dispatch = prepared.dispatch;
-        const saved = this.store.save(host === "codex-cli" ? "codex_dispatch" : "claude_dispatch", String(dispatch.id), {
+        const saved = this.store.save(driver.dispatchKind, String(dispatch.id), {
             ...recordPayload(dispatch), activation_plan_id: bound.plan.id, activation_plan_version: bound.plan.version,
             activation_context_digest: bound.context_digest, activation_max_chars: bound.max_chars, activation_resolution_id: bound.resolution.id,
         });
@@ -1834,16 +1910,16 @@ export class CraftService extends ServiceFoundation {
     }
     async capabilityContextDispatchExecute(args) {
         const host = text(args.host, "host");
-        const kind = host === "codex-cli" ? "codex_dispatch" : host === "claude-code" ? "claude_dispatch" : null;
-        if (!kind)
+        const driver = this.hostDriver(host);
+        if (!driver)
             throw new Error("Capability-context dispatch host is unsupported");
-        const dispatch = this.store.get(kind, text(args.dispatch_id, "dispatch_id"));
+        const dispatch = this.store.get(driver.dispatchKind, text(args.dispatch_id, "dispatch_id"));
         if (typeof dispatch.activation_plan_id !== "string" || typeof dispatch.activation_context_digest !== "string")
             throw new Error("Dispatch has no capability context binding");
         const bound = await this.activationBoundPrompt({ task_id: dispatch.task_id, prompt: document(args.prompt, "prompt"), plan_id: dispatch.activation_plan_id, max_chars: dispatch.activation_max_chars });
         if (bound.context_digest !== dispatch.activation_context_digest)
             throw new Error("Capability context changed since dispatch preparation");
-        const result = host === "codex-cli" ? await this.codexHost.execute({ ...args, prompt: bound.prompt }) : await this.claudeHost.execute({ ...args, prompt: bound.prompt });
+        const result = await driver.execute({ ...args, prompt: bound.prompt });
         return { ...result, resolution: bound.resolution };
     }
     async capabilityContextWorkLaunchPrepare(args) {
@@ -1852,8 +1928,8 @@ export class CraftService extends ServiceFoundation {
         const launch = prepared.launch;
         const dispatch = prepared.dispatch;
         const savedLaunch = this.store.save("work_launch", String(launch.id), { ...recordPayload(launch), activation_plan_id: bound.plan.id, activation_plan_version: bound.plan.version, activation_context_digest: bound.context_digest, activation_max_chars: bound.max_chars, activation_resolution_id: bound.resolution.id });
-        const kind = savedLaunch.host === "codex-cli" ? "codex_dispatch" : "claude_dispatch";
-        const savedDispatch = this.store.save(kind, String(dispatch.id), { ...recordPayload(dispatch), activation_plan_id: bound.plan.id, activation_plan_version: bound.plan.version, activation_context_digest: bound.context_digest, activation_max_chars: bound.max_chars, activation_resolution_id: bound.resolution.id });
+        const driver = this.requireHostDriver(String(savedLaunch.host));
+        const savedDispatch = this.store.save(driver.dispatchKind, String(dispatch.id), { ...recordPayload(dispatch), activation_plan_id: bound.plan.id, activation_plan_version: bound.plan.version, activation_context_digest: bound.context_digest, activation_max_chars: bound.max_chars, activation_resolution_id: bound.resolution.id });
         return { ...prepared, launch: savedLaunch, dispatch: savedDispatch, resolution: bound.resolution };
     }
     async capabilityContextWorkLaunchDecide(args) {
@@ -1892,7 +1968,8 @@ export class CraftService extends ServiceFoundation {
         if (!new Set(["failed", "cancelled", "interrupted"]).has(String(previous.effective_status)))
             throw new Error("Only a failed, cancelled, or interrupted launch can be retried");
         const binding = object(previous.knowledge_binding, "Work Launch knowledge binding");
-        const dispatch = this.store.get(previous.host === "codex-cli" ? "codex_dispatch" : "claude_dispatch", String(previous.dispatch_id));
+        const driver = this.requireHostDriver(String(previous.host));
+        const dispatch = this.store.get(driver.dispatchKind, String(previous.dispatch_id));
         const acceptance = previous.acceptance_plan_id ? this.store.get("acceptance_plan", String(previous.acceptance_plan_id)) : null;
         return this.knowledgeContextWorkLaunchPrepareSync({ task_id: previous.task_id, host: previous.host, workspace: previous.workspace, sandbox: previous.sandbox,
             prompt: document(args.prompt, "prompt"), bundle_id: binding.bundle_id, bundle_version: binding.bundle_version, now: args.now,
@@ -1909,12 +1986,12 @@ export class CraftService extends ServiceFoundation {
     knowledgeWorkbenchWorkLaunchRetry(args) { return this.knowledgeContextWorkLaunchRetrySync(args); }
     hostRunStart(args) {
         const host = text(args.host, "host");
-        const kind = host === "codex-cli" ? "codex_dispatch" : host === "claude-code" ? "claude_dispatch" : null;
-        if (!kind)
+        const driver = this.hostDriver(host);
+        if (!driver)
             throw new Error("Host run host is unsupported");
         if (args.run_id !== undefined && this.store.find("host_run", text(args.run_id, "run_id")))
             return this.hostRuns.start(args);
-        const dispatch = this.store.get(kind, text(args.dispatch_id, "dispatch_id"));
+        const dispatch = this.store.get(driver.dispatchKind, text(args.dispatch_id, "dispatch_id"));
         if (dispatch.knowledge_binding !== undefined)
             throw new Error("Knowledge-bound dispatch must start through its Knowledge Work Launch");
         return this.hostRuns.start(args);
@@ -2677,14 +2754,27 @@ export class CraftService extends ServiceFoundation {
         }
         return this.store.save("work_launch", String(launch.id), { ...recordPayload(launch), platform_execution_preflight: binding });
     }
+    /**
+     * A launch records the host it was prepared against, but a host profile can be
+     * removed from config afterwards. Every consumer therefore resolves the driver
+     * through here so the "this launch references a host that no longer exists"
+     * case fails closed in exactly one place instead of five copies.
+     */
+    requireHostDriver(host) {
+        const driver = this.hostDriver(host);
+        if (!driver)
+            throw new Error(`Work launch host is unsupported: ${host}`);
+        return driver;
+    }
     validateSafetyLaunch(launch) {
         const binding = object(launch.safety_preflight, "Work Launch safety preflight");
         const checked = this.executionSafety.validate({ preflight_id: binding.preflight_id, version: binding.preflight_version });
         const platform = launch.platform_execution_preflight;
         if (platform)
             this.platformExecution.validate({ preflight_id: platform.preflight_id, version: platform.preflight_version });
-        const dispatch = this.store.get(launch.host === "codex-cli" ? "codex_dispatch" : "claude_dispatch", String(launch.dispatch_id));
-        const contract = { timeout_ms: dispatch.timeout_ms, output_limit: dispatch.output_limit, max_turns: launch.host === "claude-code" ? dispatch.max_turns : null, max_budget_usd: launch.host === "claude-code" ? dispatch.max_budget_usd : null };
+        const driver = this.requireHostDriver(String(launch.host));
+        const dispatch = this.store.get(driver.dispatchKind, String(launch.dispatch_id));
+        const contract = { timeout_ms: dispatch.timeout_ms, output_limit: dispatch.output_limit, max_turns: dispatch.max_turns ?? null, max_budget_usd: dispatch.max_budget_usd ?? null };
         if (valueDigest(contract) !== valueDigest(checked.preflight.resources))
             throw new Error("Safety preflight resource contract does not match Work Launch dispatch");
     }
@@ -2747,8 +2837,7 @@ export class CraftService extends ServiceFoundation {
     workLaunchPrepare(args) { return this.workLaunchPrepareInternal(args); }
     workLaunchPrepareInternal(args, knowledgeBinding) {
         const host = text(args.host, "host");
-        if (!new Set(["codex-cli", "claude-code"]).has(host))
-            throw new Error("Work launch host is unsupported");
+        const driver = this.requireHostDriver(host);
         const sandbox = String(args.sandbox ?? "read-only");
         if (!new Set(["read-only", "workspace-write"]).has(sandbox))
             throw new Error("Work launch sandbox is unsupported");
@@ -2760,15 +2849,15 @@ export class CraftService extends ServiceFoundation {
         if (existing) {
             if (existing.host !== host || existing.sandbox !== sandbox || existing.workspace !== workspace || existing.prompt_digest !== valueDigest(prompt) || (existing.deferred_start === true) !== deferredStart || valueDigest(existing.knowledge_binding ?? null) !== valueDigest(knowledgeBinding ?? null))
                 throw new Error("Work launch idempotency conflict");
-            return { launch: existing, task: this.store.get("task", String(existing.task_id)), dispatch: this.store.get(host === "codex-cli" ? "codex_dispatch" : "claude_dispatch", String(existing.dispatch_id)), approval_required: existing.status === "awaiting_approval", idempotent: true };
+            return { launch: existing, task: this.store.get("task", String(existing.task_id)), dispatch: this.store.get(driver.dispatchKind, String(existing.dispatch_id)), approval_required: existing.status === "awaiting_approval", idempotent: true };
         }
         const task = args.task_id ? this.store.get("task", text(args.task_id, "task_id")) : this.taskOpen({ title: args.title, goal: args.goal, project_id: args.project_id }).task;
-        const dispatchId = `${host === "codex-cli" ? "codex_dispatch" : "claude_dispatch"}_${launchId}`;
-        const common = { dispatch_id: dispatchId, task_id: task.id, workspace, prompt, sandbox, model: args.model, timeout_ms: args.timeout_ms, output_limit: args.output_limit };
-        let dispatch = (host === "codex-cli" ? this.codexDispatchPrepare(common) : this.claudeDispatchPrepare({ ...common, max_turns: args.max_turns, max_budget_usd: args.max_budget_usd })).dispatch;
+        const dispatchId = `${driver.dispatchKind}_${launchId}`;
+        const common = { dispatch_id: dispatchId, task_id: task.id, workspace, prompt, sandbox, model: args.model, timeout_ms: args.timeout_ms, output_limit: args.output_limit, max_turns: args.max_turns, max_budget_usd: args.max_budget_usd };
+        let dispatch = (driver.prepare(common)).dispatch;
         if (knowledgeBinding)
-            dispatch = this.store.save(host === "codex-cli" ? "codex_dispatch" : "claude_dispatch", String(dispatch.id), { ...recordPayload(dispatch), knowledge_binding: knowledgeBinding });
-        let launch = this.store.create("work_launch", launchId, { task_id: task.id, host, dispatch_id: dispatch.id, workspace: dispatch.workspace, sandbox, prompt_digest: dispatch.prompt_digest, retry_of: args.retry_of ?? null, deferred_start: deferredStart, status: sandbox === "workspace-write" ? "awaiting_approval" : "prepared", ...(knowledgeBinding ? { knowledge_binding: knowledgeBinding } : {}) });
+            dispatch = this.store.save(driver.dispatchKind, String(dispatch.id), { ...recordPayload(dispatch), knowledge_binding: knowledgeBinding });
+        let launch = this.store.create("work_launch", launchId, { task_id: task.id, host, dispatch_id: dispatch.id, dispatch_kind: driver.dispatchKind, workspace: dispatch.workspace, sandbox, prompt_digest: dispatch.prompt_digest, retry_of: args.retry_of ?? null, deferred_start: deferredStart, status: sandbox === "workspace-write" ? "awaiting_approval" : "prepared", ...(knowledgeBinding ? { knowledge_binding: knowledgeBinding } : {}) });
         const trial = this.trialStart({ trial_id: `trial_${launchId}`, task_id: task.id, subject_type: "work_launch", subject_id: launchId, subject_version: launch.version, environment: { host, workspace: dispatch.workspace, sandbox, dispatch_id: dispatch.id, dispatch_version: dispatch.version, ...(knowledgeBinding ? { knowledge_binding: knowledgeBinding } : {}) }, budget: {} });
         this.trialTraceAppend({ trial_id: trial.id, event_type: "work_launch.prepared", source: "craft_runtime", data: { launch_id: launchId, dispatch_id: dispatch.id, host, sandbox, ...(knowledgeBinding ? { knowledge_bundle_id: knowledgeBinding.bundle_id, knowledge_bundle_version: knowledgeBinding.bundle_version, knowledge_context_digest: knowledgeBinding.context_digest } : {}) } });
         launch = this.store.save("work_launch", launchId, { ...recordPayload(launch), trial_id: trial.id });
@@ -2800,7 +2889,8 @@ export class CraftService extends ServiceFoundation {
         if (valueDigest(prompt) !== launch.prompt_digest)
             throw new Error("Work launch prompt does not match the prepared digest");
         const policy = this.autonomyPolicySave({ policy_id: `launch_policy_${launch.id}`, task_id: launch.task_id, name: "Workbench workspace write", rules: { sandbox_write: { level: "human_approval" } } }).policy;
-        const authorization = this.autonomyRequest({ request_id: `launch_authorization_${launch.id}`, policy_id: policy.id, policy_version: policy.version, task_id: launch.task_id, action: "sandbox_write", target: launch.workspace, request_digest: this.store.get(String(launch.host) === "codex-cli" ? "codex_dispatch" : "claude_dispatch", String(launch.dispatch_id)).request_digest, requested_by: "craft_workbench" }).request;
+        const driver = this.requireHostDriver(String(launch.host));
+        const authorization = this.autonomyRequest({ request_id: `launch_authorization_${launch.id}`, policy_id: policy.id, policy_version: policy.version, task_id: launch.task_id, action: "sandbox_write", target: launch.workspace, request_digest: this.store.get(driver.dispatchKind, String(launch.dispatch_id)).request_digest, requested_by: "craft_workbench" }).request;
         this.autonomyDecide({ request_id: authorization.id, decision: "approve", actor, approval_ref: `work_launch:${launch.id}` });
         const started = knowledgeBinding ? this.hostRuns.start({ host: launch.host, dispatch_id: launch.dispatch_id, prompt, authorization_request_id: authorization.id }) : this.hostRunStart({ host: launch.host, dispatch_id: launch.dispatch_id, prompt, authorization_request_id: authorization.id });
         const run = started.run;
@@ -3097,7 +3187,152 @@ export class CraftService extends ServiceFoundation {
     enterpriseAccessTicketGet(args) { return this.enterpriseAccess.get(args); }
     workLaunchRetry(args) { const previous = this.workLaunchGet({ launch_id: args.launch_id }).launch; if (previous.knowledge_binding !== undefined)
         throw new Error("Knowledge-bound Work Launch must retry through its Knowledge Work Launch"); if (!new Set(["failed", "cancelled", "interrupted"]).has(String(previous.effective_status)))
-        throw new Error("Only a failed, cancelled, or interrupted launch can be retried"); const task = this.store.get("task", String(previous.task_id)); const dispatch = this.store.get(previous.host === "codex-cli" ? "codex_dispatch" : "claude_dispatch", String(previous.dispatch_id)); const acceptance = previous.acceptance_plan_id ? this.store.get("acceptance_plan", String(previous.acceptance_plan_id)) : null; return this.workLaunchPrepare({ task_id: task.id, host: previous.host, workspace: previous.workspace, sandbox: previous.sandbox, prompt: args.prompt, launch_id: args.new_launch_id === undefined ? undefined : text(args.new_launch_id, "new_launch_id"), retry_of: previous.id, model: args.model ?? dispatch.model ?? undefined, timeout_ms: args.timeout_ms ?? dispatch.timeout_ms, output_limit: args.output_limit ?? dispatch.output_limit, max_turns: args.max_turns ?? dispatch.max_turns, max_budget_usd: args.max_budget_usd ?? dispatch.max_budget_usd ?? undefined, acceptance_name: acceptance?.name, acceptance_criteria: acceptance?.criteria }); }
+        throw new Error("Only a failed, cancelled, or interrupted launch can be retried"); const task = this.store.get("task", String(previous.task_id)); const driver = this.requireHostDriver(String(previous.host)); const dispatch = this.store.get(driver.dispatchKind, String(previous.dispatch_id)); const acceptance = previous.acceptance_plan_id ? this.store.get("acceptance_plan", String(previous.acceptance_plan_id)) : null; return this.workLaunchPrepare({ task_id: task.id, host: previous.host, workspace: previous.workspace, sandbox: previous.sandbox, prompt: args.prompt, launch_id: args.new_launch_id === undefined ? undefined : text(args.new_launch_id, "new_launch_id"), retry_of: previous.id, model: args.model ?? dispatch.model ?? undefined, timeout_ms: args.timeout_ms ?? dispatch.timeout_ms, output_limit: args.output_limit ?? dispatch.output_limit, max_turns: args.max_turns ?? dispatch.max_turns, max_budget_usd: args.max_budget_usd ?? dispatch.max_budget_usd ?? undefined, acceptance_name: acceptance?.name, acceptance_criteria: acceptance?.criteria }); }
+    hostProfileList() { return { profiles: this.hostProfiles.map((profile) => ({ host: profile.host, label: profile.label, kind: profile.kind, command: profile.command, output_format: profile.output_format, dispatch_kind: profile.dispatch_kind, models: profile.models, default_model: profile.default_model, builtin: profile.builtin })) }; }
+    hostProfileResolve(args) { const profile = resolveHostProfile(this.hostProfiles, text(args.host, "host")); return { profile: { host: profile.host, label: profile.label, kind: profile.kind, command: profile.command, output_format: profile.output_format, dispatch_kind: profile.dispatch_kind, models: profile.models, default_model: profile.default_model, builtin: profile.builtin } }; }
+    workflowRegistryScan(args) {
+        const root = text(args.project_root, "project_root");
+        const descriptors = discoverWorkflows(root, { limit: args.limit === undefined ? undefined : finiteInteger(args.limit, "limit", 1, 1, 1000) });
+        return { descriptors, count: descriptors.length };
+    }
+    workflowRetirementPlan(args) {
+        const workflowIds = args.workflow_ids === undefined ? [] : array(args.workflow_ids, "workflow_ids").map((item) => text(item, "workflow_ids"));
+        const runs = this.store.list("workflow_run", Number.MAX_SAFE_INTEGER);
+        const usage = new Map();
+        for (const run of runs) {
+            const id = String(run.workflow_id);
+            if (workflowIds.length && !workflowIds.includes(id))
+                continue;
+            const entry = usage.get(id) ?? { workflow_id: id, uses: 0, successes: 0, last_used_at: null };
+            entry.uses += 1;
+            if (run.status === "passed")
+                entry.successes += 1;
+            entry.last_used_at = String(run.created_at);
+            usage.set(id, entry);
+        }
+        const policy = args.policy && typeof args.policy === "object" && !Array.isArray(args.policy) ? args.policy : {};
+        const override = {};
+        if (policy.min_uses !== undefined)
+            override.min_uses = finiteInteger(policy.min_uses, "min_uses", 0, 0, Number.MAX_SAFE_INTEGER);
+        if (policy.stale_days !== undefined)
+            override.stale_days = finiteInteger(policy.stale_days, "stale_days", 1, 1, Number.MAX_SAFE_INTEGER);
+        if (policy.min_success_rate !== undefined)
+            override.min_success_rate = Number(policy.min_success_rate);
+        const decisions = planWorkflowRetirement([...usage.values()], { now: text(args.now ?? new Date().toISOString(), "now"), policy: override });
+        return { decisions, total: decisions.length };
+    }
+    knowledgeIndex() { return new KnowledgeIndex(this.store.paths.knowledgeIndex ?? `${this.store.paths.root}/knowledge-index.sqlite`); }
+    knowledgeIndexSync(args) {
+        const root = text(args.project_root, "project_root");
+        const index = this.knowledgeIndex();
+        try {
+            const current = scanKnowledgeBase(root, { limit: args.limit === undefined ? undefined : finiteInteger(args.limit, "limit", 1, 1, 2000) });
+            const previous = index.catalog();
+            const plan = diffKnowledgeBase(previous, current);
+            const result = index.apply(plan, root);
+            return { ...result, plan: { added: plan.added.length, changed: plan.changed.length, removed: plan.removed.length } };
+        }
+        finally {
+            index.close();
+        }
+    }
+    knowledgeSearch(args) {
+        const index = this.knowledgeIndex();
+        try {
+            return { hits: index.search(text(args.query, "query"), { limit: args.limit === undefined ? undefined : finiteInteger(args.limit, "limit", 1, 1, 100) }) };
+        }
+        finally {
+            index.close();
+        }
+    }
+    /** Declare where a knowledge document belongs and, optionally, when it stops being trustworthy. */
+    knowledgeScopeSet(args) {
+        const entries = array(args.entries, "entries").map((item) => {
+            if (!item || typeof item !== "object" || Array.isArray(item))
+                throw new Error("knowledge scope entries must be objects");
+            return item;
+        });
+        const index = this.knowledgeIndex();
+        try {
+            return { entries: index.setScope(entries) };
+        }
+        finally {
+            index.close();
+        }
+    }
+    knowledgeScopeList(args) {
+        const index = this.knowledgeIndex();
+        try {
+            const scope = args.scope === undefined ? undefined : String(args.scope);
+            return { entries: index.scopeCatalog(scope), expired: index.expired() };
+        }
+        finally {
+            index.close();
+        }
+    }
+    /** Forget expired documents from the rebuildable projection. Markdown files are never touched. */
+    knowledgeScopeForget() {
+        const index = this.knowledgeIndex();
+        try {
+            return index.forgetExpired();
+        }
+        finally {
+            index.close();
+        }
+    }
+    /** Read-only projection of runs, outcomes and cost per successful outcome. */
+    metricsReport(args = {}) {
+        return { ...this.metrics.report(args) };
+    }
+    /**
+     * Evaluate the launch gates for one payload.
+     *
+     * This is the observable half of hook hardening: it answers "would the default
+     * gates let this through, and why" without running anything. It is also the
+     * seam a deployment uses to add its own `fail_closed` check, which is why it
+     * accepts explicit hooks rather than only the defaults.
+     */
+    async launchGate(args) {
+        const hooks = args.hooks === undefined ? defaultHooks() : defineHooks(args.hooks);
+        const payload = (args.payload && typeof args.payload === "object" && !Array.isArray(args.payload))
+            ? args.payload : {};
+        const result = await runHooks(hooks, "before_effect", payload, { invoke: (hook) => {
+                if (hook.kind === "builtin")
+                    return { ok: true };
+                return { ok: false, detail: "Command hook execution requires an external invoker" };
+            } });
+        return { blocked: result.blocked, point: "before_effect",
+            outcomes: result.outcomes.map((outcome) => ({ ...outcome })) };
+    }
+    executionBudgetPlan(args) {
+        const host = text(args.host, "host");
+        const profile = resolveHostProfile(this.hostProfiles, host);
+        const texts = array(args.texts ?? [], "texts").map((item) => text(item, "texts"));
+        const estimated = estimatePromptTokens(texts);
+        const budget = createBudgetState(finiteInteger(args.limit, "limit", 1, 1, 10_000_000), args.reserve === undefined ? 0 : finiteInteger(args.reserve, "reserve", 0, 0, 10_000_000));
+        const spent = spendTokens(budget, estimated);
+        const complexity = classifyComplexity({ steps: finiteInteger(args.steps ?? 0, "steps", 0, 0, 1000), distinct_paths: finiteInteger(args.distinct_paths ?? 0, "distinct_paths", 0, 0, 1000), context_chars: texts.reduce((sum, item) => sum + item.length, 0), requires_external_write: args.requires_external_write === true, requires_multi_step_reasoning: args.requires_multi_step_reasoning === true });
+        const tiers = (args.tiers && typeof args.tiers === "object" && !Array.isArray(args.tiers)) ? args.tiers : {};
+        const routing = routeModel({ host, models: tiers, tier: complexity });
+        return { estimated_tokens: estimated, budget: spent.state, exceeded: spent.exceeded, remaining: spent.remaining, complexity, routing, truncation: args.max_result_tokens === undefined ? null : truncateToBudget(texts.join("\n"), finiteInteger(args.max_result_tokens, "max_result_tokens", 1, 1, 10_000_000)) };
+    }
+    hookCatalog(args) {
+        const hooks = defineHooks(args.hooks);
+        const point = text(args.point, "point");
+        return { hooks: hooks.filter((hook) => hook.point === point), point };
+    }
+    async hookRun(args) {
+        const hooks = defineHooks(args.hooks);
+        const point = text(args.point, "point");
+        const payload = (args.payload && typeof args.payload === "object" && !Array.isArray(args.payload)) ? args.payload : {};
+        const result = await runHooks(hooks, point, payload, { invoke: (hook, p) => {
+                if (hook.kind === "builtin")
+                    return { ok: true };
+                // Command hooks are not executed from the service; the caller must supply an executor.
+                return { ok: false, detail: "Command hook execution requires an external invoker" };
+            } });
+        return { outcomes: result.outcomes, blocked: result.blocked };
+    }
     finalizeWorkLaunch(run, receipt) {
         const launch = this.store.list("work_launch", 10_000, (item) => item.run_id === run.id)[0];
         if (!launch?.trial_id || this.store.find("outcome", `outcome_${launch.trial_id}`)) {

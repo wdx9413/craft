@@ -12,6 +12,7 @@ export interface CraftPaths {
     backupsDir: string;
     runtimeDir: string;
     artifactsDir: string;
+    knowledgeIndex: string;
 }
 export declare function dataRoot(env?: NodeJS.ProcessEnv): string;
 export declare function craftPaths(root?: string): CraftPaths;

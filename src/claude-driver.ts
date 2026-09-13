@@ -3,8 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { AutonomyKernel } from "./autonomy.ts";
-import { executeCodex } from "./codex-driver.ts";
-import type { HostDriver, HostExecutor, HostExecutionResult, HostOutputObserver, HostSandbox } from "./host-driver.ts";
+import { executeHostProcess, type HostDriver, type HostExecutor, type HostExecutionResult, type HostOutputObserver, type HostSandbox } from "./host-driver.ts";
 import { CraftStore, type JsonObject } from "./store.ts";
 
 function text(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim(); }
@@ -27,8 +26,8 @@ function parse(stdout: string): { events: JsonObject[]; invalidLines: number; se
 }
 
 export class ClaudeHostKernel implements HostDriver {
-  readonly host = "claude-code"; readonly store: CraftStore; executor: HostExecutor;
-  constructor(store: CraftStore, executor: HostExecutor = executeCodex) { this.store = store; this.executor = executor; }
+  readonly host = "claude-code"; readonly dispatchKind = "claude_dispatch"; readonly store: CraftStore; executor: HostExecutor;
+  constructor(store: CraftStore, executor: HostExecutor = executeHostProcess) { this.store = store; this.executor = executor; }
 
   prepare(args: JsonObject): JsonObject {
     const task = this.store.get("task", text(args.task_id, "task_id")); const prompt = text(args.prompt, "prompt"); const workspace = resolve(text(args.workspace, "workspace"));

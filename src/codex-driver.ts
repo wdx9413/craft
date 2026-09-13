@@ -1,11 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
-import { spawn } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { AutonomyKernel } from "./autonomy.ts";
 import { CraftStore, type JsonObject } from "./store.ts";
-import type { HostDriver, HostExecutionRequest, HostExecutionResult, HostExecutor, HostOutputObserver, HostSandbox } from "./host-driver.ts";
+import { executeHostProcess, type HostDriver, type HostExecutionRequest, type HostExecutionResult, type HostExecutor, type HostOutputObserver, type HostSandbox } from "./host-driver.ts";
 
 export type CodexSandbox = HostSandbox;
 export type CodexExecutionRequest = HostExecutionRequest;
@@ -18,19 +17,10 @@ function digest(value: unknown): string { return `sha256:${createHash("sha256").
 function redact(value: string): string { return value.replace(/(?:api[_-]?key|authorization|cookie|password|secret|token)\s*[:=]\s*[^\s]+/giu, "[redacted]"); }
 function payload(record: JsonObject): JsonObject { const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record; return rest; }
 
-export const executeCodex: CodexExecutor = async (request) => new Promise((accept, reject) => {
-  const child = spawn(request.executable, request.argv, { cwd: request.cwd, shell: false, windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
-  let stdout = ""; let stderr = ""; let outputLimited = false; let timedOut = false; let cancelled = false;
-  const append = (current: string, chunk: Buffer): string => { const next = current + chunk.toString("utf8"); if (Buffer.byteLength(next) <= request.outputLimit) return next; outputLimited = true; return Buffer.from(next).subarray(0, request.outputLimit).toString("utf8"); };
-  const observed = (stream: "stdout" | "stderr", chunk: Buffer) => request.observe?.({ stream, bytes: chunk.length, digest: digest(chunk.toString("utf8")) });
-  child.stdout.on("data", (chunk: Buffer) => { stdout = append(stdout, chunk); observed("stdout", chunk); });
-  child.stderr.on("data", (chunk: Buffer) => { stderr = append(stderr, chunk); observed("stderr", chunk); });
-  child.once("error", (error) => { clearTimeout(timer); reject(error); });
-  const timer = setTimeout(() => { timedOut = true; child.kill(); }, request.timeoutMs);
-  const abort = () => { cancelled = true; child.kill(); }; request.signal?.addEventListener("abort", abort, { once: true }); if (request.signal?.aborted) abort();
-  child.once("close", (exitCode, signal) => { clearTimeout(timer); request.signal?.removeEventListener("abort", abort); accept({ exitCode, signal, stdout, stderr, timedOut, cancelled, outputLimited }); });
-  child.stdin.end(request.stdin);
-});
+// The bounded child-process runner lives in host-driver.ts so every host driver
+// shares one sandbox/output-limit/cancellation implementation. `executeCodex`
+// stays exported because it is the injectable seam the Codex tests replace.
+export const executeCodex: CodexExecutor = executeHostProcess;
 
 function parseEvents(stdout: string): { events: JsonObject[]; invalidLines: number; threadId: string | null; finalMessage: string | null; usage: JsonObject | null } {
   const events: JsonObject[] = []; let invalidLines = 0;
@@ -45,6 +35,7 @@ function parseEvents(stdout: string): { events: JsonObject[]; invalidLines: numb
 
 export class CodexHostKernel implements HostDriver {
   readonly host = "codex-cli";
+  readonly dispatchKind = "codex_dispatch";
   readonly store: CraftStore; executor: CodexExecutor;
   constructor(store: CraftStore, executor: CodexExecutor = executeCodex) { this.store = store; this.executor = executor; }
 

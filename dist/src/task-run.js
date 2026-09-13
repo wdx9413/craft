@@ -18,7 +18,9 @@ export class TaskRunKernel {
         const launch = current(this.store, "work_launch", args.launch_id);
         if (digest([contract.status, contract.launch_id, contract.task_id]) !== digest(["active", launch.id, launch.task_id]))
             throw new Error("Task Run requires an active Task Control contract bound to the Work Launch");
-        const dispatchKind = { "codex-cli": "codex_dispatch", "claude-code": "claude_dispatch" }[String(launch.host)] ?? null;
+        const dispatchKind = launch.dispatch_kind
+            ?? { "codex-cli": "codex_dispatch", "claude-code": "claude_dispatch" }[String(launch.host)]
+            ?? null;
         if (!dispatchKind)
             throw new Error("Task Run host is unsupported");
         const dispatch = current(this.store, dispatchKind, launch.dispatch_id);

@@ -36,10 +36,18 @@ export class VerifiedWorkLoopKernel {
         const changed = previous.snapshot_digest !== snapshot.snapshot_digest || previous.workspace_state_revision !== snapshot.workspace_state_revision;
         const hostTerminal = ["ready_for_delivery", "awaiting_acceptance", "recovery", "blocked"].includes(String(state.status));
         const status = loop.lifecycle === "needs_replan" || (changed && !hostTerminal) || state.status === "needs_replan" ? "needs_replan" : state.status;
-        const reason = status === "needs_replan" ? (changed ? "workspace_changed_without_terminal_receipt" : "task_run_drift") : null;
+        // An explicit human decision is the first and most specific cause of a replan,
+        // so a later observation must not overwrite it with a derived one.
+        const priorReason = loop.lifecycle === "needs_replan" ? String(loop.needs_replan_reason) : null;
+        const reason = status === "needs_replan" ? (priorReason ?? (changed ? "workspace_changed_without_terminal_receipt" : "task_run_drift")) : null;
         const saved = this.store.save("verified_work_loop", String(loop.id), { ...payload(loop), latest_snapshot_id: snapshot.id, latest_task_run_state_id: state.id, lifecycle: status === "needs_replan" ? "needs_replan" : loop.lifecycle, needs_replan_reason: reason });
-        const receiptId = String(args.receipt_id ?? `work_loop_receipt_${saved.id}_${snapshot.version}_${state.version}`);
         const identity = { work_loop_id: saved.id, work_loop_version: saved.version, task_run_state_id: state.id, task_run_state_version: state.version, snapshot_id: snapshot.id, snapshot_version: snapshot.version, status, reason };
+        // A receipt must describe exactly one observation. Record versions repeat across
+        // observations, so the default id is derived from the observation itself: replaying
+        // the same state and snapshot stays idempotent, while a new snapshot, status or
+        // reason can never reuse an older receipt.
+        const observation = { task_run_state_id: state.id, snapshot_id: snapshot.id, status, reason };
+        const receiptId = String(args.receipt_id ?? `work_loop_receipt_${saved.id}_${digest(observation).slice(-16)}`);
         const receipt = this.store.find("verified_work_loop_receipt", receiptId) ?? this.store.create("verified_work_loop_receipt", receiptId, { ...identity, receipt_digest: digest(identity) });
         return { loop: saved, state: { status, action: status === "needs_replan" ? "replan" : state.action, actor: status === "needs_replan" ? "human" : state.actor }, receipt };
     }

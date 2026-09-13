@@ -3,7 +3,7 @@ import { McpServer } from "./mcp.ts";
 import { CraftService } from "./service.ts";
 import { CraftStore, type JsonObject } from "./store.ts";
 
-type Mode = "core" | "full";
+type Mode = string;
 type Server = Pick<McpServer, "handle">;
 type Start = (mode: Mode) => Promise<{ server: Server; close: () => void }>;
 

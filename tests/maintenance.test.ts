@@ -26,7 +26,10 @@ test("local worker owns one cross-platform lock, heartbeats, stops, and reports 
   assert.deepEqual(result, { status: "stopped", ticks: 2 }); assert.equal(waits, 1); assert.equal(afterTicks, 2); assert.equal((await worker.status()).status, "stopped");
   assert.equal(await worker.run({ maxTicks: 1 }).then((item) => item.ticks), 1);
   const controller = new AbortController(); controller.abort(); assert.equal((await worker.run({ maxTicks: 1, signal: controller.signal })).ticks, 0);
-  const live = new AbortController(); setTimeout(() => live.abort(), 50); assert.equal((await worker.run({ intervalMs: 100, maxTicks: 2, signal: live.signal })).ticks, 1);
+  // The abort must land while the default wait is pending, not while the first
+  // tick is still doing file I/O. A 50ms abort raced that work under parallel
+  // test load, which skipped the default wait and left it uncovered.
+  const live = new AbortController(); setTimeout(() => live.abort(), 250); assert.equal((await worker.run({ intervalMs: 10_000, maxTicks: 2, signal: live.signal })).ticks, 1);
   await writeFile(path.join(f.paths.runtimeDir, "maintenance-worker.json"), "not-json"); await assert.rejects(() => worker.status(), SyntaxError);
   await assert.rejects(() => worker.run({ intervalMs: 99 }), /interval_ms/); await assert.rejects(() => worker.run({ maxTicks: 0 }), /max_ticks/); f.store.close();
 });

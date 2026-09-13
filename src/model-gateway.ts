@@ -1,0 +1,212 @@
+import type { JsonObject } from "./store.ts";
+
+/**
+ * The model gateway.
+ *
+ * Craft's second shape is running the loop itself instead of handing work to
+ * Codex or Claude. That needs a provider abstraction, and the first thing a
+ * provider abstraction must get right is where the secret lives: Craft stores
+ * the *name* of the environment variable that holds a key, never the key. This
+ * module therefore contains no credential values at all — a configured provider
+ * is one whose environment variable happens to be set at run time.
+ *
+ * Nothing here performs I/O. Rendering a request and parsing a response are pure
+ * functions so they can be verified without a network, which is also what lets
+ * the eight provider families ship before any key exists.
+ */
+
+export type ModelProtocol = "openai-compatible" | "anthropic";
+export type ModelTier = "small" | "standard" | "frontier";
+
+export interface ModelProviderSpec {
+  provider: string;
+  label: string;
+  protocol: ModelProtocol;
+  base_url: string;
+  api_key_env: string;
+  chat_path: string;
+  models: Partial<Record<ModelTier, string>>;
+  /** Relative price hint used only to order providers; never presented as a real quote. */
+  cost_hint: number;
+  supports_tools: boolean;
+}
+
+export interface ChatMessage { role: "system" | "user" | "assistant"; content: string }
+export interface ChatRequest { url: string; headers: JsonObject; body: JsonObject; prompt_tokens_estimate: number }
+export interface ChatResult { text: string; model: string | null; usage: { input_tokens: number; output_tokens: number } | null }
+
+const PROVIDER_NAME = /^[a-z][a-z0-9-]{0,31}$/u;
+const ENV_NAME = /^[A-Z_][A-Z0-9_]*$/u;
+
+/**
+ * The provider families Craft declares support for. Each row is a data
+ * declaration: adding a vendor is a row, not a code path.
+ *
+ * Anthropic is the one native non-OpenAI wire format in this list; every other
+ * vendor exposes an OpenAI-compatible surface, including the Chinese clouds.
+ */
+export const PROVIDER_CATALOG: readonly ModelProviderSpec[] = [
+  { provider: "deepseek", label: "DeepSeek", protocol: "openai-compatible", base_url: "https://api.deepseek.com/v1",
+    api_key_env: "DEEPSEEK_API_KEY", chat_path: "/chat/completions",
+    models: { small: "deepseek-chat", standard: "deepseek-chat", frontier: "deepseek-reasoner" }, cost_hint: 1, supports_tools: true },
+  { provider: "volcengine", label: "火山引擎方舟", protocol: "openai-compatible", base_url: "https://ark.cn-beijing.volces.com/api/v3",
+    api_key_env: "ARK_API_KEY", chat_path: "/chat/completions",
+    models: { small: "doubao-lite", standard: "doubao-pro", frontier: "doubao-pro-32k" }, cost_hint: 2, supports_tools: true },
+  { provider: "qwen", label: "通义千问", protocol: "openai-compatible", base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    api_key_env: "DASHSCOPE_API_KEY", chat_path: "/chat/completions",
+    models: { small: "qwen-turbo", standard: "qwen-plus", frontier: "qwen-max" }, cost_hint: 2, supports_tools: true },
+  { provider: "kimi", label: "Kimi (Moonshot)", protocol: "openai-compatible", base_url: "https://api.moonshot.cn/v1",
+    api_key_env: "MOONSHOT_API_KEY", chat_path: "/chat/completions",
+    models: { small: "moonshot-v1-8k", standard: "moonshot-v1-32k", frontier: "moonshot-v1-128k" }, cost_hint: 2, supports_tools: true },
+  { provider: "glm", label: "智谱 GLM", protocol: "openai-compatible", base_url: "https://open.bigmodel.cn/api/paas/v4",
+    api_key_env: "ZHIPU_API_KEY", chat_path: "/chat/completions",
+    models: { small: "glm-4-flash", standard: "glm-4-air", frontier: "glm-4-plus" }, cost_hint: 1, supports_tools: true },
+  { provider: "minimax", label: "MiniMax", protocol: "openai-compatible", base_url: "https://api.minimax.chat/v1",
+    api_key_env: "MINIMAX_API_KEY", chat_path: "/text/chatcompletion_v2",
+    models: { standard: "abab6.5s-chat", frontier: "abab6.5-chat" }, cost_hint: 2, supports_tools: false },
+  { provider: "gpt", label: "OpenAI GPT", protocol: "openai-compatible", base_url: "https://api.openai.com/v1",
+    api_key_env: "OPENAI_API_KEY", chat_path: "/chat/completions",
+    models: { small: "gpt-4o-mini", standard: "gpt-4o", frontier: "gpt-4.1" }, cost_hint: 6, supports_tools: true },
+  { provider: "claude", label: "Anthropic Claude", protocol: "anthropic", base_url: "https://api.anthropic.com/v1",
+    api_key_env: "ANTHROPIC_API_KEY", chat_path: "/messages",
+    models: { small: "claude-haiku-4", standard: "claude-sonnet-4", frontier: "claude-opus-4" }, cost_hint: 7, supports_tools: true },
+];
+
+const TIER_ORDER: readonly ModelTier[] = ["frontier", "standard", "small"];
+
+function text(value: unknown, name: string): string {
+  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
+  return value.trim();
+}
+
+function httpUrl(value: unknown, name: string): string {
+  const raw = text(value, name);
+  let url: URL;
+  try { url = new URL(raw); }
+  catch { throw new Error(`${name} must be a valid HTTP(S) URL`); }
+  if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
+    throw new Error(`${name} must be an HTTP(S) URL without credentials or query data`);
+  }
+  return raw.replace(/\/+$/u, "");
+}
+
+/** Validate one declaration. A provider without any model tier is useless, so it fails closed. */
+export function defineProvider(input: JsonObject): ModelProviderSpec {
+  const provider = text(input.provider, "provider");
+  if (!PROVIDER_NAME.test(provider)) throw new Error(`Unsupported provider name: ${provider}`);
+  const protocol = text(input.protocol, "protocol");
+  if (!["openai-compatible", "anthropic"].includes(protocol)) throw new Error(`Unsupported provider protocol: ${protocol}`);
+  const apiKeyEnv = text(input.api_key_env, "api_key_env");
+  if (!ENV_NAME.test(apiKeyEnv)) throw new Error("api_key_env must be an uppercase environment-variable name");
+  const rawModels = (input.models ?? {}) as JsonObject;
+  if (typeof rawModels !== "object" || Array.isArray(rawModels)) throw new Error("provider models must be an object");
+  const models: Partial<Record<ModelTier, string>> = {};
+  for (const tier of TIER_ORDER) {
+    const value = rawModels[tier];
+    if (value === undefined || value === null) continue;
+    models[tier] = text(value, `models.${tier}`);
+  }
+  if (!Object.keys(models).length) throw new Error("provider must declare at least one model tier");
+  const supportsTools = input.supports_tools ?? true;
+  if (typeof supportsTools !== "boolean") throw new Error("supports_tools must be a boolean");
+  const costHint = input.cost_hint === undefined ? 1 : Number(input.cost_hint);
+  if (!Number.isFinite(costHint) || costHint < 0) throw new Error("cost_hint must be a non-negative number");
+  return { provider, label: input.label === undefined ? provider : text(input.label, "label"),
+    protocol: protocol as ModelProtocol, base_url: httpUrl(input.base_url, "base_url"), api_key_env: apiKeyEnv,
+    chat_path: input.chat_path === undefined ? (protocol === "anthropic" ? "/messages" : "/chat/completions") : text(input.chat_path, "chat_path"),
+    models, cost_hint: costHint, supports_tools: supportsTools };
+}
+
+/**
+ * Pick a model for a tier, walking *down* so a missing tier degrades to a cheaper
+ * one instead of silently paying for a stronger model than the task asked for.
+ */
+export function selectModel(spec: ModelProviderSpec, tier: ModelTier): { tier: ModelTier; model: string; downgraded: boolean } {
+  if (!TIER_ORDER.includes(tier)) throw new Error(`Unsupported model tier: ${String(tier)}`);
+  for (let index = TIER_ORDER.indexOf(tier); index < TIER_ORDER.length; index += 1) {
+    const candidate = TIER_ORDER[index];
+    const model = spec.models[candidate];
+    if (model) return { tier: candidate, model, downgraded: candidate !== tier };
+  }
+  throw new Error(`Provider ${spec.provider} declares no usable model tier`);
+}
+
+/** A provider is usable when its declared environment variable holds a value. No secret is ever returned. */
+export function credentialStatus(spec: ModelProviderSpec, env: NodeJS.ProcessEnv = process.env): { provider: string; api_key_env: string; configured: boolean } {
+  const value = env[spec.api_key_env];
+  return { provider: spec.provider, api_key_env: spec.api_key_env, configured: typeof value === "string" && value.length > 0 };
+}
+
+/** Public, secret-free view of a provider, which is what every read surface returns. */
+export function publicProvider(spec: ModelProviderSpec, env: NodeJS.ProcessEnv = process.env): JsonObject {
+  return { label: spec.label, protocol: spec.protocol, base_url: spec.base_url,
+    models: spec.models, cost_hint: spec.cost_hint, supports_tools: spec.supports_tools,
+    ...credentialStatus(spec, env) };
+}
+
+/**
+ * Render a request for the two wire formats. Only the shape is built here; the
+ * API key is read at call time from the environment by the transport, so it can
+ * never end up inside a stored record.
+ */
+export function buildChatRequest(spec: ModelProviderSpec, options: {
+  model: string; messages: ChatMessage[]; max_tokens?: number; temperature?: number;
+}): ChatRequest {
+  const model = text(options.model, "model");
+  if (!Array.isArray(options.messages) || !options.messages.length) throw new Error("chat request requires at least one message");
+  const messages = options.messages.map((message, index) => {
+    if (!message || typeof message !== "object") throw new Error(`chat message ${index} must be an object`);
+    if (!["system", "user", "assistant"].includes(message.role)) throw new Error(`chat message ${index} has an unsupported role`);
+    if (typeof message.content !== "string") throw new Error(`chat message ${index} content must be a string`);
+    return { role: message.role, content: message.content };
+  });
+  const promptChars = messages.reduce((total, message) => total + message.content.length, 0);
+  const promptTokensEstimate = Math.max(1, Math.ceil(promptChars / 4));
+  const headers: JsonObject = { "content-type": "application/json" };
+  let body: JsonObject;
+  if (spec.protocol === "anthropic") {
+    headers["anthropic-version"] = "2023-06-01";
+    const system = messages.filter((message) => message.role === "system").map((message) => message.content).join("\n\n");
+    body = { model, max_tokens: options.max_tokens ?? 4_096,
+      messages: messages.filter((message) => message.role !== "system").map((message) => ({ role: message.role, content: message.content })),
+      ...(system ? { system } : {}) };
+  } else {
+    headers.authorization = `Bearer $${spec.api_key_env}`;
+    body = { model, messages, max_tokens: options.max_tokens ?? 4_096,
+      ...(options.temperature === undefined ? {} : { temperature: options.temperature }) };
+  }
+  return { url: `${spec.base_url}${spec.chat_path}`, headers, body, prompt_tokens_estimate: promptTokensEstimate };
+}
+
+/** Normalize either wire format into text plus usage. A malformed payload fails closed. */
+export function parseChatResponse(spec: ModelProviderSpec, payload: unknown): ChatResult {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error("Model response must be an object");
+  const body = payload as JsonObject;
+  if (spec.protocol === "anthropic") {
+    const blocks = Array.isArray(body.content) ? body.content as JsonObject[] : [];
+    const text = blocks.filter((block) => block.type === "text").map((block) => String(block.text ?? "")).join("");
+    if (!text) throw new Error("Anthropic response contained no text block");
+    const usage = body.usage as JsonObject | undefined;
+    return { text, model: body.model === undefined ? null : String(body.model),
+      usage: usage ? { input_tokens: Number(usage.input_tokens ?? 0), output_tokens: Number(usage.output_tokens ?? 0) } : null };
+  }
+  const choices = Array.isArray(body.choices) ? body.choices as JsonObject[] : [];
+  const message = choices[0]?.message as JsonObject | undefined;
+  if (!message || typeof message.content !== "string") throw new Error("OpenAI-compatible response contained no message content");
+  const usage = body.usage as JsonObject | undefined;
+  return { text: message.content, model: body.model === undefined ? null : String(body.model),
+    usage: usage ? { input_tokens: Number(usage.prompt_tokens ?? 0), output_tokens: Number(usage.completion_tokens ?? 0) } : null };
+}
+
+/**
+ * The transport seam. Craft ships no network client in this version, so the
+ * default refuses with an actionable message instead of pretending to run; a
+ * deployment (or a test) injects a real one.
+ */
+export interface ModelTransport { complete(spec: ModelProviderSpec, request: ChatRequest): Promise<ChatResult> }
+
+export const unconfiguredTransport: ModelTransport = {
+  complete: async (spec) => {
+    throw new Error(`No model transport is installed for provider ${spec.provider}; set ${spec.api_key_env} and enable the internal host before running the loop.`);
+  },
+};

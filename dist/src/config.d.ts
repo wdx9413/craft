@@ -1,5 +1,6 @@
 import { type CraftPaths } from "./paths.ts";
 import { type EmbeddingProviderConfig } from "./semantic.ts";
+import type { JsonObject } from "./store.ts";
 export type CraftMode = "agent" | "supervisor" | "provider";
 export type RuntimeKind = "direct-api" | "codex-cli" | "claude-code" | "unconfigured";
 export interface DirectProvider {
@@ -22,6 +23,7 @@ export interface CraftConfig {
     supervisor: {
         hosts: Array<"codex-cli" | "claude-code" | "generic-mcp">;
     };
+    hostProfiles?: JsonObject[];
     storage: {
         database: string;
         capabilityIndex: string;
@@ -36,6 +38,7 @@ export interface InitInput {
     runtimeKind?: RuntimeKind;
     provider?: DirectProvider;
     supervisorHosts?: CraftConfig["supervisor"]["hosts"];
+    hostProfiles?: JsonObject[];
     semanticSearch?: CraftConfig["semanticSearch"];
     now?: string;
 }

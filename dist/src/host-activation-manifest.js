@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { CraftStore } from "./store.js";
-const HOSTS = new Set(["codex-cli", "claude-code"]);
+import { BUILTIN_HOST_PROFILES } from "./host-registry.js";
 const EFFECTS = new Set(["read_only", "local_write", "external_write"]);
 function text(value, name) {
     if (typeof value !== "string" || !value.trim())
@@ -24,7 +24,11 @@ function isExpired(value) { return Number.isNaN(Date.parse(String(value))) || Da
  */
 export class HostActivationManifestKernel {
     store;
-    constructor(store) { this.store = store; }
+    hosts;
+    constructor(store, hostProfiles = BUILTIN_HOST_PROFILES) {
+        this.store = store;
+        this.hosts = new Set(hostProfiles.map((profile) => profile.host));
+    }
     prepare(args) {
         const task = this.store.get("task", text(args.task_id, "task_id"));
         const profile = this.store.get("activation_profile", text(args.profile_id, "profile_id"));
@@ -33,7 +37,7 @@ export class HostActivationManifestKernel {
         if (profile.task_id !== task.id)
             throw new Error("Activation Profile does not match task");
         const host = text(args.host, "host");
-        if (!HOSTS.has(host))
+        if (!this.hosts.has(host))
             throw new Error("Host Activation Manifest host is unsupported");
         const requested = args.asset_ids === undefined ? [...profile.asset_ids] : values(args.asset_ids, "asset_ids");
         if (requested.some((assetId) => !profile.asset_ids.includes(assetId)))

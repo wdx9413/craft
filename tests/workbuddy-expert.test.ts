@@ -14,7 +14,7 @@ test("WorkBuddy Expert package has the required identity, Agent, avatar, Skill, 
   const plugin = await json(`${packageRoot}/.codebuddy-plugin/plugin.json`);
   const mcp = await json(`${packageRoot}/.mcp.json`);
   assert.equal(plugin.name, "craft-work-governance");
-  assert.equal(plugin.version, "0.11.62");
+  assert.equal(plugin.version, "0.12.1");
   assert.equal(plugin.expertType, "agent");
   assert.equal(plugin.agentName, "craft-work-governance");
   assert.deepEqual(plugin.agents, ["./agents/craft-work-governance.md"]);
@@ -30,6 +30,7 @@ test("WorkBuddy Expert package has the required identity, Agent, avatar, Skill, 
   const avatar = await readFile(resolve(root, `${packageRoot}/avatars/craft-work-governance.png`));
   assert.deepEqual([...avatar.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
   assert.deepEqual(Object.keys(mcp.mcpServers), ["craft"]);
-  assert.equal(mcp.mcpServers.craft.command, "craft-mcp");
+  assert.equal(mcp.mcpServers.craft.command, "node");
+  assert.deepEqual(mcp.mcpServers.craft.args, ["${CODEBUDDY_PLUGIN_ROOT}/bin/craft-mcp.cjs", "--surface", "syscall"]);
   assert.equal(mcp.mcpServers.craft["x-workbuddy"].auth.type, "none");
 });

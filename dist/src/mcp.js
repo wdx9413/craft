@@ -1,5 +1,6 @@
 import { CraftService, VERSION } from "./service.js";
 import {} from "./store.js";
+import { SYSCALL_PASSTHROUGH, SYSCALL_VERBS, buildRegistry, catalogOf, describeEntry, resolveEntry } from "./tool-plane.js";
 const schemaFor = (name) => {
     if (["scan", "enabled", "allow_execution", "allow_external_write", "require_held_out", "require_outcome_passed", "retryable", "requires_external_effect", "supports_pause_resume", "supports_evidence_receipts", "generated_code", "requires_credential", "has_compensation", "approved", "start_trial", "untrusted_input", "confirmed_original_runner_stopped", "sanitized", "active", "acceptance_required", "trusted", "unattended", "reobserve_required", "compensation_or_handoff"].includes(name))
         return { type: "boolean" };
@@ -517,11 +518,99 @@ export const TOOLS = [
     tool("craft_feedback_case_approve", "Approve reviewed feedback only into an immutable development case.", ["intake_id", "split", "reviewer"], false, ["case_id"]),
     tool("craft_canary_start", "Start a gated candidate canary with an exact baseline and environment.", ["candidate_id", "baseline_id", "environment"], false, ["canary_id"]),
     tool("craft_canary_observe", "Observe a canary metric and roll back on a configured regression.", ["canary_id", "metric", "baseline", "candidate", "threshold"], false),
+    tool("craft_host_profile_list", "List all host profiles including built-ins and user-declared model CLIs.", [], true),
+    tool("craft_host_profile_resolve", "Resolve one host profile by exact name.", ["host"], true),
+    tool("craft_workflow_registry_scan", "Discover workflow definitions from a project directory.", ["project_root"], true, ["limit"]),
+    tool("craft_workflow_retirement_plan", "Propose retirement or deprecation for workflows based on usage statistics.", [], true, ["workflow_ids", "policy", "now"]),
+    tool("craft_knowledge_index_sync", "Sync a Markdown knowledge base into the rebuildable FTS5 projection.", ["project_root"], false, ["limit"]),
+    tool("craft_knowledge_search", "Search the projected knowledge index with substring queries.", ["query"], true, ["limit"]),
+    tool("craft_execution_budget_plan", "Estimate tokens, check budget, classify complexity, and route to a model tier.", ["host", "limit", "texts"], true, ["reserve", "steps", "distinct_paths", "requires_external_write", "requires_multi_step_reasoning", "tiers", "max_result_tokens"]),
+    tool("craft_hook_catalog", "List hooks planned for one lifecycle point.", ["point"], true, ["hooks"]),
+    tool("craft_hook_run", "Run hooks for one lifecycle point and return outcomes.", ["point", "hooks"], false, ["payload"]),
+    tool("craft_knowledge_scope_set", "Declare a knowledge document's scope (user/project/task) and an optional expiry in days.", ["entries"], false),
+    tool("craft_knowledge_scope_list", "List knowledge scopes and the documents whose expiry has passed.", [], true, ["scope"]),
+    tool("craft_knowledge_scope_forget", "Drop expired documents from the rebuildable projection; Markdown sources are untouched.", [], false),
+    tool("craft_metrics_report", "Aggregate host runs and outcomes into success rate and cost per successful outcome.", [], true, ["host"]),
+    tool("craft_launch_gate", "Evaluate the before-effect launch gates for a payload and report whether they block it.", [], true, ["hooks", "payload"]),
+    tool("craft_model_provider_list", "List the declared model providers with their credential environment variable and whether it is set.", [], true),
+    tool("craft_model_provider_get", "Describe one model provider and, optionally, the model a tier selects.", ["provider"], true, ["tier"]),
+    tool("craft_agent_loop_plan", "Show the circuit-breaker limits a self-hosted loop would run under, without starting one.", [], true, ["limits"]),
+    tool("craft_asset_route", "Select the smallest credible set of declared assets for one task, with the reason for every rejection.", ["signals", "assets"], true),
+    tool("craft_model_independence_compare", "Check whether a subject's declared invariants hold across every model it was tried on.", ["trials", "invariants"], true),
 ];
 const CORE_TOOL_NAMES = new Set(["craft_info", "craft_source_list", "craft_capability_search", "craft_capability_get", "craft_semantic_status", "craft_execution_policy_decide",
     "craft_default_route", "craft_default_route_resume", "craft_default_route_find", "craft_task_open", "craft_task_list", "craft_task_checkpoint", "craft_task_control_refresh", "craft_task_control_get", "craft_task_run_refresh", "craft_task_run_get", "craft_verified_work_loop_prepare", "craft_verified_work_loop_advance", "craft_verified_work_loop_decide", "craft_verified_work_loop_resume", "craft_verified_work_loop_get", "craft_host_activation_manifest_prepare", "craft_host_activation_manifest_validate", "craft_host_activation_manifest_consume", "craft_host_activation_manifest_get", "craft_execution_fabric_prepare", "craft_execution_fabric_execute", "craft_execution_fabric_advance", "craft_execution_fabric_consume", "craft_execution_fabric_get", "craft_host_bridge_get", "craft_work_launch_get", "craft_work_delivery_observe", "craft_work_delivery_get", "craft_delivery_loop_refresh", "craft_delivery_loop_get", "craft_delivery_evaluation_compare", "craft_delivery_evaluation_run", "craft_eval_campaign_report", "craft_adaptive_harness_recommend", "craft_managed_write_get", "craft_managed_run_get", "craft_campaign_runner_get", "craft_workspace_observer_get", "craft_autonomy_ladder_get", "craft_work_coordinator_get", "craft_agent_eval_lab_get", "craft_judge_promotion_eligible", "craft_platform_execution_preflight", "craft_platform_execution_probe", "craft_platform_execution_probe_get", "craft_workspace_get", "craft_workspace_diff", "craft_work_object_list", "craft_workspace_impact", "craft_context_assemble", "craft_change_set_preview",
     "craft_artifact_register", "craft_evidence_record", "craft_capability_access_plan", "craft_capability_call_issue", "craft_capability_call_consume", "craft_capability_connector_list", "craft_capability_connector_ticket_issue", "craft_capability_connector_ticket_consume", "craft_evaluation_program_due", "craft_evaluation_program_report", "craft_enterprise_access_ticket_get", "craft_a2a_delegation_get"]);
 export const CORE_TOOLS = TOOLS.filter((tool) => CORE_TOOL_NAMES.has(tool.name));
+// The syscall surface. Instead of one tool per operation, a host learns a fixed
+// set of verbs and addresses capabilities by (resource, operation). The registry
+// is derived from TOOLS, so the 485 operations stay reachable while the mounted
+// schema stays O(1): `craft_describe` is what tells the model the exact arguments
+// of any operation, on demand, instead of paying for all of them up front.
+export const SYSCALL_TOOLS = [
+    tool("craft_describe", "Describe Craft operations: with no arguments returns the resource catalog; with resource (and optional operation) returns the exact arguments, effect, risk and approval requirement.", [], true, ["resource", "operation"]),
+    tool("craft_list", "List Craft records of one resource, addressed as resource plus an optional operation.", ["resource"], true, ["operation", "limit", "args"]),
+    tool("craft_get", "Read one Craft record of a resource by id.", ["resource"], true, ["operation", "args"]),
+    tool("craft_create", "Create or record a new Craft object of a resource.", ["resource"], false, ["operation", "args"]),
+    tool("craft_update", "Update, advance or decide an existing Craft object of a resource.", ["resource"], false, ["operation", "args"]),
+    tool("craft_run", "Run or start a Craft operation that executes work; the operation must be named explicitly.", ["resource", "operation"], false, ["args"]),
+    tool("craft_cancel", "Cancel or stop a running Craft operation of a resource.", ["resource"], false, ["operation", "args"]),
+    tool("craft_search", "Search indexed capabilities, or another searchable resource when one is named.", [], true, ["query", "resource", "limit"]),
+];
+export const TOOL_REGISTRY = buildRegistry(TOOLS);
+/**
+ * Default operation for each syscall verb, so a caller that omits it still lands
+ * on the obvious tool. Exported so a test can assert it stays exhaustive over
+ * SYSCALL_VERBS — that is what lets `dispatchSyscall` index it without a
+ * defensive fallback that could never be reached or tested.
+ */
+export const VERB_DEFAULT_OPERATION = {
+    craft_list: "list", craft_get: "get", craft_create: "create",
+    craft_update: "update", craft_run: "run", craft_cancel: "cancel", craft_search: "search",
+};
+// Tool surfaces. A surface is a bounded slice of TOOLS that a Host can mount on
+// its own, so one session only pays for the schemas it actually needs. "core"
+// and "full" keep their original meaning; the named domain surfaces partition
+// every non-core tool, so `core + domains` covers TOOLS exactly once.
+//
+// Order matters: the first matching rule wins, which is what keeps a tool in
+// exactly one domain surface. The trailing `workflow` rule is a deliberate
+// catch-all, and a test pins its size so a broken rule above cannot silently
+// swallow the whole list.
+const SURFACE_RULES = [
+    { name: "governance", pattern: /^craft_(capability|source|logical|contract|hub|supply|federation|materialization|certification|skill|publication|catalog|domain|hook)/ },
+    { name: "evaluation", pattern: /^craft_(evaluation|eval|benchmark|campaign|judge|grader|grade|signoff|harness|trial|trajectory|experience|adaptation|adaptive|canary|acceptance|outcome|delivery_evaluation|agent_eval|verified_iteration|feedback)/ },
+    { name: "execution", pattern: /^craft_(sandbox|docker|effect|egress|credential|execution|managed|platform|isolated|local|external|recovery|durable|trigger|webhook|orchestration|runtime|autonomy|speculative)/ },
+    { name: "knowledge", pattern: /^craft_(wiki|knowledge|context|memory|project|semantic|claim|relation)/ },
+    { name: "workspace", pattern: /^craft_(workspace|work_object|change_set|state|transaction|lineage|hydration|dehydration|artifact|evidence|untrusted)/ },
+    { name: "collaboration", pattern: /^craft_(a2a|enterprise|agent|expert|attention|work_coordinator|home|decision|guided|strategy)/ },
+    { name: "workflow", pattern: /^craft_/ },
+];
+/**
+ * Every mountable surface name, in the order they are declared. `syscall` is a
+ * deliberate exception to the partition below: it re-exposes a small, chosen
+ * subset by name (the routing Skill's tools) alongside the generic verbs, so it
+ * is not part of the domain partition and is excluded from that coverage check.
+ */
+export const SURFACE_NAMES = ["core", ...SURFACE_RULES.map((rule) => rule.name), "syscall", "full"];
+/** Domain surfaces only: these partition every non-core tool exactly once. */
+export const DOMAIN_SURFACE_NAMES = SURFACE_RULES.map((rule) => rule.name);
+/** The single domain surface a non-core tool belongs to. The first matching rule wins, so a tool can never land in two surfaces. */
+export function domainSurfaceOf(toolName) {
+    return SURFACE_RULES.find((rule) => rule.pattern.test(toolName))?.name ?? "workflow";
+}
+/** Tool names a surface exposes. Unknown surfaces fail closed instead of silently widening to the full list. */
+export function surfaceToolNames(surface) {
+    if (surface === "full")
+        return TOOLS.map((tool) => tool.name);
+    if (surface === "core")
+        return CORE_TOOLS.map((tool) => tool.name);
+    if (surface === "syscall")
+        return [...SYSCALL_VERBS, ...SYSCALL_PASSTHROUGH];
+    if (!SURFACE_RULES.some((rule) => rule.name === surface))
+        throw new Error(`Unknown Craft MCP surface: ${surface}`);
+    return TOOLS.filter((tool) => !CORE_TOOL_NAMES.has(tool.name) && domainSurfaceOf(tool.name) === surface).map((tool) => tool.name);
+}
 export class McpServer {
     service;
     handlers;
@@ -530,7 +619,8 @@ export class McpServer {
     constructor(service, mode = "full") {
         this.service = service;
         this.mode = mode;
-        this.tools = mode === "core" ? CORE_TOOLS : TOOLS;
+        const allowed = new Set(surfaceToolNames(mode));
+        this.tools = [...TOOLS, ...SYSCALL_TOOLS].filter((tool) => allowed.has(tool.name));
         this.handlers = {
             craft_info: () => service.info(), craft_source_add: (a) => service.sourceAdd(a),
             craft_source_list: () => service.sourceList(), craft_source_update: (a) => service.sourceUpdate(a),
@@ -835,6 +925,25 @@ export class McpServer {
             craft_judge_calibration_record: service.judgeCalibrationRecord.bind(service), craft_judge_promotion_eligible: service.judgePromotionEligible.bind(service), craft_evaluation_judge_gate: service.evaluationJudgeGate.bind(service),
             craft_adaptation_candidate_create: service.adaptationCandidateCreate.bind(service), craft_adaptation_candidate_authorize_canary: service.adaptationCandidateAuthorizeCanary.bind(service), craft_feedback_intake_create: service.feedbackIntakeCreate.bind(service),
             craft_feedback_case_approve: service.feedbackCaseApprove.bind(service), craft_canary_start: service.canaryStart.bind(service), craft_canary_observe: service.canaryObserve.bind(service),
+            craft_host_profile_list: () => service.hostProfileList(),
+            craft_host_profile_resolve: (a) => service.hostProfileResolve(a),
+            craft_workflow_registry_scan: (a) => service.workflowRegistryScan(a),
+            craft_workflow_retirement_plan: (a) => service.workflowRetirementPlan(a),
+            craft_knowledge_index_sync: (a) => service.knowledgeIndexSync(a),
+            craft_knowledge_search: (a) => service.knowledgeSearch(a),
+            craft_execution_budget_plan: (a) => service.executionBudgetPlan(a),
+            craft_hook_catalog: (a) => service.hookCatalog(a),
+            craft_hook_run: (a) => service.hookRun(a),
+            craft_model_provider_list: () => service.modelProviderList(),
+            craft_metrics_report: (a) => service.metricsReport(a),
+            craft_launch_gate: (a) => service.launchGate(a),
+            craft_knowledge_scope_set: (a) => service.knowledgeScopeSet(a),
+            craft_knowledge_scope_list: (a) => service.knowledgeScopeList(a),
+            craft_knowledge_scope_forget: () => service.knowledgeScopeForget(),
+            craft_model_provider_get: (a) => service.modelProviderGet(a),
+            craft_agent_loop_plan: (a) => service.agentLoopPlan(a),
+            craft_asset_route: (a) => service.assetRoute(a),
+            craft_model_independence_compare: (a) => service.modelIndependenceCompare(a),
         };
     }
     async handle(message) {
@@ -863,15 +972,20 @@ export class McpServer {
             return this.error(request.id, -32602, "Tool call params must be an object");
         }
         const params = request.params;
-        const handler = this.handlers[String(params.name)];
-        if (!handler || (this.mode === "core" && !this.tools.some((tool) => tool.name === params.name)))
-            return this.error(request.id, -32602, `Unknown tool: ${params.name}`);
+        const supplied = params.arguments ?? {};
+        if (!supplied || typeof supplied !== "object" || Array.isArray(supplied)) {
+            return this.error(request.id, -32602, "Tool arguments must be an object");
+        }
+        const name = String(params.name);
+        if (this.mode !== "full" && !this.tools.some((tool) => tool.name === name)) {
+            return this.error(request.id, -32602, `Unknown tool: ${name}`);
+        }
         try {
-            const supplied = params.arguments ?? {};
-            if (!supplied || typeof supplied !== "object" || Array.isArray(supplied)) {
-                return this.error(request.id, -32602, "Tool arguments must be an object");
-            }
-            const result = await handler(supplied);
+            const result = SYSCALL_VERBS.includes(name)
+                ? await this.dispatchSyscall(name, supplied)
+                : await this.dispatchTool(name, supplied);
+            if (result === undefined)
+                return this.error(request.id, -32602, `Unknown tool: ${name}`);
             return this.ok(request.id, { content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
                 structuredContent: result, isError: false });
         }
@@ -879,6 +993,41 @@ export class McpServer {
             return this.ok(request.id, { content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }],
                 isError: true });
         }
+    }
+    dispatchTool(name, args) {
+        const handler = this.handlers[name];
+        return handler ? handler(args) : undefined;
+    }
+    /**
+     * Resolve one syscall verb against the registry, then run the legacy handler it
+     * points at. The syscall surface therefore never re-implements an operation and
+     * can never drift from the named one.
+     */
+    async dispatchSyscall(name, args) {
+        const resource = typeof args.resource === "string" && args.resource.trim() ? args.resource.trim() : "capability";
+        const operation = typeof args.operation === "string" && args.operation.trim() ? args.operation.trim() : undefined;
+        if (name === "craft_describe") {
+            if (args.resource === undefined)
+                return catalogOf(TOOL_REGISTRY);
+            const described = resolveEntry(TOOL_REGISTRY, resource, operation, "info");
+            if (!described) {
+                return { found: false, resource, operation: operation ?? null,
+                    hint: "Call craft_describe with no arguments for the full resource catalog." };
+            }
+            return describeEntry(described);
+        }
+        // Every verb except craft_describe declares a default operation, and a test
+        // pins that exhaustiveness rather than leaving an unreachable `?? "info"`.
+        const entry = resolveEntry(TOOL_REGISTRY, resource, operation, VERB_DEFAULT_OPERATION[name]);
+        if (!entry)
+            throw new Error(`Unknown Craft operation: ${resource}${operation ? `.${operation}` : ""}`);
+        const handler = this.handlers[entry.tool];
+        if (!handler)
+            throw new Error(`Craft operation is not mounted on this surface: ${entry.tool}`);
+        const { resource: _resource, operation: _operation, args: nested, ...rest } = args;
+        const forwarded = { ...rest,
+            ...(nested && typeof nested === "object" && !Array.isArray(nested) ? nested : {}) };
+        return handler(forwarded);
     }
     ok(requestId, result) { return { jsonrpc: "2.0", id: requestId, result }; }
     error(requestId, code, message) {

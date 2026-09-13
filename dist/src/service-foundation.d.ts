@@ -34,6 +34,11 @@ import { HomeKernel } from "./home.ts";
 import { CodexHostKernel } from "./codex-driver.ts";
 import { ClaudeHostKernel } from "./claude-driver.ts";
 import { HostRunKernel } from "./host-run.ts";
+import { type HostProfile } from "./host-registry.ts";
+import { InternalHostDriver } from "./internal-host-driver.ts";
+import { MetricsKernel } from "./metrics.ts";
+import { type ModelProviderSpec, type ModelTransport } from "./model-gateway.ts";
+import type { HostDriver } from "./host-driver.ts";
 import { KnowledgeBoundLaunchKernel } from "./knowledge-bound-launch.ts";
 import { KnowledgeWorkbenchKernel } from "./knowledge-workbench.ts";
 import { WikiCandidateGovernanceKernel } from "./wiki-candidate-governance.ts";
@@ -108,7 +113,10 @@ export declare abstract class ServiceFoundation {
     readonly home: HomeKernel;
     readonly codexHost: CodexHostKernel;
     readonly claudeHost: ClaudeHostKernel;
+    readonly hostProfiles: readonly HostProfile[];
+    readonly hostDrivers: Map<string, HostDriver>;
     readonly hostRuns: HostRunKernel;
+    hostDriver(host: string): HostDriver | undefined;
     readonly knowledgeLaunch: KnowledgeBoundLaunchKernel;
     readonly knowledgeWorkbench: KnowledgeWorkbenchKernel;
     readonly wikiCandidateGovernance: WikiCandidateGovernanceKernel;
@@ -144,6 +152,17 @@ export declare abstract class ServiceFoundation {
     readonly evaluationOperations: EvaluationOperationsKernel;
     readonly enterpriseAccess: EnterpriseAccessKernel;
     readonly a2aDelegation: A2ADelegationKernel;
-    constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter?: LocalIsolatedAdapter, dockerSandbox?: DockerSandboxAdapter, egressBroker?: TrustedEgressBroker, hostOwnerId?: string);
+    readonly modelProviders: readonly ModelProviderSpec[];
+    readonly internalHost: InternalHostDriver;
+    readonly metrics: MetricsKernel;
+    constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter?: LocalIsolatedAdapter, dockerSandbox?: DockerSandboxAdapter, egressBroker?: TrustedEgressBroker, hostOwnerId?: string, hostProfiles?: readonly HostProfile[], modelProviders?: readonly ModelProviderSpec[], modelTransport?: ModelTransport);
     protected abstract finalizeWorkLaunch(run: JsonObject, receipt: JsonObject | null): void;
+    /**
+     * The bounded action surface the internal host may call.
+     *
+     * This is a whitelist on purpose: a self-hosted loop that can reach any Craft
+     * operation would be a privilege escalation relative to the governed host
+     * path. Abstract so the facade owns the list, exactly like finalizeWorkLaunch.
+     */
+    protected abstract invokeInternalAction(action: string, args: JsonObject): JsonObject | Promise<JsonObject>;
 }

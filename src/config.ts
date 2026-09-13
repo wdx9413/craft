@@ -1,7 +1,9 @@
 import { access, readFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import { atomicPrivateJson, craftPaths, ensureLayout, type CraftPaths } from "./paths.ts";
+import { hostProfilesFromConfig } from "./host-registry.ts";
 import { type EmbeddingProviderConfig } from "./semantic.ts";
+import type { JsonObject } from "./store.ts";
 
 export type CraftMode = "agent" | "supervisor" | "provider";
 export type RuntimeKind = "direct-api" | "codex-cli" | "claude-code" | "unconfigured";
@@ -25,6 +27,7 @@ export interface CraftConfig {
     provider?: DirectProvider;
   };
   supervisor: { hosts: Array<"codex-cli" | "claude-code" | "generic-mcp"> };
+  hostProfiles?: JsonObject[];
   storage: {
     database: string;
     capabilityIndex: string;
@@ -38,6 +41,7 @@ export interface InitInput {
   runtimeKind?: RuntimeKind;
   provider?: DirectProvider;
   supervisorHosts?: CraftConfig["supervisor"]["hosts"];
+  hostProfiles?: JsonObject[];
   semanticSearch?: CraftConfig["semanticSearch"];
   now?: string;
 }
@@ -85,6 +89,7 @@ export async function initializeConfig(
       ...(runtimeKind === "direct-api" ? { provider: input.provider } : {}),
     },
     supervisor: { hosts: input.mode === "supervisor" ? input.supervisorHosts || [] : [] },
+    ...(input.hostProfiles?.length ? { hostProfiles: input.hostProfiles } : {}),
     storage: {
       database: paths.databaseFile,
       capabilityIndex: paths.indexFile,
@@ -125,8 +130,9 @@ function validateInit(input: InitInput): void {
   const runtime = input.runtimeKind || "unconfigured";
   if (!RUNTIMES.has(runtime)) throw new Error(`Unsupported runtime: ${runtime}`);
   if (input.mode === "agent" && runtime === "direct-api") validateProvider(input.provider);
+  const declaredHosts = new Set(hostProfilesFromConfig(input.hostProfiles).map((profile) => profile.host));
   for (const host of input.supervisorHosts || []) {
-    if (!HOSTS.has(host)) throw new Error(`Unsupported supervisor host: ${host}`);
+    if (!HOSTS.has(host) && !declaredHosts.has(host)) throw new Error(`Unsupported supervisor host: ${host}`);
   }
 }
 
@@ -205,8 +211,9 @@ function validateConfig(value: unknown): asserts value is CraftConfig {
       && (typeof config.runtime.command !== "string" || !config.runtime.command.trim())) {
     throw new Error("CLI runtime requires a command.");
   }
+  const declaredHosts = new Set(hostProfilesFromConfig(config.hostProfiles).map((profile) => profile.host));
   if (!config.supervisor || !Array.isArray(config.supervisor.hosts)
-      || config.supervisor.hosts.some((host) => !HOSTS.has(host))) {
+      || config.supervisor.hosts.some((host) => !HOSTS.has(host) && !declaredHosts.has(host))) {
     throw new Error("Craft config has invalid supervisor hosts.");
   }
   validateSemanticSearch(config.semanticSearch);

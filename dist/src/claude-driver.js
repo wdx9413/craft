@@ -3,7 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { AutonomyKernel } from "./autonomy.js";
-import { executeCodex } from "./codex-driver.js";
+import { executeHostProcess } from "./host-driver.js";
 import { CraftStore } from "./store.js";
 function text(value, name) { if (typeof value !== "string" || !value.trim())
     throw new Error(`${name} must not be empty`); return value.trim(); }
@@ -41,9 +41,10 @@ function parse(stdout) {
 }
 export class ClaudeHostKernel {
     host = "claude-code";
+    dispatchKind = "claude_dispatch";
     store;
     executor;
-    constructor(store, executor = executeCodex) { this.store = store; this.executor = executor; }
+    constructor(store, executor = executeHostProcess) { this.store = store; this.executor = executor; }
     prepare(args) {
         const task = this.store.get("task", text(args.task_id, "task_id"));
         const prompt = text(args.prompt, "prompt");

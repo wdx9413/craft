@@ -7,9 +7,13 @@ tests/.tmp/
 tests/.validation-deps/
 .coverage
 coverage.json
+coverage/
 htmlcov/
 build/
 .test-install/
 node_modules/
 .node-coverage/
 .coverage-raw/
+.workbuddy/
+.workbuddy-ai/
+.tmp-*

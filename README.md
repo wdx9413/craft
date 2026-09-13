@@ -1,6 +1,6 @@
 # Craft
 
-> 当前发布版本：v0.11.62。所有宿主接入统一采用“Route-first”：Codex/Claude 插件、TraeWork、WorkBuddy Expert 默认只安装一个轻量 `craft-route` Skill，并连接精简 Core MCP；`craft` 与 `craft-clarify` 是单独的可选包。完整 MCP 仍作为显式、经批准的高级治理入口保留。云端运行、市场审核和远程 MCP 仍须由部署 Adapter 或平台审核完成，不能被当作已上线服务。
+> 当前发布版本：v0.12.1。所有宿主接入统一采用“Route-first”：Codex/Claude 插件、TraeWork、WorkBuddy Expert 默认只安装一个轻量 `craft-route` Skill，并连接精简 Core MCP；`craft` 与 `craft-clarify` 是单独的可选包。完整 MCP 仍作为显式、经批准的高级治理入口保留。云端运行、市场审核和远程 MCP 仍须由部署 Adapter 或平台审核完成，不能被当作已上线服务。
 
 [中文](README.md) | [English](README.en.md)
 
@@ -73,6 +73,15 @@ Sandbox 能力采用“声明、诊断、黑盒一致性验证、精确版本票
 - Managed Host Bridge / Execution Fabric：Fabric 生成的 Launch 会延后 Host 启动；只有精确 Manifest、Prompt 摘要和 Activation Receipt 再次通过，才可启动 Codex CLI 或 Claude Code。写入仍需显式审批；Host 终态自动触发状态再观察，不能冒充交付结果。
 - 可验证演进：本地 `workspace-write` 有基线/提交 Checkpoint 和显式恢复，外部 effect 不在回滚承诺内；Campaign 用已观察 Delivery 生成无正文配对报告，Candidate 必须经 held-out、Signoff、Evidence Canary 和人工结论才可被最小 Harness 选择器推荐。
 - Capability Connector：内置、用户批准的 GitHub/火山引擎 Skill 来源和 stdio/HTTPS MCP 统一登记为无敏感正文的来源元数据；发现、批准、Activation Profile 和调用 ticket 严格分离。Serena MCP 只允许只读 Asset。Connector 不自动安装、启停第三方服务、改写宿主 MCP 配置或保存凭据。
+- **syscall 工具面**：8 个通用动词（`describe` / `list` / `get` / `create` / `update` / `run` / `cancel` / `search`）加 `resource` + `operation` 寻址，替代按操作逐个暴露工具。注册表由既有工具表机械派生，**全部操作可达而挂载 schema 保持 O(1)**。实测 syscall 面 15 工具 5,294 字符（≈1.3k tokens），full 面 499 工具 205,505 字符 —— **降低 97.4%**。详见 [Tool Plane](docs/technical/modules/tool-plane.md)。
+- **模型网关**：声明式支持 deepseek、火山引擎方舟、通义千问、Kimi、智谱 GLM、MiniMax、OpenAI GPT、Anthropic Claude 八家模型族。只保存端点、协议、模型分层与**环境变量名**，从不保存密钥；请求渲染与响应解析是纯函数，因此可在没有任何 API Key 时被声明、配置与验证。本版**不内置网络客户端**，默认 transport 明确拒绝并指出缺少的环境变量。详见 [Model Gateway](docs/technical/modules/model-gateway.md)。
+- **内建宿主（internal host）**：Craft 自己跑循环时，是与 Codex、Claude 并列的第三个 Host Driver，产出同样的 dispatch/receipt/事件记录。循环带六道外部熔断（步数、token、墙钟、无进展、动作重复、预算熔断），可调用的动作是显式白名单且只限读与记录。详见 [Internal Host](docs/technical/modules/internal-host.md)。
+- **资产信封与路由**：能力、知识、工作流共用统一信封；路由按信任、健康、effect、领域标签、预算与风险上限选择最小集合，并返回每一次拒绝的理由。
+- **跨模型可比性**：资产可声明 core invariants 与 model-sensitive 行为；只有核心不变量在每个模型都成立才判 verified，只试过一个模型返回 `inconclusive` 而非通过。详见 [Asset Routing](docs/technical/modules/asset-routing.md)。
+- **运营度量**：只读指标投影，聚合成功率、耗时、token、成本与**每成功 outcome 成本**（空库报告零样本而非满分）。
+- **启动门禁**：默认门禁集中声明为"被记录 / 被计量 / 被回执核验"三件事，`craft_launch_gate` 可评估某次启动是否会被拦下及原因，并支持注入 `fail_closed` 检查。
+- **知识作用域与过期**：知识可声明 `user` / `project` / `task` 作用域与 TTL；过期文档从可重建投影中移除，**Markdown 源文件不受影响**。
+- 单一版本源：版本号以 `package.json` 为准，`version:check` 覆盖插件清单、两个 WorkBuddy 适配器清单与三个适配器 Skill。
 - Windows、macOS、Linux 共用 TypeScript/Node.js 运行时；不依赖 Python。
 
 v0.9.10–v0.10.2 还提供声明范围内的文件快照、本地事务记录、受限 TypeScript 脚本候选和 Host 执行交接。v0.10.0 新增共享结构化工作对象；v0.10.1 用字段级 ChangeSet 阻止同字段覆盖；v0.10.2 新增持久等待、幂等资源结算、Fallback Contract 与 Effect/Saga Kernel。外部写入预声明请求、幂等键、审批和可选补偿；未知结果可先通过预授权只读 GET 对账，未映射状态仍需人工消歧。补偿 Adapter 只执行精确授权且预先冻结解释契约，网络模糊保持未知，补偿失败不会伪装成回滚成功。候选操作尚不是自动从原始轨迹提炼程序；平台与安全缺口见 [执行策略](docs/technical/modules/execution-policy.md)。

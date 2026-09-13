@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import test from "node:test";
-import { McpServer, TOOLS } from "../src/mcp.ts";
+import type { JsonObject } from "../src/store.ts";
+import { CORE_TOOLS, McpServer, SURFACE_NAMES, TOOLS, domainSurfaceOf, surfaceToolNames } from "../src/mcp.ts";
 import { serveMcpStdio } from "../src/mcp-stdio.ts";
 import { craftPaths } from "../src/paths.ts";
 import { CraftService } from "../src/service.ts";
@@ -22,6 +23,7 @@ test("MCP negotiates protocols, lists tools, dispatches every handler, and repor
     assert.equal((await server.handle({ id: 0 }))?.error instanceof Object, true);
     assert.equal(await server.handle({ method: "x" }), undefined);
     assert.equal(await server.handle({ id: 1, method: "notifications/initialized" }), undefined);
+    assert.equal(await server.handle({ jsonrpc: "2.0", method: "ping" }), undefined);
     assert.equal(((await server.handle({ id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } }))?.result as Record<string, unknown>).protocolVersion, "2025-06-18");
     assert.equal(((await server.handle({ id: 1, method: "initialize" }))?.result as Record<string, unknown>).protocolVersion, "2025-11-25");
     assert.deepEqual((await server.handle({ id: 2, method: "ping" }))?.result, {});
@@ -370,6 +372,17 @@ test("MCP stdio waits for a Host request that arrives after startup", async () =
   assert.equal((JSON.parse(output[0]) as { id: number }).id, 2);
 });
 
+test("MCP stdio ignores notification responses", async () => {
+  const input = new PassThrough(); const output: string[] = [];
+  const serving = serveMcpStdio({ mode: "core", input, write: (line) => output.push(line), start: async () => ({
+    server: { handle: async (request) => (request as JsonObject).id === undefined ? undefined : { jsonrpc: "2.0", id: 3, result: {} } }, close: () => undefined,
+  }) });
+  input.end('{"jsonrpc":"2.0","method":"notifications/initialized"}\n{"jsonrpc":"2.0","id":3,"method":"ping"}\n');
+  await serving;
+  assert.equal(output.length, 1);
+  assert.equal((JSON.parse(output[0]) as { id: number }).id, 3);
+});
+
 test("MCP stdio default runtime accepts buffered initialization", async () => {
   const root = join(tmpdir(), `craft-mcp-stdio-${process.pid}-${Date.now()}`); const input = new PassThrough(); const output: string[] = [];
   const original = process.env.CRAFT_DATA_DIR; process.env.CRAFT_DATA_DIR = root;
@@ -377,6 +390,44 @@ test("MCP stdio default runtime accepts buffered initialization", async () => {
     const serving = serveMcpStdio({ mode: "full", input, write: (line) => output.push(line) });
     input.end('{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}\n');
     await serving;
-    assert.equal((JSON.parse(output[0]) as { result: { serverInfo: { version: string } } }).result.serverInfo.version, "0.11.62");
+    assert.equal((JSON.parse(output[0]) as { result: { serverInfo: { version: string } } }).result.serverInfo.version, "0.12.1");
   } finally { if (original === undefined) delete process.env.CRAFT_DATA_DIR; else process.env.CRAFT_DATA_DIR = original; await rm(root, { recursive: true, force: true }); }
+});
+
+test("MCP tool surfaces partition the full tool list and fail closed on unknown names", async () => {
+  assert.equal(surfaceToolNames("full").length, TOOLS.length);
+  assert.deepEqual(surfaceToolNames("core").sort(), CORE_TOOLS.map((tool) => tool.name).sort());
+
+  const domains = SURFACE_NAMES.filter((name) => name !== "core" && name !== "full" && name !== "syscall");
+  const seen = new Set<string>(surfaceToolNames("core"));
+  for (const name of domains) {
+    const names = surfaceToolNames(name);
+    assert(names.length > 0, `${name} surface must not be empty`);
+    for (const tool of names) { assert(!seen.has(tool), `${tool} belongs to more than one surface`); seen.add(tool); }
+  }
+  assert.equal(seen.size, TOOLS.length, "core plus every domain surface must cover each tool exactly once");
+
+  assert(surfaceToolNames("governance").includes("craft_capability_connector_register"));
+  assert(surfaceToolNames("execution").includes("craft_docker_sandbox_execute"));
+  assert(surfaceToolNames("evaluation").includes("craft_eval_campaign_create"));
+  assert(surfaceToolNames("workspace").includes("craft_workspace_transaction_begin"));
+  assert.equal(domainSurfaceOf("craft_agent_eval_lab_create"), "evaluation");
+  assert.equal(domainSurfaceOf("not_a_craft_tool"), "workflow");
+  assert.throws(() => surfaceToolNames("no-such-surface"), /Unknown Craft MCP surface: no-such-surface/);
+});
+
+test("MCP server mounts one domain surface and rejects tools outside it", async () => {
+  const root = join(tmpdir(), `craft-mcp-surface-${process.pid}-${Date.now()}`);
+  await mkdir(root, { recursive: true });
+  const store = await new CraftStore(craftPaths(root)).open();
+  try {
+    const server = new McpServer(new CraftService(store), "knowledge");
+    const knowledge = surfaceToolNames("knowledge");
+    assert.equal(server.mode, "knowledge");
+    assert.equal(server.tools.length, knowledge.length);
+    const listed = await server.handle({ jsonrpc: "2.0", id: 1, method: "tools/list" });
+    assert.equal((listed?.result as { tools: unknown[] }).tools.length, knowledge.length);
+    const outside = await server.handle({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "craft_source_add", arguments: {} } });
+    assert.equal((outside?.error as { code: number }).code, -32602);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });

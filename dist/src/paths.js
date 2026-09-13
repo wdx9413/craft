@@ -22,6 +22,7 @@ export function craftPaths(root = dataRoot()) {
         backupsDir: join(resolved, "backups"),
         runtimeDir: join(resolved, "runtime"),
         artifactsDir: join(resolved, "artifacts"),
+        knowledgeIndex: join(resolved, "index", "knowledge.db"),
     };
 }
 export async function ensureLayout(paths = craftPaths()) {

@@ -1,5 +1,5 @@
 import { McpServer } from "./mcp.ts";
-type Mode = "core" | "full";
+type Mode = string;
 type Server = Pick<McpServer, "handle">;
 type Start = (mode: Mode) => Promise<{
     server: Server;

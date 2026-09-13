@@ -1,7 +1,26 @@
 import { CraftStore, type JsonObject } from "./store.ts";
+import { type EmbeddingProvider } from "./semantic.ts";
 import { ServiceFoundation } from "./service-foundation.ts";
-export declare const VERSION = "0.11.62";
+export declare const VERSION = "0.12.1";
 export declare class CraftService extends ServiceFoundation {
+    constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter?: unknown, dockerSandbox?: unknown, egressBroker?: unknown, hostOwnerId?: string, hostProfiles?: readonly import("./host-registry.ts").HostProfile[], modelProviders?: readonly import("./model-gateway.ts").ModelProviderSpec[], modelTransport?: import("./model-gateway.ts").ModelTransport);
+    /**
+     * The only operations the internal host may invoke.
+     *
+     * Read-and-record only: a loop Craft runs itself must not be able to reach an
+     * operation a governed host would have needed an approval for. Anything absent
+     * here fails closed, so widening the loop's authority is always an explicit
+     * edit to this list rather than a side effect of a registry change.
+     */
+    protected invokeInternalAction(action: string, args: JsonObject): Promise<JsonObject>;
+    modelProviderList(): JsonObject;
+    modelProviderGet(args: JsonObject): JsonObject;
+    /** Where the circuit breakers would sit for a given plan, without running anything. */
+    agentLoopPlan(args: JsonObject): JsonObject;
+    /** Route one task to the smallest credible set of declared assets. Read-only: it selects, it does not activate. */
+    assetRoute(args: JsonObject): JsonObject;
+    /** Compare one subject's trials across models; a single model is reported inconclusive rather than passed. */
+    modelIndependenceCompare(args: JsonObject): JsonObject;
     static open(store: CraftStore, hostOwnerId?: string): Promise<CraftService>;
     info(): JsonObject;
     sourceAdd(args: JsonObject): Promise<JsonObject>;
@@ -276,6 +295,13 @@ export declare class CraftService extends ServiceFoundation {
     executionSafetyGet(args: JsonObject): JsonObject;
     private platformPreflightForLaunch;
     private bindPlatformPreflight;
+    /**
+     * A launch records the host it was prepared against, but a host profile can be
+     * removed from config afterwards. Every consumer therefore resolves the driver
+     * through here so the "this launch references a host that no longer exists"
+     * case fails closed in exactly one place instead of five copies.
+     */
+    private requireHostDriver;
     private validateSafetyLaunch;
     safetyWorkLaunchPrepare(args: JsonObject): JsonObject;
     safetyWorkLaunchDecide(args: JsonObject): JsonObject;
@@ -396,6 +422,32 @@ export declare class CraftService extends ServiceFoundation {
     enterpriseAccessTicketConsume(args: JsonObject): JsonObject;
     enterpriseAccessTicketGet(args: JsonObject): JsonObject;
     workLaunchRetry(args: JsonObject): JsonObject;
+    hostProfileList(): JsonObject;
+    hostProfileResolve(args: JsonObject): JsonObject;
+    workflowRegistryScan(args: JsonObject): JsonObject;
+    workflowRetirementPlan(args: JsonObject): JsonObject;
+    private knowledgeIndex;
+    knowledgeIndexSync(args: JsonObject): JsonObject;
+    knowledgeSearch(args: JsonObject): JsonObject;
+    /** Declare where a knowledge document belongs and, optionally, when it stops being trustworthy. */
+    knowledgeScopeSet(args: JsonObject): JsonObject;
+    knowledgeScopeList(args: JsonObject): JsonObject;
+    /** Forget expired documents from the rebuildable projection. Markdown files are never touched. */
+    knowledgeScopeForget(): JsonObject;
+    /** Read-only projection of runs, outcomes and cost per successful outcome. */
+    metricsReport(args?: JsonObject): JsonObject;
+    /**
+     * Evaluate the launch gates for one payload.
+     *
+     * This is the observable half of hook hardening: it answers "would the default
+     * gates let this through, and why" without running anything. It is also the
+     * seam a deployment uses to add its own `fail_closed` check, which is why it
+     * accepts explicit hooks rather than only the defaults.
+     */
+    launchGate(args: JsonObject): Promise<JsonObject>;
+    executionBudgetPlan(args: JsonObject): JsonObject;
+    hookCatalog(args: JsonObject): JsonObject;
+    hookRun(args: JsonObject): Promise<JsonObject>;
     protected finalizeWorkLaunch(run: JsonObject, receipt: JsonObject | null): void;
     private settleManagedWrite;
     private finishFabricHostBridge;

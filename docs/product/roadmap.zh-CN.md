@@ -13,7 +13,7 @@
 
 ## 建设原则
 
-以 [产品架构](architecture.zh-CN.md) 的三大支柱为目标：工作与协作、执行与保障、学习与改进。**评测与实验是第三支柱内的核心模块**，不另设第四支柱。以下里程碑是规划；当前实现基线已推进到 v0.11.62。
+以 [产品架构](architecture.zh-CN.md) 的三大支柱为目标：工作与协作、执行与保障、学习与改进。**评测与实验是第三支柱内的核心模块**，不另设第四支柱。以下里程碑是规划；当前实现基线已推进到 v0.12.1。
 
 **两步定位**：短期做**跨宿主治理插件层**——以 MCP/插件形式接入 Codex CLI、Claude Code、DeepSeek Harness 等宿主，统一能力发现、授权门禁、证据链与评测门禁，执行留在宿主内；长期做**自主 Agent 平台**——自有对话循环、宿主调度与评测驱动的自我改进。Provider 是当前主线，Supervisor/Agent 是长期形态；本路线图中 v0.11.x 的能力全部属于两步共用的内核。
 
@@ -96,6 +96,32 @@
 **v0.11.61：Route-first 多宿主入口。** 新增最小 `craft-route` Skill，先区分可直接完成、必须澄清、可恢复任务与需要创建路线的复杂工作，再只加载路由选中的能力。Codex/Claude 插件既有 Core 默认面保持不变；TraeWork 的默认 `mcp.json`、WorkBuddy Expert 都切到 `craft-mcp`，而 WorkBuddy Connector 继续作为显式 Full-MCP 高级治理入口。所有方式共享同一 Task、Evidence、Policy、Workflow 和 Capability Connector 内核；完整工具面只在用户批准的来源/连接器管理场景使用。详见 [TraeWork / WorkBuddy 宿主适配](../technical/modules/host-ecosystem-adapters.md)。
 
 **v0.11.62：单 Skill 默认面。** 吸收强模型不应被重叠提示词污染的原则，所有默认入口只加载 `craft-route`；其内置最多三项、只问决策性问题的最小澄清规则。`craft` 与 `craft-clarify` 被保留为独立 opt-in 包，WorkBuddy Expert 与 Connector 均不再携带重复的 Craft Skill。Core/Full MCP 能力与共享状态保持不变。详见 [TraeWork / WorkBuddy 宿主适配](../technical/modules/host-ecosystem-adapters.md)。
+
+**v0.12.1：syscall 工具面、模型网关与跨模型可比性（当前版本）。** 本版把"最小安全面"从分片推进到结构：新增 `syscall` 接入面，用 8 个通用动词（`describe` / `list` / `get` / `create` / `update` / `run` / `cancel` / `search`）加 `resource` + `operation` 寻址，替代按操作逐个暴露工具。注册表由既有工具表机械派生，因此 **494 个操作全部可达而挂载 schema 保持 O(1)**；`union(registry) === 全部工具`、地址唯一、失败关闭均由测试断言。默认面实测约为 full 面的 1/10 以下，`craft_describe` 按需返回某个操作的精确入参与 effect/risk/审批要求。syscall 面不复制任何 handler，也不改变任何操作语义。
+
+同一版本新增**模型网关**：以声明方式支持 8 家模型（deepseek、火山引擎方舟、通义千问、Kimi、智谱 GLM、MiniMax、OpenAI GPT、Anthropic Claude）。Provider 目录只保存端点、协议、模型分层与**环境变量名**，从不保存密钥；凭证是否就绪由运行时的环境变量决定。请求渲染与响应解析是纯函数，因此 8 家可以在没有任何 API Key 的情况下被声明、配置与验证。本版**不内置网络客户端**：默认 transport 明确拒绝并指出缺少哪个环境变量。
+
+新增**内建宿主（internal host）**：Craft 自己跑循环时，是与 Codex、Claude 并列的第三个 Host Driver，产出同样的 dispatch / receipt / event 记录，所以"自己跑"和"治理别人跑"可以用同一套 harness 比较。循环带**外部熔断**（步数、token、墙钟、无进展、动作重复、预算熔断六道闸），因为实测中智能体几乎不会主动报告自己卡住；循环可调用的动作是显式白名单，且只限读与记录。
+
+新增**资产信封与路由**：能力、知识、工作流共用同一信封（来源 / 信任 / 健康 / effect / 成本 / 策略 / 稳定性），路由按信任、健康、effect、领域标签、预算与风险上限选最小集合，并把每一次拒绝的理由一并返回；无可用项时给出 baseline 而非猜测。
+
+新增**跨模型可比性**：资产可声明 core invariants 与 model-sensitive 行为，评测要求至少两个模型；只有核心不变量在每个模型都成立才判 verified，只在部分模型成立的降级为提示。这是 Craft 对"模型会变、机制不该变"这一前提的可验证表达。
+
+**运营度量**：新增只读指标投影，把已有记录聚合为成功率、耗时、token、成本与**每成功 outcome 成本**（成本 ÷ 通过数）。业界真正在意的不是"花了多少 token"，而是"拿到一个成功结果花了多少"——便宜但失败的run比昂贵但成功的run更贵，单轮 token 数表达不了这件事。空库报告为零样本而不是满分。
+
+**启动门禁**：默认门禁声明为三件事——被记录（audit-log）、被计量（token-meter）、被回执核验（receipt-check），集中在一处声明以便被报告与扩展；`craft_launch_gate` 可评估某个 payload 是否会被门禁拦下及原因，且接受部署方注入 `fail_closed` 检查。内置门禁在服务自身 invoker 下恒为通过，因此挂载它们不改动既有启动行为。
+
+工程底座：版本号收敛为 package.json 单一来源，`version:check` 扩展覆盖两个 WorkBuddy 适配器清单与三个适配器 Skill；覆盖率门禁保持 100%（行 / 函数 / 分支），本版未放宽任何阈值。
+
+**知识作用域与过期**：知识文档可声明 `user` / `project` / `task` 作用域与可选 TTL；过期文档会从可重建投影中移除，但**绝不改动 Markdown 源文件**——遗忘的是投影，不是真相。理由是过期的笔记比没有笔记更危险：默默检索到一条已被取代的决策，比检索不到更难排查。
+
+以下为上一版内容。
+
+**v0.11.63：最小安全面工具分片。** `craft-route` 长期承诺 "smallest safe MCP surface"，但默认面实际是 485 个工具全量注入（≈57.4k tokens）。本版把工具面按域切成可独立挂载的分片：`core`（69，默认不变）与 `governance` / `evaluation` / `execution` / `knowledge` / `workspace` / `collaboration` / `workflow`，另保留 `full`（485）。分片是同一份代码加不同白名单，不是两套清单；`core` 加全部分片的并集经测试断言恰好等于 485 且互不重叠，未知 surface 失败关闭而非静默放宽到全量。入口新增 `--surface <name>` 与 `CRAFT_MCP_SURFACE`，默认行为完全不变。最大分片 83 工具 / ≈10.6k tokens，为 full 的 18.5%。它不改变任何现有工具语义，也不自动为宿主挑选分片。
+
+同一版本修复 2 个**回执完整性**缺陷（N1 验收过程中发现）：其一，验证循环回执的默认 ID 原先用记录版本号做身份，而版本号在多次观测间会重复（新建快照记录版本恒为 1，内容未变的状态走幂等路径也保持版本 1），导致第二次观测直接复用旧回执——审计链会给出与 loop 实际状态相矛盾的记录（实测：loop 已 `needs_replan`，唯一回执却说 `running` 且指向另一个快照）。现改为由观测内容（状态 + 快照 + 原因）寻址，重放保持幂等、新观测必然新回执。其二，人工修改写入的 `needs_replan_reason = "human_change"` 会被随后的派生原因覆盖，使该原因在实践中永不保留；现改为首个原因优先，显式人工归因不再被覆盖。两项均补测试，覆盖率门禁保持 100%。
+
+N1 六项验收标准（研发闭环、文件成果确定性验收、人工修改、Host 中断、审批过期、输入漂移）已全部通过，40/40 断言，详见 [N1 验收报告](../research/n1-acceptance-report-2026-09-12.md)。
 
 - 面向各行业工作者，研发是首批验证场景，视频用于检验跨领域复用；后续扩展销售、教育与内容创作，不同时自建所有专业编辑器。
 - 先把真实工作从目标到成果跑通，同时提供可操作的最小界面；不长期只增加协议与配置。

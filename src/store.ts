@@ -1,8 +1,9 @@
 import { existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
+import { applyMigrations, backupDatabase } from "./store-migrations.ts";
 import { craftPaths, ensureLayout, type CraftPaths } from "./paths.ts";
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 export type JsonObject = Record<string, unknown>;
 export type SaveEntry = { kind: string; id: string; payload: JsonObject; version?: number };
 const RESERVED_FIELDS = new Set(["id", "version", "created_at", "updated_at"]);
@@ -31,37 +32,34 @@ export class CraftStore {
     await ensureLayout(this.paths);
     const database = new DatabaseSync(this.paths.databaseFile);
     database.exec("PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA busy_timeout=15000;");
-    database.exec("BEGIN IMMEDIATE");
     try {
-    database.exec(`
-      CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS records(
-        kind TEXT NOT NULL,id TEXT NOT NULL,version INTEGER NOT NULL,
-        payload_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,
-        PRIMARY KEY(kind,id,version)
-      );
-      CREATE INDEX IF NOT EXISTS records_latest ON records(kind,id,version DESC);
-      CREATE TABLE IF NOT EXISTS events(
-        stream TEXT NOT NULL,sequence INTEGER NOT NULL,event_type TEXT NOT NULL,
-        payload_json TEXT NOT NULL,created_at TEXT NOT NULL,
-        PRIMARY KEY(stream,sequence)
-      );
-    `);
-    const schemaRow = database.prepare("SELECT value FROM meta WHERE key='schema_version'").get() as { value?: string } | undefined;
-    const previousVersion = Number(schemaRow?.value ?? 0);
-    if (previousVersion > SCHEMA_VERSION) {
-      throw new Error(`Craft database schema ${previousVersion} is newer than supported schema ${SCHEMA_VERSION}`);
-    }
-    database.prepare("INSERT OR REPLACE INTO meta(key,value) VALUES('schema_version',?)")
-      .run(String(SCHEMA_VERSION));
-    database.exec("COMMIT");
-    this.#database = database;
-    return this;
+      // Schema upgrades go through the ordered migration registry, which
+      // owns its own transaction. We do not wrap it here because SQLite
+      // refuses nested BEGIN IMMEDIATE. If the migration refuses the
+      // schema (e.g. a newer-than-supported version) we must close the
+      // freshly opened connection so the file lock is released.
+      applyMigrations(database, SCHEMA_VERSION);
     } catch (error) {
-      database.exec("ROLLBACK");
       database.close();
       throw error;
     }
+    this.#database = database;
+    return this;
+  }
+
+  /**
+   * Apply pending migrations to an already-open database. Returns a
+   * description of what changed. Caller is responsible for closing the
+   * connection if they want to re-open from disk after a rollback.
+   */
+  applyMigrationsNow(target = SCHEMA_VERSION, options: { dryRun?: boolean } = {}) {
+    // `applyMigrations` runs its own transaction; do not wrap it here.
+    return applyMigrations(this.database, target, options);
+  }
+
+  /** Copy the live database file to `paths.backupsDir`. */
+  backup(backupsDir = this.paths.backupsDir): string {
+    return backupDatabase(this.paths.databaseFile, backupsDir);
   }
 
   get database(): DatabaseSync {

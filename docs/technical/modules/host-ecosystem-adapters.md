@@ -1,6 +1,6 @@
 # TraeWork / WorkBuddy host adapters
 
-> Implementation baseline: v0.11.62. These are local integration and marketplace-submission packages, not claims that Craft has been approved by either marketplace or that a cloud MCP service exists.
+> Implementation baseline: v0.12.1. These are local integration and marketplace-submission packages, not claims that Craft has been approved by either marketplace or that a cloud MCP service exists.
 
 ## Goal
 
@@ -23,7 +23,7 @@ Codex / Claude / TraeWork / WorkBuddy
 
 ## WorkBuddy
 
-[`adapters/workbuddy-connector/`](../../../adapters/workbuddy-connector/README.md) follows WorkBuddy's MCP + Skill connector structure: one MCP server, `connector-meta.json`, market icon and exactly one route Skill. It is the explicit Full-MCP Connector, not the Expert entry. [`adapters/workbuddy-expert/`](../../../adapters/workbuddy-expert/README.md) is the separately uploadable, route-first Expert package: `.codebuddy-plugin/plugin.json`, a PNG avatar, one Agent, exactly one `craft-route` Skill, and a Core MCP dependency. The local command expects a separately installed Craft executable; this avoids a brittle Git bootstrap during Connector startup. Publishing remains a WorkBuddy review step. A future remote connector must use HTTPS and preserve Craft's approval/evidence boundary rather than forwarding raw user context to an untrusted service.
+[`adapters/workbuddy-connector/`](../../../adapters/workbuddy-connector/README.md) follows WorkBuddy's MCP + Skill connector structure: one MCP server, `connector-meta.json`, market icon and exactly one route Skill. It is the explicit Full-MCP Connector, not the Expert entry. [`adapters/workbuddy-expert/`](../../../adapters/workbuddy-expert/README.md) is the separately uploadable, route-first Expert package: `.codebuddy-plugin/plugin.json`, a PNG avatar, one Agent, exactly one `craft-route` Skill, and a Core MCP dependency. Both WorkBuddy packages resolve their stdio entry through the host's plugin-root variable (`${CODEBUDDY_PLUGIN_ROOT}/bin/...`) to the dependency-free bundle shipped inside the archive, so neither a globally installed `craft-mcp` binary nor a Git bootstrap is needed at Connector or Expert startup. That mirrors the `${CLAUDE_PLUGIN_ROOT}` entry the Claude adapter already uses. Publishing remains a WorkBuddy review step. A future remote connector must use HTTPS and preserve Craft's approval/evidence boundary rather than forwarding raw user context to an untrusted service.
 
 ## Non-goals and next deployment step
 

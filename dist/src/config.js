@@ -1,6 +1,7 @@
 import { access, readFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import { atomicPrivateJson, craftPaths, ensureLayout } from "./paths.js";
+import { hostProfilesFromConfig } from "./host-registry.js";
 import {} from "./semantic.js";
 const MODES = new Set(["agent", "supervisor", "provider"]);
 const RUNTIMES = new Set([
@@ -42,6 +43,7 @@ export async function initializeConfig(input, paths = craftPaths()) {
             ...(runtimeKind === "direct-api" ? { provider: input.provider } : {}),
         },
         supervisor: { hosts: input.mode === "supervisor" ? input.supervisorHosts || [] : [] },
+        ...(input.hostProfiles?.length ? { hostProfiles: input.hostProfiles } : {}),
         storage: {
             database: paths.databaseFile,
             capabilityIndex: paths.indexFile,
@@ -82,8 +84,9 @@ function validateInit(input) {
         throw new Error(`Unsupported runtime: ${runtime}`);
     if (input.mode === "agent" && runtime === "direct-api")
         validateProvider(input.provider);
+    const declaredHosts = new Set(hostProfilesFromConfig(input.hostProfiles).map((profile) => profile.host));
     for (const host of input.supervisorHosts || []) {
-        if (!HOSTS.has(host))
+        if (!HOSTS.has(host) && !declaredHosts.has(host))
             throw new Error(`Unsupported supervisor host: ${host}`);
     }
 }
@@ -168,8 +171,9 @@ function validateConfig(value) {
         && (typeof config.runtime.command !== "string" || !config.runtime.command.trim())) {
         throw new Error("CLI runtime requires a command.");
     }
+    const declaredHosts = new Set(hostProfilesFromConfig(config.hostProfiles).map((profile) => profile.host));
     if (!config.supervisor || !Array.isArray(config.supervisor.hosts)
-        || config.supervisor.hosts.some((host) => !HOSTS.has(host))) {
+        || config.supervisor.hosts.some((host) => !HOSTS.has(host) && !declaredHosts.has(host))) {
         throw new Error("Craft config has invalid supervisor hosts.");
     }
     validateSemanticSearch(config.semanticSearch);

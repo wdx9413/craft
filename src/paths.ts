@@ -17,6 +17,7 @@ export interface CraftPaths {
   backupsDir: string;
   runtimeDir: string;
   artifactsDir: string;
+  knowledgeIndex: string;
 }
 
 export function dataRoot(env: NodeJS.ProcessEnv = process.env): string {
@@ -40,6 +41,7 @@ export function craftPaths(root = dataRoot()): CraftPaths {
     backupsDir: join(resolved, "backups"),
     runtimeDir: join(resolved, "runtime"),
     artifactsDir: join(resolved, "artifacts"),
+    knowledgeIndex: join(resolved, "index", "knowledge.db"),
   };
 }
 

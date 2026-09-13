@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
+import { lstatSync } from "node:fs";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,8 +10,29 @@ import { McpServer } from "../src/mcp.ts";
 import { craftPaths } from "../src/paths.ts";
 import { CraftService, VERSION } from "../src/service.ts";
 import { CraftStore, type JsonObject } from "../src/store.ts";
+import { kind } from "../src/state-workspace.ts";
 
 const hash = (value: unknown) => `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
+
+// Windows creates junctions without elevation, but a junction can only target a
+// directory, while a POSIX link can target a file. Junctions are reported as
+// symbolic links by lstat, so the adapter assertions stay identical.
+const WINDOWS = process.platform === "win32";
+async function linkPath(target: string, path: string): Promise<void> {
+  await symlink(target, path, WINDOWS ? "junction" : undefined);
+}
+
+// FIFOs have no Windows equivalent, and some environments report success from
+// mkfifo while the resulting path stays invisible to Node. Probe the real
+// capability instead of guessing from the platform name, so the non-regular-file
+// branch of the adapter is still exercised wherever a FIFO can actually be read.
+function createFifo(path: string): boolean {
+  try {
+    execFileSync("mkfifo", [path]);
+    const stat = lstatSync(path);
+    return !stat.isFile() && !stat.isDirectory() && !stat.isSymbolicLink();
+  } catch { return false; }
+}
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-work-loop-")); await writeFile(join(root, "note.txt"), "before");
@@ -51,7 +73,7 @@ test("Verified Work Loop is the small public seam over launch, observed state, a
     const noPaths = f.service.verifiedWorkLoopPrepare({ work_loop_id: "no-paths", workspace_id: f.workspace.id, title: "No paths", goal: "read", host: "codex-cli", prompt: "read" }); await f.service.hostRuns.wait(String((noPaths.launch as JsonObject).run_id)); assert.ok((f.service.verifiedWorkLoopDecide({ work_loop_id: (noPaths.work_loop as JsonObject).id, decision: "human_change", actor: "user", summary: "external edit" }).human_state_event as JsonObject).id);
     const rejection = f.service.verifiedWorkLoopPrepare({ work_loop_id: "reject-loop", workspace_id: f.workspace.id, title: "Reject", goal: "read", host: "codex-cli", prompt: "read", acceptance_name: "manual", acceptance_criteria: [{ id: "manual", name: "Manual", method: "human", required: true }] }); assert.ok((f.service.verifiedWorkLoopDecide({ work_loop_id: (rejection.work_loop as JsonObject).id, decision: "reject", actor: "user", summary: "not acceptable", criterion_id: "manual" }).decision as JsonObject).id); await f.service.hostRuns.wait(String((rejection.launch as JsonObject).run_id));
     const resumeDrift = f.service.verifiedWorkLoopPrepare({ work_loop_id: "resume-drift", workspace_id: f.workspace.id, title: "Resume drift", goal: "read", host: "codex-cli", prompt: "read" }); const resumeRun = resumeDrift.task_run as JsonObject; f.service.taskRunPause({ task_run_id: resumeRun.id, reason: "wait" }); await writeFile(join(f.root, "note.txt"), "resume drift"); assert.throws(() => f.service.verifiedWorkLoopResume({ work_loop_id: (resumeDrift.work_loop as JsonObject).id }), /fresh prepare/); await f.service.hostRuns.wait(String((resumeDrift.launch as JsonObject).run_id));
-    assert.equal(VERSION, "0.11.62");
+    assert.equal(VERSION, "0.12.1");
   } finally { await Promise.all(f.store.list("host_run", 100).map((run) => f.service.hostRuns.wait(String(run.id)))); f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
@@ -65,9 +87,13 @@ test("State Workspace adapters retain only hashes, reject unsafe selections, and
     assert.deepEqual((f.service.stateWorkspaceCompare({ before_snapshot_id: first.id, after_snapshot_id: second.id }).difference as JsonObject).modified_paths, ["note.txt"]);
     const file = f.service.stateWorkspaceObserve({ workspace_id: f.workspace.id, adapter: "file_artifact", paths: ["note.txt"], artifact_ids: [artifact.id] }).snapshot as JsonObject; assert.deepEqual(file.artifact_ids, [artifact.id]);
     await mkdir(join(f.root, "dir")); await writeFile(join(f.root, "dir", "nested.txt"), "nested"); await writeFile(join(f.root, "dir", "second.txt"), "second"); const directory = f.service.workspaceOpen({ workspace_id: "directory", name: "Directory", root_path: f.root, include_paths: ["dir"] }).workspace as JsonObject; assert.equal(((f.service.stateWorkspaceObserve({ workspace_id: directory.id }).snapshot as JsonObject).entries as JsonObject[]).length, 2);
-    const rootArtifact = f.service.stateWorkspaceObserve({ workspace_id: f.workspace.id, adapter: "file_artifact", paths: ["./"] }).snapshot as JsonObject; assert.ok((rootArtifact.entries as JsonObject[]).length > 0); execFileSync("mkfifo", [join(f.root, "pipe")]);
-    await symlink(join(f.root, "note.txt"), join(f.root, "link")); const linked = f.service.workspaceOpen({ workspace_id: "linked", name: "Linked", root_path: f.root, include_paths: ["link"] }).workspace as JsonObject;
-    assert.throws(() => f.service.stateWorkspaceObserve({ workspace_id: f.workspace.id, adapter: "other" }), /unsupported/); assert.throws(() => f.service.stateWorkspaceObserve({ workspace_id: f.workspace.id, adapter: "file_artifact" }), /requires/); assert.throws(() => f.service.stateWorkspaceObserve({ workspace_id: f.workspace.id, adapter: "file_artifact", paths: ["../x"] }), /relative/); assert.throws(() => f.service.stateWorkspaceObserve({ workspace_id: f.workspace.id, adapter: "file_artifact", paths: ["note.txt", "note.txt"] }), /unique/); assert.throws(() => f.service.stateWorkspaceObserve({ workspace_id: f.workspace.id, adapter: "file_artifact", paths: ["pipe"] }), /regular files/); assert.throws(() => f.service.stateWorkspaceObserve({ workspace_id: linked.id }), /symbolic/); assert.throws(() => f.service.stateWorkspaceCompare({ before_snapshot_id: first.id, after_snapshot_id: f.store.create("state_snapshot", "other", { workspace_id: "other", entries: [], snapshot_digest: "x" }).id }), /one workspace/);
+    const rootArtifact = f.service.stateWorkspaceObserve({ workspace_id: f.workspace.id, adapter: "file_artifact", paths: ["./"] }).snapshot as JsonObject; assert.ok((rootArtifact.entries as JsonObject[]).length > 0);
+    const hasFifo = createFifo(join(f.root, "pipe"));
+    const linkName = WINDOWS ? "linked-dir" : "link";
+    if (WINDOWS) await mkdir(join(f.root, "linked-target"));
+    await linkPath(WINDOWS ? join(f.root, "linked-target") : join(f.root, "note.txt"), join(f.root, linkName));
+    const linked = f.service.workspaceOpen({ workspace_id: "linked", name: "Linked", root_path: f.root, include_paths: [linkName] }).workspace as JsonObject;
+    assert.throws(() => f.service.stateWorkspaceObserve({ workspace_id: f.workspace.id, adapter: "other" }), /unsupported/); assert.throws(() => f.service.stateWorkspaceObserve({ workspace_id: f.workspace.id, adapter: "file_artifact" }), /requires/); assert.throws(() => f.service.stateWorkspaceObserve({ workspace_id: f.workspace.id, adapter: "file_artifact", paths: ["../x"] }), /relative/); assert.throws(() => f.service.stateWorkspaceObserve({ workspace_id: f.workspace.id, adapter: "file_artifact", paths: ["note.txt", "note.txt"] }), /unique/); if (hasFifo) assert.throws(() => f.service.stateWorkspaceObserve({ workspace_id: f.workspace.id, adapter: "file_artifact", paths: ["pipe"] }), /regular files/); assert.throws(() => kind({ isFile: () => false, isDirectory: () => false }, "pipe"), /regular files/); assert.throws(() => f.service.stateWorkspaceObserve({ workspace_id: linked.id }), /symbolic/); assert.throws(() => f.service.stateWorkspaceCompare({ before_snapshot_id: first.id, after_snapshot_id: f.store.create("state_snapshot", "other", { workspace_id: "other", entries: [], snapshot_digest: "x" }).id }), /one workspace/);
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
@@ -165,7 +191,33 @@ test("State, campaign, and project-knowledge failures remain explicit instead of
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("v0.11.62 retains deterministic rejection and idempotency branches", async () => {
+test("Verified Work Loop receipts bind to one observation and keep the first explicit replan cause", async () => {
+  const f = await fixture();
+  try {
+    const prepared = f.service.verifiedWorkLoopPrepare({ work_loop_id: "receipt-loop", workspace_id: f.workspace.id, title: "Receipts", goal: "read", host: "codex-cli", prompt: "read" });
+    const taskRun = prepared.task_run as JsonObject; const baseline = prepared.baseline_snapshot as JsonObject;
+    const running = f.store.create("task_run_state", "receipt-running", { task_run_id: taskRun.id, status: "running", action: "wait_for_host", actor: "host" });
+    const first = f.service.verifiedWorkLoops.advance({ work_loop_id: "receipt-loop", task_run_state_id: running.id, snapshot_id: baseline.id });
+    assert.equal((first.receipt as JsonObject).status, "running");
+    const drifted = f.store.create("state_snapshot", "receipt-drift", { workspace_id: f.workspace.id, workspace_state_revision: 9, entries: [], snapshot_digest: "drift" });
+    const second = f.service.verifiedWorkLoops.advance({ work_loop_id: "receipt-loop", task_run_state_id: running.id, snapshot_id: drifted.id });
+    assert.equal((second.state as JsonObject).status, "needs_replan");
+    assert.equal((second.receipt as JsonObject).reason, "workspace_changed_without_terminal_receipt");
+    assert.notEqual((second.receipt as JsonObject).id, (first.receipt as JsonObject).id);
+    assert.equal((f.service.verifiedWorkLoops.advance({ work_loop_id: "receipt-loop", task_run_state_id: running.id, snapshot_id: drifted.id }).receipt as JsonObject).id, (second.receipt as JsonObject).id);
+    const read = f.service.verifiedWorkLoops.get({ work_loop_id: "receipt-loop" }); const receipts = read.receipts as JsonObject[];
+    assert.equal(receipts.length, 2);
+    assert.ok(receipts.some((item) => item.snapshot_id === (read.loop as JsonObject).latest_snapshot_id && item.status === "needs_replan"));
+
+    const human = f.service.verifiedWorkLoopPrepare({ work_loop_id: "human-cause", workspace_id: f.workspace.id, title: "Cause", goal: "read", host: "codex-cli", prompt: "read" });
+    await f.service.hostRuns.wait(String((human.launch as JsonObject).run_id));
+    f.service.verifiedWorkLoopDecide({ work_loop_id: "human-cause", decision: "human_change", actor: "user", summary: "edited", affected_paths: ["note.txt"] });
+    assert.equal((f.service.verifiedWorkLoops.get({ work_loop_id: "human-cause" }).loop as JsonObject).needs_replan_reason, "human_change");
+    await f.service.hostRuns.wait(String((prepared.launch as JsonObject).run_id));
+  } finally { await Promise.all(f.store.list("host_run", 100).map((run) => f.service.hostRuns.wait(String(run.id)))); f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("v0.12.1 retains deterministic rejection and idempotency branches", async () => {
   const f = await fixture();
   let directHostRunId = "";
   try {
@@ -214,9 +266,13 @@ test("v0.11.62 retains deterministic rejection and idempotency branches", async 
     f.service.projectKnowledgeProposeUpdate({ proposal_id: "proposal-conflict", discovery_id: discovery.id, memory_id: "serena:one", evidence_ids: [evidence.id], summary: "one" });
     assert.throws(() => f.service.projectKnowledgeProposeUpdate({ proposal_id: "proposal-conflict", discovery_id: discovery.id, memory_id: "serena:one", evidence_ids: [evidence.id], summary: "two" }), /conflict/);
     assert.throws(() => f.service.projectKnowledgeProposeUpdate({ discovery_id: discovery.id, memory_id: "serena:one", evidence_ids: "branches-evidence" as unknown as string[], summary: "bad" }), /requires/);
-    await rm(join(f.root, ".serena", "memories", "two.md")); await symlink(join(f.root, ".serena", "memories", "one.md"), join(f.root, ".serena", "memories", "two.md"));
+    const memories = join(f.root, ".serena", "memories");
+    await rm(join(memories, "two.md"));
+    if (WINDOWS) await mkdir(join(f.root, "serena-target"));
+    const memoryTarget = WINDOWS ? join(f.root, "serena-target") : join(memories, "one.md");
+    await linkPath(memoryTarget, join(memories, "two.md"));
     assert.throws(() => f.service.projectKnowledgeResolve({ discovery_id: discovery.id, memory_ids: ["serena:two"] }), /symbolic/);
-    await symlink(join(f.root, ".serena", "memories", "one.md"), join(f.root, ".serena", "memories", "link.md"));
+    await linkPath(memoryTarget, join(memories, "link.md"));
     assert.throws(() => f.service.projectKnowledgeDiscover({ discovery_id: "symlink", project_root: f.root, trusted: true }), /symbolic/);
   } finally { await f.service.hostRuns.wait(String(directHostRunId)); f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });

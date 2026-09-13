@@ -33,7 +33,13 @@ import { AttentionKernel } from "./attention.ts";
 import { HomeKernel } from "./home.ts";
 import { CodexHostKernel } from "./codex-driver.ts";
 import { ClaudeHostKernel } from "./claude-driver.ts";
+import { GenericCliHostKernel } from "./generic-driver.ts";
 import { HostRunKernel } from "./host-run.ts";
+import { type HostProfile, mergeHostProfiles } from "./host-registry.ts";
+import { InternalHostDriver } from "./internal-host-driver.ts";
+import { MetricsKernel } from "./metrics.ts";
+import { PROVIDER_CATALOG, type ModelProviderSpec, type ModelTransport } from "./model-gateway.ts";
+import type { HostDriver } from "./host-driver.ts";
 import { KnowledgeBoundLaunchKernel } from "./knowledge-bound-launch.ts";
 import { KnowledgeWorkbenchKernel } from "./knowledge-workbench.ts";
 import { WikiCandidateGovernanceKernel } from "./wiki-candidate-governance.ts";
@@ -109,7 +115,11 @@ export abstract class ServiceFoundation {
   readonly home: HomeKernel;
   readonly codexHost: CodexHostKernel;
   readonly claudeHost: ClaudeHostKernel;
+  readonly hostProfiles: readonly HostProfile[];
+  readonly hostDrivers: Map<string, HostDriver>;
   readonly hostRuns: HostRunKernel;
+
+  hostDriver(host: string): HostDriver | undefined { return this.hostDrivers.get(host); }
   readonly knowledgeLaunch: KnowledgeBoundLaunchKernel;
   readonly knowledgeWorkbench: KnowledgeWorkbenchKernel;
   readonly wikiCandidateGovernance: WikiCandidateGovernanceKernel;
@@ -145,9 +155,14 @@ export abstract class ServiceFoundation {
   readonly evaluationOperations: EvaluationOperationsKernel;
   readonly enterpriseAccess: EnterpriseAccessKernel;
   readonly a2aDelegation: A2ADelegationKernel;
+  readonly modelProviders: readonly ModelProviderSpec[];
+  readonly internalHost: InternalHostDriver;
+  readonly metrics: MetricsKernel;
 
   constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter = new LocalIsolatedAdapter(),
-    dockerSandbox = new DockerSandboxAdapter(), egressBroker = new TrustedEgressBroker(), hostOwnerId?: string) {
+    dockerSandbox = new DockerSandboxAdapter(), egressBroker = new TrustedEgressBroker(), hostOwnerId?: string,
+    hostProfiles?: readonly HostProfile[], modelProviders?: readonly ModelProviderSpec[],
+    modelTransport?: ModelTransport) {
     this.store = store; this.catalog = new Catalog(store, semanticProvider); this.isolatedAdapter = isolatedAdapter;
     this.workspace = new WorkspaceState(store, store.paths);
     this.transaction = new TransactionCoordinator(store, this.workspace); this.trajectory = new TrajectoryCompiler(store);
@@ -165,6 +180,18 @@ export abstract class ServiceFoundation {
     this.supplyChain = new SupplyChainKernel(store); this.attention = new AttentionKernel(store);
     this.home = new HomeKernel(store, this.attention); this.codexHost = new CodexHostKernel(store);
     this.claudeHost = new ClaudeHostKernel(store);
+    this.hostProfiles = mergeHostProfiles([...(hostProfiles ?? [])]);
+    this.modelProviders = modelProviders && modelProviders.length ? modelProviders : PROVIDER_CATALOG;
+    this.internalHost = new InternalHostDriver(store, { providers: this.modelProviders, transport: modelTransport,
+      invokeAction: (action, args) => this.invokeInternalAction(action, args) });
+    const drivers: [string, HostDriver][] = [
+      ["codex-cli", this.codexHost],
+      ["claude-code", this.claudeHost],
+      ["internal", this.internalHost],
+      ...this.hostProfiles.filter((profile) => !profile.builtin && profile.kind === "agent-cli")
+        .map((profile): [string, HostDriver] => [profile.host, new GenericCliHostKernel(store, profile)]),
+    ];
+    this.hostDrivers = new Map(drivers);
     this.knowledgeLaunch = new KnowledgeBoundLaunchKernel(store);
     this.knowledgeWorkbench = new KnowledgeWorkbenchKernel(store);
     this.wikiCandidateGovernance = new WikiCandidateGovernanceKernel(store);
@@ -185,7 +212,7 @@ export abstract class ServiceFoundation {
     this.projectKnowledge = new ProjectKnowledgeKernel(store);
     this.capabilityConnectors = new CapabilityConnectorKernel(store);
     this.capabilityAccess = new CapabilityAccessKernel(store, this.catalog);
-    this.hostActivationManifests = new HostActivationManifestKernel(store);
+    this.hostActivationManifests = new HostActivationManifestKernel(store, this.hostProfiles);
     this.executionFabric = new ExecutionFabricKernel(store);
     this.hostBridge = new HostBridgeKernel(store);
     this.managedWrites = new ManagedWriteKernel(store, this.transaction, this.workspace);
@@ -200,10 +227,20 @@ export abstract class ServiceFoundation {
     this.evaluationOperations = new EvaluationOperationsKernel(store, this.evalCampaigns);
     this.enterpriseAccess = new EnterpriseAccessKernel(store);
     this.a2aDelegation = new A2ADelegationKernel(store);
-    this.hostRuns = new HostRunKernel(store, [this.codexHost, this.claudeHost], hostOwnerId,
+    this.metrics = new MetricsKernel(store);
+    this.hostRuns = new HostRunKernel(store, [...this.hostDrivers.values()], hostOwnerId,
       (run, receipt) => this.finalizeWorkLaunch(run, receipt));
   }
 
   // Implemented by the public facade after the corresponding domain method exists.
   protected abstract finalizeWorkLaunch(run: JsonObject, receipt: JsonObject | null): void;
+
+  /**
+   * The bounded action surface the internal host may call.
+   *
+   * This is a whitelist on purpose: a self-hosted loop that can reach any Craft
+   * operation would be a privilege escalation relative to the governed host
+   * path. Abstract so the facade owns the list, exactly like finalizeWorkLaunch.
+   */
+  protected abstract invokeInternalAction(action: string, args: JsonObject): JsonObject | Promise<JsonObject>;
 }

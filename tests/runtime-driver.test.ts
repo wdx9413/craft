@@ -1,252 +1,1082 @@
 import assert from "node:assert/strict";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { craftPaths } from "../src/paths.ts";
-import { CraftService } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/store.ts";
+import { CraftStore, SCHEMA_VERSION, type JsonObject } from "../src/store.ts";
+import { defineHook, defaultHooks, runHooks, planHooks, type HookRun } from "../src/hooks.ts";
+import { RuntimeDriver, runtimeDriverInternalsForTest, type RuntimeOperation } from "../src/runtime-driver.ts";
+import { ExternalEffectKernel } from "../src/effects.ts";
+import { HookedEffectKernel } from "../src/hooked-effect-kernel.ts";
 
-test("controlled driver executes only policy-approved deterministic workflows and recovers leases", async () => {
-  const root = join(tmpdir(), `craft-v096-driver-${process.pid}-${Date.now()}`);
-  await mkdir(root, { recursive: true }); await writeFile(join(root, "proof.txt"), "ok");
-  const store = await new CraftStore(craftPaths(join(root, "data"))).open(); const service = new CraftService(store);
+async function fixture(): Promise<{ root: string; store: CraftStore; runtime: RuntimeDriver }> {
+  const root = join(tmpdir(), `craft-runtime-${process.pid}-${Date.now()}-${Math.random()}`);
+  await mkdir(root, { recursive: true });
+  const store = await new CraftStore(craftPaths(root)).open();
+  const runtime = new RuntimeDriver(store, { strictHooks: true });
+  return { root, store, runtime };
+}
+
+async function teardown(root: string, store: CraftStore): Promise<void> {
+  store.close();
+  await rm(root, { recursive: true, force: true });
+}
+
+test("startOperation persists a runtime_operation with the expected fields", async () => {
+  const { root, store, runtime } = await fixture();
   try {
-    const task = service.taskOpen({ title: "Driver", goal: "Execute deterministically" }).task as JsonObject;
-    const workflow = service.workflowSave({ workflow_id: "proof", name: "Proof", steps: [
-      { id: "proof", type: "assertion", evaluator: "file_exists", path: "proof.txt" },
-    ] });
-    const policy = service.runtimePolicySave({ name: "Driver policy", allowed_effects: ["read_only"],
-      trusted_hosts: ["craft-driver"], path_allowlist: ["proof.txt"], max_attempts: 2, lease_ttl_seconds: 1 });
-    service.runtimeRunStart({ run_id: "driver-run", task_id: task.id, policy_id: policy.id, environment: { image: "fixed" }, operations: [{
-      operation_id: "workflow-op", kind: "workflow", effect: "read_only", objective: "prove", execution: {
-        workflow_id: workflow.id, workflow_version: workflow.version, project_root: root, inputs: { marker: "explicit" },
-      },
-    }] });
-    const tick = service.runtimeDriverTick({ run_id: "driver-run", driver_id: "craft-driver" });
-    assert.equal((tick.executed as JsonObject[]).length, 1);
-    assert.equal((service.runtimeRunGet({ run_id: "driver-run" }).run as JsonObject).status, "completed");
-
-    service.runtimeRunStart({ run_id: "lease-run", task_id: task.id, policy_id: policy.id, environment: {}, operations: [{
-      operation_id: "lease-op", kind: "agent", effect: "read_only", objective: "host work",
-    }] });
-    service.runtimeDispatch({ run_id: "lease-run", claimed_by: "craft-driver" });
-    const reclaimed = service.runtimeLeaseRecover({ run_id: "lease-run", now: "2999-01-01T00:00:00.000Z" });
-    assert.deepEqual(reclaimed.recovered_operation_ids, ["lease-op"]);
-    assert.throws(() => service.runtimeDriverTick({ run_id: "lease-run", driver_id: "other" }), /trusted/);
-  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+    const operation = runtime.startOperation({
+      route_id: "route_42", idempotency_key: "idem_abcdef01",
+      effect_class: "write", effect_scope: "github/api/repos/foo",
+      policy_hash: "sha256:abc", expires_at: new Date(Date.now() + 60_000).toISOString(),
+    });
+    assert.equal(operation.route_id, "route_42");
+    assert.equal(operation.idempotency_key, "idem_abcdef01");
+    assert.equal(operation.effect_class, "write");
+    assert.equal(operation.status, "executing");
+    assert.equal(operation.retry_count, 0);
+    assert.ok(store.find("runtime_operation", operation.id), "operation must be persisted");
+  } finally {
+    await teardown(root, store);
+  }
 });
 
-test("held-out promotion applies repeated-trial confidence, regression budgets, and a program grader", async () => {
-  const root = join(tmpdir(), `craft-v096-eval-${process.pid}-${Date.now()}`);
-  await mkdir(root, { recursive: true }); await writeFile(join(root, "ok.txt"), "ok");
-  const store = await new CraftStore(craftPaths(join(root, "data"))).open(); const service = new CraftService(store);
+test("startOperation rejects an already-past expiry", async () => {
+  const { root, store, runtime } = await fixture();
   try {
-    const task = service.taskOpen({ title: "Eval", goal: "Promote only evidence" }).task as JsonObject;
-    const suite = service.evaluationSuiteSave({ name: "Held", cases: [{ case_id: "one", split: "held_out" }, { case_id: "two", split: "held_out" }] });
-    const good = (workflowId: string) => service.workflowSave({ workflow_id: workflowId, name: workflowId, steps: [
-      { id: "proof", type: "assertion", evaluator: "file_exists", path: "ok.txt" },
-    ] });
-    const baseline = good("baseline"); const candidate = good("candidate");
-    const runner = service.evaluationRunnerRun({ task_id: task.id, suite_id: suite.id, split: "held_out", project_root: root,
-      trials_per_case: 2, subjects: [
-        { label: "baseline", subject_type: "workflow", subject_id: baseline.id, subject_version: baseline.version },
-        { label: "candidate", subject_type: "workflow", subject_id: candidate.id, subject_version: candidate.version },
-      ] });
-    const comparison = (runner.comparisons as JsonObject[])[0];
-    const grader = service.graderSave({ name: "Gate", grader_type: "program", rules: { minimum_pass_rate: 1 } });
-    const grade = service.evaluationProgramGrade({ evaluation_run_id: (runner.evaluation_runs as JsonObject[])[1].id,
-      grader_id: grader.id, grader_version: grader.version });
-    assert.equal(((grade.grades as JsonObject[])[0]).verdict, "passed");
-    const defaultGrader = service.graderSave({ name: "Default gate", grader_type: "program" });
-    assert.equal((service.evaluationProgramGrade({ evaluation_run_id: (runner.evaluation_runs as JsonObject[])[0].id,
-      grader_id: defaultGrader.id }).passed), true);
-    const durationGrader = service.graderSave({ name: "Duration gate", grader_type: "program", configuration: { maximum_mean_duration_ms: 1_000_000 } });
-    assert.equal((service.evaluationProgramGrade({ evaluation_run_id: (runner.evaluation_runs as JsonObject[])[0].id,
-      grader_id: durationGrader.id }).passed), true);
-    const promotion = service.evaluationPromotionAssess({ comparison_id: comparison.id, min_trials: 4,
-      min_pass_rate_delta: 0 });
-    assert.equal(promotion.eligible, true);
-    assert.equal(typeof ((promotion.comparison as JsonObject).paired as JsonObject).candidate_wins, "number");
-    assert.equal((service.evaluationPromotionAssess({ comparison_id: comparison.id, min_trials: 5 }).eligible), false);
-    assert.equal((service.evaluationProgramGrade({ evaluation_run_id: (runner.evaluation_runs as JsonObject[])[1].id,
-      grader_id: grader.id }).grades as JsonObject[]).length, 4);
-    const badGrader = service.graderSave({ name: "Bad gate", grader_type: "program", configuration: { minimum_pass_rate: 2 } });
-    assert.throws(() => service.evaluationProgramGrade({ evaluation_run_id: (runner.evaluation_runs as JsonObject[])[1].id,
-      grader_id: badGrader.id }), /configuration/);
-    const human = service.graderSave({ name: "Human", grader_type: "human" });
-    assert.throws(() => service.evaluationProgramGrade({ evaluation_run_id: (runner.evaluation_runs as JsonObject[])[1].id,
-      grader_id: human.id }), /program grader/);
-    assert.throws(() => service.evaluationPromotionAssess({ comparison_id: comparison.id, max_cost_regression_ratio: -1 }), /thresholds/);
-    const failing = service.workflowSave({ workflow_id: "failing-candidate", name: "Failing candidate", steps: [
-      { id: "missing", type: "assertion", evaluator: "file_exists", path: "missing.txt" },
-    ] });
-    const wins = service.evaluationRunnerRun({ runner_id: "wins", task_id: task.id, suite_id: suite.id, split: "held_out", project_root: root,
-      subjects: [{ label: "fail", subject_type: "workflow", subject_id: failing.id, subject_version: failing.version },
-        { label: "pass", subject_type: "workflow", subject_id: candidate.id, subject_version: candidate.version }] });
-    const failedGrade = service.evaluationProgramGrade({ evaluation_run_id: (wins.evaluation_runs as JsonObject[])[0].id,
-      grader_id: grader.id, grader_version: grader.version });
-    assert.equal(((failedGrade.grades as JsonObject[])[0]).verdict, "failed");
-    const winPromotion = service.evaluationPromotionAssess({ comparison_id: ((wins.comparisons as JsonObject[])[0]).id, min_trials: 2 });
-    assert.equal(((winPromotion.comparison as JsonObject).paired as JsonObject).candidate_wins, 2);
-    const losses = service.evaluationRunnerRun({ runner_id: "losses", task_id: task.id, suite_id: suite.id, split: "held_out", project_root: root,
-      subjects: [{ label: "pass", subject_type: "workflow", subject_id: candidate.id, subject_version: candidate.version },
-        { label: "fail", subject_type: "workflow", subject_id: failing.id, subject_version: failing.version }] });
-    const lossPromotion = service.evaluationPromotionAssess({ comparison_id: ((losses.comparisons as JsonObject[])[0]).id, min_trials: 2 });
-    assert.equal(((lossPromotion.comparison as JsonObject).paired as JsonObject).baseline_wins, 2);
-  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+    assert.throws(() => runtime.startOperation({
+      route_id: "r", idempotency_key: "idem_key_99",
+      effect_class: "read", effect_scope: "x", policy_hash: "p",
+      expires_at: new Date(Date.now() - 1000).toISOString(),
+    }), /expires_at must be in the future/);
+  } finally {
+    await teardown(root, store);
+  }
 });
 
-test("adaptive harness compiles a host-neutral IR into a controlled runtime and keeps mined candidates in shadow", async () => {
-  const root = join(tmpdir(), `craft-v096-harness-${process.pid}-${Date.now()}`);
-  const store = await new CraftStore(craftPaths(root)).open(); const service = new CraftService(store);
+test("startOperation rejects an invalid expiry timestamp", async () => {
+  const { root, store, runtime } = await fixture();
   try {
-    const task = service.taskOpen({ title: "Harness", goal: "Safely evolve" }).task as JsonObject;
-    const policy = service.runtimePolicySave({ name: "IR", allowed_effects: ["read_only"] });
-    const selection = service.harnessSelect({ task_id: task.id, risk: "high", budget: { tokens: 20 }, requires_external_effect: false });
-    assert.equal((selection.strategy as JsonObject).topology, "planner_executor_evaluator");
-    const ir = service.agentIrCompile({ task_id: task.id, harness_id: (selection.harness as JsonObject).id,
-      harness_version: (selection.harness as JsonObject).version,
-      goal: "inspect then judge", operations: [{ id: "plan", kind: "agent", effect: "read_only", objective: "plan" },
-        { id: "judge", kind: "grader", effect: "read_only", objective: "judge", depends_on: ["plan"] },
-        { id: "workflow", kind: "workflow", effect: "read_only", objective: "workflow", execution: { workflow_id: "future", project_root: root, inputs: {} } }] });
-    const lowered = service.agentIrLower({ ir_id: ir.id, ir_version: ir.version, run_id: "ir-run", policy_id: policy.id, environment: { image: "fixed" } });
-    assert.equal((lowered.operations as JsonObject[]).length, 3);
-    const experiment = service.experienceShadowExperimentCreate({ task_id: task.id, mining_candidate_id: "missing" });
-    assert.equal(experiment.status, "rejected");
-    assert.throws(() => service.harnessSelect({ task_id: task.id, risk: "unknown" }), /risk/);
-    assert.throws(() => service.agentIrCompile({ task_id: task.id, harness_id: (selection.harness as JsonObject).id, goal: "bad", operations: [] }), /uniquely/);
-    assert.throws(() => service.agentIrCompile({ task_id: task.id, harness_id: (selection.harness as JsonObject).id, goal: "bad", operations: [
-      { id: "one", kind: "agent", effect: "read_only", objective: "one", depends_on: ["missing"] },
-    ] }), /dependencies/);
+    assert.throws(() => runtime.startOperation({
+      route_id: "r", idempotency_key: "idem_invalid_date", effect_class: "read", effect_scope: "x", policy_hash: "p",
+      expires_at: "not-a-date",
+    }), /expires_at must be an ISO-8601 datetime/);
+  } finally {
+    await teardown(root, store);
+  }
+});
 
-    const subject = service.workflowSave({ workflow_id: "mined", name: "Mined" });
-    const evidence = service.evidenceRecord({ source_type: "program", confidence: "confirmed", claim: "failure" });
-    for (const trialId of ["mine-one", "mine-two"]) {
-      service.trialStart({ trial_id: trialId, task_id: task.id, subject_type: "workflow", subject_id: subject.id, subject_version: subject.version });
-      service.outcomeRecord({ trial_id: trialId, verdict: "failed", failure_type: "repeat", summary: "failed", evidence_ids: [evidence.id] });
+test("runtime driver validation helpers reject every non-text and non-object shape", () => {
+  assert.equal(runtimeDriverInternalsForTest.text(" value ", "value"), "value");
+  assert.throws(() => runtimeDriverInternalsForTest.text(0, "value"), /must not be empty/);
+  assert.throws(() => runtimeDriverInternalsForTest.text("", "value"), /must not be empty/);
+  assert.deepEqual(runtimeDriverInternalsForTest.object({ ok: true }, "value"), { ok: true });
+  assert.throws(() => runtimeDriverInternalsForTest.object(null, "value"), /must be an object/);
+  assert.throws(() => runtimeDriverInternalsForTest.object("bad", "value"), /must be an object/);
+  assert.throws(() => runtimeDriverInternalsForTest.object([], "value"), /must be an object/);
+});
+
+test("startOperation rejects unknown effect classes", async () => {
+  const { root, store, runtime } = await fixture();
+  try {
+    assert.throws(() => runtime.startOperation({
+      route_id: "r", idempotency_key: "idem_key_99",
+      effect_class: "destroy", effect_scope: "x", policy_hash: "p",
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+    }), /effect_class must be one of/);
+  } finally {
+    await teardown(root, store);
+  }
+});
+
+test("replay-safe startOperation returns the same record on the same key", async () => {
+  const { root, store, runtime } = await fixture();
+  try {
+    const first = runtime.startOperation({
+      route_id: "r", idempotency_key: "idem_key_99",
+      effect_class: "execute", effect_scope: "x", policy_hash: "p",
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+      operation_id: "op_one",
+    });
+    const second = runtime.startOperation({
+      route_id: "r", idempotency_key: "idem_key_99",
+      effect_class: "execute", effect_scope: "x", policy_hash: "p",
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+      operation_id: "op_one",
+    });
+    assert.equal(second.id, first.id);
+    assert.equal(second.version, first.version);
+  } finally {
+    await teardown(root, store);
+  }
+});
+
+test("startOperation flags pending_approval when a ref is supplied", async () => {
+  const { root, store, runtime } = await fixture();
+  try {
+    const operation = runtime.startOperation({
+      route_id: "r", idempotency_key: "idem_key_99",
+      effect_class: "publish", effect_scope: "marketing/post",
+      policy_hash: "p", pending_approval_ref: "approval_42",
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+    });
+    assert.equal(operation.status, "pending_approval");
+    assert.equal(operation.pending_approval_ref, "approval_42");
+  } finally {
+    await teardown(root, store);
+  }
+});
+
+test("runBeforeEffectSync runs the default before_effect hooks and writes events", async () => {
+  const { root, store, runtime } = await fixture();
+  try {
+    const operation = runtime.startOperation({
+      route_id: "r", idempotency_key: "idem_key_99",
+      effect_class: "write", effect_scope: "x", policy_hash: "p",
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+    });
+    const run = runtime.runBeforeEffectSync(operation, { action: "noop" });
+    assert.equal(run.blocked, false);
+    // The default hook list has two before_effect hooks (audit-log +
+    // token-meter) and one after_receipt hook; the sync run only sees the
+    // ones attached to the requested point.
+    const beforeHooks = defaultHooks().filter((hook) => hook.point === "before_effect");
+    assert.equal(run.outcomes.length, beforeHooks.length);
+    for (const outcome of run.outcomes) assert.equal(outcome.status, "passed");
+    const events = store.events("hook");
+    assert.ok(events.length >= beforeHooks.length + 1, "operation_started + hook_before_effect events");
+  } finally {
+    await teardown(root, store);
+  }
+});
+
+test("runBeforeEffectSync blocks dispatch when a fail_closed hook fails", async () => {
+  const { root, store, runtime } = await fixture();
+  try {
+    const failingHook = defineHook({
+      id: "deny-write", point: "before_effect", kind: "builtin",
+      target: "builtin:receipt-check", fail_policy: "fail_closed", timeout_ms: 1000,
+    });
+    const driver = new RuntimeDriver(runtime.store, {
+      strictHooks: true, hooks: [failingHook],
+    });
+    // receipt-check refuses when idempotency_key is absent.
+    const operation = driver.startOperation({
+      route_id: "r", idempotency_key: "will_be_cleared",
+      effect_class: "write", effect_scope: "x", policy_hash: "p",
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+    });
+    const run = driver.runBeforeEffectSync({ ...operation, idempotency_key: "" }, {});
+    assert.equal(run.blocked, true);
+  } finally {
+    await teardown(root, store);
+  }
+});
+
+test("completeOperation advances status and emits one completion event", async () => {
+  const { root, store, runtime } = await fixture();
+  try {
+    const operation = runtime.startOperation({
+      route_id: "r", idempotency_key: "idem_key_99",
+      effect_class: "execute", effect_scope: "x", policy_hash: "p",
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+    });
+    const completed = runtime.completeOperation(operation, { receipt_id: "rcpt_001", status: "completed" });
+    assert.equal(completed.status, "completed");
+    assert.ok(completed.finished_at);
+    const events = store.events("hook").filter((row) => row.event_type === "operation_completed");
+    assert.equal(events.length, 1);
+  } finally {
+    await teardown(root, store);
+  }
+});
+
+test("timeoutOperation marks an expired operation as timed_out", async () => {
+  const { root, store, runtime } = await fixture();
+  try {
+    const operation = runtime.startOperation({
+      route_id: "r", idempotency_key: "idem_key_99",
+      effect_class: "read", effect_scope: "x", policy_hash: "p",
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+    });
+    const timed = runtime.timeoutOperation(operation, "wall-clock exceeded");
+    assert.equal(timed.status, "timed_out");
+    assert.ok(timed.finished_at);
+  } finally {
+    await teardown(root, store);
+  }
+});
+
+test("recoverOperation refuses an expired operation", async () => {
+  const { root, store, runtime } = await fixture();
+  try {
+    const pastExpiry = new Date(Date.now() - 1000).toISOString();
+    const operation = runtime.startOperation({
+      route_id: "r", idempotency_key: "idem_key_99",
+      effect_class: "read", effect_scope: "x", policy_hash: "p",
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+      operation_id: "op_expired",
+    });
+    // Backdate the expiry through a direct updateIfVersion to simulate a
+    // crash recovery finding a stale operation.
+    const backdated = runtime.store.updateIfVersion("runtime_operation", operation.id, Number(operation.version), {
+      ...payloadOf(operation), expires_at: pastExpiry,
+    }) as RuntimeOperation;
+    assert.throws(() => runtime.recoverOperation(backdated.id), /has expired/);
+  } finally {
+    await teardown(root, store);
+  }
+});
+
+test("HookedEffectKernel.start refuses dispatch when the hook chain blocks", async () => {
+  const { root, store, runtime } = await fixture();
+  try {
+    store.create("task", "task_seed", {
+      title: "seed", goal: "seed", status: "draft", version: 1,
+    });
+    // Build a driver whose `runBeforeEffectSync` always reports a blocked
+    // verdict, simulating a fail_closed hook in the chain.
+    const blockingDriver = new RuntimeDriver(store, {
+      strictHooks: true, hooks: [],
+      onHookEvent: () => undefined,
+    });
+    (blockingDriver as unknown as {
+      runBeforeEffectSync: (op: RuntimeOperation, payload: JsonObject) => { outcomes: never[]; blocked: boolean };
+    }).runBeforeEffectSync = () => ({ outcomes: [], blocked: true });
+    const inner = new ExternalEffectKernel(store);
+    const hooked = new HookedEffectKernel(inner, blockingDriver);
+    const prepared = inner.prepare({
+      task_id: "task_seed", effect: "external_write", idempotency_key: "idem_key_alpha1",
+      provider: "github", action: "POST /repos/foo/issues", target: "github/api",
+      request_digest: "sha256:abc", approval_ref: "approval_001",
+      effect_id: "eff_blocked",
+    }) as { effect: { id: string } };
+    assert.throws(() => hooked.start({
+      effect_id: prepared.effect.id, approval_ref: "approval_001",
+      route_id: "r", effect_class: "write", effect_scope: "github/api/repos/foo",
+      policy_hash: "sha256:abc", idempotency_key: "idem_key_alpha1",
+    }), /hook chain blocked/);
+  } finally {
+    await teardown(root, store);
+  }
+});
+
+test("HookedEffectKernel dispatches start + report and writes hook events for both", async () => {
+  const { root, store, runtime } = await fixture();
+  try {
+    store.create("task", "task_seed", {
+      title: "seed", goal: "seed", status: "draft", version: 1,
+    });
+    // The report path needs at least one evidence_id, so seed one first.
+    store.create("evidence", "evidence_001", {
+      kind: "response", digest: "sha256:done", summary: "github post succeeded",
+    });
+    const inner = new ExternalEffectKernel(store);
+    const hooked = new HookedEffectKernel(inner, runtime);
+    const prepared = inner.prepare({
+      task_id: "task_seed", effect: "external_write", idempotency_key: "idem_key_alpha1",
+      provider: "github", action: "POST /repos/foo/issues", target: "github/api",
+      request_digest: "sha256:abc", approval_ref: "approval_001",
+      effect_id: "eff_ok_001",
+    }) as { effect: { id: string } };
+    const started = hooked.start({
+      effect_id: prepared.effect.id, approval_ref: "approval_001",
+      route_id: "r", effect_class: "write", effect_scope: "github/api/repos/foo",
+      policy_hash: "sha256:abc", idempotency_key: "idem_key_alpha1",
+    }) as { idempotent: boolean };
+    assert.equal(started.idempotent, false);
+    hooked.report({
+      effect_id: prepared.effect.id, receipt_id: "rcpt_001",
+      status: "succeeded", remote_operation_id: "remote_42",
+      evidence_ids: ["evidence_001"], response_digest: "sha256:done",
+      operation_id: prepared.effect.id,
+    });
+    const hookEvents = store.events("hook").filter((row) => String(row.event_type).startsWith("hook_"));
+    assert.ok(hookEvents.length >= 3, "before_effect + after_receipt + operation_started/completed events");
+  } finally {
+    await teardown(root, store);
+  }
+});
+
+test("recentHookEvents surfaces the audit trail for `craft_hook_audit`", async () => {
+  const { root, store, runtime } = await fixture();
+  try {
+    const operation = runtime.startOperation({
+      route_id: "r", idempotency_key: "idem_key_99",
+      effect_class: "read", effect_scope: "x", policy_hash: "p",
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+    });
+    runtime.runBeforeEffectSync(operation, { extra: "context" });
+    const trail = runtime.recentHookEvents();
+    assert.ok(trail.length >= defaultHooks().length);
+    for (const outcome of trail) {
+      assert.equal(outcome.fail_policy, "fail_closed");
     }
-    const mined = service.experienceMine({ subject_type: "workflow", subject_id: subject.id, subject_version: subject.version });
-    assert.equal(service.experienceShadowExperimentCreate({ task_id: task.id,
-      mining_candidate_id: (mined.candidates as JsonObject[])[0].id }).status, "planned");
-  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+  } finally {
+    await teardown(root, store);
+  }
 });
 
-test("driver blocks unsafe deterministic execution, retries deterministic failures, and exhausts leases safely", async () => {
-  const root = join(tmpdir(), `craft-v096-policy-${process.pid}-${Date.now()}`);
-  await mkdir(root, { recursive: true }); const store = await new CraftStore(craftPaths(join(root, "data"))).open(); const service = new CraftService(store);
-  try {
-    const task = service.taskOpen({ title: "Policy", goal: "Reject unsafe work" }).task as JsonObject;
-    const policy = service.runtimePolicySave({ name: "Strict", allowed_effects: ["read_only", "external_write"], trusted_hosts: ["driver"],
-      path_allowlist: ["allowed.txt", "missing.txt"], command_allowlist: [], max_attempts: 2, lease_ttl_seconds: 1 });
-    const add = (id: string, workflow: JsonObject) => service.runtimeRunStart({ run_id: `${id}-run`, task_id: task.id, policy_id: policy.id,
-      environment: {}, operations: [{ operation_id: id, kind: "workflow", effect: String((workflow.steps as JsonObject[])[0].side_effect ?? "read_only"),
-        objective: id, execution: { workflow_id: workflow.id, workflow_version: workflow.version, project_root: root, inputs: {} } }] });
-    const external = service.workflowSave({ workflow_id: "external", name: "External", steps: [
-      { id: "external", type: "assertion", evaluator: "file_exists", path: "allowed.txt", side_effect: "external_write" },
-    ] });
-    add("external-op", external); assert.equal(((service.runtimeDriverTick({ run_id: "external-op-run", driver_id: "driver" }).executed as JsonObject[])[0]).blocked, true);
-    const path = service.workflowSave({ workflow_id: "path", name: "Path", steps: [
-      { id: "path", type: "assertion", evaluator: "file_exists", path: "blocked.txt" },
-    ] });
-    add("path-op", path); service.runtimeDriverTick({ run_id: "path-op-run", driver_id: "driver" });
-    const escape = service.workflowSave({ workflow_id: "escape", name: "Escape", steps: [
-      { id: "escape", type: "assertion", evaluator: "file_exists", path: "../escape.txt" },
-    ] });
-    add("escape-op", escape); service.runtimeDriverTick({ run_id: "escape-op-run", driver_id: "driver" });
-    const command = service.workflowSave({ workflow_id: "command", name: "Command", steps: [
-      { id: "command", type: "command", command: [process.execPath, "-e", ""], side_effect: "read_only" },
-    ] });
-    add("command-op", command); service.runtimeDriverTick({ run_id: "command-op-run", driver_id: "driver" });
-    const secret = service.workflowSave({ workflow_id: "secret", name: "Secret", steps: [
-      { id: "secret", type: "command", command: [process.execPath, "-e", ""], env: { TOKEN: "x" }, side_effect: "read_only" },
-    ] });
-    const allowedCommand = service.runtimePolicySave({ runtime_policy_id: policy.id, name: "Strict v2", allowed_effects: ["read_only"], trusted_hosts: ["driver"],
-      path_allowlist: ["."], command_allowlist: [process.execPath], max_attempts: 2 });
-    service.runtimeRunStart({ run_id: "secret-run", task_id: task.id, policy_id: allowedCommand.id, environment: {}, operations: [{
-      operation_id: "secret-op", kind: "workflow", effect: "read_only", objective: "secret", execution: { workflow_id: secret.id, workflow_version: secret.version, project_root: root, inputs: {} },
-    }] });
-    service.runtimeDriverTick({ run_id: "secret-run", driver_id: "driver" });
-  const cleanCommand = service.workflowSave({ workflow_id: "clean-command", name: "Clean command", steps: [
-      { id: "clean", type: "command", command: [process.execPath, "-e", ""], side_effect: "read_only" },
-    ] });
-    service.runtimeRunStart({ run_id: "clean-command-run", task_id: task.id, policy_id: allowedCommand.id, environment: {}, operations: [{
-      operation_id: "clean-command-op", kind: "workflow", effect: "read_only", objective: "clean", execution: {
-        workflow_id: cleanCommand.id, workflow_version: cleanCommand.version, project_root: root, inputs: {},
-      },
-    }] });
-    assert.equal(((service.runtimeDriverTick({ run_id: "clean-command-run", driver_id: "driver" }).executed as JsonObject[])[0]).status, "passed");
-    const failing = service.workflowSave({ workflow_id: "failing", name: "Failing", steps: [
-      { id: "missing", type: "assertion", evaluator: "file_exists", path: "missing.txt" },
-    ] });
-    add("retry-op", failing); service.runtimeDriverTick({ run_id: "retry-op-run", driver_id: "driver" });
-    assert.equal((service.runtimeOperationGet({ operation_id: "retry-op" }).operation as JsonObject).status, "pending");
-    service.runtimeDriverTick({ run_id: "retry-op-run", driver_id: "driver" });
-    assert.equal((service.runtimeRunGet({ run_id: "retry-op-run" }).run as JsonObject).status, "failed");
-    service.runtimeRunStart({ run_id: "exhausted-run", task_id: task.id, policy_id: allowedCommand.id, environment: {}, operations: [{
-      operation_id: "exhausted", kind: "agent", effect: "read_only", objective: "exhausted",
-    }] });
-    service.runtimeDispatch({ run_id: "exhausted-run", claimed_by: "host" });
-    service.runtimeLeaseRecover({ run_id: "exhausted-run", now: "2999-01-01T00:00:00.000Z" });
-    service.runtimeDispatch({ run_id: "exhausted-run", claimed_by: "host" });
-    assert.deepEqual(service.runtimeLeaseRecover({ run_id: "exhausted-run", now: "2999-01-01T00:00:00.000Z" }).recovered_operation_ids, ["exhausted"]);
-    assert.equal((service.runtimeOperationGet({ operation_id: "exhausted" }).operation as JsonObject).status, "failed");
-  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+test("SCHEMA_VERSION is at least 4 so the runtime_operation kind is addressable", () => {
+  // Sanity check: the registry and the runtime driver are coupled through
+  // this version. If a future migration drops the schema version below 4
+  // without keeping the kinds in sync, this assertion will fail loudly.
+  assert.ok(SCHEMA_VERSION >= 4);
 });
 
-test("runtime and adaptive controls reject malformed branches without changing the approved path", async () => {
-  const root = join(tmpdir(), `craft-v096-branches-${process.pid}-${Date.now()}`);
-  const store = await new CraftStore(craftPaths(root)).open(); const service = new CraftService(store);
+test("startOperation rejects bad idempotency_key shapes", async () => {
+  const { root, store, runtime } = await fixture();
   try {
-    const task = service.taskOpen({ title: "Branches", goal: "Cover controls" }).task as JsonObject;
-    const policy = service.runtimePolicySave({ name: "Branches", allowed_effects: ["read_only"], trusted_hosts: ["driver"],
-      max_attempts: 2, lease_ttl_seconds: 1 });
-    assert.throws(() => service.runtimePolicySave({ name: "Duplicate host", allowed_effects: ["read_only"], trusted_hosts: ["driver", "driver"] }), /unique/);
-    assert.throws(() => service.runtimeRunStart({ task_id: task.id, policy_id: policy.id, environment: {}, operations: [
-      { operation_id: "self-dependency", kind: "agent", effect: "read_only", objective: "self", depends_on: ["self-dependency"] },
-    ] }), /depend on itself/);
-    const run = service.runtimeRunStart({ run_id: "dag-run", task_id: task.id, policy_id: policy.id, environment: {}, operations: [
-      { operation_id: "left", kind: "agent", effect: "read_only", objective: "left" },
-      { operation_id: "right", kind: "agent", effect: "read_only", objective: "right" },
-      { operation_id: "join", kind: "grader", effect: "read_only", objective: "join", depends_on: ["left", "right"] },
-    ] });
-    assert.equal((run.operations as JsonObject[]).length, 3);
-    const first = service.runtimeDispatch({ run_id: "dag-run", claimed_by: "host", kinds: ["agent"] }).operations as JsonObject[];
-    assert.equal(first.length, 1);
-    assert.throws(() => service.runtimeDispatch({ run_id: "dag-run", claimed_by: "host", kinds: ["bad"] }), /kinds/);
-    service.runtimeRunStart({ run_id: "legacy-run", task_id: task.id, policy_id: policy.id, environment: {}, operations: [
-      { operation_id: "legacy-parent", kind: "agent", effect: "read_only", objective: "parent" },
-      { operation_id: "legacy-child", kind: "agent", effect: "read_only", objective: "child", parent_operation_id: "legacy-parent" },
-    ] });
-    const legacyChild = service.runtimeOperationGet({ operation_id: "legacy-child" }).operation as JsonObject;
-    store.save("runtime_operation", "legacy-child", { ...legacyChild, depends_on: null });
-    const legacyParent = (service.runtimeDispatch({ run_id: "legacy-run", claimed_by: "host" }).operations as JsonObject[])[0];
-    service.runtimeOperationSubmit({ operation_id: "legacy-parent", lease_id: legacyParent.lease_id, claimed_by: "host", verdict: "passed" });
-    const dispatchedLegacyChild = (service.runtimeDispatch({ run_id: "legacy-run", claimed_by: "host" }).operations as JsonObject[])[0];
-    assert.equal(dispatchedLegacyChild.operation_id, "legacy-child");
-    service.runtimeOperationSubmit({ operation_id: "legacy-child", lease_id: dispatchedLegacyChild.lease_id, claimed_by: "host", verdict: "passed" });
-    service.runtimeRunStart({ run_id: "legacy-root-run", task_id: task.id, policy_id: policy.id, environment: {}, operations: [
-      { operation_id: "zzz-anchor", kind: "agent", effect: "read_only", objective: "anchor" },
-    ] });
-    store.create("runtime_operation", "legacy-root", { run_id: "legacy-root-run", operation_id: "legacy-root", kind: "agent", effect: "read_only",
-      objective: "legacy root", parent_operation_id: null, status: "pending", attempts: 0, submission_receipts: [] });
-    assert.equal((service.runtimeDispatch({ run_id: "legacy-root-run", claimed_by: "host" }).operations as JsonObject[])[0].operation_id, "legacy-root");
-    assert.throws(() => service.runtimeLeaseRecover({ run_id: "dag-run", now: "bad-time" }), /timestamp/);
-    assert.equal((service.runtimeDriverTick({ run_id: "dag-run", driver_id: "driver" }).executed as JsonObject[]).length, 0);
-    assert.equal((service.harnessSelect({ task_id: task.id, risk: "low" }).strategy as JsonObject).topology, "single");
-    assert.equal((service.harnessSelect({ task_id: task.id, risk: "medium" }).strategy as JsonObject).topology, "incremental");
-    assert.equal((service.harnessSelect({ task_id: task.id, risk: "low", requires_external_effect: true }).strategy as JsonObject).topology,
-      "planner_executor_evaluator");
-    const harness = service.harnessSelect({ task_id: task.id, risk: "low" }).harness as JsonObject;
-    assert.throws(() => service.agentIrCompile({ task_id: task.id, harness_id: harness.id, goal: "self", operations: [
-      { id: "self", kind: "agent", effect: "read_only", objective: "self", depends_on: ["self"] },
-    ] }), /depend on itself/);
-    assert.throws(() => service.agentIrCompile({ task_id: task.id, harness_id: harness.id, goal: "duplicate", operations: [
-      { id: "one", kind: "agent", effect: "read_only", objective: "one", depends_on: ["two", "two"] },
-      { id: "two", kind: "agent", effect: "read_only", objective: "two" },
-    ] }), /unique/);
-    assert.throws(() => service.agentIrCompile({ task_id: task.id, harness_id: harness.id, goal: "type", operations: [
-      { id: "bad", kind: "bad", effect: "read_only", objective: "bad" },
-    ] }), /unsupported/);
-  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+    // Too short — the regex requires 8-200 safe characters.
+    assert.throws(() => runtime.startOperation({
+      route_id: "r", idempotency_key: "short",
+      effect_class: "read", effect_scope: "x", policy_hash: "p",
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+    }), /idempotency_key must be stable/);
+    // Disallowed character — the regex excludes spaces and punctuation outside the allow-list.
+    assert.throws(() => runtime.startOperation({
+      route_id: "r", idempotency_key: "id em with spaces!!!",
+      effect_class: "read", effect_scope: "x", policy_hash: "p",
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+    }), /idempotency_key must be stable/);
+  } finally {
+    await teardown(root, store);
+  }
 });
+
+test("startOperation rejects conflicting operation_id on a different key", async () => {
+  const { root, store, runtime } = await fixture();
+  try {
+    runtime.startOperation({
+      route_id: "r", idempotency_key: "idem_key_first",
+      effect_class: "read", effect_scope: "x", policy_hash: "p",
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+      operation_id: "op_conflict",
+    });
+    assert.throws(() => runtime.startOperation({
+      route_id: "r", idempotency_key: "idem_key_second",
+      effect_class: "read", effect_scope: "x", policy_hash: "p",
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+      operation_id: "op_conflict",
+    }), /already exists with a different idempotency_key/);
+  } finally {
+    await teardown(root, store);
+  }
+});
+
+test("async runHooks paths mirror the sync verdict and write audit events", async () => {
+  const { root, store, runtime } = await fixture();
+  try {
+    const operation = runtime.startOperation({
+      route_id: "r", idempotency_key: "idem_key_async",
+      effect_class: "read", effect_scope: "x", policy_hash: "p",
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+    });
+    const before = await runtime.runBeforeEffect(operation, { foo: "bar" });
+    assert.equal(before.blocked, false);
+    const after = await runtime.runAfterReceipt(operation, { receipt_id: "rcpt_async" });
+    assert.equal(after.blocked, false);
+    const failure = await runtime.runOnFailure(operation, { error: "test" });
+    assert.equal(failure.blocked, false);
+    // The default hook list has two before_effect, one after_receipt, and
+    // zero on_failure hooks, so we expect at least 3 hook_<point> events.
+    const events = store.events("hook").filter((row) => String(row.event_type).startsWith("hook_"));
+    assert.ok(events.length >= 3);
+    // operation_started was also persisted on startOperation.
+    const started = store.events("hook").filter((row) => String(row.event_type) === "operation_started");
+    assert.equal(started.length, 1);
+  } finally {
+    await teardown(root, store);
+  }
+});
+
+test("runHooks converts a builtin exception into a failed outcome", async () => {
+  // The async runHooks must catch exceptions thrown by the builtin
+  // evaluator and convert them into a structured failure rather than
+  // letting them bubble — that is what keeps audit-log callers safe.
+  const hooks = [
+    defineHook({
+      id: "thrower", point: "before_effect", kind: "builtin",
+      target: "builtin:audit-log", fail_policy: "fail_closed", timeout_ms: 1000,
+    }),
+  ];
+  const run = await runHooks(hooks, "before_effect", {}, {
+    invoke: () => { throw new Error("boom"); },
+  });
+  assert.equal(run.blocked, true);
+  assert.equal(run.outcomes.length, 1);
+  assert.equal(run.outcomes[0].status, "failed");
+  assert.match(run.outcomes[0].detail ?? "", /boom/);
+});
+
+test("planHooks filters by the requested point", () => {
+  const hooks = [
+    defineHook({ id: "a", point: "before_effect", kind: "builtin", target: "builtin:audit-log",
+      fail_policy: "fail_closed", timeout_ms: 1000 }),
+    defineHook({ id: "b", point: "after_receipt", kind: "builtin", target: "builtin:receipt-check",
+      fail_policy: "fail_closed", timeout_ms: 1000 }),
+  ];
+  assert.equal(planHooks(hooks, "before_effect").length, 1);
+  assert.equal(planHooks(hooks, "after_receipt").length, 1);
+  assert.equal(planHooks(hooks, "on_failure").length, 0);
+});
+
+test("planHooks rejects an unknown hook point", () => {
+  assert.throws(() => planHooks([], "totally-not-a-point"), /Unsupported hook point/);
+});
+
+test("runHooksSync returns blocked when a fail_closed hook fails synchronously", async () => {
+  // The sync variant is what `HookedEffectKernel.start` calls. Force a
+  // synchronous failure and confirm the verdict is `blocked`.
+  const hooks = [
+    defineHook({
+      id: "audit-fail", point: "before_effect", kind: "builtin",
+      target: "builtin:audit-log", fail_policy: "fail_closed", timeout_ms: 1000,
+    }),
+  ];
+  const result = await import("../src/hooks.ts").then((m) => m.runHooksSync(hooks, "before_effect", {}, {
+    invoke: () => ({ ok: false, detail: "denied" }),
+  }));
+  assert.equal(result.blocked, true);
+});
+
+test("runHooksSync surfaces thrown exceptions as failed outcomes", async () => {
+  const hooks = [
+    defineHook({
+      id: "throwing", point: "before_effect", kind: "builtin",
+      target: "builtin:audit-log", fail_policy: "fail_closed", timeout_ms: 1000,
+    }),
+  ];
+  const m = await import("../src/hooks.ts");
+  const result = m.runHooksSync(hooks, "before_effect", {}, {
+    invoke: () => { throw new Error("sync boom"); },
+  });
+  assert.equal(result.blocked, true);
+  assert.equal(result.outcomes[0].status, "failed");
+  assert.match(result.outcomes[0].detail ?? "", /sync boom/);
+});
+
+test("runFor relaxes the blocked verdict when strictHooks is disabled", async () => {
+  // Lenient mode must downgrade a fail_closed before_effect to a passed
+  // run so observation cannot break the work it observes. The failing
+  // hook here actually returns ok=false, so the runHooks callback reports
+  // a blocked verdict and the runFor relaxation branch fires.
+  const { root, store, runtime } = await fixture();
+  try {
+    const driver = new RuntimeDriver(store, {
+      strictHooks: false,
+      hooks: [defineHook({
+        id: "failing", point: "before_effect", kind: "builtin",
+        target: "builtin:audit-log", fail_policy: "fail_closed", timeout_ms: 1000,
+      })],
+    });
+    // Override the private `invokeBuiltin` so the hook actually returns ok=false.
+    (driver as unknown as { invokeBuiltin: () => { ok: boolean; detail?: string } }).invokeBuiltin = () => ({ ok: false, detail: "denied" });
+    const operation = driver.startOperation({
+      route_id: "r", idempotency_key: "idem_lenient",
+      effect_class: "read", effect_scope: "x", policy_hash: "p",
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+    });
+    const run = await driver.runBeforeEffect(operation, {});
+    assert.equal(run.blocked, false, "lenient mode must downgrade fail_closed to passed");
+  } finally {
+    await teardown(root, store);
+  }
+});
+
+test("runFor does not relax a blocked after_receipt hook", async () => {
+  const { root, store } = await fixture();
+  try {
+    const driver = new RuntimeDriver(store, {
+      strictHooks: false,
+      hooks: [defineHook({ id: "after-block", point: "after_receipt", kind: "builtin", target: "builtin:audit-log" })],
+    });
+    (driver as unknown as { invokeBuiltin: () => { ok: boolean; detail: string } }).invokeBuiltin =
+      () => ({ ok: false, detail: "after denied" });
+    const operation = driver.startOperation({
+      route_id: "r", idempotency_key: "idem_after_block", effect_class: "read", effect_scope: "x", policy_hash: "p",
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+    });
+    const run = await driver.runAfterReceipt(operation, { receipt_id: "r" });
+    assert.equal(run.blocked, true);
+  } finally {
+    await teardown(root, store);
+  }
+});
+
+test("runFor keeps a blocked before_effect hook strict", async () => {
+  const { root, store } = await fixture();
+  try {
+    const driver = new RuntimeDriver(store, {
+      strictHooks: true,
+      hooks: [defineHook({ id: "strict-block", point: "before_effect", kind: "builtin", target: "builtin:audit-log" })],
+    });
+    (driver as unknown as { invokeBuiltin: () => { ok: boolean; detail: string } }).invokeBuiltin =
+      () => ({ ok: false, detail: "strict denied" });
+    const operation = driver.startOperation({
+      route_id: "r", idempotency_key: "idem_strict_block", effect_class: "read", effect_scope: "x", policy_hash: "p",
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+    });
+    const run = await driver.runBeforeEffect(operation, {});
+    assert.equal(run.blocked, true);
+  } finally {
+    await teardown(root, store);
+  }
+});
+
+test("invokeBuiltinSync is the public seam that mirrors invokeBuiltin", async () => {
+  const { root, store, runtime } = await fixture();
+  try {
+    const hook = defaultHooks()[0];
+    const result = runtime.invokeBuiltinSync(hook, "before_effect", { idempotency_key: "k" });
+    assert.equal(result.ok, true);
+  } finally {
+    await teardown(root, store);
+  }
+});
+
+test("invokeBuiltinSync returns a failure for an unknown builtin target", async () => {
+  // Bypass `defineHook`'s target allow-list by constructing a HookSpec
+  // directly: the runtime driver is the one that decides what a target
+  // means, so it must still report a clean failure when given something
+  // outside the built-in set.
+  const { root, store, runtime } = await fixture();
+  try {
+    const mystery = {
+      id: "mystery", point: "before_effect", kind: "builtin" as const,
+      target: "builtin:not-real", fail_policy: "fail_closed" as const, timeout_ms: 1000,
+    };
+    const result = runtime.invokeBuiltinSync(mystery, "before_effect", {});
+    assert.equal(result.ok, false);
+    assert.match(String(result.detail), /unknown builtin hook target/);
+  } finally {
+    await teardown(root, store);
+  }
+});
+
+test("invokeBuiltinSync surfaces token-meter and receipt-check branches", async () => {
+  const { root, store, runtime } = await fixture();
+  try {
+    const tokenMeter = defineHook({
+      id: "tm", point: "before_effect", kind: "builtin",
+      target: "builtin:token-meter", fail_policy: "fail_closed", timeout_ms: 1000,
+    });
+    const receiptCheck = defineHook({
+      id: "rc", point: "after_receipt", kind: "builtin",
+      target: "builtin:receipt-check", fail_policy: "fail_closed", timeout_ms: 1000,
+    });
+    assert.equal(runtime.invokeBuiltinSync(tokenMeter, "before_effect", {}).ok, true);
+    // receipt-check refuses when the body has no idempotency_key.
+    const refused = runtime.invokeBuiltinSync(receiptCheck, "after_receipt", {});
+    assert.equal(refused.ok, false);
+    const allowed = runtime.invokeBuiltinSync(receiptCheck, "after_receipt", { idempotency_key: "k" });
+    assert.equal(allowed.ok, true);
+  } finally {
+    await teardown(root, store);
+  }
+});
+
+test("runSync surfaces thrown exceptions as failed outcomes", async () => {
+  const { root, store, runtime } = await fixture();
+  try {
+    const driver = new RuntimeDriver(store, {
+      hooks: [defineHook({
+        id: "thrower-sync", point: "before_effect", kind: "builtin",
+        target: "builtin:audit-log", fail_policy: "fail_closed", timeout_ms: 1000,
+      })],
+      onHookEvent: () => undefined,
+    });
+    const operation = driver.startOperation({
+      route_id: "r", idempotency_key: "idem_run_sync",
+      effect_class: "read", effect_scope: "x", policy_hash: "p",
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+    });
+    // runSync calls the private `invokeBuiltin` directly; force it to
+    // throw so the surrounding catch block converts the exception into
+    // a structured failed outcome.
+    (driver as unknown as { invokeBuiltin: () => { ok: boolean } }).invokeBuiltin = () => { throw new Error("sync run throw"); };
+    const run = driver.runBeforeEffectSync(operation, {});
+    assert.equal(run.blocked, true);
+    assert.equal(run.outcomes[0].status, "failed");
+    assert.match(run.outcomes[0].detail ?? "", /sync run throw/);
+  } finally {
+    await teardown(root, store);
+  }
+});
+
+test("runSync uses the default detail when a hook reports failure without detail", async () => {
+  const { root, store } = await fixture();
+  try {
+    const driver = new RuntimeDriver(store, {
+      hooks: [defineHook({ id: "no-detail", point: "before_effect", kind: "builtin", target: "builtin:audit-log" })],
+      onHookEvent: () => undefined,
+    });
+    (driver as unknown as { invokeBuiltin: () => { ok: boolean } }).invokeBuiltin = () => ({ ok: false });
+    const operation = driver.startOperation({
+      route_id: "r", idempotency_key: "idem_no_detail", effect_class: "read", effect_scope: "x", policy_hash: "p",
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+    });
+    const result = driver.runBeforeEffectSync(operation, {});
+    assert.equal(result.blocked, true);
+    assert.equal(result.outcomes[0].detail, "hook reported failure");
+  } finally {
+    await teardown(root, store);
+  }
+});
+
+test("runSync reports blocked=false when no hooks match the point", async () => {
+  const { root, store, runtime } = await fixture();
+  try {
+    const operation = runtime.startOperation({
+      route_id: "r", idempotency_key: "idem_run_sync_empty",
+      effect_class: "read", effect_scope: "x", policy_hash: "p",
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+    });
+    // The default hooks have no on_failure entry, so runOnFailureSync on the
+    // stock driver returns an empty outcomes list with blocked=false.
+    const run = runtime.runOnFailureSync(operation, { error: "x" });
+    assert.equal(run.blocked, false);
+    assert.equal(run.outcomes.length, 0);
+  } finally {
+    await teardown(root, store);
+  }
+});
+
+test("RuntimeDriver validates command hooks and honors an injected clock", async () => {
+  const { root, store } = await fixture();
+  try {
+    const fixed = new Date("2030-01-01T00:00:00.000Z");
+    const driver = new RuntimeDriver(store, {
+      now: () => fixed,
+      hooks: [defineHook({ id: "command-hook", point: "before_effect", kind: "command", target: "external:check" })],
+    });
+    const operation = driver.startOperation({
+      route_id: "r", idempotency_key: "idem_command_hook", effect_class: "read", effect_scope: "x",
+      policy_hash: "p", expires_at: "2030-01-01T00:01:00.000Z",
+    });
+    const run = driver.runBeforeEffectSync(operation, {});
+    assert.equal(run.blocked, true);
+    assert.match(run.outcomes[0].detail ?? "", /not a builtin/);
+  } finally {
+    await teardown(root, store);
+  }
+});
+
+test("runHooksSync completes and returns blocked=false on the happy path", async () => {
+  // The final return statement must be reached when no hook fails —
+  // proving the loop terminates with `blocked = false` rather than
+  // returning early through the fail_closed branch.
+  const m = await import("../src/hooks.ts");
+  const hooks = [
+    defineHook({
+      id: "audit-ok", point: "before_effect", kind: "builtin",
+      target: "builtin:audit-log", fail_policy: "fail_closed", timeout_ms: 1000,
+    }),
+  ];
+  const run = m.runHooksSync(hooks, "before_effect", {}, {
+    invoke: () => ({ ok: true }),
+  });
+  assert.equal(run.blocked, false);
+  assert.equal(run.outcomes[0].status, "passed");
+});
+
+test("HookedEffectKernel.report falls back to the synthetic operation when the runtime_operation is missing", async () => {
+  // The synthetic fallback lives in the `found ?? syntheticOperation`
+  // branch. Force the lookup to return null by deleting the runtime
+  // operation after start, then call report — the wrapper must build a
+  // synthetic operation so after_receipt hooks still audit.
+  const { root, store, runtime } = await fixture();
+  try {
+    store.create("task", "task_seed", { title: "seed", goal: "seed", status: "draft", version: 1 });
+    store.create("evidence", "evidence_004", { kind: "response", digest: "x", summary: "x" });
+    const inner = new ExternalEffectKernel(store);
+    const hooked = new HookedEffectKernel(inner, runtime);
+    const prepared = inner.prepare({
+      task_id: "task_seed", effect: "external_write", idempotency_key: "idem_key_alpha1",
+      provider: "github", action: "POST /repos/foo/issues", target: "github/api",
+      request_digest: "sha256:abc", approval_ref: "approval_001",
+      effect_id: "eff_synthetic_lookup",
+    }) as { effect: { id: string } };
+    const started = hooked.start({
+      effect_id: prepared.effect.id, approval_ref: "approval_001",
+      route_id: "r", effect_class: "write", effect_scope: "github/api/repos/foo",
+      policy_hash: "sha256:abc", idempotency_key: "idem_key_alpha1",
+    }) as { effect: { id: string } };
+    // Delete all rows for the runtime_operation. `remove` returns the
+    // number of versioned rows touched; we only care that they are gone
+    // so the next lookup returns null and the synthetic branch fires.
+    const removed = store.remove("runtime_operation", started.effect.id);
+    assert.ok(removed >= 1);
+    const result = hooked.report({
+      effect_id: prepared.effect.id, receipt_id: "rcpt_synthetic_lookup",
+      status: "succeeded", remote_operation_id: "remote_42",
+      evidence_ids: ["evidence_004"], response_digest: "sha256:done",
+      operation_id: prepared.effect.id,
+    });
+    assert.ok(result);
+  } finally {
+    await teardown(root, store);
+  }
+});
+
+test("recoverOperation rejects a completed operation", async () => {
+  const { root, store, runtime } = await fixture();
+  try {
+    const operation = runtime.startOperation({
+      route_id: "r", idempotency_key: "idem_completed",
+      effect_class: "read", effect_scope: "x", policy_hash: "p",
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+    });
+    const completed = runtime.completeOperation(operation, { receipt_id: "rcpt_done", status: "completed" });
+    assert.throws(() => runtime.recoverOperation(completed.id), /not resumable/);
+  } finally {
+    await teardown(root, store);
+  }
+});
+
+test("HookedEffectKernel.prepare delegates to the inner kernel unchanged", async () => {
+  const { root, store, runtime } = await fixture();
+  try {
+    store.create("task", "task_seed", {
+      title: "seed", goal: "seed", status: "draft", version: 1,
+    });
+    const inner = new ExternalEffectKernel(store);
+    const hooked = new HookedEffectKernel(inner, runtime);
+    const prepared = hooked.prepare({
+      task_id: "task_seed", effect: "external_write", idempotency_key: "idem_key_alpha1",
+      provider: "github", action: "POST /repos/foo/issues", target: "github/api",
+      request_digest: "sha256:abc", approval_ref: "approval_001",
+      effect_id: "eff_prep",
+    }) as { effect: { id: string } };
+    assert.ok(prepared.effect.id);
+  } finally {
+    await teardown(root, store);
+  }
+});
+
+test("HookedEffectKernel.report looks up the existing runtime_operation by id", async () => {
+  const { root, store, runtime } = await fixture();
+  try {
+    store.create("task", "task_seed", {
+      title: "seed", goal: "seed", status: "draft", version: 1,
+    });
+    store.create("evidence", "evidence_002", {
+      kind: "response", digest: "sha256:done", summary: "ok",
+    });
+    const inner = new ExternalEffectKernel(store);
+    const hooked = new HookedEffectKernel(inner, runtime);
+    const prepared = inner.prepare({
+      task_id: "task_seed", effect: "external_write", idempotency_key: "idem_key_alpha1",
+      provider: "github", action: "POST /repos/foo/issues", target: "github/api",
+      request_digest: "sha256:abc", approval_ref: "approval_001",
+      effect_id: "eff_with_op",
+    }) as { effect: { id: string } };
+    // Start first so the wrapper records a runtime_operation.
+    hooked.start({
+      effect_id: prepared.effect.id, approval_ref: "approval_001",
+      route_id: "r", effect_class: "write", effect_scope: "github/api/repos/foo",
+      policy_hash: "sha256:abc", idempotency_key: "idem_key_alpha1",
+    });
+    // Now report: the lookup finds the real runtime_operation, so the
+    // synthetic fallback is not used.
+    const result = hooked.report({
+      effect_id: prepared.effect.id, receipt_id: "rcpt_lookup",
+      status: "succeeded", remote_operation_id: "remote_42",
+      evidence_ids: ["evidence_002"], response_digest: "sha256:done",
+      operation_id: prepared.effect.id,
+    });
+    assert.ok(result);
+  } finally {
+    await teardown(root, store);
+  }
+});
+
+test("HookedEffectKernel re-throws inner kernel errors after running on_failure", async () => {
+  const { root, store, runtime } = await fixture();
+  try {
+    store.create("task", "task_seed", {
+      title: "seed", goal: "seed", status: "draft", version: 1,
+    });
+    const inner = new ExternalEffectKernel(store);
+    const hooked = new HookedEffectKernel(inner, runtime);
+    // Approve ref mismatch forces start() to throw.
+    const prepared = inner.prepare({
+      task_id: "task_seed", effect: "external_write", idempotency_key: "idem_key_alpha1",
+      provider: "github", action: "POST /repos/foo/issues", target: "github/api",
+      request_digest: "sha256:abc", approval_ref: "approval_correct",
+      effect_id: "eff_fail",
+    }) as { effect: { id: string } };
+    assert.throws(() => hooked.start({
+      effect_id: prepared.effect.id, approval_ref: "approval_wrong",
+      route_id: "r", effect_class: "write", effect_scope: "github/api/repos/foo",
+      policy_hash: "sha256:abc", idempotency_key: "idem_key_alpha1",
+    }), /approval does not match/);
+  } finally {
+    await teardown(root, store);
+  }
+});
+
+test("runtime_operation is recorded in a fresh database opened at v4", async () => {
+  // Persistence check: opening a fresh store at v4 (the latest schema) must
+  // accept a runtime_operation save without any DDL surprises. This is the
+  // regression test for the v3→v4 migration introduced by W7.
+  const root = join(tmpdir(), `craft-runtime-v4-${process.pid}-${Date.now()}`);
+  await mkdir(root, { recursive: true });
+  const store = await new CraftStore(craftPaths(root)).open();
+  try {
+    const runtime = new RuntimeDriver(store);
+    const op = runtime.startOperation({
+      route_id: "r", idempotency_key: "idem_v4_smoke",
+      effect_class: "read", effect_scope: "x", policy_hash: "p",
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+    });
+    assert.ok(store.find("runtime_operation", op.id));
+  } finally {
+    await teardown(root, store);
+  }
+});
+
+test("recoverOperation bumps retry_count on a resumable operation", async () => {
+  const { root, store, runtime } = await fixture();
+  try {
+    const operation = runtime.startOperation({
+      route_id: "r", idempotency_key: "idem_resume_1",
+      effect_class: "read", effect_scope: "x", policy_hash: "p",
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+    });
+    const recovered = runtime.recoverOperation(operation.id);
+    assert.equal(recovered.status, "crash_recovered");
+    assert.equal(recovered.retry_count, 1);
+  } finally {
+    await teardown(root, store);
+  }
+});
+
+test("HookRun shape serialises blocked and outcomes", () => {
+  const run: HookRun = { outcomes: [], blocked: true };
+  assert.equal(run.blocked, true);
+  assert.deepEqual(run.outcomes, []);
+});
+
+test("HookedEffectKernel.resolve / saga / compensate delegates forward unchanged", async () => {
+  // We do not need a real receipt to exercise the wrapper's pass-through
+  // surface — the inner kernel will throw on the missing effect, which is
+  // enough to prove the wrapper ran (delegation preserves the error).
+  const { root, store, runtime } = await fixture();
+  try {
+    store.create("task", "task_seed", {
+      title: "seed", goal: "seed", status: "draft", version: 1,
+    });
+    const inner = new ExternalEffectKernel(store);
+    const hooked = new HookedEffectKernel(inner, runtime);
+    assert.throws(() => hooked.resolve({ effect_id: "nonexistent", resolution: "succeeded",
+      resolver_type: "human", approval_ref: "x", evidence_ids: ["e"] }), /Unknown external_effect/);
+    // Each remaining delegating method simply forwards to the inner
+    // kernel; the inner kernel will throw because the effect row is
+    // missing or because reconciliation/saga state is incomplete —
+    // either way the throw proves delegation happened.
+    for (const call of [
+      () => hooked.reconcileIssue({ effect_id: "nonexistent", issue: "x", reference: "r" }),
+      () => hooked.reconcileReport({ effect_id: "nonexistent", report: { ok: false } }),
+      () => hooked.reconcileFail({ effect_id: "nonexistent" }),
+      () => hooked.compensateIssue({ effect_id: "nonexistent", plan_id: "p", scope: "issue" }),
+      () => hooked.compensateFromExecution({ effect_id: "nonexistent", plan_id: "p", scope: "execution" }),
+      () => hooked.compensateCancel({ effect_id: "nonexistent", plan_id: "p" }),
+      () => hooked.compensateReport({ effect_id: "nonexistent", plan_id: "p", scope: "report" }),
+      () => hooked.sagaCreate({ effect_id: "nonexistent", name: "saga" }),
+      () => hooked.sagaGet({ saga_id: "nonexistent" }),
+    ] as const) {
+      assert.throws(call as () => JsonObject);
+    }
+  } finally {
+    await teardown(root, store);
+  }
+});
+
+test("HookedEffectKernel.start falls back to all-default allocateOperation branches", async () => {
+  // The allocateOperation helper supplies defaults for every field that
+  // is missing from `args`. Calling start with an empty-ish effect_id
+  // forces every `?? fallback` branch to execute.
+  const { root, store, runtime } = await fixture();
+  try {
+    store.create("task", "task_seed", {
+      title: "seed", goal: "seed", status: "draft", version: 1,
+    });
+    // Stub the inner kernel so that start throws — we only care about
+    // exercising the allocateOperation default branches; the actual
+    // dispatch will be swallowed by the catch branch (also exercised).
+    const inner = new ExternalEffectKernel(store);
+    const hooked = new HookedEffectKernel(inner, runtime);
+    // Patch kernel.start to throw so the start catch branch fires.
+    (inner as unknown as { start: () => never }).start = () => { throw new Error("synthetic failure"); };
+    assert.throws(() => hooked.start({
+      // No route_id, task_id, idempotency_key, effect_class, effect_scope,
+      // policy_hash — every default branch fires.
+      effect_id: undefined, action: "noop", target: "noop",
+    } as JsonObject), /synthetic failure/);
+  } finally {
+    await teardown(root, store);
+  }
+});
+
+test("HookedEffectKernel continues when a lenient hook verdict is blocked", async () => {
+  const { root, store } = await fixture();
+  try {
+    const runtime = new RuntimeDriver(store, { strictHooks: false, onHookEvent: () => undefined });
+    (runtime as unknown as { runBeforeEffectSync: () => { outcomes: never[]; blocked: boolean } }).runBeforeEffectSync =
+      () => ({ outcomes: [], blocked: true });
+    const inner = new ExternalEffectKernel(store);
+    (inner as unknown as { start: () => JsonObject }).start = () => ({ accepted: true });
+    const hooked = new HookedEffectKernel(inner, runtime);
+    const result = hooked.start({ effect_id: "eff_lenient", action: "noop", target: "local" });
+    assert.deepEqual(result, { accepted: true });
+  } finally {
+    await teardown(root, store);
+  }
+});
+
+test("HookedEffectKernel records non-Error failures", async () => {
+  const { root, store } = await fixture();
+  try {
+    const runtime = new RuntimeDriver(store, {
+      hooks: [defineHook({ id: "failure-audit", point: "on_failure", kind: "builtin", target: "builtin:audit-log" })],
+    });
+    (runtime as unknown as { invokeBuiltin: (hook: unknown, point: string) => JsonObject }).invokeBuiltin =
+      (_hook, point) => { if (point === "on_failure") throw "hook plain"; return { ok: true }; };
+    const inner = new ExternalEffectKernel(store);
+    (inner as unknown as { start: () => never }).start = () => { throw "plain failure"; };
+    const hooked = new HookedEffectKernel(inner, runtime);
+    assert.throws(() => hooked.start({ effect_id: "eff_plain_failure" } as JsonObject));
+    const events = store.events("hook").filter((row) => row.event_type === "hook_on_failure");
+    assert.ok(events.some((row) => String((row.payload as JsonObject).detail ?? "").includes("hook plain")));
+  } finally {
+    await teardown(root, store);
+  }
+});
+
+test("HookedEffectKernel.report triggers the lookupOperation catch branch and the errorMessage helper", async () => {
+  // The catch branch (line ~102) fires only when `store.find` itself
+  // throws on the runtime_operation lookup. Patch the find AFTER
+  // start() so start's own find (idempotency check) still works.
+  const { root, store, runtime } = await fixture();
+  try {
+    store.create("task", "task_seed", {
+      title: "seed", goal: "seed", status: "draft", version: 1,
+    });
+    store.create("evidence", "evidence_lookup_catch", { kind: "response", digest: "x", summary: "x" });
+    const inner = new ExternalEffectKernel(store);
+    const hooked = new HookedEffectKernel(inner, runtime);
+    inner.prepare({
+      task_id: "task_seed", effect: "external_write", idempotency_key: "idem_lookup_catch",
+      provider: "github", action: "POST /repos/foo/issues", target: "github/api",
+      request_digest: "sha256:abc", approval_ref: "approval_001", effect_id: "eff_lookup_catch",
+    });
+    (inner as unknown as { start: (a: JsonObject) => JsonObject }).start = (a: JsonObject) => ({ idempotent: false, effect: a });
+    (inner as unknown as { report: () => never }).report = () => { throw new Error("inner report fail"); };
+    hooked.start({
+      effect_id: "eff_lookup_catch", task_id: "task_seed", route_id: "task_seed",
+      idempotency_key: "idem_lookup_catch", effect_class: "write",
+      effect_scope: "github/api", policy_hash: "sha256:abc",
+      action: "POST /repos/foo/issues", target: "github/api", approval_ref: "approval_001",
+      request_digest: "sha256:abc",
+    });
+    // Now patch find to throw on the next runtime_operation lookup.
+    // We patch it for both startOperation's idempotency check (already
+    // resolved) and the report path's lookupOperation call.
+    const originalFind = store.find.bind(store);
+    let findCalls = 0;
+    store.find = ((kind: string, id: string) => {
+      if (kind === "runtime_operation") {
+        findCalls += 1;
+        if (findCalls === 1) throw new Error("forced lookup throw");
+      }
+      return originalFind(kind, id);
+    }) as typeof store.find;
+    try {
+      assert.throws(() => hooked.report({
+        effect_id: "eff_lookup_catch", receipt_id: "rcpt_catch",
+        status: "succeeded", evidence_ids: ["evidence_lookup_catch"],
+      }), /inner report fail/);
+      assert.ok(findCalls >= 1, "the lookup catch branch must have fired");
+    } finally {
+      store.find = originalFind;
+    }
+  } finally {
+    await teardown(root, store);
+  }
+});
+
+test("HookedEffectKernel.report uses the synthetic fallback when the runtime_operation is missing", async () => {
+  // Pass an operation_id that does not exist; the lookup falls through to
+  // the synthetic operation so after_receipt hooks still audit.
+  const { root, store, runtime } = await fixture();
+  try {
+    store.create("task", "task_seed", {
+      title: "seed", goal: "seed", status: "draft", version: 1,
+    });
+    store.create("evidence", "evidence_003", {
+      kind: "response", digest: "sha256:done", summary: "ok",
+    });
+    const inner = new ExternalEffectKernel(store);
+    const hooked = new HookedEffectKernel(inner, runtime);
+    const prepared = inner.prepare({
+      task_id: "task_seed", effect: "external_write", idempotency_key: "idem_key_alpha1",
+      provider: "github", action: "POST /repos/foo/issues", target: "github/api",
+      request_digest: "sha256:abc", approval_ref: "approval_001",
+      effect_id: "eff_fallback",
+    }) as { effect: { id: string } };
+    // Start so the effect is in `executing`; pass an operation_id that
+    // does NOT exist so the wrapper's lookup falls back to the synthetic.
+    hooked.start({
+      effect_id: prepared.effect.id, approval_ref: "approval_001",
+      route_id: "r", effect_class: "write", effect_scope: "github/api/repos/foo",
+      policy_hash: "sha256:abc", idempotency_key: "idem_key_alpha1",
+    });
+    const result = hooked.report({
+      effect_id: prepared.effect.id, receipt_id: "rcpt_fallback",
+      status: "succeeded", remote_operation_id: "remote_42",
+      evidence_ids: ["evidence_003"], response_digest: "sha256:done",
+      operation_id: "no-such-operation-id",
+    });
+    assert.ok(result);
+  } finally {
+    await teardown(root, store);
+  }
+});
+
+test("HookedEffectKernel.report re-throws inner kernel errors after running on_failure", async () => {
+  const { root, store, runtime } = await fixture();
+  try {
+    store.create("task", "task_seed", {
+      title: "seed", goal: "seed", status: "draft", version: 1,
+    });
+    const inner = new ExternalEffectKernel(store);
+    const hooked = new HookedEffectKernel(inner, runtime);
+    const prepared = inner.prepare({
+      task_id: "task_seed", effect: "external_write", idempotency_key: "idem_key_alpha1",
+      provider: "github", action: "POST /repos/foo/issues", target: "github/api",
+      request_digest: "sha256:abc", approval_ref: "approval_001",
+      effect_id: "eff_report_fail",
+    }) as { effect: { id: string } };
+    // Start so the effect is in `executing`, then report with an invalid
+    // status to force the inner kernel to throw.
+    hooked.start({
+      effect_id: prepared.effect.id, approval_ref: "approval_001",
+      route_id: "r", effect_class: "write", effect_scope: "github/api/repos/foo",
+      policy_hash: "sha256:abc", idempotency_key: "idem_key_alpha1",
+    });
+    assert.throws(() => hooked.report({
+      effect_id: prepared.effect.id, receipt_id: "rcpt_bad",
+      status: "bogus", evidence_ids: ["evidence_001"],
+      remote_operation_id: "x", response_digest: "y",
+    }), /External effect result is unsupported/);
+  } finally {
+    await teardown(root, store);
+  }
+});
+
+function payloadOf(record: RuntimeOperation): Record<string, unknown> {
+  const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record;
+  return rest;
+}

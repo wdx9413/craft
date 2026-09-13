@@ -33,7 +33,9 @@ export class HostRunKernel {
                 throw new Error("Host run idempotency conflict");
             return { run: existing, idempotent: true };
         }
-        const kind = host === "codex-cli" ? "codex_dispatch" : "claude_dispatch";
+        // The dispatch record kind is owned by the driver, so adding a model CLI
+        // never requires editing this kernel.
+        const kind = driver.dispatchKind;
         const dispatch = this.store.get(kind, dispatchId);
         if (dispatch.status !== "prepared")
             throw new Error("Host dispatch must be prepared");

@@ -6,9 +6,8 @@ function text(value, name) { if (typeof value !== "string" || !value.trim())
     throw new Error(`${name} must not be empty`); return value.trim(); }
 function integer(value, name, minimum, maximum) { const result = Number(value); if (!Number.isInteger(result) || result < minimum || result > maximum)
     throw new Error(`${name} must be an integer between ${minimum} and ${maximum}`); return result; }
-function money(value) { if (value === undefined)
-    return null; const result = Number(value); if (!Number.isFinite(result) || result <= 0 || result > 1_000)
-    throw new Error("max_budget_usd must be between 0 and 1000"); return result; }
+function money(value) { if (!Number.isFinite(value) || value <= 0 || value > 1_000)
+    throw new Error("max_budget_usd must be between 0 and 1000"); return value; }
 function digest(value) { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
 function payload(record) { const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record; return rest; }
 /** Binds a verified sandbox declaration and bounded Host resources to a launch; it does not claim to be an OS sandbox. */
@@ -19,15 +18,15 @@ export class ExecutionSafetyKernel {
     preflight(args) {
         const task = this.store.get("task", text(args.task_id, "task_id"));
         const host = text(args.host, "host");
-        if (!new Set(["codex-cli", "claude-code"]).has(host))
-            throw new Error("Safety preflight host is unsupported");
         const sandbox = text(args.sandbox, "sandbox");
         if (!new Set(["read-only", "workspace-write"]).has(sandbox))
             throw new Error("Safety preflight sandbox is unsupported");
         const profileId = text(args.profile_id, "profile_id");
         const profileVersion = integer(args.profile_version, "profile_version", 1, Number.MAX_SAFE_INTEGER);
         const workspace = resolve(text(args.workspace, "workspace"));
-        const resources = { timeout_ms: integer(args.timeout_ms, "timeout_ms", 1_000, 3_600_000), output_limit: integer(args.output_limit, "output_limit", 4_096, 16_777_216), max_turns: host === "claude-code" ? integer(args.max_turns, "max_turns", 1, 100) : null, max_budget_usd: host === "claude-code" ? money(args.max_budget_usd) : null };
+        const resources = { timeout_ms: integer(args.timeout_ms, "timeout_ms", 1_000, 3_600_000), output_limit: integer(args.output_limit, "output_limit", 4_096, 16_777_216) };
+        resources.max_turns = args.max_turns !== undefined ? integer(args.max_turns, "max_turns", 1, 100) : null;
+        resources.max_budget_usd = args.max_budget_usd !== undefined ? money(Number(args.max_budget_usd)) : null;
         const requirements = sandbox === "workspace-write" ? { filesystem: "workspace_overlay", network: "denied", features: ["cancel", "process_isolation", "snapshot"], limits: {} } : { filesystem: "read_only", network: "denied", features: ["cancel", "process_isolation"], limits: {} };
         const planned = this.sandbox.plan({ task_id: task.id, profile_id: profileId, profile_version: profileVersion, requirements, request_digest: `safety:${task.id}`, dry_run: true });
         if (planned.compatible !== true)

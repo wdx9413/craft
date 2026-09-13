@@ -5,7 +5,7 @@ import { CraftStore, type JsonObject } from "./store.ts";
 
 function text(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim(); }
 function integer(value: unknown, name: string, minimum: number, maximum: number): number { const result = Number(value); if (!Number.isInteger(result) || result < minimum || result > maximum) throw new Error(`${name} must be an integer between ${minimum} and ${maximum}`); return result; }
-function money(value: unknown): number | null { if (value === undefined) return null; const result = Number(value); if (!Number.isFinite(result) || result <= 0 || result > 1_000) throw new Error("max_budget_usd must be between 0 and 1000"); return result; }
+function money(value: number): number { if (!Number.isFinite(value) || value <= 0 || value > 1_000) throw new Error("max_budget_usd must be between 0 and 1000"); return value; }
 function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
 function payload(record: JsonObject): JsonObject { const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record; return rest; }
 
@@ -15,10 +15,12 @@ export class ExecutionSafetyKernel {
   constructor(store: CraftStore, sandbox: SandboxKernel) { this.store = store; this.sandbox = sandbox; }
 
   preflight(args: JsonObject): JsonObject {
-    const task = this.store.get("task", text(args.task_id, "task_id")); const host = text(args.host, "host"); if (!new Set(["codex-cli", "claude-code"]).has(host)) throw new Error("Safety preflight host is unsupported");
+    const task = this.store.get("task", text(args.task_id, "task_id")); const host = text(args.host, "host");
     const sandbox = text(args.sandbox, "sandbox"); if (!new Set(["read-only", "workspace-write"]).has(sandbox)) throw new Error("Safety preflight sandbox is unsupported");
     const profileId = text(args.profile_id, "profile_id"); const profileVersion = integer(args.profile_version, "profile_version", 1, Number.MAX_SAFE_INTEGER); const workspace = resolve(text(args.workspace, "workspace"));
-    const resources = { timeout_ms: integer(args.timeout_ms, "timeout_ms", 1_000, 3_600_000), output_limit: integer(args.output_limit, "output_limit", 4_096, 16_777_216), max_turns: host === "claude-code" ? integer(args.max_turns, "max_turns", 1, 100) : null, max_budget_usd: host === "claude-code" ? money(args.max_budget_usd) : null };
+    const resources: JsonObject = { timeout_ms: integer(args.timeout_ms, "timeout_ms", 1_000, 3_600_000), output_limit: integer(args.output_limit, "output_limit", 4_096, 16_777_216) };
+    resources.max_turns = args.max_turns !== undefined ? integer(args.max_turns, "max_turns", 1, 100) : null;
+    resources.max_budget_usd = args.max_budget_usd !== undefined ? money(Number(args.max_budget_usd)) : null;
     const requirements = sandbox === "workspace-write" ? { filesystem: "workspace_overlay", network: "denied", features: ["cancel", "process_isolation", "snapshot"], limits: {} } : { filesystem: "read_only", network: "denied", features: ["cancel", "process_isolation"], limits: {} };
     const planned = this.sandbox.plan({ task_id: task.id, profile_id: profileId, profile_version: profileVersion, requirements, request_digest: `safety:${task.id}`, dry_run: true }); if (planned.compatible !== true) throw new Error(`Safety preflight requirements are not satisfied: ${(planned.missing as string[]).join(", ")}`);
     const profile = planned.profile as JsonObject; const identity = { task_id: task.id, host, workspace, sandbox, profile_id: profile.id, profile_version: profile.version, profile_digest: profile.capability_digest, requirements, resources };
