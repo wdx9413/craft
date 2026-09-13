@@ -13,9 +13,9 @@
 
 ## 建设原则
 
-以 [产品架构](architecture.zh-CN.md) 的三大支柱为目标：工作与协作、执行与保障、学习与改进。**评测与实验是第三支柱内的核心模块**，不另设第四支柱。当前实现基线已推进到 v0.12.11。
+以 [产品架构](architecture.zh-CN.md) 的三大支柱为目标：工作与协作、执行与保障、学习与改进。**评测与实验是第三支柱内的核心模块**，不另设第四支柱。当前实现基线已推进到 v0.12.12。
 
-**v0.12.11：连续工作运行时。** 在 Project Brain 与 Work Session 之上增加统一 Context Manifest、可控 Replay Runner、本地持续运行服务状态、Project Bundle、跨宿主 Handoff、反馈学习信号、领域 Evaluator 与真实成本账本。旧数据保持原记录不迁移覆盖，知识和能力仍只按摘要/版本引用；系统级调度、远程对象存储、生产级通知与 OS 沙箱继续由部署 Adapter 承担。
+**v0.12.12：连续工作运行时。** 在 Project Brain 与 Work Session 之上增加统一 Context Manifest、可控 Replay Runner、本地持续运行服务状态、Project Bundle、跨宿主 Handoff、反馈学习信号、领域 Evaluator 与真实成本账本。旧数据保持原记录不迁移覆盖，知识和能力仍只按摘要/版本引用；系统级调度、远程对象存储、生产级通知与 OS 沙箱继续由部署 Adapter 承担。
 
 本版同时补齐连续工作垂直切片：Context Manifest 固定知识、能力、Workflow、模型、Host 和验收引用；Replay 只允许在 Trace、工作区和审批摘要未漂移时执行；本地 Runtime Service 可由托盘、cron 或系统服务调用 tick；Project Bundle 与 Handoff 保留可迁移引用；反馈和成本可以按项目归因。实现细节与边界见 [当前能力矩阵](../technical/current-capability-matrix.md)。
 

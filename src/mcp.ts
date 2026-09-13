@@ -4,7 +4,7 @@ import { SYSCALL_PASSTHROUGH, SYSCALL_VERBS, buildRegistry, catalogOf, describeE
 
 type Tool = { name: string; description: string; inputSchema: JsonObject; annotations?: JsonObject };
 const schemaFor = (name: string): JsonObject => {
-  if (["scan", "enabled", "allow_execution", "allow_external_write", "require_held_out", "require_outcome_passed", "retryable", "requires_external_effect", "supports_pause_resume", "supports_evidence_receipts", "generated_code", "requires_credential", "has_compensation", "approved", "start_trial", "untrusted_input", "confirmed_original_runner_stopped", "sanitized", "active", "acceptance_required", "trusted", "unattended", "reobserve_required", "compensation_or_handoff", "require_governance", "accepted", "stale", "crash_recovery"].includes(name)) return { type: "boolean" };
+  if (["scan", "enabled", "allow_execution", "allow_external_write", "require_held_out", "require_outcome_passed", "retryable", "requires_external_effect", "supports_pause_resume", "supports_evidence_receipts", "generated_code", "requires_credential", "has_compensation", "approved", "start_trial", "untrusted_input", "confirmed_original_runner_stopped", "sanitized", "active", "acceptance_required", "trusted", "unattended", "reobserve_required", "compensation_or_handoff", "require_governance", "accepted", "stale", "crash_recovery", "reobserved", "delivered", "allowed"].includes(name)) return { type: "boolean" };
   if (["limit", "version", "capacity", "max_concurrency", "size_bytes", "subject_version", "expected_version", "max_candidates",
     "suite_version", "configuration_version", "harness_configuration_version", "target_version", "profile_version",
     "grader_version", "policy_version", "signoff_policy_version", "lease_ttl_seconds", "ttl_seconds", "trials_per_case", "window_size", "max_attempts", "min_trials", "harness_version", "ir_version", "runtime_adapter_version", "agreed", "total", "expected_state_revision", "max_chars", "max_items", "timeout_ms", "output_limit", "max_turns", "after_sequence", "context_profile_version", "activation_profile_version", "budget_account_version", "contract_version", "conformance_version"].includes(name)) return { type: "integer" };
@@ -815,6 +815,18 @@ export const TOOLS: Tool[] = [
   tool("craft_cost_price_save", "Save a provider/model price snapshot used for real cost attribution.", ["provider", "model", "input_per_million", "output_per_million"], false, ["price_id", "effective_at"]),
   tool("craft_cost_usage_record", "Record token usage against a provider price snapshot and attribute actual cost.", ["provider", "model"], false, ["usage_id", "project_id", "task_id", "input_tokens", "output_tokens"]),
   tool("craft_cost_ledger_report", "Report provider cost, input tokens and output tokens by project.", [], true, ["project_id"]),
+  tool("craft_verified_work_prepare", "Prepare the unified Verified Autonomous Work slice with pinned context, workspace, action and acceptance references.", ["task_id", "context_manifest_id", "host", "workspace_digest", "action_digest", "acceptance_ref"], false, ["work_id", "model", "effect", "budget"]),
+  tool("craft_verified_work_authorize", "Authorize one exact work slice; writes require approval and a verified platform profile.", ["work_id", "authorization_ref"], false, ["approved", "approved_by", "platform_profile_id"]),
+  tool("craft_verified_work_action", "Record one observed action receipt after the Host/tool call; duplicate idempotency keys are safe.", ["work_id", "action_contract", "idempotency_key", "input_digest", "result_digest"], false, ["reobserved"]),
+  tool("craft_verified_work_reobserve", "Compare external state after an action and fail closed into replanning on drift.", ["work_id", "observed_digest"], false, ["expected_digest"]),
+  tool("craft_verified_work_deliver", "Close work only after independent acceptance, artifacts and evidence are present.", ["work_id", "acceptance_verdict"], false, ["artifact_ids", "evidence_ids"]),
+  tool("craft_verified_work_resume", "Resume paused or interrupted work only from fresh context and observed state.", ["work_id", "context_digest", "observed_digest"], false, ["expected_context_digest"]),
+  tool("craft_verified_work_handoff", "Pause and hand off one authorized work slice to another Host without copying raw prompts.", ["work_id", "target_host"], false, ["handoff_id"]),
+  tool("craft_verified_work_get", "Read one Verified Autonomous Work state and its phase.", ["work_id"], true),
+  tool("craft_sandbox_conformance_save", "Record verifier-attributed platform sandbox conformance; this does not run the probe.", ["platform", "isolation", "network", "checks", "verifier"], false, ["profile_id", "status", "capabilities"]),
+  tool("craft_sandbox_conformance_admit", "Admit an effect only when the exact platform profile is verified, isolated and network-denied.", ["effect"], false, ["profile_id"]),
+  tool("craft_sandbox_conformance_get", "Read one platform conformance profile.", ["profile_id"], true),
+  tool("craft_trace_explorer_query", "Query a content-free Trace Explorer projection with event digests for Workbench diagnostics.", [], true, ["task_id", "status", "limit"]),
 ];
 
 const CORE_TOOL_NAMES = new Set(["craft_info", "craft_source_list", "craft_capability_search", "craft_capability_get", "craft_semantic_status", "craft_execution_policy_decide",
@@ -1331,6 +1343,18 @@ export class McpServer {
       craft_cost_price_save: (a) => service.costPriceSave(a),
       craft_cost_usage_record: (a) => service.costUsageRecord(a),
       craft_cost_ledger_report: (a) => service.costLedgerReport(a),
+      craft_verified_work_prepare: (a) => service.verifiedWorkPrepare(a),
+      craft_verified_work_authorize: (a) => service.verifiedWorkAuthorize(a),
+      craft_verified_work_action: (a) => service.verifiedWorkAction(a),
+      craft_verified_work_reobserve: (a) => service.verifiedWorkReobserve(a),
+      craft_verified_work_deliver: (a) => service.verifiedWorkDeliver(a),
+      craft_verified_work_resume: (a) => service.verifiedWorkResume(a),
+      craft_verified_work_handoff: (a) => service.verifiedWorkHandoff(a),
+      craft_verified_work_get: (a) => service.verifiedWorkGet(a),
+      craft_sandbox_conformance_save: (a) => service.sandboxConformanceSave(a),
+      craft_sandbox_conformance_admit: (a) => service.sandboxConformanceAdmit(a),
+      craft_sandbox_conformance_get: (a) => service.sandboxConformanceGet(a),
+      craft_trace_explorer_query: (a) => service.traceExplorerQuery(a),
     };
   }
 

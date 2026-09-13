@@ -27,7 +27,7 @@ import { dockerRequestDigest } from "./docker-sandbox.ts";
 import { egressRequestDigest } from "./egress.ts";
 import { ServiceFoundation } from "./service-foundation.ts";
 
-export const VERSION = "0.12.11";
+export const VERSION = "0.12.12";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -2966,6 +2966,18 @@ export class CraftService extends ServiceFoundation {
   costPriceSave(args: JsonObject): JsonObject { return this.costLedger.priceSave(args); }
   costUsageRecord(args: JsonObject): JsonObject { return this.costLedger.usageRecord(args); }
   costLedgerReport(args: JsonObject = {}): JsonObject { return this.costLedger.report(args); }
+  verifiedWorkPrepare(args: JsonObject): JsonObject { return this.verifiedAutonomousWork.prepare(args); }
+  verifiedWorkAuthorize(args: JsonObject): JsonObject { return this.verifiedAutonomousWork.authorize(args); }
+  verifiedWorkAction(args: JsonObject): JsonObject { return this.verifiedAutonomousWork.recordAction(args); }
+  verifiedWorkReobserve(args: JsonObject): JsonObject { return this.verifiedAutonomousWork.reobserve(args); }
+  verifiedWorkDeliver(args: JsonObject): JsonObject { return this.verifiedAutonomousWork.deliver(args); }
+  verifiedWorkResume(args: JsonObject): JsonObject { return this.verifiedAutonomousWork.resume(args); }
+  verifiedWorkHandoff(args: JsonObject): JsonObject { return this.verifiedAutonomousWork.handoff(args); }
+  verifiedWorkGet(args: JsonObject): JsonObject { return this.verifiedAutonomousWork.get(args); }
+  sandboxConformanceSave(args: JsonObject): JsonObject { return this.sandboxConformance.save(args); }
+  sandboxConformanceAdmit(args: JsonObject): JsonObject { return this.sandboxConformance.admit(args); }
+  sandboxConformanceGet(args: JsonObject): JsonObject { return this.sandboxConformance.get(args); }
+  traceExplorerQuery(args: JsonObject = {}): JsonObject { return this.traceExplorer.query(args); }
   workSessionPrepare(args: JsonObject): JsonObject { return this.workSessions.prepare(args); }
   workSessionGet(args: JsonObject): JsonObject { return this.workSessions.get(args); }
   workSessionRefresh(args: JsonObject): JsonObject { return this.workSessions.refresh(args); }

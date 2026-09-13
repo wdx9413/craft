@@ -20,7 +20,7 @@ async function fixture() {
   return { root, store, service: new CraftService(store) };
 }
 
-test("v0.12.11 adds the unified context, replay, service, bundle and feedback kernels", async () => {
+test("v0.12.12 adds the unified context, replay, service, bundle and feedback kernels", async () => {
   const f = await fixture();
   try {
     const context = new ContextPlaneKernel(f.store);

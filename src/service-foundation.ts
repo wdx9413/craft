@@ -93,6 +93,7 @@ import { WorkSessionKernel } from "./work-session.ts";
 import { WorkbenchExperienceKernel } from "./workbench-experience.ts";
 import { LongTaskWorkerKernel } from "./long-task-worker.ts";
 import { ContextPlaneKernel, ReplayRunnerKernel, LocalRuntimeServiceKernel, ProjectBundleKernel, FeedbackLearningKernel, DomainEvaluatorKernel, HandoffManifestKernel, CostLedgerKernel } from "./v01211-runtime.ts";
+import { VerifiedAutonomousWorkKernel, SandboxConformanceKernel, TraceExplorerKernel } from "./v01212-verified-work.ts";
 
 /**
  * Stable composition root for the service. Domain behavior stays in focused
@@ -201,6 +202,9 @@ export abstract class ServiceFoundation {
   readonly domainEvaluators: DomainEvaluatorKernel;
   readonly handoffManifests: HandoffManifestKernel;
   readonly costLedger: CostLedgerKernel;
+  readonly verifiedAutonomousWork: VerifiedAutonomousWorkKernel;
+  readonly sandboxConformance: SandboxConformanceKernel;
+  readonly traceExplorer: TraceExplorerKernel;
 
   constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter = new LocalIsolatedAdapter(),
     dockerSandbox = new DockerSandboxAdapter(), egressBroker = new TrustedEgressBroker(), hostOwnerId?: string,
@@ -297,6 +301,9 @@ export abstract class ServiceFoundation {
     this.domainEvaluators = new DomainEvaluatorKernel(store);
     this.handoffManifests = new HandoffManifestKernel(store);
     this.costLedger = new CostLedgerKernel(store);
+    this.verifiedAutonomousWork = new VerifiedAutonomousWorkKernel(store);
+    this.sandboxConformance = new SandboxConformanceKernel(store);
+    this.traceExplorer = new TraceExplorerKernel(store);
     this.hostRuns = new HostRunKernel(store, [...this.hostDrivers.values()], hostOwnerId,
       (run, receipt) => this.finalizeWorkLaunch(run, receipt), this.trace);
   }

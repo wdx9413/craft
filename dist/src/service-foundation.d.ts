@@ -92,6 +92,7 @@ import { WorkSessionKernel } from "./work-session.ts";
 import { WorkbenchExperienceKernel } from "./workbench-experience.ts";
 import { LongTaskWorkerKernel } from "./long-task-worker.ts";
 import { ContextPlaneKernel, ReplayRunnerKernel, LocalRuntimeServiceKernel, ProjectBundleKernel, FeedbackLearningKernel, DomainEvaluatorKernel, HandoffManifestKernel, CostLedgerKernel } from "./v01211-runtime.ts";
+import { VerifiedAutonomousWorkKernel, SandboxConformanceKernel, TraceExplorerKernel } from "./v01212-verified-work.ts";
 /**
  * Stable composition root for the service. Domain behavior stays in focused
  * kernels; CraftService is the backwards-compatible API facade.
@@ -198,6 +199,9 @@ export declare abstract class ServiceFoundation {
     readonly domainEvaluators: DomainEvaluatorKernel;
     readonly handoffManifests: HandoffManifestKernel;
     readonly costLedger: CostLedgerKernel;
+    readonly verifiedAutonomousWork: VerifiedAutonomousWorkKernel;
+    readonly sandboxConformance: SandboxConformanceKernel;
+    readonly traceExplorer: TraceExplorerKernel;
     constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter?: LocalIsolatedAdapter, dockerSandbox?: DockerSandboxAdapter, egressBroker?: TrustedEgressBroker, hostOwnerId?: string, hostProfiles?: readonly HostProfile[], modelProviders?: readonly ModelProviderSpec[], modelTransport?: ModelTransport);
     protected abstract finalizeWorkLaunch(run: JsonObject, receipt: JsonObject | null): void;
     /**

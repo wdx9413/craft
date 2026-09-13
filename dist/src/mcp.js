@@ -2,7 +2,7 @@ import { CraftService, VERSION } from "./service.js";
 import {} from "./store.js";
 import { SYSCALL_PASSTHROUGH, SYSCALL_VERBS, buildRegistry, catalogOf, describeEntry, resolveEntry } from "./tool-plane.js";
 const schemaFor = (name) => {
-    if (["scan", "enabled", "allow_execution", "allow_external_write", "require_held_out", "require_outcome_passed", "retryable", "requires_external_effect", "supports_pause_resume", "supports_evidence_receipts", "generated_code", "requires_credential", "has_compensation", "approved", "start_trial", "untrusted_input", "confirmed_original_runner_stopped", "sanitized", "active", "acceptance_required", "trusted", "unattended", "reobserve_required", "compensation_or_handoff", "require_governance", "accepted", "stale", "crash_recovery"].includes(name))
+    if (["scan", "enabled", "allow_execution", "allow_external_write", "require_held_out", "require_outcome_passed", "retryable", "requires_external_effect", "supports_pause_resume", "supports_evidence_receipts", "generated_code", "requires_credential", "has_compensation", "approved", "start_trial", "untrusted_input", "confirmed_original_runner_stopped", "sanitized", "active", "acceptance_required", "trusted", "unattended", "reobserve_required", "compensation_or_handoff", "require_governance", "accepted", "stale", "crash_recovery", "reobserved", "delivered", "allowed"].includes(name))
         return { type: "boolean" };
     if (["limit", "version", "capacity", "max_concurrency", "size_bytes", "subject_version", "expected_version", "max_candidates",
         "suite_version", "configuration_version", "harness_configuration_version", "target_version", "profile_version",
@@ -644,6 +644,18 @@ export const TOOLS = [
     tool("craft_cost_price_save", "Save a provider/model price snapshot used for real cost attribution.", ["provider", "model", "input_per_million", "output_per_million"], false, ["price_id", "effective_at"]),
     tool("craft_cost_usage_record", "Record token usage against a provider price snapshot and attribute actual cost.", ["provider", "model"], false, ["usage_id", "project_id", "task_id", "input_tokens", "output_tokens"]),
     tool("craft_cost_ledger_report", "Report provider cost, input tokens and output tokens by project.", [], true, ["project_id"]),
+    tool("craft_verified_work_prepare", "Prepare the unified Verified Autonomous Work slice with pinned context, workspace, action and acceptance references.", ["task_id", "context_manifest_id", "host", "workspace_digest", "action_digest", "acceptance_ref"], false, ["work_id", "model", "effect", "budget"]),
+    tool("craft_verified_work_authorize", "Authorize one exact work slice; writes require approval and a verified platform profile.", ["work_id", "authorization_ref"], false, ["approved", "approved_by", "platform_profile_id"]),
+    tool("craft_verified_work_action", "Record one observed action receipt after the Host/tool call; duplicate idempotency keys are safe.", ["work_id", "action_contract", "idempotency_key", "input_digest", "result_digest"], false, ["reobserved"]),
+    tool("craft_verified_work_reobserve", "Compare external state after an action and fail closed into replanning on drift.", ["work_id", "observed_digest"], false, ["expected_digest"]),
+    tool("craft_verified_work_deliver", "Close work only after independent acceptance, artifacts and evidence are present.", ["work_id", "acceptance_verdict"], false, ["artifact_ids", "evidence_ids"]),
+    tool("craft_verified_work_resume", "Resume paused or interrupted work only from fresh context and observed state.", ["work_id", "context_digest", "observed_digest"], false, ["expected_context_digest"]),
+    tool("craft_verified_work_handoff", "Pause and hand off one authorized work slice to another Host without copying raw prompts.", ["work_id", "target_host"], false, ["handoff_id"]),
+    tool("craft_verified_work_get", "Read one Verified Autonomous Work state and its phase.", ["work_id"], true),
+    tool("craft_sandbox_conformance_save", "Record verifier-attributed platform sandbox conformance; this does not run the probe.", ["platform", "isolation", "network", "checks", "verifier"], false, ["profile_id", "status", "capabilities"]),
+    tool("craft_sandbox_conformance_admit", "Admit an effect only when the exact platform profile is verified, isolated and network-denied.", ["effect"], false, ["profile_id"]),
+    tool("craft_sandbox_conformance_get", "Read one platform conformance profile.", ["profile_id"], true),
+    tool("craft_trace_explorer_query", "Query a content-free Trace Explorer projection with event digests for Workbench diagnostics.", [], true, ["task_id", "status", "limit"]),
 ];
 const CORE_TOOL_NAMES = new Set(["craft_info", "craft_source_list", "craft_capability_search", "craft_capability_get", "craft_semantic_status", "craft_execution_policy_decide",
     "craft_default_route", "craft_default_route_resume", "craft_default_route_find", "craft_task_open", "craft_task_list", "craft_intent_compile", "craft_intent_get", "craft_acceptance_compile", "craft_acceptance_contract_get", "craft_task_checkpoint", "craft_task_control_refresh", "craft_task_control_get", "craft_task_run_refresh", "craft_task_run_get", "craft_verified_work_loop_prepare", "craft_verified_work_loop_advance", "craft_verified_work_loop_decide", "craft_verified_work_loop_resume", "craft_verified_work_loop_get", "craft_host_activation_manifest_prepare", "craft_host_activation_manifest_validate", "craft_host_activation_manifest_consume", "craft_host_activation_manifest_get", "craft_execution_fabric_prepare", "craft_execution_fabric_execute", "craft_execution_fabric_advance", "craft_execution_fabric_consume", "craft_execution_fabric_get", "craft_host_bridge_get", "craft_work_launch_get", "craft_work_delivery_observe", "craft_work_delivery_get", "craft_delivery_loop_refresh", "craft_delivery_loop_get", "craft_delivery_evaluation_compare", "craft_delivery_evaluation_run", "craft_eval_campaign_report", "craft_adaptive_harness_recommend", "craft_managed_write_get", "craft_managed_run_get", "craft_campaign_runner_get", "craft_workspace_observer_get", "craft_autonomy_ladder_get", "craft_work_coordinator_get", "craft_agent_eval_lab_get", "craft_judge_promotion_eligible", "craft_platform_execution_preflight", "craft_platform_execution_probe", "craft_platform_execution_probe_get", "craft_workspace_get", "craft_workspace_diff", "craft_work_object_list", "craft_workspace_impact", "craft_context_assemble", "craft_change_set_preview",
@@ -1153,6 +1165,18 @@ export class McpServer {
             craft_cost_price_save: (a) => service.costPriceSave(a),
             craft_cost_usage_record: (a) => service.costUsageRecord(a),
             craft_cost_ledger_report: (a) => service.costLedgerReport(a),
+            craft_verified_work_prepare: (a) => service.verifiedWorkPrepare(a),
+            craft_verified_work_authorize: (a) => service.verifiedWorkAuthorize(a),
+            craft_verified_work_action: (a) => service.verifiedWorkAction(a),
+            craft_verified_work_reobserve: (a) => service.verifiedWorkReobserve(a),
+            craft_verified_work_deliver: (a) => service.verifiedWorkDeliver(a),
+            craft_verified_work_resume: (a) => service.verifiedWorkResume(a),
+            craft_verified_work_handoff: (a) => service.verifiedWorkHandoff(a),
+            craft_verified_work_get: (a) => service.verifiedWorkGet(a),
+            craft_sandbox_conformance_save: (a) => service.sandboxConformanceSave(a),
+            craft_sandbox_conformance_admit: (a) => service.sandboxConformanceAdmit(a),
+            craft_sandbox_conformance_get: (a) => service.sandboxConformanceGet(a),
+            craft_trace_explorer_query: (a) => service.traceExplorerQuery(a),
         };
     }
     async handle(message) {

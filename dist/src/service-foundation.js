@@ -91,6 +91,7 @@ import { WorkSessionKernel } from "./work-session.js";
 import { WorkbenchExperienceKernel } from "./workbench-experience.js";
 import { LongTaskWorkerKernel } from "./long-task-worker.js";
 import { ContextPlaneKernel, ReplayRunnerKernel, LocalRuntimeServiceKernel, ProjectBundleKernel, FeedbackLearningKernel, DomainEvaluatorKernel, HandoffManifestKernel, CostLedgerKernel } from "./v01211-runtime.js";
+import { VerifiedAutonomousWorkKernel, SandboxConformanceKernel, TraceExplorerKernel } from "./v01212-verified-work.js";
 /**
  * Stable composition root for the service. Domain behavior stays in focused
  * kernels; CraftService is the backwards-compatible API facade.
@@ -197,6 +198,9 @@ export class ServiceFoundation {
     domainEvaluators;
     handoffManifests;
     costLedger;
+    verifiedAutonomousWork;
+    sandboxConformance;
+    traceExplorer;
     constructor(store, semanticProvider, isolatedAdapter = new LocalIsolatedAdapter(), dockerSandbox = new DockerSandboxAdapter(), egressBroker = new TrustedEgressBroker(), hostOwnerId, hostProfiles, modelProviders, modelTransport) {
         this.store = store;
         this.catalog = new Catalog(store, semanticProvider);
@@ -306,6 +310,9 @@ export class ServiceFoundation {
         this.domainEvaluators = new DomainEvaluatorKernel(store);
         this.handoffManifests = new HandoffManifestKernel(store);
         this.costLedger = new CostLedgerKernel(store);
+        this.verifiedAutonomousWork = new VerifiedAutonomousWorkKernel(store);
+        this.sandboxConformance = new SandboxConformanceKernel(store);
+        this.traceExplorer = new TraceExplorerKernel(store);
         this.hostRuns = new HostRunKernel(store, [...this.hostDrivers.values()], hostOwnerId, (run, receipt) => this.finalizeWorkLaunch(run, receipt), this.trace);
     }
 }

@@ -25,7 +25,7 @@ import { decideExecution } from "./execution-policy.js";
 import { dockerRequestDigest } from "./docker-sandbox.js";
 import { egressRequestDigest } from "./egress.js";
 import { ServiceFoundation } from "./service-foundation.js";
-export const VERSION = "0.12.11";
+export const VERSION = "0.12.12";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -3750,6 +3750,18 @@ export class CraftService extends ServiceFoundation {
     costPriceSave(args) { return this.costLedger.priceSave(args); }
     costUsageRecord(args) { return this.costLedger.usageRecord(args); }
     costLedgerReport(args = {}) { return this.costLedger.report(args); }
+    verifiedWorkPrepare(args) { return this.verifiedAutonomousWork.prepare(args); }
+    verifiedWorkAuthorize(args) { return this.verifiedAutonomousWork.authorize(args); }
+    verifiedWorkAction(args) { return this.verifiedAutonomousWork.recordAction(args); }
+    verifiedWorkReobserve(args) { return this.verifiedAutonomousWork.reobserve(args); }
+    verifiedWorkDeliver(args) { return this.verifiedAutonomousWork.deliver(args); }
+    verifiedWorkResume(args) { return this.verifiedAutonomousWork.resume(args); }
+    verifiedWorkHandoff(args) { return this.verifiedAutonomousWork.handoff(args); }
+    verifiedWorkGet(args) { return this.verifiedAutonomousWork.get(args); }
+    sandboxConformanceSave(args) { return this.sandboxConformance.save(args); }
+    sandboxConformanceAdmit(args) { return this.sandboxConformance.admit(args); }
+    sandboxConformanceGet(args) { return this.sandboxConformance.get(args); }
+    traceExplorerQuery(args = {}) { return this.traceExplorer.query(args); }
     workSessionPrepare(args) { return this.workSessions.prepare(args); }
     workSessionGet(args) { return this.workSessions.get(args); }
     workSessionRefresh(args) { return this.workSessions.refresh(args); }

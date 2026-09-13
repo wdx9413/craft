@@ -1,7 +1,7 @@
 import { CraftStore, type JsonObject } from "./store.ts";
 import { type EmbeddingProvider } from "./semantic.ts";
 import { ServiceFoundation } from "./service-foundation.ts";
-export declare const VERSION = "0.12.11";
+export declare const VERSION = "0.12.12";
 export declare class CraftService extends ServiceFoundation {
     constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter?: unknown, dockerSandbox?: unknown, egressBroker?: unknown, hostOwnerId?: string, hostProfiles?: readonly import("./host-registry.ts").HostProfile[], modelProviders?: readonly import("./model-gateway.ts").ModelProviderSpec[], modelTransport?: import("./model-gateway.ts").ModelTransport);
     /**
@@ -558,6 +558,18 @@ export declare class CraftService extends ServiceFoundation {
     costPriceSave(args: JsonObject): JsonObject;
     costUsageRecord(args: JsonObject): JsonObject;
     costLedgerReport(args?: JsonObject): JsonObject;
+    verifiedWorkPrepare(args: JsonObject): JsonObject;
+    verifiedWorkAuthorize(args: JsonObject): JsonObject;
+    verifiedWorkAction(args: JsonObject): JsonObject;
+    verifiedWorkReobserve(args: JsonObject): JsonObject;
+    verifiedWorkDeliver(args: JsonObject): JsonObject;
+    verifiedWorkResume(args: JsonObject): JsonObject;
+    verifiedWorkHandoff(args: JsonObject): JsonObject;
+    verifiedWorkGet(args: JsonObject): JsonObject;
+    sandboxConformanceSave(args: JsonObject): JsonObject;
+    sandboxConformanceAdmit(args: JsonObject): JsonObject;
+    sandboxConformanceGet(args: JsonObject): JsonObject;
+    traceExplorerQuery(args?: JsonObject): JsonObject;
     workSessionPrepare(args: JsonObject): JsonObject;
     workSessionGet(args: JsonObject): JsonObject;
     workSessionRefresh(args: JsonObject): JsonObject;

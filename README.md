@@ -1,6 +1,6 @@
 # Craft
 
-> 当前发布版本：v0.12.11。所有宿主接入统一采用“Route-first”：Codex/Claude 插件、TraeWork、WorkBuddy Expert 默认只安装一个轻量 `craft-route` Skill，并连接低 Token syscall MCP；`craft` 与 `craft-clarify` 是单独的可选包。Craft 现在提供统一 Context Manifest、受控 Replay、可持续本地 Runtime、Project Bundle、反馈学习信号、领域 Evaluator、跨宿主 Handoff 与真实成本账本；真实云端执行、市场审核和 OS 级隔离仍须由部署 Adapter 或平台审核完成，不能把本地契约伪装成已上线服务。
+> 当前发布版本：v0.12.12。所有宿主接入统一采用“Route-first”：Codex/Claude 插件、TraeWork、WorkBuddy Expert 默认只安装一个轻量 `craft-route` Skill，并连接低 Token syscall MCP；`craft` 与 `craft-clarify` 是单独的可选包。Craft 现在提供统一 Context Manifest、Verified Autonomous Work、动作授权、状态再观察、独立交付门、受控 Replay、可持续本地 Runtime、Project Bundle、反馈学习信号、领域 Evaluator、跨宿主 Handoff 与真实成本账本；真实云端执行、市场审核和 OS 级隔离仍须由部署 Adapter 或平台审核完成，不能把本地契约伪装成已上线服务。
 
 [中文](README.md) | [English](README.en.md)
 
@@ -43,7 +43,8 @@ Sandbox 能力采用“声明、诊断、黑盒一致性验证、精确版本票
 - 确定性命令、文件/JSON 断言、覆盖率门禁，以及结构化执行回执。
 - 版本化评测集与 Agent Profile 基础数据模型。
 - 六维 Harness Configuration、不可变 Trial/Outcome、只追加 Trace、Workflow 自动取证闭环，以及 held-out Eval 驱动的晋级与回滚。
-- **Runtime Truth Layer（v0.12.11）**：在旧 `craft.trace.v1` 兼容读取之上提供版本无关的 `craft.trace` envelope、OTLP/HTTP 映射、Tool Call/SSE 解析、会话压缩、跨进程 correlation 和结构化工作笔记；原始 Prompt 与业务正文不进入 Trace，自动发布仍受评测、Signoff 和 Canary 门禁约束。新增 Context Manifest、可控 Replay、可持续本地 Runtime、Project Bundle、反馈学习、领域 Evaluator、Handoff 与成本归因。详见 [Runtime Truth](docs/technical/modules/runtime-truth.zh-CN.md)。
+- **Runtime Truth Layer（v0.12.12）**：在旧 `craft.trace.v1` 兼容读取之上提供版本无关的 `craft.trace` envelope、OTLP/HTTP 映射、Tool Call/SSE 解析、会话压缩、跨进程 correlation 和结构化工作笔记；原始 Prompt 与业务正文不进入 Trace，自动发布仍受评测、Signoff 和 Canary 门禁约束。新增 Context Manifest、可控 Replay、可持续本地 Runtime、Project Bundle、反馈学习、领域 Evaluator、Handoff 与成本归因。详见 [Runtime Truth](docs/technical/modules/runtime-truth.zh-CN.md)。
+- **Verified Autonomous Work（v0.12.12）**：将 Context Manifest、动作授权、Host/工具回执、状态再观察、独立 Acceptance、Artifact/Evidence 和 Delivery Gate 收敛为单 Agent 主路径；漂移自动进入 `needs_replan`，写入动作必须经过批准和平台 Conformance。详见 [Verified Autonomous Work](docs/technical/modules/v01212-verified-autonomous-work.zh-CN.md)。
 - **Runtime Boundaries（v0.12.10）**：自主模型循环、OS 安全计划、MCP Registry 治理、摘要化 A2A Transport 和组织同步均通过同一服务/MCP 底座提供。详见 [Runtime Boundaries](docs/technical/modules/v0128-runtime-boundaries.zh-CN.md)。
 - Orchestration Trial 自动归档：锁定 Agent Profile 精确版本，记录 Dispatch、重路由、节点结果、成本和证据，并在终态自动生成 Outcome。
 - 版本化 Grader、多来源 Grade 和 Signoff Policy；模型判断不会被记录成程序证明。
