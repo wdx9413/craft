@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { completeLoop, defineLoopLimits, failLoop, beginLoop, loopSummary, observeStep } from "./agent-loop.js";
 import { buildChatRequest, credentialStatus, parseChatResponse, selectModel, createFetchTransport } from "./model-gateway.js";
+import { compactConversation, createWorkNote, toolResultMessage } from "./runtime-truth.js";
+import { TraceKernel } from "./trace-kernel.js";
 import { CraftStore } from "./store.js";
 function text(value, name) { if (typeof value !== "string" || !value.trim())
     throw new Error(`${name} must not be empty`); return value.trim(); }
@@ -47,12 +49,16 @@ export class InternalHostDriver {
     transport;
     invokeAction;
     env;
+    tools;
+    trace;
     constructor(store, options) {
         if (!options.providers.length)
             throw new Error("The internal host requires at least one declared provider");
         this.store = store;
         this.providers = options.providers;
         this.env = options.env ?? process.env;
+        this.tools = options.tools ?? [];
+        this.trace = new TraceKernel(store);
         this.transport = options.transport ?? createFetchTransport({ env: this.env });
         this.invokeAction = options.invokeAction;
     }
@@ -107,23 +113,40 @@ export class InternalHostDriver {
         let finalMessage = null;
         let failure = null;
         dispatch = this.store.save(this.dispatchKind, String(dispatch.id), { ...payload(dispatch), status: "running", started_at: new Date().toISOString(), ...(resumedFrom ? { resumed_from: resumedFrom } : {}) });
-        const messages = [{ role: "user", content: prompt }];
+        const session = this.store.find("internal_session", `session_${dispatch.id}`);
+        let messages = session && Array.isArray(session.messages) ? session.messages : [{ role: "user", content: prompt }];
+        const traceId = `runtime:${dispatch.id}`;
+        this.trace.start({ trace_id: traceId, task_id: dispatch.task_id, run_id: dispatch.id, model_fingerprint: digest({ provider: provider.provider, model: dispatch.model }), metadata: createWorkNote({ goal: prompt }) });
         try {
             while (state.status === "running") {
-                const request = buildChatRequest(provider, { model: String(dispatch.model), messages });
+                const compacted = compactConversation(messages, 32_000);
+                messages = compacted.messages;
+                this.store.save("internal_session", `session_${dispatch.id}`, { dispatch_id: dispatch.id, messages, compacted: compacted.compacted, omitted: compacted.omitted, summary_digest: compacted.summary_digest });
+                const request = buildChatRequest(provider, { model: String(dispatch.model), messages: messages, tools: this.tools.length ? [...this.tools] : undefined });
                 options.observe?.({ stream: "stdout", bytes: request.prompt_tokens_estimate, digest: digest(request.url) });
+                this.trace.append({ trace_id: traceId, event_kind: "model.request", source: "internal-host", trust: "observed", summary: "model request", usage: { input_tokens: request.prompt_tokens_estimate }, data: { provider: provider.provider, model: dispatch.model, compacted: compacted.compacted } });
                 const result = await this.transport.complete(provider, request);
                 const tokens = (result.usage?.input_tokens ?? 0) + (result.usage?.output_tokens ?? 0);
-                const proposed = parseAction(result.text);
+                const parsedCalls = (result.tool_calls ?? []).map((call) => ({ id: call.id, name: call.function.name, arguments: (() => { try {
+                        return JSON.parse(call.function.arguments || "{}");
+                    }
+                    catch {
+                        throw new Error("tool arguments must be valid JSON");
+                    } })() }));
+                const proposed = parsedCalls.length ? parsedCalls[0] : parseAction(result.text);
                 if (!proposed || !this.invokeAction) {
                     state = completeLoop(state, "model_final_message");
-                    finalMessage = result.text;
+                    finalMessage = result.text || (parsedCalls.length ? `Tool call ${parsedCalls[0].name} not executed` : "");
+                    this.trace.append({ trace_id: traceId, event_kind: "model.final", source: "internal-host", trust: "observed", summary: "model final", data: { text_digest: digest(finalMessage) }, usage: result.usage ?? {} });
                     break;
                 }
-                const outcome = await this.invokeAction(proposed.action, proposed.args);
-                messages.push({ role: "assistant", content: result.text });
-                messages.push({ role: "user", content: JSON.stringify(outcome) });
-                const observed = observeStep(state, limits, { action: proposed.action, args: proposed.args,
+                const action = "action" in proposed ? proposed.action : proposed.name;
+                const actionArgs = "args" in proposed ? proposed.args : proposed.arguments;
+                const outcome = await this.invokeAction(action, actionArgs);
+                messages.push({ role: "assistant", content: result.text || null, ...(result.tool_calls ? { tool_calls: result.tool_calls } : {}) });
+                messages.push("id" in proposed ? toolResultMessage(proposed.id, outcome) : { role: "user", content: JSON.stringify(outcome) });
+                this.trace.append({ trace_id: traceId, event_kind: "tool.call", source: "internal-host", trust: "observed", summary: action, data: { action, args_digest: digest(actionArgs), outcome_digest: digest(outcome) } });
+                const observed = observeStep(state, limits, { action, args: actionArgs,
                     progress_digest: digest(outcome), tokens, now: Date.now() });
                 state = observed.state;
                 if (observed.halted) {
@@ -154,6 +177,7 @@ export class InternalHostDriver {
         const receipt = this.store.create(this.receiptKind(), `receipt_${dispatch.id}`, { ...receiptPayload, uri: pathToFileURL(receiptPath).toString(), digest: digest(receiptPayload) });
         const saved = this.store.save(this.dispatchKind, String(dispatch.id), { ...payload(dispatch), status,
             receipt_id: receipt.id, finished_at: receiptPayload.completed_at });
+        this.trace.finalize({ trace_id: traceId, status: status === "completed" ? "completed" : "failed", summary: status === "completed" ? "internal host completed" : (failure ?? "internal host failed") });
         this.store.appendEvent(`task:${dispatch.task_id}`, "host.completed", { host: this.host, dispatch_id: dispatch.id,
             receipt_id: receipt.id, status });
         return { dispatch: saved, receipt, idempotent: false };

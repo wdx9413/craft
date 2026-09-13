@@ -13,7 +13,9 @@
 
 ## 建设原则
 
-以 [产品架构](architecture.zh-CN.md) 的三大支柱为目标：工作与协作、执行与保障、学习与改进。**评测与实验是第三支柱内的核心模块**，不另设第四支柱。当前实现基线已推进到 v0.12.7。
+以 [产品架构](architecture.zh-CN.md) 的三大支柱为目标：工作与协作、执行与保障、学习与改进。**评测与实验是第三支柱内的核心模块**，不另设第四支柱。当前实现基线已推进到 v0.12.8。
+
+**v0.12.8：Runtime Truth Layer。** 在旧 Trace 读取兼容之上，接通内部模型循环的 Tool Call、会话压缩、结构化工作笔记、跨进程 correlation 和 OTLP 映射；OS 沙箱、生产 A2A Transport、官方 Registry 同步和组织级加密同步仍由部署 Adapter 承担。
 
 **v0.12.6：通用意图与验收闭环。** 本版在 v0.12.4 的运行时基础上增加跨入口 Intent/Acceptance Contract 编译器：GUI、CLI、插件和专家对同一句目标得到相同的任务合同，覆盖率只是可插拔的程序验收器。Full MCP 暴露高级能力，默认 syscall 面保持低 Token。真实 OS 沙箱、生产 A2A Transport、云端 Registry、OTel 和多用户身份仍必须由外部 Adapter/平台验收，不能将本地契约当作生产服务。
 

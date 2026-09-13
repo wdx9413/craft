@@ -82,6 +82,11 @@ import { PlatformOperationsKernel } from "./platform-operations.ts";
 import { UsageKernel } from "./usage.ts";
 import { IntentCompilerKernel } from "./intent-compiler.ts";
 import { TraceKernel } from "./trace-kernel.ts";
+import { RuntimeTruthKernel } from "./runtime-truth-kernel.ts";
+import { OsSecurityKernel } from "./os-security.ts";
+import { McpRegistryKernel } from "./mcp-registry.ts";
+import { A2ATransportKernel } from "./a2a-transport.ts";
+import { OrgSyncKernel } from "./org-sync.ts";
 /**
  * Stable composition root for the service. Domain behavior stays in focused
  * kernels; CraftService is the backwards-compatible API facade.
@@ -171,6 +176,11 @@ export declare abstract class ServiceFoundation {
     readonly usage: UsageKernel;
     readonly intentCompiler: IntentCompilerKernel;
     readonly trace: TraceKernel;
+    readonly runtimeTruth: RuntimeTruthKernel;
+    readonly osSecurity: OsSecurityKernel;
+    readonly mcpRegistry: McpRegistryKernel;
+    readonly a2aTransport: A2ATransportKernel;
+    readonly orgSync: OrgSyncKernel;
     constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter?: LocalIsolatedAdapter, dockerSandbox?: DockerSandboxAdapter, egressBroker?: TrustedEgressBroker, hostOwnerId?: string, hostProfiles?: readonly HostProfile[], modelProviders?: readonly ModelProviderSpec[], modelTransport?: ModelTransport);
     protected abstract finalizeWorkLaunch(run: JsonObject, receipt: JsonObject | null): void;
     /**

@@ -31,9 +31,11 @@ export interface ModelProviderSpec {
   supports_tools: boolean;
 }
 
-export interface ChatMessage { role: "system" | "user" | "assistant"; content: string }
+export interface ChatToolDefinition { type: "function"; function: { name: string; description?: string; parameters?: JsonObject } }
+export interface ChatToolCall { id: string; type: "function"; function: { name: string; arguments: string } }
+export interface ChatMessage { role: "system" | "user" | "assistant" | "tool"; content: string | null; tool_call_id?: string; tool_calls?: ChatToolCall[] }
 export interface ChatRequest { url: string; headers: JsonObject; body: JsonObject; prompt_tokens_estimate: number }
-export interface ChatResult { text: string; model: string | null; usage: { input_tokens: number; output_tokens: number } | null }
+export interface ChatResult { text: string; model: string | null; usage: { input_tokens: number; output_tokens: number } | null; tool_calls?: ChatToolCall[] }
 
 const PROVIDER_NAME = /^[a-z][a-z0-9-]{0,31}$/u;
 const ENV_NAME = /^[A-Z_][A-Z0-9_]*$/u;
@@ -150,30 +152,32 @@ export function publicProvider(spec: ModelProviderSpec, env: NodeJS.ProcessEnv =
  * never end up inside a stored record.
  */
 export function buildChatRequest(spec: ModelProviderSpec, options: {
-  model: string; messages: ChatMessage[]; max_tokens?: number; temperature?: number;
+  model: string; messages: ChatMessage[]; max_tokens?: number; temperature?: number; tools?: ChatToolDefinition[]; stream?: boolean;
 }): ChatRequest {
   const model = text(options.model, "model");
   if (!Array.isArray(options.messages) || !options.messages.length) throw new Error("chat request requires at least one message");
   const messages = options.messages.map((message, index) => {
     if (!message || typeof message !== "object") throw new Error(`chat message ${index} must be an object`);
-    if (!["system", "user", "assistant"].includes(message.role)) throw new Error(`chat message ${index} has an unsupported role`);
-    if (typeof message.content !== "string") throw new Error(`chat message ${index} content must be a string`);
-    return { role: message.role, content: message.content };
+    if (!["system", "user", "assistant", "tool"].includes(message.role)) throw new Error(`chat message ${index} has an unsupported role`);
+    if (message.content !== null && typeof message.content !== "string") throw new Error(`chat message ${index} content must be a string or null`);
+    return { ...message };
   });
-  const promptChars = messages.reduce((total, message) => total + message.content.length, 0);
+  const promptChars = messages.reduce((total, message) => total + String(message.content ?? "").length, 0);
   const promptTokensEstimate = Math.max(1, Math.ceil(promptChars / 4));
   const headers: JsonObject = { "content-type": "application/json" };
   let body: JsonObject;
   if (spec.protocol === "anthropic") {
     headers["anthropic-version"] = "2023-06-01";
-    const system = messages.filter((message) => message.role === "system").map((message) => message.content).join("\n\n");
+    const system = messages.filter((message) => message.role === "system").map((message) => message.content ?? "").join("\n\n");
     body = { model, max_tokens: options.max_tokens ?? 4_096,
-      messages: messages.filter((message) => message.role !== "system").map((message) => ({ role: message.role, content: message.content })),
-      ...(system ? { system } : {}) };
+       messages: messages.filter((message) => message.role !== "system").map((message) => message.role === "tool"
+         ? ({ role: "user", content: [{ type: "tool_result", tool_use_id: message.tool_call_id ?? "unknown", content: message.content ?? "" }] } as JsonObject)
+         : ({ ...message, ...(message.tool_call_id ? { tool_use_id: message.tool_call_id } : {}) } as JsonObject)),
+      ...(system ? { system } : {}), ...(options.tools?.length ? { tools: options.tools.map((tool) => ({ name: tool.function.name, description: tool.function.description, input_schema: tool.function.parameters ?? { type: "object" } })) } : {}), ...(options.stream ? { stream: true } : {}) };
   } else {
     headers.authorization = `Bearer $${spec.api_key_env}`;
     body = { model, messages, max_tokens: options.max_tokens ?? 4_096,
-      ...(options.temperature === undefined ? {} : { temperature: options.temperature }) };
+      ...(options.temperature === undefined ? {} : { temperature: options.temperature }), ...(options.tools?.length ? { tools: options.tools } : {}), ...(options.stream ? { stream: true } : {}) };
   }
   return { url: `${spec.base_url}${spec.chat_path}`, headers, body, prompt_tokens_estimate: promptTokensEstimate };
 }
@@ -187,14 +191,19 @@ export function parseChatResponse(spec: ModelProviderSpec, payload: unknown): Ch
     const text = blocks.filter((block) => block.type === "text").map((block) => String(block.text ?? "")).join("");
     if (!text) throw new Error("Anthropic response contained no text block");
     const usage = body.usage as JsonObject | undefined;
-    return { text, model: body.model === undefined ? null : String(body.model),
+    const toolCalls = blocks.filter((block) => block.type === "tool_use").map((block, index) => ({ id: String(block.id ?? `tool_${index + 1}`), type: "function" as const, function: { name: String(block.name), arguments: JSON.stringify(block.input ?? {}) } }));
+    return { text, model: body.model === undefined ? null : String(body.model), ...(toolCalls.length ? { tool_calls: toolCalls } : {}),
       usage: usage ? { input_tokens: Number(usage.input_tokens ?? 0), output_tokens: Number(usage.output_tokens ?? 0) } : null };
   }
   const choices = Array.isArray(body.choices) ? body.choices as JsonObject[] : [];
   const message = choices[0]?.message as JsonObject | undefined;
-  if (!message || typeof message.content !== "string") throw new Error("OpenAI-compatible response contained no message content");
+  if (!message || (message.content !== null && typeof message.content !== "string")) throw new Error("OpenAI-compatible response contained no message content");
   const usage = body.usage as JsonObject | undefined;
-  return { text: message.content, model: body.model === undefined ? null : String(body.model),
+  const toolCalls = Array.isArray(message.tool_calls) ? (message.tool_calls as JsonObject[]).map((item, index) => {
+    const fn = item.function as JsonObject;
+    return { id: String(item.id ?? `tool_${index + 1}`), type: "function" as const, function: { name: String(fn.name), arguments: typeof fn.arguments === "string" ? fn.arguments : JSON.stringify(fn.arguments ?? {}) } };
+  }) : [];
+  return { text: message.content === null ? "" : message.content, model: body.model === undefined ? null : String(body.model), ...(toolCalls.length ? { tool_calls: toolCalls } : {}),
     usage: usage ? { input_tokens: Number(usage.prompt_tokens ?? 0), output_tokens: Number(usage.completion_tokens ?? 0) } : null };
 }
 

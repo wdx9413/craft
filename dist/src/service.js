@@ -25,7 +25,7 @@ import { decideExecution } from "./execution-policy.js";
 import { dockerRequestDigest } from "./docker-sandbox.js";
 import { egressRequestDigest } from "./egress.js";
 import { ServiceFoundation } from "./service-foundation.js";
-export const VERSION = "0.12.7";
+export const VERSION = "0.12.8";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -287,7 +287,7 @@ export class CraftService extends ServiceFoundation {
             "experience_shadow_experiment", "adaptive_harness", "agent_ir", "operational_signal", "operational_alert",
             "capability_asset", "activation_profile", "tool_selection_receipt", "capability_call", "capability_connector", "capability_connector_asset", "capability_connector_ticket", "logical_activation_plan", "logical_activation_audit", "logical_activation_resolution", "expert_profile", "context_capsule",
             "evaluation_reliability", "judge_adapter", "judge_calibration", "adaptation_candidate", "feedback_intake", "feedback_case", "canary",
-            "workspace", "workspace_checkpoint", "workspace_change", "workspace_transaction", "work_object", "memory_item", "context_profile", "task_graph", "change_set",
+            "workspace", "workspace_checkpoint", "workspace_change", "workspace_transaction", "work_object", "memory_item", "context_profile", "task_graph", "change_set", "os_security_plan", "os_security_receipt", "mcp_registry_source", "mcp_registry_server", "mcp_registry_health", "org_sync_manifest", "trace_otlp_export",
             "budget_account", "budget_reservation", "durable_wait", "external_event", "fallback_contract", "fallback_event",
             "credential_handle", "credential_lease", "egress_authorization", "egress_execution", "parser_security_evaluation", "parser_process_receipt",
             "sandbox_profile", "sandbox_assessment", "sandbox_ticket", "sandbox_receipt", "sandbox_egress_binding",
@@ -3703,6 +3703,20 @@ export class CraftService extends ServiceFoundation {
     traceReplayBundle(args) { return this.trace.replayBundle(args); }
     traceCaseCompile(args) { return this.trace.compileCase(args); }
     traceRetentionPlan(args) { return this.trace.retentionPlan(args); }
+    runtimeTruthStandardize(args) { return this.runtimeTruth.standardize(args); }
+    runtimeTruthOtlp(args) { return this.runtimeTruth.otlp(args); }
+    async runtimeTruthExport(args) { return this.runtimeTruth.export(args); }
+    runtimeTruthCompact(args) { return this.runtimeTruth.compact(args); }
+    runtimeTruthWorkNote(args) { return this.runtimeTruth.workNote(args); }
+    osSecurityPlan(args) { return this.osSecurity.plan(args); }
+    osSecurityVerify(args) { return this.osSecurity.verify(args); }
+    mcpRegistrySourceRegister(args) { return this.mcpRegistry.sourceRegister(args); }
+    mcpRegistryServerIngest(args) { return this.mcpRegistry.serverIngest(args); }
+    mcpRegistryHealthRecord(args) { return this.mcpRegistry.health(args); }
+    mcpRegistryRevoke(args) { return this.mcpRegistry.revoke(args); }
+    async a2aTransportDispatch(args) { return this.a2aTransport.dispatch(args); }
+    orgSyncPrepare(args) { return this.orgSync.prepare(args); }
+    orgSyncApply(args) { return this.orgSync.apply(args); }
     trialGet(args) {
         const trialId = text(args.trial_id, "trial_id");
         const trial = this.store.get("trial", trialId);

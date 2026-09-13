@@ -1,5 +1,6 @@
 import type { HostDriver, HostOutputObserver } from "./host-driver.ts";
-import { type ModelProviderSpec, type ModelTransport } from "./model-gateway.ts";
+import { type ChatToolDefinition, type ModelProviderSpec, type ModelTransport } from "./model-gateway.ts";
+import { TraceKernel } from "./trace-kernel.ts";
 import { CraftStore, type JsonObject } from "./store.ts";
 /**
  * The internal host: Craft running the loop itself.
@@ -18,6 +19,7 @@ export interface InternalHostOptions {
     /** Executes one proposed action; omitted means the model may only answer, not act. */
     invokeAction?: (action: string, args: JsonObject) => JsonObject | Promise<JsonObject>;
     env?: NodeJS.ProcessEnv;
+    tools?: readonly ChatToolDefinition[];
 }
 /**
  * A model reply is only treated as an action when it is a single JSON object with
@@ -40,6 +42,8 @@ export declare class InternalHostDriver implements HostDriver {
     readonly transport: ModelTransport;
     readonly invokeAction: InternalHostOptions["invokeAction"];
     readonly env: NodeJS.ProcessEnv;
+    readonly tools: readonly ChatToolDefinition[];
+    readonly trace: TraceKernel;
     constructor(store: CraftStore, options: InternalHostOptions);
     private receiptKind;
     private provider;

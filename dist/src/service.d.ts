@@ -1,7 +1,7 @@
 import { CraftStore, type JsonObject } from "./store.ts";
 import { type EmbeddingProvider } from "./semantic.ts";
 import { ServiceFoundation } from "./service-foundation.ts";
-export declare const VERSION = "0.12.7";
+export declare const VERSION = "0.12.8";
 export declare class CraftService extends ServiceFoundation {
     constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter?: unknown, dockerSandbox?: unknown, egressBroker?: unknown, hostOwnerId?: string, hostProfiles?: readonly import("./host-registry.ts").HostProfile[], modelProviders?: readonly import("./model-gateway.ts").ModelProviderSpec[], modelTransport?: import("./model-gateway.ts").ModelTransport);
     /**
@@ -511,6 +511,20 @@ export declare class CraftService extends ServiceFoundation {
     traceReplayBundle(args: JsonObject): JsonObject;
     traceCaseCompile(args: JsonObject): JsonObject;
     traceRetentionPlan(args: JsonObject): JsonObject;
+    runtimeTruthStandardize(args: JsonObject): JsonObject;
+    runtimeTruthOtlp(args: JsonObject): JsonObject;
+    runtimeTruthExport(args: JsonObject): Promise<JsonObject>;
+    runtimeTruthCompact(args: JsonObject): JsonObject;
+    runtimeTruthWorkNote(args: JsonObject): JsonObject;
+    osSecurityPlan(args: JsonObject): JsonObject;
+    osSecurityVerify(args: JsonObject): JsonObject;
+    mcpRegistrySourceRegister(args: JsonObject): JsonObject;
+    mcpRegistryServerIngest(args: JsonObject): JsonObject;
+    mcpRegistryHealthRecord(args: JsonObject): JsonObject;
+    mcpRegistryRevoke(args: JsonObject): JsonObject;
+    a2aTransportDispatch(args: JsonObject): Promise<JsonObject>;
+    orgSyncPrepare(args: JsonObject): JsonObject;
+    orgSyncApply(args: JsonObject): JsonObject;
     trialGet(args: JsonObject): JsonObject;
     evaluationRunRecord(args: JsonObject): JsonObject;
     evaluationRunAggregate(args: JsonObject): JsonObject;

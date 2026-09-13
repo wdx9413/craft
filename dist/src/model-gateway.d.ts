@@ -27,9 +27,27 @@ export interface ModelProviderSpec {
     cost_hint: number;
     supports_tools: boolean;
 }
+export interface ChatToolDefinition {
+    type: "function";
+    function: {
+        name: string;
+        description?: string;
+        parameters?: JsonObject;
+    };
+}
+export interface ChatToolCall {
+    id: string;
+    type: "function";
+    function: {
+        name: string;
+        arguments: string;
+    };
+}
 export interface ChatMessage {
-    role: "system" | "user" | "assistant";
-    content: string;
+    role: "system" | "user" | "assistant" | "tool";
+    content: string | null;
+    tool_call_id?: string;
+    tool_calls?: ChatToolCall[];
 }
 export interface ChatRequest {
     url: string;
@@ -44,6 +62,7 @@ export interface ChatResult {
         input_tokens: number;
         output_tokens: number;
     } | null;
+    tool_calls?: ChatToolCall[];
 }
 /**
  * The provider families Craft declares support for. Each row is a data
@@ -82,6 +101,8 @@ export declare function buildChatRequest(spec: ModelProviderSpec, options: {
     messages: ChatMessage[];
     max_tokens?: number;
     temperature?: number;
+    tools?: ChatToolDefinition[];
+    stream?: boolean;
 }): ChatRequest;
 /** Normalize either wire format into text plus usage. A malformed payload fails closed. */
 export declare function parseChatResponse(spec: ModelProviderSpec, payload: unknown): ChatResult;

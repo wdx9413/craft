@@ -12,11 +12,11 @@ const schemaFor = (name: string): JsonObject => {
   if (["input", "inputs", "metadata", "policy", "dimensions", "environment", "budget", "data", "scores",
     "costs", "metrics", "configuration", "receipt_requirements", "execution", "rules", "authorization_requests", "notification_refs", "cost_hint", "design_axes", "report",
     "limits", "resources", "actual", "actual_resources", "estimated_resources", "observation", "trial_budget", "policy_fingerprints", "structured_data", "field_sources",
-    "capabilities", "observed_capabilities", "requirements", "output", "transform", "entity", "values", "budget_limits", "sandbox_requirements", "eval_suite_ref", "checks", "state", "action_results", "workbench", "runtime", "privacy", "acceptance", "budget", "action_contract", "state_before", "state_after", "usage", "value", "model_fingerprint", "environment_fingerprint", "capability_fingerprint", "policy_fingerprint", "metadata"].includes(name)) return { type: "object" };
+    "capabilities", "observed_capabilities", "requirements", "output", "transform", "entity", "values", "budget_limits", "sandbox_requirements", "eval_suite_ref", "checks", "state", "action_results", "workbench", "runtime", "privacy", "acceptance", "budget", "action_contract", "state_before", "state_after", "usage", "value", "model_fingerprint", "environment_fingerprint", "capability_fingerprint", "policy_fingerprint", "metadata", "trace"].includes(name)) return { type: "object" };
   if (["completed", "pending", "decisions", "artifacts", "steps", "cases", "capabilities",
     "allowed_side_effects", "approved_side_effects", "nodes", "artifact_ids", "evidence_ids",
     "trial_ids", "requirements", "grade_ids", "pattern_ids", "failure_modes", "receipt_ids", "criteria", "acceptance_criteria", "allowed_extensions", "fields", "capability_requirements", "object_schemas", "components", "action_contracts", "tags", "claim_ids", "evidence_ids", "expected_claim_ids", "case_ids",
-    "allowed_operations", "allowed_effects", "require_approval_for", "operations", "subjects", "children", "trusted_hosts", "command_allowlist", "path_allowlist", "kinds", "effects", "allowed_kinds", "dependencies", "aliases", "assets", "asset_ids", "connector_ticket_ids", "artifact_ids", "final_artifact_ids", "evidence_ids", "gold_case_ids", "output_contract", "trial_ids", "include_paths", "affected_paths", "object_ids", "depends_on", "source_paths", "applies_to", "patches", "snapshot_refs", "triggers", "allowed_hosts", "allowed_actions", "approval_required_actions", "detected_instructions", "citations", "allowed_fields", "argv", "sources", "budget_ids", "recovery_item_ids", "memory_kinds", "object_types", "required_memory_ids", "required_object_ids", "benchmark_ids", "memory_ids", "paths", "state_paths", "turns", "roles", "changed_paths", "materials", "non_goals", "input_refs", "output_refs", "evidence_ids", "contamination_flags", "trace_ids"].includes(name)) return { type: "array" };
+    "allowed_operations", "allowed_effects", "require_approval_for", "operations", "subjects", "children", "trusted_hosts", "command_allowlist", "path_allowlist", "kinds", "effects", "allowed_kinds", "dependencies", "aliases", "assets", "asset_ids", "connector_ticket_ids", "artifact_ids", "final_artifact_ids", "evidence_ids", "gold_case_ids", "output_contract", "trial_ids", "include_paths", "affected_paths", "object_ids", "depends_on", "source_paths", "applies_to", "patches", "snapshot_refs", "triggers", "allowed_hosts", "allowed_actions", "approval_required_actions", "detected_instructions", "citations", "allowed_fields", "argv", "sources", "budget_ids", "recovery_item_ids", "memory_kinds", "object_types", "required_memory_ids", "required_object_ids", "benchmark_ids", "memory_ids", "paths", "state_paths", "turns", "messages", "events", "decisions", "constraints", "open_questions", "artifacts", "roles", "changed_paths", "materials", "non_goals", "input_refs", "output_refs", "evidence_ids", "contamination_flags", "trace_ids"].includes(name)) return { type: "array" };
   return { type: "string" };
 };
 const objectSchema = (required: string[] = [], optional: string[] = []): JsonObject => ({ type: "object",
@@ -752,6 +752,20 @@ export const TOOLS: Tool[] = [
   tool("craft_platform_authorize", "Evaluate one action against a member role and persist the decision.", ["member_id", "action"], false, ["authorization_id", "required_role"]),
   tool("craft_platform_observe", "Record a content-bounded operational observation.", ["event"], false, ["observation_id", "status", "run_id", "metric", "value"]),
   tool("craft_platform_observability_export", "Export standard content-free observability records for external OTel/log adapters.", [], true, ["limit"]),
+  tool("craft_runtime_truth_standardize", "Normalize a legacy or current Trace into the versionless craft.trace envelope.", ["trace"], true, ["export_id"]),
+  tool("craft_runtime_truth_otlp", "Map a content-free craft.trace record and events to OTLP/HTTP JSON without exporting it.", ["trace"], true, ["events"]),
+  tool("craft_runtime_truth_export", "Export a content-free craft.trace projection to an OTLP/HTTP endpoint and persist only the receipt.", ["endpoint", "trace"], false, ["events", "export_id"]),
+  tool("craft_runtime_truth_compact", "Compact a resumable model conversation while preserving system constraints and the latest work.", ["messages"], false, ["session_id", "max_chars"]),
+  tool("craft_runtime_truth_work_note", "Persist a structured, digest-backed work note for long-running Agent sessions.", ["goal"], false, ["note_id", "decisions", "constraints", "open_questions", "artifacts"]),
+  tool("craft_os_security_plan", "Plan a platform-specific fail-closed execution boundary with filesystem, network, and secret-broker constraints.", ["workspace"], false, ["plan_id", "platform", "network", "filesystem", "egress_allowlist", "secret_broker"]),
+  tool("craft_os_security_verify", "Verify observed platform-boundary evidence before allowing a governed execution.", ["plan_id", "observed", "evidence_ids"], false, ["receipt_id", "verified_by"]),
+  tool("craft_mcp_registry_source_register", "Register an HTTPS MCP Registry source with an explicit trust class; no network request is performed.", ["endpoint"], false, ["source_id", "trust", "key_digest"]),
+  tool("craft_mcp_registry_server_ingest", "Ingest one digest-pinned MCP server metadata record from a trusted registry source.", ["source_id", "name", "version", "endpoint", "digest"], false, ["server_id", "capabilities"]),
+  tool("craft_mcp_registry_health_record", "Record an MCP server health result without treating health as a trust decision.", ["server_id"], false, ["health_id", "status", "checked_at", "evidence_digest"]),
+  tool("craft_mcp_registry_revoke", "Revoke one MCP registry server version and preserve the audit record.", ["server_id", "reason"]),
+  tool("craft_a2a_transport_dispatch", "Dispatch a digest-only HTTPS A2A envelope and return a bounded remote receipt.", ["endpoint", "request_id", "agent", "operation", "input_digest"]),
+  tool("craft_org_sync_prepare", "Prepare an encrypted-adapter organization sync manifest with conflict and deletion-tombstone semantics.", ["workspace_id"], false, ["sync_id", "member_ids", "record_refs"]),
+  tool("craft_org_sync_apply", "Apply an organization sync manifest only when the base digest still matches.", ["sync_id", "base_digest"], false, ["current_digest", "tombstones"]),
 ];
 
 const CORE_TOOL_NAMES = new Set(["craft_info", "craft_source_list", "craft_capability_search", "craft_capability_get", "craft_semantic_status", "craft_execution_policy_decide",
@@ -1208,6 +1222,20 @@ export class McpServer {
       craft_platform_authorize: (a) => service.platformAuthorize(a),
       craft_platform_observe: (a) => service.platformObserve(a),
       craft_platform_observability_export: (a) => service.platformObservabilityExport(a),
+      craft_runtime_truth_standardize: (a) => service.runtimeTruthStandardize(a),
+      craft_runtime_truth_otlp: (a) => service.runtimeTruthOtlp(a),
+      craft_runtime_truth_export: (a) => service.runtimeTruthExport(a),
+      craft_runtime_truth_compact: (a) => service.runtimeTruthCompact(a),
+      craft_runtime_truth_work_note: (a) => service.runtimeTruthWorkNote(a),
+      craft_os_security_plan: (a) => service.osSecurityPlan(a),
+      craft_os_security_verify: (a) => service.osSecurityVerify(a),
+      craft_mcp_registry_source_register: (a) => service.mcpRegistrySourceRegister(a),
+      craft_mcp_registry_server_ingest: (a) => service.mcpRegistryServerIngest(a),
+      craft_mcp_registry_health_record: (a) => service.mcpRegistryHealthRecord(a),
+      craft_mcp_registry_revoke: (a) => service.mcpRegistryRevoke(a),
+      craft_a2a_transport_dispatch: (a) => service.a2aTransportDispatch(a),
+      craft_org_sync_prepare: (a) => service.orgSyncPrepare(a),
+      craft_org_sync_apply: (a) => service.orgSyncApply(a),
     };
   }
 

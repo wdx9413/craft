@@ -14,7 +14,7 @@ test("WorkBuddy Expert package has the required identity, Agent, avatar, Skill, 
   const plugin = await json(`${packageRoot}/.codebuddy-plugin/plugin.json`);
   const mcp = await json(`${packageRoot}/.mcp.json`);
   assert.equal(plugin.name, "craft-work-governance");
-  assert.equal(plugin.version, "0.12.7");
+  assert.equal(plugin.version, "0.12.8");
   assert.equal(plugin.expertType, "agent");
   assert.equal(plugin.agentName, "craft-work-governance");
   assert.deepEqual(plugin.agents, ["./agents/craft-work-governance.md"]);

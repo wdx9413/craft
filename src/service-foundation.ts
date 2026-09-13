@@ -83,6 +83,11 @@ import { PlatformOperationsKernel } from "./platform-operations.ts";
 import { UsageKernel } from "./usage.ts";
 import { IntentCompilerKernel } from "./intent-compiler.ts";
 import { TraceKernel } from "./trace-kernel.ts";
+import { RuntimeTruthKernel } from "./runtime-truth-kernel.ts";
+import { OsSecurityKernel } from "./os-security.ts";
+import { McpRegistryKernel } from "./mcp-registry.ts";
+import { A2ATransportKernel } from "./a2a-transport.ts";
+import { OrgSyncKernel } from "./org-sync.ts";
 
 /**
  * Stable composition root for the service. Domain behavior stays in focused
@@ -174,6 +179,11 @@ export abstract class ServiceFoundation {
   readonly usage: UsageKernel;
   readonly intentCompiler: IntentCompilerKernel;
   readonly trace: TraceKernel;
+  readonly runtimeTruth: RuntimeTruthKernel;
+  readonly osSecurity: OsSecurityKernel;
+  readonly mcpRegistry: McpRegistryKernel;
+  readonly a2aTransport: A2ATransportKernel;
+  readonly orgSync: OrgSyncKernel;
 
   constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter = new LocalIsolatedAdapter(),
     dockerSandbox = new DockerSandboxAdapter(), egressBroker = new TrustedEgressBroker(), hostOwnerId?: string,
@@ -252,8 +262,13 @@ export abstract class ServiceFoundation {
     this.usage = new UsageKernel(store);
     this.intentCompiler = new IntentCompilerKernel(store);
     this.trace = new TraceKernel(store);
+    this.runtimeTruth = new RuntimeTruthKernel(store);
+    this.osSecurity = new OsSecurityKernel(store);
+    this.mcpRegistry = new McpRegistryKernel(store);
+    this.a2aTransport = new A2ATransportKernel();
+    this.orgSync = new OrgSyncKernel(store);
     this.hostRuns = new HostRunKernel(store, [...this.hostDrivers.values()], hostOwnerId,
-      (run, receipt) => this.finalizeWorkLaunch(run, receipt));
+      (run, receipt) => this.finalizeWorkLaunch(run, receipt), this.trace);
   }
 
   // Implemented by the public facade after the corresponding domain method exists.

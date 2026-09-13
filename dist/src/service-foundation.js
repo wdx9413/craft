@@ -81,6 +81,11 @@ import { PlatformOperationsKernel } from "./platform-operations.js";
 import { UsageKernel } from "./usage.js";
 import { IntentCompilerKernel } from "./intent-compiler.js";
 import { TraceKernel } from "./trace-kernel.js";
+import { RuntimeTruthKernel } from "./runtime-truth-kernel.js";
+import { OsSecurityKernel } from "./os-security.js";
+import { McpRegistryKernel } from "./mcp-registry.js";
+import { A2ATransportKernel } from "./a2a-transport.js";
+import { OrgSyncKernel } from "./org-sync.js";
 /**
  * Stable composition root for the service. Domain behavior stays in focused
  * kernels; CraftService is the backwards-compatible API facade.
@@ -170,6 +175,11 @@ export class ServiceFoundation {
     usage;
     intentCompiler;
     trace;
+    runtimeTruth;
+    osSecurity;
+    mcpRegistry;
+    a2aTransport;
+    orgSync;
     constructor(store, semanticProvider, isolatedAdapter = new LocalIsolatedAdapter(), dockerSandbox = new DockerSandboxAdapter(), egressBroker = new TrustedEgressBroker(), hostOwnerId, hostProfiles, modelProviders, modelTransport) {
         this.store = store;
         this.catalog = new Catalog(store, semanticProvider);
@@ -261,7 +271,12 @@ export class ServiceFoundation {
         this.usage = new UsageKernel(store);
         this.intentCompiler = new IntentCompilerKernel(store);
         this.trace = new TraceKernel(store);
-        this.hostRuns = new HostRunKernel(store, [...this.hostDrivers.values()], hostOwnerId, (run, receipt) => this.finalizeWorkLaunch(run, receipt));
+        this.runtimeTruth = new RuntimeTruthKernel(store);
+        this.osSecurity = new OsSecurityKernel(store);
+        this.mcpRegistry = new McpRegistryKernel(store);
+        this.a2aTransport = new A2ATransportKernel();
+        this.orgSync = new OrgSyncKernel(store);
+        this.hostRuns = new HostRunKernel(store, [...this.hostDrivers.values()], hostOwnerId, (run, receipt) => this.finalizeWorkLaunch(run, receipt), this.trace);
     }
 }
 //# sourceMappingURL=service-foundation.js.map

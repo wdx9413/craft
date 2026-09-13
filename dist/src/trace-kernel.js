@@ -1,6 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import { CraftStore } from "./store.js";
-export const TRACE_SCHEMA_VERSION = "craft.trace.v1";
+import { TRACE_SCHEMA, TRACE_SCHEMA_REVISION } from "./runtime-truth.js";
+/** Current write format. Legacy callers may still import this name. */
+export const TRACE_SCHEMA_VERSION = TRACE_SCHEMA;
+export const LEGACY_TRACE_SCHEMA_VERSION = "craft.trace.v1";
 const TERMINAL = new Set(["completed", "failed", "cancelled", "blocked"]);
 const TRUST = new Set(["observed", "verified", "human", "untrusted"]);
 const SIGNALS = new Set(["accepted", "rejected", "corrected", "retried", "stopped", "handoff", "rated"]);
@@ -72,7 +75,7 @@ export class TraceKernel {
                 throw new Error("Trace idempotency conflict");
             return { trace: existing, idempotent: true };
         }
-        return { trace: this.store.create("trace", traceId, { schema: TRACE_SCHEMA_VERSION, ...identity, identity_digest: identityDigest, status: "running", next_sequence: 0, event_count: 0, started_at: new Date().toISOString(), metadata_digest: digest(safeData(args.metadata, "metadata")) }), idempotent: false };
+        return { trace: this.store.create("trace", traceId, { schema: TRACE_SCHEMA_VERSION, schema_revision: TRACE_SCHEMA_REVISION, ...identity, identity_digest: identityDigest, status: "running", next_sequence: 0, event_count: 0, started_at: new Date().toISOString(), metadata_digest: digest(safeData(args.metadata, "metadata")) }), idempotent: false };
     }
     append(args) {
         const traceId = text(args.trace_id, "trace_id");
@@ -98,7 +101,7 @@ export class TraceKernel {
                 throw new Error("Trace event idempotency conflict");
             return { event: existing, trace, idempotent: true };
         }
-        const event = this.store.create("trace_event", eventId, { schema: TRACE_SCHEMA_VERSION, ...identity, event_digest: eventDigest, trace_id: traceId });
+        const event = this.store.create("trace_event", eventId, { schema: TRACE_SCHEMA_VERSION, schema_revision: TRACE_SCHEMA_REVISION, ...identity, event_digest: eventDigest, trace_id: traceId });
         this.store.appendEvent(`trace:${traceId}`, eventKind, { event_id: event.id, trace_id: traceId, sequence, event_digest: eventDigest, trust, output_refs: identity.output_refs });
         const savedTrace = this.store.save("trace", traceId, { ...payload(trace), next_sequence: sequence, event_count: Number(trace.event_count) + 1, last_event_id: event.id, last_event_at: event.created_at });
         return { event, trace: savedTrace, idempotent: false };

@@ -125,27 +125,29 @@ export function buildChatRequest(spec, options) {
     const messages = options.messages.map((message, index) => {
         if (!message || typeof message !== "object")
             throw new Error(`chat message ${index} must be an object`);
-        if (!["system", "user", "assistant"].includes(message.role))
+        if (!["system", "user", "assistant", "tool"].includes(message.role))
             throw new Error(`chat message ${index} has an unsupported role`);
-        if (typeof message.content !== "string")
-            throw new Error(`chat message ${index} content must be a string`);
-        return { role: message.role, content: message.content };
+        if (message.content !== null && typeof message.content !== "string")
+            throw new Error(`chat message ${index} content must be a string or null`);
+        return { ...message };
     });
-    const promptChars = messages.reduce((total, message) => total + message.content.length, 0);
+    const promptChars = messages.reduce((total, message) => total + String(message.content ?? "").length, 0);
     const promptTokensEstimate = Math.max(1, Math.ceil(promptChars / 4));
     const headers = { "content-type": "application/json" };
     let body;
     if (spec.protocol === "anthropic") {
         headers["anthropic-version"] = "2023-06-01";
-        const system = messages.filter((message) => message.role === "system").map((message) => message.content).join("\n\n");
+        const system = messages.filter((message) => message.role === "system").map((message) => message.content ?? "").join("\n\n");
         body = { model, max_tokens: options.max_tokens ?? 4_096,
-            messages: messages.filter((message) => message.role !== "system").map((message) => ({ role: message.role, content: message.content })),
-            ...(system ? { system } : {}) };
+            messages: messages.filter((message) => message.role !== "system").map((message) => message.role === "tool"
+                ? { role: "user", content: [{ type: "tool_result", tool_use_id: message.tool_call_id ?? "unknown", content: message.content ?? "" }] }
+                : { ...message, ...(message.tool_call_id ? { tool_use_id: message.tool_call_id } : {}) }),
+            ...(system ? { system } : {}), ...(options.tools?.length ? { tools: options.tools.map((tool) => ({ name: tool.function.name, description: tool.function.description, input_schema: tool.function.parameters ?? { type: "object" } })) } : {}), ...(options.stream ? { stream: true } : {}) };
     }
     else {
         headers.authorization = `Bearer $${spec.api_key_env}`;
         body = { model, messages, max_tokens: options.max_tokens ?? 4_096,
-            ...(options.temperature === undefined ? {} : { temperature: options.temperature }) };
+            ...(options.temperature === undefined ? {} : { temperature: options.temperature }), ...(options.tools?.length ? { tools: options.tools } : {}), ...(options.stream ? { stream: true } : {}) };
     }
     return { url: `${spec.base_url}${spec.chat_path}`, headers, body, prompt_tokens_estimate: promptTokensEstimate };
 }
@@ -160,15 +162,20 @@ export function parseChatResponse(spec, payload) {
         if (!text)
             throw new Error("Anthropic response contained no text block");
         const usage = body.usage;
-        return { text, model: body.model === undefined ? null : String(body.model),
+        const toolCalls = blocks.filter((block) => block.type === "tool_use").map((block, index) => ({ id: String(block.id ?? `tool_${index + 1}`), type: "function", function: { name: String(block.name), arguments: JSON.stringify(block.input ?? {}) } }));
+        return { text, model: body.model === undefined ? null : String(body.model), ...(toolCalls.length ? { tool_calls: toolCalls } : {}),
             usage: usage ? { input_tokens: Number(usage.input_tokens ?? 0), output_tokens: Number(usage.output_tokens ?? 0) } : null };
     }
     const choices = Array.isArray(body.choices) ? body.choices : [];
     const message = choices[0]?.message;
-    if (!message || typeof message.content !== "string")
+    if (!message || (message.content !== null && typeof message.content !== "string"))
         throw new Error("OpenAI-compatible response contained no message content");
     const usage = body.usage;
-    return { text: message.content, model: body.model === undefined ? null : String(body.model),
+    const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls.map((item, index) => {
+        const fn = item.function;
+        return { id: String(item.id ?? `tool_${index + 1}`), type: "function", function: { name: String(fn.name), arguments: typeof fn.arguments === "string" ? fn.arguments : JSON.stringify(fn.arguments ?? {}) } };
+    }) : [];
+    return { text: message.content === null ? "" : message.content, model: body.model === undefined ? null : String(body.model), ...(toolCalls.length ? { tool_calls: toolCalls } : {}),
         usage: usage ? { input_tokens: Number(usage.prompt_tokens ?? 0), output_tokens: Number(usage.completion_tokens ?? 0) } : null };
 }
 function responseError(status, body) {

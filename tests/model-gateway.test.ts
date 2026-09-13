@@ -95,12 +95,13 @@ test("request rendering matches each wire format", () => {
   assert.ok(openai.prompt_tokens_estimate >= 1);
 
   const anthropic = buildChatRequest(anthropicSpec(), { model: "demo-claude", max_tokens: 128,
-    messages: [{ role: "system", content: "be brief" }, { role: "user", content: "hi" }] });
+    messages: [{ role: "system", content: "be brief" }, { role: "user", content: "hi" }], tools: [{ type: "function", function: { name: "lookup", description: "Lookup", parameters: { type: "object" } } }] });
   assert.equal(anthropic.url, "https://example.test/v1/messages");
   assert.equal(anthropic.headers["anthropic-version"], "2023-06-01");
   assert.equal(anthropic.body.system, "be brief");
   assert.deepEqual(anthropic.body.messages, [{ role: "user", content: "hi" }]);
   assert.equal(anthropic.body.max_tokens, 128);
+  assert.equal((anthropic.body.tools as JsonObject[])[0]!.name, "lookup");
 
   const noSystem = buildChatRequest(anthropicSpec(), { model: "demo-claude", messages: [{ role: "user", content: "hi" }] });
   assert.equal(noSystem.body.max_tokens, 4_096);
@@ -112,7 +113,7 @@ test("request rendering rejects malformed conversations", () => {
   const build = (messages: unknown[]): ChatRequest => buildChatRequest(spec, { model: "m", messages: messages as never });
   assert.throws(() => build([]), /at least one message/);
   assert.throws(() => build([null]), /must be an object/);
-  assert.throws(() => build([{ role: "tool", content: "x" }]), /unsupported role/);
+  assert.deepEqual(buildChatRequest(spec, { model: "m", messages: [{ role: "tool", content: "x", tool_call_id: "call" }] }).body.messages, [{ role: "tool", content: "x", tool_call_id: "call" }]);
   assert.throws(() => build([{ role: "user", content: 1 }]), /content must be a string/);
 });
 
@@ -120,6 +121,8 @@ test("response parsing normalizes both wire formats and fails closed", () => {
   const openai = parseChatResponse(openaiSpec(), { model: "demo-std", choices: [{ message: { content: "hello" } }],
     usage: { prompt_tokens: 3, completion_tokens: 4 } });
   assert.deepEqual(openai, { text: "hello", model: "demo-std", usage: { input_tokens: 3, output_tokens: 4 } });
+  const openaiTool = parseChatResponse(openaiSpec(), { model: "demo-std", choices: [{ message: { content: null, tool_calls: [{ id: "call", function: { name: "search", arguments: { q: "x" } } }] } }] });
+  assert.equal(openaiTool.tool_calls?.[0]?.function.name, "search");
   assert.equal(parseChatResponse(openaiSpec(), { choices: [{ message: { content: "x" } }] }).usage, null);
 
   const anthropic = parseChatResponse(anthropicSpec(), { model: "demo-claude",
@@ -127,6 +130,8 @@ test("response parsing normalizes both wire formats and fails closed", () => {
     usage: { input_tokens: 1, output_tokens: 2, cache_read_input_tokens: 9 } });
   assert.equal(anthropic.text, "ac");
   assert.deepEqual(anthropic.usage, { input_tokens: 1, output_tokens: 2 });
+  const anthropicTool = parseChatResponse(anthropicSpec(), { content: [{ type: "text", text: "go" }, { type: "tool_use", id: "a", name: "lookup", input: { q: "x" } }] });
+  assert.equal(anthropicTool.tool_calls?.[0]?.function.name, "lookup");
 
   assert.throws(() => parseChatResponse(openaiSpec(), "nope"), /must be an object/);
   assert.throws(() => parseChatResponse(openaiSpec(), { choices: [] }), /no message content/);
@@ -361,7 +366,9 @@ test("the internal host prepares idempotently and validates its provider", async
   const f = await store();
   try {
     const task = f.store.create("task", `task_${process.pid}`, { title: "t", goal: "g" });
-    const driver = new InternalHostDriver(f.store, { providers: [openaiSpec(), anthropicSpec()], transport: transportOf(["done"]) });
+  const driver = new InternalHostDriver(f.store, { providers: [openaiSpec(), anthropicSpec()], transport: transportOf(["done"]) });
+  assert.equal((driver as unknown as { receiptKind(): string }).receiptKind(), "internal_receipt");
+  assert.equal((driver as unknown as { provider(name?: string): { provider: string } }).provider().provider, "demo");
     const prepared = driver.prepare({ task_id: task.id, prompt: "go", provider: "demo" }) as JsonObject;
     assert.equal((prepared.dispatch as JsonObject).model, "demo-std");
     assert.equal((prepared.credential as JsonObject).configured, false);
@@ -468,7 +475,20 @@ test("the internal host validates its arguments and streams observations", async
       { observe: (event) => events.push({ bytes: event.bytes }) }) as JsonObject;
     assert.equal(events.length, 1);
     assert.ok(events[0].bytes >= 1);
-    assert.equal((executed.receipt as JsonObject).status, "completed");
+    assert.ok((executed.receipt as JsonObject).status === "completed", JSON.stringify(executed.receipt));
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("the internal host executes normalized provider Tool Calls", async () => {
+  const f = await store();
+  try {
+    const task = f.store.create("task", `task_tool_${process.pid}`, { title: "t", goal: "g" }); let turn = 0;
+    const driver = new InternalHostDriver(f.store, { providers: [openaiSpec()], transport: { complete: async () => turn++ === 0
+      ? { text: "", model: "demo", usage: { input_tokens: 1, output_tokens: 1 }, tool_calls: [{ id: "call", type: "function", function: { name: "ping", arguments: "{}" } }] }
+      : { text: "done", model: "demo", usage: { input_tokens: 1, output_tokens: 1 } } }, invokeAction: (action) => ({ action, ok: true }) });
+    driver.prepare({ task_id: task.id, prompt: "go", dispatch_id: "tool-call" });
+    const executed = await driver.execute({ dispatch_id: "tool-call", prompt: "go" }) as JsonObject;
+    assert.ok((executed.receipt as JsonObject).status === "completed", JSON.stringify(executed.receipt));
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 

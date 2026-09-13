@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { CraftStore } from "./store.js";
+import { TraceKernel } from "./trace-kernel.js";
 function text(value, name) { if (typeof value !== "string" || !value.trim())
     throw new Error(`${name} must not be empty`); return value.trim(); }
 function payload(record) { const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record; return rest; }
@@ -11,7 +12,8 @@ export class HostRunKernel {
     terminalObserver;
     controllers = new Map();
     completions = new Map();
-    constructor(store, drivers, ownerId = `runner_${randomUUID().replaceAll("-", "")}`, terminalObserver) { this.store = store; this.drivers = new Map(drivers.map((driver) => [driver.host, driver])); this.ownerId = ownerId; this.terminalObserver = terminalObserver; }
+    trace;
+    constructor(store, drivers, ownerId = `runner_${randomUUID().replaceAll("-", "")}`, terminalObserver, trace) { this.store = store; this.drivers = new Map(drivers.map((driver) => [driver.host, driver])); this.ownerId = ownerId; this.terminalObserver = terminalObserver; this.trace = trace; }
     notifyTerminal(run, receipt) { if (!this.terminalObserver)
         return; try {
         this.terminalObserver(run, receipt);
@@ -42,8 +44,19 @@ export class HostRunKernel {
         const run = this.store.create("host_run", runId, { host, dispatch_id: dispatchId, task_id: dispatch.task_id, owner_id: this.ownerId, status: "running", cancel_requested: false, event_count: 0, started_at: new Date().toISOString() });
         const controller = new AbortController();
         this.controllers.set(runId, controller);
+        const traceId = `host_run:${runId}`;
+        if (this.trace) {
+            this.trace.start({ trace_id: traceId, task_id: String(dispatch.task_id), run_id: runId, operation_id: dispatchId, metadata: { host } });
+            this.trace.append({ trace_id: traceId, event_kind: "host.started", actor: host, source: "host-run", trust: "observed", data: {}, summary: "Host execution started" });
+        }
         const observe = (event) => { const current = this.store.get("host_run", runId); this.store.appendEvent(`host-run:${runId}`, "host.output", event); this.store.save("host_run", runId, { ...payload(current), event_count: Number(current.event_count) + 1 }); };
-        const completion = driver.execute({ ...args, dispatch_id: dispatchId, prompt }, { signal: controller.signal, observe }).then((result) => { const current = this.store.get("host_run", runId); const receipt = result.receipt; const status = current.cancel_requested || receipt.cancelled ? "cancelled" : receipt.status === "completed" ? "completed" : "failed"; const saved = this.store.save("host_run", runId, { ...payload(current), status, receipt_id: receipt.id, finished_at: new Date().toISOString() }); this.store.appendEvent(`host-run:${runId}`, "host.finished", { status, receipt_id: receipt.id }); this.notifyTerminal(saved, receipt); }).catch((error) => { const current = this.store.get("host_run", runId); const saved = this.store.save("host_run", runId, { ...payload(current), status: current.cancel_requested ? "cancelled" : "failed", error_class: error instanceof Error ? error.name : "UnknownError", finished_at: new Date().toISOString() }); this.notifyTerminal(saved, null); }).finally(() => { this.controllers.delete(runId); });
+        const completion = driver.execute({ ...args, dispatch_id: dispatchId, prompt }, { signal: controller.signal, observe }).then((result) => { const current = this.store.get("host_run", runId); const receipt = result.receipt; const status = current.cancel_requested || receipt.cancelled ? "cancelled" : receipt.status === "completed" ? "completed" : "failed"; const saved = this.store.save("host_run", runId, { ...payload(current), status, receipt_id: receipt.id, finished_at: new Date().toISOString() }); this.store.appendEvent(`host-run:${runId}`, "host.finished", { status, receipt_id: receipt.id }); if (this.trace) {
+            this.trace.append({ trace_id: traceId, event_kind: "host.finished", actor: "host-run", source: "host-run", trust: "observed", data: {}, output_refs: [String(receipt.id)], status, summary: "Host execution finished" });
+            this.trace.finalize({ trace_id: traceId, status: status === "completed" ? "completed" : status === "cancelled" ? "cancelled" : "failed", summary: "Host run terminal" });
+        } this.notifyTerminal(saved, receipt); }).catch((error) => { const current = this.store.get("host_run", runId); const saved = this.store.save("host_run", runId, { ...payload(current), status: current.cancel_requested ? "cancelled" : "failed", error_class: error instanceof Error ? error.name : "UnknownError", finished_at: new Date().toISOString() }); if (this.trace) {
+            this.trace.append({ trace_id: traceId, event_kind: "host.failed", actor: "host-run", source: "host-run", trust: "observed", data: {}, error_class: error instanceof Error ? error.name : "UnknownError", status: "failed", summary: "Host execution failed" });
+            this.trace.finalize({ trace_id: traceId, status: "failed", summary: "Host execution failed" });
+        } this.notifyTerminal(saved, null); }).finally(() => { this.controllers.delete(runId); });
         this.completions.set(runId, completion);
         return { run, idempotent: false };
     }

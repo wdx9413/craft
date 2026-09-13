@@ -1,5 +1,6 @@
 import type { HostDriver } from "./host-driver.ts";
 import { CraftStore, type JsonObject } from "./store.ts";
+import { TraceKernel } from "./trace-kernel.ts";
 export declare class HostRunKernel {
     readonly store: CraftStore;
     readonly drivers: Map<string, HostDriver>;
@@ -7,7 +8,8 @@ export declare class HostRunKernel {
     readonly terminalObserver?: (run: JsonObject, receipt: JsonObject | null) => void;
     private controllers;
     private completions;
-    constructor(store: CraftStore, drivers: HostDriver[], ownerId?: string, terminalObserver?: (run: JsonObject, receipt: JsonObject | null) => void);
+    readonly trace?: TraceKernel;
+    constructor(store: CraftStore, drivers: HostDriver[], ownerId?: string, terminalObserver?: (run: JsonObject, receipt: JsonObject | null) => void, trace?: TraceKernel);
     private notifyTerminal;
     start(args: JsonObject): JsonObject;
     get(args: JsonObject): JsonObject;

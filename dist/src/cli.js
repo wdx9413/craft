@@ -100,7 +100,7 @@ async function promptChoice(question, choices) {
 async function interactiveInit() {
     const modes = ["agent", "supervisor", "provider"];
     const mode = modes[await promptChoice("How do you want to use Craft?", [
-        "Agent - Prepare a standalone model runtime (model loop is not included yet)",
+        "Agent - Run a governed standalone model runtime",
         "Supervisor - Configure execution hosts (automatic host drivers are not included yet)",
         "Provider - Craft supplies capabilities to another Agent",
     ])];
@@ -413,7 +413,7 @@ export async function main(args = process.argv.slice(2)) {
     }
     stdout.write(`Craft mode: ${config.activeMode}\n`);
     stdout.write(config.activeMode === "agent"
-        ? "Agent mode configuration is ready; this release does not yet include the standalone model loop.\n"
+        ? "Agent mode is ready; run `craft run --goal \"...\"` to start the governed model loop.\n"
         : config.activeMode === "supervisor"
             ? `Configured hosts: ${config.supervisor.hosts.join(", ") || "none"}\n`
             : "Provider mode is configured; connect through the Craft plugin or MCP server.\n");
