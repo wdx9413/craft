@@ -100,19 +100,25 @@ export class InternalHostDriver implements HostDriver {
   }
 
   async execute(args: JsonObject, options: { signal?: AbortSignal; observe?: HostOutputObserver } = {}): Promise<JsonObject> {
-    const dispatch = this.store.get(this.dispatchKind, text(args.dispatch_id, "dispatch_id"));
+    let dispatch = this.store.get(this.dispatchKind, text(args.dispatch_id, "dispatch_id"));
     const prompt = text(args.prompt, "prompt");
     if (digest(prompt) !== dispatch.prompt_digest) throw new Error("Internal host prompt does not match the prepared digest");
     if (dispatch.status === "completed" || dispatch.status === "failed") {
       return { dispatch, receipt: this.store.get(this.receiptKind(), `receipt_${dispatch.id}`), idempotent: true };
     }
-    if (dispatch.status !== "prepared") throw new Error("Internal host dispatch is not executable");
+    const resume = args.resume === true;
+    if (dispatch.status === "running" && !resume) throw new Error("Internal host dispatch is running; resume requires an explicit resume flag");
+    if (dispatch.status !== "prepared" && dispatch.status !== "running") throw new Error("Internal host dispatch is not executable");
+    const resumedFrom = dispatch.status === "running" ? dispatch.status : null;
+    if (resumedFrom) {
+      dispatch = this.store.save(this.dispatchKind, String(dispatch.id), { ...payload(dispatch), status: "prepared", resumed_at: new Date().toISOString() });
+    }
     const provider = this.provider(dispatch.provider);
     const limits = defineLoopLimits(dispatch.limits as JsonObject);
     let state = beginLoop(Date.now());
     let finalMessage: string | null = null;
     let failure: string | null = null;
-    this.store.save(this.dispatchKind, String(dispatch.id), { ...payload(dispatch), status: "running", started_at: new Date().toISOString() });
+    dispatch = this.store.save(this.dispatchKind, String(dispatch.id), { ...payload(dispatch), status: "running", started_at: new Date().toISOString(), ...(resumedFrom ? { resumed_from: resumedFrom } : {}) });
 
     const messages: ChatMessage[] = [{ role: "user", content: prompt }];
     try {

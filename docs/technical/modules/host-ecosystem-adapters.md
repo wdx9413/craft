@@ -1,6 +1,6 @@
 # TraeWork / WorkBuddy host adapters
 
-> Implementation baseline: v0.12.2. These are local integration and marketplace-submission packages, not claims that Craft has been approved by either marketplace or that a cloud MCP service exists.
+> Implementation baseline: v0.12.3. These are local integration and marketplace-submission packages, not claims that Craft has been approved by either marketplace or that a cloud MCP service exists.
 
 ## Goal
 
@@ -19,11 +19,11 @@ Codex / Claude / TraeWork / WorkBuddy
 
 ## TraeWork
 
-[`adapters/trae-work/`](../../../adapters/trae-work/README.md) provides the exact JSON accepted by TraeWork's manual local MCP configuration and uploadable Skills. `craft-route` is the only recommended default upload; `craft` and `craft-clarify` are separately selectable opt-in packages. Its `mcp.json` starts Core; `mcp-full.json` is the deliberate advanced alternative. Local stdio MCP runs only on TraeWork Desktop. Web and cloud tasks require a deployment-owned HTTPS MCP Adapter, its own identity and authorization design, and a new evidence review. The package deliberately does not claim that local Craft state is reachable from cloud tasks.
+[`adapters/trae-work/`](../../../adapters/trae-work/README.md) provides the exact JSON accepted by TraeWork's manual local MCP configuration and uploadable Skills. `craft-route` is the only recommended default upload; `craft` and `craft-clarify` are separately selectable opt-in packages. Its `mcp.json` starts the compact syscall surface; `mcp-core.json` remains a named Core compatibility profile and `mcp-full.json` is the deliberate advanced alternative. Local stdio MCP runs only on TraeWork Desktop. Web and cloud tasks require a deployment-owned HTTPS MCP Adapter, its own identity and authorization design, and a new evidence review. The package deliberately does not claim that local Craft state is reachable from cloud tasks.
 
 ## WorkBuddy
 
-[`adapters/workbuddy-connector/`](../../../adapters/workbuddy-connector/README.md) follows WorkBuddy's MCP + Skill connector structure: one MCP server, `connector-meta.json`, market icon and exactly one route Skill. It is the explicit Full-MCP Connector, not the Expert entry. [`adapters/workbuddy-expert/`](../../../adapters/workbuddy-expert/README.md) is the separately uploadable, route-first Expert package: `.codebuddy-plugin/plugin.json`, a PNG avatar, one Agent, exactly one `craft-route` Skill, and a Core MCP dependency. Both WorkBuddy packages resolve their stdio entry through the host's plugin-root variable (`${CODEBUDDY_PLUGIN_ROOT}/bin/...`) to the dependency-free bundle shipped inside the archive, so neither a globally installed `craft-mcp` binary nor a Git bootstrap is needed at Connector or Expert startup. That mirrors the `${CLAUDE_PLUGIN_ROOT}` entry the Claude adapter already uses. Publishing remains a WorkBuddy review step. A future remote connector must use HTTPS and preserve Craft's approval/evidence boundary rather than forwarding raw user context to an untrusted service.
+[`adapters/workbuddy-connector/`](../../../adapters/workbuddy-connector/README.md) follows WorkBuddy's MCP + Skill connector structure: one MCP server, `connector-meta.json`, market icon and exactly one route Skill. It uses the compact syscall surface by default and remains the explicit Full-MCP upgrade path for administration. [`adapters/workbuddy-expert/`](../../../adapters/workbuddy-expert/README.md) is the separately uploadable, route-first Expert package: `.codebuddy-plugin/plugin.json`, a PNG avatar, one Agent, exactly one `craft-route` Skill, and the same syscall MCP dependency. Both WorkBuddy packages resolve their stdio entry through the host's plugin-root variable (`${CODEBUDDY_PLUGIN_ROOT}/bin/...`) to the dependency-free bundle shipped inside the archive, so neither a globally installed `craft-mcp` binary nor a Git bootstrap is needed at Connector or Expert startup. That mirrors the `${CLAUDE_PLUGIN_ROOT}` entry the Claude adapter already uses. Publishing remains a WorkBuddy review step. A future remote connector must use HTTPS and preserve Craft's approval/evidence boundary rather than forwarding raw user context to an untrusted service.
 
 ## Non-goals and next deployment step
 

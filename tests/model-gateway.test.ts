@@ -432,7 +432,15 @@ test("the internal host fails closed when the transport or dispatch misbehaves",
     // A dispatch that is not prepared must refuse to run.
     const second = driver.prepare({ task_id: task.id, prompt: "go", dispatch_id: "d2" }) as JsonObject;
     f.store.save(driver.dispatchKind, "d2", { ...(second.dispatch as JsonObject), status: "running" });
-    await assert.rejects(driver.execute({ dispatch_id: "d2", prompt: "go" }), /not executable/);
+    await assert.rejects(driver.execute({ dispatch_id: "d2", prompt: "go" }), /requires an explicit resume flag/);
+    const resumed = await driver.execute({ dispatch_id: "d2", prompt: "go", resume: true }) as JsonObject;
+    assert.equal(resumed.idempotent, false);
+    assert.equal((resumed.dispatch as JsonObject).resumed_from, "running");
+
+    // Any state outside the prepared/running execution boundary fails closed.
+    const third = driver.prepare({ task_id: task.id, prompt: "go", dispatch_id: "d4" }) as JsonObject;
+    f.store.save(driver.dispatchKind, "d4", { ...(third.dispatch as JsonObject), status: "paused" });
+    await assert.rejects(driver.execute({ dispatch_id: "d4", prompt: "go" }), /is not executable/);
 
     // The unconfigured transport surfaces the provider's environment variable.
     const offline = new InternalHostDriver(f.store, { providers: [openaiSpec()] });

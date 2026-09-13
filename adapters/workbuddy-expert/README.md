@@ -4,7 +4,7 @@ Upload this package only through WorkBuddy's **Expert** creation flow. It is del
 
 ## Self-contained MCP entry
 
-The archive ships the bundled, dependency-free Core MCP at `bin/craft-mcp.cjs` and points at it through the plugin root variable:
+The archive ships the bundled, dependency-free syscall MCP at `bin/craft-mcp.cjs` and points at it through the plugin root variable:
 
 ```json
 "command": "node",
@@ -13,7 +13,7 @@ The archive ships the bundled, dependency-free Core MCP at `bin/craft-mcp.cjs` a
 
 Nothing has to be installed beforehand: no globally installed `craft-mcp` on `PATH`, and no `node_modules` beside the archive. The only assumption is a `node` executable on `PATH`, which is the same assumption WorkBuddy's own bundled plugins make.
 
-The Expert declares one local stdio dependency, `craft-mcp`, the route-first Core surface. On first summon, WorkBuddy should present the connection dependency. It packages exactly one default Skill, `craft-route`, which chooses the smallest governed path; a separately configured `craft-mcp-full` remains available only for user-approved capability administration.
+The Expert declares one local stdio dependency, `craft-mcp`, the route-first syscall surface. On first summon, WorkBuddy should present the connection dependency. It packages exactly one default Skill, `craft-route`, which chooses the smallest governed path; a separately configured `craft-mcp-full` remains available only for user-approved capability administration.
 
 ## Optional: CLI and state
 

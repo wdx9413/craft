@@ -16054,19 +16054,25 @@ var InternalHostDriver = class {
     }), idempotent: false, credential: credentialStatus(provider, this.env) };
   }
   async execute(args, options = {}) {
-    const dispatch = this.store.get(this.dispatchKind, text38(args.dispatch_id, "dispatch_id"));
+    let dispatch = this.store.get(this.dispatchKind, text38(args.dispatch_id, "dispatch_id"));
     const prompt = text38(args.prompt, "prompt");
     if (digest21(prompt) !== dispatch.prompt_digest) throw new Error("Internal host prompt does not match the prepared digest");
     if (dispatch.status === "completed" || dispatch.status === "failed") {
       return { dispatch, receipt: this.store.get(this.receiptKind(), `receipt_${dispatch.id}`), idempotent: true };
     }
-    if (dispatch.status !== "prepared") throw new Error("Internal host dispatch is not executable");
+    const resume = args.resume === true;
+    if (dispatch.status === "running" && !resume) throw new Error("Internal host dispatch is running; resume requires an explicit resume flag");
+    if (dispatch.status !== "prepared" && dispatch.status !== "running") throw new Error("Internal host dispatch is not executable");
+    const resumedFrom = dispatch.status === "running" ? dispatch.status : null;
+    if (resumedFrom) {
+      dispatch = this.store.save(this.dispatchKind, String(dispatch.id), { ...payload23(dispatch), status: "prepared", resumed_at: (/* @__PURE__ */ new Date()).toISOString() });
+    }
     const provider = this.provider(dispatch.provider);
     const limits = defineLoopLimits(dispatch.limits);
     let state = beginLoop(Date.now());
     let finalMessage = null;
     let failure = null;
-    this.store.save(this.dispatchKind, String(dispatch.id), { ...payload23(dispatch), status: "running", started_at: (/* @__PURE__ */ new Date()).toISOString() });
+    dispatch = this.store.save(this.dispatchKind, String(dispatch.id), { ...payload23(dispatch), status: "running", started_at: (/* @__PURE__ */ new Date()).toISOString(), ...resumedFrom ? { resumed_from: resumedFrom } : {} });
     const messages = [{ role: "user", content: prompt }];
     try {
       while (state.status === "running") {
@@ -19895,7 +19901,7 @@ var ServiceFoundation = class {
 };
 
 // src/service.ts
-var VERSION = "0.12.2";
+var VERSION = "0.12.3";
 var CONFIDENCE = /* @__PURE__ */ new Set(["confirmed", "bounded", "unverified", "rejected"]);
 var TASK_STATUS = /* @__PURE__ */ new Set(["active", "paused", "completed", "cancelled"]);
 var VERSIONED_LIFECYCLE = /* @__PURE__ */ new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -28659,7 +28665,7 @@ async function serveMcpStdio(options) {
 // bin/craft-mcp.ts
 var flag = process.argv.indexOf("--surface");
 var requested = flag === -1 ? process.env.CRAFT_MCP_SURFACE : process.argv[flag + 1];
-var mode = requested && requested.length > 0 ? requested : "core";
+var mode = requested && requested.length > 0 ? requested : "syscall";
 serveMcpStdio({ mode, input: process.stdin, write: (line) => process.stdout.write(line) }).catch(() => {
   process.stderr.write("Craft MCP failed to start.\n");
   process.exitCode = 1;

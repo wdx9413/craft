@@ -10,7 +10,7 @@ const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 // depending on a globally installed `craft-mcp` binary being on PATH.
 const adapters = [
   { directory: "adapters/workbuddy-expert", config: ".mcp.json", bundle: "dist/plugin/craft-mcp.cjs", entry: "bin/craft-mcp.cjs", artifact: "craft-workbuddy-expert" },
-  { directory: "adapters/workbuddy-connector", config: "mcp.json", bundle: "dist/plugin/craft-mcp-full.cjs", entry: "bin/craft-mcp-full.cjs", artifact: "craft-workbuddy-connector" },
+  { directory: "adapters/workbuddy-connector", config: "mcp.json", bundle: "dist/plugin/craft-mcp.cjs", entry: "bin/craft-mcp.cjs", artifact: "craft-workbuddy-connector" },
 ];
 
 type Entry = { name: string; data: Buffer };

@@ -1,6 +1,6 @@
 # Craft
 
-> Current release: v0.12.2. Every host now follows a route-first boundary: Codex/Claude plugins, TraeWork, and the WorkBuddy Expert install exactly one default `craft-route` Skill with the compact Core MCP; `craft` and `craft-clarify` are separate opt-in packages. Craft now also ships a fetch-based model transport plus `craft doctor/run` for standalone execution. The Full MCP remains an explicit, approved advanced-governance entry point. Cloud execution, marketplace publication, and remote MCP still require a deployment adapter or platform review; they are not claimed as shipped services.
+> Current release: v0.12.3. Every host now follows a route-first boundary: Codex/Claude plugins, TraeWork, and the WorkBuddy Expert install exactly one default `craft-route` Skill with the roughly 15-tool syscall MCP; `craft` and `craft-clarify` are separate opt-in packages. Craft now also ships a fetch-based model transport plus `craft doctor/run` for bounded standalone execution. The Full MCP remains an explicit, approved advanced-governance entry point. Cloud execution, marketplace publication, and remote MCP still require a deployment adapter or platform review; they are not claimed as shipped services.
 
 [中文](README.md) | [English](README.en.md)
 
@@ -112,7 +112,7 @@ Tools use the `craft_` prefix to avoid collisions. For substantial work the Craf
 
 ## WorkBuddy
 
-`adapters/workbuddy-expert/` is a route-first WorkBuddy Expert upload package with `.codebuddy-plugin/plugin.json`, a PNG avatar, Agent definition, exactly one `craft-route` Skill, and a local Core MCP dependency. `adapters/workbuddy-connector/` is the separate full-governance Connector, also with only `craft-route`, and must not be uploaded to the Expert page. They share the same Craft state, Evidence, and Policy rather than fork capabilities. Install Craft first so the appropriate `craft-mcp` or `craft-mcp-full` command is on `PATH`; marketplace distribution additionally needs a controlled installer or remote HTTPS MCP and WorkBuddy review.
+`adapters/workbuddy-expert/` is a route-first WorkBuddy Expert upload package with `.codebuddy-plugin/plugin.json`, a PNG avatar, Agent definition, exactly one `craft-route` Skill, and a local syscall MCP dependency. `adapters/workbuddy-connector/` is the separate governance Connector, also with only `craft-route`; it can explicitly opt into Full MCP for administration and must not be uploaded to the Expert page. They share the same Craft state, Evidence, and Policy rather than fork capabilities. Install Craft first so the appropriate `craft-mcp` or `craft-mcp-full` command is on `PATH`; marketplace distribution additionally needs a controlled installer or remote HTTPS MCP and WorkBuddy review.
 
 ## Verification
 

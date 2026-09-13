@@ -1,6 +1,6 @@
 # Craft for TraeWork
 
-This is an integration package, not a TraeWork marketplace listing. It exposes Craft's route-first Core MCP by default, with an explicit Full-MCP upgrade, and small on-demand Skills without duplicating the Craft core.
+This is an integration package, not a TraeWork marketplace listing. It exposes Craft's route-first syscall MCP by default, with an explicit Full-MCP upgrade, and small on-demand Skills without duplicating the Craft core.
 
 ## Local desktop MCP
 
@@ -11,8 +11,8 @@ This is an integration package, not a TraeWork marketplace listing. It exposes C
    craft init
    ```
 
-2. In TraeWork Desktop, choose **Settings → MCP → Local → Create → Manual configuration**, then paste [`mcp.json`](mcp.json). It starts `craft-mcp`, the route-first Core surface.
-3. [`mcp-core.json`](mcp-core.json) is a backward-compatible copy of the same Core setup. Import [`mcp-full.json`](mcp-full.json) only when a user-approved administrative operation needs complete Craft compatibility.
+2. In TraeWork Desktop, choose **Settings → MCP → Local → Create → Manual configuration**, then paste [`mcp.json`](mcp.json). It starts `craft-mcp`, the route-first syscall surface.
+3. [`mcp-core.json`](mcp-core.json) is a backward-compatible named Core setup for hosts that need it. Import [`mcp-full.json`](mcp-full.json) only when a user-approved administrative operation needs complete Craft compatibility.
 
 The local stdio process can serve only desktop-local tasks. TraeWork web/cloud tasks need a separately deployed HTTPS MCP adapter; do not point cloud work at a local path or claim the local database is shared with the cloud.
 

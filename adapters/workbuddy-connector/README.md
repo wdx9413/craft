@@ -1,19 +1,19 @@
 # Craft WorkBuddy Connector
 
-This directory is a WorkBuddy **MCP + Skill** Connector submission package. It is the explicit advanced entry point: it exposes one local stdio server, `craft-mcp-full`, so complete Craft compatibility remains available through one controlled provider endpoint. It packages exactly one default Skill, `craft-route`, so the model still begins with the smallest governed route.
+This directory is a WorkBuddy **MCP + Skill** Connector submission package. It exposes one local stdio server, `craft-mcp`, with the compact syscall surface so normal work does not pay for the full registry. The Full MCP remains an explicit advanced entry point for complete compatibility and administration. It packages exactly one default Skill, `craft-route`, so the model still begins with the smallest governed route.
 
 ## Self-contained MCP entry
 
-The archive ships the bundled, dependency-free Full MCP at `bin/craft-mcp-full.cjs` and points at it through the plugin root variable:
+The archive ships the bundled, dependency-free syscall MCP at `bin/craft-mcp.cjs` and points at it through the plugin root variable:
 
 ```json
 "command": "node",
-"args": ["${CODEBUDDY_PLUGIN_ROOT}/bin/craft-mcp-full.cjs"]
+"args": ["${CODEBUDDY_PLUGIN_ROOT}/bin/craft-mcp.cjs"]
 ```
 
-Keep [`mcp.json`](mcp.json) unchanged and import/package this directory through WorkBuddy's Connector workflow. Nothing has to be installed beforehand: no globally installed `craft-mcp-full` on `PATH`, and no `node_modules` beside the archive. State uses the local `~/.craft_data` directory by default.
+Keep [`mcp.json`](mcp.json) unchanged and import/package this directory through WorkBuddy's Connector workflow. Nothing has to be installed beforehand: no globally installed `craft-mcp` on `PATH`, and no `node_modules` beside the archive. State uses the local `~/.craft_data` directory by default.
 
-Use the separate Expert package for normal route-first work; use this Connector only when the approved task truly needs the complete administrative surface.
+Use the separate Expert package for normal route-first work; use this Connector when the host needs a Connector package. Configure `craft-mcp-full` separately only when the approved task truly needs the complete administrative surface.
 
 ## Rebuilding this archive
 

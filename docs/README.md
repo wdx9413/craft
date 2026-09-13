@@ -75,6 +75,7 @@
 - [N1 验收报告（2026-09-12）](research/n1-acceptance-report-2026-09-12.md)：六项验收 40/40 与诚实边界。
 - [**v0.12.1 方案（2026-09-13）**](research/craft-v0.12.1-plan-2026-09-13.md)：syscall 工具面、模型网关、内建宿主、资产路由与跨模型可比性的完整方案与依据。
 - [**v0.12.2 方案（2026-09-13）**](research/craft-v0.12.2-plan-2026-09-13.md)：真实模型传输、`craft doctor/run` 自主闭环、版本门禁与多宿主发布同步；并列出恢复、Effect Policy、Eval Runner、知识血缘和 A2A 的后续收敛项。
+- [**v0.12.3 方案（2026-09-13）**](research/craft-v0.12.3-plan-2026-09-13.md)：syscall 低 token 默认面、显式 dispatch 恢复、多宿主同步与发布验收边界；诚实列出远程 A2A、生产级 checkpoint、真实 Eval Runner 等后续能力。
 - [自适应 Harness 研究基线](research/self-adaptive-harness-closed-loop-2026-09-08.md)：较早版本的研究记录，实施状态以当前模块说明为准。
 
 ## 当前实现参考

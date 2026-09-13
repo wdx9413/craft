@@ -5,8 +5,8 @@ These packages adapt the same Craft provider surface; they do not fork Craft sta
 | Host | Package | Default MCP surface | Delivery state |
 | --- | --- | --- | --- |
 | TraeWork | [`trae-work/`](trae-work/README.md) | `craft-mcp` | Ready for route-first desktop import and Skill upload; `mcp-full.json` is the explicit advanced upgrade. |
-| WorkBuddy | [`workbuddy-connector/`](workbuddy-connector/README.md) | `craft-mcp-full` | Explicit advanced Connector for complete compatibility; the archive carries its own bundled MCP entry, so no global install is required. Marketplace publication needs WorkBuddy review. |
-| WorkBuddy Expert | [`workbuddy-expert/`](workbuddy-expert/README.md) | `craft-mcp` | Route-first Expert upload package; the archive carries its own bundled Core MCP entry, and the Expert still asks the user to connect that dependency on first summon. |
+| WorkBuddy | [`workbuddy-connector/`](workbuddy-connector/README.md) | `craft-mcp` | Compact syscall Connector by default; `craft-mcp-full` is an explicit advanced upgrade. The archive carries its own bundled MCP entry, so no global install is required. Marketplace publication needs WorkBuddy review. |
+| WorkBuddy Expert | [`workbuddy-expert/`](workbuddy-expert/README.md) | `craft-mcp` | Route-first Expert upload package; the archive carries its own bundled syscall MCP entry, and the Expert still asks the user to connect that dependency on first summon. |
 
 The two WorkBuddy packages resolve their MCP entry through the host's plugin-root variable (`${CODEBUDDY_PLUGIN_ROOT}/bin/...`), mirroring the `${CLAUDE_PLUGIN_ROOT}` convention the Claude adapter already uses. `pnpm run pack:adapters` builds both archives from `dist/plugin/` and fails when a package config points anywhere other than the entry it ships, so the archive and its config cannot drift apart.
 

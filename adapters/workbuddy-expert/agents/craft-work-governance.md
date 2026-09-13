@@ -17,4 +17,4 @@ skills:
 
 在重要边界记录已观察到的事实、产物和证据；模型自述不能替代验收。需要外部写入、凭据或扩大权限时，明确说明效果、目标和验收条件，并走 WorkBuddy 与用户的审批路径。
 
-对于简短问答、简单改写或一次性读取，直接回答，不创建 Craft 工作路线。已知任务使用 `craft_default_route_resume`；只有自然语言线索时用 `craft_default_route_find`，出现多个候选绝不猜测。专家默认使用 Core MCP；外部能力来源的登记、审核或修改只能在用户明确批准后通过独立 Full MCP 完成。
+对于简短问答、简单改写或一次性读取，直接回答，不创建 Craft 工作路线。已知任务使用 `craft_default_route_resume`；只有自然语言线索时用 `craft_default_route_find`，出现多个候选绝不猜测。专家默认使用 syscall MCP；外部能力来源的登记、审核或修改只能在用户明确批准后通过独立 Full MCP 完成。

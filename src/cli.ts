@@ -25,6 +25,7 @@ Usage:
   craft doctor                  Check runtime, credentials, storage, and adapters
   craft version                 Print the Craft product version
   craft run --goal <text>       Run a governed standalone Agent task
+  craft run --resume <dispatch> Resume a crashed/running dispatch with the exact goal
   craft mode <name>             Switch agent, supervisor, or provider mode
   craft paths                   Print the ~/.craft_data layout
   craft source add <path>       Add and scan a capability directory
@@ -200,19 +201,24 @@ async function runStandalone(args: string[], paths: ReturnType<typeof craftPaths
   const config = await loadConfig(paths);
   if (!config) throw new Error("Craft is not initialized; run `craft init --mode agent --runtime direct-api ...` first.");
   if (config.runtime.kind !== "direct-api" || !config.runtime.provider) throw new Error("`craft run` currently requires a direct-api runtime; configure it with `craft init`.");
+  const resumeId = option(args, "--resume");
   const goal = option(args, "--goal");
-  if (!goal?.trim()) throw new Error("run requires --goal <text>");
+  if (!resumeId && !goal?.trim()) throw new Error("run requires --goal <text> or --resume <dispatch_id> with --goal");
   const provider = providerFromConfig(config.runtime.provider);
   const store = await new CraftStore(paths).open();
   const service = new CraftService(store, undefined, undefined, undefined, undefined, undefined, [], [provider], createFetchTransport());
   try {
-    const task = service.taskOpen({ title: option(args, "--title") ?? goal.slice(0, 80), goal }).task as JsonObject;
+    const existingDispatch = resumeId ? store.get("internal_dispatch", resumeId) : null;
+    const task = existingDispatch
+      ? store.get("task", String(existingDispatch.task_id))
+      : service.taskOpen({ title: option(args, "--title") ?? goal!.slice(0, 80), goal }).task as JsonObject;
     const driver = service.hostDriver("internal");
     if (!driver) throw new Error("Internal Host Driver is unavailable");
-    const prepared = driver.prepare({ task_id: task.id, prompt: goal, provider: provider.provider, tier: option(args, "--tier") ?? "standard",
+    const prompt = goal ?? String(task.goal);
+    const prepared = existingDispatch ? { dispatch: existingDispatch } : driver.prepare({ task_id: task.id, prompt, provider: provider.provider, tier: option(args, "--tier") ?? "standard",
       ...(option(args, "--max-steps") ? { limits: { max_steps: Number(option(args, "--max-steps")) } } : {}) }) as JsonObject;
     const dispatch = prepared.dispatch as JsonObject;
-    const executed = await driver.execute({ dispatch_id: dispatch.id, prompt: goal });
+    const executed = await driver.execute({ dispatch_id: dispatch.id, prompt, ...(existingDispatch ? { resume: true } : {}) });
     return { version: VERSION, task, ...executed } as JsonObject;
   } finally { store.close(); }
 }

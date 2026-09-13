@@ -19,7 +19,7 @@ function onlyServer(document: Record<string, unknown>): Record<string, unknown> 
   return servers.craft;
 }
 
-test("TraeWork adapter defaults to Core and keeps an explicit Full upgrade with portable Skills", async () => {
+test("TraeWork adapter defaults to the syscall surface and keeps an explicit Full upgrade with portable Skills", async () => {
   const routeFirst = onlyServer(await json("adapters/trae-work/mcp.json"));
   const compact = onlyServer(await json("adapters/trae-work/mcp-core.json"));
   const full = onlyServer(await json("adapters/trae-work/mcp-full.json"));
@@ -35,17 +35,17 @@ test("TraeWork adapter defaults to Core and keeps an explicit Full upgrade with 
   assert.match(await text("adapters/trae-work/README.md"), /cloud tasks need a separately deployed HTTPS MCP adapter/i);
 });
 
-test("WorkBuddy connector keeps the explicit advanced MCP with a route-first Skill", async () => {
+test("WorkBuddy connector keeps the compact MCP with a route-first Skill", async () => {
   const connector = await json("adapters/workbuddy-connector/connector-meta.json");
   const server = onlyServer(await json("adapters/workbuddy-connector/mcp.json"));
   assert.equal(connector.source, "craft-agent-harness");
   assert.equal(connector.type, "mcp");
-  assert.equal(connector.version, "0.12.2");
+  assert.equal(connector.version, "0.12.3");
   assert(Array.isArray(connector.examples_zh) && connector.examples_zh.length >= 2);
   assert(Array.isArray(connector.examples_en) && connector.examples_en.length >= 2);
   assert.equal(server.type, "stdio");
   assert.equal(server.command, "node");
-  assert.deepEqual(server.args, ["${CODEBUDDY_PLUGIN_ROOT}/bin/craft-mcp-full.cjs"]);
+  assert.deepEqual(server.args, ["${CODEBUDDY_PLUGIN_ROOT}/bin/craft-mcp.cjs"]);
   assert.equal(server.timeout, 30000);
   assert.match(await text("adapters/workbuddy-connector/skills/craft-route/SKILL.md"), /craft_default_route/);
   await assert.rejects(readFile(resolve(root, "adapters/workbuddy-connector/skills/craft/SKILL.md")), { code: "ENOENT" });
@@ -53,7 +53,7 @@ test("WorkBuddy connector keeps the explicit advanced MCP with a route-first Ski
   assert.match(await text("adapters/workbuddy-connector/README.md"), /not a claim of marketplace availability/i);
 });
 
-test("every portable host defaults to the same route-first Core and retains an explicit Full path", async () => {
+test("every portable host defaults to the same route-first syscall path and retains an explicit Full path", async () => {
   const codex = await json(".codex-plugin/plugin.json");
   const claude = await json(".claude-plugin/plugin.json");
   const rootMcp = await json(".mcp.json");
@@ -68,8 +68,8 @@ test("every portable host defaults to the same route-first Core and retains an e
   assert.equal(expertServer.command, "node");
   assert.deepEqual(expertServer.args, ["${CODEBUDDY_PLUGIN_ROOT}/bin/craft-mcp.cjs", "--surface", "syscall"]);
   assert.match(await text("skills/craft-route/SKILL.md"), /craft_default_route/);
-  assert.equal(deepseek.version, "0.12.2");
-  assert.match(await text("adapters/deepseek-harness/index.ts"), /craft-agent-harness@0\.12\.2/);
+  assert.equal(deepseek.version, "0.12.3");
+  assert.match(await text("adapters/deepseek-harness/index.ts"), /craft-agent-harness@0\.12\.3/);
   assert.match(await text("adapters/README.md"), /craft-mcp-full.*user-approved/i);
   assert.match(await text("docs/technical/modules/host-ecosystem-adapters.md"), /Codex \/ Claude \/ TraeWork \/ WorkBuddy/);
 });

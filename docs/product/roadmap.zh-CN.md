@@ -13,9 +13,9 @@
 
 ## 建设原则
 
-以 [产品架构](architecture.zh-CN.md) 的三大支柱为目标：工作与协作、执行与保障、学习与改进。**评测与实验是第三支柱内的核心模块**，不另设第四支柱。以下里程碑是规划；当前实现基线已推进到 v0.12.2。
+以 [产品架构](architecture.zh-CN.md) 的三大支柱为目标：工作与协作、执行与保障、学习与改进。**评测与实验是第三支柱内的核心模块**，不另设第四支柱。以下里程碑是规划；当前实现基线已推进到 v0.12.3。
 
-**v0.12.2：可运行产品化。** 本版补齐平台 fetch 模型传输、`craft doctor`、`craft run --goal` 与统一版本门禁，让独立 Agent 闭环可以真实启动；外部效果仍由 Host/Approval 治理。后续重点是 checkpoint 恢复、Effect Policy-as-code、真实 Eval Runner、知识 Bundle 血缘和 A2A transport。
+**v0.12.3：低 token 默认面与可恢复自主入口。** 默认 MCP 从 Core 收缩为固定 syscall 面（约 15 个工具），按 `resource + operation` 动态寻址；WorkBuddy、TraeWork、Expert 和本地 CLI 统一采用该边界，Full MCP 仍是显式的管理入口。本版增加 `craft run --resume` 对中断/运行中 dispatch 的显式重放保护，并同步所有接入层版本与发布包。真实容器隔离、远程 A2A transport、生产级 checkpoint、真实业务 Eval Runner 和云端服务仍属于后续部署能力，不在本版虚假宣称已完成。
 
 **两步定位**：短期做**跨宿主治理插件层**——以 MCP/插件形式接入 Codex CLI、Claude Code、DeepSeek Harness 等宿主，统一能力发现、授权门禁、证据链与评测门禁，执行留在宿主内；长期做**自主 Agent 平台**——自有对话循环、宿主调度与评测驱动的自我改进。Provider 是当前主线，Supervisor/Agent 是长期形态；本路线图中 v0.11.x 的能力全部属于两步共用的内核。
 
@@ -95,7 +95,7 @@
 
 **v0.11.60：WorkBuddy Expert 上传包。** `workbuddy-expert` 以 WorkBuddy 的 `.codebuddy-plugin/plugin.json`、PNG 头像、单个 Agent、Skill 与内置 MCP 依赖表达 Craft 的工作治理专家；它和 Connector 包分开，避免把 `connector-meta.json` 错传到 Expert 配置入口。Agent 只通过高层 Craft 路由管理可续接工作。
 
-**v0.11.61：Route-first 多宿主入口。** 新增最小 `craft-route` Skill，先区分可直接完成、必须澄清、可恢复任务与需要创建路线的复杂工作，再只加载路由选中的能力。Codex/Claude 插件既有 Core 默认面保持不变；TraeWork 的默认 `mcp.json`、WorkBuddy Expert 都切到 `craft-mcp`，而 WorkBuddy Connector 继续作为显式 Full-MCP 高级治理入口。所有方式共享同一 Task、Evidence、Policy、Workflow 和 Capability Connector 内核；完整工具面只在用户批准的来源/连接器管理场景使用。详见 [TraeWork / WorkBuddy 宿主适配](../technical/modules/host-ecosystem-adapters.md)。
+**v0.11.61：Route-first 多宿主入口。** 新增最小 `craft-route` Skill，先区分可直接完成、必须澄清、可恢复任务与需要创建路线的复杂工作，再只加载路由选中的能力。Codex/Claude 插件、TraeWork、WorkBuddy Expert 和 Connector 统一使用小型 syscall 默认面；完整工具面只在用户批准的来源/连接器管理场景使用。所有方式共享同一 Task、Evidence、Policy、Workflow 和 Capability Connector 内核。详见 [TraeWork / WorkBuddy 宿主适配](../technical/modules/host-ecosystem-adapters.md)。
 
 **v0.11.62：单 Skill 默认面。** 吸收强模型不应被重叠提示词污染的原则，所有默认入口只加载 `craft-route`；其内置最多三项、只问决策性问题的最小澄清规则。`craft` 与 `craft-clarify` 被保留为独立 opt-in 包，WorkBuddy Expert 与 Connector 均不再携带重复的 Craft Skill。Core/Full MCP 能力与共享状态保持不变。详见 [TraeWork / WorkBuddy 宿主适配](../technical/modules/host-ecosystem-adapters.md)。
 

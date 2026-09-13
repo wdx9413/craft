@@ -1,6 +1,6 @@
 # Internal Host：Craft 自己跑循环
 
-> 状态：v0.12.2 实现内建宿主驱动与六道熔断，并提供基于平台 fetch 的模型传输；默认仍需用户配置 API Key。
+> 状态：v0.12.3 实现内建宿主驱动、六道熔断与显式 dispatch 恢复入口，并提供基于平台 fetch 的模型传输；默认仍需用户配置 API Key。
 
 ## 为什么是"第三个 Host Driver"
 

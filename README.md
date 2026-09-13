@@ -1,6 +1,6 @@
 # Craft
 
-> 当前发布版本：v0.12.2。所有宿主接入统一采用“Route-first”：Codex/Claude 插件、TraeWork、WorkBuddy Expert 默认只安装一个轻量 `craft-route` Skill，并连接精简 Core MCP；`craft` 与 `craft-clarify` 是单独的可选包。Craft 现在也内置 fetch 模型传输与 `craft doctor/run` 独立运行入口；完整 MCP 仍作为显式、经批准的高级治理入口保留。云端运行、市场审核和远程 MCP 仍须由部署 Adapter 或平台审核完成，不能被当作已上线服务。
+> 当前发布版本：v0.12.3。所有宿主接入统一采用“Route-first”：Codex/Claude 插件、TraeWork、WorkBuddy Expert 默认只安装一个轻量 `craft-route` Skill，并连接约 15 个工具的 syscall MCP；`craft` 与 `craft-clarify` 是单独的可选包。Craft 现在也内置 fetch 模型传输与 `craft doctor/run` 独立运行入口；完整 MCP 仍作为显式、经批准的高级治理入口保留。云端运行、市场审核和远程 MCP 仍须由部署 Adapter 或平台审核完成，不能被当作已上线服务。
 
 [中文](README.md) | [English](README.en.md)
 
@@ -113,7 +113,7 @@ pnpm test
 
 1. Provider（当前主线，跨宿主治理插件层）：Craft 通过 MCP/插件接入 Codex CLI、Claude Code、DeepSeek Harness 等宿主，提供能力发现、任务延续、Workflow、证据、授权与评测门禁；执行仍发生在宿主内，Craft 只治理、不越权。
 2. Supervisor（规划形态）：未来由 Craft 调度 Codex、Claude Code 或其他 Host；当前版本已有可并发领取、依赖阻断和失败换路的编排状态机与 Host Run 生命周期，但还没有自动通用 Host Driver。
-3. Agent（规划形态）：未来由 Craft 直接承载对话和模型工具循环；当前版本只提供配置与持久化底座，尚不能替代 Codex 或 Claude Code。
+3. Agent：当前版本已提供受限的独立模型循环与 Provider 传输；它仍不是 Codex/Claude 的完全替代品，写入、外部效果和高风险操作继续由 Host/Policy/Approval 控制。
 
 三者共用同一内核，Provider 阶段积累的授权、证据与评测数据是后续自主化的基础。
 
@@ -141,7 +141,7 @@ pnpm test
 
 ## 接入 WorkBuddy
 
-`adapters/workbuddy-expert/` 是 WorkBuddy Expert 上传包，包含 `.codebuddy-plugin/plugin.json`、PNG 头像、Agent 定义、唯一的 `craft-route` Skill 及本地 Core MCP 依赖；默认只开放 `craft-mcp`。`adapters/workbuddy-connector/` 是单独的完整治理 Connector，也只携带 `craft-route`，适用于用户明确批准的来源/连接器管理，不能上传到“专家”页面。两者共享同一 Craft 数据、Evidence 和 Policy，不会产生能力分叉。Expert 包可用于本地联调或提交 WorkBuddy 审核，但不代表已在其市场发布。使用前先安装 Craft，使相应的 `craft-mcp` 或 `craft-mcp-full` 在 `PATH` 中；市场化分发前还需要提供受控安装包或远程 HTTPS MCP，并通过 WorkBuddy 审核。
+`adapters/workbuddy-expert/` 是 WorkBuddy Expert 上传包，包含 `.codebuddy-plugin/plugin.json`、PNG 头像、Agent 定义、唯一的 `craft-route` Skill 及本地 syscall MCP 依赖；默认只开放约 15 个路由工具。`adapters/workbuddy-connector/` 是单独的完整治理 Connector，仍只携带 `craft-route`，需要时可显式升级到 Full MCP，不能上传到“专家”页面。两者共享同一 Craft 数据、Evidence 和 Policy，不会产生能力分叉。Expert 包可用于本地联调或提交 WorkBuddy 审核，但不代表已在其市场发布。使用前先安装 Craft，使相应的 `craft-mcp` 或 `craft-mcp-full` 在 `PATH` 中；市场化分发前还需要提供受控安装包或远程 HTTPS MCP，并通过 WorkBuddy 审核。
 
 ## 通用 MCP
 
