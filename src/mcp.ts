@@ -4,11 +4,11 @@ import { SYSCALL_PASSTHROUGH, SYSCALL_VERBS, buildRegistry, catalogOf, describeE
 
 type Tool = { name: string; description: string; inputSchema: JsonObject; annotations?: JsonObject };
 const schemaFor = (name: string): JsonObject => {
-  if (["scan", "enabled", "allow_execution", "allow_external_write", "require_held_out", "require_outcome_passed", "retryable", "requires_external_effect", "supports_pause_resume", "supports_evidence_receipts", "generated_code", "requires_credential", "has_compensation", "approved", "start_trial", "untrusted_input", "confirmed_original_runner_stopped", "sanitized", "active", "acceptance_required", "trusted", "unattended", "reobserve_required", "compensation_or_handoff", "require_governance"].includes(name)) return { type: "boolean" };
+  if (["scan", "enabled", "allow_execution", "allow_external_write", "require_held_out", "require_outcome_passed", "retryable", "requires_external_effect", "supports_pause_resume", "supports_evidence_receipts", "generated_code", "requires_credential", "has_compensation", "approved", "start_trial", "untrusted_input", "confirmed_original_runner_stopped", "sanitized", "active", "acceptance_required", "trusted", "unattended", "reobserve_required", "compensation_or_handoff", "require_governance", "accepted", "stale", "crash_recovery"].includes(name)) return { type: "boolean" };
   if (["limit", "version", "capacity", "max_concurrency", "size_bytes", "subject_version", "expected_version", "max_candidates",
     "suite_version", "configuration_version", "harness_configuration_version", "target_version", "profile_version",
     "grader_version", "policy_version", "signoff_policy_version", "lease_ttl_seconds", "ttl_seconds", "trials_per_case", "window_size", "max_attempts", "min_trials", "harness_version", "ir_version", "runtime_adapter_version", "agreed", "total", "expected_state_revision", "max_chars", "max_items", "timeout_ms", "output_limit", "max_turns", "after_sequence", "context_profile_version", "activation_profile_version", "budget_account_version", "contract_version", "conformance_version"].includes(name)) return { type: "integer" };
-  if (["score", "value", "threshold", "confidence", "min_pass_rate_delta", "max_cost_regression_ratio", "max_duration_regression_ratio", "max_budget_ratio", "baseline", "candidate", "minimum_agreement", "max_budget_usd"].includes(name)) return { type: "number" };
+  if (["score", "value", "threshold", "confidence", "min_pass_rate_delta", "max_cost_regression_ratio", "max_duration_regression_ratio", "max_budget_ratio", "baseline", "candidate", "minimum_agreement", "max_budget_usd", "input_per_million", "output_per_million"].includes(name)) return { type: "number" };
   if (["input", "inputs", "metadata", "policy", "dimensions", "environment", "budget", "data", "scores",
     "costs", "metrics", "configuration", "receipt_requirements", "execution", "rules", "authorization_requests", "notification_refs", "cost_hint", "design_axes", "report",
     "limits", "resources", "actual", "actual_resources", "estimated_resources", "observation", "trial_budget", "policy_fingerprints", "structured_data", "field_sources",
@@ -793,6 +793,28 @@ export const TOOLS: Tool[] = [
   tool("craft_long_task_get", "Read one long-task checkpoint and its current state.", ["checkpoint_id"], true),
   tool("craft_long_task_list", "List durable long-task checkpoints for the Workbench recovery view.", [], true, ["session_id", "limit"]),
   tool("craft_long_task_tick", "Run one bounded background-worker tick for expired or externally woken checkpoints.", [], false, ["now"]),
+  tool("craft_context_manifest_save", "Pin one unified Context Manifest joining knowledge, capabilities, Workflow, model, Host and acceptance references.", ["project_id", "task_id"], false, ["manifest_id", "knowledge_refs", "capability_refs", "workflow_refs", "excluded_refs", "model", "host", "acceptance_ref", "selection_rationale"]),
+  tool("craft_context_manifest_get", "Read one digest-pinned unified Context Manifest.", ["manifest_id"], true),
+  tool("craft_context_manifest_audit", "Revalidate a Context Manifest and fail closed on digest drift.", ["manifest_id"], false, ["expected_digest"]),
+  tool("craft_replay_runner_prepare", "Prepare a revalidation-gated replay run from a terminal Trace; it never replays stale actions.", ["trace_id", "approval_ref", "workspace_digest"], false, ["replay_id"]),
+  tool("craft_replay_runner_execute", "Execute an approved replay through the registered runtime executor; without an executor it records a dry-run receipt.", ["replay_id"], false, ["approval_ref"]),
+  tool("craft_replay_runner_get", "Read a controlled replay run and its step receipts.", ["replay_id"], true),
+  tool("craft_local_service_configure", "Configure the persistent local Craft runtime service for tray, cron, or startup integration.", [], false, ["service_id", "schedule", "startup", "notification", "crash_recovery"]),
+  tool("craft_local_service_start", "Start the persistent local Craft runtime service.", [], false, ["service_id"]),
+  tool("craft_local_service_stop", "Stop the persistent local Craft runtime service.", [], false, ["service_id"]),
+  tool("craft_local_service_tick", "Run one bounded local runtime tick and dispatch pending wake records.", [], false, ["service_id", "now"]),
+  tool("craft_local_service_get", "Read local runtime service state.", [], true, ["service_id"]),
+  tool("craft_project_bundle_export", "Create a portable digest-verified Project Bundle for backup, migration and cross-host handoff.", ["project_id"], false, ["bundle_id", "limit"]),
+  tool("craft_project_bundle_verify", "Verify a stored Project Bundle without changing project data.", ["bundle_id"], true),
+  tool("craft_feedback_learning_record", "Record a scoped user correction or acceptance signal without auto-publishing experience.", ["action", "diff_digest", "reason"], false, ["signal_id", "scope", "project_id", "task_id", "outcome_id", "accepted"]),
+  tool("craft_feedback_learning_resolve", "Resolve whether a feedback signal is reusable for the current project and optionally mark it stale.", ["signal_id"], false, ["project_id", "stale"]),
+  tool("craft_domain_evaluator_save", "Register a lightweight domain evaluator with explicit metric rules.", ["domain", "name", "rules"], false, ["evaluator_id", "description"]),
+  tool("craft_domain_evaluator_evaluate", "Evaluate observed domain metrics and return an evidence digest.", ["evaluator_id", "metrics"], true),
+  tool("craft_handoff_manifest_create", "Create a host-neutral handoff manifest preserving context, permissions, artifacts, evidence and outcome references.", ["task_id", "context_manifest_id", "host"], false, ["handoff_id", "session_id", "model", "allowed_effects", "artifact_ids", "evidence_ids", "outcome_id"]),
+  tool("craft_handoff_manifest_get", "Read a host-neutral handoff manifest.", ["handoff_id"], true),
+  tool("craft_cost_price_save", "Save a provider/model price snapshot used for real cost attribution.", ["provider", "model", "input_per_million", "output_per_million"], false, ["price_id", "effective_at"]),
+  tool("craft_cost_usage_record", "Record token usage against a provider price snapshot and attribute actual cost.", ["provider", "model"], false, ["usage_id", "project_id", "task_id", "input_tokens", "output_tokens"]),
+  tool("craft_cost_ledger_report", "Report provider cost, input tokens and output tokens by project.", [], true, ["project_id"]),
 ];
 
 const CORE_TOOL_NAMES = new Set(["craft_info", "craft_source_list", "craft_capability_search", "craft_capability_get", "craft_semantic_status", "craft_execution_policy_decide",
@@ -1287,6 +1309,28 @@ export class McpServer {
       craft_long_task_get: (a) => service.longTaskGet(a),
       craft_long_task_list: (a) => service.longTaskList(a),
       craft_long_task_tick: (a) => service.longTaskTick(a),
+      craft_context_manifest_save: (a) => service.contextManifestSave(a),
+      craft_context_manifest_get: (a) => service.contextManifestGet(a),
+      craft_context_manifest_audit: (a) => service.contextManifestAudit(a),
+      craft_replay_runner_prepare: (a) => service.replayRunnerPrepare(a),
+      craft_replay_runner_execute: (a) => service.replayRunnerExecute(a),
+      craft_replay_runner_get: (a) => service.replayRunnerGet(a),
+      craft_local_service_configure: (a) => service.localRuntimeServiceConfigure(a),
+      craft_local_service_start: (a) => service.localRuntimeServiceStart(a),
+      craft_local_service_stop: (a) => service.localRuntimeServiceStop(a),
+      craft_local_service_tick: (a) => service.localRuntimeServiceTick(a),
+      craft_local_service_get: (a) => service.localRuntimeServiceGet(a),
+      craft_project_bundle_export: (a) => service.projectBundleExport(a),
+      craft_project_bundle_verify: (a) => service.projectBundleVerify(a),
+      craft_feedback_learning_record: (a) => service.feedbackLearningRecord(a),
+      craft_feedback_learning_resolve: (a) => service.feedbackLearningResolve(a),
+      craft_domain_evaluator_save: (a) => service.domainEvaluatorSave(a),
+      craft_domain_evaluator_evaluate: (a) => service.domainEvaluatorEvaluate(a),
+      craft_handoff_manifest_create: (a) => service.handoffManifestCreate(a),
+      craft_handoff_manifest_get: (a) => service.handoffManifestGet(a),
+      craft_cost_price_save: (a) => service.costPriceSave(a),
+      craft_cost_usage_record: (a) => service.costUsageRecord(a),
+      craft_cost_ledger_report: (a) => service.costLedgerReport(a),
     };
   }
 

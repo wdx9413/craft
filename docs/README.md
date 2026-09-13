@@ -64,6 +64,7 @@
 - [Project Brain 与 Work Session（v0.12.10）](technical/modules/project-brain-work-session.zh-CN.md)：把目标、资料、决策、任务、成果和可复核上下文固定到项目。
 - [Workbench Experience（v0.12.10）](technical/modules/workbench-experience.zh-CN.md)：Trace、成果、Evidence 和下一步的只读体验投影。
 - [Long Task Worker（v0.12.10）](technical/modules/long-task-worker.zh-CN.md)：释放进程、事件唤醒、重新验证和新 Host 派发。
+- [Continuous Work Runtime（v0.12.11）](technical/modules/v01211-continuous-runtime.zh-CN.md)：统一 Context Manifest、受控 Replay、本地 Runtime Service、Project Bundle、Handoff、反馈、领域评测和成本归因。
 - [当前能力矩阵](technical/current-capability-matrix.md)：区分已实现、本地实现、需要 Adapter 和尚未开始。
 - [v0.12.4 Platform Runtime](technical/modules/platform-runtime-v0124.md)：自主运行、Checkpoint/Resume、能力生命周期、记忆整合、远程互操作和观测导出契约。
 - [v0.12.6 通用意图与验收闭环](research/craft-v0.12.6-plan-2026-09-13.md)：统一 GUI、CLI、插件和专家入口的 Task/Acceptance Contract，并将覆盖率作为可插拔验收器。

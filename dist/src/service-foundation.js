@@ -90,6 +90,7 @@ import { ProjectBrainKernel } from "./project-brain.js";
 import { WorkSessionKernel } from "./work-session.js";
 import { WorkbenchExperienceKernel } from "./workbench-experience.js";
 import { LongTaskWorkerKernel } from "./long-task-worker.js";
+import { ContextPlaneKernel, ReplayRunnerKernel, LocalRuntimeServiceKernel, ProjectBundleKernel, FeedbackLearningKernel, DomainEvaluatorKernel, HandoffManifestKernel, CostLedgerKernel } from "./v01211-runtime.js";
 /**
  * Stable composition root for the service. Domain behavior stays in focused
  * kernels; CraftService is the backwards-compatible API facade.
@@ -188,6 +189,14 @@ export class ServiceFoundation {
     workSessions;
     workbenchExperience;
     longTaskWorker;
+    contextPlane;
+    replayRunner;
+    localRuntimeService;
+    projectBundles;
+    feedbackLearning;
+    domainEvaluators;
+    handoffManifests;
+    costLedger;
     constructor(store, semanticProvider, isolatedAdapter = new LocalIsolatedAdapter(), dockerSandbox = new DockerSandboxAdapter(), egressBroker = new TrustedEgressBroker(), hostOwnerId, hostProfiles, modelProviders, modelTransport) {
         this.store = store;
         this.catalog = new Catalog(store, semanticProvider);
@@ -289,6 +298,14 @@ export class ServiceFoundation {
         this.workSessions = new WorkSessionKernel(store, this.projectBrain);
         this.workbenchExperience = new WorkbenchExperienceKernel(store);
         this.longTaskWorker = new LongTaskWorkerKernel(store);
+        this.contextPlane = new ContextPlaneKernel(store);
+        this.replayRunner = new ReplayRunnerKernel(store);
+        this.localRuntimeService = new LocalRuntimeServiceKernel(store);
+        this.projectBundles = new ProjectBundleKernel(store);
+        this.feedbackLearning = new FeedbackLearningKernel(store);
+        this.domainEvaluators = new DomainEvaluatorKernel(store);
+        this.handoffManifests = new HandoffManifestKernel(store);
+        this.costLedger = new CostLedgerKernel(store);
         this.hostRuns = new HostRunKernel(store, [...this.hostDrivers.values()], hostOwnerId, (run, receipt) => this.finalizeWorkLaunch(run, receipt), this.trace);
     }
 }

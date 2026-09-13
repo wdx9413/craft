@@ -27,7 +27,7 @@ import { dockerRequestDigest } from "./docker-sandbox.ts";
 import { egressRequestDigest } from "./egress.ts";
 import { ServiceFoundation } from "./service-foundation.ts";
 
-export const VERSION = "0.12.10";
+export const VERSION = "0.12.11";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -2944,6 +2944,28 @@ export class CraftService extends ServiceFoundation {
   projectBrainMaterialBind(args: JsonObject): JsonObject { return this.projectBrain.materialBind(args); }
   projectBrainOutcomeRecord(args: JsonObject): JsonObject { return this.projectBrain.outcomeRecord(args); }
   projectBrainExperienceRecord(args: JsonObject): JsonObject { return this.projectBrain.experienceRecord(args); }
+  contextManifestSave(args: JsonObject): JsonObject { return this.contextPlane.save(args); }
+  contextManifestGet(args: JsonObject): JsonObject { return this.contextPlane.get(args); }
+  contextManifestAudit(args: JsonObject): JsonObject { return this.contextPlane.audit(args); }
+  replayRunnerPrepare(args: JsonObject): JsonObject { return this.replayRunner.prepare(args); }
+  async replayRunnerExecute(args: JsonObject): Promise<JsonObject> { return this.replayRunner.execute(args); }
+  replayRunnerGet(args: JsonObject): JsonObject { return this.replayRunner.get(args); }
+  localRuntimeServiceConfigure(args: JsonObject): JsonObject { return this.localRuntimeService.configure(args); }
+  localRuntimeServiceStart(args: JsonObject = {}): JsonObject { return this.localRuntimeService.start(args); }
+  localRuntimeServiceStop(args: JsonObject = {}): JsonObject { return this.localRuntimeService.stop(args); }
+  localRuntimeServiceTick(args: JsonObject = {}): JsonObject { return this.localRuntimeService.tick(args); }
+  localRuntimeServiceGet(args: JsonObject = {}): JsonObject { return this.localRuntimeService.get(args); }
+  projectBundleExport(args: JsonObject): JsonObject { return this.projectBundles.export(args); }
+  projectBundleVerify(args: JsonObject): JsonObject { return this.projectBundles.verify(args); }
+  feedbackLearningRecord(args: JsonObject): JsonObject { return this.feedbackLearning.record(args); }
+  feedbackLearningResolve(args: JsonObject): JsonObject { return this.feedbackLearning.resolve(args); }
+  domainEvaluatorSave(args: JsonObject): JsonObject { return this.domainEvaluators.save(args); }
+  domainEvaluatorEvaluate(args: JsonObject): JsonObject { return this.domainEvaluators.evaluate(args); }
+  handoffManifestCreate(args: JsonObject): JsonObject { return this.handoffManifests.create(args); }
+  handoffManifestGet(args: JsonObject): JsonObject { return this.handoffManifests.get(args); }
+  costPriceSave(args: JsonObject): JsonObject { return this.costLedger.priceSave(args); }
+  costUsageRecord(args: JsonObject): JsonObject { return this.costLedger.usageRecord(args); }
+  costLedgerReport(args: JsonObject = {}): JsonObject { return this.costLedger.report(args); }
   workSessionPrepare(args: JsonObject): JsonObject { return this.workSessions.prepare(args); }
   workSessionGet(args: JsonObject): JsonObject { return this.workSessions.get(args); }
   workSessionRefresh(args: JsonObject): JsonObject { return this.workSessions.refresh(args); }

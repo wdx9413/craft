@@ -92,6 +92,7 @@ import { ProjectBrainKernel } from "./project-brain.ts";
 import { WorkSessionKernel } from "./work-session.ts";
 import { WorkbenchExperienceKernel } from "./workbench-experience.ts";
 import { LongTaskWorkerKernel } from "./long-task-worker.ts";
+import { ContextPlaneKernel, ReplayRunnerKernel, LocalRuntimeServiceKernel, ProjectBundleKernel, FeedbackLearningKernel, DomainEvaluatorKernel, HandoffManifestKernel, CostLedgerKernel } from "./v01211-runtime.ts";
 
 /**
  * Stable composition root for the service. Domain behavior stays in focused
@@ -192,6 +193,14 @@ export abstract class ServiceFoundation {
   readonly workSessions: WorkSessionKernel;
   readonly workbenchExperience: WorkbenchExperienceKernel;
   readonly longTaskWorker: LongTaskWorkerKernel;
+  readonly contextPlane: ContextPlaneKernel;
+  readonly replayRunner: ReplayRunnerKernel;
+  readonly localRuntimeService: LocalRuntimeServiceKernel;
+  readonly projectBundles: ProjectBundleKernel;
+  readonly feedbackLearning: FeedbackLearningKernel;
+  readonly domainEvaluators: DomainEvaluatorKernel;
+  readonly handoffManifests: HandoffManifestKernel;
+  readonly costLedger: CostLedgerKernel;
 
   constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter = new LocalIsolatedAdapter(),
     dockerSandbox = new DockerSandboxAdapter(), egressBroker = new TrustedEgressBroker(), hostOwnerId?: string,
@@ -280,6 +289,14 @@ export abstract class ServiceFoundation {
     this.workSessions = new WorkSessionKernel(store, this.projectBrain);
     this.workbenchExperience = new WorkbenchExperienceKernel(store);
     this.longTaskWorker = new LongTaskWorkerKernel(store);
+    this.contextPlane = new ContextPlaneKernel(store);
+    this.replayRunner = new ReplayRunnerKernel(store);
+    this.localRuntimeService = new LocalRuntimeServiceKernel(store);
+    this.projectBundles = new ProjectBundleKernel(store);
+    this.feedbackLearning = new FeedbackLearningKernel(store);
+    this.domainEvaluators = new DomainEvaluatorKernel(store);
+    this.handoffManifests = new HandoffManifestKernel(store);
+    this.costLedger = new CostLedgerKernel(store);
     this.hostRuns = new HostRunKernel(store, [...this.hostDrivers.values()], hostOwnerId,
       (run, receipt) => this.finalizeWorkLaunch(run, receipt), this.trace);
   }

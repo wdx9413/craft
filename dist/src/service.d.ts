@@ -1,7 +1,7 @@
 import { CraftStore, type JsonObject } from "./store.ts";
 import { type EmbeddingProvider } from "./semantic.ts";
 import { ServiceFoundation } from "./service-foundation.ts";
-export declare const VERSION = "0.12.10";
+export declare const VERSION = "0.12.11";
 export declare class CraftService extends ServiceFoundation {
     constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter?: unknown, dockerSandbox?: unknown, egressBroker?: unknown, hostOwnerId?: string, hostProfiles?: readonly import("./host-registry.ts").HostProfile[], modelProviders?: readonly import("./model-gateway.ts").ModelProviderSpec[], modelTransport?: import("./model-gateway.ts").ModelTransport);
     /**
@@ -536,6 +536,28 @@ export declare class CraftService extends ServiceFoundation {
     projectBrainMaterialBind(args: JsonObject): JsonObject;
     projectBrainOutcomeRecord(args: JsonObject): JsonObject;
     projectBrainExperienceRecord(args: JsonObject): JsonObject;
+    contextManifestSave(args: JsonObject): JsonObject;
+    contextManifestGet(args: JsonObject): JsonObject;
+    contextManifestAudit(args: JsonObject): JsonObject;
+    replayRunnerPrepare(args: JsonObject): JsonObject;
+    replayRunnerExecute(args: JsonObject): Promise<JsonObject>;
+    replayRunnerGet(args: JsonObject): JsonObject;
+    localRuntimeServiceConfigure(args: JsonObject): JsonObject;
+    localRuntimeServiceStart(args?: JsonObject): JsonObject;
+    localRuntimeServiceStop(args?: JsonObject): JsonObject;
+    localRuntimeServiceTick(args?: JsonObject): JsonObject;
+    localRuntimeServiceGet(args?: JsonObject): JsonObject;
+    projectBundleExport(args: JsonObject): JsonObject;
+    projectBundleVerify(args: JsonObject): JsonObject;
+    feedbackLearningRecord(args: JsonObject): JsonObject;
+    feedbackLearningResolve(args: JsonObject): JsonObject;
+    domainEvaluatorSave(args: JsonObject): JsonObject;
+    domainEvaluatorEvaluate(args: JsonObject): JsonObject;
+    handoffManifestCreate(args: JsonObject): JsonObject;
+    handoffManifestGet(args: JsonObject): JsonObject;
+    costPriceSave(args: JsonObject): JsonObject;
+    costUsageRecord(args: JsonObject): JsonObject;
+    costLedgerReport(args?: JsonObject): JsonObject;
     workSessionPrepare(args: JsonObject): JsonObject;
     workSessionGet(args: JsonObject): JsonObject;
     workSessionRefresh(args: JsonObject): JsonObject;

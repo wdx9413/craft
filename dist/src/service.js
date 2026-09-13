@@ -25,7 +25,7 @@ import { decideExecution } from "./execution-policy.js";
 import { dockerRequestDigest } from "./docker-sandbox.js";
 import { egressRequestDigest } from "./egress.js";
 import { ServiceFoundation } from "./service-foundation.js";
-export const VERSION = "0.12.10";
+export const VERSION = "0.12.11";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -3728,6 +3728,28 @@ export class CraftService extends ServiceFoundation {
     projectBrainMaterialBind(args) { return this.projectBrain.materialBind(args); }
     projectBrainOutcomeRecord(args) { return this.projectBrain.outcomeRecord(args); }
     projectBrainExperienceRecord(args) { return this.projectBrain.experienceRecord(args); }
+    contextManifestSave(args) { return this.contextPlane.save(args); }
+    contextManifestGet(args) { return this.contextPlane.get(args); }
+    contextManifestAudit(args) { return this.contextPlane.audit(args); }
+    replayRunnerPrepare(args) { return this.replayRunner.prepare(args); }
+    async replayRunnerExecute(args) { return this.replayRunner.execute(args); }
+    replayRunnerGet(args) { return this.replayRunner.get(args); }
+    localRuntimeServiceConfigure(args) { return this.localRuntimeService.configure(args); }
+    localRuntimeServiceStart(args = {}) { return this.localRuntimeService.start(args); }
+    localRuntimeServiceStop(args = {}) { return this.localRuntimeService.stop(args); }
+    localRuntimeServiceTick(args = {}) { return this.localRuntimeService.tick(args); }
+    localRuntimeServiceGet(args = {}) { return this.localRuntimeService.get(args); }
+    projectBundleExport(args) { return this.projectBundles.export(args); }
+    projectBundleVerify(args) { return this.projectBundles.verify(args); }
+    feedbackLearningRecord(args) { return this.feedbackLearning.record(args); }
+    feedbackLearningResolve(args) { return this.feedbackLearning.resolve(args); }
+    domainEvaluatorSave(args) { return this.domainEvaluators.save(args); }
+    domainEvaluatorEvaluate(args) { return this.domainEvaluators.evaluate(args); }
+    handoffManifestCreate(args) { return this.handoffManifests.create(args); }
+    handoffManifestGet(args) { return this.handoffManifests.get(args); }
+    costPriceSave(args) { return this.costLedger.priceSave(args); }
+    costUsageRecord(args) { return this.costLedger.usageRecord(args); }
+    costLedgerReport(args = {}) { return this.costLedger.report(args); }
     workSessionPrepare(args) { return this.workSessions.prepare(args); }
     workSessionGet(args) { return this.workSessions.get(args); }
     workSessionRefresh(args) { return this.workSessions.refresh(args); }

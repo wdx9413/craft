@@ -13,11 +13,11 @@
 
 ## 建设原则
 
-以 [产品架构](architecture.zh-CN.md) 的三大支柱为目标：工作与协作、执行与保障、学习与改进。**评测与实验是第三支柱内的核心模块**，不另设第四支柱。当前实现基线已推进到 v0.12.10。
+以 [产品架构](architecture.zh-CN.md) 的三大支柱为目标：工作与协作、执行与保障、学习与改进。**评测与实验是第三支柱内的核心模块**，不另设第四支柱。当前实现基线已推进到 v0.12.11。
 
-**v0.12.10：Project Brain 与可恢复工作系统。** 将项目目标、决策、资料、结果和经验收敛为 Project Brain；用 Work Session 统一知识、能力、Workflow、模型与 Host 的选择和血缘；Workbench 提供任务—成果—证据—Trace 的只读体验投影与回放计划；长任务采用“释放进程—外部等待—唤醒—重新验证—新 Host 派发”的持久协议。旧数据保持原记录不迁移覆盖，知识和能力仍只按摘要/版本引用。真实跨设备调度、远程对象存储、生产级通知与 OS 沙箱继续由部署 Adapter 承担。
+**v0.12.11：连续工作运行时。** 在 Project Brain 与 Work Session 之上增加统一 Context Manifest、可控 Replay Runner、本地持续运行服务状态、Project Bundle、跨宿主 Handoff、反馈学习信号、领域 Evaluator 与真实成本账本。旧数据保持原记录不迁移覆盖，知识和能力仍只按摘要/版本引用；系统级调度、远程对象存储、生产级通知与 OS 沙箱继续由部署 Adapter 承担。
 
-本版同时补齐运行时垂直切片：CLI `run` 会创建/恢复 Brain 与 Session；默认 Internal Host 只加载五个受限 syscall；Workbench 暴露 Brain、Experience、Trace 和 checkpoint 投影；MCP Registry 与 A2A 任务操作以摘要化 HTTPS Adapter 接入；Long Task Worker 提供有界 tick；Dispatch 绑定 Session 版本和 context digest。实现细节与边界见 [v0.12.10 产品运行时](../technical/modules/v01210-product-runtime.zh-CN.md) 和 [当前能力矩阵](../technical/current-capability-matrix.md)。
+本版同时补齐连续工作垂直切片：Context Manifest 固定知识、能力、Workflow、模型、Host 和验收引用；Replay 只允许在 Trace、工作区和审批摘要未漂移时执行；本地 Runtime Service 可由托盘、cron 或系统服务调用 tick；Project Bundle 与 Handoff 保留可迁移引用；反馈和成本可以按项目归因。实现细节与边界见 [当前能力矩阵](../technical/current-capability-matrix.md)。
 
 **v0.12.8：Runtime Truth Layer。** 将模型循环、Tool Call、会话压缩、结构化工作笔记、跨进程 correlation 和 OTLP 映射收敛为可审计运行时事实；它为 v0.12.10 的 Project Brain、Workbench 投影和长任务恢复提供统一引用。OS 沙箱、生产 A2A Transport、官方 Registry 同步和组织级加密同步仍由部署 Adapter 承担。
 
