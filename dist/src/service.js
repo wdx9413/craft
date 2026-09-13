@@ -25,7 +25,7 @@ import { decideExecution } from "./execution-policy.js";
 import { dockerRequestDigest } from "./docker-sandbox.js";
 import { egressRequestDigest } from "./egress.js";
 import { ServiceFoundation } from "./service-foundation.js";
-export const VERSION = "0.12.8";
+export const VERSION = "0.12.9";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -305,7 +305,7 @@ export class CraftService extends ServiceFoundation {
             "maintenance_status",
             "maintenance_tick",
             "maintenance_component", "maintenance_failure", "attention_item", "work_launch", "work_delivery", "delivery_loop", "delivery_evaluation_case", "delivery_evaluation_comparison", "delivery_evaluation_run", "platform_execution_profile", "platform_execution_preflight", "platform_execution_probe", "platform_execution_conformance", "task_run", "task_run_state", "task_run_handoff", "task_benchmark", "task_benchmark_pair", "task_benchmark_canary_sample", "state_snapshot", "verified_work_loop", "verified_work_loop_receipt", "verified_work_loop_decision", "human_state_event", "work_loop_invalidation", "eval_campaign", "eval_campaign_slot", "eval_campaign_report", "managed_write_guard", "managed_write_settlement", "adaptive_harness_recommendation", "project_knowledge_discovery", "project_knowledge_resolution", "project_knowledge_proposal", "acceptance_plan", "acceptance_check", "acceptance_assessment", "acceptance_evaluator", "acceptance_evaluation_job", "verified_iteration", "iteration_attempt", "strategy_recommendation",
-            "trajectory_script_proposal", "verified_script_run", "knowledge_claim", "wiki_page", "knowledge_relation", "wiki_context_bundle", "wiki_skill_candidate", "knowledge_evaluation_case", "knowledge_evaluation_run", "wiki_candidate_evaluation_attestation", "wiki_candidate_publication_authorization", "wiki_candidate_publication_package", "guided_work_brief", "execution_safety_preflight", "wiki_candidate_local_import", "autonomy_ladder_decision", "workspace_observation", "work_coordinator", "agent_eval_lab", "agent_eval_attempt", "evaluation_program", "evaluation_program_run", "enterprise_identity_provider", "enterprise_principal", "enterprise_adapter_binding", "enterprise_access_ticket", "a2a_agent_trust", "a2a_collaboration_session", "a2a_delegation", "a2a_delegation_receipt"];
+            "trajectory_script_proposal", "verified_script_run", "knowledge_claim", "wiki_page", "knowledge_relation", "wiki_context_bundle", "wiki_skill_candidate", "knowledge_evaluation_case", "knowledge_evaluation_run", "wiki_candidate_evaluation_attestation", "wiki_candidate_publication_authorization", "wiki_candidate_publication_package", "guided_work_brief", "execution_safety_preflight", "wiki_candidate_local_import", "autonomy_ladder_decision", "workspace_observation", "work_coordinator", "agent_eval_lab", "agent_eval_attempt", "evaluation_program", "evaluation_program_run", "enterprise_identity_provider", "enterprise_principal", "enterprise_adapter_binding", "enterprise_access_ticket", "a2a_agent_trust", "a2a_collaboration_session", "a2a_delegation", "a2a_delegation_receipt", "project_brain", "project_goal", "project_decision", "project_material", "project_outcome", "project_experience", "work_session", "long_task_checkpoint"];
         kinds.push("untrusted_content", "untrusted_extraction", "decision_projection");
         return { version: VERSION, data_root: this.store.paths.root,
             counts: Object.fromEntries(kinds.map((kind) => [kind, this.store.count(kind)])) };
@@ -3717,6 +3717,28 @@ export class CraftService extends ServiceFoundation {
     async a2aTransportDispatch(args) { return this.a2aTransport.dispatch(args); }
     orgSyncPrepare(args) { return this.orgSync.prepare(args); }
     orgSyncApply(args) { return this.orgSync.apply(args); }
+    projectBrainOpen(args) { return this.projectBrain.open(args); }
+    projectBrainGet(args) { return this.projectBrain.get(args); }
+    projectBrainRefresh(args) { return this.projectBrain.refresh(args); }
+    projectBrainGoalSave(args) { return this.projectBrain.goalSave(args); }
+    projectBrainDecisionSave(args) { return this.projectBrain.decisionSave(args); }
+    projectBrainMaterialBind(args) { return this.projectBrain.materialBind(args); }
+    projectBrainOutcomeRecord(args) { return this.projectBrain.outcomeRecord(args); }
+    projectBrainExperienceRecord(args) { return this.projectBrain.experienceRecord(args); }
+    workSessionPrepare(args) { return this.workSessions.prepare(args); }
+    workSessionGet(args) { return this.workSessions.get(args); }
+    workSessionRefresh(args) { return this.workSessions.refresh(args); }
+    workSessionBindLaunch(args) { return this.workSessions.bindLaunch(args); }
+    workSessionComplete(args) { return this.workSessions.complete(args); }
+    workbenchExperienceQuery(args = {}) { return this.workbenchExperience.query(args); }
+    workbenchExperienceGet(args) { return this.workbenchExperience.get(args); }
+    workbenchExperienceReview(args = {}) { return this.workbenchExperience.review(args); }
+    workbenchTraceReplayPlan(args) { return this.workbenchExperience.replayPlan(args); }
+    longTaskSuspend(args) { return this.longTaskWorker.suspend(args); }
+    longTaskWake(args) { return this.longTaskWorker.wake(args); }
+    longTaskResume(args) { return this.longTaskWorker.resume(args); }
+    longTaskGet(args) { return this.longTaskWorker.get(args); }
+    longTaskList(args = {}) { return this.longTaskWorker.list(args); }
     trialGet(args) {
         const trialId = text(args.trial_id, "trial_id");
         const trial = this.store.get("trial", trialId);

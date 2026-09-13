@@ -1,7 +1,7 @@
 import { CraftStore, type JsonObject } from "./store.ts";
 import { type EmbeddingProvider } from "./semantic.ts";
 import { ServiceFoundation } from "./service-foundation.ts";
-export declare const VERSION = "0.12.8";
+export declare const VERSION = "0.12.9";
 export declare class CraftService extends ServiceFoundation {
     constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter?: unknown, dockerSandbox?: unknown, egressBroker?: unknown, hostOwnerId?: string, hostProfiles?: readonly import("./host-registry.ts").HostProfile[], modelProviders?: readonly import("./model-gateway.ts").ModelProviderSpec[], modelTransport?: import("./model-gateway.ts").ModelTransport);
     /**
@@ -525,6 +525,28 @@ export declare class CraftService extends ServiceFoundation {
     a2aTransportDispatch(args: JsonObject): Promise<JsonObject>;
     orgSyncPrepare(args: JsonObject): JsonObject;
     orgSyncApply(args: JsonObject): JsonObject;
+    projectBrainOpen(args: JsonObject): JsonObject;
+    projectBrainGet(args: JsonObject): JsonObject;
+    projectBrainRefresh(args: JsonObject): JsonObject;
+    projectBrainGoalSave(args: JsonObject): JsonObject;
+    projectBrainDecisionSave(args: JsonObject): JsonObject;
+    projectBrainMaterialBind(args: JsonObject): JsonObject;
+    projectBrainOutcomeRecord(args: JsonObject): JsonObject;
+    projectBrainExperienceRecord(args: JsonObject): JsonObject;
+    workSessionPrepare(args: JsonObject): JsonObject;
+    workSessionGet(args: JsonObject): JsonObject;
+    workSessionRefresh(args: JsonObject): JsonObject;
+    workSessionBindLaunch(args: JsonObject): JsonObject;
+    workSessionComplete(args: JsonObject): JsonObject;
+    workbenchExperienceQuery(args?: JsonObject): JsonObject;
+    workbenchExperienceGet(args: JsonObject): JsonObject;
+    workbenchExperienceReview(args?: JsonObject): JsonObject;
+    workbenchTraceReplayPlan(args: JsonObject): JsonObject;
+    longTaskSuspend(args: JsonObject): JsonObject;
+    longTaskWake(args: JsonObject): JsonObject;
+    longTaskResume(args: JsonObject): JsonObject;
+    longTaskGet(args: JsonObject): JsonObject;
+    longTaskList(args?: JsonObject): JsonObject;
     trialGet(args: JsonObject): JsonObject;
     evaluationRunRecord(args: JsonObject): JsonObject;
     evaluationRunAggregate(args: JsonObject): JsonObject;

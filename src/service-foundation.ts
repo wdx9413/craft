@@ -88,6 +88,10 @@ import { OsSecurityKernel } from "./os-security.ts";
 import { McpRegistryKernel } from "./mcp-registry.ts";
 import { A2ATransportKernel } from "./a2a-transport.ts";
 import { OrgSyncKernel } from "./org-sync.ts";
+import { ProjectBrainKernel } from "./project-brain.ts";
+import { WorkSessionKernel } from "./work-session.ts";
+import { WorkbenchExperienceKernel } from "./workbench-experience.ts";
+import { LongTaskWorkerKernel } from "./long-task-worker.ts";
 
 /**
  * Stable composition root for the service. Domain behavior stays in focused
@@ -184,6 +188,10 @@ export abstract class ServiceFoundation {
   readonly mcpRegistry: McpRegistryKernel;
   readonly a2aTransport: A2ATransportKernel;
   readonly orgSync: OrgSyncKernel;
+  readonly projectBrain: ProjectBrainKernel;
+  readonly workSessions: WorkSessionKernel;
+  readonly workbenchExperience: WorkbenchExperienceKernel;
+  readonly longTaskWorker: LongTaskWorkerKernel;
 
   constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter = new LocalIsolatedAdapter(),
     dockerSandbox = new DockerSandboxAdapter(), egressBroker = new TrustedEgressBroker(), hostOwnerId?: string,
@@ -267,6 +275,10 @@ export abstract class ServiceFoundation {
     this.mcpRegistry = new McpRegistryKernel(store);
     this.a2aTransport = new A2ATransportKernel();
     this.orgSync = new OrgSyncKernel(store);
+    this.projectBrain = new ProjectBrainKernel(store);
+    this.workSessions = new WorkSessionKernel(store, this.projectBrain);
+    this.workbenchExperience = new WorkbenchExperienceKernel(store);
+    this.longTaskWorker = new LongTaskWorkerKernel(store);
     this.hostRuns = new HostRunKernel(store, [...this.hostDrivers.values()], hostOwnerId,
       (run, receipt) => this.finalizeWorkLaunch(run, receipt), this.trace);
   }

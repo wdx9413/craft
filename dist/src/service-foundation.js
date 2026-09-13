@@ -86,6 +86,10 @@ import { OsSecurityKernel } from "./os-security.js";
 import { McpRegistryKernel } from "./mcp-registry.js";
 import { A2ATransportKernel } from "./a2a-transport.js";
 import { OrgSyncKernel } from "./org-sync.js";
+import { ProjectBrainKernel } from "./project-brain.js";
+import { WorkSessionKernel } from "./work-session.js";
+import { WorkbenchExperienceKernel } from "./workbench-experience.js";
+import { LongTaskWorkerKernel } from "./long-task-worker.js";
 /**
  * Stable composition root for the service. Domain behavior stays in focused
  * kernels; CraftService is the backwards-compatible API facade.
@@ -180,6 +184,10 @@ export class ServiceFoundation {
     mcpRegistry;
     a2aTransport;
     orgSync;
+    projectBrain;
+    workSessions;
+    workbenchExperience;
+    longTaskWorker;
     constructor(store, semanticProvider, isolatedAdapter = new LocalIsolatedAdapter(), dockerSandbox = new DockerSandboxAdapter(), egressBroker = new TrustedEgressBroker(), hostOwnerId, hostProfiles, modelProviders, modelTransport) {
         this.store = store;
         this.catalog = new Catalog(store, semanticProvider);
@@ -276,6 +284,10 @@ export class ServiceFoundation {
         this.mcpRegistry = new McpRegistryKernel(store);
         this.a2aTransport = new A2ATransportKernel();
         this.orgSync = new OrgSyncKernel(store);
+        this.projectBrain = new ProjectBrainKernel(store);
+        this.workSessions = new WorkSessionKernel(store, this.projectBrain);
+        this.workbenchExperience = new WorkbenchExperienceKernel(store);
+        this.longTaskWorker = new LongTaskWorkerKernel(store);
         this.hostRuns = new HostRunKernel(store, [...this.hostDrivers.values()], hostOwnerId, (run, receipt) => this.finalizeWorkLaunch(run, receipt), this.trace);
     }
 }
