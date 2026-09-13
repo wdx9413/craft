@@ -59,6 +59,7 @@
 - [Tool Plane：通用动词与资源注册表](technical/modules/tool-plane.md)：工具面 O(1)、能力走数据的 syscall 接入面。
 - [Model Gateway：声明式模型接入](technical/modules/model-gateway.md)：8 家模型族的声明、分层选择与纯函数请求/响应。
 - [Internal Host：Craft 自己跑循环](technical/modules/internal-host.md)：第三个 Host Driver 与六道熔断。
+- [v0.12.4 Platform Runtime](technical/modules/platform-runtime-v0124.md)：自主运行、Checkpoint/Resume、能力生命周期、记忆整合、远程互操作和观测导出契约。
 - [Asset Envelope、路由与跨模型可比性](technical/modules/asset-routing.md)：三类资产的统一信封、只读路由与跨模型闸门。
 - [Task Run、平台 Conformance 与 Benchmark](technical/modules/task-run-benchmark.md)：把一个真实 Host 工作收敛为可恢复运行记录，并以同环境、同预算的交付对照形成受门禁候选。
 - [可验证执行与演进平台](technical/modules/evolution-platform.md)：范围内本地写入恢复、Campaign 报告、Evidence Canary 与最小 Harness 推荐。
@@ -76,6 +77,7 @@
 - [**v0.12.1 方案（2026-09-13）**](research/craft-v0.12.1-plan-2026-09-13.md)：syscall 工具面、模型网关、内建宿主、资产路由与跨模型可比性的完整方案与依据。
 - [**v0.12.2 方案（2026-09-13）**](research/craft-v0.12.2-plan-2026-09-13.md)：真实模型传输、`craft doctor/run` 自主闭环、版本门禁与多宿主发布同步；并列出恢复、Effect Policy、Eval Runner、知识血缘和 A2A 的后续收敛项。
 - [**v0.12.3 方案（2026-09-13）**](research/craft-v0.12.3-plan-2026-09-13.md)：syscall 低 token 默认面、显式 dispatch 恢复、多宿主同步与发布验收边界；诚实列出远程 A2A、生产级 checkpoint、真实 Eval Runner 等后续能力。
+- [**v0.12.4 方案（2026-09-13）**](research/craft-v0.12.4-plan-2026-09-13.md)：自主运行时、持久 Checkpoint、统一能力生命周期、记忆整合、HTTPS 远程互操作和可导出观测契约；明确真实 OS 沙箱、云端 transport 与多用户服务仍由外部 Adapter 验收。
 - [自适应 Harness 研究基线](research/self-adaptive-harness-closed-loop-2026-09-08.md)：较早版本的研究记录，实施状态以当前模块说明为准。
 
 ## 当前实现参考

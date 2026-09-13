@@ -75,6 +75,11 @@ import { AgentEvalLabKernel } from "./agent-eval-lab.ts";
 import { EvaluationOperationsKernel } from "./evaluation-operations.ts";
 import { EnterpriseAccessKernel } from "./enterprise-access.ts";
 import { A2ADelegationKernel } from "./a2a-delegation.ts";
+import { AutonomousRuntimeKernel } from "./autonomous-runtime.ts";
+import { CapabilityLifecycleKernel } from "./capability-lifecycle.ts";
+import { MemoryConsolidationKernel } from "./memory-consolidation.ts";
+import { RemoteInteropKernel } from "./remote-interop.ts";
+import { PlatformOperationsKernel } from "./platform-operations.ts";
 
 /**
  * Stable composition root for the service. Domain behavior stays in focused
@@ -155,6 +160,11 @@ export abstract class ServiceFoundation {
   readonly evaluationOperations: EvaluationOperationsKernel;
   readonly enterpriseAccess: EnterpriseAccessKernel;
   readonly a2aDelegation: A2ADelegationKernel;
+  readonly autonomousRuntime: AutonomousRuntimeKernel;
+  readonly capabilityLifecycle: CapabilityLifecycleKernel;
+  readonly memoryConsolidation: MemoryConsolidationKernel;
+  readonly remoteInterop: RemoteInteropKernel;
+  readonly platformOperations: PlatformOperationsKernel;
   readonly modelProviders: readonly ModelProviderSpec[];
   readonly internalHost: InternalHostDriver;
   readonly metrics: MetricsKernel;
@@ -227,6 +237,11 @@ export abstract class ServiceFoundation {
     this.evaluationOperations = new EvaluationOperationsKernel(store, this.evalCampaigns);
     this.enterpriseAccess = new EnterpriseAccessKernel(store);
     this.a2aDelegation = new A2ADelegationKernel(store);
+    this.autonomousRuntime = new AutonomousRuntimeKernel(store);
+    this.capabilityLifecycle = new CapabilityLifecycleKernel(store);
+    this.memoryConsolidation = new MemoryConsolidationKernel(store);
+    this.remoteInterop = new RemoteInteropKernel(store);
+    this.platformOperations = new PlatformOperationsKernel(store);
     this.metrics = new MetricsKernel(store);
     this.hostRuns = new HostRunKernel(store, [...this.hostDrivers.values()], hostOwnerId,
       (run, receipt) => this.finalizeWorkLaunch(run, receipt));

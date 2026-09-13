@@ -1,7 +1,7 @@
 import { CraftStore, type JsonObject } from "./store.ts";
 import { type EmbeddingProvider } from "./semantic.ts";
 import { ServiceFoundation } from "./service-foundation.ts";
-export declare const VERSION = "0.12.3";
+export declare const VERSION = "0.12.4";
 export declare class CraftService extends ServiceFoundation {
     constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter?: unknown, dockerSandbox?: unknown, egressBroker?: unknown, hostOwnerId?: string, hostProfiles?: readonly import("./host-registry.ts").HostProfile[], modelProviders?: readonly import("./model-gateway.ts").ModelProviderSpec[], modelTransport?: import("./model-gateway.ts").ModelTransport);
     /**
@@ -535,4 +535,30 @@ export declare class CraftService extends ServiceFoundation {
     orchestrationRenew(args: JsonObject): JsonObject;
     orchestrationSubmit(args: JsonObject): JsonObject;
     orchestrationTrialFinalize(args: JsonObject): JsonObject;
+    autonomousRuntimePrepare(args: JsonObject): JsonObject;
+    autonomousRuntimeCheckpoint(args: JsonObject): JsonObject;
+    autonomousRuntimeResume(args: JsonObject): JsonObject;
+    autonomousRuntimeCancel(args: JsonObject): JsonObject;
+    autonomousRuntimeGet(args: JsonObject): JsonObject;
+    autonomousRuntimeRun(args: JsonObject): Promise<JsonObject>;
+    capabilityLifecycleRegister(args: JsonObject): JsonObject;
+    capabilityLifecycleInstall(args: JsonObject): JsonObject;
+    capabilityLifecycleActivate(args: JsonObject): JsonObject;
+    capabilityLifecycleDisable(args: JsonObject): JsonObject;
+    capabilityLifecycleUpgrade(args: JsonObject): JsonObject;
+    capabilityLifecycleRetire(args: JsonObject): JsonObject;
+    capabilityLifecycleResolve(args: JsonObject): JsonObject;
+    capabilityLifecycleList(): JsonObject;
+    memoryConsolidationRemember(args: JsonObject): JsonObject;
+    memoryConsolidationConsolidate(args: JsonObject): JsonObject;
+    memoryConsolidationResolve(args: JsonObject): JsonObject;
+    memoryConsolidationSearch(args: JsonObject): JsonObject;
+    remoteInteropPrepare(args: JsonObject): JsonObject;
+    remoteInteropDispatch(args: JsonObject): Promise<JsonObject>;
+    remoteInteropReport(args: JsonObject): JsonObject;
+    remoteInteropGet(args: JsonObject): JsonObject;
+    platformMemberSave(args: JsonObject): JsonObject;
+    platformAuthorize(args: JsonObject): JsonObject;
+    platformObserve(args: JsonObject): JsonObject;
+    platformObservabilityExport(args: JsonObject): JsonObject;
 }

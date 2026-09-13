@@ -26,7 +26,7 @@ import { dockerRequestDigest } from "./docker-sandbox.ts";
 import { egressRequestDigest } from "./egress.ts";
 import { ServiceFoundation } from "./service-foundation.ts";
 
-export const VERSION = "0.12.3";
+export const VERSION = "0.12.4";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -3600,4 +3600,54 @@ export class CraftService extends ServiceFoundation {
       evidence_ids: [...new Set(traceEvidence)], source: "orchestration_aggregated" });
     return { plan, ...this.trialGet({ trial_id: trialId }) };
   }
+
+  autonomousRuntimePrepare(args: JsonObject): JsonObject { return this.autonomousRuntime.prepare(args); }
+  autonomousRuntimeCheckpoint(args: JsonObject): JsonObject { return this.autonomousRuntime.checkpoint(args); }
+  autonomousRuntimeResume(args: JsonObject): JsonObject { return this.autonomousRuntime.resume(args); }
+  autonomousRuntimeCancel(args: JsonObject): JsonObject { return this.autonomousRuntime.cancel(args); }
+  autonomousRuntimeGet(args: JsonObject): JsonObject { return this.autonomousRuntime.get(args); }
+  async autonomousRuntimeRun(args: JsonObject): Promise<JsonObject> {
+    const turns = Array.isArray(args.turns) ? args.turns.map((turn) => object(turn, "turn")) : [];
+    if (!turns.length) throw new Error("turns must contain at least one turn");
+    let index = 0;
+    const actionResults = object(args.action_results ?? {}, "action_results");
+    const model = { next: async () => {
+      const turn = turns[index] ?? { kind: "final", message: "No more scripted turns" };
+      index += 1;
+      return turn as import("./autonomous-runtime.ts").RuntimeTurn;
+    } };
+    const executor = async (action: string, input: JsonObject) => {
+      const result = actionResults[action];
+      return result && typeof result === "object" && !Array.isArray(result) ? result as JsonObject : { action, args: input, recorded: true };
+    };
+    return this.autonomousRuntime.run(args, model, executor);
+  }
+
+  capabilityLifecycleRegister(args: JsonObject): JsonObject { return this.capabilityLifecycle.register(args); }
+  capabilityLifecycleInstall(args: JsonObject): JsonObject { return this.capabilityLifecycle.install(args); }
+  capabilityLifecycleActivate(args: JsonObject): JsonObject { return this.capabilityLifecycle.activate(args); }
+  capabilityLifecycleDisable(args: JsonObject): JsonObject { return this.capabilityLifecycle.disable(args); }
+  capabilityLifecycleUpgrade(args: JsonObject): JsonObject { return this.capabilityLifecycle.upgrade(args); }
+  capabilityLifecycleRetire(args: JsonObject): JsonObject { return this.capabilityLifecycle.retire(args); }
+  capabilityLifecycleResolve(args: JsonObject): JsonObject { return this.capabilityLifecycle.resolve(args); }
+  capabilityLifecycleList(): JsonObject { return this.capabilityLifecycle.list(); }
+
+  memoryConsolidationRemember(args: JsonObject): JsonObject { return this.memoryConsolidation.remember(args); }
+  memoryConsolidationConsolidate(args: JsonObject): JsonObject { return this.memoryConsolidation.consolidate(args); }
+  memoryConsolidationResolve(args: JsonObject): JsonObject { return this.memoryConsolidation.resolve(args); }
+  memoryConsolidationSearch(args: JsonObject): JsonObject { return this.memoryConsolidation.search(args); }
+
+  remoteInteropPrepare(args: JsonObject): JsonObject { return this.remoteInterop.prepare(args); }
+  async remoteInteropDispatch(args: JsonObject): Promise<JsonObject> {
+    const status = String(args.status ?? "accepted") as "accepted" | "completed" | "failed";
+    if (!new Set(["accepted", "completed", "failed"]).has(status)) throw new Error("Unsupported remote status");
+    return this.remoteInterop.dispatch(args, { dispatch: async () => ({ remote_id: text(args.remote_id ?? `remote_${randomUUID().replaceAll("-", "")}`, "remote_id"), status, ...(args.result_digest === undefined ? {} : { result_digest: text(args.result_digest, "result_digest") }) }) });
+  }
+  remoteInteropReport(args: JsonObject): JsonObject { return this.remoteInterop.report(args); }
+  remoteInteropGet(args: JsonObject): JsonObject { return this.remoteInterop.get(args); }
+
+  platformMemberSave(args: JsonObject): JsonObject { return this.platformOperations.memberSave(args); }
+  platformAuthorize(args: JsonObject): JsonObject { return this.platformOperations.authorize(args); }
+  platformObserve(args: JsonObject): JsonObject { return this.platformOperations.observe(args); }
+  platformObservabilityExport(args: JsonObject): JsonObject { return this.platformOperations.exportObservations(args); }
 }

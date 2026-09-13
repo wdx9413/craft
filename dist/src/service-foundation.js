@@ -73,6 +73,11 @@ import { AgentEvalLabKernel } from "./agent-eval-lab.js";
 import { EvaluationOperationsKernel } from "./evaluation-operations.js";
 import { EnterpriseAccessKernel } from "./enterprise-access.js";
 import { A2ADelegationKernel } from "./a2a-delegation.js";
+import { AutonomousRuntimeKernel } from "./autonomous-runtime.js";
+import { CapabilityLifecycleKernel } from "./capability-lifecycle.js";
+import { MemoryConsolidationKernel } from "./memory-consolidation.js";
+import { RemoteInteropKernel } from "./remote-interop.js";
+import { PlatformOperationsKernel } from "./platform-operations.js";
 /**
  * Stable composition root for the service. Domain behavior stays in focused
  * kernels; CraftService is the backwards-compatible API facade.
@@ -151,6 +156,11 @@ export class ServiceFoundation {
     evaluationOperations;
     enterpriseAccess;
     a2aDelegation;
+    autonomousRuntime;
+    capabilityLifecycle;
+    memoryConsolidation;
+    remoteInterop;
+    platformOperations;
     modelProviders;
     internalHost;
     metrics;
@@ -236,6 +246,11 @@ export class ServiceFoundation {
         this.evaluationOperations = new EvaluationOperationsKernel(store, this.evalCampaigns);
         this.enterpriseAccess = new EnterpriseAccessKernel(store);
         this.a2aDelegation = new A2ADelegationKernel(store);
+        this.autonomousRuntime = new AutonomousRuntimeKernel(store);
+        this.capabilityLifecycle = new CapabilityLifecycleKernel(store);
+        this.memoryConsolidation = new MemoryConsolidationKernel(store);
+        this.remoteInterop = new RemoteInteropKernel(store);
+        this.platformOperations = new PlatformOperationsKernel(store);
         this.metrics = new MetricsKernel(store);
         this.hostRuns = new HostRunKernel(store, [...this.hostDrivers.values()], hostOwnerId, (run, receipt) => this.finalizeWorkLaunch(run, receipt));
     }

@@ -74,6 +74,11 @@ import { AgentEvalLabKernel } from "./agent-eval-lab.ts";
 import { EvaluationOperationsKernel } from "./evaluation-operations.ts";
 import { EnterpriseAccessKernel } from "./enterprise-access.ts";
 import { A2ADelegationKernel } from "./a2a-delegation.ts";
+import { AutonomousRuntimeKernel } from "./autonomous-runtime.ts";
+import { CapabilityLifecycleKernel } from "./capability-lifecycle.ts";
+import { MemoryConsolidationKernel } from "./memory-consolidation.ts";
+import { RemoteInteropKernel } from "./remote-interop.ts";
+import { PlatformOperationsKernel } from "./platform-operations.ts";
 /**
  * Stable composition root for the service. Domain behavior stays in focused
  * kernels; CraftService is the backwards-compatible API facade.
@@ -152,6 +157,11 @@ export declare abstract class ServiceFoundation {
     readonly evaluationOperations: EvaluationOperationsKernel;
     readonly enterpriseAccess: EnterpriseAccessKernel;
     readonly a2aDelegation: A2ADelegationKernel;
+    readonly autonomousRuntime: AutonomousRuntimeKernel;
+    readonly capabilityLifecycle: CapabilityLifecycleKernel;
+    readonly memoryConsolidation: MemoryConsolidationKernel;
+    readonly remoteInterop: RemoteInteropKernel;
+    readonly platformOperations: PlatformOperationsKernel;
     readonly modelProviders: readonly ModelProviderSpec[];
     readonly internalHost: InternalHostDriver;
     readonly metrics: MetricsKernel;

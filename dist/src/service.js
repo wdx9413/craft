@@ -24,7 +24,7 @@ import { decideExecution } from "./execution-policy.js";
 import { dockerRequestDigest } from "./docker-sandbox.js";
 import { egressRequestDigest } from "./egress.js";
 import { ServiceFoundation } from "./service-foundation.js";
-export const VERSION = "0.12.3";
+export const VERSION = "0.12.4";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -4447,5 +4447,52 @@ export class CraftService extends ServiceFoundation {
             evidence_ids: [...new Set(traceEvidence)], source: "orchestration_aggregated" });
         return { plan, ...this.trialGet({ trial_id: trialId }) };
     }
+    autonomousRuntimePrepare(args) { return this.autonomousRuntime.prepare(args); }
+    autonomousRuntimeCheckpoint(args) { return this.autonomousRuntime.checkpoint(args); }
+    autonomousRuntimeResume(args) { return this.autonomousRuntime.resume(args); }
+    autonomousRuntimeCancel(args) { return this.autonomousRuntime.cancel(args); }
+    autonomousRuntimeGet(args) { return this.autonomousRuntime.get(args); }
+    async autonomousRuntimeRun(args) {
+        const turns = Array.isArray(args.turns) ? args.turns.map((turn) => object(turn, "turn")) : [];
+        if (!turns.length)
+            throw new Error("turns must contain at least one turn");
+        let index = 0;
+        const actionResults = object(args.action_results ?? {}, "action_results");
+        const model = { next: async () => {
+                const turn = turns[index] ?? { kind: "final", message: "No more scripted turns" };
+                index += 1;
+                return turn;
+            } };
+        const executor = async (action, input) => {
+            const result = actionResults[action];
+            return result && typeof result === "object" && !Array.isArray(result) ? result : { action, args: input, recorded: true };
+        };
+        return this.autonomousRuntime.run(args, model, executor);
+    }
+    capabilityLifecycleRegister(args) { return this.capabilityLifecycle.register(args); }
+    capabilityLifecycleInstall(args) { return this.capabilityLifecycle.install(args); }
+    capabilityLifecycleActivate(args) { return this.capabilityLifecycle.activate(args); }
+    capabilityLifecycleDisable(args) { return this.capabilityLifecycle.disable(args); }
+    capabilityLifecycleUpgrade(args) { return this.capabilityLifecycle.upgrade(args); }
+    capabilityLifecycleRetire(args) { return this.capabilityLifecycle.retire(args); }
+    capabilityLifecycleResolve(args) { return this.capabilityLifecycle.resolve(args); }
+    capabilityLifecycleList() { return this.capabilityLifecycle.list(); }
+    memoryConsolidationRemember(args) { return this.memoryConsolidation.remember(args); }
+    memoryConsolidationConsolidate(args) { return this.memoryConsolidation.consolidate(args); }
+    memoryConsolidationResolve(args) { return this.memoryConsolidation.resolve(args); }
+    memoryConsolidationSearch(args) { return this.memoryConsolidation.search(args); }
+    remoteInteropPrepare(args) { return this.remoteInterop.prepare(args); }
+    async remoteInteropDispatch(args) {
+        const status = String(args.status ?? "accepted");
+        if (!new Set(["accepted", "completed", "failed"]).has(status))
+            throw new Error("Unsupported remote status");
+        return this.remoteInterop.dispatch(args, { dispatch: async () => ({ remote_id: text(args.remote_id ?? `remote_${randomUUID().replaceAll("-", "")}`, "remote_id"), status, ...(args.result_digest === undefined ? {} : { result_digest: text(args.result_digest, "result_digest") }) }) });
+    }
+    remoteInteropReport(args) { return this.remoteInterop.report(args); }
+    remoteInteropGet(args) { return this.remoteInterop.get(args); }
+    platformMemberSave(args) { return this.platformOperations.memberSave(args); }
+    platformAuthorize(args) { return this.platformOperations.authorize(args); }
+    platformObserve(args) { return this.platformOperations.observe(args); }
+    platformObservabilityExport(args) { return this.platformOperations.exportObservations(args); }
 }
 //# sourceMappingURL=service.js.map

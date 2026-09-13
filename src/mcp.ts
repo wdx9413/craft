@@ -8,15 +8,15 @@ const schemaFor = (name: string): JsonObject => {
   if (["limit", "version", "capacity", "max_concurrency", "size_bytes", "subject_version", "expected_version", "max_candidates",
     "suite_version", "configuration_version", "harness_configuration_version", "target_version", "profile_version",
     "grader_version", "policy_version", "signoff_policy_version", "lease_ttl_seconds", "ttl_seconds", "trials_per_case", "window_size", "max_attempts", "min_trials", "harness_version", "ir_version", "runtime_adapter_version", "agreed", "total", "expected_state_revision", "max_chars", "max_items", "timeout_ms", "output_limit", "max_turns", "after_sequence", "context_profile_version", "activation_profile_version", "budget_account_version", "contract_version", "conformance_version"].includes(name)) return { type: "integer" };
-  if (["score", "value", "threshold", "min_pass_rate_delta", "max_cost_regression_ratio", "max_duration_regression_ratio", "max_budget_ratio", "baseline", "candidate", "minimum_agreement", "max_budget_usd"].includes(name)) return { type: "number" };
+  if (["score", "value", "threshold", "confidence", "min_pass_rate_delta", "max_cost_regression_ratio", "max_duration_regression_ratio", "max_budget_ratio", "baseline", "candidate", "minimum_agreement", "max_budget_usd"].includes(name)) return { type: "number" };
   if (["input", "inputs", "metadata", "policy", "dimensions", "environment", "budget", "data", "scores",
     "costs", "metrics", "configuration", "receipt_requirements", "execution", "rules", "authorization_requests", "notification_refs", "cost_hint", "design_axes", "report",
     "limits", "resources", "actual", "actual_resources", "estimated_resources", "observation", "trial_budget", "policy_fingerprints", "structured_data", "field_sources",
-    "capabilities", "observed_capabilities", "requirements", "output", "transform", "entity", "values", "budget_limits", "sandbox_requirements", "eval_suite_ref", "checks"].includes(name)) return { type: "object" };
+    "capabilities", "observed_capabilities", "requirements", "output", "transform", "entity", "values", "budget_limits", "sandbox_requirements", "eval_suite_ref", "checks", "state", "action_results"].includes(name)) return { type: "object" };
   if (["completed", "pending", "decisions", "artifacts", "steps", "cases", "capabilities",
     "allowed_side_effects", "approved_side_effects", "nodes", "artifact_ids", "evidence_ids",
     "trial_ids", "requirements", "grade_ids", "pattern_ids", "failure_modes", "receipt_ids", "criteria", "acceptance_criteria", "allowed_extensions", "fields", "capability_requirements", "object_schemas", "components", "action_contracts", "tags", "claim_ids", "evidence_ids", "expected_claim_ids", "case_ids",
-    "allowed_operations", "allowed_effects", "require_approval_for", "operations", "subjects", "children", "trusted_hosts", "command_allowlist", "path_allowlist", "kinds", "effects", "allowed_kinds", "dependencies", "aliases", "assets", "asset_ids", "connector_ticket_ids", "artifact_ids", "final_artifact_ids", "evidence_ids", "gold_case_ids", "output_contract", "trial_ids", "include_paths", "affected_paths", "object_ids", "depends_on", "source_paths", "applies_to", "patches", "snapshot_refs", "triggers", "allowed_hosts", "allowed_actions", "approval_required_actions", "detected_instructions", "citations", "allowed_fields", "argv", "sources", "budget_ids", "recovery_item_ids", "memory_kinds", "object_types", "required_memory_ids", "required_object_ids", "benchmark_ids", "memory_ids", "paths", "state_paths"].includes(name)) return { type: "array" };
+    "allowed_operations", "allowed_effects", "require_approval_for", "operations", "subjects", "children", "trusted_hosts", "command_allowlist", "path_allowlist", "kinds", "effects", "allowed_kinds", "dependencies", "aliases", "assets", "asset_ids", "connector_ticket_ids", "artifact_ids", "final_artifact_ids", "evidence_ids", "gold_case_ids", "output_contract", "trial_ids", "include_paths", "affected_paths", "object_ids", "depends_on", "source_paths", "applies_to", "patches", "snapshot_refs", "triggers", "allowed_hosts", "allowed_actions", "approval_required_actions", "detected_instructions", "citations", "allowed_fields", "argv", "sources", "budget_ids", "recovery_item_ids", "memory_kinds", "object_types", "required_memory_ids", "required_object_ids", "benchmark_ids", "memory_ids", "paths", "state_paths", "turns", "roles"].includes(name)) return { type: "array" };
   return { type: "string" };
 };
 const objectSchema = (required: string[] = [], optional: string[] = []): JsonObject => ({ type: "object",
@@ -708,6 +708,32 @@ export const TOOLS: Tool[] = [
   tool("craft_agent_loop_plan", "Show the circuit-breaker limits a self-hosted loop would run under, without starting one.", [], true, ["limits"]),
   tool("craft_asset_route", "Select the smallest credible set of declared assets for one task, with the reason for every rejection.", ["signals", "assets"], true),
   tool("craft_model_independence_compare", "Check whether a subject's declared invariants hold across every model it was tried on.", ["trials", "invariants"], true),
+  tool("craft_autonomous_runtime_prepare", "Prepare a provider-neutral autonomous run with explicit step and token limits.", ["task_id", "goal", "model"], false, ["run_id", "limits"]),
+  tool("craft_autonomous_runtime_run", "Run a bounded autonomous loop from explicit model turns and record every action, checkpoint, and terminal result.", ["task_id", "goal", "model", "turns"], false, ["run_id", "limits", "action_results"]),
+  tool("craft_autonomous_runtime_checkpoint", "Persist a content-bounded autonomous checkpoint without granting new authority.", ["run_id", "state"], false, ["checkpoint_id", "reason"]),
+  tool("craft_autonomous_runtime_resume", "Resume an autonomous run from its exact latest checkpoint.", ["run_id"], false, ["checkpoint_id"]),
+  tool("craft_autonomous_runtime_cancel", "Cancel an autonomous run with an explicit reason.", ["run_id"], false, ["reason"]),
+  tool("craft_autonomous_runtime_get", "Read an autonomous run, turns, and checkpoints.", ["run_id"], true),
+  tool("craft_capability_lifecycle_register", "Register a versioned capability in the unified install/activate/rollback lifecycle.", ["capability_id", "name", "source"], false, ["source_version", "effect", "dependencies", "permissions"]),
+  tool("craft_capability_lifecycle_install", "Install a registered capability without activating it.", ["capability_id"]),
+  tool("craft_capability_lifecycle_activate", "Activate an installed capability after lifecycle checks.", ["capability_id"]),
+  tool("craft_capability_lifecycle_disable", "Disable a capability and retain the reason for audit.", ["capability_id"], false, ["reason"]),
+  tool("craft_capability_lifecycle_upgrade", "Upgrade a capability only when its exact source version and digest are declared.", ["capability_id", "source_version", "source_digest"]),
+  tool("craft_capability_lifecycle_retire", "Retire a capability so it can never be activated again.", ["capability_id"], false, ["reason"]),
+  tool("craft_capability_lifecycle_resolve", "Resolve one active capability name without silently choosing an ambiguous source.", ["name"], true),
+  tool("craft_capability_lifecycle_list", "List unified capability lifecycle records.", [], true),
+  tool("craft_memory_remember_episode", "Store one redacted episodic memory for later consolidation.", ["content"], false, ["memory_id", "scope", "source", "task_id", "confidence"]),
+  tool("craft_memory_consolidate", "Consolidate selected episodic memories into one versioned semantic memory.", ["memory_ids"], false, ["semantic_id", "scope", "content", "confidence"]),
+  tool("craft_memory_resolve", "Resolve a semantic memory as active, superseded, or rejected.", ["semantic_id", "status"], false, ["resolution"]),
+  tool("craft_memory_search", "Search active semantic memories by scope and bounded text match.", ["query"], true, ["scope"]),
+  tool("craft_remote_interop_prepare", "Prepare an HTTPS-only remote Agent/MCP request with no execution authority.", ["endpoint", "agent", "operation", "task_id", "input_digest"], false, ["request_id"]),
+  tool("craft_remote_interop_dispatch", "Dispatch one prepared remote request through an approved Host transport and persist the receipt.", ["request_id"], false, ["status", "remote_id", "result_digest"]),
+  tool("craft_remote_interop_report", "Record a remote terminal status without accepting raw remote context as trusted.", ["request_id", "status"], false, ["result_digest"]),
+  tool("craft_remote_interop_get", "Read a remote request and its receipts.", ["request_id"], true),
+  tool("craft_platform_member_save", "Register a local team identity and roles without storing credentials.", ["name"], false, ["member_id", "roles"]),
+  tool("craft_platform_authorize", "Evaluate one action against a member role and persist the decision.", ["member_id", "action"], false, ["authorization_id", "required_role"]),
+  tool("craft_platform_observe", "Record a content-bounded operational observation.", ["event"], false, ["observation_id", "status", "run_id", "metric", "value"]),
+  tool("craft_platform_observability_export", "Export standard content-free observability records for external OTel/log adapters.", [], true, ["limit"]),
 ];
 
 const CORE_TOOL_NAMES = new Set(["craft_info", "craft_source_list", "craft_capability_search", "craft_capability_get", "craft_semantic_status", "craft_execution_policy_decide",
@@ -1122,6 +1148,32 @@ export class McpServer {
       craft_agent_loop_plan: (a) => service.agentLoopPlan(a),
       craft_asset_route: (a) => service.assetRoute(a),
       craft_model_independence_compare: (a) => service.modelIndependenceCompare(a),
+      craft_autonomous_runtime_prepare: (a) => service.autonomousRuntimePrepare(a),
+      craft_autonomous_runtime_run: (a) => service.autonomousRuntimeRun(a),
+      craft_autonomous_runtime_checkpoint: (a) => service.autonomousRuntimeCheckpoint(a),
+      craft_autonomous_runtime_resume: (a) => service.autonomousRuntimeResume(a),
+      craft_autonomous_runtime_cancel: (a) => service.autonomousRuntimeCancel(a),
+      craft_autonomous_runtime_get: (a) => service.autonomousRuntimeGet(a),
+      craft_capability_lifecycle_register: (a) => service.capabilityLifecycleRegister(a),
+      craft_capability_lifecycle_install: (a) => service.capabilityLifecycleInstall(a),
+      craft_capability_lifecycle_activate: (a) => service.capabilityLifecycleActivate(a),
+      craft_capability_lifecycle_disable: (a) => service.capabilityLifecycleDisable(a),
+      craft_capability_lifecycle_upgrade: (a) => service.capabilityLifecycleUpgrade(a),
+      craft_capability_lifecycle_retire: (a) => service.capabilityLifecycleRetire(a),
+      craft_capability_lifecycle_resolve: (a) => service.capabilityLifecycleResolve(a),
+      craft_capability_lifecycle_list: () => service.capabilityLifecycleList(),
+      craft_memory_remember_episode: (a) => service.memoryConsolidationRemember(a),
+      craft_memory_consolidate: (a) => service.memoryConsolidationConsolidate(a),
+      craft_memory_resolve: (a) => service.memoryConsolidationResolve(a),
+      craft_memory_search: (a) => service.memoryConsolidationSearch(a),
+      craft_remote_interop_prepare: (a) => service.remoteInteropPrepare(a),
+      craft_remote_interop_dispatch: (a) => service.remoteInteropDispatch(a),
+      craft_remote_interop_report: (a) => service.remoteInteropReport(a),
+      craft_remote_interop_get: (a) => service.remoteInteropGet(a),
+      craft_platform_member_save: (a) => service.platformMemberSave(a),
+      craft_platform_authorize: (a) => service.platformAuthorize(a),
+      craft_platform_observe: (a) => service.platformObserve(a),
+      craft_platform_observability_export: (a) => service.platformObservabilityExport(a),
     };
   }
 
