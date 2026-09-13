@@ -92,6 +92,7 @@ import { WorkbenchExperienceKernel } from "./workbench-experience.js";
 import { LongTaskWorkerKernel } from "./long-task-worker.js";
 import { ContextPlaneKernel, ReplayRunnerKernel, LocalRuntimeServiceKernel, ProjectBundleKernel, FeedbackLearningKernel, DomainEvaluatorKernel, HandoffManifestKernel, CostLedgerKernel } from "./v01211-runtime.js";
 import { VerifiedAutonomousWorkKernel, SandboxConformanceKernel, TraceExplorerKernel } from "./v01212-verified-work.js";
+import { ActionGatewayKernel, AcceptanceGateKernel, DurableWorkerKernel, ProviderRouterKernel, A2AProtocolKernel } from "./v01213-runtime.js";
 /**
  * Stable composition root for the service. Domain behavior stays in focused
  * kernels; CraftService is the backwards-compatible API facade.
@@ -201,6 +202,11 @@ export class ServiceFoundation {
     verifiedAutonomousWork;
     sandboxConformance;
     traceExplorer;
+    actionGateway;
+    acceptanceGates;
+    durableWorker;
+    providerRouter;
+    a2aProtocol;
     constructor(store, semanticProvider, isolatedAdapter = new LocalIsolatedAdapter(), dockerSandbox = new DockerSandboxAdapter(), egressBroker = new TrustedEgressBroker(), hostOwnerId, hostProfiles, modelProviders, modelTransport) {
         this.store = store;
         this.catalog = new Catalog(store, semanticProvider);
@@ -313,6 +319,11 @@ export class ServiceFoundation {
         this.verifiedAutonomousWork = new VerifiedAutonomousWorkKernel(store);
         this.sandboxConformance = new SandboxConformanceKernel(store);
         this.traceExplorer = new TraceExplorerKernel(store);
+        this.actionGateway = new ActionGatewayKernel(store);
+        this.acceptanceGates = new AcceptanceGateKernel(store);
+        this.durableWorker = new DurableWorkerKernel(store);
+        this.providerRouter = new ProviderRouterKernel(store);
+        this.a2aProtocol = new A2AProtocolKernel();
         this.hostRuns = new HostRunKernel(store, [...this.hostDrivers.values()], hostOwnerId, (run, receipt) => this.finalizeWorkLaunch(run, receipt), this.trace);
     }
 }

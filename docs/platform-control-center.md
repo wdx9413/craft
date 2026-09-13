@@ -1,6 +1,6 @@
-# v0.12.10 Platform Control Center
+# v0.12.13 Platform Control Center
 
-v0.12.10 把 Craft 从“可被宿主调用的治理内核”推进成可持续使用的本地工作台和 Runtime Truth 运行时。GUI 仍是本机 Workbench 应用，由 `craft gui`/`craft serve` 启动；执行权限仍由 Codex、Claude、Trae Work、WorkBuddy 或独立 Host Driver 承担。
+v0.12.13 把 Craft 从“可被宿主调用的治理内核”推进成带有界动作、独立验收、可恢复本地 Worker 和 Provider fallback 的本地工作台与 Runtime Truth 运行时。GUI 仍是本机 Workbench 应用，由 `craft gui`/`craft serve` 启动；执行权限仍由 Codex、Claude、Trae Work、WorkBuddy 或独立 Host Driver 承担。
 
 ## 设置与数据目录
 
@@ -18,7 +18,7 @@ Craft 的版本升级遵循单向可迁移原则：旧数据库按有序 migrati
 
 Windows 原生 runner 会生成含 Node runtime、真正的 `craft.exe` 和应用资源的绿色 ZIP；双击 `craft.exe` 会隐藏命令窗口并打开浏览器 Workbench，`.cmd`/`.ps1` 仅保留给高级用户。若默认 `~/.craft_data` 在 Windows 上暂时不可写，便携启动器会回退到 `%LOCALAPPDATA%\Craft\data`；显式设置 `CRAFT_DATA_DIR` 时不做回退并弹出可读错误。macOS 原生 runner 会把 Node runtime 放进 `.app`，再使用 `hdiutil` 生成真正的 `.dmg`。Windows 当前开发机无法合法生成 macOS DMG，因此 `.github/workflows/desktop-release.yml` 在 macOS runner 上产出它；不生成伪文件冒充 DMG。
 
-## v0.12.5 架构图
+## 当前架构图（v0.12.13）
 
 ```mermaid
 flowchart TD
@@ -37,4 +37,4 @@ flowchart TD
 
 ## 仍然明确未声称完成的理想态
 
-真实跨厂商模型循环、多人协作/远程同步、标准 OTel 导出、生产级 OS 沙箱和签名安装器仍属于部署或后续产品层。v0.12.5 提供的是可观察、可配置、可移植的本地基座，不把本地契约包装成云端服务。
+真实跨厂商模型循环、多人协作/远程同步、标准 OTel 导出、生产级 OS 沙箱和签名安装器仍属于部署或后续产品层。v0.12.13 提供的是可观察、可配置、可移植且能独立验收的本地基座，不把本地契约包装成云端服务。

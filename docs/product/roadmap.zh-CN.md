@@ -13,7 +13,9 @@
 
 ## 建设原则
 
-以 [产品架构](architecture.zh-CN.md) 的三大支柱为目标：工作与协作、执行与保障、学习与改进。**评测与实验是第三支柱内的核心模块**，不另设第四支柱。当前实现基线已推进到 v0.12.12。
+以 [产品架构](architecture.zh-CN.md) 的三大支柱为目标：工作与协作、执行与保障、学习与改进。**评测与实验是第三支柱内的核心模块**，不另设第四支柱。当前实现基线已推进到 v0.12.13。
+
+**v0.12.13：Runtime Completion。** 新增有界 Action Gateway（工作区读写、审批与回执）、独立 Acceptance Gate（Host 完成不等于业务成功）、本地 Durable Worker（租约、队列、停止与恢复）、Provider fallback 路由，以及 HTTPS-only、摘要级 A2A message/task 入口。CLI standalone run 现在会停在 `needs_review`，必须经过独立验收才产生 verified outcome；Shell、浏览器、远程 MCP、OS 级沙箱和真实远程 A2A 仍由显式平台 Adapter 提供，不把本地契约冒充生产能力。
 
 **v0.12.12：连续工作运行时。** 在 Project Brain 与 Work Session 之上增加统一 Context Manifest、可控 Replay Runner、本地持续运行服务状态、Project Bundle、跨宿主 Handoff、反馈学习信号、领域 Evaluator 与真实成本账本。旧数据保持原记录不迁移覆盖，知识和能力仍只按摘要/版本引用；系统级调度、远程对象存储、生产级通知与 OS 沙箱继续由部署 Adapter 承担。
 

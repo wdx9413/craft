@@ -25,7 +25,7 @@ import { decideExecution } from "./execution-policy.js";
 import { dockerRequestDigest } from "./docker-sandbox.js";
 import { egressRequestDigest } from "./egress.js";
 import { ServiceFoundation } from "./service-foundation.js";
-export const VERSION = "0.12.12";
+export const VERSION = "0.12.13";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -222,6 +222,14 @@ export class CraftService extends ServiceFoundation {
             task_checkpoint: (input) => this.taskCheckpoint(input),
             evidence_record: (input) => this.evidenceRecord(input),
             artifact_register: (input) => this.artifactRegister(input),
+            workspace_read: async (input) => {
+                const prepared = this.actionGatewayPrepare({ action_id: `internal-read-${valueDigest(input).slice(7, 23)}`, task_id: text(input.task_id, "task_id"), workspace: text(input.workspace, "workspace"), operation: "workspace_read", effect: "read_only", input_digest: valueDigest(input) });
+                return this.actionGatewayExecute({ action_id: prepared.action.id, relative_path: text(input.relative_path, "relative_path") });
+            },
+            workspace_write: async (input) => {
+                const prepared = this.actionGatewayPrepare({ action_id: `internal-write-${valueDigest(input).slice(7, 23)}`, task_id: text(input.task_id, "task_id"), workspace: text(input.workspace, "workspace"), operation: "workspace_write", effect: "local_write", input_digest: valueDigest(input), ...(input.approval_ref === undefined ? {} : { approval_ref: input.approval_ref }) });
+                return this.actionGatewayExecute({ action_id: prepared.action.id, relative_path: text(input.relative_path, "relative_path"), content: text(input.content, "content"), approved: input.approved === true });
+            },
         };
         const handler = permitted[action];
         if (!handler)
@@ -3762,6 +3770,26 @@ export class CraftService extends ServiceFoundation {
     sandboxConformanceAdmit(args) { return this.sandboxConformance.admit(args); }
     sandboxConformanceGet(args) { return this.sandboxConformance.get(args); }
     traceExplorerQuery(args = {}) { return this.traceExplorer.query(args); }
+    actionGatewayPrepare(args) { return this.actionGateway.prepare(args); }
+    actionGatewayExecute(args) { return this.actionGateway.execute(args); }
+    actionGatewayGet(args) { return this.actionGateway.get(args); }
+    acceptanceGatePrepare(args) { return this.acceptanceGates.prepare(args); }
+    acceptanceGateAssess(args) { return this.acceptanceGates.assess(args); }
+    acceptanceGateOutcome(args) { return this.acceptanceGates.outcome(args); }
+    acceptanceGateGet(args) { return this.acceptanceGates.get(args); }
+    durableWorkerConfigure(args = {}) { return this.durableWorker.configure(args); }
+    durableWorkerStart(args = {}) { return this.durableWorker.start(args); }
+    durableWorkerStop(args = {}) { return this.durableWorker.stop(args); }
+    durableWorkerEnqueue(args) { return this.durableWorker.enqueue(args); }
+    durableWorkerTick(args = {}) { return this.durableWorker.tick(args); }
+    durableWorkerRecover(args = {}) { return this.durableWorker.recover(args); }
+    durableWorkerGet(args = {}) { return this.durableWorker.get(args); }
+    providerRoutePlan(args) { return this.providerRouter.plan(args); }
+    providerRouteRecord(args) { return this.providerRouter.record(args); }
+    providerRouteGet(args) { return this.providerRouter.get(args); }
+    a2aMessageSend(args) { return this.a2aProtocol.sendMessage(args); }
+    a2aMessageStream(args) { return this.a2aProtocol.streamMessage(args); }
+    a2aTaskList(args) { return this.a2aProtocol.listTasks(args); }
     workSessionPrepare(args) { return this.workSessions.prepare(args); }
     workSessionGet(args) { return this.workSessions.get(args); }
     workSessionRefresh(args) { return this.workSessions.refresh(args); }

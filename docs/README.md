@@ -59,13 +59,14 @@
 - [Tool Plane：通用动词与资源注册表](technical/modules/tool-plane.md)：工具面 O(1)、能力走数据的 syscall 接入面。
 - [Model Gateway：声明式模型接入](technical/modules/model-gateway.md)：8 家模型族的声明、分层选择与纯函数请求/响应。
 - [Internal Host：Craft 自己跑循环](technical/modules/internal-host.md)：第三个 Host Driver 与六道熔断。
-- [Runtime Truth（v0.12.10）](technical/modules/runtime-truth.zh-CN.md)：统一 Trace、Tool Call、SSE、OTLP、压缩和结构化工作笔记。
-- [Runtime Boundaries（v0.12.10）](technical/modules/v0128-runtime-boundaries.zh-CN.md)：OS 安全计划、MCP Registry、A2A Transport 与组织同步。
+- [Runtime Truth（v0.12.10 基线）](technical/modules/runtime-truth.zh-CN.md)：统一 Trace、Tool Call、SSE、OTLP、压缩和结构化工作笔记。
+- [Runtime Completion（v0.12.13）](technical/modules/v01213-runtime-completion.zh-CN.md)：受限 Action Gateway、强制 Acceptance Gate、Worker lease/recovery、Provider fallback 和摘要化 A2A 标准操作。
+- [Runtime Completion（v0.12.13）](technical/modules/v01213-runtime-completion.zh-CN.md)：有界动作、独立验收、Durable Worker、Provider fallback 与摘要级 A2A。
 - [Project Brain 与 Work Session（v0.12.10）](technical/modules/project-brain-work-session.zh-CN.md)：把目标、资料、决策、任务、成果和可复核上下文固定到项目。
 - [Workbench Experience（v0.12.10）](technical/modules/workbench-experience.zh-CN.md)：Trace、成果、Evidence 和下一步的只读体验投影。
 - [Long Task Worker（v0.12.10）](technical/modules/long-task-worker.zh-CN.md)：释放进程、事件唤醒、重新验证和新 Host 派发。
-- [Continuous Work Runtime（v0.12.12）](technical/modules/v01211-continuous-runtime.zh-CN.md)：统一 Context Manifest、受控 Replay、本地 Runtime Service、Project Bundle、Handoff、反馈、领域评测和成本归因。
-- [Verified Autonomous Work（v0.12.12）](technical/modules/v01212-verified-autonomous-work.zh-CN.md)：把动作授权、Host 回执、状态再观察、独立验收、交付门、Handoff 和平台 Conformance 串成单 Agent 主路径。
+- [Continuous Work Runtime（v0.12.12 基线）](technical/modules/v01211-continuous-runtime.zh-CN.md)：统一 Context Manifest、受控 Replay、本地 Runtime Service、Project Bundle、Handoff、反馈、领域评测和成本归因。
+- [Verified Autonomous Work（v0.12.12 基线）](technical/modules/v01212-verified-autonomous-work.zh-CN.md)：把动作授权、Host 回执、状态再观察、独立验收、交付门、Handoff 和平台 Conformance 串成单 Agent 主路径。
 - [当前能力矩阵](technical/current-capability-matrix.md)：区分已实现、本地实现、需要 Adapter 和尚未开始。
 - [v0.12.4 Platform Runtime](technical/modules/platform-runtime-v0124.md)：自主运行、Checkpoint/Resume、能力生命周期、记忆整合、远程互操作和观测导出契约。
 - [v0.12.6 通用意图与验收闭环](research/craft-v0.12.6-plan-2026-09-13.md)：统一 GUI、CLI、插件和专家入口的 Task/Acceptance Contract，并将覆盖率作为可插拔验收器。
@@ -96,4 +97,4 @@
 - [中文架构说明](architecture.zh-CN.md)
 - [English architecture](architecture.en.md)
 
-文档区分“已实现接口/机制”“真实链路已验收”和“目标/待实现”。v0.12.10 的本地接口与测试已实现；真实平台 OS 沙箱、Secret Broker、OTLP 部署、远程 A2A 和多人同步仍须由对应 Adapter 提供独立证明。有代码、100% 单元覆盖率、真实平台安全与业务质量是不同证据。
+文档区分“已实现接口/机制”“真实链路已验收”和“目标/待实现”。v0.12.13 的本地接口与测试已实现；真实平台 OS 沙箱、Secret Broker、OTLP 部署、远程 A2A 和多人同步仍须由对应 Adapter 提供独立证明。有代码、100% 单元覆盖率、真实平台安全与业务质量是不同证据。

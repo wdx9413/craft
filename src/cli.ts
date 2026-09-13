@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { createInterface } from "node:readline/promises";
+import { createHash } from "node:crypto";
 import { access } from "node:fs/promises";
 import { stdin, stdout } from "node:process";
 import { pathToFileURL } from "node:url";
@@ -16,6 +17,8 @@ import { LocalSupervisor, SupervisorClient } from "./supervisor.ts";
 import { openBrowser } from "./browser.ts";
 import { VERSION } from "./service.ts";
 import { credentialStatus, createFetchTransport, providerFromConfig } from "./model-gateway.ts";
+
+function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
 
 const HELP = `Craft
 
@@ -234,12 +237,19 @@ async function runStandalone(args: string[], paths: ReturnType<typeof craftPaths
       ...(option(args, "--max-steps") ? { limits: { max_steps: Number(option(args, "--max-steps")) } } : {}) }) as JsonObject;
     const dispatch = prepared.dispatch as JsonObject;
     service.workSessionBindDispatch({ session_id: session.id, dispatch_id: dispatch.id });
+    const context = service.contextManifestSave({ manifest_id: `context-${dispatch.id}`, project_id: effectiveProjectId, task_id: task.id, model: config.runtime.provider.model, host: "internal", acceptance_ref: `acceptance:${task.id}`, knowledge_refs: [], capability_refs: [], workflow_refs: [], excluded_refs: [], selection_rationale: ["standalone runtime context"] }).manifest as JsonObject;
+    const verified = service.verifiedWorkPrepare({ work_id: `verified-${dispatch.id}`, task_id: task.id, context_manifest_id: context.id, host: "internal", model: config.runtime.provider.model, effect: "read_only", workspace_digest: digest(paths.root), action_digest: digest({ prompt, dispatch_id: dispatch.id }), acceptance_ref: `acceptance:${task.id}` });
+    service.verifiedWorkAuthorize({ work_id: (verified.work as JsonObject).id, authorization_ref: "local-read" });
     const executed = await driver.execute({ dispatch_id: dispatch.id, prompt, ...(existingDispatch ? { resume: true } : {}) });
     const receipt = executed.receipt as JsonObject;
-    const status = receipt.status === "completed" ? "completed" : "failed";
-    const outcome = service.projectBrainOutcomeRecord({ project_id: effectiveProjectId, task_id: task.id, session_id: session.id, verdict: status, summary: String(receipt.final_message ?? receipt.failure ?? status) });
-    const completedSession = service.workSessionComplete({ session_id: session.id, status, outcome_id: (outcome.outcome as JsonObject).id, summary: String(receipt.final_message ?? receipt.failure ?? status) });
-    return { version: VERSION, project_id: effectiveProjectId, session: completedSession.session, task, ...executed, outcome } as JsonObject;
+    const hostStatus = receipt.status === "completed" ? "completed" : "failed";
+    const evidence = service.evidenceRecord({ evidence_id: `standalone-evidence-${dispatch.id}`, source_type: "program", confidence: hostStatus === "completed" ? "bounded" : "confirmed", claim: `Internal Host returned ${hostStatus}; independent acceptance is still required.`, locator: `internal-dispatch:${dispatch.id}` });
+    const artifact = service.artifactRegister({ artifact_id: `standalone-artifact-${dispatch.id}`, kind: "host_receipt", name: `Internal Host receipt ${dispatch.id}`, uri: String(receipt.uri ?? `craft://internal/${dispatch.id}`), digest: receipt.digest ?? null, producer_type: "internal_host", producer_id: dispatch.id });
+    service.verifiedWorkAction({ work_id: (verified.work as JsonObject).id, action_contract: { operation: "model_loop", dispatch_id: dispatch.id }, idempotency_key: "host-receipt", input_digest: digest(prompt), result_digest: digest(receipt) });
+    service.verifiedWorkReobserve({ work_id: (verified.work as JsonObject).id, observed_digest: digest(paths.root), expected_digest: digest(paths.root) });
+    const gate = service.acceptanceGatePrepare({ gate_id: `standalone-gate-${dispatch.id}`, task_id: task.id, work_id: (verified.work as JsonObject).id, acceptance_ref: `acceptance:${task.id}`, required_artifact_ids: [artifact.id], required_evidence_ids: [evidence.id] });
+    const completedSession = service.workSessionComplete({ session_id: session.id, status: hostStatus === "completed" ? "needs_review" : "failed", summary: hostStatus === "completed" ? "Host finished; independent acceptance is pending." : String(receipt.failure ?? "Host failed") });
+    return { version: VERSION, project_id: effectiveProjectId, session: completedSession.session, task, ...executed, acceptance: gate, outcome: null } as JsonObject;
   } finally { store.close(); }
 }
 

@@ -94,6 +94,7 @@ import { WorkbenchExperienceKernel } from "./workbench-experience.ts";
 import { LongTaskWorkerKernel } from "./long-task-worker.ts";
 import { ContextPlaneKernel, ReplayRunnerKernel, LocalRuntimeServiceKernel, ProjectBundleKernel, FeedbackLearningKernel, DomainEvaluatorKernel, HandoffManifestKernel, CostLedgerKernel } from "./v01211-runtime.ts";
 import { VerifiedAutonomousWorkKernel, SandboxConformanceKernel, TraceExplorerKernel } from "./v01212-verified-work.ts";
+import { ActionGatewayKernel, AcceptanceGateKernel, DurableWorkerKernel, ProviderRouterKernel, A2AProtocolKernel } from "./v01213-runtime.ts";
 
 /**
  * Stable composition root for the service. Domain behavior stays in focused
@@ -205,6 +206,11 @@ export abstract class ServiceFoundation {
   readonly verifiedAutonomousWork: VerifiedAutonomousWorkKernel;
   readonly sandboxConformance: SandboxConformanceKernel;
   readonly traceExplorer: TraceExplorerKernel;
+  readonly actionGateway: ActionGatewayKernel;
+  readonly acceptanceGates: AcceptanceGateKernel;
+  readonly durableWorker: DurableWorkerKernel;
+  readonly providerRouter: ProviderRouterKernel;
+  readonly a2aProtocol: A2AProtocolKernel;
 
   constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter = new LocalIsolatedAdapter(),
     dockerSandbox = new DockerSandboxAdapter(), egressBroker = new TrustedEgressBroker(), hostOwnerId?: string,
@@ -304,6 +310,11 @@ export abstract class ServiceFoundation {
     this.verifiedAutonomousWork = new VerifiedAutonomousWorkKernel(store);
     this.sandboxConformance = new SandboxConformanceKernel(store);
     this.traceExplorer = new TraceExplorerKernel(store);
+    this.actionGateway = new ActionGatewayKernel(store);
+    this.acceptanceGates = new AcceptanceGateKernel(store);
+    this.durableWorker = new DurableWorkerKernel(store);
+    this.providerRouter = new ProviderRouterKernel(store);
+    this.a2aProtocol = new A2AProtocolKernel();
     this.hostRuns = new HostRunKernel(store, [...this.hostDrivers.values()], hostOwnerId,
       (run, receipt) => this.finalizeWorkLaunch(run, receipt), this.trace);
   }

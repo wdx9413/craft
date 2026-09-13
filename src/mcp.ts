@@ -16,7 +16,7 @@ const schemaFor = (name: string): JsonObject => {
   if (["completed", "pending", "decisions", "artifacts", "steps", "cases", "capabilities",
     "allowed_side_effects", "approved_side_effects", "nodes", "artifact_ids", "evidence_ids",
     "trial_ids", "requirements", "grade_ids", "pattern_ids", "failure_modes", "receipt_ids", "criteria", "acceptance_criteria", "allowed_extensions", "fields", "capability_requirements", "object_schemas", "components", "action_contracts", "tags", "claim_ids", "evidence_ids", "expected_claim_ids", "case_ids",
-    "allowed_operations", "allowed_effects", "require_approval_for", "operations", "subjects", "children", "trusted_hosts", "command_allowlist", "path_allowlist", "kinds", "effects", "allowed_kinds", "dependencies", "aliases", "assets", "asset_ids", "connector_ticket_ids", "artifact_ids", "final_artifact_ids", "evidence_ids", "gold_case_ids", "output_contract", "trial_ids", "include_paths", "affected_paths", "object_ids", "depends_on", "source_paths", "applies_to", "patches", "snapshot_refs", "triggers", "allowed_hosts", "allowed_actions", "approval_required_actions", "detected_instructions", "citations", "allowed_fields", "argv", "sources", "budget_ids", "recovery_item_ids", "memory_kinds", "object_types", "required_memory_ids", "required_object_ids", "benchmark_ids", "memory_ids", "paths", "state_paths", "turns", "messages", "events", "decisions", "constraints", "open_questions", "artifacts", "roles", "changed_paths", "materials", "non_goals", "input_refs", "output_refs", "evidence_ids", "contamination_flags", "trace_ids", "knowledge_refs", "capability_refs", "workflow_refs", "excluded_refs", "selection_rationale"].includes(name)) return { type: "array" };
+    "allowed_operations", "allowed_effects", "require_approval_for", "operations", "subjects", "children", "trusted_hosts", "command_allowlist", "path_allowlist", "kinds", "effects", "allowed_kinds", "dependencies", "aliases", "assets", "asset_ids", "connector_ticket_ids", "artifact_ids", "final_artifact_ids", "evidence_ids", "gold_case_ids", "output_contract", "trial_ids", "include_paths", "affected_paths", "object_ids", "depends_on", "source_paths", "applies_to", "patches", "snapshot_refs", "triggers", "allowed_hosts", "allowed_actions", "approval_required_actions", "detected_instructions", "citations", "allowed_fields", "argv", "sources", "providers", "budget_ids", "recovery_item_ids", "memory_kinds", "object_types", "required_memory_ids", "required_object_ids", "benchmark_ids", "memory_ids", "paths", "state_paths", "turns", "messages", "events", "decisions", "constraints", "open_questions", "artifacts", "roles", "changed_paths", "materials", "non_goals", "input_refs", "output_refs", "evidence_ids", "contamination_flags", "trace_ids", "knowledge_refs", "capability_refs", "workflow_refs", "excluded_refs", "selection_rationale"].includes(name)) return { type: "array" };
   return { type: "string" };
 };
 const objectSchema = (required: string[] = [], optional: string[] = []): JsonObject => ({ type: "object",
@@ -827,6 +827,26 @@ export const TOOLS: Tool[] = [
   tool("craft_sandbox_conformance_admit", "Admit an effect only when the exact platform profile is verified, isolated and network-denied.", ["effect"], false, ["profile_id"]),
   tool("craft_sandbox_conformance_get", "Read one platform conformance profile.", ["profile_id"], true),
   tool("craft_trace_explorer_query", "Query a content-free Trace Explorer projection with event digests for Workbench diagnostics.", [], true, ["task_id", "status", "limit"]),
+  tool("craft_action_gateway_prepare", "Prepare one bounded workspace action with an effect and input digest.", ["task_id", "workspace", "operation", "input_digest"], false, ["action_id", "effect", "approval_ref"]),
+  tool("craft_action_gateway_execute", "Execute one prepared workspace read/write; shell, browser and MCP actions require external adapters.", ["action_id", "relative_path"], false, ["content", "approved"]),
+  tool("craft_action_gateway_get", "Read one action contract and receipt.", ["action_id"], true),
+  tool("craft_acceptance_gate_prepare", "Prepare an independent acceptance gate; Host completion is not a passing verdict.", ["task_id", "work_id", "acceptance_ref"], false, ["gate_id", "required_artifact_ids", "required_evidence_ids"]),
+  tool("craft_acceptance_gate_assess", "Assess an independent acceptance gate with artifact and evidence references.", ["gate_id", "verdict"], false, ["artifact_ids", "evidence_ids", "assessor"]),
+  tool("craft_acceptance_gate_outcome", "Create a verified Outcome only from a passed acceptance gate.", ["gate_id"], false, ["summary"]),
+  tool("craft_acceptance_gate_get", "Read one acceptance gate.", ["gate_id"], true),
+  tool("craft_durable_worker_configure", "Configure the local Worker lease and recovery policy.", [], false, ["worker_id", "startup", "notification", "lease_ttl_ms"]),
+  tool("craft_durable_worker_start", "Start the local Worker state machine; an OS service still owns the process.", [], false, ["worker_id"]),
+  tool("craft_durable_worker_stop", "Stop the local Worker state machine.", [], false, ["worker_id"]),
+  tool("craft_durable_worker_enqueue", "Enqueue one durable Worker job.", ["task_id", "action"], false, ["worker_id", "job_id", "payload"]),
+  tool("craft_durable_worker_tick", "Lease pending Worker jobs in one bounded tick.", [], false, ["worker_id", "now"]),
+  tool("craft_durable_worker_recover", "Return expired Worker leases to pending with a recovery receipt.", [], false, ["worker_id", "now"]),
+  tool("craft_durable_worker_get", "Read Worker state and jobs.", [], true, ["worker_id"]),
+  tool("craft_provider_route_plan", "Plan preferred and fallback model providers with a bounded budget digest.", ["providers"], false, ["route_id", "preferred", "task_id", "budget"]),
+  tool("craft_provider_route_record", "Record which declared provider was actually used.", ["route_id", "provider"], false, ["status", "usage"]),
+  tool("craft_provider_route_get", "Read one Provider route.", ["route_id"], true),
+  tool("craft_a2a_message_send", "Send a digest-only A2A message through the standard message/send operation.", ["endpoint", "message_digest"], false, ["request_id", "context_id"]),
+  tool("craft_a2a_message_stream", "Request a digest-only A2A streaming message operation.", ["endpoint", "message_digest"], false, ["request_id", "context_id"]),
+  tool("craft_a2a_task_list", "List remote A2A tasks without importing raw content.", ["endpoint"], false, ["request_id", "page_token"]),
 ];
 
 const CORE_TOOL_NAMES = new Set(["craft_info", "craft_source_list", "craft_capability_search", "craft_capability_get", "craft_semantic_status", "craft_execution_policy_decide",
@@ -1355,6 +1375,26 @@ export class McpServer {
       craft_sandbox_conformance_admit: (a) => service.sandboxConformanceAdmit(a),
       craft_sandbox_conformance_get: (a) => service.sandboxConformanceGet(a),
       craft_trace_explorer_query: (a) => service.traceExplorerQuery(a),
+      craft_action_gateway_prepare: (a) => service.actionGatewayPrepare(a),
+      craft_action_gateway_execute: (a) => service.actionGatewayExecute(a),
+      craft_action_gateway_get: (a) => service.actionGatewayGet(a),
+      craft_acceptance_gate_prepare: (a) => service.acceptanceGatePrepare(a),
+      craft_acceptance_gate_assess: (a) => service.acceptanceGateAssess(a),
+      craft_acceptance_gate_outcome: (a) => service.acceptanceGateOutcome(a),
+      craft_acceptance_gate_get: (a) => service.acceptanceGateGet(a),
+      craft_durable_worker_configure: (a) => service.durableWorkerConfigure(a),
+      craft_durable_worker_start: (a) => service.durableWorkerStart(a),
+      craft_durable_worker_stop: (a) => service.durableWorkerStop(a),
+      craft_durable_worker_enqueue: (a) => service.durableWorkerEnqueue(a),
+      craft_durable_worker_tick: (a) => service.durableWorkerTick(a),
+      craft_durable_worker_recover: (a) => service.durableWorkerRecover(a),
+      craft_durable_worker_get: (a) => service.durableWorkerGet(a),
+      craft_provider_route_plan: (a) => service.providerRoutePlan(a),
+      craft_provider_route_record: (a) => service.providerRouteRecord(a),
+      craft_provider_route_get: (a) => service.providerRouteGet(a),
+      craft_a2a_message_send: (a) => service.a2aMessageSend(a),
+      craft_a2a_message_stream: (a) => service.a2aMessageStream(a),
+      craft_a2a_task_list: (a) => service.a2aTaskList(a),
     };
   }
 

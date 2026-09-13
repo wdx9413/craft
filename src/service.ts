@@ -27,7 +27,7 @@ import { dockerRequestDigest } from "./docker-sandbox.ts";
 import { egressRequestDigest } from "./egress.ts";
 import { ServiceFoundation } from "./service-foundation.ts";
 
-export const VERSION = "0.12.12";
+export const VERSION = "0.12.13";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -224,6 +224,14 @@ export class CraftService extends ServiceFoundation {
       task_checkpoint: (input) => this.taskCheckpoint(input),
       evidence_record: (input) => this.evidenceRecord(input),
       artifact_register: (input) => this.artifactRegister(input),
+      workspace_read: async (input) => {
+        const prepared = this.actionGatewayPrepare({ action_id: `internal-read-${valueDigest(input).slice(7, 23)}`, task_id: text(input.task_id, "task_id"), workspace: text(input.workspace, "workspace"), operation: "workspace_read", effect: "read_only", input_digest: valueDigest(input) });
+        return this.actionGatewayExecute({ action_id: (prepared.action as JsonObject).id, relative_path: text(input.relative_path, "relative_path") });
+      },
+      workspace_write: async (input) => {
+        const prepared = this.actionGatewayPrepare({ action_id: `internal-write-${valueDigest(input).slice(7, 23)}`, task_id: text(input.task_id, "task_id"), workspace: text(input.workspace, "workspace"), operation: "workspace_write", effect: "local_write", input_digest: valueDigest(input), ...(input.approval_ref === undefined ? {} : { approval_ref: input.approval_ref }) });
+        return this.actionGatewayExecute({ action_id: (prepared.action as JsonObject).id, relative_path: text(input.relative_path, "relative_path"), content: text(input.content, "content"), approved: input.approved === true });
+      },
     };
     const handler = permitted[action];
     if (!handler) throw new Error(`Internal host action is not permitted: ${action}`);
@@ -2978,6 +2986,26 @@ export class CraftService extends ServiceFoundation {
   sandboxConformanceAdmit(args: JsonObject): JsonObject { return this.sandboxConformance.admit(args); }
   sandboxConformanceGet(args: JsonObject): JsonObject { return this.sandboxConformance.get(args); }
   traceExplorerQuery(args: JsonObject = {}): JsonObject { return this.traceExplorer.query(args); }
+  actionGatewayPrepare(args: JsonObject): JsonObject { return this.actionGateway.prepare(args); }
+  actionGatewayExecute(args: JsonObject): Promise<JsonObject> { return this.actionGateway.execute(args); }
+  actionGatewayGet(args: JsonObject): JsonObject { return this.actionGateway.get(args); }
+  acceptanceGatePrepare(args: JsonObject): JsonObject { return this.acceptanceGates.prepare(args); }
+  acceptanceGateAssess(args: JsonObject): JsonObject { return this.acceptanceGates.assess(args); }
+  acceptanceGateOutcome(args: JsonObject): JsonObject { return this.acceptanceGates.outcome(args); }
+  acceptanceGateGet(args: JsonObject): JsonObject { return this.acceptanceGates.get(args); }
+  durableWorkerConfigure(args: JsonObject = {}): JsonObject { return this.durableWorker.configure(args); }
+  durableWorkerStart(args: JsonObject = {}): JsonObject { return this.durableWorker.start(args); }
+  durableWorkerStop(args: JsonObject = {}): JsonObject { return this.durableWorker.stop(args); }
+  durableWorkerEnqueue(args: JsonObject): JsonObject { return this.durableWorker.enqueue(args); }
+  durableWorkerTick(args: JsonObject = {}): JsonObject { return this.durableWorker.tick(args); }
+  durableWorkerRecover(args: JsonObject = {}): JsonObject { return this.durableWorker.recover(args); }
+  durableWorkerGet(args: JsonObject = {}): JsonObject { return this.durableWorker.get(args); }
+  providerRoutePlan(args: JsonObject): JsonObject { return this.providerRouter.plan(args); }
+  providerRouteRecord(args: JsonObject): JsonObject { return this.providerRouter.record(args); }
+  providerRouteGet(args: JsonObject): JsonObject { return this.providerRouter.get(args); }
+  a2aMessageSend(args: JsonObject): Promise<JsonObject> { return this.a2aProtocol.sendMessage(args); }
+  a2aMessageStream(args: JsonObject): Promise<JsonObject> { return this.a2aProtocol.streamMessage(args); }
+  a2aTaskList(args: JsonObject): Promise<JsonObject> { return this.a2aProtocol.listTasks(args); }
   workSessionPrepare(args: JsonObject): JsonObject { return this.workSessions.prepare(args); }
   workSessionGet(args: JsonObject): JsonObject { return this.workSessions.get(args); }
   workSessionRefresh(args: JsonObject): JsonObject { return this.workSessions.refresh(args); }

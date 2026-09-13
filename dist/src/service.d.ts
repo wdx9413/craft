@@ -1,7 +1,7 @@
 import { CraftStore, type JsonObject } from "./store.ts";
 import { type EmbeddingProvider } from "./semantic.ts";
 import { ServiceFoundation } from "./service-foundation.ts";
-export declare const VERSION = "0.12.12";
+export declare const VERSION = "0.12.13";
 export declare class CraftService extends ServiceFoundation {
     constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter?: unknown, dockerSandbox?: unknown, egressBroker?: unknown, hostOwnerId?: string, hostProfiles?: readonly import("./host-registry.ts").HostProfile[], modelProviders?: readonly import("./model-gateway.ts").ModelProviderSpec[], modelTransport?: import("./model-gateway.ts").ModelTransport);
     /**
@@ -570,6 +570,26 @@ export declare class CraftService extends ServiceFoundation {
     sandboxConformanceAdmit(args: JsonObject): JsonObject;
     sandboxConformanceGet(args: JsonObject): JsonObject;
     traceExplorerQuery(args?: JsonObject): JsonObject;
+    actionGatewayPrepare(args: JsonObject): JsonObject;
+    actionGatewayExecute(args: JsonObject): Promise<JsonObject>;
+    actionGatewayGet(args: JsonObject): JsonObject;
+    acceptanceGatePrepare(args: JsonObject): JsonObject;
+    acceptanceGateAssess(args: JsonObject): JsonObject;
+    acceptanceGateOutcome(args: JsonObject): JsonObject;
+    acceptanceGateGet(args: JsonObject): JsonObject;
+    durableWorkerConfigure(args?: JsonObject): JsonObject;
+    durableWorkerStart(args?: JsonObject): JsonObject;
+    durableWorkerStop(args?: JsonObject): JsonObject;
+    durableWorkerEnqueue(args: JsonObject): JsonObject;
+    durableWorkerTick(args?: JsonObject): JsonObject;
+    durableWorkerRecover(args?: JsonObject): JsonObject;
+    durableWorkerGet(args?: JsonObject): JsonObject;
+    providerRoutePlan(args: JsonObject): JsonObject;
+    providerRouteRecord(args: JsonObject): JsonObject;
+    providerRouteGet(args: JsonObject): JsonObject;
+    a2aMessageSend(args: JsonObject): Promise<JsonObject>;
+    a2aMessageStream(args: JsonObject): Promise<JsonObject>;
+    a2aTaskList(args: JsonObject): Promise<JsonObject>;
     workSessionPrepare(args: JsonObject): JsonObject;
     workSessionGet(args: JsonObject): JsonObject;
     workSessionRefresh(args: JsonObject): JsonObject;
