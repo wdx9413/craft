@@ -16,7 +16,8 @@ export class LongTaskWorkerKernel {
     if (taskRun && taskRun.contract_id && taskRun.launch_id && this.store.get("work_launch", String(taskRun.launch_id)).task_id !== session.task_id) throw new Error("Task Run does not belong to the session");
     const checkpointId = String(args.checkpoint_id ?? `long_task_${randomUUID().replaceAll("-", "")}`); const waitCondition = text(args.wait_condition, "wait_condition"); const resumeAction = text(args.resume_action ?? "revalidate_and_resume", "resume_action"); const state = { session_id: session.id, session_version: session.version, task_run_id: taskRun?.id ?? null, task_run_version: taskRun?.version ?? null, host_run_id: args.host_run_id ?? null, wait_condition: waitCondition, resume_action: resumeAction, context_digest: session.context_digest, state_digest: digest({ session: session.id, session_version: session.version, task_run: taskRun?.id ?? null, task_run_version: taskRun?.version ?? null, wait_condition: waitCondition, resume_action: resumeAction }) };
     const existing = this.store.find("long_task_checkpoint", checkpointId); if (existing) { if (existing.state_digest !== state.state_digest) throw new Error("Long Task checkpoint idempotency conflict"); return { checkpoint: existing, idempotent: true }; }
-    const checkpoint = this.store.create("long_task_checkpoint", checkpointId, { ...state, status: "waiting", released: true, wake_signal_digest: null, created_at_input: now(args.now), last_revalidated_at: null, failure: null });
+    const expiresAt = args.expires_at === undefined ? null : now(args.expires_at);
+    const checkpoint = this.store.create("long_task_checkpoint", checkpointId, { ...state, status: "waiting", released: true, wake_signal_digest: null, expires_at: expiresAt, created_at_input: now(args.now), last_revalidated_at: null, failure: null });
     return { checkpoint, idempotent: false, host_released: true };
   }
 
@@ -34,4 +35,15 @@ export class LongTaskWorkerKernel {
   get(args: JsonObject): JsonObject { return { checkpoint: this.store.get("long_task_checkpoint", text(args.checkpoint_id, "checkpoint_id")) }; }
 
   list(args: JsonObject = {}): JsonObject { const limit = args.limit === undefined ? 50 : Number(args.limit); if (!Number.isInteger(limit) || limit < 1 || limit > 500) throw new Error("limit must be an integer between 1 and 500"); return { checkpoints: this.store.list("long_task_checkpoint", limit, (item) => args.session_id === undefined || item.session_id === args.session_id) }; }
+
+  /** One bounded background-worker tick for expiry and externally woken checkpoints. */
+  tick(args: JsonObject = {}): JsonObject {
+    const at = now(args.now); const due = this.store.list("long_task_checkpoint", 500, (item) => ["waiting", "wake_requested"].includes(String(item.status)) && (item.expires_at === null || item.expires_at === undefined || Date.parse(String(item.expires_at)) <= Date.parse(at)));
+    const processed: JsonObject[] = [];
+    for (const checkpoint of due) {
+      if (checkpoint.status === "waiting") processed.push(this.store.save("long_task_checkpoint", String(checkpoint.id), { ...payload(checkpoint), status: "needs_replan", failure: [{ component: "wait", issue: "expired" }], last_revalidated_at: at, resume_mode: "replan" }));
+      else processed.push(this.resume({ checkpoint_id: checkpoint.id, now: at }).checkpoint as JsonObject);
+    }
+    return { at, processed, count: processed.length, content_free: true };
+  }
 }

@@ -1,4 +1,6 @@
-# Project Brain and Work Session (v0.12.9)
+# Project Brain and Work Session (v0.12.10; v0.12.9 baseline)
+
+> The core objects were introduced in v0.12.9. v0.12.10 adds CLI run, Internal Host binding, and Registry/A2A/long-task integration; see the [v0.12.10 runtime vertical slice](v01210-product-runtime.en.md).
 
 v0.12.9 makes a project the user-facing continuity object. Project Brain projects goals, material references, decisions, tasks, outcomes, and candidate experience. Work Session pins the exact knowledge, capability, Workflow, model, Host, and acceptance context for one task.
 

@@ -762,8 +762,11 @@ export const TOOLS: Tool[] = [
   tool("craft_mcp_registry_source_register", "Register an HTTPS MCP Registry source with an explicit trust class; no network request is performed.", ["endpoint"], false, ["source_id", "trust", "key_digest"]),
   tool("craft_mcp_registry_server_ingest", "Ingest one digest-pinned MCP server metadata record from a trusted registry source.", ["source_id", "name", "version", "endpoint", "digest"], false, ["server_id", "capabilities"]),
   tool("craft_mcp_registry_health_record", "Record an MCP server health result without treating health as a trust decision.", ["server_id"], false, ["health_id", "status", "checked_at", "evidence_digest"]),
+  tool("craft_mcp_registry_sync", "Fetch one registry page through an HTTPS adapter and ingest digest-pinned server metadata; it never activates a server.", ["source_id"], false, ["list_url"]),
   tool("craft_mcp_registry_revoke", "Revoke one MCP registry server version and preserve the audit record.", ["server_id", "reason"]),
   tool("craft_a2a_transport_dispatch", "Dispatch a digest-only HTTPS A2A envelope and return a bounded remote receipt.", ["endpoint", "request_id", "agent", "operation", "input_digest"]),
+  tool("craft_a2a_transport_task_get", "Read a remote A2A task status and Artifact references without importing raw content.", ["endpoint", "task_id"]),
+  tool("craft_a2a_transport_task_cancel", "Request cancellation of one remote A2A task with a digest-only reason.", ["endpoint", "task_id"], false, ["reason"]),
   tool("craft_org_sync_prepare", "Prepare an encrypted-adapter organization sync manifest with conflict and deletion-tombstone semantics.", ["workspace_id"], false, ["sync_id", "member_ids", "record_refs"]),
   tool("craft_org_sync_apply", "Apply an organization sync manifest only when the base digest still matches.", ["sync_id", "base_digest"], false, ["current_digest", "tombstones"]),
   tool("craft_project_brain_open", "Open the durable user-facing Project Brain that joins goals, materials, tasks, decisions, outcomes, and reusable experience.", ["project_id"], false, ["brain_id", "name", "description"]),
@@ -778,6 +781,7 @@ export const TOOLS: Tool[] = [
   tool("craft_work_session_get", "Read a content-free Work Session context plan and selection rationale.", ["session_id"], true),
   tool("craft_work_session_refresh", "Re-observe a Work Session and fail closed on task or Project Brain drift.", ["session_id"], false),
   tool("craft_work_session_bind_launch", "Bind one exact Work Launch to the prepared Work Session.", ["session_id", "launch_id"], false),
+  tool("craft_work_session_bind_dispatch", "Bind one exact standalone internal Host dispatch to the prepared Work Session.", ["session_id", "dispatch_id"], false),
   tool("craft_work_session_complete", "Close a Work Session with an independently observed result summary digest.", ["session_id", "summary"], false, ["status", "outcome_id"]),
   tool("craft_workbench_experience_query", "Read the Workbench project/task/session projection: trace timeline, launches, outcomes, artifacts, and next action.", [], true, ["project_id", "task_id", "session_id", "limit"]),
   tool("craft_workbench_experience_get", "Read one Work Session-centered Workbench projection.", ["session_id"], true, ["limit"]),
@@ -788,6 +792,7 @@ export const TOOLS: Tool[] = [
   tool("craft_long_task_resume", "Revalidate a woken long task and return a fresh Host dispatch plan or a fail-closed replan.", ["checkpoint_id"], false, ["now"]),
   tool("craft_long_task_get", "Read one long-task checkpoint and its current state.", ["checkpoint_id"], true),
   tool("craft_long_task_list", "List durable long-task checkpoints for the Workbench recovery view.", [], true, ["session_id", "limit"]),
+  tool("craft_long_task_tick", "Run one bounded background-worker tick for expired or externally woken checkpoints.", [], false, ["now"]),
 ];
 
 const CORE_TOOL_NAMES = new Set(["craft_info", "craft_source_list", "craft_capability_search", "craft_capability_get", "craft_semantic_status", "craft_execution_policy_decide",
@@ -1253,9 +1258,9 @@ export class McpServer {
       craft_os_security_verify: (a) => service.osSecurityVerify(a),
       craft_mcp_registry_source_register: (a) => service.mcpRegistrySourceRegister(a),
       craft_mcp_registry_server_ingest: (a) => service.mcpRegistryServerIngest(a),
-      craft_mcp_registry_health_record: (a) => service.mcpRegistryHealthRecord(a),
+      craft_mcp_registry_health_record: (a) => service.mcpRegistryHealthRecord(a), craft_mcp_registry_sync: (a) => service.mcpRegistrySync(a),
       craft_mcp_registry_revoke: (a) => service.mcpRegistryRevoke(a),
-      craft_a2a_transport_dispatch: (a) => service.a2aTransportDispatch(a),
+      craft_a2a_transport_dispatch: (a) => service.a2aTransportDispatch(a), craft_a2a_transport_task_get: (a) => service.a2aTransportTaskGet(a), craft_a2a_transport_task_cancel: (a) => service.a2aTransportTaskCancel(a),
       craft_org_sync_prepare: (a) => service.orgSyncPrepare(a),
       craft_org_sync_apply: (a) => service.orgSyncApply(a),
       craft_project_brain_open: (a) => service.projectBrainOpen(a),
@@ -1270,6 +1275,7 @@ export class McpServer {
       craft_work_session_get: (a) => service.workSessionGet(a),
       craft_work_session_refresh: (a) => service.workSessionRefresh(a),
       craft_work_session_bind_launch: (a) => service.workSessionBindLaunch(a),
+      craft_work_session_bind_dispatch: (a) => service.workSessionBindDispatch(a),
       craft_work_session_complete: (a) => service.workSessionComplete(a),
       craft_workbench_experience_query: (a) => service.workbenchExperienceQuery(a),
       craft_workbench_experience_get: (a) => service.workbenchExperienceGet(a),
@@ -1280,6 +1286,7 @@ export class McpServer {
       craft_long_task_resume: (a) => service.longTaskResume(a),
       craft_long_task_get: (a) => service.longTaskGet(a),
       craft_long_task_list: (a) => service.longTaskList(a),
+      craft_long_task_tick: (a) => service.longTaskTick(a),
     };
   }
 

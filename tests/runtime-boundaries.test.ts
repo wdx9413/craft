@@ -9,7 +9,7 @@ import { CraftService } from "../src/service.ts";
 import { McpServer } from "../src/mcp.ts";
 import { A2ATransportKernel } from "../src/a2a-transport.ts";
 
-test("v0.12.9 security, registry, A2A and organization boundaries are fail closed", async () => {
+test("v0.12.10 security, registry, A2A and organization boundaries are fail closed", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-boundaries-")); const store = await new CraftStore(craftPaths(root)).open();
   try {
     const service = new CraftService(store);
@@ -29,6 +29,12 @@ test("v0.12.9 security, registry, A2A and organization boundaries are fail close
     const remote = await transport.dispatch({ endpoint: "https://agent.example/a2a", request_id: "req", agent: "agent", operation: "run", input_digest: "sha256:input" }, async (_url, init) => { sent.push(JSON.parse(String(init?.body)) as JsonObject); return { status: 202, json: async () => ({ remote_id: "remote", status: "accepted" }) }; });
     assert.equal(remote.raw_content, false); assert.equal(sent[0]!.execution_authority, false); await assert.rejects(() => transport.dispatch({ endpoint: "http://bad", request_id: "r", agent: "a", operation: "o", input_digest: "d" }), /HTTPS/);
     await assert.rejects(() => service.a2aTransportDispatch({ endpoint: "http://bad", request_id: "service-request", agent: "a", operation: "o", input_digest: "d" }), /HTTPS/);
+    const registrySync = await service.mcpRegistry.sync({ source_id: "source", list_url: "https://registry.example/list" }, async () => ({ status: 200, json: async () => ({ servers: [{ server_id: "synced", name: "sync", version: "1.0.0", endpoint: "https://sync.example", digest: "sha256:sync" }] }) }));
+    assert.equal(registrySync.count, 1);
+    const taskGet = await transport.taskGet({ endpoint: "https://agent.example/a2a", task_id: "remote-task" }, async (url, init) => { assert.equal(url, "https://agent.example/a2a/tasks/remote-task"); assert.equal(init?.method, "GET"); return { status: 200, json: async () => ({ status: "working", artifact_refs: ["artifact:1"] }) }; });
+    assert.equal(taskGet.status, "working");
+    const taskCancel = await transport.taskCancel({ endpoint: "https://agent.example/a2a", task_id: "remote-task", reason: "stop" }, async (url, init) => { assert.equal(url, "https://agent.example/a2a/tasks/remote-task:cancel"); assert.equal(init?.method, "POST"); return { status: 200, json: async () => ({ status: "canceled" }) }; });
+    assert.equal(taskCancel.canceled, true);
     const manifest = service.orgSyncPrepare({ sync_id: "sync", workspace_id: "workspace", member_ids: ["member"], record_refs: ["task"] });
     assert.equal((service.orgSyncApply({ sync_id: "sync", base_digest: (manifest.manifest as JsonObject).manifest_digest, tombstones: ["old"] }).status), "applied");
     assert.equal((service.orgSyncApply({ sync_id: "sync", base_digest: "sha256:stale" }).status), "conflict");
@@ -39,7 +45,10 @@ test("v0.12.9 security, registry, A2A and organization boundaries are fail close
     assert.equal((await call("craft_mcp_registry_server_ingest", { source_id: "mcp-source", server_id: "mcp-server", name: "demo", version: "1", endpoint: "https://server.example", digest: "sha256:d" })).isError, false);
     assert.equal((await call("craft_mcp_registry_health_record", { server_id: "mcp-server" })).isError, false);
     assert.equal((await call("craft_mcp_registry_revoke", { server_id: "mcp-server", reason: "test" })).isError, false);
+    assert.equal((await call("craft_mcp_registry_sync", { source_id: "mcp-source", list_url: "http://invalid" })).isError, true);
     assert.equal((await call("craft_a2a_transport_dispatch", { endpoint: "http://invalid", request_id: "mcp-request", agent: "a", operation: "o", input_digest: "d" })).isError, true);
+    assert.equal((await call("craft_a2a_transport_task_get", { endpoint: "http://invalid", task_id: "remote-task" })).isError, true);
+    assert.equal((await call("craft_a2a_transport_task_cancel", { endpoint: "http://invalid", task_id: "remote-task" })).isError, true);
     assert.equal((await call("craft_org_sync_prepare", { sync_id: "mcp-sync", workspace_id: "workspace" })).isError, false);
     assert.equal((await call("craft_org_sync_apply", { sync_id: "mcp-sync", base_digest: "sha256:stale" })).isError, false);
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }

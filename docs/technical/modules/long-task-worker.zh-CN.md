@@ -1,4 +1,6 @@
-# Long Task Worker（v0.12.9）
+# Long Task Worker（v0.12.10；v0.12.9 基线）
+
+> v0.12.10 adds a bounded worker tick for expiry and wake processing; a fresh Host and session revalidation are still required.
 
 长任务采用可持久化协议：
 

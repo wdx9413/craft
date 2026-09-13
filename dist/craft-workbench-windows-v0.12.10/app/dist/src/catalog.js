@@ -1,0 +1,358 @@
+import { createHash } from "node:crypto";
+import { readdir, readFile, realpath, stat } from "node:fs/promises";
+import { basename, join, relative, resolve } from "node:path";
+import { parse } from "yaml";
+import { cosine, sanitizeEmbeddingText, semanticFailureReason } from "./semantic.js";
+import { CraftStore } from "./store.js";
+function stableId(prefix, value) {
+    return `${prefix}_${createHash("sha256").update(value).digest("hex").slice(0, 20)}`;
+}
+function metadataTerms(metadata) {
+    const aliases = metadata.aliases;
+    if (typeof aliases === "string")
+        return [aliases];
+    return Array.isArray(aliases) ? aliases.filter((value) => typeof value === "string") : [];
+}
+function declarationKey(item) {
+    const metadata = item.metadata;
+    const explicit = metadata.capability_id ?? metadata.id;
+    return `${item.kind}:${typeof explicit === "string" && explicit.trim() ? explicit.trim().toLowerCase() : String(item.name).trim().toLowerCase()}`;
+}
+function rerank(query, item) {
+    const normalized = query.trim().toLowerCase();
+    const terms = normalized.split(/\s+/).filter(Boolean);
+    const name = String(item.name).toLowerCase();
+    const description = String(item.description).toLowerCase();
+    const aliases = metadataTerms(item.metadata).join(" ").toLowerCase();
+    const matchedTerms = terms.filter((term) => `${name}\n${description}\n${aliases}`.includes(term));
+    const exactName = name === normalized;
+    const exactDescription = description.includes(normalized);
+    const aliasMatch = aliases.includes(normalized);
+    const lexical = Number(item.score);
+    return { ...item, score: lexical + matchedTerms.length * 10 + Number(exactName) * 100 + Number(exactDescription) * 40 + Number(aliasMatch) * 60,
+        match: { matched_terms: matchedTerms, exact_name: exactName, exact_description: exactDescription, alias_match: aliasMatch } };
+}
+export function pathKey(path, platform = process.platform) {
+    return platform === "win32" ? path.toLowerCase() : path;
+}
+export function parseSkill(text, fallback) {
+    let metadata = {};
+    let body = text;
+    if (text.startsWith("---\n") || text.startsWith("---\r\n")) {
+        const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(text);
+        if (match) {
+            const parsed = parse(match[1]);
+            if (parsed && typeof parsed === "object" && !Array.isArray(parsed))
+                metadata = parsed;
+            body = text.slice(match[0].length);
+        }
+    }
+    return {
+        name: String(metadata.name || fallback),
+        description: String(metadata.description || ""),
+        version: String(metadata.version || "unversioned"),
+        body,
+        metadata,
+    };
+}
+export async function skillFiles(root, onError) {
+    const found = [];
+    const visited = new Set();
+    async function walk(directory) {
+        const actual = await realpath(directory);
+        const key = pathKey(actual);
+        if (visited.has(key))
+            return;
+        visited.add(key);
+        const entries = await readdir(directory, { withFileTypes: true });
+        entries.sort((a, b) => a.name.localeCompare(b.name));
+        for (const entry of entries) {
+            const path = join(directory, entry.name);
+            try {
+                const info = await stat(path);
+                if (info.isDirectory()) {
+                    await walk(path);
+                }
+                else if (info.isFile() && entry.name.toLowerCase() === "skill.md") {
+                    found.push(path);
+                }
+            }
+            catch (error) {
+                onError?.(path, error);
+            }
+        }
+    }
+    await walk(root);
+    return found.sort();
+}
+export class Catalog {
+    store;
+    semanticProvider;
+    #semanticStatus;
+    #degradedUntil = 0;
+    constructor(store, semanticProvider) {
+        this.store = store;
+        this.semanticProvider = semanticProvider;
+        this.#semanticStatus = semanticProvider
+            ? { mode: "configured", provider: semanticProvider.label, indexed_capabilities: 0 }
+            : { mode: "disabled", reason: "not_configured", indexed_capabilities: 0 };
+    }
+    async addSource(path, label, scan = true, priority = 0) {
+        const requested_path = resolve(path);
+        const root = await realpath(requested_path);
+        if (!(await stat(root)).isDirectory())
+            throw new Error("Capability source must be a directory.");
+        if (!Number.isInteger(priority) || priority < -1000 || priority > 1000)
+            throw new Error("Capability source priority must be an integer between -1000 and 1000.");
+        const mountKey = `${pathKey(requested_path)}:${label ?? ""}`;
+        const duplicate = this.store.list("source", Number.MAX_SAFE_INTEGER).find((item) => item.mount_key === mountKey);
+        if (duplicate)
+            return scan && duplicate.enabled ? this.scanSource(String(duplicate.id)) : duplicate;
+        const id = stableId("source", mountKey);
+        this.store.save("source", id, { label: label || basename(root), requested_path, real_path: root, mount_key: mountKey,
+            priority, enabled: true, scanned_at: null });
+        return scan ? this.scanSource(id) : this.getSource(id);
+    }
+    listSources() { return this.store.list("source", Number.MAX_SAFE_INTEGER); }
+    listLogicalCapabilities() {
+        return this.store.list("logical_capability", Number.MAX_SAFE_INTEGER).map((logical) => ({ ...logical,
+            conflicts: this.store.list("capability_conflict", Number.MAX_SAFE_INTEGER, (conflict) => conflict.logical_capability_ids.includes(String(logical.id))) }));
+    }
+    getSource(id) { return this.store.get("source", id); }
+    updateSource(id, enabled, label, priority) {
+        const current = this.getSource(id);
+        if (priority !== undefined && (!Number.isInteger(priority) || priority < -1000 || priority > 1000))
+            throw new Error("Capability source priority must be an integer between -1000 and 1000.");
+        const updated = this.store.save("source", id, { ...current,
+            enabled: enabled ?? current.enabled, label: label ?? current.label, priority: priority ?? current.priority ?? 0 });
+        this.rebuildLogicalCapabilities();
+        return updated;
+    }
+    rebuildLogicalCapabilities() {
+        const sources = new Map(this.listSources().map((source) => [String(source.id), source]));
+        const observations = this.store.list("capability", Number.MAX_SAFE_INTEGER).filter((item) => sources.get(String(item.source_id))?.enabled === true);
+        const byDigest = new Map();
+        for (const item of observations) {
+            const digest = String(item.digest);
+            byDigest.set(digest, [...(byDigest.get(digest) ?? []), item]);
+        }
+        const current = new Set();
+        const logicalByDigest = new Map();
+        for (const [digest, group] of byDigest) {
+            const logicalId = stableId("logical_capability", digest);
+            current.add(logicalId);
+            logicalByDigest.set(digest, logicalId);
+            const ordered = [...group].sort((left, right) => Number(sources.get(String(right.source_id))?.priority ?? 0) - Number(sources.get(String(left.source_id))?.priority ?? 0) || String(left.id).localeCompare(String(right.id)));
+            const selected = ordered[0];
+            const instances = ordered.map((item) => ({ capability_id: item.id, source_id: item.source_id, source_priority: Number(sources.get(String(item.source_id))?.priority ?? 0), path: item.path }));
+            this.store.save("logical_capability", logicalId, { content_digest: digest, kind: selected.kind, name: selected.name, description: selected.description, version: selected.version, metadata: selected.metadata, selected_capability_id: selected.id, selected_source_id: selected.source_id, instances, declaration_keys: [...new Set(group.map(declarationKey))].sort(), health: "healthy" });
+        }
+        for (const item of this.store.list("logical_capability", Number.MAX_SAFE_INTEGER))
+            if (!current.has(String(item.id)))
+                this.store.remove("logical_capability", String(item.id));
+        const byDeclaration = new Map();
+        for (const item of observations) {
+            const key = declarationKey(item);
+            byDeclaration.set(key, new Set([...(byDeclaration.get(key) ?? []), String(item.digest)]));
+        }
+        const conflictIds = new Set();
+        for (const [key, digests] of byDeclaration)
+            if (digests.size > 1) {
+                const conflictId = stableId("capability_conflict", key);
+                conflictIds.add(conflictId);
+                const logicalIds = [...digests].map((digest) => logicalByDigest.get(digest)).sort();
+                this.store.save("capability_conflict", conflictId, { declaration_key: key, logical_capability_ids: logicalIds, content_digests: [...digests].sort(), status: "open" });
+            }
+        for (const item of this.store.list("capability_conflict", Number.MAX_SAFE_INTEGER))
+            if (!conflictIds.has(String(item.id)))
+                this.store.remove("capability_conflict", String(item.id));
+    }
+    removeSource(id) {
+        this.getSource(id);
+        for (const capability of this.store.list("capability", Number.MAX_SAFE_INTEGER)) {
+            if (capability.source_id === id)
+                this.store.remove("capability", String(capability.id));
+        }
+        this.store.remove("source", id);
+        this.rebuildLogicalCapabilities();
+        return { id, removed: true };
+    }
+    async scanSource(id) {
+        const source = this.getSource(id);
+        if (!source.enabled)
+            throw new Error(`Capability source is disabled: ${id}`);
+        const issues = [];
+        const files = await skillFiles(String(source.real_path), (path, error) => issues.push({
+            path, error: String(error),
+        }));
+        const live = new Set();
+        let added = 0;
+        let updated = 0;
+        let unchanged = 0;
+        for (const path of files) {
+            const relative_path = relative(String(source.real_path), path).replaceAll("\\", "/");
+            const assetId = stableId("cap", `${id}:${relative_path}`);
+            live.add(assetId);
+            const fileStat = await stat(path);
+            let previous;
+            try {
+                previous = this.store.get("capability", assetId);
+            }
+            catch {
+                previous = undefined;
+            }
+            if (previous?.size === fileStat.size && previous?.mtime_ms === fileStat.mtimeMs) {
+                unchanged += 1;
+                continue;
+            }
+            const text = await readFile(path, "utf8");
+            const digest = createHash("sha256").update(text).digest("hex");
+            if (previous?.digest === digest) {
+                this.store.save("capability", assetId, { ...previous, size: fileStat.size, mtime_ms: fileStat.mtimeMs });
+                unchanged += 1;
+                continue;
+            }
+            const skill = parseSkill(text, basename(resolve(path, "..")));
+            this.store.save("capability", assetId, { ...skill, kind: "skill", source_id: id,
+                search_text: `${skill.body}\n${metadataTerms(skill.metadata).join("\n")}`,
+                relative_path, path: await realpath(path), digest, size: fileStat.size,
+                mtime_ms: fileStat.mtimeMs });
+            if (previous)
+                updated += 1;
+            else
+                added += 1;
+        }
+        let removed = 0;
+        for (const item of this.store.list("capability", Number.MAX_SAFE_INTEGER)) {
+            if (item.source_id === id && !live.has(String(item.id))) {
+                this.store.remove("capability", String(item.id));
+                removed += 1;
+            }
+        }
+        this.store.save("source", id, { ...source, scanned_at: new Date().toISOString() });
+        this.rebuildLogicalCapabilities();
+        return { ...this.getSource(id), scan: { added, updated, unchanged, removed, total: files.length,
+                issues } };
+    }
+    async scan(sourceId) {
+        if (sourceId)
+            return this.scanSource(sourceId);
+        const results = [];
+        for (const source of this.listSources().filter((item) => item.enabled)) {
+            results.push(await this.scanSource(String(source.id)));
+        }
+        return { sources: results };
+    }
+    search(query, limit = 6) {
+        const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+        if (!terms.length)
+            return [];
+        const lexical = this.store.searchCapabilities(terms, 20);
+        const aliasFallback = lexical.length ? [] : this.store.list("capability", Number.MAX_SAFE_INTEGER, (item) => {
+            const aliases = metadataTerms(item.metadata).join(" ").toLowerCase();
+            return terms.every((term) => aliases.includes(term));
+        });
+        const activeSourceIds = new Set(this.listSources().filter((source) => source.enabled === true).map((source) => String(source.id)));
+        const candidates = [...lexical, ...aliasFallback].filter((item, index, values) => (item.source_id === undefined || activeSourceIds.has(String(item.source_id))) &&
+            values.findIndex((candidate) => candidate.id === item.id) === index).map((item) => rerank(query, item))
+            .sort((left, right) => Number(right.score) - Number(left.score) || String(left.id).localeCompare(String(right.id)));
+        const sources = new Map(this.listSources().map((source) => [String(source.id), source]));
+        const selected = new Map();
+        for (const item of candidates) {
+            const key = String(item.digest);
+            const previous = selected.get(key);
+            const priority = Number(sources.get(String(item.source_id))?.priority ?? 0);
+            const previousPriority = previous ? Number(sources.get(String(previous.source_id))?.priority ?? 0) : -Infinity;
+            if (!previous || priority > previousPriority || (priority === previousPriority && String(item.id) < String(previous.id)))
+                selected.set(key, item);
+        }
+        return [...selected.values()]
+            .sort((left, right) => Number(right.score) - Number(left.score) || String(left.id).localeCompare(String(right.id)))
+            .slice(0, Math.min(Math.max(1, limit), 20)).map((item) => {
+            const { body: _body, metadata: _metadata, search_text: _searchText, ...summary } = item;
+            const logical = this.store.find("logical_capability", stableId("logical_capability", String(item.digest)));
+            const conflicts = logical ? this.store.list("capability_conflict", Number.MAX_SAFE_INTEGER, (conflict) => conflict.logical_capability_ids.includes(String(logical.id))) : [];
+            return { ...summary, logical_capability_id: logical?.id ?? null, source_instances: logical?.instances ?? [{ capability_id: item.id, source_id: item.source_id ?? null, source_priority: 0, path: item.path ?? null }], conflicts };
+        });
+    }
+    semanticStatus() { return { ...this.#semanticStatus }; }
+    async searchHybrid(query, limit = 6) {
+        const lexical = this.search(query, 20);
+        const provider = this.semanticProvider;
+        if (!provider)
+            return lexical.slice(0, Math.min(Math.max(1, limit), 20));
+        if (Date.now() < this.#degradedUntil) {
+            this.#semanticStatus = { ...this.#semanticStatus, mode: "degraded", reason: "cooldown",
+                degraded_until: new Date(this.#degradedUntil).toISOString() };
+            return lexical.slice(0, Math.min(Math.max(1, limit), 20));
+        }
+        try {
+            const vectors = await this.capabilityVectors(provider);
+            if (!vectors.length)
+                return lexical.slice(0, Math.min(Math.max(1, limit), 20));
+            const [queryVector] = await provider.embed([sanitizeEmbeddingText(query)]);
+            const semantic = vectors.map(({ capability, vector }) => ({ capability, semantic_score: cosine(queryVector, vector) }))
+                .sort((left, right) => right.semantic_score - left.semantic_score || String(left.capability.id).localeCompare(String(right.capability.id)));
+            const ranks = new Map();
+            lexical.forEach((item, index) => ranks.set(String(item.id), 1 / (60 + index + 1)));
+            semantic.forEach((item, index) => ranks.set(String(item.capability.id), (ranks.get(String(item.capability.id)) ?? 0) + 1 / (60 + index + 1)));
+            const candidates = new Map();
+            lexical.forEach((item) => candidates.set(String(item.id), item));
+            semantic.forEach((item) => candidates.set(String(item.capability.id), { ...item.capability, semantic_score: item.semantic_score }));
+            const merged = [...candidates.values()].sort((left, right) => String(left.id).localeCompare(String(right.id)))
+                .map((item) => ({ ...item, score: ranks.get(String(item.id)) * 1_000 }))
+                .map((item) => rerank(query, item))
+                .sort((left, right) => Number(right.score) - Number(left.score))
+                .slice(0, Math.min(Math.max(1, limit), 20));
+            this.#semanticStatus = { mode: "ready", provider: provider.label, indexed_capabilities: vectors.length,
+                last_success_at: new Date().toISOString() };
+            return merged.map(summary);
+        }
+        catch (error) {
+            this.#degradedUntil = Date.now() + 60_000;
+            this.#semanticStatus = { mode: "degraded", provider: provider.label, reason: semanticFailureReason(error),
+                indexed_capabilities: this.store.count("capability_embedding"), degraded_until: new Date(this.#degradedUntil).toISOString() };
+            return lexical.slice(0, Math.min(Math.max(1, limit), 20));
+        }
+    }
+    async capabilityVectors(provider) {
+        const capabilities = this.store.list("capability", Number.MAX_SAFE_INTEGER);
+        const cached = [];
+        const missing = [];
+        for (const capability of capabilities) {
+            const record = this.store.find("capability_embedding", embeddingId(String(capability.id), provider.fingerprint));
+            if (record && record.capability_digest === capability.digest && record.provider_fingerprint === provider.fingerprint && Array.isArray(record.vector)) {
+                cached.push({ capability, vector: record.vector });
+            }
+            else
+                missing.push(capability);
+        }
+        if (!missing.length)
+            return cached;
+        const embeddings = await provider.embed(missing.map(embeddingText));
+        if (embeddings.length !== missing.length)
+            throw new Error("Invalid embedding response");
+        const dimension = [...cached.map((item) => item.vector.length), ...embeddings.map((vector) => vector.length)].find(Boolean);
+        if (!dimension || embeddings.some((vector) => vector.length !== dimension))
+            throw new Error("Embedding dimensions differ");
+        const created = missing.map((capability, index) => {
+            const vector = embeddings[index];
+            this.store.save("capability_embedding", embeddingId(String(capability.id), provider.fingerprint), {
+                capability_id: capability.id, capability_digest: capability.digest, provider_fingerprint: provider.fingerprint, vector,
+            });
+            return { capability, vector };
+        });
+        return [...cached, ...created];
+    }
+    get(assetId) { return this.store.get("capability", assetId); }
+}
+function embeddingId(capabilityId, fingerprint) { return stableId("embedding", `${capabilityId}:${fingerprint}`); }
+function embeddingText(capability) {
+    return sanitizeEmbeddingText([capability.name, capability.description, metadataTerms(capability.metadata).join("\n")]
+        .filter((value) => typeof value === "string" && value.trim()).join("\n"));
+}
+function summary(item) {
+    const { body: _body, metadata: _metadata, search_text: _searchText, ...value } = item;
+    return value;
+}
+//# sourceMappingURL=catalog.js.map

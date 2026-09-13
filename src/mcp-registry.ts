@@ -5,6 +5,7 @@ function text(value: unknown, name: string): string { if (typeof value !== "stri
 function https(value: unknown, name: string): string { const result = text(value, name); if (!result.startsWith("https://")) throw new Error(`${name} must use HTTPS`); return result; }
 function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
 const TRUST = new Set(["official", "private", "community"]); const HEALTH = new Set(["healthy", "degraded", "unhealthy", "revoked"]);
+export interface RegistryFetch { (input: string, init?: { method?: string; headers?: Record<string, string> }): Promise<{ status: number; json(): Promise<unknown> }> }
 export class McpRegistryKernel {
   readonly store: CraftStore;
   constructor(store: CraftStore) { this.store = store; }
@@ -20,4 +21,15 @@ export class McpRegistryKernel {
   }
   health(args: JsonObject): JsonObject { const server = this.store.get("mcp_registry_server", text(args.server_id, "server_id")); const status = text(args.status ?? "healthy", "status"); if (!HEALTH.has(status)) throw new Error("Unsupported MCP Registry health status"); const healthId = String(args.health_id ?? `mcp_registry_health_${server.id}`); const existing = this.store.find("mcp_registry_health", healthId); const result = { server_id: server.id, status, checked_at: args.checked_at ?? new Date().toISOString(), evidence_digest: args.evidence_digest ?? null }; if (existing) return { health: existing, idempotent: true }; return { health: this.store.create("mcp_registry_health", healthId, result), idempotent: false }; }
   revoke(args: JsonObject): JsonObject { const server = this.store.get("mcp_registry_server", text(args.server_id, "server_id")); const updated = this.store.save("mcp_registry_server", String(server.id), { ...server, status: "revoked", revoke_reason: text(args.reason, "reason") }); return { server: updated, idempotent: server.status === "revoked" }; }
+
+  /** Pull one registry page through an injected adapter; metadata is still untrusted until certification. */
+  async sync(args: JsonObject, fetchImpl: RegistryFetch = fetch as unknown as RegistryFetch): Promise<JsonObject> {
+    const source = this.store.get("mcp_registry_source", text(args.source_id, "source_id")); if (source.enabled !== true) throw new Error("MCP Registry source is disabled");
+    const endpoint = https(args.list_url ?? source.endpoint, "list_url"); const response = await fetchImpl(endpoint, { method: "GET", headers: { accept: "application/json" } });
+    if (response.status < 200 || response.status >= 300) throw new Error(`MCP Registry sync HTTP ${response.status}`);
+    const body = await response.json(); const entries: unknown[] | null = Array.isArray(body) ? body : body && typeof body === "object" && Array.isArray((body as JsonObject).servers) ? (body as JsonObject).servers as unknown[] : null;
+    if (!entries) throw new Error("MCP Registry response must contain a servers array");
+    const servers: JsonObject[] = []; for (const entry of entries) { if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new Error("MCP Registry server entry must be an object"); servers.push(this.serverIngest({ source_id: source.id, ...(entry as JsonObject) }).server as JsonObject); }
+    return { source_id: source.id, endpoint, count: servers.length, servers, response_digest: digest(body) };
+  }
 }

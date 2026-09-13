@@ -1,6 +1,6 @@
-# v0.12.9 Platform Control Center
+# v0.12.10 Platform Control Center
 
-v0.12.9 把 Craft 从“可被宿主调用的治理内核”推进成可持续使用的本地工作台和 Runtime Truth 运行时。GUI 仍是本机 Workbench 应用，由 `craft gui`/`craft serve` 启动；执行权限仍由 Codex、Claude、Trae Work、WorkBuddy 或独立 Host Driver 承担。
+v0.12.10 把 Craft 从“可被宿主调用的治理内核”推进成可持续使用的本地工作台和 Runtime Truth 运行时。GUI 仍是本机 Workbench 应用，由 `craft gui`/`craft serve` 启动；执行权限仍由 Codex、Claude、Trae Work、WorkBuddy 或独立 Host Driver 承担。
 
 ## 设置与数据目录
 

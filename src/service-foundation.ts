@@ -36,7 +36,7 @@ import { ClaudeHostKernel } from "./claude-driver.ts";
 import { GenericCliHostKernel } from "./generic-driver.ts";
 import { HostRunKernel } from "./host-run.ts";
 import { type HostProfile, mergeHostProfiles } from "./host-registry.ts";
-import { InternalHostDriver } from "./internal-host-driver.ts";
+import { DEFAULT_INTERNAL_TOOLS, InternalHostDriver } from "./internal-host-driver.ts";
 import { MetricsKernel } from "./metrics.ts";
 import { PROVIDER_CATALOG, type ModelProviderSpec, type ModelTransport } from "./model-gateway.ts";
 import type { HostDriver } from "./host-driver.ts";
@@ -217,6 +217,7 @@ export abstract class ServiceFoundation {
     this.hostProfiles = mergeHostProfiles([...(hostProfiles ?? [])]);
     this.modelProviders = modelProviders && modelProviders.length ? modelProviders : PROVIDER_CATALOG;
     this.internalHost = new InternalHostDriver(store, { providers: this.modelProviders, transport: modelTransport,
+      tools: DEFAULT_INTERNAL_TOOLS,
       invokeAction: (action, args) => this.invokeInternalAction(action, args) });
     const drivers: [string, HostDriver][] = [
       ["codex-cli", this.codexHost],

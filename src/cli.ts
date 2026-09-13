@@ -26,6 +26,7 @@ Usage:
   craft doctor                  Check runtime, credentials, storage, and adapters
   craft version                 Print the Craft product version
   craft run --goal <text>       Run a governed standalone Agent task
+  craft run --project <id> ...  Attach the run to a durable Project Brain
   craft run --resume <dispatch> Resume a crashed/running dispatch with the exact goal
   craft mode <name>             Switch agent, supervisor, or provider mode
   craft paths                   Print the ~/.craft_data layout
@@ -208,23 +209,37 @@ async function runStandalone(args: string[], paths: ReturnType<typeof craftPaths
   if (config.runtime.kind !== "direct-api" || !config.runtime.provider) throw new Error("`craft run` currently requires a direct-api runtime; configure it with `craft init`.");
   const resumeId = option(args, "--resume");
   const goal = option(args, "--goal");
+  const projectId = option(args, "--project") ?? "local";
   if (!resumeId && !goal?.trim()) throw new Error("run requires --goal <text> or --resume <dispatch_id> with --goal");
   const provider = providerFromConfig(config.runtime.provider);
   const store = await new CraftStore(paths).open();
   const service = new CraftService(store, undefined, undefined, undefined, undefined, undefined, [], [provider], createFetchTransport());
   try {
     const existingDispatch = resumeId ? store.get("internal_dispatch", resumeId) : null;
+    const existingTask = existingDispatch ? store.get("task", String(existingDispatch.task_id)) : null;
+    const effectiveProjectId = existingTask?.project_id === null || existingTask?.project_id === undefined ? projectId : String(existingTask.project_id);
+    service.projectBrainOpen({ project_id: effectiveProjectId, name: effectiveProjectId });
     const task = existingDispatch
-      ? store.get("task", String(existingDispatch.task_id))
-      : service.taskOpen({ title: option(args, "--title") ?? goal!.slice(0, 80), goal }).task as JsonObject;
+      ? existingTask as JsonObject
+      : service.taskOpen({ title: option(args, "--title") ?? goal!.slice(0, 80), goal, project_id: effectiveProjectId }).task as JsonObject;
+    if (!existingDispatch) service.projectBrainGoalSave({ project_id: effectiveProjectId, title: task.title, metric: "acceptance" });
+    const existingSessionId = existingDispatch?.session_id === undefined || existingDispatch.session_id === null ? null : String(existingDispatch.session_id);
+    const session = existingSessionId
+      ? service.workSessionGet({ session_id: existingSessionId }).session as JsonObject
+      : service.workSessionPrepare({ project_id: effectiveProjectId, task_id: task.id, goal: task.goal, model: provider.provider, host: "internal", selection_rationale: ["default internal runtime", "bounded read-only Craft tool surface"] }).session as JsonObject;
     const driver = service.hostDriver("internal");
     if (!driver) throw new Error("Internal Host Driver is unavailable");
     const prompt = goal ?? String(task.goal);
-    const prepared = existingDispatch ? { dispatch: existingDispatch } : driver.prepare({ task_id: task.id, prompt, provider: provider.provider, tier: option(args, "--tier") ?? "standard",
+    const prepared = existingDispatch ? { dispatch: existingDispatch } : driver.prepare({ task_id: task.id, prompt, provider: provider.provider, session_id: session.id, context_digest: session.context_digest, tier: option(args, "--tier") ?? "standard",
       ...(option(args, "--max-steps") ? { limits: { max_steps: Number(option(args, "--max-steps")) } } : {}) }) as JsonObject;
     const dispatch = prepared.dispatch as JsonObject;
+    service.workSessionBindDispatch({ session_id: session.id, dispatch_id: dispatch.id });
     const executed = await driver.execute({ dispatch_id: dispatch.id, prompt, ...(existingDispatch ? { resume: true } : {}) });
-    return { version: VERSION, task, ...executed } as JsonObject;
+    const receipt = executed.receipt as JsonObject;
+    const status = receipt.status === "completed" ? "completed" : "failed";
+    const outcome = service.projectBrainOutcomeRecord({ project_id: effectiveProjectId, task_id: task.id, session_id: session.id, verdict: status, summary: String(receipt.final_message ?? receipt.failure ?? status) });
+    const completedSession = service.workSessionComplete({ session_id: session.id, status, outcome_id: (outcome.outcome as JsonObject).id, summary: String(receipt.final_message ?? receipt.failure ?? status) });
+    return { version: VERSION, project_id: effectiveProjectId, session: completedSession.session, task, ...executed, outcome } as JsonObject;
   } finally { store.close(); }
 }
 

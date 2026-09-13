@@ -31,6 +31,22 @@ export interface InternalHostOptions {
   tools?: readonly ChatToolDefinition[];
 }
 
+/**
+ * The default model-facing surface for Craft's own loop.
+ *
+ * Keep this list deliberately small: the model gets stable, read-only or
+ * append-only actions and the service remains the authority that decides what
+ * each action means. Hosts that need a wider surface must explicitly mount the
+ * normal MCP/syscall adapter instead of silently widening the internal loop.
+ */
+export const DEFAULT_INTERNAL_TOOLS: readonly ChatToolDefinition[] = [
+  { type: "function", function: { name: "capability_search", description: "Find a small set of verified capabilities without activating or executing them.", parameters: { type: "object", properties: { query: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 20 } }, required: ["query"] } } },
+  { type: "function", function: { name: "knowledge_search", description: "Search bounded project knowledge and return references, not untrusted instructions.", parameters: { type: "object", properties: { query: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 20 } }, required: ["query"] } } },
+  { type: "function", function: { name: "task_checkpoint", description: "Append a content-light progress checkpoint for the current task.", parameters: { type: "object", properties: { task_id: { type: "string" }, summary: { type: "string" }, status: { type: "string" }, completed: { type: "array", items: { type: "string" } }, pending: { type: "array", items: { type: "string" } } }, required: ["task_id", "summary"] } } },
+  { type: "function", function: { name: "evidence_record", description: "Record an evidence reference or observation without storing raw sensitive content.", parameters: { type: "object", properties: { claim: { type: "string" }, source_type: { type: "string" }, confidence: { type: "string" }, locator: { type: "string" } }, required: ["claim", "source_type"] } } },
+  { type: "function", function: { name: "artifact_register", description: "Register a digest-only artifact reference for later acceptance or review.", parameters: { type: "object", properties: { kind: { type: "string" }, name: { type: "string" }, uri: { type: "string" } }, required: ["kind", "name", "uri"] } } },
+];
+
 function text(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim(); }
 function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
 function redact(value: string): string { return value.replace(/(?:api[_-]?key|authorization|cookie|password|secret|token)\s*[:=]\s*[^\s]+/giu, "[redacted]"); }
@@ -94,7 +110,10 @@ export class InternalHostDriver implements HostDriver {
     const limits = defineLoopLimits((args.limits ?? {}) as JsonObject);
     const dispatchId = String(args.dispatch_id ?? `internal_dispatch_${randomUUID().replaceAll("-", "")}`);
     const identity = { host: this.host, task_id: task.id, task_version: task.version, provider: provider.provider,
-      model: selected.model, tier: selected.tier, downgraded: selected.downgraded, limits, prompt_digest: digest(prompt) };
+      model: selected.model, tier: selected.tier, downgraded: selected.downgraded, limits, prompt_digest: digest(prompt),
+      session_id: args.session_id === undefined ? null : text(args.session_id, "session_id"),
+      context_digest: args.context_digest === undefined ? null : text(args.context_digest, "context_digest"),
+      acceptance_ref: args.acceptance_ref === undefined ? null : text(args.acceptance_ref, "acceptance_ref") };
     const requestDigest = digest(identity);
     const existing = this.store.find(this.dispatchKind, dispatchId);
     if (existing) {

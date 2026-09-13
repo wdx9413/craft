@@ -1,0 +1,2 @@
+A native macOS runner must build the DMG. On macOS run: pnpm run build && pnpm run pack:desktop
+Staging app: D:\documents\project\mytest\craft\dist\craft-workbench-macos-v0.12.10.app

@@ -1,6 +1,6 @@
 # Craft
 
-> Current release: v0.12.9. Every host follows a route-first boundary with a low-token syscall MCP. GUI, CLI, Codex/Claude plugins, TraeWork, and WorkBuddy Experts share the same host-neutral Intent and Acceptance Contracts, while the Runtime Truth Layer adds bounded model Tool Calls, resumable context, standard Trace/OTLP projection, and structured work notes. Real cloud execution, marketplace publication, and OS-level isolation still require a deployment adapter or platform review; they are not claimed as shipped services.
+> Current release: v0.12.10. Every host follows a route-first boundary with a low-token syscall MCP. GUI, CLI, Codex/Claude plugins, TraeWork, and WorkBuddy Experts share the same host-neutral Intent and Acceptance Contracts, while the Runtime Truth Layer adds bounded model Tool Calls, resumable context, standard Trace/OTLP projection, and structured work notes. Real cloud execution, marketplace publication, and OS-level isolation still require a deployment adapter or platform review; they are not claimed as shipped services.
 
 [中文](README.md) | [English](README.en.md)
 
@@ -40,8 +40,8 @@ See the [product architecture (Chinese)](docs/product/architecture.zh-CN.md) and
 - Versioned Workflows with inputs, safe paths, redaction, side-effect approval, deterministic commands, assertions, coverage gates, and receipts.
 - Versioned evaluation-suite and Agent-profile primitives.
 - Six-dimensional Harness Configurations, immutable Trials and Outcomes, append-only Traces, automatic evidence capture for Workflow runs, and held-out-eval-gated promotion and rollback.
-- **Runtime Truth Layer (v0.12.9)**: a stable `craft.trace` envelope (with legacy `craft.trace.v1` reads), OTLP/HTTP projection, Tool Call/SSE normalization, resumable context compaction, cross-process correlation, and structured work notes. Raw prompts and business bodies stay out of evolution data; evaluation, Signoff, and Canary gates still control reuse and publication. See [Runtime Truth](docs/technical/modules/runtime-truth.en.md).
-- **Runtime Boundaries (v0.12.9)**: autonomous model-loop actions, OS security plans, MCP Registry governance, digest-only A2A transport, and organization sync are exposed through the same service/MCP base. See [Runtime Boundaries](docs/technical/modules/v0128-runtime-boundaries.en.md).
+- **Runtime Truth Layer (v0.12.10)**: a stable `craft.trace` envelope (with legacy `craft.trace.v1` reads), OTLP/HTTP projection, Tool Call/SSE normalization, resumable context compaction, cross-process correlation, and structured work notes. Raw prompts and business bodies stay out of evolution data; evaluation, Signoff, and Canary gates still control reuse and publication. See [Runtime Truth](docs/technical/modules/runtime-truth.en.md).
+- **Runtime Boundaries (v0.12.10)**: autonomous model-loop actions, OS security plans, MCP Registry governance, digest-only A2A transport, and organization sync are exposed through the same service/MCP base. See [Runtime Boundaries](docs/technical/modules/v0128-runtime-boundaries.en.md).
 - Automatic Orchestration Trial capture with pinned Agent Profile versions, dispatch and reroute traces, node costs and evidence, and terminal Outcomes.
 - Versioned Graders, provenance-preserving Grades, and Signoff Policies; a model judgment cannot masquerade as program proof.
 - Same-benchmark comparisons for Workflow, Agent Profile, and Harness Configuration versions, with aggregate quality, cost, duration, and failure-type deltas. Comparability requires the exact suite version, split, subject type, and case set.

@@ -1,0 +1,11 @@
+import { spawnSync } from "node:child_process";
+import type { JsonObject } from "./store.ts";
+export declare const SIDE_EFFECTS: Set<string>;
+export declare function resolveInputs(definitions: JsonObject[], supplied: JsonObject): JsonObject;
+export declare function substitute(value: unknown, inputs: JsonObject): unknown;
+export declare function safePath(root: string, child?: string): string;
+export declare function redact(value: string, secrets?: string[]): string;
+export declare function normalizeSteps(input: unknown[]): JsonObject[];
+export declare function approvedEffects(allowExecution: boolean, effects?: unknown[]): Set<string>;
+export declare function runStep(step: JsonObject, root: string, runtimeEnv?: NodeJS.ProcessEnv, runner?: typeof spawnSync): JsonObject;
+export declare function executeSteps(steps: JsonObject[], root: string, approved: Set<string>, executor?: typeof runStep): JsonObject[];

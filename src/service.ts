@@ -27,7 +27,7 @@ import { dockerRequestDigest } from "./docker-sandbox.ts";
 import { egressRequestDigest } from "./egress.ts";
 import { ServiceFoundation } from "./service-foundation.ts";
 
-export const VERSION = "0.12.9";
+export const VERSION = "0.12.10";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -2929,7 +2929,10 @@ export class CraftService extends ServiceFoundation {
   mcpRegistryServerIngest(args: JsonObject): JsonObject { return this.mcpRegistry.serverIngest(args); }
   mcpRegistryHealthRecord(args: JsonObject): JsonObject { return this.mcpRegistry.health(args); }
   mcpRegistryRevoke(args: JsonObject): JsonObject { return this.mcpRegistry.revoke(args); }
+  async mcpRegistrySync(args: JsonObject): Promise<JsonObject> { return this.mcpRegistry.sync(args); }
   async a2aTransportDispatch(args: JsonObject): Promise<JsonObject> { return this.a2aTransport.dispatch(args); }
+  async a2aTransportTaskGet(args: JsonObject): Promise<JsonObject> { return this.a2aTransport.taskGet(args); }
+  async a2aTransportTaskCancel(args: JsonObject): Promise<JsonObject> { return this.a2aTransport.taskCancel(args); }
   orgSyncPrepare(args: JsonObject): JsonObject { return this.orgSync.prepare(args); }
   orgSyncApply(args: JsonObject): JsonObject { return this.orgSync.apply(args); }
 
@@ -2945,6 +2948,7 @@ export class CraftService extends ServiceFoundation {
   workSessionGet(args: JsonObject): JsonObject { return this.workSessions.get(args); }
   workSessionRefresh(args: JsonObject): JsonObject { return this.workSessions.refresh(args); }
   workSessionBindLaunch(args: JsonObject): JsonObject { return this.workSessions.bindLaunch(args); }
+  workSessionBindDispatch(args: JsonObject): JsonObject { return this.workSessions.bindDispatch(args); }
   workSessionComplete(args: JsonObject): JsonObject { return this.workSessions.complete(args); }
   workbenchExperienceQuery(args: JsonObject = {}): JsonObject { return this.workbenchExperience.query(args); }
   workbenchExperienceGet(args: JsonObject): JsonObject { return this.workbenchExperience.get(args); }
@@ -2955,6 +2959,7 @@ export class CraftService extends ServiceFoundation {
   longTaskResume(args: JsonObject): JsonObject { return this.longTaskWorker.resume(args); }
   longTaskGet(args: JsonObject): JsonObject { return this.longTaskWorker.get(args); }
   longTaskList(args: JsonObject = {}): JsonObject { return this.longTaskWorker.list(args); }
+  longTaskTick(args: JsonObject = {}): JsonObject { return this.longTaskWorker.tick(args); }
 
   trialGet(args: JsonObject): JsonObject {
     const trialId = text(args.trial_id, "trial_id");

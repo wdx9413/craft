@@ -1,4 +1,6 @@
-# Project Brain 与 Work Session（v0.12.9）
+# Project Brain 与 Work Session（v0.12.10；v0.12.9 基线）
+
+> 本文描述的核心对象在 v0.12.9 建立；v0.12.10 增加 CLI run、Internal Host 绑定和 Registry/A2A/长任务联动，完整垂直切片见 [v0.12.10 产品运行时](v01210-product-runtime.zh-CN.md)。
 
 v0.12.9 把 Craft 的核心对象收敛成连续的项目工作系统：Project Brain 保存目标、资料引用、决策、任务、成果和候选经验；Work Session 将一次任务使用的知识、能力、Workflow、模型、Host 与验收合同固定成一个可复核上下文计划。
 

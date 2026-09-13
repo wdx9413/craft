@@ -42,6 +42,17 @@ export class WorkSessionKernel {
 
   bindLaunch(args: JsonObject): JsonObject { const session = this.store.get("work_session", text(args.session_id, "session_id")); const launch = this.store.get("work_launch", text(args.launch_id, "launch_id")); if (launch.task_id !== session.task_id) throw new Error("Work Launch does not belong to the session task"); const saved = this.store.save("work_session", String(session.id), { ...payload(session), launch_id: launch.id, status: "running", next_action: "observe_execution" }); return { session: saved, launch }; }
 
+  /** Bind the standalone internal Host dispatch to the same session lineage. */
+  bindDispatch(args: JsonObject): JsonObject {
+    const session = this.store.get("work_session", text(args.session_id, "session_id"));
+    const dispatch = this.store.get("internal_dispatch", text(args.dispatch_id, "dispatch_id"));
+    if (dispatch.task_id !== session.task_id) throw new Error("Internal dispatch does not belong to the session task");
+    if (dispatch.session_id !== undefined && dispatch.session_id !== session.id) throw new Error("Internal dispatch is bound to another session");
+    const savedDispatch = this.store.save("internal_dispatch", String(dispatch.id), { ...payload(dispatch), session_id: session.id, session_version: session.version, context_digest: session.context_digest });
+    const saved = this.store.save("work_session", String(session.id), { ...payload(session), dispatch_id: savedDispatch.id, status: "running", next_action: "observe_execution" });
+    return { session: saved, dispatch: savedDispatch };
+  }
+
   complete(args: JsonObject): JsonObject { const session = this.store.get("work_session", text(args.session_id, "session_id")); const status = String(args.status ?? "completed"); if (!["completed", "needs_review", "failed"].includes(status)) throw new Error("Work Session status is unsupported"); const saved = this.store.save("work_session", String(session.id), { ...payload(session), status, outcome_id: args.outcome_id === undefined ? session.outcome_id : text(args.outcome_id, "outcome_id"), completion_digest: digest(text(args.summary, "summary")), next_action: status === "completed" ? "record_experience" : "review_result" }); return { session: saved }; }
 
 }
