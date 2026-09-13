@@ -16,8 +16,7 @@ jobs:
       - uses: pnpm/action-setup@v4
         with:
           # Keep CI on the package-manager version declared in package.json.
-          # A different pnpm may try to fetch a replacement during install.
-          version: 12.3.4
+          version: 11.19.0
       - uses: actions/setup-node@v4
         with:
           node-version: 24
