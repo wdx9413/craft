@@ -34,6 +34,16 @@ function writeSchemaVersion(database: DatabaseSync, version: number): void {
   database.prepare("INSERT OR REPLACE INTO meta(key,value) VALUES('schema_version',?)").run(String(version));
 }
 
+/** Repair databases produced by older releases that recorded a newer schema
+ * version before the journal column was actually added. This is intentionally
+ * idempotent so startup can heal a partially applied migration without
+ * rewriting user records. */
+function repairKnownSchemaDrift(database: DatabaseSync, current: number): void {
+  if (current >= 2 && !columnExists(database, "meta", "applied_at")) {
+    database.exec("ALTER TABLE meta ADD COLUMN applied_at TEXT");
+  }
+}
+
 /**
  * Return true if the named column exists on the named table. Used to make
  * column-adding migrations idempotent against partial intermediate schemas
@@ -209,6 +219,7 @@ export interface ApplyResult {
 export function applyMigrations(database: DatabaseSync, target = SCHEMA_VERSION, options: ApplyOptions = {}): ApplyResult {
   ensureMetaTable(database);
   const current = readSchemaVersion(database);
+  if (!options.dryRun) repairKnownSchemaDrift(database, current);
   if (current > target) {
     throw new Error(`Craft database schema v${current} is newer than supported schema v${target}`);
   }

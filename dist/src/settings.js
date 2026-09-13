@@ -2,7 +2,7 @@ import { access, readFile } from "node:fs/promises";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { dirname } from "node:path";
-import { isAbsolute, resolve } from "node:path";
+import { resolve } from "node:path";
 import { atomicPrivateJson, craftPaths, ensureLayout } from "./paths.js";
 function number(value, name, fallback, min, max) {
     if (value === undefined)

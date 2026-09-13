@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -30,6 +30,15 @@ test("fresh database applies the full migration chain in order", () => {
   const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((r) => (r as { name: string }).name);
   assert.ok(tables.includes("effect_log"));
   assert.ok(tables.includes("policy_evaluations"));
+});
+
+test("repairs a legacy database that recorded v4 without meta.applied_at", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec("CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT NOT NULL); INSERT INTO meta(key,value) VALUES('schema_version','4');");
+  const result = applyMigrations(db, SCHEMA_VERSION);
+  assert.equal(result.applied, 0);
+  assert.ok((db.prepare("PRAGMA table_info(meta)").all() as Array<{ name: string }>).some((column) => column.name === "applied_at"));
+  db.close();
 });
 
 test("already-current database reports zero applied and does not throw", () => {
@@ -113,21 +122,23 @@ test("CraftStore.open upgrades a v0 database file in place", async () => {
   try {
     const paths = craftPaths(root);
     await mkdir(paths.databaseDir, { recursive: true });
-    // Seed a v0 schema file with no meta entry; applyMigrations must walk it up.
+    // Seed a v0 schema file with no meta table; applyMigrations must walk it up.
     const seed = new DatabaseSync(paths.databaseFile);
     seed.exec(`
-      CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
-      INSERT INTO meta(key,value) VALUES('schema_version','0');
       CREATE TABLE records(
         kind TEXT NOT NULL,id TEXT NOT NULL,version INTEGER NOT NULL,
         payload_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,
         PRIMARY KEY(kind,id,version)
       );
+      INSERT INTO records(kind,id,version,payload_json,created_at,updated_at)
+        VALUES('legacy','kept',1,'{"value":"must-survive"}','2020-01-01','2020-01-01');
     `);
     seed.close();
     const store = await new CraftStore(paths).open();
     try {
       assert.equal(schemaVersion(store.database), SCHEMA_VERSION);
+      assert.equal(store.get("legacy", "kept").value, "must-survive");
+      assert.ok((await readdir(paths.backupsDir)).some((name) => name.startsWith("craft-")));
       // v3→v4 introduces effect_log; the live store must have it.
       const tables = store.database.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((r) => (r as { name: string }).name);
       assert.ok(tables.includes("effect_log"));

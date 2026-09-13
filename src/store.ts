@@ -19,6 +19,15 @@ function validLimit(limit: number): number {
   return Math.max(1, limit);
 }
 
+function storedSchemaVersion(database: DatabaseSync): number {
+  try {
+    const row = database.prepare("SELECT value FROM meta WHERE key='schema_version'").get() as { value?: string } | undefined;
+    return Number(row?.value ?? 0);
+  } catch {
+    return 0;
+  }
+}
+
 export class CraftStore {
   readonly paths: CraftPaths;
   #database: DatabaseSync | null = null;
@@ -30,9 +39,16 @@ export class CraftStore {
   async open(): Promise<this> {
     if (this.#database) return this;
     await ensureLayout(this.paths);
+    const existed = existsSync(this.paths.databaseFile);
     const database = new DatabaseSync(this.paths.databaseFile);
     database.exec("PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA busy_timeout=15000;");
     try {
+      // Preserve an exact pre-migration copy before changing an existing
+      // database. Future-schema databases are not touched and fail closed.
+      if (existed && storedSchemaVersion(database) < SCHEMA_VERSION) {
+        database.exec("PRAGMA wal_checkpoint(FULL)");
+        this.backup();
+      }
       // Schema upgrades go through the ordered migration registry, which
       // owns its own transaction. We do not wrap it here because SQLite
       // refuses nested BEGIN IMMEDIATE. If the migration refuses the

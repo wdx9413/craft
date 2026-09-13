@@ -7387,6 +7387,11 @@ function writeSchemaVersion(database, version) {
   ensureMetaTable(database);
   database.prepare("INSERT OR REPLACE INTO meta(key,value) VALUES('schema_version',?)").run(String(version));
 }
+function repairKnownSchemaDrift(database, current2) {
+  if (current2 >= 2 && !columnExists(database, "meta", "applied_at")) {
+    database.exec("ALTER TABLE meta ADD COLUMN applied_at TEXT");
+  }
+}
 function columnExists(database, table, column) {
   const rows = database.prepare(`PRAGMA table_info(${table})`).all();
   return rows.some((row) => row.name === column);
@@ -7518,6 +7523,7 @@ function findMigration(from, to) {
 function applyMigrations(database, target = SCHEMA_VERSION, options = {}) {
   ensureMetaTable(database);
   const current2 = readSchemaVersion(database);
+  if (!options.dryRun) repairKnownSchemaDrift(database, current2);
   if (current2 > target) {
     throw new Error(`Craft database schema v${current2} is newer than supported schema v${target}`);
   }

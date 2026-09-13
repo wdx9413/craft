@@ -10,6 +10,10 @@ v0.12.5 把 Craft 从“可被宿主调用的治理内核”推进成可持续�
 
 Workbench 和 `craft usage` 读取已落盘的 Host receipt、Outcome、Autonomous Turn，按日、ISO 周、月、年及 Host 汇总 input/output/total tokens。缺失或不可信的 usage 不会被猜测；结果为空时显示零，而不是制造“节省”结论。该报表是本地可重建投影，不会保存 Prompt 正文。
 
+## 数据兼容承诺
+
+Craft 的版本升级遵循单向可迁移原则：旧数据库按有序 migration 升级，业务记录不被删除或重写；检测到旧 schema 时，打开前会在 `backups/` 保留一份原始数据库副本。已知的部分迁移状态（例如旧版本提前写入 schema 版本但遗漏 `meta.applied_at`）会在启动时幂等修复。检测到高于当前版本的数据库时则失败关闭，不会降级覆盖。跨多个大版本升级前仍建议保留整个 `~/.craft_data` 目录备份。
+
 ## 桌面分发边界
 
 Windows 原生 runner 会生成含 Node runtime、真正的 `craft.exe` 和应用资源的绿色 ZIP；双击 `craft.exe` 会隐藏命令窗口并打开浏览器 Workbench，`.cmd`/`.ps1` 仅保留给高级用户。若默认 `~/.craft_data` 在 Windows 上暂时不可写，便携启动器会回退到 `%LOCALAPPDATA%\Craft\data`；显式设置 `CRAFT_DATA_DIR` 时不做回退并弹出可读错误。macOS 原生 runner 会把 Node runtime 放进 `.app`，再使用 `hdiutil` 生成真正的 `.dmg`。Windows 当前开发机无法合法生成 macOS DMG，因此 `.github/workflows/desktop-release.yml` 在 macOS runner 上产出它；不生成伪文件冒充 DMG。
