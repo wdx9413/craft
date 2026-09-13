@@ -9169,6 +9169,90 @@ function buildChatRequest(spec, options) {
   }
   return { url: `${spec.base_url}${spec.chat_path}`, headers, body: body2, prompt_tokens_estimate: promptTokensEstimate };
 }
+function parseChatResponse(spec, payload40) {
+  if (!payload40 || typeof payload40 !== "object" || Array.isArray(payload40)) throw new Error("Model response must be an object");
+  const body2 = payload40;
+  if (spec.protocol === "anthropic") {
+    const blocks = Array.isArray(body2.content) ? body2.content : [];
+    const text74 = blocks.filter((block) => block.type === "text").map((block) => String(block.text ?? "")).join("");
+    if (!text74) throw new Error("Anthropic response contained no text block");
+    const usage2 = body2.usage;
+    return {
+      text: text74,
+      model: body2.model === void 0 ? null : String(body2.model),
+      usage: usage2 ? { input_tokens: Number(usage2.input_tokens ?? 0), output_tokens: Number(usage2.output_tokens ?? 0) } : null
+    };
+  }
+  const choices = Array.isArray(body2.choices) ? body2.choices : [];
+  const message = choices[0]?.message;
+  if (!message || typeof message.content !== "string") throw new Error("OpenAI-compatible response contained no message content");
+  const usage = body2.usage;
+  return {
+    text: message.content,
+    model: body2.model === void 0 ? null : String(body2.model),
+    usage: usage ? { input_tokens: Number(usage.prompt_tokens ?? 0), output_tokens: Number(usage.completion_tokens ?? 0) } : null
+  };
+}
+function responseError(status, body2) {
+  const detail = body2.replace(/\s+/gu, " ").trim().slice(0, 300);
+  return new Error(`Model request failed with HTTP ${status}${detail ? `: ${detail}` : ""}`);
+}
+function createFetchTransport(options = {}) {
+  const env = options.env ?? process.env;
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const timeoutMs = options.timeoutMs ?? 6e4;
+  const maxAttempts = options.maxAttempts ?? 3;
+  const maxResponseBytes = options.maxResponseBytes ?? 8 * 1024 * 1024;
+  if (!Number.isInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 3e5) throw new Error("timeoutMs must be between 100 and 300000");
+  if (!Number.isInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 5) throw new Error("maxAttempts must be between 1 and 5");
+  if (!Number.isInteger(maxResponseBytes) || maxResponseBytes < 1024) throw new Error("maxResponseBytes must be at least 1024");
+  return {
+    complete: async (spec, request2) => {
+      const key2 = env[spec.api_key_env]?.trim();
+      if (!key2) throw new Error(`Provider ${spec.provider} is not configured; set ${spec.api_key_env} before running Craft.`);
+      const headers = { "content-type": "application/json" };
+      if (spec.protocol === "anthropic") {
+        headers["x-api-key"] = key2;
+        headers["anthropic-version"] = "2023-06-01";
+      } else {
+        headers.authorization = `Bearer ${key2}`;
+      }
+      let lastError;
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        let retryable = true;
+        try {
+          const response = await fetchImpl(request2.url, { method: "POST", headers, body: JSON.stringify(request2.body), signal: controller.signal });
+          const body2 = await response.text();
+          if (body2.length > maxResponseBytes) throw new Error(`Model response exceeded ${maxResponseBytes} bytes`);
+          if (response.ok) {
+            let parsed;
+            try {
+              parsed = JSON.parse(body2);
+            } catch {
+              throw new Error("Model response was not valid JSON");
+            }
+            return parseChatResponse(spec, parsed);
+          }
+          lastError = responseError(response.status, body2);
+          retryable = [408, 429, 500, 502, 503, 504].includes(response.status);
+          if (!retryable || attempt === maxAttempts) throw lastError;
+          const retryAfter = Number(response.headers.get("retry-after") ?? "0");
+          await new Promise((resolve19) => setTimeout(resolve19, Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter * 1e3, 1e4) : attempt * 250));
+        } catch (error) {
+          lastError = error instanceof Error ? error : new Error(String(error));
+          if (!retryable || attempt === maxAttempts) throw lastError;
+          if (lastError.name === "AbortError") lastError = new Error(`Model request timed out after ${timeoutMs}ms`);
+          await new Promise((resolve19) => setTimeout(resolve19, attempt * 250));
+        } finally {
+          clearTimeout(timer);
+        }
+      }
+      throw lastError;
+    }
+  };
+}
 var unconfiguredTransport = {
   complete: async (spec) => {
     throw new Error(`No model transport is installed for provider ${spec.provider}; set ${spec.api_key_env} and enable the internal host before running the loop.`);
@@ -15924,9 +16008,9 @@ var InternalHostDriver = class {
     if (!options.providers.length) throw new Error("The internal host requires at least one declared provider");
     this.store = store;
     this.providers = options.providers;
-    this.transport = options.transport ?? unconfiguredTransport;
-    this.invokeAction = options.invokeAction;
     this.env = options.env ?? process.env;
+    this.transport = options.transport ?? createFetchTransport({ env: this.env });
+    this.invokeAction = options.invokeAction;
   }
   receiptKind() {
     return "internal_receipt";
@@ -19811,7 +19895,7 @@ var ServiceFoundation = class {
 };
 
 // src/service.ts
-var VERSION = "0.12.1";
+var VERSION = "0.12.2";
 var CONFIDENCE = /* @__PURE__ */ new Set(["confirmed", "bounded", "unverified", "rejected"]);
 var TASK_STATUS = /* @__PURE__ */ new Set(["active", "paused", "completed", "cancelled"]);
 var VERSIONED_LIFECYCLE = /* @__PURE__ */ new Set(["draft", "candidate", "verified", "deprecated"]);

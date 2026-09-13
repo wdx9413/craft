@@ -5,8 +5,8 @@ import { join } from "node:path";
 import test from "node:test";
 import { beginLoop, budgetBand, completeLoop, defineLoopLimits, failLoop, loopSummary, observeStep } from "../src/agent-loop.ts";
 import { InternalHostDriver, parseAction } from "../src/internal-host-driver.ts";
-import { PROVIDER_CATALOG, buildChatRequest, credentialStatus, defineProvider, parseChatResponse,
-  publicProvider, selectModel, unconfiguredTransport, type ChatRequest, type ChatResult,
+import { PROVIDER_CATALOG, buildChatRequest, credentialStatus, createFetchTransport, defineProvider, parseChatResponse,
+  providerFromConfig, publicProvider, selectModel, unconfiguredTransport, type ChatRequest, type ChatResult,
   type ModelProviderSpec, type ModelTransport } from "../src/model-gateway.ts";
 import { craftPaths } from "../src/paths.ts";
 import { CraftStore, type JsonObject } from "../src/store.ts";
@@ -164,6 +164,69 @@ test("a loop step may omit its token cost", () => {
 test("the default transport refuses instead of pretending to run", async () => {
   await assert.rejects(unconfiguredTransport.complete(openaiSpec(), buildChatRequest(openaiSpec(), { model: "m",
     messages: [{ role: "user", content: "hi" }] })), /set DEMO_API_KEY/);
+});
+
+test("the built-in fetch transport authenticates, parses, retries, and fails closed", async () => {
+  const openai = openaiSpec();
+  assert.ok(createFetchTransport());
+  const requests: Array<{ url: string; authorization: string | null }> = [];
+  let calls = 0;
+  const transport = createFetchTransport({ env: { DEMO_API_KEY: "secret" }, maxAttempts: 2, timeoutMs: 100,
+    fetchImpl: async (url, init) => {
+      requests.push({ url: String(url), authorization: new Headers(init?.headers).get("authorization") }); calls += 1;
+      if (calls === 1) return new Response("busy", { status: 503 });
+      return new Response(JSON.stringify({ model: "demo-std", choices: [{ message: { content: "ok" } }], usage: { prompt_tokens: 1, completion_tokens: 2 } }), { status: 200 });
+    } });
+  const result = await transport.complete(openai, buildChatRequest(openai, { model: "demo-std", messages: [{ role: "user", content: "hi" }] }));
+  assert.equal(result.text, "ok"); assert.equal(calls, 2); assert.equal(requests[0].authorization, "Bearer secret");
+  assert.equal(requests[1].url, "https://example.test/v1/chat/completions");
+
+  const anthropic = anthropicSpec();
+  let seenHeaders: Headers | undefined;
+  const anthropicTransport = createFetchTransport({ env: { DEMO_ANTHROPIC_KEY: "a-secret" }, maxAttempts: 1,
+    fetchImpl: async (_url, init) => { seenHeaders = new Headers(init?.headers); return new Response(JSON.stringify({ content: [{ type: "text", text: "hello" }] }), { status: 200 }); } });
+  assert.equal((await anthropicTransport.complete(anthropic, buildChatRequest(anthropic, { model: "demo-claude", messages: [{ role: "user", content: "hi" }] }))).text, "hello");
+  assert.equal(seenHeaders?.get("x-api-key"), "a-secret"); assert.equal(seenHeaders?.get("anthropic-version"), "2023-06-01");
+
+  await assert.rejects(createFetchTransport({ env: {}, maxAttempts: 1 }).complete(openai, buildChatRequest(openai, { model: "m", messages: [{ role: "user", content: "x" }] })), /set DEMO_API_KEY/);
+  await assert.rejects(createFetchTransport({ env: { DEMO_API_KEY: "x" }, maxAttempts: 1,
+    fetchImpl: async () => new Response("no", { status: 400 }) }).complete(openai, buildChatRequest(openai, { model: "m", messages: [{ role: "user", content: "x" }] })), /HTTP 400/);
+  await assert.rejects(createFetchTransport({ env: { DEMO_API_KEY: "x" }, maxAttempts: 1,
+    fetchImpl: async () => new Response(null, { status: 400 }) }).complete(openai, buildChatRequest(openai, { model: "m", messages: [{ role: "user", content: "x" }] })), /HTTP 400$/);
+  await assert.rejects(createFetchTransport({ env: { DEMO_API_KEY: "x" }, maxAttempts: 1,
+    fetchImpl: async () => new Response("not-json", { status: 200 }) }).complete(openai, buildChatRequest(openai, { model: "m", messages: [{ role: "user", content: "x" }] })), /valid JSON/);
+  await assert.rejects(createFetchTransport({ env: { DEMO_API_KEY: "x" }, maxAttempts: 1, maxResponseBytes: 1_024,
+    fetchImpl: async () => new Response("x".repeat(2_000), { status: 200 }) }).complete(openai, buildChatRequest(openai, { model: "m", messages: [{ role: "user", content: "x" }] })), /exceeded/);
+  let abortedCalls = 0;
+  const retryAfterAbort = createFetchTransport({ env: { DEMO_API_KEY: "x" }, maxAttempts: 2,
+    fetchImpl: async () => { abortedCalls += 1; if (abortedCalls === 1) throw new DOMException("timeout", "AbortError"); return new Response(JSON.stringify({ choices: [{ message: { content: "recovered" } }] }), { status: 200 }); } });
+  assert.equal((await retryAfterAbort.complete(openai, buildChatRequest(openai, { model: "m", messages: [{ role: "user", content: "x" }] }))).text, "recovered");
+  let retryAfterCalls = 0;
+  const retryAfterTransport = createFetchTransport({ env: { DEMO_API_KEY: "x" }, maxAttempts: 2,
+    fetchImpl: async () => { retryAfterCalls += 1; return retryAfterCalls === 1
+      ? new Response("busy", { status: 429, headers: { "retry-after": "0.001" } })
+      : new Response(JSON.stringify({ choices: [{ message: { content: "after" } }] }), { status: 200 }); } });
+  assert.equal((await retryAfterTransport.complete(openai, buildChatRequest(openai, { model: "m", messages: [{ role: "user", content: "x" }] }))).text, "after");
+  let invalidRetryAfterCalls = 0;
+  const invalidRetryAfterTransport = createFetchTransport({ env: { DEMO_API_KEY: "x" }, maxAttempts: 2,
+    fetchImpl: async () => { invalidRetryAfterCalls += 1; return invalidRetryAfterCalls === 1
+      ? new Response("busy", { status: 503, headers: { "retry-after": "later" } })
+      : new Response(JSON.stringify({ choices: [{ message: { content: "fallback" } }] }), { status: 200 }); } });
+  assert.equal((await invalidRetryAfterTransport.complete(openai, buildChatRequest(openai, { model: "m", messages: [{ role: "user", content: "x" }] }))).text, "fallback");
+  let rudeCalls = 0;
+  const rudeRetry = createFetchTransport({ env: { DEMO_API_KEY: "x" }, maxAttempts: 2,
+    fetchImpl: async () => { rudeCalls += 1; if (rudeCalls === 1) throw "temporary"; return new Response(JSON.stringify({ choices: [{ message: { content: "rude-recovered" } }] }), { status: 200 }); } });
+  assert.equal((await rudeRetry.complete(openai, buildChatRequest(openai, { model: "m", messages: [{ role: "user", content: "x" }] }))).text, "rude-recovered");
+  assert.throws(() => createFetchTransport({ timeoutMs: 99 }), /timeoutMs/);
+  assert.throws(() => createFetchTransport({ maxAttempts: 0 }), /maxAttempts/);
+  assert.throws(() => createFetchTransport({ maxResponseBytes: 1 }), /maxResponseBytes/);
+});
+
+test("provider config is normalized without storing a secret", () => {
+  const spec = providerFromConfig({ protocol: "openai-compatible", name: "My Local Model", baseUrl: "http://localhost:9000/v1/", model: "local", apiKeyEnv: "LOCAL_KEY" });
+  assert.equal(spec.provider, "my-local-model"); assert.equal(spec.base_url, "http://localhost:9000/v1"); assert.equal(spec.api_key_env, "LOCAL_KEY");
+  const fallback = providerFromConfig({ protocol: "anthropic", name: "  ", baseUrl: "https://example.test/v1", model: "claude" });
+  assert.equal(fallback.provider, "custom"); assert.equal(fallback.api_key_env, "CRAFT_API_KEY");
 });
 
 test("loop limits are bounded and defaults are explicit", () => {

@@ -9,10 +9,8 @@ import { CraftStore, type JsonObject } from "./store.ts";
  * evidence records, so "Craft works on its own" and "Craft governs someone
  * else's agent" stay the same shape and can be compared with the same harness.
  *
- * The driver owns nothing about the wire: a ModelTransport is injected. In this
- * version Craft ships no network client, so the default transport refuses with an
- * actionable message — which is why the eight providers can be declared, tested
- * and configured before any API key exists.
+ * The driver owns nothing about the wire: a ModelTransport can be injected for a
+ * host proxy or deterministic tests. The default is Craft's fetch-based transport.
  */
 export interface InternalHostOptions {
     providers: readonly ModelProviderSpec[];

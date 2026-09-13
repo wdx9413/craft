@@ -93,4 +93,25 @@ export declare function parseChatResponse(spec: ModelProviderSpec, payload: unkn
 export interface ModelTransport {
     complete(spec: ModelProviderSpec, request: ChatRequest): Promise<ChatResult>;
 }
+export interface FetchTransportOptions {
+    env?: NodeJS.ProcessEnv;
+    fetchImpl?: typeof fetch;
+    timeoutMs?: number;
+    maxAttempts?: number;
+    maxResponseBytes?: number;
+}
+/**
+ * The built-in network transport. It deliberately uses the platform fetch API
+ * rather than adding an SDK per provider: the catalog already normalizes the
+ * two wire formats and this keeps the plugin small and cross-platform.
+ */
+export declare function createFetchTransport(options?: FetchTransportOptions): ModelTransport;
+/** Turn the user-facing config shape into the normalized provider declaration. */
+export declare function providerFromConfig(input: {
+    protocol: ModelProtocol;
+    name: string;
+    baseUrl: string;
+    model: string;
+    apiKeyEnv?: string;
+}): ModelProviderSpec;
 export declare const unconfiguredTransport: ModelTransport;

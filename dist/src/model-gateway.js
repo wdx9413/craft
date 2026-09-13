@@ -171,6 +171,92 @@ export function parseChatResponse(spec, payload) {
     return { text: message.content, model: body.model === undefined ? null : String(body.model),
         usage: usage ? { input_tokens: Number(usage.prompt_tokens ?? 0), output_tokens: Number(usage.completion_tokens ?? 0) } : null };
 }
+function responseError(status, body) {
+    const detail = body.replace(/\s+/gu, " ").trim().slice(0, 300);
+    return new Error(`Model request failed with HTTP ${status}${detail ? `: ${detail}` : ""}`);
+}
+/**
+ * The built-in network transport. It deliberately uses the platform fetch API
+ * rather than adding an SDK per provider: the catalog already normalizes the
+ * two wire formats and this keeps the plugin small and cross-platform.
+ */
+export function createFetchTransport(options = {}) {
+    const env = options.env ?? process.env;
+    const fetchImpl = options.fetchImpl ?? fetch;
+    const timeoutMs = options.timeoutMs ?? 60_000;
+    const maxAttempts = options.maxAttempts ?? 3;
+    const maxResponseBytes = options.maxResponseBytes ?? 8 * 1024 * 1024;
+    if (!Number.isInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 300_000)
+        throw new Error("timeoutMs must be between 100 and 300000");
+    if (!Number.isInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 5)
+        throw new Error("maxAttempts must be between 1 and 5");
+    if (!Number.isInteger(maxResponseBytes) || maxResponseBytes < 1_024)
+        throw new Error("maxResponseBytes must be at least 1024");
+    return {
+        complete: async (spec, request) => {
+            const key = env[spec.api_key_env]?.trim();
+            if (!key)
+                throw new Error(`Provider ${spec.provider} is not configured; set ${spec.api_key_env} before running Craft.`);
+            const headers = { "content-type": "application/json" };
+            if (spec.protocol === "anthropic") {
+                headers["x-api-key"] = key;
+                headers["anthropic-version"] = "2023-06-01";
+            }
+            else {
+                headers.authorization = `Bearer ${key}`;
+            }
+            let lastError;
+            for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+                const controller = new AbortController();
+                const timer = setTimeout(() => controller.abort(), timeoutMs);
+                let retryable = true;
+                try {
+                    const response = await fetchImpl(request.url, { method: "POST", headers, body: JSON.stringify(request.body), signal: controller.signal });
+                    const body = await response.text();
+                    if (body.length > maxResponseBytes)
+                        throw new Error(`Model response exceeded ${maxResponseBytes} bytes`);
+                    if (response.ok) {
+                        let parsed;
+                        try {
+                            parsed = JSON.parse(body);
+                        }
+                        catch {
+                            throw new Error("Model response was not valid JSON");
+                        }
+                        return parseChatResponse(spec, parsed);
+                    }
+                    lastError = responseError(response.status, body);
+                    retryable = [408, 429, 500, 502, 503, 504].includes(response.status);
+                    if (!retryable || attempt === maxAttempts)
+                        throw lastError;
+                    const retryAfter = Number(response.headers.get("retry-after") ?? "0");
+                    await new Promise((resolve) => setTimeout(resolve, Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter * 1_000, 10_000) : attempt * 250));
+                }
+                catch (error) {
+                    lastError = error instanceof Error ? error : new Error(String(error));
+                    if (!retryable || attempt === maxAttempts)
+                        throw lastError;
+                    if (lastError.name === "AbortError")
+                        lastError = new Error(`Model request timed out after ${timeoutMs}ms`);
+                    await new Promise((resolve) => setTimeout(resolve, attempt * 250));
+                }
+                finally {
+                    clearTimeout(timer);
+                }
+            }
+            // maxAttempts is validated as a positive integer, so every exhausted
+            // loop has either captured or thrown the last transport error.
+            throw lastError;
+        },
+    };
+}
+/** Turn the user-facing config shape into the normalized provider declaration. */
+export function providerFromConfig(input) {
+    const normalized = input.name.trim().toLowerCase().replace(/[^a-z0-9-]+/gu, "-").replace(/^-+|-+$/gu, "") || "custom";
+    return defineProvider({ provider: normalized, label: input.name.trim() || normalized, protocol: input.protocol, base_url: input.baseUrl,
+        api_key_env: input.apiKeyEnv || "CRAFT_API_KEY", chat_path: input.protocol === "anthropic" ? "/messages" : "/chat/completions",
+        models: { standard: input.model }, supports_tools: true, cost_hint: 1 });
+}
 export const unconfiguredTransport = {
     complete: async (spec) => {
         throw new Error(`No model transport is installed for provider ${spec.provider}; set ${spec.api_key_env} and enable the internal host before running the loop.`);

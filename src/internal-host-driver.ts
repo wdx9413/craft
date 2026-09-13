@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { completeLoop, defineLoopLimits, failLoop, beginLoop, loopSummary, observeStep, type LoopState } from "./agent-loop.ts";
 import type { HostDriver, HostOutputObserver } from "./host-driver.ts";
-import { buildChatRequest, credentialStatus, parseChatResponse, selectModel, unconfiguredTransport,
+import { buildChatRequest, credentialStatus, parseChatResponse, selectModel, createFetchTransport,
   type ChatMessage, type ModelProviderSpec, type ModelTier, type ModelTransport } from "./model-gateway.ts";
 import { CraftStore, type JsonObject } from "./store.ts";
 
@@ -16,10 +16,8 @@ import { CraftStore, type JsonObject } from "./store.ts";
  * evidence records, so "Craft works on its own" and "Craft governs someone
  * else's agent" stay the same shape and can be compared with the same harness.
  *
- * The driver owns nothing about the wire: a ModelTransport is injected. In this
- * version Craft ships no network client, so the default transport refuses with an
- * actionable message — which is why the eight providers can be declared, tested
- * and configured before any API key exists.
+ * The driver owns nothing about the wire: a ModelTransport can be injected for a
+ * host proxy or deterministic tests. The default is Craft's fetch-based transport.
  */
 
 export interface InternalHostOptions {
@@ -68,9 +66,8 @@ export class InternalHostDriver implements HostDriver {
 
   constructor(store: CraftStore, options: InternalHostOptions) {
     if (!options.providers.length) throw new Error("The internal host requires at least one declared provider");
-    this.store = store; this.providers = options.providers;
-    this.transport = options.transport ?? unconfiguredTransport; this.invokeAction = options.invokeAction;
-    this.env = options.env ?? process.env;
+    this.store = store; this.providers = options.providers; this.env = options.env ?? process.env;
+    this.transport = options.transport ?? createFetchTransport({ env: this.env }); this.invokeAction = options.invokeAction;
   }
 
   private receiptKind(): string { return "internal_receipt"; }

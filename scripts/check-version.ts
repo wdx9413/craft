@@ -21,7 +21,8 @@ if (typeof packageVersion !== "string" || !/^\d+\.\d+\.\d+$/.test(packageVersion
 }
 
 for (const path of [".codex-plugin/plugin.json", ".claude-plugin/plugin.json",
-  "adapters/workbuddy-expert/.codebuddy-plugin/plugin.json", "adapters/workbuddy-connector/connector-meta.json"]) {
+  "adapters/workbuddy-expert/.codebuddy-plugin/plugin.json", "adapters/workbuddy-connector/connector-meta.json",
+  "adapters/deepseek-harness/package.json"]) {
   const manifestVersion = (await json(path)).version;
   if (manifestVersion !== packageVersion) throw new Error(`${path} version ${String(manifestVersion)} differs from package.json ${packageVersion}`);
 }

@@ -3,7 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { completeLoop, defineLoopLimits, failLoop, beginLoop, loopSummary, observeStep } from "./agent-loop.js";
-import { buildChatRequest, credentialStatus, parseChatResponse, selectModel, unconfiguredTransport } from "./model-gateway.js";
+import { buildChatRequest, credentialStatus, parseChatResponse, selectModel, createFetchTransport } from "./model-gateway.js";
 import { CraftStore } from "./store.js";
 function text(value, name) { if (typeof value !== "string" || !value.trim())
     throw new Error(`${name} must not be empty`); return value.trim(); }
@@ -52,9 +52,9 @@ export class InternalHostDriver {
             throw new Error("The internal host requires at least one declared provider");
         this.store = store;
         this.providers = options.providers;
-        this.transport = options.transport ?? unconfiguredTransport;
-        this.invokeAction = options.invokeAction;
         this.env = options.env ?? process.env;
+        this.transport = options.transport ?? createFetchTransport({ env: this.env });
+        this.invokeAction = options.invokeAction;
     }
     receiptKind() { return "internal_receipt"; }
     provider(name) {

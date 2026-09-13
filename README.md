@@ -1,6 +1,6 @@
 # Craft
 
-> 当前发布版本：v0.12.1。所有宿主接入统一采用“Route-first”：Codex/Claude 插件、TraeWork、WorkBuddy Expert 默认只安装一个轻量 `craft-route` Skill，并连接精简 Core MCP；`craft` 与 `craft-clarify` 是单独的可选包。完整 MCP 仍作为显式、经批准的高级治理入口保留。云端运行、市场审核和远程 MCP 仍须由部署 Adapter 或平台审核完成，不能被当作已上线服务。
+> 当前发布版本：v0.12.2。所有宿主接入统一采用“Route-first”：Codex/Claude 插件、TraeWork、WorkBuddy Expert 默认只安装一个轻量 `craft-route` Skill，并连接精简 Core MCP；`craft` 与 `craft-clarify` 是单独的可选包。Craft 现在也内置 fetch 模型传输与 `craft doctor/run` 独立运行入口；完整 MCP 仍作为显式、经批准的高级治理入口保留。云端运行、市场审核和远程 MCP 仍须由部署 Adapter 或平台审核完成，不能被当作已上线服务。
 
 [中文](README.md) | [English](README.en.md)
 

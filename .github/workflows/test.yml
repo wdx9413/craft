@@ -22,6 +22,8 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Verify product release version
+        run: pnpm run version:check
       - name: Clean distributions
         run: pnpm run clean
       - name: Build core

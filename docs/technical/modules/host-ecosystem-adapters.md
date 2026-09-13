@@ -1,6 +1,6 @@
 # TraeWork / WorkBuddy host adapters
 
-> Implementation baseline: v0.12.1. These are local integration and marketplace-submission packages, not claims that Craft has been approved by either marketplace or that a cloud MCP service exists.
+> Implementation baseline: v0.12.2. These are local integration and marketplace-submission packages, not claims that Craft has been approved by either marketplace or that a cloud MCP service exists.
 
 ## Goal
 

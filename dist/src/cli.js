@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { createInterface } from "node:readline/promises";
+import { access } from "node:fs/promises";
 import { stdin, stdout } from "node:process";
 import { pathToFileURL } from "node:url";
 import { initializeConfig, loadConfig, setMode, configureSemanticSearch } from "./config.js";
@@ -11,12 +12,17 @@ import { LocalMaintenanceWorker, MaintenanceKernel } from "./maintenance.js";
 import { runBuiltinAcceptanceTicks } from "./acceptance-worker.js";
 import { LocalWorkbenchServer } from "./workbench-server.js";
 import { LocalSupervisor, SupervisorClient } from "./supervisor.js";
+import { VERSION } from "./service.js";
+import { credentialStatus, createFetchTransport, providerFromConfig } from "./model-gateway.js";
 const HELP = `Craft
 
 Usage:
   craft                         Start onboarding or open the active mode
   craft init [options]          Configure Craft
   craft config show             Print redacted configuration
+  craft doctor                  Check runtime, credentials, storage, and adapters
+  craft version                 Print the Craft product version
+  craft run --goal <text>       Run a governed standalone Agent task
   craft mode <name>             Switch agent, supervisor, or provider mode
   craft paths                   Print the ~/.craft_data layout
   craft source add <path>       Add and scan a capability directory
@@ -61,8 +67,11 @@ Semantic options:
   --provider-name <name> --base-url <url> --model <model>
   --api-key-env <ENV_NAME> [--timeout-ms <100-30000>]
 
-Worker options:
+  Worker options:
   --interval-ms <100-3600000>
+
+Run options:
+  --goal <text> --tier <small|standard|frontier> [--max-steps <n>]
 `;
 function option(args, name) {
     const index = args.indexOf(name);
@@ -162,6 +171,60 @@ function publicConfig(config) {
         ...(semanticSearch ? { semanticSearch } : {}),
     };
 }
+async function doctor(paths) {
+    const config = await loadConfig(paths);
+    const result = {
+        version: VERSION,
+        node: process.versions.node,
+        node_supported: Number(process.versions.node.split(".")[0]) >= 23,
+        initialized: Boolean(config),
+        data_root: paths.root,
+    };
+    if (!config)
+        return { ...result, status: "needs_init", next: "craft init --mode agent --runtime direct-api ..." };
+    const runtime = config.runtime;
+    const provider = runtime.provider ? providerFromConfig(runtime.provider) : null;
+    return { ...result, runtime: runtime.kind, provider: provider ? { ...credentialStatus(provider), model: runtime.provider?.model } : null,
+        storage: { database: paths.databaseFile, exists: await fileExists(paths.databaseFile) },
+        status: runtime.kind === "direct-api" && provider && credentialStatus(provider).configured ? "ready" : "needs_configuration",
+        next: runtime.kind === "direct-api" ? "craft run --goal \"...\"" : "craft init --mode agent --runtime direct-api ..." };
+}
+async function fileExists(path) {
+    try {
+        await access(path);
+        return true;
+    }
+    catch {
+        return false;
+    }
+}
+async function runStandalone(args, paths) {
+    const config = await loadConfig(paths);
+    if (!config)
+        throw new Error("Craft is not initialized; run `craft init --mode agent --runtime direct-api ...` first.");
+    if (config.runtime.kind !== "direct-api" || !config.runtime.provider)
+        throw new Error("`craft run` currently requires a direct-api runtime; configure it with `craft init`.");
+    const goal = option(args, "--goal");
+    if (!goal?.trim())
+        throw new Error("run requires --goal <text>");
+    const provider = providerFromConfig(config.runtime.provider);
+    const store = await new CraftStore(paths).open();
+    const service = new CraftService(store, undefined, undefined, undefined, undefined, undefined, [], [provider], createFetchTransport());
+    try {
+        const task = service.taskOpen({ title: option(args, "--title") ?? goal.slice(0, 80), goal }).task;
+        const driver = service.hostDriver("internal");
+        if (!driver)
+            throw new Error("Internal Host Driver is unavailable");
+        const prepared = driver.prepare({ task_id: task.id, prompt: goal, provider: provider.provider, tier: option(args, "--tier") ?? "standard",
+            ...(option(args, "--max-steps") ? { limits: { max_steps: Number(option(args, "--max-steps")) } } : {}) });
+        const dispatch = prepared.dispatch;
+        const executed = await driver.execute({ dispatch_id: dispatch.id, prompt: goal });
+        return { version: VERSION, task, ...executed };
+    }
+    finally {
+        store.close();
+    }
+}
 export async function main(args = process.argv.slice(2)) {
     const paths = craftPaths();
     if (args.includes("--help") || args.includes("-h")) {
@@ -170,6 +233,18 @@ export async function main(args = process.argv.slice(2)) {
     }
     if (args[0] === "paths") {
         stdout.write(`${JSON.stringify(paths, null, 2)}\n`);
+        return;
+    }
+    if (args[0] === "version") {
+        stdout.write(`${VERSION}\n`);
+        return;
+    }
+    if (args[0] === "doctor") {
+        stdout.write(`${JSON.stringify(await doctor(paths), null, 2)}\n`);
+        return;
+    }
+    if (args[0] === "run") {
+        stdout.write(`${JSON.stringify(await runStandalone(args.slice(1), paths), null, 2)}\n`);
         return;
     }
     if (args[0] === "config" && args[1] === "show") {
