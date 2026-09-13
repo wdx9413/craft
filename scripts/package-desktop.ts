@@ -27,7 +27,7 @@ if (process.platform === "win32") {
 }
 await writeFile(join(stage, "craft-workbench.cmd"), "@echo off\nsetlocal\n\"%~dp0node.exe\" \"%~dp0app\\dist\\src\\cli.js\" gui %*\n", "utf8");
 await writeFile(join(stage, "craft-workbench.ps1"), "& (Join-Path $PSScriptRoot 'node.exe') (Join-Path $PSScriptRoot 'app/dist/src/cli.js') gui $args\n", "utf8");
-await writeFile(join(stage, "README.txt"), `Craft Workbench v${manifest.version}\n\nDouble-click craft.exe. It opens the local Workbench in your browser without a command window.\nAdvanced users may run craft-workbench.cmd or craft-workbench.ps1 from a terminal.\nSettings live in %USERPROFILE%\\.craft_data\\settings.json and may relocate dataRoot.\nThis bundle includes the Node runtime and is intended for Windows x64.\n`, "utf8");
+await writeFile(join(stage, "README.txt"), `Craft Workbench v${manifest.version}\n\nDouble-click craft.exe. It opens the local Workbench in a standalone native app window without a command window.\nThe window uses Microsoft Edge or Google Chrome's app mode; install one of them if this computer has neither.\nAdvanced users may run craft-workbench.cmd or craft-workbench.ps1 from a terminal.\nSettings live in %USERPROFILE%\\.craft_data\\settings.json and may relocate dataRoot.\nThis bundle includes the Node runtime and is intended for Windows x64.\n`, "utf8");
 if (process.platform === "win32" && existsSync(process.execPath)) await cp(process.execPath, join(stage, "node.exe"));
 const windowsEntries = await entriesFrom(stage, `craft-workbench-windows-v${manifest.version}`); await writeFile(join(dist, `craft-workbench-windows-v${manifest.version}.zip`), archive(windowsEntries));
 

@@ -12,6 +12,7 @@ import { LocalMaintenanceWorker, MaintenanceKernel } from "./maintenance.js";
 import { runBuiltinAcceptanceTicks } from "./acceptance-worker.js";
 import { LocalWorkbenchServer } from "./workbench-server.js";
 import { LocalSupervisor, SupervisorClient } from "./supervisor.js";
+import { openBrowser } from "./browser.js";
 import { VERSION } from "./service.js";
 import { credentialStatus, createFetchTransport, providerFromConfig } from "./model-gateway.js";
 const HELP = `Craft
@@ -346,6 +347,8 @@ export async function main(args = process.argv.slice(2)) {
                 try {
                     const started = await server.start(option(args, "--port") === undefined ? 4173 : Number(option(args, "--port")));
                     stdout.write(`Craft Workbench: ${started.url}\n`);
+                    if (args[0] === "gui")
+                        openBrowser(started.url);
                     await new Promise((resolve) => { const stop = () => resolve(); process.once("SIGINT", stop); process.once("SIGTERM", stop); });
                 }
                 finally {
