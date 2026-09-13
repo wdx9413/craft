@@ -7,9 +7,8 @@
     {
       "name": "craft",
       "source": {
-        "source": "url",
-        "url": "https://github.com/wdx9413/craft.git",
-        "ref": "main"
+        "source": "local",
+        "path": "."
       },
       "policy": {
         "installation": "AVAILABLE",
