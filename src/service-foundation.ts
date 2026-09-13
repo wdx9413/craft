@@ -82,6 +82,7 @@ import { RemoteInteropKernel } from "./remote-interop.ts";
 import { PlatformOperationsKernel } from "./platform-operations.ts";
 import { UsageKernel } from "./usage.ts";
 import { IntentCompilerKernel } from "./intent-compiler.ts";
+import { TraceKernel } from "./trace-kernel.ts";
 
 /**
  * Stable composition root for the service. Domain behavior stays in focused
@@ -172,6 +173,7 @@ export abstract class ServiceFoundation {
   readonly metrics: MetricsKernel;
   readonly usage: UsageKernel;
   readonly intentCompiler: IntentCompilerKernel;
+  readonly trace: TraceKernel;
 
   constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter = new LocalIsolatedAdapter(),
     dockerSandbox = new DockerSandboxAdapter(), egressBroker = new TrustedEgressBroker(), hostOwnerId?: string,
@@ -249,6 +251,7 @@ export abstract class ServiceFoundation {
     this.metrics = new MetricsKernel(store);
     this.usage = new UsageKernel(store);
     this.intentCompiler = new IntentCompilerKernel(store);
+    this.trace = new TraceKernel(store);
     this.hostRuns = new HostRunKernel(store, [...this.hostDrivers.values()], hostOwnerId,
       (run, receipt) => this.finalizeWorkLaunch(run, receipt));
   }

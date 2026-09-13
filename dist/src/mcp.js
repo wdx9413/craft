@@ -13,12 +13,12 @@ const schemaFor = (name) => {
     if (["input", "inputs", "metadata", "policy", "dimensions", "environment", "budget", "data", "scores",
         "costs", "metrics", "configuration", "receipt_requirements", "execution", "rules", "authorization_requests", "notification_refs", "cost_hint", "design_axes", "report",
         "limits", "resources", "actual", "actual_resources", "estimated_resources", "observation", "trial_budget", "policy_fingerprints", "structured_data", "field_sources",
-        "capabilities", "observed_capabilities", "requirements", "output", "transform", "entity", "values", "budget_limits", "sandbox_requirements", "eval_suite_ref", "checks", "state", "action_results", "workbench", "runtime", "privacy", "acceptance", "budget"].includes(name))
+        "capabilities", "observed_capabilities", "requirements", "output", "transform", "entity", "values", "budget_limits", "sandbox_requirements", "eval_suite_ref", "checks", "state", "action_results", "workbench", "runtime", "privacy", "acceptance", "budget", "action_contract", "state_before", "state_after", "usage", "value", "model_fingerprint", "environment_fingerprint", "capability_fingerprint", "policy_fingerprint", "metadata"].includes(name))
         return { type: "object" };
     if (["completed", "pending", "decisions", "artifacts", "steps", "cases", "capabilities",
         "allowed_side_effects", "approved_side_effects", "nodes", "artifact_ids", "evidence_ids",
         "trial_ids", "requirements", "grade_ids", "pattern_ids", "failure_modes", "receipt_ids", "criteria", "acceptance_criteria", "allowed_extensions", "fields", "capability_requirements", "object_schemas", "components", "action_contracts", "tags", "claim_ids", "evidence_ids", "expected_claim_ids", "case_ids",
-        "allowed_operations", "allowed_effects", "require_approval_for", "operations", "subjects", "children", "trusted_hosts", "command_allowlist", "path_allowlist", "kinds", "effects", "allowed_kinds", "dependencies", "aliases", "assets", "asset_ids", "connector_ticket_ids", "artifact_ids", "final_artifact_ids", "evidence_ids", "gold_case_ids", "output_contract", "trial_ids", "include_paths", "affected_paths", "object_ids", "depends_on", "source_paths", "applies_to", "patches", "snapshot_refs", "triggers", "allowed_hosts", "allowed_actions", "approval_required_actions", "detected_instructions", "citations", "allowed_fields", "argv", "sources", "budget_ids", "recovery_item_ids", "memory_kinds", "object_types", "required_memory_ids", "required_object_ids", "benchmark_ids", "memory_ids", "paths", "state_paths", "turns", "roles", "changed_paths", "materials", "non_goals"].includes(name))
+        "allowed_operations", "allowed_effects", "require_approval_for", "operations", "subjects", "children", "trusted_hosts", "command_allowlist", "path_allowlist", "kinds", "effects", "allowed_kinds", "dependencies", "aliases", "assets", "asset_ids", "connector_ticket_ids", "artifact_ids", "final_artifact_ids", "evidence_ids", "gold_case_ids", "output_contract", "trial_ids", "include_paths", "affected_paths", "object_ids", "depends_on", "source_paths", "applies_to", "patches", "snapshot_refs", "triggers", "allowed_hosts", "allowed_actions", "approval_required_actions", "detected_instructions", "citations", "allowed_fields", "argv", "sources", "budget_ids", "recovery_item_ids", "memory_kinds", "object_types", "required_memory_ids", "required_object_ids", "benchmark_ids", "memory_ids", "paths", "state_paths", "turns", "roles", "changed_paths", "materials", "non_goals", "input_refs", "output_refs", "evidence_ids", "contamination_flags", "trace_ids"].includes(name))
         return { type: "array" };
     return { type: "string" };
 };
@@ -461,6 +461,16 @@ export const TOOLS = [
     tool("craft_trial_trace_append", "Append an immutable trace event to a trial.", ["trial_id", "event_type"], false, ["source", "data", "artifact_ids", "evidence_ids"]),
     tool("craft_trial_get", "Read a trial with its trace and outcome.", ["trial_id"], true),
     tool("craft_trial_list", "List immutable trials.", [], true, ["limit", "query"]),
+    tool("craft_trace_start", "Start one canonical, host-neutral Trace with exact task, run, model, policy, capability, and environment fingerprints.", ["task_id"], false, ["trace_id", "launch_id", "run_id", "trial_id", "attempt_id", "operation_id", "model_fingerprint", "environment_fingerprint", "capability_fingerprint", "policy_fingerprint", "metadata"]),
+    tool("craft_trace_append", "Append one contiguous, content-bounded canonical Trace Event with state, action, receipt, provenance, cost, and evidence references.", ["trace_id", "event_kind"], false, ["event_id", "sequence", "span_id", "parent_span_id", "operation_id", "actor", "source", "trust", "data", "action_contract", "state_before", "state_after", "input_refs", "output_refs", "capability_revision", "policy_revision", "model_fingerprint", "environment_fingerprint", "workspace_before", "workspace_after", "usage", "cost_usd", "duration_ms", "error_class", "status", "summary"]),
+    tool("craft_trace_observe", "Append an externally observed state transition to a Trace; observation is distinct from model self-report.", ["trace_id"], false, ["event_id", "state_before", "state_after", "workspace_before", "workspace_after", "summary", "source", "actor", "data"]),
+    tool("craft_trace_feedback", "Record a human or reviewer feedback signal and attach it to the canonical Trace.", ["trace_id", "signal", "summary"], false, ["feedback_id", "actor", "value", "evidence_ids", "outcome"]),
+    tool("craft_trace_finalize", "Close a Trace with a verified terminal status and optional Evidence references.", ["trace_id", "status", "summary"], false, ["verdict", "evidence_ids"]),
+    tool("craft_trace_get", "Read a Trace, canonical events, feedback signals, and content-free replay facts.", ["trace_id"], true),
+    tool("craft_trace_query", "Query canonical Trace Events by Trace, Task, or event kind without returning raw prompt content.", [], true, ["trace_id", "task_id", "event_kind", "limit"]),
+    tool("craft_trace_replay_bundle", "Build a digest-only replay bundle and report whether the Trace has enough fingerprints for reproducible replay.", ["trace_id"], true),
+    tool("craft_trace_case_compile", "Compile one terminal Trace into a sanitized development or approved held-out evolution Case.", ["trace_id", "summary"], false, ["case_id", "partition", "acceptance_contract_ref", "approved_by", "contamination_flags"]),
+    tool("craft_trace_retention_plan", "Save an idempotent digest-only Trace retention and privacy policy; deletion still requires review.", [], false, ["policy_id", "max_days", "max_events", "pii_mode"]),
     tool("craft_outcome_record", "Record the single immutable outcome for a trial.", ["trial_id", "verdict", "summary"], false, ["failure_type", "scores", "costs", "evidence_ids", "source"]),
     tool("craft_evaluation_run_record", "Record a reproducible evaluation from completed trials in one suite partition.", ["suite_id", "split", "subject_type", "subject_id", "subject_version", "trial_ids"], false, ["run_id", "suite_version", "metrics"]),
     tool("craft_evaluation_run_get", "Read an immutable evaluation run.", ["run_id"], true),
@@ -574,7 +584,7 @@ export const TOOLS = [
 ];
 const CORE_TOOL_NAMES = new Set(["craft_info", "craft_source_list", "craft_capability_search", "craft_capability_get", "craft_semantic_status", "craft_execution_policy_decide",
     "craft_default_route", "craft_default_route_resume", "craft_default_route_find", "craft_task_open", "craft_task_list", "craft_intent_compile", "craft_intent_get", "craft_acceptance_compile", "craft_acceptance_contract_get", "craft_task_checkpoint", "craft_task_control_refresh", "craft_task_control_get", "craft_task_run_refresh", "craft_task_run_get", "craft_verified_work_loop_prepare", "craft_verified_work_loop_advance", "craft_verified_work_loop_decide", "craft_verified_work_loop_resume", "craft_verified_work_loop_get", "craft_host_activation_manifest_prepare", "craft_host_activation_manifest_validate", "craft_host_activation_manifest_consume", "craft_host_activation_manifest_get", "craft_execution_fabric_prepare", "craft_execution_fabric_execute", "craft_execution_fabric_advance", "craft_execution_fabric_consume", "craft_execution_fabric_get", "craft_host_bridge_get", "craft_work_launch_get", "craft_work_delivery_observe", "craft_work_delivery_get", "craft_delivery_loop_refresh", "craft_delivery_loop_get", "craft_delivery_evaluation_compare", "craft_delivery_evaluation_run", "craft_eval_campaign_report", "craft_adaptive_harness_recommend", "craft_managed_write_get", "craft_managed_run_get", "craft_campaign_runner_get", "craft_workspace_observer_get", "craft_autonomy_ladder_get", "craft_work_coordinator_get", "craft_agent_eval_lab_get", "craft_judge_promotion_eligible", "craft_platform_execution_preflight", "craft_platform_execution_probe", "craft_platform_execution_probe_get", "craft_workspace_get", "craft_workspace_diff", "craft_work_object_list", "craft_workspace_impact", "craft_context_assemble", "craft_change_set_preview",
-    "craft_artifact_register", "craft_evidence_record", "craft_capability_access_plan", "craft_capability_call_issue", "craft_capability_call_consume", "craft_capability_connector_list", "craft_capability_connector_ticket_issue", "craft_capability_connector_ticket_consume", "craft_evaluation_program_due", "craft_evaluation_program_report", "craft_enterprise_access_ticket_get", "craft_a2a_delegation_get", "craft_usage_report", "craft_settings_get"]);
+    "craft_artifact_register", "craft_evidence_record", "craft_capability_access_plan", "craft_capability_call_issue", "craft_capability_call_consume", "craft_capability_connector_list", "craft_capability_connector_ticket_issue", "craft_capability_connector_ticket_consume", "craft_evaluation_program_due", "craft_evaluation_program_report", "craft_enterprise_access_ticket_get", "craft_a2a_delegation_get", "craft_usage_report", "craft_settings_get", "craft_trace_get", "craft_trace_query", "craft_trace_replay_bundle"]);
 export const CORE_TOOLS = TOOLS.filter((tool) => CORE_TOOL_NAMES.has(tool.name));
 // The syscall surface. Instead of one tool per operation, a host learns a fixed
 // set of verbs and addresses capabilities by (resource, operation). The registry
@@ -613,7 +623,7 @@ export const VERB_DEFAULT_OPERATION = {
 // swallow the whole list.
 const SURFACE_RULES = [
     { name: "governance", pattern: /^craft_(capability|source|logical|contract|hub|supply|federation|materialization|certification|skill|publication|catalog|domain|hook)/ },
-    { name: "evaluation", pattern: /^craft_(evaluation|eval|benchmark|campaign|judge|grader|grade|signoff|harness|trial|trajectory|experience|adaptation|adaptive|canary|acceptance|outcome|delivery_evaluation|agent_eval|verified_iteration|feedback)/ },
+    { name: "evaluation", pattern: /^craft_(evaluation|eval|benchmark|campaign|judge|grader|grade|signoff|harness|trial|trajectory|experience|adaptation|adaptive|canary|acceptance|outcome|delivery_evaluation|agent_eval|verified_iteration|feedback|trace)/ },
     { name: "execution", pattern: /^craft_(sandbox|docker|effect|egress|credential|execution|managed|platform|isolated|local|external|recovery|durable|trigger|webhook|orchestration|runtime|autonomy|speculative)/ },
     { name: "knowledge", pattern: /^craft_(wiki|knowledge|context|memory|project|semantic|claim|relation)/ },
     { name: "workspace", pattern: /^craft_(workspace|work_object|change_set|state|transaction|lineage|hydration|dehydration|artifact|evidence|untrusted)/ },
@@ -915,6 +925,16 @@ export class McpServer {
             craft_trial_trace_append: (a) => service.trialTraceAppend(a),
             craft_trial_get: (a) => service.trialGet(a),
             craft_trial_list: (a) => service.list("trial", "trials", a),
+            craft_trace_start: (a) => service.traceStart(a),
+            craft_trace_append: (a) => service.traceAppend(a),
+            craft_trace_observe: (a) => service.traceObserve(a),
+            craft_trace_feedback: (a) => service.traceFeedback(a),
+            craft_trace_finalize: (a) => service.traceFinalize(a),
+            craft_trace_get: (a) => service.traceGet(a),
+            craft_trace_query: (a) => service.traceQuery(a),
+            craft_trace_replay_bundle: (a) => service.traceReplayBundle(a),
+            craft_trace_case_compile: (a) => service.traceCaseCompile(a),
+            craft_trace_retention_plan: (a) => service.traceRetentionPlan(a),
             craft_outcome_record: (a) => service.outcomeRecord(a),
             craft_evaluation_run_record: (a) => service.evaluationRunRecord(a),
             craft_evaluation_run_get: (a) => service.get("evaluation_run", "run_id", a),

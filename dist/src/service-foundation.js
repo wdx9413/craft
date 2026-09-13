@@ -80,6 +80,7 @@ import { RemoteInteropKernel } from "./remote-interop.js";
 import { PlatformOperationsKernel } from "./platform-operations.js";
 import { UsageKernel } from "./usage.js";
 import { IntentCompilerKernel } from "./intent-compiler.js";
+import { TraceKernel } from "./trace-kernel.js";
 /**
  * Stable composition root for the service. Domain behavior stays in focused
  * kernels; CraftService is the backwards-compatible API facade.
@@ -168,6 +169,7 @@ export class ServiceFoundation {
     metrics;
     usage;
     intentCompiler;
+    trace;
     constructor(store, semanticProvider, isolatedAdapter = new LocalIsolatedAdapter(), dockerSandbox = new DockerSandboxAdapter(), egressBroker = new TrustedEgressBroker(), hostOwnerId, hostProfiles, modelProviders, modelTransport) {
         this.store = store;
         this.catalog = new Catalog(store, semanticProvider);
@@ -258,6 +260,7 @@ export class ServiceFoundation {
         this.metrics = new MetricsKernel(store);
         this.usage = new UsageKernel(store);
         this.intentCompiler = new IntentCompilerKernel(store);
+        this.trace = new TraceKernel(store);
         this.hostRuns = new HostRunKernel(store, [...this.hostDrivers.values()], hostOwnerId, (run, receipt) => this.finalizeWorkLaunch(run, receipt));
     }
 }

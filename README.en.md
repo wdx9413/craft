@@ -1,6 +1,6 @@
 # Craft
 
-> Current release: v0.12.6. Every host follows a route-first boundary with a low-token syscall MCP. GUI, CLI, Codex/Claude plugins, TraeWork, and WorkBuddy Experts now share the same host-neutral Intent and Acceptance Contracts before execution, verification, and evidence capture. The Full MCP remains an explicit, approved advanced-governance entry point. Real cloud execution, marketplace publication, and OS-level isolation still require a deployment adapter or platform review; they are not claimed as shipped services.
+> Current release: v0.12.7. Every host follows a route-first boundary with a low-token syscall MCP. GUI, CLI, Codex/Claude plugins, TraeWork, and WorkBuddy Experts now share the same host-neutral Intent and Acceptance Contracts before execution, verification, and evidence capture. The Full MCP remains an explicit, approved advanced-governance entry point. Real cloud execution, marketplace publication, and OS-level isolation still require a deployment adapter or platform review; they are not claimed as shipped services.
 
 [中文](README.md) | [English](README.en.md)
 
@@ -40,6 +40,7 @@ See the [product architecture (Chinese)](docs/product/architecture.zh-CN.md) and
 - Versioned Workflows with inputs, safe paths, redaction, side-effect approval, deterministic commands, assertions, coverage gates, and receipts.
 - Versioned evaluation-suite and Agent-profile primitives.
 - Six-dimensional Harness Configurations, immutable Trials and Outcomes, append-only Traces, automatic evidence capture for Workflow runs, and held-out-eval-gated promotion and rollback.
+- **Trace & Evolution Kernel (v0.12.7)**: one host-neutral event ledger for runs, observations, feedback, model/capability/policy/environment fingerprints, digest-only replay bundles, and Trace-to-Case compilation. Raw prompts and business bodies stay out of evolution data; evaluation, Signoff, and Canary gates still control reuse and publication. See the [Trace module](docs/technical/modules/trace-evolution-kernel.md).
 - Automatic Orchestration Trial capture with pinned Agent Profile versions, dispatch and reroute traces, node costs and evidence, and terminal Outcomes.
 - Versioned Graders, provenance-preserving Grades, and Signoff Policies; a model judgment cannot masquerade as program proof.
 - Same-benchmark comparisons for Workflow, Agent Profile, and Harness Configuration versions, with aggregate quality, cost, duration, and failure-type deltas. Comparability requires the exact suite version, split, subject type, and case set.

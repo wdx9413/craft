@@ -100,7 +100,7 @@ export class IntentCompilerKernel {
       budget: args.budget === undefined ? null : object(args.budget, "budget"),
       clarifications: questions,
       acceptance_required: route !== "simple",
-      compiler_version: "0.12.6",
+      compiler_version: "0.12.7",
     } as JsonObject;
     const intentId = String(args.intent_id ?? `intent_${randomUUID().replaceAll("-", "")}`);
     const requestDigest = digest(contract);

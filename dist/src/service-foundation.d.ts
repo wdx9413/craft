@@ -81,6 +81,7 @@ import { RemoteInteropKernel } from "./remote-interop.ts";
 import { PlatformOperationsKernel } from "./platform-operations.ts";
 import { UsageKernel } from "./usage.ts";
 import { IntentCompilerKernel } from "./intent-compiler.ts";
+import { TraceKernel } from "./trace-kernel.ts";
 /**
  * Stable composition root for the service. Domain behavior stays in focused
  * kernels; CraftService is the backwards-compatible API facade.
@@ -169,6 +170,7 @@ export declare abstract class ServiceFoundation {
     readonly metrics: MetricsKernel;
     readonly usage: UsageKernel;
     readonly intentCompiler: IntentCompilerKernel;
+    readonly trace: TraceKernel;
     constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter?: LocalIsolatedAdapter, dockerSandbox?: DockerSandboxAdapter, egressBroker?: TrustedEgressBroker, hostOwnerId?: string, hostProfiles?: readonly HostProfile[], modelProviders?: readonly ModelProviderSpec[], modelTransport?: ModelTransport);
     protected abstract finalizeWorkLaunch(run: JsonObject, receipt: JsonObject | null): void;
     /**

@@ -61,6 +61,7 @@
 - [Internal Host：Craft 自己跑循环](technical/modules/internal-host.md)：第三个 Host Driver 与六道熔断。
 - [v0.12.4 Platform Runtime](technical/modules/platform-runtime-v0124.md)：自主运行、Checkpoint/Resume、能力生命周期、记忆整合、远程互操作和观测导出契约。
 - [v0.12.6 通用意图与验收闭环](research/craft-v0.12.6-plan-2026-09-13.md)：统一 GUI、CLI、插件和专家入口的 Task/Acceptance Contract，并将覆盖率作为可插拔验收器。
+- [v0.12.7 Trace & Evolution Kernel](research/craft-v0.12.7-trace-evolution-2026-09-13.md)：统一跨 Host Trace、状态观察、反馈信号、回放包和 Trace→Case 进化入口。
 - [Asset Envelope、路由与跨模型可比性](technical/modules/asset-routing.md)：三类资产的统一信封、只读路由与跨模型闸门。
 - [Task Run、平台 Conformance 与 Benchmark](technical/modules/task-run-benchmark.md)：把一个真实 Host 工作收敛为可恢复运行记录，并以同环境、同预算的交付对照形成受门禁候选。
 - [可验证执行与演进平台](technical/modules/evolution-platform.md)：范围内本地写入恢复、Campaign 报告、Evidence Canary 与最小 Harness 推荐。

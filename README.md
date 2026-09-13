@@ -1,6 +1,6 @@
 # Craft
 
-> 当前发布版本：v0.12.6。所有宿主接入统一采用“Route-first”：Codex/Claude 插件、TraeWork、WorkBuddy Expert 默认只安装一个轻量 `craft-route` Skill，并连接低 Token syscall MCP；`craft` 与 `craft-clarify` 是单独的可选包。Craft 现在也提供通用 Intent/Acceptance Contract 编译器：同一自然语言目标可被 GUI、CLI、插件和专家解析成相同的任务合同，再进入受控执行、验收和证据闭环。真实云端执行、市场审核和 OS 级隔离仍须由部署 Adapter 或平台审核完成，不能把本地契约伪装成已上线服务。
+> 当前发布版本：v0.12.7。所有宿主接入统一采用“Route-first”：Codex/Claude 插件、TraeWork、WorkBuddy Expert 默认只安装一个轻量 `craft-route` Skill，并连接低 Token syscall MCP；`craft` 与 `craft-clarify` 是单独的可选包。Craft 现在也提供通用 Intent/Acceptance Contract 编译器：同一自然语言目标可被 GUI、CLI、插件和专家解析成相同的任务合同，再进入受控执行、验收和证据闭环。真实云端执行、市场审核和 OS 级隔离仍须由部署 Adapter 或平台审核完成，不能把本地契约伪装成已上线服务。
 
 [中文](README.md) | [English](README.en.md)
 
@@ -43,6 +43,7 @@ Sandbox 能力采用“声明、诊断、黑盒一致性验证、精确版本票
 - 确定性命令、文件/JSON 断言、覆盖率门禁，以及结构化执行回执。
 - 版本化评测集与 Agent Profile 基础数据模型。
 - 六维 Harness Configuration、不可变 Trial/Outcome、只追加 Trace、Workflow 自动取证闭环，以及 held-out Eval 驱动的晋级与回滚。
+- **Trace & Evolution Kernel（v0.12.7）**：统一跨 Host 的运行事件、状态观察、反馈、模型/能力/Policy/环境指纹、Digest-only Replay Bundle 和 Trace→Case 编译；原始 Prompt 与业务正文不进入进化数据，自动发布仍受评测、Signoff 和 Canary 门禁约束。详见 [Trace 模块](docs/technical/modules/trace-evolution-kernel.md)。
 - Orchestration Trial 自动归档：锁定 Agent Profile 精确版本，记录 Dispatch、重路由、节点结果、成本和证据，并在终态自动生成 Outcome。
 - 版本化 Grader、多来源 Grade 和 Signoff Policy；模型判断不会被记录成程序证明。
 - 同评测集版本对比：在 Suite 精确版本、分区、Subject 类型和 Case 集合一致时，聚合比较 Workflow、Agent Profile 或 Harness Configuration 的质量、成本、耗时与失败类型。

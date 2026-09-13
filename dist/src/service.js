@@ -25,7 +25,7 @@ import { decideExecution } from "./execution-policy.js";
 import { dockerRequestDigest } from "./docker-sandbox.js";
 import { egressRequestDigest } from "./egress.js";
 import { ServiceFoundation } from "./service-foundation.js";
-export const VERSION = "0.12.6";
+export const VERSION = "0.12.7";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -3665,10 +3665,12 @@ export class CraftService extends ServiceFoundation {
             this.store.get("artifact", artifactId);
         for (const evidenceId of evidenceIds)
             this.store.get("evidence", evidenceId);
-        return this.store.appendEvent(`trial:${trialId}`, text(args.event_type, "event_type"), {
+        const result = this.store.appendEvent(`trial:${trialId}`, text(args.event_type, "event_type"), {
             trial_id: trialId, source: args.source ?? "agent_reported",
             data: object(args.data ?? {}, "data"), artifact_ids: artifactIds, evidence_ids: evidenceIds,
         });
+        this.trace.appendTrial({ ...args, event_id: `${trialId}:${result.sequence}`, event_type: args.event_type, artifact_ids: artifactIds, evidence_ids: evidenceIds });
+        return result;
     }
     outcomeRecord(args) {
         const trialId = text(args.trial_id, "trial_id");
@@ -3681,14 +3683,26 @@ export class CraftService extends ServiceFoundation {
             this.store.get("evidence", evidenceId);
         const failureType = args.failure_type === undefined ? (verdict === "passed" ? null : "unspecified")
             : text(args.failure_type, "failure_type");
-        return this.store.create("outcome", `outcome_${trialId}`, {
+        const outcome = this.store.create("outcome", `outcome_${trialId}`, {
             trial_id: trialId, verdict, summary: text(args.summary, "summary"),
             failure_type: failureType,
             scores: object(args.scores ?? {}, "scores"), costs: object(args.costs ?? {}, "costs"),
             evidence_ids: evidenceIds, source: args.source ?? "program_verified",
             ...(args.knowledge_binding === undefined ? {} : { knowledge_binding: object(args.knowledge_binding, "knowledge_binding") }),
         });
+        this.trace.appendTrial({ trial_id: trialId, event_type: "outcome.recorded", source: "program_verified", trust: "verified", summary: outcome.summary, data: { verdict, failure_type: failureType }, evidence_ids: evidenceIds });
+        return outcome;
     }
+    traceStart(args) { return this.trace.start(args); }
+    traceAppend(args) { return this.trace.append(args); }
+    traceObserve(args) { return this.trace.observe(args); }
+    traceFeedback(args) { return this.trace.feedback(args); }
+    traceFinalize(args) { return this.trace.finalize(args); }
+    traceGet(args) { return this.trace.get(args); }
+    traceQuery(args = {}) { return this.trace.query(args); }
+    traceReplayBundle(args) { return this.trace.replayBundle(args); }
+    traceCaseCompile(args) { return this.trace.compileCase(args); }
+    traceRetentionPlan(args) { return this.trace.retentionPlan(args); }
     trialGet(args) {
         const trialId = text(args.trial_id, "trial_id");
         const trial = this.store.get("trial", trialId);

@@ -1,7 +1,7 @@
 import { CraftStore, type JsonObject } from "./store.ts";
 import { type EmbeddingProvider } from "./semantic.ts";
 import { ServiceFoundation } from "./service-foundation.ts";
-export declare const VERSION = "0.12.6";
+export declare const VERSION = "0.12.7";
 export declare class CraftService extends ServiceFoundation {
     constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter?: unknown, dockerSandbox?: unknown, egressBroker?: unknown, hostOwnerId?: string, hostProfiles?: readonly import("./host-registry.ts").HostProfile[], modelProviders?: readonly import("./model-gateway.ts").ModelProviderSpec[], modelTransport?: import("./model-gateway.ts").ModelTransport);
     /**
@@ -501,6 +501,16 @@ export declare class CraftService extends ServiceFoundation {
     trialStart(args: JsonObject): JsonObject;
     trialTraceAppend(args: JsonObject): JsonObject;
     outcomeRecord(args: JsonObject): JsonObject;
+    traceStart(args: JsonObject): JsonObject;
+    traceAppend(args: JsonObject): JsonObject;
+    traceObserve(args: JsonObject): JsonObject;
+    traceFeedback(args: JsonObject): JsonObject;
+    traceFinalize(args: JsonObject): JsonObject;
+    traceGet(args: JsonObject): JsonObject;
+    traceQuery(args?: JsonObject): JsonObject;
+    traceReplayBundle(args: JsonObject): JsonObject;
+    traceCaseCompile(args: JsonObject): JsonObject;
+    traceRetentionPlan(args: JsonObject): JsonObject;
     trialGet(args: JsonObject): JsonObject;
     evaluationRunRecord(args: JsonObject): JsonObject;
     evaluationRunAggregate(args: JsonObject): JsonObject;
