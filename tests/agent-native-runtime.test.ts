@@ -21,7 +21,7 @@ async function fixture() {
 
 test("v0.12.3 distinguishes portable, guarded, isolated and external autonomy", async () => {
   const f = await fixture(); const { store, service } = f;
-  assert.equal(VERSION, "0.12.4");
+  assert.equal(VERSION, "0.12.5");
   assert.throws(() => service.autonomyLadderDecide({ effect: "nope" }), /unsupported/);
   const read = service.autonomyLadderDecide({ decision_id: "read", effect: "read_only" }); assert.equal((read.decision as JsonObject).mode, "portable_read"); assert.equal(service.autonomyLadderDecide({ decision_id: "read", effect: "read_only" }).idempotent, true);
   assert.throws(() => service.autonomyLadderDecide({ effect: "local_write" }), /Workspace and approval/);

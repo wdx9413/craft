@@ -1,0 +1,39 @@
+name: desktop-release
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+jobs:
+  windows-portable:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 11.19.0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 24, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - run: pnpm run pack:desktop
+      - uses: actions/upload-artifact@v4
+        with:
+          name: craft-workbench-windows
+          path: dist/craft-workbench-windows-*.zip
+
+  macos-dmg:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 11.19.0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 24, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - run: pnpm run pack:desktop
+      - uses: actions/upload-artifact@v4
+        with:
+          name: craft-workbench-macos
+          path: dist/craft-workbench-macos-*.dmg

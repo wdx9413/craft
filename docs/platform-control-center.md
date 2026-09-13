@@ -1,0 +1,36 @@
+# v0.12.5 Platform Control Center
+
+v0.12.5 把 Craft 从“可被宿主调用的治理内核”推进成可持续使用的本地工作台。GUI 仍是本机 Workbench Web 应用，由 `craft gui`/`craft serve` 启动；执行权限仍由 Codex、Claude、Trae Work、WorkBuddy 或独立 Host Driver 承担。
+
+## 设置与数据目录
+
+默认设置文件为 `~/.craft_data/settings.json`。`dataRoot` 可以改到绝对路径；重启 Craft 后，新的数据库、索引、日志、缓存、运行时和成果目录都会从该根目录创建。`CRAFT_DATA_DIR` 环境变量优先级最高，适合 CI、便携包和多项目隔离。设置文件只存 UI/运行预算偏好，不存 API Key、Cookie 或授权令牌。
+
+## Token 用量
+
+Workbench 和 `craft usage` 读取已落盘的 Host receipt、Outcome、Autonomous Turn，按日、ISO 周、月、年及 Host 汇总 input/output/total tokens。缺失或不可信的 usage 不会被猜测；结果为空时显示零，而不是制造“节省”结论。该报表是本地可重建投影，不会保存 Prompt 正文。
+
+## 桌面分发边界
+
+Windows 原生 runner 会生成含 Node runtime、`craft-workbench.cmd` 和应用资源的绿色 ZIP；双击脚本即可打开浏览器 Workbench。macOS 原生 runner 使用 `hdiutil` 生成真正的 `.dmg`。Windows 当前开发机无法合法生成 macOS DMG，因此 `.github/workflows/desktop-release.yml` 在 macOS runner 上产出它；不生成伪文件冒充 DMG。
+
+## v0.12.5 架构图
+
+```mermaid
+flowchart TD
+  UI[Workbench GUI / CLI] --> API[Local Workbench API]
+  API --> S[CraftService facade]
+  S --> K[Focused kernels: Work / Knowledge / Eval / Safety]
+  S --> P[Platform Control Center]
+  P --> SET[settings.json]
+  P --> U[Usage projection]
+  U --> R[Host receipts + Outcomes + Autonomous turns]
+  S --> DB[(SQLite + Markdown + artifacts)]
+  S --> MCP[Compact syscall MCP / Full MCP]
+  MCP --> H[Codex / Claude / Trae / WorkBuddy adapters]
+  H --> HOST[Host execution boundary]
+```
+
+## 仍然明确未声称完成的理想态
+
+真实跨厂商模型循环、多人协作/远程同步、标准 OTel 导出、生产级 OS 沙箱和签名安装器仍属于部署或后续产品层。v0.12.5 提供的是可观察、可配置、可移植的本地基座，不把本地契约包装成云端服务。

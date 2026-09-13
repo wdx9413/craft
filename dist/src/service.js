@@ -10,6 +10,7 @@ import { addCosts, dispatchNodes, normalizeNodes, orchestrationOutcome, planStat
 import { aggregateEvaluation, compareEvaluationAggregates } from "./evaluation.js";
 import { publishSkill, rollbackSkillPublication } from "./skill-publisher.js";
 import { loadConfig } from "./config.js";
+import { loadSettingsSync, publicSettings, resetSettingsSync, saveSettingsSync } from "./settings.js";
 import { hostProfilesFromConfig, resolveHostProfile } from "./host-registry.js";
 import { actionDigest, beginLoop, budgetBand, defineLoopLimits } from "./agent-loop.js";
 import { assetRef, defineAsset, routeAssets } from "./assets.js";
@@ -24,7 +25,7 @@ import { decideExecution } from "./execution-policy.js";
 import { dockerRequestDigest } from "./docker-sandbox.js";
 import { egressRequestDigest } from "./egress.js";
 import { ServiceFoundation } from "./service-foundation.js";
-export const VERSION = "0.12.4";
+export const VERSION = "0.12.5";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -3283,6 +3284,23 @@ export class CraftService extends ServiceFoundation {
     /** Read-only projection of runs, outcomes and cost per successful outcome. */
     metricsReport(args = {}) {
         return { ...this.metrics.report(args) };
+    }
+    usageReport(args = {}) {
+        return { ...this.usage.report(args) };
+    }
+    settingsGet() {
+        return publicSettings(loadSettingsSync(this.store.paths), this.store.paths);
+    }
+    settingsUpdate(args) {
+        const patch = { ...args };
+        delete patch.settingsFile;
+        delete patch.secretsStored;
+        delete patch.restartRequiredForDataRoot;
+        const settings = saveSettingsSync(patch, this.store.paths);
+        return publicSettings(settings, this.store.paths);
+    }
+    settingsReset() {
+        return publicSettings(resetSettingsSync(this.store.paths), this.store.paths);
     }
     /**
      * Evaluate the launch gates for one payload.

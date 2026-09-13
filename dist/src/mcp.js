@@ -13,7 +13,7 @@ const schemaFor = (name) => {
     if (["input", "inputs", "metadata", "policy", "dimensions", "environment", "budget", "data", "scores",
         "costs", "metrics", "configuration", "receipt_requirements", "execution", "rules", "authorization_requests", "notification_refs", "cost_hint", "design_axes", "report",
         "limits", "resources", "actual", "actual_resources", "estimated_resources", "observation", "trial_budget", "policy_fingerprints", "structured_data", "field_sources",
-        "capabilities", "observed_capabilities", "requirements", "output", "transform", "entity", "values", "budget_limits", "sandbox_requirements", "eval_suite_ref", "checks", "state", "action_results"].includes(name))
+        "capabilities", "observed_capabilities", "requirements", "output", "transform", "entity", "values", "budget_limits", "sandbox_requirements", "eval_suite_ref", "checks", "state", "action_results", "workbench", "runtime", "privacy"].includes(name))
         return { type: "object" };
     if (["completed", "pending", "decisions", "artifacts", "steps", "cases", "capabilities",
         "allowed_side_effects", "approved_side_effects", "nodes", "artifact_ids", "evidence_ids",
@@ -531,6 +531,10 @@ export const TOOLS = [
     tool("craft_knowledge_scope_list", "List knowledge scopes and the documents whose expiry has passed.", [], true, ["scope"]),
     tool("craft_knowledge_scope_forget", "Drop expired documents from the rebuildable projection; Markdown sources are untouched.", [], false),
     tool("craft_metrics_report", "Aggregate host runs and outcomes into success rate and cost per successful outcome.", [], true, ["host"]),
+    tool("craft_usage_report", "Aggregate observed input/output tokens by day, ISO week, month, year, and host. No prompt content is retained.", [], true, ["from", "to"]),
+    tool("craft_settings_get", "Read the redacted Workbench settings and active data directory.", [], true),
+    tool("craft_settings_update", "Update non-secret Workbench settings; changing dataRoot takes effect after restart.", [], false, ["locale", "theme", "dataRoot", "workbench", "runtime", "privacy"]),
+    tool("craft_settings_reset", "Reset Workbench settings to safe defaults without deleting project data.", [], false),
     tool("craft_launch_gate", "Evaluate the before-effect launch gates for a payload and report whether they block it.", [], true, ["hooks", "payload"]),
     tool("craft_model_provider_list", "List the declared model providers with their credential environment variable and whether it is set.", [], true),
     tool("craft_model_provider_get", "Describe one model provider and, optionally, the model a tier selects.", ["provider"], true, ["tier"]),
@@ -566,7 +570,7 @@ export const TOOLS = [
 ];
 const CORE_TOOL_NAMES = new Set(["craft_info", "craft_source_list", "craft_capability_search", "craft_capability_get", "craft_semantic_status", "craft_execution_policy_decide",
     "craft_default_route", "craft_default_route_resume", "craft_default_route_find", "craft_task_open", "craft_task_list", "craft_task_checkpoint", "craft_task_control_refresh", "craft_task_control_get", "craft_task_run_refresh", "craft_task_run_get", "craft_verified_work_loop_prepare", "craft_verified_work_loop_advance", "craft_verified_work_loop_decide", "craft_verified_work_loop_resume", "craft_verified_work_loop_get", "craft_host_activation_manifest_prepare", "craft_host_activation_manifest_validate", "craft_host_activation_manifest_consume", "craft_host_activation_manifest_get", "craft_execution_fabric_prepare", "craft_execution_fabric_execute", "craft_execution_fabric_advance", "craft_execution_fabric_consume", "craft_execution_fabric_get", "craft_host_bridge_get", "craft_work_launch_get", "craft_work_delivery_observe", "craft_work_delivery_get", "craft_delivery_loop_refresh", "craft_delivery_loop_get", "craft_delivery_evaluation_compare", "craft_delivery_evaluation_run", "craft_eval_campaign_report", "craft_adaptive_harness_recommend", "craft_managed_write_get", "craft_managed_run_get", "craft_campaign_runner_get", "craft_workspace_observer_get", "craft_autonomy_ladder_get", "craft_work_coordinator_get", "craft_agent_eval_lab_get", "craft_judge_promotion_eligible", "craft_platform_execution_preflight", "craft_platform_execution_probe", "craft_platform_execution_probe_get", "craft_workspace_get", "craft_workspace_diff", "craft_work_object_list", "craft_workspace_impact", "craft_context_assemble", "craft_change_set_preview",
-    "craft_artifact_register", "craft_evidence_record", "craft_capability_access_plan", "craft_capability_call_issue", "craft_capability_call_consume", "craft_capability_connector_list", "craft_capability_connector_ticket_issue", "craft_capability_connector_ticket_consume", "craft_evaluation_program_due", "craft_evaluation_program_report", "craft_enterprise_access_ticket_get", "craft_a2a_delegation_get"]);
+    "craft_artifact_register", "craft_evidence_record", "craft_capability_access_plan", "craft_capability_call_issue", "craft_capability_call_consume", "craft_capability_connector_list", "craft_capability_connector_ticket_issue", "craft_capability_connector_ticket_consume", "craft_evaluation_program_due", "craft_evaluation_program_report", "craft_enterprise_access_ticket_get", "craft_a2a_delegation_get", "craft_usage_report", "craft_settings_get"]);
 export const CORE_TOOLS = TOOLS.filter((tool) => CORE_TOOL_NAMES.has(tool.name));
 // The syscall surface. Instead of one tool per operation, a host learns a fixed
 // set of verbs and addresses capabilities by (resource, operation). The registry
@@ -962,6 +966,10 @@ export class McpServer {
             craft_hook_run: (a) => service.hookRun(a),
             craft_model_provider_list: () => service.modelProviderList(),
             craft_metrics_report: (a) => service.metricsReport(a),
+            craft_usage_report: (a) => service.usageReport(a),
+            craft_settings_get: async () => service.settingsGet(),
+            craft_settings_update: async (a) => service.settingsUpdate(a),
+            craft_settings_reset: async () => service.settingsReset(),
             craft_launch_gate: (a) => service.launchGate(a),
             craft_knowledge_scope_set: (a) => service.knowledgeScopeSet(a),
             craft_knowledge_scope_list: (a) => service.knowledgeScopeList(a),

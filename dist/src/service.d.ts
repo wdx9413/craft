@@ -1,7 +1,7 @@
 import { CraftStore, type JsonObject } from "./store.ts";
 import { type EmbeddingProvider } from "./semantic.ts";
 import { ServiceFoundation } from "./service-foundation.ts";
-export declare const VERSION = "0.12.4";
+export declare const VERSION = "0.12.5";
 export declare class CraftService extends ServiceFoundation {
     constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter?: unknown, dockerSandbox?: unknown, egressBroker?: unknown, hostOwnerId?: string, hostProfiles?: readonly import("./host-registry.ts").HostProfile[], modelProviders?: readonly import("./model-gateway.ts").ModelProviderSpec[], modelTransport?: import("./model-gateway.ts").ModelTransport);
     /**
@@ -436,6 +436,10 @@ export declare class CraftService extends ServiceFoundation {
     knowledgeScopeForget(): JsonObject;
     /** Read-only projection of runs, outcomes and cost per successful outcome. */
     metricsReport(args?: JsonObject): JsonObject;
+    usageReport(args?: JsonObject): JsonObject;
+    settingsGet(): JsonObject;
+    settingsUpdate(args: JsonObject): JsonObject;
+    settingsReset(): JsonObject;
     /**
      * Evaluate the launch gates for one payload.
      *

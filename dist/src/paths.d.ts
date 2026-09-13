@@ -2,6 +2,7 @@ export interface CraftPaths {
     root: string;
     configDir: string;
     configFile: string;
+    settingsFile: string;
     databaseDir: string;
     databaseFile: string;
     legacyDatabaseFile: string;

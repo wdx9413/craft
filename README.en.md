@@ -1,6 +1,6 @@
 # Craft
 
-> Current release: v0.12.4. Every host now follows a route-first boundary: Codex/Claude plugins, TraeWork, and the WorkBuddy Expert install exactly one default `craft-route` Skill with the roughly 15-tool syscall MCP; `craft` and `craft-clarify` are separate opt-in packages. Craft now also ships a bounded autonomous runtime with durable checkpoints, a unified capability lifecycle, memory consolidation, an HTTPS remote-interoperability contract, and exportable observations. The Full MCP remains an explicit, approved advanced-governance entry point. Real cloud execution, marketplace publication, and OS-level isolation still require a deployment adapter or platform review; they are not claimed as shipped services.
+> Current release: v0.12.5. Every host now follows a route-first boundary: Codex/Claude plugins, TraeWork, and the WorkBuddy Expert install exactly one default `craft-route` Skill with the roughly 15-tool syscall MCP; `craft` and `craft-clarify` are separate opt-in packages. Craft now also ships a bounded autonomous runtime with durable checkpoints, a unified capability lifecycle, memory consolidation, an HTTPS remote-interoperability contract, exportable observations, and a Workbench settings/token control center. The Full MCP remains an explicit, approved advanced-governance entry point. Real cloud execution, marketplace publication, and OS-level isolation still require a deployment adapter or platform review; they are not claimed as shipped services.
 
 [中文](README.md) | [English](README.en.md)
 

@@ -11,6 +11,7 @@ import { addCosts, dispatchNodes, normalizeNodes, orchestrationOutcome, planStat
 import { aggregateEvaluation, compareEvaluationAggregates, type EvaluationAggregate } from "./evaluation.ts";
 import { publishSkill, rollbackSkillPublication } from "./skill-publisher.ts";
 import { loadConfig } from "./config.ts";
+import { loadSettingsSync, publicSettings, resetSettingsSync, saveSettingsSync, type CraftSettingsPatch } from "./settings.ts";
 import { hostProfilesFromConfig, resolveHostProfile } from "./host-registry.ts";
 import { actionDigest, beginLoop, budgetBand, defineLoopLimits } from "./agent-loop.ts";
 import { assetRef, defineAsset, routeAssets } from "./assets.ts";
@@ -26,7 +27,7 @@ import { dockerRequestDigest } from "./docker-sandbox.ts";
 import { egressRequestDigest } from "./egress.ts";
 import { ServiceFoundation } from "./service-foundation.ts";
 
-export const VERSION = "0.12.4";
+export const VERSION = "0.12.5";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -2524,6 +2525,27 @@ export class CraftService extends ServiceFoundation {
   /** Read-only projection of runs, outcomes and cost per successful outcome. */
   metricsReport(args: JsonObject = {}): JsonObject {
     return { ...this.metrics.report(args) };
+  }
+
+  usageReport(args: JsonObject = {}): JsonObject {
+    return { ...this.usage.report(args) };
+  }
+
+  settingsGet(): JsonObject {
+    return publicSettings(loadSettingsSync(this.store.paths), this.store.paths) as JsonObject;
+  }
+
+  settingsUpdate(args: JsonObject): JsonObject {
+    const patch = { ...args } as CraftSettingsPatch;
+    delete (patch as Record<string, unknown>).settingsFile;
+    delete (patch as Record<string, unknown>).secretsStored;
+    delete (patch as Record<string, unknown>).restartRequiredForDataRoot;
+    const settings = saveSettingsSync(patch, this.store.paths);
+    return publicSettings(settings, this.store.paths) as JsonObject;
+  }
+
+  settingsReset(): JsonObject {
+    return publicSettings(resetSettingsSync(this.store.paths), this.store.paths) as JsonObject;
   }
 
   /**

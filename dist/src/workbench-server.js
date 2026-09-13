@@ -15,6 +15,10 @@ let domainKits=[],selectedRun=null,nextSequence=0;async function loadKits(){cons
 const FABRIC_WORKBENCH_SCRIPT = `<script>
 (()=>{const legacyCreate=document.getElementById('create').onclick;document.getElementById('create').onclick=async()=>{if(document.getElementById('knowledgeBundle').value)return legacyCreate();const prompt=document.getElementById('prompt').value;const kitId=document.getElementById('domainKit').value;const raw=lines('acceptance');const specs=raw.map((line,index)=>{const match=line.match(/^(program|model|human|business_signal|file)\\s*:\\s*(.+)$/);return{id:'criterion_'+(index+1),name:match&&match[1]==='file'?'文件成果：'+match[2]:match?match[2]:line,method:match&&match[1]==='file'?'program':match?match[1]:'human',required:true,file_path:match&&match[1]==='file'?match[2]:null}});const acceptance=specs.map(({file_path,...criterion})=>criterion);const prepared=await api('/api/execution-fabrics',{method:'POST',body:JSON.stringify({title:document.getElementById('title').value,goal:document.getElementById('goal').value,workspace:document.getElementById('workspace').value,include_paths:lines('workspaceScope').length?lines('workspaceScope'):['.'],host:document.getElementById('host').value,sandbox:document.getElementById('sandbox').value,prompt,...(!kitId&&acceptance.length?{acceptance_name:'Definition of done',acceptance_criteria:acceptance}:{})})});if(kitId){const values={};for(const input of document.querySelectorAll('#domainFields [data-field]'))values[input.dataset.field]=input.type==='checkbox'?input.checked:input.type==='number'?Number(input.value):input.value;await api('/api/domain-kits/'+encodeURIComponent(kitId)+'/apply',{method:'POST',body:JSON.stringify({launch_id:prepared.launch.id,values})})}else for(const spec of specs.filter(x=>x.file_path))await api('/api/acceptance-plans/'+encodeURIComponent(prepared.launch.acceptance_plan_id)+'/file-evaluation',{method:'POST',body:JSON.stringify({criterion_id:spec.id,workspace:prepared.launch.workspace,relative_path:spec.file_path})});const write=prepared.launch.sandbox==='workspace-write';if(!write||confirm('Agent 将修改以下工作区：\\n'+prepared.launch.workspace+'\\n\\n只批准本次摘要绑定的任务。是否继续？'))await api('/api/execution-fabrics/'+encodeURIComponent(prepared.execution_fabric.id)+'/execute',{method:'POST',body:JSON.stringify({prompt,approved:write||undefined,actor:write?'workbench-user':undefined})});await load(true)}})();
 </script>`;
+const CONTROL_CENTER_HTML = `<section class="card wide"><h2>平台设置与 Token 用量</h2><p><small>设置保存在 <code>~/.craft_data/settings.json</code>（可通过 dataRoot 改位置）；凭据不会写入设置文件。</small></p><div id="settings"></div><div id="usage" class="metrics"></div><button id="saveSettings">保存设置</button><button id="resetSettings" class="danger">恢复默认</button></section>`;
+const CONTROL_CENTER_SCRIPT = `<script>
+(()=>{const load=async()=>{const settings=await api('/api/settings');const target=document.getElementById('settings');target.replaceChildren();for(const [key,value] of [['数据目录',settings.dataRoot],['设置文件',settings.settingsFile],['主题',settings.theme],['语言',settings.locale],['默认模型层级',settings.runtime.defaultTier],['单次最大步数',settings.runtime.maxSteps],['单次最大 Token',settings.runtime.maxTokens]]){const row=document.createElement('div');row.className='item';row.textContent=key+'：'+value;target.append(row)}const usage=await api('/api/usage');const usageTarget=document.getElementById('usage');usageTarget.replaceChildren();for(const [key,value] of [['累计 Token',usage.totals.total_tokens],['今日 Token',Object.values(usage.daily).at(-1)?.total_tokens||0],['本周 Token',Object.values(usage.weekly).at(-1)?.total_tokens||0],['本月 Token',Object.values(usage.monthly).at(-1)?.total_tokens||0],['今年 Token',Object.values(usage.yearly).at(-1)?.total_tokens||0]]){const metric=document.createElement('div');metric.className='metric';const bold=document.createElement('b');bold.textContent=String(value);metric.append(bold,document.createTextNode(key));usageTarget.append(metric)}};document.getElementById('saveSettings').onclick=async()=>{const dataRoot=window.prompt('数据目录（留空保持不变）：', '');const theme=window.prompt('主题：system、light 或 dark','system');const patch={...(dataRoot?{dataRoot}:{}),...(theme?{theme}:{})};await api('/api/settings',{method:'PATCH',body:JSON.stringify(patch)});await load();alert('已保存；数据目录变更需要重启 Craft 才会切换。')};document.getElementById('resetSettings').onclick=async()=>{if(!confirm('只重置设置，不删除数据。继续？'))return;await api('/api/settings/reset',{method:'POST',body:'{}'});await load()};window.craftControlCenterLoad=load;load().catch(e=>document.getElementById('settings').textContent=e.message)})();
+</script>`;
 function json(status, value) { return { status, contentType: "application/json; charset=utf-8", body: JSON.stringify(value) }; }
 function authorized(supplied, expected) { if (!supplied)
     return false; const left = Buffer.from(supplied); const right = Buffer.from(expected); return left.length === right.length && timingSafeEqual(left, right); }
@@ -31,7 +35,7 @@ export class WorkbenchWebApp {
         const url = new URL(request.path, this.origin);
         const path = url.pathname;
         if (request.method === "GET" && path === "/")
-            return { status: 200, contentType: "text/html; charset=utf-8", body: HTML.replace("</body>", `${FABRIC_WORKBENCH_SCRIPT}</body>`) };
+            return { status: 200, contentType: "text/html; charset=utf-8", body: HTML.replace("</main>", `${CONTROL_CENTER_HTML}</main>`).replace("</body>", `${FABRIC_WORKBENCH_SCRIPT}${CONTROL_CENTER_SCRIPT}</body>`) };
         if (request.method === "GET" && path === "/health")
             return json(200, { status: "ok", version: VERSION });
         if (path.startsWith("/api/") && request.origin !== undefined && request.origin !== this.origin)
@@ -41,6 +45,14 @@ export class WorkbenchWebApp {
         try {
             if (request.method === "GET" && path === "/api/home")
                 return json(200, this.service.homeView({}));
+            if (request.method === "GET" && path === "/api/settings")
+                return json(200, this.service.settingsGet());
+            if (request.method === "PATCH" && path === "/api/settings")
+                return json(200, this.service.settingsUpdate(bodyObject(request.body)));
+            if (request.method === "POST" && path === "/api/settings/reset")
+                return json(200, this.service.settingsReset());
+            if (request.method === "GET" && path === "/api/usage")
+                return json(200, this.service.usageReport({ from: url.searchParams.get("from") ?? undefined, to: url.searchParams.get("to") ?? undefined }));
             if (request.method === "GET" && path.startsWith("/api/managed-runs/"))
                 return json(200, this.service.managedRunGet({ managed_run_id: decodeURIComponent(path.slice(18)) }));
             if (request.method === "GET" && path.startsWith("/api/campaign-runners/"))

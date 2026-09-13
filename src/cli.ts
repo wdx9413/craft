@@ -28,6 +28,9 @@ Usage:
   craft run --resume <dispatch> Resume a crashed/running dispatch with the exact goal
   craft mode <name>             Switch agent, supervisor, or provider mode
   craft paths                   Print the ~/.craft_data layout
+  craft settings show           Show redacted GUI settings
+  craft settings reset          Reset GUI settings without deleting data
+  craft usage                   Show daily/weekly/monthly/yearly token usage
   craft source add <path>       Add and scan a capability directory
   craft source list             List capability directories
   craft source scan [id]        Incrementally scan sources
@@ -50,6 +53,7 @@ Usage:
   craft supervisor status       Check the local Supervisor
   craft home                    Show the unified Workbench Home projection
   craft serve [--port 4173]     Start the local-only Workbench web app
+  craft gui [--port 4173]       Alias for serve; open the local Workbench
   craft inbox refresh           Refresh the unified attention inbox
   craft inbox list [options]    List prioritized attention cards
   craft inbox ack <id>          Acknowledge a card without resolving its source
@@ -271,7 +275,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     }
     throw new Error("semantic requires configure, disable, or status.");
   }
-  if (["source", "capability", "task", "worker", "inbox", "home", "serve", "codex", "claude", "host-run", "supervisor"].includes(args[0] ?? "")) {
+  if (["source", "capability", "task", "worker", "inbox", "home", "serve", "gui", "usage", "settings", "codex", "claude", "host-run", "supervisor"].includes(args[0] ?? "")) {
     const store = await new CraftStore(paths).open();
     const service = await CraftService.open(store);
     try {
@@ -295,7 +299,11 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
         const supervisor = new LocalSupervisor(service, paths); const started = await supervisor.start(option(args, "--port") === undefined ? 0 : Number(option(args, "--port")));
         stdout.write(`Craft Supervisor: ${String(started.url)}\n`); await new Promise<void>((resolve) => { const stop = () => resolve(); process.once("SIGINT", stop); process.once("SIGTERM", stop); }); await supervisor.close(); return;
       }
-      else if (args[0] === "serve") {
+      else if (args[0] === "usage") result = service.usageReport({ from: option(args, "--from"), to: option(args, "--to") });
+      else if (args[0] === "settings" && args[1] === "show") result = service.settingsGet();
+      else if (args[0] === "settings" && args[1] === "reset") result = service.settingsReset();
+      else if (args[0] === "settings" && args[1] === "update") result = service.settingsUpdate(JSON.parse(option(args, "--json") ?? "{}") as JsonObject);
+      else if (args[0] === "serve" || args[0] === "gui") {
         const supervisor = new LocalSupervisor(service, paths); await supervisor.start(0); const server = new LocalWorkbenchServer(service);
         try { const started = await server.start(option(args, "--port") === undefined ? 4173 : Number(option(args, "--port"))); stdout.write(`Craft Workbench: ${started.url}\n`); await new Promise<void>((resolve) => { const stop = () => resolve(); process.once("SIGINT", stop); process.once("SIGTERM", stop); }); }
         finally { await server.close(); await supervisor.close(); } return;
