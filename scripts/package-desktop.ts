@@ -22,7 +22,7 @@ const yaml = await realpath(join(root, "node_modules", "yaml")); await cp(yaml, 
 if (process.platform === "win32") {
   const compiler = ["C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe", "C:\\Windows\\Microsoft.NET\\Framework\\v4.0.30319\\csc.exe"].find((candidate) => existsSync(candidate));
   if (!compiler) throw new Error("Windows desktop packaging requires the .NET Framework C# compiler to create craft.exe");
-  const compile = spawnSync(compiler, ["/nologo", "/target:winexe", `/out:${join(stage, "craft.exe")}`, join(root, "scripts", "windows-launcher.cs")], { encoding: "utf8" });
+  const compile = spawnSync(compiler, ["/nologo", "/target:winexe", "/reference:System.Windows.Forms.dll", `/out:${join(stage, "craft.exe")}`, join(root, "scripts", "windows-launcher.cs")], { encoding: "utf8" });
   if (compile.status !== 0) throw new Error(`craft.exe compilation failed: ${compile.stderr || compile.stdout}`);
 }
 await writeFile(join(stage, "craft-workbench.cmd"), "@echo off\nsetlocal\n\"%~dp0node.exe\" \"%~dp0app\\dist\\src\\cli.js\" gui %*\n", "utf8");
