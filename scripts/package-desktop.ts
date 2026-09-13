@@ -22,7 +22,7 @@ const yaml = await realpath(join(root, "node_modules", "yaml")); await cp(yaml, 
 if (process.platform === "win32") {
   const compiler = ["C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe", "C:\\Windows\\Microsoft.NET\\Framework\\v4.0.30319\\csc.exe"].find((candidate) => existsSync(candidate));
   if (!compiler) throw new Error("Windows desktop packaging requires the .NET Framework C# compiler to create craft.exe");
-  const compile = spawnSync(compiler, ["/nologo", "/target:winexe", "/reference:System.Windows.Forms.dll", `/out:${join(stage, "craft.exe")}`, join(root, "scripts", "windows-launcher.cs")], { encoding: "utf8" });
+  const compile = spawnSync(compiler, ["/nologo", "/target:winexe", "/reference:System.Windows.Forms.dll", `/win32icon:${join(root, "assets", "craft.ico")}`, `/out:${join(stage, "craft.exe")}`, join(root, "scripts", "windows-launcher.cs")], { encoding: "utf8" });
   if (compile.status !== 0) throw new Error(`craft.exe compilation failed: ${compile.stderr || compile.stdout}`);
 }
 await writeFile(join(stage, "craft-workbench.cmd"), "@echo off\nsetlocal\n\"%~dp0node.exe\" \"%~dp0app\\dist\\src\\cli.js\" gui %*\n", "utf8");
@@ -34,9 +34,10 @@ const windowsEntries = await entriesFrom(stage, `craft-workbench-windows-v${mani
 const macStage = join(dist, `craft-workbench-macos-v${manifest.version}.app`); await rm(macStage, { recursive: true, force: true }); await mkdir(join(macStage, "Contents", "MacOS"), { recursive: true }); await mkdir(join(macStage, "Contents", "Resources", "app", "dist"), { recursive: true });
 await cp(join(dist, "src"), join(macStage, "Contents", "Resources", "app", "dist", "src"), { recursive: true }); await cp(join(root, "package.json"), join(macStage, "Contents", "Resources", "app", "package.json"));
 if (process.platform === "darwin" && existsSync(process.execPath)) await cp(process.execPath, join(macStage, "Contents", "Resources", "node"));
+await cp(join(root, "assets", "craft.icns"), join(macStage, "Contents", "Resources", "craft.icns"));
 await writeFile(join(macStage, "Contents", "MacOS", "craft-workbench"), "#!/bin/sh\nROOT=\"$(CDPATH= cd -- \"$(dirname -- \"$0\")/../Resources\" && pwd)\"\nexec \"${CRAFT_NODE:-$ROOT/node}\" \"$ROOT/app/dist/src/cli.js\" gui \"$@\"\n", "utf8");
 await chmod(join(macStage, "Contents", "MacOS", "craft-workbench"), 0o755);
-await writeFile(join(macStage, "Contents", "Info.plist"), `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleName</key><string>Craft Workbench</string><key>CFBundleIdentifier</key><string>dev.craft.workbench</string><key>CFBundleVersion</key><string>${manifest.version}</string><key>CFBundleExecutable</key><string>craft-workbench</string></dict></plist>`, "utf8");
+await writeFile(join(macStage, "Contents", "Info.plist"), `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleName</key><string>Craft Workbench</string><key>CFBundleIdentifier</key><string>dev.craft.workbench</string><key>CFBundleVersion</key><string>${manifest.version}</string><key>CFBundleExecutable</key><string>craft-workbench</string><key>CFBundleIconFile</key><string>craft.icns</string></dict></plist>`, "utf8");
 const hdiutil = process.platform === "darwin" ? spawnSync("hdiutil", ["create", "-volname", "Craft Workbench", "-srcfolder", macStage, "-ov", "-format", "UDZO", join(dist, `craft-workbench-macos-v${manifest.version}.dmg`)], { stdio: "inherit" }) : null;
 if (!hdiutil || hdiutil.status !== 0) await writeFile(join(dist, `craft-workbench-macos-v${manifest.version}.dmg.txt`), `A native macOS runner must build the DMG. On macOS run: pnpm run build && pnpm run pack:desktop\nStaging app: ${macStage}\n`, "utf8");
 process.stdout.write(`desktop: windows zip and macOS staging prepared for v${manifest.version}\n`);
