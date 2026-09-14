@@ -110,6 +110,8 @@ import { ReleaseQualificationKernel } from "./release-qualification.ts";
 import { VerificationPlane } from "./verification-plane.ts";
 import { EvaluationModelProfileKernel } from "./evaluation-model-profile.ts";
 import { WorkflowEvolutionKernel } from "./workflow-evolution.ts";
+import { TrustProfileKernel } from "./trust-profile.ts";
+import { WebOperationKernel } from "./web-operation.ts";
 
 /**
  * Stable composition root for the service. Domain behavior stays in focused
@@ -241,6 +243,8 @@ export abstract class ServiceFoundation {
   readonly durableWorker: DurableWorkerKernel;
   readonly providerRouter: ProviderRouterKernel;
   readonly a2aProtocol: A2AProtocolKernel;
+  readonly trustProfiles: TrustProfileKernel;
+  readonly webOperations: WebOperationKernel;
 
   constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter = new LocalIsolatedAdapter(),
     dockerSandbox = new DockerSandboxAdapter(), egressBroker = new TrustedEgressBroker(), hostOwnerId?: string,
@@ -360,6 +364,8 @@ export abstract class ServiceFoundation {
     this.durableWorker = new DurableWorkerKernel(store);
     this.providerRouter = new ProviderRouterKernel(store);
     this.a2aProtocol = new A2AProtocolKernel();
+    this.trustProfiles = new TrustProfileKernel(store);
+    this.webOperations = new WebOperationKernel(store);
     this.hostRuns = new HostRunKernel(store, [...this.hostDrivers.values()], hostOwnerId,
       (run, receipt) => this.finalizeWorkLaunch(run, receipt), this.trace);
   }

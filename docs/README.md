@@ -100,6 +100,8 @@
 
 ## 当前实现参考
 
+- [v0.12.25 Trust Profile、网页操作边界与 HTTP MCP](technical/modules/v01225-trust-web-runtime.md)
+
 - [中文架构说明](architecture.zh-CN.md)
 - [English architecture](architecture.en.md)
 

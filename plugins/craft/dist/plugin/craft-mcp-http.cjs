@@ -1101,18 +1101,18 @@ ${indent}${text112.slice(fold + 1, end2)}`;
     }
     function consumeMoreIndentedLines(text112, i, indent) {
       let end = i;
-      let start2 = i + 1;
-      let ch = text112[start2];
+      let start = i + 1;
+      let ch = text112[start];
       while (ch === " " || ch === "	") {
-        if (i < start2 + indent) {
+        if (i < start + indent) {
           ch = text112[++i];
         } else {
           do {
             ch = text112[++i];
           } while (ch && ch !== "\n");
           end = i;
-          start2 = i + 1;
-          ch = text112[start2];
+          start = i + 1;
+          ch = text112[start];
         }
       }
       return end;
@@ -1143,12 +1143,12 @@ var require_stringifyString = __commonJS({
       const strLen = str.length;
       if (strLen <= limit3)
         return false;
-      for (let i = 0, start2 = 0; i < strLen; ++i) {
+      for (let i = 0, start = 0; i < strLen; ++i) {
         if (str[i] === "\n") {
-          if (i - start2 > limit3)
+          if (i - start > limit3)
             return true;
-          start2 = i + 1;
-          if (strLen - start2 <= limit3)
+          start = i + 1;
+          if (strLen - start <= limit3)
             return false;
         }
       }
@@ -1162,19 +1162,19 @@ var require_stringifyString = __commonJS({
       const minMultiLineLength = ctx.options.doubleQuotedMinMultiLineLength;
       const indent = ctx.indent || (containsDocumentMarker(value) ? "  " : "");
       let str = "";
-      let start2 = 0;
+      let start = 0;
       for (let i = 0, ch = json[i]; ch; ch = json[++i]) {
         if (ch === " " && json[i + 1] === "\\" && json[i + 2] === "n") {
-          str += json.slice(start2, i) + "\\ ";
+          str += json.slice(start, i) + "\\ ";
           i += 1;
-          start2 = i;
+          start = i;
           ch = "\\";
         }
         if (ch === "\\")
           switch (json[i + 1]) {
             case "u":
               {
-                str += json.slice(start2, i);
+                str += json.slice(start, i);
                 const code = json.substr(i + 2, 4);
                 switch (code) {
                   case "0000":
@@ -1208,14 +1208,14 @@ var require_stringifyString = __commonJS({
                       str += json.substr(i, 6);
                 }
                 i += 5;
-                start2 = i + 1;
+                start = i + 1;
               }
               break;
             case "n":
               if (implicitKey || json[i + 2] === '"' || json.length < minMultiLineLength) {
                 i += 1;
               } else {
-                str += json.slice(start2, i) + "\n\n";
+                str += json.slice(start, i) + "\n\n";
                 while (json[i + 2] === "\\" && json[i + 3] === "n" && json[i + 4] !== '"') {
                   str += "\n";
                   i += 2;
@@ -1224,14 +1224,14 @@ var require_stringifyString = __commonJS({
                 if (json[i + 2] === " ")
                   str += "\\";
                 i += 1;
-                start2 = i + 1;
+                start = i + 1;
               }
               break;
             default:
               i += 1;
           }
       }
-      str = start2 ? str + json.slice(start2) : json;
+      str = start ? str + json.slice(start) : json;
       return implicitKey ? str : foldFlowLines.foldFlowLines(str, indent, foldFlowLines.FOLD_QUOTED, getFoldOptions(ctx, false));
     }
     function singleQuotedString(value, ctx) {
@@ -1310,10 +1310,10 @@ ${indent}`) + "'";
         else
           break;
       }
-      let start2 = value.substring(0, startNlPos < startEnd ? startNlPos + 1 : startEnd);
-      if (start2) {
-        value = value.substring(start2.length);
-        start2 = start2.replace(/\n+/g, `$&${indent}`);
+      let start = value.substring(0, startNlPos < startEnd ? startNlPos + 1 : startEnd);
+      if (start) {
+        value = value.substring(start.length);
+        start = start.replace(/\n+/g, `$&${indent}`);
       }
       const indentSize = indent ? "2" : "1";
       let header = (startWithSpace ? indentSize : "") + chomp;
@@ -1331,14 +1331,14 @@ ${indent}`) + "'";
             literalFallback = true;
           };
         }
-        const body2 = foldFlowLines.foldFlowLines(`${start2}${foldedValue}${end}`, indent, foldFlowLines.FOLD_BLOCK, foldOptions);
+        const body2 = foldFlowLines.foldFlowLines(`${start}${foldedValue}${end}`, indent, foldFlowLines.FOLD_BLOCK, foldOptions);
         if (!literalFallback)
           return `>${header}
 ${indent}${body2}`;
       }
       value = value.replace(/\n+/g, `$&${indent}`);
       return `|${header}
-${indent}${start2}${value}${end}`;
+${indent}${start}${value}${end}`;
     }
     function plainString(item, ctx, onComment, onChompKeep) {
       const { type, value } = item;
@@ -1969,23 +1969,23 @@ ${indent}${line}` : "\n";
         lines.push(str);
         linesAtValue = lines.length;
       }
-      const { start: start2, end } = flowChars;
+      const { start, end } = flowChars;
       if (lines.length === 0) {
-        return start2 + end;
+        return start + end;
       } else {
         if (!reqNewline) {
           const len = lines.reduce((sum, line) => sum + line.length + 2, 2);
           reqNewline = ctx.options.lineWidth > 0 && len > ctx.options.lineWidth;
         }
         if (reqNewline) {
-          let str = start2;
+          let str = start;
           for (const line of lines)
             str += line ? `
 ${indentStep}${indent}${line}` : "\n";
           return `${str}
 ${indent}${end}`;
         } else {
-          return `${start2}${fcPadding}${lines.join(" ")}${fcPadding}${end}`;
+          return `${start}${fcPadding}${lines.join(" ")}${fcPadding}${end}`;
         }
       }
     }
@@ -3780,7 +3780,7 @@ var require_resolve_props = __commonJS({
       let newlineAfterProp = null;
       let comma = null;
       let found = null;
-      let start2 = null;
+      let start = null;
       for (const token of tokens) {
         if (reqSpace) {
           if (token.type !== "space" && token.type !== "newline" && token.type !== "comma")
@@ -3832,7 +3832,7 @@ var require_resolve_props = __commonJS({
             if (token.source.endsWith(":"))
               onError(token.offset + token.source.length - 1, "BAD_ALIAS", "Anchor ending in : is ambiguous", true);
             anchor = token;
-            start2 ?? (start2 = token.offset);
+            start ?? (start = token.offset);
             atNewline = false;
             hasSpace = false;
             reqSpace = true;
@@ -3841,7 +3841,7 @@ var require_resolve_props = __commonJS({
             if (tag)
               onError(token, "MULTIPLE_TAGS", "A node can have at most one tag");
             tag = token;
-            start2 ?? (start2 = token.offset);
+            start ?? (start = token.offset);
             atNewline = false;
             hasSpace = false;
             reqSpace = true;
@@ -3889,7 +3889,7 @@ var require_resolve_props = __commonJS({
         tag,
         newlineAfterProp,
         end,
-        start: start2 ?? end
+        start: start ?? end
       };
     }
     exports2.resolveProps = resolveProps;
@@ -3991,8 +3991,8 @@ var require_resolve_block_map = __commonJS({
       let offset = bm.offset;
       let commentEnd = null;
       for (const collItem of bm.items) {
-        const { start: start2, key: key2, sep: sep2, value } = collItem;
-        const keyProps = resolveProps.resolveProps(start2, {
+        const { start, key: key2, sep: sep2, value } = collItem;
+        const keyProps = resolveProps.resolveProps(start, {
           indicator: "explicit-key-ind",
           next: key2 ?? sep2?.[0],
           offset,
@@ -4019,14 +4019,14 @@ var require_resolve_block_map = __commonJS({
             continue;
           }
           if (keyProps.newlineAfterProp || utilContainsNewline.containsNewline(key2)) {
-            onError(key2 ?? start2[start2.length - 1], "MULTILINE_IMPLICIT_KEY", "Implicit keys need to be on a single line");
+            onError(key2 ?? start[start.length - 1], "MULTILINE_IMPLICIT_KEY", "Implicit keys need to be on a single line");
           }
         } else if (keyProps.found?.indent !== bm.indent) {
           onError(offset, "BAD_INDENT", startColMsg);
         }
         ctx.atKey = true;
         const keyStart = keyProps.end;
-        const keyNode = key2 ? composeNode(ctx, key2, keyProps, onError) : composeEmptyNode(ctx, keyStart, start2, null, keyProps, onError);
+        const keyNode = key2 ? composeNode(ctx, key2, keyProps, onError) : composeEmptyNode(ctx, keyStart, start, null, keyProps, onError);
         if (ctx.schema.compat)
           utilFlowIndentCheck.flowIndentCheck(bm.indent, key2, onError);
         ctx.atKey = false;
@@ -4096,8 +4096,8 @@ var require_resolve_block_seq = __commonJS({
         ctx.atKey = false;
       let offset = bs.offset;
       let commentEnd = null;
-      for (const { start: start2, value } of bs.items) {
-        const props = resolveProps.resolveProps(start2, {
+      for (const { start, value } of bs.items) {
+        const props = resolveProps.resolveProps(start, {
           indicator: "seq-item-ind",
           next: value,
           offset,
@@ -4118,7 +4118,7 @@ var require_resolve_block_seq = __commonJS({
             continue;
           }
         }
-        const node = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, start2, null, props, onError);
+        const node = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, start, null, props, onError);
         if (ctx.schema.compat)
           utilFlowIndentCheck.flowIndentCheck(bs.indent, value, onError);
         offset = node.range[2];
@@ -4202,8 +4202,8 @@ var require_resolve_flow_collection = __commonJS({
       let offset = fc.offset + fc.start.source.length;
       for (let i = 0; i < fc.items.length; ++i) {
         const collItem = fc.items[i];
-        const { start: start2, key: key2, sep: sep2, value } = collItem;
-        const props = resolveProps.resolveProps(start2, {
+        const { start, key: key2, sep: sep2, value } = collItem;
+        const props = resolveProps.resolveProps(start, {
           flow: fcName,
           indicator: "explicit-key-ind",
           next: key2 ?? sep2?.[0],
@@ -4243,7 +4243,7 @@ var require_resolve_flow_collection = __commonJS({
             onError(props.start, "MISSING_CHAR", `Missing , between ${fcName} items`);
           if (props.comment) {
             let prevItemComment = "";
-            loop: for (const st of start2) {
+            loop: for (const st of start) {
               switch (st.type) {
                 case "comma":
                 case "space":
@@ -4276,7 +4276,7 @@ var require_resolve_flow_collection = __commonJS({
         } else {
           ctx.atKey = true;
           const keyStart = props.end;
-          const keyNode = key2 ? composeNode(ctx, key2, props, onError) : composeEmptyNode(ctx, keyStart, start2, null, props, onError);
+          const keyNode = key2 ? composeNode(ctx, key2, props, onError) : composeEmptyNode(ctx, keyStart, start, null, props, onError);
           if (isBlock(key2))
             onError(keyNode.range, "BLOCK_IN_FLOW", blockMsg);
           ctx.atKey = false;
@@ -4439,10 +4439,10 @@ var require_resolve_block_scalar = __commonJS({
     "use strict";
     var Scalar = require_Scalar();
     function resolveBlockScalar(ctx, scalar2, onError) {
-      const start2 = scalar2.offset;
+      const start = scalar2.offset;
       const header = parseBlockScalarHeader(scalar2, ctx.options.strict, onError);
       if (!header)
-        return { value: "", type: null, comment: "", range: [start2, start2, start2] };
+        return { value: "", type: null, comment: "", range: [start, start, start] };
       const type = header.mode === ">" ? Scalar.Scalar.BLOCK_FOLDED : Scalar.Scalar.BLOCK_LITERAL;
       const lines = scalar2.source ? splitLines(scalar2.source) : [];
       let chompStart = lines.length;
@@ -4455,10 +4455,10 @@ var require_resolve_block_scalar = __commonJS({
       }
       if (chompStart === 0) {
         const value2 = header.chomp === "+" && lines.length > 0 ? "\n".repeat(Math.max(1, lines.length - 1)) : "";
-        let end2 = start2 + header.length;
+        let end2 = start + header.length;
         if (scalar2.source)
           end2 += scalar2.source.length;
-        return { value: value2, type, comment: header.comment, range: [start2, end2, end2] };
+        return { value: value2, type, comment: header.comment, range: [start, end2, end2] };
       }
       let trimIndent = scalar2.indent + header.indent;
       let offset = scalar2.offset + header.length;
@@ -4539,8 +4539,8 @@ var require_resolve_block_scalar = __commonJS({
         default:
           value += "\n";
       }
-      const end = start2 + header.length + scalar2.source.length;
-      return { value, type, comment: header.comment, range: [start2, end, end] };
+      const end = start + header.length + scalar2.source.length;
+      return { value, type, comment: header.comment, range: [start, end, end] };
     }
     function parseBlockScalarHeader({ offset, props }, strict, onError) {
       if (props[0].type !== "block-scalar-header") {
@@ -5061,7 +5061,7 @@ var require_compose_doc = __commonJS({
     var composeNode = require_compose_node();
     var resolveEnd = require_resolve_end();
     var resolveProps = require_resolve_props();
-    function composeDoc(options, directives, { offset, start: start2, value, end }, onError) {
+    function composeDoc(options, directives, { offset, start, value, end }, onError) {
       const opts = Object.assign({ _directives: directives }, options);
       const doc = new Document.Document(void 0, opts);
       const ctx = {
@@ -5071,7 +5071,7 @@ var require_compose_doc = __commonJS({
         options: doc.options,
         schema: doc.schema
       };
-      const props = resolveProps.resolveProps(start2, {
+      const props = resolveProps.resolveProps(start, {
         indicator: "doc-start",
         next: value ?? end?.[0],
         offset,
@@ -5084,7 +5084,7 @@ var require_compose_doc = __commonJS({
         if (value && (value.type === "block-map" || value.type === "block-seq") && !props.hasNewline)
           onError(props.end, "MISSING_CHAR", "Block collection cannot start on same line with directives-end marker");
       }
-      doc.contents = value ? composeNode.composeNode(ctx, value, props, onError) : composeNode.composeEmptyNode(ctx, props.end, start2, null, props, onError);
+      doc.contents = value ? composeNode.composeNode(ctx, value, props, onError) : composeNode.composeEmptyNode(ctx, props.end, start, null, props, onError);
       const contentEnd = doc.contents.range[2];
       const re = resolveEnd.resolveEnd(end, contentEnd, false, onError);
       if (re.comment)
@@ -5533,9 +5533,9 @@ var require_cst_stringify = __commonJS({
         }
       }
     }
-    function stringifyItem({ start: start2, key: key2, sep: sep2, value }) {
+    function stringifyItem({ start, key: key2, sep: sep2, value }) {
       let res = "";
-      for (const st of start2)
+      for (const st of start)
         res += st.source;
       if (key2)
         res += stringifyToken(key2);
@@ -6325,8 +6325,8 @@ var require_line_counter = __commonJS({
             return { line: low + 1, col: 1 };
           if (low === 0)
             return { line: 0, col: offset };
-          const start2 = this.lineStarts[low - 1];
-          return { line: low, col: offset - start2 + 1 };
+          const start = this.lineStarts[low - 1];
+          return { line: low, col: offset - start + 1 };
         };
       }
     };
@@ -6706,7 +6706,7 @@ var require_parser = __commonJS({
       *scalar(scalar2) {
         if (this.type === "map-value-ind") {
           const prev = getPrevProps(this.peek(2));
-          const start2 = getFirstKeyStartProps(prev);
+          const start = getFirstKeyStartProps(prev);
           let sep2;
           if (scalar2.end) {
             sep2 = scalar2.end;
@@ -6718,7 +6718,7 @@ var require_parser = __commonJS({
             type: "block-map",
             offset: scalar2.offset,
             indent: scalar2.indent,
-            items: [{ start: start2, key: scalar2, sep: sep2 }]
+            items: [{ start, key: scalar2, sep: sep2 }]
           };
           this.onKeyLine = true;
           this.stack[this.stack.length - 1] = map;
@@ -6793,7 +6793,7 @@ var require_parser = __commonJS({
         if (this.indent >= map.indent) {
           const atMapIndent = !this.onKeyLine && this.indent === map.indent;
           const atNextItem = atMapIndent && (it.sep || it.explicitKey) && this.type !== "seq-item-ind";
-          let start2 = [];
+          let start = [];
           if (atNextItem && it.sep && !it.value) {
             const nl = [];
             for (let i = 0; i < it.sep.length; ++i) {
@@ -6813,14 +6813,14 @@ var require_parser = __commonJS({
               }
             }
             if (nl.length >= 2)
-              start2 = it.sep.splice(nl[1]);
+              start = it.sep.splice(nl[1]);
           }
           switch (this.type) {
             case "anchor":
             case "tag":
               if (atNextItem || it.value) {
-                start2.push(this.sourceToken);
-                map.items.push({ start: start2 });
+                start.push(this.sourceToken);
+                map.items.push({ start });
                 this.onKeyLine = true;
               } else if (it.sep) {
                 it.sep.push(this.sourceToken);
@@ -6833,8 +6833,8 @@ var require_parser = __commonJS({
                 it.start.push(this.sourceToken);
                 it.explicitKey = true;
               } else if (atNextItem || it.value) {
-                start2.push(this.sourceToken);
-                map.items.push({ start: start2, explicitKey: true });
+                start.push(this.sourceToken);
+                map.items.push({ start, explicitKey: true });
               } else {
                 this.stack.push({
                   type: "block-map",
@@ -6851,12 +6851,12 @@ var require_parser = __commonJS({
                   if (includesToken(it.start, "newline")) {
                     Object.assign(it, { key: null, sep: [this.sourceToken] });
                   } else {
-                    const start3 = getFirstKeyStartProps(it.start);
+                    const start2 = getFirstKeyStartProps(it.start);
                     this.stack.push({
                       type: "block-map",
                       offset: this.offset,
                       indent: this.indent,
-                      items: [{ start: start3, key: null, sep: [this.sourceToken] }]
+                      items: [{ start: start2, key: null, sep: [this.sourceToken] }]
                     });
                   }
                 } else if (it.value) {
@@ -6866,10 +6866,10 @@ var require_parser = __commonJS({
                     type: "block-map",
                     offset: this.offset,
                     indent: this.indent,
-                    items: [{ start: start2, key: null, sep: [this.sourceToken] }]
+                    items: [{ start, key: null, sep: [this.sourceToken] }]
                   });
                 } else if (isFlowToken(it.key) && !includesToken(it.sep, "newline")) {
-                  const start3 = getFirstKeyStartProps(it.start);
+                  const start2 = getFirstKeyStartProps(it.start);
                   const key2 = it.key;
                   const sep2 = it.sep;
                   sep2.push(this.sourceToken);
@@ -6879,10 +6879,10 @@ var require_parser = __commonJS({
                     type: "block-map",
                     offset: this.offset,
                     indent: this.indent,
-                    items: [{ start: start3, key: key2, sep: sep2 }]
+                    items: [{ start: start2, key: key2, sep: sep2 }]
                   });
-                } else if (start2.length > 0) {
-                  it.sep = it.sep.concat(start2, this.sourceToken);
+                } else if (start.length > 0) {
+                  it.sep = it.sep.concat(start, this.sourceToken);
                 } else {
                   it.sep.push(this.sourceToken);
                 }
@@ -6890,7 +6890,7 @@ var require_parser = __commonJS({
                 if (!it.sep) {
                   Object.assign(it, { key: null, sep: [this.sourceToken] });
                 } else if (it.value || atNextItem) {
-                  map.items.push({ start: start2, key: null, sep: [this.sourceToken] });
+                  map.items.push({ start, key: null, sep: [this.sourceToken] });
                 } else if (includesToken(it.sep, "map-value-ind")) {
                   this.stack.push({
                     type: "block-map",
@@ -6910,7 +6910,7 @@ var require_parser = __commonJS({
             case "double-quoted-scalar": {
               const fs = this.flowScalar(this.type);
               if (atNextItem || it.value) {
-                map.items.push({ start: start2, key: fs, sep: [] });
+                map.items.push({ start, key: fs, sep: [] });
                 this.onKeyLine = true;
               } else if (it.sep) {
                 this.stack.push(fs);
@@ -6934,7 +6934,7 @@ var require_parser = __commonJS({
                     return;
                   }
                 } else if (atMapIndent) {
-                  map.items.push({ start: start2 });
+                  map.items.push({ start });
                 }
                 this.stack.push(bv);
                 return;
@@ -7071,7 +7071,7 @@ var require_parser = __commonJS({
             yield* this.step();
           } else if (this.type === "map-value-ind" && parent.type !== "flow-collection") {
             const prev = getPrevProps(parent);
-            const start2 = getFirstKeyStartProps(prev);
+            const start = getFirstKeyStartProps(prev);
             fixFlowSeqItems(fc);
             const sep2 = fc.end.splice(1, fc.end.length);
             sep2.push(this.sourceToken);
@@ -7079,7 +7079,7 @@ var require_parser = __commonJS({
               type: "block-map",
               offset: fc.offset,
               indent: fc.indent,
-              items: [{ start: start2, key: fc, sep: sep2 }]
+              items: [{ start, key: fc, sep: sep2 }]
             };
             this.onKeyLine = true;
             this.stack[this.stack.length - 1] = map;
@@ -7138,35 +7138,35 @@ var require_parser = __commonJS({
           case "explicit-key-ind": {
             this.onKeyLine = true;
             const prev = getPrevProps(parent);
-            const start2 = getFirstKeyStartProps(prev);
-            start2.push(this.sourceToken);
+            const start = getFirstKeyStartProps(prev);
+            start.push(this.sourceToken);
             return {
               type: "block-map",
               offset: this.offset,
               indent: this.indent,
-              items: [{ start: start2, explicitKey: true }]
+              items: [{ start, explicitKey: true }]
             };
           }
           case "map-value-ind": {
             this.onKeyLine = true;
             const prev = getPrevProps(parent);
-            const start2 = getFirstKeyStartProps(prev);
+            const start = getFirstKeyStartProps(prev);
             return {
               type: "block-map",
               offset: this.offset,
               indent: this.indent,
-              items: [{ start: start2, key: null, sep: [this.sourceToken] }]
+              items: [{ start, key: null, sep: [this.sourceToken] }]
             };
           }
         }
         return null;
       }
-      atIndentedComment(start2, indent) {
+      atIndentedComment(start, indent) {
         if (this.type !== "comment")
           return false;
         if (this.indent <= indent)
           return false;
-        return start2.every((st) => st.type === "newline" || st.type === "space");
+        return start.every((st) => st.type === "newline" || st.type === "space");
       }
       *documentEnd(docEnd) {
         if (this.type !== "doc-mode") {
@@ -7357,8 +7357,8 @@ var require_dist = __commonJS({
   }
 });
 
-// src/mcp-stdio.ts
-var import_node_readline = require("node:readline");
+// src/mcp-http.ts
+var import_node_http = require("node:http");
 
 // src/service.ts
 var import_node_crypto114 = require("node:crypto");
@@ -8523,8 +8523,8 @@ function resolveHostProfile(profiles, host) {
   if (!profile) throw new Error(`Unknown host profile: ${host}`);
   return profile;
 }
-function hostModelFor(profile, requested2) {
-  const explicit = optionalText(requested2, "model");
+function hostModelFor(profile, requested) {
+  const explicit = optionalText(requested, "model");
   if (explicit === null) return profile.default_model;
   if (profile.models.length && !profile.models.includes(explicit)) {
     throw new Error(`Host ${profile.host} does not declare model ${explicit}`);
@@ -9645,8 +9645,8 @@ function locateSnippet(body2, tokens, width = 200) {
   const haystack = body2.toLowerCase();
   const at = tokens.map((token) => haystack.indexOf(token.toLowerCase())).filter((index) => index >= 0).sort((a, b) => a - b)[0];
   if (at === void 0) return body2.slice(0, width);
-  const start2 = Math.max(0, at - Math.floor(width / 2));
-  return body2.slice(start2, start2 + width).trim();
+  const start = Math.max(0, at - Math.floor(width / 2));
+  return body2.slice(start, start + width).trim();
 }
 var KnowledgeIndex = class {
   file;
@@ -9847,9 +9847,9 @@ function classifyComplexity(signals) {
 }
 function routeModel(request2) {
   const host = text7(request2.host, "host");
-  const start2 = TIER_ORDER2.indexOf(request2.tier);
-  if (start2 === -1) throw new Error(`Unsupported model tier: ${String(request2.tier)}`);
-  for (let index = start2; index < TIER_ORDER2.length; index += 1) {
+  const start = TIER_ORDER2.indexOf(request2.tier);
+  if (start === -1) throw new Error(`Unsupported model tier: ${String(request2.tier)}`);
+  for (let index = start; index < TIER_ORDER2.length; index += 1) {
     const tier = TIER_ORDER2[index];
     const declared = request2.models[tier];
     if (typeof declared === "string" && declared.trim()) {
@@ -11793,8 +11793,8 @@ function available(account) {
   const reserved = account.reserved;
   return Object.fromEntries(Object.entries(limits2).map(([key2, limit3]) => [key2, Number(limit3) - Number(used[key2] ?? 0) - Number(reserved[key2] ?? 0)]));
 }
-function fits(requested2, capacity) {
-  return Object.entries(requested2).every(([key2, amount]) => Object.hasOwn(capacity, key2) && Number(amount) <= Number(capacity[key2]));
+function fits(requested, capacity) {
+  return Object.entries(requested).every(([key2, amount]) => Object.hasOwn(capacity, key2) && Number(amount) <= Number(capacity[key2]));
 }
 var ControlPlaneKernel = class {
   store;
@@ -11849,17 +11849,17 @@ var ControlPlaneKernel = class {
     const account = this.store.get("budget_account", text16(args.budget_id, "budget_id"));
     if (account.status !== "active") throw new Error("Budget account is not active");
     const reservationId = id6(args.reservation_id, "reservation_id", "reservation");
-    const requested2 = amounts(args.resources, "resources");
+    const requested = amounts(args.resources, "resources");
     const existing = this.store.find("budget_reservation", reservationId);
     if (existing) {
-      if (existing.budget_id !== account.id || JSON.stringify(existing.resources) !== JSON.stringify(requested2)) throw new Error("Reservation idempotency conflict");
+      if (existing.budget_id !== account.id || JSON.stringify(existing.resources) !== JSON.stringify(requested)) throw new Error("Reservation idempotency conflict");
       return { reservation: existing, account, available: available(account), idempotent: true };
     }
     const remaining = available(account);
-    if (!fits(requested2, remaining)) throw new Error("Budget reservation exceeds available resources");
+    if (!fits(requested, remaining)) throw new Error("Budget reservation exceeds available resources");
     const [reservation, savedAccount] = this.store.saveBatch([
-      { kind: "budget_reservation", id: reservationId, version: 1, payload: { budget_id: account.id, resources: requested2, status: "reserved", purpose: args.purpose ?? null } },
-      { kind: "budget_account", id: String(account.id), payload: { ...payload3(account), reserved: add(account.reserved, requested2) } }
+      { kind: "budget_reservation", id: reservationId, version: 1, payload: { budget_id: account.id, resources: requested, status: "reserved", purpose: args.purpose ?? null } },
+      { kind: "budget_account", id: String(account.id), payload: { ...payload3(account), reserved: add(account.reserved, requested) } }
     ]);
     return { reservation, account: savedAccount, available: available(savedAccount), idempotent: false };
   }
@@ -13786,8 +13786,8 @@ var LineageKernel = class {
     const workspace = this.store.get("workspace", text24(args.workspace_id, "workspace_id"));
     const direction = String(args.direction ?? "upstream");
     if (!(/* @__PURE__ */ new Set(["upstream", "downstream"])).has(direction)) throw new Error("Lineage direction is unsupported");
-    const start2 = this.reference(args.entity, "entity", String(workspace.id), null);
-    const startKey = key(start2);
+    const start = this.reference(args.entity, "entity", String(workspace.id), null);
+    const startKey = key(start);
     const maxDepth = integer5(args.max_depth, "max_depth", 8, 1, 20);
     const edges = this.store.list(
       "lineage_edge",
@@ -13813,7 +13813,7 @@ var LineageKernel = class {
       }
       frontier = next;
     }
-    return { workspace_id: workspace.id, direction, start: start2, node_keys: [...nodes].sort(), edges: selected, truncated: frontier.size > 0 };
+    return { workspace_id: workspace.id, direction, start, node_keys: [...nodes].sort(), edges: selected, truncated: frontier.size > 0 };
   }
   verify(args) {
     const lineage = this.store.get("lineage_edge", text24(args.lineage_id, "lineage_id"));
@@ -17196,8 +17196,8 @@ var LocalCandidateImportKernel = class {
     if (packageRecord.status !== "prepared" || packageRecord.manual_import_required !== true || packageRecord.execution_authority !== false) throw new Error("Only a prepared non-executable manual package can be imported");
     if (args.confirmed !== true) throw new Error("Local package import requires explicit confirmed: true");
     const root = (0, import_node_path20.resolve)(text46(args.target_root, "target_root"));
-    const requested2 = text46(args.relative_path, "relative_path");
-    const target = (0, import_node_path20.resolve)(root, requested2);
+    const requested = text46(args.relative_path, "relative_path");
+    const target = (0, import_node_path20.resolve)(root, requested);
     const pathRelative = (0, import_node_path20.relative)(root, target);
     if (!pathRelative || pathRelative.startsWith("..") || pathRelative.includes(":") || !pathRelative.endsWith(".md")) throw new Error("Local package import path must be a descendant Markdown file");
     const content = String(packageRecord.content);
@@ -18282,14 +18282,14 @@ var ProjectKnowledgeKernel = class {
   }
   resolve(args) {
     const discovery = this.store.get("project_knowledge_discovery", text58(args.discovery_id, "discovery_id"));
-    const requested2 = Array.isArray(args.memory_ids) ? args.memory_ids.map((item) => text58(item, "memory_ids")) : [];
-    if (!requested2.length || requested2.length > 3 || new Set(requested2).size !== requested2.length) throw new Error("Project Knowledge resolve accepts one to three unique memory_ids");
+    const requested = Array.isArray(args.memory_ids) ? args.memory_ids.map((item) => text58(item, "memory_ids")) : [];
+    if (!requested.length || requested.length > 3 || new Set(requested).size !== requested.length) throw new Error("Project Knowledge resolve accepts one to three unique memory_ids");
     const maxChars = args.max_chars === void 0 ? 12e3 : Number(args.max_chars);
     if (!Number.isInteger(maxChars) || maxChars < 1 || maxChars > 1e5) throw new Error("max_chars must be an integer between 1 and 100000");
     const descriptors = new Map(discovery.descriptors.map((item) => [item.memory_id, item]));
     const root = text58(discovery.project_root, "project_root");
     let used = 0;
-    const memories = requested2.map((memoryId) => {
+    const memories = requested.map((memoryId) => {
       const entry2 = descriptors.get(memoryId);
       if (!entry2) throw new Error("Project Knowledge memory is not in this discovery");
       const path2 = safeChild(root, entry2.path);
@@ -18949,8 +18949,8 @@ var HostActivationManifestKernel = class {
     if (profile.task_id !== task.id) throw new Error("Activation Profile does not match task");
     const host = text61(args.host, "host");
     if (!this.hosts.has(host)) throw new Error("Host Activation Manifest host is unsupported");
-    const requested2 = args.asset_ids === void 0 ? [...profile.asset_ids] : values2(args.asset_ids, "asset_ids");
-    if (requested2.some((assetId) => !profile.asset_ids.includes(assetId))) throw new Error("Host Activation Manifest asset is not in the Activation Profile");
+    const requested = args.asset_ids === void 0 ? [...profile.asset_ids] : values2(args.asset_ids, "asset_ids");
+    if (requested.some((assetId) => !profile.asset_ids.includes(assetId))) throw new Error("Host Activation Manifest asset is not in the Activation Profile");
     const tickets = args.connector_ticket_ids === void 0 ? [] : values2(args.connector_ticket_ids, "connector_ticket_ids");
     const ticketByAsset = /* @__PURE__ */ new Map();
     for (const ticketId of tickets) {
@@ -18961,7 +18961,7 @@ var HostActivationManifestKernel = class {
       if (ticketByAsset.has(String(ticket.asset_id))) throw new Error("Connector tickets must cover each asset at most once");
       ticketByAsset.set(String(ticket.asset_id), ticket);
     }
-    const assets = requested2.map((assetId) => this.asset(profile, assetId, ticketByAsset));
+    const assets = requested.map((assetId) => this.asset(profile, assetId, ticketByAsset));
     const identity = { task_id: task.id, profile_id: profile.id, profile_version: profile.version, host, assets };
     const manifestId = String(args.manifest_id ?? `host_activation_${digest42(identity).slice(-20)}`);
     const existing = this.store.find("host_activation_manifest", manifestId);
@@ -20835,9 +20835,9 @@ function canonical8(value) {
 function digest62(value) {
   return `sha256:${(0, import_node_crypto84.createHash)("sha256").update(canonical8(value)).digest("hex")}`;
 }
-function inferMetric(goal, requested2) {
-  if (requested2 !== void 0) {
-    const metric = text81(requested2, "metric").toLowerCase();
+function inferMetric(goal, requested) {
+  if (requested !== void 0) {
+    const metric = text81(requested, "metric").toLowerCase();
     if (!["methods", "functions", "lines", "statements", "branches", "all"].includes(metric)) throw new Error("metric is unsupported");
     return metric;
   }
@@ -20846,15 +20846,15 @@ function inferMetric(goal, requested2) {
   if (/(?:分支|branch)/iu.test(goal)) return "branches";
   return null;
 }
-function inferThreshold(goal, requested2) {
-  const value = requested2 === void 0 ? goal.match(/(?:^|\s)(\d{1,3})(?:\s*%)?/u)?.[1] : requested2;
+function inferThreshold(goal, requested) {
+  const value = requested === void 0 ? goal.match(/(?:^|\s)(\d{1,3})(?:\s*%)?/u)?.[1] : requested;
   const threshold = Number(value ?? 100);
   if (!Number.isFinite(threshold) || threshold < 0 || threshold > 100) throw new Error("threshold must be between 0 and 100");
   return threshold;
 }
-function inferScope(goal, requested2) {
-  if (requested2 !== void 0) {
-    const scope2 = text81(requested2, "scope").toLowerCase();
+function inferScope(goal, requested) {
+  if (requested !== void 0) {
+    const scope2 = text81(requested, "scope").toLowerCase();
     if (!["changed", "workspace", "specified"].includes(scope2)) throw new Error("scope is unsupported");
     return scope2;
   }
@@ -24217,10 +24217,10 @@ var VerificationPlane = class {
     const candidateChange = boolean2(args.candidate_change, "candidate_change");
     const requiresRealHost = boolean2(args.requires_real_host, "requires_real_host");
     const derivedRisk = deriveRisk(changeKinds, effects, candidateChange, requiresRealHost);
-    const requested2 = args.requested_risk_level === void 0 ? derivedRisk : text106(args.requested_risk_level, "requested_risk_level");
-    if (!RISK.has(requested2)) throw new Error("requested_risk_level is unsupported");
-    const risk = maxRisk(derivedRisk, requested2);
-    const identity = { change_ref: text106(args.change_ref, "change_ref"), change_kinds: [...changeKinds].sort(), effects: [...effects].sort(), candidate_change: candidateChange, requires_real_host: requiresRealHost, environment_fingerprint: text106(args.environment_fingerprint, "environment_fingerprint"), requested_risk_level: requested2, risk_level: risk, content_stored: false };
+    const requested = args.requested_risk_level === void 0 ? derivedRisk : text106(args.requested_risk_level, "requested_risk_level");
+    if (!RISK.has(requested)) throw new Error("requested_risk_level is unsupported");
+    const risk = maxRisk(derivedRisk, requested);
+    const identity = { change_ref: text106(args.change_ref, "change_ref"), change_kinds: [...changeKinds].sort(), effects: [...effects].sort(), candidate_change: candidateChange, requires_real_host: requiresRealHost, environment_fingerprint: text106(args.environment_fingerprint, "environment_fingerprint"), requested_risk_level: requested, risk_level: risk, content_stored: false };
     const verificationId = String(args.verification_id ?? `verification_${digest86(identity).slice(-16)}`);
     const identityDigest = digest86(identity);
     const existing = this.store.find("verification_plan", verificationId);
@@ -24229,7 +24229,7 @@ var VerificationPlane = class {
       const checks2 = this.checks(existing.id);
       return { verification: { ...existing, checks: checks2 }, checks: checks2, idempotent: true };
     }
-    const verification = this.store.create("verification_plan", verificationId, { ...identity, identity_digest: identityDigest, risk_escalated: RANK[risk] > RANK[requested2], execution_authority: "none", lifecycle: "planned" });
+    const verification = this.store.create("verification_plan", verificationId, { ...identity, identity_digest: identityDigest, risk_escalated: RANK[risk] > RANK[requested], execution_authority: "none", lifecycle: "planned" });
     const checks = checkKinds(risk, changeKinds, candidateChange, requiresRealHost).map((kind2, index) => this.store.create("verification_check", `${verificationId}:${kind2}`, { verification_id: verification.id, kind: kind2, order: index + 1, required: true, status: "pending" }));
     return { verification: { ...verification, checks }, checks, idempotent: false };
   }
@@ -26195,11 +26195,11 @@ var CraftService = class _CraftService extends ServiceFoundation {
     const task = this.store.get("task", text111(args.task_id, "task_id"));
     const policy = this.runtimePolicy(args);
     const environment = object30(args.environment, "environment");
-    const requested2 = array6(args.operations, "operations");
-    if (!requested2.length) throw new Error("operations must not be empty");
+    const requested = array6(args.operations, "operations");
+    if (!requested.length) throw new Error("operations must not be empty");
     const runId = String(args.run_id ?? id13("runtime_run"));
     const operationIds = /* @__PURE__ */ new Set();
-    const operations2 = requested2.map((raw, index) => {
+    const operations2 = requested.map((raw, index) => {
       const input = object30(raw, `operations[${index}]`);
       const operationId = text111(input.operation_id, `operations[${index}].operation_id`);
       if (operationIds.has(operationId)) throw new Error("operation_id must be unique within a run");
@@ -31688,8 +31688,8 @@ Evidence: ${item.evidence_ids.join(", ")}
     if (plan.status !== "running") throw new Error(`Plan is not running: ${plan.status}`);
     const owner = text111(args.claimed_by, "claimed_by");
     const maximum = finiteInteger2(plan.max_concurrency, "plan max_concurrency", 4, 1, 32);
-    const requested2 = finiteInteger2(args.capacity, "capacity", maximum, 1);
-    const capacity = Math.min(requested2, maximum);
+    const requested = finiteInteger2(args.capacity, "capacity", maximum, 1);
+    const capacity = Math.min(requested, maximum);
     const recovered = recoverExpiredLeases(plan.nodes);
     const result = dispatchNodes(
       recovered.nodes,
@@ -35128,8 +35128,8 @@ var McpServer = class {
     }
     if (request2.method === "notifications/initialized" || request2.id === void 0) return void 0;
     if (request2.method === "initialize") {
-      const requested2 = request2.params?.protocolVersion;
-      const version = ["2025-03-26", "2025-06-18", "2025-11-25"].includes(String(requested2)) ? requested2 : "2025-11-25";
+      const requested = request2.params?.protocolVersion;
+      const version = ["2025-03-26", "2025-06-18", "2025-11-25"].includes(String(requested)) ? requested : "2025-11-25";
       return this.ok(request2.id, {
         protocolVersion: version,
         capabilities: { tools: {} },
@@ -35210,55 +35210,76 @@ var McpServer = class {
   }
 };
 
-// src/mcp-stdio.ts
-async function start(mode2) {
-  const store = await new CraftStore().open();
-  return { server: new McpServer(await CraftService.open(store), mode2), close: () => store.close() };
-}
-function parseError() {
-  return { jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } };
-}
-async function serveMcpStdio(options) {
-  const input = (0, import_node_readline.createInterface)({ input: options.input, crlfDelay: Infinity });
-  const pending = [];
-  let closed = false;
-  let wake;
-  input.on("line", (line) => {
-    pending.push(line);
-    wake?.();
-  });
-  input.on("close", () => {
-    closed = true;
-    wake?.();
-  });
-  const runtime = await (options.start ?? start)(options.mode);
-  try {
-    while (pending.length || !closed) {
-      if (!pending.length) await new Promise((resolve21) => {
-        wake = resolve21;
-      });
-      wake = void 0;
-      const line = pending.shift();
-      if (line === void 0) continue;
-      let response;
-      try {
-        response = await runtime.server.handle(JSON.parse(line));
-      } catch {
-        response = parseError();
-      }
-      if (response) options.write(`${JSON.stringify(response)}
-`);
-    }
-  } finally {
-    runtime.close();
+// src/mcp-http.ts
+var MAX_BODY = 4 * 1024 * 1024;
+async function readBody(request2) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of request2) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += buffer.length;
+    if (size > MAX_BODY) throw new Error("MCP request body exceeds 4 MiB");
+    chunks.push(buffer);
   }
+  return Buffer.concat(chunks).toString("utf8");
+}
+function createMcpHttpHandler(handler, options = {}) {
+  const path2 = options.path ?? "/mcp";
+  return async (request2, response) => {
+    if (request2.url?.split("?")[0] !== path2 || request2.method !== "POST") {
+      response.statusCode = request2.url?.split("?")[0] === path2 ? 405 : 404;
+      response.setHeader("content-type", "application/json");
+      response.end(JSON.stringify({ error: "POST /mcp required" }));
+      return;
+    }
+    if (request2.headers.accept && !String(request2.headers.accept).includes("application/json") && !String(request2.headers.accept).includes("text/event-stream")) {
+      response.statusCode = 406;
+      response.end(JSON.stringify({ error: "Accept must include application/json or text/event-stream" }));
+      return;
+    }
+    try {
+      const raw = await readBody(request2);
+      const message = JSON.parse(raw);
+      const result = await handler.handle(message);
+      response.statusCode = result === void 0 ? 202 : 200;
+      response.setHeader("content-type", "application/json");
+      response.setHeader("cache-control", "no-store");
+      response.end(result === void 0 ? "" : JSON.stringify(result));
+    } catch (error) {
+      response.statusCode = error instanceof Error && error.message.includes("exceeds") ? 413 : 400;
+      response.setHeader("content-type", "application/json");
+      response.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+    }
+  };
+}
+async function serveMcpHttp(options) {
+  const runtime = await (options.start ?? (async () => {
+    const store = await new CraftStore().open();
+    return { server: new McpServer(await CraftService.open(store), options.mode ?? "syscall"), close: () => store.close() };
+  }))();
+  const http = (0, import_node_http.createServer)(createMcpHttpHandler(runtime.server, { path: options.path }));
+  await new Promise((resolve21, reject) => {
+    http.once("error", reject);
+    http.listen(options.port ?? 8787, options.host ?? "127.0.0.1", () => {
+      http.removeListener("error", reject);
+      resolve21();
+    });
+  });
+  return { server: http, close: () => {
+    http.close();
+    runtime.close();
+  } };
 }
 
-// bin/craft-mcp.ts
+// bin/craft-mcp-http.ts
 var flag = process.argv.indexOf("--surface");
-var requested = flag === -1 ? process.env.CRAFT_MCP_SURFACE : process.argv[flag + 1];
-var mode = requested && requested.length > 0 ? requested : "syscall";
-serveMcpStdio({ mode, input: process.stdin, write: (line) => process.stdout.write(line) }).catch(() => {
-  process.stderr.write("Craft MCP failed to start.\n");
+var mode = flag === -1 ? process.env.CRAFT_MCP_SURFACE : process.argv[flag + 1];
+var port = Number(process.env.CRAFT_MCP_PORT ?? 8787);
+serveMcpHttp({ mode: mode && mode.length > 0 ? mode : "syscall", port }).then(({ server }) => {
+  process.stderr.write(`Craft MCP HTTP listening on http://127.0.0.1:${server.address().port}/mcp
+`);
+}).catch((error) => {
+  process.stderr.write(`Craft MCP HTTP failed to start: ${error instanceof Error ? error.message : String(error)}
+`);
   process.exitCode = 1;
 });

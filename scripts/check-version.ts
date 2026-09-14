@@ -46,7 +46,7 @@ for (const path of ["adapters/workbuddy-expert/skills/craft-route/SKILL.md",
   "adapters/workbuddy-connector/skills/craft-route/SKILL.md",
   "adapters/trae-work/skills/craft-route/SKILL.md"]) {
   const skill = await readFile(resolve(root, path), "utf8");
-  const quoted = skill.match(/\bv(\d+\.\d+\.\d+)\b/u);
+  const quoted = skill.match(/(?:\bv|version:\s*)(\d+\.\d+\.\d+)\b/u);
   if (quoted && quoted[1] !== packageVersion) {
     throw new Error(`${path} quotes v${quoted[1]} but package.json is ${packageVersion}`);
   }

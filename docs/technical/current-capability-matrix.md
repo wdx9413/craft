@@ -1,4 +1,4 @@
-# Current Capability Matrix (v0.12.20)
+# Current Capability Matrix (v0.12.25)
 
 | Area | State | Boundary |
 |---|---|---|
@@ -38,4 +38,7 @@
 | Durable checkpoint tick | implemented locally | expiry/wake processing is bounded; v0.12.13 adds persistent worker leases and recovery, while OS scheduler and notification delivery remain adapters |
 | Project Bundle / Handoff | implemented locally | digest-verified portable references preserve project continuity without copying raw business content |
 | Feedback / Domain Evaluation / Cost | implemented locally | scoped feedback, metric-based domain evaluator contracts, and provider price/usage attribution are recorded; business-specific scorers remain external |
+| Trust Profile / autonomy compounding | implemented and tested locally | evidence-backed recommendation is scoped, expiring and revocable; it never grants execution authority or silently escalates effects |
+| Web operation boundary | implemented and tested locally | bounded credential-free HTTP GET/HEAD observation plus adapter-only browser contracts; clicks, forms and submits require an explicit host/plugin Adapter |
+| MCP HTTP transport | implemented and tested locally | bounded JSON POST `/mcp` gateway with size and Accept checks; stdio remains the default and authentication/TLS are deployment concerns |
 | Automatic experience publication | not automatic | Evaluation, Signoff, Canary, and human publication remain mandatory |
