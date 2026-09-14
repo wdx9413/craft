@@ -26,8 +26,9 @@ import { decideExecution } from "./execution-policy.ts";
 import { dockerRequestDigest } from "./docker-sandbox.ts";
 import { egressRequestDigest } from "./egress.ts";
 import { ServiceFoundation } from "./service-foundation.ts";
+import { V01226Runtime, importOpenApiDocument } from "./v01226-runtime.ts";
 
-export const VERSION = "0.12.25";
+export const VERSION = "0.12.26";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -3918,4 +3919,31 @@ export class CraftService extends ServiceFoundation {
   platformAuthorize(args: JsonObject): JsonObject { return this.platformOperations.authorize(args); }
   platformObserve(args: JsonObject): JsonObject { return this.platformOperations.observe(args); }
   platformObservabilityExport(args: JsonObject): JsonObject { return this.platformOperations.exportObservations(args); }
+
+  /** v0.12.26 Generic Adapter SDK and cross-platform execution surface. */
+  adapterManifestSave(args: JsonObject): JsonObject { return new V01226Runtime(this.store).adapterRegister(args as never); }
+  adapterManifestGet(args: JsonObject): JsonObject { return { manifest: new V01226Runtime(this.store).adapterGet(String(args.adapter_id)) }; }
+  adapterManifestList(args: JsonObject = {}): JsonObject { return new V01226Runtime(this.store).adapterList(Number(args.limit ?? 50)); }
+  adapterHealth(args: JsonObject): JsonObject { return new V01226Runtime(this.store).adapterHealth(String(args.adapter_id)); }
+  adapterConformance(args: JsonObject): JsonObject { return new V01226Runtime(this.store).adapterConformance(String(args.adapter_id)); }
+  adapterQuarantine(args: JsonObject): JsonObject { return new V01226Runtime(this.store).adapterQuarantine(String(args.adapter_id), String(args.reason)); }
+  adapterRollback(args: JsonObject): JsonObject { return new V01226Runtime(this.store).adapterRollback(String(args.adapter_id)); }
+  async adapterInstall(args: JsonObject): Promise<JsonObject> { return new V01226Runtime(this.store).adapterInstall(String(args.manifest_path), args.integrity === undefined ? undefined : String(args.integrity)); }
+  commandPlan(args: JsonObject): JsonObject { return new V01226Runtime(this.store).commandPlan(args as never); }
+  async commandRun(args: JsonObject): Promise<JsonObject> { return new V01226Runtime(this.store).commandRun(args as never); }
+  commandObserve(args: JsonObject): JsonObject { return { run: new V01226Runtime(this.store).commandObserve(String(args.run_id)) }; }
+  commandCancel(args: JsonObject): JsonObject { return new V01226Runtime(this.store).commandCancel(String(args.run_id)); }
+  async commandRetry(args: JsonObject): Promise<JsonObject> { return new V01226Runtime(this.store).commandRetry(String(args.run_id)); }
+  contextManifestV01226Save(args: JsonObject): JsonObject { return new V01226Runtime(this.store).contextManifestSave(args); }
+  capabilityProjection(args: JsonObject): JsonObject { return new V01226Runtime(this.store).capabilityProject({ candidates: Array.isArray(args.candidates) ? args.candidates as JsonObject[] : [], required: Array.isArray(args.required) ? args.required as string[] : [], token_budget: args.token_budget === undefined ? undefined : Number(args.token_budget) }); }
+  durableRunStart(args: JsonObject): JsonObject { return new V01226Runtime(this.store).durableStart(args); }
+  durableRunTick(args: JsonObject = {}): JsonObject { return new V01226Runtime(this.store).durableTick(String(args.owner ?? "local"), Number(args.lease_seconds ?? 30)); }
+  durableRunComplete(args: JsonObject): JsonObject { return new V01226Runtime(this.store).durableComplete(String(args.run_id), String(args.status) as "completed" | "failed" | "cancelled", args.result as JsonObject | undefined); }
+  durableRunRecover(args: JsonObject = {}): JsonObject { return new V01226Runtime(this.store).durableRecover(args.owner === undefined ? undefined : String(args.owner)); }
+  trustCurveRecord(args: JsonObject): JsonObject { return new V01226Runtime(this.store).trustRecord({ scope: String(args.scope), passed: Number(args.passed), failed: Number(args.failed), evidence_refs: Array.isArray(args.evidence_refs) ? args.evidence_refs as string[] : [] }); }
+  modelRouteV01226(args: JsonObject): JsonObject { return new V01226Runtime(this.store).modelRoute({ candidates: Array.isArray(args.candidates) ? args.candidates as JsonObject[] : [], objective: args.objective as "quality" | "cost" | "latency" | undefined, budget: args.budget === undefined ? undefined : Number(args.budget) }); }
+  deliveryGateV01226(args: JsonObject): JsonObject { return new V01226Runtime(this.store).deliveryGate({ artifacts: Array.isArray(args.artifacts) ? args.artifacts as string[] : [], evidence: Array.isArray(args.evidence) ? args.evidence as string[] : [], required_artifacts: Array.isArray(args.required_artifacts) ? args.required_artifacts as string[] : [], required_evidence: Array.isArray(args.required_evidence) ? args.required_evidence as string[] : [] }); }
+  taskHandoffManifest(args: JsonObject): JsonObject { return new V01226Runtime(this.store).handoff(args as never); }
+  domainEvaluatorRun(args: JsonObject): JsonObject { return new V01226Runtime(this.store).evaluatorRun({ evaluator_id: String(args.evaluator_id), observations: args.observations as JsonObject }); }
+  async openApiImport(args: JsonObject): Promise<JsonObject> { return importOpenApiDocument(new V01226Runtime(this.store), args.document as string | JsonObject); }
 }

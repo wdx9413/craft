@@ -101,6 +101,7 @@
 ## 当前实现参考
 
 - [v0.12.25 Trust Profile、网页操作边界与 HTTP MCP](technical/modules/v01225-trust-web-runtime.md)
+- [v0.12.26 Generic Adapter Runtime、跨平台命令与 Durable Work](technical/modules/v01226-runtime.md)
 
 - [中文架构说明](architecture.zh-CN.md)
 - [English architecture](architecture.en.md)

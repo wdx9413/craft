@@ -1,4 +1,4 @@
-# Current Capability Matrix (v0.12.25)
+# Current Capability Matrix (v0.12.26)
 
 | Area | State | Boundary |
 |---|---|---|

@@ -157,7 +157,7 @@ test("Execution Fabric joins the verified loop and Host activation without a sec
     const core = new McpServer(f.service, "core");
     for (const name of ["craft_verified_work_loop_prepare", "craft_verified_work_loop_advance", "craft_verified_work_loop_decide", "craft_verified_work_loop_resume", "craft_verified_work_loop_get", "craft_host_bridge_get", "craft_host_activation_manifest_prepare"]) assert.ok(core.tools.some((tool) => tool.name === name), name);
     for (const retired of ["craft_execution_fabric_prepare", "craft_execution_fabric_execute", "craft_execution_fabric_advance", "craft_execution_fabric_consume", "craft_execution_fabric_get"]) assert.equal(core.tools.some((tool) => tool.name === retired), false, retired);
-    assert.equal(VERSION, "0.12.25");
+    assert.equal(VERSION, "0.12.26");
   } finally { await Promise.all(f.store.list("host_run", 100).map((run) => f.service.hostRuns.wait(String(run.id)))); f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 

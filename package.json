@@ -1,6 +1,6 @@
 {
   "name": "craft-agent-harness",
-  "version": "0.12.25",
+  "version": "0.12.26",
   "description": "Cross-platform capability, workflow, evidence, and agent harness",
   "type": "module",
   "bin": {
@@ -10,7 +10,7 @@
     "craft-mcp-http": "dist/bin/craft-mcp-http.js"
   },
   "scripts": {
-    "test": "pnpm run build && pnpm run typecheck && pnpm run test:ts && pnpm run test:v01216 && pnpm run test:v01217 && pnpm run test:v01218 && pnpm run test:v01219 && pnpm run test:v01220 && pnpm run test:v01221 && pnpm run test:v01222 && pnpm run test:v01223 && pnpm run test:v01224 && pnpm run test:v01225 && pnpm run test:smoke && pnpm run test:plugin",
+    "test": "pnpm run build && pnpm run typecheck && pnpm run test:ts && pnpm run test:v01216 && pnpm run test:v01217 && pnpm run test:v01218 && pnpm run test:v01219 && pnpm run test:v01220 && pnpm run test:v01221 && pnpm run test:v01222 && pnpm run test:v01223 && pnpm run test:v01224 && pnpm run test:v01225 && pnpm run test:v01226 && pnpm run test:smoke && pnpm run test:plugin",
     "clean": "node --experimental-strip-types scripts/clean.ts",
     "build": "pnpm run clean && pnpm run build:core && pnpm run build:plugin && pnpm run pack:plugin && pnpm run build:deepseek && pnpm run pack:adapters",
     "build:core": "node node_modules/typescript/bin/tsc -p tsconfig.build.json",
@@ -34,6 +34,7 @@
     "test:v01223": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-include=src/verification-plane.ts --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 tests/v01223-verification-plane.test.ts",
     "test:v01224": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-include=src/evaluation-model-profile.ts --test-coverage-include=src/workflow-evolution.ts --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 tests/v01224-evaluation-model-workflow-evolution.test.ts",
     "test:v01225": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-include=src/trust-profile.ts --test-coverage-include=src/web-operation.ts --test-coverage-include=src/mcp-http.ts --test-coverage-lines=100 --test-coverage-functions=100 tests/v01225-trust-web-runtime.test.ts",
+    "test:v01226": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-include=src/v01226-runtime.ts --test-coverage-lines=100 --test-coverage-functions=100 tests/v01226-runtime.test.ts",
     "check:ts": "node --experimental-strip-types src/cli.ts --help",
     "typecheck": "node node_modules/typescript/bin/tsc --noEmit"
   },

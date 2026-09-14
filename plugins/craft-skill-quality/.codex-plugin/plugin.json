@@ -1,6 +1,6 @@
 {
   "name": "craft-skill-quality",
-  "version": "0.12.25",
+  "version": "0.12.26",
   "description": "Standalone repeatable evaluation and bounded evolution for Agent Skills.",
   "author": { "name": "wdx9413", "url": "https://github.com/wdx9413" },
   "homepage": "https://github.com/wdx9413/craft",

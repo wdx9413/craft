@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createInterface } from "node:readline/promises";
 import { createHash } from "node:crypto";
-import { access } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import { stdin, stdout } from "node:process";
 import { pathToFileURL } from "node:url";
 import { initializeConfig, loadConfig, setMode, type CraftMode, type DirectProvider,
@@ -70,6 +70,18 @@ Usage:
   craft worker tick             Run one safe local maintenance cycle
   craft worker run [options]    Run the persistent local maintenance worker
   craft worker status           Read the last local worker heartbeat
+  craft command plan --argv '["node","-v"]'
+                                Plan a cross-platform command without executing
+  craft command run --argv '["node","-v"]'
+                                Execute a governed command and return a receipt
+  craft command observe <run>   Read a command receipt
+  craft command cancel <run>    Cancel a running command
+  craft adapter list|get|health|conformance|quarantine|rollback
+                                Manage Generic Adapter manifests
+  craft adapter install --manifest <file>
+                                Install and verify a local adapter manifest
+  craft openapi import --file <file>
+                                Import OpenAPI operations as a governed adapter
 
 Init options:
   --mode <agent|supervisor|provider>
@@ -93,6 +105,19 @@ Run options:
 function option(args: string[], name: string): string | undefined {
   const index = args.indexOf(name);
   return index >= 0 ? args[index + 1] : undefined;
+}
+
+function jsonOption(args: string[], name: string): JsonObject | string[] | undefined {
+  const raw = option(args, name); if (raw === undefined) return undefined;
+  try { return JSON.parse(raw) as JsonObject | string[]; } catch { throw new Error(`${name} must contain valid JSON`); }
+}
+
+function commandRequest(args: string[]): JsonObject {
+  const parsed = jsonOption(args, "--argv");
+  const argv = Array.isArray(parsed) ? parsed : (() => { const marker = args.indexOf("--"); return marker < 0 ? [] : args.slice(marker + 1); })();
+  return { argv, cwd: option(args, "--cwd"), shell: args.includes("--shell") ? option(args, "--shell") ?? (process.platform === "win32" ? "powershell.exe" : "/bin/sh") : false,
+    timeout_ms: option(args, "--timeout-ms") === undefined ? undefined : Number(option(args, "--timeout-ms")), output_limit: option(args, "--output-limit") === undefined ? undefined : Number(option(args, "--output-limit")),
+    effect: option(args, "--effect"), approval_ref: option(args, "--approval"), adapter_id: option(args, "--adapter") };
 }
 
 async function promptChoice(question: string, choices: string[]): Promise<number> {
@@ -305,12 +330,25 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     }
     throw new Error("semantic requires configure, disable, or status.");
   }
-  if (["source", "capability", "task", "kit", "worker", "inbox", "home", "serve", "gui", "usage", "settings", "codex", "claude", "host-run", "supervisor"].includes(args[0] ?? "")) {
+  if (["source", "capability", "task", "kit", "worker", "inbox", "home", "serve", "gui", "usage", "settings", "codex", "claude", "host-run", "supervisor", "command", "adapter", "openapi"].includes(args[0] ?? "")) {
     const store = await new CraftStore(paths).open();
     const service = await CraftService.open(store);
     try {
       let result: unknown;
-      if (args[0] === "source" && args[1] === "add") result = await service.sourceAdd({ path: args[2] });
+      if (args[0] === "command" && args[1] === "plan") result = service.commandPlan(commandRequest(args));
+      else if (args[0] === "command" && args[1] === "run") result = await service.commandRun(commandRequest(args));
+      else if (args[0] === "command" && args[1] === "observe") result = service.commandObserve({ run_id: args[2] });
+      else if (args[0] === "command" && args[1] === "cancel") result = service.commandCancel({ run_id: args[2] });
+      else if (args[0] === "command" && args[1] === "retry") result = await service.commandRetry({ run_id: args[2] });
+      else if (args[0] === "adapter" && args[1] === "list") result = service.adapterManifestList({ limit: option(args, "--limit") === undefined ? 50 : Number(option(args, "--limit")) });
+      else if (args[0] === "adapter" && args[1] === "get") result = service.adapterManifestGet({ adapter_id: args[2] });
+      else if (args[0] === "adapter" && args[1] === "health") result = service.adapterHealth({ adapter_id: args[2] });
+      else if (args[0] === "adapter" && args[1] === "conformance") result = service.adapterConformance({ adapter_id: args[2] });
+      else if (args[0] === "adapter" && args[1] === "quarantine") result = service.adapterQuarantine({ adapter_id: args[2], reason: option(args, "--reason") });
+      else if (args[0] === "adapter" && args[1] === "rollback") result = service.adapterRollback({ adapter_id: args[2] });
+      else if (args[0] === "adapter" && args[1] === "install") result = await service.adapterInstall({ manifest_path: option(args, "--manifest"), integrity: option(args, "--integrity") });
+      else if (args[0] === "openapi" && args[1] === "import") result = await service.openApiImport({ document: await readFile(String(option(args, "--file")), "utf8") });
+      else if (args[0] === "source" && args[1] === "add") result = await service.sourceAdd({ path: args[2] });
       else if (args[0] === "source" && args[1] === "list") result = service.sourceList();
       else if (args[0] === "source" && args[1] === "scan") result = await service.sourceScan({ source_id: args[2] });
       else if (args[0] === "capability" && args[1] === "search") result = await service.capabilitySearch({ query: args.slice(2).join(" ") });

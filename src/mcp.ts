@@ -16,7 +16,7 @@ const schemaFor = (name: string): JsonObject => {
   if (["completed", "pending", "decisions", "artifacts", "steps", "cases", "capabilities",
     "allowed_side_effects", "approved_side_effects", "nodes", "artifact_ids", "evidence_ids",
     "trial_ids", "requirements", "grade_ids", "pattern_ids", "failure_modes", "receipt_ids", "criteria", "acceptance_criteria", "allowed_extensions", "fields", "capability_requirements", "object_schemas", "components", "action_contracts", "bindings", "source_refs", "changes", "tags", "claim_ids", "evidence_ids", "expected_claim_ids", "case_ids",
-    "allowed_operations", "allowed_effects", "require_approval_for", "operations", "subjects", "children", "trusted_hosts", "command_allowlist", "path_allowlist", "kinds", "effects", "allowed_kinds", "dependencies", "aliases", "assets", "asset_ids", "connector_ticket_ids", "artifact_ids", "final_artifact_ids", "evidence_ids", "gold_case_ids", "output_contract", "trial_ids", "include_paths", "affected_paths", "object_ids", "depends_on", "source_paths", "applies_to", "patches", "snapshot_refs", "triggers", "allowed_hosts", "allowed_actions", "approval_required_actions", "detected_instructions", "citations", "allowed_fields", "argv", "sources", "providers", "budget_ids", "recovery_item_ids", "memory_kinds", "object_types", "required_memory_ids", "required_object_ids", "benchmark_ids", "memory_ids", "source_ids", "paths", "state_paths", "turns", "messages", "events", "decisions", "constraints", "open_questions", "artifacts", "roles", "changed_paths", "materials", "non_goals", "input_refs", "output_refs", "evidence_ids", "gold_case_ids", "contamination_flags", "trace_ids", "knowledge_refs", "capability_refs", "workflow_refs", "excluded_refs", "selection_rationale", "change_kinds"].includes(name)) return { type: "array" };
+    "allowed_operations", "allowed_effects", "require_approval_for", "operations", "subjects", "children", "trusted_hosts", "command_allowlist", "path_allowlist", "kinds", "effects", "allowed_kinds", "dependencies", "aliases", "assets", "asset_ids", "connector_ticket_ids", "artifact_ids", "final_artifact_ids", "evidence_ids", "gold_case_ids", "output_contract", "trial_ids", "include_paths", "affected_paths", "object_ids", "depends_on", "source_paths", "applies_to", "patches", "snapshot_refs", "triggers", "allowed_hosts", "allowed_actions", "approval_required_actions", "detected_instructions", "citations", "allowed_fields", "argv", "sources", "providers", "budget_ids", "recovery_item_ids", "memory_kinds", "object_types", "required_memory_ids", "required_object_ids", "benchmark_ids", "memory_ids", "source_ids", "paths", "state_paths", "turns", "messages", "events", "decisions", "constraints", "open_questions", "artifacts", "roles", "changed_paths", "materials", "non_goals", "input_refs", "output_refs", "evidence_ids", "gold_case_ids", "contamination_flags", "trace_ids", "knowledge_refs", "capability_refs", "workflow_refs", "excluded_refs", "selection_rationale", "change_kinds", "platforms", "permissions", "required", "candidates", "required_artifacts", "required_evidence", "evidence_refs", "criteria"].includes(name)) return { type: "array" };
   return { type: "string" };
 };
 const objectSchema = (required: string[] = [], optional: string[] = []): JsonObject => ({ type: "object",
@@ -29,6 +29,28 @@ const tool = (name: string, description: string, required: string[] = [], readOn
 
 const TOOL_DEFINITIONS: Tool[] = [
   tool("craft_info", "Show the Craft version, data location, and record counts.", [], true),
+  tool("craft_adapter_manifest_save", "Register a versioned Generic Adapter Manifest with declared capabilities, permissions, effects, and platform support.", ["adapter_id", "version", "kind"], false, ["platforms", "entry", "transport", "capabilities", "permissions", "effects", "dependencies", "integrity", "signature", "sandbox_profile", "metadata"]),
+  tool("craft_adapter_manifest_get", "Read one exact Generic Adapter Manifest.", ["adapter_id"], true),
+  tool("craft_adapter_manifest_list", "List registered Generic Adapter Manifests.", [], true, ["limit"]),
+  tool("craft_adapter_health", "Run a platform compatibility health check for one adapter.", ["adapter_id"], true),
+  tool("craft_adapter_conformance", "Run deterministic Generic Adapter conformance checks.", ["adapter_id"], true),
+  tool("craft_adapter_quarantine", "Quarantine an adapter without deleting its manifest.", ["adapter_id", "reason"]),
+  tool("craft_adapter_rollback", "Reactivate a quarantined adapter after review.", ["adapter_id"]),
+  tool("craft_command_plan", "Plan a cross-platform argv command without executing it.", ["argv"], false, ["cwd", "shell", "timeout_ms", "output_limit", "effect", "approval_ref", "adapter_id"]),
+  tool("craft_command_run", "Execute one governed cross-platform command and return a bounded receipt.", ["argv"], false, ["cwd", "shell", "timeout_ms", "output_limit", "effect", "approval_ref", "adapter_id", "run_id"]),
+  tool("craft_command_observe", "Read one command receipt.", ["run_id"], true),
+  tool("craft_command_cancel", "Cancel one running command or return an idempotent terminal receipt.", ["run_id"]),
+  tool("craft_capability_projection", "Project only required capabilities within a token budget and explain exclusions.", ["candidates"], true, ["required", "token_budget"]),
+  tool("craft_durable_run_start", "Create a leased, recoverable durable run.", [], false, ["run_id", "task_id", "goal"]),
+  tool("craft_durable_run_tick", "Claim one queued or expired durable run with a lease.", [], false, ["owner", "lease_seconds"]),
+  tool("craft_durable_run_complete", "Complete a durable run with an explicit terminal status.", ["run_id", "status"], false, ["result"]),
+  tool("craft_durable_run_recover", "Return running runs to the queue after owner failure.", [], false, ["owner"]),
+  tool("craft_trust_curve_record", "Record scoped evidence and calculate a bounded autonomy suggestion.", ["scope", "passed", "failed"], false, ["evidence_refs"]),
+  tool("craft_model_route", "Select a model candidate by quality, cost, or latency under an optional budget.", ["candidates"], true, ["objective", "budget"]),
+  tool("craft_delivery_gate", "Independently gate delivery on required artifacts and evidence.", ["artifacts", "evidence"], true, ["required_artifacts", "required_evidence"]),
+  tool("craft_task_handoff_manifest", "Create a host-neutral task handoff manifest.", ["context_manifest", "host", "task"], true, ["budget"]),
+  tool("craft_domain_evaluator_run", "Run a domain evaluator against structured observations.", ["evaluator_id", "observations"], true),
+  tool("craft_openapi_import", "Import an OpenAPI document into a governed read/write adapter contract.", ["document"], false),
   tool("craft_trust_profile_record", "Record scoped evidence for a trust recommendation; it never grants execution authority.", ["scope", "evidence_ids"], false, ["profile_id", "passed", "failed", "interventions", "ttl_seconds", "reason"]),
   tool("craft_trust_profile_recommend", "Recommend automatic, notify-only, human-approval, or blocked handling from scoped evidence.", ["profile_id"], true),
   tool("craft_trust_profile_get", "Read one scoped trust profile.", ["profile_id"], true),
@@ -1062,6 +1084,13 @@ export class McpServer {
     this.tools = [...ACTIVE_TOOLS, ...SYSCALL_TOOLS].filter((tool) => allowed.has(tool.name));
     this.handlers = {
       craft_info: () => service.info(),
+      craft_adapter_manifest_save: (a) => service.adapterManifestSave(a), craft_adapter_manifest_get: (a) => service.adapterManifestGet(a), craft_adapter_manifest_list: (a) => service.adapterManifestList(a),
+      craft_adapter_health: (a) => service.adapterHealth(a), craft_adapter_conformance: (a) => service.adapterConformance(a), craft_adapter_quarantine: (a) => service.adapterQuarantine(a), craft_adapter_rollback: (a) => service.adapterRollback(a),
+      craft_command_plan: (a) => service.commandPlan(a), craft_command_run: (a) => service.commandRun(a), craft_command_observe: (a) => service.commandObserve(a), craft_command_cancel: (a) => service.commandCancel(a),
+      craft_capability_projection: (a) => service.capabilityProjection(a),
+      craft_durable_run_start: (a) => service.durableRunStart(a), craft_durable_run_tick: (a) => service.durableRunTick(a), craft_durable_run_complete: (a) => service.durableRunComplete(a), craft_durable_run_recover: (a) => service.durableRunRecover(a),
+      craft_trust_curve_record: (a) => service.trustCurveRecord(a), craft_model_route: (a) => service.modelRouteV01226(a), craft_delivery_gate: (a) => service.deliveryGateV01226(a),
+      craft_task_handoff_manifest: (a) => service.taskHandoffManifest(a), craft_domain_evaluator_run: (a) => service.domainEvaluatorRun(a), craft_openapi_import: (a) => service.openApiImport(a),
       craft_trust_profile_record: (a) => service.trustProfileRecord(a), craft_trust_profile_recommend: (a) => service.trustProfileRecommend(a),
       craft_trust_profile_get: (a) => service.trustProfileGet(a), craft_trust_profile_list: (a) => service.trustProfileList(a), craft_trust_profile_revoke: (a) => service.trustProfileRevoke(a),
       craft_web_fetch: (a) => service.webFetch(a), craft_web_action_prepare: (a) => service.webActionPrepare(a),

@@ -30,9 +30,9 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/nodes/identity.js
+// node_modules/yaml/dist/nodes/identity.js
 var require_identity = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/nodes/identity.js"(exports2) {
+  "node_modules/yaml/dist/nodes/identity.js"(exports2) {
     "use strict";
     var ALIAS = /* @__PURE__ */ Symbol.for("yaml.alias");
     var DOC = /* @__PURE__ */ Symbol.for("yaml.document");
@@ -87,9 +87,9 @@ var require_identity = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/visit.js
+// node_modules/yaml/dist/visit.js
 var require_visit = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/visit.js"(exports2) {
+  "node_modules/yaml/dist/visit.js"(exports2) {
     "use strict";
     var identity = require_identity();
     var BREAK = /* @__PURE__ */ Symbol("break visit");
@@ -245,9 +245,9 @@ var require_visit = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/doc/directives.js
+// node_modules/yaml/dist/doc/directives.js
 var require_directives = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/doc/directives.js"(exports2) {
+  "node_modules/yaml/dist/doc/directives.js"(exports2) {
     "use strict";
     var identity = require_identity();
     var visit = require_visit();
@@ -416,9 +416,9 @@ var require_directives = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/doc/anchors.js
+// node_modules/yaml/dist/doc/anchors.js
 var require_anchors = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/doc/anchors.js"(exports2) {
+  "node_modules/yaml/dist/doc/anchors.js"(exports2) {
     "use strict";
     var identity = require_identity();
     var visit = require_visit();
@@ -486,11 +486,11 @@ var require_anchors = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/doc/applyReviver.js
+// node_modules/yaml/dist/doc/applyReviver.js
 var require_applyReviver = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/doc/applyReviver.js"(exports2) {
+  "node_modules/yaml/dist/doc/applyReviver.js"(exports2) {
     "use strict";
-    function applyReviver(reviver, obj, key2, val) {
+    function applyReviver(reviver, obj2, key2, val) {
       if (val && typeof val === "object") {
         if (Array.isArray(val)) {
           for (let i = 0, len = val.length; i < len; ++i) {
@@ -530,15 +530,15 @@ var require_applyReviver = __commonJS({
           }
         }
       }
-      return reviver.call(obj, key2, val);
+      return reviver.call(obj2, key2, val);
     }
     exports2.applyReviver = applyReviver;
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/nodes/toJS.js
+// node_modules/yaml/dist/nodes/toJS.js
 var require_toJS = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/nodes/toJS.js"(exports2) {
+  "node_modules/yaml/dist/nodes/toJS.js"(exports2) {
     "use strict";
     var identity = require_identity();
     function toJS(value, arg, ctx) {
@@ -566,9 +566,9 @@ var require_toJS = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/nodes/Node.js
+// node_modules/yaml/dist/nodes/Node.js
 var require_Node = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/nodes/Node.js"(exports2) {
+  "node_modules/yaml/dist/nodes/Node.js"(exports2) {
     "use strict";
     var applyReviver = require_applyReviver();
     var identity = require_identity();
@@ -607,9 +607,9 @@ var require_Node = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/nodes/Alias.js
+// node_modules/yaml/dist/nodes/Alias.js
 var require_Alias = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/nodes/Alias.js"(exports2) {
+  "node_modules/yaml/dist/nodes/Alias.js"(exports2) {
     "use strict";
     var anchors = require_anchors();
     var visit = require_visit();
@@ -723,9 +723,9 @@ var require_Alias = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/nodes/Scalar.js
+// node_modules/yaml/dist/nodes/Scalar.js
 var require_Scalar = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/nodes/Scalar.js"(exports2) {
+  "node_modules/yaml/dist/nodes/Scalar.js"(exports2) {
     "use strict";
     var identity = require_identity();
     var Node = require_Node();
@@ -753,9 +753,9 @@ var require_Scalar = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/doc/createNode.js
+// node_modules/yaml/dist/doc/createNode.js
 var require_createNode = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/doc/createNode.js"(exports2) {
+  "node_modules/yaml/dist/doc/createNode.js"(exports2) {
     "use strict";
     var Alias = require_Alias();
     var identity = require_identity();
@@ -828,9 +828,9 @@ var require_createNode = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/nodes/Collection.js
+// node_modules/yaml/dist/nodes/Collection.js
 var require_Collection = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/nodes/Collection.js"(exports2) {
+  "node_modules/yaml/dist/nodes/Collection.js"(exports2) {
     "use strict";
     var createNode = require_createNode();
     var identity = require_identity();
@@ -971,9 +971,9 @@ var require_Collection = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/stringify/stringifyComment.js
+// node_modules/yaml/dist/stringify/stringifyComment.js
 var require_stringifyComment = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/stringify/stringifyComment.js"(exports2) {
+  "node_modules/yaml/dist/stringify/stringifyComment.js"(exports2) {
     "use strict";
     var stringifyComment = (str) => str.replace(/^(?!$)(?: $)?/gm, "#");
     function indentComment(comment, indent) {
@@ -988,9 +988,9 @@ var require_stringifyComment = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/stringify/foldFlowLines.js
+// node_modules/yaml/dist/stringify/foldFlowLines.js
 var require_foldFlowLines = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/stringify/foldFlowLines.js"(exports2) {
+  "node_modules/yaml/dist/stringify/foldFlowLines.js"(exports2) {
     "use strict";
     var FOLD_FLOW = "flow";
     var FOLD_BLOCK = "block";
@@ -1124,9 +1124,9 @@ ${indent}${text112.slice(fold + 1, end2)}`;
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/stringify/stringifyString.js
+// node_modules/yaml/dist/stringify/stringifyString.js
 var require_stringifyString = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/stringify/stringifyString.js"(exports2) {
+  "node_modules/yaml/dist/stringify/stringifyString.js"(exports2) {
     "use strict";
     var Scalar = require_Scalar();
     var foldFlowLines = require_foldFlowLines();
@@ -1407,9 +1407,9 @@ ${indent}`);
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/stringify/stringify.js
+// node_modules/yaml/dist/stringify/stringify.js
 var require_stringify = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/stringify/stringify.js"(exports2) {
+  "node_modules/yaml/dist/stringify/stringify.js"(exports2) {
     "use strict";
     var anchors = require_anchors();
     var identity = require_identity();
@@ -1464,10 +1464,10 @@ var require_stringify = __commonJS({
           return match.find((t) => t.format === item.format) ?? match[0];
       }
       let tagObj = void 0;
-      let obj;
+      let obj2;
       if (identity.isScalar(item)) {
-        obj = item.value;
-        let match = tags.filter((t) => t.identify?.(obj));
+        obj2 = item.value;
+        let match = tags.filter((t) => t.identify?.(obj2));
         if (match.length > 1) {
           const testMatch = match.filter((t) => t.test);
           if (testMatch.length > 0)
@@ -1475,11 +1475,11 @@ var require_stringify = __commonJS({
         }
         tagObj = match.find((t) => t.format === item.format) ?? match.find((t) => !t.format);
       } else {
-        obj = item;
-        tagObj = tags.find((t) => t.nodeClass && obj instanceof t.nodeClass);
+        obj2 = item;
+        tagObj = tags.find((t) => t.nodeClass && obj2 instanceof t.nodeClass);
       }
       if (!tagObj) {
-        const name = obj?.constructor?.name ?? (obj === null ? "null" : typeof obj);
+        const name = obj2?.constructor?.name ?? (obj2 === null ? "null" : typeof obj2);
         throw new Error(`Tag not resolved for ${name} value`);
       }
       return tagObj;
@@ -1531,9 +1531,9 @@ ${ctx.indent}${str}`;
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/stringify/stringifyPair.js
+// node_modules/yaml/dist/stringify/stringifyPair.js
 var require_stringifyPair = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/stringify/stringifyPair.js"(exports2) {
+  "node_modules/yaml/dist/stringify/stringifyPair.js"(exports2) {
     "use strict";
     var identity = require_identity();
     var Scalar = require_Scalar();
@@ -1664,9 +1664,9 @@ ${ctx.indent}`;
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/log.js
+// node_modules/yaml/dist/log.js
 var require_log = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/log.js"(exports2) {
+  "node_modules/yaml/dist/log.js"(exports2) {
     "use strict";
     var node_process = require("process");
     function debug(logLevel, ...messages) {
@@ -1686,9 +1686,9 @@ var require_log = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/yaml-1.1/merge.js
+// node_modules/yaml/dist/schema/yaml-1.1/merge.js
 var require_merge = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/yaml-1.1/merge.js"(exports2) {
+  "node_modules/yaml/dist/schema/yaml-1.1/merge.js"(exports2) {
     "use strict";
     var identity = require_identity();
     var Scalar = require_Scalar();
@@ -1746,9 +1746,9 @@ var require_merge = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/nodes/addPairToJSMap.js
+// node_modules/yaml/dist/nodes/addPairToJSMap.js
 var require_addPairToJSMap = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/nodes/addPairToJSMap.js"(exports2) {
+  "node_modules/yaml/dist/nodes/addPairToJSMap.js"(exports2) {
     "use strict";
     var log = require_log();
     var merge = require_merge();
@@ -1810,9 +1810,9 @@ var require_addPairToJSMap = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/nodes/Pair.js
+// node_modules/yaml/dist/nodes/Pair.js
 var require_Pair = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/nodes/Pair.js"(exports2) {
+  "node_modules/yaml/dist/nodes/Pair.js"(exports2) {
     "use strict";
     var createNode = require_createNode();
     var stringifyPair = require_stringifyPair();
@@ -1850,9 +1850,9 @@ var require_Pair = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/stringify/stringifyCollection.js
+// node_modules/yaml/dist/stringify/stringifyCollection.js
 var require_stringifyCollection = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/stringify/stringifyCollection.js"(exports2) {
+  "node_modules/yaml/dist/stringify/stringifyCollection.js"(exports2) {
     "use strict";
     var identity = require_identity();
     var stringify = require_stringify();
@@ -2001,9 +2001,9 @@ ${indent}${end}`;
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/nodes/YAMLMap.js
+// node_modules/yaml/dist/nodes/YAMLMap.js
 var require_YAMLMap = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/nodes/YAMLMap.js"(exports2) {
+  "node_modules/yaml/dist/nodes/YAMLMap.js"(exports2) {
     "use strict";
     var stringifyCollection = require_stringifyCollection();
     var addPairToJSMap = require_addPairToJSMap();
@@ -2035,23 +2035,23 @@ var require_YAMLMap = __commonJS({
        * A generic collection parsing method that can be extended
        * to other node classes that inherit from YAMLMap
        */
-      static from(schema, obj, ctx) {
+      static from(schema, obj2, ctx) {
         const { keepUndefined, replacer } = ctx;
         const map = new this(schema);
         const add3 = (key2, value) => {
           if (typeof replacer === "function")
-            value = replacer.call(obj, key2, value);
+            value = replacer.call(obj2, key2, value);
           else if (Array.isArray(replacer) && !replacer.includes(key2))
             return;
           if (value !== void 0 || keepUndefined)
             map.items.push(Pair.createPair(key2, value, ctx));
         };
-        if (obj instanceof Map) {
-          for (const [key2, value] of obj)
+        if (obj2 instanceof Map) {
+          for (const [key2, value] of obj2)
             add3(key2, value);
-        } else if (obj && typeof obj === "object") {
-          for (const key2 of Object.keys(obj))
-            add3(key2, obj[key2]);
+        } else if (obj2 && typeof obj2 === "object") {
+          for (const key2 of Object.keys(obj2))
+            add3(key2, obj2[key2]);
         }
         if (typeof schema.sortMapEntries === "function") {
           map.items.sort(schema.sortMapEntries);
@@ -2145,9 +2145,9 @@ var require_YAMLMap = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/common/map.js
+// node_modules/yaml/dist/schema/common/map.js
 var require_map = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/common/map.js"(exports2) {
+  "node_modules/yaml/dist/schema/common/map.js"(exports2) {
     "use strict";
     var identity = require_identity();
     var YAMLMap = require_YAMLMap();
@@ -2161,15 +2161,15 @@ var require_map = __commonJS({
           onError("Expected a mapping for this tag");
         return map2;
       },
-      createNode: (schema, obj, ctx) => YAMLMap.YAMLMap.from(schema, obj, ctx)
+      createNode: (schema, obj2, ctx) => YAMLMap.YAMLMap.from(schema, obj2, ctx)
     };
     exports2.map = map;
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/nodes/YAMLSeq.js
+// node_modules/yaml/dist/nodes/YAMLSeq.js
 var require_YAMLSeq = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/nodes/YAMLSeq.js"(exports2) {
+  "node_modules/yaml/dist/nodes/YAMLSeq.js"(exports2) {
     "use strict";
     var createNode = require_createNode();
     var stringifyCollection = require_stringifyCollection();
@@ -2257,15 +2257,15 @@ var require_YAMLSeq = __commonJS({
           onComment
         });
       }
-      static from(schema, obj, ctx) {
+      static from(schema, obj2, ctx) {
         const { replacer } = ctx;
         const seq = new this(schema);
-        if (obj && Symbol.iterator in Object(obj)) {
+        if (obj2 && Symbol.iterator in Object(obj2)) {
           let i = 0;
-          for (let it of obj) {
+          for (let it of obj2) {
             if (typeof replacer === "function") {
-              const key2 = obj instanceof Set ? it : String(i++);
-              it = replacer.call(obj, key2, it);
+              const key2 = obj2 instanceof Set ? it : String(i++);
+              it = replacer.call(obj2, key2, it);
             }
             seq.items.push(createNode.createNode(it, void 0, ctx));
           }
@@ -2283,9 +2283,9 @@ var require_YAMLSeq = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/common/seq.js
+// node_modules/yaml/dist/schema/common/seq.js
 var require_seq = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/common/seq.js"(exports2) {
+  "node_modules/yaml/dist/schema/common/seq.js"(exports2) {
     "use strict";
     var identity = require_identity();
     var YAMLSeq = require_YAMLSeq();
@@ -2299,15 +2299,15 @@ var require_seq = __commonJS({
           onError("Expected a sequence for this tag");
         return seq2;
       },
-      createNode: (schema, obj, ctx) => YAMLSeq.YAMLSeq.from(schema, obj, ctx)
+      createNode: (schema, obj2, ctx) => YAMLSeq.YAMLSeq.from(schema, obj2, ctx)
     };
     exports2.seq = seq;
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/common/string.js
+// node_modules/yaml/dist/schema/common/string.js
 var require_string = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/common/string.js"(exports2) {
+  "node_modules/yaml/dist/schema/common/string.js"(exports2) {
     "use strict";
     var stringifyString = require_stringifyString();
     var string = {
@@ -2324,9 +2324,9 @@ var require_string = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/common/null.js
+// node_modules/yaml/dist/schema/common/null.js
 var require_null = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/common/null.js"(exports2) {
+  "node_modules/yaml/dist/schema/common/null.js"(exports2) {
     "use strict";
     var Scalar = require_Scalar();
     var nullTag = {
@@ -2342,9 +2342,9 @@ var require_null = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/core/bool.js
+// node_modules/yaml/dist/schema/core/bool.js
 var require_bool = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/core/bool.js"(exports2) {
+  "node_modules/yaml/dist/schema/core/bool.js"(exports2) {
     "use strict";
     var Scalar = require_Scalar();
     var boolTag = {
@@ -2366,9 +2366,9 @@ var require_bool = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/stringify/stringifyNumber.js
+// node_modules/yaml/dist/stringify/stringifyNumber.js
 var require_stringifyNumber = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/stringify/stringifyNumber.js"(exports2) {
+  "node_modules/yaml/dist/stringify/stringifyNumber.js"(exports2) {
     "use strict";
     function stringifyNumber({ format: format2, minFractionDigits, tag, value }) {
       if (typeof value === "bigint")
@@ -2393,9 +2393,9 @@ var require_stringifyNumber = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/core/float.js
+// node_modules/yaml/dist/schema/core/float.js
 var require_float = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/core/float.js"(exports2) {
+  "node_modules/yaml/dist/schema/core/float.js"(exports2) {
     "use strict";
     var Scalar = require_Scalar();
     var stringifyNumber = require_stringifyNumber();
@@ -2439,9 +2439,9 @@ var require_float = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/core/int.js
+// node_modules/yaml/dist/schema/core/int.js
 var require_int = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/core/int.js"(exports2) {
+  "node_modules/yaml/dist/schema/core/int.js"(exports2) {
     "use strict";
     var stringifyNumber = require_stringifyNumber();
     var intIdentify = (value) => typeof value === "bigint" || Number.isInteger(value);
@@ -2484,9 +2484,9 @@ var require_int = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/core/schema.js
+// node_modules/yaml/dist/schema/core/schema.js
 var require_schema = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/core/schema.js"(exports2) {
+  "node_modules/yaml/dist/schema/core/schema.js"(exports2) {
     "use strict";
     var map = require_map();
     var _null = require_null();
@@ -2512,9 +2512,9 @@ var require_schema = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/json/schema.js
+// node_modules/yaml/dist/schema/json/schema.js
 var require_schema2 = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/json/schema.js"(exports2) {
+  "node_modules/yaml/dist/schema/json/schema.js"(exports2) {
     "use strict";
     var Scalar = require_Scalar();
     var map = require_map();
@@ -2579,9 +2579,9 @@ var require_schema2 = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/yaml-1.1/binary.js
+// node_modules/yaml/dist/schema/yaml-1.1/binary.js
 var require_binary = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/yaml-1.1/binary.js"(exports2) {
+  "node_modules/yaml/dist/schema/yaml-1.1/binary.js"(exports2) {
     "use strict";
     var node_buffer = require("buffer");
     var Scalar = require_Scalar();
@@ -2645,9 +2645,9 @@ var require_binary = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/yaml-1.1/pairs.js
+// node_modules/yaml/dist/schema/yaml-1.1/pairs.js
 var require_pairs = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/yaml-1.1/pairs.js"(exports2) {
+  "node_modules/yaml/dist/schema/yaml-1.1/pairs.js"(exports2) {
     "use strict";
     var identity = require_identity();
     var Pair = require_Pair();
@@ -2723,9 +2723,9 @@ ${cn.comment}` : item.comment;
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/yaml-1.1/omap.js
+// node_modules/yaml/dist/schema/yaml-1.1/omap.js
 var require_omap = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/yaml-1.1/omap.js"(exports2) {
+  "node_modules/yaml/dist/schema/yaml-1.1/omap.js"(exports2) {
     "use strict";
     var identity = require_identity();
     var toJS = require_toJS();
@@ -2801,9 +2801,9 @@ var require_omap = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/yaml-1.1/bool.js
+// node_modules/yaml/dist/schema/yaml-1.1/bool.js
 var require_bool2 = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/yaml-1.1/bool.js"(exports2) {
+  "node_modules/yaml/dist/schema/yaml-1.1/bool.js"(exports2) {
     "use strict";
     var Scalar = require_Scalar();
     function boolStringify({ value, source }, ctx) {
@@ -2833,9 +2833,9 @@ var require_bool2 = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/yaml-1.1/float.js
+// node_modules/yaml/dist/schema/yaml-1.1/float.js
 var require_float2 = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/yaml-1.1/float.js"(exports2) {
+  "node_modules/yaml/dist/schema/yaml-1.1/float.js"(exports2) {
     "use strict";
     var Scalar = require_Scalar();
     var stringifyNumber = require_stringifyNumber();
@@ -2882,9 +2882,9 @@ var require_float2 = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/yaml-1.1/int.js
+// node_modules/yaml/dist/schema/yaml-1.1/int.js
 var require_int2 = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/yaml-1.1/int.js"(exports2) {
+  "node_modules/yaml/dist/schema/yaml-1.1/int.js"(exports2) {
     "use strict";
     var stringifyNumber = require_stringifyNumber();
     var intIdentify = (value) => typeof value === "bigint" || Number.isInteger(value);
@@ -2961,9 +2961,9 @@ var require_int2 = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/yaml-1.1/set.js
+// node_modules/yaml/dist/schema/yaml-1.1/set.js
 var require_set = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/yaml-1.1/set.js"(exports2) {
+  "node_modules/yaml/dist/schema/yaml-1.1/set.js"(exports2) {
     "use strict";
     var identity = require_identity();
     var Pair = require_Pair();
@@ -3050,9 +3050,9 @@ var require_set = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/yaml-1.1/timestamp.js
+// node_modules/yaml/dist/schema/yaml-1.1/timestamp.js
 var require_timestamp = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/yaml-1.1/timestamp.js"(exports2) {
+  "node_modules/yaml/dist/schema/yaml-1.1/timestamp.js"(exports2) {
     "use strict";
     var stringifyNumber = require_stringifyNumber();
     function parseSexagesimal(str, asBigInt) {
@@ -3138,9 +3138,9 @@ var require_timestamp = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/yaml-1.1/schema.js
+// node_modules/yaml/dist/schema/yaml-1.1/schema.js
 var require_schema3 = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/yaml-1.1/schema.js"(exports2) {
+  "node_modules/yaml/dist/schema/yaml-1.1/schema.js"(exports2) {
     "use strict";
     var map = require_map();
     var _null = require_null();
@@ -3182,9 +3182,9 @@ var require_schema3 = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/tags.js
+// node_modules/yaml/dist/schema/tags.js
 var require_tags = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/tags.js"(exports2) {
+  "node_modules/yaml/dist/schema/tags.js"(exports2) {
     "use strict";
     var map = require_map();
     var _null = require_null();
@@ -3276,9 +3276,9 @@ var require_tags = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/Schema.js
+// node_modules/yaml/dist/schema/Schema.js
 var require_Schema = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/Schema.js"(exports2) {
+  "node_modules/yaml/dist/schema/Schema.js"(exports2) {
     "use strict";
     var identity = require_identity();
     var map = require_map();
@@ -3308,9 +3308,9 @@ var require_Schema = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/stringify/stringifyDocument.js
+// node_modules/yaml/dist/stringify/stringifyDocument.js
 var require_stringifyDocument = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/stringify/stringifyDocument.js"(exports2) {
+  "node_modules/yaml/dist/stringify/stringifyDocument.js"(exports2) {
     "use strict";
     var identity = require_identity();
     var stringify = require_stringify();
@@ -3388,9 +3388,9 @@ var require_stringifyDocument = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/doc/Document.js
+// node_modules/yaml/dist/doc/Document.js
 var require_Document = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/doc/Document.js"(exports2) {
+  "node_modules/yaml/dist/doc/Document.js"(exports2) {
     "use strict";
     var Alias = require_Alias();
     var Collection = require_Collection();
@@ -3697,9 +3697,9 @@ var require_Document = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/errors.js
+// node_modules/yaml/dist/errors.js
 var require_errors = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/errors.js"(exports2) {
+  "node_modules/yaml/dist/errors.js"(exports2) {
     "use strict";
     var YAMLError = class extends Error {
       constructor(name, pos, code, message) {
@@ -3762,9 +3762,9 @@ ${pointer2}
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/resolve-props.js
+// node_modules/yaml/dist/compose/resolve-props.js
 var require_resolve_props = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/resolve-props.js"(exports2) {
+  "node_modules/yaml/dist/compose/resolve-props.js"(exports2) {
     "use strict";
     function resolveProps(tokens, { flow, indicator, next, offset, onError, parentIndent, startOnNewline }) {
       let spaceBefore = false;
@@ -3896,9 +3896,9 @@ var require_resolve_props = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/util-contains-newline.js
+// node_modules/yaml/dist/compose/util-contains-newline.js
 var require_util_contains_newline = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/util-contains-newline.js"(exports2) {
+  "node_modules/yaml/dist/compose/util-contains-newline.js"(exports2) {
     "use strict";
     function containsNewline(key2) {
       if (!key2)
@@ -3938,9 +3938,9 @@ var require_util_contains_newline = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/util-flow-indent-check.js
+// node_modules/yaml/dist/compose/util-flow-indent-check.js
 var require_util_flow_indent_check = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/util-flow-indent-check.js"(exports2) {
+  "node_modules/yaml/dist/compose/util-flow-indent-check.js"(exports2) {
     "use strict";
     var utilContainsNewline = require_util_contains_newline();
     function flowIndentCheck(indent, fc, onError) {
@@ -3956,9 +3956,9 @@ var require_util_flow_indent_check = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/util-map-includes.js
+// node_modules/yaml/dist/compose/util-map-includes.js
 var require_util_map_includes = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/util-map-includes.js"(exports2) {
+  "node_modules/yaml/dist/compose/util-map-includes.js"(exports2) {
     "use strict";
     var identity = require_identity();
     function mapIncludes(ctx, items2, search) {
@@ -3972,9 +3972,9 @@ var require_util_map_includes = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/resolve-block-map.js
+// node_modules/yaml/dist/compose/resolve-block-map.js
 var require_resolve_block_map = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/resolve-block-map.js"(exports2) {
+  "node_modules/yaml/dist/compose/resolve-block-map.js"(exports2) {
     "use strict";
     var Pair = require_Pair();
     var YAMLMap = require_YAMLMap();
@@ -4080,9 +4080,9 @@ var require_resolve_block_map = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/resolve-block-seq.js
+// node_modules/yaml/dist/compose/resolve-block-seq.js
 var require_resolve_block_seq = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/resolve-block-seq.js"(exports2) {
+  "node_modules/yaml/dist/compose/resolve-block-seq.js"(exports2) {
     "use strict";
     var YAMLSeq = require_YAMLSeq();
     var resolveProps = require_resolve_props();
@@ -4131,9 +4131,9 @@ var require_resolve_block_seq = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/resolve-end.js
+// node_modules/yaml/dist/compose/resolve-end.js
 var require_resolve_end = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/resolve-end.js"(exports2) {
+  "node_modules/yaml/dist/compose/resolve-end.js"(exports2) {
     "use strict";
     function resolveEnd(end, offset, reqSpace, onError) {
       let comment = "";
@@ -4174,9 +4174,9 @@ var require_resolve_end = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/resolve-flow-collection.js
+// node_modules/yaml/dist/compose/resolve-flow-collection.js
 var require_resolve_flow_collection = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/resolve-flow-collection.js"(exports2) {
+  "node_modules/yaml/dist/compose/resolve-flow-collection.js"(exports2) {
     "use strict";
     var identity = require_identity();
     var Pair = require_Pair();
@@ -4368,9 +4368,9 @@ var require_resolve_flow_collection = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/compose-collection.js
+// node_modules/yaml/dist/compose/compose-collection.js
 var require_compose_collection = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/compose-collection.js"(exports2) {
+  "node_modules/yaml/dist/compose/compose-collection.js"(exports2) {
     "use strict";
     var identity = require_identity();
     var Scalar = require_Scalar();
@@ -4433,9 +4433,9 @@ var require_compose_collection = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/resolve-block-scalar.js
+// node_modules/yaml/dist/compose/resolve-block-scalar.js
 var require_resolve_block_scalar = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/resolve-block-scalar.js"(exports2) {
+  "node_modules/yaml/dist/compose/resolve-block-scalar.js"(exports2) {
     "use strict";
     var Scalar = require_Scalar();
     function resolveBlockScalar(ctx, scalar2, onError) {
@@ -4616,9 +4616,9 @@ var require_resolve_block_scalar = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/resolve-flow-scalar.js
+// node_modules/yaml/dist/compose/resolve-flow-scalar.js
 var require_resolve_flow_scalar = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/resolve-flow-scalar.js"(exports2) {
+  "node_modules/yaml/dist/compose/resolve-flow-scalar.js"(exports2) {
     "use strict";
     var Scalar = require_Scalar();
     var resolveEnd = require_resolve_end();
@@ -4836,9 +4836,9 @@ var require_resolve_flow_scalar = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/compose-scalar.js
+// node_modules/yaml/dist/compose/compose-scalar.js
 var require_compose_scalar = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/compose-scalar.js"(exports2) {
+  "node_modules/yaml/dist/compose/compose-scalar.js"(exports2) {
     "use strict";
     var identity = require_identity();
     var Scalar = require_Scalar();
@@ -4917,9 +4917,9 @@ var require_compose_scalar = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/util-empty-scalar-position.js
+// node_modules/yaml/dist/compose/util-empty-scalar-position.js
 var require_util_empty_scalar_position = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/util-empty-scalar-position.js"(exports2) {
+  "node_modules/yaml/dist/compose/util-empty-scalar-position.js"(exports2) {
     "use strict";
     function emptyScalarPosition(offset, before, pos) {
       if (before) {
@@ -4947,9 +4947,9 @@ var require_util_empty_scalar_position = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/compose-node.js
+// node_modules/yaml/dist/compose/compose-node.js
 var require_compose_node = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/compose-node.js"(exports2) {
+  "node_modules/yaml/dist/compose/compose-node.js"(exports2) {
     "use strict";
     var Alias = require_Alias();
     var identity = require_identity();
@@ -5053,9 +5053,9 @@ var require_compose_node = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/compose-doc.js
+// node_modules/yaml/dist/compose/compose-doc.js
 var require_compose_doc = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/compose-doc.js"(exports2) {
+  "node_modules/yaml/dist/compose/compose-doc.js"(exports2) {
     "use strict";
     var Document = require_Document();
     var composeNode = require_compose_node();
@@ -5096,9 +5096,9 @@ var require_compose_doc = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/composer.js
+// node_modules/yaml/dist/compose/composer.js
 var require_composer = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/composer.js"(exports2) {
+  "node_modules/yaml/dist/compose/composer.js"(exports2) {
     "use strict";
     var node_process = require("process");
     var directives = require_directives();
@@ -5304,9 +5304,9 @@ ${end.comment}` : end.comment;
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/parse/cst-scalar.js
+// node_modules/yaml/dist/parse/cst-scalar.js
 var require_cst_scalar = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/parse/cst-scalar.js"(exports2) {
+  "node_modules/yaml/dist/parse/cst-scalar.js"(exports2) {
     "use strict";
     var resolveBlockScalar = require_resolve_block_scalar();
     var resolveFlowScalar = require_resolve_flow_scalar();
@@ -5489,9 +5489,9 @@ var require_cst_scalar = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/parse/cst-stringify.js
+// node_modules/yaml/dist/parse/cst-stringify.js
 var require_cst_stringify = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/parse/cst-stringify.js"(exports2) {
+  "node_modules/yaml/dist/parse/cst-stringify.js"(exports2) {
     "use strict";
     var stringify = (cst) => "type" in cst ? stringifyToken(cst) : stringifyItem(cst);
     function stringifyToken(token) {
@@ -5550,9 +5550,9 @@ var require_cst_stringify = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/parse/cst-visit.js
+// node_modules/yaml/dist/parse/cst-visit.js
 var require_cst_visit = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/parse/cst-visit.js"(exports2) {
+  "node_modules/yaml/dist/parse/cst-visit.js"(exports2) {
     "use strict";
     var BREAK = /* @__PURE__ */ Symbol("break visit");
     var SKIP = /* @__PURE__ */ Symbol("skip children");
@@ -5612,9 +5612,9 @@ var require_cst_visit = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/parse/cst.js
+// node_modules/yaml/dist/parse/cst.js
 var require_cst = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/parse/cst.js"(exports2) {
+  "node_modules/yaml/dist/parse/cst.js"(exports2) {
     "use strict";
     var cstScalar = require_cst_scalar();
     var cstStringify = require_cst_stringify();
@@ -5714,9 +5714,9 @@ var require_cst = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/parse/lexer.js
+// node_modules/yaml/dist/parse/lexer.js
 var require_lexer = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/parse/lexer.js"(exports2) {
+  "node_modules/yaml/dist/parse/lexer.js"(exports2) {
     "use strict";
     var cst = require_cst();
     function isEmpty(ch) {
@@ -6303,9 +6303,9 @@ var require_lexer = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/parse/line-counter.js
+// node_modules/yaml/dist/parse/line-counter.js
 var require_line_counter = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/parse/line-counter.js"(exports2) {
+  "node_modules/yaml/dist/parse/line-counter.js"(exports2) {
     "use strict";
     var LineCounter = class {
       constructor() {
@@ -6334,22 +6334,22 @@ var require_line_counter = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/parse/parser.js
+// node_modules/yaml/dist/parse/parser.js
 var require_parser = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/parse/parser.js"(exports2) {
+  "node_modules/yaml/dist/parse/parser.js"(exports2) {
     "use strict";
     var node_process = require("process");
     var cst = require_cst();
     var lexer = require_lexer();
-    function includesToken(list9, type) {
-      for (let i = 0; i < list9.length; ++i)
-        if (list9[i].type === type)
+    function includesToken(list10, type) {
+      for (let i = 0; i < list10.length; ++i)
+        if (list10[i].type === type)
           return true;
       return false;
     }
-    function findNonEmptyIndex(list9) {
-      for (let i = 0; i < list9.length; ++i) {
-        switch (list9[i].type) {
+    function findNonEmptyIndex(list10) {
+      for (let i = 0; i < list10.length; ++i) {
+        switch (list10[i].type) {
           case "space":
           case "comment":
           case "newline":
@@ -7208,9 +7208,9 @@ var require_parser = __commonJS({
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/public-api.js
+// node_modules/yaml/dist/public-api.js
 var require_public_api = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/public-api.js"(exports2) {
+  "node_modules/yaml/dist/public-api.js"(exports2) {
     "use strict";
     var composer = require_composer();
     var Document = require_Document();
@@ -7257,7 +7257,7 @@ var require_public_api = __commonJS({
       }
       return doc;
     }
-    function parse3(src, reviver, options) {
+    function parse4(src, reviver, options) {
       let _reviver = void 0;
       if (typeof reviver === "function") {
         _reviver = reviver;
@@ -7298,16 +7298,16 @@ var require_public_api = __commonJS({
         return value.toString(options);
       return new Document.Document(value, _replacer, options).toString(options);
     }
-    exports2.parse = parse3;
+    exports2.parse = parse4;
     exports2.parseAllDocuments = parseAllDocuments;
     exports2.parseDocument = parseDocument;
     exports2.stringify = stringify;
   }
 });
 
-// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/index.js
+// node_modules/yaml/dist/index.js
 var require_dist = __commonJS({
-  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/index.js"(exports2) {
+  "node_modules/yaml/dist/index.js"(exports2) {
     "use strict";
     var composer = require_composer();
     var Document = require_Document();
@@ -7361,9 +7361,9 @@ var require_dist = __commonJS({
 var import_node_http = require("node:http");
 
 // src/service.ts
-var import_node_crypto114 = require("node:crypto");
+var import_node_crypto115 = require("node:crypto");
 var import_node_fs16 = require("node:fs");
-var import_promises16 = require("node:fs/promises");
+var import_promises17 = require("node:fs/promises");
 var import_node_path25 = require("node:path");
 var import_node_url5 = require("node:url");
 
@@ -7722,13 +7722,13 @@ var CraftStore = class {
   insert(database, entry2) {
     const { kind: kind2, id: id14, version } = entry2;
     const payload63 = payloadOnly(entry2.payload);
-    const now2 = (/* @__PURE__ */ new Date()).toISOString();
+    const now3 = (/* @__PURE__ */ new Date()).toISOString();
     const next = version ?? Number(database.prepare(
       "SELECT COALESCE(MAX(version),0)+1 AS version FROM records WHERE kind=? AND id=?"
     ).get(kind2, id14).version);
     database.prepare(`INSERT INTO records(
-        kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)`).run(kind2, id14, next, JSON.stringify(payload63), now2, now2);
-    return { ...payload63, id: id14, version: next, created_at: now2, updated_at: now2 };
+        kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)`).run(kind2, id14, next, JSON.stringify(payload63), now3, now3);
+    return { ...payload63, id: id14, version: next, created_at: now3, updated_at: now3 };
   }
   find(kind2, id14, version) {
     const row = version === void 0 ? this.database.prepare(
@@ -7845,9 +7845,9 @@ function validateJsonSchema(value, rawSchema, path2 = "$", depth = 0) {
   if (type === "object") {
     const data = value;
     const properties = object(schema.properties ?? {}, `${path2}.properties`);
-    const required2 = schema.required ?? [];
-    if (!Array.isArray(required2) || required2.some((item) => typeof item !== "string") || new Set(required2).size !== required2.length) throw new Error(`${path2}.required must contain unique strings`);
-    for (const name of required2) if (!(name in data)) throw new Error(`${path2}.${name} is required`);
+    const required3 = schema.required ?? [];
+    if (!Array.isArray(required3) || required3.some((item) => typeof item !== "string") || new Set(required3).size !== required3.length) throw new Error(`${path2}.required must contain unique strings`);
+    for (const name of required3) if (!(name in data)) throw new Error(`${path2}.${name} is required`);
     for (const [name, child] of Object.entries(data)) {
       if (properties[name] !== void 0) validateJsonSchema(child, properties[name], `${path2}.${name}`, depth + 1);
       else if (schema.additionalProperties === false) throw new Error(`${path2}.${name} is not allowed`);
@@ -8160,7 +8160,7 @@ function planStatus(nodes) {
   if (nodes.some((node) => node.status === "pending" || node.status === "leased")) return "running";
   return "failed";
 }
-function dispatchNodes(nodes, capacity, owner, leaseTtlSeconds = 300, now2 = Date.now()) {
+function dispatchNodes(nodes, capacity, owner, leaseTtlSeconds = 300, now3 = Date.now()) {
   if (!Number.isInteger(capacity) || capacity < 0) throw new Error("capacity must be a non-negative integer");
   if (!Number.isInteger(leaseTtlSeconds) || leaseTtlSeconds < 1 || leaseTtlSeconds > 3600) {
     throw new Error("lease_ttl_seconds must be an integer between 1 and 3600");
@@ -8181,7 +8181,7 @@ function dispatchNodes(nodes, capacity, owner, leaseTtlSeconds = 300, now2 = Dat
       status: "leased",
       lease_id: leaseId,
       claimed_by: owner,
-      lease_expires_at: new Date(now2 + leaseTtlSeconds * 1e3).toISOString()
+      lease_expires_at: new Date(now3 + leaseTtlSeconds * 1e3).toISOString()
     };
     leases.push({
       lease_id: leaseId,
@@ -8196,11 +8196,11 @@ function dispatchNodes(nodes, capacity, owner, leaseTtlSeconds = 300, now2 = Dat
   });
   return { nodes: updated, leases };
 }
-function recoverExpiredLeases(nodes, now2 = Date.now()) {
+function recoverExpiredLeases(nodes, now3 = Date.now()) {
   const recovered = [];
   const updated = nodes.map((node) => {
     const expiresAt = Date.parse(String(node.lease_expires_at ?? ""));
-    if (node.status !== "leased" || !Number.isFinite(expiresAt) || expiresAt > now2) return node;
+    if (node.status !== "leased" || !Number.isFinite(expiresAt) || expiresAt > now3) return node;
     recovered.push(String(node.id));
     return {
       ...node,
@@ -8796,7 +8796,7 @@ function loadSettingsSync(paths = craftPaths()) {
     return defaultSettings(paths);
   }
 }
-function saveSettingsSync(patch, paths = craftPaths(), now2 = /* @__PURE__ */ new Date()) {
+function saveSettingsSync(patch, paths = craftPaths(), now3 = /* @__PURE__ */ new Date()) {
   const current2 = loadSettingsSync(paths);
   const next = normalizeSettings({
     ...current2,
@@ -8804,13 +8804,13 @@ function saveSettingsSync(patch, paths = craftPaths(), now2 = /* @__PURE__ */ ne
     workbench: { ...current2.workbench, ...patch.workbench ?? {} },
     runtime: { ...current2.runtime, ...patch.runtime ?? {} },
     privacy: { ...current2.privacy, ...patch.privacy ?? {} },
-    updatedAt: now2.toISOString()
+    updatedAt: now3.toISOString()
   }, paths);
   syncWrite(paths.settingsFile, next);
   return next;
 }
-function resetSettingsSync(paths = craftPaths(), now2 = /* @__PURE__ */ new Date()) {
-  const next = { ...defaultSettings(paths), updatedAt: now2.toISOString() };
+function resetSettingsSync(paths = craftPaths(), now3 = /* @__PURE__ */ new Date()) {
+  const next = { ...defaultSettings(paths), updatedAt: now3.toISOString() };
   syncWrite(paths.settingsFile, next);
   return next;
 }
@@ -8848,12 +8848,12 @@ function defineLoopLimits(input = {}) {
     no_progress_limit: integer2(input.no_progress_limit, "no_progress_limit", DEFAULT_LOOP_LIMITS.no_progress_limit, 1, 100)
   };
 }
-function beginLoop(now2) {
+function beginLoop(now3) {
   return {
     status: "running",
     steps: 0,
     tokens_used: 0,
-    started_at: now2,
+    started_at: now3,
     progress_digest: null,
     stalled_steps: 0,
     last_action: null,
@@ -9521,8 +9521,8 @@ function resolvePolicy(options) {
 }
 function planWorkflowRetirement(usage2, options) {
   const policy = resolvePolicy(options);
-  const now2 = Date.parse(text5(options.now, "now"));
-  if (!Number.isFinite(now2)) throw new Error("Retirement planning requires an ISO now timestamp");
+  const now3 = Date.parse(text5(options.now, "now"));
+  if (!Number.isFinite(now3)) throw new Error("Retirement planning requires an ISO now timestamp");
   const windowMs = policy.stale_days * 864e5;
   return usage2.map((item) => {
     const workflowId = text5(item.workflow_id, "workflow_id");
@@ -9535,7 +9535,7 @@ function planWorkflowRetirement(usage2, options) {
       lastUsed = Date.parse(text5(item.last_used_at, "last_used_at"));
       if (!Number.isFinite(lastUsed)) throw new Error(`Workflow last_used_at is not a timestamp: ${workflowId}`);
     }
-    const stale = lastUsed === null || now2 - lastUsed > windowMs;
+    const stale = lastUsed === null || now3 - lastUsed > windowMs;
     const successRate = uses === 0 ? null : successes / uses;
     const reasons = [];
     let recommendation;
@@ -9668,9 +9668,9 @@ var KnowledgeIndex = class {
    * document never expires on its own — which is the right default for durable
    * project knowledge and the wrong one for a task-scoped note.
    */
-  setScope(entries2, now2 = Date.now()) {
+  setScope(entries2, now3 = Date.now()) {
     if (!Array.isArray(entries2)) throw new Error("Knowledge scope entries must be an array");
-    const instant12 = new Date(now2).toISOString();
+    const instant12 = new Date(now3).toISOString();
     return entries2.map((entry2, index) => {
       if (!entry2 || typeof entry2 !== "object") throw new Error(`Knowledge scope entry ${index} must be an object`);
       const path2 = text6(entry2.path, `scope path at index ${index}`);
@@ -9682,7 +9682,7 @@ var KnowledgeIndex = class {
         if (!Number.isInteger(days) || days < 1 || days > 3650) {
           throw new Error(`Knowledge scope ttl_days at index ${index} must be an integer between 1 and 3650`);
         }
-        expiresAt = new Date(now2 + days * 864e5).toISOString();
+        expiresAt = new Date(now3 + days * 864e5).toISOString();
       }
       this.db.prepare("INSERT INTO knowledge_scope(path, scope, expires_at, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(path) DO UPDATE SET scope = excluded.scope, expires_at = excluded.expires_at, updated_at = excluded.updated_at").run(path2, scope2, expiresAt, instant12);
       return { path: path2, scope: scope2, expires_at: expiresAt, updated_at: instant12 };
@@ -9700,8 +9700,8 @@ var KnowledgeIndex = class {
     }));
   }
   /** Entries whose expiry has passed. A document with no expiry is never listed here. */
-  expired(now2 = Date.now()) {
-    const instant12 = new Date(now2).toISOString();
+  expired(now3 = Date.now()) {
+    const instant12 = new Date(now3).toISOString();
     return this.db.prepare("SELECT path, scope, expires_at, updated_at FROM knowledge_scope WHERE expires_at IS NOT NULL AND expires_at <= ? ORDER BY path").all(instant12).map((row) => ({
       path: String(row.path),
       scope: String(row.scope),
@@ -9720,8 +9720,8 @@ var KnowledgeIndex = class {
    * rollback branch here would be unreachable code that still has to be
    * measured, while adding no recovery the caller does not already have.
    */
-  forgetExpired(now2 = Date.now()) {
-    const stale = this.expired(now2);
+  forgetExpired(now3 = Date.now()) {
+    const stale = this.expired(now3);
     for (const entry2 of stale) {
       this.db.prepare("DELETE FROM knowledge_chunk WHERE path = ?").run(entry2.path);
       this.db.prepare("DELETE FROM knowledge_document WHERE path = ?").run(entry2.path);
@@ -9943,7 +9943,7 @@ var EFFECTS2 = /* @__PURE__ */ new Set(["read_only", "local_write", "external_wr
 var ISOLATED_PLATFORMS = /* @__PURE__ */ new Set(["darwin", "linux"]);
 function decideExecution(input) {
   const effect = String(input.effect);
-  const platform = String(input.platform);
+  const platform2 = String(input.platform);
   if (!EFFECTS2.has(effect)) throw new Error("Execution effect is unsupported");
   if (input.requires_credential === true) {
     return { tier: "blocked", autonomous: false, requires_approval: false, requires_isolation: false, reason: "trusted_credential_broker_required" };
@@ -9951,7 +9951,7 @@ function decideExecution(input) {
   if (effect === "read_only") {
     return { tier: "host_read_only", autonomous: true, requires_approval: false, requires_isolation: false, reason: "read_only_host_execution" };
   }
-  if (effect === "local_write" && input.generated_code === true && ISOLATED_PLATFORMS.has(platform)) {
+  if (effect === "local_write" && input.generated_code === true && ISOLATED_PLATFORMS.has(platform2)) {
     return { tier: "isolated_local", autonomous: true, requires_approval: false, requires_isolation: true, reason: "generated_code_requires_isolation" };
   }
   if (effect === "destructive" && input.has_compensation !== true) {
@@ -10362,8 +10362,8 @@ ${aliases}`.includes(term));
     match: { matched_terms: matchedTerms, exact_name: exactName, exact_description: exactDescription, alias_match: aliasMatch }
   };
 }
-function pathKey(path2, platform = process.platform) {
-  return platform === "win32" ? path2.toLowerCase() : path2;
+function pathKey(path2, platform2 = process.platform) {
+  return platform2 === "win32" ? path2.toLowerCase() : path2;
 }
 function parseSkill(text112, fallback) {
   let metadata = {};
@@ -10470,19 +10470,19 @@ var Catalog = class {
     const observations = this.store.list("capability", Number.MAX_SAFE_INTEGER).filter((item) => sources.get(String(item.source_id))?.enabled === true);
     const byDigest = /* @__PURE__ */ new Map();
     for (const item of observations) {
-      const digest91 = String(item.digest);
-      byDigest.set(digest91, [...byDigest.get(digest91) ?? [], item]);
+      const digest92 = String(item.digest);
+      byDigest.set(digest92, [...byDigest.get(digest92) ?? [], item]);
     }
     const current2 = /* @__PURE__ */ new Set();
     const logicalByDigest = /* @__PURE__ */ new Map();
-    for (const [digest91, group] of byDigest) {
-      const logicalId = stableId("logical_capability", digest91);
+    for (const [digest92, group] of byDigest) {
+      const logicalId = stableId("logical_capability", digest92);
       current2.add(logicalId);
-      logicalByDigest.set(digest91, logicalId);
+      logicalByDigest.set(digest92, logicalId);
       const ordered = [...group].sort((left, right) => Number(sources.get(String(right.source_id))?.priority ?? 0) - Number(sources.get(String(left.source_id))?.priority ?? 0) || String(left.id).localeCompare(String(right.id)));
       const selected = ordered[0];
       const instances = ordered.map((item) => ({ capability_id: item.id, source_id: item.source_id, source_priority: Number(sources.get(String(item.source_id))?.priority ?? 0), path: item.path }));
-      this.store.save("logical_capability", logicalId, { content_digest: digest91, kind: selected.kind, name: selected.name, description: selected.description, version: selected.version, metadata: selected.metadata, selected_capability_id: selected.id, selected_source_id: selected.source_id, instances, declaration_keys: [...new Set(group.map(declarationKey))].sort(), health: "healthy" });
+      this.store.save("logical_capability", logicalId, { content_digest: digest92, kind: selected.kind, name: selected.name, description: selected.description, version: selected.version, metadata: selected.metadata, selected_capability_id: selected.id, selected_source_id: selected.source_id, instances, declaration_keys: [...new Set(group.map(declarationKey))].sort(), health: "healthy" });
     }
     for (const item of this.store.list("logical_capability", Number.MAX_SAFE_INTEGER)) if (!current2.has(String(item.id))) this.store.remove("logical_capability", String(item.id));
     const byDeclaration = /* @__PURE__ */ new Map();
@@ -10494,7 +10494,7 @@ var Catalog = class {
     for (const [key2, digests] of byDeclaration) if (digests.size > 1) {
       const conflictId = stableId("capability_conflict", key2);
       conflictIds.add(conflictId);
-      const logicalIds = [...digests].map((digest91) => logicalByDigest.get(digest91)).sort();
+      const logicalIds = [...digests].map((digest92) => logicalByDigest.get(digest92)).sort();
       this.store.save("capability_conflict", conflictId, { declaration_key: key2, logical_capability_ids: logicalIds, content_digests: [...digests].sort(), status: "open" });
     }
     for (const item of this.store.list("capability_conflict", Number.MAX_SAFE_INTEGER)) if (!conflictIds.has(String(item.id))) this.store.remove("capability_conflict", String(item.id));
@@ -10536,8 +10536,8 @@ var Catalog = class {
         continue;
       }
       const text112 = await (0, import_promises6.readFile)(path2, "utf8");
-      const digest91 = (0, import_node_crypto11.createHash)("sha256").update(text112).digest("hex");
-      if (previous?.digest === digest91) {
+      const digest92 = (0, import_node_crypto11.createHash)("sha256").update(text112).digest("hex");
+      if (previous?.digest === digest92) {
         this.store.save("capability", assetId, { ...previous, size: fileStat.size, mtime_ms: fileStat.mtimeMs });
         unchanged += 1;
         continue;
@@ -10551,7 +10551,7 @@ var Catalog = class {
 ${metadataTerms(skill.metadata).join("\n")}`,
         relative_path,
         path: await (0, import_promises6.realpath)(path2),
-        digest: digest91,
+        digest: digest92,
         size: fileStat.size,
         mtime_ms: fileStat.mtimeMs
       });
@@ -10711,8 +10711,8 @@ function pathAllowed(path2, prefixes) {
   const normalized = path2.replaceAll("\\", "/").replace(/^\.\//u, "");
   return !!normalized && !normalized.startsWith("/") && !normalized.split("/").includes("..") && prefixes.some((prefix) => prefix === "." || normalized === prefix || normalized.startsWith(`${prefix}/`));
 }
-function helperFor(platform) {
-  return platform === "darwin" ? "/usr/bin/sandbox-exec" : platform === "linux" ? "/usr/bin/bwrap" : null;
+function helperFor(platform2) {
+  return platform2 === "darwin" ? "/usr/bin/sandbox-exec" : platform2 === "linux" ? "/usr/bin/bwrap" : null;
 }
 async function runLocalProcess(request2) {
   const environment = { ...process.env };
@@ -11481,12 +11481,12 @@ var WorkbenchKernel = class {
     const maxItems = Number(args.limit ?? 12);
     const maxChars = Number(args.max_chars ?? 12e3);
     if (!Number.isInteger(maxItems) || maxItems < 1 || !Number.isInteger(maxChars) || maxChars < 1) throw new Error("Context limits must be positive integers");
-    const now2 = Date.now();
+    const now3 = Date.now();
     const memoryKinds = profileSelector(args.memory_kinds, "memory_kinds", MEMORY_KINDS);
     const objectTypes = strings2(args.object_types, "object_types");
     const requiredMemoryIds = new Set(strings2(args.required_memory_ids, "required_memory_ids"));
     const requiredObjectIds = new Set(strings2(args.required_object_ids, "required_object_ids"));
-    const memories = this.store.list("memory_item", 1e4).filter((item) => item.status === "active" && matchesScope(item, taskId3, workspaceId) && (!memoryKinds.length || memoryKinds.includes(String(item.kind))) && (item.valid_until === null || Date.parse(String(item.valid_until)) >= now2));
+    const memories = this.store.list("memory_item", 1e4).filter((item) => item.status === "active" && matchesScope(item, taskId3, workspaceId) && (!memoryKinds.length || memoryKinds.includes(String(item.kind))) && (item.valid_until === null || Date.parse(String(item.valid_until)) >= now3));
     const objects = workspaceId ? this.store.list("work_object", 1e4, (item) => item.workspace_id === workspaceId && item.status !== "archived" && (!objectTypes.length || objectTypes.includes(String(item.object_type)))) : [];
     for (const memoryId of requiredMemoryIds) if (!memories.some((item) => item.id === memoryId)) throw new Error("Required memory is unavailable in this context");
     for (const objectId of requiredObjectIds) if (!objects.some((item) => item.id === objectId)) throw new Error("Required work object is unavailable in this context");
@@ -11938,9 +11938,9 @@ var ControlPlaneKernel = class {
     const wait = this.store.get("durable_wait", text16(args.wait_id, "wait_id"));
     if (wait.status !== "waiting") return { wait, idempotent: true };
     const signal = text16(args.signal, "signal");
-    const now2 = args.now === void 0 ? Date.now() : Date.parse(text16(args.now, "now"));
-    if (Number.isNaN(now2)) throw new Error("now must be an ISO timestamp");
-    if (wait.condition === "time" ? now2 < Date.parse(String(wait.resume_after)) : signal !== wait.condition) throw new Error("Resume signal does not satisfy the wait condition");
+    const now3 = args.now === void 0 ? Date.now() : Date.parse(text16(args.now, "now"));
+    if (Number.isNaN(now3)) throw new Error("now must be an ISO timestamp");
+    if (wait.condition === "time" ? now3 < Date.parse(String(wait.resume_after)) : signal !== wait.condition) throw new Error("Resume signal does not satisfy the wait condition");
     if (wait.condition === "event" && wait.event_key && args.signal_key !== wait.event_key) throw new Error("Resume event key does not match the wait condition");
     let status = "resumed";
     let reason = null;
@@ -12091,8 +12091,8 @@ var SecurityBrokerKernel = class {
     const actions = strings4(args.allowed_actions, "allowed_actions");
     const approvalRequired = args.approval_required_actions === void 0 ? [] : strings4(args.approval_required_actions, "approval_required_actions");
     if (approvalRequired.some((action) => !actions.includes(action))) throw new Error("Approval-required actions must also be allowed");
-    const now2 = args.now === void 0 ? Date.now() : Date.parse(text17(args.now, "now"));
-    if (Number.isNaN(now2)) throw new Error("now must be an ISO timestamp");
+    const now3 = args.now === void 0 ? Date.now() : Date.parse(text17(args.now, "now"));
+    if (Number.isNaN(now3)) throw new Error("now must be an ISO timestamp");
     const ttl = Number(args.ttl_seconds ?? 900);
     if (!Number.isInteger(ttl) || ttl < 1 || ttl > 3600) throw new Error("ttl_seconds must be an integer between 1 and 3600");
     const lease = this.store.create("credential_lease", id7(args.lease_id, "lease_id", "credential_lease"), {
@@ -12101,8 +12101,8 @@ var SecurityBrokerKernel = class {
       allowed_hosts: hosts,
       allowed_actions: actions,
       approval_required_actions: approvalRequired,
-      issued_at: new Date(now2).toISOString(),
-      expires_at: new Date(now2 + ttl * 1e3).toISOString(),
+      issued_at: new Date(now3).toISOString(),
+      expires_at: new Date(now3 + ttl * 1e3).toISOString(),
       status: "active"
     });
     return { lease };
@@ -12110,9 +12110,9 @@ var SecurityBrokerKernel = class {
   egressAuthorize(args) {
     const lease = this.store.get("credential_lease", text17(args.lease_id, "lease_id"));
     if (lease.status !== "active") throw new Error("Credential lease is not active");
-    const now2 = args.now === void 0 ? Date.now() : Date.parse(text17(args.now, "now"));
-    if (Number.isNaN(now2)) throw new Error("now must be an ISO timestamp");
-    if (now2 >= Date.parse(String(lease.expires_at))) throw new Error("Credential lease has expired");
+    const now3 = args.now === void 0 ? Date.now() : Date.parse(text17(args.now, "now"));
+    if (Number.isNaN(now3)) throw new Error("now must be an ISO timestamp");
+    if (now3 >= Date.parse(String(lease.expires_at))) throw new Error("Credential lease has expired");
     const target = new URL(text17(args.url, "url"));
     if (target.protocol !== "https:" || target.username || target.password) throw new Error("Egress target must be an HTTPS URL without embedded credentials");
     const host = target.hostname.toLowerCase();
@@ -12145,7 +12145,7 @@ var SecurityBrokerKernel = class {
       request_fingerprint: requestFingerprint,
       approval_ref: args.approval_ref ?? null,
       status: "authorized",
-      authorized_at: new Date(now2).toISOString(),
+      authorized_at: new Date(now3).toISOString(),
       untrusted_input: args.untrusted_input === true
     });
     return { authorization, broker_instruction: { handle_id: lease.handle_id }, idempotent: false };
@@ -12540,8 +12540,8 @@ var ParserProcessAdapter = class {
     const contentId = text18(args.content_id, "content_id").trim();
     const raw = text18(args.raw_content, "raw_content");
     const content = this.security.store.get("untrusted_content", contentId);
-    const digest91 = `sha256:${(0, import_node_crypto21.createHash)("sha256").update(raw).digest("hex")}`;
-    if (content.content_digest !== digest91) throw new Error("raw_content digest does not match the registered content envelope");
+    const digest92 = `sha256:${(0, import_node_crypto21.createHash)("sha256").update(raw).digest("hex")}`;
+    if (content.content_digest !== digest92) throw new Error("raw_content digest does not match the registered content envelope");
     const receiptId = typeof args.receipt_id === "string" && args.receipt_id.trim() ? args.receipt_id.trim() : `parser_process_${(0, import_node_crypto21.randomUUID)().replaceAll("-", "")}`;
     const started = Date.now();
     try {
@@ -12564,7 +12564,7 @@ var ParserProcessAdapter = class {
       });
       const receipt = this.security.store.create("parser_process_receipt", receiptId, {
         content_id: contentId,
-        content_digest: digest91,
+        content_digest: digest92,
         worker_protocol: 1,
         status: "passed",
         duration_ms: Date.now() - started,
@@ -12575,7 +12575,7 @@ var ParserProcessAdapter = class {
     } catch (error) {
       this.security.store.create("parser_process_receipt", receiptId, {
         content_id: contentId,
-        content_digest: digest91,
+        content_digest: digest92,
         worker_protocol: 1,
         status: "failed",
         duration_ms: Date.now() - started,
@@ -13167,10 +13167,10 @@ var RecoveryQueueKernel = class {
     this.store = store;
   }
   refresh(args = {}) {
-    const now2 = instant(args.now, "now");
+    const now3 = instant(args.now, "now");
     const limit3 = positiveInteger(args.limit, "limit", 100, 1e3);
-    this.recoverExpired({ now: new Date(now2).toISOString(), limit: limit3 });
-    const candidates = this.candidates(now2).slice(0, limit3);
+    this.recoverExpired({ now: new Date(now3).toISOString(), limit: limit3 });
+    const candidates = this.candidates(now3).slice(0, limit3);
     const active = new Set(candidates.map((item) => item.id));
     const items2 = candidates.map((candidate) => {
       const existing = this.store.find("recovery_item", candidate.id);
@@ -13183,14 +13183,14 @@ var RecoveryQueueKernel = class {
       if (!active.has(String(existing.id))) this.store.save("recovery_item", String(existing.id), {
         ...payload7(existing),
         status: "superseded",
-        superseded_at: new Date(now2).toISOString()
+        superseded_at: new Date(now3).toISOString()
       });
     }
-    return { items: items2, count: items2.length, refreshed_at: new Date(now2).toISOString() };
+    return { items: items2, count: items2.length, refreshed_at: new Date(now3).toISOString() };
   }
   claim(args) {
-    const now2 = instant(args.now, "now");
-    this.recoverExpired({ now: new Date(now2).toISOString(), limit: 1e3 });
+    const now3 = instant(args.now, "now");
+    this.recoverExpired({ now: new Date(now3).toISOString(), limit: 1e3 });
     const actions = stringArray(args.actions, "actions");
     const workerId = text21(args.worker_id, "worker_id");
     const leaseSeconds = positiveInteger(args.lease_seconds, "lease_seconds", 300, 3600);
@@ -13203,8 +13203,8 @@ var RecoveryQueueKernel = class {
       lease: {
         token,
         worker_id: workerId,
-        leased_at: new Date(now2).toISOString(),
-        expires_at: new Date(now2 + leaseSeconds * 1e3).toISOString()
+        leased_at: new Date(now3).toISOString(),
+        expires_at: new Date(now3 + leaseSeconds * 1e3).toISOString()
       }
     });
     return { item: leased, lease_token: token };
@@ -13213,15 +13213,15 @@ var RecoveryQueueKernel = class {
     const item = this.store.get("recovery_item", text21(args.item_id, "item_id"));
     if (item.status !== "leased") throw new Error("Recovery item is not leased");
     const lease = item.lease;
-    const now2 = instant(args.now, "now");
-    if (text21(args.lease_token, "lease_token") !== lease.token || now2 >= Date.parse(String(lease.expires_at))) {
+    const now3 = instant(args.now, "now");
+    if (text21(args.lease_token, "lease_token") !== lease.token || now3 >= Date.parse(String(lease.expires_at))) {
       throw new Error("Recovery lease is invalid or expired");
     }
     const outcome2 = text21(args.outcome, "outcome");
     if (!(/* @__PURE__ */ new Set(["completed", "failed", "deferred"])).has(outcome2)) throw new Error("Unsupported recovery outcome");
     const evidenceIds = outcome2 === "deferred" && args.evidence_ids === void 0 ? [] : stringArray(args.evidence_ids, "evidence_ids");
     for (const evidenceId of evidenceIds) this.store.get("evidence", evidenceId);
-    const current2 = this.candidates(now2).find((candidate) => candidate.id === item.id);
+    const current2 = this.candidates(now3).find((candidate) => candidate.id === item.id);
     const stale = Boolean(current2 && (current2.subject_version !== item.subject_version || current2.subject_status !== item.subject_status));
     if (outcome2 === "completed" && current2 && !stale) throw new Error("Recovery source is still actionable");
     const status = stale ? "stale" : outcome2;
@@ -13232,32 +13232,32 @@ var RecoveryQueueKernel = class {
       outcome: outcome2,
       evidence_ids: evidenceIds,
       summary: text21(args.summary, "summary"),
-      reported_at: new Date(now2).toISOString()
+      reported_at: new Date(now3).toISOString()
     });
     return { item: updated, stale };
   }
   recoverExpired(args = {}) {
-    const now2 = instant(args.now, "now");
+    const now3 = instant(args.now, "now");
     const limit3 = positiveInteger(args.limit, "limit", 100, 1e3);
     let recovered = 0;
     for (const item of this.store.list("recovery_item", 1e4, (entry2) => entry2.status === "leased").slice(0, limit3)) {
       const lease = item.lease;
-      if (now2 >= Date.parse(String(lease.expires_at))) {
+      if (now3 >= Date.parse(String(lease.expires_at))) {
         this.store.updateIfVersion("recovery_item", String(item.id), Number(item.version), {
           ...payload7(item),
           status: "open",
           lease: null,
-          recovered_at: new Date(now2).toISOString()
+          recovered_at: new Date(now3).toISOString()
         });
         recovered += 1;
       }
     }
     return { recovered };
   }
-  candidates(now2) {
+  candidates(now3) {
     const candidates = [];
     for (const wait of this.store.list("durable_wait", 1e4, (item) => item.status === "waiting")) {
-      if (wait.condition === "time" && Date.parse(String(wait.resume_at)) <= now2) candidates.push(this.candidate(wait, "durable_wait", "resume_due_wait", 90, {}));
+      if (wait.condition === "time" && Date.parse(String(wait.resume_at)) <= now3) candidates.push(this.candidate(wait, "durable_wait", "resume_due_wait", 90, {}));
       else if (wait.condition === "approval") candidates.push(this.candidate(wait, "durable_wait", "request_approval", 70, { approval_scope: wait.approval_scope }));
     }
     for (const effect of this.store.list("external_effect", 1e4)) {
@@ -13391,8 +13391,8 @@ var TriggerKernel = class {
     if (Buffer.byteLength(rawBody) > 1024 * 1024) throw new Error("Webhook body exceeds 1 MiB");
     const timestamp2 = text22(args.timestamp, "timestamp");
     const signedAt = Date.parse(timestamp2);
-    const now2 = instant2(args.now, "now");
-    if (Number.isNaN(signedAt) || Math.abs(now2 - signedAt) > Number(subscription.max_age_seconds) * 1e3) throw new Error("Webhook timestamp is invalid or outside the replay window");
+    const now3 = instant2(args.now, "now");
+    if (Number.isNaN(signedAt) || Math.abs(now3 - signedAt) > Number(subscription.max_age_seconds) * 1e3) throw new Error("Webhook timestamp is invalid or outside the replay window");
     const handle = this.store.get("credential_handle", String(subscription.handle_id));
     const secretRef = String(handle.secret_ref ?? "");
     const variable = secretRef.startsWith("env:") ? secretRef.slice(4) : "";
@@ -13427,7 +13427,7 @@ var TriggerKernel = class {
       return { trigger_event: ignored, dispatch: null, idempotent: false };
     }
     const last = this.store.list("trigger_event", 1e4, (item) => item.subscription_id === subscription.id && (/* @__PURE__ */ new Set(["accepted", "delivered", "awaiting_budget"])).has(String(item.status))).sort((left, right) => String(right.accepted_at).localeCompare(String(left.accepted_at)))[0];
-    if (last && now2 - Date.parse(String(last.accepted_at)) < Number(subscription.throttle_seconds) * 1e3) {
+    if (last && now3 - Date.parse(String(last.accepted_at)) < Number(subscription.throttle_seconds) * 1e3) {
       const throttled = this.store.create("trigger_event", recordId, {
         subscription_id: subscription.id,
         event_id: eventId,
@@ -13454,7 +13454,7 @@ var TriggerKernel = class {
       timestamp: timestamp2,
       body_digest: bodyDigest,
       status: "accepted",
-      accepted_at: new Date(now2).toISOString(),
+      accepted_at: new Date(now3).toISOString(),
       dispatch,
       raw_body_stored: false,
       budget_id: subscription.budget_id,
@@ -13557,7 +13557,7 @@ var SpeculativeKernel = class {
     if (active.length >= Number(policy.max_candidates)) throw new Error("Speculative policy candidate limit reached");
     const reservation = this.store.get("budget_reservation", text23(args.reservation_id, "reservation_id"));
     if (reservation.status !== "reserved" || reservation.budget_id !== policy.budget_id || JSON.stringify(reservation.resources) !== JSON.stringify(policy.estimated_resources)) throw new Error("Speculative reservation does not match policy");
-    const now2 = instant3(args.now, "now");
+    const now3 = instant3(args.now, "now");
     const candidate = this.store.create("speculative_candidate", candidateId, {
       policy_id: policy.id,
       policy_version: policy.version,
@@ -13569,7 +13569,7 @@ var SpeculativeKernel = class {
       status: "queued",
       trust: "untrusted_data",
       execution_authority: false,
-      expires_at: new Date(now2 + Number(policy.ttl_seconds) * 1e3).toISOString(),
+      expires_at: new Date(now3 + Number(policy.ttl_seconds) * 1e3).toISOString(),
       artifact_ids: [],
       evidence_ids: []
     });
@@ -13579,8 +13579,8 @@ var SpeculativeKernel = class {
     const workerId = text23(args.worker_id, "worker_id");
     const allowed = strings7(args.operations, "operations", 1);
     if (allowed.some((item) => !OPERATIONS.has(item))) throw new Error("Worker declares an unsupported speculative operation");
-    const now2 = instant3(args.now, "now");
-    const candidate = this.store.list("speculative_candidate", 1e4, (item) => item.status === "queued" && Date.parse(String(item.expires_at)) > now2 && allowed.includes(String(item.operation)))[0];
+    const now3 = instant3(args.now, "now");
+    const candidate = this.store.list("speculative_candidate", 1e4, (item) => item.status === "queued" && Date.parse(String(item.expires_at)) > now3 && allowed.includes(String(item.operation)))[0];
     if (!candidate) return { candidate: null };
     const lease = `lease_${(0, import_node_crypto26.randomUUID)().replaceAll("-", "")}`;
     const saved = this.store.updateIfVersion("speculative_candidate", String(candidate.id), Number(candidate.version), {
@@ -13588,7 +13588,7 @@ var SpeculativeKernel = class {
       status: "leased",
       lease_id: lease,
       claimed_by: workerId,
-      lease_expires_at: new Date(now2 + integer4(args.lease_ttl_seconds, "lease_ttl_seconds", 300, 30, 3600) * 1e3).toISOString()
+      lease_expires_at: new Date(now3 + integer4(args.lease_ttl_seconds, "lease_ttl_seconds", 300, 30, 3600) * 1e3).toISOString()
     });
     return { candidate: saved, dispatch: {
       candidate_id: saved.id,
@@ -13602,8 +13602,8 @@ var SpeculativeKernel = class {
   submit(args) {
     const candidate = this.store.get("speculative_candidate", text23(args.candidate_id, "candidate_id"));
     if (candidate.status !== "leased" || candidate.lease_id !== args.lease_id || candidate.claimed_by !== args.worker_id) throw new Error("Speculative candidate lease does not match");
-    const now2 = instant3(args.now, "now");
-    if (now2 > Date.parse(String(candidate.lease_expires_at))) throw new Error("Speculative candidate lease expired");
+    const now3 = instant3(args.now, "now");
+    if (now3 > Date.parse(String(candidate.lease_expires_at))) throw new Error("Speculative candidate lease expired");
     const verdict = text23(args.verdict, "verdict");
     if (!(/* @__PURE__ */ new Set(["ready", "failed"])).has(verdict)) throw new Error("Speculative verdict is unsupported");
     const artifactIds = strings7(args.artifact_ids ?? [], "artifact_ids");
@@ -13615,7 +13615,7 @@ var SpeculativeKernel = class {
       summary: text23(args.summary, "summary"),
       artifact_ids: artifactIds,
       evidence_ids: evidenceIds,
-      completed_at: new Date(now2).toISOString(),
+      completed_at: new Date(now3).toISOString(),
       lease_id: null,
       claimed_by: null,
       lease_expires_at: null
@@ -13652,14 +13652,14 @@ var SpeculativeKernel = class {
     return { candidate: saved, preference_signal: signal };
   }
   expire(args) {
-    const now2 = instant3(args.now, "now");
+    const now3 = instant3(args.now, "now");
     const limit3 = integer4(args.limit, "limit", 100, 1, 1e3);
     const expired = [];
-    for (const candidate of this.store.list("speculative_candidate", 1e4, (item) => (/* @__PURE__ */ new Set(["queued", "leased", "ready"])).has(String(item.status)) && Date.parse(String(item.expires_at)) <= now2).slice(0, limit3)) {
+    for (const candidate of this.store.list("speculative_candidate", 1e4, (item) => (/* @__PURE__ */ new Set(["queued", "leased", "ready"])).has(String(item.status)) && Date.parse(String(item.expires_at)) <= now3).slice(0, limit3)) {
       expired.push(this.store.updateIfVersion("speculative_candidate", String(candidate.id), Number(candidate.version), {
         ...payload8(candidate),
         status: "expired",
-        expired_at: new Date(now2).toISOString(),
+        expired_at: new Date(now3).toISOString(),
         lease_id: null,
         claimed_by: null,
         lease_expires_at: null
@@ -13888,7 +13888,7 @@ var HydrationKernel = class {
     if (recovery.some((item) => item.task_id !== task.id || !(/* @__PURE__ */ new Set(["open", "leased"])).has(String(item.status)))) {
       throw new Error("Snapshot recovery items must be active and belong to the task");
     }
-    const now2 = instant4(args.now, "now");
+    const now3 = instant4(args.now, "now");
     const ttl = integer6(args.ttl_seconds, "ttl_seconds", 604800, 60, 2592e3);
     const state2 = {
       task: reference(task),
@@ -13919,8 +13919,8 @@ var HydrationKernel = class {
       state: state2,
       state_fingerprint: stateFingerprint,
       status: "frozen",
-      captured_at: new Date(now2).toISOString(),
-      expires_at: new Date(now2 + ttl * 1e3).toISOString(),
+      captured_at: new Date(now3).toISOString(),
+      expires_at: new Date(now3 + ttl * 1e3).toISOString(),
       raw_context_stored: false,
       credentials_stored: false
     });
@@ -13965,8 +13965,8 @@ var HydrationKernel = class {
     const snapshot = this.store.get("dehydration_snapshot", text25(args.snapshot_id, "snapshot_id"));
     const expected = text25(args.state_fingerprint, "state_fingerprint");
     if (expected !== snapshot.state_fingerprint) throw new Error("Hydration state fingerprint mismatch");
-    const now2 = instant4(args.now, "now");
-    if (now2 > Date.parse(String(snapshot.expires_at))) throw new Error("Dehydration snapshot expired");
+    const now3 = instant4(args.now, "now");
+    if (now3 > Date.parse(String(snapshot.expires_at))) throw new Error("Dehydration snapshot expired");
     const hostId = text25(args.host_id, "host_id");
     if (snapshot.status === "hydrating") {
       if (snapshot.claimed_by === hostId && snapshot.claim_key === args.claim_key) return { snapshot, inspection: this.inspect(args), idempotent: true };
@@ -13983,7 +13983,7 @@ var HydrationKernel = class {
       lease_id: leaseId,
       claimed_by: hostId,
       claim_key: claimKey,
-      lease_expires_at: new Date(now2 + integer6(args.lease_ttl_seconds, "lease_ttl_seconds", 300, 30, 3600) * 1e3).toISOString(),
+      lease_expires_at: new Date(now3 + integer6(args.lease_ttl_seconds, "lease_ttl_seconds", 300, 30, 3600) * 1e3).toISOString(),
       hydration_mode: inspection.readiness === "ready" ? "resume" : "replan"
     });
     return { snapshot: saved, inspection, dispatch: {
@@ -13998,8 +13998,8 @@ var HydrationKernel = class {
   report(args) {
     const snapshot = this.store.get("dehydration_snapshot", text25(args.snapshot_id, "snapshot_id"));
     if (snapshot.status !== "hydrating" || snapshot.lease_id !== args.lease_id || snapshot.claimed_by !== args.host_id) throw new Error("Hydration lease does not match");
-    const now2 = instant4(args.now, "now");
-    if (now2 > Date.parse(String(snapshot.lease_expires_at))) throw new Error("Hydration lease expired");
+    const now3 = instant4(args.now, "now");
+    if (now3 > Date.parse(String(snapshot.lease_expires_at))) throw new Error("Hydration lease expired");
     const outcome2 = text25(args.outcome, "outcome");
     if (!(/* @__PURE__ */ new Set(["completed", "abandoned"])).has(outcome2)) throw new Error("Hydration outcome is unsupported");
     const evidenceIds = strings8(args.evidence_ids, "evidence_ids");
@@ -14010,7 +14010,7 @@ var HydrationKernel = class {
       status: outcome2 === "completed" ? "hydrated" : "frozen",
       hydration_summary: text25(args.summary, "summary"),
       hydration_evidence_ids: evidenceIds,
-      hydrated_at: outcome2 === "completed" ? new Date(now2).toISOString() : null,
+      hydrated_at: outcome2 === "completed" ? new Date(now3).toISOString() : null,
       lease_id: null,
       claimed_by: null,
       claim_key: null,
@@ -14019,10 +14019,10 @@ var HydrationKernel = class {
     return { snapshot: saved };
   }
   recover(args) {
-    const now2 = instant4(args.now, "now");
+    const now3 = instant4(args.now, "now");
     const limit3 = integer6(args.limit, "limit", 100, 1, 1e3);
     const recovered = [];
-    for (const snapshot of this.store.list("dehydration_snapshot", 1e4, (item) => item.status === "hydrating" && Date.parse(String(item.lease_expires_at)) <= now2).slice(0, limit3)) recovered.push(this.store.updateIfVersion(
+    for (const snapshot of this.store.list("dehydration_snapshot", 1e4, (item) => item.status === "hydrating" && Date.parse(String(item.lease_expires_at)) <= now3).slice(0, limit3)) recovered.push(this.store.updateIfVersion(
       "dehydration_snapshot",
       String(snapshot.id),
       Number(snapshot.version),
@@ -14033,7 +14033,7 @@ var HydrationKernel = class {
         claimed_by: null,
         claim_key: null,
         lease_expires_at: null,
-        last_recovered_at: new Date(now2).toISOString()
+        last_recovered_at: new Date(now3).toISOString()
       }
     ));
     return { recovered, count: recovered.length };
@@ -14115,7 +14115,7 @@ var AutonomyKernel = class {
     const requestDigest = text26(args.request_digest, "request_digest");
     if (!/^sha256:[a-f0-9]{64}$/u.test(requestDigest)) throw new Error("request_digest must be sha256 hex");
     const target = text26(args.target, "target");
-    const now2 = instant5(args.now, "now");
+    const now3 = instant5(args.now, "now");
     const ttl = integer7(args.ttl_seconds, "ttl_seconds", Number(policy.default_ttl_seconds), 60, 86400);
     const identity = { policy_id: policy.id, policy_version: policy.version, task_id: taskId3, action, target, request_digest: requestDigest };
     const requestId = String(args.request_id ?? `authorization_${(0, import_node_crypto29.randomUUID)().replaceAll("-", "")}`);
@@ -14136,30 +14136,30 @@ var AutonomyKernel = class {
       requested_by: text26(args.requested_by, "requested_by"),
       approvals: [],
       notification_required: level === "notify_only",
-      created_at_control: new Date(now2).toISOString(),
-      expires_at: new Date(now2 + ttl * 1e3).toISOString()
+      created_at_control: new Date(now3).toISOString(),
+      expires_at: new Date(now3 + ttl * 1e3).toISOString()
     });
     return { request: request2, idempotent: false };
   }
   decide(args) {
     const request2 = this.store.get("autonomy_request", text26(args.request_id, "request_id"));
     if (request2.status !== "pending_approval") throw new Error("Autonomy request is not awaiting approval");
-    const now2 = instant5(args.now, "now");
-    if (now2 > Date.parse(String(request2.expires_at))) throw new Error("Autonomy request expired");
+    const now3 = instant5(args.now, "now");
+    if (now3 > Date.parse(String(request2.expires_at))) throw new Error("Autonomy request expired");
     const actor = text26(args.actor, "actor");
     const decision = text26(args.decision, "decision");
     if (!(/* @__PURE__ */ new Set(["approve", "deny"])).has(decision)) throw new Error("Autonomy decision is unsupported");
     const approvalRef = text26(args.approval_ref, "approval_ref");
     const approvals = request2.approvals;
     if (approvals.some((item) => item.actor === actor)) throw new Error("Approver has already decided");
-    const next = [...approvals, { actor, decision, approval_ref: approvalRef, decided_at: new Date(now2).toISOString() }];
+    const next = [...approvals, { actor, decision, approval_ref: approvalRef, decided_at: new Date(now3).toISOString() }];
     const approved = next.filter((item) => item.decision === "approve").length;
     const status = decision === "deny" ? "denied" : approved >= Number(request2.quorum) ? "authorized" : "pending_approval";
     return { request: this.store.save("autonomy_request", String(request2.id), { ...payload10(request2), approvals: next, status }) };
   }
   consumptionPlan(args) {
     const request2 = this.store.get("autonomy_request", text26(args.request_id, "request_id"));
-    const now2 = instant5(args.now, "now");
+    const now3 = instant5(args.now, "now");
     const consumptionId = `autonomy_use_${request2.id}`;
     const existing = this.store.find("autonomy_consumption", consumptionId);
     if (existing) {
@@ -14167,7 +14167,7 @@ var AutonomyKernel = class {
       return { request: request2, existing, entries: [] };
     }
     if (request2.status !== "authorized") throw new Error("Autonomy request is not authorized");
-    if (now2 > Date.parse(String(request2.expires_at))) throw new Error("Autonomy authorization expired");
+    if (now3 > Date.parse(String(request2.expires_at))) throw new Error("Autonomy authorization expired");
     for (const field of ["task_id", "action", "target", "request_digest"]) if (args[field] !== request2[field]) throw new Error(`Autonomy ${field} mismatch`);
     const notificationRef = request2.notification_required ? text26(args.notification_ref, "notification_ref") : null;
     const idempotencyKey = text26(args.idempotency_key, "idempotency_key");
@@ -14180,7 +14180,7 @@ var AutonomyKernel = class {
         request_digest: request2.request_digest,
         idempotency_key: idempotencyKey,
         notification_ref: notificationRef,
-        consumed_at: new Date(now2).toISOString()
+        consumed_at: new Date(now3).toISOString()
       } },
       { kind: "autonomy_request", id: String(request2.id), version: Number(request2.version) + 1, payload: { ...payload10(request2), status: "consumed", consumption_id: consumptionId } }
     ] };
@@ -14845,10 +14845,10 @@ var HubSyncKernel = class {
     if (revision2 !== Number(source.cursor_revision) + 1) throw new Error("Hub revision must advance exactly once");
     if (previousDigest !== source.cursor_digest) throw new Error("Hub previous digest does not match the trusted cursor");
     const saved = this.store.transaction((database) => {
-      const now2 = (/* @__PURE__ */ new Date()).toISOString();
+      const now3 = (/* @__PURE__ */ new Date()).toISOString();
       const insert = (kind2, id14, data, version) => {
-        database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)").run(kind2, id14, version, JSON.stringify(data), now2, now2);
-        return { ...data, id: id14, version, created_at: now2, updated_at: now2 };
+        database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)").run(kind2, id14, version, JSON.stringify(data), now3, now3);
+        return { ...data, id: id14, version, created_at: now3, updated_at: now3 };
       };
       for (const item of entries2) {
         const id14 = `${source.id}:${item.entry_id}`;
@@ -15325,14 +15325,14 @@ var AttentionKernel = class {
     this.store = store;
   }
   refresh(args = {}) {
-    const now2 = instant6(args.now, "now");
+    const now3 = instant6(args.now, "now");
     const candidates = this.candidates().slice(0, boundedLimit(args.limit));
     const active = new Set(candidates.map((item) => item.id));
     const cards = candidates.map((candidate) => {
       const current2 = this.store.find("attention_item", candidate.id);
       if (!current2) return this.store.create("attention_item", candidate.id, { ...candidate, status: "open", deferred_until: null });
       const unchanged = current2.source_version === candidate.source_version && current2.source_status === candidate.source_status;
-      const deferred = current2.status === "deferred" && Date.parse(String(current2.deferred_until)) > now2;
+      const deferred = current2.status === "deferred" && Date.parse(String(current2.deferred_until)) > now3;
       if (unchanged && (current2.status === "open" || current2.status === "acknowledged" || deferred)) return current2;
       return this.store.save("attention_item", candidate.id, { ...candidate, status: "open", deferred_until: null });
     });
@@ -15340,29 +15340,29 @@ var AttentionKernel = class {
       if (!active.has(String(current2.id))) this.store.save("attention_item", String(current2.id), {
         ...payload18(current2),
         status: "resolved",
-        resolved_at: new Date(now2).toISOString(),
+        resolved_at: new Date(now3).toISOString(),
         resolution: "source_no_longer_actionable"
       });
     }
-    return { cards, count: cards.length, open_count: cards.filter((item) => item.status === "open").length, refreshed_at: new Date(now2).toISOString() };
+    return { cards, count: cards.length, open_count: cards.filter((item) => item.status === "open").length, refreshed_at: new Date(now3).toISOString() };
   }
   list(args = {}) {
-    const now2 = instant6(args.now, "now");
+    const now3 = instant6(args.now, "now");
     const audience = args.audience === void 0 ? null : text34(args.audience, "audience");
     if (audience !== null && !["human", "agent", "operator"].includes(audience)) throw new Error("audience is unsupported");
-    const items2 = this.store.list("attention_item", 1e4, (item) => (item.status === "open" || item.status === "deferred" && Date.parse(String(item.deferred_until)) <= now2) && (audience === null || item.audience === audience)).sort((left, right) => Number(right.priority) - Number(left.priority) || String(left.id).localeCompare(String(right.id))).slice(0, boundedLimit(args.limit));
-    return { items: items2, count: items2.length, as_of: new Date(now2).toISOString() };
+    const items2 = this.store.list("attention_item", 1e4, (item) => (item.status === "open" || item.status === "deferred" && Date.parse(String(item.deferred_until)) <= now3) && (audience === null || item.audience === audience)).sort((left, right) => Number(right.priority) - Number(left.priority) || String(left.id).localeCompare(String(right.id))).slice(0, boundedLimit(args.limit));
+    return { items: items2, count: items2.length, as_of: new Date(now3).toISOString() };
   }
   decide(args) {
     const item = this.store.get("attention_item", text34(args.item_id, "item_id"));
     if (!["open", "deferred"].includes(String(item.status))) throw new Error("Attention item is not actionable");
     const decision = text34(args.decision, "decision");
     if (!(/* @__PURE__ */ new Set(["acknowledge", "defer"])).has(decision)) throw new Error("Attention decision is unsupported");
-    const now2 = instant6(args.now, "now");
+    const now3 = instant6(args.now, "now");
     let deferredUntil = null;
     if (decision === "defer") {
       const until = instant6(args.deferred_until, "deferred_until");
-      if (until <= now2) throw new Error("deferred_until must be later than now");
+      if (until <= now3) throw new Error("deferred_until must be later than now");
       deferredUntil = new Date(until).toISOString();
     }
     return { item: this.store.updateIfVersion("attention_item", String(item.id), Number(item.version), {
@@ -15371,7 +15371,7 @@ var AttentionKernel = class {
       deferred_until: deferredUntil,
       decided_by: text34(args.decided_by, "decided_by"),
       decision_reason: args.reason === void 0 ? null : text34(args.reason, "reason"),
-      decided_at: new Date(now2).toISOString()
+      decided_at: new Date(now3).toISOString()
     }) };
   }
   candidates() {
@@ -15408,9 +15408,9 @@ function bounded(value) {
   return n;
 }
 function instant7(value) {
-  const now2 = value === void 0 ? (/* @__PURE__ */ new Date()).toISOString() : String(value);
-  if (Number.isNaN(Date.parse(now2))) throw new Error("now must be an ISO timestamp");
-  return now2;
+  const now3 = value === void 0 ? (/* @__PURE__ */ new Date()).toISOString() : String(value);
+  if (Number.isNaN(Date.parse(now3))) throw new Error("now must be an ISO timestamp");
+  return now3;
 }
 function pick(record, fields2) {
   return Object.fromEntries(fields2.filter((field) => record[field] !== void 0).map((field) => [field, record[field]]));
@@ -15427,11 +15427,11 @@ var HomeKernel = class {
     this.attention = attention;
   }
   view(args = {}) {
-    const now2 = instant7(args.now);
+    const now3 = instant7(args.now);
     const limit3 = bounded(args.limit);
     const tasks = this.store.list("task", 1e4);
     const workspaces = this.store.list("workspace", 1e4);
-    const attention = this.attention.list({ now: now2, limit: limit3 }).items;
+    const attention = this.attention.list({ now: now3, limit: limit3 }).items;
     const runs = [
       ...this.store.list("runtime_run", 1e4).map((item) => ({ ...item, run_kind: "runtime" })),
       ...this.store.list("workflow_run", 1e4).map((item) => ({ ...item, run_kind: "workflow" })),
@@ -15448,7 +15448,7 @@ var HomeKernel = class {
     });
     const maintenance = this.store.find("maintenance_status", "local");
     return {
-      generated_at: now2,
+      generated_at: now3,
       summary: {
         active_tasks: tasks.filter((item) => item.status === "active").length,
         workspaces: workspaces.length,
@@ -16112,8 +16112,8 @@ function compactConversation(messages, maxChars = 32e3) {
 }
 function createWorkNote(args) {
   const goal = text38(args.goal, "goal");
-  const list9 = (value, name) => (value ?? []).map((item) => text38(item, name));
-  const note = { goal, decisions: list9(args.decisions, "decisions"), constraints: list9(args.constraints, "constraints"), open_questions: list9(args.open_questions, "open_questions"), artifacts: list9(args.artifacts, "artifacts") };
+  const list10 = (value, name) => (value ?? []).map((item) => text38(item, name));
+  const note = { goal, decisions: list10(args.decisions, "decisions"), constraints: list10(args.constraints, "constraints"), open_questions: list10(args.open_questions, "open_questions"), artifacts: list10(args.artifacts, "artifacts") };
   return { ...note, digest: digest21(note), raw_content: false };
 }
 
@@ -16251,9 +16251,9 @@ var TraceKernel = class {
   replayBundle(args) {
     const result = this.get(args);
     const trace = result.trace;
-    const required2 = ["model_fingerprint", "environment_fingerprint", "capability_fingerprint", "policy_fingerprint"];
-    const replayable = required2.every((key2) => typeof trace[key2] === "string" && String(trace[key2]).length > 0) && result.events.every((event) => event.event_kind === "trace.finalized" || event.data_digest && event.action_contract !== null);
-    return { schema: TRACE_SCHEMA_VERSION, trace_id: trace.id, replayable, raw_content: false, trace, events: result.events, feedback: result.feedback, replay: { required_fingerprints: required2, state_refs: result.events.map((event) => ({ sequence: event.sequence, before: event.workspace_before, after: event.workspace_after })) } };
+    const required3 = ["model_fingerprint", "environment_fingerprint", "capability_fingerprint", "policy_fingerprint"];
+    const replayable = required3.every((key2) => typeof trace[key2] === "string" && String(trace[key2]).length > 0) && result.events.every((event) => event.event_kind === "trace.finalized" || event.data_digest && event.action_contract !== null);
+    return { schema: TRACE_SCHEMA_VERSION, trace_id: trace.id, replayable, raw_content: false, trace, events: result.events, feedback: result.feedback, replay: { required_fingerprints: required3, state_refs: result.events.map((event) => ({ sequence: event.sequence, before: event.workspace_before, after: event.workspace_after })) } };
   }
   compileCase(args) {
     const result = this.get({ trace_id: args.trace_id });
@@ -16759,13 +16759,13 @@ var KnowledgeBoundLaunchKernel = class {
     );
     return this.validate(bundle, args.now);
   }
-  revalidate(binding, now2) {
+  revalidate(binding, now3) {
     const bundleId = text42(binding.bundle_id, "knowledge_binding.bundle_id");
     const bundleVersion = positiveInteger2(binding.bundle_version, "knowledge_binding.bundle_version");
     const current2 = this.store.get("wiki_context_bundle", bundleId);
     if (current2.version !== bundleVersion) throw new Error("Knowledge context bundle changed since Work Launch preparation");
     const exact = this.store.get("wiki_context_bundle", bundleId, bundleVersion);
-    const validated = this.validate(exact, now2);
+    const validated = this.validate(exact, now3);
     if (!sameJson(validated, binding)) throw new Error("Knowledge context binding changed since Work Launch preparation");
     return validated;
   }
@@ -16780,8 +16780,8 @@ ${context}
 </craft-read-only-evidence-knowledge>`;
   }
   validate(bundle, requestedNow) {
-    const now2 = requestedNow === void 0 ? Date.now() : Date.parse(text42(requestedNow, "now"));
-    if (Number.isNaN(now2)) throw new Error("now must be an ISO timestamp");
+    const now3 = requestedNow === void 0 ? Date.now() : Date.parse(text42(requestedNow, "now"));
+    if (Number.isNaN(now3)) throw new Error("now must be an ISO timestamp");
     const scope2 = text42(bundle.scope, "wiki_context_bundle.scope");
     const maxChars = positiveInteger2(bundle.max_chars, "wiki_context_bundle.max_chars");
     const refs2 = array2(bundle.claim_refs, "wiki_context_bundle.claim_refs").map((value, index) => {
@@ -16798,7 +16798,7 @@ ${context}
       if (claim.valid_until !== null && claim.valid_until !== void 0) {
         const validUntil = Date.parse(text42(claim.valid_until, "knowledge_claim.valid_until"));
         if (Number.isNaN(validUntil)) throw new Error("knowledge_claim.valid_until must be an ISO timestamp");
-        if (validUntil <= now2) throw new Error("Knowledge Claim has expired");
+        if (validUntil <= now3) throw new Error("Knowledge Claim has expired");
       }
       const evidenceIds = array2(claim.evidence_ids, "knowledge_claim.evidence_ids").map((id14) => text42(id14, "knowledge_claim.evidence_id"));
       if (!evidenceIds.length) throw new Error("Knowledge Claim requires Evidence");
@@ -17416,13 +17416,13 @@ var PlatformExecutionKernel = class {
   }
   profileSave(args) {
     const profileId = text50(args.profile_id, "profile_id");
-    const platform = text50(args.platform, "platform");
+    const platform2 = text50(args.platform, "platform");
     const isolation = text50(args.isolation, "isolation");
     const network = text50(args.network, "network");
     if (!(/* @__PURE__ */ new Set(["none", "verified"])).has(isolation) || !(/* @__PURE__ */ new Set(["deny", "allow"])).has(network)) throw new Error("Execution profile boundary is unsupported");
     const conformance = args.conformance_id === void 0 ? null : this.store.get("platform_execution_conformance", text50(args.conformance_id, "conformance_id"), args.conformance_version === void 0 ? void 0 : Number(args.conformance_version));
-    if (conformance && (conformance.status !== "verified" || conformance.platform !== platform)) throw new Error("Execution profile conformance is not verified for this platform");
-    const item = { platform, isolation, network, verified_by: isolation === "verified" ? text50(args.verified_by, "verified_by") : null, conformance: conformance ? { id: conformance.id, version: conformance.version } : null, active: args.active !== false };
+    if (conformance && (conformance.status !== "verified" || conformance.platform !== platform2)) throw new Error("Execution profile conformance is not verified for this platform");
+    const item = { platform: platform2, isolation, network, verified_by: isolation === "verified" ? text50(args.verified_by, "verified_by") : null, conformance: conformance ? { id: conformance.id, version: conformance.version } : null, active: args.active !== false };
     const existing = this.store.find("platform_execution_profile", profileId);
     const definitionDigest = digest32(item);
     if (existing) {
@@ -17432,14 +17432,14 @@ var PlatformExecutionKernel = class {
     return { profile: this.store.create("platform_execution_profile", profileId, { ...item, definition_digest: definitionDigest }), idempotent: false };
   }
   conformanceRecord(args) {
-    const platform = text50(args.platform, "platform");
+    const platform2 = text50(args.platform, "platform");
     const verifier = text50(args.verifier, "verifier");
     const checks = args.checks;
     if (!checks || typeof checks !== "object" || Array.isArray(checks)) throw new Error("checks must be an object");
-    const required2 = ["network_denied", "workspace_contained", "credentials_absent", "cancel_cleanup", "resource_limits"];
-    if (required2.some((key2) => checks[key2] !== true)) throw new Error("Platform conformance requires every execution boundary check");
-    const identity = { platform, verifier, checks: required2.map((key2) => key2) };
-    const conformanceId = String(args.conformance_id ?? `platform_execution_conformance_${platform}`);
+    const required3 = ["network_denied", "workspace_contained", "credentials_absent", "cancel_cleanup", "resource_limits"];
+    if (required3.some((key2) => checks[key2] !== true)) throw new Error("Platform conformance requires every execution boundary check");
+    const identity = { platform: platform2, verifier, checks: required3.map((key2) => key2) };
+    const conformanceId = String(args.conformance_id ?? `platform_execution_conformance_${platform2}`);
     const existing = this.store.find("platform_execution_conformance", conformanceId);
     const conformanceDigest = digest32(identity);
     if (existing) {
@@ -17450,13 +17450,13 @@ var PlatformExecutionKernel = class {
   }
   preflight(args) {
     const effect = text50(args.effect, "effect");
-    const platform = text50(args.platform, "platform");
+    const platform2 = text50(args.platform, "platform");
     const requiresBoundary = effect !== "read_only";
-    if (!requiresBoundary) return { allowed: true, mode: "portable_read", profile: null, receipt: { platform, effect, boundary_required: false } };
+    if (!requiresBoundary) return { allowed: true, mode: "portable_read", profile: null, receipt: { platform: platform2, effect, boundary_required: false } };
     const profile = args.profile_id === void 0 ? null : this.store.get("platform_execution_profile", text50(args.profile_id, "profile_id"));
-    if (!profile || profile.active !== true || profile.platform !== platform || profile.isolation !== "verified" || profile.network !== "deny") throw new Error("Write effect requires an active verified network-denied platform boundary");
-    if (profile.conformance) this.conformanceValidate(profile.conformance, platform);
-    const identity = { profile_id: profile.id, profile_version: profile.version, platform, effect };
+    if (!profile || profile.active !== true || profile.platform !== platform2 || profile.isolation !== "verified" || profile.network !== "deny") throw new Error("Write effect requires an active verified network-denied platform boundary");
+    if (profile.conformance) this.conformanceValidate(profile.conformance, platform2);
+    const identity = { profile_id: profile.id, profile_version: profile.version, platform: platform2, effect };
     const preflightId = String(args.preflight_id ?? `platform_preflight_${profile.id}_${effect}`);
     const existing = this.store.find("platform_execution_preflight", preflightId);
     const preflightDigest = digest32(identity);
@@ -17476,10 +17476,10 @@ var PlatformExecutionKernel = class {
     return { preflight, profile, valid: true };
   }
   probe(args) {
-    const platform = args.platform === void 0 ? process.platform : text50(args.platform, "platform");
-    if (platform !== process.platform) throw new Error("Platform probe must target the current local platform");
-    const observed = { platform, node_version: process.version, sandbox_exec_available: (0, import_node_fs13.existsSync)("/usr/bin/sandbox-exec"), verified: false, note: "Probe is health telemetry only and never verifies an execution boundary." };
-    const probeId = String(args.probe_id ?? `platform_execution_probe_${platform}`);
+    const platform2 = args.platform === void 0 ? process.platform : text50(args.platform, "platform");
+    if (platform2 !== process.platform) throw new Error("Platform probe must target the current local platform");
+    const observed = { platform: platform2, node_version: process.version, sandbox_exec_available: (0, import_node_fs13.existsSync)("/usr/bin/sandbox-exec"), verified: false, note: "Probe is health telemetry only and never verifies an execution boundary." };
+    const probeId = String(args.probe_id ?? `platform_execution_probe_${platform2}`);
     const existing = this.store.find("platform_execution_probe", probeId);
     const probeDigest = digest32(observed);
     if (existing) {
@@ -17491,9 +17491,9 @@ var PlatformExecutionKernel = class {
   probeGet(args) {
     return { probe: this.store.get("platform_execution_probe", text50(args.probe_id, "probe_id")) };
   }
-  conformanceValidate(reference3, platform) {
+  conformanceValidate(reference3, platform2) {
     const record = this.store.get("platform_execution_conformance", text50(reference3.id, "conformance.id"), Number(reference3.version));
-    if (record.status !== "verified" || record.platform !== platform) throw new Error("Platform conformance is no longer valid");
+    if (record.status !== "verified" || record.platform !== platform2) throw new Error("Platform conformance is no longer valid");
   }
 };
 
@@ -18620,9 +18620,9 @@ var CapabilityConnectorKernel = class {
     if (source.status !== "approved" || Number(source.version) !== Number(ticket.connector_asset_version)) throw new Error("Connector asset changed after ticket issue");
     const call = this.store.get("capability_call", String(ticket.call_id));
     if (call.status !== "issued" || call.profile_id !== profileId) throw new Error("Underlying capability call is unavailable");
-    const now2 = (/* @__PURE__ */ new Date()).toISOString();
-    const receipt = this.store.save("capability_call", String(call.id), { ...recordPayload6(call), status: "consumed", consumed_at: now2 });
-    const consumed = this.store.save("capability_connector_ticket", String(ticket.id), { ...recordPayload6(ticket), status: "consumed", consumed_at: now2 });
+    const now3 = (/* @__PURE__ */ new Date()).toISOString();
+    const receipt = this.store.save("capability_call", String(call.id), { ...recordPayload6(call), status: "consumed", consumed_at: now3 });
+    const consumed = this.store.save("capability_connector_ticket", String(ticket.id), { ...recordPayload6(ticket), status: "consumed", consumed_at: now3 });
     return { receipt, ticket: consumed };
   }
   connector(connectorId) {
@@ -18809,13 +18809,13 @@ var CapabilityAccessKernel = class {
       const logical = this.store.get("logical_capability", String(selected.logical_capability_id));
       const capability = this.store.get("capability", String(logical.selected_capability_id));
       const content = await (0, import_promises14.readFile)(text60(capability.path, "capability.path"), "utf8");
-      const digest91 = (0, import_node_crypto63.createHash)("sha256").update(content).digest("hex");
-      if (digest91 !== selected.content_digest) throw new Error("Capability file digest drifted; rescan the source before loading it");
+      const digest92 = (0, import_node_crypto63.createHash)("sha256").update(content).digest("hex");
+      if (digest92 !== selected.content_digest) throw new Error("Capability file digest drifted; rescan the source before loading it");
       assertNoSecret2(content, "capability content");
       if (content.length > maxChars) throw new Error("Capability content exceeds the requested context limit");
       return {
         logical_capability_id: logical.id,
-        content_digest: digest91,
+        content_digest: digest92,
         selected_capability_id: capability.id,
         selected_source_id: logical.selected_source_id,
         path: capability.path,
@@ -18907,8 +18907,8 @@ var CapabilityAccessKernel = class {
     if (validIsoTime(call.expires_at, "expires_at") < Date.now()) throw new Error("Capability call has expired");
     return { receipt: this.store.save("capability_call", String(call.id), { ...recordPayload7(call), status: "consumed", consumed_at: (/* @__PURE__ */ new Date()).toISOString() }) };
   }
-  saveVersioned(kind2, prefix, args, required2) {
-    for (const key2 of required2) text60(args[key2], key2);
+  saveVersioned(kind2, prefix, args, required3) {
+    for (const key2 of required3) text60(args[key2], key2);
     const recordId = String(args[`${prefix}_id`] ?? id12(prefix));
     const payload63 = { ...args };
     delete payload63[`${prefix}_id`];
@@ -19931,16 +19931,16 @@ var EvaluationOperationsKernel = class {
   }
   due(args) {
     const program = this.store.get("evaluation_program", text73(args.program_id, "program_id"));
-    const now2 = instant8(args.now, "now");
+    const now3 = instant8(args.now, "now");
     if (program.lifecycle !== "active") return { program, due: false, reason: "program_paused" };
     const last = program.last_planned_at === null ? null : Date.parse(String(program.last_planned_at));
-    const dueAt = last === null ? now2 : last + Number(program.cadence_hours) * 36e5;
-    return { program, due: dueAt <= now2, due_at: new Date(dueAt).toISOString(), reason: dueAt <= now2 ? "scheduled" : "cadence_not_elapsed" };
+    const dueAt = last === null ? now3 : last + Number(program.cadence_hours) * 36e5;
+    return { program, due: dueAt <= now3, due_at: new Date(dueAt).toISOString(), reason: dueAt <= now3 ? "scheduled" : "cadence_not_elapsed" };
   }
   plan(args) {
     const program = this.store.get("evaluation_program", text73(args.program_id, "program_id"));
-    const now2 = instant8(args.now, "now");
-    const due = this.due({ program_id: program.id, now: new Date(now2).toISOString() });
+    const now3 = instant8(args.now, "now");
+    const due = this.due({ program_id: program.id, now: new Date(now3).toISOString() });
     if (due.due !== true) throw new Error(`Evaluation Program is not due: ${String(due.reason)}`);
     const partition = args.partition === void 0 ? "development" : text73(args.partition, "partition");
     if (!(/* @__PURE__ */ new Set(["development", "held_out"])).has(partition)) throw new Error("Evaluation Program partition is unsupported");
@@ -19955,7 +19955,7 @@ var EvaluationOperationsKernel = class {
     const environmentDigest = digest54(environment);
     const budgetDigest = digest54(budget);
     const campaign = partition === "held_out" ? this.campaigns.create({
-      campaign_id: String(args.campaign_id ?? `evaluation_program_campaign_${program.id}_${partition}_${now2}`),
+      campaign_id: String(args.campaign_id ?? `evaluation_program_campaign_${program.id}_${partition}_${now3}`),
       case_ids: caseIds,
       baseline_harness: baselineHarness,
       candidate_harness: candidateHarness,
@@ -19989,11 +19989,11 @@ var EvaluationOperationsKernel = class {
       run_digest: runDigest,
       planned_by: text73(args.planned_by, "planned_by"),
       independent_approval_ref: args.independent_approval_ref ?? null,
-      planned_at: new Date(now2).toISOString(),
+      planned_at: new Date(now3).toISOString(),
       status: partition === "held_out" ? "planned" : "development_ready",
       raw_business_content_stored: false
     });
-    const saved = this.store.save("evaluation_program", String(program.id), { ...payload38(program), last_planned_at: new Date(now2).toISOString(), last_program_run_id: run.id });
+    const saved = this.store.save("evaluation_program", String(program.id), { ...payload38(program), last_planned_at: new Date(now3).toISOString(), last_program_run_id: run.id });
     return { program: saved, campaign, run, next_action: campaign ? "create_campaign_runner_and_claim_one_host_slot" : "prepare_development_trials_with_explicit_host", idempotent: false };
   }
   report(args) {
@@ -20072,8 +20072,8 @@ var EnterpriseAccessKernel = class {
     const evidenceIds = strings16(args.evidence_ids, "evidence_ids", 1);
     confirmedEvidence(this.store, evidenceIds);
     const claims = strings16(args.observed_claims, "observed_claims", 4);
-    const required2 = ["short_lived_credentials", "token_exchange", "audit_subject", "revocation"];
-    if (required2.some((claim) => !claims.includes(claim))) throw new Error("Enterprise identity provider verification is missing a required boundary claim");
+    const required3 = ["short_lived_credentials", "token_exchange", "audit_subject", "revocation"];
+    if (required3.some((claim) => !claims.includes(claim))) throw new Error("Enterprise identity provider verification is missing a required boundary claim");
     const ttl = integer17(args.max_ttl_seconds, "max_ttl_seconds", 900, 60, 3600);
     return { provider: this.store.save("enterprise_identity_provider", String(provider.id), { ...payload39(provider), lifecycle: "verified", evidence_ids: evidenceIds, observed_claims: claims, max_ttl_seconds: ttl, verified_by: text74(args.verified_by, "verified_by") }), idempotent: false };
   }
@@ -20082,7 +20082,7 @@ var EnterpriseAccessKernel = class {
     const task = this.store.get("task", text74(args.task_id, "task_id"));
     const subjectDigest = text74(args.subject_digest, "subject_digest");
     if (!/^sha256:[a-f0-9]{64}$/u.test(subjectDigest)) throw new Error("subject_digest must be SHA-256; raw subject identifiers are not stored");
-    const now2 = instant9(args.now, "now");
+    const now3 = instant9(args.now, "now");
     const ttl = integer17(args.ttl_seconds, "ttl_seconds", Math.min(900, Number(provider.max_ttl_seconds)), 60, Number(provider.max_ttl_seconds));
     const identity = { provider_id: provider.id, provider_version: provider.version, task_id: task.id, subject_digest: subjectDigest, roles: strings16(args.roles, "roles", 1), organization_ref: provider.organization_ref };
     const principalId = text74(args.principal_id, "principal_id");
@@ -20092,7 +20092,7 @@ var EnterpriseAccessKernel = class {
       if (existing.identity_digest !== identityDigest) throw new Error("Enterprise principal idempotency conflict");
       return { principal: existing, idempotent: true };
     }
-    return { principal: this.store.create("enterprise_principal", principalId, { ...identity, identity_digest: identityDigest, status: "active", bound_at: new Date(now2).toISOString(), expires_at: new Date(now2 + ttl * 1e3).toISOString() }), idempotent: false };
+    return { principal: this.store.create("enterprise_principal", principalId, { ...identity, identity_digest: identityDigest, status: "active", bound_at: new Date(now3).toISOString(), expires_at: new Date(now3 + ttl * 1e3).toISOString() }), idempotent: false };
   }
   adapterBind(args) {
     const provider = this.verifiedProvider(text74(args.provider_id, "provider_id"));
@@ -20127,10 +20127,10 @@ var EnterpriseAccessKernel = class {
     if (binding.lifecycle !== "active") throw new Error("Enterprise Adapter binding is not active");
     const principal = this.store.get("enterprise_principal", text74(args.principal_id, "principal_id"));
     const task = this.store.get("task", text74(args.task_id, "task_id"));
-    const now2 = instant9(args.now, "now");
-    if (principal.status !== "active" || principal.task_id !== task.id || now2 >= Date.parse(String(principal.expires_at))) throw new Error("Enterprise principal is inactive, expired, or belongs to another task");
+    const now3 = instant9(args.now, "now");
+    if (principal.status !== "active" || principal.task_id !== task.id || now3 >= Date.parse(String(principal.expires_at))) throw new Error("Enterprise principal is inactive, expired, or belongs to another task");
     const lease = this.store.get("credential_lease", text74(args.credential_lease_id, "credential_lease_id"));
-    if (lease.status !== "active" || lease.task_id !== task.id || now2 >= Date.parse(String(lease.expires_at))) throw new Error("Enterprise Access requires an active same-task short-lived credential lease");
+    if (lease.status !== "active" || lease.task_id !== task.id || now3 >= Date.parse(String(lease.expires_at))) throw new Error("Enterprise Access requires an active same-task short-lived credential lease");
     const effect = text74(args.effect, "effect");
     if (!binding.allowed_effects.includes(effect)) throw new Error("Enterprise ticket effect is not allowed by its Adapter binding");
     const approvalRef = args.approval_ref === void 0 ? null : text74(args.approval_ref, "approval_ref");
@@ -20165,11 +20165,11 @@ var EnterpriseAccessKernel = class {
   }
   ticketConsume(args) {
     const ticket = this.store.get("enterprise_access_ticket", text74(args.ticket_id, "ticket_id"));
-    const now2 = instant9(args.now, "now");
+    const now3 = instant9(args.now, "now");
     if (ticket.status === "consumed") return { ticket, idempotent: true };
-    if (ticket.status !== "issued" || now2 >= Date.parse(String(ticket.expires_at))) throw new Error("Enterprise Access ticket is expired or no longer active");
+    if (ticket.status !== "issued" || now3 >= Date.parse(String(ticket.expires_at))) throw new Error("Enterprise Access ticket is expired or no longer active");
     if (text74(args.request_digest, "request_digest") !== ticket.request_digest) throw new Error("Enterprise Access ticket request digest mismatch");
-    return { ticket: this.store.save("enterprise_access_ticket", String(ticket.id), { ...payload39(ticket), status: "consumed", consumed_at: new Date(now2).toISOString(), consumer_ref: text74(args.consumer_ref, "consumer_ref") }), idempotent: false };
+    return { ticket: this.store.save("enterprise_access_ticket", String(ticket.id), { ...payload39(ticket), status: "consumed", consumed_at: new Date(now3).toISOString(), consumer_ref: text74(args.consumer_ref, "consumer_ref") }), idempotent: false };
   }
   get(args) {
     return { ticket: this.store.get("enterprise_access_ticket", text74(args.ticket_id, "ticket_id")) };
@@ -20292,12 +20292,12 @@ var A2ADelegationKernel = class {
   }
   dispatch(args) {
     const delegation = this.store.get("a2a_delegation", text75(args.delegation_id, "delegation_id"));
-    const now2 = instant10(args.now, "now");
+    const now3 = instant10(args.now, "now");
     if (delegation.status === "issued" || delegation.status === "completed") return { delegation, envelope: this.envelope(delegation), idempotent: true };
-    if (delegation.status !== "prepared" || now2 >= Date.parse(String(delegation.expires_at))) throw new Error("A2A delegation is expired or not dispatchable");
+    if (delegation.status !== "prepared" || now3 >= Date.parse(String(delegation.expires_at))) throw new Error("A2A delegation is expired or not dispatchable");
     const receipt = this.store.get("evidence", text75(args.transport_evidence_id, "transport_evidence_id"));
     if (receipt.confidence !== "confirmed") throw new Error("A2A transport dispatch requires confirmed Evidence");
-    const issued = this.store.save("a2a_delegation", String(delegation.id), { ...payload40(delegation), status: "issued", transport_receipt_id: receipt.id, issued_at: new Date(now2).toISOString(), dispatched_by: text75(args.dispatched_by, "dispatched_by") });
+    const issued = this.store.save("a2a_delegation", String(delegation.id), { ...payload40(delegation), status: "issued", transport_receipt_id: receipt.id, issued_at: new Date(now3).toISOString(), dispatched_by: text75(args.dispatched_by, "dispatched_by") });
     return { delegation: issued, envelope: this.envelope(issued), idempotent: false };
   }
   report(args) {
@@ -20712,9 +20712,9 @@ var PlatformOperationsKernel = class {
   authorize(args) {
     const member = this.store.get("platform_member", text80(args.member_id, "member_id"));
     const action = text80(args.action, "action");
-    const required2 = text80(args.required_role ?? "member", "required_role");
-    const allowed = member.active === true && (member.roles.includes(required2) || member.roles.includes("admin"));
-    const decision = this.store.create("platform_authorization", String(args.authorization_id ?? `authorization_${(0, import_node_crypto83.randomUUID)().replaceAll("-", "")}`), { member_id: member.id, action, required_role: required2, allowed, reason: allowed ? "role_granted" : "role_missing" });
+    const required3 = text80(args.required_role ?? "member", "required_role");
+    const allowed = member.active === true && (member.roles.includes(required3) || member.roles.includes("admin"));
+    const decision = this.store.create("platform_authorization", String(args.authorization_id ?? `authorization_${(0, import_node_crypto83.randomUUID)().replaceAll("-", "")}`), { member_id: member.id, action, required_role: required3, allowed, reason: allowed ? "role_granted" : "role_missing" });
     return { authorization: decision, allowed };
   }
   observe(args) {
@@ -21051,15 +21051,15 @@ var OsSecurityKernel = class {
     this.store = store;
   }
   plan(args) {
-    const platform = text83(args.platform ?? process.platform, "platform");
-    if (!PLATFORMS.has(platform)) throw new Error("Unsupported platform");
+    const platform2 = text83(args.platform ?? process.platform, "platform");
+    if (!PLATFORMS.has(platform2)) throw new Error("Unsupported platform");
     const workspace = text83(args.workspace, "workspace");
     const network = text83(args.network ?? "denied", "network");
     if (!NETWORK2.has(network)) throw new Error("Unsupported network policy");
     const filesystem = text83(args.filesystem ?? "read_only", "filesystem");
     if (!FILESYSTEM2.has(filesystem)) throw new Error("Unsupported filesystem policy");
     const allowlist = list(args.egress_allowlist, "egress_allowlist");
-    const boundary = { platform, workspace, network, filesystem, egress_allowlist: allowlist, process_isolation: platform === "win32" ? "job_object" : platform === "darwin" ? "sandbox_profile" : "landlock_or_namespace", secret_broker: args.secret_broker === true, fail_closed: true };
+    const boundary = { platform: platform2, workspace, network, filesystem, egress_allowlist: allowlist, process_isolation: platform2 === "win32" ? "job_object" : platform2 === "darwin" ? "sandbox_profile" : "landlock_or_namespace", secret_broker: args.secret_broker === true, fail_closed: true };
     const boundaryDigest = digest63(boundary);
     const planId = String(args.plan_id ?? `os_security_${(0, import_node_crypto86.randomUUID)().replaceAll("-", "")}`);
     const existing = this.store.find("os_security_plan", planId);
@@ -21778,10 +21778,10 @@ var LocalRuntimeServiceKernel = class {
     const serviceId = String(args.service_id ?? "craft-local");
     const service = this.store.get("local_runtime_service", serviceId);
     if (service.status !== "running") return { service, processed: [], count: 0, skipped: true };
-    const now2 = args.now === void 0 ? (/* @__PURE__ */ new Date()).toISOString() : text91(args.now, "now");
+    const now3 = args.now === void 0 ? (/* @__PURE__ */ new Date()).toISOString() : text91(args.now, "now");
     const jobs = this.store.list("runtime_wakeup", 500, (item) => item.service_id === serviceId && item.status === "pending");
-    const processed = jobs.map((job) => this.store.save("runtime_wakeup", String(job.id), { ...payload48(job), status: "dispatched", dispatched_at: now2 }));
-    const saved = this.store.save("local_runtime_service", serviceId, { ...payload48(service), last_tick_at: now2, processed_count: Number(service.processed_count ?? 0) + processed.length });
+    const processed = jobs.map((job) => this.store.save("runtime_wakeup", String(job.id), { ...payload48(job), status: "dispatched", dispatched_at: now3 }));
+    const saved = this.store.save("local_runtime_service", serviceId, { ...payload48(service), last_tick_at: now3, processed_count: Number(service.processed_count ?? 0) + processed.length });
     return { service: saved, processed, count: processed.length, skipped: false };
   }
   get(args = {}) {
@@ -22042,9 +22042,9 @@ var SandboxConformanceKernel = class {
   }
   save(args) {
     const id14 = String(args.profile_id ?? `sandbox_conformance_${text92(args.platform, "platform")}`);
-    const platform = text92(args.platform, "platform");
+    const platform2 = text92(args.platform, "platform");
     const checks = object24(args.checks, "checks");
-    const record = { platform, isolation: text92(args.isolation, "isolation"), network: text92(args.network, "network"), checks, verifier: text92(args.verifier, "verifier"), status: args.status === void 0 ? "unverified" : text92(args.status, "status"), capabilities: list4(args.capabilities, "capabilities") };
+    const record = { platform: platform2, isolation: text92(args.isolation, "isolation"), network: text92(args.network, "network"), checks, verifier: text92(args.verifier, "verifier"), status: args.status === void 0 ? "unverified" : text92(args.status, "status"), capabilities: list4(args.capabilities, "capabilities") };
     const existing = this.store.find("sandbox_conformance", id14);
     return { profile: existing ? this.store.save("sandbox_conformance", id14, { ...payload49(existing), ...record }) : this.store.create("sandbox_conformance", id14, record), idempotent: false };
   }
@@ -22228,15 +22228,15 @@ var DurableWorkerKernel = class {
   tick(args = {}) {
     const worker = this.store.get("durable_worker", String(args.worker_id ?? "craft-worker"));
     if (worker.status !== "running") return { worker, jobs: [], skipped: true };
-    const now2 = String(args.now ?? (/* @__PURE__ */ new Date()).toISOString());
-    const jobs = this.store.list("worker_job", 100, (item) => item.worker_id === worker.id && item.status === "pending").map((job) => this.store.save("worker_job", String(job.id), { ...payload50(job), status: "leased", lease_id: `lease_${job.id}`, leased_at: now2 }));
-    const saved = this.store.save("durable_worker", String(worker.id), { ...payload50(worker), last_tick_at: now2, processed_count: Number(worker.processed_count ?? 0) + jobs.length });
+    const now3 = String(args.now ?? (/* @__PURE__ */ new Date()).toISOString());
+    const jobs = this.store.list("worker_job", 100, (item) => item.worker_id === worker.id && item.status === "pending").map((job) => this.store.save("worker_job", String(job.id), { ...payload50(job), status: "leased", lease_id: `lease_${job.id}`, leased_at: now3 }));
+    const saved = this.store.save("durable_worker", String(worker.id), { ...payload50(worker), last_tick_at: now3, processed_count: Number(worker.processed_count ?? 0) + jobs.length });
     return { worker: saved, jobs, skipped: false };
   }
   recover(args = {}) {
     const worker = this.store.get("durable_worker", String(args.worker_id ?? "craft-worker"));
-    const now2 = Date.parse(String(args.now ?? (/* @__PURE__ */ new Date()).toISOString()));
-    const recovered = this.store.list("worker_job", 100, (item) => item.worker_id === worker.id && item.status === "leased" && Date.parse(String(item.leased_at)) + Number(worker.lease_ttl_ms) < now2).map((job) => this.store.save("worker_job", String(job.id), { ...payload50(job), status: "pending", lease_id: null, recovered_at: new Date(now2).toISOString() }));
+    const now3 = Date.parse(String(args.now ?? (/* @__PURE__ */ new Date()).toISOString()));
+    const recovered = this.store.list("worker_job", 100, (item) => item.worker_id === worker.id && item.status === "leased" && Date.parse(String(item.leased_at)) + Number(worker.lease_ttl_ms) < now3).map((job) => this.store.save("worker_job", String(job.id), { ...payload50(job), status: "pending", lease_id: null, recovered_at: new Date(now3).toISOString() }));
     return { recovered, count: recovered.length };
   }
   get(args = {}) {
@@ -22316,9 +22316,9 @@ var RuntimeAssuranceKernel = class {
   store;
   platform;
   campaigns;
-  constructor(store, platform, campaigns) {
+  constructor(store, platform2, campaigns) {
     this.store = store;
-    this.platform = platform;
+    this.platform = platform2;
     this.campaigns = campaigns;
   }
   attest(args) {
@@ -22546,15 +22546,15 @@ var FederatedDelegationKernel = class {
   }
   consume(args) {
     const grant = this.store.get("federated_delegation_grant", text95(args.grant_id, "grant_id"));
-    const now2 = instant11(args.now, "now");
+    const now3 = instant11(args.now, "now");
     if (grant.status === "consumed") return { grant, artifact_grants: this.artifactGrants(String(grant.id)), idempotent: true };
-    if (grant.status !== "active" || now2 >= Date.parse(String(grant.expires_at))) throw new Error("Federated Grant is expired or inactive");
+    if (grant.status !== "active" || now3 >= Date.parse(String(grant.expires_at))) throw new Error("Federated Grant is expired or inactive");
     if (text95(args.audience, "audience") !== grant.audience) throw new Error("Federated Grant audience does not match");
     const card = this.store.get("a2a_agent_card", String(grant.card_id), Number(grant.card_version));
     const currentCard = this.store.get("a2a_agent_card", String(grant.card_id));
     if (card.card_digest !== grant.card_digest || currentCard.version !== card.version || currentCard.card_digest !== card.card_digest) throw new Error("Federated Grant Agent Card drifted");
     this.healthy(card);
-    const saved = this.store.save("federated_delegation_grant", String(grant.id), { ...payload51(grant), status: "consumed", consumed_at: new Date(now2).toISOString(), consumer_ref: text95(args.consumer_ref, "consumer_ref") });
+    const saved = this.store.save("federated_delegation_grant", String(grant.id), { ...payload51(grant), status: "consumed", consumed_at: new Date(now3).toISOString(), consumer_ref: text95(args.consumer_ref, "consumer_ref") });
     return { grant: saved, artifact_grants: this.artifactGrants(String(saved.id)), idempotent: false };
   }
   receiptRecord(args) {
@@ -22595,12 +22595,12 @@ var FederatedDelegationKernel = class {
   }
   reconcile(args) {
     const grant = this.store.get("federated_delegation_grant", text95(args.grant_id, "grant_id"));
-    const now2 = instant11(args.now, "now");
+    const now3 = instant11(args.now, "now");
     if (TERMINAL4.has(String(grant.status))) return { grant, incident: null, idempotent: true };
-    if (now2 < Date.parse(String(grant.expires_at))) return { grant, incident: null, idempotent: true };
+    if (now3 < Date.parse(String(grant.expires_at))) return { grant, incident: null, idempotent: true };
     const incidentId = `federated_remote_incident_${grant.id}`;
     const existing = this.store.find("federated_remote_incident", incidentId);
-    const incident = existing ?? this.store.create("federated_remote_incident", incidentId, { grant_id: grant.id, state: "indeterminate", detected_at: new Date(now2).toISOString(), required_next_action: "adapter_poll_or_human_review", raw_remote_content_stored: false });
+    const incident = existing ?? this.store.create("federated_remote_incident", incidentId, { grant_id: grant.id, state: "indeterminate", detected_at: new Date(now3).toISOString(), required_next_action: "adapter_poll_or_human_review", raw_remote_content_stored: false });
     const saved = this.store.save("federated_delegation_grant", String(grant.id), { ...payload51(grant), status: "indeterminate", incident_id: incident.id });
     return { grant: saved, incident, idempotent: false };
   }
@@ -22727,9 +22727,9 @@ function confirmed2(store, ids3) {
 var RuntimeReadinessKernel = class {
   store;
   platform;
-  constructor(store, platform) {
+  constructor(store, platform2) {
     this.store = store;
-    this.platform = platform;
+    this.platform = platform2;
   }
   assess(args) {
     const task = this.store.get("task", text97(args.task_id, "task_id"));
@@ -22738,7 +22738,7 @@ var RuntimeReadinessKernel = class {
     const evidenceIds = strings22(args.evidence_ids, "evidence_ids");
     confirmed2(this.store, evidenceIds);
     const blockers = [];
-    const platform = text97(args.platform, "platform");
+    const platform2 = text97(args.platform, "platform");
     const host = text97(args.host, "host");
     const workspaceRecovery = args.workspace_recovery === true;
     let preflight = null;
@@ -22762,7 +22762,7 @@ var RuntimeReadinessKernel = class {
       }
       if (args.compensation_ref === void 0 && effect === "destructive") blockers.push("compensation_or_human_disposition_missing");
     }
-    const identity = { task_id: task.id, host, platform, effect, environment_digest: text97(args.environment_digest, "environment_digest"), workspace_recovery: workspaceRecovery, preflight_id: preflight?.id ?? null, preflight_version: preflight?.version ?? null, enterprise_binding_id: enterpriseBinding?.id ?? null, enterprise_binding_version: enterpriseBinding?.version ?? null, compensation_ref: args.compensation_ref ?? null, evidence_ids: evidenceIds, blockers: blockers.sort() };
+    const identity = { task_id: task.id, host, platform: platform2, effect, environment_digest: text97(args.environment_digest, "environment_digest"), workspace_recovery: workspaceRecovery, preflight_id: preflight?.id ?? null, preflight_version: preflight?.version ?? null, enterprise_binding_id: enterpriseBinding?.id ?? null, enterprise_binding_version: enterpriseBinding?.version ?? null, compensation_ref: args.compensation_ref ?? null, evidence_ids: evidenceIds, blockers: blockers.sort() };
     const assessmentId = String(args.assessment_id ?? `runtime_readiness_${digest77(identity).slice(-16)}`);
     const existing = this.store.find("runtime_readiness_assessment", assessmentId);
     const assessmentDigest = digest77(identity);
@@ -22854,12 +22854,12 @@ var AssuredPilotKernel = class {
   }
   consumeSealedAccess(args) {
     const access3 = this.store.get("sealed_evaluation_access", text98(args.access_id, "access_id"));
-    const now2 = args.now === void 0 ? (/* @__PURE__ */ new Date()).toISOString() : iso(args.now, "now");
+    const now3 = args.now === void 0 ? (/* @__PURE__ */ new Date()).toISOString() : iso(args.now, "now");
     if (access3.task_run_id !== text98(args.task_run_id, "task_run_id")) throw new Error("Sealed evaluation access Task Run does not match");
     if (access3.status !== "issued") throw new Error("Sealed evaluation access was already consumed");
-    if (Date.parse(String(access3.expires_at)) <= Date.parse(now2)) throw new Error("Sealed evaluation access has expired");
+    if (Date.parse(String(access3.expires_at)) <= Date.parse(now3)) throw new Error("Sealed evaluation access has expired");
     this.assertSealedCaseCurrent(this.sealed(access3.sealed_case_id));
-    return { access: this.store.save("sealed_evaluation_access", String(access3.id), { ...payload53(access3), status: "consumed", consumed_at: now2 }), idempotent: false };
+    return { access: this.store.save("sealed_evaluation_access", String(access3.id), { ...payload53(access3), status: "consumed", consumed_at: now3 }), idempotent: false };
   }
   recordRecovery(args) {
     const run = this.store.get("task_run", text98(args.task_run_id, "task_run_id"));
@@ -23280,8 +23280,8 @@ function object27(value, name) {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${name} must be an object`);
   return value;
 }
-function strings24(value, name, required2 = false) {
-  if (value === void 0 && !required2) return [];
+function strings24(value, name, required3 = false) {
+  if (value === void 0 && !required3) return [];
   if (!Array.isArray(value)) throw new Error(`${name} must be an array`);
   const result = value.map((item) => text100(item, name));
   if (new Set(result).size !== result.length) throw new Error(`${name} must contain unique values`);
@@ -23475,8 +23475,8 @@ var KnowledgeMemoryRuntime = class {
   resolve(args) {
     const query = noSecret3(text100(args.query, "query"), "query");
     const requestedScope = scope(args);
-    const now2 = new Date(args.now === void 0 ? Date.now() : text100(args.now, "now"));
-    if (Number.isNaN(now2.valueOf())) throw new Error("now must be an ISO timestamp");
+    const now3 = new Date(args.now === void 0 ? Date.now() : text100(args.now, "now"));
+    if (Number.isNaN(now3.valueOf())) throw new Error("now must be an ISO timestamp");
     const maxItems = Number(args.max_items ?? 12);
     const maxChars = Number(args.max_chars ?? 12e3);
     if (!Number.isInteger(maxItems) || maxItems < 1 || !Number.isInteger(maxChars) || maxChars < 1) throw new Error("Context budget is invalid");
@@ -23494,7 +23494,7 @@ var KnowledgeMemoryRuntime = class {
     }
     const candidates = this.store.list("memory_ledger", 1e4, (item) => {
       const source = sources.get(String(item.source_id));
-      return item.status === "active" && source?.status === "active" && source.trust !== "untrusted" && canonical10(item.scope) === canonical10(requestedScope) && (item.valid_until === null || Date.parse(String(item.valid_until)) >= now2.valueOf()) && (allowRestricted || item.sensitivity !== "restricted") && (selectedSourceIds === null || selectedSourceIds.has(String(item.source_id)));
+      return item.status === "active" && source?.status === "active" && source.trust !== "untrusted" && canonical10(item.scope) === canonical10(requestedScope) && (item.valid_until === null || Date.parse(String(item.valid_until)) >= now3.valueOf()) && (allowRestricted || item.sensitivity !== "restricted") && (selectedSourceIds === null || selectedSourceIds.has(String(item.source_id)));
     }).map((item) => ({ memory: item, required: requestedIds.includes(String(item.id)), score: queryTerms.reduce((sum, term) => sum + Number(String(item.content).toLowerCase().includes(term)), 0) })).filter((item) => item.required || item.score > 0).sort((left, right) => Number(right.required) - Number(left.required) || right.score - left.score || String(left.memory.id).localeCompare(String(right.memory.id)));
     for (const memoryId of requestedIds) if (!candidates.some((item) => item.memory.id === memoryId)) throw new Error("Required Memory is unavailable in this Context");
     const items2 = [];
@@ -23760,11 +23760,11 @@ var ContinualHarnessKernel = class {
   resolve(args) {
     const view = this.store.get("continual_harness_view", text102(args.view_id, "view_id"));
     const sessionId = text102(args.session_id, "session_id");
-    const now2 = args.now === void 0 ? /* @__PURE__ */ new Date() : new Date(text102(args.now, "now"));
-    if (Number.isNaN(now2.valueOf())) throw new Error("now must be an ISO timestamp");
+    const now3 = args.now === void 0 ? /* @__PURE__ */ new Date() : new Date(text102(args.now, "now"));
+    if (Number.isNaN(now3.valueOf())) throw new Error("now must be an ISO timestamp");
     const all = this.store.list("harness_refinement", 1e4, (item) => item.view_id === view.id && (/* @__PURE__ */ new Set(["bounded_active", "active"])).has(String(item.lifecycle)));
-    const selected = all.filter((item) => item.lifecycle === "active" || item.session_id === sessionId && Date.parse(String(item.expires_at)) > now2.valueOf()).sort((a, b) => String(a.id).localeCompare(String(b.id)));
-    const expired = all.filter((item) => item.lifecycle === "bounded_active" && item.session_id === sessionId && Date.parse(String(item.expires_at)) <= now2.valueOf()).map((item) => ({ id: item.id, version: item.version }));
+    const selected = all.filter((item) => item.lifecycle === "active" || item.session_id === sessionId && Date.parse(String(item.expires_at)) > now3.valueOf()).sort((a, b) => String(a.id).localeCompare(String(b.id)));
+    const expired = all.filter((item) => item.lifecycle === "bounded_active" && item.session_id === sessionId && Date.parse(String(item.expires_at)) <= now3.valueOf()).map((item) => ({ id: item.id, version: item.version }));
     const refs2 = selected.map((item) => ({ id: item.id, version: item.version, after_snapshot: item.after_snapshot }));
     const identity = { view_id: view.id, view_version: view.version, session_id: sessionId, base_bindings: view.bindings, refinement_refs: refs2, effective_snapshot: digest82({ base: view.bindings, refinements: refs2 }), content_free: true, execution_authority: false };
     const receiptId = String(args.receipt_id ?? `harness_resolution_receipt_${digest82(identity).slice(-16)}`);
@@ -23806,11 +23806,11 @@ function text103(value, name) {
   if (SECRET5.test(result)) throw new Error(`${name} must not contain credentials or secrets`);
   return result;
 }
-function strings27(value, name, required2 = false) {
-  if (value === void 0 && !required2) return [];
+function strings27(value, name, required3 = false) {
+  if (value === void 0 && !required3) return [];
   if (!Array.isArray(value)) throw new Error(`${name} must be an array`);
   const result = value.map((item) => text103(item, name));
-  if (required2 && !result.length) throw new Error(`${name} must contain at least one value`);
+  if (required3 && !result.length) throw new Error(`${name} must contain at least one value`);
   if (new Set(result).size !== result.length) throw new Error(`${name} must contain unique values`);
   return result.sort();
 }
@@ -25052,8 +25052,307 @@ var ServiceFoundation = class {
   }
 };
 
+// src/v01226-runtime.ts
+var import_node_crypto114 = require("node:crypto");
+var import_promises16 = require("node:fs/promises");
+var import_node_child_process6 = require("node:child_process");
+var import_node_process = require("node:process");
+var import_yaml2 = __toESM(require_dist(), 1);
+var ADAPTER_KINDS = /* @__PURE__ */ new Set(["command", "mcp", "openapi", "browser", "host", "model"]);
+var EFFECTS14 = /* @__PURE__ */ new Set(["read", "read_only", "local_write", "external_write", "destructive"]);
+var ACTIVE_PLATFORMS = /* @__PURE__ */ new Set(["win32", "darwin", "linux", "freebsd", "any"]);
+var now2 = () => (/* @__PURE__ */ new Date()).toISOString();
+var digest91 = (value) => `sha256:${(0, import_node_crypto114.createHash)("sha256").update(JSON.stringify(value)).digest("hex")}`;
+function required2(value, name) {
+  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
+  return value.trim();
+}
+function list9(value, name, minimum = 0) {
+  if (!Array.isArray(value)) throw new Error(`${name} must be an array`);
+  const result = value.map((item) => required2(item, name));
+  if (result.length < minimum || new Set(result).size !== result.length) throw new Error(`${name} must contain unique values`);
+  return result;
+}
+function integer23(value, name, fallback, min, max) {
+  const result = value === void 0 ? fallback : Number(value);
+  if (!Number.isInteger(result) || result < min || result > max) throw new Error(`${name} must be an integer between ${min} and ${max}`);
+  return result;
+}
+function obj(value, name) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${name} must be an object`);
+  return value;
+}
+function defineAdapterManifest(input) {
+  const kind2 = input.kind;
+  if (!ADAPTER_KINDS.has(kind2)) throw new Error("kind is unsupported");
+  const platforms = input.platforms === void 0 ? ["any"] : list9(input.platforms, "platforms", 1);
+  if (platforms.some((item) => !ACTIVE_PLATFORMS.has(item))) throw new Error("platform is unsupported");
+  const effects = input.effects === void 0 ? ["read_only"] : list9(input.effects, "effects", 1);
+  if (effects.some((item) => !EFFECTS14.has(item))) throw new Error("effect is unsupported");
+  return {
+    schema_version: 1,
+    adapter_id: required2(input.adapter_id, "adapter_id"),
+    version: required2(input.version, "version"),
+    kind: kind2,
+    platforms,
+    entry: input.entry === void 0 ? "builtin" : required2(input.entry, "entry"),
+    transport: input.transport === void 0 ? "local" : required2(input.transport, "transport"),
+    capabilities: input.capabilities === void 0 ? [] : list9(input.capabilities, "capabilities"),
+    permissions: input.permissions === void 0 ? [] : list9(input.permissions, "permissions"),
+    effects,
+    ...input.dependencies === void 0 ? {} : { dependencies: obj(input.dependencies, "dependencies") },
+    ...input.integrity === void 0 ? {} : { integrity: required2(input.integrity, "integrity") },
+    ...input.signature === void 0 ? {} : { signature: required2(input.signature, "signature") },
+    ...input.sandbox_profile === void 0 ? {} : { sandbox_profile: required2(input.sandbox_profile, "sandbox_profile") },
+    status: input.status ?? "active",
+    ...input.metadata === void 0 ? {} : { metadata: obj(input.metadata, "metadata") }
+  };
+}
+var V01226Runtime = class {
+  activeProcesses = /* @__PURE__ */ new Map();
+  store;
+  spawnProcess;
+  constructor(store, spawnProcess = import_node_child_process6.spawn) {
+    this.store = store;
+    this.spawnProcess = spawnProcess;
+  }
+  adapterRegister(input) {
+    const manifest = defineAdapterManifest(input);
+    const existing = this.store.find("adapter_manifest", manifest.adapter_id);
+    if (existing && existing.manifest_digest !== digest91(manifest)) {
+      const version = Number(existing.version ?? 0) + 1;
+      const saved = this.store.save("adapter_manifest", manifest.adapter_id, { ...manifest, version: manifest.version, previous_version: version, manifest_digest: digest91(manifest) });
+      return { manifest: saved, idempotent: false };
+    }
+    if (existing) return { manifest: existing, idempotent: true };
+    return { manifest: this.store.create("adapter_manifest", manifest.adapter_id, { ...manifest, manifest_digest: digest91(manifest) }), idempotent: false };
+  }
+  adapterGet(adapterId) {
+    return this.store.get("adapter_manifest", required2(adapterId, "adapter_id"));
+  }
+  adapterList(limit3 = 50) {
+    return { adapters: this.store.list("adapter_manifest", integer23(limit3, "limit", 50, 1, 500)) };
+  }
+  adapterHealth(adapterId) {
+    const manifest = this.adapterGet(adapterId);
+    const supported = manifest.platforms.includes("any") || manifest.platforms.includes(import_node_process.platform);
+    const result = { adapter_id: adapterId, status: manifest.status === "active" && supported ? "healthy" : "unavailable", platform: import_node_process.platform, checked_at: now2() };
+    this.store.save("adapter_health", adapterId, result);
+    return result;
+  }
+  adapterConformance(adapterId) {
+    const manifest = this.adapterGet(adapterId);
+    const checks = [Boolean(manifest.schema_version === 1), Boolean(manifest.capabilities.length || manifest.kind === "command"), Boolean(manifest.effects.length), Boolean(manifest.manifest_digest)];
+    const result = { adapter_id: adapterId, passed: checks.every(Boolean), checks, checked_at: now2() };
+    this.store.save("adapter_conformance", adapterId, result);
+    return result;
+  }
+  adapterQuarantine(adapterId, reason) {
+    const current2 = this.adapterGet(adapterId);
+    return { manifest: this.store.save("adapter_manifest", adapterId, { ...current2, status: "quarantined", quarantine_reason: required2(reason, "reason") }) };
+  }
+  adapterRollback(adapterId) {
+    const current2 = this.adapterGet(adapterId);
+    if (current2.status !== "quarantined") throw new Error("adapter must be quarantined before rollback");
+    return { manifest: this.store.save("adapter_manifest", adapterId, { ...current2, status: "active", rollback_at: now2() }) };
+  }
+  async adapterInstall(manifestPath, expectedIntegrity) {
+    const raw = await (0, import_promises16.readFile)(required2(manifestPath, "manifest_path"), "utf8");
+    const parsed = JSON.parse(raw);
+    const manifest = defineAdapterManifest(parsed);
+    const actual = digest91(manifest);
+    if (expectedIntegrity && expectedIntegrity !== actual) throw new Error("adapter integrity mismatch");
+    if (manifest.integrity && manifest.integrity !== actual) throw new Error("adapter integrity mismatch");
+    if (!manifest.signature && !expectedIntegrity) throw new Error("adapter install requires a signature or expected integrity");
+    if (manifest.dependencies && manifest.dependencies.install) throw new Error("runtime dependency installation is not allowed");
+    return this.adapterRegister({ ...manifest, integrity: manifest.integrity ?? actual });
+  }
+  commandPlan(input) {
+    const request2 = this.validateCommand(input);
+    const id14 = `command_${(0, import_node_crypto114.randomUUID)().replaceAll("-", "")}`;
+    const plan = this.store.create("command_plan", id14, { request: request2, request_digest: digest91(request2), status: "planned", created_at: now2() });
+    return { plan, receipt_contract: "craft.command.receipt" };
+  }
+  async commandRun(input) {
+    const request2 = this.validateCommand(input);
+    const runId = input.run_id ?? `command_run_${(0, import_node_crypto114.randomUUID)().replaceAll("-", "")}`;
+    const run = this.store.create("command_run", runId, { request: request2, request_digest: digest91(request2), status: "running", started_at: now2() });
+    const command2 = request2.argv[0];
+    const args = request2.argv.slice(1);
+    const child = this.spawnProcess(command2, args, { cwd: request2.cwd, env: { ...process.env, ...request2.env }, shell: request2.shell === false ? false : request2.shell ?? false, windowsHide: true });
+    this.activeProcesses.set(runId, child);
+    const limit3 = request2.output_limit ?? 64 * 1024;
+    let stdout = "";
+    let stderr = "";
+    child.stdout?.on("data", (chunk) => {
+      stdout = `${stdout}${chunk.toString()}`.slice(0, limit3);
+    });
+    child.stderr?.on("data", (chunk) => {
+      stderr = `${stderr}${chunk.toString()}`.slice(0, limit3);
+    });
+    const outcome2 = await new Promise((resolve21) => {
+      let settled = false;
+      const finish = (status, code, signal) => {
+        if (settled) return;
+        settled = true;
+        const receipt = { run_id: runId, status, exit_code: code, ...signal ? { signal } : {}, stdout, stderr, stdout_digest: digest91(stdout), stderr_digest: digest91(stderr), adapter_id: request2.adapter_id ?? "local.command", completed_at: now2() };
+        this.activeProcesses.delete(runId);
+        this.store.save("command_run", runId, { ...run, ...receipt });
+        this.store.appendEvent(`command:${runId}`, "command.completed", receipt);
+        resolve21({ run: this.store.get("command_run", runId), receipt });
+      };
+      child.on("error", (error) => finish("failed", null, String(error.message).slice(0, 200)));
+      child.on("close", (code, signal) => finish(signal === "SIGTERM" ? "cancelled" : code === 0 ? "completed" : "failed", code, signal ?? void 0));
+      const timeout = request2.timeout_ms ?? 12e4;
+      const timer = setTimeout(() => {
+        child.kill();
+      }, timeout);
+      child.once("close", () => clearTimeout(timer));
+    });
+    return outcome2;
+  }
+  commandObserve(runId) {
+    return this.store.get("command_run", required2(runId, "run_id"));
+  }
+  commandCancel(runId) {
+    const id14 = required2(runId, "run_id");
+    const process2 = this.activeProcesses.get(id14);
+    if (!process2) {
+      const saved = this.store.find("command_run", id14);
+      if (!saved) throw new Error(`Unknown command_run: ${id14}`);
+      if (saved.status === "running") return { run: this.store.save("command_run", id14, { ...saved, cancel_requested: true, cancel_requested_at: now2() }), requested: false, cross_process: true };
+      return { run: saved, idempotent: true };
+    }
+    process2.kill();
+    return { run: this.store.get("command_run", id14), requested: true };
+  }
+  async commandRetry(runId) {
+    const run = this.commandObserve(runId);
+    return this.commandRun({ ...run.request, run_id: `retry_${(0, import_node_crypto114.randomUUID)().replaceAll("-", "")}` });
+  }
+  validateCommand(input) {
+    const argv = list9(input.argv, "argv", 1);
+    const effect = input.effect ?? "read_only";
+    if (!EFFECTS14.has(effect)) throw new Error("effect is unsupported");
+    if (input.shell !== void 0 && input.shell !== false && typeof input.shell !== "string") throw new Error("shell must be false or a shell path");
+    if (input.shell && effect === "destructive" && !input.approval_ref) throw new Error("destructive shell command requires approval_ref");
+    return { ...input, argv, effect, timeout_ms: integer23(input.timeout_ms, "timeout_ms", 12e4, 100, 36e5), output_limit: integer23(input.output_limit, "output_limit", 65536, 256, 1e7), ...input.cwd === void 0 ? {} : { cwd: required2(input.cwd, "cwd") } };
+  }
+  contextManifestSave(input) {
+    const id14 = required2(input.manifest_id ?? `context_${(0, import_node_crypto114.randomUUID)().replaceAll("-", "")}`, "manifest_id");
+    const manifest = { ...input, manifest_id: id14, knowledge_refs: list9(input.knowledge_refs ?? [], "knowledge_refs"), capability_refs: list9(input.capability_refs ?? [], "capability_refs"), workflow_refs: list9(input.workflow_refs ?? [], "workflow_refs"), excluded_refs: list9(input.excluded_refs ?? [], "excluded_refs"), manifest_digest: digest91(input), created_at: now2() };
+    const existing = this.store.find("context_manifest", id14);
+    if (existing) return { manifest: existing, idempotent: true };
+    return { manifest: this.store.create("context_manifest", id14, manifest), idempotent: false };
+  }
+  capabilityProject(input) {
+    const requiredCapabilities = input.required ?? [];
+    const budget = input.token_budget ?? 1e3;
+    let spent = 0;
+    const selected = [];
+    const excluded = [];
+    for (const candidate of input.candidates) {
+      const cost = Number(candidate.token_cost ?? 100);
+      const capability = String(candidate.capability ?? candidate.id ?? "");
+      if (requiredCapabilities.length && !requiredCapabilities.includes(capability)) {
+        excluded.push({ ...candidate, reason: "not_required" });
+        continue;
+      }
+      if (spent + cost > budget) {
+        excluded.push({ ...candidate, reason: "token_budget" });
+        continue;
+      }
+      selected.push(candidate);
+      spent += cost;
+    }
+    return { selected, excluded, spent_tokens: spent, rationale: "required capabilities first, then token budget" };
+  }
+  durableStart(input) {
+    const id14 = required2(input.run_id ?? `durable_${(0, import_node_crypto114.randomUUID)().replaceAll("-", "")}`, "run_id");
+    const existing = this.store.find("durable_run", id14);
+    if (existing) return { run: existing, idempotent: true };
+    return { run: this.store.create("durable_run", id14, { ...input, run_id: id14, status: "queued", attempts: 0, lease_until: null, created_at: now2() }), idempotent: false };
+  }
+  durableTick(owner = "local", leaseSeconds = 30) {
+    const queued = this.store.list("durable_run", 1, (record) => ["queued", "running"].includes(String(record.status)) && (!record.lease_until || String(record.lease_until) < now2()));
+    const run = queued[0];
+    if (!run) return { claimed: false };
+    const claimed = this.store.save("durable_run", String(run.id), { ...run, status: "running", owner, attempts: Number(run.attempts ?? 0) + 1, lease_until: new Date(Date.now() + leaseSeconds * 1e3).toISOString(), heartbeat_at: now2() });
+    return { claimed: true, run: claimed };
+  }
+  durableComplete(runId, status, result) {
+    const run = this.store.get("durable_run", required2(runId, "run_id"));
+    return { run: this.store.save("durable_run", runId, { ...run, status, lease_until: null, result: result ?? null, completed_at: now2() }) };
+  }
+  durableRecover(owner) {
+    const runs = this.store.list("durable_run", 500, (record) => record.status === "running" && (!owner || record.owner === owner));
+    const recovered = runs.map((run) => this.store.save("durable_run", String(run.id), { ...run, status: "queued", lease_until: null, recovered_at: now2() }));
+    return { recovered: recovered.length, runs: recovered };
+  }
+  trustRecord(input) {
+    const passed = integer23(input.passed, "passed", 0, 0, Number.MAX_SAFE_INTEGER);
+    const failed = integer23(input.failed, "failed", 0, 0, Number.MAX_SAFE_INTEGER);
+    if (!passed && !failed) throw new Error("passed or failed is required");
+    const rate = passed / (passed + failed);
+    const autonomy = rate >= 0.99 && passed >= 20 ? "automatic" : rate >= 0.9 ? "assisted" : "manual";
+    const id14 = `trust_${digest91(input).slice(7, 23)}`;
+    return { profile: this.store.save("trust_curve", id14, { scope: required2(input.scope, "scope"), passed, failed, reliability: rate, autonomy, evidence_refs: input.evidence_refs ?? [], updated_at: now2() }) };
+  }
+  modelRoute(input) {
+    const objective = input.objective ?? "quality";
+    if (!input.candidates.length) throw new Error("candidates must not be empty");
+    const ranked = [...input.candidates].sort((a, b) => {
+      const score = (item) => objective === "cost" ? -Number(item.cost ?? Number.MAX_SAFE_INTEGER) : objective === "latency" ? -Number(item.latency_ms ?? Number.MAX_SAFE_INTEGER) : Number(item.quality ?? 0);
+      return score(b) - score(a);
+    });
+    const selected = ranked.find((candidate) => input.budget === void 0 || Number(candidate.cost ?? 0) <= input.budget) ?? ranked[0];
+    return { selected, ranked, rationale: `objective=${objective}` };
+  }
+  deliveryGate(input) {
+    const artifacts = list9(input.artifacts, "artifacts");
+    const evidence2 = list9(input.evidence, "evidence");
+    const missingArtifacts = (input.required_artifacts ?? artifacts).filter((item) => !artifacts.includes(item));
+    const missingEvidence = (input.required_evidence ?? evidence2).filter((item) => !evidence2.includes(item));
+    const passed = !missingArtifacts.length && !missingEvidence.length;
+    return { status: passed ? "passed" : "blocked", passed, missing_artifacts: missingArtifacts, missing_evidence: missingEvidence, gate: "delivery" };
+  }
+  projectBundle(input) {
+    const bundle = { schema_version: 1, bundle_id: `bundle_${(0, import_node_crypto114.randomUUID)().replaceAll("-", "")}`, exported_at: now2(), project: input.project, tasks: input.tasks ?? [], sessions: input.sessions ?? [], trace: input.trace ?? [], artifacts: input.artifacts ?? [] };
+    return { bundle, digest: digest91(bundle) };
+  }
+  handoff(input) {
+    return { manifest_type: "craft.task.handoff", schema_version: 1, handoff_id: `handoff_${(0, import_node_crypto114.randomUUID)().replaceAll("-", "")}`, context_manifest: input.context_manifest, host: input.host, task: input.task, budget: input.budget ?? {}, digest: digest91(input) };
+  }
+  evaluatorDefine(input) {
+    const id14 = required2(input.evaluator_id, "evaluator_id");
+    return { evaluator: this.store.save("domain_evaluator", id14, { evaluator_id: id14, domain: required2(input.domain, "domain"), criteria: list9(input.criteria, "criteria", 1), status: "active" }) };
+  }
+  evaluatorRun(input) {
+    const evaluator = this.store.get("domain_evaluator", required2(input.evaluator_id, "evaluator_id"));
+    const observations = obj(input.observations, "observations");
+    const missing = evaluator.criteria.filter((criterion) => observations[criterion] === void 0);
+    return { evaluator_id: evaluator.id, verdict: missing.length ? "inconclusive" : "passed", missing, observations };
+  }
+};
+async function importOpenApiDocument(runtime, source) {
+  const document2 = typeof source === "string" ? (0, import_yaml2.parse)(source) : source;
+  const paths = obj(document2.paths ?? {}, "paths");
+  const operations2 = [];
+  for (const [path2, raw] of Object.entries(paths)) {
+    const item = obj(raw, `paths.${path2}`);
+    for (const [method, operation] of Object.entries(item)) {
+      if (!["get", "post", "put", "patch", "delete", "head"].includes(method)) continue;
+      const op = obj(operation, `${path2}.${method}`);
+      const effect = ["get", "head"].includes(method) ? "read" : "external_write";
+      operations2.push({ operation_id: String(op.operationId ?? `${method}_${path2.replaceAll(/[^a-zA-Z0-9]+/g, "_")}`), method: method.toUpperCase(), path: path2, effect, summary: op.summary ?? null });
+    }
+  }
+  if (!operations2.length) throw new Error("OpenAPI document contains no operations");
+  return runtime.adapterRegister({ adapter_id: String(document2.info && typeof document2.info === "object" && !Array.isArray(document2.info) && document2.info.title ? `openapi.${String(document2.info.title).toLowerCase().replaceAll(/[^a-z0-9]+/g, "-")}` : `openapi.${digest91(document2).slice(7, 19)}`), version: "1.0.0", kind: "openapi", platforms: ["any"], entry: "openapi", transport: "https", capabilities: operations2.map((operation) => String(operation.operation_id)), effects: [...new Set(operations2.map((operation) => String(operation.effect)))], metadata: { operations: operations2, openapi_version: document2.openapi ?? document2.swagger ?? "unknown" } });
+}
+
 // src/service.ts
-var VERSION = "0.12.25";
+var VERSION = "0.12.26";
 var CONFIDENCE2 = /* @__PURE__ */ new Set(["confirmed", "bounded", "unverified", "rejected"]);
 var TASK_STATUS = /* @__PURE__ */ new Set(["active", "paused", "completed", "cancelled"]);
 var VERSIONED_LIFECYCLE = /* @__PURE__ */ new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -25070,10 +25369,10 @@ var KNOWLEDGE_KINDS = /* @__PURE__ */ new Set(["fact", "rule", "decision", "term
 var KNOWLEDGE_STATUSES = /* @__PURE__ */ new Set(["candidate", "reviewed", "disputed", "superseded", "expired"]);
 var KNOWLEDGE_RELATIONS = /* @__PURE__ */ new Set(["supports", "contradicts", "supersedes", "applies_to", "depends_on"]);
 function id13(prefix) {
-  return `${prefix}_${(0, import_node_crypto114.randomUUID)().replaceAll("-", "")}`;
+  return `${prefix}_${(0, import_node_crypto115.randomUUID)().replaceAll("-", "")}`;
 }
 function valueDigest(value) {
-  return `sha256:${(0, import_node_crypto114.createHash)("sha256").update(JSON.stringify(value)).digest("hex")}`;
+  return `sha256:${(0, import_node_crypto115.createHash)("sha256").update(JSON.stringify(value)).digest("hex")}`;
 }
 function text111(value, name) {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
@@ -25198,7 +25497,7 @@ function canonical14(value) {
   return JSON.stringify(value);
 }
 function fingerprint3(value) {
-  return (0, import_node_crypto114.createHash)("sha256").update(canonical14(value)).digest("hex");
+  return (0, import_node_crypto115.createHash)("sha256").update(canonical14(value)).digest("hex");
 }
 function runtimeAuthorization(runId, operation) {
   const kind2 = String(operation.kind);
@@ -25984,8 +26283,8 @@ var CraftService = class _CraftService extends ServiceFoundation {
   expertSubagentReport(args) {
     const operation = this.store.get("runtime_operation", text111(args.operation_id, "operation_id"));
     const report = object30(args.report, "report");
-    const required2 = ["hypotheses", "counterexamples", "evidence_ids", "confidence", "next_action"];
-    if (required2.some((key2) => report[key2] === void 0) || !Array.isArray(report.hypotheses) || !Array.isArray(report.counterexamples)) throw new Error("Expert report violates output contract");
+    const required3 = ["hypotheses", "counterexamples", "evidence_ids", "confidence", "next_action"];
+    if (required3.some((key2) => report[key2] === void 0) || !Array.isArray(report.hypotheses) || !Array.isArray(report.counterexamples)) throw new Error("Expert report violates output contract");
     if (!Array.isArray(report.evidence_ids) || !report.evidence_ids.length) throw new Error("Evidence is required for an Expert report");
     const evidenceIds = uniqueTextArray3(report.evidence_ids, "report.evidence_ids");
     for (const evidenceId of evidenceIds) this.store.get("evidence", evidenceId);
@@ -25996,7 +26295,7 @@ var CraftService = class _CraftService extends ServiceFoundation {
     const projectId2 = text111(args.project_id, "project_id");
     const enforcement = String(args.enforcement ?? "required");
     if (!(/* @__PURE__ */ new Set(["required", "advisory"])).has(enforcement)) throw new Error(`Unsupported policy enforcement: ${enforcement}`);
-    const policyId = String(args.policy_id ?? `project_policy_${(0, import_node_crypto114.createHash)("sha256").update(projectId2).digest("hex").slice(0, 24)}`);
+    const policyId = String(args.policy_id ?? `project_policy_${(0, import_node_crypto115.createHash)("sha256").update(projectId2).digest("hex").slice(0, 24)}`);
     return this.saveVersioned("project_policy", "policy", {
       ...args,
       policy_id: policyId,
@@ -26445,11 +26744,11 @@ var CraftService = class _CraftService extends ServiceFoundation {
   }
   runtimeLeaseRecover(args) {
     const run = this.store.get("runtime_run", text111(args.run_id, "run_id"));
-    const now2 = args.now === void 0 ? Date.now() : validIsoTime2(args.now, "now");
+    const now3 = args.now === void 0 ? Date.now() : validIsoTime2(args.now, "now");
     const policy = this.runtimePolicy({ policy_id: run.policy_id, policy_version: run.policy_version });
     const recovered = [];
     for (const operation of this.runtimeOperations(String(run.id))) {
-      if (operation.status !== "leased" || validIsoTime2(operation.lease_expires_at, "lease_expires_at") > now2) continue;
+      if (operation.status !== "leased" || validIsoTime2(operation.lease_expires_at, "lease_expires_at") > now3) continue;
       const exhausted = Number(operation.attempts) >= Number(policy.max_attempts);
       this.store.save("runtime_operation", String(operation.id), {
         ...recordPayload8(operation),
@@ -26912,7 +27211,7 @@ var CraftService = class _CraftService extends ServiceFoundation {
     const capabilities = selectedCapabilities ?? this.catalog.search(goal, 6);
     const developmentPlan = workflow === null ? { stages: SAFE_INCREMENTAL_STAGES.map((stage) => ({ ...stage })) } : null;
     const strategyCapabilities = developmentPlan === null ? [] : capabilities.slice(0, 3).map((capability) => String(capability.id));
-    const strategyId = strategyCapabilities.length ? `route_strategy_${(0, import_node_crypto114.createHash)("sha256").update(JSON.stringify({ mode: "safe_incremental_development", capability_ids: strategyCapabilities })).digest("hex").slice(0, 24)}` : null;
+    const strategyId = strategyCapabilities.length ? `route_strategy_${(0, import_node_crypto115.createHash)("sha256").update(JSON.stringify({ mode: "safe_incremental_development", capability_ids: strategyCapabilities })).digest("hex").slice(0, 24)}` : null;
     const strategy = strategyId === null ? null : this.store.find("route_strategy", strategyId) ?? this.store.create(
       "route_strategy",
       strategyId,
@@ -27427,11 +27726,11 @@ ${task.goal}`.toLowerCase();
   }
   durableWaitSweep(args) {
     const nowText = args.now === void 0 ? (/* @__PURE__ */ new Date()).toISOString() : text111(args.now, "now");
-    const now2 = Date.parse(nowText);
-    if (Number.isNaN(now2)) throw new Error("now must be an ISO timestamp");
+    const now3 = Date.parse(nowText);
+    if (Number.isNaN(now3)) throw new Error("now must be an ISO timestamp");
     const limit3 = finiteInteger2(args.limit, "limit", 100, 1, 1e4);
     const policyFingerprints = object30(args.policy_fingerprints ?? {}, "policy_fingerprints");
-    const due = this.store.list("durable_wait", 1e4, (item) => item.status === "waiting" && item.condition === "time" && Date.parse(String(item.resume_after)) <= now2).slice(0, limit3);
+    const due = this.store.list("durable_wait", 1e4, (item) => item.status === "waiting" && item.condition === "time" && Date.parse(String(item.resume_after)) <= now3).slice(0, limit3);
     const deliveries = due.map((wait) => {
       const result = this.durableWaitResume({
         wait_id: wait.id,
@@ -27676,10 +27975,10 @@ ${task.goal}`.toLowerCase();
       });
       if (!executed.response) throw new Error("Egress response is unavailable for sandbox delivery");
       const response = executed.response;
-      const ticketHash = (0, import_node_crypto114.createHash)("sha256").update(String(ticket.id)).digest("hex").slice(0, 24);
-      const bindingHash = (0, import_node_crypto114.createHash)("sha256").update(bindingId).digest("hex").slice(0, 24);
+      const ticketHash = (0, import_node_crypto115.createHash)("sha256").update(String(ticket.id)).digest("hex").slice(0, 24);
+      const bindingHash = (0, import_node_crypto115.createHash)("sha256").update(bindingId).digest("hex").slice(0, 24);
       const inbox = (0, import_node_path25.join)(this.store.paths.runtimeDir, "sandbox-inbox", ticketHash);
-      await (0, import_promises16.mkdir)(inbox, { recursive: true });
+      await (0, import_promises17.mkdir)(inbox, { recursive: true });
       const outputPath = (0, import_node_path25.join)(inbox, `${bindingHash}-${outputName}`);
       const envelope = {
         trust: "untrusted_external_response",
@@ -27692,7 +27991,7 @@ ${task.goal}`.toLowerCase();
         body: response.body,
         output_limited: response.output_limited
       };
-      await (0, import_promises16.writeFile)(outputPath, `${JSON.stringify(envelope, null, 2)}
+      await (0, import_promises17.writeFile)(outputPath, `${JSON.stringify(envelope, null, 2)}
 `, { encoding: "utf8", flag: "wx", mode: 384 });
       const artifact = this.artifactRegister({
         kind: "sandbox_egress_inbox",
@@ -28395,12 +28694,12 @@ ${material}
     if (!criteria.length || new Set(criteria.map((item) => item.id)).size !== criteria.length) throw new Error("Acceptance criteria must be non-empty with unique ids");
     const planId = String(args.plan_id ?? `acceptance_${launch.id}`);
     const existing = this.store.find("acceptance_plan", planId);
-    const digest91 = valueDigest({ task_id: task.id, launch_id: launch.id, criteria });
+    const digest92 = valueDigest({ task_id: task.id, launch_id: launch.id, criteria });
     if (existing) {
-      if (existing.definition_digest !== digest91) throw new Error("Acceptance plan idempotency conflict");
+      if (existing.definition_digest !== digest92) throw new Error("Acceptance plan idempotency conflict");
       return { plan: existing, trial: this.store.get("trial", String(existing.trial_id)), idempotent: true };
     }
-    let plan = this.store.create("acceptance_plan", planId, { task_id: task.id, launch_id: launch.id, name: text111(args.name ?? "Work acceptance", "name"), criteria, definition_digest: digest91, status: "active" });
+    let plan = this.store.create("acceptance_plan", planId, { task_id: task.id, launch_id: launch.id, name: text111(args.name ?? "Work acceptance", "name"), criteria, definition_digest: digest92, status: "active" });
     const trial = this.trialStart({ trial_id: `trial_${plan.id}`, task_id: task.id, subject_type: "acceptance_plan", subject_id: plan.id, subject_version: plan.version, environment: { work_launch_id: launch.id }, budget: {} });
     plan = this.store.save("acceptance_plan", planId, { ...plan, trial_id: trial.id });
     this.trialTraceAppend({ trial_id: trial.id, event_type: "acceptance.planned", source: "craft_runtime", data: { plan_id: plan.id, criterion_count: criteria.length } });
@@ -28427,13 +28726,13 @@ ${material}
     for (const evidenceId of evidenceIds) this.store.get("evidence", evidenceId);
     const checkId = String(args.check_id ?? id13("acceptance_check"));
     const identity = { plan_id: plan.id, plan_version: plan.version, criterion_id: criterionId, evaluator_type: evaluatorType, evaluator_id: text111(args.evaluator_id, "evaluator_id"), result, summary: text111(args.summary, "summary"), evidence_ids: evidenceIds };
-    const digest91 = valueDigest(identity);
+    const digest92 = valueDigest(identity);
     const existing = this.store.find("acceptance_check", checkId);
     if (existing) {
-      if (existing.check_digest !== digest91) throw new Error("Acceptance check idempotency conflict");
+      if (existing.check_digest !== digest92) throw new Error("Acceptance check idempotency conflict");
       return { check: existing, idempotent: true };
     }
-    return { check: this.store.create("acceptance_check", checkId, { ...identity, check_digest: digest91 }), idempotent: false };
+    return { check: this.store.create("acceptance_check", checkId, { ...identity, check_digest: digest92 }), idempotent: false };
   }
   acceptanceHumanReview(args) {
     const plan = this.store.get("acceptance_plan", text111(args.plan_id, "plan_id"));
@@ -28683,14 +28982,14 @@ ${material}
     }
     const sandboxIdentity = kit.sandbox_requirements ? { profile_id: text111(args.sandbox_profile_id, "sandbox_profile_id"), profile_version: finiteInteger2(args.sandbox_profile_version, "sandbox_profile_version", 1) } : null;
     const identity = { kit_id: kit.id, kit_version: kit.version, launch_id: launch.id, values: normalized, resolved_assets: resolvedAssets, eval_suite: evalSuite ? { suite_id: evalSuite.id, suite_version: evalSuite.version } : null, sandbox: sandboxIdentity, budget_id: budgetId, budget_limits: budgetLimits2 };
-    const digest91 = valueDigest(identity);
+    const digest92 = valueDigest(identity);
     const applicationId = String(args.application_id ?? `domain_kit_application_${launch.id}`);
     const existing = this.store.find("domain_kit_application", applicationId);
     if (existing) {
-      if (existing.application_digest !== digest91) throw new Error("Domain Kit application idempotency conflict");
+      if (existing.application_digest !== digest92) throw new Error("Domain Kit application idempotency conflict");
       return { application: existing, lock: this.store.get("domain_kit_lock", String(existing.lock_id)), plan: this.store.get("acceptance_plan", String(existing.plan_id)), jobs: this.store.list("acceptance_evaluation_job", 1e4, (job) => job.plan_id === existing.plan_id), sandbox: existing.sandbox_ticket_id ? { compatible: true, ticket: this.store.get("sandbox_ticket", String(existing.sandbox_ticket_id)) } : null, budget_reservation: existing.budget_reservation_id ? this.store.get("budget_reservation", String(existing.budget_reservation_id)) : null, idempotent: true };
     }
-    const sandboxPreview = kit.sandbox_requirements ? this.sandboxPlan({ task_id: launch.task_id, profile_id: sandboxIdentity?.profile_id, profile_version: sandboxIdentity?.profile_version, requirements: kit.sandbox_requirements, request_digest: digest91, dry_run: true }) : null;
+    const sandboxPreview = kit.sandbox_requirements ? this.sandboxPlan({ task_id: launch.task_id, profile_id: sandboxIdentity?.profile_id, profile_version: sandboxIdentity?.profile_version, requirements: kit.sandbox_requirements, request_digest: digest92, dry_run: true }) : null;
     if (sandboxPreview && sandboxPreview.compatible !== true) throw new Error(`Domain Kit sandbox requirements are not satisfied: ${sandboxPreview.missing.join(", ")}`);
     const criteria = kit.criteria.map(({ evaluator: _evaluator, ...criterion }) => criterion);
     const plan = this.acceptancePlanSave({ task_id: launch.task_id, launch_id: launch.id, name: `${kit.name}\u9A8C\u6536`, criteria }).plan;
@@ -28703,10 +29002,10 @@ ${material}
       jobs.push(prepared.job);
     }
     const budgetReservation = budgetId ? this.budgetReserve({ budget_id: budgetId, reservation_id: `domain_kit_budget_${applicationId}`, resources: budgetLimits2, purpose: `domain_kit:${kit.id}` }).reservation : null;
-    const sandbox = kit.sandbox_requirements ? this.sandboxPlan({ task_id: launch.task_id, profile_id: sandboxIdentity?.profile_id, profile_version: sandboxIdentity?.profile_version, requirements: kit.sandbox_requirements, request_digest: digest91, ticket_id: `sandbox_ticket_${applicationId}` }) : null;
+    const sandbox = kit.sandbox_requirements ? this.sandboxPlan({ task_id: launch.task_id, profile_id: sandboxIdentity?.profile_id, profile_version: sandboxIdentity?.profile_version, requirements: kit.sandbox_requirements, request_digest: digest92, ticket_id: `sandbox_ticket_${applicationId}` }) : null;
     const actionLock = this.store.create("domain_kit_action_lock", actionLockId, { application_id: applicationId, kit_id: kit.id, kit_version: kit.version, actions: resolvedActions, lock_digest: valueDigest(resolvedActions) });
     const lock = this.store.create("domain_kit_lock", `domain_kit_lock_${applicationId}`, { application_id: applicationId, kit_id: kit.id, kit_version: kit.version, kit_digest: kit.definition_digest, assets: resolvedAssets, action_lock_id: actionLock.id, action_lock_digest: actionLock.lock_digest, eval_suite: identity.eval_suite, sandbox_profile: sandboxIdentity, budget_id: budgetId, budget_reservation_id: budgetReservation?.id ?? null, lock_digest: valueDigest(identity) });
-    const application = this.store.create("domain_kit_application", applicationId, { ...identity, application_digest: digest91, lock_id: lock.id, action_lock_id: actionLock.id, plan_id: plan.id, job_ids: jobs.map((job) => job.id), sandbox_ticket_id: sandbox?.ticket?.id ?? null, budget_reservation_id: budgetReservation?.id ?? null, status: "active" });
+    const application = this.store.create("domain_kit_application", applicationId, { ...identity, application_digest: digest92, lock_id: lock.id, action_lock_id: actionLock.id, plan_id: plan.id, job_ids: jobs.map((job) => job.id), sandbox_ticket_id: sandbox?.ticket?.id ?? null, budget_reservation_id: budgetReservation?.id ?? null, status: "active" });
     return { application, lock, action_lock: actionLock, plan, jobs, sandbox, budget_reservation: budgetReservation, idempotent: false };
   }
   domainKitSettle(args) {
@@ -28759,8 +29058,8 @@ ${material}
   domainKitActionReport(args) {
     const request2 = this.store.get("domain_kit_action_request", text111(args.request_id, "request_id"));
     if ((/* @__PURE__ */ new Set(["completed", "failed"])).has(String(request2.status))) {
-      const digest91 = valueDigest(args.output ?? null);
-      if (request2.output_digest !== digest91 || request2.outcome !== args.outcome) throw new Error("Domain Kit action report idempotency conflict");
+      const digest92 = valueDigest(args.output ?? null);
+      if (request2.output_digest !== digest92 || request2.outcome !== args.outcome) throw new Error("Domain Kit action report idempotency conflict");
       return { request: request2, idempotent: true };
     }
     const authorization = this.store.get("autonomy_request", String(request2.authorization_request_id));
@@ -28792,8 +29091,8 @@ ${material}
     return { jobs };
   }
   acceptanceEvaluationRecover(args) {
-    const now2 = args.now === void 0 ? (/* @__PURE__ */ new Date()).toISOString() : text111(args.now, "now");
-    const nowMs = Date.parse(now2);
+    const now3 = args.now === void 0 ? (/* @__PURE__ */ new Date()).toISOString() : text111(args.now, "now");
+    const nowMs = Date.parse(now3);
     if (Number.isNaN(nowMs)) throw new Error("now must be an ISO timestamp");
     const limit3 = finiteInteger2(args.limit, "limit", 100, 1, 1e3);
     const recovered = [];
@@ -28832,10 +29131,10 @@ ${material}
     const latest = /* @__PURE__ */ new Map();
     for (const check of this.store.list("acceptance_check", 1e4, (item) => item.plan_id === plan.id && item.plan_version === plan.version)) if (!latest.has(String(check.criterion_id))) latest.set(String(check.criterion_id), check);
     const criteria = plan.criteria;
-    const required2 = criteria.filter((item) => item.required === true);
-    const missing = required2.filter((item) => !latest.has(String(item.id))).map((item) => item.id);
-    const failed = required2.filter((item) => latest.get(String(item.id))?.result === "failed").map((item) => item.id);
-    const blocked = required2.filter((item) => latest.get(String(item.id))?.result === "blocked").map((item) => item.id);
+    const required3 = criteria.filter((item) => item.required === true);
+    const missing = required3.filter((item) => !latest.has(String(item.id))).map((item) => item.id);
+    const failed = required3.filter((item) => latest.get(String(item.id))?.result === "failed").map((item) => item.id);
+    const blocked = required3.filter((item) => latest.get(String(item.id))?.result === "blocked").map((item) => item.id);
     const status = missing.length ? "pending" : failed.length ? "failed" : blocked.length ? "blocked" : "passed";
     const assessment = this.store.save("acceptance_assessment", `assessment_${plan.id}`, { plan_id: plan.id, plan_version: plan.version, task_id: plan.task_id, launch_id: plan.launch_id, status, missing, failed, blocked, checked: latest.size, total: criteria.length });
     if (status === "pending") {
@@ -28853,7 +29152,7 @@ ${material}
       return { assessment, outcome: existing };
     }
     this.trialTraceAppend({ trial_id: plan.trial_id, event_type: `acceptance.${status}`, source: "craft_runtime", data: { assessment_id: assessment.id, checked: latest.size, total: criteria.length }, evidence_ids: evidenceIds });
-    const outcome2 = this.outcomeRecord({ trial_id: plan.trial_id, verdict: status === "passed" ? "passed" : status === "blocked" ? "blocked" : "failed", summary: `Business acceptance ${status}.`, failure_type: status === "passed" ? void 0 : `acceptance_${status}`, scores: { required_pass_rate: required2.length ? (required2.length - failed.length - blocked.length) / required2.length : 1 }, costs: {}, evidence_ids: evidenceIds, source: "multi_method_acceptance" });
+    const outcome2 = this.outcomeRecord({ trial_id: plan.trial_id, verdict: status === "passed" ? "passed" : status === "blocked" ? "blocked" : "failed", summary: `Business acceptance ${status}.`, failure_type: status === "passed" ? void 0 : `acceptance_${status}`, scores: { required_pass_rate: required3.length ? (required3.length - failed.length - blocked.length) / required3.length : 1 }, costs: {}, evidence_ids: evidenceIds, source: "multi_method_acceptance" });
     this.deliveryLoop.refresh({ launch_id: plan.launch_id });
     this.refreshTaskControlForLaunch(plan.launch_id);
     this.refreshTaskRunForLaunch(plan.launch_id);
@@ -28982,11 +29281,11 @@ ${material}
     if (existing && existing.identity_digest === valueDigest(identity)) return { page: existing, idempotent: true };
     const filePath = (0, import_node_path25.join)(this.store.paths.root, "wiki", `${pageId}.v${existing ? Number(existing.version) + 1 : 1}.md`);
     if (existing) {
-      const current2 = await (0, import_promises16.readFile)(String(existing.file_path), "utf8");
+      const current2 = await (0, import_promises17.readFile)(String(existing.file_path), "utf8");
       if (valueDigest(current2) !== existing.body_digest) throw new Error("Wiki page file has unrecorded changes; refresh it before saving");
     }
-    await (0, import_promises16.mkdir)((0, import_node_path25.join)(this.store.paths.root, "wiki"), { recursive: true });
-    await (0, import_promises16.writeFile)(filePath, body2, "utf8");
+    await (0, import_promises17.mkdir)((0, import_node_path25.join)(this.store.paths.root, "wiki"), { recursive: true });
+    await (0, import_promises17.writeFile)(filePath, body2, "utf8");
     const page = this.store.save("wiki_page", pageId, { title, scope: scope2, claim_ids: claimIds, identity_digest: valueDigest(identity), body_digest: valueDigest(body2), file_path: filePath, revision_source: String(args.author ?? "human") });
     return { page, idempotent: false };
   }
@@ -29035,7 +29334,7 @@ ${material}
     const scope2 = String(args.scope ?? "global");
     const maxItems = finiteInteger2(args.max_items, "max_items", 8, 1, 50);
     const maxChars = finiteInteger2(args.max_chars, "max_chars", 6e3, 100, 1e5);
-    const now2 = args.now === void 0 ? Date.now() : validIsoTime2(args.now, "now");
+    const now3 = args.now === void 0 ? Date.now() : validIsoTime2(args.now, "now");
     const terms2 = [...new Set(query.toLowerCase().match(/[\p{L}\p{N}_-]+/gu) ?? [])];
     const excluded = [];
     const matched = this.store.list("knowledge_claim", 1e4).flatMap((claim) => {
@@ -29043,7 +29342,7 @@ ${material}
         excluded.push({ claim_id: claim.id, reason: "not_reviewed" });
         return [];
       }
-      if (claim.valid_until && Date.parse(String(claim.valid_until)) < now2) {
+      if (claim.valid_until && Date.parse(String(claim.valid_until)) < now3) {
         excluded.push({ claim_id: claim.id, reason: "expired" });
         return [];
       }
@@ -29172,19 +29471,19 @@ Evidence: ${item.evidence_ids.join(", ")}
     return this.executionSafety.get(args);
   }
   platformPreflightForLaunch(args) {
-    const platform = args.platform === void 0 ? null : text111(args.platform, "platform");
+    const platform2 = args.platform === void 0 ? null : text111(args.platform, "platform");
     const profileId = args.platform_profile_id === void 0 ? null : text111(args.platform_profile_id, "platform_profile_id");
     const effect = args.platform_effect === void 0 ? null : text111(args.platform_effect, "platform_effect");
-    const missingFields = [platform, profileId, effect].filter((value) => value === null).length;
+    const missingFields = [platform2, profileId, effect].filter((value) => value === null).length;
     if (![0, 3].includes(missingFields)) throw new Error("Platform execution binding requires platform, profile, and effect together");
     if (effect === null) return null;
     const expected = String(args.sandbox).replace("workspace-write", "local_write").replace("read-only", "read_only");
     if (effect !== expected) throw new Error("Platform execution effect does not match Work Launch sandbox");
-    return this.platformExecution.preflight({ platform, profile_id: profileId, effect }).preflight;
+    return this.platformExecution.preflight({ platform: platform2, profile_id: profileId, effect }).preflight;
   }
-  bindPlatformPreflight(launch, platform) {
-    if (platform === null) return launch;
-    const binding = { preflight_id: platform.id, preflight_version: platform.version, profile_id: platform.profile_id, profile_version: platform.profile_version, platform: platform.platform, effect: platform.effect };
+  bindPlatformPreflight(launch, platform2) {
+    if (platform2 === null) return launch;
+    const binding = { preflight_id: platform2.id, preflight_version: platform2.version, profile_id: platform2.profile_id, profile_version: platform2.profile_version, platform: platform2.platform, effect: platform2.effect };
     const existing = launch.platform_execution_preflight;
     if (existing) {
       if (valueDigest(existing) !== valueDigest(binding)) throw new Error("Work Launch is already bound to another platform preflight");
@@ -29206,8 +29505,8 @@ Evidence: ${item.evidence_ids.join(", ")}
   validateSafetyLaunch(launch) {
     const binding = object30(launch.safety_preflight, "Work Launch safety preflight");
     const checked = this.executionSafety.validate({ preflight_id: binding.preflight_id, version: binding.preflight_version });
-    const platform = launch.platform_execution_preflight;
-    if (platform) this.platformExecution.validate({ preflight_id: platform.preflight_id, version: platform.preflight_version });
+    const platform2 = launch.platform_execution_preflight;
+    if (platform2) this.platformExecution.validate({ preflight_id: platform2.preflight_id, version: platform2.preflight_version });
     const driver = this.requireHostDriver(String(launch.host));
     const dispatch = this.store.get(driver.dispatchKind, String(launch.dispatch_id));
     const contract = { timeout_ms: dispatch.timeout_ms, output_limit: dispatch.output_limit, max_turns: dispatch.max_turns ?? null, max_budget_usd: dispatch.max_budget_usd ?? null };
@@ -29216,10 +29515,10 @@ Evidence: ${item.evidence_ids.join(", ")}
   safetyWorkLaunchPrepare(args) {
     const prepared = this.executionSafety.preflight(args);
     const preflight = prepared.preflight;
-    const platform = this.platformPreflightForLaunch(args);
+    const platform2 = this.platformPreflightForLaunch(args);
     const launched = this.workLaunchPrepare({ ...args, task_id: preflight.task_id, timeout_ms: preflight.resources.timeout_ms, output_limit: preflight.resources.output_limit, max_turns: preflight.resources.max_turns ?? void 0, max_budget_usd: preflight.resources.max_budget_usd ?? void 0 });
     const safetyBound = this.executionSafety.bind({ preflight_id: preflight.id, launch_id: launched.launch.id });
-    return { ...launched, launch: this.bindPlatformPreflight(safetyBound.launch, platform), preflight, platform_preflight: platform, idempotent: launched.idempotent };
+    return { ...launched, launch: this.bindPlatformPreflight(safetyBound.launch, platform2), preflight, platform_preflight: platform2, idempotent: launched.idempotent };
   }
   safetyWorkLaunchDecide(args) {
     const launch = this.store.get("work_launch", text111(args.launch_id, "launch_id"));
@@ -29343,10 +29642,10 @@ Evidence: ${item.evidence_ids.join(", ")}
     const caseIds = args.case_ids === void 0 ? this.store.list("knowledge_evaluation_case", 1e4).map((item) => String(item.id)) : uniqueTextArray3(args.case_ids, "case_ids");
     if (!caseIds.length) throw new Error("Knowledge evaluation requires at least one case");
     const topK = finiteInteger2(args.top_k, "top_k", 5, 1, 50);
-    const now2 = args.now ?? (/* @__PURE__ */ new Date()).toISOString();
+    const now3 = args.now ?? (/* @__PURE__ */ new Date()).toISOString();
     const results = caseIds.map((caseId) => {
       const item = this.store.get("knowledge_evaluation_case", caseId);
-      const compiled = this.wikiContextCompile({ query: item.query, scope: item.scope, max_items: topK, max_chars: 1e5, now: now2 });
+      const compiled = this.wikiContextCompile({ query: item.query, scope: item.scope, max_items: topK, max_chars: 1e5, now: now3 });
       const selected = compiled.included.map((claim) => String(claim.claim_id));
       const expected = item.expected_claim_ids;
       const matched = expected.filter((claim) => selected.includes(claim));
@@ -29361,7 +29660,7 @@ Evidence: ${item.evidence_ids.join(", ")}
     if (![minRecall, minEvidence].every((value) => Number.isFinite(value) && value >= 0 && value <= 1)) throw new Error("Knowledge evaluation thresholds must be between 0 and 1");
     const runId = String(args.run_id ?? id13("knowledge_evaluation_run"));
     const existing = this.store.find("knowledge_evaluation_run", runId);
-    const identity = { case_ids: caseIds, top_k: topK, now: now2, min_recall: minRecall, min_evidence_coverage: minEvidence };
+    const identity = { case_ids: caseIds, top_k: topK, now: now3, min_recall: minRecall, min_evidence_coverage: minEvidence };
     if (existing) {
       if (existing.identity_digest !== valueDigest(identity)) throw new Error("Knowledge evaluation run idempotency conflict");
       return { run: existing, idempotent: true };
@@ -30338,8 +30637,8 @@ Evidence: ${item.evidence_ids.join(", ")}
       metadata: args.metadata ?? {}
     });
   }
-  saveVersioned(kind2, prefix, args, required2) {
-    for (const key2 of required2) text111(args[key2], key2);
+  saveVersioned(kind2, prefix, args, required3) {
+    for (const key2 of required3) text111(args[key2], key2);
     const recordId = String(args[`${prefix}_id`] ?? id13(prefix));
     const payload63 = { ...args };
     delete payload63[`${prefix}_id`];
@@ -30399,7 +30698,7 @@ Evidence: ${item.evidence_ids.join(", ")}
     if (!GRADE_VERDICTS.has(verdict)) throw new Error(`Unsupported grade verdict: ${verdict}`);
     const evidenceIds = array6(args.evidence_ids ?? [], "evidence_ids").map((value) => text111(value, "evidence_id"));
     for (const evidenceId of evidenceIds) this.store.get("evidence", evidenceId);
-    const gradeId = `grade_${(0, import_node_crypto114.createHash)("sha256").update(JSON.stringify(
+    const gradeId = `grade_${(0, import_node_crypto115.createHash)("sha256").update(JSON.stringify(
       [trialId, grader.id, grader.version]
     )).digest("hex")}`;
     return this.store.create("grade", gradeId, {
@@ -31044,7 +31343,7 @@ Evidence: ${item.evidence_ids.join(", ")}
     const duration = aggregate.costs.duration_ms;
     const passed = Number(aggregate.pass_rate) >= minimumPassRate && (duration?.mean === void 0 || Number(duration.mean) <= maximumDuration);
     const grades = evaluation.trial_ids.map((trialId) => {
-      const gradeId = `grade_${(0, import_node_crypto114.createHash)("sha256").update(JSON.stringify([trialId, grader.id, grader.version])).digest("hex")}`;
+      const gradeId = `grade_${(0, import_node_crypto115.createHash)("sha256").update(JSON.stringify([trialId, grader.id, grader.version])).digest("hex")}`;
       const existing = this.store.find("grade", gradeId);
       if (existing) return existing;
       const outcome2 = this.store.get("outcome", `outcome_${trialId}`);
@@ -31292,7 +31591,7 @@ Evidence: ${item.evidence_ids.join(", ")}
     const candidates = [...groups.values()].filter((group) => group.trial_ids.length >= 2).map((group) => {
       const trialIds = [...group.trial_ids].sort();
       const evidenceIds = [...new Set(group.evidence_ids)].sort();
-      const candidateId = `experience_mining_${(0, import_node_crypto114.createHash)("sha256").update(`${subjectType}:${subjectId}:${subjectVersion}:${group.pattern_kind}:${group.failure_type}:${trialIds.join(",")}`).digest("hex")}`;
+      const candidateId = `experience_mining_${(0, import_node_crypto115.createHash)("sha256").update(`${subjectType}:${subjectId}:${subjectVersion}:${group.pattern_kind}:${group.failure_type}:${trialIds.join(",")}`).digest("hex")}`;
       const payload63 = {
         subject_type: subjectType,
         subject_id: subjectId,
@@ -31804,7 +32103,7 @@ Evidence: ${item.evidence_ids.join(", ")}
       return { plan, ...this.trialGet({ trial_id: trialId }) };
     }
     const result = orchestrationOutcome(plan.nodes, Boolean(plan.budget_exceeded));
-    const stableKey = (0, import_node_crypto114.createHash)("sha256").update(`${plan.id}:${trialId}`).digest("hex");
+    const stableKey = (0, import_node_crypto115.createHash)("sha256").update(`${plan.id}:${trialId}`).digest("hex");
     const artifactId = `artifact_${stableKey}`;
     const artifact = this.store.find("artifact", artifactId) ?? this.artifactRegister({
       artifact_id: artifactId,
@@ -31926,7 +32225,7 @@ Evidence: ${item.evidence_ids.join(", ")}
   async remoteInteropDispatch(args) {
     const status = String(args.status ?? "accepted");
     if (!(/* @__PURE__ */ new Set(["accepted", "completed", "failed"])).has(status)) throw new Error("Unsupported remote status");
-    return this.remoteInterop.dispatch(args, { dispatch: async () => ({ remote_id: text111(args.remote_id ?? `remote_${(0, import_node_crypto114.randomUUID)().replaceAll("-", "")}`, "remote_id"), status, ...args.result_digest === void 0 ? {} : { result_digest: text111(args.result_digest, "result_digest") } }) });
+    return this.remoteInterop.dispatch(args, { dispatch: async () => ({ remote_id: text111(args.remote_id ?? `remote_${(0, import_node_crypto115.randomUUID)().replaceAll("-", "")}`, "remote_id"), status, ...args.result_digest === void 0 ? {} : { result_digest: text111(args.result_digest, "result_digest") } }) });
   }
   remoteInteropReport(args) {
     return this.remoteInterop.report(args);
@@ -31945,6 +32244,82 @@ Evidence: ${item.evidence_ids.join(", ")}
   }
   platformObservabilityExport(args) {
     return this.platformOperations.exportObservations(args);
+  }
+  /** v0.12.26 Generic Adapter SDK and cross-platform execution surface. */
+  adapterManifestSave(args) {
+    return new V01226Runtime(this.store).adapterRegister(args);
+  }
+  adapterManifestGet(args) {
+    return { manifest: new V01226Runtime(this.store).adapterGet(String(args.adapter_id)) };
+  }
+  adapterManifestList(args = {}) {
+    return new V01226Runtime(this.store).adapterList(Number(args.limit ?? 50));
+  }
+  adapterHealth(args) {
+    return new V01226Runtime(this.store).adapterHealth(String(args.adapter_id));
+  }
+  adapterConformance(args) {
+    return new V01226Runtime(this.store).adapterConformance(String(args.adapter_id));
+  }
+  adapterQuarantine(args) {
+    return new V01226Runtime(this.store).adapterQuarantine(String(args.adapter_id), String(args.reason));
+  }
+  adapterRollback(args) {
+    return new V01226Runtime(this.store).adapterRollback(String(args.adapter_id));
+  }
+  async adapterInstall(args) {
+    return new V01226Runtime(this.store).adapterInstall(String(args.manifest_path), args.integrity === void 0 ? void 0 : String(args.integrity));
+  }
+  commandPlan(args) {
+    return new V01226Runtime(this.store).commandPlan(args);
+  }
+  async commandRun(args) {
+    return new V01226Runtime(this.store).commandRun(args);
+  }
+  commandObserve(args) {
+    return { run: new V01226Runtime(this.store).commandObserve(String(args.run_id)) };
+  }
+  commandCancel(args) {
+    return new V01226Runtime(this.store).commandCancel(String(args.run_id));
+  }
+  async commandRetry(args) {
+    return new V01226Runtime(this.store).commandRetry(String(args.run_id));
+  }
+  contextManifestV01226Save(args) {
+    return new V01226Runtime(this.store).contextManifestSave(args);
+  }
+  capabilityProjection(args) {
+    return new V01226Runtime(this.store).capabilityProject({ candidates: Array.isArray(args.candidates) ? args.candidates : [], required: Array.isArray(args.required) ? args.required : [], token_budget: args.token_budget === void 0 ? void 0 : Number(args.token_budget) });
+  }
+  durableRunStart(args) {
+    return new V01226Runtime(this.store).durableStart(args);
+  }
+  durableRunTick(args = {}) {
+    return new V01226Runtime(this.store).durableTick(String(args.owner ?? "local"), Number(args.lease_seconds ?? 30));
+  }
+  durableRunComplete(args) {
+    return new V01226Runtime(this.store).durableComplete(String(args.run_id), String(args.status), args.result);
+  }
+  durableRunRecover(args = {}) {
+    return new V01226Runtime(this.store).durableRecover(args.owner === void 0 ? void 0 : String(args.owner));
+  }
+  trustCurveRecord(args) {
+    return new V01226Runtime(this.store).trustRecord({ scope: String(args.scope), passed: Number(args.passed), failed: Number(args.failed), evidence_refs: Array.isArray(args.evidence_refs) ? args.evidence_refs : [] });
+  }
+  modelRouteV01226(args) {
+    return new V01226Runtime(this.store).modelRoute({ candidates: Array.isArray(args.candidates) ? args.candidates : [], objective: args.objective, budget: args.budget === void 0 ? void 0 : Number(args.budget) });
+  }
+  deliveryGateV01226(args) {
+    return new V01226Runtime(this.store).deliveryGate({ artifacts: Array.isArray(args.artifacts) ? args.artifacts : [], evidence: Array.isArray(args.evidence) ? args.evidence : [], required_artifacts: Array.isArray(args.required_artifacts) ? args.required_artifacts : [], required_evidence: Array.isArray(args.required_evidence) ? args.required_evidence : [] });
+  }
+  taskHandoffManifest(args) {
+    return new V01226Runtime(this.store).handoff(args);
+  }
+  domainEvaluatorRun(args) {
+    return new V01226Runtime(this.store).evaluatorRun({ evaluator_id: String(args.evaluator_id), observations: args.observations });
+  }
+  async openApiImport(args) {
+    return importOpenApiDocument(new V01226Runtime(this.store), args.document);
   }
 };
 
@@ -32211,10 +32586,10 @@ function auditOf(effect) {
   return effect === "local_write" ? "on_write" : "always";
 }
 function schemaParts(tool2) {
-  const required2 = Array.isArray(tool2.inputSchema.required) ? tool2.inputSchema.required.map(String) : [];
+  const required3 = Array.isArray(tool2.inputSchema.required) ? tool2.inputSchema.required.map(String) : [];
   const properties = tool2.inputSchema.properties ?? {};
-  const optional2 = Object.keys(properties).filter((key2) => !required2.includes(key2));
-  return { required: required2, optional: optional2 };
+  const optional2 = Object.keys(properties).filter((key2) => !required3.includes(key2));
+  return { required: required3, optional: optional2 };
 }
 function buildRegistry(tools) {
   const seen = /* @__PURE__ */ new Map();
@@ -32225,7 +32600,7 @@ function buildRegistry(tools) {
     if (clash) throw new Error(`Tool registry collision: ${tool2.name} and ${clash} both map to ${key2}`);
     seen.set(key2, tool2.name);
     const effect = classifyEffect(tool2, operation, resource);
-    const { required: required2, optional: optional2 } = schemaParts(tool2);
+    const { required: required3, optional: optional2 } = schemaParts(tool2);
     return {
       tool: tool2.name,
       resource,
@@ -32238,7 +32613,7 @@ function buildRegistry(tools) {
       timeout_ms: LONG_RUNNING_OPERATIONS.has(operation) ? 3e5 : 3e4,
       audit_policy: auditOf(effect),
       roles: GOVERNANCE_RESOURCES.test(resource) ? ["owner", "admin"] : ["owner"],
-      required: required2,
+      required: required3,
       optional: optional2
     };
   });
@@ -32509,24 +32884,54 @@ var schemaFor = (name) => {
     "workflow_refs",
     "excluded_refs",
     "selection_rationale",
-    "change_kinds"
+    "change_kinds",
+    "platforms",
+    "permissions",
+    "required",
+    "candidates",
+    "required_artifacts",
+    "required_evidence",
+    "evidence_refs",
+    "criteria"
   ].includes(name)) return { type: "array" };
   return { type: "string" };
 };
-var objectSchema = (required2 = [], optional2 = []) => ({
+var objectSchema = (required3 = [], optional2 = []) => ({
   type: "object",
-  properties: Object.fromEntries([...required2, ...optional2].map((name) => [name, schemaFor(name)])),
-  required: required2,
+  properties: Object.fromEntries([...required3, ...optional2].map((name) => [name, schemaFor(name)])),
+  required: required3,
   additionalProperties: false
 });
-var tool = (name, description, required2 = [], readOnly = false, optional2 = []) => ({
+var tool = (name, description, required3 = [], readOnly = false, optional2 = []) => ({
   name,
   description,
-  inputSchema: objectSchema(required2, optional2),
+  inputSchema: objectSchema(required3, optional2),
   ...readOnly ? { annotations: { readOnlyHint: true } } : {}
 });
 var TOOL_DEFINITIONS = [
   tool("craft_info", "Show the Craft version, data location, and record counts.", [], true),
+  tool("craft_adapter_manifest_save", "Register a versioned Generic Adapter Manifest with declared capabilities, permissions, effects, and platform support.", ["adapter_id", "version", "kind"], false, ["platforms", "entry", "transport", "capabilities", "permissions", "effects", "dependencies", "integrity", "signature", "sandbox_profile", "metadata"]),
+  tool("craft_adapter_manifest_get", "Read one exact Generic Adapter Manifest.", ["adapter_id"], true),
+  tool("craft_adapter_manifest_list", "List registered Generic Adapter Manifests.", [], true, ["limit"]),
+  tool("craft_adapter_health", "Run a platform compatibility health check for one adapter.", ["adapter_id"], true),
+  tool("craft_adapter_conformance", "Run deterministic Generic Adapter conformance checks.", ["adapter_id"], true),
+  tool("craft_adapter_quarantine", "Quarantine an adapter without deleting its manifest.", ["adapter_id", "reason"]),
+  tool("craft_adapter_rollback", "Reactivate a quarantined adapter after review.", ["adapter_id"]),
+  tool("craft_command_plan", "Plan a cross-platform argv command without executing it.", ["argv"], false, ["cwd", "shell", "timeout_ms", "output_limit", "effect", "approval_ref", "adapter_id"]),
+  tool("craft_command_run", "Execute one governed cross-platform command and return a bounded receipt.", ["argv"], false, ["cwd", "shell", "timeout_ms", "output_limit", "effect", "approval_ref", "adapter_id", "run_id"]),
+  tool("craft_command_observe", "Read one command receipt.", ["run_id"], true),
+  tool("craft_command_cancel", "Cancel one running command or return an idempotent terminal receipt.", ["run_id"]),
+  tool("craft_capability_projection", "Project only required capabilities within a token budget and explain exclusions.", ["candidates"], true, ["required", "token_budget"]),
+  tool("craft_durable_run_start", "Create a leased, recoverable durable run.", [], false, ["run_id", "task_id", "goal"]),
+  tool("craft_durable_run_tick", "Claim one queued or expired durable run with a lease.", [], false, ["owner", "lease_seconds"]),
+  tool("craft_durable_run_complete", "Complete a durable run with an explicit terminal status.", ["run_id", "status"], false, ["result"]),
+  tool("craft_durable_run_recover", "Return running runs to the queue after owner failure.", [], false, ["owner"]),
+  tool("craft_trust_curve_record", "Record scoped evidence and calculate a bounded autonomy suggestion.", ["scope", "passed", "failed"], false, ["evidence_refs"]),
+  tool("craft_model_route", "Select a model candidate by quality, cost, or latency under an optional budget.", ["candidates"], true, ["objective", "budget"]),
+  tool("craft_delivery_gate", "Independently gate delivery on required artifacts and evidence.", ["artifacts", "evidence"], true, ["required_artifacts", "required_evidence"]),
+  tool("craft_task_handoff_manifest", "Create a host-neutral task handoff manifest.", ["context_manifest", "host", "task"], true, ["budget"]),
+  tool("craft_domain_evaluator_run", "Run a domain evaluator against structured observations.", ["evaluator_id", "observations"], true),
+  tool("craft_openapi_import", "Import an OpenAPI document into a governed read/write adapter contract.", ["document"], false),
   tool("craft_trust_profile_record", "Record scoped evidence for a trust recommendation; it never grants execution authority.", ["scope", "evidence_ids"], false, ["profile_id", "passed", "failed", "interventions", "ttl_seconds", "reason"]),
   tool("craft_trust_profile_recommend", "Recommend automatic, notify-only, human-approval, or blocked handling from scoped evidence.", ["profile_id"], true),
   tool("craft_trust_profile_get", "Read one scoped trust profile.", ["profile_id"], true),
@@ -34373,6 +34778,28 @@ var McpServer = class {
     this.tools = [...ACTIVE_TOOLS, ...SYSCALL_TOOLS].filter((tool2) => allowed.has(tool2.name));
     this.handlers = {
       craft_info: () => service.info(),
+      craft_adapter_manifest_save: (a) => service.adapterManifestSave(a),
+      craft_adapter_manifest_get: (a) => service.adapterManifestGet(a),
+      craft_adapter_manifest_list: (a) => service.adapterManifestList(a),
+      craft_adapter_health: (a) => service.adapterHealth(a),
+      craft_adapter_conformance: (a) => service.adapterConformance(a),
+      craft_adapter_quarantine: (a) => service.adapterQuarantine(a),
+      craft_adapter_rollback: (a) => service.adapterRollback(a),
+      craft_command_plan: (a) => service.commandPlan(a),
+      craft_command_run: (a) => service.commandRun(a),
+      craft_command_observe: (a) => service.commandObserve(a),
+      craft_command_cancel: (a) => service.commandCancel(a),
+      craft_capability_projection: (a) => service.capabilityProjection(a),
+      craft_durable_run_start: (a) => service.durableRunStart(a),
+      craft_durable_run_tick: (a) => service.durableRunTick(a),
+      craft_durable_run_complete: (a) => service.durableRunComplete(a),
+      craft_durable_run_recover: (a) => service.durableRunRecover(a),
+      craft_trust_curve_record: (a) => service.trustCurveRecord(a),
+      craft_model_route: (a) => service.modelRouteV01226(a),
+      craft_delivery_gate: (a) => service.deliveryGateV01226(a),
+      craft_task_handoff_manifest: (a) => service.taskHandoffManifest(a),
+      craft_domain_evaluator_run: (a) => service.domainEvaluatorRun(a),
+      craft_openapi_import: (a) => service.openApiImport(a),
       craft_trust_profile_record: (a) => service.trustProfileRecord(a),
       craft_trust_profile_recommend: (a) => service.trustProfileRecommend(a),
       craft_trust_profile_get: (a) => service.trustProfileGet(a),
