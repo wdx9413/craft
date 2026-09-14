@@ -7,6 +7,10 @@ interfaces/                 外部协议入口
   mcp-server.ts             MCP 工具定义、分发与错误映射
   mcp/tool-schema.ts        工具参数 Schema 与只读标注
   mcp/surface-registry.ts   Domain / Component / Syscall surface 投影
+  mcp/runtime-handlers.ts   Runtime 与 Adapter handler 注册
+  mcp/work-handlers.ts      Work / Host / Task handler 注册
+  mcp/evaluation-handlers.ts Evaluation / Acceptance handler 注册
+  mcp/workspace-handlers.ts Workspace / Transaction handler 注册
 application/                用例与应用门面
   craft-service.ts          CraftService 兼容门面与跨域编排
   use-cases/                按领域安装的用例组（Adapter、Trace、Knowledge、Memory 等）
@@ -29,7 +33,7 @@ infrastructure/             持久化、路径和运行环境
 
 `src/service.ts` 与 `src/mcp.ts` 现在是稳定的薄兼容入口，真实实现分别位于 `src/application/craft-service.ts` 和 `src/interfaces/mcp-server.ts`。第三方继续使用旧路径不会失效；后续新增代码应从分层入口或具体领域模块导入，避免再把门面做成新的上帝模块。
 
-这次只做结构收敛，没有删除历史版本测试或改变公开工具名。大型实现文件仍会按领域边界渐进拆分，每次拆分都通过类型检查、完整测试和适配器 smoke test 验证。MCP 的工具 Schema 与 Surface Registry 已从协议服务器中抽出；后续再按领域抽取 Handler，但仍由同一个兼容分发入口承接。
+这次只做结构收敛，没有删除历史版本测试或改变公开工具名。大型实现文件仍会按领域边界渐进拆分，每次拆分都通过类型检查、完整测试和适配器 smoke test 验证。MCP 的工具 Schema、Surface Registry 和 Runtime / Work / Evaluation / Workspace Handler 已从协议服务器中抽出；仍由同一个兼容分发入口承接。
 
 ## Memory / Knowledge 的分发决策
 

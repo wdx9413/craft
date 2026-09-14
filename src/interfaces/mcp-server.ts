@@ -3,6 +3,11 @@ import { type JsonObject } from "../store.ts";
 import { SYSCALL_PASSTHROUGH, SYSCALL_VERBS, buildRegistry, catalogOf, describeEntry, resolveEntry } from "../tool-plane.ts";
 import { type Tool, tool } from "./mcp/tool-schema.ts";
 import { surfaceToolNames as resolveSurfaceToolNames } from "./mcp/surface-registry.ts";
+import { createRuntimeHandlers } from "./mcp/runtime-handlers.ts";
+import { createWorkHandlers } from "./mcp/work-handlers.ts";
+import { createEvaluationHandlers } from "./mcp/evaluation-handlers.ts";
+import { createWorkspaceHandlers } from "./mcp/workspace-handlers.ts";
+import type { McpHandler } from "./mcp/handler-types.ts";
 export { COMPONENT_SURFACES, COMPONENT_SURFACE_NAMES, DOMAIN_SURFACE_NAMES, SURFACE_NAMES, SURFACE_RULES, domainSurfaceOf } from "./mcp/surface-registry.ts";
 
 const TOOL_DEFINITIONS: Tool[] = [
@@ -1001,7 +1006,7 @@ export const VERB_DEFAULT_OPERATION: Readonly<Record<string, string>> = {
 
 export class McpServer {
   readonly service: CraftService;
-  readonly handlers: Record<string, (args: JsonObject) => JsonObject | Promise<JsonObject>>;
+  readonly handlers: Record<string, McpHandler>;
   readonly tools: Tool[];
   readonly mode: string;
   constructor(service: CraftService, mode: string = "full") {
@@ -1010,6 +1015,10 @@ export class McpServer {
     const allowed = new Set(surfaceToolNames(mode));
     this.tools = [...ACTIVE_TOOLS, ...SYSCALL_TOOLS].filter((tool) => allowed.has(tool.name));
     this.handlers = {
+      ...createRuntimeHandlers(service),
+      ...createWorkHandlers(service),
+      ...createEvaluationHandlers(service),
+      ...createWorkspaceHandlers(service),
       craft_info: () => service.info(),
       craft_adapter_manifest_save: (a) => service.adapterManifestSave(a), craft_adapter_manifest_get: (a) => service.adapterManifestGet(a), craft_adapter_manifest_list: (a) => service.adapterManifestList(a),
       craft_adapter_health: (a) => service.adapterHealth(a), craft_adapter_conformance: (a) => service.adapterConformance(a), craft_adapter_quarantine: (a) => service.adapterQuarantine(a), craft_adapter_rollback: (a) => service.adapterRollback(a),
@@ -1046,20 +1055,6 @@ export class McpServer {
       craft_host_adapter_list: (a) => service.list("host_adapter", "host_adapters", a),
       craft_host_adapter_dispatch: (a) => service.hostAdapterDispatch(a),
       craft_host_adapter_report: (a) => service.hostAdapterReport(a),
-      craft_runtime_policy_save: (a) => service.runtimePolicySave(a),
-      craft_runtime_policy_get: (a) => service.get("runtime_policy", "runtime_policy_id", a),
-      craft_runtime_policy_list: (a) => service.list("runtime_policy", "runtime_policies", a),
-      craft_runtime_run_start: (a) => service.runtimeRunStart(a), craft_runtime_run_get: (a) => service.runtimeRunGet(a),
-      craft_runtime_dispatch: (a) => service.runtimeDispatch(a), craft_runtime_operation_get: (a) => service.runtimeOperationGet(a),
-      craft_runtime_operation_decision: (a) => service.runtimeOperationDecision(a),
-      craft_runtime_operation_submit: (a) => service.runtimeOperationSubmit(a), craft_runtime_run_resume: (a) => service.runtimeRunResume(a),
-      craft_runtime_lease_recover: (a) => service.runtimeLeaseRecover(a), craft_runtime_driver_tick: (a) => service.runtimeDriverTick(a),
-      craft_runtime_promotion_eligibility: (a) => service.runtimePromotionEligibility(a),
-      craft_runtime_adapter_save: (a) => service.runtimeAdapterSave(a),
-      craft_runtime_adapter_get: (a) => service.get("runtime_adapter", "runtime_adapter_id", a),
-      craft_runtime_adapter_list: (a) => service.list("runtime_adapter", "runtime_adapters", a),
-      craft_runtime_adapter_dispatch: (a) => service.runtimeAdapterDispatch(a),
-      craft_runtime_adapter_report: (a) => service.runtimeAdapterReport(a),
       craft_local_isolated_execute: service.localIsolatedExecute.bind(service),
       craft_route_workflow_proposal_create: (a) => service.routeWorkflowProposalCreate(a),
       craft_default_route_update: (a) => service.defaultRouteUpdate(a),
@@ -1068,16 +1063,6 @@ export class McpServer {
       craft_acceptance_compile: (a) => service.acceptanceCompile(a), craft_acceptance_contract_get: (a) => service.acceptanceContractGet(a),
       craft_task_checkpoint: (a) => service.taskCheckpoint(a), craft_feedback_record: (a) => service.feedbackRecord(a),
       craft_task_control_save: (a) => service.taskControlSave(a), craft_task_control_bind_launch: (a) => service.taskControlBindLaunch(a),
-      craft_task_control_refresh: (a) => service.taskControlRefresh(a), craft_task_control_get: (a) => service.taskControlGet(a), craft_task_control_handoff: (a) => service.taskControlHandoff(a),
-      craft_task_run_prepare: (a) => service.taskRunPrepare(a), craft_task_run_refresh: (a) => service.taskRunRefresh(a), craft_task_run_get: (a) => service.taskRunGet(a),
-      craft_task_run_pause: (a) => service.taskRunPause(a), craft_task_run_resume: (a) => service.taskRunResume(a), craft_task_run_cancel: (a) => service.taskRunCancel(a), craft_task_run_handoff: (a) => service.taskRunHandoff(a),
-      craft_verified_work_loop_prepare: (a) => service.verifiedWorkLoopPrepare(a), craft_verified_work_loop_advance: (a) => service.verifiedWorkLoopAdvance(a), craft_verified_work_loop_decide: (a) => service.verifiedWorkLoopDecide(a), craft_verified_work_loop_resume: (a) => service.verifiedWorkLoopResume(a), craft_verified_work_loop_get: (a) => service.verifiedWorkLoopGet(a),
-      craft_host_activation_manifest_prepare: service.hostActivationManifestPrepare.bind(service), craft_host_activation_manifest_validate: service.hostActivationManifestValidate.bind(service), craft_host_activation_manifest_consume: service.hostActivationManifestConsume.bind(service), craft_host_activation_manifest_get: service.hostActivationManifestGet.bind(service),
-      craft_execution_fabric_prepare: service.executionFabricPrepare.bind(service), craft_execution_fabric_execute: service.executionFabricExecute.bind(service), craft_execution_fabric_advance: service.executionFabricAdvance.bind(service), craft_execution_fabric_consume: service.executionFabricConsume.bind(service), craft_execution_fabric_get: service.executionFabricGet.bind(service), craft_host_bridge_get: service.hostBridgeGet.bind(service),
-      craft_state_workspace_observe: (a) => service.stateWorkspaceObserve(a), craft_state_workspace_compare: (a) => service.stateWorkspaceCompare(a),
-      craft_workspace_observer_observe: (a) => service.workspaceObserverObserve(a), craft_workspace_observer_get: (a) => service.workspaceObserverGet(a), craft_autonomy_ladder_decide: (a) => service.autonomyLadderDecide(a), craft_autonomy_ladder_get: (a) => service.autonomyLadderGet(a), craft_work_coordinator_prepare: (a) => service.workCoordinatorPrepare(a), craft_work_coordinator_attach_host_run: (a) => service.workCoordinatorAttachHostRun(a), craft_work_coordinator_observe: (a) => service.workCoordinatorObserve(a), craft_work_coordinator_handoff: (a) => service.workCoordinatorHandoff(a), craft_work_coordinator_get: (a) => service.workCoordinatorGet(a),
-      craft_eval_campaign_create: (a) => service.evalCampaignCreate(a), craft_eval_campaign_bind: (a) => service.evalCampaignBind(a), craft_eval_campaign_advance: (a) => service.evalCampaignAdvance(a), craft_eval_campaign_get: (a) => service.evalCampaignGet(a), craft_eval_campaign_report: (a) => service.evalCampaignReport(a), craft_evaluation_program_save: (a) => service.evaluationProgramSave(a), craft_evaluation_program_due: (a) => service.evaluationProgramDue(a), craft_evaluation_program_plan: (a) => service.evaluationProgramPlan(a), craft_evaluation_program_report: (a) => service.evaluationProgramReport(a), craft_adaptive_harness_recommend: (a) => service.adaptiveHarnessRecommend(a), craft_managed_write_get: (a) => service.managedWriteGet(a), craft_managed_write_rollback: (a) => service.managedWriteRollback(a),
-      craft_managed_run_create: (a) => service.managedRunCreate(a), craft_managed_run_observe: (a) => service.managedRunObserve(a), craft_managed_run_handoff: (a) => service.managedRunHandoff(a), craft_managed_run_resume: (a) => service.managedRunResume(a), craft_managed_run_fork_shadow: (a) => service.managedRunForkShadow(a), craft_managed_run_get: (a) => service.managedRunGet(a),
       craft_campaign_runner_create: (a) => service.campaignRunnerCreate(a), craft_campaign_runner_claim: (a) => service.campaignRunnerClaim(a), craft_campaign_runner_bind: (a) => service.campaignRunnerBind(a), craft_campaign_runner_advance: (a) => service.campaignRunnerAdvance(a), craft_campaign_runner_get: (a) => service.campaignRunnerGet(a),
       craft_evaluation_model_profile_save: (a) => service.evaluationModelProfileSave(a), craft_evaluation_model_profile_get: (a) => service.evaluationModelProfileGet(a), craft_evaluation_model_profile_list: (a) => service.evaluationModelProfileList(a), craft_evaluation_model_ticket_issue: (a) => service.evaluationModelTicketIssue(a),
       craft_workflow_evolution_observe: (a) => service.workflowEvolutionObserve(a), craft_workflow_evolution_observations: (a) => service.workflowEvolutionObservations(a), craft_workflow_evolution_propose: (a) => service.workflowEvolutionPropose(a), craft_workflow_evolution_proposal_submit: (a) => service.workflowEvolutionProposalSubmit(a), craft_workflow_evolution_proposal_get: (a) => service.workflowEvolutionProposalGet(a),
@@ -1085,11 +1070,6 @@ export class McpServer {
       craft_assured_pilot_seal_case: (a) => service.assuredPilotSealCase(a), craft_assured_pilot_access_issue: (a) => service.assuredPilotIssueSealedAccess(a), craft_assured_pilot_access_consume: (a) => service.assuredPilotConsumeSealedAccess(a), craft_assured_pilot_recovery_record: (a) => service.assuredPilotRecordRecovery(a), craft_assured_pilot_prepare: (a) => service.assuredPilotPrepare(a), craft_assured_pilot_reassess: (a) => service.assuredPilotReassess(a), craft_assured_pilot_get: (a) => service.assuredPilotGet(a),
       craft_agent_eval_lab_create: (a) => service.agentEvalLabCreate(a), craft_agent_eval_lab_start: (a) => service.agentEvalLabStart(a), craft_agent_eval_lab_observe: (a) => service.agentEvalLabObserve(a), craft_agent_eval_lab_get: (a) => service.agentEvalLabGet(a),
       craft_project_knowledge_discover: (a) => service.projectKnowledgeDiscover(a), craft_project_knowledge_resolve: (a) => service.projectKnowledgeResolve(a), craft_project_knowledge_propose_update: (a) => service.projectKnowledgeProposeUpdate(a),
-      craft_workspace_open: (a) => service.workspaceOpen(a), craft_workspace_get: (a) => service.workspaceGet(a),
-      craft_workspace_checkpoint: (a) => service.workspaceCheckpoint(a), craft_workspace_diff: (a) => service.workspaceDiff(a),
-      craft_workspace_human_change: (a) => service.workspaceHumanChange(a), craft_workspace_restore: (a) => service.workspaceRestore(a),
-      craft_work_object_put: (a) => service.workObjectPut(a), craft_work_object_list: (a) => service.workObjectList(a),
-      craft_workspace_impact: (a) => service.workspaceImpact(a), craft_workspace_change_apply: (a) => service.workspaceChangeApply(a),
       craft_memory_remember: (a) => service.memoryRemember(a), craft_memory_transition: (a) => service.memoryTransition(a),
       craft_context_assemble: (a) => service.contextAssemble(a),
       craft_context_profile_save: (a) => service.contextProfileSave(a),
@@ -1136,11 +1116,6 @@ export class McpServer {
       craft_host_run_get: (a) => service.hostRunGet(a),
       craft_host_run_cancel: (a) => service.hostRunCancel(a),
       craft_host_run_recover: (a) => service.hostRunRecover(a),
-      craft_work_launch_prepare: (a) => service.workLaunchPrepare(a),
-      craft_work_launch_decide: (a) => service.workLaunchDecide(a),
-      craft_work_launch_get: (a) => service.workLaunchGet(a),
-      craft_work_launch_retry: (a) => service.workLaunchRetry(a),
-      craft_work_delivery_observe: (a) => service.workDeliveryObserve(a), craft_work_delivery_get: (a) => service.workDeliveryGet(a),
       craft_delivery_loop_refresh: (a) => service.deliveryLoopRefresh(a), craft_delivery_loop_get: (a) => service.deliveryLoopGet(a),
       craft_delivery_evaluation_case_save: (a) => service.deliveryEvaluationCaseSave(a), craft_delivery_evaluation_compare: (a) => service.deliveryEvaluationCompare(a), craft_delivery_evaluation_run: (a) => service.deliveryEvaluationRun(a),
       craft_task_benchmark_create: (a) => service.taskBenchmarkCreate(a), craft_task_benchmark_evaluate: (a) => service.taskBenchmarkEvaluate(a), craft_task_benchmark_aggregate: (a) => service.taskBenchmarkAggregate(a), craft_task_benchmark_candidate_propose: (a) => service.taskBenchmarkCandidatePropose(a), craft_task_benchmark_candidate_authorize_canary: (a) => service.taskBenchmarkCandidateAuthorizeCanary(a), craft_task_benchmark_candidate_canary_start: (a) => service.taskBenchmarkCandidateCanaryStart(a), craft_task_benchmark_candidate_canary_observe: (a) => service.taskBenchmarkCandidateCanaryObserve(a), craft_task_benchmark_candidate_canary_conclude: (a) => service.taskBenchmarkCandidateCanaryConclude(a),
@@ -1160,19 +1135,6 @@ export class McpServer {
       craft_knowledge_context_work_launch_prepare: (a) => service.knowledgeContextWorkLaunchPrepare(a),
       craft_knowledge_context_work_launch_decide: (a) => service.knowledgeContextWorkLaunchDecide(a),
       craft_knowledge_context_work_launch_retry: (a) => service.knowledgeContextWorkLaunchRetry(a),
-      craft_acceptance_plan_save: (a) => service.acceptancePlanSave(a),
-      craft_acceptance_plan_get: (a) => service.acceptancePlanGet(a),
-      craft_acceptance_check_record: (a) => service.acceptanceCheckRecord(a),
-      craft_acceptance_human_review: (a) => service.acceptanceHumanReview(a),
-      craft_acceptance_evaluator_save: (a) => service.acceptanceEvaluatorSave(a),
-      craft_acceptance_evaluation_prepare: (a) => service.acceptanceEvaluationPrepare(a),
-      craft_acceptance_file_prepare: (a) => service.acceptanceFileEvaluationPrepare(a),
-      craft_acceptance_coverage_prepare: (a) => service.acceptanceCoverageEvaluationPrepare(a),
-      craft_acceptance_media_probe_prepare: (a) => service.acceptanceMediaProbePrepare(a),
-      craft_acceptance_evaluation_claim: (a) => service.acceptanceEvaluationClaim(a),
-      craft_acceptance_evaluation_recover: (a) => service.acceptanceEvaluationRecover(a),
-      craft_acceptance_evaluation_report: (a) => service.acceptanceEvaluationReport(a),
-      craft_acceptance_assess: (a) => service.acceptanceAssess(a),
       craft_verified_iteration_create: (a) => service.verifiedIterationCreate(a),
       craft_verified_iteration_get: (a) => service.verifiedIterationGet(a),
       craft_verified_iteration_assess: (a) => service.verifiedIterationAssess(a),
@@ -1235,9 +1197,6 @@ export class McpServer {
       craft_docker_sandbox_probe: (a) => service.dockerSandboxProbe(a),
       craft_docker_sandbox_conformance: (a) => service.dockerSandboxConformance(a),
       craft_docker_sandbox_execute: (a) => service.dockerSandboxExecute(a),
-      craft_workspace_transaction_begin: (a) => service.workspaceTransactionBegin(a), craft_workspace_transaction_commit: (a) => service.workspaceTransactionCommit(a),
-      craft_workspace_transaction_rollback: (a) => service.workspaceTransactionRollback(a),
-      craft_workspace_transaction_get: (a) => service.get("workspace_transaction", "transaction_id", a),
       craft_trajectory_script_compile: (a) => service.trajectoryScriptCompile(a), craft_trajectory_script_authorize: (a) => service.trajectoryScriptAuthorize(a),
       craft_trajectory_script_get: (a) => service.get("trajectory_script_proposal", "proposal_id", a),
       craft_trajectory_script_list: (a) => service.list("trajectory_script_proposal", "proposals", a),
