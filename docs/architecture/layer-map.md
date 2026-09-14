@@ -7,6 +7,7 @@ interfaces/                 外部协议入口
   mcp-server.ts             MCP 工具定义、分发与错误映射
 application/                用例与应用门面
   craft-service.ts          CraftService 兼容门面与跨域编排
+  use-cases/                按领域安装的用例组（Adapter、Trace、Knowledge、Memory 等）
 domains/                    稳定业务内核（按命名空间分组）
   index.ts                  controlPlane / execution / evidence / knowledge / integration
 infrastructure/             持久化、路径和运行环境
@@ -27,3 +28,15 @@ infrastructure/             持久化、路径和运行环境
 `src/service.ts` 与 `src/mcp.ts` 现在是稳定的薄兼容入口，真实实现分别位于 `src/application/craft-service.ts` 和 `src/interfaces/mcp-server.ts`。第三方继续使用旧路径不会失效；后续新增代码应从分层入口或具体领域模块导入，避免再把门面做成新的上帝模块。
 
 这次只做结构收敛，没有删除历史版本测试或改变公开工具名。大型实现文件仍会按领域边界渐进拆分，每次拆分都通过类型检查、完整测试和适配器 smoke test 验证。
+
+## Memory / Knowledge 的分发决策
+
+Memory 和 Knowledge 的真实能力以 MCP component surface 为协议真相：`component-memory` 与 `component-knowledge` 可以被 Codex、Claude、WorkBuddy、Trae 或独立 CLI 直接接入。插件不是另一套实现，而是宿主分发外壳，负责 Skill、图标、默认提示、权限和安装元数据。
+
+因此保留两种形态，但职责不同：
+
+- 只需要调用能力时，优先使用 MCP，适配成本最低、跨宿主最好。
+- 需要宿主内的路由提示、渐进式上下文和可见入口时，再用薄插件包装同一个 MCP surface。
+- `craft-memory`、`craft-knowledge` 可以独立安装；完整 `craft` 作为组合插件提供完整 MCP，不复制子插件代码，也不强制所有宿主安装一堆组件。
+
+这避免把每个能力同时实现成多套插件协议。未来新增宿主只需做一个薄包装器，核心能力和安全边界仍由同一份 MCP/Service 实现提供。

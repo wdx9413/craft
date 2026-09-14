@@ -26,7 +26,8 @@ import { decideExecution } from "../execution-policy.ts";
 import { dockerRequestDigest } from "../docker-sandbox.ts";
 import { egressRequestDigest } from "../egress.ts";
 import { ServiceFoundation } from "../service-foundation.ts";
-import { V01226Runtime, importOpenApiDocument } from "../v01226-runtime.ts";
+import { installAdapterRuntimeMethods } from "./use-cases/adapter-runtime.ts";
+import { installKernelDelegateMethods } from "./use-cases/kernel-delegates.ts";
 
 export const VERSION = "0.12.26";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
@@ -412,17 +413,6 @@ export class CraftService extends ServiceFoundation {
   capabilityKitSetState(args: JsonObject): JsonObject { return this.capabilityKits.setState(args); }
   capabilityKitConformance(args: JsonObject): JsonObject { return this.capabilityKits.conformance(args); }
   capabilityKitDistribution(args: JsonObject): JsonObject { return this.capabilityKits.distribution(args); }
-  knowledgeMemoryInstallBuiltins(): JsonObject { return this.knowledgeMemory.installBuiltins(); }
-  knowledgeSourceRegister(args: JsonObject): JsonObject { return this.knowledgeMemory.sourceRegister(args); }
-  knowledgeSourceList(args: JsonObject): JsonObject { return this.knowledgeMemory.sourceList(args); }
-  knowledgeSourceTransition(args: JsonObject): JsonObject { return this.knowledgeMemory.sourceTransition(args); }
-  memoryLedgerRemember(args: JsonObject): JsonObject { return this.knowledgeMemory.remember(args); }
-  memoryLedgerTransition(args: JsonObject): JsonObject { return this.knowledgeMemory.transition(args); }
-  memoryLedgerCompatBind(args: JsonObject): JsonObject { return this.knowledgeMemory.compatBind(args); }
-  contextResolutionResolve(args: JsonObject): JsonObject { return this.knowledgeMemory.resolve(args); }
-  contextResolutionGet(args: JsonObject): JsonObject { return this.knowledgeMemory.receiptGet(args); }
-  retrievalAdapterConfigure(args: JsonObject): JsonObject { return this.knowledgeMemory.retrievalConfigure(args); }
-  retrievalAdapterEvaluate(args: JsonObject): JsonObject { return this.knowledgeMemory.retrievalEvaluate(args); }
   workRuntimeModeConfigure(args: JsonObject): JsonObject { return this.workRuntimeModes.configure(args); }
   workRuntimeModePrepare(args: JsonObject): JsonObject { return this.workRuntimeModes.prepare(args); }
   workRuntimeModeGet(args: JsonObject): JsonObject { return this.workRuntimeModes.get(args); }
@@ -3039,17 +3029,6 @@ export class CraftService extends ServiceFoundation {
     return outcome;
   }
 
-  traceStart(args: JsonObject): JsonObject { return this.trace.start(args); }
-  traceAppend(args: JsonObject): JsonObject { return this.trace.append(args); }
-  traceObserve(args: JsonObject): JsonObject { return this.trace.observe(args); }
-  traceFeedback(args: JsonObject): JsonObject { return this.trace.feedback(args); }
-  traceFinalize(args: JsonObject): JsonObject { return this.trace.finalize(args); }
-  traceGet(args: JsonObject): JsonObject { return this.trace.get(args); }
-  traceQuery(args: JsonObject = {}): JsonObject { return this.trace.query(args); }
-  traceReplayBundle(args: JsonObject): JsonObject { return this.trace.replayBundle(args); }
-  traceCaseCompile(args: JsonObject): JsonObject { return this.trace.compileCase(args); }
-  traceRetentionPlan(args: JsonObject): JsonObject { return this.trace.retentionPlan(args); }
-  traceRetentionSweep(args: JsonObject = {}): JsonObject { return this.trace.retentionSweep(args); }
   runtimeTruthStandardize(args: JsonObject): JsonObject { return this.runtimeTruth.standardize(args); }
   runtimeTruthOtlp(args: JsonObject): JsonObject { return this.runtimeTruth.otlp(args); }
   async runtimeTruthExport(args: JsonObject): Promise<JsonObject> { return this.runtimeTruth.export(args); }
@@ -3893,58 +3872,12 @@ export class CraftService extends ServiceFoundation {
     return this.autonomousRuntime.run(args, model, executor);
   }
 
-  capabilityLifecycleRegister(args: JsonObject): JsonObject { return this.capabilityLifecycle.register(args); }
-  capabilityLifecycleInstall(args: JsonObject): JsonObject { return this.capabilityLifecycle.install(args); }
-  capabilityLifecycleActivate(args: JsonObject): JsonObject { return this.capabilityLifecycle.activate(args); }
-  capabilityLifecycleDisable(args: JsonObject): JsonObject { return this.capabilityLifecycle.disable(args); }
-  capabilityLifecycleUpgrade(args: JsonObject): JsonObject { return this.capabilityLifecycle.upgrade(args); }
-  capabilityLifecycleRetire(args: JsonObject): JsonObject { return this.capabilityLifecycle.retire(args); }
-  capabilityLifecycleResolve(args: JsonObject): JsonObject { return this.capabilityLifecycle.resolve(args); }
-  capabilityLifecycleList(): JsonObject { return this.capabilityLifecycle.list(); }
-
-  memoryConsolidationRemember(args: JsonObject): JsonObject { return this.memoryConsolidation.remember(args); }
-  memoryConsolidationConsolidate(args: JsonObject): JsonObject { return this.memoryConsolidation.consolidate(args); }
-  memoryConsolidationResolve(args: JsonObject): JsonObject { return this.memoryConsolidation.resolve(args); }
-  memoryConsolidationSearch(args: JsonObject): JsonObject { return this.memoryConsolidation.search(args); }
-
-  remoteInteropPrepare(args: JsonObject): JsonObject { return this.remoteInterop.prepare(args); }
   async remoteInteropDispatch(args: JsonObject): Promise<JsonObject> {
     const status = String(args.status ?? "accepted") as "accepted" | "completed" | "failed";
     if (!new Set(["accepted", "completed", "failed"]).has(status)) throw new Error("Unsupported remote status");
     return this.remoteInterop.dispatch(args, { dispatch: async () => ({ remote_id: text(args.remote_id ?? `remote_${randomUUID().replaceAll("-", "")}`, "remote_id"), status, ...(args.result_digest === undefined ? {} : { result_digest: text(args.result_digest, "result_digest") }) }) });
   }
-  remoteInteropReport(args: JsonObject): JsonObject { return this.remoteInterop.report(args); }
-  remoteInteropGet(args: JsonObject): JsonObject { return this.remoteInterop.get(args); }
-
-  platformMemberSave(args: JsonObject): JsonObject { return this.platformOperations.memberSave(args); }
-  platformAuthorize(args: JsonObject): JsonObject { return this.platformOperations.authorize(args); }
-  platformObserve(args: JsonObject): JsonObject { return this.platformOperations.observe(args); }
-  platformObservabilityExport(args: JsonObject): JsonObject { return this.platformOperations.exportObservations(args); }
-
-  /** v0.12.26 Generic Adapter SDK and cross-platform execution surface. */
-  adapterManifestSave(args: JsonObject): JsonObject { return new V01226Runtime(this.store).adapterRegister(args as never); }
-  adapterManifestGet(args: JsonObject): JsonObject { return { manifest: new V01226Runtime(this.store).adapterGet(String(args.adapter_id)) }; }
-  adapterManifestList(args: JsonObject = {}): JsonObject { return new V01226Runtime(this.store).adapterList(Number(args.limit ?? 50)); }
-  adapterHealth(args: JsonObject): JsonObject { return new V01226Runtime(this.store).adapterHealth(String(args.adapter_id)); }
-  adapterConformance(args: JsonObject): JsonObject { return new V01226Runtime(this.store).adapterConformance(String(args.adapter_id)); }
-  adapterQuarantine(args: JsonObject): JsonObject { return new V01226Runtime(this.store).adapterQuarantine(String(args.adapter_id), String(args.reason)); }
-  adapterRollback(args: JsonObject): JsonObject { return new V01226Runtime(this.store).adapterRollback(String(args.adapter_id)); }
-  async adapterInstall(args: JsonObject): Promise<JsonObject> { return new V01226Runtime(this.store).adapterInstall(String(args.manifest_path), args.integrity === undefined ? undefined : String(args.integrity)); }
-  commandPlan(args: JsonObject): JsonObject { return new V01226Runtime(this.store).commandPlan(args as never); }
-  async commandRun(args: JsonObject): Promise<JsonObject> { return new V01226Runtime(this.store).commandRun(args as never); }
-  commandObserve(args: JsonObject): JsonObject { return { run: new V01226Runtime(this.store).commandObserve(String(args.run_id)) }; }
-  commandCancel(args: JsonObject): JsonObject { return new V01226Runtime(this.store).commandCancel(String(args.run_id)); }
-  async commandRetry(args: JsonObject): Promise<JsonObject> { return new V01226Runtime(this.store).commandRetry(String(args.run_id)); }
-  contextManifestV01226Save(args: JsonObject): JsonObject { return new V01226Runtime(this.store).contextManifestSave(args); }
-  capabilityProjection(args: JsonObject): JsonObject { return new V01226Runtime(this.store).capabilityProject({ candidates: Array.isArray(args.candidates) ? args.candidates as JsonObject[] : [], required: Array.isArray(args.required) ? args.required as string[] : [], token_budget: args.token_budget === undefined ? undefined : Number(args.token_budget) }); }
-  durableRunStart(args: JsonObject): JsonObject { return new V01226Runtime(this.store).durableStart(args); }
-  durableRunTick(args: JsonObject = {}): JsonObject { return new V01226Runtime(this.store).durableTick(String(args.owner ?? "local"), Number(args.lease_seconds ?? 30)); }
-  durableRunComplete(args: JsonObject): JsonObject { return new V01226Runtime(this.store).durableComplete(String(args.run_id), String(args.status) as "completed" | "failed" | "cancelled", args.result as JsonObject | undefined); }
-  durableRunRecover(args: JsonObject = {}): JsonObject { return new V01226Runtime(this.store).durableRecover(args.owner === undefined ? undefined : String(args.owner)); }
-  trustCurveRecord(args: JsonObject): JsonObject { return new V01226Runtime(this.store).trustRecord({ scope: String(args.scope), passed: Number(args.passed), failed: Number(args.failed), evidence_refs: Array.isArray(args.evidence_refs) ? args.evidence_refs as string[] : [] }); }
-  modelRouteV01226(args: JsonObject): JsonObject { return new V01226Runtime(this.store).modelRoute({ candidates: Array.isArray(args.candidates) ? args.candidates as JsonObject[] : [], objective: args.objective as "quality" | "cost" | "latency" | undefined, budget: args.budget === undefined ? undefined : Number(args.budget) }); }
-  deliveryGateV01226(args: JsonObject): JsonObject { return new V01226Runtime(this.store).deliveryGate({ artifacts: Array.isArray(args.artifacts) ? args.artifacts as string[] : [], evidence: Array.isArray(args.evidence) ? args.evidence as string[] : [], required_artifacts: Array.isArray(args.required_artifacts) ? args.required_artifacts as string[] : [], required_evidence: Array.isArray(args.required_evidence) ? args.required_evidence as string[] : [] }); }
-  taskHandoffManifest(args: JsonObject): JsonObject { return new V01226Runtime(this.store).handoff(args as never); }
-  domainEvaluatorRun(args: JsonObject): JsonObject { return new V01226Runtime(this.store).evaluatorRun({ evaluator_id: String(args.evaluator_id), observations: args.observations as JsonObject }); }
-  async openApiImport(args: JsonObject): Promise<JsonObject> { return importOpenApiDocument(new V01226Runtime(this.store), args.document as string | JsonObject); }
 }
+
+installAdapterRuntimeMethods(CraftService);
+installKernelDelegateMethods(CraftService);
