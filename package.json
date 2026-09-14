@@ -1,6 +1,6 @@
 {
   "name": "craft-agent-harness",
-  "version": "0.12.18",
+  "version": "0.12.20",
   "description": "Cross-platform capability, workflow, evidence, and agent harness",
   "type": "module",
   "bin": {
@@ -9,7 +9,7 @@
     "craft-mcp-full": "dist/bin/craft-mcp-full.js"
   },
   "scripts": {
-    "test": "pnpm run build && pnpm run typecheck && pnpm run test:ts && pnpm run test:v01216 && pnpm run test:v01217 && pnpm run test:v01218 && pnpm run test:smoke && pnpm run test:plugin",
+    "test": "pnpm run build && pnpm run typecheck && pnpm run test:ts && pnpm run test:v01216 && pnpm run test:v01217 && pnpm run test:v01218 && pnpm run test:v01219 && pnpm run test:v01220 && pnpm run test:smoke && pnpm run test:plugin",
     "clean": "node --experimental-strip-types scripts/clean.ts",
     "build": "pnpm run clean && pnpm run build:core && pnpm run build:plugin && pnpm run pack:plugin && pnpm run build:deepseek && pnpm run pack:adapters",
     "build:core": "node node_modules/typescript/bin/tsc -p tsconfig.build.json",
@@ -26,6 +26,8 @@
     "test:v01216": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-include=src/federated-delegation.ts --test-coverage-include=src/harness-topology.ts --test-coverage-include=src/runtime-readiness.ts --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 tests/v01216-federated-runtime.test.ts",
     "test:v01217": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-include=src/assured-pilot.ts --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 tests/v01217-assured-pilot.test.ts",
     "test:v01218": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-include=src/capability-kit-runtime.ts --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 tests/v01218-capability-platform.test.ts",
+    "test:v01219": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-include=src/knowledge-memory-runtime.ts --test-coverage-include=src/work-runtime-mode.ts --test-coverage-include=src/verified-work-loop.ts --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 tests/v01219-universal-runtime.test.ts tests/verified-work-loop.test.ts",
+    "test:v01220": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-include=src/continual-harness.ts --test-coverage-include=src/stateful-compute.ts --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 tests/v01220-continual-harness.test.ts",
     "check:ts": "node --experimental-strip-types src/cli.ts --help",
     "typecheck": "node node_modules/typescript/bin/tsc --noEmit"
   },

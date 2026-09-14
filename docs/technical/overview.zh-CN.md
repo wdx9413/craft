@@ -141,3 +141,7 @@ Observed Delivery ──pairs──> Eval Campaign Report ──with Canary Evid
 v0.12.17 以 `AssuredPilotKernel` 收束真实 Host 回执、Runtime Assurance、Runtime Readiness、恢复演练、精确 Capability Profile 与一次性密封评测引用。任何环境、能力、Case 或人工工作区漂移都会进入 `needs_replan`；默认仍是单 Agent，远程协作只传引用、可撤销且失败关闭。详见[Assured Pilot](modules/assured-pilot.md)。
 
 v0.12.18 以 `CapabilityKitRuntime` 提供可插拔的能力供给面：Kit 必须经 Manifest 校验、精确依赖锁和机制级 Conformance 后才能被 Task 激活；停用或撤销会使自身及依赖方的活动记录进入 `needs_replan`。Kit 的 Hook 是有界的协议阶段，不是任意代码回调；其对外 Skill/MCP/CLI/Plugin 描述共用同一 Kit 摘要，默认不授予执行权限。详见 [Capability Kit Runtime](modules/capability-kit-runtime.md)。
+
+v0.12.19 在此之上加入 `KnowledgeMemoryRuntime`：`KnowledgeSource → MemoryLedger → ContextResolutionReceipt` 使外部知识、可撤销记忆与实际装载上下文各自有独立边界。`WorkRuntimeModeKernel` 仅把 Console/Agent 的模型、Host、Activation 与 Context 引用固定为计划，再交给 Verified Work Loop；它不偷渡模型调用或执行权。
+
+v0.12.20 加入 `ContinualHarnessKernel` 与 `StatefulComputeKernel`：真实 Trace、Outcome、Acceptance 与 Evidence 可生成最多改变两个设计轴的局部 Harness Diff。Session 级 Prompt Note/Memory 只能在隐私检查后带 TTL 临时生效；Skill、Workflow、Sub-agent 等治理变更仍须 Shadow Eval、精确 Signoff、Canary 和回滚。持久计算通过 Host 无关的 Session、Dispatch、单调 State revision 与 Receipt 表达，不绑定任何第三方 Agent，也不在 Craft 内裸执行模型代码。

@@ -1,4 +1,4 @@
-# Current Capability Matrix (v0.12.18)
+# Current Capability Matrix (v0.12.20)
 
 | Area | State | Boundary |
 |---|---|---|
@@ -15,6 +15,13 @@
 | Harness topology | evaluated optional coordination | single-Agent baseline by default; up to five read-only roles only after paired evidence; no hidden Agent launch |
 | Runtime readiness | deployment fact assessment | evidence, recovery, platform preflight and enterprise binding blockers; does not claim a Host/Sandbox/Broker is deployed |
 | Context selection | implemented | exact references and digests; vector search remains optional |
+| Knowledge Source / Memory Ledger | implemented and tested locally | source scope, digest, trust/access, legacy reference bindings, expiry/revocation and sensitivity are explicit; external systems remain source-owned |
+| Context Resolution Receipt | implemented and tested locally | content-free exact memory/source versions and budgets; untrusted/revoked sources and restricted memory fail closed by default |
+| Retrieval Adapter admission | implemented and tested locally | keyword default; vector requires provider fingerprint plus recall, zero-leakage, latency and cost evaluation |
+| Console / Agent mode plan | implemented and tested locally | same verified protocol projects a Host-bound plan; it does not duplicate provider model calls or terminal execution |
+| Continual Harness view / refinement | implemented and tested locally | content-free exact bindings; low-risk Session memory/prompt changes have privacy review and TTL, while governed changes require shadow Eval, exact Signoff and Canary |
+| Stateful compute protocol | implemented and tested locally | generic Host descriptor, Session, Dispatch, monotonic state Receipt and re-observation; no embedded code executor or vendor-specific Agent binding |
+| Sub-agent function calls | implemented and tested locally | at most five asynchronous read-only calls per parent Session with explicit context references, budget, Evidence and result contract; single Agent remains the default |
 | Trace / Workbench projection | implemented locally | controlled Replay Runner now revalidates the terminal Trace and records step receipts; external effect executors remain deployment adapters |
 | Long-task recovery | implemented protocol | fresh Host dispatch is required after process release |
 | OTel / OTLP | implemented adapter contract | deployment collector is external |

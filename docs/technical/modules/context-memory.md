@@ -1,6 +1,6 @@
 # 上下文、记忆与后台整理
 
-> v0.11.23 在 v0.10.0 的范围化 `memory_item` 与预算化上下文装配之上，加入版本化 `context_profile`，并允许逻辑能力 Activation Plan 精确引用 Profile 版本。Resolution 在内容进入宿主上下文前重验文件摘要和字符预算，回执不保存正文。自动摘要、语义换页、后台整理和跨设备同步仍是目标能力。
+> v0.12.19 在 v0.10.0 的范围化 `memory_item` 与预算化上下文装配之上，新增 `KnowledgeSource`、`MemoryLedger` 与 `ContextResolutionReceipt`。旧对象继续兼容引用，不执行破坏性迁移；向量检索只有经泄漏、召回、时延和成本评测后才可选择。
 
 ## 上下文分层与 CVMM
 

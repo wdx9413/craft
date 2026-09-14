@@ -1,6 +1,6 @@
 # Craft
 
-> Current release: v0.12.18. Every host follows a route-first boundary with a low-token syscall MCP. Capability Kit Runtime now governs the variable Skill, MCP, CLI, and plugin surfaces through a declarative, revocable Kit; installation never loads third-party code or grants execution authority. Real cloud execution, marketplace publication, and OS-level isolation still require a deployment adapter or platform review; they are not claimed as shipped services.
+> Current release: v0.12.20. Craft is a general work runtime for people and AI: it can control a Host such as Codex or prepare a model-neutral Agent-mode plan. This release adds evidence-backed Continual Harness refinement, two-speed evolution, generic persistent compute Sessions, and read-only Sub-agent calls. Craft binds no third-party Agent and never bypasses Host, evaluation, or approval boundaries.
 
 [中文](README.md) | [English](README.en.md)
 

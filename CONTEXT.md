@@ -72,6 +72,15 @@ _Avoid_: Prompt、完整上下文
 **Project Knowledge**：项目说明、经验或记忆等可按需读取的背景材料。它最多提供受限上下文，不能自动扩大权限或充当已验证事实。
 _Avoid_: Evidence、Policy
 
+**Knowledge Source**：带 scope、digest、trust 和外部读写边界的知识来源描述符，例如 Evidence Wiki、Serena、kefu、README。它不是知识正文、不是证据，也不因登记而自动被加载。
+_Avoid_: Capability Source、Memory
+
+**Memory Ledger**：带来源、范围、证据、有效期、敏感等级和撤销关系的工作/情景/偏好/程序记忆记录。它通过兼容绑定引用旧记忆，不强制迁移旧账本。
+_Avoid_: Context Profile、Evidence Wiki
+
+**Context Resolution Receipt**：一次向 Host 提供受限上下文的内容无关回执，固定选中的知识/记忆版本、选择理由和预算。它不保存重复正文，不授予执行权。
+_Avoid_: Prompt、Activation Profile
+
 ## 执行与交付
 
 **Host**：实际请求模型、调用原生工具或运行命令的外部执行环境，例如 Codex、Claude 或其他 MCP Host。Craft 对未经过其协议的 Host 行为不作保证。
@@ -88,6 +97,9 @@ _Avoid_: Host Run、Trial
 
 **Verified Work Loop**：围绕一个 Task 的主控制循环：预期状态、受控启动、Receipt、重新观察、验收、交付或重新规划。它不执行 Host，只确保 Host 的自述不能跳过观察和验收。
 _Avoid_: Workflow、Agent
+
+**Work Runtime Mode**：Console 或独立 Agent 的产品入口选择。它只固定模型、Host、Activation Profile 与 Context Receipt 的引用，下一步仍须进入 Verified Work Loop。
+_Avoid_: Host、Execution Fabric
 
 **Sub-agent Operation**：父 Runtime Operation 下、为一个独立只读诊断目标创建的子 Operation。历史文档中的 “Sub-agent Run” 指此概念；它不是一个独立的根 Run。
 _Avoid_: 独立 Agent、子任务线程

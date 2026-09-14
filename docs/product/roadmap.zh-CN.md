@@ -13,7 +13,11 @@
 
 ## 建设原则
 
-以 [产品架构](architecture.zh-CN.md) 的三大支柱为目标：工作与协作、执行与保障、学习与改进。**评测与实验是第三支柱内的核心模块**，不另设第四支柱。当前实现基线已推进到 v0.12.18。
+以 [产品架构](architecture.zh-CN.md) 的三大支柱为目标：工作与协作、执行与保障、学习与改进。**评测与实验是第三支柱内的核心模块**，不另设第四支柱。当前实现基线已推进到 v0.12.20。
+
+**v0.12.19：通用知识、记忆与双运行模式。** `KnowledgeSource` 为 Evidence Wiki、Serena、kefu、README 等外部内容保留 scope、digest、trust 与只读/提议边界；`MemoryLedger` 统一工作、情景、偏好、程序记忆，并以来源、Evidence、有效期、敏感等级与撤销关系约束生命周期。`ContextResolutionReceipt` 精确记录本次给 Host 装载了什么、为何选中、用哪个版本和多少预算，持久回执不复制正文；向量检索只在零跨项目泄漏、召回、成本和时延评测通过后使用。`WorkRuntimeMode` 让 Craft 既可挂在 Codex 等 Host 上作为运行控制台，也可生成模型无关的 Agent 模式计划；两者都必须进入同一 Verified Work Loop，不能绕过 Policy、Receipt、Acceptance 或 Eval。
+
+**v0.12.20：持续 Harness 与持久计算协议。** `ContinualHarnessView` 固定一次任务真正使用的资产版本；`Refinement` 从 Trace、Outcome、Acceptance 与 Evidence 生成小范围 Diff。Session 级低风险记忆/提示补充可带 TTL 暂用，其他变化必须走 Shadow Eval、exact Signoff、Canary 与精确回滚。`StatefulComputeHost` 以通用 Session/Dispatch/Receipt 表达跨轮次状态，函数式 Sub-agent 最多五个且只读；两者均无内置执行权，不绑定第三方 Agent。
 
 **v0.12.17：Assured Pilot 真实证据闭环。** 在已有 Task Contract、Host Bridge、Verified Work Loop、Runtime Assurance、Readiness、Capability Connector 与 Eval Campaign 之间补入最小的事实收口：held-out Case 只按摘要密封，外部 Evaluator 需消费一个 Task Run 绑定的一次性引用；恢复能力要有确认级 Evidence、环境一致且包含重建/回执重验/状态再观察的 Drill；Pilot 只绑定可信健康、精确版本且无凭据的 Capability Profile。Task Run、环境、能力、Case 或人工工作区发生漂移时，一律 `needs_replan`。本版不声称真实生产隔离、外部密封存储或企业凭据已经部署，也不默认多 Agent。详见[Assured Pilot](../technical/modules/assured-pilot.md)。
 

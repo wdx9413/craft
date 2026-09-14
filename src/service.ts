@@ -27,7 +27,7 @@ import { dockerRequestDigest } from "./docker-sandbox.ts";
 import { egressRequestDigest } from "./egress.ts";
 import { ServiceFoundation } from "./service-foundation.ts";
 
-export const VERSION = "0.12.18";
+export const VERSION = "0.12.20";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -300,7 +300,7 @@ export class CraftService extends ServiceFoundation {
       "experience_shadow_experiment", "adaptive_harness", "agent_ir", "operational_signal", "operational_alert",
       "capability_asset", "activation_profile", "tool_selection_receipt", "capability_call", "capability_connector", "capability_connector_asset", "capability_connector_ticket", "capability_connector_health", "capability_connector_revocation", "logical_activation_plan", "logical_activation_audit", "logical_activation_resolution", "expert_profile", "context_capsule",
       "evaluation_reliability", "judge_adapter", "judge_calibration", "adaptation_candidate", "feedback_intake", "feedback_case", "canary",
-      "capability_kit", "capability_kit_activation", "capability_kit_contribution", "capability_kit_conformance",
+      "capability_kit", "capability_kit_activation", "capability_kit_contribution", "capability_kit_conformance", "knowledge_source", "memory_ledger", "memory_compat_binding", "context_resolution_receipt", "retrieval_adapter", "retrieval_evaluation", "work_runtime_mode", "work_runtime_plan",
       "workspace", "workspace_checkpoint", "workspace_change", "workspace_transaction", "work_object", "memory_item", "context_profile", "task_graph", "change_set", "os_security_plan", "os_security_receipt", "mcp_registry_source", "mcp_registry_server", "mcp_registry_health", "org_sync_manifest", "trace_otlp_export",
       "budget_account", "budget_reservation", "durable_wait", "external_event", "fallback_contract", "fallback_event",
       "credential_handle", "credential_lease", "egress_authorization", "egress_execution", "parser_security_evaluation", "parser_process_receipt",
@@ -379,6 +379,38 @@ export class CraftService extends ServiceFoundation {
   capabilityKitSetState(args: JsonObject): JsonObject { return this.capabilityKits.setState(args); }
   capabilityKitConformance(args: JsonObject): JsonObject { return this.capabilityKits.conformance(args); }
   capabilityKitDistribution(args: JsonObject): JsonObject { return this.capabilityKits.distribution(args); }
+  knowledgeMemoryInstallBuiltins(): JsonObject { return this.knowledgeMemory.installBuiltins(); }
+  knowledgeSourceRegister(args: JsonObject): JsonObject { return this.knowledgeMemory.sourceRegister(args); }
+  knowledgeSourceList(args: JsonObject): JsonObject { return this.knowledgeMemory.sourceList(args); }
+  knowledgeSourceTransition(args: JsonObject): JsonObject { return this.knowledgeMemory.sourceTransition(args); }
+  memoryLedgerRemember(args: JsonObject): JsonObject { return this.knowledgeMemory.remember(args); }
+  memoryLedgerTransition(args: JsonObject): JsonObject { return this.knowledgeMemory.transition(args); }
+  memoryLedgerCompatBind(args: JsonObject): JsonObject { return this.knowledgeMemory.compatBind(args); }
+  contextResolutionResolve(args: JsonObject): JsonObject { return this.knowledgeMemory.resolve(args); }
+  contextResolutionGet(args: JsonObject): JsonObject { return this.knowledgeMemory.receiptGet(args); }
+  retrievalAdapterConfigure(args: JsonObject): JsonObject { return this.knowledgeMemory.retrievalConfigure(args); }
+  retrievalAdapterEvaluate(args: JsonObject): JsonObject { return this.knowledgeMemory.retrievalEvaluate(args); }
+  workRuntimeModeConfigure(args: JsonObject): JsonObject { return this.workRuntimeModes.configure(args); }
+  workRuntimeModePrepare(args: JsonObject): JsonObject { return this.workRuntimeModes.prepare(args); }
+  workRuntimeModeGet(args: JsonObject): JsonObject { return this.workRuntimeModes.get(args); }
+  continualHarnessViewCreate(args: JsonObject): JsonObject { return this.continualHarness.viewCreate(args); }
+  continualHarnessRefine(args: JsonObject): JsonObject { return this.continualHarness.refine(args); }
+  continualHarnessSubmit(args: JsonObject): JsonObject { return this.continualHarness.submit(args); }
+  continualHarnessShadow(args: JsonObject): JsonObject { return this.continualHarness.shadow(args); }
+  continualHarnessAuthorizeCanary(args: JsonObject): JsonObject { return this.continualHarness.authorizeCanary(args); }
+  continualHarnessObserveCanary(args: JsonObject): JsonObject { return this.continualHarness.observeCanary(args); }
+  continualHarnessRollback(args: JsonObject): JsonObject { return this.continualHarness.rollback(args); }
+  continualHarnessSignals(args: JsonObject): JsonObject { return this.continualHarness.signals(args); }
+  continualHarnessResolve(args: JsonObject): JsonObject { return this.continualHarness.resolve(args); }
+  continualHarnessGet(args: JsonObject): JsonObject { return this.continualHarness.get(args); }
+  statefulComputeHostRegister(args: JsonObject): JsonObject { return this.statefulCompute.hostRegister(args); }
+  statefulComputeSessionPrepare(args: JsonObject): JsonObject { return this.statefulCompute.sessionPrepare(args); }
+  statefulComputeDispatch(args: JsonObject): JsonObject { return this.statefulCompute.dispatch(args); }
+  statefulComputeObserve(args: JsonObject): JsonObject { return this.statefulCompute.observe(args); }
+  statefulComputeDelegate(args: JsonObject): JsonObject { return this.statefulCompute.delegate(args); }
+  statefulComputeReport(args: JsonObject): JsonObject { return this.statefulCompute.report(args); }
+  statefulComputeCancel(args: JsonObject): JsonObject { return this.statefulCompute.cancel(args); }
+  statefulComputeSessionGet(args: JsonObject): JsonObject { return this.statefulCompute.sessionGet(args); }
 
   hostActivationManifestPrepare(args: JsonObject): JsonObject { return this.hostActivationManifests.prepare(args); }
   hostActivationManifestValidate(args: JsonObject): JsonObject { return this.hostActivationManifests.validate(args); }

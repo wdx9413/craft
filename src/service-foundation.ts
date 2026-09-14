@@ -101,6 +101,10 @@ import { HarnessTopologyKernel } from "./harness-topology.ts";
 import { RuntimeReadinessKernel } from "./runtime-readiness.ts";
 import { AssuredPilotKernel } from "./assured-pilot.ts";
 import { CapabilityKitRuntime } from "./capability-kit-runtime.ts";
+import { KnowledgeMemoryRuntime } from "./knowledge-memory-runtime.ts";
+import { WorkRuntimeModeKernel } from "./work-runtime-mode.ts";
+import { ContinualHarnessKernel } from "./continual-harness.ts";
+import { StatefulComputeKernel } from "./stateful-compute.ts";
 
 /**
  * Stable composition root for the service. Domain behavior stays in focused
@@ -167,6 +171,10 @@ export abstract class ServiceFoundation {
   readonly capabilityConnectors: CapabilityConnectorKernel;
   readonly capabilityAccess: CapabilityAccessKernel;
   readonly capabilityKits: CapabilityKitRuntime;
+  readonly knowledgeMemory: KnowledgeMemoryRuntime;
+  readonly workRuntimeModes: WorkRuntimeModeKernel;
+  readonly continualHarness: ContinualHarnessKernel;
+  readonly statefulCompute: StatefulComputeKernel;
   readonly hostActivationManifests: HostActivationManifestKernel;
   readonly executionFabric: ExecutionFabricKernel;
   readonly hostBridge: HostBridgeKernel;
@@ -279,6 +287,10 @@ export abstract class ServiceFoundation {
     this.capabilityConnectors = new CapabilityConnectorKernel(store);
     this.capabilityAccess = new CapabilityAccessKernel(store, this.catalog);
     this.capabilityKits = new CapabilityKitRuntime(store);
+    this.knowledgeMemory = new KnowledgeMemoryRuntime(store);
+    this.workRuntimeModes = new WorkRuntimeModeKernel(store, this.hostDrivers.keys());
+    this.continualHarness = new ContinualHarnessKernel(store);
+    this.statefulCompute = new StatefulComputeKernel(store);
     this.hostActivationManifests = new HostActivationManifestKernel(store, this.hostProfiles);
     this.executionFabric = new ExecutionFabricKernel(store);
     this.hostBridge = new HostBridgeKernel(store);

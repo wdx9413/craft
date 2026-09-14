@@ -1,5 +1,13 @@
 # Verified Work Loop、State Workspace 与 Eval Campaign
 
+> v0.12.19 将内部状态投影为条件化的五阶段协议：**定义 → 准备 → 行动 → 交付 → 学习**。这是长任务、写入任务和可交付任务的可靠性骨架，不是普通对话必须逐步经过的僵化流程。
+
+- 定义：固定 Task Contract、约束与成功标准；
+- 准备：读取 State Snapshot，最小化能力激活并完成预检；
+- 行动：Host 执行后写入 Receipt，再观察真实状态；
+- 交付：以 Acceptance、Delivery 与 Outcome 判断结果，不采信 Host 自述；
+- 学习：仅从已记录的轨迹和指标提出受 Gate 约束的候选。
+
 > 状态：v0.11.54 提供主链机制、Host Manifest、受控 Host Bridge 与脱敏 fixture；它不宣称任意业务 Harness 已经带来质量收益。
 
 ## 一个主入口，三个内部深模块

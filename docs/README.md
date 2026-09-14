@@ -29,6 +29,9 @@
 - [沙箱与风险分级执行](technical/modules/execution-policy.md)：现有隔离雏形、平台缺口、Shadow/补偿和安全验收。
 - [Transactional Runtime 与 Trajectory Compiler](technical/modules/transactional-runtime.md)：本地事务、脚本交接、分支重放与自动编译目标。
 - [上下文与记忆管理](technical/modules/context-memory.md)：CVMM 类比、按需工作集、偏好范围与后台整理目标。
+- [Knowledge Source、Memory Ledger 与 Context Resolution](technical/modules/knowledge-memory-runtime.md)：统一知识来源、兼容旧记忆、受限装配回执与可选向量检索准入。
+- [Console 与独立 Agent 运行模式](technical/modules/work-runtime-modes.md)：以同一 Policy、State、Receipt、Eval 内核支持 Host 控制台与模型无关 Agent 计划。
+- [Continual Harness 与持久计算协议](technical/modules/continual-harness-runtime.md)：证据化复盘、Session 临时适配、全局候选门禁、Host 无关状态快照与函数式只读 Sub-agent。
 - [控制面安全、资源与长任务护栏](technical/modules/control-plane-guardrails.md)：细粒度变更、凭据与提示注入、挂起恢复、预算、主动触发、GUI 兜底及组织共享边界。
 - [Recovery Queue 与受控主动性](technical/modules/recovery-proactive-runtime.md)：恢复工作投影、Worker Lease、过期回收、证据回执和主动执行边界。
 - [Provenance 与对象级 Lineage](technical/modules/provenance-lineage.md)：精确版本来源、转换器、Evidence、上下游追溯、环检测和陈旧检查。
