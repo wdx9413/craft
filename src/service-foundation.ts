@@ -112,6 +112,10 @@ import { EvaluationModelProfileKernel } from "./evaluation-model-profile.ts";
 import { WorkflowEvolutionKernel } from "./workflow-evolution.ts";
 import { TrustProfileKernel } from "./trust-profile.ts";
 import { WebOperationKernel } from "./web-operation.ts";
+import { WorkCoordinator } from "./application/coordinators/work-coordinator.ts";
+import { RuntimeCoordinator } from "./application/coordinators/runtime-coordinator.ts";
+import { EvaluationCoordinator } from "./application/coordinators/evaluation-coordinator.ts";
+import { WorkspaceCoordinator } from "./application/coordinators/workspace-coordinator.ts";
 
 /**
  * Stable composition root for the service. Domain behavior stays in focused
@@ -245,6 +249,11 @@ export abstract class ServiceFoundation {
   readonly a2aProtocol: A2AProtocolKernel;
   readonly trustProfiles: TrustProfileKernel;
   readonly webOperations: WebOperationKernel;
+  /** Explicit application contexts; kernels remain the single behavior owners. */
+  readonly workCoordinator: WorkCoordinator;
+  readonly runtimeCoordinator: RuntimeCoordinator;
+  readonly evaluationCoordinator: EvaluationCoordinator;
+  readonly workspaceCoordinator: WorkspaceCoordinator;
 
   constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter = new LocalIsolatedAdapter(),
     dockerSandbox = new DockerSandboxAdapter(), egressBroker = new TrustedEgressBroker(), hostOwnerId?: string,
@@ -366,6 +375,15 @@ export abstract class ServiceFoundation {
     this.a2aProtocol = new A2AProtocolKernel();
     this.trustProfiles = new TrustProfileKernel(store);
     this.webOperations = new WebOperationKernel(store);
+    this.workCoordinator = new WorkCoordinator(store, this.taskControl, this.taskRuns, this.verifiedWorkLoops,
+      this.workDelivery, this.deliveryLoop, this.workSessions);
+    this.runtimeCoordinator = new RuntimeCoordinator(store, this.actionGateway, this.durableWorker,
+      this.providerRouter, this.runtimeTruth, this.runtimeAssurance, this.autonomousRuntime, this.localRuntimeService);
+    this.evaluationCoordinator = new EvaluationCoordinator(store, this.evalCampaigns, this.evaluationOperations,
+      this.acceptanceGates, this.domainEvaluators, this.evaluationModelProfiles, this.taskBenchmarks,
+      this.campaignRunners, this.feedbackLearning, this.costLedger, this.providerRouter);
+    this.workspaceCoordinator = new WorkspaceCoordinator(store, this.workspace, this.transaction, this.workbench,
+      this.stateWorkspace, this.workspaceObserver, this.changeSets, this.projectBrain, this.lineage, this.hydration);
     this.hostRuns = new HostRunKernel(store, [...this.hostDrivers.values()], hostOwnerId,
       (run, receipt) => this.finalizeWorkLaunch(run, receipt), this.trace);
   }
