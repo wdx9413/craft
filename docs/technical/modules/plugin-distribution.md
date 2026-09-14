@@ -10,7 +10,7 @@
 
 `pnpm run build` 先生成 MCP bundle，再执行 `pnpm run pack:plugin`：它精确复制当前的 route Skill 和两个 bundle。`pnpm run test:plugin` 会验证目录完整性、版本一致性、市场路径、Skill 内容一致性、根 `dist/` 未被 Git 跟踪，并在临时目录启动 MCP 完成握手。
 
-桌面 `.app`、Windows ZIP、二进制、adapter ZIP、一般 CLI 编译产物和 source map 都不属于插件包。它们由 GitHub Actions 在 tag 发布时构建为 Release assets；源码仓库也忽略根 `dist/`，避免新发布继续膨胀 Git 历史。
+桌面 `.app`、Windows ZIP、二进制、adapter ZIP、一般 CLI 编译产物和 source map 都不属于插件包。当前不构建也不发布这些平台安装资产；待桌面交付重新进入范围时，再建立独立的 GitHub Release 流水线。源码仓库继续忽略根 `dist/`，避免未来发布继续膨胀 Git 历史。
 
 ## 兼容边界
 

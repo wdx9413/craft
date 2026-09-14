@@ -133,7 +133,7 @@ pnpm test
 
 插件只读取 `plugins/craft/` 中的 manifest、`craft-route` Skill 和两个单文件 MCP bundle；不会把源码、桌面应用、适配器包或 source map 复制进插件缓存。`skills/craft` 与 `skills/craft-clarify` 可作为独立可选包安装，但这样不会自动获得 MCP 数据层。
 
-从 v0.12.14 起，插件发行物固定在 `plugins/craft/`；Codex 把该轻量目录复制到缓存后无需再执行 `npm install`，也不会依赖源码仓库的 `node_modules`。桌面 `.app`、Windows ZIP 和运行时二进制只由 GitHub Release 分发。升级后请重新安装插件，并在新会话中验证 `craft_info`。
+从 v0.12.14 起，插件发行物固定在 `plugins/craft/`；Codex 把该轻量目录复制到缓存后无需再执行 `npm install`，也不会依赖源码仓库的 `node_modules`。当前暂不构建或发布桌面 `.app`、Windows ZIP、运行时二进制等平台安装包；它们不会进入插件目录或 Git 历史。升级后请重新安装插件，并在新会话中验证 `craft_info`。
 
 ## 接入 Claude Code
 

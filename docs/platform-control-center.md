@@ -16,7 +16,7 @@ Craft 的版本升级遵循单向可迁移原则：旧数据库按有序 migrati
 
 ## 桌面分发边界
 
-Windows 原生 runner 会生成含 Node runtime、真正的 `craft.exe` 和应用资源的绿色 ZIP；双击 `craft.exe` 会隐藏命令窗口并打开浏览器 Workbench，`.cmd`/`.ps1` 仅保留给高级用户。若默认 `~/.craft_data` 在 Windows 上暂时不可写，便携启动器会回退到 `%LOCALAPPDATA%\Craft\data`；显式设置 `CRAFT_DATA_DIR` 时不做回退并弹出可读错误。macOS 原生 runner 会把 Node runtime 放进 `.app`，再使用 `hdiutil` 生成真正的 `.dmg`。Windows 当前开发机无法合法生成 macOS DMG，因此 `.github/workflows/desktop-release.yml` 在 macOS runner 上产出它；不生成伪文件冒充 DMG。
+Windows 原生 runner 的绿色 ZIP、macOS `.app`/`.dmg` 仍只是未来可复用的打包方案；当前版本不构建、不提交、也不发布这些平台安装资产。若以后恢复桌面交付，Windows 方案应携带 Node runtime、真正的 `craft.exe` 和应用资源，并在默认数据目录不可写时回退到 `%LOCALAPPDATA%\Craft\data`；macOS 方案应在 macOS runner 上使用 `hdiutil` 生成真实 DMG，不生成伪文件冒充 DMG。
 
 ## 当前架构图（v0.12.13）
 
