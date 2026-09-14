@@ -27,7 +27,7 @@ import { dockerRequestDigest } from "./docker-sandbox.ts";
 import { egressRequestDigest } from "./egress.ts";
 import { ServiceFoundation } from "./service-foundation.ts";
 
-export const VERSION = "0.12.15";
+export const VERSION = "0.12.16";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -318,7 +318,7 @@ export class CraftService extends ServiceFoundation {
       "maintenance_status",
       "maintenance_tick",
       "maintenance_component", "maintenance_failure", "attention_item", "work_launch", "work_delivery", "delivery_loop", "delivery_evaluation_case", "delivery_evaluation_comparison", "delivery_evaluation_run", "platform_execution_profile", "platform_execution_preflight", "platform_execution_probe", "platform_execution_conformance", "task_run", "task_run_state", "task_run_handoff", "task_benchmark", "task_benchmark_pair", "task_benchmark_canary_sample", "state_snapshot", "verified_work_loop", "verified_work_loop_receipt", "verified_work_loop_decision", "human_state_event", "work_loop_invalidation", "eval_campaign", "eval_campaign_slot", "eval_campaign_report", "managed_write_guard", "managed_write_settlement", "adaptive_harness_recommendation", "project_knowledge_discovery", "project_knowledge_resolution", "project_knowledge_proposal", "acceptance_plan", "acceptance_check", "acceptance_assessment", "acceptance_evaluator", "acceptance_evaluation_job", "verified_iteration", "iteration_attempt", "strategy_recommendation", "runtime_assurance_attestation", "runtime_intervention", "runtime_assurance_campaign",
-      "trajectory_script_proposal", "verified_script_run", "knowledge_claim", "wiki_page", "knowledge_relation", "wiki_context_bundle", "wiki_skill_candidate", "knowledge_evaluation_case", "knowledge_evaluation_run", "wiki_candidate_evaluation_attestation", "wiki_candidate_publication_authorization", "wiki_candidate_publication_package", "guided_work_brief", "execution_safety_preflight", "wiki_candidate_local_import", "autonomy_ladder_decision", "workspace_observation", "work_coordinator", "agent_eval_lab", "agent_eval_attempt", "evaluation_program", "evaluation_program_run", "enterprise_identity_provider", "enterprise_principal", "enterprise_adapter_binding", "enterprise_access_ticket", "a2a_agent_trust", "a2a_collaboration_session", "a2a_delegation", "a2a_delegation_receipt", "project_brain", "project_goal", "project_decision", "project_material", "project_outcome", "project_experience", "work_session", "long_task_checkpoint"];
+      "trajectory_script_proposal", "verified_script_run", "knowledge_claim", "wiki_page", "knowledge_relation", "wiki_context_bundle", "wiki_skill_candidate", "knowledge_evaluation_case", "knowledge_evaluation_run", "wiki_candidate_evaluation_attestation", "wiki_candidate_publication_authorization", "wiki_candidate_publication_package", "guided_work_brief", "execution_safety_preflight", "wiki_candidate_local_import", "autonomy_ladder_decision", "workspace_observation", "work_coordinator", "agent_eval_lab", "agent_eval_attempt", "evaluation_program", "evaluation_program_run", "enterprise_identity_provider", "enterprise_principal", "enterprise_adapter_binding", "enterprise_access_ticket", "a2a_agent_trust", "a2a_collaboration_session", "a2a_delegation", "a2a_delegation_receipt", "federated_agent_health", "federated_delegation_grant", "federated_artifact_grant", "federated_remote_receipt", "federated_remote_incident", "harness_topology", "harness_topology_selection", "runtime_readiness_assessment", "project_brain", "project_goal", "project_decision", "project_material", "project_outcome", "project_experience", "work_session", "long_task_checkpoint"];
     kinds.push("untrusted_content", "untrusted_extraction", "decision_projection");
     return { version: VERSION, data_root: this.store.paths.root,
       counts: Object.fromEntries(kinds.map((kind) => [kind, this.store.count(kind)])) };
@@ -2193,6 +2193,20 @@ export class CraftService extends ServiceFoundation {
   a2aDelegationDispatch(args: JsonObject): JsonObject { return this.a2aDelegation.dispatch(args); }
   a2aDelegationReport(args: JsonObject): JsonObject { return this.a2aDelegation.report(args); }
   a2aDelegationGet(args: JsonObject): JsonObject { return this.a2aDelegation.get(args); }
+  federatedAgentHealthRecord(args: JsonObject): JsonObject { return this.federatedDelegation.healthRecord(args); }
+  federatedDelegationGrantIssue(args: JsonObject): JsonObject { return this.federatedDelegation.issue(args); }
+  federatedDelegationGrantConsume(args: JsonObject): JsonObject { return this.federatedDelegation.consume(args); }
+  federatedDelegationReceiptRecord(args: JsonObject): JsonObject { return this.federatedDelegation.receiptRecord(args); }
+  federatedDelegationRevoke(args: JsonObject): JsonObject { return this.federatedDelegation.revoke(args); }
+  federatedDelegationReconcile(args: JsonObject): JsonObject { return this.federatedDelegation.reconcile(args); }
+  federatedDelegationGet(args: JsonObject): JsonObject { return this.federatedDelegation.get(args); }
+  harnessTopologyDefine(args: JsonObject): JsonObject { return this.harnessTopologies.define(args); }
+  harnessTopologyPromote(args: JsonObject): JsonObject { return this.harnessTopologies.promote(args); }
+  harnessTopologySelect(args: JsonObject): JsonObject { return this.harnessTopologies.select(args); }
+  harnessTopologySuspend(args: JsonObject): JsonObject { return this.harnessTopologies.suspend(args); }
+  harnessTopologyGet(args: JsonObject): JsonObject { return this.harnessTopologies.get(args); }
+  runtimeReadinessAssess(args: JsonObject): JsonObject { return this.runtimeReadiness.assess(args); }
+  runtimeReadinessGet(args: JsonObject): JsonObject { return this.runtimeReadiness.get(args); }
   knowledgeEvaluationCaseSave(args: JsonObject): JsonObject {
     const query = assertNoSecret(text(args.query, "query"), "query"); const scope = String(args.scope ?? "global"); const expected = uniqueTextArray(args.expected_claim_ids, "expected_claim_ids"); expected.forEach((item) => this.store.get("knowledge_claim", item));
     const caseId = String(args.case_id ?? id("knowledge_evaluation_case")); const existing = this.store.find("knowledge_evaluation_case", caseId); const identity = { query, scope, expected_claim_ids: expected };

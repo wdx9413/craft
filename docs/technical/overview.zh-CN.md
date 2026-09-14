@@ -135,3 +135,4 @@ Observed Delivery ──pairs──> Eval Campaign Report ──with Canary Evid
 - [Capability Certification：候选能力认证与晋级](modules/capability-certification.md)
 - [Supply-chain Governance：可信能力的持续治理](modules/supply-chain-governance.md)
 - [Local Maintenance Worker：持续运行的本地控制面](modules/local-maintenance-worker.md)
+v0.12.16 在现有 Task、A2A 和 Runtime Assurance 之上增加联邦委派 Grant、评测驱动的 Harness Topology 与 Runtime Readiness Assessment。默认仍是单 Agent；远程协作只传引用、可撤销且失败关闭。详见[联邦委派与受限多 Agent 运行时](modules/federated-delegation-runtime.zh-CN.md)。

@@ -1,6 +1,6 @@
 # Craft：受控 Agent 工作运行时
 
-> 本文是 Craft 的总览入口。它解释产品解决的问题、关键概念如何连接、当前实现做到哪里，以及在面试或架构评审中应如何准确回答。当前实现基线为 v0.12.15；旧版本号只表示历史里程碑。
+> 本文是 Craft 的总览入口。它解释产品解决的问题、关键概念如何连接、当前实现做到哪里，以及在面试或架构评审中应如何准确回答。当前实现基线为 v0.12.16；旧版本号只表示历史里程碑。
 
 ## 一句话
 
@@ -71,7 +71,7 @@ Outcome，或 needs_replan / handoff
 三个规则最重要：
 
 - Host 完成只说明 Host 已返回；仍要重新观察状态并执行 Acceptance。
-- v0.12.15 的 `Runtime Assurance` 只在终态 Host 回执、环境/预算、再观察与（写入时）平台预检一致时形成 Attestation；Campaign 每个绑定 slot 都具备该事实后才可聚合。
+- v0.12.16 的 `Runtime Assurance` 只在终态 Host 回执、环境/预算、再观察与（写入时）平台预检一致时形成 Attestation；Campaign 每个绑定 slot 都具备该事实后才可聚合。
 - 文件、输入、权限、能力版本、环境或预算发生漂移时，旧路径进入 `needs_replan`，不会借用旧 Receipt。
 - 人工修改是 `HumanStateEvent`，是新的事实，不要求模型“记住”人刚才改了什么。
 
@@ -155,6 +155,8 @@ Trial / Evaluation / Signoff：某个方法在可比较样本上是否值得复�
 ## 多 Agent 与 Expert
 
 Craft 不默认多 Agent。只有当子目标可独立验证、上下文可以切分、额外成本能在评测中抵消时，才应该增加 Expert 或子操作。v0.11.58 的远程 A2A 还额外要求 eligible 单 Agent 基线、confirmed Evidence、人工信任决定和只读 effect；它传递 Artifact/Evidence 引用而非原始上下文，真实传输仍由 Host Adapter 负责。
+
+v0.12.16 将该原则落为 `Harness Topology`：唯一 baseline 是单个 primary Agent；最多五个只读角色只作为 shadow candidate，须经配对评测后才可能被选择。远程 A2A 还必须消费绑定父 Task Run、audience、能力/Artifact scope、effect 与到期时间的 `Delegation Grant`，并在远端 Receipt 与环境摘要一致时才能成为证据。
 
 当前 `diagnostic_research` Expert 是受限的只读诊断角色；子操作必须给出假设、反例、Evidence 引用、置信边界与下一步，父任务负责裁决。历史文档中“Sub-agent Run”统一理解为 **Sub-agent Operation**：代码中它是父 Runtime Operation 下的子 Operation，而非一个新的根 Task Run。
 

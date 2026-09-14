@@ -1,6 +1,6 @@
 # Capability Connector
 
-> 状态：v0.12.15 实现本地、显式注册的 Connector 控制面与 Host Manifest/Bridge 边界。它验证元数据、操作 scope、健康回执和调用票据；不替 Host 安装、启动或配置第三方服务。
+> 状态：v0.12.16 实现本地、显式注册的 Connector 控制面与 Host Manifest/Bridge 边界。它验证元数据、操作 scope、健康回执和调用票据；不替 Host 安装、启动或配置第三方服务。
 
 ## 职责
 

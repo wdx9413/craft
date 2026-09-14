@@ -1,6 +1,6 @@
 {
   "name": "craft-agent-harness",
-  "version": "0.12.15",
+  "version": "0.12.16",
   "description": "Cross-platform capability, workflow, evidence, and agent harness",
   "type": "module",
   "bin": {
@@ -9,7 +9,7 @@
     "craft-mcp-full": "dist/bin/craft-mcp-full.js"
   },
   "scripts": {
-    "test": "pnpm run build && pnpm run typecheck && pnpm run test:ts && pnpm run test:smoke && pnpm run test:plugin",
+    "test": "pnpm run build && pnpm run typecheck && pnpm run test:ts && pnpm run test:v01216 && pnpm run test:smoke && pnpm run test:plugin",
     "clean": "node --experimental-strip-types scripts/clean.ts",
     "build": "pnpm run clean && pnpm run build:core && pnpm run build:plugin && pnpm run pack:plugin && pnpm run build:deepseek && pnpm run pack:adapters",
     "build:core": "node node_modules/typescript/bin/tsc -p tsconfig.build.json",
@@ -23,6 +23,7 @@
     "test:plugin": "node --experimental-strip-types scripts/check-plugin-package.ts && node --experimental-strip-types scripts/plugin-smoke.ts && node --experimental-strip-types scripts/plugin-full-smoke.ts",
     "version:check": "node --experimental-strip-types scripts/check-version.ts",
     "test:ts": "pnpm run version:check && node --experimental-strip-types scripts/test.ts",
+    "test:v01216": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-include=src/federated-delegation.ts --test-coverage-include=src/harness-topology.ts --test-coverage-include=src/runtime-readiness.ts --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 tests/v01216-federated-runtime.test.ts",
     "check:ts": "node --experimental-strip-types src/cli.ts --help",
     "typecheck": "node node_modules/typescript/bin/tsc --noEmit"
   },

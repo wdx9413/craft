@@ -1,4 +1,4 @@
-# Current Capability Matrix (v0.12.15)
+# Current Capability Matrix (v0.12.16)
 
 | Area | State | Boundary |
 |---|---|---|
@@ -11,6 +11,9 @@
 | Durable Worker lease/recovery | implemented locally | persistent bounded worker state; OS daemon, tray and notification delivery remain adapters |
 | Provider fallback route | implemented locally | provider order and usage receipt; protocol streaming and credentials remain Host/Model adapters |
 | Standard A2A operations | protocol adapter | digest-only message/send, stream and task list; auth, push, Artifact content and remote execution remain deployment work |
+| Federated delegation | governed remote collaboration | health-bound one-time Grant, scoped Artifact grants, revocation and indeterminate timeout; remote transport/identity remains an Adapter concern |
+| Harness topology | evaluated optional coordination | single-Agent baseline by default; up to five read-only roles only after paired evidence; no hidden Agent launch |
+| Runtime readiness | deployment fact assessment | evidence, recovery, platform preflight and enterprise binding blockers; does not claim a Host/Sandbox/Broker is deployed |
 | Context selection | implemented | exact references and digests; vector search remains optional |
 | Trace / Workbench projection | implemented locally | controlled Replay Runner now revalidates the terminal Trace and records step receipts; external effect executors remain deployment adapters |
 | Long-task recovery | implemented protocol | fresh Host dispatch is required after process release |

@@ -83,6 +83,18 @@ _Avoid_: Workflow、Agent
 **Sub-agent Operation**：父 Runtime Operation 下、为一个独立只读诊断目标创建的子 Operation。历史文档中的 “Sub-agent Run” 指此概念；它不是一个独立的根 Run。
 _Avoid_: 独立 Agent、子任务线程
 
+**Harness Topology**：一个 Task 可选的 Agent 角色组合。唯一默认 Topology 是单个 `primary`；诊断、独立评估或远程只读角色必须先作为候选接受配对评测，才可被路由选择。
+_Avoid_: 默认多 Agent、Agent 群
+
+**Delegation Grant**：绑定父 Task Run、父操作、远端受众、能力/Artifact scope、effect、到期时间和撤销状态的一次性远程协作授权。它不是 A2A Card、网络 Token 或远端已执行的证明。
+_Avoid_: A2A 会话、访问凭据、远程任务
+
+**Artifact Grant**：从 Delegation Grant 派生的、对一个精确 Artifact 版本的只读引用授权。它不承载 Artifact 正文，也不能扩大父 Grant 的范围。
+_Avoid_: 文件副本、共享上下文
+
+**Runtime Readiness Assessment**：基于 Evidence、平台 Preflight、恢复能力及企业 Binding 得出的部署就绪检查。它只枚举已证实条件和阻塞项，不等同于已部署的 Host、Sandbox 或 Broker。
+_Avoid_: 健康检查、上线证明
+
 **Effect**：动作可能造成的状态影响等级，如 `read_only`、`local_write`、`external_write` 或 `destructive`。Effect 是权限输入，不是风险已被消除的证明。
 _Avoid_: Sandbox、Approval
 

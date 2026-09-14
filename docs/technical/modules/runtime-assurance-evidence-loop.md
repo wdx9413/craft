@@ -1,4 +1,4 @@
-# Runtime Assurance & Evidence Loop（v0.12.15）
+# Runtime Assurance & Evidence Loop（v0.12.16）
 
 > 状态：本地实现并有脱敏测试。它证明 Craft 已收集到的事实彼此一致；不把本地记录冒充为对未接入 Host、外部系统或操作系统隔离器的控制。
 
