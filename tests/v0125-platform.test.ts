@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { craftPaths, dataRoot } from "../src/paths.ts";
 import { defaultSettings, loadSettings, loadSettingsSync, normalizeSettings, publicSettings, resetSettings, resetSettingsSync, saveSettings } from "../src/settings.ts";
 import { CraftStore } from "../src/store.ts";
@@ -36,7 +36,7 @@ test("settings persist, validate, and support a relocatable data root", async ()
   await writeFile(malformed.settingsFile, "not-json", "utf8");
   assert.equal((await loadSettings(malformed)).theme, "system");
   assert.equal(loadSettingsSync(malformed).theme, "system");
-  assert.equal(dataRoot({ CRAFT_SETTINGS_FILE: malformed.settingsFile }), join(process.env.USERPROFILE ?? process.cwd(), ".craft_data"));
+  assert.equal(dataRoot({ CRAFT_SETTINGS_FILE: malformed.settingsFile }), join(homedir(), ".craft_data"));
   assert.equal(dataRoot({ CRAFT_DATA_DIR: join(root, "env") }), join(root, "env"));
   const bootstrap = join(root, "bootstrap.json");
   await writeFile(bootstrap, JSON.stringify({ dataRoot: join(root, "from-settings") }), "utf8");
@@ -51,7 +51,7 @@ test("usage report aggregates facts by day, ISO week, month, year, and host", as
     store.create("codex_receipt", "r1", { host: "codex-cli", completed_at: "2026-09-13T10:00:00Z", usage: { input_tokens: 4, output_tokens: 6 } });
     store.create("claude_receipt", "r2", { host: "claude-code", completed_at: "2026-09-12T10:00:00Z", usage: { promptTokens: 2, completionTokens: 3 } });
     store.create("internal_receipt", "r3", { host: "internal", completed_at: "2026-08-01T10:00:00Z", loop: { tokens: 8 } });
-    store.create("outcome", "o1", { created_at: "2026-09-13T11:00:00Z", costs: { usage: { totalTokens: 7 } } });
+    store.create("outcome", "o1", { completed_at: "2026-09-13T11:00:00Z", costs: { usage: { totalTokens: 7 } } });
     store.create("autonomous_turn", "t1", { host: "internal", observed_at: "2026-09-13T12:00:00Z", tokens: 9 });
     store.create("autonomous_turn", "t3", { observed_at: "2026-09-13T12:30:00Z", tokens: 1 });
     store.create("codex_receipt", "empty", { host: "codex-cli", completed_at: "2026-09-13T13:00:00Z", usage: {} });

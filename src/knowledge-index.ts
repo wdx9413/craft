@@ -4,17 +4,15 @@ import { dirname, join, relative, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 /**
- * Markdown stays the source of truth; SQLite FTS5 is a rebuildable projection of
- * it. Deleting the index loses nothing, and a stale index is detectable because
+ * Markdown stays the source of truth; SQLite is a rebuildable projection of it.
+ * Deleting the index loses nothing, and a stale index is detectable because
  * every projected document carries the digest of the file it came from.
  *
- * The projection uses the FTS5 `trigram` tokenizer on purpose: the default
- * `unicode61` tokenizer cannot match a Chinese substring at all, which would
- * make the knowledge layer useless for the workflows this project targets.
+ * Search uses deterministic token conjunction against the content table. This
+ * keeps the index portable when a Node runtime ships SQLite without FTS5.
  */
 const MAX_FILES = 2_000;
 const DEFAULT_CHUNK_CHARS = 4_000;
-const MIN_TRIGRAM_CHARS = 3;
 
 /**
  * Where a document belongs, and therefore how long it may be trusted.
@@ -139,7 +137,6 @@ export class KnowledgeIndex {
     this.db.exec([
       "CREATE TABLE IF NOT EXISTS knowledge_document(path TEXT PRIMARY KEY, digest TEXT NOT NULL, size_bytes INTEGER NOT NULL, chunks INTEGER NOT NULL);",
       "CREATE TABLE IF NOT EXISTS knowledge_chunk(path TEXT NOT NULL, ordinal INTEGER NOT NULL, heading TEXT, body TEXT NOT NULL, PRIMARY KEY(path, ordinal));",
-      "CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_fts USING fts5(path UNINDEXED, heading, body, tokenize='trigram');",
       "CREATE TABLE IF NOT EXISTS knowledge_scope(path TEXT PRIMARY KEY, scope TEXT NOT NULL, expires_at TEXT, updated_at TEXT NOT NULL);",
     ].join("\n"));
   }
@@ -206,7 +203,6 @@ export class KnowledgeIndex {
   forgetExpired(now = Date.now()): { forgotten: string[] } {
     const stale = this.expired(now);
     for (const entry of stale) {
-      this.db.prepare("DELETE FROM knowledge_fts WHERE path = ?").run(entry.path);
       this.db.prepare("DELETE FROM knowledge_chunk WHERE path = ?").run(entry.path);
       this.db.prepare("DELETE FROM knowledge_document WHERE path = ?").run(entry.path);
       this.db.prepare("DELETE FROM knowledge_scope WHERE path = ?").run(entry.path);
@@ -223,20 +219,16 @@ export class KnowledgeIndex {
       for (const document of upserts) {
         const content = readFileSync(join(base, document.path), "utf8");
         const chunks = chunkMarkdown(content);
-        this.db.prepare("DELETE FROM knowledge_fts WHERE path = ?").run(document.path);
         this.db.prepare("DELETE FROM knowledge_chunk WHERE path = ?").run(document.path);
         this.db.prepare("DELETE FROM knowledge_document WHERE path = ?").run(document.path);
         this.db.prepare("INSERT INTO knowledge_document(path, digest, size_bytes, chunks) VALUES (?, ?, ?, ?)")
           .run(document.path, document.digest, document.size_bytes, chunks.length);
         const insertChunk = this.db.prepare("INSERT INTO knowledge_chunk(path, ordinal, heading, body) VALUES (?, ?, ?, ?)");
-        const insertFts = this.db.prepare("INSERT INTO knowledge_fts(path, heading, body) VALUES (?, ?, ?)");
         for (const [ordinal, chunk] of chunks.entries()) {
           insertChunk.run(document.path, ordinal, chunk.heading, chunk.body);
-          insertFts.run(document.path, chunk.heading, chunk.body);
         }
       }
       for (const document of plan.removed) {
-        this.db.prepare("DELETE FROM knowledge_fts WHERE path = ?").run(document.path);
         this.db.prepare("DELETE FROM knowledge_chunk WHERE path = ?").run(document.path);
         this.db.prepare("DELETE FROM knowledge_document WHERE path = ?").run(document.path);
       }
@@ -255,19 +247,14 @@ export class KnowledgeIndex {
   }
 
   /**
-   * Substring search. `trigram` needs at least three characters per term, so a
-   * shorter query falls back to LIKE instead of silently returning nothing.
+   * Portable substring search. Every term must occur in the same chunk; the
+   * ordered query and row order make the result reproducible across SQLite
+   * builds, including Node runtimes without FTS5.
    */
   search(query: string, options: { limit?: number } = {}): KnowledgeHit[] {
     const limit = options.limit ?? 10;
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error("Knowledge search limit must be an integer between 1 and 100");
     const tokens = knowledgeQueryTokens(query);
-    if (tokens.every((token) => token.length >= MIN_TRIGRAM_CHARS)) {
-      const expression = tokens.map((token) => `"${token}"`).join(" ");
-      return this.db.prepare("SELECT path, heading, snippet(knowledge_fts, 2, '[', ']', '…', 12) AS snippet, rank FROM knowledge_fts WHERE knowledge_fts MATCH ? ORDER BY rank LIMIT ?")
-        .all(expression, limit)
-        .map((row) => ({ path: String(row.path), heading: row.heading === null ? null : String(row.heading), snippet: String(row.snippet), rank: Number(row.rank) }));
-    }
     const clause = tokens.map(() => "body LIKE ?").join(" AND ");
     return this.db.prepare(`SELECT path, heading, body FROM knowledge_chunk WHERE ${clause} ORDER BY path, ordinal LIMIT ?`)
       .all(...tokens.map((token) => `%${token}%`), limit)

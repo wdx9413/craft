@@ -16,7 +16,7 @@ async function fixture() {
   return { root, store, service: new CraftService(store) };
 }
 
-test("v0.12.13 action gateway enforces workspace boundaries and approval", async () => {
+test("v0.12.14 action gateway enforces workspace boundaries and approval", async () => {
   const f = await fixture();
   try {
     const kernel = new ActionGatewayKernel(f.store);
@@ -42,7 +42,7 @@ test("v0.12.13 action gateway enforces workspace boundaries and approval", async
   } finally { f.store.close(); }
 });
 
-test("v0.12.13 acceptance, worker and provider kernels form a durable local control path", async () => {
+test("v0.12.14 acceptance, worker and provider kernels form a durable local control path", async () => {
   const f = await fixture();
   try {
     const gate = new AcceptanceGateKernel(f.store);
@@ -79,7 +79,7 @@ test("v0.12.13 acceptance, worker and provider kernels form a durable local cont
   } finally { f.store.close(); }
 });
 
-test("v0.12.13 A2A standard operations are HTTPS-only and content-free", async () => {
+test("v0.12.14 A2A standard operations are HTTPS-only and content-free", async () => {
   const response = async () => ({ ok: true, status: 200, json: async () => ({ task_id: "remote", status: "working" }) }) as Response;
   const fetchImpl = (async () => response()) as unknown as typeof fetch;
   const kernel = new A2AProtocolKernel();
@@ -91,7 +91,7 @@ test("v0.12.13 A2A standard operations are HTTPS-only and content-free", async (
   await assert.rejects(() => kernel.listTasks({ endpoint: "https://agent.test" }, badFetch), /HTTP 503/);
 });
 
-test("v0.12.13 service and MCP expose the new runtime surface", async () => {
+test("v0.12.14 service and MCP expose the new runtime surface", async () => {
   const f = await fixture();
   try {
     const service = f.service;

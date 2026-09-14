@@ -20,7 +20,7 @@ if (typeof packageVersion !== "string" || !/^\d+\.\d+\.\d+$/.test(packageVersion
   throw new Error("package.json must provide a semantic version as the release source of truth");
 }
 
-for (const path of [".codex-plugin/plugin.json", ".claude-plugin/plugin.json",
+for (const path of ["plugins/craft/.codex-plugin/plugin.json", ".claude-plugin/plugin.json",
   "adapters/workbuddy-expert/.codebuddy-plugin/plugin.json", "adapters/workbuddy-connector/connector-meta.json",
   "adapters/deepseek-harness/package.json"]) {
   const manifestVersion = (await json(path)).version;

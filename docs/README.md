@@ -44,6 +44,7 @@
 - [Attention Inbox](technical/modules/attention-inbox.md)：把审批、恢复、后台异常和候选成果投影为统一待处理卡片。
 - [Workbench Home](technical/modules/workbench-home.md)：为 CLI、MCP 和未来 UI 组合任务、成果、预算、运行与健康状态。
 - [Local Workbench Web](technical/modules/local-workbench-web.md)：只监听本机、令牌保护的首个可见工作台。
+- [Codex 插件轻量分发](technical/modules/plugin-distribution.md)：源码与发布插件解耦，市场只读取 manifest、Skill 与 MCP bundle。
 - [可插拔能力源与最小默认能力](technical/modules/pluggable-capability-sources.md)：把 Skill、MCP、Registry、专家和未来 A2A Agent 接入同一治理链，同时限制内置 Prompt 负担。
 - [受治理能力接入示例](governed-capability-intake.md)：从签名目录到非可执行候选的端到端路径，以及跨宿主边界。
 - [Knowledge-bound Work Launch](technical/modules/knowledge-bound-work-launch.md)：把受审核、可复算的 Wiki Context Bundle 固定到真实 Host 任务，并在变化时失败关闭。

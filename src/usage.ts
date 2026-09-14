@@ -25,7 +25,7 @@ function recordUsage(record: JsonObject): UsageBucket {
   return usage(record.usage ?? record.loop);
 }
 function timestamp(record: JsonObject): number | null {
-  for (const key of ["completed_at", "finished_at", "created_at", "updated_at", "observed_at"]) {
+  for (const key of ["completed_at", "finished_at", "observed_at", "created_at", "updated_at"]) {
     const value = Date.parse(String(record[key] ?? "")); if (Number.isFinite(value)) return value;
   }
   return null;

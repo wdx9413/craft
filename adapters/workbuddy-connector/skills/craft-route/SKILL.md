@@ -4,7 +4,7 @@ display_name: Craft 路由
 description: Route substantial work to Craft's smallest safe MCP surface before selecting detailed tools.
 description_zh: 先用最小 Craft 路由面决定复杂工作，再按需加载能力。
 category: productivity
-version: 0.12.13
+version: 0.12.14
 author: wdx9413
 ---
 

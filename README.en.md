@@ -1,6 +1,6 @@
 # Craft
 
-> Current release: v0.12.13. Every host follows a route-first boundary with a low-token syscall MCP. GUI, CLI, Codex/Claude plugins, TraeWork, and WorkBuddy Experts share the same host-neutral Intent and Acceptance Contracts, while the Runtime Truth Layer adds unified Context Manifests, controlled Replay, a persistent local runtime, portable Project Bundles, feedback signals, domain evaluators, handoff manifests, and cost attribution. v0.12.13 adds a bounded Action Gateway, mandatory Acceptance Gate, Worker lease/recovery, Provider fallback routing, and standard A2A operation entry points. Real cloud execution, marketplace publication, and OS-level isolation still require a deployment adapter or platform review; they are not claimed as shipped services.
+> Current release: v0.12.14. Every host follows a route-first boundary with a low-token syscall MCP. GUI, CLI, Codex/Claude plugins, TraeWork, and WorkBuddy Experts share the same host-neutral Intent and Acceptance Contracts, while the Runtime Truth Layer adds unified Context Manifests, controlled Replay, a persistent local runtime, portable Project Bundles, feedback signals, domain evaluators, handoff manifests, and cost attribution. v0.12.13 adds a bounded Action Gateway, mandatory Acceptance Gate, Worker lease/recovery, Provider fallback routing, and standard A2A operation entry points. Real cloud execution, marketplace publication, and OS-level isolation still require a deployment adapter or platform review; they are not claimed as shipped services.
 
 [中文](README.md) | [English](README.en.md)
 
@@ -91,7 +91,7 @@ pnpm test
 
 ## Codex plugin
 
-Add `https://github.com/wdx9413/craft` as a Git marketplace source. Pin a release tag when possible and use `.` as the sparse path because the plugin manifest is at repository root.
+Add `https://github.com/wdx9413/craft` as a Git marketplace source. Pin a release tag when possible and use `./plugins/craft` as the sparse path. The published plugin package contains only its manifest, `craft-route` Skill, and bundled MCP entry points.
 
 Since v0.2.1, the plugin MCP starts from a versioned single-file bundle committed with the plugin. A Codex cache copy therefore needs neither `npm install` nor the source repository's `node_modules`. Reinstall after upgrading from an older version and verify `craft_info` in a new session.
 

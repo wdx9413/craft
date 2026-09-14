@@ -1,15 +1,17 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
+const pluginRoot = join(root, "plugins", "craft");
+const manifest = JSON.parse(await readFile(join(pluginRoot, ".codex-plugin", "plugin.json"), "utf8"));
 const dataRoot = await mkdtemp(join(tmpdir(), "craft-plugin-full-smoke-"));
-const child = spawn("node", [join(root, "dist/plugin/craft-mcp-full.cjs")], {
-  cwd: root, env: { ...process.env, CRAFT_DATA_DIR: join(dataRoot, "data") }, stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
+const child = spawn("node", [join(pluginRoot, "dist/plugin/craft-mcp-full.cjs")], {
+  cwd: pluginRoot, env: { ...process.env, CRAFT_DATA_DIR: join(dataRoot, "data") }, stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
 });
 try {
   assert(child.stdin && child.stdout && child.stderr, "full MCP smoke test requires piped stdio");
@@ -19,7 +21,7 @@ try {
   await Promise.race([once(child.stdout, "data"), new Promise<never>((_, reject) => setTimeout(() => reject(new Error(errors || "Full MCP smoke test timed out")), 5_000))]);
   await new Promise((resolveOutput) => setTimeout(resolveOutput, 25));
   const responses = output.trim().split(/\r?\n/).map((line) => JSON.parse(line));
-  assert.equal(responses[0].result.serverInfo.version, "0.12.10");
+  assert.equal(responses[0].result.serverInfo.version, manifest.version);
   assert((responses[1].result.tools as Array<{ name: string }>).some((tool) => tool.name === "craft_skill_proposal_publish"));
   console.log("Bundled full MCP starts and retains legacy tools.");
 } finally {

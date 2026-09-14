@@ -6,7 +6,7 @@ description: Route substantial work to Craft's smallest safe MCP surface before 
 description_zh: 先用最小 Craft 路由面决定复杂工作，再按需加载能力。
 description_en: Route substantial work through Craft before loading detailed capabilities.
 category: productivity
-version: 0.12.13
+version: 0.12.14
 author: wdx9413
 ---
 

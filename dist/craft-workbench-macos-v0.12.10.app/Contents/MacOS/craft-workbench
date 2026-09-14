@@ -1,3 +1,0 @@
-#!/bin/sh
-ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/../Resources" && pwd)"
-exec "${CRAFT_NODE:-$ROOT/node}" "$ROOT/app/dist/src/cli.js" gui "$@"
