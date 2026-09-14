@@ -36,18 +36,24 @@ export class MaintenanceKernel {
     const sources = this.service.store.list("hub_source", limit); const reconciliations = sources.map((source) => execute(`hub:${source.id}`, () => this.service.supplyChainReconcile({ source_id: source.id }))).filter(Boolean) as JsonObject[];
     const recovery = execute("recovery_projection", () => this.service.recoveryQueueRefresh({ now, limit }));
     const attention = execute("attention_projection", () => this.service.attentionRefresh({ now, limit }));
+    // Avoid adding a healthy outcome to an otherwise backed-off tick when the
+    // store has no traces; once traces exist the component is scheduled on the
+    // same bounded maintenance cadence as the other projections.
+    const traceRetention = this.service.store.count("trace") > 0
+      ? execute("trace_retention", () => this.service.traceRetentionSweep({ now, limit }))
+      : null;
     const degraded = outcomes.some((item) => item.status !== "passed");
     const previous = this.service.store.find("maintenance_status", "local");
     const receipt = this.service.store.create("maintenance_tick", `maintenance_tick_${randomUUID().replaceAll("-", "")}`, { observed_at: now, limit,
       source_count: sources.length, invalidated_count: reconciliations.reduce((sum, item) => sum + Number(item.count), 0), recovery_count: Number(recovery?.count ?? 0),
       recovered_recovery_leases: Number(recoveryLeases?.recovered ?? 0), recovered_hydration_leases: Number(hydrationLeases?.recovered ?? 0),
-      expired_speculative_candidates: Number(speculative?.expired ?? 0), recovered_acceptance_jobs: Number(acceptance?.recovered ?? 0), exhausted_acceptance_jobs: Number(acceptance?.exhausted ?? 0), attention_count: Number(attention?.count ?? 0), component_outcomes: outcomes, status: degraded ? "degraded" : "passed" });
+      expired_speculative_candidates: Number(speculative?.expired ?? 0), recovered_acceptance_jobs: Number(acceptance?.recovered ?? 0), exhausted_acceptance_jobs: Number(acceptance?.exhausted ?? 0), attention_count: Number(attention?.count ?? 0), trace_archived: Number(traceRetention?.archived ?? 0), trace_deleted: Number(traceRetention?.deleted ?? 0), component_outcomes: outcomes, status: degraded ? "degraded" : "passed" });
     const status = this.service.store.save("maintenance_status", "local", { ...(previous ? payload(previous) : {}), status: degraded ? "degraded" : "healthy", last_tick_at: now,
       limit, source_count: sources.length, invalidated_count: reconciliations.reduce((sum, item) => sum + Number(item.count), 0),
       recovery_count: Number(recovery?.count ?? 0), recovered_recovery_leases: Number(recoveryLeases?.recovered ?? 0),
       recovered_hydration_leases: Number(hydrationLeases?.recovered ?? 0), expired_speculative_candidates: Number(speculative?.expired ?? 0),
-      recovered_acceptance_jobs: Number(acceptance?.recovered ?? 0), exhausted_acceptance_jobs: Number(acceptance?.exhausted ?? 0), attention_count: Number(attention?.count ?? 0), last_tick_id: receipt.id });
-    return { status, receipt, outcomes, reconciliations, recovery, attention };
+      recovered_acceptance_jobs: Number(acceptance?.recovered ?? 0), exhausted_acceptance_jobs: Number(acceptance?.exhausted ?? 0), attention_count: Number(attention?.count ?? 0), trace_archived: Number(traceRetention?.archived ?? 0), trace_deleted: Number(traceRetention?.deleted ?? 0), last_tick_id: receipt.id });
+    return { status, receipt, outcomes, reconciliations, recovery, attention, trace_retention: traceRetention };
   }
 }
 

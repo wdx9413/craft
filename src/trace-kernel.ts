@@ -1,6 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
+import { chmodSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import type { JsonObject } from "./store.ts";
 import { CraftStore } from "./store.ts";
+import { craftPaths } from "./paths.ts";
 import { TRACE_SCHEMA, TRACE_SCHEMA_REVISION } from "./runtime-truth.ts";
 
 /** Current write format. Legacy callers may still import this name. */
@@ -151,9 +154,36 @@ export class TraceKernel {
   }
 
   retentionPlan(args: JsonObject): JsonObject {
-    const policyId = String(args.policy_id ?? "default"); const maxDays = Number(args.max_days ?? 30); const maxEvents = Number(args.max_events ?? 100_000); if (!Number.isInteger(maxDays) || maxDays < 1) throw new Error("max_days must be a positive integer"); if (!Number.isInteger(maxEvents) || maxEvents < 1) throw new Error("max_events must be a positive integer");
+    const policyId = String(args.policy_id ?? "default"); const maxDays = Number(args.max_days ?? 7); const maxEvents = Number(args.max_events ?? 100_000); if (!Number.isInteger(maxDays) || maxDays < 1) throw new Error("max_days must be a positive integer"); if (!Number.isInteger(maxEvents) || maxEvents < 1) throw new Error("max_events must be a positive integer");
     const existing = this.store.find("trace_policy", policyId); const identity = { max_days: maxDays, max_events: maxEvents, pii_mode: String(args.pii_mode ?? "digest_only") }; if (existing) { if (existing.identity_digest !== digest(identity)) throw new Error("Trace policy idempotency conflict"); return { policy: existing, idempotent: true }; }
-    return { policy: this.store.create("trace_policy", policyId, { ...identity, identity_digest: digest(identity), deletion_requires_review: true }), idempotent: false };
+    return { policy: this.store.create("trace_policy", policyId, { ...identity, identity_digest: digest(identity), archive_before_delete: true, automatic_after_archive: true, deletion_requires_review: false }), idempotent: false };
+  }
+
+  /** Archive and remove only terminal traces older than the retention window. */
+  retentionSweep(args: JsonObject = {}): JsonObject {
+    const now = args.now === undefined ? new Date().toISOString() : String(args.now);
+    if (Number.isNaN(Date.parse(now))) throw new Error("now must be an ISO timestamp");
+    const maxDays = Number(args.max_days ?? 7); const limit = Number(args.limit ?? 100);
+    if (!Number.isInteger(maxDays) || maxDays < 1) throw new Error("max_days must be a positive integer");
+    if (!Number.isInteger(limit) || limit < 1 || limit > 10_000) throw new Error("limit must be an integer between 1 and 10000");
+    const cutoff = Date.parse(now) - maxDays * 86_400_000;
+    const candidates = this.store.list("trace", Number.MAX_SAFE_INTEGER)
+      .filter((trace) => TERMINAL.has(String(trace.status) as TraceStatus))
+      .filter((trace) => Date.parse(String(trace.last_event_at ?? trace.updated_at ?? trace.started_at)) < cutoff)
+      .slice(0, limit);
+    const archives: string[] = []; let deleted = 0;
+    const paths = craftPaths(this.store.paths.root); const archiveDir = join(paths.logsDir, "trace-archive"); mkdirSync(archiveDir, { recursive: true });
+    for (const trace of candidates) {
+      const result = this.get({ trace_id: trace.id }); const events = result.events as JsonObject[]; const feedback = result.feedback as JsonObject[];
+      const archiveDigest = digest({ trace, events, feedback });
+      const archive = { schema: TRACE_SCHEMA_VERSION, trace_id: trace.id, archived_at: now, cutoff: new Date(cutoff).toISOString(), trace, events, feedback, archive_digest: archiveDigest };
+      const path = join(archiveDir, `${trace.id}.${String(trace.version)}.${archiveDigest.slice(7, 23)}.json`);
+      const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
+      writeFileSync(temporary, `${JSON.stringify(archive, null, 2)}\n`, { encoding: "utf8", mode: 0o600 }); renameSync(temporary, path); if (process.platform !== "win32") chmodSync(path, 0o600);
+      this.store.removeTraceRecords(String(trace.id), events.map((event) => String(event.id)), feedback.map((item) => String(item.id)));
+      archives.push(path); deleted += 1;
+    }
+    return { schema: TRACE_SCHEMA_VERSION, now, max_days: maxDays, cutoff: new Date(cutoff).toISOString(), scanned: candidates.length, archived: archives.length, deleted, archives };
   }
 
   appendTrial(args: JsonObject): JsonObject {

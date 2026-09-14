@@ -218,6 +218,24 @@ export class CraftStore {
     });
   }
 
+  /** Remove the append-only event stream for a single bounded lifecycle. */
+  removeEvents(stream: string): number {
+    return this.transaction((database) => Number(
+      database.prepare("DELETE FROM events WHERE stream=?").run(stream).changes,
+    ));
+  }
+
+  /** Atomically remove a trace and its versioned records after archival. */
+  removeTraceRecords(traceId: string, eventIds: readonly string[], feedbackIds: readonly string[]): number {
+    return this.transaction((database) => {
+      let changes = Number(database.prepare("DELETE FROM records WHERE kind='trace' AND id=?").run(traceId).changes);
+      for (const id of eventIds) changes += Number(database.prepare("DELETE FROM records WHERE kind='trace_event' AND id=?").run(id).changes);
+      for (const id of feedbackIds) changes += Number(database.prepare("DELETE FROM records WHERE kind='trace_feedback' AND id=?").run(id).changes);
+      changes += Number(database.prepare("DELETE FROM events WHERE stream=?").run(`trace:${traceId}`).changes);
+      return changes;
+    });
+  }
+
   private record(row: Record<string, unknown>): JsonObject {
     return { ...JSON.parse(String(row.payload_json)), id: row.id, version: row.version,
       created_at: row.created_at, updated_at: row.updated_at };

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { existsSync, readdirSync } from "node:fs";
 import test from "node:test";
 import { McpServer, CORE_TOOLS } from "../src/mcp.ts";
 import { craftPaths } from "../src/paths.ts";
@@ -91,10 +92,36 @@ test("legacy Trial Trace is projected into the canonical Trace and MCP surfaces 
       ["craft_trace_replay_bundle", { trace_id: "mcp-trace" }],
       ["craft_trace_case_compile", { trace_id: "mcp-trace", summary: "case" }],
       ["craft_trace_retention_plan", { policy_id: "mcp-policy", max_days: 10, max_events: 20 }],
+      ["craft_trace_retention_sweep", { now: "2030-01-01T00:00:00.000Z", max_days: 7 }],
     ];
     for (const [name, args] of calls) { const response = await mcp.handle({ id: name, method: "tools/call", params: { name, arguments: args } }); assert.equal((response?.result as JsonObject).isError, false); }
     assert.ok(CORE_TOOLS.some((tool) => tool.name === "craft_trace_get"));
     assert.ok(mcp.tools.some((tool) => tool.name === "craft_trace_case_compile"));
     const kernel = new TraceKernel(f.store); assert.equal((kernel.query({ trace_id: "trial:trial" }).count), 2);
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("Trace retention archives terminal records for seven days and preserves active work", async () => {
+  const f = await fixture();
+  try {
+    f.service.traceStart({ trace_id: "old", task_id: "task" });
+    f.service.traceAppend({ trace_id: "old", event_kind: "action", data: {}, action_contract: { effect: "read_only" } });
+    f.service.traceFeedback({ trace_id: "old", signal: "corrected", summary: "reviewed" });
+    f.service.traceFinalize({ trace_id: "old", status: "completed", summary: "done" });
+    const old = new Date("2020-01-01T00:00:00.000Z").toISOString();
+    const record = f.store.get("trace", "old");
+    f.store.save("trace", "old", { ...record, last_event_at: old, updated_at: old });
+    f.service.traceStart({ trace_id: "active", task_id: "task" });
+    const result = f.service.traceRetentionSweep({ now: "2030-01-01T00:00:00.000Z" });
+    assert.equal(result.archived, 1); assert.equal(result.deleted, 1); assert.equal(result.max_days, 7);
+    assert.throws(() => f.store.get("trace", "old"), /Unknown trace/);
+    assert.equal(f.store.events("trace:old").length, 0);
+    assert.equal(f.store.get("trace", "active").status, "running");
+    const archiveDir = join(f.store.paths.logsDir, "trace-archive");
+    assert.equal(existsSync(archiveDir), true); assert.equal(readdirSync(archiveDir).length, 1);
+    assert.equal(f.service.traceRetentionSweep({ now: "2030-01-01T00:00:00.000Z" }).deleted, 0);
+    assert.throws(() => f.service.traceRetentionSweep({ now: "invalid" }), /ISO timestamp/);
+    assert.throws(() => f.service.traceRetentionSweep({ max_days: 0 }), /positive integer/);
+    assert.throws(() => f.service.traceRetentionSweep({ limit: 0 }), /between 1 and 10000/);
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });

@@ -105,6 +105,7 @@
 
 - [中文架构说明](architecture.zh-CN.md)
 - [English architecture](architecture.en.md)
+- [分层与目录地图](architecture/layer-map.md)：说明 interfaces、application、domains、infrastructure 的边界与兼容拆分策略。
 
 文档区分“已实现接口/机制”“真实链路已验收”和“目标/待实现”。v0.12.13 的本地接口与测试已实现；真实平台 OS 沙箱、Secret Broker、OTLP 部署、远程 A2A 和多人同步仍须由对应 Adapter 提供独立证明。有代码、100% 单元覆盖率、真实平台安全与业务质量是不同证据。
 - [联邦委派与受限多 Agent 运行时](technical/modules/federated-delegation-runtime.zh-CN.md)
