@@ -1,31 +1,9 @@
 import { CraftService, VERSION } from "../service.ts";
 import { type JsonObject } from "../store.ts";
 import { SYSCALL_PASSTHROUGH, SYSCALL_VERBS, buildRegistry, catalogOf, describeEntry, resolveEntry } from "../tool-plane.ts";
-
-type Tool = { name: string; description: string; inputSchema: JsonObject; annotations?: JsonObject };
-const schemaFor = (name: string): JsonObject => {
-  if (["scan", "enabled", "allow_execution", "allow_external_write", "require_held_out", "require_outcome_passed", "retryable", "requires_external_effect", "supports_pause_resume", "supports_evidence_receipts", "generated_code", "requires_credential", "has_compensation", "approved", "start_trial", "untrusted_input", "confirmed_original_runner_stopped", "sanitized", "active", "acceptance_required", "trusted", "unattended", "reobserve_required", "compensation_or_handoff", "require_governance", "accepted", "stale", "crash_recovery", "reobserved", "delivered", "allowed", "allow_restricted", "privacy_reviewed", "complete", "content_stored", "candidate_change", "requires_real_host"].includes(name)) return { type: "boolean" };
-  if (["limit", "max_days", "version", "capacity", "max_concurrency", "size_bytes", "subject_version", "expected_version", "max_candidates",
-    "suite_version", "configuration_version", "harness_configuration_version", "target_version", "profile_version",
-    "grader_version", "policy_version", "signoff_policy_version", "lease_ttl_seconds", "ttl_seconds", "trials_per_case", "window_size", "max_attempts", "min_trials", "harness_version", "ir_version", "runtime_adapter_version", "agreed", "total", "expected_state_revision", "expected_revision", "observed_revision", "max_chars", "max_items", "timeout_ms", "output_limit", "max_turns", "after_sequence", "context_profile_version", "activation_profile_version", "budget_account_version", "contract_version", "conformance_version", "max_latency_ms"].includes(name)) return { type: "integer" };
-  if (["score", "value", "threshold", "confidence", "min_pass_rate_delta", "max_cost_regression_ratio", "max_duration_regression_ratio", "max_budget_ratio", "baseline", "candidate", "minimum_agreement", "max_budget_usd", "input_per_million", "output_per_million", "minimum_recall", "max_cost_usd"].includes(name)) return { type: "number" };
-  if (["input", "inputs", "metadata", "policy", "dimensions", "environment", "budget", "data", "scores",
-    "costs", "metrics", "configuration", "receipt_requirements", "execution", "rules", "authorization_requests", "notification_refs", "cost_hint", "design_axes", "report",
-    "limits", "resources", "actual", "actual_resources", "estimated_resources", "observation", "trial_budget", "policy_fingerprints", "structured_data", "field_sources",
-    "capabilities", "observed_capabilities", "requirements", "output", "transform", "entity", "values", "budget_limits", "sandbox_requirements", "eval_suite_ref", "checks", "state", "action_results", "workbench", "runtime", "privacy", "acceptance", "budget", "allocation", "action_contract", "result_schema", "state_before", "state_after", "usage", "value", "model_fingerprint", "environment_fingerprint", "capability_fingerprint", "policy_fingerprint", "metadata", "trace", "scope"].includes(name)) return { type: "object" };
-  if (["completed", "pending", "decisions", "artifacts", "steps", "cases", "capabilities",
-    "allowed_side_effects", "approved_side_effects", "nodes", "artifact_ids", "evidence_ids",
-    "trial_ids", "requirements", "grade_ids", "pattern_ids", "failure_modes", "receipt_ids", "criteria", "acceptance_criteria", "allowed_extensions", "fields", "capability_requirements", "object_schemas", "components", "action_contracts", "bindings", "source_refs", "changes", "tags", "claim_ids", "evidence_ids", "expected_claim_ids", "case_ids",
-    "allowed_operations", "allowed_effects", "require_approval_for", "operations", "subjects", "children", "trusted_hosts", "command_allowlist", "path_allowlist", "kinds", "effects", "allowed_kinds", "dependencies", "aliases", "assets", "asset_ids", "connector_ticket_ids", "artifact_ids", "final_artifact_ids", "evidence_ids", "gold_case_ids", "output_contract", "trial_ids", "include_paths", "affected_paths", "object_ids", "depends_on", "source_paths", "applies_to", "patches", "snapshot_refs", "triggers", "allowed_hosts", "allowed_actions", "approval_required_actions", "detected_instructions", "citations", "allowed_fields", "argv", "sources", "providers", "budget_ids", "recovery_item_ids", "memory_kinds", "object_types", "required_memory_ids", "required_object_ids", "benchmark_ids", "memory_ids", "source_ids", "paths", "state_paths", "turns", "messages", "events", "decisions", "constraints", "open_questions", "artifacts", "roles", "changed_paths", "materials", "non_goals", "input_refs", "output_refs", "evidence_ids", "gold_case_ids", "contamination_flags", "trace_ids", "knowledge_refs", "capability_refs", "workflow_refs", "excluded_refs", "selection_rationale", "change_kinds", "platforms", "permissions", "required", "candidates", "required_artifacts", "required_evidence", "evidence_refs", "criteria"].includes(name)) return { type: "array" };
-  return { type: "string" };
-};
-const objectSchema = (required: string[] = [], optional: string[] = []): JsonObject => ({ type: "object",
-  properties: Object.fromEntries([...required, ...optional].map((name) => [name, schemaFor(name)])), required,
-  additionalProperties: false });
-const tool = (name: string, description: string, required: string[] = [], readOnly = false,
-  optional: string[] = []): Tool => ({
-  name, description, inputSchema: objectSchema(required, optional), ...(readOnly ? { annotations: { readOnlyHint: true } } : {}),
-});
+import { type Tool, tool } from "./mcp/tool-schema.ts";
+import { surfaceToolNames as resolveSurfaceToolNames } from "./mcp/surface-registry.ts";
+export { COMPONENT_SURFACES, COMPONENT_SURFACE_NAMES, DOMAIN_SURFACE_NAMES, SURFACE_NAMES, SURFACE_RULES, domainSurfaceOf } from "./mcp/surface-registry.ts";
 
 const TOOL_DEFINITIONS: Tool[] = [
   tool("craft_info", "Show the Craft version, data location, and record counts.", [], true),
@@ -987,6 +965,11 @@ const CORE_TOOL_NAMES = new Set(["craft_info", "craft_source_list", "craft_capab
   "craft_artifact_register", "craft_evidence_record", "craft_capability_access_plan", "craft_capability_call_issue", "craft_capability_call_consume", "craft_capability_kit_get", "craft_capability_kit_list", "craft_capability_kit_distribution", "craft_capability_connector_list", "craft_capability_connector_ticket_issue", "craft_capability_connector_ticket_consume", "craft_knowledge_source_list", "craft_context_resolution_resolve", "craft_context_resolution_get", "craft_work_runtime_mode_get", "craft_continual_harness_view_create", "craft_continual_harness_refine", "craft_continual_harness_submit", "craft_continual_harness_signals", "craft_continual_harness_resolve", "craft_continual_harness_get", "craft_stateful_compute_session_prepare", "craft_stateful_compute_dispatch", "craft_stateful_compute_observe", "craft_stateful_compute_delegate", "craft_stateful_compute_report", "craft_stateful_compute_cancel", "craft_stateful_compute_session_get", "craft_uncertainty_resolve", "craft_release_qualification_evaluate", "craft_platform_ideal_state_assess", "craft_verification_get", "craft_evaluation_program_due", "craft_evaluation_program_report", "craft_enterprise_access_ticket_get", "craft_a2a_delegation_get", "craft_federated_delegation_get", "craft_harness_topology_get", "craft_runtime_readiness_get", "craft_assured_pilot_get", "craft_assured_pilot_reassess", "craft_usage_report", "craft_settings_get", "craft_trace_get", "craft_trace_query", "craft_trace_replay_bundle", "craft_trust_profile_recommend", "craft_trust_profile_get", "craft_trust_profile_list", "craft_web_fetch", "craft_web_operation_get"]);
 export const CORE_TOOLS: Tool[] = ACTIVE_TOOLS.filter((tool) => CORE_TOOL_NAMES.has(tool.name));
 
+/** Backward-compatible one-argument surface lookup for existing callers. */
+export function surfaceToolNames(surface: string): string[] {
+  return resolveSurfaceToolNames(surface, ACTIVE_TOOLS, CORE_TOOL_NAMES);
+}
+
 // The syscall surface. Instead of one tool per operation, a host learns a fixed
 // set of verbs and addresses capabilities by (resource, operation). The registry
 // is derived from TOOLS, so the 485 operations stay reachable while the mounted
@@ -1015,63 +998,6 @@ export const VERB_DEFAULT_OPERATION: Readonly<Record<string, string>> = {
   craft_list: "list", craft_get: "get", craft_create: "create",
   craft_update: "update", craft_run: "run", craft_cancel: "cancel", craft_search: "search",
 };
-
-// Tool surfaces. A surface is a bounded slice of TOOLS that a Host can mount on
-// its own, so one session only pays for the schemas it actually needs. "core"
-// and "full" keep their original meaning; the named domain surfaces partition
-// every non-core tool, so `core + domains` covers TOOLS exactly once.
-//
-// Order matters: the first matching rule wins, which is what keeps a tool in
-// exactly one domain surface. The trailing `workflow` rule is a deliberate
-// catch-all, and a test pins its size so a broken rule above cannot silently
-// swallow the whole list.
-const SURFACE_RULES: ReadonlyArray<{ name: string; pattern: RegExp }> = [
-  { name: "governance", pattern: /^craft_(capability|source|logical|contract|hub|supply|federation|materialization|certification|skill|publication|catalog|domain|hook)/ },
-  { name: "evaluation", pattern: /^craft_(evaluation|eval|benchmark|campaign|judge|grader|grade|signoff|harness|trial|trajectory|experience|adaptation|adaptive|canary|acceptance|outcome|delivery_evaluation|agent_eval|verified_iteration|feedback|trace|verification)/ },
-  { name: "execution", pattern: /^craft_(sandbox|docker|effect|egress|credential|execution|managed|platform|isolated|local|external|recovery|durable|trigger|webhook|orchestration|runtime|autonomy|speculative|web)/ },
-  { name: "knowledge", pattern: /^craft_(wiki|knowledge|context|memory|project|semantic|claim|relation)/ },
-  { name: "workspace", pattern: /^craft_(workspace|work_object|change_set|state|transaction|lineage|hydration|dehydration|artifact|evidence|untrusted)/ },
-  { name: "collaboration", pattern: /^craft_(a2a|enterprise|agent|expert|federated|attention|work_coordinator|home|decision|guided|strategy)/ },
-  { name: "workflow", pattern: /^craft_/ },
-];
-
-/**
- * Every mountable surface name, in the order they are declared. `syscall` is a
- * deliberate exception to the partition below: it re-exposes a small, chosen
- * subset by name (the routing Skill's tools) alongside the generic verbs, so it
- * is not part of the domain partition and is excluded from that coverage check.
- */
-const COMPONENT_SURFACES: Readonly<Record<string, RegExp>> = {
-  // Retrieval evaluation belongs to both bounded knowledge and memory products:
-  // it evaluates a resolver adapter, never becomes the source of truth itself.
-  "component-knowledge": /^craft_(wiki|knowledge|claim|relation|context_resolution|retrieval_adapter)/,
-  "component-memory": /^craft_(memory|knowledge_source|context_resolution|retrieval_adapter)/,
-  "component-capability": /^craft_(source|capability|logical|semantic)/,
-  "component-skill-quality": /^craft_(evaluation|eval|benchmark|campaign|judge|grader|grade|signoff|trial|outcome|skill_proposal|verified_iteration|verification)/,
-  "component-workflow-evolution": /^craft_(workflow_evolution|evaluation_model|experience_mine|experience_candidate|experience_shadow|route_workflow_proposal|workflow_(?:save|get|search|transition|rollback))/,
-};
-
-export const COMPONENT_SURFACE_NAMES: readonly string[] = Object.keys(COMPONENT_SURFACES);
-export const SURFACE_NAMES: readonly string[] = ["core", ...SURFACE_RULES.map((rule) => rule.name), ...COMPONENT_SURFACE_NAMES, "syscall", "full"];
-
-/** Domain surfaces only: these partition every non-core tool exactly once. */
-export const DOMAIN_SURFACE_NAMES: readonly string[] = SURFACE_RULES.map((rule) => rule.name);
-
-/** The single domain surface a non-core tool belongs to. The first matching rule wins, so a tool can never land in two surfaces. */
-export function domainSurfaceOf(toolName: string): string {
-  return SURFACE_RULES.find((rule) => rule.pattern.test(toolName))?.name ?? "workflow";
-}
-
-/** Tool names a surface exposes. Unknown surfaces fail closed instead of silently widening to the full list. */
-export function surfaceToolNames(surface: string): string[] {
-  if (surface === "full") return ACTIVE_TOOLS.map((tool) => tool.name);
-  if (surface === "core") return CORE_TOOLS.map((tool) => tool.name);
-  if (surface === "syscall") return [...SYSCALL_VERBS, ...SYSCALL_PASSTHROUGH];
-  const component = COMPONENT_SURFACES[surface];
-  if (component) return ACTIVE_TOOLS.filter((tool) => tool.name === "craft_info" || component.test(tool.name)).map((tool) => tool.name);
-  if (!SURFACE_RULES.some((rule) => rule.name === surface)) throw new Error(`Unknown Craft MCP surface: ${surface}`);
-  return ACTIVE_TOOLS.filter((tool) => !CORE_TOOL_NAMES.has(tool.name) && domainSurfaceOf(tool.name) === surface).map((tool) => tool.name);
-}
 
 export class McpServer {
   readonly service: CraftService;
