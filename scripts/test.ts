@@ -16,6 +16,11 @@ if (!tests.length) throw new Error("No TypeScript tests were discovered");
 // thresholds are never relaxed just to make a run pass.
 const major = Number(process.versions.node.split(".")[0]);
 const isolation = major >= 23 ? ["--test-isolation=none"] : [];
+// The suite intentionally shares one process so coverage and legacy imports are
+// collected together.  A few integration tests temporarily replace process
+// globals (fetch and environment variables); keep files deterministic across
+// runners by never executing top-level test files concurrently.
+const concurrency = ["--test-concurrency=1"];
 if (major < 23) {
   process.stderr.write(
     `Node ${process.versions.node} does not support --test-isolation=none; running with default process isolation. Coverage thresholds are unchanged.\n`,
@@ -25,6 +30,7 @@ if (major < 23) {
 const result = spawnSync(process.execPath, [
   "--test",
   ...isolation,
+  ...concurrency,
   "--experimental-test-coverage",
   "--test-coverage-exclude=tests/**",
   // CLI is an executable entrypoint verified through child-process smoke tests.
