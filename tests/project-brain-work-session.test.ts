@@ -55,7 +55,7 @@ test("v0.12.12 service and MCP expose the new surfaces", async () => {
   assert.equal((service.info().counts as Record<string, number>).project_brain, 1); const response = await server.handle({ id: 1, method: "tools/call", params: { name: "craft_project_brain_get", arguments: { project_id: "p3" } } }); assert.equal((response?.result as Record<string, unknown>).isError, false); assert.equal((opened.brain as Record<string, unknown>).project_id, "p3"); assert.equal((prepared.session as Record<string, unknown>).project_id, "p3"); assert.ok(mcpCheckpoint); f.store.close();
 });
 
-test("v0.12.16 internal Host advertises only bounded Craft actions", async () => {
+test("v0.12.17 internal Host advertises only bounded Craft actions", async () => {
   const f = await fixture(); const service = new CraftService(f.store);
   assert.deepEqual(service.internalHost.tools.map((tool) => tool.function.name), ["capability_search", "knowledge_search", "task_checkpoint", "evidence_record", "artifact_register", "workspace_read", "workspace_write"]);
   f.store.create("task", "task10", { project_id: null, title: "Task", goal: "Goal", status: "active" });

@@ -1,4 +1,4 @@
-# Runtime Assurance & Evidence Loop（v0.12.16）
+# Runtime Assurance & Evidence Loop（v0.12.17）
 
 > 状态：本地实现并有脱敏测试。它证明 Craft 已收集到的事实彼此一致；不把本地记录冒充为对未接入 Host、外部系统或操作系统隔离器的控制。
 
@@ -49,3 +49,5 @@ Task Run + terminal Host Receipt
 - full 面：Attestation、Campaign advance、Connector register/discover/health/revoke 等显式治理动作。
 
 Host 决定真实启停 MCP、凭据、网络与执行环境；Craft 只签发可核验的 Profile/票据并验证回流事实。
+
+v0.12.17 之上的 [Assured Pilot](assured-pilot.md) 会进一步把已验证 Attestation、Runtime Readiness、恢复演练、可信 Capability 版本与密封评测引用固定为同一条事实链；它仍不替代真实部署 Adapter。

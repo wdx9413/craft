@@ -1,6 +1,6 @@
 # Craft
 
-> 当前发布版本：v0.12.16。所有宿主接入统一采用“Route-first”：Codex/Claude 插件、TraeWork、WorkBuddy Expert 默认只安装一个轻量 `craft-route` Skill，并连接低 Token syscall MCP；`craft` 与 `craft-clarify` 是单独的可选包。Craft 现在提供统一 Context Manifest、Verified Autonomous Work、受限 Action Gateway、强制 Acceptance Gate、Durable Worker lease/recovery、Provider fallback、标准 A2A 操作入口、受控 Replay、可持续本地 Runtime、Project Bundle、反馈学习信号、领域 Evaluator、跨宿主 Handoff 与真实成本账本；真实云端执行、平台级沙箱、市场审核和 OS 级隔离仍须由部署 Adapter 或平台审核完成，不能把本地契约伪装成已上线服务。
+> 当前发布版本：v0.12.17。所有宿主接入统一采用“Route-first”：Codex/Claude 插件、TraeWork、WorkBuddy Expert 默认只安装一个轻量 `craft-route` Skill，并连接低 Token syscall MCP；`craft` 与 `craft-clarify` 是单独的可选包。新增 Assured Pilot 把真实 Host 回执、恢复演练、可信能力版本与一次性密封评测引用收束为可复核样本；真实云端执行、平台级沙箱、市场审核和 OS 级隔离仍须由部署 Adapter 或平台审核完成，不能把本地契约伪装成已上线服务。
 
 [中文](README.md) | [English](README.en.md)
 
@@ -47,6 +47,7 @@ Sandbox 能力采用“声明、诊断、黑盒一致性验证、精确版本票
 - **Verified Autonomous Work（v0.12.13）**：将 Context Manifest、动作授权、受限 Action Gateway、Host/工具回执、状态再观察、强制 Acceptance Gate、Artifact/Evidence 和 Delivery Gate 收敛为单 Agent 主路径；漂移自动进入 `needs_replan`，写入动作必须经过批准和平台 Conformance。详见 [Verified Autonomous Work](docs/technical/modules/v01212-verified-autonomous-work.zh-CN.md)。
 - **Runtime Completion（v0.12.13）**：新增受限工作区读写、Worker lease/recovery、Provider fallback 路由和标准 A2A message/stream/list 接口；Shell、浏览器、MCP 远程动作和 OS 级隔离仍必须由显式 Adapter 提供。
 - **Runtime Boundaries（v0.12.13）**：有界 Action Gateway、独立 Acceptance Gate、Durable Worker、Provider fallback 和摘要化 A2A 入口均通过同一服务/MCP 底座提供；真实 Shell、浏览器、远程副作用与 OS 沙箱仍需显式 Adapter。详见 [Runtime Completion](docs/technical/modules/v01213-runtime-completion.zh-CN.md)。
+- **Assured Pilot（v0.12.17）**：把已验证的 Host 回执、环境、恢复演练、可信 Capability Profile 与一次性密封 held-out Case 引用收束为可比较样本；环境、能力、Case 或人工工作区漂移即 `needs_replan`。它不读取密封正文，也不把本地记录声称为生产隔离。详见 [Assured Pilot](docs/technical/modules/assured-pilot.md)。
 - Orchestration Trial 自动归档：锁定 Agent Profile 精确版本，记录 Dispatch、重路由、节点结果、成本和证据，并在终态自动生成 Outcome。
 - 版本化 Grader、多来源 Grade 和 Signoff Policy；模型判断不会被记录成程序证明。
 - 同评测集版本对比：在 Suite 精确版本、分区、Subject 类型和 Case 集合一致时，聚合比较 Workflow、Agent Profile 或 Harness Configuration 的质量、成本、耗时与失败类型。

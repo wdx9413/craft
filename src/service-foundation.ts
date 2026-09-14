@@ -99,6 +99,7 @@ import { RuntimeAssuranceKernel } from "./runtime-assurance.ts";
 import { FederatedDelegationKernel } from "./federated-delegation.ts";
 import { HarnessTopologyKernel } from "./harness-topology.ts";
 import { RuntimeReadinessKernel } from "./runtime-readiness.ts";
+import { AssuredPilotKernel } from "./assured-pilot.ts";
 
 /**
  * Stable composition root for the service. Domain behavior stays in focused
@@ -176,6 +177,7 @@ export abstract class ServiceFoundation {
   readonly federatedDelegation: FederatedDelegationKernel;
   readonly harnessTopologies: HarnessTopologyKernel;
   readonly runtimeReadiness: RuntimeReadinessKernel;
+  readonly assuredPilot: AssuredPilotKernel;
   readonly autonomyLadder: AutonomyLadderKernel;
   readonly workspaceObserver: WorkspaceObserverKernel;
   readonly workCoordinators: WorkCoordinatorKernel;
@@ -286,6 +288,7 @@ export abstract class ServiceFoundation {
     this.federatedDelegation = new FederatedDelegationKernel(store);
     this.harnessTopologies = new HarnessTopologyKernel(store);
     this.runtimeReadiness = new RuntimeReadinessKernel(store, this.platformExecution);
+    this.assuredPilot = new AssuredPilotKernel(store);
     this.autonomyLadder = new AutonomyLadderKernel(store);
     this.workspaceObserver = new WorkspaceObserverKernel(store, this.stateWorkspace);
     this.workCoordinators = new WorkCoordinatorKernel(store, this.managedRuns);

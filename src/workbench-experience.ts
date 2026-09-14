@@ -17,9 +17,10 @@ export class WorkbenchExperienceKernel {
     const launches = this.store.list("work_launch", 10_000, (item) => taskIds.has(String(item.task_id))).slice(0, n); const traces = this.store.list("trace", 10_000, (item) => taskIds.has(String(item.task_id))).slice(0, n);
     const outcomes = this.store.list("outcome", 10_000, (item) => { const trial = this.store.find("trial", String(item.trial_id)); return Boolean(trial && taskIds.has(String(trial.task_id))); }).slice(0, n);
     const artifacts = this.store.list("artifact", n, (item) => taskIds.has(String(item.task_id)));
+    const pilots = this.store.list("assured_work_pilot", 10_000, (item) => taskIds.has(String(item.task_id))).slice(0, n);
     const timeline = traces.flatMap((trace) => this.store.list("trace_event", 10_000, (event) => event.trace_id === trace.id).map((event) => ({ trace_id: trace.id, sequence: event.sequence, event_kind: event.event_kind, status: event.status, created_at: event.created_at, output_refs: event.output_refs }))).sort((a, b) => String(a.created_at).localeCompare(String(b.created_at))).slice(0, n);
-    const nextAction = sessions.some((item) => item.status === "needs_replan") ? "review_context_drift" : sessions.some((item) => item.status === "running") ? "observe_execution" : launches.some((item) => item.status === "awaiting_approval") ? "approve_or_deny" : "start_or_prepare_work";
-    const projection = { filters: { project_id: projectId, task_id: taskId, session_id: sessionId }, sessions: sessions.map(this.ref), launches: launches.map(this.ref), traces: traces.map(this.ref), outcomes: outcomes.map(this.ref), artifacts: artifacts.map(this.ref), timeline, next_action: nextAction };
+    const nextAction = pilots.some((item) => item.status === "needs_replan") || sessions.some((item) => item.status === "needs_replan") ? "review_context_drift" : sessions.some((item) => item.status === "running") ? "observe_execution" : launches.some((item) => item.status === "awaiting_approval") ? "approve_or_deny" : "start_or_prepare_work";
+    const projection = { filters: { project_id: projectId, task_id: taskId, session_id: sessionId }, sessions: sessions.map(this.ref), launches: launches.map(this.ref), traces: traces.map(this.ref), outcomes: outcomes.map(this.ref), artifacts: artifacts.map(this.ref), pilots: pilots.map(this.ref), timeline, next_action: nextAction };
     return { ...projection, projection_digest: digest(projection), content_free: true };
   }
 

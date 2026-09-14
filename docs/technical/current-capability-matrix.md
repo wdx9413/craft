@@ -1,4 +1,4 @@
-# Current Capability Matrix (v0.12.16)
+# Current Capability Matrix (v0.12.17)
 
 | Area | State | Boundary |
 |---|---|---|
@@ -20,6 +20,7 @@
 | OTel / OTLP | implemented adapter contract | deployment collector is external |
 | OS sandbox / Secret Broker | local contracts and probes | production isolation requires a platform adapter |
 | Runtime Assurance | implemented and tested locally | attests terminal Host receipt, re-observation, environment/budget and write preflight; it does not invent external execution proof |
+| Assured Pilot | implemented and tested locally | binds verified Host facts, recovery drill, trusted capability versions and one-time sealed Case access; any drift requires replanning |
 | External Connector health/revocation | implemented and tested locally | exact scope, metadata digest and current health gate ticket consumption; host-owned transport/credentials remain external |
 | A2A / organization sync | digest-only transport and local conflict rules | remote identity, storage, and policy require deployment evidence |
 | MCP Registry sync | implemented adapter | HTTPS pull and local ingest only; signature, moderation, health scheduling and official registry policy remain deployment governance |

@@ -95,6 +95,18 @@ _Avoid_: 文件副本、共享上下文
 **Runtime Readiness Assessment**：基于 Evidence、平台 Preflight、恢复能力及企业 Binding 得出的部署就绪检查。它只枚举已证实条件和阻塞项，不等同于已部署的 Host、Sandbox 或 Broker。
 _Avoid_: 健康检查、上线证明
 
+**Sealed Evaluation Case**：对独立批准的 held-out Evaluation Case 的内容无关引用，固定其版本与摘要。它不包含 Case 正文，也不授予读取正文的权限。
+_Avoid_: Evaluation Case 副本、测试输入
+
+**Sealed Evaluation Access**：绑定一个 Task Run、收件 Adapter、用途和到期时间的一次性 Sealed Evaluation Case 引用。它不是数据凭据，也不表示外部 Adapter 已读取 Case。
+_Avoid_: token、Case 内容、Artifact Grant
+
+**Recovery Drill**：通过 rehydration、Receipt 重验和状态再观察，并附确认级 Evidence 的受控恢复事实。它不等同于生产故障演练或平台隔离认证。
+_Avoid_: 部署证明、备份
+
+**Assured Pilot**：将可信 Capability Profile、已验证 Host Receipt、Runtime Readiness、Recovery Drill 与已消费 Sealed Evaluation Access 绑定的可比较运行样本。它不是业务 Outcome、生产发布或 Agent 成功声明。
+_Avoid_: 上线实例、业务结果、已发布 Candidate
+
 **Effect**：动作可能造成的状态影响等级，如 `read_only`、`local_write`、`external_write` 或 `destructive`。Effect 是权限输入，不是风险已被消除的证明。
 _Avoid_: Sandbox、Approval
 
