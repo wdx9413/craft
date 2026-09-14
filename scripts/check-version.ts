@@ -30,7 +30,8 @@ for (const path of ["plugins/craft/.codex-plugin/plugin.json", "plugins/craft-kn
 }
 
 const service = await readFile(resolve(root, "src/service.ts"), "utf8");
-const match = service.match(/export const VERSION = "([^"]+)";/u);
+const applicationService = await readFile(resolve(root, "src/application/craft-service.ts"), "utf8");
+const match = (service + "\n" + applicationService).match(/export const VERSION = "([^"]+)";/u);
 if (match?.[1] !== packageVersion) throw new Error(`src/service.ts VERSION differs from package.json ${packageVersion}`);
 
 for (const path of ["README.md", "README.en.md"]) {
