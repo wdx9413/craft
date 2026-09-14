@@ -9,6 +9,7 @@ import { craftPaths } from "../src/paths.ts";
 import { CraftService, VERSION } from "../src/service.ts";
 import { CraftStore, type JsonObject } from "../src/store.ts";
 import { TRACE_SCHEMA_VERSION, TraceKernel } from "../src/trace-kernel.ts";
+import { MaintenanceKernel } from "../src/maintenance.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-trace-evolution-"));
@@ -123,5 +124,11 @@ test("Trace retention archives terminal records for seven days and preserves act
     assert.throws(() => f.service.traceRetentionSweep({ now: "invalid" }), /ISO timestamp/);
     assert.throws(() => f.service.traceRetentionSweep({ max_days: 0 }), /positive integer/);
     assert.throws(() => f.service.traceRetentionSweep({ limit: 0 }), /between 1 and 10000/);
+    f.service.traceStart({ trace_id: "maintenance-old", task_id: "task" });
+    f.service.traceFinalize({ trace_id: "maintenance-old", status: "completed", summary: "maintenance cleanup" });
+    const maintenanceRecord = f.store.get("trace", "maintenance-old");
+    f.store.save("trace", "maintenance-old", { ...maintenanceRecord, last_event_at: old, updated_at: old });
+    const maintenance = new MaintenanceKernel(f.service).tick({ now: "2030-01-01T00:00:00.000Z" });
+    assert.equal((maintenance.trace_retention as JsonObject).deleted, 1);
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
