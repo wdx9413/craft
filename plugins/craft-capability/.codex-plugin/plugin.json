@@ -15,6 +15,9 @@
     "longDescription": "Scan and logically deduplicate capability sources, preserve provenance, audit health and trust, and recommend the smallest task-relevant activation set.",
     "developerName": "wdx9413",
     "category": "Developer Tools",
+    "brandColor": "#000000",
+    "composerIcon": "./assets/craft-icon.svg",
+    "logo": "./assets/craft-icon.svg",
     "capabilities": ["Capability discovery", "Logical deduplication", "Activation planning"],
     "defaultPrompt": ["Find the smallest healthy capability set for this goal; do not activate or execute it yet."]
   }

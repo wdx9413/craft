@@ -15,6 +15,9 @@
     "longDescription": "Run frozen cases and calibrated graders, compare repeated baseline and candidate trials, and produce evidence-backed promotion decisions without automatic publication.",
     "developerName": "wdx9413",
     "category": "Developer Tools",
+    "brandColor": "#000000",
+    "composerIcon": "./assets/craft-icon.svg",
+    "logo": "./assets/craft-icon.svg",
     "capabilities": ["Skill evaluation", "Grader calibration", "Promotion evidence"],
     "defaultPrompt": ["Evaluate this Skill candidate against its frozen baseline and report eligible, rejected, or inconclusive."]
   }

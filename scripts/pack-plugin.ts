@@ -1,5 +1,5 @@
 import { cp, mkdir, rm } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -9,6 +9,7 @@ const targetSkill = resolve(pluginRoot, "skills", "craft-route");
 const sourceBundles = ["craft-mcp.cjs", "craft-mcp-full.cjs"];
 const targetBundleDirectory = resolve(pluginRoot, "dist", "plugin");
 const components = ["craft-knowledge", "craft-memory", "craft-capability", "craft-skill-quality", "craft-workflow-evolution"];
+const pluginsRoot = resolve(root, "plugins");
 
 function insidePlugin(path: string): boolean {
   return path === pluginRoot || path.startsWith(`${pluginRoot}/`) || path.startsWith(`${pluginRoot}\\`);
@@ -30,7 +31,8 @@ for (const component of components) {
   const componentRoot = resolve(root, "plugins", component);
   const componentBundleDirectory = resolve(componentRoot, "dist", "plugin");
   const componentSkill = resolve(componentRoot, "skills", component);
-  if (!componentRoot.startsWith(resolve(root, "plugins") + "/")) throw new Error(`Refusing to package outside plugins: ${componentRoot}`);
+  const componentRelative = relative(pluginsRoot, componentRoot);
+  if (!componentRelative || componentRelative.startsWith("..") || isAbsolute(componentRelative)) throw new Error(`Refusing to package outside plugins: ${componentRoot}`);
   await rm(componentBundleDirectory, { recursive: true, force: true });
   await rm(componentSkill, { recursive: true, force: true });
   await mkdir(componentBundleDirectory, { recursive: true });

@@ -7,13 +7,17 @@ import { fileURLToPath } from "node:url";
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const pluginRoot = join(root, "plugins", "craft");
 const componentNames = ["craft-knowledge", "craft-memory", "craft-capability", "craft-skill-quality", "craft-workflow-evolution"];
+const normalizeText = (value: string): string => value.replaceAll("\r\n", "\n");
 const packageJson = JSON.parse(await readFile(join(root, "package.json"), "utf8")) as { version: string };
-const pluginManifest = JSON.parse(await readFile(join(pluginRoot, ".codex-plugin", "plugin.json"), "utf8")) as { name: string; version: string; skills: string; mcpServers: string };
+const pluginManifest = JSON.parse(await readFile(join(pluginRoot, ".codex-plugin", "plugin.json"), "utf8")) as { name: string; version: string; skills: string; mcpServers: string; interface?: { composerIcon?: string; logo?: string } };
 
 assert.equal(pluginManifest.name, "craft");
 assert.equal(pluginManifest.version, packageJson.version, "plugin and package versions must match");
 assert.equal(pluginManifest.skills, "./skills/");
 assert.equal(pluginManifest.mcpServers, "./.mcp.json");
+assert.equal(pluginManifest.interface?.composerIcon, "./assets/craft-icon.svg");
+assert.equal(pluginManifest.interface?.logo, "./assets/craft-icon.svg");
+await access(join(pluginRoot, "assets", "craft-icon.svg"));
 
 for (const path of [
   join(pluginRoot, ".mcp.json"),
@@ -24,20 +28,23 @@ for (const path of [
 
 for (const name of componentNames) {
   const componentRoot = join(root, "plugins", name);
-  const componentManifest = JSON.parse(await readFile(join(componentRoot, ".codex-plugin", "plugin.json"), "utf8")) as { name: string; version: string; skills: string; mcpServers: string };
+  const componentManifest = JSON.parse(await readFile(join(componentRoot, ".codex-plugin", "plugin.json"), "utf8")) as { name: string; version: string; skills: string; mcpServers: string; interface?: { composerIcon?: string; logo?: string } };
   assert.equal(componentManifest.name, name);
   assert.equal(componentManifest.version, packageJson.version);
   assert.equal(componentManifest.skills, "./skills/");
   assert.equal(componentManifest.mcpServers, "./.mcp.json");
+  assert.equal(componentManifest.interface?.composerIcon, "./assets/craft-icon.svg");
+  assert.equal(componentManifest.interface?.logo, "./assets/craft-icon.svg");
+  await access(join(componentRoot, "assets", "craft-icon.svg"));
   await access(join(componentRoot, "dist", "plugin", "craft-mcp.cjs"));
   const source = await readFile(join(root, "skills", name, "SKILL.md"), "utf8");
   const packed = await readFile(join(componentRoot, "skills", name, "SKILL.md"), "utf8");
-  assert.equal(packed, source);
+  assert.equal(normalizeText(packed), normalizeText(source));
 }
 
 const sourceSkill = await readFile(join(root, "skills", "craft-route", "SKILL.md"), "utf8");
 const packagedSkill = await readFile(join(pluginRoot, "skills", "craft-route", "SKILL.md"), "utf8");
-assert.equal(packagedSkill, sourceSkill, "the packaged Skill must be an exact generated copy");
+assert.equal(normalizeText(packagedSkill), normalizeText(sourceSkill), "the packaged Skill must be an exact generated copy");
 
 for (const marketplacePath of ["marketplace.json", ".agents/plugins/marketplace.json"]) {
   const marketplace = JSON.parse(await readFile(join(root, marketplacePath), "utf8")) as { plugins: Array<{ name: string; source: { path: string } }> };

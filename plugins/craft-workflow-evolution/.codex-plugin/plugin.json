@@ -15,6 +15,9 @@
     "longDescription": "Accept sanitized execution observations, generate bounded Workflow candidates through an explicit model or Host proposal, then reuse Craft's existing evaluation, Signoff, Canary and rollback gates.",
     "developerName": "wdx9413",
     "category": "Developer Tools",
+    "brandColor": "#000000",
+    "composerIcon": "./assets/craft-icon.svg",
+    "logo": "./assets/craft-icon.svg",
     "capabilities": ["Sanitized observation intake", "Workflow draft proposals", "Model evaluation contracts"],
     "defaultPrompt": ["Create a bounded Workflow draft from these sanitized execution observations; do not publish it before independent evaluation."]
   }

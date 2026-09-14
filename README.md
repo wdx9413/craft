@@ -135,7 +135,16 @@ pnpm test
 
 - 仓库：`https://github.com/wdx9413/craft`
 - 分支/Tag：建议固定发布 Tag；开发时可用 `main`
-- 稀疏路径：`./plugins/craft`
+- 稀疏路径：`plugins` 和 `.agents`（不要只检出仓库根目录；插件实际位于 `plugins/*`）
+
+命令行首次添加时可直接执行：
+
+```bash
+codex plugin marketplace add git@github.com:wdx9413/craft.git --ref main --sparse plugins --sparse .agents
+codex plugin add craft@craft-marketplace
+```
+
+如果已有旧版 Craft marketplace，升级后仍提示“插件源路径不是目录”或“未能加载插件连接”，说明本地快照保留了旧稀疏路径。删除并按上面两条命令重新添加 marketplace 即可，不需要升级 Craft 版本号。
 
 插件只读取 `plugins/craft/` 中的 manifest、`craft-route` Skill 和两个单文件 MCP bundle；不会把源码、桌面应用、适配器包或 source map 复制进插件缓存。`skills/craft` 与 `skills/craft-clarify` 可作为独立可选包安装，但这样不会自动获得 MCP 数据层。
 

@@ -31,7 +31,7 @@ craft capability search "需求澄清"   # 只返回候选摘要，不把全文�
 
 ## 接入宿主（三选一）
 
-- **Codex CLI 插件**：把本仓库加为插件市场来源（固定 Tag），市场条目固定指向 `./plugins/craft`，插件只读取该目录中的 manifest、Skill 和 MCP bundle。
+- **Codex CLI 插件**：把本仓库加为插件市场来源（固定 Tag），并确保稀疏检出包含 `plugins` 和 `.agents`；市场条目固定指向 `./plugins/craft`，插件只读取该目录中的 manifest、Skill 和 MCP bundle。旧快照若提示插件源路径不是目录，需要删除后重新添加 marketplace。
 - **Claude Code 插件**：同上，读 `.claude-plugin/plugin.json`。
 - **任意 MCP Host**：
 

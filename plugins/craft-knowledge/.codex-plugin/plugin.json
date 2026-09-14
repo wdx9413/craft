@@ -15,6 +15,9 @@
     "longDescription": "Search and govern Craft Wiki and configured knowledge sources with scoped references, revisions, evidence, review, and reproducible context receipts.",
     "developerName": "wdx9413",
     "category": "Productivity",
+    "brandColor": "#000000",
+    "composerIcon": "./assets/craft-icon.svg",
+    "logo": "./assets/craft-icon.svg",
     "capabilities": ["Knowledge sources", "Evidence Wiki", "Context resolution"],
     "defaultPrompt": ["Search my governed knowledge for this question and cite the selected revisions."]
   }

@@ -15,6 +15,9 @@
     "longDescription": "Resolve working, episodic, preference, and procedural memories by scope, provenance, expiry, sensitivity, and evidence without requiring Craft's full orchestration loop.",
     "developerName": "wdx9413",
     "category": "Productivity",
+    "brandColor": "#000000",
+    "composerIcon": "./assets/craft-icon.svg",
+    "logo": "./assets/craft-icon.svg",
     "capabilities": ["Memory ledger", "Context resolution", "Memory governance"],
     "defaultPrompt": ["Resolve only the memories relevant to this task and explain why each was selected."]
   }

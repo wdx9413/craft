@@ -91,7 +91,14 @@ pnpm test
 
 ## Codex plugin
 
-Add `https://github.com/wdx9413/craft` as a Git marketplace source. Pin a release tag when possible and use `./plugins/craft` as the sparse path. The published plugin package contains only its manifest, `craft-route` Skill, and bundled MCP entry points.
+Add `https://github.com/wdx9413/craft` as a Git marketplace source. Pin a release tag when possible and sparse-check out both `plugins` and `.agents` (the plugin sources live under `plugins/*`). For the CLI:
+
+```bash
+codex plugin marketplace add git@github.com:wdx9413/craft.git --ref main --sparse plugins --sparse .agents
+codex plugin add craft@craft-marketplace
+```
+
+If an older marketplace snapshot reports that a plugin source path is not a directory or that its plugin connection could not load, remove and re-add the marketplace with those sparse paths. The published plugin package contains only its manifest, `craft-route` Skill, icon assets, and bundled MCP entry points.
 
 Since v0.2.1, the plugin MCP starts from a versioned single-file bundle committed with the plugin. A Codex cache copy therefore needs neither `npm install` nor the source repository's `node_modules`. Reinstall after upgrading from an older version and verify `craft_info` in a new session.
 

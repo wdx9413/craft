@@ -17,6 +17,9 @@
     "longDescription": "The complete Craft runtime composes Core, Knowledge, Memory, Capability, and Skill Quality behind a minimal route-first surface. In Codex it uses the current app as an embedded execution host and never launches a second Codex CLI by default.",
     "developerName": "wdx9413",
     "category": "Productivity",
+    "brandColor": "#000000",
+    "composerIcon": "./assets/craft-icon.svg",
+    "logo": "./assets/craft-icon.svg",
     "capabilities": ["Capability search", "Task continuity", "Shared work objects", "Dependency impact analysis", "Bounded context assembly", "Scoped memory", "Execution trials", "Evidence records", "Multi-agent orchestration", "Evaluation signoff", "Version comparison", "Verified workflows", "Experience patterns", "Safe Skill publishing"],
     "defaultPrompt": [
       "Use Craft as the default orchestrator for this substantial goal.",
