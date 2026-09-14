@@ -218,13 +218,6 @@ export class CraftStore {
     });
   }
 
-  /** Remove the append-only event stream for a single bounded lifecycle. */
-  removeEvents(stream: string): number {
-    return this.transaction((database) => Number(
-      database.prepare("DELETE FROM events WHERE stream=?").run(stream).changes,
-    ));
-  }
-
   /** Atomically remove a trace and its versioned records after archival. */
   removeTraceRecords(traceId: string, eventIds: readonly string[], feedbackIds: readonly string[]): number {
     return this.transaction((database) => {
