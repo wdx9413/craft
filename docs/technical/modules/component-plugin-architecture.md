@@ -22,7 +22,7 @@ Craft 是面向人和 AI 的通用工作运行时。它提供两种互补分发�
 └── craft-workflow-evolution
 ```
 
-完整插件是组合根，不是第五套实现。四个组件与完整插件共享同一数据模型、服务内核和 MCP bundle，通过受限 MCP surface 决定当前宿主能看到什么。安装完整插件不等于激活全部能力；默认仍使用精简、按需描述的 syscall surface。
+完整插件是组合根，不是第六套实现。五个组件与完整插件共享同一数据模型、服务内核和 MCP bundle，通过受限 MCP surface 决定当前宿主能看到什么。安装完整插件不等于激活全部能力；默认仍使用精简、按需描述的 syscall surface。完整插件不会把五个 sibling plugin 作为安装依赖再次下载；组件插件只是同一运行时的最小权限投影。
 
 ## Execution Host 不是第二个 Agent
 
