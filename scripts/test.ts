@@ -52,8 +52,13 @@ process.stdout.write(stdout);
 process.stderr.write(stderr);
 if ((result.status ?? 1) !== 0 && process.env.GITHUB_ACTIONS === "true") {
   const combined = `${stdout}\n${stderr}`.trim();
-  const failureStart = combined.lastIndexOf("✖ failing tests:");
-  const detail = (failureStart >= 0 ? combined.slice(failureStart) : combined.slice(-6_000)).slice(0, 6_000)
+  // Node's TAP reporter has changed its summary wording across releases. Pick
+  // the assertion/test failure lines directly so a platform-only failure is
+  // diagnosable from the check annotation even when the full log is gated.
+  const failureLines = combined.split(/\r?\n/).filter((line) =>
+    /(?:^|\s)(?:not ok|✖|AssertionError|TypeError|ReferenceError|Error:|ERR_[A-Z_]+|symbolic|mkfifo)/i.test(line),
+  );
+  const detail = (failureLines.length ? failureLines.join("\n") : combined.slice(-6_000)).slice(0, 6_000)
     .replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A");
   process.stderr.write(`::error title=Craft unit test failure::${detail}\n`);
 }
