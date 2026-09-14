@@ -44,7 +44,17 @@ const result = spawnSync(process.execPath, [
   // This avoids blocking a release on legacy defensive combinations while
   // keeping line/function coverage deterministic at 100%.
   ...tests,
-], { cwd: root, stdio: "inherit" });
+], { cwd: root, stdio: ["inherit", "pipe", "pipe"], maxBuffer: 16 * 1024 * 1024 });
+
+const stdout = result.stdout?.toString() ?? "";
+const stderr = result.stderr?.toString() ?? "";
+process.stdout.write(stdout);
+process.stderr.write(stderr);
+if ((result.status ?? 1) !== 0 && process.env.GITHUB_ACTIONS === "true") {
+  const detail = `${stdout}\n${stderr}`.trim().slice(-6_000)
+    .replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A");
+  process.stderr.write(`::error title=Craft unit test failure::${detail}\n`);
+}
 
 if (result.error) throw result.error;
 process.exitCode = result.status ?? 1;
