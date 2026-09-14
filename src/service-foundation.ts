@@ -108,6 +108,8 @@ import { StatefulComputeKernel } from "./stateful-compute.ts";
 import { UncertaintyPolicyKernel } from "./uncertainty-policy.ts";
 import { ReleaseQualificationKernel } from "./release-qualification.ts";
 import { VerificationPlane } from "./verification-plane.ts";
+import { EvaluationModelProfileKernel } from "./evaluation-model-profile.ts";
+import { WorkflowEvolutionKernel } from "./workflow-evolution.ts";
 
 /**
  * Stable composition root for the service. Domain behavior stays in focused
@@ -181,6 +183,8 @@ export abstract class ServiceFoundation {
   readonly uncertaintyPolicies: UncertaintyPolicyKernel;
   readonly releaseQualifications: ReleaseQualificationKernel;
   readonly verificationPlane: VerificationPlane;
+  readonly evaluationModelProfiles: EvaluationModelProfileKernel;
+  readonly workflowEvolution: WorkflowEvolutionKernel;
   readonly hostActivationManifests: HostActivationManifestKernel;
   readonly executionFabric: ExecutionFabricKernel;
   readonly hostBridge: HostBridgeKernel;
@@ -300,6 +304,8 @@ export abstract class ServiceFoundation {
     this.uncertaintyPolicies = new UncertaintyPolicyKernel(store);
     this.releaseQualifications = new ReleaseQualificationKernel(store);
     this.verificationPlane = new VerificationPlane(store);
+    this.evaluationModelProfiles = new EvaluationModelProfileKernel(store, this.modelProviders);
+    this.workflowEvolution = new WorkflowEvolutionKernel(store);
     this.hostActivationManifests = new HostActivationManifestKernel(store, this.hostProfiles);
     this.executionFabric = new ExecutionFabricKernel(store);
     this.hostBridge = new HostBridgeKernel(store);

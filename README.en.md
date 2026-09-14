@@ -1,6 +1,6 @@
 # Craft
 
-> Current release: v0.12.23. Craft is a general work runtime for people and AI. It can be installed as a complete plugin or as standalone Knowledge, Memory, Capability, and Skill Quality components. In Codex, the current app is the embedded execution host; Craft does not start another Codex CLI by default.
+> Current release: v0.12.24. Craft is a general work runtime for people and AI. It can be installed as a complete plugin or as standalone Knowledge, Memory, Capability, Skill Quality, and Workflow Evolution components. In Codex, the current app is the embedded execution host; Craft does not start another Codex CLI by default.
 
 [中文](README.md) | [English](README.en.md)
 

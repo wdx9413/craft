@@ -8,7 +8,7 @@ const sourceSkill = resolve(root, "skills", "craft-route");
 const targetSkill = resolve(pluginRoot, "skills", "craft-route");
 const sourceBundles = ["craft-mcp.cjs", "craft-mcp-full.cjs"];
 const targetBundleDirectory = resolve(pluginRoot, "dist", "plugin");
-const components = ["craft-knowledge", "craft-memory", "craft-capability", "craft-skill-quality"];
+const components = ["craft-knowledge", "craft-memory", "craft-capability", "craft-skill-quality", "craft-workflow-evolution"];
 
 function insidePlugin(path: string): boolean {
   return path === pluginRoot || path.startsWith(`${pluginRoot}/`) || path.startsWith(`${pluginRoot}\\`);

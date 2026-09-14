@@ -1,6 +1,6 @@
 # Craft
 
-> 当前发布版本：v0.12.23。Craft 是面向人和 AI 的通用工作运行时：既可以完整插件接入 Codex 等 Host，也可将 Knowledge、Memory、Capability 和 Skill Quality 作为独立组件使用。Codex 插件默认复用当前 App 作为 Embedded Host，不另起 Codex CLI；所有形态都共享相同的状态、策略、Receipt、评测与安全边界。
+> 当前发布版本：v0.12.24。Craft 是面向人和 AI 的通用工作运行时：既可以完整插件接入 Codex 等 Host，也可将 Knowledge、Memory、Capability、Skill Quality 和 Workflow Evolution 作为独立组件使用。Codex 插件默认复用当前 App 作为 Embedded Host，不另起 Codex CLI；所有形态都共享相同的状态、策略、Receipt、评测与安全边界。
 
 [中文](README.md) | [English](README.en.md)
 
@@ -52,6 +52,7 @@ Sandbox 能力采用“声明、诊断、黑盒一致性验证、精确版本票
 - **Platform Ideal State v1（v0.12.21）**：工作主链统一为“定义、准备、行动、交付、学习”；模型可在 Safety Floor 内自动增加求证强度，人工介入仅为可配置兜底。发布资格使用两个无正文 Pilot、同环境同预算的五次配对 Trial，明确区分 `eligible`、`rejected` 与 `inconclusive`。详见 [Platform Ideal State v1](docs/technical/modules/platform-ideal-state-v1.md)。
 - **组件插件架构（v0.12.22）**：完整 Craft 是组合根，另提供 `craft-knowledge`、`craft-memory`、`craft-capability`、`craft-skill-quality` 四个独立插件；安装不等于全量激活。Host 协议区分 Embedded、Managed 与 Remote。详见 [组件插件架构](docs/technical/modules/component-plugin-architecture.md)。
 - **开发验证平面（v0.12.23）**：`VerificationPlane` 依据变更类别、effect、Candidate 和 Host 风险生成最小检查集，收集同环境 Evidence Receipt，并明确给出 `eligible`、`rejected` 或 `inconclusive`。它不执行命令；Candidate 仍须通过 Release Qualification。详见 [Verification Plane](docs/technical/modules/verification-plane.md)。
+- **模型评测与 Workflow Evolution（v0.12.24）**：`EvaluationModelProfile` 仅保存 Provider、模型、预算和环境变量名引用，默认禁止联网且从不存 API Key；`craft-workflow-evolution` 将多条脱敏执行观察提炼为最多两个设计轴的草案请求。草案经过独立评测、Signoff 和 Canary 后才可成为 `verified` Workflow，届时才进入 Capability 的可选集合。
 - Orchestration Trial 自动归档：锁定 Agent Profile 精确版本，记录 Dispatch、重路由、节点结果、成本和证据，并在终态自动生成 Outcome。
 - 版本化 Grader、多来源 Grade 和 Signoff Policy；模型判断不会被记录成程序证明。
 - 同评测集版本对比：在 Suite 精确版本、分区、Subject 类型和 Case 集合一致时，聚合比较 Workflow、Agent Profile 或 Harness Configuration 的质量、成本、耗时与失败类型。

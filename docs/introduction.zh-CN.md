@@ -1,6 +1,6 @@
 # Craft：受控 Agent 工作运行时
 
-> 本文是 Craft 的总览入口。它解释产品解决的问题、关键概念如何连接、当前实现做到哪里，以及在面试或架构评审中应如何准确回答。当前实现基线为 v0.12.23；旧版本号只表示历史里程碑。
+> 本文是 Craft 的总览入口。它解释产品解决的问题、关键概念如何连接、当前实现做到哪里，以及在面试或架构评审中应如何准确回答。当前实现基线为 v0.12.24；旧版本号只表示历史里程碑。
 
 ## 一句话
 
@@ -65,6 +65,8 @@ v0.12.21 进一步把主链压缩为“定义 → 准备 → 行动 → 交付 �
 v0.12.22 将产品拆成完整 Craft 插件与四个可独立安装的组件插件。完整插件统一装配 Core、Knowledge、Memory、Capability、Skill Quality 和 Host Bridge；独立插件可以在不启用完整工作流的情况下增强其他 Agent。Codex App 默认是 `embedded` Execution Host，Craft 不会因此另起 Codex CLI。详见 [组件插件架构](technical/modules/component-plugin-architecture.md)。
 
 v0.12.23 增加 `VerificationPlane`：它从变更类型、effect、Candidate 与真实 Host 需求推导最小验证集，收集环境一致的 Evidence Receipt，并判定 `eligible / rejected / inconclusive`。单元覆盖率只是其中一个确定性检查；对抗、恢复、真实 Host 和 Candidate 还需更强验证。该模块不执行命令、不持久化原始内容，仍通过既有 Host / Runtime Seam 运行实际检查。详见 [Verification Plane](technical/modules/verification-plane.md)。
+
+v0.12.24 增加两条独立但可衔接的组件链。`EvaluationModelProfile` 只记录 Provider、模型、预算和密钥环境变量名，默认禁止网络，发出的 Ticket 只能由后续兼容 Host/Adapter 执行；`craft-workflow-evolution` 将至少两条独立、脱敏、带 Evidence 的执行观察聚合成最多两个设计轴的 Workflow 草案。草案不能直接被发现或调用，只有通过已有 Eval、Signoff 与 Canary 后成为 `verified` Workflow，才会回到 Capability Discovery 的候选集合。知识与记忆的关键词/向量检索也遵循同一原则：检索器是可评测的实现，不是事实层。详见 [模型评测与 Workflow Evolution](technical/modules/evaluation-model-workflow-evolution.md)。
 
 ```text
 Task + Task Contract + 初始 State Snapshot

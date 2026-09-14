@@ -13,13 +13,15 @@
 
 ## 建设原则
 
-以 [产品架构](architecture.zh-CN.md) 的三大支柱为目标：工作与协作、执行与保障、学习与改进。**评测与实验是第三支柱内的核心模块**，不另设第四支柱。当前实现基线已推进到 v0.12.23。
+以 [产品架构](architecture.zh-CN.md) 的三大支柱为目标：工作与协作、执行与保障、学习与改进。**评测与实验是第三支柱内的核心模块**，不另设第四支柱。当前实现基线已推进到 v0.12.24。
 
 **v0.12.21：Platform Ideal State v1。** `VerifiedWorkLoop` 成为唯一公开工作门面，阶段级 Launch/Fabric 接口退出 MCP 公共清单但保留为内部模块。分层 `UncertaintyPolicy` 默认受限自主：模型可自动增加确定性检查、独立评估器、授权上下文、只读 Expert 或 Trial 数，不能自动扩大 effect、数据、凭据或自治权限；人工只是可配置兜底，同样不能覆盖 Safety Floor。两个无正文 `ReferencePilot` 固定每臂五次配对运行，以 `eligible / rejected / inconclusive` 区分效果、回归和证据不足。内置测试只证明机制，真实 Codex 运行与盲评必须另行取得。详见 [Platform Ideal State v1](../technical/modules/platform-ideal-state-v1.md)。
 
 **v0.12.22：Component Plugin Architecture。** 完整 Craft 插件负责统一装配，Knowledge、Memory、Capability 和 Skill Quality 同时作为可独立安装的插件开放；各插件复用同一内核，通过受限 surface 最小暴露。Host 协议区分当前 App 内的 Embedded Bridge、显式 CLI/Worker 的 Managed Adapter 与远程 Delegation，避免将“运行在 Codex 中”误解为“再启动一个 Codex”。详见 [组件插件架构](../technical/modules/component-plugin-architecture.md)。
 
 **v0.12.23：Verification Plane。** 开发变更不再只以单测或覆盖率作结论。`VerificationPlane` 按变更、effect、真实 Host 与 Candidate 风险生成最小验证计划，要求同环境、Evidence-backed Receipt，并在 `eligible / rejected / inconclusive` 中明确判定。它复用既有 Host、Sandbox、Eval Campaign 和 Release Qualification，不新增任意命令执行入口；Skill Quality 组件也可独立暴露这一能力。详见 [Verification Plane](../technical/modules/verification-plane.md)。
+
+**v0.12.24：模型评测契约与 Workflow Evolution 插件。** 真实模型配置收敛为不含密钥的 `EvaluationModelProfile`，默认不联网，只有显式启用、环境变量就绪且兼容 Adapter 消费精确 Ticket 时才可运行。新组件 `craft-workflow-evolution` 从多条独立脱敏执行观察生成最多两个设计轴的 draft Workflow；它复用既有 shadow/held-out Eval、Signoff、Canary 与回滚，不自动替换、发布或激活。只有 `verified` Workflow 才能重新进入 Capability Discovery。Knowledge/Memory 的关键词、向量及未来 Retrieval Adapter 一律先过召回、泄漏、成本和时延的单点评测。详见 [模型评测与 Workflow Evolution](../technical/modules/evaluation-model-workflow-evolution.md)。
 
 **v0.12.19：通用知识、记忆与双运行模式。** `KnowledgeSource` 为 Evidence Wiki、Serena、kefu、README 等外部内容保留 scope、digest、trust 与只读/提议边界；`MemoryLedger` 统一工作、情景、偏好、程序记忆，并以来源、Evidence、有效期、敏感等级与撤销关系约束生命周期。`ContextResolutionReceipt` 精确记录本次给 Host 装载了什么、为何选中、用哪个版本和多少预算，持久回执不复制正文；向量检索只在零跨项目泄漏、召回、成本和时延评测通过后使用。`WorkRuntimeMode` 让 Craft 既可挂在 Codex 等 Host 上作为运行控制台，也可生成模型无关的 Agent 模式计划；两者都必须进入同一 Verified Work Loop，不能绕过 Policy、Receipt、Acceptance 或 Eval。
 

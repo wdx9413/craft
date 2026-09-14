@@ -22,7 +22,7 @@ if (typeof packageVersion !== "string" || !/^\d+\.\d+\.\d+$/.test(packageVersion
 
 for (const path of ["plugins/craft/.codex-plugin/plugin.json", "plugins/craft-knowledge/.codex-plugin/plugin.json",
   "plugins/craft-memory/.codex-plugin/plugin.json", "plugins/craft-capability/.codex-plugin/plugin.json",
-  "plugins/craft-skill-quality/.codex-plugin/plugin.json", ".claude-plugin/plugin.json",
+  "plugins/craft-skill-quality/.codex-plugin/plugin.json", "plugins/craft-workflow-evolution/.codex-plugin/plugin.json", ".claude-plugin/plugin.json",
   "adapters/workbuddy-expert/.codebuddy-plugin/plugin.json", "adapters/workbuddy-connector/connector-meta.json",
   "adapters/deepseek-harness/package.json"]) {
   const manifestVersion = (await json(path)).version;

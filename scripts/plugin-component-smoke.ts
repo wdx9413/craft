@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
-const components = ["craft-knowledge", "craft-memory", "craft-capability", "craft-skill-quality"];
+const components = ["craft-knowledge", "craft-memory", "craft-capability", "craft-skill-quality", "craft-workflow-evolution"];
 
 async function smoke(name: string): Promise<void> {
   const pluginRoot = join(root, "plugins", name);
@@ -28,7 +28,7 @@ async function smoke(name: string): Promise<void> {
     child.stdin.end(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-11-25" } })}\n${JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list" })}\n`);
     const result = await Promise.race([responses, new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`${name} timed out`)), 5_000))]);
     const tools = result[1].result.tools as Array<{ name: string }>;
-    assert.equal(result[0].result.serverInfo.version, "0.12.23");
+    assert.equal(result[0].result.serverInfo.version, "0.12.24");
     assert(tools.length > 0);
     assert(tools.some((tool) => tool.name === "craft_info"));
     assert(!tools.some((tool) => tool.name === "craft_verified_work_loop_prepare"));

@@ -39,6 +39,12 @@
       "source": { "source": "local", "path": "./plugins/craft-skill-quality" },
       "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
       "category": "Developer Tools"
+    },
+    {
+      "name": "craft-workflow-evolution",
+      "source": { "source": "local", "path": "./plugins/craft-workflow-evolution" },
+      "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
+      "category": "Developer Tools"
     }
   ]
 }

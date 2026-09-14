@@ -1,6 +1,6 @@
 {
   "name": "craft-work-governance",
-  "version": "0.12.23",
+  "version": "0.12.24",
   "description": "Governs substantial work with durable tasks, evidence, verification, and reusable workflows.",
   "author": {
     "name": "wdx9413",

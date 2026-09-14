@@ -9,15 +9,16 @@ import { CraftService, VERSION } from "../src/service.ts";
 import { CraftStore } from "../src/store.ts";
 import { craftPaths } from "../src/paths.ts";
 
-const components = ["craft-knowledge", "craft-memory", "craft-capability", "craft-skill-quality"] as const;
+const components = ["craft-knowledge", "craft-memory", "craft-capability", "craft-skill-quality", "craft-workflow-evolution"] as const;
 
-test("v0.12.23 exposes four bounded component surfaces without the full work runtime", () => {
+test("v0.12.24 exposes five bounded component surfaces without the full work runtime", () => {
   assert.deepEqual(COMPONENT_SURFACE_NAMES, components.map((name) => `component-${name.slice(6)}`));
   const expected = {
     "component-knowledge": "craft_knowledge_claim_save",
     "component-memory": "craft_memory_ledger_remember",
     "component-capability": "craft_capability_search",
     "component-skill-quality": "craft_evaluation_run_record",
+    "component-workflow-evolution": "craft_workflow_evolution_observe",
   } as const;
   for (const [surface, tool] of Object.entries(expected)) {
     const names = surfaceToolNames(surface);
@@ -25,6 +26,8 @@ test("v0.12.23 exposes four bounded component surfaces without the full work run
     assert(names.includes(tool), `${surface} must expose ${tool}`);
     assert(!names.includes("craft_verified_work_loop_prepare"));
   }
+  assert(surfaceToolNames("component-knowledge").includes("craft_retrieval_adapter_evaluate"));
+  assert(surfaceToolNames("component-memory").includes("craft_retrieval_adapter_evaluate"));
 });
 
 test("component plugin manifests mount their exact surface", async () => {

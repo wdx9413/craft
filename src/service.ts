@@ -27,7 +27,7 @@ import { dockerRequestDigest } from "./docker-sandbox.ts";
 import { egressRequestDigest } from "./egress.ts";
 import { ServiceFoundation } from "./service-foundation.ts";
 
-export const VERSION = "0.12.23";
+export const VERSION = "0.12.24";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -252,6 +252,25 @@ export class CraftService extends ServiceFoundation {
     return { provider: publicProvider(spec),
       ...(tier === undefined ? {} : { selection: selectModel(spec, tier) }),
       transport_installed: this.internalHost.transport !== unconfiguredTransport };
+  }
+
+  evaluationModelProfileSave(args: JsonObject): JsonObject { return this.evaluationModelProfiles.save(args); }
+  evaluationModelProfileGet(args: JsonObject): JsonObject { return this.evaluationModelProfiles.get(args); }
+  evaluationModelProfileList(args: JsonObject): JsonObject { return this.evaluationModelProfiles.list(args); }
+  evaluationModelTicketIssue(args: JsonObject): JsonObject { return this.evaluationModelProfiles.issue(args); }
+
+  workflowEvolutionObserve(args: JsonObject): JsonObject { return this.workflowEvolution.observe(args); }
+  workflowEvolutionPropose(args: JsonObject): JsonObject { return this.workflowEvolution.propose(args); }
+  workflowEvolutionObservations(args: JsonObject): JsonObject { return this.workflowEvolution.observations(args); }
+  workflowEvolutionProposalGet(args: JsonObject): JsonObject { return this.workflowEvolution.get(args); }
+  workflowEvolutionProposalSubmit(args: JsonObject): JsonObject {
+    const submitted = this.workflowEvolution.submit(args); const proposal = submitted.proposal as JsonObject;
+    if (submitted.idempotent === true) return { ...submitted, workflow: this.store.get("workflow", String(proposal.workflow_id)), next_action: "Run shadow and held-out evaluation, then use the existing Signoff and Canary gates before this Workflow can be selected." };
+    const workflow = this.workflowSave({ workflow_id: proposal.workflow_id, name: proposal.name, description: proposal.description,
+      inputs: proposal.inputs, steps: proposal.steps, derived_from: { workflow_evolution_proposal_id: proposal.id,
+        workflow_evolution_proposal_version: proposal.version, request_id: proposal.request_id, request_version: proposal.request_version,
+        model_ticket_id: proposal.model_ticket_id, replaces_workflow: proposal.replaces_workflow, design_axes: this.store.get("workflow_evolution_request", String(proposal.request_id), Number(proposal.request_version)).design_axes } });
+    return { ...submitted, workflow, next_action: "Run shadow and held-out evaluation, then use the existing Signoff and Canary gates before this Workflow can be selected." };
   }
 
   /** Where the circuit breakers would sit for a given plan, without running anything. */

@@ -34,6 +34,6 @@ Context Resolution 只在一个精确 scope 内选择 active、非 `untrusted` �
 
 ## 可选 Retrieval Adapter
 
-默认使用确定性关键词选择。向量 Adapter 必须先登记 provider fingerprint，并通过独立评测：召回率达到阈值、跨项目泄漏为零、时延和成本不超预算。失败、未配置或未评测时 Resolution 固定回退关键词，不会静默使用向量。
+默认使用确定性关键词选择。向量 Adapter 必须先登记 provider fingerprint，并通过独立的**检索单点评测**：冻结查询与相关项、召回率达到阈值、跨项目泄漏为零、时延和成本不超预算。关键词、向量或未来任意检索器都要走同一准入；失败、未配置或未评测时 Resolution 固定回退关键词，不会静默使用向量。
 
 本 Module 只管理检索选择的准入事实；真正 embedding 调用仍由既有 `EmbeddingProvider`/部署 Adapter 负责。

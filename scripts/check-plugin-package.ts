@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const pluginRoot = join(root, "plugins", "craft");
-const componentNames = ["craft-knowledge", "craft-memory", "craft-capability", "craft-skill-quality"];
+const componentNames = ["craft-knowledge", "craft-memory", "craft-capability", "craft-skill-quality", "craft-workflow-evolution"];
 const packageJson = JSON.parse(await readFile(join(root, "package.json"), "utf8")) as { version: string };
 const pluginManifest = JSON.parse(await readFile(join(pluginRoot, ".codex-plugin", "plugin.json"), "utf8")) as { name: string; version: string; skills: string; mcpServers: string };
 
