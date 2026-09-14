@@ -10,7 +10,7 @@ test("browser invocation uses the native opener on each desktop platform", () =>
   assert.equal(getBrowserInvocation("aix", "http://localhost"), undefined);
 });
 
-test("openBrowser is injectable, disabled for headless runs, and safe on launch errors", () => {
+test("openBrowser is injectable, disabled for headless runs, and safe on launch errors", async () => {
   const calls: Array<{ command: string; args: string[] }> = [];
   const fake: BrowserSpawner = (command, args) => { calls.push({ command, args }); return { unref() {} }; };
   const old = process.env.CRAFT_NO_BROWSER;
@@ -23,7 +23,16 @@ test("openBrowser is injectable, disabled for headless runs, and safe on launch 
     assert.equal(openBrowser("http://localhost", "linux", fake), false);
     delete process.env.CRAFT_NO_BROWSER;
     assert.equal(openBrowser("http://localhost", "linux", () => { throw new Error("unavailable"); }), false);
-    assert.equal(openBrowser("http://127.0.0.1:1", "linux"), true);
+    // Exercise the real spawner's asynchronous ENOENT handler deterministically
+    // without launching a desktop browser on the CI runner.
+    const path = process.env.PATH;
+    process.env.PATH = "__craft_missing_path__";
+    try {
+      assert.equal(openBrowser("http://127.0.0.1:1", "linux"), true);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    } finally {
+      if (path === undefined) delete process.env.PATH; else process.env.PATH = path;
+    }
   } finally {
     if (old === undefined) delete process.env.CRAFT_NO_BROWSER; else process.env.CRAFT_NO_BROWSER = old;
   }

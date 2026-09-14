@@ -62,9 +62,12 @@ if ((result.status ?? 1) !== 0 && process.env.GITHUB_ACTIONS === "true") {
   // Coverage failures can be platform-specific even when all tests pass.
   // Keep only rows that contain a sub-100 percentage to identify the source
   // file without flooding the annotation with the complete coverage table.
-  const uncoveredRows = lines.filter((line) =>
-    /\|\s*\d+(?:\.\d+)?\s*\|/.test(line) && /(?:9\d|[0-8]\d|0)\.\d+\s*\|/.test(line),
-  );
+  const uncoveredRows = lines.filter((line) => {
+    const match = line.match(/^\s*ℹ\s+([^|]+)\|\s*([\d.]+)\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)\s*\|/);
+    // The third percentage column is the function/method gate. Branch gaps
+    // are intentionally informational and must not be reported as failures.
+    return match !== null && Number(match[4]) < 100;
+  });
   const detail = [...new Set([...failureLines, ...uncoveredRows])].join("\n").slice(0, 6_000)
     .replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A");
   process.stderr.write(`::error title=Craft unit test failure::${detail}\n`);
