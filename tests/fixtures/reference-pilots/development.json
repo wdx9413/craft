@@ -1,0 +1,11 @@
+{
+  "kind": "development",
+  "name": "Sanitized Codex development pilot",
+  "case_ref": "fixture:development:repository-change",
+  "primary_metric": "human_intervention_minutes",
+  "direction": "lower_is_better",
+  "effect_threshold": 1,
+  "guardrail_names": ["acceptance_passed", "no_scope_violation", "no_secret_leakage"],
+  "sanitized": true,
+  "content_stored": false
+}

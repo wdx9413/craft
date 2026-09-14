@@ -1,0 +1,11 @@
+{
+  "kind": "file_delivery",
+  "name": "Sanitized generic file-delivery pilot",
+  "case_ref": "fixture:file-delivery:project-package",
+  "primary_metric": "blind_review_score",
+  "direction": "higher_is_better",
+  "effect_threshold": 0.1,
+  "guardrail_names": ["deterministic_checks_passed", "no_scope_violation", "no_secret_leakage"],
+  "sanitized": true,
+  "content_stored": false
+}

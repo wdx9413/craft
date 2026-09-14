@@ -154,8 +154,10 @@ test("Execution Fabric joins the verified loop and Host activation without a sec
     const forcedTask = f.service.taskOpen({ title: "Forced", goal: "forced" }).task as JsonObject;
     const forcedProfile = f.store.create("activation_profile", "forced-profile", { task_id: forcedTask.id, goal_fingerprint: `sha256:${createHash("sha256").update(JSON.stringify("forced")).digest("hex")}`, asset_ids: [], asset_versions: {}, allowed_effects: ["local_write"], activation: "host_mediated", status: "recommended", selection: "no_capability_required" });
     assert.equal((f.service.executionFabricPrepare({ workspace_id: f.workspace.id, task_id: forcedTask.id, goal: "forced", host: "codex-cli", prompt: "forced", sandbox: "workspace-write", profile_id: forcedProfile.id }).activation_profile as JsonObject).id, forcedProfile.id);
-    const core = new McpServer(f.service, "core"); for (const name of ["craft_execution_fabric_prepare", "craft_execution_fabric_execute", "craft_execution_fabric_advance", "craft_execution_fabric_consume", "craft_execution_fabric_get", "craft_host_bridge_get", "craft_host_activation_manifest_prepare"]) assert.ok(core.tools.some((tool) => tool.name === name), name);
-    assert.equal(VERSION, "0.12.20");
+    const core = new McpServer(f.service, "core");
+    for (const name of ["craft_verified_work_loop_prepare", "craft_verified_work_loop_advance", "craft_verified_work_loop_decide", "craft_verified_work_loop_resume", "craft_verified_work_loop_get", "craft_host_bridge_get", "craft_host_activation_manifest_prepare"]) assert.ok(core.tools.some((tool) => tool.name === name), name);
+    for (const retired of ["craft_execution_fabric_prepare", "craft_execution_fabric_execute", "craft_execution_fabric_advance", "craft_execution_fabric_consume", "craft_execution_fabric_get"]) assert.equal(core.tools.some((tool) => tool.name === retired), false, retired);
+    assert.equal(VERSION, "0.12.23");
   } finally { await Promise.all(f.store.list("host_run", 100).map((run) => f.service.hostRuns.wait(String(run.id)))); f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
@@ -171,6 +173,10 @@ test("Managed Host Bridge rejects mismatched facts and retains only exact invoca
     const prepared = f.service.executionFabricPrepare({ fabric_id: "bridge", manifest_id: "bridge-manifest", workspace_id: f.workspace.id, title: "Bridge", goal: "inspect", host: "codex-cli", prompt: "inspect", sandbox: "read-only" });
     const fabric = prepared.execution_fabric as JsonObject; const manifest = prepared.host_activation_manifest as JsonObject; const loop = prepared.work_loop as JsonObject; const taskRun = prepared.task_run as JsonObject; const launch = prepared.launch as JsonObject;
     const first = f.service.hostBridge.prepare({ fabric_id: fabric.id, invocation_id: "bridge" }).invocation as JsonObject;
+    assert.equal(((first.host_protocol as JsonObject).mode), "managed");
+    const remote = f.service.hostBridge.prepare({ fabric_id: fabric.id, invocation_id: "bridge-remote", host_mode: "remote" }).invocation as JsonObject;
+    assert.equal(((remote.host_protocol as JsonObject).mode), "remote");
+    assert.throws(() => f.service.hostBridge.prepare({ fabric_id: fabric.id, invocation_id: "bridge-invalid", host_mode: "other" }), /Unsupported Execution Host mode/);
     assert.equal(f.service.hostBridge.prepare({ fabric_id: fabric.id, invocation_id: "bridge" }).idempotent, true);
     assert.equal((f.service.hostBridgeGet({ invocation_id: first.id }).fabric as JsonObject).id, fabric.id);
     assert.throws(() => f.service.hostBridgeGet({ invocation_id: 1 as unknown as string }), /must not be empty/);

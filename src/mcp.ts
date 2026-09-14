@@ -4,7 +4,7 @@ import { SYSCALL_PASSTHROUGH, SYSCALL_VERBS, buildRegistry, catalogOf, describeE
 
 type Tool = { name: string; description: string; inputSchema: JsonObject; annotations?: JsonObject };
 const schemaFor = (name: string): JsonObject => {
-  if (["scan", "enabled", "allow_execution", "allow_external_write", "require_held_out", "require_outcome_passed", "retryable", "requires_external_effect", "supports_pause_resume", "supports_evidence_receipts", "generated_code", "requires_credential", "has_compensation", "approved", "start_trial", "untrusted_input", "confirmed_original_runner_stopped", "sanitized", "active", "acceptance_required", "trusted", "unattended", "reobserve_required", "compensation_or_handoff", "require_governance", "accepted", "stale", "crash_recovery", "reobserved", "delivered", "allowed", "allow_restricted", "privacy_reviewed", "complete"].includes(name)) return { type: "boolean" };
+  if (["scan", "enabled", "allow_execution", "allow_external_write", "require_held_out", "require_outcome_passed", "retryable", "requires_external_effect", "supports_pause_resume", "supports_evidence_receipts", "generated_code", "requires_credential", "has_compensation", "approved", "start_trial", "untrusted_input", "confirmed_original_runner_stopped", "sanitized", "active", "acceptance_required", "trusted", "unattended", "reobserve_required", "compensation_or_handoff", "require_governance", "accepted", "stale", "crash_recovery", "reobserved", "delivered", "allowed", "allow_restricted", "privacy_reviewed", "complete", "content_stored", "candidate_change", "requires_real_host"].includes(name)) return { type: "boolean" };
   if (["limit", "version", "capacity", "max_concurrency", "size_bytes", "subject_version", "expected_version", "max_candidates",
     "suite_version", "configuration_version", "harness_configuration_version", "target_version", "profile_version",
     "grader_version", "policy_version", "signoff_policy_version", "lease_ttl_seconds", "ttl_seconds", "trials_per_case", "window_size", "max_attempts", "min_trials", "harness_version", "ir_version", "runtime_adapter_version", "agreed", "total", "expected_state_revision", "expected_revision", "observed_revision", "max_chars", "max_items", "timeout_ms", "output_limit", "max_turns", "after_sequence", "context_profile_version", "activation_profile_version", "budget_account_version", "contract_version", "conformance_version", "max_latency_ms"].includes(name)) return { type: "integer" };
@@ -16,7 +16,7 @@ const schemaFor = (name: string): JsonObject => {
   if (["completed", "pending", "decisions", "artifacts", "steps", "cases", "capabilities",
     "allowed_side_effects", "approved_side_effects", "nodes", "artifact_ids", "evidence_ids",
     "trial_ids", "requirements", "grade_ids", "pattern_ids", "failure_modes", "receipt_ids", "criteria", "acceptance_criteria", "allowed_extensions", "fields", "capability_requirements", "object_schemas", "components", "action_contracts", "bindings", "source_refs", "changes", "tags", "claim_ids", "evidence_ids", "expected_claim_ids", "case_ids",
-    "allowed_operations", "allowed_effects", "require_approval_for", "operations", "subjects", "children", "trusted_hosts", "command_allowlist", "path_allowlist", "kinds", "effects", "allowed_kinds", "dependencies", "aliases", "assets", "asset_ids", "connector_ticket_ids", "artifact_ids", "final_artifact_ids", "evidence_ids", "gold_case_ids", "output_contract", "trial_ids", "include_paths", "affected_paths", "object_ids", "depends_on", "source_paths", "applies_to", "patches", "snapshot_refs", "triggers", "allowed_hosts", "allowed_actions", "approval_required_actions", "detected_instructions", "citations", "allowed_fields", "argv", "sources", "providers", "budget_ids", "recovery_item_ids", "memory_kinds", "object_types", "required_memory_ids", "required_object_ids", "benchmark_ids", "memory_ids", "source_ids", "paths", "state_paths", "turns", "messages", "events", "decisions", "constraints", "open_questions", "artifacts", "roles", "changed_paths", "materials", "non_goals", "input_refs", "output_refs", "evidence_ids", "contamination_flags", "trace_ids", "knowledge_refs", "capability_refs", "workflow_refs", "excluded_refs", "selection_rationale"].includes(name)) return { type: "array" };
+    "allowed_operations", "allowed_effects", "require_approval_for", "operations", "subjects", "children", "trusted_hosts", "command_allowlist", "path_allowlist", "kinds", "effects", "allowed_kinds", "dependencies", "aliases", "assets", "asset_ids", "connector_ticket_ids", "artifact_ids", "final_artifact_ids", "evidence_ids", "gold_case_ids", "output_contract", "trial_ids", "include_paths", "affected_paths", "object_ids", "depends_on", "source_paths", "applies_to", "patches", "snapshot_refs", "triggers", "allowed_hosts", "allowed_actions", "approval_required_actions", "detected_instructions", "citations", "allowed_fields", "argv", "sources", "providers", "budget_ids", "recovery_item_ids", "memory_kinds", "object_types", "required_memory_ids", "required_object_ids", "benchmark_ids", "memory_ids", "source_ids", "paths", "state_paths", "turns", "messages", "events", "decisions", "constraints", "open_questions", "artifacts", "roles", "changed_paths", "materials", "non_goals", "input_refs", "output_refs", "evidence_ids", "gold_case_ids", "contamination_flags", "trace_ids", "knowledge_refs", "capability_refs", "workflow_refs", "excluded_refs", "selection_rationale", "change_kinds"].includes(name)) return { type: "array" };
   return { type: "string" };
 };
 const objectSchema = (required: string[] = [], optional: string[] = []): JsonObject => ({ type: "object",
@@ -27,7 +27,7 @@ const tool = (name: string, description: string, required: string[] = [], readOn
   name, description, inputSchema: objectSchema(required, optional), ...(readOnly ? { annotations: { readOnlyHint: true } } : {}),
 });
 
-export const TOOLS: Tool[] = [
+const TOOL_DEFINITIONS: Tool[] = [
   tool("craft_info", "Show the Craft version, data location, and record counts.", [], true),
   tool("craft_source_add", "Add and optionally scan a local capability directory. Equivalent mounts are idempotent; mirrors remain provenance.", ["path"], false, ["label", "scan", "priority"]),
   tool("craft_source_list", "List configured capability sources and resolved paths.", [], true),
@@ -377,6 +377,18 @@ export const TOOLS: Tool[] = [
   tool("craft_stateful_compute_report", "Accept a structured Sub-agent result with hypotheses, counterexamples, Evidence and confidence.", ["call_id", "hypotheses", "counterexamples", "evidence_ids", "confidence", "next_action"], false, ["output_refs"]),
   tool("craft_stateful_compute_cancel", "Cancel one non-terminal persistent Session and propagate cancellation to all outstanding Sub-agent calls.", ["session_id", "reason"]),
   tool("craft_stateful_compute_session_get", "Read one persistent compute Session and its latest Receipt reference.", ["session_id"], true),
+  tool("craft_uncertainty_policy_save", "Save a layered, versioned uncertainty policy; specific scopes cannot grant execution authority.", ["scope"], false, ["policy_id", "scope_id", "mode", "on_uncertain", "fallback", "confidence_threshold", "consistency_threshold", "max_attempts", "escalations", "human_fallback"]),
+  tool("craft_uncertainty_resolve", "Resolve insufficient or conflicting evidence into collecting, human-required, abstained, unchanged, rejected, or blocked.", ["policy_ids", "subject_ref"], false, ["resolution_id", "confidence", "consistency", "evidence_confidences", "conflict", "safety_floor_violation", "attempt"]),
+  tool("craft_uncertainty_adjudicate", "Append a scoped human quality adjudication without deleting evidence or overriding the Core Safety Floor.", ["resolution_id", "decision", "actor", "reason", "scope", "valid_until", "evidence_ids"], false, ["adjudication_id"]),
+  tool("craft_reference_pilot_save", "Register a sanitized, content-free development or file-delivery Reference Pilot.", ["kind", "name", "case_ref", "primary_metric"], false, ["pilot_id", "host", "direction", "effect_threshold", "guardrail_names", "sanitized", "content_stored"]),
+  tool("craft_release_qualification_plan", "Create exactly five paired baseline and candidate slots under one environment and budget fingerprint.", ["pilot_id", "baseline_ref", "candidate_ref", "environment_fingerprint", "budget_fingerprint"], false, ["qualification_id"]),
+  tool("craft_release_qualification_record", "Record one content-free, evidence-backed Reference Pilot result.", ["slot_id", "primary_value", "guardrails", "evidence_ids", "environment_fingerprint", "budget_fingerprint"], false, ["mechanism_passed"]),
+  tool("craft_release_qualification_evaluate", "Evaluate completed paired Pilot slots as eligible, rejected, or inconclusive.", ["qualification_id"]),
+  tool("craft_platform_ideal_state_assess", "Assess Platform Ideal State v1 from one development and one file-delivery qualification.", ["development_qualification_id", "file_qualification_id"], true),
+  tool("craft_verification_plan", "Derive a content-free, risk-matched development verification plan. It plans checks only and never executes a Host or command.", ["change_ref", "change_kinds", "effects", "environment_fingerprint"], false, ["verification_id", "candidate_change", "requires_real_host", "requested_risk_level", "content_stored"]),
+  tool("craft_verification_receipt_record", "Record one planned same-environment verification check with bounded Evidence; unplanned checks and raw content are rejected.", ["verification_id", "check_id", "status", "summary", "environment_fingerprint"], false, ["receipt_id", "evidence_ids"]),
+  tool("craft_verification_assess", "Assess a Verification Plan as eligible, rejected, or inconclusive. Candidate changes also require an eligible Release Qualification.", ["verification_id"], false, ["assessment_id", "release_qualification_id"]),
+  tool("craft_verification_get", "Read a Verification Plan, its planned checks, Evidence Receipts, and assessments.", ["verification_id"], true),
   tool("craft_task_graph_create", "Create a domain-neutral task dependency graph with optional exact Context Profile bindings; it does not dispatch Agents.", ["name", "nodes"], false,
     ["graph_id", "task_id", "workspace_id"]),
   tool("craft_task_graph_get", "Read one collaborative task graph.", ["graph_id"], true, ["version"]),
@@ -917,10 +929,22 @@ export const TOOLS: Tool[] = [
   tool("craft_a2a_task_list", "List remote A2A tasks without importing raw content.", ["endpoint"], false, ["request_id", "page_token"]),
 ];
 
+const RETIRED_PUBLIC_TOOL_NAMES = new Set([
+  "craft_work_launch_prepare", "craft_work_launch_decide", "craft_work_launch_get", "craft_work_launch_retry",
+  "craft_execution_fabric_prepare", "craft_execution_fabric_execute", "craft_execution_fabric_advance", "craft_execution_fabric_consume", "craft_execution_fabric_get",
+  "craft_verified_work_prepare", "craft_verified_work_authorize", "craft_verified_work_action", "craft_verified_work_reobserve", "craft_verified_work_deliver", "craft_verified_work_resume", "craft_verified_work_handoff", "craft_verified_work_get",
+  "craft_capability_context_work_launch_prepare", "craft_capability_context_work_launch_decide",
+  "craft_knowledge_context_work_launch_prepare", "craft_knowledge_context_work_launch_decide", "craft_knowledge_context_work_launch_retry",
+  "craft_guided_work_launch_prepare", "craft_safety_work_launch_prepare", "craft_safety_work_launch_decide",
+]);
+/** Public MCP operations. Retired stage-level entry points remain service internals. */
+export const TOOLS: Tool[] = TOOL_DEFINITIONS.filter((item) => !RETIRED_PUBLIC_TOOL_NAMES.has(item.name));
+const ACTIVE_TOOLS = TOOLS;
+
 const CORE_TOOL_NAMES = new Set(["craft_info", "craft_source_list", "craft_capability_search", "craft_capability_get", "craft_semantic_status", "craft_execution_policy_decide",
   "craft_default_route", "craft_default_route_resume", "craft_default_route_find", "craft_task_open", "craft_task_list", "craft_intent_compile", "craft_intent_get", "craft_acceptance_compile", "craft_acceptance_contract_get", "craft_task_checkpoint", "craft_task_control_refresh", "craft_task_control_get", "craft_task_run_refresh", "craft_task_run_get", "craft_verified_work_loop_prepare", "craft_verified_work_loop_advance", "craft_verified_work_loop_decide", "craft_verified_work_loop_resume", "craft_verified_work_loop_get", "craft_host_activation_manifest_prepare", "craft_host_activation_manifest_validate", "craft_host_activation_manifest_consume", "craft_host_activation_manifest_get", "craft_execution_fabric_prepare", "craft_execution_fabric_execute", "craft_execution_fabric_advance", "craft_execution_fabric_consume", "craft_execution_fabric_get", "craft_host_bridge_get", "craft_work_launch_get", "craft_work_delivery_observe", "craft_work_delivery_get", "craft_delivery_loop_refresh", "craft_delivery_loop_get", "craft_delivery_evaluation_compare", "craft_delivery_evaluation_run", "craft_eval_campaign_report", "craft_adaptive_harness_recommend", "craft_managed_write_get", "craft_managed_run_get", "craft_campaign_runner_get", "craft_runtime_assurance_intervene", "craft_runtime_assurance_get", "craft_workspace_observer_get", "craft_autonomy_ladder_get", "craft_work_coordinator_get", "craft_agent_eval_lab_get", "craft_judge_promotion_eligible", "craft_platform_execution_preflight", "craft_platform_execution_probe", "craft_platform_execution_probe_get", "craft_workspace_get", "craft_workspace_diff", "craft_work_object_list", "craft_workspace_impact", "craft_context_assemble", "craft_change_set_preview",
-  "craft_artifact_register", "craft_evidence_record", "craft_capability_access_plan", "craft_capability_call_issue", "craft_capability_call_consume", "craft_capability_kit_get", "craft_capability_kit_list", "craft_capability_kit_distribution", "craft_capability_connector_list", "craft_capability_connector_ticket_issue", "craft_capability_connector_ticket_consume", "craft_knowledge_source_list", "craft_context_resolution_resolve", "craft_context_resolution_get", "craft_work_runtime_mode_get", "craft_continual_harness_view_create", "craft_continual_harness_refine", "craft_continual_harness_submit", "craft_continual_harness_signals", "craft_continual_harness_resolve", "craft_continual_harness_get", "craft_stateful_compute_session_prepare", "craft_stateful_compute_dispatch", "craft_stateful_compute_observe", "craft_stateful_compute_delegate", "craft_stateful_compute_report", "craft_stateful_compute_cancel", "craft_stateful_compute_session_get", "craft_evaluation_program_due", "craft_evaluation_program_report", "craft_enterprise_access_ticket_get", "craft_a2a_delegation_get", "craft_federated_delegation_get", "craft_harness_topology_get", "craft_runtime_readiness_get", "craft_assured_pilot_get", "craft_assured_pilot_reassess", "craft_usage_report", "craft_settings_get", "craft_trace_get", "craft_trace_query", "craft_trace_replay_bundle"]);
-export const CORE_TOOLS: Tool[] = TOOLS.filter((tool) => CORE_TOOL_NAMES.has(tool.name));
+  "craft_artifact_register", "craft_evidence_record", "craft_capability_access_plan", "craft_capability_call_issue", "craft_capability_call_consume", "craft_capability_kit_get", "craft_capability_kit_list", "craft_capability_kit_distribution", "craft_capability_connector_list", "craft_capability_connector_ticket_issue", "craft_capability_connector_ticket_consume", "craft_knowledge_source_list", "craft_context_resolution_resolve", "craft_context_resolution_get", "craft_work_runtime_mode_get", "craft_continual_harness_view_create", "craft_continual_harness_refine", "craft_continual_harness_submit", "craft_continual_harness_signals", "craft_continual_harness_resolve", "craft_continual_harness_get", "craft_stateful_compute_session_prepare", "craft_stateful_compute_dispatch", "craft_stateful_compute_observe", "craft_stateful_compute_delegate", "craft_stateful_compute_report", "craft_stateful_compute_cancel", "craft_stateful_compute_session_get", "craft_uncertainty_resolve", "craft_release_qualification_evaluate", "craft_platform_ideal_state_assess", "craft_verification_get", "craft_evaluation_program_due", "craft_evaluation_program_report", "craft_enterprise_access_ticket_get", "craft_a2a_delegation_get", "craft_federated_delegation_get", "craft_harness_topology_get", "craft_runtime_readiness_get", "craft_assured_pilot_get", "craft_assured_pilot_reassess", "craft_usage_report", "craft_settings_get", "craft_trace_get", "craft_trace_query", "craft_trace_replay_bundle"]);
+export const CORE_TOOLS: Tool[] = ACTIVE_TOOLS.filter((tool) => CORE_TOOL_NAMES.has(tool.name));
 
 // The syscall surface. Instead of one tool per operation, a host learns a fixed
 // set of verbs and addresses capabilities by (resource, operation). The registry
@@ -938,7 +962,7 @@ export const SYSCALL_TOOLS: Tool[] = [
   tool("craft_search", "Search indexed capabilities, or another searchable resource when one is named.", [], true, ["query", "resource", "limit"]),
 ];
 
-export const TOOL_REGISTRY = buildRegistry(TOOLS);
+export const TOOL_REGISTRY = buildRegistry(ACTIVE_TOOLS);
 
 /**
  * Default operation for each syscall verb, so a caller that omits it still lands
@@ -962,7 +986,7 @@ export const VERB_DEFAULT_OPERATION: Readonly<Record<string, string>> = {
 // swallow the whole list.
 const SURFACE_RULES: ReadonlyArray<{ name: string; pattern: RegExp }> = [
   { name: "governance", pattern: /^craft_(capability|source|logical|contract|hub|supply|federation|materialization|certification|skill|publication|catalog|domain|hook)/ },
-  { name: "evaluation", pattern: /^craft_(evaluation|eval|benchmark|campaign|judge|grader|grade|signoff|harness|trial|trajectory|experience|adaptation|adaptive|canary|acceptance|outcome|delivery_evaluation|agent_eval|verified_iteration|feedback|trace)/ },
+  { name: "evaluation", pattern: /^craft_(evaluation|eval|benchmark|campaign|judge|grader|grade|signoff|harness|trial|trajectory|experience|adaptation|adaptive|canary|acceptance|outcome|delivery_evaluation|agent_eval|verified_iteration|feedback|trace|verification)/ },
   { name: "execution", pattern: /^craft_(sandbox|docker|effect|egress|credential|execution|managed|platform|isolated|local|external|recovery|durable|trigger|webhook|orchestration|runtime|autonomy|speculative)/ },
   { name: "knowledge", pattern: /^craft_(wiki|knowledge|context|memory|project|semantic|claim|relation)/ },
   { name: "workspace", pattern: /^craft_(workspace|work_object|change_set|state|transaction|lineage|hydration|dehydration|artifact|evidence|untrusted)/ },
@@ -976,7 +1000,15 @@ const SURFACE_RULES: ReadonlyArray<{ name: string; pattern: RegExp }> = [
  * subset by name (the routing Skill's tools) alongside the generic verbs, so it
  * is not part of the domain partition and is excluded from that coverage check.
  */
-export const SURFACE_NAMES: readonly string[] = ["core", ...SURFACE_RULES.map((rule) => rule.name), "syscall", "full"];
+const COMPONENT_SURFACES: Readonly<Record<string, RegExp>> = {
+  "component-knowledge": /^craft_(wiki|knowledge|claim|relation|context_resolution)/,
+  "component-memory": /^craft_(memory|knowledge_source|context_resolution)/,
+  "component-capability": /^craft_(source|capability|logical|semantic)/,
+  "component-skill-quality": /^craft_(evaluation|eval|benchmark|campaign|judge|grader|grade|signoff|trial|outcome|skill_proposal|verified_iteration|verification)/,
+};
+
+export const COMPONENT_SURFACE_NAMES: readonly string[] = Object.keys(COMPONENT_SURFACES);
+export const SURFACE_NAMES: readonly string[] = ["core", ...SURFACE_RULES.map((rule) => rule.name), ...COMPONENT_SURFACE_NAMES, "syscall", "full"];
 
 /** Domain surfaces only: these partition every non-core tool exactly once. */
 export const DOMAIN_SURFACE_NAMES: readonly string[] = SURFACE_RULES.map((rule) => rule.name);
@@ -988,11 +1020,13 @@ export function domainSurfaceOf(toolName: string): string {
 
 /** Tool names a surface exposes. Unknown surfaces fail closed instead of silently widening to the full list. */
 export function surfaceToolNames(surface: string): string[] {
-  if (surface === "full") return TOOLS.map((tool) => tool.name);
+  if (surface === "full") return ACTIVE_TOOLS.map((tool) => tool.name);
   if (surface === "core") return CORE_TOOLS.map((tool) => tool.name);
   if (surface === "syscall") return [...SYSCALL_VERBS, ...SYSCALL_PASSTHROUGH];
+  const component = COMPONENT_SURFACES[surface];
+  if (component) return ACTIVE_TOOLS.filter((tool) => tool.name === "craft_info" || component.test(tool.name)).map((tool) => tool.name);
   if (!SURFACE_RULES.some((rule) => rule.name === surface)) throw new Error(`Unknown Craft MCP surface: ${surface}`);
-  return TOOLS.filter((tool) => !CORE_TOOL_NAMES.has(tool.name) && domainSurfaceOf(tool.name) === surface).map((tool) => tool.name);
+  return ACTIVE_TOOLS.filter((tool) => !CORE_TOOL_NAMES.has(tool.name) && domainSurfaceOf(tool.name) === surface).map((tool) => tool.name);
 }
 
 export class McpServer {
@@ -1004,7 +1038,7 @@ export class McpServer {
     this.service = service;
     this.mode = mode;
     const allowed = new Set(surfaceToolNames(mode));
-    this.tools = [...TOOLS, ...SYSCALL_TOOLS].filter((tool) => allowed.has(tool.name));
+    this.tools = [...ACTIVE_TOOLS, ...SYSCALL_TOOLS].filter((tool) => allowed.has(tool.name));
     this.handlers = {
       craft_info: () => service.info(), craft_source_add: (a) => service.sourceAdd(a),
       craft_source_list: () => service.sourceList(), craft_source_update: (a) => service.sourceUpdate(a),
@@ -1337,6 +1371,9 @@ export class McpServer {
       craft_stateful_compute_delegate: service.statefulComputeDelegate.bind(service), craft_stateful_compute_report: service.statefulComputeReport.bind(service),
       craft_stateful_compute_cancel: service.statefulComputeCancel.bind(service),
       craft_stateful_compute_session_get: service.statefulComputeSessionGet.bind(service),
+      craft_uncertainty_policy_save: service.uncertaintyPolicySave.bind(service), craft_uncertainty_resolve: service.uncertaintyResolve.bind(service), craft_uncertainty_adjudicate: service.uncertaintyAdjudicate.bind(service),
+      craft_reference_pilot_save: service.referencePilotSave.bind(service), craft_release_qualification_plan: service.releaseQualificationPlan.bind(service), craft_release_qualification_record: service.releaseQualificationRecord.bind(service), craft_release_qualification_evaluate: service.releaseQualificationEvaluate.bind(service), craft_platform_ideal_state_assess: service.platformIdealStateAssess.bind(service),
+      craft_verification_plan: service.verificationPlan.bind(service), craft_verification_receipt_record: service.verificationReceiptRecord.bind(service), craft_verification_assess: service.verificationAssess.bind(service), craft_verification_get: service.verificationGet.bind(service),
       craft_capability_connector_register: service.capabilityConnectorRegister.bind(service), craft_capability_connector_discover: service.capabilityConnectorDiscover.bind(service),
       craft_capability_connector_update: service.capabilityConnectorUpdate.bind(service),
       craft_capability_connector_health_record: service.capabilityConnectorHealthRecord.bind(service),

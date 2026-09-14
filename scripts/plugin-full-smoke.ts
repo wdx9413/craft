@@ -16,11 +16,17 @@ const child = spawn("node", [join(pluginRoot, "dist/plugin/craft-mcp-full.cjs")]
 try {
   assert(child.stdin && child.stdout && child.stderr, "full MCP smoke test requires piped stdio");
   let output = ""; let errors = ""; child.stdout.setEncoding("utf8"); child.stderr.setEncoding("utf8");
-  child.stdout.on("data", (chunk) => { output += chunk; }); child.stderr.on("data", (chunk) => { errors += chunk; });
+  child.stderr.on("data", (chunk) => { errors += chunk; });
+  const responsesPromise = new Promise<Array<Record<string, any>>>((resolveResponses, reject) => {
+    child.stdout.on("data", (chunk) => {
+      output += chunk;
+      const lines = output.split(/\r?\n/u);
+      if (lines.length >= 3) resolveResponses(lines.slice(0, 2).map((line) => JSON.parse(line)));
+    });
+    child.once("error", reject);
+  });
   child.stdin.end(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-11-25" } })}\n${JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list" })}\n`);
-  await Promise.race([once(child.stdout, "data"), new Promise<never>((_, reject) => setTimeout(() => reject(new Error(errors || "Full MCP smoke test timed out")), 5_000))]);
-  await new Promise((resolveOutput) => setTimeout(resolveOutput, 25));
-  const responses = output.trim().split(/\r?\n/).map((line) => JSON.parse(line));
+  const responses = await Promise.race([responsesPromise, new Promise<never>((_, reject) => setTimeout(() => reject(new Error(errors || "Full MCP smoke test timed out")), 5_000))]);
   assert.equal(responses[0].result.serverInfo.version, manifest.version);
   assert((responses[1].result.tools as Array<{ name: string }>).some((tool) => tool.name === "craft_skill_proposal_publish"));
   console.log("Bundled full MCP starts and retains legacy tools.");

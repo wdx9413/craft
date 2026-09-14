@@ -1,0 +1,21 @@
+{
+  "name": "craft-knowledge",
+  "version": "0.12.23",
+  "description": "Standalone governed knowledge for people and AI hosts.",
+  "author": { "name": "wdx9413", "url": "https://github.com/wdx9413" },
+  "homepage": "https://github.com/wdx9413/craft",
+  "repository": "https://github.com/wdx9413/craft",
+  "license": "MIT",
+  "keywords": ["knowledge", "wiki", "evidence", "mcp"],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Craft Knowledge",
+    "shortDescription": "Evidence-backed knowledge without the full runtime.",
+    "longDescription": "Search and govern Craft Wiki and configured knowledge sources with scoped references, revisions, evidence, review, and reproducible context receipts.",
+    "developerName": "wdx9413",
+    "category": "Productivity",
+    "capabilities": ["Knowledge sources", "Evidence Wiki", "Context resolution"],
+    "defaultPrompt": ["Search my governed knowledge for this question and cite the selected revisions."]
+  }
+}

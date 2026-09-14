@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { CraftStore, type JsonObject } from "./store.ts";
+import { assertExecutionHostMode, defaultExecutionHostMode, executionHostDescriptor } from "./host-protocol.ts";
 
 function text(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim(); }
 function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
@@ -8,6 +9,9 @@ const TERMINAL = new Set(["completed", "failed", "cancelled", "interrupted"]);
 
 /**
  * Binds an already-prepared Execution Fabric to one actual Host invocation.
+ * In an embedded Codex/Claude plugin this is an EmbeddedHostBridge: the
+ * already-running Host claims an action and returns a Receipt. Craft does not
+ * launch another Codex or Claude process.
  * It deliberately stores only references and prompt digests. Host execution,
  * authorization and state observation remain in their specialised kernels.
  */
@@ -25,9 +29,12 @@ export class HostBridgeKernel {
       throw new Error("Host Bridge requires one Fabric, Task, Manifest, Work Loop, and Host Launch");
     }
     if (!["prepared", "awaiting_approval", "running"].includes(String(launch.status))) throw new Error("Host Bridge Launch is not executable");
+    const hostId = String(launch.host);
+    const hostMode = args.host_mode === undefined ? defaultExecutionHostMode(hostId) : assertExecutionHostMode(String(args.host_mode));
+    const hostProtocol = executionHostDescriptor(hostId, hostMode);
     const identity = { fabric_id: fabric.id, manifest_id: manifest.id, manifest_version: manifest.version,
       work_loop_id: loop.id, task_run_id: taskRun.id, task_id: loop.task_id, launch_id: launch.id,
-      host: launch.host, dispatch_id: launch.dispatch_id, sandbox: launch.sandbox, prompt_digest: launch.prompt_digest };
+      host: launch.host, host_protocol: hostProtocol, dispatch_id: launch.dispatch_id, sandbox: launch.sandbox, prompt_digest: launch.prompt_digest };
     const invocationId = String(args.invocation_id ?? `host_bridge_${fabric.id}`); const existing = this.store.find("host_bridge_invocation", invocationId); const identityDigest = digest(identity);
     if (existing) { if (existing.identity_digest !== identityDigest) throw new Error("Host Bridge invocation idempotency conflict"); return { invocation: existing, idempotent: true }; }
     return { invocation: this.store.create("host_bridge_invocation", invocationId, { ...identity, identity_digest: identityDigest, status: "prepared", activation_receipt_id: null, run_id: null }), idempotent: false };

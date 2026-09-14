@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import test from "node:test";
 import type { JsonObject } from "../src/store.ts";
-import { CORE_TOOLS, McpServer, SURFACE_NAMES, TOOLS, domainSurfaceOf, surfaceToolNames } from "../src/mcp.ts";
+import { CORE_TOOLS, DOMAIN_SURFACE_NAMES, McpServer, TOOLS, domainSurfaceOf, surfaceToolNames } from "../src/mcp.ts";
 import { serveMcpStdio } from "../src/mcp-stdio.ts";
 import { craftPaths } from "../src/paths.ts";
 import { CraftService } from "../src/service.ts";
@@ -390,7 +390,7 @@ test("MCP stdio default runtime accepts buffered initialization", async () => {
     const serving = serveMcpStdio({ mode: "full", input, write: (line) => output.push(line) });
     input.end('{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}\n');
     await serving;
-    assert.equal((JSON.parse(output[0]) as { result: { serverInfo: { version: string } } }).result.serverInfo.version, "0.12.20");
+    assert.equal((JSON.parse(output[0]) as { result: { serverInfo: { version: string } } }).result.serverInfo.version, "0.12.23");
   } finally { if (original === undefined) delete process.env.CRAFT_DATA_DIR; else process.env.CRAFT_DATA_DIR = original; await rm(root, { recursive: true, force: true }); }
 });
 
@@ -398,7 +398,7 @@ test("MCP tool surfaces partition the full tool list and fail closed on unknown 
   assert.equal(surfaceToolNames("full").length, TOOLS.length);
   assert.deepEqual(surfaceToolNames("core").sort(), CORE_TOOLS.map((tool) => tool.name).sort());
 
-  const domains = SURFACE_NAMES.filter((name) => name !== "core" && name !== "full" && name !== "syscall");
+  const domains = DOMAIN_SURFACE_NAMES;
   const seen = new Set<string>(surfaceToolNames("core"));
   for (const name of domains) {
     const names = surfaceToolNames(name);

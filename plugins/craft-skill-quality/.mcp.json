@@ -1,0 +1,1 @@
+{"mcpServers":{"craft-skill-quality":{"command":"node","args":["dist/plugin/craft-mcp.cjs","--surface","component-skill-quality"],"cwd":"."}}}

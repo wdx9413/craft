@@ -1,6 +1,6 @@
 {
   "name": "craft-agent-harness",
-  "version": "0.12.20",
+  "version": "0.12.23",
   "description": "Cross-platform capability, workflow, evidence, and agent harness",
   "type": "module",
   "bin": {
@@ -9,7 +9,7 @@
     "craft-mcp-full": "dist/bin/craft-mcp-full.js"
   },
   "scripts": {
-    "test": "pnpm run build && pnpm run typecheck && pnpm run test:ts && pnpm run test:v01216 && pnpm run test:v01217 && pnpm run test:v01218 && pnpm run test:v01219 && pnpm run test:v01220 && pnpm run test:smoke && pnpm run test:plugin",
+    "test": "pnpm run build && pnpm run typecheck && pnpm run test:ts && pnpm run test:v01216 && pnpm run test:v01217 && pnpm run test:v01218 && pnpm run test:v01219 && pnpm run test:v01220 && pnpm run test:v01221 && pnpm run test:v01222 && pnpm run test:v01223 && pnpm run test:smoke && pnpm run test:plugin",
     "clean": "node --experimental-strip-types scripts/clean.ts",
     "build": "pnpm run clean && pnpm run build:core && pnpm run build:plugin && pnpm run pack:plugin && pnpm run build:deepseek && pnpm run pack:adapters",
     "build:core": "node node_modules/typescript/bin/tsc -p tsconfig.build.json",
@@ -20,7 +20,7 @@
     "pack:desktop": "node --experimental-strip-types scripts/package-desktop.ts",
     "prepack": "pnpm run build",
     "test:smoke": "node dist/src/cli.js --help",
-    "test:plugin": "node --experimental-strip-types scripts/check-plugin-package.ts && node --experimental-strip-types scripts/plugin-smoke.ts && node --experimental-strip-types scripts/plugin-full-smoke.ts",
+    "test:plugin": "node --experimental-strip-types scripts/check-plugin-package.ts && node --experimental-strip-types scripts/plugin-smoke.ts && node --experimental-strip-types scripts/plugin-component-smoke.ts && node --experimental-strip-types scripts/plugin-full-smoke.ts",
     "version:check": "node --experimental-strip-types scripts/check-version.ts",
     "test:ts": "pnpm run version:check && node --experimental-strip-types scripts/test.ts",
     "test:v01216": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-include=src/federated-delegation.ts --test-coverage-include=src/harness-topology.ts --test-coverage-include=src/runtime-readiness.ts --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 tests/v01216-federated-runtime.test.ts",
@@ -28,6 +28,9 @@
     "test:v01218": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-include=src/capability-kit-runtime.ts --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 tests/v01218-capability-platform.test.ts",
     "test:v01219": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-include=src/knowledge-memory-runtime.ts --test-coverage-include=src/work-runtime-mode.ts --test-coverage-include=src/verified-work-loop.ts --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 tests/v01219-universal-runtime.test.ts tests/verified-work-loop.test.ts",
     "test:v01220": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-include=src/continual-harness.ts --test-coverage-include=src/stateful-compute.ts --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 tests/v01220-continual-harness.test.ts",
+    "test:v01221": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-include=src/uncertainty-policy.ts --test-coverage-include=src/release-qualification.ts --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 tests/v01221-platform-ideal-state.test.ts",
+    "test:v01222": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-include=src/host-protocol.ts --test-coverage-include=src/host-bridge.ts --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 tests/v01222-component-plugins.test.ts tests/execution-fabric.test.ts",
+    "test:v01223": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-include=src/verification-plane.ts --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 tests/v01223-verification-plane.test.ts",
     "check:ts": "node --experimental-strip-types src/cli.ts --help",
     "typecheck": "node node_modules/typescript/bin/tsc --noEmit"
   },

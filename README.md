@@ -1,6 +1,6 @@
 # Craft
 
-> 当前发布版本：v0.12.20。Craft 是面向人和 AI 的通用工作运行时：既可作为 Codex 等 Host 的运行控制台，也可通过模型无关的 Agent 模式准备执行计划。本版新增证据化 Continual Harness、双速演进、通用持久计算 Session 和函数式只读 Sub-agent；它不绑定第三方 Agent、不保存凭据，也不绕过 Host、评测或审批直接执行。
+> 当前发布版本：v0.12.23。Craft 是面向人和 AI 的通用工作运行时：既可以完整插件接入 Codex 等 Host，也可将 Knowledge、Memory、Capability 和 Skill Quality 作为独立组件使用。Codex 插件默认复用当前 App 作为 Embedded Host，不另起 Codex CLI；所有形态都共享相同的状态、策略、Receipt、评测与安全边界。
 
 [中文](README.md) | [English](README.en.md)
 
@@ -49,7 +49,9 @@ Sandbox 能力采用“声明、诊断、黑盒一致性验证、精确版本票
 - **Runtime Boundaries（v0.12.13）**：有界 Action Gateway、独立 Acceptance Gate、Durable Worker、Provider fallback 和摘要化 A2A 入口均通过同一服务/MCP 底座提供；真实 Shell、浏览器、远程副作用与 OS 沙箱仍需显式 Adapter。详见 [Runtime Completion](docs/technical/modules/v01213-runtime-completion.zh-CN.md)。
 - **Assured Pilot（v0.12.17）**：把已验证的 Host 回执、环境、恢复演练、可信 Capability Profile 与一次性密封 held-out Case 引用收束为可比较样本；环境、能力、Case 或人工工作区漂移即 `needs_replan`。它不读取密封正文，也不把本地记录声称为生产隔离。详见 [Assured Pilot](docs/technical/modules/assured-pilot.md)。
 - **Capability Kit Platform（v0.12.18）**：`Capability Kit Manifest → Registry → Conformance → Task Activation → digest-only Contribution` 是唯一扩展路径。Kit 可投影为 Skill、MCP、CLI 或插件描述；核心事实、授权、Receipt、Evidence、Outcome 与 Eval Gate 不可由 Kit 直接写入。内置 Serena 项目知识和本地工作区两个样例，外部 Kit 不自动下载、执行或启用。详见 [Capability Kit Runtime](docs/technical/modules/capability-kit-runtime.md)。
-- **Continual Harness（v0.12.20）**：从真实 Trace、Outcome、Acceptance 与 Evidence 生成最多改变两个设计轴的局部 Diff。Session 内低风险 Prompt Note/Memory 经过隐私检查后可带 TTL 暂用；Skill、Workflow、Sub-agent 等变化必须经过 Shadow Eval、精确 Signoff、Canary 与回滚。Host 无关的持久计算 Session 只签发 Dispatch 并接收状态 Receipt，不在 Craft 内裸执行代码。详见 [Continual Harness 与持久计算协议](docs/technical/modules/continual-harness-runtime.md)。
+- **Platform Ideal State v1（v0.12.21）**：工作主链统一为“定义、准备、行动、交付、学习”；模型可在 Safety Floor 内自动增加求证强度，人工介入仅为可配置兜底。发布资格使用两个无正文 Pilot、同环境同预算的五次配对 Trial，明确区分 `eligible`、`rejected` 与 `inconclusive`。详见 [Platform Ideal State v1](docs/technical/modules/platform-ideal-state-v1.md)。
+- **组件插件架构（v0.12.22）**：完整 Craft 是组合根，另提供 `craft-knowledge`、`craft-memory`、`craft-capability`、`craft-skill-quality` 四个独立插件；安装不等于全量激活。Host 协议区分 Embedded、Managed 与 Remote。详见 [组件插件架构](docs/technical/modules/component-plugin-architecture.md)。
+- **开发验证平面（v0.12.23）**：`VerificationPlane` 依据变更类别、effect、Candidate 和 Host 风险生成最小检查集，收集同环境 Evidence Receipt，并明确给出 `eligible`、`rejected` 或 `inconclusive`。它不执行命令；Candidate 仍须通过 Release Qualification。详见 [Verification Plane](docs/technical/modules/verification-plane.md)。
 - Orchestration Trial 自动归档：锁定 Agent Profile 精确版本，记录 Dispatch、重路由、节点结果、成本和证据，并在终态自动生成 Outcome。
 - 版本化 Grader、多来源 Grade 和 Signoff Policy；模型判断不会被记录成程序证明。
 - 同评测集版本对比：在 Suite 精确版本、分区、Subject 类型和 Case 集合一致时，聚合比较 Workflow、Agent Profile 或 Harness Configuration 的质量、成本、耗时与失败类型。

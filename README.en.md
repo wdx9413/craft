@@ -1,6 +1,6 @@
 # Craft
 
-> Current release: v0.12.20. Craft is a general work runtime for people and AI: it can control a Host such as Codex or prepare a model-neutral Agent-mode plan. This release adds evidence-backed Continual Harness refinement, two-speed evolution, generic persistent compute Sessions, and read-only Sub-agent calls. Craft binds no third-party Agent and never bypasses Host, evaluation, or approval boundaries.
+> Current release: v0.12.23. Craft is a general work runtime for people and AI. It can be installed as a complete plugin or as standalone Knowledge, Memory, Capability, and Skill Quality components. In Codex, the current app is the embedded execution host; Craft does not start another Codex CLI by default.
 
 [中文](README.md) | [English](README.en.md)
 

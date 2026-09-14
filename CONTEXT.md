@@ -2,6 +2,18 @@
 
 Craft 是一个把任务、能力、执行事实和评测闭环连接起来的受控工作运行时。这里定义跨产品、MCP 和实现都使用的词；具体接口、版本和实现细节放在 `docs/`。
 
+**Platform Ideal State v1**：Craft 第一阶段可宣告完成的平台边界：新能力无需修改核心即可受控接入，真实任务可执行、恢复、验收和比较。它以可复现工作证据判定，不以累计功能数量或追逐全部行业能力判定。
+_Avoid_: 终极形态、功能全集、万能 Agent
+
+**Reference Pilot**：用于证明 Platform Ideal State v1 的可重复真实任务纵切，固定输入基线、Host、环境、预算、验收和失败分类。首批由一个 Codex 研发 Case 和一个文件型非研发 Case 组成。
+_Avoid_: 单元测试、演示、一次性成功案例
+
+**Release Qualification**：发布前对 Reference Pilot 的机制门和价值门进行固定环境、等预算、重复配对运行后形成的准入结论。结论只能是 `eligible`、`rejected` 或 `inconclusive`，单次成功和单元覆盖率不能替代它。
+_Avoid_: 测试通过、版本检查、模型自评
+
+**Verification Plane**：开发变更的内容无关验证控制模块。它根据变更类别、effect、Candidate 与 Host 要求生成最小验证集，接收同环境、Evidence-backed Receipt，并输出 `eligible`、`rejected` 或 `inconclusive`。它不执行命令，也不替代 Release Qualification。
+_Avoid_: 测试运行器、覆盖率报告、任意命令执行器
+
 ## 任务与状态
 
 **Task**：用户希望完成的、可跨会话延续的工作目标。它不是一次模型调用或一次命令执行。
@@ -139,6 +151,12 @@ _Avoid_: 通用事务、外部回滚
 
 **Acceptance**：对交付是否满足明确业务或技术条件的独立判断。它补充 Host Receipt，不能由模型声明替代。
 _Avoid_: Host completion、Outcome
+
+**Uncertainty Policy**：当验收或评测证据不足、接近阈值或相互冲突时，决定继续采证、请求人工、弃权、保持旧状态、拒绝或阻塞的版本化规则。它可以按 Global、Project、Task 或 Case 收窄行为，但不能低于 Core Safety Floor，也不能自动扩大 effect、权限或数据范围。
+_Avoid_: 模型自报置信度、人工兜底、自动提权
+
+**Adjudication**：人工针对普通质量分歧形成的追加式裁决，记录理由、范围、有效期和所依据的证据版本。它不删除原证据，不能绕过 Core Safety Floor，并会在相关状态或证据变化后失效或待复核。
+_Avoid_: 覆盖证据、安全例外、人工通过
 
 **Work Delivery**：对终态 Host Receipt 与 Acceptance 的只读交付观察，明确区分待验收、接受、拒绝、阻塞和 Host 失败。
 _Avoid_: Host Run、Artifact

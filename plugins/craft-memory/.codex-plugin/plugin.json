@@ -1,0 +1,21 @@
+{
+  "name": "craft-memory",
+  "version": "0.12.23",
+  "description": "Standalone scoped and evidence-linked memory for AI hosts.",
+  "author": { "name": "wdx9413", "url": "https://github.com/wdx9413" },
+  "homepage": "https://github.com/wdx9413/craft",
+  "repository": "https://github.com/wdx9413/craft",
+  "license": "MIT",
+  "keywords": ["memory", "context", "agent", "mcp"],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Craft Memory",
+    "shortDescription": "Scoped memory and reproducible context receipts.",
+    "longDescription": "Resolve working, episodic, preference, and procedural memories by scope, provenance, expiry, sensitivity, and evidence without requiring Craft's full orchestration loop.",
+    "developerName": "wdx9413",
+    "category": "Productivity",
+    "capabilities": ["Memory ledger", "Context resolution", "Memory governance"],
+    "defaultPrompt": ["Resolve only the memories relevant to this task and explain why each was selected."]
+  }
+}

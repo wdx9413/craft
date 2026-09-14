@@ -1,6 +1,6 @@
 # Craft：受控 Agent 工作运行时
 
-> 本文是 Craft 的总览入口。它解释产品解决的问题、关键概念如何连接、当前实现做到哪里，以及在面试或架构评审中应如何准确回答。当前实现基线为 v0.12.20；旧版本号只表示历史里程碑。
+> 本文是 Craft 的总览入口。它解释产品解决的问题、关键概念如何连接、当前实现做到哪里，以及在面试或架构评审中应如何准确回答。当前实现基线为 v0.12.23；旧版本号只表示历史里程碑。
 
 ## 一句话
 
@@ -59,6 +59,12 @@ Craft 把这些问题放到同一个持久化控制面。它保存摘要、引�
 这五段是按风险启用的可靠性协议，不是要求每个普通问答强制经过的流程。定义固定目标、约束和成功标准；准备读取事实、最小激活并预检；行动必须产生 Receipt 并再观察；交付走 Acceptance/Outcome；学习只产生经过 Eval、Signoff、Canary 与回滚约束的候选。
 
 v0.12.20 将最后的“学习”变成可运行的双速闭环：本次 Session 内的低风险 Prompt Note/Memory 可在隐私检查后带 TTL 临时生效；任何项目级、用户级、Skill、Workflow 或 Sub-agent 变化仍是候选，必须经过 Shadow Eval、精确 Signoff 与 Canary。持久计算与子 Agent 通过通用 Host 协议表达，不绑定具体供应商或第三方 Agent。
+
+v0.12.21 进一步把主链压缩为“定义 → 准备 → 行动 → 交付 → 学习”，并将 `VerifiedWorkLoop` 固定为唯一公开工作门面。`UncertaintyPolicy` 允许模型在 Safety Floor 内自主增加求证强度，人工介入只是可配置兜底；`ReferencePilot` 用两个无正文 Case、每臂五次配对 Trial 区分机制通过与真实价值证明。详见 [Platform Ideal State v1](technical/modules/platform-ideal-state-v1.md)。
+
+v0.12.22 将产品拆成完整 Craft 插件与四个可独立安装的组件插件。完整插件统一装配 Core、Knowledge、Memory、Capability、Skill Quality 和 Host Bridge；独立插件可以在不启用完整工作流的情况下增强其他 Agent。Codex App 默认是 `embedded` Execution Host，Craft 不会因此另起 Codex CLI。详见 [组件插件架构](technical/modules/component-plugin-architecture.md)。
+
+v0.12.23 增加 `VerificationPlane`：它从变更类型、effect、Candidate 与真实 Host 需求推导最小验证集，收集环境一致的 Evidence Receipt，并判定 `eligible / rejected / inconclusive`。单元覆盖率只是其中一个确定性检查；对抗、恢复、真实 Host 和 Candidate 还需更强验证。该模块不执行命令、不持久化原始内容，仍通过既有 Host / Runtime Seam 运行实际检查。详见 [Verification Plane](technical/modules/verification-plane.md)。
 
 ```text
 Task + Task Contract + 初始 State Snapshot

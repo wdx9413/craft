@@ -1,6 +1,6 @@
 {
   "name": "craft",
-  "version": "0.12.20",
+  "version": "0.12.23",
   "description": "Capability discovery, durable tasks, verified workflows, evidence, and multi-agent orchestration.",
   "author": {
     "name": "wdx9413",
@@ -10,11 +10,11 @@
   "repository": "https://github.com/wdx9413/craft",
   "license": "MIT",
   "keywords": ["agent", "skills", "workflow", "memory", "mcp"],
-  "skills": "./skills/craft-route/",
+  "skills": "./skills/",
   "interface": {
     "displayName": "Craft",
     "shortDescription": "Discover, orchestrate, evaluate, and reuse capabilities.",
-    "longDescription": "Craft indexes user-selected capabilities and manages durable tasks, execution trials and traces, evidence-gated evaluations, host-mediated plans, and reusable workflows under ~/.craft_data.",
+    "longDescription": "The complete Craft runtime composes Core, Knowledge, Memory, Capability, and Skill Quality behind a minimal route-first surface. In Codex it uses the current app as an embedded execution host and never launches a second Codex CLI by default.",
     "developerName": "wdx9413",
     "category": "Productivity",
     "capabilities": ["Capability search", "Task continuity", "Shared work objects", "Dependency impact analysis", "Bounded context assembly", "Scoped memory", "Execution trials", "Evidence records", "Multi-agent orchestration", "Evaluation signoff", "Version comparison", "Verified workflows", "Experience patterns", "Safe Skill publishing"],

@@ -27,7 +27,7 @@ import { dockerRequestDigest } from "./docker-sandbox.ts";
 import { egressRequestDigest } from "./egress.ts";
 import { ServiceFoundation } from "./service-foundation.ts";
 
-export const VERSION = "0.12.20";
+export const VERSION = "0.12.23";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -301,6 +301,7 @@ export class CraftService extends ServiceFoundation {
       "capability_asset", "activation_profile", "tool_selection_receipt", "capability_call", "capability_connector", "capability_connector_asset", "capability_connector_ticket", "capability_connector_health", "capability_connector_revocation", "logical_activation_plan", "logical_activation_audit", "logical_activation_resolution", "expert_profile", "context_capsule",
       "evaluation_reliability", "judge_adapter", "judge_calibration", "adaptation_candidate", "feedback_intake", "feedback_case", "canary",
       "capability_kit", "capability_kit_activation", "capability_kit_contribution", "capability_kit_conformance", "knowledge_source", "memory_ledger", "memory_compat_binding", "context_resolution_receipt", "retrieval_adapter", "retrieval_evaluation", "work_runtime_mode", "work_runtime_plan",
+      "uncertainty_policy", "uncertainty_resolution", "adjudication", "reference_pilot", "release_qualification", "release_qualification_slot",
       "workspace", "workspace_checkpoint", "workspace_change", "workspace_transaction", "work_object", "memory_item", "context_profile", "task_graph", "change_set", "os_security_plan", "os_security_receipt", "mcp_registry_source", "mcp_registry_server", "mcp_registry_health", "org_sync_manifest", "trace_otlp_export",
       "budget_account", "budget_reservation", "durable_wait", "external_event", "fallback_contract", "fallback_event",
       "credential_handle", "credential_lease", "egress_authorization", "egress_execution", "parser_security_evaluation", "parser_process_receipt",
@@ -411,6 +412,18 @@ export class CraftService extends ServiceFoundation {
   statefulComputeReport(args: JsonObject): JsonObject { return this.statefulCompute.report(args); }
   statefulComputeCancel(args: JsonObject): JsonObject { return this.statefulCompute.cancel(args); }
   statefulComputeSessionGet(args: JsonObject): JsonObject { return this.statefulCompute.sessionGet(args); }
+  uncertaintyPolicySave(args: JsonObject): JsonObject { return this.uncertaintyPolicies.save(args); }
+  uncertaintyResolve(args: JsonObject): JsonObject { return this.uncertaintyPolicies.resolve(args); }
+  uncertaintyAdjudicate(args: JsonObject): JsonObject { return this.uncertaintyPolicies.adjudicate(args); }
+  referencePilotSave(args: JsonObject): JsonObject { return this.releaseQualifications.pilotSave(args); }
+  releaseQualificationPlan(args: JsonObject): JsonObject { return this.releaseQualifications.plan(args); }
+  releaseQualificationRecord(args: JsonObject): JsonObject { return this.releaseQualifications.record(args); }
+  releaseQualificationEvaluate(args: JsonObject): JsonObject { return this.releaseQualifications.evaluate(args); }
+  platformIdealStateAssess(args: JsonObject): JsonObject { return this.releaseQualifications.platformAssess(args); }
+  verificationPlan(args: JsonObject): JsonObject { return this.verificationPlane.plan(args); }
+  verificationReceiptRecord(args: JsonObject): JsonObject { return this.verificationPlane.record(args); }
+  verificationAssess(args: JsonObject): JsonObject { return this.verificationPlane.assess(args); }
+  verificationGet(args: JsonObject): JsonObject { return this.verificationPlane.get(args); }
 
   hostActivationManifestPrepare(args: JsonObject): JsonObject { return this.hostActivationManifests.prepare(args); }
   hostActivationManifestValidate(args: JsonObject): JsonObject { return this.hostActivationManifests.validate(args); }
@@ -2372,6 +2385,13 @@ export class CraftService extends ServiceFoundation {
     return { resumed, advance: this.verifiedWorkLoopAdvance({ work_loop_id: loop.id, environment: args.environment, budget: args.budget, state_adapter: args.state_adapter, state_paths: args.state_paths }) };
   }
   verifiedWorkLoopGet(args: JsonObject): JsonObject { return this.verifiedWorkLoops.get(args); }
+  verifiedWorkLoopWorkbenchPrepare(args: JsonObject): JsonObject {
+    const root = resolve(text(args.workspace, "workspace")); const includePaths = uniqueTextArray(args.include_paths ?? ["."], "include_paths").sort();
+    const workspaceId = args.workspace_id === undefined ? `workspace_loop_${valueDigest({ root, include_paths: includePaths }).slice(-16)}` : text(args.workspace_id, "workspace_id"); const existing = this.store.find("workspace", workspaceId);
+    const workspace = existing ?? (this.workspaceOpen({ workspace_id: workspaceId, name: args.workspace_name ?? args.title ?? "Craft Task Workspace", root_path: root, include_paths: includePaths }).workspace as JsonObject);
+    if (workspace.root_path !== root || valueDigest(workspace.include_paths) !== valueDigest(includePaths)) throw new Error("Task Workspace id is already bound to another root or observation scope");
+    return this.verifiedWorkLoopPrepare({ ...args, workspace_id: workspace.id });
+  }
   executionFabricPrepare(args: JsonObject): JsonObject {
     const task = args.task_id === undefined ? this.taskOpen({ title: args.title, goal: args.goal, project_id: args.project_id }).task as JsonObject : this.store.get("task", text(args.task_id, "task_id"));
     const allowedEffects = uniqueTextArray(args.allowed_effects ?? [args.sandbox === "workspace-write" ? "local_write" : "read_only"], "allowed_effects");

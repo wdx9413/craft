@@ -1,0 +1,21 @@
+{
+  "name": "craft-capability",
+  "version": "0.12.23",
+  "description": "Standalone discovery and governance for Skills, MCP tools, Workflows, and adapters.",
+  "author": { "name": "wdx9413", "url": "https://github.com/wdx9413" },
+  "homepage": "https://github.com/wdx9413/craft",
+  "repository": "https://github.com/wdx9413/craft",
+  "license": "MIT",
+  "keywords": ["skills", "mcp", "capability", "discovery"],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Craft Capability",
+    "shortDescription": "Discover and rank capabilities without activating all tools.",
+    "longDescription": "Scan and logically deduplicate capability sources, preserve provenance, audit health and trust, and recommend the smallest task-relevant activation set.",
+    "developerName": "wdx9413",
+    "category": "Developer Tools",
+    "capabilities": ["Capability discovery", "Logical deduplication", "Activation planning"],
+    "defaultPrompt": ["Find the smallest healthy capability set for this goal; do not activate or execute it yet."]
+  }
+}
