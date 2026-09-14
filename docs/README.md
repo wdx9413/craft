@@ -16,6 +16,7 @@
 - [技术总览](technical/overview.zh-CN.md)：架构分层、核心对象与模块关系。
 - [Capability 与领域 Kit](technical/modules/capability-kit.md)
 - [Capability Access：上下文、能力选择与短期调用票据](technical/modules/capability-access.md)
+- [Runtime Assurance & Evidence Loop](technical/modules/runtime-assurance-evidence-loop.md)：终态 Host 回执、再观察、写入边界、Campaign 证据和外部 Connector health/revoke 的受限闭环。
 - [Verified Execution Fabric](technical/modules/verified-execution-fabric.md)：将 Profile、Host Manifest、Work Loop 与状态再观察收敛为一条可复核执行链。
 - [Managed Host Bridge](technical/modules/managed-host-bridge.md)：先验证 Manifest 再启动本地 Host，并把终态回流为状态再观察。
 - [Agent IR](technical/modules/agent-ir.md)

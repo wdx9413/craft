@@ -13,7 +13,9 @@
 
 ## 建设原则
 
-以 [产品架构](architecture.zh-CN.md) 的三大支柱为目标：工作与协作、执行与保障、学习与改进。**评测与实验是第三支柱内的核心模块**，不另设第四支柱。当前实现基线已推进到 v0.12.13。
+以 [产品架构](architecture.zh-CN.md) 的三大支柱为目标：工作与协作、执行与保障、学习与改进。**评测与实验是第三支柱内的核心模块**，不另设第四支柱。当前实现基线已推进到 v0.12.15。
+
+**v0.12.15：Runtime Assurance & Evidence Loop。** `RuntimeAssuranceKernel` 不另建第二套 Agent 状态机，而是把 Task Run、终态 Host Receipt、环境/预算、状态再观察、Delivery 与写入 Platform Preflight 固定成可复核 Attestation；任何漂移都进入 `needs_replan` 或拒绝。Eval Campaign 只有在所有已绑定 slot 都有同环境、同预算的 verified Attestation 时才能进入既有 Benchmark/held-out/Signoff 链。外部 GitHub/火山 Skill、MCP、Serena Connector 增加最小 operation scope、metadata-digest health receipt 和不可逆 revoke；Host 仍负责真实 transport、凭据和执行，Craft 不把本地契约夸大为生产隔离或业务效果。
 
 **v0.12.13：Runtime Completion。** 新增有界 Action Gateway（工作区读写、审批与回执）、独立 Acceptance Gate（Host 完成不等于业务成功）、本地 Durable Worker（租约、队列、停止与恢复）、Provider fallback 路由，以及 HTTPS-only、摘要级 A2A message/task 入口。CLI standalone run 现在会停在 `needs_review`，必须经过独立验收才产生 verified outcome；Shell、浏览器、远程 MCP、OS 级沙箱和真实远程 A2A 仍由显式平台 Adapter 提供，不把本地契约冒充生产能力。
 

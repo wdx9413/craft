@@ -95,6 +95,7 @@ import { LongTaskWorkerKernel } from "./long-task-worker.ts";
 import { ContextPlaneKernel, ReplayRunnerKernel, LocalRuntimeServiceKernel, ProjectBundleKernel, FeedbackLearningKernel, DomainEvaluatorKernel, HandoffManifestKernel, CostLedgerKernel } from "./v01211-runtime.ts";
 import { VerifiedAutonomousWorkKernel, SandboxConformanceKernel, TraceExplorerKernel } from "./v01212-verified-work.ts";
 import { ActionGatewayKernel, AcceptanceGateKernel, DurableWorkerKernel, ProviderRouterKernel, A2AProtocolKernel } from "./v01213-runtime.ts";
+import { RuntimeAssuranceKernel } from "./runtime-assurance.ts";
 
 /**
  * Stable composition root for the service. Domain behavior stays in focused
@@ -168,6 +169,7 @@ export abstract class ServiceFoundation {
   readonly adaptiveHarnesses: AdaptiveHarnessKernel;
   readonly managedRuns: ManagedRunKernel;
   readonly campaignRunners: CampaignRunnerKernel;
+  readonly runtimeAssurance: RuntimeAssuranceKernel;
   readonly autonomyLadder: AutonomyLadderKernel;
   readonly workspaceObserver: WorkspaceObserverKernel;
   readonly workCoordinators: WorkCoordinatorKernel;
@@ -274,6 +276,7 @@ export abstract class ServiceFoundation {
     this.adaptiveHarnesses = new AdaptiveHarnessKernel(store);
     this.managedRuns = new ManagedRunKernel(store);
     this.campaignRunners = new CampaignRunnerKernel(store, this.evalCampaigns);
+    this.runtimeAssurance = new RuntimeAssuranceKernel(store, this.platformExecution, this.campaignRunners);
     this.autonomyLadder = new AutonomyLadderKernel(store);
     this.workspaceObserver = new WorkspaceObserverKernel(store, this.stateWorkspace);
     this.workCoordinators = new WorkCoordinatorKernel(store, this.managedRuns);

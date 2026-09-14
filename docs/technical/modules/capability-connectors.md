@@ -1,6 +1,6 @@
 # Capability Connector
 
-> 状态：v0.11.54 实现本地、显式注册的 Connector 控制面与 Host Manifest/Bridge 边界。它验证元数据、调用票据和 Host 接受回执；不替 Host 安装、启动或配置第三方服务。
+> 状态：v0.12.15 实现本地、显式注册的 Connector 控制面与 Host Manifest/Bridge 边界。它验证元数据、操作 scope、健康回执和调用票据；不替 Host 安装、启动或配置第三方服务。
 
 ## 职责
 
@@ -29,19 +29,20 @@ Receipt + 再观察
 
 所有外部 Connector 要携带用户审批引用。需要凭据的 Asset 会记录“需要外部 Broker”，但不会进入 Activation Profile；本版没有内置凭据 Broker。`local_write`、`external_write` 与 `destructive` Asset 可以被发现和审查，但不会因 Connector approval 自动成为可激活 Asset。
 
-用户可在 Full MCP 面显式禁用 Connector；已签发但尚未消费的 ticket 会在消费时失败关闭。禁用不删除历史 Receipt，也不修改第三方服务。
+用户可在 Full MCP 面显式禁用或不可逆撤销 Connector；已签发但尚未消费的 ticket 会在消费时失败关闭。禁用/撤销不删除历史 Receipt，也不修改第三方服务。
 
 ## 调用门禁
 
 `craft_capability_connector_ticket_issue` 仅在以下条件同时满足时签发票据：
 
 - Connector 仍为 active 且 trusted/verified；
+- operation 位于用户批准的最小 scope，外部 Connector 还要有当前 metadata digest 的 `healthy` 回执；
 - 已批准的 Connector Asset、Capability Asset 与 Activation Profile 精确版本一致；
 - Asset 健康、可信、无需凭据，并在 Profile 的 effect 范围内；
 - Serena 仍是只读；
 - ticket 未过期。
 
-`consume` 会重查 Connector 与 Connector Asset 的状态和版本，并只允许一次。Connector Asset 不能走旧的通用 `capability_call` 入口绕过 ticket；Host 应在真正调用前消费 ticket，再把真实执行 Receipt 和观察结果交回既有 WorkLoop/Runtime。Craft 不声称能在未集成的第三方进程中强制拦截裸调用。
+`consume` 会重查 Connector、scope、health、Connector Asset 的状态和版本，并只允许一次。Connector Asset 不能走旧的通用 `capability_call` 入口绕过 ticket；Host 应在真正调用前消费 ticket，再把真实执行 Receipt 和观察结果交回既有 WorkLoop/Runtime。Craft 不声称能在未集成的第三方进程中强制拦截裸调用。
 
 ## MCP 面与兼容性
 

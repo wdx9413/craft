@@ -27,7 +27,7 @@ import { dockerRequestDigest } from "./docker-sandbox.ts";
 import { egressRequestDigest } from "./egress.ts";
 import { ServiceFoundation } from "./service-foundation.ts";
 
-export const VERSION = "0.12.14";
+export const VERSION = "0.12.15";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -298,7 +298,7 @@ export class CraftService extends ServiceFoundation {
       "project_policy", "route_receipt", "host_adapter", "host_dispatch", "runtime_policy", "runtime_run",
       "runtime_operation", "runtime_adapter", "evaluation_runner", "evaluation_promotion", "experience_mining_candidate",
       "experience_shadow_experiment", "adaptive_harness", "agent_ir", "operational_signal", "operational_alert",
-      "capability_asset", "activation_profile", "tool_selection_receipt", "capability_call", "capability_connector", "capability_connector_asset", "capability_connector_ticket", "logical_activation_plan", "logical_activation_audit", "logical_activation_resolution", "expert_profile", "context_capsule",
+      "capability_asset", "activation_profile", "tool_selection_receipt", "capability_call", "capability_connector", "capability_connector_asset", "capability_connector_ticket", "capability_connector_health", "capability_connector_revocation", "logical_activation_plan", "logical_activation_audit", "logical_activation_resolution", "expert_profile", "context_capsule",
       "evaluation_reliability", "judge_adapter", "judge_calibration", "adaptation_candidate", "feedback_intake", "feedback_case", "canary",
       "workspace", "workspace_checkpoint", "workspace_change", "workspace_transaction", "work_object", "memory_item", "context_profile", "task_graph", "change_set", "os_security_plan", "os_security_receipt", "mcp_registry_source", "mcp_registry_server", "mcp_registry_health", "org_sync_manifest", "trace_otlp_export",
       "budget_account", "budget_reservation", "durable_wait", "external_event", "fallback_contract", "fallback_event",
@@ -317,7 +317,7 @@ export class CraftService extends ServiceFoundation {
       "supply_chain_advisory",
       "maintenance_status",
       "maintenance_tick",
-      "maintenance_component", "maintenance_failure", "attention_item", "work_launch", "work_delivery", "delivery_loop", "delivery_evaluation_case", "delivery_evaluation_comparison", "delivery_evaluation_run", "platform_execution_profile", "platform_execution_preflight", "platform_execution_probe", "platform_execution_conformance", "task_run", "task_run_state", "task_run_handoff", "task_benchmark", "task_benchmark_pair", "task_benchmark_canary_sample", "state_snapshot", "verified_work_loop", "verified_work_loop_receipt", "verified_work_loop_decision", "human_state_event", "work_loop_invalidation", "eval_campaign", "eval_campaign_slot", "eval_campaign_report", "managed_write_guard", "managed_write_settlement", "adaptive_harness_recommendation", "project_knowledge_discovery", "project_knowledge_resolution", "project_knowledge_proposal", "acceptance_plan", "acceptance_check", "acceptance_assessment", "acceptance_evaluator", "acceptance_evaluation_job", "verified_iteration", "iteration_attempt", "strategy_recommendation",
+      "maintenance_component", "maintenance_failure", "attention_item", "work_launch", "work_delivery", "delivery_loop", "delivery_evaluation_case", "delivery_evaluation_comparison", "delivery_evaluation_run", "platform_execution_profile", "platform_execution_preflight", "platform_execution_probe", "platform_execution_conformance", "task_run", "task_run_state", "task_run_handoff", "task_benchmark", "task_benchmark_pair", "task_benchmark_canary_sample", "state_snapshot", "verified_work_loop", "verified_work_loop_receipt", "verified_work_loop_decision", "human_state_event", "work_loop_invalidation", "eval_campaign", "eval_campaign_slot", "eval_campaign_report", "managed_write_guard", "managed_write_settlement", "adaptive_harness_recommendation", "project_knowledge_discovery", "project_knowledge_resolution", "project_knowledge_proposal", "acceptance_plan", "acceptance_check", "acceptance_assessment", "acceptance_evaluator", "acceptance_evaluation_job", "verified_iteration", "iteration_attempt", "strategy_recommendation", "runtime_assurance_attestation", "runtime_intervention", "runtime_assurance_campaign",
       "trajectory_script_proposal", "verified_script_run", "knowledge_claim", "wiki_page", "knowledge_relation", "wiki_context_bundle", "wiki_skill_candidate", "knowledge_evaluation_case", "knowledge_evaluation_run", "wiki_candidate_evaluation_attestation", "wiki_candidate_publication_authorization", "wiki_candidate_publication_package", "guided_work_brief", "execution_safety_preflight", "wiki_candidate_local_import", "autonomy_ladder_decision", "workspace_observation", "work_coordinator", "agent_eval_lab", "agent_eval_attempt", "evaluation_program", "evaluation_program_run", "enterprise_identity_provider", "enterprise_principal", "enterprise_adapter_binding", "enterprise_access_ticket", "a2a_agent_trust", "a2a_collaboration_session", "a2a_delegation", "a2a_delegation_receipt", "project_brain", "project_goal", "project_decision", "project_material", "project_outcome", "project_experience", "work_session", "long_task_checkpoint"];
     kinds.push("untrusted_content", "untrusted_extraction", "decision_projection");
     return { version: VERSION, data_root: this.store.paths.root,
@@ -362,6 +362,8 @@ export class CraftService extends ServiceFoundation {
   capabilityConnectorRegister(args: JsonObject): JsonObject { return this.capabilityConnectors.register(args); }
   capabilityConnectorDiscover(args: JsonObject): JsonObject { return this.capabilityConnectors.discover(args); }
   capabilityConnectorUpdate(args: JsonObject): JsonObject { return this.capabilityConnectors.update(args); }
+  capabilityConnectorHealthRecord(args: JsonObject): JsonObject { return this.capabilityConnectors.healthRecord(args); }
+  capabilityConnectorRevoke(args: JsonObject): JsonObject { return this.capabilityConnectors.revoke(args); }
   capabilityConnectorApprove(args: JsonObject): JsonObject { return this.capabilityConnectors.approve(args); }
   capabilityConnectorList(args: JsonObject): JsonObject { return this.capabilityConnectors.list(args); }
   capabilityConnectorTicketIssue(args: JsonObject): JsonObject { return this.capabilityConnectors.ticketIssue(args); }
@@ -2421,6 +2423,10 @@ export class CraftService extends ServiceFoundation {
   campaignRunnerBind(args: JsonObject): JsonObject { return this.campaignRunners.bind(args); }
   campaignRunnerAdvance(args: JsonObject): JsonObject { return this.campaignRunners.advance(args); }
   campaignRunnerGet(args: JsonObject): JsonObject { return this.campaignRunners.get(args); }
+  runtimeAssuranceAttest(args: JsonObject): JsonObject { return this.runtimeAssurance.attest(args); }
+  runtimeAssuranceIntervene(args: JsonObject): JsonObject { return this.runtimeAssurance.intervene(args); }
+  runtimeAssuranceCampaignAdvance(args: JsonObject): JsonObject { return this.runtimeAssurance.campaignAdvance(args); }
+  runtimeAssuranceGet(args: JsonObject): JsonObject { return this.runtimeAssurance.get(args); }
   agentEvalLabCreate(args: JsonObject): JsonObject { return this.agentEvalLab.create(args); }
   agentEvalLabAttach(args: JsonObject): JsonObject { return this.agentEvalLab.attach(args); }
   agentEvalLabStart(args: JsonObject): JsonObject {

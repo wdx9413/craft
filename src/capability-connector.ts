@@ -20,6 +20,13 @@ function array(value: unknown, name: string): unknown[] {
   if (!Array.isArray(value)) throw new Error(`${name} must be an array`);
   return value;
 }
+function operations(value: unknown, kind: string): string[] {
+  const defaults = kind === "builtin" ? ["*"] : kind === "serena_mcp"
+    ? ["discover", "inspect", "read", "resolve"] : ["inspect", "read"];
+  const result = value === undefined ? defaults : array(value, "allowed_operations").map((item) => assertSafe(text(item, "allowed_operations item"), "allowed_operations item"));
+  if (!result.length || result.length > 20 || new Set(result).size !== result.length) throw new Error("allowed_operations must contain between 1 and 20 unique entries");
+  return [...result].sort();
+}
 function object(value: unknown, name: string): JsonObject {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${name} must be an object`);
   return value as JsonObject;
@@ -66,12 +73,19 @@ export class CapabilityConnectorKernel {
     const approved = args.approved === true;
     if (EXTERNAL_CONNECTORS.has(kind) && !approved) throw new Error("External connector requires explicit user approval");
     const endpoint = endpointFor(kind, args.endpoint, name);
+    const allowedOperations = operations(args.allowed_operations, kind);
     const connector = this.store.create("capability_connector", String(args.connector_id ?? id("connector")), {
       kind, name, endpoint, trust: kind === "builtin" ? "verified" : "trusted", status: "active",
       approval_ref: kind === "builtin" ? "builtin" : text(args.approval_ref, "approval_ref"),
       credentials_stored: false, user_managed: kind !== "builtin", metadata_digest: digest(args.metadata ?? {}),
+      allowed_operations: allowedOperations, scope_digest: digest(allowedOperations), health_required: EXTERNAL_CONNECTORS.has(kind),
     });
-    return { connector };
+    const health = this.store.create("capability_connector_health", `connector_health_${connector.id}`, {
+      connector_id: connector.id, connector_version: connector.version, status: kind === "builtin" ? "healthy" : "unknown",
+      source_digest: connector.metadata_digest, health_digest: digest({ connector: connector.id, version: connector.version, status: kind === "builtin" ? "healthy" : "unknown" }),
+      observed_by: "registration", raw_content_stored: false, evidence_ids: [],
+    });
+    return { connector, health };
   }
 
   discover(args: JsonObject): JsonObject {
@@ -86,9 +100,44 @@ export class CapabilityConnectorKernel {
   update(args: JsonObject): JsonObject {
     if (typeof args.active !== "boolean") throw new Error("active must be a boolean");
     const connector = this.connector(args.connector_id);
+    if (connector.status === "revoked" && args.active) throw new Error("A revoked capability connector cannot be re-enabled");
     return { connector: this.store.save("capability_connector", String(connector.id), {
       ...recordPayload(connector), status: args.active ? "active" : "disabled",
     }) };
+  }
+
+  healthRecord(args: JsonObject): JsonObject {
+    const connector = this.connector(args.connector_id); this.assertActive(connector);
+    const status = text(args.status, "status");
+    if (!["healthy", "degraded", "unhealthy"].includes(status)) throw new Error("Connector health status is unsupported");
+    const sourceDigest = text(args.source_digest, "source_digest");
+    if (sourceDigest !== connector.metadata_digest) throw new Error("Connector health source digest does not match");
+    const evidenceIds = args.evidence_ids === undefined ? [] : array(args.evidence_ids, "evidence_ids").map((value) => text(value, "evidence_id"));
+    for (const evidenceId of evidenceIds) this.store.get("evidence", evidenceId);
+    const healthId = `connector_health_${connector.id}`;
+    if (args.health_id !== undefined && text(args.health_id, "health_id") !== healthId) throw new Error("Connector health id is derived from connector_id");
+    const healthPayload = {
+      connector_id: connector.id, connector_version: connector.version, status, source_digest: sourceDigest,
+      health_digest: digest({ connector_id: connector.id, connector_version: connector.version, status, sourceDigest, evidenceIds }),
+      observed_by: text(args.observed_by, "observed_by"), raw_content_stored: false, evidence_ids: evidenceIds,
+    };
+    const health = this.store.find("capability_connector_health", healthId)
+      ? this.store.save("capability_connector_health", healthId, healthPayload)
+      : this.store.create("capability_connector_health", healthId, healthPayload);
+    return { connector, health };
+  }
+
+  revoke(args: JsonObject): JsonObject {
+    const connector = this.connector(args.connector_id);
+    const reason = assertSafe(text(args.reason, "reason"), "reason");
+    if (connector.status === "revoked") return { connector, idempotent: true };
+    const revoked = this.store.save("capability_connector", String(connector.id), {
+      ...recordPayload(connector), status: "revoked", revoked_at: new Date().toISOString(), revocation_reason_digest: digest(reason),
+    });
+    const event = this.store.create("capability_connector_revocation", String(args.revocation_id ?? id("connector_revocation")), {
+      connector_id: revoked.id, connector_version: revoked.version, reason_digest: digest(reason), raw_reason_stored: false,
+    });
+    return { connector: revoked, event, idempotent: false };
   }
 
   approve(args: JsonObject): JsonObject {
@@ -117,6 +166,7 @@ export class CapabilityConnectorKernel {
     const connectors = this.store.list("capability_connector", limit).map((connector) => ({
       id: connector.id, version: connector.version, kind: connector.kind, name: connector.name, trust: connector.trust,
       status: connector.status, user_managed: connector.user_managed, credentials_stored: connector.credentials_stored,
+      scope_digest: connector.scope_digest, health: this.health(connector)?.status ?? "unknown",
     }));
     const assets = this.store.list("capability_connector_asset", 10_000)
       .filter((asset) => connectors.some((connector) => connector.id === asset.connector_id))
@@ -140,14 +190,20 @@ export class CapabilityConnectorKernel {
     }
     if (connector.kind === "serena_mcp" && asset.effect !== "read_only") throw new Error("Serena connector only permits read-only calls");
     const expiresAt = expiry(args.expires_at); const operation = assertSafe(text(args.operation, "operation"), "operation");
+    const allowedOperations = connector.allowed_operations as string[];
+    if (!allowedOperations.includes("*") && !allowedOperations.includes(operation)) throw new Error("Connector operation is outside the approved scope");
+    const health = this.health(connector);
+    if (connector.health_required === true && health?.status !== "healthy") throw new Error("Capability connector does not have a current healthy receipt");
     const call = this.store.create("capability_call", String(args.call_id ?? id("capability_call")), {
       profile_id: profile.id, profile_version: profile.version, asset_id: asset.id, asset_version: asset.version,
       operation, status: "issued", expires_at: expiresAt, connector_id: connector.id, connector_version: connector.version,
+      connector_scope_digest: connector.scope_digest,
     });
     const ticket = this.store.create("capability_connector_ticket", String(args.ticket_id ?? id("connector_ticket")), {
       call_id: call.id, profile_id: profile.id, profile_version: profile.version, asset_id: asset.id, asset_version: asset.version,
       connector_id: connector.id, connector_version: connector.version, connector_asset_id: source.id,
       connector_asset_version: source.version, source_digest: source.source_digest, status: "issued", expires_at: expiresAt,
+      connector_scope_digest: connector.scope_digest, connector_health_id: health?.id ?? null, connector_health_version: health?.version ?? null,
     });
     return { call, ticket };
   }
@@ -159,6 +215,11 @@ export class CapabilityConnectorKernel {
     if (ticket.status !== "issued") throw new Error("Connector ticket was already consumed");
     if (Date.parse(String(ticket.expires_at)) < Date.now()) throw new Error("Connector ticket has expired");
     const connector = this.store.get("capability_connector", String(ticket.connector_id)); this.assertActive(connector);
+    if (connector.scope_digest !== ticket.connector_scope_digest) throw new Error("Connector scope changed after ticket issue");
+    const health = this.health(connector);
+    if (connector.health_required === true && (health?.status !== "healthy" || health.id !== ticket.connector_health_id || health.version !== ticket.connector_health_version)) {
+      throw new Error("Connector health changed after ticket issue");
+    }
     const source = this.store.get("capability_connector_asset", String(ticket.connector_asset_id));
     if (source.status !== "approved" || Number(source.version) !== Number(ticket.connector_asset_version)) throw new Error("Connector asset changed after ticket issue");
     const call = this.store.get("capability_call", String(ticket.call_id));
@@ -170,6 +231,10 @@ export class CapabilityConnectorKernel {
   }
 
   private connector(connectorId: unknown): JsonObject { return this.store.get("capability_connector", text(connectorId, "connector_id")); }
+  private health(connector: JsonObject): JsonObject | null {
+    const health = this.store.find("capability_connector_health", `connector_health_${connector.id}`);
+    return health?.connector_version === connector.version ? health : null;
+  }
   private assertActive(connector: JsonObject): void {
     if (connector.status !== "active" || !["trusted", "verified"].includes(String(connector.trust))) throw new Error("Capability connector is not active and trusted");
   }

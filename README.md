@@ -1,6 +1,6 @@
 # Craft
 
-> 当前发布版本：v0.12.14。所有宿主接入统一采用“Route-first”：Codex/Claude 插件、TraeWork、WorkBuddy Expert 默认只安装一个轻量 `craft-route` Skill，并连接低 Token syscall MCP；`craft` 与 `craft-clarify` 是单独的可选包。Craft 现在提供统一 Context Manifest、Verified Autonomous Work、受限 Action Gateway、强制 Acceptance Gate、Durable Worker lease/recovery、Provider fallback、标准 A2A 操作入口、受控 Replay、可持续本地 Runtime、Project Bundle、反馈学习信号、领域 Evaluator、跨宿主 Handoff 与真实成本账本；真实云端执行、平台级沙箱、市场审核和 OS 级隔离仍须由部署 Adapter 或平台审核完成，不能把本地契约伪装成已上线服务。
+> 当前发布版本：v0.12.15。所有宿主接入统一采用“Route-first”：Codex/Claude 插件、TraeWork、WorkBuddy Expert 默认只安装一个轻量 `craft-route` Skill，并连接低 Token syscall MCP；`craft` 与 `craft-clarify` 是单独的可选包。Craft 现在提供统一 Context Manifest、Verified Autonomous Work、受限 Action Gateway、强制 Acceptance Gate、Durable Worker lease/recovery、Provider fallback、标准 A2A 操作入口、受控 Replay、可持续本地 Runtime、Project Bundle、反馈学习信号、领域 Evaluator、跨宿主 Handoff 与真实成本账本；真实云端执行、平台级沙箱、市场审核和 OS 级隔离仍须由部署 Adapter 或平台审核完成，不能把本地契约伪装成已上线服务。
 
 [中文](README.md) | [English](README.en.md)
 
@@ -133,7 +133,7 @@ pnpm test
 
 插件只读取 `plugins/craft/` 中的 manifest、`craft-route` Skill 和两个单文件 MCP bundle；不会把源码、桌面应用、适配器包或 source map 复制进插件缓存。`skills/craft` 与 `skills/craft-clarify` 可作为独立可选包安装，但这样不会自动获得 MCP 数据层。
 
-从 v0.12.14 起，插件发行物固定在 `plugins/craft/`；Codex 把该轻量目录复制到缓存后无需再执行 `npm install`，也不会依赖源码仓库的 `node_modules`。当前暂不构建或发布桌面 `.app`、Windows ZIP、运行时二进制等平台安装包；它们不会进入插件目录或 Git 历史。升级后请重新安装插件，并在新会话中验证 `craft_info`。
+从 v0.12.15 起，插件发行物固定在 `plugins/craft/`；Codex 把该轻量目录复制到缓存后无需再执行 `npm install`，也不会依赖源码仓库的 `node_modules`。当前暂不构建或发布桌面 `.app`、Windows ZIP、运行时二进制等平台安装包；它们不会进入插件目录或 Git 历史。升级后请重新安装插件，并在新会话中验证 `craft_info`。
 
 ## 接入 Claude Code
 

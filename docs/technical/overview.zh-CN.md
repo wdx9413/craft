@@ -52,6 +52,7 @@ Capability Kit ──contains──> Capability / Validator / Policy / Eval Suit
 Capability Source(s) ──mirror──> Logical Capability ──pins──> Logical Activation Plan ──resolves──> bounded read-only context
 Capability Connector / Capability Asset ──selected by──> Activation Profile ──issues──> Capability Ticket / Call Receipt
 Activation Profile ──pins──> Host Activation Manifest ──authorizes──> Managed Host Bridge ──joins──> Execution Fabric ──re-observes──> Verified Work Loop Receipt
+Task Run + Host Receipt + Re-observation + Platform Preflight ──attests──> Runtime Assurance ──gates──> Eval Campaign advance
 Execution Fabric (local_write) ──scopes──> Managed Write Transaction ──commits/approved restores──> Workspace Checkpoint
 Task ──compiled to──> Agent IR ──lowered to──> Workflow / Orchestration Plan
 Task ──has sourced, correctable──> Context Profile
@@ -101,6 +102,7 @@ Observed Delivery ──pairs──> Eval Campaign Report ──with Canary Evid
 - [Experience / Eval Kernel](modules/experience-eval.md)
 - [Workflow / Verification / Signoff](modules/workflow-signoff.md)
 - [Runtime 与宿主接入](modules/runtime-integration.md)
+- [Runtime Assurance & Evidence Loop](modules/runtime-assurance-evidence-loop.md)：将终态 Host 回执、再观察、写入边界与 Campaign 聚合固定为同一份可核验证据。
 - [Codex CLI Host Driver](modules/codex-host-driver.md)
 - [Claude Code Host Driver](modules/claude-host-driver.md)
 - [Managed Host Runs：后台运行、进度与取消](modules/managed-host-runs.md)

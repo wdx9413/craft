@@ -1,6 +1,6 @@
 # Craft：受控 Agent 工作运行时
 
-> 本文是 Craft 的总览入口。它解释产品解决的问题、关键概念如何连接、当前实现做到哪里，以及在面试或架构评审中应如何准确回答。当前实现基线为 v0.12.13；旧版本号只表示历史里程碑。
+> 本文是 Craft 的总览入口。它解释产品解决的问题、关键概念如何连接、当前实现做到哪里，以及在面试或架构评审中应如何准确回答。当前实现基线为 v0.12.15；旧版本号只表示历史里程碑。
 
 ## 一句话
 
@@ -71,6 +71,7 @@ Outcome，或 needs_replan / handoff
 三个规则最重要：
 
 - Host 完成只说明 Host 已返回；仍要重新观察状态并执行 Acceptance。
+- v0.12.15 的 `Runtime Assurance` 只在终态 Host 回执、环境/预算、再观察与（写入时）平台预检一致时形成 Attestation；Campaign 每个绑定 slot 都具备该事实后才可聚合。
 - 文件、输入、权限、能力版本、环境或预算发生漂移时，旧路径进入 `needs_replan`，不会借用旧 Receipt。
 - 人工修改是 `HumanStateEvent`，是新的事实，不要求模型“记住”人刚才改了什么。
 
@@ -97,6 +98,7 @@ flowchart LR
 - **Capability Asset** 才是带 trust、health、effect 和精确版本的受治理能力。
 - **Activation Profile** 为一个 Task 选出最小、可用且权限匹配的 Asset 集合。
 - **Connector ticket** 同时固定 Profile、Asset、来源摘要和有效期；Connector Asset 不能绕过 ticket 走旧的通用调用入口。
+- 外部 Connector 还固定最小 operation scope 与当前 health receipt；scope、metadata 或健康漂移，以及明确 revoke，都会让旧 ticket 失败关闭。
 
 `Logical Activation Plan` 与 `Activation Profile` 不相同：前者固定“哪些本地 Skill 正文可以作为只读上下文”，后者固定“哪些治理过的能力可被当前任务使用”。两者可同时存在，但不能互相代替。
 

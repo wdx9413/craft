@@ -46,7 +46,7 @@ test("Capability Connectors require explicit source approval, retain only metada
     assert.match(String((f.service.capabilityConnectorApprove({ connector_asset_id: automatic.id, approval_ref: "review-2" }).asset as JsonObject).id), /^asset_/);
     assert.equal((f.service.capabilityConnectorList({ limit: 1 }).connectors as JsonObject[]).length, 1);
     assert.throws(() => f.service.capabilityConnectorList({ limit: 0 }), /between/);
-    assert.equal(VERSION, "0.12.14");
+    assert.equal(VERSION, "0.12.15");
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
@@ -61,6 +61,8 @@ test("Connector ticket is pinned to an active Profile, exact source version, and
     const plan = f.service.capabilityAccessPlan({ task_id: task.id, goal: "inspect", allowed_effects: ["read_only"] }); const profile = plan.profile as JsonObject;
     assert.throws(() => f.service.capabilityCallIssue({ profile_id: profile.id, asset_id: (approved.asset as JsonObject).id, operation: "inspect" }), /Connector ticket/);
     assert.throws(() => f.service.capabilityConnectorTicketIssue({ profile_id: profile.id, connector_asset_id: source.id, operation: "inspect", expires_at: "not-a-time" }), /ISO/);
+    assert.throws(() => f.service.capabilityConnectorTicketIssue({ profile_id: profile.id, connector_asset_id: source.id, operation: "inspect" }), /healthy receipt/);
+    f.service.capabilityConnectorHealthRecord({ connector_id: connector.id, status: "healthy", source_digest: connector.metadata_digest, observed_by: "test" });
     const ticket = f.service.capabilityConnectorTicketIssue({ ticket_id: "ticket", call_id: "call", profile_id: profile.id, connector_asset_id: source.id, operation: "inspect" });
     assert.equal(((ticket.ticket as JsonObject).asset_id), (approved.asset as JsonObject).id);
     assert.throws(() => f.service.capabilityCallConsume({ call_id: "call", profile_id: profile.id }), /Connector ticket/);
@@ -131,10 +133,12 @@ test("Capability Connector rejects every unsafe discovery and ticket drift befor
     const verified = f.store.save("capability_asset", String(asset.id), { ...f.store.get("capability_asset", String(asset.id)), trust: "verified" });
     f.store.save("capability_connector_asset", String(read.id), { ...f.store.get("capability_connector_asset", String(read.id)), capability_asset_version: verified.version });
     f.store.save("activation_profile", String(profile.id), { ...f.store.get("activation_profile", String(profile.id)), asset_versions: { [String(asset.id)]: verified.version } });
+    f.service.capabilityConnectorHealthRecord({ connector_id: connector.id, status: "healthy", source_digest: connector.metadata_digest, observed_by: "test" });
     const blocked = f.service.capabilityConnectorTicketIssue({ ticket_id: "blocked", profile_id: profile.id, connector_asset_id: read.id, operation: "read" });
     f.store.save("capability_connector", String(connector.id), { ...connector, status: "disabled" });
     assert.equal((blocked.ticket as JsonObject).status, "issued"); assert.throws(() => f.service.capabilityConnectorTicketConsume({ ticket_id: "blocked", profile_id: profile.id }), /not active/);
     f.store.save("capability_connector", String(connector.id), { ...connector, status: "active" });
+    f.service.capabilityConnectorHealthRecord({ connector_id: connector.id, status: "healthy", source_digest: connector.metadata_digest, observed_by: "test" });
     const unavailable = f.service.capabilityConnectorTicketIssue({ ticket_id: "unavailable", profile_id: profile.id, connector_asset_id: read.id, operation: "read" });
     const call = unavailable.call as JsonObject; f.store.save("capability_call", String(call.id), { ...call, status: "consumed" });
     assert.throws(() => f.service.capabilityConnectorTicketConsume({ ticket_id: "unavailable", profile_id: profile.id }), /Underlying/);
@@ -152,17 +156,51 @@ test("Capability Connector rejects every unsafe discovery and ticket drift befor
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
+test("External Connector tickets are scope-bound, health-bound, and permanently revocable", async () => {
+  const f = await fixture();
+  try {
+    const connector = f.service.capabilityConnectorRegister({ connector_id: "scoped", kind: "github_skill", name: "Scoped", approved: true, approval_ref: "user", allowed_operations: ["inspect"] }).connector as JsonObject;
+    assert.deepEqual(connector.allowed_operations, ["inspect"]);
+    assert.throws(() => f.service.capabilityConnectorHealthRecord({ connector_id: connector.id, status: "healthy", source_digest: "sha256:other", observed_by: "test" }), /digest/);
+    const evidence = f.service.evidenceRecord({ evidence_id: "connector-health-evidence", source_type: "program", confidence: "confirmed", claim: "connector health observed" }) as JsonObject;
+    f.service.capabilityConnectorHealthRecord({ connector_id: connector.id, status: "healthy", source_digest: connector.metadata_digest, observed_by: "test", evidence_ids: [evidence.id] });
+    const source = (f.service.capabilityConnectorDiscover({ connector_id: connector.id, assets: [{ connector_asset_id: "asset", logical_id: "asset", name: "Asset", asset_type: "skill", effect: "read_only", aliases: ["inspect"] }] }).assets as JsonObject[])[0];
+    const asset = f.service.capabilityConnectorApprove({ connector_asset_id: source.id, approval_ref: "review", asset_id: "asset" }).asset as JsonObject;
+    const task = f.service.taskOpen({ title: "Inspect", goal: "inspect" }).task as JsonObject;
+    const profile = f.service.capabilityAccessPlan({ task_id: task.id, goal: "inspect" }).profile as JsonObject;
+    assert.equal((profile.asset_ids as string[]).includes(String(asset.id)), true);
+    assert.throws(() => f.service.capabilityConnectorTicketIssue({ profile_id: profile.id, connector_asset_id: source.id, operation: "write" }), /approved scope/);
+    const stale = f.service.capabilityConnectorTicketIssue({ ticket_id: "stale", profile_id: profile.id, connector_asset_id: source.id, operation: "inspect" });
+    f.service.capabilityConnectorHealthRecord({ connector_id: connector.id, status: "degraded", source_digest: connector.metadata_digest, observed_by: "test" });
+    assert.equal((stale.ticket as JsonObject).status, "issued");
+    assert.throws(() => f.service.capabilityConnectorTicketConsume({ ticket_id: "stale", profile_id: profile.id }), /health changed/);
+    f.service.capabilityConnectorHealthRecord({ connector_id: connector.id, status: "healthy", source_digest: connector.metadata_digest, observed_by: "test" });
+    const revocable = f.service.capabilityConnectorTicketIssue({ ticket_id: "revocable", profile_id: profile.id, connector_asset_id: source.id, operation: "inspect" });
+    const revoked = f.service.capabilityConnectorRevoke({ connector_id: connector.id, reason: "project removed connector" });
+    assert.equal((revoked.connector as JsonObject).status, "revoked");
+    assert.throws(() => f.service.capabilityConnectorUpdate({ connector_id: connector.id, active: true }), /cannot be re-enabled/);
+    assert.equal((f.service.capabilityConnectorRevoke({ connector_id: connector.id, reason: "again" }).idempotent), true);
+    assert.equal((revocable.ticket as JsonObject).status, "issued");
+    assert.throws(() => f.service.capabilityConnectorTicketConsume({ ticket_id: "revocable", profile_id: profile.id }), /not active/);
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
 test("Core exposes the Work Loop and issued connector calls, while connector administration stays full-only", async () => {
   const f = await fixture();
   try {
     const core = new McpServer(f.service, "core"); const full = new McpServer(f.service, "full");
-    for (const name of ["craft_verified_work_loop_prepare", "craft_verified_work_loop_advance", "craft_verified_work_loop_decide", "craft_verified_work_loop_resume", "craft_verified_work_loop_get", "craft_capability_connector_list", "craft_capability_connector_ticket_issue", "craft_capability_connector_ticket_consume"]) assert.ok(core.tools.some((tool) => tool.name === name), name);
+    for (const name of ["craft_verified_work_loop_prepare", "craft_verified_work_loop_advance", "craft_verified_work_loop_decide", "craft_verified_work_loop_resume", "craft_verified_work_loop_get", "craft_runtime_assurance_intervene", "craft_runtime_assurance_get", "craft_capability_connector_list", "craft_capability_connector_ticket_issue", "craft_capability_connector_ticket_consume"]) assert.ok(core.tools.some((tool) => tool.name === name), name);
     assert.equal(core.tools.some((tool) => tool.name === "craft_capability_connector_register"), false);
+    assert.equal(core.tools.some((tool) => tool.name === "craft_runtime_assurance_attest"), false);
     assert.ok(full.tools.some((tool) => tool.name === "craft_capability_connector_register"));
+    assert.ok(full.tools.some((tool) => tool.name === "craft_runtime_assurance_attest"));
     const response = await core.handle({ id: 1, method: "tools/call", params: { name: "craft_capability_connector_register", arguments: { kind: "builtin", name: "No" } } });
     assert.match(String((response?.error as JsonObject).message), /Unknown tool/);
     const registered = await full.handle({ id: 2, method: "tools/call", params: { name: "craft_capability_connector_register", arguments: { connector_id: "mcp", kind: "mcp_stdio", name: "MCP", endpoint: "stdio://mcp", approved: true, approval_ref: "user" } } });
     assert.equal(((registered?.result as JsonObject).isError), false);
+    const connector = f.store.get("capability_connector", "mcp");
+    const health = await full.handle({ id: "health", method: "tools/call", params: { name: "craft_capability_connector_health_record", arguments: { connector_id: "mcp", status: "healthy", source_digest: connector.metadata_digest, observed_by: "test" } } });
+    assert.equal(((health?.result as JsonObject).isError), false);
     const discovered = await full.handle({ id: 3, method: "tools/call", params: { name: "craft_capability_connector_discover", arguments: { connector_id: "mcp", assets: [{ connector_asset_id: "mcp-read", logical_id: "mcp-read", name: "Read", asset_type: "tool", effect: "read_only" }] } } });
     assert.equal(((discovered?.result as JsonObject).isError), false);
     const updated = await full.handle({ id: "update", method: "tools/call", params: { name: "craft_capability_connector_update", arguments: { connector_id: "mcp", active: true } } });
@@ -171,5 +209,10 @@ test("Core exposes the Work Loop and issued connector calls, while connector adm
     assert.equal(((approved?.result as JsonObject).isError), false);
     const listed = await core.handle({ id: 5, method: "tools/call", params: { name: "craft_capability_connector_list", arguments: {} } });
     assert.equal(((listed?.result as JsonObject).isError), false);
+    for (const handler of [full.handlers.craft_runtime_assurance_attest, full.handlers.craft_runtime_assurance_intervene, full.handlers.craft_runtime_assurance_get, full.handlers.craft_runtime_assurance_campaign_advance]) {
+      await assert.rejects(async () => handler({ task_run_id: "missing", runner_id: "missing", kind: "pause", actor: "test", reason: "test" }), /Unknown/);
+    }
+    const revoked = await full.handle({ id: "revoke", method: "tools/call", params: { name: "craft_capability_connector_revoke", arguments: { connector_id: "mcp", reason: "removed" } } });
+    assert.equal(((revoked?.result as JsonObject).isError), false);
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
