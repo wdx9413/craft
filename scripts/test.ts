@@ -55,10 +55,17 @@ if ((result.status ?? 1) !== 0 && process.env.GITHUB_ACTIONS === "true") {
   // Node's TAP reporter has changed its summary wording across releases. Pick
   // the assertion/test failure lines directly so a platform-only failure is
   // diagnosable from the check annotation even when the full log is gated.
-  const failureLines = combined.split(/\r?\n/).filter((line) =>
+  const lines = combined.split(/\r?\n/);
+  const failureLines = lines.filter((line) =>
     /(?:^|\s)(?:not ok|✖|AssertionError|TypeError|ReferenceError|Error:|ERR_[A-Z_]+|symbolic|mkfifo)/i.test(line),
   );
-  const detail = (failureLines.length ? failureLines.join("\n") : combined.slice(-6_000)).slice(0, 6_000)
+  // Coverage failures can be platform-specific even when all tests pass.
+  // Keep only rows that contain a sub-100 percentage to identify the source
+  // file without flooding the annotation with the complete coverage table.
+  const uncoveredRows = lines.filter((line) =>
+    /\|\s*\d+(?:\.\d+)?\s*\|/.test(line) && /(?:9\d|[0-8]\d|0)\.\d+\s*\|/.test(line),
+  );
+  const detail = [...new Set([...failureLines, ...uncoveredRows])].join("\n").slice(0, 6_000)
     .replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A");
   process.stderr.write(`::error title=Craft unit test failure::${detail}\n`);
 }
