@@ -51,7 +51,9 @@ const stderr = result.stderr?.toString() ?? "";
 process.stdout.write(stdout);
 process.stderr.write(stderr);
 if ((result.status ?? 1) !== 0 && process.env.GITHUB_ACTIONS === "true") {
-  const detail = `${stdout}\n${stderr}`.trim().slice(-6_000)
+  const combined = `${stdout}\n${stderr}`.trim();
+  const failureStart = combined.lastIndexOf("✖ failing tests:");
+  const detail = (failureStart >= 0 ? combined.slice(failureStart) : combined.slice(-6_000)).slice(0, 6_000)
     .replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A");
   process.stderr.write(`::error title=Craft unit test failure::${detail}\n`);
 }
