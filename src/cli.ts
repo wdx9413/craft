@@ -44,6 +44,10 @@ Usage:
   craft semantic disable         Disable semantic retrieval and use keywords only
   craft semantic status          Show semantic retrieval health
   craft task list               List durable tasks
+  craft kit list                List installed Capability Kits
+  craft kit install-builtins    Install reviewed built-in Capability Kits
+  craft kit describe <id>       Describe the shared Skill/MCP/CLI/plugin surface
+  craft kit conformance <id>    Run deterministic Kit Conformance checks
   craft codex prepare ...       Prepare a digest-bound Codex CLI dispatch
   craft codex execute ...       Execute a prepared Codex CLI dispatch
   craft claude prepare ...      Prepare a bounded Claude Code dispatch
@@ -301,7 +305,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     }
     throw new Error("semantic requires configure, disable, or status.");
   }
-  if (["source", "capability", "task", "worker", "inbox", "home", "serve", "gui", "usage", "settings", "codex", "claude", "host-run", "supervisor"].includes(args[0] ?? "")) {
+  if (["source", "capability", "task", "kit", "worker", "inbox", "home", "serve", "gui", "usage", "settings", "codex", "claude", "host-run", "supervisor"].includes(args[0] ?? "")) {
     const store = await new CraftStore(paths).open();
     const service = await CraftService.open(store);
     try {
@@ -311,6 +315,10 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
       else if (args[0] === "source" && args[1] === "scan") result = await service.sourceScan({ source_id: args[2] });
       else if (args[0] === "capability" && args[1] === "search") result = await service.capabilitySearch({ query: args.slice(2).join(" ") });
       else if (args[0] === "task" && args[1] === "list") result = service.taskList({});
+      else if (args[0] === "kit" && args[1] === "list") result = service.capabilityKitList({});
+      else if (args[0] === "kit" && args[1] === "install-builtins") result = service.capabilityKitInstallBuiltins();
+      else if (args[0] === "kit" && args[1] === "describe") result = service.capabilityKitDistribution({ kit_id: args[2] });
+      else if (args[0] === "kit" && args[1] === "conformance") result = service.capabilityKitConformance({ kit_id: args[2] });
       else if (args[0] === "codex" && args[1] === "prepare") result = service.codexDispatchPrepare({ task_id: option(args, "--task"), workspace: option(args, "--workspace"), prompt: option(args, "--prompt"), dispatch_id: option(args, "--id"), sandbox: option(args, "--sandbox"), model: option(args, "--model"), timeout_ms: option(args, "--timeout-ms"), output_limit: option(args, "--output-limit") });
       else if (args[0] === "codex" && args[1] === "execute") result = await service.codexDispatchExecute({ dispatch_id: option(args, "--id"), prompt: option(args, "--prompt"), authorization_request_id: option(args, "--authorization"), notification_ref: option(args, "--notification-ref") });
       else if (args[0] === "claude" && args[1] === "prepare") result = service.claudeDispatchPrepare({ task_id: option(args, "--task"), workspace: option(args, "--workspace"), prompt: option(args, "--prompt"), dispatch_id: option(args, "--id"), sandbox: option(args, "--sandbox"), model: option(args, "--model"), max_turns: option(args, "--max-turns"), max_budget_usd: option(args, "--max-budget-usd"), timeout_ms: option(args, "--timeout-ms"), output_limit: option(args, "--output-limit") });

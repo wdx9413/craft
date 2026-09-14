@@ -48,7 +48,9 @@ v0.11.20 固定第一条能力平面边界：**Source Mount 是 provenance，逻
 ## 核心对象关系
 
 ```text
-Capability Kit ──contains──> Capability / Validator / Policy / Eval Suite
+Capability Kit Manifest ──registers──> Capability Kit ──passes──> Kit Conformance ──binds──> Kit Activation ──records──> bounded Contribution
+Capability Kit ──projects──> Skill / MCP / CLI / Plugin descriptor
+Domain Kit ──may compose──> Capability Kit + Object / Action / Acceptance contracts
 Capability Source(s) ──mirror──> Logical Capability ──pins──> Logical Activation Plan ──resolves──> bounded read-only context
 Capability Connector / Capability Asset ──selected by──> Activation Profile ──issues──> Capability Ticket / Call Receipt
 Activation Profile ──pins──> Host Activation Manifest ──authorizes──> Managed Host Bridge ──joins──> Execution Fabric ──re-observes──> Verified Work Loop Receipt
@@ -97,6 +99,7 @@ Observed Delivery ──pairs──> Eval Campaign Report ──with Canary Evid
 - [Local Workbench Web：本地可见工作台](modules/local-workbench-web.md)
 
 - [Capability 与领域 Kit](modules/capability-kit.md)
+- [Capability Kit Runtime：可插拔供给面的受控生命周期](modules/capability-kit-runtime.md)
 - [Capability Access：上下文、能力选择与短期调用票据](modules/capability-access.md)
 - [Agent IR](modules/agent-ir.md)
 - [Experience / Eval Kernel](modules/experience-eval.md)
@@ -136,3 +139,5 @@ Observed Delivery ──pairs──> Eval Campaign Report ──with Canary Evid
 - [Supply-chain Governance：可信能力的持续治理](modules/supply-chain-governance.md)
 - [Local Maintenance Worker：持续运行的本地控制面](modules/local-maintenance-worker.md)
 v0.12.17 以 `AssuredPilotKernel` 收束真实 Host 回执、Runtime Assurance、Runtime Readiness、恢复演练、精确 Capability Profile 与一次性密封评测引用。任何环境、能力、Case 或人工工作区漂移都会进入 `needs_replan`；默认仍是单 Agent，远程协作只传引用、可撤销且失败关闭。详见[Assured Pilot](modules/assured-pilot.md)。
+
+v0.12.18 以 `CapabilityKitRuntime` 提供可插拔的能力供给面：Kit 必须经 Manifest 校验、精确依赖锁和机制级 Conformance 后才能被 Task 激活；停用或撤销会使自身及依赖方的活动记录进入 `needs_replan`。Kit 的 Hook 是有界的协议阶段，不是任意代码回调；其对外 Skill/MCP/CLI/Plugin 描述共用同一 Kit 摘要，默认不授予执行权限。详见 [Capability Kit Runtime](modules/capability-kit-runtime.md)。

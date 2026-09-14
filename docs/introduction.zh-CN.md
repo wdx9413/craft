@@ -1,6 +1,6 @@
 # Craft：受控 Agent 工作运行时
 
-> 本文是 Craft 的总览入口。它解释产品解决的问题、关键概念如何连接、当前实现做到哪里，以及在面试或架构评审中应如何准确回答。当前实现基线为 v0.12.17；旧版本号只表示历史里程碑。
+> 本文是 Craft 的总览入口。它解释产品解决的问题、关键概念如何连接、当前实现做到哪里，以及在面试或架构评审中应如何准确回答。当前实现基线为 v0.12.18；旧版本号只表示历史里程碑。
 
 ## 一句话
 
@@ -73,6 +73,7 @@ Outcome，或 needs_replan / handoff
 - Host 完成只说明 Host 已返回；仍要重新观察状态并执行 Acceptance。
 - v0.12.16 的 `Runtime Assurance` 只在终态 Host 回执、环境/预算、再观察与（写入时）平台预检一致时形成 Attestation；Campaign 每个绑定 slot 都具备该事实后才可聚合。
 - v0.12.17 的 `Assured Pilot` 把 Attestation、就绪检查、恢复演练、Capability Profile 与一次性密封 Case 引用固定为单条证据链。环境、能力版本、Case 或人工工作区漂移时必须重新规划；Pilot 是可比较的运行样本，不是业务成功或生产部署声明。
+- v0.12.18 的 `Capability Kit Platform` 把外部变化收束到声明式 Manifest：一个 Kit 先登记、锁定依赖并通过机制级 Conformance，才可绑定到具体 Task；它只能提交阶段有界的摘要化贡献。Skill、MCP、CLI 与插件是同一 Kit 的四种呈现，不是四套彼此绕过治理的扩展机制。
 - 文件、输入、权限、能力版本、环境或预算发生漂移时，旧路径进入 `needs_replan`，不会借用旧 Receipt。
 - 人工修改是 `HumanStateEvent`，是新的事实，不要求模型“记住”人刚才改了什么。
 

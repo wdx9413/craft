@@ -27,7 +27,7 @@ async function fixture() {
   return { root, store, service, environmentDigest, evaluation };
 }
 
-test("v0.12.17 binds sealed evaluation access, recovery evidence, trusted capability versions and one Pilot", async () => {
+test("v0.12.18 binds sealed evaluation access, recovery evidence, trusted capability versions and one Pilot", async () => {
   const f = await fixture();
   try {
     const sealed = f.service.assuredPilotSealCase({ sealed_case_id: "sealed", case_id: "case", custodian: "eval-team", opaque_locator_digest: "sha256:opaque", approval_ref: "independent-reviewer" }).sealed_case as JsonObject;
@@ -53,11 +53,11 @@ test("v0.12.17 binds sealed evaluation access, recovery evidence, trusted capabi
       const response = await mcp.handle({ id: name, method: "tools/call", params: { name, arguments: args } });
       assert.equal((response?.result as JsonObject).isError, false, name);
     }
-    assert.equal(VERSION, "0.12.17");
+    assert.equal(VERSION, "0.12.18");
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("v0.12.17 fails closed on unsealed, expired, stale or untrusted Pilot facts and projects attention", async () => {
+test("v0.12.18 fails closed on unsealed, expired, stale or untrusted Pilot facts and projects attention", async () => {
   const f = await fixture();
   try {
     assert.throws(() => f.service.assuredPilotSealCase({ case_id: "missing", custodian: "x", opaque_locator_digest: "sha256:x", approval_ref: "x" }), /Unknown/);
@@ -83,7 +83,7 @@ test("v0.12.17 fails closed on unsealed, expired, stale or untrusted Pilot facts
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("v0.12.17 covers idempotent receipts and independently visible drift reasons", async () => {
+test("v0.12.18 covers idempotent receipts and independently visible drift reasons", async () => {
   const f = await fixture();
   try {
     f.store.create("delivery_evaluation_case", "development", { partition: "development", sanitized: true, approved_by: null, definition_digest: "sha256:development" });
@@ -108,7 +108,7 @@ test("v0.12.17 covers idempotent receipts and independently visible drift reason
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("v0.12.17 rejects malformed grants and invalid pilot contracts without weakening the normal path", async () => {
+test("v0.12.18 rejects malformed grants and invalid pilot contracts without weakening the normal path", async () => {
   const f = await fixture();
   try {
     assert.throws(() => f.service.assuredPilotSealCase({ case_id: "case", custodian: "", opaque_locator_digest: "sha256:opaque", approval_ref: "review" }), /must not be empty/);

@@ -13,9 +13,11 @@
 
 ## 建设原则
 
-以 [产品架构](architecture.zh-CN.md) 的三大支柱为目标：工作与协作、执行与保障、学习与改进。**评测与实验是第三支柱内的核心模块**，不另设第四支柱。当前实现基线已推进到 v0.12.17。
+以 [产品架构](architecture.zh-CN.md) 的三大支柱为目标：工作与协作、执行与保障、学习与改进。**评测与实验是第三支柱内的核心模块**，不另设第四支柱。当前实现基线已推进到 v0.12.18。
 
 **v0.12.17：Assured Pilot 真实证据闭环。** 在已有 Task Contract、Host Bridge、Verified Work Loop、Runtime Assurance、Readiness、Capability Connector 与 Eval Campaign 之间补入最小的事实收口：held-out Case 只按摘要密封，外部 Evaluator 需消费一个 Task Run 绑定的一次性引用；恢复能力要有确认级 Evidence、环境一致且包含重建/回执重验/状态再观察的 Drill；Pilot 只绑定可信健康、精确版本且无凭据的 Capability Profile。Task Run、环境、能力、Case 或人工工作区发生漂移时，一律 `needs_replan`。本版不声称真实生产隔离、外部密封存储或企业凭据已经部署，也不默认多 Agent。详见[Assured Pilot](../technical/modules/assured-pilot.md)。
+
+**v0.12.18：Capability Kit Platform v1。** 用 `Capability Kit Manifest → Registry → Conformance → Activation → Contribution / Revoke` 管理所有可变能力供给面。Manifest 精确声明兼容版本、依赖锁、effect、数据范围、入口、Hook、健康检查和评测套件；安装不运行第三方代码，不保存凭据，也不因被发现或被安装而获得执行权。Kit 只有在 Task 存在、依赖未漂移和 Conformance 通过后才会活动；禁用或撤销会传播为 `needs_replan`。Skill、MCP、CLI、插件只共享同一个 descriptor，默认 Core MCP 只读，Full MCP 才暴露安装、激活、贡献与撤销。首批内置 Serena 项目知识和本地工作区 Kit 仅验证机制，不宣称接入任何真实业务系统。详见 [Capability Kit Runtime](../technical/modules/capability-kit-runtime.md)。
 
 **v0.12.16：Runtime Assurance、联邦委派与受限多 Agent。** `RuntimeAssuranceKernel` 不另建第二套 Agent 状态机，而是把 Task Run、终态 Host Receipt、环境/预算、状态再观察、Delivery 与写入 Platform Preflight 固定成可复核 Attestation；任何漂移都进入 `needs_replan` 或拒绝。Eval Campaign 只有在所有已绑定 slot 都有同环境、同预算的 verified Attestation 时才能进入既有 Benchmark/held-out/Signoff 链。`FederatedDelegationKernel` 在已有 A2A 摘要协议上增加 Card health、一次性 `Delegation Grant`、精确 `Artifact Grant`、撤销和超时 `indeterminate`，不传正文或凭据；`HarnessTopologyKernel` 使 single primary 成为默认，最多五个只读角色仅在配对评测与 confirmed Evidence 后可被路由。`RuntimeReadinessKernel` 将平台 Preflight、恢复、企业 Binding 和补偿/人工处置差距固化为失败关闭 Assessment。外部 GitHub/火山 Skill、MCP、Serena Connector 均有最小 operation scope、metadata-digest health receipt 和不可逆 revoke；Host 仍负责真实 transport、凭据和执行，Craft 不把本地契约夸大为生产隔离或业务效果。详见[联邦委派与受限多 Agent 运行时](../technical/modules/federated-delegation-runtime.zh-CN.md)。
 

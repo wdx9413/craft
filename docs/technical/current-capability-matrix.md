@@ -1,4 +1,4 @@
-# Current Capability Matrix (v0.12.17)
+# Current Capability Matrix (v0.12.18)
 
 | Area | State | Boundary |
 |---|---|---|
@@ -20,7 +20,11 @@
 | OTel / OTLP | implemented adapter contract | deployment collector is external |
 | OS sandbox / Secret Broker | local contracts and probes | production isolation requires a platform adapter |
 | Runtime Assurance | implemented and tested locally | attests terminal Host receipt, re-observation, environment/budget and write preflight; it does not invent external execution proof |
-| Assured Pilot | implemented and tested locally | binds verified Host facts, recovery drill, trusted capability versions and one-time sealed Case access; any drift requires replanning |
+| Assured Pilot | implemented and tested locally (v0.12.17) | binds verified Host facts, recovery drill, trusted capability versions and one-time sealed Case access; any drift requires replanning |
+| Capability Kit Registry | implemented and tested locally | declarative exact-version Kit manifests, pinned dependencies, lifecycle state, digest and provenance; install is not code loading |
+| Kit Conformance / Activation | implemented and tested locally | static mechanism checks plus Task-bound activation; dependency drift, disable or revoke fail closed and require replanning |
+| Kit presentation | implemented and tested locally | one Kit descriptor may project Skill, MCP, CLI and plugin surfaces; Core MCP exposes read-only inspection while Full MCP keeps lifecycle writes explicit |
+| Built-in vertical samples | implemented and tested locally | Serena project knowledge and local workspace Kits exercise the supply boundary only; actual Host/Serena execution remains adapter-owned |
 | External Connector health/revocation | implemented and tested locally | exact scope, metadata digest and current health gate ticket consumption; host-owned transport/credentials remain external |
 | A2A / organization sync | digest-only transport and local conflict rules | remote identity, storage, and policy require deployment evidence |
 | MCP Registry sync | implemented adapter | HTTPS pull and local ingest only; signature, moderation, health scheduling and official registry policy remain deployment governance |

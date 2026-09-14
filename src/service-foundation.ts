@@ -100,6 +100,7 @@ import { FederatedDelegationKernel } from "./federated-delegation.ts";
 import { HarnessTopologyKernel } from "./harness-topology.ts";
 import { RuntimeReadinessKernel } from "./runtime-readiness.ts";
 import { AssuredPilotKernel } from "./assured-pilot.ts";
+import { CapabilityKitRuntime } from "./capability-kit-runtime.ts";
 
 /**
  * Stable composition root for the service. Domain behavior stays in focused
@@ -165,6 +166,7 @@ export abstract class ServiceFoundation {
   readonly projectKnowledge: ProjectKnowledgeKernel;
   readonly capabilityConnectors: CapabilityConnectorKernel;
   readonly capabilityAccess: CapabilityAccessKernel;
+  readonly capabilityKits: CapabilityKitRuntime;
   readonly hostActivationManifests: HostActivationManifestKernel;
   readonly executionFabric: ExecutionFabricKernel;
   readonly hostBridge: HostBridgeKernel;
@@ -276,6 +278,7 @@ export abstract class ServiceFoundation {
     this.projectKnowledge = new ProjectKnowledgeKernel(store);
     this.capabilityConnectors = new CapabilityConnectorKernel(store);
     this.capabilityAccess = new CapabilityAccessKernel(store, this.catalog);
+    this.capabilityKits = new CapabilityKitRuntime(store);
     this.hostActivationManifests = new HostActivationManifestKernel(store, this.hostProfiles);
     this.executionFabric = new ExecutionFabricKernel(store);
     this.hostBridge = new HostBridgeKernel(store);

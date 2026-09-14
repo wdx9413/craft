@@ -39,6 +39,15 @@ _Avoid_: Capability Asset、Connector
 **Capability Kit**：把 Capability、Policy、Validator 和 Eval Suite 打包在一起的可版本化供给单元。它不因为被安装就自动获得执行权。
 _Avoid_: Capability Source、Activation Profile
 
+**Capability Kit Manifest**：Capability Kit 的声明式身份、精确版本、依赖锁、effect、数据范围、入口、可参与阶段、健康检查和评测套件。它不是可执行代码包，也不允许携带凭据。
+_Avoid_: 插件包、安装脚本
+
+**Capability Kit Activation**：将一个通过 Conformance 的 Kit 精确绑定到 Task 的可撤销记录。它只允许 Kit 提交阶段受限且无正文的提议/回执，不能给 Kit 授权、写入事实或绕过 Host。
+_Avoid_: Activation Profile、工具调用
+
+**Domain Kit**：面向某个工作领域的对象、界面、动作契约与验收组合。它可引用 Capability Kit，但不等同于外部扩展的分发和生命周期单位。
+_Avoid_: Capability Kit、行业标签
+
 **Logical Capability**：由多个同内容 Source 实例归并出的可发现能力身份。它用于检索和去重，不授予执行权。
 _Avoid_: Capability Asset
 

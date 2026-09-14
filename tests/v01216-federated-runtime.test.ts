@@ -36,7 +36,7 @@ function replace(f: Awaited<ReturnType<typeof fixture>>, kind: string, id: unkno
   return f.store.save(kind, recordId, { ...record, ...patch });
 }
 
-test("v0.12.17 grants only healthy, scoped, one-time remote read authority and records bound receipts", async () => {
+test("v0.12.18 grants only healthy, scoped, one-time remote read authority and records bound receipts", async () => {
   const f = await fixture();
   try {
     const item = delegation(f, "delegation");
@@ -69,11 +69,11 @@ test("v0.12.17 grants only healthy, scoped, one-time remote read authority and r
     assert.throws(() => full.handlers.craft_federated_delegation_revoke({ grant_id: grant.id, reason: "late", evidence_ids: [f.confirmed.id] }), /Terminal/);
     assert.equal((await full.handlers.craft_federated_delegation_reconcile({ grant_id: grant.id })).idempotent, true);
     assert.equal((await full.handlers.craft_federated_delegation_get({ grant_id: grant.id })).grant !== undefined, true);
-    assert.equal(VERSION, "0.12.17");
+    assert.equal(VERSION, "0.12.18");
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("v0.12.17 closes unhealthy, revoked, and expired remote delegation paths without assuming success", async () => {
+test("v0.12.18 closes unhealthy, revoked, and expired remote delegation paths without assuming success", async () => {
   const f = await fixture();
   try {
     f.service.federatedAgentHealthRecord({ card_id: f.card.id, card_digest: f.card.card_digest, status: "healthy", evidence_ids: [f.confirmed.id], observed_by: "host" });
@@ -89,7 +89,7 @@ test("v0.12.17 closes unhealthy, revoked, and expired remote delegation paths wi
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("v0.12.17 keeps multi-Agent topology shadowed until paired evidence and makes deployment gaps explicit", async () => {
+test("v0.12.18 keeps multi-Agent topology shadowed until paired evidence and makes deployment gaps explicit", async () => {
   const f = await fixture();
   try {
     assert.throws(() => f.service.harnessTopologyDefine({ topology_id: "bad", task_id: f.task.id, roles: ["diagnostic_research"], mode: "candidate" }), /primary/);
@@ -125,7 +125,7 @@ test("v0.12.17 keeps multi-Agent topology shadowed until paired evidence and mak
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("v0.12.17 fails closed at every newly introduced authorization and topology boundary", async () => {
+test("v0.12.18 fails closed at every newly introduced authorization and topology boundary", async () => {
   const f = await fixture();
   try {
     // Topology input, lifecycle, and selection conflict branches.
@@ -165,7 +165,7 @@ test("v0.12.17 fails closed at every newly introduced authorization and topology
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("v0.12.17 records every remote delegation failure as an explicit boundary", async () => {
+test("v0.12.18 records every remote delegation failure as an explicit boundary", async () => {
   const f = await fixture();
   try {
     replace(f, "a2a_collaboration_session", f.session.id, { max_delegations: 50 });

@@ -1,6 +1,6 @@
 # Craft
 
-> Current release: v0.12.17. Every host follows a route-first boundary with a low-token syscall MCP. Assured Pilot now binds an observed Host receipt, a recovery drill, trusted capability versions, and one-time sealed evaluation access into a re-checkable sample. Real cloud execution, marketplace publication, and OS-level isolation still require a deployment adapter or platform review; they are not claimed as shipped services.
+> Current release: v0.12.18. Every host follows a route-first boundary with a low-token syscall MCP. Capability Kit Runtime now governs the variable Skill, MCP, CLI, and plugin surfaces through a declarative, revocable Kit; installation never loads third-party code or grants execution authority. Real cloud execution, marketplace publication, and OS-level isolation still require a deployment adapter or platform review; they are not claimed as shipped services.
 
 [中文](README.md) | [English](README.en.md)
 

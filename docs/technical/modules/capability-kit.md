@@ -4,6 +4,8 @@
 
 Capability Catalog 发现、索引和按需读取 Skill 等能力资产。v0.11.13 增加首个可执行 Domain Kit Kernel；v0.11.14 将它扩展为宿主无关组合契约；v0.11.15 补齐递归依赖锁与预算闭环；v0.11.16 验证跨领域确定性验收；v0.11.17 将 Domain Action 与已验证、已发布的动态 Contract 融合；v0.11.18 补齐类型化输入、精确授权和证据化结果闭环；v0.11.20 增加逻辑能力索引。
 
+v0.12.18 新增 **Capability Kit Runtime**，但不改变 Domain Kit 的含义：Domain Kit 是领域对象/动作/验收的组合；Capability Kit 是外接或内置能力的声明式供给与生命周期单位。前者可以引用后者，二者不能互相替代。详见 [Capability Kit Runtime](capability-kit-runtime.md)。
+
 ## 关系
 
 - 被 Agent IR 引用，提供可用 Operation 与约束。

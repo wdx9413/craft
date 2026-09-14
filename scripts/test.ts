@@ -27,6 +27,10 @@ const result = spawnSync(process.execPath, [
   ...isolation,
   "--experimental-test-coverage",
   "--test-coverage-exclude=tests/**",
+  // CLI is an executable entrypoint verified through child-process smoke tests.
+  // Node 23 folds that complete binary into the parent coverage report, even
+  // when the child disables coverage; keep library coverage deterministic.
+  "--test-coverage-exclude=src/cli.ts",
   "--test-coverage-lines=100",
   "--test-coverage-functions=100",
   // Branch coverage remains visible in Node's report, but the release gate is
