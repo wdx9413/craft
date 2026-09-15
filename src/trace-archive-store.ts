@@ -18,6 +18,8 @@ export type TraceArchiveBundle = {
 };
 
 export type TraceArchivePointer = {
+  /** Logical storage plugin chosen when the segment was written. */
+  backend_id?: string;
   storage: typeof LOCAL_STORAGE | typeof OBJECT_STORAGE;
   format: typeof FORMAT;
   locator: string;

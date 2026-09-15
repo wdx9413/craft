@@ -26,6 +26,7 @@ import { decideExecution } from "../execution-policy.ts";
 import { dockerRequestDigest } from "../docker-sandbox.ts";
 import { egressRequestDigest } from "../egress.ts";
 import { ServiceFoundation } from "../service-foundation.ts";
+import type { TraceArchiveRuntimeBackend } from "../trace-archive-storage.ts";
 import { dataSpaceId } from "../data-space.ts";
 import { installAdapterRuntimeMethods } from "./use-cases/adapter-runtime.ts";
 import { installKernelDelegateMethods } from "./use-cases/kernel-delegates.ts";
@@ -207,9 +208,9 @@ export class CraftService extends ServiceFoundation {
   constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter?: unknown,
     dockerSandbox?: unknown, egressBroker?: unknown, hostOwnerId?: string, hostProfiles?: readonly import("../host-registry.ts").HostProfile[],
     modelProviders?: readonly import("../model-gateway.ts").ModelProviderSpec[],
-    modelTransport?: import("../model-gateway.ts").ModelTransport) {
+    modelTransport?: import("../model-gateway.ts").ModelTransport, traceArchiveBackends?: readonly TraceArchiveRuntimeBackend[]) {
     super(store, semanticProvider, isolatedAdapter as never, dockerSandbox as never, egressBroker as never, hostOwnerId,
-      hostProfiles, modelProviders, modelTransport);
+      hostProfiles, modelProviders, modelTransport, traceArchiveBackends);
   }
 
   /**
@@ -342,7 +343,7 @@ export class CraftService extends ServiceFoundation {
       "sandbox_profile", "sandbox_assessment", "sandbox_ticket", "sandbox_receipt", "sandbox_egress_binding",
       "external_effect", "external_effect_receipt", "effect_compensation", "effect_reconciliation", "effect_saga", "recovery_item",
       "trigger_subscription", "trigger_event", "speculative_policy", "speculative_candidate", "preference_signal", "lineage_edge", "dehydration_snapshot",
-      "autonomy_policy", "autonomy_request", "autonomy_consumption",
+      "autonomy_policy", "autonomy_request", "autonomy_consumption", "trace_policy", "trace_archive", "trace_archive_storage", "trace_archive_storage_active",
       "contract_observation", "contract_candidate", "task_intent", "acceptance_contract",
       "contract_publication",
       "capability_canary", "capability_canary_sample",

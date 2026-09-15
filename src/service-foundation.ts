@@ -83,6 +83,7 @@ import { PlatformOperationsKernel } from "./platform-operations.ts";
 import { UsageKernel } from "./usage.ts";
 import { IntentCompilerKernel } from "./intent-compiler.ts";
 import { TraceKernel } from "./trace-kernel.ts";
+import { TraceArchiveStorageKernel, type TraceArchiveRuntimeBackend } from "./trace-archive-storage.ts";
 import { HostSessionEventKernel } from "./host-session-events.ts";
 import { OutcomeObserverKernel } from "./outcome-observer.ts";
 import { RuntimeTruthKernel } from "./runtime-truth-kernel.ts";
@@ -233,6 +234,7 @@ export abstract class ServiceFoundation {
   readonly metrics: MetricsKernel;
   readonly usage: UsageKernel;
   readonly intentCompiler: IntentCompilerKernel;
+  readonly traceArchiveStorage: TraceArchiveStorageKernel;
   readonly trace: TraceKernel;
   readonly hostSessions: HostSessionEventKernel;
   readonly outcomeObservers: OutcomeObserverKernel;
@@ -276,7 +278,7 @@ export abstract class ServiceFoundation {
   constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter = new LocalIsolatedAdapter(),
     dockerSandbox = new DockerSandboxAdapter(), egressBroker = new TrustedEgressBroker(), hostOwnerId?: string,
     hostProfiles?: readonly HostProfile[], modelProviders?: readonly ModelProviderSpec[],
-    modelTransport?: ModelTransport) {
+    modelTransport?: ModelTransport, traceArchiveBackends?: readonly TraceArchiveRuntimeBackend[]) {
     this.store = store; this.catalog = new Catalog(store, semanticProvider); this.isolatedAdapter = isolatedAdapter;
     this.workspace = new WorkspaceState(store, store.paths);
     this.transaction = new TransactionCoordinator(store, this.workspace); this.trajectory = new TrajectoryCompiler(store);
@@ -367,7 +369,8 @@ export abstract class ServiceFoundation {
     this.metrics = new MetricsKernel(store);
     this.usage = new UsageKernel(store);
     this.intentCompiler = new IntentCompilerKernel(store);
-    this.trace = new TraceKernel(store);
+    this.traceArchiveStorage = new TraceArchiveStorageKernel(store, traceArchiveBackends);
+    this.trace = new TraceKernel(store, this.traceArchiveStorage);
     this.durableActionLoops = new DurableActionLoopKernel(store, this.trace);
     this.hostSessions = new HostSessionEventKernel(store, this.trace);
     this.outcomeObservers = new OutcomeObserverKernel(store, this.trace);

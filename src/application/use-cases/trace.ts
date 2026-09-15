@@ -12,4 +12,7 @@ export function installTraceMethods(serviceClass: typeof CraftService): void {
   serviceClass.prototype.traceCaseCompile = function (args) { return this.trace.compileCase(args); };
   serviceClass.prototype.traceRetentionPlan = function (args) { return this.trace.retentionPlan(args); };
   serviceClass.prototype.traceRetentionSweep = function (args = {}) { return this.trace.retentionSweep(args); };
+  serviceClass.prototype.traceArchiveStorageRegister = function (args) { return this.traceArchiveStorage.register(args); };
+  serviceClass.prototype.traceArchiveStorageList = function (args = {}) { return this.traceArchiveStorage.list(args); };
+  serviceClass.prototype.traceArchiveStorageActivate = function (args) { return this.traceArchiveStorage.activate(args); };
 }

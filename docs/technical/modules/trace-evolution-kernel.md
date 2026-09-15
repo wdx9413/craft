@@ -46,8 +46,10 @@ GUI、CLI、Codex、Claude、Trae、WorkBuddy 和 Skill/MCP 只负责产生或�
 
 Trace 的逻辑事实不等于某一种物理存储。活动 Run 的索引、状态与短期事件仍保留在 SQLite，便于事务关联、权限过滤和低延迟查询；到期的终态 Trace 会由 `retentionSweep` 写为按日期分区、私有权限的 gzip JSONL 段，然后仅在 SQLite 留下版本化 Archive Pointer。
 
-默认 `LocalTraceArchiveStore` 写入 `logs/trace-archive/YYYY/MM/DD/`，单个归档段包含 manifest、Trace、Event 和 Feedback，并以内容摘要校验。`ObjectTraceArchiveStore` 是部署 seam：Craft 固定格式、摘要和 URI，部署方注入对象存储客户端与凭据。未配置可信后端时不会把归档悄悄发送到网络。
+默认 `LocalTraceArchiveStore` 写入 `logs/trace-archive/YYYY/MM/DD/`，单个归档段包含 manifest、Trace、Event 和 Feedback，并以内容摘要校验。默认热保留期是 **7 天**；`craft_trace_retention_plan` 保存的 `default` Policy 会被后台 Maintenance 自动读取。若要调整已有 Policy，必须明确传入 `replace: true`，避免因同名配置的误调用改变保留期。
+
+`TraceArchiveStorageKernel` 是数据存储插件的配置与运行时 seam。用户可用 Full MCP 登记 `storage_id`、`backend_id`、`credential_ref` 与 `configuration_ref`，再显式激活；Craft 只保存引用，不保存密钥，也不会从配置动态加载任意代码。部署方把已审查的 `TraceArchiveStore` Backend 注入 Craft 进程后，登记项才会显示为 available 并允许激活。`ObjectTraceArchiveStore` 是其中一个对象存储实现 seam；可对接 S3、OSS、MinIO 或企业存储，但具体 SDK、网络和凭据生命周期由部署插件负责。
 
 `craft_trace_get` 与 `craft_trace_query` 始终经 Craft Core 读取热数据或 Archive Pointer；调用方不应直接读取 SQLite 或归档目录。这样服务端可以在同一查询路径施加项目范围、授权、脱敏和未来的远程对象存储访问控制。损坏、越界 Locator、摘要不符或格式不符的归档均失败关闭。
 
-归档只迁移已经终态且满足保留策略的记录；它不自动清空活动 Trace，也不对既有数据库做强制迁移。归档后的 Trace 仍可通过相同的读接口获取，事件会标记为 archived。
+归档只迁移已经终态且满足保留策略的记录；它不自动清空活动 Trace，也不对既有数据库做强制迁移。归档后的 Trace 仍可通过相同的读接口获取，事件会标记为 archived。选中的外部 Backend 不可用或写入失败时，归档 Sweep 失败关闭：热 Trace 与事件不会删除，Maintenance 会记录失败并按既有退避策略重试。

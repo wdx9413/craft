@@ -164,16 +164,17 @@ export class TraceKernel {
   }
 
   retentionPlan(args: JsonObject): JsonObject {
-    const policyId = String(args.policy_id ?? "default"); const maxDays = Number(args.max_days ?? 7); const maxEvents = Number(args.max_events ?? 100_000); if (!Number.isInteger(maxDays) || maxDays < 1) throw new Error("max_days must be a positive integer"); if (!Number.isInteger(maxEvents) || maxEvents < 1) throw new Error("max_events must be a positive integer");
-    const existing = this.store.find("trace_policy", policyId); const identity = { max_days: maxDays, max_events: maxEvents, pii_mode: String(args.pii_mode ?? "digest_only") }; if (existing) { if (existing.identity_digest !== digest(identity)) throw new Error("Trace policy idempotency conflict"); return { policy: existing, idempotent: true }; }
-    return { policy: this.store.create("trace_policy", policyId, { ...identity, identity_digest: digest(identity), archive_before_delete: true, automatic_after_archive: true, deletion_requires_review: false }), idempotent: false };
+    const policyId = text(args.policy_id ?? "default", "policy_id"); const maxDays = Number(args.max_days ?? 7); const maxEvents = Number(args.max_events ?? 100_000); if (!Number.isInteger(maxDays) || maxDays < 1) throw new Error("max_days must be a positive integer"); if (!Number.isInteger(maxEvents) || maxEvents < 1) throw new Error("max_events must be a positive integer");
+    if (args.replace !== undefined && args.replace !== true && args.replace !== false) throw new Error("replace must be a boolean");
+    const existing = this.store.find("trace_policy", policyId); const identity = { max_days: maxDays, max_events: maxEvents, pii_mode: String(args.pii_mode ?? "digest_only") }; if (existing) { if (existing.identity_digest === digest(identity)) return { policy: existing, idempotent: true }; if (args.replace !== true) throw new Error("Trace policy idempotency conflict"); return { policy: this.store.save("trace_policy", policyId, { ...payload(existing), ...identity, identity_digest: digest(identity), policy_revision: Number(existing.policy_revision ?? 1) + 1, updated_by: String(args.updated_by ?? "operator") }), idempotent: false }; }
+    return { policy: this.store.create("trace_policy", policyId, { ...identity, identity_digest: digest(identity), policy_revision: 1, archive_before_delete: true, automatic_after_archive: true, deletion_requires_review: false }), idempotent: false };
   }
 
   /** Archive and remove only terminal traces older than the retention window. */
   retentionSweep(args: JsonObject = {}): JsonObject {
     const now = args.now === undefined ? new Date().toISOString() : String(args.now);
     if (Number.isNaN(Date.parse(now))) throw new Error("now must be an ISO timestamp");
-    const maxDays = Number(args.max_days ?? 7); const limit = Number(args.limit ?? 100);
+    const policy = this.resolveRetentionPolicy(args); const maxDays = policy.maxDays; const limit = Number(args.limit ?? 100);
     if (!Number.isInteger(maxDays) || maxDays < 1) throw new Error("max_days must be a positive integer");
     if (!Number.isInteger(limit) || limit < 1 || limit > 10_000) throw new Error("limit must be an integer between 1 and 10000");
     const cutoff = Date.parse(now) - maxDays * 86_400_000;
@@ -186,11 +187,11 @@ export class TraceKernel {
       const result = this.get({ trace_id: trace.id }); const events = result.events as JsonObject[]; const feedback = result.feedback as JsonObject[];
       const existing = this.store.find("trace_archive", String(trace.id));
       const archive = existing ? this.archivePointer(existing) : this.archives.write({ trace_id: String(trace.id), trace_version: Number(trace.version), archived_at: now, trace, events, feedback });
-      if (!existing) this.store.create("trace_archive", String(trace.id), { trace_id: trace.id, trace_version: trace.version, task_id: trace.task_id, status: trace.status, archived_at: now, last_event_at: trace.last_event_at ?? trace.updated_at, event_count: events.length, feedback_count: feedback.length, archive_storage: archive.storage, archive_locator: archive.locator, archive_uri: archive.uri, archive_format: archive.format, content_digest: archive.content_digest, bytes: archive.bytes });
+      if (!existing) this.store.create("trace_archive", String(trace.id), { trace_id: trace.id, trace_version: trace.version, task_id: trace.task_id, status: trace.status, archived_at: now, last_event_at: trace.last_event_at ?? trace.updated_at, event_count: events.length, feedback_count: feedback.length, archive_backend_id: archive.backend_id ?? "local", archive_storage: archive.storage, archive_locator: archive.locator, archive_uri: archive.uri, archive_format: archive.format, content_digest: archive.content_digest, bytes: archive.bytes });
       this.store.removeTraceRecords(String(trace.id), events.map((event) => String(event.id)), feedback.map((item) => String(item.id)));
       archives.push(archive.uri); deleted += 1;
     }
-    return { schema: TRACE_SCHEMA_VERSION, now, max_days: maxDays, cutoff: new Date(cutoff).toISOString(), scanned: candidates.length, archived: archives.length, deleted, archives };
+    return { schema: TRACE_SCHEMA_VERSION, now, policy_id: policy.id, policy_revision: policy.revision, policy_source: policy.source, max_days: maxDays, cutoff: new Date(cutoff).toISOString(), scanned: candidates.length, archived: archives.length, deleted, archives };
   }
 
   appendTrial(args: JsonObject): JsonObject {
@@ -199,6 +200,14 @@ export class TraceKernel {
   }
 
   private archivePointer(record: JsonObject): TraceArchivePointer {
-    return { storage: String(record.archive_storage) as TraceArchivePointer["storage"], format: String(record.archive_format) as TraceArchivePointer["format"], locator: text(record.archive_locator, "archive_locator"), uri: text(record.archive_uri, "archive_uri"), content_digest: text(record.content_digest, "archive content_digest"), bytes: Number(record.bytes) };
+    return { ...(record.archive_backend_id === undefined ? {} : { backend_id: text(record.archive_backend_id, "archive_backend_id") }), storage: String(record.archive_storage) as TraceArchivePointer["storage"], format: String(record.archive_format) as TraceArchivePointer["format"], locator: text(record.archive_locator, "archive_locator"), uri: text(record.archive_uri, "archive_uri"), content_digest: text(record.content_digest, "archive content_digest"), bytes: Number(record.bytes) };
+  }
+
+  private resolveRetentionPolicy(args: JsonObject): { id: string; revision: number; maxDays: number; source: "override" | "stored" | "builtin" } {
+    if (args.max_days !== undefined) return { id: "override", revision: 0, maxDays: Number(args.max_days), source: "override" };
+    const id = text(args.policy_id ?? "default", "policy_id"); const stored = this.store.find("trace_policy", id);
+    if (stored) return { id, revision: Number(stored.policy_revision ?? 1), maxDays: Number(stored.max_days), source: "stored" };
+    if (id !== "default") throw new Error("Unknown Trace retention policy");
+    return { id: "default", revision: 0, maxDays: 7, source: "builtin" };
   }
 }

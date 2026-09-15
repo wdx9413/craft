@@ -46,6 +46,9 @@ declare module "../craft-service.ts" {
     traceCaseCompile(args: JsonObject): JsonObject;
     traceRetentionPlan(args: JsonObject): JsonObject;
     traceRetentionSweep(args?: JsonObject): JsonObject;
+    traceArchiveStorageRegister(args: JsonObject): JsonObject;
+    traceArchiveStorageList(args?: JsonObject): JsonObject;
+    traceArchiveStorageActivate(args: JsonObject): JsonObject;
     capabilityLifecycleRegister(args: JsonObject): JsonObject;
     capabilityLifecycleInstall(args: JsonObject): JsonObject;
     capabilityLifecycleActivate(args: JsonObject): JsonObject;
