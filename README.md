@@ -1,6 +1,6 @@
 # Craft
 
-> 当前发布版本：v0.12.26。Craft 是面向人和 AI 的通用工作运行时：既可以完整插件接入 Codex 等 Host，也可将 Knowledge、Memory、Capability、Skill Quality 和 Workflow Evolution 作为独立组件使用。Codex 插件默认复用当前 App 作为 Embedded Host，不另起 Codex CLI；所有形态都共享相同的状态、策略、Receipt、评测与安全边界。
+> 当前发布版本：v0.12.27。Craft 是面向人和 AI 的通用工作运行时：默认 `craft` 插件包含知识、记忆、能力发现、质量评测与 Workflow 演进；它们以同一套状态、策略、Receipt、评测与安全边界协同工作，也可按需作为独立组件使用。Codex 插件默认复用当前 App 作为 Embedded Host，不另起 Codex CLI。
 
 [中文](README.md) | [English](README.en.md)
 
@@ -54,6 +54,7 @@ Sandbox 能力采用“声明、诊断、黑盒一致性验证、精确版本票
 - **开发验证平面（v0.12.23）**：`VerificationPlane` 依据变更类别、effect、Candidate 和 Host 风险生成最小检查集，收集同环境 Evidence Receipt，并明确给出 `eligible`、`rejected` 或 `inconclusive`。它不执行命令；Candidate 仍须通过 Release Qualification。详见 [Verification Plane](docs/technical/modules/verification-plane.md)。
 - **模型评测与 Workflow Evolution（v0.12.24）**：`EvaluationModelProfile` 仅保存 Provider、模型、预算和环境变量名引用，默认禁止联网且从不存 API Key；`craft-workflow-evolution` 将多条脱敏执行观察提炼为最多两个设计轴的草案请求。草案经过独立评测、Signoff 和 Canary 后才可成为 `verified` Workflow，届时才进入 Capability 的可选集合。
 - **Trust Profile 与网页边界（v0.12.26）**：`TrustProfile` 将 Trial/Outcome/Evidence 汇总为按任务、项目、能力、模型、Host、effect 和数据范围限定的自主权建议；建议会过期、可撤销，且永远不等于授权。文件操作继续走 Action Gateway；网页 GET/HEAD 走无凭据、有界的 MCP 观察，浏览器点击、填表、提交只生成 Adapter Contract，由宿主插件执行并回传 Receipt。v0.12.26 增加 Generic Adapter SDK、跨平台 Command Adapter、OpenAPI 导入、Durable Runtime、Context Manifest、信任曲线、领域 Evaluator 和项目迁移契约。详见 [v0.12.26 Runtime](docs/technical/modules/v01226-runtime.md)。
+- **完整主插件组合（v0.12.27）**：默认 `craft` 不再被描述为只有编排核心：它通过固定 syscall 词表按需访问 Knowledge、Memory、Capability、Skill Quality 和 Workflow Evolution，因而不必把数百个工具 Schema 同时注入模型上下文。`craft-*` 子插件保留为单域独立入口，通常与完整插件二选一。详见 [v0.12.27 主插件组合](docs/technical/modules/v01227-primary-plugin-composition.md)。
 - Orchestration Trial 自动归档：锁定 Agent Profile 精确版本，记录 Dispatch、重路由、节点结果、成本和证据，并在终态自动生成 Outcome。
 - 版本化 Grader、多来源 Grade 和 Signoff Policy；模型判断不会被记录成程序证明。
 - 同评测集版本对比：在 Suite 精确版本、分区、Subject 类型和 Case 集合一致时，聚合比较 Workflow、Agent Profile 或 Harness Configuration 的质量、成本、耗时与失败类型。

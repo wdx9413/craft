@@ -16,6 +16,7 @@ assert.deepEqual(Object.keys(manifest.mcpServers), ["craft"]);
 const server = manifest.mcpServers.craft;
 assert.equal(server.command, "node");
 assert.equal(server.cwd, ".");
+assert.deepEqual(server.args, ["dist/plugin/craft-mcp.cjs", "--surface", "syscall"]);
 
 const pluginRoot = await mkdtemp(join(tmpdir(), "craft-plugin-smoke-"));
 let child: ReturnType<typeof spawn> | undefined;

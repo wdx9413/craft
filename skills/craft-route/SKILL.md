@@ -7,6 +7,14 @@ description: "Route substantial work through Craft's smallest safe MCP surface; 
 
 Use this lightweight entry point before choosing detailed Craft or third-party tools. It is a routing contract, not a replacement for the Craft service.
 
+The primary `craft` plugin is the complete Craft runtime: Knowledge, Memory,
+Capability discovery, Skill Quality, and Workflow Evolution are all available
+through its compact syscall surface. They are addressed on demand with
+`craft_describe` followed by a syscall verb and `(resource, operation)`; do not
+ask the user to install a sibling component merely to use one of those built-in
+capabilities. The sibling plugins are optional standalone projections for a
+Host that wants only one bounded domain surface.
+
 ## Decide first
 
 - For a short answer, simple rewrite, or one-step read with no durable value, answer directly and do not call Craft.
@@ -18,7 +26,7 @@ Use this lightweight entry point before choosing detailed Craft or third-party t
 ## Route, then narrow
 
 1. Read only the Capability or Workflow references selected by the route. Do not inspect an entire Skill, MCP, or expert catalog.
-2. Use the Core MCP for routing, bounded context, task continuity, evidence, and profile-bound tickets. A ticket is not permission to widen scope.
+2. Use the default Craft MCP for routing, bounded context, task continuity, evidence, profile-bound tickets, and any selected built-in Knowledge, Memory, Capability, Quality, or Workflow Evolution operation. First call `craft_describe` for an unfamiliar resource so its exact contract, effect, and approval rule are known. A ticket is not permission to widen scope.
 3. Record observed material progress with `craft_task_checkpoint`; register acceptance-relevant artifacts or evidence when the route requires it.
 4. Use the Full MCP only for a user-approved administrative action such as registering, approving, or changing an external capability source. It is an explicit upgrade, not a fallback for ordinary work.
 

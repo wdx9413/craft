@@ -1,6 +1,6 @@
 {
   "name": "craft-workflow-evolution",
-  "version": "0.12.26",
+  "version": "0.12.27",
   "description": "Standalone evidence-backed Workflow evolution for Agent execution records.",
   "author": { "name": "wdx9413", "url": "https://github.com/wdx9413" },
   "homepage": "https://github.com/wdx9413/craft",

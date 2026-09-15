@@ -66,7 +66,7 @@ test("Trace replay and retention policies are deterministic and bounded", async 
     assert.throws(() => f.service.traceRetentionPlan({ max_days: 0 }), /positive integer/);
     assert.throws(() => f.service.traceRetentionPlan({ max_events: 0 }), /positive integer/);
     assert.throws(() => f.service.traceQuery({ limit: 0 }), /between 1 and 10000/);
-    assert.equal(VERSION, "0.12.26");
+    assert.equal(VERSION, "0.12.27");
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 

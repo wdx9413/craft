@@ -1,12 +1,12 @@
 {
   "name": "craft",
-  "version": "0.12.26",
+  "version": "0.12.27",
   "description": "Capability discovery, durable tasks, Workflow and orchestration trials, multi-source grading, comparable evaluations, Signoff-gated Skill proposals, and safe Skill publishing.",
   "skills": "./skills/craft-route/",
   "mcpServers": {
     "craft": {
       "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/dist/plugin/craft-mcp.cjs"]
+      "args": ["${CLAUDE_PLUGIN_ROOT}/dist/plugin/craft-mcp.cjs", "--surface", "syscall"]
     }
   }
 }

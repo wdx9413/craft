@@ -1,7 +1,9 @@
 # Craft Codex Plugin
 
-This is the complete Craft composition plugin. It is the composition root: its bundled MCP already contains Core, Knowledge, Memory, Capability, Skill Quality, and Workflow Evolution surfaces. It intentionally contains only the manifest, the route-first Skill, icon assets, and the core/full bundled MCP entry points. In Codex the current app is the embedded execution host; it does not start a second Codex CLI.
+This is the complete Craft composition plugin. Install `craft` when the user wants the whole product: Core, Knowledge, Memory, Capability discovery, Skill Quality, and Workflow Evolution are all included in the same bundled runtime and share one Craft data store.
 
-The sibling plugins are optional projections of the same runtime, not dependencies that the complete plugin downloads or installs. Install `craft-knowledge`, `craft-memory`, `craft-capability`, `craft-skill-quality`, or `craft-workflow-evolution` instead when only one bounded component is needed.
+Its default MCP remains small on purpose: it exposes the route contract plus a fixed syscall vocabulary, rather than hundreds of schemas. `craft_describe` resolves an exact resource and operation, then the syscall verb reaches the corresponding built-in capability. This means that installing `craft` is sufficient to use memory, knowledge, capability discovery, evaluation, and Workflow Evolution; installing a sibling plugin is not a prerequisite.
+
+The sibling plugins are optional standalone projections of the same runtime. Install `craft-knowledge`, `craft-memory`, `craft-capability`, `craft-skill-quality`, or `craft-workflow-evolution` *instead of* the complete plugin when a Host needs only one bounded domain surface. Avoid enabling an overlapping sibling alongside `craft` unless the Host explicitly needs the duplicate direct tool surface.
 
 Run `pnpm run pack:plugin` from the repository root after building the MCP bundles. Desktop applications, host-adapter archives, source maps, and general CLI build output belong in GitHub Releases or build artifacts, never in this package.

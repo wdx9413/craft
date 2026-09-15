@@ -30,9 +30,9 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
-// node_modules/yaml/dist/nodes/identity.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/nodes/identity.js
 var require_identity = __commonJS({
-  "node_modules/yaml/dist/nodes/identity.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/nodes/identity.js"(exports2) {
     "use strict";
     var ALIAS = /* @__PURE__ */ Symbol.for("yaml.alias");
     var DOC = /* @__PURE__ */ Symbol.for("yaml.document");
@@ -87,9 +87,9 @@ var require_identity = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/visit.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/visit.js
 var require_visit = __commonJS({
-  "node_modules/yaml/dist/visit.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/visit.js"(exports2) {
     "use strict";
     var identity = require_identity();
     var BREAK = /* @__PURE__ */ Symbol("break visit");
@@ -245,9 +245,9 @@ var require_visit = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/doc/directives.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/doc/directives.js
 var require_directives = __commonJS({
-  "node_modules/yaml/dist/doc/directives.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/doc/directives.js"(exports2) {
     "use strict";
     var identity = require_identity();
     var visit = require_visit();
@@ -416,9 +416,9 @@ var require_directives = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/doc/anchors.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/doc/anchors.js
 var require_anchors = __commonJS({
-  "node_modules/yaml/dist/doc/anchors.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/doc/anchors.js"(exports2) {
     "use strict";
     var identity = require_identity();
     var visit = require_visit();
@@ -486,9 +486,9 @@ var require_anchors = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/doc/applyReviver.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/doc/applyReviver.js
 var require_applyReviver = __commonJS({
-  "node_modules/yaml/dist/doc/applyReviver.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/doc/applyReviver.js"(exports2) {
     "use strict";
     function applyReviver(reviver, obj2, key2, val) {
       if (val && typeof val === "object") {
@@ -536,9 +536,9 @@ var require_applyReviver = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/nodes/toJS.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/nodes/toJS.js
 var require_toJS = __commonJS({
-  "node_modules/yaml/dist/nodes/toJS.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/nodes/toJS.js"(exports2) {
     "use strict";
     var identity = require_identity();
     function toJS(value, arg, ctx) {
@@ -566,9 +566,9 @@ var require_toJS = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/nodes/Node.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/nodes/Node.js
 var require_Node = __commonJS({
-  "node_modules/yaml/dist/nodes/Node.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/nodes/Node.js"(exports2) {
     "use strict";
     var applyReviver = require_applyReviver();
     var identity = require_identity();
@@ -607,9 +607,9 @@ var require_Node = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/nodes/Alias.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/nodes/Alias.js
 var require_Alias = __commonJS({
-  "node_modules/yaml/dist/nodes/Alias.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/nodes/Alias.js"(exports2) {
     "use strict";
     var anchors = require_anchors();
     var visit = require_visit();
@@ -723,9 +723,9 @@ var require_Alias = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/nodes/Scalar.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/nodes/Scalar.js
 var require_Scalar = __commonJS({
-  "node_modules/yaml/dist/nodes/Scalar.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/nodes/Scalar.js"(exports2) {
     "use strict";
     var identity = require_identity();
     var Node = require_Node();
@@ -753,9 +753,9 @@ var require_Scalar = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/doc/createNode.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/doc/createNode.js
 var require_createNode = __commonJS({
-  "node_modules/yaml/dist/doc/createNode.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/doc/createNode.js"(exports2) {
     "use strict";
     var Alias = require_Alias();
     var identity = require_identity();
@@ -828,9 +828,9 @@ var require_createNode = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/nodes/Collection.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/nodes/Collection.js
 var require_Collection = __commonJS({
-  "node_modules/yaml/dist/nodes/Collection.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/nodes/Collection.js"(exports2) {
     "use strict";
     var createNode = require_createNode();
     var identity = require_identity();
@@ -971,9 +971,9 @@ var require_Collection = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/stringify/stringifyComment.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/stringify/stringifyComment.js
 var require_stringifyComment = __commonJS({
-  "node_modules/yaml/dist/stringify/stringifyComment.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/stringify/stringifyComment.js"(exports2) {
     "use strict";
     var stringifyComment = (str) => str.replace(/^(?!$)(?: $)?/gm, "#");
     function indentComment(comment, indent) {
@@ -988,9 +988,9 @@ var require_stringifyComment = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/stringify/foldFlowLines.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/stringify/foldFlowLines.js
 var require_foldFlowLines = __commonJS({
-  "node_modules/yaml/dist/stringify/foldFlowLines.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/stringify/foldFlowLines.js"(exports2) {
     "use strict";
     var FOLD_FLOW = "flow";
     var FOLD_BLOCK = "block";
@@ -1124,9 +1124,9 @@ ${indent}${text112.slice(fold + 1, end2)}`;
   }
 });
 
-// node_modules/yaml/dist/stringify/stringifyString.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/stringify/stringifyString.js
 var require_stringifyString = __commonJS({
-  "node_modules/yaml/dist/stringify/stringifyString.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/stringify/stringifyString.js"(exports2) {
     "use strict";
     var Scalar = require_Scalar();
     var foldFlowLines = require_foldFlowLines();
@@ -1407,9 +1407,9 @@ ${indent}`);
   }
 });
 
-// node_modules/yaml/dist/stringify/stringify.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/stringify/stringify.js
 var require_stringify = __commonJS({
-  "node_modules/yaml/dist/stringify/stringify.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/stringify/stringify.js"(exports2) {
     "use strict";
     var anchors = require_anchors();
     var identity = require_identity();
@@ -1531,9 +1531,9 @@ ${ctx.indent}${str}`;
   }
 });
 
-// node_modules/yaml/dist/stringify/stringifyPair.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/stringify/stringifyPair.js
 var require_stringifyPair = __commonJS({
-  "node_modules/yaml/dist/stringify/stringifyPair.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/stringify/stringifyPair.js"(exports2) {
     "use strict";
     var identity = require_identity();
     var Scalar = require_Scalar();
@@ -1664,9 +1664,9 @@ ${ctx.indent}`;
   }
 });
 
-// node_modules/yaml/dist/log.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/log.js
 var require_log = __commonJS({
-  "node_modules/yaml/dist/log.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/log.js"(exports2) {
     "use strict";
     var node_process = require("process");
     function debug(logLevel, ...messages) {
@@ -1686,9 +1686,9 @@ var require_log = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/schema/yaml-1.1/merge.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/yaml-1.1/merge.js
 var require_merge = __commonJS({
-  "node_modules/yaml/dist/schema/yaml-1.1/merge.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/yaml-1.1/merge.js"(exports2) {
     "use strict";
     var identity = require_identity();
     var Scalar = require_Scalar();
@@ -1746,9 +1746,9 @@ var require_merge = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/nodes/addPairToJSMap.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/nodes/addPairToJSMap.js
 var require_addPairToJSMap = __commonJS({
-  "node_modules/yaml/dist/nodes/addPairToJSMap.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/nodes/addPairToJSMap.js"(exports2) {
     "use strict";
     var log = require_log();
     var merge = require_merge();
@@ -1810,9 +1810,9 @@ var require_addPairToJSMap = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/nodes/Pair.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/nodes/Pair.js
 var require_Pair = __commonJS({
-  "node_modules/yaml/dist/nodes/Pair.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/nodes/Pair.js"(exports2) {
     "use strict";
     var createNode = require_createNode();
     var stringifyPair = require_stringifyPair();
@@ -1850,9 +1850,9 @@ var require_Pair = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/stringify/stringifyCollection.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/stringify/stringifyCollection.js
 var require_stringifyCollection = __commonJS({
-  "node_modules/yaml/dist/stringify/stringifyCollection.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/stringify/stringifyCollection.js"(exports2) {
     "use strict";
     var identity = require_identity();
     var stringify = require_stringify();
@@ -2001,9 +2001,9 @@ ${indent}${end}`;
   }
 });
 
-// node_modules/yaml/dist/nodes/YAMLMap.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/nodes/YAMLMap.js
 var require_YAMLMap = __commonJS({
-  "node_modules/yaml/dist/nodes/YAMLMap.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/nodes/YAMLMap.js"(exports2) {
     "use strict";
     var stringifyCollection = require_stringifyCollection();
     var addPairToJSMap = require_addPairToJSMap();
@@ -2145,9 +2145,9 @@ var require_YAMLMap = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/schema/common/map.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/common/map.js
 var require_map = __commonJS({
-  "node_modules/yaml/dist/schema/common/map.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/common/map.js"(exports2) {
     "use strict";
     var identity = require_identity();
     var YAMLMap = require_YAMLMap();
@@ -2167,9 +2167,9 @@ var require_map = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/nodes/YAMLSeq.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/nodes/YAMLSeq.js
 var require_YAMLSeq = __commonJS({
-  "node_modules/yaml/dist/nodes/YAMLSeq.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/nodes/YAMLSeq.js"(exports2) {
     "use strict";
     var createNode = require_createNode();
     var stringifyCollection = require_stringifyCollection();
@@ -2283,9 +2283,9 @@ var require_YAMLSeq = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/schema/common/seq.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/common/seq.js
 var require_seq = __commonJS({
-  "node_modules/yaml/dist/schema/common/seq.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/common/seq.js"(exports2) {
     "use strict";
     var identity = require_identity();
     var YAMLSeq = require_YAMLSeq();
@@ -2305,9 +2305,9 @@ var require_seq = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/schema/common/string.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/common/string.js
 var require_string = __commonJS({
-  "node_modules/yaml/dist/schema/common/string.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/common/string.js"(exports2) {
     "use strict";
     var stringifyString = require_stringifyString();
     var string = {
@@ -2324,9 +2324,9 @@ var require_string = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/schema/common/null.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/common/null.js
 var require_null = __commonJS({
-  "node_modules/yaml/dist/schema/common/null.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/common/null.js"(exports2) {
     "use strict";
     var Scalar = require_Scalar();
     var nullTag = {
@@ -2342,9 +2342,9 @@ var require_null = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/schema/core/bool.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/core/bool.js
 var require_bool = __commonJS({
-  "node_modules/yaml/dist/schema/core/bool.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/core/bool.js"(exports2) {
     "use strict";
     var Scalar = require_Scalar();
     var boolTag = {
@@ -2366,9 +2366,9 @@ var require_bool = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/stringify/stringifyNumber.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/stringify/stringifyNumber.js
 var require_stringifyNumber = __commonJS({
-  "node_modules/yaml/dist/stringify/stringifyNumber.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/stringify/stringifyNumber.js"(exports2) {
     "use strict";
     function stringifyNumber({ format: format2, minFractionDigits, tag, value }) {
       if (typeof value === "bigint")
@@ -2393,9 +2393,9 @@ var require_stringifyNumber = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/schema/core/float.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/core/float.js
 var require_float = __commonJS({
-  "node_modules/yaml/dist/schema/core/float.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/core/float.js"(exports2) {
     "use strict";
     var Scalar = require_Scalar();
     var stringifyNumber = require_stringifyNumber();
@@ -2439,9 +2439,9 @@ var require_float = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/schema/core/int.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/core/int.js
 var require_int = __commonJS({
-  "node_modules/yaml/dist/schema/core/int.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/core/int.js"(exports2) {
     "use strict";
     var stringifyNumber = require_stringifyNumber();
     var intIdentify = (value) => typeof value === "bigint" || Number.isInteger(value);
@@ -2484,9 +2484,9 @@ var require_int = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/schema/core/schema.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/core/schema.js
 var require_schema = __commonJS({
-  "node_modules/yaml/dist/schema/core/schema.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/core/schema.js"(exports2) {
     "use strict";
     var map = require_map();
     var _null = require_null();
@@ -2512,9 +2512,9 @@ var require_schema = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/schema/json/schema.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/json/schema.js
 var require_schema2 = __commonJS({
-  "node_modules/yaml/dist/schema/json/schema.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/json/schema.js"(exports2) {
     "use strict";
     var Scalar = require_Scalar();
     var map = require_map();
@@ -2579,9 +2579,9 @@ var require_schema2 = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/schema/yaml-1.1/binary.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/yaml-1.1/binary.js
 var require_binary = __commonJS({
-  "node_modules/yaml/dist/schema/yaml-1.1/binary.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/yaml-1.1/binary.js"(exports2) {
     "use strict";
     var node_buffer = require("buffer");
     var Scalar = require_Scalar();
@@ -2645,9 +2645,9 @@ var require_binary = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/schema/yaml-1.1/pairs.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/yaml-1.1/pairs.js
 var require_pairs = __commonJS({
-  "node_modules/yaml/dist/schema/yaml-1.1/pairs.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/yaml-1.1/pairs.js"(exports2) {
     "use strict";
     var identity = require_identity();
     var Pair = require_Pair();
@@ -2723,9 +2723,9 @@ ${cn.comment}` : item.comment;
   }
 });
 
-// node_modules/yaml/dist/schema/yaml-1.1/omap.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/yaml-1.1/omap.js
 var require_omap = __commonJS({
-  "node_modules/yaml/dist/schema/yaml-1.1/omap.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/yaml-1.1/omap.js"(exports2) {
     "use strict";
     var identity = require_identity();
     var toJS = require_toJS();
@@ -2801,9 +2801,9 @@ var require_omap = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/schema/yaml-1.1/bool.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/yaml-1.1/bool.js
 var require_bool2 = __commonJS({
-  "node_modules/yaml/dist/schema/yaml-1.1/bool.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/yaml-1.1/bool.js"(exports2) {
     "use strict";
     var Scalar = require_Scalar();
     function boolStringify({ value, source }, ctx) {
@@ -2833,9 +2833,9 @@ var require_bool2 = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/schema/yaml-1.1/float.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/yaml-1.1/float.js
 var require_float2 = __commonJS({
-  "node_modules/yaml/dist/schema/yaml-1.1/float.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/yaml-1.1/float.js"(exports2) {
     "use strict";
     var Scalar = require_Scalar();
     var stringifyNumber = require_stringifyNumber();
@@ -2882,9 +2882,9 @@ var require_float2 = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/schema/yaml-1.1/int.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/yaml-1.1/int.js
 var require_int2 = __commonJS({
-  "node_modules/yaml/dist/schema/yaml-1.1/int.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/yaml-1.1/int.js"(exports2) {
     "use strict";
     var stringifyNumber = require_stringifyNumber();
     var intIdentify = (value) => typeof value === "bigint" || Number.isInteger(value);
@@ -2961,9 +2961,9 @@ var require_int2 = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/schema/yaml-1.1/set.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/yaml-1.1/set.js
 var require_set = __commonJS({
-  "node_modules/yaml/dist/schema/yaml-1.1/set.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/yaml-1.1/set.js"(exports2) {
     "use strict";
     var identity = require_identity();
     var Pair = require_Pair();
@@ -3050,9 +3050,9 @@ var require_set = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/schema/yaml-1.1/timestamp.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/yaml-1.1/timestamp.js
 var require_timestamp = __commonJS({
-  "node_modules/yaml/dist/schema/yaml-1.1/timestamp.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/yaml-1.1/timestamp.js"(exports2) {
     "use strict";
     var stringifyNumber = require_stringifyNumber();
     function parseSexagesimal(str, asBigInt) {
@@ -3138,9 +3138,9 @@ var require_timestamp = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/schema/yaml-1.1/schema.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/yaml-1.1/schema.js
 var require_schema3 = __commonJS({
-  "node_modules/yaml/dist/schema/yaml-1.1/schema.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/yaml-1.1/schema.js"(exports2) {
     "use strict";
     var map = require_map();
     var _null = require_null();
@@ -3182,9 +3182,9 @@ var require_schema3 = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/schema/tags.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/tags.js
 var require_tags = __commonJS({
-  "node_modules/yaml/dist/schema/tags.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/tags.js"(exports2) {
     "use strict";
     var map = require_map();
     var _null = require_null();
@@ -3276,9 +3276,9 @@ var require_tags = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/schema/Schema.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/Schema.js
 var require_Schema = __commonJS({
-  "node_modules/yaml/dist/schema/Schema.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/schema/Schema.js"(exports2) {
     "use strict";
     var identity = require_identity();
     var map = require_map();
@@ -3308,9 +3308,9 @@ var require_Schema = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/stringify/stringifyDocument.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/stringify/stringifyDocument.js
 var require_stringifyDocument = __commonJS({
-  "node_modules/yaml/dist/stringify/stringifyDocument.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/stringify/stringifyDocument.js"(exports2) {
     "use strict";
     var identity = require_identity();
     var stringify = require_stringify();
@@ -3388,9 +3388,9 @@ var require_stringifyDocument = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/doc/Document.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/doc/Document.js
 var require_Document = __commonJS({
-  "node_modules/yaml/dist/doc/Document.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/doc/Document.js"(exports2) {
     "use strict";
     var Alias = require_Alias();
     var Collection = require_Collection();
@@ -3697,9 +3697,9 @@ var require_Document = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/errors.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/errors.js
 var require_errors = __commonJS({
-  "node_modules/yaml/dist/errors.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/errors.js"(exports2) {
     "use strict";
     var YAMLError = class extends Error {
       constructor(name, pos, code, message) {
@@ -3762,9 +3762,9 @@ ${pointer2}
   }
 });
 
-// node_modules/yaml/dist/compose/resolve-props.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/resolve-props.js
 var require_resolve_props = __commonJS({
-  "node_modules/yaml/dist/compose/resolve-props.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/resolve-props.js"(exports2) {
     "use strict";
     function resolveProps(tokens, { flow, indicator, next, offset, onError, parentIndent, startOnNewline }) {
       let spaceBefore = false;
@@ -3896,9 +3896,9 @@ var require_resolve_props = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/compose/util-contains-newline.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/util-contains-newline.js
 var require_util_contains_newline = __commonJS({
-  "node_modules/yaml/dist/compose/util-contains-newline.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/util-contains-newline.js"(exports2) {
     "use strict";
     function containsNewline(key2) {
       if (!key2)
@@ -3938,9 +3938,9 @@ var require_util_contains_newline = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/compose/util-flow-indent-check.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/util-flow-indent-check.js
 var require_util_flow_indent_check = __commonJS({
-  "node_modules/yaml/dist/compose/util-flow-indent-check.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/util-flow-indent-check.js"(exports2) {
     "use strict";
     var utilContainsNewline = require_util_contains_newline();
     function flowIndentCheck(indent, fc, onError) {
@@ -3956,9 +3956,9 @@ var require_util_flow_indent_check = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/compose/util-map-includes.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/util-map-includes.js
 var require_util_map_includes = __commonJS({
-  "node_modules/yaml/dist/compose/util-map-includes.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/util-map-includes.js"(exports2) {
     "use strict";
     var identity = require_identity();
     function mapIncludes(ctx, items2, search) {
@@ -3972,9 +3972,9 @@ var require_util_map_includes = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/compose/resolve-block-map.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/resolve-block-map.js
 var require_resolve_block_map = __commonJS({
-  "node_modules/yaml/dist/compose/resolve-block-map.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/resolve-block-map.js"(exports2) {
     "use strict";
     var Pair = require_Pair();
     var YAMLMap = require_YAMLMap();
@@ -4080,9 +4080,9 @@ var require_resolve_block_map = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/compose/resolve-block-seq.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/resolve-block-seq.js
 var require_resolve_block_seq = __commonJS({
-  "node_modules/yaml/dist/compose/resolve-block-seq.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/resolve-block-seq.js"(exports2) {
     "use strict";
     var YAMLSeq = require_YAMLSeq();
     var resolveProps = require_resolve_props();
@@ -4131,9 +4131,9 @@ var require_resolve_block_seq = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/compose/resolve-end.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/resolve-end.js
 var require_resolve_end = __commonJS({
-  "node_modules/yaml/dist/compose/resolve-end.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/resolve-end.js"(exports2) {
     "use strict";
     function resolveEnd(end, offset, reqSpace, onError) {
       let comment = "";
@@ -4174,9 +4174,9 @@ var require_resolve_end = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/compose/resolve-flow-collection.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/resolve-flow-collection.js
 var require_resolve_flow_collection = __commonJS({
-  "node_modules/yaml/dist/compose/resolve-flow-collection.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/resolve-flow-collection.js"(exports2) {
     "use strict";
     var identity = require_identity();
     var Pair = require_Pair();
@@ -4368,9 +4368,9 @@ var require_resolve_flow_collection = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/compose/compose-collection.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/compose-collection.js
 var require_compose_collection = __commonJS({
-  "node_modules/yaml/dist/compose/compose-collection.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/compose-collection.js"(exports2) {
     "use strict";
     var identity = require_identity();
     var Scalar = require_Scalar();
@@ -4433,9 +4433,9 @@ var require_compose_collection = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/compose/resolve-block-scalar.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/resolve-block-scalar.js
 var require_resolve_block_scalar = __commonJS({
-  "node_modules/yaml/dist/compose/resolve-block-scalar.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/resolve-block-scalar.js"(exports2) {
     "use strict";
     var Scalar = require_Scalar();
     function resolveBlockScalar(ctx, scalar2, onError) {
@@ -4616,9 +4616,9 @@ var require_resolve_block_scalar = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/compose/resolve-flow-scalar.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/resolve-flow-scalar.js
 var require_resolve_flow_scalar = __commonJS({
-  "node_modules/yaml/dist/compose/resolve-flow-scalar.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/resolve-flow-scalar.js"(exports2) {
     "use strict";
     var Scalar = require_Scalar();
     var resolveEnd = require_resolve_end();
@@ -4836,9 +4836,9 @@ var require_resolve_flow_scalar = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/compose/compose-scalar.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/compose-scalar.js
 var require_compose_scalar = __commonJS({
-  "node_modules/yaml/dist/compose/compose-scalar.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/compose-scalar.js"(exports2) {
     "use strict";
     var identity = require_identity();
     var Scalar = require_Scalar();
@@ -4917,9 +4917,9 @@ var require_compose_scalar = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/compose/util-empty-scalar-position.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/util-empty-scalar-position.js
 var require_util_empty_scalar_position = __commonJS({
-  "node_modules/yaml/dist/compose/util-empty-scalar-position.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/util-empty-scalar-position.js"(exports2) {
     "use strict";
     function emptyScalarPosition(offset, before, pos) {
       if (before) {
@@ -4947,9 +4947,9 @@ var require_util_empty_scalar_position = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/compose/compose-node.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/compose-node.js
 var require_compose_node = __commonJS({
-  "node_modules/yaml/dist/compose/compose-node.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/compose-node.js"(exports2) {
     "use strict";
     var Alias = require_Alias();
     var identity = require_identity();
@@ -5053,9 +5053,9 @@ var require_compose_node = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/compose/compose-doc.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/compose-doc.js
 var require_compose_doc = __commonJS({
-  "node_modules/yaml/dist/compose/compose-doc.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/compose-doc.js"(exports2) {
     "use strict";
     var Document = require_Document();
     var composeNode = require_compose_node();
@@ -5096,9 +5096,9 @@ var require_compose_doc = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/compose/composer.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/composer.js
 var require_composer = __commonJS({
-  "node_modules/yaml/dist/compose/composer.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/composer.js"(exports2) {
     "use strict";
     var node_process = require("process");
     var directives = require_directives();
@@ -5304,9 +5304,9 @@ ${end.comment}` : end.comment;
   }
 });
 
-// node_modules/yaml/dist/parse/cst-scalar.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/parse/cst-scalar.js
 var require_cst_scalar = __commonJS({
-  "node_modules/yaml/dist/parse/cst-scalar.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/parse/cst-scalar.js"(exports2) {
     "use strict";
     var resolveBlockScalar = require_resolve_block_scalar();
     var resolveFlowScalar = require_resolve_flow_scalar();
@@ -5489,9 +5489,9 @@ var require_cst_scalar = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/parse/cst-stringify.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/parse/cst-stringify.js
 var require_cst_stringify = __commonJS({
-  "node_modules/yaml/dist/parse/cst-stringify.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/parse/cst-stringify.js"(exports2) {
     "use strict";
     var stringify = (cst) => "type" in cst ? stringifyToken(cst) : stringifyItem(cst);
     function stringifyToken(token) {
@@ -5550,9 +5550,9 @@ var require_cst_stringify = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/parse/cst-visit.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/parse/cst-visit.js
 var require_cst_visit = __commonJS({
-  "node_modules/yaml/dist/parse/cst-visit.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/parse/cst-visit.js"(exports2) {
     "use strict";
     var BREAK = /* @__PURE__ */ Symbol("break visit");
     var SKIP = /* @__PURE__ */ Symbol("skip children");
@@ -5612,9 +5612,9 @@ var require_cst_visit = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/parse/cst.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/parse/cst.js
 var require_cst = __commonJS({
-  "node_modules/yaml/dist/parse/cst.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/parse/cst.js"(exports2) {
     "use strict";
     var cstScalar = require_cst_scalar();
     var cstStringify = require_cst_stringify();
@@ -5714,9 +5714,9 @@ var require_cst = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/parse/lexer.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/parse/lexer.js
 var require_lexer = __commonJS({
-  "node_modules/yaml/dist/parse/lexer.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/parse/lexer.js"(exports2) {
     "use strict";
     var cst = require_cst();
     function isEmpty(ch) {
@@ -6303,9 +6303,9 @@ var require_lexer = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/parse/line-counter.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/parse/line-counter.js
 var require_line_counter = __commonJS({
-  "node_modules/yaml/dist/parse/line-counter.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/parse/line-counter.js"(exports2) {
     "use strict";
     var LineCounter = class {
       constructor() {
@@ -6334,9 +6334,9 @@ var require_line_counter = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/parse/parser.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/parse/parser.js
 var require_parser = __commonJS({
-  "node_modules/yaml/dist/parse/parser.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/parse/parser.js"(exports2) {
     "use strict";
     var node_process = require("process");
     var cst = require_cst();
@@ -7208,9 +7208,9 @@ var require_parser = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/public-api.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/public-api.js
 var require_public_api = __commonJS({
-  "node_modules/yaml/dist/public-api.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/public-api.js"(exports2) {
     "use strict";
     var composer = require_composer();
     var Document = require_Document();
@@ -7305,9 +7305,9 @@ var require_public_api = __commonJS({
   }
 });
 
-// node_modules/yaml/dist/index.js
+// node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/index.js
 var require_dist = __commonJS({
-  "node_modules/yaml/dist/index.js"(exports2) {
+  "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/index.js"(exports2) {
     "use strict";
     var composer = require_composer();
     var Document = require_Document();
@@ -7360,11 +7360,11 @@ var require_dist = __commonJS({
 // src/mcp-http.ts
 var import_node_http = require("node:http");
 
-// src/service.ts
+// src/application/craft-service.ts
 var import_node_crypto115 = require("node:crypto");
-var import_node_fs16 = require("node:fs");
+var import_node_fs17 = require("node:fs");
 var import_promises17 = require("node:fs/promises");
-var import_node_path25 = require("node:path");
+var import_node_path26 = require("node:path");
 var import_node_url5 = require("node:url");
 
 // src/store.ts
@@ -7795,6 +7795,16 @@ var CraftStore = class {
         payload: JSON.parse(String(item.payload_json)),
         created_at: item.created_at
       };
+    });
+  }
+  /** Atomically remove a trace and its versioned records after archival. */
+  removeTraceRecords(traceId, eventIds, feedbackIds) {
+    return this.transaction((database) => {
+      let changes = Number(database.prepare("DELETE FROM records WHERE kind='trace' AND id=?").run(traceId).changes);
+      for (const id14 of eventIds) changes += Number(database.prepare("DELETE FROM records WHERE kind='trace_event' AND id=?").run(id14).changes);
+      for (const id14 of feedbackIds) changes += Number(database.prepare("DELETE FROM records WHERE kind='trace_feedback' AND id=?").run(id14).changes);
+      changes += Number(database.prepare("DELETE FROM events WHERE stream=?").run(`trace:${traceId}`).changes);
+      return changes;
     });
   }
   record(row) {
@@ -16004,6 +16014,8 @@ var import_node_crypto43 = require("node:crypto");
 
 // src/trace-kernel.ts
 var import_node_crypto42 = require("node:crypto");
+var import_node_fs13 = require("node:fs");
+var import_node_path18 = require("node:path");
 
 // src/runtime-truth.ts
 var import_node_crypto41 = require("node:crypto");
@@ -16276,7 +16288,7 @@ var TraceKernel = class {
   }
   retentionPlan(args) {
     const policyId = String(args.policy_id ?? "default");
-    const maxDays = Number(args.max_days ?? 30);
+    const maxDays = Number(args.max_days ?? 7);
     const maxEvents = Number(args.max_events ?? 1e5);
     if (!Number.isInteger(maxDays) || maxDays < 1) throw new Error("max_days must be a positive integer");
     if (!Number.isInteger(maxEvents) || maxEvents < 1) throw new Error("max_events must be a positive integer");
@@ -16286,7 +16298,40 @@ var TraceKernel = class {
       if (existing.identity_digest !== digest22(identity)) throw new Error("Trace policy idempotency conflict");
       return { policy: existing, idempotent: true };
     }
-    return { policy: this.store.create("trace_policy", policyId, { ...identity, identity_digest: digest22(identity), deletion_requires_review: true }), idempotent: false };
+    return { policy: this.store.create("trace_policy", policyId, { ...identity, identity_digest: digest22(identity), archive_before_delete: true, automatic_after_archive: true, deletion_requires_review: false }), idempotent: false };
+  }
+  /** Archive and remove only terminal traces older than the retention window. */
+  retentionSweep(args = {}) {
+    const now3 = args.now === void 0 ? (/* @__PURE__ */ new Date()).toISOString() : String(args.now);
+    if (Number.isNaN(Date.parse(now3))) throw new Error("now must be an ISO timestamp");
+    const maxDays = Number(args.max_days ?? 7);
+    const limit3 = Number(args.limit ?? 100);
+    if (!Number.isInteger(maxDays) || maxDays < 1) throw new Error("max_days must be a positive integer");
+    if (!Number.isInteger(limit3) || limit3 < 1 || limit3 > 1e4) throw new Error("limit must be an integer between 1 and 10000");
+    const cutoff = Date.parse(now3) - maxDays * 864e5;
+    const candidates = this.store.list("trace", Number.MAX_SAFE_INTEGER).filter((trace) => TERMINAL.has(String(trace.status))).filter((trace) => Date.parse(String(trace.last_event_at ?? trace.updated_at ?? trace.started_at)) < cutoff).slice(0, limit3);
+    const archives = [];
+    let deleted = 0;
+    const paths = craftPaths(this.store.paths.root);
+    const archiveDir = (0, import_node_path18.join)(paths.logsDir, "trace-archive");
+    (0, import_node_fs13.mkdirSync)(archiveDir, { recursive: true });
+    for (const trace of candidates) {
+      const result = this.get({ trace_id: trace.id });
+      const events = result.events;
+      const feedback = result.feedback;
+      const archiveDigest = digest22({ trace, events, feedback });
+      const archive = { schema: TRACE_SCHEMA_VERSION, trace_id: trace.id, archived_at: now3, cutoff: new Date(cutoff).toISOString(), trace, events, feedback, archive_digest: archiveDigest };
+      const path2 = (0, import_node_path18.join)(archiveDir, `${trace.id}.${String(trace.version)}.${archiveDigest.slice(7, 23)}.json`);
+      const temporary = `${path2}.${process.pid}.${(0, import_node_crypto42.randomUUID)()}.tmp`;
+      (0, import_node_fs13.writeFileSync)(temporary, `${JSON.stringify(archive, null, 2)}
+`, { encoding: "utf8", mode: 384 });
+      (0, import_node_fs13.renameSync)(temporary, path2);
+      if (process.platform !== "win32") (0, import_node_fs13.chmodSync)(path2, 384);
+      this.store.removeTraceRecords(String(trace.id), events.map((event) => String(event.id)), feedback.map((item) => String(item.id)));
+      archives.push(path2);
+      deleted += 1;
+    }
+    return { schema: TRACE_SCHEMA_VERSION, now: now3, max_days: maxDays, cutoff: new Date(cutoff).toISOString(), scanned: candidates.length, archived: archives.length, deleted, archives };
   }
   appendTrial(args) {
     const trialId = text39(args.trial_id, "trial_id");
@@ -16416,7 +16461,7 @@ var HostRunKernel = class {
 // src/internal-host-driver.ts
 var import_node_crypto44 = require("node:crypto");
 var import_promises12 = require("node:fs/promises");
-var import_node_path18 = require("node:path");
+var import_node_path19 = require("node:path");
 var import_node_url4 = require("node:url");
 var DEFAULT_INTERNAL_TOOLS = [
   { type: "function", function: { name: "capability_search", description: "Find a small set of verified capabilities without activating or executing them.", parameters: { type: "object", properties: { query: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 20 } }, required: ["query"] } } },
@@ -16611,9 +16656,9 @@ var InternalHostDriver = class {
       failure: failure === null ? null : redact6(failure),
       completed_at: (/* @__PURE__ */ new Date()).toISOString()
     };
-    const directory = (0, import_node_path18.join)(this.store.paths.artifactsDir, this.host);
+    const directory = (0, import_node_path19.join)(this.store.paths.artifactsDir, this.host);
     await (0, import_promises12.mkdir)(directory, { recursive: true });
-    const receiptPath = (0, import_node_path18.join)(directory, `${dispatch.id}.json`);
+    const receiptPath = (0, import_node_path19.join)(directory, `${dispatch.id}.json`);
     await (0, import_promises12.writeFile)(receiptPath, `${JSON.stringify(receiptPayload, null, 2)}
 `, { encoding: "utf8", mode: 384 });
     const receipt = this.store.create(
@@ -17097,7 +17142,7 @@ var GuidedWorkKernel = class {
 
 // src/execution-safety.ts
 var import_node_crypto48 = require("node:crypto");
-var import_node_path19 = require("node:path");
+var import_node_path20 = require("node:path");
 function text45(value, name) {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
   return value.trim();
@@ -17132,7 +17177,7 @@ var ExecutionSafetyKernel = class {
     if (!(/* @__PURE__ */ new Set(["read-only", "workspace-write"])).has(sandbox)) throw new Error("Safety preflight sandbox is unsupported");
     const profileId = text45(args.profile_id, "profile_id");
     const profileVersion = integer15(args.profile_version, "profile_version", 1, Number.MAX_SAFE_INTEGER);
-    const workspace = (0, import_node_path19.resolve)(text45(args.workspace, "workspace"));
+    const workspace = (0, import_node_path20.resolve)(text45(args.workspace, "workspace"));
     const resources2 = { timeout_ms: integer15(args.timeout_ms, "timeout_ms", 1e3, 36e5), output_limit: integer15(args.output_limit, "output_limit", 4096, 16777216) };
     resources2.max_turns = args.max_turns !== void 0 ? integer15(args.max_turns, "max_turns", 1, 100) : null;
     resources2.max_budget_usd = args.max_budget_usd !== void 0 ? money(Number(args.max_budget_usd)) : null;
@@ -17178,7 +17223,7 @@ var ExecutionSafetyKernel = class {
 // src/local-candidate-import.ts
 var import_node_crypto49 = require("node:crypto");
 var import_promises13 = require("node:fs/promises");
-var import_node_path20 = require("node:path");
+var import_node_path21 = require("node:path");
 function text46(value, name) {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
   return value.trim();
@@ -17195,10 +17240,10 @@ var LocalCandidateImportKernel = class {
     const packageRecord = this.store.get("wiki_candidate_publication_package", text46(args.package_id, "package_id"));
     if (packageRecord.status !== "prepared" || packageRecord.manual_import_required !== true || packageRecord.execution_authority !== false) throw new Error("Only a prepared non-executable manual package can be imported");
     if (args.confirmed !== true) throw new Error("Local package import requires explicit confirmed: true");
-    const root = (0, import_node_path20.resolve)(text46(args.target_root, "target_root"));
+    const root = (0, import_node_path21.resolve)(text46(args.target_root, "target_root"));
     const requested = text46(args.relative_path, "relative_path");
-    const target = (0, import_node_path20.resolve)(root, requested);
-    const pathRelative = (0, import_node_path20.relative)(root, target);
+    const target = (0, import_node_path21.resolve)(root, requested);
+    const pathRelative = (0, import_node_path21.relative)(root, target);
     if (!pathRelative || pathRelative.startsWith("..") || pathRelative.includes(":") || !pathRelative.endsWith(".md")) throw new Error("Local package import path must be a descendant Markdown file");
     const content = String(packageRecord.content);
     const importId = String(args.import_id ?? `wiki_candidate_local_import_${(0, import_node_crypto49.randomUUID)().replaceAll("-", "")}`);
@@ -17214,7 +17259,7 @@ var LocalCandidateImportKernel = class {
     } catch (error) {
       if (!(error instanceof Error) || error.code !== "ENOENT") throw error;
     }
-    await (0, import_promises13.mkdir)((0, import_node_path20.resolve)(root, pathRelative, ".."), { recursive: true });
+    await (0, import_promises13.mkdir)((0, import_node_path21.resolve)(root, pathRelative, ".."), { recursive: true });
     await (0, import_promises13.writeFile)(target, content, { encoding: "utf8", flag: "wx", mode: 384 });
     const imported = this.store.create("wiki_candidate_local_import", importId, { ...identity, identity_digest: digest28(JSON.stringify(identity)), target_uri: target, enabled: false, execution_authority: false, status: "imported" });
     return { import: imported, idempotent: false };
@@ -17401,7 +17446,7 @@ var DeliveryEvaluationKernel = class {
 
 // src/platform-execution.ts
 var import_node_crypto53 = require("node:crypto");
-var import_node_fs13 = require("node:fs");
+var import_node_fs14 = require("node:fs");
 function text50(value, name) {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
   return value.trim();
@@ -17478,7 +17523,7 @@ var PlatformExecutionKernel = class {
   probe(args) {
     const platform2 = args.platform === void 0 ? process.platform : text50(args.platform, "platform");
     if (platform2 !== process.platform) throw new Error("Platform probe must target the current local platform");
-    const observed = { platform: platform2, node_version: process.version, sandbox_exec_available: (0, import_node_fs13.existsSync)("/usr/bin/sandbox-exec"), verified: false, note: "Probe is health telemetry only and never verifies an execution boundary." };
+    const observed = { platform: platform2, node_version: process.version, sandbox_exec_available: (0, import_node_fs14.existsSync)("/usr/bin/sandbox-exec"), verified: false, note: "Probe is health telemetry only and never verifies an execution boundary." };
     const probeId = String(args.probe_id ?? `platform_execution_probe_${platform2}`);
     const existing = this.store.find("platform_execution_probe", probeId);
     const probeDigest = digest32(observed);
@@ -17545,7 +17590,7 @@ var DeliveryLoopKernel = class {
 
 // src/task-control.ts
 var import_node_crypto55 = require("node:crypto");
-var import_node_path21 = require("node:path");
+var import_node_path22 = require("node:path");
 var EFFECTS5 = /* @__PURE__ */ new Set(["read_only", "local_write", "external_write"]);
 var HANDOFF_REASONS = /* @__PURE__ */ new Set(["operator_handoff", "approval_wait", "environment_block", "user_pause", "recovery"]);
 function text52(value, name) {
@@ -17598,7 +17643,7 @@ var TaskControlKernel = class {
   save(args) {
     const task = this.store.get("task", text52(args.task_id, "task_id"));
     const allowedEffects = values(args.allowed_effects);
-    const workspace = (0, import_node_path21.resolve)(text52(args.workspace, "workspace"));
+    const workspace = (0, import_node_path22.resolve)(text52(args.workspace, "workspace"));
     const profile = ref(this.store, "activation_profile", args.activation_profile_id, args.activation_profile_version);
     const budget = ref(this.store, "budget_account", args.budget_account_id, args.budget_account_version);
     if (profile && profile.task_id !== task.id) throw new Error("Activation profile does not match task");
@@ -17625,7 +17670,7 @@ var TaskControlKernel = class {
     const contract = this.store.get("task_control_contract", text52(args.contract_id, "contract_id"));
     const launch = this.store.get("work_launch", text52(args.launch_id, "launch_id"));
     if (contract.status !== "active" || launch.task_id !== contract.task_id) throw new Error("Work Launch does not match active task control contract");
-    if ((0, import_node_path21.resolve)(String(launch.workspace)) !== contract.workspace) throw new Error("Work Launch workspace does not match task control contract");
+    if ((0, import_node_path22.resolve)(String(launch.workspace)) !== contract.workspace) throw new Error("Work Launch workspace does not match task control contract");
     if (!contract.allowed_effects.includes(launchEffect(launch))) throw new Error("Work Launch effect is not allowed by task control contract");
     if (contract.acceptance_required === true && !launch.acceptance_plan_id) throw new Error("Task control contract requires an acceptance plan");
     if (contract.launch_id !== null) {
@@ -17974,8 +18019,8 @@ function terms(value) {
 
 // src/state-workspace.ts
 var import_node_crypto58 = require("node:crypto");
-var import_node_fs14 = require("node:fs");
-var import_node_path22 = require("node:path");
+var import_node_fs15 = require("node:fs");
+var import_node_path23 = require("node:path");
 function text55(value, name) {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
   return value.trim();
@@ -17984,16 +18029,16 @@ function digest37(value) {
   return `sha256:${(0, import_node_crypto58.createHash)("sha256").update(JSON.stringify(value)).digest("hex")}`;
 }
 function fileDigest(path2) {
-  return `sha256:${(0, import_node_crypto58.createHash)("sha256").update((0, import_node_fs14.readFileSync)(path2)).digest("hex")}`;
+  return `sha256:${(0, import_node_crypto58.createHash)("sha256").update((0, import_node_fs15.readFileSync)(path2)).digest("hex")}`;
 }
 function relativePath2(value, name) {
   const item = text55(value, name).replaceAll("\\", "/");
-  if ((0, import_node_path22.isAbsolute)(item) || item.split("/").includes("..")) throw new Error(`${name} must be relative to the workspace`);
+  if ((0, import_node_path23.isAbsolute)(item) || item.split("/").includes("..")) throw new Error(`${name} must be relative to the workspace`);
   return item.replace(/^\.\//, "") || ".";
 }
 function nested2(root, path2) {
-  const target = (0, import_node_path22.resolve)(root, path2);
-  if ((0, import_node_path22.relative)(root, target).startsWith("..")) throw new Error("workspace state path escapes root");
+  const target = (0, import_node_path23.resolve)(root, path2);
+  if ((0, import_node_path23.relative)(root, target).startsWith("..")) throw new Error("workspace state path escapes root");
   return target;
 }
 function kind(stat3, path2) {
@@ -18003,11 +18048,11 @@ function kind(stat3, path2) {
 }
 function files3(root, path2) {
   const target = nested2(root, path2);
-  if (!(0, import_node_fs14.existsSync)(target)) return [];
-  const stat3 = (0, import_node_fs14.lstatSync)(target);
+  if (!(0, import_node_fs15.existsSync)(target)) return [];
+  const stat3 = (0, import_node_fs15.lstatSync)(target);
   if (stat3.isSymbolicLink()) throw new Error(`state adapters do not follow symbolic links: ${path2}`);
   if (kind(stat3, path2) === "file") return [{ path: path2, digest: fileDigest(target), size_bytes: stat3.size }];
-  return (0, import_node_fs14.readdirSync)(target, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name)).flatMap((entry2) => files3(root, (0, import_node_path22.join)(path2, entry2.name).replaceAll("\\", "/")));
+  return (0, import_node_fs15.readdirSync)(target, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name)).flatMap((entry2) => files3(root, (0, import_node_path23.join)(path2, entry2.name).replaceAll("\\", "/")));
 }
 var StateWorkspaceKernel = class {
   store;
@@ -18232,8 +18277,8 @@ var EvalCampaignKernel = class {
 
 // src/project-knowledge.ts
 var import_node_crypto61 = require("node:crypto");
-var import_node_fs15 = require("node:fs");
-var import_node_path23 = require("node:path");
+var import_node_fs16 = require("node:fs");
+var import_node_path24 = require("node:path");
 function text58(value, name) {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
   return value.trim();
@@ -18245,8 +18290,8 @@ function recordDigest2(value) {
   return `sha256:${(0, import_node_crypto61.createHash)("sha256").update(JSON.stringify(value)).digest("hex")}`;
 }
 function safeChild(root, path2) {
-  const target = (0, import_node_path23.resolve)(root, path2);
-  if ((0, import_node_path23.relative)(root, target).startsWith("..")) throw new Error("Project Knowledge path escapes the trusted project root");
+  const target = (0, import_node_path24.resolve)(root, path2);
+  if ((0, import_node_path24.relative)(root, target).startsWith("..")) throw new Error("Project Knowledge path escapes the trusted project root");
   return target;
 }
 function noSecret2(value) {
@@ -18259,15 +18304,15 @@ var ProjectKnowledgeKernel = class {
   }
   discover(args) {
     if (args.trusted !== true) throw new Error("Project Knowledge discovery requires trusted=true");
-    const projectRoot = (0, import_node_path23.resolve)(text58(args.project_root, "project_root"));
+    const projectRoot = (0, import_node_path24.resolve)(text58(args.project_root, "project_root"));
     const memoriesRoot = safeChild(projectRoot, ".serena/memories");
-    const children = (0, import_node_fs15.existsSync)(memoriesRoot) ? (0, import_node_fs15.readdirSync)(memoriesRoot, { withFileTypes: true }) : [];
+    const children = (0, import_node_fs16.existsSync)(memoriesRoot) ? (0, import_node_fs16.readdirSync)(memoriesRoot, { withFileTypes: true }) : [];
     if (children.some((entry2) => entry2.isSymbolicLink())) throw new Error("Project Knowledge does not follow symbolic links");
     const entries2 = children.filter((entry2) => entry2.isFile() && entry2.name.endsWith(".md")).sort((a, b) => a.name.localeCompare(b.name)).map((entry2) => {
       const path2 = safeChild(memoriesRoot, entry2.name);
-      const stat3 = (0, import_node_fs15.lstatSync)(path2);
+      const stat3 = (0, import_node_fs16.lstatSync)(path2);
       if (stat3.isSymbolicLink()) throw new Error("Project Knowledge does not follow symbolic links");
-      const content = (0, import_node_fs15.readFileSync)(path2, "utf8");
+      const content = (0, import_node_fs16.readFileSync)(path2, "utf8");
       return { memory_id: `serena:${entry2.name.slice(0, -3)}`, path: `.serena/memories/${entry2.name}`, name: entry2.name.slice(0, -3), digest: digest40(content), size_bytes: stat3.size };
     });
     const identity = { project_root: projectRoot, provider: "serena_project_memory", descriptors: entries2 };
@@ -18293,9 +18338,9 @@ var ProjectKnowledgeKernel = class {
       const entry2 = descriptors.get(memoryId);
       if (!entry2) throw new Error("Project Knowledge memory is not in this discovery");
       const path2 = safeChild(root, entry2.path);
-      const stat3 = (0, import_node_fs15.lstatSync)(path2);
+      const stat3 = (0, import_node_fs16.lstatSync)(path2);
       if (stat3.isSymbolicLink()) throw new Error("Project Knowledge does not follow symbolic links");
-      const content = (0, import_node_fs15.readFileSync)(path2, "utf8");
+      const content = (0, import_node_fs16.readFileSync)(path2, "utf8");
       if (digest40(content) !== entry2.digest) throw new Error("Project Knowledge memory changed since discovery");
       noSecret2(content);
       used += content.length;
@@ -22078,7 +22123,7 @@ var TraceExplorerKernel = class {
 // src/v01213-runtime.ts
 var import_node_crypto96 = require("node:crypto");
 var import_promises15 = require("node:fs/promises");
-var import_node_path24 = require("node:path");
+var import_node_path25 = require("node:path");
 function text93(value, name) {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
   return value.trim();
@@ -22129,20 +22174,20 @@ var ActionGatewayKernel = class {
     if (action.status !== "prepared") throw new Error("Action is not executable");
     const effect = String(action.effect);
     if (effect !== "read_only" && args.approved !== true) throw new Error("Write actions require explicit approval");
-    const workspace = (0, import_node_path24.resolve)(text93(action.workspace, "workspace"));
+    const workspace = (0, import_node_path25.resolve)(text93(action.workspace, "workspace"));
     const operation = String(action.operation);
     const relativePath3 = text93(args.relative_path ?? "", "relative_path");
-    if ((0, import_node_path24.isAbsolute)(relativePath3) || (0, import_node_path24.relative)(workspace, (0, import_node_path24.resolve)(workspace, relativePath3)).startsWith("..")) throw new Error("Action path escapes workspace");
+    if ((0, import_node_path25.isAbsolute)(relativePath3) || (0, import_node_path25.relative)(workspace, (0, import_node_path25.resolve)(workspace, relativePath3)).startsWith("..")) throw new Error("Action path escapes workspace");
     if (operation === "workspace_read") {
-      const content = await (0, import_promises15.readFile)((0, import_node_path24.resolve)(workspace, relativePath3), "utf8");
+      const content = await (0, import_promises15.readFile)((0, import_node_path25.resolve)(workspace, relativePath3), "utf8");
       const result = { operation, path: relativePath3, content, result_digest: digest73(content) };
       return this.finish(action, result);
     }
     if (operation === "workspace_write") {
       if (effect !== "local_write") throw new Error("workspace_write requires local_write effect");
       const content = text93(args.content, "content");
-      const target = (0, import_node_path24.resolve)(workspace, relativePath3);
-      await (0, import_promises15.mkdir)((0, import_node_path24.resolve)(target, ".."), { recursive: true });
+      const target = (0, import_node_path25.resolve)(workspace, relativePath3);
+      await (0, import_promises15.mkdir)((0, import_node_path25.resolve)(target, ".."), { recursive: true });
       await (0, import_promises15.writeFile)(target, content, "utf8");
       return this.finish(action, { operation, path: relativePath3, bytes: Buffer.byteLength(content), result_digest: digest73(content) });
     }
@@ -24776,6 +24821,102 @@ var WebOperationKernel = class {
   }
 };
 
+// src/application/coordinators/work-coordinator.ts
+var WorkCoordinator = class {
+  store;
+  taskControl;
+  taskRuns;
+  verifiedWorkLoops;
+  workDelivery;
+  deliveryLoop;
+  workSessions;
+  constructor(store, taskControl, taskRuns, verifiedWorkLoops, workDelivery, deliveryLoop, workSessions) {
+    this.store = store;
+    this.taskControl = taskControl;
+    this.taskRuns = taskRuns;
+    this.verifiedWorkLoops = verifiedWorkLoops;
+    this.workDelivery = workDelivery;
+    this.deliveryLoop = deliveryLoop;
+    this.workSessions = workSessions;
+  }
+};
+
+// src/application/coordinators/runtime-coordinator.ts
+var RuntimeCoordinator = class {
+  store;
+  actionGateway;
+  durableWorker;
+  providerRouter;
+  runtimeTruth;
+  runtimeAssurance;
+  autonomousRuntime;
+  localRuntimeService;
+  constructor(store, actionGateway, durableWorker, providerRouter, runtimeTruth, runtimeAssurance, autonomousRuntime, localRuntimeService) {
+    this.store = store;
+    this.actionGateway = actionGateway;
+    this.durableWorker = durableWorker;
+    this.providerRouter = providerRouter;
+    this.runtimeTruth = runtimeTruth;
+    this.runtimeAssurance = runtimeAssurance;
+    this.autonomousRuntime = autonomousRuntime;
+    this.localRuntimeService = localRuntimeService;
+  }
+};
+
+// src/application/coordinators/evaluation-coordinator.ts
+var EvaluationCoordinator = class {
+  store;
+  evalCampaigns;
+  evaluationOperations;
+  acceptanceGates;
+  domainEvaluators;
+  evaluationModelProfiles;
+  taskBenchmarks;
+  campaignRunners;
+  feedbackLearning;
+  costLedger;
+  providerRouter;
+  constructor(store, evalCampaigns, evaluationOperations, acceptanceGates, domainEvaluators, evaluationModelProfiles, taskBenchmarks, campaignRunners, feedbackLearning, costLedger, providerRouter) {
+    this.store = store;
+    this.evalCampaigns = evalCampaigns;
+    this.evaluationOperations = evaluationOperations;
+    this.acceptanceGates = acceptanceGates;
+    this.domainEvaluators = domainEvaluators;
+    this.evaluationModelProfiles = evaluationModelProfiles;
+    this.taskBenchmarks = taskBenchmarks;
+    this.campaignRunners = campaignRunners;
+    this.feedbackLearning = feedbackLearning;
+    this.costLedger = costLedger;
+    this.providerRouter = providerRouter;
+  }
+};
+
+// src/application/coordinators/workspace-coordinator.ts
+var WorkspaceCoordinator = class {
+  store;
+  workspace;
+  transaction;
+  workbench;
+  stateWorkspace;
+  workspaceObserver;
+  changeSets;
+  projectBrain;
+  lineage;
+  hydration;
+  constructor(store, workspace, transaction, workbench, stateWorkspace, workspaceObserver, changeSets, projectBrain, lineage, hydration) {
+    this.store = store;
+    this.workspace = workspace;
+    this.transaction = transaction;
+    this.workbench = workbench;
+    this.stateWorkspace = stateWorkspace;
+    this.workspaceObserver = workspaceObserver;
+    this.changeSets = changeSets;
+    this.projectBrain = projectBrain;
+    this.lineage = lineage;
+    this.hydration = hydration;
+  }
+};
+
 // src/service-foundation.ts
 var ServiceFoundation = class {
   store;
@@ -24906,6 +25047,11 @@ var ServiceFoundation = class {
   a2aProtocol;
   trustProfiles;
   webOperations;
+  /** Explicit application contexts; kernels remain the single behavior owners. */
+  workCoordinator;
+  runtimeCoordinator;
+  evaluationCoordinator;
+  workspaceCoordinator;
   constructor(store, semanticProvider, isolatedAdapter = new LocalIsolatedAdapter(), dockerSandbox = new DockerSandboxAdapter(), egressBroker = new TrustedEgressBroker(), hostOwnerId, hostProfiles, modelProviders, modelTransport) {
     this.store = store;
     this.catalog = new Catalog(store, semanticProvider);
@@ -25042,6 +25188,50 @@ var ServiceFoundation = class {
     this.a2aProtocol = new A2AProtocolKernel();
     this.trustProfiles = new TrustProfileKernel(store);
     this.webOperations = new WebOperationKernel(store);
+    this.workCoordinator = new WorkCoordinator(
+      store,
+      this.taskControl,
+      this.taskRuns,
+      this.verifiedWorkLoops,
+      this.workDelivery,
+      this.deliveryLoop,
+      this.workSessions
+    );
+    this.runtimeCoordinator = new RuntimeCoordinator(
+      store,
+      this.actionGateway,
+      this.durableWorker,
+      this.providerRouter,
+      this.runtimeTruth,
+      this.runtimeAssurance,
+      this.autonomousRuntime,
+      this.localRuntimeService
+    );
+    this.evaluationCoordinator = new EvaluationCoordinator(
+      store,
+      this.evalCampaigns,
+      this.evaluationOperations,
+      this.acceptanceGates,
+      this.domainEvaluators,
+      this.evaluationModelProfiles,
+      this.taskBenchmarks,
+      this.campaignRunners,
+      this.feedbackLearning,
+      this.costLedger,
+      this.providerRouter
+    );
+    this.workspaceCoordinator = new WorkspaceCoordinator(
+      store,
+      this.workspace,
+      this.transaction,
+      this.workbench,
+      this.stateWorkspace,
+      this.workspaceObserver,
+      this.changeSets,
+      this.projectBrain,
+      this.lineage,
+      this.hydration
+    );
     this.hostRuns = new HostRunKernel(
       store,
       [...this.hostDrivers.values()],
@@ -25351,8 +25541,248 @@ async function importOpenApiDocument(runtime, source) {
   return runtime.adapterRegister({ adapter_id: String(document2.info && typeof document2.info === "object" && !Array.isArray(document2.info) && document2.info.title ? `openapi.${String(document2.info.title).toLowerCase().replaceAll(/[^a-z0-9]+/g, "-")}` : `openapi.${digest91(document2).slice(7, 19)}`), version: "1.0.0", kind: "openapi", platforms: ["any"], entry: "openapi", transport: "https", capabilities: operations2.map((operation) => String(operation.operation_id)), effects: [...new Set(operations2.map((operation) => String(operation.effect)))], metadata: { operations: operations2, openapi_version: document2.openapi ?? document2.swagger ?? "unknown" } });
 }
 
-// src/service.ts
-var VERSION = "0.12.26";
+// src/application/use-cases/adapter-runtime.ts
+function installAdapterRuntimeMethods(serviceClass) {
+  serviceClass.prototype.adapterManifestSave = function(args) {
+    return new V01226Runtime(this.store).adapterRegister(args);
+  };
+  serviceClass.prototype.adapterManifestGet = function(args) {
+    return { manifest: new V01226Runtime(this.store).adapterGet(String(args.adapter_id)) };
+  };
+  serviceClass.prototype.adapterManifestList = function(args = {}) {
+    return new V01226Runtime(this.store).adapterList(Number(args.limit ?? 50));
+  };
+  serviceClass.prototype.adapterHealth = function(args) {
+    return new V01226Runtime(this.store).adapterHealth(String(args.adapter_id));
+  };
+  serviceClass.prototype.adapterConformance = function(args) {
+    return new V01226Runtime(this.store).adapterConformance(String(args.adapter_id));
+  };
+  serviceClass.prototype.adapterQuarantine = function(args) {
+    return new V01226Runtime(this.store).adapterQuarantine(String(args.adapter_id), String(args.reason));
+  };
+  serviceClass.prototype.adapterRollback = function(args) {
+    return new V01226Runtime(this.store).adapterRollback(String(args.adapter_id));
+  };
+  serviceClass.prototype.adapterInstall = async function(args) {
+    return new V01226Runtime(this.store).adapterInstall(String(args.manifest_path), args.integrity === void 0 ? void 0 : String(args.integrity));
+  };
+  serviceClass.prototype.commandPlan = function(args) {
+    return new V01226Runtime(this.store).commandPlan(args);
+  };
+  serviceClass.prototype.commandRun = async function(args) {
+    return new V01226Runtime(this.store).commandRun(args);
+  };
+  serviceClass.prototype.commandObserve = function(args) {
+    return { run: new V01226Runtime(this.store).commandObserve(String(args.run_id)) };
+  };
+  serviceClass.prototype.commandCancel = function(args) {
+    return new V01226Runtime(this.store).commandCancel(String(args.run_id));
+  };
+  serviceClass.prototype.commandRetry = async function(args) {
+    return new V01226Runtime(this.store).commandRetry(String(args.run_id));
+  };
+  serviceClass.prototype.contextManifestV01226Save = function(args) {
+    return new V01226Runtime(this.store).contextManifestSave(args);
+  };
+  serviceClass.prototype.capabilityProjection = function(args) {
+    return new V01226Runtime(this.store).capabilityProject({
+      candidates: Array.isArray(args.candidates) ? args.candidates : [],
+      required: Array.isArray(args.required) ? args.required : [],
+      token_budget: args.token_budget === void 0 ? void 0 : Number(args.token_budget)
+    });
+  };
+  serviceClass.prototype.durableRunStart = function(args) {
+    return new V01226Runtime(this.store).durableStart(args);
+  };
+  serviceClass.prototype.durableRunTick = function(args = {}) {
+    return new V01226Runtime(this.store).durableTick(String(args.owner ?? "local"), Number(args.lease_seconds ?? 30));
+  };
+  serviceClass.prototype.durableRunComplete = function(args) {
+    return new V01226Runtime(this.store).durableComplete(String(args.run_id), String(args.status), args.result);
+  };
+  serviceClass.prototype.durableRunRecover = function(args = {}) {
+    return new V01226Runtime(this.store).durableRecover(args.owner === void 0 ? void 0 : String(args.owner));
+  };
+  serviceClass.prototype.trustCurveRecord = function(args) {
+    return new V01226Runtime(this.store).trustRecord({ scope: String(args.scope), passed: Number(args.passed), failed: Number(args.failed), evidence_refs: Array.isArray(args.evidence_refs) ? args.evidence_refs : [] });
+  };
+  serviceClass.prototype.modelRouteV01226 = function(args) {
+    return new V01226Runtime(this.store).modelRoute({ candidates: Array.isArray(args.candidates) ? args.candidates : [], objective: args.objective, budget: args.budget === void 0 ? void 0 : Number(args.budget) });
+  };
+  serviceClass.prototype.deliveryGateV01226 = function(args) {
+    return new V01226Runtime(this.store).deliveryGate({ artifacts: Array.isArray(args.artifacts) ? args.artifacts : [], evidence: Array.isArray(args.evidence) ? args.evidence : [], required_artifacts: Array.isArray(args.required_artifacts) ? args.required_artifacts : [], required_evidence: Array.isArray(args.required_evidence) ? args.required_evidence : [] });
+  };
+  serviceClass.prototype.taskHandoffManifest = function(args) {
+    return new V01226Runtime(this.store).handoff(args);
+  };
+  serviceClass.prototype.domainEvaluatorRun = function(args) {
+    return new V01226Runtime(this.store).evaluatorRun({ evaluator_id: String(args.evaluator_id), observations: args.observations });
+  };
+  serviceClass.prototype.openApiImport = async function(args) {
+    return importOpenApiDocument(new V01226Runtime(this.store), args.document);
+  };
+}
+
+// src/application/use-cases/knowledge-memory.ts
+function installKnowledgeMemoryMethods(serviceClass) {
+  serviceClass.prototype.knowledgeMemoryInstallBuiltins = function() {
+    return this.knowledgeMemory.installBuiltins();
+  };
+  serviceClass.prototype.knowledgeSourceRegister = function(args) {
+    return this.knowledgeMemory.sourceRegister(args);
+  };
+  serviceClass.prototype.knowledgeSourceList = function(args) {
+    return this.knowledgeMemory.sourceList(args);
+  };
+  serviceClass.prototype.knowledgeSourceTransition = function(args) {
+    return this.knowledgeMemory.sourceTransition(args);
+  };
+  serviceClass.prototype.memoryLedgerRemember = function(args) {
+    return this.knowledgeMemory.remember(args);
+  };
+  serviceClass.prototype.memoryLedgerTransition = function(args) {
+    return this.knowledgeMemory.transition(args);
+  };
+  serviceClass.prototype.memoryLedgerCompatBind = function(args) {
+    return this.knowledgeMemory.compatBind(args);
+  };
+  serviceClass.prototype.contextResolutionResolve = function(args) {
+    return this.knowledgeMemory.resolve(args);
+  };
+  serviceClass.prototype.contextResolutionGet = function(args) {
+    return this.knowledgeMemory.receiptGet(args);
+  };
+  serviceClass.prototype.retrievalAdapterConfigure = function(args) {
+    return this.knowledgeMemory.retrievalConfigure(args);
+  };
+  serviceClass.prototype.retrievalAdapterEvaluate = function(args) {
+    return this.knowledgeMemory.retrievalEvaluate(args);
+  };
+}
+
+// src/application/use-cases/trace.ts
+function installTraceMethods(serviceClass) {
+  serviceClass.prototype.traceStart = function(args) {
+    return this.trace.start(args);
+  };
+  serviceClass.prototype.traceAppend = function(args) {
+    return this.trace.append(args);
+  };
+  serviceClass.prototype.traceObserve = function(args) {
+    return this.trace.observe(args);
+  };
+  serviceClass.prototype.traceFeedback = function(args) {
+    return this.trace.feedback(args);
+  };
+  serviceClass.prototype.traceFinalize = function(args) {
+    return this.trace.finalize(args);
+  };
+  serviceClass.prototype.traceGet = function(args) {
+    return this.trace.get(args);
+  };
+  serviceClass.prototype.traceQuery = function(args = {}) {
+    return this.trace.query(args);
+  };
+  serviceClass.prototype.traceReplayBundle = function(args) {
+    return this.trace.replayBundle(args);
+  };
+  serviceClass.prototype.traceCaseCompile = function(args) {
+    return this.trace.compileCase(args);
+  };
+  serviceClass.prototype.traceRetentionPlan = function(args) {
+    return this.trace.retentionPlan(args);
+  };
+  serviceClass.prototype.traceRetentionSweep = function(args = {}) {
+    return this.trace.retentionSweep(args);
+  };
+}
+
+// src/application/use-cases/capability-lifecycle.ts
+function installCapabilityLifecycleMethods(serviceClass) {
+  serviceClass.prototype.capabilityLifecycleRegister = function(args) {
+    return this.capabilityLifecycle.register(args);
+  };
+  serviceClass.prototype.capabilityLifecycleInstall = function(args) {
+    return this.capabilityLifecycle.install(args);
+  };
+  serviceClass.prototype.capabilityLifecycleActivate = function(args) {
+    return this.capabilityLifecycle.activate(args);
+  };
+  serviceClass.prototype.capabilityLifecycleDisable = function(args) {
+    return this.capabilityLifecycle.disable(args);
+  };
+  serviceClass.prototype.capabilityLifecycleUpgrade = function(args) {
+    return this.capabilityLifecycle.upgrade(args);
+  };
+  serviceClass.prototype.capabilityLifecycleRetire = function(args) {
+    return this.capabilityLifecycle.retire(args);
+  };
+  serviceClass.prototype.capabilityLifecycleResolve = function(args) {
+    return this.capabilityLifecycle.resolve(args);
+  };
+  serviceClass.prototype.capabilityLifecycleList = function() {
+    return this.capabilityLifecycle.list();
+  };
+}
+
+// src/application/use-cases/memory-consolidation.ts
+function installMemoryConsolidationMethods(serviceClass) {
+  serviceClass.prototype.memoryConsolidationRemember = function(args) {
+    return this.memoryConsolidation.remember(args);
+  };
+  serviceClass.prototype.memoryConsolidationConsolidate = function(args) {
+    return this.memoryConsolidation.consolidate(args);
+  };
+  serviceClass.prototype.memoryConsolidationResolve = function(args) {
+    return this.memoryConsolidation.resolve(args);
+  };
+  serviceClass.prototype.memoryConsolidationSearch = function(args) {
+    return this.memoryConsolidation.search(args);
+  };
+}
+
+// src/application/use-cases/remote-interop.ts
+function installRemoteInteropMethods(serviceClass) {
+  serviceClass.prototype.remoteInteropPrepare = function(args) {
+    return this.remoteInterop.prepare(args);
+  };
+  serviceClass.prototype.remoteInteropReport = function(args) {
+    return this.remoteInterop.report(args);
+  };
+  serviceClass.prototype.remoteInteropGet = function(args) {
+    return this.remoteInterop.get(args);
+  };
+}
+
+// src/application/use-cases/platform.ts
+function installPlatformMethods(serviceClass) {
+  serviceClass.prototype.platformMemberSave = function(args) {
+    return this.platformOperations.memberSave(args);
+  };
+  serviceClass.prototype.platformAuthorize = function(args) {
+    return this.platformOperations.authorize(args);
+  };
+  serviceClass.prototype.platformObserve = function(args) {
+    return this.platformOperations.observe(args);
+  };
+  serviceClass.prototype.platformObservabilityExport = function(args) {
+    return this.platformOperations.exportObservations(args);
+  };
+}
+
+// src/application/use-cases/kernel-delegates.ts
+function installKernelDelegateMethods(serviceClass) {
+  installKnowledgeMemoryMethods(serviceClass);
+  installTraceMethods(serviceClass);
+  installCapabilityLifecycleMethods(serviceClass);
+  installMemoryConsolidationMethods(serviceClass);
+  installRemoteInteropMethods(serviceClass);
+  installPlatformMethods(serviceClass);
+}
+
+// src/application/craft-service.ts
+var VERSION = "0.12.27";
 var CONFIDENCE2 = /* @__PURE__ */ new Set(["confirmed", "bounded", "unverified", "rejected"]);
 var TASK_STATUS = /* @__PURE__ */ new Set(["active", "paused", "completed", "cancelled"]);
 var VERSIONED_LIFECYCLE = /* @__PURE__ */ new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -26091,39 +26521,6 @@ var CraftService = class _CraftService extends ServiceFoundation {
   }
   capabilityKitDistribution(args) {
     return this.capabilityKits.distribution(args);
-  }
-  knowledgeMemoryInstallBuiltins() {
-    return this.knowledgeMemory.installBuiltins();
-  }
-  knowledgeSourceRegister(args) {
-    return this.knowledgeMemory.sourceRegister(args);
-  }
-  knowledgeSourceList(args) {
-    return this.knowledgeMemory.sourceList(args);
-  }
-  knowledgeSourceTransition(args) {
-    return this.knowledgeMemory.sourceTransition(args);
-  }
-  memoryLedgerRemember(args) {
-    return this.knowledgeMemory.remember(args);
-  }
-  memoryLedgerTransition(args) {
-    return this.knowledgeMemory.transition(args);
-  }
-  memoryLedgerCompatBind(args) {
-    return this.knowledgeMemory.compatBind(args);
-  }
-  contextResolutionResolve(args) {
-    return this.knowledgeMemory.resolve(args);
-  }
-  contextResolutionGet(args) {
-    return this.knowledgeMemory.receiptGet(args);
-  }
-  retrievalAdapterConfigure(args) {
-    return this.knowledgeMemory.retrievalConfigure(args);
-  }
-  retrievalAdapterEvaluate(args) {
-    return this.knowledgeMemory.retrievalEvaluate(args);
   }
   workRuntimeModeConfigure(args) {
     return this.workRuntimeModes.configure(args);
@@ -27977,9 +28374,9 @@ ${task.goal}`.toLowerCase();
       const response = executed.response;
       const ticketHash = (0, import_node_crypto115.createHash)("sha256").update(String(ticket.id)).digest("hex").slice(0, 24);
       const bindingHash = (0, import_node_crypto115.createHash)("sha256").update(bindingId).digest("hex").slice(0, 24);
-      const inbox = (0, import_node_path25.join)(this.store.paths.runtimeDir, "sandbox-inbox", ticketHash);
+      const inbox = (0, import_node_path26.join)(this.store.paths.runtimeDir, "sandbox-inbox", ticketHash);
       await (0, import_promises17.mkdir)(inbox, { recursive: true });
-      const outputPath = (0, import_node_path25.join)(inbox, `${bindingHash}-${outputName}`);
+      const outputPath = (0, import_node_path26.join)(inbox, `${bindingHash}-${outputName}`);
       const envelope = {
         trust: "untrusted_external_response",
         execution_authority: false,
@@ -28965,7 +29362,7 @@ ${material}
       else {
         const stringValue = text111(value, key2);
         if (field.type === "choice" && !field.options.includes(stringValue)) throw new Error(`${key2} must be one of the declared choices`);
-        if (field.type === "path" && ((0, import_node_path25.isAbsolute)(stringValue) || import_node_path25.win32.isAbsolute(stringValue) || stringValue.split(/[\\/]/).includes(".."))) throw new Error(`${key2} must be a workspace-relative contained path`);
+        if (field.type === "path" && ((0, import_node_path26.isAbsolute)(stringValue) || import_node_path26.win32.isAbsolute(stringValue) || stringValue.split(/[\\/]/).includes(".."))) throw new Error(`${key2} must be a workspace-relative contained path`);
         normalized[key2] = stringValue;
       }
     }
@@ -29279,26 +29676,26 @@ ${material}
     const existing = this.store.find("wiki_page", pageId);
     const identity = { title, body: body2, scope: scope2, claim_ids: claimIds };
     if (existing && existing.identity_digest === valueDigest(identity)) return { page: existing, idempotent: true };
-    const filePath = (0, import_node_path25.join)(this.store.paths.root, "wiki", `${pageId}.v${existing ? Number(existing.version) + 1 : 1}.md`);
+    const filePath = (0, import_node_path26.join)(this.store.paths.root, "wiki", `${pageId}.v${existing ? Number(existing.version) + 1 : 1}.md`);
     if (existing) {
       const current2 = await (0, import_promises17.readFile)(String(existing.file_path), "utf8");
       if (valueDigest(current2) !== existing.body_digest) throw new Error("Wiki page file has unrecorded changes; refresh it before saving");
     }
-    await (0, import_promises17.mkdir)((0, import_node_path25.join)(this.store.paths.root, "wiki"), { recursive: true });
+    await (0, import_promises17.mkdir)((0, import_node_path26.join)(this.store.paths.root, "wiki"), { recursive: true });
     await (0, import_promises17.writeFile)(filePath, body2, "utf8");
     const page = this.store.save("wiki_page", pageId, { title, scope: scope2, claim_ids: claimIds, identity_digest: valueDigest(identity), body_digest: valueDigest(body2), file_path: filePath, revision_source: String(args.author ?? "human") });
     return { page, idempotent: false };
   }
   wikiPageGet(args) {
     const page = this.store.get("wiki_page", text111(args.page_id, "page_id"), args.version === void 0 ? void 0 : finiteInteger2(args.version, "version", 1));
-    return { page, body: (0, import_node_fs16.readFileSync)(String(page.file_path), "utf8") };
+    return { page, body: (0, import_node_fs17.readFileSync)(String(page.file_path), "utf8") };
   }
   wikiPageList(args) {
     return this.list("wiki_page", "pages", args);
   }
   wikiPageRefresh(args) {
     const page = this.store.get("wiki_page", text111(args.page_id, "page_id"));
-    const body2 = assertNoSecret4(document((0, import_node_fs16.readFileSync)(String(page.file_path), "utf8"), "body"), "body");
+    const body2 = assertNoSecret4(document((0, import_node_fs17.readFileSync)(String(page.file_path), "utf8"), "body"), "body");
     if (valueDigest(body2) === page.body_digest) return { page, changed: false };
     const saved = this.store.save("wiki_page", String(page.id), { ...recordPayload8(page), body_digest: valueDigest(body2), identity_digest: null, revision_source: "filesystem" });
     return { page: saved, changed: true };
@@ -29683,7 +30080,7 @@ Evidence: ${item.evidence_ids.join(", ")}
     const sandbox = String(args.sandbox ?? "read-only");
     if (!(/* @__PURE__ */ new Set(["read-only", "workspace-write"])).has(sandbox)) throw new Error("Work launch sandbox is unsupported");
     const prompt = text111(args.prompt, "prompt");
-    const workspace = (0, import_node_path25.resolve)(text111(args.workspace, "workspace"));
+    const workspace = (0, import_node_path26.resolve)(text111(args.workspace, "workspace"));
     const deferredStart = args.defer_host_start === true;
     const launchId = args.launch_id === void 0 ? id13("work_launch") : text111(args.launch_id, "launch_id");
     const existing = this.store.find("work_launch", launchId);
@@ -29857,7 +30254,7 @@ Evidence: ${item.evidence_ids.join(", ")}
     return this.verifiedWorkLoops.get(args);
   }
   verifiedWorkLoopWorkbenchPrepare(args) {
-    const root = (0, import_node_path25.resolve)(text111(args.workspace, "workspace"));
+    const root = (0, import_node_path26.resolve)(text111(args.workspace, "workspace"));
     const includePaths2 = uniqueTextArray3(args.include_paths ?? ["."], "include_paths").sort();
     const workspaceId = args.workspace_id === void 0 ? `workspace_loop_${valueDigest({ root, include_paths: includePaths2 }).slice(-16)}` : text111(args.workspace_id, "workspace_id");
     const existing = this.store.find("workspace", workspaceId);
@@ -29954,7 +30351,7 @@ Evidence: ${item.evidence_ids.join(", ")}
     return this.hostBridge.get(args);
   }
   executionFabricWorkbenchPrepare(args) {
-    const root = (0, import_node_path25.resolve)(text111(args.workspace, "workspace"));
+    const root = (0, import_node_path26.resolve)(text111(args.workspace, "workspace"));
     const includePaths2 = uniqueTextArray3(args.include_paths ?? ["."], "include_paths").sort();
     const workspaceId = args.workspace_id === void 0 ? `workspace_fabric_${valueDigest(root).slice(-16)}` : text111(args.workspace_id, "workspace_id");
     const existing = this.store.find("workspace", workspaceId);
@@ -30844,36 +31241,6 @@ Evidence: ${item.evidence_ids.join(", ")}
     });
     this.trace.appendTrial({ trial_id: trialId, event_type: "outcome.recorded", source: "program_verified", trust: "verified", summary: outcome2.summary, data: { verdict, failure_type: failureType }, evidence_ids: evidenceIds });
     return outcome2;
-  }
-  traceStart(args) {
-    return this.trace.start(args);
-  }
-  traceAppend(args) {
-    return this.trace.append(args);
-  }
-  traceObserve(args) {
-    return this.trace.observe(args);
-  }
-  traceFeedback(args) {
-    return this.trace.feedback(args);
-  }
-  traceFinalize(args) {
-    return this.trace.finalize(args);
-  }
-  traceGet(args) {
-    return this.trace.get(args);
-  }
-  traceQuery(args = {}) {
-    return this.trace.query(args);
-  }
-  traceReplayBundle(args) {
-    return this.trace.replayBundle(args);
-  }
-  traceCaseCompile(args) {
-    return this.trace.compileCase(args);
-  }
-  traceRetentionPlan(args) {
-    return this.trace.retentionPlan(args);
   }
   runtimeTruthStandardize(args) {
     return this.runtimeTruth.standardize(args);
@@ -32183,145 +32550,14 @@ Evidence: ${item.evidence_ids.join(", ")}
     };
     return this.autonomousRuntime.run(args, model, executor);
   }
-  capabilityLifecycleRegister(args) {
-    return this.capabilityLifecycle.register(args);
-  }
-  capabilityLifecycleInstall(args) {
-    return this.capabilityLifecycle.install(args);
-  }
-  capabilityLifecycleActivate(args) {
-    return this.capabilityLifecycle.activate(args);
-  }
-  capabilityLifecycleDisable(args) {
-    return this.capabilityLifecycle.disable(args);
-  }
-  capabilityLifecycleUpgrade(args) {
-    return this.capabilityLifecycle.upgrade(args);
-  }
-  capabilityLifecycleRetire(args) {
-    return this.capabilityLifecycle.retire(args);
-  }
-  capabilityLifecycleResolve(args) {
-    return this.capabilityLifecycle.resolve(args);
-  }
-  capabilityLifecycleList() {
-    return this.capabilityLifecycle.list();
-  }
-  memoryConsolidationRemember(args) {
-    return this.memoryConsolidation.remember(args);
-  }
-  memoryConsolidationConsolidate(args) {
-    return this.memoryConsolidation.consolidate(args);
-  }
-  memoryConsolidationResolve(args) {
-    return this.memoryConsolidation.resolve(args);
-  }
-  memoryConsolidationSearch(args) {
-    return this.memoryConsolidation.search(args);
-  }
-  remoteInteropPrepare(args) {
-    return this.remoteInterop.prepare(args);
-  }
   async remoteInteropDispatch(args) {
     const status = String(args.status ?? "accepted");
     if (!(/* @__PURE__ */ new Set(["accepted", "completed", "failed"])).has(status)) throw new Error("Unsupported remote status");
     return this.remoteInterop.dispatch(args, { dispatch: async () => ({ remote_id: text111(args.remote_id ?? `remote_${(0, import_node_crypto115.randomUUID)().replaceAll("-", "")}`, "remote_id"), status, ...args.result_digest === void 0 ? {} : { result_digest: text111(args.result_digest, "result_digest") } }) });
   }
-  remoteInteropReport(args) {
-    return this.remoteInterop.report(args);
-  }
-  remoteInteropGet(args) {
-    return this.remoteInterop.get(args);
-  }
-  platformMemberSave(args) {
-    return this.platformOperations.memberSave(args);
-  }
-  platformAuthorize(args) {
-    return this.platformOperations.authorize(args);
-  }
-  platformObserve(args) {
-    return this.platformOperations.observe(args);
-  }
-  platformObservabilityExport(args) {
-    return this.platformOperations.exportObservations(args);
-  }
-  /** v0.12.26 Generic Adapter SDK and cross-platform execution surface. */
-  adapterManifestSave(args) {
-    return new V01226Runtime(this.store).adapterRegister(args);
-  }
-  adapterManifestGet(args) {
-    return { manifest: new V01226Runtime(this.store).adapterGet(String(args.adapter_id)) };
-  }
-  adapterManifestList(args = {}) {
-    return new V01226Runtime(this.store).adapterList(Number(args.limit ?? 50));
-  }
-  adapterHealth(args) {
-    return new V01226Runtime(this.store).adapterHealth(String(args.adapter_id));
-  }
-  adapterConformance(args) {
-    return new V01226Runtime(this.store).adapterConformance(String(args.adapter_id));
-  }
-  adapterQuarantine(args) {
-    return new V01226Runtime(this.store).adapterQuarantine(String(args.adapter_id), String(args.reason));
-  }
-  adapterRollback(args) {
-    return new V01226Runtime(this.store).adapterRollback(String(args.adapter_id));
-  }
-  async adapterInstall(args) {
-    return new V01226Runtime(this.store).adapterInstall(String(args.manifest_path), args.integrity === void 0 ? void 0 : String(args.integrity));
-  }
-  commandPlan(args) {
-    return new V01226Runtime(this.store).commandPlan(args);
-  }
-  async commandRun(args) {
-    return new V01226Runtime(this.store).commandRun(args);
-  }
-  commandObserve(args) {
-    return { run: new V01226Runtime(this.store).commandObserve(String(args.run_id)) };
-  }
-  commandCancel(args) {
-    return new V01226Runtime(this.store).commandCancel(String(args.run_id));
-  }
-  async commandRetry(args) {
-    return new V01226Runtime(this.store).commandRetry(String(args.run_id));
-  }
-  contextManifestV01226Save(args) {
-    return new V01226Runtime(this.store).contextManifestSave(args);
-  }
-  capabilityProjection(args) {
-    return new V01226Runtime(this.store).capabilityProject({ candidates: Array.isArray(args.candidates) ? args.candidates : [], required: Array.isArray(args.required) ? args.required : [], token_budget: args.token_budget === void 0 ? void 0 : Number(args.token_budget) });
-  }
-  durableRunStart(args) {
-    return new V01226Runtime(this.store).durableStart(args);
-  }
-  durableRunTick(args = {}) {
-    return new V01226Runtime(this.store).durableTick(String(args.owner ?? "local"), Number(args.lease_seconds ?? 30));
-  }
-  durableRunComplete(args) {
-    return new V01226Runtime(this.store).durableComplete(String(args.run_id), String(args.status), args.result);
-  }
-  durableRunRecover(args = {}) {
-    return new V01226Runtime(this.store).durableRecover(args.owner === void 0 ? void 0 : String(args.owner));
-  }
-  trustCurveRecord(args) {
-    return new V01226Runtime(this.store).trustRecord({ scope: String(args.scope), passed: Number(args.passed), failed: Number(args.failed), evidence_refs: Array.isArray(args.evidence_refs) ? args.evidence_refs : [] });
-  }
-  modelRouteV01226(args) {
-    return new V01226Runtime(this.store).modelRoute({ candidates: Array.isArray(args.candidates) ? args.candidates : [], objective: args.objective, budget: args.budget === void 0 ? void 0 : Number(args.budget) });
-  }
-  deliveryGateV01226(args) {
-    return new V01226Runtime(this.store).deliveryGate({ artifacts: Array.isArray(args.artifacts) ? args.artifacts : [], evidence: Array.isArray(args.evidence) ? args.evidence : [], required_artifacts: Array.isArray(args.required_artifacts) ? args.required_artifacts : [], required_evidence: Array.isArray(args.required_evidence) ? args.required_evidence : [] });
-  }
-  taskHandoffManifest(args) {
-    return new V01226Runtime(this.store).handoff(args);
-  }
-  domainEvaluatorRun(args) {
-    return new V01226Runtime(this.store).evaluatorRun({ evaluator_id: String(args.evaluator_id), observations: args.observations });
-  }
-  async openApiImport(args) {
-    return importOpenApiDocument(new V01226Runtime(this.store), args.document);
-  }
 };
+installAdapterRuntimeMethods(CraftService);
+installKernelDelegateMethods(CraftService);
 
 // src/tool-plane.ts
 var SYSCALL_VERBS = [
@@ -32494,7 +32730,12 @@ var OPERATIONS2 = [
   "release",
   "deliver",
   "accept",
-  "reject"
+  "reject",
+  // Memory Ledger is part of the primary composition. These verbs must remain
+  // semantic addresses on the syscall surface instead of degrading to an
+  // opaque resource name such as `memory_ledger_remember`.
+  "remember",
+  "transition"
 ];
 var DESTRUCTIVE_OPERATIONS = /* @__PURE__ */ new Set(["delete", "remove", "revoke", "purge", "rollback"]);
 var READ_OPERATIONS = /* @__PURE__ */ new Set([
@@ -32663,11 +32904,12 @@ function describeEntry(entry2) {
   };
 }
 
-// src/mcp.ts
+// src/interfaces/mcp/tool-schema.ts
 var schemaFor = (name) => {
   if (["scan", "enabled", "allow_execution", "allow_external_write", "require_held_out", "require_outcome_passed", "retryable", "requires_external_effect", "supports_pause_resume", "supports_evidence_receipts", "generated_code", "requires_credential", "has_compensation", "approved", "start_trial", "untrusted_input", "confirmed_original_runner_stopped", "sanitized", "active", "acceptance_required", "trusted", "unattended", "reobserve_required", "compensation_or_handoff", "require_governance", "accepted", "stale", "crash_recovery", "reobserved", "delivered", "allowed", "allow_restricted", "privacy_reviewed", "complete", "content_stored", "candidate_change", "requires_real_host"].includes(name)) return { type: "boolean" };
   if ([
     "limit",
+    "max_days",
     "version",
     "capacity",
     "max_concurrency",
@@ -32908,6 +33150,170 @@ var tool = (name, description, required3 = [], readOnly = false, optional2 = [])
   inputSchema: objectSchema(required3, optional2),
   ...readOnly ? { annotations: { readOnlyHint: true } } : {}
 });
+
+// src/interfaces/mcp/surface-registry.ts
+var SURFACE_RULES = [
+  { name: "governance", pattern: /^craft_(capability|source|logical|contract|hub|supply|federation|materialization|certification|skill|publication|catalog|domain|hook)/ },
+  { name: "evaluation", pattern: /^craft_(evaluation|eval|benchmark|campaign|judge|grader|grade|signoff|harness|trial|trajectory|experience|adaptation|adaptive|canary|acceptance|outcome|delivery_evaluation|agent_eval|verified_iteration|feedback|trace|verification)/ },
+  { name: "execution", pattern: /^craft_(sandbox|docker|effect|egress|credential|execution|managed|platform|isolated|local|external|recovery|durable|trigger|webhook|orchestration|runtime|autonomy|speculative|web)/ },
+  { name: "knowledge", pattern: /^craft_(wiki|knowledge|context|memory|project|semantic|claim|relation)/ },
+  { name: "workspace", pattern: /^craft_(workspace|work_object|change_set|state|transaction|lineage|hydration|dehydration|artifact|evidence|untrusted)/ },
+  { name: "collaboration", pattern: /^craft_(a2a|enterprise|agent|expert|federated|attention|work_coordinator|home|decision|guided|strategy)/ },
+  { name: "workflow", pattern: /^craft_/ }
+];
+var COMPONENT_SURFACES = {
+  "component-knowledge": /^craft_(wiki|knowledge|claim|relation|context_resolution|retrieval_adapter)/,
+  "component-memory": /^craft_(memory|knowledge_source|context_resolution|retrieval_adapter)/,
+  "component-capability": /^craft_(source|capability|logical|semantic)/,
+  "component-skill-quality": /^craft_(evaluation|eval|benchmark|campaign|judge|grader|grade|signoff|trial|outcome|skill_proposal|verified_iteration|verification)/,
+  "component-workflow-evolution": /^craft_(workflow_evolution|evaluation_model|experience_mine|experience_candidate|experience_shadow|route_workflow_proposal|workflow_(?:save|get|search|transition|rollback))/
+};
+var COMPONENT_SURFACE_NAMES = Object.keys(COMPONENT_SURFACES);
+var DOMAIN_SURFACE_NAMES = SURFACE_RULES.map((rule) => rule.name);
+var SURFACE_NAMES = ["core", ...DOMAIN_SURFACE_NAMES, ...COMPONENT_SURFACE_NAMES, "syscall", "full"];
+function domainSurfaceOf(toolName) {
+  return SURFACE_RULES.find((rule) => rule.pattern.test(toolName))?.name ?? "workflow";
+}
+function surfaceToolNames(surface, activeTools, coreToolNames) {
+  if (surface === "full") return activeTools.map((tool2) => tool2.name);
+  if (surface === "core") return activeTools.filter((tool2) => coreToolNames.has(tool2.name)).map((tool2) => tool2.name);
+  if (surface === "syscall") return [...SYSCALL_VERBS, ...SYSCALL_PASSTHROUGH];
+  const component = COMPONENT_SURFACES[surface];
+  if (component) return activeTools.filter((tool2) => tool2.name === "craft_info" || component.test(tool2.name)).map((tool2) => tool2.name);
+  if (!SURFACE_RULES.some((rule) => rule.name === surface)) throw new Error(`Unknown Craft MCP surface: ${surface}`);
+  return activeTools.filter((tool2) => !coreToolNames.has(tool2.name) && domainSurfaceOf(tool2.name) === surface).map((tool2) => tool2.name);
+}
+
+// src/interfaces/mcp/runtime-handlers.ts
+function createRuntimeHandlers(service) {
+  return {
+    craft_runtime_policy_save: (a) => service.runtimePolicySave(a),
+    craft_runtime_policy_get: (a) => service.get("runtime_policy", "runtime_policy_id", a),
+    craft_runtime_policy_list: (a) => service.list("runtime_policy", "runtime_policies", a),
+    craft_runtime_run_start: (a) => service.runtimeRunStart(a),
+    craft_runtime_run_get: (a) => service.runtimeRunGet(a),
+    craft_runtime_dispatch: (a) => service.runtimeDispatch(a),
+    craft_runtime_operation_get: (a) => service.runtimeOperationGet(a),
+    craft_runtime_operation_decision: (a) => service.runtimeOperationDecision(a),
+    craft_runtime_operation_submit: (a) => service.runtimeOperationSubmit(a),
+    craft_runtime_run_resume: (a) => service.runtimeRunResume(a),
+    craft_runtime_lease_recover: (a) => service.runtimeLeaseRecover(a),
+    craft_runtime_driver_tick: (a) => service.runtimeDriverTick(a),
+    craft_runtime_promotion_eligibility: (a) => service.runtimePromotionEligibility(a),
+    craft_runtime_adapter_save: (a) => service.runtimeAdapterSave(a),
+    craft_runtime_adapter_get: (a) => service.get("runtime_adapter", "runtime_adapter_id", a),
+    craft_runtime_adapter_list: (a) => service.list("runtime_adapter", "runtime_adapters", a),
+    craft_runtime_adapter_dispatch: (a) => service.runtimeAdapterDispatch(a),
+    craft_runtime_adapter_report: (a) => service.runtimeAdapterReport(a)
+  };
+}
+
+// src/interfaces/mcp/work-handlers.ts
+function createWorkHandlers(service) {
+  return {
+    craft_task_control_refresh: (a) => service.taskControlRefresh(a),
+    craft_task_control_get: (a) => service.taskControlGet(a),
+    craft_task_control_handoff: (a) => service.taskControlHandoff(a),
+    craft_task_run_prepare: (a) => service.taskRunPrepare(a),
+    craft_task_run_refresh: (a) => service.taskRunRefresh(a),
+    craft_task_run_get: (a) => service.taskRunGet(a),
+    craft_task_run_pause: (a) => service.taskRunPause(a),
+    craft_task_run_resume: (a) => service.taskRunResume(a),
+    craft_task_run_cancel: (a) => service.taskRunCancel(a),
+    craft_task_run_handoff: (a) => service.taskRunHandoff(a),
+    craft_verified_work_loop_prepare: (a) => service.verifiedWorkLoopPrepare(a),
+    craft_verified_work_loop_advance: (a) => service.verifiedWorkLoopAdvance(a),
+    craft_verified_work_loop_decide: (a) => service.verifiedWorkLoopDecide(a),
+    craft_verified_work_loop_resume: (a) => service.verifiedWorkLoopResume(a),
+    craft_verified_work_loop_get: (a) => service.verifiedWorkLoopGet(a),
+    craft_host_activation_manifest_prepare: service.hostActivationManifestPrepare.bind(service),
+    craft_host_activation_manifest_validate: service.hostActivationManifestValidate.bind(service),
+    craft_host_activation_manifest_consume: service.hostActivationManifestConsume.bind(service),
+    craft_host_activation_manifest_get: service.hostActivationManifestGet.bind(service),
+    craft_execution_fabric_prepare: service.executionFabricPrepare.bind(service),
+    craft_execution_fabric_execute: service.executionFabricExecute.bind(service),
+    craft_execution_fabric_advance: service.executionFabricAdvance.bind(service),
+    craft_execution_fabric_consume: service.executionFabricConsume.bind(service),
+    craft_execution_fabric_get: service.executionFabricGet.bind(service),
+    craft_host_bridge_get: service.hostBridgeGet.bind(service),
+    craft_state_workspace_observe: (a) => service.stateWorkspaceObserve(a),
+    craft_state_workspace_compare: (a) => service.stateWorkspaceCompare(a),
+    craft_workspace_observer_observe: (a) => service.workspaceObserverObserve(a),
+    craft_workspace_observer_get: (a) => service.workspaceObserverGet(a),
+    craft_autonomy_ladder_decide: (a) => service.autonomyLadderDecide(a),
+    craft_autonomy_ladder_get: (a) => service.autonomyLadderGet(a),
+    craft_work_coordinator_prepare: (a) => service.workCoordinatorPrepare(a),
+    craft_work_coordinator_attach_host_run: (a) => service.workCoordinatorAttachHostRun(a),
+    craft_work_coordinator_observe: (a) => service.workCoordinatorObserve(a),
+    craft_work_coordinator_handoff: (a) => service.workCoordinatorHandoff(a),
+    craft_work_coordinator_get: (a) => service.workCoordinatorGet(a),
+    craft_work_launch_prepare: (a) => service.workLaunchPrepare(a),
+    craft_work_launch_decide: (a) => service.workLaunchDecide(a),
+    craft_work_launch_get: (a) => service.workLaunchGet(a),
+    craft_work_launch_retry: (a) => service.workLaunchRetry(a),
+    craft_work_delivery_observe: (a) => service.workDeliveryObserve(a),
+    craft_work_delivery_get: (a) => service.workDeliveryGet(a)
+  };
+}
+
+// src/interfaces/mcp/evaluation-handlers.ts
+function createEvaluationHandlers(service) {
+  return {
+    craft_eval_campaign_create: (a) => service.evalCampaignCreate(a),
+    craft_eval_campaign_bind: (a) => service.evalCampaignBind(a),
+    craft_eval_campaign_advance: (a) => service.evalCampaignAdvance(a),
+    craft_eval_campaign_get: (a) => service.evalCampaignGet(a),
+    craft_eval_campaign_report: (a) => service.evalCampaignReport(a),
+    craft_evaluation_program_save: (a) => service.evaluationProgramSave(a),
+    craft_evaluation_program_due: (a) => service.evaluationProgramDue(a),
+    craft_evaluation_program_plan: (a) => service.evaluationProgramPlan(a),
+    craft_evaluation_program_report: (a) => service.evaluationProgramReport(a),
+    craft_adaptive_harness_recommend: (a) => service.adaptiveHarnessRecommend(a),
+    craft_managed_write_get: (a) => service.managedWriteGet(a),
+    craft_managed_write_rollback: (a) => service.managedWriteRollback(a),
+    craft_managed_run_create: (a) => service.managedRunCreate(a),
+    craft_managed_run_observe: (a) => service.managedRunObserve(a),
+    craft_managed_run_handoff: (a) => service.managedRunHandoff(a),
+    craft_managed_run_resume: (a) => service.managedRunResume(a),
+    craft_managed_run_fork_shadow: (a) => service.managedRunForkShadow(a),
+    craft_managed_run_get: (a) => service.managedRunGet(a),
+    craft_acceptance_plan_save: (a) => service.acceptancePlanSave(a),
+    craft_acceptance_plan_get: (a) => service.acceptancePlanGet(a),
+    craft_acceptance_check_record: (a) => service.acceptanceCheckRecord(a),
+    craft_acceptance_human_review: (a) => service.acceptanceHumanReview(a),
+    craft_acceptance_evaluator_save: (a) => service.acceptanceEvaluatorSave(a),
+    craft_acceptance_evaluation_prepare: (a) => service.acceptanceEvaluationPrepare(a),
+    craft_acceptance_file_prepare: (a) => service.acceptanceFileEvaluationPrepare(a),
+    craft_acceptance_coverage_prepare: (a) => service.acceptanceCoverageEvaluationPrepare(a),
+    craft_acceptance_media_probe_prepare: (a) => service.acceptanceMediaProbePrepare(a),
+    craft_acceptance_evaluation_claim: (a) => service.acceptanceEvaluationClaim(a),
+    craft_acceptance_evaluation_recover: (a) => service.acceptanceEvaluationRecover(a),
+    craft_acceptance_evaluation_report: (a) => service.acceptanceEvaluationReport(a),
+    craft_acceptance_assess: (a) => service.acceptanceAssess(a)
+  };
+}
+
+// src/interfaces/mcp/workspace-handlers.ts
+function createWorkspaceHandlers(service) {
+  return {
+    craft_workspace_open: (a) => service.workspaceOpen(a),
+    craft_workspace_get: (a) => service.workspaceGet(a),
+    craft_workspace_checkpoint: (a) => service.workspaceCheckpoint(a),
+    craft_workspace_diff: (a) => service.workspaceDiff(a),
+    craft_workspace_human_change: (a) => service.workspaceHumanChange(a),
+    craft_workspace_restore: (a) => service.workspaceRestore(a),
+    craft_work_object_put: (a) => service.workObjectPut(a),
+    craft_work_object_list: (a) => service.workObjectList(a),
+    craft_workspace_impact: (a) => service.workspaceImpact(a),
+    craft_workspace_change_apply: (a) => service.workspaceChangeApply(a),
+    craft_workspace_transaction_begin: (a) => service.workspaceTransactionBegin(a),
+    craft_workspace_transaction_commit: (a) => service.workspaceTransactionCommit(a),
+    craft_workspace_transaction_rollback: (a) => service.workspaceTransactionRollback(a),
+    craft_workspace_transaction_get: (a) => service.get("workspace_transaction", "transaction_id", a)
+  };
+}
+
+// src/interfaces/mcp-server.ts
 var TOOL_DEFINITIONS = [
   tool("craft_info", "Show the Craft version, data location, and record counts.", [], true),
   tool("craft_adapter_manifest_save", "Register a versioned Generic Adapter Manifest with declared capabilities, permissions, effects, and platform support.", ["adapter_id", "version", "kind"], false, ["platforms", "entry", "transport", "capabilities", "permissions", "effects", "dependencies", "integrity", "signature", "sandbox_profile", "metadata"]),
@@ -34252,7 +34658,8 @@ var TOOL_DEFINITIONS = [
   tool("craft_trace_query", "Query canonical Trace Events by Trace, Task, or event kind without returning raw prompt content.", [], true, ["trace_id", "task_id", "event_kind", "limit"]),
   tool("craft_trace_replay_bundle", "Build a digest-only replay bundle and report whether the Trace has enough fingerprints for reproducible replay.", ["trace_id"], true),
   tool("craft_trace_case_compile", "Compile one terminal Trace into a sanitized development or approved held-out evolution Case.", ["trace_id", "summary"], false, ["case_id", "partition", "acceptance_contract_ref", "approved_by", "contamination_flags"]),
-  tool("craft_trace_retention_plan", "Save an idempotent digest-only Trace retention and privacy policy; deletion still requires review.", [], false, ["policy_id", "max_days", "max_events", "pii_mode"]),
+  tool("craft_trace_retention_plan", "Save an idempotent digest-only Trace retention and privacy policy; archival precedes automatic terminal-trace deletion.", [], false, ["policy_id", "max_days", "max_events", "pii_mode"]),
+  tool("craft_trace_retention_sweep", "Archive and remove terminal Trace records older than the retention window; running traces are preserved.", [], false, ["now", "max_days", "limit"]),
   tool(
     "craft_outcome_record",
     "Record the single immutable outcome for a trial.",
@@ -34713,6 +35120,9 @@ var CORE_TOOL_NAMES = /* @__PURE__ */ new Set([
   "craft_web_operation_get"
 ]);
 var CORE_TOOLS = ACTIVE_TOOLS.filter((tool2) => CORE_TOOL_NAMES.has(tool2.name));
+function surfaceToolNames2(surface) {
+  return surfaceToolNames(surface, ACTIVE_TOOLS, CORE_TOOL_NAMES);
+}
 var SYSCALL_TOOLS = [
   tool("craft_describe", "Describe Craft operations: with no arguments returns the resource catalog; with resource (and optional operation) returns the exact arguments, effect, risk and approval requirement.", [], true, ["resource", "operation"]),
   tool("craft_list", "List Craft records of one resource, addressed as resource plus an optional operation.", ["resource"], true, ["operation", "limit", "args"]),
@@ -34733,39 +35143,6 @@ var VERB_DEFAULT_OPERATION = {
   craft_cancel: "cancel",
   craft_search: "search"
 };
-var SURFACE_RULES = [
-  { name: "governance", pattern: /^craft_(capability|source|logical|contract|hub|supply|federation|materialization|certification|skill|publication|catalog|domain|hook)/ },
-  { name: "evaluation", pattern: /^craft_(evaluation|eval|benchmark|campaign|judge|grader|grade|signoff|harness|trial|trajectory|experience|adaptation|adaptive|canary|acceptance|outcome|delivery_evaluation|agent_eval|verified_iteration|feedback|trace|verification)/ },
-  { name: "execution", pattern: /^craft_(sandbox|docker|effect|egress|credential|execution|managed|platform|isolated|local|external|recovery|durable|trigger|webhook|orchestration|runtime|autonomy|speculative|web)/ },
-  { name: "knowledge", pattern: /^craft_(wiki|knowledge|context|memory|project|semantic|claim|relation)/ },
-  { name: "workspace", pattern: /^craft_(workspace|work_object|change_set|state|transaction|lineage|hydration|dehydration|artifact|evidence|untrusted)/ },
-  { name: "collaboration", pattern: /^craft_(a2a|enterprise|agent|expert|federated|attention|work_coordinator|home|decision|guided|strategy)/ },
-  { name: "workflow", pattern: /^craft_/ }
-];
-var COMPONENT_SURFACES = {
-  // Retrieval evaluation belongs to both bounded knowledge and memory products:
-  // it evaluates a resolver adapter, never becomes the source of truth itself.
-  "component-knowledge": /^craft_(wiki|knowledge|claim|relation|context_resolution|retrieval_adapter)/,
-  "component-memory": /^craft_(memory|knowledge_source|context_resolution|retrieval_adapter)/,
-  "component-capability": /^craft_(source|capability|logical|semantic)/,
-  "component-skill-quality": /^craft_(evaluation|eval|benchmark|campaign|judge|grader|grade|signoff|trial|outcome|skill_proposal|verified_iteration|verification)/,
-  "component-workflow-evolution": /^craft_(workflow_evolution|evaluation_model|experience_mine|experience_candidate|experience_shadow|route_workflow_proposal|workflow_(?:save|get|search|transition|rollback))/
-};
-var COMPONENT_SURFACE_NAMES = Object.keys(COMPONENT_SURFACES);
-var SURFACE_NAMES = ["core", ...SURFACE_RULES.map((rule) => rule.name), ...COMPONENT_SURFACE_NAMES, "syscall", "full"];
-var DOMAIN_SURFACE_NAMES = SURFACE_RULES.map((rule) => rule.name);
-function domainSurfaceOf(toolName) {
-  return SURFACE_RULES.find((rule) => rule.pattern.test(toolName))?.name ?? "workflow";
-}
-function surfaceToolNames(surface) {
-  if (surface === "full") return ACTIVE_TOOLS.map((tool2) => tool2.name);
-  if (surface === "core") return CORE_TOOLS.map((tool2) => tool2.name);
-  if (surface === "syscall") return [...SYSCALL_VERBS, ...SYSCALL_PASSTHROUGH];
-  const component = COMPONENT_SURFACES[surface];
-  if (component) return ACTIVE_TOOLS.filter((tool2) => tool2.name === "craft_info" || component.test(tool2.name)).map((tool2) => tool2.name);
-  if (!SURFACE_RULES.some((rule) => rule.name === surface)) throw new Error(`Unknown Craft MCP surface: ${surface}`);
-  return ACTIVE_TOOLS.filter((tool2) => !CORE_TOOL_NAMES.has(tool2.name) && domainSurfaceOf(tool2.name) === surface).map((tool2) => tool2.name);
-}
 var McpServer = class {
   service;
   handlers;
@@ -34774,9 +35151,13 @@ var McpServer = class {
   constructor(service, mode2 = "full") {
     this.service = service;
     this.mode = mode2;
-    const allowed = new Set(surfaceToolNames(mode2));
+    const allowed = new Set(surfaceToolNames2(mode2));
     this.tools = [...ACTIVE_TOOLS, ...SYSCALL_TOOLS].filter((tool2) => allowed.has(tool2.name));
     this.handlers = {
+      ...createRuntimeHandlers(service),
+      ...createWorkHandlers(service),
+      ...createEvaluationHandlers(service),
+      ...createWorkspaceHandlers(service),
       craft_info: () => service.info(),
       craft_adapter_manifest_save: (a) => service.adapterManifestSave(a),
       craft_adapter_manifest_get: (a) => service.adapterManifestGet(a),
@@ -34839,24 +35220,6 @@ var McpServer = class {
       craft_host_adapter_list: (a) => service.list("host_adapter", "host_adapters", a),
       craft_host_adapter_dispatch: (a) => service.hostAdapterDispatch(a),
       craft_host_adapter_report: (a) => service.hostAdapterReport(a),
-      craft_runtime_policy_save: (a) => service.runtimePolicySave(a),
-      craft_runtime_policy_get: (a) => service.get("runtime_policy", "runtime_policy_id", a),
-      craft_runtime_policy_list: (a) => service.list("runtime_policy", "runtime_policies", a),
-      craft_runtime_run_start: (a) => service.runtimeRunStart(a),
-      craft_runtime_run_get: (a) => service.runtimeRunGet(a),
-      craft_runtime_dispatch: (a) => service.runtimeDispatch(a),
-      craft_runtime_operation_get: (a) => service.runtimeOperationGet(a),
-      craft_runtime_operation_decision: (a) => service.runtimeOperationDecision(a),
-      craft_runtime_operation_submit: (a) => service.runtimeOperationSubmit(a),
-      craft_runtime_run_resume: (a) => service.runtimeRunResume(a),
-      craft_runtime_lease_recover: (a) => service.runtimeLeaseRecover(a),
-      craft_runtime_driver_tick: (a) => service.runtimeDriverTick(a),
-      craft_runtime_promotion_eligibility: (a) => service.runtimePromotionEligibility(a),
-      craft_runtime_adapter_save: (a) => service.runtimeAdapterSave(a),
-      craft_runtime_adapter_get: (a) => service.get("runtime_adapter", "runtime_adapter_id", a),
-      craft_runtime_adapter_list: (a) => service.list("runtime_adapter", "runtime_adapters", a),
-      craft_runtime_adapter_dispatch: (a) => service.runtimeAdapterDispatch(a),
-      craft_runtime_adapter_report: (a) => service.runtimeAdapterReport(a),
       craft_local_isolated_execute: service.localIsolatedExecute.bind(service),
       craft_route_workflow_proposal_create: (a) => service.routeWorkflowProposalCreate(a),
       craft_default_route_update: (a) => service.defaultRouteUpdate(a),
@@ -34870,60 +35233,6 @@ var McpServer = class {
       craft_feedback_record: (a) => service.feedbackRecord(a),
       craft_task_control_save: (a) => service.taskControlSave(a),
       craft_task_control_bind_launch: (a) => service.taskControlBindLaunch(a),
-      craft_task_control_refresh: (a) => service.taskControlRefresh(a),
-      craft_task_control_get: (a) => service.taskControlGet(a),
-      craft_task_control_handoff: (a) => service.taskControlHandoff(a),
-      craft_task_run_prepare: (a) => service.taskRunPrepare(a),
-      craft_task_run_refresh: (a) => service.taskRunRefresh(a),
-      craft_task_run_get: (a) => service.taskRunGet(a),
-      craft_task_run_pause: (a) => service.taskRunPause(a),
-      craft_task_run_resume: (a) => service.taskRunResume(a),
-      craft_task_run_cancel: (a) => service.taskRunCancel(a),
-      craft_task_run_handoff: (a) => service.taskRunHandoff(a),
-      craft_verified_work_loop_prepare: (a) => service.verifiedWorkLoopPrepare(a),
-      craft_verified_work_loop_advance: (a) => service.verifiedWorkLoopAdvance(a),
-      craft_verified_work_loop_decide: (a) => service.verifiedWorkLoopDecide(a),
-      craft_verified_work_loop_resume: (a) => service.verifiedWorkLoopResume(a),
-      craft_verified_work_loop_get: (a) => service.verifiedWorkLoopGet(a),
-      craft_host_activation_manifest_prepare: service.hostActivationManifestPrepare.bind(service),
-      craft_host_activation_manifest_validate: service.hostActivationManifestValidate.bind(service),
-      craft_host_activation_manifest_consume: service.hostActivationManifestConsume.bind(service),
-      craft_host_activation_manifest_get: service.hostActivationManifestGet.bind(service),
-      craft_execution_fabric_prepare: service.executionFabricPrepare.bind(service),
-      craft_execution_fabric_execute: service.executionFabricExecute.bind(service),
-      craft_execution_fabric_advance: service.executionFabricAdvance.bind(service),
-      craft_execution_fabric_consume: service.executionFabricConsume.bind(service),
-      craft_execution_fabric_get: service.executionFabricGet.bind(service),
-      craft_host_bridge_get: service.hostBridgeGet.bind(service),
-      craft_state_workspace_observe: (a) => service.stateWorkspaceObserve(a),
-      craft_state_workspace_compare: (a) => service.stateWorkspaceCompare(a),
-      craft_workspace_observer_observe: (a) => service.workspaceObserverObserve(a),
-      craft_workspace_observer_get: (a) => service.workspaceObserverGet(a),
-      craft_autonomy_ladder_decide: (a) => service.autonomyLadderDecide(a),
-      craft_autonomy_ladder_get: (a) => service.autonomyLadderGet(a),
-      craft_work_coordinator_prepare: (a) => service.workCoordinatorPrepare(a),
-      craft_work_coordinator_attach_host_run: (a) => service.workCoordinatorAttachHostRun(a),
-      craft_work_coordinator_observe: (a) => service.workCoordinatorObserve(a),
-      craft_work_coordinator_handoff: (a) => service.workCoordinatorHandoff(a),
-      craft_work_coordinator_get: (a) => service.workCoordinatorGet(a),
-      craft_eval_campaign_create: (a) => service.evalCampaignCreate(a),
-      craft_eval_campaign_bind: (a) => service.evalCampaignBind(a),
-      craft_eval_campaign_advance: (a) => service.evalCampaignAdvance(a),
-      craft_eval_campaign_get: (a) => service.evalCampaignGet(a),
-      craft_eval_campaign_report: (a) => service.evalCampaignReport(a),
-      craft_evaluation_program_save: (a) => service.evaluationProgramSave(a),
-      craft_evaluation_program_due: (a) => service.evaluationProgramDue(a),
-      craft_evaluation_program_plan: (a) => service.evaluationProgramPlan(a),
-      craft_evaluation_program_report: (a) => service.evaluationProgramReport(a),
-      craft_adaptive_harness_recommend: (a) => service.adaptiveHarnessRecommend(a),
-      craft_managed_write_get: (a) => service.managedWriteGet(a),
-      craft_managed_write_rollback: (a) => service.managedWriteRollback(a),
-      craft_managed_run_create: (a) => service.managedRunCreate(a),
-      craft_managed_run_observe: (a) => service.managedRunObserve(a),
-      craft_managed_run_handoff: (a) => service.managedRunHandoff(a),
-      craft_managed_run_resume: (a) => service.managedRunResume(a),
-      craft_managed_run_fork_shadow: (a) => service.managedRunForkShadow(a),
-      craft_managed_run_get: (a) => service.managedRunGet(a),
       craft_campaign_runner_create: (a) => service.campaignRunnerCreate(a),
       craft_campaign_runner_claim: (a) => service.campaignRunnerClaim(a),
       craft_campaign_runner_bind: (a) => service.campaignRunnerBind(a),
@@ -34956,16 +35265,6 @@ var McpServer = class {
       craft_project_knowledge_discover: (a) => service.projectKnowledgeDiscover(a),
       craft_project_knowledge_resolve: (a) => service.projectKnowledgeResolve(a),
       craft_project_knowledge_propose_update: (a) => service.projectKnowledgeProposeUpdate(a),
-      craft_workspace_open: (a) => service.workspaceOpen(a),
-      craft_workspace_get: (a) => service.workspaceGet(a),
-      craft_workspace_checkpoint: (a) => service.workspaceCheckpoint(a),
-      craft_workspace_diff: (a) => service.workspaceDiff(a),
-      craft_workspace_human_change: (a) => service.workspaceHumanChange(a),
-      craft_workspace_restore: (a) => service.workspaceRestore(a),
-      craft_work_object_put: (a) => service.workObjectPut(a),
-      craft_work_object_list: (a) => service.workObjectList(a),
-      craft_workspace_impact: (a) => service.workspaceImpact(a),
-      craft_workspace_change_apply: (a) => service.workspaceChangeApply(a),
       craft_memory_remember: (a) => service.memoryRemember(a),
       craft_memory_transition: (a) => service.memoryTransition(a),
       craft_context_assemble: (a) => service.contextAssemble(a),
@@ -35031,12 +35330,6 @@ var McpServer = class {
       craft_host_run_get: (a) => service.hostRunGet(a),
       craft_host_run_cancel: (a) => service.hostRunCancel(a),
       craft_host_run_recover: (a) => service.hostRunRecover(a),
-      craft_work_launch_prepare: (a) => service.workLaunchPrepare(a),
-      craft_work_launch_decide: (a) => service.workLaunchDecide(a),
-      craft_work_launch_get: (a) => service.workLaunchGet(a),
-      craft_work_launch_retry: (a) => service.workLaunchRetry(a),
-      craft_work_delivery_observe: (a) => service.workDeliveryObserve(a),
-      craft_work_delivery_get: (a) => service.workDeliveryGet(a),
       craft_delivery_loop_refresh: (a) => service.deliveryLoopRefresh(a),
       craft_delivery_loop_get: (a) => service.deliveryLoopGet(a),
       craft_delivery_evaluation_case_save: (a) => service.deliveryEvaluationCaseSave(a),
@@ -35089,19 +35382,6 @@ var McpServer = class {
       craft_knowledge_context_work_launch_prepare: (a) => service.knowledgeContextWorkLaunchPrepare(a),
       craft_knowledge_context_work_launch_decide: (a) => service.knowledgeContextWorkLaunchDecide(a),
       craft_knowledge_context_work_launch_retry: (a) => service.knowledgeContextWorkLaunchRetry(a),
-      craft_acceptance_plan_save: (a) => service.acceptancePlanSave(a),
-      craft_acceptance_plan_get: (a) => service.acceptancePlanGet(a),
-      craft_acceptance_check_record: (a) => service.acceptanceCheckRecord(a),
-      craft_acceptance_human_review: (a) => service.acceptanceHumanReview(a),
-      craft_acceptance_evaluator_save: (a) => service.acceptanceEvaluatorSave(a),
-      craft_acceptance_evaluation_prepare: (a) => service.acceptanceEvaluationPrepare(a),
-      craft_acceptance_file_prepare: (a) => service.acceptanceFileEvaluationPrepare(a),
-      craft_acceptance_coverage_prepare: (a) => service.acceptanceCoverageEvaluationPrepare(a),
-      craft_acceptance_media_probe_prepare: (a) => service.acceptanceMediaProbePrepare(a),
-      craft_acceptance_evaluation_claim: (a) => service.acceptanceEvaluationClaim(a),
-      craft_acceptance_evaluation_recover: (a) => service.acceptanceEvaluationRecover(a),
-      craft_acceptance_evaluation_report: (a) => service.acceptanceEvaluationReport(a),
-      craft_acceptance_assess: (a) => service.acceptanceAssess(a),
       craft_verified_iteration_create: (a) => service.verifiedIterationCreate(a),
       craft_verified_iteration_get: (a) => service.verifiedIterationGet(a),
       craft_verified_iteration_assess: (a) => service.verifiedIterationAssess(a),
@@ -35214,10 +35494,6 @@ var McpServer = class {
       craft_docker_sandbox_probe: (a) => service.dockerSandboxProbe(a),
       craft_docker_sandbox_conformance: (a) => service.dockerSandboxConformance(a),
       craft_docker_sandbox_execute: (a) => service.dockerSandboxExecute(a),
-      craft_workspace_transaction_begin: (a) => service.workspaceTransactionBegin(a),
-      craft_workspace_transaction_commit: (a) => service.workspaceTransactionCommit(a),
-      craft_workspace_transaction_rollback: (a) => service.workspaceTransactionRollback(a),
-      craft_workspace_transaction_get: (a) => service.get("workspace_transaction", "transaction_id", a),
       craft_trajectory_script_compile: (a) => service.trajectoryScriptCompile(a),
       craft_trajectory_script_authorize: (a) => service.trajectoryScriptAuthorize(a),
       craft_trajectory_script_get: (a) => service.get("trajectory_script_proposal", "proposal_id", a),
@@ -35281,6 +35557,7 @@ var McpServer = class {
       craft_trace_replay_bundle: (a) => service.traceReplayBundle(a),
       craft_trace_case_compile: (a) => service.traceCaseCompile(a),
       craft_trace_retention_plan: (a) => service.traceRetentionPlan(a),
+      craft_trace_retention_sweep: (a) => service.traceRetentionSweep(a),
       craft_outcome_record: (a) => service.outcomeRecord(a),
       craft_evaluation_run_record: (a) => service.evaluationRunRecord(a),
       craft_evaluation_run_get: (a) => service.get("evaluation_run", "run_id", a),

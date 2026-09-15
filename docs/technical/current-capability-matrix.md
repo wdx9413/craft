@@ -1,7 +1,8 @@
-# Current Capability Matrix (v0.12.26)
+# Current Capability Matrix (v0.12.27)
 
 | Area | State | Boundary |
 |---|---|---|
+| Primary `craft` plugin composition | implemented and tested locally | one compact syscall surface reaches built-in Knowledge, Memory, Capability, Skill Quality and Workflow Evolution; sibling plugins are optional single-domain projections, not prerequisites |
 | Project Brain / Work Session | implemented and tested locally | editable goal/decision/material kernels plus a digest-pinned Context Manifest; Markdown remains source of truth |
 | Default Internal Host tools | implemented and tested | five bounded syscall actions; external tools remain explicitly routed through MCP/Host adapters |
 | CLI `run` vertical slice | implemented and tested locally | creates/continues Project Brain + Work Session and records outcome; model/provider credentials remain deployment configuration |

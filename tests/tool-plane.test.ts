@@ -26,6 +26,8 @@ test("tool name parsing keeps multi-word resources and honours trailing verbs", 
   assert.deepEqual(parseToolName("craft_capability_search"), { resource: "capability", operation: "search" });
   assert.deepEqual(parseToolName("craft_default_route_execute"), { resource: "default_route", operation: "execute" });
   assert.deepEqual(parseToolName("craft_verified_work_loop_receipt"), { resource: "verified_work_loop", operation: "receipt" });
+  assert.deepEqual(parseToolName("craft_memory_ledger_remember"), { resource: "memory_ledger", operation: "remember" });
+  assert.deepEqual(parseToolName("craft_memory_ledger_transition"), { resource: "memory_ledger", operation: "transition" });
   assert.deepEqual(parseToolName("craft_info"), { resource: "info", operation: "info" });
   assert.deepEqual(parseToolName("craft_something_unknownsuffix"), { resource: "something_unknownsuffix", operation: "info" });
   assert.deepEqual(parseToolName("not_prefixed"), { resource: "not_prefixed", operation: "info" });
@@ -126,6 +128,35 @@ test("craft_describe explains the catalog and then one exact operation", async (
     const missing = await call("craft_describe", { resource: "no_such_thing" });
     assert.equal(missing.found, false);
     assert.ok(typeof missing.hint === "string");
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("the primary syscall surface composes every built-in Craft component on demand", async () => {
+  const root = join(tmpdir(), `craft-primary-composition-${process.pid}-${Date.now()}`);
+  await mkdir(root, { recursive: true });
+  const store = await new CraftStore(craftPaths(root)).open();
+  const server = new McpServer(new CraftService(store), "syscall");
+  const describe = async (resource: string, operation: string): Promise<JsonObject> => {
+    const response = await server.handle({ id: resource, method: "tools/call", params: {
+      name: "craft_describe", arguments: { resource, operation },
+    } });
+    const result = response?.result as JsonObject;
+    assert.equal(result.isError, false, `${resource}.${operation}: ${JSON.stringify(result.content)}`);
+    return result.structuredContent as JsonObject;
+  };
+  try {
+    const expected = [
+      ["knowledge_source", "register", "craft_knowledge_source_register"],
+      ["memory_ledger", "remember", "craft_memory_ledger_remember"],
+      ["capability", "search", "craft_capability_search"],
+      ["evaluation_run", "record", "craft_evaluation_run_record"],
+      ["workflow_evolution", "observe", "craft_workflow_evolution_observe"],
+    ] as const;
+    for (const [resource, operation, tool] of expected) {
+      const contract = await describe(resource, operation);
+      assert.equal(contract.tool, tool);
+    }
+    assert.equal(server.tools.length, surfaceToolNames("syscall").length);
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 

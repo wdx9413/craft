@@ -82,6 +82,10 @@ const OPERATIONS: readonly string[] = [
   "fork", "merge", "split", "move", "copy", "clone", "attach", "detach", "assign", "notify", "request",
   "respond", "emit", "flush", "reset", "clear", "purge", "prune", "sweep", "rebuild", "reindex",
   "migrate", "upgrade", "replay", "estimate", "schedule", "queue", "release", "deliver", "accept", "reject",
+  // Memory Ledger is part of the primary composition. These verbs must remain
+  // semantic addresses on the syscall surface instead of degrading to an
+  // opaque resource name such as `memory_ledger_remember`.
+  "remember", "transition",
 ];
 
 const DESTRUCTIVE_OPERATIONS = new Set(["delete", "remove", "revoke", "purge", "rollback"]);
