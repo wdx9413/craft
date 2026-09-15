@@ -102,7 +102,7 @@ test("v0.12.19 keeps Console and Agent mode as a mode-neutral plan over verified
       const response = await mcp.handle({ id: name, method: "tools/call", params: { name, arguments: args } }); assert.equal((response?.result as JsonObject).isError, false, name);
     }
     assert.equal(new McpServer(f.service, "core").tools.some((tool) => tool.name === "craft_context_resolution_resolve"), true);
-    assert.equal(VERSION, "0.12.27");
+    assert.equal(VERSION, "0.12.28");
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 

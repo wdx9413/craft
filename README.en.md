@@ -1,6 +1,6 @@
 # Craft
 
-> Current release: v0.12.27. Craft is a general work runtime for people and AI. The default `craft` plugin includes Knowledge, Memory, Capability discovery, Skill Quality, and Workflow Evolution behind one shared control plane; each remains available as an optional standalone component. In Codex, the current app is the embedded execution host; Craft does not start another Codex CLI by default.
+> Current release: v0.12.28. Craft is a general work runtime for people and AI. The default `craft` plugin includes Knowledge, Memory, Capability discovery, Skill Quality, and Workflow Evolution behind one shared control plane; each remains available as an optional standalone component. In Codex, the current app is the embedded execution host; Craft does not start another Codex CLI by default.
 
 [中文](README.md) | [English](README.en.md)
 
@@ -44,7 +44,7 @@ See the [product architecture (Chinese)](docs/product/architecture.zh-CN.md) and
 - **Verified Autonomous Work (v0.12.13)**: joins Context Manifest, action authorization, the bounded Action Gateway, Host/tool receipts, state re-observation, mandatory independent acceptance, Artifact/Evidence, and the Delivery Gate into one single-agent path; drift enters `needs_replan`, and writes require approval plus platform Conformance. See [Verified Autonomous Work](docs/technical/modules/v01212-verified-autonomous-work.en.md).
 - **Runtime Completion (v0.12.13)**: bounded Action Gateway, independent Acceptance Gate, Durable Worker, Provider fallback, and digest-only A2A entry points share the same service/MCP base; real shell, browser, remote effects, and OS isolation remain explicit adapter boundaries. See [Runtime Completion](docs/technical/modules/v01213-runtime-completion.en.md).
 - **Generic Adapter Runtime (v0.12.26)**: Craft adds a versioned Adapter Manifest/Registry, cross-platform governed commands, OpenAPI import, durable runs, Context Manifest, trust curves, domain evaluators, and portable project handoffs. See [v0.12.26 Runtime](docs/technical/modules/v01226-runtime.md).
-- **Primary Plugin Composition (v0.12.27)**: the default `craft` plugin reaches all built-in domains through a compact syscall surface, while the sibling `craft-*` plugins remain optional single-domain installations. See [v0.12.27 Primary Plugin Composition](docs/technical/modules/v01227-primary-plugin-composition.md).
+- **Primary Plugin Composition (v0.12.28)**: the default `craft` plugin reaches all built-in domains through a compact syscall surface. `craft_knowledge_bootstrap_install` idempotently registers the bundled Evidence Wiki and Serena descriptors without reading external files or storing chat. The sibling `craft-*` plugins remain optional single-domain installations. See [Primary Plugin Composition](docs/technical/modules/v01228-primary-plugin-composition.md).
 - Automatic Orchestration Trial capture with pinned Agent Profile versions, dispatch and reroute traces, node costs and evidence, and terminal Outcomes.
 - Versioned Graders, provenance-preserving Grades, and Signoff Policies; a model judgment cannot masquerade as program proof.
 - Same-benchmark comparisons for Workflow, Agent Profile, and Harness Configuration versions, with aggregate quality, cost, duration, and failure-type deltas. Comparability requires the exact suite version, split, subject type, and case set.

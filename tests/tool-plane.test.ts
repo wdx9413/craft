@@ -94,7 +94,7 @@ test("a tool with no declared properties yields an empty optional list", () => {
 
 test("the syscall surface is O(1) in tools and far below the full surface", () => {
   const syscall = surfaceToolNames("syscall");
-  assert.equal(syscall.length, SYSCALL_TOOLS.length + 7);
+  assert.equal(syscall.length, SYSCALL_TOOLS.length + 8);
   const mounted = [...TOOLS, ...SYSCALL_TOOLS].filter((tool) => syscall.includes(tool.name));
   const measured = measureSurface(mounted);
   assert.equal(measured.tools, syscall.length);
@@ -136,15 +136,22 @@ test("the primary syscall surface composes every built-in Craft component on dem
   await mkdir(root, { recursive: true });
   const store = await new CraftStore(craftPaths(root)).open();
   const server = new McpServer(new CraftService(store), "syscall");
-  const describe = async (resource: string, operation: string): Promise<JsonObject> => {
-    const response = await server.handle({ id: resource, method: "tools/call", params: {
-      name: "craft_describe", arguments: { resource, operation },
-    } });
+  const call = async (name: string, args: JsonObject): Promise<JsonObject> => {
+    const response = await server.handle({ id: name, method: "tools/call", params: { name, arguments: args } });
     const result = response?.result as JsonObject;
-    assert.equal(result.isError, false, `${resource}.${operation}: ${JSON.stringify(result.content)}`);
+    assert.equal(result.isError, false, `${name}: ${JSON.stringify(result.content)}`);
     return result.structuredContent as JsonObject;
   };
+  const describe = async (resource: string, operation: string): Promise<JsonObject> => {
+    return call("craft_describe", { resource, operation });
+  };
   try {
+    const initialized = await call("craft_knowledge_bootstrap_install", {});
+    assert.deepEqual((initialized.sources as JsonObject[]).map((source) => source.id).sort(), [
+      "builtin.evidence-wiki", "builtin.serena-project-knowledge",
+    ]);
+    const reinitialized = await call("craft_knowledge_bootstrap_install", {});
+    assert.equal((reinitialized.sources as JsonObject[]).every((source) => source.status === "active"), true);
     const expected = [
       ["knowledge_source", "register", "craft_knowledge_source_register"],
       ["memory_ledger", "remember", "craft_memory_ledger_remember"],

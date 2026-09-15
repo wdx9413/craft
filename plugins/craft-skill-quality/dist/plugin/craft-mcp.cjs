@@ -25782,7 +25782,7 @@ function installKernelDelegateMethods(serviceClass) {
 }
 
 // src/application/craft-service.ts
-var VERSION = "0.12.27";
+var VERSION = "0.12.28";
 var CONFIDENCE2 = /* @__PURE__ */ new Set(["confirmed", "bounded", "unverified", "rejected"]);
 var TASK_STATUS = /* @__PURE__ */ new Set(["active", "paused", "completed", "cancelled"]);
 var VERSIONED_LIFECYCLE = /* @__PURE__ */ new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -32577,7 +32577,10 @@ var SYSCALL_PASSTHROUGH = [
   "craft_default_route_find",
   "craft_default_route_execute",
   "craft_task_checkpoint",
-  "craft_evidence_record"
+  "craft_evidence_record",
+  // Idempotent local setup for the built-in Knowledge / Memory descriptors. It
+  // deliberately registers metadata only; it never ingests external content.
+  "craft_knowledge_bootstrap_install"
 ];
 var OPERATIONS2 = [
   "create",
@@ -33163,7 +33166,10 @@ var SURFACE_RULES = [
 ];
 var COMPONENT_SURFACES = {
   "component-knowledge": /^craft_(wiki|knowledge|claim|relation|context_resolution|retrieval_adapter)/,
-  "component-memory": /^craft_(memory|knowledge_source|context_resolution|retrieval_adapter)/,
+  // Memory entries must retain their explicit source provenance. The bootstrap
+  // only registers Craft-owned descriptors, so it belongs to this bounded
+  // surface as well as Knowledge without granting external reads.
+  "component-memory": /^craft_(memory|knowledge_source|knowledge_bootstrap|context_resolution|retrieval_adapter)/,
   "component-capability": /^craft_(source|capability|logical|semantic)/,
   "component-skill-quality": /^craft_(evaluation|eval|benchmark|campaign|judge|grader|grade|signoff|trial|outcome|skill_proposal|verified_iteration|verification)/,
   "component-workflow-evolution": /^craft_(workflow_evolution|evaluation_model|experience_mine|experience_candidate|experience_shadow|route_workflow_proposal|workflow_(?:save|get|search|transition|rollback))/
@@ -33834,6 +33840,7 @@ var TOOL_DEFINITIONS = [
     ["profile_version", "task_id", "workspace_id"]
   ),
   tool("craft_knowledge_memory_install_builtins", "Register the built-in Evidence Wiki and Serena knowledge source descriptors; it never scans or writes external files."),
+  tool("craft_knowledge_bootstrap_install", "Idempotently register Craft's built-in Evidence Wiki and Serena descriptors for the complete primary plugin. It never scans external files or stores conversation content."),
   tool("craft_knowledge_source_register", "Register a digest-pinned Wiki, Serena, kefu, README, or custom Knowledge Source with explicit trust and read/write boundary.", ["kind", "label", "scope_kind", "scope_id", "locator", "content_digest"], false, ["source_id", "trust", "access"]),
   tool("craft_knowledge_source_list", "List active Knowledge Sources by exact optional scope.", [], true, ["scope_kind", "scope_id", "limit"]),
   tool("craft_knowledge_source_transition", "Disable or revoke one Knowledge Source without deleting history.", ["source_id", "status", "reason"]),
@@ -35611,6 +35618,7 @@ var McpServer = class {
       craft_capability_kit_conformance: service.capabilityKitConformance.bind(service),
       craft_capability_kit_distribution: service.capabilityKitDistribution.bind(service),
       craft_knowledge_memory_install_builtins: service.knowledgeMemoryInstallBuiltins.bind(service),
+      craft_knowledge_bootstrap_install: service.knowledgeMemoryInstallBuiltins.bind(service),
       craft_knowledge_source_register: service.knowledgeSourceRegister.bind(service),
       craft_knowledge_source_list: service.knowledgeSourceList.bind(service),
       craft_knowledge_source_transition: service.knowledgeSourceTransition.bind(service),

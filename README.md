@@ -1,6 +1,6 @@
 # Craft
 
-> 当前发布版本：v0.12.27。Craft 是面向人和 AI 的通用工作运行时：默认 `craft` 插件包含知识、记忆、能力发现、质量评测与 Workflow 演进；它们以同一套状态、策略、Receipt、评测与安全边界协同工作，也可按需作为独立组件使用。Codex 插件默认复用当前 App 作为 Embedded Host，不另起 Codex CLI。
+> 当前发布版本：v0.12.28。Craft 是面向人和 AI 的通用工作运行时：默认 `craft` 插件包含知识、记忆、能力发现、质量评测与 Workflow 演进；它们以同一套状态、策略、Receipt、评测与安全边界协同工作，也可按需作为独立组件使用。Codex 插件默认复用当前 App 作为 Embedded Host，不另起 Codex CLI。
 
 [中文](README.md) | [English](README.en.md)
 
@@ -54,7 +54,7 @@ Sandbox 能力采用“声明、诊断、黑盒一致性验证、精确版本票
 - **开发验证平面（v0.12.23）**：`VerificationPlane` 依据变更类别、effect、Candidate 和 Host 风险生成最小检查集，收集同环境 Evidence Receipt，并明确给出 `eligible`、`rejected` 或 `inconclusive`。它不执行命令；Candidate 仍须通过 Release Qualification。详见 [Verification Plane](docs/technical/modules/verification-plane.md)。
 - **模型评测与 Workflow Evolution（v0.12.24）**：`EvaluationModelProfile` 仅保存 Provider、模型、预算和环境变量名引用，默认禁止联网且从不存 API Key；`craft-workflow-evolution` 将多条脱敏执行观察提炼为最多两个设计轴的草案请求。草案经过独立评测、Signoff 和 Canary 后才可成为 `verified` Workflow，届时才进入 Capability 的可选集合。
 - **Trust Profile 与网页边界（v0.12.26）**：`TrustProfile` 将 Trial/Outcome/Evidence 汇总为按任务、项目、能力、模型、Host、effect 和数据范围限定的自主权建议；建议会过期、可撤销，且永远不等于授权。文件操作继续走 Action Gateway；网页 GET/HEAD 走无凭据、有界的 MCP 观察，浏览器点击、填表、提交只生成 Adapter Contract，由宿主插件执行并回传 Receipt。v0.12.26 增加 Generic Adapter SDK、跨平台 Command Adapter、OpenAPI 导入、Durable Runtime、Context Manifest、信任曲线、领域 Evaluator 和项目迁移契约。详见 [v0.12.26 Runtime](docs/technical/modules/v01226-runtime.md)。
-- **完整主插件组合（v0.12.27）**：默认 `craft` 不再被描述为只有编排核心：它通过固定 syscall 词表按需访问 Knowledge、Memory、Capability、Skill Quality 和 Workflow Evolution，因而不必把数百个工具 Schema 同时注入模型上下文。`craft-*` 子插件保留为单域独立入口，通常与完整插件二选一。详见 [v0.12.27 主插件组合](docs/technical/modules/v01227-primary-plugin-composition.md)。
+- **完整主插件组合（v0.12.28）**：默认 `craft` 不再被描述为只有编排核心：它通过固定 syscall 词表按需访问 Knowledge、Memory、Capability、Skill Quality 和 Workflow Evolution，因而不必把数百个工具 Schema 同时注入模型上下文。`craft_knowledge_bootstrap_install` 幂等登记内置 Evidence Wiki 和 Serena 描述符，但不自动沉淀聊天或读取外部文件。`craft-*` 子插件保留为单域独立入口，通常与完整插件二选一。详见 [主插件组合](docs/technical/modules/v01228-primary-plugin-composition.md)。
 - Orchestration Trial 自动归档：锁定 Agent Profile 精确版本，记录 Dispatch、重路由、节点结果、成本和证据，并在终态自动生成 Outcome。
 - 版本化 Grader、多来源 Grade 和 Signoff Policy；模型判断不会被记录成程序证明。
 - 同评测集版本对比：在 Suite 精确版本、分区、Subject 类型和 Case 集合一致时，聚合比较 Workflow、Agent Profile 或 Harness Configuration 的质量、成本、耗时与失败类型。
@@ -85,7 +85,7 @@ Sandbox 能力采用“声明、诊断、黑盒一致性验证、精确版本票
 - Managed Host Bridge / Execution Fabric：Fabric 生成的 Launch 会延后 Host 启动；只有精确 Manifest、Prompt 摘要和 Activation Receipt 再次通过，才可启动 Codex CLI 或 Claude Code。写入仍需显式审批；Host 终态自动触发状态再观察，不能冒充交付结果。
 - 可验证演进：本地 `workspace-write` 有基线/提交 Checkpoint 和显式恢复，外部 effect 不在回滚承诺内；Campaign 用已观察 Delivery 生成无正文配对报告，Candidate 必须经 held-out、Signoff、Evidence Canary 和人工结论才可被最小 Harness 选择器推荐。
 - Capability Connector：内置、用户批准的 GitHub/火山引擎 Skill 来源和 stdio/HTTPS MCP 统一登记为无敏感正文的来源元数据；发现、批准、Activation Profile 和调用 ticket 严格分离。Serena MCP 只允许只读 Asset。Connector 不自动安装、启停第三方服务、改写宿主 MCP 配置或保存凭据。
-- **syscall 工具面**：8 个通用动词（`describe` / `list` / `get` / `create` / `update` / `run` / `cancel` / `search`）加 `resource` + `operation` 寻址，替代按操作逐个暴露工具。注册表由既有工具表机械派生，**全部操作可达而挂载 schema 保持 O(1)**。实测 syscall 面 15 工具 5,294 字符（≈1.3k tokens），full 面 499 工具 205,505 字符 —— **降低 97.4%**。详见 [Tool Plane](docs/technical/modules/tool-plane.md)。
+- **syscall 工具面**：8 个通用动词（`describe` / `list` / `get` / `create` / `update` / `run` / `cancel` / `search`）加 `resource` + `operation` 寻址，替代按操作逐个暴露工具；另保留 8 个主路径直连操作（含一次性内置知识源登记）。注册表由既有工具表机械派生，**全部操作可达而挂载 schema 保持 O(1)**。详见 [Tool Plane](docs/technical/modules/tool-plane.md)。
 - **模型网关**：声明式支持 deepseek、火山引擎方舟、通义千问、Kimi、智谱 GLM、MiniMax、OpenAI GPT、Anthropic Claude 八家模型族。只保存端点、协议、模型分层与**环境变量名**，从不保存密钥；请求渲染与响应解析是纯函数，因此可在没有任何 API Key 时被声明、配置与验证。本版**不内置网络客户端**，默认 transport 明确拒绝并指出缺少的环境变量。详见 [Model Gateway](docs/technical/modules/model-gateway.md)。
 - **内建宿主（internal host）**：Craft 自己跑循环时，是与 Codex、Claude 并列的第三个 Host Driver，产出同样的 dispatch/receipt/事件记录。循环带六道外部熔断（步数、token、墙钟、无进展、动作重复、预算熔断），可调用的动作是显式白名单且只限读与记录。详见 [Internal Host](docs/technical/modules/internal-host.md)。
 - **资产信封与路由**：能力、知识、工作流共用统一信封；路由按信任、健康、effect、领域标签、预算与风险上限选择最小集合，并返回每一次拒绝的理由。
@@ -162,7 +162,7 @@ codex plugin add craft@craft-marketplace
 
 ## 接入 WorkBuddy
 
-`adapters/workbuddy-expert/` 是 WorkBuddy Expert 上传包，包含 `.codebuddy-plugin/plugin.json`、PNG 头像、Agent 定义、唯一的 `craft-route` Skill 及本地 syscall MCP 依赖；默认只开放约 15 个路由工具。`adapters/workbuddy-connector/` 是单独的完整治理 Connector，仍只携带 `craft-route`，需要时可显式升级到 Full MCP，不能上传到“专家”页面。两者共享同一 Craft 数据、Evidence 和 Policy，不会产生能力分叉。Expert 包可用于本地联调或提交 WorkBuddy 审核，但不代表已在其市场发布。使用前先安装 Craft，使相应的 `craft-mcp` 或 `craft-mcp-full` 在 `PATH` 中；市场化分发前还需要提供受控安装包或远程 HTTPS MCP，并通过 WorkBuddy 审核。
+`adapters/workbuddy-expert/` 是 WorkBuddy Expert 上传包，包含 `.codebuddy-plugin/plugin.json`、PNG 头像、Agent 定义、唯一的 `craft-route` Skill 及本地 syscall MCP 依赖；默认只开放 16 个路由工具。`adapters/workbuddy-connector/` 是单独的完整治理 Connector，仍只携带 `craft-route`，需要时可显式升级到 Full MCP，不能上传到“专家”页面。两者共享同一 Craft 数据、Evidence 和 Policy，不会产生能力分叉。Expert 包可用于本地联调或提交 WorkBuddy 审核，但不代表已在其市场发布。使用前先安装 Craft，使相应的 `craft-mcp` 或 `craft-mcp-full` 在 `PATH` 中；市场化分发前还需要提供受控安装包或远程 HTTPS MCP，并通过 WorkBuddy 审核。
 
 ## 通用 MCP
 

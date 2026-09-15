@@ -31,6 +31,9 @@ export const SYSCALL_VERBS: readonly string[] = [
 export const SYSCALL_PASSTHROUGH: readonly string[] = [
   "craft_info", "craft_default_route", "craft_default_route_resume", "craft_default_route_find",
   "craft_default_route_execute", "craft_task_checkpoint", "craft_evidence_record",
+  // Idempotent local setup for the built-in Knowledge / Memory descriptors. It
+  // deliberately registers metadata only; it never ingests external content.
+  "craft_knowledge_bootstrap_install",
 ];
 
 export type ToolEffect = "read_only" | "local_write" | "external_write" | "destructive";

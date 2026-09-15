@@ -15,6 +15,11 @@ ask the user to install a sibling component merely to use one of those built-in
 capabilities. The sibling plugins are optional standalone projections for a
 Host that wants only one bounded domain surface.
 
+For a fresh Craft data store, call `craft_knowledge_bootstrap_install` once
+before the first governed knowledge or memory operation. It only registers the
+bundled Evidence Wiki and Serena descriptors; it must not be treated as
+permission to read external project files or automatically persist the chat.
+
 ## Decide first
 
 - For a short answer, simple rewrite, or one-step read with no durable value, answer directly and do not call Craft.

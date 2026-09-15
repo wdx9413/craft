@@ -102,7 +102,7 @@
 
 - [v0.12.25 Trust Profile、网页操作边界与 HTTP MCP](technical/modules/v01225-trust-web-runtime.md)
 - [v0.12.26 Generic Adapter Runtime、跨平台命令与 Durable Work](technical/modules/v01226-runtime.md)
-- [v0.12.27 完整主插件组合与独立组件投影](technical/modules/v01227-primary-plugin-composition.md)
+- [v0.12.28 完整主插件组合与独立组件投影](technical/modules/v01228-primary-plugin-composition.md)
 
 - [中文架构说明](architecture.zh-CN.md)
 - [English architecture](architecture.en.md)

@@ -59,7 +59,7 @@ try {
     new Promise<never>((_, reject) => setTimeout(() => reject(new Error(errors || "MCP smoke test timed out")), 5_000)),
   ]) as Array<any>;
   assert.equal(responses[0].result.serverInfo.version, codexManifest.version);
-  assert.equal((responses[1].result.tools as Array<{ name: string }>).length, 15);
+  assert.equal((responses[1].result.tools as Array<{ name: string }>).length, 16);
   assert((responses[1].result.tools as Array<{ name: string }>).some((tool) => tool.name === "craft_describe"));
   assert(!(responses[1].result.tools as Array<{ name: string }>).some((tool) => tool.name === "craft_skill_proposal_publish"));
   assert.equal(responses[2].result.structuredContent.version, codexManifest.version);

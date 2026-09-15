@@ -1,4 +1,4 @@
-# v0.12.27 完整主插件组合
+# v0.12.28 完整主插件组合
 
 ## 产品边界
 
@@ -15,9 +15,11 @@
 1. `craft_describe` 先返回某个资源/操作的精确参数、effect、风险和审批要求。
 2. `craft_list`、`craft_get`、`craft_search` 读取相应资源。
 3. `craft_create`、`craft_update`、`craft_run`、`craft_cancel` 在 Policy 允许的前提下调用该资源操作。
-4. 路由、任务检查点和证据记录保留为少量直接入口，保障普通任务的最短路径。
+4. 路由、任务检查点、证据记录与 `craft_knowledge_bootstrap_install` 保留为少量直接入口，保障普通任务的最短路径。
 
-这让 `memory_ledger.remember`、`knowledge_source.register`、`capability.search`、`evaluation_run.record` 与 `workflow_evolution.observe` 都能由主插件按需访问，同时默认工具数保持为 15。
+这让 `memory_ledger.remember`、`knowledge_source.register`、`capability.search`、`evaluation_run.record` 与 `workflow_evolution.observe` 都能由主插件按需访问，同时默认工具数保持为 16。
+
+首次使用 `craft_knowledge_bootstrap_install` 会幂等登记内置 Craft Evidence Wiki 与受限 Serena 描述符。它不扫描外部文件、不导入聊天、更不自动生成长期记忆；写入知识和记忆仍须通过各自的证据、范围与敏感性校验。
 
 ## 安全与兼容
 
@@ -29,4 +31,4 @@
 
 ## 验证
 
-测试固定验证主 syscall 面能描述并到达五个内置领域，MCP bundle 启动后仍只暴露 15 个工具，且主插件、各独立组件和 full 面均完成 `initialize` / `tools/list` smoke。
+测试固定验证主 syscall 面能初始化内置知识来源、描述并到达五个内置领域，MCP bundle 启动后仍只暴露 16 个工具，且主插件、各独立组件和 full 面均完成 `initialize` / `tools/list` smoke。

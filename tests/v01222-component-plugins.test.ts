@@ -28,6 +28,9 @@ test("v0.12.24 exposes five bounded component surfaces without the full work run
   }
   assert(surfaceToolNames("component-knowledge").includes("craft_retrieval_adapter_evaluate"));
   assert(surfaceToolNames("component-memory").includes("craft_retrieval_adapter_evaluate"));
+  for (const surface of ["component-knowledge", "component-memory"]) {
+    assert(surfaceToolNames(surface).includes("craft_knowledge_bootstrap_install"));
+  }
 });
 
 test("component plugin manifests mount their exact surface", async () => {

@@ -15,7 +15,10 @@ export const SURFACE_RULES: ReadonlyArray<{ name: string; pattern: RegExp }> = [
 
 export const COMPONENT_SURFACES: Readonly<Record<string, RegExp>> = {
   "component-knowledge": /^craft_(wiki|knowledge|claim|relation|context_resolution|retrieval_adapter)/,
-  "component-memory": /^craft_(memory|knowledge_source|context_resolution|retrieval_adapter)/,
+  // Memory entries must retain their explicit source provenance. The bootstrap
+  // only registers Craft-owned descriptors, so it belongs to this bounded
+  // surface as well as Knowledge without granting external reads.
+  "component-memory": /^craft_(memory|knowledge_source|knowledge_bootstrap|context_resolution|retrieval_adapter)/,
   "component-capability": /^craft_(source|capability|logical|semantic)/,
   "component-skill-quality": /^craft_(evaluation|eval|benchmark|campaign|judge|grader|grade|signoff|trial|outcome|skill_proposal|verified_iteration|verification)/,
   "component-workflow-evolution": /^craft_(workflow_evolution|evaluation_model|experience_mine|experience_candidate|experience_shadow|route_workflow_proposal|workflow_(?:save|get|search|transition|rollback))/,
