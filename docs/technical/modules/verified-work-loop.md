@@ -22,6 +22,8 @@ VerifiedWorkLoop
 
 `prepare` 将现有 Task、Task Control、初始 State Snapshot、Work Launch、Task Run 固定为一个不含 Prompt、凭据或原始业务正文的 Manifest。`advance` 重新读取 Host Receipt、环境/预算摘要和状态 Snapshot；Host 进程结束不是交付成功，只有后续 Acceptance 通过才会得到可交付状态。
 
+对包含多个可验收步骤的长任务，可在本 Work Loop 下额外创建 [Durable Action Loop](durable-action-experience.md)。它把 Work Item、Host Receipt、再观察和 passed Acceptance 绑定为行动账本；不会替代主 Loop，也不会把“Host 声称完成”记为进度。
+
 `decide` 是人工操作的唯一入口：批准已准备的本地写 Launch、提交人工验收、或登记 `HumanStateEvent`。后者同时生成可查询的失效记录并使当前 Loop 停在 `needs_replan`；旧计划不会因为模型仍在上下文中就被继续使用。`resume` 在恢复前重新观察环境、预算和 Workspace，任何漂移都要求新建准备路径。
 
 ## State Workspace

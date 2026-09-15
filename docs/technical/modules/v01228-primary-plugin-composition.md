@@ -2,9 +2,20 @@
 
 ## 产品边界
 
-`craft` 是默认安装入口，包含 Core、Knowledge、Memory、Capability discovery、Skill Quality 和 Workflow Evolution。它们共用同一份 Craft 数据、策略、证据与评测账本；安装主插件不需要再安装任何 `craft-*` 子插件。
+`craft` 是默认安装入口，包含 Core、Context（Knowledge + Memory）、Capability discovery、Quality 和受限 Workflow Evolution。它们共用同一份 Craft 数据、策略、证据与评测账本；安装主插件不需要再安装任何 `craft-*` 子插件。实现主体不是插件，而是可被任意 Host 调用的 Craft Runtime/MCP。
 
-子插件不是主插件的依赖，而是同一运行时的单域投影：当用户只希望给已有 Host 增加知识、记忆、能力发现、Skill 评测或 Workflow 演进之一时，可单独安装相应组件。通常应当与主插件二选一，避免给同一个 Host 安装重复工具面。
+子插件不是主插件的依赖，而是同一 Runtime 的 MCP 安装投影：当用户只希望给已有 Host 增加 Context、知识、记忆、能力发现或通用 Quality 时，可单独安装对应 Plugin，也可直接配置 `craft-mcp --product <name>`。通常应当与主插件二选一，避免给同一个 Host 安装重复工具面。`craft-knowledge` 与 `craft-memory` 是正式单域入口；`craft-skill-quality` 是 `quality` 的兼容名称；`craft-workflow-evolution` 只能生成草案，不能独立形成发布闭环。
+
+| 产品 | 公开入口 | Runtime 工具面 |
+| --- | --- | --- |
+| 完整 Craft | `craft-mcp --product full` | 紧凑 syscall |
+| Context | `craft-mcp --product context` | Knowledge + Memory + Context Receipt |
+| Knowledge | `craft-mcp --product knowledge` | KnowledgeSource、Wiki、Claim、检索 |
+| Memory | `craft-mcp --product memory` | MemoryLedger、范围化解析、撤销 |
+| Capability | `craft-mcp --product capability` | 发现、去重、健康、最小激活 |
+| Quality | `craft-mcp --product quality` | Subject、Case、Trial、Grader、比较 |
+| Evolution | `craft-mcp --product evolution` | Candidate / Workflow draft |
+| 管理 | `craft-mcp --product admin` | 完整原始工具面 |
 
 ## 为什么不是把所有操作直接暴露出来
 
@@ -27,8 +38,9 @@
 - 每次调用仍使用原操作的输入校验、Policy、effect、审批与 Receipt 规则。
 - 不认识的资源或操作失败关闭；不能借由 syscall 绕过权限。
 - `memory_ledger.remember` 和 `memory_ledger.transition` 被纳入正式操作词表，避免退化成不透明资源名。
-- `craft-mcp-full` 仍是显式兼容入口，供需要旧有直接工具名的管理场景使用。
+- `craft-mcp-full` 和 `--surface` 仍是显式兼容入口；新的管理配置应使用 `craft-mcp --product admin`。
+- `craft_info.data_space_id` 是无正文的数据空间身份；不同 ID 的组件不得默认共用 Ledger、Receipt 或 Evidence。
 
 ## 验证
 
-测试固定验证主 syscall 面能初始化内置知识来源、描述并到达五个内置领域，MCP bundle 启动后仍只暴露 16 个工具，且主插件、各独立组件和 full 面均完成 `initialize` / `tools/list` smoke。
+测试固定验证主 syscall 面能初始化内置知识来源、描述并到达五个内置领域，MCP bundle 启动后仍只暴露 16 个工具；`craft-context` 还覆盖来源 bootstrap、范围化记忆与 Context Receipt，`craft-quality` 与其兼容名工具面完全一致，主插件、各独立组件和 full 面均完成 `initialize` / `tools/list` smoke。

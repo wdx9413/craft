@@ -22,6 +22,8 @@ Refinement（来源 + Evidence + 假设 + 最多两个设计轴的 Diff）
 
 `signals` 只从同一 Task 的失败 Acceptance 和已通过 Outcome 产生复盘提示，不自动修改 Harness。下一轮由 `resolve` 选择与 Session 相符且未过期的临时 Refinement，以及已完成治理的正式 Refinement，并形成不含正文的 `HarnessResolutionReceipt`。因此“产生候选”和“真正进入下一轮上下文”是两个可审计步骤。
 
+更底层的观察、失败模式和干预接受/拒绝理由可由 [Experience Ledger](durable-action-experience.md) 留存。该账本仅服务维护与评测，执行 Host 不能把未验证诊断模式当作临时提示绕过当前 Skill/Workflow 边界。
+
 ## Stateful Compute Host
 
 `StatefulComputeKernel` 是 Host 无关的控制协议，不是 REPL 实现或执行器：

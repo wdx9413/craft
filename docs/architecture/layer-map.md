@@ -44,6 +44,6 @@ Memory 和 Knowledge 的真实能力以 MCP component surface 为协议真相：
 
 - 只需要调用能力时，优先使用 MCP，适配成本最低、跨宿主最好。
 - 需要宿主内的路由提示、渐进式上下文和可见入口时，再用薄插件包装同一个 MCP surface。
-- `craft-memory`、`craft-knowledge` 可以独立安装；完整 `craft` 作为组合插件提供完整 MCP，不复制子插件代码，也不强制所有宿主安装一堆组件。
+- `craft-context`、`craft-capability`、`craft-quality` 可以独立安装；完整 `craft` 作为组合插件提供完整 MCP，不复制子插件代码，也不强制所有宿主安装一堆组件。`craft-memory`、`craft-knowledge` 与 `craft-skill-quality` 是兼容投影。
 
 这避免把每个能力同时实现成多套插件协议。未来新增宿主只需做一个薄包装器，核心能力和安全边界仍由同一份 MCP/Service 实现提供。

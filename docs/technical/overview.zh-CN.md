@@ -55,6 +55,11 @@ Capability Source(s) ──mirror──> Logical Capability ──pins──> Lo
 Capability Connector / Capability Asset ──selected by──> Activation Profile ──issues──> Capability Ticket / Call Receipt
 Activation Profile ──pins──> Host Activation Manifest ──authorizes──> Managed Host Bridge ──joins──> Execution Fabric ──re-observes──> Verified Work Loop Receipt
 Task Run + Host Receipt + Re-observation + Platform Preflight ──attests──> Runtime Assurance ──gates──> Eval Campaign advance
+Host Session (continuous facts) ──maps──> Canonical Trace <──maps── Independent Outcome Observer (actual state)
+Remote Tenant + Principal/Scope Receipt ──binds──> opaque Remote Task Handle ──guards──> get/result/cancel/stream
+Publisher Key ──signs──> Supply-chain Attestation ──supplements──> Certification / Signoff
+A2A v1 Card + consumed Federated Grant ──projects──> bounded remote Task
+Two Host Sessions + independent Observations ──measure──> Runtime Acceptance Campaign
 Execution Fabric (local_write) ──scopes──> Managed Write Transaction ──commits/approved restores──> Workspace Checkpoint
 Task ──compiled to──> Agent IR ──lowered to──> Workflow / Orchestration Plan
 Task ──has sourced, correctable──> Context Profile
@@ -106,6 +111,7 @@ Observed Delivery ──pairs──> Eval Campaign Report ──with Canary Evid
 - [Workflow / Verification / Signoff](modules/workflow-signoff.md)
 - [Runtime 与宿主接入](modules/runtime-integration.md)
 - [Runtime Assurance & Evidence Loop](modules/runtime-assurance-evidence-loop.md)：将终态 Host 回执、再观察、写入边界与 Campaign 聚合固定为同一份可核验证据。
+- [远程 MCP、会话协议与独立结果观察](modules/remote-mcp-session-observer.md)：远程授权失败关闭，Host 连续事实与独立观察统一进入 Canonical Trace。
 - [Codex CLI Host Driver](modules/codex-host-driver.md)
 - [Claude Code Host Driver](modules/claude-host-driver.md)
 - [Managed Host Runs：后台运行、进度与取消](modules/managed-host-runs.md)

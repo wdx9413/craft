@@ -1,6 +1,6 @@
 # Knowledge Source、Memory Ledger 与 Context Resolution
 
-v0.12.19 将知识来源、可用记忆和上下文装配收敛为一个控制面 Module。它不替代 Evidence Wiki、Serena 或 `kefu_llm_wiki`；这些系统保留各自的内容与维护职责。
+v0.12.19 将知识来源、可用记忆和上下文装配收敛为一个控制面 Module。它不替代 Evidence Wiki、Serena 或用户已有知识库；这些系统保留各自的内容与维护职责。
 
 ```text
 知识来源描述符
@@ -12,13 +12,13 @@ v0.12.19 将知识来源、可用记忆和上下文装配收敛为一个控制�
 
 ## Knowledge Source
 
-`KnowledgeSource` 统一 `evidence_wiki`、`serena`、`kefu_wiki`、`project_note`、`readme` 与 `custom` 的 scope、digest、trust 和 access：
+`KnowledgeSource` 统一 Evidence Wiki、Serena、旧知识库、项目说明、README 与自定义来源的 scope、digest、trust 和 access：
 
 - `read_only`：只允许提供受限上下文；
 - `proposal_only`：只能提出外部内容更新建议；
 - 没有任何类型允许 Craft 直接修改外部 Wiki、Serena 或 README。
 
-默认可登记 Craft Evidence Wiki 与 Serena 描述符；`kefu_llm_wiki` 通过 `kefu_wiki` 来源接入。首次接入是摘要固定的只读描述，不同步草稿、不导入原始会话，也不把外部 review 自动等同为 Craft 的 Evidence/Signoff。
+默认可登记 Craft Evidence Wiki 与 Serena 描述符。外部知识库首次接入是摘要固定的只读描述，不同步草稿、不导入原始会话，也不把外部 review 自动等同为 Craft 的 Evidence/Signoff。
 
 ## Memory Ledger
 

@@ -1,10 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
-import { chmodSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import type { JsonObject } from "./store.ts";
 import { CraftStore } from "./store.ts";
-import { craftPaths } from "./paths.ts";
 import { TRACE_SCHEMA, TRACE_SCHEMA_REVISION } from "./runtime-truth.ts";
+import { LocalTraceArchiveStore, type TraceArchivePointer, type TraceArchiveStore } from "./trace-archive-store.ts";
 
 /** Current write format. Legacy callers may still import this name. */
 export const TRACE_SCHEMA_VERSION = TRACE_SCHEMA;
@@ -62,7 +60,8 @@ function payload(record: JsonObject): JsonObject {
  */
 export class TraceKernel {
   readonly store: CraftStore;
-  constructor(store: CraftStore) { this.store = store; }
+  readonly archives: TraceArchiveStore;
+  constructor(store: CraftStore, archives: TraceArchiveStore = new LocalTraceArchiveStore(store.paths.logsDir)) { this.store = store; this.archives = archives; }
 
   start(args: JsonObject): JsonObject {
     const taskId = text(args.task_id, "task_id");
@@ -130,12 +129,23 @@ export class TraceKernel {
     return { trace: saved, event, idempotent: false };
   }
 
-  get(args: JsonObject): JsonObject { const trace = this.store.get("trace", text(args.trace_id, "trace_id")); return { trace, events: this.store.list("trace_event", Number.MAX_SAFE_INTEGER, (item) => item.trace_id === trace.id).sort((a, b) => Number(a.sequence) - Number(b.sequence)), feedback: this.store.list("trace_feedback", Number.MAX_SAFE_INTEGER, (item) => item.trace_id === trace.id) }; }
+  get(args: JsonObject): JsonObject {
+    const traceId = text(args.trace_id, "trace_id"); const trace = this.store.find("trace", traceId);
+    if (trace) return { trace, events: this.store.list("trace_event", Number.MAX_SAFE_INTEGER, (item) => item.trace_id === trace.id).sort((a, b) => Number(a.sequence) - Number(b.sequence)), feedback: this.store.list("trace_feedback", Number.MAX_SAFE_INTEGER, (item) => item.trace_id === trace.id) };
+    const archive = this.store.find("trace_archive", traceId); if (!archive) throw new Error(`Unknown trace: ${traceId}`);
+    const bundle = this.archives.read(this.archivePointer(archive));
+    return { trace: bundle.trace, events: bundle.events, feedback: bundle.feedback, archived: true, archive };
+  }
 
   query(args: JsonObject = {}): JsonObject {
     const limit = args.limit === undefined ? 100 : Number(args.limit); if (!Number.isInteger(limit) || limit < 1 || limit > 10_000) throw new Error("limit must be an integer between 1 and 10000");
     const traceId = args.trace_id === undefined ? null : text(args.trace_id, "trace_id"); const taskId = args.task_id === undefined ? null : text(args.task_id, "task_id"); const eventKind = args.event_kind === undefined ? null : text(args.event_kind, "event_kind");
-    const events = this.store.list("trace_event", Number.MAX_SAFE_INTEGER, (item) => (traceId === null || item.trace_id === traceId) && (eventKind === null || item.event_kind === eventKind) && (taskId === null || this.store.find("trace", String(item.trace_id))?.task_id === taskId)).sort((a, b) => String(a.created_at).localeCompare(String(b.created_at))).slice(0, limit);
+    const hot = this.store.list("trace_event", Number.MAX_SAFE_INTEGER, (item) => (traceId === null || item.trace_id === traceId) && (eventKind === null || item.event_kind === eventKind) && (taskId === null || this.store.find("trace", String(item.trace_id))?.task_id === taskId));
+    const archived: JsonObject[] = this.store.list("trace_archive", Number.MAX_SAFE_INTEGER, (archive) => (traceId === null || archive.trace_id === traceId) && (taskId === null || archive.task_id === taskId)).flatMap((archive): JsonObject[] => {
+      const bundle = this.archives.read(this.archivePointer(archive));
+      return bundle.events.filter((event) => eventKind === null || event.event_kind === eventKind).map((event) => ({ ...event, archived: true, archive_uri: archive.archive_uri }));
+    });
+    const events = [...hot, ...archived].sort((a, b) => String(a.created_at ?? "").localeCompare(String(b.created_at ?? ""))).slice(0, limit);
     return { schema: TRACE_SCHEMA_VERSION, count: events.length, events };
   }
 
@@ -172,16 +182,13 @@ export class TraceKernel {
       .filter((trace) => Date.parse(String(trace.last_event_at ?? trace.updated_at ?? trace.started_at)) < cutoff)
       .slice(0, limit);
     const archives: string[] = []; let deleted = 0;
-    const paths = craftPaths(this.store.paths.root); const archiveDir = join(paths.logsDir, "trace-archive"); mkdirSync(archiveDir, { recursive: true });
     for (const trace of candidates) {
       const result = this.get({ trace_id: trace.id }); const events = result.events as JsonObject[]; const feedback = result.feedback as JsonObject[];
-      const archiveDigest = digest({ trace, events, feedback });
-      const archive = { schema: TRACE_SCHEMA_VERSION, trace_id: trace.id, archived_at: now, cutoff: new Date(cutoff).toISOString(), trace, events, feedback, archive_digest: archiveDigest };
-      const path = join(archiveDir, `${trace.id}.${String(trace.version)}.${archiveDigest.slice(7, 23)}.json`);
-      const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
-      writeFileSync(temporary, `${JSON.stringify(archive, null, 2)}\n`, { encoding: "utf8", mode: 0o600 }); renameSync(temporary, path); if (process.platform !== "win32") chmodSync(path, 0o600);
+      const existing = this.store.find("trace_archive", String(trace.id));
+      const archive = existing ? this.archivePointer(existing) : this.archives.write({ trace_id: String(trace.id), trace_version: Number(trace.version), archived_at: now, trace, events, feedback });
+      if (!existing) this.store.create("trace_archive", String(trace.id), { trace_id: trace.id, trace_version: trace.version, task_id: trace.task_id, status: trace.status, archived_at: now, last_event_at: trace.last_event_at ?? trace.updated_at, event_count: events.length, feedback_count: feedback.length, archive_storage: archive.storage, archive_locator: archive.locator, archive_uri: archive.uri, archive_format: archive.format, content_digest: archive.content_digest, bytes: archive.bytes });
       this.store.removeTraceRecords(String(trace.id), events.map((event) => String(event.id)), feedback.map((item) => String(item.id)));
-      archives.push(path); deleted += 1;
+      archives.push(archive.uri); deleted += 1;
     }
     return { schema: TRACE_SCHEMA_VERSION, now, max_days: maxDays, cutoff: new Date(cutoff).toISOString(), scanned: candidates.length, archived: archives.length, deleted, archives };
   }
@@ -189,5 +196,9 @@ export class TraceKernel {
   appendTrial(args: JsonObject): JsonObject {
     const trialId = text(args.trial_id, "trial_id"); const traceId = `trial:${trialId}`; if (!this.store.find("trace", traceId)) this.start({ trace_id: traceId, task_id: String(this.store.get("trial", trialId).task_id), trial_id: trialId, environment_fingerprint: args.environment_fingerprint });
     return this.append({ ...args, trace_id: traceId, event_kind: args.event_kind ?? args.event_type, actor: args.actor ?? "system", source: args.source ?? "trial", trust: args.trust ?? (args.source === "human_observed" ? "human" : "observed"), data: args.data ?? {}, input_refs: args.input_refs ?? [], output_refs: [...strings(args.artifact_ids, "artifact_ids"), ...strings(args.evidence_ids, "evidence_ids")] });
+  }
+
+  private archivePointer(record: JsonObject): TraceArchivePointer {
+    return { storage: String(record.archive_storage) as TraceArchivePointer["storage"], format: String(record.archive_format) as TraceArchivePointer["format"], locator: text(record.archive_locator, "archive_locator"), uri: text(record.archive_uri, "archive_uri"), content_digest: text(record.content_digest, "archive content_digest"), bytes: Number(record.bytes) };
   }
 }

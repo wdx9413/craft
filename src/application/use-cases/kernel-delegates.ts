@@ -6,6 +6,9 @@ import { installCapabilityLifecycleMethods } from "./capability-lifecycle.ts";
 import { installMemoryConsolidationMethods } from "./memory-consolidation.ts";
 import { installRemoteInteropMethods } from "./remote-interop.ts";
 import { installPlatformMethods } from "./platform.ts";
+import { installTurnCognitiveMethods } from "./turn-cognitive.ts";
+import { installHostSessionMethods } from "./host-session.ts";
+import { installDurableExperienceMethods } from "./durable-experience.ts";
 
 /** Thin application use cases that delegate to one owned domain kernel. */
 declare module "../craft-service.ts" {
@@ -21,6 +24,17 @@ declare module "../craft-service.ts" {
     contextResolutionGet(args: JsonObject): JsonObject;
     retrievalAdapterConfigure(args: JsonObject): JsonObject;
     retrievalAdapterEvaluate(args: JsonObject): JsonObject;
+    turnPolicySave(args: JsonObject): JsonObject;
+    turnPolicyGet(args: JsonObject): JsonObject;
+    turnProposalSubmit(args: JsonObject): JsonObject;
+    turnHostAdapterSave(args: JsonObject): JsonObject;
+    turnHookPlan(args: JsonObject): JsonObject;
+    turnIntakeAssess(args: JsonObject): JsonObject;
+    turnReceiptGet(args: JsonObject): JsonObject;
+    turnMemoryCandidateList(args?: JsonObject): JsonObject;
+    turnMemoryCandidateDecide(args: JsonObject): JsonObject;
+    turnEvaluationCaseSave(args: JsonObject): JsonObject;
+    turnEvaluationRun(args: JsonObject): JsonObject;
     traceStart(args: JsonObject): JsonObject;
     traceAppend(args: JsonObject): JsonObject;
     traceObserve(args: JsonObject): JsonObject;
@@ -51,6 +65,25 @@ declare module "../craft-service.ts" {
     platformAuthorize(args: JsonObject): JsonObject;
     platformObserve(args: JsonObject): JsonObject;
     platformObservabilityExport(args: JsonObject): JsonObject;
+    hostSessionOpen(args: JsonObject): JsonObject;
+    hostSessionAppend(args: JsonObject): JsonObject;
+    hostSessionResume(args: JsonObject): JsonObject;
+    hostSessionGet(args: JsonObject): JsonObject;
+    outcomeObserverObserve(args: JsonObject): JsonObject;
+    outcomeObserverGet(args: JsonObject): JsonObject;
+    durableActionLoopCreate(args: JsonObject): JsonObject;
+    durableActionLoopNext(args: JsonObject): JsonObject;
+    durableActionLoopPropose(args: JsonObject): JsonObject;
+    durableActionLoopDispatch(args: JsonObject): JsonObject;
+    durableActionLoopReport(args: JsonObject): JsonObject;
+    durableActionLoopResume(args: JsonObject): JsonObject;
+    durableActionLoopGet(args: JsonObject): JsonObject;
+    experienceLedgerObserve(args: JsonObject): JsonObject;
+    experienceLedgerCompile(args: JsonObject): JsonObject;
+    experienceLedgerPropose(args: JsonObject): JsonObject;
+    experienceLedgerEvaluate(args: JsonObject): JsonObject;
+    experienceLedgerDecide(args: JsonObject): JsonObject;
+    experienceLedgerGet(args: JsonObject): JsonObject;
   }
 }
 
@@ -61,4 +94,7 @@ export function installKernelDelegateMethods(serviceClass: typeof CraftService):
   installMemoryConsolidationMethods(serviceClass);
   installRemoteInteropMethods(serviceClass);
   installPlatformMethods(serviceClass);
+  installTurnCognitiveMethods(serviceClass);
+  installHostSessionMethods(serviceClass);
+  installDurableExperienceMethods(serviceClass);
 }

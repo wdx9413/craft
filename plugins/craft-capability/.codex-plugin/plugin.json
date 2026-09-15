@@ -1,6 +1,6 @@
 {
   "name": "craft-capability",
-  "version": "0.12.28",
+  "version": "0.12.30",
   "description": "Standalone discovery and governance for Skills, MCP tools, Workflows, and adapters.",
   "author": { "name": "wdx9413", "url": "https://github.com/wdx9413" },
   "homepage": "https://github.com/wdx9413/craft",

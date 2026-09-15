@@ -60,6 +60,13 @@ test("MCP negotiates protocols, lists tools, dispatches every handler, and repor
       const response = await server.handle({ id: name, method: "tools/call", params: { name, arguments: {} } });
       assert.equal((response?.result as Record<string, unknown>).isError, true, name);
     }
+    for (const name of ["craft_supply_chain_publisher_register", "craft_supply_chain_attest", "craft_supply_chain_attestation_assert", "craft_supply_chain_attestation_revoke",
+      "craft_remote_tenant_register", "craft_remote_task_bind", "craft_remote_task_authorize", "craft_remote_task_revoke", "craft_remote_task_get",
+      "craft_a2a_v1_discover", "craft_a2a_v1_submit", "craft_a2a_v1_task_get", "craft_a2a_v1_cancel",
+      "craft_runtime_acceptance_plan", "craft_runtime_acceptance_record", "craft_runtime_acceptance_evaluate", "craft_runtime_acceptance_get"]) {
+      const response = await server.handle({ id: name, method: "tools/call", params: { name, arguments: {} } });
+      assert.equal((response?.result as Record<string, unknown>).isError, true, name);
+    }
 
     const calls: Record<string, Record<string, unknown>> = {
       craft_info: {}, craft_source_list: {}, craft_semantic_status: {}, craft_task_list: {}, craft_artifact_list: {},
@@ -390,7 +397,7 @@ test("MCP stdio default runtime accepts buffered initialization", async () => {
     const serving = serveMcpStdio({ mode: "full", input, write: (line) => output.push(line) });
     input.end('{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}\n');
     await serving;
-    assert.equal((JSON.parse(output[0]) as { result: { serverInfo: { version: string } } }).result.serverInfo.version, "0.12.28");
+    assert.equal((JSON.parse(output[0]) as { result: { serverInfo: { version: string } } }).result.serverInfo.version, "0.12.30");
   } finally { if (original === undefined) delete process.env.CRAFT_DATA_DIR; else process.env.CRAFT_DATA_DIR = original; await rm(root, { recursive: true, force: true }); }
 });
 

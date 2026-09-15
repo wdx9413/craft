@@ -1,0 +1,24 @@
+{
+  "name": "craft-quality",
+  "version": "0.12.30",
+  "description": "Standalone repeatable evaluation and promotion evidence for Agent assets and task outcomes.",
+  "author": { "name": "wdx9413", "url": "https://github.com/wdx9413" },
+  "homepage": "https://github.com/wdx9413/craft",
+  "repository": "https://github.com/wdx9413/craft",
+  "license": "MIT",
+  "keywords": ["evaluation", "quality", "grader", "workflow", "mcp"],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Craft Quality",
+    "shortDescription": "Evaluate Skills, MCPs, Workflows, and Agent outcomes.",
+    "longDescription": "Freeze a versioned Subject, cases, environment, budget, and graders; compare repeated trials and produce evidence-backed eligibility. It does not publish, activate, or execute an ungoverned candidate.",
+    "developerName": "wdx9413",
+    "category": "Developer Tools",
+    "brandColor": "#000000",
+    "composerIcon": "./assets/craft-icon.svg",
+    "logo": "./assets/craft-icon.svg",
+    "capabilities": ["Subject evaluation", "Grader calibration", "Baseline comparison", "Promotion evidence", "Verification planning"],
+    "defaultPrompt": ["Use Craft Quality to evaluate this candidate against a fixed baseline. First state the Subject, cases, environment, budget, and graders; then report eligible, rejected, or inconclusive without publishing anything."]
+  }
+}

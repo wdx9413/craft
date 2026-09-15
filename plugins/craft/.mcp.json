@@ -4,8 +4,8 @@
       "command": "node",
       "args": [
         "dist/plugin/craft-mcp.cjs",
-        "--surface",
-        "syscall"
+        "--product",
+        "full"
       ],
       "cwd": "."
     }

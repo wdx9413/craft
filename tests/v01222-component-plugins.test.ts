@@ -3,17 +3,45 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { COMPONENT_SURFACE_NAMES, McpServer, surfaceToolNames } from "../src/mcp.ts";
+import { COMPONENT_SURFACE_NAMES, McpServer, domainSurfaceOf, surfaceToolNames } from "../src/mcp.ts";
+import { surfaceToolNames as resolveSurfaceToolNames } from "../src/interfaces/mcp/surface-registry.ts";
 import { assertExecutionHostMode, defaultExecutionHostMode, executionHostDescriptor } from "../src/host-protocol.ts";
 import { CraftService, VERSION } from "../src/service.ts";
 import { CraftStore } from "../src/store.ts";
 import { craftPaths } from "../src/paths.ts";
+import { dataSpaceId } from "../src/data-space.ts";
+import { MCP_PRODUCT_NAMES, productSurfaceOf, resolveMcpProductMode } from "../src/interfaces/mcp/product-launch.ts";
 
-const components = ["craft-knowledge", "craft-memory", "craft-capability", "craft-skill-quality", "craft-workflow-evolution"] as const;
+const components = ["craft-context", "craft-quality", "craft-knowledge", "craft-memory", "craft-capability", "craft-skill-quality", "craft-workflow-evolution"] as const;
 
-test("v0.12.24 exposes five bounded component surfaces without the full work runtime", () => {
+test("public MCP products resolve to bounded Runtime surfaces while legacy surfaces remain an explicit escape hatch", () => {
+  assert.deepEqual(MCP_PRODUCT_NAMES, ["full", "context", "knowledge", "memory", "capability", "quality", "evolution", "admin"]);
+  assert.equal(productSurfaceOf("full"), "syscall");
+  assert.equal(productSurfaceOf("context"), "component-context");
+  assert.equal(productSurfaceOf("knowledge"), "component-knowledge");
+  assert.equal(productSurfaceOf("memory"), "component-memory");
+  assert.equal(productSurfaceOf("capability"), "component-capability");
+  assert.equal(productSurfaceOf("quality"), "component-quality");
+  assert.equal(productSurfaceOf("evolution"), "component-workflow-evolution");
+  assert.equal(productSurfaceOf("admin"), "full");
+  assert.equal(resolveMcpProductMode([], {}), "syscall");
+  assert.equal(resolveMcpProductMode(["--product", "context"], {}), "component-context");
+  assert.equal(resolveMcpProductMode(["--surface", "component-memory"], {}), "component-memory");
+  assert.equal(resolveMcpProductMode([], { CRAFT_MCP_PRODUCT: "quality" }), "component-quality");
+  assert.equal(resolveMcpProductMode(["--product", "memory", "--surface", "component-memory"], {}), "component-memory");
+  assert.throws(() => resolveMcpProductMode(["--product", "unknown"], {}), /Unknown Craft MCP product/);
+  assert.throws(() => resolveMcpProductMode(["--product"], {}), /requires a value/);
+  assert.throws(() => resolveMcpProductMode(["--surface", "--product"], {}), /requires a value/);
+  assert.throws(() => resolveMcpProductMode(["--product", "context", "--product", "context"], {}), /only once/);
+  assert.throws(() => resolveMcpProductMode(["--product", "context", "--surface", "component-memory"], {}), /conflict/);
+  assert.throws(() => resolveMcpProductMode([], { CRAFT_MCP_PRODUCT: "context", CRAFT_MCP_SURFACE: "component-memory" }), /conflict/);
+});
+
+test("component products expose a deep context and generic quality surface without the full work runtime", () => {
   assert.deepEqual(COMPONENT_SURFACE_NAMES, components.map((name) => `component-${name.slice(6)}`));
   const expected = {
+    "component-context": "craft_memory_ledger_remember",
+    "component-quality": "craft_evaluation_run_record",
     "component-knowledge": "craft_knowledge_claim_save",
     "component-memory": "craft_memory_ledger_remember",
     "component-capability": "craft_capability_search",
@@ -26,22 +54,69 @@ test("v0.12.24 exposes five bounded component surfaces without the full work run
     assert(names.includes(tool), `${surface} must expose ${tool}`);
     assert(!names.includes("craft_verified_work_loop_prepare"));
   }
-  assert(surfaceToolNames("component-knowledge").includes("craft_retrieval_adapter_evaluate"));
-  assert(surfaceToolNames("component-memory").includes("craft_retrieval_adapter_evaluate"));
-  for (const surface of ["component-knowledge", "component-memory"]) {
+  assert(surfaceToolNames("component-context").includes("craft_knowledge_claim_save"));
+  assert(surfaceToolNames("component-context").includes("craft_memory_ledger_remember"));
+  assert(surfaceToolNames("component-context").includes("craft_context_resolution_resolve"));
+  assert(surfaceToolNames("component-context").includes("craft_retrieval_adapter_evaluate"));
+  assert(surfaceToolNames("component-quality").includes("craft_harness_configuration_save"));
+  assert(surfaceToolNames("component-quality").includes("craft_acceptance_plan_save"));
+  assert(surfaceToolNames("component-quality").includes("craft_delivery_evaluation_run"));
+  assert.deepEqual(surfaceToolNames("component-quality"), surfaceToolNames("component-skill-quality"));
+  for (const surface of ["component-context", "component-knowledge", "component-memory"]) {
     assert(surfaceToolNames(surface).includes("craft_knowledge_bootstrap_install"));
   }
 });
 
-test("component plugin manifests mount their exact surface", async () => {
+test("surface registry keeps generic quality and every bounded projection deterministic", () => {
+  assert.equal(domainSurfaceOf("craft_capability_search"), "governance");
+  assert.equal(domainSurfaceOf("craft_evaluation_run_record"), "evaluation");
+  assert.equal(domainSurfaceOf("craft_runtime_readiness_get"), "execution");
+  assert.equal(domainSurfaceOf("craft_context_resolution_get"), "knowledge");
+  assert.equal(domainSurfaceOf("craft_workspace_get"), "workspace");
+  assert.equal(domainSurfaceOf("craft_a2a_delegation_get"), "collaboration");
+  assert.equal(domainSurfaceOf("craft_unknown_operation"), "workflow");
+  assert.equal(domainSurfaceOf("unknown_operation"), "workflow");
+
+  const tools = [
+    { name: "craft_info" }, { name: "craft_evaluation_run_record" }, { name: "craft_workspace_get" }, { name: "craft_source_list" },
+  ] as never[];
+  const core = new Set(["craft_info", "craft_workspace_get"]);
+  assert.deepEqual(resolveSurfaceToolNames("full", tools, core), ["craft_info", "craft_evaluation_run_record", "craft_workspace_get", "craft_source_list"]);
+  assert.deepEqual(resolveSurfaceToolNames("core", tools, core), ["craft_info", "craft_workspace_get"]);
+  assert.deepEqual(resolveSurfaceToolNames("syscall", tools, core), ["craft_describe", "craft_list", "craft_get", "craft_create", "craft_update", "craft_run", "craft_cancel", "craft_search", "craft_info", "craft_default_route", "craft_default_route_resume", "craft_default_route_find", "craft_default_route_execute", "craft_task_checkpoint", "craft_evidence_record", "craft_knowledge_bootstrap_install"]);
+  assert.deepEqual(resolveSurfaceToolNames("evaluation", tools, core), ["craft_evaluation_run_record"]);
+  assert.throws(() => resolveSurfaceToolNames("not-a-surface", tools, core), /Unknown Craft MCP surface/);
+});
+
+test("component plugin manifests use public MCP products rather than internal surface names", async () => {
   for (const name of components) {
     const manifest = JSON.parse(await readFile(`plugins/${name}/.codex-plugin/plugin.json`, "utf8"));
     const mcp = JSON.parse(await readFile(`plugins/${name}/.mcp.json`, "utf8"));
     const server = mcp.mcpServers[name];
     assert.equal(manifest.name, name);
     assert.equal(manifest.version, VERSION);
-    assert.deepEqual(server.args, ["dist/plugin/craft-mcp.cjs", "--surface", `component-${name.slice(6)}`]);
+    const product = name === "craft-skill-quality" ? "quality" : name === "craft-workflow-evolution" ? "evolution" : name.slice(6);
+    assert.deepEqual(server.args, ["dist/plugin/craft-mcp.cjs", "--product", product]);
   }
+});
+
+test("the context component can bootstrap provenance, persist bounded memory, and resolve one scoped receipt", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-context-component-"));
+  const store = await new CraftStore(craftPaths(root)).open();
+  try {
+    const service = new CraftService(store); const server = new McpServer(service, "component-context");
+    assert.equal(service.info().data_space_id, dataSpaceId(root));
+    assert.notEqual(dataSpaceId(root), dataSpaceId(`${root}-other`));
+    await server.handlers.craft_knowledge_bootstrap_install({});
+    const remembered = await server.handlers.craft_memory_ledger_remember({
+      memory_id: "context-memory", source_id: "builtin.evidence-wiki", kind: "working", scope_kind: "project", scope_id: "demo", content: "Keep changes incremental.", confidence: "bounded",
+    });
+    assert.equal((remembered.memory as { id: string }).id, "context-memory");
+    const resolved = await server.handlers.craft_context_resolution_resolve({
+      receipt_id: "context-receipt", query: "incremental change", scope_kind: "project", scope_id: "demo", memory_ids: ["context-memory"], max_items: 3, max_chars: 200,
+    });
+    assert.equal((resolved.receipt as { id: string }).id, "context-receipt");
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
 test("Execution Host protocol distinguishes embedded, managed, and remote execution", () => {

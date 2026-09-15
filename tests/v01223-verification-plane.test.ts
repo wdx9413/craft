@@ -94,13 +94,14 @@ test("v0.12.23 exposes the VerificationPlane through the public CraftService sea
   } finally { await close(f); }
 });
 
-test("v0.12.23 mounts verification planning only on the full and skill-quality MCP surfaces", async () => {
+test("verification planning mounts on the generic quality surface and its Skill-quality compatibility alias", async () => {
   const f = await fixture();
   try {
-    const service = new CraftService(f.store); const core = new McpServer(service, "core"); const quality = new McpServer(service, "component-skill-quality");
+    const service = new CraftService(f.store); const core = new McpServer(service, "core"); const quality = new McpServer(service, "component-quality"); const compatibility = new McpServer(service, "component-skill-quality");
     assert(core.tools.some((tool) => tool.name === "craft_verification_get"));
     assert(!core.tools.some((tool) => tool.name === "craft_verification_plan"));
     assert(quality.tools.some((tool) => tool.name === "craft_verification_plan"));
+    assert(compatibility.tools.some((tool) => tool.name === "craft_verification_plan"));
     const response = await quality.handle({ id: "plan", method: "tools/call", params: { name: "craft_verification_plan", arguments: { verification_id: "mcp-change", change_ref: "git:mcp", change_kinds: ["code"], effects: ["read_only"], environment_fingerprint: "env:one", content_stored: false } } });
     assert.equal((response?.result as JsonObject).isError, false);
     const blocked = await core.handle({ id: "blocked", method: "tools/call", params: { name: "craft_verification_plan", arguments: {} } });

@@ -1,1 +1,1 @@
-{"mcpServers":{"craft-workflow-evolution":{"command":"node","args":["dist/plugin/craft-mcp.cjs","--surface","component-workflow-evolution"],"cwd":"."}}}
+{"mcpServers":{"craft-workflow-evolution":{"command":"node","args":["dist/plugin/craft-mcp.cjs","--product","evolution"],"cwd":"."}}}

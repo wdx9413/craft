@@ -39,7 +39,7 @@ Candidate 的所有检查通过仍不足以成为 `eligible`：还必须引用�
 
 - 默认 Core 面只读暴露 `craft_verification_get`，便于工作控制台查看当前验证事实。
 - 完整 MCP 提供 `craft_verification_plan`、`craft_verification_receipt_record`、`craft_verification_assess` 与 `craft_verification_get`。
-- `craft-skill-quality` 组件插件包含完整 Verification Plane，因而可单独为 Codex、Claude、IDE 或其他 Agent 提供开发验证能力；安装它不会启用 Verified Work Loop，也不会授予命令或写入权限。
+- `craft-quality` 组件插件包含完整 Verification Plane，因而可单独为 Codex、Claude、IDE 或其他 Agent 提供开发验证能力；安装它不会启用 Verified Work Loop，也不会授予命令或写入权限。`craft-skill-quality` 保留为相同工具面的兼容名称。
 
 ## 证据边界
 

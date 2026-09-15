@@ -40,7 +40,7 @@ test("WorkBuddy connector keeps the compact MCP with a route-first Skill", async
   const server = onlyServer(await json("adapters/workbuddy-connector/mcp.json"));
   assert.equal(connector.source, "craft-agent-harness");
   assert.equal(connector.type, "mcp");
-  assert.equal(connector.version, "0.12.28");
+  assert.equal(connector.version, "0.12.30");
   assert(Array.isArray(connector.examples_zh) && connector.examples_zh.length >= 2);
   assert(Array.isArray(connector.examples_en) && connector.examples_en.length >= 2);
   assert.equal(server.type, "stdio");
@@ -62,13 +62,13 @@ test("every portable host defaults to the same route-first syscall path and reta
   assert.equal(codex.mcpServers, "./.mcp.json");
   assert.equal(codex.skills, "./skills/");
   assert.equal(claude.skills, "./skills/craft-route/");
-  assert.deepEqual((rootMcp.mcpServers as Record<string, Record<string, unknown>>).craft.args, ["dist/plugin/craft-mcp.cjs", "--surface", "syscall"]);
-  assert.deepEqual((claude.mcpServers as Record<string, Record<string, unknown>>).craft.args, ["${CLAUDE_PLUGIN_ROOT}/dist/plugin/craft-mcp.cjs", "--surface", "syscall"]);
+  assert.deepEqual((rootMcp.mcpServers as Record<string, Record<string, unknown>>).craft.args, ["dist/plugin/craft-mcp.cjs", "--product", "full"]);
+  assert.deepEqual((claude.mcpServers as Record<string, Record<string, unknown>>).craft.args, ["${CLAUDE_PLUGIN_ROOT}/dist/plugin/craft-mcp.cjs", "--product", "full"]);
   const expertServer = onlyServer(expertMcp);
   assert.equal(expertServer.command, "node");
-  assert.deepEqual(expertServer.args, ["${CODEBUDDY_PLUGIN_ROOT}/bin/craft-mcp.cjs", "--surface", "syscall"]);
+  assert.deepEqual(expertServer.args, ["${CODEBUDDY_PLUGIN_ROOT}/bin/craft-mcp.cjs", "--product", "full"]);
   assert.match(await text("skills/craft-route/SKILL.md"), /craft_default_route/);
-  assert.equal(deepseek.version, "0.12.28");
+  assert.equal(deepseek.version, "0.12.30");
   assert.match(await text("adapters/deepseek-harness/index.ts"), /craft-agent-harness@0\.12\.23/);
   assert.match(await text("adapters/README.md"), /craft-mcp-full.*user-approved/i);
   assert.match(await text("docs/technical/modules/host-ecosystem-adapters.md"), /Codex \/ Claude \/ TraeWork \/ WorkBuddy/);

@@ -66,7 +66,7 @@ test("Trace replay and retention policies are deterministic and bounded", async 
     assert.throws(() => f.service.traceRetentionPlan({ max_days: 0 }), /positive integer/);
     assert.throws(() => f.service.traceRetentionPlan({ max_events: 0 }), /positive integer/);
     assert.throws(() => f.service.traceQuery({ limit: 0 }), /between 1 and 10000/);
-    assert.equal(VERSION, "0.12.28");
+    assert.equal(VERSION, "0.12.30");
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
@@ -116,6 +116,9 @@ test("Trace retention archives terminal records for seven days and preserves act
     const result = f.service.traceRetentionSweep({ now: "2030-01-01T00:00:00.000Z" });
     assert.equal(result.archived, 1); assert.equal(result.deleted, 1); assert.equal(result.max_days, 7);
     assert.throws(() => f.store.get("trace", "old"), /Unknown trace/);
+    const archived = f.service.traceGet({ trace_id: "old" });
+    assert.equal(archived.archived, true); assert.equal((archived.trace as JsonObject).status, "completed"); assert.equal((archived.events as JsonObject[]).length, 3);
+    assert.equal((f.service.traceQuery({ trace_id: "old" }).events as JsonObject[]).every((event) => event.archived === true), true);
     assert.equal(f.store.events("trace:old").length, 0);
     assert.equal(f.store.get("trace", "active").status, "running");
     const archiveDir = join(f.store.paths.logsDir, "trace-archive");

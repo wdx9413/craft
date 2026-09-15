@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { McpServer } from "./mcp.ts";
 import { CraftService } from "./service.ts";
 import { CraftStore } from "./store.ts";
+import { RemoteMcpAccessError, type RemoteMcpAccessPolicy } from "./remote-mcp-access.ts";
 
 type Handler = Pick<McpServer, "handle">;
 const MAX_BODY = 4 * 1024 * 1024;
@@ -16,8 +17,16 @@ async function readBody(request: IncomingMessage): Promise<string> {
   return Buffer.concat(chunks).toString("utf8");
 }
 
+export interface McpHttpOptions {
+  path?: string;
+  /** Opt-in remote boundary. Without a verified principal, request processing never starts. */
+  remoteAccess?: RemoteMcpAccessPolicy;
+  /** Must be supplied by a trusted TLS-termination adapter for remote traffic. */
+  secureTransport?: (request: IncomingMessage) => boolean;
+}
+
 /** Streamable-HTTP-compatible JSON request boundary; no credentials or CORS are enabled by default. */
-export function createMcpHttpHandler(handler: Handler, options: { path?: string } = {}) {
+export function createMcpHttpHandler(handler: Handler, options: McpHttpOptions = {}) {
   const path = options.path ?? "/mcp";
   return async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
     if (request.url?.split("?")[0] !== path || request.method !== "POST") {
@@ -28,20 +37,21 @@ export function createMcpHttpHandler(handler: Handler, options: { path?: string 
       response.statusCode = 406; response.end(JSON.stringify({ error: "Accept must include application/json or text/event-stream" })); return;
     }
     try {
+      if (options.remoteAccess) await options.remoteAccess.authorize({ authorization: request.headers.authorization, secure_transport: options.secureTransport?.(request) === true });
       const raw = await readBody(request); const message = JSON.parse(raw) as unknown; const result = await handler.handle(message);
       response.statusCode = result === undefined ? 202 : 200;
       response.setHeader("content-type", "application/json"); response.setHeader("cache-control", "no-store");
       response.end(result === undefined ? "" : JSON.stringify(result));
     } catch (error) {
-      response.statusCode = error instanceof Error && error.message.includes("exceeds") ? 413 : 400;
+      response.statusCode = error instanceof RemoteMcpAccessError ? error.statusCode : error instanceof Error && error.message.includes("exceeds") ? 413 : 400;
       response.setHeader("content-type", "application/json"); response.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
     }
   };
 }
 
-export async function serveMcpHttp(options: { mode?: string; host?: string; port?: number; path?: string; start?: () => Promise<{ server: Handler; close: () => void }> }): Promise<{ server: Server; close: () => void }> {
+export async function serveMcpHttp(options: McpHttpOptions & { mode?: string; host?: string; port?: number; start?: () => Promise<{ server: Handler; close: () => void }> }): Promise<{ server: Server; close: () => void }> {
   const runtime = await (options.start ?? (async () => { const store = await new CraftStore().open(); return { server: new McpServer(await CraftService.open(store), options.mode ?? "syscall"), close: () => store.close() }; }))();
-  const http = createServer(createMcpHttpHandler(runtime.server, { path: options.path }));
+  const http = createServer(createMcpHttpHandler(runtime.server, options));
   await new Promise<void>((resolve, reject) => { http.once("error", reject); http.listen(options.port ?? 8787, options.host ?? "127.0.0.1", () => { http.removeListener("error", reject); resolve(); }); });
   return { server: http, close: () => { http.close(); runtime.close(); } };
 }

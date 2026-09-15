@@ -1,7 +1,7 @@
 {
   "name": "craft-workflow-evolution",
-  "version": "0.12.28",
-  "description": "Standalone evidence-backed Workflow evolution for Agent execution records.",
+  "version": "0.12.30",
+  "description": "Compatibility helper that turns evidence-backed execution observations into bounded Workflow drafts.",
   "author": { "name": "wdx9413", "url": "https://github.com/wdx9413" },
   "homepage": "https://github.com/wdx9413/craft",
   "repository": "https://github.com/wdx9413/craft",
@@ -10,9 +10,9 @@
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
   "interface": {
-    "displayName": "Craft Workflow Evolution",
-    "shortDescription": "Distill verified execution evidence into gated Workflow drafts.",
-    "longDescription": "Accept sanitized execution observations, generate bounded Workflow candidates through an explicit model or Host proposal, then reuse Craft's existing evaluation, Signoff, Canary and rollback gates.",
+    "displayName": "Craft Workflow Evolution (Compatibility)",
+    "shortDescription": "Create bounded Workflow drafts for Craft Quality to evaluate.",
+    "longDescription": "This compatibility helper ingests only sanitized execution observations and creates a bounded Workflow draft. It does not form a standalone evolution loop: use complete Craft with Craft Quality for evaluation, signoff, canary, and rollback.",
     "developerName": "wdx9413",
     "category": "Developer Tools",
     "brandColor": "#000000",

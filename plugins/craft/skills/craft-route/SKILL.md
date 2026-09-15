@@ -7,22 +7,31 @@ description: "Route substantial work through Craft's smallest safe MCP surface; 
 
 Use this lightweight entry point before choosing detailed Craft or third-party tools. It is a routing contract, not a replacement for the Craft service.
 
-The primary `craft` plugin is the complete Craft runtime: Knowledge, Memory,
-Capability discovery, Skill Quality, and Workflow Evolution are all available
-through its compact syscall surface. They are addressed on demand with
+The Craft Runtime is MCP-first: `craft-mcp --product full` exposes the complete
+runtime, while `context`, `knowledge`, `memory`, `capability`, `quality`, and
+`evolution` are formal bounded MCP products. The primary `craft` plugin merely
+packages the full MCP product with this Skill for Codex. Context (Knowledge +
+Memory), Capability discovery, Quality, and bounded Workflow Evolution are all available
+through the compact syscall surface. They are addressed on demand with
 `craft_describe` followed by a syscall verb and `(resource, operation)`; do not
 ask the user to install a sibling component merely to use one of those built-in
-capabilities. The sibling plugins are optional standalone projections for a
-Host that wants only one bounded domain surface.
+capabilities. The recommended sibling plugins are `craft-context`,
+`craft-capability`, and `craft-quality`; they are optional standalone
+projections for a Host that wants only one bounded outcome. Knowledge and
+Memory remain first-class narrow products; `craft-skill-quality` remains a
+compatibility name, while Workflow Evolution alone creates drafts only.
 
 For a fresh Craft data store, call `craft_knowledge_bootstrap_install` once
 before the first governed knowledge or memory operation. It only registers the
 bundled Evidence Wiki and Serena descriptors; it must not be treated as
 permission to read external project files or automatically persist the chat.
 
-## Decide first
+## Decide each turn, then route only when needed
 
-- For a short answer, simple rewrite, or one-step read with no durable value, answer directly and do not call Craft.
+- A short answer, simple rewrite, or one-step read may remain direct. Do not manufacture a task, context lookup, capability search, or memory merely because Craft is installed.
+- When the turn may benefit from project knowledge, a Skill/MCP/Workflow choice, durable continuity, or a candidate memory, submit the smallest content-free Turn Proposal and follow the scoped Turn Receipt. The Receipt is advisory: it never starts a Host or grants a wider effect.
+- A Host that has no native turn hook submits Proposals manually or through its own Adapter. Never claim Craft installed a hook or started a second Codex/Claude CLI process.
+- Candidate memory is not durable memory. It must be explicitly accepted through the Memory Ledger with its original source, scope, sensitivity, and evidence.
 - When a missing decision materially changes the deliverable, external effect, or acceptance rule, state a short working contract and ask at most three decision-changing questions. Do not require another Skill to do this.
 - For a known durable task, call `craft_default_route_resume`. If only a natural-language continuation is available, call `craft_default_route_find`; never select an ambiguous task.
 - For other substantial work, call `craft_default_route` once. Follow only the returned next safe action.

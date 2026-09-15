@@ -1,6 +1,6 @@
 # Trace & Evolution Kernel
 
-> 状态：v0.12.7 已实现统一的本地 Trace 事件账本、反馈信号、Digest-only Replay Bundle 和 Trace→Case 编译。它是跨入口的事实层，不是自动发布或模型训练器。
+> 状态：v0.12.30 已实现统一的 Trace 事件账本、反馈信号、Digest-only Replay Bundle、Trace→Case 编译，以及可替换的冷热归档。它是跨入口的事实层，不是自动发布或模型训练器。
 
 ## 事件信封
 
@@ -41,3 +41,13 @@ Trace 必须先经过脱敏、可信度分类和 Case 分区，才能进入 Eval
 ## 接入层原则
 
 GUI、CLI、Codex、Claude、Trae、WorkBuddy 和 Skill/MCP 只负责产生或展示事件；Trace Schema、关联关系、幂等、回放可行性和 Case 编译全部由 Craft Core 负责，避免各宿主形成不同的进化数据格式。
+
+## 存储与保留
+
+Trace 的逻辑事实不等于某一种物理存储。活动 Run 的索引、状态与短期事件仍保留在 SQLite，便于事务关联、权限过滤和低延迟查询；到期的终态 Trace 会由 `retentionSweep` 写为按日期分区、私有权限的 gzip JSONL 段，然后仅在 SQLite 留下版本化 Archive Pointer。
+
+默认 `LocalTraceArchiveStore` 写入 `logs/trace-archive/YYYY/MM/DD/`，单个归档段包含 manifest、Trace、Event 和 Feedback，并以内容摘要校验。`ObjectTraceArchiveStore` 是部署 seam：Craft 固定格式、摘要和 URI，部署方注入对象存储客户端与凭据。未配置可信后端时不会把归档悄悄发送到网络。
+
+`craft_trace_get` 与 `craft_trace_query` 始终经 Craft Core 读取热数据或 Archive Pointer；调用方不应直接读取 SQLite 或归档目录。这样服务端可以在同一查询路径施加项目范围、授权、脱敏和未来的远程对象存储访问控制。损坏、越界 Locator、摘要不符或格式不符的归档均失败关闭。
+
+归档只迁移已经终态且满足保留策略的记录；它不自动清空活动 Trace，也不对既有数据库做强制迁移。归档后的 Trace 仍可通过相同的读接口获取，事件会标记为 archived。

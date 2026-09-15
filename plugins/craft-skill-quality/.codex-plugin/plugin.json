@@ -1,7 +1,7 @@
 {
   "name": "craft-skill-quality",
-  "version": "0.12.28",
-  "description": "Standalone repeatable evaluation and bounded evolution for Agent Skills.",
+  "version": "0.12.30",
+  "description": "Compatibility alias for Craft Quality; evaluates versioned Agent assets with repeatable evidence.",
   "author": { "name": "wdx9413", "url": "https://github.com/wdx9413" },
   "homepage": "https://github.com/wdx9413/craft",
   "repository": "https://github.com/wdx9413/craft",
@@ -10,15 +10,15 @@
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
   "interface": {
-    "displayName": "Craft Skill Quality",
-    "shortDescription": "Evaluate Skill candidates before publishing them.",
-    "longDescription": "Run frozen cases and calibrated graders, compare repeated baseline and candidate trials, and produce evidence-backed promotion decisions without automatic publication.",
+    "displayName": "Craft Skill Quality (Compatibility)",
+    "shortDescription": "Compatibility alias for Craft Quality.",
+    "longDescription": "This legacy name exposes the same generic quality surface as Craft Quality. It evaluates versioned Subjects with frozen cases, calibrated graders, repeated trials, and evidence-backed promotion decisions without automatic publication.",
     "developerName": "wdx9413",
     "category": "Developer Tools",
     "brandColor": "#000000",
     "composerIcon": "./assets/craft-icon.svg",
     "logo": "./assets/craft-icon.svg",
-    "capabilities": ["Skill evaluation", "Grader calibration", "Promotion evidence"],
+    "capabilities": ["Generic subject evaluation", "Grader calibration", "Promotion evidence"],
     "defaultPrompt": ["Evaluate this Skill candidate against its frozen baseline and report eligible, rejected, or inconclusive."]
   }
 }

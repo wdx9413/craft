@@ -5,3 +5,4 @@
  * kept separate from application and domain code.
  */
 export * from "./interfaces/mcp-server.ts";
+export * from "./interfaces/mcp/product-launch.ts";

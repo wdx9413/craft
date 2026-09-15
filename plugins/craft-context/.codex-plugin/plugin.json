@@ -1,0 +1,24 @@
+{
+  "name": "craft-context",
+  "version": "0.12.30",
+  "description": "Standalone governed knowledge, scoped memory, and reproducible context for AI hosts.",
+  "author": { "name": "wdx9413", "url": "https://github.com/wdx9413" },
+  "homepage": "https://github.com/wdx9413/craft",
+  "repository": "https://github.com/wdx9413/craft",
+  "license": "MIT",
+  "keywords": ["knowledge", "memory", "context", "agent", "mcp"],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Craft Context",
+    "shortDescription": "Give an Agent governed knowledge and memory.",
+    "longDescription": "Connect scoped knowledge sources, preserve evidence-linked memory, and resolve the smallest reproducible context pack. It never grants execution authority or silently imports private chat history.",
+    "developerName": "wdx9413",
+    "category": "Productivity",
+    "brandColor": "#000000",
+    "composerIcon": "./assets/craft-icon.svg",
+    "logo": "./assets/craft-icon.svg",
+    "capabilities": ["Knowledge sources", "Evidence Wiki", "Memory ledger", "Context resolution", "Retrieval evaluation"],
+    "defaultPrompt": ["Use Craft Context to resolve the smallest relevant knowledge and memory set for this request. Explain the selected source versions and do not write a durable memory unless I explicitly approve it."]
+  }
+}

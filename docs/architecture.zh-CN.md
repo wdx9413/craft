@@ -66,7 +66,7 @@ v0.12.20 用 `ContinualHarnessView → Refinement → bounded Session activation
 
 v0.12.21 将上述能力收口到 `VerifiedWorkLoop` 唯一公开门面，并增加 `UncertaintyPolicy → Resolution → optional Adjudication` 和 `ReferencePilot → 5× paired Qualification → Platform Assessment`。自动化只可提升求证强度，不能提升权限；机制验收与真实业务效果分别记录，证据不足时明确返回 `inconclusive`。
 
-v0.12.22 增加组合式插件边界：完整 `craft` 插件作为组合根，`craft-knowledge`、`craft-memory`、`craft-capability`、`craft-skill-quality` 可单独安装。它们共享一个内核和数据契约，但通过不同 MCP surface 最小暴露。Execution Host 明确分为 `embedded`、`managed`、`remote`；Codex/Claude 插件模式默认复用当前宿主，不启动第二个 CLI。详见 [组件插件架构](technical/modules/component-plugin-architecture.md)。
+v0.12.28 收敛组合式插件边界：完整 `craft` 插件作为组合根，推荐独立入口为 `craft-context`、`craft-capability`、`craft-quality`。它们共享一个内核和数据契约，但通过不同 MCP surface 最小暴露；`craft-knowledge`、`craft-memory`、`craft-skill-quality` 仅作兼容投影。Execution Host 明确分为 `embedded`、`managed`、`remote`；Codex/Claude 插件模式默认复用当前宿主，不启动第二个 CLI。详见 [组件插件架构](technical/modules/component-plugin-architecture.md)。
 
 v0.12.23 增加 `VerificationPlane` 深模块。它位于开发变更与既有执行/评测模块之间：调用方只提交无正文 Change 描述，模块按风险生成 Contract、确定性端到端、状态机、对抗、恢复、Host Conformance、Eval 与 Release Qualification 检查；回执必须绑定同一环境与 Evidence。它不新增命令执行入口，也不把测试通过误写为业务价值证明。详见 [Verification Plane](technical/modules/verification-plane.md)。
 

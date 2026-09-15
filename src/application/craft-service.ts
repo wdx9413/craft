@@ -26,10 +26,11 @@ import { decideExecution } from "../execution-policy.ts";
 import { dockerRequestDigest } from "../docker-sandbox.ts";
 import { egressRequestDigest } from "../egress.ts";
 import { ServiceFoundation } from "../service-foundation.ts";
+import { dataSpaceId } from "../data-space.ts";
 import { installAdapterRuntimeMethods } from "./use-cases/adapter-runtime.ts";
 import { installKernelDelegateMethods } from "./use-cases/kernel-delegates.ts";
 
-export const VERSION = "0.12.28";
+export const VERSION = "0.12.30";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
@@ -356,6 +357,9 @@ export class CraftService extends ServiceFoundation {
       "trajectory_script_proposal", "verified_script_run", "knowledge_claim", "wiki_page", "knowledge_relation", "wiki_context_bundle", "wiki_skill_candidate", "knowledge_evaluation_case", "knowledge_evaluation_run", "wiki_candidate_evaluation_attestation", "wiki_candidate_publication_authorization", "wiki_candidate_publication_package", "guided_work_brief", "execution_safety_preflight", "wiki_candidate_local_import", "autonomy_ladder_decision", "workspace_observation", "work_coordinator", "agent_eval_lab", "agent_eval_attempt", "evaluation_program", "evaluation_program_run", "enterprise_identity_provider", "enterprise_principal", "enterprise_adapter_binding", "enterprise_access_ticket", "a2a_agent_trust", "a2a_collaboration_session", "a2a_delegation", "a2a_delegation_receipt", "federated_agent_health", "federated_delegation_grant", "federated_artifact_grant", "federated_remote_receipt", "federated_remote_incident", "harness_topology", "harness_topology_selection", "runtime_readiness_assessment", "sealed_evaluation_case", "sealed_evaluation_access", "runtime_recovery_drill", "assured_work_pilot", "project_brain", "project_goal", "project_decision", "project_material", "project_outcome", "project_experience", "work_session", "long_task_checkpoint", "trust_profile", "web_operation", "web_operation_receipt"];
     kinds.push("untrusted_content", "untrusted_extraction", "decision_projection");
     return { version: VERSION, data_root: this.store.paths.root,
+      // Components compare this content-free identity before assuming they
+      // share one local ledger. It identifies only the configured data space.
+      data_space_id: dataSpaceId(this.store.paths.root),
       counts: Object.fromEntries(kinds.map((kind) => [kind, this.store.count(kind)])) };
   }
 
@@ -3044,6 +3048,23 @@ export class CraftService extends ServiceFoundation {
   async a2aTransportDispatch(args: JsonObject): Promise<JsonObject> { return this.a2aTransport.dispatch(args); }
   async a2aTransportTaskGet(args: JsonObject): Promise<JsonObject> { return this.a2aTransport.taskGet(args); }
   async a2aTransportTaskCancel(args: JsonObject): Promise<JsonObject> { return this.a2aTransport.taskCancel(args); }
+  remoteTenantRegister(args: JsonObject): JsonObject { return this.remoteRuntime.tenantRegister(args); }
+  remoteTaskBind(args: JsonObject): JsonObject { return this.remoteRuntime.bind(args); }
+  remoteTaskAuthorize(args: JsonObject): JsonObject { return this.remoteRuntime.authorize(args); }
+  remoteTaskRevoke(args: JsonObject): JsonObject { return this.remoteRuntime.revoke(args); }
+  remoteTaskGet(args: JsonObject): JsonObject { return this.remoteRuntime.get(args); }
+  supplyChainPublisherRegister(args: JsonObject): JsonObject { return this.supplyChainAttestations.publisherRegister(args); }
+  supplyChainAttest(args: JsonObject): JsonObject { return this.supplyChainAttestations.attest(args); }
+  supplyChainAttestationAssert(args: JsonObject): JsonObject { return this.supplyChainAttestations.assertCurrent(args); }
+  supplyChainAttestationRevoke(args: JsonObject): JsonObject { return this.supplyChainAttestations.revoke(args); }
+  runtimeAcceptancePlan(args: JsonObject): JsonObject { return this.runtimeAcceptance.plan(args); }
+  runtimeAcceptanceRecord(args: JsonObject): JsonObject { return this.runtimeAcceptance.record(args); }
+  runtimeAcceptanceEvaluate(args: JsonObject): JsonObject { return this.runtimeAcceptance.evaluate(args); }
+  runtimeAcceptanceGet(args: JsonObject): JsonObject { return this.runtimeAcceptance.get(args); }
+  async a2aV1Discover(args: JsonObject): Promise<JsonObject> { return this.a2aV1.discover(args); }
+  async a2aV1Submit(args: JsonObject): Promise<JsonObject> { return this.a2aV1.submit(args); }
+  async a2aV1TaskGet(args: JsonObject): Promise<JsonObject> { return this.a2aV1.taskGet(args); }
+  async a2aV1Cancel(args: JsonObject): Promise<JsonObject> { return this.a2aV1.cancel(args); }
   orgSyncPrepare(args: JsonObject): JsonObject { return this.orgSync.prepare(args); }
   orgSyncApply(args: JsonObject): JsonObject { return this.orgSync.apply(args); }
 

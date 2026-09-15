@@ -1,57 +1,120 @@
-# Component Plugin Architecture（v0.12.24）
+# 组件插件架构
 
-## 产品装配
+## 一条 Runtime，多种分发方式
 
-Craft 是面向人和 AI 的通用工作运行时。它提供两种互补分发形态：
+Craft 的事实模型、Policy、Evidence 和评测账本只有一份。**Runtime 是产品实现，MCP 是公开协议，Plugin 是宿主安装包，Skill 是调用策略。**四者不是四套产品；插件也不复制业务逻辑。
 
 ```text
-完整 Craft 插件
-├── Craft Core：Verified Work Loop、Policy、State、Receipt、Acceptance、Eval
-├── Craft Knowledge：知识来源、Evidence Wiki、知识版本与 Context 引用
-├── Craft Memory：Memory Ledger、范围、有效期、撤销与 Context Resolution Receipt
-├── Craft Capability：Skill/MCP/Workflow/Adapter 的发现、去重、健康与最小激活
-├── Craft Skill Quality：Case、Trial、Grader、比较、晋级证据
-├── Craft Workflow Evolution：脱敏执行观察、受限草案与模型调用契约
-└── Host Bridge：连接当前宿主或独立执行器
-
-独立组件插件
-├── craft-knowledge
-├── craft-memory
-├── craft-capability
-├── craft-skill-quality
-└── craft-workflow-evolution
+Craft Runtime
+  ├── MCP：任意 MCP Host 的稳定公开入口
+  ├── CLI / SDK：同一 Runtime 的本地或程序入口
+  └── Plugin：Skill + MCP 配置 + 已打包 bundle
 ```
 
-完整插件是组合根，不是第六套实现。五个组件与完整插件共享同一数据模型、服务内核和 MCP bundle，通过受限 MCP surface 决定当前宿主能看到什么。安装完整插件不等于激活全部能力；默认仍使用精简、按需描述的 syscall surface。完整插件不会把五个 sibling plugin 作为安装依赖再次下载；组件插件只是同一运行时的最小权限投影。
+任何发布形态都必须指向同一 `CRAFT_DATA_DIR`/`data_space_id` 才共享事实。Plugin 不能绕过 MCP/Runtime 的 Policy、Receipt 或评测门禁。
 
-## Execution Host 不是第二个 Agent
+```text
+craft（默认完整运行时）
+├── Craft Core：Work Loop、Policy、State、Receipt、Acceptance
+├── Craft Context：KnowledgeSource、MemoryLedger、Context Resolution Receipt
+├── Craft Capability：Skill / MCP / Workflow / Adapter 的发现与最小激活计划
+├── Craft Quality：Subject、Case、Trial、Grader、比较与晋级证据
+├── Workflow Evolution：只产生受限 Candidate 草案
+└── Host Bridge：连接当前宿主或显式执行器
 
-`Execution Host` 指真正执行 Action Contract 的主体。它分为三种协议模式：
+正式 MCP 产品
+├── full：完整 Craft 的紧凑 syscall 面
+├── context：Knowledge + Memory 的组合入口
+├── knowledge：独立知识治理
+├── memory：独立记忆治理
+├── capability：能力发现与最小激活
+├── quality：通用质量评测
+├── evolution：受限 Candidate 草案
+└── admin：完整原始工具面，仅显式管理场景
+```
 
-| 模式 | 例子 | 是否启动子进程 | 谁推动循环 |
-|---|---|---:|---|
-| `embedded` | 当前 Codex App、Claude、IDE | 否 | 当前宿主领取动作并回传 Receipt |
-| `managed` | 显式选择的 Codex CLI、Claude CLI、本地 Worker | 是 | Craft 的独立运行器 |
-| `remote` | MCP Task、A2A Agent、远程 Worker | 否 | 远端协议与租约 |
+完整 `craft` 是默认安装入口；它已包含所有上述能力，使用小型 syscall 面按需到达底层操作。`craft-context`、`craft-knowledge`、`craft-memory`、`craft-capability` 与 `craft-quality` 是正式的单域产品投影，不是降级实现。通常一个 Host 选择 `craft` 或一组不重叠单域产品，避免重复注入工具。
 
-Codex 插件默认使用 `EmbeddedHostBridge`：当前 Codex 调 Craft 获取 Action Contract，使用自身文件、终端和 MCP 工具执行，再把 Receipt 交回 Craft。Craft 不反向控制 Codex App，也不默认拉起第二个 Codex CLI。
+## MCP-first 入口
 
-## 独立使用边界
+安装 Runtime 后，任何 Host 都可直接启动同一个可执行文件：
 
-- `craft-knowledge`：可独立检索、读取和治理知识；不会因此取得执行权限。
-- `craft-memory`：可独立解析或提议记忆变更；不得保存凭据或跨范围装载。
-- `craft-capability`：可独立扫描、去重、审计和推荐；发现不等于安装、激活、授权或调用。
-- `craft-skill-quality`：可独立评测并产生晋级证据；不会自动发布 Skill。
-- `craft-workflow-evolution`：接收至少两条独立、脱敏且有 Evidence 的执行观察，生成最多两个设计轴的 Workflow 草案请求；不会读取原始用户记录、执行草案或发布 Workflow。
+```text
+craft-mcp --product full
+craft-mcp --product context
+craft-mcp --product knowledge
+craft-mcp --product memory
+craft-mcp --product capability
+craft-mcp --product quality
+craft-mcp --product evolution
+craft-mcp --product admin
+```
 
-不安装 Craft Core 时，这些组件仍能增强其他 Agent，但只提供局部、bounded 的结论。需要跨组件交付、执行恢复、策略控制、真实状态验收或受限演进时，由完整 Craft 对各组件 Receipt 重新校验并统一裁决。
+`--product` 是稳定的产品契约。底层 `--surface` 和 `CRAFT_MCP_SURFACE` 只为已有集成保留；显式产品与 surface 同时出现且不一致时启动失败，绝不静默扩宽工具面。命令行显式参数优先于继承环境变量，避免宿主遗留环境误改 Plugin 产品面。
 
-## Host 与组件扩展
+## 三个独立产品
 
-`craft-capability` 与 `craft-workflow-evolution` 的交接是单向的：前者发现并选择已登记的 Asset，后者只形成 `draft` Workflow。只有该草案通过既有 shadow/held-out Eval、Signoff 与 Canary 而成为精确版本的 `verified` Workflow，才可由能力发现/路由作为候选。这样演进记录不会直接污染发现结果或默认执行。
+### Craft Context
 
-知识与记忆组件同样是可替换实现：关键词、向量或其他 Retrieval Adapter 都先作为候选策略，须通过召回、跨 scope 泄漏、成本与时延的单点评测，才能影响 Context Resolution；它们不能替代 Ledger、Source digest 或 Context Receipt 的事实层。
+`craft-context` 是知识与记忆的组合入口，而不是把两种概念混为一谈：
 
-后续 Codex、Claude、Cursor、Gemini CLI、VS Code 等接入只实现薄 Host Bridge；Obsidian、Serena、kefu 等知识或记忆来源只实现 Source Adapter。协议和事实模型保持稳定，宿主与来源可以替换或补充，不能绕开 Policy、scope、digest、Receipt 和 Evidence。
+```text
+外部或内置知识来源
+  → KnowledgeSource（scope、digest、trust、只读/提议边界）
+  → MemoryLedger（工作、情景、偏好、程序记忆）
+  → Context Resolution（最小 scope 与预算）
+  → Context Resolution Receipt
+```
 
-本版本不包含新的 UI、远程插件市场、后台 Agent Worker，也不声称 Craft MCP 可以主动调用 Codex App 内部工具。
+它向 Host 提供可复现的上下文，绝不提供执行权。推荐的独立使用顺序是：
+
+1. 读取 `craft_info`，确认目标组件的 `data_space_id`；不同 ID 不应假定能共用 Ledger 或 Receipt。
+2. 仅 bootstrap 或登记当前 scope 所需的 `KnowledgeSource`。
+3. 解析最小 Context，并返回带版本、预算和排除原因的 Receipt。
+4. 仅在明确批准后写入 durable Memory；修正通过 supersede 或 revoke 留下历史，而不是覆盖事实。
+
+`craft-knowledge` 和 `craft-memory` 是一等的单域产品：前者适合知识库、Wiki 与 Evidence 治理，后者适合偏好、项目决策、会话收尾与可撤销工作记忆。`craft-context` 只是它们的组合入口，因此普通用户不必先判断“上下文究竟属于知识还是记忆”。
+
+### Craft Capability
+
+`craft-capability` 管理外部 Skill、MCP、Workflow、Adapter 等 Capability Asset 的发现、逻辑去重、健康与推荐。发现、激活、授权、调用仍是四件不同的事；该组件不能直接安装、启动或调用外部工具。
+
+### Craft Quality
+
+`craft-quality` 评测一个固定版本的 **Subject**，而不是只评 Skill。Subject 可以是 Skill、MCP/Host Adapter、Capability Kit、Workflow、Harness、检索策略、Turn Policy 或实际交付。
+
+```text
+冻结 Subject + Case + 环境 + 预算 + Grader
+  → 重复 Trial / Outcome
+  → baseline 与 candidate 比较
+  → eligible | rejected | inconclusive
+```
+
+质量模块不发现能力、不创建 Candidate、不发布也不激活。不同 Subject 的检查实现可以不同：例如 MCP/Adapter 需要协议 conformance 和受控 fixture，检索器需要召回/泄漏/时延/成本，Workflow 需要真实 Outcome；但它们使用同一比较与准入语义。`craft-skill-quality` 是完全等价的兼容别名。
+
+## Candidate 与 Workflow Evolution
+
+Candidate 是主运行时的受限演进链，而不是可独立完成发布的插件：
+
+```text
+脱敏 Observation + Evidence
+  → Candidate / Workflow draft（最多两个设计轴）
+  → Craft Quality 的 shadow / held-out 评测
+  → Signoff → Canary → 精确回滚
+```
+
+`craft-workflow-evolution` 是正式的 Evolution 产品投影，但它只能走到 draft。需要完整闭环时，应使用 `full`，或由 Host 明确组合 `evolution`、`quality` 和完整 Craft 的 Signoff/Canary 能力。Capability 只能发现已经成为 `verified` 的精确 Workflow 版本。
+
+## 数据空间与 Host
+
+所有插件默认使用同一用户的 `~/.craft_data`；Host 若设置不同的 `CRAFT_DATA_DIR`，它们就是不同数据空间。每个 surface 都能通过 `craft_info.data_space_id` 比较该事实。不同数据空间之间不得默认为 Receipt、Memory、Evidence 或 Candidate 可互认。
+
+`Execution Host` 是实际请求模型、调用工具或运行命令的主体：当前 Codex App、Claude 或 IDE 属于 `embedded`，不会由 Craft 默认再启动一个 CLI。Craft 在这些 Host 中提供控制、事实、质量与受限演进；它不反向接管宿主应用。
+
+## 验收边界
+
+- 每个 MCP 产品必须在空数据空间完成 `initialize`、`tools/list`，且 Context/Knowledge/Memory/Capability/Quality/Evolution 工具面不包含 Verified Work Loop。
+- `craft-context` 必须能 bootstrap 来源、保存有 scope 的 bounded Memory，并产生 Context Resolution Receipt。
+- `craft-quality` 与兼容名必须暴露完全一致的质量工具面。
+- 主插件与直接 MCP 的 `full` 产品必须按 syscall 使用全部能力，无需安装 sibling；插件只声明 Skill、MCP 配置和 bundle。
+- 这些投影是最小 MCP 暴露，不是独立安全沙箱；执行隔离仍由显式 Runtime/Sandbox Adapter 负责。

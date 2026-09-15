@@ -1,1 +1,1 @@
-{"mcpServers":{"craft-knowledge":{"command":"node","args":["dist/plugin/craft-mcp.cjs","--surface","component-knowledge"],"cwd":"."}}}
+{"mcpServers":{"craft-knowledge":{"command":"node","args":["dist/plugin/craft-mcp.cjs","--product","knowledge"],"cwd":"."}}}

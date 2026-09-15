@@ -21,10 +21,10 @@ Ticket 本身只有输入引用、输出契约引用、Profile 精确版本和�
 
 ## Workflow Evolution
 
-`craft-workflow-evolution` 可独立安装。输入必须是 `sanitized=true` 且 `content_stored=false` 的观察，每条都引用 `confirmed` 或 `bounded` Evidence。客服线上场景可把“会话/执行记录”的外部 ID 与 digest 作为 Source Reference 传入；原始客户文本仍留在业务系统。
+`craft-workflow-evolution` 保留为兼容草案辅助器，并不构成独立发布闭环。输入必须是 `sanitized=true` 且 `content_stored=false` 的观察，每条都引用 `confirmed` 或 `bounded` Evidence。业务场景可把“会话/执行记录”的外部 ID 与 digest 作为 Source Reference 传入；原始文本仍留在业务系统。
 
 请求至少要有两条独立 Source；Candidate 最多改变 `context/tools/generation/orchestration/memory/output` 中两个设计轴。模型或 Host 只能提交新的 `draft` Workflow，可引用旧模板作为 `replaces_workflow`，但不会覆盖旧的 `verified` 版本。
 
 ## 何时真正可用
 
-`draft` 不是能力，也不能被默认路由。只有同环境、同预算、重复对照的 shadow/held-out Eval 证明收益，并通过精确 Signoff 与 Canary 后，Workflow 才能成为 `verified`。Capability Discovery 只在这一时刻将该精确版本作为可激活候选；发现、激活、授权、调用继续是四个不同状态。
+`draft` 不是能力，也不能被默认路由。只有通过 `craft-quality` 进行同环境、同预算、重复对照的 shadow/held-out Eval 证明收益，并通过精确 Signoff 与 Canary 后，Workflow 才能成为 `verified`。Capability Discovery 只在这一时刻将该精确版本作为可激活候选；发现、激活、授权、调用继续是四个不同状态。

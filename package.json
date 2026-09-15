@@ -1,6 +1,6 @@
 {
   "name": "craft-agent-harness",
-  "version": "0.12.28",
+  "version": "0.12.30",
   "description": "Cross-platform capability, workflow, evidence, and agent harness",
   "type": "module",
   "bin": {
@@ -10,7 +10,7 @@
     "craft-mcp-http": "dist/bin/craft-mcp-http.js"
   },
   "scripts": {
-    "test": "pnpm run build && pnpm run typecheck && pnpm run test:ts && pnpm run test:v01216 && pnpm run test:v01217 && pnpm run test:v01218 && pnpm run test:v01219 && pnpm run test:v01220 && pnpm run test:v01221 && pnpm run test:v01222 && pnpm run test:v01223 && pnpm run test:v01224 && pnpm run test:v01225 && pnpm run test:v01226 && pnpm run test:smoke && pnpm run test:plugin",
+    "test": "pnpm run build && pnpm run typecheck && pnpm run test:ts && pnpm run test:v01216 && pnpm run test:v01217 && pnpm run test:v01218 && pnpm run test:v01219 && pnpm run test:v01220 && pnpm run test:v01221 && pnpm run test:v01222 && pnpm run test:v01223 && pnpm run test:v01224 && pnpm run test:v01225 && pnpm run test:v01226 && pnpm run test:v01228 && pnpm run test:v01229 && pnpm run test:v01230 && pnpm run test:durable-experience && pnpm run test:trace-storage && pnpm run test:smoke && pnpm run test:plugin",
     "clean": "node --experimental-strip-types scripts/clean.ts",
     "build": "pnpm run clean && pnpm run build:core && pnpm run build:plugin && pnpm run pack:plugin && pnpm run build:deepseek && pnpm run pack:adapters",
     "build:core": "node node_modules/typescript/bin/tsc -p tsconfig.build.json",
@@ -30,11 +30,16 @@
     "test:v01219": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-include=src/knowledge-memory-runtime.ts --test-coverage-include=src/work-runtime-mode.ts --test-coverage-include=src/verified-work-loop.ts --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 tests/v01219-universal-runtime.test.ts tests/verified-work-loop.test.ts",
     "test:v01220": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-include=src/continual-harness.ts --test-coverage-include=src/stateful-compute.ts --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 tests/v01220-continual-harness.test.ts",
     "test:v01221": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-include=src/uncertainty-policy.ts --test-coverage-include=src/release-qualification.ts --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 tests/v01221-platform-ideal-state.test.ts",
-    "test:v01222": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-include=src/host-protocol.ts --test-coverage-include=src/host-bridge.ts --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 tests/v01222-component-plugins.test.ts tests/execution-fabric.test.ts",
+    "test:v01222": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-include=src/host-protocol.ts --test-coverage-include=src/host-bridge.ts --test-coverage-include=src/interfaces/mcp/surface-registry.ts --test-coverage-include=src/interfaces/mcp/product-launch.ts --test-coverage-include=src/data-space.ts --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 tests/v01222-component-plugins.test.ts tests/execution-fabric.test.ts",
     "test:v01223": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-include=src/verification-plane.ts --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 tests/v01223-verification-plane.test.ts",
     "test:v01224": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-include=src/evaluation-model-profile.ts --test-coverage-include=src/workflow-evolution.ts --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 tests/v01224-evaluation-model-workflow-evolution.test.ts",
     "test:v01225": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-include=src/trust-profile.ts --test-coverage-include=src/web-operation.ts --test-coverage-include=src/mcp-http.ts --test-coverage-lines=100 --test-coverage-functions=100 tests/v01225-trust-web-runtime.test.ts",
     "test:v01226": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-include=src/v01226-runtime.ts --test-coverage-lines=100 --test-coverage-functions=100 tests/v01226-runtime.test.ts",
+    "test:v01228": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-include=src/turn-cognitive-runtime.ts --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 tests/v01228-turn-cognitive-runtime.test.ts",
+    "test:v01229": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-include=src/remote-mcp-access.ts --test-coverage-include=src/host-session-events.ts --test-coverage-include=src/outcome-observer.ts --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 tests/v01229-remote-mcp-access.test.ts tests/v01229-session-observer.test.ts",
+    "test:v01230": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-include=src/remote-runtime.ts --test-coverage-include=src/oidc-jwks.ts --test-coverage-include=src/supply-chain-attestation.ts --test-coverage-include=src/runtime-acceptance.ts --test-coverage-include=src/a2a-v1-adapter.ts --test-coverage-lines=100 --test-coverage-functions=100 tests/v01230-runtime-proof.test.ts",
+    "test:durable-experience": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-include=src/durable-action-loop.ts --test-coverage-include=src/experience-ledger.ts --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 tests/durable-action-experience.test.ts",
+    "test:trace-storage": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-include=src/trace-archive-store.ts --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 tests/trace-archive-store.test.ts",
     "check:ts": "node --experimental-strip-types src/cli.ts --help",
     "typecheck": "node node_modules/typescript/bin/tsc --noEmit"
   },

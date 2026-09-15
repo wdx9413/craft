@@ -1,8 +1,8 @@
-# Current Capability Matrix (v0.12.28)
+# Current Capability Matrix (v0.12.30)
 
 | Area | State | Boundary |
 |---|---|---|
-| Primary `craft` plugin composition | implemented and tested locally | one compact syscall surface reaches built-in Knowledge, Memory, Capability, Skill Quality and Workflow Evolution; sibling plugins are optional single-domain projections, not prerequisites |
+| Primary `craft` plugin composition | implemented and tested locally | one compact syscall surface reaches built-in Context, Capability, Quality and bounded Workflow Evolution; `craft-context`、`craft-capability`、`craft-quality` are optional projections, not prerequisites |
 | Project Brain / Work Session | implemented and tested locally | editable goal/decision/material kernels plus a digest-pinned Context Manifest; Markdown remains source of truth |
 | Default Internal Host tools | implemented and tested | five bounded syscall actions; external tools remain explicitly routed through MCP/Host adapters |
 | CLI `run` vertical slice | implemented and tested locally | creates/continues Project Brain + Work Session and records outcome; model/provider credentials remain deployment configuration |
@@ -18,7 +18,10 @@
 | Context selection | implemented | exact references and digests; vector search remains optional |
 | Knowledge Source / Memory Ledger | implemented and tested locally | source scope, digest, trust/access, legacy reference bindings, expiry/revocation and sensitivity are explicit; external systems remain source-owned |
 | Context Resolution Receipt | implemented and tested locally | content-free exact memory/source versions and budgets; untrusted/revoked sources and restricted memory fail closed by default |
+| Component data-space identity | implemented and tested locally | every `craft_info` returns a content-free `data_space_id`; components with different IDs must not assume Ledger, Receipt or Evidence interoperability |
 | Retrieval Adapter admission | implemented and tested locally | keyword default; vector requires provider fingerprint plus recall, zero-leakage, latency and cost evaluation |
+| Turn Cognitive Runtime | implemented and tested locally | Host/Craft Agent submits a content-free semantic proposal; scoped Policy issues a minimal receipt and optional user-governed memory candidate, but cannot install Host hooks or execute tools |
+| Turn Policy evaluation | implemented and tested locally | deterministic fixture checks decision accuracy, false-positive selection and scope rejection; it is a stage evaluation, not proof of business Outcome |
 | Console / Agent mode plan | implemented and tested locally | same verified protocol projects a Host-bound plan; it does not duplicate provider model calls or terminal execution |
 | Continual Harness view / refinement | implemented and tested locally | content-free exact bindings; low-risk Session memory/prompt changes have privacy review and TTL, while governed changes require shadow Eval, exact Signoff and Canary |
 | Stateful compute protocol | implemented and tested locally | generic Host descriptor, Session, Dispatch, monotonic state Receipt and re-observation; no embedded code executor or vendor-specific Agent binding |
@@ -41,5 +44,12 @@
 | Feedback / Domain Evaluation / Cost | implemented locally | scoped feedback, metric-based domain evaluator contracts, and provider price/usage attribution are recorded; business-specific scorers remain external |
 | Trust Profile / autonomy compounding | implemented and tested locally | evidence-backed recommendation is scoped, expiring and revocable; it never grants execution authority or silently escalates effects |
 | Web operation boundary | implemented and tested locally | bounded credential-free HTTP GET/HEAD observation plus adapter-only browser contracts; clicks, forms and submits require an explicit host/plugin Adapter |
-| MCP HTTP transport | implemented and tested locally | bounded JSON POST `/mcp` gateway with size and Accept checks; stdio remains the default and authentication/TLS are deployment concerns |
+| MCP HTTP transport | implemented and tested locally | bounded JSON POST `/mcp` gateway with size and Accept checks; optional Remote Access Policy fails closed on non-TLS, missing verifier, issuer/audience/scope/expiry mismatch and rate exhaustion; IdP/TLS gateway remain deployment adapters |
+| OIDC/JWKS reference verifier | implemented and tested locally | RS256/JWKS resource-server Adapter verifies issuer, audience, expiry and signature without storing a token; authorization-code/PKCE, TLS termination, token exchange and revocation are deployment-owned |
+| Remote Tenant / Task Binding | implemented and tested locally | opaque one-time handle is bound to Task, tenant data-space, principal/receipt digests, audience, scopes and expiry; remote result/cancel/stream reads must re-authorize and tenant disable/revocation fails closed |
+| Host Session Protocol | implemented and tested locally | content-free contiguous events map into the canonical Trace; embedded Host only reports facts and never causes a second CLI to start |
+| Independent Outcome Observer | implemented and tested locally | observed snapshot and Evidence are distinct from Host self-report; it never independently grants promotion |
+| Runtime Acceptance Campaign | implemented and tested locally | requires two declared Hosts, two sanitized Cases, pinned environment/budget and independent observed outcomes; 3–4 trials are diagnostic and only strict five-trial evidence can become eligible for later Signoff/Canary |
+| Publisher provenance attestation | implemented and tested locally | public-key signature proves a digest was signed and fails stale on digest drift; it never installs, activates or replaces existing certification |
+| A2A v1 Adapter | implemented and tested locally | HTTPS Agent Card plus `message/send`, `tasks/get` and `tasks/cancel` are grant-bound, idempotent, digest-only protocol projections; remote identity, Artifact content and production transport remain deployment work |
 | Automatic experience publication | not automatic | Evaluation, Signoff, Canary, and human publication remain mandatory |

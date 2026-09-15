@@ -1,8 +1,8 @@
 ---
 name: craft-skill-quality
-description: Use Craft's standalone Skill quality component to validate and compare Skill candidates with repeatable cases, graders, reports, and evidence gates.
+description: Compatibility entrypoint for Craft Quality. Use it to validate a versioned Skill or other Agent asset with repeatable cases, graders, reports, and evidence gates.
 ---
 
-# Craft Skill Quality
+# Craft Skill Quality (Compatibility)
 
-Freeze cases, environment, budget, subject versions, and graders before comparison. Prefer deterministic checks, then calibrated model or human graders. Report eligible, rejected, or inconclusive; never publish or replace a Skill merely because one run passed.
+This name is retained for existing installations. Prefer `craft-quality` for new use: it evaluates Skills, MCP/Host Adapters, Capability Kits, Workflows, Harnesses, retrieval policies, and task outcomes through the same frozen-Subject quality loop.

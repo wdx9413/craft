@@ -1,6 +1,6 @@
 # Craft：受控 Agent 工作运行时
 
-> 本文是 Craft 的总览入口。它解释产品解决的问题、关键概念如何连接、当前实现做到哪里，以及在面试或架构评审中应如何准确回答。当前实现基线为 v0.12.24；旧版本号只表示历史里程碑。
+> 本文是 Craft 的总览入口。它解释产品解决的问题、关键概念如何连接、当前实现做到哪里，以及在面试或架构评审中应如何准确回答。当前实现基线为 v0.12.30；旧版本号只表示历史里程碑。
 
 ## 一句话
 
@@ -62,11 +62,15 @@ v0.12.20 将最后的“学习”变成可运行的双速闭环：本次 Session
 
 v0.12.21 进一步把主链压缩为“定义 → 准备 → 行动 → 交付 → 学习”，并将 `VerifiedWorkLoop` 固定为唯一公开工作门面。`UncertaintyPolicy` 允许模型在 Safety Floor 内自主增加求证强度，人工介入只是可配置兜底；`ReferencePilot` 用两个无正文 Case、每臂五次配对 Trial 区分机制通过与真实价值证明。详见 [Platform Ideal State v1](technical/modules/platform-ideal-state-v1.md)。
 
-v0.12.22 将产品拆成完整 Craft 插件与四个可独立安装的组件插件。完整插件统一装配 Core、Knowledge、Memory、Capability、Skill Quality 和 Host Bridge；独立插件可以在不启用完整工作流的情况下增强其他 Agent。Codex App 默认是 `embedded` Execution Host，Craft 不会因此另起 Codex CLI。详见 [组件插件架构](technical/modules/component-plugin-architecture.md)。
+v0.12.28 将产品收敛为完整 Craft 与三个推荐的独立入口：`craft-context`（知识、记忆和最小上下文）、`craft-capability`（能力发现）和 `craft-quality`（通用 Subject 评测）。完整插件统一装配 Core、Context、Capability、Quality 和 Host Bridge；旧 Knowledge、Memory、Skill Quality 名称仅保留兼容。Codex App 默认是 `embedded` Execution Host，Craft 不会因此另起 Codex CLI。详见 [组件插件架构](technical/modules/component-plugin-architecture.md)。
+
+v0.12.30 补齐“能部署、能证明”的外层：远程运行将 principal、tenant、scope、receipt 与一次性 handle 固定在同一任务上；真正的效果比较必须引用真实 Host Session 和独立 Outcome Observer，而不是模型自述。发布者签名、A2A v1 Task 与远程 MCP 都是可替换 Adapter，仍受既有 Capability、Signoff 与 Policy 约束。详见 [Runtime Proof 与远程部署边界](technical/modules/runtime-proof-deployment.md)。
+
+当前工作树继续补强两处长期运行短板：`DurableActionLoop` 让每个 Work Item 必须经过“行动 → Receipt → 再观察 → 验收”才能成为已证明进度；`ExperienceLedger` 将观察、诊断模式与接受/拒绝的干预提案分层保存。它们不改变版本号，也不把未验证知识直接塞回执行 Host。详见 [Durable Action Loop 与 Experience Ledger](technical/modules/durable-action-experience.md)。
 
 v0.12.23 增加 `VerificationPlane`：它从变更类型、effect、Candidate 与真实 Host 需求推导最小验证集，收集环境一致的 Evidence Receipt，并判定 `eligible / rejected / inconclusive`。单元覆盖率只是其中一个确定性检查；对抗、恢复、真实 Host 和 Candidate 还需更强验证。该模块不执行命令、不持久化原始内容，仍通过既有 Host / Runtime Seam 运行实际检查。详见 [Verification Plane](technical/modules/verification-plane.md)。
 
-v0.12.24 增加两条独立但可衔接的组件链。`EvaluationModelProfile` 只记录 Provider、模型、预算和密钥环境变量名，默认禁止网络，发出的 Ticket 只能由后续兼容 Host/Adapter 执行；`craft-workflow-evolution` 将至少两条独立、脱敏、带 Evidence 的执行观察聚合成最多两个设计轴的 Workflow 草案。草案不能直接被发现或调用，只有通过已有 Eval、Signoff 与 Canary 后成为 `verified` Workflow，才会回到 Capability Discovery 的候选集合。知识与记忆的关键词/向量检索也遵循同一原则：检索器是可评测的实现，不是事实层。详见 [模型评测与 Workflow Evolution](technical/modules/evaluation-model-workflow-evolution.md)。
+`EvaluationModelProfile` 只记录 Provider、模型、预算和密钥环境变量名，默认禁止网络，发出的 Ticket 只能由后续兼容 Host/Adapter 执行；Workflow Evolution 将至少两条独立、脱敏、带 Evidence 的执行观察聚合成最多两个设计轴的 Workflow 草案。草案不能直接被发现或调用，只有经 `craft-quality` 的 Eval、再通过 Signoff 与 Canary 成为 `verified` Workflow，才会回到 Capability Discovery 的候选集合。知识与记忆的关键词/向量检索也遵循同一原则：检索器是可评测的实现，不是事实层。详见 [模型评测与 Workflow Evolution](technical/modules/evaluation-model-workflow-evolution.md)。
 
 ```text
 Task + Task Contract + 初始 State Snapshot
