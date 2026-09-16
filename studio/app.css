@@ -488,6 +488,14 @@ html {
 /* Body copy on a document page (task detail); .aside-note is too small for it. */
 .doc-p { margin: 0; font-size: 14px; line-height: 24px; color: var(--text-2); }
 
+/* Historical task observation is intentionally compact.  The summary carries
+   the category and the detail can be folded away without losing the record. */
+.task-observe-fold { margin-top: 14px; border-top: var(--hair) solid var(--line-subtle); }
+.task-observe-fold summary { padding: 11px 0; cursor: pointer; color: var(--text-2); font-size: 13px; font-weight: 500; list-style: none; }
+.task-observe-fold summary::before { content: '›'; display: inline-block; margin-right: 7px; color: var(--text-3); transition: transform var(--dt-fast) var(--ease); }
+.task-observe-fold[open] summary::before { transform: rotate(90deg); }
+.task-observe-fold .rows { padding-bottom: 4px; }
+
 .rail-foot {
   border-top: var(--hair) solid var(--line-subtle);
   padding: 7px 12px;

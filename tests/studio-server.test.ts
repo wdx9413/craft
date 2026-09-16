@@ -41,6 +41,12 @@ test("Craft Studio projects model, project, connector and source reads over the 
   const post = (requestPath: string, body: unknown) => app.handle({ method: "POST", path: requestPath, token: "secret", body: JSON.stringify(body) });
 
   assert.equal(JSON.parse(get("/api/studio/summary").body).version, VERSION);
+  f.store.create("memory_item", "studio-memory", { task_id: "studio-task", kind: "decision", content: "Keep observations local", scope: "task", status: "active" });
+  f.store.create("workflow", "studio-workflow", { name: "Observe", status: "active" });
+  f.store.create("workflow_run", "studio-workflow-run", { task_id: "studio-task", workflow_id: "studio-workflow", status: "completed" });
+  assert.equal((JSON.parse(get("/api/studio/resources?kind=memory&task_id=studio-task").body) as { items: unknown[] }).items.length, 1);
+  assert.equal((JSON.parse(get("/api/studio/resources?kind=workflows&task_id=studio-task").body) as { workflows: unknown[] }).workflows.length, 1);
+  assert.equal(get("/api/studio/resources?kind=nope").status, 422);
 
   const models = JSON.parse(get("/api/models").body) as { count: number; providers: Array<Record<string, unknown>> };
   assert.equal(models.count >= 8, true);

@@ -72,6 +72,15 @@ export class HomeKernel {
     const hostEvents = hostRuns.flatMap((run) => this.store.events(`host-run:${run.id}`).map((event) => ({ run_id: run.id, ...event })));
     const activity: JsonObject[] = [...taskEvents, ...hostEvents].map((item) => item as JsonObject)
       .sort((left, right) => String(right.created_at).localeCompare(String(left.created_at)));
+    // These projections deliberately stay task-scoped.  Studio uses them for a
+    // historical task's Context view, so opening one task can never make
+    // another task's notes or workflow runs appear by accident.
+    const memories = this.store.list("memory_item", limit, (item) => item.task_id === taskId && item.status !== "superseded" && item.status !== "expired");
+    const workflowRuns = this.store.list("workflow_run", limit, (item) => item.task_id === taskId);
+    const workflowIds = new Set(workflowRuns.map((item) => String(item.workflow_id)).filter(Boolean));
+    const workflows = [...workflowIds].map((workflowId) => this.store.find("workflow", workflowId)).filter((item): item is JsonObject => item !== null);
+    const knowledge = this.store.list("knowledge_claim", limit, (item) => item.task_id === taskId || item.scope === `task:${taskId}`);
+    const contextManifests = this.store.list("context_manifest", limit, (item) => item.task_id === taskId);
     return { task: pick(task, ["id", "title", "goal", "project_id", "model_id", "permission_mode", "status", "created_at", "updated_at"]),
       messages: messages.map((item) => pick(item, ["id", "role", "content", "model_id", "provider_model", "usage", "created_at"])),
       host_runs: hostRuns.map((item) => pick(item, ["id", "host", "status", "event_count", "started_at", "finished_at", "updated_at"])),
@@ -86,6 +95,13 @@ export class HomeKernel {
       lineage: this.store.list("lineage_edge", limit, (item) => item.task_id === taskId).map((item) => pick(item, ["id", "workspace_id", "output", "inputs", "transform", "actor_type", "summary", "evidence_ids"])),
       waits: this.store.list("durable_wait", limit, (item) => item.task_id === taskId).map((item) => pick(item, ["id", "condition", "status", "resume_at", "event_key", "updated_at"])),
       attention: this.store.list("attention_item", limit, (item) => item.task_id === taskId && item.status !== "resolved").map((item) => pick(item, ["id", "audience", "priority", "reason", "action", "status"])),
-      trace: traces.slice(0, limit).map((item) => pick(item, ["stream", "sequence", "event_type", "created_at"])) };
+      trace: traces.slice(0, limit).map((item) => pick(item, ["stream", "sequence", "event_type", "created_at"])),
+      context: {
+        memories: memories.map((item) => pick(item, ["id", "kind", "content", "source", "scope", "applies_to", "status", "valid_until", "updated_at"])),
+        knowledge: knowledge.map((item) => pick(item, ["id", "kind", "content", "status", "scope", "source", "updated_at"])),
+        workflows: workflows.map((item) => pick(item, ["id", "name", "description", "status", "updated_at"])),
+        workflow_runs: workflowRuns.map((item) => pick(item, ["id", "workflow_id", "status", "started_at", "finished_at", "updated_at"])),
+        manifests: contextManifests.map((item) => pick(item, ["id", "summary", "status", "created_at", "updated_at"]))
+      } };
   }
 }

@@ -1921,6 +1921,26 @@ export class CraftService extends ServiceFoundation {
   homeTask(args: JsonObject): JsonObject { return this.home.task(args); }
   homeHostRuns(args: JsonObject): JsonObject { return this.home.hostRuns(args); }
   homeHostRun(args: JsonObject): JsonObject { return this.home.hostRun(args); }
+  /** Bounded, local-only catalog views for the Studio's separate resource pages. */
+  studioResourceView(args: JsonObject): JsonObject {
+    const kind = text(args.kind, "kind");
+    const limit = finiteInteger(args.limit, "limit", 100, 1, 200);
+    const taskId = args.task_id === undefined ? null : text(args.task_id, "task_id");
+    if (kind === "memory") {
+      const items = this.store.list("memory_item", limit, (item) =>
+        (!taskId || item.task_id === taskId) && item.status !== "superseded" && item.status !== "expired");
+      return { items: items.map((item) => ({ id: item.id, kind: item.kind, content: item.content, source: item.source,
+        scope: item.scope, task_id: item.task_id, status: item.status, valid_until: item.valid_until, updated_at: item.updated_at })) };
+    }
+    if (kind === "workflows") {
+      const runs = this.store.list("workflow_run", limit, (item) => !taskId || item.task_id === taskId);
+      const workflowIds = new Set(runs.map((item) => String(item.workflow_id)).filter(Boolean));
+      const workflows = taskId ? [...workflowIds].map((workflowId) => this.store.find("workflow", workflowId)).filter((item): item is JsonObject => item !== null) : this.store.list("workflow", limit);
+      return { workflows: workflows.map((item) => ({ id: item.id, name: item.name, description: item.description, status: item.status, updated_at: item.updated_at })),
+        runs: runs.map((item) => ({ id: item.id, workflow_id: item.workflow_id, task_id: item.task_id, status: item.status, started_at: item.started_at, finished_at: item.finished_at, updated_at: item.updated_at })) };
+    }
+    throw new Error("kind must be memory or workflows");
+  }
   codexDispatchPrepare(args: JsonObject): JsonObject { return this.codexHost.prepare(args); }
   async codexDispatchExecute(args: JsonObject): Promise<JsonObject> {
     const dispatch = this.store.get("codex_dispatch", text(args.dispatch_id, "dispatch_id"));

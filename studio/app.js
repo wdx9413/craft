@@ -136,7 +136,7 @@
   };
 
   var TASK_PERMISSION_LABELS = {
-    human_approval: '人工审批', assisted_approval: '帮我审批', full_access: '完全访问'
+    human_approval: '手动审批', assisted_approval: '帮我审批', full_access: '完全访问'
   };
 
   var CONFIDENCE_LABELS = { confirmed: '已确认', high: '高', medium: '中', low: '低' };
@@ -453,16 +453,24 @@
   // when the task is created and shown as a group in the rail — not a place. It
   // used to sit here as 一级菜单 and duplicated the rail's own grouping.
   var NAV = [
-    { key: 'capabilities', label: '能力', title: '能力', sub: 'Craft 能替你做的事，以及每件事的来源与影响范围', icon: 'plug', view: viewCapabilities },
-    { key: 'settings', label: '设置', title: '设置', sub: '模型、用量、外观与高级选项', icon: 'sliders', view: viewSettings }
+    { key: 'plugins', label: '插件', title: '插件', sub: '可安装或已登记的能力包', icon: 'plug', view: viewPlugins },
+    { key: 'skills', label: '技能', title: '技能', sub: '把具体方法与提示词作为可复用资产管理', icon: 'spark', view: viewSkills },
+    { key: 'connectors', label: '连接器', title: '连接器', sub: '连接本机目录、MCP 服务和外部来源', icon: 'server', view: viewCapabilities },
+    { key: 'models', label: '模型', title: '模型', sub: '配置任务对话和推理使用的模型', icon: 'cpu', view: viewModels },
+    { key: 'memory', label: '记忆', title: '记忆', sub: '查看被保存的短期与长期任务记忆', icon: 'db', view: viewMemory },
+    { key: 'knowledge', label: '知识', title: '知识', sub: '将 Markdown、JSON 和可核验结论组织成知识库', icon: 'layers', view: viewKnowledge },
+    { key: 'workflows', label: '工作流', title: '工作流', sub: '查看复用流程及其运行记录', icon: 'refresh', view: viewWorkflows }
   ];
 
-  var FLAT = NAV;
-  var NAV_COUNT = { capabilities: 'capability_connector' };
+  // Settings remains routable, but is deliberately anchored at the rail bottom
+  // rather than competing with the everyday working surfaces above.
+  var SETTINGS_PAGE = { key: 'settings', label: '设置', title: '设置', sub: '外观、默认档位与高级选项', icon: 'sliders', view: viewSettings };
+  var FLAT = NAV.concat([SETTINGS_PAGE]);
+  var NAV_COUNT = { connectors: 'capability_connector', plugins: 'capability_asset', skills: 'capability_asset', memory: 'memory_item', knowledge: 'knowledge_claim', workflows: 'workflow' };
 
   // Home is where the app already lands, so it needs no nav entry either: it is
   // the composer and nothing else — the task list lives in the rail.
-  var HOME_PAGE = { key: 'home', label: '任务', title: '任务', sub: '说清楚要做什么，选一个文件夹，其余交给 Craft', icon: 'tasks', view: viewHome };
+  var HOME_PAGE = { key: 'home', label: '任务区', title: '任务区', sub: '说清楚要做什么，选一个文件夹，其余交给 Craft', icon: 'tasks', view: viewHome };
 
   // The folder detail page is reached by clicking a folder name in the rail. It
   // stays out of NAV, but keeps a hash of its own so a reload lands back on it.
@@ -702,7 +710,7 @@
             (modelOptions || '<option value="">先到设置添加模型</option>') + '</select></label>' +
         '<label class="cbtn cbtn-pick" title="选择任务权限">' + icon('shield') +
           '<select id="task-permission" aria-label="选择权限">' +
-            options([['human_approval', '人工审批'], ['assisted_approval', '帮我审批'], ['full_access', '完全访问']], c.permission) +
+            options([['human_approval', '手动审批'], ['assisted_approval', '帮我审批'], ['full_access', '完全访问']], c.permission) +
           '</select></label>' +
         '<span class="grow"></span>' +
         (ready.length ? '<button class="cbtn primary" type="button" id="composer-send">' + icon('play') + '<span>开始</span></button>' :
@@ -736,7 +744,7 @@
     var send = root.querySelector('#composer-send');
     if (send) send.onclick = submitComposer;
     var setup = root.querySelector('#composer-model-setup');
-    if (setup) setup.onclick = function () { go('settings'); };
+    if (setup) setup.onclick = function () { go('models'); };
     box.onkeydown = function (event) {
       if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') { event.preventDefault(); submitComposer(); }
     };
@@ -1275,7 +1283,11 @@
         aside: asideBlock('任务是什么', '', '<div class="aside-note">一个任务是一次完整的工作：一个目标、一条执行过程、一份验证结论。</div>')
       });
     }
-    return api('/api/tasks/' + encodeURIComponent(taskId)).then(function (detail) {
+    return Promise.all([
+      api('/api/tasks/' + encodeURIComponent(taskId)),
+      settled(api('/api/workbench-experience?task_id=' + encodeURIComponent(taskId) + '&limit=100'), { sessions: [], launches: [], traces: [], outcomes: [], artifacts: [], timeline: [], next_action: '' })
+    ]).then(function (results) {
+      var detail = results[0], experience = results[1];
       var task = detail.task || {};
       var checkpoints = detail.checkpoints || [];
       var latest = checkpoints[0] || null;
@@ -1286,6 +1298,11 @@
       var messages = detail.messages || [];
       var hostRuns = detail.host_runs || [];
       var activity = detail.activity || [];
+      var context = detail.context || {};
+      var usage = messages.reduce(function (total, message) {
+        var value = message.usage || {};
+        return total + Number(value.total_tokens || value.input_tokens || 0) + Number(value.output_tokens || 0);
+      }, 0);
 
       state.selectedTaskTitle = task.title || '';
       if (state.page === 'task') {
@@ -1367,12 +1384,34 @@
           '</div><span class="row-time">' + esc(shortTime(item.created_at)) + '</span></div>';
       }).join('') : emptyState('还没有活动记录', '真正发起对话或运行后，时间线会出现在这里。', 'dot');
 
+      var observationTimeline = experience.timeline || [];
+      var observationRows = observationTimeline.length ? observationTimeline.map(function (item) {
+        return '<div class="row">' + lead('dot', 'muted') + '<div class="row-main"><span class="row-title">' +
+          esc(label(TRACE_LABELS, item.event_kind, item.event_kind || '执行事件')) + '</span><span class="row-sub mono">链路 ' + esc(item.trace_id || '—') + ' · #' + esc(item.sequence || '—') + '</span></div>' +
+          '<span class="row-time">' + esc(shortTime(item.created_at)) + '</span></div>';
+      }).join('') : emptyState('还没有链路事件', '当任务通过受控执行路径运行时，事件会按顺序记录在这里。', 'dot');
+      var hostRunRows = hostRuns.length ? hostRuns.map(function (run) {
+        return '<div class="row">' + lead('play', run.status === 'completed' ? 'success' : 'muted') + '<div class="row-main"><span class="row-title">' + esc(run.host || '本机运行') + '</span><span class="row-sub mono">' + esc(run.id || '—') + ' · ' + esc(run.event_count || 0) + ' 条事件</span></div>' + statusPill(run.status) + '</div>';
+      }).join('') : emptyState('还没有执行运行', '模型对话已经记录在上方；文件、命令等受控运行开始后会在这里显示。', 'play');
+      var observeCard = taskCard('观测', '日志、链路追踪与指标',
+        '<div class="metrics"><div class="stat"><div class="stat-body"><b>' + esc(messages.length) + '</b><span>对话消息</span></div></div><div class="stat"><div class="stat-body"><b>' + esc(hostRuns.length) + '</b><span>受控运行</span></div></div><div class="stat"><div class="stat-body"><b>' + esc((experience.traces || []).length) + '</b><span>链路</span></div></div><div class="stat"><div class="stat-body"><b>' + esc(usage || 0) + '</b><span>已记录 Token</span></div></div></div>' +
+        '<details class="task-observe-fold" open><summary>运行记录与日志</summary><div class="rows">' + hostRunRows + '</div></details>' +
+        '<details class="task-observe-fold" open><summary>链路追踪</summary><div class="rows">' + observationRows + '</div></details>');
+      var memories = context.memories || [], knowledge = context.knowledge || [], workflows = context.workflows || [], workflowRuns = context.workflow_runs || [], manifests = context.manifests || [];
+      var memoryRows = memories.length ? memories.map(function (item) { return '<div class="row">' + lead('db', 'muted') + '<div class="row-main"><span class="row-title">' + esc(item.content || item.id) + '</span><span class="row-sub">' + esc([item.kind, item.source].filter(Boolean).join(' · ')) + '</span></div></div>'; }).join('') : emptyState('没有任务短期记忆', '任务显式记录的有效记忆会显示在这里。', 'db');
+      var knowledgeRows = knowledge.length ? knowledge.map(function (item) { return '<div class="row">' + lead('layers', 'muted') + '<div class="row-main"><span class="row-title">' + esc(item.content || item.id) + '</span><span class="row-sub">' + esc(label(STATUS_LABELS, item.status, item.status || '—')) + '</span></div></div>'; }).join('') : emptyState('没有任务知识', '从这个任务中提取且绑定到该任务的知识会显示在这里。', 'layers');
+      var workflowRows = workflowRuns.length ? workflowRuns.map(function (item) { return '<div class="row">' + lead('refresh', 'muted') + '<div class="row-main"><span class="row-title">' + esc(item.workflow_id || item.id) + '</span><span class="row-sub">' + esc(shortTime(item.updated_at)) + '</span></div>' + statusPill(item.status) + '</div>'; }).join('') : emptyState('没有任务工作流', workflows.length || manifests.length ? '已有关联上下文，但没有可展示的工作流运行。' : '通过工作流运行该任务后，记录会显示在这里。', 'refresh');
+      var contextCard = taskCard('任务上下文', '短期记忆、知识与工作流',
+        '<details class="task-observe-fold" open><summary>短期记忆 · ' + esc(memories.length) + '</summary><div class="rows">' + memoryRows + '</div></details>' +
+        '<details class="task-observe-fold"><summary>任务知识 · ' + esc(knowledge.length) + '</summary><div class="rows">' + knowledgeRows + '</div></details>' +
+        '<details class="task-observe-fold"><summary>工作流与上下文清单 · ' + esc(workflowRuns.length + manifests.length) + '</summary><div class="rows">' + workflowRows + '</div></details>');
+
       var pending = (latest && latest.pending) || [];
       var aside = asideCollapsible('任务信息', asideRows([
         ['状态', label(STATUS_LABELS, task.status, task.status || '—')],
         ['文件夹', folder],
         ['模型', task.model_id || '—'],
-        ['权限', label(TASK_PERMISSION_LABELS, task.permission_mode, '人工审批')],
+        ['权限', label(TASK_PERMISSION_LABELS, task.permission_mode, '手动审批')],
         ['创建时间', shortTime(task.created_at) || '—'],
         ['最近更新', shortTime(task.updated_at) || '—']
       ])) +
@@ -1383,7 +1422,7 @@
         pending.map(function (stage) { return esc(label(STAGE_LABELS, stage, stage)); }).join('、') + '</div>') : '');
 
       return {
-        html: '<div class="stack task-page">' + goalCard + conversationCard +
+        html: '<div class="stack task-page">' + goalCard + conversationCard + observeCard + contextCard +
           taskCard('活动', (hostRuns.length ? hostRuns.length + ' 次运行' : '暂无运行'), '<div class="rows">' + activityRows + '</div>') +
           '<div class="grid-2">' + progressCard + verdictCard + '</div>' +
           taskCard('产物', artifacts.length + ' 项', '<div class="rows">' + artifactRows + '</div>') +
@@ -1434,7 +1473,7 @@
     if (!name) { toast('名称不能为空', true); return; }
     if (activeSource === 'local') {
       api('/api/sources', { method: 'POST', body: { path: val('source-path'), label: name, scan: checked('source-scan'), priority: 0 } })
-        .then(function () { toast('已添加本机文件夹'); paint('capabilities'); }).catch(fail);
+        .then(function () { toast('已添加本机文件夹'); paint('connectors'); }).catch(fail);
       return;
     }
     var body = { kind: val('source-kind'), name: name, endpoint: val('source-endpoint') || undefined,
@@ -1447,12 +1486,12 @@
         toast('已添加来源「' + name + '」');
         // Not an interstitial any more: the next step is a card at the top of
         // the column, right next to the list of sources it refers to.
-        openInlineOn('capabilities', {
+        openInlineOn('connectors', {
           title: '来源已添加',
           sub: name,
           html: '<div class="callout info">' + icon('arrow') + '<span>下一步：点该来源上的「扫描可用能力」，把里面的能力登记进来。扫描只是登记，不会下载也不会运行。</span></div>' +
             '<div class="aside-note">Craft 只保存来源信息与摘要，不保存任何密码或密钥。</div>',
-          actions: [{ label: '知道了', primary: true, run: function () { dismissInline('capabilities'); } }]
+          actions: [{ label: '知道了', primary: true, run: function () { dismissInline('connectors'); } }]
         });
       }).catch(fail);
   }
@@ -1472,7 +1511,7 @@
     });
     if (!assets.length) { toast('请至少填写一个能力', true); return; }
     api('/api/connectors/' + encodeURIComponent(connectorId) + '/discover', { method: 'POST', body: { assets: assets } })
-      .then(function () { clearInline(); toast('资产已登记，等待审批'); paint('capabilities'); })
+      .then(function () { clearInline(); toast('资产已登记，等待审批'); paint('connectors'); })
       .catch(fail);
   }
 
@@ -1572,15 +1611,15 @@
               : '<div class="aside-note">没有添加本机能力文件夹。</div>'),
         mounts: [function (root) {
           var setupOpen = root.querySelector('#source-setup-open');
-          if (setupOpen) setupOpen.onclick = function () { state.capabilitySetupOpen = true; paint('capabilities'); };
+          if (setupOpen) setupOpen.onclick = function () { state.capabilitySetupOpen = true; paint('connectors'); };
           var setupClose = root.querySelector('#source-setup-close');
-          if (setupClose) setupClose.onclick = function () { state.capabilitySetupOpen = false; paint('capabilities'); };
+          if (setupClose) setupClose.onclick = function () { state.capabilitySetupOpen = false; paint('connectors'); };
           var register = root.querySelector('#source-register');
           if (register) register.onclick = registerSource;
           var sourceTabs = root.querySelector('#source-tabs');
           if (sourceTabs) sourceTabs.onclick = function (event) {
             var tab = event.target.closest('[data-source]');
-            if (tab) { activeSource = tab.getAttribute('data-source'); paint('capabilities'); }
+            if (tab) { activeSource = tab.getAttribute('data-source'); paint('connectors'); }
           };
           root.querySelectorAll('[data-discover]').forEach(function (button) {
             button.onclick = function () {
@@ -1598,14 +1637,14 @@
             button.onclick = function () {
               var id = button.getAttribute('data-approve-asset');
               api('/api/connector-assets/' + encodeURIComponent(id) + '/approve', { method: 'POST', body: { approval_ref: 'studio-user-approval' } })
-                .then(function () { toast('已确认可用'); paint('capabilities'); }).catch(fail);
+                .then(function () { toast('已确认可用'); paint('connectors'); }).catch(fail);
             };
           });
           root.querySelectorAll('[data-toggle]').forEach(function (button) {
             button.onclick = function () {
               var id = button.getAttribute('data-toggle');
               api('/api/connectors/' + encodeURIComponent(id) + '/status', { method: 'POST', body: { active: button.getAttribute('data-active') !== 'true' } })
-                .then(function () { paint('capabilities'); }).catch(fail);
+                .then(function () { paint('connectors'); }).catch(fail);
             };
           });
           root.querySelectorAll('[data-revoke]').forEach(function (button) {
@@ -1617,16 +1656,117 @@
                 title: '撤销这个来源？', sub: id,
                 html: '<div class="callout warn">' + icon('alert') + '<span>撤销后，这个来源上已经确认可用的能力会全部失效，用到它们的任务不能再调用。本机文件不会被删除。</span></div>',
                 actions: [
-                  { label: '取消', run: function () { clearInline(); paint('capabilities'); } },
+                  { label: '取消', run: function () { clearInline(); paint('connectors'); } },
                   { label: '确认撤销', primary: true, danger: true, run: function () {
                     api('/api/connectors/' + encodeURIComponent(id) + '/revoke', { method: 'POST', body: { reason: 'revoked from Craft Studio' } })
-                      .then(function () { clearInline(); toast('已撤销'); paint('capabilities'); }).catch(fail);
+                      .then(function () { clearInline(); toast('已撤销'); paint('connectors'); }).catch(fail);
                   } }
                 ]
               });
             };
           });
         }]
+      };
+    });
+  }
+
+  // --------------------------------------------------------- resource pages
+  // The storage layer is plugin-oriented, but people do not think in storage
+  // tables.  These views are intentionally separate, while projecting the same
+  // local records that the connector and knowledge kernels already manage.
+
+  function catalogRows(items, iconName, title, sub) {
+    return items.length ? '<div class="rows">' + items.map(function (item) {
+      return '<div class="row">' + lead(iconName, 'muted') + '<div class="row-main"><span class="row-title">' + esc(title(item)) + '</span>' +
+        (sub(item) ? '<span class="row-sub">' + esc(sub(item)) + '</span>' : '') + '</div>' +
+        (item.status ? statusPill(item.status) : '') + '</div>';
+    }).join('') + '</div>' : '';
+  }
+
+  function viewPlugins() {
+    return api('/api/connectors?limit=100').then(function (result) {
+      var connectors = (result.connectors || []).filter(function (item) { return item.kind === 'github_skill'; });
+      var assets = result.assets || [];
+      var rows = catalogRows(connectors, 'plug', function (item) { return item.name || item.id; }, function (item) {
+        var count = assets.filter(function (asset) { return asset.connector_id === item.id; }).length;
+        return 'GitHub 来源 · 已登记 ' + count + ' 项';
+      });
+      return {
+        html: '<div class="stack"><div class="card">' + head('插件', '插件是可安装或可接入的能力包；这里不展示示例数据',
+          '<button class="btn primary" id="plugins-add" type="button">' + icon('plus') + '添加插件来源</button>') +
+          '<div class="card-body">' + (rows || emptyState('还没有插件', '添加 GitHub 插件来源后，登记到的插件会显示在这里。', 'plug')) + '</div></div></div>',
+        aside: asideBlock('插件来源', String(connectors.length), '<div class="aside-note">来源需要你手动添加与确认；Craft 不会自动下载或安装代码。</div>'),
+        mounts: [function (root) { var button = root.querySelector('#plugins-add'); if (button) button.onclick = function () { activeSource = 'plugins'; state.capabilitySetupOpen = true; go('connectors'); }; }]
+      };
+    });
+  }
+
+  function viewSkills() {
+    return api('/api/connectors?limit=100').then(function (result) {
+      var assets = (result.assets || []).filter(function (item) { return item.asset_type === 'skill'; });
+      var rows = catalogRows(assets, 'spark', function (item) { return item.name || item.logical_id || item.id; }, function (item) {
+        return (item.summary || '没有说明') + ' · ' + label(EFFECT_LABELS, item.effect, item.effect || '仅查看');
+      });
+      return {
+        html: '<div class="stack"><div class="card">' + head('技能', '从插件、连接器或本机目录登记的可复用方法', countChip(assets.length)) +
+          '<div class="card-body">' + (rows || emptyState('还没有技能', '先在「插件」或「连接器」里接入来源，再扫描和确认具体技能。', 'spark')) + '</div></div></div>',
+        aside: asideBlock('技能的状态', '', '<div class="aside-note">只有确认可用的技能才应被任务调用。技能本身不等于授予文件、网络或外部写入权限。</div>')
+      };
+    });
+  }
+
+  function viewModels() {
+    return api('/api/config/models').then(function (result) {
+      var models = result.models || [];
+      var rows = models.length ? models.map(function (model) {
+        return '<div class="row"><span class="row-lead accent">' + esc(String(model.name || model.id).charAt(0).toUpperCase()) + '</span><div class="row-main"><span class="row-title">' + esc(model.name || model.id) + '</span><span class="row-sub">' + esc(model.model || '未选择模型') + '</span></div>' + (model.configured ? pill('可用', 'ok') : pill('待填密钥', 'warn')) + '</div>';
+      }).join('') : emptyState('还没有模型', '添加并配置一个模型后，就能创建并继续任务对话。', 'cpu');
+      return {
+        html: '<div class="stack"><div class="card">' + head('模型', '先配置模型，再在任务区选择它开始任务', '<button class="btn primary" id="model-add" type="button">' + icon('plus') + '添加模型</button>') +
+          '<div class="card-body"><div class="rows">' + rows + '</div><p class="doc-p" style="margin-top:12px">密钥只从本机设置或系统环境变量读取，不会出现在任务记录中。</p></div></div></div>',
+        aside: asideBlock('任务执行', '', '<div class="aside-note">任务会先以模型对话方式运行。需要读取文件、执行命令或外部操作时，Craft 会根据任务权限进行治理和记录。</div>'),
+        mounts: [function (root) { var button = root.querySelector('#model-add'); if (button) button.onclick = function () { openModelSheet({ step: 1, preset: null, model: '', name: '' }); }; }]
+      };
+    });
+  }
+
+  function viewMemory() {
+    return api('/api/studio/resources?kind=memory&limit=100').then(function (result) {
+      var items = result.items || [];
+      var rows = catalogRows(items, 'db', function (item) { return item.content || item.id; }, function (item) {
+        return [item.kind, item.scope, item.source].filter(Boolean).join(' · ');
+      });
+      return {
+        html: '<div class="stack"><div class="card">' + head('记忆', '这是 Craft 已保存且仍有效的本地记忆，不是模拟样例', countChip(items.length)) +
+          '<div class="card-body">' + (rows || emptyState('还没有可展示的记忆', '任务运行并显式保存记忆后，它会以结构化记录出现在这里。', 'db')) + '</div></div></div>',
+        aside: asideBlock('记忆范围', '', '<div class="aside-note">任务页会只展示该任务自己的短期记忆；这里则是全局视图。</div>')
+      };
+    });
+  }
+
+  function viewKnowledge() {
+    return api('/api/knowledge').then(function (result) {
+      var claims = result.claims || [], pages = result.pages || [], bundles = result.bundles || [];
+      var claimRows = catalogRows(claims, 'layers', function (item) { return item.content || item.id; }, function (item) { return [item.kind, label(STATUS_LABELS, item.status, item.status), item.scope].filter(Boolean).join(' · '); });
+      var pageRows = catalogRows(pages, 'file', function (item) { return item.title || item.id; }, function (item) { return item.revision_source || 'Markdown / JSON'; });
+      return {
+        html: '<div class="stack"><div class="grid-2"><div class="card">' + head('知识结论', '带来源与状态的可核验内容', countChip(claims.length)) + '<div class="card-body">' + (claimRows || emptyState('还没有知识结论', '从任务或资料中提取后才会显示。', 'layers')) + '</div></div>' +
+          '<div class="card">' + head('知识页面', 'Markdown 或 JSON 的可视化入口', countChip(pages.length)) + '<div class="card-body">' + (pageRows || emptyState('还没有知识页面', '导入或生成知识页后会显示在这里。', 'file')) + '</div></div></div>' +
+          '<div class="card">' + head('知识包', '运行任务时可绑定的已整理上下文', countChip(bundles.length)) + '<div class="card-body">' + (bundles.length ? catalogRows(bundles, 'inbox', function (item) { return item.id; }, function (item) { return (item.claim_refs || []).length + ' 条结论 · ' + (item.scope || '未设范围'); }) : emptyState('还没有知识包', '知识包需要由真实知识记录生成。', 'inbox')) + '</div></div></div>',
+        aside: asideBlock('可追溯性', '', '<div class="aside-note">知识不是聊天摘要：它保留状态、范围和来源，便于复核和后续任务复用。</div>')
+      };
+    });
+  }
+
+  function viewWorkflows() {
+    return api('/api/studio/resources?kind=workflows&limit=100').then(function (result) {
+      var workflows = result.workflows || [], runs = result.runs || [];
+      return {
+        html: '<div class="stack"><div class="card">' + head('工作流', '可复用的步骤编排', countChip(workflows.length)) + '<div class="card-body">' +
+          (catalogRows(workflows, 'refresh', function (item) { return item.name || item.id; }, function (item) { return item.description || '没有说明'; }) || emptyState('还没有工作流', '保存或导入工作流后会显示在这里。', 'refresh')) + '</div></div>' +
+          '<div class="card">' + head('工作流运行', '实际运行过的记录', countChip(runs.length)) + '<div class="card-body">' +
+          (catalogRows(runs, 'play', function (item) { return item.workflow_id || item.id; }, function (item) { return [label(STATUS_LABELS, item.status, item.status), shortTime(item.updated_at)].filter(Boolean).join(' · '); }) || emptyState('还没有工作流运行', '没有执行记录时不会填充示例数据。', 'play')) + '</div></div></div>',
+        aside: asideBlock('运行记录', '', '<div class="aside-note">打开某个任务后，可在它的「观测」和「任务上下文」中看到与该任务相关的流程记录。</div>')
       };
     });
   }
@@ -1901,7 +2041,7 @@
   }
 
   function openExecutionSetup() {
-    openSheetAfterPaint('settings', function () {
+    openSheetAfterPaint('models', function () {
       openModelSheet({ step: 1, preset: null, model: '', name: '' });
     });
   }
@@ -2079,7 +2219,7 @@
         execSave();
         renderStatusExecution();
         toast(w.editing ? '已保存' : '已添加模型「' + payload.name + '」');
-        if (state.page === 'settings') paint('settings'); else go('settings');
+        if (state.page === 'models') paint('models'); else go('models');
       }).catch(fail);
     };
   }
@@ -2125,12 +2265,15 @@
     }
 
     $('jump-new-task').onclick = openComposer;
+    $('settings-nav').onclick = function () { go('settings'); };
     $('nav-back').onclick = function () { history.back(); };
     $('nav-forward').onclick = function () { history.forward(); };
     $('aside-toggle').onclick = function () {
       var app = $('app'); var next = app.getAttribute('data-aside') === 'open' ? 'collapsed' : 'open';
       app.setAttribute('data-aside', next); $('aside-toggle').setAttribute('aria-pressed', String(next === 'collapsed'));
     };
+    var settings = $('settings-nav');
+    if (settings) settings.setAttribute('aria-current', String(current === 'settings'));
     document.querySelectorAll('[data-menu]').forEach(function (button) { button.onclick = function () { openTopMenu(button.getAttribute('data-menu'), button); }; });
     document.addEventListener('click', function (event) { if (!event.target.closest('[data-menu], #top-menu')) closeTopMenu(); });
     // The folder tree lives in the static rail markup, so bind once here instead

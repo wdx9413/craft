@@ -15532,6 +15532,12 @@ var HomeKernel = class {
     const messages = this.store.list("task_message", limit3, (item) => item.task_id === taskId3).sort((left, right) => String(left.created_at).localeCompare(String(right.created_at)));
     const hostEvents = hostRuns.flatMap((run) => this.store.events(`host-run:${run.id}`).map((event) => ({ run_id: run.id, ...event })));
     const activity = [...taskEvents, ...hostEvents].map((item) => item).sort((left, right) => String(right.created_at).localeCompare(String(left.created_at)));
+    const memories = this.store.list("memory_item", limit3, (item) => item.task_id === taskId3 && item.status !== "superseded" && item.status !== "expired");
+    const workflowRuns = this.store.list("workflow_run", limit3, (item) => item.task_id === taskId3);
+    const workflowIds = new Set(workflowRuns.map((item) => String(item.workflow_id)).filter(Boolean));
+    const workflows = [...workflowIds].map((workflowId) => this.store.find("workflow", workflowId)).filter((item) => item !== null);
+    const knowledge = this.store.list("knowledge_claim", limit3, (item) => item.task_id === taskId3 || item.scope === `task:${taskId3}`);
+    const contextManifests = this.store.list("context_manifest", limit3, (item) => item.task_id === taskId3);
     return {
       task: pick(task, ["id", "title", "goal", "project_id", "model_id", "permission_mode", "status", "created_at", "updated_at"]),
       messages: messages.map((item) => pick(item, ["id", "role", "content", "model_id", "provider_model", "usage", "created_at"])),
@@ -15547,7 +15553,14 @@ var HomeKernel = class {
       lineage: this.store.list("lineage_edge", limit3, (item) => item.task_id === taskId3).map((item) => pick(item, ["id", "workspace_id", "output", "inputs", "transform", "actor_type", "summary", "evidence_ids"])),
       waits: this.store.list("durable_wait", limit3, (item) => item.task_id === taskId3).map((item) => pick(item, ["id", "condition", "status", "resume_at", "event_key", "updated_at"])),
       attention: this.store.list("attention_item", limit3, (item) => item.task_id === taskId3 && item.status !== "resolved").map((item) => pick(item, ["id", "audience", "priority", "reason", "action", "status"])),
-      trace: traces.slice(0, limit3).map((item) => pick(item, ["stream", "sequence", "event_type", "created_at"]))
+      trace: traces.slice(0, limit3).map((item) => pick(item, ["stream", "sequence", "event_type", "created_at"])),
+      context: {
+        memories: memories.map((item) => pick(item, ["id", "kind", "content", "source", "scope", "applies_to", "status", "valid_until", "updated_at"])),
+        knowledge: knowledge.map((item) => pick(item, ["id", "kind", "content", "status", "scope", "source", "updated_at"])),
+        workflows: workflows.map((item) => pick(item, ["id", "name", "description", "status", "updated_at"])),
+        workflow_runs: workflowRuns.map((item) => pick(item, ["id", "workflow_id", "status", "started_at", "finished_at", "updated_at"])),
+        manifests: contextManifests.map((item) => pick(item, ["id", "summary", "status", "created_at", "updated_at"]))
+      }
     };
   }
 };
@@ -30604,6 +30617,36 @@ ${task.goal}`.toLowerCase();
   }
   homeHostRun(args) {
     return this.home.hostRun(args);
+  }
+  /** Bounded, local-only catalog views for the Studio's separate resource pages. */
+  studioResourceView(args) {
+    const kind2 = text122(args.kind, "kind");
+    const limit3 = finiteInteger2(args.limit, "limit", 100, 1, 200);
+    const taskId3 = args.task_id === void 0 ? null : text122(args.task_id, "task_id");
+    if (kind2 === "memory") {
+      const items2 = this.store.list("memory_item", limit3, (item) => (!taskId3 || item.task_id === taskId3) && item.status !== "superseded" && item.status !== "expired");
+      return { items: items2.map((item) => ({
+        id: item.id,
+        kind: item.kind,
+        content: item.content,
+        source: item.source,
+        scope: item.scope,
+        task_id: item.task_id,
+        status: item.status,
+        valid_until: item.valid_until,
+        updated_at: item.updated_at
+      })) };
+    }
+    if (kind2 === "workflows") {
+      const runs = this.store.list("workflow_run", limit3, (item) => !taskId3 || item.task_id === taskId3);
+      const workflowIds = new Set(runs.map((item) => String(item.workflow_id)).filter(Boolean));
+      const workflows = taskId3 ? [...workflowIds].map((workflowId) => this.store.find("workflow", workflowId)).filter((item) => item !== null) : this.store.list("workflow", limit3);
+      return {
+        workflows: workflows.map((item) => ({ id: item.id, name: item.name, description: item.description, status: item.status, updated_at: item.updated_at })),
+        runs: runs.map((item) => ({ id: item.id, workflow_id: item.workflow_id, task_id: item.task_id, status: item.status, started_at: item.started_at, finished_at: item.finished_at, updated_at: item.updated_at }))
+      };
+    }
+    throw new Error("kind must be memory or workflows");
   }
   codexDispatchPrepare(args) {
     return this.codexHost.prepare(args);

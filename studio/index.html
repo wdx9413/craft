@@ -72,7 +72,7 @@ try {
              control and the switch between folder grouping (default) and one
              flat list ordered by latest update. -->
         <div class="nav-group">
-          <span>任务 <span class="count" id="task-list-count">0</span></span>
+          <span>任务区 <span class="count" id="task-list-count">0</span></span>
           <span class="group-tools">
             <button class="icon-btn tiny" id="task-fold" type="button" title="全部展开或折叠" aria-label="全部展开或折叠">
               <svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.8 6.3L8 3.1l3.2 3.2M4.8 9.7L8 12.9l3.2-3.2"/></svg>
@@ -83,6 +83,10 @@ try {
         <div class="folder-tree" id="folder-tree"></div>
       </div>
       <div class="rail-foot">
+        <button class="nav-item" id="settings-nav" type="button">
+          <svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.1v1.1m0 9.6v1.1M13.9 8h-1.1M3.2 8H2.1m10.2-4.1-.8.8M4.5 11.5l-.8.8m8.6 0-.8-.8M4.5 4.5l-.8-.8"/><circle cx="8" cy="8" r="2.5"/></svg>
+          <span class="nav-label">设置</span>
+        </button>
         <div class="conn" id="rail-status" data-state="pending"><span class="dot"></span><span class="conn-text">连接中…</span></div>
       </div>
     </aside>

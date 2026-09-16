@@ -161,6 +161,7 @@ export class WorkbenchWebApp {
       // Craft Studio read/write surfaces. These are thin projections of existing
       // kernels: the shell never gains authority the CLI does not already have.
       if (request.method === "GET" && path === "/api/studio/summary") return json(200, this.service.info());
+      if (request.method === "GET" && path === "/api/studio/resources") return json(200, this.service.studioResourceView({ kind: url.searchParams.get("kind") ?? undefined, task_id: url.searchParams.get("task_id") ?? undefined, limit: url.searchParams.get("limit") ?? undefined }));
       if (request.method === "GET" && path === "/api/models") return json(200, this.service.modelProviderList());
       if (request.method === "GET" && path === "/api/model-profiles") return json(200, this.service.evaluationModelProfileList({ limit: boundedLimit(url.searchParams.get("limit"), 100) }));
       if (request.method === "POST" && path === "/api/model-profiles") return json(201, this.service.evaluationModelProfileSave(bodyObject(request.body)));
