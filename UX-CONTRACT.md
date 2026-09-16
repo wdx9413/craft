@@ -44,6 +44,12 @@ Buttons and icon buttons use native `<button>` elements, pointer cursors, hover/
 | Remove model | App-owned confirmation sheet | confirmation action | Settings | toast | keep confirmation open | cancel action | `studio/app.js` |
 | New task | rail action / composer | local form state | task conversation | first model reply | retain input and show error | task composer | `studio/app.js` |
 | Continue task | task conversation composer | disable send while model responds | same task thread | append user/model turns | retain input and show error | task composer | `studio/app.js` |
+| Install plugin manifest | Plugins page file picker | parse JSON locally, then persist local descriptor | Plugins | toast | preserve file choice and show parse/server error | upload trigger | `studio/app.js` |
+| Install local skill | Skills page file picker | read bounded `SKILL.md`, persist inspectable instruction | Skills and task capability picker | toast | preserve file choice and show error | upload trigger | `studio/app.js` |
+| Import connector config | Connectors page file picker | parse JSON locally, register as user-approved source | Connectors | toast | preserve file choice and show error | upload trigger | `studio/app.js` |
+| Edit memory | Memory inline editor | save a replacement record; do not rewrite prior memory | Memory | toast | retain entered content and show error | inline editor | `studio/app.js` |
+| Edit knowledge page | Knowledge inline editor | save a new local Markdown revision | Knowledge | toast | retain entered content and show error | inline editor | `studio/app.js` |
+| Edit workflow | Workflow inline editor | save a draft version; no automatic execution | Workflows | toast | retain entered JSON and show error | inline editor | `studio/app.js` |
 
 ## Navigation and responsive behavior
 
@@ -55,7 +61,7 @@ Sheets and the command palette are app-owned overlays. Toasts are single-system 
 
 ## Async and resilience
 
-Requests remain same-origin and token-scoped. Failed mutations preserve field values and return an inline/toast error. A conversation turn has no tool authority: it may call the selected model but cannot claim or cause file/external effects. The UI must not commit a stale request result after a newer navigation or selection.
+Requests remain same-origin and token-scoped. Failed mutations preserve field values and return an inline/toast error. Uploads are text-only and bounded to 48 KiB. A `plugin.json` installs a local descriptor only; it never executes uploaded code. Uploaded skills are explicit task context, while tools and connectors still require their own provenance, activation and approval. A conversation turn has no tool authority: it may call the selected model but cannot claim or cause file/external effects. The UI must not commit a stale request result after a newer navigation or selection.
 
 ## Validation
 

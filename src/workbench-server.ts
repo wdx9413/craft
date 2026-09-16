@@ -162,6 +162,12 @@ export class WorkbenchWebApp {
       // kernels: the shell never gains authority the CLI does not already have.
       if (request.method === "GET" && path === "/api/studio/summary") return json(200, this.service.info());
       if (request.method === "GET" && path === "/api/studio/resources") return json(200, this.service.studioResourceView({ kind: url.searchParams.get("kind") ?? undefined, task_id: url.searchParams.get("task_id") ?? undefined, limit: url.searchParams.get("limit") ?? undefined }));
+      if (request.method === "POST" && path === "/api/studio/plugins") return json(201, this.service.studioPluginInstall(bodyObject(request.body)));
+      if (request.method === "POST" && path === "/api/studio/skills") return json(201, this.service.studioSkillSave(bodyObject(request.body)));
+      if (request.method === "POST" && path === "/api/studio/memory") return json(201, this.service.studioMemorySave(bodyObject(request.body)));
+      if (request.method === "POST" && path.startsWith("/api/studio/memory/") && path.endsWith("/retire")) return json(200, this.service.studioMemoryRetire({ memory_id: decodeURIComponent(path.slice(19, -7)) }));
+      if (request.method === "POST" && path === "/api/studio/knowledge/claims") return json(201, this.service.studioKnowledgeClaimSave(bodyObject(request.body)));
+      if (request.method === "POST" && path === "/api/studio/workflows") return json(201, this.service.studioWorkflowSave(bodyObject(request.body)));
       if (request.method === "GET" && path === "/api/models") return json(200, this.service.modelProviderList());
       if (request.method === "GET" && path === "/api/model-profiles") return json(200, this.service.evaluationModelProfileList({ limit: boundedLimit(url.searchParams.get("limit"), 100) }));
       if (request.method === "POST" && path === "/api/model-profiles") return json(201, this.service.evaluationModelProfileSave(bodyObject(request.body)));

@@ -320,6 +320,17 @@
       });
   }
 
+  function readUpload(input, accepted, callback) {
+    var file = input && input.files && input.files[0];
+    if (!file) return;
+    if (accepted && accepted.indexOf(file.name.split('.').pop().toLowerCase()) < 0) { toast('请选择 .' + accepted.join('、.') + ' 文件', true); input.value = ''; return; }
+    if (file.size > 48 * 1024) { toast('上传内容不能超过 48 KiB', true); input.value = ''; return; }
+    var reader = new FileReader();
+    reader.onload = function () { input.value = ''; callback(String(reader.result || ''), file.name); };
+    reader.onerror = function () { input.value = ''; toast('读取文件失败', true); };
+    reader.readAsText(file, 'utf-8');
+  }
+
   function call(tool, args) { return api('/api/studio/call', { method: 'POST', body: { tool: tool, args: args || {} } }); }
 
   // ------------------------------------------------------------- inline form
@@ -641,7 +652,7 @@
   // right panel.
 
   var WORKSPACE_KEY = 'craft.workspace';
-  var caps = { connectors: [], assets: [] };
+  var caps = { connectors: [], assets: [], userSkills: [] };
 
   // Sort order is the rail's: folders the store knows first, 「默认」 last, and
   // a folder the store has no record for is still offered (tasks can point at one).
@@ -658,14 +669,17 @@
   function capNameOf(id) {
     var list = caps.assets || [];
     for (var i = 0; i < list.length; i += 1) { if (list[i].id === id) return list[i].name || id; }
+    list = caps.userSkills || [];
+    for (var j = 0; j < list.length; j += 1) { if (list[j].id === id) return list[j].name || id; }
     return id;
   }
 
   function loadCapabilities() {
-    if (caps.assets.length) return Promise.resolve(caps);
-    return api('/api/connectors?limit=100').then(function (result) {
-      caps.connectors = result.connectors || [];
-      caps.assets = result.assets || [];
+    if (caps.assets.length || caps.userSkills.length) return Promise.resolve(caps);
+    return Promise.all([api('/api/connectors?limit=100'), api('/api/studio/resources?kind=skills&limit=100')]).then(function (results) {
+      caps.connectors = results[0].connectors || [];
+      caps.assets = results[0].assets || [];
+      caps.userSkills = results[1].items || [];
       return caps;
     });
   }
@@ -773,7 +787,9 @@
     var chosen = state.composer.caps || [];
     // The runtime has no field for capability selection yet, so the names ride
     // along in the prompt as an explicit instruction instead of being dropped.
+    var selectedSkills = (caps.userSkills || []).filter(function (item) { return chosen.indexOf(item.id) >= 0; });
     var prompt = chosen.length ? raw + '\n\n可用的能力：' + chosen.map(capNameOf).join('、') : raw;
+    if (selectedSkills.length) prompt += '\n\n<craft-user-skills>\n' + selectedSkills.map(function (item) { return '### ' + item.name + '\n' + item.content; }).join('\n\n') + '\n</craft-user-skills>';
     var body = { title: title, goal: raw, model_id: model, permission_mode: val('task-permission') || 'human_approval' };
     if (folder) body.project_id = folder;
     state.composer.model = model;
@@ -1034,16 +1050,17 @@
       bindSheetBack(panel);
       loadCapabilities().then(function () {
         var chosen = state.composer.caps || [];
-        var usable = (caps.assets || []).filter(function (item) { return item.status === 'approved'; });
-        var body = usable.length
-          ? usable.map(function (item) {
+        var usable = (caps.assets || []).filter(function (item) { return item.status === 'approved'; }).map(function (item) { return { id: item.id, name: item.name, sub: label(ASSET_TYPE_LABELS, item.asset_type, item.asset_type) + ' · ' + label(EFFECT_LABELS, item.effect, item.effect) }; });
+        var personalSkills = (caps.userSkills || []).filter(function (item) { return item.status === 'active'; }).map(function (item) { return { id: item.id, name: item.name, sub: '已安装技能 · 将作为任务上下文附带' }; });
+        var available = usable.concat(personalSkills);
+        var body = available.length
+          ? available.map(function (item) {
               return '<label class="check cap-row"><input type="checkbox" data-cap="' + esc(item.id) + '"' +
                 (chosen.indexOf(item.id) >= 0 ? ' checked' : '') + '>' +
                 '<span class="cap-text"><b>' + esc(item.name) + '</b><span>' +
-                esc(label(ASSET_TYPE_LABELS, item.asset_type, item.asset_type)) + ' · ' +
-                esc(label(EFFECT_LABELS, item.effect, item.effect)) + '</span></span></label>';
-            }).join('') + '<div class="aside-note" style="margin-top:10px">还没处理的能力先到「能力」页确认。</div>'
-          : '<div class="aside-note">还没有已确认可用的能力。先到「能力」页添加一个来源，扫描并确认要用的能力。</div>';
+                esc(item.sub) + '</span></span></label>';
+            }).join('') + '<div class="aside-note" style="margin-top:10px">外部能力需先在「连接器」确认；本地上传的技能可直接作为任务指令上下文使用。</div>'
+          : '<div class="aside-note">还没有可用能力。先上传技能，或在「连接器」里添加一个来源并确认能力。</div>';
         panel.innerHTML = sheetHead('这个任务可以用哪些能力', '只有已确认可用的能力才能勾选') +
           '<div class="sheet-body">' + body + '</div>';
         bindSheetBack(panel);
@@ -1581,7 +1598,7 @@
             '<div class="callout info">' + icon('shield') + '<span>外部来源需要你点一下确认才生效。Craft 只保存来源信息与摘要，不保存任何密码或密钥，也不会替你安装或启动服务。</span></div>' +
             '</div></div></div>'
         : '<div class="card">' + head('能力来源', '把已确认的本机目录、插件或 MCP 服务接入任务',
-            '<button class="btn primary" id="source-setup-open" type="button">' + icon('plus') + '添加来源</button>') +
+            '<div class="row-actions"><button class="btn" id="connector-config-upload" type="button">' + icon('file') + '导入配置</button><input id="connector-config-file" type="file" accept="application/json,.json" hidden><button class="btn primary" id="source-setup-open" type="button">' + icon('plus') + '添加来源</button></div>') +
             '<div class="card-body"><div class="source-summary">' +
               '<div><b>' + esc(connectors.length) + '</b><span>外部来源</span></div>' +
               '<div><b>' + esc(sources.length) + '</b><span>本机目录</span></div>' +
@@ -1612,6 +1629,8 @@
         mounts: [function (root) {
           var setupOpen = root.querySelector('#source-setup-open');
           if (setupOpen) setupOpen.onclick = function () { state.capabilitySetupOpen = true; paint('connectors'); };
+          var configUpload = root.querySelector('#connector-config-upload'), configFile = root.querySelector('#connector-config-file');
+          if (configUpload && configFile) { configUpload.onclick = function () { configFile.click(); }; configFile.onchange = function () { readUpload(configFile, ['json'], function (content) { try { var config = JSON.parse(content); api('/api/connectors', { method: 'POST', body: { kind: config.kind, name: config.name, endpoint: config.endpoint, allowed_operations: config.allowed_operations, approved: true, approval_ref: 'studio-user-import', metadata: { imported_from: 'user_file' } } }).then(function () { toast('连接器配置已导入，等待扫描与审核'); paint('connectors'); }).catch(fail); } catch (_) { toast('连接器配置不是有效 JSON', true); } }); }; }
           var setupClose = root.querySelector('#source-setup-close');
           if (setupClose) setupClose.onclick = function () { state.capabilitySetupOpen = false; paint('connectors'); };
           var register = root.querySelector('#source-register');
@@ -1684,33 +1703,43 @@
   }
 
   function viewPlugins() {
-    return api('/api/connectors?limit=100').then(function (result) {
-      var connectors = (result.connectors || []).filter(function (item) { return item.kind === 'github_skill'; });
-      var assets = result.assets || [];
-      var rows = catalogRows(connectors, 'plug', function (item) { return item.name || item.id; }, function (item) {
+    return Promise.all([api('/api/connectors?limit=100'), api('/api/studio/resources?kind=plugins&limit=100')]).then(function (results) {
+      var connectors = (results[0].connectors || []).filter(function (item) { return item.kind === 'github_skill'; });
+      var assets = results[0].assets || [], installed = results[1].items || [];
+      var sourceRows = catalogRows(connectors, 'plug', function (item) { return item.name || item.id; }, function (item) {
         var count = assets.filter(function (asset) { return asset.connector_id === item.id; }).length;
         return 'GitHub 来源 · 已登记 ' + count + ' 项';
       });
+      var installedRows = catalogRows(installed, 'plug', function (item) { return item.name + ' · v' + item.package_version; }, function (item) { return item.description || '本机插件清单'; });
       return {
-        html: '<div class="stack"><div class="card">' + head('插件', '插件是可安装或可接入的能力包；这里不展示示例数据',
-          '<button class="btn primary" id="plugins-add" type="button">' + icon('plus') + '添加插件来源</button>') +
-          '<div class="card-body">' + (rows || emptyState('还没有插件', '添加 GitHub 插件来源后，登记到的插件会显示在这里。', 'plug')) + '</div></div></div>',
-        aside: asideBlock('插件来源', String(connectors.length), '<div class="aside-note">来源需要你手动添加与确认；Craft 不会自动下载或安装代码。</div>'),
-        mounts: [function (root) { var button = root.querySelector('#plugins-add'); if (button) button.onclick = function () { activeSource = 'plugins'; state.capabilitySetupOpen = true; go('connectors'); }; }]
+        html: '<div class="stack"><div class="card">' + head('已安装插件', '本机插件清单；每个包的技能与连接器仍需独立确认',
+          '<div class="row-actions"><button class="btn" id="plugins-add" type="button">' + icon('plus') + '添加来源</button><button class="btn primary" id="plugin-upload" type="button">' + icon('file') + '上传 plugin.json</button><input id="plugin-file" type="file" accept="application/json,.json" hidden></div>') +
+          '<div class="card-body">' + (installedRows || emptyState('还没有本机插件', '上传一个 plugin.json，或添加一个 Marketplace / GitHub 来源。', 'plug')) + '</div></div>' +
+          '<div class="card">' + head('插件来源', '来自已连接的市场或 GitHub', countChip(connectors.length)) + '<div class="card-body">' + (sourceRows || emptyState('还没有插件来源', '添加来源后可扫描并确认其中的能力。', 'plug')) + '</div></div></div>',
+        aside: asideBlock('安装边界', '', '<div class="aside-note">上传 manifest 只安装描述，不执行上传文件中的代码。技能与连接器必须分别安装、审核和启用。</div>'),
+        mounts: [function (root) {
+          var button = root.querySelector('#plugins-add'); if (button) button.onclick = function () { activeSource = 'plugins'; state.capabilitySetupOpen = true; go('connectors'); };
+          var upload = root.querySelector('#plugin-upload'), file = root.querySelector('#plugin-file');
+          if (upload && file) { upload.onclick = function () { file.click(); }; file.onchange = function () { readUpload(file, ['json'], function (content) { try { var manifest = JSON.parse(content); api('/api/studio/plugins', { method: 'POST', body: { manifest: manifest } }).then(function () { toast('插件清单已安装'); paint('plugins'); }).catch(fail); } catch (_) { toast('plugin.json 不是有效 JSON', true); } }); }; }
+        }]
       };
     });
   }
 
   function viewSkills() {
-    return api('/api/connectors?limit=100').then(function (result) {
-      var assets = (result.assets || []).filter(function (item) { return item.asset_type === 'skill'; });
+    return Promise.all([api('/api/connectors?limit=100'), api('/api/studio/resources?kind=skills&limit=100')]).then(function (results) {
+      var assets = (results[0].assets || []).filter(function (item) { return item.asset_type === 'skill'; }), personal = results[1].items || [];
       var rows = catalogRows(assets, 'spark', function (item) { return item.name || item.logical_id || item.id; }, function (item) {
         return (item.summary || '没有说明') + ' · ' + label(EFFECT_LABELS, item.effect, item.effect || '仅查看');
       });
+      var personalRows = catalogRows(personal, 'spark', function (item) { return item.name; }, function (item) { return item.description || '本机上传 · 可在任务创建时附带'; });
       return {
-        html: '<div class="stack"><div class="card">' + head('技能', '从插件、连接器或本机目录登记的可复用方法', countChip(assets.length)) +
-          '<div class="card-body">' + (rows || emptyState('还没有技能', '先在「插件」或「连接器」里接入来源，再扫描和确认具体技能。', 'spark')) + '</div></div></div>',
-        aside: asideBlock('技能的状态', '', '<div class="aside-note">只有确认可用的技能才应被任务调用。技能本身不等于授予文件、网络或外部写入权限。</div>')
+        html: '<div class="stack"><div class="card">' + head('本机技能', '上传或编辑 SKILL.md；选入任务后会作为只读指令上下文附带',
+          '<div class="row-actions"><button class="btn primary" id="skill-upload" type="button">' + icon('file') + '上传 SKILL.md</button><input id="skill-file" type="file" accept="text/markdown,.md" hidden></div>') +
+          '<div class="card-body">' + (personalRows || emptyState('还没有本机技能', '上传一个 SKILL.md 后可在新建任务的「能力」中选择它。', 'spark')) + '</div></div>' +
+          '<div class="card">' + head('已登记技能', '来自已确认的插件或连接器', countChip(assets.length)) + '<div class="card-body">' + (rows || emptyState('还没有已登记技能', '在连接器中扫描并确认外部技能。', 'spark')) + '</div></div></div>',
+        aside: asideBlock('技能的状态', '', '<div class="aside-note">本机技能不会自动获得工具权限；外部技能仍遵循来源审核、权限与连接器健康检查。</div>'),
+        mounts: [function (root) { var upload = root.querySelector('#skill-upload'), file = root.querySelector('#skill-file'); if (upload && file) { upload.onclick = function () { file.click(); }; file.onchange = function () { readUpload(file, ['md'], function (content, name) { var title = (content.match(/^name:\s*([^\r\n]+)$/m) || [])[1] || name.replace(/\.md$/i, ''); var description = (content.match(/^description:\s*([^\r\n]+)$/m) || [])[1] || ''; api('/api/studio/skills', { method: 'POST', body: { name: title.trim(), description: description.trim(), content: content } }).then(function () { caps.userSkills = []; toast('技能已安装'); paint('skills'); }).catch(fail); }); }; } }]
       };
     });
   }
@@ -1730,16 +1759,57 @@
     });
   }
 
+  function openMemoryEditor(item) {
+    item = item || {};
+    openInlineOn('memory', {
+      title: item.id ? '修改记忆' : '添加记忆', sub: '保存会保留人工来源；修改会生成替代版本',
+      html: '<div class="field"><label for="memory-content">内容</label><textarea id="memory-content" class="tall">' + esc(item.content || '') + '</textarea></div>' +
+        '<div class="field-row"><div class="field"><label for="memory-kind">类型</label><select id="memory-kind">' + options([['fact', '事实'], ['decision', '决策'], ['preference', '偏好'], ['experience', '经验']], item.kind || 'fact') + '</select></div>' +
+        '<div class="field"><label>范围</label><input value="' + esc(item.scope === 'task' ? '当前任务' : item.scope === 'workspace' ? '当前工作区' : '用户') + '" readonly></div></div>',
+      actions: [{ label: '保存记忆', primary: true, run: function () { var body = { memory_id: item.id, content: val('memory-content'), kind: val('memory-kind') }; if (!item.id) body.scope = 'user'; api('/api/studio/memory', { method: 'POST', body: body }).then(function () { clearInline(); toast(item.id ? '记忆已更新为新版本' : '记忆已保存'); paint('memory'); }).catch(fail); } }]
+    });
+  }
+
+  function openKnowledgePageEditor(page) {
+    page = page || {};
+    var load = page.id ? call('craft_wiki_page_get', { page_id: page.id }) : Promise.resolve({ body: '', page: {} });
+    load.then(function (result) {
+      openInlineOn('knowledge', {
+        title: page.id ? '编辑知识页面' : '新建知识页面', sub: '内容保存为本机 Markdown，并保留版本',
+        html: '<div class="field"><label for="wiki-title">标题</label><input id="wiki-title" value="' + esc((result.page || {}).title || page.title || '') + '"></div>' +
+          '<div class="field"><label for="wiki-scope">范围</label><input id="wiki-scope" value="' + esc((result.page || {}).scope || 'global') + '"></div>' +
+          '<div class="field"><label for="wiki-body">Markdown 内容</label><textarea id="wiki-body" class="tall">' + esc(result.body || '') + '</textarea></div>',
+        actions: [{ label: '保存页面', primary: true, run: function () { call('craft_wiki_page_save', { page_id: page.id, title: val('wiki-title'), scope: val('wiki-scope') || 'global', body: val('wiki-body'), author: 'studio-user' }).then(function () { clearInline(); toast('知识页面已保存'); paint('knowledge'); }).catch(fail); } }]
+      });
+    }).catch(fail);
+  }
+
+  function openKnowledgeClaimEditor() {
+    openInlineOn('knowledge', {
+      title: '添加知识结论', sub: '将自动附上一条人工来源证据，初始状态为待审核',
+      html: '<div class="field"><label for="claim-content">结论</label><textarea id="claim-content">' + '</textarea></div><div class="field-row"><div class="field"><label for="claim-kind">类型</label><select id="claim-kind">' + options([['fact', '事实'], ['rule', '规则'], ['decision', '决策'], ['term', '术语'], ['failure_mode', '失败模式']], 'fact') + '</select></div><div class="field"><label for="claim-scope">范围</label><input id="claim-scope" value="global"></div></div>',
+      actions: [{ label: '保存结论', primary: true, run: function () { api('/api/studio/knowledge/claims', { method: 'POST', body: { content: val('claim-content'), kind: val('claim-kind'), scope: val('claim-scope') || 'global' } }).then(function () { clearInline(); toast('知识结论已保存，等待审核'); paint('knowledge'); }).catch(fail); } }]
+    });
+  }
+
+  function openWorkflowEditor(workflow) {
+    workflow = workflow || {};
+    openInlineOn('workflows', {
+      title: workflow.id ? '编辑工作流' : '新建工作流', sub: '保存为草稿；执行前仍须走权限与审批流程',
+      html: '<div class="field"><label for="workflow-name">名称</label><input id="workflow-name" value="' + esc(workflow.name || '') + '"></div><div class="field"><label for="workflow-desc">说明</label><input id="workflow-desc" value="' + esc(workflow.description || '') + '"></div><div class="field"><label for="workflow-inputs">输入定义（JSON 数组）</label><textarea id="workflow-inputs">' + esc(JSON.stringify(workflow.inputs || [], null, 2)) + '</textarea></div><div class="field"><label for="workflow-steps">步骤（JSON 数组）</label><textarea id="workflow-steps" class="tall">' + esc(JSON.stringify(workflow.steps || [], null, 2)) + '</textarea></div>',
+      actions: [{ label: '保存草稿', primary: true, run: function () { try { var inputs = JSON.parse(val('workflow-inputs') || '[]'), steps = JSON.parse(val('workflow-steps') || '[]'); api('/api/studio/workflows', { method: 'POST', body: { workflow_id: workflow.id, name: val('workflow-name'), description: val('workflow-desc'), inputs: inputs, steps: steps } }).then(function () { clearInline(); toast('工作流草稿已保存'); paint('workflows'); }).catch(fail); } catch (_) { toast('输入定义和步骤必须是有效 JSON 数组', true); } } }]
+    });
+  }
+
   function viewMemory() {
     return api('/api/studio/resources?kind=memory&limit=100').then(function (result) {
       var items = result.items || [];
-      var rows = catalogRows(items, 'db', function (item) { return item.content || item.id; }, function (item) {
-        return [item.kind, item.scope, item.source].filter(Boolean).join(' · ');
-      });
+      var rows = items.length ? '<div class="rows">' + items.map(function (item) { return '<div class="row"><span class="row-lead muted">' + icon('db') + '</span><div class="row-main"><span class="row-title">' + esc(item.content || item.id) + '</span><span class="row-sub">' + esc([item.kind, item.scope, item.source].filter(Boolean).join(' · ')) + '</span></div><div class="row-actions"><button class="btn sm" data-memory-edit="' + esc(item.id) + '">编辑</button><button class="btn sm danger" data-memory-retire="' + esc(item.id) + '">停用</button></div></div>'; }).join('') + '</div>' : '';
       return {
-        html: '<div class="stack"><div class="card">' + head('记忆', '这是 Craft 已保存且仍有效的本地记忆，不是模拟样例', countChip(items.length)) +
+        html: '<div class="stack"><div class="card">' + head('记忆', '这是 Craft 已保存且仍有效的本地记忆；可由你手动维护', '<button class="btn primary" id="memory-add" type="button">' + icon('plus') + '添加记忆</button>') +
           '<div class="card-body">' + (rows || emptyState('还没有可展示的记忆', '任务运行并显式保存记忆后，它会以结构化记录出现在这里。', 'db')) + '</div></div></div>',
-        aside: asideBlock('记忆范围', '', '<div class="aside-note">任务页会只展示该任务自己的短期记忆；这里则是全局视图。</div>')
+        aside: asideBlock('记忆范围', '', '<div class="aside-note">编辑不会原地篡改旧记录：Craft 会写入替代版本并保留人工来源。任务页只展示任务自身的短期记忆。</div>'),
+        mounts: [function (root) { var add = root.querySelector('#memory-add'); if (add) add.onclick = function () { openMemoryEditor(); }; root.querySelectorAll('[data-memory-edit]').forEach(function (button) { button.onclick = function () { var item = items.filter(function (entry) { return entry.id === button.getAttribute('data-memory-edit'); })[0]; if (item) openMemoryEditor(item); }; }); root.querySelectorAll('[data-memory-retire]').forEach(function (button) { button.onclick = function () { api('/api/studio/memory/' + encodeURIComponent(button.getAttribute('data-memory-retire')) + '/retire', { method: 'POST', body: {} }).then(function () { toast('记忆已停用'); paint('memory'); }).catch(fail); }; }); }]
       };
     });
   }
@@ -1748,12 +1818,13 @@
     return api('/api/knowledge').then(function (result) {
       var claims = result.claims || [], pages = result.pages || [], bundles = result.bundles || [];
       var claimRows = catalogRows(claims, 'layers', function (item) { return item.content || item.id; }, function (item) { return [item.kind, label(STATUS_LABELS, item.status, item.status), item.scope].filter(Boolean).join(' · '); });
-      var pageRows = catalogRows(pages, 'file', function (item) { return item.title || item.id; }, function (item) { return item.revision_source || 'Markdown / JSON'; });
+      var pageRows = pages.length ? '<div class="rows">' + pages.map(function (item) { return '<div class="row"><span class="row-lead muted">' + icon('file') + '</span><div class="row-main"><span class="row-title">' + esc(item.title || item.id) + '</span><span class="row-sub">' + esc(item.revision_source || 'Markdown') + '</span></div><button class="btn sm" data-wiki-edit="' + esc(item.id) + '">编辑</button></div>'; }).join('') + '</div>' : '';
       return {
-        html: '<div class="stack"><div class="grid-2"><div class="card">' + head('知识结论', '带来源与状态的可核验内容', countChip(claims.length)) + '<div class="card-body">' + (claimRows || emptyState('还没有知识结论', '从任务或资料中提取后才会显示。', 'layers')) + '</div></div>' +
-          '<div class="card">' + head('知识页面', 'Markdown 或 JSON 的可视化入口', countChip(pages.length)) + '<div class="card-body">' + (pageRows || emptyState('还没有知识页面', '导入或生成知识页后会显示在这里。', 'file')) + '</div></div></div>' +
+        html: '<div class="stack"><div class="grid-2"><div class="card">' + head('知识结论', '带来源与状态的可核验内容', '<button class="btn sm" id="claim-add">' + icon('plus') + '添加结论</button>') + '<div class="card-body">' + (claimRows || emptyState('还没有知识结论', '从任务或资料中提取后才会显示。', 'layers')) + '</div></div>' +
+          '<div class="card">' + head('知识页面', '以本机 Markdown 保存、可直接编辑', '<button class="btn sm primary" id="wiki-add">' + icon('plus') + '新建页面</button>') + '<div class="card-body">' + (pageRows || emptyState('还没有知识页面', '新建页面或导入资料后会显示在这里。', 'file')) + '</div></div></div>' +
           '<div class="card">' + head('知识包', '运行任务时可绑定的已整理上下文', countChip(bundles.length)) + '<div class="card-body">' + (bundles.length ? catalogRows(bundles, 'inbox', function (item) { return item.id; }, function (item) { return (item.claim_refs || []).length + ' 条结论 · ' + (item.scope || '未设范围'); }) : emptyState('还没有知识包', '知识包需要由真实知识记录生成。', 'inbox')) + '</div></div></div>',
-        aside: asideBlock('可追溯性', '', '<div class="aside-note">知识不是聊天摘要：它保留状态、范围和来源，便于复核和后续任务复用。</div>')
+        aside: asideBlock('可追溯性', '', '<div class="aside-note">知识页面的修改写入新 Markdown 版本；人工新增结论会附带来源证据，仍可再审核。</div>'),
+        mounts: [function (root) { var wiki = root.querySelector('#wiki-add'), claim = root.querySelector('#claim-add'); if (wiki) wiki.onclick = function () { openKnowledgePageEditor(); }; if (claim) claim.onclick = openKnowledgeClaimEditor; root.querySelectorAll('[data-wiki-edit]').forEach(function (button) { button.onclick = function () { var page = pages.filter(function (entry) { return entry.id === button.getAttribute('data-wiki-edit'); })[0]; if (page) openKnowledgePageEditor(page); }; }); }]
       };
     });
   }
@@ -1761,12 +1832,14 @@
   function viewWorkflows() {
     return api('/api/studio/resources?kind=workflows&limit=100').then(function (result) {
       var workflows = result.workflows || [], runs = result.runs || [];
+      var workflowRows = workflows.length ? '<div class="rows">' + workflows.map(function (item) { return '<div class="row"><span class="row-lead muted">' + icon('refresh') + '</span><div class="row-main"><span class="row-title">' + esc(item.name || item.id) + '</span><span class="row-sub">' + esc(item.description || '没有说明') + '</span></div><button class="btn sm" data-workflow-edit="' + esc(item.id) + '">编辑</button></div>'; }).join('') + '</div>' : '';
       return {
-        html: '<div class="stack"><div class="card">' + head('工作流', '可复用的步骤编排', countChip(workflows.length)) + '<div class="card-body">' +
-          (catalogRows(workflows, 'refresh', function (item) { return item.name || item.id; }, function (item) { return item.description || '没有说明'; }) || emptyState('还没有工作流', '保存或导入工作流后会显示在这里。', 'refresh')) + '</div></div>' +
+        html: '<div class="stack"><div class="card">' + head('工作流', '可复用的步骤编排；可手动编辑为草稿', '<button class="btn primary" id="workflow-add">' + icon('plus') + '新建工作流</button>') + '<div class="card-body">' +
+          (workflowRows || emptyState('还没有工作流', '新建一个工作流草稿，或后续从插件导入。', 'refresh')) + '</div></div>' +
           '<div class="card">' + head('工作流运行', '实际运行过的记录', countChip(runs.length)) + '<div class="card-body">' +
           (catalogRows(runs, 'play', function (item) { return item.workflow_id || item.id; }, function (item) { return [label(STATUS_LABELS, item.status, item.status), shortTime(item.updated_at)].filter(Boolean).join(' · '); }) || emptyState('还没有工作流运行', '没有执行记录时不会填充示例数据。', 'play')) + '</div></div></div>',
-        aside: asideBlock('运行记录', '', '<div class="aside-note">打开某个任务后，可在它的「观测」和「任务上下文」中看到与该任务相关的流程记录。</div>')
+        aside: asideBlock('运行记录', '', '<div class="aside-note">保存只会生成或更新草稿；运行仍要经过任务权限、审批与观测链路。打开任务可查看相关流程记录。</div>'),
+        mounts: [function (root) { var add = root.querySelector('#workflow-add'); if (add) add.onclick = function () { openWorkflowEditor(); }; root.querySelectorAll('[data-workflow-edit]').forEach(function (button) { button.onclick = function () { var workflow = workflows.filter(function (entry) { return entry.id === button.getAttribute('data-workflow-edit'); })[0]; if (workflow) openWorkflowEditor(workflow); }; }); }]
       };
     });
   }

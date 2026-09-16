@@ -30642,11 +30642,91 @@ ${task.goal}`.toLowerCase();
       const workflowIds = new Set(runs.map((item) => String(item.workflow_id)).filter(Boolean));
       const workflows = taskId3 ? [...workflowIds].map((workflowId) => this.store.find("workflow", workflowId)).filter((item) => item !== null) : this.store.list("workflow", limit3);
       return {
-        workflows: workflows.map((item) => ({ id: item.id, name: item.name, description: item.description, status: item.status, updated_at: item.updated_at })),
+        workflows: workflows.map((item) => ({ id: item.id, name: item.name, description: item.description, inputs: item.inputs ?? [], steps: item.steps ?? [], status: item.status, updated_at: item.updated_at })),
         runs: runs.map((item) => ({ id: item.id, workflow_id: item.workflow_id, task_id: item.task_id, status: item.status, started_at: item.started_at, finished_at: item.finished_at, updated_at: item.updated_at }))
       };
     }
-    throw new Error("kind must be memory or workflows");
+    if (kind2 === "plugins") {
+      const items2 = this.store.list("studio_plugin", limit3);
+      return { items: items2.map((item) => ({
+        id: item.id,
+        name: item.name,
+        package_version: item.package_version,
+        description: item.description,
+        status: item.status,
+        install_mode: item.install_mode,
+        updated_at: item.updated_at
+      })) };
+    }
+    if (kind2 === "skills") {
+      const items2 = this.store.list("studio_skill", limit3);
+      return { items: items2.map((item) => ({
+        id: item.id,
+        name: item.name,
+        description: item.description,
+        content: item.content,
+        source: item.source,
+        status: item.status,
+        updated_at: item.updated_at
+      })) };
+    }
+    throw new Error("kind must be plugins, skills, memory or workflows");
+  }
+  /** A local plugin manifest is installable metadata, never executable code. */
+  studioPluginInstall(args) {
+    const manifest = object35(args.manifest, "manifest");
+    const name = assertNoSecret4(text122(manifest.name, "manifest.name"), "manifest.name");
+    const packageVersion = assertNoSecret4(text122(manifest.version, "manifest.version"), "manifest.version");
+    const description = manifest.description === void 0 ? "" : assertNoSecret4(String(manifest.description), "manifest.description");
+    const encoded = assertNoSecret4(JSON.stringify(manifest), "manifest");
+    return { plugin: this.store.create("studio_plugin", String(args.plugin_id ?? id13("studio_plugin")), {
+      name,
+      package_version: packageVersion,
+      description,
+      manifest,
+      manifest_digest: valueDigest(encoded),
+      source: "user_upload",
+      status: "installed",
+      install_mode: "manifest_only",
+      executable: false
+    }) };
+  }
+  /** Save a user-uploaded SKILL.md as local, inspectable instruction content. */
+  studioSkillSave(args) {
+    const content = assertNoSecret4(document(args.content, "content"), "content");
+    if (content.length > 48e3) throw new Error("Skill content must not exceed 48,000 characters");
+    const name = assertNoSecret4(text122(args.name, "name"), "name");
+    const description = args.description === void 0 ? "" : assertNoSecret4(String(args.description), "description");
+    const skillId = String(args.skill_id ?? id13("studio_skill"));
+    const previous = this.store.find("studio_skill", skillId);
+    const payload72 = { name, description, content, content_digest: valueDigest(content), source: "user_upload", status: "active", edited_by: "studio-user" };
+    return { skill: previous ? this.store.save("studio_skill", skillId, { ...payload72, previous_version: previous.version }) : this.store.create("studio_skill", skillId, payload72) };
+  }
+  studioMemorySave(args) {
+    const memoryId = args.memory_id === void 0 ? void 0 : text122(args.memory_id, "memory_id");
+    const previous = memoryId === void 0 ? null : this.store.get("memory_item", memoryId);
+    return this.memoryRemember({
+      kind: args.kind ?? previous?.kind ?? "fact",
+      scope: args.scope ?? previous?.scope ?? "user",
+      content: args.content,
+      source: "studio_user",
+      task_id: args.task_id ?? previous?.task_id ?? void 0,
+      workspace_id: args.workspace_id ?? previous?.workspace_id ?? void 0,
+      applies_to: args.applies_to ?? previous?.applies_to ?? [],
+      evidence_ids: [],
+      ...previous ? { supersedes_id: previous.id } : {}
+    });
+  }
+  studioMemoryRetire(args) {
+    return this.memoryTransition({ memory_id: text122(args.memory_id, "memory_id"), status: "expired", reason: "retired by studio user" });
+  }
+  studioKnowledgeClaimSave(args) {
+    const content = assertNoSecret4(document(args.content, "content"), "content");
+    const evidence2 = this.evidenceRecord({ source_type: "human", confidence: "bounded", claim: "User-authored knowledge record.", locator: "studio:knowledge" });
+    return this.knowledgeClaimSave({ kind: args.kind ?? "fact", content, scope: args.scope ?? "global", tags: args.tags ?? [], evidence_ids: [evidence2.id] });
+  }
+  studioWorkflowSave(args) {
+    return this.workflowSave({ workflow_id: args.workflow_id, name: text122(args.name, "name"), description: args.description ?? "", inputs: args.inputs ?? [], steps: args.steps ?? [] });
   }
   codexDispatchPrepare(args) {
     return this.codexHost.prepare(args);

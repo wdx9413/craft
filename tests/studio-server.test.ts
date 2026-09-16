@@ -47,6 +47,14 @@ test("Craft Studio projects model, project, connector and source reads over the 
   assert.equal((JSON.parse(get("/api/studio/resources?kind=memory&task_id=studio-task").body) as { items: unknown[] }).items.length, 1);
   assert.equal((JSON.parse(get("/api/studio/resources?kind=workflows&task_id=studio-task").body) as { workflows: unknown[] }).workflows.length, 1);
   assert.equal(get("/api/studio/resources?kind=nope").status, 422);
+  assert.equal(post("/api/studio/plugins", { manifest: { name: "Local helper", version: "1.0.0", description: "A locally installed descriptor" } }).status, 201);
+  assert.equal((JSON.parse(get("/api/studio/resources?kind=plugins").body) as { items: unknown[] }).items.length, 1);
+  assert.equal(post("/api/studio/skills", { name: "release-note", description: "Write release notes", content: "---\nname: release-note\n---\nWrite release notes." }).status, 201);
+  assert.equal((JSON.parse(get("/api/studio/resources?kind=skills").body) as { items: unknown[] }).items.length, 1);
+  assert.equal(post("/api/studio/memory", { kind: "fact", scope: "user", content: "Keep the work local" }).status, 201);
+  assert.equal((JSON.parse(get("/api/studio/resources?kind=memory").body) as { items: unknown[] }).items.length, 2);
+  assert.equal(post("/api/studio/knowledge/claims", { kind: "rule", content: "Review external plugins before use" }).status, 201);
+  assert.equal(post("/api/studio/workflows", { name: "Local review", description: "Review a local change", inputs: [], steps: [] }).status, 201);
 
   const models = JSON.parse(get("/api/models").body) as { count: number; providers: Array<Record<string, unknown>> };
   assert.equal(models.count >= 8, true);
