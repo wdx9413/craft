@@ -91,9 +91,9 @@ function normalizeModels(value: unknown): CraftModelConfig[] {
 }
 
 export function defaultSettings(paths = craftPaths()): CraftSettings {
-  // Dark is the shipped default for the Studio shell; users can switch to the
-  // all-white light theme from the title bar or Settings → 界面与运行时.
-  return { schemaVersion: 1, locale: "zh-CN", theme: "dark", dataRoot: paths.root,
+  // Studio starts in the low-glare light theme. Dark and system-following are
+  // deliberate user choices in Settings, never a surprise on first launch.
+  return { schemaVersion: 1, locale: "zh-CN", theme: "light", dataRoot: paths.root,
     workbench: { port: 4173, openOnStart: true }, runtime: { defaultTier: "medium", maxSteps: 32, maxTokens: 12000 },
     models: [], privacy: { telemetry: false }, updatedAt: new Date(0).toISOString() };
 }

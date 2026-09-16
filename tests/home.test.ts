@@ -60,7 +60,21 @@ test("task detail joins exact task evidence and lineage into a bounded safe view
   f.store.create("runtime_run", "run", { task_id: "task", status: "running" }); f.store.create("workflow_run", "wr", { task_id: "other", status: "passed" }); f.store.create("orchestration_plan", "plan", { task_id: "task", status: "running" });
   f.store.create("lineage_edge", "edge", { task_id: "task", workspace_id: "ws", summary: "derived" }); f.store.create("durable_wait", "wait", { task_id: "task", status: "waiting", condition: "approval" });
   f.store.create("attention_item", "open", { task_id: "task", status: "open", reason: "Review" }); f.store.create("attention_item", "resolved", { task_id: "task", status: "resolved" });
-  const detail = f.home.task({ task_id: "task", limit: 20 }); assert.equal((detail.trials as object[]).length, 2); assert.equal((detail.evidence as object[]).length, 2); assert.equal((detail.artifacts as object[]).length, 1); assert.equal((detail.runs as object[]).length, 2); assert.equal((detail.attention as object[]).length, 1); assert.equal(JSON.stringify(detail).includes("hidden"), false);
+  const detail = f.home.task({ task_id: "task", limit: 20 }); assert.equal((detail.trials as object[]).length, 2); assert.equal((detail.evidence as object[]).length, 2); assert.equal((detail.artifacts as object[]).length, 1); assert.equal((detail.runs as object[]).length, 2); assert.equal((detail.attention as object[]).length, 1); assert.equal((detail.messages as object[]).length, 0); assert.equal(JSON.stringify(detail).includes("hidden"), false);
   assert.throws(() => f.home.task({ task_id: " " }), /not be empty/); assert.throws(() => f.home.task({ task_id: "missing" }), /Unknown/); assert.throws(() => f.home.task({ task_id: "task", limit: 0 }), /between/);
   const service = new CraftService(f.store); assert.equal((service.homeTask({ task_id: "task" }).task as Record<string, unknown>).id, "task"); const response = await new McpServer(service).handle({ id: 1, method: "tools/call", params: { name: "craft_home_task", arguments: { task_id: "task" } } }); assert.equal((response?.result as Record<string, unknown>).isError, false); f.store.close();
+});
+
+test("task detail retains model and permission as durable thread context", async () => {
+  const f = await fixture();
+  try {
+    const service = new CraftService(f.store);
+    const opened = service.taskOpen({ title: "Thread", goal: "Continue safely", model_id: "deepseek", permission_mode: "assisted_approval" });
+    const task = opened.task as Record<string, unknown>;
+    const detail = service.homeTask({ task_id: task.id as string }) as Record<string, unknown>;
+    assert.equal((detail.task as Record<string, unknown>).model_id, "deepseek");
+    assert.equal((detail.task as Record<string, unknown>).permission_mode, "assisted_approval");
+    assert.equal((detail.activity as object[]).length, 1);
+    assert.throws(() => service.taskOpen({ title: "Bad", goal: "Bad", permission_mode: "unsafe" }), /permission mode/);
+  } finally { f.store.close(); }
 });

@@ -13,7 +13,7 @@
     page: 'home', token: '',
     selectedProject: null, selectedProvider: null, selectedTier: 'standard',
     selectedTask: null, selectedTaskTitle: '', collapsedFolders: {}, showAllFolders: {}, folderGroups: null,
-    counts: {}, settings: null, theme: 'dark',
+    counts: {}, settings: null, theme: 'light',
     execution: { mode: '', provider: null, tier: 'standard' },
     pendingSheet: null, modelWizard: null,
     // The rail's task list has two shapes: grouped by folder (the default) or a
@@ -22,7 +22,7 @@
     taskView: 'folder',
     // Creating a task is the only moment a folder gets chosen, so the composer
     // owns that choice instead of a modal form that disappears on submit.
-    composer: { folder: '', sandbox: 'read-only', host: 'codex-cli', workspace: '', caps: [], more: false, lastPrompt: '' },
+    composer: { folder: '', model: '', permission: 'human_approval', caps: [], models: [] },
     // A launch that needs approval can only be approved while its work-loop id
     // is still in hand, so it is parked here for the page that renders it.
     pendingApproval: null,
@@ -130,7 +130,13 @@
   var TRACE_LABELS = {
     route_started: '开始执行', route_stage_completed: '完成一个阶段', route_completed: '执行完成',
     route_failed: '执行失败', trial_started: '开始验收', trial_completed: '验收结束',
-    task_run_started: '任务开始', task_run_completed: '任务结束', checkpoint_recorded: '记录了一次进度'
+    task_run_started: '任务开始', task_run_completed: '任务结束', checkpoint_recorded: '记录了一次进度',
+    'task.created': '创建任务', 'task.message.user': '发送了一条消息', 'task.message.assistant': '模型已回复',
+    'task.message.failed': '模型回复失败', 'host.output': '执行输出', 'host.finished': '执行结束'
+  };
+
+  var TASK_PERMISSION_LABELS = {
+    human_approval: '人工审批', assisted_approval: '帮我审批', full_access: '完全访问'
   };
 
   var CONFIDENCE_LABELS = { confirmed: '已确认', high: '高', medium: '中', low: '低' };
@@ -219,6 +225,28 @@
   }
 
   function toggleTheme() { saveTheme(resolvedTheme() === 'dark' ? 'light' : 'dark'); }
+
+  var openMenu = null;
+  function closeTopMenu() {
+    var node = $('top-menu');
+    if (node) node.remove();
+    document.querySelectorAll('[data-menu]').forEach(function (button) { button.setAttribute('aria-expanded', 'false'); });
+    openMenu = null;
+  }
+  function openTopMenu(name, button) {
+    if (openMenu === name) { closeTopMenu(); return; }
+    closeTopMenu(); openMenu = name; button.setAttribute('aria-expanded', 'true');
+    var commands = {
+      file: [['新建任务', openComposer], ['设置', function () { go('settings'); }]],
+      edit: [['复制', function () { try { document.execCommand('copy'); } catch (_) { /* browser policy */ } }], ['粘贴', function () { toast('请在输入框中使用 Ctrl+V 粘贴'); }]],
+      view: [['收起左侧栏', function () { $('rail-toggle').click(); }], ['收起右侧信息', function () { $('aside-toggle').click(); }], [resolvedTheme() === 'dark' ? '切换浅色主题' : '切换深色主题', toggleTheme]],
+      help: [['键盘快捷键', function () { toast('Ctrl/⌘ + Enter 发送对话；Esc 关闭面板。'); }], ['关于 Craft Studio', function () { toast('Craft Studio · 本机任务工作台'); }]]
+    }[name] || [];
+    var menu = document.createElement('div'); menu.id = 'top-menu'; menu.className = 'top-menu'; menu.setAttribute('role', 'menu');
+    commands.forEach(function (command) { var item = document.createElement('button'); item.type = 'button'; item.textContent = command[0]; item.onclick = function () { closeTopMenu(); command[1](); }; menu.appendChild(item); });
+    document.body.appendChild(menu);
+    var rect = button.getBoundingClientRect(); menu.style.left = Math.round(rect.left) + 'px'; menu.style.top = Math.round(rect.bottom + 4) + 'px';
+  }
 
   // ------------------------------------------------------------- view helpers
 
@@ -655,44 +683,32 @@
 
   // Toggling 更多 flips visibility instead of re-rendering, so whatever the user
   // already typed into the box or the work-directory field survives.
-  function composerMoreOpen(open) {
-    var panel = $('composer-more-panel');
-    var button = $('composer-more');
-    if (panel) panel.hidden = !open;
-    if (button) button.setAttribute('aria-expanded', String(!!open));
-  }
-
   function composerHtml() {
     var c = state.composer;
-    var permission = c.sandbox === 'workspace-write' ? '完全访问 · 可改文件' : '有限访问 · 只看不改';
+    var modelOptions = (c.models || []).map(function (model) {
+      return '<option value="' + esc(model.id) + '"' + (model.id === c.model ? ' selected' : '') + '>' +
+        esc(model.name + ' · ' + model.model) + (model.configured ? '' : '（待填密钥）') + '</option>';
+    }).join('');
+    var ready = (c.models || []).filter(function (model) { return model.configured; });
     return '<div class="composer">' +
-      '<textarea id="composer-text" rows="3" placeholder="说说要做的事，例如：修复登录超时，超时不再复现并补上回归用例"></textarea>' +
+      '<textarea id="composer-text" rows="3" placeholder="说说要做的事，例如：修复登录超时，并补上回归用例"></textarea>' +
       '<div id="composer-chips"></div>' +
       '<div class="composer-bar">' +
         '<button class="cbtn" type="button" id="composer-caps" title="这个任务可以用哪些已登记的能力">' + icon('plus') + '<span>能力</span></button>' +
         '<label class="cbtn cbtn-pick" title="这个任务算在哪个文件夹">' + icon('folder') +
           '<select id="composer-folder" aria-label="选择文件夹">' + composerFolders() + '</select></label>' +
+        '<label class="cbtn cbtn-pick" title="选择本次对话使用的模型">' + icon('cpu') +
+          '<select id="composer-model" aria-label="选择模型"' + (ready.length ? '' : ' disabled') + '>' +
+            (modelOptions || '<option value="">先到设置添加模型</option>') + '</select></label>' +
+        '<label class="cbtn cbtn-pick" title="选择任务权限">' + icon('shield') +
+          '<select id="task-permission" aria-label="选择权限">' +
+            options([['human_approval', '人工审批'], ['assisted_approval', '帮我审批'], ['full_access', '完全访问']], c.permission) +
+          '</select></label>' +
         '<span class="grow"></span>' +
-        '<button class="cbtn" type="button" id="composer-more" aria-expanded="' + String(!!c.more) + '"><span>更多</span>' + icon('chev') + '</button>' +
-        '<button class="cbtn primary" type="button" id="composer-send">' + icon('play') + '<span>开始</span></button>' +
+        (ready.length ? '<button class="cbtn primary" type="button" id="composer-send">' + icon('play') + '<span>开始</span></button>' :
+          '<button class="cbtn" type="button" id="composer-model-setup">先添加模型</button>') +
       '</div>' +
-      '<div class="composer-more" id="composer-more-panel"' + (c.more ? '' : ' hidden') + '>' +
-        '<div class="field"><label for="task-workspace">工作目录</label>' +
-          '<input id="task-workspace" type="text" placeholder="D:\\workspace\\demo" value="' + esc(c.workspace) + '">' +
-          '<span class="hint">Craft 只会在这个目录里干活。填过一次就会记住。</span></div>' +
-        '<div class="field-row">' +
-          '<div class="field"><label for="task-permission">允许做到什么程度</label>' +
-            '<select id="task-permission">' +
-              options([['read-only', '有限访问 · 只看不改'], ['workspace-write', '完全访问 · 可改文件']], c.sandbox) +
-            '</select><span class="hint">完全访问才能真的改文件，之后需要你批准一次。</span></div>' +
-          '<div class="field"><label for="task-host">执行引擎</label>' +
-            '<select id="task-host">' + options(HOSTS, c.host) + '</select>' +
-            '<span class="hint">不知道选哪个就用默认。</span></div>' +
-        '</div>' +
-        '<div class="field"><label for="task-acceptance">完成标准（每行一条，可不填）</label>' +
-          '<textarea id="task-acceptance" placeholder="文件:dist/report.md&#10;命令:npm test&#10;人工确认可用"></textarea>' +
-          '<span class="hint">写「文件:xxx.md」检查有没有产出该文件；写「命令:npm test」用命令验证；其余直接写人话。</span></div>' +
-      '</div>' +
+      '<div class="composer-note">对话从模型开始。文件、命令与外部动作会依照所选权限另行确认。</div>' +
       '</div>';
   }
 
@@ -712,19 +728,15 @@
       var node = $('aside-folder');
       if (node) node.textContent = folderNameOf(folder.value);
     };
+    var model = root.querySelector('#composer-model');
+    if (model) model.onchange = function () { state.composer.model = model.value; };
     var permission = root.querySelector('#task-permission');
-    if (permission) {
-      permission.onchange = function () {
-        state.composer.sandbox = permission.value;
-        var node = $('aside-sandbox');
-        if (node) node.textContent = permission.value === 'workspace-write' ? '完全访问' : '有限访问';
-      };
-    }
+    if (permission) permission.onchange = function () { state.composer.permission = permission.value; };
     root.querySelector('#composer-caps').onclick = openCapabilitySheet;
-    root.querySelector('#composer-more').onclick = function () {
-      composerMoreOpen(root.querySelector('#composer-more-panel').hidden);
-    };
-    root.querySelector('#composer-send').onclick = submitComposer;
+    var send = root.querySelector('#composer-send');
+    if (send) send.onclick = submitComposer;
+    var setup = root.querySelector('#composer-model-setup');
+    if (setup) setup.onclick = function () { go('settings'); };
     box.onkeydown = function (event) {
       if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') { event.preventDefault(); submitComposer(); }
     };
@@ -741,15 +753,11 @@
 
   function submitComposer() {
     var raw = val('composer-text');
-    var workspace = val('task-workspace');
     if (!raw) { toast('先说一下要做什么', true); return; }
-    if (!workspace) {
-      // The runtime rejects a task without a workspace root, so say so where the
-      // field is rather than failing after the request.
-      composerMoreOpen(true);
-      toast('请先填工作目录（在「更多」里）', true);
-      return;
-    }
+    var model = val('composer-model') || state.composer.model;
+    if (!model) { toast('请先选择一个可用模型', true); return; }
+    var configuredModel = (state.composer.models || []).filter(function (item) { return item.id === model; })[0];
+    if (!configuredModel || !configuredModel.configured) { toast('这个模型还没有可用密钥，请先到设置完成配置', true); return; }
     var folder = $('composer-folder') ? $('composer-folder').value : '';
     if (folder === '__new__') folder = '';
     var firstLine = raw.split(/\r?\n/)[0].trim();
@@ -758,44 +766,21 @@
     // The runtime has no field for capability selection yet, so the names ride
     // along in the prompt as an explicit instruction instead of being dropped.
     var prompt = chosen.length ? raw + '\n\n可用的能力：' + chosen.map(capNameOf).join('、') : raw;
-    var parsed = parseCriteria();
-    var sandbox = val('task-permission') || 'read-only';
-    var host = val('task-host') || 'codex-cli';
-    var body = {
-      title: title, goal: raw, workspace: workspace, include_paths: ['.'],
-      host: host, sandbox: sandbox, prompt: prompt
-    };
+    var body = { title: title, goal: raw, model_id: model, permission_mode: val('task-permission') || 'human_approval' };
     if (folder) body.project_id = folder;
-    if (parsed.criteria.length) { body.acceptance_name = '完成标准'; body.acceptance_criteria = parsed.criteria; }
-    state.composer.workspace = workspace;
-    state.composer.sandbox = sandbox;
-    state.composer.host = host;
+    state.composer.model = model;
+    state.composer.permission = body.permission_mode;
     state.composer.lastPrompt = prompt;
-    try { localStorage.setItem(WORKSPACE_KEY, workspace); } catch (_) { /* storage off */ }
-    api('/api/verified-work-loops', { method: 'POST', body: body }).then(function (prepared) {
-      var launch = prepared.launch || {};
-      return Promise.all(parsed.files.map(function (spec) {
-        return api('/api/acceptance-plans/' + encodeURIComponent(launch.acceptance_plan_id) + '/file-evaluation', {
-          method: 'POST', body: { criterion_id: spec.id, workspace: launch.workspace, relative_path: spec.file_path }
-        });
-      })).then(function () { return prepared; });
-    }).then(function (prepared) {
-      var launch = prepared.launch || {};
-      var task = prepared.task || {};
-      if (launch.status === 'awaiting_approval') {
-        // The approval endpoint wants the verified work loop, not the work
-        // launch — they are two different records and only the former resolves.
-        state.pendingApproval = { taskId: task.id, loopId: (prepared.work_loop || {}).id || null };
-        toast('任务已创建，等你批准');
-      } else {
-        toast('任务已交给执行引擎');
-      }
+    api('/api/tasks', { method: 'POST', body: body }).then(function (created) {
+      var task = created.task || {};
+      if (!task.id) throw new Error('任务创建未返回任务编号');
+      return api('/api/tasks/' + encodeURIComponent(task.id) + '/messages', { method: 'POST', body: { content: prompt } }).then(function () { return task; });
+    }).then(function (task) {
+      toast('任务已开始');
       state.composer.folder = '';
       state.composer.caps = [];
       renderFolderTree(true);
-      // Land on the task itself: the old flow showed a dialog that said "created",
-      // which the task page already says — and better.
-      if (task.id) openTask(task.id); else paint('home');
+      openTask(task.id);
     }).catch(fail);
   }
 
@@ -937,7 +922,9 @@
     }).catch(function () {
       var count = $('task-list-count');
       if (count) count.textContent = '—';
-      host.innerHTML = '<div class="aside-note" style="padding:8px">任务列表加载失败。</div>';
+      // A fresh workspace has no tasks. Do not turn an empty or unavailable
+      // projection into invented sample data or a permanent error row.
+      host.innerHTML = '';
     });
   }
 
@@ -974,7 +961,12 @@
   }
 
   function viewHome() {
-    return loadCapabilities().catch(function () { return caps; }).then(function () {
+    return Promise.all([
+      loadCapabilities().catch(function () { return caps; }),
+      settled(api('/api/config/models'), { models: [] })
+    ]).then(function (results) {
+      state.composer.models = results[1].models || [];
+      if (!state.composer.model && state.composer.models.length) state.composer.model = state.composer.models[0].id;
       return {
         html: '<div class="stack home">' + composerHtml() +
           '<p class="home-hint">按 Ctrl + Enter 直接开始。所有任务在左边「任务」里，默认按文件夹分组。</p>' +
@@ -1291,6 +1283,9 @@
       var artifacts = detail.artifacts || [];
       var evidence = detail.evidence || [];
       var trace = detail.trace || [];
+      var messages = detail.messages || [];
+      var hostRuns = detail.host_runs || [];
+      var activity = detail.activity || [];
 
       state.selectedTaskTitle = task.title || '';
       if (state.page === 'task') {
@@ -1303,6 +1298,17 @@
 
       var goalCard = taskCard('目标', '文件夹：' + esc(folder),
         '<p class="doc-p">' + esc(task.goal || '这个任务还没有写下目标') + '</p>');
+
+      var messageRows = messages.length ? messages.map(function (message) {
+        var role = message.role === 'assistant' ? 'assistant' : 'user';
+        return '<article class="task-message ' + role + '">' +
+          '<div class="task-message-meta"><span>' + (role === 'assistant' ? 'Craft' : '你') + '</span><time>' + esc(shortTime(message.created_at)) + '</time></div>' +
+          '<p>' + esc(message.content) + '</p></article>';
+      }).join('') : emptyState('从这里开始任务', '写下第一句话后，Craft 会使用你选择的模型继续这条任务线程。', 'spark');
+      var conversationCard = taskCard('对话', task.model_id ? '模型：' + esc(task.model_id) : '尚未选择模型',
+        '<div class="task-thread">' + messageRows + '</div>' +
+        '<div class="task-composer"><textarea id="task-message-input" rows="2" placeholder="继续这个任务…"></textarea>' +
+          '<div class="task-composer-foot"><span>对话不会自行执行文件或外部操作</span><button class="btn primary" type="button" id="task-message-send">发送</button></div></div>');
 
       var progressCard;
       if (!latest) {
@@ -1354,21 +1360,31 @@
           '<span class="row-time">' + esc(shortTime(item.created_at)) + '</span></div>';
       }).join('') : emptyState('还没有过程记录', null, 'dot');
 
+      var activityRows = activity.length ? activity.map(function (item) {
+        return '<div class="row"><span class="row-lead muted">' + icon('dot') + '</span><div class="row-main"><span class="row-title">' +
+          esc(label(TRACE_LABELS, item.event_type, item.event_type)) + '</span>' +
+          (item.run_id ? '<span class="row-sub mono">运行 ' + esc(item.run_id) + '</span>' : '') +
+          '</div><span class="row-time">' + esc(shortTime(item.created_at)) + '</span></div>';
+      }).join('') : emptyState('还没有活动记录', '真正发起对话或运行后，时间线会出现在这里。', 'dot');
+
       var pending = (latest && latest.pending) || [];
-      var aside = asideBlock('任务信息', '', asideRows([
+      var aside = asideCollapsible('任务信息', asideRows([
         ['状态', label(STATUS_LABELS, task.status, task.status || '—')],
         ['文件夹', folder],
+        ['模型', task.model_id || '—'],
+        ['权限', label(TASK_PERMISSION_LABELS, task.permission_mode, '人工审批')],
         ['创建时间', shortTime(task.created_at) || '—'],
         ['最近更新', shortTime(task.updated_at) || '—']
       ])) +
-      asideBlock('这几块分别看什么', '', '<div class="aside-note">' +
+      asideCollapsible('查看说明', '<div class="aside-note">' +
         '目标＝这件事要达成什么；进度＝最近一次做到哪一步；结论＝独立验收的结果；' +
-        '产物＝产出的文件与代码改动；验证＝每条结论的依据；过程＝执行过程中发生的事。</div>') +
-      (pending.length ? asideBlock('还剩 ' + pending.length + ' 步', '', '<div class="aside-note">' +
+        '产物＝产出的文件与代码改动；验证＝每条结论的依据；活动＝对话与运行过程中发生的事。</div>') +
+      (pending.length ? asideCollapsible('还剩 ' + pending.length + ' 步', '<div class="aside-note">' +
         pending.map(function (stage) { return esc(label(STAGE_LABELS, stage, stage)); }).join('、') + '</div>') : '');
 
       return {
-        html: '<div class="stack">' + goalCard +
+        html: '<div class="stack task-page">' + goalCard + conversationCard +
+          taskCard('活动', (hostRuns.length ? hostRuns.length + ' 次运行' : '暂无运行'), '<div class="rows">' + activityRows + '</div>') +
           '<div class="grid-2">' + progressCard + verdictCard + '</div>' +
           taskCard('产物', artifacts.length + ' 项', '<div class="rows">' + artifactRows + '</div>') +
           '<div class="grid-2">' +
@@ -1376,6 +1392,20 @@
             taskCard('过程', trace.length + ' 条', '<div class="rows">' + traceRows + '</div>') +
           '</div></div>',
         aside: aside,
+        mounts: [function (root) {
+          var input = root.querySelector('#task-message-input');
+          var send = root.querySelector('#task-message-send');
+          if (!input || !send) return;
+          function submit() {
+            var content = String(input.value || '').trim();
+            if (!content) { toast('写点内容再发送', true); return; }
+            send.disabled = true; input.disabled = true;
+            api('/api/tasks/' + encodeURIComponent(taskId) + '/messages', { method: 'POST', body: { content: content } })
+              .then(function () { paint('task'); }).catch(function (error) { send.disabled = false; input.disabled = false; fail(error); });
+          }
+          send.onclick = submit;
+          input.onkeydown = function (event) { if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') { event.preventDefault(); submit(); } };
+        }],
         actions: taskPageActions(task),
       };
     });
@@ -1541,7 +1571,7 @@
               openInline({
                 title: '扫描可用能力', sub: '手动登记这个来源里有哪些能力',
                 html: '<div class="field"><label for="discover-lines">每行一个能力，用竖线分成 5 段：<b>类型 | 唯一标识 | 名称 | 影响范围 | 一句话说明</b></label>' +
-                  '<textarea id="discover-lines" class="tall">skill|craft/skills/craft-route|craft-route|read_only|路由 Skill\nmcp_server|craft/plugins/craft|craft MCP|read_only|syscall 工具面</textarea>' +
+                  '<textarea id="discover-lines" class="tall" placeholder="skill | your-skill-id | 能力名称 | read_only | 一句话说明"></textarea>' +
                   '<span class="hint">类型可填：Skill、MCP 服务、工具、工作流、适配器、校验器、评分器、评测集。影响范围可填：仅查看 / 可改本机文件 / 会对外发送 / 有破坏性。</span></div>',
                 actions: [{ label: '确认登记', primary: true, run: function () { discoverAssets(id); } }]
               });
@@ -1746,12 +1776,12 @@
             '<button class="btn sm primary" id="models-manage" type="button">' + icon('plus') + '添加模型</button>') +
             '<div class="card-body tight"><div class="rows">' + modelRows + '</div></div></div>' +
           '<div class="grid-2">' +
-            '<div class="card">' + head('外观与默认档位', '改完点「保存设置」生效',
+            '<div class="card">' + head('外观与偏好', '浅色为默认；更改会立即预览',
               '<button class="btn primary" id="settings-save" type="button">' + icon('check') + '保存设置</button>') +
               '<div class="card-body"><div class="stack">' +
                 '<div class="field-row">' +
                   '<div class="field"><label for="set-theme">外观</label><select id="set-theme">' +
-                    options([['dark', '深色（默认）'], ['light', '浅色'], ['system', '跟随系统']], settings.theme) + '</select></div>' +
+                    options([['light', '浅色（默认）'], ['dark', '深色'], ['system', '跟随系统']], settings.theme) + '</select></div>' +
                   '<div class="field"><label for="set-tier">默认档位</label><select id="set-tier">' +
                     options(TIER_WORDS.map(function (pair) { return [pair[0], pair[1] + ' · ' + pair[2]]; }), settings.runtime.defaultTier) + '</select></div>' +
                 '</div>' +
@@ -1848,9 +1878,9 @@
     var node = $('sb-mode');
     if (!node) return;
     var mode = state.execution && state.execution.mode;
-    if (mode === 'cli') node.textContent = '执行模式 本地 CLI';
-    else if (mode === 'provider') node.textContent = '执行模式 模型 API';
-    else node.textContent = '执行模式 未设置';
+    if (mode === 'cli') node.textContent = '模型 本地 CLI';
+    else if (mode === 'provider') node.textContent = '模型 API 已配置';
+    else node.textContent = '模型 未设置';
   }
 
   function openExecutionSetup() {
@@ -2064,13 +2094,6 @@
     state.selectedTask = params.get('task') || null;
     state.selectedProject = params.get('project') || null;
     execLoad();
-    try {
-      var saved = localStorage.getItem(WORKSPACE_KEY);
-      if (saved) state.composer.workspace = saved;
-    } catch (_) { /* storage off */ }
-    // 工作目录 is required by the runtime, so the one time it has never been set
-    // is the one time 更多 starts open instead of folded away.
-    state.composer.more = !state.composer.workspace;
     applyTheme();
     renderStatusExecution();
 
@@ -2085,8 +2108,14 @@
     }
 
     $('jump-new-task').onclick = openComposer;
-    $('theme-toggle').onclick = toggleTheme;
-    $('cmdk').onclick = openPalette;
+    $('nav-back').onclick = function () { history.back(); };
+    $('nav-forward').onclick = function () { history.forward(); };
+    $('aside-toggle').onclick = function () {
+      var app = $('app'); var next = app.getAttribute('data-aside') === 'open' ? 'collapsed' : 'open';
+      app.setAttribute('data-aside', next); $('aside-toggle').setAttribute('aria-pressed', String(next === 'collapsed'));
+    };
+    document.querySelectorAll('[data-menu]').forEach(function (button) { button.onclick = function () { openTopMenu(button.getAttribute('data-menu'), button); }; });
+    document.addEventListener('click', function (event) { if (!event.target.closest('[data-menu], #top-menu')) closeTopMenu(); });
     // The folder tree lives in the static rail markup, so bind once here instead
     // of re-binding on every repaint.
     // Three things live in one tree: the chevron folds a folder, the folder name
@@ -2134,6 +2163,7 @@
         return;
       }
       if (event.key !== 'Escape') return;
+      if (openMenu) { closeTopMenu(); return; }
       if (!$('palette-host').hidden) { closePalette(); return; }
       if (inlineForm) dismissInline(inlineForm.page);
     });
@@ -2167,7 +2197,7 @@
 
     api('/api/home').then(function (home) {
       var launches = home.work_launches || [];
-      $('sb-host').textContent = '运行位置 ' + (launches.length ? (launches[0].host || '—') : '自动');
+      $('sb-host').textContent = '任务运行 ' + (launches.length ? (launches[0].host || '—') : '自动');
     }).catch(function () { /* status bar keeps the placeholder */ });
 
     renderFolderTree(true);

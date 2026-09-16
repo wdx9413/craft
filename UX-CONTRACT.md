@@ -3,7 +3,7 @@
 ## Product context
 
 - Audience: people operating local Craft tasks and capability sources.
-- Primary jobs: create or resume work, inspect task state, configure a model and manage local context.
+- Primary jobs: create or continue a task conversation, inspect factual task activity, configure a model and manage local context.
 - Active locales: `zh-CN`, `en-US`; current Studio navigation is `zh-CN`.
 - Accessibility target: WCAG 2.2 AA.
 
@@ -20,7 +20,7 @@
 - Project `DESIGN.md`: `DESIGN.md`.
 - Token ownership: existing runtime CSS is canonical.
 - Runtime source: `studio/app.css`, served by `src/workbench-server.ts` and copied by `scripts/package-desktop.ts`.
-- Themes: light and dark; reduced motion is always respected.
+- Themes: light (default), dark and system-following; reduced motion is always respected.
 
 ## Canonical UI Map
 
@@ -42,11 +42,12 @@ Buttons and icon buttons use native `<button>` elements, pointer cursors, hover/
 | Add model | Studio sheet | Save disabled while request runs | Settings | toast | preserve sheet values | sheet control | `studio/app.js` |
 | Edit model | Settings row | Save disabled while request runs | Settings | toast | preserve sheet values | sheet control | `studio/app.js` |
 | Remove model | App-owned confirmation sheet | confirmation action | Settings | toast | keep confirmation open | cancel action | `studio/app.js` |
-| New task | rail action / composer | local form state | active task | status update | inline error | composer | `studio/app.js` |
+| New task | rail action / composer | local form state | task conversation | first model reply | retain input and show error | task composer | `studio/app.js` |
+| Continue task | task conversation composer | disable send while model responds | same task thread | append user/model turns | retain input and show error | task composer | `studio/app.js` |
 
 ## Navigation and responsive behavior
 
-The rail is collapsible. The central content owns reading scroll, while rail and contextual panel have their own scroll regions. Keyboard escape closes the command palette or the active inline sheet and restores the relevant control. Dense content truncates only where an accessible full value remains available.
+The rail and contextual panel are independently collapsible. The central content owns reading scroll, while rail, conversation and contextual panel have their own scroll regions. Keyboard escape closes the active menu, command palette or inline sheet and restores the relevant control. Dense content truncates only where an accessible full value remains available.
 
 ## Overlays and feedback
 
@@ -54,7 +55,7 @@ Sheets and the command palette are app-owned overlays. Toasts are single-system 
 
 ## Async and resilience
 
-Requests remain same-origin and token-scoped. Failed mutations preserve field values and return an inline/toast error. The UI must not commit a stale request result after a newer navigation or selection.
+Requests remain same-origin and token-scoped. Failed mutations preserve field values and return an inline/toast error. A conversation turn has no tool authority: it may call the selected model but cannot claim or cause file/external effects. The UI must not commit a stale request result after a newer navigation or selection.
 
 ## Validation
 

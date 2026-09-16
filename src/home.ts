@@ -65,7 +65,17 @@ export class HomeKernel {
     for (const event of traces) { const eventPayload = event.payload as JsonObject; for (const artifactId of Array.isArray(eventPayload.artifact_ids) ? eventPayload.artifact_ids : []) artifactIds.add(String(artifactId)); }
     const artifacts = [...artifactIds].map((id) => this.store.find("artifact", id)).filter((item): item is JsonObject => item !== null);
     const runs = ["runtime_run", "workflow_run", "orchestration_plan"].flatMap((kind) => this.store.list(kind, 10_000, (item) => item.task_id === taskId).map((item) => ({ ...item, run_kind: kind })));
-    return { task: pick(task, ["id", "title", "goal", "project_id", "status", "created_at", "updated_at"]),
+    const taskEvents = this.store.events(`task:${taskId}`);
+    const hostRuns = this.store.list("host_run", limit, (item) => item.task_id === taskId);
+    const messages = this.store.list("task_message", limit, (item) => item.task_id === taskId)
+      .sort((left, right) => String(left.created_at).localeCompare(String(right.created_at)));
+    const hostEvents = hostRuns.flatMap((run) => this.store.events(`host-run:${run.id}`).map((event) => ({ run_id: run.id, ...event })));
+    const activity: JsonObject[] = [...taskEvents, ...hostEvents].map((item) => item as JsonObject)
+      .sort((left, right) => String(right.created_at).localeCompare(String(left.created_at)));
+    return { task: pick(task, ["id", "title", "goal", "project_id", "model_id", "permission_mode", "status", "created_at", "updated_at"]),
+      messages: messages.map((item) => pick(item, ["id", "role", "content", "model_id", "provider_model", "usage", "created_at"])),
+      host_runs: hostRuns.map((item) => pick(item, ["id", "host", "status", "event_count", "started_at", "finished_at", "updated_at"])),
+      activity: activity.slice(0, limit).map((item) => pick(item, ["run_id", "stream", "sequence", "event_type", "created_at"])),
       checkpoints: this.store.list("checkpoint", limit, (item) => item.task_id === taskId).map((item) => pick(item, ["id", "summary", "completed", "pending", "decisions", "status", "created_at"])),
       feedback: this.store.list("feedback", limit, (item) => item.task_id === taskId).map((item) => pick(item, ["id", "kind", "original", "corrected", "source", "created_at"])),
       runs: runs.slice(0, limit).map((item) => pick(item, ["id", "run_kind", "status", "current_stage", "updated_at"])),

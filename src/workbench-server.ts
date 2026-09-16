@@ -198,11 +198,14 @@ export class WorkbenchWebApp {
    */
   async handleAsync(request: WebRequest): Promise<WebResponse> {
     const path = new URL(request.path, this.origin).pathname;
-    if (request.method === "POST" && (path === "/api/sources" || path === "/api/studio/call")) {
+    if (request.method === "POST" && (path === "/api/sources" || path === "/api/studio/call" || (path.startsWith("/api/tasks/") && path.endsWith("/messages")))) {
       if (request.origin !== undefined && request.origin !== this.origin) return json(403, { error: "Cross-origin request rejected" });
       if (!authorized(request.token, this.token)) return json(401, { error: "Workbench token required" });
       try {
         if (path === "/api/sources") return json(201, await this.service.sourceAdd(bodyObject(request.body)));
+        if (path.startsWith("/api/tasks/") && path.endsWith("/messages")) {
+          return json(201, await this.service.taskMessageSend({ ...bodyObject(request.body), task_id: decodeURIComponent(path.slice(11, -9)) }));
+        }
         const body = bodyObject(request.body); const name = String(body.tool ?? "");
         if (!name.startsWith("craft_")) return json(422, { error: "Studio calls must address a craft_ tool" });
         const bridge = studioBridge(this.service);

@@ -12,7 +12,7 @@ import { aggregateEvaluation, compareEvaluationAggregates, type EvaluationAggreg
 import { publishSkill, rollbackSkillPublication } from "../skill-publisher.ts";
 import { loadConfig } from "../config.ts";
 import { loadSettingsSync, publicSettings, resetSettingsSync, saveSettingsSync, type CraftSettingsPatch, type CraftModelConfig, type ModelProtocol } from "../settings.ts";
-import { publicModel } from "../model-gateway.ts";
+import { buildChatRequest, createFetchTransport, publicModel, specFromConfig, type ChatMessage } from "../model-gateway.ts";
 import { hostProfilesFromConfig, resolveHostProfile } from "../host-registry.ts";
 import { actionDigest, beginLoop, budgetBand, defineLoopLimits } from "../agent-loop.ts";
 import { assetRef, defineAsset, routeAssets } from "../assets.ts";
@@ -35,6 +35,7 @@ import { installKernelDelegateMethods } from "./use-cases/kernel-delegates.ts";
 export const VERSION = "0.12.30";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
+const TASK_PERMISSION_MODES = new Set(["human_approval", "assisted_approval", "full_access"]);
 const VERSIONED_LIFECYCLE = new Set(["draft", "candidate", "verified", "deprecated"]);
 const TRIAL_VERDICTS = new Set(["passed", "failed", "blocked", "cancelled"]);
 const EVAL_SPLITS = new Set(["search", "development", "held_out"]);
@@ -1365,9 +1366,51 @@ export class CraftService extends ServiceFoundation {
   taskOpen(args: JsonObject): JsonObject {
     if (args.task_id) return this.taskPack(String(args.task_id));
     const taskId = id("task");
+    const modelId = args.model_id === undefined ? null : text(args.model_id, "model_id");
+    const permissionMode = String(args.permission_mode ?? "human_approval");
+    if (!TASK_PERMISSION_MODES.has(permissionMode)) throw new Error("Task permission mode is unsupported");
     this.store.save("task", taskId, { title: text(args.title, "title"), goal: text(args.goal, "goal"),
-      project_id: args.project_id ?? null, status: "active" });
+      project_id: args.project_id ?? null, model_id: modelId, permission_mode: permissionMode, status: "active" });
+    this.store.appendEvent(`task:${taskId}`, "task.created", { model_id: modelId, permission_mode: permissionMode });
     return this.taskPack(taskId);
+  }
+
+  /** Persist a real model-backed conversation turn without granting tool authority. */
+  async taskMessageSend(args: JsonObject): Promise<JsonObject> {
+    const taskId = text(args.task_id, "task_id");
+    const task = this.store.get("task", taskId);
+    const content = assertNoSecret(document(args.content, "content"), "content");
+    const modelId = task.model_id === null || task.model_id === undefined ? null : String(task.model_id);
+    if (!modelId) throw new Error("This task has no selected model. Choose one in Settings before continuing.");
+    const settings = loadSettingsSync(this.store.paths);
+    const model = settings.models.find((item) => item.id === modelId);
+    if (!model) throw new Error("The task model is no longer configured. Choose another model in Settings.");
+    const user = this.store.create("task_message", id("task_message"), { task_id: taskId, role: "user", content, model_id: modelId, source: "studio" });
+    this.store.appendEvent(`task:${taskId}`, "task.message.user", { message_id: user.id, model_id: modelId });
+    const history = this.store.list("task_message", 100, (item) => item.task_id === taskId)
+      .sort((left, right) => String(left.created_at).localeCompare(String(right.created_at)));
+    const system = [
+      "You are continuing a Craft task conversation.",
+      `Task goal: ${String(task.goal)}`,
+      `Permission mode: ${String(task.permission_mode ?? "human_approval")}.`,
+      "This is a conversation turn only. Do not claim that files, commands, or external systems were changed. Explain the next safe step and ask when approval or missing context is needed."
+    ].join("\n");
+    try {
+      const spec = specFromConfig(model);
+      const result = await createFetchTransport().complete(spec, buildChatRequest(spec, {
+        model: model.model,
+        messages: ([{ role: "system", content: system }] as ChatMessage[]).concat(history.map((item): ChatMessage => ({
+          role: item.role === "assistant" ? "assistant" as const : "user" as const,
+          content: String(item.content)
+        })))
+      }));
+      const assistant = this.store.create("task_message", id("task_message"), { task_id: taskId, role: "assistant", content: result.text, model_id: modelId, provider_model: result.model, usage: result.usage, source: "model" });
+      this.store.appendEvent(`task:${taskId}`, "task.message.assistant", { message_id: assistant.id, model_id: modelId });
+      return { user, assistant };
+    } catch (error) {
+      this.store.appendEvent(`task:${taskId}`, "task.message.failed", { model_id: modelId, error_class: error instanceof Error ? error.name : "UnknownError" });
+      throw error;
+    }
   }
   taskList(args: JsonObject): JsonObject {
     const status = args.status as string | undefined;

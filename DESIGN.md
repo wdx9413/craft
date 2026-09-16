@@ -1,7 +1,7 @@
 ---
 version: alpha
 name: Craft Studio
-description: A dense local-first desktop workbench that borrows DeepSeek Harness restraint while retaining Craft's warm operational signature.
+description: A dense local-first desktop workbench that treats every task as a continuing conversation, while retaining Craft's warm operational signature.
 colors:
   background: "#FFFFFF"
   chrome: "rgb(249, 250, 251)"
@@ -25,7 +25,7 @@ rounded:
   composer: "22px"
   pill: "999px"
 spacing:
-  titlebar: "40px"
+  titlebar: "40px; compact navigation and application menus only"
   statusbar: "24px"
   rail: "232px"
   aside: "280px"
@@ -65,7 +65,7 @@ The system sans stack prioritizes native rendering and CJK coverage. Interface t
 
 ## Layout
 
-The shell owns the viewport and uses 40px title bar, 24px status bar, 232px rail and 280px contextual aside. Each scrollable panel owns its overflow; loading and feedback preserve the surrounding geometry. The rail can collapse without changing content semantics.
+The shell owns the viewport and uses a 40px title bar, 24px status bar, 232px rail and 280px contextual aside. The title bar contains only rail/navigation controls and File/Edit/View/Help; the browser app host retains actual window controls. Both rail and contextual aside can collapse without changing content semantics. Each scrollable panel owns its overflow; loading and feedback preserve the surrounding geometry.
 
 ## Elevation & Depth
 
@@ -77,7 +77,7 @@ Radii are intentionally non-uniform: 6px micro details, 8px controls, 12px surfa
 
 ## Components
 
-Buttons, icon buttons, inputs, rows, tabs and palette items provide hover, active, disabled and visible keyboard focus states. Sheets replace browser dialogs, toast messages use one live region, secret fields are masked, and reduced motion collapses transitions. Scrollbars use globally inherited visible thumb styling.
+Buttons, icon buttons, inputs, rows, tabs and palette items provide hover, active, disabled and visible keyboard focus states. Task threads use own-message/right and model-message/left alignment; activity remains a separate factual projection. Sheets replace browser dialogs, toast messages use one live region, secret fields are masked, and reduced motion collapses transitions. Scrollbars use globally inherited visible thumb styling.
 
 ## Do's and Don'ts
 

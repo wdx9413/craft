@@ -8790,7 +8790,7 @@ function defaultSettings(paths = craftPaths()) {
   return {
     schemaVersion: 1,
     locale: "zh-CN",
-    theme: "dark",
+    theme: "light",
     dataRoot: paths.root,
     workbench: { port: 4173, openOnStart: true },
     runtime: { defaultTier: "medium", maxSteps: 32, maxTokens: 12e3 },
@@ -15527,8 +15527,16 @@ var HomeKernel = class {
     }
     const artifacts = [...artifactIds].map((id14) => this.store.find("artifact", id14)).filter((item) => item !== null);
     const runs = ["runtime_run", "workflow_run", "orchestration_plan"].flatMap((kind2) => this.store.list(kind2, 1e4, (item) => item.task_id === taskId3).map((item) => ({ ...item, run_kind: kind2 })));
+    const taskEvents = this.store.events(`task:${taskId3}`);
+    const hostRuns = this.store.list("host_run", limit3, (item) => item.task_id === taskId3);
+    const messages = this.store.list("task_message", limit3, (item) => item.task_id === taskId3).sort((left, right) => String(left.created_at).localeCompare(String(right.created_at)));
+    const hostEvents = hostRuns.flatMap((run) => this.store.events(`host-run:${run.id}`).map((event) => ({ run_id: run.id, ...event })));
+    const activity = [...taskEvents, ...hostEvents].map((item) => item).sort((left, right) => String(right.created_at).localeCompare(String(left.created_at)));
     return {
-      task: pick(task, ["id", "title", "goal", "project_id", "status", "created_at", "updated_at"]),
+      task: pick(task, ["id", "title", "goal", "project_id", "model_id", "permission_mode", "status", "created_at", "updated_at"]),
+      messages: messages.map((item) => pick(item, ["id", "role", "content", "model_id", "provider_model", "usage", "created_at"])),
+      host_runs: hostRuns.map((item) => pick(item, ["id", "host", "status", "event_count", "started_at", "finished_at", "updated_at"])),
+      activity: activity.slice(0, limit3).map((item) => pick(item, ["run_id", "stream", "sequence", "event_type", "created_at"])),
       checkpoints: this.store.list("checkpoint", limit3, (item) => item.task_id === taskId3).map((item) => pick(item, ["id", "summary", "completed", "pending", "decisions", "status", "created_at"])),
       feedback: this.store.list("feedback", limit3, (item) => item.task_id === taskId3).map((item) => pick(item, ["id", "kind", "original", "corrected", "source", "created_at"])),
       runs: runs.slice(0, limit3).map((item) => pick(item, ["id", "run_kind", "status", "current_stage", "updated_at"])),
@@ -27417,6 +27425,7 @@ function installKernelDelegateMethods(serviceClass) {
 var VERSION = "0.12.30";
 var CONFIDENCE3 = /* @__PURE__ */ new Set(["confirmed", "bounded", "unverified", "rejected"]);
 var TASK_STATUS = /* @__PURE__ */ new Set(["active", "paused", "completed", "cancelled"]);
+var TASK_PERMISSION_MODES = /* @__PURE__ */ new Set(["human_approval", "assisted_approval", "full_access"]);
 var VERSIONED_LIFECYCLE = /* @__PURE__ */ new Set(["draft", "candidate", "verified", "deprecated"]);
 var TRIAL_VERDICTS = /* @__PURE__ */ new Set(["passed", "failed", "blocked", "cancelled"]);
 var EVAL_SPLITS = /* @__PURE__ */ new Set(["search", "development", "held_out"]);
@@ -29566,13 +29575,55 @@ ${task.goal}`.toLowerCase();
   taskOpen(args) {
     if (args.task_id) return this.taskPack(String(args.task_id));
     const taskId3 = id13("task");
+    const modelId = args.model_id === void 0 ? null : text122(args.model_id, "model_id");
+    const permissionMode = String(args.permission_mode ?? "human_approval");
+    if (!TASK_PERMISSION_MODES.has(permissionMode)) throw new Error("Task permission mode is unsupported");
     this.store.save("task", taskId3, {
       title: text122(args.title, "title"),
       goal: text122(args.goal, "goal"),
       project_id: args.project_id ?? null,
+      model_id: modelId,
+      permission_mode: permissionMode,
       status: "active"
     });
+    this.store.appendEvent(`task:${taskId3}`, "task.created", { model_id: modelId, permission_mode: permissionMode });
     return this.taskPack(taskId3);
+  }
+  /** Persist a real model-backed conversation turn without granting tool authority. */
+  async taskMessageSend(args) {
+    const taskId3 = text122(args.task_id, "task_id");
+    const task = this.store.get("task", taskId3);
+    const content = assertNoSecret4(document(args.content, "content"), "content");
+    const modelId = task.model_id === null || task.model_id === void 0 ? null : String(task.model_id);
+    if (!modelId) throw new Error("This task has no selected model. Choose one in Settings before continuing.");
+    const settings = loadSettingsSync(this.store.paths);
+    const model = settings.models.find((item) => item.id === modelId);
+    if (!model) throw new Error("The task model is no longer configured. Choose another model in Settings.");
+    const user = this.store.create("task_message", id13("task_message"), { task_id: taskId3, role: "user", content, model_id: modelId, source: "studio" });
+    this.store.appendEvent(`task:${taskId3}`, "task.message.user", { message_id: user.id, model_id: modelId });
+    const history = this.store.list("task_message", 100, (item) => item.task_id === taskId3).sort((left, right) => String(left.created_at).localeCompare(String(right.created_at)));
+    const system = [
+      "You are continuing a Craft task conversation.",
+      `Task goal: ${String(task.goal)}`,
+      `Permission mode: ${String(task.permission_mode ?? "human_approval")}.`,
+      "This is a conversation turn only. Do not claim that files, commands, or external systems were changed. Explain the next safe step and ask when approval or missing context is needed."
+    ].join("\n");
+    try {
+      const spec = specFromConfig(model);
+      const result = await createFetchTransport().complete(spec, buildChatRequest(spec, {
+        model: model.model,
+        messages: [{ role: "system", content: system }].concat(history.map((item) => ({
+          role: item.role === "assistant" ? "assistant" : "user",
+          content: String(item.content)
+        })))
+      }));
+      const assistant = this.store.create("task_message", id13("task_message"), { task_id: taskId3, role: "assistant", content: result.text, model_id: modelId, provider_model: result.model, usage: result.usage, source: "model" });
+      this.store.appendEvent(`task:${taskId3}`, "task.message.assistant", { message_id: assistant.id, model_id: modelId });
+      return { user, assistant };
+    } catch (error) {
+      this.store.appendEvent(`task:${taskId3}`, "task.message.failed", { model_id: modelId, error_class: error instanceof Error ? error.name : "UnknownError" });
+      throw error;
+    }
   }
   taskList(args) {
     const status = args.status;

@@ -276,6 +276,9 @@ html {
 
 .app[data-rail="collapsed"] .workspace { grid-template-columns: minmax(0, 1fr) var(--aside-w); }
 .app[data-rail="collapsed"] .rail { display: none; }
+.app[data-aside="collapsed"] .workspace { grid-template-columns: var(--rail-w) minmax(0, 1fr); }
+.app[data-aside="collapsed"] .aside { display: none; }
+.app[data-rail="collapsed"][data-aside="collapsed"] .workspace { grid-template-columns: minmax(0, 1fr); }
 
 /* ---------------------------------------------------------------- titlebar */
 
@@ -295,6 +298,19 @@ html {
 .tb-left { flex: 0 0 auto; }
 .tb-center { flex: 1; justify-content: center; }
 .tb-right { flex: 0 0 auto; }
+.tb-divider { width: var(--hair); height: 16px; background: var(--line); margin: 0 2px; }
+.app-menus { display: flex; align-items: center; gap: 2px; }
+.menu-btn {
+  height: 28px; padding: 0 8px; border: none; border-radius: var(--r1);
+  background: transparent; color: var(--text-2); font: 13px/20px var(--font); cursor: pointer;
+}
+.menu-btn:hover, .menu-btn[aria-expanded="true"] { background: var(--bg-hover); color: var(--text); }
+.top-menu {
+  position: fixed; z-index: 80; min-width: 180px; padding: 4px;
+  border: var(--hair) solid var(--line); border-radius: var(--r2); background: var(--bg-surface); box-shadow: var(--shadow-pop);
+}
+.top-menu button { display: flex; width: 100%; min-height: 32px; padding: 6px 8px; border: none; border-radius: var(--r1); background: transparent; color: var(--text); font: 13px/20px var(--font); text-align: left; cursor: pointer; }
+.top-menu button:hover { background: var(--bg-hover); }
 
 /* Mode switcher */
 .mode-switch { display: flex; align-items: center; gap: 4px; padding: 0; background: transparent; border: none; }
@@ -1466,6 +1482,21 @@ border-radius: 50%;
   border-top: var(--hair) solid var(--line-subtle);
   margin-top: 2px; padding-top: 10px;
 }
+.composer-note { padding: 0 12px 4px; color: var(--text-3); font-size: 12px; line-height: 18px; }
+
+/* A task is a conversation first. Operational projections stay below the
+   thread, so reading and continuing work never compete for the same place. */
+.task-page { max-width: 880px; }
+.task-thread { display: flex; flex-direction: column; gap: 12px; max-height: min(52vh, 560px); overflow-y: auto; padding: 2px 2px 2px 0; }
+.task-message { max-width: 86%; display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-radius: var(--r3); background: var(--bg-inset); color: var(--text); }
+.task-message.user { align-self: flex-end; background: var(--bg-accent); }
+.task-message.assistant { align-self: flex-start; }
+.task-message-meta { display: flex; align-items: center; justify-content: space-between; gap: 16px; color: var(--text-3); font-size: 11px; line-height: 16px; }
+.task-message.user .task-message-meta { color: var(--text-2); }
+.task-message p { margin: 0; white-space: pre-wrap; word-break: break-word; font-size: 14px; line-height: 22px; }
+.task-composer { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; padding-top: 12px; border-top: var(--hair) solid var(--line-subtle); }
+.task-composer textarea { min-height: 50px; resize: vertical; }
+.task-composer-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--text-3); font-size: 12px; line-height: 18px; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip {
   display: inline-flex; align-items: center; gap: 4px;

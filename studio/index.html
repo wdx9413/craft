@@ -5,38 +5,44 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Craft Studio</title>
 <script>
-/* Resolve the theme before the first paint so switching never flashes.
-   Dark is the default; the server value in settings.json is authoritative and
-   this cached copy only exists to paint instantly. */
+/* Resolve the theme before the first paint so switching never flashes. */
 try {
   var cached = localStorage.getItem('craft.theme');
-  document.documentElement.setAttribute('data-theme', cached === 'light' ? 'light' : 'dark');
-} catch (_) { /* storage disabled — the default dark theme stands */ }
+  document.documentElement.setAttribute('data-theme', cached === 'dark' ? 'dark' : 'light');
+} catch (_) { /* storage disabled — light is the shipped default */ }
 </script>
 <link rel="stylesheet" href="/studio/app.css">
 </head>
 <body>
 
-<div class="app" id="app" data-rail="open">
+<div class="app" id="app" data-rail="open" data-aside="open">
 
   <header class="titlebar">
     <div class="tb-group tb-left">
       <button class="icon-btn" id="rail-toggle" type="button" aria-label="展开或收起侧栏">
         <svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><rect x="1.8" y="2.8" width="12.4" height="10.4" rx="1.8"/><path d="M6.4 2.8v10.4"/></svg>
       </button>
-
-    </div>
-
-    <div class="tb-group tb-center">
-      <button class="cmdk" id="cmdk" type="button">
-        <svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="7.2" cy="7.2" r="4.2"/><path d="M10.4 10.4l3 3"/></svg>
-        <span>搜索页面、任务与能力来源…</span>
-        <kbd>Ctrl K</kbd>
+      <button class="icon-btn" id="nav-back" type="button" aria-label="后退" title="后退">
+        <svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.8 3.4 5.2 8l4.6 4.6"/></svg>
       </button>
+      <button class="icon-btn" id="nav-forward" type="button" aria-label="前进" title="前进">
+        <svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6.2 3.4L10.8 8l-4.6 4.6"/></svg>
+      </button>
+      <span class="tb-divider" aria-hidden="true"></span>
+      <div class="app-menus" aria-label="应用菜单">
+        <button class="menu-btn" type="button" data-menu="file">文件</button>
+        <button class="menu-btn" type="button" data-menu="edit">编辑</button>
+        <button class="menu-btn" type="button" data-menu="view">视图</button>
+        <button class="menu-btn" type="button" data-menu="help">帮助</button>
+      </div>
     </div>
+
+    <div class="tb-group tb-center" aria-hidden="true"></div>
 
     <div class="tb-group tb-right">
-      <button class="icon-btn" id="theme-toggle" type="button" aria-label="切换浅色与深色主题"></button>
+      <button class="icon-btn" id="aside-toggle" type="button" aria-label="展开或收起右侧信息" title="展开或收起右侧信息">
+        <svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><rect x="1.8" y="2.8" width="12.4" height="10.4" rx="1.8"/><path d="M9.6 2.8v10.4"/></svg>
+      </button>
     </div>
   </header>
 
@@ -101,8 +107,8 @@ try {
 
   <footer class="statusbar">
     <span class="sb-item" id="sb-conn" data-state="pending"><span class="dot"></span>连接中</span>
-    <span class="sb-item" id="sb-mode">执行模式 未设置</span>
-    <span class="sb-item" id="sb-host">运行位置 自动</span>
+    <span class="sb-item" id="sb-mode">模型 未设置</span>
+    <span class="sb-item" id="sb-host">任务运行 自动</span>
     <span class="sb-item mono" id="sb-root">—</span>
     <span class="sb-grow"></span>
     <span class="sb-item mono" id="sb-counts"></span>

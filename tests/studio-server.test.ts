@@ -115,3 +115,15 @@ test("the Studio bridge forwards a bounded craft_ call behind the same guards as
     assert.equal((await fetch(`${origin}/api/studio/call`, { method: "POST", headers: { authorization: "Bearer network-token", origin }, body: JSON.stringify({ tool: "craft_info" }) })).status, 200);
   } finally { await server.close(); f.store.close(); }
 });
+
+test("Studio exposes task conversation behind the same token and origin gates", async () => {
+  const f = await fixture();
+  const app = new WorkbenchWebApp(f.service, "secret", "http://127.0.0.1:4173");
+  const task = f.service.taskOpen({ title: "Conversation", goal: "Keep context", model_id: "missing-model" }).task as Record<string, unknown>;
+  const endpoint = `/api/tasks/${String(task.id)}/messages`;
+  assert.equal((await app.handleAsync({ method: "POST", path: endpoint, token: "wrong", body: JSON.stringify({ content: "hello" }) })).status, 401);
+  assert.equal((await app.handleAsync({ method: "POST", path: endpoint, token: "secret", origin: "https://evil.example", body: JSON.stringify({ content: "hello" }) })).status, 403);
+  const rejected = await app.handleAsync({ method: "POST", path: endpoint, token: "secret", body: JSON.stringify({ content: "hello" }) });
+  assert.equal(rejected.status, 422); assert.match(rejected.body, /no longer configured/);
+  f.store.close();
+});
