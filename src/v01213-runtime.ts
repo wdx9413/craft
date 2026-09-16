@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { isAbsolute, relative, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
+import { homedir } from "node:os";
 import { CraftStore, type JsonObject } from "./store.ts";
 
 function text(value: unknown, name: string): string {
@@ -29,7 +30,11 @@ const EFFECTS = new Set(["read_only", "local_write", "external_write", "destruct
 /** v0.12.13 bounded action gateway. The default adapter never executes shell or remote effects. */
 export class ActionGatewayKernel {
   readonly store: CraftStore;
-  constructor(store: CraftStore) { this.store = store; }
+  readonly dataRoot: string;
+  constructor(store: CraftStore, dataRoot?: string) {
+    this.store = store;
+    this.dataRoot = dataRoot ?? join(homedir(), ".craft_data");
+  }
 
   prepare(args: JsonObject): JsonObject {
     const actionId = String(args.action_id ?? `action_${randomUUID().replaceAll("-", "")}`);
@@ -52,17 +57,23 @@ export class ActionGatewayKernel {
     const effect = String(action.effect);
     if (effect !== "read_only" && args.approved !== true) throw new Error("Write actions require explicit approval");
     const workspace = resolve(text(action.workspace, "workspace"));
+    const dataRoot = resolve(this.dataRoot);
     const operation = String(action.operation);
     const relativePath = text(args.relative_path ?? "", "relative_path");
-    if (isAbsolute(relativePath) || relative(workspace, resolve(workspace, relativePath)).startsWith("..")) throw new Error("Action path escapes workspace");
+    const inWorkspace = isAbsolute(relativePath)
+      ? false
+      : !relative(workspace, resolve(workspace, relativePath)).startsWith("..");
+    const inDataRoot = isAbsolute(relativePath) && !relative(dataRoot, resolve(relativePath)).startsWith("..");
+    if (!inWorkspace && !inDataRoot) throw new Error("Action path escapes workspace and Craft data root");
+    const target = inWorkspace ? resolve(workspace, relativePath) : resolve(relativePath);
     if (operation === "workspace_read") {
-      const content = await readFile(resolve(workspace, relativePath), "utf8");
+      const content = await readFile(target, "utf8");
       const result = { operation, path: relativePath, content, result_digest: digest(content) };
       return this.finish(action, result);
     }
     if (operation === "workspace_write") {
       if (effect !== "local_write") throw new Error("workspace_write requires local_write effect");
-      const content = text(args.content, "content"); const target = resolve(workspace, relativePath);
+      const content = text(args.content, "content");
       await mkdir(resolve(target, ".."), { recursive: true }); await writeFile(target, content, "utf8");
       return this.finish(action, { operation, path: relativePath, bytes: Buffer.byteLength(content), result_digest: digest(content) });
     }

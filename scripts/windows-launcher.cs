@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Diagnostics;
 using System.IO;
 using System.Windows.Forms;
@@ -8,6 +9,47 @@ internal static class CraftLauncher
     private static string Quote(string value)
     {
         return "\"" + value.Replace("\"", "\\\"") + "\"";
+    }
+
+    /// <summary>
+    /// .NET Framework's ProcessStartInfo.EnvironmentVariables is a case-insensitive
+    /// StringDictionary, so on a machine that exports both HTTP_PROXY and http_proxy
+    /// its getter throws ArgumentException while copying the current environment and
+    /// Process.Start can never run at all. Drop the case-duplicate keys up front so
+    /// the child environment can be built. Only the launcher and its own children are
+    /// affected, and Node resolves env lookups case-insensitively on Windows anyway.
+    /// </summary>
+    private static void DropCaseDuplicateVariables()
+    {
+        ArrayList seen = new ArrayList();
+        foreach (DictionaryEntry entry in Environment.GetEnvironmentVariables())
+        {
+            string key = (string)entry.Key;
+            bool duplicate = false;
+            for (int index = 0; index < seen.Count; index += 1)
+            {
+                if (String.Equals((string)seen[index], key, StringComparison.OrdinalIgnoreCase))
+                {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (duplicate) Environment.SetEnvironmentVariable(key, null);
+            else seen.Add(key);
+        }
+    }
+
+    /// <summary>
+    /// The Workbench prints "&lt;origin&gt;/#token=..." and the same process also
+    /// serves Craft Studio at "&lt;origin&gt;/studio#token=...". Derive the Studio URL
+    /// from that first line rather than waiting for a second stdout line, which
+    /// would block forever on an older cli.js that only prints one.
+    /// </summary>
+    private static string StudioUrl(string workbench)
+    {
+        const string marker = "/#token=";
+        if (workbench.IndexOf(marker, StringComparison.Ordinal) < 0) return workbench;
+        return workbench.Replace(marker, "/studio#token=");
     }
 
     private static bool OpenNativeWindow(string url, out Process window, out string error)
@@ -39,16 +81,17 @@ internal static class CraftLauncher
             if (window != null) { error = ""; return true; }
         }
         window = null;
-        error = "未找到 Microsoft Edge 或 Google Chrome，无法创建 Workbench 原生窗口。";
+        error = "未找到 Microsoft Edge 或 Google Chrome，无法创建 Craft Studio 原生窗口。";
         return false;
     }
 
-    private static int Run(string root, string node, string cli, string dataRoot, out string details)
+    private static int Run(string root, string node, string cli, string extra, string dataRoot, out string details)
     {
+        DropCaseDuplicateVariables();
         ProcessStartInfo start = new ProcessStartInfo
         {
             FileName = node,
-            Arguments = Quote(cli) + " gui",
+            Arguments = Quote(cli) + " gui" + extra,
             WorkingDirectory = root,
             UseShellExecute = false,
             CreateNoWindow = true,
@@ -65,7 +108,7 @@ internal static class CraftLauncher
             string firstLine = child.StandardOutput.ReadLine();
             if (firstLine != null && firstLine.StartsWith("Craft Workbench: ", StringComparison.Ordinal))
             {
-                string url = firstLine.Substring("Craft Workbench: ".Length).Trim();
+                string url = StudioUrl(firstLine.Substring("Craft Workbench: ".Length).Trim());
                 string windowError;
                 if (!OpenNativeWindow(url, out window, out windowError))
                 {
@@ -76,6 +119,12 @@ internal static class CraftLauncher
                 }
                 window.WaitForExit();
                 if (!child.HasExited) child.Kill();
+                child.WaitForExit();
+                // Closing the app window is the normal way to quit. The child is
+                // killed on purpose at that point, which yields a non-zero exit
+                // code, so report success rather than a bogus failure dialog.
+                details = "";
+                return 0;
             }
             child.WaitForExit();
             details = (child.StandardError.ReadToEnd() + "\n" + child.StandardOutput.ReadToEnd()).Trim();
@@ -88,18 +137,23 @@ internal static class CraftLauncher
         string root = AppDomain.CurrentDomain.BaseDirectory;
         string node = Path.Combine(root, "node.exe");
         string cli = Path.Combine(root, "app", "dist", "src", "cli.js");
+        // Forward our own arguments so `craft.exe --port 4174` works when the
+        // default port is already taken by another Craft instance.
+        string extra = "";
+        string[] argv = Environment.GetCommandLineArgs();
+        for (int index = 1; index < argv.Length; index += 1) extra += " " + Quote(argv[index]);
         string details;
-        int exitCode = Run(root, node, cli, null, out details);
+        int exitCode = Run(root, node, cli, extra, null, out details);
         string explicitRoot = Environment.GetEnvironmentVariable("CRAFT_DATA_DIR");
         if (exitCode != 0 && String.IsNullOrWhiteSpace(explicitRoot) && details.IndexOf("database file", StringComparison.OrdinalIgnoreCase) >= 0)
         {
             string fallback = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Craft", "data");
             Directory.CreateDirectory(fallback);
-            exitCode = Run(root, node, cli, fallback, out details);
+            exitCode = Run(root, node, cli, extra, fallback, out details);
         }
         if (exitCode != 0)
         {
-            MessageBox.Show("Craft Workbench 启动失败。\n\n" + details + "\n\n如果数据目录不可写，请设置 CRAFT_DATA_DIR 到一个可写目录。", "Craft Workbench", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show("Craft Studio 启动失败。\n\n" + details + "\n\n如果数据目录不可写，请设置 CRAFT_DATA_DIR 到一个可写目录。", "Craft Studio", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
         return exitCode;
     }

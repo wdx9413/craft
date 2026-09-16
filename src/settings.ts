@@ -5,6 +5,18 @@ import { dirname } from "node:path";
 import { resolve } from "node:path";
 import { atomicPrivateJson, craftPaths, ensureLayout, type CraftPaths } from "./paths.ts";
 
+export type ModelProtocol = "openai-compatible" | "anthropic";
+
+export interface CraftModelConfig {
+  id: string;
+  name: string;
+  protocol: ModelProtocol;
+  baseUrl: string;
+  model: string;
+  apiKeyEnv: string;
+  supportsTools: boolean;
+}
+
 export interface CraftSettings {
   schemaVersion: 1;
   locale: "zh-CN" | "en-US";
@@ -12,6 +24,7 @@ export interface CraftSettings {
   dataRoot: string;
   workbench: { port: number; openOnStart: boolean };
   runtime: { defaultTier: "small" | "medium" | "large"; maxSteps: number; maxTokens: number };
+  models: CraftModelConfig[];
   privacy: { telemetry: boolean };
   updatedAt: string;
 }
@@ -19,6 +32,7 @@ export interface CraftSettings {
 export type CraftSettingsPatch = Partial<Pick<CraftSettings, "locale" | "theme" | "dataRoot">> & {
   workbench?: Partial<CraftSettings["workbench"]>;
   runtime?: Partial<CraftSettings["runtime"]>;
+  models?: CraftModelConfig[];
   privacy?: Partial<CraftSettings["privacy"]>;
 };
 
@@ -41,10 +55,47 @@ function text(value: unknown, name: string, fallback: string): string {
   return value.trim();
 }
 
+function httpUrl(value: unknown, name: string, fallback: string): string {
+  if (value === undefined) return fallback;
+  const raw = text(value, name, fallback);
+  let url: URL;
+  try { url = new URL(raw); }
+  catch { throw new Error(`${name} must be a valid HTTP(S) URL`); }
+  if (!["http:", "https:"].includes(url.protocol)) throw new Error(`${name} must be http or https`);
+  return raw.replace(/\/+$/u, "");
+}
+
+function normalizeModels(value: unknown): CraftModelConfig[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) throw new Error("models must be an array");
+  const seen = new Set<string>();
+  return value.map(function (item, index) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error(`models[${index}] must be an object`);
+    const entry = item as Record<string, unknown>;
+    const id = text(entry.id, `models[${index}].id`, `model-${index}`);
+    if (seen.has(id)) throw new Error(`Duplicate model id: ${id}`);
+    seen.add(id);
+    const protocol = text(entry.protocol, `models[${index}].protocol`, "openai-compatible");
+    if (protocol !== "openai-compatible" && protocol !== "anthropic") throw new Error(`models[${index}].protocol must be openai-compatible or anthropic`);
+    const supportsTools = entry.supportsTools === undefined ? true : Boolean(entry.supportsTools);
+    return {
+      id,
+      name: text(entry.name, `models[${index}].name`, id),
+      protocol: protocol as ModelProtocol,
+      baseUrl: httpUrl(entry.baseUrl, `models[${index}].baseUrl`, "https://api.openai.com/v1"),
+      model: text(entry.model, `models[${index}].model`, "gpt-4o-mini"),
+      apiKeyEnv: text(entry.apiKeyEnv, `models[${index}].apiKeyEnv`, "CRAFT_API_KEY"),
+      supportsTools,
+    };
+  });
+}
+
 export function defaultSettings(paths = craftPaths()): CraftSettings {
-  return { schemaVersion: 1, locale: "zh-CN", theme: "system", dataRoot: paths.root,
+  // Dark is the shipped default for the Studio shell; users can switch to the
+  // all-white light theme from the title bar or Settings → 界面与运行时.
+  return { schemaVersion: 1, locale: "zh-CN", theme: "dark", dataRoot: paths.root,
     workbench: { port: 4173, openOnStart: true }, runtime: { defaultTier: "medium", maxSteps: 32, maxTokens: 12000 },
-    privacy: { telemetry: false }, updatedAt: new Date(0).toISOString() };
+    models: [], privacy: { telemetry: false }, updatedAt: new Date(0).toISOString() };
 }
 
 export function normalizeSettings(value: unknown, paths = craftPaths()): CraftSettings {
@@ -64,6 +115,7 @@ export function normalizeSettings(value: unknown, paths = craftPaths()): CraftSe
   return { schemaVersion: 1, locale: locale as CraftSettings["locale"], theme: theme as CraftSettings["theme"], dataRoot,
     workbench: { port: number(workbench.port, "workbench.port", 4173, 0, 65535), openOnStart: boolean(workbench.openOnStart, "workbench.openOnStart", true) },
     runtime: { defaultTier: defaultTier as CraftSettings["runtime"]["defaultTier"], maxSteps: number(runtime.maxSteps, "runtime.maxSteps", 32, 1, 10000), maxTokens: number(runtime.maxTokens, "runtime.maxTokens", 12000, 1, 100000000) },
+    models: normalizeModels(input.models),
     privacy: { telemetry: boolean(privacy.telemetry, "privacy.telemetry", false) }, updatedAt };
 }
 
@@ -80,6 +132,7 @@ export async function saveSettings(patch: CraftSettingsPatch, paths = craftPaths
   const current = await loadSettings(paths);
   const next = normalizeSettings({ ...current, ...patch,
     workbench: { ...current.workbench, ...(patch.workbench ?? {}) }, runtime: { ...current.runtime, ...(patch.runtime ?? {}) },
+    models: patch.models !== undefined ? patch.models : current.models,
     privacy: { ...current.privacy, ...(patch.privacy ?? {}) }, updatedAt: now.toISOString() }, paths);
   await atomicPrivateJson(paths.settingsFile, next); return next;
 }
@@ -102,6 +155,7 @@ export function loadSettingsSync(paths = craftPaths()): CraftSettings {
 export function saveSettingsSync(patch: CraftSettingsPatch, paths = craftPaths(), now = new Date()): CraftSettings {
   const current = loadSettingsSync(paths); const next = normalizeSettings({ ...current, ...patch,
     workbench: { ...current.workbench, ...(patch.workbench ?? {}) }, runtime: { ...current.runtime, ...(patch.runtime ?? {}) },
+    models: patch.models !== undefined ? patch.models : current.models,
     privacy: { ...current.privacy, ...(patch.privacy ?? {}) }, updatedAt: now.toISOString() }, paths); syncWrite(paths.settingsFile, next); return next;
 }
 

@@ -377,7 +377,9 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
       else if (args[0] === "settings" && args[1] === "update") result = service.settingsUpdate(JSON.parse(option(args, "--json") ?? "{}") as JsonObject);
       else if (args[0] === "serve" || args[0] === "gui") {
         const supervisor = new LocalSupervisor(service, paths); const supervisorRun = await supervisor.startOrReuse(0); const server = new LocalWorkbenchServer(service);
-        try { const started = await server.start(option(args, "--port") === undefined ? 4173 : Number(option(args, "--port"))); stdout.write(`Craft Workbench: ${started.url}\n`); if (args[0] === "gui") openBrowser(started.url); await new Promise<void>((resolve) => { const stop = () => resolve(); process.once("SIGINT", stop); process.once("SIGTERM", stop); }); }
+        try { const started = await server.start(option(args, "--port") === undefined ? 4173 : Number(option(args, "--port"))); const studioUrl = started.url.replace("/#token=", "/studio#token=");
+          stdout.write(`Craft Workbench: ${started.url}\nCraft Studio: ${studioUrl}\n`);
+          if (args[0] === "gui") openBrowser(studioUrl); await new Promise<void>((resolve) => { const stop = () => resolve(); process.once("SIGINT", stop); process.once("SIGTERM", stop); }); }
         finally { await server.close(); if (supervisorRun.owned) await supervisor.close(); } return;
       }
       else if (args[0] === "inbox" && args[1] === "refresh") result = service.attentionRefresh({ limit: option(args, "--limit") });

@@ -11,7 +11,8 @@ import { addCosts, dispatchNodes, normalizeNodes, orchestrationOutcome, planStat
 import { aggregateEvaluation, compareEvaluationAggregates, type EvaluationAggregate } from "../evaluation.ts";
 import { publishSkill, rollbackSkillPublication } from "../skill-publisher.ts";
 import { loadConfig } from "../config.ts";
-import { loadSettingsSync, publicSettings, resetSettingsSync, saveSettingsSync, type CraftSettingsPatch } from "../settings.ts";
+import { loadSettingsSync, publicSettings, resetSettingsSync, saveSettingsSync, type CraftSettingsPatch, type CraftModelConfig, type ModelProtocol } from "../settings.ts";
+import { publicModel } from "../model-gateway.ts";
 import { hostProfilesFromConfig, resolveHostProfile } from "../host-registry.ts";
 import { actionDigest, beginLoop, budgetBand, defineLoopLimits } from "../agent-loop.ts";
 import { assetRef, defineAsset, routeAssets } from "../assets.ts";
@@ -201,6 +202,19 @@ function binomial(n: number, k: number): number {
   let value = 1;
   for (let index = 1; index <= k; index += 1) value = value * (n - k + index) / index;
   return value;
+}
+
+function validateModelInput(args: JsonObject, id: string): CraftModelConfig {
+  const name = text(args.name, "name");
+  const protocol = (args.protocol === "anthropic" || args.protocol === "openai-compatible"
+    ? args.protocol : "openai-compatible") as ModelProtocol;
+  const baseUrl = text(args.baseUrl, "baseUrl").replace(/\/+$/, "");
+  const model = text(args.model, "model");
+  const apiKeyEnv = text(args.apiKeyEnv, "apiKeyEnv");
+  const supportsTools = args.supportsTools === true;
+  if (!/^https?:\/\//.test(baseUrl)) throw new Error("baseUrl must start with http:// or https://");
+  if (!/^[A-Z_][A-Z0-9_]*$/i.test(apiKeyEnv)) throw new Error("apiKeyEnv must be a valid environment variable name");
+  return { id, name, protocol, baseUrl, model, apiKeyEnv, supportsTools };
 }
 
 export class CraftService extends ServiceFoundation {
@@ -2677,6 +2691,44 @@ export class CraftService extends ServiceFoundation {
 
   settingsReset(): JsonObject {
     return publicSettings(resetSettingsSync(this.store.paths), this.store.paths) as JsonObject;
+  }
+
+  // —— model management ——
+
+  modelList(): JsonObject {
+    const settings = loadSettingsSync(this.store.paths);
+    return { models: settings.models.map((model) => publicModel(model)) };
+  }
+
+  modelAdd(args: JsonObject): JsonObject {
+    const settings = loadSettingsSync(this.store.paths);
+    const id = text(args.id, "id").trim().toLowerCase().replace(/[^a-z0-9-]/g, "-");
+    if (!id) throw new Error("model id is required");
+    if (settings.models.some((m) => m.id === id)) throw new Error(`model already exists: ${id}`);
+    const model = validateModelInput(args, id);
+    const next = saveSettingsSync({ models: [...settings.models, model] }, this.store.paths);
+    return { model: publicModel(next.models.find((m) => m.id === id)!) };
+  }
+
+  modelUpdate(args: JsonObject): JsonObject {
+    const settings = loadSettingsSync(this.store.paths);
+    const id = text(args.id, "id");
+    const idx = settings.models.findIndex((m) => m.id === id);
+    if (idx < 0) throw new Error(`model not found: ${id}`);
+    const updated = validateModelInput(args, id);
+    const models = settings.models.slice();
+    models[idx] = updated;
+    const next = saveSettingsSync({ models }, this.store.paths);
+    return { model: publicModel(next.models.find((m) => m.id === id)!) };
+  }
+
+  modelDelete(args: JsonObject): JsonObject {
+    const settings = loadSettingsSync(this.store.paths);
+    const id = text(args.id, "id");
+    if (!settings.models.some((m) => m.id === id)) throw new Error(`model not found: ${id}`);
+    const models = settings.models.filter((m) => m.id !== id);
+    saveSettingsSync({ models }, this.store.paths);
+    return { ok: true };
   }
 
   /**

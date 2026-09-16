@@ -18,6 +18,9 @@ const manifest = JSON.parse(await readFile(join(root, "package.json"), "utf8")) 
 await mkdir(dist, { recursive: true });
 const stage = join(dist, `craft-workbench-windows-v${manifest.version}`); await rm(stage, { recursive: true, force: true }); await mkdir(join(stage, "app", "dist"), { recursive: true });
 await cp(join(dist, "src"), join(stage, "app", "dist", "src"), { recursive: true }); await cp(join(root, "package.json"), join(stage, "app", "package.json"));
+// locateStudio() walks up from app/dist/src looking for a sibling studio/ folder,
+// so the Studio app has to ship inside the bundle or /studio answers 404.
+await cp(join(root, "studio"), join(stage, "app", "dist", "studio"), { recursive: true });
 const yaml = await realpath(join(root, "node_modules", "yaml")); await cp(yaml, join(stage, "app", "node_modules", "yaml"), { recursive: true });
 if (process.platform === "win32") {
   const compiler = ["C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe", "C:\\Windows\\Microsoft.NET\\Framework\\v4.0.30319\\csc.exe"].find((candidate) => existsSync(candidate));
@@ -27,12 +30,13 @@ if (process.platform === "win32") {
 }
 await writeFile(join(stage, "craft-workbench.cmd"), "@echo off\nsetlocal\n\"%~dp0node.exe\" \"%~dp0app\\dist\\src\\cli.js\" gui %*\n", "utf8");
 await writeFile(join(stage, "craft-workbench.ps1"), "& (Join-Path $PSScriptRoot 'node.exe') (Join-Path $PSScriptRoot 'app/dist/src/cli.js') gui $args\n", "utf8");
-await writeFile(join(stage, "README.txt"), `Craft Workbench v${manifest.version}\n\nDouble-click craft.exe. It opens the local Workbench in a standalone native app window without a command window.\nThe window uses Microsoft Edge or Google Chrome's app mode; install one of them if this computer has neither.\nAdvanced users may run craft-workbench.cmd or craft-workbench.ps1 from a terminal.\nSettings live in %USERPROFILE%\\.craft_data\\settings.json and may relocate dataRoot.\nThis bundle includes the Node runtime and is intended for Windows x64.\n`, "utf8");
+await writeFile(join(stage, "README.txt"), `Craft Studio v${manifest.version}\n\nDouble-click craft.exe. It opens Craft Studio in a standalone native app window without a command window.\nThe window uses Microsoft Edge or Google Chrome's app mode; install one of them if this computer has neither.\nPass --port <n> to craft.exe when the default port 4173 is already taken.\nAdvanced users may run craft-workbench.cmd or craft-workbench.ps1 from a terminal.\nSettings live in %USERPROFILE%\\.craft_data\\settings.json and may relocate dataRoot.\nThis bundle includes the Node runtime and is intended for Windows x64.\n`, "utf8");
 if (process.platform === "win32" && existsSync(process.execPath)) await cp(process.execPath, join(stage, "node.exe"));
 const windowsEntries = await entriesFrom(stage, `craft-workbench-windows-v${manifest.version}`); await writeFile(join(dist, `craft-workbench-windows-v${manifest.version}.zip`), archive(windowsEntries));
 
 const macStage = join(dist, `craft-workbench-macos-v${manifest.version}.app`); await rm(macStage, { recursive: true, force: true }); await mkdir(join(macStage, "Contents", "MacOS"), { recursive: true }); await mkdir(join(macStage, "Contents", "Resources", "app", "dist"), { recursive: true });
 await cp(join(dist, "src"), join(macStage, "Contents", "Resources", "app", "dist", "src"), { recursive: true }); await cp(join(root, "package.json"), join(macStage, "Contents", "Resources", "app", "package.json"));
+await cp(join(root, "studio"), join(macStage, "Contents", "Resources", "app", "dist", "studio"), { recursive: true });
 if (process.platform === "darwin" && existsSync(process.execPath)) await cp(process.execPath, join(macStage, "Contents", "Resources", "node"));
 await cp(join(root, "assets", "craft.icns"), join(macStage, "Contents", "Resources", "craft.icns"));
 await writeFile(join(macStage, "Contents", "MacOS", "craft-workbench"), "#!/bin/sh\nROOT=\"$(CDPATH= cd -- \"$(dirname -- \"$0\")/../Resources\" && pwd)\"\nexec \"${CRAFT_NODE:-$ROOT/node}\" \"$ROOT/app/dist/src/cli.js\" gui \"$@\"\n", "utf8");

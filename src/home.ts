@@ -39,7 +39,7 @@ export class HomeKernel {
         acceptance_status: item.acceptance_plan_id ? this.store.find("acceptance_assessment", `assessment_${item.acceptance_plan_id}`)?.status ?? "pending" : "not_configured", delivery_status: loop?.delivery_status ?? "not_materialized", delivery_action: loop?.action ?? "refresh_delivery_loop" }; }),
       task_controls: this.store.list("task_control_contract", limit).map((item) => { const state = this.store.find("task_control_state", `task_control_state_${item.id}`); return { ...pick(item, ["id", "task_id", "workspace", "allowed_effects", "acceptance_required", "launch_id", "updated_at"]), status: state?.status ?? "not_refreshed", action: state?.action ?? "refresh_task_control", actor: state?.actor ?? "host" }; }),
       task_runs: this.store.list("task_run", limit).map((item) => { const state = this.store.find("task_run_state", `task_run_state_${item.id}`); return { ...pick(item, ["id", "contract_id", "launch_id", "lifecycle", "updated_at"]), status: state?.status ?? "not_refreshed", action: state?.action ?? "refresh_task_run", actor: state?.actor ?? "host" }; }),
-      tasks: tasks.slice(0, limit).map((item) => pick(item, ["id", "title", "goal", "status", "updated_at"])),
+      tasks: tasks.slice(0, limit).map((item) => pick(item, ["id", "title", "goal", "project_id", "status", "updated_at"])),
       workspaces: workspaces.slice(0, limit).map((item) => ({ ...pick(item, ["id", "name", "root", "state_revision", "updated_at"]),
         object_count: this.store.list("work_object", 10_000, (object) => object.workspace_id === item.id).length })),
       runs: activeRuns.slice(0, limit).map((item) => pick(item, ["id", "run_kind", "task_id", "status", "current_stage", "updated_at"])),

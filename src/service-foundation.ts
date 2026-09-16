@@ -38,7 +38,8 @@ import { HostRunKernel } from "./host-run.ts";
 import { type HostProfile, mergeHostProfiles } from "./host-registry.ts";
 import { DEFAULT_INTERNAL_TOOLS, InternalHostDriver } from "./internal-host-driver.ts";
 import { MetricsKernel } from "./metrics.ts";
-import { PROVIDER_CATALOG, type ModelProviderSpec, type ModelTransport } from "./model-gateway.ts";
+import { PROVIDER_CATALOG, specsFromModels, type ModelProviderSpec, type ModelTransport } from "./model-gateway.ts";
+import { loadSettingsSync } from "./settings.ts";
 import type { HostDriver } from "./host-driver.ts";
 import { KnowledgeBoundLaunchKernel } from "./knowledge-bound-launch.ts";
 import { KnowledgeWorkbenchKernel } from "./knowledge-workbench.ts";
@@ -297,7 +298,12 @@ export abstract class ServiceFoundation {
     this.home = new HomeKernel(store, this.attention); this.codexHost = new CodexHostKernel(store);
     this.claudeHost = new ClaudeHostKernel(store);
     this.hostProfiles = mergeHostProfiles([...(hostProfiles ?? [])]);
-    this.modelProviders = modelProviders && modelProviders.length ? modelProviders : PROVIDER_CATALOG;
+    const configuredModels = specsFromModels(loadSettingsSync(store.paths).models);
+    // The catalog is a safe, keyless discovery fallback. A saved configuration
+    // takes precedence after restart, while a first-run Studio can still load
+    // far enough to guide the user through adding one.
+    this.modelProviders = modelProviders && modelProviders.length ? modelProviders
+      : configuredModels.length ? configuredModels : PROVIDER_CATALOG;
     this.internalHost = new InternalHostDriver(store, { providers: this.modelProviders, transport: modelTransport,
       tools: DEFAULT_INTERNAL_TOOLS,
       invokeAction: (action, args) => this.invokeInternalAction(action, args) });
@@ -398,7 +404,7 @@ export abstract class ServiceFoundation {
     this.verifiedAutonomousWork = new VerifiedAutonomousWorkKernel(store);
     this.sandboxConformance = new SandboxConformanceKernel(store);
     this.traceExplorer = new TraceExplorerKernel(store);
-    this.actionGateway = new ActionGatewayKernel(store);
+    this.actionGateway = new ActionGatewayKernel(store, store.paths.root);
     this.acceptanceGates = new AcceptanceGateKernel(store);
     this.durableWorker = new DurableWorkerKernel(store);
     this.providerRouter = new ProviderRouterKernel(store);

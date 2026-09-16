@@ -50,6 +50,7 @@
     "bin",
     "src",
     "dist",
+    "studio",
     "skills",
     "adapters",
     "plugins",

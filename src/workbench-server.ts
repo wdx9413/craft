@@ -1,11 +1,31 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { type AddressInfo } from "node:net";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { CraftService, VERSION } from "./service.ts";
 import { runBuiltinAcceptanceTicks } from "./acceptance-worker.ts";
+import { McpServer } from "./mcp.ts";
 import { type JsonObject } from "./store.ts";
 
 const MAX_BODY = 64 * 1024;
+/**
+ * Declaring `script-src` / `style-src` overrides `default-src` for those
+ * directives, so `'self'` has to be listed explicitly: the legacy Workbench
+ * page inlines everything, while Craft Studio loads `/studio/app.css` and
+ * `/studio/app.js` as same-origin files.
+ *
+ * `img-src` is spelled out for the same reason: without it the directive falls
+ * back to `default-src 'self'`, which refuses the `data:` SVG chevrons Studio
+ * draws inside form controls. Images cannot execute, so allowing `data:` here
+ * costs no script or style protection.
+ */
+const SECURITY_HEADERS: Readonly<Record<string, string>> = {
+  "cache-control": "no-store",
+  "content-security-policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'",
+  "x-content-type-options": "nosniff",
+};
 const HTML = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Craft Workbench</title><style>
 :root{font-family:Inter,system-ui,sans-serif;color:#17201b;background:#f3f1ea}*{box-sizing:border-box}body{margin:0}header{padding:28px 5vw 18px;display:flex;justify-content:space-between;align-items:end}h1{margin:0;font-size:34px}small{color:#647067}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;padding:0 5vw 5vw}.card{background:#fff;border:1px solid #ddd9cd;border-radius:16px;padding:18px;box-shadow:0 8px 30px #26352b0d}.wide{grid-column:1/-1}.metrics{display:flex;gap:24px;flex-wrap:wrap}.metric b{display:block;font-size:26px}.item{padding:10px 0;border-top:1px solid #eee9df}.pill{display:inline-block;padding:3px 8px;border-radius:99px;background:#e2eee6;margin-right:7px}button{border:0;border-radius:9px;padding:8px 12px;background:#1d6b4b;color:#fff;cursor:pointer}button.danger{background:#a43d35;float:right}input,select,textarea{width:100%;margin:4px 0;padding:8px;border:1px solid #ccc;border-radius:8px}textarea{min-height:72px}.empty{color:#788078}pre{white-space:pre-wrap;max-height:240px;overflow:auto}</style></head><body>
 <header><div><small>Agent-Native Workspace</small><h1>Craft Workbench</h1></div><button id="refresh">刷新状态</button></header><main class="grid"><section class="card wide"><h2>概览</h2><div id="summary" class="metrics"></div></section><section class="card"><h2>需要处理</h2><div id="attention"></div></section><section class="card"><h2>引导工作</h2><p>先固定目标和资料，再回答必要决策；只有准备完成才可启动。</p><input id="guidedTitle" placeholder="工作名称"><input id="guidedGoal" placeholder="目标"><textarea id="guidedMaterials" placeholder="资料引用，每行一条"></textarea><textarea id="guidedDecisions" placeholder="需要决定的问题，每行一条"></textarea><button id="guidedCreate">保存工作概要</button><div id="guidedWork"></div></section><section class="card"><h2>开始工作</h2><input id="title" placeholder="任务名称"><input id="goal" placeholder="希望完成什么"><input id="workspace" placeholder="工作目录绝对路径"><textarea id="workspaceScope" placeholder="观察范围（相对路径，每行一条；默认 .）"></textarea><select id="host"><option value="codex-cli">Codex CLI</option><option value="claude-code">Claude Code</option></select><select id="sandbox"><option value="read-only">只读探索</option><option value="workspace-write">允许修改工作区（启动前确认）</option></select><textarea id="prompt" placeholder="给 Agent 的具体说明"></textarea><select id="knowledgeBundle"><option value="">不使用知识 Bundle</option></select><select id="domainKit"><option value="">自定义验收条件</option></select><div id="domainFields"></div><textarea id="acceptance" placeholder="验收条件，每行一项。file:成果相对路径会自动检查；也支持 program:、model:、human:、business_signal:"></textarea><button id="create">创建并运行</button><div id="tasks"></div></section><section class="card"><h2>任务控制</h2><p>目标、工作区、权限和验收约束被固定；Craft 只显示下一安全动作。</p><div id="taskControls"></div></section><section class="card"><h2>工作尝试</h2><div id="launches"></div></section><section class="card"><h2>工作空间</h2><div id="workspaces"></div></section><section class="card"><h2>运行与预算</h2><div id="runtime"></div></section><section class="card wide"><h2>Host 任务</h2><div id="hostRuns"></div><pre id="hostEvents" class="empty">选择运行查看增量事件</pre></section><section class="card wide"><h2>任务详情与证据</h2><div id="detail" class="empty">选择一个任务查看</div></section><section class="card wide"><h2>知识库</h2><div id="knowledge"></div><pre id="knowledgeDetail" class="empty">选择 Wiki 页面或 Bundle 预览</pre></section><section class="card wide"><h2>最近成果</h2><div id="outputs"></div></section></main><script>
@@ -28,18 +48,61 @@ export type WebResponse = { status: number; contentType: string; body: string };
 function json(status: number, value: JsonObject): WebResponse { return { status, contentType: "application/json; charset=utf-8", body: JSON.stringify(value) }; }
 function authorized(supplied: string | undefined, expected: string): boolean { if (!supplied) return false; const left = Buffer.from(supplied); const right = Buffer.from(expected); return left.length === right.length && timingSafeEqual(left, right); }
 function bodyObject(body: string | undefined): JsonObject { if (!body) return {}; if (Buffer.byteLength(body) > MAX_BODY) throw new Error("Request body exceeds 64 KiB"); const value: unknown = JSON.parse(body); if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Request body must be a JSON object"); return value as JsonObject; }
+function failure(error: unknown): WebResponse { return json(error instanceof SyntaxError ? 400 : error instanceof Error && error.message.includes("64 KiB") ? 413 : 422,
+  { error: error instanceof Error ? error.message : String(error) }); }
+function boundedLimit(value: string | null, fallback: number): number { if (value === null || value === "") return fallback; const parsed = Number(value); if (!Number.isInteger(parsed) || parsed < 1 || parsed > 1_000) throw new Error("limit must be an integer between 1 and 1000"); return parsed; }
+
+/**
+ * The Studio is a Codex-style HTML app that lives beside the packaged runtime
+ * rather than inside the bundle, so it stays editable without a rebuild. Walk
+ * up from this module (src/ in development, dist/src/ after a build) and use
+ * the first directory that actually holds the app.
+ */
+export function locateStudio(start?: string): string | null {
+  let directory = start ?? dirname(fileURLToPath(import.meta.url));
+  for (let depth = 0; depth < 4; depth += 1) {
+    const candidate = join(directory, "studio");
+    if (existsSync(join(candidate, "index.html"))) return candidate;
+    directory = dirname(directory);
+  }
+  return null;
+}
+
+const STUDIO_ASSETS: Readonly<Record<string, { file: string; type: string }>> = {
+  "/studio": { file: "index.html", type: "text/html; charset=utf-8" },
+  "/studio/": { file: "index.html", type: "text/html; charset=utf-8" },
+  "/studio/app.css": { file: "app.css", type: "text/css; charset=utf-8" },
+  "/studio/app.js": { file: "app.js", type: "application/javascript; charset=utf-8" },
+};
+
+/** One bridge per service: the full tool surface is built once, not per request. */
+const STUDIO_BRIDGES = new WeakMap<CraftService, McpServer>();
+export function studioBridge(service: CraftService): McpServer {
+  const existing = STUDIO_BRIDGES.get(service);
+  if (existing) return existing;
+  const created = new McpServer(service, "full");
+  STUDIO_BRIDGES.set(service, created);
+  return created;
+}
 
 export class WorkbenchWebApp {
-  readonly service: CraftService; readonly token: string; readonly origin: string;
-  constructor(service: CraftService, token: string, origin: string) { this.service = service; this.token = token; this.origin = origin; }
+  readonly service: CraftService; readonly token: string; readonly origin: string; readonly studioDir: string | null;
+  constructor(service: CraftService, token: string, origin: string, options: { studioDir?: string | null } = {}) {
+    this.service = service; this.token = token; this.origin = origin;
+    this.studioDir = options.studioDir === undefined ? locateStudio() : options.studioDir;
+  }
   handle(request: WebRequest): WebResponse {
     const url = new URL(request.path, this.origin); const path = url.pathname;
     if (request.method === "GET" && path === "/") return { status: 200, contentType: "text/html; charset=utf-8", body: HTML.replace("</main>", `${CONTROL_CENTER_HTML}</main>`).replace("</body>", `${FABRIC_WORKBENCH_SCRIPT}${CONTROL_CENTER_SCRIPT}<script>async function loadExperience(){const d=await api('/api/workbench-experience');const e=document.getElementById('experience');e.className='';e.textContent='Sessions '+d.sessions.length+' · Launches '+d.launches.length+' · Traces '+d.traces.length+' · Outcomes '+d.outcomes.length+' · Next: '+d.next_action}loadExperience().catch(()=>{});</script></body>`) };
     if (request.method === "GET" && path === "/health") return json(200, { status: "ok", version: VERSION });
+    if (request.method === "GET" && path.startsWith("/studio")) return this.#studioAsset(path);
     if (path.startsWith("/api/") && request.origin !== undefined && request.origin !== this.origin) return json(403, { error: "Cross-origin request rejected" });
     if (path.startsWith("/api/") && !authorized(request.token, this.token)) return json(401, { error: "Workbench token required" });
     try {
-      if (request.method === "GET" && path === "/api/home") return json(200, this.service.homeView({}));
+      if (request.method === "GET" && path === "/api/home") {
+        const homeLimit = Number(url.searchParams.get("limit"));
+        return json(200, this.service.homeView(Number.isInteger(homeLimit) && homeLimit >= 1 && homeLimit <= 50 ? { limit: homeLimit } : {}));
+      }
       if (request.method === "GET" && path === "/api/project-brain") return json(200, this.service.projectBrainGet({ project_id: url.searchParams.get("project_id") ?? "local", limit: url.searchParams.get("limit") ?? undefined }));
       if (request.method === "GET" && path === "/api/workbench-experience") return json(200, this.service.workbenchExperienceQuery({ project_id: url.searchParams.get("project_id") ?? undefined, task_id: url.searchParams.get("task_id") ?? undefined, limit: url.searchParams.get("limit") ?? undefined }));
       if (request.method === "GET" && path === "/api/traces") return json(200, this.service.traceQuery({ task_id: url.searchParams.get("task_id") ?? undefined, event_kind: url.searchParams.get("event_kind") ?? undefined, limit: url.searchParams.get("limit") ?? undefined }));
@@ -95,9 +158,68 @@ export class WorkbenchWebApp {
       if (request.method === "POST" && path.startsWith("/api/task-runs/") && path.endsWith("/handoff")) return json(201, this.service.taskRunHandoff({ ...bodyObject(request.body), task_run_id: decodeURIComponent(path.slice(15, -8)) }));
       if (request.method === "POST" && path === "/api/inbox/refresh") return json(200, this.service.attentionRefresh(bodyObject(request.body)));
       if (request.method === "POST" && path === "/api/inbox/decide") return json(200, this.service.attentionDecide(bodyObject(request.body)));
+      // Craft Studio read/write surfaces. These are thin projections of existing
+      // kernels: the shell never gains authority the CLI does not already have.
+      if (request.method === "GET" && path === "/api/studio/summary") return json(200, this.service.info());
+      if (request.method === "GET" && path === "/api/models") return json(200, this.service.modelProviderList());
+      if (request.method === "GET" && path === "/api/model-profiles") return json(200, this.service.evaluationModelProfileList({ limit: boundedLimit(url.searchParams.get("limit"), 100) }));
+      if (request.method === "POST" && path === "/api/model-profiles") return json(201, this.service.evaluationModelProfileSave(bodyObject(request.body)));
+      if (request.method === "GET" && path.startsWith("/api/models/")) {
+        const tier = url.searchParams.get("tier");
+        return json(200, this.service.modelProviderGet({ provider: decodeURIComponent(path.slice(12)), ...(tier === null || tier === "" ? {} : { tier }) }));
+      }
+      // User-configured model management (CRUD on settings.models)
+      if (request.method === "GET" && path === "/api/config/models") return json(200, this.service.modelList());
+      if (request.method === "POST" && path === "/api/config/models") return json(201, this.service.modelAdd(bodyObject(request.body)));
+      if (request.method === "PATCH" && path.startsWith("/api/config/models/")) return json(200, this.service.modelUpdate({ ...bodyObject(request.body), id: decodeURIComponent(path.slice(20)) }));
+      if (request.method === "DELETE" && path.startsWith("/api/config/models/")) return json(200, this.service.modelDelete({ id: decodeURIComponent(path.slice(20)) }));
+      if (request.method === "GET" && path === "/api/projects") return json(200, { projects: this.service.store.list("project_brain", boundedLimit(url.searchParams.get("limit"), 50)) });
+      if (request.method === "POST" && path === "/api/projects") return json(201, this.service.projectBrainOpen(bodyObject(request.body)));
+      if (request.method === "POST" && path.startsWith("/api/projects/") && path.endsWith("/goals")) return json(201, this.service.projectBrainGoalSave({ ...bodyObject(request.body), project_id: decodeURIComponent(path.slice(14, -6)) }));
+      if (request.method === "POST" && path.startsWith("/api/projects/") && path.endsWith("/decisions")) return json(201, this.service.projectBrainDecisionSave({ ...bodyObject(request.body), project_id: decodeURIComponent(path.slice(14, -10)) }));
+      if (request.method === "POST" && path.startsWith("/api/projects/") && path.endsWith("/materials")) return json(201, this.service.projectBrainMaterialBind({ ...bodyObject(request.body), project_id: decodeURIComponent(path.slice(14, -10)) }));
+      if (request.method === "POST" && path.startsWith("/api/projects/") && path.endsWith("/outcomes")) return json(201, this.service.projectBrainOutcomeRecord({ ...bodyObject(request.body), project_id: decodeURIComponent(path.slice(14, -9)) }));
+      if (request.method === "POST" && path.startsWith("/api/projects/") && path.endsWith("/experiences")) return json(201, this.service.projectBrainExperienceRecord({ ...bodyObject(request.body), project_id: decodeURIComponent(path.slice(14, -12)) }));
+      if (request.method === "GET" && path.startsWith("/api/projects/")) return json(200, this.service.projectBrainGet({ project_id: decodeURIComponent(path.slice(14)), limit: boundedLimit(url.searchParams.get("limit"), 50) }));
+      if (request.method === "GET" && path === "/api/connectors") return json(200, this.service.capabilityConnectorList({ limit: boundedLimit(url.searchParams.get("limit"), 50) }));
+      if (request.method === "POST" && path === "/api/connectors") return json(201, this.service.capabilityConnectorRegister(bodyObject(request.body)));
+      if (request.method === "POST" && path.startsWith("/api/connectors/") && path.endsWith("/discover")) return json(201, this.service.capabilityConnectorDiscover({ ...bodyObject(request.body), connector_id: decodeURIComponent(path.slice(16, -9)) }));
+      if (request.method === "POST" && path.startsWith("/api/connectors/") && path.endsWith("/status")) return json(200, this.service.capabilityConnectorUpdate({ ...bodyObject(request.body), connector_id: decodeURIComponent(path.slice(16, -7)) }));
+      if (request.method === "POST" && path.startsWith("/api/connectors/") && path.endsWith("/revoke")) return json(200, this.service.capabilityConnectorRevoke({ ...bodyObject(request.body), connector_id: decodeURIComponent(path.slice(16, -7)) }));
+      if (request.method === "POST" && path.startsWith("/api/connector-assets/") && path.endsWith("/approve")) return json(200, this.service.capabilityConnectorApprove({ ...bodyObject(request.body), connector_asset_id: decodeURIComponent(path.slice(22, -8)) }));
+      if (request.method === "GET" && path === "/api/sources") return json(200, this.service.sourceList());
       return json(404, { error: "Not found" });
-    } catch (error) { return json(error instanceof SyntaxError ? 400 : error instanceof Error && error.message.includes("64 KiB") ? 413 : 422,
-      { error: error instanceof Error ? error.message : String(error) }); }
+    } catch (error) { return failure(error); }
+  }
+
+  /**
+   * Studio routes that must await a kernel. They stay off `handle` so the
+   * synchronous app contract every existing test relies on is unchanged.
+   */
+  async handleAsync(request: WebRequest): Promise<WebResponse> {
+    const path = new URL(request.path, this.origin).pathname;
+    if (request.method === "POST" && (path === "/api/sources" || path === "/api/studio/call")) {
+      if (request.origin !== undefined && request.origin !== this.origin) return json(403, { error: "Cross-origin request rejected" });
+      if (!authorized(request.token, this.token)) return json(401, { error: "Workbench token required" });
+      try {
+        if (path === "/api/sources") return json(201, await this.service.sourceAdd(bodyObject(request.body)));
+        const body = bodyObject(request.body); const name = String(body.tool ?? "");
+        if (!name.startsWith("craft_")) return json(422, { error: "Studio calls must address a craft_ tool" });
+        const bridge = studioBridge(this.service);
+        const handler = bridge.handlers[name];
+        if (!handler) return json(422, { error: `Unknown craft tool: ${name}` });
+        const args = body.args === undefined ? {} : body.args;
+        if (!args || typeof args !== "object" || Array.isArray(args)) return json(422, { error: "tool args must be an object" });
+        return json(200, await handler(args as JsonObject));
+      } catch (error) { return failure(error); }
+    }
+    return this.handle(request);
+  }
+
+  #studioAsset(path: string): WebResponse {
+    const asset = STUDIO_ASSETS[path];
+    if (!asset || this.studioDir === null) return json(404, { error: "Not found" });
+    return { status: 200, contentType: asset.type, body: readFileSync(join(this.studioDir, asset.file), "utf8") };
   }
 }
 
@@ -111,9 +233,15 @@ export class LocalWorkbenchServer {
       request.on("data", (chunk: Buffer) => { size += chunk.length; if (size <= MAX_BODY) chunks.push(chunk); });
       request.on("end", () => { const activePort = (server.address() as AddressInfo).port;
         const origin = `http://127.0.0.1:${activePort}`; const auth = request.headers.authorization?.startsWith("Bearer ") ? request.headers.authorization.slice(7) : undefined;
-        const result = size > MAX_BODY ? json(413, { error: "Request body exceeds 64 KiB" }) : new WorkbenchWebApp(this.service, this.token, origin).handle({ method: String(request.method),
-          path: new URL(String(request.url), origin).pathname, token: auth, origin: request.headers.origin, body: Buffer.concat(chunks).toString("utf8") });
-        response.writeHead(result.status, { "content-type": result.contentType, "cache-control": "no-store", "content-security-policy": "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'", "x-content-type-options": "nosniff" }); response.end(result.body); }); });
+        // `handleAsync` is total: it only ever resolves or returns a JSON error,
+        // so the reply is written from `then` without a failure channel.
+        // NB: hand over the raw url, not `.pathname`. `handle` reads limits and
+        // ids from `url.searchParams`, so stripping the query here silently
+        // dropped every `?limit=` / `?project_id=` a caller sent.
+        const pending = size > MAX_BODY ? Promise.resolve(json(413, { error: "Request body exceeds 64 KiB" })) : new WorkbenchWebApp(this.service, this.token, origin).handleAsync({ method: String(request.method),
+          path: String(request.url), token: auth, origin: request.headers.origin, body: Buffer.concat(chunks).toString("utf8") });
+        void pending.then((result) => {
+          response.writeHead(result.status, { "content-type": result.contentType, ...SECURITY_HEADERS }); response.end(result.body); }); }); });
     await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(port, "127.0.0.1", () => { server.off("error", reject); resolve(); }); });
     this.#server = server; this.#acceptanceTimer = setInterval(() => { if (this.#acceptanceRunning) return; this.#acceptanceRunning = true; this.acceptanceTick().catch(() => undefined).finally(() => { this.#acceptanceRunning = false; }); }, 500); const activePort = (server.address() as AddressInfo).port;
     return { url: `http://127.0.0.1:${activePort}/#token=${encodeURIComponent(this.token)}`, token: this.token };
