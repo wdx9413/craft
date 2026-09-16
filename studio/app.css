@@ -228,6 +228,10 @@ a:hover, a:focus-visible { text-decoration: underline; text-decoration-style: do
 
 /* Scrollbar skin: 8px, transparent track, one rounded thumb. Raised surfaces
    re-state --scrollbar-thumb on their own container. */
+html {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {

@@ -8750,14 +8750,51 @@ function text2(value, name, fallback) {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must be a non-empty string`);
   return value.trim();
 }
+function httpUrl(value, name, fallback) {
+  if (value === void 0) return fallback;
+  const raw = text2(value, name, fallback);
+  let url2;
+  try {
+    url2 = new URL(raw);
+  } catch {
+    throw new Error(`${name} must be a valid HTTP(S) URL`);
+  }
+  if (!["http:", "https:"].includes(url2.protocol)) throw new Error(`${name} must be http or https`);
+  return raw.replace(/\/+$/u, "");
+}
+function normalizeModels(value) {
+  if (value === void 0 || value === null) return [];
+  if (!Array.isArray(value)) throw new Error("models must be an array");
+  const seen = /* @__PURE__ */ new Set();
+  return value.map(function(item, index) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error(`models[${index}] must be an object`);
+    const entry2 = item;
+    const id14 = text2(entry2.id, `models[${index}].id`, `model-${index}`);
+    if (seen.has(id14)) throw new Error(`Duplicate model id: ${id14}`);
+    seen.add(id14);
+    const protocol = text2(entry2.protocol, `models[${index}].protocol`, "openai-compatible");
+    if (protocol !== "openai-compatible" && protocol !== "anthropic") throw new Error(`models[${index}].protocol must be openai-compatible or anthropic`);
+    const supportsTools = entry2.supportsTools === void 0 ? true : Boolean(entry2.supportsTools);
+    return {
+      id: id14,
+      name: text2(entry2.name, `models[${index}].name`, id14),
+      protocol,
+      baseUrl: httpUrl(entry2.baseUrl, `models[${index}].baseUrl`, "https://api.openai.com/v1"),
+      model: text2(entry2.model, `models[${index}].model`, "gpt-4o-mini"),
+      apiKeyEnv: text2(entry2.apiKeyEnv, `models[${index}].apiKeyEnv`, "CRAFT_API_KEY"),
+      supportsTools
+    };
+  });
+}
 function defaultSettings(paths = craftPaths()) {
   return {
     schemaVersion: 1,
     locale: "zh-CN",
-    theme: "system",
+    theme: "dark",
     dataRoot: paths.root,
     workbench: { port: 4173, openOnStart: true },
     runtime: { defaultTier: "medium", maxSteps: 32, maxTokens: 12e3 },
+    models: [],
     privacy: { telemetry: false },
     updatedAt: (/* @__PURE__ */ new Date(0)).toISOString()
   };
@@ -8783,6 +8820,7 @@ function normalizeSettings(value, paths = craftPaths()) {
     dataRoot: dataRoot2,
     workbench: { port: number(workbench.port, "workbench.port", 4173, 0, 65535), openOnStart: boolean(workbench.openOnStart, "workbench.openOnStart", true) },
     runtime: { defaultTier, maxSteps: number(runtime.maxSteps, "runtime.maxSteps", 32, 1, 1e4), maxTokens: number(runtime.maxTokens, "runtime.maxTokens", 12e3, 1, 1e8) },
+    models: normalizeModels(input.models),
     privacy: { telemetry: boolean(privacy.telemetry, "privacy.telemetry", false) },
     updatedAt
   };
@@ -8813,6 +8851,7 @@ function saveSettingsSync(patch, paths = craftPaths(), now3 = /* @__PURE__ */ ne
     ...patch,
     workbench: { ...current2.workbench, ...patch.workbench ?? {} },
     runtime: { ...current2.runtime, ...patch.runtime ?? {} },
+    models: patch.models !== void 0 ? patch.models : current2.models,
     privacy: { ...current2.privacy, ...patch.privacy ?? {} },
     updatedAt: now3.toISOString()
   }, paths);
@@ -8834,6 +8873,215 @@ function publicSettings(settings, paths = craftPaths()) {
     note: "Credentials remain in environment variables or host stores; settings.json never contains API keys."
   };
 }
+
+// src/model-gateway.ts
+var TIER_ORDER = ["frontier", "standard", "small"];
+var PROVIDER_CATALOG = [
+  { provider: "deepseek", label: "DeepSeek", protocol: "openai-compatible", base_url: "https://api.deepseek.com/v1", api_key_env: "DEEPSEEK_API_KEY", chat_path: "/chat/completions", models: { small: "deepseek-chat", standard: "deepseek-chat", frontier: "deepseek-reasoner" }, cost_hint: 1, supports_tools: true },
+  { provider: "volcengine", label: "\u706B\u5C71\u5F15\u64CE\u65B9\u821F", protocol: "openai-compatible", base_url: "https://ark.cn-beijing.volces.com/api/v3", api_key_env: "ARK_API_KEY", chat_path: "/chat/completions", models: { small: "doubao-lite", standard: "doubao-pro", frontier: "doubao-pro-32k" }, cost_hint: 2, supports_tools: true },
+  { provider: "qwen", label: "\u901A\u4E49\u5343\u95EE", protocol: "openai-compatible", base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1", api_key_env: "DASHSCOPE_API_KEY", chat_path: "/chat/completions", models: { small: "qwen-turbo", standard: "qwen-plus", frontier: "qwen-max" }, cost_hint: 2, supports_tools: true },
+  { provider: "kimi", label: "Kimi (Moonshot)", protocol: "openai-compatible", base_url: "https://api.moonshot.cn/v1", api_key_env: "MOONSHOT_API_KEY", chat_path: "/chat/completions", models: { small: "moonshot-v1-8k", standard: "moonshot-v1-32k", frontier: "moonshot-v1-128k" }, cost_hint: 2, supports_tools: true },
+  { provider: "glm", label: "\u667A\u8C31 GLM", protocol: "openai-compatible", base_url: "https://open.bigmodel.cn/api/paas/v4", api_key_env: "ZHIPU_API_KEY", chat_path: "/chat/completions", models: { small: "glm-4-flash", standard: "glm-4-air", frontier: "glm-4-plus" }, cost_hint: 1, supports_tools: true },
+  { provider: "minimax", label: "MiniMax", protocol: "openai-compatible", base_url: "https://api.minimax.chat/v1", api_key_env: "MINIMAX_API_KEY", chat_path: "/text/chatcompletion_v2", models: { standard: "abab6.5s-chat", frontier: "abab6.5-chat" }, cost_hint: 2, supports_tools: false },
+  { provider: "gpt", label: "OpenAI GPT", protocol: "openai-compatible", base_url: "https://api.openai.com/v1", api_key_env: "OPENAI_API_KEY", chat_path: "/chat/completions", models: { small: "gpt-4o-mini", standard: "gpt-4o", frontier: "gpt-4.1" }, cost_hint: 6, supports_tools: true },
+  { provider: "claude", label: "Anthropic Claude", protocol: "anthropic", base_url: "https://api.anthropic.com/v1", api_key_env: "ANTHROPIC_API_KEY", chat_path: "/messages", models: { small: "claude-haiku-4", standard: "claude-sonnet-4", frontier: "claude-opus-4" }, cost_hint: 7, supports_tools: true }
+];
+function text3(value, name) {
+  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
+  return value.trim();
+}
+function specFromConfig(model) {
+  const chatPath = model.protocol === "anthropic" ? "/messages" : "/chat/completions";
+  return {
+    provider: model.id,
+    label: model.name || model.id,
+    protocol: model.protocol,
+    base_url: model.baseUrl,
+    api_key_env: model.apiKeyEnv,
+    chat_path: chatPath,
+    models: { standard: model.model },
+    cost_hint: 1,
+    supports_tools: model.supportsTools
+  };
+}
+function specsFromModels(models) {
+  return models.map(specFromConfig);
+}
+function publicModel(model, env = process.env) {
+  const value = env[model.apiKeyEnv];
+  const configured = typeof value === "string" && value.length > 0;
+  return {
+    id: model.id,
+    name: model.name,
+    protocol: model.protocol,
+    baseUrl: model.baseUrl,
+    model: model.model,
+    apiKeyEnv: model.apiKeyEnv,
+    configured,
+    supportsTools: model.supportsTools
+  };
+}
+function publicProvider(spec, env = process.env) {
+  const value = env[spec.api_key_env];
+  const configured = typeof value === "string" && value.length > 0;
+  return {
+    provider: spec.provider,
+    label: spec.label,
+    protocol: spec.protocol,
+    base_url: spec.base_url,
+    api_key_env: spec.api_key_env,
+    models: spec.models,
+    cost_hint: spec.cost_hint,
+    supports_tools: spec.supports_tools,
+    configured
+  };
+}
+function credentialStatus(spec, env = process.env) {
+  const value = env[spec.api_key_env];
+  return { provider: spec.provider, configured: typeof value === "string" && value.length > 0, api_key_env: spec.api_key_env };
+}
+function selectModel(spec, tier) {
+  if (!TIER_ORDER.includes(tier)) throw new Error(`Unsupported model tier: ${String(tier)}`);
+  for (let index = TIER_ORDER.indexOf(tier); index < TIER_ORDER.length; index += 1) {
+    const candidate2 = TIER_ORDER[index];
+    const model = spec.models[candidate2];
+    if (model) return { tier: candidate2, model, downgraded: candidate2 !== tier };
+  }
+  throw new Error(`Provider ${spec.provider} declares no usable model tier`);
+}
+function buildChatRequest(spec, options) {
+  const model = text3(options.model, "model");
+  if (!Array.isArray(options.messages) || !options.messages.length) throw new Error("chat request requires at least one message");
+  const messages = options.messages.map((message, index) => {
+    if (!message || typeof message !== "object") throw new Error(`chat message ${index} must be an object`);
+    if (!["system", "user", "assistant", "tool"].includes(message.role)) throw new Error(`chat message ${index} has an unsupported role`);
+    if (message.content !== null && typeof message.content !== "string") throw new Error(`chat message ${index} content must be a string or null`);
+    return { ...message };
+  });
+  const promptChars = messages.reduce((total, message) => total + String(message.content ?? "").length, 0);
+  const promptTokensEstimate = Math.max(1, Math.ceil(promptChars / 4));
+  const headers = { "content-type": "application/json" };
+  let body2;
+  if (spec.protocol === "anthropic") {
+    headers["anthropic-version"] = "2023-06-01";
+    const system = messages.filter((message) => message.role === "system").map((message) => message.content ?? "").join("\n\n");
+    body2 = {
+      model,
+      max_tokens: options.max_tokens ?? 4096,
+      messages: messages.filter((message) => message.role !== "system").map((message) => message.role === "tool" ? { role: "user", content: [{ type: "tool_result", tool_use_id: message.tool_call_id ?? "unknown", content: message.content ?? "" }] } : { ...message, ...message.tool_call_id ? { tool_use_id: message.tool_call_id } : {} }),
+      ...system ? { system } : {},
+      ...options.tools?.length ? { tools: options.tools.map((tool2) => ({ name: tool2.function.name, description: tool2.function.description, input_schema: tool2.function.parameters ?? { type: "object" } })) } : {},
+      ...options.stream ? { stream: true } : {}
+    };
+  } else {
+    headers.authorization = `Bearer $${spec.api_key_env}`;
+    body2 = {
+      model,
+      messages,
+      max_tokens: options.max_tokens ?? 4096,
+      ...options.temperature === void 0 ? {} : { temperature: options.temperature },
+      ...options.tools?.length ? { tools: options.tools } : {},
+      ...options.stream ? { stream: true } : {}
+    };
+  }
+  return { url: `${spec.base_url}${spec.chat_path}`, headers, body: body2, prompt_tokens_estimate: promptTokensEstimate };
+}
+function parseChatResponse(spec, payload72) {
+  if (!payload72 || typeof payload72 !== "object" || Array.isArray(payload72)) throw new Error("Model response must be an object");
+  const body2 = payload72;
+  if (spec.protocol === "anthropic") {
+    const blocks = Array.isArray(body2.content) ? body2.content : [];
+    const text123 = blocks.filter((block) => block.type === "text").map((block) => String(block.text ?? "")).join("");
+    if (!text123) throw new Error("Anthropic response contained no text block");
+    const usage3 = body2.usage;
+    const toolCalls2 = blocks.filter((block) => block.type === "tool_use").map((block, index) => ({ id: String(block.id ?? `tool_${index + 1}`), type: "function", function: { name: String(block.name), arguments: JSON.stringify(block.input ?? {}) } }));
+    return {
+      text: text123,
+      model: body2.model === void 0 ? null : String(body2.model),
+      ...toolCalls2.length ? { tool_calls: toolCalls2 } : {},
+      usage: usage3 ? { input_tokens: Number(usage3.input_tokens ?? 0), output_tokens: Number(usage3.output_tokens ?? 0) } : null
+    };
+  }
+  const choices = Array.isArray(body2.choices) ? body2.choices : [];
+  const message = choices[0]?.message;
+  if (!message || message.content !== null && typeof message.content !== "string") throw new Error("OpenAI-compatible response contained no message content");
+  const usage2 = body2.usage;
+  const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls.map((item, index) => {
+    const fn = item.function;
+    return { id: String(item.id ?? `tool_${index + 1}`), type: "function", function: { name: String(fn.name), arguments: typeof fn.arguments === "string" ? fn.arguments : JSON.stringify(fn.arguments ?? {}) } };
+  }) : [];
+  return {
+    text: message.content === null ? "" : message.content,
+    model: body2.model === void 0 ? null : String(body2.model),
+    ...toolCalls.length ? { tool_calls: toolCalls } : {},
+    usage: usage2 ? { input_tokens: Number(usage2.prompt_tokens ?? 0), output_tokens: Number(usage2.completion_tokens ?? 0) } : null
+  };
+}
+function responseError(status, body2) {
+  const detail = body2.replace(/\s+/gu, " ").trim().slice(0, 300);
+  return new Error(`Model request failed with HTTP ${status}${detail ? `: ${detail}` : ""}`);
+}
+function createFetchTransport(options = {}) {
+  const env = options.env ?? process.env;
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const timeoutMs = options.timeoutMs ?? 6e4;
+  const maxAttempts = options.maxAttempts ?? 3;
+  const maxResponseBytes = options.maxResponseBytes ?? 8 * 1024 * 1024;
+  if (!Number.isInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 3e5) throw new Error("timeoutMs must be between 100 and 300000");
+  if (!Number.isInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 5) throw new Error("maxAttempts must be between 1 and 5");
+  if (!Number.isInteger(maxResponseBytes) || maxResponseBytes < 1024) throw new Error("maxResponseBytes must be at least 1024");
+  return {
+    complete: async (spec, request2) => {
+      const key2 = env[spec.api_key_env]?.trim();
+      if (!key2) throw new Error(`Model ${spec.provider} is not configured; set ${spec.api_key_env} before running Craft.`);
+      const headers = { "content-type": "application/json" };
+      if (spec.protocol === "anthropic") {
+        headers["x-api-key"] = key2;
+        headers["anthropic-version"] = "2023-06-01";
+      } else {
+        headers.authorization = `Bearer ${key2}`;
+      }
+      let lastError;
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        let retryable = true;
+        try {
+          const response = await fetchImpl(request2.url, { method: "POST", headers, body: JSON.stringify(request2.body), signal: controller.signal });
+          const body2 = await response.text();
+          if (body2.length > maxResponseBytes) throw new Error(`Model response exceeded ${maxResponseBytes} bytes`);
+          if (response.ok) {
+            let parsed;
+            try {
+              parsed = JSON.parse(body2);
+            } catch {
+              throw new Error("Model response was not valid JSON");
+            }
+            return parseChatResponse(spec, parsed);
+          }
+          lastError = responseError(response.status, body2);
+          retryable = [408, 429, 500, 502, 503, 504].includes(response.status);
+          if (!retryable || attempt === maxAttempts) throw lastError;
+          const retryAfter = Number(response.headers.get("retry-after") ?? "0");
+          await new Promise((resolve22) => setTimeout(resolve22, Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter * 1e3, 1e4) : attempt * 250));
+        } catch (error) {
+          lastError = error instanceof Error ? error : new Error(String(error));
+          if (!retryable || attempt === maxAttempts) throw lastError;
+          if (lastError.name === "AbortError") lastError = new Error(`Model request timed out after ${timeoutMs}ms`);
+          await new Promise((resolve22) => setTimeout(resolve22, attempt * 250));
+        } finally {
+          clearTimeout(timer);
+        }
+      }
+      throw lastError;
+    }
+  };
+}
+var unconfiguredTransport = {
+  complete: async (spec) => {
+    throw new Error(`No model transport is installed for ${spec.provider}; set ${spec.api_key_env} and enable the internal host before running the loop.`);
+  }
+};
 
 // src/agent-loop.ts
 var import_node_crypto5 = require("node:crypto");
@@ -8946,12 +9194,12 @@ var TRUSTS = ["verified", "candidate", "unverified", "revoked"];
 var HEALTHS = ["healthy", "degraded", "blocked", "unknown"];
 var EFFECTS = ["read_only", "local_write", "external_write", "destructive"];
 var ASSET_ID = /^[a-zA-Z0-9][a-zA-Z0-9._:@/-]{0,127}$/u;
-function text3(value, name) {
+function text4(value, name) {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
   return value.trim();
 }
 function oneOf(value, name, allowed) {
-  const result = text3(value, name);
+  const result = text4(value, name);
   if (!allowed.includes(result)) throw new Error(`Unsupported ${name}: ${result}`);
   return result;
 }
@@ -8961,7 +9209,7 @@ function stringList2(value, name, allowEmpty = true) {
     return [];
   }
   if (!Array.isArray(value)) throw new Error(`${name} must be an array of strings`);
-  const entries2 = value.map((item) => text3(item, name));
+  const entries2 = value.map((item) => text4(item, name));
   if (!allowEmpty && !entries2.length) throw new Error(`${name} must not be empty`);
   if (new Set(entries2).size !== entries2.length) throw new Error(`${name} must not repeat an entry`);
   return entries2;
@@ -8989,7 +9237,7 @@ function assetDigest(envelope) {
 }
 function defineAsset(input) {
   const kind2 = oneOf(input.kind, "kind", KIND_IDS);
-  const id14 = text3(input.id, "id");
+  const id14 = text4(input.id, "id");
   if (!ASSET_ID.test(id14)) throw new Error(`Unsupported asset id: ${id14}`);
   const version = input.version === void 0 ? 1 : Number(input.version);
   if (!Number.isInteger(version) || version < 1) throw new Error("Asset version must be a positive integer");
@@ -9005,12 +9253,12 @@ function defineAsset(input) {
     kind: kind2,
     id: id14,
     version,
-    source: text3(input.source, "source"),
+    source: text4(input.source, "source"),
     trust: oneOf(input.trust ?? "unverified", "trust", TRUSTS),
     health: oneOf(input.health ?? "unknown", "health", HEALTHS),
     effect_scope: oneOf(input.effect_scope ?? "read_only", "effect_scope", EFFECTS),
     cost_profile: { tokens: nonNegative(cost.tokens, "cost_profile.tokens", 0), latency_ms: nonNegative(cost.latency_ms, "cost_profile.latency_ms", 0) },
-    policy: input.policy === void 0 || input.policy === null ? null : text3(input.policy, "policy"),
+    policy: input.policy === void 0 || input.policy === null ? null : text4(input.policy, "policy"),
     tags: stringList2(input.tags, "tags"),
     stability: { core_invariants: coreInvariants, model_sensitive: modelSensitive }
   };
@@ -9165,260 +9413,6 @@ function compareAcrossModels(trials, invariants) {
     reason
   };
 }
-
-// src/model-gateway.ts
-var PROVIDER_CATALOG = [
-  {
-    provider: "deepseek",
-    label: "DeepSeek",
-    protocol: "openai-compatible",
-    base_url: "https://api.deepseek.com/v1",
-    api_key_env: "DEEPSEEK_API_KEY",
-    chat_path: "/chat/completions",
-    models: { small: "deepseek-chat", standard: "deepseek-chat", frontier: "deepseek-reasoner" },
-    cost_hint: 1,
-    supports_tools: true
-  },
-  {
-    provider: "volcengine",
-    label: "\u706B\u5C71\u5F15\u64CE\u65B9\u821F",
-    protocol: "openai-compatible",
-    base_url: "https://ark.cn-beijing.volces.com/api/v3",
-    api_key_env: "ARK_API_KEY",
-    chat_path: "/chat/completions",
-    models: { small: "doubao-lite", standard: "doubao-pro", frontier: "doubao-pro-32k" },
-    cost_hint: 2,
-    supports_tools: true
-  },
-  {
-    provider: "qwen",
-    label: "\u901A\u4E49\u5343\u95EE",
-    protocol: "openai-compatible",
-    base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-    api_key_env: "DASHSCOPE_API_KEY",
-    chat_path: "/chat/completions",
-    models: { small: "qwen-turbo", standard: "qwen-plus", frontier: "qwen-max" },
-    cost_hint: 2,
-    supports_tools: true
-  },
-  {
-    provider: "kimi",
-    label: "Kimi (Moonshot)",
-    protocol: "openai-compatible",
-    base_url: "https://api.moonshot.cn/v1",
-    api_key_env: "MOONSHOT_API_KEY",
-    chat_path: "/chat/completions",
-    models: { small: "moonshot-v1-8k", standard: "moonshot-v1-32k", frontier: "moonshot-v1-128k" },
-    cost_hint: 2,
-    supports_tools: true
-  },
-  {
-    provider: "glm",
-    label: "\u667A\u8C31 GLM",
-    protocol: "openai-compatible",
-    base_url: "https://open.bigmodel.cn/api/paas/v4",
-    api_key_env: "ZHIPU_API_KEY",
-    chat_path: "/chat/completions",
-    models: { small: "glm-4-flash", standard: "glm-4-air", frontier: "glm-4-plus" },
-    cost_hint: 1,
-    supports_tools: true
-  },
-  {
-    provider: "minimax",
-    label: "MiniMax",
-    protocol: "openai-compatible",
-    base_url: "https://api.minimax.chat/v1",
-    api_key_env: "MINIMAX_API_KEY",
-    chat_path: "/text/chatcompletion_v2",
-    models: { standard: "abab6.5s-chat", frontier: "abab6.5-chat" },
-    cost_hint: 2,
-    supports_tools: false
-  },
-  {
-    provider: "gpt",
-    label: "OpenAI GPT",
-    protocol: "openai-compatible",
-    base_url: "https://api.openai.com/v1",
-    api_key_env: "OPENAI_API_KEY",
-    chat_path: "/chat/completions",
-    models: { small: "gpt-4o-mini", standard: "gpt-4o", frontier: "gpt-4.1" },
-    cost_hint: 6,
-    supports_tools: true
-  },
-  {
-    provider: "claude",
-    label: "Anthropic Claude",
-    protocol: "anthropic",
-    base_url: "https://api.anthropic.com/v1",
-    api_key_env: "ANTHROPIC_API_KEY",
-    chat_path: "/messages",
-    models: { small: "claude-haiku-4", standard: "claude-sonnet-4", frontier: "claude-opus-4" },
-    cost_hint: 7,
-    supports_tools: true
-  }
-];
-var TIER_ORDER = ["frontier", "standard", "small"];
-function text4(value, name) {
-  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
-  return value.trim();
-}
-function selectModel(spec, tier) {
-  if (!TIER_ORDER.includes(tier)) throw new Error(`Unsupported model tier: ${String(tier)}`);
-  for (let index = TIER_ORDER.indexOf(tier); index < TIER_ORDER.length; index += 1) {
-    const candidate2 = TIER_ORDER[index];
-    const model = spec.models[candidate2];
-    if (model) return { tier: candidate2, model, downgraded: candidate2 !== tier };
-  }
-  throw new Error(`Provider ${spec.provider} declares no usable model tier`);
-}
-function credentialStatus(spec, env = process.env) {
-  const value = env[spec.api_key_env];
-  return { provider: spec.provider, api_key_env: spec.api_key_env, configured: typeof value === "string" && value.length > 0 };
-}
-function publicProvider(spec, env = process.env) {
-  return {
-    label: spec.label,
-    protocol: spec.protocol,
-    base_url: spec.base_url,
-    models: spec.models,
-    cost_hint: spec.cost_hint,
-    supports_tools: spec.supports_tools,
-    ...credentialStatus(spec, env)
-  };
-}
-function buildChatRequest(spec, options) {
-  const model = text4(options.model, "model");
-  if (!Array.isArray(options.messages) || !options.messages.length) throw new Error("chat request requires at least one message");
-  const messages = options.messages.map((message, index) => {
-    if (!message || typeof message !== "object") throw new Error(`chat message ${index} must be an object`);
-    if (!["system", "user", "assistant", "tool"].includes(message.role)) throw new Error(`chat message ${index} has an unsupported role`);
-    if (message.content !== null && typeof message.content !== "string") throw new Error(`chat message ${index} content must be a string or null`);
-    return { ...message };
-  });
-  const promptChars = messages.reduce((total, message) => total + String(message.content ?? "").length, 0);
-  const promptTokensEstimate = Math.max(1, Math.ceil(promptChars / 4));
-  const headers = { "content-type": "application/json" };
-  let body2;
-  if (spec.protocol === "anthropic") {
-    headers["anthropic-version"] = "2023-06-01";
-    const system = messages.filter((message) => message.role === "system").map((message) => message.content ?? "").join("\n\n");
-    body2 = {
-      model,
-      max_tokens: options.max_tokens ?? 4096,
-      messages: messages.filter((message) => message.role !== "system").map((message) => message.role === "tool" ? { role: "user", content: [{ type: "tool_result", tool_use_id: message.tool_call_id ?? "unknown", content: message.content ?? "" }] } : { ...message, ...message.tool_call_id ? { tool_use_id: message.tool_call_id } : {} }),
-      ...system ? { system } : {},
-      ...options.tools?.length ? { tools: options.tools.map((tool2) => ({ name: tool2.function.name, description: tool2.function.description, input_schema: tool2.function.parameters ?? { type: "object" } })) } : {},
-      ...options.stream ? { stream: true } : {}
-    };
-  } else {
-    headers.authorization = `Bearer $${spec.api_key_env}`;
-    body2 = {
-      model,
-      messages,
-      max_tokens: options.max_tokens ?? 4096,
-      ...options.temperature === void 0 ? {} : { temperature: options.temperature },
-      ...options.tools?.length ? { tools: options.tools } : {},
-      ...options.stream ? { stream: true } : {}
-    };
-  }
-  return { url: `${spec.base_url}${spec.chat_path}`, headers, body: body2, prompt_tokens_estimate: promptTokensEstimate };
-}
-function parseChatResponse(spec, payload72) {
-  if (!payload72 || typeof payload72 !== "object" || Array.isArray(payload72)) throw new Error("Model response must be an object");
-  const body2 = payload72;
-  if (spec.protocol === "anthropic") {
-    const blocks = Array.isArray(body2.content) ? body2.content : [];
-    const text123 = blocks.filter((block) => block.type === "text").map((block) => String(block.text ?? "")).join("");
-    if (!text123) throw new Error("Anthropic response contained no text block");
-    const usage3 = body2.usage;
-    const toolCalls2 = blocks.filter((block) => block.type === "tool_use").map((block, index) => ({ id: String(block.id ?? `tool_${index + 1}`), type: "function", function: { name: String(block.name), arguments: JSON.stringify(block.input ?? {}) } }));
-    return {
-      text: text123,
-      model: body2.model === void 0 ? null : String(body2.model),
-      ...toolCalls2.length ? { tool_calls: toolCalls2 } : {},
-      usage: usage3 ? { input_tokens: Number(usage3.input_tokens ?? 0), output_tokens: Number(usage3.output_tokens ?? 0) } : null
-    };
-  }
-  const choices = Array.isArray(body2.choices) ? body2.choices : [];
-  const message = choices[0]?.message;
-  if (!message || message.content !== null && typeof message.content !== "string") throw new Error("OpenAI-compatible response contained no message content");
-  const usage2 = body2.usage;
-  const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls.map((item, index) => {
-    const fn = item.function;
-    return { id: String(item.id ?? `tool_${index + 1}`), type: "function", function: { name: String(fn.name), arguments: typeof fn.arguments === "string" ? fn.arguments : JSON.stringify(fn.arguments ?? {}) } };
-  }) : [];
-  return {
-    text: message.content === null ? "" : message.content,
-    model: body2.model === void 0 ? null : String(body2.model),
-    ...toolCalls.length ? { tool_calls: toolCalls } : {},
-    usage: usage2 ? { input_tokens: Number(usage2.prompt_tokens ?? 0), output_tokens: Number(usage2.completion_tokens ?? 0) } : null
-  };
-}
-function responseError(status, body2) {
-  const detail = body2.replace(/\s+/gu, " ").trim().slice(0, 300);
-  return new Error(`Model request failed with HTTP ${status}${detail ? `: ${detail}` : ""}`);
-}
-function createFetchTransport(options = {}) {
-  const env = options.env ?? process.env;
-  const fetchImpl = options.fetchImpl ?? fetch;
-  const timeoutMs = options.timeoutMs ?? 6e4;
-  const maxAttempts = options.maxAttempts ?? 3;
-  const maxResponseBytes = options.maxResponseBytes ?? 8 * 1024 * 1024;
-  if (!Number.isInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 3e5) throw new Error("timeoutMs must be between 100 and 300000");
-  if (!Number.isInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 5) throw new Error("maxAttempts must be between 1 and 5");
-  if (!Number.isInteger(maxResponseBytes) || maxResponseBytes < 1024) throw new Error("maxResponseBytes must be at least 1024");
-  return {
-    complete: async (spec, request2) => {
-      const key2 = env[spec.api_key_env]?.trim();
-      if (!key2) throw new Error(`Provider ${spec.provider} is not configured; set ${spec.api_key_env} before running Craft.`);
-      const headers = { "content-type": "application/json" };
-      if (spec.protocol === "anthropic") {
-        headers["x-api-key"] = key2;
-        headers["anthropic-version"] = "2023-06-01";
-      } else {
-        headers.authorization = `Bearer ${key2}`;
-      }
-      let lastError;
-      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), timeoutMs);
-        let retryable = true;
-        try {
-          const response = await fetchImpl(request2.url, { method: "POST", headers, body: JSON.stringify(request2.body), signal: controller.signal });
-          const body2 = await response.text();
-          if (body2.length > maxResponseBytes) throw new Error(`Model response exceeded ${maxResponseBytes} bytes`);
-          if (response.ok) {
-            let parsed;
-            try {
-              parsed = JSON.parse(body2);
-            } catch {
-              throw new Error("Model response was not valid JSON");
-            }
-            return parseChatResponse(spec, parsed);
-          }
-          lastError = responseError(response.status, body2);
-          retryable = [408, 429, 500, 502, 503, 504].includes(response.status);
-          if (!retryable || attempt === maxAttempts) throw lastError;
-          const retryAfter = Number(response.headers.get("retry-after") ?? "0");
-          await new Promise((resolve22) => setTimeout(resolve22, Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter * 1e3, 1e4) : attempt * 250));
-        } catch (error) {
-          lastError = error instanceof Error ? error : new Error(String(error));
-          if (!retryable || attempt === maxAttempts) throw lastError;
-          if (lastError.name === "AbortError") lastError = new Error(`Model request timed out after ${timeoutMs}ms`);
-          await new Promise((resolve22) => setTimeout(resolve22, attempt * 250));
-        } finally {
-          clearTimeout(timer);
-        }
-      }
-      throw lastError;
-    }
-  };
-}
-var unconfiguredTransport = {
-  complete: async (spec) => {
-    throw new Error(`No model transport is installed for provider ${spec.provider}; set ${spec.api_key_env} and enable the internal host before running the loop.`);
-  }
-};
 
 // src/workflow-registry.ts
 var import_node_crypto7 = require("node:crypto");
@@ -15488,7 +15482,7 @@ var HomeKernel = class {
         const state2 = this.store.find("task_run_state", `task_run_state_${item.id}`);
         return { ...pick(item, ["id", "contract_id", "launch_id", "lifecycle", "updated_at"]), status: state2?.status ?? "not_refreshed", action: state2?.action ?? "refresh_task_run", actor: state2?.actor ?? "host" };
       }),
-      tasks: tasks.slice(0, limit3).map((item) => pick(item, ["id", "title", "goal", "status", "updated_at"])),
+      tasks: tasks.slice(0, limit3).map((item) => pick(item, ["id", "title", "goal", "project_id", "status", "updated_at"])),
       workspaces: workspaces.slice(0, limit3).map((item) => ({
         ...pick(item, ["id", "name", "root", "state_revision", "updated_at"]),
         object_count: this.store.list("work_object", 1e4, (object36) => object36.workspace_id === item.id).length
@@ -22958,6 +22952,7 @@ var TraceExplorerKernel = class {
 var import_node_crypto104 = require("node:crypto");
 var import_promises15 = require("node:fs/promises");
 var import_node_path25 = require("node:path");
+var import_node_os2 = require("node:os");
 function text101(value, name) {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
   return value.trim();
@@ -22983,8 +22978,10 @@ function payload56(record) {
 var EFFECTS10 = /* @__PURE__ */ new Set(["read_only", "local_write", "external_write", "destructive"]);
 var ActionGatewayKernel = class {
   store;
-  constructor(store) {
+  dataRoot;
+  constructor(store, dataRoot2) {
     this.store = store;
+    this.dataRoot = dataRoot2 ?? (0, import_node_path25.join)((0, import_node_os2.homedir)(), ".craft_data");
   }
   prepare(args) {
     const actionId = String(args.action_id ?? `action_${(0, import_node_crypto104.randomUUID)().replaceAll("-", "")}`);
@@ -23009,18 +23006,21 @@ var ActionGatewayKernel = class {
     const effect = String(action.effect);
     if (effect !== "read_only" && args.approved !== true) throw new Error("Write actions require explicit approval");
     const workspace = (0, import_node_path25.resolve)(text101(action.workspace, "workspace"));
+    const dataRoot2 = (0, import_node_path25.resolve)(this.dataRoot);
     const operation = String(action.operation);
     const relativePath3 = text101(args.relative_path ?? "", "relative_path");
-    if ((0, import_node_path25.isAbsolute)(relativePath3) || (0, import_node_path25.relative)(workspace, (0, import_node_path25.resolve)(workspace, relativePath3)).startsWith("..")) throw new Error("Action path escapes workspace");
+    const inWorkspace = (0, import_node_path25.isAbsolute)(relativePath3) ? false : !(0, import_node_path25.relative)(workspace, (0, import_node_path25.resolve)(workspace, relativePath3)).startsWith("..");
+    const inDataRoot = (0, import_node_path25.isAbsolute)(relativePath3) && !(0, import_node_path25.relative)(dataRoot2, (0, import_node_path25.resolve)(relativePath3)).startsWith("..");
+    if (!inWorkspace && !inDataRoot) throw new Error("Action path escapes workspace and Craft data root");
+    const target = inWorkspace ? (0, import_node_path25.resolve)(workspace, relativePath3) : (0, import_node_path25.resolve)(relativePath3);
     if (operation === "workspace_read") {
-      const content = await (0, import_promises15.readFile)((0, import_node_path25.resolve)(workspace, relativePath3), "utf8");
+      const content = await (0, import_promises15.readFile)(target, "utf8");
       const result = { operation, path: relativePath3, content, result_digest: digest81(content) };
       return this.finish(action, result);
     }
     if (operation === "workspace_write") {
       if (effect !== "local_write") throw new Error("workspace_write requires local_write effect");
       const content = text101(args.content, "content");
-      const target = (0, import_node_path25.resolve)(workspace, relativePath3);
       await (0, import_promises15.mkdir)((0, import_node_path25.resolve)(target, ".."), { recursive: true });
       await (0, import_promises15.writeFile)(target, content, "utf8");
       return this.finish(action, { operation, path: relativePath3, bytes: Buffer.byteLength(content), result_digest: digest81(content) });
@@ -26587,7 +26587,8 @@ var ServiceFoundation = class {
     this.codexHost = new CodexHostKernel(store);
     this.claudeHost = new ClaudeHostKernel(store);
     this.hostProfiles = mergeHostProfiles([...hostProfiles ?? []]);
-    this.modelProviders = modelProviders && modelProviders.length ? modelProviders : PROVIDER_CATALOG;
+    const configuredModels = specsFromModels(loadSettingsSync(store.paths).models);
+    this.modelProviders = modelProviders && modelProviders.length ? modelProviders : configuredModels.length ? configuredModels : PROVIDER_CATALOG;
     this.internalHost = new InternalHostDriver(store, {
       providers: this.modelProviders,
       transport: modelTransport,
@@ -26690,7 +26691,7 @@ var ServiceFoundation = class {
     this.verifiedAutonomousWork = new VerifiedAutonomousWorkKernel(store);
     this.sandboxConformance = new SandboxConformanceKernel(store);
     this.traceExplorer = new TraceExplorerKernel(store);
-    this.actionGateway = new ActionGatewayKernel(store);
+    this.actionGateway = new ActionGatewayKernel(store, store.paths.root);
     this.acceptanceGates = new AcceptanceGateKernel(store);
     this.durableWorker = new DurableWorkerKernel(store);
     this.providerRouter = new ProviderRouterKernel(store);
@@ -27604,6 +27605,17 @@ function binomial(n, k) {
   let value = 1;
   for (let index = 1; index <= k; index += 1) value = value * (n - k + index) / index;
   return value;
+}
+function validateModelInput(args, id14) {
+  const name = text122(args.name, "name");
+  const protocol = args.protocol === "anthropic" || args.protocol === "openai-compatible" ? args.protocol : "openai-compatible";
+  const baseUrl = text122(args.baseUrl, "baseUrl").replace(/\/+$/, "");
+  const model = text122(args.model, "model");
+  const apiKeyEnv = text122(args.apiKeyEnv, "apiKeyEnv");
+  const supportsTools = args.supportsTools === true;
+  if (!/^https?:\/\//.test(baseUrl)) throw new Error("baseUrl must start with http:// or https://");
+  if (!/^[A-Z_][A-Z0-9_]*$/i.test(apiKeyEnv)) throw new Error("apiKeyEnv must be a valid environment variable name");
+  return { id: id14, name, protocol, baseUrl, model, apiKeyEnv, supportsTools };
 }
 var CraftService = class _CraftService extends ServiceFoundation {
   constructor(store, semanticProvider, isolatedAdapter, dockerSandbox, egressBroker, hostOwnerId, hostProfiles, modelProviders, modelTransport, traceArchiveBackends) {
@@ -32342,6 +32354,39 @@ Evidence: ${item.evidence_ids.join(", ")}
   }
   settingsReset() {
     return publicSettings(resetSettingsSync(this.store.paths), this.store.paths);
+  }
+  // —— model management ——
+  modelList() {
+    const settings = loadSettingsSync(this.store.paths);
+    return { models: settings.models.map((model) => publicModel(model)) };
+  }
+  modelAdd(args) {
+    const settings = loadSettingsSync(this.store.paths);
+    const id14 = text122(args.id, "id").trim().toLowerCase().replace(/[^a-z0-9-]/g, "-");
+    if (!id14) throw new Error("model id is required");
+    if (settings.models.some((m) => m.id === id14)) throw new Error(`model already exists: ${id14}`);
+    const model = validateModelInput(args, id14);
+    const next = saveSettingsSync({ models: [...settings.models, model] }, this.store.paths);
+    return { model: publicModel(next.models.find((m) => m.id === id14)) };
+  }
+  modelUpdate(args) {
+    const settings = loadSettingsSync(this.store.paths);
+    const id14 = text122(args.id, "id");
+    const idx = settings.models.findIndex((m) => m.id === id14);
+    if (idx < 0) throw new Error(`model not found: ${id14}`);
+    const updated = validateModelInput(args, id14);
+    const models = settings.models.slice();
+    models[idx] = updated;
+    const next = saveSettingsSync({ models }, this.store.paths);
+    return { model: publicModel(next.models.find((m) => m.id === id14)) };
+  }
+  modelDelete(args) {
+    const settings = loadSettingsSync(this.store.paths);
+    const id14 = text122(args.id, "id");
+    if (!settings.models.some((m) => m.id === id14)) throw new Error(`model not found: ${id14}`);
+    const models = settings.models.filter((m) => m.id !== id14);
+    saveSettingsSync({ models }, this.store.paths);
+    return { ok: true };
   }
   /**
    * Evaluate the launch gates for one payload.
