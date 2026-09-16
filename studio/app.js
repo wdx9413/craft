@@ -26,7 +26,7 @@
     // A launch that needs approval can only be approved while its work-loop id
     // is still in hand, so it is parked here for the page that renders it.
     pendingApproval: null,
-    asideOpen: {}
+    asideOpen: {}, capabilitySetupOpen: false
   };
 
   // ------------------------------------------------------------------ icons
@@ -1534,13 +1534,24 @@
           }).join('') + '</div>'
         : emptyState('没有挂载本地能力目录', '切到「本地目录」标签即可挂载', 'folder');
 
-      return {
-        html: '<div class="stack">' +
-          '<div class="card">' + head('添加能力来源', esc(spec.hint),
+      var setupCard = state.capabilitySetupOpen
+        ? '<div class="card">' + head('添加能力来源', esc(spec.hint),
+            '<button class="btn" id="source-setup-close" type="button">完成</button>' +
             '<button class="btn primary" id="source-register" type="button">' + (activeSource === 'local' ? icon('folder') + '添加文件夹' : icon('plus') + '添加来源') + '</button>') +
             '<div class="card-body"><div class="stack">' + tabs + form +
             '<div class="callout info">' + icon('shield') + '<span>外部来源需要你点一下确认才生效。Craft 只保存来源信息与摘要，不保存任何密码或密钥，也不会替你安装或启动服务。</span></div>' +
-            '</div></div></div>' +
+            '</div></div></div>'
+        : '<div class="card">' + head('能力来源', '把已确认的本机目录、插件或 MCP 服务接入任务',
+            '<button class="btn primary" id="source-setup-open" type="button">' + icon('plus') + '添加来源</button>') +
+            '<div class="card-body"><div class="source-summary">' +
+              '<div><b>' + esc(connectors.length) + '</b><span>外部来源</span></div>' +
+              '<div><b>' + esc(sources.length) + '</b><span>本机目录</span></div>' +
+              '<div><b>' + esc(assets.length) + '</b><span>已登记能力</span></div>' +
+            '</div><p class="doc-p">来源只在你添加并确认后才会可用；这里不会预置演示数据或自动安装任何东西。</p></div></div>';
+
+      return {
+        html: '<div class="stack">' +
+          setupCard +
           connectorRows +
           '<div class="card">' + head('本机能力文件夹', '扫描结果会进入能力检索，做任务时可以直接用', countChip(sources.length)) +
             '<div class="card-body tight">' + sourceRows + '</div></div>' +
@@ -1560,8 +1571,14 @@
                 }).join('') + '</div>'
               : '<div class="aside-note">没有添加本机能力文件夹。</div>'),
         mounts: [function (root) {
-          root.querySelector('#source-register').onclick = registerSource;
-          root.querySelector('#source-tabs').onclick = function (event) {
+          var setupOpen = root.querySelector('#source-setup-open');
+          if (setupOpen) setupOpen.onclick = function () { state.capabilitySetupOpen = true; paint('capabilities'); };
+          var setupClose = root.querySelector('#source-setup-close');
+          if (setupClose) setupClose.onclick = function () { state.capabilitySetupOpen = false; paint('capabilities'); };
+          var register = root.querySelector('#source-register');
+          if (register) register.onclick = registerSource;
+          var sourceTabs = root.querySelector('#source-tabs');
+          if (sourceTabs) sourceTabs.onclick = function (event) {
             var tab = event.target.closest('[data-source]');
             if (tab) { activeSource = tab.getAttribute('data-source'); paint('capabilities'); }
           };
