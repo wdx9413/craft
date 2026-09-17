@@ -44,6 +44,13 @@ test("Runtime Assurance attests real Host receipts, re-observation, write confor
     const attested = f.service.runtimeAssuranceAttest({ attestation_id: "read-attestation", task_run_id: read.run.id, environment: read.environment, budget: read.budget, workspace_observation_id: observation.id, evidence_ids: [evidence.id] });
     assert.equal((attested.attestation as JsonObject).status, "verified");
     assert.equal(f.service.runtimeAssuranceAttest({ attestation_id: "read-attestation", task_run_id: read.run.id, environment: read.environment, budget: read.budget, workspace_observation_id: observation.id, evidence_ids: [evidence.id] }).idempotent, true);
+    assert.throws(() => f.service.runtimeAssuranceAttest({ task_run_id: read.run.id, environment: read.environment, budget: read.budget, effect: "external_write", workspace_observation_id: observation.id }), /not allowed/);
+    const defaults = recordedRun(f, "defaults", { environment: {}, budget: {} });
+    const defaultsObservation = f.service.workspaceObserverObserve({ workspace_id: f.workspace.id, source: "host" }).observation as JsonObject;
+    assert.equal((f.service.runtimeAssuranceAttest({ attestation_id: "defaults-attestation", task_run_id: defaults.run.id, workspace_observation_id: defaultsObservation.id }).attestation as JsonObject).status, "verified");
+    const interventionAgain = f.service.runtimeAssuranceIntervene({ intervention_id: "pause-idempotent", task_run_id: read.run.id, kind: "pause", actor: "operator", reason: "review" });
+    assert.equal(f.service.runtimeAssuranceIntervene({ intervention_id: "pause-idempotent", task_run_id: read.run.id, kind: "pause", actor: "operator", reason: "review" }).idempotent, true);
+    void interventionAgain;
     f.store.create("task_run_state", "loop-state", {}); f.store.create("state_snapshot", "loop-snapshot", {});
     f.store.create("verified_work_loop", "loop", { task_run_id: read.run.id, latest_task_run_state_id: "loop-state", latest_snapshot_id: "loop-snapshot" });
     f.store.create("verified_work_loop_receipt", "loop-receipt", { work_loop_id: "loop", task_run_state_id: "loop-state", snapshot_id: "loop-snapshot", status: "observed" });
@@ -62,7 +69,7 @@ test("Runtime Assurance attests real Host receipts, re-observation, write confor
     const writeObservation = f.service.workspaceObserverObserve({ workspace_id: f.workspace.id, source: "host" }).observation as JsonObject;
     assert.throws(() => f.service.runtimeAssuranceAttest({ task_run_id: write.run.id, effect: "local_write", environment: write.environment, budget: write.budget, workspace_observation_id: writeObservation.id }), /preflight_id/);
     assert.equal((f.service.runtimeAssuranceAttest({ task_run_id: write.run.id, effect: "local_write", environment: write.environment, budget: write.budget, workspace_observation_id: writeObservation.id, preflight_id: preflight.id }).attestation as JsonObject).status, "verified");
-    const state = f.service.runtimeAssuranceGet({ task_run_id: read.run.id }); assert.equal((state.attestations as JsonObject[]).length, 3); assert.equal((state.interventions as JsonObject[]).length, 1);
+    const state = f.service.runtimeAssuranceGet({ task_run_id: read.run.id }); assert.equal((state.attestations as JsonObject[]).length, 3); assert.equal((state.interventions as JsonObject[]).length, 2);
     assert.equal(VERSION, "0.12.31");
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
