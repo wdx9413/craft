@@ -228,9 +228,9 @@ test("v0.12.4 platform operations export role decisions and the MCP surface", as
     await call("craft_capability_lifecycle_resolve", { name: "Handler" });
     await call("craft_capability_lifecycle_list", {});
     await call("craft_memory_remember_episode", { memory_id: "handler-memory", content: "remember" });
-    await call("craft_memory_consolidate", { semantic_id: "handler-semantic", memory_ids: ["handler-memory"] });
+    await service.memoryConsolidationConsolidate({ memory_ids: ["handler-memory"], semantic_id: "handler-semantic", content: "remember" });
+    await call("craft_memory_resolve", { semantic_id: "handler-semantic", status: "active", resolution: "confirmed" });
     await call("craft_memory_search", { query: "remember" });
-    await call("craft_memory_resolve", { semantic_id: "handler-semantic", status: "active" });
     await call("craft_remote_interop_prepare", { request_id: "handler-remote", endpoint: "https://remote.test", agent: "agent", operation: "read", task_id: "handler-task", input_digest: "sha256:i" });
     await call("craft_remote_interop_dispatch", { request_id: "handler-remote", status: "completed", remote_id: "remote" });
     await call("craft_remote_interop_get", { request_id: "handler-remote" });
@@ -247,4 +247,4 @@ test("v0.12.4 platform operations export role decisions and the MCP surface", as
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("release version is v0.12.24", () => { assert.equal(VERSION, "0.12.30"); });
+test("release version is v0.12.24", () => { assert.equal(VERSION, "0.12.31"); });

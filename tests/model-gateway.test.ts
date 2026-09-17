@@ -6,7 +6,7 @@ import test from "node:test";
 import { beginLoop, budgetBand, completeLoop, defineLoopLimits, failLoop, loopSummary, observeStep } from "../src/agent-loop.ts";
 import { InternalHostDriver, parseAction } from "../src/internal-host-driver.ts";
 import { PROVIDER_CATALOG, buildChatRequest, credentialStatus, createFetchTransport, defineProvider, parseChatResponse,
-  providerFromConfig, publicProvider, selectModel, unconfiguredTransport, type ChatRequest, type ChatResult,
+  providerFromConfig, publicProvider, publicModel, selectModel, specFromConfig, specsFromModels, unconfiguredTransport, type ChatRequest, type ChatResult,
   type ModelProviderSpec, type ModelTransport } from "../src/model-gateway.ts";
 import { craftPaths } from "../src/paths.ts";
 import { CraftStore, type JsonObject } from "../src/store.ts";
@@ -62,6 +62,31 @@ test("defaults fill in the provider label, chat path and tool support", () => {
   assert.equal(declared.chat_path, "/custom");
   assert.equal(declared.supports_tools, false);
   assert.equal(declared.cost_hint, 3);
+});
+
+test("user model configs produce provider specs and secret-free public views", () => {
+  const openai = { id: "user-openai", name: "User OpenAI", protocol: "openai-compatible" as const, baseUrl: "https://example.test/v1", model: "user-model", apiKeyEnv: "USER_MODEL_KEY", supportsTools: true };
+  const anthropic = { ...openai, id: "user-anthropic", protocol: "anthropic" as const, supportsTools: false };
+  assert.equal(specFromConfig(openai).chat_path, "/chat/completions");
+  assert.equal(specFromConfig(anthropic).chat_path, "/messages");
+  assert.deepEqual(specsFromModels([openai, anthropic]).map((item) => item.provider), ["user-openai", "user-anthropic"]);
+  assert.equal((publicModel(openai, {} as NodeJS.ProcessEnv) as JsonObject).configured, false);
+  assert.equal((publicModel(openai, { USER_MODEL_KEY: "configured" }) as JsonObject).configured, true);
+});
+
+test("legacy episodic and semantic memory facade remains auditable and idempotent", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-memory-compat-"));
+  const store = await new CraftStore(craftPaths(root)).open();
+  const service = new (await import("../src/service.ts")).CraftService(store);
+  try {
+    const remembered = service.memoryConsolidationRemember({ memory_id: "episode-1", scope: "task:compat", content: "Observed a stable workflow", source: "test" });
+    assert.equal((remembered.memory as JsonObject).consolidated, false);
+    assert.equal(service.memoryConsolidationRemember({ memory_id: "episode-1", scope: "task:compat", content: "Observed a stable workflow", source: "test" }).idempotent, true);
+    const consolidated = service.memoryConsolidationConsolidate({ memory_ids: ["episode-1"], semantic_id: "semantic-1", scope: "task:compat", content: "Stable workflow" });
+    assert.equal((consolidated.memory as JsonObject).status, "active");
+    assert.equal((service.memoryConsolidationSearch({ query: "stable", scope: "task:compat" }).results as JsonObject[]).length, 1);
+    assert.equal((service.memoryConsolidationResolve({ semantic_id: "semantic-1", status: "superseded", resolution: "replaced" }).memory as JsonObject).status, "superseded");
+  } finally { store.close(); }
 });
 function anchorAnthropicPath(): string {
   return defineProvider({ provider: "demo", protocol: "anthropic", base_url: "https://example.test/v1",
@@ -394,6 +419,7 @@ test("the internal host completes on a final message and records a receipt", asy
     const task = f.store.create("task", `task_${process.pid}`, { title: "t", goal: "g" });
     const driver = new InternalHostDriver(f.store, { providers: [openaiSpec()], transport: transportOf(["all done"]) });
     const prepared = driver.prepare({ task_id: task.id, prompt: "go" }) as JsonObject;
+    f.store.create("internal_session", `session_${String((prepared.dispatch as JsonObject).id)}`, { messages: [{ role: "user", content: "resumed context" }] });
     const executed = await driver.execute({ dispatch_id: (prepared.dispatch as JsonObject).id, prompt: "go" }) as JsonObject;
     const receipt = executed.receipt as JsonObject;
     assert.equal(receipt.status, "completed");

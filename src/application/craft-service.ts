@@ -32,7 +32,7 @@ import { dataSpaceId } from "../data-space.ts";
 import { installAdapterRuntimeMethods } from "./use-cases/adapter-runtime.ts";
 import { installKernelDelegateMethods } from "./use-cases/kernel-delegates.ts";
 
-export const VERSION = "0.12.30";
+export const VERSION = "0.12.31";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const TASK_PERMISSION_MODES = new Set(["human_approval", "assisted_approval", "full_access"]);
@@ -226,6 +226,43 @@ export class CraftService extends ServiceFoundation {
     modelTransport?: import("../model-gateway.ts").ModelTransport, traceArchiveBackends?: readonly TraceArchiveRuntimeBackend[]) {
     super(store, semanticProvider, isolatedAdapter as never, dockerSandbox as never, egressBroker as never, hostOwnerId,
       hostProfiles, modelProviders, modelTransport, traceArchiveBackends);
+  }
+
+  /** Studio facade: all writes go through governed Claim/Ledger/DAG kernels. */
+  studioResourceView(args: JsonObject = {}): JsonObject {
+    if (args.kind !== undefined) return this.studioResourceCatalogView(args);
+    const limit = Number(args.limit ?? 50);
+    return { version: VERSION, resources: {
+      claims: this.store.list("knowledge_claim", limit), wiki: this.store.list("wiki_page", limit),
+      memory_candidates: this.store.list("memory_candidate", limit), memories: this.store.list("memory_ledger", limit),
+      workflows: this.store.list("workflow_dag", limit), task_states: this.store.list("task_state_projection", limit),
+    } };
+  }
+  studioMemorySave(args: JsonObject): JsonObject {
+    const sourceId = String(args.source_id ?? "studio-local-source");
+    if (!this.store.find("knowledge_source", sourceId)) this.knowledgeSourceRegister({ source_id: sourceId, kind: "custom", label: "Studio local memory", scope_kind: "user", scope_id: "local", locator: "studio://memory", content_digest: valueDigest(sourceId), trust: "bounded", access: "proposal_only" });
+    const kind = ["working", "episodic", "preference", "procedural"].includes(String(args.kind)) ? args.kind : "episodic";
+    return this.memoryCandidatePropose({ ...args, kind, source_id: sourceId, scope_kind: args.scope_kind ?? args.scope ?? "user", scope_id: args.scope_id ?? "local" });
+  }
+  studioMemoryReview(args: JsonObject): JsonObject { return this.memoryCandidateReview(args); }
+  studioKnowledgeClaimSave(args: JsonObject): JsonObject {
+    const evidence = args.evidence_ids === undefined ? this.evidenceRecord({ source_type: "human", confidence: "bounded", claim: "Studio-authored candidate.", locator: "studio://knowledge" }) : null;
+    return this.knowledgeClaimSave({ ...args, evidence_ids: args.evidence_ids ?? [evidence?.id], scope: args.scope ?? "global" });
+  }
+  studioWorkflowSave(args: JsonObject): JsonObject {
+    const steps = Array.isArray(args.steps) ? args.steps as JsonObject[] : [];
+    const nodes = Array.isArray(args.nodes) ? args.nodes : steps.map((step, index) => ({ id: String(step.id ?? `step-${index + 1}`), type: String(step.type ?? "action"), side_effect: String(step.side_effect ?? "read_only"), ...(step.action === undefined ? {} : { action: step.action }), depends_on: Array.isArray(step.depends_on) ? step.depends_on : [] }));
+    return this.workflowDagSave({ ...args, nodes: nodes.length ? nodes : [{ id: "studio-placeholder", type: "action", side_effect: "read_only", action: "noop", depends_on: [] }] });
+  }
+  knowledgeExpirySweep(args: JsonObject = {}): JsonObject {
+    const now = new Date(args.now === undefined ? Date.now() : text(args.now, "now")); if (Number.isNaN(now.valueOf())) throw new Error("now must be an ISO timestamp"); const expired: JsonObject[] = [];
+    for (const claim of this.store.list("knowledge_claim", 10_000, (x) => x.status === "reviewed" && Boolean(x.valid_until) && Date.parse(String(x.valid_until)) < now.valueOf())) expired.push(this.store.save("knowledge_claim", String(claim.id), { ...recordPayload(claim), status: "expired", expiry_reason_digest: valueDigest("valid_until elapsed") }));
+    return { expired, count: expired.length, now: now.toISOString() };
+  }
+  knowledgeConflictResolve(args: JsonObject): JsonObject {
+    const claim = this.store.get("knowledge_claim", text(args.claim_id, "claim_id")); const decision = text(args.decision, "decision"); if (!new Set(["reviewed", "disputed", "superseded"]).has(decision)) throw new Error("knowledge conflict decision is unsupported");
+    if (decision === "reviewed") { const ids = Array.isArray(claim.evidence_ids) ? claim.evidence_ids as unknown[] : []; if (!ids.some((e) => ["bounded", "confirmed"].includes(String(this.store.get("evidence", String(e)).confidence)))) throw new Error("Conflict resolution requires bounded or confirmed Evidence"); }
+    return this.knowledgeClaimReview({ claim_id: claim.id, status: decision, reviewer: args.reviewer, reason: args.reason });
   }
 
   /**
@@ -1921,15 +1958,16 @@ export class CraftService extends ServiceFoundation {
   homeTask(args: JsonObject): JsonObject { return this.home.task(args); }
   homeHostRuns(args: JsonObject): JsonObject { return this.home.hostRuns(args); }
   homeHostRun(args: JsonObject): JsonObject { return this.home.hostRun(args); }
-  /** Bounded, local-only catalog views for the Studio's separate resource pages. */
-  studioResourceView(args: JsonObject): JsonObject {
+  /** Bounded, local-only compatibility catalog for older Studio resource pages. */
+  studioResourceCatalogView(args: JsonObject): JsonObject {
     const kind = text(args.kind, "kind");
     const limit = finiteInteger(args.limit, "limit", 100, 1, 200);
     const taskId = args.task_id === undefined ? null : text(args.task_id, "task_id");
     if (kind === "memory") {
       const items = this.store.list("memory_item", limit, (item) =>
         (!taskId || item.task_id === taskId) && item.status !== "superseded" && item.status !== "expired");
-      return { items: items.map((item) => ({ id: item.id, kind: item.kind, content: item.content, source: item.source,
+      const candidates = this.store.list("memory_candidate", limit, (item) => !taskId || item.task_id === taskId);
+      return { items: [...items, ...candidates].slice(0, limit).map((item) => ({ id: item.id, kind: item.kind, content: item.content, source: item.source,
         scope: item.scope, task_id: item.task_id, status: item.status, valid_until: item.valid_until, updated_at: item.updated_at })) };
     }
     if (kind === "workflows") {
@@ -1973,7 +2011,7 @@ export class CraftService extends ServiceFoundation {
     const payload = { name, description, content, content_digest: valueDigest(content), source: "user_upload", status: "active", edited_by: "studio-user" };
     return { skill: previous ? this.store.save("studio_skill", skillId, { ...payload, previous_version: previous.version }) : this.store.create("studio_skill", skillId, payload) };
   }
-  studioMemorySave(args: JsonObject): JsonObject {
+  studioMemoryCompatSave(args: JsonObject): JsonObject {
     const memoryId = args.memory_id === undefined ? undefined : text(args.memory_id, "memory_id");
     const previous = memoryId === undefined ? null : this.store.get("memory_item", memoryId);
     return this.memoryRemember({ kind: args.kind ?? previous?.kind ?? "fact", scope: args.scope ?? previous?.scope ?? "user",
@@ -1982,12 +2020,12 @@ export class CraftService extends ServiceFoundation {
       evidence_ids: [], ...(previous ? { supersedes_id: previous.id } : {}) });
   }
   studioMemoryRetire(args: JsonObject): JsonObject { return this.memoryTransition({ memory_id: text(args.memory_id, "memory_id"), status: "expired", reason: "retired by studio user" }); }
-  studioKnowledgeClaimSave(args: JsonObject): JsonObject {
+  studioKnowledgeCompatSave(args: JsonObject): JsonObject {
     const content = assertNoSecret(document(args.content, "content"), "content");
     const evidence = this.evidenceRecord({ source_type: "human", confidence: "bounded", claim: "User-authored knowledge record.", locator: "studio:knowledge" });
     return this.knowledgeClaimSave({ kind: args.kind ?? "fact", content, scope: args.scope ?? "global", tags: args.tags ?? [], evidence_ids: [evidence.id] });
   }
-  studioWorkflowSave(args: JsonObject): JsonObject { return this.workflowSave({ workflow_id: args.workflow_id, name: text(args.name, "name"), description: args.description ?? "", inputs: args.inputs ?? [], steps: args.steps ?? [] }); }
+  studioWorkflowCompatSave(args: JsonObject): JsonObject { return this.workflowSave({ workflow_id: args.workflow_id, name: text(args.name, "name"), description: args.description ?? "", inputs: args.inputs ?? [], steps: args.steps ?? [] }); }
   codexDispatchPrepare(args: JsonObject): JsonObject { return this.codexHost.prepare(args); }
   async codexDispatchExecute(args: JsonObject): Promise<JsonObject> {
     const dispatch = this.store.get("codex_dispatch", text(args.dispatch_id, "dispatch_id"));
@@ -2267,6 +2305,11 @@ export class CraftService extends ServiceFoundation {
     const claim = this.store.get("knowledge_claim", text(args.claim_id, "claim_id")); const status = text(args.status, "status");
     if (!KNOWLEDGE_STATUSES.has(status) || status === "candidate") throw new Error("Knowledge claim review status is unsupported");
     const reviewer = text(args.reviewer, "reviewer"); const reason = assertNoSecret(document(args.reason, "reason"), "reason");
+    if (status === "reviewed") {
+      const evidenceIds = Array.isArray(claim.evidence_ids) ? claim.evidence_ids as unknown[] : [];
+      const supported = evidenceIds.some((e) => ["bounded", "confirmed"].includes(String(this.store.get("evidence", String(e)).confidence)));
+      if (!supported) throw new Error("Reviewed knowledge claim requires bounded or confirmed Evidence");
+    }
     const saved = this.store.save("knowledge_claim", String(claim.id), { ...recordPayload(claim), status, review: { reviewer, reason_digest: valueDigest(reason), reviewed_at: new Date().toISOString() } });
     return { claim: saved };
   }
@@ -3681,7 +3724,13 @@ export class CraftService extends ServiceFoundation {
   }
 
   workflowSave(args: JsonObject): JsonObject {
-    return this.saveVersioned("workflow", "workflow", { ...args, lifecycle: "draft" }, ["name"]);
+    if (args.steps !== undefined) {
+      if (!Array.isArray(args.steps)) throw new Error("steps must be an array");
+      const normalized = normalizeSteps(args.steps);
+      const identityDigest = valueDigest({ name: args.name, description: args.description ?? "", inputs: args.inputs ?? {}, steps: normalized });
+      return this.saveVersioned("workflow", "workflow", { ...args, steps: normalized, workflow_digest: identityDigest, lifecycle: "draft" }, ["name"]);
+    }
+    return this.saveVersioned("workflow", "workflow", { ...args, workflow_digest: valueDigest({ name: args.name, description: args.description ?? "", inputs: args.inputs ?? {}, steps: [] }), lifecycle: "draft" }, ["name"]);
   }
 
   workflowTransition(args: JsonObject): JsonObject {

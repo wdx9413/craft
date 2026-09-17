@@ -16,7 +16,7 @@ function contextDigest(context: string): string { return `sha256:${createHash("s
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-knowledge-launch-")); const store = await new CraftStore(craftPaths(join(root, "data"))).open(); const service = new CraftService(store);
   const task = record(service.taskOpen({ title: "Brief", goal: "Prepare an accurate brief" }), "task");
-  const evidence = service.evidenceRecord({ evidence_id: "evidence", source_type: "program", claim: "Program observation." });
+  const evidence = service.evidenceRecord({ evidence_id: "evidence", source_type: "program", claim: "Program observation.", confidence: "bounded" });
   const claim = record(service.knowledgeClaimSave({ claim_id: "claim", kind: "rule", content: "Use the approved project facts.", scope: "project:brief", valid_until: "2027-01-01T00:00:00.000Z", evidence_ids: [evidence.id] }), "claim");
   service.knowledgeClaimReview({ claim_id: claim.id, status: "reviewed", reviewer: "reviewer", reason: "checked" });
   const compiled = service.wikiContextCompile({ bundle_id: "bundle", query: "approved facts", scope: "project:brief", max_items: 2, max_chars: 1_000, now: "2026-09-10T00:00:00.000Z" });
@@ -39,7 +39,7 @@ test("Knowledge-bound Work Launch pins reviewed Wiki knowledge across Dispatch, 
     const outcome = f.store.get("outcome", `outcome_${launch.trial_id}`); assert.deepEqual(outcome.knowledge_binding, binding);
     const mcp = new McpServer(f.service, "full"); const mcpPrepared = await mcp.handle({ id: "mcp", method: "tools/call", params: { name: "craft_knowledge_context_work_launch_prepare", arguments: { ...args, launch_id: "mcp-launch" } } }); assert.equal((mcpPrepared?.result as JsonObject).isError, false);
     const mcpDecided = await mcp.handle({ id: "mcp-decide", method: "tools/call", params: { name: "craft_knowledge_context_work_launch_decide", arguments: { launch_id: "mcp-launch", actor: "human", approved: false, prompt: args.prompt, now: args.now } } }); assert.equal((mcpDecided?.result as JsonObject).isError, false);
-    assert.equal(VERSION, "0.12.30");
+    assert.equal(VERSION, "0.12.31");
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 

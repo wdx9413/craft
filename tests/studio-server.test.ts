@@ -63,6 +63,10 @@ test("Craft Studio projects model, project, connector and source reads over the 
   assert.equal((deepseek.selection as Record<string, unknown>).model, "deepseek-reasoner");
   assert.equal(JSON.parse(get("/api/models/deepseek").body).selection, undefined);
   assert.equal(get("/api/models/nope").status, 422);
+  assert.equal(post("/api/config/models", { id: "Local Model", name: "Local Model", protocol: "openai-compatible", baseUrl: "https://example.test/v1", model: "local", apiKeyEnv: "LOCAL_MODEL_KEY", supportsTools: false }).status, 201);
+  assert.equal((JSON.parse(get("/api/config/models").body) as { models: unknown[] }).models.length, 1);
+  assert.equal(app.handle({ method: "PATCH", path: "/api/config/models/local-model", token: "secret", body: JSON.stringify({ name: "Updated", protocol: "anthropic", baseUrl: "https://example.test/v1", model: "updated", apiKeyEnv: "LOCAL_MODEL_KEY", supportsTools: true }) }).status, 200);
+  assert.equal(app.handle({ method: "DELETE", path: "/api/config/models/local-model", token: "secret" }).status, 200);
   const saved = JSON.parse(post("/api/model-profiles", { profile_id: "studio-deepseek-standard", provider: "deepseek", tier: "standard" }).body) as Record<string, unknown>;
   assert.equal((saved.profile as Record<string, unknown>).provider, "deepseek");
   assert.equal((saved.readiness as Record<string, unknown>).status, "needs_enablement");
@@ -139,5 +143,43 @@ test("Studio exposes task conversation behind the same token and origin gates", 
   assert.equal((await app.handleAsync({ method: "POST", path: endpoint, token: "secret", origin: "https://evil.example", body: JSON.stringify({ content: "hello" }) })).status, 403);
   const rejected = await app.handleAsync({ method: "POST", path: endpoint, token: "secret", body: JSON.stringify({ content: "hello" }) });
   assert.equal(rejected.status, 422); assert.match(rejected.body, /no longer configured/);
+  await f.service.settingsUpdate({ models: [{ id: "studio-model", name: "Studio model", protocol: "openai-compatible", baseUrl: "https://example.test/v1", model: "studio", apiKeyEnv: "STUDIO_KEY", supportsTools: false }] });
+  const successTask = f.service.taskOpen({ title: "Configured conversation", goal: "Keep context", model_id: "studio-model" }).task as Record<string, unknown>;
+  const originalFetch = globalThis.fetch;
+  const originalKey = process.env.STUDIO_KEY;
+  process.env.STUDIO_KEY = "test-key";
+  globalThis.fetch = (async () => new Response(JSON.stringify({ choices: [{ message: { content: "safe reply" } }], model: "studio", usage: { prompt_tokens: 1, completion_tokens: 2 } }), { status: 200, headers: { "content-type": "application/json" } })) as typeof fetch;
+  try {
+    const success = await app.handleAsync({ method: "POST", path: `/api/tasks/${String(successTask.id)}/messages`, token: "secret", body: JSON.stringify({ content: "hello" }) });
+    assert.equal(success.status, 201); assert.match(success.body, /safe reply/);
+    globalThis.fetch = (async () => { throw new Error("transport down"); }) as typeof fetch;
+    assert.equal((await app.handleAsync({ method: "POST", path: `/api/tasks/${String(successTask.id)}/messages`, token: "secret", body: JSON.stringify({ content: "retry" }) })).status, 422);
+  } finally { globalThis.fetch = originalFetch; if (originalKey === undefined) delete process.env.STUDIO_KEY; else process.env.STUDIO_KEY = originalKey; }
   f.store.close();
+});
+
+test("Studio compatibility facades still route every write through governed kernels", async () => {
+  const f = await fixture();
+  try {
+    const service = f.service;
+    const proposed = service.studioMemorySave({ memory_id: "studio-ledger-memory", kind: "preference", scope: "user", content: "Prefer concise reports" });
+    const candidate = proposed.candidate as Record<string, unknown>;
+    assert.equal(candidate.status, "candidate");
+    const reviewed = service.studioMemoryReview({ candidate_id: candidate.id, decision: "reject", reviewer: "studio-reviewer", reason: "awaiting explicit preference confirmation" });
+    assert.equal((reviewed.candidate as Record<string, unknown>).status, "rejected");
+    f.store.create("memory_item", "studio-retire-memory", { kind: "preference", scope: "user", content: "Retire me", status: "active" });
+    const retired = service.studioMemoryRetire({ memory_id: "studio-retire-memory" });
+    assert.equal((retired.memory as Record<string, unknown>).status, "expired");
+
+    const claim = service.studioKnowledgeClaimSave({ kind: "fact", content: "Studio writes are candidate-first" });
+    assert.equal((claim.claim as Record<string, unknown>).status, "candidate");
+    const workflow = service.studioWorkflowSave({ workflow_id: "studio-compat-workflow", name: "Compat", steps: [{ id: "inspect", type: "action", side_effect: "read_only", action: "inspect" }] });
+    assert.equal((workflow.workflow as Record<string, unknown>).lifecycle, "draft");
+    assert.equal((workflow.workflow as Record<string, unknown>).graph !== undefined, true);
+
+    const legacy = service.studioMemoryCompatSave({ kind: "fact", scope: "user", content: "Legacy facade" });
+    assert.equal((legacy.memory as Record<string, unknown>).status, "active");
+    assert.equal((service.studioKnowledgeCompatSave({ content: "Legacy knowledge facade" }).claim as Record<string, unknown>).status, "candidate");
+    assert.equal((service.studioWorkflowCompatSave({ workflow_id: "studio-legacy-workflow", name: "Legacy", steps: [] }) as Record<string, unknown>).lifecycle, "draft");
+  } finally { f.store.close(); }
 });

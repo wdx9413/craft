@@ -17,7 +17,7 @@ async function fixture() {
   return { root, store, service };
 }
 
-test("v0.12.30 binds remote task operations to one tenant, principal, receipt, scope and opaque one-time handle", async () => {
+test("v0.12.31 binds remote task operations to one tenant, principal, receipt, scope and opaque one-time handle", async () => {
   const f = await fixture();
   try {
     const tenant = f.service.remoteTenantRegister({ tenant_id: "tenant", data_space_id: "space", key_envelope_ref: "kms:key", retention_policy_ref: "retention:v1", deletion_policy_ref: "delete:v1" }).tenant as JsonObject;
@@ -38,7 +38,7 @@ test("v0.12.30 binds remote task operations to one tenant, principal, receipt, s
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("v0.12.30 verifies a real JWKS-signed OIDC resource token without retaining it", async () => {
+test("v0.12.31 verifies a real JWKS-signed OIDC resource token without retaining it", async () => {
   const keys = generateKeyPairSync("rsa", { modulusLength: 2048 }); const jwk = keys.publicKey.export({ format: "jwk" }) as JsonObject; jwk.kid = "key"; jwk.use = "sig";
   const header = Buffer.from(JSON.stringify({ alg: "RS256", kid: "key" })).toString("base64url"); const claims = Buffer.from(JSON.stringify({ iss: "https://issuer.example.test/", aud: ["craft"], sub: "subject", scope: "craft.read craft.write", client_id: "client", exp: 1_900_000_000 })).toString("base64url");
   const signature = sign("RSA-SHA256", Buffer.from(`${header}.${claims}`), keys.privateKey).toString("base64url"); const token = `${header}.${claims}.${signature}`;
@@ -53,7 +53,7 @@ test("v0.12.30 verifies a real JWKS-signed OIDC resource token without retaining
   await assert.rejects(() => verifier(`x.${claims}.${signature}`), /header/);
 });
 
-test("v0.12.30 keeps publisher signatures separate from capability activation and makes drift fail closed", async () => {
+test("v0.12.31 keeps publisher signatures separate from capability activation and makes drift fail closed", async () => {
   const f = await fixture();
   try {
     const keys = generateKeyPairSync("ed25519"); const publicKey = keys.publicKey.export({ type: "spki", format: "pem" }).toString(); const subjectDigest = d("c");
@@ -66,7 +66,7 @@ test("v0.12.30 keeps publisher signatures separate from capability activation an
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("v0.12.30 accepts only observed two-Host/two-Case five-trial evidence before default activation", async () => {
+test("v0.12.31 accepts only observed two-Host/two-Case five-trial evidence before default activation", async () => {
   const f = await fixture();
   try {
     const plan = f.service.runtimeAcceptancePlan({ plan_id: "plan", case_ids: ["code", "file"], host_ids: ["codex", "other"], baseline_harness: "single", candidate_harness: "retrieval", environment_fingerprint: "env", budget_fingerprint: "budget", trials_per_pair: 5, observer_kind: "workspace" }).plan as JsonObject;
@@ -80,7 +80,7 @@ test("v0.12.30 accepts only observed two-Host/two-Case five-trial evidence befor
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("v0.12.30 adapts A2A v1 only through a consumed read-only delegation grant", async () => {
+test("v0.12.31 adapts A2A v1 only through a consumed read-only delegation grant", async () => {
   const f = await fixture();
   try {
     f.store.create("federated_delegation_grant", "grant", { status: "consumed", effect: "read_only", grant_digest: d("g") });

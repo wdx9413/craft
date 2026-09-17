@@ -1,6 +1,6 @@
 {
   "name": "craft-agent-harness",
-  "version": "0.12.30",
+  "version": "0.12.31",
   "description": "Cross-platform capability, workflow, evidence, and agent harness",
   "type": "module",
   "bin": {
@@ -10,7 +10,7 @@
     "craft-mcp-http": "dist/bin/craft-mcp-http.js"
   },
   "scripts": {
-    "test": "pnpm run build && pnpm run typecheck && pnpm run test:ts && pnpm run test:v01216 && pnpm run test:v01217 && pnpm run test:v01218 && pnpm run test:v01219 && pnpm run test:v01220 && pnpm run test:v01221 && pnpm run test:v01222 && pnpm run test:v01223 && pnpm run test:v01224 && pnpm run test:v01225 && pnpm run test:v01226 && pnpm run test:v01228 && pnpm run test:v01229 && pnpm run test:v01230 && pnpm run test:durable-experience && pnpm run test:trace-storage && pnpm run test:smoke && pnpm run test:plugin",
+    "test": "pnpm run build && pnpm run typecheck && pnpm run test:ts && pnpm run test:v01216 && pnpm run test:v01217 && pnpm run test:v01218 && pnpm run test:v01219 && pnpm run test:v01220 && pnpm run test:v01221 && pnpm run test:v01222 && pnpm run test:v01223 && pnpm run test:v01224 && pnpm run test:v01225 && pnpm run test:v01226 && pnpm run test:v01228 && pnpm run test:v01229 && pnpm run test:v01230 && pnpm run test:v01231 && pnpm run test:legacy-knowledge-migration && pnpm run test:durable-experience && pnpm run test:trace-storage && pnpm run test:smoke && pnpm run test:plugin",
     "clean": "node --experimental-strip-types scripts/clean.ts",
     "build": "pnpm run clean && pnpm run build:core && pnpm run build:plugin && pnpm run pack:plugin && pnpm run build:deepseek && pnpm run pack:adapters",
     "build:core": "node node_modules/typescript/bin/tsc -p tsconfig.build.json",
@@ -38,6 +38,9 @@
     "test:v01228": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-include=src/turn-cognitive-runtime.ts --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 tests/v01228-turn-cognitive-runtime.test.ts",
     "test:v01229": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-include=src/remote-mcp-access.ts --test-coverage-include=src/host-session-events.ts --test-coverage-include=src/outcome-observer.ts --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 tests/v01229-remote-mcp-access.test.ts tests/v01229-session-observer.test.ts",
     "test:v01230": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-include=src/remote-runtime.ts --test-coverage-include=src/oidc-jwks.ts --test-coverage-include=src/supply-chain-attestation.ts --test-coverage-include=src/runtime-acceptance.ts --test-coverage-include=src/a2a-v1-adapter.ts --test-coverage-lines=100 --test-coverage-functions=100 tests/v01230-runtime-proof.test.ts",
+    "test:v01231": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-include=src/memory-governance.ts --test-coverage-include=src/workflow-dag.ts --test-coverage-include=src/task-state.ts --test-coverage-lines=100 --test-coverage-functions=100 tests/v01231-agent-foundation.test.ts",
+    "test:legacy-knowledge-migration": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-include=src/legacy-knowledge-migration.ts --test-coverage-include=src/application/use-cases/legacy-knowledge-migration.ts --test-coverage-lines=100 tests/legacy-knowledge-migration.test.ts",
+    "knowledge:import-offline": "node --experimental-strip-types scripts/import-legacy-knowledge.ts",
     "test:durable-experience": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-include=src/durable-action-loop.ts --test-coverage-include=src/experience-ledger.ts --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 tests/durable-action-experience.test.ts",
     "test:trace-storage": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-include=src/trace-archive-store.ts --test-coverage-include=src/trace-archive-storage.ts --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 tests/trace-archive-store.test.ts tests/trace-archive-storage.test.ts",
     "check:ts": "node --experimental-strip-types src/cli.ts --help",

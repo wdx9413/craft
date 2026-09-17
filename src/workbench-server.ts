@@ -119,6 +119,11 @@ export class WorkbenchWebApp {
       if (request.method === "GET" && path === "/api/domain-kits") return json(200, this.service.domainKitInstallBuiltins());
       if (request.method === "POST" && path.startsWith("/api/domain-kits/") && path.endsWith("/apply")) return json(201, this.service.domainKitApply({ ...bodyObject(request.body), kit_id: decodeURIComponent(path.slice(17, -6)) }));
       if (request.method === "GET" && path === "/api/knowledge") return json(200, this.service.knowledgeWorkbenchView({ limit: url.searchParams.get("limit") ?? undefined }));
+      if (request.method === "GET" && path === "/api/studio/resources") return json(200, this.service.studioResourceView({ kind: url.searchParams.get("kind") ?? undefined, task_id: url.searchParams.get("task_id") ?? undefined, limit: url.searchParams.get("limit") ?? undefined }));
+      if (request.method === "POST" && path === "/api/studio/memory") return json(201, this.service.studioMemorySave(bodyObject(request.body)));
+      if (request.method === "POST" && path === "/api/studio/memory/review") return json(200, this.service.studioMemoryReview(bodyObject(request.body)));
+      if (request.method === "POST" && path === "/api/studio/knowledge/claims") return json(201, this.service.studioKnowledgeClaimSave(bodyObject(request.body)));
+      if (request.method === "POST" && path === "/api/studio/workflows") return json(201, this.service.studioWorkflowSave(bodyObject(request.body)));
       if (request.method === "GET" && path.startsWith("/api/knowledge/pages/")) return json(200, this.service.wikiPageGet({ page_id: decodeURIComponent(path.slice(21)), version: url.searchParams.get("version") ?? undefined }));
       if (request.method === "POST" && path.startsWith("/api/knowledge/pages/") && path.endsWith("/refresh")) return json(200, this.service.wikiPageRefresh({ page_id: decodeURIComponent(path.slice(21, -8)) }));
       if (request.method === "POST" && path.startsWith("/api/knowledge/claims/") && path.endsWith("/review")) return json(200, this.service.knowledgeClaimReview({ ...bodyObject(request.body), claim_id: decodeURIComponent(path.slice(22, -7)) }));
@@ -178,8 +183,8 @@ export class WorkbenchWebApp {
       // User-configured model management (CRUD on settings.models)
       if (request.method === "GET" && path === "/api/config/models") return json(200, this.service.modelList());
       if (request.method === "POST" && path === "/api/config/models") return json(201, this.service.modelAdd(bodyObject(request.body)));
-      if (request.method === "PATCH" && path.startsWith("/api/config/models/")) return json(200, this.service.modelUpdate({ ...bodyObject(request.body), id: decodeURIComponent(path.slice(20)) }));
-      if (request.method === "DELETE" && path.startsWith("/api/config/models/")) return json(200, this.service.modelDelete({ id: decodeURIComponent(path.slice(20)) }));
+      if (request.method === "PATCH" && path.startsWith("/api/config/models/")) return json(200, this.service.modelUpdate({ ...bodyObject(request.body), id: decodeURIComponent(path.slice("/api/config/models/".length)) }));
+      if (request.method === "DELETE" && path.startsWith("/api/config/models/")) return json(200, this.service.modelDelete({ id: decodeURIComponent(path.slice("/api/config/models/".length)) }));
       if (request.method === "GET" && path === "/api/projects") return json(200, { projects: this.service.store.list("project_brain", boundedLimit(url.searchParams.get("limit"), 50)) });
       if (request.method === "POST" && path === "/api/projects") return json(201, this.service.projectBrainOpen(bodyObject(request.body)));
       if (request.method === "POST" && path.startsWith("/api/projects/") && path.endsWith("/goals")) return json(201, this.service.projectBrainGoalSave({ ...bodyObject(request.body), project_id: decodeURIComponent(path.slice(14, -6)) }));

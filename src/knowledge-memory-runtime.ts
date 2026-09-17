@@ -7,7 +7,7 @@ const ACCESS = new Set(["read_only", "proposal_only"]);
 const MEMORY_KINDS = new Set(["working", "episodic", "preference", "procedural"]);
 const MEMORY_STATUS = new Set(["active", "superseded", "revoked", "expired"]);
 const SENSITIVITIES = new Set(["public", "internal", "restricted"]);
-const SCOPE_KINDS = new Set(["user", "project", "workspace", "task"]);
+const SCOPE_KINDS = new Set(["user", "project", "workspace", "task", "session"]);
 const SECRET = /(?:api[_-]?key|authorization|cookie|password|secret|token)\s*[:=]\s*[^\s]{8,}/iu;
 
 function text(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim(); }
@@ -89,7 +89,9 @@ export class KnowledgeMemoryRuntime {
     const content = noSecret(text(args.content, "content"), "content"); const confidence = text(args.confidence ?? "bounded", "confidence");
     if (!new Set(["confirmed", "bounded", "unverified"]).has(confidence)) throw new Error("Memory confidence is unsupported");
     if ((kind === "procedural" || confidence === "confirmed") && !evidenceIds.length) throw new Error("Procedural or confirmed Memory requires Evidence");
-    const validUntil = date(args.valid_until, "valid_until"); const identity = { source_id: source.id, source_version: source.version, kind, scope: memoryScope, content, content_digest: digest(content), sensitivity, confidence, evidence_ids: evidenceIds, valid_until: validUntil };
+    const explicitValidUntil = date(args.valid_until, "valid_until");
+    const validUntil = explicitValidUntil ?? (kind === "working" ? new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() : kind === "episodic" ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString() : null);
+    const identity = { source_id: source.id, source_version: source.version, kind, scope: memoryScope, content, content_digest: digest(content), sensitivity, confidence, evidence_ids: evidenceIds, valid_until: validUntil };
     const memoryId = String(args.memory_id ?? `memory_ledger_${randomUUID().replaceAll("-", "")}`); const existing = this.store.find("memory_ledger", memoryId); const identityDigest = digest(identity);
     if (existing) { if (existing.identity_digest !== identityDigest) throw new Error("Memory Ledger idempotency conflict"); return { memory: existing, idempotent: true }; }
     return { memory: this.store.create("memory_ledger", memoryId, { ...identity, identity_digest: identityDigest, status: "active", supersedes_id: null }), idempotent: false };

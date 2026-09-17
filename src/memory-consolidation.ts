@@ -5,6 +5,7 @@ import { CraftStore } from "./store.ts";
 function text(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim(); }
 function payload(record: JsonObject): JsonObject { const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record; return rest; }
 function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
+const SECRET = /(?:api[_-]?key|authorization|cookie|password|passwd|secret|token)\s*[:=]\s*[^\s]{6,}/iu;
 
 export class MemoryConsolidationKernel {
   readonly store: CraftStore;
@@ -15,6 +16,7 @@ export class MemoryConsolidationKernel {
     const scope = text(args.scope ?? "task", "scope");
     const content = text(args.content, "content");
     const source = text(args.source ?? "work", "source");
+    if (SECRET.test(content) || SECRET.test(source)) throw new Error("Memory content and source must not contain credentials or secrets");
     const existing = this.store.find("episodic_memory", memoryId);
     const identityDigest = digest({ scope, content, source, task_id: args.task_id ?? null });
     if (existing) {
@@ -30,6 +32,7 @@ export class MemoryConsolidationKernel {
     const memories = memoryIds.map((memoryId) => this.store.get("episodic_memory", memoryId));
     const scope = text(args.scope ?? memories[0]!.scope, "scope");
     const content = text(args.content ?? memories.map((memory) => String(memory.content)).join("\n"), "content");
+    if (SECRET.test(content)) throw new Error("Semantic memory content must not contain credentials or secrets");
     const semanticId = String(args.semantic_id ?? `semantic_memory_${randomUUID().replaceAll("-", "")}`);
     const identityDigest = digest({ scope, content, memory_ids: memoryIds });
     const existing = this.store.find("semantic_memory", semanticId);

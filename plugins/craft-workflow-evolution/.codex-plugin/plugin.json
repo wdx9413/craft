@@ -1,6 +1,6 @@
 {
   "name": "craft-workflow-evolution",
-  "version": "0.12.30",
+  "version": "0.12.31",
   "description": "Compatibility helper that turns evidence-backed execution observations into bounded Workflow drafts.",
   "author": { "name": "wdx9413", "url": "https://github.com/wdx9413" },
   "homepage": "https://github.com/wdx9413/craft",

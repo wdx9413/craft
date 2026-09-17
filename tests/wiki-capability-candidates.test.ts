@@ -10,7 +10,7 @@ import { CraftStore, type JsonObject } from "../src/store.ts";
 test("Wiki-derived capability candidates remain proposal-only", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-wiki-candidate-")); const store = await new CraftStore(craftPaths(root)).open(); const service = new CraftService(store);
   try {
-    const evidence = service.evidenceRecord({ source_type: "program", claim: "Observed." });
+    const evidence = service.evidenceRecord({ source_type: "program", claim: "Observed.", confidence: "bounded" });
     const make = (id: string) => service.knowledgeClaimSave({ claim_id: id, kind: "rule", content: id, evidence_ids: [evidence.id] }).claim as JsonObject;
     const a = make("a"); const b = make("b"); const pending = make("pending");
     service.knowledgeClaimReview({ claim_id: a.id, status: "reviewed", reviewer: "h", reason: "r" }); service.knowledgeClaimReview({ claim_id: b.id, status: "reviewed", reviewer: "h", reason: "r" });
@@ -21,6 +21,6 @@ test("Wiki-derived capability candidates remain proposal-only", async () => {
     await assert.rejects(Promise.resolve().then(() => service.wikiSkillCandidateCreate({ ...input, kind: "bad", candidate_id: "bad" })), /unsupported/); await assert.rejects(Promise.resolve().then(() => service.wikiSkillCandidateCreate({ ...input, candidate_id: "pending", claim_ids: [a.id, pending.id] })), /reviewed/); await assert.rejects(Promise.resolve().then(() => service.wikiSkillCandidateCreate({ ...input, instructions: "changed" })), /idempotency/);
     assert.equal((service.wikiSkillCandidateReview({ candidate_id: candidate.id, status: "ready_for_evaluation", reviewer: "h", reason: "review" }).candidate as JsonObject).status, "ready_for_evaluation"); await assert.rejects(Promise.resolve().then(() => service.wikiSkillCandidateReview({ candidate_id: candidate.id, status: "draft", reviewer: "h", reason: "no" })), /unsupported/);
     const mcp = new McpServer(service, "full"); for (const [name, arguments_] of [["craft_wiki_skill_candidate_create", { ...input, candidate_id: "mcp" }], ["craft_wiki_skill_candidate_get", { candidate_id: candidate.id }], ["craft_wiki_skill_candidate_list", {}], ["craft_wiki_skill_candidate_review", { candidate_id: candidate.id, status: "rejected", reviewer: "h", reason: "no" }]] as [string, JsonObject][]) { const result = await mcp.handle({ id: name, method: "tools/call", params: { name, arguments: arguments_ } }); assert.equal((result?.result as JsonObject).isError, false); }
-    assert.equal(VERSION, "0.12.30");
+    assert.equal(VERSION, "0.12.31");
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });

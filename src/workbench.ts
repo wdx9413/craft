@@ -6,6 +6,7 @@ const MEMORY_KINDS = new Set(["fact", "preference", "decision", "experience"]);
 const MEMORY_STATUS = new Set(["active", "superseded", "expired", "rejected"]);
 const TASK_GRAPH_NODE_KINDS = new Set(["explore", "produce", "verify", "review", "deliver"]);
 const TASK_GRAPH_NODE_STATUS = new Set(["pending", "active", "done", "skipped", "blocked"]);
+const SECRET = /(?:api[_-]?key|authorization|cookie|password|passwd|secret|token)\s*[:=]\s*[^\s]{6,}/iu;
 
 function id(value: unknown, name: string, prefix: string): string {
   const result = value === undefined ? `${prefix}_${randomUUID().replaceAll("-", "")}` : String(value).trim();
@@ -200,8 +201,10 @@ export class WorkbenchKernel {
     if (superseded && (superseded.scope !== scope || superseded.task_id !== (args.task_id ?? null) || superseded.workspace_id !== (args.workspace_id ?? null))) {
       throw new Error("Replacement memory must keep the same scope target");
     }
+    const content = text(args.content, "content"); const source = text(args.source, "source");
+    if (SECRET.test(content) || SECRET.test(source)) throw new Error("Memory content and source must not contain credentials or secrets");
     const memory = this.store.create("memory_item", id(args.memory_id, "memory_id", "memory"), { kind, scope,
-      content: text(args.content, "content"), source: text(args.source, "source"), task_id: args.task_id ?? null,
+      content, source, task_id: args.task_id ?? null,
       workspace_id: args.workspace_id ?? null, applies_to: strings(args.applies_to, "applies_to"), status: "active",
       valid_until: validUntil, evidence_ids: strings(args.evidence_ids, "evidence_ids"), supersedes_id: superseded?.id ?? null });
     if (superseded) this.memoryTransition({ memory_id: superseded.id, status: "superseded", replacement_id: memory.id });

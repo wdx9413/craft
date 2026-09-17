@@ -30,7 +30,7 @@ export const COMPONENT_SURFACES: Readonly<Record<string, RegExp>> = {
   "component-memory": /^craft_(memory|knowledge_source|knowledge_bootstrap|context_resolution|retrieval_adapter)/,
   "component-capability": /^craft_(source|capability|logical|semantic)/,
   "component-skill-quality": QUALITY_TOOLS,
-  "component-workflow-evolution": /^craft_(workflow_evolution|evaluation_model|experience_mine|experience_candidate|experience_shadow|route_workflow_proposal|workflow_(?:save|get|search|transition|rollback))/,
+  "component-workflow-evolution": /^craft_(workflow_evolution|evaluation_model|experience_mine|experience_candidate|experience_shadow|route_workflow_proposal|workflow_(?:save|get|search|transition|rollback|dag_validate|dag_save|dag_transition|checkpoint|resume|run_cancel|replan|export|import))/,
 };
 
 export const COMPONENT_SURFACE_NAMES: readonly string[] = Object.keys(COMPONENT_SURFACES);

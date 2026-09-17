@@ -1,6 +1,6 @@
 # Craft
 
-> 当前发布版本：v0.12.30。Craft 是面向人和 AI 的通用工作运行时：知识、记忆、能力发现、质量评测与 Workflow 演进都由同一 Runtime 实现，并以 MCP 对外提供；默认 `craft` 插件只是将 Skill、MCP 配置和 bundle 打包给 Codex。它们共享同一套状态、策略、Receipt、评测与安全边界，也可按需作为独立 MCP 产品使用。Codex 插件默认复用当前 App 作为 Embedded Host，不另起 Codex CLI。
+> 当前发布版本：v0.12.31。Craft 是面向人和 AI 的通用工作运行时：知识、记忆、能力发现、质量评测与 Workflow 演进都由同一 Runtime 实现，并以 MCP 对外提供；默认 `craft` 插件只是将 Skill、MCP 配置和 bundle 打包给 Codex。它们共享同一套状态、策略、Receipt、评测与安全边界，也可按需作为独立 MCP 产品使用。Codex 插件默认复用当前 App 作为 Embedded Host，不另起 Codex CLI。
 
 [中文](README.md) | [English](README.en.md)
 

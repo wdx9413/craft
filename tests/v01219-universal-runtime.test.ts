@@ -32,8 +32,8 @@ test("v0.12.19 makes Knowledge Sources, Memory Ledger, receipts and retrieval se
     assert.throws(() => f.runtime.sourceRegister({ kind: "readme", label: "secret=12345678", scope_kind: "project", scope_id: "project", locator: "x", content_digest: "x" }), /credentials/);
     assert.throws(() => f.runtime.sourceTransition({ source_id: source.id, status: "active", reason: "x" }), /unsupported/);
 
-    const working = f.runtime.remember({ memory_id: "working", source_id: source.id, kind: "working", scope_kind: "project", scope_id: "project", content: "Use controlled workflow", sensitivity: "internal" }).memory as JsonObject;
-    assert.equal((f.runtime.remember({ memory_id: "working", source_id: source.id, kind: "working", scope_kind: "project", scope_id: "project", content: "Use controlled workflow", sensitivity: "internal" }) as JsonObject).idempotent, true);
+    const working = f.runtime.remember({ memory_id: "working", source_id: source.id, kind: "working", scope_kind: "project", scope_id: "project", content: "Use controlled workflow", sensitivity: "internal", valid_until: "2030-01-01T00:00:00.000Z" }).memory as JsonObject;
+    assert.equal((f.runtime.remember({ memory_id: "working", source_id: source.id, kind: "working", scope_kind: "project", scope_id: "project", content: "Use controlled workflow", sensitivity: "internal", valid_until: "2030-01-01T00:00:00.000Z" }) as JsonObject).idempotent, true);
     assert.throws(() => f.runtime.remember({ source_id: source.id, kind: "procedural", scope_kind: "project", scope_id: "project", content: "always test" }), /requires Evidence/);
     const procedural = f.runtime.remember({ memory_id: "procedure", source_id: source.id, kind: "procedural", scope_kind: "project", scope_id: "project", content: "Test the changed behavior", confidence: "confirmed", evidence_ids: ["evidence"], valid_until: "2030-01-01T00:00:00.000Z" }).memory as JsonObject;
     assert.throws(() => f.runtime.remember({ source_id: source.id, kind: "working", scope_kind: "project", scope_id: "project", content: "token=secretsecret" }), /credentials/);
@@ -102,7 +102,7 @@ test("v0.12.19 keeps Console and Agent mode as a mode-neutral plan over verified
       const response = await mcp.handle({ id: name, method: "tools/call", params: { name, arguments: args } }); assert.equal((response?.result as JsonObject).isError, false, name);
     }
     assert.equal(new McpServer(f.service, "core").tools.some((tool) => tool.name === "craft_context_resolution_resolve"), true);
-    assert.equal(VERSION, "0.12.30");
+    assert.equal(VERSION, "0.12.31");
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
