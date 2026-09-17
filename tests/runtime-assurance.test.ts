@@ -90,3 +90,22 @@ test("Runtime Assurance only advances a Campaign after every bound run has match
     assert.equal(f.service.runtimeAssuranceCampaignAdvance({ runner_id: runner.id }).idempotent, true);
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
+
+test("Runtime Assurance records rejected and review-needed terminal outcomes", async () => {
+  const f = await fixture();
+  try {
+    const failed = recordedRun(f, "failed-host", { delivery: "accepted", environment: {}, budget: {} });
+    f.store.save("host_run", String(failed.host.id), { ...failed.host, status: "failed" });
+    const failedObservation = f.service.workspaceObserverObserve({ workspace_id: f.workspace.id, source: "host" }).observation as JsonObject;
+    const rejected = f.service.runtimeAssuranceAttest({ attestation_id: "rejected", task_run_id: failed.run.id, environment: {}, budget: {}, workspace_observation_id: failedObservation.id });
+    assert.equal((rejected.attestation as JsonObject).status, "rejected");
+
+    const review = recordedRun(f, "needs-review", { delivery: "pending", environment: {}, budget: {} });
+    const reviewObservation = f.service.workspaceObserverObserve({ workspace_id: f.workspace.id, source: "host" }).observation as JsonObject;
+    const needsReview = f.service.runtimeAssuranceAttest({ attestation_id: "needs-review", task_run_id: review.run.id, environment: {}, budget: {}, workspace_observation_id: reviewObservation.id });
+    assert.equal((needsReview.attestation as JsonObject).status, "needs_review");
+    f.store.remove("work_delivery", String(review.delivery.id));
+    const noDelivery = f.service.runtimeAssuranceAttest({ attestation_id: "no-delivery", task_run_id: review.run.id, environment: {}, budget: {}, workspace_observation_id: reviewObservation.id });
+    assert.equal((noDelivery.attestation as JsonObject).status, "needs_review");
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});

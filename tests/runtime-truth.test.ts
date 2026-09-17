@@ -62,6 +62,8 @@ test("Runtime Truth covers fallback fields, provider variants, and rejection bou
   assert.throws(() => parseToolCalls({ content: [{ type: "tool_use", id: "", name: "use" }] }), /tool_use id/);
   assert.deepEqual(parseSseFrames("comment\ndata: \ndata: [DONE]\n"), []);
   assert.equal(toOtlpTrace({ trace_id: "x", event_kind: "run", status: "failed", parent_span_id: "p", data: {} }).resourceSpans !== undefined, true);
+  assert.deepEqual(traceCorrelation({ trace_id: "x" }).baggage, { task_id: null, run_id: null, operation_id: null });
+  assert.equal(compactConversation([{ role: "system", content: null }, { role: "user", content: "x" }], 256).compacted, false);
 });
 
 test("Runtime Truth persistence and Full MCP expose the same bounded operations", async () => {
@@ -86,5 +88,10 @@ test("Runtime Truth persistence and Full MCP expose the same bounded operations"
     for (const [id, name, arguments_] of calls) {
       const result = await mcp.handle({ id, method: "tools/call", params: { name, arguments: arguments_ } }); assert.equal(((result!.result as JsonObject).isError), false);
     }
+    assert.ok((kernel.standardize({ trace_id: "direct", event_kind: "direct" }).export as JsonObject).id);
+    assert.equal((kernel.otlp({ trace_id: "direct", event_kind: "direct" }).format), "otlp/json");
+    assert.throws(() => kernel.compact({ session_id: "bad", messages: "nope" as never }), /messages must be an array/);
+    assert.ok((kernel.compact({ messages: [{ role: "user", content: "hi" }] }).compaction as JsonObject).id);
+    assert.ok((kernel.workNote({ goal: "generated" }).note as JsonObject).id);
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });

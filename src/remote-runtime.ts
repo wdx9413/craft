@@ -6,6 +6,8 @@ function text(value: unknown, name: string): string {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
   return value.trim();
 }
+function fallback<T>(value: T | undefined, defaultValue: T): T { return value === undefined ? defaultValue : value; }
+function epoch(value: unknown, name: string): number { return value === undefined ? Date.now() : instant(value, name); }
 
 function instant(value: unknown, name: string): number {
   const result = Date.parse(text(value, name));
@@ -67,15 +69,15 @@ export class RemoteRuntimeKernel {
     const task = this.store.get("task", text(args.task_id, "task_id"));
     const scopes = uniqueStrings(args.scopes, "scopes", 1);
     const expiresAt = text(args.expires_at, "expires_at"); const expires = instant(expiresAt, "expires_at");
-    const now = args.now === undefined ? Date.now() : instant(args.now, "now");
-    if (expires <= now) throw new Error("Remote task binding must not already be expired");
+    const currentNow = epoch(args.now, "now");
+    if (expires <= currentNow) throw new Error("Remote task binding must not already be expired");
     const identity = {
       task_id: task.id, task_version: task.version, tenant_id: tenant.id, tenant_version: tenant.version,
       principal_digest: this.sha256Ref(args.principal_digest, "principal_digest"),
       access_receipt_digest: this.sha256Ref(args.access_receipt_digest, "access_receipt_digest"),
       audience: text(args.audience, "audience"), scopes, expires_at: new Date(expires).toISOString(),
     };
-    const bindingId = String(args.binding_id ?? `remote_task_${randomBytes(12).toString("hex")}`);
+    const bindingId = String(fallback(args.binding_id, `remote_task_${randomBytes(12).toString("hex")}`));
     const existing = this.store.find("remote_task_binding", bindingId); const bindingDigest = digest(identity);
     if (existing) {
       if (existing.binding_digest !== bindingDigest) throw new Error("Remote task binding idempotency conflict");
@@ -83,7 +85,7 @@ export class RemoteRuntimeKernel {
     }
     const handle = opaqueHandle();
     const binding = this.store.create("remote_task_binding", bindingId, {
-      ...identity, binding_digest: bindingDigest, handle_digest: sha256(handle), status: "active", issued_at: new Date(now).toISOString(),
+      ...identity, binding_digest: bindingDigest, handle_digest: sha256(handle), status: "active", issued_at: new Date(currentNow).toISOString(),
       raw_handle_stored: false, authorized_operations: ["get", "result", "cancel", "stream"],
     });
     return { binding, handle, idempotent: false, handle_returned_once: true };
@@ -93,7 +95,7 @@ export class RemoteRuntimeKernel {
     const binding = this.store.get("remote_task_binding", text(args.binding_id, "binding_id"));
     const operation = text(args.operation, "operation");
     if (!(binding.authorized_operations as string[]).includes(operation)) throw new Error("Remote task operation is unsupported");
-    const now = args.now === undefined ? Date.now() : instant(args.now, "now");
+    const now = epoch(args.now, "now");
     if (binding.status !== "active" || now >= Date.parse(String(binding.expires_at))) throw new Error("Remote task binding is inactive or expired");
     this.activeTenant(String(binding.tenant_id), Number(binding.tenant_version));
     if (sha256(text(args.handle, "handle")) !== binding.handle_digest) throw new Error("Remote task handle does not match");
@@ -103,7 +105,7 @@ export class RemoteRuntimeKernel {
     if (text(args.audience, "audience") !== binding.audience) throw new Error("Remote task audience does not match");
     const scopes = uniqueStrings(args.scopes, "scopes", 1);
     if ((binding.scopes as string[]).some((scope) => !scopes.includes(scope))) throw new Error("Remote task scope is insufficient");
-    const receiptId = String(args.receipt_id ?? `remote_task_access_${binding.id}_${operation}_${randomBytes(8).toString("hex")}`);
+    const receiptId = String(fallback(args.receipt_id, `remote_task_access_${binding.id}_${operation}_${randomBytes(8).toString("hex")}`));
     const identity = { binding_id: binding.id, binding_version: binding.version, operation, at: new Date(now).toISOString(), principal_digest: binding.principal_digest, tenant_id: binding.tenant_id };
     const existing = this.store.find("remote_task_access_receipt", receiptId);
     if (existing) {
@@ -118,7 +120,8 @@ export class RemoteRuntimeKernel {
     const binding = this.store.get("remote_task_binding", text(args.binding_id, "binding_id"));
     if (binding.status === "revoked") return { binding, idempotent: true };
     if (binding.status !== "active") throw new Error("Only an active remote task binding can be revoked");
-    const saved = this.store.save("remote_task_binding", String(binding.id), { ...payload(binding), status: "revoked", revoked_at: args.now === undefined ? new Date().toISOString() : new Date(instant(args.now, "now")).toISOString(), revocation_reason: text(args.reason, "reason") });
+    const revokedAt = new Date(epoch(args.now, "now")).toISOString();
+    const saved = this.store.save("remote_task_binding", String(binding.id), { ...payload(binding), status: "revoked", revoked_at: revokedAt, revocation_reason: text(args.reason, "reason") });
     return { binding: saved, idempotent: false };
   }
 

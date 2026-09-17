@@ -46,6 +46,29 @@ test("Work Session, Workbench projection and durable long-task wake/resume are f
   f.store.create("trace", "trace2", { task_id: "task2", status: "running", model_fingerprint: "m", environment_fingerprint: "e" }); f.store.create("trace_event", "trace2:1", { trace_id: "trace2", sequence: 1, event_kind: "step", action_contract: { action: "read" }, input_refs: [], output_refs: [] }); const replay = experience.replayPlan({ trace_id: "trace2" }); assert.equal(replay.replayable, true); f.store.close();
 });
 
+test("Long Task checkpoints validate task-run ownership, expiry and malformed state", async () => {
+  const f = await fixture();
+  try {
+    f.brain.open({ project_id: "p-long" });
+    f.store.create("task", "task-long", { project_id: "p-long", title: "Long", goal: "Wait" });
+    f.store.create("work_session", "session-long", { task_id: "task-long", project_id: "p-long", context_digest: "sha256:ctx" });
+    f.store.create("work_launch", "launch-long", { task_id: "task-long" });
+    f.store.create("task_run", "run-long", { task_id: "task-long", contract_id: "contract", launch_id: "launch-long" });
+    const worker = new LongTaskWorkerKernel(f.store);
+    const checkpoint = worker.suspend({ session_id: "session-long", task_run_id: "run-long", wait_condition: "approval", expires_at: "2030-01-01T00:00:00.000Z", now: "2029-01-01T00:00:00.000Z" });
+    assert.equal((checkpoint.checkpoint as Record<string, unknown>).task_run_id, "run-long");
+    worker.wake({ checkpoint_id: String((checkpoint.checkpoint as Record<string, unknown>).id), signal: "approved" });
+    worker.resume({ checkpoint_id: String((checkpoint.checkpoint as Record<string, unknown>).id) });
+    assert.throws(() => worker.wake({ checkpoint_id: String((checkpoint.checkpoint as Record<string, unknown>).id), signal: "again" }), /waiting/);
+    assert.throws(() => worker.list({ limit: 0 }), /between/);
+    const missingSession = worker.suspend({ session_id: "session-long", checkpoint_id: "missing-session-cp", wait_condition: "event" });
+    f.store.save("long_task_checkpoint", "missing-session-cp", { ...missingSession.checkpoint as Record<string, unknown>, session_id: "deleted-session" });
+    const replanned = worker.resume({ checkpoint_id: "missing-session-cp", now: "2030-01-01T00:00:00.000Z" });
+    assert.equal(replanned.ready, false);
+    assert.equal((replanned.checkpoint as Record<string, unknown>).failure instanceof Array, true);
+  } finally { f.store.close(); }
+});
+
 test("legacy memory consolidation covers default scope, source, confidence and search filters", async () => {
   const f = await fixture();
   try {
@@ -89,6 +112,15 @@ test("work session rejects drift, cross-project bindings and malformed reference
     f.store.save("project_brain", String(edgeBrain.id), { ...edgeBrain, name: "changed" });
     assert.equal(sessions.refresh({ session_id: String((fresh.session as Record<string, unknown>).id) }).ready, false);
     assert.equal((sessions.complete({ session_id: "edge-session-2", status: "failed", summary: "failed", outcome_id: "outcome" }).session as Record<string, unknown>).status, "failed");
+    f.store.create("work_session", "missing-refs", { task_id: "missing-task", project_id: "missing-project", task_version: 1, brain_version: 1, status: "running", context_digest: "sha256:x" });
+    const missingRefresh = sessions.refresh({ session_id: "missing-refs" });
+    assert.equal(missingRefresh.ready, false);
+    f.store.create("task", "null-project-task", { project_id: null, title: "Null", goal: "Goal" });
+    brain.open({ project_id: "null-project" });
+    const nullSession = sessions.prepare({ project_id: "null-project", task_id: "null-project-task", session_id: "null-session" });
+    assert.equal((nullSession.session as Record<string, unknown>).status, "prepared");
+    f.store.create("internal_dispatch", "unbound-dispatch", { task_id: "null-project-task", status: "prepared" });
+    assert.equal((sessions.bindDispatch({ session_id: "null-session", dispatch_id: "unbound-dispatch" }).dispatch as Record<string, unknown>).session_id, "null-session");
   } finally { f.store.close(); }
 });
 
@@ -101,6 +133,8 @@ test("project brain covers default identities, revisions and projection limits",
     assert.equal(brain.open({ project_id: "defaults", brain_id: "brain-defaults" }).idempotent, true);
     assert.throws(() => brain.open({ project_id: "defaults", brain_id: "brain-defaults", description: "changed" }), /idempotency/);
     assert.throws(() => brain.get({ project_id: "missing" }), /Unknown/);
+    assert.throws(() => brain.goalSave({ project_id: "defaults", title: "Bad", constraint_digests: "bad" as never }), /array/);
+    assert.throws(() => brain.goalSave({ project_id: "defaults", title: "Dup", constraint_digests: ["x", "x"] }), /unique/);
     assert.throws(() => brain.snapshot({ project_id: "defaults", limit: 0 }), /between/);
     brain.goalSave({ project_id: "defaults", goal_id: "goal-default", title: "Ship" });
     brain.goalSave({ project_id: "defaults", goal_id: "goal-default", title: "Ship v2", metric: "quality" });
@@ -108,6 +142,7 @@ test("project brain covers default identities, revisions and projection limits",
     brain.decisionSave({ project_id: "defaults", decision_id: "decision-default", title: "Use v2", rationale: "reason2", chosen_ref: "ref2", excluded_refs: [] });
     brain.materialBind({ project_id: "defaults", material_id: "material-default", name: "Brief", uri: "file:///brief", content_digest: "sha256:brief" });
     brain.outcomeRecord({ project_id: "defaults", outcome_id: "outcome-default", verdict: "passed", summary: "done" });
+    assert.throws(() => brain.outcomeRecord({ project_id: "defaults", verdict: "passed", summary: "done", evidence_ids: "bad" as never }), /array/);
     const experience = brain.experienceRecord({ project_id: "defaults", experience_id: "experience-default", name: "Pattern", pattern: "pattern" });
     assert.equal((experience.experience as Record<string, unknown>).source_outcome_id, null);
     assert.equal(brain.snapshot({ project_id: "defaults", limit: 10 }).content_free, true);

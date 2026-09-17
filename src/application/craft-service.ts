@@ -72,6 +72,12 @@ function optionalBoolean(value: unknown, name: string): boolean | undefined {
   if (typeof value !== "boolean") throw new Error(`${name} must be a boolean`);
   return value;
 }
+function optionalText(value: unknown, name: string): string | undefined {
+  return value === undefined ? undefined : text(value, name);
+}
+function firstDefined<T>(...values: (T | undefined)[]): T | undefined {
+  return values.find((value) => value !== undefined);
+}
 function optionalScore(value: unknown, name: string): number | null {
   if (value === undefined || value === null) return null;
   const score = Number(value);
@@ -2012,11 +2018,11 @@ export class CraftService extends ServiceFoundation {
     return { skill: previous ? this.store.save("studio_skill", skillId, { ...payload, previous_version: previous.version }) : this.store.create("studio_skill", skillId, payload) };
   }
   studioMemoryCompatSave(args: JsonObject): JsonObject {
-    const memoryId = args.memory_id === undefined ? undefined : text(args.memory_id, "memory_id");
+    const memoryId = optionalText(args.memory_id, "memory_id");
     const previous = memoryId === undefined ? null : this.store.get("memory_item", memoryId);
-    return this.memoryRemember({ kind: args.kind ?? previous?.kind ?? "fact", scope: args.scope ?? previous?.scope ?? "user",
-      content: args.content, source: "studio_user", task_id: args.task_id ?? previous?.task_id ?? undefined,
-      workspace_id: args.workspace_id ?? previous?.workspace_id ?? undefined, applies_to: args.applies_to ?? previous?.applies_to ?? [],
+    return this.memoryRemember({ kind: firstDefined(args.kind, previous?.kind, "fact"), scope: firstDefined(args.scope, previous?.scope, "user"),
+      content: args.content, source: "studio_user", task_id: firstDefined(args.task_id, previous?.task_id),
+      workspace_id: firstDefined(args.workspace_id, previous?.workspace_id), applies_to: firstDefined(args.applies_to, previous?.applies_to, []),
       evidence_ids: [], ...(previous ? { supersedes_id: previous.id } : {}) });
   }
   studioMemoryRetire(args: JsonObject): JsonObject { return this.memoryTransition({ memory_id: text(args.memory_id, "memory_id"), status: "expired", reason: "retired by studio user" }); }

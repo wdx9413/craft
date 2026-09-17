@@ -99,6 +99,8 @@ test("v0.12.12 defaults and failure states remain explicit", async () => {
   const f = await fixture();
   try {
     const kernel = new VerifiedAutonomousWorkKernel(f.store);
+    assert.throws(() => kernel.prepare({ task_id: null as never, context_manifest_id: f.contextId, host: "internal", workspace_digest: "sha256:w", action_digest: "sha256:a", acceptance_ref: "accept" }), /task_id/);
+    assert.throws(() => kernel.prepare({ task_id: "task", context_manifest_id: f.contextId, host: "internal", workspace_digest: "sha256:w", action_digest: "sha256:a", acceptance_ref: "accept", budget: [] as never }), /budget/);
     const prepared = kernel.prepare({ work_id: "defaults", task_id: "task", context_manifest_id: f.contextId, host: "internal", workspace_digest: "sha256:w", action_digest: "sha256:a", acceptance_ref: "accept" });
     assert.equal((prepared.work as JsonObject).model, null);
     assert.equal(kernel.authorize({ work_id: "defaults" }).work !== undefined, true);
@@ -119,7 +121,38 @@ test("v0.12.12 defaults and failure states remain explicit", async () => {
     assert.equal(kernel.handoff({ work_id: "paused", target_host: "other", handoff_id: "h" }).idempotent, true);
     assert.equal((handoff.work as JsonObject).status, "paused");
     const sandbox = new SandboxConformanceKernel(f.store);
+    assert.throws(() => sandbox.save({ platform: "linux", isolation: "verified", network: "deny", checks: [] as never, verifier: "ci" }), /checks/);
     sandbox.save({ profile_id: "defaults-sandbox", platform: "linux", isolation: "verified", network: "deny", checks: {}, verifier: "ci" });
     assert.equal((sandbox.get({ profile_id: "defaults-sandbox" }).profile as JsonObject).status, "unverified");
+    assert.throws(() => new TraceExplorerKernel(f.store).query({ limit: 0 }), /between/);
+  } finally { f.store.close(); }
+});
+
+test("v0.12.12 compatibility kernels cover generated ids and guarded transitions", async () => {
+  const f = await fixture();
+  try {
+    const kernel = new VerifiedAutonomousWorkKernel(f.store);
+    const generated = kernel.prepare({ task_id: "task", context_manifest_id: f.contextId, host: "internal", workspace_digest: "sha256:g", action_digest: "sha256:a", acceptance_ref: "accept" });
+    assert.match(String((generated.work as JsonObject).id), /^verified_work_/);
+    f.store.save("verified_work", String((generated.work as JsonObject).id), { ...generated.work as JsonObject, status: "delivered", action_count: undefined });
+    assert.throws(() => kernel.authorize({ work_id: String((generated.work as JsonObject).id), authorization_ref: "r" }), /awaiting/);
+    f.store.save("verified_work", String((generated.work as JsonObject).id), { ...generated.work as JsonObject, status: "prepared", action_count: undefined });
+    kernel.authorize({ work_id: String((generated.work as JsonObject).id), authorization_ref: "r" });
+    assert.throws(() => kernel.recordAction({ work_id: "missing", action_contract: {}, idempotency_key: "x", input_digest: "i", result_digest: "o" }), /Unknown/);
+    const action = kernel.recordAction({ work_id: String((generated.work as JsonObject).id), action_contract: {}, idempotency_key: "x", input_digest: "i", result_digest: "o" });
+    assert.equal((action.work as JsonObject).action_count, 1);
+    f.store.save("verified_work", String((generated.work as JsonObject).id), { ...action.work as JsonObject, status: "delivered" });
+    assert.throws(() => kernel.handoff({ work_id: String((generated.work as JsonObject).id), target_host: "other" }), /handoffable/);
+    assert.throws(() => kernel.deliver({ work_id: String((generated.work as JsonObject).id), acceptance_verdict: "passed", artifact_ids: [], evidence_ids: [] }), /re-observed/);
+
+    const sandbox = new SandboxConformanceKernel(f.store);
+    const profile = sandbox.save({ platform: "linux", isolation: "verified", network: "deny", checks: {}, verifier: "ci" });
+    assert.match(String((profile.profile as JsonObject).id), /^sandbox_conformance_linux$/);
+    assert.equal(sandbox.admit({ effect: "read_only" }).reason, "portable_read_only");
+    const explorer = new TraceExplorerKernel(f.store);
+    f.store.create("trace", "trace-empty-fields", { task_id: "task", status: "failed" });
+    f.store.create("trace_event", "trace-empty-event", { trace_id: "trace-empty-fields", sequence: 1, event_kind: "done" });
+    const rows = explorer.query({ task_id: "task" }).traces as JsonObject[];
+    assert.ok(rows.some((row) => String((row.trace as JsonObject).id) === "trace-empty-fields"));
   } finally { f.store.close(); }
 });

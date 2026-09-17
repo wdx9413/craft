@@ -23,11 +23,14 @@ test("service facades exercise defaults, compatibility views, and model validati
     assert.equal((memory.candidate as JsonObject).status, "candidate");
     const claim = service.studioKnowledgeClaimSave({ kind: "fact", content: "bounded fact" });
     assert.equal((claim.claim as JsonObject).status, "candidate");
+    const explicitEvidence = store.create("evidence", "studio-evidence", { source_type: "human", confidence: "bounded", claim: "checked" });
+    assert.equal((service.studioKnowledgeClaimSave({ kind: "fact", content: "evidence bound", evidence_ids: [explicitEvidence.id] }).claim as JsonObject).status, "candidate");
     const workflow = service.studioWorkflowSave({ name: "placeholder" });
     assert.equal((workflow.workflow as JsonObject).lifecycle, "draft");
     const workflowFromSteps = service.studioWorkflowSave({ name: "steps", steps: [{ id: "s" }] });
     assert.equal((workflowFromSteps.workflow as JsonObject).lifecycle, "draft");
     assert.equal((service.studioWorkflowSave({ name: "bad", nodes: "nope" }).workflow as JsonObject).lifecycle, "draft");
+    assert.equal((service.studioWorkflowSave({ name: "nodes", nodes: [{ id: "n", type: "action", side_effect: "read_only", depends_on: [] }] }).workflow as JsonObject).lifecycle, "draft");
 
     assert.throws(() => service.modelAdd({ id: "bad", name: "Bad", baseUrl: "ftp://model", model: "m", apiKeyEnv: "KEY" }), /http/);
     assert.throws(() => service.modelAdd({ id: "bad", name: "Bad", baseUrl: "https://model", model: "m", apiKeyEnv: "bad key" }), /environment/);
@@ -48,6 +51,11 @@ test("service facades exercise defaults, compatibility views, and model validati
     assert.throws(() => service.workflowSave({ name: "invalid", steps: "bad" }), /steps must be an array/);
     assert.equal((service.workflowSave({ name: "empty" }) as JsonObject).lifecycle, "draft");
     assert.equal((await service.launchGate({ payload: null })).blocked, false);
+    const expiring = store.create("knowledge_claim", "expiring", { kind: "fact", content: "old", evidence_ids: [explicitEvidence.id], status: "reviewed", valid_until: "2000-01-01T00:00:00.000Z" });
+    assert.equal((service.knowledgeExpirySweep({ now: "2030-01-01T00:00:00.000Z" }).expired as JsonObject[]).some((item) => item.id === expiring.id), true);
+    assert.throws(() => service.knowledgeExpirySweep({ now: "invalid" }), /ISO/);
+    const conflict = store.create("knowledge_claim", "conflict-claim", { kind: "fact", content: "conflict", evidence_ids: [explicitEvidence.id], status: "candidate" });
+    assert.equal((service.knowledgeConflictResolve({ claim_id: conflict.id, decision: "reviewed", reviewer: "reviewer", reason: "checked" }).claim as JsonObject).status, "reviewed");
   } finally {
     store.close();
     await rm(root, { recursive: true, force: true });

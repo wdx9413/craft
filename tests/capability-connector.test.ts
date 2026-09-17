@@ -22,6 +22,7 @@ test("Capability Connectors require explicit source approval, retain only metada
     assert.throws(() => f.service.capabilityConnectorRegister({ kind: "mcp_http", name: "Malformed", approved: true, approval_ref: "user", endpoint: "not a url" }), /valid HTTPS/);
     assert.throws(() => f.service.capabilityConnectorRegister({ kind: "mcp_stdio", name: "Unsafe", approved: true, approval_ref: "user", endpoint: "stdio://x?token=secret" }), /credentials/);
     const builtin = f.service.capabilityConnectorRegister({ connector_id: "builtin", kind: "builtin", name: "Built-in" }).connector as JsonObject;
+    assert.deepEqual(builtin.allowed_operations, ["*"]);
     assert.equal(builtin.trust, "verified");
     assert.throws(() => f.service.capabilityConnectorUpdate({ connector_id: builtin.id }), /boolean/);
     assert.equal((f.service.capabilityConnectorUpdate({ connector_id: builtin.id, active: false }).connector as JsonObject).status, "disabled");
@@ -44,6 +45,9 @@ test("Capability Connectors require explicit source approval, retain only metada
     assert.equal(((approved.asset as JsonObject).trust), "trusted");
     const automatic = (f.service.capabilityConnectorDiscover({ connector_id: serena.id, assets: [{ logical_id: "auto", name: "Auto", asset_type: "tool", effect: "read_only" }] }).assets as JsonObject[])[0];
     assert.match(String((f.service.capabilityConnectorApprove({ connector_asset_id: automatic.id, approval_ref: "review-2" }).asset as JsonObject).id), /^asset_/);
+    const builtHealth = f.service.capabilityConnectorHealthRecord({ connector_id: builtin.id, status: "degraded", source_digest: builtin.metadata_digest, observed_by: "test", health_id: `connector_health_${builtin.id}` });
+    assert.equal((builtHealth.health as JsonObject).status, "degraded");
+    assert.equal((f.service.capabilityConnectorHealthRecord({ connector_id: builtin.id, status: "healthy", source_digest: builtin.metadata_digest, observed_by: "test" }).health as JsonObject).status, "healthy");
     assert.equal((f.service.capabilityConnectorList({ limit: 1 }).connectors as JsonObject[]).length, 1);
     assert.throws(() => f.service.capabilityConnectorList({ limit: 0 }), /between/);
     assert.equal(VERSION, "0.12.31");

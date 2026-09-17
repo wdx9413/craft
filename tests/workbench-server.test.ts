@@ -62,6 +62,9 @@ test("local Workbench server binds loopback, serves headers, handles bodies, and
   assert.equal(started.token, "network-token"); assert.equal((await fetch(`${origin}/`)).status, 200); const health = await fetch(`${origin}/health`); assert.equal(health.headers.get("x-content-type-options"), "nosniff");
   assert.equal((await fetch(`${origin}/api/home`, { headers: { authorization: "Basic x" } })).status, 401);
   assert.equal((await fetch(`${origin}/api/home`, { headers: { authorization: "Bearer network-token" } })).status, 200);
+  for (const route of ["/api/project-brain?project_id=local&limit=1", "/api/workbench-experience?project_id=local&task_id=t&limit=1", "/api/traces?task_id=t&event_kind=x&limit=1", "/api/long-task-checkpoints?session_id=s&limit=1", "/api/studio/resources?kind=memory&task_id=t&limit=1"]) {
+    assert.equal((await fetch(`${origin}${route}`, { headers: { authorization: "Bearer network-token" } })).status < 500, true);
+  }
   assert.equal((await fetch(`${origin}/api/inbox/refresh`, { method: "POST", headers: { authorization: "Bearer network-token", origin }, body: "{}" })).status, 200);
   assert.equal((await fetch(`${origin}/api/inbox/refresh`, { method: "POST", headers: { authorization: "Bearer network-token" }, body: "x".repeat(66_000) })).status, 413);
   await assert.rejects(() => server.start(0), /already running/); await server.close(); await server.close(); f.store.close();
@@ -107,5 +110,17 @@ test("Workbench exposes governed resume, fabric, studio, and model routes", asyn
     assert.equal(request("POST", "/api/studio/workflows", JSON.stringify({ name: "workflow" })).status, 201);
     assert.equal(request("GET", "/api/models").status, 200);
     assert.equal(request("GET", "/api/model-profiles").status, 200);
+    assert.equal(request("GET", "/api/home?limit=bad").status, 200);
+    assert.equal(request("GET", "/api/home?limit=1").status, 200);
+    assert.ok([404, 422].includes(request("GET", "/api/project-brain").status));
+    assert.equal(request("GET", "/api/project-brain?project_id=p&limit=1").status, 422);
+    assert.equal(request("GET", "/api/workbench-experience?project_id=p&task_id=t&limit=1").status, 200);
+    assert.equal(request("GET", "/api/traces?task_id=t&event_kind=x&limit=1").status, 200);
+    assert.equal(request("GET", "/api/long-task-checkpoints?session_id=s&limit=1").status, 200);
+    assert.equal(request("GET", "/api/studio/resources?kind=memory&task_id=t&limit=1").status, 200);
+    assert.equal(request("POST", "/api/studio/memory/review", JSON.stringify({ candidate_id: "missing", decision: "reject", reviewer: "r", reason: "x" })).status, 422);
+    assert.equal(request("POST", "/api/studio/knowledge/claims", JSON.stringify({ kind: "fact", content: "fact", evidence_ids: [] })).status, 422);
+    assert.equal(request("POST", "/api/studio/workflows", JSON.stringify({ name: "workflow", steps: [{ id: "s" }] })).status, 201);
+    assert.equal(request("POST", "/api/studio/call", JSON.stringify({})).status, 404);
   } finally { f.store.close(); }
 });

@@ -2,6 +2,18 @@ import type { CraftService } from "../craft-service.ts";
 import type { JsonObject } from "../../store.ts";
 import { V01226Runtime, importOpenApiDocument } from "../../v01226-runtime.ts";
 
+function arrayOrEmpty<T>(value: unknown): T[] {
+  return Array.isArray(value) ? value as T[] : [];
+}
+
+function numberOrUndefined(value: unknown): number | undefined {
+  return value === undefined ? undefined : Number(value);
+}
+
+function stringOrUndefined(value: unknown): string | undefined {
+  return value === undefined ? undefined : String(value);
+}
+
 /**
  * Adapter/runtime use cases live outside the application facade. The facade
  * still exposes the historical method names through this typed installation
@@ -44,7 +56,7 @@ export function installAdapterRuntimeMethods(serviceClass: typeof CraftService):
   serviceClass.prototype.adapterConformance = function (args) { return new V01226Runtime(this.store).adapterConformance(String(args.adapter_id)); };
   serviceClass.prototype.adapterQuarantine = function (args) { return new V01226Runtime(this.store).adapterQuarantine(String(args.adapter_id), String(args.reason)); };
   serviceClass.prototype.adapterRollback = function (args) { return new V01226Runtime(this.store).adapterRollback(String(args.adapter_id)); };
-  serviceClass.prototype.adapterInstall = async function (args) { return new V01226Runtime(this.store).adapterInstall(String(args.manifest_path), args.integrity === undefined ? undefined : String(args.integrity)); };
+  serviceClass.prototype.adapterInstall = async function (args) { return new V01226Runtime(this.store).adapterInstall(String(args.manifest_path), stringOrUndefined(args.integrity)); };
   serviceClass.prototype.commandPlan = function (args) { return new V01226Runtime(this.store).commandPlan(args as never); };
   serviceClass.prototype.commandRun = async function (args) { return new V01226Runtime(this.store).commandRun(args as never); };
   serviceClass.prototype.commandObserve = function (args) { return { run: new V01226Runtime(this.store).commandObserve(String(args.run_id)) }; };
@@ -53,18 +65,18 @@ export function installAdapterRuntimeMethods(serviceClass: typeof CraftService):
   serviceClass.prototype.contextManifestV01226Save = function (args) { return new V01226Runtime(this.store).contextManifestSave(args); };
   serviceClass.prototype.capabilityProjection = function (args) {
     return new V01226Runtime(this.store).capabilityProject({
-      candidates: Array.isArray(args.candidates) ? args.candidates as JsonObject[] : [],
-      required: Array.isArray(args.required) ? args.required as string[] : [],
-      token_budget: args.token_budget === undefined ? undefined : Number(args.token_budget),
+      candidates: arrayOrEmpty<JsonObject>(args.candidates),
+      required: arrayOrEmpty<string>(args.required),
+      token_budget: numberOrUndefined(args.token_budget),
     });
   };
   serviceClass.prototype.durableRunStart = function (args) { return new V01226Runtime(this.store).durableStart(args); };
   serviceClass.prototype.durableRunTick = function (args = {}) { return new V01226Runtime(this.store).durableTick(String(args.owner ?? "local"), Number(args.lease_seconds ?? 30)); };
   serviceClass.prototype.durableRunComplete = function (args) { return new V01226Runtime(this.store).durableComplete(String(args.run_id), String(args.status) as "completed" | "failed" | "cancelled", args.result as JsonObject | undefined); };
   serviceClass.prototype.durableRunRecover = function (args = {}) { return new V01226Runtime(this.store).durableRecover(args.owner === undefined ? undefined : String(args.owner)); };
-  serviceClass.prototype.trustCurveRecord = function (args) { return new V01226Runtime(this.store).trustRecord({ scope: String(args.scope), passed: Number(args.passed), failed: Number(args.failed), evidence_refs: Array.isArray(args.evidence_refs) ? args.evidence_refs as string[] : [] }); };
-  serviceClass.prototype.modelRouteV01226 = function (args) { return new V01226Runtime(this.store).modelRoute({ candidates: Array.isArray(args.candidates) ? args.candidates as JsonObject[] : [], objective: args.objective as "quality" | "cost" | "latency" | undefined, budget: args.budget === undefined ? undefined : Number(args.budget) }); };
-  serviceClass.prototype.deliveryGateV01226 = function (args) { return new V01226Runtime(this.store).deliveryGate({ artifacts: Array.isArray(args.artifacts) ? args.artifacts as string[] : [], evidence: Array.isArray(args.evidence) ? args.evidence as string[] : [], required_artifacts: Array.isArray(args.required_artifacts) ? args.required_artifacts as string[] : [], required_evidence: Array.isArray(args.required_evidence) ? args.required_evidence as string[] : [] }); };
+  serviceClass.prototype.trustCurveRecord = function (args) { return new V01226Runtime(this.store).trustRecord({ scope: String(args.scope), passed: Number(args.passed), failed: Number(args.failed), evidence_refs: arrayOrEmpty<string>(args.evidence_refs) }); };
+  serviceClass.prototype.modelRouteV01226 = function (args) { return new V01226Runtime(this.store).modelRoute({ candidates: arrayOrEmpty<JsonObject>(args.candidates), objective: args.objective as "quality" | "cost" | "latency" | undefined, budget: numberOrUndefined(args.budget) }); };
+  serviceClass.prototype.deliveryGateV01226 = function (args) { return new V01226Runtime(this.store).deliveryGate({ artifacts: arrayOrEmpty<string>(args.artifacts), evidence: arrayOrEmpty<string>(args.evidence), required_artifacts: arrayOrEmpty<string>(args.required_artifacts), required_evidence: arrayOrEmpty<string>(args.required_evidence) }); };
   serviceClass.prototype.taskHandoffManifest = function (args) { return new V01226Runtime(this.store).handoff(args as never); };
   serviceClass.prototype.domainEvaluatorRun = function (args) { return new V01226Runtime(this.store).evaluatorRun({ evaluator_id: String(args.evaluator_id), observations: args.observations as JsonObject }); };
   serviceClass.prototype.openApiImport = async function (args) { return importOpenApiDocument(new V01226Runtime(this.store), args.document as string | JsonObject); };

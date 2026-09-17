@@ -72,6 +72,7 @@ test("user model configs produce provider specs and secret-free public views", (
   assert.deepEqual(specsFromModels([openai, anthropic]).map((item) => item.provider), ["user-openai", "user-anthropic"]);
   assert.equal((publicModel(openai, {} as NodeJS.ProcessEnv) as JsonObject).configured, false);
   assert.equal((publicModel(openai, { USER_MODEL_KEY: "configured" }) as JsonObject).configured, true);
+  assert.equal(specFromConfig({ ...openai, name: "" }).label, "user-openai");
 });
 
 test("legacy episodic and semantic memory facade remains auditable and idempotent", async () => {
@@ -131,6 +132,15 @@ test("request rendering matches each wire format", () => {
   const noSystem = buildChatRequest(anthropicSpec(), { model: "demo-claude", messages: [{ role: "user", content: "hi" }] });
   assert.equal(noSystem.body.max_tokens, 4_096);
   assert.equal("system" in noSystem.body, false);
+  const anthropicToolResult = buildChatRequest(anthropicSpec(), { model: "demo-claude", messages: [
+    { role: "tool", content: null }, { role: "assistant", content: "done", tool_call_id: "call" },
+  ] });
+  assert.deepEqual(anthropicToolResult.body.messages, [
+    { role: "user", content: [{ type: "tool_result", tool_use_id: "unknown", content: "" }] },
+    { role: "assistant", content: "done", tool_call_id: "call", tool_use_id: "call" },
+  ]);
+  const openaiExtras = buildChatRequest(openaiSpec(), { model: "demo-std", messages: [{ role: "user", content: "hi" }], tools: [], stream: true });
+  assert.equal(openaiExtras.body.stream, true);
 });
 
 test("request rendering rejects malformed conversations", () => {
@@ -157,6 +167,10 @@ test("response parsing normalizes both wire formats and fails closed", () => {
   assert.deepEqual(anthropic.usage, { input_tokens: 1, output_tokens: 2 });
   const anthropicTool = parseChatResponse(anthropicSpec(), { content: [{ type: "text", text: "go" }, { type: "tool_use", id: "a", name: "lookup", input: { q: "x" } }] });
   assert.equal(anthropicTool.tool_calls?.[0]?.function.name, "lookup");
+  const anthropicToolDefaults = parseChatResponse(anthropicSpec(), { content: [{ type: "text", text: "go" }, { type: "tool_use", name: "lookup" }] });
+  assert.equal(anthropicToolDefaults.tool_calls?.[0]?.id, "tool_1");
+  const openaiToolDefaults = parseChatResponse(openaiSpec(), { choices: [{ message: { content: null, tool_calls: [{ function: { name: "lookup", arguments: { q: "x" } } }] } }] });
+  assert.equal(openaiToolDefaults.tool_calls?.[0]?.id, "tool_1");
 
   assert.throws(() => parseChatResponse(openaiSpec(), "nope"), /must be an object/);
   assert.throws(() => parseChatResponse(openaiSpec(), { choices: [] }), /no message content/);

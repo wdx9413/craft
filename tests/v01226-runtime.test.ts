@@ -142,3 +142,42 @@ test("v0.12.26 rejects null, empty and malformed adapter inputs", async () => {
     assert.throws(() => f.runtime.adapterList(0), /between/);
   } finally { await close(f); }
 });
+
+test("v0.12.26 covers adapter, command and durable defensive branches", async () => {
+  const f = await fixture();
+  try {
+    const unsupportedPlatform = process.platform === "darwin" ? "linux" : "darwin";
+    const base = { adapter_id: "branch.adapter", version: "1", kind: "command" as const, platforms: [unsupportedPlatform], capabilities: ["command.run"], permissions: [], effects: ["read_only"] as string[], signature: "sig" };
+    f.runtime.adapterRegister(base);
+    assert.equal(f.runtime.adapterHealth("branch.adapter").status, "unavailable");
+    assert.throws(() => f.runtime.adapterRollback("branch.adapter"), /quarantined/);
+    f.runtime.adapterQuarantine("branch.adapter", "test");
+    assert.equal(f.runtime.adapterHealth("branch.adapter").status, "unavailable");
+    const manifestPath = join(f.root, "signed-adapter.json");
+    await writeFile(manifestPath, JSON.stringify({ ...base, adapter_id: "signed.adapter", signature: "sig" }));
+    await f.runtime.adapterInstall(manifestPath);
+    await writeFile(manifestPath, JSON.stringify({ ...base, adapter_id: "unsigned.adapter", signature: undefined }));
+    await assert.rejects(f.runtime.adapterInstall(manifestPath), /signature or expected integrity/);
+
+    const shellFalse = new V01226Runtime(f.store, fakeSpawner());
+    const run = await shellFalse.commandRun({ run_id: "branch-run", argv: ["echo", "x"], shell: false, cwd: f.root, output_limit: 256, timeout_ms: 100 });
+    assert.equal((run.receipt as JsonObject).status, "completed");
+    const cross = new V01226Runtime(f.store, slowSpawner());
+    f.store.create("command_run", "cross-run", { request: { argv: ["wait"] }, status: "running" });
+    assert.equal(cross.commandCancel("cross-run").cross_process, true);
+    assert.throws(() => cross.commandCancel("missing-cross"), /Unknown/);
+    assert.throws(() => f.runtime.commandPlan({ argv: ["echo"], effect: "read_only", cwd: "" }), /cwd/);
+
+    assert.equal((f.runtime.capabilityProject({ candidates: [{ id: "a", capability: "a", token_cost: 2 }, { id: "b", capability: "b", token_cost: 2 }], token_budget: 2 }).excluded as JsonObject[]).length, 1);
+    const generatedDurable = f.runtime.durableStart({});
+    assert.equal((generatedDurable.run as JsonObject).status, "queued");
+    assert.equal(f.runtime.durableTick("owner").claimed, true);
+    assert.equal(f.runtime.durableTick("owner").claimed, false);
+    const generatedId = String((generatedDurable.run as JsonObject).id);
+    f.store.save("durable_run", generatedId, { ...f.store.get("durable_run", generatedId), lease_until: "2000-01-01T00:00:00.000Z" });
+    assert.equal(f.runtime.durableRecover("owner").recovered, 1);
+    assert.equal((f.runtime.modelRoute({ objective: "quality", candidates: [{ id: "q", quality: 1, cost: 9 }], budget: 1 }).selected as JsonObject).id, "q");
+    const openapi = await importOpenApiDocument(f.runtime, { paths: { "/x": { get: { summary: "x" } } } });
+    assert.equal((openapi.manifest as JsonObject).metadata && typeof (openapi.manifest as JsonObject).metadata === "object", true);
+  } finally { await close(f); }
+});

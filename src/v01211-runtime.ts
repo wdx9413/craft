@@ -7,6 +7,10 @@ function text(value: unknown, name: string): string {
   return value.trim();
 }
 
+function optionalText(value: unknown, name: string): string | null { return value === undefined ? null : text(value, name); }
+function fallback<T>(value: T | undefined, defaultValue: T): T { return value === undefined ? defaultValue : value; }
+function numberOrZero(value: unknown): number { return value === undefined || value === null ? 0 : Number(value); }
+
 function list(value: unknown, name: string): string[] {
   if (value === undefined) return [];
   if (!Array.isArray(value)) throw new Error(`${name} must be an array`);
@@ -45,12 +49,12 @@ export class ContextPlaneKernel {
   save(args: JsonObject): JsonObject {
     const projectId = text(args.project_id, "project_id");
     const taskId = text(args.task_id, "task_id");
-    const manifestId = String(args.manifest_id ?? `context_manifest_${randomUUID().replaceAll("-", "")}`);
+    const manifestId = String(fallback(args.manifest_id, `context_manifest_${randomUUID().replaceAll("-", "")}`));
     const refs = Object.fromEntries(MANIFEST_FIELDS.map((field) => [field, list(args[field], field)]));
     const identity = { project_id: projectId, task_id: taskId, knowledge_refs: refs.knowledge_refs, capability_refs: refs.capability_refs,
-      workflow_refs: refs.workflow_refs, excluded_refs: refs.excluded_refs, model: args.model === undefined ? null : text(args.model, "model"),
-      host: args.host === undefined ? null : text(args.host, "host"), acceptance_ref: args.acceptance_ref === undefined ? null : text(args.acceptance_ref, "acceptance_ref"),
-      selection_rationale: args.selection_rationale === undefined ? null : text(args.selection_rationale, "selection_rationale") };
+      workflow_refs: refs.workflow_refs, excluded_refs: refs.excluded_refs, model: optionalText(args.model, "model"),
+      host: optionalText(args.host, "host"), acceptance_ref: optionalText(args.acceptance_ref, "acceptance_ref"),
+      selection_rationale: optionalText(args.selection_rationale, "selection_rationale") };
     const identityDigest = digest(identity);
     const existing = this.store.find("context_manifest", manifestId);
     if (existing) {
@@ -87,7 +91,7 @@ export class ReplayRunnerKernel {
     const events = this.store.list("trace_event", 10_000, (item) => item.trace_id === traceId && item.action_contract !== null)
       .sort((left, right) => Number(left.sequence) - Number(right.sequence));
     if (!events.length) throw new Error("Trace has no replayable action contracts");
-    const replayId = String(args.replay_id ?? `replay_${randomUUID().replaceAll("-", "")}`);
+    const replayId = String(fallback(args.replay_id, `replay_${randomUUID().replaceAll("-", "")}`));
     const identity = { trace_id: traceId, trace_version: trace.version, event_ids: events.map((event) => event.id), approval_ref: text(args.approval_ref, "approval_ref"), workspace_digest: text(args.workspace_digest, "workspace_digest") };
     const replayDigest = digest(identity);
     const existing = this.store.find("replay_run", replayId);
@@ -124,7 +128,7 @@ export class LocalRuntimeServiceKernel {
   constructor(store: CraftStore) { this.store = store; }
 
   configure(args: JsonObject): JsonObject {
-    const serviceId = String(args.service_id ?? "craft-local");
+    const serviceId = String(fallback(args.service_id, "craft-local"));
     const existing = this.store.find("local_runtime_service", serviceId);
     const record = { service_id: serviceId, schedule: String(args.schedule ?? "on_demand"), startup: String(args.startup ?? "manual"), notification: String(args.notification ?? "disabled"), crash_recovery: args.crash_recovery !== false };
     if (existing) return { service: this.store.save("local_runtime_service", serviceId, { ...payload(existing), ...record }), idempotent: false };
@@ -132,19 +136,19 @@ export class LocalRuntimeServiceKernel {
   }
 
   start(args: JsonObject = {}): JsonObject {
-    const serviceId = String(args.service_id ?? "craft-local"); const service = this.store.find("local_runtime_service", serviceId) ?? (this.configure({ service_id: serviceId }).service as JsonObject);
+    const serviceId = String(fallback(args.service_id, "craft-local")); const service = this.store.find("local_runtime_service", serviceId) ?? (this.configure({ service_id: serviceId }).service as JsonObject);
     if (service.status === "running") return { service, idempotent: true };
     return { service: this.store.save("local_runtime_service", serviceId, { ...payload(service), status: "running", started_at: new Date().toISOString() }), idempotent: false };
   }
 
   stop(args: JsonObject = {}): JsonObject {
-    const serviceId = String(args.service_id ?? "craft-local"); const service = this.store.get("local_runtime_service", serviceId);
+    const serviceId = String(fallback(args.service_id, "craft-local")); const service = this.store.get("local_runtime_service", serviceId);
     if (service.status === "stopped") return { service, idempotent: true };
     return { service: this.store.save("local_runtime_service", serviceId, { ...payload(service), status: "stopped", stopped_at: new Date().toISOString() }), idempotent: false };
   }
 
   tick(args: JsonObject = {}): JsonObject {
-    const serviceId = String(args.service_id ?? "craft-local"); const service = this.store.get("local_runtime_service", serviceId);
+    const serviceId = String(fallback(args.service_id, "craft-local")); const service = this.store.get("local_runtime_service", serviceId);
     if (service.status !== "running") return { service, processed: [], count: 0, skipped: true };
     const now = args.now === undefined ? new Date().toISOString() : text(args.now, "now");
     const jobs = this.store.list("runtime_wakeup", 500, (item) => item.service_id === serviceId && item.status === "pending");
@@ -153,7 +157,7 @@ export class LocalRuntimeServiceKernel {
     return { service: saved, processed, count: processed.length, skipped: false };
   }
 
-  get(args: JsonObject = {}): JsonObject { return { service: this.store.get("local_runtime_service", String(args.service_id ?? "craft-local")) }; }
+  get(args: JsonObject = {}): JsonObject { return { service: this.store.get("local_runtime_service", String(fallback(args.service_id, "craft-local"))) }; }
 }
 
 /** Portable, digest-verified Project Bundle for backup, migration and handoff. */
@@ -167,7 +171,7 @@ export class ProjectBundleKernel {
     const records = kinds.flatMap((kind) => this.store.list(kind, max, (item) => item.project_id === projectId || item.task_id === projectId || item.workspace_id === projectId));
     const identity = { format: "craft.project-bundle", schema: 1, project_id: projectId, records: records.map((record) => ({ kind: "project_record", ref: `${record.id}@${record.version}`, digest: digest(record) })) };
     const bundle = { ...identity, exported_at: args.exported_at === undefined ? new Date().toISOString() : text(args.exported_at, "exported_at") };
-    const id = String(args.bundle_id ?? `project_bundle_${randomUUID().replaceAll("-", "")}`);
+    const id = String(fallback(args.bundle_id, `project_bundle_${randomUUID().replaceAll("-", "")}`));
     const existing = this.store.find("project_bundle", id);
     if (existing) { if (existing.bundle_digest !== digest(identity)) throw new Error("Project Bundle idempotency conflict"); return { bundle: existing, idempotent: true }; }
     return { bundle: this.store.create("project_bundle", id, { ...bundle, bundle_digest: digest(identity), portable: true }), idempotent: false };
@@ -188,7 +192,7 @@ export class FeedbackLearningKernel {
   record(args: JsonObject): JsonObject {
     const signalId = String(args.signal_id ?? `feedback_signal_${randomUUID().replaceAll("-", "")}`); const scope = String(args.scope ?? "project");
     if (!["task", "project", "global"].includes(scope)) throw new Error("Unsupported feedback scope");
-    const identity = { scope, project_id: args.project_id === undefined ? null : text(args.project_id, "project_id"), task_id: args.task_id === undefined ? null : text(args.task_id, "task_id"), outcome_id: args.outcome_id === undefined ? null : text(args.outcome_id, "outcome_id"), action: text(args.action, "action"), diff_digest: text(args.diff_digest, "diff_digest"), reason_digest: digest(text(args.reason, "reason")), accepted: args.accepted === true };
+    const identity = { scope, project_id: optionalText(args.project_id, "project_id"), task_id: optionalText(args.task_id, "task_id"), outcome_id: optionalText(args.outcome_id, "outcome_id"), action: text(args.action, "action"), diff_digest: text(args.diff_digest, "diff_digest"), reason_digest: digest(text(args.reason, "reason")), accepted: args.accepted === true };
     const existing = this.store.find("feedback_signal", signalId);
     if (existing) { if (existing.identity_digest !== digest(identity)) throw new Error("Feedback signal idempotency conflict"); return { signal: existing, idempotent: true }; }
     return { signal: this.store.create("feedback_signal", signalId, { ...identity, identity_digest: digest(identity), status: "active" }), idempotent: false };
@@ -208,7 +212,7 @@ export class DomainEvaluatorKernel {
   constructor(store: CraftStore) { this.store = store; }
 
   save(args: JsonObject): JsonObject {
-    const evaluatorId = String(args.evaluator_id ?? `domain_evaluator_${randomUUID().replaceAll("-", "")}`); const domain = text(args.domain, "domain"); const name = text(args.name, "name");
+    const evaluatorId = String(fallback(args.evaluator_id, `domain_evaluator_${randomUUID().replaceAll("-", "")}`)); const domain = text(args.domain, "domain"); const name = text(args.name, "name");
     const criteria = object(args.rules ?? args.criteria, "rules"); const record = { domain, name, criteria, description_digest: digest(args.description ?? ""), status: "active" };
     const existing = this.store.find("domain_evaluator", evaluatorId); if (existing) return { evaluator: this.store.save("domain_evaluator", evaluatorId, { ...payload(existing), ...record }), idempotent: false };
     return { evaluator: this.store.create("domain_evaluator", evaluatorId, record), idempotent: false };
@@ -228,7 +232,7 @@ export class HandoffManifestKernel {
   constructor(store: CraftStore) { this.store = store; }
 
   create(args: JsonObject): JsonObject {
-    const handoffId = String(args.handoff_id ?? `handoff_manifest_${randomUUID().replaceAll("-", "")}`); const identity = { task_id: text(args.task_id, "task_id"), session_id: args.session_id === undefined ? null : text(args.session_id, "session_id"), context_manifest_id: text(args.context_manifest_id, "context_manifest_id"), host: text(args.host, "host"), model: args.model === undefined ? null : text(args.model, "model"), allowed_effects: list(args.allowed_effects, "allowed_effects"), artifact_ids: list(args.artifact_ids, "artifact_ids"), evidence_ids: list(args.evidence_ids, "evidence_ids"), outcome_id: args.outcome_id === undefined ? null : text(args.outcome_id, "outcome_id") };
+    const handoffId = String(fallback(args.handoff_id, `handoff_manifest_${randomUUID().replaceAll("-", "")}`)); const identity = { task_id: text(args.task_id, "task_id"), session_id: optionalText(args.session_id, "session_id"), context_manifest_id: text(args.context_manifest_id, "context_manifest_id"), host: text(args.host, "host"), model: optionalText(args.model, "model"), allowed_effects: list(args.allowed_effects, "allowed_effects"), artifact_ids: list(args.artifact_ids, "artifact_ids"), evidence_ids: list(args.evidence_ids, "evidence_ids"), outcome_id: optionalText(args.outcome_id, "outcome_id") };
     const handoffDigest = digest(identity); const existing = this.store.find("handoff_manifest", handoffId); if (existing) { if (existing.handoff_digest !== handoffDigest) throw new Error("Handoff Manifest idempotency conflict"); return { handoff: existing, idempotent: true }; }
     return { handoff: this.store.create("handoff_manifest", handoffId, { ...identity, handoff_digest: handoffDigest, status: "ready" }), idempotent: false };
   }
@@ -244,7 +248,7 @@ export class CostLedgerKernel {
   priceSave(args: JsonObject): JsonObject {
     const provider = text(args.provider, "provider"); const model = text(args.model, "model"); const input = Number(args.input_per_million); const output = Number(args.output_per_million);
     if (![input, output].every((value) => Number.isFinite(value) && value >= 0)) throw new Error("prices must be non-negative finite numbers");
-    const id = String(args.price_id ?? `price_${provider}_${model}`); const record = { provider, model, input_per_million: input, output_per_million: output, effective_at: args.effective_at === undefined ? new Date().toISOString() : text(args.effective_at, "effective_at") };
+    const id = String(fallback(args.price_id, `price_${provider}_${model}`)); const record = { provider, model, input_per_million: input, output_per_million: output, effective_at: args.effective_at === undefined ? new Date().toISOString() : text(args.effective_at, "effective_at") };
     const existing = this.store.find("provider_price", id); return { price: existing ? this.store.save("provider_price", id, { ...payload(existing), ...record }) : this.store.create("provider_price", id, record), idempotent: false };
   }
 
@@ -253,8 +257,8 @@ export class CostLedgerKernel {
     if (![input, output].every((value) => Number.isInteger(value) && value >= 0)) throw new Error("token counts must be non-negative integers");
     const price = this.store.list("provider_price", 1000, (item) => item.provider === provider && item.model === model)[0]; if (!price) throw new Error("No provider price snapshot");
     const costUsd = input * Number(price.input_per_million) / 1_000_000 + output * Number(price.output_per_million) / 1_000_000;
-    const id = String(args.usage_id ?? `usage_${randomUUID().replaceAll("-", "")}`); return { usage: this.store.create("usage_ledger", id, { provider, model, project_id: args.project_id ?? null, task_id: args.task_id ?? null, input_tokens: input, output_tokens: output, cost_usd: costUsd, price_id: price.id }), idempotent: false };
+    const id = String(fallback(args.usage_id, `usage_${randomUUID().replaceAll("-", "")}`)); return { usage: this.store.create("usage_ledger", id, { provider, model, project_id: args.project_id ?? null, task_id: args.task_id ?? null, input_tokens: input, output_tokens: output, cost_usd: costUsd, price_id: price.id }), idempotent: false };
   }
 
-  report(args: JsonObject = {}): JsonObject { const projectId = args.project_id === undefined ? null : text(args.project_id, "project_id"); const entries = this.store.list("usage_ledger", 10_000, (item) => projectId === null || item.project_id === projectId); return { entries, total_cost_usd: entries.reduce((sum, item) => sum + Number(item.cost_usd ?? 0), 0), total_input_tokens: entries.reduce((sum, item) => sum + Number(item.input_tokens ?? 0), 0), total_output_tokens: entries.reduce((sum, item) => sum + Number(item.output_tokens ?? 0), 0) }; }
+  report(args: JsonObject = {}): JsonObject { const projectId = optionalText(args.project_id, "project_id"); const entries = this.store.list("usage_ledger", 10_000, (item) => projectId === null || item.project_id === projectId); return { entries, total_cost_usd: entries.reduce((sum, item) => sum + numberOrZero(item.cost_usd), 0), total_input_tokens: entries.reduce((sum, item) => sum + numberOrZero(item.input_tokens), 0), total_output_tokens: entries.reduce((sum, item) => sum + numberOrZero(item.output_tokens), 0) }; }
 }

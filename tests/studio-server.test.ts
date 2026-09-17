@@ -181,5 +181,11 @@ test("Studio compatibility facades still route every write through governed kern
     assert.equal((legacy.memory as Record<string, unknown>).status, "active");
     assert.equal((service.studioKnowledgeCompatSave({ content: "Legacy knowledge facade" }).claim as Record<string, unknown>).status, "candidate");
     assert.equal((service.studioWorkflowCompatSave({ workflow_id: "studio-legacy-workflow", name: "Legacy", steps: [] }) as Record<string, unknown>).lifecycle, "draft");
+    f.store.create("memory_item", "compat-previous", { kind: "preference", scope: "user", task_id: "task", workspace_id: "workspace", applies_to: ["old"], content: "Old preference", status: "active" });
+    const superseded = service.studioMemoryCompatSave({ memory_id: "compat-previous", content: "Updated preference", applies_to: ["new"] });
+    assert.equal((superseded.memory as Record<string, unknown>).status, "active");
+    assert.throws(() => service.studioSkillSave({ name: "too-large", content: "x".repeat(48_001) }), /48,000/);
+    service.studioSkillSave({ skill_id: "skill-update", name: "Skill", content: "one" });
+    assert.equal((service.studioSkillSave({ skill_id: "skill-update", name: "Skill", content: "two" }).skill as Record<string, unknown>).previous_version, 1);
   } finally { f.store.close(); }
 });

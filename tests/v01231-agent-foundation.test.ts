@@ -128,6 +128,13 @@ test("v0.12.31 governance kernels fail closed on invalid, drifted and idempotent
     assert.equal((service.memoryConflictResolve({ candidate_id: kept.id, resolution: "keep", actor: "r", reason: "keep" }).candidate as JsonObject).status, "candidate");
     await writeFile(join(root, "workflows", "noop"), "", { flag: "w" }).catch(() => undefined);
     assert.ok(store.find("memory_ledger", "edge-memory"));
+    assert.throws(() => service.memoryCandidatePropose({ source_id: source.id, kind: "procedural", scope_kind: "project", scope_id: "p", content: "procedure", topic: "proc" }), /requires Evidence/);
+    assert.throws(() => service.memoryCandidatePropose({ source_id: source.id, kind: "working", scope_kind: "project", scope_id: "p", content: "x", evidence_ids: "bad" as never }), /array/);
+    assert.throws(() => service.memoryCandidatePropose({ source_id: source.id, kind: "working", scope_kind: "project", scope_id: "p", content: "x", confidence: "bad" }), /unsupported/);
+    assert.throws(() => service.memoryCandidateReview({ candidate_id: String(noConflict.id), decision: "bad", reviewer: "r", reason: "x" }), /decision/);
+    assert.equal((service.memoryConflictList({}).conflicts as JsonObject[]).length, 0);
+    store.save("memory_candidate", String(noConflict.id), { ...store.get("memory_candidate", String(noConflict.id)), conflict_ids: "bad" });
+    assert.equal((service.memoryConflictResolve({ candidate_id: noConflict.id, resolution: "dismiss", actor: "r", reason: "x" }).candidate as JsonObject).status, "candidate");
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
