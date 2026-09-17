@@ -46,6 +46,23 @@ test("Work Session, Workbench projection and durable long-task wake/resume are f
   f.store.create("trace", "trace2", { task_id: "task2", status: "running", model_fingerprint: "m", environment_fingerprint: "e" }); f.store.create("trace_event", "trace2:1", { trace_id: "trace2", sequence: 1, event_kind: "step", action_contract: { action: "read" }, input_refs: [], output_refs: [] }); const replay = experience.replayPlan({ trace_id: "trace2" }); assert.equal(replay.replayable, true); f.store.close();
 });
 
+test("legacy memory consolidation covers default scope, source, confidence and search filters", async () => {
+  const f = await fixture();
+  try {
+    const memory = new (await import("../src/memory-consolidation.ts")).MemoryConsolidationKernel(f.store);
+    const first = memory.remember({ memory_id: "legacy-memory", content: "A bounded observation" });
+    assert.equal((first.memory as Record<string, unknown>).scope, "task");
+    assert.equal((first.memory as Record<string, unknown>).source, "work");
+    const second = memory.remember({ memory_id: "legacy-memory-2", scope: "task", content: "A second observation", source: "test", confidence: 0.9 });
+    const consolidated = memory.consolidate({ memory_ids: ["legacy-memory", "legacy-memory-2"], semantic_id: "legacy-semantic" });
+    assert.equal((consolidated.memory as Record<string, unknown>).status, "active");
+    assert.equal((memory.search({ query: "bounded" }).results as unknown[]).length, 1);
+    assert.equal((memory.search({ query: "bounded", scope: "other" }).results as unknown[]).length, 0);
+    assert.throws(() => memory.remember({ content: "token=secret-value" }), /credentials/);
+    assert.throws(() => memory.consolidate({ memory_ids: ["legacy-memory"], content: "password=secret-value" }), /secrets/);
+  } finally { f.store.close(); }
+});
+
 test("v0.12.12 service and MCP expose the new surfaces", async () => {
   // The service now exposes the default bounded model tool surface and the dispatch/session binding.
   const f = await fixture(); const service = new CraftService(f.store); const opened = service.projectBrainOpen({ project_id: "p3" }); f.store.create("task", "task3", { project_id: "p3", title: "Task", goal: "Goal", status: "active" }); service.projectBrainGoalSave({ project_id: "p3", title: "Ship" }); service.projectBrainDecisionSave({ project_id: "p3", title: "Choose", rationale: "reason", chosen_ref: "wf" }); service.projectBrainMaterialBind({ project_id: "p3", name: "brief", uri: "file:///brief", content_digest: "sha256:b" }); const prepared = service.workSessionPrepare({ project_id: "p3", task_id: "task3", session_id: "s3" }); service.workSessionGet({ session_id: "s3" }); service.workSessionRefresh({ session_id: "s3" }); f.store.create("work_launch", "launch3", { task_id: "task3", status: "prepared" }); service.workSessionBindLaunch({ session_id: "s3", launch_id: "launch3" }); service.workSessionComplete({ session_id: "s3", summary: "done" }); service.projectBrainOutcomeRecord({ project_id: "p3", session_id: "s3", verdict: "passed", summary: "done" }); service.projectBrainExperienceRecord({ project_id: "p3", name: "pattern", pattern: "pattern" }); service.workbenchExperienceQuery({ project_id: "p3" }); service.workbenchExperienceGet({ session_id: "s3" }); service.workbenchExperienceReview({ project_id: "p3" }); const checkpoint = service.longTaskSuspend({ session_id: "s3", wait_condition: "approval" }); service.longTaskGet({ checkpoint_id: (checkpoint.checkpoint as Record<string, unknown>).id }); service.longTaskList({ session_id: "s3" }); service.longTaskWake({ checkpoint_id: (checkpoint.checkpoint as Record<string, unknown>).id, signal: "approved" }); service.longTaskResume({ checkpoint_id: (checkpoint.checkpoint as Record<string, unknown>).id }); service.longTaskTick({ now: "2020-01-01T00:00:00.000Z" });
