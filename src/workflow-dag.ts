@@ -21,22 +21,21 @@ export class WorkflowDagKernel {
     const nodes = args.nodes; if (!Array.isArray(nodes) || !nodes.length) throw new Error("nodes must contain at least one node");
     const seen = new Set<string>(); const normalized: WorkflowNode[] = [];
     for (let i = 0; i < nodes.length; i++) {
-      const raw = nodes[i]; /* node:coverage ignore next */
+      const raw = nodes[i];
       if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error(`nodes[${i}] must be an object`); const n = raw as JsonObject;
       const nodeId = text(n.id, `nodes[${i}].id`); if (seen.has(nodeId)) throw new Error(`duplicate node id: ${nodeId}`); seen.add(nodeId);
       const type = text(n.type, `nodes[${i}].type`); if (!NODE_TYPES.has(type)) throw new Error(`unsupported node type: ${type}`);
-      const deps = n.depends_on === undefined ? [] : n.depends_on; /* node:coverage ignore next */
+      const deps = n.depends_on === undefined ? [] : n.depends_on;
       if (!Array.isArray(deps) || deps.some((d) => typeof d !== "string")) throw new Error(`nodes[${i}].depends_on must be an array`);
       const sideEffect = text(n.side_effect ?? "read_only", `nodes[${i}].side_effect`); if (!EFFECTS.has(sideEffect)) throw new Error(`unsupported side_effect: ${sideEffect}`);
       if (deps.includes(nodeId)) throw new Error(`node ${nodeId} cannot depend on itself`);
-      /* node:coverage ignore next */
       if (type === "retry" && (n.max_attempts === undefined || Number(n.max_attempts) < 1)) throw new Error(`retry node ${nodeId} requires max_attempts`);
       if (type === "subworkflow") text(n.workflow_id, `nodes[${i}].workflow_id`);
       normalized.push({ ...n, id: nodeId, type, depends_on: [...new Set(deps as string[])].sort(), side_effect: sideEffect });
     }
     for (const n of normalized) for (const dep of n.depends_on) if (!seen.has(dep)) throw new Error(`node ${n.id} has unknown dependency: ${dep}`);
     const byId = new Map(normalized.map((n) => [n.id, n])); const visiting = new Set<string>(); const visited = new Set<string>();
-    const visit = (nodeId: string): void => { /* node:coverage ignore next */
+    const visit = (nodeId: string): void => {
       if (visiting.has(nodeId)) throw new Error(`workflow DAG contains a cycle at ${nodeId}`); if (visited.has(nodeId)) return; visiting.add(nodeId); for (const dep of byId.get(nodeId)!.depends_on) visit(dep); visiting.delete(nodeId); visited.add(nodeId); };
     for (const n of normalized) visit(n.id);
     return { nodes: normalized, inputs: args.inputs ?? {}, outputs: args.outputs ?? {}, checkpoint_policy: args.checkpoint_policy ?? { mode: "step" } };
@@ -44,7 +43,6 @@ export class WorkflowDagKernel {
 
   save(args: JsonObject): JsonObject {
     const workflowId = String(args.workflow_id ?? id("workflow_dag")); const graph = this.validate(args); const lifecycle = String(args.lifecycle ?? "draft"); if (!LIFECYCLE.has(lifecycle)) throw new Error("workflow lifecycle is unsupported");
-    /* node:coverage ignore next */
     if (SECRET.test(JSON.stringify(graph)) || SECRET.test(String(args.name)) || SECRET.test(String(args.description ?? ""))) throw new Error("Workflow definition must not contain credentials or secrets");
     const identity = { workflow_id: workflowId, name: text(args.name, "name"), description: String(args.description ?? ""), graph, graph_digest: digest(graph) }; const existing = this.store.find("workflow_dag", workflowId);
     if (existing) { if (existing.identity_digest !== digest(identity)) throw new Error("Workflow DAG idempotency conflict"); return { workflow: existing, idempotent: true }; }
@@ -56,7 +54,6 @@ export class WorkflowDagKernel {
     const workflow = this.store.get("workflow_dag", text(args.workflow_id, "workflow_id")); const current = String(workflow.lifecycle); const target = text(args.target, "target");
     const allowed: Record<string, string[]> = { draft: ["candidate"], candidate: ["verified"], verified: ["canary", "deprecated"], canary: ["routable", "rolled_back"], routable: ["deprecated", "rolled_back"], deprecated: [], rolled_back: [] };
     if (!LIFECYCLE.has(target) || !allowed[current]?.includes(target)) throw new Error(`Invalid Workflow DAG transition: ${current} -> ${target}`);
-    /* node:coverage ignore next */
     if (["verified", "routable"].includes(target)) {
       const evaluation = this.store.get("evaluation_run", text(args.evaluation_run_id, "evaluation_run_id"));
       if (evaluation.verdict !== "passed" || evaluation.split !== "held_out") throw new Error("Workflow verification requires a passed held-out evaluation");
@@ -73,7 +70,6 @@ export class WorkflowDagKernel {
 
   resume(args: JsonObject): JsonObject {
     const cp = this.store.get("workflow_checkpoint", text(args.checkpoint_id, "checkpoint_id")); const workflow = this.store.get("workflow_dag", String(cp.workflow_id));
-    /* node:coverage ignore next */
     const drift = (args.graph_digest !== undefined && args.graph_digest !== cp.graph_digest) || (args.state_digest !== undefined && args.state_digest !== cp.state_digest);
     return { checkpoint: cp, workflow, status: drift ? "needs_replan" : "ready", reason: drift ? "checkpoint fingerprint drift" : "exact graph and state match" };
   }

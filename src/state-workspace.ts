@@ -10,7 +10,6 @@ function digest(value: unknown): string { return `sha256:${createHash("sha256").
 function fileDigest(path: string): string { return `sha256:${createHash("sha256").update(readFileSync(path)).digest("hex")}`; }
 function relativePath(value: unknown, name: string): string { const item = text(value, name).replaceAll("\\", "/"); if (isAbsolute(item) || item.split("/").includes("..")) throw new Error(`${name} must be relative to the workspace`); return item.replace(/^\.\//, "") || "."; }
 function nested(root: string, path: string): string { const target = resolve(root, path);
-  /* node:coverage ignore next */
   if (relative(root, target).startsWith("..")) throw new Error("workspace state path escapes root");
   return target;
 }

@@ -63,6 +63,57 @@ test("legacy memory consolidation covers default scope, source, confidence and s
   } finally { f.store.close(); }
 });
 
+test("work session rejects drift, cross-project bindings and malformed references", async () => {
+  const f = await fixture();
+  try {
+    const brain = f.brain;
+    brain.open({ project_id: "edge-project" });
+    f.store.create("task", "edge-task", { project_id: "edge-project", title: "Edge", goal: "Goal" });
+    const sessions = new WorkSessionKernel(f.store);
+    assert.throws(() => sessions.prepare({ project_id: "edge-project", task_id: "edge-task", knowledge_refs: [{ id: "bad" }, null] }), /items/);
+    assert.throws(() => sessions.prepare({ project_id: "edge-project", task_id: "edge-task", excluded_refs: ["x", "x"] }), /unique/);
+    const prepared = sessions.prepare({ project_id: "edge-project", task_id: "edge-task", session_id: "edge-session", selection_rationale: [], knowledge_refs: [], capability_refs: [], workflow_refs: [], excluded_refs: [] });
+    assert.equal(sessions.refresh({ session_id: "edge-session" }).ready, true);
+    f.store.save("task", "edge-task", { ...f.store.get("task", "edge-task"), title: "Changed" });
+    assert.equal(sessions.refresh({ session_id: "edge-session" }).ready, false);
+    assert.throws(() => sessions.prepare({ project_id: "edge-project", task_id: "edge-task", session_id: "edge-session", goal: "different" }), /idempotency/);
+    f.store.create("work_launch", "edge-launch", { task_id: "other" });
+    assert.throws(() => sessions.bindLaunch({ session_id: "edge-session", launch_id: "edge-launch" }), /belong/);
+    f.store.create("internal_dispatch", "edge-dispatch", { task_id: "other", status: "prepared" });
+    assert.throws(() => sessions.bindDispatch({ session_id: "edge-session", dispatch_id: "edge-dispatch" }), /belong/);
+    f.store.save("task", "edge-task", { ...f.store.get("task", "edge-task"), project_id: null, version: 1 });
+    const fresh = sessions.prepare({ project_id: "edge-project", task_id: "edge-task", session_id: "edge-session-2" });
+    f.store.create("work_launch", "edge-launch-2", { task_id: "edge-task" });
+    assert.equal((sessions.bindLaunch({ session_id: "edge-session-2", launch_id: "edge-launch-2" }).session as Record<string, unknown>).status, "running");
+    const edgeBrain = f.store.list("project_brain").find((item) => item.project_id === "edge-project")!;
+    f.store.save("project_brain", String(edgeBrain.id), { ...edgeBrain, name: "changed" });
+    assert.equal(sessions.refresh({ session_id: String((fresh.session as Record<string, unknown>).id) }).ready, false);
+    assert.equal((sessions.complete({ session_id: "edge-session-2", status: "failed", summary: "failed", outcome_id: "outcome" }).session as Record<string, unknown>).status, "failed");
+  } finally { f.store.close(); }
+});
+
+test("project brain covers default identities, revisions and projection limits", async () => {
+  const f = await fixture();
+  try {
+    const brain = f.brain;
+    const opened = brain.open({ project_id: "defaults", brain_id: "brain-defaults" });
+    assert.equal((opened.brain as Record<string, unknown>).name, "defaults");
+    assert.equal(brain.open({ project_id: "defaults", brain_id: "brain-defaults" }).idempotent, true);
+    assert.throws(() => brain.open({ project_id: "defaults", brain_id: "brain-defaults", description: "changed" }), /idempotency/);
+    assert.throws(() => brain.get({ project_id: "missing" }), /Unknown/);
+    assert.throws(() => brain.snapshot({ project_id: "defaults", limit: 0 }), /between/);
+    brain.goalSave({ project_id: "defaults", goal_id: "goal-default", title: "Ship" });
+    brain.goalSave({ project_id: "defaults", goal_id: "goal-default", title: "Ship v2", metric: "quality" });
+    brain.decisionSave({ project_id: "defaults", decision_id: "decision-default", title: "Use", rationale: "reason", chosen_ref: "ref" });
+    brain.decisionSave({ project_id: "defaults", decision_id: "decision-default", title: "Use v2", rationale: "reason2", chosen_ref: "ref2", excluded_refs: [] });
+    brain.materialBind({ project_id: "defaults", material_id: "material-default", name: "Brief", uri: "file:///brief", content_digest: "sha256:brief" });
+    brain.outcomeRecord({ project_id: "defaults", outcome_id: "outcome-default", verdict: "passed", summary: "done" });
+    const experience = brain.experienceRecord({ project_id: "defaults", experience_id: "experience-default", name: "Pattern", pattern: "pattern" });
+    assert.equal((experience.experience as Record<string, unknown>).source_outcome_id, null);
+    assert.equal(brain.snapshot({ project_id: "defaults", limit: 10 }).content_free, true);
+  } finally { f.store.close(); }
+});
+
 test("v0.12.12 service and MCP expose the new surfaces", async () => {
   // The service now exposes the default bounded model tool surface and the dispatch/session binding.
   const f = await fixture(); const service = new CraftService(f.store); const opened = service.projectBrainOpen({ project_id: "p3" }); f.store.create("task", "task3", { project_id: "p3", title: "Task", goal: "Goal", status: "active" }); service.projectBrainGoalSave({ project_id: "p3", title: "Ship" }); service.projectBrainDecisionSave({ project_id: "p3", title: "Choose", rationale: "reason", chosen_ref: "wf" }); service.projectBrainMaterialBind({ project_id: "p3", name: "brief", uri: "file:///brief", content_digest: "sha256:b" }); const prepared = service.workSessionPrepare({ project_id: "p3", task_id: "task3", session_id: "s3" }); service.workSessionGet({ session_id: "s3" }); service.workSessionRefresh({ session_id: "s3" }); f.store.create("work_launch", "launch3", { task_id: "task3", status: "prepared" }); service.workSessionBindLaunch({ session_id: "s3", launch_id: "launch3" }); service.workSessionComplete({ session_id: "s3", summary: "done" }); service.projectBrainOutcomeRecord({ project_id: "p3", session_id: "s3", verdict: "passed", summary: "done" }); service.projectBrainExperienceRecord({ project_id: "p3", name: "pattern", pattern: "pattern" }); service.workbenchExperienceQuery({ project_id: "p3" }); service.workbenchExperienceGet({ session_id: "s3" }); service.workbenchExperienceReview({ project_id: "p3" }); const checkpoint = service.longTaskSuspend({ session_id: "s3", wait_condition: "approval" }); service.longTaskGet({ checkpoint_id: (checkpoint.checkpoint as Record<string, unknown>).id }); service.longTaskList({ session_id: "s3" }); service.longTaskWake({ checkpoint_id: (checkpoint.checkpoint as Record<string, unknown>).id, signal: "approved" }); service.longTaskResume({ checkpoint_id: (checkpoint.checkpoint as Record<string, unknown>).id }); service.longTaskTick({ now: "2020-01-01T00:00:00.000Z" });

@@ -113,3 +113,22 @@ test("v0.12.18 service and MCP expose the new runtime surface", async () => {
     }
   } finally { f.store.close(); }
 });
+
+test("v0.12.13 validates nullish and empty protocol inputs explicitly", async () => {
+  const f = await fixture();
+  try {
+    const action = new ActionGatewayKernel(f.store);
+    assert.throws(() => action.prepare({ task_id: null, workspace: f.root, operation: "workspace_read", input_digest: "sha256:x" }), /task_id/);
+    assert.throws(() => action.prepare({ task_id: "", workspace: f.root, operation: "workspace_read", input_digest: "sha256:x" }), /task_id/);
+    assert.throws(() => action.prepare({ task_id: "task", workspace: [], operation: "workspace_read", input_digest: "sha256:x" }), /workspace/);
+    assert.throws(() => action.prepare({ task_id: "task", workspace: f.root, operation: "workspace_read", input_digest: [] }), /input_digest/);
+    const gate = new AcceptanceGateKernel(f.store);
+    assert.throws(() => gate.prepare({ task_id: "task", work_id: "w", acceptance_ref: "a", required_artifact_ids: "bad" }), /array/);
+    assert.throws(() => gate.assess({ gate_id: "missing", verdict: "passed", artifact_ids: [], evidence_ids: [] }), /Unknown/);
+    const worker = new DurableWorkerKernel(f.store);
+    assert.throws(() => worker.enqueue({ worker_id: "w", task_id: "task", action: "" }), /action/);
+    const router = new ProviderRouterKernel(f.store);
+    assert.throws(() => router.plan({ providers: ["a", "a"] }), /unique/);
+    assert.throws(() => router.plan({ providers: [null] }), /providers/);
+  } finally { f.store.close(); }
+});

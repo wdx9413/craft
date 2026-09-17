@@ -94,3 +94,32 @@ test("v0.12.12 verifies action authorization, re-observation, delivery, handoff 
     for (const [name, args] of calls) { const response = await mcp.handle({ id: name, method: "tools/call", params: { name, arguments: args } }); assert.equal((response?.result as JsonObject).isError, false, name); }
   } finally { f.store.close(); }
 });
+
+test("v0.12.12 defaults and failure states remain explicit", async () => {
+  const f = await fixture();
+  try {
+    const kernel = new VerifiedAutonomousWorkKernel(f.store);
+    const prepared = kernel.prepare({ work_id: "defaults", task_id: "task", context_manifest_id: f.contextId, host: "internal", workspace_digest: "sha256:w", action_digest: "sha256:a", acceptance_ref: "accept" });
+    assert.equal((prepared.work as JsonObject).model, null);
+    assert.equal(kernel.authorize({ work_id: "defaults" }).work !== undefined, true);
+    const action = kernel.recordAction({ work_id: "defaults", action_contract: {}, idempotency_key: "k", input_digest: "sha256:i", result_digest: "sha256:o" });
+    assert.equal((action.work as JsonObject).status, "running");
+    assert.equal(kernel.recordAction({ work_id: "defaults", action_contract: {}, idempotency_key: "k", input_digest: "sha256:i", result_digest: "sha256:o" }).idempotent, true);
+    assert.equal(kernel.reobserve({ work_id: "defaults", observed_digest: "sha256:w" }).drifted, false);
+    assert.equal((kernel.deliver({ work_id: "defaults", acceptance_verdict: "blocked" }).work as JsonObject).status, "blocked");
+    const observed = kernel.prepare({ work_id: "observed", task_id: "task", context_manifest_id: f.contextId, host: "internal", workspace_digest: "sha256:w", action_digest: "sha256:a", acceptance_ref: "accept" });
+    kernel.authorize({ work_id: "observed" }); kernel.recordAction({ work_id: "observed", action_contract: {}, idempotency_key: "k", input_digest: "sha256:i", result_digest: "sha256:o" }); kernel.reobserve({ work_id: String((observed.work as JsonObject).id), observed_digest: "sha256:w" });
+    assert.throws(() => kernel.deliver({ work_id: "observed", acceptance_verdict: "passed" }), /artifacts/);
+
+    const paused = kernel.prepare({ work_id: "paused", task_id: "task", context_manifest_id: f.contextId, host: "internal", workspace_digest: "sha256:w", action_digest: "sha256:a", acceptance_ref: "accept" });
+    f.store.save("verified_work", String((paused.work as JsonObject).id), { ...(paused.work as JsonObject), status: "paused" });
+    assert.throws(() => kernel.resume({ work_id: "paused", context_digest: "x", expected_context_digest: "y", observed_digest: "z" }), /replan/);
+    assert.equal(kernel.resume({ work_id: "paused", context_digest: "x", observed_digest: "z" }).resumed, true);
+    const handoff = kernel.handoff({ work_id: "paused", target_host: "other", handoff_id: "h" });
+    assert.equal(kernel.handoff({ work_id: "paused", target_host: "other", handoff_id: "h" }).idempotent, true);
+    assert.equal((handoff.work as JsonObject).status, "paused");
+    const sandbox = new SandboxConformanceKernel(f.store);
+    sandbox.save({ profile_id: "defaults-sandbox", platform: "linux", isolation: "verified", network: "deny", checks: {}, verifier: "ci" });
+    assert.equal((sandbox.get({ profile_id: "defaults-sandbox" }).profile as JsonObject).status, "unverified");
+  } finally { f.store.close(); }
+});

@@ -90,3 +90,22 @@ test("Workbench acceptance polling skips overlap and isolates adapter failures",
   const f = await fixture(); let ticks = 0; const server = new LocalWorkbenchServer(f.service, "timer-token", { acceptanceTick: async () => { ticks += 1; await new Promise((resolve) => setTimeout(resolve, 650)); throw new Error("isolated"); } });
   await server.start(0); await new Promise((resolve) => setTimeout(resolve, 1_250)); await server.close(); assert.equal(ticks, 1); f.store.close();
 });
+
+test("Workbench exposes governed resume, fabric, studio, and model routes", async () => {
+  const f = await fixture(); const app = new WorkbenchWebApp(f.service, "route-token", "http://127.0.0.1:4173");
+  try {
+    const request = (method: "GET" | "POST", path: string, body?: string) => app.handle({ method, path, token: "route-token", origin: "http://127.0.0.1:4173", body });
+    assert.equal(request("POST", "/api/verified-work-loops/missing/resume", "{}").status, 422);
+    assert.equal(request("GET", "/api/execution-fabrics/missing").status, 422);
+    assert.equal(request("GET", "/api/work-launches/missing").status, 422);
+    assert.equal(request("GET", "/api/studio/summary").status, 200);
+    assert.equal(request("GET", "/api/studio/resources?kind=skills&limit=1").status, 200);
+    assert.equal(request("POST", "/api/studio/plugins", JSON.stringify({ manifest: { name: "demo", version: "1" } })).status, 201);
+    assert.equal(request("POST", "/api/studio/skills", JSON.stringify({ name: "skill", content: "Use evidence." })).status, 201);
+    assert.equal(request("POST", "/api/studio/memory", JSON.stringify({ content: "temporary" })).status, 201);
+    assert.equal(request("POST", "/api/studio/knowledge/claims", JSON.stringify({ kind: "fact", content: "fact" })).status, 201);
+    assert.equal(request("POST", "/api/studio/workflows", JSON.stringify({ name: "workflow" })).status, 201);
+    assert.equal(request("GET", "/api/models").status, 200);
+    assert.equal(request("GET", "/api/model-profiles").status, 200);
+  } finally { f.store.close(); }
+});

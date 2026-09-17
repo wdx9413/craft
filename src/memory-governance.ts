@@ -20,7 +20,6 @@ export class MemoryGovernanceKernel {
   readonly ledger: KnowledgeMemoryRuntime;
   constructor(store: CraftStore, ledger: KnowledgeMemoryRuntime) { this.store = store; this.ledger = ledger; }
 
-  /* node:coverage ignore next */
   propose(args: JsonObject): JsonObject {
     const kind = text(args.kind, "kind"); if (!KINDS.has(kind)) throw new Error("memory kind is unsupported");
     const scopeKind = text(args.scope_kind, "scope_kind"); if (!SCOPE.has(scopeKind)) throw new Error("scope_kind is unsupported");
@@ -36,7 +35,6 @@ export class MemoryGovernanceKernel {
     const identity = { source_id: sourceId, kind, scope: { kind: scopeKind, id: scopeId }, topic: String(args.topic ?? ""), content_digest: digest(content), sensitivity: String(args.sensitivity ?? "internal"), confidence, evidence_ids: ids, valid_until: validUntil };
     const candidateId = String(args.candidate_id ?? id("memory_candidate")); const existing = this.store.find("memory_candidate", candidateId);
     if (existing) { if (existing.identity_digest !== digest(identity)) throw new Error("Memory candidate idempotency conflict"); return { candidate: existing, idempotent: true }; }
-    /* node:coverage ignore next */
     const conflicts = this.store.list("memory_candidate", 10_000, (item) => Boolean(item.status !== "rejected" && item.status !== "expired" && item.scope && JSON.stringify(item.scope) === JSON.stringify(identity.scope) && item.topic === identity.topic && item.content_digest !== identity.content_digest));
     const status = conflicts.length ? "conflict_pending" : "candidate";
     const candidate = this.store.create("memory_candidate", candidateId, { ...identity, content, status, conflict_ids: conflicts.map((x) => x.id), proposed_by: String(args.proposed_by ?? "agent"), identity_digest: digest(identity) });
@@ -76,7 +74,6 @@ export class MemoryGovernanceKernel {
 
   expirySweep(args: JsonObject = {}): JsonObject {
     const now = new Date(args.now === undefined ? Date.now() : text(args.now, "now")); if (Number.isNaN(now.valueOf())) throw new Error("now must be an ISO timestamp"); const expired: JsonObject[] = [];
-    /* node:coverage ignore next */
     for (const candidate of this.store.list("memory_candidate", 10_000, (x) => x.status === "candidate" || x.status === "approved")) if (candidate.valid_until && Date.parse(String(candidate.valid_until)) < now.valueOf()) expired.push(this.store.save("memory_candidate", String(candidate.id), { ...payload(candidate), status: "expired" }));
     for (const memory of this.store.list("memory_ledger", 10_000, (x) => Boolean(x.status === "active" && x.valid_until && Date.parse(String(x.valid_until)) < now.valueOf()))) expired.push(this.ledger.transition({ memory_id: memory.id, status: "expired", reason: "valid_until elapsed" }).memory as JsonObject);
     return { expired, count: expired.length, now: now.toISOString() };

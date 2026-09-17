@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -24,6 +24,9 @@ test("v0.12.12 adds the unified context, replay, service, bundle and feedback ke
   const f = await fixture();
   try {
     const context = new ContextPlaneKernel(f.store);
+    assert.throws(() => context.save({ project_id: null, task_id: "task" }), /project_id/);
+    assert.throws(() => context.save({ project_id: "project", task_id: "" }), /task_id/);
+    assert.throws(() => context.save({ project_id: "project", task_id: "task", knowledge_refs: "bad" }), /array/);
     const saved = context.save({ project_id: "project", task_id: "task", manifest_id: "manifest", knowledge_refs: ["k"], capability_refs: ["c"], workflow_refs: ["w"], excluded_refs: ["x"], model: "gpt", host: "internal", acceptance_ref: "accept", selection_rationale: "evidence" });
     assert.equal((saved.manifest as JsonObject).status, "pinned");
     assert.equal(context.save({ project_id: "project", task_id: "task", manifest_id: "manifest", knowledge_refs: ["k"], capability_refs: ["c"], workflow_refs: ["w"], excluded_refs: ["x"], model: "gpt", host: "internal", acceptance_ref: "accept", selection_rationale: "evidence" }).idempotent, true);
@@ -32,6 +35,7 @@ test("v0.12.12 adds the unified context, replay, service, bundle and feedback ke
     assert.equal(context.audit({ manifest_id: "manifest", expected_digest: "sha256:drift" }).status, "needs_replan");
 
     const replay = new ReplayRunnerKernel(f.store);
+    assert.throws(() => replay.prepare({ trace_id: "trace", approval_ref: "", workspace_digest: "w" }), /approval_ref/);
     const prepared = replay.prepare({ trace_id: "trace", replay_id: "replay", approval_ref: "human-1", workspace_digest: "sha256:w" });
     assert.equal((prepared.replay as JsonObject).status, "prepared");
     assert.equal(replay.prepare({ trace_id: "trace", replay_id: "replay", approval_ref: "human-1", workspace_digest: "sha256:w" }).idempotent, true);
@@ -120,4 +124,72 @@ test("v0.12.12 adds the unified context, replay, service, bundle and feedback ke
       assert.equal((response?.result as JsonObject).isError, false, name);
     }
   } finally { f.store.close(); }
+});
+
+test("v0.12.11 kernels exercise default, invalid and transition branches", async () => {
+  const f = await fixture();
+  try {
+    const context = new ContextPlaneKernel(f.store);
+    const defaults = context.save({ project_id: "project", task_id: "task", manifest_id: "defaults" });
+    assert.equal((defaults.manifest as JsonObject).model, null);
+    assert.equal(context.audit({ manifest_id: "defaults", expected_digest: "sha256:drift" }).status, "needs_replan");
+    assert.equal(context.audit({ manifest_id: "defaults", expected_digest: "sha256:drift" }).status, "needs_replan");
+    assert.throws(() => context.save({ project_id: "project", task_id: "task", manifest_id: "defaults", model: "changed" }), /idempotency/);
+
+    const replay = new ReplayRunnerKernel(f.store);
+    f.store.save("trace", "trace", { ...f.store.get("trace", "trace"), status: "running" });
+    assert.throws(() => replay.prepare({ trace_id: "trace", approval_ref: "a", workspace_digest: "w" }), /terminal/);
+    f.store.save("trace", "trace", { ...f.store.get("trace", "trace"), status: "completed" });
+    assert.throws(() => replay.prepare({ trace_id: "missing", approval_ref: "a", workspace_digest: "w" }), /Unknown/);
+    const prepared = replay.prepare({ trace_id: "trace", replay_id: "edge-replay", approval_ref: "a", workspace_digest: "w" });
+    assert.throws(() => replay.prepare({ trace_id: "trace", replay_id: "edge-replay", approval_ref: "b", workspace_digest: "w" }), /idempotency/);
+    await assert.rejects(() => replay.execute({ replay_id: "edge-replay", approval_ref: "b" }), /does not match/);
+    assert.equal((await replay.execute({ replay_id: String((prepared.replay as JsonObject).id) })).idempotent, false);
+    assert.equal((await replay.execute({ replay_id: "edge-replay" })).idempotent, true);
+    f.store.create("trace", "trace-drift", { task_id: "task", status: "completed", model_fingerprint: "m", environment_fingerprint: "e" });
+    f.store.create("trace_event", "trace-drift:1", { trace_id: "trace-drift", sequence: 1, event_kind: "read", action_contract: { effect: "read_only" } });
+    replay.prepare({ trace_id: "trace-drift", replay_id: "drift-replay", approval_ref: "a", workspace_digest: "w" });
+    f.store.save("trace", "trace-drift", { ...f.store.get("trace", "trace-drift"), status: "failed" });
+    await assert.rejects(() => replay.execute({ replay_id: "drift-replay" }), /changed/);
+
+    const runtime = new LocalRuntimeServiceKernel(f.store);
+    runtime.configure({ service_id: "local" }); runtime.configure({ service_id: "local", schedule: "hourly" });
+    assert.equal(runtime.stop({ service_id: "local" }).idempotent, true);
+    runtime.start({ service_id: "local" });
+    assert.throws(() => runtime.tick({ service_id: "local", now: "" }), /now/);
+    assert.equal((runtime.tick({ service_id: "local", now: "bad" }).service as JsonObject).last_tick_at, "bad");
+    f.store.create("runtime_wakeup", "wake-2", { service_id: "local", status: "pending" });
+    assert.equal(runtime.tick({ service_id: "local" }).skipped, false);
+
+    const bundles = new ProjectBundleKernel(f.store);
+    assert.throws(() => bundles.export({ project_id: "project", limit: 0 }), /between/);
+    const bundle = bundles.export({ project_id: "project", bundle_id: "edge-bundle", exported_at: "2030-01-01T00:00:00.000Z" });
+    f.store.save("project_bundle", "edge-bundle", { ...(bundle.bundle as JsonObject), bundle_digest: "sha256:drift" });
+    assert.equal(bundles.verify({ bundle_id: "edge-bundle" }).valid, false);
+
+    const feedback = new FeedbackLearningKernel(f.store);
+    assert.throws(() => feedback.record({ scope: "project", action: "", diff_digest: "d", reason: "r" }), /action/);
+    assert.throws(() => feedback.record({ scope: "invalid", action: "x", diff_digest: "d", reason: "r" }), /Unsupported/);
+    const global = feedback.record({ signal_id: "global", scope: "global", action: "x", diff_digest: "d", reason: "r" });
+    assert.equal(feedback.resolve({ signal_id: String((global.signal as JsonObject).id) }).status, "reusable");
+    const taskOnly = feedback.record({ signal_id: "task-only", scope: "task", task_id: "task", action: "x", diff_digest: "d", reason: "r" });
+    assert.equal(feedback.resolve({ signal_id: String((taskOnly.signal as JsonObject).id) }).status, "project_only");
+
+    const domains = new DomainEvaluatorKernel(f.store);
+    domains.save({ evaluator_id: "edge-domain", domain: "x", name: "X", criteria: { score: 1 } });
+    domains.save({ evaluator_id: "edge-domain", domain: "x", name: "X2", criteria: { score: 2 } });
+    assert.equal(domains.evaluate({ evaluator_id: "edge-domain", metrics: { score: 1 } }).verdict, "failed");
+    assert.equal(domains.evaluate({ evaluator_id: "edge-domain", metrics: {} }).verdict, "failed");
+
+    const handoff = new HandoffManifestKernel(f.store);
+    const created = handoff.create({ handoff_id: "edge-handoff", task_id: "task", context_manifest_id: "defaults", host: "internal" });
+    assert.equal((created.handoff as JsonObject).session_id, null);
+    assert.throws(() => handoff.create({ handoff_id: "edge-handoff", task_id: "other", context_manifest_id: "defaults", host: "internal" }), /idempotency/);
+
+    const costs = new CostLedgerKernel(f.store);
+    assert.throws(() => costs.priceSave({ provider: "", model: "m", input_per_million: 1, output_per_million: 1 }), /provider/);
+    assert.throws(() => costs.priceSave({ provider: "x", model: "m", input_per_million: -1, output_per_million: 1 }), /non-negative/);
+    assert.throws(() => costs.usageRecord({ provider: "x", model: "m" }), /No provider price/);
+    assert.deepEqual(costs.report().entries instanceof Array, true);
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });

@@ -22,6 +22,7 @@
     "prepack": "pnpm run build",
     "test:smoke": "node dist/src/cli.js --help",
     "test:plugin": "node --experimental-strip-types scripts/check-plugin-package.ts && node --experimental-strip-types scripts/plugin-smoke.ts && node --experimental-strip-types scripts/plugin-component-smoke.ts && node --experimental-strip-types scripts/plugin-full-smoke.ts",
+    "coverage:branches:report": "c8 --all --src=src --exclude=src/cli.ts --exclude=src/**/index.ts --exclude=**/*.d.ts --reporter=json --reporter=text --report-dir=coverage node --test --test-isolation=none --test-concurrency=1 tests/*.test.ts && node --experimental-strip-types scripts/branch-gap-report.ts",
     "version:check": "node --experimental-strip-types scripts/check-version.ts",
     "test:ts": "pnpm run version:check && node --experimental-strip-types scripts/test.ts",
     "test:v01216": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-include=src/federated-delegation.ts --test-coverage-include=src/harness-topology.ts --test-coverage-include=src/runtime-readiness.ts --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 tests/v01216-federated-runtime.test.ts",
@@ -81,6 +82,7 @@
   },
   "devDependencies": {
     "@types/node": ">=23 <26",
+    "c8": "10.1.3",
     "esbuild": "^0.28.2",
     "typescript": ">=5.8 <7"
   },

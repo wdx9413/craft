@@ -6,6 +6,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { craftPaths } from "../src/paths.ts";
 import { CraftStore } from "../src/store.ts";
+import type { JsonObject } from "../src/store.ts";
 import { V01226Runtime, defineAdapterManifest, importOpenApiDocument, type CommandSpawner } from "../src/v01226-runtime.ts";
 import { CraftService } from "../src/service.ts";
 import { McpServer } from "../src/mcp.ts";
@@ -53,6 +54,10 @@ test("v0.12.26 generic adapter manifest lifecycle is governed and reversible", a
     const installed = await f.runtime.adapterInstall(manifestPath); assert.equal((installed.manifest as { adapter_id: string }).adapter_id, "file.adapter");
     await writeFile(manifestPath, JSON.stringify({ ...input, adapter_id: "bad.adapter", dependencies: { install: "npm" } })); await assert.rejects(f.runtime.adapterInstall(manifestPath), /installation/);
     await writeFile(manifestPath, JSON.stringify({ ...input, adapter_id: "bad.digest" })); await assert.rejects(f.runtime.adapterInstall(manifestPath, "sha256:wrong"), /integrity/);
+    const defaults = defineAdapterManifest({ adapter_id: "defaults", version: "1", kind: "mcp" });
+    assert.deepEqual(defaults.platforms, ["any"]); assert.deepEqual(defaults.effects, ["read_only"]); assert.deepEqual(defaults.capabilities, []);
+    const decorated = defineAdapterManifest({ adapter_id: "decorated", version: "1", kind: "host", dependencies: {}, integrity: "sha256:i", signature: "sig", sandbox_profile: "strict", metadata: {} });
+    assert.equal(decorated.sandbox_profile, "strict");
   } finally { await close(f); }
 });
 
@@ -87,6 +92,15 @@ test("v0.12.26 context projection, durable runtime, trust, routing, delivery and
     assert.equal(f.runtime.deliveryGate({ artifacts: ["a"], evidence: ["e"], required_artifacts: ["a"], required_evidence: ["e"] }).status, "passed"); assert.equal(f.runtime.deliveryGate({ artifacts: [], evidence: [], required_artifacts: ["a"], required_evidence: ["e"] }).status, "blocked");
     const bundle = f.runtime.projectBundle({ project: { id: "p" } }); assert.match(String(bundle.digest), /^sha256:/); const handoff = f.runtime.handoff({ context_manifest: context.manifest as Record<string, unknown>, host: { id: "h" }, task: { id: "t" } }); assert.equal(handoff.manifest_type, "craft.task.handoff");
     f.runtime.evaluatorDefine({ evaluator_id: "video", domain: "video", criteria: ["duration", "format"] }); assert.equal(f.runtime.evaluatorRun({ evaluator_id: "video", observations: { duration: 10, format: "mp4" } }).verdict, "passed"); assert.equal(f.runtime.evaluatorRun({ evaluator_id: "video", observations: {} }).verdict, "inconclusive");
+    const autoContext = f.runtime.contextManifestSave({ project_id: "p", task_id: "t" }); assert.ok((autoContext.manifest as { manifest_id: string }).manifest_id);
+    const projected = f.runtime.capabilityProject({ candidates: [{ id: "fallback" }] }); assert.equal((projected.selected as JsonObject[])[0]?.id, "fallback");
+    assert.equal((f.runtime.durableComplete("d", "completed").run as JsonObject).result, null);
+    assert.equal(f.runtime.durableRecover("other").recovered, 0);
+    assert.equal((f.runtime.trustRecord({ scope: "assisted", passed: 9, failed: 1 }).profile as JsonObject).autonomy, "assisted");
+    assert.equal((f.runtime.modelRoute({ objective: "latency", candidates: [{ id: "slow", latency_ms: 20 }, { id: "fast", latency_ms: 5 }], budget: 1 }).selected as JsonObject).id, "fast");
+    assert.equal(f.runtime.deliveryGate({ artifacts: ["a"], evidence: ["e"] }).status, "passed");
+    assert.deepEqual((f.runtime.projectBundle({ project: { id: "p" } }).bundle as JsonObject).sessions, []);
+    assert.deepEqual((f.runtime.handoff({ context_manifest: {}, host: {}, task: {} }).budget as JsonObject), {});
   } finally { await close(f); }
 });
 
@@ -94,6 +108,8 @@ test("v0.12.26 OpenAPI importer creates read/write adapter contracts", async () 
   const f = await fixture(); try {
     const imported = await importOpenApiDocument(f.runtime, "openapi: 3.0.0\ninfo:\n  title: Demo API\npaths:\n  /items:\n    get:\n      operationId: listItems\n    post:\n      operationId: createItem\n"); const manifest = imported.manifest as { kind: string; metadata: { operations: Array<{ effect: string }> } }; assert.equal(manifest.kind, "openapi"); assert.deepEqual(manifest.metadata.operations.map((item) => item.effect), ["read", "external_write"]);
     await assert.rejects(importOpenApiDocument(f.runtime, { openapi: "3.0.0", paths: {} }), /no operations/);
+    const fallback = await importOpenApiDocument(f.runtime, { paths: { "/health": { options: {}, head: {} } } });
+    assert.equal((fallback.manifest as JsonObject).kind, "openapi");
   } finally { await close(f); }
 });
 
@@ -109,5 +125,20 @@ test("v0.12.26 Service and MCP expose the shared runtime without a second execut
     await call("craft_command_plan", { argv: ["echo", "mcp"] }); const mcpRun = await call("craft_command_run", { argv: [process.execPath, "-e", "console.log('mcp')"] }); const mcpPayload = mcpRun?.result as { structuredContent?: { run?: { id: string } } } | undefined; const mcpRunId = String(mcpPayload?.structuredContent?.run?.id ?? ""); if (mcpRunId) { await call("craft_command_observe", { run_id: mcpRunId }); await call("craft_command_cancel", { run_id: mcpRunId }); }
     await call("craft_capability_projection", { candidates: [{ id: "c", token_cost: 1 }] }); await call("craft_durable_run_start", { run_id: "mcp-durable" }); await call("craft_durable_run_tick", {}); await call("craft_durable_run_complete", { run_id: "mcp-durable", status: "completed" }); await call("craft_durable_run_recover", {}); await call("craft_trust_curve_record", { scope: "mcp", passed: 1, failed: 0 }); await call("craft_model_route", { candidates: [{ id: "m", quality: 1 }] }); await call("craft_delivery_gate", { artifacts: ["a"], evidence: ["e"] }); await call("craft_task_handoff_manifest", { context_manifest: { id: "c" }, host: { id: "h" }, task: { id: "t" } }); await call("craft_domain_evaluator_run", { evaluator_id: "svc-eval", observations: { ok: true } }); await call("craft_openapi_import", { document: "openapi: 3.0.0\npaths:\n  /mcp:\n    get: {}\n" });
     assert.equal((plan.plan as { status: string }).status, "planned");
+  } finally { await close(f); }
+});
+
+test("v0.12.26 rejects null, empty and malformed adapter inputs", async () => {
+  const f = await fixture();
+  try {
+    assert.throws(() => defineAdapterManifest({ adapter_id: null as never, version: "1", kind: "command" }), /adapter_id/);
+    assert.throws(() => defineAdapterManifest({ adapter_id: "x", version: "", kind: "command" }), /version/);
+    assert.throws(() => defineAdapterManifest({ adapter_id: "x", version: "1", kind: "command", platforms: [] }), /unique/);
+    assert.throws(() => defineAdapterManifest({ adapter_id: "x", version: "1", kind: "command", capabilities: [null] as never }), /capabilities/);
+    assert.throws(() => defineAdapterManifest({ adapter_id: "x", version: "1", kind: "command", dependencies: [] as never }), /dependencies/);
+    assert.throws(() => f.runtime.commandPlan({ argv: ["echo"], timeout_ms: 99 }), /between/);
+    assert.throws(() => f.runtime.commandPlan({ argv: ["echo"], shell: 1 as never }), /shell/);
+    assert.throws(() => f.runtime.contextManifestSave({ manifest_id: "bad", knowledge_refs: ["x", "x"] }), /unique/);
+    assert.throws(() => f.runtime.adapterList(0), /between/);
   } finally { await close(f); }
 });

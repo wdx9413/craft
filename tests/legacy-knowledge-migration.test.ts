@@ -41,3 +41,48 @@ test("legacy formal knowledge migration is read-only, candidate-first, deduplica
     const mcp = new McpServer(service, "component-knowledge"); const listed = await mcp.handle({ id: "tools", method: "tools/list", params: {} }); assert.equal(((listed?.result as JsonObject).tools as JsonObject[]).some((item) => String(item.name).includes("legacy_knowledge")), false);
   } finally { store.close(); await rm(root, { recursive: true, force: true }); await rm(legacy, { recursive: true, force: true }); }
 });
+
+test("legacy migration discovery and import cover metadata, drift and failure branches", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-legacy-edge-"));
+  const legacy = await mkdtemp(join(tmpdir(), "legacy-edge-"));
+  const pages = join(legacy, "data", "pages", "workflows"); await mkdir(pages, { recursive: true });
+  const valid = (title: string) => `---\ntitle: ${title}\nstatus: confirmed\ncategory: workflows\nknowledge_type: workflow\nevidence_type: test\nevidence_ref: tests/x\nreuse_reason: reusable rule\n---\n# ${title}\n`;
+  await writeFile(join(pages, "valid.md"), valid("Valid"));
+  await writeFile(join(pages, "plain.md"), "plain body");
+  await writeFile(join(pages, "unsupported.md"), "---\nstatus: confirmed\ncategory: unknown\nknowledge_type: unknown\nevidence_type: test\nevidence_ref: x\nreuse_reason: reusable\n---\n");
+  await writeFile(join(pages, "missing-evidence.md"), "---\nstatus: confirmed\ncategory: workflows\nknowledge_type: workflow\n---\n");
+  await writeFile(join(pages, "forbidden.md"), "---\nstatus: confirmed\ncategory: workflows\nknowledge_type: workflow\nevidence_type: test\nevidence_ref: x\nreuse_reason: 会议纪要\n---\n");
+  await writeFile(join(pages, "large.md"), "x".repeat(256 * 1024 + 1));
+  const store = await new CraftStore(craftPaths(root)).open(); const kernel = new LegacyKnowledgeMigrationKernel(store);
+  try {
+    const discovered = await kernel.discover({ migration_id: "edge-discovery", source_root: legacy });
+    const entries = discovered.migration as JsonObject; const list = entries.entries as JsonObject[];
+    assert.equal(list.find((item) => String(item.rel_path).endsWith("plain.md"))?.reason, "not_confirmed");
+    assert.equal(list.find((item) => String(item.rel_path).endsWith("unsupported.md"))?.reason, "unsupported_metadata");
+    assert.equal(list.find((item) => String(item.rel_path).endsWith("missing-evidence.md"))?.reason, "missing_evidence_or_reuse_reason");
+    assert.equal(list.find((item) => String(item.rel_path).endsWith("forbidden.md"))?.reason, "sensitive_or_disallowed");
+    assert.equal(list.find((item) => String(item.rel_path).endsWith("large.md"))?.reason, "file_too_large");
+    const beforeDigest = String((discovered.migration as JsonObject).source_digest);
+    await writeFile(join(pages, "valid.md"), valid("Changed")); await rm(join(pages, "unsupported.md"), { force: true });
+    const diff = await kernel.sourceDiff({ migration_id: "edge-discovery", source_root: legacy });
+    assert.equal(diff.changed, true); assert.ok((diff.tombstones as string[]).some((item) => item.endsWith("unsupported.md"))); assert.notEqual(diff.current_digest, beforeDigest);
+    const fresh = await kernel.discover({ migration_id: "edge-import", source_root: legacy });
+    const freshMigration = fresh.migration as JsonObject; const eligible = (freshMigration.entries as JsonObject[]).find((item) => String(item.rel_path).endsWith("valid.md"))!;
+    const imported = await kernel.importCandidates({ migration_id: "edge-import", candidate_ids: [String(eligible.rel_path), "unknown.md"] }, "source", (entry) => ({ evidence_id: `e:${entry.rel_path}`, claim_id: `c:${entry.rel_path}` }));
+    assert.equal((imported.candidates as JsonObject[]).length, 1); assert.equal((imported.failures as JsonObject[])[0]?.code, "unknown_candidate");
+    const again = await kernel.importCandidates({ migration_id: "edge-import", candidate_ids: [String(eligible.rel_path)] }, "source", () => { throw new Error("should not be called"); });
+    assert.equal((again.candidates as JsonObject[])[0]?.idempotent, true);
+    await assert.rejects(kernel.importCandidates({ migration_id: "edge-import", candidate_ids: [] }, "source", () => ({ evidence_id: "e", claim_id: "c" })), /non-empty/);
+    const candidate = (imported.candidates as JsonObject[])[0]!;
+    await assert.rejects(Promise.resolve().then(() => kernel.publishReady({ candidate_id: candidate.id })), /knowledge_claim/);
+    store.create("knowledge_claim", String(candidate.claim_id), { status: "candidate", evidence_ids: [candidate.evidence_id] });
+    assert.throws(() => kernel.publishReady({ candidate_id: candidate.id }), /reviewed/);
+    store.save("knowledge_claim", String(candidate.claim_id), { ...store.get("knowledge_claim", String(candidate.claim_id)), status: "reviewed" });
+    assert.equal(kernel.publishReady({ candidate_id: candidate.id }).idempotent, false);
+    store.save("legacy_knowledge_migration_candidate", String(candidate.id), { ...candidate, status: "published" });
+    assert.equal(kernel.publishReady({ candidate_id: candidate.id }).idempotent, true);
+    assert.equal(kernel.retractReady({ candidate_id: candidate.id }).idempotent, false);
+    store.save("legacy_knowledge_migration_candidate", String(candidate.id), { ...store.get("legacy_knowledge_migration_candidate", String(candidate.id)), status: "retracted" });
+    assert.equal(kernel.retractReady({ candidate_id: candidate.id }).idempotent, true);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); await rm(legacy, { recursive: true, force: true }); }
+});

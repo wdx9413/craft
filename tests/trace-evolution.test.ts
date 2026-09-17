@@ -135,3 +135,25 @@ test("Trace retention archives terminal records for seven days and preserves act
     assert.equal((maintenance.trace_retention as JsonObject).deleted, 1);
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
+
+test("Trace Kernel handles omitted optional fields, alternate event names, and bounded validation", async () => {
+  const f = await fixture();
+  try {
+    const started = f.service.traceStart({ task_id: "task" });
+    const traceId = String((started.trace as JsonObject).id);
+    assert.equal(String((started.trace as JsonObject).metadata_digest).startsWith("sha256:"), true);
+    assert.equal(f.service.traceStart({ trace_id: traceId, task_id: "task" }).idempotent, true);
+    const event = f.service.traceAppend({ trace_id: traceId, event_type: "legacy.event", data: {} });
+    assert.equal((event.event as JsonObject).event_kind, "legacy.event");
+    assert.equal(f.service.traceObserve({ trace_id: traceId, data: null, state_before: null, state_after: null }).event !== undefined, true);
+    assert.throws(() => f.service.traceAppend({ trace_id: traceId, event_kind: "bad", data: [], action_contract: [] }), /object/);
+    assert.throws(() => f.service.traceAppend({ trace_id: traceId, event_kind: "bad", data: {}, trust: "bad" }), /unsupported/);
+    assert.throws(() => f.service.traceAppend({ trace_id: traceId, event_kind: "bad", data: {}, input_refs: ["same", "same"] }), /unique/);
+    assert.throws(() => f.service.traceFeedback({ trace_id: traceId, signal: "bad", summary: "x" }), /unsupported/);
+    const feedback = f.service.traceFeedback({ trace_id: traceId, signal: "accepted", summary: "accepted" });
+    assert.equal((feedback.feedback as JsonObject).value, null);
+    assert.throws(() => f.service.traceFeedback({ trace_id: traceId, signal: "rejected", summary: "x", value: [] }), /object/);
+    assert.throws(() => f.service.traceQuery({ limit: 1.5 }), /between/);
+    assert.equal((f.service.traceQuery({}).count as number) >= 3, true);
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});

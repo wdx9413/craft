@@ -7,7 +7,7 @@ import { createRuntimeHandlers } from "./mcp/runtime-handlers.ts";
 import { createWorkHandlers } from "./mcp/work-handlers.ts";
 import { createEvaluationHandlers } from "./mcp/evaluation-handlers.ts";
 import { createWorkspaceHandlers } from "./mcp/workspace-handlers.ts";
-import type { McpHandler } from "./mcp/handler-types.ts";
+import type { McpHandler } from "./mcp/handler-types.js";
 export { COMPONENT_SURFACES, COMPONENT_SURFACE_NAMES, DOMAIN_SURFACE_NAMES, SURFACE_NAMES, SURFACE_RULES, domainSurfaceOf } from "./mcp/surface-registry.ts";
 
 const TOOL_DEFINITIONS: Tool[] = [

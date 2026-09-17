@@ -52,6 +52,18 @@ test("OTLP export validates endpoint and accepts an injected transport", async (
   await assert.rejects(() => exportOtlp("https://otel.example", payload, async () => ({ status: 500, body: "bad" })), /HTTP 500/);
 });
 
+test("Runtime Truth covers fallback fields, provider variants, and rejection boundaries", () => {
+  const normalized = standardizeTrace({ id: "fallback", event_type: "event", data: { token: "redact", keep: true }, status: null, trust: "human", actor: "user", parent_span_id: "parent" });
+  assert.equal(normalized.trace_id, "fallback"); assert.equal(normalized.event_kind, "event"); assert.equal(normalized.parent_span_id, "parent");
+  assert.throws(() => standardizeTrace({ trace_id: "x", trust: "" }), /trust/);
+  assert.throws(() => standardizeTrace({ trace_id: "x", input_refs: [1] as never }), /input_refs/);
+  assert.deepEqual(parseToolCalls({}), []);
+  assert.deepEqual(parseToolCalls({ choices: [{ message: { tool_calls: [{ function: { name: "search", arguments: {} } }] } }], content: [{ type: "tool_use", id: "u", name: "use" }] }), [{ id: "tool_1", name: "search", arguments: {} }, { id: "u", name: "use", arguments: {} }]);
+  assert.throws(() => parseToolCalls({ content: [{ type: "tool_use", id: "", name: "use" }] }), /tool_use id/);
+  assert.deepEqual(parseSseFrames("comment\ndata: \ndata: [DONE]\n"), []);
+  assert.equal(toOtlpTrace({ trace_id: "x", event_kind: "run", status: "failed", parent_span_id: "p", data: {} }).resourceSpans !== undefined, true);
+});
+
 test("Runtime Truth persistence and Full MCP expose the same bounded operations", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-runtime-truth-")); const store = await new CraftStore(craftPaths(root)).open();
   try {

@@ -9,7 +9,6 @@ function text(value: unknown, name: string): string { if (typeof value !== "stri
 function digest(value: unknown): string { return `sha256:${createHash("sha256").update(String(value)).digest("hex")}`; }
 function recordDigest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
 function safeChild(root: string, path: string): string { const target = resolve(root, path);
-  /* node:coverage ignore next */
   if (relative(root, target).startsWith("..")) throw new Error("Project Knowledge path escapes the trusted project root");
   return target;
 }
@@ -27,7 +26,6 @@ export class ProjectKnowledgeKernel {
     if (children.some((entry) => entry.isSymbolicLink())) throw new Error("Project Knowledge does not follow symbolic links");
     const entries = children.filter((entry) => entry.isFile() && entry.name.endsWith(".md")).sort((a, b) => a.name.localeCompare(b.name)).map((entry) => {
       const path = safeChild(memoriesRoot, entry.name); const stat = lstatSync(path);
-      /* node:coverage ignore next */
       if (stat.isSymbolicLink()) throw new Error("Project Knowledge does not follow symbolic links");
       const content = readFileSync(path, "utf8");
       return { memory_id: `serena:${entry.name.slice(0, -3)}`, path: `.serena/memories/${entry.name}`, name: entry.name.slice(0, -3), digest: digest(content), size_bytes: stat.size } satisfies MemoryDescriptor;

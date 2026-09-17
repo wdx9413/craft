@@ -24712,7 +24712,6 @@ var MemoryGovernanceKernel = class {
     this.store = store;
     this.ledger = ledger;
   }
-  /* node:coverage ignore next */
   propose(args) {
     const kind2 = text110(args.kind, "kind");
     if (!KINDS3.has(kind2)) throw new Error("memory kind is unsupported");
