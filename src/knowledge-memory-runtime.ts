@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { CraftStore, type JsonObject } from "./store.ts";
+import { contentReference } from "./content-store.ts";
 
 const SOURCE_KINDS = new Set(["evidence_wiki", "serena", "kefu_wiki", "project_note", "readme", "custom"]);
 const TRUSTS = new Set(["untrusted", "bounded", "verified"]);
@@ -25,7 +26,7 @@ function canonical(value: unknown): string {
   return JSON.stringify(value);
 }
 function digest(value: unknown): string { return `sha256:${createHash("sha256").update(canonical(value)).digest("hex")}`; }
-function payload(record: JsonObject): JsonObject { const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record; return rest; }
+function payload(record: JsonObject): JsonObject { const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record; if (rest.content_ref !== undefined) delete rest.content; return rest; }
 function noSecret(value: string, name: string): string { if (SECRET.test(value)) throw new Error(`${name} must not contain credentials or secrets`); return value; }
 function noSecretValue(value: unknown, name: string): void {
   if (typeof value === "string") { noSecret(value, name); return; }
@@ -52,7 +53,7 @@ export class KnowledgeMemoryRuntime {
 
   installBuiltins(): JsonObject {
     const sources = [
-      this.sourceRegister({ source_id: "builtin.evidence-wiki", kind: "evidence_wiki", label: "Craft Evidence Wiki", scope_kind: "user", scope_id: "local", locator: "~/.craft_data/wiki", content_digest: "builtin:evidence-wiki:v1", trust: "verified", access: "proposal_only" }).source,
+      this.sourceRegister({ source_id: "builtin.evidence-wiki", kind: "evidence_wiki", label: "Craft Evidence Wiki", scope_kind: "user", scope_id: "local", locator: "~/.craft_data/knowledge/md", content_digest: "builtin:evidence-wiki:v1", trust: "verified", access: "proposal_only" }).source,
       this.sourceRegister({ source_id: "builtin.serena-project-knowledge", kind: "serena", label: "Serena project knowledge", scope_kind: "project", scope_id: "selected-project", locator: ".serena/memories", content_digest: "builtin:serena-project-knowledge:v1", trust: "bounded", access: "read_only" }).source,
     ];
     return { sources };
@@ -91,10 +92,12 @@ export class KnowledgeMemoryRuntime {
     if ((kind === "procedural" || confidence === "confirmed") && !evidenceIds.length) throw new Error("Procedural or confirmed Memory requires Evidence");
     const explicitValidUntil = date(args.valid_until, "valid_until");
     const validUntil = explicitValidUntil ?? (kind === "working" ? new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() : kind === "episodic" ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString() : null);
-    const identity = { source_id: source.id, source_version: source.version, kind, scope: memoryScope, content, content_digest: digest(content), sensitivity, confidence, evidence_ids: evidenceIds, valid_until: validUntil };
+    const contentDigest = digest(content);
+    const identity = { source_id: source.id, source_version: source.version, kind, scope: memoryScope, content_digest: contentDigest, sensitivity, confidence, evidence_ids: evidenceIds, valid_until: validUntil };
     const memoryId = String(args.memory_id ?? `memory_ledger_${randomUUID().replaceAll("-", "")}`); const existing = this.store.find("memory_ledger", memoryId); const identityDigest = digest(identity);
     if (existing) { if (existing.identity_digest !== identityDigest) throw new Error("Memory Ledger idempotency conflict"); return { memory: existing, idempotent: true }; }
-    return { memory: this.store.create("memory_ledger", memoryId, { ...identity, identity_digest: identityDigest, status: "active", supersedes_id: null }), idempotent: false };
+    const contentRef = this.store.contentStore.writeSync({ kind: "memory", record_id: memoryId, version: 1, scope: `${memoryScope.kind}:${memoryScope.id}`, status: "active", sensitivity, source_id: String(source.id), body: content });
+    return { memory: this.store.create("memory_ledger", memoryId, { ...identity, content_ref: contentRef, identity_digest: identityDigest, status: "active", supersedes_id: null }), idempotent: false };
   }
 
   transition(args: JsonObject): JsonObject {
@@ -164,17 +167,27 @@ export class KnowledgeMemoryRuntime {
         && (item.valid_until === null || Date.parse(String(item.valid_until)) >= now.valueOf()) && (allowRestricted || item.sensitivity !== "restricted")
         && (selectedSourceIds === null || selectedSourceIds.has(String(item.source_id)));
     })
-      .map((item) => ({ memory: item, required: requestedIds.includes(String(item.id)), score: queryTerms.reduce((sum, term) => sum + Number(String(item.content).toLowerCase().includes(term)), 0) }))
+      .map((item) => { const body = this.content(item); return { memory: item, body, required: requestedIds.includes(String(item.id)), score: queryTerms.reduce((sum, term) => sum + Number(body.toLowerCase().includes(term)), 0) }; })
       .filter((item) => item.required || item.score > 0).sort((left, right) => Number(right.required) - Number(left.required) || right.score - left.score || String(left.memory.id).localeCompare(String(right.memory.id)));
     for (const memoryId of requestedIds) if (!candidates.some((item) => item.memory.id === memoryId)) throw new Error("Required Memory is unavailable in this Context");
     const items: JsonObject[] = []; let usedChars = 0;
-    for (const candidate of candidates) { const size = String(candidate.memory.content).length; if (items.length >= maxItems) break; if (usedChars + size > maxChars) { if (candidate.required) throw new Error("Required Memory exceeds Context budget"); continue; } usedChars += size; items.push({ memory_id: candidate.memory.id, memory_version: candidate.memory.version, source_id: candidate.memory.source_id, content: candidate.memory.content, content_digest: candidate.memory.content_digest, sensitivity: candidate.memory.sensitivity, reason: candidate.required ? "required" : retrievalMode === "vector" ? "evaluated_vector_adapter" : "keyword_overlap" }); }
+    for (const candidate of candidates) { const size = candidate.body.length; if (items.length >= maxItems) break; if (usedChars + size > maxChars) { if (candidate.required) throw new Error("Required Memory exceeds Context budget"); continue; } usedChars += size; items.push({ memory_id: candidate.memory.id, memory_version: candidate.memory.version, source_id: candidate.memory.source_id, content: candidate.body, content_digest: candidate.memory.content_digest, sensitivity: candidate.memory.sensitivity, reason: candidate.required ? "required" : retrievalMode === "vector" ? "evaluated_vector_adapter" : "keyword_overlap" }); }
     const receiptId = String(args.receipt_id ?? `context_resolution_${randomUUID().replaceAll("-", "")}`); const identity = { query_digest: digest(query), scope: requestedScope, retrieval_adapter_id: adapter?.id ?? null, retrieval_adapter_version: adapter?.version ?? null, retrieval_mode: retrievalMode, allow_restricted: allowRestricted, memory_refs: items.map((item) => ({ memory_id: item.memory_id, memory_version: item.memory_version, content_digest: item.content_digest, reason: item.reason })), max_items: maxItems, max_chars: maxChars, used_chars: usedChars };
     const existing = this.store.find("context_resolution_receipt", receiptId); const identityDigest = digest(identity);
     if (existing) { if (existing.identity_digest !== identityDigest) throw new Error("Context Resolution Receipt idempotency conflict"); return { receipt: existing, items, idempotent: true }; }
     return { receipt: this.store.create("context_resolution_receipt", receiptId, { ...identity, identity_digest: identityDigest, omitted_count: candidates.length - items.length, content_free: true }), items, idempotent: false };
   }
 
-  get(args: JsonObject): JsonObject { return { memory: this.store.get("memory_ledger", text(args.memory_id, "memory_id"), args.version === undefined ? undefined : Number(args.version)) }; }
+  get(args: JsonObject): JsonObject {
+    const memory = this.store.get("memory_ledger", text(args.memory_id, "memory_id"), args.version === undefined ? undefined : Number(args.version));
+    return { memory: { ...memory, content: this.content(memory) } };
+  }
   receiptGet(args: JsonObject): JsonObject { return { receipt: this.store.get("context_resolution_receipt", text(args.receipt_id, "receipt_id"), args.version === undefined ? undefined : Number(args.version)) }; }
+
+  private content(memory: JsonObject): string {
+    if (typeof memory.content === "string") return memory.content;
+    const ref = memory.content_ref;
+    if (!contentReference(ref)) throw new Error("Memory content reference is missing");
+    return this.store.contentStore.readCompatSync(ref).body;
+  }
 }

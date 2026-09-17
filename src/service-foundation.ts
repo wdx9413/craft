@@ -131,6 +131,7 @@ import { EvaluationCoordinator } from "./application/coordinators/evaluation-coo
 import { WorkspaceCoordinator } from "./application/coordinators/workspace-coordinator.ts";
 import { DurableActionLoopKernel } from "./durable-action-loop.ts";
 import { ExperienceLedgerKernel } from "./experience-ledger.ts";
+import { ContentMigrationKernel } from "./content-migration.ts";
 
 /**
  * Stable composition root for the service. Domain behavior stays in focused
@@ -236,6 +237,7 @@ export abstract class ServiceFoundation {
   readonly autonomousRuntime: AutonomousRuntimeKernel;
   readonly capabilityLifecycle: CapabilityLifecycleKernel;
   readonly memoryConsolidation: MemoryConsolidationKernel;
+  readonly contentMigration: ContentMigrationKernel;
   readonly remoteInterop: RemoteInteropKernel;
   readonly platformOperations: PlatformOperationsKernel;
   readonly modelProviders: readonly ModelProviderSpec[];
@@ -382,6 +384,7 @@ export abstract class ServiceFoundation {
     this.autonomousRuntime = new AutonomousRuntimeKernel(store);
     this.capabilityLifecycle = new CapabilityLifecycleKernel(store);
     this.memoryConsolidation = new MemoryConsolidationKernel(store);
+    this.contentMigration = new ContentMigrationKernel(store);
     this.remoteInterop = new RemoteInteropKernel(store);
     this.platformOperations = new PlatformOperationsKernel(store);
     this.metrics = new MetricsKernel(store);

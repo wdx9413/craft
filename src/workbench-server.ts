@@ -120,11 +120,6 @@ export class WorkbenchWebApp {
       if (request.method === "GET" && path === "/api/domain-kits") return json(200, this.service.domainKitInstallBuiltins());
       if (request.method === "POST" && path.startsWith("/api/domain-kits/") && path.endsWith("/apply")) return json(201, this.service.domainKitApply({ ...bodyObject(request.body), kit_id: decodeURIComponent(path.slice(17, -6)) }));
       if (request.method === "GET" && path === "/api/knowledge") return json(200, this.service.knowledgeWorkbenchView({ limit: url.searchParams.get("limit") ?? undefined }));
-      if (request.method === "GET" && path === "/api/studio/resources") return json(200, this.service.studioResourceView({ kind: queryValue(url, "kind"), task_id: queryValue(url, "task_id"), limit: queryValue(url, "limit") }));
-      if (request.method === "POST" && path === "/api/studio/memory") return json(201, this.service.studioMemorySave(bodyObject(request.body)));
-      if (request.method === "POST" && path === "/api/studio/memory/review") return json(200, this.service.studioMemoryReview(bodyObject(request.body)));
-      if (request.method === "POST" && path === "/api/studio/knowledge/claims") return json(201, this.service.studioKnowledgeClaimSave(bodyObject(request.body)));
-      if (request.method === "POST" && path === "/api/studio/workflows") return json(201, this.service.studioWorkflowSave(bodyObject(request.body)));
       if (request.method === "GET" && path.startsWith("/api/knowledge/pages/")) return json(200, this.service.wikiPageGet({ page_id: decodeURIComponent(path.slice(21)), version: url.searchParams.get("version") ?? undefined }));
       if (request.method === "POST" && path.startsWith("/api/knowledge/pages/") && path.endsWith("/refresh")) return json(200, this.service.wikiPageRefresh({ page_id: decodeURIComponent(path.slice(21, -8)) }));
       if (request.method === "POST" && path.startsWith("/api/knowledge/claims/") && path.endsWith("/review")) return json(200, this.service.knowledgeClaimReview({ ...bodyObject(request.body), claim_id: decodeURIComponent(path.slice(22, -7)) }));
@@ -171,6 +166,7 @@ export class WorkbenchWebApp {
       if (request.method === "POST" && path === "/api/studio/plugins") return json(201, this.service.studioPluginInstall(bodyObject(request.body)));
       if (request.method === "POST" && path === "/api/studio/skills") return json(201, this.service.studioSkillSave(bodyObject(request.body)));
       if (request.method === "POST" && path === "/api/studio/memory") return json(201, this.service.studioMemorySave(bodyObject(request.body)));
+      if (request.method === "POST" && path === "/api/studio/memory/review") return json(200, this.service.studioMemoryReview(bodyObject(request.body)));
       if (request.method === "POST" && path.startsWith("/api/studio/memory/") && path.endsWith("/retire")) return json(200, this.service.studioMemoryRetire({ memory_id: decodeURIComponent(path.slice(19, -7)) }));
       if (request.method === "POST" && path === "/api/studio/knowledge/claims") return json(201, this.service.studioKnowledgeClaimSave(bodyObject(request.body)));
       if (request.method === "POST" && path === "/api/studio/workflows") return json(201, this.service.studioWorkflowSave(bodyObject(request.body)));

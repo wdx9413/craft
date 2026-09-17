@@ -17,7 +17,8 @@ function noSecret(value: string): void { if (/(?:api[_-]?key|password|secret|tok
 /** Read-only bridge for Serena's project-local Markdown memories. It never writes .serena. */
 export class ProjectKnowledgeKernel {
   readonly store: CraftStore;
-  constructor(store: CraftStore) { this.store = store; }
+  readonly lstat: typeof lstatSync;
+  constructor(store: CraftStore, lstat: typeof lstatSync = lstatSync) { this.store = store; this.lstat = lstat; }
 
   discover(args: JsonObject): JsonObject {
     if (args.trusted !== true) throw new Error("Project Knowledge discovery requires trusted=true");
@@ -25,7 +26,7 @@ export class ProjectKnowledgeKernel {
     const children = existsSync(memoriesRoot) ? readdirSync(memoriesRoot, { withFileTypes: true }) : [];
     if (children.some((entry) => entry.isSymbolicLink())) throw new Error("Project Knowledge does not follow symbolic links");
     const entries = children.filter((entry) => entry.isFile() && entry.name.endsWith(".md")).sort((a, b) => a.name.localeCompare(b.name)).map((entry) => {
-      const path = safeChild(memoriesRoot, entry.name); const stat = lstatSync(path);
+      const path = safeChild(memoriesRoot, entry.name); const stat = this.lstat(path);
       if (stat.isSymbolicLink()) throw new Error("Project Knowledge does not follow symbolic links");
       const content = readFileSync(path, "utf8");
       return { memory_id: `serena:${entry.name.slice(0, -3)}`, path: `.serena/memories/${entry.name}`, name: entry.name.slice(0, -3), digest: digest(content), size_bytes: stat.size } satisfies MemoryDescriptor;

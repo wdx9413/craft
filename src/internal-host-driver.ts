@@ -57,7 +57,7 @@ const MAX_FINAL_MESSAGE_CHARS = 4_000;
 const MAX_SESSION_MESSAGE_CHARS = 2_000;
 function persistedConversation(messages: ConversationMessage[]): JsonObject[] {
   return messages.map((message) => {
-    const raw = typeof message.content === "string" ? message.content : message.content === null ? "" : JSON.stringify(message.content);
+    const raw = message.content === null ? "" : message.content;
     return { role: message.role, content: redact(raw).slice(0, MAX_SESSION_MESSAGE_CHARS), content_digest: digest(raw), tool_calls_digest: message.tool_calls ? digest(message.tool_calls) : null };
   });
 }

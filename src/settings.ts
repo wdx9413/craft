@@ -132,7 +132,7 @@ export async function saveSettings(patch: CraftSettingsPatch, paths = craftPaths
   const current = await loadSettings(paths);
   const next = normalizeSettings({ ...current, ...patch,
     workbench: { ...current.workbench, ...(patch.workbench ?? {}) }, runtime: { ...current.runtime, ...(patch.runtime ?? {}) },
-    models: patch.models !== undefined ? patch.models : current.models,
+    models: [current.models, patch.models][Number(patch.models !== undefined)],
     privacy: { ...current.privacy, ...(patch.privacy ?? {}) }, updatedAt: now.toISOString() }, paths);
   await atomicPrivateJson(paths.settingsFile, next); return next;
 }

@@ -2,10 +2,12 @@ import { existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { applyMigrations, backupDatabase } from "./store-migrations.ts";
 import { craftPaths, ensureLayout, type CraftPaths } from "./paths.ts";
+import { MarkdownContentStore, type ContentKind } from "./content-store.ts";
 
 export const SCHEMA_VERSION = 4;
 export type JsonObject = Record<string, unknown>;
 export type SaveEntry = { kind: string; id: string; payload: JsonObject; version?: number };
+export type RawRecord = { kind: string; id: string; version: number; payload: JsonObject; created_at: string; updated_at: string };
 const RESERVED_FIELDS = new Set(["id", "version", "created_at", "updated_at"]);
 
 function payloadOnly(payload: JsonObject): JsonObject {
@@ -30,10 +32,12 @@ function storedSchemaVersion(database: DatabaseSync): number {
 
 export class CraftStore {
   readonly paths: CraftPaths;
+  readonly contentStore: MarkdownContentStore;
   #database: DatabaseSync | null = null;
 
   constructor(paths = craftPaths()) {
     this.paths = paths;
+    this.contentStore = new MarkdownContentStore(paths);
   }
 
   async open(): Promise<this> {
@@ -55,6 +59,7 @@ export class CraftStore {
       // schema (e.g. a newer-than-supported version) we must close the
       // freshly opened connection so the file lock is released.
       applyMigrations(database, SCHEMA_VERSION);
+      this.rebuildDomainIndexes(database);
     } catch (error) {
       database.close();
       throw error;
@@ -76,6 +81,24 @@ export class CraftStore {
   /** Copy the live database file to `paths.backupsDir`. */
   backup(backupsDir = this.paths.backupsDir): string {
     return backupDatabase(this.paths.databaseFile, backupsDir);
+  }
+
+  private rebuildDomainIndexes(database: DatabaseSync): void {
+    const entries: Array<[string, ContentKind]> = [[this.paths.knowledgeDatabaseFile, "knowledge"], [this.paths.memoryDatabaseFile, "memory"]];
+    const rows = database.prepare("SELECT kind,id,version,payload_json,updated_at FROM records").all() as Array<Record<string, unknown>>;
+    for (const [path, domain] of entries) {
+      const index = new DatabaseSync(path);
+      try {
+        index.exec("PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS content_index (kind TEXT NOT NULL, id TEXT NOT NULL, version INTEGER NOT NULL, content_ref TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(kind,id,version)); DELETE FROM content_index;");
+        const insert = index.prepare("INSERT INTO content_index(kind,id,version,content_ref,updated_at) VALUES(?,?,?,?,?)");
+        for (const row of rows) {
+          const payload = JSON.parse(String(row.payload_json)) as JsonObject;
+          const ref = payload.content_ref;
+          if (!ref || typeof ref !== "object" || Array.isArray(ref) || (ref as Record<string, unknown>).kind !== domain) continue;
+          insert.run(String(row.kind), String(row.id), Number(row.version), JSON.stringify(ref), String(row.updated_at));
+        }
+      } finally { index.close(); }
+    }
   }
 
   get database(): DatabaseSync {
@@ -176,6 +199,41 @@ export class CraftStore {
       .get(kind, kind) as { count: number }).count);
   }
 
+  /** Return every stored version without hydrating Markdown content. Used by
+   * reversible content migrations and integrity tooling only. */
+  rawRecords(kind?: string): RawRecord[] {
+    const rows = kind === undefined
+      ? this.database.prepare("SELECT * FROM records ORDER BY kind,id,version").all()
+      : this.database.prepare("SELECT * FROM records WHERE kind=? ORDER BY id,version").all(kind);
+    return rows.map((row) => {
+      const item = row as Record<string, unknown>;
+      return { kind: String(item.kind), id: String(item.id), version: Number(item.version),
+        payload: JSON.parse(String(item.payload_json)) as JsonObject,
+        created_at: String(item.created_at), updated_at: String(item.updated_at) };
+    });
+  }
+
+  /** Migration-only in-place payload replacement. The caller must create a
+   * database backup first; ordinary domain updates remain append-only. */
+  replacePayload(kind: string, id: string, version: number, payload: JsonObject): void {
+    this.transaction((database) => {
+      const result = database.prepare("UPDATE records SET payload_json=?,updated_at=? WHERE kind=? AND id=? AND version=?")
+        .run(JSON.stringify(payloadOnly(payload)), new Date().toISOString(), kind, id, version);
+      if (Number(result.changes) !== 1) throw new Error(`Unknown record version: ${kind}/${id}/${version}`);
+    });
+  }
+
+  replacePayloadBatch(entries: Array<{ kind: string; id: string; version: number; payload: JsonObject }>): void {
+    if (!entries.length) return;
+    this.transaction((database) => {
+      const statement = database.prepare("UPDATE records SET payload_json=?,updated_at=? WHERE kind=? AND id=? AND version=?");
+      for (const entry of entries) {
+        const result = statement.run(JSON.stringify(payloadOnly(entry.payload)), new Date().toISOString(), entry.kind, entry.id, entry.version);
+        if (Number(result.changes) !== 1) throw new Error(`Unknown record version: ${entry.kind}/${entry.id}/${entry.version}`);
+      }
+    });
+  }
+
   searchCapabilities(terms: string[], limit: number): JsonObject[] {
     const bounded = Math.min(validLimit(limit), 20);
     if (!terms.length) return [];
@@ -230,8 +288,13 @@ export class CraftStore {
   }
 
   private record(row: Record<string, unknown>): JsonObject {
-    return { ...JSON.parse(String(row.payload_json)), id: row.id, version: row.version,
-      created_at: row.created_at, updated_at: row.updated_at };
+    const payload = JSON.parse(String(row.payload_json)) as JsonObject;
+    const record: JsonObject = { ...payload, id: row.id, version: row.version, created_at: row.created_at, updated_at: row.updated_at };
+    if (record.content_ref && (row.kind === "knowledge_claim" || row.kind === "memory_ledger" || row.kind === "episodic_memory" || row.kind === "semantic_memory")) {
+      try { record.content = this.contentStore.readCompatSync(record.content_ref as never).body; }
+      catch { record.content_unavailable = true; }
+    }
+    return record;
   }
 
   close(): void {

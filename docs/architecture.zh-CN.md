@@ -101,6 +101,8 @@ v0.7.0 已实现 Experience Pattern、Skill Proposal 和受控 Publisher；v0.8.
 
 默认根目录是 `~/.craft_data`，可用 `CRAFT_DATA_DIR` 覆盖。配置写入 `config/`，版本化状态写入 `db/craft.db`，其余目录用于可重建索引、日志、备份、缓存和运行时文件。业务项目仅作为读取或明确授权的 Workflow 工作目录，不存放 Craft 内部数据。
 
+知识与记忆正文写入 `knowledge/md/`、`memory/md/` 的版本化 Markdown；对应的 `knowledge/knowledge.db`、`memory/memory.db` 保存可重建域索引，主 SQLite 继续保存跨域生命周期事务。正文带 `craft.content.v1` frontmatter 与 SHA-256 摘要，引用读取会校验路径、版本和摘要。旧 `content/` 正文或内联正文可通过显式 `craft_content_migrate` 做备份、dry-run、幂等迁移，漂移或敏感内容会失败关闭。
+
 所有业务实体按 `(kind, id, version)` 保存；事件流按 Stream 单调递增。写入使用 SQLite 事务和 WAL，配置使用同目录原子替换。
 
 ## 当前边界

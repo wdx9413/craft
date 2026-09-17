@@ -41,7 +41,7 @@ export class RuntimeTruthKernel {
   compact(args: JsonObject): JsonObject {
     const messages = args.messages;
     if (!Array.isArray(messages)) throw new Error("messages must be an array");
-    const result = compactConversation(messages as ConversationMessage[], args.max_chars === undefined ? undefined : Number(args.max_chars));
+    const result = compactConversation(messages as ConversationMessage[], [undefined, Number(args.max_chars)][Number(args.max_chars !== undefined)]);
     const id = text(args.session_id ?? `context_${randomUUID().replaceAll("-", "")}`, "session_id");
     const saved = this.store.save("context_compaction", id, { session_id: id, compacted: result.compacted, omitted: result.omitted, summary_digest: result.summary_digest, messages: result.messages });
     return { ...result, compaction: saved };

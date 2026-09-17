@@ -3,7 +3,7 @@ import type { JsonObject } from "./store.ts";
 import { CraftStore } from "./store.ts";
 
 function text(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim(); }
-function payload(record: JsonObject): JsonObject { const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record; return rest; }
+function payload(record: JsonObject): JsonObject { const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record; if (rest.content_ref !== undefined) delete rest.content; return rest; }
 function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
 const SECRET = /(?:api[_-]?key|authorization|cookie|password|passwd|secret|token)\s*[:=]\s*[^\s]{6,}/iu;
 
@@ -23,7 +23,11 @@ export class MemoryConsolidationKernel {
       if (existing.identity_digest !== identityDigest) throw new Error("Memory idempotency conflict");
       return { memory: existing, idempotent: true };
     }
-    return { memory: this.store.create("episodic_memory", memoryId, { scope, content, source, task_id: args.task_id ?? null, identity_digest: identityDigest, consolidated: false, confidence: Number(args.confidence ?? 0.5) }), idempotent: false };
+    const contentRef = this.store.contentStore.writeSync({ kind: "memory", record_id: memoryId, version: 1,
+      scope, status: "active", sensitivity: "internal", source_id: source, body: content });
+    return { memory: this.store.create("episodic_memory", memoryId, { scope, source, task_id: args.task_id ?? null,
+      content_ref: contentRef, content_digest: contentRef.digest, identity_digest: identityDigest, consolidated: false,
+      confidence: Number(args.confidence ?? 0.5) }), idempotent: false };
   }
 
   consolidate(args: JsonObject): JsonObject {
@@ -41,7 +45,11 @@ export class MemoryConsolidationKernel {
       return { memory: existing, idempotent: true };
     }
     for (const memory of memories) this.store.save("episodic_memory", String(memory.id), { ...payload(memory), consolidated: true, consolidated_into: semanticId });
-    return { memory: this.store.create("semantic_memory", semanticId, { scope, content, memory_ids: memoryIds, identity_digest: identityDigest, confidence: Number(args.confidence ?? 0.8), status: "active" }), idempotent: false };
+    const contentRef = this.store.contentStore.writeSync({ kind: "memory", record_id: semanticId, version: 1,
+      scope, status: "active", sensitivity: "internal", source_id: "consolidation", body: content });
+    return { memory: this.store.create("semantic_memory", semanticId, { scope, memory_ids: memoryIds,
+      content_ref: contentRef, content_digest: contentRef.digest, identity_digest: identityDigest,
+      confidence: Number(args.confidence ?? 0.8), status: "active" }), idempotent: false };
   }
 
   resolve(args: JsonObject): JsonObject {

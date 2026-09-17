@@ -127,13 +127,14 @@ export class LegacyKnowledgeMigrationKernel {
   private async entry(sourceRoot: string, pagesRoot: string, file: string): Promise<Entry> {
     const info = await stat(file); const rel_path = relative(sourceRoot, file).split("\\").join("/");
     if (info.size > MAX_BYTES) return this.excluded(rel_path, digest(`${file}:${info.size}`), "file_too_large");
-    const content = await readFile(file, "utf8"); const page_digest = digest(content); if (!safe(content)) return this.excluded(rel_path, page_digest, "sensitive_or_disallowed");
+    const content = await readFile(file, "utf8"); const page_digest = digest(content);
     const { metadata, body } = frontmatter(content); const title = metadata.title || heading(body, relative(pagesRoot, file));
-    const category = metadata.category ?? relative(pagesRoot, file).split("/")[0] ?? ""; const knowledge_type = metadata.knowledge_type ?? "";
+    const category = metadata.category ?? relative(pagesRoot, file).split("/")[0]!; const knowledge_type = metadata.knowledge_type ?? "";
     if (metadata.status !== "confirmed") return this.excluded(rel_path, page_digest, "not_confirmed", title, category, knowledge_type);
     if (!CATEGORIES.has(category) || !TYPES.has(knowledge_type)) return this.excluded(rel_path, page_digest, "unsupported_metadata", title, category, knowledge_type);
     const reuse = metadata.reuse_reason ?? ""; const evidence_type = metadata.evidence_type ?? null; if (!reuse || !evidence_type || !metadata.evidence_ref) return this.excluded(rel_path, page_digest, "missing_evidence_or_reuse_reason", title, category, knowledge_type);
     const summary = `来源摘要：${reuse}`; if (!safe(`${title}\n${summary}`)) return this.excluded(rel_path, page_digest, "sensitive_or_disallowed", title, category, knowledge_type);
+    if (!safe(content)) return this.excluded(rel_path, page_digest, "sensitive_or_disallowed", title, category, knowledge_type);
     return { rel_path, page_digest, title, summary, eligibility: "eligible", reason: null, category, knowledge_type, scope: metadata.scope ?? "project", project: metadata.project ?? null, tags: tags(metadata.tags), evidence_type };
   }
 

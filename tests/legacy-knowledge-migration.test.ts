@@ -55,9 +55,17 @@ test("legacy migration compatibility defaults and non-Error failures remain expl
   const pages = join(legacy, "data", "pages", "facts"); await mkdir(pages, { recursive: true });
   const page = (title: string, type: string) => `---\ntitle: ${title}\nstatus: confirmed\ncategory: workflows\nknowledge_type: ${type}\nevidence_type: test\nevidence_ref: tests/x\nreuse_reason: reusable\nscope: project\n---\n# ${title}\n`;
   await writeFile(join(pages, "working.md"), page("Working fact", "stable_project_fact"));
+  await writeFile(join(pages, "missing-meta.md"), "---\nstatus: confirmed\nevidence_type: test\nevidence_ref: tests/x\nreuse_reason: reusable\n---\n# Missing metadata\n");
+  await writeFile(join(pages, "summary-secret.md"), "---\ntitle: Summary secret\nstatus: confirmed\ncategory: workflows\nknowledge_type: workflow\nevidence_type: test\nevidence_ref: tests/x\nreuse_reason: token=supersecretvalue\n---\n# Summary secret\n");
   const store = await new CraftStore(craftPaths(root)).open(); const service = new CraftService(store);
   try {
     const discovered = await service.legacyKnowledgeMigrationDiscover({ migration_id: "compat", source_root: legacy, offline: true });
+    const entries = (discovered.migration as JsonObject).entries as JsonObject[];
+    assert.equal(entries.find((item) => String(item.rel_path).endsWith("missing-meta.md"))?.reason, "unsupported_metadata");
+    assert.equal(entries.find((item) => String(item.rel_path).endsWith("summary-secret.md"))?.reason, "sensitive_or_disallowed");
+    await writeFile(join(legacy, "data", "pages", "facts", "body-secret.md"), "---\ntitle: Body secret\nstatus: confirmed\ncategory: workflows\nknowledge_type: workflow\nevidence_type: test\nevidence_ref: tests/x\nreuse_reason: reusable\n---\npassword: supersecret\n");
+    const bodySecret = await service.legacyKnowledgeMigrationDiscover({ migration_id: "compat-body-secret", source_root: legacy, offline: true });
+    assert.equal(((bodySecret.migration as JsonObject).entries as JsonObject[]).find((item) => String(item.rel_path).endsWith("body-secret.md"))?.reason, "sensitive_or_disallowed");
     const imported = await service.legacyKnowledgeMigrationCandidateImport({ migration_id: "compat", candidate_ids: ["data/pages/facts/working.md"], offline: true });
     const candidate = (imported.candidates as JsonObject[])[0]!;
     store.save("evidence", String(candidate.evidence_id), { ...store.get("evidence", String(candidate.evidence_id)), confidence: "bounded" });
@@ -74,8 +82,18 @@ test("legacy migration compatibility defaults and non-Error failures remain expl
     service.knowledgeClaimReview = (() => { throw "retract string failure"; }) as typeof service.knowledgeClaimReview;
     await assert.rejects(service.legacyKnowledgeMigrationRetract({ candidate_id: candidate.id, reviewer: "reviewer", reason: "withdrawn" }), /retract string failure/);
     service.knowledgeClaimReview = originalClaimReview;
+    await assert.rejects(service.legacyKnowledgeMigrationRetract({ candidate_id: candidate.id, reviewer: "reviewer" }), /reviewer and reason/);
+    await assert.rejects(service.legacyKnowledgeMigrationRetract({ candidate_id: candidate.id, reviewer: "", reason: "withdrawn" }), /reviewer and reason/);
+    await assert.rejects(service.legacyKnowledgeMigrationRetract({ candidate_id: candidate.id, reviewer: null, reason: "withdrawn" }), /reviewer and reason/);
     await service.legacyKnowledgeMigrationRetract({ candidate_id: candidate.id, reviewer: "reviewer", reason: "withdrawn" });
     assert.equal((discovered.migration as JsonObject).id, "compat");
+    const direct = new LegacyKnowledgeMigrationKernel(store);
+    await direct.discover({ migration_id: "compat-failure", source_root: legacy });
+    const failedImport = await direct.importCandidates({ migration_id: "compat-failure", candidate_ids: ["data/pages/facts/working.md"] }, "source", () => { throw "candidate import string failure"; });
+    assert.equal((failedImport.failures as JsonObject[]).length, 1);
+    await direct.discover({ migration_id: "compat-error-failure", source_root: legacy });
+    const failedErrorImport = await direct.importCandidates({ migration_id: "compat-error-failure", candidate_ids: ["data/pages/facts/working.md"] }, "source", () => { throw new Error("candidate import error failure"); });
+    assert.equal((failedErrorImport.failures as JsonObject[])[0]?.code, "candidate import error failure");
   } finally { store.close(); await rm(root, { recursive: true, force: true }); await rm(legacy, { recursive: true, force: true }); }
 });
 
@@ -140,6 +158,15 @@ test("legacy discovery rejects unclosed frontmatter without reading a second sou
   const pages = join(legacy, "data", "pages"); await mkdir(pages, { recursive: true }); await writeFile(join(pages, "broken.md"), "---\ntitle: broken\nstatus: confirmed\n");
   const store = await new CraftStore(craftPaths(root)).open();
   try { await assert.rejects(new LegacyKnowledgeMigrationKernel(store).discover({ source_root: legacy }), /frontmatter is not closed/); }
+  finally { store.close(); await rm(root, { recursive: true, force: true }); await rm(legacy, { recursive: true, force: true }); }
+});
+
+test("legacy discovery enforces the bounded source file count", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-legacy-file-limit-")); const legacy = await mkdtemp(join(tmpdir(), "legacy-file-limit-"));
+  const pages = join(legacy, "data", "pages"); await mkdir(pages, { recursive: true });
+  await Promise.all(Array.from({ length: 10_001 }, (_, index) => writeFile(join(pages, `page-${index}.md`), "plain")));
+  const store = await new CraftStore(craftPaths(root)).open();
+  try { await assert.rejects(new LegacyKnowledgeMigrationKernel(store).discover({ source_root: legacy }), /file limit/); }
   finally { store.close(); await rm(root, { recursive: true, force: true }); await rm(legacy, { recursive: true, force: true }); }
 });
 

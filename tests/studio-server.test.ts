@@ -145,6 +145,8 @@ test("Studio exposes task conversation behind the same token and origin gates", 
   assert.equal(rejected.status, 422); assert.match(rejected.body, /no longer configured/);
   await f.service.settingsUpdate({ models: [{ id: "studio-model", name: "Studio model", protocol: "openai-compatible", baseUrl: "https://example.test/v1", model: "studio", apiKeyEnv: "STUDIO_KEY", supportsTools: false }] });
   const successTask = f.service.taskOpen({ title: "Configured conversation", goal: "Keep context", model_id: "studio-model" }).task as Record<string, unknown>;
+  const { permission_mode: _permissionMode, ...withoutPermission } = successTask;
+  f.store.save("task", String(successTask.id), withoutPermission);
   const originalFetch = globalThis.fetch;
   const originalKey = process.env.STUDIO_KEY;
   process.env.STUDIO_KEY = "test-key";
@@ -154,6 +156,8 @@ test("Studio exposes task conversation behind the same token and origin gates", 
     assert.equal(success.status, 201); assert.match(success.body, /safe reply/);
     globalThis.fetch = (async () => { throw new Error("transport down"); }) as typeof fetch;
     assert.equal((await app.handleAsync({ method: "POST", path: `/api/tasks/${String(successTask.id)}/messages`, token: "secret", body: JSON.stringify({ content: "retry" }) })).status, 422);
+    globalThis.fetch = (async () => { throw "transport string down"; }) as typeof fetch;
+    assert.equal((await app.handleAsync({ method: "POST", path: `/api/tasks/${String(successTask.id)}/messages`, token: "secret", body: JSON.stringify({ content: "retry-string" }) })).status, 422);
   } finally { globalThis.fetch = originalFetch; if (originalKey === undefined) delete process.env.STUDIO_KEY; else process.env.STUDIO_KEY = originalKey; }
   f.store.close();
 });

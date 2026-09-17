@@ -94,6 +94,7 @@ function object(value: unknown, name: string): JsonObject {
 }
 function recordPayload(record: JsonObject): JsonObject {
   const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...payload } = record;
+  if (payload.content_ref !== undefined) delete payload.content;
   return payload;
 }
 function uniqueTextArray(value: unknown, name: string, minimum = 1): string[] {
@@ -2300,9 +2301,11 @@ export class CraftService extends ServiceFoundation {
     const evidenceIds = uniqueTextArray(args.evidence_ids, "evidence_ids"); evidenceIds.forEach((item) => this.store.get("evidence", item));
     const tags = optionalTextArray(args.tags, "tags"); const validUntil = args.valid_until === undefined ? null : new Date(validIsoTime(args.valid_until, "valid_until")).toISOString();
     const claimId = String(args.claim_id ?? id("knowledge_claim")); const existing = this.store.find("knowledge_claim", claimId);
-    const identity = { kind, content, scope, evidence_ids: evidenceIds, tags, valid_until: validUntil };
+    const contentDigest = valueDigest(content);
+    const identity = { kind, content_digest: contentDigest, scope, evidence_ids: evidenceIds, tags, valid_until: validUntil };
     if (existing) { if (existing.identity_digest !== valueDigest(identity)) throw new Error("Knowledge claim idempotency conflict"); return { claim: existing, idempotent: true }; }
-    const claim = this.store.create("knowledge_claim", claimId, { ...identity, identity_digest: valueDigest(identity), status: "candidate", review: null });
+    const contentRef = this.store.contentStore.writeSync({ kind: "knowledge", record_id: claimId, version: 1, scope, status: "candidate", sensitivity: "internal", source_id: String(args.source_id ?? "builtin.evidence-wiki"), body: content });
+    const claim = this.store.create("knowledge_claim", claimId, { ...identity, content_ref: contentRef, identity_digest: valueDigest(identity), status: "candidate", review: null });
     return { claim, idempotent: false };
   }
   knowledgeClaimGet(args: JsonObject): JsonObject { return { claim: this.store.get("knowledge_claim", text(args.claim_id, "claim_id"), args.version === undefined ? undefined : finiteInteger(args.version, "version", 1)) }; }
@@ -2323,23 +2326,33 @@ export class CraftService extends ServiceFoundation {
     const title = assertNoSecret(text(args.title, "title"), "title"); const body = assertNoSecret(document(args.body, "body"), "body"); const scope = String(args.scope ?? "global");
     const claimIds = optionalTextArray(args.claim_ids, "claim_ids"); claimIds.forEach((item) => this.store.get("knowledge_claim", item));
     const pageId = String(args.page_id ?? id("wiki_page")); const existing = this.store.find("wiki_page", pageId);
-    const identity = { title, body, scope, claim_ids: claimIds };
+    const identity = { title, body_digest: valueDigest(body), scope, claim_ids: claimIds };
     if (existing && existing.identity_digest === valueDigest(identity)) return { page: existing, idempotent: true };
-    const filePath = join(this.store.paths.root, "wiki", `${pageId}.v${existing ? Number(existing.version) + 1 : 1}.md`);
+    const nextVersion = existing ? Number(existing.version) + 1 : 1;
     if (existing) {
-      const current = await readFile(String(existing.file_path), "utf8");
+      let current: string;
+      try { current = existing.content_ref ? this.store.contentStore.readCompatSync(existing.content_ref as never).body : await readFile(String(existing.file_path), "utf8"); }
+      catch { throw new Error("Wiki page file has unrecorded changes; refresh it before saving"); }
       if (valueDigest(current) !== existing.body_digest) throw new Error("Wiki page file has unrecorded changes; refresh it before saving");
     }
-    await mkdir(join(this.store.paths.root, "wiki"), { recursive: true }); await writeFile(filePath, body, "utf8");
-    const page = this.store.save("wiki_page", pageId, { title, scope, claim_ids: claimIds, identity_digest: valueDigest(identity), body_digest: valueDigest(body), file_path: filePath, revision_source: String(args.author ?? "human") });
+    const contentRef = await this.store.contentStore.write({ kind: "knowledge", record_id: pageId, version: nextVersion, scope, status: "active", sensitivity: "internal", source_id: "builtin.evidence-wiki", body });
+    const page = this.store.save("wiki_page", pageId, { title, scope, claim_ids: claimIds, identity_digest: valueDigest(identity), body_digest: valueDigest(body), content_ref: contentRef, file_path: contentRef.path, revision_source: String(args.author ?? "human") });
     return { page, idempotent: false };
   }
-  wikiPageGet(args: JsonObject): JsonObject { const page = this.store.get("wiki_page", text(args.page_id, "page_id"), args.version === undefined ? undefined : finiteInteger(args.version, "version", 1)); return { page, body: readFileSync(String(page.file_path), "utf8") }; }
+  wikiPageGet(args: JsonObject): JsonObject {
+    const page = this.store.get("wiki_page", text(args.page_id, "page_id"), args.version === undefined ? undefined : finiteInteger(args.version, "version", 1));
+    const body = page.content_ref ? (() => { try { return this.store.contentStore.readUncheckedSync(String((page.content_ref as JsonObject).path)).body; } catch { return readFileSync(String(page.file_path), "utf8"); } })() : readFileSync(String(page.file_path), "utf8");
+    return { page, body };
+  }
   wikiPageList(args: JsonObject): JsonObject { return this.list("wiki_page", "pages", args); }
   wikiPageRefresh(args: JsonObject): JsonObject {
-    const page = this.store.get("wiki_page", text(args.page_id, "page_id")); const body = assertNoSecret(document(readFileSync(String(page.file_path), "utf8"), "body"), "body");
+    const page = this.store.get("wiki_page", text(args.page_id, "page_id"));
+    const rawPath = String(page.file_path ?? (page.content_ref as JsonObject).path);
+    const body = assertNoSecret(document(page.content_ref ? (() => { try { return this.store.contentStore.readUncheckedSync(rawPath).body; } catch { return readFileSync(rawPath, "utf8"); } })() : readFileSync(rawPath, "utf8"), "body"), "body");
     if (valueDigest(body) === page.body_digest) return { page, changed: false };
-    const saved = this.store.save("wiki_page", String(page.id), { ...recordPayload(page), body_digest: valueDigest(body), identity_digest: null, revision_source: "filesystem" });
+    const nextVersion = Number(page.version) + 1;
+    const contentRef = this.store.contentStore.writeSync({ kind: "knowledge", record_id: String(page.id), version: nextVersion, scope: String(page.scope ?? "global"), status: "active", sensitivity: "internal", source_id: "builtin.evidence-wiki", body });
+    const saved = this.store.save("wiki_page", String(page.id), { ...recordPayload(page), body_digest: valueDigest(body), content_ref: contentRef, file_path: contentRef.path, identity_digest: null, revision_source: "filesystem" });
     return { page: saved, changed: true };
   }
   knowledgeWorkbenchView(args: JsonObject = {}): JsonObject { return this.knowledgeWorkbench.view(args); }
@@ -2862,7 +2875,7 @@ export class CraftService extends ServiceFoundation {
   modelAdd(args: JsonObject): JsonObject {
     const settings = loadSettingsSync(this.store.paths);
     const id = text(args.id, "id").trim().toLowerCase().replace(/[^a-z0-9-]/g, "-");
-    if (!id) throw new Error("model id is required");
+    if (/^-+$/.test(id)) throw new Error("model id is required");
     if (settings.models.some((m) => m.id === id)) throw new Error(`model already exists: ${id}`);
     const model = validateModelInput(args, id);
     const next = saveSettingsSync({ models: [...settings.models, model] }, this.store.paths);
@@ -4088,6 +4101,10 @@ export class CraftService extends ServiceFoundation {
       evidence_ids: [...new Set(traceEvidence)], source: "orchestration_aggregated" });
     return { plan, ...this.trialGet({ trial_id: trialId }) };
   }
+
+  contentStatus(): JsonObject { return this.contentMigration.status(); }
+  contentVerify(args: JsonObject = {}): JsonObject { return this.contentMigration.verify(args); }
+  contentMigrate(args: JsonObject = {}): JsonObject { return this.contentMigration.migrate(args) as unknown as JsonObject; }
 
   autonomousRuntimePrepare(args: JsonObject): JsonObject { return this.autonomousRuntime.prepare(args); }
   autonomousRuntimeCheckpoint(args: JsonObject): JsonObject { return this.autonomousRuntime.checkpoint(args); }

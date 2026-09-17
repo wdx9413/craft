@@ -1,6 +1,6 @@
 # 上下文、记忆与后台整理
 
-> v0.12.19 在 v0.10.0 的范围化 `memory_item` 与预算化上下文装配之上，新增 `KnowledgeSource`、`MemoryLedger` 与 `ContextResolutionReceipt`。旧对象继续兼容引用，不执行破坏性迁移；向量检索只有经泄漏、召回、时延和成本评测后才可选择。
+> v0.12.19 在 v0.10.0 的范围化 `memory_item` 与预算化上下文装配之上，新增 `KnowledgeSource`、`MemoryLedger` 与 `ContextResolutionReceipt`。v0.12.31 将知识和记忆正文分别放入 `~/.craft_data/knowledge/md/`、`~/.craft_data/memory/md/`，对应域 SQLite 作为可重建索引，主 SQLite 继续承担跨域事务；旧对象通过显式、可回滚迁移兼容。向量检索只有经泄漏、召回、时延和成本评测后才可选择。
 
 ## 上下文分层与 CVMM
 
@@ -19,7 +19,7 @@ Context Virtual Memory Management（CVMM）在 Craft 中是应用层类比：模
 
 ## 可见、可纠正的记忆
 
-当前内核按用户、任务或工作空间定界记忆，保留来源、证据、有效期和替代关系；上下文装配合并有效记忆与未归档工作对象，按查询匹配并遵守条目数及字符预算。
+当前内核按用户、任务或工作空间定界记忆，保留来源、证据、有效期和替代关系；正文存为带 frontmatter 和 digest 的 Markdown，域 SQLite 中的 `content_ref` 是唯一受管引用。上下文装配合并有效记忆与未归档工作对象，按查询匹配并遵守条目数及字符预算。
 
 `Context Profile` 是可审阅、可精确引用的选择策略：它固定任务/工作空间范围、允许的记忆类别和对象类型、强制纳入的记忆/对象，以及最大条目数与字符数。Profile 的同一 ID 可有多个版本；Task Graph 绑定的是精确版本。必选材料失效、超出范围或自身超过预算时，装配直接失败，而不是静默遗漏。它不是模型内部上下文窗口控制器，也不自动拉取或执行能力。
 

@@ -20,6 +20,12 @@ export interface CraftPaths {
   runtimeDir: string;
   artifactsDir: string;
   knowledgeIndex: string;
+  knowledgeDir: string;
+  memoryDir: string;
+  knowledgeDatabaseFile: string;
+  memoryDatabaseFile: string;
+  knowledgeContentDir: string;
+  memoryContentDir: string;
 }
 
 export function dataRoot(env: NodeJS.ProcessEnv = process.env): string {
@@ -58,7 +64,15 @@ export function craftPaths(root = dataRoot()): CraftPaths {
     backupsDir: join(resolved, "backups"),
     runtimeDir: join(resolved, "runtime"),
     artifactsDir: join(resolved, "artifacts"),
-    knowledgeIndex: join(resolved, "index", "knowledge.db"),
+    knowledgeDir: join(resolved, "knowledge"),
+    memoryDir: join(resolved, "memory"),
+    knowledgeDatabaseFile: join(resolved, "knowledge", "knowledge.db"),
+    memoryDatabaseFile: join(resolved, "memory", "memory.db"),
+    knowledgeContentDir: join(resolved, "knowledge", "md"),
+    memoryContentDir: join(resolved, "memory", "md"),
+    // The searchable knowledge projection shares the knowledge domain DB;
+    // its tables are independent from the content-index projection.
+    knowledgeIndex: join(resolved, "knowledge", "knowledge.db"),
   };
 }
 
@@ -66,6 +80,7 @@ export async function ensureLayout(paths = craftPaths()): Promise<CraftPaths> {
   await Promise.all([
     paths.configDir, paths.databaseDir, paths.indexDir, paths.logsDir,
     paths.cacheDir, paths.backupsDir, paths.runtimeDir, paths.artifactsDir,
+    paths.knowledgeDir, paths.memoryDir, paths.knowledgeContentDir, paths.memoryContentDir,
   ].map((path) => mkdir(path, { recursive: true })));
   return paths;
 }

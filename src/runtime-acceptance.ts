@@ -7,7 +7,9 @@ function digest(value: unknown): string { return `sha256:${createHash("sha256").
 function payload(record: JsonObject): JsonObject { const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record; return rest; }
 function unique(value: unknown, name: string, exact?: number): string[] {
   if (!Array.isArray(value) || !value.length) throw new Error(`${name} must be a non-empty array`);
-  const values = value.map((item) => text(item, name)); if (new Set(values).size !== values.length || exact !== undefined && values.length !== exact) throw new Error(`${name} must contain exactly ${exact ?? "unique"} values`);
+  const values = value.map((item) => text(item, name));
+  if (new Set(values).size !== values.length) throw new Error(`${name} must contain unique values`);
+  if (exact !== undefined && values.length !== exact) throw new Error(`${name} must contain exactly ${exact} values`);
   return values.sort();
 }
 function integer(value: unknown, name: string, minimum: number, maximum: number): number { const result = Number(value); if (!Number.isInteger(result) || result < minimum || result > maximum) throw new Error(`${name} must be an integer between ${minimum} and ${maximum}`); return result; }
@@ -64,7 +66,7 @@ export class RuntimeAcceptanceKernel {
     }
     const total = pairs.length; const complete = incomplete === 0; const strictProof = Number(plan.trials_per_pair) === 5 && candidateWins === total && baselineWins === 0;
     const status = !complete ? "inconclusive" : strictProof ? "eligible" : baselineWins >= candidateWins ? "rejected" : "inconclusive";
-    const evaluationId = String(args.evaluation_id ?? `runtime_acceptance_evaluation_${plan.id}`); const identity = { plan_id: plan.id, plan_version: plan.version, total_pairs: total, candidate_wins: candidateWins, baseline_wins: baselineWins, ties, incomplete, status };
+    const evaluationId = String(args.evaluation_id ?? `runtime_acceptance_evaluation_${plan.id}`); const identity = { plan_id: plan.id, total_pairs: total, candidate_wins: candidateWins, baseline_wins: baselineWins, ties, incomplete, status };
     const existing = this.store.find("runtime_acceptance_evaluation", evaluationId); const evaluationDigest = digest(identity);
     if (existing) { if (existing.evaluation_digest !== evaluationDigest) throw new Error("Runtime acceptance evaluation idempotency conflict"); return { evaluation: existing, idempotent: true }; }
     const evaluation = this.store.create("runtime_acceptance_evaluation", evaluationId, { ...identity, evaluation_digest: evaluationDigest, candidate_default_activation_permitted: status === "eligible" });
