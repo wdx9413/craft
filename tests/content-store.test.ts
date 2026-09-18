@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, readdir, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, stat, symlink, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -8,7 +8,7 @@ import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { CraftStore } from "../src/store.ts";
 import { craftPaths } from "../src/paths.ts";
-import { MarkdownContentStore } from "../src/content-store.ts";
+import { contentTitle, MarkdownContentStore } from "../src/content-store.ts";
 import { CraftService } from "../src/application/craft-service.ts";
 import { ContentMigrationKernel } from "../src/content-migration.ts";
 import { MemoryConsolidationKernel } from "../src/memory-consolidation.ts";
@@ -27,10 +27,18 @@ test("MarkdownContentStore writes self-describing content and verifies its diges
   const f = await fixture();
   const content = new MarkdownContentStore(f.paths);
   const ref = await content.write({ kind: "knowledge", record_id: "claim-1", version: 1, scope: "global", status: "candidate", sensitivity: "internal", source_id: "source-1", body: "Hello knowledge" });
-  assert.match(ref.path, /knowledge\/md\/claim-1\.v1\.md$/);
+  assert.match(ref.path, /knowledge\/md\/Hello-knowledge--[a-f0-9]{12}\.v1\.md$/);
+  assert.equal(ref.title, "Hello knowledge");
   assert.equal((await content.read(ref)).body, "Hello knowledge");
   assert.equal((await content.verify(ref)).status, "verified");
   assert.equal(content.verifySync(ref).status, "verified");
+  assert.throws(() => content.rewriteSync({ kind: "knowledge", record_id: "claim-1", version: 0, scope: "global", status: "candidate", sensitivity: "internal", source_id: "source-1", body: "invalid version" }), /positive integer/);
+  const rewritten = content.rewriteSync({ kind: "knowledge", record_id: "claim-1", version: 1, scope: "global", status: "candidate", sensitivity: "internal", source_id: "source-1", body: "Rewritten knowledge" });
+  assert.equal(content.readSync(rewritten).body, "Rewritten knowledge");
+  const rewrittenRaw = readFileSync(rewritten.path, "utf8");
+  writeFileSync(rewritten.path, rewrittenRaw.replace('record_id: "claim-1"', 'record_id: "other"'));
+  assert.throws(() => content.rewriteSync({ kind: "knowledge", record_id: "claim-1", version: 1, scope: "global", status: "candidate", sensitivity: "internal", source_id: "source-1", body: "wrong identity" }), /identity conflict/);
+  writeFileSync(rewritten.path, rewrittenRaw);
   assert.equal(content.verifySync({ ...ref, path: join(f.root, "missing.md") }).status, "drifted");
   const missing = await content.write({ kind: "knowledge", record_id: "missing", version: 1, scope: "global", status: "candidate", sensitivity: "internal", source_id: "source-1", body: "to remove" });
   await unlink(missing.path);
@@ -43,7 +51,7 @@ test("MarkdownContentStore writes self-describing content and verifies its diges
   const legacyPath = content.legacyPathFor("knowledge", "claim-1", 1);
   await mkdir(dirname(legacyPath), { recursive: true });
   await writeFile(legacyPath, raw, "utf8");
-  assert.equal(content.readCompatSync({ ...ref, path: legacyPath }).body, "Hello knowledge");
+  assert.equal(content.readCompatSync({ ...rewritten, path: legacyPath }).body, "Rewritten knowledge");
   assert.throws(() => content.readCompatSync({ ...ref, path: join(f.root, "outside.md") }), /outside/);
   await f.store.close();
 });
@@ -53,8 +61,9 @@ test("content drift and unsafe identifiers fail closed", async () => {
   const content = new MarkdownContentStore(f.paths);
   const ref = await content.write({ kind: "memory", record_id: "memory-1", version: 1, scope: "user:local", status: "active", sensitivity: "restricted", source_id: "source-1", body: "Private memory" });
   await assert.rejects(content.read({ ...ref, record_id: "other" }), /outside|metadata/);
-  await writeFile(ref.path, (await readFile(ref.path, "utf8")).replace("Private memory", "Changed memory"), "utf8");
+  await writeFile(ref.path, (await readFile(ref.path, "utf8")).replace(/Private memory$/u, "Changed memory"), "utf8");
   await assert.rejects(content.read(ref), /digest/);
+  await assert.rejects(content.read({ ...ref, path: join(f.root, "outside.md") }), /outside/);
   assert.equal((await content.verify(ref)).status, "drifted");
   assert.equal(content.verifySync(ref).status, "drifted");
   await content.writeSync({ kind: "memory", record_id: "memory-2", version: 1, scope: "user:local", status: "active", sensitivity: "restricted", source_id: "source-1", body: "Private memory" });
@@ -89,6 +98,39 @@ test("content store rejects malformed documents and conflicting versions", async
   await assert.rejects(content.write({ kind: "knowledge", record_id: "bad-version", version: 0, scope: "global", status: "candidate", sensitivity: "internal", source_id: "source-1", body: "x" }), /positive integer/);
   await assert.rejects(content.write({ kind: "knowledge", record_id: "empty", version: 1, scope: "global", status: "candidate", sensitivity: "internal", source_id: "source-1", body: " " }), /empty/);
   await assert.rejects(content.write({ kind: "knowledge", record_id: "secret", version: 1, scope: "global", status: "candidate", sensitivity: "internal", source_id: "source-1", body: "password: 12345678" }), /credentials/);
+  await f.store.close();
+});
+
+test("semantic filename lookup fails closed on mismatched and malformed siblings", async () => {
+  const f = await fixture();
+  const content = new MarkdownContentStore(f.paths);
+  const mismatch = await content.write({ kind: "memory", record_id: "mismatch", version: 1, title: "Other kind", scope: "global", status: "active", sensitivity: "internal", source_id: "source", body: "other body" });
+  const mismatchInKnowledge = content.namedPathFor("knowledge", "mismatch", 1, "Other kind");
+  await mkdir(dirname(mismatchInKnowledge), { recursive: true });
+  await writeFile(mismatchInKnowledge, (await readFile(mismatch.path, "utf8")).replace('record_kind: "memory"', 'record_kind: "memory"'), "utf8");
+  await assert.rejects(content.write({ kind: "knowledge", record_id: "mismatch", version: 1, title: "New title", scope: "global", status: "active", sensitivity: "internal", source_id: "source", body: "new body" }), /identity conflict/);
+  const malformedPath = content.namedPathFor("knowledge", "malformed-sibling", 1, "Broken");
+  await writeFile(malformedPath, "not frontmatter", "utf8");
+  assert.throws(() => content.writeSync({ kind: "knowledge", record_id: "malformed-sibling", version: 1, title: "Different", scope: "global", status: "active", sensitivity: "internal", source_id: "source", body: "body" }), /frontmatter/);
+  const missing = new MarkdownContentStore({ ...f.paths, knowledgeContentDir: join(f.root, "not-created") });
+  assert.throws(() => missing.rewriteSync({ kind: "knowledge", record_id: "missing-dir", version: 1, scope: "global", status: "active", sensitivity: "internal", source_id: "source", body: "body" }), /ENOENT|no such file/);
+  await f.store.close();
+});
+
+test("content titles provide readable Unicode filenames without changing identity", async () => {
+  const f = await fixture();
+  const content = new MarkdownContentStore(f.paths);
+  assert.equal(contentTitle("", undefined, "Fallback title"), "Fallback title");
+  assert.throws(() => contentTitle("", undefined, ""), /title/);
+  assert.throws(() => contentTitle("body", "token: 12345678", "fallback"), /credentials|secrets/);
+  assert.match(content.namedPathFor("knowledge", "named", undefined, "!!!"), /untitled--[a-f0-9]{12}\.md$/);
+  assert.match(content.pathFor("memory", "memory-path"), /memory-path\.md$/);
+  const ref = await content.write({ kind: "knowledge", record_id: "metadata-title", version: 1, title: "可读名称 / API", scope: "global", status: "active", sensitivity: "internal", source_id: "source", body: "body" });
+  const withoutTitle = (await readFile(ref.path, "utf8")).replace(/title: .*\n/u, "");
+  await writeFile(ref.path, withoutTitle, "utf8");
+  assert.equal((await content.write({ kind: "knowledge", record_id: "metadata-title", version: 1, title: "可读名称 / API", scope: "global", status: "active", sensitivity: "internal", source_id: "source", body: "body" })).title, "可读名称 / API");
+  await writeFile(ref.path, withoutTitle, "utf8");
+  assert.equal(content.writeSync({ kind: "knowledge", record_id: "metadata-title", version: 1, title: "可读名称 / API", scope: "global", status: "active", sensitivity: "internal", source_id: "source", body: "body" }).title, "可读名称 / API");
   await f.store.close();
 });
 
@@ -188,6 +230,101 @@ test("content migration moves legacy inline bodies to Markdown idempotently", as
   await f.store.close();
 });
 
+test("legacy source rehydration restores the full digest-pinned page body", async () => {
+  const f = await fixture();
+  const sourceRoot = join(f.root, "source");
+  const locator = "data/pages/projects/full-page.md";
+  const sourcePath = join(sourceRoot, locator);
+  await mkdir(dirname(sourcePath), { recursive: true });
+  const source = "---\ntitle: Full page\nstatus: confirmed\n---\n# Full page\n\nThis is the complete source body.\n";
+  await writeFile(sourcePath, source, "utf8");
+  f.store.create("legacy_knowledge_migration", "rehydrate-migration", { source_root: sourceRoot, source_digest: "snapshot" });
+  f.store.create("knowledge_claim", "rehydrate-claim", { kind: "fact", scope: "legacy:shared:shared", status: "candidate", source_id: "legacy-import", content: "Full page\n\nShort summary" });
+  new ContentMigrationKernel(f.store).migrate();
+  f.store.create("legacy_knowledge_migration_candidate", "rehydrate-candidate", {
+    migration_id: "rehydrate-migration", claim_id: "rehydrate-claim", source_locator: locator,
+    source_digest: `sha256:${createHash("sha256").update(source, "utf8").digest("hex")}`, status: "candidate",
+  });
+  const migration = new ContentMigrationKernel(f.store);
+  assert.throws(() => migration.rehydrateLegacy({}), /migration_id/);
+  assert.equal(migration.rehydrateLegacy({ migration_id: "rehydrate-migration", dry_run: true }).migrated, 1);
+  const replaceBatch = f.store.replacePayloadBatch.bind(f.store);
+  f.store.replacePayloadBatch = (() => { throw "rehydrate failure"; }) as typeof f.store.replacePayloadBatch;
+  assert.throws(() => migration.rehydrateLegacy({ migration_id: "rehydrate-migration" }), /rolled back; database backup: .*; rehydrate failure/);
+  f.store.replacePayloadBatch = replaceBatch;
+  const result = migration.rehydrateLegacy({ migration_id: "rehydrate-migration" });
+  assert.equal(result.migrated, 1);
+  assert.match(String(f.store.get("knowledge_claim", "rehydrate-claim").content), /complete source body/);
+  assert.equal((migration.verify({ kind: "knowledge_claim" }) as { failed: number }).failed, 0);
+  assert.equal(migration.rehydrateLegacy({ migration_id: "rehydrate-migration" }).skipped, 1);
+  await writeFile(sourcePath, `${source}changed`, "utf8");
+  const candidate = f.store.rawRecords("legacy_knowledge_migration_candidate").find((row) => row.id === "rehydrate-candidate")!;
+  f.store.replacePayload("legacy_knowledge_migration_candidate", candidate.id, candidate.version, { ...candidate.payload, source_digest: `sha256:${createHash("sha256").update(`${source}changed`, "utf8").digest("hex")}` });
+  const originalBatch = f.store.replacePayloadBatch.bind(f.store);
+  f.store.replacePayloadBatch = (() => { throw new Error("rehydrate error"); }) as typeof f.store.replacePayloadBatch;
+  assert.throws(() => migration.rehydrateLegacy({ migration_id: "rehydrate-migration" }), /rolled back; database backup: .*; rehydrate error/);
+  f.store.replacePayloadBatch = originalBatch;
+  f.store.replacePayload("legacy_knowledge_migration_candidate", candidate.id, candidate.version, { ...candidate.payload, source_digest: `sha256:${createHash("sha256").update(source, "utf8").digest("hex")}` });
+  assert.throws(() => migration.rehydrateLegacy({ migration_id: "rehydrate-migration" }), /digest drifted/);
+  await f.store.close();
+});
+
+test("legacy source rehydration rejects missing, unsafe, stale, and malformed sources", async () => {
+  const f = await fixture();
+  const migration = new ContentMigrationKernel(f.store);
+  const rawDigest = (value: string) => `sha256:${createHash("sha256").update(value, "utf8").digest("hex")}`;
+  async function candidate(migrationId: string, candidateId: string, claimId: string | null, locator: string | undefined, source: string | undefined, sourceDigest: string | undefined): Promise<void> {
+    const sourceRoot = join(f.root, migrationId);
+    await mkdir(join(sourceRoot, "data/pages"), { recursive: true });
+    if (source !== undefined && locator !== undefined && !locator.startsWith("../")) {
+      const path = join(sourceRoot, locator);
+      await mkdir(dirname(path), { recursive: true });
+      await writeFile(path, source, "utf8");
+    }
+    f.store.create("legacy_knowledge_migration", migrationId, { source_root: sourceRoot });
+    if (claimId) {
+      f.store.create("knowledge_claim", claimId, { kind: "fact", scope: "global", status: "candidate", source_id: "legacy", content: "summary" });
+      migration.migrate();
+    }
+    f.store.create("legacy_knowledge_migration_candidate", candidateId, {
+      migration_id: migrationId, claim_id: claimId, source_locator: locator, source_digest: sourceDigest, status: "candidate",
+    });
+  }
+  const missingClaimRoot = join(f.root, "missing-claim"); await mkdir(join(missingClaimRoot, "data/pages"), { recursive: true });
+  f.store.create("legacy_knowledge_migration", "missing-claim", { source_root: missingClaimRoot });
+  f.store.create("legacy_knowledge_migration_candidate", "missing-claim-candidate", { migration_id: "missing-claim", claim_id: "unknown-claim", source_locator: "data/pages/missing.md", source_digest: rawDigest("body"), status: "candidate" });
+  assert.throws(() => migration.rehydrateLegacy({ migration_id: "missing-claim" }), /claim reference is missing/);
+  await candidate("missing-ref", "missing-ref-candidate", "missing-ref-claim", "data/pages/missing.md", "body", rawDigest("body"));
+  const missingRef = f.store.rawRecords("knowledge_claim").find((row) => row.id === "missing-ref-claim")!;
+  f.store.replacePayload("knowledge_claim", missingRef.id, missingRef.version, { content: "summary" });
+  assert.throws(() => migration.rehydrateLegacy({ migration_id: "missing-ref" }), /claim reference is missing/);
+  await candidate("missing-locator", "missing-locator-candidate", "missing-locator-claim", undefined, undefined, undefined);
+  assert.throws(() => migration.rehydrateLegacy({ migration_id: "missing-locator" }), /source locator is missing/);
+  await candidate("escaping-locator", "escaping-locator-candidate", "escaping-locator-claim", "../outside.md", "body", rawDigest("body"));
+  assert.throws(() => migration.rehydrateLegacy({ migration_id: "escaping-locator" }), /escapes source root/);
+  await candidate("empty-digest", "empty-digest-candidate", "empty-digest-claim", "data/pages/empty.md", "body", undefined);
+  assert.throws(() => migration.rehydrateLegacy({ migration_id: "empty-digest" }), /digest drifted/);
+  await candidate("malformed-source", "malformed-source-candidate", "malformed-source-claim", "data/pages/malformed.md", "---\nunclosed", rawDigest("---\nunclosed"));
+  assert.throws(() => migration.rehydrateLegacy({ migration_id: "malformed-source" }), /frontmatter is not closed/);
+  const symlinkRoot = join(f.root, "symlink-source"); const outside = join(f.root, "outside.md");
+  await mkdir(join(symlinkRoot, "data/pages"), { recursive: true }); await writeFile(outside, "outside", "utf8"); await symlink(outside, join(symlinkRoot, "data/pages/link.md"));
+  f.store.create("legacy_knowledge_migration", "symlink-source", { source_root: symlinkRoot });
+  f.store.create("knowledge_claim", "symlink-claim", { kind: "fact", scope: "global", status: "candidate", source_id: "legacy", content: "summary" }); migration.migrate();
+  f.store.create("legacy_knowledge_migration_candidate", "symlink-candidate", { migration_id: "symlink-source", claim_id: "symlink-claim", source_locator: "data/pages/link.md", source_digest: rawDigest("outside"), status: "candidate" });
+  assert.throws(() => migration.rehydrateLegacy({ migration_id: "symlink-source" }), /path escapes source root/);
+  await candidate("plain-source", "plain-source-candidate", "plain-source-claim", "data/pages/plain.md", "plain source body", rawDigest("plain source body"));
+  assert.equal(migration.rehydrateLegacy({ migration_id: "plain-source" }).migrated, 1);
+  const versionRoot = join(f.root, "versioned-source"); const versionLocator = "data/pages/versioned.md"; const versionBody = "version two source";
+  await mkdir(join(versionRoot, "data/pages"), { recursive: true }); await writeFile(join(versionRoot, versionLocator), versionBody, "utf8");
+  f.store.create("legacy_knowledge_migration", "versioned-source", { source_root: versionRoot });
+  f.store.create("knowledge_claim", "versioned-claim", { kind: "fact", scope: "global", status: "candidate", source_id: "legacy", content: "version one" });
+  f.store.save("knowledge_claim", "versioned-claim", { kind: "fact", scope: "global", status: "candidate", source_id: "legacy", content: "version two" });
+  migration.migrate();
+  f.store.create("legacy_knowledge_migration_candidate", "versioned-candidate", { migration_id: "versioned-source", claim_id: "versioned-claim", source_locator: versionLocator, source_digest: rawDigest(versionBody), status: "candidate" });
+  assert.equal(migration.rehydrateLegacy({ migration_id: "versioned-source" }).migrated, 1);
+  await f.store.close();
+});
+
 test("content migration relocates old content references into the domain directory", async () => {
   const f = await fixture();
   const content = f.store.contentStore;
@@ -198,7 +335,7 @@ test("content migration relocates old content references into the domain directo
   f.store.create("memory_ledger", "old-ref", { scope: "task", content_ref: { ...current, path: oldPath } });
   const result = new ContentMigrationKernel(f.store).migrate();
   assert.equal(result.migrated, 1);
-  assert.match(String((f.store.rawRecords("memory_ledger")[0]!.payload.content_ref as Record<string, unknown>).path), /memory\/md\/old-ref\.v1\.md$/);
+  assert.match(String((f.store.rawRecords("memory_ledger")[0]!.payload.content_ref as Record<string, unknown>).path), /memory\/md\/old-reference--[a-f0-9]{12}\.v1\.md$/);
   await f.store.close();
 });
 
@@ -210,7 +347,7 @@ test("content migration preserves old wiki files and fails closed on secrets", a
   const migration = new ContentMigrationKernel(f.store);
   assert.equal(migration.migrate().migrated, 1);
   const page = f.store.get("wiki_page", "legacy-page");
-  assert.match(String(page.file_path), /knowledge\/md\/legacy-page\.v1\.md$/);
+  assert.match(String(page.file_path), /knowledge\/md\/Legacy--[a-f0-9]{12}\.v1\.md$/);
   assert.equal(f.store.contentStore.readSync(page.content_ref as never).body, "legacy wiki");
 
   f.store.create("knowledge_claim", "secret-claim", { kind: "fact", content: "api_key: abcdefgh", evidence_ids: [] });

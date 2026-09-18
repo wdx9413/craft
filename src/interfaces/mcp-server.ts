@@ -285,7 +285,7 @@ const TOOL_DEFINITIONS: Tool[] = [
   tool("craft_verified_iteration_get", "Read a verification-driven iteration and its content-free attempt history.", ["iteration_id"], true),
   tool("craft_verified_iteration_assess", "Classify one independent acceptance assessment as pass, retry, block, or human handoff; only task failures can retry within budget.", ["iteration_id", "assessment_id", "classification"], false, ["attempt_id", "feedback"]),
   tool("craft_strategy_recommend", "Recommend a candidate strategy only from a comparable held-out evaluation; it never changes routing or executes work.", ["task_id", "comparison_id"], false, ["recommendation_id", "cost_metric"]),
-  tool("craft_knowledge_claim_save", "Save a candidate fact, rule, decision, term, or failure mode only with existing evidence; it is not automatically trusted or executable.", ["kind", "content", "evidence_ids"], false, ["claim_id", "scope", "tags", "valid_until"]),
+  tool("craft_knowledge_claim_save", "Save a candidate fact, rule, decision, term, or failure mode only with existing evidence; it is not automatically trusted or executable.", ["kind", "content", "evidence_ids"], false, ["claim_id", "title", "scope", "tags", "valid_until"]),
   tool("craft_knowledge_claim_get", "Read one exact evidence-backed knowledge claim.", ["claim_id"], true, ["version"]),
   tool("craft_knowledge_claim_list", "List locally stored evidence-backed knowledge claims.", [], true, ["limit", "query"]),
   tool("craft_knowledge_claim_review", "Explicitly review, dispute, supersede, or expire a candidate knowledge claim without deleting history.", ["claim_id", "status", "reviewer", "reason"], false),

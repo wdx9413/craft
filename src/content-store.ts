@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import type { CraftPaths } from "./paths.ts";
 
 export type ContentKind = "knowledge" | "memory";
@@ -16,6 +16,10 @@ export interface ContentWriteInput {
   sensitivity: string;
   source_id: string;
   body: string;
+  /** Human-readable label used only for the Markdown filename/frontmatter. */
+  title?: string;
+  /** Existing path used by source-aware migrations when a semantic rename is needed. */
+  current_path?: string;
 }
 
 export interface ContentRef {
@@ -26,6 +30,7 @@ export interface ContentRef {
   digest: string;
   bytes: number;
   format: "markdown";
+  title: string;
 }
 
 export interface ContentManifest {
@@ -39,6 +44,7 @@ export interface ContentManifest {
   source_id: string;
   body_digest: string;
   updated_at: string;
+  title?: string;
 }
 
 export interface ContentReadResult { body: string; manifest: ContentManifest; }
@@ -86,6 +92,37 @@ function safeFileName(id: string): string {
   return `${id.replace(/[^A-Za-z0-9._-]/gu, "_")}-${digest}`;
 }
 
+function titleFromBody(body: string): string | undefined {
+  const heading = body.split(/\r?\n/u).find((line) => /^\s{0,3}#{1,6}\s+\S/u.test(line));
+  const first = heading ? heading.replace(/^\s{0,3}#{1,6}\s+/u, "") : body.split(/\r?\n/u).find((line) => line.trim());
+  if (!first) return undefined;
+  return first.trim().slice(0, 120);
+}
+
+export function contentTitle(body: string, title?: string, fallback = "untitled"): string {
+  const value = (title ?? titleFromBody(body) ?? fallback).normalize("NFKC").trim().replace(/[\r\n]+/gu, " ");
+  if (!value) throw new Error("Content title must not be empty");
+  if (SECRET.test(value)) throw new Error("Content title must not contain credentials or secrets");
+  return value.slice(0, 120);
+}
+
+function titleSlug(title: string): string {
+  const slug = title
+    .replace(/[\\/]/gu, " ")
+    .replace(/[^\p{L}\p{N}._ -]/gu, " ")
+    .trim()
+    .replace(/\s+/gu, "-")
+    .replace(/-+/gu, "-")
+    .replace(/^[.-]+|[.-]+$/gu, "")
+    .slice(0, 96);
+  return slug || "untitled";
+}
+
+function idSuffix(recordId: string): string {
+  const hash = createHash("sha256").update(recordId, "utf8").digest("hex").slice(0, 12);
+  return hash;
+}
+
 export class MarkdownContentStore {
   readonly paths: CraftPaths;
   constructor(paths: CraftPaths) { this.paths = paths; }
@@ -95,25 +132,35 @@ export class MarkdownContentStore {
     return join(directory, `${safeFileName(recordId)}${version === undefined ? "" : `.v${version}`}.md`);
   }
 
+  /** Stable, human-readable path. The hash suffix keeps duplicate titles distinct. */
+  namedPathFor(kind: ContentKind, recordId: string, version: number | undefined, title: string): string {
+    const directory = kind === "knowledge" ? this.paths.knowledgeContentDir : this.paths.memoryContentDir;
+    safeFileName(recordId);
+    return join(directory, `${titleSlug(title)}--${idSuffix(recordId)}${version === undefined ? "" : `.v${version}`}.md`);
+  }
+
   legacyPathFor(kind: ContentKind, recordId: string, version?: number): string {
     const directory = kind === "knowledge" ? join(this.paths.root, "content", "knowledge", "md") : join(this.paths.root, "content", "memory", "md");
     return join(directory, `${safeFileName(recordId)}${version === undefined ? "" : `.v${version}`}.md`);
   }
 
   isCanonicalRef(ref: Pick<ContentRef, "kind" | "record_id" | "version" | "path">): boolean {
-    return resolve(ref.path) === resolve(this.pathFor(ref.kind, ref.record_id, ref.version));
+    const directory = resolve(ref.kind === "knowledge" ? this.paths.knowledgeContentDir : this.paths.memoryContentDir);
+    return dirname(resolve(ref.path)) === directory && resolve(ref.path).endsWith(`.v${ref.version}.md`);
   }
 
   async write(input: ContentWriteInput): Promise<ContentRef> {
     if (!Number.isSafeInteger(input.version) || input.version < 1) throw new Error("Content version must be a positive integer");
     validateContentBody(input.body);
-    const path = this.pathFor(input.kind, input.record_id, input.version);
+    const title = contentTitle(input.body, input.title, input.record_id);
+    const path = this.namedPathFor(input.kind, input.record_id, input.version, title);
     await mkdir(resolve(path, ".."), { recursive: true });
     const digest = bodyDigest(input.body);
+    const existingPath = existsSync(path) ? path : this.findCanonicalPath(input.kind, input.record_id, input.version);
     try {
-      const existing = await this.readPath(path);
+      const existing = await this.readPath(existingPath ?? path);
       if (existing.manifest.record_id !== input.record_id || existing.manifest.record_kind !== input.kind) throw new Error("Content file identity conflict");
-      if (existing.manifest.body_digest === digest && existing.manifest.record_version === input.version) return this.ref(input.kind, input.record_id, input.version, path, digest, input.body);
+      if (existing.manifest.body_digest === digest && existing.manifest.record_version === input.version) return this.ref(input.kind, input.record_id, input.version, existingPath!, digest, input.body, existing.manifest.title ?? title);
       throw new Error("Content version already exists with different body");
     } catch (error) {
       if (!(error instanceof Error) || !/ENOENT|no such file/iu.test(error.message)) throw error;
@@ -123,18 +170,20 @@ export class MarkdownContentStore {
     const temporary = `${path}.${process.pid}.${Date.now()}.tmp`;
     await writeFile(temporary, raw, { encoding: "utf8", mode: 0o600 });
     await rename(temporary, path);
-    return this.ref(input.kind, input.record_id, input.version, path, digest, input.body);
+    return this.ref(input.kind, input.record_id, input.version, path, digest, input.body, title);
   }
 
   writeSync(input: ContentWriteInput): ContentRef {
     if (!Number.isSafeInteger(input.version) || input.version < 1) throw new Error("Content version must be a positive integer");
     validateContentBody(input.body);
-    const path = this.pathFor(input.kind, input.record_id, input.version); mkdirSync(resolve(path, ".."), { recursive: true });
+    const title = contentTitle(input.body, input.title, input.record_id);
+    const path = this.namedPathFor(input.kind, input.record_id, input.version, title); mkdirSync(resolve(path, ".."), { recursive: true });
     const digest = bodyDigest(input.body);
+    const existingPath = existsSync(path) ? path : this.findCanonicalPath(input.kind, input.record_id, input.version);
     try {
-      const existing = parseDocument(readFileSync(path, "utf8"));
+      const existing = parseDocument(readFileSync(existingPath ?? path, "utf8"));
       if (existing.manifest.record_id !== input.record_id || existing.manifest.record_kind !== input.kind) throw new Error("Content file identity conflict");
-      if (existing.manifest.body_digest === digest && existing.manifest.record_version === input.version) return this.ref(input.kind, input.record_id, input.version, path, digest, input.body);
+      if (existing.manifest.body_digest === digest && existing.manifest.record_version === input.version) return this.ref(input.kind, input.record_id, input.version, existingPath!, digest, input.body, existing.manifest.title ?? title);
       throw new Error("Content version already exists with different body");
     } catch (error) {
       if (!(error instanceof Error) || !/ENOENT|no such file/iu.test(error.message)) throw error;
@@ -142,12 +191,33 @@ export class MarkdownContentStore {
     const raw = this.serialize(this.manifest(input, digest), input.body);
     const temporary = `${path}.${process.pid}.${Date.now()}.tmp`;
     writeFileSync(temporary, raw, { encoding: "utf8", mode: 0o600 }); renameSync(temporary, path);
-    return this.ref(input.kind, input.record_id, input.version, path, digest, input.body);
+    return this.ref(input.kind, input.record_id, input.version, path, digest, input.body, title);
+  }
+
+  /** Replace the body of an existing canonical document without changing its
+   * identity or version. This is reserved for source-aware migrations: normal
+   * domain writes remain append-only and must create a new record version. */
+  rewriteSync(input: ContentWriteInput): ContentRef {
+    if (!Number.isSafeInteger(input.version) || input.version < 1) throw new Error("Content version must be a positive integer");
+    validateContentBody(input.body);
+    const title = contentTitle(input.body, input.title, input.record_id);
+    const currentPath = input.current_path ?? this.findCanonicalPath(input.kind, input.record_id, input.version) ?? this.pathFor(input.kind, input.record_id, input.version);
+    // Ordinary rewrites preserve the current path; source-aware migrations may
+    // explicitly pass current_path to opt into a semantic filename rename.
+    const path = input.current_path ? this.namedPathFor(input.kind, input.record_id, input.version, title) : currentPath;
+    const existing = parseDocument(readFileSync(currentPath, "utf8"));
+    if (existing.manifest.record_id !== input.record_id || existing.manifest.record_kind !== input.kind
+      || existing.manifest.record_version !== input.version) throw new Error("Content rewrite identity conflict");
+    const digest = bodyDigest(input.body);
+    const temporary = `${path}.${process.pid}.${Date.now()}.tmp`;
+    writeFileSync(temporary, this.serialize(this.manifest(input, digest), input.body), { encoding: "utf8", mode: 0o600 });
+    renameSync(temporary, path);
+    if (resolve(currentPath) !== resolve(path)) unlinkSync(currentPath);
+    return this.ref(input.kind, input.record_id, input.version, path, digest, input.body, title);
   }
 
   async read(ref: Pick<ContentRef, "kind" | "record_id" | "version" | "path" | "digest">): Promise<ContentReadResult> {
-    const expected = this.pathFor(ref.kind, ref.record_id, ref.version);
-    if (resolve(ref.path) !== resolve(expected)) throw new Error("Content reference path is outside the canonical directory");
+    if (!this.isCanonicalRef(ref)) throw new Error("Content reference path is outside the canonical directory");
     const result = await this.readPath(ref.path);
     if (result.manifest.record_id !== ref.record_id || result.manifest.record_kind !== ref.kind || result.manifest.record_version !== ref.version) throw new Error("Content reference metadata drifted");
     if (result.manifest.body_digest !== ref.digest || bodyDigest(result.body) !== ref.digest) throw new Error("Content body digest drifted");
@@ -155,8 +225,7 @@ export class MarkdownContentStore {
   }
 
   readSync(ref: Pick<ContentRef, "kind" | "record_id" | "version" | "path" | "digest">): ContentReadResult {
-    const expected = this.pathFor(ref.kind, ref.record_id, ref.version);
-    if (resolve(ref.path) !== resolve(expected)) throw new Error("Content reference path is outside the canonical directory");
+    if (!this.isCanonicalRef(ref)) throw new Error("Content reference path is outside the canonical directory");
     const result = parseDocument(readFileSync(ref.path, "utf8"));
     if (result.manifest.record_id !== ref.record_id || result.manifest.record_kind !== ref.kind || result.manifest.record_version !== ref.version) throw new Error("Content reference metadata drifted");
     if (result.manifest.body_digest !== ref.digest || bodyDigest(result.body) !== ref.digest) throw new Error("Content body digest drifted");
@@ -197,14 +266,35 @@ export class MarkdownContentStore {
 
   private async readPath(path: string): Promise<ContentReadResult> { return parseDocument(await readFile(path, "utf8")); }
 
+  private findCanonicalPath(kind: ContentKind, recordId: string, version: number): string | null {
+    const directory = kind === "knowledge" ? this.paths.knowledgeContentDir : this.paths.memoryContentDir;
+    try {
+      const suffix = `--${idSuffix(recordId)}.v${version}.md`;
+      for (const name of readdirSync(directory).filter((item) => item.endsWith(suffix))) {
+        const path = join(directory, name);
+        try {
+          const manifest = parseDocument(readFileSync(path, "utf8")).manifest;
+          if (manifest.record_kind === kind && manifest.record_version === version) return path;
+          return path;
+        } catch {
+          // A matching filename is still returned so callers fail closed on malformed metadata.
+          return path;
+        }
+      }
+    } catch {
+      return null;
+    }
+    return null;
+  }
+
   private manifest(input: ContentWriteInput, digest: string): ContentManifest {
     return { schema_version: "craft.content.v1", record_kind: input.kind, record_id: input.record_id,
       record_version: input.version, scope: input.scope, status: input.status, sensitivity: input.sensitivity, source_id: input.source_id,
-      body_digest: digest, updated_at: new Date().toISOString() };
+      body_digest: digest, updated_at: new Date().toISOString(), title: contentTitle(input.body, input.title, input.record_id) };
   }
 
-  private ref(kind: ContentKind, recordId: string, version: number, path: string, digest: string, body: string): ContentRef {
-    return { kind, record_id: recordId, version, path, digest, bytes: Buffer.byteLength(body, "utf8"), format: "markdown" };
+  private ref(kind: ContentKind, recordId: string, version: number, path: string, digest: string, body: string, title: string): ContentRef {
+    return { kind, record_id: recordId, version, path, digest, bytes: Buffer.byteLength(body, "utf8"), format: "markdown", title };
   }
 
   private serialize(manifest: ContentManifest, body: string): string {

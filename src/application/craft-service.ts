@@ -2302,9 +2302,10 @@ export class CraftService extends ServiceFoundation {
     const tags = optionalTextArray(args.tags, "tags"); const validUntil = args.valid_until === undefined ? null : new Date(validIsoTime(args.valid_until, "valid_until")).toISOString();
     const claimId = String(args.claim_id ?? id("knowledge_claim")); const existing = this.store.find("knowledge_claim", claimId);
     const contentDigest = valueDigest(content);
-    const identity = { kind, content_digest: contentDigest, scope, evidence_ids: evidenceIds, tags, valid_until: validUntil };
+    const title = args.title === undefined ? undefined : assertNoSecret(text(args.title, "title"), "title");
+    const identity = { kind, content_digest: contentDigest, scope, evidence_ids: evidenceIds, tags, valid_until: validUntil, ...(title ? { title } : {}) };
     if (existing) { if (existing.identity_digest !== valueDigest(identity)) throw new Error("Knowledge claim idempotency conflict"); return { claim: existing, idempotent: true }; }
-    const contentRef = this.store.contentStore.writeSync({ kind: "knowledge", record_id: claimId, version: 1, scope, status: "candidate", sensitivity: "internal", source_id: String(args.source_id ?? "builtin.evidence-wiki"), body: content });
+    const contentRef = this.store.contentStore.writeSync({ kind: "knowledge", record_id: claimId, version: 1, scope, status: "candidate", sensitivity: "internal", source_id: String(args.source_id ?? "builtin.evidence-wiki"), title, body: content });
     const claim = this.store.create("knowledge_claim", claimId, { ...identity, content_ref: contentRef, identity_digest: valueDigest(identity), status: "candidate", review: null });
     return { claim, idempotent: false };
   }

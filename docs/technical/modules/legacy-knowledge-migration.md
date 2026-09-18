@@ -15,4 +15,4 @@
 
 命令支持 `--dry-run`、`--source-root`、`--data-root` 和 `--migration-id`。正式运行会先备份 `craft.db`，再显式选择发现清单中的路径，并在写入前重新读取页面、核验 digest 和敏感边界；漂移、删除或重新变敏感都会失败关闭。它对同一迁移/页面 digest 幂等，对相同标题+类型+项目+分类的现有候选记为 `duplicate`，不自动创建第二个 Claim。每个可导入项创建 `unverified` Evidence 与 `candidate` Claim，旧系统的 confirmed 状态不等同于 Craft reviewed/confirmed。旧迁移 MCP 工具已从组件 surface 移除，服务方法仅接受 `offline: true`，防止重新形成运行时依赖。
 
-发布必须先由独立操作者把 Claim 审核为 `reviewed`。发布生成仅含摘要、来源相对路径和 digest 的 Evidence Wiki 页，并创建带 Evidence 的 `bounded` Memory Ledger；不会授予执行权。撤回要求明确理由：Claim 变为 `disputed`，Ledger 变为 `revoked`，Wiki 页产生不含原文的撤回修订。`craft_legacy_knowledge_migration_failure_report` 只返回失败码及摘要，不返回页面内容或敏感片段。
+发布必须先由独立操作者把 Claim 审核为 `reviewed`。发布生成仅含摘要、来源相对路径和 digest 的 Evidence Wiki 页，并创建带 Evidence 的 `bounded` Memory Ledger；不会授予执行权。撤回要求明确理由：Claim 变为 `disputed`，Ledger 变为 `revoked`，Wiki 页产生不含原文的撤回修订。迁移后的正文文件使用来源标题生成可读文件名，并追加稳定短 ID；标题只用于导航，Claim 的 `record_id`、版本和 digest 不变。`craft_legacy_knowledge_migration_failure_report` 只返回失败码及摘要，不返回页面内容或敏感片段。

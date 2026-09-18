@@ -1,6 +1,6 @@
 # 上下文、记忆与后台整理
 
-> v0.12.19 在 v0.10.0 的范围化 `memory_item` 与预算化上下文装配之上，新增 `KnowledgeSource`、`MemoryLedger` 与 `ContextResolutionReceipt`。v0.12.31 将知识和记忆正文分别放入 `~/.craft_data/knowledge/md/`、`~/.craft_data/memory/md/`，对应域 SQLite 作为可重建索引，主 SQLite 继续承担跨域事务；旧对象通过显式、可回滚迁移兼容。向量检索只有经泄漏、召回、时延和成本评测后才可选择。
+> v0.12.19 在 v0.10.0 的范围化 `memory_item` 与预算化上下文装配之上，新增 `KnowledgeSource`、`MemoryLedger` 与 `ContextResolutionReceipt`。v0.12.31 将知识和记忆正文分别放入 `~/.craft_data/knowledge/md/`、`~/.craft_data/memory/md/`，对应域 SQLite 作为可重建索引，主 SQLite 继续承担跨域事务；旧对象通过显式、可回滚迁移兼容。Markdown 文件名采用“可读标题 + 稳定短 ID + 版本号”，例如 `接口超时排查--a1b2c3d4e5f6.v1.md`，名称变化不会改变 `record_id`、Evidence 或权限。向量检索只有经泄漏、召回、时延和成本评测后才可选择。
 
 ## 上下文分层与 CVMM
 
@@ -20,6 +20,8 @@ Context Virtual Memory Management（CVMM）在 Craft 中是应用层类比：模
 ## 可见、可纠正的记忆
 
 当前内核按用户、任务或工作空间定界记忆，保留来源、证据、有效期和替代关系；正文存为带 frontmatter 和 digest 的 Markdown，域 SQLite 中的 `content_ref` 是唯一受管引用。上下文装配合并有效记忆与未归档工作对象，按查询匹配并遵守条目数及字符预算。
+
+正文文件的名称是给人看的导航，不是事实主键：标题优先来自显式 `title`，没有标题时从 Markdown 一级至六级标题或首个非空行推导；文件名会保留中文和英文语义字符，清理路径分隔符与危险标点，并追加由 `record_id` 派生的短哈希避免重名。frontmatter 同时保存 `title`、`record_id`、`record_version`、`body_digest`、作用域、状态和来源。读取始终校验路径、身份、版本和 digest；用户可以改标题，但不能靠改文件名改变记录身份或权限。
 
 `Context Profile` 是可审阅、可精确引用的选择策略：它固定任务/工作空间范围、允许的记忆类别和对象类型、强制纳入的记忆/对象，以及最大条目数与字符数。Profile 的同一 ID 可有多个版本；Task Graph 绑定的是精确版本。必选材料失效、超出范围或自身超过预算时，装配直接失败，而不是静默遗漏。它不是模型内部上下文窗口控制器，也不自动拉取或执行能力。
 

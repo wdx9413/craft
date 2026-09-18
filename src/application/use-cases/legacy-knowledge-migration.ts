@@ -17,7 +17,7 @@ export function installLegacyKnowledgeMigrationMethods(serviceClass: typeof Craf
     return this.legacyKnowledgeMigration.importCandidates(args, sourceId, (entry, _source, _sourceId, candidateId) => {
       const evidenceId = `legacy_knowledge_evidence_${candidateId.slice(-24)}`; const claimId = `legacy_knowledge_claim_${candidateId.slice(-24)}`;
       this.evidenceRecord({ evidence_id: evidenceId, source_type: "legacy_kefu_wiki_formal_page", claim: `Legacy formal page imported as unverified candidate: ${entry.title}`, confidence: "unverified", locator: entry.rel_path, metadata: { source_digest: entry.page_digest, evidence_type: entry.evidence_type, migration: true } });
-      this.knowledgeClaimSave({ claim_id: claimId, kind: ({ domain_rule: "fact", technical_decision: "decision", workflow: "rule", troubleshooting: "failure_mode", stable_project_fact: "fact" } as Record<string, string>)[entry.knowledge_type], content: `${entry.title}\n\n${entry.summary}`, evidence_ids: [evidenceId], scope: `legacy:${entry.scope}:${entry.project ?? "shared"}`, tags: entry.tags });
+      this.knowledgeClaimSave({ claim_id: claimId, title: entry.title, kind: ({ domain_rule: "fact", technical_decision: "decision", workflow: "rule", troubleshooting: "failure_mode", stable_project_fact: "fact" } as Record<string, string>)[entry.knowledge_type], content: `${entry.title}\n\n${entry.summary}`, evidence_ids: [evidenceId], scope: `legacy:${entry.scope}:${entry.project ?? "shared"}`, tags: entry.tags });
       return { evidence_id: evidenceId, claim_id: claimId };
     });
   };
