@@ -32,7 +32,7 @@ import { dataSpaceId } from "../data-space.ts";
 import { installAdapterRuntimeMethods } from "./use-cases/adapter-runtime.ts";
 import { installKernelDelegateMethods } from "./use-cases/kernel-delegates.ts";
 
-export const VERSION = "0.12.31";
+export const VERSION = "0.12.32";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const TASK_PERMISSION_MODES = new Set(["human_approval", "assisted_approval", "full_access"]);
@@ -396,9 +396,9 @@ export class CraftService extends ServiceFoundation {
       "evaluation_reliability", "judge_adapter", "judge_calibration", "adaptation_candidate", "feedback_intake", "feedback_case", "canary",
       "capability_kit", "capability_kit_activation", "capability_kit_contribution", "capability_kit_conformance", "knowledge_source", "memory_ledger", "memory_compat_binding", "context_resolution_receipt", "retrieval_adapter", "retrieval_evaluation", "work_runtime_mode", "work_runtime_plan",
       "uncertainty_policy", "uncertainty_resolution", "adjudication", "reference_pilot", "release_qualification", "release_qualification_slot",
-      "workspace", "workspace_checkpoint", "workspace_change", "workspace_transaction", "work_object", "memory_item", "context_profile", "task_graph", "change_set", "os_security_plan", "os_security_receipt", "mcp_registry_source", "mcp_registry_server", "mcp_registry_health", "org_sync_manifest", "trace_otlp_export",
+      "workspace", "workspace_checkpoint", "workspace_change", "workspace_transaction", "work_object", "memory_item", "memory_policy", "memory_usage_signal", "memory_maintenance_run", "memory_maintenance_candidate", "context_profile", "task_graph", "change_set", "os_security_plan", "os_security_receipt", "mcp_registry_source", "mcp_registry_server", "mcp_registry_health", "org_sync_manifest", "trace_otlp_export", "trace_review",
       "budget_account", "budget_reservation", "durable_wait", "external_event", "fallback_contract", "fallback_event",
-      "credential_handle", "credential_lease", "egress_authorization", "egress_execution", "parser_security_evaluation", "parser_process_receipt",
+      "credential_handle", "credential_lease", "egress_authorization", "egress_execution", "parser_security_evaluation", "parser_process_receipt", "mcp_task", "runtime_manifest", "runtime_probe", "runtime_conformance", "runtime_attestation",
       "sandbox_profile", "sandbox_assessment", "sandbox_ticket", "sandbox_receipt", "sandbox_egress_binding",
       "external_effect", "external_effect_receipt", "effect_compensation", "effect_reconciliation", "effect_saga", "recovery_item",
       "trigger_subscription", "trigger_event", "speculative_policy", "speculative_candidate", "preference_signal", "lineage_edge", "dehydration_snapshot",
@@ -1511,6 +1511,10 @@ export class CraftService extends ServiceFoundation {
     return trial;
   }
   private controlTrace(trialId: unknown, eventType: string, data: JsonObject): JsonObject {
+    const trace = this.store.find("trace", `trial:${String(trialId)}`);
+    if (trace && ["completed", "failed", "cancelled", "blocked"].includes(String(trace.status))) {
+      return { trace, skipped: true, reason: "trial_trace_terminal" };
+    }
     return this.trialTraceAppend({ trial_id: trialId, event_type: eventType, source: "craft_control_plane", data });
   }
   budgetReserve(args: JsonObject): JsonObject {
@@ -1622,16 +1626,17 @@ export class CraftService extends ServiceFoundation {
         throw new Error("Fallback actual resources exceed or do not match the active reservation");
       }
     }
-    const outcome = this.outcomeRecord({ trial_id: trial.id, verdict: args.verdict, summary: args.summary,
-      failure_type: args.failure_type, scores: args.scores ?? {}, costs, evidence_ids: evidenceIds, source: args.source ?? "fallback_host_receipt" });
     let settlement: JsonObject | null = null;
     if (event.reservation_id) settlement = this.budgetSettle({ reservation_id: event.reservation_id,
       actual: actualResources, trial_id: trial.id });
+    const outcomeId = `outcome_${trial.id}`;
+    this.controlTrace(trial.id, "fallback_completed", { fallback_event_id: event.id, outcome_id: outcomeId,
+      settlement_id: settlement ? (settlement.reservation as JsonObject).id : null });
+    const outcome = this.outcomeRecord({ trial_id: trial.id, verdict: args.verdict, summary: args.summary,
+      failure_type: args.failure_type, scores: args.scores ?? {}, costs, evidence_ids: evidenceIds, source: args.source ?? "fallback_host_receipt" });
     const saved = this.store.save("fallback_event", String(event.id), { ...recordPayload(event), trial_id: trial.id,
       status: "completed", outcome_id: outcome.id, completed_at: new Date().toISOString(), settlement_id:
         settlement ? (settlement.reservation as JsonObject).id : null });
-    this.controlTrace(trial.id, "fallback_completed", { fallback_event_id: saved.id, outcome_id: outcome.id,
-      settlement_id: saved.settlement_id });
     return { event: saved, trial, outcome, settlement, idempotent: false };
   }
   credentialHandleRegister(args: JsonObject): JsonObject { return this.security.handleRegister(args); }
@@ -2478,6 +2483,8 @@ export class CraftService extends ServiceFoundation {
   harnessTopologyGet(args: JsonObject): JsonObject { return this.harnessTopologies.get(args); }
   runtimeReadinessAssess(args: JsonObject): JsonObject { return this.runtimeReadiness.assess(args); }
   runtimeReadinessGet(args: JsonObject): JsonObject { return this.runtimeReadiness.get(args); }
+  runtimeReadinessProviderStatus(): JsonObject { return this.runtimeModelProbe.status(); }
+  async runtimeReadinessModelProbe(args: JsonObject): Promise<JsonObject> { return this.runtimeModelProbe.probe(args); }
   assuredPilotSealCase(args: JsonObject): JsonObject { return this.assuredPilot.sealCase(args); }
   assuredPilotIssueSealedAccess(args: JsonObject): JsonObject { return this.assuredPilot.issueSealedAccess(args); }
   assuredPilotConsumeSealedAccess(args: JsonObject): JsonObject { return this.assuredPilot.consumeSealedAccess(args); }
@@ -3256,6 +3263,9 @@ export class CraftService extends ServiceFoundation {
       ...(args.knowledge_binding === undefined ? {} : { knowledge_binding: object(args.knowledge_binding, "knowledge_binding") }),
     });
     this.trace.appendTrial({ trial_id: trialId, event_type: "outcome.recorded", source: "program_verified", trust: "verified", summary: outcome.summary, data: { verdict, failure_type: failureType }, evidence_ids: evidenceIds });
+    const traceStatus = verdict === "passed" ? "completed" : verdict as "failed" | "blocked" | "cancelled";
+    this.trace.finalize({ trace_id: `trial:${trialId}`, status: traceStatus, verdict,
+      summary: `Trial outcome ${verdict}.`, evidence_ids: evidenceIds });
     return outcome;
   }
 

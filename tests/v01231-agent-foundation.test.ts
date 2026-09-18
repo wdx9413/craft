@@ -9,7 +9,7 @@ import { craftPaths } from "../src/paths.ts";
 
 async function fixture() { const root = await mkdtemp(join(tmpdir(), "craft-v01231-")); const store = await new CraftStore(craftPaths(root)).open(); const service = new CraftService(store); return { root, store, service }; }
 
-test("v0.12.31 memory governance is candidate-first, conflict-aware and expiring", async () => {
+test("v0.12.32 memory governance is candidate-first, conflict-aware and expiring", async () => {
   const { root, store, service } = await fixture();
   try {
     service.knowledgeMemoryInstallBuiltins();
@@ -39,7 +39,7 @@ test("v0.12.31 memory governance is candidate-first, conflict-aware and expiring
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
-test("v0.12.31 workflow DAG validates, checkpoints and detects drift", async () => {
+test("v0.12.32 workflow DAG validates, checkpoints and detects drift", async () => {
   const { root, store, service } = await fixture();
   try {
     const workflow = service.workflowDagSave({ workflow_id: "wf", name: "DAG", nodes: [{ id: "a", type: "action" }, { id: "b", type: "human_gate", depends_on: ["a"], side_effect: "local_write" }] }).workflow as JsonObject;
@@ -52,7 +52,7 @@ test("v0.12.31 workflow DAG validates, checkpoints and detects drift", async () 
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
-test("v0.12.31 task state is append-only and optimistic-concurrency protected", async () => {
+test("v0.12.32 task state is append-only and optimistic-concurrency protected", async () => {
   const { root, store, service } = await fixture();
   try {
     const first = service.taskStateTransition({ task_id: "task", state: "running", actor: "agent", reason: "start" });
@@ -72,7 +72,7 @@ test("v0.12.31 task state is append-only and optimistic-concurrency protected", 
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
-test("v0.12.31 governance kernels fail closed on invalid, drifted and idempotent inputs", async () => {
+test("v0.12.32 governance kernels fail closed on invalid, drifted and idempotent inputs", async () => {
   const { root, store, service } = await fixture();
   try {
     const source = service.knowledgeSourceRegister({ source_id: "edge-source", kind: "custom", label: "edge", scope_kind: "project", scope_id: "p", locator: "offline://edge", content_digest: "sha256:edge", trust: "bounded", access: "proposal_only" }).source as JsonObject;
@@ -138,7 +138,7 @@ test("v0.12.31 governance kernels fail closed on invalid, drifted and idempotent
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
-test("v0.12.31 workflow DAG lifecycle and import/export error paths", async () => {
+test("v0.12.32 workflow DAG lifecycle and import/export error paths", async () => {
   const { root, store, service } = await fixture();
   try {
     assert.throws(() => service.workflowDagValidate({}), /at least one/);

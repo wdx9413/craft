@@ -41,6 +41,14 @@ function scope(args: JsonObject): JsonObject {
   const kind = text(args.scope_kind, "scope_kind"); if (!SCOPE_KINDS.has(kind)) throw new Error("scope_kind is unsupported");
   return { kind, id: text(args.scope_id, "scope_id") };
 }
+function optionalScope(args: JsonObject): JsonObject | null {
+  const kind = args.scope_kind;
+  const id = args.scope_id;
+  const kindEmpty = kind === undefined || kind === null || (typeof kind === "string" && !kind.trim());
+  const idEmpty = id === undefined || id === null || (typeof id === "string" && !id.trim());
+  if (kindEmpty && idEmpty) return null;
+  return scope(args);
+}
 
 /**
  * One control-plane module for background sources, durable memories and the
@@ -151,7 +159,9 @@ export class KnowledgeMemoryRuntime {
   }
 
   resolve(args: JsonObject): JsonObject {
-    const query = noSecret(text(args.query, "query"), "query"); const requestedScope = scope(args); const now = new Date(args.now === undefined ? Date.now() : text(args.now, "now")); if (Number.isNaN(now.valueOf())) throw new Error("now must be an ISO timestamp");
+    const query = noSecret(text(args.query, "query"), "query"); const requestedScope = optionalScope(args);
+    if (requestedScope === null) return { query, scope: null, items: [], receipt: null, skipped: true, reason: "scope_unavailable" };
+    const now = new Date(args.now === undefined ? Date.now() : text(args.now, "now")); if (Number.isNaN(now.valueOf())) throw new Error("now must be an ISO timestamp");
     const maxItems = Number(args.max_items ?? 12); const maxChars = Number(args.max_chars ?? 12_000); if (!Number.isInteger(maxItems) || maxItems < 1 || !Number.isInteger(maxChars) || maxChars < 1) throw new Error("Context budget is invalid");
     const sourceIds = strings(args.source_ids, "source_ids"); const requestedIds = strings(args.memory_ids, "memory_ids"); const allowRestricted = args.allow_restricted === true; const adapter = args.retrieval_adapter_id === undefined ? null : this.store.get("retrieval_adapter", text(args.retrieval_adapter_id, "retrieval_adapter_id"));
     const retrievalMode = adapter?.status === "eligible" ? adapter.strategy : "keyword";

@@ -4,7 +4,7 @@ import { PlatformExecutionKernel } from "./platform-execution.ts";
 import { CraftStore, type JsonObject } from "./store.ts";
 
 const TERMINAL_HOST = new Set(["completed", "failed", "cancelled", "interrupted"]);
-const INTERVENTIONS = new Set(["approval", "pause", "resume", "timeout", "cancel", "retry", "revoke", "handoff"]);
+const INTERVENTIONS = new Set(["notify", "question", "steer", "approval", "pause", "resume", "timeout", "cancel", "abort", "retry", "revoke", "handoff"]);
 
 function text(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim(); }
 function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }

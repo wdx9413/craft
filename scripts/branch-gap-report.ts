@@ -6,7 +6,7 @@ type CoverageFile = { path: string; branchMap?: Record<string, { line: number; l
 
 const root = resolve(import.meta.dirname, "..");
 const input = resolve(root, process.argv[2] ?? "coverage/coverage-final.json");
-const output = resolve(root, process.argv[3] ?? "docs/releases/v0.12.31-branch-gaps.md");
+const output = resolve(root, process.argv[3] ?? "docs/releases/v0.12.32-branch-gaps.md");
 const report = JSON.parse(await readFile(input, "utf8")) as Record<string, CoverageFile>;
 const rows: Array<{ file: string; branch: string; line: number; column: number; hits: number; expression: string }> = [];
 let total = 0;

@@ -7,6 +7,8 @@ const KINDS = new Set(["working", "episodic", "preference", "procedural"]);
 const STATUSES = new Set(["candidate", "approved", "rejected", "conflict_pending", "expired"]);
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified"]);
 const SCOPE = new Set(["user", "project", "workspace", "task", "session"]);
+const POLICY_MODES = new Set(["off", "propose", "governed"]);
+const POLICY_CONFIDENCE = new Set(["confirmed", "bounded"]);
 function id(prefix: string): string { return `${prefix}_${randomUUID().replaceAll("-", "")}`; }
 function text(v: unknown, name: string): string { if (typeof v !== "string" || !v.trim()) throw new Error(`${name} must not be empty`); return v.trim(); }
 function digest(v: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(v)).digest("hex")}`; }
@@ -20,7 +22,30 @@ export class MemoryGovernanceKernel {
   readonly ledger: KnowledgeMemoryRuntime;
   constructor(store: CraftStore, ledger: KnowledgeMemoryRuntime) { this.store = store; this.ledger = ledger; }
 
+  policyGet(args: JsonObject = {}): JsonObject {
+    const policyId = text(args.policy_id ?? "default", "policy_id");
+    const stored = this.store.find("memory_policy", policyId);
+    return { policy: stored ?? { id: policyId, version: 1, mode: "propose", min_confidence: "confirmed", auto_commit: false, source: "builtin" } };
+  }
+
+  policySave(args: JsonObject): JsonObject {
+    const policyId = text(args.policy_id ?? "default", "policy_id");
+    const mode = text(args.mode, "mode"); if (!POLICY_MODES.has(mode)) throw new Error("memory policy mode is unsupported");
+    const minConfidence = text(args.min_confidence ?? "confirmed", "min_confidence");
+    if (!POLICY_CONFIDENCE.has(minConfidence)) throw new Error("min_confidence must be confirmed or bounded");
+    const updatedBy = noSecret(text(args.updated_by ?? "operator", "updated_by"), "updated_by");
+    const identity = { mode, min_confidence: minConfidence, auto_commit: mode === "governed" };
+    const existing = this.store.find("memory_policy", policyId);
+    if (existing && existing.identity_digest === digest(identity)) return { policy: existing, idempotent: true };
+    const payloadValue = { ...identity, updated_by: updatedBy, identity_digest: digest(identity), status: "active" };
+    return { policy: existing
+      ? this.store.save("memory_policy", policyId, { ...payload(existing), ...payloadValue, policy_revision: Number(existing.policy_revision ?? 1) + 1 })
+      : this.store.create("memory_policy", policyId, { ...payloadValue, policy_revision: 1 }), idempotent: false };
+  }
+
   propose(args: JsonObject): JsonObject {
+    const policy = this.policyGet().policy as JsonObject;
+    if (policy.mode === "off") return { candidate: null, conflicts: [], auto_committed: false, status: "disabled", policy };
     const kind = text(args.kind, "kind"); if (!KINDS.has(kind)) throw new Error("memory kind is unsupported");
     const scopeKind = text(args.scope_kind, "scope_kind"); if (!SCOPE.has(scopeKind)) throw new Error("scope_kind is unsupported");
     const scopeId = text(args.scope_id, "scope_id"); const content = noSecret(text(args.content, "content"), "content");
@@ -39,7 +64,16 @@ export class MemoryGovernanceKernel {
     const status = conflicts.length ? "conflict_pending" : "candidate";
     const candidate = this.store.create("memory_candidate", candidateId, { ...identity, content, status, conflict_ids: conflicts.map((x) => x.id), proposed_by: String(args.proposed_by ?? "agent"), identity_digest: digest(identity) });
     for (const conflict of conflicts) this.store.save("memory_candidate", String(conflict.id), { ...payload(conflict), status: "conflict_pending", conflict_ids: [...new Set([...(conflict.conflict_ids as string[] ?? []), candidate.id])] });
-    return { candidate, conflicts, idempotent: false };
+    const eligible = policy.mode === "governed" && conflicts.length === 0 && ids.length > 0 && ids.every((e) => {
+      const confidenceValue = String(this.store.get("evidence", e).confidence);
+      return policy.min_confidence === "bounded" ? ["bounded", "confirmed"].includes(confidenceValue) : confidenceValue === "confirmed";
+    });
+    if (eligible) {
+      const approved = this.store.save("memory_candidate", candidateId, { ...payload(candidate), status: "approved", review: { reviewer: "governed-policy", reason_digest: digest("policy threshold"), reviewed_at: new Date().toISOString() } });
+      const memory = this.remember({ candidate_id: approved.id }).memory as JsonObject;
+      return { candidate: approved, conflicts, memory, auto_committed: true, idempotent: false, policy };
+    }
+    return { candidate, conflicts, auto_committed: false, idempotent: false, policy };
   }
 
   review(args: JsonObject): JsonObject {

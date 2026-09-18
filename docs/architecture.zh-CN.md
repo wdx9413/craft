@@ -62,6 +62,8 @@ v0.12.18 增加 `CapabilityKitRuntime`，把可变供给面与不可变控制面
 
 v0.12.19 用 `KnowledgeSource`、`MemoryLedger` 与 `ContextResolutionReceipt` 收敛外部知识、可撤销记忆和模型上下文：外部正文仍归 Serena、kefu、Wiki 或项目文件所有，Craft 只固定来源/信任/版本/装配事实。相同内核可投影为 Codex 等 Host 的控制台模式或模型无关的 Agent 模式计划；两者都必须走 Policy、State、Receipt、Acceptance、Eval 与受限演进。
 
+v0.12.32 将这些模块收敛为 Runtime Assurance & Learning Loop。Trace Review 负责从不可变事件链定位首错和根因；Memory Maintenance 负责 Light/Review/Deep 三阶段候选提炼；两者只提供诊断与候选，不绕过 Acceptance、Evaluation、Signoff、Canary 和回滚。新增 `RuntimeProofKernel` 将 manifest、probe、conformance、attestation 和 checkpoint rehydrate 统一为执行环境证明；新增 owner-scoped `McpTaskKernel`，在异步工作前持久化 Task，支持 TTL、input_required、取消、幂等和过期。SQLite 是本地事实源，正文和外部归档仍通过可替换 Adapter 管理。
+
 v0.12.20 用 `ContinualHarnessView → Refinement → bounded Session activation / governed promotion` 连接运行与学习，并以通用 `StatefulComputeHost → Session → Dispatch → Receipt` 支持持久状态和函数式只读委派。该层只提供控制协议，不绑定第三方 Agent，不把后台进程当沙箱，也不允许复盘越过评测直接修改全局资产。
 
 v0.12.21 将上述能力收口到 `VerifiedWorkLoop` 唯一公开门面，并增加 `UncertaintyPolicy → Resolution → optional Adjudication` 和 `ReferencePilot → 5× paired Qualification → Platform Assessment`。自动化只可提升求证强度，不能提升权限；机制验收与真实业务效果分别记录，证据不足时明确返回 `inconclusive`。

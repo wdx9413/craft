@@ -10,6 +10,7 @@ import { installTurnCognitiveMethods } from "./turn-cognitive.ts";
 import { installHostSessionMethods } from "./host-session.ts";
 import { installDurableExperienceMethods } from "./durable-experience.ts";
 import { installLegacyKnowledgeMigrationMethods } from "./legacy-knowledge-migration.ts";
+import { installRuntimeLearningMethods } from "./runtime-learning.ts";
 
 /** Thin application use cases that delegate to one owned domain kernel. */
 declare module "../craft-service.ts" {
@@ -26,6 +27,8 @@ declare module "../craft-service.ts" {
     retrievalAdapterConfigure(args: JsonObject): JsonObject;
     retrievalAdapterEvaluate(args: JsonObject): JsonObject;
     memoryCandidatePropose(args: JsonObject): JsonObject;
+    memoryPolicySave(args: JsonObject): JsonObject;
+    memoryPolicyGet(args?: JsonObject): JsonObject;
     memoryCandidateReview(args: JsonObject): JsonObject;
     memoryLedgerRememberApproved(args: JsonObject): JsonObject;
     memoryConflictList(args?: JsonObject): JsonObject;
@@ -84,6 +87,9 @@ declare module "../craft-service.ts" {
     traceArchiveStorageRegister(args: JsonObject): JsonObject;
     traceArchiveStorageList(args?: JsonObject): JsonObject;
     traceArchiveStorageActivate(args: JsonObject): JsonObject;
+    traceReview(args: JsonObject): JsonObject;
+    traceReviewGet(args: JsonObject): JsonObject;
+    traceReviewList(args?: JsonObject): JsonObject;
     capabilityLifecycleRegister(args: JsonObject): JsonObject;
     capabilityLifecycleInstall(args: JsonObject): JsonObject;
     capabilityLifecycleActivate(args: JsonObject): JsonObject;
@@ -96,6 +102,20 @@ declare module "../craft-service.ts" {
     memoryConsolidationConsolidate(args: JsonObject): JsonObject;
     memoryConsolidationResolve(args: JsonObject): JsonObject;
     memoryConsolidationSearch(args: JsonObject): JsonObject;
+    memoryMaintenanceRun(args?: JsonObject): JsonObject;
+    memoryMaintenanceSignal(args: JsonObject): JsonObject;
+    memoryMaintenanceCycle(args?: JsonObject): JsonObject;
+    memoryMaintenanceGet(args: JsonObject): JsonObject;
+    mcpTaskCreate(args: JsonObject): JsonObject;
+    mcpTaskGet(args: JsonObject): JsonObject;
+    mcpTaskUpdate(args: JsonObject): JsonObject;
+    mcpTaskCancel(args: JsonObject): JsonObject;
+    mcpTaskExpire(args?: JsonObject): JsonObject;
+    runtimeProofManifest(args: JsonObject): JsonObject;
+    runtimeProofProbe(args: JsonObject): JsonObject;
+    runtimeProofConformance(args: JsonObject): JsonObject;
+    runtimeProofAttest(args: JsonObject): JsonObject;
+    runtimeProofRehydrate(args: JsonObject): JsonObject;
     remoteInteropPrepare(args: JsonObject): JsonObject;
     remoteInteropReport(args: JsonObject): JsonObject;
     remoteInteropGet(args: JsonObject): JsonObject;
@@ -136,6 +156,7 @@ export function installKernelDelegateMethods(serviceClass: typeof CraftService):
   installHostSessionMethods(serviceClass);
   installDurableExperienceMethods(serviceClass);
   installLegacyKnowledgeMigrationMethods(serviceClass);
+  installRuntimeLearningMethods(serviceClass);
   serviceClass.prototype.knowledgeSourceSnapshot = function (args) { return this.legacyKnowledgeMigration.sourceSnapshot(args); };
   serviceClass.prototype.knowledgeSourceDiff = function (args) { return this.legacyKnowledgeMigration.sourceDiff(args); };
   serviceClass.prototype.knowledgeCandidateImport = function (args) { return this.legacyKnowledgeMigrationCandidateImport(args); };
@@ -147,6 +168,8 @@ export function installKernelDelegateMethods(serviceClass: typeof CraftService):
   serviceClass.prototype.knowledgeCandidateRetract = function (args) { return this.legacyKnowledgeMigrationRetract(args); };
   serviceClass.prototype.knowledgeMigrationFailureReport = function (args) { return this.legacyKnowledgeMigrationFailureReport(args); };
   serviceClass.prototype.memoryCandidatePropose = function (args) { return this.memoryGovernance.propose(args); };
+  serviceClass.prototype.memoryPolicySave = function (args) { return this.memoryGovernance.policySave(args); };
+  serviceClass.prototype.memoryPolicyGet = function (args = {}) { return this.memoryGovernance.policyGet(args); };
   serviceClass.prototype.memoryCandidateReview = function (args) { return this.memoryGovernance.review(args); };
   serviceClass.prototype.memoryLedgerRememberApproved = function (args) { return this.memoryGovernance.remember(args); };
   serviceClass.prototype.memoryConflictList = function (args = {}) { return this.memoryGovernance.listConflicts(args); };
@@ -154,6 +177,16 @@ export function installKernelDelegateMethods(serviceClass: typeof CraftService):
   serviceClass.prototype.memoryExpirySweep = function (args = {}) { return this.memoryGovernance.expirySweep(args); };
   serviceClass.prototype.memorySessionFinalize = function (args) { return this.memoryGovernance.sessionFinalize(args); };
   serviceClass.prototype.memoryConsolidateGoverned = function (args) { return this.memoryGovernance.consolidate(args); };
+  serviceClass.prototype.mcpTaskCreate = function (args) { return this.mcpTasks.create(args); };
+  serviceClass.prototype.mcpTaskGet = function (args) { return this.mcpTasks.get(args); };
+  serviceClass.prototype.mcpTaskUpdate = function (args) { return this.mcpTasks.update(args); };
+  serviceClass.prototype.mcpTaskCancel = function (args) { return this.mcpTasks.cancel(args); };
+  serviceClass.prototype.mcpTaskExpire = function (args = {}) { return this.mcpTasks.expire(args); };
+  serviceClass.prototype.runtimeProofManifest = function (args) { return this.runtimeProof.manifest(args); };
+  serviceClass.prototype.runtimeProofProbe = function (args) { return this.runtimeProof.probe(args); };
+  serviceClass.prototype.runtimeProofConformance = function (args) { return this.runtimeProof.conformance(args); };
+  serviceClass.prototype.runtimeProofAttest = function (args) { return this.runtimeProof.attest(args); };
+  serviceClass.prototype.runtimeProofRehydrate = function (args) { return this.runtimeProof.rehydrate(args); };
   serviceClass.prototype.workflowDagValidate = function (args) { return this.workflowDag.validate(args); };
   serviceClass.prototype.workflowDagSave = function (args) { return this.workflowDag.save(args); };
   serviceClass.prototype.workflowDagTransition = function (args) { return this.workflowDag.transition(args); };

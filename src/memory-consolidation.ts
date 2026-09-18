@@ -3,6 +3,19 @@ import type { JsonObject } from "./store.ts";
 import { CraftStore } from "./store.ts";
 
 function text(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim(); }
+function searchScope(value: unknown): { scope: string | null; skipped: boolean } {
+  if (value === undefined) return { scope: null, skipped: false };
+  if (value === null) return { scope: null, skipped: true };
+  if (typeof value === "string") return value.trim() ? { scope: value.trim(), skipped: false } : { scope: null, skipped: true };
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const record = value as JsonObject;
+    const kind = record.kind ?? record.scope_kind;
+    const id = record.id ?? record.scope_id;
+    if (typeof kind !== "string" || typeof id !== "string" || !kind.trim() || !id.trim()) return { scope: null, skipped: true };
+    return { scope: `${kind.trim()}:${id.trim()}`, skipped: false };
+  }
+  throw new Error("scope must be a string or scope object");
+}
 function payload(record: JsonObject): JsonObject { const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record; if (rest.content_ref !== undefined) delete rest.content; return rest; }
 function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
 const SECRET = /(?:api[_-]?key|authorization|cookie|password|passwd|secret|token)\s*[:=]\s*[^\s]{6,}/iu;
@@ -10,6 +23,13 @@ const SECRET = /(?:api[_-]?key|authorization|cookie|password|passwd|secret|token
 export class MemoryConsolidationKernel {
   readonly store: CraftStore;
   constructor(store: CraftStore) { this.store = store; }
+
+  private body(record: JsonObject): string {
+    if (typeof record.content === "string") return record.content;
+    const ref = record.content_ref;
+    if (!ref || typeof ref !== "object" || Array.isArray(ref)) return "";
+    try { return this.store.contentStore.readCompatSync(ref as never).body; } catch { return ""; }
+  }
 
   remember(args: JsonObject): JsonObject {
     const memoryId = String(args.memory_id ?? `memory_${randomUUID().replaceAll("-", "")}`);
@@ -35,7 +55,7 @@ export class MemoryConsolidationKernel {
     if (!memoryIds.length) throw new Error("memory_ids must contain at least one id");
     const memories = memoryIds.map((memoryId) => this.store.get("episodic_memory", memoryId));
     const scope = text(args.scope ?? memories[0]!.scope, "scope");
-    const content = text(args.content ?? memories.map((memory) => String(memory.content)).join("\n"), "content");
+    const content = text(args.content ?? memories.map((memory) => this.body(memory)).filter(Boolean).join("\n"), "content");
     if (SECRET.test(content)) throw new Error("Semantic memory content must not contain credentials or secrets");
     const semanticId = String(args.semantic_id ?? `semantic_memory_${randomUUID().replaceAll("-", "")}`);
     const identityDigest = digest({ scope, content, memory_ids: memoryIds });
@@ -61,9 +81,14 @@ export class MemoryConsolidationKernel {
 
   search(args: JsonObject): JsonObject {
     const query = text(args.query, "query").toLowerCase();
-    const scope = args.scope === undefined ? null : text(args.scope, "scope");
+    const resolvedScope = searchScope(args.scope);
+    if (resolvedScope.skipped) {
+      return { query, scope: null, results: [], skipped: true, reason: "scope_unavailable" };
+    }
+    const scope = resolvedScope.scope;
     const memories = this.store.list("semantic_memory", 10_000, (item) => item.status === "active" && (scope === null || item.scope === scope));
-    const results = memories.filter((item) => String(item.content).toLowerCase().includes(query));
+    const results = memories.filter((item) => this.body(item).toLowerCase().includes(query))
+      .map((item) => ({ ...item, content: this.body(item) }));
     return { query, results };
   }
 }

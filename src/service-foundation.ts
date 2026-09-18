@@ -118,6 +118,8 @@ import { WorkRuntimeModeKernel } from "./work-runtime-mode.ts";
 import { TurnCognitiveRuntime } from "./turn-cognitive-runtime.ts";
 import { ContinualHarnessKernel } from "./continual-harness.ts";
 import { StatefulComputeKernel } from "./stateful-compute.ts";
+import { McpTaskKernel } from "./mcp-tasks.ts";
+import { RuntimeProofKernel } from "./runtime-proof.ts";
 import { UncertaintyPolicyKernel } from "./uncertainty-policy.ts";
 import { ReleaseQualificationKernel } from "./release-qualification.ts";
 import { VerificationPlane } from "./verification-plane.ts";
@@ -132,6 +134,9 @@ import { WorkspaceCoordinator } from "./application/coordinators/workspace-coord
 import { DurableActionLoopKernel } from "./durable-action-loop.ts";
 import { ExperienceLedgerKernel } from "./experience-ledger.ts";
 import { ContentMigrationKernel } from "./content-migration.ts";
+import { TraceReviewKernel } from "./trace-review.ts";
+import { MemoryMaintenanceKernel } from "./memory-maintenance.ts";
+import { RuntimeModelProbeKernel } from "./runtime-model-probe.ts";
 
 /**
  * Stable composition root for the service. Domain behavior stays in focused
@@ -238,6 +243,11 @@ export abstract class ServiceFoundation {
   readonly capabilityLifecycle: CapabilityLifecycleKernel;
   readonly memoryConsolidation: MemoryConsolidationKernel;
   readonly contentMigration: ContentMigrationKernel;
+  readonly traceReviews: TraceReviewKernel;
+  readonly memoryMaintenance: MemoryMaintenanceKernel;
+  readonly runtimeModelProbe: RuntimeModelProbeKernel;
+  readonly mcpTasks: McpTaskKernel;
+  readonly runtimeProof: RuntimeProofKernel;
   readonly remoteInterop: RemoteInteropKernel;
   readonly platformOperations: PlatformOperationsKernel;
   readonly modelProviders: readonly ModelProviderSpec[];
@@ -384,6 +394,11 @@ export abstract class ServiceFoundation {
     this.autonomousRuntime = new AutonomousRuntimeKernel(store);
     this.capabilityLifecycle = new CapabilityLifecycleKernel(store);
     this.memoryConsolidation = new MemoryConsolidationKernel(store);
+    this.traceReviews = new TraceReviewKernel(store);
+    this.memoryMaintenance = new MemoryMaintenanceKernel(store);
+    this.runtimeModelProbe = new RuntimeModelProbeKernel(store, this.modelProviders, modelTransport ?? null);
+    this.mcpTasks = new McpTaskKernel(store);
+    this.runtimeProof = new RuntimeProofKernel(store);
     this.contentMigration = new ContentMigrationKernel(store);
     this.remoteInterop = new RemoteInteropKernel(store);
     this.platformOperations = new PlatformOperationsKernel(store);

@@ -69,7 +69,7 @@ test("Trace replay and retention policies are deterministic and bounded", async 
     assert.throws(() => f.service.traceRetentionPlan({ max_days: 0 }), /positive integer/);
     assert.throws(() => f.service.traceRetentionPlan({ max_events: 0 }), /positive integer/);
     assert.throws(() => f.service.traceQuery({ limit: 0 }), /between 1 and 10000/);
-    assert.equal(VERSION, "0.12.31");
+    assert.equal(VERSION, "0.12.32");
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
@@ -80,7 +80,7 @@ test("legacy Trial Trace is projected into the canonical Trace and MCP surfaces 
     const appended = f.service.trialTraceAppend({ trial_id: "trial", event_type: "workflow.started", source: "program_verified", data: { phase: "start" } }); assert.equal(appended.sequence, 1);
     assert.equal((f.service.traceGet({ trace_id: "trial:trial" }).events as JsonObject[]).length, 1);
     f.service.outcomeRecord({ trial_id: "trial", verdict: "passed", summary: "done", scores: {}, costs: {}, evidence_ids: [], source: "program_verified" });
-    assert.equal((f.service.traceGet({ trace_id: "trial:trial" }).events as JsonObject[]).length, 2);
+    assert.equal((f.service.traceGet({ trace_id: "trial:trial" }).events as JsonObject[]).length, 3);
     const mcp = new McpServer(f.service, "full");
     for (const [name, args] of [["craft_trace_get", { trace_id: "trial:trial" }], ["craft_trace_query", { trace_id: "trial:trial" }], ["craft_trace_replay_bundle", { trace_id: "trial:trial" }]] as [string, JsonObject][]) {
       const response = await mcp.handle({ id: name, method: "tools/call", params: { name, arguments: args } }); assert.equal((response?.result as JsonObject).isError, false);
@@ -101,7 +101,7 @@ test("legacy Trial Trace is projected into the canonical Trace and MCP surfaces 
     for (const [name, args] of calls) { const response = await mcp.handle({ id: name, method: "tools/call", params: { name, arguments: args } }); assert.equal((response?.result as JsonObject).isError, false); }
     assert.ok(CORE_TOOLS.some((tool) => tool.name === "craft_trace_get"));
     assert.ok(mcp.tools.some((tool) => tool.name === "craft_trace_case_compile"));
-    const kernel = new TraceKernel(f.store); assert.equal((kernel.query({ trace_id: "trial:trial" }).count), 2);
+    const kernel = new TraceKernel(f.store); assert.equal((kernel.query({ trace_id: "trial:trial" }).count), 3);
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 

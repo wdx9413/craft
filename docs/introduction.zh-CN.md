@@ -1,6 +1,6 @@
 # Craft：受控 Agent 工作运行时
 
-> 本文是 Craft 的总览入口。它解释产品解决的问题、关键概念如何连接、当前实现做到哪里，以及在面试或架构评审中应如何准确回答。当前实现基线为 v0.12.30；旧版本号只表示历史里程碑。
+> 本文是 Craft 的总览入口。它解释产品解决的问题、关键概念如何连接、当前实现做到哪里，以及在面试或架构评审中应如何准确回答。当前实现基线为 v0.12.32；旧版本号只表示历史里程碑。
 
 ## 一句话
 
@@ -63,6 +63,8 @@ v0.12.20 将最后的“学习”变成可运行的双速闭环：本次 Session
 v0.12.21 进一步把主链压缩为“定义 → 准备 → 行动 → 交付 → 学习”，并将 `VerifiedWorkLoop` 固定为唯一公开工作门面。`UncertaintyPolicy` 允许模型在 Safety Floor 内自主增加求证强度，人工介入只是可配置兜底；`ReferencePilot` 用两个无正文 Case、每臂五次配对 Trial 区分机制通过与真实价值证明。详见 [Platform Ideal State v1](technical/modules/platform-ideal-state-v1.md)。
 
 v0.12.28 将产品收敛为完整 Craft 与三个推荐的独立入口：`craft-context`（知识、记忆和最小上下文）、`craft-capability`（能力发现）和 `craft-quality`（通用 Subject 评测）。完整插件统一装配 Core、Context、Capability、Quality 和 Host Bridge；旧 Knowledge、Memory、Skill Quality 名称仅保留兼容。Codex App 默认是 `embedded` Execution Host，Craft 不会因此另起 Codex CLI。详见 [组件插件架构](technical/modules/component-plugin-architecture.md)。
+
+v0.12.32 完成 Runtime Assurance & Learning Loop：所有模式都可以沿着 `Task Contract → Activation → Preflight → Host → Receipt → Re-observation → Acceptance → Outcome → Trace/Evaluation → Candidate` 工作。`RuntimeProof` 负责 manifest、probe、conformance、attestation 和恢复前环境重水合；`McpTask` 负责 owner-scoped 的持久任务句柄、TTL、取消和幂等。Craft 不代替 Codex、Claude 或 IDE 的模型和工具执行，而是提供可恢复状态、权限边界、诊断证据、验收和受限演进；未配置真实 Host、凭据 Broker 或隔离器时不会伪造成功。
 
 v0.12.30 补齐“能部署、能证明”的外层：远程运行将 principal、tenant、scope、receipt 与一次性 handle 固定在同一任务上；真正的效果比较必须引用真实 Host Session 和独立 Outcome Observer，而不是模型自述。发布者签名、A2A v1 Task 与远程 MCP 都是可替换 Adapter，仍受既有 Capability、Signoff 与 Policy 约束。详见 [Runtime Proof 与远程部署边界](technical/modules/runtime-proof-deployment.md)。
 

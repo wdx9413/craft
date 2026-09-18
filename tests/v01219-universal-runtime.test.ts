@@ -102,7 +102,7 @@ test("v0.12.19 keeps Console and Agent mode as a mode-neutral plan over verified
       const response = await mcp.handle({ id: name, method: "tools/call", params: { name, arguments: args } }); assert.equal((response?.result as JsonObject).isError, false, name);
     }
     assert.equal(new McpServer(f.service, "core").tools.some((tool) => tool.name === "craft_context_resolution_resolve"), true);
-    assert.equal(VERSION, "0.12.31");
+    assert.equal(VERSION, "0.12.32");
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
@@ -187,10 +187,18 @@ test("v0.12.19 fails closed for untrusted, stale, restricted, malformed and drif
     f.runtime.retrievalEvaluate({ adapter_id: nested.id, metrics: { recall: 1, cross_project_leak_count: 0, latency_ms: 0, cost_usd: 0 } });
     assert.equal(((f.runtime.resolve({ query: "alpha", scope_kind: "project", scope_id: "project", retrieval_adapter_id: nested.id, max_items: 1, max_chars: 200 }) as JsonObject).items as JsonObject[])[0].reason, "evaluated_vector_adapter");
     assert.equal(((f.runtime.resolve({ query: "!!!", scope_kind: "project", scope_id: "project" }) as JsonObject).items as JsonObject[]).length, 0);
+    const skipped = f.runtime.resolve({ query: "no scope", scope_kind: " ", scope_id: "" }) as JsonObject;
+    assert.equal(skipped.skipped, true);
+    assert.deepEqual(skipped.items, []);
+    assert.equal(skipped.receipt, null);
     assert.throws(() => f.runtime.resolve({ query: "x", scope_kind: "project", scope_id: "project", source_ids: "generated" as unknown as string[] }), /array/);
     assert.throws(() => f.runtime.resolve({ query: "x", scope_kind: "project", scope_id: "project", source_ids: [String(generatedSource.id), String(generatedSource.id)] }), /unique/);
     assert.throws(() => f.runtime.sourceTransition({ source_id: "", status: "disabled", reason: "x" }), /empty/);
     assert.equal((f.runtime.get({ memory_id: generatedMemory.id, version: 1 }).memory as JsonObject).id, generatedMemory.id);
+    const contentKernel = f.runtime as unknown as { content(record: JsonObject): string };
+    const directRef = f.store.contentStore.writeSync({ kind: "memory", record_id: "direct-content", version: 1, scope: "project:project", status: "active", sensitivity: "internal", source_id: String(generatedSource.id), body: "direct content" });
+    assert.equal(contentKernel.content({ content_ref: directRef }), "direct content");
+    assert.throws(() => contentKernel.content({ content_ref: {} }), /missing/);
     assert.equal((f.runtime.receiptGet({ receipt_id: (keywordResult.receipt as JsonObject).id as string, version: 1 }).receipt as JsonObject).id, (keywordResult.receipt as JsonObject).id);
     const autoPlan = f.modes.prepare({ task_id: "task", profile_id: console.id }).plan as JsonObject; assert.match(String(autoPlan.id), /^work_runtime_plan_/);
     f.store.create("work_runtime_mode", "agent-without-model", { mode: "agent", allowed_hosts: ["internal"], default_host: "internal", default_model: null });

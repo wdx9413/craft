@@ -42,18 +42,22 @@ export class MaintenanceKernel {
     const traceRetention = this.service.store.count("trace") > 0
       ? execute("trace_retention", () => this.service.traceRetentionSweep({ now, limit }))
       : null;
+    const knowledgeExpiry = this.service.store.count("knowledge_claim") > 0
+      ? execute("knowledge_expiry", () => this.service.knowledgeExpirySweep({ now })) : null;
+    const memoryExpiry = (this.service.store.count("memory_candidate") > 0 || this.service.store.count("memory_ledger") > 0)
+      ? execute("memory_expiry", () => this.service.memoryExpirySweep({ now })) : null;
     const degraded = outcomes.some((item) => item.status !== "passed");
     const previous = this.service.store.find("maintenance_status", "local");
     const receipt = this.service.store.create("maintenance_tick", `maintenance_tick_${randomUUID().replaceAll("-", "")}`, { observed_at: now, limit,
       source_count: sources.length, invalidated_count: reconciliations.reduce((sum, item) => sum + Number(item.count), 0), recovery_count: Number(recovery?.count ?? 0),
       recovered_recovery_leases: Number(recoveryLeases?.recovered ?? 0), recovered_hydration_leases: Number(hydrationLeases?.recovered ?? 0),
-      expired_speculative_candidates: Number(speculative?.expired ?? 0), recovered_acceptance_jobs: Number(acceptance?.recovered ?? 0), exhausted_acceptance_jobs: Number(acceptance?.exhausted ?? 0), attention_count: Number(attention?.count ?? 0), trace_archived: Number(traceRetention?.archived ?? 0), trace_deleted: Number(traceRetention?.deleted ?? 0), component_outcomes: outcomes, status: degraded ? "degraded" : "passed" });
+      expired_speculative_candidates: Number(speculative?.expired ?? 0), recovered_acceptance_jobs: Number(acceptance?.recovered ?? 0), exhausted_acceptance_jobs: Number(acceptance?.exhausted ?? 0), attention_count: Number(attention?.count ?? 0), trace_archived: Number(traceRetention?.archived ?? 0), trace_deleted: Number(traceRetention?.deleted ?? 0), expired_knowledge: Number(knowledgeExpiry?.count ?? 0), expired_memory: Number(memoryExpiry?.count ?? 0), component_outcomes: outcomes, status: degraded ? "degraded" : "passed" });
     const status = this.service.store.save("maintenance_status", "local", { ...(previous ? payload(previous) : {}), status: degraded ? "degraded" : "healthy", last_tick_at: now,
       limit, source_count: sources.length, invalidated_count: reconciliations.reduce((sum, item) => sum + Number(item.count), 0),
       recovery_count: Number(recovery?.count ?? 0), recovered_recovery_leases: Number(recoveryLeases?.recovered ?? 0),
       recovered_hydration_leases: Number(hydrationLeases?.recovered ?? 0), expired_speculative_candidates: Number(speculative?.expired ?? 0),
-      recovered_acceptance_jobs: Number(acceptance?.recovered ?? 0), exhausted_acceptance_jobs: Number(acceptance?.exhausted ?? 0), attention_count: Number(attention?.count ?? 0), trace_archived: Number(traceRetention?.archived ?? 0), trace_deleted: Number(traceRetention?.deleted ?? 0), last_tick_id: receipt.id });
-    return { status, receipt, outcomes, reconciliations, recovery, attention, trace_retention: traceRetention };
+      recovered_acceptance_jobs: Number(acceptance?.recovered ?? 0), exhausted_acceptance_jobs: Number(acceptance?.exhausted ?? 0), attention_count: Number(attention?.count ?? 0), trace_archived: Number(traceRetention?.archived ?? 0), trace_deleted: Number(traceRetention?.deleted ?? 0), expired_knowledge: Number(knowledgeExpiry?.count ?? 0), expired_memory: Number(memoryExpiry?.count ?? 0), last_tick_id: receipt.id });
+    return { status, receipt, outcomes, reconciliations, recovery, attention, trace_retention: traceRetention, knowledge_expiry: knowledgeExpiry, memory_expiry: memoryExpiry };
   }
 }
 

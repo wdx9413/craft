@@ -1,6 +1,6 @@
 {
   "name": "craft-agent-harness",
-  "version": "0.12.31",
+  "version": "0.12.32",
   "description": "Cross-platform capability, workflow, evidence, and agent harness",
   "type": "module",
   "bin": {
@@ -10,7 +10,7 @@
     "craft-mcp-http": "dist/bin/craft-mcp-http.js"
   },
   "scripts": {
-    "test": "pnpm run build && pnpm run typecheck && pnpm run test:ts && pnpm run test:v01216 && pnpm run test:v01217 && pnpm run test:v01218 && pnpm run test:v01219 && pnpm run test:v01220 && pnpm run test:v01221 && pnpm run test:v01222 && pnpm run test:v01223 && pnpm run test:v01224 && pnpm run test:v01225 && pnpm run test:v01226 && pnpm run test:v01228 && pnpm run test:v01229 && pnpm run test:v01230 && pnpm run test:v01231 && pnpm run test:legacy-knowledge-migration && pnpm run test:durable-experience && pnpm run test:trace-storage && pnpm run test:smoke && pnpm run test:plugin",
+    "test": "pnpm run build && pnpm run typecheck && pnpm run test:ts && pnpm run test:v01216 && pnpm run test:v01217 && pnpm run test:v01218 && pnpm run test:v01219 && pnpm run test:v01220 && pnpm run test:v01221 && pnpm run test:v01222 && pnpm run test:v01223 && pnpm run test:v01224 && pnpm run test:v01225 && pnpm run test:v01226 && pnpm run test:v01228 && pnpm run test:v01229 && pnpm run test:v01230 && pnpm run test:v01231 && pnpm run test:v01232 && pnpm run test:legacy-knowledge-migration && pnpm run test:durable-experience && pnpm run test:trace-storage && pnpm run test:smoke && pnpm run test:plugin",
     "clean": "node --experimental-strip-types scripts/clean.ts",
     "build": "pnpm run clean && pnpm run build:core && pnpm run build:plugin && pnpm run pack:plugin && pnpm run build:deepseek && pnpm run pack:adapters",
     "build:core": "node node_modules/typescript/bin/tsc -p tsconfig.build.json",
@@ -21,11 +21,11 @@
     "pack:desktop": "node --experimental-strip-types scripts/package-desktop.ts",
     "prepack": "pnpm run build",
     "test:smoke": "node dist/src/cli.js --help",
-    "test:plugin": "node --experimental-strip-types scripts/check-plugin-package.ts && node --experimental-strip-types scripts/plugin-smoke.ts && node --experimental-strip-types scripts/plugin-component-smoke.ts && node --experimental-strip-types scripts/plugin-full-smoke.ts",
+    "test:plugin": "node --experimental-strip-types scripts/check-plugin-package.ts && node --experimental-strip-types scripts/check-plugin-version.ts && node --experimental-strip-types scripts/plugin-smoke.ts && node --experimental-strip-types scripts/plugin-component-smoke.ts && node --experimental-strip-types scripts/plugin-full-smoke.ts",
     "coverage:branches:report": "c8 --all --src=src --exclude=src/cli.ts --exclude=src/**/index.ts --exclude=**/*.d.ts --reporter=json --reporter=text --report-dir=coverage node --test --test-isolation=none --test-concurrency=1 tests/*.test.ts && node --experimental-strip-types scripts/branch-gap-report.ts",
     "version:check": "node --experimental-strip-types scripts/check-version.ts",
     "test:ts": "pnpm run version:check && node --experimental-strip-types scripts/test.ts",
-    "test:v01216": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-include=src/federated-delegation.ts --test-coverage-include=src/harness-topology.ts --test-coverage-include=src/runtime-readiness.ts --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 tests/v01216-federated-runtime.test.ts",
+    "test:v01216": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-include=src/federated-delegation.ts --test-coverage-include=src/harness-topology.ts --test-coverage-include=src/runtime-readiness.ts --test-coverage-include=src/runtime-model-probe.ts --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 tests/v01216-federated-runtime.test.ts",
     "test:v01217": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-include=src/assured-pilot.ts --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 tests/v01217-assured-pilot.test.ts",
     "test:v01218": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-include=src/capability-kit-runtime.ts --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 tests/v01218-capability-platform.test.ts",
     "test:v01219": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-include=src/knowledge-memory-runtime.ts --test-coverage-include=src/work-runtime-mode.ts --test-coverage-include=src/verified-work-loop.ts --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 tests/v01219-universal-runtime.test.ts tests/verified-work-loop.test.ts",
@@ -40,6 +40,7 @@
     "test:v01229": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-include=src/remote-mcp-access.ts --test-coverage-include=src/host-session-events.ts --test-coverage-include=src/outcome-observer.ts --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 tests/v01229-remote-mcp-access.test.ts tests/v01229-session-observer.test.ts",
     "test:v01230": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-include=src/remote-runtime.ts --test-coverage-include=src/oidc-jwks.ts --test-coverage-include=src/supply-chain-attestation.ts --test-coverage-include=src/runtime-acceptance.ts --test-coverage-include=src/a2a-v1-adapter.ts --test-coverage-lines=100 --test-coverage-functions=100 tests/v01230-runtime-proof.test.ts",
     "test:v01231": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-include=src/memory-governance.ts --test-coverage-include=src/workflow-dag.ts --test-coverage-include=src/task-state.ts --test-coverage-lines=100 --test-coverage-functions=100 tests/v01231-agent-foundation.test.ts",
+    "test:v01232": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-include=src/trace-review.ts --test-coverage-include=src/memory-maintenance.ts --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 tests/v01232-observability-memory.test.ts && node --test --test-isolation=none --experimental-test-coverage --test-coverage-include=src/mcp-tasks.ts --test-coverage-include=src/runtime-proof.ts --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 tests/mcp-tasks.test.ts tests/runtime-proof.test.ts",
     "test:legacy-knowledge-migration": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-include=src/legacy-knowledge-migration.ts --test-coverage-include=src/application/use-cases/legacy-knowledge-migration.ts --test-coverage-lines=100 tests/legacy-knowledge-migration.test.ts",
     "knowledge:import-offline": "node --experimental-strip-types scripts/import-legacy-knowledge.ts",
     "test:durable-experience": "node --test --test-isolation=none --experimental-test-coverage --test-coverage-include=src/durable-action-loop.ts --test-coverage-include=src/experience-ledger.ts --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100 tests/durable-action-experience.test.ts",

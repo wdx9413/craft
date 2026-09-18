@@ -8,6 +8,8 @@ import { McpServer, surfaceToolNames } from "../src/mcp.ts";
 import { craftPaths } from "../src/paths.ts";
 import { CraftService, VERSION } from "../src/service.ts";
 import { CraftStore, type JsonObject } from "../src/store.ts";
+import { RuntimeModelProbeKernel } from "../src/runtime-model-probe.ts";
+import type { ModelProviderSpec, ModelTransport } from "../src/model-gateway.ts";
 
 function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
 
@@ -69,7 +71,7 @@ test("v0.12.18 grants only healthy, scoped, one-time remote read authority and r
     assert.throws(() => full.handlers.craft_federated_delegation_revoke({ grant_id: grant.id, reason: "late", evidence_ids: [f.confirmed.id] }), /Terminal/);
     assert.equal((await full.handlers.craft_federated_delegation_reconcile({ grant_id: grant.id })).idempotent, true);
     assert.equal((await full.handlers.craft_federated_delegation_get({ grant_id: grant.id })).grant !== undefined, true);
-    assert.equal(VERSION, "0.12.31");
+    assert.equal(VERSION, "0.12.32");
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
@@ -229,4 +231,51 @@ test("v0.12.18 records every remote delegation failure as an explicit boundary",
     f.service.federatedAgentHealthRecord({ card_id: nonArrayCard.id, card_digest: nonArrayCard.card_digest, status: "healthy", evidence_ids: [f.confirmed.id], observed_by: "host" });
     assert.equal(((f.service.federatedDelegationGrantIssue({ grant_id: "non-array-skills", delegation_id: delegation(f, "non-array-skills").id, parent_task_run_id: f.run.id, parent_operation_ref: "parent", audience: "remote", issued_by: "host" }).grant as JsonObject).capability_ids as string[]).length, 0);
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("runtime readiness exposes secret-free model status and bounded probes", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-runtime-probe-"));
+  const store = await new CraftStore(craftPaths(root)).open();
+  try {
+    const provider: ModelProviderSpec = { provider: "probe", label: "Probe", protocol: "openai-compatible", base_url: "https://model.example.test/v1", api_key_env: "PROBE_KEY", chat_path: "/chat/completions", models: { standard: "probe-model" }, cost_hint: 1, supports_tools: true };
+    const frontier: ModelProviderSpec = { ...provider, provider: "frontier", models: { frontier: "frontier-model" }, api_key_env: "FRONTIER_KEY" };
+    const small: ModelProviderSpec = { ...provider, provider: "small", models: { small: "small-model" }, api_key_env: "SMALL_KEY" };
+    const emptyModel: ModelProviderSpec = { ...provider, provider: "empty", models: {}, api_key_env: "EMPTY_KEY" };
+    const requests: string[] = [];
+    const transport: ModelTransport = { complete: async (_spec, request) => { requests.push(request.url); return { text: "OK", model: "probe-model", usage: { input_tokens: 1, output_tokens: 1 } }; } };
+    const kernel = new RuntimeModelProbeKernel(store, [provider], transport);
+    assert.equal((kernel.status().providers as JsonObject[])[0]!.configured, false);
+    const catalog = new RuntimeModelProbeKernel(store, [frontier, small, emptyModel]).status().providers as JsonObject[];
+    assert.equal(catalog[0]!.model, "frontier-model"); assert.equal(catalog[1]!.model, "small-model"); assert.equal(catalog[2]!.model, null);
+    const unavailable = await kernel.probe({ probe_id: "missing", provider: "probe" });
+    assert.equal((unavailable.probe as JsonObject).status, "unavailable");
+    process.env.PROBE_KEY = "test-only";
+    const available = await kernel.probe({ probe_id: "configured", provider: "probe" });
+    assert.equal((available.probe as JsonObject).status, "available");
+    assert.equal(requests.length, 1);
+    assert.equal((await kernel.probe({ probe_id: "configured", provider: "probe" })).idempotent, true);
+    const refreshed = await kernel.probe({ probe_id: "configured", provider: "probe", refresh: true });
+    assert.equal((refreshed.probe as JsonObject).status, "available");
+    await assert.rejects(kernel.probe({ provider: "unknown" }), /declared/);
+    await assert.rejects(kernel.probe({ provider: "" }), /must not be empty/);
+    await assert.rejects(new RuntimeModelProbeKernel(store, [emptyModel], transport).probe({ provider: "empty" }), /usable model/);
+    process.env.PROBE_KEY = "test-only";
+    const defaultProbe = await kernel.probe({});
+    assert.equal((defaultProbe.probe as JsonObject).provider, "probe");
+    const noTransport = await new RuntimeModelProbeKernel(store, [provider], null).probe({ probe_id: "no-transport", provider: "probe" });
+    assert.equal((noTransport.probe as JsonObject).reason, "probe_not_run");
+    const failing = new RuntimeModelProbeKernel(store, [provider], { complete: async () => { throw new Error("upstream unavailable"); } });
+    process.env.PROBE_KEY = "test-only";
+    const failed = await failing.probe({ probe_id: "failed", provider: "probe" });
+    assert.equal((failed.probe as JsonObject).status, "unavailable");
+    assert.match(String((failed.probe as JsonObject).reason), /upstream unavailable/);
+    const emptyResponse = new RuntimeModelProbeKernel(store, [provider], { complete: async () => ({ text: "", model: "probe-model", usage: null }) });
+    const empty = await emptyResponse.probe({ probe_id: "empty-response", provider: "probe" });
+    assert.equal((empty.probe as JsonObject).reason, "empty_model_response");
+    const rawFailure = new RuntimeModelProbeKernel(store, [provider], { complete: async () => { throw "raw failure"; } });
+    const raw = await rawFailure.probe({ probe_id: "raw-failure", provider: "probe" });
+    assert.equal((raw.probe as JsonObject).reason, "model_probe_failed");
+    delete process.env.PROBE_KEY;
+    assert.deepEqual(new RuntimeModelProbeKernel(store, []).status(), { providers: [] });
+  } finally { delete process.env.PROBE_KEY; store.close(); await rm(root, { recursive: true, force: true }); }
 });

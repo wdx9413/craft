@@ -41,4 +41,5 @@ export class RuntimeReadinessKernel {
   }
 
   get(args: JsonObject): JsonObject { return { assessment: this.store.get("runtime_readiness_assessment", text(args.assessment_id, "assessment_id")) }; }
+
 }
