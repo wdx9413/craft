@@ -1,13 +1,12 @@
 import { createHash } from "node:crypto";
-import { CraftStore, type JsonObject } from "./store.ts";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
+import { text } from "./validation.ts";
+import { digestJson, payload } from "./digest.ts";
 
 const TERMINAL = new Set(["completed", "failed", "cancelled", "indeterminate", "revoked"]);
 const REMOTE_STATES = new Set(["accepted", "working", "completed", "failed", "cancelled", "indeterminate"]);
 
-function text(value: unknown, name: string): string {
-  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
-  return value.trim();
-}
+
 function strings(value: unknown, name: string, minimum = 0): string[] {
   if (!Array.isArray(value) || value.length < minimum) throw new Error(`${name} must contain at least ${minimum} values`);
   const result = value.map((item) => text(item, name));
@@ -19,11 +18,8 @@ function instant(value: unknown, name: string): number {
   if (Number.isNaN(result)) throw new Error(`${name} must be an ISO timestamp`);
   return result;
 }
-function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
-function payload(record: JsonObject): JsonObject {
-  const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record;
-  return rest;
-}
+
+
 function confirmedEvidence(store: CraftStore, ids: string[]): void {
   for (const id of ids) if (store.get("evidence", id).confidence !== "confirmed") throw new Error("Federated delegation requires confirmed Evidence");
 }
@@ -50,7 +46,7 @@ export class FederatedDelegationKernel {
     if (text(args.card_digest, "card_digest") !== card.card_digest) throw new Error("Remote Agent health does not match the current Agent Card");
     const evidenceIds = strings(args.evidence_ids, "evidence_ids", 1); confirmedEvidence(this.store, evidenceIds);
     const id = String(args.health_id ?? `federated_agent_health_${card.id}`);
-    const value = { card_id: card.id, card_version: card.version, card_digest: card.card_digest, status, evidence_ids: evidenceIds, observed_by: text(args.observed_by, "observed_by"), health_digest: digest({ card_id: card.id, card_version: card.version, card_digest: card.card_digest, status, evidence_ids: evidenceIds }) };
+    const value = { card_id: card.id, card_version: card.version, card_digest: card.card_digest, status, evidence_ids: evidenceIds, observed_by: text(args.observed_by, "observed_by"), health_digest: digestJson({ card_id: card.id, card_version: card.version, card_digest: card.card_digest, status, evidence_ids: evidenceIds }) };
     const existing = this.store.find("federated_agent_health", id);
     if (existing?.health_digest === value.health_digest) return { health: existing, idempotent: true };
     return { health: existing ? this.store.save("federated_agent_health", id, { ...value }) : this.store.create("federated_agent_health", id, value), idempotent: false };
@@ -76,10 +72,10 @@ export class FederatedDelegationKernel {
     if (JSON.stringify(artifactIds) !== JSON.stringify(delegatedArtifacts)) throw new Error("Federated Grant cannot widen delegation Artifact scope");
     const artifacts = artifactIds.map((id) => this.store.get("artifact", id));
     const identity = { delegation_id: delegation.id, delegation_digest: delegation.delegation_digest, session_id: session.id, session_digest: session.session_digest, trust_id: trust.id, trust_version: trust.version, card_id: card.id, card_version: card.version, card_digest: card.card_digest, parent_task_run_id: run.id, parent_task_run_version: run.version, parent_operation_ref: text(args.parent_operation_ref, "parent_operation_ref"), audience: text(args.audience, "audience"), capability_ids: capabilityIds, artifact_ids: artifactIds, effect: "read_only", expires_at: delegation.expires_at };
-    const grantId = text(args.grant_id, "grant_id"); const grantDigest = digest(identity); const existing = this.store.find("federated_delegation_grant", grantId);
+    const grantId = text(args.grant_id, "grant_id"); const grantDigest = digestJson(identity); const existing = this.store.find("federated_delegation_grant", grantId);
     if (existing) { if (existing.grant_digest !== grantDigest) throw new Error("Federated Grant idempotency conflict"); return { grant: existing, artifact_grants: this.artifactGrants(String(existing.id)), idempotent: true }; }
     const grant = this.store.create("federated_delegation_grant", grantId, { ...identity, grant_digest: grantDigest, status: "active", raw_context_stored: false, issued_by: text(args.issued_by, "issued_by") });
-    const artifactGrants = artifacts.map((artifact) => this.store.create("federated_artifact_grant", `${grant.id}:${artifact.id}`, { grant_id: grant.id, artifact_id: artifact.id, artifact_version: artifact.version, artifact_digest: digest({ id: artifact.id, version: artifact.version, uri: artifact.uri ?? null }), effect: "read_only", expires_at: grant.expires_at, status: "active", raw_content_stored: false }));
+    const artifactGrants = artifacts.map((artifact) => this.store.create("federated_artifact_grant", `${grant.id}:${artifact.id}`, { grant_id: grant.id, artifact_id: artifact.id, artifact_version: artifact.version, artifact_digest: digestJson({ id: artifact.id, version: artifact.version, uri: artifact.uri ?? null }), effect: "read_only", expires_at: grant.expires_at, status: "active", raw_content_stored: false }));
     return { grant, artifact_grants: artifactGrants, idempotent: false };
   }
 
@@ -105,7 +101,7 @@ export class FederatedDelegationKernel {
     const artifactGrantIds = strings(args.artifact_grant_ids ?? [], "artifact_grant_ids"); const expected = this.artifactGrants(String(grant.id)).map((item) => String(item.id)).sort();
     if (JSON.stringify(artifactGrantIds) !== JSON.stringify(expected)) throw new Error("Remote receipt Artifact grants do not match the Grant");
     const identity = { grant_id: grant.id, grant_digest: grant.grant_digest, delegation_id: delegation.id, state, environment_digest: run.environment_digest, effect: "read_only", artifact_grant_ids: artifactGrantIds, evidence_ids: evidenceIds, result_digest: text(args.result_digest, "result_digest") };
-    const receiptId = text(args.receipt_id, "receipt_id"); const receiptDigest = digest(identity); const existing = this.store.find("federated_remote_receipt", receiptId);
+    const receiptId = text(args.receipt_id, "receipt_id"); const receiptDigest = digestJson(identity); const existing = this.store.find("federated_remote_receipt", receiptId);
     if (existing) { if (existing.receipt_digest !== receiptDigest) throw new Error("Federated remote receipt idempotency conflict"); return { receipt: existing, grant, idempotent: true }; }
     if (grant.status !== "consumed") throw new Error("Remote receipt requires a consumed Federated Grant");
     if (delegation.status !== "issued") throw new Error("Remote receipt requires an issued A2A delegation");

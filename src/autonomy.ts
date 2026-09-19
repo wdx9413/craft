@@ -1,15 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
-import { CraftStore, type JsonObject } from "./store.ts";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
+import { object, text } from "./validation.ts";
+import { digestJson, payload } from "./digest.ts";
 
 const ACTIONS = new Set(["read", "draft", "sandbox_write", "external_write", "communication", "computer_use", "destructive", "financial"]);
 const LEVELS = new Set(["automatic", "notify_only", "human_approval", "multi_sig"]);
 const HIGH_RISK = new Set(["destructive", "financial"]);
-function text(value: unknown, name: string): string {
-  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim();
-}
-function object(value: unknown, name: string): JsonObject {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${name} must be an object`); return value as JsonObject;
-}
+
 function integer(value: unknown, name: string, fallback: number, min: number, max: number): number {
   const result = value === undefined ? fallback : Number(value);
   if (!Number.isInteger(result) || result < min || result > max) throw new Error(`${name} must be an integer between ${min} and ${max}`); return result;
@@ -18,10 +15,6 @@ function instant(value: unknown, name: string): number {
   const result = value === undefined ? Date.now() : Date.parse(text(value, name));
   if (Number.isNaN(result)) throw new Error(`${name} must be an ISO timestamp`); return result;
 }
-function payload(record: JsonObject): JsonObject {
-  const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record; return rest;
-}
-function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
 
 export class AutonomyKernel {
   readonly store: CraftStore;
@@ -58,7 +51,7 @@ export class AutonomyKernel {
     const target = text(args.target, "target"); const now = instant(args.now, "now");
     const ttl = integer(args.ttl_seconds, "ttl_seconds", Number(policy.default_ttl_seconds), 60, 86400);
     const identity = { policy_id: policy.id, policy_version: policy.version, task_id: taskId, action, target, request_digest: requestDigest };
-    const requestId = String(args.request_id ?? `authorization_${randomUUID().replaceAll("-", "")}`); const requestFingerprint = digest(identity);
+    const requestId = String(args.request_id ?? `authorization_${randomUUID().replaceAll("-", "")}`); const requestFingerprint = digestJson(identity);
     const existing = this.store.find("autonomy_request", requestId);
     if (existing) {
       if (existing.request_fingerprint !== requestFingerprint) throw new Error("Autonomy request idempotency conflict");

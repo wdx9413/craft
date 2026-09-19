@@ -13,11 +13,11 @@
 
 ## 建设原则
 
-以 [产品架构](architecture.zh-CN.md) 的三大支柱为目标：工作与协作、执行与保障、学习与改进。**评测与实验是第三支柱内的核心模块**，不另设第四支柱。当前实现基线已推进到 v0.12.30。
+以 [产品架构](architecture.zh-CN.md) 的三大支柱为目标：工作与协作、执行与保障、学习与改进。**评测与实验是第三支柱内的核心模块**，不另设第四支柱。当前实现基线已推进到 v0.12.33。
 
 **v0.12.21：Platform Ideal State v1。** `VerifiedWorkLoop` 成为唯一公开工作门面，阶段级 Launch/Fabric 接口退出 MCP 公共清单但保留为内部模块。分层 `UncertaintyPolicy` 默认受限自主：模型可自动增加确定性检查、独立评估器、授权上下文、只读 Expert 或 Trial 数，不能自动扩大 effect、数据、凭据或自治权限；人工只是可配置兜底，同样不能覆盖 Safety Floor。两个无正文 `ReferencePilot` 固定每臂五次配对运行，以 `eligible / rejected / inconclusive` 区分效果、回归和证据不足。内置测试只证明机制，真实 Codex 运行与盲评必须另行取得。详见 [Platform Ideal State v1](../technical/modules/platform-ideal-state-v1.md)。
 
-**v0.12.30：Runtime Proof & Deployment。** 新增可替换 JWKS/OIDC Resource Server verifier、Tenant/Task/Principal/Scope/TTL 绑定的远程任务 handle、真实 Host Session + 独立 Outcome Observer 的双 Host 双 Case 验收 Campaign、发布者公钥摘要证明，以及只读 Federated Grant 驱动的 A2A v1 Adapter。它们只提供可部署的失败关闭契约与本地 conformance，非 loopback 监听、TLS/反向代理、OAuth 登录/PKCE、IdP 撤销、真实业务 Case 与 Windows 隔离后端仍必须由部署环境提供并验证。详见 [Runtime Proof 与远程部署边界](../technical/modules/runtime-proof-deployment.md)。
+**v0.12.33：Runtime Proof & Deployment。** 新增可替换 JWKS/OIDC Resource Server verifier、Tenant/Task/Principal/Scope/TTL 绑定的远程任务 handle、真实 Host Session + 独立 Outcome Observer 的双 Host 双 Case 验收 Campaign、发布者公钥摘要证明，以及只读 Federated Grant 驱动的 A2A v1 Adapter。它们只提供可部署的失败关闭契约与本地 conformance，非 loopback 监听、TLS/反向代理、OAuth 登录/PKCE、IdP 撤销、真实业务 Case 与 Windows 隔离后端仍必须由部署环境提供并验证。详见 [Runtime Proof 与远程部署边界](../technical/modules/runtime-proof-deployment.md)。
 
 **v0.12.28：Component Plugin Architecture 收敛。** 完整 Craft 插件负责统一装配；推荐的可独立安装入口收敛为 Context、Capability 和 Quality。各插件复用同一内核，通过受限 surface 最小暴露；Knowledge、Memory 和 Skill Quality 的旧入口保留兼容。Host 协议区分当前 App 内的 Embedded Bridge、显式 CLI/Worker 的 Managed Adapter 与远程 Delegation，避免将“运行在 Codex 中”误解为“再启动一个 Codex”。详见 [组件插件架构](../technical/modules/component-plugin-architecture.md)。
 

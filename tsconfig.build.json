@@ -9,6 +9,6 @@
     "declaration": true,
     "sourceMap": true
   },
-  "include": ["src/**/*.ts", "bin/**/*.ts"],
+  "include": ["src/**/*.ts", "bin/**/*.ts", "capability/**/*.ts"],
   "exclude": ["tests", "adapters"]
 }

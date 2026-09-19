@@ -1,19 +1,16 @@
 import { createHash } from "node:crypto";
-import { CraftStore, type JsonObject } from "./store.ts";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
+import { object, text } from "./validation.ts";
 
 const ENTITY_KINDS = new Set(["work_object", "artifact", "evidence", "memory_item", "trial", "outcome",
   "workflow", "capability", "speculative_candidate", "external_effect"]);
 const ACTORS = new Set(["program", "model", "human", "workflow", "agent", "external_system"]);
-function text(value: unknown, name: string): string {
-  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim();
-}
+
 function integer(value: unknown, name: string, fallback: number, min = 1, max = Number.MAX_SAFE_INTEGER): number {
   const result = value === undefined ? fallback : Number(value);
   if (!Number.isInteger(result) || result < min || result > max) throw new Error(`${name} must be an integer between ${min} and ${max}`); return result;
 }
-function object(value: unknown, name: string): JsonObject {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${name} must be an object`); return value as JsonObject;
-}
+
 function array(value: unknown, name: string): unknown[] {
   if (!Array.isArray(value)) throw new Error(`${name} must be an array`); return value;
 }

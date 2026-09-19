@@ -3,16 +3,14 @@ import { lookup } from "node:dns/promises";
 import { request, type RequestOptions } from "node:https";
 import type { ClientRequest, IncomingMessage } from "node:http";
 import { isIP } from "node:net";
-import type { JsonObject } from "./store.ts";
+import type { JsonObject } from "./infrastructure/store.ts";
+import { text } from "./validation.ts";
 
 export type EgressResponse = { status: number; headers: Record<string, string>; body: string; output_limited: boolean };
 export type EgressResolver = (hostname: string) => Promise<Array<{ address: string; family: number }>>;
 export type EgressTransport = (input: { url: URL; method: string; headers: Record<string, string>; body: string;
   address: string; family: number; timeout_ms: number; output_limit: number }) => Promise<EgressResponse>;
 
-function text(value: unknown, name: string): string {
-  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim();
-}
 function canonicalHeaders(value: unknown): Record<string, string> {
   if (value === undefined) return {};
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("headers must be an object");

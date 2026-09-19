@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { CraftService, VERSION } from "./service.ts";
 import { runBuiltinAcceptanceTicks } from "./acceptance-worker.ts";
 import { McpServer } from "./mcp.ts";
-import { type JsonObject } from "./store.ts";
+import { type JsonObject } from "./infrastructure/store.ts";
 
 const MAX_BODY = 64 * 1024;
 /**

@@ -1,15 +1,17 @@
 import { createHash } from "node:crypto";
-import { CraftStore, type JsonObject } from "./store.ts";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
+import { text } from "./validation.ts";
+import { digestJson, payload } from "./digest.ts";
 
 const ROLES = new Set(["primary", "diagnostic_research", "independent_evaluator", "remote_readonly"]);
 
-function text(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim(); }
+
 function strings(value: unknown, name: string): string[] {
   if (!Array.isArray(value) || !value.length) throw new Error(`${name} must contain at least one value`);
   const result = value.map((item) => text(item, name)); if (new Set(result).size !== result.length) throw new Error(`${name} must contain unique values`); return result.sort();
 }
-function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
-function payload(record: JsonObject): JsonObject { const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record; return rest; }
+
+
 function confirmed(store: CraftStore, ids: string[]): void { for (const id of ids) if (store.get("evidence", id).confidence !== "confirmed") throw new Error("Harness topology requires confirmed Evidence"); }
 
 /** A compact policy module: single-Agent is always the baseline; topology growth is evaluated, bounded and reversible. */
@@ -26,7 +28,7 @@ export class HarnessTopologyKernel {
     const maxAgents = args.max_agents === undefined ? roles.length : Number(args.max_agents);
     if (!Number.isInteger(maxAgents) || maxAgents < roles.length || maxAgents > 5) throw new Error("Harness topology max_agents must be between role count and 5");
     const identity = { task_id: task.id, roles, mode, max_agents: maxAgents, context_policy: "reference_only", effect_policy: "read_only_for_delegates" };
-    const topologyId = text(args.topology_id, "topology_id"); const topologyDigest = digest(identity); const existing = this.store.find("harness_topology", topologyId);
+    const topologyId = text(args.topology_id, "topology_id"); const topologyDigest = digestJson(identity); const existing = this.store.find("harness_topology", topologyId);
     if (existing) { if (existing.topology_digest !== topologyDigest) throw new Error("Harness topology idempotency conflict"); return { topology: existing, idempotent: true }; }
     return { topology: this.store.create("harness_topology", topologyId, { ...identity, topology_digest: topologyDigest, lifecycle: mode === "baseline" ? "active" : "shadow_only" }), idempotent: false };
   }
@@ -47,7 +49,7 @@ export class HarnessTopologyKernel {
     if (baseline.task_id !== task.id || baseline.mode !== "baseline" || baseline.lifecycle !== "active") throw new Error("Harness baseline is not active for this task");
     const candidates = this.store.list("harness_topology", 1000, (item) => item.task_id === task.id && item.mode === "candidate" && item.lifecycle === "routing_eligible").sort((left, right) => String(left.id).localeCompare(String(right.id)));
     const chosen = candidates[0] ?? baseline; const identity = { task_id: task.id, baseline_topology_id: baseline.id, baseline_version: baseline.version, selected_topology_id: chosen.id, selected_version: chosen.version };
-    const selectionId = String(args.selection_id ?? `harness_topology_selection_${digest(identity).slice(-16)}`); const existing = this.store.find("harness_topology_selection", selectionId); const selectionDigest = digest(identity);
+    const selectionId = String(args.selection_id ?? `harness_topology_selection_${digestJson(identity).slice(-16)}`); const existing = this.store.find("harness_topology_selection", selectionId); const selectionDigest = digestJson(identity);
     if (existing) { if (existing.selection_digest !== selectionDigest) throw new Error("Harness topology selection idempotency conflict"); return { selection: existing, topology: chosen, idempotent: true }; }
     return { selection: this.store.create("harness_topology_selection", selectionId, { ...identity, selection_digest: selectionDigest, reason: chosen.id === baseline.id ? "single_agent_baseline" : "evaluated_candidate" }), topology: chosen, idempotent: false };
   }

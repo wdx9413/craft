@@ -1,9 +1,11 @@
-import { CraftStore, type JsonObject } from "./store.ts";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
+import { text } from "./validation.ts";
+import { payload } from "./digest.ts";
 
-function text(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim(); }
+
 function instant(value: unknown, name: string): number { const parsed = value === undefined ? Date.now() : Date.parse(text(value, name)); if (Number.isNaN(parsed)) throw new Error(`${name} must be an ISO timestamp`); return parsed; }
 function boundedLimit(value: unknown): number { const parsed = value === undefined ? 100 : Number(value); if (!Number.isInteger(parsed) || parsed < 1 || parsed > 1000) throw new Error("limit must be an integer between 1 and 1000"); return parsed; }
-function payload(record: JsonObject): JsonObject { const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record; return rest; }
+
 type Candidate = { id: string; source_kind: string; source_id: string; source_version: number; source_status: string; task_id: string | null;
   audience: "human" | "agent" | "operator"; priority: number; reason: string; action: string; details: JsonObject };
 

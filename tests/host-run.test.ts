@@ -5,9 +5,9 @@ import { join } from "node:path";
 import test from "node:test";
 import type { HostDriver } from "../src/host-driver.ts";
 import { HostRunKernel } from "../src/host-run.ts";
-import { craftPaths } from "../src/paths.ts";
+import { craftPaths } from "../src/infrastructure/paths.ts";
 import { CraftService } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/store.ts";
+import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
 import { McpServer } from "../src/mcp.ts";
 
 async function fixture(name: string) {

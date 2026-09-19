@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import { copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, type Stats } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
-import type { CraftPaths } from "./paths.ts";
-import { CraftStore, type JsonObject } from "./store.ts";
+import type { CraftPaths } from "./infrastructure/paths.ts";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
 
 type SnapshotEntry = { path: string; digest: string; size_bytes: number };
 

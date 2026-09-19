@@ -3,9 +3,9 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { craftPaths } from "../src/paths.ts";
+import { craftPaths } from "../src/infrastructure/paths.ts";
 import { CraftService } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/store.ts";
+import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
 
 type Overrides = { materialization?: JsonObject; asset?: JsonObject; source?: JsonObject; entry?: JsonObject; profile?: JsonObject; evaluation?: JsonObject; outcome?: JsonObject; receipt?: JsonObject; signoff?: JsonObject; grade?: JsonObject };
 async function fixture(overrides: Overrides = {}) { const root = await mkdtemp(path.join(tmpdir(), "craft-cert-")); const store = await new CraftStore(craftPaths(root)).open(); const service = new CraftService(store);

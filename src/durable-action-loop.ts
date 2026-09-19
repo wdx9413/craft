@@ -1,6 +1,8 @@
-import { createHash, randomUUID } from "node:crypto";
-import { CraftStore, type JsonObject } from "./store.ts";
+﻿import { randomUUID } from "node:crypto";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
 import { TraceKernel } from "./trace-kernel.ts";
+import { object } from "./validation.ts";
+import { canonicalJson, stableDigest, payload } from "./digest.ts";
 
 const ACTION_KINDS = new Set(["observe", "execute", "verify", "wait", "clarify"]);
 const EFFECTS = new Set(["read_only", "local_write"]);
@@ -13,17 +15,6 @@ function text(value: unknown, name: string): string {
   const result = value.trim(); if (SECRET.test(result)) throw new Error(`${name} must not contain credentials or secrets`);
   return result;
 }
-function object(value: unknown, name: string): JsonObject {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${name} must be an object`);
-  return value as JsonObject;
-}
-function payload(record: JsonObject): JsonObject { const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...value } = record; return value; }
-function canonical(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
-  if (value && typeof value === "object") return `{${Object.entries(value as JsonObject).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`).join(",")}}`;
-  return JSON.stringify(value);
-}
-function digest(value: unknown): string { return `sha256:${createHash("sha256").update(canonical(value)).digest("hex")}`; }
 
 type WorkItem = JsonObject & { id: string; depends_on: string[]; acceptance_digest: string };
 
@@ -48,7 +39,7 @@ export class DurableActionLoopKernel {
     const identity = { work_loop_id: workLoop.id, work_loop_version: workLoop.version, task_id: workLoop.task_id, task_run_id: workLoop.task_run_id,
       workspace_id: workLoop.workspace_id, initial_snapshot_id: snapshot.id, initial_snapshot_version: snapshot.version, initial_snapshot_digest: snapshot.snapshot_digest,
       items: items.map((item) => ({ id: item.id, depends_on: item.depends_on, acceptance_digest: item.acceptance_digest })) };
-    const loopId = String(args.action_loop_id ?? `durable_action_loop_${digest(identity).slice(-20)}`); const existing = this.store.find("durable_action_loop", loopId); const identityDigest = digest(identity);
+    const loopId = String(args.action_loop_id ?? `durable_action_loop_${stableDigest(identity).slice(-20)}`); const existing = this.store.find("durable_action_loop", loopId); const identityDigest = stableDigest(identity);
     if (existing) { if (existing.identity_digest !== identityDigest) throw new Error("Durable Action Loop idempotency conflict"); return { loop: existing, idempotent: true }; }
     const traceId = `durable_action_loop:${loopId}`;
     const loop = this.store.create("durable_action_loop", loopId, { ...identity, identity_digest: identityDigest, trace_id: traceId, lifecycle: "active", latest_snapshot_id: snapshot.id, latest_snapshot_version: snapshot.version, latest_snapshot_digest: snapshot.snapshot_digest, needs_replan_reason: null });
@@ -75,7 +66,7 @@ export class DurableActionLoopKernel {
     const effect = text(args.effect ?? "read_only", "effect"); if (!EFFECTS.has(effect) || kind !== "execute" && effect !== "read_only") throw new Error("Durable action effect is unsupported");
     const identity = { action_loop_id: loop.id, action_loop_version: loop.version, item_key: itemKey, kind, effect,
       action_digest: text(args.action_digest, "action_digest"), expected_snapshot_id: loop.latest_snapshot_id, expected_snapshot_version: loop.latest_snapshot_version, expected_snapshot_digest: loop.latest_snapshot_digest };
-    const actionId = String(args.action_id ?? `durable_action_${randomUUID().replaceAll("-", "")}`); const existing = this.store.find("durable_action", actionId); const identityDigest = digest(identity);
+    const actionId = String(args.action_id ?? `durable_action_${randomUUID().replaceAll("-", "")}`); const existing = this.store.find("durable_action", actionId); const identityDigest = stableDigest(identity);
     if (existing) { if (existing.identity_digest !== identityDigest) throw new Error("Durable action idempotency conflict"); return { action: existing, idempotent: true }; }
     const state = this.next({ action_loop_id: String(loop.id) });
     if (state.next_action !== "propose_action") throw new Error("Durable Action Loop is not ready for a new action");
@@ -89,7 +80,7 @@ export class DurableActionLoopKernel {
   dispatch(args: JsonObject): JsonObject {
     const action = this.store.get("durable_action", text(args.action_id, "action_id"));
     if (action.lifecycle !== "proposed") throw new Error("Only a proposed Durable action can be dispatched");
-    const saved = this.store.save("durable_action", String(action.id), { ...payload(action), lifecycle: "dispatched", dispatch_digest: digest(text(args.dispatch_ref, "dispatch_ref")) });
+    const saved = this.store.save("durable_action", String(action.id), { ...payload(action), lifecycle: "dispatched", dispatch_digest: stableDigest(text(args.dispatch_ref, "dispatch_ref")) });
     const loop = this.store.get("durable_action_loop", String(action.action_loop_id)); this.appendTrace(loop, "durable.action.dispatched", { action_id: action.id, dispatch_digest: saved.dispatch_digest }, `durable_action:${action.id}:dispatched`, { ref: action.expected_snapshot_id });
     return { action: saved };
   }

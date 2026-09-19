@@ -8,6 +8,22 @@ Craft 的产品目标是面向各行业的人机共同数字工作台；本页�
 
 完整目标见 [三大支柱与十个模块](product/architecture.zh-CN.md)，后续取舍见 [路线](product/roadmap.zh-CN.md)。评测属于“学习与改进”支柱，沙箱属于“执行与保障”。历史章节中的隔离描述不得解释为已完成安全认证；当前实际缺口见 [沙箱与执行策略](technical/modules/execution-policy.md)。
 
+## 框架：harness 与 context 的分解
+
+全站反复用到的分解方式，先写在这里，避免每次重新推导：
+
+```text
+agent   = model + harness
+harness = permission + context + tool + environment   (+ hook，正交轴)
+context = history + knowledge + memory + experience + state
+```
+
+`hook` 不在 `harness` 那一行里，因为它不回答“有什么”，而回答“在流程的哪一刻”——这是它单列的原因，不是排版。
+
+五个上下文成员**各由谁持有、门槛是什么、`state` 具体存什么**，见 [上下文的五个成员](technical/modules/context-members.md)；其中 `history`（宿主提供）与 `state`（当前任务）**不是**可插拔成员，只有三个累积型成员可以是能力。能力如何在进程内声明并装配，见 [Capability 扩展协议](technical/modules/capability-protocol.md)。这两个问题与“MCP 暴露哪些工具面”是不同层：MCP 是对外协议，能力契约是内部协议。
+
+已决定、不应重新争论的取舍见 [决策记录（ADR）](adr/README.md)。
+
 Craft Core 管理以下稳定对象：
 
 - Capability：可检索的能力资产。当前扫描 `SKILL.md`，未来扩展插件与 MCP 元数据。

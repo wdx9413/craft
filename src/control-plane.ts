@@ -1,19 +1,14 @@
 import { randomUUID } from "node:crypto";
-import { CraftStore, type JsonObject, type SaveEntry } from "./store.ts";
+import { CraftStore, type JsonObject, type SaveEntry } from "./infrastructure/store.ts";
+import { object, text } from "./validation.ts";
+import { payload } from "./digest.ts";
 
 function id(value: unknown, name: string, prefix: string): string {
   const result = value === undefined ? `${prefix}_${randomUUID().replaceAll("-", "")}` : String(value).trim();
   if (!/^[a-zA-Z0-9_-]+$/.test(result)) throw new Error(`${name} must contain only letters, numbers, _ or -`);
   return result;
 }
-function text(value: unknown, name: string): string {
-  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
-  return value.trim();
-}
-function object(value: unknown, name: string): JsonObject {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${name} must be an object`);
-  return value as JsonObject;
-}
+
 function amounts(value: unknown, name: string): JsonObject {
   const result = object(value, name);
   for (const [resource, amount] of Object.entries(result)) if (typeof amount !== "number" || !Number.isFinite(amount) || amount < 0) {
@@ -27,9 +22,7 @@ function strings(value: unknown, name: string): string[] {
   if (new Set(result).size !== result.length) throw new Error(`${name} must contain unique values`);
   return result;
 }
-function payload(record: JsonObject): JsonObject {
-  const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record; return rest;
-}
+
 function add(left: JsonObject, right: JsonObject, direction = 1): JsonObject {
   const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
   return Object.fromEntries([...keys].map((key) => [key, Number(left[key] ?? 0) + direction * Number(right[key] ?? 0)]));

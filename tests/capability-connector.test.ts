@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { McpServer } from "../src/mcp.ts";
-import { craftPaths } from "../src/paths.ts";
+import { craftPaths } from "../src/infrastructure/paths.ts";
 import { CraftService, VERSION } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/store.ts";
+import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-connectors-"));
@@ -46,7 +46,7 @@ test("Capability Connectors require explicit source approval, retain only metada
     assert.match(String((f.service.capabilityConnectorApprove({ connector_asset_id: automatic.id, approval_ref: "review-2" }).asset as JsonObject).id), /^asset_/);
     assert.equal((f.service.capabilityConnectorList({ limit: 1 }).connectors as JsonObject[]).length, 1);
     assert.throws(() => f.service.capabilityConnectorList({ limit: 0 }), /between/);
-    assert.equal(VERSION, "0.12.30");
+    assert.equal(VERSION, "0.12.33");
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 

@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
-import type { JsonObject } from "./store.ts";
+import type { JsonObject } from "./infrastructure/store.ts";
 import { normalizeSteps } from "./workflow.ts";
+import { text } from "./validation.ts";
 
 /**
  * Deterministic workflows are the carrier Craft hands work to, so they live as
@@ -53,11 +54,6 @@ export interface RetirementDecision {
 }
 
 export const DEFAULT_RETIREMENT_POLICY: RetirementPolicy = { min_uses: 5, stale_days: 90, min_success_rate: 0.5 };
-
-function text(value: unknown, name: string): string {
-  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
-  return value.trim();
-}
 
 function recordDigest(value: unknown): string {
   return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;

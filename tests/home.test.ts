@@ -5,9 +5,9 @@ import path from "node:path";
 import test from "node:test";
 import { HomeKernel } from "../src/home.ts";
 import { McpServer } from "../src/mcp.ts";
-import { craftPaths } from "../src/paths.ts";
+import { craftPaths } from "../src/infrastructure/paths.ts";
 import { CraftService } from "../src/service.ts";
-import { CraftStore } from "../src/store.ts";
+import { CraftStore } from "../src/infrastructure/store.ts";
 
 async function fixture() { const root = await mkdtemp(path.join(tmpdir(), "craft-home-")); const store = await new CraftStore(craftPaths(root)).open(); return { store, home: new HomeKernel(store) }; }
 
@@ -65,7 +65,14 @@ test("task detail joins exact task evidence and lineage into a bounded safe view
   f.store.create("workflow_run", "task-workflow-run", { task_id: "task", workflow_id: "task-workflow", status: "completed" });
   f.store.create("lineage_edge", "edge", { task_id: "task", workspace_id: "ws", summary: "derived" }); f.store.create("durable_wait", "wait", { task_id: "task", status: "waiting", condition: "approval" });
   f.store.create("attention_item", "open", { task_id: "task", status: "open", reason: "Review" }); f.store.create("attention_item", "resolved", { task_id: "task", status: "resolved" });
-  const detail = f.home.task({ task_id: "task", limit: 20 }); assert.equal((detail.trials as object[]).length, 2); assert.equal((detail.evidence as object[]).length, 2); assert.equal((detail.artifacts as object[]).length, 1); assert.equal((detail.runs as object[]).length, 3); assert.equal((detail.attention as object[]).length, 1); assert.equal((detail.messages as object[]).length, 0); assert.equal(((detail.context as Record<string, unknown>).memories as object[]).length, 1); assert.equal(((detail.context as Record<string, unknown>).knowledge as object[]).length, 1); assert.equal(((detail.context as Record<string, unknown>).workflow_runs as object[]).length, 1); assert.equal(JSON.stringify(detail).includes("hidden"), false);
+  f.store.create("context_manifest", "manifest", { task_id: "task", summary: "Assembled context", status: "active" });
+  f.store.create("host_run", "hr", { task_id: "task", host: "claude-code", status: "completed", event_count: 1 });
+  f.store.create("host_run", "hr-other", { task_id: "other", host: "codex", status: "completed", event_count: 0 });
+  f.store.appendEvent("host-run:hr", "host.started", { agent: "claude-code" });
+  f.store.appendEvent("task:task", "task.opened", { title: "Video" });
+  f.store.create("task_message", "tm1", { task_id: "task", role: "user", content: "What next?", model_id: "deepseek", created_at: "2026-01-01T00:00:01.000Z" });
+  f.store.create("task_message", "tm2", { task_id: "task", role: "assistant", content: "Try this.", model_id: "deepseek", provider_model: "deepseek-chat", created_at: "2026-01-01T00:00:02.000Z" });
+  const detail = f.home.task({ task_id: "task", limit: 20 }); assert.equal((detail.trials as object[]).length, 2); assert.equal((detail.evidence as object[]).length, 2); assert.equal((detail.artifacts as object[]).length, 1); assert.equal((detail.runs as object[]).length, 3); assert.equal((detail.attention as object[]).length, 1); assert.equal((detail.messages as object[]).length, 2); assert.equal((detail.host_runs as object[]).length, 1); assert.ok((detail.activity as object[]).length > 0); assert.equal(((detail.context as Record<string, unknown>).memories as object[]).length, 1); assert.equal(((detail.context as Record<string, unknown>).knowledge as object[]).length, 1); assert.equal(((detail.context as Record<string, unknown>).workflow_runs as object[]).length, 1); assert.equal(((detail.context as Record<string, unknown>).manifests as object[]).length, 1); assert.equal(JSON.stringify(detail).includes("hidden"), false);
   assert.throws(() => f.home.task({ task_id: " " }), /not be empty/); assert.throws(() => f.home.task({ task_id: "missing" }), /Unknown/); assert.throws(() => f.home.task({ task_id: "task", limit: 0 }), /between/);
   const service = new CraftService(f.store); assert.equal((service.homeTask({ task_id: "task" }).task as Record<string, unknown>).id, "task"); const response = await new McpServer(service).handle({ id: 1, method: "tools/call", params: { name: "craft_home_task", arguments: { task_id: "task" } } }); assert.equal((response?.result as Record<string, unknown>).isError, false); f.store.close();
 });

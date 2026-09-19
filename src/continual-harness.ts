@@ -1,5 +1,7 @@
-import { createHash, randomUUID } from "node:crypto";
-import { CraftStore, type JsonObject } from "./store.ts";
+﻿import { randomUUID } from "node:crypto";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
+import { object } from "./validation.ts";
+import { stableDigest, payload } from "./digest.ts";
 
 const BINDING_KINDS = new Set(["prompt_note", "memory_ledger", "capability", "workflow", "expert_profile", "harness_topology", "work_runtime_plan", "context_resolution_receipt", "activation_profile"]);
 const SOURCE_KINDS = new Set(["trial", "outcome", "acceptance_gate", "verified_work_loop", "trace", "work_session"]);
@@ -9,10 +11,7 @@ const SECRET = /(?:api[_-]?key|authorization|cookie|password|secret|token)\s*[:=
 
 function text(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); const result = value.trim(); if (SECRET.test(result)) throw new Error(`${name} must not contain credentials or secrets`); return result; }
 function strings(value: unknown, name: string): string[] { if (!Array.isArray(value)) throw new Error(`${name} must be an array`); const result = value.map((item) => text(item, name)); if (!result.length) throw new Error(`${name} must contain at least one value`); if (new Set(result).size !== result.length) throw new Error(`${name} must contain unique values`); return result.sort(); }
-function object(value: unknown, name: string): JsonObject { if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${name} must be an object`); return value as JsonObject; }
-function payload(record: JsonObject): JsonObject { const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record; return rest; }
-function canonical(value: unknown): string { if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`; if (value && typeof value === "object") return `{${Object.entries(value as JsonObject).sort(([a], [b]) => a.localeCompare(b)).map(([key, child]) => `${JSON.stringify(key)}:${canonical(child)}`).join(",")}}`; return JSON.stringify(value); }
-function digest(value: unknown): string { return `sha256:${createHash("sha256").update(canonical(value)).digest("hex")}`; }
+
 function reference(store: CraftStore, raw: unknown, name: string, allowed: Set<string>): JsonObject {
   const input = object(raw, name); const kind = text(input.kind, `${name}.kind`); if (!allowed.has(kind)) throw new Error(`${name}.kind is unsupported`);
   const id = text(input.id, `${name}.id`); const version = input.version === undefined ? undefined : Number(input.version);
@@ -31,7 +30,7 @@ export class ContinualHarnessKernel {
     const bindings = inputs.map((item, index) => reference(this.store, item, `bindings[${index}]`, BINDING_KINDS)).sort((a, b) => `${a.kind}:${a.id}`.localeCompare(`${b.kind}:${b.id}`));
     if (new Set(bindings.map((item) => `${item.kind}:${item.id}`)).size !== bindings.length) throw new Error("Harness bindings must be unique");
     const identity = { task_id: task.id, task_version: task.version, bindings, content_free: true, execution_authority: false };
-    const viewId = String(args.view_id ?? `continual_harness_view_${digest(identity).slice(-16)}`); const identityDigest = digest(identity); const existing = this.store.find("continual_harness_view", viewId);
+    const viewId = String(args.view_id ?? `continual_harness_view_${stableDigest(identity).slice(-16)}`); const identityDigest = stableDigest(identity); const existing = this.store.find("continual_harness_view", viewId);
     if (existing) { if (existing.identity_digest !== identityDigest) throw new Error("Continual Harness view idempotency conflict"); return { view: existing, idempotent: true }; }
     return { view: this.store.create("continual_harness_view", viewId, { ...identity, identity_digest: identityDigest }), idempotent: false };
   }
@@ -49,9 +48,9 @@ export class ContinualHarnessKernel {
     for (const source of sourceRefs) this.assertTaskSource(task.id as string, source);
     const sessionId = local ? text(args.session_id, "session_id") : null;
     const identity = { task_id: task.id, task_version: task.version, view_id: view.id, view_version: view.version, session_id: sessionId, source_refs: sourceRefs, evidence_ids: evidenceIds, hypothesis: text(args.hypothesis, "hypothesis"), changes, design_axes: axes.sort(), risk: local ? "low" : "governed" };
-    const refinementId = String(args.refinement_id ?? `harness_refinement_${randomUUID().replaceAll("-", "")}`); const identityDigest = digest(identity); const existing = this.store.find("harness_refinement", refinementId);
+    const refinementId = String(args.refinement_id ?? `harness_refinement_${randomUUID().replaceAll("-", "")}`); const identityDigest = stableDigest(identity); const existing = this.store.find("harness_refinement", refinementId);
     if (existing) { if (existing.identity_digest !== identityDigest) throw new Error("Harness refinement idempotency conflict"); return { refinement: existing, idempotent: true }; }
-    return { refinement: this.store.create("harness_refinement", refinementId, { ...identity, identity_digest: identityDigest, before_snapshot: digest(view.bindings), after_snapshot: digest({ bindings: view.bindings, changes }), lifecycle: "draft", publication_allowed: false }), idempotent: false };
+    return { refinement: this.store.create("harness_refinement", refinementId, { ...identity, identity_digest: identityDigest, before_snapshot: stableDigest(view.bindings), after_snapshot: stableDigest({ bindings: view.bindings, changes }), lifecycle: "draft", publication_allowed: false }), idempotent: false };
   }
 
   submit(args: JsonObject): JsonObject {
@@ -106,8 +105,8 @@ export class ContinualHarnessKernel {
     const all = this.store.list("harness_refinement", 10_000, (item) => item.view_id === view.id && new Set(["bounded_active", "active"]).has(String(item.lifecycle)));
     const selected = all.filter((item) => item.lifecycle === "active" || (item.session_id === sessionId && Date.parse(String(item.expires_at)) > now.valueOf())).sort((a, b) => String(a.id).localeCompare(String(b.id)));
     const expired = all.filter((item) => item.lifecycle === "bounded_active" && item.session_id === sessionId && Date.parse(String(item.expires_at)) <= now.valueOf()).map((item) => ({ id: item.id, version: item.version }));
-    const refs = selected.map((item) => ({ id: item.id, version: item.version, after_snapshot: item.after_snapshot })); const identity = { view_id: view.id, view_version: view.version, session_id: sessionId, base_bindings: view.bindings, refinement_refs: refs, effective_snapshot: digest({ base: view.bindings, refinements: refs }), content_free: true, execution_authority: false };
-    const receiptId = String(args.receipt_id ?? `harness_resolution_receipt_${digest(identity).slice(-16)}`); const identityDigest = digest(identity); const existing = this.store.find("harness_resolution_receipt", receiptId);
+    const refs = selected.map((item) => ({ id: item.id, version: item.version, after_snapshot: item.after_snapshot })); const identity = { view_id: view.id, view_version: view.version, session_id: sessionId, base_bindings: view.bindings, refinement_refs: refs, effective_snapshot: stableDigest({ base: view.bindings, refinements: refs }), content_free: true, execution_authority: false };
+    const receiptId = String(args.receipt_id ?? `harness_resolution_receipt_${stableDigest(identity).slice(-16)}`); const identityDigest = stableDigest(identity); const existing = this.store.find("harness_resolution_receipt", receiptId);
     if (existing) { if (existing.identity_digest !== identityDigest) throw new Error("Harness resolution Receipt idempotency conflict"); return { receipt: existing, expired, idempotent: true }; }
     return { receipt: this.store.create("harness_resolution_receipt", receiptId, { ...identity, identity_digest: identityDigest }), expired, idempotent: false };
   }

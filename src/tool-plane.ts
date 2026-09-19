@@ -1,4 +1,4 @@
-import type { JsonObject } from "./store.ts";
+import type { JsonObject } from "./infrastructure/store.ts";
 
 /**
  * The tool plane.

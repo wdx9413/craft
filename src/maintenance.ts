@@ -2,13 +2,13 @@ import { createHash, randomUUID } from "node:crypto";
 import { open, readFile, rename, unlink } from "node:fs/promises";
 import { hostname } from "node:os";
 import { join } from "node:path";
-import { atomicPrivateJson, type CraftPaths } from "./paths.ts";
+import { atomicPrivateJson, type CraftPaths } from "./infrastructure/paths.ts";
 import { CraftService } from "./service.ts";
-import { type JsonObject } from "./store.ts";
+import { type JsonObject } from "./infrastructure/store.ts";
+import { payload } from "./digest.ts";
 
 function integer(value: unknown, name: string, fallback: number, min: number, max: number): number { const result = value === undefined ? fallback : Number(value); if (!Number.isInteger(result) || result < min || result > max) throw new Error(`${name} must be an integer between ${min} and ${max}`); return result; }
 function instant(value: unknown): string { const result = value === undefined ? new Date().toISOString() : String(value); if (Number.isNaN(Date.parse(result))) throw new Error("now must be an ISO timestamp"); return result; }
-function payload(record: JsonObject): JsonObject { const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record; return rest; }
 
 export class MaintenanceKernel {
   readonly service: CraftService;

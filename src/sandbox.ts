@@ -1,19 +1,13 @@
 import { createHash, randomUUID } from "node:crypto";
-import { CraftStore, type JsonObject } from "./store.ts";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
+import { object, text } from "./validation.ts";
+import { payload } from "./digest.ts";
 
 const BACKENDS = new Set(["local_process", "container", "remote"]);
 const FILESYSTEM = new Set(["none", "read_only", "workspace_overlay"]);
 const NETWORK = new Set(["denied", "allowlist", "unrestricted"]);
 const FEATURES = new Set(["process_isolation", "credential_broker", "snapshot", "cancel"]);
 
-function text(value: unknown, name: string): string {
-  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
-  return value.trim();
-}
-function object(value: unknown, name: string): JsonObject {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${name} must be an object`);
-  return value as JsonObject;
-}
 function strings(value: unknown, name: string): string[] {
   if (!Array.isArray(value)) throw new Error(`${name} must be an array`);
   const result = value.map((item) => text(item, name));
@@ -30,9 +24,6 @@ function positiveLimits(value: unknown, name: string): JsonObject {
   return limits;
 }
 function digest(value: unknown): string { return createHash("sha256").update(JSON.stringify(value)).digest("hex"); }
-function payload(record: JsonObject): JsonObject {
-  const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record; return rest;
-}
 
 function normalizeCapabilities(value: unknown): JsonObject {
   const input = object(value, "capabilities"); const filesystem = text(input.filesystem, "capabilities.filesystem");

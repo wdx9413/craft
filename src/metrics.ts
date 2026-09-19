@@ -1,4 +1,4 @@
-import { CraftStore, type JsonObject } from "./store.ts";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
 
 /**
  * Operational metrics as a projection.

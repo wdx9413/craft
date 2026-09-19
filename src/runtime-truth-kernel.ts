@@ -1,10 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { JsonObject } from "./store.ts";
-import { CraftStore } from "./store.ts";
+import type { JsonObject } from "./infrastructure/store.ts";
+import { CraftStore } from "./infrastructure/store.ts";
 import { compactConversation, createWorkNote, exportOtlp, standardizeTrace, toOtlpTrace, type ConversationMessage } from "./runtime-truth.ts";
-
-function text(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim(); }
-function object(value: unknown, name: string): JsonObject { if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${name} must be an object`); return value as JsonObject; }
+import { object, text } from "./validation.ts";
 
 /** Persistence facade for the versionless Runtime Truth protocol. */
 export class RuntimeTruthKernel {
@@ -47,11 +45,47 @@ export class RuntimeTruthKernel {
     return { ...result, compaction: saved };
   }
 
+  /**
+   * Read back the compaction that was written for one session.
+   *
+   * `compact` was persist-only until this existed, which made the stored history unusable: the
+   * one thing a resuming Host needs is the compacted window it produced earlier, and there was
+   * no way to ask for it. Every other kernel in Craft has a `get` for what it saves; this pair
+   * was the exception, and the exception was the bug.
+   *
+   * The record id *is* the session id, so no separate index is needed: `compact` saves under
+   * `args.session_id`, so a session can be resumed knowing only its own name.
+   */
+  compactionGet(args: JsonObject): JsonObject {
+    const sessionId = text(args.session_id, "session_id");
+    return { compaction: this.store.get("context_compaction", sessionId, args.version === undefined ? undefined : Number(args.version)) };
+  }
+
+  /** List stored compactions, newest first, so a Host can find a session it did not name. */
+  compactionList(args: JsonObject = {}): JsonObject {
+    const limit = args.limit === undefined ? 50 : Number(args.limit);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 1_000) throw new Error("limit must be an integer between 1 and 1000");
+    const items = this.store.list("context_compaction", limit);
+    return { compactions: items.map((item) => ({ id: item.id, version: item.version, session_id: item.session_id, compacted: item.compacted, omitted: item.omitted, summary_digest: item.summary_digest, updated_at: item.updated_at })), count: items.length };
+  }
+
   workNote(args: JsonObject): JsonObject {
     const note = createWorkNote({ goal: text(args.goal, "goal"), decisions: args.decisions as string[] | undefined, constraints: args.constraints as string[] | undefined, open_questions: args.open_questions as string[] | undefined, artifacts: args.artifacts as string[] | undefined });
     const id = text(args.note_id ?? `work_note_${randomUUID().replaceAll("-", "")}`, "note_id");
     const existing = this.store.find("work_note", id);
     if (existing) return { note: existing, idempotent: true };
     return { note: this.store.create("work_note", id, note), idempotent: false };
+  }
+
+  /**
+   * Read back one work note.
+   *
+   * A work note exists to be the thing a long-running session reads on resume — that is what its
+   * own description says — so a note that could only be written was not doing its job. Same
+   * defect as `compactionGet`, fixed in the same place so the pair stays symmetric.
+   */
+  workNoteGet(args: JsonObject): JsonObject {
+    const noteId = text(args.note_id, "note_id");
+    return { note: this.store.get("work_note", noteId, args.version === undefined ? undefined : Number(args.version)) };
   }
 }

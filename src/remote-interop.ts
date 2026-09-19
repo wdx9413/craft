@@ -1,10 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { JsonObject } from "./store.ts";
-import { CraftStore } from "./store.ts";
+import type { JsonObject } from "./infrastructure/store.ts";
+import { CraftStore } from "./infrastructure/store.ts";
+import { text } from "./validation.ts";
+import { digestJson, payload } from "./digest.ts";
 
-function text(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim(); }
-function payload(record: JsonObject): JsonObject { const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record; return rest; }
-function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
 function httpsUrl(value: unknown): string { const url = text(value, "endpoint"); if (!url.startsWith("https://")) throw new Error("Remote endpoint must use HTTPS"); return url; }
 
 export interface RemoteTransport {
@@ -21,7 +20,7 @@ export class RemoteInteropKernel {
     const operation = text(args.operation, "operation");
     const taskId = text(args.task_id, "task_id");
     const requestId = String(args.request_id ?? `remote_request_${randomUUID().replaceAll("-", "")}`);
-    const requestDigest = digest({ endpoint, agent, operation, task_id: taskId, input_digest: text(args.input_digest, "input_digest") });
+    const requestDigest = digestJson({ endpoint, agent, operation, task_id: taskId, input_digest: text(args.input_digest, "input_digest") });
     const existing = this.store.find("remote_request", requestId);
     if (existing) { if (existing.request_digest !== requestDigest) throw new Error("Remote request idempotency conflict"); return { request: existing, idempotent: true }; }
     return { request: this.store.create("remote_request", requestId, { endpoint, agent, operation, task_id: taskId, input_digest: text(args.input_digest, "input_digest"), request_digest: requestDigest, status: "prepared", remote_id: null, result_digest: null }), idempotent: false };
@@ -35,7 +34,7 @@ export class RemoteInteropKernel {
     const result = await transport.dispatch(String(request.endpoint), envelope);
     if (!result.remote_id || !new Set(["accepted", "completed", "failed"]).has(result.status)) throw new Error("Remote transport returned an invalid result");
     const saved = this.store.save("remote_request", String(request.id), { ...payload(request), status: result.status, remote_id: result.remote_id, result_digest: result.result_digest ?? null, dispatched_at: new Date().toISOString() });
-    return { request: saved, receipt: this.store.create("remote_receipt", `receipt_${request.id}`, { request_id: request.id, remote_id: result.remote_id, status: result.status, result_digest: result.result_digest ?? null, envelope_digest: digest(envelope) }), idempotent: false };
+    return { request: saved, receipt: this.store.create("remote_receipt", `receipt_${request.id}`, { request_id: request.id, remote_id: result.remote_id, status: result.status, result_digest: result.result_digest ?? null, envelope_digest: digestJson(envelope) }), idempotent: false };
   }
 
   report(args: JsonObject): JsonObject {

@@ -38,6 +38,26 @@ Craft 的第二种形态是自己跑循环，而不是把工作交给 Codex 或 
 - 熔断是机制性的，但仍需要调用方在 `halted` 为真时立即停止。
 - 未验证：真实模型下的循环行为（本机无网络、无密钥）。
 
+## 自己跑的时候，Craft 就是宿主——包括历史
+
+这一条容易被忽略，但它是自托管的定义性后果：交给 Codex 或 Claude 时，对话历史由**它们**持有，Craft 只拿到一个查询并只留 `query_digest`。而当 Craft 自己跑循环时，**没有别人持有历史**，所以它必须自己持有并自己压缩。
+
+于是 `internal-host-driver.ts` 在每一轮构造模型请求之前做这件事：把 `internal_session` 里的 `messages` 按 `limits.max_context_tokens` 交给 `compactConversation`（估算器是 `estimateTokens`，与成本控制共用同一个度量），压缩结果写回 `internal_session`，同时落一条 `context_compaction`。
+
+压缩策略是两段式，而不是"超出就丢"：
+
+```text
+保留 system（系统约束不能丢）
+  + 从最近往前填到预算 65% 的 tail（最近的工作不能丢）
+  → 中间被省略
+  → 第一段：规则省略（确定性，不调模型）
+  → 第二段：可选模型摘要；没有模型时回退成确定性、无内容、带 digest 的笔记
+```
+
+工具结果的溢出是**另一条**路径，不要与压缩混淆：单条过大的工具结果被截成"有说明的头部"，而不是把对话挤掉。
+
+这也解释了 `history` 为什么不因为自托管而变成第四个可插拔成员：变的是**宿主是谁**，不是哪个成员的性质。让 Craft 托管**外部**宿主的历史才是一次需要写明理由的改动，见 [上下文的五个成员](context-members.md)。
+
 ## 相关模块
 
 - [Model Gateway](model-gateway.md)：provider 声明与请求/响应归一化。

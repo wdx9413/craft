@@ -1,9 +1,9 @@
 import { access, readFile } from "node:fs/promises";
 import { constants } from "node:fs";
-import { atomicPrivateJson, craftPaths, ensureLayout, type CraftPaths } from "./paths.ts";
+import { atomicPrivateJson, craftPaths, ensureLayout, type CraftPaths } from "./infrastructure/paths.ts";
 import { hostProfilesFromConfig } from "./host-registry.ts";
 import { type EmbeddingProviderConfig } from "./semantic.ts";
-import type { JsonObject } from "./store.ts";
+import type { JsonObject } from "./infrastructure/store.ts";
 
 export type CraftMode = "agent" | "supervisor" | "provider";
 export type RuntimeKind = "direct-api" | "codex-cli" | "claude-code" | "unconfigured";

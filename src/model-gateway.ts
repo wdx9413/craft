@@ -1,5 +1,6 @@
-import type { JsonObject } from "./store.ts";
+import type { JsonObject } from "./infrastructure/store.ts";
 import type { CraftModelConfig, ModelProtocol } from "./settings.ts";
+import { text } from "./validation.ts";
 
 /**
  * The model gateway.
@@ -46,10 +47,7 @@ export const PROVIDER_CATALOG: readonly ModelProviderSpec[] = [
   { provider: "claude", label: "Anthropic Claude", protocol: "anthropic", base_url: "https://api.anthropic.com/v1", api_key_env: "ANTHROPIC_API_KEY", chat_path: "/messages", models: { small: "claude-haiku-4", standard: "claude-sonnet-4", frontier: "claude-opus-4" }, cost_hint: 7, supports_tools: true },
 ];
 
-function text(value: unknown, name: string): string {
-  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
-  return value.trim();
-}
+
 
 function httpUrl(value: unknown, name: string): string {
   const raw = text(value, name); let url: URL;
@@ -158,6 +156,14 @@ export function selectModel(spec: ModelProviderSpec, tier: ModelTier): { tier: M
  * Render a request for the two wire formats. Only the shape is built here; the
  * API key is read at call time from the environment by the transport, so it can
  * never end up inside a stored record.
+ *
+ * The authorization header therefore records the *name* of the environment
+ * variable the transport should read — never a value, and never the literal
+ * `${...}` source text of a template. The previous form emitted the literal
+ * string `Bearer $WORKBUDDY_API_KEY`, which announced a credential to anyone
+ * inspecting the built request while being a valid-looking header: the transport
+ * happened to rebuild its own headers and masked the defect. It is named here as
+ * `env:NAME` so a reader can tell at a glance that no secret is present.
  */
 export function buildChatRequest(spec: ModelProviderSpec, options: {
   model: string; messages: ChatMessage[]; max_tokens?: number; temperature?: number; tools?: ChatToolDefinition[]; stream?: boolean;
@@ -183,7 +189,7 @@ export function buildChatRequest(spec: ModelProviderSpec, options: {
          : ({ ...message, ...(message.tool_call_id ? { tool_use_id: message.tool_call_id } : {}) } as JsonObject)),
       ...(system ? { system } : {}), ...(options.tools?.length ? { tools: options.tools.map((tool) => ({ name: tool.function.name, description: tool.function.description, input_schema: tool.function.parameters ?? { type: "object" } })) } : {}), ...(options.stream ? { stream: true } : {}) };
   } else {
-    headers.authorization = `Bearer $${spec.api_key_env}`;
+    headers.authorization = `env:${spec.api_key_env}`;
     body = { model, messages, max_tokens: options.max_tokens ?? 4_096,
       ...(options.temperature === undefined ? {} : { temperature: options.temperature }), ...(options.tools?.length ? { tools: options.tools } : {}), ...(options.stream ? { stream: true } : {}) };
   }

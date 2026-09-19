@@ -5,9 +5,9 @@ import { McpServer } from "../src/mcp.ts";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { craftPaths } from "../src/paths.ts";
+import { craftPaths } from "../src/infrastructure/paths.ts";
 import { CraftService } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/store.ts";
+import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
 import { snapshotNodeKind } from "../src/workspace.ts";
 
 test("workspace checkpoints preserve a file-state timeline and require approval to restore", async () => {

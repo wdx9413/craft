@@ -1,11 +1,13 @@
 import { createHash } from "node:crypto";
 import { DeliveryEvaluationKernel } from "./delivery-evaluation.ts";
-import { CraftStore, type JsonObject } from "./store.ts";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
+import { text } from "./validation.ts";
+import { digestJson, payload } from "./digest.ts";
 
-function text(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim(); }
+
 function positive(value: unknown, name: string, fallback: number): number { const parsed = value === undefined ? fallback : Number(value); if (![Number.isInteger(parsed), parsed >= 1, parsed <= 100].every(Boolean)) throw new Error(`${name} must be an integer between 1 and 100`); return parsed; }
-function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
-function payload(record: JsonObject): JsonObject { const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record; return rest; }
+
+
 
 /** Pairs already-observed Task Runs; it never fabricates a model result or starts a hidden Host. */
 export class TaskBenchmarkKernel {
@@ -15,7 +17,7 @@ export class TaskBenchmarkKernel {
   create(args: JsonObject): JsonObject {
     const item = this.store.get("delivery_evaluation_case", text(args.case_id, "case_id")); const baseline = this.store.get("task_run", text(args.baseline_task_run_id, "baseline_task_run_id")); const candidate = this.store.get("task_run", text(args.candidate_task_run_id, "candidate_task_run_id"));
     const identity = { case_id: item.id, case_version: item.version, baseline_task_run_id: baseline.id, baseline_task_run_version: baseline.version, candidate_task_run_id: candidate.id, candidate_task_run_version: candidate.version, environment_digest: baseline.environment_digest, budget_digest: baseline.budget_digest, comparable: baseline.environment_digest === candidate.environment_digest && baseline.budget_digest === candidate.budget_digest };
-    const benchmarkId = String(args.benchmark_id ?? `task_benchmark_${baseline.id}_${candidate.id}_${item.id}`); const existing = this.store.find("task_benchmark", benchmarkId); const identityDigest = digest(identity);
+    const benchmarkId = String(args.benchmark_id ?? `task_benchmark_${baseline.id}_${candidate.id}_${item.id}`); const existing = this.store.find("task_benchmark", benchmarkId); const identityDigest = digestJson(identity);
     if (existing) { if (existing.identity_digest !== identityDigest) throw new Error("Task Benchmark idempotency conflict"); return { benchmark: existing, idempotent: true }; }
     return { benchmark: this.store.create("task_benchmark", benchmarkId, { ...identity, identity_digest: identityDigest, status: "awaiting_delivery" }), idempotent: false };
   }
@@ -46,8 +48,8 @@ export class TaskBenchmarkKernel {
     if (evaluation.status !== "eligible_for_signoff") throw new Error("Task Benchmark candidate requires held-out eligible evaluation");
     const candidateHarness = args.candidate_harness === undefined ? null : text(args.candidate_harness, "candidate_harness");
     const applicabilityTerms = args.applicability_terms === undefined ? [] : terms(args.applicability_terms);
-    const identity = { evaluation_run_id: evaluation.id, evaluation_run_version: evaluation.version, summary_digest: digest(text(args.summary, "summary")), design_axes: axes(args.candidate_axes), candidate_harness: candidateHarness, applicability_terms: applicabilityTerms };
-    const candidateId = String(args.candidate_id ?? `task_benchmark_candidate_${evaluation.id}`); const existing = this.store.find("task_benchmark_candidate", candidateId); const identityDigest = digest(identity);
+    const identity = { evaluation_run_id: evaluation.id, evaluation_run_version: evaluation.version, summary_digest: digestJson(text(args.summary, "summary")), design_axes: axes(args.candidate_axes), candidate_harness: candidateHarness, applicability_terms: applicabilityTerms };
+    const candidateId = String(args.candidate_id ?? `task_benchmark_candidate_${evaluation.id}`); const existing = this.store.find("task_benchmark_candidate", candidateId); const identityDigest = digestJson(identity);
     if (existing) { if (existing.identity_digest !== identityDigest) throw new Error("Task Benchmark candidate idempotency conflict"); return { candidate: existing, idempotent: true }; }
     return { candidate: this.store.create("task_benchmark_candidate", candidateId, { ...identity, identity_digest: identityDigest, lifecycle: "draft", publication_allowed: false }), idempotent: false };
   }
@@ -63,10 +65,10 @@ export class TaskBenchmarkKernel {
     const candidate = this.store.get("task_benchmark_candidate", text(args.candidate_id, "candidate_id"));
     if (candidate.lifecycle !== "canary_ready") throw new Error("Task Benchmark candidate must be canary_ready");
     const evaluation = this.store.get("delivery_evaluation_run", String(candidate.evaluation_run_id));
-    const environmentDigest = digest(args.environment ?? {}); const budgetDigest = digest(args.budget ?? {});
-    if (digest([environmentDigest, budgetDigest]) !== digest([evaluation.environment, evaluation.budget])) throw new Error("Task Benchmark Canary requires the evaluated environment and budget");
+    const environmentDigest = digestJson(args.environment ?? {}); const budgetDigest = digestJson(args.budget ?? {});
+    if (digestJson([environmentDigest, budgetDigest]) !== digestJson([evaluation.environment, evaluation.budget])) throw new Error("Task Benchmark Canary requires the evaluated environment and budget");
     const identity = { candidate_id: candidate.id, candidate_version: candidate.version, baseline_id: text(args.baseline_id, "baseline_id"), evaluation_run_id: evaluation.id, evaluation_run_version: evaluation.version, environment_digest: environmentDigest, budget_digest: budgetDigest };
-    const canaryId = String(args.canary_id ?? `task_benchmark_canary_${candidate.id}`); const existing = this.store.find("task_benchmark_canary", canaryId); const identityDigest = digest(identity);
+    const canaryId = String(args.canary_id ?? `task_benchmark_canary_${candidate.id}`); const existing = this.store.find("task_benchmark_canary", canaryId); const identityDigest = digestJson(identity);
     if (existing) { if (existing.identity_digest !== identityDigest) throw new Error("Task Benchmark Canary idempotency conflict"); return { canary: existing, idempotent: true }; }
     return { canary: this.store.create("task_benchmark_canary", canaryId, { ...identity, identity_digest: identityDigest, status: "running", publication_allowed: false }), idempotent: false };
   }
@@ -78,7 +80,7 @@ export class TaskBenchmarkKernel {
     if (canary.status !== "running") throw new Error("Task Benchmark Canary is not running");
     const evidenceId = args.evidence_id === undefined ? null : text(args.evidence_id, "evidence_id"); if (evidenceId) this.store.get("evidence", evidenceId);
     const sampleIdentity = { canary_id: canary.id, evidence_id: evidenceId, baseline_quality: baseline, candidate_quality: candidate, regression_threshold: threshold };
-    const sampleId = String(args.sample_id ?? `task_benchmark_canary_sample_${digest(sampleIdentity).slice(-16)}`); const existing = this.store.find("task_benchmark_canary_sample", sampleId); const sampleDigest = digest(sampleIdentity);
+    const sampleId = String(args.sample_id ?? `task_benchmark_canary_sample_${digestJson(sampleIdentity).slice(-16)}`); const existing = this.store.find("task_benchmark_canary_sample", sampleId); const sampleDigest = digestJson(sampleIdentity);
     if (existing) { if (existing.sample_digest !== sampleDigest) throw new Error("Task Benchmark Canary sample idempotency conflict"); return { canary, sample: existing, idempotent: true }; }
     const sample = this.store.create("task_benchmark_canary_sample", sampleId, { ...sampleIdentity, sample_digest: sampleDigest });
     const regressed = candidate < baseline - threshold;

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { defineHostProfile, hostProfilesFromConfig, mergeHostProfiles, resolveHostProfile, hostModelFor, renderHostArgv, defaultDispatchKind, BUILTIN_HOST_PROFILES, ARGV_PLACEHOLDERS } from "../src/host-registry.ts";
-import type { JsonObject } from "../src/store.ts";
+import type { JsonObject } from "../src/infrastructure/store.ts";
 
 test("defineHostProfile validates and normalizes a declared host", () => {
   const profile = defineHostProfile({ host: "deepseek-cli", kind: "agent-cli", command: "deepseek", output_format: "text", argv_template: ["-p", "{prompt}"] });

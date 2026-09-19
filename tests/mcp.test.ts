@@ -4,12 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import test from "node:test";
-import type { JsonObject } from "../src/store.ts";
+import type { JsonObject } from "../src/infrastructure/store.ts";
 import { CORE_TOOLS, DOMAIN_SURFACE_NAMES, McpServer, TOOLS, domainSurfaceOf, surfaceToolNames } from "../src/mcp.ts";
 import { serveMcpStdio } from "../src/mcp-stdio.ts";
-import { craftPaths } from "../src/paths.ts";
+import { craftPaths } from "../src/infrastructure/paths.ts";
 import { CraftService } from "../src/service.ts";
-import { CraftStore } from "../src/store.ts";
+import { CraftStore } from "../src/infrastructure/store.ts";
 
 test("MCP negotiates protocols, lists tools, dispatches every handler, and reports errors", async () => {
   const root = join(tmpdir(), `craft-mcp-${process.pid}-${Date.now()}`);
@@ -397,7 +397,7 @@ test("MCP stdio default runtime accepts buffered initialization", async () => {
     const serving = serveMcpStdio({ mode: "full", input, write: (line) => output.push(line) });
     input.end('{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}\n');
     await serving;
-    assert.equal((JSON.parse(output[0]) as { result: { serverInfo: { version: string } } }).result.serverInfo.version, "0.12.30");
+    assert.equal((JSON.parse(output[0]) as { result: { serverInfo: { version: string } } }).result.serverInfo.version, "0.12.33");
   } finally { if (original === undefined) delete process.env.CRAFT_DATA_DIR; else process.env.CRAFT_DATA_DIR = original; await rm(root, { recursive: true, force: true }); }
 });
 

@@ -4,9 +4,9 @@ import { createServer, request as httpRequest, type Server } from "node:http";
 import { type AddressInfo } from "node:net";
 import { hostname } from "node:os";
 import { join } from "node:path";
-import { atomicPrivateJson, type CraftPaths } from "./paths.ts";
+import { atomicPrivateJson, type CraftPaths } from "./infrastructure/paths.ts";
 import { CraftService, VERSION } from "./service.ts";
-import type { JsonObject } from "./store.ts";
+import type { JsonObject } from "./infrastructure/store.ts";
 
 const MAX_BODY = 256 * 1024;
 function equal(left: string | undefined, right: string): boolean { if (!left) return false; const a = Buffer.from(left); const b = Buffer.from(right); return a.length === b.length && timingSafeEqual(a, b); }

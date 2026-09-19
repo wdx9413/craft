@@ -1,10 +1,9 @@
 import { createHash } from "node:crypto";
-import { CraftStore, type JsonObject } from "./store.ts";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
+import { object, text } from "./validation.ts";
+import { digestJson, payload } from "./digest.ts";
 
-function text(value: unknown, name: string): string {
-  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
-  return value.trim();
-}
+
 function strings(value: unknown, name: string, minimum = 0): string[] {
   if (!Array.isArray(value) || value.length < minimum) throw new Error(`${name} must contain at least ${minimum} values`);
   const values = value.map((item) => text(item, name));
@@ -21,15 +20,9 @@ function instant(value: unknown, name: string): number {
   if (Number.isNaN(result)) throw new Error(`${name} must be an ISO timestamp`);
   return result;
 }
-function object(value: unknown, name: string): JsonObject {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${name} must be an object`);
-  return value as JsonObject;
-}
-function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
-function payload(record: JsonObject): JsonObject {
-  const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record;
-  return rest;
-}
+
+
+
 function confirmedEvidence(store: CraftStore, ids: string[]): void {
   for (const id of ids) if (store.get("evidence", id).confidence !== "confirmed") throw new Error("A2A trust requires confirmed Evidence");
 }
@@ -49,7 +42,7 @@ export class A2ADelegationKernel {
     const evidenceIds = strings(args.evidence_ids, "evidence_ids", 1); confirmedEvidence(this.store, evidenceIds);
     const allowedEffects = strings(args.allowed_effects, "allowed_effects", 1); if (allowedEffects.some((effect) => effect !== "read_only")) throw new Error("A2A trust is read-only until a separately certified remote effect adapter exists");
     const definition = { card_id: card.id, card_version: card.version, card_digest: card.card_digest, provider_id: provider.id, provider_version: provider.version, allowed_effects: allowedEffects, evidence_ids: evidenceIds };
-    const trustId = text(args.trust_id, "trust_id"); const existing = this.store.find("a2a_agent_trust", trustId); const definitionDigest = digest(definition);
+    const trustId = text(args.trust_id, "trust_id"); const existing = this.store.find("a2a_agent_trust", trustId); const definitionDigest = digestJson(definition);
     if (existing) { if (existing.definition_digest !== definitionDigest) throw new Error("A2A Agent trust idempotency conflict"); return { trust: existing, idempotent: true }; }
     return { trust: this.store.create("a2a_agent_trust", trustId, { ...definition, definition_digest: definitionDigest, status: "active", explicit_approval_ref: text(args.approval_ref, "approval_ref") }), idempotent: false };
   }
@@ -61,8 +54,8 @@ export class A2ADelegationKernel {
     if (evaluation.status !== "eligible_for_signoff") throw new Error("A2A collaboration requires an eligible single-Agent evaluation baseline");
     const evidenceId = text(args.justification_evidence_id, "justification_evidence_id"); confirmedEvidence(this.store, [evidenceId]);
     const budget = object(args.budget, "budget"); const sessionIdentity = { task_id: task.id, trust_id: trust.id, trust_version: trust.version,
-      evaluation_run_id: evaluation.id, evaluation_run_version: evaluation.version, justification_evidence_id: evidenceId, budget_digest: digest(budget), max_delegations: integer(args.max_delegations, "max_delegations", 5, 1, 5) };
-    const sessionId = text(args.session_id, "session_id"); const existing = this.store.find("a2a_collaboration_session", sessionId); const sessionDigest = digest(sessionIdentity);
+      evaluation_run_id: evaluation.id, evaluation_run_version: evaluation.version, justification_evidence_id: evidenceId, budget_digest: digestJson(budget), max_delegations: integer(args.max_delegations, "max_delegations", 5, 1, 5) };
+    const sessionId = text(args.session_id, "session_id"); const existing = this.store.find("a2a_collaboration_session", sessionId); const sessionDigest = digestJson(sessionIdentity);
     if (existing) { if (existing.session_digest !== sessionDigest) throw new Error("A2A collaboration session idempotency conflict"); return { session: existing, idempotent: true }; }
     return { session: this.store.create("a2a_collaboration_session", sessionId, { ...sessionIdentity, session_digest: sessionDigest, budget, lifecycle: "active", delegated_count: 0, raw_context_stored: false }), idempotent: false };
   }
@@ -75,9 +68,9 @@ export class A2ADelegationKernel {
     // delegated_count advances after the first preparation.  Its record version
     // is operational state, not delegation intent, so retries bind to the
     // immutable session definition digest instead.
-    const identity = { session_id: session.id, session_digest: session.session_digest, objective_digest: digest(text(args.objective, "objective")), artifact_ids: artifactIds, evidence_ids: evidenceIds, effect: "read_only", expires_at: expiresAt };
+    const identity = { session_id: session.id, session_digest: session.session_digest, objective_digest: digestJson(text(args.objective, "objective")), artifact_ids: artifactIds, evidence_ids: evidenceIds, effect: "read_only", expires_at: expiresAt };
     const { expires_at: _expiresAt, ...intent } = identity;
-    const delegationId = text(args.delegation_id, "delegation_id"); const existing = this.store.find("a2a_delegation", delegationId); const delegationDigest = digest(intent);
+    const delegationId = text(args.delegation_id, "delegation_id"); const existing = this.store.find("a2a_delegation", delegationId); const delegationDigest = digestJson(intent);
     if (existing) { if (existing.delegation_digest !== delegationDigest) throw new Error("A2A delegation idempotency conflict"); return { delegation: existing, idempotent: true }; }
     if (Number(session.delegated_count) >= Number(session.max_delegations)) throw new Error("A2A collaboration session reached its delegation limit");
     const delegation = this.store.create("a2a_delegation", delegationId, { ...identity, delegation_digest: delegationDigest, status: "prepared", transport_receipt_id: null, result_receipt_id: null });
@@ -105,8 +98,8 @@ export class A2ADelegationKernel {
     if (delegation.status !== "issued") throw new Error("A2A delegation has not been issued");
     const evidenceIds = strings(args.evidence_ids, "evidence_ids", 1); confirmedEvidence(this.store, evidenceIds);
     const result = object(args.result, "result"); if (Object.keys(result).some((key) => /(?:secret|token|cookie|password|authorization)/iu.test(key))) throw new Error("A2A result must not contain credential fields");
-    const receiptIdentity = { delegation_id: delegation.id, verdict, evidence_ids: evidenceIds, result_digest: digest(result) };
-    const receiptId = text(args.receipt_id, "receipt_id"); const receiptDigest = digest(receiptIdentity);
+    const receiptIdentity = { delegation_id: delegation.id, verdict, evidence_ids: evidenceIds, result_digest: digestJson(result) };
+    const receiptId = text(args.receipt_id, "receipt_id"); const receiptDigest = digestJson(receiptIdentity);
     const receipt = this.store.create("a2a_delegation_receipt", receiptId, { ...receiptIdentity, receipt_digest: receiptDigest, raw_result_stored: false });
     const completed = this.store.save("a2a_delegation", String(delegation.id), { ...payload(delegation), status: "completed", result_receipt_id: receipt.id, verdict, completed_at: new Date().toISOString() });
     return { delegation: completed, receipt, idempotent: false };

@@ -1,11 +1,10 @@
 import { createHash } from "node:crypto";
-import { CraftStore, type JsonObject } from "./store.ts";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
 import { EvalCampaignKernel } from "./eval-campaign.ts";
+import { object, text } from "./validation.ts";
+import { digestJson, payload } from "./digest.ts";
 
-function text(value: unknown, name: string): string {
-  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
-  return value.trim();
-}
+
 function strings(value: unknown, name: string, minimum = 0): string[] {
   if (!Array.isArray(value) || value.length < minimum) throw new Error(`${name} must contain at least ${minimum} values`);
   const values = value.map((item) => text(item, name));
@@ -22,15 +21,9 @@ function instant(value: unknown, name: string): number {
   if (Number.isNaN(result)) throw new Error(`${name} must be an ISO timestamp`);
   return result;
 }
-function object(value: unknown, name: string): JsonObject {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${name} must be an object`);
-  return value as JsonObject;
-}
-function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
-function payload(record: JsonObject): JsonObject {
-  const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record;
-  return rest;
-}
+
+
+
 
 /**
  * Operations layer for reviewed, redacted real-world evaluation cases. It only
@@ -53,7 +46,7 @@ export class EvaluationOperationsKernel {
       lifecycle: args.lifecycle === undefined ? "active" : text(args.lifecycle, "lifecycle"),
     };
     if (!new Set(["active", "paused"]).has(definition.lifecycle)) throw new Error("Evaluation Program lifecycle is unsupported");
-    const programId = text(args.program_id, "program_id"); const existing = this.store.find("evaluation_program", programId); const definitionDigest = digest(definition);
+    const programId = text(args.program_id, "program_id"); const existing = this.store.find("evaluation_program", programId); const definitionDigest = digestJson(definition);
     if (existing) {
       if (existing.definition_digest !== definitionDigest) throw new Error("Evaluation Program idempotency conflict");
       return { program: existing, idempotent: true };
@@ -80,7 +73,7 @@ export class EvaluationOperationsKernel {
     if (baselineHarness === candidateHarness) throw new Error("Evaluation Program requires distinct baseline and candidate Harnesses");
     const caseIds = partition === "development" ? program.development_case_ids as string[] : program.held_out_case_ids as string[];
     const environment = object(args.environment, "environment"); const budget = object(args.budget, "budget");
-    const trials = integer(args.trials_per_case, "trials_per_case", 2, 1, 20); const environmentDigest = digest(environment); const budgetDigest = digest(budget);
+    const trials = integer(args.trials_per_case, "trials_per_case", 2, 1, 20); const environmentDigest = digestJson(environment); const budgetDigest = digestJson(budget);
     const campaign = partition === "held_out" ? this.campaigns.create({ campaign_id: String(args.campaign_id ?? `evaluation_program_campaign_${program.id}_${partition}_${now}`),
       case_ids: caseIds, baseline_harness: baselineHarness, candidate_harness: candidateHarness, trials_per_case: trials,
       acceptance_ref: text(args.acceptance_ref, "acceptance_ref"), environment, budget }).campaign as JsonObject : null;
@@ -90,7 +83,7 @@ export class EvaluationOperationsKernel {
     const runIdentity = { program_id: program.id, program_definition_digest: program.definition_digest, partition, case_ids: caseIds, baseline_harness: baselineHarness,
       candidate_harness: candidateHarness, trials_per_case: trials, campaign_id: campaign?.id ?? null, campaign_version: campaign?.version ?? null,
       environment_digest: campaign?.environment_digest ?? environmentDigest, budget_digest: campaign?.budget_digest ?? budgetDigest };
-    const runId = String(args.program_run_id ?? `evaluation_program_run_${program.id}_${digest(runIdentity).slice(-16)}`); const existing = this.store.find("evaluation_program_run", runId); const runDigest = digest(runIdentity);
+    const runId = String(args.program_run_id ?? `evaluation_program_run_${program.id}_${digestJson(runIdentity).slice(-16)}`); const existing = this.store.find("evaluation_program_run", runId); const runDigest = digestJson(runIdentity);
     if (existing) {
       if (existing.run_digest !== runDigest) throw new Error("Evaluation Program Run idempotency conflict");
       return { program, campaign, run: existing, idempotent: true };

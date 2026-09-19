@@ -1,12 +1,14 @@
 import { createHash, createPublicKey, verify } from "node:crypto";
-import type { JsonObject } from "./store.ts";
-import { CraftStore } from "./store.ts";
+import type { JsonObject } from "./infrastructure/store.ts";
+import { CraftStore } from "./infrastructure/store.ts";
+import { text } from "./validation.ts";
+import { digestJson, payload } from "./digest.ts";
 
 const SUBJECT_KINDS = new Set(["capability_asset", "mcp_registry_server", "hub_catalog_entry"]);
 
-function text(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim(); }
-function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
-function payload(record: JsonObject): JsonObject { const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record; return rest; }
+
+
+
 function sha256(value: unknown, name: string): string { const result = text(value, name); if (!/^sha256:[a-f0-9]{64}$/u.test(result)) throw new Error(`${name} must be a SHA-256 digest`); return result; }
 
 /**
@@ -21,10 +23,10 @@ export class SupplyChainAttestationKernel {
   publisherRegister(args: JsonObject): JsonObject {
     const publisherId = text(args.publisher_id, "publisher_id"); const publicKeyPem = text(args.public_key_pem, "public_key_pem");
     let keyFingerprint: string;
-    try { keyFingerprint = digest(createPublicKey(publicKeyPem).export({ format: "der", type: "spki" }).toString("base64")); }
+    try { keyFingerprint = digestJson(createPublicKey(publicKeyPem).export({ format: "der", type: "spki" }).toString("base64")); }
     catch { throw new Error("publisher public_key_pem is invalid"); }
     const definition = { publisher_id: publisherId, key_fingerprint: keyFingerprint, identity_ref: text(args.identity_ref, "identity_ref") };
-    const existing = this.store.find("supply_chain_publisher", publisherId); const definitionDigest = digest(definition);
+    const existing = this.store.find("supply_chain_publisher", publisherId); const definitionDigest = digestJson(definition);
     if (existing) { if (existing.definition_digest !== definitionDigest) throw new Error("Supply-chain publisher idempotency conflict"); return { publisher: existing, idempotent: true }; }
     return { publisher: this.store.create("supply_chain_publisher", publisherId, { ...definition, definition_digest: definitionDigest, public_key_pem: publicKeyPem, status: "active" }), idempotent: false };
   }
@@ -37,8 +39,8 @@ export class SupplyChainAttestationKernel {
     try { verified = verify(null, Buffer.from(subjectDigest, "utf8"), createPublicKey(String(publisher.public_key_pem)), signature); }
     catch { throw new Error("Supply-chain signature is invalid"); }
     if (!verified) throw new Error("Supply-chain signature does not verify");
-    const identity = { publisher_id: publisher.id, publisher_version: publisher.version, subject_kind: subjectKind, subject_id: subjectId, subject_digest: subjectDigest, signature_digest: digest(signature.toString("base64url")) };
-    const attestationId = String(args.attestation_id ?? `supply_attestation_${digest(identity).slice(-24)}`); const existing = this.store.find("supply_chain_attestation", attestationId); const attestationDigest = digest(identity);
+    const identity = { publisher_id: publisher.id, publisher_version: publisher.version, subject_kind: subjectKind, subject_id: subjectId, subject_digest: subjectDigest, signature_digest: digestJson(signature.toString("base64url")) };
+    const attestationId = String(args.attestation_id ?? `supply_attestation_${digestJson(identity).slice(-24)}`); const existing = this.store.find("supply_chain_attestation", attestationId); const attestationDigest = digestJson(identity);
     if (existing) { if (existing.attestation_digest !== attestationDigest) throw new Error("Supply-chain attestation idempotency conflict"); return { attestation: existing, idempotent: true }; }
     return { attestation: this.store.create("supply_chain_attestation", attestationId, { ...identity, attestation_digest: attestationDigest, status: "verified", raw_signature_stored: false }), idempotent: false };
   }

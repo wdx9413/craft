@@ -1,13 +1,15 @@
 import { createHash } from "node:crypto";
 import { CampaignRunnerKernel } from "./campaign-runner.ts";
 import { PlatformExecutionKernel } from "./platform-execution.ts";
-import { CraftStore, type JsonObject } from "./store.ts";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
+import { text } from "./validation.ts";
+import { digestJson } from "./digest.ts";
 
 const TERMINAL_HOST = new Set(["completed", "failed", "cancelled", "interrupted"]);
 const INTERVENTIONS = new Set(["approval", "pause", "resume", "timeout", "cancel", "retry", "revoke", "handoff"]);
 
-function text(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim(); }
-function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
+
+
 function ids(value: unknown, name: string): string[] {
   if (value === undefined) return [];
   if (!Array.isArray(value)) throw new Error(`${name} must be an array`);
@@ -39,7 +41,7 @@ export class RuntimeAssuranceKernel {
     if (hostRun.id !== launch.run_id || hostRun.task_id !== taskId || !TERMINAL_HOST.has(String(hostRun.status))) {
       throw new Error("Runtime Assurance requires the Task Run's terminal Host receipt");
     }
-    const environmentDigest = digest(args.environment ?? {}); const budgetDigest = digest(args.budget ?? {});
+    const environmentDigest = digestJson(args.environment ?? {}); const budgetDigest = digestJson(args.budget ?? {});
     if (environmentDigest !== taskRun.environment_digest || budgetDigest !== taskRun.budget_digest) {
       throw new Error("Runtime Assurance environment or budget drift requires replanning");
     }
@@ -62,8 +64,8 @@ export class RuntimeAssuranceKernel {
       reobservation, boundary, delivery_id: delivery?.id ?? null, delivery_version: delivery?.version ?? null,
       evidence_ids: evidenceIds, status,
     };
-    const attestationId = String(args.attestation_id ?? `runtime_assurance_${taskRun.id}_${digest(identity).slice(-16)}`);
-    const existing = this.store.find("runtime_assurance_attestation", attestationId); const attestationDigest = digest(identity);
+    const attestationId = String(args.attestation_id ?? `runtime_assurance_${taskRun.id}_${digestJson(identity).slice(-16)}`);
+    const existing = this.store.find("runtime_assurance_attestation", attestationId); const attestationDigest = digestJson(identity);
     if (existing) { if (existing.attestation_digest !== attestationDigest) throw new Error("Runtime Assurance attestation idempotency conflict"); return { attestation: existing, idempotent: true }; }
     const attestation = this.store.create("runtime_assurance_attestation", attestationId, { ...identity, attestation_digest: attestationDigest, raw_content_stored: false });
     this.event(String(taskRun.id), "attested", { attestation_id: String(attestation.id), host_run_id: String(hostRun.id), status, effect });
@@ -75,9 +77,9 @@ export class RuntimeAssuranceKernel {
     if (!INTERVENTIONS.has(kind)) throw new Error("Runtime Assurance intervention kind is unsupported");
     const evidenceIds = ids(args.evidence_ids, "evidence_ids"); for (const evidenceId of evidenceIds) this.store.get("evidence", evidenceId);
     const identity = { task_run_id: taskRun.id, task_run_version: taskRun.version, kind, actor: text(args.actor, "actor"),
-      reason_digest: digest(text(args.reason, "reason")), evidence_ids: evidenceIds };
-    const interventionId = String(args.intervention_id ?? `runtime_intervention_${taskRun.id}_${digest(identity).slice(-16)}`);
-    const existing = this.store.find("runtime_intervention", interventionId); const interventionDigest = digest(identity);
+      reason_digest: digestJson(text(args.reason, "reason")), evidence_ids: evidenceIds };
+    const interventionId = String(args.intervention_id ?? `runtime_intervention_${taskRun.id}_${digestJson(identity).slice(-16)}`);
+    const existing = this.store.find("runtime_intervention", interventionId); const interventionDigest = digestJson(identity);
     if (existing) { if (existing.intervention_digest !== interventionDigest) throw new Error("Runtime Assurance intervention idempotency conflict"); return { intervention: existing, idempotent: true }; }
     const intervention = this.store.create("runtime_intervention", interventionId, { ...identity, intervention_digest: interventionDigest, raw_content_stored: false });
     this.event(String(taskRun.id), "intervened", { intervention_id: String(intervention.id), kind });
@@ -97,8 +99,8 @@ export class RuntimeAssuranceKernel {
       return String(matches[0].id);
     }).sort();
     const identity = { runner_id: runner.id, campaign_id: campaign.id, environment_digest: campaign.environment_digest, budget_digest: campaign.budget_digest, assurance_ids: assuranceIds };
-    const recordId = String(args.assurance_campaign_id ?? `runtime_assurance_campaign_${runner.id}_${digest(identity).slice(-16)}`);
-    const existing = this.store.find("runtime_assurance_campaign", recordId); const recordDigest = digest(identity);
+    const recordId = String(args.assurance_campaign_id ?? `runtime_assurance_campaign_${runner.id}_${digestJson(identity).slice(-16)}`);
+    const existing = this.store.find("runtime_assurance_campaign", recordId); const recordDigest = digestJson(identity);
     if (existing) {
       if (existing.assurance_campaign_digest !== recordDigest) throw new Error("Runtime Assurance Campaign idempotency conflict");
       return { assurance_campaign: existing, result: this.campaigns.get({ runner_id: runner.id }), idempotent: true };

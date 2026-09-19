@@ -1,6 +1,6 @@
 # Craft
 
-> 当前发布版本：v0.12.30。Craft 是面向人和 AI 的通用工作运行时：知识、记忆、能力发现、质量评测与 Workflow 演进都由同一 Runtime 实现，并以 MCP 对外提供；默认 `craft` 插件只是将 Skill、MCP 配置和 bundle 打包给 Codex。它们共享同一套状态、策略、Receipt、评测与安全边界，也可按需作为独立 MCP 产品使用。Codex 插件默认复用当前 App 作为 Embedded Host，不另起 Codex CLI。
+> 当前发布版本：v0.12.33。Craft 是面向人和 AI 的通用工作运行时：知识、记忆、能力发现、质量评测与 Workflow 演进都由同一 Runtime 实现，并以 MCP 对外提供；默认 `craft` 插件只是将 Skill、MCP 配置和 bundle 打包给 Codex。它们共享同一套状态、策略、Receipt、评测与安全边界，也可按需作为独立 MCP 产品使用。Codex 插件默认复用当前 App 作为 Embedded Host，不另起 Codex CLI。
 
 [中文](README.md) | [English](README.en.md)
 
@@ -56,7 +56,7 @@ Sandbox 能力采用“声明、诊断、黑盒一致性验证、精确版本票
 - **Trust Profile 与网页边界（v0.12.26）**：`TrustProfile` 将 Trial/Outcome/Evidence 汇总为按任务、项目、能力、模型、Host、effect 和数据范围限定的自主权建议；建议会过期、可撤销，且永远不等于授权。文件操作继续走 Action Gateway；网页 GET/HEAD 走无凭据、有界的 MCP 观察，浏览器点击、填表、提交只生成 Adapter Contract，由宿主插件执行并回传 Receipt。v0.12.26 增加 Generic Adapter SDK、跨平台 Command Adapter、OpenAPI 导入、Durable Runtime、Context Manifest、信任曲线、领域 Evaluator 和项目迁移契约。详见 [v0.12.26 Runtime](docs/technical/modules/v01226-runtime.md)。
 - **完整主插件组合（v0.12.28）**：默认 `craft` 不再被描述为只有编排核心：它通过固定 syscall 词表按需访问 Context、Capability、Quality 与 Workflow Evolution，因而不必把数百个工具 Schema 同时注入模型上下文。`craft-context` 是知识、记忆和 Context Receipt 的推荐独立入口；`craft-quality` 评测 Skill、MCP、Workflow 等任意版本化 Subject。`craft_info.data_space_id` 明确组件是否共享账本。详见 [主插件组合](docs/technical/modules/v01228-primary-plugin-composition.md)。
 - **Turn Cognitive Runtime（v0.12.28）**：Craft 现在可按轮接收 Host 或独立 Agent 的内容无关语义提议，再以 scope 内 Policy 决定是否需要上下文、能力发现、工作准备、候选记忆或评测观察。短对话可以全不触发；候选记忆必须显式采纳后才进入 Ledger。它只声明 Codex/Claude/IDE 的接入契约，不会改宿主配置或在 App 中另起 CLI。详见 [Turn Cognitive Runtime](docs/technical/modules/turn-cognitive-runtime.md)。
-- **Runtime Proof & Deployment（v0.12.30）**：远程 MCP 可使用 JWKS/OIDC Resource Server verifier；Remote Task 以 tenant、principal、scope、receipt、TTL 和一次性 handle 绑定。真实 Harness 效果必须以双 Host、双脱敏 Case、Host Session 与独立 Outcome Observer 的重复 Campaign 证明。供应链增加发布者签名证明；A2A v1 仅作为受限 Federated Grant 的 Adapter。非 loopback 网络监听、TLS/反向代理、IdP、真实 Case 与 Windows 隔离仍是部署方明确配置的边界。详见 [Runtime Proof 与远程部署边界](docs/technical/modules/runtime-proof-deployment.md)。
+- **Runtime Proof & Deployment（v0.12.33）**：远程 MCP 可使用 JWKS/OIDC Resource Server verifier；Remote Task 以 tenant、principal、scope、receipt、TTL 和一次性 handle 绑定。真实 Harness 效果必须以双 Host、双脱敏 Case、Host Session 与独立 Outcome Observer 的重复 Campaign 证明。供应链增加发布者签名证明；A2A v1 仅作为受限 Federated Grant 的 Adapter。非 loopback 网络监听、TLS/反向代理、IdP、真实 Case 与 Windows 隔离仍是部署方明确配置的边界。详见 [Runtime Proof 与远程部署边界](docs/technical/modules/runtime-proof-deployment.md)。
 - **Remote Access / Session / Observer Contracts（未发布）**：远程 MCP 只有部署方注入可信 verifier 后才可访问，且以 TLS、issuer、audience、scope、到期时间和限流失败关闭；Host 的连续事实与独立状态观察都写入同一条 Trace，观察本身不能晋级。详见 [运行时契约](docs/technical/modules/remote-mcp-session-observer.md)。
 - Orchestration Trial 自动归档：锁定 Agent Profile 精确版本，记录 Dispatch、重路由、节点结果、成本和证据，并在终态自动生成 Outcome。
 - 版本化 Grader、多来源 Grade 和 Signoff Policy；模型判断不会被记录成程序证明。
@@ -89,7 +89,7 @@ Sandbox 能力采用“声明、诊断、黑盒一致性验证、精确版本票
 - 可验证演进：本地 `workspace-write` 有基线/提交 Checkpoint 和显式恢复，外部 effect 不在回滚承诺内；Campaign 用已观察 Delivery 生成无正文配对报告，Candidate 必须经 held-out、Signoff、Evidence Canary 和人工结论才可被最小 Harness 选择器推荐。
 - Capability Connector：内置、用户批准的 GitHub/火山引擎 Skill 来源和 stdio/HTTPS MCP 统一登记为无敏感正文的来源元数据；发现、批准、Activation Profile 和调用 ticket 严格分离。Serena MCP 只允许只读 Asset。Connector 不自动安装、启停第三方服务、改写宿主 MCP 配置或保存凭据。
 - **syscall 工具面**：8 个通用动词（`describe` / `list` / `get` / `create` / `update` / `run` / `cancel` / `search`）加 `resource` + `operation` 寻址，替代按操作逐个暴露工具；另保留 8 个主路径直连操作（含一次性内置知识源登记）。注册表由既有工具表机械派生，**全部操作可达而挂载 schema 保持 O(1)**。详见 [Tool Plane](docs/technical/modules/tool-plane.md)。
-- **模型网关**：声明式支持 deepseek、火山引擎方舟、通义千问、Kimi、智谱 GLM、MiniMax、OpenAI GPT、Anthropic Claude 八家模型族。只保存端点、协议、模型分层与**环境变量名**，从不保存密钥；请求渲染与响应解析是纯函数，因此可在没有任何 API Key 时被声明、配置与验证。本版**不内置网络客户端**，默认 transport 明确拒绝并指出缺少的环境变量。详见 [Model Gateway](docs/technical/modules/model-gateway.md)。
+- **模型网关**：声明式支持 deepseek、火山引擎方舟、通义千问、Kimi、智谱 GLM、MiniMax、OpenAI GPT、Anthropic Claude 八家模型族。只保存端点、协议、模型分层与**环境变量名**，从不保存密钥；请求渲染与响应解析是纯函数，因此可在没有任何 API Key 时被声明、配置与验证。**内置真实 HTTP transport**（`createFetchTransport`，60 秒超时、429 指数退避、8MB 响应上限），内建宿主与 CLI 默认注入它，因此配置好 Key 即可直接跑模型；`unconfiguredTransport` 只是可注入的降级 seam，不指出缺少的环境变量时不会静默失败。首次运行可用性由 `craft_first_run_readiness` 直接回答。详见 [Model Gateway](docs/technical/modules/model-gateway.md)。
 - **内建宿主（internal host）**：Craft 自己跑循环时，是与 Codex、Claude 并列的第三个 Host Driver，产出同样的 dispatch/receipt/事件记录。循环带六道外部熔断（步数、token、墙钟、无进展、动作重复、预算熔断），可调用的动作是显式白名单且只限读与记录。详见 [Internal Host](docs/technical/modules/internal-host.md)。
 - **资产信封与路由**：能力、知识、工作流共用统一信封；路由按信任、健康、effect、领域标签、预算与风险上限选择最小集合，并返回每一次拒绝的理由。
 - **跨模型可比性**：资产可声明 core invariants 与 model-sensitive 行为；只有核心不变量在每个模型都成立才判 verified，只试过一个模型返回 `inconclusive` 而非通过。详见 [Asset Routing](docs/technical/modules/asset-routing.md)。
@@ -153,7 +153,7 @@ codex plugin add craft@craft-marketplace
 
 插件只读取 `plugins/craft/` 中的 manifest、`craft-route` Skill 和两个单文件 MCP bundle；不会把源码、桌面应用、适配器包或 source map 复制进插件缓存。`skills/craft` 与 `skills/craft-clarify` 可作为独立可选包安装，但这样不会自动获得 MCP 数据层。
 
-从 v0.12.16 起，插件发行物固定在 `plugins/craft/`；Codex 把该轻量目录复制到缓存后无需再执行 `npm install`，也不会依赖源码仓库的 `node_modules`。当前暂不构建或发布桌面 `.app`、Windows ZIP、运行时二进制等平台安装包；它们不会进入插件目录或 Git 历史。升级后请重新安装插件，并在新会话中验证 `craft_info`。
+从 v0.12.16 起，插件发行物固定在 `plugins/craft/`；Codex 把该轻量目录复制到缓存后无需再执行 `npm install`，也不会依赖源码仓库的 `node_modules`。桌面安装包（Windows ZIP、macOS DMG）由 `.github/workflows/desktop-release.yml` 在发布时构建并作为 GitHub Release asset 上传，用户有下载入口；它们不会进入插件目录或 npm 包（`files` 白名单已收窄到 `dist/src` 与 `dist/plugin`），也不进入 Git 历史。升级后请重新安装插件，并在新会话中验证 `craft_info`。
 
 ## 接入 Claude Code
 

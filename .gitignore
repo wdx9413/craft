@@ -3,6 +3,9 @@
 __pycache__/
 *.py[cod]
 *.egg-info/
+# Python-era scaffolding from before the Node-only runtime; kept out of Git so a
+# local copy cannot be mistaken for part of the product.
+/br-tools/
 tests/.tmp/
 tests/.validation-deps/
 .coverage
@@ -16,6 +19,36 @@ build/
 node_modules/
 .node-coverage/
 .coverage-raw/
+# Ad-hoc V8 dump directories and console dumps written while investigating
+# coverage gaps (`--test-coverage-directory=cov-*`). Local scratch only.
+cov-*/
+.cov*.txt
 .workbuddy/
 .workbuddy-ai/
 .tmp-*
+
+# `pack-plugin` regenerates these from `dist/plugin` on every `pnpm build`, and a
+# component plugin only needs them at runtime. The bundles were byte-identical
+# copies (8 x 2.25 MB) and the skill files were copies of `skills/<name>`, so this
+# kept 21.5 MB of duplicated build output in Git. Plugin metadata stays tracked:
+# only the generated `dist/` and `skills/` trees are ignored.
+/plugins/*/dist/
+/plugins/*/skills/
+
+# Credentials. Craft can import a desktop credential file, so a stray `.env` or key
+# in the working tree is a realistic accident. The secret detectors in
+# `src/federation.ts` and `src/materialization.ts` only run on specific data paths,
+# so they are not a substitute for this.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+.npmrc
+.netrc
+credentials.json
+credentials.yaml
+credentials.yml
+

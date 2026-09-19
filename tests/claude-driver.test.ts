@@ -6,9 +6,9 @@ import test from "node:test";
 import { ClaudeHostKernel } from "../src/claude-driver.ts";
 import type { HostExecutor } from "../src/host-driver.ts";
 import { McpServer } from "../src/mcp.ts";
-import { craftPaths } from "../src/paths.ts";
+import { craftPaths } from "../src/infrastructure/paths.ts";
 import { CraftService } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/store.ts";
+import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
 
 const success: HostExecutor = async () => ({ exitCode: 0, signal: null, stderr: "progress", timedOut: false, outputLimited: false, stdout: [
   JSON.stringify({ type: "system", subtype: "init", session_id: "session-1" }),

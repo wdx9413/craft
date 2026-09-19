@@ -1,8 +1,10 @@
 import { createHash } from "node:crypto";
-import { CraftStore, type JsonObject } from "./store.ts";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
+import { text } from "./validation.ts";
+import { digestJson } from "./digest.ts";
 
-function text(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim(); }
-function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
+
+
 
 /**
  * Separates a verified isolation boundary from a human-approved local write.
@@ -41,7 +43,7 @@ export class AutonomyLadderKernel {
 
   private record(args: JsonObject, value: JsonObject): JsonObject {
     const identity = { ...value, task_id: args.task_id === undefined ? null : text(args.task_id, "task_id"), action_digest: args.action_digest === undefined ? null : text(args.action_digest, "action_digest") };
-    const decisionId = String(args.decision_id ?? `autonomy_ladder_${digest(identity).slice(-16)}`); const existing = this.store.find("autonomy_ladder_decision", decisionId); const decisionDigest = digest(identity);
+    const decisionId = String(args.decision_id ?? `autonomy_ladder_${digestJson(identity).slice(-16)}`); const existing = this.store.find("autonomy_ladder_decision", decisionId); const decisionDigest = digestJson(identity);
     if (existing) { if (existing.decision_digest !== decisionDigest) throw new Error("Autonomy Ladder decision idempotency conflict"); return { decision: existing, idempotent: true }; }
     return { decision: this.store.create("autonomy_ladder_decision", decisionId, { ...identity, decision_digest: decisionDigest }), idempotent: false };
   }

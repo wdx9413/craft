@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
-import type { JsonObject } from "./store.ts";
+import type { JsonObject } from "./infrastructure/store.ts";
+import { digestJson } from "./digest.ts";
 
 export type HostSandbox = "read-only" | "workspace-write";
 export type HostOutputObserver = (event: { stream: "stdout" | "stderr"; bytes: number; digest: string }) => void;
@@ -20,7 +21,7 @@ export interface HostDriver {
   execute(args: JsonObject, options?: { signal?: AbortSignal; observe?: HostOutputObserver }): Promise<JsonObject>;
 }
 
-function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
+
 
 /**
  * One bounded, cancellable child process with output caps. Every host driver
@@ -31,7 +32,7 @@ export const executeHostProcess: HostExecutor = async (request) => new Promise((
   const child = spawn(request.executable, request.argv, { cwd: request.cwd, shell: false, windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
   let stdout = ""; let stderr = ""; let outputLimited = false; let timedOut = false; let cancelled = false;
   const append = (current: string, chunk: Buffer): string => { const next = current + chunk.toString("utf8"); if (Buffer.byteLength(next) <= request.outputLimit) return next; outputLimited = true; return Buffer.from(next).subarray(0, request.outputLimit).toString("utf8"); };
-  const observed = (stream: "stdout" | "stderr", chunk: Buffer) => request.observe?.({ stream, bytes: chunk.length, digest: digest(chunk.toString("utf8")) });
+  const observed = (stream: "stdout" | "stderr", chunk: Buffer) => request.observe?.({ stream, bytes: chunk.length, digest: digestJson(chunk.toString("utf8")) });
   child.stdout.on("data", (chunk: Buffer) => { stdout = append(stdout, chunk); observed("stdout", chunk); });
   child.stderr.on("data", (chunk: Buffer) => { stderr = append(stderr, chunk); observed("stderr", chunk); });
   child.once("error", (error) => { clearTimeout(timer); reject(error); });

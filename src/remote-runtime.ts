@@ -1,11 +1,10 @@
 import { createHash, randomBytes } from "node:crypto";
-import type { JsonObject } from "./store.ts";
-import { CraftStore } from "./store.ts";
+import type { JsonObject } from "./infrastructure/store.ts";
+import { CraftStore } from "./infrastructure/store.ts";
+import { text } from "./validation.ts";
+import { digestJson, payload } from "./digest.ts";
 
-function text(value: unknown, name: string): string {
-  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
-  return value.trim();
-}
+
 
 function instant(value: unknown, name: string): number {
   const result = Date.parse(text(value, name));
@@ -13,16 +12,11 @@ function instant(value: unknown, name: string): number {
   return result;
 }
 
-function digest(value: unknown): string {
-  return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
-}
 
-function sha256(value: string): string { return digest(value); }
 
-function payload(record: JsonObject): JsonObject {
-  const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record;
-  return rest;
-}
+function sha256(value: string): string { return digestJson(value); }
+
+
 
 function uniqueStrings(value: unknown, name: string, minimum = 0): string[] {
   if (!Array.isArray(value) || value.length < minimum) throw new Error(`${name} must contain at least ${minimum} values`);
@@ -54,7 +48,7 @@ export class RemoteRuntimeKernel {
       retention_policy_ref: text(args.retention_policy_ref, "retention_policy_ref"),
       deletion_policy_ref: text(args.deletion_policy_ref, "deletion_policy_ref"),
     };
-    const identityDigest = digest(identity); const existing = this.store.find("remote_tenant", tenantId);
+    const identityDigest = digestJson(identity); const existing = this.store.find("remote_tenant", tenantId);
     if (existing) {
       if (existing.identity_digest !== identityDigest) throw new Error("Remote tenant idempotency conflict");
       return { tenant: existing, idempotent: true };
@@ -76,7 +70,7 @@ export class RemoteRuntimeKernel {
       audience: text(args.audience, "audience"), scopes, expires_at: new Date(expires).toISOString(),
     };
     const bindingId = String(args.binding_id ?? `remote_task_${randomBytes(12).toString("hex")}`);
-    const existing = this.store.find("remote_task_binding", bindingId); const bindingDigest = digest(identity);
+    const existing = this.store.find("remote_task_binding", bindingId); const bindingDigest = digestJson(identity);
     if (existing) {
       if (existing.binding_digest !== bindingDigest) throw new Error("Remote task binding idempotency conflict");
       return { binding: existing, handle: null, idempotent: true };
@@ -107,10 +101,10 @@ export class RemoteRuntimeKernel {
     const identity = { binding_id: binding.id, binding_version: binding.version, operation, at: new Date(now).toISOString(), principal_digest: binding.principal_digest, tenant_id: binding.tenant_id };
     const existing = this.store.find("remote_task_access_receipt", receiptId);
     if (existing) {
-      if (existing.access_digest !== digest(identity)) throw new Error("Remote task access receipt idempotency conflict");
+      if (existing.access_digest !== digestJson(identity)) throw new Error("Remote task access receipt idempotency conflict");
       return { binding, receipt: existing, idempotent: true };
     }
-    const receipt = this.store.create("remote_task_access_receipt", receiptId, { ...identity, access_digest: digest(identity), raw_handle_stored: false });
+    const receipt = this.store.create("remote_task_access_receipt", receiptId, { ...identity, access_digest: digestJson(identity), raw_handle_stored: false });
     return { binding, receipt, idempotent: false };
   }
 

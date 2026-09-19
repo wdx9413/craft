@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { McpServer } from "../src/mcp.ts";
-import { craftPaths } from "../src/paths.ts";
+import { craftPaths } from "../src/infrastructure/paths.ts";
 import { CraftService, VERSION } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/store.ts";
+import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
 
 test("shared object graphs invalidate dependents and prevent stale writes", async () => {
   const root = join(tmpdir(), `craft-workbench-${process.pid}-${Date.now()}`);
@@ -16,7 +16,7 @@ test("shared object graphs invalidate dependents and prevent stale writes", asyn
   try {
     await mkdir(worktree, { recursive: true });
     const opened = service.workspaceOpen({ workspace_id: "ws", name: "Video", root_path: worktree, include_paths: ["assets"] });
-    assert.equal(VERSION, "0.12.30");
+    assert.equal(VERSION, "0.12.33");
     assert.equal((opened.workspace as JsonObject).state_revision, 1);
     const brief = service.workObjectPut({ workspace_id: "ws", object_id: "brief", object_type: "brief", name: "人物设定",
       data: { character: "A" }, source_paths: ["assets/brief.md"], expected_state_revision: 1 }).object as JsonObject;

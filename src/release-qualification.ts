@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto";
-import { CraftStore, type JsonObject } from "./store.ts";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
+import { text } from "./validation.ts";
+import { digestJson, payload } from "./digest.ts";
 
-function text(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim(); }
+
 function finite(value: unknown, name: string, fallback = 0): number { const result = value === undefined ? fallback : Number(value); if (!Number.isFinite(result) || result < 0) throw new Error(`${name} must be a non-negative finite number`); return result; }
-function payload(record: JsonObject): JsonObject { const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record; return rest; }
-function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
+
+
 function mean(values: number[]): number { return values.reduce((sum, item) => sum + item, 0) / values.length; }
 
 export class ReleaseQualificationKernel {
@@ -16,7 +18,7 @@ export class ReleaseQualificationKernel {
     if (args.sanitized !== true || args.content_stored === true) throw new Error("Reference Pilot must be sanitized and content-free");
     const direction = text(args.direction ?? "lower_is_better", "direction"); if (!new Set(["lower_is_better", "higher_is_better"]).has(direction)) throw new Error("Reference Pilot metric direction is unsupported");
     const identity = { kind, name: text(args.name, "name"), case_ref: text(args.case_ref, "case_ref"), host: text(args.host ?? "codex", "host"), primary_metric: text(args.primary_metric, "primary_metric"), direction, effect_threshold: finite(args.effect_threshold, "effect_threshold"), guardrail_names: Array.isArray(args.guardrail_names) ? [...new Set(args.guardrail_names.map((item) => text(item, "guardrail_names")))].sort() : [], sanitized: true, content_stored: false };
-    const pilotId = String(args.pilot_id ?? `reference_pilot_${kind}`); const definitionDigest = digest(identity); const existing = this.store.find("reference_pilot", pilotId);
+    const pilotId = String(args.pilot_id ?? `reference_pilot_${kind}`); const definitionDigest = digestJson(identity); const existing = this.store.find("reference_pilot", pilotId);
     if (existing) { if (existing.definition_digest !== definitionDigest) throw new Error("Reference Pilot idempotency conflict"); return { pilot: existing, idempotent: true }; }
     return { pilot: this.store.create("reference_pilot", pilotId, { ...identity, definition_digest: definitionDigest }), idempotent: false };
   }
@@ -24,7 +26,7 @@ export class ReleaseQualificationKernel {
   plan(args: JsonObject): JsonObject {
     const pilot = this.store.get("reference_pilot", text(args.pilot_id, "pilot_id")); const environment = text(args.environment_fingerprint, "environment_fingerprint"); const budget = text(args.budget_fingerprint, "budget_fingerprint");
     const identity = { pilot_id: pilot.id, pilot_version: pilot.version, baseline_ref: text(args.baseline_ref, "baseline_ref"), candidate_ref: text(args.candidate_ref, "candidate_ref"), environment_fingerprint: environment, budget_fingerprint: budget, trials_per_arm: 5 };
-    const qualificationId = String(args.qualification_id ?? `release_qualification_${pilot.id}_${digest(identity).slice(-12)}`); const identityDigest = digest(identity); const existing = this.store.find("release_qualification", qualificationId);
+    const qualificationId = String(args.qualification_id ?? `release_qualification_${pilot.id}_${digestJson(identity).slice(-12)}`); const identityDigest = digestJson(identity); const existing = this.store.find("release_qualification", qualificationId);
     if (existing) { if (existing.identity_digest !== identityDigest) throw new Error("Release Qualification idempotency conflict"); return { qualification: existing, slots: this.store.list("release_qualification_slot", 20, (item) => item.qualification_id === existing.id), idempotent: true }; }
     const qualification = this.store.create("release_qualification", qualificationId, { ...identity, identity_digest: identityDigest, lifecycle: "collecting", conclusion: "inconclusive" });
     const slots: JsonObject[] = []; for (const arm of ["baseline", "candidate"]) for (let index = 1; index <= 5; index += 1) slots.push(this.store.create("release_qualification_slot", `${qualificationId}_${arm}_${index}`, { qualification_id: qualification.id, arm, pair_index: index, status: "pending" }));

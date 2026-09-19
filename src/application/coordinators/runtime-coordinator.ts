@@ -1,9 +1,9 @@
-import type { CraftStore } from "../../store.ts";
-import type { ActionGatewayKernel, DurableWorkerKernel, ProviderRouterKernel } from "../../v01213-runtime.ts";
+import type { CraftStore } from "../../infrastructure/store.ts";
+import type { ActionGatewayKernel, DurableWorkerKernel, ProviderRouterKernel } from "../../runtime-completion.ts";
 import type { AutonomousRuntimeKernel } from "../../autonomous-runtime.ts";
 import type { RuntimeAssuranceKernel } from "../../runtime-assurance.ts";
 import type { RuntimeTruthKernel } from "../../runtime-truth-kernel.ts";
-import type { LocalRuntimeServiceKernel } from "../../v01211-runtime.ts";
+import type { LocalRuntimeServiceKernel } from "../../local-runtime-service.ts";
 
 /** Application-owned Runtime context for future orchestration extraction. */
 export class RuntimeCoordinator {

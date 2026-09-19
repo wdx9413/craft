@@ -1,12 +1,14 @@
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readdirSync, readFileSync, type Stats } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import { CraftStore, type JsonObject } from "./store.ts";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
+import { text } from "./validation.ts";
+import { digestJson } from "./digest.ts";
 
 type Entry = { path: string; digest: string; size_bytes: number };
 
-function text(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim(); }
-function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
+
+
 function fileDigest(path: string): string { return `sha256:${createHash("sha256").update(readFileSync(path)).digest("hex")}`; }
 function relativePath(value: unknown, name: string): string { const item = text(value, name).replaceAll("\\", "/"); if (isAbsolute(item) || item.split("/").includes("..")) throw new Error(`${name} must be relative to the workspace`); return item.replace(/^\.\//, "") || "."; }
 function nested(root: string, path: string): string { const target = resolve(root, path);
@@ -49,7 +51,7 @@ export class StateWorkspaceKernel {
     const artifactIds = args.artifact_ids === undefined ? [] : (args.artifact_ids as unknown[]).map((item) => text(item, "artifact_ids"));
     for (const artifactId of artifactIds) this.store.get("artifact", artifactId);
     const identity = { workspace_id: workspace.id, workspace_version: workspace.version, workspace_state_revision: workspace.state_revision, adapter, paths, entries, artifact_ids: artifactIds };
-    const snapshotId = String(args.snapshot_id ?? `state_snapshot_${workspace.id}_${digest(identity).slice(-16)}`); const existing = this.store.find("state_snapshot", snapshotId); const snapshotDigest = digest(identity);
+    const snapshotId = String(args.snapshot_id ?? `state_snapshot_${workspace.id}_${digestJson(identity).slice(-16)}`); const existing = this.store.find("state_snapshot", snapshotId); const snapshotDigest = digestJson(identity);
     if (existing) { if (existing.snapshot_digest !== snapshotDigest) throw new Error("State Snapshot idempotency conflict"); return { snapshot: existing, idempotent: true }; }
     return { snapshot: this.store.create("state_snapshot", snapshotId, { ...identity, snapshot_digest: snapshotDigest }), idempotent: false };
   }

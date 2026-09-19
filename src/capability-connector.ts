@@ -1,5 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
-import { CraftStore, type JsonObject } from "./store.ts";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
+import { object, text } from "./validation.ts";
+import { digestJson } from "./digest.ts";
 
 const CONNECTOR_KINDS = new Set(["builtin", "github_skill", "volcengine_skill", "mcp_stdio", "mcp_http", "serena_mcp"]);
 const ASSET_TYPES = new Set(["skill", "mcp_server", "tool", "workflow", "adapter", "validator", "grader", "eval_suite"]);
@@ -8,10 +10,7 @@ const EXTERNAL_CONNECTORS = new Set(["github_skill", "volcengine_skill", "mcp_st
 const SECRET_PATTERN = /(?:authorization|bearer|cookie|password|secret|token|api[_-]?key)\s*[=:]|https?:\/\/[^/\s@]+:[^/\s@]+@/iu;
 
 function id(prefix: string): string { return `${prefix}_${randomUUID().replaceAll("-", "")}`; }
-function text(value: unknown, name: string): string {
-  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
-  return value.trim();
-}
+
 function optionalText(value: unknown, name: string): string | null {
   if (value === undefined || value === null || value === "") return null;
   return text(value, name);
@@ -27,17 +26,12 @@ function operations(value: unknown, kind: string): string[] {
   if (!result.length || result.length > 20 || new Set(result).size !== result.length) throw new Error("allowed_operations must contain between 1 and 20 unique entries");
   return [...result].sort();
 }
-function object(value: unknown, name: string): JsonObject {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${name} must be an object`);
-  return value as JsonObject;
-}
+
 function recordPayload(record: JsonObject): JsonObject {
   const { id: _id, version: _version, created_at: _createdAt, updated_at: _updatedAt, ...payload } = record;
   return payload;
 }
-function digest(value: unknown): string {
-  return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
-}
+
 function assertSafe(value: string, name: string): string {
   if (SECRET_PATTERN.test(value)) throw new Error(`${name} must not contain credentials or secrets`);
   return value;
@@ -77,12 +71,12 @@ export class CapabilityConnectorKernel {
     const connector = this.store.create("capability_connector", String(args.connector_id ?? id("connector")), {
       kind, name, endpoint, trust: kind === "builtin" ? "verified" : "trusted", status: "active",
       approval_ref: kind === "builtin" ? "builtin" : text(args.approval_ref, "approval_ref"),
-      credentials_stored: false, user_managed: kind !== "builtin", metadata_digest: digest(args.metadata ?? {}),
-      allowed_operations: allowedOperations, scope_digest: digest(allowedOperations), health_required: EXTERNAL_CONNECTORS.has(kind),
+      credentials_stored: false, user_managed: kind !== "builtin", metadata_digest: digestJson(args.metadata ?? {}),
+      allowed_operations: allowedOperations, scope_digest: digestJson(allowedOperations), health_required: EXTERNAL_CONNECTORS.has(kind),
     });
     const health = this.store.create("capability_connector_health", `connector_health_${connector.id}`, {
       connector_id: connector.id, connector_version: connector.version, status: kind === "builtin" ? "healthy" : "unknown",
-      source_digest: connector.metadata_digest, health_digest: digest({ connector: connector.id, version: connector.version, status: kind === "builtin" ? "healthy" : "unknown" }),
+      source_digest: connector.metadata_digest, health_digest: digestJson({ connector: connector.id, version: connector.version, status: kind === "builtin" ? "healthy" : "unknown" }),
       observed_by: "registration", raw_content_stored: false, evidence_ids: [],
     });
     return { connector, health };
@@ -118,7 +112,7 @@ export class CapabilityConnectorKernel {
     if (args.health_id !== undefined && text(args.health_id, "health_id") !== healthId) throw new Error("Connector health id is derived from connector_id");
     const healthPayload = {
       connector_id: connector.id, connector_version: connector.version, status, source_digest: sourceDigest,
-      health_digest: digest({ connector_id: connector.id, connector_version: connector.version, status, sourceDigest, evidenceIds }),
+      health_digest: digestJson({ connector_id: connector.id, connector_version: connector.version, status, sourceDigest, evidenceIds }),
       observed_by: text(args.observed_by, "observed_by"), raw_content_stored: false, evidence_ids: evidenceIds,
     };
     const health = this.store.find("capability_connector_health", healthId)
@@ -132,10 +126,10 @@ export class CapabilityConnectorKernel {
     const reason = assertSafe(text(args.reason, "reason"), "reason");
     if (connector.status === "revoked") return { connector, idempotent: true };
     const revoked = this.store.save("capability_connector", String(connector.id), {
-      ...recordPayload(connector), status: "revoked", revoked_at: new Date().toISOString(), revocation_reason_digest: digest(reason),
+      ...recordPayload(connector), status: "revoked", revoked_at: new Date().toISOString(), revocation_reason_digest: digestJson(reason),
     });
     const event = this.store.create("capability_connector_revocation", String(args.revocation_id ?? id("connector_revocation")), {
-      connector_id: revoked.id, connector_version: revoked.version, reason_digest: digest(reason), raw_reason_stored: false,
+      connector_id: revoked.id, connector_version: revoked.version, reason_digest: digestJson(reason), raw_reason_stored: false,
     });
     return { connector: revoked, event, idempotent: false };
   }
@@ -247,7 +241,7 @@ export class CapabilityConnectorKernel {
     const locator = assertSafe(optionalText(entry.source_locator, "source_locator") ?? logicalId, "source_locator");
     const aliases = entry.aliases === undefined ? [] : array(entry.aliases, "aliases").map((item) => text(item, "alias"));
     if (new Set(aliases).size !== aliases.length) throw new Error("aliases must be unique");
-    const sourceDigest = text(entry.source_digest ?? digest({ logicalId, summary, locator }), "source_digest");
+    const sourceDigest = text(entry.source_digest ?? digestJson({ logicalId, summary, locator }), "source_digest");
     return this.store.create("capability_connector_asset", String(entry.connector_asset_id ?? id("connector_asset")), {
       connector_id: connector.id, connector_version: connector.version, logical_id: logicalId, name, summary,
       source_locator: locator, source_digest: sourceDigest, asset_type: assetType, effect, aliases,

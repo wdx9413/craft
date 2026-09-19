@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { McpServer } from "../src/mcp.ts";
-import { craftPaths } from "../src/paths.ts";
+import { craftPaths } from "../src/infrastructure/paths.ts";
 import { CraftService, VERSION } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/store.ts";
+import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
 
 test("guided work keeps goal, material references, decisions, and Host launch distinct", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-guided-work-")); const store = await new CraftStore(craftPaths(root)).open(); const service = new CraftService(store);
@@ -22,6 +22,6 @@ test("guided work keeps goal, material references, decisions, and Host launch di
     assert.throws(() => service.guidedWork.create({ task_id: "", materials: [] }), /task_id/); assert.throws(() => service.guidedWork.create({ task_id: String(generated.task_id), materials: "bad" }), /array/); assert.throws(() => service.guidedWork.create({ task_id: String(generated.task_id), materials: [null] }), /objects/); assert.throws(() => service.guidedWorkDecide({ brief_id: generated.id, decision_id: "x", answer: "api_key=x", actor: "user" }), /not awaiting|sensitive/);
     for (const bad of [{ ...input, brief_id: "bad-kind", materials: [{ kind: "unknown", label: "x", reference: "x" }] }, { ...input, brief_id: "bad-required", decisions: [{ id: "x", question: "x", required: "yes" }] }, { ...input, brief_id: "duplicate", decisions: [{ id: "x", question: "x" }, { id: "x", question: "y" }] }, { ...input, brief_id: "secret", materials: [{ kind: "note", label: "api_key=x", reference: "x" }] }]) assert.throws(() => service.guidedWorkCreate(bad), /unsupported|sensitive/);
     const mcp = new McpServer(service, "full"); for (const [name, arguments_] of [["craft_guided_work_create", { brief_id: "mcp", title: "MCP", goal: "Goal" }], ["craft_guided_work_get", { brief_id: "mcp" }], ["craft_guided_work_create", { brief_id: "mcp-decision", title: "MCP decision", goal: "Goal", decisions: [{ id: "go", question: "Proceed?" }] }], ["craft_guided_work_decide", { brief_id: "mcp-decision", decision_id: "go", answer: "yes", actor: "user" }], ["craft_guided_work_launch_prepare", { brief_id: "mcp-decision", launch_id: "mcp-launch", host: "codex-cli", workspace: root, prompt: "Run", sandbox: "workspace-write" }]] as [string, JsonObject][]) assert.equal(((await mcp.handle({ id: name, method: "tools/call", params: { name, arguments: arguments_ } }))?.result as JsonObject).isError, false);
-    assert.equal(VERSION, "0.12.30");
+    assert.equal(VERSION, "0.12.33");
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });

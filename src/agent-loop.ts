@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { JsonObject } from "./store.ts";
+import type { JsonObject } from "./infrastructure/store.ts";
 
 /**
  * Circuit breakers for a self-hosted loop.
@@ -15,6 +15,15 @@ import type { JsonObject } from "./store.ts";
 export interface LoopLimits {
   max_steps: number;
   max_tokens: number;
+  /**
+   * The per-request context window.
+   *
+   * Deliberately separate from `max_tokens`: that is the *cumulative* spend cap
+   * for the whole dispatch, so reusing it as the context ceiling would shrink the
+   * window after every step and compact the conversation for no reason. This is
+   * the number compaction is governed by.
+   */
+  max_context_tokens: number;
   max_wall_clock_ms: number;
   /** Consecutive steps with an unchanged progress digest before the loop halts. */
   no_progress_limit: number;
@@ -46,7 +55,7 @@ export interface StepObservation {
   now: number;
 }
 
-export const DEFAULT_LOOP_LIMITS: LoopLimits = { max_steps: 30, max_tokens: 200_000,
+export const DEFAULT_LOOP_LIMITS: LoopLimits = { max_steps: 30, max_tokens: 200_000, max_context_tokens: 32_000,
   max_wall_clock_ms: 30 * 60_000, no_progress_limit: 5 };
 
 function integer(value: unknown, name: string, fallback: number, minimum: number, maximum: number): number {
@@ -61,6 +70,8 @@ export function defineLoopLimits(input: JsonObject = {}): LoopLimits {
   return {
     max_steps: integer(input.max_steps, "max_steps", DEFAULT_LOOP_LIMITS.max_steps, 1, 1_000),
     max_tokens: integer(input.max_tokens, "max_tokens", DEFAULT_LOOP_LIMITS.max_tokens, 1, 10_000_000),
+    max_context_tokens: integer(input.max_context_tokens, "max_context_tokens",
+      DEFAULT_LOOP_LIMITS.max_context_tokens, 256, 10_000_000),
     max_wall_clock_ms: integer(input.max_wall_clock_ms, "max_wall_clock_ms", DEFAULT_LOOP_LIMITS.max_wall_clock_ms, 1_000, 24 * 3_600_000),
     no_progress_limit: integer(input.no_progress_limit, "no_progress_limit", DEFAULT_LOOP_LIMITS.no_progress_limit, 1, 100),
   };
@@ -74,6 +85,21 @@ export function beginLoop(now: number): LoopState {
 /** Stable identity for one action, so calling the same tool with the same arguments twice is visible as a loop. */
 export function actionDigest(action: string, args: JsonObject = {}): string {
   return `sha256:${createHash("sha256").update(JSON.stringify({ action, args })).digest("hex")}`;
+}
+
+/**
+ * Charge one model turn that produced no action.
+ *
+ * The completing turn is still a turn the provider billed for, and it used to be
+ * invisible to the loop: `steps` and `tokens_used` only advanced on turns that
+ * executed an action, so a run under-reported its cost by a full turn -- at the
+ * last turn, which is exactly where the budget matters. This is accounting only;
+ * halt decisions stay in `observeStep`, so a completion is never converted into a
+ * halt by charging it.
+ */
+export function chargeTurn(state: LoopState, tokens: number): LoopState {
+  if (!Number.isInteger(tokens) || tokens < 0) throw new Error("Turn tokens must be a non-negative integer");
+  return { ...state, steps: state.steps + 1, tokens_used: state.tokens_used + tokens };
 }
 
 /** Remaining budget as a band, so the caller can compress, downgrade or fuse instead of only failing at zero. */

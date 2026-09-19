@@ -1,6 +1,6 @@
 import type { CraftService } from "../craft-service.ts";
-import type { JsonObject } from "../../store.ts";
-import { V01226Runtime, importOpenApiDocument } from "../../v01226-runtime.ts";
+import type { JsonObject } from "../../infrastructure/store.ts";
+import { V01226Runtime, importOpenApiDocument } from "../../generic-adapter-runtime.ts";
 
 /**
  * Adapter/runtime use cases live outside the application facade. The facade

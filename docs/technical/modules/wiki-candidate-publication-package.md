@@ -14,7 +14,7 @@
 - 人工授权的 Candidate identity digest、`publication_allowed` 和非执行属性未漂移；
 - 目标宿主与候选类型相容。
 
-Skill 候选当前可面向 `codex-cli`、`claude-code`、`deepseek-harness` 或 `generic-mcp` 准备；Workflow 候选只面向 `craft-workflow`。目标名只是受支持的交付语义，不宣称 Craft 已替用户安装到这些宿主。
+Skill 候选当前可面向 `codex-cli`、`claude-code`、`deepseek-harness` 或 `generic-mcp` 准备；Workflow 候选只面向 `craft-workflow-host`。目标名只是受支持的交付语义，不宣称 Craft 已替用户安装到这些宿主。
 
 ## 输出与边界
 

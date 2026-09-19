@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { McpServer } from "../src/mcp.ts";
-import { craftPaths } from "../src/paths.ts";
+import { craftPaths } from "../src/infrastructure/paths.ts";
 import { CraftService, VERSION } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/store.ts";
+import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
 
 test("safety preflight pins a verified boundary and Host resource contract before approval", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-safety-")); const store = await new CraftStore(craftPaths(root)).open(); const service = new CraftService(store);
@@ -30,6 +30,6 @@ test("safety preflight pins a verified boundary and Host resource contract befor
     assert.match(String((service.executionSafetyPreflight({ task_id: task.id, host: "codex-cli", workspace: root, sandbox: "read-only", profile_id: "read", profile_version: 2, timeout_ms: 30_000, output_limit: 8_192 }).preflight as JsonObject).id), /^execution_safety_preflight_/); assert.throws(() => service.executionSafetyPreflight({ preflight_id: "incompatible", task_id: task.id, host: "codex-cli", workspace: root, sandbox: "workspace-write", profile_id: "read", profile_version: 2, timeout_ms: 30_000, output_limit: 8_192 }), /requirements are not satisfied/);
     store.create("execution_safety_preflight", "failed", { task_id: task.id, profile_id: "local", profile_version: 2, profile_digest: "x", status: "failed" }); assert.throws(() => service.executionSafety.validate({ preflight_id: "failed" }), /not passed/); store.create("execution_safety_preflight", "drift", { task_id: task.id, profile_id: "local", profile_version: 2, profile_digest: "wrong", status: "passed" }); assert.throws(() => service.executionSafety.validate({ preflight_id: "drift" }), /changed/);
     const mcp = new McpServer(service, "full"); for (const [name, arguments_] of [["craft_execution_safety_get", { preflight_id: preflight.id }], ["craft_execution_safety_preflight", input], ["craft_safety_work_launch_prepare", { ...input, preflight_id: "mcp-safe", launch_id: "mcp-launch", prompt: "MCP edit" }], ["craft_safety_work_launch_decide", { launch_id: "mcp-launch", actor: "human", approved: false }]] as [string, JsonObject][]) assert.equal(((await mcp.handle({ id: name, method: "tools/call", params: { name, arguments: arguments_ } }))?.result as JsonObject).isError, false);
-    assert.equal(VERSION, "0.12.30");
+    assert.equal(VERSION, "0.12.33");
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });

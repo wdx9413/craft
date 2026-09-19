@@ -1,10 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
-import { CraftStore, type JsonObject } from "./store.ts";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
+import { object, text } from "./validation.ts";
+import { payload } from "./digest.ts";
 
-function text(value: unknown, name: string): string {
-  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
-  return value.trim();
-}
 function id(value: unknown, name: string, prefix: string): string {
   const result = value === undefined ? `${prefix}_${randomUUID().replaceAll("-", "")}` : text(value, name);
   if (!/^[a-zA-Z0-9_-]+$/.test(result)) throw new Error(`${name} must contain only letters, numbers, _ or -`);
@@ -23,19 +21,14 @@ function optionalStrings(value: unknown, name: string): string[] {
   if (new Set(result).size !== result.length) throw new Error(`${name} must contain unique values`);
   return result;
 }
-function object(value: unknown, name: string): JsonObject {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${name} must be an object`);
-  return value as JsonObject;
-}
+
 function containsSensitiveField(value: unknown): boolean {
   if (Array.isArray(value)) return value.some(containsSensitiveField);
   if (!value || typeof value !== "object") return false;
   return Object.entries(value as JsonObject).some(([key, child]) =>
     /^(?:api[_-]?key|authorization|cookie|password|secret|token)$/iu.test(key) || containsSensitiveField(child));
 }
-function payload(record: JsonObject): JsonObject {
-  const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record; return rest;
-}
+
 function digest(value: JsonObject): string { return createHash("sha256").update(JSON.stringify(value)).digest("hex"); }
 
 export class SecurityBrokerKernel {

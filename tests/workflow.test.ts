@@ -27,7 +27,7 @@ test("workflow inputs, substitution, paths, redaction, and policies are determin
 });
 
 test("workflow runtime executes commands, assertions, coverage gates, failures, and approvals", async () => {
-  const root = join(tmpdir(), `craft-workflow-${process.pid}-${Date.now()}`);
+  const root = join(tmpdir(), `craft-workflow-host-${process.pid}-${Date.now()}`);
   const outside = `${root}-outside`;
   await mkdir(join(root, "sub"), { recursive: true });
   await mkdir(outside, { recursive: true });

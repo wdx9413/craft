@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto";
-import { CraftStore, type JsonObject } from "./store.ts";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
 import { ManagedRunKernel } from "./managed-run.ts";
+import { text } from "./validation.ts";
+import { digestJson, payload } from "./digest.ts";
 
-function text(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim(); }
-function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
-function payload(record: JsonObject): JsonObject { const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record; return rest; }
+
+
+
 
 /** One durable coordinator per Execution Fabric. It owns no model loop: the
  * Host remains replaceable while Craft owns the safe state transitions. */
@@ -22,7 +24,7 @@ export class WorkCoordinatorKernel {
       managed_run_id: managed.id,
       managed_run_identity_digest: managed.identity_digest,
     };
-    const coordinatorId = String(args.coordinator_id ?? `work_coordinator_${fabric.id}`); const existing = this.store.find("work_coordinator", coordinatorId); const identityDigest = digest(identity);
+    const coordinatorId = String(args.coordinator_id ?? `work_coordinator_${fabric.id}`); const existing = this.store.find("work_coordinator", coordinatorId); const identityDigest = digestJson(identity);
     if (existing) { if (existing.identity_digest !== identityDigest) throw new Error("Work Coordinator idempotency conflict"); return { coordinator: existing, managed_run: managed, idempotent: true }; }
     const coordinator = this.store.create("work_coordinator", coordinatorId, { ...identity, identity_digest: identityDigest, lifecycle: "prepared", active_host_run_id: null, latest_observation_id: null, next_action: "start_or_handoff" });
     this.event(coordinator, "prepared", { fabric_id: fabric.id, managed_run_id: managed.id }); return { coordinator, managed_run: managed, idempotent: false };

@@ -1,10 +1,27 @@
-import { createHash, randomUUID } from "node:crypto";
-import { KnowledgeMemoryRuntime } from "./knowledge-memory-runtime.ts";
-import { CraftStore, type JsonObject } from "./store.ts";
+﻿import { randomUUID } from "node:crypto";
+import type { MemoryLedgerKernel } from "../capability/craft-memory/memory-ledger.ts";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
+import { object } from "./validation.ts";
+import { canonicalJson, stableDigest, payload } from "./digest.ts";
 
 const SCOPE_KINDS = new Set(["user", "project", "workspace", "task"]);
-const INTENTS = new Set(["conversation", "knowledge", "capability", "task", "execution", "learning"]);
-const SIGNALS = new Set(["needs_context", "needs_capability", "needs_workflow", "needs_execution", "durable_value", "sensitive"]);
+/**
+ * Intents a proposal may declare.
+ *
+ * `memory` and `experience` are here because the context decision below reads them. They used
+ * to be absent, and the decision read only `knowledge` — so a Host that declared it needed
+ * memory, or experience, got `context: "none"` and no context pack at all. The member was in
+ * the MCP surface and not in the decision that decides whether to consult it.
+ */
+const INTENTS = new Set(["conversation", "knowledge", "memory", "experience", "capability", "task", "execution", "learning"]);
+/**
+ * Signals a proposal may declare, and the defaults a policy may rely on.
+ *
+ * `needs_memory` and `needs_experience` name the two accumulated members that had no signal of
+ * their own, which is the other half of the same defect: a Host could not say "I need memory"
+ * in a way the policy could match.
+ */
+const SIGNALS = new Set(["needs_context", "needs_memory", "needs_experience", "needs_capability", "needs_workflow", "needs_execution", "durable_value", "sensitive"]);
 const MEMORY_KINDS = new Set(["working", "episodic", "preference", "procedural"]);
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified"]);
 const CANDIDATE_STATUS = new Set(["accepted", "rejected", "revoked"]);
@@ -16,10 +33,7 @@ function text(value: unknown, name: string): string {
   if (SECRET.test(result)) throw new Error(`${name} must not contain credentials or secrets`);
   return result;
 }
-function object(value: unknown, name: string): JsonObject {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${name} must be an object`);
-  return value as JsonObject;
-}
+
 function strings(value: unknown, name: string, allowed?: ReadonlySet<string>): string[] {
   if (!Array.isArray(value) || !value.length) throw new Error(`${name} must be a non-empty array`);
   const result = value.map((item) => text(item, name));
@@ -30,19 +44,12 @@ function strings(value: unknown, name: string, allowed?: ReadonlySet<string>): s
 function optionalStrings(value: unknown, name: string, allowed?: ReadonlySet<string>): string[] {
   return value === undefined ? [] : strings(value, name, allowed);
 }
-function canonical(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
-  if (value && typeof value === "object") return `{${Object.entries(value as JsonObject).sort(([a], [b]) => a.localeCompare(b)).map(([key, child]) => `${JSON.stringify(key)}:${canonical(child)}`).join(",")}}`;
-  return JSON.stringify(value);
-}
-function digest(value: unknown): string { return `sha256:${createHash("sha256").update(canonical(value)).digest("hex")}`; }
-function payload(record: JsonObject): JsonObject { const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record; return rest; }
 function scope(args: JsonObject): JsonObject {
   const kind = text(args.scope_kind, "scope_kind");
   if (!SCOPE_KINDS.has(kind)) throw new Error("scope_kind is unsupported");
   return { kind, id: text(args.scope_id, "scope_id") };
 }
-function sameScope(left: JsonObject, right: JsonObject): boolean { return canonical(left) === canonical(right); }
+function sameScope(left: JsonObject, right: JsonObject): boolean { return canonicalJson(left) === canonicalJson(right); }
 
 type Actions = { context: "none" | "resolve"; capability: "none" | "discover"; workflow: "none" | "route"; work: "none" | "prepare"; memory: "none" | "candidate"; evaluation: "none" | "observe" };
 
@@ -65,8 +72,8 @@ function candidate(args: JsonObject): JsonObject | null {
  */
 export class TurnCognitiveRuntime {
   readonly store: CraftStore;
-  readonly memory: KnowledgeMemoryRuntime;
-  constructor(store: CraftStore, memory: KnowledgeMemoryRuntime) { this.store = store; this.memory = memory; }
+  readonly memory: MemoryLedgerKernel;
+  constructor(store: CraftStore, memory: MemoryLedgerKernel) { this.store = store; this.memory = memory; }
 
   policySave(args: JsonObject): JsonObject {
     const policyScope = scope(args); const mode = text(args.mode ?? "governed", "mode");
@@ -76,7 +83,7 @@ export class TurnCognitiveRuntime {
       memory_capture: text(args.memory_capture ?? "candidate", "memory_capture"), evaluation_capture: text(args.evaluation_capture ?? "observe", "evaluation_capture") };
     if (!new Set(["none", "candidate"]).has(identity.memory_capture)) throw new Error("memory_capture is unsupported");
     if (!new Set(["none", "observe"]).has(identity.evaluation_capture)) throw new Error("evaluation_capture is unsupported");
-    const policyId = String(args.policy_id ?? `turn_policy_${randomUUID().replaceAll("-", "")}`); const existing = this.store.find("turn_policy", policyId); const identityDigest = digest(identity);
+    const policyId = String(args.policy_id ?? `turn_policy_${randomUUID().replaceAll("-", "")}`); const existing = this.store.find("turn_policy", policyId); const identityDigest = stableDigest(identity);
     if (existing) { if (existing.identity_digest !== identityDigest) throw new Error("Turn Policy idempotency conflict"); return { policy: existing, idempotent: true }; }
     return { policy: this.store.create("turn_policy", policyId, { ...identity, identity_digest: identityDigest, status: "active", execution_authority: false }), idempotent: false };
   }
@@ -92,7 +99,7 @@ export class TurnCognitiveRuntime {
     const identity = { scope: proposalScope, semantic_owner: semanticOwner, host_adapter_id: args.host_adapter_id === undefined ? null : text(args.host_adapter_id, "host_adapter_id"),
       work_runtime_mode_id: modeProfile?.id ?? null, work_runtime_mode_version: modeProfile?.version ?? null, model: modeProfile?.default_model ?? null,
       input_digest: text(args.input_digest, "input_digest"), intents: strings(args.intents, "intents", INTENTS), signals: optionalStrings(args.signals, "signals", SIGNALS), memory_candidate: candidate(args) };
-    const proposalId = String(args.proposal_id ?? `turn_proposal_${randomUUID().replaceAll("-", "")}`); const existing = this.store.find("turn_proposal", proposalId); const identityDigest = digest(identity);
+    const proposalId = String(args.proposal_id ?? `turn_proposal_${randomUUID().replaceAll("-", "")}`); const existing = this.store.find("turn_proposal", proposalId); const identityDigest = stableDigest(identity);
     if (existing) { if (existing.identity_digest !== identityDigest) throw new Error("Turn Proposal idempotency conflict"); return { proposal: existing, idempotent: true }; }
     return { proposal: this.store.create("turn_proposal", proposalId, { ...identity, identity_digest: identityDigest, content_free_input: true, execution_authority: false }), idempotent: false };
   }
@@ -102,7 +109,7 @@ export class TurnCognitiveRuntime {
     const delivery = text(args.delivery ?? "manual", "delivery"); if (!new Set(["manual", "event_hook"]).has(delivery)) throw new Error("Turn Host Adapter delivery is unsupported");
     const identity = { host, delivery, supports_turn_hook: args.supports_turn_hook === true, proposal_contract: text(args.proposal_contract ?? "turn-proposal/v1", "proposal_contract") };
     if (delivery === "event_hook" && identity.supports_turn_hook !== true) throw new Error("event_hook requires supports_turn_hook");
-    const adapterId = String(args.adapter_id ?? `turn_host_adapter_${randomUUID().replaceAll("-", "")}`); const existing = this.store.find("turn_host_adapter", adapterId); const identityDigest = digest(identity);
+    const adapterId = String(args.adapter_id ?? `turn_host_adapter_${randomUUID().replaceAll("-", "")}`); const existing = this.store.find("turn_host_adapter", adapterId); const identityDigest = stableDigest(identity);
     if (existing) { if (existing.identity_digest !== identityDigest) throw new Error("Turn Host Adapter idempotency conflict"); return { adapter: existing, idempotent: true }; }
     return { adapter: this.store.create("turn_host_adapter", adapterId, { ...identity, identity_digest: identityDigest, status: "declared", modifies_host_configuration: false }), idempotent: false };
   }
@@ -118,7 +125,7 @@ export class TurnCognitiveRuntime {
     if (policy.status !== "active" || !sameScope(policy.scope as JsonObject, proposal.scope as JsonObject)) throw new Error("Turn Proposal is outside the active Policy scope");
     const actions = this.decide(policy, proposal); const receiptIdentity = { proposal_id: proposal.id, proposal_version: proposal.version, policy_id: policy.id, policy_version: policy.version, actions,
       input_digest: proposal.input_digest, semantic_owner: proposal.semantic_owner, selected_refs: { host_adapter_id: proposal.host_adapter_id, work_runtime_mode_id: proposal.work_runtime_mode_id } };
-    const receiptId = String(args.receipt_id ?? `turn_receipt_${randomUUID().replaceAll("-", "")}`); const existing = this.store.find("turn_receipt", receiptId); const receiptDigest = digest(receiptIdentity);
+    const receiptId = String(args.receipt_id ?? `turn_receipt_${randomUUID().replaceAll("-", "")}`); const existing = this.store.find("turn_receipt", receiptId); const receiptDigest = stableDigest(receiptIdentity);
     if (existing) { if (existing.identity_digest !== receiptDigest) throw new Error("Turn Receipt idempotency conflict"); return { receipt: existing, candidate: existing.memory_candidate_id ? this.store.get("turn_memory_candidate", String(existing.memory_candidate_id)) : null, idempotent: true }; }
     const memoryCandidate = actions.memory === "candidate" ? this.createCandidate(proposal, policy) : null;
     const receipt = this.store.create("turn_receipt", receiptId, { ...receiptIdentity, identity_digest: receiptDigest, memory_candidate_id: memoryCandidate?.id ?? null, content_free: true, execution_authority: false });
@@ -137,7 +144,7 @@ export class TurnCognitiveRuntime {
     const record = this.store.get("turn_memory_candidate", text(args.candidate_id, "candidate_id")); const status = text(args.status, "status");
     if (!CANDIDATE_STATUS.has(status)) throw new Error("Memory Candidate status is unsupported");
     if (record.status !== "candidate") throw new Error("Memory Candidate is already decided");
-    const reasonDigest = digest(text(args.reason, "reason")); let memoryId: string | null = null;
+    const reasonDigest = stableDigest(text(args.reason, "reason")); let memoryId: string | null = null;
     if (status === "accepted") {
       const confidence = text(args.confidence ?? "bounded", "confidence"); if (!CONFIDENCE.has(confidence)) throw new Error("Memory Candidate confidence is unsupported");
       const remembered = this.memory.remember({ memory_id: args.memory_id ?? `memory_from_${record.id}`, source_id: record.source_id, kind: record.kind, scope_kind: (record.scope as JsonObject).kind,
@@ -151,7 +158,7 @@ export class TurnCognitiveRuntime {
     const policy = this.store.get("turn_policy", text(args.policy_id, "policy_id")); const proposal = object(args.proposal, "proposal");
     if (proposal.memory_candidate !== undefined) throw new Error("Turn Evaluation Case proposal must be content-free");
     const expected = object(args.expected_actions, "expected_actions"); const identity = { policy_id: policy.id, policy_version: policy.version, proposal, expected_actions: expected };
-    const caseId = String(args.case_id ?? `turn_evaluation_case_${randomUUID().replaceAll("-", "")}`); const existing = this.store.find("turn_evaluation_case", caseId); const identityDigest = digest(identity);
+    const caseId = String(args.case_id ?? `turn_evaluation_case_${randomUUID().replaceAll("-", "")}`); const existing = this.store.find("turn_evaluation_case", caseId); const identityDigest = stableDigest(identity);
     if (existing) { if (existing.identity_digest !== identityDigest) throw new Error("Turn Evaluation Case idempotency conflict"); return { case: existing, idempotent: true }; }
     return { case: this.store.create("turn_evaluation_case", caseId, { ...identity, identity_digest: identityDigest, content_free: true }), idempotent: false };
   }
@@ -162,7 +169,7 @@ export class TurnCognitiveRuntime {
     const results = cases.map((item) => this.evaluate(item)); const passed = results.filter((item) => item.passed).length;
     const metrics = { cases: results.length, passed, decision_accuracy: passed / results.length, false_positive_count: results.reduce((sum, item) => sum + item.false_positive_count, 0), scope_rejection_count: results.filter((item) => item.scope_rejected).length };
     const identity = { case_refs: cases.map((item) => ({ id: item.id, version: item.version })), metrics, verdict: passed === results.length ? "eligible" : "rejected" };
-    const evaluationId = String(args.evaluation_id ?? `turn_evaluation_${randomUUID().replaceAll("-", "")}`); const existing = this.store.find("turn_evaluation", evaluationId); const identityDigest = digest(identity);
+    const evaluationId = String(args.evaluation_id ?? `turn_evaluation_${randomUUID().replaceAll("-", "")}`); const existing = this.store.find("turn_evaluation", evaluationId); const identityDigest = stableDigest(identity);
     if (existing) { if (existing.identity_digest !== identityDigest) throw new Error("Turn Evaluation Run idempotency conflict"); return { evaluation: existing, results, idempotent: true }; }
     return { evaluation: this.store.create("turn_evaluation", evaluationId, { ...identity, identity_digest: identityDigest, results, execution_authority: false }), results, idempotent: false };
   }
@@ -170,7 +177,14 @@ export class TurnCognitiveRuntime {
   private decide(policy: JsonObject, proposal: JsonObject): Actions {
     const signals = new Set(proposal.signals as string[]); const intents = new Set(proposal.intents as string[]);
     const matches = (configured: unknown, defaults: readonly string[]) => (configured as string[]).some((item) => signals.has(item)) || defaults.some((item) => signals.has(item));
-    const context = policy.mode === "observe_only" ? "none" : (matches(policy.context_on, ["needs_context"]) || intents.has("knowledge") ? "resolve" : "none");
+    // Resolving context means assembling the pack from all three accumulated members at once,
+    // so the decision is "does this turn need any of them" rather than "does it need
+    // knowledge". The three intents and the three signals are listed explicitly because that
+    // list is the claim: adding a fourth member without adding it here is the bug this fixes,
+    // and `context_members_are_all_decidable` in the tests pins the correspondence.
+    const context = policy.mode === "observe_only" ? "none"
+      : (matches(policy.context_on, ["needs_context", "needs_memory", "needs_experience"])
+        || intents.has("knowledge") || intents.has("memory") || intents.has("experience") ? "resolve" : "none");
     const capability = policy.mode === "observe_only" ? "none" : (matches(policy.capability_on, ["needs_capability"]) || intents.has("capability") ? "discover" : "none");
     const workflow = policy.mode === "governed" && (matches(policy.workflow_on, ["needs_workflow"]) || intents.has("task") || intents.has("execution")) ? "route" : "none";
     const work = policy.mode === "governed" && (signals.has("needs_execution") || intents.has("execution")) ? "prepare" : "none";
@@ -184,8 +198,8 @@ export class TurnCognitiveRuntime {
     const source = this.store.get("knowledge_source", String(memoryCandidate.source_id));
     if (source.status !== "active" || source.trust === "untrusted") throw new Error("Memory Candidate source is unavailable");
     const identity = { proposal_id: proposal.id, proposal_version: proposal.version, policy_id: policy.id, policy_version: policy.version, source_id: source.id, source_version: source.version,
-      kind: memoryCandidate.kind, scope: proposal.scope, content: memoryCandidate.content, content_digest: digest(memoryCandidate.content), sensitivity: memoryCandidate.sensitivity, evidence_ids: memoryCandidate.evidence_ids, valid_until: memoryCandidate.valid_until };
-    const candidateId = `turn_memory_candidate_${digest(identity).slice(-24)}`; const existing = this.store.find("turn_memory_candidate", candidateId); const identityDigest = digest(identity);
+      kind: memoryCandidate.kind, scope: proposal.scope, content: memoryCandidate.content, content_digest: stableDigest(memoryCandidate.content), sensitivity: memoryCandidate.sensitivity, evidence_ids: memoryCandidate.evidence_ids, valid_until: memoryCandidate.valid_until };
+    const candidateId = `turn_memory_candidate_${stableDigest(identity).slice(-24)}`; const existing = this.store.find("turn_memory_candidate", candidateId); const identityDigest = stableDigest(identity);
     if (existing) return existing;
     return this.store.create("turn_memory_candidate", candidateId, { ...identity, identity_digest: identityDigest, status: "candidate", lifecycle: "proposed_not_memory" });
   }
@@ -197,6 +211,6 @@ export class TurnCognitiveRuntime {
     const normalized = { ...proposal, scope: proposalScope, signals: optionalStrings(proposal.signals, "signals", SIGNALS), intents: strings(proposal.intents, "intents", INTENTS), memory_candidate: null };
     const actual = this.decide(policy, normalized); const fields = Object.keys(actual) as Array<keyof Actions>;
     const falsePositives = fields.filter((field) => expected[field] === "none" && actual[field] !== "none").length;
-    return { case_id: String(item.id), passed: canonical(actual) === canonical(expected), false_positive_count: falsePositives, scope_rejected: false };
+    return { case_id: String(item.id), passed: canonicalJson(actual) === canonicalJson(expected), false_positive_count: falsePositives, scope_rejected: false };
   }
 }

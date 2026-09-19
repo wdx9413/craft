@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { McpServer } from "../src/mcp.ts";
-import { craftPaths } from "../src/paths.ts";
+import { craftPaths } from "../src/infrastructure/paths.ts";
 import { CraftService, VERSION } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/store.ts";
+import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
 
 test("validated capability context is bound to Codex and Claude dispatches", async () => {
   const root = join(tmpdir(), `craft-context-dispatch-${process.pid}-${Date.now()}`); const sourcePath = join(root, "skills");
@@ -42,6 +42,6 @@ test("validated capability context is bound to Codex and Claude dispatches", asy
     await writeFile(join(sourcePath, "SKILL.md"), `${skill}\nChanged.`);
     await assert.rejects(service.capabilityContextDispatchExecute({ host: "codex-cli", dispatch_id: codexDispatch.id, prompt: common.prompt }), /digest drifted/);
     await service.sourceScan({ source_id: source.id });
-    assert.equal(VERSION, "0.12.30");
+    assert.equal(VERSION, "0.12.33");
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });

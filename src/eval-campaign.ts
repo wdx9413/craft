@@ -1,11 +1,13 @@
 import { createHash } from "node:crypto";
-import { CraftStore, type JsonObject } from "./store.ts";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
 import { TaskBenchmarkKernel } from "./task-benchmark.ts";
+import { text } from "./validation.ts";
+import { digestJson, payload } from "./digest.ts";
 
-function text(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim(); }
-function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
+
+
 function positive(value: unknown, name: string): number { const parsed = Number(value); if (!Number.isInteger(parsed) || parsed < 2 || parsed > 20) throw new Error(`${name} must be an integer between 2 and 20`); return parsed; }
-function payload(record: JsonObject): JsonObject { const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record; return rest; }
+
 
 /** Plans Case × Harness × Trial slots. Hosts bind observed runs; this kernel never starts hidden model work. */
 export class EvalCampaignKernel {
@@ -15,9 +17,9 @@ export class EvalCampaignKernel {
   create(args: JsonObject): JsonObject {
     const caseIds = Array.isArray(args.case_ids) ? args.case_ids.map((item) => text(item, "case_ids")) : []; if (!caseIds.length || new Set(caseIds).size !== caseIds.length) throw new Error("case_ids must be a unique non-empty array");
     const cases = caseIds.map((caseId) => this.store.get("delivery_evaluation_case", caseId)); if (cases.some((item) => item.partition !== "held_out" || item.sanitized !== true)) throw new Error("Eval Campaign requires sanitized held_out Cases");
-    const trials = positive(args.trials_per_case, "trials_per_case"); const environment = digest(args.environment ?? {}); const budget = digest(args.budget ?? {}); const acceptance = text(args.acceptance_ref, "acceptance_ref");
+    const trials = positive(args.trials_per_case, "trials_per_case"); const environment = digestJson(args.environment ?? {}); const budget = digestJson(args.budget ?? {}); const acceptance = text(args.acceptance_ref, "acceptance_ref");
     const identity = { case_ids: caseIds, case_versions: cases.map((item) => ({ id: item.id, version: item.version })), baseline_harness: text(args.baseline_harness, "baseline_harness"), candidate_harness: text(args.candidate_harness, "candidate_harness"), trials_per_case: trials, environment_digest: environment, budget_digest: budget, acceptance_ref: acceptance };
-    const campaignId = String(args.campaign_id ?? `eval_campaign_${digest(identity).slice(-16)}`); const existing = this.store.find("eval_campaign", campaignId); const identityDigest = digest(identity);
+    const campaignId = String(args.campaign_id ?? `eval_campaign_${digestJson(identity).slice(-16)}`); const existing = this.store.find("eval_campaign", campaignId); const identityDigest = digestJson(identity);
     if (existing) { if (existing.identity_digest !== identityDigest) throw new Error("Eval Campaign idempotency conflict"); return { campaign: existing, slots: this.slots(String(existing.id)), idempotent: true }; }
     const campaign = this.store.create("eval_campaign", campaignId, { ...identity, identity_digest: identityDigest, lifecycle: "collecting", publication_allowed: false });
     const slots = cases.flatMap((item) => Array.from({ length: trials }, (_, index) => ["baseline", "candidate"].map((arm) => this.store.create("eval_campaign_slot", `eval_slot_${campaign.id}_${item.id}_${index + 1}_${arm}`, { campaign_id: campaign.id, case_id: item.id, case_version: item.version, trial: index + 1, arm, harness: arm === "baseline" ? identity.baseline_harness : identity.candidate_harness, task_run_id: null, status: "pending" })))).flat();

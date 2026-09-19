@@ -1,0 +1,3 @@
+# 目标与验收内置，评测方式可插拔
+
+一次工作必须有目标和验收，否则"有没有干完"没有判据：`craft_intent_compile` 把自然语言目标编成 durable、host-neutral 的 Task Contract，歧义时返回显式澄清问题（`route = clarification`）；`craft_acceptance_compile` 在 `route` 为 `clarification` 时**直接抛错**，因此"先澄清、再编译验收"是代码强制的顺序；`craft_guided_work_*` 要求所有必需决策答完才允许准备 launch；`craft_acceptance_gate_outcome` **只从 passed gate 产生 verified Outcome**（工具说明原文：Host completion is not a passing verdict）。这些是**内置**的，因为它们不可被配置掉——一个能被配置成"没有"的验收闸门不是闸门，系统会退化成"宿主说完成就算完成"。可插拔的是**怎么评**：`craft_acceptance_evaluator_save` 按 program / model / business-signal 注册评测器并走 domain adapter，内置的有 file artifact、覆盖率与 ffprobe。所以正确的缝是"要求内置、评测方法可插拔"，而不是把整个验收做成可选能力。计划同样有承载：`craft_task_graph_create` 给依赖图，`durable_action_loop` 的每个 work item 自带 `acceptance_digest`，使"验收"落到工作项粒度而不只是整单。

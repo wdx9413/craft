@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { McpServer } from "../src/mcp.ts";
-import { craftPaths } from "../src/paths.ts";
+import { craftPaths } from "../src/infrastructure/paths.ts";
 import { CraftService, VERSION } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/store.ts";
+import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
 test("independent verification drives bounded retry, handoff, and terminal evidence", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-iteration-")); const store = await new CraftStore(craftPaths(root)).open(); const service = new CraftService(store);
   try {
@@ -42,6 +42,6 @@ test("independent verification drives bounded retry, handoff, and terminal evide
     const created = await mcp.handle({ id: "iteration-create", method: "tools/call", params: { name: "craft_verified_iteration_create", arguments: { iteration_id: "mcp", task_id: task.id, launch_id: "launch", acceptance_plan_id: "plan" } } }); assert.equal((created?.result as JsonObject).isError, false);
     const result = await mcp.handle({ id: "iteration", method: "tools/call", params: { name: "craft_verified_iteration_get", arguments: { iteration_id: retry.id } } }); assert.equal((result?.result as JsonObject).isError, false);
     const mcpAssessment = makeAssessment("mcp-assessment"); const assessed = await mcp.handle({ id: "iteration-assess", method: "tools/call", params: { name: "craft_verified_iteration_assess", arguments: { iteration_id: "mcp", assessment_id: mcpAssessment.id, classification: "verification_configuration" } } }); assert.equal((assessed?.result as JsonObject).isError, false);
-    assert.equal(VERSION, "0.12.30");
+    assert.equal(VERSION, "0.12.33");
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });

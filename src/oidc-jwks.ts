@@ -1,5 +1,6 @@
 import { createPublicKey, verify } from "node:crypto";
 import type { RemoteMcpPrincipal } from "./remote-mcp-access.ts";
+import { text } from "./validation.ts";
 
 type FetchLike = (input: string, init?: { method?: string; headers?: Record<string, string> }) => Promise<{ status: number; json(): Promise<unknown> }>;
 
@@ -13,10 +14,7 @@ export interface OidcJwksVerifierOptions {
   cacheTtlMs?: number;
 }
 
-function text(value: unknown, name: string): string {
-  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
-  return value.trim();
-}
+
 
 function httpsUrl(value: string, name: string): string {
   const url = new URL(value); if (url.protocol !== "https:" || url.username || url.password) throw new Error(`${name} must be an HTTPS URL without credentials`);

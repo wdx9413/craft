@@ -1,0 +1,34 @@
+{
+  "name": "@craft/capability-knowledge",
+  "version": "0.12.33",
+  "private": true,
+  "description": "Craft Knowledge capability: evidence-backed claims, Wiki context, relations, and the project index",
+  "type": "module",
+  "main": "capability.ts",
+  "exports": {
+    ".": "./capability.ts",
+    "./ownership": "./ownership.ts",
+    "./knowledge-workbench": "./knowledge-workbench.ts",
+    "./knowledge-bound-launch": "./knowledge-bound-launch.ts",
+    "./knowledge-relation": "./knowledge-relation.ts",
+    "./wiki-candidate-governance": "./wiki-candidate-governance.ts",
+    "./local-candidate-import": "./local-candidate-import.ts",
+    "./project-knowledge": "./project-knowledge.ts",
+    "./project-brain": "./project-brain.ts"
+  },
+  "files": [
+    "capability.ts",
+    "ownership.ts",
+    "knowledge-workbench.ts",
+    "knowledge-bound-launch.ts",
+    "knowledge-relation.ts",
+    "wiki-candidate-governance.ts",
+    "local-candidate-import.ts",
+    "project-knowledge.ts",
+    "project-brain.ts"
+  ],
+  "peerDependencies": {
+    "craft-agent-harness": "0.12.33"
+  },
+  "license": "MIT"
+}

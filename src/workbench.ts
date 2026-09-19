@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { CraftStore, type JsonObject, type SaveEntry } from "./store.ts";
+import { CraftStore, type JsonObject, type SaveEntry } from "./infrastructure/store.ts";
+import { text } from "./validation.ts";
+import { payload } from "./digest.ts";
 
 const OBJECT_STATUS = new Set(["draft", "accepted", "needs_review", "archived"]);
 const MEMORY_KINDS = new Set(["fact", "preference", "decision", "experience"]);
@@ -13,22 +15,12 @@ function id(value: unknown, name: string, prefix: string): string {
   return result;
 }
 
-function text(value: unknown, name: string): string {
-  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
-  return value.trim();
-}
-
 function strings(value: unknown, name: string): string[] {
   if (value === undefined) return [];
   if (!Array.isArray(value)) throw new Error(`${name} must be an array`);
   const result = value.map((item) => text(item, name));
   if (new Set(result).size !== result.length) throw new Error(`${name} must contain unique values`);
   return result;
-}
-
-function payload(record: JsonObject): JsonObject {
-  const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record;
-  return rest;
 }
 
 function revision(value: unknown, fallback: number): number {

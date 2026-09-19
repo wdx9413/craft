@@ -1,10 +1,8 @@
-import { createHash, randomUUID } from "node:crypto";
-import { CraftStore, type JsonObject, type SaveEntry } from "./store.ts";
+import { randomUUID } from "node:crypto";
+import { CraftStore, type JsonObject, type SaveEntry } from "./infrastructure/store.ts";
+import { text } from "./validation.ts";
+import { stableDigest, payload } from "./digest.ts";
 
-function text(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim(); }
-function payload(record: JsonObject): JsonObject { const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record; return rest; }
-function canonical(value: unknown): string { if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`; if (value && typeof value === "object") return `{${Object.entries(value as JsonObject).sort(([a], [b]) => a.localeCompare(b)).map(([key, child]) => `${JSON.stringify(key)}:${canonical(child)}`).join(",")}}`; return JSON.stringify(value); }
-function digest(value: unknown): string { return `sha256:${createHash("sha256").update(canonical(value)).digest("hex")}`; }
 function strings(value: unknown, name: string): string[] { if (!Array.isArray(value) || !value.length) throw new Error(`${name} must be a non-empty array`); const result = value.map((item) => text(item, name)); if (new Set(result).size !== result.length) throw new Error(`${name} must contain unique values`); return result; }
 
 const SEVERITIES = new Set(["low", "medium", "high", "critical"]);
@@ -23,7 +21,7 @@ export class SupplyChainKernel {
     const severity = text(args.severity, "severity"); if (!SEVERITIES.has(severity)) throw new Error("Advisory severity is unsupported");
     const evidenceIds = strings(args.evidence_ids, "evidence_ids"); for (const id of evidenceIds) this.store.get("evidence", id);
     const advisoryId = String(args.advisory_id ?? `supply_chain_advisory_${randomUUID().replaceAll("-", "")}`);
-    const fingerprint = digest({ source_id: source.id, entry_id: entryId, asset_id: assetId, severity, evidence_ids: [...evidenceIds].sort(), summary: args.summary });
+    const fingerprint = stableDigest({ source_id: source.id, entry_id: entryId, asset_id: assetId, severity, evidence_ids: [...evidenceIds].sort(), summary: args.summary });
     const existing = this.store.find("supply_chain_advisory", advisoryId);
     if (existing) { if (existing.fingerprint !== fingerprint) throw new Error("Supply-chain advisory idempotency conflict"); return { advisory: existing, idempotent: true }; }
     return { advisory: this.store.create("supply_chain_advisory", advisoryId, { source_id: source.id, entry_id: entryId, asset_id: assetId,

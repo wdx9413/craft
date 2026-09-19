@@ -1,6 +1,6 @@
 # Runtime Proof 与远程部署边界
 
-v0.12.30 把已有的本地 Runtime Contracts 补成四个可替换的深模块。它们不启动隐藏模型、不保存 token、私钥、原始 Case 或远端 Artifact 正文，也不把部署声明当作业务效果。
+v0.12.33 把已有的本地 Runtime Contracts 补成四个可替换的深模块。它们不启动隐藏模型、不保存 token、私钥、原始 Case 或远端 Artifact 正文，也不把部署声明当作业务效果。
 
 ```text
 OIDC/JWKS verifier ──> Remote MCP Access Policy ──> RemoteTaskBinding

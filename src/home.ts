@@ -1,4 +1,4 @@
-import { CraftStore, type JsonObject } from "./store.ts";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
 import { AttentionKernel } from "./attention.ts";
 
 function bounded(value: unknown): number { const n = value === undefined ? 10 : Number(value); if (!Number.isInteger(n) || n < 1 || n > 50) throw new Error("limit must be an integer between 1 and 50"); return n; }

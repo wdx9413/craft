@@ -1,9 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { CraftStore, type JsonObject } from "./store.ts";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
+import { text } from "./validation.ts";
+import { payload } from "./digest.ts";
 
-function text(value: unknown, name: string): string {
-  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim();
-}
 function positiveInteger(value: unknown, name: string, fallback: number, maximum: number): number {
   const result = value === undefined ? fallback : Number(value);
   if (!Number.isInteger(result) || result < 1 || result > maximum) throw new Error(`${name} must be an integer between 1 and ${maximum}`);
@@ -14,9 +13,7 @@ function stringArray(value: unknown, name: string): string[] {
   const result = value.map((item) => text(item, name));
   if (new Set(result).size !== result.length) throw new Error(`${name} must contain unique values`); return result;
 }
-function payload(record: JsonObject): JsonObject {
-  const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record; return rest;
-}
+
 function instant(value: unknown, name: string): number {
   const result = value === undefined ? Date.now() : Date.parse(text(value, name));
   if (Number.isNaN(result)) throw new Error(`${name} must be an ISO timestamp`); return result;

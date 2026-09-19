@@ -1,11 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
-import { CraftStore, type JsonObject } from "./store.ts";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
+import { object, text } from "./validation.ts";
+import { payload } from "./digest.ts";
 
-function text(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim(); }
 function number(value: unknown, name: string, min = 0, max = Number.MAX_SAFE_INTEGER): number { const result = Number(value); if (!Number.isFinite(result) || result < min || result > max) throw new Error(`${name} must be between ${min} and ${max}`); return result; }
 function integer(value: unknown, name: string, min: number, max: number): number { const result = number(value, name, min, max); if (!Number.isInteger(result)) throw new Error(`${name} must be an integer`); return result; }
-function object(value: unknown, name: string): JsonObject { if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${name} must be an object`); return value as JsonObject; }
-function payload(record: JsonObject): JsonObject { const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record; return rest; }
+
 function digest(value: string): number { return Number.parseInt(createHash("sha256").update(value).digest("hex").slice(0, 8), 16) % 10_000; }
 
 export class CapabilityCanaryKernel {

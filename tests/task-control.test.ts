@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { McpServer } from "../src/mcp.ts";
-import { craftPaths } from "../src/paths.ts";
+import { craftPaths } from "../src/infrastructure/paths.ts";
 import { CraftService, VERSION } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/store.ts";
+import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
 import { WorkbenchWebApp } from "../src/workbench-server.ts";
 
 async function fixture() {
@@ -44,7 +44,7 @@ test("task control pins one task boundary and materializes a deterministic deliv
     assert.equal((view.contract as JsonObject).launch_id, launch.id); assert.equal((view.delivery_loop as JsonObject).action, "deliver");
     const home = f.service.homeView({ limit: 10 });
     assert.equal(((home.task_controls as JsonObject[])[0]).action, "deliver");
-    assert.equal(VERSION, "0.12.30");
+    assert.equal(VERSION, "0.12.33");
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 

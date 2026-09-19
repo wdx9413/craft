@@ -1,32 +1,14 @@
-import { createHash, randomUUID } from "node:crypto";
-import { CraftStore, type JsonObject } from "./store.ts";
+﻿import { randomUUID } from "node:crypto";
+import { canonicalJson, stableDigest } from "./digest.ts";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
+import { object, text } from "./validation.ts";
 
 export type IntentRoute = "simple" | "governed" | "clarification";
 export type CoverageMetric = "methods" | "functions" | "lines" | "statements" | "branches" | "all";
 
-function text(value: unknown, name: string): string {
-  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
-  return value.trim();
-}
-
-function object(value: unknown, name: string): JsonObject {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${name} must be an object`);
-  return value as JsonObject;
-}
-
 function strings(value: unknown, name: string): string[] {
   if (!Array.isArray(value)) throw new Error(`${name} must be an array`);
   return value.map((item) => text(item, name));
-}
-
-function canonical(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
-  if (value && typeof value === "object") return `{${Object.entries(value as JsonObject).sort(([left], [right]) => left.localeCompare(right)).map(([key, entry]) => `${JSON.stringify(key)}:${canonical(entry)}`).join(",")}}`;
-  return JSON.stringify(value);
-}
-
-function digest(value: unknown): string {
-  return `sha256:${createHash("sha256").update(canonical(value)).digest("hex")}`;
 }
 
 function inferMetric(goal: string, requested: unknown): CoverageMetric | null {
@@ -103,7 +85,7 @@ export class IntentCompilerKernel {
       compiler_version: "0.12.8",
     } as JsonObject;
     const intentId = String(args.intent_id ?? `intent_${randomUUID().replaceAll("-", "")}`);
-    const requestDigest = digest(contract);
+    const requestDigest = stableDigest(contract);
     const existing = this.store.find("task_intent", intentId);
     if (existing) {
       if (existing.request_digest !== requestDigest) throw new Error("Task intent idempotency conflict");
@@ -127,7 +109,7 @@ export class IntentCompilerKernel {
       id: "goal", name: "User-defined goal completion", method: "human", evaluator: "human_confirmation", goal: intent.goal,
       materials: intent.materials, non_goals: intent.non_goals, evidence: ["host_receipt", "artifact", "human_confirmation"],
     };
-    const definition = { intent_id: intent.id, intent_version: intent.version, criteria: [criterion], definition_digest: digest({ intent_id: intent.id, intent_version: intent.version, criterion }) };
+    const definition = { intent_id: intent.id, intent_version: intent.version, criteria: [criterion], definition_digest: stableDigest({ intent_id: intent.id, intent_version: intent.version, criterion }) };
     const contractId = String(args.acceptance_id ?? `acceptance_${intent.id}`);
     const existing = this.store.find("acceptance_contract", contractId);
     if (existing) {

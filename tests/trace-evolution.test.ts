@@ -5,9 +5,9 @@ import { join } from "node:path";
 import { existsSync, readdirSync } from "node:fs";
 import test from "node:test";
 import { McpServer, CORE_TOOLS } from "../src/mcp.ts";
-import { craftPaths } from "../src/paths.ts";
+import { craftPaths } from "../src/infrastructure/paths.ts";
 import { CraftService, VERSION } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/store.ts";
+import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
 import { TRACE_SCHEMA_VERSION, TraceKernel } from "../src/trace-kernel.ts";
 import { MaintenanceKernel } from "../src/maintenance.ts";
 
@@ -66,7 +66,7 @@ test("Trace replay and retention policies are deterministic and bounded", async 
     assert.throws(() => f.service.traceRetentionPlan({ max_days: 0 }), /positive integer/);
     assert.throws(() => f.service.traceRetentionPlan({ max_events: 0 }), /positive integer/);
     assert.throws(() => f.service.traceQuery({ limit: 0 }), /between 1 and 10000/);
-    assert.equal(VERSION, "0.12.30");
+    assert.equal(VERSION, "0.12.33");
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 

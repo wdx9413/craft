@@ -1,6 +1,7 @@
-import type { CraftService } from "../craft-service.ts";
-import type { JsonObject } from "../../store.ts";
+﻿import type { CraftService } from "../craft-service.ts";
+import type { JsonObject } from "../../infrastructure/store.ts";
 import { installKnowledgeMemoryMethods } from "./knowledge-memory.ts";
+import { installKnowledgeRelationMethods } from "./knowledge-relation.ts";
 import { installTraceMethods } from "./trace.ts";
 import { installCapabilityLifecycleMethods } from "./capability-lifecycle.ts";
 import { installMemoryConsolidationMethods } from "./memory-consolidation.ts";
@@ -20,10 +21,15 @@ declare module "../craft-service.ts" {
     memoryLedgerRemember(args: JsonObject): JsonObject;
     memoryLedgerTransition(args: JsonObject): JsonObject;
     memoryLedgerCompatBind(args: JsonObject): JsonObject;
-    contextResolutionResolve(args: JsonObject): JsonObject;
+    contextResolutionResolve(args: JsonObject): JsonObject | Promise<JsonObject>;
     contextResolutionGet(args: JsonObject): JsonObject;
     retrievalAdapterConfigure(args: JsonObject): JsonObject;
     retrievalAdapterEvaluate(args: JsonObject): JsonObject;
+    relationSave(args: JsonObject): JsonObject;
+    relationRetract(args: JsonObject): JsonObject;
+    relationGet(args: JsonObject): JsonObject;
+    relationNeighbors(args: JsonObject): JsonObject;
+    relationTraverse(args: JsonObject): JsonObject;
     turnPolicySave(args: JsonObject): JsonObject;
     turnPolicyGet(args: JsonObject): JsonObject;
     turnProposalSubmit(args: JsonObject): JsonObject;
@@ -92,6 +98,7 @@ declare module "../craft-service.ts" {
 
 export function installKernelDelegateMethods(serviceClass: typeof CraftService): void {
   installKnowledgeMemoryMethods(serviceClass);
+  installKnowledgeRelationMethods(serviceClass);
   installTraceMethods(serviceClass);
   installCapabilityLifecycleMethods(serviceClass);
   installMemoryConsolidationMethods(serviceClass);

@@ -1,10 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { JsonObject } from "./store.ts";
-import { CraftStore } from "./store.ts";
+import type { JsonObject } from "./infrastructure/store.ts";
+import { CraftStore } from "./infrastructure/store.ts";
+import { list, text } from "./validation.ts";
+import { digestJson } from "./digest.ts";
 
-function text(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim(); }
-function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
-function list(value: unknown, name: string): string[] { if (value === undefined) return []; if (!Array.isArray(value)) throw new Error(`${name} must be an array`); return value.map((item) => text(item, name)); }
 const PLATFORMS = new Set(["win32", "darwin", "linux"]);
 const NETWORK = new Set(["denied", "allowlist"]);
 const FILESYSTEM = new Set(["read_only", "workspace_write"]);
@@ -20,7 +19,7 @@ export class OsSecurityKernel {
     const filesystem = text(args.filesystem ?? "read_only", "filesystem"); if (!FILESYSTEM.has(filesystem)) throw new Error("Unsupported filesystem policy");
     const allowlist = list(args.egress_allowlist, "egress_allowlist");
     const boundary = { platform, workspace, network, filesystem, egress_allowlist: allowlist, process_isolation: platform === "win32" ? "job_object" : platform === "darwin" ? "sandbox_profile" : "landlock_or_namespace", secret_broker: args.secret_broker === true, fail_closed: true };
-    const boundaryDigest = digest(boundary); const planId = String(args.plan_id ?? `os_security_${randomUUID().replaceAll("-", "")}`); const existing = this.store.find("os_security_plan", planId);
+    const boundaryDigest = digestJson(boundary); const planId = String(args.plan_id ?? `os_security_${randomUUID().replaceAll("-", "")}`); const existing = this.store.find("os_security_plan", planId);
     if (existing) { if (existing.boundary_digest !== boundaryDigest) throw new Error("OS security plan idempotency conflict"); return { plan: existing, idempotent: true }; }
     return { plan: this.store.create("os_security_plan", planId, { ...boundary, boundary_digest: boundaryDigest, status: "planned" }), idempotent: false };
   }

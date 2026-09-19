@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { McpServer, SYSCALL_TOOLS, TOOL_REGISTRY, TOOLS, VERB_DEFAULT_OPERATION, surfaceToolNames } from "../src/mcp.ts";
-import { craftPaths } from "../src/paths.ts";
+import { craftPaths } from "../src/infrastructure/paths.ts";
 import { CraftService } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/store.ts";
+import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
 import { buildRegistry, catalogOf, findEntry, measureSurface, parseToolName, resolveEntry } from "../src/tool-plane.ts";
 
 test("the registry is a lossless re-index of every legacy tool", () => {

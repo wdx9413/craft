@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { McpServer } from "../src/mcp.ts";
-import { craftPaths } from "../src/paths.ts";
+import { craftPaths } from "../src/infrastructure/paths.ts";
 import { CraftService, VERSION } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/store.ts";
+import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
 
 test("capability resolution loads only digest-pinned local documents as bounded context", async () => {
   const root = join(tmpdir(), `craft-logical-resolve-${process.pid}-${Date.now()}`); const sourcePath = join(root, "skills");
@@ -38,6 +38,6 @@ test("capability resolution loads only digest-pinned local documents as bounded 
     await assert.rejects(service.logicalActivationResolve({ plan_id: plan.id }), /digest drifted/);
     await service.sourceScan({ source_id: source.id });
     await assert.rejects(service.logicalActivationResolve({ plan_id: plan.id }), /stale/);
-    assert.equal(VERSION, "0.12.30");
+    assert.equal(VERSION, "0.12.33");
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });

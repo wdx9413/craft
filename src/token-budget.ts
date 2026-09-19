@@ -1,3 +1,4 @@
+import { text } from "./validation.ts";
 /**
  * Deterministic token accounting and model routing.
  *
@@ -32,11 +33,6 @@ const STANDARD_PATHS = 3;
 const FRONTIER_PATHS = 10;
 const STANDARD_CONTEXT_CHARS = 20_000;
 const TIER_ORDER: readonly ModelTier[] = ["frontier", "standard", "small"];
-
-function text(value: unknown, name: string): string {
-  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
-  return value.trim();
-}
 
 function count(value: unknown, name: string): number {
   const result = Number(value ?? 0);

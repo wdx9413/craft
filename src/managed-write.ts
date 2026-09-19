@@ -1,11 +1,13 @@
 import { createHash } from "node:crypto";
-import { CraftStore, type JsonObject } from "./store.ts";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
 import type { TransactionCoordinator } from "./transaction.ts";
 import type { WorkspaceState } from "./workspace.ts";
+import { text } from "./validation.ts";
+import { digestJson, payload } from "./digest.ts";
 
-function text(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim(); }
-function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
-function payload(record: JsonObject): JsonObject { const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record; return rest; }
+
+
+
 
 /**
  * Adds a bounded, user-approved recovery seam to a Fabric local-write Run.
@@ -22,7 +24,7 @@ export class ManagedWriteKernel {
     if (launch.sandbox !== "workspace-write") throw new Error("Managed write requires a workspace-write Fabric");
     const existing = this.store.find("managed_write_guard", String(fabric.id));
     const identity = { fabric_id: fabric.id, work_loop_id: fabric.work_loop_id, launch_id: launch.id, workspace_id: this.workspaceId(fabric), workspace_scope: this.scope(fabric) };
-    const identityDigest = digest(identity);
+    const identityDigest = digestJson(identity);
     if (existing) { if (existing.identity_digest !== identityDigest) throw new Error("Managed write idempotency conflict"); return { guard: existing, transaction: this.store.get("workspace_transaction", String(existing.transaction_id)), idempotent: true }; }
     const transaction = this.transactions.begin({ transaction_id: `managed_write_transaction_${fabric.id}`, workspace_id: identity.workspace_id, label: `Fabric ${fabric.id}` }).transaction as JsonObject;
     const guard = this.store.create("managed_write_guard", String(fabric.id), { ...identity, identity_digest: identityDigest, transaction_id: transaction.id, transaction_version: transaction.version, status: "prepared", run_id: null, committed_checkpoint_id: null, rollback_reason: null });
@@ -49,7 +51,7 @@ export class ManagedWriteKernel {
     const transaction = committed ? this.transactions.commit({ transaction_id: guard.transaction_id, checkpoint_id: checkpoint!.id }).transaction as JsonObject : this.store.get("workspace_transaction", String(guard.transaction_id));
     const saved = this.store.save("managed_write_guard", String(guard.id), { ...payload(guard), status: committed ? "committed" : "rollback_pending", committed_checkpoint_id: checkpoint?.id ?? null, host_status: run.status });
     const identity = { guard_id: guard.id, guard_version: saved.version, run_id: run.id, run_version: run.version, transaction_id: transaction.id, checkpoint_id: checkpoint?.id ?? null, status: saved.status };
-    const settlement = this.store.create("managed_write_settlement", `managed_write_settlement_${guard.id}_${run.id}`, { ...identity, settlement_digest: digest(identity) });
+    const settlement = this.store.create("managed_write_settlement", `managed_write_settlement_${guard.id}_${run.id}`, { ...identity, settlement_digest: digestJson(identity) });
     return { guard: saved, transaction, settlement, idempotent: false };
   }
 

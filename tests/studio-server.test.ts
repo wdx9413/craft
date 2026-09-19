@@ -3,9 +3,9 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { craftPaths } from "../src/paths.ts";
+import { craftPaths } from "../src/infrastructure/paths.ts";
 import { CraftService, VERSION } from "../src/service.ts";
-import { CraftStore } from "../src/store.ts";
+import { CraftStore } from "../src/infrastructure/store.ts";
 import { LocalWorkbenchServer, WorkbenchWebApp, locateStudio, studioBridge } from "../src/workbench-server.ts";
 
 async function fixture() {
@@ -27,6 +27,18 @@ test("Craft Studio serves its Codex-style app from beside the runtime", async ()
   assert.equal(app.handle({ method: "GET", path: "/studio/" }).status, 200);
   assert.match(app.handle({ method: "GET", path: "/studio/app.css" }).body, /--bg-rail/);
   assert.match(app.handle({ method: "GET", path: "/studio/app.js" }).body, /studio\/call/);
+  // v0.12.33: the approval surface must actually be served and wired, not merely
+  // described. The runtime's headline guarantee is an approval gate, so a Studio
+  // without a place to approve is the inconsistency this release removes.
+  const studioScript = app.handle({ method: "GET", path: "/studio/app.js" }).body;
+  assert.match(studioScript, /\/api\/inbox\/refresh/);
+  assert.match(studioScript, /\/api\/inbox\/decide/);
+  assert.match(studioScript, /待我批准/);
+  assert.match(studioScript, /viewApprovals/);
+  // The nav entry and the view must agree, or the page is unreachable.
+  assert.match(studioScript, /key: 'approvals'[\s\S]*?view: viewApprovals/);
+  // Decisions must be persistence-backed: a deferred card needs a future instant.
+  assert.match(studioScript, /deferred_until/);
   assert.equal(app.handle({ method: "GET", path: "/studio/missing.css" }).status, 404);
   assert.equal(new WorkbenchWebApp(f.service, "studio-token", "http://127.0.0.1:4173", { studioDir: null })
     .handle({ method: "GET", path: "/studio" }).status, 404);
@@ -53,6 +65,8 @@ test("Craft Studio projects model, project, connector and source reads over the 
   assert.equal((JSON.parse(get("/api/studio/resources?kind=skills").body) as { items: unknown[] }).items.length, 1);
   assert.equal(post("/api/studio/memory", { kind: "fact", scope: "user", content: "Keep the work local" }).status, 201);
   assert.equal((JSON.parse(get("/api/studio/resources?kind=memory").body) as { items: unknown[] }).items.length, 2);
+  assert.equal(post("/api/studio/memory/studio-memory/retire", {}).status, 200);
+  assert.equal((JSON.parse(get("/api/studio/resources?kind=memory").body) as { items: unknown[] }).items.length, 1);
   assert.equal(post("/api/studio/knowledge/claims", { kind: "rule", content: "Review external plugins before use" }).status, 201);
   assert.equal(post("/api/studio/workflows", { name: "Local review", description: "Review a local change", inputs: [], steps: [] }).status, 201);
 
@@ -133,11 +147,30 @@ test("the Studio bridge forwards a bounded craft_ call behind the same guards as
 test("Studio exposes task conversation behind the same token and origin gates", async () => {
   const f = await fixture();
   const app = new WorkbenchWebApp(f.service, "secret", "http://127.0.0.1:4173");
-  const task = f.service.taskOpen({ title: "Conversation", goal: "Keep context", model_id: "missing-model" }).task as Record<string, unknown>;
-  const endpoint = `/api/tasks/${String(task.id)}/messages`;
-  assert.equal((await app.handleAsync({ method: "POST", path: endpoint, token: "wrong", body: JSON.stringify({ content: "hello" }) })).status, 401);
-  assert.equal((await app.handleAsync({ method: "POST", path: endpoint, token: "secret", origin: "https://evil.example", body: JSON.stringify({ content: "hello" }) })).status, 403);
-  const rejected = await app.handleAsync({ method: "POST", path: endpoint, token: "secret", body: JSON.stringify({ content: "hello" }) });
-  assert.equal(rejected.status, 422); assert.match(rejected.body, /no longer configured/);
-  f.store.close();
+  const secretName = "CRAFT_STUDIO_TASK_KEY";
+  const originalFetch = globalThis.fetch;
+  const originalKey = process.env[secretName];
+  try {
+    const task = f.service.taskOpen({ title: "Conversation", goal: "Keep context", model_id: "missing-model" }).task as Record<string, unknown>;
+    const endpoint = `/api/tasks/${String(task.id)}/messages`;
+    assert.equal((await app.handleAsync({ method: "POST", path: endpoint, token: "wrong", body: JSON.stringify({ content: "hello" }) })).status, 401);
+    assert.equal((await app.handleAsync({ method: "POST", path: endpoint, token: "secret", origin: "https://evil.example", body: JSON.stringify({ content: "hello" }) })).status, 403);
+    const rejected = await app.handleAsync({ method: "POST", path: endpoint, token: "secret", body: JSON.stringify({ content: "hello" }) });
+    assert.equal(rejected.status, 422); assert.match(rejected.body, /no longer configured/);
+    // With a configured model and a stubbed transport the same route records the
+    // turn and answers 201, which is the path the Studio thread view depends on.
+    f.service.modelAdd({ id: "local", name: "Local", protocol: "openai-compatible", baseUrl: "https://api.example.test/v1",
+      model: "gpt-local", apiKeyEnv: secretName, supportsTools: false });
+    process.env[secretName] = "studio-secret";
+    const configured = f.service.taskOpen({ title: "Conversation", goal: "Keep context", model_id: "local" }).task as Record<string, unknown>;
+    const configuredEndpoint = `/api/tasks/${String(configured.id)}/messages`;
+    globalThis.fetch = (async () => new Response(JSON.stringify({
+      model: "gpt-local", choices: [{ message: { content: "A safe next step." } }], usage: { prompt_tokens: 2, completion_tokens: 4 } }), { status: 200 })) as typeof fetch;
+    const sent = await app.handleAsync({ method: "POST", path: configuredEndpoint, token: "secret", body: JSON.stringify({ content: "What next?" }) });
+    assert.equal(sent.status, 201); assert.match(sent.body, /A safe next step\./);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalKey === undefined) delete process.env[secretName]; else process.env[secretName] = originalKey;
+    f.store.close();
+  }
 });

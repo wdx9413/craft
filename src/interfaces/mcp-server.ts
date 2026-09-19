@@ -1,7 +1,11 @@
-import { CraftService, VERSION } from "../service.ts";
-import { type JsonObject } from "../store.ts";
+﻿import { CraftService, VERSION } from "../service.ts";
+import { classifyTool } from "../internal-tool-authorization.ts";
+import { HookPlane } from "../hook-plane.ts";
+import { type JsonObject } from "../infrastructure/store.ts";
+import { discoverResult, pingPolicy, readRequestMeta } from "../mcp-forward-compat.ts";
+import { negotiateProtocolVersion, MCP_PREFERRED_PROTOCOL_VERSION } from "../distribution-and-first-run.ts";
 import { SYSCALL_PASSTHROUGH, SYSCALL_VERBS, buildRegistry, catalogOf, describeEntry, resolveEntry } from "../tool-plane.ts";
-import { type Tool, tool } from "./mcp/tool-schema.ts";
+import { type Tool, tool } from "../mcp/tool-schema.ts";
 import { surfaceToolNames as resolveSurfaceToolNames } from "./mcp/surface-registry.ts";
 import { createRuntimeHandlers } from "./mcp/runtime-handlers.ts";
 import { createWorkHandlers } from "./mcp/work-handlers.ts";
@@ -62,6 +66,56 @@ const TOOL_DEFINITIONS: Tool[] = [
   tool("craft_semantic_status", "Show whether optional semantic capability retrieval is disabled, configured, ready, or temporarily degraded.", [], true),
   tool("craft_execution_policy_decide", "Classify an effect into normal host execution, isolation, approval, or a fail-closed block.", ["effect", "platform"], true, ["generated_code", "requires_credential", "has_compensation"]),
   tool("craft_capability_get", "Read one indexed capability.", ["asset_id"], true),
+  // v0.12.33: the first-run and distribution surface. These answer "can an
+  // ordinary user actually run this", which no earlier tool did.
+  tool("craft_first_run_readiness", "Report which configured models are usable right now and, when none are, the exact environment variable or action that unblocks a first run.", [], true, ["models", "env", "credential_source"]),
+  tool("craft_credential_resolve", "Resolve credential names from the process environment plus an optional desktop-written credential file. Names are returned; values are never returned.", [], true, ["credential_file", "env"]),
+  tool("craft_mcp_protocol_negotiate", "Negotiate the MCP protocol version and report whether a downgrade occurred and why.", [], true, ["protocolVersion"]),
+  tool("craft_mcp_migration_assess", "Assess whether the MCP 2026-07-28 revision can be adopted, and name what blocks it.", [], true, ["host_supports_mrtr", "has_durable_tasks", "tasks_extension_adopted"]),
+  tool("craft_isolation_capability_get", "Report the real isolation boundary for a platform, distinguishing an enforced backend from a declared one.", [], true, ["platform"]),
+  tool("craft_distribution_plan_get", "Report where a user obtains the desktop build and what remains before a download exists.", [], true, ["release_assets_available"]),
+  tool("craft_context_project", "Project context into a token budget without destroying anything. With a session_id the projection is stored, so an omitted segment can be restored in a later call without re-supplying it.", ["max_tokens"], false, ["segments", "session_id"]),
+  tool("craft_context_restore", "Pull an omitted context segment back into the projection. With a session_id the segments come from the store, which is the case this exists for: the caller knows the id and nothing else. It reports failure if the segment genuinely cannot fit.", ["segment_id"], false, ["max_tokens", "segments", "session_id"]),
+  tool("craft_context_projection_get", "Read one session's stored projection and its segment count, without reading the transcript back.", ["session_id"], true),
+  tool("craft_state_view_get", "Read one unified, read-only view of a task's state: the workspace snapshot, the run, the manifest, a derived status and the single safe next action.", [], true, ["task_id"]),
+  tool("craft_bm25_search", "Rank records by BM25 with an exact-identifier boost, so a digest or ticket id outranks a semantic near-miss.", ["query"], false, ["documents"]),
+  tool("craft_retrieval_fuse", "Fuse several ranked lists by reciprocal rank into one ordering, with a source count per item.", ["rankings"], false, ["k"]),
+  tool("craft_experience_capture_decide", "Decide whether a finished turn is worth remembering, from observed signals rather than model discretion.", ["outcome"], false, ["retries", "corrections", "distinct_tools", "novel", "user_explicit", "threshold"]),
+  tool("craft_experience_capture_build", "Turn an accepted capture into a reviewable experience record carrying its provenance.", ["outcome", "summary"], false, ["task_id", "scope", "experience_id", "retries", "corrections", "distinct_tools", "novel", "user_explicit", "threshold"]),
+  tool("craft_memory_decay_get", "Weight a memory by age, successful use and source trust, so a stale preference stops competing with a recent correction.", ["confirmed_at", "now"], false, ["accesses", "trust"]),
+  tool("craft_memory_capture_propose", "Decide whether a turn should propose a memory candidate without being asked. Approval stays mandatory; only the proposal threshold moves.", ["signals", "succeeded"], false, ["corrections", "retries", "novel", "mode"]),
+  tool("craft_memory_promotion_preview", "Preview the promotion of a legacy memory into the governed ledger as an approvable candidate. Never migrates silently.", ["legacy_kind", "legacy_id", "content"], false, ["legacy_version", "scope", "kind"]),
+  tool("craft_memory_hybrid_scores", "Fuse keyword and vector rankings for memory retrieval, so an eligible adapter actually changes the result rather than the label.", ["candidates"], false, ["vector_eligible", "k"]),
+  tool("craft_memory_usage_record", "Record that a resolved memory was in context for a turn that succeeded, which is the access signal decay learns from.", ["memory_ids", "outcome", "turn_id"], false, ["receipt_id"]),
+  // v0.12.36: the deterministic verification sensor. It compares bytes the caller
+  // already observed and executes nothing, which is why all three are `read`.
+  tool("craft_verification_check", "Evaluate one deterministic check (exit code, expected output, file digest) as passed, failed, blocked or inconclusive. It executes nothing.", ["kind", "name"], false, ["expected_exit_code", "observed_exit_code", "expected_substring", "expected_pattern", "observed_output", "expected_digest", "observed_digest", "observed_present"]),
+  tool("craft_verification_evaluate", "Combine independent deterministic checks into one verdict: any failed check fails the plan, and an unevaluable check is blocked, never a pass.", ["checks"], false),
+  tool("craft_verification_capture_signals_get", "Turn deterministic check results into the outcome the experience-capture decision consumes, so a lesson comes from an observed failure rather than a reported one.", ["checks"], false, ["retries"]),
+  // v0.12.37: cross-trajectory abstraction. Reading across runs is `read`; the
+  // deliberate exception is `craft_abstraction_build`, which is `governed`
+  // because minting an abstraction asserts a claim about the future.
+  tool("craft_trajectory_signature_get", "Derive the deterministic failure signature for one trajectory. Order-independent, so the same failure reported differently still groups together.", ["failed_checks"], false),
+  tool("craft_abstraction_evaluate", "Find failure signatures recurring across independent trajectories and report which clear the evidence floor, including the near-misses.", ["trajectories"], false, ["scope"]),
+  tool("craft_abstraction_build", "Build a reviewable abstraction from a demonstrated recurring failure. It always requires review and grants no execution authority.", ["trajectories", "signature"], false, ["scope", "abstraction_id"]),
+  // v0.12.38: failure attribution. It names the cause the observations support,
+  // or reports `unattributed` — a guessed cause is worse than an admitted gap.
+  tool("craft_failure_attribution_get", "Attribute one failure to the layer that caused it (echo, coverage, grounding, revision, scope, temporal, retrieval, synthesis) from observed signals only.", [], false, ["evidence_already_in_input", "source_contained_answer", "relevant_retrieved", "answer_in_context", "fact_extracted", "superseded_by_newer", "wrong_scope_applied", "wrong_time_applied", "answer_wrong_with_full_context"]),
+  tool("craft_failure_attribution_summary_get", "Attribute many failures and rank where the system is weakest, reporting the unattributed count rather than hiding it.", ["failures"], false),
+  // v0.12.39: compare what this build declares against what it implements. An
+  // unchecked claim is reported as `unverifiable`, never as passing.
+  tool("craft_mcp_declarations_get", "Read this build's MCP declarations as data, each with the fact that would falsify it.", [], true),
+  tool("craft_consistency_check", "Check declarations against observed implementation facts, returning confirmed, contradicted, or unverifiable for each.", ["declarations", "observed"], true),
+  // v0.12.40: governance pinning. Constraints are removed from the eviction
+  // competition and integrity-checked by content, not by presence.
+  tool("craft_governance_pin_get", "Render the pinned governance block that must survive every compaction, with its integrity digest.", ["constraints"], true),
+  tool("craft_governance_pin_check", "Verify the pinned governance block is still intact in a rendered context, detecting both loss and rewording.", ["constraints", "rendered"], true),
+  tool("craft_governance_compaction_evaluate", "Plan a compaction that removes constraints from the eviction competition, and report what it would drop.", ["constraints", "max_tokens", "segments"], true),
+  tool("craft_governance_constraint_define", "Define one standing governance constraint as data, so it can be pinned and its survival checked.", ["id", "kind", "statement", "effect"], false, ["scope"]),
+  // v0.12.41: MCP 2026-07-28 forward compatibility, reported honestly rather
+  // than claimed.
+  tool("craft_mcp_discover_get", "Report the revisions this build speaks, its capabilities, and its assessment of the 2026-07-28 revision.", [], true, ["server_name", "version"]),
+  tool("craft_mcp_forward_compat_get", "Report which 2026-07-28 requirements are addressed and which remain, without claiming compliance.", [], true, ["protocol_version"]),
   tool("craft_default_route", "Create a durable route that prefers matching verified Workflows and otherwise returns the shortest safe host plan.",
     ["goal"], false, ["title", "project_id", "mode"]),
   tool("craft_default_route_execute", "Run the exact verified Workflow selected by a route and capture its Trial lifecycle.",
@@ -296,6 +350,11 @@ const TOOL_DEFINITIONS: Tool[] = [
   tool("craft_knowledge_workbench_view", "Read the bounded Workbench projection of Claims, Wiki pages, Context Bundles, conflicts, evaluations, candidates, and knowledge-bound launches.", [], true, ["limit"]),
   tool("craft_knowledge_context_bundle_preview", "Revalidate one exact Context Bundle and render its bounded read-only knowledge preview without preparing or starting a Work Launch.", ["bundle_id"], true, ["bundle_version", "now"]),
   tool("craft_knowledge_relation_save", "Create a typed support, contradiction, supersession, applicability, or dependency relation between two evidence-backed claims.", ["from_claim_id", "to_claim_id", "relation"], false, ["relation_id"]),
+  tool("craft_relation_relate", "Create one typed, evidence-backed relation between two addressable knowledge objects (claim, memory, knowledge document, evidence, capability, or page). Confirmed relations require Evidence. It grants no execution authority.", ["source", "target", "relation"], false, ["relation_id", "confidence", "evidence_ids", "valid_from", "rationale"]),
+  tool("craft_relation_neighbors", "Read the live one-hop neighbours of one addressable knowledge object, spanning both directions and labelled forward or inverse.", ["kind", "id"], true, ["version", "direction", "relation", "as_of", "limit"]),
+  tool("craft_relation_traverse", "Walk relations from one knowledge object to a bounded depth (max 3) with cycle detection; it never expands without limit.", ["kind", "id"], true, ["version", "max_depth", "direction", "relation", "as_of", "limit"]),
+  tool("craft_relation_retract", "Soft-invalidate one relation by setting its valid_to instant; the record and its history are preserved rather than deleted.", ["relation_id", "reason"], false, ["valid_to", "now"]),
+  tool("craft_relation_get", "Read one exact knowledge relation revision.", ["relation_id"], true, ["version"]),
   tool("craft_wiki_context_compile", "Compile only reviewed, current, scope-matching evidence-backed claims into a bounded Agent context using deterministic keyword matching by default.", ["query"], true, ["bundle_id", "scope", "max_items", "max_chars", "now"]),
   tool("craft_wiki_context_bundle_get", "Read a content-free Wiki context compilation receipt.", ["bundle_id"], true, ["version"]),
   tool("craft_wiki_context_bundle_list", "List local Wiki context compilation receipts.", [], true, ["limit", "query"]),
@@ -837,6 +896,7 @@ const TOOL_DEFINITIONS: Tool[] = [
   tool("craft_expert_profile_save", "Save the only supported read-only diagnostic research Expert profile.", ["name", "expert_type", "allowed_effects", "output_contract"], false, ["expert_id"]),
   tool("craft_context_capsule_create", "Create a bounded reference-only Context Capsule for a diagnostic Expert.", ["task_id", "profile_id", "input_boundary"], false, ["capsule_id", "artifact_ids", "evidence_ids"]),
   tool("craft_expert_subagent_create", "Create one bounded read-only diagnostic Sub-agent Run.", ["run_id", "parent_operation_id", "expert_id", "capsule_id", "objective"], false, ["operation_id"]),
+  tool("craft_expert_subagent_run", "Run one leased read-only diagnostic Sub-agent as a real child loop with its own context window and a budget carved out of the delegating dispatch. It never inherits write authority.", ["operation_id", "parent_dispatch_id"], false),
   tool("craft_expert_subagent_report", "Submit a structured diagnostic Expert result with Evidence references.", ["operation_id", "lease_id", "claimed_by", "verdict", "report"], false, ["costs"]),
   tool("craft_evaluation_reliability_assess", "Assess repeated paired evaluation reliability; it can return inconclusive.", ["comparison_id"], false, ["assessment_id", "min_trials", "max_budget_ratio"]),
   tool("craft_judge_adapter_save", "Save a model or human Judge adapter; it is advisory until calibrated.", ["name", "grader_type"], false, ["judge_id"]),
@@ -902,7 +962,10 @@ const TOOL_DEFINITIONS: Tool[] = [
   tool("craft_runtime_truth_otlp", "Map a content-free craft.trace record and events to OTLP/HTTP JSON without exporting it.", ["trace"], true, ["events"]),
   tool("craft_runtime_truth_export", "Export a content-free craft.trace projection to an OTLP/HTTP endpoint and persist only the receipt.", ["endpoint", "trace"], false, ["events", "export_id"]),
   tool("craft_runtime_truth_compact", "Compact a resumable model conversation while preserving system constraints and the latest work.", ["messages"], false, ["session_id", "max_chars"]),
+  tool("craft_runtime_truth_compaction_get", "Read back the compacted window stored for one session, so a resuming Host does not have to re-derive it.", ["session_id"], true, ["version"]),
+  tool("craft_runtime_truth_compaction_list", "List stored compactions so a Host can find a session it did not name.", [], true, ["limit"]),
   tool("craft_runtime_truth_work_note", "Persist a structured, digest-backed work note for long-running Agent sessions.", ["goal"], false, ["note_id", "decisions", "constraints", "open_questions", "artifacts"]),
+  tool("craft_runtime_truth_work_note_get", "Read back one persisted work note, which is what a resuming long-running session starts from.", ["note_id"], true, ["version"]),
   tool("craft_os_security_plan", "Plan a platform-specific fail-closed execution boundary with filesystem, network, and secret-broker constraints.", ["workspace"], false, ["plan_id", "platform", "network", "filesystem", "egress_allowlist", "secret_broker"]),
   tool("craft_os_security_verify", "Verify observed platform-boundary evidence before allowing a governed execution.", ["plan_id", "observed", "evidence_ids"], false, ["receipt_id", "verified_by"]),
   tool("craft_mcp_registry_source_register", "Register an HTTPS MCP Registry source with an explicit trust class; no network request is performed.", ["endpoint"], false, ["source_id", "trust", "key_digest"]),
@@ -1014,9 +1077,19 @@ const RETIRED_PUBLIC_TOOL_NAMES = new Set([
 ]);
 /** Public MCP operations. Retired stage-level entry points remain service internals. */
 export const TOOLS: Tool[] = TOOL_DEFINITIONS.filter((item) => !RETIRED_PUBLIC_TOOL_NAMES.has(item.name));
-const ACTIVE_TOOLS = TOOLS;
+/** The live catalog other surfaces (internal loop) project from. Single source. */
+export const ACTIVE_TOOLS = TOOLS;
 
 const CORE_TOOL_NAMES = new Set(["craft_info", "craft_source_list", "craft_capability_search", "craft_capability_get", "craft_semantic_status", "craft_execution_policy_decide",
+  "craft_first_run_readiness", "craft_credential_resolve", "craft_mcp_protocol_negotiate", "craft_mcp_migration_assess", "craft_isolation_capability_get", "craft_distribution_plan_get",
+  "craft_context_project", "craft_context_restore", "craft_bm25_search", "craft_retrieval_fuse", "craft_experience_capture_decide", "craft_experience_capture_build",
+  "craft_memory_decay_get", "craft_memory_capture_propose", "craft_memory_promotion_preview", "craft_memory_hybrid_scores", "craft_memory_usage_record",
+  "craft_verification_check", "craft_verification_evaluate", "craft_verification_capture_signals_get",
+  "craft_trajectory_signature_get", "craft_abstraction_evaluate", "craft_abstraction_build",
+  "craft_failure_attribution_get", "craft_failure_attribution_summary_get",
+  "craft_mcp_declarations_get", "craft_consistency_check",
+  "craft_governance_pin_get", "craft_governance_pin_check", "craft_governance_compaction_evaluate", "craft_governance_constraint_define",
+  "craft_mcp_discover_get", "craft_mcp_forward_compat_get",
   "craft_default_route", "craft_default_route_resume", "craft_default_route_find", "craft_task_open", "craft_task_list", "craft_intent_compile", "craft_intent_get", "craft_acceptance_compile", "craft_acceptance_contract_get", "craft_task_checkpoint", "craft_task_control_refresh", "craft_task_control_get", "craft_task_run_refresh", "craft_task_run_get", "craft_verified_work_loop_prepare", "craft_verified_work_loop_advance", "craft_verified_work_loop_decide", "craft_verified_work_loop_resume", "craft_verified_work_loop_get", "craft_host_activation_manifest_prepare", "craft_host_activation_manifest_validate", "craft_host_activation_manifest_consume", "craft_host_activation_manifest_get", "craft_execution_fabric_prepare", "craft_execution_fabric_execute", "craft_execution_fabric_advance", "craft_execution_fabric_consume", "craft_execution_fabric_get", "craft_host_bridge_get", "craft_work_launch_get", "craft_work_delivery_observe", "craft_work_delivery_get", "craft_delivery_loop_refresh", "craft_delivery_loop_get", "craft_delivery_evaluation_compare", "craft_delivery_evaluation_run", "craft_eval_campaign_report", "craft_adaptive_harness_recommend", "craft_managed_write_get", "craft_managed_run_get", "craft_campaign_runner_get", "craft_runtime_assurance_intervene", "craft_runtime_assurance_get", "craft_workspace_observer_get", "craft_autonomy_ladder_get", "craft_work_coordinator_get", "craft_agent_eval_lab_get", "craft_judge_promotion_eligible", "craft_platform_execution_preflight", "craft_platform_execution_probe", "craft_platform_execution_probe_get", "craft_workspace_get", "craft_workspace_diff", "craft_work_object_list", "craft_workspace_impact", "craft_context_assemble", "craft_change_set_preview",
   "craft_artifact_register", "craft_evidence_record", "craft_capability_access_plan", "craft_capability_call_issue", "craft_capability_call_consume", "craft_capability_kit_get", "craft_capability_kit_list", "craft_capability_kit_distribution", "craft_capability_connector_list", "craft_capability_connector_ticket_issue", "craft_capability_connector_ticket_consume", "craft_knowledge_source_list", "craft_context_resolution_resolve", "craft_context_resolution_get", "craft_work_runtime_mode_get", "craft_continual_harness_view_create", "craft_continual_harness_refine", "craft_continual_harness_submit", "craft_continual_harness_signals", "craft_continual_harness_resolve", "craft_continual_harness_get", "craft_stateful_compute_session_prepare", "craft_stateful_compute_dispatch", "craft_stateful_compute_observe", "craft_stateful_compute_delegate", "craft_stateful_compute_report", "craft_stateful_compute_cancel", "craft_stateful_compute_session_get", "craft_uncertainty_resolve", "craft_release_qualification_evaluate", "craft_platform_ideal_state_assess", "craft_verification_get", "craft_evaluation_program_due", "craft_evaluation_program_report", "craft_enterprise_access_ticket_get", "craft_a2a_delegation_get", "craft_federated_delegation_get", "craft_harness_topology_get", "craft_runtime_readiness_get", "craft_assured_pilot_get", "craft_assured_pilot_reassess", "craft_usage_report", "craft_settings_get", "craft_trace_get", "craft_trace_query", "craft_trace_replay_bundle", "craft_trust_profile_recommend", "craft_trust_profile_get", "craft_trust_profile_list", "craft_web_fetch", "craft_web_operation_get"]);
 export const CORE_TOOLS: Tool[] = ACTIVE_TOOLS.filter((tool) => CORE_TOOL_NAMES.has(tool.name));
@@ -1060,9 +1133,19 @@ export class McpServer {
   readonly handlers: Record<string, McpHandler>;
   readonly tools: Tool[];
   readonly mode: string;
+  /**
+   * The assembled capability hooks, when the service has them.
+   *
+   * Optional because a test may construct a server over a partial service, and because the hook
+   * plane is an addition to the flow rather than a precondition for it: `undefined` means the
+   * server behaves exactly as it did before hooks existed, which is what keeps this change from
+   * being a rewrite of the dispatch path.
+   */
+  readonly hooks: HookPlane | undefined;
   constructor(service: CraftService, mode: string = "full") {
     this.service = service;
     this.mode = mode;
+    this.hooks = (service as { hookPlane?: HookPlane }).hookPlane;
     const allowed = new Set(surfaceToolNames(mode));
     this.tools = [...ACTIVE_TOOLS, ...SYSCALL_TOOLS].filter((tool) => allowed.has(tool.name));
     this.handlers = {
@@ -1094,6 +1177,41 @@ export class McpServer {
       craft_logical_activation_resolution_get: (a) => service.get("logical_activation_resolution", "resolution_id", a),
       craft_logical_activation_resolution_list: (a) => service.list("logical_activation_resolution", "resolutions", a),
       craft_execution_policy_decide: service.executionPolicyDecide.bind(service),
+      craft_first_run_readiness: service.firstRunReadiness.bind(service),
+      craft_credential_resolve: service.credentialResolve.bind(service),
+      craft_mcp_protocol_negotiate: service.mcpProtocolNegotiate.bind(service),
+      craft_mcp_migration_assess: service.mcpMigrationAssess.bind(service),
+      craft_isolation_capability_get: service.isolationCapabilityGet.bind(service),
+      craft_distribution_plan_get: service.distributionPlanGet.bind(service),
+      craft_context_project: service.contextProject.bind(service),
+      craft_context_restore: service.contextRestore.bind(service),
+      craft_context_projection_get: service.contextProjectionGet.bind(service),
+      craft_state_view_get: service.stateViewGet.bind(service),
+      craft_bm25_search: service.bm25Search.bind(service),
+      craft_retrieval_fuse: service.retrievalFuse.bind(service),
+      craft_experience_capture_decide: service.experienceCaptureDecide.bind(service),
+      craft_experience_capture_build: service.experienceCaptureBuild.bind(service),
+      craft_memory_decay_get: service.memoryDecayWeightGet.bind(service),
+      craft_memory_capture_propose: service.memoryProposePolicy.bind(service),
+      craft_memory_promotion_preview: service.memoryLegacyPromote.bind(service),
+      craft_memory_hybrid_scores: service.memoryHybridScores.bind(service),
+      craft_memory_usage_record: service.memoryUsageEvidenceRecord.bind(service),
+      craft_verification_check: service.verificationCheck.bind(service),
+      craft_verification_evaluate: service.verificationRun.bind(service),
+      craft_verification_capture_signals_get: service.verificationCaptureSignals.bind(service),
+      craft_trajectory_signature_get: service.trajectorySignatureGet.bind(service),
+      craft_abstraction_evaluate: service.abstractionEvaluate.bind(service),
+      craft_abstraction_build: service.abstractionBuild.bind(service),
+      craft_failure_attribution_get: service.failureAttributionGet.bind(service),
+      craft_failure_attribution_summary_get: service.failureAttributionSummaryGet.bind(service),
+      craft_mcp_declarations_get: () => service.mcpDeclarationsGet(),
+      craft_consistency_check: service.consistencyCheck.bind(service),
+      craft_governance_pin_get: service.governancePinGet.bind(service),
+      craft_governance_pin_check: service.governancePinCheck.bind(service),
+      craft_governance_compaction_evaluate: service.governanceCompactionEvaluate.bind(service),
+      craft_governance_constraint_define: service.governanceConstraintDefine.bind(service),
+      craft_mcp_discover_get: service.mcpDiscoverGet.bind(service),
+      craft_mcp_forward_compat_get: service.mcpForwardCompatGet.bind(service),
       craft_capability_get: (a) => service.capabilityGet(a),
       craft_default_route: (a) => service.defaultRouteWithSemanticSearch(a), craft_default_route_execute: (a) => service.defaultRouteExecute(a),
       craft_default_route_resume: (a) => service.defaultRouteResume(a), craft_default_route_find: (a) => service.defaultRouteFind(a),
@@ -1194,6 +1312,8 @@ export class McpServer {
       craft_strategy_recommend: (a) => service.strategyRecommend(a),
       craft_knowledge_claim_save: (a) => service.knowledgeClaimSave(a), craft_knowledge_claim_get: (a) => service.knowledgeClaimGet(a), craft_knowledge_claim_list: (a) => service.knowledgeClaimList(a), craft_knowledge_claim_review: (a) => service.knowledgeClaimReview(a),
       craft_wiki_page_save: (a) => service.wikiPageSave(a), craft_wiki_page_get: (a) => service.wikiPageGet(a), craft_wiki_page_list: (a) => service.wikiPageList(a), craft_wiki_page_refresh: (a) => service.wikiPageRefresh(a), craft_knowledge_relation_save: (a) => service.knowledgeRelationSave(a),
+      craft_relation_relate: (a) => service.relationSave(a), craft_relation_retract: (a) => service.relationRetract(a), craft_relation_get: (a) => service.relationGet(a),
+      craft_relation_neighbors: (a) => service.relationNeighbors(a), craft_relation_traverse: (a) => service.relationTraverse(a),
       craft_knowledge_workbench_view: (a) => service.knowledgeWorkbenchView(a), craft_knowledge_context_bundle_preview: (a) => service.knowledgeContextBundlePreview(a),
       craft_wiki_context_compile: (a) => service.wikiContextCompile(a), craft_wiki_context_bundle_get: (a) => service.wikiContextBundleGet(a), craft_wiki_context_bundle_list: (a) => service.wikiContextBundleList(a),
       craft_wiki_skill_candidate_create: (a) => service.wikiSkillCandidateCreate(a), craft_wiki_skill_candidate_get: (a) => service.wikiSkillCandidateGet(a), craft_wiki_skill_candidate_list: (a) => service.wikiSkillCandidateList(a), craft_wiki_skill_candidate_review: (a) => service.wikiSkillCandidateReview(a),
@@ -1392,6 +1512,7 @@ export class McpServer {
       craft_capability_connector_ticket_issue: service.capabilityConnectorTicketIssue.bind(service), craft_capability_connector_ticket_consume: service.capabilityConnectorTicketConsume.bind(service),
       craft_expert_profile_save: service.expertProfileSave.bind(service), craft_context_capsule_create: service.contextCapsuleCreate.bind(service),
       craft_expert_subagent_create: service.expertSubagentCreate.bind(service), craft_expert_subagent_report: service.expertSubagentReport.bind(service),
+      craft_expert_subagent_run: (a) => service.expertSubagentRun(a),
       craft_evaluation_reliability_assess: service.evaluationReliabilityAssess.bind(service), craft_judge_adapter_save: service.judgeAdapterSave.bind(service),
       craft_judge_calibration_record: service.judgeCalibrationRecord.bind(service), craft_judge_promotion_eligible: service.judgePromotionEligible.bind(service), craft_evaluation_judge_gate: service.evaluationJudgeGate.bind(service),
       craft_adaptation_candidate_create: service.adaptationCandidateCreate.bind(service), craft_adaptation_candidate_authorize_canary: service.adaptationCandidateAuthorizeCanary.bind(service), craft_feedback_intake_create: service.feedbackIntakeCreate.bind(service),
@@ -1449,7 +1570,10 @@ export class McpServer {
       craft_runtime_truth_otlp: (a) => service.runtimeTruthOtlp(a),
       craft_runtime_truth_export: (a) => service.runtimeTruthExport(a),
       craft_runtime_truth_compact: (a) => service.runtimeTruthCompact(a),
+      craft_runtime_truth_compaction_get: (a) => service.runtimeTruthCompactionGet(a),
+      craft_runtime_truth_compaction_list: (a) => service.runtimeTruthCompactionList(a),
       craft_runtime_truth_work_note: (a) => service.runtimeTruthWorkNote(a),
+      craft_runtime_truth_work_note_get: (a) => service.runtimeTruthWorkNoteGet(a),
       craft_os_security_plan: (a) => service.osSecurityPlan(a),
       craft_os_security_verify: (a) => service.osSecurityVerify(a),
       craft_mcp_registry_source_register: (a) => service.mcpRegistrySourceRegister(a),
@@ -1540,6 +1664,10 @@ export class McpServer {
       craft_a2a_message_stream: (a) => service.a2aMessageStream(a),
       craft_a2a_task_list: (a) => service.a2aTaskList(a),
     };
+    // One catalog, one dispatch. The internal loop addresses these same
+    // handlers, so a tier-gated internal action can never mean something
+    // different from the public tool of the same name.
+    service.registerCanonicalHandlers(this.handlers);
   }
 
   async handle(message: unknown): Promise<JsonObject | undefined> {
@@ -1549,14 +1677,40 @@ export class McpServer {
       return this.error(request.id ?? null, -32600, "Invalid Request");
     }
     if (request.method === "notifications/initialized" || request.id === undefined) return undefined;
-    if (request.method === "initialize") {
-      const requested = (request.params as JsonObject | undefined)?.protocolVersion;
-      const version = ["2025-03-26", "2025-06-18", "2025-11-25"].includes(String(requested))
-        ? requested : "2025-11-25";
-      return this.ok(request.id, { protocolVersion: version, capabilities: { tools: {} },
-        serverInfo: { name: "craft", version: VERSION } });
+    // Forward compatibility: tolerate a peer that sends 2026-07-28 per-request
+    // `_meta`. Reading it is additive — a 2025-11-25 client never sends it — and
+    // unknown protocol keys are surfaced rather than silently discarded.
+    const requestMeta = readRequestMeta(request as JsonObject);
+    if (request.method === "server/discover") {
+      // Mandated by 2026-07-28 (SEP-2575) and harmless on every earlier
+      // revision, so a newer client gets an honest answer instead of
+      // `Method not found`.
+      return this.ok(request.id, discoverResult({ server_name: "craft", version: VERSION }));
     }
-    if (request.method === "ping") return this.ok(request.id, {});
+    if (request.method === "initialize") {
+      // The supported-revision table lives in one place. This handler used to
+      // inline a second copy, so the constant and the code that speaks the
+      // protocol could disagree without anything noticing — the exact shape of
+      // defect the declaration/implementation check now exists to catch.
+      const negotiation = negotiateProtocolVersion((request.params as JsonObject | undefined)?.protocolVersion);
+      const base = { protocolVersion: negotiation.negotiated, capabilities: { tools: {} },
+        serverInfo: { name: "craft", version: VERSION } };
+      // A downgrade is reported rather than hidden. This build does not speak
+      // 2026-07-28, and silently answering 2025-11-25 made "the server does not
+      // speak this revision" indistinguishable from "the server pretends to".
+      if (!negotiation.downgraded) return this.ok(request.id, base);
+      return this.ok(request.id, { ...base, downgraded: true, downgrade_reason: negotiation.reason,
+        requested_protocol_version: negotiation.requested, assessed_revision: negotiation.assessed_revision,
+        migration_status: negotiation.migration_status });
+    }
+    // `ping` is retained deliberately: it belongs to every revision this build
+    // speaks, and 2026-07-28 removed it only for the revision this build does not
+    // speak. Serving it is therefore conditional rather than accidental.
+    if (request.method === "ping") {
+      const policy = pingPolicy({ protocol_version: requestMeta.protocol_version ?? MCP_PREFERRED_PROTOCOL_VERSION });
+      if (policy.serve_ping !== true) return this.error(request.id, -32601, `Method not found: ${request.method}`);
+      return this.ok(request.id, {});
+    }
     if (request.method === "tools/list") return this.ok(request.id, { tools: this.tools });
     if (request.method !== "tools/call") return this.error(request.id, -32601, `Method not found: ${request.method}`);
     if (!request.params || typeof request.params !== "object" || Array.isArray(request.params)) {
@@ -1571,11 +1725,25 @@ export class McpServer {
     if (this.mode !== "full" && !this.tools.some((tool) => tool.name === name)) {
       return this.error(request.id, -32602, `Unknown tool: ${name}`);
     }
+    // The two hook phases that stand in front of and behind an effect. `tool_before` is a gating
+    // phase, so this is the point where "a hook can stop a tool call" stops being a comment: a
+    // refusal returns without dispatching, and `tool_after` therefore does not run for it either.
+    const context = this.hooks === undefined ? undefined : HookPlane.toolContext(name, supplied, classifyTool);
+    if (context) {
+      const gate = await this.hooks!.run("tool_before", context);
+      if (gate.denied) {
+        const refusal = gate.outcomes.find((entry) => entry.outcome.kind === "denied")!;
+        const reason = refusal.outcome.kind === "denied" ? refusal.outcome.reason : "denied";
+        return this.ok(request.id, { content: [{ type: "text", text: `Denied by hook ${refusal.hook}${refusal.capability ? ` (${refusal.capability})` : ""}: ${reason}` }],
+          structuredContent: { denied: true, hook: refusal.hook, capability: refusal.capability ?? null, reason }, isError: true });
+      }
+    }
     try {
       const result = SYSCALL_VERBS.includes(name)
         ? await this.dispatchSyscall(name, supplied as JsonObject)
         : await this.dispatchTool(name, supplied as JsonObject);
       if (result === undefined) return this.error(request.id, -32602, `Unknown tool: ${name}`);
+      if (context) await this.hooks!.run("tool_after", context);
       return this.ok(request.id, { content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
         structuredContent: result, isError: false });
     } catch (error) {

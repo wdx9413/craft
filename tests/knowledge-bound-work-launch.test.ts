@@ -1,14 +1,14 @@
-import assert from "node:assert/strict";
+﻿import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { McpServer } from "../src/mcp.ts";
-import { KnowledgeBoundLaunchKernel } from "../src/knowledge-bound-launch.ts";
-import { craftPaths } from "../src/paths.ts";
+import { KnowledgeBoundLaunchKernel } from "../capability/craft-knowledge/knowledge-bound-launch.ts";
+import { craftPaths } from "../src/infrastructure/paths.ts";
 import { CraftService, VERSION } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/store.ts";
+import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
 
 function record(result: JsonObject, key: string): JsonObject { return result[key] as JsonObject; }
 function contextDigest(context: string): string { return `sha256:${createHash("sha256").update(JSON.stringify(context)).digest("hex")}`; }
@@ -39,7 +39,7 @@ test("Knowledge-bound Work Launch pins reviewed Wiki knowledge across Dispatch, 
     const outcome = f.store.get("outcome", `outcome_${launch.trial_id}`); assert.deepEqual(outcome.knowledge_binding, binding);
     const mcp = new McpServer(f.service, "full"); const mcpPrepared = await mcp.handle({ id: "mcp", method: "tools/call", params: { name: "craft_knowledge_context_work_launch_prepare", arguments: { ...args, launch_id: "mcp-launch" } } }); assert.equal((mcpPrepared?.result as JsonObject).isError, false);
     const mcpDecided = await mcp.handle({ id: "mcp-decide", method: "tools/call", params: { name: "craft_knowledge_context_work_launch_decide", arguments: { launch_id: "mcp-launch", actor: "human", approved: false, prompt: args.prompt, now: args.now } } }); assert.equal((mcpDecided?.result as JsonObject).isError, false);
-    assert.equal(VERSION, "0.12.30");
+    assert.equal(VERSION, "0.12.33");
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 

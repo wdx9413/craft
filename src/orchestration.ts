@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { JsonObject } from "./store.ts";
+import type { JsonObject } from "./infrastructure/store.ts";
 import { SIDE_EFFECTS } from "./workflow.ts";
 
 export const PROVENANCE = new Set(["agent_reported", "model_judged", "program_verified", "human_approved", "human_rejected"]);

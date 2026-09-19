@@ -1,4 +1,4 @@
-import type { CraftStore } from "../../store.ts";
+import type { CraftStore } from "../../infrastructure/store.ts";
 import type { DeliveryLoopKernel } from "../../delivery-loop.ts";
 import type { TaskControlKernel } from "../../task-control.ts";
 import type { TaskRunKernel } from "../../task-run.ts";

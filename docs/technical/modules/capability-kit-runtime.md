@@ -49,4 +49,4 @@ craft kit conformance <kit-id>
 
 ## 验证
 
-`tests/v01218-capability-platform.test.ts` 覆盖 Manifest/依赖、Conformance、Task Activation、阶段越权、贡献脱敏、禁用/撤销传播、Core/Full MCP 分面与 CLI。该测试使用脱敏本地 fixture，只证明机制正确；真实业务价值仍需通过现有 Campaign、Signoff 与 Canary 评测。
+`tests/capability-platform.test.ts` 覆盖 Manifest/依赖、Conformance、Task Activation、阶段越权、贡献脱敏、禁用/撤销传播、Core/Full MCP 分面与 CLI。该测试使用脱敏本地 fixture，只证明机制正确；真实业务价值仍需通过现有 Campaign、Signoff 与 Canary 评测。

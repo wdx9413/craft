@@ -3,9 +3,9 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { craftPaths } from "../src/paths.ts";
+import { craftPaths } from "../src/infrastructure/paths.ts";
 import { CraftService } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/store.ts";
+import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
 
 test("默认编排优先已验证 Workflow，并为无匹配任务给出安全增量研发计划", async () => {
   const root = join(tmpdir(), `craft-default-route-${process.pid}-${Date.now()}`);

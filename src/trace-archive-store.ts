@@ -2,7 +2,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { gzipSync, gunzipSync } from "node:zlib";
-import type { JsonObject } from "./store.ts";
+import type { JsonObject } from "./infrastructure/store.ts";
+import { object, text } from "./validation.ts";
 
 const FORMAT = "craft.trace.archive.v1";
 const LOCAL_STORAGE = "local_jsonl_gzip";
@@ -45,15 +46,9 @@ function digest(value: Uint8Array | string): string {
   return `sha256:${createHash("sha256").update(value).digest("hex")}`;
 }
 
-function object(value: unknown, name: string): JsonObject {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${name} must be an object`);
-  return value as JsonObject;
-}
 
-function text(value: unknown, name: string): string {
-  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
-  return value.trim();
-}
+
+
 
 function validTimestamp(value: string): string {
   if (Number.isNaN(Date.parse(value))) throw new Error("archived_at must be an ISO timestamp");

@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto";
-import { CraftStore, type JsonObject } from "./store.ts";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
 import { assertExecutionHostMode, defaultExecutionHostMode, executionHostDescriptor } from "./host-protocol.ts";
+import { text } from "./validation.ts";
+import { digestJson, payload } from "./digest.ts";
 
-function text(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim(); }
-function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
-function payload(record: JsonObject): JsonObject { const { id: _id, version: _version, created_at: _createdAt, updated_at: _updatedAt, ...rest } = record; return rest; }
+
+
+
 const TERMINAL = new Set(["completed", "failed", "cancelled", "interrupted"]);
 
 /**
@@ -35,7 +37,7 @@ export class HostBridgeKernel {
     const identity = { fabric_id: fabric.id, manifest_id: manifest.id, manifest_version: manifest.version,
       work_loop_id: loop.id, task_run_id: taskRun.id, task_id: loop.task_id, launch_id: launch.id,
       host: launch.host, host_protocol: hostProtocol, dispatch_id: launch.dispatch_id, sandbox: launch.sandbox, prompt_digest: launch.prompt_digest };
-    const invocationId = String(args.invocation_id ?? `host_bridge_${fabric.id}`); const existing = this.store.find("host_bridge_invocation", invocationId); const identityDigest = digest(identity);
+    const invocationId = String(args.invocation_id ?? `host_bridge_${fabric.id}`); const existing = this.store.find("host_bridge_invocation", invocationId); const identityDigest = digestJson(identity);
     if (existing) { if (existing.identity_digest !== identityDigest) throw new Error("Host Bridge invocation idempotency conflict"); return { invocation: existing, idempotent: true }; }
     return { invocation: this.store.create("host_bridge_invocation", invocationId, { ...identity, identity_digest: identityDigest, status: "prepared", activation_receipt_id: null, run_id: null }), idempotent: false };
   }

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { defineHook, defineHooks, planHooks, runHooks, runHooksSync, BUILTIN_HOOK_TARGETS } from "../src/hooks.ts";
-import type { JsonObject } from "../src/store.ts";
+import type { JsonObject } from "../src/infrastructure/store.ts";
 
 test("defineHook validates all fields", () => {
   const h = defineHook({ id: "a", point: "before_step", kind: "builtin", target: "builtin:audit-log" });

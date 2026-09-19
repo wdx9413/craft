@@ -1,10 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { JsonObject } from "./store.ts";
-import { CraftStore } from "./store.ts";
+import type { JsonObject } from "./infrastructure/store.ts";
+import { CraftStore } from "./infrastructure/store.ts";
+import { text } from "./validation.ts";
+import { digestJson, payload } from "./digest.ts";
 
-function text(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim(); }
-function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
-function payload(record: JsonObject): JsonObject { const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record; return rest; }
+
+
+
 function unique(value: unknown, name: string, exact?: number): string[] {
   if (!Array.isArray(value) || !value.length) throw new Error(`${name} must be a non-empty array`);
   const values = value.map((item) => text(item, name)); if (new Set(values).size !== values.length || exact !== undefined && values.length !== exact) throw new Error(`${name} must contain exactly ${exact ?? "unique"} values`);
@@ -27,7 +29,7 @@ export class RuntimeAcceptanceKernel {
     const trials = integer(args.trials_per_pair, "trials_per_pair", 3, 5);
     const identity = { case_ids: caseIds, host_ids: hostIds, baseline_harness: text(args.baseline_harness, "baseline_harness"), candidate_harness: text(args.candidate_harness, "candidate_harness"), environment_fingerprint: text(args.environment_fingerprint, "environment_fingerprint"), budget_fingerprint: text(args.budget_fingerprint, "budget_fingerprint"), trials_per_pair: trials, observer_kind: text(args.observer_kind, "observer_kind") };
     if (identity.baseline_harness === identity.candidate_harness) throw new Error("Runtime acceptance candidate must differ from baseline");
-    const planId = String(args.plan_id ?? `runtime_acceptance_${randomUUID().replaceAll("-", "")}`); const existing = this.store.find("runtime_acceptance_plan", planId); const planDigest = digest(identity);
+    const planId = String(args.plan_id ?? `runtime_acceptance_${randomUUID().replaceAll("-", "")}`); const existing = this.store.find("runtime_acceptance_plan", planId); const planDigest = digestJson(identity);
     if (existing) { if (existing.plan_digest !== planDigest) throw new Error("Runtime acceptance plan idempotency conflict"); return { plan: existing, idempotent: true }; }
     return { plan: this.store.create("runtime_acceptance_plan", planId, { ...identity, plan_digest: planDigest, status: "collecting", raw_case_content_stored: false }), idempotent: false };
   }
@@ -44,7 +46,7 @@ export class RuntimeAcceptanceKernel {
     const observation = this.store.get("outcome_observation", text(args.observation_id, "observation_id"));
     if (observation.trace_id !== session.trace_id || observation.host_id !== hostId || observation.observer_kind !== plan.observer_kind || observation.observer_id === hostId) throw new Error("Runtime acceptance Outcome Observation is not independent or does not match the Host Session");
     const identity = { plan_id: plan.id, plan_version: plan.version, host_id: hostId, case_id: caseId, arm, harness, trial_index: trialIndex, host_session_id: session.id, host_session_version: session.version, observation_id: observation.id, observation_version: observation.version, verdict: observation.verdict };
-    const recordId = String(args.record_id ?? `runtime_acceptance_record_${plan.id}_${hostId}_${caseId}_${arm}_${trialIndex}`); const recordDigest = digest(identity); const existing = this.store.find("runtime_acceptance_record", recordId);
+    const recordId = String(args.record_id ?? `runtime_acceptance_record_${plan.id}_${hostId}_${caseId}_${arm}_${trialIndex}`); const recordDigest = digestJson(identity); const existing = this.store.find("runtime_acceptance_record", recordId);
     if (existing) { if (existing.record_digest !== recordDigest) throw new Error("Runtime acceptance record idempotency conflict"); return { record: existing, idempotent: true }; }
     const duplicate = this.store.list("runtime_acceptance_record", 10_000, (item) => item.plan_id === plan.id && item.host_id === hostId && item.case_id === caseId && item.arm === arm && item.trial_index === trialIndex)[0];
     if (duplicate) throw new Error("Runtime acceptance slot is already recorded");
@@ -65,7 +67,7 @@ export class RuntimeAcceptanceKernel {
     const total = pairs.length; const complete = incomplete === 0; const strictProof = Number(plan.trials_per_pair) === 5 && candidateWins === total && baselineWins === 0;
     const status = !complete ? "inconclusive" : strictProof ? "eligible" : baselineWins >= candidateWins ? "rejected" : "inconclusive";
     const evaluationId = String(args.evaluation_id ?? `runtime_acceptance_evaluation_${plan.id}`); const identity = { plan_id: plan.id, plan_version: plan.version, total_pairs: total, candidate_wins: candidateWins, baseline_wins: baselineWins, ties, incomplete, status };
-    const existing = this.store.find("runtime_acceptance_evaluation", evaluationId); const evaluationDigest = digest(identity);
+    const existing = this.store.find("runtime_acceptance_evaluation", evaluationId); const evaluationDigest = digestJson(identity);
     if (existing) { if (existing.evaluation_digest !== evaluationDigest) throw new Error("Runtime acceptance evaluation idempotency conflict"); return { evaluation: existing, idempotent: true }; }
     const evaluation = this.store.create("runtime_acceptance_evaluation", evaluationId, { ...identity, evaluation_digest: evaluationDigest, candidate_default_activation_permitted: status === "eligible" });
     const saved = this.store.save("runtime_acceptance_plan", String(plan.id), { ...payload(plan), status: "evaluated", latest_evaluation_id: evaluation.id });

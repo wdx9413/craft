@@ -1,14 +1,12 @@
-import { createHash, randomUUID } from "node:crypto";
-import { CraftStore, type JsonObject } from "./store.ts";
+import { randomUUID } from "node:crypto";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
+import { object, text } from "./validation.ts";
+import { canonicalJson, stableDigest, payload } from "./digest.ts";
 
 const ADAPTERS = new Set(["api", "mcp", "computer_use"]);
 const EFFECTS = new Set(["read_only", "local_write", "external_write", "destructive", "unknown"]);
-function text(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim(); }
-function object(value: unknown, name: string): JsonObject { if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${name} must be an object`); return value as JsonObject; }
+
 function strings(value: unknown, name: string, minimum = 1): string[] { if (!Array.isArray(value) || value.length < minimum) throw new Error(`${name} must contain at least ${minimum} values`); const result = value.map((item) => text(item, name)); if (new Set(result).size !== result.length) throw new Error(`${name} must contain unique values`); return result; }
-function canonical(value: unknown): string { if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`; if (value && typeof value === "object") return `{${Object.entries(value as JsonObject).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${JSON.stringify(k)}:${canonical(v)}`).join(",")}}`; return JSON.stringify(value); }
-function digest(value: unknown): string { return `sha256:${createHash("sha256").update(canonical(value)).digest("hex")}`; }
-function payload(record: JsonObject): JsonObject { const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record; return rest; }
 
 export class ContractInferenceKernel {
   readonly store: CraftStore;
@@ -22,11 +20,11 @@ export class ContractInferenceKernel {
     const evidenceIds = strings(args.evidence_ids, "evidence_ids"); for (const id of evidenceIds) this.store.get("evidence", id);
     const inputSchema = object(args.input_schema, "input_schema"); const outputSchema = object(args.output_schema, "output_schema");
     const identity = { task_id: task.id, adapter_kind: adapter, endpoint: text(args.endpoint, "endpoint"), operation: text(args.operation, "operation"),
-      input_schema_digest: digest(inputSchema), output_schema_digest: digest(outputSchema), observed_effect: effect,
+      input_schema_digest: stableDigest(inputSchema), output_schema_digest: stableDigest(outputSchema), observed_effect: effect,
       idempotency_observed: args.idempotency_observed === true, compensation_observed: args.compensation_observed === true,
       credential_handles_required: strings(args.credential_handles_required ?? [], "credential_handles_required", 0) };
     const observationId = String(args.observation_id ?? `contract_observation_${randomUUID().replaceAll("-", "")}`);
-    const fingerprint = digest({ ...identity, outcome, evidence_ids: evidenceIds }); const existing = this.store.find("contract_observation", observationId);
+    const fingerprint = stableDigest({ ...identity, outcome, evidence_ids: evidenceIds }); const existing = this.store.find("contract_observation", observationId);
     if (existing) { if (existing.fingerprint !== fingerprint) throw new Error("Contract observation idempotency conflict"); return { observation: existing, idempotent: true }; }
     return { observation: this.store.create("contract_observation", observationId, { ...identity, input_schema: inputSchema,
       output_schema: outputSchema, outcome, evidence_ids: evidenceIds, fingerprint, raw_payload_stored: false }), idempotent: false };
@@ -38,7 +36,7 @@ export class ContractInferenceKernel {
     if (observations.some((item) => same.some((key) => item[key] !== first[key]))) throw new Error("Contract observations are not structurally consistent");
     if (observations.some((item) => item.outcome !== "succeeded")) throw new Error("Contract inference requires successful observations");
     const candidateId = String(args.candidate_id ?? `contract_candidate_${randomUUID().replaceAll("-", "")}`);
-    const candidateFingerprint = digest({ observation_ids: [...ids].sort() }); const existing = this.store.find("contract_candidate", candidateId);
+    const candidateFingerprint = stableDigest({ observation_ids: [...ids].sort() }); const existing = this.store.find("contract_candidate", candidateId);
     if (existing) { if (existing.candidate_fingerprint !== candidateFingerprint) throw new Error("Contract candidate idempotency conflict"); return { candidate: existing, idempotent: true }; }
     const unanimous = (field: string) => observations.every((item) => item[field] === first[field]) ? first[field] : "unknown";
     return { candidate: this.store.create("contract_candidate", candidateId, { task_id: first.task_id, adapter_kind: first.adapter_kind,
@@ -78,7 +76,7 @@ export class ContractInferenceKernel {
     const candidate = this.store.get("contract_candidate", text(args.candidate_id, "candidate_id"), Number(args.candidate_version));
     if (baseline.adapter_kind !== candidate.adapter_kind || baseline.endpoint !== candidate.endpoint || baseline.operation !== candidate.operation) throw new Error("Contract diff subjects are unrelated");
     const left = object(baseline.reviewed_contract, "baseline reviewed_contract"); const right = object(candidate.reviewed_contract, "candidate reviewed_contract");
-    const changes: JsonObject[] = []; const add = (field: string, breaking: boolean) => { if (canonical(left[field]) !== canonical(right[field])) changes.push({ field, breaking }); };
+    const changes: JsonObject[] = []; const add = (field: string, breaking: boolean) => { if (canonicalJson(left[field]) !== canonicalJson(right[field])) changes.push({ field, breaking }); };
     add("input_schema", true); add("output_schema", true); add("effect", true); add("credential_handles_required", true);
     add("idempotency", left.idempotency === true && right.idempotency !== true); add("compensation", left.compensation === true && right.compensation !== true);
     return { baseline: { id: baseline.id, version: baseline.version }, candidate: { id: candidate.id, version: candidate.version },
@@ -92,13 +90,13 @@ export class ContractInferenceKernel {
     const reviewed = object(contract.reviewed_contract, "reviewed_contract"); const effect = String(reviewed.effect);
     if (!new Set(["read_only", "local_write", "external_write", "destructive"]).has(effect)) throw new Error("Contract publication effect is not executable");
     const publicationId = String(args.publication_id ?? `contract_publication_${randomUUID().replaceAll("-", "")}`);
-    const fingerprint = digest({ candidate_id: contract.id, candidate_version: contract.version, asset_id: args.asset_id });
+    const fingerprint = stableDigest({ candidate_id: contract.id, candidate_version: contract.version, asset_id: args.asset_id });
     const existing = this.store.find("contract_publication", publicationId);
     if (existing) { if (existing.fingerprint !== fingerprint) throw new Error("Contract publication idempotency conflict"); return { publication: existing, asset: this.store.get("capability_asset", String(existing.asset_id), Number(existing.asset_version)), idempotent: true }; }
     const assetId = text(args.asset_id, "asset_id"); const current = this.store.find("capability_asset", assetId);
     const asset = this.store.save("capability_asset", assetId, { name: text(args.name, "name"), asset_type: "adapter", trust: "verified", health: "healthy",
       effect, source_uri: `craft://contracts/${contract.id}/${contract.version}`, dependencies: [], aliases: [], requires_credential: Array.isArray(reviewed.credential_handles_required) && reviewed.credential_handles_required.length > 0,
-      cost_hint: {}, source_digest: digest(reviewed), contract_id: contract.id, contract_version: contract.version }, current ? Number(current.version) + 1 : 1);
+      cost_hint: {}, source_digest: stableDigest(reviewed), contract_id: contract.id, contract_version: contract.version }, current ? Number(current.version) + 1 : 1);
     const publication = this.store.create("contract_publication", publicationId, { candidate_id: contract.id, candidate_version: contract.version,
       asset_id: asset.id, asset_version: asset.version, publisher, approval_ref: text(args.approval_ref, "approval_ref"), fingerprint, status: "active" });
     return { publication, asset, idempotent: false };

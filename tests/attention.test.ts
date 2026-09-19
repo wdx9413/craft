@@ -13,8 +13,8 @@ import "./acceptance-runner.test.ts";
 import "./acceptance-worker.test.ts";
 import "./domain-kit.test.ts";
 import { AttentionKernel } from "../src/attention.ts";
-import { craftPaths } from "../src/paths.ts";
-import { CraftStore } from "../src/store.ts";
+import { craftPaths } from "../src/infrastructure/paths.ts";
+import { CraftStore } from "../src/infrastructure/store.ts";
 import { CraftService } from "../src/service.ts";
 import { McpServer } from "../src/mcp.ts";
 

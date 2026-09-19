@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+﻿#!/usr/bin/env node
 import { createInterface } from "node:readline/promises";
 import { createHash } from "node:crypto";
 import { access, readFile } from "node:fs/promises";
@@ -7,9 +7,9 @@ import { pathToFileURL } from "node:url";
 import { initializeConfig, loadConfig, setMode, type CraftMode, type DirectProvider,
   type InitInput, type RuntimeKind, configureSemanticSearch } from "./config.ts";
 import { type EmbeddingProviderConfig } from "./semantic.ts";
-import { craftPaths } from "./paths.ts";
+import { craftPaths } from "./infrastructure/paths.ts";
 import { CraftService } from "./service.ts";
-import { CraftStore, type JsonObject } from "./store.ts";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
 import { LocalMaintenanceWorker, MaintenanceKernel } from "./maintenance.ts";
 import { runBuiltinAcceptanceTicks } from "./acceptance-worker.ts";
 import { LocalWorkbenchServer } from "./workbench-server.ts";
@@ -17,8 +17,9 @@ import { LocalSupervisor, SupervisorClient } from "./supervisor.ts";
 import { openBrowser } from "./browser.ts";
 import { VERSION } from "./service.ts";
 import { credentialStatus, createFetchTransport, providerFromConfig } from "./model-gateway.ts";
+import { digestJson } from "./digest.ts";
 
-function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
+
 
 const HELP = `Craft
 
@@ -100,6 +101,7 @@ Semantic options:
 
 Run options:
   --goal <text> --tier <small|standard|frontier> [--max-steps <n>]
+  [--context-scope <user|project|workspace|task>] [--resume <dispatch_id>]
 `;
 
 function option(args: string[], name: string): string | undefined {
@@ -235,6 +237,50 @@ async function fileExists(path: string): Promise<boolean> {
   try { await access(path); return true; } catch { return false; }
 }
 
+/**
+ * Resolve the real context for a standalone run instead of pretending there is
+ * none. Every ref is digest-bound and every selection records *why* it was
+ * chosen, so a degraded run (for example, no embedding provider) is visible in
+ * the manifest rather than silently looking like a healthy one.
+ */
+export async function resolveStandaloneContext(service: CraftService, input: { goal: string; projectRoot: string; contextScope: string; scopeId: string }): Promise<JsonObject> {
+  const rationale: string[] = [];
+  const excluded: string[] = [];
+  const knowledgeRefs: string[] = [];
+  const capabilityRefs: string[] = [];
+  try {
+    const sync = service.knowledgeIndexSync({ project_root: input.projectRoot, limit: 2000 });
+    const plan = (sync.plan ?? {}) as JsonObject;
+    rationale.push(`knowledge_index_sync:added=${String(plan.added ?? 0)},changed=${String(plan.changed ?? 0)},removed=${String(plan.removed ?? 0)}`);
+  } catch (error) {
+    excluded.push(`knowledge_index:${(error as Error).message}`);
+  }
+  try {
+    const hits = service.knowledgeSearch({ query: input.goal, limit: 6 }).hits as JsonObject[];
+    if (hits.length === 0) rationale.push("knowledge:no_match"); else rationale.push(`knowledge:bm25_top${hits.length}`);
+    for (const hit of hits) knowledgeRefs.push(`knowledge://${String(hit.path)}#${String(hit.heading)}@${digestJson({ path: hit.path, heading: hit.heading })}`);
+  } catch (error) {
+    excluded.push(`knowledge_search:${(error as Error).message}`);
+  }
+  try {
+    const capabilities = await service.capabilitySearch({ query: input.goal, limit: 6 });
+    const found = capabilities.capabilities as JsonObject[];
+    if (found.length === 0) rationale.push("capability:no_match"); else rationale.push(`capability:hybrid_top${found.length}`);
+    for (const capability of found) capabilityRefs.push(`capability://${String(capability.id)}@${String(capability.version)}`);
+    if ((capabilities.semantic_search as JsonObject)?.mode !== "ready") rationale.push("degraded:no_embedding_provider");
+  } catch (error) {
+    excluded.push(`capability_search:${(error as Error).message}`);
+  }
+  const resolution = await service.contextResolutionResolve({ query: input.goal, scope_kind: input.contextScope, scope_id: input.scopeId, receipt_id: `standalone-ctx-${digestJson({ goal: input.goal, scope: input.contextScope, id: input.scopeId }).slice(7, 19)}` });
+  const receipt = resolution.receipt as JsonObject;
+  const memoryRefs = Array.isArray(receipt.memory_refs) ? receipt.memory_refs as JsonObject[] : [];
+  if (memoryRefs.length === 0) rationale.push(`memory:${input.contextScope}_no_match`); else rationale.push(`memory:${input.contextScope}_top${memoryRefs.length}`);
+  rationale.push(`retrieval_mode:${String(receipt.retrieval_mode ?? "keyword")}`);
+  const omitted = Number(receipt.omitted_count ?? 0);
+  if (omitted > 0) excluded.push(`context_resolution:omitted=${omitted}`);
+  return { knowledge_refs: knowledgeRefs, capability_refs: capabilityRefs, memory_refs: memoryRefs.map((ref) => `memory://${String(ref.memory_id)}@${String(ref.memory_version)}`), excluded_refs: excluded, selection_rationale: rationale };
+}
+
 async function runStandalone(args: string[], paths: ReturnType<typeof craftPaths>): Promise<JsonObject> {
   const config = await loadConfig(paths);
   if (!config) throw new Error("Craft is not initialized; run `craft init --mode agent --runtime direct-api ...` first.");
@@ -266,16 +312,19 @@ async function runStandalone(args: string[], paths: ReturnType<typeof craftPaths
       ...(option(args, "--max-steps") ? { limits: { max_steps: Number(option(args, "--max-steps")) } } : {}) }) as JsonObject;
     const dispatch = prepared.dispatch as JsonObject;
     service.workSessionBindDispatch({ session_id: session.id, dispatch_id: dispatch.id });
-    const context = service.contextManifestSave({ manifest_id: `context-${dispatch.id}`, project_id: effectiveProjectId, task_id: task.id, model: config.runtime.provider.model, host: "internal", acceptance_ref: `acceptance:${task.id}`, knowledge_refs: [], capability_refs: [], workflow_refs: [], excluded_refs: [], selection_rationale: ["standalone runtime context"] }).manifest as JsonObject;
-    const verified = service.verifiedWorkPrepare({ work_id: `verified-${dispatch.id}`, task_id: task.id, context_manifest_id: context.id, host: "internal", model: config.runtime.provider.model, effect: "read_only", workspace_digest: digest(paths.root), action_digest: digest({ prompt, dispatch_id: dispatch.id }), acceptance_ref: `acceptance:${task.id}` });
+    const contextScope = option(args, "--context-scope") ?? "project";
+    if (!["user", "project", "workspace", "task"].includes(contextScope)) throw new Error("--context-scope must be one of user|project|workspace|task");
+    const resolved = await resolveStandaloneContext(service, { goal: prompt, projectRoot: paths.root, contextScope, scopeId: effectiveProjectId });
+    const context = service.contextManifestSave({ manifest_id: `context-${dispatch.id}`, project_id: effectiveProjectId, task_id: task.id, model: config.runtime.provider.model, host: "internal", acceptance_ref: `acceptance:${task.id}`, knowledge_refs: (resolved.knowledge_refs as string[]) ?? [], capability_refs: (resolved.capability_refs as string[]) ?? [], workflow_refs: [], excluded_refs: (resolved.excluded_refs as string[]) ?? [], selection_rationale: ((resolved.selection_rationale as string[]) ?? []).join("; ") }).manifest as JsonObject;
+    const verified = service.verifiedWorkPrepare({ work_id: `verified-${dispatch.id}`, task_id: task.id, context_manifest_id: context.id, host: "internal", model: config.runtime.provider.model, effect: "read_only", workspace_digest: digestJson(paths.root), action_digest: digestJson({ prompt, dispatch_id: dispatch.id }), acceptance_ref: `acceptance:${task.id}` });
     service.verifiedWorkAuthorize({ work_id: (verified.work as JsonObject).id, authorization_ref: "local-read" });
     const executed = await driver.execute({ dispatch_id: dispatch.id, prompt, ...(existingDispatch ? { resume: true } : {}) });
     const receipt = executed.receipt as JsonObject;
     const hostStatus = receipt.status === "completed" ? "completed" : "failed";
     const evidence = service.evidenceRecord({ evidence_id: `standalone-evidence-${dispatch.id}`, source_type: "program", confidence: hostStatus === "completed" ? "bounded" : "confirmed", claim: `Internal Host returned ${hostStatus}; independent acceptance is still required.`, locator: `internal-dispatch:${dispatch.id}` });
     const artifact = service.artifactRegister({ artifact_id: `standalone-artifact-${dispatch.id}`, kind: "host_receipt", name: `Internal Host receipt ${dispatch.id}`, uri: String(receipt.uri ?? `craft://internal/${dispatch.id}`), digest: receipt.digest ?? null, producer_type: "internal_host", producer_id: dispatch.id });
-    service.verifiedWorkAction({ work_id: (verified.work as JsonObject).id, action_contract: { operation: "model_loop", dispatch_id: dispatch.id }, idempotency_key: "host-receipt", input_digest: digest(prompt), result_digest: digest(receipt) });
-    service.verifiedWorkReobserve({ work_id: (verified.work as JsonObject).id, observed_digest: digest(paths.root), expected_digest: digest(paths.root) });
+    service.verifiedWorkAction({ work_id: (verified.work as JsonObject).id, action_contract: { operation: "model_loop", dispatch_id: dispatch.id }, idempotency_key: "host-receipt", input_digest: digestJson(prompt), result_digest: digestJson(receipt) });
+    service.verifiedWorkReobserve({ work_id: (verified.work as JsonObject).id, observed_digest: digestJson(paths.root), expected_digest: digestJson(paths.root) });
     const gate = service.acceptanceGatePrepare({ gate_id: `standalone-gate-${dispatch.id}`, task_id: task.id, work_id: (verified.work as JsonObject).id, acceptance_ref: `acceptance:${task.id}`, required_artifact_ids: [artifact.id], required_evidence_ids: [evidence.id] });
     const completedSession = service.workSessionComplete({ session_id: session.id, status: hostStatus === "completed" ? "needs_review" : "failed", summary: hostStatus === "completed" ? "Host finished; independent acceptance is pending." : String(receipt.failure ?? "Host failed") });
     return { version: VERSION, project_id: effectiveProjectId, session: completedSession.session, task, ...executed, acceptance: gate, outcome: null } as JsonObject;

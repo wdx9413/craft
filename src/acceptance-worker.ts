@@ -3,12 +3,12 @@ import { existsSync } from "node:fs";
 import { lstat, readFile } from "node:fs/promises";
 import { extname, isAbsolute, relative, resolve } from "node:path";
 import { type CraftService } from "./service.ts";
-import { type JsonObject } from "./store.ts";
+import { type JsonObject } from "./infrastructure/store.ts";
+import { text } from "./validation.ts";
 
 export type AcceptanceEvaluationResult = { result: "passed" | "failed" | "blocked"; summary: string; receipt?: JsonObject };
 export type AcceptanceJobExecutor = (job: JsonObject) => Promise<AcceptanceEvaluationResult>;
 
-function text(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim(); }
 function positive(value: unknown, name: string, fallback: number): number { const parsed = value === undefined ? fallback : Number(value); if (!Number.isInteger(parsed) || parsed < 1) throw new Error(`${name} must be a positive integer`); return parsed; }
 function contained(root: string, target: string): boolean { const rel = relative(root, target); return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel)); }
 async function readJsonArtifact(job: JsonObject): Promise<{ data: JsonObject; path: string }> { const input = job.input as JsonObject; const workspace = resolve(text(input.workspace, "input.workspace")); const relativePath = text(input.relative_path, "input.relative_path"); if (isAbsolute(relativePath)) throw new Error("input.relative_path must be relative"); const target = resolve(workspace, relativePath); if (!contained(workspace, target)) throw new Error("input.relative_path escapes the workspace"); const stat = await lstat(target); if (stat.isSymbolicLink() || !stat.isFile() || stat.size > 10 * 1024 * 1024) throw new Error("JSON evidence must be a regular non-symlink file of at most 10 MiB"); const parsed: unknown = JSON.parse(await readFile(target, "utf8")); if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("JSON evidence must contain an object"); return { data: parsed as JsonObject, path: relativePath }; }

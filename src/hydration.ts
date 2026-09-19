@@ -1,9 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
-import { CraftStore, type JsonObject } from "./store.ts";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
+import { text } from "./validation.ts";
+import { payload } from "./digest.ts";
 
-function text(value: unknown, name: string): string {
-  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim();
-}
 function integer(value: unknown, name: string, fallback: number, min: number, max: number): number {
   const result = value === undefined ? fallback : Number(value);
   if (!Number.isInteger(result) || result < min || result > max) throw new Error(`${name} must be an integer between ${min} and ${max}`); return result;
@@ -18,9 +17,7 @@ function instant(value: unknown, name: string): number {
   const result = value === undefined ? Date.now() : Date.parse(text(value, name));
   if (Number.isNaN(result)) throw new Error(`${name} must be an ISO timestamp`); return result;
 }
-function payload(record: JsonObject): JsonObject {
-  const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record; return rest;
-}
+
 function fingerprint(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
 function reference(record: JsonObject): JsonObject { return { id: record.id, version: record.version }; }
 

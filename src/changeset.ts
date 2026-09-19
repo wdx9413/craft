@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { CraftStore, type JsonObject, type SaveEntry } from "./store.ts";
+import { CraftStore, type JsonObject, type SaveEntry } from "./infrastructure/store.ts";
 import { WorkbenchKernel } from "./workbench.ts";
+import { text } from "./validation.ts";
+import { payload } from "./digest.ts";
 
 type Patch = { object_id: string; base_version: number; op: "set" | "remove"; path: string; value?: unknown };
 
@@ -8,16 +10,6 @@ function id(value: unknown, name: string, prefix: string): string {
   const result = value === undefined ? `${prefix}_${randomUUID().replaceAll("-", "")}` : String(value).trim();
   if (!/^[a-zA-Z0-9_-]+$/.test(result)) throw new Error(`${name} must contain only letters, numbers, _ or -`);
   return result;
-}
-
-function text(value: unknown, name: string): string {
-  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
-  return value.trim();
-}
-
-function payload(record: JsonObject): JsonObject {
-  const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record;
-  return rest;
 }
 
 function pointer(value: unknown): string[] {

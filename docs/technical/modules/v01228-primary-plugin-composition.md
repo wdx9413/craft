@@ -4,7 +4,7 @@
 
 `craft` 是默认安装入口，包含 Core、Context（Knowledge + Memory）、Capability discovery、Quality 和受限 Workflow Evolution。它们共用同一份 Craft 数据、策略、证据与评测账本；安装主插件不需要再安装任何 `craft-*` 子插件。实现主体不是插件，而是可被任意 Host 调用的 Craft Runtime/MCP。
 
-子插件不是主插件的依赖，而是同一 Runtime 的 MCP 安装投影：当用户只希望给已有 Host 增加 Context、知识、记忆、能力发现或通用 Quality 时，可单独安装对应 Plugin，也可直接配置 `craft-mcp --product <name>`。通常应当与主插件二选一，避免给同一个 Host 安装重复工具面。`craft-knowledge` 与 `craft-memory` 是正式单域入口；`craft-skill-quality` 是 `quality` 的兼容名称；`craft-workflow-evolution` 只能生成草案，不能独立形成发布闭环。
+子插件不是主插件的依赖，而是同一 Runtime 的 MCP 安装投影：当用户只希望给已有 Host 增加 Context、知识、记忆、能力发现或通用 Quality 时，可单独安装对应 Plugin，也可直接配置 `craft-mcp --product <name>`。通常应当与主插件二选一，避免给同一个 Host 安装重复工具面。`craft-knowledge` 与 `craft-memory` 是正式单域入口；`craft-skill-quality` 是 `quality` 的兼容名称；`craft-experience` 只能生成草案，不能独立形成发布闭环。
 
 | 产品 | 公开入口 | Runtime 工具面 |
 | --- | --- | --- |

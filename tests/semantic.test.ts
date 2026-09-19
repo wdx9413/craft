@@ -5,10 +5,10 @@ import { join } from "node:path";
 import test from "node:test";
 import { Catalog } from "../src/catalog.ts";
 import { initializeConfig } from "../src/config.ts";
-import { craftPaths } from "../src/paths.ts";
+import { craftPaths } from "../src/infrastructure/paths.ts";
 import { cosine, embeddingFingerprint, OpenAiCompatibleEmbeddingProvider, sanitizeEmbeddingText, semanticFailureReason,
   type EmbeddingProvider } from "../src/semantic.ts";
-import { CraftStore } from "../src/store.ts";
+import { CraftStore } from "../src/infrastructure/store.ts";
 import { CraftService } from "../src/service.ts";
 
 class StubEmbeddings implements EmbeddingProvider {

@@ -28,8 +28,10 @@
 - [Agent-Native Workspace 与生成界面](technical/modules/agent-native-workspace.md)
 - [沙箱与风险分级执行](technical/modules/execution-policy.md)：现有隔离雏形、平台缺口、Shadow/补偿和安全验收。
 - [Transactional Runtime 与 Trajectory Compiler](technical/modules/transactional-runtime.md)：本地事务、脚本交接、分支重放与自动编译目标。
+- [**上下文的五个成员**](technical/modules/context-members.md)：`history` / `knowledge` / `memory` / `experience` / `state` 各由谁持有、门槛是什么、`state` 具体存什么、历史压缩的实测状态；区分"决定"与"实测"，并集中列出未决问题。**问 context 由什么组成时先读这一篇。**
+- [**Capability 扩展协议**](technical/modules/capability-protocol.md)：进程内的能力契约（`CraftCapability` / 注册表装配 / 归属与投影 / hook 与单点埋点 / 能力包分层）。**MCP 是对外协议，这一篇是内部协议。**
 - [上下文与记忆管理](technical/modules/context-memory.md)：CVMM 类比、按需工作集、偏好范围与后台整理目标。
-- [Knowledge Source、Memory Ledger 与 Context Resolution](technical/modules/knowledge-memory-runtime.md)：统一知识来源、兼容旧记忆、受限装配回执与可选向量检索准入。
+- [Knowledge Source、Memory Ledger 与 Context Resolution](technical/modules/knowledge-memory-context.md)：统一知识来源、兼容旧记忆、受限装配回执与可选向量检索准入；**v0.12.43 沿成员边界切成三个模块**（两个能力包 + 一个核心控制面），以及为什么读取侧必须留在核心。
 - [Turn Cognitive Runtime](technical/modules/turn-cognitive-runtime.md)：每轮按需做上下文、能力、工作、候选记忆和评测决策；不强制把对话变成任务。
 - [Evaluation Model Profile 与 Workflow Evolution](technical/modules/evaluation-model-workflow-evolution.md)：真实模型的 secret-free 调用契约，以及脱敏执行记录到受限 Workflow 草案的晋级链。
 - [Console 与独立 Agent 运行模式](technical/modules/work-runtime-modes.md)：以同一 Policy、State、Receipt、Eval 内核支持 Host 控制台与模型无关 Agent 计划。
@@ -98,6 +100,7 @@
 - [**v0.12.4 方案（2026-09-13）**](research/craft-v0.12.4-plan-2026-09-13.md)：自主运行时、持久 Checkpoint、统一能力生命周期、记忆整合、HTTPS 远程互操作和可导出观测契约；明确真实 OS 沙箱、云端 transport 与多用户服务仍由外部 Adapter 验收。
 - [**v0.12.6 方案（2026-09-13）**](research/craft-v0.12.6-plan-2026-09-13.md)：跨 GUI、CLI、插件和专家的通用意图/验收合同，以及低 Token 默认接入边界。
 - [自适应 Harness 研究基线](research/self-adaptive-harness-closed-loop-2026-09-08.md)：较早版本的研究记录，实施状态以当前模块说明为准。
+- [**MCP 2026-07-28 迁移策略（2026-09-18）**](research/mcp-2026-07-28-migration-strategy-2026-09-18.md)：破坏性修订的影响面评估、Tasks/MRTR 归属决策与 S0–S3 最小交付；当前为策略而非实施记录。
 
 ## 当前实现参考
 
@@ -108,6 +111,7 @@
 - [中文架构说明](architecture.zh-CN.md)
 - [English architecture](architecture.en.md)
 - [分层与目录地图](architecture/layer-map.md)：说明 interfaces、application、domains、infrastructure 的边界与兼容拆分策略。
+- [**决策记录（ADR）**](adr/README.md)：11 条"已决定、不应重新争论"的架构决策及其索引。**这 11 条此前没有任何地方引用**——写进目录但没人索引的决策与没写下来的决策一样会被忘掉，所以新增 ADR 时同时在索引里加一行。
 
 文档区分“已实现接口/机制”“真实链路已验收”和“目标/待实现”。v0.12.13 的本地接口与测试已实现；真实平台 OS 沙箱、Secret Broker、OTLP 部署、远程 A2A 和多人同步仍须由对应 Adapter 提供独立证明。有代码、100% 单元覆盖率、真实平台安全与业务质量是不同证据。
 - [联邦委派与受限多 Agent 运行时](technical/modules/federated-delegation-runtime.zh-CN.md)

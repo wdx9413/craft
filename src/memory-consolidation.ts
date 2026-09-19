@@ -1,10 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { JsonObject } from "./store.ts";
-import { CraftStore } from "./store.ts";
-
-function text(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim(); }
-function payload(record: JsonObject): JsonObject { const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record; return rest; }
-function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
+import type { JsonObject } from "./infrastructure/store.ts";
+import { CraftStore } from "./infrastructure/store.ts";
+import { text } from "./validation.ts";
+import { digestJson, payload } from "./digest.ts";
 
 export class MemoryConsolidationKernel {
   readonly store: CraftStore;
@@ -16,7 +14,7 @@ export class MemoryConsolidationKernel {
     const content = text(args.content, "content");
     const source = text(args.source ?? "work", "source");
     const existing = this.store.find("episodic_memory", memoryId);
-    const identityDigest = digest({ scope, content, source, task_id: args.task_id ?? null });
+    const identityDigest = digestJson({ scope, content, source, task_id: args.task_id ?? null });
     if (existing) {
       if (existing.identity_digest !== identityDigest) throw new Error("Memory idempotency conflict");
       return { memory: existing, idempotent: true };
@@ -31,7 +29,7 @@ export class MemoryConsolidationKernel {
     const scope = text(args.scope ?? memories[0]!.scope, "scope");
     const content = text(args.content ?? memories.map((memory) => String(memory.content)).join("\n"), "content");
     const semanticId = String(args.semantic_id ?? `semantic_memory_${randomUUID().replaceAll("-", "")}`);
-    const identityDigest = digest({ scope, content, memory_ids: memoryIds });
+    const identityDigest = digestJson({ scope, content, memory_ids: memoryIds });
     const existing = this.store.find("semantic_memory", semanticId);
     if (existing) {
       if (existing.identity_digest !== identityDigest) throw new Error("Semantic memory idempotency conflict");

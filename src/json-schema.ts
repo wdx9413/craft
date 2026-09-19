@@ -1,9 +1,10 @@
-import { type JsonObject } from "./store.ts";
+import { type JsonObject } from "./infrastructure/store.ts";
+import { object } from "./validation.ts";
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 
 const TYPES = new Set(["object", "array", "string", "number", "integer", "boolean", "null"]);
 const KEYWORDS = new Set(["$schema", "title", "description", "type", "properties", "required", "additionalProperties", "items", "enum", "const", "minLength", "maxLength", "minimum", "maximum", "minItems", "maxItems"]);
-function object(value: unknown, name: string): JsonObject { if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${name} must be an object`); return value as JsonObject; }
+
 function integer(value: unknown, name: string): number { const parsed = Number(value); if (!Number.isInteger(parsed) || parsed < 0) throw new Error(`${name} must be a non-negative integer`); return parsed; }
 function same(left: unknown, right: unknown): boolean { return JSON.stringify(left) === JSON.stringify(right); }
 

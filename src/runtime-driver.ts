@@ -1,6 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
-import { CraftStore, type JsonObject } from "./store.ts";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
 import { defaultHooks, runHooks, type HookOutcome, type HookSpec, type HookRun } from "./hooks.ts";
+import { object, text } from "./validation.ts";
+import { digestJson } from "./digest.ts";
 
 /**
  * Effect classes the runtime driver recognises. Each `Operation` declares
@@ -10,25 +12,11 @@ import { defaultHooks, runHooks, type HookOutcome, type HookSpec, type HookRun }
 export type EffectClass = "read" | "write" | "execute" | "network" | "publish";
 const EFFECT_CLASSES: readonly string[] = ["read", "write", "execute", "network", "publish"];
 
-function text(value: unknown, name: string): string {
-  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
-  return value.trim();
-}
-
-function object(value: unknown, name: string): JsonObject {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${name} must be an object`);
-  return value as JsonObject;
-}
-
 /** Narrow validation seam used by the method-level coverage suite. */
 export const runtimeDriverInternalsForTest = { text, object };
 
 function isEffectClass(value: unknown): value is EffectClass {
   return typeof value === "string" && EFFECT_CLASSES.includes(value);
-}
-
-function digest(value: unknown): string {
-  return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
 }
 
 /**
@@ -319,7 +307,7 @@ export class RuntimeDriver {
     if (hook.kind !== "builtin") throw new Error(`Hook ${hook.id} is not a builtin`);
     switch (hook.target) {
       case "builtin:audit-log":
-        return { ok: true, detail: digest({ hook: hook.id, point, op: body.operation_id, ts: this.now().toISOString() }) };
+        return { ok: true, detail: digestJson({ hook: hook.id, point, op: body.operation_id, ts: this.now().toISOString() }) };
       case "builtin:token-meter":
         // The meter is observational; the metrics aggregator writes the
         // actual counters. Returning ok keeps the chain moving.

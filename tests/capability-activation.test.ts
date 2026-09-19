@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { McpServer } from "../src/mcp.ts";
-import { craftPaths } from "../src/paths.ts";
+import { craftPaths } from "../src/infrastructure/paths.ts";
 import { CraftService, VERSION } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/store.ts";
+import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
 
 test("logical capability content is pinned and audit detects reselection or drift", async () => {
   const root = join(tmpdir(), `craft-logical-activation-${process.pid}-${Date.now()}`); const primary = join(root, "primary"); const mirror = join(root, "mirror");
@@ -53,6 +53,6 @@ test("logical capability content is pinned and audit detects reselection or drif
       const result = await mcp.handle({ id: name, method: "tools/call", params: { name, arguments: arguments_ } });
       assert.equal((result?.result as JsonObject).isError, false, name);
     }
-    assert.equal(VERSION, "0.12.30");
+    assert.equal(VERSION, "0.12.33");
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import type { JsonObject } from "./store.ts";
+import type { JsonObject } from "./infrastructure/store.ts";
+import { text } from "./validation.ts";
 
 /**
  * One envelope for every reusable thing.
@@ -60,11 +61,6 @@ const TRUSTS: readonly string[] = ["verified", "candidate", "unverified", "revok
 const HEALTHS: readonly string[] = ["healthy", "degraded", "blocked", "unknown"];
 const EFFECTS: readonly string[] = ["read_only", "local_write", "external_write", "destructive"];
 const ASSET_ID = /^[a-zA-Z0-9][a-zA-Z0-9._:@/-]{0,127}$/u;
-
-function text(value: unknown, name: string): string {
-  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
-  return value.trim();
-}
 
 function oneOf<T extends string>(value: unknown, name: string, allowed: readonly string[]): T {
   const result = text(value, name);

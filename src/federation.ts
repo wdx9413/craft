@@ -1,19 +1,16 @@
-import { createHash, randomUUID } from "node:crypto";
-import { CraftStore, type JsonObject } from "./store.ts";
+﻿import { randomUUID } from "node:crypto";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
+import { object, text } from "./validation.ts";
+import { stableDigest, payload } from "./digest.ts";
 
-function text(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim(); }
-function object(value: unknown, name: string): JsonObject { if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${name} must be an object`); return value as JsonObject; }
 function strings(value: unknown, name: string, minimum = 0): string[] { if (!Array.isArray(value) || value.length < minimum) throw new Error(`${name} must contain at least ${minimum} values`); const result = value.map((item) => text(item, name)); if (new Set(result).size !== result.length) throw new Error(`${name} must contain unique values`); return result; }
-function canonical(value: unknown): string { if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`; if (value && typeof value === "object") return `{${Object.entries(value as JsonObject).sort(([a], [b]) => a.localeCompare(b)).map(([key, child]) => `${JSON.stringify(key)}:${canonical(child)}`).join(",")}}`; return JSON.stringify(value); }
-function digest(value: unknown): string { return `sha256:${createHash("sha256").update(canonical(value)).digest("hex")}`; }
-function payload(record: JsonObject): JsonObject { const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record; return rest; }
+
 function safe(value: unknown, path = "manifest"): void {
   if (typeof value === "string" && /(?:bearer\s+[a-z0-9._-]{8,}|sk-[a-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----)/iu.test(value)) throw new Error(`${path} contains secret-like material`);
   if (Array.isArray(value)) { value.forEach((item, index) => safe(item, `${path}[${index}]`)); return; }
   if (!value || typeof value !== "object") return;
   for (const [key, child] of Object.entries(value as JsonObject)) { if (/^(?:api[_-]?key|authorization|cookie|password|secret|token)$/iu.test(key)) throw new Error(`${path}.${key} is a sensitive field`); safe(child, `${path}.${key}`); }
 }
-
 export class CapabilityFederationKernel {
   readonly store: CraftStore;
   constructor(store: CraftStore) { this.store = store; }
@@ -25,7 +22,7 @@ export class CapabilityFederationKernel {
     const audience = text(args.audience, "audience"); if (!new Set(["personal", "team", "organization"]).has(audience)) throw new Error("Federation audience is unsupported");
     const manifest = object(args.manifest, "manifest"); safe(manifest);
     const bundleId = String(args.bundle_id ?? `capability_bundle_${randomUUID().replaceAll("-", "")}`);
-    const fingerprint = digest({ asset_id: asset.id, asset_version: asset.version, audience, manifest, evidence_ids: [...evidenceIds].sort() });
+    const fingerprint = stableDigest({ asset_id: asset.id, asset_version: asset.version, audience, manifest, evidence_ids: [...evidenceIds].sort() });
     const existing = this.store.find("capability_bundle", bundleId); if (existing) { if (existing.fingerprint !== fingerprint) throw new Error("Capability bundle idempotency conflict"); return { bundle: existing, idempotent: true }; }
     return { bundle: this.store.create("capability_bundle", bundleId, { asset_id: asset.id, asset_version: asset.version, audience, manifest,
       evidence_ids: evidenceIds, fingerprint, status: "proposed", execution_authority: false, raw_trajectory_stored: false }), idempotent: false };
@@ -44,8 +41,8 @@ export class CapabilityFederationKernel {
     const publisher = text(args.publisher, "publisher"); if (publisher === bundle.reviewer) throw new Error("Federation publication requires an independent publisher");
     const asset = this.store.get("capability_asset", String(bundle.asset_id), Number(bundle.asset_version)); const currentAsset = this.store.get("capability_asset", String(bundle.asset_id));
     if (asset.trust !== "verified" || asset.health !== "healthy" || currentAsset.health !== "healthy") throw new Error("Capability bundle asset is no longer publishable");
-    const releaseId = String(args.release_id ?? `capability_release_${randomUUID().replaceAll("-", "")}`); const releaseDigest = digest({ bundle_id: bundle.id, bundle_version: bundle.version, asset_id: asset.id, asset_version: asset.version, manifest: bundle.manifest });
-    const approvalRef = text(args.approval_ref, "approval_ref"); const publicationFingerprint = digest({ release_digest: releaseDigest, publisher, approval_ref: approvalRef });
+    const releaseId = String(args.release_id ?? `capability_release_${randomUUID().replaceAll("-", "")}`); const releaseDigest = stableDigest({ bundle_id: bundle.id, bundle_version: bundle.version, asset_id: asset.id, asset_version: asset.version, manifest: bundle.manifest });
+    const approvalRef = text(args.approval_ref, "approval_ref"); const publicationFingerprint = stableDigest({ release_digest: releaseDigest, publisher, approval_ref: approvalRef });
     const existing = this.store.find("capability_release", releaseId); if (existing) { if (existing.publication_fingerprint !== publicationFingerprint) throw new Error("Capability release idempotency conflict"); return { release: existing, idempotent: true }; }
     return { release: this.store.create("capability_release", releaseId, { bundle_id: bundle.id, bundle_version: bundle.version, asset_id: asset.id,
       asset_version: asset.version, audience: bundle.audience, manifest: bundle.manifest, evidence_ids: bundle.evidence_ids, publisher,
@@ -56,7 +53,7 @@ export class CapabilityFederationKernel {
     const release = this.store.get("capability_release", text(args.release_id, "release_id"), Number(args.release_version)); const currentRelease = this.store.get("capability_release", String(release.id));
     if (release.status !== "active" || currentRelease.status !== "active") throw new Error("Capability release is not active");
     const consumer = text(args.consumer, "consumer"); const subscriptionId = String(args.subscription_id ?? `capability_subscription_${randomUUID().replaceAll("-", "")}`);
-    const fingerprint = digest({ release_id: release.id, release_version: release.version, release_digest: release.release_digest, consumer }); const existing = this.store.find("capability_subscription", subscriptionId);
+    const fingerprint = stableDigest({ release_id: release.id, release_version: release.version, release_digest: release.release_digest, consumer }); const existing = this.store.find("capability_subscription", subscriptionId);
     if (existing) { if (existing.fingerprint !== fingerprint) throw new Error("Capability subscription idempotency conflict"); return { subscription: existing, idempotent: true }; }
     return { subscription: this.store.create("capability_subscription", subscriptionId, { release_id: release.id, release_version: release.version,
       release_digest: release.release_digest, consumer, asset_id: release.asset_id, asset_version: release.asset_version, fingerprint, status: "pinned", execution_authority: false }), idempotent: false };

@@ -1,12 +1,14 @@
 import { createHash, randomUUID } from "node:crypto";
-import { CraftStore, type JsonObject } from "./store.ts";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
 import { TraceKernel } from "./trace-kernel.ts";
+import { text } from "./validation.ts";
+import { digestJson } from "./digest.ts";
 
 const KINDS = new Set(["program", "workspace", "human", "external"]);
 const VERDICTS = new Set(["passed", "failed", "blocked", "inconclusive"]);
 
-function text(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim(); }
-function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
+
+
 function ids(value: unknown): string[] { if (value === undefined) return []; if (!Array.isArray(value)) throw new Error("evidence_ids must be an array"); const result = value.map((item) => text(item, "evidence_ids")); if (new Set(result).size !== result.length) throw new Error("evidence_ids must be unique"); return result.sort(); }
 
 /** Independent, content-free observation; it is evidence for assessment, never an auto-promotion decision. */
@@ -24,7 +26,7 @@ export class OutcomeObserverKernel {
     const evidenceIds = ids(args.evidence_ids); if (verdict === "passed" && !evidenceIds.length) throw new Error("Passed Outcome Observation requires Evidence");
     for (const evidenceId of evidenceIds) if (!new Set(["confirmed", "bounded"]).has(String(this.store.get("evidence", evidenceId).confidence))) throw new Error("Outcome Observation Evidence must be confirmed or bounded");
     const identity = { trace_id: trace.id, host_id: hostId, observer_id: observerId, observer_kind: kind, environment_fingerprint: environment, verdict, state_snapshot_ref: text(args.state_snapshot_ref, "state_snapshot_ref"), evidence_ids: evidenceIds };
-    const observationId = String(args.observation_id ?? `outcome_observation_${randomUUID().replaceAll("-", "")}`); const observationDigest = digest(identity); const existing = this.store.find("outcome_observation", observationId);
+    const observationId = String(args.observation_id ?? `outcome_observation_${randomUUID().replaceAll("-", "")}`); const observationDigest = digestJson(identity); const existing = this.store.find("outcome_observation", observationId);
     if (existing) { if (existing.observation_digest !== observationDigest) throw new Error("Outcome Observation idempotency conflict"); return { observation: existing, trace_event: this.store.get("trace_event", String(existing.trace_event_id)), idempotent: true }; }
     const traceEvent = this.trace.observe({ trace_id: trace.id, event_id: `outcome_observer:${observationId}`, actor: observerId, source: `outcome_observer:${kind}`, trust: kind === "human" ? "human" : "observed", state_after: { ref: identity.state_snapshot_ref }, output_refs: evidenceIds, summary: `${kind}:${verdict}`, data: { observation_id: observationId, observer_kind: kind, verdict, environment_fingerprint: environment } }).event as JsonObject;
     const observation = this.store.create("outcome_observation", observationId, { ...identity, observation_digest: observationDigest, trace_event_id: traceEvent.id, trace_event_version: traceEvent.version, promotion_eligible: false, raw_content_stored: false });

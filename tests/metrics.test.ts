@@ -6,9 +6,9 @@ import test from "node:test";
 import { defaultHooks } from "../src/hooks.ts";
 import { McpServer } from "../src/mcp.ts";
 import { MetricsKernel, usageTokens } from "../src/metrics.ts";
-import { craftPaths } from "../src/paths.ts";
+import { craftPaths } from "../src/infrastructure/paths.ts";
 import { CraftService } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/store.ts";
+import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
 
 const ISO = (offsetMs: number) => new Date(Date.parse("2026-01-01T00:00:00.000Z") + offsetMs).toISOString();
 

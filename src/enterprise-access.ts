@@ -1,13 +1,12 @@
 import { createHash } from "node:crypto";
-import { CraftStore, type JsonObject } from "./store.ts";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
+import { text } from "./validation.ts";
+import { digestJson, payload } from "./digest.ts";
 
 const PROVIDER_KINDS = new Set(["oidc_workload_identity", "short_lived_broker"]);
 const EFFECTS = new Set(["read_only", "external_write", "destructive"]);
 
-function text(value: unknown, name: string): string {
-  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
-  return value.trim();
-}
+
 function strings(value: unknown, name: string, minimum = 0): string[] {
   if (!Array.isArray(value) || value.length < minimum) throw new Error(`${name} must contain at least ${minimum} values`);
   const values = value.map((item) => text(item, name));
@@ -24,11 +23,8 @@ function integer(value: unknown, name: string, fallback: number, minimum: number
   if (!Number.isInteger(result) || result < minimum || result > maximum) throw new Error(`${name} must be an integer between ${minimum} and ${maximum}`);
   return result;
 }
-function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
-function payload(record: JsonObject): JsonObject {
-  const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record;
-  return rest;
-}
+
+
 function confirmedEvidence(store: CraftStore, ids: string[]): void {
   for (const id of ids) if (store.get("evidence", id).confidence !== "confirmed") throw new Error("Enterprise boundary verification requires confirmed Evidence");
 }
@@ -45,7 +41,7 @@ export class EnterpriseAccessKernel {
     const kind = text(args.kind, "kind"); if (!PROVIDER_KINDS.has(kind)) throw new Error("Enterprise identity provider kind is unsupported");
     const issuer = new URL(text(args.issuer, "issuer")); if (issuer.protocol !== "https:" || issuer.username || issuer.password) throw new Error("Enterprise issuer must be an HTTPS URL without credentials");
     const definition = { kind, issuer: issuer.toString(), audience: text(args.audience, "audience"), broker_ref: text(args.broker_ref, "broker_ref"), organization_ref: text(args.organization_ref, "organization_ref") };
-    const providerId = text(args.provider_id, "provider_id"); const existing = this.store.find("enterprise_identity_provider", providerId); const definitionDigest = digest(definition);
+    const providerId = text(args.provider_id, "provider_id"); const existing = this.store.find("enterprise_identity_provider", providerId); const definitionDigest = digestJson(definition);
     if (existing) { if (existing.definition_digest !== definitionDigest) throw new Error("Enterprise identity provider idempotency conflict"); return { provider: existing, idempotent: true }; }
     return { provider: this.store.create("enterprise_identity_provider", providerId, { ...definition, definition_digest: definitionDigest, lifecycle: "declared", raw_credential_stored: false }), idempotent: false };
   }
@@ -66,7 +62,7 @@ export class EnterpriseAccessKernel {
     const subjectDigest = text(args.subject_digest, "subject_digest"); if (!/^sha256:[a-f0-9]{64}$/u.test(subjectDigest)) throw new Error("subject_digest must be SHA-256; raw subject identifiers are not stored");
     const now = instant(args.now, "now"); const ttl = integer(args.ttl_seconds, "ttl_seconds", Math.min(900, Number(provider.max_ttl_seconds)), 60, Number(provider.max_ttl_seconds));
     const identity = { provider_id: provider.id, provider_version: provider.version, task_id: task.id, subject_digest: subjectDigest, roles: strings(args.roles, "roles", 1), organization_ref: provider.organization_ref };
-    const principalId = text(args.principal_id, "principal_id"); const existing = this.store.find("enterprise_principal", principalId); const identityDigest = digest(identity);
+    const principalId = text(args.principal_id, "principal_id"); const existing = this.store.find("enterprise_principal", principalId); const identityDigest = digestJson(identity);
     if (existing) { if (existing.identity_digest !== identityDigest) throw new Error("Enterprise principal idempotency conflict"); return { principal: existing, idempotent: true }; }
     return { principal: this.store.create("enterprise_principal", principalId, { ...identity, identity_digest: identityDigest, status: "active", bound_at: new Date(now).toISOString(), expires_at: new Date(now + ttl * 1_000).toISOString() }), idempotent: false };
   }
@@ -80,7 +76,7 @@ export class EnterpriseAccessKernel {
     if (!effects.includes(String(asset.effect))) throw new Error("Enterprise Adapter cannot widen its published Contract effect");
     const definition = { provider_id: provider.id, provider_version: provider.version, contract_publication_id: publication.id, contract_publication_version: publication.version,
       asset_id: asset.id, asset_version: asset.version, allowed_effects: effects, target_host: text(args.target_host, "target_host") };
-    const bindingId = text(args.binding_id, "binding_id"); const existing = this.store.find("enterprise_adapter_binding", bindingId); const definitionDigest = digest(definition);
+    const bindingId = text(args.binding_id, "binding_id"); const existing = this.store.find("enterprise_adapter_binding", bindingId); const definitionDigest = digestJson(definition);
     if (existing) { if (existing.definition_digest !== definitionDigest) throw new Error("Enterprise Adapter binding idempotency conflict"); return { binding: existing, idempotent: true }; }
     return { binding: this.store.create("enterprise_adapter_binding", bindingId, { ...definition, definition_digest: definitionDigest, lifecycle: "active", raw_credential_stored: false }), idempotent: false };
   }
@@ -100,7 +96,7 @@ export class EnterpriseAccessKernel {
     const expires = Math.min(Date.parse(String(principal.expires_at)), Date.parse(String(lease.expires_at)));
     const identity = { binding_id: binding.id, binding_version: binding.version, principal_id: principal.id, principal_version: principal.version, task_id: task.id,
       credential_lease_id: lease.id, effect, request_digest: text(args.request_digest, "request_digest"), approval_ref: approvalRef, autonomy_consumption_id: consumptionId, expires_at: new Date(expires).toISOString() };
-    const ticketId = text(args.ticket_id, "ticket_id"); const existing = this.store.find("enterprise_access_ticket", ticketId); const ticketDigest = digest(identity);
+    const ticketId = text(args.ticket_id, "ticket_id"); const existing = this.store.find("enterprise_access_ticket", ticketId); const ticketDigest = digestJson(identity);
     if (existing) { if (existing.ticket_digest !== ticketDigest) throw new Error("Enterprise Access ticket idempotency conflict"); return { ticket: existing, idempotent: true }; }
     return { ticket: this.store.create("enterprise_access_ticket", ticketId, { ...identity, ticket_digest: ticketDigest, status: "issued", broker_instruction: { credential_lease_id: lease.id, target_host: binding.target_host } }), idempotent: false };
   }

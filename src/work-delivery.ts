@@ -1,8 +1,10 @@
 import { createHash } from "node:crypto";
-import { CraftStore, type JsonObject } from "./store.ts";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
+import { text } from "./validation.ts";
+import { digestJson } from "./digest.ts";
 
-function text(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim(); }
-function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
+
+
 
 /** Read-only closure over an exact Host receipt and independent acceptance state. */
 export class WorkDeliveryKernel {
@@ -17,7 +19,7 @@ export class WorkDeliveryKernel {
     const hostPassed = run.status === "completed";
     const status = !hostPassed ? "host_failed" : launch.acceptance_plan_id === undefined ? "ready_for_delivery" : acceptance?.status === "passed" ? "accepted" : acceptance?.status === "failed" ? "rejected" : acceptance?.status === "blocked" ? "blocked" : "awaiting_acceptance";
     const identity = { launch_id: launch.id, launch_version: launch.version, run_id: run.id, run_version: run.version, acceptance_id: acceptance?.id ?? null, acceptance_version: acceptance?.version ?? null, status };
-    const deliveryId = String(args.delivery_id ?? `delivery_${launch.id}`); const existing = this.store.find("work_delivery", deliveryId); const observationDigest = digest(identity);
+    const deliveryId = String(args.delivery_id ?? `delivery_${launch.id}`); const existing = this.store.find("work_delivery", deliveryId); const observationDigest = digestJson(identity);
     if (existing) { if (existing.observation_digest !== observationDigest) throw new Error("Work delivery observation changed; use a new delivery_id"); return { delivery: existing, launch, run, acceptance, idempotent: true }; }
     return { delivery: this.store.create("work_delivery", deliveryId, { ...identity, observation_digest: observationDigest }), launch, run, acceptance, idempotent: false };
   }

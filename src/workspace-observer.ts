@@ -1,9 +1,11 @@
 import { createHash } from "node:crypto";
-import { CraftStore, type JsonObject } from "./store.ts";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
 import { StateWorkspaceKernel } from "./state-workspace.ts";
+import { text } from "./validation.ts";
+import { digestJson } from "./digest.ts";
 
-function text(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim(); }
-function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
+
+
 
 /** Poll-based, content-free workspace observer. It never guesses whether an
  * uncorrelated edit was made by a person or a model. */
@@ -20,7 +22,7 @@ export class WorkspaceObserverKernel {
     const source = args.source === undefined ? "unattributed" : text(args.source, "source"); if (!new Set(["host", "human", "unattributed"]).has(source)) throw new Error("Workspace observation source is unsupported");
     const changed = difference.changed === true; const classification = !changed ? "unchanged" : source === "host" ? "host_observed" : source === "human" ? "human_observed" : "external_unattributed";
     const identity = { workspace_id: workspaceId, previous_snapshot_id: prior?.id ?? null, previous_snapshot_version: prior?.version ?? null, snapshot_id: snapshot.id, snapshot_version: snapshot.version, source, classification, difference };
-    const observationId = String(args.observation_id ?? `workspace_observation_${workspaceId}_${digest(identity).slice(-16)}`); const existing = this.store.find("workspace_observation", observationId); const observationDigest = digest(identity);
+    const observationId = String(args.observation_id ?? `workspace_observation_${workspaceId}_${digestJson(identity).slice(-16)}`); const existing = this.store.find("workspace_observation", observationId); const observationDigest = digestJson(identity);
     if (existing) { if (existing.observation_digest !== observationDigest) throw new Error("Workspace observation idempotency conflict"); return { observation: existing, snapshot, idempotent: true }; }
     const observation = this.store.create("workspace_observation", observationId, { ...identity, observation_digest: observationDigest });
     this.store.appendEvent(`workspace:${workspaceId}`, "workspace.observed", { observation_id: observation.id, classification, changed, snapshot_id: snapshot.id });

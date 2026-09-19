@@ -34,8 +34,14 @@ jobs:
         run: pnpm run build:deepseek
       - name: Package host adapters
         run: pnpm run pack:adapters
+      - name: Lint
+        run: pnpm run lint
       - name: Typecheck
         run: pnpm run typecheck
+      - name: Layer direction audit
+        run: pnpm run audit:layering
+      - name: Declaration/implementation consistency audit
+        run: pnpm run audit:consistency
       - name: Unit tests and 100% coverage
         run: pnpm run test:ts
       - name: CLI smoke test

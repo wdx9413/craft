@@ -1,20 +1,19 @@
 import { createHash } from "node:crypto";
-import { CraftStore, type JsonObject } from "./store.ts";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
 import { BUILTIN_HOST_PROFILES, type HostProfile } from "./host-registry.ts";
+import { text } from "./validation.ts";
+import { digestJson } from "./digest.ts";
 
 const EFFECTS = new Set(["read_only", "local_write", "external_write"]);
 
-function text(value: unknown, name: string): string {
-  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
-  return value.trim();
-}
+
 function values(value: unknown, name: string): string[] {
   if (!Array.isArray(value) || !value.length) throw new Error(`${name} must be a non-empty array`);
   const result = value.map((item) => text(item, name));
   if (new Set(result).size !== result.length) throw new Error(`${name} must contain unique values`);
   return result;
 }
-function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
+
 function isExpired(value: unknown): boolean { return Number.isNaN(Date.parse(String(value))) || Date.parse(String(value)) < Date.now(); }
 
 /**
@@ -51,8 +50,8 @@ export class HostActivationManifestKernel {
     }
     const assets = requested.map((assetId) => this.asset(profile, assetId, ticketByAsset));
     const identity = { task_id: task.id, profile_id: profile.id, profile_version: profile.version, host, assets };
-    const manifestId = String(args.manifest_id ?? `host_activation_${digest(identity).slice(-20)}`);
-    const existing = this.store.find("host_activation_manifest", manifestId); const identityDigest = digest(identity);
+    const manifestId = String(args.manifest_id ?? `host_activation_${digestJson(identity).slice(-20)}`);
+    const existing = this.store.find("host_activation_manifest", manifestId); const identityDigest = digestJson(identity);
     if (existing) {
       if (existing.identity_digest !== identityDigest) throw new Error("Host Activation Manifest idempotency conflict");
       return { manifest: existing, idempotent: true };
@@ -69,7 +68,7 @@ export class HostActivationManifestKernel {
       reference.connector_ticket_id ? [[String(reference.asset_id), this.store.get("capability_connector_ticket", String(reference.connector_ticket_id))]] : [],
     )));
     const expected = { task_id: manifest.task_id, profile_id: profile.id, profile_version: profile.version, host: manifest.host, assets };
-    if (digest(expected) !== manifest.identity_digest) throw new Error("Host Activation Manifest facts drifted");
+    if (digestJson(expected) !== manifest.identity_digest) throw new Error("Host Activation Manifest facts drifted");
     return { manifest, valid: true };
   }
 
@@ -80,10 +79,10 @@ export class HostActivationManifestKernel {
     const existing = this.store.find("host_activation_receipt", callId);
     const identity = { manifest_id: manifest.id, manifest_version: manifest.version, host };
     if (existing) {
-      if (existing.identity_digest !== digest(identity)) throw new Error("Host Activation receipt idempotency conflict");
+      if (existing.identity_digest !== digestJson(identity)) throw new Error("Host Activation receipt idempotency conflict");
       return { receipt: existing, idempotent: true };
     }
-    return { receipt: this.store.create("host_activation_receipt", callId, { ...identity, identity_digest: digest(identity) }), idempotent: false };
+    return { receipt: this.store.create("host_activation_receipt", callId, { ...identity, identity_digest: digestJson(identity) }), idempotent: false };
   }
 
   get(args: JsonObject): JsonObject {

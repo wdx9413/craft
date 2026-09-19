@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { randomUUID } from "node:crypto";
 import { dirname } from "node:path";
 import { resolve } from "node:path";
-import { atomicPrivateJson, craftPaths, ensureLayout, type CraftPaths } from "./paths.ts";
+import { atomicPrivateJson, craftPaths, ensureLayout, type CraftPaths } from "./infrastructure/paths.ts";
 
 export type ModelProtocol = "openai-compatible" | "anthropic";
 
@@ -91,9 +91,10 @@ function normalizeModels(value: unknown): CraftModelConfig[] {
 }
 
 export function defaultSettings(paths = craftPaths()): CraftSettings {
-  // Studio starts in the low-glare light theme. Dark and system-following are
-  // deliberate user choices in Settings, never a surprise on first launch.
-  return { schemaVersion: 1, locale: "zh-CN", theme: "light", dataRoot: paths.root,
+  // `theme` must agree with `normalizeSettings`, which fills a missing theme
+  // with "system": the factory and the loader describe the same first launch,
+  // so a reset cannot silently pin a different theme than a fresh load.
+  return { schemaVersion: 1, locale: "zh-CN", theme: "system", dataRoot: paths.root,
     workbench: { port: 4173, openOnStart: true }, runtime: { defaultTier: "medium", maxSteps: 32, maxTokens: 12000 },
     models: [], privacy: { telemetry: false }, updatedAt: new Date(0).toISOString() };
 }

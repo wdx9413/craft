@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { resolve } from "node:path";
-import type { JsonObject } from "./store.ts";
+import type { JsonObject } from "./infrastructure/store.ts";
 
 export type IsolatedExecution = {
   run_id: string; command: string; args: string[]; runtime_root: string; command_allowlist: string[]; path_allowlist: string[];

@@ -1,11 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
-import { CraftStore, type JsonObject } from "./store.ts";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
+import { text } from "./validation.ts";
+import { digestJson, payload } from "./digest.ts";
 
 function id(prefix: string): string { return `${prefix}_${randomUUID().replaceAll("-", "")}`; }
-function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
-function text(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim(); }
+
 function entries(value: unknown, name: string): JsonObject[] { if (value === undefined) return []; if (!Array.isArray(value)) throw new Error(`${name} must be an array`); return value.map((item) => { if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error(`${name} must contain objects`); return item as JsonObject; }); }
-function payload(record: JsonObject): JsonObject { const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record; return rest; }
+
 function noSecret(value: string, name: string): string { if (/(?:api[_-]?key|authorization|cookie|password|secret|token)["']?\s*[:=]\s*[^\s]+/iu.test(value)) throw new Error(`${name} must not contain sensitive assignments`); return value; }
 
 /** A user-readable goal/material/decision state; it never starts a Host itself. */
@@ -19,9 +20,9 @@ export class GuidedWorkKernel {
     const decisions = entries(args.decisions, "decisions").map((item) => ({ id: text(item.id, "decisions.id"), question: noSecret(text(item.question, "decisions.question"), "decisions.question"), required: item.required === undefined ? true : item.required, answer: null }));
     if (materials.some((item) => !new Set(["file", "url", "note", "artifact"]).has(String(item.kind))) || decisions.some((item) => typeof item.required !== "boolean") || new Set(decisions.map((item) => String(item.id))).size !== decisions.length) throw new Error("Guided work materials or decisions are unsupported");
     const briefId = String(args.brief_id ?? id("guided_work")); const identity = { task_id: task.id, materials, decisions: decisions.map(({ answer: _answer, ...item }) => item) }; const existing = this.store.find("guided_work_brief", briefId);
-    if (existing) { if (existing.identity_digest !== digest(identity)) throw new Error("Guided work brief idempotency conflict"); return { brief: existing, task, idempotent: true }; }
+    if (existing) { if (existing.identity_digest !== digestJson(identity)) throw new Error("Guided work brief idempotency conflict"); return { brief: existing, task, idempotent: true }; }
     const status = decisions.some((item) => item.required) ? "awaiting_decisions" : "ready_to_launch";
-    const brief = this.store.create("guided_work_brief", briefId, { ...identity, identity_digest: digest(identity), status, launch_id: null, execution_authority: false });
+    const brief = this.store.create("guided_work_brief", briefId, { ...identity, identity_digest: digestJson(identity), status, launch_id: null, execution_authority: false });
     return { brief, task, idempotent: false };
   }
 
@@ -31,7 +32,7 @@ export class GuidedWorkKernel {
     const decisionId = text(args.decision_id, "decision_id"); const answer = noSecret(text(args.answer, "answer"), "answer"); const actor = text(args.actor, "actor");
     const decisions = entries(brief.decisions, "brief.decisions").map((item) => ({ ...item })); const decision = decisions.find((item) => item.id === decisionId);
     if (!decision) throw new Error("Guided work decision is unknown"); if (decision.answer !== null && decision.answer !== undefined) throw new Error("Guided work decision is already answered");
-    decision.answer = { actor, answer_digest: digest(answer), decided_at: new Date().toISOString() };
+    decision.answer = { actor, answer_digest: digestJson(answer), decided_at: new Date().toISOString() };
     const status = decisions.some((item) => item.required && (item.answer === null || item.answer === undefined)) ? "awaiting_decisions" : "ready_to_launch";
     return { brief: this.store.save("guided_work_brief", String(brief.id), { ...payload(brief), decisions, status }) };
   }

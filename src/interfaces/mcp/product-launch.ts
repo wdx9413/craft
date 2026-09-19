@@ -11,7 +11,7 @@ export const MCP_PRODUCT_SURFACES = {
   memory: "component-memory",
   capability: "component-capability",
   quality: "component-quality",
-  evolution: "component-workflow-evolution",
+  experience: "component-experience",
   admin: "full",
 } as const;
 

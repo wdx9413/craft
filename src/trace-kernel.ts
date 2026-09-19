@@ -1,8 +1,10 @@
-import { createHash, randomUUID } from "node:crypto";
-import type { JsonObject } from "./store.ts";
-import { CraftStore } from "./store.ts";
+﻿import { randomUUID } from "node:crypto";
+import type { JsonObject } from "./infrastructure/store.ts";
+import { CraftStore } from "./infrastructure/store.ts";
 import { TRACE_SCHEMA, TRACE_SCHEMA_REVISION } from "./runtime-truth.ts";
 import { LocalTraceArchiveStore, type TraceArchivePointer, type TraceArchiveStore } from "./trace-archive-store.ts";
+import { text } from "./validation.ts";
+import { canonicalJson, stableDigest, payload } from "./digest.ts";
 
 /** Current write format. Legacy callers may still import this name. */
 export const TRACE_SCHEMA_VERSION = TRACE_SCHEMA;
@@ -14,10 +16,6 @@ const TERMINAL = new Set<TraceStatus>(["completed", "failed", "cancelled", "bloc
 const TRUST = new Set<TraceTrust>(["observed", "verified", "human", "untrusted"]);
 const SIGNALS = new Set(["accepted", "rejected", "corrected", "retried", "stopped", "handoff", "rated"]);
 
-function text(value: unknown, name: string): string {
-  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
-  return value.trim();
-}
 function optional(value: unknown): string | null { return value === undefined || value === null ? null : text(value, "reference"); }
 function object(value: unknown, name: string, fallback: JsonObject = {}): JsonObject {
   if (value === undefined) return fallback;
@@ -37,20 +35,10 @@ function number(value: unknown, name: string): number | null {
   if (!Number.isFinite(result) || result < 0) throw new Error(`${name} must be a non-negative finite number`);
   return result;
 }
-function canonical(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
-  if (value && typeof value === "object") return `{${Object.entries(value as JsonObject).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`).join(",")}}`;
-  return JSON.stringify(value);
-}
-function digest(value: unknown): string { return `sha256:${createHash("sha256").update(canonical(value)).digest("hex")}`; }
 function safeData(value: unknown, name: string): JsonObject {
   const result = object(value, name);
   if (/["']?(?:api[_-]?key|authorization|cookie|password|secret|token)["']?\s*[:=]/iu.test(JSON.stringify(result))) throw new Error(`${name} must not contain sensitive assignments`);
   return result;
-}
-function payload(record: JsonObject): JsonObject {
-  const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record;
-  return rest;
 }
 
 /**
@@ -67,13 +55,13 @@ export class TraceKernel {
     const taskId = text(args.task_id, "task_id");
     const traceId = String(args.trace_id ?? `trace_${randomUUID().replaceAll("-", "")}`);
     const identity = { task_id: taskId, launch_id: optional(args.launch_id), run_id: optional(args.run_id), trial_id: optional(args.trial_id), attempt_id: optional(args.attempt_id), operation_id: optional(args.operation_id), model_fingerprint: optional(args.model_fingerprint), environment_fingerprint: optional(args.environment_fingerprint), capability_fingerprint: optional(args.capability_fingerprint), policy_fingerprint: optional(args.policy_fingerprint) };
-    const identityDigest = digest(identity);
+    const identityDigest = stableDigest(identity);
     const existing = this.store.find("trace", traceId);
     if (existing) {
       if (existing.identity_digest !== identityDigest) throw new Error("Trace idempotency conflict");
       return { trace: existing, idempotent: true };
     }
-    return { trace: this.store.create("trace", traceId, { schema: TRACE_SCHEMA_VERSION, schema_revision: TRACE_SCHEMA_REVISION, ...identity, identity_digest: identityDigest, status: "running", next_sequence: 0, event_count: 0, started_at: new Date().toISOString(), metadata_digest: digest(safeData(args.metadata, "metadata")) }), idempotent: false };
+    return { trace: this.store.create("trace", traceId, { schema: TRACE_SCHEMA_VERSION, schema_revision: TRACE_SCHEMA_REVISION, ...identity, identity_digest: identityDigest, status: "running", next_sequence: 0, event_count: 0, started_at: new Date().toISOString(), metadata_digest: stableDigest(safeData(args.metadata, "metadata")) }), idempotent: false };
   }
 
   append(args: JsonObject): JsonObject {
@@ -89,8 +77,8 @@ export class TraceKernel {
     if (!TRUST.has(trust)) throw new Error("Trace event trust is unsupported");
     const eventId = requestedEventId ?? `${traceId}:${sequence}`;
     const data = safeData(args.data, "data");
-    const identity = { trace_id: traceId, sequence, event_kind: eventKind, actor: String(args.actor ?? "system"), source: String(args.source ?? "craft"), trust, span_id: optional(args.span_id) ?? `${traceId}:span:${sequence}`, parent_span_id: optional(args.parent_span_id), operation_id: optional(args.operation_id), action_contract: args.action_contract === undefined ? null : safeData(args.action_contract, "action_contract"), state_before: args.state_before === undefined ? null : safeData(args.state_before, "state_before"), state_after: args.state_after === undefined ? null : safeData(args.state_after, "state_after"), input_refs: strings(args.input_refs, "input_refs"), output_refs: strings(args.output_refs, "output_refs"), capability_revision: optional(args.capability_revision), policy_revision: optional(args.policy_revision), model_fingerprint: optional(args.model_fingerprint), environment_fingerprint: optional(args.environment_fingerprint), workspace_before: optional(args.workspace_before), workspace_after: optional(args.workspace_after), usage: args.usage === undefined ? null : safeData(args.usage, "usage"), cost_usd: number(args.cost_usd, "cost_usd"), duration_ms: number(args.duration_ms, "duration_ms"), error_class: optional(args.error_class), status: optional(args.status), summary: optional(args.summary), data_digest: digest(data), content_stored: false };
-    const eventDigest = digest(identity);
+    const identity = { trace_id: traceId, sequence, event_kind: eventKind, actor: String(args.actor ?? "system"), source: String(args.source ?? "craft"), trust, span_id: optional(args.span_id) ?? `${traceId}:span:${sequence}`, parent_span_id: optional(args.parent_span_id), operation_id: optional(args.operation_id), action_contract: args.action_contract === undefined ? null : safeData(args.action_contract, "action_contract"), state_before: args.state_before === undefined ? null : safeData(args.state_before, "state_before"), state_after: args.state_after === undefined ? null : safeData(args.state_after, "state_after"), input_refs: strings(args.input_refs, "input_refs"), output_refs: strings(args.output_refs, "output_refs"), capability_revision: optional(args.capability_revision), policy_revision: optional(args.policy_revision), model_fingerprint: optional(args.model_fingerprint), environment_fingerprint: optional(args.environment_fingerprint), workspace_before: optional(args.workspace_before), workspace_after: optional(args.workspace_after), usage: args.usage === undefined ? null : safeData(args.usage, "usage"), cost_usd: number(args.cost_usd, "cost_usd"), duration_ms: number(args.duration_ms, "duration_ms"), error_class: optional(args.error_class), status: optional(args.status), summary: optional(args.summary), data_digest: stableDigest(data), content_stored: false };
+    const eventDigest = stableDigest(identity);
     const existing = existingRequested ?? this.store.find("trace_event", eventId);
     if (existing) {
       if (existing.event_digest !== eventDigest) throw new Error("Trace event idempotency conflict");
@@ -109,13 +97,13 @@ export class TraceKernel {
   feedback(args: JsonObject): JsonObject {
     const traceId = text(args.trace_id, "trace_id"); this.store.get("trace", traceId);
     const signal = text(args.signal, "signal"); if (!SIGNALS.has(signal)) throw new Error("Trace feedback signal is unsupported");
-    const summary = text(args.summary, "summary"); const feedbackId = String(args.feedback_id ?? `feedback_${traceId}_${digest({ signal, summary }).slice(-16)}`);
+    const summary = text(args.summary, "summary"); const feedbackId = String(args.feedback_id ?? `feedback_${traceId}_${stableDigest({ signal, summary }).slice(-16)}`);
     const existing = this.store.find("trace_feedback", feedbackId);
     if (existing) {
       if (existing.signal !== signal || existing.summary !== summary) throw new Error("Trace feedback idempotency conflict");
       return { feedback: existing, idempotent: true };
     }
-    const record = this.store.create("trace_feedback", feedbackId, { trace_id: traceId, signal, actor: String(args.actor ?? "human"), summary, value: args.value === undefined ? null : safeData(args.value, "value"), evidence_ids: strings(args.evidence_ids, "evidence_ids"), outcome: optional(args.outcome), signal_digest: digest({ signal, summary, value: args.value ?? null }) });
+    const record = this.store.create("trace_feedback", feedbackId, { trace_id: traceId, signal, actor: String(args.actor ?? "human"), summary, value: args.value === undefined ? null : safeData(args.value, "value"), evidence_ids: strings(args.evidence_ids, "evidence_ids"), outcome: optional(args.outcome), signal_digest: stableDigest({ signal, summary, value: args.value ?? null }) });
     const event = this.append({ trace_id: traceId, event_kind: `feedback.${signal}`, actor: record.actor, source: "feedback", trust: record.actor === "human" ? "human" : "untrusted", summary, data: {}, output_refs: [record.id] });
     return { feedback: record, event, idempotent: event.idempotent === true };
   }
@@ -158,7 +146,7 @@ export class TraceKernel {
     const result = this.get({ trace_id: args.trace_id }); const trace = result.trace as JsonObject; if (!TERMINAL.has(String(trace.status) as TraceStatus)) throw new Error("Trace Case requires a terminal Trace");
     const partition = String(args.partition ?? "development"); if (!(new Set(["development", "held_out"]).has(partition))) throw new Error("Trace Case partition is unsupported");
     const approvedBy = args.approved_by === undefined ? null : text(args.approved_by, "approved_by"); if (partition === "held_out" && approvedBy === null) throw new Error("held_out Trace Case requires approved_by");
-    const caseId = String(args.case_id ?? `trace_case_${trace.id}`); const eventIds = (result.events as JsonObject[]).map((event) => String(event.id)); const identity = { source_trace_id: trace.id, trace_version: trace.version, event_ids: eventIds, partition, acceptance_contract_ref: optional(args.acceptance_contract_ref), summary: text(args.summary, "summary") }; const caseDigest = digest(identity); const existing = this.store.find("trace_case", caseId);
+    const caseId = String(args.case_id ?? `trace_case_${trace.id}`); const eventIds = (result.events as JsonObject[]).map((event) => String(event.id)); const identity = { source_trace_id: trace.id, trace_version: trace.version, event_ids: eventIds, partition, acceptance_contract_ref: optional(args.acceptance_contract_ref), summary: text(args.summary, "summary") }; const caseDigest = stableDigest(identity); const existing = this.store.find("trace_case", caseId);
     if (existing) { if (existing.case_digest !== caseDigest) throw new Error("Trace Case idempotency conflict"); return { case: existing, idempotent: true }; }
     return { case: this.store.create("trace_case", caseId, { ...identity, case_digest: caseDigest, sanitized: true, raw_content_stored: false, contamination_flags: strings(args.contamination_flags, "contamination_flags"), approved_by: approvedBy, status: "candidate" }), idempotent: false };
   }
@@ -166,8 +154,8 @@ export class TraceKernel {
   retentionPlan(args: JsonObject): JsonObject {
     const policyId = text(args.policy_id ?? "default", "policy_id"); const maxDays = Number(args.max_days ?? 7); const maxEvents = Number(args.max_events ?? 100_000); if (!Number.isInteger(maxDays) || maxDays < 1) throw new Error("max_days must be a positive integer"); if (!Number.isInteger(maxEvents) || maxEvents < 1) throw new Error("max_events must be a positive integer");
     if (args.replace !== undefined && args.replace !== true && args.replace !== false) throw new Error("replace must be a boolean");
-    const existing = this.store.find("trace_policy", policyId); const identity = { max_days: maxDays, max_events: maxEvents, pii_mode: String(args.pii_mode ?? "digest_only") }; if (existing) { if (existing.identity_digest === digest(identity)) return { policy: existing, idempotent: true }; if (args.replace !== true) throw new Error("Trace policy idempotency conflict"); return { policy: this.store.save("trace_policy", policyId, { ...payload(existing), ...identity, identity_digest: digest(identity), policy_revision: Number(existing.policy_revision ?? 1) + 1, updated_by: String(args.updated_by ?? "operator") }), idempotent: false }; }
-    return { policy: this.store.create("trace_policy", policyId, { ...identity, identity_digest: digest(identity), policy_revision: 1, archive_before_delete: true, automatic_after_archive: true, deletion_requires_review: false }), idempotent: false };
+    const existing = this.store.find("trace_policy", policyId); const identity = { max_days: maxDays, max_events: maxEvents, pii_mode: String(args.pii_mode ?? "digest_only") }; if (existing) { if (existing.identity_digest === stableDigest(identity)) return { policy: existing, idempotent: true }; if (args.replace !== true) throw new Error("Trace policy idempotency conflict"); return { policy: this.store.save("trace_policy", policyId, { ...payload(existing), ...identity, identity_digest: stableDigest(identity), policy_revision: Number(existing.policy_revision ?? 1) + 1, updated_by: String(args.updated_by ?? "operator") }), idempotent: false }; }
+    return { policy: this.store.create("trace_policy", policyId, { ...identity, identity_digest: stableDigest(identity), policy_revision: 1, archive_before_delete: true, automatic_after_archive: true, deletion_requires_review: false }), idempotent: false };
   }
 
   /** Archive and remove only terminal traces older than the retention window. */

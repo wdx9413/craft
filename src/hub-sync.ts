@@ -1,12 +1,10 @@
-import { createHash, createPublicKey, randomUUID, verify } from "node:crypto";
-import { CraftStore, type JsonObject } from "./store.ts";
+import { createPublicKey, randomUUID, verify } from "node:crypto";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
+import { text } from "./validation.ts";
+import { canonicalJson, stableDigest, payload } from "./digest.ts";
 
-function text(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim(); }
 function integer(value: unknown, name: string, min: number, max: number): number { const result = Number(value); if (!Number.isInteger(result) || result < min || result > max) throw new Error(`${name} must be an integer between ${min} and ${max}`); return result; }
 function strings(value: unknown, name: string, max = 50): string[] { if (!Array.isArray(value) || value.length > max) throw new Error(`${name} must be an array with at most ${max} values`); const result = value.map((item) => text(item, name)); if (new Set(result).size !== result.length) throw new Error(`${name} must contain unique values`); return result; }
-function canonical(value: unknown): string { if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`; if (value && typeof value === "object") return `{${Object.entries(value as JsonObject).sort(([a], [b]) => a.localeCompare(b)).map(([key, child]) => `${JSON.stringify(key)}:${canonical(child)}`).join(",")}}`; return JSON.stringify(value); }
-function digest(value: unknown): string { return `sha256:${createHash("sha256").update(canonical(value)).digest("hex")}`; }
-function payload(record: JsonObject): JsonObject { const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record; return rest; }
 function entry(value: unknown): JsonObject {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Hub entry must be an object"); const item = value as JsonObject;
   const status = text(item.status, "entry.status"); if (!new Set(["active", "withdrawn"]).has(status)) throw new Error("Hub entry status is unsupported");
@@ -24,7 +22,7 @@ export class HubSyncKernel {
     const endpoint = new URL(text(args.endpoint, "endpoint")); if (endpoint.protocol !== "https:" || endpoint.username || endpoint.password) throw new Error("Hub endpoint must be HTTPS without embedded credentials");
     const publicKey = text(args.public_key_pem, "public_key_pem"); let key; try { key = createPublicKey(publicKey); } catch { throw new Error("Hub public key is invalid"); }
     if (key.asymmetricKeyType !== "ed25519") throw new Error("Hub source requires an Ed25519 public key");
-    const sourceId = String(args.source_id ?? `hub_source_${randomUUID().replaceAll("-", "")}`); const fingerprint = digest({ endpoint: endpoint.toString(), public_key_pem: publicKey, publisher: args.publisher });
+    const sourceId = String(args.source_id ?? `hub_source_${randomUUID().replaceAll("-", "")}`); const fingerprint = stableDigest({ endpoint: endpoint.toString(), public_key_pem: publicKey, publisher: args.publisher });
     const existing = this.store.find("hub_source", sourceId); if (existing) { if (existing.fingerprint !== fingerprint) throw new Error("Hub source idempotency conflict"); return { source: existing, idempotent: true }; }
     return { source: this.store.create("hub_source", sourceId, { endpoint: endpoint.toString(), publisher: text(args.publisher, "publisher"), public_key_pem: publicKey,
       fingerprint, status: "active", cursor_revision: 0, cursor_digest: "genesis", last_sync_at: null }), idempotent: false };
@@ -37,9 +35,9 @@ export class HubSyncKernel {
     if (!Array.isArray(args.entries) || args.entries.length > 1000) throw new Error("Hub page must contain at most 1000 entries"); const entries = args.entries.map(entry);
     if (new Set(entries.map((item) => item.entry_id)).size !== entries.length) throw new Error("Hub page entry ids must be unique");
     const issuedAt = text(args.issued_at, "issued_at"); if (Number.isNaN(Date.parse(issuedAt))) throw new Error("Hub issued_at must be an ISO timestamp");
-    const envelope = { source_id: source.id, revision, previous_digest: previousDigest, issued_at: issuedAt, entries }; const pageDigest = digest(envelope);
+    const envelope = { source_id: source.id, revision, previous_digest: previousDigest, issued_at: issuedAt, entries }; const pageDigest = stableDigest(envelope);
     let signature: Buffer; try { signature = Buffer.from(text(args.signature, "signature"), "base64"); } catch { throw new Error("Hub signature is invalid"); }
-    if (!signature.length || !verify(null, Buffer.from(canonical(envelope)), String(source.public_key_pem), signature)) throw new Error("Hub page signature verification failed");
+    if (!signature.length || !verify(null, Buffer.from(canonicalJson(envelope)), String(source.public_key_pem), signature)) throw new Error("Hub page signature verification failed");
     const receiptId = String(args.receipt_id ?? `hub_sync_${randomUUID().replaceAll("-", "")}`); const existing = this.store.find("hub_sync_receipt", receiptId);
     if (existing) { if (existing.page_digest !== pageDigest) throw new Error("Hub sync receipt idempotency conflict"); return { receipt: existing, idempotent: true }; }
     if (revision !== Number(source.cursor_revision) + 1) throw new Error("Hub revision must advance exactly once");

@@ -1,8 +1,10 @@
 import { createHash } from "node:crypto";
-import { CraftStore, type JsonObject } from "./store.ts";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
+import { text } from "./validation.ts";
+import { digestJson } from "./digest.ts";
 
-function text(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim(); }
-function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
+
+
 
 /** Selects only explicitly routed, evaluated candidates; otherwise returns the declared minimal baseline. */
 export class AdaptiveHarnessKernel {
@@ -17,8 +19,8 @@ export class AdaptiveHarnessKernel {
       .filter((item) => item.matches > 0)
       .sort((left, right) => right.matches - left.matches || String(left.candidate.id).localeCompare(String(right.candidate.id)));
     const selected = candidates[0]?.candidate ?? null;
-    const identity = { task_id: task.id, task_version: task.version, goal_digest: digest(goal), baseline_harness: baseline, candidate_id: selected?.id ?? null, candidate_version: selected?.version ?? null };
-    const recommendationId = String(args.recommendation_id ?? `adaptive_harness_recommendation_${digest(identity).slice(-16)}`); const existing = this.store.find("adaptive_harness_recommendation", recommendationId); const identityDigest = digest(identity);
+    const identity = { task_id: task.id, task_version: task.version, goal_digest: digestJson(goal), baseline_harness: baseline, candidate_id: selected?.id ?? null, candidate_version: selected?.version ?? null };
+    const recommendationId = String(args.recommendation_id ?? `adaptive_harness_recommendation_${digestJson(identity).slice(-16)}`); const existing = this.store.find("adaptive_harness_recommendation", recommendationId); const identityDigest = digestJson(identity);
     if (existing) { if (existing.identity_digest !== identityDigest) throw new Error("Adaptive Harness recommendation idempotency conflict"); return { recommendation: existing, idempotent: true }; }
     const recommendation = this.store.create("adaptive_harness_recommendation", recommendationId, { ...identity, identity_digest: identityDigest, selected_harness: selected?.candidate_harness ?? baseline, reason: selected ? "evaluated_canary_candidate" : "no_eligible_candidate", execution_authority: false });
     return { recommendation, idempotent: false };

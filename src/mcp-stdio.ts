@@ -1,7 +1,7 @@
 import { createInterface } from "node:readline";
 import { McpServer } from "./mcp.ts";
 import { CraftService } from "./service.ts";
-import { CraftStore, type JsonObject } from "./store.ts";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
 
 type Mode = string;
 type Server = Pick<McpServer, "handle">;

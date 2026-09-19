@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { CraftStore, type JsonObject } from "./store.ts";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
+import { object } from "./validation.ts";
 
 type ScriptOperation = JsonObject & { operation_id: string; kind: "workflow" | "checkpoint" };
 const SECRET = /(?:api[_-]?key|authorization|cookie|password|secret|token)\s*[:=]\s*[^\s]+/iu;
@@ -16,10 +17,7 @@ function text(value: unknown, name: string): string {
   return value.trim();
 }
 
-function object(value: unknown, name: string): JsonObject {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${name} must be an object`);
-  return value as JsonObject;
-}
+
 
 function recordPayload(record: JsonObject): JsonObject {
   const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...payload } = record;

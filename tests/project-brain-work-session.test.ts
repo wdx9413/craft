@@ -1,11 +1,11 @@
-import assert from "node:assert/strict";
+﻿import assert from "node:assert/strict";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { craftPaths } from "../src/paths.ts";
-import { CraftStore } from "../src/store.ts";
-import { ProjectBrainKernel } from "../src/project-brain.ts";
+import { craftPaths } from "../src/infrastructure/paths.ts";
+import { CraftStore } from "../src/infrastructure/store.ts";
+import { ProjectBrainKernel } from "../capability/craft-knowledge/project-brain.ts";
 import { WorkSessionKernel } from "../src/work-session.ts";
 import { WorkbenchExperienceKernel } from "../src/workbench-experience.ts";
 import { LongTaskWorkerKernel } from "../src/long-task-worker.ts";
@@ -57,7 +57,18 @@ test("v0.12.12 service and MCP expose the new surfaces", async () => {
 
 test("v0.12.18 internal Host advertises only bounded Craft actions", async () => {
   const f = await fixture(); const service = new CraftService(f.store);
-  assert.deepEqual(service.internalHost.tools.map((tool) => tool.function.name), ["capability_search", "knowledge_search", "task_checkpoint", "evidence_record", "artifact_register", "workspace_read", "workspace_write"]);
+  // The loop now addresses the full canonical catalog, but only through the
+  // read/candidate tiers: it can observe and propose, never approve its own work.
+  const names = service.internalHost.tools.map((tool) => tool.function.name);
+  assert.ok(names.length > 7, "the loop should see more than the legacy bounded table");
+  for (const forbidden of ["capability_delete", "contract_publish", "credential_lease_issue", "docker_run"]) {
+    assert.ok(!names.includes(forbidden), `${forbidden} must not be mounted on the loop`);
+  }
+  assert.ok(names.includes("knowledge_search"));
+  assert.ok(names.includes("workspace_write"));
+  assert.ok(service.internalHost.authorization.includes("read"));
+  assert.ok(service.internalHost.authorization.includes("candidate"));
+  assert.ok(!service.internalHost.authorization.includes("governed"));
   f.store.create("task", "task10", { project_id: null, title: "Task", goal: "Goal", status: "active" });
   f.store.create("project_brain", "brain10", { project_id: "local", name: "local", description_digest: "sha256:x", status: "active" });
   const session = service.workSessionPrepare({ project_id: "local", task_id: "task10", session_id: "session10" });

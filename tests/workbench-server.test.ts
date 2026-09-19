@@ -5,9 +5,9 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { craftPaths } from "../src/paths.ts";
+import { craftPaths } from "../src/infrastructure/paths.ts";
 import { CraftService, VERSION } from "../src/service.ts";
-import { CraftStore } from "../src/store.ts";
+import { CraftStore } from "../src/infrastructure/store.ts";
 import { LocalWorkbenchServer, WorkbenchWebApp } from "../src/workbench-server.ts";
 import { McpServer } from "../src/mcp.ts";
 

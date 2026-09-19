@@ -127,6 +127,8 @@ Observed Delivery ──pairs──> Eval Campaign Report ──with Canary Evid
 - [Agent-Native Workspace Runtime](modules/agent-native-runtime.md)：将 Host 事实、状态再观察、分级自主权和评测 Attempt 收敛为可恢复链。
 - [沙箱与风险分级执行](modules/execution-policy.md)
 - [Transactional Runtime 与 Trajectory Compiler](modules/transactional-runtime.md)
+- [**上下文的五个成员**：谁持有 history / knowledge / memory / experience / state](modules/context-members.md)
+- [**Capability 扩展协议**：进程内的能力契约与 hook](modules/capability-protocol.md)
 - [上下文与记忆管理](modules/context-memory.md)
 - [Evidence Wiki：带证据的项目知识层](modules/evidence-wiki.md)
 - [Context Compiler：有界知识上下文](modules/context-compiler.md)

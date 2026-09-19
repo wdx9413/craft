@@ -1,10 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
-import { CraftStore, type JsonObject } from "./store.ts";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
+import { text } from "./validation.ts";
+import { digestJson, payload } from "./digest.ts";
 
 const OPERATIONS = new Set(["index", "summarize", "draft", "prefetch_metadata"]);
-function text(value: unknown, name: string): string {
-  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim();
-}
+
 function integer(value: unknown, name: string, fallback: number, min: number, max: number): number {
   const result = value === undefined ? fallback : Number(value);
   if (!Number.isInteger(result) || result < min || result > max) throw new Error(`${name} must be an integer between ${min} and ${max}`); return result;
@@ -22,15 +22,10 @@ function resources(value: unknown): JsonObject {
   }
   return value as JsonObject;
 }
-function payload(record: JsonObject): JsonObject {
-  const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record; return rest;
-}
+
 function instant(value: unknown, name: string): number {
   const result = value === undefined ? Date.now() : Date.parse(text(value, name));
   if (Number.isNaN(result)) throw new Error(`${name} must be an ISO timestamp`); return result;
-}
-function digest(value: unknown): string {
-  return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
 }
 
 export class SpeculativeKernel {
@@ -62,7 +57,7 @@ export class SpeculativeKernel {
     if (event.status !== "delivered" || !dispatch || dispatch.task_id !== policy.task_id || dispatch.event_key !== policy.event_key) {
       throw new Error("Trigger event does not match the active speculative policy");
     }
-    const candidateId = `spec_${policy.id}_v${policy.version}_${event.id}`; const inputFingerprint = digest({
+    const candidateId = `spec_${policy.id}_v${policy.version}_${event.id}`; const inputFingerprint = digestJson({
       event_digest: event.body_digest, dispatch, policy_id: policy.id, policy_version: policy.version, operation: policy.operation });
     const existing = this.store.find("speculative_candidate", candidateId);
     if (existing) {
@@ -120,7 +115,7 @@ export class SpeculativeKernel {
     const signal = this.store.create("preference_signal", `signal_${candidate.id}`, { task_id: candidate.task_id,
       candidate_id: candidate.id, source: "candidate_decision", decision, reviewer, correction,
       generated_artifact_ids: candidate.artifact_ids, final_artifact_ids: finalArtifacts,
-      changed: digest(candidate.artifact_ids) !== digest(finalArtifacts) || correction !== null });
+      changed: digestJson(candidate.artifact_ids) !== digestJson(finalArtifacts) || correction !== null });
     return { candidate: saved, preference_signal: signal };
   }
 

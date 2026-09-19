@@ -1,9 +1,11 @@
 import { createHash } from "node:crypto";
-import { CraftStore, type JsonObject } from "./store.ts";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
 import { WorkDeliveryKernel } from "./work-delivery.ts";
+import { text } from "./validation.ts";
+import { digestJson } from "./digest.ts";
 
-function text(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim(); }
-function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
+
+
 function terminal(status: unknown): boolean { return ["completed", "failed", "cancelled", "interrupted"].includes(String(status)); }
 function nextAction(status: string): JsonObject {
   if (["accepted", "ready_for_delivery"].includes(status)) return { phase: "complete", action: "deliver" };
@@ -24,7 +26,7 @@ export class DeliveryLoopKernel {
     const delivery = run && terminal(run.status) ? this.deliveries.observe({ launch_id: launch.id, delivery_id: `delivery_${launch.id}_${run.version}_${assessment?.version ?? 0}` }).delivery as JsonObject : null;
     const deliveryStatus = String(delivery?.status ?? "awaiting_host"); const guidance = nextAction(deliveryStatus);
     const identity = { launch_id: launch.id, launch_version: launch.version, run_id: run?.id ?? null, run_version: run?.version ?? null, assessment_id: assessment?.id ?? null, assessment_version: assessment?.version ?? null, delivery_id: delivery?.id ?? null, delivery_version: delivery?.version ?? null, delivery_status: deliveryStatus, ...guidance };
-    const loopId = String(args.loop_id ?? `delivery_loop_${launch.id}`); const current = this.store.find("delivery_loop", loopId); const stateDigest = digest(identity);
+    const loopId = String(args.loop_id ?? `delivery_loop_${launch.id}`); const current = this.store.find("delivery_loop", loopId); const stateDigest = digestJson(identity);
     if (current?.state_digest === stateDigest) return { loop: current, delivery, idempotent: true };
     const loop = current ? this.store.save("delivery_loop", loopId, { ...identity, state_digest: stateDigest }) : this.store.create("delivery_loop", loopId, { ...identity, state_digest: stateDigest });
     return { loop, delivery, idempotent: false };

@@ -3,7 +3,8 @@ import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import { basename, join, relative, resolve } from "node:path";
 import { parse } from "yaml";
 import { cosine, sanitizeEmbeddingText, semanticFailureReason, type EmbeddingProvider, type SemanticStatus } from "./semantic.ts";
-import { CraftStore, type JsonObject } from "./store.ts";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
+import { Bm25Index, fuseRankings } from "./context-retrieval-capture.ts";
 
 function stableId(prefix: string, value: string): string {
   return `${prefix}_${createHash("sha256").update(value).digest("hex").slice(0, 20)}`;
@@ -17,8 +18,8 @@ export interface SkillDocument {
   metadata: JsonObject;
 }
 
-function metadataTerms(metadata: JsonObject): string[] {
-  const aliases = metadata.aliases;
+function metadataTerms(metadata: JsonObject | undefined): string[] {
+  const aliases = (metadata ?? {}).aliases;
   if (typeof aliases === "string") return [aliases];
   return Array.isArray(aliases) ? aliases.filter((value): value is string => typeof value === "string") : [];
 }
@@ -46,6 +47,28 @@ function rerank(query: string, item: JsonObject): JsonObject {
 
 export function pathKey(path: string, platform = process.platform): string {
   return platform === "win32" ? path.toLowerCase() : path;
+}
+
+/**
+ * BM25 as an *independent* lexical signal over capability text.
+ *
+ * `rerank` is substring scoring: a query containing a common word is dominated
+ * by it, and it has no notion of term rarity. Craft stores identifier-dense
+ * material (receipt digests, ticket ids, sha256), which is exactly where rarity
+ * weighting wins — `TS-999` should find the single record that mentions it even
+ * when other records match on ordinary words. BM25 is added alongside rerank and
+ * the vector signal; the three are fused with RRF rather than one replacing
+ * another, so a regression in any single signal cannot silently rewrite the
+ * ranking.
+ */
+function bm25Ranking(query: string, items: JsonObject[]): Array<{ id: string }> {
+  if (!items.length) return [];
+  const index = new Bm25Index();
+  for (const item of items) {
+    index.add(String(item.id), [item.name, item.description, metadataTerms(item.metadata as JsonObject).join(" "),
+      item.search_text ?? item.body].filter((value) => typeof value === "string").join("\n"));
+  }
+  return index.score(query).filter((entry) => entry.score > 0).map((entry) => ({ id: entry.id }));
 }
 
 export function parseSkill(text: string, fallback: string): SkillDocument {
@@ -251,40 +274,61 @@ export class Catalog {
   semanticStatus(): SemanticStatus { return { ...this.#semanticStatus }; }
 
   async searchHybrid(query: string, limit = 6): Promise<JsonObject[]> {
+    const bounded = Math.min(Math.max(1, limit), 20);
     const lexical = this.search(query, 20);
     const provider = this.semanticProvider;
-    if (!provider) return lexical.slice(0, Math.min(Math.max(1, limit), 20));
+    if (!provider) return this.fuseLexical(query, lexical, bounded);
     if (Date.now() < this.#degradedUntil) {
       this.#semanticStatus = { ...this.#semanticStatus, mode: "degraded", reason: "cooldown",
         degraded_until: new Date(this.#degradedUntil).toISOString() };
-      return lexical.slice(0, Math.min(Math.max(1, limit), 20));
+      return this.fuseLexical(query, lexical, bounded);
     }
     try {
       const vectors = await this.capabilityVectors(provider);
-      if (!vectors.length) return lexical.slice(0, Math.min(Math.max(1, limit), 20));
+      if (!vectors.length) return this.fuseLexical(query, lexical, bounded);
       const [queryVector] = await provider.embed([sanitizeEmbeddingText(query)]);
       const semantic = vectors.map(({ capability, vector }) => ({ capability, semantic_score: cosine(queryVector, vector) }))
         .sort((left, right) => right.semantic_score - left.semantic_score || String(left.capability.id).localeCompare(String(right.capability.id)));
-      const ranks = new Map<string, number>();
-      lexical.forEach((item, index) => ranks.set(String(item.id), 1 / (60 + index + 1)));
-      semantic.forEach((item, index) => ranks.set(String(item.capability.id), (ranks.get(String(item.capability.id)) ?? 0) + 1 / (60 + index + 1)));
       const candidates = new Map<string, JsonObject>();
       lexical.forEach((item) => candidates.set(String(item.id), item));
       semantic.forEach((item) => candidates.set(String(item.capability.id), { ...item.capability, semantic_score: item.semantic_score }));
-      const merged = [...candidates.values()].sort((left, right) => String(left.id).localeCompare(String(right.id)))
-        .map((item) => ({ ...item, score: ranks.get(String(item.id))! * 1_000 }))
-        .map((item) => rerank(query, item))
-        .sort((left, right) => Number(right.score) - Number(left.score))
-        .slice(0, Math.min(Math.max(1, limit), 20));
+      const merged = [...candidates.values()].sort((left, right) => String(left.id).localeCompare(String(right.id))).map((item) => rerank(query, item));
+      const selected = this.fuseCandidates(query, merged, semantic.map((item) => ({ id: String(item.capability.id) })), bounded);
       this.#semanticStatus = { mode: "ready", provider: provider.label, indexed_capabilities: vectors.length,
         last_success_at: new Date().toISOString() };
-      return merged.map(summary);
+      return selected.map(summary);
     } catch (error) {
       this.#degradedUntil = Date.now() + 60_000;
       this.#semanticStatus = { mode: "degraded", provider: provider.label, reason: semanticFailureReason(error),
         indexed_capabilities: this.store.count("capability_embedding"), degraded_until: new Date(this.#degradedUntil).toISOString() };
-      return lexical.slice(0, Math.min(Math.max(1, limit), 20));
+      return this.fuseLexical(query, lexical, bounded);
     }
+  }
+
+  /**
+   * Three-signal RRF over the same candidate pool.
+   *
+   * `rerank` stays the local lexical signal (exact-name/description/alias boost),
+   * BM25 contributes rarity-weighted term matching, and the vector ranking is
+   * passed in when a provider is available. Fusing instead of replacing is what
+   * makes the change safe: the previous behaviour is still one of the signals, so
+   * the top-k can only move when BM25 or the vector really disagrees.
+   */
+  private fuseLexical(query: string, lexical: JsonObject[], limit: number): JsonObject[] {
+    const merged = lexical.map((item) => rerank(query, item));
+    return this.fuseCandidates(query, merged, [], limit).map(summary);
+  }
+
+  private fuseCandidates(query: string, candidates: JsonObject[], semantic: Array<{ id: string }>, limit: number): JsonObject[] {
+    const bm25: Array<{ id: string }> = bm25Ranking(query, candidates);
+    const reranked: Array<{ id: string }> = [...candidates]
+      .sort((left, right) => Number(right.score) - Number(left.score) || String(left.id).localeCompare(String(right.id)))
+      .map((item) => ({ id: String(item.id) }));
+    const fused = fuseRankings([reranked, bm25, semantic]);
+    const byId = new Map(candidates.map((item) => [String(item.id), item]));
+    return fused.filter((entry) => byId.has(entry.id))
+      .map((entry) => ({ ...byId.get(entry.id)!, rank_score: entry.score }))
+      .slice(0, limit);
   }
 
   private async capabilityVectors(provider: EmbeddingProvider): Promise<Array<{ capability: JsonObject; vector: number[] }>> {
@@ -324,3 +368,4 @@ function summary(item: JsonObject): JsonObject {
   const { body: _body, metadata: _metadata, search_text: _searchText, ...value } = item;
   return value;
 }
+

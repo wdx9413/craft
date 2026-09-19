@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { McpServer } from "../src/mcp.ts";
-import { craftPaths } from "../src/paths.ts";
+import { craftPaths } from "../src/infrastructure/paths.ts";
 import { CraftService, VERSION } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/store.ts";
+import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
 test("Work Launch binds and rechecks local capability context across approval", async () => {
   const root = join(tmpdir(), `craft-context-launch-${Date.now()}`); const skills = join(root, "skills"); const store = await new CraftStore(craftPaths(join(root, "data"))).open(); const service = new CraftService(store);
   try {
@@ -24,6 +24,6 @@ test("Work Launch binds and rechecks local capability context across approval", 
     const tampered = await service.capabilityContextWorkLaunchPrepare({ ...args, launch_id: "tampered" }); store.save("work_launch", String((tampered.launch as JsonObject).id), { ...(tampered.launch as JsonObject), activation_context_digest: "wrong" }); await assert.rejects(service.capabilityContextWorkLaunchDecide({ launch_id: (tampered.launch as JsonObject).id, actor: "human", approved: true, prompt: args.prompt }), /changed since/);
     const claude = await service.capabilityContextWorkLaunchPrepare({ ...args, host: "claude-code", launch_id: "claude" }); assert.equal((claude.dispatch as JsonObject).kind, undefined);
     const stale = await service.capabilityContextWorkLaunchPrepare({ ...args, launch_id: "stale" }); await writeFile(join(skills, "SKILL.md"), `${content}\nChanged.`); await assert.rejects(service.capabilityContextWorkLaunchDecide({ launch_id: (stale.launch as JsonObject).id, actor: "human", approved: true, prompt: args.prompt }), /digest drifted/);
-    await service.sourceScan({ source_id: source.id }); assert.equal(VERSION, "0.12.30");
+    await service.sourceScan({ source_id: source.id }); assert.equal(VERSION, "0.12.33");
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });

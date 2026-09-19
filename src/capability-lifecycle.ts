@@ -1,18 +1,11 @@
 import { createHash } from "node:crypto";
-import type { JsonObject } from "./store.ts";
-import { CraftStore } from "./store.ts";
+import type { JsonObject } from "./infrastructure/store.ts";
+import { CraftStore } from "./infrastructure/store.ts";
+import { text } from "./validation.ts";
+import { digestJson, payload } from "./digest.ts";
 
 export type CapabilityLifecycle = "draft" | "installed" | "active" | "disabled" | "retired";
 
-function text(value: unknown, name: string): string {
-  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
-  return value.trim();
-}
-function payload(record: JsonObject): JsonObject {
-  const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record;
-  return rest;
-}
-function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
 function state(value: unknown): CapabilityLifecycle {
   const normalized = String(value ?? "draft") as CapabilityLifecycle;
   if (!(new Set<CapabilityLifecycle>(["draft", "installed", "active", "disabled", "retired"])).has(normalized)) throw new Error("Unsupported capability lifecycle");
@@ -30,7 +23,7 @@ export class CapabilityLifecycleKernel {
     const version = text(args.source_version ?? "0.0.0", "source_version");
     const effect = text(args.effect ?? "read_only", "effect");
     const manifest = { capability_id: capabilityId, name, source, source_version: version, effect, dependencies: args.dependencies ?? [], permissions: args.permissions ?? [] };
-    const manifestDigest = digest(manifest);
+    const manifestDigest = digestJson(manifest);
     const existing = this.store.find("capability_lifecycle", capabilityId);
     if (existing) {
       if (existing.manifest_digest !== manifestDigest) throw new Error("Capability identity already exists with different manifest");
@@ -68,7 +61,7 @@ export class CapabilityLifecycleKernel {
     const version = text(args.source_version, "source_version");
     const sourceDigest = text(args.source_digest, "source_digest");
     if (version === capability.source_version && sourceDigest === capability.source_digest) return { capability, idempotent: true };
-    const next = { ...payload(capability), source_version: version, source_digest: sourceDigest, lifecycle: "installed", manifest_digest: digest({ ...payload(capability), source_version: version, source_digest: sourceDigest }), previous_version: capability.source_version };
+    const next = { ...payload(capability), source_version: version, source_digest: sourceDigest, lifecycle: "installed", manifest_digest: digestJson({ ...payload(capability), source_version: version, source_digest: sourceDigest }), previous_version: capability.source_version };
     return { capability: this.store.save("capability_lifecycle", String(capability.id), next), idempotent: false };
   }
 

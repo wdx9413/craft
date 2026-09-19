@@ -1,20 +1,14 @@
 import { createHash, randomUUID } from "node:crypto";
-import { CraftStore, type JsonObject } from "./store.ts";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
+import { text } from "./validation.ts";
+import { digestJson, payload } from "./digest.ts";
 
-function text(value: unknown, name: string): string {
-  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
-  return value.trim();
-}
 function integer(value: unknown, name: string, fallback: number, minimum = 0): number {
   const number = value === undefined ? fallback : Number(value);
   if (!Number.isInteger(number) || number < minimum) throw new Error(`${name} must be an integer >= ${minimum}`);
   return number;
 }
-function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
-function payload(record: JsonObject): JsonObject {
-  const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record;
-  return rest;
-}
+
 function list(value: unknown, name: string): string[] {
   if (value === undefined) return [];
   if (!Array.isArray(value)) throw new Error(`${name} must be an array`);
@@ -49,12 +43,12 @@ export class TrustProfileKernel {
     const identity = { scope, attempts, passed, failed, interventions, evidence_ids: evidenceIds };
     const existing = this.store.find("trust_profile", profileId);
     if (existing) {
-      if (existing.identity_digest !== digest(identity)) throw new Error("Trust profile idempotency conflict");
+      if (existing.identity_digest !== digestJson(identity)) throw new Error("Trust profile idempotency conflict");
       return { profile: existing, idempotent: true, recommendation: this.recommend({ profile_id: profileId }) };
     }
     const profile = this.store.create("trust_profile", profileId, {
       ...scope, attempts, passed, failed, interventions, evidence_ids: evidenceIds,
-      identity_digest: digest(identity), valid_until: validUntil, status: "active",
+      identity_digest: digestJson(identity), valid_until: validUntil, status: "active",
       last_reason: text(args.reason ?? "evidence_recorded", "reason"),
     });
     return { profile, idempotent: false, recommendation: this.recommend({ profile_id: profileId }) };
@@ -73,7 +67,7 @@ export class TrustProfileKernel {
     else if (attempts >= 3 && passRate >= 0.9) { level = "notify_only"; reason = "repeated passing evidence supports notification-only autonomy"; }
     return { profile, recommendation: level, reason, pass_rate: passRate,
       execution_authority: false, requires_explicit_policy: true, expires_at: profile.valid_until,
-      recommendation_digest: digest({ profile_id: profile.id, profile_version: profile.version, level, reason }) };
+      recommendation_digest: digestJson({ profile_id: profile.id, profile_version: profile.version, level, reason }) };
   }
 
   revoke(args: JsonObject): JsonObject {

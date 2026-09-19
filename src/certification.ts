@@ -1,11 +1,9 @@
-import { createHash, randomUUID } from "node:crypto";
-import { CraftStore, type JsonObject } from "./store.ts";
+import { randomUUID } from "node:crypto";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
+import { text } from "./validation.ts";
+import { stableDigest, payload } from "./digest.ts";
 
-function text(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim(); }
 function integer(value: unknown, name: string): number { const result = Number(value); if (!Number.isInteger(result) || result < 1) throw new Error(`${name} must be a positive integer`); return result; }
-function payload(record: JsonObject): JsonObject { const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record; return rest; }
-function canonical(value: unknown): string { if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`; if (value && typeof value === "object") return `{${Object.entries(value as JsonObject).sort(([a], [b]) => a.localeCompare(b)).map(([key, child]) => `${JSON.stringify(key)}:${canonical(child)}`).join(",")}}`; return JSON.stringify(value); }
-function digest(value: unknown): string { return `sha256:${createHash("sha256").update(canonical(value)).digest("hex")}`; }
 
 export class CapabilityCertificationKernel {
   readonly store: CraftStore;
@@ -33,7 +31,7 @@ export class CapabilityCertificationKernel {
     const signoff = this.store.get("signoff", text(args.signoff_id, "signoff_id")); if (signoff.decision !== "passed" || signoff.evaluation_run_id !== evaluation.id || signoff.subject_type !== "capability_asset" || signoff.subject_id !== asset.id || Number(signoff.subject_version) !== Number(asset.version)) throw new Error("Certification requires a passed Signoff for the exact Evaluation");
     const grades = (signoff.grade_ids as string[]).map((id) => this.store.get("grade", id)); for (const trialId of trialIds) { const grade = grades.find((item) => item.trial_id === trialId && item.grader_type === "program" && item.verdict === "passed" && Array.isArray(item.evidence_ids) && item.evidence_ids.length); if (!grade) throw new Error("Certification requires an evidence-backed passing program Grade for every Trial"); }
     const certifier = text(args.certifier, "certifier"); if (certifier === materialization.reviewer) throw new Error("Certification requires an independent certifier");
-    const certificationId = String(args.certification_id ?? `capability_certification_${randomUUID().replaceAll("-", "")}`); const fingerprint = digest({ materialization_id: materialization.id, materialization_version: materialization.version,
+    const certificationId = String(args.certification_id ?? `capability_certification_${randomUUID().replaceAll("-", "")}`); const fingerprint = stableDigest({ materialization_id: materialization.id, materialization_version: materialization.version,
       asset_id: asset.id, asset_version: asset.version, sandbox_profile_id: profile.id, sandbox_profile_version: profile.version,
       evaluation_run_id: evaluation.id, signoff_id: signoff.id, receipt_ids: [...receiptIds].sort(), certifier });
     const existing = this.store.find("capability_certification", certificationId); if (existing) { if (existing.fingerprint !== fingerprint) throw new Error("Capability certification idempotency conflict"); return { certification: existing, idempotent: true }; }

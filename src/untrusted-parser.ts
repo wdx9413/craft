@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { JsonObject } from "./store.ts";
+import type { JsonObject } from "./infrastructure/store.ts";
 import { SecurityBrokerKernel } from "./security.ts";
 
 const MAX_CONTENT_BYTES = 1024 * 1024;

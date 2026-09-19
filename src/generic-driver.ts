@@ -5,13 +5,13 @@ import { pathToFileURL } from "node:url";
 import { AutonomyKernel } from "./autonomy.ts";
 import { executeHostProcess, type HostDriver, type HostExecutionResult, type HostExecutor, type HostOutputObserver, type HostSandbox } from "./host-driver.ts";
 import { hostModelFor, renderHostArgv, type HostProfile } from "./host-registry.ts";
-import { CraftStore, type JsonObject } from "./store.ts";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
+import { text } from "./validation.ts";
+import { digestJson, payload } from "./digest.ts";
 
-function text(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim(); }
 function integer(value: unknown, name: string, fallback: number, minimum: number, maximum: number): number { const result = value === undefined ? fallback : Number(value); if (!Number.isInteger(result) || result < minimum || result > maximum) throw new Error(`${name} must be an integer between ${minimum} and ${maximum}`); return result; }
-function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
+
 function redact(value: string): string { return value.replace(/(?:api[_-]?key|authorization|cookie|password|secret|token)\s*[:=]\s*[^\s]+/giu, "[redacted]"); }
-function payload(record: JsonObject): JsonObject { const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record; return rest; }
 
 const SANDBOXES: ReadonlySet<string> = new Set(["read-only", "workspace-write"]);
 const MAX_FINAL_MESSAGE_CHARS = 4_000;
@@ -49,8 +49,8 @@ export class GenericCliHostKernel implements HostDriver {
     if (!SANDBOXES.has(sandbox)) throw new Error("Host sandbox is unsupported");
     const model = hostModelFor(this.profile, args.model);
     const dispatchId = String(args.dispatch_id ?? `${this.dispatchKind}_${randomUUID().replaceAll("-", "")}`);
-    const identity = { host: this.host, task_id: task.id, task_version: task.version, workspace, sandbox, model, prompt_digest: digest(prompt) };
-    const requestDigest = digest(identity);
+    const identity = { host: this.host, task_id: task.id, task_version: task.version, workspace, sandbox, model, prompt_digest: digestJson(prompt) };
+    const requestDigest = digestJson(identity);
     const existing = this.store.find(this.dispatchKind, dispatchId);
     if (existing) { if (existing.request_digest !== requestDigest) throw new Error("Host dispatch idempotency conflict"); return { dispatch: existing, idempotent: true }; }
     return { dispatch: this.store.create(this.dispatchKind, dispatchId, { ...identity, request_digest: requestDigest,
@@ -62,7 +62,7 @@ export class GenericCliHostKernel implements HostDriver {
   async execute(args: JsonObject, options: { signal?: AbortSignal; observe?: HostOutputObserver } = {}): Promise<JsonObject> {
     const dispatch = this.store.get(this.dispatchKind, text(args.dispatch_id, "dispatch_id"));
     const prompt = text(args.prompt, "prompt");
-    if (digest(prompt) !== dispatch.prompt_digest) throw new Error("Host prompt does not match the prepared digest");
+    if (digestJson(prompt) !== dispatch.prompt_digest) throw new Error("Host prompt does not match the prepared digest");
     if (dispatch.status === "completed" || dispatch.status === "failed") {
       return { dispatch, receipt: this.store.get(this.receiptKind(), `receipt_${dispatch.id}`), idempotent: true };
     }
@@ -97,13 +97,13 @@ export class GenericCliHostKernel implements HostDriver {
       cancelled: execution.cancelled ?? false, output_limited: execution.outputLimited,
       stdout_bytes: Buffer.byteLength(execution.stdout),
       final_message: trimmed ? redact(trimmed).slice(-MAX_FINAL_MESSAGE_CHARS) : null,
-      stderr_digest: digest(execution.stderr), completed_at: new Date().toISOString() };
+      stderr_digest: digestJson(execution.stderr), completed_at: new Date().toISOString() };
     const directory = join(this.store.paths.artifactsDir, this.host);
     await mkdir(directory, { recursive: true });
     const receiptPath = join(directory, `${dispatch.id}.json`);
     await writeFile(receiptPath, `${JSON.stringify(receiptPayload, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
     const receipt = this.store.create(this.receiptKind(), `receipt_${dispatch.id}`, { ...receiptPayload,
-      uri: pathToFileURL(receiptPath).toString(), digest: digest(receiptPayload) });
+      uri: pathToFileURL(receiptPath).toString(), digest: digestJson(receiptPayload) });
     const saved = this.store.save(this.dispatchKind, String(dispatch.id), { ...payload(dispatch), status,
       receipt_id: receipt.id, finished_at: receiptPayload.completed_at });
     this.store.appendEvent(`task:${dispatch.task_id}`, "host.completed", { host: this.host, dispatch_id: dispatch.id,

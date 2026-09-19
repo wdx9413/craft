@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { spawn } from "node:child_process";
-import type { JsonObject } from "./store.ts";
+import type { JsonObject } from "./infrastructure/store.ts";
 import { SecurityBrokerKernel } from "./security.ts";
 
 type WorkerOptions = { workerPath?: string; timeoutMs?: number; spawnProcess?: typeof spawn };

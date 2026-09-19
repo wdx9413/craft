@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { JsonObject } from "./store.ts";
-import { CraftStore } from "./store.ts";
+import type { JsonObject } from "./infrastructure/store.ts";
+import { CraftStore } from "./infrastructure/store.ts";
+import { text } from "./validation.ts";
+import { digestJson } from "./digest.ts";
 
-function text(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim(); }
-function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
 export class PlatformOperationsKernel {
   readonly store: CraftStore;
   constructor(store: CraftStore) { this.store = store; }
@@ -12,7 +12,7 @@ export class PlatformOperationsKernel {
     const memberId = String(args.member_id ?? `member_${randomUUID().replaceAll("-", "")}`);
     const name = text(args.name, "name");
     const roles = Array.isArray(args.roles) ? args.roles.map((item) => text(item, "roles")) : ["member"];
-    const identityDigest = digest({ name, roles });
+    const identityDigest = digestJson({ name, roles });
     const existing = this.store.find("platform_member", memberId);
     if (existing) { if (existing.identity_digest !== identityDigest) throw new Error("Member identity conflict"); return { member: existing, idempotent: true }; }
     return { member: this.store.create("platform_member", memberId, { name, roles, identity_digest: identityDigest, active: true }), idempotent: false };
@@ -30,7 +30,7 @@ export class PlatformOperationsKernel {
   observe(args: JsonObject): JsonObject {
     const event = text(args.event, "event");
     const status = text(args.status ?? "ok", "status");
-    const observation = this.store.create("platform_observation", String(args.observation_id ?? `observation_${randomUUID().replaceAll("-", "")}`), { event, status, run_id: args.run_id ?? null, metric: args.metric ?? null, value: args.value ?? null, value_digest: digest(args.value ?? null) });
+    const observation = this.store.create("platform_observation", String(args.observation_id ?? `observation_${randomUUID().replaceAll("-", "")}`), { event, status, run_id: args.run_id ?? null, metric: args.metric ?? null, value: args.value ?? null, value_digest: digestJson(args.value ?? null) });
     return { observation };
   }
 

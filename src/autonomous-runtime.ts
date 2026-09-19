@@ -1,6 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { JsonObject } from "./store.ts";
-import { CraftStore } from "./store.ts";
+import type { JsonObject } from "./infrastructure/store.ts";
+import { CraftStore } from "./infrastructure/store.ts";
+import { text } from "./validation.ts";
+import { digestJson, payload } from "./digest.ts";
 
 export type RuntimeTurn =
   | { kind: "action"; action: string; args?: JsonObject; tokens?: number }
@@ -14,11 +16,6 @@ export type RuntimeExecutor = (action: string, args: JsonObject) => Promise<Json
 
 export interface RuntimeLimits { max_steps: number; max_tokens: number }
 
-function text(value: unknown, name: string): string {
-  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
-  return value.trim();
-}
-
 function limits(value: unknown): RuntimeLimits {
   const input = (value && typeof value === "object" && !Array.isArray(value)) ? value as JsonObject : {};
   const maxSteps = input.max_steps === undefined ? 24 : Number(input.max_steps);
@@ -26,15 +23,6 @@ function limits(value: unknown): RuntimeLimits {
   if (!Number.isInteger(maxSteps) || maxSteps < 1 || maxSteps > 1_000) throw new Error("max_steps must be an integer between 1 and 1000");
   if (!Number.isInteger(maxTokens) || maxTokens < 1 || maxTokens > 10_000_000) throw new Error("max_tokens must be an integer between 1 and 10000000");
   return { max_steps: maxSteps, max_tokens: maxTokens };
-}
-
-function digest(value: unknown): string {
-  return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
-}
-
-function payload(record: JsonObject): JsonObject {
-  const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record;
-  return rest;
 }
 
 function safeArgs(value: unknown): JsonObject {
@@ -55,7 +43,7 @@ export class AutonomousRuntimeKernel {
     const model = text(args.model, "model");
     const runId = String(args.run_id ?? `autonomous_run_${randomUUID().replaceAll("-", "")}`);
     const runLimits = limits(args.limits);
-    const requestDigest = digest({ task_id: taskId, goal, model, limits: runLimits });
+    const requestDigest = digestJson({ task_id: taskId, goal, model, limits: runLimits });
     const existing = this.store.find("autonomous_run", runId);
     if (existing) {
       if (existing.request_digest !== requestDigest) throw new Error("Autonomous run idempotency conflict");
@@ -81,7 +69,7 @@ export class AutonomousRuntimeKernel {
     const sequence = Number(run.steps) + 1;
     const checkpointId = String(args.checkpoint_id ?? `${runId}:${sequence}`);
     const checkpoint = this.store.create("autonomous_checkpoint", checkpointId, {
-      run_id: runId, sequence, reason: String(args.reason ?? "turn"), state_digest: digest(state), state: state as JsonObject,
+      run_id: runId, sequence, reason: String(args.reason ?? "turn"), state_digest: digestJson(state), state: state as JsonObject,
     });
     const saved = this.store.save("autonomous_run", runId, { ...payload(run), checkpoint_id: checkpoint.id, status: "paused" });
     return { run: saved, checkpoint, idempotent: false };
@@ -124,10 +112,10 @@ export class AutonomousRuntimeKernel {
       const action = text(turn.action, "action");
       const actionArgs = safeArgs(turn.args);
       const outcome = await executor(action, actionArgs);
-      this.store.create("autonomous_turn", `${run.id}:${sequence}`, { run_id: run.id, sequence, kind: "action", action, args_digest: digest(actionArgs), outcome_digest: digest(outcome), tokens });
+      this.store.create("autonomous_turn", `${run.id}:${sequence}`, { run_id: run.id, sequence, kind: "action", action, args_digest: digestJson(actionArgs), outcome_digest: digestJson(outcome), tokens });
       history.push(this.store.get("autonomous_turn", `${run.id}:${sequence}`));
       run = this.store.save("autonomous_run", String(run.id), { ...payload(run), status: "running", steps: sequence, tokens_used: Number(run.tokens_used) + tokens });
-      const savedCheckpoint = this.checkpoint({ run_id: run.id, checkpoint_id: `${run.id}:checkpoint:${sequence}`, reason: "action", state: { sequence, action, outcome_digest: digest(outcome) } });
+      const savedCheckpoint = this.checkpoint({ run_id: run.id, checkpoint_id: `${run.id}:checkpoint:${sequence}`, reason: "action", state: { sequence, action, outcome_digest: digestJson(outcome) } });
       checkpoint = savedCheckpoint.checkpoint as JsonObject;
       run = this.store.save("autonomous_run", String(run.id), { ...payload(savedCheckpoint.run as JsonObject), status: "running" });
     }

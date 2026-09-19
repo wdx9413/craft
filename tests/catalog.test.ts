@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { Catalog, parseSkill, pathKey } from "../src/catalog.ts";
-import { craftPaths } from "../src/paths.ts";
-import { CraftStore } from "../src/store.ts";
+import { craftPaths } from "../src/infrastructure/paths.ts";
+import { CraftStore } from "../src/infrastructure/store.ts";
 
 test("catalog adds, incrementally scans, searches, updates, and removes sources", async () => {
   const root = join(tmpdir(), `craft-catalog-${process.pid}-${Date.now()}`);

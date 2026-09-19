@@ -1,4 +1,4 @@
-import type { JsonObject } from "./store.ts";
+import type { JsonObject } from "./infrastructure/store.ts";
 
 const EFFECTS = new Set(["read_only", "local_write", "external_write", "destructive"]);
 const ISOLATED_PLATFORMS = new Set(["darwin", "linux"]);

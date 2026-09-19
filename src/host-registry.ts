@@ -1,4 +1,5 @@
-import type { JsonObject } from "./store.ts";
+import type { JsonObject } from "./infrastructure/store.ts";
+import { text } from "./validation.ts";
 
 /**
  * Host profiles are the declarative half of "plug in any model".
@@ -45,11 +46,6 @@ export const BUILTIN_HOST_PROFILES: readonly HostProfile[] = [
   { host: "generic-mcp", label: "Generic MCP host", kind: "generic-mcp", command: "craft-mcp", argv_template: [],
     output_format: "text", dispatch_kind: "generic_mcp_dispatch", models: [], default_model: null, builtin: true },
 ];
-
-function text(value: unknown, name: string): string {
-  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
-  return value.trim();
-}
 
 function optionalText(value: unknown, name: string): string | null {
   return value === undefined || value === null ? null : text(value, name);

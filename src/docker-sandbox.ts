@@ -2,15 +2,13 @@ import { createHash } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { isAbsolute, relative, resolve } from "node:path";
-import type { JsonObject } from "./store.ts";
+import type { JsonObject } from "./infrastructure/store.ts";
+import { text } from "./validation.ts";
 
 export type DockerResult = { code: number; stdout: string; stderr: string; timed_out: boolean; output_limited: boolean };
 export type DockerRunner = (argv: string[], timeoutMs: number, outputLimit: number) => Promise<DockerResult>;
 const OUTPUT_LIMIT = 1024 * 1024;
 
-function text(value: unknown, name: string): string {
-  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim();
-}
 function command(value: unknown): string[] {
   if (!Array.isArray(value) || !value.length) throw new Error("command must be a non-empty string array");
   return value.map((item) => text(item, "command"));

@@ -5,10 +5,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { evaluateCoverageReport, evaluateFileArtifact, evaluateMediaProbeReport, runAcceptanceAdapterTick, runBuiltinAcceptanceTicks } from "../src/acceptance-worker.ts";
-import { craftPaths } from "../src/paths.ts";
+import { craftPaths } from "../src/infrastructure/paths.ts";
 import { CraftService } from "../src/service.ts";
 import { McpServer } from "../src/mcp.ts";
-import { CraftStore, type JsonObject } from "../src/store.ts";
+import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
 
 function job(workspace: string, relativePath: string, configuration: JsonObject = {}, extra: JsonObject = {}): JsonObject { return { input: { workspace, relative_path: relativePath, ...extra }, evaluator_configuration: configuration }; }
 

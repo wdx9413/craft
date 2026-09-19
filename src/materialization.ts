@@ -1,14 +1,14 @@
-import { createHash, randomUUID } from "node:crypto";
+﻿import { createHash, randomUUID } from "node:crypto";
 import { access, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { CraftStore, type JsonObject } from "./store.ts";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
+import { text } from "./validation.ts";
+import { stableDigest, payload } from "./digest.ts";
 
 const TYPES = new Set(["skill", "workflow", "tool", "mcp", "script", "adapter", "agent", "template"]);
 const EFFECTS = new Set(["read_only", "local_write", "external_write", "destructive", "unknown"]);
-function text(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim(); }
-function payload(record: JsonObject): JsonObject { const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record; return rest; }
-function canonical(value: unknown): string { if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`; if (value && typeof value === "object") return `{${Object.entries(value as JsonObject).sort(([a], [b]) => a.localeCompare(b)).map(([key, child]) => `${JSON.stringify(key)}:${canonical(child)}`).join(",")}}`; return JSON.stringify(value); }
-function digest(value: unknown): string { return `sha256:${createHash("sha256").update(canonical(value)).digest("hex")}`; }
+
+
 function safeRelative(value: unknown): string { const result = text(value, "file.path").replaceAll("\\", "/"); if (path.posix.isAbsolute(result) || result.split("/").some((part) => !part || part === "." || part === "..") || /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/iu.test(path.posix.basename(result))) throw new Error("Materialized file path is unsafe"); return result; }
 function decode(value: unknown): Buffer { const encoded = text(value, "file.content_base64"); if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(encoded)) throw new Error("file.content_base64 is invalid"); return Buffer.from(encoded, "base64"); }
 function files(value: unknown): { path: string; content: Buffer; size: number; digest: string }[] {
@@ -38,10 +38,10 @@ export class MaterializationKernel {
     const source = this.store.get("hub_source", text(args.source_id, "source_id")); if (source.status !== "active") throw new Error("Hub source is not active");
     const entry = this.store.get("hub_catalog_entry", `${source.id}:${text(args.entry_id, "entry_id")}`); if (entry.status !== "active") throw new Error("Hub catalog entry is not active");
     const packageFiles = files(args.files); if (!packageFiles.some((item) => new Set(["skill.md", "capability.json", "plugin.json"]).has(path.posix.basename(item.path).toLowerCase()))) throw new Error("Materialized package requires a capability descriptor");
-    const manifest = packageFiles.map(({ path: filePath, size, digest: fileDigest }) => ({ path: filePath, size, digest: fileDigest })); const contentDigest = digest(manifest);
+    const manifest = packageFiles.map(({ path: filePath, size, digest: fileDigest }) => ({ path: filePath, size, digest: fileDigest })); const contentDigest = stableDigest(manifest);
     if (contentDigest !== entry.content_digest) throw new Error("Materialized package digest does not match the signed catalog"); const scan = findings(packageFiles);
     if (scan.some((item) => item.severity === "critical")) throw new Error("Materialized package contains a critical finding");
-    const materializationId = String(args.materialization_id ?? `materialization_${randomUUID().replaceAll("-", "")}`); const fingerprint = digest({ source_id: source.id, entry_id: entry.entry_id, content_digest: contentDigest });
+    const materializationId = String(args.materialization_id ?? `materialization_${randomUUID().replaceAll("-", "")}`); const fingerprint = stableDigest({ source_id: source.id, entry_id: entry.entry_id, content_digest: contentDigest });
     const existing = this.store.find("capability_materialization", materializationId); if (existing) { if (existing.fingerprint !== fingerprint) throw new Error("Materialization idempotency conflict"); return { materialization: existing, idempotent: true }; }
     const root = path.resolve(this.store.paths.cacheDir, "hub-packages", String(source.id), String(entry.entry_id), contentDigest.slice(7)); const base = path.resolve(this.store.paths.cacheDir, "hub-packages");
     if (path.relative(base, root).startsWith("..")) throw new Error("Materialization target escaped the cache root"); const temporary = `${root}.tmp-${process.pid}-${randomUUID()}`;

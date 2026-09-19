@@ -6,8 +6,8 @@ import test from "node:test";
 import { GenericCliHostKernel } from "../src/generic-driver.ts";
 import type { HostExecutionResult } from "../src/host-driver.ts";
 import { defineHostProfile } from "../src/host-registry.ts";
-import { CraftStore, type JsonObject } from "../src/store.ts";
-import { craftPaths } from "../src/paths.ts";
+import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
+import { craftPaths } from "../src/infrastructure/paths.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-generic-"));

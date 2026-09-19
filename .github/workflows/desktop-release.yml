@@ -1,0 +1,103 @@
+name: desktop-release
+
+# The distribution gap this workflow closes: desktop packages were only ever
+# produced by `pnpm run pack:desktop` on a developer machine, so no user had a
+# download entry point. Windows needs a Windows runner (the launcher is compiled
+# with the .NET Framework csc.exe) and the DMG needs a real macOS runner, which
+# is why packaging is a matrix rather than a single job.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    name: package ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows
+            os: windows-latest
+            artifact: craft-workbench-windows
+          - platform: macos
+            os: macos-latest
+            artifact: craft-workbench-macos
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.19.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # The desktop bundle ships the compiled runtime, so the full build must
+      # run before packaging. This is the same gate CI uses for a release.
+      - run: pnpm run version:check
+      - run: pnpm run build
+      - run: pnpm test
+      - name: Package desktop bundle
+        run: pnpm run pack:desktop
+      - name: Collect Windows artifacts
+        if: matrix.platform == 'windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./package.json').version")
+          mkdir -p release-assets
+          cp "dist/craft-workbench-windows-v${version}.zip" release-assets/
+          cp "dist/craft-workbuddy-expert-v${version}.zip" release-assets/ || true
+          cp "dist/craft-workbuddy-connector-v${version}.zip" release-assets/ || true
+          ls -la release-assets
+      - name: Collect macOS artifacts
+        if: matrix.platform == 'macos'
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./package.json').version")
+          mkdir -p release-assets
+          cp "dist/craft-workbench-macos-v${version}.dmg" release-assets/
+          ls -la release-assets
+      - name: Verify the installer was really produced
+        shell: bash
+        run: |
+          set -euo pipefail
+          count=$(find release-assets -type f | wc -l)
+          if [ "$count" -eq 0 ]; then
+            echo "::error::no release asset was produced; refusing to report success"
+            exit 1
+          fi
+          find release-assets -type f -printf '%f %s bytes\n' 2>/dev/null || find release-assets -type f
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: release-assets/*
+          if-no-files-found: error
+
+  attach:
+    name: attach assets to the release
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ls -la release-assets
+          for file in release-assets/*; do
+            [ -f "$file" ] || continue
+            echo "uploading $file"
+            gh release upload "${{ github.event.release.tag_name }}" "$file" --clobber
+          done

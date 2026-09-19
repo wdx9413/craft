@@ -7,9 +7,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { McpServer } from "../src/mcp.ts";
-import { craftPaths } from "../src/paths.ts";
+import { craftPaths } from "../src/infrastructure/paths.ts";
 import { CraftService } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/store.ts";
+import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
 import { resolveParserWorkerPath, runParserWorker, scrubParserEnvironment } from "../src/parser-process.ts";
 
 const contentDigest = (value: string): string => `sha256:${createHash("sha256").update(value).digest("hex")}`;

@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { McpServer } from "../src/mcp.ts";
-import { craftPaths } from "../src/paths.ts";
+import { craftPaths } from "../src/infrastructure/paths.ts";
 import { CraftService } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/store.ts";
+import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
 
 test("work delivery closes Host and acceptance facts without inventing a business outcome", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-delivery-")); const store = await new CraftStore(craftPaths(root)).open(); const service = new CraftService(store);

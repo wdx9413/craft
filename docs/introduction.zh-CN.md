@@ -1,6 +1,6 @@
 # Craft：受控 Agent 工作运行时
 
-> 本文是 Craft 的总览入口。它解释产品解决的问题、关键概念如何连接、当前实现做到哪里，以及在面试或架构评审中应如何准确回答。当前实现基线为 v0.12.30；旧版本号只表示历史里程碑。
+> 本文是 Craft 的总览入口。它解释产品解决的问题、关键概念如何连接、当前实现做到哪里，以及在面试或架构评审中应如何准确回答。当前实现基线为 v0.12.33；旧版本号只表示历史里程碑。
 
 ## 一句话
 
@@ -64,7 +64,7 @@ v0.12.21 进一步把主链压缩为“定义 → 准备 → 行动 → 交付 �
 
 v0.12.28 将产品收敛为完整 Craft 与三个推荐的独立入口：`craft-context`（知识、记忆和最小上下文）、`craft-capability`（能力发现）和 `craft-quality`（通用 Subject 评测）。完整插件统一装配 Core、Context、Capability、Quality 和 Host Bridge；旧 Knowledge、Memory、Skill Quality 名称仅保留兼容。Codex App 默认是 `embedded` Execution Host，Craft 不会因此另起 Codex CLI。详见 [组件插件架构](technical/modules/component-plugin-architecture.md)。
 
-v0.12.30 补齐“能部署、能证明”的外层：远程运行将 principal、tenant、scope、receipt 与一次性 handle 固定在同一任务上；真正的效果比较必须引用真实 Host Session 和独立 Outcome Observer，而不是模型自述。发布者签名、A2A v1 Task 与远程 MCP 都是可替换 Adapter，仍受既有 Capability、Signoff 与 Policy 约束。详见 [Runtime Proof 与远程部署边界](technical/modules/runtime-proof-deployment.md)。
+v0.12.33 补齐“能部署、能证明”的外层：远程运行将 principal、tenant、scope、receipt 与一次性 handle 固定在同一任务上；真正的效果比较必须引用真实 Host Session 和独立 Outcome Observer，而不是模型自述。发布者签名、A2A v1 Task 与远程 MCP 都是可替换 Adapter，仍受既有 Capability、Signoff 与 Policy 约束。详见 [Runtime Proof 与远程部署边界](technical/modules/runtime-proof-deployment.md)。
 
 当前工作树继续补强两处长期运行短板：`DurableActionLoop` 让每个 Work Item 必须经过“行动 → Receipt → 再观察 → 验收”才能成为已证明进度；`ExperienceLedger` 将观察、诊断模式与接受/拒绝的干预提案分层保存。它们不改变版本号，也不把未验证知识直接塞回执行 Host。详见 [Durable Action Loop 与 Experience Ledger](technical/modules/durable-action-experience.md)。
 

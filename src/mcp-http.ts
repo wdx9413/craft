@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { McpServer } from "./mcp.ts";
 import { CraftService } from "./service.ts";
-import { CraftStore } from "./store.ts";
+import { CraftStore } from "./infrastructure/store.ts";
 import { RemoteMcpAccessError, type RemoteMcpAccessPolicy } from "./remote-mcp-access.ts";
 
 type Handler = Pick<McpServer, "handle">;

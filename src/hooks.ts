@@ -1,4 +1,5 @@
-import type { JsonObject } from "./store.ts";
+import type { JsonObject } from "./infrastructure/store.ts";
+import { text } from "./validation.ts";
 
 /**
  * Lifecycle hook points, so safety, statistics, and evaluation do not have to be
@@ -54,11 +55,6 @@ export interface HookRun { outcomes: HookOutcome[]; blocked: boolean }
 const HOOK_ID = /^[a-z0-9][a-z0-9._-]{0,63}$/u;
 const FAIL_POLICIES: readonly string[] = ["fail_closed", "fail_open"];
 const MAX_TIMEOUT_MS = 60_000;
-
-function text(value: unknown, name: string): string {
-  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
-  return value.trim();
-}
 
 export function defineHook(input: JsonObject): HookSpec {
   const id = text(input.id, "hook id");

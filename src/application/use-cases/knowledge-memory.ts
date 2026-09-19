@@ -1,15 +1,26 @@
 import type { CraftService } from "../craft-service.ts";
 
+/**
+ * The three delegations that used to reach one class.
+ *
+ * `KnowledgeMemoryRuntime` served two context members plus the shared context plane from a
+ * single object, so every method here went through `this.knowledgeMemory`. Now each method
+ * names the **owner of the member it belongs to**: Sources to the knowledge package's registry,
+ * Ledger writes to the memory package's kernel, and resolution to the core context plane. The
+ * split is therefore visible in the delegation, not only in the directory layout — which is what
+ * makes the ownership declarations in each package's `ownership.ts` checkable rather than
+ * aspirational.
+ */
 export function installKnowledgeMemoryMethods(serviceClass: typeof CraftService): void {
-  serviceClass.prototype.knowledgeMemoryInstallBuiltins = function () { return this.knowledgeMemory.installBuiltins(); };
-  serviceClass.prototype.knowledgeSourceRegister = function (args) { return this.knowledgeMemory.sourceRegister(args); };
-  serviceClass.prototype.knowledgeSourceList = function (args) { return this.knowledgeMemory.sourceList(args); };
-  serviceClass.prototype.knowledgeSourceTransition = function (args) { return this.knowledgeMemory.sourceTransition(args); };
-  serviceClass.prototype.memoryLedgerRemember = function (args) { return this.knowledgeMemory.remember(args); };
-  serviceClass.prototype.memoryLedgerTransition = function (args) { return this.knowledgeMemory.transition(args); };
-  serviceClass.prototype.memoryLedgerCompatBind = function (args) { return this.knowledgeMemory.compatBind(args); };
-  serviceClass.prototype.contextResolutionResolve = function (args) { return this.knowledgeMemory.resolve(args); };
-  serviceClass.prototype.contextResolutionGet = function (args) { return this.knowledgeMemory.receiptGet(args); };
-  serviceClass.prototype.retrievalAdapterConfigure = function (args) { return this.knowledgeMemory.retrievalConfigure(args); };
-  serviceClass.prototype.retrievalAdapterEvaluate = function (args) { return this.knowledgeMemory.retrievalEvaluate(args); };
+  serviceClass.prototype.knowledgeMemoryInstallBuiltins = function () { return this.knowledgeSources.installBuiltins(); };
+  serviceClass.prototype.knowledgeSourceRegister = function (args) { return this.knowledgeSources.sourceRegister(args); };
+  serviceClass.prototype.knowledgeSourceList = function (args) { return this.knowledgeSources.sourceList(args); };
+  serviceClass.prototype.knowledgeSourceTransition = function (args) { return this.knowledgeSources.sourceTransition(args); };
+  serviceClass.prototype.memoryLedgerRemember = function (args) { return this.memoryLedger.remember(args); };
+  serviceClass.prototype.memoryLedgerTransition = function (args) { return this.memoryLedger.transition(args); };
+  serviceClass.prototype.memoryLedgerCompatBind = function (args) { return this.memoryLedger.compatBind(args); };
+  serviceClass.prototype.contextResolutionResolve = function (args) { return this.contextResolution.resolve(args); };
+  serviceClass.prototype.contextResolutionGet = function (args) { return this.contextResolution.receiptGet(args); };
+  serviceClass.prototype.retrievalAdapterConfigure = function (args) { return this.contextResolution.retrievalConfigure(args); };
+  serviceClass.prototype.retrievalAdapterEvaluate = function (args) { return this.contextResolution.retrievalEvaluate(args); };
 }

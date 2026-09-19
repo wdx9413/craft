@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto";
-import { CraftStore, type JsonObject } from "./store.ts";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
 import { EvalCampaignKernel } from "./eval-campaign.ts";
+import { text } from "./validation.ts";
+import { digestJson, payload } from "./digest.ts";
 
-function text(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim(); }
-function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
-function payload(record: JsonObject): JsonObject { const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record; return rest; }
+
+
+
 
 /**
  * A Host-neutral campaign driver. It may issue one pinned slot at a time, but
@@ -18,7 +20,7 @@ export class CampaignRunnerKernel {
   create(args: JsonObject): JsonObject {
     const campaign = this.store.get("eval_campaign", text(args.campaign_id, "campaign_id"));
     const identity = { campaign_id: campaign.id, campaign_version: campaign.version, environment_digest: campaign.environment_digest, budget_digest: campaign.budget_digest, evaluator_ref: text(args.evaluator_ref, "evaluator_ref"), mode: "host_bound" };
-    const runnerId = String(args.runner_id ?? `campaign_runner_${campaign.id}`); const existing = this.store.find("campaign_runner", runnerId); const identityDigest = digest(identity);
+    const runnerId = String(args.runner_id ?? `campaign_runner_${campaign.id}`); const existing = this.store.find("campaign_runner", runnerId); const identityDigest = digestJson(identity);
     if (existing) { if (existing.identity_digest !== identityDigest) throw new Error("Campaign Runner idempotency conflict"); return { runner: existing, idempotent: true }; }
     return { runner: this.store.create("campaign_runner", runnerId, { ...identity, identity_digest: identityDigest, lifecycle: "ready", issued_slot_ids: [], bound_slot_ids: [] }), idempotent: false };
   }
@@ -28,7 +30,7 @@ export class CampaignRunnerKernel {
     const slots = this.slots(runner); const issued = new Set(runner.issued_slot_ids as string[]); const next = slots.find((slot) => slot.status === "pending" && !issued.has(String(slot.id)));
     if (!next) return { runner, dispatch: null, next_action: "advance_campaign" };
     const identity = { runner_id: runner.id, runner_version: runner.version, slot_id: next.id, slot_version: next.version, case_id: next.case_id, case_version: next.case_version, arm: next.arm, harness: next.harness, environment_digest: runner.environment_digest, budget_digest: runner.budget_digest, evaluator_ref: runner.evaluator_ref };
-    const dispatchId = String(args.dispatch_id ?? `campaign_dispatch_${runner.id}_${next.id}`); const dispatchDigest = digest(identity);
+    const dispatchId = String(args.dispatch_id ?? `campaign_dispatch_${runner.id}_${next.id}`); const dispatchDigest = digestJson(identity);
     const dispatch = this.store.create("campaign_runner_dispatch", dispatchId, { ...identity, dispatch_digest: dispatchDigest, status: "issued" });
     const saved = this.store.save("campaign_runner", String(runner.id), { ...payload(runner), lifecycle: "collecting", issued_slot_ids: [...issued, String(next.id)].sort() });
     this.store.appendEvent(`campaign-runner:${saved.id}`, "campaign_runner.claimed", { dispatch_id: dispatch.id, slot_id: next.id });

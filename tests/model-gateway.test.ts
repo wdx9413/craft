@@ -3,13 +3,13 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { beginLoop, budgetBand, completeLoop, defineLoopLimits, failLoop, loopSummary, observeStep } from "../src/agent-loop.ts";
+import { beginLoop, budgetBand, chargeTurn, completeLoop, defineLoopLimits, failLoop, loopSummary, observeStep } from "../src/agent-loop.ts";
 import { InternalHostDriver, parseAction } from "../src/internal-host-driver.ts";
 import { PROVIDER_CATALOG, buildChatRequest, credentialStatus, createFetchTransport, defineProvider, parseChatResponse,
   providerFromConfig, publicProvider, selectModel, unconfiguredTransport, type ChatRequest, type ChatResult,
   type ModelProviderSpec, type ModelTransport } from "../src/model-gateway.ts";
-import { craftPaths } from "../src/paths.ts";
-import { CraftStore, type JsonObject } from "../src/store.ts";
+import { craftPaths } from "../src/infrastructure/paths.ts";
+import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
 
 const openaiSpec = (): ModelProviderSpec => defineProvider({ provider: "demo", label: "Demo", protocol: "openai-compatible",
   base_url: "https://example.test/v1", api_key_env: "DEMO_API_KEY",
@@ -89,7 +89,17 @@ test("request rendering matches each wire format", () => {
   const openai = buildChatRequest(openaiSpec(), { model: "demo-std", temperature: 0,
     messages: [{ role: "system", content: "be brief" }, { role: "user", content: "hi" }] });
   assert.equal(openai.url, "https://example.test/v1/chat/completions");
-  assert.equal(openai.headers.authorization, "Bearer $DEMO_API_KEY");
+  // The built request names the environment variable the transport must read; it
+  // never carries a credential. This assertion previously locked in the literal
+  // "Bearer $DEMO_API_KEY" — the un-interpolated template source — so a defect
+  // that announced a fake credential was protected by its own test.
+  assert.equal(openai.headers.authorization, "env:DEMO_API_KEY");
+  // No header value may look like a credential, in any wire format.
+  for (const request of [openai, buildChatRequest(anthropicSpec(), { model: "demo-claude", messages: [{ role: "user", content: "hi" }] })]) {
+    for (const value of Object.values(request.headers)) {
+      assert.equal(/\bBearer\s+\S/u.test(String(value)), false, `header leaked a bearer credential: ${String(value)}`);
+    }
+  }
   assert.deepEqual(openai.body.messages, [{ role: "system", content: "be brief" }, { role: "user", content: "hi" }]);
   assert.equal(openai.body.temperature, 0);
   assert.ok(openai.prompt_tokens_estimate >= 1);
@@ -236,12 +246,16 @@ test("provider config is normalized without storing a secret", () => {
 
 test("loop limits are bounded and defaults are explicit", () => {
   const limits = defineLoopLimits();
-  assert.deepEqual(limits, { max_steps: 30, max_tokens: 200_000, max_wall_clock_ms: 1_800_000, no_progress_limit: 5 });
+  assert.deepEqual(limits, { max_steps: 30, max_tokens: 200_000, max_context_tokens: 32_000, max_wall_clock_ms: 1_800_000, no_progress_limit: 5 });
   assert.equal(defineLoopLimits({ max_steps: 3 }).max_steps, 3);
   assert.throws(() => defineLoopLimits({ max_steps: 0 }), /max_steps/);
   assert.throws(() => defineLoopLimits({ max_tokens: 0 }), /max_tokens/);
   assert.throws(() => defineLoopLimits({ max_wall_clock_ms: 10 }), /max_wall_clock_ms/);
   assert.throws(() => defineLoopLimits({ no_progress_limit: 0 }), /no_progress_limit/);
+  // The context window is its own limit, because the cumulative spend cap would
+  // otherwise double as a window that shrinks after every step.
+  assert.equal(defineLoopLimits({ max_context_tokens: 4_096 }).max_context_tokens, 4_096);
+  assert.throws(() => defineLoopLimits({ max_context_tokens: 255 }), /max_context_tokens/);
 });
 
 test("budget bands compress, downgrade and fuse before the ceiling", () => {
@@ -309,6 +323,20 @@ test("a halted loop refuses further steps and validates observations", () => {
   assert.equal(again.halt_reason, "token_limit");
   assert.throws(() => completeLoop(halted.state, "x"), /already halted/);
   assert.throws(() => observeStep(beginLoop(0), limits, { action: "a", progress_digest: "x", tokens: -1, now: 1 }), /non-negative integer/);
+});
+
+test("a model turn without an action is still charged to the loop", () => {
+  const start = beginLoop(0);
+  const charged = chargeTurn(start, 12);
+  assert.equal(charged.steps, 1);
+  assert.equal(charged.tokens_used, 12);
+  // Accounting only: the caller still decides the verdict, so a completion is never
+  // turned into a halt by charging it.
+  assert.equal(charged.status, "running");
+  assert.equal(charged.halt_reason, null);
+  assert.equal(chargeTurn(start, 0).tokens_used, 0);
+  assert.throws(() => chargeTurn(start, -1), /non-negative integer/u);
+  assert.throws(() => chargeTurn(start, 1.5), /non-negative integer/u);
 });
 
 test("loop completion and failure demand an explicit verdict", () => {
@@ -533,5 +561,94 @@ test("the internal host redacts credentials from a final message", async () => {
     driver.prepare({ task_id: task.id, prompt: "go", dispatch_id: "d1" });
     const executed = await driver.execute({ dispatch_id: "d1", prompt: "go" }) as JsonObject;
     assert.equal((executed.receipt as JsonObject).final_message, "[redacted]");
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("every tool call a turn proposes is executed and every id is answered", async () => {
+  const f = await store();
+  try {
+    const task = f.store.create("task", `task_${process.pid}`, { title: "t", goal: "g" });
+    let turns = 0;
+    const transport: ModelTransport = { complete: async () => {
+      turns += 1;
+      return turns === 1
+        ? { text: "searching", model: "fake", usage: { input_tokens: 2, output_tokens: 2 }, tool_calls: [
+            { id: "call-1", type: "function", function: { name: "capability_search", arguments: JSON.stringify({ query: "a" }) } },
+            { id: "call-2", type: "function", function: { name: "knowledge_search", arguments: JSON.stringify({ query: "b" }) } },
+          ] }
+        : { text: "done", model: "fake", usage: { input_tokens: 1, output_tokens: 1 } };
+    } };
+    const dispatched: string[] = [];
+    const driver = new InternalHostDriver(f.store, { providers: [openaiSpec()], transport,
+      invokeAction: (action) => { dispatched.push(action); return { ok: true, action }; } });
+    driver.prepare({ task_id: task.id, prompt: "go", dispatch_id: "parallel" });
+    const run = await driver.execute({ dispatch_id: "parallel", prompt: "go" }) as JsonObject;
+
+    // Both calls ran: dropping the second was the defect that silently discarded
+    // work the model had already committed to.
+    assert.deepEqual(dispatched, ["capability_search", "knowledge_search"]);
+    assert.equal((run.receipt as JsonObject).status, "completed");
+    // Every echoed call id has a result, so the next request is not rejected over
+    // a dangling call.
+    const session = f.store.get("internal_session", "session_parallel") as JsonObject;
+    const ids = (session.messages as Array<Record<string, unknown>>)
+      .filter((message) => message.role === "tool").map((message) => message.tool_call_id);
+    assert.deepEqual(ids, ["call-1", "call-2"]);
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("a refused action is answered to the model instead of ending the run", async () => {
+  const f = await store();
+  try {
+    const task = f.store.create("task", `task_${process.pid}`, { title: "t", goal: "g" });
+    let turns = 0;
+    const transport: ModelTransport = { complete: async () => {
+      turns += 1;
+      return turns === 1
+        ? { text: "", model: "fake", usage: { input_tokens: 1, output_tokens: 1 }, tool_calls: [
+            { id: "call-1", type: "function", function: { name: "contract_publish", arguments: "{}" } },
+          ] }
+        : { text: "recovered after the refusal", model: "fake", usage: { input_tokens: 1, output_tokens: 1 } };
+    } };
+    const driver = new InternalHostDriver(f.store, { providers: [openaiSpec()], transport,
+      invokeAction: async () => { throw new Error("Internal host action is not permitted: contract_publish (tier governed)"); } });
+    driver.prepare({ task_id: task.id, prompt: "go", dispatch_id: "refusal" });
+    const run = await driver.execute({ dispatch_id: "refusal", prompt: "go" }) as JsonObject;
+    const receipt = run.receipt as JsonObject;
+    // The refusal reached the model as a tool result, so the loop could repair and
+    // finish rather than dying on its first mistake.
+    assert.equal(receipt.status, "completed");
+    assert.equal(receipt.final_message, "recovered after the refusal");
+    const session = f.store.get("internal_session", "session_refusal") as JsonObject;
+    const toolMessage = (session.messages as Array<Record<string, unknown>>)
+      .find((message) => message.role === "tool") as Record<string, unknown>;
+    assert.match(String(toolMessage.content), /not permitted/u);
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("a dispatcher that answers with nothing still yields an object result", async () => {
+  const f = await store();
+  try {
+    const task = f.store.create("task", `task_${process.pid}`, { title: "t", goal: "g" });
+    let turns = 0;
+    const transport: ModelTransport = { complete: async () => {
+      turns += 1;
+      return turns === 1
+        ? { text: "", model: "fake", usage: null, tool_calls: [
+            { id: "call-1", type: "function", function: { name: "anything", arguments: "" } },
+          ] }
+        : { text: "settled", model: "fake", usage: null };
+    } };
+    // A misbehaving dispatcher returning nothing must not put a malformed message
+    // in the transcript; the loop normalises it to an empty object.
+    const driver = new InternalHostDriver(f.store, { providers: [openaiSpec()], transport,
+      invokeAction: (() => undefined) as never });
+    driver.prepare({ task_id: task.id, prompt: "go", dispatch_id: "empty" });
+    const run = await driver.execute({ dispatch_id: "empty", prompt: "go" }) as JsonObject;
+    assert.equal((run.receipt as JsonObject).status, "completed");
+    const session = f.store.get("internal_session", "session_empty") as JsonObject;
+    const toolMessage = (session.messages as Array<Record<string, unknown>>)
+      .find((message) => message.role === "tool") as Record<string, unknown>;
+    assert.equal(toolMessage.content, "{}");
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });

@@ -1,5 +1,7 @@
-import { createHash, randomUUID } from "node:crypto";
-import { CraftStore, type JsonObject } from "./store.ts";
+﻿import { randomUUID } from "node:crypto";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
+import { object, text } from "./validation.ts";
+import { canonicalJson, stableDigest, payload } from "./digest.ts";
 
 const KIT_ID = /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/u;
 const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u;
@@ -8,14 +10,7 @@ const SURFACES = new Set(["skill", "mcp", "cli", "plugin"]);
 const PHASES = new Set(["intent.enrich", "clarify.propose", "plan.propose", "activation.resolve", "preflight.check", "execute.adapter", "observe.snapshot", "accept.evaluate", "instrument.emit", "learn.propose"]);
 const SECRET = /(?:api[_-]?key|authorization|cookie|password|secret|token)\s*[:=]/iu;
 
-function text(value: unknown, name: string): string {
-  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
-  return value.trim();
-}
-function object(value: unknown, name: string): JsonObject {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${name} must be an object`);
-  return value as JsonObject;
-}
+
 function strings(value: unknown, name: string, allowed?: Set<string>): string[] {
   if (!Array.isArray(value) || !value.length) throw new Error(`${name} must be a non-empty array`);
   const result = value.map((item) => text(item, name));
@@ -31,16 +26,7 @@ function optionalStrings(value: unknown, name: string): string[] {
   if (new Set(result).size !== result.length) throw new Error(`${name} must contain unique values`);
   return result;
 }
-function payload(record: JsonObject): JsonObject {
-  const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record;
-  return rest;
-}
-function canonical(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
-  if (value && typeof value === "object") return `{${Object.entries(value as JsonObject).sort(([a], [b]) => a.localeCompare(b)).map(([key, child]) => `${JSON.stringify(key)}:${canonical(child)}`).join(",")}}`;
-  return JSON.stringify(value);
-}
-function digest(value: unknown): string { return `sha256:${createHash("sha256").update(canonical(value)).digest("hex")}`; }
+
 function assertNoSecret(value: unknown, name: string): void {
   if (typeof value === "string" && SECRET.test(value)) throw new Error(`${name} must not contain credentials or secrets`);
   if (Array.isArray(value)) value.forEach((item) => assertNoSecret(item, name));
@@ -61,14 +47,14 @@ export class CapabilityKitRuntime {
     const manifest = this.manifest(object(args.manifest, "manifest"));
     const existing = this.store.find("capability_kit", manifest.id);
     if (existing && existing.manifest_version === manifest.manifest_version) {
-      if (existing.manifest_digest !== digest(manifest)) throw new Error("Capability Kit version digest conflicts with installed Kit");
+      if (existing.manifest_digest !== stableDigest(manifest)) throw new Error("Capability Kit version digest conflicts with installed Kit");
       return { kit: existing, idempotent: true };
     }
     this.dependencies(manifest.depends_on);
     const origin = text(args.origin ?? (args.builtin === true ? "builtin" : "local"), "origin");
     assertNoSecret(origin, "origin");
     const kit = this.store.save("capability_kit", manifest.id, {
-      manifest, manifest_version: manifest.manifest_version, manifest_digest: digest(manifest), status: "installed",
+      manifest, manifest_version: manifest.manifest_version, manifest_digest: stableDigest(manifest), status: "installed",
       origin, built_in: args.builtin === true,
     });
     this.store.appendEvent(`capability-kit:${kit.id}`, "kit.installed", { kit_id: kit.id, version: kit.version, manifest_digest: kit.manifest_digest });
@@ -98,10 +84,10 @@ export class CapabilityKitRuntime {
     const identity = { kit_id: kit.id, kit_version: kit.version, task_id: taskId, manifest_digest: kit.manifest_digest, activation_profile_id: args.activation_profile_id ?? null };
     const existing = this.store.find("capability_kit_activation", activationId);
     if (existing) {
-      if (existing.identity_digest !== digest(identity)) throw new Error("Capability Kit activation idempotency conflict");
+      if (existing.identity_digest !== stableDigest(identity)) throw new Error("Capability Kit activation idempotency conflict");
       return { activation: existing, idempotent: true };
     }
-    const activation = this.store.create("capability_kit_activation", activationId, { ...identity, identity_digest: digest(identity), status: reason ? "blocked" : "active", reason });
+    const activation = this.store.create("capability_kit_activation", activationId, { ...identity, identity_digest: stableDigest(identity), status: reason ? "blocked" : "active", reason });
     this.store.appendEvent(`capability-kit:${kit.id}`, "kit.activation", { activation_id: activation.id, task_id: taskId, status: activation.status });
     return { activation, idempotent: false };
   }
@@ -118,7 +104,7 @@ export class CapabilityKitRuntime {
     const contributionId = String(args.contribution_id ?? `kit_contribution_${randomUUID().replaceAll("-", "")}`);
     const contribution = this.store.create("capability_kit_contribution", contributionId, {
       kit_id: kit.id, kit_version: kit.version, activation_id: activation.id, activation_version: activation.version,
-      phase, proposal_digest: digest(proposal), proposal_keys: Object.keys(proposal).sort(), evidence_ids: evidenceIds, raw_content_stored: false,
+      phase, proposal_digest: stableDigest(proposal), proposal_keys: Object.keys(proposal).sort(), evidence_ids: evidenceIds, raw_content_stored: false,
     });
     this.store.appendEvent(`capability-kit:${kit.id}`, "kit.contribution", { contribution_id: contribution.id, phase, proposal_digest: contribution.proposal_digest });
     return { contribution };
@@ -129,7 +115,7 @@ export class CapabilityKitRuntime {
     const state = text(args.state, "state"); if (!new Set(["disabled", "revoked"]).has(state)) throw new Error("Capability Kit state is unsupported");
     const reason = text(args.reason, "reason"); assertNoSecret(reason, "reason");
     if (kit.status === state) return { kit, invalidations: [], idempotent: true };
-    const updated = this.store.save("capability_kit", String(kit.id), { ...payload(kit), status: state, state_actor: text(args.actor, "actor"), state_reason_digest: digest(reason) });
+    const updated = this.store.save("capability_kit", String(kit.id), { ...payload(kit), status: state, state_actor: text(args.actor, "actor"), state_reason_digest: stableDigest(reason) });
     const affected = this.affectedKitIds(String(kit.id));
     const invalidations = this.store.list("capability_kit_activation", 100_000, (item) => affected.has(String(item.kit_id)) && item.status === "active")
       .map((activation) => this.store.save("capability_kit_activation", String(activation.id), { ...payload(activation), status: "needs_replan", reason: `kit_${state}` }));
@@ -143,8 +129,8 @@ export class CapabilityKitRuntime {
     const reportId = String(args.report_id ?? `kit_conformance_${kit.id}_${kit.version}`);
     const identity = { kit_id: kit.id, kit_version: kit.version, manifest_digest: kit.manifest_digest, findings };
     const existing = this.store.find("capability_kit_conformance", reportId);
-    if (existing) { if (existing.identity_digest !== digest(identity)) throw new Error("Capability Kit conformance idempotency conflict"); return { report: existing, idempotent: true }; }
-    const report = this.store.create("capability_kit_conformance", reportId, { ...identity, identity_digest: digest(identity), verdict: findings.length ? "failed" : "passed", mechanism_only: true, raw_content_stored: false });
+    if (existing) { if (existing.identity_digest !== stableDigest(identity)) throw new Error("Capability Kit conformance idempotency conflict"); return { report: existing, idempotent: true }; }
+    const report = this.store.create("capability_kit_conformance", reportId, { ...identity, identity_digest: stableDigest(identity), verdict: findings.length ? "failed" : "passed", mechanism_only: true, raw_content_stored: false });
     return { report, idempotent: false };
   }
 

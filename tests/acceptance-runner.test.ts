@@ -3,9 +3,9 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
 import { McpServer } from "../src/mcp.ts";
-import { craftPaths } from "../src/paths.ts";
+import { craftPaths } from "../src/infrastructure/paths.ts";
 import { CraftService } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/store.ts";
+import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
 
 async function fixture(name: string) { const store = await new CraftStore(craftPaths(join(tmpdir(), `craft-acceptance-runner-${name}-${process.pid}-${Date.now()}`))).open(); const service = new CraftService(store); const task = service.taskOpen({ title: "Domain delivery", goal: "Verify it" }).task as JsonObject; store.create("host_run", "completed-run", { status: "completed" }); store.create("work_launch", "launch", { task_id: task.id, run_id: "completed-run" }); return { store, service, task }; }
 

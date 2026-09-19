@@ -53,8 +53,8 @@
       "category": "Developer Tools"
     },
     {
-      "name": "craft-workflow-evolution",
-      "source": { "source": "local", "path": "./plugins/craft-workflow-evolution" },
+      "name": "craft-experience",
+      "source": { "source": "local", "path": "./plugins/craft-experience" },
       "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
       "category": "Developer Tools"
     }

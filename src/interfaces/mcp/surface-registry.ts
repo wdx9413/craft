@@ -1,5 +1,8 @@
 import { SYSCALL_PASSTHROUGH, SYSCALL_VERBS } from "../../tool-plane.ts";
-import type { Tool } from "./tool-schema.ts";
+import type { Tool } from "../../mcp/tool-schema.ts";
+import { EXPERIENCE_COMPONENT } from "../../../capability/craft-experience/ownership.ts";
+import { KNOWLEDGE_COMPONENT, KNOWLEDGE_CONTEXT_SOURCE } from "../../../capability/craft-knowledge/ownership.ts";
+import { MEMORY_COMPONENT, MEMORY_CONTEXT_SOURCE } from "../../../capability/craft-memory/ownership.ts";
 
 // Tool surfaces are a bounded projection over the canonical tool catalog. The
 // registry owns only names and matching rules; execution remains in McpServer.
@@ -15,22 +18,45 @@ export const SURFACE_RULES: ReadonlyArray<{ name: string; pattern: RegExp }> = [
   { name: "workflow", pattern: /^craft_/ },
 ];
 
+/**
+ * The tools a Host needs in order to *resolve* what a component stored.
+ *
+ * `context_resolution` and `retrieval_adapter` are the two verbs that turn stored material
+ * into a bounded, reproducible context pack. They belong to the projections rather than to a
+ * capability, because a Host that loads only one concern still has to be able to resolve the
+ * material that concern holds. They are implemented by `src/context-resolution.ts`, which is in
+ * the core for exactly that reason.
+ */
+const SHARED_CONTEXT_TOOLS = "craft_(?:context_resolution|retrieval_adapter)";
+
 export const COMPONENT_SURFACES: Readonly<Record<string, RegExp>> = {
-  // Context is the user-facing composition of governed knowledge, scoped
-  // memory, and reproducible context selection. Narrow legacy projections
-  // remain available for Hosts that deliberately want only one concern.
-  "component-context": /^craft_(wiki|knowledge|claim|relation|memory|context_resolution|retrieval_adapter)/,
-  // Quality is subject-agnostic: a Skill is only one possible Subject. Keep
-  // the prior name as an exact compatibility alias for existing installs.
+  // Context is the user-facing composition of governed knowledge, scoped memory, and
+  // reproducible context selection. Narrow legacy projections remain available for Hosts that
+  // deliberately want only one concern. It composes the *frozen* knowledge name space rather
+  // than the knowledge product's, because adding a family here would change what an existing
+  // Host sees; `ownership.ts` records which is which and why.
+  "component-context": new RegExp(`^(?:${KNOWLEDGE_CONTEXT_SOURCE}|${MEMORY_CONTEXT_SOURCE})`),
+  // Quality is subject-agnostic: a Skill is only one possible Subject. Keep the prior name as
+  // an exact compatibility alias for existing installs.
   "component-quality": QUALITY_TOOLS,
-  "component-knowledge": /^craft_(wiki|knowledge|claim|relation|context_resolution|retrieval_adapter)/,
-  // Memory entries must retain their explicit source provenance. The bootstrap
-  // only registers Craft-owned descriptors, so it belongs to this bounded
-  // surface as well as Knowledge without granting external reads.
-  "component-memory": /^craft_(memory|knowledge_source|knowledge_bootstrap|context_resolution|retrieval_adapter)/,
+  // Knowledge is owned by `capability/craft-knowledge`, which declares `owns` and this
+  // projection in `ownership.ts`. The projection is deliberately the broad name space, not the
+  // narrower ownership list: a Host loading the Knowledge product expects `craft_knowledge_*`
+  // even where the facade still implements it.
+  "component-knowledge": KNOWLEDGE_COMPONENT,
+  // Memory is owned by `capability/craft-memory`, which declares both `owns` and this projection
+  // in `ownership.ts`. Its projection is wider than its ownership in two directions: the derived
+  // signals the facade still implements, and the Knowledge Source bootstrap verbs — because a
+  // memory entry's provenance *is* a Source, so a Host that loads only Memory still has to
+  // register the Source its entries cite.
+  "component-memory": MEMORY_COMPONENT,
   "component-capability": /^craft_(source|capability|logical|semantic)/,
   "component-skill-quality": QUALITY_TOOLS,
-  "component-workflow-evolution": /^craft_(workflow_evolution|evaluation_model|experience_mine|experience_candidate|experience_shadow|route_workflow_proposal|workflow_(?:save|get|search|transition|rollback))/,
+  // Experience is owned by `capability/craft-experience`, which declares both `owns` and this
+  // projection in `ownership.ts`; the projection adds the experience families a separate
+  // kernel implements but the same product serves. The shared context verbs are not part of
+  // it: experience is not resolved through the context plane.
+  "component-experience": EXPERIENCE_COMPONENT,
 };
 
 export const COMPONENT_SURFACE_NAMES: readonly string[] = Object.keys(COMPONENT_SURFACES);

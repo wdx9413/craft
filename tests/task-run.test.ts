@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { McpServer } from "../src/mcp.ts";
-import { craftPaths } from "../src/paths.ts";
+import { craftPaths } from "../src/infrastructure/paths.ts";
 import { CraftService, VERSION } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/store.ts";
+import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
 import { WorkbenchWebApp } from "../src/workbench-server.ts";
 
 async function fixture() {
@@ -39,7 +39,7 @@ test("Task Run binds a real read-only launch, persists only digests, and safely 
     assert.equal((f.service.taskRunCancel({ task_run_id: taskRun.id, reason: "done" }).run as JsonObject).lifecycle, "cancelled"); assert.equal(f.service.taskRunCancel({ task_run_id: taskRun.id, reason: "done" }).idempotent, true);
     assert.equal((f.service.taskRunRefresh({ task_run_id: taskRun.id }).state as JsonObject).status, "cancelled"); assert.throws(() => f.service.taskRunPause({ task_run_id: taskRun.id, reason: "again" }), /Cancelled/); assert.throws(() => f.service.taskRunResume({ task_run_id: taskRun.id }), /Cancelled/);
     assert.throws(() => f.service.taskRunGet({ task_run_id: "" }), /task_run_id/);
-    assert.equal(VERSION, "0.12.30");
+    assert.equal(VERSION, "0.12.33");
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 

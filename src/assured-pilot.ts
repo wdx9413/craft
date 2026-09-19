@@ -1,18 +1,14 @@
 import { createHash } from "node:crypto";
-import { CraftStore, type JsonObject } from "./store.ts";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
+import { text } from "./validation.ts";
+import { digestJson, payload } from "./digest.ts";
 
 const TRUSTED = new Set(["trusted", "verified"]);
 const REQUIRED_RECOVERY_CHECKS = ["rehydration_verified", "receipt_revalidated", "state_reobserved"] as const;
 
-function text(value: unknown, name: string): string {
-  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
-  return value.trim();
-}
-function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
-function payload(record: JsonObject): JsonObject {
-  const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...value } = record;
-  return value;
-}
+
+
+
 function iso(value: unknown, name: string): string {
   const result = text(value, name); if (!Number.isFinite(Date.parse(result))) throw new Error(`${name} must be an ISO timestamp`);
   return result;
@@ -40,7 +36,7 @@ export class AssuredPilotKernel {
     if (caseRecord.partition !== "held_out" || caseRecord.sanitized !== true || !caseRecord.approved_by) throw new Error("Only independently approved sanitized held-out Cases may be sealed");
     const identity = { case_id: caseRecord.id, case_version: caseRecord.version, case_digest: caseRecord.definition_digest,
       custodian: text(args.custodian, "custodian"), opaque_locator_digest: text(args.opaque_locator_digest, "opaque_locator_digest"), approval_ref: text(args.approval_ref, "approval_ref") };
-    const sealedCaseId = String(args.sealed_case_id ?? `sealed_eval_case_${caseRecord.id}_${caseRecord.version}`); const existing = this.store.find("sealed_evaluation_case", sealedCaseId); const identityDigest = digest(identity);
+    const sealedCaseId = String(args.sealed_case_id ?? `sealed_eval_case_${caseRecord.id}_${caseRecord.version}`); const existing = this.store.find("sealed_evaluation_case", sealedCaseId); const identityDigest = digestJson(identity);
     if (existing) { if (existing.identity_digest !== identityDigest) throw new Error("Sealed evaluation Case idempotency conflict"); return { sealed_case: existing, idempotent: true }; }
     return { sealed_case: this.store.create("sealed_evaluation_case", sealedCaseId, { ...identity, identity_digest: identityDigest, raw_case_stored: false, status: "sealed" }), idempotent: false };
   }
@@ -50,7 +46,7 @@ export class AssuredPilotKernel {
     const run = this.store.get("task_run", text(args.task_run_id, "task_run_id")); const expiresAt = iso(args.expires_at, "expires_at");
     const identity = { sealed_case_id: sealed.id, sealed_case_version: sealed.version, task_run_id: run.id, task_run_version: run.version,
       recipient: text(args.recipient, "recipient"), expires_at: expiresAt, purpose: "evaluation" };
-    const accessId = String(args.access_id ?? `sealed_eval_access_${digest(identity).slice(-16)}`); const existing = this.store.find("sealed_evaluation_access", accessId); const identityDigest = digest(identity);
+    const accessId = String(args.access_id ?? `sealed_eval_access_${digestJson(identity).slice(-16)}`); const existing = this.store.find("sealed_evaluation_access", accessId); const identityDigest = digestJson(identity);
     if (existing) { if (existing.identity_digest !== identityDigest) throw new Error("Sealed evaluation access idempotency conflict"); return { access: existing, idempotent: true }; }
     return { access: this.store.create("sealed_evaluation_access", accessId, { ...identity, identity_digest: identityDigest, status: "issued", raw_case_stored: false }), idempotent: false };
   }
@@ -75,7 +71,7 @@ export class AssuredPilotKernel {
     const evidenceIds = confirmedEvidence(this.store, args.evidence_ids);
     const identity = { task_run_id: run.id, task_run_version: run.version, attestation_id: attestation.id, attestation_version: attestation.version,
       readiness_id: readiness.id, readiness_version: readiness.version, environment_digest: environmentDigest, checks: REQUIRED_RECOVERY_CHECKS, evidence_ids: evidenceIds };
-    const drillId = String(args.drill_id ?? `runtime_recovery_drill_${digest(identity).slice(-16)}`); const existing = this.store.find("runtime_recovery_drill", drillId); const identityDigest = digest(identity);
+    const drillId = String(args.drill_id ?? `runtime_recovery_drill_${digestJson(identity).slice(-16)}`); const existing = this.store.find("runtime_recovery_drill", drillId); const identityDigest = digestJson(identity);
     if (existing) { if (existing.identity_digest !== identityDigest) throw new Error("Recovery drill idempotency conflict"); return { drill: existing, idempotent: true }; }
     return { drill: this.store.create("runtime_recovery_drill", drillId, { ...identity, identity_digest: identityDigest, status: "passed", deployment_claimed: false }), idempotent: false };
   }
@@ -92,7 +88,7 @@ export class AssuredPilotKernel {
     this.assertProfile(profile, String(task.id)); this.assertSealedCaseCurrent(this.sealed(access.sealed_case_id));
     const identity = { task_id: task.id, task_run_id: run.id, task_run_version: run.version, environment_digest: run.environment_digest,
       attestation: { id: attestation.id, version: attestation.version }, readiness: { id: readiness.id, version: readiness.version }, recovery_drill: { id: drill.id, version: drill.version }, activation_profile: { id: profile.id, version: profile.version }, sealed_access: { id: access.id, version: access.version } };
-    const pilotId = String(args.pilot_id ?? `assured_pilot_${digest(identity).slice(-16)}`); const existing = this.store.find("assured_work_pilot", pilotId); const identityDigest = digest(identity);
+    const pilotId = String(args.pilot_id ?? `assured_pilot_${digestJson(identity).slice(-16)}`); const existing = this.store.find("assured_work_pilot", pilotId); const identityDigest = digestJson(identity);
     if (existing) { if (existing.identity_digest !== identityDigest) throw new Error("Assured Pilot idempotency conflict"); return { pilot: existing, idempotent: true }; }
     return { pilot: this.store.create("assured_work_pilot", pilotId, { ...identity, identity_digest: identityDigest, status: "evidence_bound", deployment_claimed: false }), idempotent: false };
   }

@@ -1,8 +1,10 @@
 import { createHash } from "node:crypto";
-import { CraftStore, type JsonObject } from "./store.ts";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
+import { text } from "./validation.ts";
+import { digestJson } from "./digest.ts";
 
-function text(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim(); }
-function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
+
+
 function taskId(run: JsonObject): string {
   const fromLaunch = run.launch_identity && typeof run.launch_identity === "object" && !Array.isArray(run.launch_identity) ? (run.launch_identity as JsonObject).task_id : undefined;
   return text(run.task_id ?? fromLaunch, "Task Run task_id");
@@ -16,7 +18,7 @@ export class AgentEvalLabKernel {
   create(args: JsonObject): JsonObject {
     const runner = this.store.get("campaign_runner", text(args.runner_id, "runner_id")); const campaign = this.store.get("eval_campaign", String(runner.campaign_id));
     const identity = { runner_id: runner.id, runner_version: runner.version, campaign_id: campaign.id, campaign_version: campaign.version, environment_digest: campaign.environment_digest, budget_digest: campaign.budget_digest };
-    const labId = String(args.lab_id ?? `agent_eval_lab_${runner.id}`); const existing = this.store.find("agent_eval_lab", labId); const identityDigest = digest(identity);
+    const labId = String(args.lab_id ?? `agent_eval_lab_${runner.id}`); const existing = this.store.find("agent_eval_lab", labId); const identityDigest = digestJson(identity);
     if (existing) { if (existing.identity_digest !== identityDigest) throw new Error("Agent Eval Lab idempotency conflict"); return { lab: existing, idempotent: true }; }
     return { lab: this.store.create("agent_eval_lab", labId, { ...identity, identity_digest: identityDigest, lifecycle: "ready", attempt_ids: [] }), idempotent: false };
   }
@@ -37,7 +39,7 @@ export class AgentEvalLabKernel {
       coordinator_id: coordinator.id,
       coordinator_identity_digest: coordinator.identity_digest,
     };
-    const attemptId = String(args.attempt_id ?? `agent_eval_attempt_${dispatch.id}`); const existing = this.store.find("agent_eval_attempt", attemptId); const identityDigest = digest(identity);
+    const attemptId = String(args.attempt_id ?? `agent_eval_attempt_${dispatch.id}`); const existing = this.store.find("agent_eval_attempt", attemptId); const identityDigest = digestJson(identity);
     if (existing) { if (existing.identity_digest !== identityDigest) throw new Error("Agent Eval attempt idempotency conflict"); return { lab, attempt: existing, idempotent: true }; }
     const attempt = this.store.create("agent_eval_attempt", attemptId, { ...identity, identity_digest: identityDigest, lifecycle: "running" }); const saved = this.store.save("agent_eval_lab", String(lab.id), { ...lab, lifecycle: "collecting", attempt_ids: [...new Set([...(lab.attempt_ids as string[]), String(attempt.id)])].sort() });
     return { lab: saved, attempt, idempotent: false };

@@ -8,9 +8,9 @@ import test from "node:test";
 import { PassThrough } from "node:stream";
 import { TrustedEgressBroker, createHttpsTransport, egressRequestDigest, isPrivateEgressAddress, resolvePublic, type EgressTransport } from "../src/egress.ts";
 import { McpServer } from "../src/mcp.ts";
-import { craftPaths } from "../src/paths.ts";
+import { craftPaths } from "../src/infrastructure/paths.ts";
 import { CraftService } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/store.ts";
+import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
 
 test("trusted egress injects only at a public pinned transport and redacts the response", async () => {
   let observed: Parameters<EgressTransport>[0] | undefined;

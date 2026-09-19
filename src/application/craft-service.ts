@@ -1,10 +1,10 @@
-import { createHash, randomUUID } from "node:crypto";
+﻿import { createHash, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { isAbsolute, join, resolve, win32 } from "node:path";
 import { pathToFileURL } from "node:url";
 import { validateJsonSchema, type JsonValue } from "../json-schema.ts";
-import { CraftStore, type JsonObject } from "../store.ts";
+import { CraftStore, type JsonObject } from "../infrastructure/store.ts";
 import { approvedEffects, executeSteps, normalizeSteps, resolveInputs, SIDE_EFFECTS, substitute } from "../workflow.ts";
 import { addCosts, dispatchNodes, normalizeNodes, orchestrationOutcome, planStatus, recoverExpiredLeases, submitNode,
   type PlanNode } from "../orchestration.ts";
@@ -21,18 +21,33 @@ import { credentialStatus, publicProvider, selectModel, unconfiguredTransport } 
 import { OpenAiCompatibleEmbeddingProvider, type EmbeddingProvider } from "../semantic.ts";
 import { discoverWorkflows, diffWorkflowCatalog, planWorkflowRetirement, type WorkflowUsage } from "../workflow-registry.ts";
 import { KnowledgeIndex, diffKnowledgeBase, scanKnowledgeBase } from "../knowledge-index.ts";
-import { classifyComplexity, createBudgetState, estimatePromptTokens, routeModel, spendTokens, truncateToBudget } from "../token-budget.ts";
+import { classifyComplexity, createBudgetState, estimatePromptTokens, estimateTokens, routeModel, spendTokens, truncateToBudget } from "../token-budget.ts";
 import { defaultHooks, defineHooks, runHooks, type HookSpec } from "../hooks.ts";
 import { decideExecution } from "../execution-policy.ts";
+import { assessMcpMigration, createCredentialResolver, distributionPlan, firstRunReadiness, isolationCapability, negotiateProtocolVersion, readCredentialFile } from "../distribution-and-first-run.ts";
+import { Bm25Index, buildExperienceRecord, decideExperienceCapture, fuseRankings } from "../context-retrieval-capture.ts";
+
+import { evaluateVerificationCheck, runVerification, verificationCaptureSignals } from "../verification-sensor.ts";
+import { abstractAcrossTrajectories, buildAbstraction, trajectoryFailureSignature } from "../trajectory-abstraction.ts";
+import { attributeFailure, summarizeAttributions } from "../failure-attribution.ts";
+import { checkConsistency, mcpDeclarations } from "../declaration-consistency.ts";
+import {
+  compactionPlan, defineConstraint, pinConstraints, verifyPinIntact
+} from "../governance-pinning.ts";
+import { discoverResult, forwardCompatibility } from "../mcp-forward-compat.ts";
 import { dockerRequestDigest } from "../docker-sandbox.ts";
 import { egressRequestDigest } from "../egress.ts";
-import { ServiceFoundation } from "../service-foundation.ts";
+import { ServiceFoundation } from "./service-foundation.ts";
 import type { TraceArchiveRuntimeBackend } from "../trace-archive-storage.ts";
 import { dataSpaceId } from "../data-space.ts";
+import { actionNameOf, classifyTool } from "../internal-tool-authorization.ts";
+import { executeSubagent, planSubagentExecution } from "../subagent-execution.ts";
 import { installAdapterRuntimeMethods } from "./use-cases/adapter-runtime.ts";
 import { installKernelDelegateMethods } from "./use-cases/kernel-delegates.ts";
+import { object, text } from "../validation.ts";
+import { canonicalJson } from "../digest.ts";
 
-export const VERSION = "0.12.30";
+export const VERSION = "0.12.33";
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const TASK_PERMISSION_MODES = new Set(["human_approval", "assisted_approval", "full_access"]);
@@ -52,10 +67,7 @@ const KNOWLEDGE_RELATIONS = new Set(["supports", "contradicts", "supersedes", "a
 
 function id(prefix: string): string { return `${prefix}_${randomUUID().replaceAll("-", "")}`; }
 function valueDigest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
-function text(value: unknown, name: string): string {
-  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
-  return value.trim();
-}
+
 function document(value: unknown, name: string): string {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
   return value;
@@ -82,10 +94,7 @@ function array(value: unknown, name: string): unknown[] {
   if (!Array.isArray(value)) throw new Error(`${name} must be an array`);
   return value;
 }
-function object(value: unknown, name: string): JsonObject {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${name} must be an object`);
-  return value as JsonObject;
-}
+
 function recordPayload(record: JsonObject): JsonObject {
   const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...payload } = record;
   return payload;
@@ -156,17 +165,13 @@ function assertNoSecret(value: string, name: string): string {
   return value;
 }
 
-function canonical(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
-  if (value && typeof value === "object") {
-    return `{${Object.entries(value as JsonObject).sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`).join(",")}}`;
-  }
-  return JSON.stringify(value);
-}
-
 function fingerprint(value: JsonObject): string {
-  return createHash("sha256").update(canonical(value)).digest("hex");
+  // The same serialization every other kernel now shares, with a different public shape: bare
+  // hex rather than a `sha256:`-prefixed value, and callers that want the prefix add it
+  // themselves (`request_digest: \`sha256:${fingerprint(...)}\``). That difference is why this
+  // is not `stableDigest` — merging it would change the shape of every fingerprint this facade
+  // stores, and a stored fingerprint is an identity.
+  return createHash("sha256").update(canonicalJson(value)).digest("hex");
 }
 
 function runtimeAuthorization(runId: string, operation: JsonObject): JsonObject {
@@ -229,17 +234,81 @@ export class CraftService extends ServiceFoundation {
   }
 
   /**
-   * The only operations the internal host may invoke.
+   * The canonical MCP handler table, contributed by the mounted McpServer.
    *
-   * Read-and-record only: a loop Craft runs itself must not be able to reach an
-   * operation a governed host would have needed an approval for. Anything absent
-   * here fails closed, so widening the loop's authority is always an explicit
-   * edit to this list rather than a side effect of a registry change.
+   * The tool catalog is a single source, and so is its dispatch: instead of a
+   * second hand-maintained whitelist that could drift from the public surface,
+   * the internal loop addresses the *same* handlers the MCP surface exposes.
+   * Authorization is then a property of the tier gate, not of a duplicate list.
+   * A service with no McpServer mounted simply has no external dispatch, so the
+   * loop falls back to the bounded table below.
+   */
+  private canonicalHandlers: Record<string, (input: JsonObject) => JsonObject | Promise<JsonObject>> | null = null;
+
+  /** Contributed by McpServer so the internal loop and MCP share one dispatch. */
+  registerCanonicalHandlers(handlers: Record<string, (input: JsonObject) => JsonObject | Promise<JsonObject>>): void {
+    this.canonicalHandlers = handlers;
+  }
+
+  /**
+   * The operations the internal host may invoke.
+   *
+   * Two gates, both fail-closed. The first is the *tier gate*: the action's
+   * canonical tool name is classified (read / candidate / governed / forbidden)
+   * and must be inside the tiers this host mounted -- by default read and
+   * candidate, so "Craft works on its own" can observe and propose but cannot
+   * approve its own work. The second is dispatch: the action is resolved
+   * against the canonical MCP handler table when a server is mounted, and
+   * otherwise against the bounded fallback table below, so an action that is
+   * not a real public operation fails closed either way.
    */
   protected async invokeInternalAction(action: string, args: JsonObject): Promise<JsonObject> {
-    const permitted: Record<string, (input: JsonObject) => JsonObject | Promise<JsonObject>> = {
+    const tier = classifyTool(`craft_${action}`);
+    if (!this.internalHost.authorization.includes(tier)) {
+      throw new Error(`Internal host action is not permitted: ${action} (tier ${tier} is outside the mounted authorization)`);
+    }
+    const canonicalHandler = this.canonicalHandlers?.[`craft_${action}`];
+    if (canonicalHandler) return canonicalHandler(args);
+    const handler = this.internalFallbackActions()[action];
+    if (!handler) throw new Error(`Internal host action is not permitted: ${action} (not a known operation)`);
+    return handler(args);
+  }
+
+  /**
+   * The bounded surface the loop keeps when no MCP server is mounted.
+   *
+   * This is the read-and-record core the internal host was originally built
+   * around; it stays as the offline/no-server fallback so a standalone service
+   * still gives the loop something useful without widening its authority.
+   */
+  private internalFallbackActions(): Record<string, (input: JsonObject) => JsonObject | Promise<JsonObject>> {
+    return {
       capability_search: (input) => this.capabilitySearch(input),
       knowledge_search: (input) => this.knowledgeSearch(input),
+      // v0.12.35: the read half of memory access, plus a candidate-only write.
+      // `memory_capture_propose` deliberately routes to the governed candidate
+      // path rather than the ledger write, so a loop tool call cannot create a
+      // durable memory on its own. The key must equal the canonical action name,
+      // because that name is what the loop is offered: an alias here is a tool
+      // the model can see and never reach.
+      memory_search: (input) => this.memorySearch(input),
+      memory_capture_propose: (input) => this.knowledgeMemoryCandidatePropose(input),
+      // v0.12.36: the loop verifies its own work here. Both are pure
+      // comparisons over facts the caller already observed, so they execute
+      // nothing and grant no new authority.
+      verification_evaluate: (input) => this.verificationRun(input),
+      verification_capture_signals_get: (input) => this.verificationCaptureSignals(input),
+      // The loop may look across past trajectories to see recurrence; it may
+      // not mint an abstraction, which stays governed.
+      abstraction_evaluate: (input) => this.abstractionEvaluate(input),
+      // The loop names the cause of its own failure, but never invents one:
+      // `unattributed` is returned rather than guessed.
+      failure_attribution_get: (input) => this.failureAttributionGet(input),
+      // The loop checks a claim against the implementation instead of assuming
+      // the declaration is true.
+      consistency_check: (input) => this.consistencyCheck(input),
+      // The loop verifies its own guardrail but cannot author one.
+      governance_pin_check: (input) => this.governancePinCheck(input),
       task_checkpoint: (input) => this.taskCheckpoint(input),
       evidence_record: (input) => this.evidenceRecord(input),
       artifact_register: (input) => this.artifactRegister(input),
@@ -252,9 +321,21 @@ export class CraftService extends ServiceFoundation {
         return this.actionGatewayExecute({ action_id: (prepared.action as JsonObject).id, relative_path: text(input.relative_path, "relative_path"), content: text(input.content, "content"), approved: input.approved === true });
       },
     };
-    const handler = permitted[action];
-    if (!handler) throw new Error(`Internal host action is not permitted: ${action}`);
-    return handler(args);
+  }
+
+  /**
+   * The tool names the internal loop is actually able to route.
+   *
+   * Built from the two tables `invokeInternalAction` dispatches against, so the
+   * advertised surface and the answerable surface cannot diverge: a name is here
+   * exactly when a call to it would resolve. The canonical table is consulted
+   * live, which is why a host that mounts its MCP server after the service was
+   * constructed still gets the wide surface.
+   */
+  protected dispatchableInternalActions(): ReadonlySet<string> {
+    const names = new Set(Object.keys(this.internalFallbackActions()));
+    for (const canonical of Object.keys(this.canonicalHandlers ?? {})) names.add(actionNameOf(canonical));
+    return names;
   }
 
   modelProviderList(): JsonObject {
@@ -405,6 +486,186 @@ export class CraftService extends ServiceFoundation {
   logicalActivationResolve(args: JsonObject): Promise<JsonObject> { return this.capabilityAccess.logicalActivationResolve(args); }
   semanticSearchStatus(): JsonObject { return this.catalog.semanticStatus(); }
   executionPolicyDecide(args: JsonObject): JsonObject { return decideExecution(args); }
+  // v0.12.33: first-run readiness, credential resolution, protocol negotiation,
+  // honest platform isolation reporting and the user-facing download plan.
+  firstRunReadiness(args: JsonObject): JsonObject {
+    // "Right now" means the real environment, not an echo: the caller may
+    // override, but omitting the inputs must not report "no models" when the
+    // process or settings actually have them. The gateway reads settings the same
+    // way the rest of the service does, so the answer reflects this install.
+    const models = Array.isArray(args.models) && args.models.length
+      ? args.models as JsonObject[]
+      : loadSettingsSync(this.store.paths).models.map((model) => model as unknown as JsonObject);
+    const env = args.env && typeof args.env === "object" && Object.keys(args.env as object).length
+      ? args.env as NodeJS.ProcessEnv
+      : process.env;
+    return firstRunReadiness({ ...args, models, env });
+  }
+  credentialResolve(args: JsonObject): JsonObject {
+    const sources: NodeJS.ProcessEnv[] = [process.env];
+    // A desktop launcher writes the pasted key to a file and points here, so the
+    // user never has to touch the process environment themselves.
+    if (typeof args.credential_file === "string") {
+      const overlay = readCredentialFile(args.credential_file);
+      if (!overlay.found) throw new Error(`Credential file ${String(overlay.path)} does not exist`);
+      sources.push(overlay.env as NodeJS.ProcessEnv);
+    }
+    if (args.env && typeof args.env === "object") sources.push(args.env as NodeJS.ProcessEnv);
+    const resolved = createCredentialResolver(sources).env;
+    return { names: Object.keys(resolved).filter((name) => resolved[name]).sort(), credential_source: args.credential_file ? "desktop_launcher" : "process_environment" };
+  }
+  mcpProtocolNegotiate(args: JsonObject): JsonObject { return negotiateProtocolVersion(args.protocolVersion); }
+  mcpMigrationAssess(args: JsonObject): JsonObject { return assessMcpMigration(args); }
+  isolationCapabilityGet(args: JsonObject): JsonObject { return isolationCapability(String(args.platform ?? process.platform)); }
+  distributionPlanGet(args: JsonObject): JsonObject {
+    return distributionPlan({ version: VERSION, repository: "wdx9413/craft", release_assets_available: args.release_assets_available === true });
+  }
+  // v0.12.34: the three ideal-state gaps. Reversible context projection (so a
+  // dropped segment can come back), BM25 over identifier-heavy records, and a
+  // deterministic experience-capture gate that does not depend on the model
+  // choosing to call a memory tool.
+  // The projection is durable now, so an omitted segment really can come back in a later call. The
+  // two methods used to build a throwaway `ReversibleContext` from the arguments on every call,
+  // which is why `restore` needed the original segments re-supplied and why the tool's own promise
+  // ("omitted segments are named and can be restored") could not be kept.
+  contextProject(args: JsonObject): JsonObject { return this.contextProjection.project(args); }
+  contextRestore(args: JsonObject): JsonObject { return this.contextProjection.restore(args); }
+  contextProjectionGet(args: JsonObject): JsonObject { return this.contextProjection.get(args); }
+  /**
+   * The unified `state` view.
+   *
+   * A read of five records with one precedence, so a caller asking "where is this task" gets an
+   * answer instead of an assembly. It writes nothing: the status is derived, so there is no second
+   * source of truth to drift.
+   */
+  stateViewGet(args: JsonObject): JsonObject { return this.stateView.get(args); }
+  bm25Search(args: JsonObject): JsonObject {
+    const index = new Bm25Index();
+    for (const item of (args.documents as JsonObject[] | undefined) ?? []) {
+      index.add(String(item.id), String(item.value));
+    }
+    const ranked = index.score(String(args.query));
+    return {
+      results: ranked.map((item, position) => ({ ...item, rank: position + 1 })),
+      count: ranked.length,
+      indexed: index.size,
+    };
+  }
+  retrievalFuse(args: JsonObject): JsonObject {
+    const rankings = ((args.rankings as JsonObject[][] | undefined) ?? []).map((ranking) =>
+      ranking.map((item) => ({ id: String(item.id) })));
+    const fused = fuseRankings(rankings, args.k === undefined ? 60 : Number(args.k));
+    return { fused, count: fused.length };
+  }
+  experienceCaptureDecide(args: JsonObject): JsonObject { return decideExperienceCapture(args) as unknown as JsonObject; }
+  experienceCaptureBuild(args: JsonObject): JsonObject { return buildExperienceRecord(args); }
+  // v0.12.36: the deterministic verification sensor. It produces the failure
+  // signal the self-evolution loop consumes, so a lesson can be learned from an
+  // observed result instead of from an `outcome` the caller supplied.
+  verificationCheck(args: JsonObject): JsonObject { return evaluateVerificationCheck(args) as unknown as JsonObject; }
+  verificationRun(args: JsonObject): JsonObject { return runVerification(args); }
+  verificationCaptureSignals(args: JsonObject): JsonObject { return verificationCaptureSignals(args); }
+  // v0.12.37: cross-trajectory abstraction. This is the Experience stage the
+  // per-run capture path never reached — it reads across many trajectories and
+  // generalises only when recurrence is demonstrated.
+  // Wrapped in an object rather than returned bare: an MCP handler must answer
+  // with an object, and the signature is clearer next to its inputs.
+  trajectorySignatureGet(args: JsonObject): JsonObject {
+    return { signature: trajectoryFailureSignature(args), failed_checks: [...new Set(((args.failed_checks as unknown[] | undefined) ?? []).map(String))].sort() };
+  }
+  abstractionEvaluate(args: JsonObject): JsonObject { return abstractAcrossTrajectories(args); }
+  // v0.12.40: governance pinning. The loop may check its own guardrail and
+  // simulate compaction; defining a constraint stays governed, because a guard
+  // the loop can redefine is not a guard.
+  governancePinGet(args: JsonObject): JsonObject { return pinConstraints((args.constraints as JsonObject[]) ?? []); }
+  governancePinCheck(args: JsonObject): JsonObject { return verifyPinIntact(args); }
+  governanceCompactionEvaluate(args: JsonObject): JsonObject { return compactionPlan(args); }
+  governanceConstraintDefine(args: JsonObject): JsonObject { return defineConstraint(args); }
+  // v0.12.41: MCP 2026-07-28 forward compatibility. Reporting readiness is read;
+  // it never claims compliance.
+  mcpDiscoverGet(args: JsonObject): JsonObject { return discoverResult(args); }
+  mcpForwardCompatGet(args: JsonObject): JsonObject { return forwardCompatibility(args); }
+  abstractionBuild(args: JsonObject): JsonObject { return buildAbstraction(args); }
+  // v0.12.39: declaration/implementation consistency. Declarations are data, so
+  // the comparison is mechanical rather than a matter of care.
+  consistencyCheck(args: JsonObject): JsonObject { return checkConsistency(args); }
+  mcpDeclarationsGet(): JsonObject { return { declarations: mcpDeclarations() }; }
+  // v0.12.38: failure attribution. V1 produces the observations; this names the
+  // cause, so a lesson can be checked against the layer it claims.
+  failureAttributionGet(args: JsonObject): JsonObject { return attributeFailure(args); }
+  failureAttributionSummaryGet(args: JsonObject): JsonObject { return summarizeAttributions(args); }
+  // v0.12.35: the memory read path, decay weighting, capture policy, legacy
+  // promotion planning, hybrid (vector+keyword) memory scoring, and the usage
+  // evidence that makes "the agent did better because it remembered" checkable.
+  memoryDecayWeightGet(args: JsonObject): JsonObject {
+    // Wrapped rather than returned bare: an MCP handler must answer with an
+    // object, and the weight is more useful alongside the inputs it came from.
+    return { weight: this.memorySignals.decayWeight(args), confirmed_at: String(args.confirmed_at), now: String(args.now) };
+  }
+  memoryProposePolicy(args: JsonObject): JsonObject { return this.memorySignals.shouldPropose(args); }
+  memoryLegacyPromote(args: JsonObject): JsonObject { return this.memorySignals.planLegacyPromotion(args); }
+  memoryHybridScores(args: JsonObject): JsonObject {
+    const candidates = ((args.candidates as JsonObject[] | undefined) ?? []).map((item) => ({
+      id: String(item.id),
+      similarity: item.similarity === null || item.similarity === undefined ? null : Number(item.similarity),
+      keyword_score: Number(item.keyword_score ?? 0)
+    }));
+    const results = this.memorySignals.hybridScores(candidates, {
+      vectorEligible: args.vector_eligible === true,
+      ...(args.k === undefined ? {} : { k: Number(args.k) })
+    });
+    return { results, count: results.length, vector_eligible: args.vector_eligible === true };
+  }
+  memoryUsageEvidenceRecord(args: JsonObject): JsonObject { return this.memorySignals.usageEvidence(args); }
+
+  /**
+   * The loop's candidate-only memory write.
+   *
+   * A loop tool call must not be able to create a durable memory, so this
+   * records a *turn proposal* carrying a memory candidate and stops there. The
+   * candidate still has to pass `candidateDecide` before anything reaches the
+   * ledger, which keeps the governance identical to a host-initiated proposal
+   * while letting the agent ask for something to be remembered.
+   */
+  knowledgeMemoryCandidatePropose(args: JsonObject): JsonObject {
+    const source = this.store.get("knowledge_source", text(args.source_id ?? "craft.internal", "source_id"));
+    const kind = text(args.kind, "kind");
+    const content = text(args.content, "content");
+    // Content is validated before scope: a proposal carrying a credential must
+    // be refused for that reason, not for a missing scope field, or the caller
+    // would learn the wrong thing about why it was rejected.
+    assertNoSecret(content, "content");
+    const scope = text(args.scope, "scope");
+    // A craft_agent proposal must name the active Agent Work Runtime mode, so
+    // the gate in proposalSubmit is a real precondition rather than a lookup
+    // that can never succeed. The caller may pin one explicitly.
+    const activeMode = args.work_runtime_mode_id === undefined
+      ? this.store.list("work_runtime_mode", 100).find((profile) => profile.mode === "agent" && profile.status === "active")
+      : this.store.get("work_runtime_mode", text(args.work_runtime_mode_id, "work_runtime_mode_id"));
+    if (!activeMode) throw new Error("Memory proposal requires an active Agent Work Runtime mode");
+    const proposal = this.turnCognitive.proposalSubmit({
+      scope_kind: scope,
+      scope_id: text(args.scope_id ?? "internal", "scope_id"),
+      semantic_owner: "craft_agent",
+      work_runtime_mode_id: String(activeMode.id),
+      input_digest: valueDigest({ content, kind, scope }),
+      // `learning` is the intent that covers "something worth remembering"; the
+      // candidate itself is what carries the content.
+      intents: ["learning"],
+      signals: ["durable_value"],
+      memory_candidate: { source_id: String(source.id), kind, content, sensitivity: args.sensitivity ?? "internal" }
+    });
+    const recorded = proposal.proposal as JsonObject;
+    return {
+      proposal_id: recorded.id,
+      kind,
+      scope,
+      // Stated explicitly so a caller cannot mistake this for a durable write.
+      durable: false,
+      requires_approval: true,
+      execution_authority: false
+    };
+  }
   capabilityGet(args: JsonObject): JsonObject {
     return this.catalog.get(text(args.asset_id, "asset_id"));
   }
@@ -505,6 +766,49 @@ export class CraftService extends ServiceFoundation {
     const evidenceIds = uniqueTextArray(report.evidence_ids, "report.evidence_ids"); for (const evidenceId of evidenceIds) this.store.get("evidence", evidenceId);
     if (!CONFIDENCE.has(text(report.confidence, "report.confidence"))) throw new Error("Expert report confidence is unsupported");
     return this.runtimeOperationSubmit({ operation_id: operation.id, lease_id: text(args.lease_id, "lease_id"), claimed_by: text(args.claimed_by, "claimed_by"), verdict: text(args.verdict, "verdict"), summary: assertNoSecret(JSON.stringify(report), "report"), evidence_ids: evidenceIds, costs: args.costs ?? {} });
+  }
+
+  /**
+   * Run one leased diagnostic Sub-agent as a real child loop.
+   *
+   * Until now a Sub-agent was only a record: `expertSubagentCreate` wrote a
+   * pending operation and `expertSubagentReport` accepted a report an external
+   * host had to produce. This is the missing execution body -- a nested internal
+   * dispatch with its own session, which is what lets a long run delegate a
+   * bounded question and keep its own transcript coherent.
+   *
+   * The budget is *derived from records*, never supplied by the caller: a
+   * delegating parent that could state its own remaining budget could grant
+   * itself more. `parent_dispatch_id` points at the dispatch doing the
+   * delegating, and the child's share is what that dispatch declared minus what
+   * its receipt says it already spent.
+   */
+  async expertSubagentRun(args: JsonObject): Promise<JsonObject> {
+    const operation = this.store.get("runtime_operation", text(args.operation_id, "operation_id"));
+    if (operation.kind !== "agent") throw new Error("Only an agent operation can run as a Sub-agent");
+    const run = this.store.get("runtime_run", String(operation.run_id));
+    const parent = this.store.get("internal_dispatch", text(args.parent_dispatch_id, "parent_dispatch_id"));
+    const limits = (parent.limits ?? {}) as JsonObject;
+    const receipt = this.store.find("internal_receipt", `receipt_${parent.id}`);
+    const spent = Number(((receipt?.loop ?? {}) as JsonObject).tokens_used ?? 0);
+    const remaining = Math.max(0, Number(limits.max_tokens ?? 0) - spent);
+    const plan = planSubagentExecution({ parent_remaining_tokens: remaining, effect: operation.effect,
+      parent_max_steps: limits.max_steps, parent_max_context_tokens: limits.max_context_tokens });
+    // A refusal is an answer, not an error: the caller asked whether it may
+    // delegate, and "no, with this reason" is the useful reply.
+    if (!plan.accepted) return { operation, report: null, refused: plan.reason };
+    // The internal host is always mounted by the foundation, so a guard here would
+    // be unreachable code that still counts against the coverage gate.
+    const driver = this.hostDriver("internal")!;
+    const report = await executeSubagent({ operation_id: String(operation.id), task_id: String(run.task_id),
+      objective: String(operation.objective), plan,
+      prepare: (input) => driver.prepare(input), execute: (input) => driver.execute(input) });
+    const saved = this.store.save("runtime_operation", String(operation.id), { ...recordPayload(operation),
+      status: report.status === "completed" ? "completed" : "failed",
+      subagent_report: report, subagent_report_digest: report.receipt_digest,
+      // The child never inherits the parent's authority, whatever it reported.
+      execution_authority: false });
+    return { operation: saved, report, refused: null };
   }
 
   projectPolicySave(args: JsonObject): JsonObject {
@@ -664,7 +968,7 @@ export class CraftService extends ServiceFoundation {
         : optionalTextArray(input.depends_on, `operations[${index}].depends_on`);
       if (dependencies.includes(operationId)) throw new Error("Runtime operation cannot depend on itself");
       const execution = input.execution === undefined ? null : object(input.execution, `operations[${index}].execution`);
-      if (execution !== null) assertNoSecret(canonical(execution), `operations[${index}].execution`);
+      if (execution !== null) assertNoSecret(canonicalJson(execution), `operations[${index}].execution`);
       const objective = assertNoSecret(text(input.objective, `operations[${index}].objective`), "objective");
       const target = input.target === undefined ? undefined : text(input.target, `operations[${index}].target`);
       const operation = { operation_id: operationId, kind, effect, objective, execution, ...(target === undefined ? {} : { target }) };
@@ -970,7 +1274,7 @@ export class CraftService extends ServiceFoundation {
       const dependsOn = optionalTextArray(item.depends_on, `operations[${index}].depends_on`);
       if (dependsOn.includes(operationId)) throw new Error("Agent IR operation cannot depend on itself");
       const execution = item.execution === undefined ? null : object(item.execution, `operations[${index}].execution`);
-      if (execution !== null) assertNoSecret(canonical(execution), "Agent IR execution");
+      if (execution !== null) assertNoSecret(canonicalJson(execution), "Agent IR execution");
       return { id: operationId, kind, effect, objective: assertNoSecret(text(item.objective, `operations[${index}].objective`), "objective"),
         depends_on: dependsOn, agent_profile_id: item.agent_profile_id ?? null, execution };
     });
@@ -2119,12 +2423,12 @@ export class CraftService extends ServiceFoundation {
     const check = this.acceptanceCheckRecord({ check_id: `check_${reviewId}`, plan_id: plan.id, criterion_id: criterionId, evaluator_type: "human", evaluator_id: reviewer, result, summary, evidence_ids: [evidence.id] }); const assessed = this.acceptanceAssess({ plan_id: plan.id }); return { evidence, check: check.check, assessment: assessed.assessment, outcome: assessed.outcome };
   }
   acceptanceEvaluatorSave(args: JsonObject): JsonObject {
-    const method = text(args.method, "method"); if (!ACCEPTANCE_METHODS.has(method) || method === "human") throw new Error("Automated acceptance evaluator method must be program, model, or business_signal"); const configuration = object(args.configuration ?? {}, "configuration"); assertNoSecret(canonical(configuration), "configuration");
+    const method = text(args.method, "method"); if (!ACCEPTANCE_METHODS.has(method) || method === "human") throw new Error("Automated acceptance evaluator method must be program, model, or business_signal"); const configuration = object(args.configuration ?? {}, "configuration"); assertNoSecret(canonicalJson(configuration), "configuration");
     return this.store.save("acceptance_evaluator", String(args.evaluator_id ?? id("acceptance_evaluator")), { name: text(args.name, "name"), method, adapter_id: text(args.adapter_id, "adapter_id"), configuration, max_attempts: finiteInteger(args.max_attempts, "max_attempts", 3, 1, 20), enabled: args.enabled === undefined ? true : optionalBoolean(args.enabled, "enabled") });
   }
   acceptanceEvaluationPrepare(args: JsonObject): JsonObject {
     const plan = this.store.get("acceptance_plan", text(args.plan_id, "plan_id")); if (plan.status !== "active") throw new Error("Acceptance plan is not active"); const criterionId = text(args.criterion_id, "criterion_id"); const criterion = (plan.criteria as JsonObject[]).find((item) => item.id === criterionId); if (!criterion) throw new Error("Acceptance criterion is unknown"); if (criterion.method === "human") throw new Error("Human criteria are reviewed directly, not dispatched");
-    const evaluator = this.store.get("acceptance_evaluator", text(args.evaluator_id, "evaluator_id"), args.evaluator_version === undefined ? undefined : finiteInteger(args.evaluator_version, "evaluator_version", 1)); if (evaluator.enabled !== true) throw new Error("Acceptance evaluator is disabled"); if (evaluator.method !== criterion.method) throw new Error("Acceptance evaluator method does not match the criterion"); const jobId = String(args.job_id ?? `acceptance_job_${plan.id}_${criterionId}`); const input = object(args.input ?? {}, "input"); assertNoSecret(canonical(input), "input"); const identity = { plan_id: plan.id, plan_version: plan.version, criterion_id: criterionId, evaluator_id: evaluator.id, evaluator_version: evaluator.version, adapter_id: evaluator.adapter_id, evaluator_configuration: evaluator.configuration, max_attempts: evaluator.max_attempts, input }; const requestDigest = valueDigest(identity); const existing = this.store.find("acceptance_evaluation_job", jobId); if (existing) { if (existing.request_digest !== requestDigest) throw new Error("Acceptance evaluation job idempotency conflict"); return { job: existing, idempotent: true }; } return { job: this.store.create("acceptance_evaluation_job", jobId, { ...identity, request_digest: requestDigest, status: "ready", attempts: 0, lease_id: null, lease_expires_at: null }), idempotent: false };
+    const evaluator = this.store.get("acceptance_evaluator", text(args.evaluator_id, "evaluator_id"), args.evaluator_version === undefined ? undefined : finiteInteger(args.evaluator_version, "evaluator_version", 1)); if (evaluator.enabled !== true) throw new Error("Acceptance evaluator is disabled"); if (evaluator.method !== criterion.method) throw new Error("Acceptance evaluator method does not match the criterion"); const jobId = String(args.job_id ?? `acceptance_job_${plan.id}_${criterionId}`); const input = object(args.input ?? {}, "input"); assertNoSecret(canonicalJson(input), "input"); const identity = { plan_id: plan.id, plan_version: plan.version, criterion_id: criterionId, evaluator_id: evaluator.id, evaluator_version: evaluator.version, adapter_id: evaluator.adapter_id, evaluator_configuration: evaluator.configuration, max_attempts: evaluator.max_attempts, input }; const requestDigest = valueDigest(identity); const existing = this.store.find("acceptance_evaluation_job", jobId); if (existing) { if (existing.request_digest !== requestDigest) throw new Error("Acceptance evaluation job idempotency conflict"); return { job: existing, idempotent: true }; } return { job: this.store.create("acceptance_evaluation_job", jobId, { ...identity, request_digest: requestDigest, status: "ready", attempts: 0, lease_id: null, lease_expires_at: null }), idempotent: false };
   }
   acceptanceFileEvaluationPrepare(args: JsonObject): JsonObject {
     const configuration: JsonObject = { ...(args.allowed_extensions === undefined ? {} : { allowed_extensions: array(args.allowed_extensions, "allowed_extensions").map((item) => text(item, "allowed_extension")) }), ...(args.max_bytes === undefined ? {} : { max_bytes: finiteInteger(args.max_bytes, "max_bytes", 1, 1) }) }; const evaluatorId = `builtin_file_artifact_${valueDigest(configuration).slice(0, 16)}`; let evaluator = this.store.find("acceptance_evaluator", evaluatorId); if (!evaluator) evaluator = this.acceptanceEvaluatorSave({ evaluator_id: evaluatorId, name: "Built-in file artifact validator", method: "program", adapter_id: "builtin:file-artifact", configuration, max_attempts: 3 });
@@ -2192,7 +2496,7 @@ export class CraftService extends ServiceFoundation {
     const now = args.now === undefined ? new Date().toISOString() : text(args.now, "now"); const nowMs = Date.parse(now); if (Number.isNaN(nowMs)) throw new Error("now must be an ISO timestamp"); const limit = finiteInteger(args.limit, "limit", 100, 1, 1000); const recovered: JsonObject[] = []; for (const job of this.store.list("acceptance_evaluation_job", 10_000, (item) => item.status === "leased" && Date.parse(String(item.lease_expires_at)) <= nowMs).slice(0, limit)) { const exhausted = Number(job.attempts) >= Number(job.max_attempts); recovered.push(this.store.save("acceptance_evaluation_job", String(job.id), { ...job, status: exhausted ? "exhausted" : "ready", lease_id: null, lease_expires_at: null })); } return { recovered: recovered.length, exhausted: recovered.filter((job) => job.status === "exhausted").length, jobs: recovered };
   }
   acceptanceEvaluationReport(args: JsonObject): JsonObject {
-    const job = this.store.get("acceptance_evaluation_job", text(args.job_id, "job_id")); const result = text(args.result, "result"); if (!ACCEPTANCE_RESULTS.has(result)) throw new Error("Acceptance result is unsupported"); const summary = assertNoSecret(text(args.summary, "summary"), "summary"); const receipt = object(args.receipt ?? {}, "receipt"); assertNoSecret(canonical(receipt), "receipt"); const reportDigest = valueDigest({ result, summary, receipt }); if (job.status === "completed") { if (job.report_digest !== reportDigest) throw new Error("Acceptance evaluation report idempotency conflict"); return { job, evidence: this.store.get("evidence", String(job.evidence_id)), check: this.store.get("acceptance_check", String(job.check_id)), assessment: this.store.get("acceptance_assessment", `assessment_${job.plan_id}`), outcome: this.store.find("outcome", `outcome_trial_${job.plan_id}`), idempotent: true }; }
+    const job = this.store.get("acceptance_evaluation_job", text(args.job_id, "job_id")); const result = text(args.result, "result"); if (!ACCEPTANCE_RESULTS.has(result)) throw new Error("Acceptance result is unsupported"); const summary = assertNoSecret(text(args.summary, "summary"), "summary"); const receipt = object(args.receipt ?? {}, "receipt"); assertNoSecret(canonicalJson(receipt), "receipt"); const reportDigest = valueDigest({ result, summary, receipt }); if (job.status === "completed") { if (job.report_digest !== reportDigest) throw new Error("Acceptance evaluation report idempotency conflict"); return { job, evidence: this.store.get("evidence", String(job.evidence_id)), check: this.store.get("acceptance_check", String(job.check_id)), assessment: this.store.get("acceptance_assessment", `assessment_${job.plan_id}`), outcome: this.store.find("outcome", `outcome_trial_${job.plan_id}`), idempotent: true }; }
     if (job.status !== "leased" || job.lease_id !== text(args.lease_id, "lease_id")) throw new Error("Acceptance evaluation lease does not match"); if (Date.parse(String(job.lease_expires_at)) <= Date.now()) throw new Error("Acceptance evaluation lease expired"); const evaluator = this.store.get("acceptance_evaluator", String(job.evaluator_id), Number(job.evaluator_version)); if (evaluator.adapter_id !== text(args.adapter_id, "adapter_id") || evaluator.enabled !== true) throw new Error("Acceptance evaluator adapter is not authorized"); const artifactId = receipt.artifact_id === undefined ? null : text(receipt.artifact_id, "receipt.artifact_id"); if (artifactId) this.store.get("artifact", artifactId);
     const evidence = this.evidenceRecord({ evidence_id: `evidence_${job.id}`, source_type: evaluator.method, confidence: result === "passed" ? "confirmed" : result === "failed" ? "rejected" : "bounded", claim: summary, artifact_id: artifactId, locator: `acceptance-job:${job.id}`, metadata: { evaluator_id: evaluator.id, evaluator_version: evaluator.version, adapter_id: evaluator.adapter_id, receipt_digest: valueDigest(receipt) } }); const recorded = this.acceptanceCheckRecord({ check_id: `check_${job.id}`, plan_id: job.plan_id, criterion_id: job.criterion_id, evaluator_type: evaluator.method, evaluator_id: evaluator.id, result, summary, evidence_ids: [evidence.id] }); const assessed = this.acceptanceAssess({ plan_id: job.plan_id }); const completed = this.store.save("acceptance_evaluation_job", String(job.id), { ...job, status: "completed", report_digest: reportDigest, evidence_id: evidence.id, check_id: (recorded.check as JsonObject).id, lease_id: null, lease_expires_at: null }); return { job: completed, evidence, check: recorded.check, assessment: assessed.assessment, outcome: assessed.outcome, idempotent: false };
   }
@@ -2747,8 +3051,57 @@ export class CraftService extends ServiceFoundation {
   }
   knowledgeSearch(args: JsonObject): JsonObject {
     const index = this.knowledgeIndex();
-    try { return { hits: index.search(text(args.query, "query"), { limit: args.limit === undefined ? undefined : finiteInteger(args.limit, "limit", 1, 1, 100) }) }; }
+    try {
+      const hits = index.search(text(args.query, "query"), { limit: args.limit === undefined ? undefined : finiteInteger(args.limit, "limit", 1, 1, 100) });
+      return { hits: hits.map((hit) => ({ ...hit, relations: this.relationSummary(hit.path) })) };
+    }
     finally { index.close(); }
+  }
+
+  /**
+   * Read memories for the current turn.
+   *
+   * This is the read half of the wiring gap: `memory_ledger` could be written
+   * from the loop but never read, so an agent could record a lesson and never
+   * benefit from it. It delegates to the governed resolver so every read still
+   * produces a content-free receipt with per-memory reasons and an explicit
+   * omitted count — the agent gains memory access without gaining a way around
+   * the budget or the provenance trail.
+   */
+  async memorySearch(args: JsonObject): Promise<JsonObject> {
+    const resolution = await this.contextResolution.resolve({
+      query: text(args.query, "query"),
+      scope_kind: args.scope_kind ?? "project",
+      scope_id: text(args.scope_id, "scope_id"),
+      max_items: args.max_items ?? 8,
+      max_chars: args.max_chars ?? 4000
+    });
+    const items = (resolution.items as JsonObject[]) ?? [];
+    const receipt = resolution.receipt as JsonObject;
+    // The loop gets references and a bounded excerpt; raw restricted content is
+    // never handed to the model, matching the knowledge path's discipline.
+    return {
+      memories: items.map((item) => ({
+        memory_id: item.memory_id,
+        memory_version: item.memory_version,
+        content: item.content,
+        sensitivity: item.sensitivity,
+        reason: item.reason
+      })),
+      count: items.length,
+      omitted_count: receipt.omitted_count,
+      receipt_id: receipt.id,
+      content_free_receipt: true
+    };
+  }
+
+  /** One-hop relation summary for a knowledge document, so a loop can decide whether to descend. */
+  private relationSummary(path: string): JsonObject[] {
+    const { relations } = this.knowledgeRelations.neighbors({ kind: "knowledge_document", id: path });
+    return (relations as JsonObject[]).map((edge) => ({
+      relation_id: edge.relation_id, relation: edge.relation, direction: edge.direction,
+      other: edge.direction === "forward" ? edge.target : edge.source, confidence: edge.confidence,
+    }));
   }
 
   /** Declare where a knowledge document belongs and, optionally, when it stops being trustworthy. */
@@ -3200,7 +3553,10 @@ export class CraftService extends ServiceFoundation {
   runtimeTruthOtlp(args: JsonObject): JsonObject { return this.runtimeTruth.otlp(args); }
   async runtimeTruthExport(args: JsonObject): Promise<JsonObject> { return this.runtimeTruth.export(args); }
   runtimeTruthCompact(args: JsonObject): JsonObject { return this.runtimeTruth.compact(args); }
+  runtimeTruthCompactionGet(args: JsonObject): JsonObject { return this.runtimeTruth.compactionGet(args); }
+  runtimeTruthCompactionList(args: JsonObject = {}): JsonObject { return this.runtimeTruth.compactionList(args); }
   runtimeTruthWorkNote(args: JsonObject): JsonObject { return this.runtimeTruth.workNote(args); }
+  runtimeTruthWorkNoteGet(args: JsonObject): JsonObject { return this.runtimeTruth.workNoteGet(args); }
   osSecurityPlan(args: JsonObject): JsonObject { return this.osSecurity.plan(args); }
   osSecurityVerify(args: JsonObject): JsonObject { return this.osSecurity.verify(args); }
   mcpRegistrySourceRegister(args: JsonObject): JsonObject { return this.mcpRegistry.sourceRegister(args); }

@@ -1,13 +1,15 @@
 import { createHash, randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { SandboxKernel } from "./sandbox.ts";
-import { CraftStore, type JsonObject } from "./store.ts";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
+import { text } from "./validation.ts";
+import { digestJson, payload } from "./digest.ts";
 
-function text(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim(); }
+
 function integer(value: unknown, name: string, minimum: number, maximum: number): number { const result = Number(value); if (!Number.isInteger(result) || result < minimum || result > maximum) throw new Error(`${name} must be an integer between ${minimum} and ${maximum}`); return result; }
 function money(value: number): number { if (!Number.isFinite(value) || value <= 0 || value > 1_000) throw new Error("max_budget_usd must be between 0 and 1000"); return value; }
-function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
-function payload(record: JsonObject): JsonObject { const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record; return rest; }
+
+
 
 /** Binds a verified sandbox declaration and bounded Host resources to a launch; it does not claim to be an OS sandbox. */
 export class ExecutionSafetyKernel {
@@ -25,8 +27,8 @@ export class ExecutionSafetyKernel {
     const planned = this.sandbox.plan({ task_id: task.id, profile_id: profileId, profile_version: profileVersion, requirements, request_digest: `safety:${task.id}`, dry_run: true }); if (planned.compatible !== true) throw new Error(`Safety preflight requirements are not satisfied: ${(planned.missing as string[]).join(", ")}`);
     const profile = planned.profile as JsonObject; const identity = { task_id: task.id, host, workspace, sandbox, profile_id: profile.id, profile_version: profile.version, profile_digest: profile.capability_digest, requirements, resources };
     const preflightId = String(args.preflight_id ?? `execution_safety_preflight_${randomUUID().replaceAll("-", "")}`); const existing = this.store.find("execution_safety_preflight", preflightId);
-    if (existing) { if (existing.identity_digest !== digest(identity)) throw new Error("Safety preflight idempotency conflict"); return { preflight: existing, profile, idempotent: true }; }
-    const preflight = this.store.create("execution_safety_preflight", preflightId, { ...identity, identity_digest: digest(identity), enforcement_boundary: "verified_profile_and_host_limits", os_sandbox_guaranteed: false, status: "passed" });
+    if (existing) { if (existing.identity_digest !== digestJson(identity)) throw new Error("Safety preflight idempotency conflict"); return { preflight: existing, profile, idempotent: true }; }
+    const preflight = this.store.create("execution_safety_preflight", preflightId, { ...identity, identity_digest: digestJson(identity), enforcement_boundary: "verified_profile_and_host_limits", os_sandbox_guaranteed: false, status: "passed" });
     return { preflight, profile, idempotent: false };
   }
 
@@ -38,5 +40,5 @@ export class ExecutionSafetyKernel {
   }
 
   get(args: JsonObject): JsonObject { const result = this.validate(args); const preflight = result.preflight as JsonObject; return { ...result, contract: preflight.resources }; }
-  bind(args: JsonObject): JsonObject { const result = this.validate(args); const preflight = result.preflight as JsonObject; const launch = this.store.get("work_launch", text(args.launch_id, "launch_id")); if (launch.task_id !== preflight.task_id || launch.host !== preflight.host || launch.workspace !== preflight.workspace || launch.sandbox !== preflight.sandbox) throw new Error("Safety preflight does not match Work Launch"); const existing = launch.safety_preflight as JsonObject | undefined; const binding = { preflight_id: preflight.id, preflight_version: preflight.version, identity_digest: preflight.identity_digest }; if (existing && digest(existing) !== digest(binding)) throw new Error("Work Launch is already bound to another safety preflight"); if (existing) return { launch, preflight, idempotent: true }; return { launch: this.store.save("work_launch", String(launch.id), { ...payload(launch), safety_preflight: binding }), preflight, idempotent: false }; }
+  bind(args: JsonObject): JsonObject { const result = this.validate(args); const preflight = result.preflight as JsonObject; const launch = this.store.get("work_launch", text(args.launch_id, "launch_id")); if (launch.task_id !== preflight.task_id || launch.host !== preflight.host || launch.workspace !== preflight.workspace || launch.sandbox !== preflight.sandbox) throw new Error("Safety preflight does not match Work Launch"); const existing = launch.safety_preflight as JsonObject | undefined; const binding = { preflight_id: preflight.id, preflight_version: preflight.version, identity_digest: preflight.identity_digest }; if (existing && digestJson(existing) !== digestJson(binding)) throw new Error("Work Launch is already bound to another safety preflight"); if (existing) return { launch, preflight, idempotent: true }; return { launch: this.store.save("work_launch", String(launch.id), { ...payload(launch), safety_preflight: binding }), preflight, idempotent: false }; }
 }

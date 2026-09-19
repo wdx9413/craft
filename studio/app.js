@@ -464,6 +464,7 @@
   // when the task is created and shown as a group in the rail — not a place. It
   // used to sit here as 一级菜单 and duplicated the rail's own grouping.
   var NAV = [
+    { key: 'approvals', label: '待我批准', title: '待我批准', sub: '需要人工决定才能继续的工作', icon: 'shield', view: viewApprovals },
     { key: 'plugins', label: '插件', title: '插件', sub: '可安装或已登记的能力包', icon: 'plug', view: viewPlugins },
     { key: 'skills', label: '技能', title: '技能', sub: '把具体方法与提示词作为可复用资产管理', icon: 'spark', view: viewSkills },
     { key: 'connectors', label: '连接器', title: '连接器', sub: '连接本机目录、MCP 服务和外部来源', icon: 'server', view: viewCapabilities },
@@ -1726,6 +1727,72 @@
     });
   }
 
+  // 「待我批准」是本版新增的持久入口。此前运行时的核心卖点是审批门禁，但
+  // Studio 没有任何待办审批的落点：批准决定只经由会话临时状态存在，刷新即
+  // 消失。这里直接消费 /api/inbox（refresh/decide），它本来就是持久化投影，
+  // 因此不需要任何内核改动。
+  //
+  // 卡片字段以 src/attention.ts 的 Candidate 类型为准：id / source_kind /
+  // priority(数字) / reason / action / audience / details。decide 只接受
+  // acknowledge 与 defer 两种决定，推迟必须给出未来的 deferred_until。
+  var ATTENTION_ACTIONS = { approve: '批准', resume: '恢复', retry: '重试', review: '审核', decide: '决定' };
+
+  function attentionActionLabel(action) { return label(ATTENTION_ACTIONS, action, action); }
+
+  function attentionDetail(card) {
+    var details = card.details || {};
+    var parts = [];
+    if (details.workspace) parts.push(String(details.workspace));
+    if (details.task_id) parts.push('任务 ' + String(details.task_id));
+    return parts.join(' · ');
+  }
+
+  function viewApprovals() {
+    return api('/api/inbox/refresh', { method: 'POST', body: {} }).then(function (refreshed) {
+      // 「待我批准」只关心面向人的卡片；面向 agent / operator 的卡片不是这一页的职责。
+      var cards = (refreshed.cards || []).filter(function (card) { return card.audience === 'human' || card.audience === undefined; });
+      var open = cards.filter(function (card) { return card.status === 'open'; });
+      var rows = open.length ? open.map(function (card) {
+        var detail = attentionDetail(card);
+        var actions = '<button class="btn primary" type="button" data-attention="' + esc(card.id) + '" data-decision="acknowledge">批准</button>' +
+          '<button class="btn" type="button" data-attention="' + esc(card.id) + '" data-decision="defer">稍后</button>';
+        return '<div class="row"><div class="row-main"><span class="row-title">' + esc(attentionActionLabel(card.action) + ' · ' + (card.reason || card.source_kind || card.id)) + '</span>' +
+          '<span class="row-sub">' + esc(card.source_kind || '') + (detail ? ' · ' + esc(detail) : '') + '</span></div>' +
+          pill('优先级 ' + esc(String(card.priority)), card.priority >= 70 ? 'bad' : card.priority >= 40 ? 'warn' : 'muted') +
+          '<div class="row-actions">' + actions + '</div></div>';
+      }).join('') : emptyState('没有待批准的事项', '当任务需要人工决定时，会出现在这里；刷新页面不会丢失。', 'shield');
+
+      var decided = cards.filter(function (card) { return card.status !== 'open'; });
+      return {
+        html: '<div class="stack"><div class="card">' + head('待我批准', '需要人工决定才能继续的工作；决定会持久保存，刷新不会丢失', countChip(open.length)) +
+          '<div class="card-body"><div class="rows">' + rows + '</div></div></div>' +
+          '<div class="card">' + head('已处理', '已经给出决定的事项', countChip(decided.length)) + '<div class="card-body">' +
+          (decided.length ? '<div class="rows">' + decided.map(function (card) {
+            var when = card.deferred_until ? ' · 推迟至 ' + esc(String(card.deferred_until)) : '';
+            return '<div class="row"><div class="row-main"><span class="row-title">' + esc(card.reason || card.id) + '</span><span class="row-sub">' + esc(card.status) + when + (card.decided_by ? ' · ' + esc(card.decided_by) : '') + '</span></div></div>';
+          }).join('') + '</div>' : emptyState('还没有已处理事项', '批准或推迟后的事项会记录在这里。', 'check')) + '</div></div></div>',
+        aside: asideBlock('为什么需要批准', '', '<div class="aside-note">写入、外部操作与生成代码在本机执行前需要人工决定。Craft 不会替你批准，也不会因为界面刷新而遗忘你的决定。</div>'),
+        mounts: [function (root) {
+          Array.prototype.forEach.call(root.querySelectorAll('[data-attention]'), function (button) {
+            button.onclick = function () {
+              var id = button.getAttribute('data-attention'), decision = button.getAttribute('data-decision');
+              var body = { item_id: id, decision: decision, decided_by: 'studio-user' };
+              if (decision === 'defer') {
+                // 后端要求 deferred_until 必须晚于当前时间，默认推迟一小时。
+                body.deferred_until = new Date(Date.now() + 3600000).toISOString();
+                body.reason = window.prompt('推迟原因（可留空）：') || 'deferred_from_studio';
+              }
+              button.disabled = true;
+              api('/api/inbox/decide', { method: 'POST', body: body })
+                .then(function () { toast(decision === 'acknowledge' ? '已批准' : '已推迟一小时'); paint('approvals'); })
+                .catch(function (error) { button.disabled = false; fail(error); });
+            };
+          });
+        }]
+      };
+    });
+  }
+
   function viewSkills() {
     return Promise.all([api('/api/connectors?limit=100'), api('/api/studio/resources?kind=skills&limit=100')]).then(function (results) {
       var assets = (results[0].assets || []).filter(function (item) { return item.asset_type === 'skill'; }), personal = results[1].items || [];
@@ -2099,23 +2166,18 @@
     try { localStorage.setItem(EXEC_KEY, JSON.stringify(state.execution)); } catch (_) { /* storage off */ }
   }
 
-  // Execution mode is genuinely three-state: '' (nothing chosen yet), 'cli'
-  // (local CLI runner) and 'provider' (vendor model API). The status bar used
-  // to compress that into a "is a model configured?" boolean and only ever set
-  // 'provider' on a first run with zero models, so it kept reading 未配置 even
-  // after a model had been saved. Render the real mode and refresh on change.
+  // The status bar only ever answers one question: is there a usable model?
+  // Craft ships no vendor catalog and no local CLI runner, so a model exists
+  // exactly when the user has saved one in settings.
   function renderStatusExecution() {
     var node = $('sb-mode');
     if (!node) return;
-    var mode = state.execution && state.execution.mode;
-    if (mode === 'cli') node.textContent = '模型 本地 CLI';
-    else if (mode === 'provider') node.textContent = '模型 API 已配置';
-    else node.textContent = '模型 未设置';
+    node.textContent = state.modelCount ? '模型 已配置' : '模型 未配置';
   }
 
   function openExecutionSetup() {
     openSheetAfterPaint('models', function () {
-      openModelSheet({ step: 1, preset: null, model: '', name: '' });
+      openModelSheet({ isFirstRun: true });
     });
   }
 

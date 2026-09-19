@@ -4,9 +4,9 @@ import { createServer, request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { atomicPrivateJson, craftPaths } from "../src/paths.ts";
+import { atomicPrivateJson, craftPaths } from "../src/infrastructure/paths.ts";
 import { CraftService } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/store.ts";
+import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
 import { assertSupervisorOwner, LocalSupervisor, SupervisorClient } from "../src/supervisor.ts";
 
 async function fixture(name: string) { const root = join(tmpdir(), `craft-supervisor-${name}-${process.pid}-${Date.now()}`); const paths = craftPaths(root); const store = await new CraftStore(paths).open(); const service = new CraftService(store); return { root, paths, store, service }; }

@@ -1,9 +1,11 @@
 import { createHash } from "node:crypto";
-import { CraftStore, type JsonObject } from "./store.ts";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
+import { text } from "./validation.ts";
+import { digestJson, payload } from "./digest.ts";
 
-function text(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim(); }
-function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
-function payload(record: JsonObject): JsonObject { const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record; return rest; }
+
+
+
 type ProtocolPhase = "define" | "prepare" | "act" | "deliver" | "learn";
 function phaseFor(status: string, decision?: string): ProtocolPhase {
   if (["needs_replan", "blocked", "recovery"].includes(status) || ["replan", "human_change", "reject"].includes(String(decision))) return "define";
@@ -22,7 +24,7 @@ export class VerifiedWorkLoopKernel {
     const task = this.store.get("task", text(args.task_id, "task_id")); const contract = this.store.get("task_control_contract", text(args.contract_id, "contract_id")); const run = this.store.get("task_run", text(args.task_run_id, "task_run_id")); const snapshot = this.store.get("state_snapshot", text(args.snapshot_id, "snapshot_id"));
     if (contract.task_id !== task.id || run.contract_id !== contract.id) throw new Error("Verified Work Loop facts are not bound to one Task");
     const identity = { task_id: task.id, contract_id: contract.id, contract_version: contract.version, task_run_id: run.id, task_run_version: run.version, workspace_id: snapshot.workspace_id, initial_snapshot_id: snapshot.id, initial_snapshot_digest: snapshot.snapshot_digest };
-    const loopId = String(args.work_loop_id ?? `work_loop_${run.id}`); const existing = this.store.find("verified_work_loop", loopId); const identityDigest = digest(identity);
+    const loopId = String(args.work_loop_id ?? `work_loop_${run.id}`); const existing = this.store.find("verified_work_loop", loopId); const identityDigest = digestJson(identity);
     if (existing) { if (existing.identity_digest !== identityDigest) throw new Error("Verified Work Loop idempotency conflict"); return { loop: existing, idempotent: true }; }
     const phaseHistory = [{ phase: "define", fact: "task_control_contract", version: contract.version }, { phase: "prepare", fact: "initial_state_snapshot", version: snapshot.version }];
     return { loop: this.store.create("verified_work_loop", loopId, { ...identity, identity_digest: identityDigest, lifecycle: "active", phase: "prepare", phase_history: phaseHistory, latest_snapshot_id: snapshot.id, latest_task_run_state_id: null, needs_replan_reason: null }), idempotent: false };
@@ -47,8 +49,8 @@ export class VerifiedWorkLoopKernel {
     // the same state and snapshot stays idempotent, while a new snapshot, status or
     // reason can never reuse an older receipt.
     const observation = { task_run_state_id: state.id, snapshot_id: snapshot.id, status, reason };
-    const receiptId = String(args.receipt_id ?? `work_loop_receipt_${saved.id}_${digest(observation).slice(-16)}`);
-    const receipt = this.store.find("verified_work_loop_receipt", receiptId) ?? this.store.create("verified_work_loop_receipt", receiptId, { ...identity, receipt_digest: digest(identity) });
+    const receiptId = String(args.receipt_id ?? `work_loop_receipt_${saved.id}_${digestJson(observation).slice(-16)}`);
+    const receipt = this.store.find("verified_work_loop_receipt", receiptId) ?? this.store.create("verified_work_loop_receipt", receiptId, { ...identity, receipt_digest: digestJson(identity) });
     return { loop: saved, state: { status, action: status === "needs_replan" ? "replan" : state.action, actor: status === "needs_replan" ? "human" : state.actor }, receipt };
   }
 
@@ -57,8 +59,8 @@ export class VerifiedWorkLoopKernel {
     if (!["approve", "replan", "accept", "reject", "human_change"].includes(decision)) throw new Error("Verified Work Loop decision is unsupported");
     // A retried human decision must remain idempotent even though the first
     // attempt may itself advance the Loop version.
-    const identity = { work_loop_id: loop.id, decision, actor: text(args.actor, "actor"), summary_digest: digest(text(args.summary, "summary")) };
-    const decisionId = String(args.decision_id ?? `work_loop_decision_${loop.id}_${digest(identity).slice(-16)}`); const existing = this.store.find("verified_work_loop_decision", decisionId); const decisionDigest = digest(identity);
+    const identity = { work_loop_id: loop.id, decision, actor: text(args.actor, "actor"), summary_digest: digestJson(text(args.summary, "summary")) };
+    const decisionId = String(args.decision_id ?? `work_loop_decision_${loop.id}_${digestJson(identity).slice(-16)}`); const existing = this.store.find("verified_work_loop_decision", decisionId); const decisionDigest = digestJson(identity);
     if (existing) { if (existing.decision_digest !== decisionDigest) throw new Error("Verified Work Loop decision idempotency conflict"); return { decision: existing, idempotent: true }; }
     const saved = this.store.create("verified_work_loop_decision", decisionId, { ...identity, work_loop_version: loop.version, decision_digest: decisionDigest });
     const phase = phaseFor(String(loop.lifecycle), decision); const history = [...((loop.phase_history as JsonObject[] | undefined) ?? [])];

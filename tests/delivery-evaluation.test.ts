@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { McpServer } from "../src/mcp.ts";
-import { craftPaths } from "../src/paths.ts";
+import { craftPaths } from "../src/infrastructure/paths.ts";
 import { CraftService } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/store.ts";
+import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
 
 test("delivery evaluation compares only sanitized Cases and immutable observed deliveries", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-delivery-eval-")); const store = await new CraftStore(craftPaths(root)).open(); const service = new CraftService(store);

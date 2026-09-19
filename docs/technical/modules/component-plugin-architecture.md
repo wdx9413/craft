@@ -103,7 +103,7 @@ Candidate 是主运行时的受限演进链，而不是可独立完成发布的�
   → Signoff → Canary → 精确回滚
 ```
 
-`craft-workflow-evolution` 是正式的 Evolution 产品投影，但它只能走到 draft。需要完整闭环时，应使用 `full`，或由 Host 明确组合 `evolution`、`quality` 和完整 Craft 的 Signoff/Canary 能力。Capability 只能发现已经成为 `verified` 的精确 Workflow 版本。
+`craft-experience` 是正式的 Evolution 产品投影，但它只能走到 draft。需要完整闭环时，应使用 `full`，或由 Host 明确组合 `evolution`、`quality` 和完整 Craft 的 Signoff/Canary 能力。Capability 只能发现已经成为 `verified` 的精确 Workflow 版本。
 
 ## 数据空间与 Host
 

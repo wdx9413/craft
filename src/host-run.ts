@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto";
 import type { HostDriver, HostOutputObserver } from "./host-driver.ts";
-import { CraftStore, type JsonObject } from "./store.ts";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
 import { TraceKernel } from "./trace-kernel.ts";
+import { text } from "./validation.ts";
+import { payload } from "./digest.ts";
 
-function text(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim(); }
-function payload(record: JsonObject): JsonObject { const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record; return rest; }
+
+
 const TERMINAL = new Set(["completed", "failed", "cancelled", "interrupted"]);
 
 export class HostRunKernel {

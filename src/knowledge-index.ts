@@ -2,17 +2,23 @@ import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { Bm25Index } from "./context-retrieval-capture.ts";
+import { text } from "./validation.ts";
 
 /**
  * Markdown stays the source of truth; SQLite is a rebuildable projection of it.
  * Deleting the index loses nothing, and a stale index is detectable because
  * every projected document carries the digest of the file it came from.
  *
- * Search uses deterministic token conjunction against the content table. This
- * keeps the index portable when a Node runtime ships SQLite without FTS5.
+ * Search keeps a portable token/BM25 hybrid: SQL decides the candidate set with
+ * a cheap `LIKE` conjunction (so a Node runtime without FTS5 still works), then
+ * an in-memory BM25 index re-ranks those candidates by term rarity. Candidates
+ * are what makes it work — BM25 alone over the whole corpus would need a token
+ * table, and `LIKE` alone cannot tell a rare identifier from a common word.
  */
 const MAX_FILES = 2_000;
 const DEFAULT_CHUNK_CHARS = 4_000;
+const SEARCH_CANDIDATES = 200;
 
 /**
  * Where a document belongs, and therefore how long it may be trusted.
@@ -31,10 +37,7 @@ export interface KnowledgeChunk { heading: string | null; body: string }
 export interface KnowledgePlan { added: KnowledgeDocument[]; changed: KnowledgeDocument[]; removed: KnowledgeDocument[] }
 export interface KnowledgeHit { path: string; heading: string | null; snippet: string; rank: number }
 
-function text(value: unknown, name: string): string {
-  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
-  return value.trim();
-}
+
 
 function digest(value: string): string {
   return `sha256:${createHash("sha256").update(value).digest("hex")}`;
@@ -247,19 +250,30 @@ export class KnowledgeIndex {
   }
 
   /**
-   * Portable substring search. Every term must occur in the same chunk; the
-   * ordered query and row order make the result reproducible across SQLite
-   * builds, including Node runtimes without FTS5.
+   * Portable hybrid search. SQL narrows to chunks containing every query token
+   * (a cheap, FTS5-free candidate fetch); BM25 then orders those candidates by
+   * term rarity so an identifier-dense chunk outranks one that merely shares a
+   * common word. The row order is a stable tie-break, so results are
+   * reproducible across SQLite builds.
    */
   search(query: string, options: { limit?: number } = {}): KnowledgeHit[] {
     const limit = options.limit ?? 10;
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error("Knowledge search limit must be an integer between 1 and 100");
     const tokens = knowledgeQueryTokens(query);
     const clause = tokens.map(() => "body LIKE ?").join(" AND ");
-    return this.db.prepare(`SELECT path, heading, body FROM knowledge_chunk WHERE ${clause} ORDER BY path, ordinal LIMIT ?`)
-      .all(...tokens.map((token) => `%${token}%`), limit)
-      .map((row, index) => ({ path: String(row.path), heading: row.heading === null ? null : String(row.heading),
-        snippet: locateSnippet(String(row.body), tokens), rank: index }));
+    const rows = this.db.prepare(`SELECT path, ordinal, heading, body FROM knowledge_chunk WHERE ${clause} ORDER BY path, ordinal LIMIT ?`)
+      .all(...tokens.map((token) => `%${token}%`), SEARCH_CANDIDATES)
+      .map((row) => ({ path: String(row.path), heading: row.heading === null ? null : String(row.heading), body: String(row.body) }));
+    if (!rows.length) return [];
+    const index = new Bm25Index();
+    rows.forEach((row, ordinal) => index.add(String(ordinal), `${row.heading ?? ""}\n${row.body}`));
+    const scored = new Map(index.score(query).map((entry) => [entry.id, entry.score]));
+    const ranked = rows.map((row, ordinal) => ({ row, ordinal, score: scored.get(String(ordinal)) ?? 0 }));
+    const positive = ranked.filter((entry) => entry.score > 0);
+    return (positive.length ? positive : ranked)
+      .sort((left, right) => right.score - left.score || left.row.path.localeCompare(right.row.path) || left.ordinal - right.ordinal)
+      .slice(0, limit)
+      .map((entry, rank) => ({ path: entry.row.path, heading: entry.row.heading, snippet: locateSnippet(entry.row.body, tokens), rank }));
   }
 
   status(): { documents: number; chunks: number; file: string } {

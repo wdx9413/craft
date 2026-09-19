@@ -1,6 +1,6 @@
 # Trace & Evolution Kernel
 
-> 状态：v0.12.30 已实现统一的 Trace 事件账本、反馈信号、Digest-only Replay Bundle、Trace→Case 编译，以及可替换的冷热归档。它是跨入口的事实层，不是自动发布或模型训练器。
+> 状态：v0.12.33 已实现统一的 Trace 事件账本、反馈信号、Digest-only Replay Bundle、Trace→Case 编译，以及可替换的冷热归档。它是跨入口的事实层，不是自动发布或模型训练器。
 
 ## 事件信封
 

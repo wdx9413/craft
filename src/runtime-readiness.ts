@@ -1,11 +1,13 @@
 import { createHash } from "node:crypto";
-import { CraftStore, type JsonObject } from "./store.ts";
+import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
 import { PlatformExecutionKernel } from "./platform-execution.ts";
+import { text } from "./validation.ts";
+import { digestJson } from "./digest.ts";
 
 const EFFECTS = new Set(["read_only", "local_write", "external_write", "destructive"]);
-function text(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); return value.trim(); }
+
 function strings(value: unknown, name: string): string[] { if (!Array.isArray(value) || !value.length) throw new Error(`${name} must contain at least one value`); const result = value.map((item) => text(item, name)); if (new Set(result).size !== result.length) throw new Error(`${name} must contain unique values`); return result.sort(); }
-function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
+
 function confirmed(store: CraftStore, ids: string[]): void { for (const id of ids) if (store.get("evidence", id).confidence !== "confirmed") throw new Error("Runtime readiness requires confirmed Evidence"); }
 
 /**
@@ -35,7 +37,7 @@ export class RuntimeReadinessKernel {
       if (args.compensation_ref === undefined && effect === "destructive") blockers.push("compensation_or_human_disposition_missing");
     }
     const identity = { task_id: task.id, host, platform, effect, environment_digest: text(args.environment_digest, "environment_digest"), workspace_recovery: workspaceRecovery, preflight_id: preflight?.id ?? null, preflight_version: preflight?.version ?? null, enterprise_binding_id: enterpriseBinding?.id ?? null, enterprise_binding_version: enterpriseBinding?.version ?? null, compensation_ref: args.compensation_ref ?? null, evidence_ids: evidenceIds, blockers: blockers.sort() };
-    const assessmentId = String(args.assessment_id ?? `runtime_readiness_${digest(identity).slice(-16)}`); const existing = this.store.find("runtime_readiness_assessment", assessmentId); const assessmentDigest = digest(identity);
+    const assessmentId = String(args.assessment_id ?? `runtime_readiness_${digestJson(identity).slice(-16)}`); const existing = this.store.find("runtime_readiness_assessment", assessmentId); const assessmentDigest = digestJson(identity);
     if (existing) { if (existing.assessment_digest !== assessmentDigest) throw new Error("Runtime readiness assessment idempotency conflict"); return { assessment: existing, idempotent: true }; }
     return { assessment: this.store.create("runtime_readiness_assessment", assessmentId, { ...identity, assessment_digest: assessmentDigest, status: blockers.length ? "blocked" : "ready", deployment_claimed: false }), idempotent: false };
   }

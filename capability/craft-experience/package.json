@@ -1,0 +1,24 @@
+{
+  "name": "@craft/capability-experience",
+  "version": "0.12.33",
+  "private": true,
+  "description": "Craft Experience capability: content-free observations, bounded Workflow evolution, and evaluation model profiles",
+  "type": "module",
+  "main": "capability.ts",
+  "exports": {
+    ".": "./capability.ts",
+    "./experience-ledger": "./experience-ledger.ts",
+    "./workflow-evolution": "./workflow-evolution.ts",
+    "./evaluation-model-profile": "./evaluation-model-profile.ts"
+  },
+  "files": [
+    "capability.ts",
+    "experience-ledger.ts",
+    "workflow-evolution.ts",
+    "evaluation-model-profile.ts"
+  ],
+  "peerDependencies": {
+    "craft-agent-harness": "0.12.33"
+  },
+  "license": "MIT"
+}

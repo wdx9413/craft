@@ -4,9 +4,9 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { craftPaths } from "../src/paths.ts";
+import { craftPaths } from "../src/infrastructure/paths.ts";
 import { CraftService, VERSION } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/store.ts";
+import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
 
 function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
 
@@ -63,7 +63,7 @@ test("Runtime Assurance attests real Host receipts, re-observation, write confor
     assert.throws(() => f.service.runtimeAssuranceAttest({ task_run_id: write.run.id, effect: "local_write", environment: write.environment, budget: write.budget, workspace_observation_id: writeObservation.id }), /preflight_id/);
     assert.equal((f.service.runtimeAssuranceAttest({ task_run_id: write.run.id, effect: "local_write", environment: write.environment, budget: write.budget, workspace_observation_id: writeObservation.id, preflight_id: preflight.id }).attestation as JsonObject).status, "verified");
     const state = f.service.runtimeAssuranceGet({ task_run_id: read.run.id }); assert.equal((state.attestations as JsonObject[]).length, 3); assert.equal((state.interventions as JsonObject[]).length, 1);
-    assert.equal(VERSION, "0.12.30");
+    assert.equal(VERSION, "0.12.33");
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
