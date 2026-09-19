@@ -23,7 +23,7 @@
     "test:ts": "pnpm run version:check && node --experimental-strip-types scripts/ci/test.ts",
     "test:coverage-gates": "node --experimental-strip-types scripts/coverage/coverage-gates.ts",
     "test:smoke": "node dist/src/cli.js --help",
-    "test:plugin": "node --experimental-strip-types scripts/release/check-plugin-package.ts && node --experimental-strip-types scripts/smoke/plugin-smoke.ts && node --experimental-strip-types scripts/smoke/plugin-component-smoke.ts && node --experimental-strip-types scripts/smoke/plugin-full-smoke.ts",
+    "test:plugin": "node --experimental-strip-types scripts/release/check-plugin-package.ts && node --experimental-strip-types scripts/release/check-plugin-version.ts && node --experimental-strip-types scripts/smoke/plugin-smoke.ts && node --experimental-strip-types scripts/smoke/plugin-component-smoke.ts && node --experimental-strip-types scripts/smoke/plugin-full-smoke.ts",
     "version:check": "node --experimental-strip-types scripts/ci/check-version.ts",
     "audit:layering": "node --experimental-strip-types scripts/ci/audit-layering.ts",
     "audit:surfaces": "node --experimental-strip-types scripts/ci/audit-surfaces.ts",

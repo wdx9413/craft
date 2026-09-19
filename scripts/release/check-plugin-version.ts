@@ -3,9 +3,9 @@ import { access, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
+const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const version = (JSON.parse(await readFile(join(root, "package.json"), "utf8")) as { version: string }).version;
-const components = ["craft", "craft-context", "craft-quality", "craft-knowledge", "craft-memory", "craft-capability", "craft-skill-quality", "craft-workflow-evolution"];
+const components = ["craft", "craft-capability", "craft-context", "craft-experience", "craft-knowledge", "craft-memory", "craft-quality", "craft-skill-quality"];
 for (const name of components) {
   const manifest = JSON.parse(await readFile(join(root, "plugins", name, ".codex-plugin", "plugin.json"), "utf8")) as { name: string; version: string };
   assert.equal(manifest.name, name);
