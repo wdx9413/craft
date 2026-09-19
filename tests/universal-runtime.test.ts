@@ -1,5 +1,5 @@
-﻿import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import assert from "node:assert/strict";
+import { mkdtemp, rm, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -34,8 +34,8 @@ test("v0.12.19 makes Knowledge Sources, Memory Ledger, receipts and retrieval se
     assert.throws(() => f.sources.sourceRegister({ kind: "readme", label: "secret=12345678", scope_kind: "project", scope_id: "project", locator: "x", content_digest: "x" }), /credentials/);
     assert.throws(() => f.sources.sourceTransition({ source_id: source.id, status: "active", reason: "x" }), /unsupported/);
 
-    const working = f.ledger.remember({ memory_id: "working", source_id: source.id, kind: "working", scope_kind: "project", scope_id: "project", content: "Use controlled workflow", sensitivity: "internal" }).memory as JsonObject;
-    assert.equal((f.ledger.remember({ memory_id: "working", source_id: source.id, kind: "working", scope_kind: "project", scope_id: "project", content: "Use controlled workflow", sensitivity: "internal" }) as JsonObject).idempotent, true);
+    const working = f.ledger.remember({ memory_id: "working", source_id: source.id, kind: "working", scope_kind: "project", scope_id: "project", content: "Use controlled workflow", sensitivity: "internal", valid_until: "2030-01-01T00:00:00.000Z" }).memory as JsonObject;
+    assert.equal((f.ledger.remember({ memory_id: "working", source_id: source.id, kind: "working", scope_kind: "project", scope_id: "project", content: "Use controlled workflow", sensitivity: "internal", valid_until: "2030-01-01T00:00:00.000Z" }) as JsonObject).idempotent, true);
     assert.throws(() => f.ledger.remember({ source_id: source.id, kind: "procedural", scope_kind: "project", scope_id: "project", content: "always test" }), /requires Evidence/);
     const procedural = f.ledger.remember({ memory_id: "procedure", source_id: source.id, kind: "procedural", scope_kind: "project", scope_id: "project", content: "Test the changed behavior", confidence: "confirmed", evidence_ids: ["evidence"], valid_until: "2030-01-01T00:00:00.000Z" }).memory as JsonObject;
     assert.throws(() => f.ledger.remember({ source_id: source.id, kind: "working", scope_kind: "project", scope_id: "project", content: "token=secretsecret" }), /credentials/);
@@ -189,10 +189,18 @@ test("v0.12.19 fails closed for untrusted, stale, restricted, malformed and drif
     f.context.retrievalEvaluate({ adapter_id: nested.id, metrics: { recall: 1, cross_project_leak_count: 0, latency_ms: 0, cost_usd: 0 } });
     assert.equal((((await f.context.resolve({ query: "alpha", scope_kind: "project", scope_id: "project", retrieval_adapter_id: nested.id, max_items: 1, max_chars: 200 })) as JsonObject).items as JsonObject[])[0].reason, "evaluated_vector_adapter");
     assert.equal((((await f.context.resolve({ query: "!!!", scope_kind: "project", scope_id: "project" })) as JsonObject).items as JsonObject[]).length, 0);
+    const skipped = await f.context.resolve({ query: "no scope", scope_kind: " ", scope_id: "" }) as JsonObject;
+    assert.equal(skipped.skipped, true);
+    assert.deepEqual(skipped.items, []);
+    assert.equal(skipped.receipt, null);
     await assert.rejects(() => f.context.resolve({ query: "x", scope_kind: "project", scope_id: "project", source_ids: "generated" as unknown as string[] }), /array/);
     await assert.rejects(() => f.context.resolve({ query: "x", scope_kind: "project", scope_id: "project", source_ids: [String(generatedSource.id), String(generatedSource.id)] }), /unique/);
     assert.throws(() => f.sources.sourceTransition({ source_id: "", status: "disabled", reason: "x" }), /empty/);
     assert.equal((f.ledger.get({ memory_id: generatedMemory.id, version: 1 }).memory as JsonObject).id, generatedMemory.id);
+    const contentKernel = f.ledger as unknown as { content(record: JsonObject): string };
+    const directRef = f.store.contentStore.writeSync({ kind: "memory", record_id: "direct-content", version: 1, scope: "project:project", status: "active", sensitivity: "internal", source_id: String(generatedSource.id), body: "direct content" });
+    assert.equal(contentKernel.content({ content_ref: directRef }), "direct content");
+    assert.throws(() => contentKernel.content({ content_ref: {} }), /missing/);
     assert.equal((f.context.receiptGet({ receipt_id: (keywordResult.receipt as JsonObject).id as string, version: 1 }).receipt as JsonObject).id, (keywordResult.receipt as JsonObject).id);
     const autoPlan = f.modes.prepare({ task_id: "task", profile_id: console.id }).plan as JsonObject; assert.match(String(autoPlan.id), /^work_runtime_plan_/);
     f.store.create("work_runtime_mode", "agent-without-model", { mode: "agent", allowed_hosts: ["internal"], default_host: "internal", default_model: null });
@@ -212,5 +220,28 @@ test("v0.12.19 fails closed for untrusted, stale, restricted, malformed and drif
     const facadeMode = f.service.workRuntimeModeConfigure({ profile_id: "facade-mode", mode: "console", allowed_hosts: ["codex-cli"], default_host: "codex-cli" }).profile as JsonObject;
     const facadePlan = f.service.workRuntimeModePrepare({ plan_id: "facade-plan", task_id: "task", profile_id: facadeMode.id }).plan as JsonObject;
     assert.equal((f.service.workRuntimeModeGet({ plan_id: facadePlan.id }).plan as JsonObject).id, facadePlan.id);
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+test("v0.12.33 resolves a body that lives in the content store and refuses a broken reference", async () => {
+  const f = await fixture();
+  try {
+    const source = f.sources.sourceRegister({ source_id: "content-body", kind: "custom", label: "Content body", scope_kind: "project", scope_id: "project",
+      locator: "local", content_digest: "sha256:content", trust: "bounded", access: "read_only" }).source as JsonObject;
+    const memory = f.ledger.remember({ memory_id: "stored-body", source_id: source.id, kind: "preference", scope_kind: "project", scope_id: "project", content: "alpha stored body" }).memory as JsonObject;
+    // The record keeps the reference, not the text.
+    assert.equal(memory.content, undefined);
+    assert.equal(typeof (memory.content_ref as JsonObject).path, "string");
+    const resolved = await f.context.resolve({ query: "alpha", scope_kind: "project", scope_id: "project", source_ids: [String(source.id)] });
+    assert.equal((resolved.items as JsonObject[])[0]!.content, "alpha stored body");
+
+    // A body that disappeared is a failure, not an empty memory: the receipt would otherwise
+    // describe a pack the caller cannot read.
+    await unlink(String((memory.content_ref as JsonObject).path));
+    await assert.rejects(() => f.context.resolve({ query: "alpha", scope_kind: "project", scope_id: "project", source_ids: [String(source.id)] }), /ENOENT|no such file/u);
+
+    // A record with neither an inline body nor a usable reference is refused by name.
+    f.store.create("memory_ledger", "broken-body", { source_id: String(source.id), kind: "preference", scope: { kind: "project", id: "project" },
+      content_digest: "sha256:broken", sensitivity: "internal", valid_until: null, status: "active" });
+    await assert.rejects(() => f.context.resolve({ query: "alpha", scope_kind: "project", scope_id: "project", memory_ids: ["broken-body"] }), /reference is missing/u);
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });

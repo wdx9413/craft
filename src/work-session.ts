@@ -1,4 +1,4 @@
-﻿import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
 import { ProjectBrainKernel } from "../capability/craft-knowledge/project-brain.ts";
 import { text } from "./validation.ts";

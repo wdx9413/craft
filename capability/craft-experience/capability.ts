@@ -1,4 +1,4 @@
-﻿/**
+/**
  * The Experience capability.
  *
  * Experience is the accumulated context member whose carrier is a Workflow. It is named

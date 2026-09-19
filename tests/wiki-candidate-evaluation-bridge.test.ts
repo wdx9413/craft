@@ -11,7 +11,7 @@ import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
 test("Wiki candidates require retrieval quality, held-out proof, Signoff, then explicit human publication authorization", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-wiki-bridge-")); const store = await new CraftStore(craftPaths(root)).open(); const service = new CraftService(store);
   try {
-    const evidence = service.evidenceRecord({ evidence_id: "e", source_type: "program", claim: "Observed." });
+    const evidence = service.evidenceRecord({ evidence_id: "e", source_type: "program", claim: "Observed.", confidence: "bounded" });
     const claim = (claimId: string) => service.knowledgeClaimSave({ claim_id: claimId, kind: "rule", content: `checked ${claimId} facts`, evidence_ids: [evidence.id] }).claim as JsonObject;
     const a = claim("a"); const b = claim("b"); for (const item of [a, b]) service.knowledgeClaimReview({ claim_id: item.id, status: "reviewed", reviewer: "reviewer", reason: "checked" });
     const candidate = service.wikiSkillCandidateCreate({ candidate_id: "candidate", title: "Checked helper", kind: "skill", claim_ids: [a.id, b.id], instructions: "Use checked facts.", applicability: "Only for checked facts.", fallback_condition: "Ask a human." }).candidate as JsonObject;

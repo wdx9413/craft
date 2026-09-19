@@ -1,9 +1,54 @@
-﻿# Changelog
+# Changelog
 
 > Note on numbering: the declared package version remains **0.12.33**. The
 > `v0.12.34`–`v0.12.43` headings below name **incremental work on that revision**,
 > not releases. Each is a self-contained change set with its own 100%-coverage
 > test script; the version bump happens only when the work is released.
+
+## v0.12.43 (continued) - origin/main merged: 0.12.32's work re-expressed on the split kernels
+
+`origin/main` was ten commits ahead with the 0.12.32 feature set (Markdown content store,
+Memory Governance, Workflow DAG, Task State, MCP Tasks, Runtime Proof, Trace Review, Memory
+Maintenance, legacy knowledge migration). This branch had meanwhile split the same modules
+along capability boundaries, so the merge had to answer, feature by feature, which of the two
+structures each one belongs to.
+
+**Ported onto the split kernels.** `payload` no longer returns a body that lives behind a
+`content_ref`. `MemoryLedgerKernel.remember` writes the body to the content store, keeps the
+reference and the digest, and gives a working note 24 hours and an episode 30 days by default.
+`ContextResolutionKernel.resolve` reads bodies through that same reference, and reports a scope
+it could not obtain as `skipped: true, reason: "scope_unavailable"` instead of searching every
+scope. `MemoryGovernanceKernel` takes the Ledger half it actually calls (`remember`,
+`transition`) rather than the single object this branch split up. `validation.ts` gained the
+shared `fallback`, `optionalText` and `optionalScope` helpers and the `session` scope kind,
+because three modules carried private copies of them.
+
+**Deliberate losses, recorded rather than hidden.** The remote's cosmetic `x ?? d` ->
+`fallback(x, d)` rewrites inside the eight modules this branch split out of `v01211-runtime.ts`
+were not carried over: the shared helper exists, the spellings are behaviour-identical, and
+re-applying them would have rewritten files for no reader. `defaultSettings().theme` stays
+`"system"`, harmonised with `normalizeSettings`, instead of being reverted to the remote's
+`"light"`: the two describe the same first launch and must agree, and this branch had already
+changed the factory rather than the test.
+
+**Found while merging.** Both sides added `tests/runtime-proof.test.ts`; the collision cost the
+remote's RuntimeProofKernel tests, now restored as `tests/runtime-proof-kernel.test.ts` and
+`src/runtime-proof.ts` back at 100%. `.gitignore`'s `coverage/` pattern matched
+`scripts/coverage/` at any depth, so the coverage gate scripts themselves were never committed
+and a fresh clone could not run its own gate; the directory is now un-ignored explicitly. Two
+shared helpers that `git` merged textually had to be reconciled by hand because the two sides
+disagreed about meaning: the theme default above, and `runtime-acceptance`'s evaluation identity,
+which included the plan version that `evaluate` itself bumps, so the remote's idempotency test
+and this branch's kernel could not both be right.
+
+**Verification.** `pnpm run typecheck`, `pnpm run lint`, the four audits and all **39** per-module
+coverage gates pass, and **1038** tests pass. The single combined coverage run
+(`scripts/ci/test.ts`) still reports a residue below its 100/100/100 thresholds
+(99.93 line / 99.65 branch / 99.40 function over 23 files). That gate was already failing before
+this merge on 53 files at 97.03% branch coverage, so the merge improves it rather than causing
+it; the residue is dominated by class-field lines that V8 attributes as uncovered only in a
+combined run -- the effect `tests/coverage-gates.json` documents -- plus a few delegates the
+remote added that only its per-version scripts exercised.
 
 ## v0.12.43 (continued) — the four open questions, decided and landed
 

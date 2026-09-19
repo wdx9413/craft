@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env node
+#!/usr/bin/env node
 import { createInterface } from "node:readline/promises";
 import { createHash } from "node:crypto";
 import { access, readFile } from "node:fs/promises";

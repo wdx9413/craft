@@ -10,7 +10,7 @@ import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
 test("Wiki-derived capability candidates remain proposal-only", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-wiki-candidate-")); const store = await new CraftStore(craftPaths(root)).open(); const service = new CraftService(store);
   try {
-    const evidence = service.evidenceRecord({ source_type: "program", claim: "Observed." });
+    const evidence = service.evidenceRecord({ source_type: "program", claim: "Observed.", confidence: "bounded" });
     const make = (id: string) => service.knowledgeClaimSave({ claim_id: id, kind: "rule", content: id, evidence_ids: [evidence.id] }).claim as JsonObject;
     const a = make("a"); const b = make("b"); const pending = make("pending");
     service.knowledgeClaimReview({ claim_id: a.id, status: "reviewed", reviewer: "h", reason: "r" }); service.knowledgeClaimReview({ claim_id: b.id, status: "reviewed", reviewer: "h", reason: "r" });

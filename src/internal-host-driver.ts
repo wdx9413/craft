@@ -125,6 +125,13 @@ export const INTERNAL_ONLY_TOOLS: readonly ChatToolDefinition[] = DEFAULT_INTERN
 function redact(value: string): string { return value.replace(/(?:api[_-]?key|authorization|cookie|password|secret|token)\s*[:=]\s*[^\s]+/giu, "[redacted]"); }
 
 const MAX_FINAL_MESSAGE_CHARS = 4_000;
+const MAX_SESSION_MESSAGE_CHARS = 2_000;
+function persistedConversation(messages: ConversationMessage[]): JsonObject[] {
+  return messages.map((message) => {
+    const raw = message.content === null ? "" : message.content;
+    return { role: message.role, content: redact(raw).slice(0, MAX_SESSION_MESSAGE_CHARS), content_digest: digestJson(raw), tool_calls_digest: message.tool_calls ? digestJson(message.tool_calls) : null };
+  });
+}
 
 /**
  * A model reply is only treated as an action when it is a single JSON object with
@@ -265,7 +272,9 @@ export class InternalHostDriver implements HostDriver {
     dispatch = this.store.save(this.dispatchKind, String(dispatch.id), { ...payload(dispatch), status: "running", started_at: new Date().toISOString(), ...(resumedFrom ? { resumed_from: resumedFrom } : {}) });
 
     const session = this.store.find("internal_session", `session_${dispatch.id}`);
-    let messages: ConversationMessage[] = session && Array.isArray(session.messages) ? session.messages as ConversationMessage[] : [{ role: "user", content: prompt }];
+    let messages: ConversationMessage[] = session && Array.isArray(session.messages)
+      ? (session.messages as JsonObject[]).map((item) => ({ role: String(item.role) as ConversationMessage["role"], content: typeof item.content === "string" ? redact(item.content) : null }))
+      : [{ role: "user", content: redact(prompt) }];
     const traceId = `runtime:${dispatch.id}`;
     this.trace.start({ trace_id: traceId, task_id: dispatch.task_id, run_id: dispatch.id, model_fingerprint: digestJson({ provider: provider.provider, model: dispatch.model }), metadata: createWorkNote({ goal: prompt }) });
     try {
@@ -281,7 +290,7 @@ export class InternalHostDriver implements HostDriver {
           summarize: summarizeConversation,
         });
         messages = compacted.messages;
-        this.store.save("internal_session", `session_${dispatch.id}`, { dispatch_id: dispatch.id, messages, compacted: compacted.compacted, omitted: compacted.omitted, summary_digest: compacted.summary_digest });
+        this.store.save("internal_session", `session_${dispatch.id}`, { dispatch_id: dispatch.id, messages: persistedConversation(messages), compacted: compacted.compacted, omitted: compacted.omitted, summary_digest: compacted.summary_digest, content_free: true });
         const tools = this.tools;
         const request = buildChatRequest(provider, { model: String(dispatch.model), messages: messages as ChatMessage[], tools: tools.length ? [...tools] : undefined });
         options.observe?.({ stream: "stdout", bytes: request.prompt_tokens_estimate, digest: digestJson(request.url) });

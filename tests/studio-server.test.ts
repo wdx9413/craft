@@ -77,6 +77,10 @@ test("Craft Studio projects model, project, connector and source reads over the 
   assert.equal((deepseek.selection as Record<string, unknown>).model, "deepseek-reasoner");
   assert.equal(JSON.parse(get("/api/models/deepseek").body).selection, undefined);
   assert.equal(get("/api/models/nope").status, 422);
+  assert.equal(post("/api/config/models", { id: "Local Model", name: "Local Model", protocol: "openai-compatible", baseUrl: "https://example.test/v1", model: "local", apiKeyEnv: "LOCAL_MODEL_KEY", supportsTools: false }).status, 201);
+  assert.equal((JSON.parse(get("/api/config/models").body) as { models: unknown[] }).models.length, 1);
+  assert.equal(app.handle({ method: "PATCH", path: "/api/config/models/local-model", token: "secret", body: JSON.stringify({ name: "Updated", protocol: "anthropic", baseUrl: "https://example.test/v1", model: "updated", apiKeyEnv: "LOCAL_MODEL_KEY", supportsTools: true }) }).status, 200);
+  assert.equal(app.handle({ method: "DELETE", path: "/api/config/models/local-model", token: "secret" }).status, 200);
   const saved = JSON.parse(post("/api/model-profiles", { profile_id: "studio-deepseek-standard", provider: "deepseek", tier: "standard" }).body) as Record<string, unknown>;
   assert.equal((saved.profile as Record<string, unknown>).provider, "deepseek");
   assert.equal((saved.readiness as Record<string, unknown>).status, "needs_enablement");
@@ -173,4 +177,36 @@ test("Studio exposes task conversation behind the same token and origin gates", 
     if (originalKey === undefined) delete process.env[secretName]; else process.env[secretName] = originalKey;
     f.store.close();
   }
+});
+
+test("Studio compatibility facades still route every write through governed kernels", async () => {
+  const f = await fixture();
+  try {
+    const service = f.service;
+    const proposed = service.studioMemorySave({ memory_id: "studio-ledger-memory", kind: "preference", scope: "user", content: "Prefer concise reports" });
+    const candidate = proposed.candidate as Record<string, unknown>;
+    assert.equal(candidate.status, "candidate");
+    const reviewed = service.studioMemoryReview({ candidate_id: candidate.id, decision: "reject", reviewer: "studio-reviewer", reason: "awaiting explicit preference confirmation" });
+    assert.equal((reviewed.candidate as Record<string, unknown>).status, "rejected");
+    f.store.create("memory_item", "studio-retire-memory", { kind: "preference", scope: "user", content: "Retire me", status: "active" });
+    const retired = service.studioMemoryRetire({ memory_id: "studio-retire-memory" });
+    assert.equal((retired.memory as Record<string, unknown>).status, "expired");
+
+    const claim = service.studioKnowledgeClaimSave({ kind: "fact", content: "Studio writes are candidate-first" });
+    assert.equal((claim.claim as Record<string, unknown>).status, "candidate");
+    const workflow = service.studioWorkflowSave({ workflow_id: "studio-compat-workflow", name: "Compat", steps: [{ id: "inspect", type: "action", side_effect: "read_only", action: "inspect" }] });
+    assert.equal((workflow.workflow as Record<string, unknown>).lifecycle, "draft");
+    assert.equal((workflow.workflow as Record<string, unknown>).graph !== undefined, true);
+
+    const legacy = service.studioMemoryCompatSave({ kind: "fact", scope: "user", content: "Legacy facade" });
+    assert.equal((legacy.memory as Record<string, unknown>).status, "active");
+    assert.equal((service.studioKnowledgeCompatSave({ content: "Legacy knowledge facade" }).claim as Record<string, unknown>).status, "candidate");
+    assert.equal((service.studioWorkflowCompatSave({ workflow_id: "studio-legacy-workflow", name: "Legacy", steps: [] }) as Record<string, unknown>).lifecycle, "draft");
+    f.store.create("memory_item", "compat-previous", { kind: "preference", scope: "user", task_id: "task", workspace_id: "workspace", applies_to: ["old"], content: "Old preference", status: "active" });
+    const superseded = service.studioMemoryCompatSave({ memory_id: "compat-previous", content: "Updated preference", applies_to: ["new"] });
+    assert.equal((superseded.memory as Record<string, unknown>).status, "active");
+    assert.throws(() => service.studioSkillSave({ name: "too-large", content: "x".repeat(48_001) }), /48,000/);
+    service.studioSkillSave({ skill_id: "skill-update", name: "Skill", content: "one" });
+    assert.equal((service.studioSkillSave({ skill_id: "skill-update", name: "Skill", content: "two" }).skill as Record<string, unknown>).previous_version, 1);
+  } finally { f.store.close(); }
 });

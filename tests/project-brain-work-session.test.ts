@@ -1,4 +1,4 @@
-﻿import assert from "node:assert/strict";
+import assert from "node:assert/strict";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -44,6 +44,109 @@ test("Work Session, Workbench projection and durable long-task wake/resume are f
   const expiring = worker.suspend({ session_id: "s2", checkpoint_id: "cp4", wait_condition: "timer", expires_at: "2020-01-01T00:00:00.000Z" }); assert.equal((expiring.checkpoint as Record<string, unknown>).status, "waiting"); const wakeExpiring = worker.suspend({ session_id: "s2", checkpoint_id: "cp5", wait_condition: "event", expires_at: "2020-01-01T00:00:00.000Z" }); worker.wake({ checkpoint_id: "cp5", signal: "event" }); assert.equal((wakeExpiring.checkpoint as Record<string, unknown>).status, "waiting"); const tick = worker.tick({ now: "2020-01-02T00:00:00.000Z" }); assert.equal(tick.count, 2); assert.equal((worker.get({ checkpoint_id: "cp4" }).checkpoint as Record<string, unknown>).status, "needs_replan"); assert.equal((worker.get({ checkpoint_id: "cp5" }).checkpoint as Record<string, unknown>).status, "ready");
   const experience = new WorkbenchExperienceKernel(f.store); const projection = experience.query({ project_id: "p2" }); assert.equal(projection.content_free, true); assert.equal(experience.get({ session_id: "s2" }).content_free, true); assert.equal(experience.review({ project_id: "p2" }).evidence_required, true);
   f.store.create("trace", "trace2", { task_id: "task2", status: "running", model_fingerprint: "m", environment_fingerprint: "e" }); f.store.create("trace_event", "trace2:1", { trace_id: "trace2", sequence: 1, event_kind: "step", action_contract: { action: "read" }, input_refs: [], output_refs: [] }); const replay = experience.replayPlan({ trace_id: "trace2" }); assert.equal(replay.replayable, true); f.store.close();
+});
+
+test("Long Task checkpoints validate task-run ownership, expiry and malformed state", async () => {
+  const f = await fixture();
+  try {
+    f.brain.open({ project_id: "p-long" });
+    f.store.create("task", "task-long", { project_id: "p-long", title: "Long", goal: "Wait" });
+    f.store.create("work_session", "session-long", { task_id: "task-long", project_id: "p-long", context_digest: "sha256:ctx" });
+    f.store.create("work_launch", "launch-long", { task_id: "task-long" });
+    f.store.create("task_run", "run-long", { task_id: "task-long", contract_id: "contract", launch_id: "launch-long" });
+    const worker = new LongTaskWorkerKernel(f.store);
+    const checkpoint = worker.suspend({ session_id: "session-long", task_run_id: "run-long", wait_condition: "approval", expires_at: "2030-01-01T00:00:00.000Z", now: "2029-01-01T00:00:00.000Z" });
+    assert.equal((checkpoint.checkpoint as Record<string, unknown>).task_run_id, "run-long");
+    worker.wake({ checkpoint_id: String((checkpoint.checkpoint as Record<string, unknown>).id), signal: "approved" });
+    worker.resume({ checkpoint_id: String((checkpoint.checkpoint as Record<string, unknown>).id) });
+    assert.throws(() => worker.wake({ checkpoint_id: String((checkpoint.checkpoint as Record<string, unknown>).id), signal: "again" }), /waiting/);
+    assert.throws(() => worker.list({ limit: 0 }), /between/);
+    const missingSession = worker.suspend({ session_id: "session-long", checkpoint_id: "missing-session-cp", wait_condition: "event" });
+    f.store.save("long_task_checkpoint", "missing-session-cp", { ...missingSession.checkpoint as Record<string, unknown>, session_id: "deleted-session" });
+    const replanned = worker.resume({ checkpoint_id: "missing-session-cp", now: "2030-01-01T00:00:00.000Z" });
+    assert.equal(replanned.ready, false);
+    assert.equal((replanned.checkpoint as Record<string, unknown>).failure instanceof Array, true);
+  } finally { f.store.close(); }
+});
+
+test("legacy memory consolidation covers default scope, source, confidence and search filters", async () => {
+  const f = await fixture();
+  try {
+    const memory = new (await import("../src/memory-consolidation.ts")).MemoryConsolidationKernel(f.store);
+    const first = memory.remember({ memory_id: "legacy-memory", content: "A bounded observation" });
+    assert.equal((first.memory as Record<string, unknown>).scope, "task");
+    assert.equal((first.memory as Record<string, unknown>).source, "work");
+    const second = memory.remember({ memory_id: "legacy-memory-2", scope: "task", content: "A second observation", source: "test", confidence: 0.9 });
+    const consolidated = memory.consolidate({ memory_ids: ["legacy-memory", "legacy-memory-2"], semantic_id: "legacy-semantic" });
+    assert.equal((consolidated.memory as Record<string, unknown>).status, "active");
+    assert.equal((memory.search({ query: "bounded" }).results as unknown[]).length, 1);
+    assert.equal((memory.search({ query: "bounded", scope: "other" }).results as unknown[]).length, 0);
+    assert.throws(() => memory.remember({ content: "token=secret-value" }), /credentials/);
+    assert.throws(() => memory.consolidate({ memory_ids: ["legacy-memory"], content: "password=secret-value" }), /secrets/);
+  } finally { f.store.close(); }
+});
+
+test("work session rejects drift, cross-project bindings and malformed references", async () => {
+  const f = await fixture();
+  try {
+    const brain = f.brain;
+    brain.open({ project_id: "edge-project" });
+    f.store.create("task", "edge-task", { project_id: "edge-project", title: "Edge", goal: "Goal" });
+    const sessions = new WorkSessionKernel(f.store);
+    assert.throws(() => sessions.prepare({ project_id: "edge-project", task_id: "edge-task", knowledge_refs: [{ id: "bad" }, null] }), /items/);
+    assert.throws(() => sessions.prepare({ project_id: "edge-project", task_id: "edge-task", excluded_refs: ["x", "x"] }), /unique/);
+    const prepared = sessions.prepare({ project_id: "edge-project", task_id: "edge-task", session_id: "edge-session", selection_rationale: [], knowledge_refs: [], capability_refs: [], workflow_refs: [], excluded_refs: [] });
+    assert.equal(sessions.refresh({ session_id: "edge-session" }).ready, true);
+    f.store.save("task", "edge-task", { ...f.store.get("task", "edge-task"), title: "Changed" });
+    assert.equal(sessions.refresh({ session_id: "edge-session" }).ready, false);
+    assert.throws(() => sessions.prepare({ project_id: "edge-project", task_id: "edge-task", session_id: "edge-session", goal: "different" }), /idempotency/);
+    f.store.create("work_launch", "edge-launch", { task_id: "other" });
+    assert.throws(() => sessions.bindLaunch({ session_id: "edge-session", launch_id: "edge-launch" }), /belong/);
+    f.store.create("internal_dispatch", "edge-dispatch", { task_id: "other", status: "prepared" });
+    assert.throws(() => sessions.bindDispatch({ session_id: "edge-session", dispatch_id: "edge-dispatch" }), /belong/);
+    f.store.save("task", "edge-task", { ...f.store.get("task", "edge-task"), project_id: null, version: 1 });
+    const fresh = sessions.prepare({ project_id: "edge-project", task_id: "edge-task", session_id: "edge-session-2" });
+    f.store.create("work_launch", "edge-launch-2", { task_id: "edge-task" });
+    assert.equal((sessions.bindLaunch({ session_id: "edge-session-2", launch_id: "edge-launch-2" }).session as Record<string, unknown>).status, "running");
+    const edgeBrain = f.store.list("project_brain").find((item) => item.project_id === "edge-project")!;
+    f.store.save("project_brain", String(edgeBrain.id), { ...edgeBrain, name: "changed" });
+    assert.equal(sessions.refresh({ session_id: String((fresh.session as Record<string, unknown>).id) }).ready, false);
+    assert.equal((sessions.complete({ session_id: "edge-session-2", status: "failed", summary: "failed", outcome_id: "outcome" }).session as Record<string, unknown>).status, "failed");
+    f.store.create("work_session", "missing-refs", { task_id: "missing-task", project_id: "missing-project", task_version: 1, brain_version: 1, status: "running", context_digest: "sha256:x" });
+    const missingRefresh = sessions.refresh({ session_id: "missing-refs" });
+    assert.equal(missingRefresh.ready, false);
+    f.store.create("task", "null-project-task", { project_id: null, title: "Null", goal: "Goal" });
+    brain.open({ project_id: "null-project" });
+    const nullSession = sessions.prepare({ project_id: "null-project", task_id: "null-project-task", session_id: "null-session" });
+    assert.equal((nullSession.session as Record<string, unknown>).status, "prepared");
+    f.store.create("internal_dispatch", "unbound-dispatch", { task_id: "null-project-task", status: "prepared" });
+    assert.equal((sessions.bindDispatch({ session_id: "null-session", dispatch_id: "unbound-dispatch" }).dispatch as Record<string, unknown>).session_id, "null-session");
+  } finally { f.store.close(); }
+});
+
+test("project brain covers default identities, revisions and projection limits", async () => {
+  const f = await fixture();
+  try {
+    const brain = f.brain;
+    const opened = brain.open({ project_id: "defaults", brain_id: "brain-defaults" });
+    assert.equal((opened.brain as Record<string, unknown>).name, "defaults");
+    assert.equal(brain.open({ project_id: "defaults", brain_id: "brain-defaults" }).idempotent, true);
+    assert.throws(() => brain.open({ project_id: "defaults", brain_id: "brain-defaults", description: "changed" }), /idempotency/);
+    assert.throws(() => brain.get({ project_id: "missing" }), /Unknown/);
+    assert.throws(() => brain.goalSave({ project_id: "defaults", title: "Bad", constraint_digests: "bad" as never }), /array/);
+    assert.throws(() => brain.goalSave({ project_id: "defaults", title: "Dup", constraint_digests: ["x", "x"] }), /unique/);
+    assert.throws(() => brain.snapshot({ project_id: "defaults", limit: 0 }), /between/);
+    brain.goalSave({ project_id: "defaults", goal_id: "goal-default", title: "Ship" });
+    brain.goalSave({ project_id: "defaults", goal_id: "goal-default", title: "Ship v2", metric: "quality" });
+    brain.decisionSave({ project_id: "defaults", decision_id: "decision-default", title: "Use", rationale: "reason", chosen_ref: "ref" });
+    brain.decisionSave({ project_id: "defaults", decision_id: "decision-default", title: "Use v2", rationale: "reason2", chosen_ref: "ref2", excluded_refs: [] });
+    brain.materialBind({ project_id: "defaults", material_id: "material-default", name: "Brief", uri: "file:///brief", content_digest: "sha256:brief" });
+    brain.outcomeRecord({ project_id: "defaults", outcome_id: "outcome-default", verdict: "passed", summary: "done" });
+    assert.throws(() => brain.outcomeRecord({ project_id: "defaults", verdict: "passed", summary: "done", evidence_ids: "bad" as never }), /array/);
+    const experience = brain.experienceRecord({ project_id: "defaults", experience_id: "experience-default", name: "Pattern", pattern: "pattern" });
+    assert.equal((experience.experience as Record<string, unknown>).source_outcome_id, null);
+    assert.equal(brain.snapshot({ project_id: "defaults", limit: 10 }).content_free, true);
+  } finally { f.store.close(); }
 });
 
 test("v0.12.12 service and MCP expose the new surfaces", async () => {

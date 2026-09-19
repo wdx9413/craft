@@ -124,5 +124,9 @@ export function stableDigest(value: unknown): string {
  */
 export function payload(record: JsonObject): JsonObject {
   const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...rest } = record;
+  // A record whose body moved to the content store carries `content_ref` and must not also
+  // carry the body: spreading `payload` would otherwise resurrect a copy no digest protects.
+  // Legacy records still holding inline `content` are returned exactly as they are.
+  if (rest.content_ref !== undefined) delete rest.content;
   return rest;
 }

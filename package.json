@@ -37,6 +37,8 @@
     "eval:governance": "node --experimental-strip-types capability/craft-eval/suite.ts governance",
     "eval:abstraction": "node --experimental-strip-types capability/craft-eval/abstraction.ts",
     "eval:live": "node --experimental-strip-types capability/craft-eval/run.ts && node --experimental-strip-types capability/craft-eval/recurrence.ts && node --experimental-strip-types capability/craft-eval/suite.ts",
+    "coverage:branches:report": "c8 --all --src=src --exclude=src/cli.ts --exclude=src/**/index.ts --exclude=**/*.d.ts --reporter=json --reporter=text --report-dir=coverage node --test --test-isolation=none --test-concurrency=1 tests/*.test.ts && node --experimental-strip-types scripts/branch-gap-report.ts",
+    "knowledge:import-offline": "node --experimental-strip-types scripts/import-legacy-knowledge.ts",
     "check:ts": "node --experimental-strip-types src/cli.ts --help",
     "lint": "node --experimental-strip-types scripts/ci/lint.ts",
     "typecheck": "node node_modules/typescript/bin/tsc --noEmit"
@@ -78,6 +80,7 @@
   },
   "devDependencies": {
     "@types/node": ">=23 <26",
+    "c8": "10.1.3",
     "esbuild": "^0.28.2",
     "typescript": ">=5.8 <7"
   },

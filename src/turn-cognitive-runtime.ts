@@ -1,4 +1,4 @@
-﻿import { randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import type { MemoryLedgerKernel } from "../capability/craft-memory/memory-ledger.ts";
 import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
 import { object } from "./validation.ts";

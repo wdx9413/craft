@@ -110,13 +110,22 @@ export interface ScopeRef { readonly kind: string; readonly id: string }
  * `SCOPE_KINDS` set of every module that parses a scope. Two of those modules defined
  * `scope(args)` identically, which is why it lives here rather than in either of them.
  */
-export const SCOPE_KINDS: ReadonlySet<string> = new Set(["user", "project", "workspace", "task"]);
+export const SCOPE_KINDS: ReadonlySet<string> = new Set(["user", "project", "workspace", "task", "session"]);
 
 /** Read `{scope_kind, scope_id}` from arguments, rejecting an unsupported kind. */
 export function parseScope(args: JsonObject): ScopeRef {
+
   const kind = text(args.scope_kind, "scope_kind");
   if (!SCOPE_KINDS.has(kind)) throw new Error("scope_kind is unsupported");
   return { kind, id: text(args.scope_id, "scope_id") };
+}
+
+export function optionalScope(args: JsonObject): ScopeRef | null {
+  const kind = args.scope_kind; const id = args.scope_id;
+  const kindEmpty = kind === undefined || kind === null || (typeof kind === "string" && !kind.trim());
+  const idEmpty = id === undefined || id === null || (typeof id === "string" && !id.trim());
+  if (kindEmpty && idEmpty) return null;
+  return parseScope(args);
 }
 
 /**
@@ -134,3 +143,10 @@ export function noCredentialAssignment(value: string, name: string): string {
   }
   return value;
 }
+
+
+/** A default for an argument that may be absent. `null` is a value, not an absence. */
+export function fallback<T>(value: T | undefined, defaultValue: T): T { return value === undefined ? defaultValue : value; }
+
+/** `text`, but an absent value is `null` instead of an error. */
+export function optionalText(value: unknown, name: string): string | null { return value === undefined ? null : text(value, name); }

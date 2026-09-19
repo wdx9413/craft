@@ -17,6 +17,10 @@ test("v0.12.12 security, registry, A2A and organization boundaries are fail clos
     assert.equal((service.osSecurityPlan({ plan_id: "plan", workspace: "C:\\work", platform: "win32", network: "denied", filesystem: "read_only", egress_allowlist: [], secret_broker: false })).idempotent, true);
     assert.equal((service.osSecurityVerify({ plan_id: "plan", observed: { boundary_digest: (planned.plan as JsonObject).boundary_digest }, evidence_ids: ["probe"] })).compatible, true);
     assert.equal((service.osSecurityVerify({ plan_id: "plan", receipt_id: "bad-receipt", observed: { boundary_digest: "sha256:wrong" }, evidence_ids: [] })).compatible, false);
+    assert.equal((service.osSecurityPlan({ plan_id: "defaults-security", workspace: "/work", platform: "linux" }).plan as JsonObject).network, "denied");
+    assert.equal((service.osSecurityVerify({ plan_id: "defaults-security", observed: null, evidence_ids: [] }) as JsonObject).compatible, false);
+    assert.equal((service.osSecurityVerify({ plan_id: "defaults-security", receipt_id: "receipt-1", observed: {}, evidence_ids: [] }) as JsonObject).idempotent, false);
+    assert.equal((service.osSecurityVerify({ plan_id: "defaults-security", receipt_id: "receipt-1", observed: {}, evidence_ids: [] }) as JsonObject).idempotent, true);
     assert.throws(() => service.osSecurityPlan({ workspace: "x", platform: "unknown" }), /Unsupported platform/);
     const source = service.mcpRegistrySourceRegister({ source_id: "source", endpoint: "https://registry.example", trust: "official" });
     assert.equal((service.mcpRegistrySourceRegister({ source_id: "source", endpoint: "https://registry.example", trust: "official" })).idempotent, true);
@@ -25,12 +29,30 @@ test("v0.12.12 security, registry, A2A and organization boundaries are fail clos
     assert.equal((service.mcpRegistryHealthRecord({ server_id: "server", health_id: "health", status: "healthy" })).idempotent, false);
     assert.equal((service.mcpRegistryRevoke({ server_id: "server", reason: "test" }).server as JsonObject).status, "revoked");
     assert.equal((source.source as JsonObject).enabled, true); assert.equal((server.server as JsonObject).digest, "sha256:demo");
+    assert.throws(() => service.mcpRegistrySourceRegister({ source_id: "source", endpoint: "https://other.example", trust: "official" }), /conflict/);
+    assert.equal((service.mcpRegistryServerIngest({ source_id: "source", server_id: "server", name: "demo", version: "1.0.0", endpoint: "https://server.example", digest: "sha256:demo", capabilities: ["read"] }) as JsonObject).idempotent, true);
+    assert.throws(() => service.mcpRegistryServerIngest({ source_id: "source", server_id: "server", name: "demo", version: "1.0.0", endpoint: "https://server.example", digest: "sha256:changed" }), /drift/);
     const transport = new A2ATransportKernel(); const sent: JsonObject[] = [];
     const remote = await transport.dispatch({ endpoint: "https://agent.example/a2a", request_id: "req", agent: "agent", operation: "run", input_digest: "sha256:input" }, async (_url, init) => { sent.push(JSON.parse(String(init?.body)) as JsonObject); return { status: 202, json: async () => ({ remote_id: "remote", status: "accepted" }) }; });
     assert.equal(remote.raw_content, false); assert.equal(sent[0]!.execution_authority, false); await assert.rejects(() => transport.dispatch({ endpoint: "http://bad", request_id: "r", agent: "a", operation: "o", input_digest: "d" }), /HTTPS/);
     await assert.rejects(() => service.a2aTransportDispatch({ endpoint: "http://bad", request_id: "service-request", agent: "a", operation: "o", input_digest: "d" }), /HTTPS/);
     const registrySync = await service.mcpRegistry.sync({ source_id: "source", list_url: "https://registry.example/list" }, async () => ({ status: 200, json: async () => ({ servers: [{ server_id: "synced", name: "sync", version: "1.0.0", endpoint: "https://sync.example", digest: "sha256:sync" }] }) }));
     assert.equal(registrySync.count, 1);
+    assert.throws(() => service.mcpRegistrySourceRegister({ source_id: "bad-source", endpoint: "http://registry.example" }), /HTTPS/);
+    assert.throws(() => service.mcpRegistrySourceRegister({ source_id: "bad-trust", endpoint: "https://registry.example", trust: "unknown" }), /trust/);
+    const defaultSource = service.mcpRegistrySourceRegister({ source_id: "default-source", endpoint: "https://registry.example" });
+    const defaultServer = service.mcpRegistryServerIngest({ source_id: String((defaultSource.source as JsonObject).id), name: "default", version: "1", endpoint: "https://default.example", digest: "sha256:default" });
+    assert.deepEqual((defaultServer.server as JsonObject).capabilities, []);
+    assert.equal((service.mcpRegistryHealthRecord({ server_id: String((defaultServer.server as JsonObject).id), checked_at: "2030-01-01T00:00:00.000Z" }).health as JsonObject).status, "healthy");
+    assert.throws(() => service.mcpRegistryHealthRecord({ server_id: String((defaultServer.server as JsonObject).id), health_id: "bad-health", status: "unknown" }), /health/);
+    assert.throws(() => service.mcpRegistryServerIngest({ source_id: "source", name: "bad", version: "1", endpoint: "http://bad", digest: "d" }), /HTTPS/);
+    store.save("mcp_registry_source", "default-source", { ...(defaultSource.source as JsonObject), enabled: false });
+    assert.throws(() => service.mcpRegistryServerIngest({ source_id: "default-source", name: "x", version: "1", endpoint: "https://x", digest: "d" }), /disabled/);
+    assert.throws(() => service.mcpRegistryHealthRecord({ server_id: "server", status: "bad" }), /health/);
+    await assert.rejects(() => service.mcpRegistry.sync({ source_id: "source" }, async () => ({ status: 500, json: async () => ({}) })), /HTTP 500/);
+    await assert.rejects(() => service.mcpRegistry.sync({ source_id: "source", list_url: "http://bad" }, async () => ({ status: 200, json: async () => [] })), /HTTPS/);
+    await assert.rejects(() => service.mcpRegistry.sync({ source_id: "source" }, async () => ({ status: 200, json: async () => ({}) })), /servers array/);
+    await assert.rejects(() => service.mcpRegistry.sync({ source_id: "source" }, async () => ({ status: 200, json: async () => ({ servers: [null] }) })), /entry/);
     const taskGet = await transport.taskGet({ endpoint: "https://agent.example/a2a", task_id: "remote-task" }, async (url, init) => { assert.equal(url, "https://agent.example/a2a/tasks/remote-task"); assert.equal(init?.method, "GET"); return { status: 200, json: async () => ({ status: "working", artifact_refs: ["artifact:1"] }) }; });
     assert.equal(taskGet.status, "working");
     const taskCancel = await transport.taskCancel({ endpoint: "https://agent.example/a2a", task_id: "remote-task", reason: "stop" }, async (url, init) => { assert.equal(url, "https://agent.example/a2a/tasks/remote-task:cancel"); assert.equal(init?.method, "POST"); return { status: 200, json: async () => ({ status: "canceled" }) }; });
@@ -38,6 +60,15 @@ test("v0.12.12 security, registry, A2A and organization boundaries are fail clos
     const manifest = service.orgSyncPrepare({ sync_id: "sync", workspace_id: "workspace", member_ids: ["member"], record_refs: ["task"] });
     assert.equal((service.orgSyncApply({ sync_id: "sync", base_digest: (manifest.manifest as JsonObject).manifest_digest, tombstones: ["old"] }).status), "applied");
     assert.equal((service.orgSyncApply({ sync_id: "sync", base_digest: "sha256:stale" }).status), "conflict");
+    const orgDefaults = service.orgSyncPrepare({ workspace_id: "workspace-defaults" });
+    assert.equal((orgDefaults.manifest as JsonObject).member_ids instanceof Array, true);
+    assert.equal((service.orgSyncApply({ sync_id: String((orgDefaults.manifest as JsonObject).id), base_digest: (orgDefaults.manifest as JsonObject).manifest_digest }).status), "applied");
+    for (const platform of ["darwin", "linux"]) {
+      const plan = service.osSecurityPlan({ plan_id: `platform-${platform}`, workspace: "/work", platform });
+      assert.equal((plan.plan as JsonObject).filesystem, "read_only");
+    }
+    const defaultPlan = service.osSecurityPlan({ plan_id: "default-security", workspace: "/work", platform: "darwin", network: "allowlist", filesystem: "workspace_write", egress_allowlist: ["https://example.test"] });
+    assert.equal((service.osSecurityVerify({ plan_id: "default-security", observed: { boundary_digest: (defaultPlan.plan as JsonObject).boundary_digest }, evidence_ids: ["evidence"] }).compatible), true);
     const mcp = new McpServer(service, "full"); const call = async (name: string, arguments_: JsonObject) => (await mcp.handle({ id: name, method: "tools/call", params: { name, arguments: arguments_ } }))?.result as JsonObject;
     assert.equal((await call("craft_os_security_plan", { plan_id: "mcp-plan", workspace: "C:\\work" })).isError, false);
     assert.equal((await call("craft_os_security_verify", { plan_id: "mcp-plan", observed: { boundary_digest: "sha256:wrong" }, evidence_ids: [] })).isError, false);
@@ -52,4 +83,24 @@ test("v0.12.12 security, registry, A2A and organization boundaries are fail clos
     assert.equal((await call("craft_org_sync_prepare", { sync_id: "mcp-sync", workspace_id: "workspace" })).isError, false);
     assert.equal((await call("craft_org_sync_apply", { sync_id: "mcp-sync", base_digest: "sha256:stale" })).isError, false);
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("A2A transport exercises success variants and fail-closed responses", async () => {
+  const transport = new A2ATransportKernel();
+  const response = (status: number, body: unknown) => async () => ({ status, json: async () => body });
+  const completed = await transport.dispatch({ endpoint: "https://agent.example", request_id: "r2", agent: "a", operation: "o", input_digest: "d" }, response(200, { remote_id: "remote-2", status: "completed", result_digest: "sha256:result" }));
+  assert.equal(completed.result_digest, "sha256:result");
+  const failed = await transport.dispatch({ endpoint: "https://agent.example", request_id: "r3", agent: "a", operation: "o", input_digest: "d" }, response(200, { remote_id: "remote-3", status: "failed", result_digest: "sha256:failure" }));
+  assert.equal(failed.status, "failed");
+  await assert.rejects(() => transport.dispatch({ endpoint: "https://agent.example", request_id: "r", agent: "a", operation: "o", input_digest: "d" }, response(500, {})), /HTTP 500/);
+  await assert.rejects(() => transport.dispatch({ endpoint: "https://agent.example", request_id: "r", agent: "a", operation: "o", input_digest: "d" }, response(200, [])), /object/);
+  await assert.rejects(() => transport.dispatch({ endpoint: "https://agent.example", request_id: "r", agent: "a", operation: "o", input_digest: "d" }, response(200, { remote_id: "x", status: "unknown" })), /unsupported/);
+  const task = await transport.taskGet({ endpoint: "https://agent.example/", task_id: "task/1" }, response(200, { status: "completed", artifact_refs: "not-an-array" }));
+  assert.deepEqual(task.artifact_refs, []);
+  await assert.rejects(() => transport.taskGet({ endpoint: "https://agent.example", task_id: "task" }, response(503, {})), /HTTP 503/);
+  await assert.rejects(() => transport.taskGet({ endpoint: "https://agent.example", task_id: "task" }, response(200, null)), /object/);
+  await assert.rejects(() => transport.taskGet({ endpoint: "https://agent.example", task_id: "task" }, response(200, { status: "unknown" })), /unsupported/);
+  await transport.taskCancel({ endpoint: "https://agent.example", task_id: "task" }, response(200, { status: "canceled" }));
+  await assert.rejects(() => transport.taskCancel({ endpoint: "https://agent.example", task_id: "task" }, response(200, [])), /object/);
+  await assert.rejects(() => transport.taskCancel({ endpoint: "https://agent.example", task_id: "task" }, response(200, { status: "" })), /must not be empty/);
 });

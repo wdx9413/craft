@@ -1,4 +1,4 @@
-﻿import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { CraftStore, type JsonObject } from "../../src/infrastructure/store.ts";
 import { text } from "../../src/validation.ts";
 import { digestJson } from "../../src/digest.ts";

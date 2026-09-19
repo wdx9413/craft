@@ -5,6 +5,9 @@ import {
   list,
   noCredentialAssignment,
   object,
+  fallback,
+  optionalScope,
+  optionalText,
   parseScope,
   sortedUniqueList,
   text,
@@ -95,10 +98,10 @@ test("v0.12.43 records why stateful-compute keeps its own stricter strings", asy
 });
 
 test("v0.12.43 reads a scope and refuses an unsupported kind", () => {
-  assert.deepEqual([...SCOPE_KINDS], ["user", "project", "workspace", "task"]);
+  assert.deepEqual([...SCOPE_KINDS], ["user", "project", "workspace", "task", "session"]);
   assert.deepEqual(parseScope({ scope_kind: "project", scope_id: "p" }), { kind: "project", id: "p" });
   for (const kind of SCOPE_KINDS) assert.equal(parseScope({ scope_kind: kind, scope_id: "x" }).kind, kind);
-  assert.throws(() => parseScope({ scope_kind: "session", scope_id: "p" }), /scope_kind is unsupported/u);
+  assert.throws(() => parseScope({ scope_kind: "global", scope_id: "p" }), /scope_kind is unsupported/u);
   assert.throws(() => parseScope({ scope_id: "p" }), /scope_kind must not be empty/u);
   assert.throws(() => parseScope({ scope_kind: "project" }), /scope_id must not be empty/u);
   // The kind is validated before the id, so a fully empty call reports the kind rather than
@@ -149,4 +152,25 @@ test("v0.12.43 keeps the shared helpers from widening what a caller refuses", as
   // the reason neither was merged into `digestJson` or `stableDigest`.
   assert.match(project, /function digest\(value: unknown\): string \{ return `sha256:\$\{createHash\("sha256"\)\.update\(String\(value\)\)/u);
   assert.match(project, /function recordDigest\(value: unknown\): string/u);
+});
+
+test("v0.12.33 an absent scope is reported rather than searched, and a half scope still fails", () => {
+  // A read-only resolution must not fail a turn because the Host could not name a scope, and it
+  // must not fall back to searching every scope either.
+  assert.equal(optionalScope({}), null);
+  assert.equal(optionalScope({ scope_kind: "  ", scope_id: null }), null);
+  assert.deepEqual(optionalScope({ scope_kind: "session", scope_id: "s" }), { kind: "session", id: "s" });
+  // Half a scope is a caller bug: the caller meant to name one.
+  assert.throws(() => optionalScope({ scope_kind: "project" }), /scope_id/u);
+  assert.throws(() => optionalScope({ scope_id: "p" }), /scope_kind/u);
+});
+
+test("v0.12.33 the shared default helpers keep absence and null apart", () => {
+  assert.equal(fallback(undefined, "d"), "d");
+  assert.equal(fallback("v", "d"), "v");
+  // `null` is a value, not an absence: a default must not replace it.
+  assert.equal(fallback(null, "d"), null);
+  assert.equal(optionalText(undefined, "name"), null);
+  assert.equal(optionalText(" v ", "name"), "v");
+  assert.throws(() => optionalText("", "name"), /name/u);
 });

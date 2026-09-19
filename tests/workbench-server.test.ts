@@ -37,7 +37,7 @@ test("Workbench web application exposes a token-gated same-origin API and bounde
   const acceptedPrepared = JSON.parse(app.handle({ method: "POST", path: "/api/verified-work-loops", token: "secret", body: JSON.stringify({ work_loop_id: "accepted-loop", title: "Review", goal: "Approve", host: "codex-cli", workspace: f.store.paths.root, prompt: "review", sandbox: "workspace-write", acceptance_criteria: [{ id: "owner", name: "Owner accepts", method: "human" }, { id: "file", name: "File exists", method: "program" }] }) }).body); const accepted = acceptedPrepared.launch; const reviewed = app.handle({ method: "POST", path: `/api/acceptance-plans/${accepted.acceptance_plan_id}/human-review`, token: "secret", body: JSON.stringify({ review_id: "web-review", criterion_id: "owner", reviewer: "user", result: "passed", summary: "Approved in Workbench" }) }); assert.equal(JSON.parse(reviewed.body).assessment.status, "pending");
   const fileJob = app.handle({ method: "POST", path: `/api/acceptance-plans/${accepted.acceptance_plan_id}/file-evaluation`, token: "secret", body: JSON.stringify({ job_id: "web-file", criterion_id: "file", workspace: f.store.paths.root, relative_path: "result.txt", allowed_extensions: [".txt"], max_bytes: 100 }) }); assert.equal(fileJob.status, 201); assert.equal(JSON.parse(fileJob.body).job.adapter_id, "builtin:file-artifact");
   const kitLaunch = JSON.parse(app.handle({ method: "POST", path: "/api/verified-work-loops", token: "secret", body: JSON.stringify({ work_loop_id: "kit-loop", title: "Video", goal: "Deliver", host: "codex-cli", workspace: f.store.paths.root, prompt: "video", sandbox: "workspace-write" }) }).body).launch; const kitApplied = app.handle({ method: "POST", path: "/api/domain-kits/builtin.video-delivery/apply", token: "secret", body: JSON.stringify({ launch_id: kitLaunch.id, values: { video_path: "final.mp4" } }) }); assert.equal(JSON.parse(kitApplied.body).jobs.length, 1);
-  const knowledgeEvidence = f.service.evidenceRecord({ evidence_id: "knowledge-evidence", source_type: "program", claim: "The launch facts were checked." });
+  const knowledgeEvidence = f.service.evidenceRecord({ evidence_id: "knowledge-evidence", source_type: "program", claim: "The launch facts were checked.", confidence: "bounded" });
   const knowledgeClaim = f.service.knowledgeClaimSave({ claim_id: "knowledge-claim", kind: "fact", content: "Use only checked launch facts.", evidence_ids: [knowledgeEvidence.id] }).claim as Record<string, unknown>;
   assert.equal(app.handle({ method: "POST", path: "/api/knowledge/claims/knowledge-claim/review", token: "secret", body: JSON.stringify({ status: "reviewed", reviewer: "reviewer", reason: "checked" }) }).status, 200);
   const page = (await f.service.wikiPageSave({ page_id: "knowledge-page", title: "Launch facts", body: "# Checked facts\n\nUse only checked launch facts.", claim_ids: [knowledgeClaim.id] })).page as Record<string, unknown>;
@@ -62,6 +62,9 @@ test("local Workbench server binds loopback, serves headers, handles bodies, and
   assert.equal(started.token, "network-token"); assert.equal((await fetch(`${origin}/`)).status, 200); const health = await fetch(`${origin}/health`); assert.equal(health.headers.get("x-content-type-options"), "nosniff");
   assert.equal((await fetch(`${origin}/api/home`, { headers: { authorization: "Basic x" } })).status, 401);
   assert.equal((await fetch(`${origin}/api/home`, { headers: { authorization: "Bearer network-token" } })).status, 200);
+  for (const route of ["/api/project-brain?project_id=local&limit=1", "/api/workbench-experience?project_id=local&task_id=t&limit=1", "/api/traces?task_id=t&event_kind=x&limit=1", "/api/long-task-checkpoints?session_id=s&limit=1", "/api/studio/resources?kind=memory&task_id=t&limit=1"]) {
+    assert.equal((await fetch(`${origin}${route}`, { headers: { authorization: "Bearer network-token" } })).status < 500, true);
+  }
   assert.equal((await fetch(`${origin}/api/inbox/refresh`, { method: "POST", headers: { authorization: "Bearer network-token", origin }, body: "{}" })).status, 200);
   assert.equal((await fetch(`${origin}/api/inbox/refresh`, { method: "POST", headers: { authorization: "Bearer network-token" }, body: "x".repeat(66_000) })).status, 413);
   await assert.rejects(() => server.start(0), /already running/); await server.close(); await server.close(); f.store.close();
@@ -89,4 +92,35 @@ test("Workbench server validates ports, generates tokens, and reports occupied l
 test("Workbench acceptance polling skips overlap and isolates adapter failures", async () => {
   const f = await fixture(); let ticks = 0; const server = new LocalWorkbenchServer(f.service, "timer-token", { acceptanceTick: async () => { ticks += 1; await new Promise((resolve) => setTimeout(resolve, 650)); throw new Error("isolated"); } });
   await server.start(0); await new Promise((resolve) => setTimeout(resolve, 1_250)); await server.close(); assert.equal(ticks, 1); f.store.close();
+});
+
+test("Workbench exposes governed resume, fabric, studio, and model routes", async () => {
+  const f = await fixture(); const app = new WorkbenchWebApp(f.service, "route-token", "http://127.0.0.1:4173");
+  try {
+    const request = (method: "GET" | "POST", path: string, body?: string) => app.handle({ method, path, token: "route-token", origin: "http://127.0.0.1:4173", body });
+    assert.equal(request("POST", "/api/verified-work-loops/missing/resume", "{}").status, 422);
+    assert.equal(request("GET", "/api/execution-fabrics/missing").status, 422);
+    assert.equal(request("GET", "/api/work-launches/missing").status, 422);
+    assert.equal(request("GET", "/api/studio/summary").status, 200);
+    assert.equal(request("GET", "/api/studio/resources?kind=skills&limit=1").status, 200);
+    assert.equal(request("POST", "/api/studio/plugins", JSON.stringify({ manifest: { name: "demo", version: "1" } })).status, 201);
+    assert.equal(request("POST", "/api/studio/skills", JSON.stringify({ name: "skill", content: "Use evidence." })).status, 201);
+    assert.equal(request("POST", "/api/studio/memory", JSON.stringify({ content: "temporary" })).status, 201);
+    assert.equal(request("POST", "/api/studio/knowledge/claims", JSON.stringify({ kind: "fact", content: "fact" })).status, 201);
+    assert.equal(request("POST", "/api/studio/workflows", JSON.stringify({ name: "workflow" })).status, 201);
+    assert.equal(request("GET", "/api/models").status, 200);
+    assert.equal(request("GET", "/api/model-profiles").status, 200);
+    assert.equal(request("GET", "/api/home?limit=bad").status, 200);
+    assert.equal(request("GET", "/api/home?limit=1").status, 200);
+    assert.ok([404, 422].includes(request("GET", "/api/project-brain").status));
+    assert.equal(request("GET", "/api/project-brain?project_id=p&limit=1").status, 422);
+    assert.equal(request("GET", "/api/workbench-experience?project_id=p&task_id=t&limit=1").status, 200);
+    assert.equal(request("GET", "/api/traces?task_id=t&event_kind=x&limit=1").status, 200);
+    assert.equal(request("GET", "/api/long-task-checkpoints?session_id=s&limit=1").status, 200);
+    assert.equal(request("GET", "/api/studio/resources?kind=memory&task_id=t&limit=1").status, 200);
+    assert.equal(request("POST", "/api/studio/memory/review", JSON.stringify({ candidate_id: "missing", decision: "reject", reviewer: "r", reason: "x" })).status, 422);
+    assert.equal(request("POST", "/api/studio/knowledge/claims", JSON.stringify({ kind: "fact", content: "fact", evidence_ids: [] })).status, 422);
+    assert.equal(request("POST", "/api/studio/workflows", JSON.stringify({ name: "workflow", steps: [{ id: "s" }] })).status, 201);
+    assert.equal(request("POST", "/api/studio/call", JSON.stringify({})).status, 404);
+  } finally { f.store.close(); }
 });

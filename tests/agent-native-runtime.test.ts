@@ -151,6 +151,7 @@ test("Work Coordinator owns one Host Run and records re-observation after Fabric
   try {
     const prepared = f.service.executionFabricPrepare({ fabric_id: "fabric", workspace_id: f.workspace.id, title: "Inspect", goal: "inspect", host: "codex-cli", prompt: "inspect", sandbox: "read-only" }); const fabric = prepared.execution_fabric as JsonObject; const coordinator = prepared.work_coordinator as JsonObject;
     assert.equal(f.service.workCoordinatorPrepare({ fabric_id: fabric.id }).idempotent, true);
+    assert.throws(() => f.service.executionFabricExecute({ fabric_id: fabric.id, prompt: "different" }), /prompt does not match/);
     const execution = f.service.executionFabricExecute({ fabric_id: fabric.id, prompt: "inspect" }); await f.service.hostRuns.wait(String((execution.run as JsonObject).id));
     const state = f.service.workCoordinatorGet({ coordinator_id: coordinator.id }).coordinator as JsonObject; assert.equal(state.lifecycle, "observed");
     assert.throws(() => f.service.workCoordinatorAttachHostRun({ coordinator_id: coordinator.id, host_run_id: "missing" }), /Unknown/);

@@ -10,6 +10,7 @@ import { defineProvider, type ChatRequest, type ChatResult, type ModelProviderSp
 import { craftPaths } from "../src/infrastructure/paths.ts";
 import { CraftService } from "../src/service.ts";
 import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
+import { parseAction } from "../src/internal-host-driver.ts";
 
 const spec = (): ModelProviderSpec => defineProvider({ provider: "demo", label: "Demo", protocol: "openai-compatible",
   base_url: "https://example.test/v1", api_key_env: "DEMO_API_KEY", models: { standard: "demo-std" } });
@@ -319,4 +320,13 @@ test("an unknown operation with a named operation reports it in full", async () 
     assert.equal(result.isError, true);
     assert.match((result.content as JsonObject[])[0].text as string, /Unknown Craft operation: task\.nonexistent/);
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("internal host action parser and optional bindings fail closed", () => {
+  assert.equal(parseAction("plain text"), null);
+  assert.equal(parseAction("{bad"), null);
+  assert.equal(parseAction("[]"), null);
+  assert.equal(parseAction("{\"action\":\"\"}"), null);
+  assert.equal(parseAction("{\"action\":\"read\",\"args\":[]}"), null);
+  assert.deepEqual(parseAction("{\"action\":\" read \"}"), { action: "read", args: {} });
 });

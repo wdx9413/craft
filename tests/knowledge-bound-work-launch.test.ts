@@ -1,4 +1,4 @@
-﻿import assert from "node:assert/strict";
+import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -16,7 +16,7 @@ function contextDigest(context: string): string { return `sha256:${createHash("s
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-knowledge-launch-")); const store = await new CraftStore(craftPaths(join(root, "data"))).open(); const service = new CraftService(store);
   const task = record(service.taskOpen({ title: "Brief", goal: "Prepare an accurate brief" }), "task");
-  const evidence = service.evidenceRecord({ evidence_id: "evidence", source_type: "program", claim: "Program observation." });
+  const evidence = service.evidenceRecord({ evidence_id: "evidence", source_type: "program", claim: "Program observation.", confidence: "bounded" });
   const claim = record(service.knowledgeClaimSave({ claim_id: "claim", kind: "rule", content: "Use the approved project facts.", scope: "project:brief", valid_until: "2027-01-01T00:00:00.000Z", evidence_ids: [evidence.id] }), "claim");
   service.knowledgeClaimReview({ claim_id: claim.id, status: "reviewed", reviewer: "reviewer", reason: "checked" });
   const compiled = service.wikiContextCompile({ bundle_id: "bundle", query: "approved facts", scope: "project:brief", max_items: 2, max_chars: 1_000, now: "2026-09-10T00:00:00.000Z" });

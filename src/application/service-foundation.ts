@@ -1,4 +1,4 @@
-﻿import { Catalog } from "../catalog.ts";
+import { Catalog } from "../catalog.ts";
 import { CraftStore, type JsonObject } from "../infrastructure/store.ts";
 import type { EmbeddingProvider } from "../semantic.ts";
 import { LocalIsolatedAdapter } from "../isolated.ts";
@@ -147,6 +147,16 @@ import { EXPERIENCE_KERNELS } from "../../capability/craft-experience/capability
 import { CRAFT_CAPABILITIES } from "../capability-catalog.ts";
 import { CORE_KERNELS, buildCapabilityRegistry } from "../capability-protocol.ts";
 import { HookPlane } from "../hook-plane.ts";
+import { LegacyKnowledgeMigrationKernel } from "../legacy-knowledge-migration.ts";
+import { MemoryGovernanceKernel } from "../memory-governance.ts";
+import { WorkflowDagKernel } from "../workflow-dag.ts";
+import { TaskStateKernel } from "../task-state.ts";
+import { McpTaskKernel } from "../mcp-tasks.ts";
+import { RuntimeProofKernel } from "../runtime-proof.ts";
+import { ContentMigrationKernel } from "../content-migration.ts";
+import { TraceReviewKernel } from "../trace-review.ts";
+import { MemoryMaintenanceKernel } from "../memory-maintenance.ts";
+import { RuntimeModelProbeKernel } from "../runtime-model-probe.ts";
 
 /**
  * Stable composition root for the service. Domain behavior stays in focused
@@ -198,6 +208,7 @@ export abstract class ServiceFoundation {
   readonly guidedWork: GuidedWorkKernel;
   readonly executionSafety: ExecutionSafetyKernel;
   readonly localCandidateImport: LocalCandidateImportKernel;
+  readonly legacyKnowledgeMigration: LegacyKnowledgeMigrationKernel;
   readonly a2aDiscovery: A2ADiscoveryKernel;
   readonly workDelivery: WorkDeliveryKernel;
   readonly deliveryEvaluation: DeliveryEvaluationKernel;
@@ -229,6 +240,9 @@ export abstract class ServiceFoundation {
   /** One read-only view of `state`, assembled from the records that carry it. */
   readonly stateView: StateViewKernel;
   readonly knowledgeRelations: KnowledgeRelationKernel;
+  readonly memoryGovernance: MemoryGovernanceKernel;
+  readonly workflowDag: WorkflowDagKernel;
+  readonly taskState: TaskStateKernel;
   readonly workRuntimeModes: WorkRuntimeModeKernel;
   readonly turnCognitive: TurnCognitiveRuntime;
   readonly continualHarness: ContinualHarnessKernel;
@@ -263,6 +277,12 @@ export abstract class ServiceFoundation {
   readonly autonomousRuntime: AutonomousRuntimeKernel;
   readonly capabilityLifecycle: CapabilityLifecycleKernel;
   readonly memoryConsolidation: MemoryConsolidationKernel;
+  readonly contentMigration: ContentMigrationKernel;
+  readonly traceReviews: TraceReviewKernel;
+  readonly memoryMaintenance: MemoryMaintenanceKernel;
+  readonly runtimeModelProbe: RuntimeModelProbeKernel;
+  readonly mcpTasks: McpTaskKernel;
+  readonly runtimeProof: RuntimeProofKernel;
   readonly remoteInterop: RemoteInteropKernel;
   readonly platformOperations: PlatformOperationsKernel;
   readonly modelProviders: readonly ModelProviderSpec[];
@@ -373,6 +393,7 @@ export abstract class ServiceFoundation {
     this.guidedWork = new GuidedWorkKernel(store);
     this.executionSafety = new ExecutionSafetyKernel(store, this.sandbox);
     this.localCandidateImport = capabilities.registry.require<LocalCandidateImportKernel>(KNOWLEDGE_KERNELS.localImport);
+    this.legacyKnowledgeMigration = new LegacyKnowledgeMigrationKernel(store);
     this.a2aDiscovery = new A2ADiscoveryKernel(store);
     this.workDelivery = new WorkDeliveryKernel(store);
     this.deliveryEvaluation = new DeliveryEvaluationKernel(store);
@@ -399,6 +420,9 @@ export abstract class ServiceFoundation {
     this.contextProjection = new ContextProjectionKernel(store);
     this.stateView = new StateViewKernel(store);
     this.knowledgeRelations = capabilities.registry.require<KnowledgeRelationKernel>(KNOWLEDGE_KERNELS.relations);
+    this.memoryGovernance = new MemoryGovernanceKernel(store, this.memoryLedger);
+    this.workflowDag = new WorkflowDagKernel(store);
+    this.taskState = new TaskStateKernel(store);
     this.workRuntimeModes = new WorkRuntimeModeKernel(store, this.hostDrivers.keys());
     this.turnCognitive = new TurnCognitiveRuntime(store, this.memoryLedger);
     this.continualHarness = new ContinualHarnessKernel(store);
@@ -432,6 +456,12 @@ export abstract class ServiceFoundation {
     this.autonomousRuntime = new AutonomousRuntimeKernel(store);
     this.capabilityLifecycle = new CapabilityLifecycleKernel(store);
     this.memoryConsolidation = new MemoryConsolidationKernel(store);
+    this.traceReviews = new TraceReviewKernel(store);
+    this.memoryMaintenance = new MemoryMaintenanceKernel(store);
+    this.runtimeModelProbe = new RuntimeModelProbeKernel(store, this.modelProviders, modelTransport ?? null);
+    this.mcpTasks = new McpTaskKernel(store);
+    this.runtimeProof = new RuntimeProofKernel(store);
+    this.contentMigration = new ContentMigrationKernel(store);
     this.remoteInterop = new RemoteInteropKernel(store);
     this.platformOperations = new PlatformOperationsKernel(store);
     this.metrics = new MetricsKernel(store);

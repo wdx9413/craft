@@ -1,4 +1,4 @@
-﻿import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { isAbsolute, join, resolve, win32 } from "node:path";
@@ -84,6 +84,12 @@ function optionalBoolean(value: unknown, name: string): boolean | undefined {
   if (typeof value !== "boolean") throw new Error(`${name} must be a boolean`);
   return value;
 }
+function optionalText(value: unknown, name: string): string | undefined {
+  return value === undefined ? undefined : text(value, name);
+}
+function firstDefined<T>(...values: (T | undefined)[]): T | undefined {
+  return values.find((value) => value !== undefined);
+}
 function optionalScore(value: unknown, name: string): number | null {
   if (value === undefined || value === null) return null;
   const score = Number(value);
@@ -97,6 +103,7 @@ function array(value: unknown, name: string): unknown[] {
 
 function recordPayload(record: JsonObject): JsonObject {
   const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...payload } = record;
+  if (payload.content_ref !== undefined) delete payload.content;
   return payload;
 }
 function uniqueTextArray(value: unknown, name: string, minimum = 1): string[] {
@@ -231,6 +238,43 @@ export class CraftService extends ServiceFoundation {
     modelTransport?: import("../model-gateway.ts").ModelTransport, traceArchiveBackends?: readonly TraceArchiveRuntimeBackend[]) {
     super(store, semanticProvider, isolatedAdapter as never, dockerSandbox as never, egressBroker as never, hostOwnerId,
       hostProfiles, modelProviders, modelTransport, traceArchiveBackends);
+  }
+
+  /** Studio facade: all writes go through governed Claim/Ledger/DAG kernels. */
+  studioResourceView(args: JsonObject = {}): JsonObject {
+    if (args.kind !== undefined) return this.studioResourceCatalogView(args);
+    const limit = Number(args.limit ?? 50);
+    return { version: VERSION, resources: {
+      claims: this.store.list("knowledge_claim", limit), wiki: this.store.list("wiki_page", limit),
+      memory_candidates: this.store.list("memory_candidate", limit), memories: this.store.list("memory_ledger", limit),
+      workflows: this.store.list("workflow_dag", limit), task_states: this.store.list("task_state_projection", limit),
+    } };
+  }
+  studioMemorySave(args: JsonObject): JsonObject {
+    const sourceId = String(args.source_id ?? "studio-local-source");
+    if (!this.store.find("knowledge_source", sourceId)) this.knowledgeSourceRegister({ source_id: sourceId, kind: "custom", label: "Studio local memory", scope_kind: "user", scope_id: "local", locator: "studio://memory", content_digest: valueDigest(sourceId), trust: "bounded", access: "proposal_only" });
+    const kind = ["working", "episodic", "preference", "procedural"].includes(String(args.kind)) ? args.kind : "episodic";
+    return this.memoryCandidatePropose({ ...args, kind, source_id: sourceId, scope_kind: args.scope_kind ?? args.scope ?? "user", scope_id: args.scope_id ?? "local" });
+  }
+  studioMemoryReview(args: JsonObject): JsonObject { return this.memoryCandidateReview(args); }
+  studioKnowledgeClaimSave(args: JsonObject): JsonObject {
+    const evidence = args.evidence_ids === undefined ? this.evidenceRecord({ source_type: "human", confidence: "bounded", claim: "Studio-authored candidate.", locator: "studio://knowledge" }) : null;
+    return this.knowledgeClaimSave({ ...args, evidence_ids: args.evidence_ids ?? [evidence?.id], scope: args.scope ?? "global" });
+  }
+  studioWorkflowSave(args: JsonObject): JsonObject {
+    const steps = Array.isArray(args.steps) ? args.steps as JsonObject[] : [];
+    const nodes = Array.isArray(args.nodes) ? args.nodes : steps.map((step, index) => ({ id: String(step.id ?? `step-${index + 1}`), type: String(step.type ?? "action"), side_effect: String(step.side_effect ?? "read_only"), ...(step.action === undefined ? {} : { action: step.action }), depends_on: Array.isArray(step.depends_on) ? step.depends_on : [] }));
+    return this.workflowDagSave({ ...args, nodes: nodes.length ? nodes : [{ id: "studio-placeholder", type: "action", side_effect: "read_only", action: "noop", depends_on: [] }] });
+  }
+  knowledgeExpirySweep(args: JsonObject = {}): JsonObject {
+    const now = new Date(args.now === undefined ? Date.now() : text(args.now, "now")); if (Number.isNaN(now.valueOf())) throw new Error("now must be an ISO timestamp"); const expired: JsonObject[] = [];
+    for (const claim of this.store.list("knowledge_claim", 10_000, (x) => x.status === "reviewed" && Boolean(x.valid_until) && Date.parse(String(x.valid_until)) < now.valueOf())) expired.push(this.store.save("knowledge_claim", String(claim.id), { ...recordPayload(claim), status: "expired", expiry_reason_digest: valueDigest("valid_until elapsed") }));
+    return { expired, count: expired.length, now: now.toISOString() };
+  }
+  knowledgeConflictResolve(args: JsonObject): JsonObject {
+    const claim = this.store.get("knowledge_claim", text(args.claim_id, "claim_id")); const decision = text(args.decision, "decision"); if (!new Set(["reviewed", "disputed", "superseded"]).has(decision)) throw new Error("knowledge conflict decision is unsupported");
+    if (decision === "reviewed") { const ids = Array.isArray(claim.evidence_ids) ? claim.evidence_ids as unknown[] : []; if (!ids.some((e) => ["bounded", "confirmed"].includes(String(this.store.get("evidence", String(e)).confidence)))) throw new Error("Conflict resolution requires bounded or confirmed Evidence"); }
+    return this.knowledgeClaimReview({ claim_id: claim.id, status: decision, reviewer: args.reviewer, reason: args.reason });
   }
 
   /**
@@ -433,9 +477,9 @@ export class CraftService extends ServiceFoundation {
       "evaluation_reliability", "judge_adapter", "judge_calibration", "adaptation_candidate", "feedback_intake", "feedback_case", "canary",
       "capability_kit", "capability_kit_activation", "capability_kit_contribution", "capability_kit_conformance", "knowledge_source", "memory_ledger", "memory_compat_binding", "context_resolution_receipt", "retrieval_adapter", "retrieval_evaluation", "work_runtime_mode", "work_runtime_plan",
       "uncertainty_policy", "uncertainty_resolution", "adjudication", "reference_pilot", "release_qualification", "release_qualification_slot",
-      "workspace", "workspace_checkpoint", "workspace_change", "workspace_transaction", "work_object", "memory_item", "context_profile", "task_graph", "change_set", "os_security_plan", "os_security_receipt", "mcp_registry_source", "mcp_registry_server", "mcp_registry_health", "org_sync_manifest", "trace_otlp_export",
+      "workspace", "workspace_checkpoint", "workspace_change", "workspace_transaction", "work_object", "memory_item", "memory_policy", "memory_usage_signal", "memory_maintenance_run", "memory_maintenance_candidate", "context_profile", "task_graph", "change_set", "os_security_plan", "os_security_receipt", "mcp_registry_source", "mcp_registry_server", "mcp_registry_health", "org_sync_manifest", "trace_otlp_export", "trace_review",
       "budget_account", "budget_reservation", "durable_wait", "external_event", "fallback_contract", "fallback_event",
-      "credential_handle", "credential_lease", "egress_authorization", "egress_execution", "parser_security_evaluation", "parser_process_receipt",
+      "credential_handle", "credential_lease", "egress_authorization", "egress_execution", "parser_security_evaluation", "parser_process_receipt", "mcp_task", "runtime_manifest", "runtime_probe", "runtime_conformance", "runtime_attestation",
       "sandbox_profile", "sandbox_assessment", "sandbox_ticket", "sandbox_receipt", "sandbox_egress_binding",
       "external_effect", "external_effect_receipt", "effect_compensation", "effect_reconciliation", "effect_saga", "recovery_item",
       "trigger_subscription", "trigger_event", "speculative_policy", "speculative_candidate", "preference_signal", "lineage_edge", "dehydration_snapshot",
@@ -1771,6 +1815,10 @@ export class CraftService extends ServiceFoundation {
     return trial;
   }
   private controlTrace(trialId: unknown, eventType: string, data: JsonObject): JsonObject {
+    const trace = this.store.find("trace", `trial:${String(trialId)}`);
+    if (trace && ["completed", "failed", "cancelled", "blocked"].includes(String(trace.status))) {
+      return { trace, skipped: true, reason: "trial_trace_terminal" };
+    }
     return this.trialTraceAppend({ trial_id: trialId, event_type: eventType, source: "craft_control_plane", data });
   }
   budgetReserve(args: JsonObject): JsonObject {
@@ -1882,16 +1930,17 @@ export class CraftService extends ServiceFoundation {
         throw new Error("Fallback actual resources exceed or do not match the active reservation");
       }
     }
-    const outcome = this.outcomeRecord({ trial_id: trial.id, verdict: args.verdict, summary: args.summary,
-      failure_type: args.failure_type, scores: args.scores ?? {}, costs, evidence_ids: evidenceIds, source: args.source ?? "fallback_host_receipt" });
     let settlement: JsonObject | null = null;
     if (event.reservation_id) settlement = this.budgetSettle({ reservation_id: event.reservation_id,
       actual: actualResources, trial_id: trial.id });
+    const outcomeId = `outcome_${trial.id}`;
+    this.controlTrace(trial.id, "fallback_completed", { fallback_event_id: event.id, outcome_id: outcomeId,
+      settlement_id: settlement ? (settlement.reservation as JsonObject).id : null });
+    const outcome = this.outcomeRecord({ trial_id: trial.id, verdict: args.verdict, summary: args.summary,
+      failure_type: args.failure_type, scores: args.scores ?? {}, costs, evidence_ids: evidenceIds, source: args.source ?? "fallback_host_receipt" });
     const saved = this.store.save("fallback_event", String(event.id), { ...recordPayload(event), trial_id: trial.id,
       status: "completed", outcome_id: outcome.id, completed_at: new Date().toISOString(), settlement_id:
         settlement ? (settlement.reservation as JsonObject).id : null });
-    this.controlTrace(trial.id, "fallback_completed", { fallback_event_id: saved.id, outcome_id: outcome.id,
-      settlement_id: saved.settlement_id });
     return { event: saved, trial, outcome, settlement, idempotent: false };
   }
   credentialHandleRegister(args: JsonObject): JsonObject { return this.security.handleRegister(args); }
@@ -2225,15 +2274,16 @@ export class CraftService extends ServiceFoundation {
   homeTask(args: JsonObject): JsonObject { return this.home.task(args); }
   homeHostRuns(args: JsonObject): JsonObject { return this.home.hostRuns(args); }
   homeHostRun(args: JsonObject): JsonObject { return this.home.hostRun(args); }
-  /** Bounded, local-only catalog views for the Studio's separate resource pages. */
-  studioResourceView(args: JsonObject): JsonObject {
+  /** Bounded, local-only compatibility catalog for older Studio resource pages. */
+  studioResourceCatalogView(args: JsonObject): JsonObject {
     const kind = text(args.kind, "kind");
     const limit = finiteInteger(args.limit, "limit", 100, 1, 200);
     const taskId = args.task_id === undefined ? null : text(args.task_id, "task_id");
     if (kind === "memory") {
       const items = this.store.list("memory_item", limit, (item) =>
         (!taskId || item.task_id === taskId) && item.status !== "superseded" && item.status !== "expired");
-      return { items: items.map((item) => ({ id: item.id, kind: item.kind, content: item.content, source: item.source,
+      const candidates = this.store.list("memory_candidate", limit, (item) => !taskId || item.task_id === taskId);
+      return { items: [...items, ...candidates].slice(0, limit).map((item) => ({ id: item.id, kind: item.kind, content: item.content, source: item.source,
         scope: item.scope, task_id: item.task_id, status: item.status, valid_until: item.valid_until, updated_at: item.updated_at })) };
     }
     if (kind === "workflows") {
@@ -2277,21 +2327,21 @@ export class CraftService extends ServiceFoundation {
     const payload = { name, description, content, content_digest: valueDigest(content), source: "user_upload", status: "active", edited_by: "studio-user" };
     return { skill: previous ? this.store.save("studio_skill", skillId, { ...payload, previous_version: previous.version }) : this.store.create("studio_skill", skillId, payload) };
   }
-  studioMemorySave(args: JsonObject): JsonObject {
-    const memoryId = args.memory_id === undefined ? undefined : text(args.memory_id, "memory_id");
+  studioMemoryCompatSave(args: JsonObject): JsonObject {
+    const memoryId = optionalText(args.memory_id, "memory_id");
     const previous = memoryId === undefined ? null : this.store.get("memory_item", memoryId);
-    return this.memoryRemember({ kind: args.kind ?? previous?.kind ?? "fact", scope: args.scope ?? previous?.scope ?? "user",
-      content: args.content, source: "studio_user", task_id: args.task_id ?? previous?.task_id ?? undefined,
-      workspace_id: args.workspace_id ?? previous?.workspace_id ?? undefined, applies_to: args.applies_to ?? previous?.applies_to ?? [],
+    return this.memoryRemember({ kind: firstDefined(args.kind, previous?.kind, "fact"), scope: firstDefined(args.scope, previous?.scope, "user"),
+      content: args.content, source: "studio_user", task_id: firstDefined(args.task_id, previous?.task_id),
+      workspace_id: firstDefined(args.workspace_id, previous?.workspace_id), applies_to: firstDefined(args.applies_to, previous?.applies_to, []),
       evidence_ids: [], ...(previous ? { supersedes_id: previous.id } : {}) });
   }
   studioMemoryRetire(args: JsonObject): JsonObject { return this.memoryTransition({ memory_id: text(args.memory_id, "memory_id"), status: "expired", reason: "retired by studio user" }); }
-  studioKnowledgeClaimSave(args: JsonObject): JsonObject {
+  studioKnowledgeCompatSave(args: JsonObject): JsonObject {
     const content = assertNoSecret(document(args.content, "content"), "content");
     const evidence = this.evidenceRecord({ source_type: "human", confidence: "bounded", claim: "User-authored knowledge record.", locator: "studio:knowledge" });
     return this.knowledgeClaimSave({ kind: args.kind ?? "fact", content, scope: args.scope ?? "global", tags: args.tags ?? [], evidence_ids: [evidence.id] });
   }
-  studioWorkflowSave(args: JsonObject): JsonObject { return this.workflowSave({ workflow_id: args.workflow_id, name: text(args.name, "name"), description: args.description ?? "", inputs: args.inputs ?? [], steps: args.steps ?? [] }); }
+  studioWorkflowCompatSave(args: JsonObject): JsonObject { return this.workflowSave({ workflow_id: args.workflow_id, name: text(args.name, "name"), description: args.description ?? "", inputs: args.inputs ?? [], steps: args.steps ?? [] }); }
   codexDispatchPrepare(args: JsonObject): JsonObject { return this.codexHost.prepare(args); }
   async codexDispatchExecute(args: JsonObject): Promise<JsonObject> {
     const dispatch = this.store.get("codex_dispatch", text(args.dispatch_id, "dispatch_id"));
@@ -2560,9 +2610,12 @@ export class CraftService extends ServiceFoundation {
     const evidenceIds = uniqueTextArray(args.evidence_ids, "evidence_ids"); evidenceIds.forEach((item) => this.store.get("evidence", item));
     const tags = optionalTextArray(args.tags, "tags"); const validUntil = args.valid_until === undefined ? null : new Date(validIsoTime(args.valid_until, "valid_until")).toISOString();
     const claimId = String(args.claim_id ?? id("knowledge_claim")); const existing = this.store.find("knowledge_claim", claimId);
-    const identity = { kind, content, scope, evidence_ids: evidenceIds, tags, valid_until: validUntil };
+    const contentDigest = valueDigest(content);
+    const title = args.title === undefined ? undefined : assertNoSecret(text(args.title, "title"), "title");
+    const identity = { kind, content_digest: contentDigest, scope, evidence_ids: evidenceIds, tags, valid_until: validUntil, ...(title ? { title } : {}) };
     if (existing) { if (existing.identity_digest !== valueDigest(identity)) throw new Error("Knowledge claim idempotency conflict"); return { claim: existing, idempotent: true }; }
-    const claim = this.store.create("knowledge_claim", claimId, { ...identity, identity_digest: valueDigest(identity), status: "candidate", review: null });
+    const contentRef = this.store.contentStore.writeSync({ kind: "knowledge", record_id: claimId, version: 1, scope, status: "candidate", sensitivity: "internal", source_id: String(args.source_id ?? "builtin.evidence-wiki"), title, body: content });
+    const claim = this.store.create("knowledge_claim", claimId, { ...identity, content_ref: contentRef, identity_digest: valueDigest(identity), status: "candidate", review: null });
     return { claim, idempotent: false };
   }
   knowledgeClaimGet(args: JsonObject): JsonObject { return { claim: this.store.get("knowledge_claim", text(args.claim_id, "claim_id"), args.version === undefined ? undefined : finiteInteger(args.version, "version", 1)) }; }
@@ -2571,6 +2624,11 @@ export class CraftService extends ServiceFoundation {
     const claim = this.store.get("knowledge_claim", text(args.claim_id, "claim_id")); const status = text(args.status, "status");
     if (!KNOWLEDGE_STATUSES.has(status) || status === "candidate") throw new Error("Knowledge claim review status is unsupported");
     const reviewer = text(args.reviewer, "reviewer"); const reason = assertNoSecret(document(args.reason, "reason"), "reason");
+    if (status === "reviewed") {
+      const evidenceIds = Array.isArray(claim.evidence_ids) ? claim.evidence_ids as unknown[] : [];
+      const supported = evidenceIds.some((e) => ["bounded", "confirmed"].includes(String(this.store.get("evidence", String(e)).confidence)));
+      if (!supported) throw new Error("Reviewed knowledge claim requires bounded or confirmed Evidence");
+    }
     const saved = this.store.save("knowledge_claim", String(claim.id), { ...recordPayload(claim), status, review: { reviewer, reason_digest: valueDigest(reason), reviewed_at: new Date().toISOString() } });
     return { claim: saved };
   }
@@ -2578,23 +2636,33 @@ export class CraftService extends ServiceFoundation {
     const title = assertNoSecret(text(args.title, "title"), "title"); const body = assertNoSecret(document(args.body, "body"), "body"); const scope = String(args.scope ?? "global");
     const claimIds = optionalTextArray(args.claim_ids, "claim_ids"); claimIds.forEach((item) => this.store.get("knowledge_claim", item));
     const pageId = String(args.page_id ?? id("wiki_page")); const existing = this.store.find("wiki_page", pageId);
-    const identity = { title, body, scope, claim_ids: claimIds };
+    const identity = { title, body_digest: valueDigest(body), scope, claim_ids: claimIds };
     if (existing && existing.identity_digest === valueDigest(identity)) return { page: existing, idempotent: true };
-    const filePath = join(this.store.paths.root, "wiki", `${pageId}.v${existing ? Number(existing.version) + 1 : 1}.md`);
+    const nextVersion = existing ? Number(existing.version) + 1 : 1;
     if (existing) {
-      const current = await readFile(String(existing.file_path), "utf8");
+      let current: string;
+      try { current = existing.content_ref ? this.store.contentStore.readCompatSync(existing.content_ref as never).body : await readFile(String(existing.file_path), "utf8"); }
+      catch { throw new Error("Wiki page file has unrecorded changes; refresh it before saving"); }
       if (valueDigest(current) !== existing.body_digest) throw new Error("Wiki page file has unrecorded changes; refresh it before saving");
     }
-    await mkdir(join(this.store.paths.root, "wiki"), { recursive: true }); await writeFile(filePath, body, "utf8");
-    const page = this.store.save("wiki_page", pageId, { title, scope, claim_ids: claimIds, identity_digest: valueDigest(identity), body_digest: valueDigest(body), file_path: filePath, revision_source: String(args.author ?? "human") });
+    const contentRef = await this.store.contentStore.write({ kind: "knowledge", record_id: pageId, version: nextVersion, scope, status: "active", sensitivity: "internal", source_id: "builtin.evidence-wiki", body });
+    const page = this.store.save("wiki_page", pageId, { title, scope, claim_ids: claimIds, identity_digest: valueDigest(identity), body_digest: valueDigest(body), content_ref: contentRef, file_path: contentRef.path, revision_source: String(args.author ?? "human") });
     return { page, idempotent: false };
   }
-  wikiPageGet(args: JsonObject): JsonObject { const page = this.store.get("wiki_page", text(args.page_id, "page_id"), args.version === undefined ? undefined : finiteInteger(args.version, "version", 1)); return { page, body: readFileSync(String(page.file_path), "utf8") }; }
+  wikiPageGet(args: JsonObject): JsonObject {
+    const page = this.store.get("wiki_page", text(args.page_id, "page_id"), args.version === undefined ? undefined : finiteInteger(args.version, "version", 1));
+    const body = page.content_ref ? (() => { try { return this.store.contentStore.readUncheckedSync(String((page.content_ref as JsonObject).path)).body; } catch { return readFileSync(String(page.file_path), "utf8"); } })() : readFileSync(String(page.file_path), "utf8");
+    return { page, body };
+  }
   wikiPageList(args: JsonObject): JsonObject { return this.list("wiki_page", "pages", args); }
   wikiPageRefresh(args: JsonObject): JsonObject {
-    const page = this.store.get("wiki_page", text(args.page_id, "page_id")); const body = assertNoSecret(document(readFileSync(String(page.file_path), "utf8"), "body"), "body");
+    const page = this.store.get("wiki_page", text(args.page_id, "page_id"));
+    const rawPath = String(page.file_path ?? (page.content_ref as JsonObject).path);
+    const body = assertNoSecret(document(page.content_ref ? (() => { try { return this.store.contentStore.readUncheckedSync(rawPath).body; } catch { return readFileSync(rawPath, "utf8"); } })() : readFileSync(rawPath, "utf8"), "body"), "body");
     if (valueDigest(body) === page.body_digest) return { page, changed: false };
-    const saved = this.store.save("wiki_page", String(page.id), { ...recordPayload(page), body_digest: valueDigest(body), identity_digest: null, revision_source: "filesystem" });
+    const nextVersion = Number(page.version) + 1;
+    const contentRef = this.store.contentStore.writeSync({ kind: "knowledge", record_id: String(page.id), version: nextVersion, scope: String(page.scope ?? "global"), status: "active", sensitivity: "internal", source_id: "builtin.evidence-wiki", body });
+    const saved = this.store.save("wiki_page", String(page.id), { ...recordPayload(page), body_digest: valueDigest(body), content_ref: contentRef, file_path: contentRef.path, identity_digest: null, revision_source: "filesystem" });
     return { page: saved, changed: true };
   }
   knowledgeWorkbenchView(args: JsonObject = {}): JsonObject { return this.knowledgeWorkbench.view(args); }
@@ -2719,6 +2787,8 @@ export class CraftService extends ServiceFoundation {
   harnessTopologyGet(args: JsonObject): JsonObject { return this.harnessTopologies.get(args); }
   runtimeReadinessAssess(args: JsonObject): JsonObject { return this.runtimeReadiness.assess(args); }
   runtimeReadinessGet(args: JsonObject): JsonObject { return this.runtimeReadiness.get(args); }
+  runtimeReadinessProviderStatus(): JsonObject { return this.runtimeModelProbe.status(); }
+  async runtimeReadinessModelProbe(args: JsonObject): Promise<JsonObject> { return this.runtimeModelProbe.probe(args); }
   assuredPilotSealCase(args: JsonObject): JsonObject { return this.assuredPilot.sealCase(args); }
   assuredPilotIssueSealedAccess(args: JsonObject): JsonObject { return this.assuredPilot.issueSealedAccess(args); }
   assuredPilotConsumeSealedAccess(args: JsonObject): JsonObject { return this.assuredPilot.consumeSealedAccess(args); }
@@ -3166,7 +3236,7 @@ export class CraftService extends ServiceFoundation {
   modelAdd(args: JsonObject): JsonObject {
     const settings = loadSettingsSync(this.store.paths);
     const id = text(args.id, "id").trim().toLowerCase().replace(/[^a-z0-9-]/g, "-");
-    if (!id) throw new Error("model id is required");
+    if (/^-+$/.test(id)) throw new Error("model id is required");
     if (settings.models.some((m) => m.id === id)) throw new Error(`model already exists: ${id}`);
     const model = validateModelInput(args, id);
     const next = saveSettingsSync({ models: [...settings.models, model] }, this.store.paths);
@@ -3546,6 +3616,9 @@ export class CraftService extends ServiceFoundation {
       ...(args.knowledge_binding === undefined ? {} : { knowledge_binding: object(args.knowledge_binding, "knowledge_binding") }),
     });
     this.trace.appendTrial({ trial_id: trialId, event_type: "outcome.recorded", source: "program_verified", trust: "verified", summary: outcome.summary, data: { verdict, failure_type: failureType }, evidence_ids: evidenceIds });
+    const traceStatus = verdict === "passed" ? "completed" : verdict as "failed" | "blocked" | "cancelled";
+    this.trace.finalize({ trace_id: `trial:${trialId}`, status: traceStatus, verdict,
+      summary: `Trial outcome ${verdict}.`, evidence_ids: evidenceIds });
     return outcome;
   }
 
@@ -4037,7 +4110,13 @@ export class CraftService extends ServiceFoundation {
   }
 
   workflowSave(args: JsonObject): JsonObject {
-    return this.saveVersioned("workflow", "workflow", { ...args, lifecycle: "draft" }, ["name"]);
+    if (args.steps !== undefined) {
+      if (!Array.isArray(args.steps)) throw new Error("steps must be an array");
+      const normalized = normalizeSteps(args.steps);
+      const identityDigest = valueDigest({ name: args.name, description: args.description ?? "", inputs: args.inputs ?? {}, steps: normalized });
+      return this.saveVersioned("workflow", "workflow", { ...args, steps: normalized, workflow_digest: identityDigest, lifecycle: "draft" }, ["name"]);
+    }
+    return this.saveVersioned("workflow", "workflow", { ...args, workflow_digest: valueDigest({ name: args.name, description: args.description ?? "", inputs: args.inputs ?? {}, steps: [] }), lifecycle: "draft" }, ["name"]);
   }
 
   workflowTransition(args: JsonObject): JsonObject {
@@ -4389,6 +4468,10 @@ export class CraftService extends ServiceFoundation {
       evidence_ids: [...new Set(traceEvidence)], source: "orchestration_aggregated" });
     return { plan, ...this.trialGet({ trial_id: trialId }) };
   }
+
+  contentStatus(): JsonObject { return this.contentMigration.status(); }
+  contentVerify(args: JsonObject = {}): JsonObject { return this.contentMigration.verify(args); }
+  contentMigrate(args: JsonObject = {}): JsonObject { return this.contentMigration.migrate(args) as unknown as JsonObject; }
 
   autonomousRuntimePrepare(args: JsonObject): JsonObject { return this.autonomousRuntime.prepare(args); }
   autonomousRuntimeCheckpoint(args: JsonObject): JsonObject { return this.autonomousRuntime.checkpoint(args); }

@@ -89,6 +89,9 @@ test("v0.12.18 A2A standard operations are HTTPS-only and content-free", async (
   await assert.rejects(() => kernel.sendMessage({ endpoint: "http://agent.test", message_digest: "sha256:m" }, fetchImpl), /HTTPS/);
   const badFetch = (async () => ({ ok: false, status: 503, json: async () => ({}) })) as unknown as typeof fetch;
   await assert.rejects(() => kernel.listTasks({ endpoint: "https://agent.test" }, badFetch), /HTTP 503/);
+  const defaults = async () => ({ ok: true, status: 200, json: async () => ({}) }) as Response;
+  const defaulted = await kernel.sendMessage({ endpoint: "https://agent.test", message_digest: "sha256:m" }, defaults as unknown as typeof fetch);
+  assert.equal(defaulted.task_id, null); assert.equal(defaulted.status, "accepted");
 });
 
 test("v0.12.18 service and MCP expose the new runtime surface", async () => {
@@ -111,5 +114,29 @@ test("v0.12.18 service and MCP expose the new runtime surface", async () => {
     for (const name of ["craft_a2a_message_send", "craft_a2a_message_stream", "craft_a2a_task_list"]) {
       const result = await mcp.handle({ id: name, method: "tools/call", params: { name, arguments: { endpoint: "http://invalid", message_digest: "sha256:m" } } }); assert.equal((result?.result as JsonObject).isError, true);
     }
+  } finally { f.store.close(); }
+});
+
+test("v0.12.13 validates nullish and empty protocol inputs explicitly", async () => {
+  const f = await fixture();
+  try {
+    const action = new ActionGatewayKernel(f.store);
+    assert.throws(() => action.prepare({ task_id: null, workspace: f.root, operation: "workspace_read", input_digest: "sha256:x" }), /task_id/);
+    assert.throws(() => action.prepare({ task_id: "", workspace: f.root, operation: "workspace_read", input_digest: "sha256:x" }), /task_id/);
+    assert.throws(() => action.prepare({ task_id: "task", workspace: [], operation: "workspace_read", input_digest: "sha256:x" }), /workspace/);
+    assert.throws(() => action.prepare({ task_id: "task", workspace: f.root, operation: "workspace_read", input_digest: [] }), /input_digest/);
+    const prepared = action.prepare({ action_id: "branch-action", task_id: "task", workspace: f.root, operation: "workspace_read", input_digest: "sha256:branch", acceptance_ref: "accept" });
+    await assert.rejects(() => action.execute({ action_id: String((prepared.action as JsonObject).id), relative_path: "missing" }), /ENOENT/);
+    const gate = new AcceptanceGateKernel(f.store);
+    assert.throws(() => gate.prepare({ task_id: "task", work_id: "w", acceptance_ref: "a", required_artifact_ids: "bad" }), /array/);
+    assert.throws(() => gate.assess({ gate_id: "missing", verdict: "passed", artifact_ids: [], evidence_ids: [] }), /Unknown/);
+    const worker = new DurableWorkerKernel(f.store);
+    assert.throws(() => worker.enqueue({ worker_id: "w", task_id: "task", action: "" }), /action/);
+    assert.equal((worker.start({ worker_id: "auto-worker" }).worker as JsonObject).status, "running");
+    const router = new ProviderRouterKernel(f.store);
+    assert.throws(() => router.plan({ providers: ["a", "a"] }), /unique/);
+    assert.throws(() => router.plan({ providers: [null] }), /providers/);
+    const explicitRoute = router.plan({ route_id: "explicit-route", providers: ["a"], preferred: "a" });
+    assert.equal((router.record({ route_id: String((explicitRoute.route as JsonObject).id), provider: "a", status: "manual" }).route as JsonObject).status, "manual");
   } finally { f.store.close(); }
 });

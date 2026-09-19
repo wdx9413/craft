@@ -76,5 +76,10 @@ test("ambiguous coverage and invalid declarations fail closed", async () => {
     assert.throws(() => f.service.intentCompile({ intent_id: "bad-budget", goal: "coverage", metric: "lines", budget: [] }), /budget must be an object/);
     assert.equal((f.service.intentCompile({ intent_id: "specified", goal: "coverage", metric: "lines", scope: "specified" }).intent as JsonObject).status, "needs_clarification");
     assert.equal((f.service.intentCompile({ intent_id: "functions", goal: "function coverage", metric: "functions" }).intent as JsonObject).unit, "function");
+    assert.equal((f.service.intentCompile({ intent_id: "methods-goal", goal: "补齐方法覆盖率", metric: "methods", materials: ["a", "b"], non_goals: ["x"], allowed_effects: "read_only", baseline: "main" }).intent as JsonObject).metric, "methods");
+    assert.equal((f.service.intentCompile({ intent_id: "lines-goal", goal: "补齐行覆盖率", metric: "lines" }).intent as JsonObject).metric, "lines");
+    assert.equal((f.service.intentCompile({ intent_id: "branches-goal", goal: "补齐分支覆盖率", metric: "branches" }).intent as JsonObject).metric, "branches");
+    assert.equal((f.service.intentCompile({ intent_id: "test-goal", goal: "增加测试验证", metric: "lines" }).intent as JsonObject).task_type, "test_verification");
+    const generated = f.service.intentCompile({ goal: "普通整理" }).intent as JsonObject; assert.match(String(generated.id), /^intent_/);
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });

@@ -1,5 +1,7 @@
 # Trace & Evolution Kernel
 
+> v0.12.32 新增 Trace Review：它读取不可变 Trace 与事件，输出首错、根因、版本指纹和保守 verdict。Review 是诊断证据，不是发布 Gate；只有真实 Outcome、评测和 Signoff 才能改变路由。
+
 > 状态：v0.12.33 已实现统一的 Trace 事件账本、反馈信号、Digest-only Replay Bundle、Trace→Case 编译，以及可替换的冷热归档。它是跨入口的事实层，不是自动发布或模型训练器。
 
 ## 事件信封
@@ -32,7 +34,9 @@ start → append / observe / feedback → finalize
 
 ## 与旧接口的关系
 
-旧 Trial stream 保留，兼容入口 `craft_trial_trace_append` 不变；Craft 会把它投影到 `trace:trial:<id>`。Outcome 也会追加 `outcome.recorded`，所以既有评测链无需迁移即可获得统一 Trace。
+旧 Trial stream 保留，兼容入口 `craft_trial_trace_append` 不变；Craft 会把它投影到 `trace:trial:<id>`。Outcome 也会追加 `outcome.recorded`，并按 `passed/failed/blocked/cancelled` 自动收口对应 Trial Trace，所以既有评测链无需迁移即可获得统一 Trace。
+
+MCP 宿主调用也有统一的关联层。除只读 introspection 和显式 `craft_trace_*` 管理接口外，每次 `tools/call` 会创建脱敏的 `component.call.started`、`component.call.completed` 或 `component.call.failed` 事件，并在响应中返回 `trace_correlation`。调用方可以传入 `trace_id`/`correlation_trace_id` 和 `task_id` 加入父 Trace；未传入时 Craft 为这次调用建立独立的终态 Trace。输入和输出只保存 Digest，不保存参数正文。
 
 ## 进化安全
 

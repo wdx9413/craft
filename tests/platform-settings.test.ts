@@ -23,11 +23,18 @@ test("settings persist, validate, and support a relocatable data root", async ()
   assert.equal((await saveSettings({ theme: "light" }, paths)).theme, "light");
   assert.equal(publicSettings(updated, paths).restartRequiredForDataRoot, true);
   assert.equal(loadSettingsSync(paths).locale, "en-US");
+  // The factory and the loader describe the same first launch, so both default to `system`.
   assert.equal(resetSettingsSync(paths, new Date("2026-09-14T00:00:00Z")).theme, "system");
   assert.equal((await resetSettings(paths, new Date("2026-09-15T00:00:00Z"))).runtime.defaultTier, "medium");
   assert.equal(defaultSettings(paths).dataRoot, root);
   assert.equal(normalizeSettings(undefined, paths).locale, "zh-CN");
   assert.equal(normalizeSettings([], paths).theme, "system");
+  const model = normalizeSettings({ models: [{ id: "local", name: "Local", protocol: "openai-compatible", baseUrl: "https://example.test/v1/", model: "m", apiKeyEnv: "LOCAL_KEY", supportsTools: false }] }, paths).models[0];
+  assert.equal(model.baseUrl, "https://example.test/v1"); assert.equal(model.supportsTools, false);
+  assert.throws(() => normalizeSettings({ models: "bad" }, paths), /models must be an array/);
+  assert.throws(() => normalizeSettings({ models: [{ id: "x", baseUrl: "ftp://example.test" }] }, paths), /http or https/);
+  assert.throws(() => normalizeSettings({ models: [{ id: "x", protocol: "grpc" }] }, paths), /openai-compatible or anthropic/);
+  assert.throws(() => normalizeSettings({ models: [{ id: "x" }, { id: "x" }] }, paths), /Duplicate model id/);
   assert.equal(publicSettings(defaultSettings(paths), paths).restartRequiredForDataRoot, false);
   for (const value of [{ locale: "xx" }, { theme: "blue" }, { runtime: { defaultTier: "x" } }, { workbench: { port: 65536 } }, { runtime: { maxSteps: 0 } }, { runtime: { maxTokens: 1.2 } }, { privacy: { telemetry: "yes" } }, { updatedAt: "bad" }, { dataRoot: 4 }, { locale: 4 }]) assert.throws(() => normalizeSettings(value, paths));
   assert.equal(normalizeSettings({ workbench: [], runtime: [], privacy: [] }, paths).workbench.port, 4173);
@@ -110,4 +117,16 @@ test("settings, usage, MCP, and Workbench surfaces are exposed", async () => {
   } finally {
     store.close();
   }
+});
+
+test("service model management covers add duplicate and delete lifecycle", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-model-service-"));
+  const store = await new CraftStore(craftPaths(root)).open();
+  try {
+    const service = new CraftService(store);
+    const added = service.modelAdd({ id: "Local Model", name: "Local Model", protocol: "openai-compatible", baseUrl: "https://example.test/v1", model: "local", apiKeyEnv: "LOCAL_MODEL_KEY", supportsTools: false });
+    assert.equal((added.model as Record<string, unknown>).id, "local-model");
+    assert.throws(() => service.modelAdd({ id: "Local Model", name: "Again", protocol: "openai-compatible", baseUrl: "https://example.test/v1", model: "local", apiKeyEnv: "LOCAL_MODEL_KEY" }), /already exists/);
+    assert.equal(service.modelDelete({ id: "local-model" }).ok, true);
+  } finally { store.close(); }
 });

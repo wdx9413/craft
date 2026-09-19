@@ -25,6 +25,7 @@ import { randomUUID } from "node:crypto";
 import type { CraftStore, JsonObject } from "../../src/infrastructure/store.ts";
 import { noCredentialAssignment, parseScope, sortedUniqueList, text } from "../../src/validation.ts";
 import { canonicalJson, stableDigest, payload } from "../../src/digest.ts";
+import { contentReference } from "../../src/infrastructure/content-store.ts";
 
 const MEMORY_KINDS = new Set(["working", "episodic", "preference", "procedural"]);
 const MEMORY_STATUS = new Set(["active", "superseded", "revoked", "expired"]);
@@ -52,10 +53,18 @@ export class MemoryLedgerKernel {
     const content = noCredentialAssignment(text(args.content, "content"), "content"); const confidence = text(args.confidence ?? "bounded", "confidence");
     if (!CONFIDENCES.has(confidence)) throw new Error("Memory confidence is unsupported");
     if ((kind === "procedural" || confidence === "confirmed") && !evidenceIds.length) throw new Error("Procedural or confirmed Memory requires Evidence");
-    const validUntil = date(args.valid_until, "valid_until"); const identity = { source_id: source.id, source_version: source.version, kind, scope: memoryScope, content, content_digest: stableDigest(content), sensitivity, confidence, evidence_ids: evidenceIds, valid_until: validUntil };
+    const explicitValidUntil = date(args.valid_until, "valid_until");
+    // A working note and an episode are both about now, so they get a default lifetime; a
+    // preference or a procedure is meant to outlive the turn that wrote it and does not.
+    const validUntil = explicitValidUntil ?? (kind === "working" ? new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+      : kind === "episodic" ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString() : null);
+    const identity = { source_id: source.id, source_version: source.version, kind, scope: memoryScope, content_digest: stableDigest(content), sensitivity, confidence, evidence_ids: evidenceIds, valid_until: validUntil };
     const memoryId = String(args.memory_id ?? `memory_ledger_${randomUUID().replaceAll("-", "")}`); const existing = this.store.find("memory_ledger", memoryId); const identityDigest = stableDigest(identity);
     if (existing) { if (existing.identity_digest !== identityDigest) throw new Error("Memory Ledger idempotency conflict"); return { memory: existing, idempotent: true }; }
-    return { memory: this.store.create("memory_ledger", memoryId, { ...identity, identity_digest: identityDigest, status: "active", supersedes_id: null }), idempotent: false };
+    // The body lives in the content store; the record keeps the reference and the digest, so
+    // the Ledger indexes memory rather than holding it, and a rewritten body is a drift error.
+    const contentRef = this.store.contentStore.writeSync({ kind: "memory", record_id: memoryId, version: 1, scope: `${memoryScope.kind}:${memoryScope.id}`, status: "active", sensitivity, source_id: String(source.id), body: content });
+    return { memory: this.store.create("memory_ledger", memoryId, { ...identity, content_ref: contentRef, identity_digest: identityDigest, status: "active", supersedes_id: null }), idempotent: false };
   }
 
   /**
@@ -93,5 +102,22 @@ export class MemoryLedgerKernel {
     return { binding: this.store.create("memory_compat_binding", bindingId, { ...identity, identity_digest: identityDigest, mode: "reference_only", migration_performed: false }), idempotent: false };
   }
 
-  get(args: JsonObject): JsonObject { return { memory: this.store.get("memory_ledger", text(args.memory_id, "memory_id"), args.version === undefined ? undefined : Number(args.version)) }; }
+  get(args: JsonObject): JsonObject {
+    const memory = this.store.get("memory_ledger", text(args.memory_id, "memory_id"), args.version === undefined ? undefined : Number(args.version));
+    return { memory: { ...memory, content: this.content(memory) } };
+  }
+
+  /**
+   * One entry's body, from wherever it lives.
+   *
+   * A record written before the content store existed still carries `content` inline and is
+   * returned as it is; otherwise the body is read back through the reference, so a moved or
+   * edited file is a failure rather than a silently different memory.
+   */
+  private content(memory: JsonObject): string {
+    if (typeof memory.content === "string") return memory.content;
+    const ref = memory.content_ref;
+    if (!contentReference(ref)) throw new Error("Memory content reference is missing");
+    return this.store.contentStore.readCompatSync(ref).body;
+  }
 }

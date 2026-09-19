@@ -39,10 +39,9 @@ const result = spawnSync(process.execPath, [
   "--test-coverage-exclude=src/cli.ts",
   "--test-coverage-lines=100",
   "--test-coverage-functions=100",
-  // Branch coverage remains visible in Node's report, but the release gate is
-  // intentionally method-level: a new method must be exercised completely.
-  // This avoids blocking a release on legacy defensive combinations while
-  // keeping line/function coverage deterministic at 100%.
+  "--test-coverage-branches=100",
+  // Branches are part of the release gate: defensive, compatibility, and
+  // failure paths must be exercised by real tests instead of being hidden.
   ...tests,
 ], { cwd: root, stdio: ["inherit", "pipe", "pipe"], maxBuffer: 16 * 1024 * 1024 });
 
@@ -60,13 +59,11 @@ if ((result.status ?? 1) !== 0 && process.env.GITHUB_ACTIONS === "true") {
     /(?:^|\s)(?:not ok|✖|AssertionError|TypeError|ReferenceError|Error:|ERR_[A-Z_]+|symbolic|mkfifo)/i.test(line),
   );
   // Coverage failures can be platform-specific even when all tests pass.
-  // Keep only rows that contain a sub-100 percentage to identify the source
-  // file without flooding the annotation with the complete coverage table.
+  // Keep rows with a sub-100 branch or function percentage so the source
+  // file is identifiable without flooding the annotation.
   const uncoveredRows = lines.filter((line) => {
     const match = line.match(/^\s*ℹ\s+([^|]+)\|\s*([\d.]+)\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)\s*\|/);
-    // The third percentage column is the function/method gate. Branch gaps
-    // are intentionally informational and must not be reported as failures.
-    return match !== null && Number(match[4]) < 100;
+    return match !== null && (Number(match[3]) < 100 || Number(match[4]) < 100);
   });
   const detail = [...new Set([...failureLines, ...uncoveredRows])].join("\n").slice(0, 6_000)
     .replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A");

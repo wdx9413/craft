@@ -1,4 +1,4 @@
-﻿import type { CraftStore, JsonObject } from "./infrastructure/store.ts";
+import type { CraftStore, JsonObject } from "./infrastructure/store.ts";
 import { text } from "./validation.ts";
 
 /**

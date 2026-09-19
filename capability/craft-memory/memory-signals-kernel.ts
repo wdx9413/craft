@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Recall-history signals: what the Ledger's contents say about the Ledger.
  *
  * These are the **derived** half of the Memory member. The Ledger stores entries; these functions

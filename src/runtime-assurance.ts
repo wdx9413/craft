@@ -6,7 +6,7 @@ import { text } from "./validation.ts";
 import { digestJson } from "./digest.ts";
 
 const TERMINAL_HOST = new Set(["completed", "failed", "cancelled", "interrupted"]);
-const INTERVENTIONS = new Set(["approval", "pause", "resume", "timeout", "cancel", "retry", "revoke", "handoff"]);
+const INTERVENTIONS = new Set(["notify", "question", "steer", "approval", "pause", "resume", "timeout", "cancel", "abort", "retry", "revoke", "handoff"]);
 
 
 

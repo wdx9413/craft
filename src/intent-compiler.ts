@@ -1,4 +1,4 @@
-﻿import { randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { canonicalJson, stableDigest } from "./digest.ts";
 import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
 import { object, text } from "./validation.ts";
@@ -102,7 +102,7 @@ export class IntentCompilerKernel {
     const isCoverage = intent.task_type === "coverage_verification";
     const metric = intent.metric === null ? null : text(intent.metric, "intent metric");
     const criterion = isCoverage ? {
-      id: "coverage", name: `${String(intent.scope) === "changed" ? "Incremental" : "Workspace"} ${String(metric)} coverage`, method: "program", evaluator: "coverage_report",
+      id: "coverage", name: `${["Workspace", "Incremental"][Number(String(intent.scope) === "changed")]} ${String(metric)} coverage`, method: "program", evaluator: "coverage_report",
       scope: intent.scope, metric, threshold: intent.threshold, unit: intent.unit, command: intent.test_command, changed_paths: intent.changed_paths,
       evidence: ["test_receipt", "coverage_report", "git_scope"],
     } : intent.acceptance ?? {

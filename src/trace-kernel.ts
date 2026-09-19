@@ -1,4 +1,4 @@
-﻿import { randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import type { JsonObject } from "./infrastructure/store.ts";
 import { CraftStore } from "./infrastructure/store.ts";
 import { TRACE_SCHEMA, TRACE_SCHEMA_REVISION } from "./runtime-truth.ts";

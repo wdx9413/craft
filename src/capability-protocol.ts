@@ -1,4 +1,4 @@
-﻿/**
+/**
  * The internal extension protocol.
  *
  * Craft reaches the outside world over MCP, and that is the right protocol for a Host:
@@ -84,7 +84,7 @@ export function pluggableMembers(): ContextMember[] {
 /** Where a capability's contribution is read from, mirroring craft's existing scopes. */
 export interface ContextRequest {
   readonly query: string;
-  readonly scope_kind: "user" | "project" | "task" | "workspace";
+  readonly scope_kind: "user" | "project" | "task" | "workspace" | "session";
   readonly scope_id: string;
   readonly max_items: number;
   readonly max_chars: number;
@@ -132,7 +132,7 @@ export interface TaskOutcome {
   readonly outcome: "succeeded" | "failed" | "waiting" | "blocked";
   /** Digests of the observable result, not the result. */
   readonly result_digests: readonly string[];
-  readonly scope_kind: "user" | "project" | "task" | "workspace";
+  readonly scope_kind: "user" | "project" | "task" | "workspace" | "session";
   readonly scope_id: string;
 }
 
@@ -193,7 +193,7 @@ export interface HookContext {
    * worse than an absent one — it reads as a fact. A stage that genuinely has a task, a run or a
    * loop supplies its real scope; one that does not, omits it.
    */
-  readonly scope_kind?: "user" | "project" | "task" | "workspace";
+  readonly scope_kind?: "user" | "project" | "task" | "workspace" | "session";
   readonly scope_id?: string;
   /**
    * The capability being exercised, when the stage is about one.

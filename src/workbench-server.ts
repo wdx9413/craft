@@ -51,6 +51,7 @@ function bodyObject(body: string | undefined): JsonObject { if (!body) return {}
 function failure(error: unknown): WebResponse { return json(error instanceof SyntaxError ? 400 : error instanceof Error && error.message.includes("64 KiB") ? 413 : 422,
   { error: error instanceof Error ? error.message : String(error) }); }
 function boundedLimit(value: string | null, fallback: number): number { if (value === null || value === "") return fallback; const parsed = Number(value); if (!Number.isInteger(parsed) || parsed < 1 || parsed > 1_000) throw new Error("limit must be an integer between 1 and 1000"); return parsed; }
+function queryValue(url: URL, key: string): string | undefined { const value = url.searchParams.get(key); return value === null ? undefined : value; }
 
 /**
  * The Studio is a Codex-style HTML app that lives beside the packaged runtime
@@ -103,10 +104,10 @@ export class WorkbenchWebApp {
         const homeLimit = Number(url.searchParams.get("limit"));
         return json(200, this.service.homeView(Number.isInteger(homeLimit) && homeLimit >= 1 && homeLimit <= 50 ? { limit: homeLimit } : {}));
       }
-      if (request.method === "GET" && path === "/api/project-brain") return json(200, this.service.projectBrainGet({ project_id: url.searchParams.get("project_id") ?? "local", limit: url.searchParams.get("limit") ?? undefined }));
-      if (request.method === "GET" && path === "/api/workbench-experience") return json(200, this.service.workbenchExperienceQuery({ project_id: url.searchParams.get("project_id") ?? undefined, task_id: url.searchParams.get("task_id") ?? undefined, limit: url.searchParams.get("limit") ?? undefined }));
-      if (request.method === "GET" && path === "/api/traces") return json(200, this.service.traceQuery({ task_id: url.searchParams.get("task_id") ?? undefined, event_kind: url.searchParams.get("event_kind") ?? undefined, limit: url.searchParams.get("limit") ?? undefined }));
-      if (request.method === "GET" && path === "/api/long-task-checkpoints") return json(200, this.service.longTaskList({ session_id: url.searchParams.get("session_id") ?? undefined, limit: url.searchParams.get("limit") ?? undefined }));
+      if (request.method === "GET" && path === "/api/project-brain") return json(200, this.service.projectBrainGet({ project_id: queryValue(url, "project_id") || "local", limit: queryValue(url, "limit") }));
+      if (request.method === "GET" && path === "/api/workbench-experience") return json(200, this.service.workbenchExperienceQuery({ project_id: queryValue(url, "project_id"), task_id: queryValue(url, "task_id"), limit: queryValue(url, "limit") }));
+      if (request.method === "GET" && path === "/api/traces") return json(200, this.service.traceQuery({ task_id: queryValue(url, "task_id"), event_kind: queryValue(url, "event_kind"), limit: queryValue(url, "limit") }));
+      if (request.method === "GET" && path === "/api/long-task-checkpoints") return json(200, this.service.longTaskList({ session_id: queryValue(url, "session_id"), limit: queryValue(url, "limit") }));
       if (request.method === "GET" && path === "/api/settings") return json(200, this.service.settingsGet());
       if (request.method === "PATCH" && path === "/api/settings") return json(200, this.service.settingsUpdate(bodyObject(request.body)));
       if (request.method === "POST" && path === "/api/settings/reset") return json(200, this.service.settingsReset());
@@ -161,10 +162,11 @@ export class WorkbenchWebApp {
       // Craft Studio read/write surfaces. These are thin projections of existing
       // kernels: the shell never gains authority the CLI does not already have.
       if (request.method === "GET" && path === "/api/studio/summary") return json(200, this.service.info());
-      if (request.method === "GET" && path === "/api/studio/resources") return json(200, this.service.studioResourceView({ kind: url.searchParams.get("kind") ?? undefined, task_id: url.searchParams.get("task_id") ?? undefined, limit: url.searchParams.get("limit") ?? undefined }));
+      if (request.method === "GET" && path === "/api/studio/resources") return json(200, this.service.studioResourceView({ kind: queryValue(url, "kind"), task_id: queryValue(url, "task_id"), limit: queryValue(url, "limit") }));
       if (request.method === "POST" && path === "/api/studio/plugins") return json(201, this.service.studioPluginInstall(bodyObject(request.body)));
       if (request.method === "POST" && path === "/api/studio/skills") return json(201, this.service.studioSkillSave(bodyObject(request.body)));
       if (request.method === "POST" && path === "/api/studio/memory") return json(201, this.service.studioMemorySave(bodyObject(request.body)));
+      if (request.method === "POST" && path === "/api/studio/memory/review") return json(200, this.service.studioMemoryReview(bodyObject(request.body)));
       if (request.method === "POST" && path.startsWith("/api/studio/memory/") && path.endsWith("/retire")) return json(200, this.service.studioMemoryRetire({ memory_id: decodeURIComponent(path.slice(19, -7)) }));
       if (request.method === "POST" && path === "/api/studio/knowledge/claims") return json(201, this.service.studioKnowledgeClaimSave(bodyObject(request.body)));
       if (request.method === "POST" && path === "/api/studio/workflows") return json(201, this.service.studioWorkflowSave(bodyObject(request.body)));
@@ -178,8 +180,8 @@ export class WorkbenchWebApp {
       // User-configured model management (CRUD on settings.models)
       if (request.method === "GET" && path === "/api/config/models") return json(200, this.service.modelList());
       if (request.method === "POST" && path === "/api/config/models") return json(201, this.service.modelAdd(bodyObject(request.body)));
-      if (request.method === "PATCH" && path.startsWith("/api/config/models/")) return json(200, this.service.modelUpdate({ ...bodyObject(request.body), id: decodeURIComponent(path.slice(20)) }));
-      if (request.method === "DELETE" && path.startsWith("/api/config/models/")) return json(200, this.service.modelDelete({ id: decodeURIComponent(path.slice(20)) }));
+      if (request.method === "PATCH" && path.startsWith("/api/config/models/")) return json(200, this.service.modelUpdate({ ...bodyObject(request.body), id: decodeURIComponent(path.slice("/api/config/models/".length)) }));
+      if (request.method === "DELETE" && path.startsWith("/api/config/models/")) return json(200, this.service.modelDelete({ id: decodeURIComponent(path.slice("/api/config/models/".length)) }));
       if (request.method === "GET" && path === "/api/projects") return json(200, { projects: this.service.store.list("project_brain", boundedLimit(url.searchParams.get("limit"), 50)) });
       if (request.method === "POST" && path === "/api/projects") return json(201, this.service.projectBrainOpen(bodyObject(request.body)));
       if (request.method === "POST" && path.startsWith("/api/projects/") && path.endsWith("/goals")) return json(201, this.service.projectBrainGoalSave({ ...bodyObject(request.body), project_id: decodeURIComponent(path.slice(14, -6)) }));

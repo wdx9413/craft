@@ -10,7 +10,13 @@ tests/.tmp/
 tests/.validation-deps/
 .coverage
 coverage.json
+# c8's report directory is `coverage/` at the root of the ignored set, and the
+# pattern below matches a directory of that name at any depth -- which also
+# swallowed `scripts/coverage/`, where the gate code lives. It was therefore
+# never committed, so a fresh clone had no way to run its own coverage gate.
 coverage/
+!scripts/coverage/
+!scripts/coverage/**
 htmlcov/
 build/
 /dist/

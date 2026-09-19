@@ -44,6 +44,17 @@ test("Runtime Assurance attests real Host receipts, re-observation, write confor
     const attested = f.service.runtimeAssuranceAttest({ attestation_id: "read-attestation", task_run_id: read.run.id, environment: read.environment, budget: read.budget, workspace_observation_id: observation.id, evidence_ids: [evidence.id] });
     assert.equal((attested.attestation as JsonObject).status, "verified");
     assert.equal(f.service.runtimeAssuranceAttest({ attestation_id: "read-attestation", task_run_id: read.run.id, environment: read.environment, budget: read.budget, workspace_observation_id: observation.id, evidence_ids: [evidence.id] }).idempotent, true);
+    f.store.save("host_run", String(read.host.id), { ...f.store.get("host_run", String(read.host.id)), note: "version bump" });
+    assert.throws(() => f.service.runtimeAssuranceAttest({ attestation_id: "read-attestation", task_run_id: read.run.id, environment: read.environment, budget: read.budget, workspace_observation_id: observation.id, evidence_ids: [evidence.id] }), /idempotency conflict/);
+    assert.throws(() => f.service.runtimeAssuranceAttest({ task_run_id: read.run.id, environment: read.environment, budget: read.budget, effect: "external_write", workspace_observation_id: observation.id }), /not allowed/);
+    const defaults = recordedRun(f, "defaults", { environment: {}, budget: {} });
+    const defaultsObservation = f.service.workspaceObserverObserve({ workspace_id: f.workspace.id, source: "host" }).observation as JsonObject;
+    assert.equal((f.service.runtimeAssuranceAttest({ attestation_id: "defaults-attestation", task_run_id: defaults.run.id, workspace_observation_id: defaultsObservation.id }).attestation as JsonObject).status, "verified");
+    const interventionAgain = f.service.runtimeAssuranceIntervene({ intervention_id: "pause-idempotent", task_run_id: read.run.id, kind: "pause", actor: "operator", reason: "review" });
+    f.service.runtimeAssuranceIntervene({ intervention_id: "evidence-intervention", task_run_id: read.run.id, kind: "resume", actor: "operator", reason: "evidence", evidence_ids: [evidence.id] });
+    assert.equal(f.service.runtimeAssuranceIntervene({ intervention_id: "pause-idempotent", task_run_id: read.run.id, kind: "pause", actor: "operator", reason: "review" }).idempotent, true);
+    assert.throws(() => f.service.runtimeAssuranceIntervene({ intervention_id: "pause-idempotent", task_run_id: read.run.id, kind: "pause", actor: "operator", reason: "changed" }), /idempotency conflict/);
+    void interventionAgain;
     f.store.create("task_run_state", "loop-state", {}); f.store.create("state_snapshot", "loop-snapshot", {});
     f.store.create("verified_work_loop", "loop", { task_run_id: read.run.id, latest_task_run_state_id: "loop-state", latest_snapshot_id: "loop-snapshot" });
     f.store.create("verified_work_loop_receipt", "loop-receipt", { work_loop_id: "loop", task_run_state_id: "loop-state", snapshot_id: "loop-snapshot", status: "observed" });
@@ -62,7 +73,7 @@ test("Runtime Assurance attests real Host receipts, re-observation, write confor
     const writeObservation = f.service.workspaceObserverObserve({ workspace_id: f.workspace.id, source: "host" }).observation as JsonObject;
     assert.throws(() => f.service.runtimeAssuranceAttest({ task_run_id: write.run.id, effect: "local_write", environment: write.environment, budget: write.budget, workspace_observation_id: writeObservation.id }), /preflight_id/);
     assert.equal((f.service.runtimeAssuranceAttest({ task_run_id: write.run.id, effect: "local_write", environment: write.environment, budget: write.budget, workspace_observation_id: writeObservation.id, preflight_id: preflight.id }).attestation as JsonObject).status, "verified");
-    const state = f.service.runtimeAssuranceGet({ task_run_id: read.run.id }); assert.equal((state.attestations as JsonObject[]).length, 3); assert.equal((state.interventions as JsonObject[]).length, 1);
+    const state = f.service.runtimeAssuranceGet({ task_run_id: read.run.id }); assert.equal((state.attestations as JsonObject[]).length, 3); assert.equal((state.interventions as JsonObject[]).length, 3);
     assert.equal(VERSION, "0.12.33");
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
@@ -88,5 +99,36 @@ test("Runtime Assurance only advances a Campaign after every bound run has match
     assert.equal(((advanced.result as JsonObject).runner as JsonObject).campaign_lifecycle, "eligible");
     assert.equal((advanced.assurance_campaign as JsonObject).status, "eligible");
     assert.equal(f.service.runtimeAssuranceCampaignAdvance({ runner_id: runner.id }).idempotent, true);
+    const missingCampaign = f.store.create("eval_campaign", "campaign-missing", { environment_digest: digest(environment), budget_digest: digest(budget), lifecycle: "collecting" });
+    const missingRunner = f.store.create("campaign_runner", "runner-missing", { campaign_id: missingCampaign.id, lifecycle: "collecting" });
+    f.store.create("eval_campaign_slot", "slot-missing", { campaign_id: missingCampaign.id, case_id: "case", trial: 1, arm: "baseline", task_run_id: "no-attestation", status: "bound" });
+    assert.throws(() => f.service.runtimeAssuranceCampaignAdvance({ runner_id: missingRunner.id }), /verified attestation/);
+    const assuranceKernel = (f.service as unknown as { runtimeAssurance: { campaigns: { advance: (args: JsonObject) => JsonObject } } }).runtimeAssurance;
+    assuranceKernel.campaigns.advance = () => ({ runner: { id: runner.id } });
+    const fallback = f.service.runtimeAssuranceCampaignAdvance({ runner_id: runner.id, assurance_campaign_id: "fallback-campaign" });
+    assert.equal((fallback.assurance_campaign as JsonObject).status, "collecting");
+    f.store.create("runtime_assurance_attestation", "assurance-new", { task_run_id: f.store.get("eval_campaign_slot", "slot-1-baseline").task_run_id, status: "verified", environment_digest: digest(environment), budget_digest: digest(budget) });
+    assert.throws(() => f.service.runtimeAssuranceCampaignAdvance({ runner_id: runner.id, assurance_campaign_id: String((advanced.assurance_campaign as JsonObject).id) }), /idempotency conflict/);
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("Runtime Assurance records rejected and review-needed terminal outcomes", async () => {
+  const f = await fixture();
+  try {
+    const failed = recordedRun(f, "failed-host", { delivery: "accepted", environment: {}, budget: {} });
+    f.store.save("host_run", String(failed.host.id), { ...failed.host, status: "failed" });
+    const failedObservation = f.service.workspaceObserverObserve({ workspace_id: f.workspace.id, source: "host" }).observation as JsonObject;
+    const rejected = f.service.runtimeAssuranceAttest({ attestation_id: "rejected", task_run_id: failed.run.id, environment: {}, budget: {}, workspace_observation_id: failedObservation.id });
+    assert.equal((rejected.attestation as JsonObject).status, "rejected");
+
+    const review = recordedRun(f, "needs-review", { delivery: "pending", environment: {}, budget: {} });
+    const reviewObservation = f.service.workspaceObserverObserve({ workspace_id: f.workspace.id, source: "host" }).observation as JsonObject;
+    const needsReview = f.service.runtimeAssuranceAttest({ attestation_id: "needs-review", task_run_id: review.run.id, environment: {}, budget: {}, workspace_observation_id: reviewObservation.id });
+    assert.equal((needsReview.attestation as JsonObject).status, "needs_review");
+    f.store.remove("work_delivery", String(review.delivery.id));
+    const noDelivery = f.service.runtimeAssuranceAttest({ attestation_id: "no-delivery", task_run_id: review.run.id, environment: {}, budget: {}, workspace_observation_id: reviewObservation.id });
+    assert.equal((noDelivery.attestation as JsonObject).status, "needs_review");
+    f.store.save("work_launch", String(review.launch.id), { ...f.store.get("work_launch", String(review.launch.id)), workspace: "/other" });
+    assert.throws(() => f.service.runtimeAssuranceAttest({ attestation_id: "workspace-mismatch", task_run_id: review.run.id, environment: {}, budget: {}, workspace_observation_id: reviewObservation.id }), /outside the Task Run workspace/);
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });

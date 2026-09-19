@@ -1,4 +1,4 @@
-﻿import { randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { canonicalJson, stableDigest } from "../../src/digest.ts";
 import { credentialStatus, selectModel, type ModelProviderSpec, type ModelTier } from "../../src/model-gateway.ts";
 import { CraftStore, type JsonObject } from "../../src/infrastructure/store.ts";

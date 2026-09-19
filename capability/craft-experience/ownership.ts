@@ -33,7 +33,7 @@
 export const EXPERIENCE_FAMILIES = "craft_(?:experience_ledger_|workflow_evolution_|evaluation_model_|route_workflow_proposal|workflow_(?:save|get|search|transition|rollback))";
 
 /** Families a separate kernel implements and the Experience product also serves. */
-const EXPERIENCE_PRODUCT_EXTRAS = "craft_(?:experience_pattern_|experience_candidate_list|experience_mine|experience_shadow_experiment_|experience_capture_)";
+const EXPERIENCE_PRODUCT_EXTRAS = "craft_(?:experience_pattern_|experience_candidate_list|experience_mine|experience_shadow_experiment_|experience_capture_|workflow_(?:dag_validate|dag_save|dag_transition|checkpoint|resume|run_cancel|replan|export|import))";
 
 /** What the capability owns: matched against a tool name. */
 export const EXPERIENCE_OWNS = new RegExp(`^${EXPERIENCE_FAMILIES}`);

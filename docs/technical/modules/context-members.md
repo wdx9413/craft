@@ -1,4 +1,4 @@
-﻿# 上下文的五个成员，以及每个成员由谁持有
+# 上下文的五个成员，以及每个成员由谁持有
 
 > 状态：架构结论 + 当前实测状态。基线 v0.12.33（工作版本号未升）。本文记录**决定**与**实测**，两者分开标注；未决问题集中在最后一节，不散落在正文里。
 
@@ -104,8 +104,8 @@ experience 的例外不是策略选择，而是数据模型决定的：`compile`
 
 | 问题 | 决定 | 落地 |
 | --- | --- | --- |
-| 三套压缩机制合并？ | **合并为一套** | `src/compaction.ts` 的 `compact()`；三处入口成为它的适配器。见 [ADR 0013](../../adr/0013-one-compaction-policy.md) 与下面「压缩」一节 |
-| transcript 对外成为能力？ | **不对外** | `CONTEXT_MEMBER_SOURCES.history` 保持 `host_provided`，未改一行。见 [ADR 0012](../../adr/0012-transcript-is-not-an-external-capability.md) |
+| 三套压缩机制合并？ | **合并为一套** | `src/compaction.ts` 的 `compact()`；三处入口成为它的适配器。见 [ADR 0020](../../adr/0020-one-compaction-policy.md) 与下面「压缩」一节 |
+| transcript 对外成为能力？ | **不对外** | `CONTEXT_MEMBER_SOURCES.history` 保持 `host_provided`，未改一行。见 [ADR 0019](../../adr/0019-transcript-is-not-an-external-capability.md) |
 | `ReversibleContext.restore` 持久化？ | **持久化** | `src/context-projection.ts` 的 `ContextProjectionKernel`：`context_session` 存段落、`context_projection` 存无内容的投影，`restore` 只需要 `session_id` + `segment_id` |
 | `state` 统一只读视图？ | **给一个** | `src/state-view.ts` 的 `StateViewKernel`，工具 `craft_state_view_get`；它只有读方法，`status` 是派生的，因此不会成为第二个事实来源 |
 
@@ -138,4 +138,4 @@ experience 的例外不是策略选择，而是数据模型决定的：`compile`
 - [Runtime Truth](runtime-truth.zh-CN.md)：压缩笔记与 trace envelope。
 - [上下文、记忆与后台整理](context-memory.md)：范围化记忆与后台整理的既有设计。
 - [Knowledge Source / Memory Ledger / Context Resolution](knowledge-memory-context.md)：实现这三件事的三个模块，以及为什么读取侧留在核心。
-- ADR：[上下文成员的性质是固定的](../../adr/0007-context-members-have-fixed-natures.md)、[目标与验收内置、评测可插拔](../../adr/0008-goal-and-acceptance-are-built-in.md)
+- ADR：[上下文成员的性质是固定的](../../adr/0014-context-members-have-fixed-natures.md)、[目标与验收内置、评测可插拔](../../adr/0015-goal-and-acceptance-are-built-in.md)

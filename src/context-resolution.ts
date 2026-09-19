@@ -27,8 +27,9 @@
  */
 import { randomUUID } from "node:crypto";
 import type { CraftStore, JsonObject } from "./infrastructure/store.ts";
-import { noCredentialAssignment, object, parseScope, sortedUniqueList, text } from "./validation.ts";
+import { noCredentialAssignment, object, optionalScope, sortedUniqueList, text } from "./validation.ts";
 import { canonicalJson, stableDigest, payload } from "./digest.ts";
+import { contentReference } from "./infrastructure/content-store.ts";
 import type { ContextContribution, ContextContributionProvider, ContextRequest } from "./capability-protocol.ts";
 
 const STRATEGIES = new Set(["keyword", "vector"]);
@@ -104,7 +105,11 @@ export class ContextResolutionKernel {
   }
 
   async resolve(args: JsonObject): Promise<JsonObject> {
-    const query = noCredentialAssignment(text(args.query, "query"), "query"); const requestedScope = parseScope(args); const now = new Date(args.now === undefined ? Date.now() : text(args.now, "now")); if (Number.isNaN(now.valueOf())) throw new Error("now must be an ISO timestamp");
+    const query = noCredentialAssignment(text(args.query, "query"), "query"); const requestedScope = optionalScope(args);
+    // Without a scope this returns nothing and says why. It does not search every scope, and it
+    // writes no receipt for a resolution that did not happen.
+    if (requestedScope === null) return { query, scope: null, items: [], contributions: [], receipt: null, skipped: true, reason: "scope_unavailable" };
+    const now = new Date(args.now === undefined ? Date.now() : text(args.now, "now")); if (Number.isNaN(now.valueOf())) throw new Error("now must be an ISO timestamp");
     const maxItems = Number(args.max_items ?? 12); const maxChars = Number(args.max_chars ?? 12_000); if (!Number.isInteger(maxItems) || maxItems < 1 || !Number.isInteger(maxChars) || maxChars < 1) throw new Error("Context budget is invalid");
     const sourceIds = sortedUniqueList(args.source_ids, "source_ids"); const requestedIds = sortedUniqueList(args.memory_ids, "memory_ids"); const allowRestricted = args.allow_restricted === true; const adapter = args.retrieval_adapter_id === undefined ? null : this.store.get("retrieval_adapter", text(args.retrieval_adapter_id, "retrieval_adapter_id"));
     const retrievalMode = adapter?.status === "eligible" ? adapter.strategy : "keyword";
@@ -120,11 +125,11 @@ export class ContextResolutionKernel {
         && (item.valid_until === null || Date.parse(String(item.valid_until)) >= now.valueOf()) && (allowRestricted || item.sensitivity !== "restricted")
         && (selectedSourceIds === null || selectedSourceIds.has(String(item.source_id)));
     })
-      .map((item) => ({ memory: item, required: requestedIds.includes(String(item.id)), score: queryTerms.reduce((sum, term) => sum + Number(String(item.content).toLowerCase().includes(term)), 0) }))
+      .map((item) => { const body = this.content(item); return { memory: item, body, required: requestedIds.includes(String(item.id)), score: queryTerms.reduce((sum, term) => sum + Number(body.toLowerCase().includes(term)), 0) }; })
       .filter((item) => item.required || item.score > 0).sort((left, right) => Number(right.required) - Number(left.required) || right.score - left.score || String(left.memory.id).localeCompare(String(right.memory.id)));
     for (const memoryId of requestedIds) if (!candidates.some((item) => item.memory.id === memoryId)) throw new Error("Required Memory is unavailable in this Context");
     const items: JsonObject[] = []; let usedChars = 0;
-    for (const candidate of candidates) { const size = String(candidate.memory.content).length; if (items.length >= maxItems) break; if (usedChars + size > maxChars) { if (candidate.required) throw new Error("Required Memory exceeds Context budget"); continue; } usedChars += size; items.push({ memory_id: candidate.memory.id, memory_version: candidate.memory.version, source_id: candidate.memory.source_id, content: candidate.memory.content, content_digest: candidate.memory.content_digest, sensitivity: candidate.memory.sensitivity, reason: candidate.required ? "required" : retrievalMode === "vector" ? "evaluated_vector_adapter" : "keyword_overlap" }); }
+    for (const candidate of candidates) { const size = candidate.body.length; if (items.length >= maxItems) break; if (usedChars + size > maxChars) { if (candidate.required) throw new Error("Required Memory exceeds Context budget"); continue; } usedChars += size; items.push({ memory_id: candidate.memory.id, memory_version: candidate.memory.version, source_id: candidate.memory.source_id, content: candidate.body, content_digest: candidate.memory.content_digest, sensitivity: candidate.memory.sensitivity, reason: candidate.required ? "required" : retrievalMode === "vector" ? "evaluated_vector_adapter" : "keyword_overlap" }); }
     // The capabilities' read sides, asked after the memory selection so their budgets are separate
     // from the memory budget: a contributor that filled the memory budget would be deciding how
     // much memory a turn gets, which is not its call.
@@ -146,4 +151,18 @@ export class ContextResolutionKernel {
   }
 
   receiptGet(args: JsonObject): JsonObject { return { receipt: this.store.get("context_resolution_receipt", text(args.receipt_id, "receipt_id"), args.version === undefined ? undefined : Number(args.version)) }; }
+
+  /**
+   * One entry's body, from wherever it lives.
+   *
+   * A record written before the content store existed still carries `content` inline; otherwise
+   * the body is read back through its reference, so a moved or edited file cannot be mistaken
+   * for the memory the receipt names.
+   */
+  private content(memory: JsonObject): string {
+    if (typeof memory.content === "string") return memory.content;
+    const ref = memory.content_ref;
+    if (!contentReference(ref)) throw new Error("Memory content reference is missing");
+    return this.store.contentStore.readCompatSync(ref).body;
+  }
 }

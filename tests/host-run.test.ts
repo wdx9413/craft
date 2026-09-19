@@ -9,6 +9,7 @@ import { craftPaths } from "../src/infrastructure/paths.ts";
 import { CraftService } from "../src/service.ts";
 import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
 import { McpServer } from "../src/mcp.ts";
+import { TraceKernel } from "../src/trace-kernel.ts";
 
 async function fixture(name: string) {
   const root = join(tmpdir(), `craft-host-run-${name}-${process.pid}-${Date.now()}`);
@@ -72,7 +73,7 @@ test("Host run recovery is explicit and failures remain attributable", async () 
   try {
     const rejecting: HostDriver = { host: "codex-cli", dispatchKind: "codex_dispatch", prepare: (args) => args, execute: async (_args, options) => new Promise((_resolve, reject) => { options?.signal?.addEventListener("abort", () => reject(new Error("driver crash")), { once: true }); }) };
     const unknown: HostDriver = { host: "claude-code", dispatchKind: "claude_dispatch", prepare: (args) => args, execute: async () => { throw "driver crash"; } };
-    let projections = 0; const kernel = new HostRunKernel(f.store, [rejecting, unknown], undefined, () => { projections += 1; if (projections === 1) throw new Error("projection failed"); throw "projection failed"; });
+    let projections = 0; const kernel = new HostRunKernel(f.store, [rejecting, unknown], undefined, () => { projections += 1; if (projections === 1) throw new Error("projection failed"); throw "projection failed"; }, new TraceKernel(f.store));
     f.store.create("codex_dispatch", "crash", { task_id: f.task.id, status: "prepared" });
     f.store.create("claude_dispatch", "unknown", { task_id: f.task.id, status: "prepared" });
     kernel.start({ run_id: "crash-run", host: "codex-cli", dispatch_id: "crash", prompt: "go" });

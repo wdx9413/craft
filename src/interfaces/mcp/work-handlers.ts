@@ -1,4 +1,4 @@
-import type { McpHandlerGroup, McpHandlerService } from "./handler-types.ts";
+import type { McpHandlerGroup, McpHandlerService } from "./handler-types.js";
 
 export function createWorkHandlers(service: McpHandlerService): McpHandlerGroup {
   return {

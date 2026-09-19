@@ -6,7 +6,7 @@ import test from "node:test";
 import { beginLoop, budgetBand, chargeTurn, completeLoop, defineLoopLimits, failLoop, loopSummary, observeStep } from "../src/agent-loop.ts";
 import { InternalHostDriver, parseAction } from "../src/internal-host-driver.ts";
 import { PROVIDER_CATALOG, buildChatRequest, credentialStatus, createFetchTransport, defineProvider, parseChatResponse,
-  providerFromConfig, publicProvider, selectModel, unconfiguredTransport, type ChatRequest, type ChatResult,
+  providerFromConfig, publicProvider, publicModel, selectModel, specFromConfig, specsFromModels, unconfiguredTransport, type ChatRequest, type ChatResult,
   type ModelProviderSpec, type ModelTransport } from "../src/model-gateway.ts";
 import { craftPaths } from "../src/infrastructure/paths.ts";
 import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
@@ -63,6 +63,32 @@ test("defaults fill in the provider label, chat path and tool support", () => {
   assert.equal(declared.supports_tools, false);
   assert.equal(declared.cost_hint, 3);
 });
+
+test("user model configs produce provider specs and secret-free public views", () => {
+  const openai = { id: "user-openai", name: "User OpenAI", protocol: "openai-compatible" as const, baseUrl: "https://example.test/v1", model: "user-model", apiKeyEnv: "USER_MODEL_KEY", supportsTools: true };
+  const anthropic = { ...openai, id: "user-anthropic", protocol: "anthropic" as const, supportsTools: false };
+  assert.equal(specFromConfig(openai).chat_path, "/chat/completions");
+  assert.equal(specFromConfig(anthropic).chat_path, "/messages");
+  assert.deepEqual(specsFromModels([openai, anthropic]).map((item) => item.provider), ["user-openai", "user-anthropic"]);
+  assert.equal((publicModel(openai, {} as NodeJS.ProcessEnv) as JsonObject).configured, false);
+  assert.equal((publicModel(openai, { USER_MODEL_KEY: "configured" }) as JsonObject).configured, true);
+  assert.equal(specFromConfig({ ...openai, name: "" }).label, "user-openai");
+});
+
+test("legacy episodic and semantic memory facade remains auditable and idempotent", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-memory-compat-"));
+  const store = await new CraftStore(craftPaths(root)).open();
+  const service = new (await import("../src/service.ts")).CraftService(store);
+  try {
+    const remembered = service.memoryConsolidationRemember({ memory_id: "episode-1", scope: "task:compat", content: "Observed a stable workflow", source: "test" });
+    assert.equal((remembered.memory as JsonObject).consolidated, false);
+    assert.equal(service.memoryConsolidationRemember({ memory_id: "episode-1", scope: "task:compat", content: "Observed a stable workflow", source: "test" }).idempotent, true);
+    const consolidated = service.memoryConsolidationConsolidate({ memory_ids: ["episode-1"], semantic_id: "semantic-1", scope: "task:compat", content: "Stable workflow" });
+    assert.equal((consolidated.memory as JsonObject).status, "active");
+    assert.equal((service.memoryConsolidationSearch({ query: "stable", scope: "task:compat" }).results as JsonObject[]).length, 1);
+    assert.equal((service.memoryConsolidationResolve({ semantic_id: "semantic-1", status: "superseded", resolution: "replaced" }).memory as JsonObject).status, "superseded");
+  } finally { store.close(); }
+});
 function anchorAnthropicPath(): string {
   return defineProvider({ provider: "demo", protocol: "anthropic", base_url: "https://example.test/v1",
     api_key_env: "DEMO_API_KEY", models: { standard: "m" } }).chat_path;
@@ -116,6 +142,15 @@ test("request rendering matches each wire format", () => {
   const noSystem = buildChatRequest(anthropicSpec(), { model: "demo-claude", messages: [{ role: "user", content: "hi" }] });
   assert.equal(noSystem.body.max_tokens, 4_096);
   assert.equal("system" in noSystem.body, false);
+  const anthropicToolResult = buildChatRequest(anthropicSpec(), { model: "demo-claude", messages: [
+    { role: "tool", content: null }, { role: "assistant", content: "done", tool_call_id: "call" },
+  ] });
+  assert.deepEqual(anthropicToolResult.body.messages, [
+    { role: "user", content: [{ type: "tool_result", tool_use_id: "unknown", content: "" }] },
+    { role: "assistant", content: "done", tool_call_id: "call", tool_use_id: "call" },
+  ]);
+  const openaiExtras = buildChatRequest(openaiSpec(), { model: "demo-std", messages: [{ role: "user", content: "hi" }], tools: [], stream: true });
+  assert.equal(openaiExtras.body.stream, true);
 });
 
 test("request rendering rejects malformed conversations", () => {
@@ -142,6 +177,10 @@ test("response parsing normalizes both wire formats and fails closed", () => {
   assert.deepEqual(anthropic.usage, { input_tokens: 1, output_tokens: 2 });
   const anthropicTool = parseChatResponse(anthropicSpec(), { content: [{ type: "text", text: "go" }, { type: "tool_use", id: "a", name: "lookup", input: { q: "x" } }] });
   assert.equal(anthropicTool.tool_calls?.[0]?.function.name, "lookup");
+  const anthropicToolDefaults = parseChatResponse(anthropicSpec(), { content: [{ type: "text", text: "go" }, { type: "tool_use", name: "lookup" }] });
+  assert.equal(anthropicToolDefaults.tool_calls?.[0]?.id, "tool_1");
+  const openaiToolDefaults = parseChatResponse(openaiSpec(), { choices: [{ message: { content: null, tool_calls: [{ function: { name: "lookup", arguments: { q: "x" } } }] } }] });
+  assert.equal(openaiToolDefaults.tool_calls?.[0]?.id, "tool_1");
 
   assert.throws(() => parseChatResponse(openaiSpec(), "nope"), /must be an object/);
   assert.throws(() => parseChatResponse(openaiSpec(), { choices: [] }), /no message content/);
@@ -422,6 +461,7 @@ test("the internal host completes on a final message and records a receipt", asy
     const task = f.store.create("task", `task_${process.pid}`, { title: "t", goal: "g" });
     const driver = new InternalHostDriver(f.store, { providers: [openaiSpec()], transport: transportOf(["all done"]) });
     const prepared = driver.prepare({ task_id: task.id, prompt: "go" }) as JsonObject;
+    f.store.create("internal_session", `session_${String((prepared.dispatch as JsonObject).id)}`, { messages: [{ role: "user", content: "resumed context" }] });
     const executed = await driver.execute({ dispatch_id: (prepared.dispatch as JsonObject).id, prompt: "go" }) as JsonObject;
     const receipt = executed.receipt as JsonObject;
     assert.equal(receipt.status, "completed");
@@ -569,7 +609,9 @@ test("every tool call a turn proposes is executed and every id is answered", asy
   try {
     const task = f.store.create("task", `task_${process.pid}`, { title: "t", goal: "g" });
     let turns = 0;
-    const transport: ModelTransport = { complete: async () => {
+    const requests: ChatRequest[] = [];
+    const transport: ModelTransport = { complete: async (_provider, request) => {
+      requests.push(request);
       turns += 1;
       return turns === 1
         ? { text: "searching", model: "fake", usage: { input_tokens: 2, output_tokens: 2 }, tool_calls: [
@@ -590,10 +632,13 @@ test("every tool call a turn proposes is executed and every id is answered", asy
     assert.equal((run.receipt as JsonObject).status, "completed");
     // Every echoed call id has a result, so the next request is not rejected over
     // a dangling call.
-    const session = f.store.get("internal_session", "session_parallel") as JsonObject;
-    const ids = (session.messages as Array<Record<string, unknown>>)
+    // The stored session is deliberately content-free: it keeps redacted content and digests
+    // instead of the calls themselves. A dangling id is what the provider would reject, so the
+    // ids are read from the request the next turn sends.
+    assert.equal(requests.length, 2);
+    const echoed = (requests[1]!.body.messages as Array<Record<string, unknown>>)
       .filter((message) => message.role === "tool").map((message) => message.tool_call_id);
-    assert.deepEqual(ids, ["call-1", "call-2"]);
+    assert.deepEqual(echoed, ["call-1", "call-2"]);
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 

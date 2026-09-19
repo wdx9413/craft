@@ -66,6 +66,10 @@ v0.12.28 将产品收敛为完整 Craft 与三个推荐的独立入口：`craft-
 
 v0.12.33 补齐“能部署、能证明”的外层：远程运行将 principal、tenant、scope、receipt 与一次性 handle 固定在同一任务上；真正的效果比较必须引用真实 Host Session 和独立 Outcome Observer，而不是模型自述。发布者签名、A2A v1 Task 与远程 MCP 都是可替换 Adapter，仍受既有 Capability、Signoff 与 Policy 约束。详见 [Runtime Proof 与远程部署边界](technical/modules/runtime-proof-deployment.md)。
 
+v0.12.32 完成 Runtime Assurance & Learning Loop：所有模式都可以沿着 `Task Contract → Activation → Preflight → Host → Receipt → Re-observation → Acceptance → Outcome → Trace/Evaluation → Candidate` 工作。`RuntimeProof` 负责 manifest、probe、conformance、attestation 和恢复前环境重水合；`McpTask` 负责 owner-scoped 的持久任务句柄、TTL、取消和幂等。Craft 不代替 Codex、Claude 或 IDE 的模型和工具执行，而是提供可恢复状态、权限边界、诊断证据、验收和受限演进；未配置真实 Host、凭据 Broker 或隔离器时不会伪造成功。
+
+v0.12.30 补齐“能部署、能证明”的外层：远程运行将 principal、tenant、scope、receipt 与一次性 handle 固定在同一任务上；真正的效果比较必须引用真实 Host Session 和独立 Outcome Observer，而不是模型自述。发布者签名、A2A v1 Task 与远程 MCP 都是可替换 Adapter，仍受既有 Capability、Signoff 与 Policy 约束。详见 [Runtime Proof 与远程部署边界](technical/modules/runtime-proof-deployment.md)。
+
 当前工作树继续补强两处长期运行短板：`DurableActionLoop` 让每个 Work Item 必须经过“行动 → Receipt → 再观察 → 验收”才能成为已证明进度；`ExperienceLedger` 将观察、诊断模式与接受/拒绝的干预提案分层保存。它们不改变版本号，也不把未验证知识直接塞回执行 Host。详见 [Durable Action Loop 与 Experience Ledger](technical/modules/durable-action-experience.md)。
 
 v0.12.23 增加 `VerificationPlane`：它从变更类型、effect、Candidate 与真实 Host 需求推导最小验证集，收集环境一致的 Evidence Receipt，并判定 `eligible / rejected / inconclusive`。单元覆盖率只是其中一个确定性检查；对抗、恢复、真实 Host 和 Candidate 还需更强验证。该模块不执行命令、不持久化原始内容，仍通过既有 Host / Runtime Seam 运行实际检查。详见 [Verification Plane](technical/modules/verification-plane.md)。

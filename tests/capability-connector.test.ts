@@ -22,6 +22,7 @@ test("Capability Connectors require explicit source approval, retain only metada
     assert.throws(() => f.service.capabilityConnectorRegister({ kind: "mcp_http", name: "Malformed", approved: true, approval_ref: "user", endpoint: "not a url" }), /valid HTTPS/);
     assert.throws(() => f.service.capabilityConnectorRegister({ kind: "mcp_stdio", name: "Unsafe", approved: true, approval_ref: "user", endpoint: "stdio://x?token=secret" }), /credentials/);
     const builtin = f.service.capabilityConnectorRegister({ connector_id: "builtin", kind: "builtin", name: "Built-in" }).connector as JsonObject;
+    assert.deepEqual(builtin.allowed_operations, ["*"]);
     assert.equal(builtin.trust, "verified");
     assert.throws(() => f.service.capabilityConnectorUpdate({ connector_id: builtin.id }), /boolean/);
     assert.equal((f.service.capabilityConnectorUpdate({ connector_id: builtin.id, active: false }).connector as JsonObject).status, "disabled");
@@ -44,6 +45,9 @@ test("Capability Connectors require explicit source approval, retain only metada
     assert.equal(((approved.asset as JsonObject).trust), "trusted");
     const automatic = (f.service.capabilityConnectorDiscover({ connector_id: serena.id, assets: [{ logical_id: "auto", name: "Auto", asset_type: "tool", effect: "read_only" }] }).assets as JsonObject[])[0];
     assert.match(String((f.service.capabilityConnectorApprove({ connector_asset_id: automatic.id, approval_ref: "review-2" }).asset as JsonObject).id), /^asset_/);
+    const builtHealth = f.service.capabilityConnectorHealthRecord({ connector_id: builtin.id, status: "degraded", source_digest: builtin.metadata_digest, observed_by: "test", health_id: `connector_health_${builtin.id}` });
+    assert.equal((builtHealth.health as JsonObject).status, "degraded");
+    assert.equal((f.service.capabilityConnectorHealthRecord({ connector_id: builtin.id, status: "healthy", source_digest: builtin.metadata_digest, observed_by: "test" }).health as JsonObject).status, "healthy");
     assert.equal((f.service.capabilityConnectorList({ limit: 1 }).connectors as JsonObject[]).length, 1);
     assert.throws(() => f.service.capabilityConnectorList({ limit: 0 }), /between/);
     assert.equal(VERSION, "0.12.33");
@@ -174,6 +178,16 @@ test("External Connector tickets are scope-bound, health-bound, and permanently 
     f.service.capabilityConnectorHealthRecord({ connector_id: connector.id, status: "degraded", source_digest: connector.metadata_digest, observed_by: "test" });
     assert.equal((stale.ticket as JsonObject).status, "issued");
     assert.throws(() => f.service.capabilityConnectorTicketConsume({ ticket_id: "stale", profile_id: profile.id }), /health changed/);
+    const builtin = f.service.capabilityConnectorRegister({ connector_id: "builtin-no-health", kind: "builtin", name: "Builtin no health" }).connector as JsonObject;
+    f.store.remove("capability_connector_health", `connector_health_${builtin.id}`);
+    const bsource = (f.service.capabilityConnectorDiscover({ connector_id: builtin.id, assets: [{ connector_asset_id: "basset", logical_id: "basset", name: "Builtin asset", asset_type: "tool", effect: "read_only" }] }).assets as JsonObject[])[0];
+    const basset = f.service.capabilityConnectorApprove({ connector_asset_id: bsource.id, approval_ref: "review", asset_id: "builtin-asset" }).asset as JsonObject;
+    const btask = f.service.taskOpen({ title: "Builtin", goal: "builtin" }).task as JsonObject;
+    const bprofile = f.service.capabilityAccessPlan({ task_id: btask.id, goal: "builtin" }).profile as JsonObject;
+    const bticket = f.service.capabilityConnectorTicketIssue({ ticket_id: "builtin-ticket", profile_id: bprofile.id, connector_asset_id: bsource.id, operation: "read" });
+    assert.equal((bticket.ticket as JsonObject).connector_health_id, null);
+    f.store.save("capability_connector", String(builtin.id), { ...builtin, scope_digest: "sha256:changed" });
+    assert.throws(() => f.service.capabilityConnectorTicketConsume({ ticket_id: "builtin-ticket", profile_id: bprofile.id }), /scope changed/);
     f.service.capabilityConnectorHealthRecord({ connector_id: connector.id, status: "healthy", source_digest: connector.metadata_digest, observed_by: "test" });
     const revocable = f.service.capabilityConnectorTicketIssue({ ticket_id: "revocable", profile_id: profile.id, connector_asset_id: source.id, operation: "inspect" });
     const revoked = f.service.capabilityConnectorRevoke({ connector_id: connector.id, reason: "project removed connector" });

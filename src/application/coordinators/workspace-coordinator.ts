@@ -1,4 +1,4 @@
-﻿import type { CraftStore } from "../../infrastructure/store.ts";
+import type { CraftStore } from "../../infrastructure/store.ts";
 import type { ChangeSetKernel } from "../../changeset.ts";
 import type { HydrationKernel } from "../../hydration.ts";
 import type { LineageKernel } from "../../lineage.ts";

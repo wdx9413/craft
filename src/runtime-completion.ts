@@ -3,7 +3,7 @@ import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { homedir } from "node:os";
 import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
-import { object, text } from "./validation.ts";
+import { fallback, object, optionalText, text } from "./validation.ts";
 import { digestJson, payload } from "./digest.ts";
 
 
@@ -30,10 +30,10 @@ export class ActionGatewayKernel {
   }
 
   prepare(args: JsonObject): JsonObject {
-    const actionId = String(args.action_id ?? `action_${randomUUID().replaceAll("-", "")}`);
+    const actionId = String(fallback(args.action_id, `action_${randomUUID().replaceAll("-", "")}`));
     const effect = text(args.effect ?? "read_only", "effect");
     if (!EFFECTS.has(effect)) throw new Error("Unsupported action effect");
-    const contract = { task_id: text(args.task_id, "task_id"), workspace: text(args.workspace, "workspace"), operation: text(args.operation, "operation"), effect, input_digest: text(args.input_digest, "input_digest"), approval_ref: args.approval_ref === undefined ? null : text(args.approval_ref, "approval_ref") };
+    const contract = { task_id: text(args.task_id, "task_id"), workspace: text(args.workspace, "workspace"), operation: text(args.operation, "operation"), effect, input_digest: text(args.input_digest, "input_digest"), approval_ref: optionalText(args.approval_ref, "approval_ref") };
     const actionDigest = digestJson(contract); const existing = this.store.find("action_gateway", actionId);
     if (existing) { if (existing.action_digest !== actionDigest) throw new Error("Action idempotency conflict"); return { action: existing, idempotent: true }; }
     return { action: this.store.create("action_gateway", actionId, { ...contract, action_digest: actionDigest, status: "prepared" }), idempotent: false };
@@ -52,7 +52,7 @@ export class ActionGatewayKernel {
     const workspace = resolve(text(action.workspace, "workspace"));
     const dataRoot = resolve(this.dataRoot);
     const operation = String(action.operation);
-    const relativePath = text(args.relative_path ?? "", "relative_path");
+    const relativePath = text(fallback(args.relative_path, ""), "relative_path");
     const inWorkspace = isAbsolute(relativePath)
       ? false
       : !relative(workspace, resolve(workspace, relativePath)).startsWith("..");
@@ -89,7 +89,7 @@ export class AcceptanceGateKernel {
   constructor(store: CraftStore) { this.store = store; }
 
   prepare(args: JsonObject): JsonObject {
-    const gateId = String(args.gate_id ?? `acceptance_gate_${randomUUID().replaceAll("-", "")}`);
+    const gateId = String(fallback(args.gate_id, `acceptance_gate_${randomUUID().replaceAll("-", "")}`));
     const identity = { task_id: text(args.task_id, "task_id"), work_id: text(args.work_id, "work_id"), acceptance_ref: text(args.acceptance_ref, "acceptance_ref"), required_artifact_ids: list(args.required_artifact_ids, "required_artifact_ids"), required_evidence_ids: list(args.required_evidence_ids, "required_evidence_ids") };
     const gateDigest = digestJson(identity); const existing = this.store.find("acceptance_gate", gateId);
     if (existing) { if (existing.gate_digest !== gateDigest) throw new Error("Acceptance Gate idempotency conflict"); return { gate: existing, idempotent: true }; }
@@ -123,18 +123,18 @@ export class DurableWorkerKernel {
   constructor(store: CraftStore) { this.store = store; }
 
   configure(args: JsonObject = {}): JsonObject {
-    const workerId = String(args.worker_id ?? "craft-worker"); const existing = this.store.find("durable_worker", workerId);
+    const workerId = String(fallback(args.worker_id, "craft-worker")); const existing = this.store.find("durable_worker", workerId);
     const worker = { worker_id: workerId, startup: String(args.startup ?? "manual"), notification: String(args.notification ?? "disabled"), lease_ttl_ms: Number(args.lease_ttl_ms ?? 30_000), status: existing?.status ?? "stopped" };
     return { worker: existing ? this.store.save("durable_worker", workerId, { ...payload(existing), ...worker }) : this.store.create("durable_worker", workerId, worker), idempotent: false };
   }
 
-  start(args: JsonObject = {}): JsonObject { const worker = this.store.find("durable_worker", String(args.worker_id ?? "craft-worker")) ?? this.configure(args).worker as JsonObject; if (worker.status === "running") return { worker, idempotent: true }; return { worker: this.store.save("durable_worker", String(worker.id), { ...payload(worker), status: "running", started_at: new Date().toISOString() }), idempotent: false }; }
-  stop(args: JsonObject = {}): JsonObject { const worker = this.store.get("durable_worker", String(args.worker_id ?? "craft-worker")); if (worker.status === "stopped") return { worker, idempotent: true }; return { worker: this.store.save("durable_worker", String(worker.id), { ...payload(worker), status: "stopped", stopped_at: new Date().toISOString() }), idempotent: false }; }
+  start(args: JsonObject = {}): JsonObject { const worker = this.store.find("durable_worker", String(fallback(args.worker_id, "craft-worker"))) ?? this.configure(args).worker as JsonObject; if (worker.status === "running") return { worker, idempotent: true }; return { worker: this.store.save("durable_worker", String(worker.id), { ...payload(worker), status: "running", started_at: new Date().toISOString() }), idempotent: false }; }
+  stop(args: JsonObject = {}): JsonObject { const worker = this.store.get("durable_worker", String(fallback(args.worker_id, "craft-worker"))); if (worker.status === "stopped") return { worker, idempotent: true }; return { worker: this.store.save("durable_worker", String(worker.id), { ...payload(worker), status: "stopped", stopped_at: new Date().toISOString() }), idempotent: false }; }
 
-  enqueue(args: JsonObject): JsonObject { const workerId = String(args.worker_id ?? "craft-worker"); const jobId = String(args.job_id ?? `job_${randomUUID().replaceAll("-", "")}`); const existing = this.store.find("worker_job", jobId); if (existing) return { job: existing, idempotent: true }; return { job: this.store.create("worker_job", jobId, { worker_id: workerId, task_id: text(args.task_id, "task_id"), action: text(args.action, "action"), status: "pending", payload_digest: digestJson(args.payload ?? {}) }), idempotent: false }; }
-  tick(args: JsonObject = {}): JsonObject { const worker = this.store.get("durable_worker", String(args.worker_id ?? "craft-worker")); if (worker.status !== "running") return { worker, jobs: [], skipped: true }; const now = String(args.now ?? new Date().toISOString()); const jobs = this.store.list("worker_job", 100, (item) => item.worker_id === worker.id && item.status === "pending").map((job) => this.store.save("worker_job", String(job.id), { ...payload(job), status: "leased", lease_id: `lease_${job.id}`, leased_at: now })); const saved = this.store.save("durable_worker", String(worker.id), { ...payload(worker), last_tick_at: now, processed_count: Number(worker.processed_count ?? 0) + jobs.length }); return { worker: saved, jobs, skipped: false }; }
-  recover(args: JsonObject = {}): JsonObject { const worker = this.store.get("durable_worker", String(args.worker_id ?? "craft-worker")); const now = Date.parse(String(args.now ?? new Date().toISOString())); const recovered = this.store.list("worker_job", 100, (item) => item.worker_id === worker.id && item.status === "leased" && Date.parse(String(item.leased_at)) + Number(worker.lease_ttl_ms) < now).map((job) => this.store.save("worker_job", String(job.id), { ...payload(job), status: "pending", lease_id: null, recovered_at: new Date(now).toISOString() })); return { recovered, count: recovered.length }; }
-  get(args: JsonObject = {}): JsonObject { return { worker: this.store.get("durable_worker", String(args.worker_id ?? "craft-worker")), jobs: this.store.list("worker_job", 100, (item) => item.worker_id === String(args.worker_id ?? "craft-worker")) }; }
+  enqueue(args: JsonObject): JsonObject { const workerId = String(fallback(args.worker_id, "craft-worker")); const jobId = String(fallback(args.job_id, `job_${randomUUID().replaceAll("-", "")}`)); const existing = this.store.find("worker_job", jobId); if (existing) return { job: existing, idempotent: true }; return { job: this.store.create("worker_job", jobId, { worker_id: workerId, task_id: text(args.task_id, "task_id"), action: text(args.action, "action"), status: "pending", payload_digest: digestJson(fallback(args.payload, {})) }), idempotent: false }; }
+  tick(args: JsonObject = {}): JsonObject { const worker = this.store.get("durable_worker", String(fallback(args.worker_id, "craft-worker"))); if (worker.status !== "running") return { worker, jobs: [], skipped: true }; const now = String(fallback(args.now, new Date().toISOString())); const jobs = this.store.list("worker_job", 100, (item) => item.worker_id === worker.id && item.status === "pending").map((job) => this.store.save("worker_job", String(job.id), { ...payload(job), status: "leased", lease_id: `lease_${job.id}`, leased_at: now })); const saved = this.store.save("durable_worker", String(worker.id), { ...payload(worker), last_tick_at: now, processed_count: Number(worker.processed_count ?? 0) + jobs.length }); return { worker: saved, jobs, skipped: false }; }
+  recover(args: JsonObject = {}): JsonObject { const worker = this.store.get("durable_worker", String(fallback(args.worker_id, "craft-worker"))); const now = Date.parse(String(fallback(args.now, new Date().toISOString()))); const recovered = this.store.list("worker_job", 100, (item) => item.worker_id === worker.id && item.status === "leased" && Date.parse(String(item.leased_at)) + Number(worker.lease_ttl_ms) < now).map((job) => this.store.save("worker_job", String(job.id), { ...payload(job), status: "pending", lease_id: null, recovered_at: new Date(now).toISOString() })); return { recovered, count: recovered.length }; }
+  get(args: JsonObject = {}): JsonObject { return { worker: this.store.get("durable_worker", String(fallback(args.worker_id, "craft-worker"))), jobs: this.store.list("worker_job", 100, (item) => item.worker_id === String(fallback(args.worker_id, "craft-worker"))) }; }
 }
 
 /** Provider routing policy; transport remains injected by the selected Host. */
@@ -144,7 +144,7 @@ export class ProviderRouterKernel {
   plan(args: JsonObject): JsonObject {
     const providers = list(args.providers, "providers"); if (!providers.length) throw new Error("providers must not be empty");
     const preferred = args.preferred === undefined ? providers[0] : text(args.preferred, "preferred"); if (!providers.includes(preferred)) throw new Error("preferred provider must be declared");
-    const routeId = String(args.route_id ?? `provider_route_${randomUUID().replaceAll("-", "")}`); const identity = { providers, preferred, fallback: providers.filter((item) => item !== preferred), task_id: args.task_id ?? null, budget_digest: digestJson(args.budget ?? {}) };
+    const routeId = String(fallback(args.route_id, `provider_route_${randomUUID().replaceAll("-", "")}`)); const identity = { providers, preferred, fallback: providers.filter((item) => item !== preferred), task_id: args.task_id ?? null, budget_digest: digestJson(fallback(args.budget, {})) };
     const existing = this.store.find("provider_route", routeId); if (existing) { if (existing.route_digest !== digestJson(identity)) throw new Error("Provider route idempotency conflict"); return { route: existing, idempotent: true }; }
     return { route: this.store.create("provider_route", routeId, { ...identity, route_digest: digestJson(identity), status: "planned" }), idempotent: false };
   }

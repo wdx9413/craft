@@ -134,4 +134,4 @@ memory 包另有一个 `memory.signals` 内核（`memory-signals.ts` + `memory-s
 - [组件插件架构](component-plugin-architecture.md)：Runtime / MCP / Plugin / Skill 的分工与产品投影。
 - [可插拔能力源](pluggable-capability-sources.md)：能力从哪些来源接入（与"进程内能力"是不同的问题）。
 - [分层与目录地图](../../architecture/layer-map.md)：分层规则与 `capability/` 的层级。
-- ADR：[归属不是投影](../../adr/0009-ownership-is-not-projection.md)、[hook 属于流程](../../adr/0010-a-hook-belongs-to-the-flow.md)、[共享助手只在行为一致处合并](../../adr/0011-merge-shared-helpers-only-where-behaviour-agrees.md)
+- ADR：[归属不是投影](../../adr/0016-ownership-is-not-projection.md)、[hook 属于流程](../../adr/0017-a-hook-belongs-to-the-flow.md)、[共享助手只在行为一致处合并](../../adr/0018-merge-shared-helpers-only-where-behaviour-agrees.md)

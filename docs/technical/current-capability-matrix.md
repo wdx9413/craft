@@ -17,6 +17,7 @@
 | Runtime readiness | deployment fact assessment | evidence, recovery, platform preflight and enterprise binding blockers; does not claim a Host/Sandbox/Broker is deployed |
 | Context selection | implemented | exact references and digests; vector search remains optional |
 | Knowledge Source / Memory Ledger | implemented and tested locally | source scope, digest, trust/access, legacy reference bindings, expiry/revocation and sensitivity are explicit; external systems remain source-owned |
+| Legacy formal knowledge migration | implemented and tested locally | one-time offline importer reads 53 eligible `kefu_llm_wiki` pages into candidate/Evidence records; runtime MCP/Host never scans the legacy tree; no legacy DB/MCP/Gate/FTS index or raw body is copied |
 | Context Resolution Receipt | implemented and tested locally | content-free exact memory/source versions and budgets; untrusted/revoked sources and restricted memory fail closed by default |
 | Component data-space identity | implemented and tested locally | every `craft_info` returns a content-free `data_space_id`; components with different IDs must not assume Ledger, Receipt or Evidence interoperability |
 | Retrieval Adapter admission | implemented and tested locally | keyword default; vector requires provider fingerprint plus recall, zero-leakage, latency and cost evaluation |

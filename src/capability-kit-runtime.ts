@@ -1,4 +1,4 @@
-﻿import { randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
 import { object, text } from "./validation.ts";
 import { canonicalJson, stableDigest, payload } from "./digest.ts";

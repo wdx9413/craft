@@ -1,4 +1,4 @@
-﻿import { createHash } from "node:crypto";
+import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { CraftStore, type JsonObject } from "../../src/infrastructure/store.ts";
@@ -10,7 +10,6 @@ type MemoryDescriptor = { memory_id: string; path: string; name: string; digest:
 function digest(value: unknown): string { return `sha256:${createHash("sha256").update(String(value)).digest("hex")}`; }
 function recordDigest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
 function safeChild(root: string, path: string): string { const target = resolve(root, path);
-  /* node:coverage ignore next */
   if (relative(root, target).startsWith("..")) throw new Error("Project Knowledge path escapes the trusted project root");
   return target;
 }
@@ -19,7 +18,8 @@ function noSecret(value: string): void { if (/(?:api[_-]?key|password|secret|tok
 /** Read-only bridge for Serena's project-local Markdown memories. It never writes .serena. */
 export class ProjectKnowledgeKernel {
   readonly store: CraftStore;
-  constructor(store: CraftStore) { this.store = store; }
+  readonly lstat: typeof lstatSync;
+  constructor(store: CraftStore, lstat: typeof lstatSync = lstatSync) { this.store = store; this.lstat = lstat; }
 
   discover(args: JsonObject): JsonObject {
     if (args.trusted !== true) throw new Error("Project Knowledge discovery requires trusted=true");
@@ -27,8 +27,7 @@ export class ProjectKnowledgeKernel {
     const children = existsSync(memoriesRoot) ? readdirSync(memoriesRoot, { withFileTypes: true }) : [];
     if (children.some((entry) => entry.isSymbolicLink())) throw new Error("Project Knowledge does not follow symbolic links");
     const entries = children.filter((entry) => entry.isFile() && entry.name.endsWith(".md")).sort((a, b) => a.name.localeCompare(b.name)).map((entry) => {
-      const path = safeChild(memoriesRoot, entry.name); const stat = lstatSync(path);
-      /* node:coverage ignore next */
+      const path = safeChild(memoriesRoot, entry.name); const stat = this.lstat(path);
       if (stat.isSymbolicLink()) throw new Error("Project Knowledge does not follow symbolic links");
       const content = readFileSync(path, "utf8");
       return { memory_id: `serena:${entry.name.slice(0, -3)}`, path: `.serena/memories/${entry.name}`, name: entry.name.slice(0, -3), digest: digest(content), size_bytes: stat.size } satisfies MemoryDescriptor;
@@ -44,7 +43,7 @@ export class ProjectKnowledgeKernel {
     if (!requested.length || requested.length > 3 || new Set(requested).size !== requested.length) throw new Error("Project Knowledge resolve accepts one to three unique memory_ids");
     const maxChars = args.max_chars === undefined ? 12_000 : Number(args.max_chars); if (!Number.isInteger(maxChars) || maxChars < 1 || maxChars > 100_000) throw new Error("max_chars must be an integer between 1 and 100000");
     const descriptors = new Map((discovery.descriptors as MemoryDescriptor[]).map((item) => [item.memory_id, item])); const root = text(discovery.project_root, "project_root"); let used = 0;
-    const memories = requested.map((memoryId) => { const entry = descriptors.get(memoryId); if (!entry) throw new Error("Project Knowledge memory is not in this discovery"); const path = safeChild(root, entry.path); const stat = lstatSync(path); if (stat.isSymbolicLink()) throw new Error("Project Knowledge does not follow symbolic links"); const content = readFileSync(path, "utf8"); if (digest(content) !== entry.digest) throw new Error("Project Knowledge memory changed since discovery"); noSecret(content); used += content.length; if (used > maxChars) throw new Error("Project Knowledge exceeds max_chars"); return { memory_id: entry.memory_id, name: entry.name, content, digest: entry.digest }; });
+    const memories = requested.map((memoryId) => { const entry = descriptors.get(memoryId); if (!entry) throw new Error("Project Knowledge memory is not in this discovery"); const path = safeChild(root, entry.path); const stat = this.lstat(path); if (stat.isSymbolicLink()) throw new Error("Project Knowledge does not follow symbolic links"); const content = readFileSync(path, "utf8"); if (digest(content) !== entry.digest) throw new Error("Project Knowledge memory changed since discovery"); noSecret(content); used += content.length; if (used > maxChars) throw new Error("Project Knowledge exceeds max_chars"); return { memory_id: entry.memory_id, name: entry.name, content, digest: entry.digest }; });
     const identity = { discovery_id: discovery.id, discovery_version: discovery.version, selected: memories.map(({ memory_id, name, digest: itemDigest }) => ({ memory_id, name, digest: itemDigest })), max_chars: maxChars };
     const resolutionId = String(args.resolution_id ?? `project_knowledge_resolution_${recordDigest(identity).slice(-16)}`); const existing = this.store.find("project_knowledge_resolution", resolutionId); const resolutionDigest = recordDigest(identity);
     if (existing) { if (existing.resolution_digest !== resolutionDigest) throw new Error("Project Knowledge resolution idempotency conflict"); return { resolution: existing, memories, idempotent: true }; }

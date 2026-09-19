@@ -1,4 +1,4 @@
-﻿import { createHash } from "node:crypto";
+import { createHash } from "node:crypto";
 import type { JsonObject } from "./infrastructure/store.ts";
 import { object, text } from "./validation.ts";
 import { digestJson } from "./digest.ts";

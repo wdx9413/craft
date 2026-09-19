@@ -84,7 +84,7 @@ export class V01226Runtime {
     const manifest = defineAdapterManifest(input);
     const existing = this.store.find("adapter_manifest", manifest.adapter_id);
     if (existing && existing.manifest_digest !== digest(manifest)) {
-      const version = Number(existing.version ?? 0) + 1;
+      const version = Number(existing.version) + 1;
       const saved = this.store.save("adapter_manifest", manifest.adapter_id, { ...manifest, version: manifest.version, previous_version: version, manifest_digest: digest(manifest) });
       return { manifest: saved, idempotent: false };
     }
@@ -143,7 +143,7 @@ export class V01226Runtime {
     const command = request.argv[0]; const args = request.argv.slice(1);
     const child = this.spawnProcess(command, args, { cwd: request.cwd, env: { ...process.env, ...request.env }, shell: request.shell === false ? false : request.shell ?? false, windowsHide: true });
     this.activeProcesses.set(runId, child);
-    const limit = request.output_limit ?? 64 * 1024;
+    const limit = request.output_limit;
     let stdout = ""; let stderr = "";
     child.stdout?.on("data", (chunk: Buffer) => { stdout = `${stdout}${chunk.toString()}`.slice(0, limit); });
     child.stderr?.on("data", (chunk: Buffer) => { stderr = `${stderr}${chunk.toString()}`.slice(0, limit); });
@@ -152,7 +152,7 @@ export class V01226Runtime {
       const finish = (status: CommandStatus, code: number | null, signal?: string) => { if (settled) return; settled = true; const receipt = { run_id: runId, status, exit_code: code, ...(signal ? { signal } : {}), stdout, stderr, stdout_digest: digest(stdout), stderr_digest: digest(stderr), adapter_id: request.adapter_id ?? "local.command", completed_at: now() }; this.activeProcesses.delete(runId); this.store.save("command_run", runId, { ...run, ...receipt }); this.store.appendEvent(`command:${runId}`, "command.completed", receipt); resolve({ run: this.store.get("command_run", runId), receipt }); };
       child.on("error", (error) => finish("failed", null, String(error.message).slice(0, 200)));
       child.on("close", (code, signal) => finish(signal === "SIGTERM" ? "cancelled" : code === 0 ? "completed" : "failed", code, signal ?? undefined));
-      const timeout = request.timeout_ms ?? 120_000;
+      const timeout = request.timeout_ms;
       const timer = setTimeout(() => { child.kill(); }, timeout); child.once("close", () => clearTimeout(timer));
     });
     return outcome;

@@ -1,4 +1,4 @@
-﻿import { randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
 import { TraceKernel } from "./trace-kernel.ts";
 import { object } from "./validation.ts";
