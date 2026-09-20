@@ -258,6 +258,14 @@ test("legacy discovery and import fail closed on escaped roots, stale identities
     const fake = store.create("legacy_knowledge_migration_candidate", "fake", { status: "duplicate" });
     assert.throws(() => kernel.publishReady({ candidate_id: fake.id }), /non-duplicate/);
     assert.throws(() => kernel.retractReady({ candidate_id: fake.id }), /published/);
+    const publishedCandidate = store.create("legacy_knowledge_migration_candidate", "published-for-rebind", {
+      migration_id: "extra", status: "published", claim_id: "claim", source_id: "source", source_locator: "missing.md",
+    });
+    await assert.rejects(kernel.rebindProvenance({ migration_id: "extra", candidate_ids: [] }), /non-empty/);
+    const rebound = await kernel.rebindProvenance({ migration_id: "extra" });
+    assert.equal((rebound.unchanged as JsonObject[]).find((item) => item.candidate_id === publishedCandidate.id)?.reason, "candidate_not_rebindable");
+    const review = await kernel.reviewCandidates({ migration_id: "extra", reviewer: "reviewer", model_ref: "fixture", assessments: [{ candidate_id: publishedCandidate.id, source_digest: "sha256:x", decision: "supported", reason: "not a candidate" }] });
+    assert.equal((review.failures as JsonObject[])[0]?.code, "candidate_not_reviewable");
   } finally { store.close(); await rm(root, { recursive: true, force: true }); await rm(legacy, { recursive: true, force: true }); await rm(outside, { recursive: true, force: true }); }
 });
 

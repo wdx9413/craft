@@ -7,7 +7,7 @@ import { discoverResult, pingPolicy, readRequestMeta } from "../mcp-forward-comp
 import { negotiateProtocolVersion, MCP_PREFERRED_PROTOCOL_VERSION } from "../distribution-and-first-run.ts";
 import { SYSCALL_PASSTHROUGH, SYSCALL_VERBS, buildRegistry, catalogOf, describeEntry, resolveEntry } from "../tool-plane.ts";
 import { type Tool, tool } from "../mcp/tool-schema.ts";
-import { surfaceToolNames as resolveSurfaceToolNames } from "./mcp/surface-registry.ts";
+import { componentForSurface, surfaceToolNames as resolveSurfaceToolNames } from "./mcp/surface-registry.ts";
 import { createRuntimeHandlers } from "./mcp/runtime-handlers.ts";
 import { createWorkHandlers } from "./mcp/work-handlers.ts";
 import { createEvaluationHandlers } from "./mcp/evaluation-handlers.ts";
@@ -18,7 +18,7 @@ export { COMPONENT_SURFACES, COMPONENT_SURFACE_NAMES, DOMAIN_SURFACE_NAMES, SURF
 
 const TOOL_DEFINITIONS: Tool[] = [
   tool("craft_info", "Show the Craft version, data location, and record counts.", [], true),
-  tool("craft_component_readiness_get", "Read content-free readiness, prerequisites, and the next safe action for standalone Knowledge, Memory, or Experience. It never reads stored bodies or claims model-quality improvement.", ["component"], true),
+  tool("craft_component_readiness_get", "Read content-free readiness only. This never retrieves Knowledge, Memory, or Experience, never resolves context, and does not count as using the component; call the component's actual search, context, write, or observation tool when the task requires it. Standalone surfaces accept only their mounted component.", ["component"], true),
   tool("craft_component_diagnose", "Diagnose the currently attached Knowledge, Memory, or Experience component. Optionally compare the Host-visible tools to the expected small surface.", ["component"], true, ["observed_tool_names"]),
   tool("craft_adapter_manifest_save", "Register a versioned Generic Adapter Manifest with declared capabilities, permissions, effects, and platform support.", ["adapter_id", "version", "kind"], false, ["platforms", "entry", "transport", "capabilities", "permissions", "effects", "dependencies", "integrity", "signature", "sandbox_profile", "metadata"]),
   tool("craft_adapter_manifest_get", "Read one exact Generic Adapter Manifest.", ["adapter_id"], true),
@@ -493,6 +493,8 @@ const TOOL_DEFINITIONS: Tool[] = [
   tool("craft_memory_session_finalize", "Finalize a session using only a redacted summary and candidate references.", ["session_id", "summary"], false, ["candidate_ids"]),
   tool("craft_context_resolution_resolve", "Resolve a bounded, scoped host context and write a content-free reproducible Context Resolution Receipt. If no scope is available, return an empty skipped result without reading global memory.", ["query"], false, ["scope_kind", "scope_id", "receipt_id", "source_ids", "memory_ids", "retrieval_adapter_id", "max_items", "max_chars", "now", "allow_restricted"]),
   tool("craft_context_resolution_get", "Read one content-free Context Resolution Receipt.", ["receipt_id"], true, ["version"]),
+  tool("craft_context_working_set_resolve", "Resolve the fixed Context Working Set and explain selected or host-owned members without storing content in the receipt.", ["query"], false, ["working_set_id", "members", "scope_kind", "scope_id", "required_refs", "retrieval_adapter_id", "max_items", "max_chars"]),
+  tool("craft_context_working_set_get", "Read one content-free Context Working Set receipt.", ["working_set_id"], true, ["version"]),
   tool("craft_decision_context_gate_open", "Resolve bounded Context before a named decision point. Missing scope is skipped; a required but empty Context blocks execution and requests clarification or replanning.", ["decision_kind", "query"], false, ["gate_id", "task_id", "scope_kind", "scope_id", "memory_ids", "source_ids", "retrieval_adapter_id", "max_items", "max_chars", "allow_restricted", "require_context", "context_receipt_id"]),
   tool("craft_decision_context_gate_get", "Read one decision-point Context Gate and its exact receipt reference.", ["gate_id"], true),
   tool("craft_retrieval_adapter_configure", "Configure keyword or vector retrieval metadata. A vector adapter remains inactive until an explicit leakage, recall, cost, and latency evaluation passes.", ["strategy"], false, ["adapter_id", "provider_fingerprint", "configuration"]),
@@ -792,6 +794,7 @@ const TOOL_DEFINITIONS: Tool[] = [
   tool("craft_workflow_rollback", "Restore a previously verified workflow version as the latest version.",
     ["workflow_id", "target_version", "reason"]),
   tool("craft_workflow_dag_validate", "Validate a versioned Workflow DAG before persistence. Edges may express bounded retries, conditions, human resume and compensation.", ["nodes"], true, ["edges", "inputs", "outputs", "checkpoint_policy"]),
+  tool("craft_graph_compile", "Compile a validated Graph into an analysis-only Plan for VerifiedWorkLoop; it never calls a Host or creates a second executor.", ["nodes"], true, ["plan_id", "edges", "inputs", "outputs", "checkpoint_policy"]),
   tool("craft_workflow_dag_save", "Save a validated draft Workflow DAG with a canonical graph digest. Saving does not authorize execution.", ["name", "nodes"], false, ["workflow_id", "description", "edges", "inputs", "outputs", "checkpoint_policy", "derived_from"]),
   tool("craft_workflow_dag_get", "Read one versioned Workflow DAG asset and its graph contract.", ["workflow_id"], true, ["version"]),
   tool("craft_workflow_dag_transition", "Advance a Workflow DAG only with held-out Evaluation and Canary evidence.", ["workflow_id", "target", "reason"], false, ["evaluation_run_id", "canary_receipt"]),
@@ -1006,6 +1009,15 @@ const TOOL_DEFINITIONS: Tool[] = [
   tool("craft_capability_lifecycle_retire", "Retire a capability so it can never be activated again.", ["capability_id"], false, ["reason"]),
   tool("craft_capability_lifecycle_resolve", "Resolve one active capability name without silently choosing an ambiguous source.", ["name"], true),
   tool("craft_capability_lifecycle_list", "List unified capability lifecycle records.", [], true),
+  tool("craft_capability_intake_discover", "Record a digest-pinned Capability Source manifest; discovered does not mean executable or trusted.", ["name", "source", "content_digest"], false, ["capability_id", "publisher", "version", "effect", "dependencies", "permissions", "hosts"]),
+  tool("craft_capability_intake_scan", "Run or record a content-free supply-chain scan for a Capability manifest.", ["capability_id"], false, ["scanner", "evidence"]),
+  tool("craft_capability_intake_conformance", "Record capability conformance checks before approval; failed checks cannot be activated.", ["capability_id", "checks"], false),
+  tool("craft_capability_intake_approve", "Approve a conformance-passed capability without activating it.", ["capability_id", "approved_by"]),
+  tool("craft_capability_intake_activate", "Activate an approved capability after the intake gates pass.", ["capability_id"]),
+  tool("craft_capability_intake_revoke", "Revoke a capability and prevent future routing.", ["capability_id", "reason"]),
+  tool("craft_capability_intake_upgrade_plan", "Create a preflight-to-rollback upgrade plan for a capability; it does not publish or activate it.", ["capability_id", "next_version", "next_digest"], false, ["plan_id"]),
+  tool("craft_capability_intake_get", "Read one capability intake record.", ["capability_id"], true),
+  tool("craft_capability_intake_list", "List capability intake records by state.", [], true, ["state", "limit"]),
   tool("craft_memory_remember_episode", "Store one redacted episodic memory for later consolidation.", ["content"], false, ["memory_id", "scope", "source", "task_id", "confidence"]),
   tool("craft_memory_consolidate", "Create a content-free consolidation candidate from approved Ledger memories; it is not auto-published.", ["candidate_ids", "summary"], false, ["consolidation_id"]),
   tool("craft_memory_maintenance_signal", "Record one bounded usage signal for an episodic memory without changing its status.", ["memory_id", "kind"], false, ["value", "signal_id"]),
@@ -1030,6 +1042,15 @@ const TOOL_DEFINITIONS: Tool[] = [
   tool("craft_runtime_truth_compaction_list", "List stored compactions so a Host can find a session it did not name.", [], true, ["limit"]),
   tool("craft_runtime_truth_work_note", "Persist a structured, digest-backed work note for long-running Agent sessions.", ["goal"], false, ["note_id", "decisions", "constraints", "open_questions", "artifacts"]),
   tool("craft_runtime_truth_work_note_get", "Read back one persisted work note, which is what a resuming long-running session starts from.", ["note_id"], true, ["version"]),
+  tool("craft_runtime_attempt_prepare", "Create a content-free, idempotent Runtime Execution Attempt bound to Task, Run, Host, Environment and effect.", ["task_id", "work_loop_id", "run_id", "host_id", "environment_digest", "idempotency_key"], false, ["attempt_id", "effect_class"]),
+  tool("craft_runtime_attempt_dispatch", "Record Host dispatch only; Host completion is not an Outcome.", ["attempt_id", "dispatch_ref"]),
+  tool("craft_runtime_attempt_receipt_pending", "Move an attempt to receipt_pending while waiting for a Host receipt.", ["attempt_id"], false, ["receipt_id"]),
+  tool("craft_runtime_attempt_record_receipt", "Bind a content-free Host receipt to the exact Task, Run, Attempt and idempotency key.", ["attempt_id", "result_digest"], false, ["receipt_id"]),
+  tool("craft_runtime_attempt_observe", "Record a fresh observation and make effect_unknown explicit when the external result is uncertain.", ["attempt_id"], false, ["observation_id", "observed_status", "evidence_digest"]),
+  tool("craft_runtime_attempt_resolve_effect", "Resolve an unknown external effect; confirmed success is accepted only as a runtime fact, not a business Outcome.", ["attempt_id", "resolution"], false, ["receipt_id"]),
+  tool("craft_runtime_attempt_recover", "Reconcile an existing idempotency key after interruption; it never automatically replays an unknown effect.", ["attempt_id"], false, ["reason"]),
+  tool("craft_runtime_attempt_cancel", "Cancel a non-terminal Runtime Execution Attempt with a digest-only reason.", ["attempt_id"], false, ["reason"]),
+  tool("craft_runtime_attempt_get", "Read one Runtime Execution Attempt and its current recovery status.", ["attempt_id"], true),
   tool("craft_os_security_plan", "Plan a platform-specific fail-closed execution boundary with filesystem, network, and secret-broker constraints.", ["workspace"], false, ["plan_id", "platform", "network", "filesystem", "egress_allowlist", "secret_broker"]),
   tool("craft_os_security_verify", "Verify observed platform-boundary evidence before allowing a governed execution.", ["plan_id", "observed", "evidence_ids"], false, ["receipt_id", "verified_by"]),
   tool("craft_mcp_registry_source_register", "Register an HTTPS MCP Registry source with an explicit trust class; no network request is performed.", ["endpoint"], false, ["source_id", "trust", "key_digest"]),
@@ -1069,6 +1090,9 @@ const TOOL_DEFINITIONS: Tool[] = [
   tool("craft_workbench_experience_get", "Read one Work Session-centered Workbench projection.", ["session_id"], true, ["limit"]),
   tool("craft_workbench_experience_review", "Generate a content-free review report with evidence requirements and the next safe action.", [], true, ["project_id", "task_id", "session_id", "limit"]),
   tool("craft_workbench_trace_replay_plan", "Build a revalidation-required replay plan from a canonical Trace; it never executes actions.", ["trace_id"], true),
+  tool("craft_workbench_command_execute", "Apply one versioned human Workbench command through Craft's service facade; it never writes the Store directly from the UI.", ["task_id", "command", "actor", "decision", "expected_version", "reason_digest"], false, ["command_id"]),
+  tool("craft_workbench_command_get", "Read one Workbench command receipt.", ["command_id"], true),
+  tool("craft_workbench_command_list", "List versioned Workbench command receipts for a task.", [], true, ["task_id", "limit"]),
   tool("craft_long_task_suspend", "Persist a durable long-task checkpoint, release the Host, and retain only resumable references and digests.", ["session_id", "wait_condition"], false, ["checkpoint_id", "task_run_id", "host_run_id", "resume_action", "now"]),
   tool("craft_long_task_wake", "Wake a suspended long task from an external event or human signal.", ["checkpoint_id", "signal"], false, ["reason", "now"]),
   tool("craft_long_task_resume", "Revalidate a woken long task and return a fresh Host dispatch plan or a fail-closed replan.", ["checkpoint_id"], false, ["now"]),
@@ -1218,6 +1242,7 @@ export class McpServer {
     this.hooks = (service as { hookPlane?: HookPlane }).hookPlane;
     this.componentTrace = new ComponentTraceKernel(service.trace, `mcp_${randomUUID().replaceAll("-", "")}`);
     const allowed = new Set(surfaceToolNames(mode));
+    const mountedComponent = componentForSurface(mode);
     this.tools = [...ACTIVE_TOOLS, ...SYSCALL_TOOLS].filter((tool) => allowed.has(tool.name));
     this.handlers = {
       ...createRuntimeHandlers(service),
@@ -1225,8 +1250,8 @@ export class McpServer {
       ...createEvaluationHandlers(service),
       ...createWorkspaceHandlers(service),
       craft_info: () => service.info(),
-      craft_component_readiness_get: (a) => service.componentReadinessGet(a),
-      craft_component_diagnose: (a) => service.componentDiagnose(a),
+      craft_component_readiness_get: (a) => service.componentReadinessGet(a, mountedComponent),
+      craft_component_diagnose: (a) => service.componentDiagnose(a, mountedComponent),
       craft_adapter_manifest_save: (a) => service.adapterManifestSave(a), craft_adapter_manifest_get: (a) => service.adapterManifestGet(a), craft_adapter_manifest_list: (a) => service.adapterManifestList(a),
       craft_adapter_health: (a) => service.adapterHealth(a), craft_adapter_conformance: (a) => service.adapterConformance(a), craft_adapter_quarantine: (a) => service.adapterQuarantine(a), craft_adapter_rollback: (a) => service.adapterRollback(a),
       craft_command_plan: (a) => service.commandPlan(a), craft_command_run: (a) => service.commandRun(a), craft_command_observe: (a) => service.commandObserve(a), craft_command_cancel: (a) => service.commandCancel(a),
@@ -1466,6 +1491,7 @@ export class McpServer {
       craft_workflow_transition: (a) => service.workflowTransition(a),
       craft_workflow_rollback: (a) => service.workflowRollback(a),
       craft_workflow_dag_validate: service.workflowDagValidate.bind(service), craft_workflow_dag_save: service.workflowDagSave.bind(service), craft_workflow_dag_get: service.workflowDagGet.bind(service), craft_workflow_dag_transition: service.workflowDagTransition.bind(service), craft_workflow_checkpoint: service.workflowDagCheckpoint.bind(service), craft_workflow_resume: service.workflowDagResume.bind(service), craft_workflow_run_cancel: service.workflowDagCancel.bind(service), craft_workflow_replan: service.workflowDagReplan.bind(service), craft_workflow_export: service.workflowDagExport.bind(service), craft_workflow_import: service.workflowDagImport.bind(service),
+      craft_graph_compile: service.graphCompile.bind(service),
       craft_task_state_transition: service.taskStateTransition.bind(service), craft_task_state_get: service.taskStateGet.bind(service), craft_task_state_replay: service.taskStateReplay.bind(service),
       craft_experience_pattern_create: (a) => service.experiencePatternCreate(a),
       craft_experience_pattern_get: (a) => service.get("experience_pattern", "pattern_id", a),
@@ -1567,7 +1593,9 @@ export class McpServer {
       craft_memory_candidate_propose: service.memoryCandidatePropose.bind(service), craft_memory_candidate_review: service.memoryCandidateReview.bind(service), craft_memory_ledger_remember_approved: service.memoryLedgerRememberApproved.bind(service), craft_memory_capture_user_statement: service.memoryCaptureUserStatement.bind(service),
       craft_memory_policy_save: service.memoryPolicySave.bind(service), craft_memory_policy_get: service.memoryPolicyGet.bind(service),
       craft_memory_conflict_list: service.memoryConflictList.bind(service), craft_memory_conflict_resolve: service.memoryConflictResolve.bind(service), craft_memory_expiry_sweep: service.memoryExpirySweep.bind(service), craft_memory_session_finalize: service.memorySessionFinalize.bind(service),
-      craft_context_resolution_resolve: service.contextResolutionResolve.bind(service), craft_context_resolution_get: service.contextResolutionGet.bind(service), craft_decision_context_gate_open: service.decisionContextGateOpen.bind(service), craft_decision_context_gate_get: service.decisionContextGateGet.bind(service),
+      craft_context_resolution_resolve: service.contextResolutionResolve.bind(service), craft_context_resolution_get: service.contextResolutionGet.bind(service),
+      craft_context_working_set_resolve: service.contextWorkingSetResolve.bind(service), craft_context_working_set_get: service.contextWorkingSetGet.bind(service),
+      craft_decision_context_gate_open: service.decisionContextGateOpen.bind(service), craft_decision_context_gate_get: service.decisionContextGateGet.bind(service),
       craft_retrieval_adapter_configure: service.retrievalAdapterConfigure.bind(service), craft_retrieval_adapter_evaluate: service.retrievalAdapterEvaluate.bind(service),
       craft_turn_policy_save: service.turnPolicySave.bind(service), craft_turn_policy_get: service.turnPolicyGet.bind(service),
       craft_turn_proposal_submit: service.turnProposalSubmit.bind(service), craft_turn_host_adapter_save: service.turnHostAdapterSave.bind(service), craft_turn_hook_plan: service.turnHookPlan.bind(service),
@@ -1641,6 +1669,10 @@ export class McpServer {
       craft_capability_lifecycle_retire: (a) => service.capabilityLifecycleRetire(a),
       craft_capability_lifecycle_resolve: (a) => service.capabilityLifecycleResolve(a),
       craft_capability_lifecycle_list: () => service.capabilityLifecycleList(),
+      craft_capability_intake_discover: service.capabilityIntakeDiscover.bind(service), craft_capability_intake_scan: service.capabilityIntakeScan.bind(service),
+      craft_capability_intake_conformance: service.capabilityIntakeConformance.bind(service), craft_capability_intake_approve: service.capabilityIntakeApprove.bind(service),
+      craft_capability_intake_activate: service.capabilityIntakeActivate.bind(service), craft_capability_intake_revoke: service.capabilityIntakeRevoke.bind(service),
+      craft_capability_intake_upgrade_plan: service.capabilityIntakeUpgradePlan.bind(service), craft_capability_intake_get: service.capabilityIntakeGet.bind(service), craft_capability_intake_list: service.capabilityIntakeList.bind(service),
       craft_memory_remember_episode: (a) => service.memoryConsolidationRemember(a),
       craft_memory_consolidate: service.memoryConsolidateGoverned.bind(service),
       craft_memory_resolve: (a) => service.memoryConsolidationResolve(a),
@@ -1665,6 +1697,10 @@ export class McpServer {
       craft_runtime_truth_compaction_list: (a) => service.runtimeTruthCompactionList(a),
       craft_runtime_truth_work_note: (a) => service.runtimeTruthWorkNote(a),
       craft_runtime_truth_work_note_get: (a) => service.runtimeTruthWorkNoteGet(a),
+      craft_runtime_attempt_prepare: service.runtimeAttemptPrepare.bind(service), craft_runtime_attempt_dispatch: service.runtimeAttemptDispatch.bind(service),
+      craft_runtime_attempt_receipt_pending: service.runtimeAttemptReceiptPending.bind(service), craft_runtime_attempt_record_receipt: service.runtimeAttemptRecordReceipt.bind(service),
+      craft_runtime_attempt_observe: service.runtimeAttemptObserve.bind(service), craft_runtime_attempt_resolve_effect: service.runtimeAttemptResolveEffect.bind(service),
+      craft_runtime_attempt_recover: service.runtimeAttemptRecover.bind(service), craft_runtime_attempt_cancel: service.runtimeAttemptCancel.bind(service), craft_runtime_attempt_get: service.runtimeAttemptGet.bind(service),
       craft_os_security_plan: (a) => service.osSecurityPlan(a),
       craft_os_security_verify: (a) => service.osSecurityVerify(a),
       craft_mcp_registry_source_register: (a) => service.mcpRegistrySourceRegister(a),
@@ -1694,6 +1730,7 @@ export class McpServer {
       craft_workbench_experience_get: (a) => service.workbenchExperienceGet(a),
       craft_workbench_experience_review: (a) => service.workbenchExperienceReview(a),
       craft_workbench_trace_replay_plan: (a) => service.workbenchTraceReplayPlan(a),
+      craft_workbench_command_execute: service.workbenchCommandExecute.bind(service), craft_workbench_command_get: service.workbenchCommandGet.bind(service), craft_workbench_command_list: service.workbenchCommandList.bind(service),
       craft_long_task_suspend: (a) => service.longTaskSuspend(a),
       craft_long_task_wake: (a) => service.longTaskWake(a),
       craft_long_task_resume: (a) => service.longTaskResume(a),

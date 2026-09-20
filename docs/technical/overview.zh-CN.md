@@ -142,6 +142,7 @@ Observed Delivery ──pairs──> Eval Campaign Report ──with Canary Evid
 - [Capability Canary：能力灰度与运行证据](modules/capability-canary.md)
 - [Capability Federation：可审查的团队与组织能力共享](modules/capability-federation.md)
 - [Hub Sync：大规模能力目录的可信增量同步](modules/hub-sync.md)
+- [v0.12.35 控制面收口](modules/v01235-control-plane.md)：运行事实、Context Working Set、Workbench 命令、Capability Intake 与 Graph 编译。
 - [Capability Materialization：能力内容按需落地](modules/capability-materialization.md)
 - [Capability Certification：候选能力认证与晋级](modules/capability-certification.md)
 - [Supply-chain Governance：可信能力的持续治理](modules/supply-chain-governance.md)

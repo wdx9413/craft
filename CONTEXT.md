@@ -226,6 +226,24 @@ _Avoid_: 覆盖证据、安全例外、人工通过
 **Work Delivery**：对终态 Host Receipt 与 Acceptance 的只读交付观察，明确区分待验收、接受、拒绝、阻塞和 Host 失败。
 _Avoid_: Host Run、Artifact
 
+**Runtime Execution Attempt**：绑定 Task、Verified Work Loop、Run、Host、Environment、Effect 和幂等键的一次外部执行尝试。它只记录运行事实与引用，不保存 Prompt、Cookie、Token 或业务正文；Host 完成不是 Outcome。
+_Avoid_: Host 进程、Outcome、自动重放
+
+**Runtime Observation**：对 Attempt 当前外部状态的独立、追加式观察。`effect_unknown` 必须先进入 reconcile，不得自动重放原动作。
+_Avoid_: Host 自述、Outcome
+
+**Context Working Set**：一次工作实际允许进入 Host Context 的固定成员、引用、排除原因、预算和检索回执。`history` 由 Host 提供，`state` 来自当前任务；二者不是可插拔知识源。
+_Avoid_: 全量历史、未筛选知识库
+
+**Capability Intake**：Skill、MCP、Workflow、Adapter、Evaluator 等能力从发现、扫描、Conformance、审批到激活/撤销的统一供应链入口。可发现不等于可执行，扫描通过也不等于可路由。
+_Avoid_: 自动安装、自动信任
+
+**Graph Compilation**：将 Graph 静态校验、循环/重试/补偿分析后降低为 Verified Work Loop 的 Plan。Graph 不拥有 Runtime、权限或 Host 调用权。
+_Avoid_: 第二套 Graph 执行器
+
+**Workbench Command**：带 `command_id`、`task_id`、`expected_version`、`actor`、`decision` 和 `reason_digest` 的人机协作命令。Workbench 只调用 Craft Service，不直接写 Store。
+_Avoid_: UI 私写状态、无版本覆盖
+
 ## 评测与演进
 
 **Trial**：以精确 Subject、Harness、输入、环境和预算执行或观察的一次可比较尝试。它是评测的最小实验单位。

@@ -161,6 +161,11 @@ import { TraceReviewKernel } from "../trace-review.ts";
 import { MemoryMaintenanceKernel } from "../memory-maintenance.ts";
 import { RuntimeModelProbeKernel } from "../runtime-model-probe.ts";
 import { EvaluationContractKernel } from "../evaluation-contract.ts";
+import { RuntimeExecutionAttemptKernel } from "../runtime-execution-attempt.ts";
+import { ContextWorkingSetKernel } from "../context-working-set.ts";
+import { GraphCompilerKernel } from "../graph-compiler.ts";
+import { CapabilityIntakeKernel } from "../capability-intake.ts";
+import { WorkbenchCommandKernel } from "../workbench-command.ts";
 
 /**
  * Stable composition root for the service. Domain behavior stays in focused
@@ -290,6 +295,16 @@ export abstract class ServiceFoundation {
   readonly mcpTasks: McpTaskKernel;
   readonly runtimeProof: RuntimeProofKernel;
   readonly evaluationContracts: EvaluationContractKernel;
+  /** Cross-host execution facts; Hosts only report through this seam. */
+  readonly runtimeAttempts: RuntimeExecutionAttemptKernel;
+  /** Context selection explanation and content-free receipt. */
+  readonly contextWorkingSets: ContextWorkingSetKernel;
+  /** Graph lowering is analysis only; VerifiedWorkLoop remains the executor. */
+  readonly graphCompiler: GraphCompilerKernel;
+  /** Capability source/scanning/conformance gate. */
+  readonly capabilityIntake: CapabilityIntakeKernel;
+  /** Versioned human commands; command effects stay in the service facade. */
+  readonly workbenchCommands: WorkbenchCommandKernel;
   readonly remoteInterop: RemoteInteropKernel;
   readonly platformOperations: PlatformOperationsKernel;
   readonly modelProviders: readonly ModelProviderSpec[];
@@ -426,12 +441,16 @@ export abstract class ServiceFoundation {
     // `component-context` all expose `craft_context_resolution_*`, so a Host that loads only one
     // concern still has to be able to resolve what that concern holds.
     this.contextResolution = new ContextResolutionKernel(store, capabilities.contributed);
+    this.contextWorkingSets = new ContextWorkingSetKernel(store, this.contextResolution);
     this.contextProjection = new ContextProjectionKernel(store);
     this.decisionContextGate = new DecisionPointContextGate(store, this.contextResolution);
     this.stateView = new StateViewKernel(store);
     this.knowledgeRelations = capabilities.registry.require<KnowledgeRelationKernel>(KNOWLEDGE_KERNELS.relations);
     this.memoryGovernance = new MemoryGovernanceKernel(store, this.memoryLedger);
     this.workflowDag = new WorkflowDagKernel(store);
+    this.graphCompiler = new GraphCompilerKernel(this.workflowDag);
+    this.capabilityIntake = new CapabilityIntakeKernel(store);
+    this.workbenchCommands = new WorkbenchCommandKernel(store);
     this.taskState = new TaskStateKernel(store);
     this.workRuntimeModes = new WorkRuntimeModeKernel(store, this.hostDrivers.keys());
     this.turnCognitive = new TurnCognitiveRuntime(store, this.memoryLedger);
@@ -484,6 +503,7 @@ export abstract class ServiceFoundation {
     this.hostSessions = new HostSessionEventKernel(store, this.trace);
     this.outcomeObservers = new OutcomeObserverKernel(store, this.trace);
     this.runtimeTruth = new RuntimeTruthKernel(store);
+    this.runtimeAttempts = new RuntimeExecutionAttemptKernel(store);
     this.osSecurity = new OsSecurityKernel(store);
     this.mcpRegistry = new McpRegistryKernel(store);
     this.a2aTransport = new A2ATransportKernel();

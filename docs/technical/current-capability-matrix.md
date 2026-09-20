@@ -1,4 +1,4 @@
-# Current Capability Matrix (v0.12.34)
+# Current Capability Matrix (v0.12.35)
 
 ## 单点能力的统一评测契约
 
@@ -54,6 +54,11 @@
 | Knowledge Source / Memory Ledger | implemented and tested locally | source scope, digest, trust/access, legacy reference bindings, expiry/revocation and sensitivity are explicit; external systems remain source-owned |
 | Legacy formal knowledge migration | implemented and tested locally | one-time offline importer reads 53 eligible `kefu_llm_wiki` pages into candidate/Evidence records; runtime MCP/Host never scans the legacy tree; no legacy DB/MCP/Gate/FTS index or raw body is copied |
 | Context Resolution Receipt | implemented and tested locally | content-free exact memory/source versions and budgets; untrusted/revoked sources and restricted memory fail closed by default |
+| Runtime Execution Attempt | implemented and tested locally | content-free Task/Run/Host/Environment/Effect facts; `effect_unknown` requires reconciliation and cannot be replayed automatically |
+| Context Working Set | implemented and tested locally | fixed five-member selection with selected/omitted explanation; history/state remain Host/current-task boundaries; vector remains optional |
+| Workbench Commands | implemented and tested locally | versioned, idempotent human commands; UI delegates through Craft Service and never writes Store directly |
+| Capability Intake | implemented and tested locally | discovered → scanned → conformance → approved → active lifecycle with revoke and upgrade plan; discovery is not execution |
+| Graph Compilation | implemented and tested locally | analysis-only lowering to `VerifiedWorkLoop` Plan; Graph owns no Runtime, permission or Host call |
 | Component data-space identity | implemented and tested locally | every `craft_info` returns a content-free `data_space_id`; components with different IDs must not assume Ledger, Receipt or Evidence interoperability |
 | Retrieval Adapter admission | implemented and tested locally | keyword default; vector requires provider fingerprint plus recall, zero-leakage, latency and cost evaluation |
 | Turn Cognitive Runtime | implemented and tested locally | Host/Craft Agent submits a content-free semantic proposal; scoped Policy issues a minimal receipt and optional user-governed memory candidate, but cannot install Host hooks or execute tools |

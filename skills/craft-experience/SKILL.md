@@ -11,6 +11,7 @@ Default loop for repeated coding work:
 
 1. Call `craft_component_readiness_get` with `component: "experience"`.
    If this component is missing in an otherwise enabled plugin, call `craft_component_diagnose` to distinguish an empty Experience ledger from an unattached or stale Host bundle.
+   Readiness is only an availability preflight: it does not record an Observation, create a Workflow draft, or count as using Experience. Continue with the actual observation call after a real outcome.
 2. After a real, independently observed outcome, record or reuse bounded Evidence and call `craft_workflow_evolution_observe` with a stable scenario key such as `coding:test-failure-recovery`. A trusted Codex Hook can create this only after a local edit plus terminal verification; it stores digests and result classes, never command or output bodies. The observation must be sanitized and content-free.
 3. Do not propose anything before at least two independent observations of the same scenario. Call `craft_workflow_evolution_propose` with at most two design axes.
 4. A Host or configured model may submit a draft with `craft_workflow_evolution_proposal_submit`; it is not usable by default.

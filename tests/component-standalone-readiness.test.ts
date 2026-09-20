@@ -51,6 +51,11 @@ test("standalone readiness makes empty ledgers and the coding experience thresho
     assert.equal((await knowledge.handlers.craft_component_readiness_get({ component: "knowledge" })).state, "bootstrap_required");
     assert.equal((await memory.handlers.craft_component_readiness_get({ component: "memory" })).state, "bootstrap_required");
     assert.equal((await experience.handlers.craft_component_readiness_get({ component: "experience" })).state, "independent_observations_required");
+    assert.deepEqual((await knowledge.handlers.craft_component_readiness_get({ component: "knowledge" })).usage, {
+      kind: "readiness_only",
+      component_used: false,
+      context_resolved: false,
+    });
     assert.throws(() => f.service.componentReadinessGet({ component: "all" }), /component must be knowledge/u);
     await knowledge.handlers.craft_knowledge_bootstrap_install({});
     f.store.create("knowledge_claim", "statusless", {});
@@ -74,6 +79,25 @@ test("standalone readiness makes empty ledgers and the coding experience thresho
     assert.equal((await knowledge.handlers.craft_component_readiness_get({ component: "knowledge" })).state, "ready");
     assert.equal((await memory.handlers.craft_component_readiness_get({ component: "memory" })).state, "ready");
     assert.equal((await experience.handlers.craft_component_readiness_get({ component: "experience" })).state, "evaluation_required");
+  } finally { await dispose(f); }
+});
+
+test("standalone readiness is scoped to the mounted component and cannot substitute for retrieval", async () => {
+  const f = await fixture();
+  try {
+    const memory = new McpServer(f.service, productSurfaceOf("memory"));
+    const experience = new McpServer(f.service, productSurfaceOf("experience"));
+    assert.throws(
+      () => memory.handlers.craft_component_readiness_get({ component: "knowledge" }),
+      /mounted component is memory/u,
+    );
+    const response = await experience.handle({
+      jsonrpc: "2.0", id: 1, method: "tools/call",
+      params: { name: "craft_component_readiness_get", arguments: { component: "knowledge" } },
+    }) as JsonObject;
+    const result = response.result as JsonObject;
+    assert.equal(result.isError, true);
+    assert.match(String((result.content as JsonObject[])[0]?.text), /mounted component is experience/u);
   } finally { await dispose(f); }
 });
 

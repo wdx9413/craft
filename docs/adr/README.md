@@ -25,6 +25,10 @@
 | [0019](0019-transcript-is-not-an-external-capability.md) | transcript 不对外成为能力：自托管时 Craft 即宿主，`history` 保持 `host_provided` |
 | [0020](0020-one-compaction-policy.md) | 压缩只有一套策略：`compact()` 先保留连续近期后缀再按权重竞争，保护是减法 |
 | [0021](0021-agent-harness-runtime-context-boundaries.md) | Agent、Harness、Runtime、Context 与 State 分层；完整流程与单点能力共享一套事实账本 |
+| [0022](0022-graph-lowers-to-verified-work-loop.md) | Graph 只编译为 Verified Work Loop Plan，不拥有第二套 Runtime 或权限 |
+| [0023](0023-effect-unknown-requires-reconciliation.md) | 外部 Effect 未知时必须先对账，禁止自动重放 |
+| [0024](0024-capability-supply-chain-governance.md) | 能力必须经过来源、扫描、Conformance、审批和可回滚的供应链治理 |
+| [0025](0025-context-working-set-is-the-retrieval-seam.md) | Context Working Set 是可解释、可复现、可评测的检索边界 |
 
 ## 与技术文档的关系
 
@@ -37,3 +41,4 @@
 | 0001、0002 | [产品路线](../product/roadmap.zh-CN.md) |
 | 0006 | [Uncertainty Policy](../technical/modules/platform-ideal-state-v1.md) |
 | 0021 | [架构与分层地图](../architecture/layer-map.md)、[Craft 架构](../architecture.zh-CN.md) |
+| 0022、0023、0024、0025 | [v0.12.35 控制面收口](../technical/modules/v01235-control-plane.md) |

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { COMPONENT_SURFACE_NAMES, McpServer, domainSurfaceOf, surfaceToolNames } from "../src/mcp.ts";
-import { surfaceToolNames as resolveSurfaceToolNames } from "../src/interfaces/mcp/surface-registry.ts";
+import { componentForSurface, surfaceToolNames as resolveSurfaceToolNames } from "../src/interfaces/mcp/surface-registry.ts";
 import { assertExecutionHostMode, defaultExecutionHostMode, executionHostDescriptor } from "../src/host-protocol.ts";
 import { CraftService, VERSION } from "../src/service.ts";
 import { CraftStore } from "../src/infrastructure/store.ts";
@@ -68,6 +68,13 @@ test("component products expose a deep context and generic quality surface witho
 });
 
 test("surface registry keeps generic quality and every bounded projection deterministic", () => {
+  assert.equal(componentForSurface("component-knowledge"), "knowledge");
+  assert.equal(componentForSurface("component-knowledge-daily"), "knowledge");
+  assert.equal(componentForSurface("component-memory"), "memory");
+  assert.equal(componentForSurface("component-memory-daily"), "memory");
+  assert.equal(componentForSurface("component-experience"), "experience");
+  assert.equal(componentForSurface("component-experience-daily"), "experience");
+  assert.equal(componentForSurface("component-context"), undefined);
   assert.equal(domainSurfaceOf("craft_capability_search"), "governance");
   assert.equal(domainSurfaceOf("craft_evaluation_run_record"), "evaluation");
   assert.equal(domainSurfaceOf("craft_runtime_readiness_get"), "execution");

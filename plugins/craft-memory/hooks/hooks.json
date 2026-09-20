@@ -1,6 +1,14 @@
 {
   "description": "Resolve scoped Craft Memory and capture only explicit remember commands.",
   "hooks": {
+    "SessionStart": [{
+      "hooks": [{
+        "type": "command",
+        "command": "node ${PLUGIN_ROOT}/dist/plugin/craft-codex-hook.cjs --member memory",
+        "timeout": 3,
+        "statusMessage": "Checking Craft Memory lifecycle"
+      }]
+    }],
     "UserPromptSubmit": [{
       "hooks": [{
         "type": "command",
@@ -8,6 +16,35 @@
         "timeout": 3,
         "statusMessage": "Resolving scoped Craft Memory",
         "additionalContextLimit": 3200
+      }, {
+        "type": "mcp_tool",
+        "server": "craft-memory",
+        "tool": "craft_context_resolution_resolve",
+        "input": {
+          "query": "${prompt}",
+          "scope_kind": "project",
+          "scope_id": "${cwd}",
+          "max_items": 6,
+          "max_chars": 3000
+        },
+        "timeout": 3,
+        "statusMessage": "Calling Craft Memory MCP"
+      }]
+    }],
+    "Stop": [{
+      "hooks": [{
+        "type": "command",
+        "command": "node ${PLUGIN_ROOT}/dist/plugin/craft-codex-hook.cjs --member memory",
+        "timeout": 3,
+        "statusMessage": "Closing Craft Memory turn"
+      }]
+    }],
+    "SessionEnd": [{
+      "hooks": [{
+        "type": "command",
+        "command": "node ${PLUGIN_ROOT}/dist/plugin/craft-codex-hook.cjs --member memory",
+        "timeout": 3,
+        "statusMessage": "Closing Craft Memory session"
       }]
     }]
   }

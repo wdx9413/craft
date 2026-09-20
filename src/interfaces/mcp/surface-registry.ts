@@ -88,6 +88,15 @@ export const COMPONENT_SURFACE_NAMES: readonly string[] = Object.keys(COMPONENT_
 export const DOMAIN_SURFACE_NAMES: readonly string[] = SURFACE_RULES.map((rule) => rule.name);
 export const SURFACE_NAMES: readonly string[] = ["core", ...DOMAIN_SURFACE_NAMES, ...COMPONENT_SURFACE_NAMES, "syscall", "full"];
 
+export type MountedComponent = "knowledge" | "memory" | "experience";
+
+export function componentForSurface(surface: string): MountedComponent | undefined {
+  if (surface === "component-knowledge" || surface === "component-knowledge-daily") return "knowledge";
+  if (surface === "component-memory" || surface === "component-memory-daily") return "memory";
+  if (surface === "component-experience" || surface === "component-experience-daily") return "experience";
+  return undefined;
+}
+
 export function domainSurfaceOf(toolName: string): string {
   return SURFACE_RULES.find((rule) => rule.pattern.test(toolName))?.name ?? "workflow";
 }

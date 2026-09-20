@@ -3,11 +3,13 @@ import { CRAFT_RELEASE_VERSION } from "./version.ts";
 
 const COMPONENTS = new Set(["knowledge", "memory", "experience"]);
 
-function component(value: unknown): "knowledge" | "memory" | "experience" {
+export type ComponentName = "knowledge" | "memory" | "experience";
+
+function component(value: unknown): ComponentName {
   if (typeof value !== "string" || !COMPONENTS.has(value)) {
     throw new Error("component must be knowledge, memory, or experience");
   }
-  return value as "knowledge" | "memory" | "experience";
+  return value as ComponentName;
 }
 
 function countByStatus(store: CraftStore, kind: string): Record<string, number> {
@@ -29,8 +31,10 @@ export class ComponentReadinessKernel {
   readonly store: CraftStore;
   constructor(store: CraftStore) { this.store = store; }
 
-  get(args: JsonObject): JsonObject {
-    switch (component(args.component)) {
+  get(args: JsonObject, mountedComponent?: ComponentName): JsonObject {
+    const name = component(args.component);
+    ensureMountedComponent(name, mountedComponent);
+    switch (name) {
       case "knowledge": return this.knowledge();
       case "memory": return this.memory();
       case "experience": return this.experience();
@@ -43,9 +47,10 @@ export class ComponentReadinessKernel {
    * current conversation.  A Host may supply its visible tool names to turn that fact into a
    * concrete stale-bundle or missing-surface diagnosis.
    */
-  diagnose(args: JsonObject): JsonObject {
+  diagnose(args: JsonObject, mountedComponent?: ComponentName): JsonObject {
     const name = component(args.component);
-    const readiness = this.get({ component: name });
+    ensureMountedComponent(name, mountedComponent);
+    const readiness = this.get({ component: name }, mountedComponent);
     const expected = REQUIRED_TOOLS[name];
     const observed = args.observed_tool_names === undefined ? null : toolNames(args.observed_tool_names);
     const missing = observed === null ? [] : expected.filter((tool) => !observed.includes(tool));
@@ -76,6 +81,11 @@ export class ComponentReadinessKernel {
         : state === "evidence_review_pending" ? "search_or_draft_evidence_backed_claims_then_review_them"
           : "resolve_a_bounded_context_receipt_for_the_current_scope",
       model_effect_proven: false,
+      usage: {
+        kind: "readiness_only",
+        component_used: false,
+        context_resolved: false,
+      },
     };
   }
 
@@ -92,6 +102,11 @@ export class ComponentReadinessKernel {
         : state === "candidate_or_approval_required" ? "propose_and_review_one_scoped_evidence_linked_memory"
           : "resolve_only_the_current_scope_and_record_outcome_linked_usage",
       model_effect_proven: false,
+      usage: {
+        kind: "readiness_only",
+        component_used: false,
+        context_resolved: false,
+      },
     };
   }
 
@@ -108,6 +123,11 @@ export class ComponentReadinessKernel {
         : state === "draft_proposal_available" ? "propose_a_workflow_change_with_at_most_two_design_axes"
           : "evaluate_the_draft_in_shadow_then_use_signoff_and_canary_before_routing",
       model_effect_proven: false,
+      usage: {
+        kind: "readiness_only",
+        component_used: false,
+        context_resolved: false,
+      },
     };
   }
 }
@@ -117,6 +137,12 @@ const REQUIRED_TOOLS: Readonly<Record<"knowledge" | "memory" | "experience", rea
   memory: ["craft_component_readiness_get", "craft_context_resolution_resolve", "craft_memory_maintenance_run"],
   experience: ["craft_component_readiness_get", "craft_workflow_evolution_observe", "craft_workflow_evolution_propose"],
 };
+
+function ensureMountedComponent(requested: ComponentName, mounted?: ComponentName): void {
+  if (mounted !== undefined && requested !== mounted) {
+    throw new Error(`The mounted component is ${mounted}; it cannot answer ${requested} readiness. Call the craft-${requested} component instead.`);
+  }
+}
 
 function toolNames(value: unknown): string[] {
   if (!Array.isArray(value)) throw new Error("observed_tool_names must be an array");

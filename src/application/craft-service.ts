@@ -48,7 +48,7 @@ import { object, text } from "../validation.ts";
 import { canonicalJson } from "../digest.ts";
 import { CRAFT_RELEASE_VERSION } from "../version.ts";
 import type { EvaluationContractInput, EvaluationStage } from "../evaluation-contract.ts";
-import { ComponentReadinessKernel } from "../component-readiness.ts";
+import { ComponentReadinessKernel, type ComponentName } from "../component-readiness.ts";
 
 export const VERSION = CRAFT_RELEASE_VERSION;
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
@@ -550,8 +550,8 @@ export class CraftService extends ServiceFoundation {
   }
 
   /** Content-free readiness for a separately mounted component product. */
-  componentReadinessGet(args: JsonObject): JsonObject { return new ComponentReadinessKernel(this.store).get(args); }
-  componentDiagnose(args: JsonObject): JsonObject { return new ComponentReadinessKernel(this.store).diagnose(args); }
+  componentReadinessGet(args: JsonObject, mountedComponent?: ComponentName): JsonObject { return new ComponentReadinessKernel(this.store).get(args, mountedComponent); }
+  componentDiagnose(args: JsonObject, mountedComponent?: ComponentName): JsonObject { return new ComponentReadinessKernel(this.store).diagnose(args, mountedComponent); }
 
   sourceAdd(args: JsonObject): Promise<JsonObject> {
     const label = args.label === undefined ? undefined : text(args.label, "label");

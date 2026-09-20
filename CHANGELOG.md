@@ -1,9 +1,18 @@
 # Changelog
 
-> Note on numbering: the declared package version is now **0.12.34**. Earlier
+> Note on numbering: the declared package version is now **0.12.35**. Earlier
 > `v0.12.34`–`v0.12.43` headings name **incremental work on the previous revision**,
 > not releases. Each is a self-contained change set with its own 100%-coverage
 > test script; the version bump happens only when the work is released.
+
+## v0.12.35（本次发布）
+
+- 收口 P0-P2 控制面：新增 Runtime Execution Attempt、Context Working Set、Workbench Command、Capability Intake 和 Graph Compiler；Graph 只生成交给 `VerifiedWorkLoop` 的 Plan。
+- 运行 Attempt 绑定 Task/Run/Host/Environment/Effect/Receipt/Observation，并将 `effect_unknown` 固定为需人工或受控 reconcile、禁止自动重放；上下文回执只保存引用、预算与选择原因。
+- 新增能力来源扫描、Conformance、审批、撤销和升级计划；扩展 MCP、CONTEXT、技术模块文档与 ADR，并为新模块建立 100% 行/函数/分支门禁。
+- 将 `craft_component_readiness_get` 明确限定为内容无关的可达性预检：返回值标记为 `readiness_only`，不会冒充 Knowledge 检索、Memory 读取、Experience 观察或 Context Resolution。
+- 独立 Knowledge、Memory、Experience MCP 面只接受自身组件的 readiness/diagnose 请求；错挂载调用会失败并指向正确的组件入口。
+- 同步组件插件、适配器和 Marketplace 版本元数据至 `0.12.35`。
 
 ## v0.12.34
 

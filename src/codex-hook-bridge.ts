@@ -12,8 +12,16 @@ import type { JsonObject } from "./infrastructure/store.ts";
 import { payload, stableDigest } from "./digest.ts";
 
 export type CodexHookMember = "knowledge" | "memory" | "experience";
-type HookEvent = "UserPromptSubmit" | "PostToolUse" | "Stop";
-type HookInput = JsonObject & { hook_event_name?: string; cwd?: string; session_id?: string; turn_id?: string };
+type HookEvent = "SessionStart" | "SessionEnd" | "UserPromptSubmit" | "PostToolUse" | "Stop";
+type HookInput = JsonObject & {
+  hook_event_name?: string;
+  cwd?: string;
+  session_id?: string;
+  turn_id?: string;
+  source?: string;
+  reason?: string;
+  stop_hook_active?: boolean;
+};
 
 const SECRET = /(?:api[_-]?key|authorization|cookie|password|secret|token)\s*[:=]\s*[^\s]{8,}/iu;
 const VERIFY = /(?:^|[;&|\s])(?:pnpm|npm|yarn|bun|pytest|mvn|gradle|go\s+test|cargo\s+test|node\s+--test)\b/iu;
@@ -145,9 +153,10 @@ export class CodexHookBridge {
   async handle(member: CodexHookMember, input: HookInput): Promise<JsonObject> {
     try {
       const event = text(input.hook_event_name) as HookEvent | null;
+      if (event === "SessionStart" || event === "SessionEnd") return this.lifecycle(member, event, input);
       if (event === "UserPromptSubmit") return await this.prompt(member, input);
       if (event === "PostToolUse" && member === "experience") return this.tool(input);
-      if (event === "Stop" && member === "experience") return this.stop(input);
+      if (event === "Stop") return this.stop(member, input);
       return {};
     } catch (error) {
       // Hook failures are deliberately fail-open. The trace contains only the class of error.
@@ -180,8 +189,32 @@ export class CodexHookBridge {
     return {};
   }
 
-  private stop(input: HookInput): JsonObject {
-    this.learning.finalize(input);
+  private stop(member: CodexHookMember, input: HookInput): JsonObject {
+    if (member === "experience") this.learning.finalize(input);
+    this.lifecycle(member, "Stop", input);
+    return {};
+  }
+
+  /**
+   * Session and turn boundaries are audit signals, not component usage.  In
+   * particular, readiness here is intentionally marked as readiness-only so a
+   * lifecycle hook can never masquerade as a Knowledge/Memory retrieval.
+   */
+  private lifecycle(member: CodexHookMember, event: HookEvent, input: HookInput): JsonObject {
+    const readiness = this.service.componentReadinessGet({ component: member });
+    const scope = codexProjectScope(input.cwd);
+    this.service.store.appendEvent("codex-hook", "codex_hook.lifecycle", {
+      member,
+      event,
+      scope,
+      session_id: text(input.session_id) ?? "unknown",
+      turn_id: text(input.turn_id),
+      source: text(input.source),
+      reason: text(input.reason),
+      stop_hook_active: input.stop_hook_active === true,
+      readiness_state: readiness.state,
+      usage: { kind: "readiness_only", component_used: false, context_resolved: false },
+    });
     return {};
   }
 }

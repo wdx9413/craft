@@ -26,6 +26,20 @@
   },
   "groups": [
     {
+      "name": "v01235-control-plane",
+      "include": [
+        "src/runtime-execution-attempt.ts",
+        "src/context-working-set.ts",
+        "src/graph-compiler.ts",
+        "src/capability-intake.ts",
+        "src/workbench-command.ts"
+      ],
+      "tests": [
+        "tests/v01235-control-plane.test.ts"
+      ],
+      "branches": true
+    },
+    {
       "name": "federated-runtime",
       "include": [
         "src/federated-delegation.ts",

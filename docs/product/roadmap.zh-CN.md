@@ -13,7 +13,9 @@
 
 ## 建设原则
 
-以 [产品架构](architecture.zh-CN.md) 的三大支柱为目标：工作与协作、执行与保障、学习与改进。**评测与实验是第三支柱内的核心模块**，不另设第四支柱。当前实现基线已推进到 v0.12.34。
+以 [产品架构](architecture.zh-CN.md) 的三大支柱为目标：工作与协作、执行与保障、学习与改进。**评测与实验是第三支柱内的核心模块**，不另设第四支柱。当前实现基线已推进到 v0.12.35。
+
+**v0.12.35：全能力收口。** `RuntimeExecutionAttempt` 将 Task、Run、Host、Environment、Effect、Receipt、Observation 和 Recovery Decision 绑定为无正文运行事实；`effect_unknown` 只能 reconcile，不会自动重放。`Context Working Set` 解释 history/knowledge/memory/experience/state 的选择、排除和预算，向量仍需独立评测后才能启用。Workbench 新增带版本和幂等键的协作命令；Capability Intake 统一能力 Manifest、扫描、Conformance、审批、激活和撤销；Graph 只编译为 VerifiedWorkLoop Plan，不拥有第二套 Runtime。新增模块的增量行、函数、分支覆盖率为 100%，但真实 Host 与业务价值仍须 Reference Pilot 证据。详见 [v0.12.35 控制面收口](../technical/modules/v01235-control-plane.md)。
 
 **v0.12.34：统一 Harness、任务闭环与单点能力评测。** `Agent = Model + Harness`，Harness 由 Context、Tool、Permission 和 Environment 组成；Environment 再由 Sandbox 与 Runtime 组成。任务型运行统一经过 Goal、Target、Task Contract、Plan、Step、Accept 和 Outcome，普通对话保留轻量 turn 模式。单点能力共享 Evaluation Contract，从机制证据逐级走到 routeable，不能因一次成功调用直接进入默认路由。详见 [v0.12.34 发布说明](../releases/v0.12.34.zh-CN.md)。
 

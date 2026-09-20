@@ -12,6 +12,7 @@ Default loop for a coding task:
 1. In Codex, first check whether the trusted `craft-knowledge` Hook already supplied a Context Receipt. If it did, reuse that bounded Context; otherwise call `craft_component_readiness_get` with `component: "knowledge"`.
    If the Host says the component is unavailable or behaves unlike this guidance, call
    `craft_component_diagnose` and compare the visible tool names before assuming the data is empty.
+   Readiness is only an availability preflight: it does not retrieve Knowledge, resolve Context, or count as using this component. When the task requires Knowledge, continue with the actual search or bounded resolution call.
 2. If no scoped source exists, call `craft_knowledge_bootstrap_install` or explicitly register/sync one project source.
 3. Call `craft_knowledge_search` before asking the user to repeat known project conventions.
 4. Resolve only a bounded current-scope context with `craft_context_resolution_resolve`; record its receipt id with the task result.

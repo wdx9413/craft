@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import test from "node:test";
 import { CodexHookBridge, HookSignalSanitizer, codexProjectScope, explicitMemoryStatement } from "../src/codex-hook-bridge.ts";
 import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
@@ -16,7 +16,7 @@ async function fixture() {
 async function dispose(f: Awaited<ReturnType<typeof fixture>>) { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 
 test("Codex hook scope and explicit memory parser never retain arbitrary prompts", () => {
-  assert.deepEqual(codexProjectScope("/work/../craft"), { kind: "project", id: "/craft" });
+  assert.deepEqual(codexProjectScope("/work/../craft"), { kind: "project", id: resolve("/craft") });
   assert.equal(codexProjectScope(" "), null);
   assert.equal(explicitMemoryStatement("ordinary conversation"), null);
   assert.equal(explicitMemoryStatement("记住：我偏好无糖咖啡"), "我偏好无糖咖啡");
@@ -41,7 +41,7 @@ test("Hook signal sanitizer accepts only local edit or verification metadata", (
 test("Knowledge and Memory hooks resolve only their named Context member", async () => {
   const f = await fixture();
   try {
-    const scope = "/project/craft";
+    const scope = resolve("/project/craft");
     f.service.knowledgeMemoryInstallBuiltins();
     const evidence = f.service.evidenceRecord({ evidence_id: "hook-evidence", source_type: "program", confidence: "confirmed", claim: "fixture" });
     const claim = f.service.knowledgeClaimSave({ claim_id: "hook-claim", source_id: "builtin.evidence-wiki", kind: "rule", scope: `project:${scope}`, content: "Use a focused verification command.", evidence_ids: [evidence.id] }).claim as JsonObject;
@@ -125,6 +125,7 @@ test("Hook bridge is fail-open for unsupported events and component failures", a
   const f = await fixture();
   try {
     const bridge = new CodexHookBridge(f.service);
+    assert.deepEqual(await bridge.handle("knowledge", { hook_event_name: "UnknownEvent", cwd: "/project/craft" }), {});
     assert.deepEqual(await bridge.handle("knowledge", { hook_event_name: "Stop", cwd: "/project/craft" }), {});
     assert.deepEqual(await bridge.handle("experience", { hook_event_name: "UserPromptSubmit", cwd: "/project/craft", user_prompt: "no stored context" }), {});
     const original = f.service.contextResolutionResolve;
@@ -137,7 +138,22 @@ test("Hook bridge is fail-open for unsupported events and component failures", a
     f.service.contextResolutionResolve = async () => { throw "fixture failure"; };
     assert.deepEqual(await bridge.handle("knowledge", { hook_event_name: "UserPromptSubmit", cwd: "/project/craft", prompt: "context" }), {});
     f.service.contextResolutionResolve = original;
-    assert.equal(f.store.events("codex-hook").length, 2);
+    assert.equal(f.store.events("codex-hook").filter((event) => event.event_type === "codex_hook.failed").length, 2);
     assert.deepEqual(await bridge.handle("knowledge", { hook_event_name: "UserPromptSubmit", prompt: "context" }), {});
+  } finally { await dispose(f); }
+});
+
+test("Lifecycle hooks record boundaries without counting readiness as component usage", async () => {
+  const f = await fixture();
+  try {
+    const bridge = new CodexHookBridge(f.service);
+    await bridge.handle("knowledge", { hook_event_name: "SessionStart", cwd: "/project/craft", session_id: "session", source: "startup" });
+    await bridge.handle("knowledge", { hook_event_name: "Stop", cwd: "/project/craft", session_id: "session", turn_id: "turn" });
+    await bridge.handle("knowledge", { hook_event_name: "SessionEnd", cwd: "/project/craft", session_id: "session", reason: "other" });
+    const events = f.store.events("codex-hook").filter((event) => event.event_type === "codex_hook.lifecycle");
+    assert.equal(events.length, 3);
+    assert.deepEqual(events.map((event) => (event.payload as JsonObject).event), ["SessionStart", "Stop", "SessionEnd"]);
+    assert(events.every((event) => ((event.payload as JsonObject).usage as JsonObject).component_used === false));
+    assert.equal(((events[0]!.payload as JsonObject).scope as JsonObject).id, resolve("/project/craft"));
   } finally { await dispose(f); }
 });
