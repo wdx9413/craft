@@ -32,6 +32,17 @@ test("legacy formal knowledge migration is read-only, candidate-first, deduplica
     await assert.rejects(Promise.resolve().then(() => service.legacyKnowledgeMigrationCandidateImport({ migration_id: "migration", candidate_ids: ["data/pages/workflows/eligible.md"] })), /offline-only/);
     const aliasImport = await service.knowledgeCandidateImport({ migration_id: "migration", candidate_ids: ["data/pages/workflows/eligible.md"], offline: true }); assert.ok(aliasImport);
     assert.equal((imported.failures as JsonObject[]).length, 2); assert.equal((await service.legacyKnowledgeMigrationDiscover({ migration_id: "migration", source_root: legacy, offline: true })).idempotent, true); assert.equal(((await service.legacyKnowledgeMigrationCandidateImport({ migration_id: "migration", candidate_ids: ["data/pages/workflows/eligible.md"], offline: true })).candidates as JsonObject[])[0].idempotent, true);
+    // Simulate the source_id omission of the original candidate importer. A
+    // rebind proves the source page digest before restoring the relation, while
+    // keeping the Claim a candidate and its unverified Evidence unchanged.
+    const originalClaim = store.get("knowledge_claim", String(candidate.claim_id));
+    store.save("knowledge_claim", String(candidate.claim_id), { ...originalClaim, source_id: null });
+    await assert.rejects(service.legacyKnowledgeMigrationRebindProvenance({ migration_id: "migration" }), /offline-only/);
+    const rebound = await service.legacyKnowledgeMigrationRebindProvenance({ migration_id: "migration", candidate_ids: [candidate.id], offline: true });
+    assert.equal((rebound.rebound as JsonObject[]).length, 1);
+    assert.equal(store.get("knowledge_claim", String(candidate.claim_id)).source_id, candidate.source_id);
+    assert.equal(store.get("knowledge_claim", String(candidate.claim_id)).status, "candidate");
+    assert.equal(((await service.legacyKnowledgeMigrationRebindProvenance({ migration_id: "migration", candidate_ids: [candidate.id], offline: true })).unchanged as JsonObject[])[0]!.reason, "already_bound");
     await assert.rejects(service.legacyKnowledgeMigrationPublish({ candidate_id: candidate.id, reviewer: "reviewer" }), /reviewed/); store.save("evidence", String(candidate.evidence_id), { ...store.get("evidence", String(candidate.evidence_id)), confidence: "bounded" }); service.knowledgeCandidateReview({ candidate_id: candidate.id, status: "reviewed", reviewer: "reviewer", reason: "evidence checked" });
     await assert.rejects(Promise.resolve().then(() => service.legacyKnowledgeMigrationPublish({ candidate_id: candidate.id, reviewer: "" })), /reviewer/);
     const originalWikiSave = service.wikiPageSave; service.wikiPageSave = (async () => { throw new Error("publish failure"); }) as typeof service.wikiPageSave;
@@ -48,6 +59,29 @@ test("legacy formal knowledge migration is read-only, candidate-first, deduplica
     const diff = await service.knowledgeSourceDiff({ migration_id: "migration", source_root: legacy }); assert.equal(diff.changed, false);
     const mcp = new McpServer(service, "component-knowledge"); const listed = await mcp.handle({ id: "tools", method: "tools/list", params: {} }); assert.equal(((listed?.result as JsonObject).tools as JsonObject[]).some((item) => String(item.name).includes("legacy_knowledge")), false);
   } finally { store.close(); await rm(root, { recursive: true, force: true }); await rm(legacy, { recursive: true, force: true }); }
+});
+
+test("model review restores a full immutable page body but grants only bounded knowledge trust", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-model-review-")); const source = await mkdtemp(join(tmpdir(), "knowledge-review-source-"));
+  const pages = join(source, "data", "pages", "workflows"); await mkdir(pages, { recursive: true }); await writeFile(join(pages, "eligible.md"), eligible);
+  const store = await new CraftStore(craftPaths(root)).open(); const service = new CraftService(store);
+  try {
+    const discovered = await service.legacyKnowledgeMigrationDiscover({ migration_id: "review-migration", source_root: source, offline: true });
+    const entry = ((discovered.migration as JsonObject).entries as JsonObject[])[0]!;
+    const imported = await service.legacyKnowledgeMigrationCandidateImport({ migration_id: "review-migration", candidate_ids: [entry.rel_path], offline: true });
+    const candidate = (imported.candidates as JsonObject[])[0]!;
+    const deferred = await service.knowledgeCandidateModelReview({ migration_id: "review-migration", reviewer: "agent-reviewer", model_ref: "fixture-model:v1", assessments: [{ candidate_id: candidate.id, source_digest: candidate.source_digest, decision: "revalidate", reason: "live validity remains uncertain" }] });
+    assert.equal((deferred.deferred as JsonObject[]).length, 1); assert.equal(store.get("knowledge_claim", String(candidate.claim_id)).status, "candidate");
+    const reviewed = await service.knowledgeCandidateModelReview({ migration_id: "review-migration", reviewer: "agent-reviewer", model_ref: "fixture-model:v1", assessments: [{ candidate_id: candidate.id, source_digest: candidate.source_digest, decision: "supported", reason: "coherent historical procedure with an explicit test reference" }] });
+    assert.equal((reviewed.reviewed as JsonObject[]).length, 1);
+    const claim = store.get("knowledge_claim", String(candidate.claim_id)); assert.equal(claim.status, "reviewed"); assert.equal((claim.review as JsonObject).confidence, "bounded");
+    assert.match(String(service.knowledgeClaimGet({ claim_id: claim.id }).claim && (store.contentStore.readCompatSync(claim.content_ref as never).body)), /Raw body is never retained/u);
+    const evidence = store.get("evidence", String((reviewed.reviewed as JsonObject[])[0]!.evidence_id)); assert.equal(evidence.confidence, "bounded"); assert.equal(evidence.source_type, "model_source_review");
+    const replay = await service.knowledgeCandidateModelReview({ migration_id: "review-migration", reviewer: "agent-reviewer", model_ref: "fixture-model:v1", assessments: [{ candidate_id: candidate.id, source_digest: candidate.source_digest, decision: "supported", reason: "coherent historical procedure with an explicit test reference" }] });
+    assert.equal((replay.reviewed as JsonObject[])[0]!.idempotent, true);
+    const mismatch = await service.knowledgeCandidateModelReview({ migration_id: "review-migration", reviewer: "agent-reviewer", model_ref: "fixture-model:v1", assessments: [{ candidate_id: candidate.id, source_digest: "sha256:wrong", decision: "supported", reason: "bad digest" }] });
+    assert.equal((mismatch.failures as JsonObject[])[0]!.code, "assessment_source_digest_mismatch");
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); await rm(source, { recursive: true, force: true }); }
 });
 
 test("legacy migration compatibility defaults and non-Error failures remain explicit", async () => {

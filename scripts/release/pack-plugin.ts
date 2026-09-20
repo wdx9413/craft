@@ -6,7 +6,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const pluginRoot = resolve(root, "plugins", "craft");
 const sourceSkill = resolve(root, "skills", "craft-route");
 const targetSkill = resolve(pluginRoot, "skills", "craft-route");
-const sourceBundles = ["craft-mcp.cjs", "craft-mcp-full.cjs", "craft-mcp-http.cjs", "craft-parser-worker.js"];
+const sourceBundles = ["craft-mcp.cjs", "craft-mcp-full.cjs", "craft-mcp-http.cjs", "craft-codex-hook.cjs", "craft-parser-worker.js"];
 const targetBundleDirectory = resolve(pluginRoot, "dist", "plugin");
 const components = ["craft-context", "craft-quality", "craft-knowledge", "craft-memory", "craft-capability", "craft-skill-quality", "craft-experience"];
 const pluginsRoot = resolve(root, "plugins");
@@ -39,7 +39,7 @@ for (const component of components) {
   // The parser worker is resolved relative to the bundle's own directory at
   // startup (`resolveParserWorkerPath`), so a component plugin that ships the
   // MCP bundle without it cannot boot on its own.
-  for (const bundle of ["craft-mcp.cjs", "craft-parser-worker.js"]) {
+  for (const bundle of ["craft-mcp.cjs", "craft-codex-hook.cjs", "craft-parser-worker.js"]) {
     await cp(resolve(root, "dist", "plugin", bundle), resolve(componentBundleDirectory, bundle));
   }
   await mkdir(resolve(componentRoot, "skills"), { recursive: true });

@@ -45,6 +45,7 @@ export { MEMORY_OWNS };
 export const memoryCapability: CraftCapability = {
   name: "memory",
   product: "craft-memory",
+  evaluation: { input_contract: "scoped-memory-request", output_contract: "bounded-memory-ledger-result", fixture_id: "memory-fixture-v1", host_compatibility: ["fixture", "codex", "claude"] },
   owns: MEMORY_OWNS,
   register(registry): void {
     const store = registry.require<CraftStore>(CORE_KERNELS.store);

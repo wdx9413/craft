@@ -30,7 +30,7 @@ import type { CraftStore, JsonObject } from "./infrastructure/store.ts";
 import { noCredentialAssignment, object, optionalScope, sortedUniqueList, text } from "./validation.ts";
 import { canonicalJson, stableDigest, payload } from "./digest.ts";
 import { contentReference } from "./infrastructure/content-store.ts";
-import type { ContextContribution, ContextContributionProvider, ContextRequest } from "./capability-protocol.ts";
+import { CONTEXT_MEMBERS, type ContextContribution, type ContextContributionProvider, type ContextMember, type ContextRequest } from "./capability-protocol.ts";
 
 const STRATEGIES = new Set(["keyword", "vector"]);
 const SECRET_KEY = /(?:api[_-]?key|authorization|cookie|password|secret|token)/iu;
@@ -112,6 +112,8 @@ export class ContextResolutionKernel {
     const now = new Date(args.now === undefined ? Date.now() : text(args.now, "now")); if (Number.isNaN(now.valueOf())) throw new Error("now must be an ISO timestamp");
     const maxItems = Number(args.max_items ?? 12); const maxChars = Number(args.max_chars ?? 12_000); if (!Number.isInteger(maxItems) || maxItems < 1 || !Number.isInteger(maxChars) || maxChars < 1) throw new Error("Context budget is invalid");
     const sourceIds = sortedUniqueList(args.source_ids, "source_ids"); const requestedIds = sortedUniqueList(args.memory_ids, "memory_ids"); const allowRestricted = args.allow_restricted === true; const adapter = args.retrieval_adapter_id === undefined ? null : this.store.get("retrieval_adapter", text(args.retrieval_adapter_id, "retrieval_adapter_id"));
+    const members = this.members(args.members);
+    const includeMemory = members === null || members.has("memory");
     const retrievalMode = adapter?.status === "eligible" ? adapter.strategy : "keyword";
     const queryTerms = query.toLowerCase().match(/[\p{L}\p{N}_-]+/gu) ?? []; const selectedSourceIds = sourceIds.length ? new Set(sourceIds) : null;
     const sources = new Map(this.store.list("knowledge_source", 10_000).map((source) => [String(source.id), source]));
@@ -119,14 +121,15 @@ export class ContextResolutionKernel {
       const source = sources.get(sourceId);
       if (!source || source.status !== "active" || source.trust === "untrusted") throw new Error("Requested Knowledge Source is unavailable in this Context");
     }
-    const candidates = this.store.list("memory_ledger", 10_000, (item) => {
+    const candidates = includeMemory ? this.store.list("memory_ledger", 10_000, (item) => {
       const source = sources.get(String(item.source_id));
       return item.status === "active" && source?.status === "active" && source.trust !== "untrusted" && canonicalJson(item.scope) === canonicalJson(requestedScope)
         && (item.valid_until === null || Date.parse(String(item.valid_until)) >= now.valueOf()) && (allowRestricted || item.sensitivity !== "restricted")
         && (selectedSourceIds === null || selectedSourceIds.has(String(item.source_id)));
     })
       .map((item) => { const body = this.content(item); return { memory: item, body, required: requestedIds.includes(String(item.id)), score: queryTerms.reduce((sum, term) => sum + Number(body.toLowerCase().includes(term)), 0) }; })
-      .filter((item) => item.required || item.score > 0).sort((left, right) => Number(right.required) - Number(left.required) || right.score - left.score || String(left.memory.id).localeCompare(String(right.memory.id)));
+      .filter((item) => item.required || item.score > 0).sort((left, right) => Number(right.required) - Number(left.required) || right.score - left.score || String(left.memory.id).localeCompare(String(right.memory.id))) : [];
+    if (!includeMemory && requestedIds.length) throw new Error("Requested Memory is excluded by Context members");
     for (const memoryId of requestedIds) if (!candidates.some((item) => item.memory.id === memoryId)) throw new Error("Required Memory is unavailable in this Context");
     const items: JsonObject[] = []; let usedChars = 0;
     for (const candidate of candidates) { const size = candidate.body.length; if (items.length >= maxItems) break; if (usedChars + size > maxChars) { if (candidate.required) throw new Error("Required Memory exceeds Context budget"); continue; } usedChars += size; items.push({ memory_id: candidate.memory.id, memory_version: candidate.memory.version, source_id: candidate.memory.source_id, content: candidate.body, content_digest: candidate.memory.content_digest, sensitivity: candidate.memory.sensitivity, reason: candidate.required ? "required" : retrievalMode === "vector" ? "evaluated_vector_adapter" : "keyword_overlap" }); }
@@ -135,6 +138,7 @@ export class ContextResolutionKernel {
     // much memory a turn gets, which is not its call.
     const contributions: ContextContribution[] = [];
     for (const contributor of this.contributors) {
+      if (members !== null && !members.has(contributor.member)) continue;
       contributions.push(await contributor.contribute({
         query, scope_kind: requestedScope.kind as ContextRequest["scope_kind"], scope_id: requestedScope.id,
         max_items: maxItems, max_chars: maxChars,
@@ -144,6 +148,7 @@ export class ContextResolutionKernel {
       // What the contributions selected is part of the receipt's identity, so replaying the same
       // resolution against changed compiled experience is a conflict rather than a silent second
       // receipt describing a different pack.
+      members: members === null ? null : [...members].sort(),
       contributions: contributions.map((contribution) => ({ member: contribution.member, receipt_id: contribution.receipt_id, item_count: contribution.items.length, omitted_count: contribution.omitted_count })) };
     const existing = this.store.find("context_resolution_receipt", receiptId); const identityDigest = stableDigest(identity);
     if (existing) { if (existing.identity_digest !== identityDigest) throw new Error("Context Resolution Receipt idempotency conflict"); return { receipt: existing, items, contributions, idempotent: true }; }
@@ -151,6 +156,19 @@ export class ContextResolutionKernel {
   }
 
   receiptGet(args: JsonObject): JsonObject { return { receipt: this.store.get("context_resolution_receipt", text(args.receipt_id, "receipt_id"), args.version === undefined ? undefined : Number(args.version)) }; }
+
+  private members(value: unknown): Set<ContextMember> | null {
+    if (value === undefined) return null;
+    if (!Array.isArray(value) || !value.length) throw new Error("members must be a non-empty Context member list");
+    const selected = new Set<ContextMember>();
+    for (const item of value) {
+      const member = text(item, "members") as ContextMember;
+      if (!CONTEXT_MEMBERS.includes(member)) throw new Error("members contains an unsupported Context member");
+      if (member === "history" || member === "state") throw new Error("members may select only accumulated Context members");
+      selected.add(member);
+    }
+    return selected;
+  }
 
   /**
    * One entry's body, from wherever it lives.

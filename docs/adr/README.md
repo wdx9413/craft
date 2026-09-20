@@ -24,6 +24,7 @@
 | [0018](0018-merge-shared-helpers-only-where-behaviour-agrees.md) | 共享助手只在行为一致处合并；摘要按语义命名；身份类合并需要金标值 |
 | [0019](0019-transcript-is-not-an-external-capability.md) | transcript 不对外成为能力：自托管时 Craft 即宿主，`history` 保持 `host_provided` |
 | [0020](0020-one-compaction-policy.md) | 压缩只有一套策略：`compact()` 先保留连续近期后缀再按权重竞争，保护是减法 |
+| [0021](0021-agent-harness-runtime-context-boundaries.md) | Agent、Harness、Runtime、Context 与 State 分层；完整流程与单点能力共享一套事实账本 |
 
 ## 与技术文档的关系
 
@@ -35,3 +36,4 @@
 | 0003、0004 | [Experience / Eval](../technical/modules/experience-eval.md)、[Workflow / Signoff](../technical/modules/workflow-signoff.md) |
 | 0001、0002 | [产品路线](../product/roadmap.zh-CN.md) |
 | 0006 | [Uncertainty Policy](../technical/modules/platform-ideal-state-v1.md) |
+| 0021 | [架构与分层地图](../architecture/layer-map.md)、[Craft 架构](../architecture.zh-CN.md) |

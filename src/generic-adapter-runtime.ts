@@ -4,8 +4,10 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { platform } from "node:process";
 import { parse } from "yaml";
 import type { CraftStore, JsonObject } from "./infrastructure/store.ts";
+import { CRAFT_RELEASE_VERSION } from "./version.ts";
 
-export const RUNTIME_VERSION = "0.12.26";
+export const RUNTIME_VERSION = CRAFT_RELEASE_VERSION;
+export const RUNTIME_SCHEMA_VERSION = 1;
 export type AdapterKind = "command" | "mcp" | "openapi" | "browser" | "host" | "model";
 export type AdapterStatus = "active" | "quarantined" | "retired";
 export type CommandStatus = "planned" | "running" | "completed" | "failed" | "cancelled";

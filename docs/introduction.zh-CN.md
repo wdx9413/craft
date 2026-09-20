@@ -1,6 +1,6 @@
 # Craft：受控 Agent 工作运行时
 
-> 本文是 Craft 的总览入口。它解释产品解决的问题、关键概念如何连接、当前实现做到哪里，以及在面试或架构评审中应如何准确回答。当前实现基线为 v0.12.33；旧版本号只表示历史里程碑。
+> 本文是 Craft 的总览入口。它解释产品解决的问题、关键概念如何连接、当前实现做到哪里，以及在面试或架构评审中应如何准确回答。当前实现基线为 v0.12.34；旧版本号只表示历史里程碑。
 
 ## 一句话
 
@@ -48,6 +48,38 @@ Craft 把这些问题放到同一个持久化控制面。它保存摘要、引�
 
 这五个平面是逻辑职责，不是要求每个功能都拆成单独进程。它们共享同一个本地事实存储，但接口和生命周期不同。
 
+## Agent、Harness、Runtime、Context、State 怎么区分
+
+面试或架构评审中最容易混淆的是这五个词：
+
+- **Agent** = Model + Harness。Model 做理解和提议，Harness 组织上下文、能力、执行、验证与恢复。
+- **Harness** 是一次工作的策略，不是数据库、工具列表或完整运行时；它调用 Runtime，并可作为 Candidate 被比较。
+- **Runtime** 保存可恢复执行事实：Run、Operation、Lease、Checkpoint、Receipt 和取消/重试状态。
+- **Context** 是给模型的受限投影；Knowledge、Memory、Experience 和 State 只有经过解析、预算和 scope 检查后才进入。
+- **State** 是事实源，分为控制态（任务/运行/租约/检查点）和世界态（工作区/产物/外部状态摘要）。模型说“完成”不能改变 State。
+
+因此，Craft 不是把 Codex 或 Claude 再包一层聊天窗口，而是给它们增加可恢复、可验收和可评测的控制面。
+
+最简公式是：
+
+```text
+Agent       = Model + Harness
+Harness     = Context + Tool + Permission + Environment
+Environment = Sandbox + Runtime
+Context     = History + Knowledge + Memory + Experience + State
+```
+
+这里的 `Tool` 是模型能够请求的动作面，Skill、MCP、插件和 Workflow 都可以作为 Capability 的供给或包装；`Knowledge`、`Memory`、`Experience` 通常通过 Capability Adapter 接入。`Environment` 不是单一目录：Sandbox 负责隔离，Runtime 负责生命周期、回执、检查点和恢复。`Context` 只是面向当前模型的受限投影，不能替代 State 或 Trace。
+
+## 两种使用方式：完整流程与单点能力
+
+Craft 采用“两扇入口、一套账本”：
+
+1. **完整 Craft / Codex 控制台**：适合交付、写入、长任务和跨会话恢复，走 `Goal → Clarify → Activate → Preflight → Host → Observe → Accept → Learn`。Codex 插件模式复用当前 App 的 embedded Host，不会另起 Codex CLI。
+2. **独立组件 MCP/Skill/插件**：`craft-memory`、`craft-knowledge`、`craft-capability`、`craft-quality`、`craft-experience` 可以单独给 Codex、Claude、IDE 或其他 Agent 使用。只读查询和候选草拟可直接调用；任何写入、发布、外部 effect 仍回到同一 Control Plane、Policy、Trace 和 Eval。
+
+单点能力不是“低配的另一套 Craft”，而是共享内核的产品投影。它们也必须分别评测：先证明机制，再证明 Fixture、真实 Host、业务 Case，最后才可能成为 `routeable` 能力。
+
 ## 主链：Verified Work Loop
 
 对于会修改工作区、需要交付或需要跨会话恢复的任务，推荐走 `Verified Work Loop`：
@@ -57,6 +89,8 @@ Craft 把这些问题放到同一个持久化控制面。它保存摘要、引�
 ```
 
 这五段是按风险启用的可靠性协议，不是要求每个普通问答强制经过的流程。定义固定目标、约束和成功标准；准备读取事实、最小激活并预检；行动必须产生 Receipt 并再观察；交付走 Acceptance/Outcome；学习只产生经过 Eval、Signoff、Canary 与回滚约束的候选。
+
+更精确地说，任务主链需要区分五个对象：`Goal` 是用户想要的结果；`Target` 是经过澄清的对象、范围和期望终态；`Plan` 是完成 Target 的候选路径；`Step` 是带前置条件、Action、Receipt 和失败处置的最小工作单元；`Accept` 是基于真实 State、Artifact 和 Evidence 的终态验收。普通对话可以没有持久 Target、Plan 和 Accept，不应被强行包装成任务 Workflow。
 
 v0.12.20 将最后的“学习”变成可运行的双速闭环：本次 Session 内的低风险 Prompt Note/Memory 可在隐私检查后带 TTL 临时生效；任何项目级、用户级、Skill、Workflow 或 Sub-agent 变化仍是候选，必须经过 Shadow Eval、精确 Signoff 与 Canary。持久计算与子 Agent 通过通用 Host 协议表达，不绑定具体供应商或第三方 Agent。
 
@@ -71,6 +105,8 @@ v0.12.32 完成 Runtime Assurance & Learning Loop：所有模式都可以沿着 
 v0.12.30 补齐“能部署、能证明”的外层：远程运行将 principal、tenant、scope、receipt 与一次性 handle 固定在同一任务上；真正的效果比较必须引用真实 Host Session 和独立 Outcome Observer，而不是模型自述。发布者签名、A2A v1 Task 与远程 MCP 都是可替换 Adapter，仍受既有 Capability、Signoff 与 Policy 约束。详见 [Runtime Proof 与远程部署边界](technical/modules/runtime-proof-deployment.md)。
 
 当前工作树继续补强两处长期运行短板：`DurableActionLoop` 让每个 Work Item 必须经过“行动 → Receipt → 再观察 → 验收”才能成为已证明进度；`ExperienceLedger` 将观察、诊断模式与接受/拒绝的干预提案分层保存。它们不改变版本号，也不把未验证知识直接塞回执行 Host。详见 [Durable Action Loop 与 Experience Ledger](technical/modules/durable-action-experience.md)。
+
+v0.12.34 同时补齐独立知识、记忆与经验组件的真实使用闭环：`craft_knowledge_search` 会合并受管 Claim 与 Markdown 索引，但 Candidate 仅供诊断；只有 Reviewed、来源仍 active 的 Knowledge 会进入 Context Resolution。缺少 scope 的 Memory 查询明确 `skipped`，绝不退化为全局检索；Experience 只有带当前 scope 的内容无关模式引用才能进入 Context，避免跨项目串台。`craft_knowledge_memory_bundle` 支持两台机器之间的受控导出、校验、冲突计划与明确导入；它传递可校验正文和来源引用，不复制 SQLite、聊天或凭据。详见 [Knowledge、Memory 与 Context](technical/modules/knowledge-memory-context.md)。
 
 v0.12.23 增加 `VerificationPlane`：它从变更类型、effect、Candidate 与真实 Host 需求推导最小验证集，收集环境一致的 Evidence Receipt，并判定 `eligible / rejected / inconclusive`。单元覆盖率只是其中一个确定性检查；对抗、恢复、真实 Host 和 Candidate 还需更强验证。该模块不执行命令、不持久化原始内容，仍通过既有 Host / Runtime Seam 运行实际检查。详见 [Verification Plane](technical/modules/verification-plane.md)。
 

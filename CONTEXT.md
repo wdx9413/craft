@@ -14,6 +14,59 @@ _Avoid_: 测试通过、版本检查、模型自评
 **Verification Plane**：开发变更的内容无关验证控制模块。它根据变更类别、effect、Candidate 与 Host 要求生成最小验证集，接收同环境、Evidence-backed Receipt，并输出 `eligible`、`rejected` 或 `inconclusive`。它不执行命令，也不替代 Release Qualification。
 _Avoid_: 测试运行器、覆盖率报告、任意命令执行器
 
+## 核心关系（Canonical Relationship）
+
+**Agent**：模型与 Harness 的组合。模型负责理解、提议和局部推理；Harness 负责把提议放入受约束的上下文、能力、执行和验证循环。Agent 不是 Craft 的同义词，也不是一次聊天窗口。
+_Avoid_: 把模型自述当作运行时事实
+
+**Harness**：一次 Agent 工作的决策/行动策略。对外心智模型可写成 `harness = context + tool + permission + environment`：Context 提供受限输入，Tool 提供动作面，Permission 规定可做什么，Environment 负责在哪里、以什么生命周期和隔离边界执行。内部还包含 Orchestration、Verification 和 Recovery。Harness 使用 Runtime，但不等于 Runtime；它可以被评测和替换，也不能自行扩大 Policy。
+_Avoid_: 把 Harness 当成模型、工具仓库或完整操作系统
+
+**Environment**：Harness 的执行环境抽象，至少由 `Sandbox + Runtime` 组成。Sandbox 负责工作区、网络、进程和凭据的隔离边界；Runtime 负责 Run、Operation、Lease、Checkpoint、Receipt、取消、重试和恢复。某个平台可以只提供只读 Runtime 而没有可验证 Sandbox，此时高风险 effect 必须失败关闭。
+_Avoid_: 把 Environment 误解成单一操作系统目录，或把 Runtime 误解成安全沙箱
+
+**Tool**：Harness 看到的一个动作接口，例如读取文件、调用 MCP、运行受限命令、检索知识或请求 Host。Skill、MCP Server/Tool、插件和 Workflow 是 Tool 或能力的不同供给/包装形态；它们只有登记为受治理 `Capability Asset`、通过 Activation Profile 后才可能成为当前 Tool。
+_Avoid_: 把 Skill 文件、MCP Server 或插件包直接等同于已授权 Tool
+
+**Runtime**：承载可恢复执行的事实与生命周期内核，管理 Task Run、Operation、Lease、Checkpoint、Receipt、State Snapshot、取消和重试。Runtime 不负责替模型做领域推理，也不把 Host 私有执行伪装成自己的能力。
+_Avoid_: 把 Runtime 与 Harness、Host 混称
+
+**Host**：真正运行模型、原生工具或命令的外部执行环境，例如 Codex、Claude、CLI、API 或 Fixture Host。Craft 可在控制台模式复用当前 Host，也可在独立 Agent 模式选择 Host；两种模式共用同一 Control Plane 和证据模型。
+_Avoid_: 误以为 Codex 插件会隐式再启动一个 Codex CLI
+
+**Context**：面向当前模型/Host 的受限投影，不是事实存储。它可以引用 history、knowledge、memory、experience 和当前 state，但每次装载必须经过 Context Resolution 并留下 Receipt。
+_Avoid_: 把 Context 当成 Memory、知识库或全局提示词
+
+**State**：需要被观察、比较和恢复的事实，分为 Control State（Task/Run/Operation/Lease/Checkpoint）与 World State（Workspace、Artifact、外部状态的摘要）。Context 可以引用 State，但 State 不由模型上下文拥有。
+_Avoid_: 把聊天历史或 State Snapshot 当成完整备份
+
+**Goal**：用户希望得到的结果；**Task Contract** 是把 Goal 解释成有范围、effect、预算和验收条件的可执行合同；**Acceptance** 是对真实终态的判断。三者依次回答“想要什么、允许怎么做、是否真的达成”。
+_Avoid_: 把 Goal、Task、Prompt 或 Outcome 混为一个对象
+
+**Target**：对 Goal 的可执行化目标，固定对象/范围、期望终态、非目标和完成条件。模糊 Goal 先经过澄清才形成 Target；普通对话可以没有持久 Target。
+_Avoid_: 把 Target 当成一句未经澄清的用户原话
+
+**Plan**：为 Target 选择的候选实现路径，包含有序或有依赖的 Step、能力、权限、预算、前置条件和风险。Plan 是运行时计划，不自动成为可复用 Workflow；只有经过评测和发布的 Plan 才能形成 Workflow 资产。
+_Avoid_: 把模型草稿、Workflow 和已批准执行计划混为一物
+
+**Step**：Plan 中最小可观察工作单元，至少声明目标、前置条件、Action、预期状态变化、Receipt 和失败处置。Step 完成必须经过再观察，不能只由 Host 返回文本决定。
+_Avoid_: 把模型的一次回复或一次 Tool call 自动当作已完成 Step
+
+**Accept**：对 Target 的终态验收动作/策略；它可以由确定性断言、独立 Grader 或人工裁决组成，但必须引用 State Snapshot、Artifact 或 Evidence。`accept` 是主流程动作，不是布尔字段的别名。
+_Avoid_: 把 Host completion、模型置信度或单个测试通过当成 Accept
+
+**Interaction Mode**：同一运行时上的入口投影，而不是多套 Agent。`turn` 用于普通对话；`goal` 用于形成 Target/Task；`plan` 只生成或审查 Plan；`execute` 执行已批准 Plan；`verify` 只做 Step/Target 的证据验收；`learn` 从 Trace/Outcome 生成受限 Candidate。只有 `goal`、`execute`、`verify` 和 `learn` 涉及持久任务状态时才必须建立对应 Run；`turn` 可以在不创建任务的情况下完成。
+_Avoid_: 把每种模式实现成一套独立 Store、Policy 或生命周期
+
+**Hook**：挂在既定生命周期时点上的扩展机制，例如 `before_activation`、`before_execute`、`after_receipt`、`after_observe`、`before_accept` 和 `after_outcome`。Hook 可以观察、补充摘要或请求阻断，但不能自行成为新的事实账本、绕过 Permission、直接扩大 effect，或替代 Receipt/Acceptance。它是跨 Harness、Capability 和 Runtime 的设计范式/扩展 seam，不是 Harness 的第五个组成面。
+_Avoid_: 把 Hook 当成任意 Tool、隐藏的第二条主流程或隐式副作用入口
+
+**Knowledge / Memory / Experience / Trace**：Knowledge 是有来源和 Evidence 的可复核主张；Memory 是有作用域、有效期和撤销关系的可持续上下文；Experience 是从多个 Trial/Outcome 归纳出的候选模式；Trace 是过程证据链。只有 Experience Candidate 通过评测和晋级后才可成为可路由资产。
+_Avoid_: 把 Trace 直接当记忆、把未经验证记忆直接当 Skill
+
+**Evaluation Contract**：每个可独立暴露的能力都必须声明 fixture、契约/边界、对抗与泄漏、恢复/幂等、成本/延迟和兼容性检查。`mechanism_passed`、`fixture_passed`、`host_verified`、`business_eligible`、`routeable` 是递进状态，不可用单元覆盖率或单次成功替代。
+_Avoid_: 把组件的 MCP 握手当成业务效果证明
+
 ## 任务与状态
 
 **Task**：用户希望完成的、可跨会话延续的工作目标。它不是一次模型调用或一次命令执行。
@@ -92,6 +145,18 @@ _Avoid_: Context Profile、Evidence Wiki
 
 **Context Resolution Receipt**：一次向 Host 提供受限上下文的内容无关回执，固定选中的知识/记忆版本、选择理由和预算。它不保存重复正文，不授予执行权。
 _Avoid_: Prompt、Activation Profile
+
+**Knowledge Support**：一条把 Candidate Knowledge Claim 与独立 Evidence/Observation 绑定的追加式支持记录。同一 Claim 上同一个 Evidence 或 Observation Key 只能计一次；它用于自动晋升阈值，不是聊天重复次数计数器。
+_Avoid_: 同一段 Prompt 的重复提交、模型自评、人工审批票数
+
+**Knowledge Promotion Policy**：本机的、可审计的自动晋升阈值。默认需要两条独立的 bounded/confirmed Evidence，且 Source、正文、有效期和冲突检查均通过；它允许操作者调整或熔断，不随跨机器数据包迁移。
+_Avoid_: 默认人工审核队列、跨机器信任同步、LLM 自我认证
+
+**Knowledge Contribution**：Context Resolution 中由 Knowledge Capability 提供的、只包含已自动晋升或例外复核且在 scope 内 Knowledge Claim 的有界投影。Candidate 可以被搜索、补证据和自动评估，但不能通过此投影进入执行 Host。
+_Avoid_: 知识搜索结果、自动发布规则
+
+**Knowledge/Memory Bundle**：在一个明确 scope 内交换可校验 Knowledge、Memory、其 Source/Evidence、追加式 Knowledge Support 和关联 Experience 引用的可移植数据对象。它以 `export → verify → import_plan → approved import_apply` 合并，只新增不覆盖冲突；本机 Promotion Policy 不迁移。它不是 SQLite 文件复制、云同步或凭据容器。
+_Avoid_: 数据库备份、自动同步、跨租户复制
 
 ## 执行与交付
 

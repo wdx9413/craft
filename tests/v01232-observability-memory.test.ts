@@ -345,3 +345,22 @@ test("v0.12.32 review and maintenance MCP handlers execute through the full surf
     await call("craft_memory_maintenance_get", { maintenance_id: "mcp-maintenance" });
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
+
+test("v0.12.34 maintenance keeps legacy fallback observable and reports expired governed entries", async () => {
+  const f = await fixture();
+  try {
+    f.store.create("episodic_memory", "legacy-memory", { scope: "project:p", source: "legacy", content_digest: "legacy" });
+    assert.equal((f.service.memoryMaintenanceSignal({ memory_id: "legacy-memory", kind: "recalled" }).signal as JsonObject).memory_kind, "episodic_memory");
+    assert.throws(() => f.service.memoryMaintenanceSignal({ memory_id: "missing" }), /Unknown Memory/);
+    const legacyRun = f.service.memoryMaintenanceRun({ maintenance_id: "legacy-fallback", stage: "review" });
+    assert.equal((legacyRun.run as JsonObject).memory_kind, "episodic_memory");
+    assert.ok((legacyRun.findings as JsonObject[]).some((item) => item.kind === "missing_content_ref"));
+    f.store.create("memory_ledger", "expired-ledger", { scope: { kind: "project", id: "p" }, source_id: "source", content_digest: "expired", content_ref: { path: "unused" }, status: "active", valid_until: "2020-01-01T00:00:00.000Z" });
+    f.store.create("memory_ledger", "scope-less-ledger", { source_id: "source", content_digest: "scope-less", content_ref: { path: "unused" }, status: "active", valid_until: null });
+    f.store.create("memory_ledger", "digest-less-ledger", { scope: { kind: "project", id: "p" }, source_id: "source", content_ref: { path: "unused" }, status: "active", valid_until: null });
+    assert.equal((f.service.memoryMaintenanceSignal({ memory_id: "expired-ledger", kind: "adopted" }).signal as JsonObject).memory_kind, "memory_ledger");
+    const governedRun = f.service.memoryMaintenanceRun({ maintenance_id: "expired-governed", stage: "light", now: "2030-01-01T00:00:00.000Z" });
+    assert.equal((governedRun.run as JsonObject).memory_kind, "memory_ledger");
+    assert.ok((governedRun.findings as JsonObject[]).some((item) => item.kind === "expired_active"));
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});

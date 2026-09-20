@@ -31,8 +31,8 @@
  * rather than by reading:
  *
  *  - `canonical` exists **18 times in 14 distinct (params + body) spellings**, and all 14 are
- *    **one behaviour**: arrays as `[a,b]`, objects as `{"k":v}` with keys sorted by
- *    `localeCompare`, everything else as `JSON.stringify`. The spellings differ only in
+ *    **one behaviour**: arrays as `[a,b]`, objects as `{"k":v}` with keys sorted by the
+ *    historical Chinese `localeCompare` ordering, everything else as `JSON.stringify`. The spellings differ only in
  *    parameter names (`a/b`, `left/right`, `k/v`, `child/item/entry`) and in whether the body
  *    is wrapped across lines. They are therefore merged, which is the opposite conclusion from
  *    `digest` — and the difference is the point: `digest` had five *behaviours*, `canonical`
@@ -99,7 +99,7 @@ export function canonicalJson(value: unknown): string {
 function nested(value: unknown): string | undefined {
   if (Array.isArray(value)) return `[${value.map((item) => nested(item)).join(",")}]`;
   if (value && typeof value === "object") {
-    return `{${Object.entries(value as JsonObject).sort(([left], [right]) => left.localeCompare(right))
+    return `{${Object.entries(value as JsonObject).sort(([left], [right]) => left.localeCompare(right, "zh"))
       .map(([key, child]) => `${JSON.stringify(key)}:${nested(child)}`).join(",")}}`;
   }
   return JSON.stringify(value);

@@ -93,7 +93,7 @@ test("v0.12.43 keeps record payloads free of the store's own bookkeeping", () =>
   assert.deepEqual(payload({ Id: "a", Version: 1, content: 2 }), { Id: "a", Version: 1, content: 2 });
 });
 
-test("v0.12.33 a payload does not return a body that lives behind a content reference", () => {
+test("v0.12.34 a payload does not return a body that lives behind a content reference", () => {
   // The body moved to the content store, so returning a stale copy of it would hand a caller
   // text no digest protects.
   assert.deepEqual(payload({ id: "a", version: 1, content: "inline", content_ref: { path: "x" } }), { content_ref: { path: "x" } });

@@ -23,12 +23,17 @@ export class MemoryMaintenanceKernel {
 
   signal(args: JsonObject): JsonObject {
     const memoryId = text(args.memory_id, "memory_id");
-    this.store.get("episodic_memory", memoryId);
+    // The governed Ledger is the current write path.  Keep old episodic
+    // records observable during migration, but never make maintenance depend
+    // on the legacy collection when a Ledger entry exists.
+    const ledger = this.store.find("memory_ledger", memoryId);
+    const legacy = ledger ? null : this.store.find("episodic_memory", memoryId);
+    if (!ledger && !legacy) throw new Error(`Unknown Memory: ${memoryId}`);
     const kind = text(args.kind ?? "recalled", "kind");
     const value = Number(args.value ?? 1);
     if (!Number.isFinite(value) || value < 0) throw new Error("value must be a non-negative number");
     const signalId = String(args.signal_id ?? `memory_usage_${memoryId}_${kind}`);
-    const identity = { memory_id: memoryId, kind, value };
+    const identity = { memory_id: memoryId, memory_kind: ledger ? "memory_ledger" : "episodic_memory", kind, value };
     const existing = this.store.find("memory_usage_signal", signalId);
     if (existing) {
       if (existing.identity_digest !== digest(identity)) throw new Error("Memory usage signal idempotency conflict");
@@ -42,16 +47,24 @@ export class MemoryMaintenanceKernel {
     if (!STAGES.has(stage)) throw new Error("Memory maintenance stage is unsupported");
     const now = args.now === undefined ? new Date().toISOString() : text(args.now, "now");
     if (Number.isNaN(Date.parse(now))) throw new Error("now must be an ISO timestamp");
-    const candidates = this.store.list("episodic_memory", 10_000);
+    const ledger = this.store.list("memory_ledger", 10_000);
+    // Read legacy entries only while no governed records exist.  This keeps
+    // migration reversible without mixing two accounting systems in one run.
+    const candidates = ledger.length ? ledger : this.store.list("episodic_memory", 10_000);
+    const candidateKind = ledger.length ? "memory_ledger" : "episodic_memory";
     const semantic = this.store.list("semantic_memory", 10_000, (item) => item.status === "active");
     const findings: JsonObject[] = [];
     const seen = new Set<string>();
     for (const memory of candidates) {
-      if (seen.has(String(memory.content_digest))) findings.push({ kind: "duplicate", memory_id: memory.id });
-      seen.add(String(memory.content_digest));
+      const scopedDigest = `${JSON.stringify(memory.scope ?? null)}:${String(memory.content_digest ?? "")}`;
+      if (seen.has(scopedDigest)) findings.push({ kind: "duplicate", memory_id: memory.id, memory_kind: candidateKind });
+      seen.add(scopedDigest);
       if (memory.content_ref === undefined) findings.push({ kind: "missing_content_ref", memory_id: memory.id });
-      const source = String(memory.source ?? "");
+      const source = String(memory.source_id ?? memory.source ?? "");
       if (SECRET.test(source)) findings.push({ kind: "sensitive_source", memory_id: memory.id });
+      if (candidateKind === "memory_ledger" && memory.status === "active" && typeof memory.valid_until === "string" && Date.parse(memory.valid_until) <= Date.parse(now)) {
+        findings.push({ kind: "expired_active", memory_id: memory.id, memory_kind: candidateKind });
+      }
     }
     if (stage !== "light") {
       for (const memory of semantic) {
@@ -60,14 +73,14 @@ export class MemoryMaintenanceKernel {
       }
     }
     const maintenanceId = String(args.maintenance_id ?? `memory_maintenance_${randomUUID().replaceAll("-", "")}`);
-    const identity = { stage, now, memory_ids: candidates.map((item) => item.id).sort(), semantic_ids: semantic.map((item) => item.id).sort(), finding_digest: digest(findings) };
+    const identity = { stage, now, memory_kind: candidateKind, memory_ids: candidates.map((item) => item.id).sort(), semantic_ids: semantic.map((item) => item.id).sort(), finding_digest: digest(findings) };
     const existing = this.store.find("memory_maintenance_run", maintenanceId);
     if (existing) {
       if (existing.identity_digest !== digest(identity)) throw new Error("Memory maintenance idempotency conflict");
       return { run: existing, findings, idempotent: true };
     }
     const proposal = stage === "deep" && findings.length > 0
-      ? this.store.create("memory_maintenance_candidate", `${maintenanceId}:candidate`, { source_ids: candidates.map((item) => item.id), finding_digest: digest(findings), status: "candidate", publication_allowed: false, raw_content_stored: false })
+      ? this.store.create("memory_maintenance_candidate", `${maintenanceId}:candidate`, { source_kind: candidateKind, source_ids: candidates.map((item) => item.id), finding_digest: digest(findings), status: "candidate", publication_allowed: false, raw_content_stored: false })
       : null;
     const run = this.store.create("memory_maintenance_run", maintenanceId, { ...identity, identity_digest: digest(identity), finding_count: findings.length, candidate_id: proposal?.id ?? null, status: "completed", raw_content_stored: false });
     return { run, findings, candidate: proposal, idempotent: false };

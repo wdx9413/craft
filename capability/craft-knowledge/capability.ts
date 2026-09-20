@@ -23,10 +23,9 @@
  * Both are named in `ownership.ts` where the projection is declared, because the product must
  * still expose them even though this package does not implement them.
  *
- * Like Experience, it declares no `contributes`. The read side of knowledge exists as tools
- * (`craft_wiki_context_compile`, `craft_knowledge_workbench_view`) but not as a
- * `ContextContributionProvider`, and inventing one that no caller invokes would be a claim
- * with no user. Recorded here so the absence is visible where a reader would look for it.
+ * Its `KnowledgeContribution` is the one governed read side used by Context Resolution.  It
+ * projects only reviewed claims; diagnostic searches may expose candidates to a human, but a
+ * candidate can never enter an execution Host's Context merely because it was imported.
  */
 import type { CraftCapability } from "../../src/capability-protocol.ts";
 import { CORE_KERNELS } from "../../src/capability-protocol.ts";
@@ -40,6 +39,7 @@ import { KNOWLEDGE_OWNS } from "./ownership.ts";
 import { ProjectBrainKernel } from "./project-brain.ts";
 import { ProjectKnowledgeKernel } from "./project-knowledge.ts";
 import { WikiCandidateGovernanceKernel } from "./wiki-candidate-governance.ts";
+import { KnowledgeContribution } from "./contribution.ts";
 
 /**
  * Kernel names this capability registers, and the core requires back.
@@ -70,6 +70,7 @@ export { KNOWLEDGE_OWNS };
 export const knowledgeCapability: CraftCapability = {
   name: "knowledge",
   product: "craft-knowledge",
+  evaluation: { input_contract: "scoped-query-or-claim", output_contract: "evidence-backed-knowledge", fixture_id: "knowledge-fixture-v1", host_compatibility: ["fixture", "codex", "claude"] },
   owns: KNOWLEDGE_OWNS,
   /**
    * Assemble the seven kernels from the store the core already opened.
@@ -91,4 +92,5 @@ export const knowledgeCapability: CraftCapability = {
     registry.provide(KNOWLEDGE_KERNELS.projectKnowledge, new ProjectKnowledgeKernel(store));
     registry.provide(KNOWLEDGE_KERNELS.projectBrain, new ProjectBrainKernel(store));
   },
+  contributes: (registry) => new KnowledgeContribution(registry.require<CraftStore>(CORE_KERNELS.store)),
 };

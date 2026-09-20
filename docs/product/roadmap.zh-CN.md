@@ -13,7 +13,9 @@
 
 ## 建设原则
 
-以 [产品架构](architecture.zh-CN.md) 的三大支柱为目标：工作与协作、执行与保障、学习与改进。**评测与实验是第三支柱内的核心模块**，不另设第四支柱。当前实现基线已推进到 v0.12.33。
+以 [产品架构](architecture.zh-CN.md) 的三大支柱为目标：工作与协作、执行与保障、学习与改进。**评测与实验是第三支柱内的核心模块**，不另设第四支柱。当前实现基线已推进到 v0.12.34。
+
+**v0.12.34：统一 Harness、任务闭环与单点能力评测。** `Agent = Model + Harness`，Harness 由 Context、Tool、Permission 和 Environment 组成；Environment 再由 Sandbox 与 Runtime 组成。任务型运行统一经过 Goal、Target、Task Contract、Plan、Step、Accept 和 Outcome，普通对话保留轻量 turn 模式。单点能力共享 Evaluation Contract，从机制证据逐级走到 routeable，不能因一次成功调用直接进入默认路由。详见 [v0.12.34 发布说明](../releases/v0.12.34.zh-CN.md)。
 
 **v0.12.21：Platform Ideal State v1。** `VerifiedWorkLoop` 成为唯一公开工作门面，阶段级 Launch/Fabric 接口退出 MCP 公共清单但保留为内部模块。分层 `UncertaintyPolicy` 默认受限自主：模型可自动增加确定性检查、独立评估器、授权上下文、只读 Expert 或 Trial 数，不能自动扩大 effect、数据、凭据或自治权限；人工只是可配置兜底，同样不能覆盖 Safety Floor。两个无正文 `ReferencePilot` 固定每臂五次配对运行，以 `eligible / rejected / inconclusive` 区分效果、回归和证据不足。内置测试只证明机制，真实 Codex 运行与盲评必须另行取得。详见 [Platform Ideal State v1](../technical/modules/platform-ideal-state-v1.md)。
 

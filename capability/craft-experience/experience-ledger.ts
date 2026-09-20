@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { CraftStore, type JsonObject } from "../../src/infrastructure/store.ts";
-import { object } from "../../src/validation.ts";
+import { object, optionalScope } from "../../src/validation.ts";
 import { stableDigest, payload } from "../../src/digest.ts";
 
 const OBSERVATION_KINDS = new Set(["success", "failure", "correction"]);
@@ -23,7 +23,8 @@ export class ExperienceLedgerKernel {
 
   observe(args: JsonObject): JsonObject {
     const source = this.reference(args.source_ref, "source_ref", SOURCES); const kind = text(args.kind, "kind"); if (!OBSERVATION_KINDS.has(kind)) throw new Error("Experience observation kind is unsupported");
-    const evidenceIds = this.evidenceIds(args.evidence_ids); const identity = { source, kind, scenario_key: text(args.scenario_key, "scenario_key"), finding_digest: stableDigest(text(args.finding, "finding")), evidence_ids: evidenceIds, content_free: true };
+    const scope = optionalScope(args);
+    const evidenceIds = this.evidenceIds(args.evidence_ids); const identity = { source, kind, scenario_key: text(args.scenario_key, "scenario_key"), ...(scope ? { scope } : {}), finding_digest: stableDigest(text(args.finding, "finding")), evidence_ids: evidenceIds, content_free: true };
     const observationId = String(args.observation_id ?? `experience_observation_${stableDigest(identity).slice(-20)}`); const existing = this.store.find("experience_observation", observationId); const identityDigest = stableDigest(identity);
     if (existing) { if (existing.identity_digest !== identityDigest) throw new Error("Experience observation idempotency conflict"); return { observation: existing, idempotent: true }; }
     return { observation: this.store.create("experience_observation", observationId, { ...identity, identity_digest: identityDigest, status: "recorded" }), idempotent: false };
@@ -33,9 +34,12 @@ export class ExperienceLedgerKernel {
     const scenarioKey = text(args.scenario_key, "scenario_key"); const ids = this.ids(args.observation_ids, "observation_ids", 2);
     const observations = ids.map((id) => this.store.get("experience_observation", id)).sort((a, b) => String(a.id).localeCompare(String(b.id)));
     if (observations.some((item) => item.scenario_key !== scenarioKey || item.status !== "recorded")) throw new Error("Experience observations do not match the scenario");
+    const scopes = new Set(observations.map((item) => stableDigest(item.scope ?? null)));
+    if (scopes.size !== 1) throw new Error("Experience observations do not share one scope");
     if (new Set(observations.map((item) => `${(item.source as JsonObject).kind}:${(item.source as JsonObject).id}:${(item.source as JsonObject).version}`)).size < 2) throw new Error("Experience patterns require independent source records");
     const kind = text(args.kind, "kind"); if (!PATTERN_KINDS.has(kind)) throw new Error("Experience pattern kind is unsupported");
-    const identity = { scenario_key: scenarioKey, kind, observation_refs: observations.map((item) => ({ id: item.id, version: item.version })), hypothesis_digest: stableDigest(text(args.hypothesis, "hypothesis")), applicability_digest: stableDigest(text(args.applicability, "applicability")), counterexample_digest: stableDigest(text(args.counterexample, "counterexample")), evidence_ids: [...new Set(observations.flatMap((item) => item.evidence_ids as string[]))].sort(), content_free: true };
+    const scope = observations[0]!.scope;
+    const identity = { scenario_key: scenarioKey, kind, ...(scope ? { scope } : {}), observation_refs: observations.map((item) => ({ id: item.id, version: item.version })), hypothesis_digest: stableDigest(text(args.hypothesis, "hypothesis")), applicability_digest: stableDigest(text(args.applicability, "applicability")), counterexample_digest: stableDigest(text(args.counterexample, "counterexample")), evidence_ids: [...new Set(observations.flatMap((item) => item.evidence_ids as string[]))].sort(), content_free: true };
     const patternId = String(args.pattern_id ?? `experience_pattern_${stableDigest(identity).slice(-20)}`); const existing = this.store.find("experience_pattern", patternId); const identityDigest = stableDigest(identity);
     if (existing) { if (existing.identity_digest !== identityDigest) throw new Error("Experience pattern idempotency conflict"); return { pattern: existing, idempotent: true }; }
     return { pattern: this.store.create("experience_pattern", patternId, { ...identity, identity_digest: identityDigest, status: "diagnostic_only", execution_visible: false }), idempotent: false };

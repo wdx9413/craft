@@ -102,6 +102,14 @@ test("v0.12.43 assembles capabilities without the core naming an implementation"
   assert.equal(registry.optional("nothingHere"), undefined);
 });
 
+test("installable capability products require a single-point Evaluation Contract while test probes do not", () => {
+  assert.throws(
+    () => buildCapabilityRegistry([{ ...capability("missing-eval"), product: "craft-missing-eval" }]),
+    /requires an Evaluation Contract descriptor/u,
+  );
+  assert.doesNotThrow(() => buildCapabilityRegistry([capability("probe-only")]));
+});
+
 test("v0.12.43 refuses two capabilities claiming one name or one kernel", () => {
   assert.throws(() => buildCapabilityRegistry([capability("same"), capability("same")]), /capability already registered: same/u);
   assert.throws(

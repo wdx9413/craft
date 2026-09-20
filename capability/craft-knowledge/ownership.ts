@@ -70,7 +70,7 @@ const KNOWLEDGE_NAMESPACE = "craft_(?:wiki|knowledge|claim|relation|project)";
  */
 const KNOWLEDGE_CONTEXT_NAMESPACE = "craft_(?:wiki|knowledge|claim|relation)";
 
-const SHARED_CONTEXT = "craft_(?:context_resolution|retrieval_adapter)";
+const SHARED_CONTEXT = "craft_(?:context_resolution|decision_context_gate|retrieval_adapter)";
 
 /** What the capability owns: matched against a tool name. */
 export const KNOWLEDGE_OWNS = new RegExp(`^${KNOWLEDGE_FAMILIES}`);

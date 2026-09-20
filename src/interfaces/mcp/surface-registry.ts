@@ -27,7 +27,7 @@ export const SURFACE_RULES: ReadonlyArray<{ name: string; pattern: RegExp }> = [
  * material that concern holds. They are implemented by `src/context-resolution.ts`, which is in
  * the core for exactly that reason.
  */
-const SHARED_CONTEXT_TOOLS = "craft_(?:context_resolution|retrieval_adapter)";
+const SHARED_CONTEXT_TOOLS = "craft_(?:context_resolution|decision_context_gate|retrieval_adapter)";
 
 export const COMPONENT_SURFACES: Readonly<Record<string, RegExp>> = {
   // Context is the user-facing composition of governed knowledge, scoped memory, and
@@ -59,6 +59,31 @@ export const COMPONENT_SURFACES: Readonly<Record<string, RegExp>> = {
   "component-experience": EXPERIENCE_COMPONENT,
 };
 
+/**
+ * The public component products are intentionally smaller than their advanced
+ * compatibility surfaces.  A standalone Host should see the repeatable daily
+ * path first, rather than several dozen lifecycle and diagnostic operations.
+ * Advanced callers may still select `component-*` explicitly.
+ */
+const DAILY_COMPONENT_TOOLS: Readonly<Record<string, readonly string[]>> = {
+  "component-knowledge-daily": [
+    "craft_info", "craft_component_readiness_get", "craft_component_diagnose", "craft_knowledge_bootstrap_install", "craft_knowledge_source_list",
+    "craft_knowledge_source_register", "craft_evidence_record", "craft_knowledge_search", "craft_knowledge_claim_get", "craft_knowledge_promotion_policy_get", "craft_knowledge_host_review", "craft_knowledge_support_record", "craft_knowledge_auto_review",
+    "craft_knowledge_claim_save", "craft_context_resolution_resolve", "craft_knowledge_memory_bundle",
+  ],
+  "component-memory-daily": [
+    "craft_info", "craft_component_readiness_get", "craft_component_diagnose", "craft_knowledge_bootstrap_install", "craft_knowledge_source_list",
+    "craft_memory_capture_user_statement", "craft_memory_candidate_propose", "craft_memory_candidate_review", "craft_memory_ledger_remember_approved",
+    "craft_memory_ledger_get", "craft_memory_ledger_list", "craft_memory_conflict_list", "craft_memory_conflict_resolve",
+    "craft_context_resolution_resolve", "craft_memory_maintenance_run", "craft_knowledge_memory_bundle",
+  ],
+  "component-experience-daily": [
+    "craft_info", "craft_component_readiness_get", "craft_component_diagnose", "craft_evidence_record", "craft_workflow_evolution_observe",
+    "craft_workflow_evolution_observations", "craft_workflow_evolution_propose", "craft_workflow_evolution_proposal_submit",
+    "craft_workflow_evolution_proposal_get", "craft_workflow_dag_get", "craft_workflow_dag_transition",
+  ],
+};
+
 export const COMPONENT_SURFACE_NAMES: readonly string[] = Object.keys(COMPONENT_SURFACES);
 export const DOMAIN_SURFACE_NAMES: readonly string[] = SURFACE_RULES.map((rule) => rule.name);
 export const SURFACE_NAMES: readonly string[] = ["core", ...DOMAIN_SURFACE_NAMES, ...COMPONENT_SURFACE_NAMES, "syscall", "full"];
@@ -71,6 +96,8 @@ export function surfaceToolNames(surface: string, activeTools: readonly Tool[], 
   if (surface === "full") return activeTools.map((tool) => tool.name);
   if (surface === "core") return activeTools.filter((tool) => coreToolNames.has(tool.name)).map((tool) => tool.name);
   if (surface === "syscall") return [...SYSCALL_VERBS, ...SYSCALL_PASSTHROUGH];
+  const daily = DAILY_COMPONENT_TOOLS[surface];
+  if (daily) return daily.filter((name) => activeTools.some((tool) => tool.name === name));
   const component = COMPONENT_SURFACES[surface];
   if (component) return activeTools.filter((tool) => tool.name === "craft_info" || component.test(tool.name)).map((tool) => tool.name);
   if (!SURFACE_RULES.some((rule) => rule.name === surface)) throw new Error(`Unknown Craft MCP surface: ${surface}`);

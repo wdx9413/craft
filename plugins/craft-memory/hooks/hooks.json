@@ -1,0 +1,14 @@
+{
+  "description": "Resolve scoped Craft Memory and capture only explicit remember commands.",
+  "hooks": {
+    "UserPromptSubmit": [{
+      "hooks": [{
+        "type": "command",
+        "command": "node ${PLUGIN_ROOT}/dist/plugin/craft-codex-hook.cjs --member memory",
+        "timeout": 3,
+        "statusMessage": "Resolving scoped Craft Memory",
+        "additionalContextLimit": 3200
+      }]
+    }]
+  }
+}

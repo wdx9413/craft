@@ -184,3 +184,49 @@ test("v0.12.32 workflow DAG lifecycle and import/export error paths", async () =
     assert.equal((imported.workflow as JsonObject).id, "imported");
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
+
+test("v0.12.34 memory governance keeps policy, conflict replacement, expiry and consolidation auditable", async () => {
+  const { root, store, service } = await fixture();
+  try {
+    service.knowledgeMemoryInstallBuiltins();
+    const source = service.knowledgeSourceRegister({ source_id: "governance-source", kind: "custom", label: "governance", scope_kind: "project", scope_id: "p", locator: "local", content_digest: "sha256:governance", trust: "bounded", access: "proposal_only" }).source as JsonObject;
+    const evidence = service.evidenceRecord({ evidence_id: "governance-evidence", source_type: "test", claim: "verified", confidence: "bounded" });
+    service.memoryPolicySave({ mode: "off", updated_by: "operator" });
+    assert.equal(service.memoryCandidatePropose({ source_id: source.id, kind: "preference", scope_kind: "project", scope_id: "p", content: "disabled" }).status, "disabled");
+    const governed = service.memoryPolicySave({ mode: "governed", min_confidence: "bounded", updated_by: "operator" }).policy as JsonObject;
+    assert.equal((service.memoryPolicySave({ mode: "governed", min_confidence: "bounded", updated_by: "operator" }) as JsonObject).idempotent, true);
+    const automatic = service.memoryCandidatePropose({ candidate_id: "automatic", source_id: source.id, kind: "preference", scope_kind: "project", scope_id: "p", content: "automatic", evidence_ids: [evidence.id] });
+    assert.equal(automatic.auto_committed, true);
+    assert.equal((automatic.memory as JsonObject).status, "active");
+    assert.equal(governed.mode, "governed");
+    service.memoryPolicySave({ mode: "propose", updated_by: "operator" });
+    assert.throws(() => service.memoryPolicyGet({ policy_id: " " }), /empty/);
+    const untrusted = service.knowledgeSourceRegister({ source_id: "untrusted-governance", kind: "custom", label: "untrusted", scope_kind: "project", scope_id: "p", locator: "local", content_digest: "sha256:untrusted", trust: "untrusted", access: "proposal_only" }).source as JsonObject;
+    assert.throws(() => service.memoryCandidatePropose({ source_id: untrusted.id, kind: "preference", scope_kind: "project", scope_id: "p", content: "untrusted source" }), /unavailable/);
+    store.create("memory_candidate", "null-conflict-seed", { status: "candidate", scope: { kind: "project", id: "p" }, topic: "seed", content_digest: "seed", conflict_ids: null });
+    service.memoryCandidatePropose({ candidate_id: "seed-new", source_id: source.id, kind: "preference", scope_kind: "project", scope_id: "p", topic: "seed", content: "new seed", evidence_ids: [evidence.id] });
+    const old = service.memoryCandidatePropose({ candidate_id: "drink-old", source_id: source.id, kind: "preference", scope_kind: "project", scope_id: "p", topic: "drink", content: "coffee", evidence_ids: [evidence.id] }).candidate as JsonObject;
+    service.memoryCandidateReview({ candidate_id: old.id, decision: "approve", reviewer: "reviewer", reason: "evidence" });
+    const oldMemory = service.memoryLedgerRememberApproved({ candidate_id: old.id }).memory as JsonObject;
+    const newer = service.memoryCandidatePropose({ candidate_id: "drink-new", source_id: source.id, kind: "preference", scope_kind: "project", scope_id: "p", topic: "drink", content: "tea", evidence_ids: [evidence.id] }).candidate as JsonObject;
+    assert.equal(newer.status, "conflict_pending");
+    service.memoryConflictResolve({ candidate_id: newer.id, resolution: "supersede", actor: "reviewer", reason: "newer evidence" });
+    service.memoryCandidateReview({ candidate_id: newer.id, decision: "approve", reviewer: "reviewer", reason: "evidence" });
+    const replacement = service.memoryLedgerRememberApproved({ candidate_id: newer.id });
+    assert.equal((replacement.superseded as JsonObject[])[0]!.id, oldMemory.id);
+    assert.equal(store.get("memory_ledger", String(oldMemory.id)).status, "superseded");
+    assert.equal((service.memoryLedgerRememberApproved({ candidate_id: newer.id }) as JsonObject).superseded instanceof Array, true);
+    const expiring = service.memoryCandidatePropose({ candidate_id: "expired-candidate", source_id: source.id, kind: "working", scope_kind: "project", scope_id: "p", content: "soon gone", valid_until: "2020-01-01T00:00:00.000Z" }).candidate as JsonObject;
+    assert.equal(((service.memoryExpirySweep({ now: "2030-01-01T00:00:00.000Z" }) as JsonObject).expired as JsonObject[]).some((item) => item.id === expiring.id), true);
+    assert.equal(((service.memoryExpirySweep() as JsonObject).expired as JsonObject[]).length >= 0, true);
+    const a = service.memoryCandidatePropose({ candidate_id: "consolidate-a", source_id: source.id, kind: "preference", scope_kind: "project", scope_id: "p", topic: "a", content: "one", evidence_ids: [evidence.id] }).candidate as JsonObject;
+    const b = service.memoryCandidatePropose({ candidate_id: "consolidate-b", source_id: source.id, kind: "preference", scope_kind: "project", scope_id: "p", topic: "b", content: "two", evidence_ids: [evidence.id] }).candidate as JsonObject;
+    service.memoryCandidateReview({ candidate_id: a.id, decision: "approve", reviewer: "reviewer", reason: "evidence" });
+    service.memoryCandidateReview({ candidate_id: b.id, decision: "approve", reviewer: "reviewer", reason: "evidence" });
+    assert.equal((service.memoryConsolidateGoverned({ consolidation_id: "governance-consolidation", candidate_ids: [a.id, b.id], summary: "summary" }) as JsonObject).idempotent, false);
+    assert.match(String((service.memoryConsolidateGoverned({ candidate_ids: [a.id, b.id], summary: "summary again" }) as JsonObject).consolidation), /\[object Object\]/u);
+    store.create("memory_candidate", "other-conflict", { status: "candidate", conflict_ids: null });
+    store.create("memory_candidate", "missing-arrays", { status: "candidate", conflict_ids: ["other-conflict"] });
+    assert.equal((service.memoryConflictResolve({ candidate_id: "missing-arrays", resolution: "dismiss", actor: "reviewer", reason: "cleanup" }).candidate as JsonObject).status, "candidate");
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});

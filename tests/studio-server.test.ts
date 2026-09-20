@@ -27,7 +27,7 @@ test("Craft Studio serves its Codex-style app from beside the runtime", async ()
   assert.equal(app.handle({ method: "GET", path: "/studio/" }).status, 200);
   assert.match(app.handle({ method: "GET", path: "/studio/app.css" }).body, /--bg-rail/);
   assert.match(app.handle({ method: "GET", path: "/studio/app.js" }).body, /studio\/call/);
-  // v0.12.33: the approval surface must actually be served and wired, not merely
+  // v0.12.34: the approval surface must actually be served and wired, not merely
   // described. The runtime's headline guarantee is an approval gate, so a Studio
   // without a place to approve is the inconsistency this release removes.
   const studioScript = app.handle({ method: "GET", path: "/studio/app.js" }).body;

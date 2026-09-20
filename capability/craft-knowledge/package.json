@@ -1,6 +1,6 @@
 {
   "name": "@craft/capability-knowledge",
-  "version": "0.12.33",
+  "version": "0.12.34",
   "private": true,
   "description": "Craft Knowledge capability: evidence-backed claims, Wiki context, relations, and the project index",
   "type": "module",
@@ -28,7 +28,7 @@
     "project-brain.ts"
   ],
   "peerDependencies": {
-    "craft-agent-harness": "0.12.33"
+    "craft-agent-harness": "0.12.34"
   },
   "license": "MIT"
 }

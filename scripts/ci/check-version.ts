@@ -35,10 +35,21 @@ for (const path of ["plugins/craft/.codex-plugin/plugin.json", "plugins/craft-co
   if (manifestVersion !== packageVersion) throw new Error(`${path} version ${String(manifestVersion)} differs from package.json ${packageVersion}`);
 }
 
-const service = await readFile(resolve(root, "src/service.ts"), "utf8");
-const applicationService = await readFile(resolve(root, "src/application/craft-service.ts"), "utf8");
-const match = (service + "\n" + applicationService).match(/export const VERSION = "([^"]+)";/u);
-if (match?.[1] !== packageVersion) throw new Error(`src/service.ts VERSION differs from package.json ${packageVersion}`);
+for (const path of ["plugins/craft-knowledge/.claude-plugin/plugin.json", "plugins/craft-memory/.claude-plugin/plugin.json", "plugins/craft-experience/.claude-plugin/plugin.json"]) {
+  const manifestVersion = (await json(path)).version;
+  if (manifestVersion !== packageVersion) throw new Error(`${path} version ${String(manifestVersion)} differs from package.json ${packageVersion}`);
+}
+
+const versionSource = await readFile(resolve(root, "src/version.ts"), "utf8");
+const match = versionSource.match(/CRAFT_RELEASE_VERSION = "([^"]+)"/u);
+if (match?.[1] !== packageVersion) throw new Error(`src/version.ts CRAFT_RELEASE_VERSION differs from package.json ${packageVersion}`);
+
+for (const path of ["capability/craft-knowledge/package.json", "capability/craft-memory/package.json", "capability/craft-experience/package.json", "adapters/deepseek-harness/package.json"]) {
+  const component = await json(path);
+  if (component.version !== packageVersion) throw new Error(`${path} version ${String(component.version)} differs from package.json ${packageVersion}`);
+  const peers = (component.peerDependencies ?? {}) as Record<string, unknown>;
+  if (peers["craft-agent-harness"] !== undefined && peers["craft-agent-harness"] !== packageVersion) throw new Error(`${path} craft-agent-harness peer differs from package.json ${packageVersion}`);
+}
 
 for (const path of ["README.md", "README.en.md"]) {
   const readme = await readFile(resolve(root, path), "utf8");

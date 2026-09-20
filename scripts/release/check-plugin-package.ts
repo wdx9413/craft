@@ -28,7 +28,7 @@ for (const path of [
 
 for (const name of componentNames) {
   const componentRoot = join(root, "plugins", name);
-  const componentManifest = JSON.parse(await readFile(join(componentRoot, ".codex-plugin", "plugin.json"), "utf8")) as { name: string; version: string; skills: string; mcpServers: string; interface?: { composerIcon?: string; logo?: string } };
+  const componentManifest = JSON.parse(await readFile(join(componentRoot, ".codex-plugin", "plugin.json"), "utf8")) as { name: string; version: string; skills: string; mcpServers: string; hooks?: string; interface?: { composerIcon?: string; logo?: string } };
   assert.equal(componentManifest.name, name);
   assert.equal(componentManifest.version, packageJson.version);
   assert.equal(componentManifest.skills, "./skills/");
@@ -37,9 +37,25 @@ for (const name of componentNames) {
   assert.equal(componentManifest.interface?.logo, "./assets/craft-icon.svg");
   await access(join(componentRoot, "assets", "craft-icon.svg"));
   await access(join(componentRoot, "dist", "plugin", "craft-mcp.cjs"));
+  if (["craft-knowledge", "craft-memory", "craft-experience"].includes(name)) {
+    assert.equal(componentManifest.hooks, "./hooks/hooks.json");
+    await access(join(componentRoot, "hooks", "hooks.json"));
+    await access(join(componentRoot, "dist", "plugin", "craft-codex-hook.cjs"));
+  }
   const source = await readFile(join(root, "skills", name, "SKILL.md"), "utf8");
   const packed = await readFile(join(componentRoot, "skills", name, "SKILL.md"), "utf8");
   assert.equal(normalizeText(packed), normalizeText(source));
+}
+
+// These three are standalone products in Claude Code as well as Codex.  Keep the product
+// names here because a stale `evolution` argument still parses as JSON but selects no surface.
+for (const [name, product] of [["craft-knowledge", "knowledge"], ["craft-memory", "memory"], ["craft-experience", "experience"]] as const) {
+  const manifest = JSON.parse(await readFile(join(root, "plugins", name, ".claude-plugin", "plugin.json"), "utf8")) as {
+    name: string; version: string; mcpServers: Record<string, { args: string[] }>;
+  };
+  assert.equal(manifest.name, name);
+  assert.equal(manifest.version, packageJson.version);
+  assert.deepEqual(manifest.mcpServers[name]?.args.slice(-2), ["--product", product]);
 }
 
 const sourceSkill = await readFile(join(root, "skills", "craft-route", "SKILL.md"), "utf8");

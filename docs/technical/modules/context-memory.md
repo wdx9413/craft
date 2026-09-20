@@ -4,7 +4,7 @@
 >
 > **本文讲的是范围化记忆与后台整理的设计。上下文由哪五个成员组成、每个成员由谁持有、`state` 具体存什么、历史压缩的实测状态，见 [上下文的五个成员](context-members.md)。** 两者有重叠，但那篇是权威：它区分"决定"与"实测"，并列出未决问题。
 
-v0.12.32 增加 `MemoryMaintenanceKernel`。`Light` 只做重复、过期、敏感和格式信号；`Review` 检查冲突、来源、作用域与使用关系；`Deep` 才可生成 Knowledge、Skill 或 Workflow Candidate。三阶段都保留历史、不物理删除、不自动覆盖，候选必须继续经过 Evidence、评测、Signoff 和 Canary。
+v0.12.32 增加 `MemoryMaintenanceKernel`。`Light` 只做重复、过期、敏感和格式信号；`Review` 检查冲突、来源、作用域与使用关系；`Deep` 才可生成 Knowledge、Skill 或 Workflow Candidate。三阶段都保留历史、不物理删除、不自动覆盖，候选必须继续经过 Evidence、评测、Signoff 和 Canary。v0.12.34 起它优先检查受管 `memory_ledger`；只有 Ledger 仍为空时才只读兼容旧 `episodic_memory`，不会把两套账本混入同一次维护结果。
 
 ### 作用域缺失时的只读行为
 
@@ -65,6 +65,12 @@ Context Virtual Memory Management（CVMM）在 Craft 中是应用层类比：模
 幂等记录整理游标，避免反复付费处理同一批记录；用户开始前台任务或预算耗尽时让出资源。后台摘要不覆盖不可变 Trial/Trace/Outcome，不直接删除相互矛盾的事实，不自动发布 Skill 或提升执行权限。
 
 `craft_memory_maintenance_cycle` 提供一个可恢复的后台学习游标：它按终态 Trace 的稳定 ID 顺序分批生成 `learning_observation`，只保存 Trace/版本/环境指纹和摘要 digest，不保存原始 Prompt、回复或敏感正文。观察可以成为后续 Experience/Memory Candidate 的输入，但不会自动写入正式 Memory，也不会绕过评测、Signoff 或 Canary。Worker 宕机后可用相同 `cursor` 重放，重复批次保持幂等。
+
+## 单独使用 `craft-memory`
+
+`craft-memory` 默认 MCP 面是日常小面：Readiness、来源 bootstrap、候选、审核、批准写入、当前 scope 的 Context Resolution 与 proposal-only Maintenance。完整的 `component-memory` 是显式高级面，保留给诊断、迁移和治理工具；二者共享同一 Ledger、Evidence、Receipt 与 Policy，绝不创建第二套记忆库。
+
+先调用 `craft_component_readiness_get({ component: "memory" })`。若当前任务没有明确 user/project/task scope，解析应返回 `skipped: true`，而不是读取全局记忆或报错。真实模型验证需要在相同 Host、模型、预算和代码 Fixture 下，对照“无 Memory”和“固定 Context Receipt”的 Outcome、跨项目泄漏、过期/撤销命中、成本与时延；仅 Ledger 成功写入或 MCP 握手不代表模型效果已经提升。
 
 反馈用于开发与候选诊断；held-out 不向候选生成器透露答案或逐例反馈。反复选择造成测试集过拟合时更新独立测试集。现有线上反馈审核和晋级协议继续生效。
 

@@ -12,7 +12,7 @@ test("service facades exercise defaults, compatibility views, and model validati
   const store = await new CraftStore(craftPaths(root)).open();
   const service = new CraftService(store);
   try {
-  assert.equal((service.studioResourceView() as JsonObject).version, "0.12.33");
+  assert.equal((service.studioResourceView() as JsonObject).version, "0.12.34");
     assert.throws(() => service.studioResourceCatalogView({ kind: "unknown", limit: 1 }), /kind must be/);
     assert.deepEqual((service.studioResourceCatalogView({ kind: "memory", limit: 2 }).items as unknown[]), []);
     assert.deepEqual((service.studioResourceCatalogView({ kind: "workflows", limit: 2 }).runs as unknown[]), []);

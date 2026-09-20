@@ -8,17 +8,106 @@ Craft 的产品目标是面向各行业的人机共同数字工作台；本页�
 
 完整目标见 [三大支柱与十个模块](product/architecture.zh-CN.md)，后续取舍见 [路线](product/roadmap.zh-CN.md)。评测属于“学习与改进”支柱，沙箱属于“执行与保障”。历史章节中的隔离描述不得解释为已完成安全认证；当前实际缺口见 [沙箱与执行策略](technical/modules/execution-policy.md)。
 
+## 概念关系：Agent、Harness、Runtime、Context 与 State
+
+这些词不是同一层的同义词。Craft 采用下面的稳定关系：
+
+```text
+Agent = Model + Harness
+Harness = Context + Tool + Permission + Environment
+Environment = Sandbox + Runtime
+
+Goal
+  ↓ 澄清并固化
+Target + Task Contract + Acceptance
+  ↓ 生成或选择
+Plan（Step 列表、依赖、预算、effect）
+  ↓ 由 Harness 组织
+Context Resolution + Capability Activation + Permission Preflight
+  ↓ 运行在
+Environment（Sandbox + Runtime）
+  ↓ 交给
+Host（Codex / Claude / CLI / API / Fixture）
+  ↓ 每个 Step 都要
+Action → Receipt → State Re-observation → Accept
+  ↓ 汇总
+Outcome → Trace / Evaluation / Candidate
+```
+
+- `Agent = Model + Harness`。模型负责理解与提议；Harness 负责把提议变成有边界的行动循环。
+- `Harness = Context + Tool + Permission + Environment`。Context 是受限输入，Tool 是动作面，Permission 是策略边界，Environment 是执行地点和生命周期。
+- `Environment = Sandbox + Runtime`。Sandbox 解决隔离，Runtime 解决持久执行、租约、回执、检查点、取消与恢复；没有可验证隔离器时，高风险动作失败关闭。
+- `Tool` 可以来自 Skill、MCP、插件、Workflow、检索器或 Host Adapter，但只有登记为受治理 Capability Asset 并经过 Activation 后才是当前可调用 Tool。
+- `Context` 是给模型/Host 的受限投影，不是事实存储；知识、记忆、经验和 state 只有被解析后才进入上下文。
+- `State` 分为 Control State（Task/Run/Operation/Lease/Checkpoint）和 World State（Workspace/Artifact/外部状态摘要）；模型上下文可以引用 State，但不拥有 State。
+- `Host` 是真实执行者。Codex App 的插件模式默认复用当前 embedded Host，不会隐式启动第二个 Codex CLI；独立 Agent 模式才由 Craft 选择模型和 Host。
+- `Hook` 是挂在生命周期时点的扩展 seam，例如激活前、执行前、回执后、再观察后和验收前。它可以观察、补充证据或阻断，但不能替代 Tool、Permission、Receipt 或 Acceptance，也不能绕过主流程扩大副作用。
+
+因此，Craft 的目标不是再做一个聊天壳，而是提供一套共享 Control Plane、Runtime 和证据模型的工作运行时。
+
+## 两种入口与单点能力
+
+产品保持“两扇入口、一套事实账本”：
+
+| 入口 | 默认路径 | 适用边界 |
+| --- | --- | --- |
+| 完整 Craft / Codex 控制台 | `Goal → Clarify → Activate → Preflight → Host → Observe → Accept → Learn` | 写入、交付、长任务、跨会话恢复、需要证据的工作 |
+| 单点 MCP/Skill/插件 | 读取或候选操作直接调用相应组件；任何写入/发布仍回到 Control Plane | `craft-memory`、`craft-knowledge`、`craft-capability`、`craft-quality`、`craft-experience` 等独立能力 |
+
+单点能力可以被 Codex、Claude、IDE 或独立 Agent 使用，但不能复制一套 Store、Policy、Trace 或 Eval。它们共享相同的 `data_space`、来源摘要、Receipt 和权限边界；当操作产生副作用或需要发布时，必须回到 `VerifiedWorkLoop`。
+
+## 对话、目标与计划模式
+
+主流程不是把所有输入都当成长期任务，而是根据交互模式选择最小路径：
+
+```text
+普通对话（turn）
+  → Context Resolution（可选）
+  → 回复 / 追问
+
+目标任务（goal）
+  → 澄清 Goal
+  → 固化 Target + Task Contract + Acceptance
+  → 生成/选择 Plan
+  → 执行 Step
+  → 再观察并 Accept
+  → Outcome / Learn
+
+计划审查（plan）
+  → 只生成或修改 Plan，不执行副作用
+
+验证审查（verify）
+  → 只检查 Step/Target 的 State、Artifact 和 Evidence
+```
+
+`Goal` 是用户想要的结果，`Target` 是经过澄清的对象、范围和期望终态，`Plan` 是如何完成，`Step` 是可观察的最小动作，`Accept` 是如何证明完成。只有在目标任务、执行、验证或学习模式需要持久状态时才建立 Task Run；普通对话不必被强行包装成 Workflow。
+
+## 五层主链与三类评测
+
+全流程按五个逻辑平面组织：`Control`（Goal/Task/Policy/Budget）、`Context`（Knowledge/Memory/Experience/Resolution）、`Capability`（Asset/Activation/Connector）、`Execution`（Runtime/Host/State/Receipt）和 `Trust`（Acceptance/Evaluation/Signoff/Evolution）。这五层是职责边界，不要求五个独立进程。
+
+每个可独立暴露的能力都要有自己的 `Evaluation Contract`，至少覆盖：
+
+1. **机制与契约**：输入校验、scope/effect、版本/摘要、MCP 工具面和失败关闭；
+2. **Fixture 与阶段集成**：确定性样例、漂移/重试/幂等、敏感泄漏、真实 Receipt 与上游/下游契约；
+3. **Host/业务准入**：真实 Host 或脱敏业务 Case 的 Outcome、成本/时延、恢复率、回归和可复用性。
+
+状态只能逐级升级：`mechanism_passed → fixture_passed → host_verified → business_eligible → routeable`。组件握手、单元覆盖率和一次成功都不能越级成为 `routeable`。
+
 ## 框架：harness 与 context 的分解
 
 全站反复用到的分解方式，先写在这里，避免每次重新推导：
 
 ```text
-agent   = model + harness
-harness = permission + context + tool + environment   (+ hook，正交轴)
-context = history + knowledge + memory + experience + state
+agent       = model + harness
+harness     = context + tool + permission + environment
+environment = sandbox + runtime
+context     = history + knowledge + memory + experience + state
 ```
 
-`hook` 不在 `harness` 那一行里，因为它不回答“有什么”，而回答“在流程的哪一刻”——这是它单列的原因，不是排版。
+这里的 `state` 是“可被当前任务引用的 State Projection”，不是把 Control State 或 Workspace 全量塞进上下文；Context 仍然是预算化、可重建的投影，事实主键、版本和变更留在 Runtime/Store。这样既保留五成员的产品解释，又避免把 Context 误当成第二套状态账本。
+
+`hook` 仍是流程中的正交时点，不属于四个组成面；它回答“在流程的哪一刻触发”，而不是“Agent 依赖什么”。其中 `knowledge`、`memory`、`experience` 通常以 Capability Adapter 接入，`history` 多由 Host 提供，`state` 由 Runtime/Workspace 产生并只以受限投影进入 Context。Hook 也不应成为隐藏的第五条主流程。
 
 五个上下文成员**各由谁持有、门槛是什么、`state` 具体存什么**，见 [上下文的五个成员](technical/modules/context-members.md)；其中 `history`（宿主提供）与 `state`（当前任务）**不是**可插拔成员，只有三个累积型成员可以是能力。能力如何在进程内声明并装配，见 [Capability 扩展协议](technical/modules/capability-protocol.md)。这两个问题与“MCP 暴露哪些工具面”是不同层：MCP 是对外协议，能力契约是内部协议。
 

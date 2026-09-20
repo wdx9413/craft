@@ -2,6 +2,7 @@ import type { JsonObject } from "./infrastructure/store.ts";
 import {
   MCP_ASSESSED_REVISION, MCP_MIGRATION_STATUS, MCP_PREFERRED_PROTOCOL_VERSION, MCP_PROTOCOL_VERSIONS
 } from "./distribution-and-first-run.ts";
+import { CRAFT_RELEASE_VERSION } from "./version.ts";
 
 /**
  * G7: MCP 2026-07-28 forward compatibility.
@@ -58,7 +59,7 @@ export function discoverResult(input: JsonObject = {}): JsonObject {
     protocolVersion: MCP_PREFERRED_PROTOCOL_VERSION,
     supported_revisions: [...MCP_PROTOCOL_VERSIONS],
     capabilities: { tools: {} },
-    serverInfo: { name: serverName, version: String(input.version ?? "0.12.33") },
+    serverInfo: { name: serverName, version: String(input.version ?? CRAFT_RELEASE_VERSION) },
     // Named rather than implied: a client must not assume the assessed revision
     // is available just because this build knows about it.
     assessed_revision: MCP_ASSESSED_REVISION,

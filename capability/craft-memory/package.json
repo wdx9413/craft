@@ -1,6 +1,6 @@
 {
   "name": "@craft/capability-memory",
-  "version": "0.12.33",
+  "version": "0.12.34",
   "private": true,
   "description": "Craft Memory capability: the scoped, Source-pinned, Evidence-checked Memory Ledger",
   "type": "module",
@@ -11,6 +11,6 @@
     "./memory-ledger": "./memory-ledger.ts"
   },
   "files": ["capability.ts", "ownership.ts", "memory-ledger.ts"],
-  "peerDependencies": { "craft-agent-harness": "0.12.33" },
+  "peerDependencies": { "craft-agent-harness": "0.12.34" },
   "license": "MIT"
 }

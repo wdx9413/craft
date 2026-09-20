@@ -1,6 +1,6 @@
 {
   "name": "craft-memory",
-  "version": "0.12.33",
+  "version": "0.12.34",
   "description": "Standalone scoped and evidence-linked memory for AI hosts.",
   "author": { "name": "wdx9413", "url": "https://github.com/wdx9413" },
   "homepage": "https://github.com/wdx9413/craft",
@@ -9,6 +9,7 @@
   "keywords": ["memory", "context", "agent", "mcp"],
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
+  "hooks": "./hooks/hooks.json",
   "interface": {
     "displayName": "Craft Memory",
     "shortDescription": "Scoped memory and reproducible context receipts.",

@@ -58,7 +58,12 @@ export class MemoryLedgerKernel {
     // preference or a procedure is meant to outlive the turn that wrote it and does not.
     const validUntil = explicitValidUntil ?? (kind === "working" ? new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
       : kind === "episodic" ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString() : null);
-    const identity = { source_id: source.id, source_version: source.version, kind, scope: memoryScope, content_digest: stableDigest(content), sensitivity, confidence, evidence_ids: evidenceIds, valid_until: validUntil };
+    // `topic` is optional for compatibility, but when supplied it provides the
+    // stable subject key used by governed conflict resolution (for example
+    // `preference:diet:sugar`).  It is deliberately not inferred from prose:
+    // an LLM guess must not silently merge two unrelated memories.
+    const topic = args.topic === undefined ? undefined : text(args.topic, "topic");
+    const identity = { source_id: source.id, source_version: source.version, kind, scope: memoryScope, content_digest: stableDigest(content), sensitivity, confidence, evidence_ids: evidenceIds, valid_until: validUntil, ...(topic === undefined ? {} : { topic }) };
     const memoryId = String(args.memory_id ?? `memory_ledger_${randomUUID().replaceAll("-", "")}`); const existing = this.store.find("memory_ledger", memoryId); const identityDigest = stableDigest(identity);
     if (existing) { if (existing.identity_digest !== identityDigest) throw new Error("Memory Ledger idempotency conflict"); return { memory: existing, idempotent: true }; }
     // The body lives in the content store; the record keeps the reference and the digest, so
@@ -105,6 +110,27 @@ export class MemoryLedgerKernel {
   get(args: JsonObject): JsonObject {
     const memory = this.store.get("memory_ledger", text(args.memory_id, "memory_id"), args.version === undefined ? undefined : Number(args.version));
     return { memory: { ...memory, content: this.content(memory) } };
+  }
+
+  /**
+   * List a bounded, explicitly scoped view of the ledger.
+   *
+   * There is intentionally no "all memories" fallback here.  A standalone Memory
+   * MCP must be useful without becoming a cross-project history reader: callers
+   * name the same scope they would use to resolve Context, and history is opt-in
+   * because superseded or revoked entries are diagnostic evidence rather than
+   * active advice.
+   */
+  list(args: JsonObject): JsonObject {
+    const scope = parseScope(args);
+    const limit = args.limit === undefined ? 50 : Number(args.limit);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error("limit must be an integer between 1 and 100");
+    if (args.include_history !== undefined && typeof args.include_history !== "boolean") throw new Error("include_history must be boolean");
+    const includeHistory = args.include_history === true;
+    const scopeDigest = canonicalJson(scope);
+    const memories = this.store.list("memory_ledger", limit, (item) => canonicalJson(item.scope) === scopeDigest && (includeHistory || item.status === "active"))
+      .map((memory) => ({ ...memory, content: this.content(memory) }));
+    return { scope, include_history: includeHistory, count: memories.length, memories };
   }
 
   /**

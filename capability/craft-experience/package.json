@@ -1,6 +1,6 @@
 {
   "name": "@craft/capability-experience",
-  "version": "0.12.33",
+  "version": "0.12.34",
   "private": true,
   "description": "Craft Experience capability: content-free observations, bounded Workflow evolution, and evaluation model profiles",
   "type": "module",
@@ -18,7 +18,7 @@
     "evaluation-model-profile.ts"
   ],
   "peerDependencies": {
-    "craft-agent-harness": "0.12.33"
+    "craft-agent-harness": "0.12.34"
   },
   "license": "MIT"
 }

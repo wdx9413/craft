@@ -1,4 +1,39 @@
-# Current Capability Matrix (v0.12.33)
+# Current Capability Matrix (v0.12.34)
+
+## 单点能力的统一评测契约
+
+单点能力要能被 Codex、Claude、IDE 或独立 Agent 单独接入，但“能调用”不等于“值得路由”。每个组件都应提供同一组证据阶段：
+
+| 阶段 | 证明什么 | 典型检查 | 可否成为默认路由 |
+|---|---|---|---|
+| `mechanism_passed` | 接口和不变量正确 | schema、输入校验、scope/effect、版本/摘要、失败关闭 | 否 |
+| `fixture_passed` | 本地确定性机制可工作 | 脱敏 Case、边界、冲突、漂移、幂等、恢复、敏感泄漏 | 否 |
+| `conformance_passed` | 运行时边界保持失败关闭 | 沙箱/网络/凭据/资源/输出与清理证明 | 否 |
+| `integration_passed` | 接入 Craft 核心账本 | Policy、Trace、Receipt、State、Acceptance 的一致性 | 否 |
+| `host_verified` | 接入真实 Host 后仍遵守契约 | Host Receipt、State Observer、超时/取消、Trace 完整性 | 否 |
+| `business_eligible` | 在固定业务 Case 上产生净收益 | Outcome、成本/时延、恢复率、回归、盲评/独立 Grader | 仅进入 Signoff/Canary |
+| `routeable` | 已通过发布门并可被最小激活 | held-out、等预算配对、Signoff、Canary、回滚目标 | 是 |
+
+能力的检查面至少包括：输入/输出契约、权限与数据隔离、版本和 digest 一致性、失败关闭、重试与幂等、恢复与取消、成本/延迟、兼容性以及真实终态。单元测试和 MCP 握手只能证明前两层，不能替代 Host 或业务效果证据。
+
+## 当前架构审查结论
+
+当前矩阵大多记录“本地协议已实现”，但仍需避免把协议状态写成产品承诺：`Runtime Proof`、`Host Session`、`Outcome Observer`、A2A、真实模型和外部隔离仍依赖 Adapter/部署证据；`Automatic experience publication` 仍不是自动行为。v0.12.34 的主目标应是把这些事实接入同一 `VerifiedWorkLoop`，而不是再增加新的平行 MCP 入口。
+
+## 对外名称与兼容别名
+
+当前实现同时存在产品能力名、组件投影名和历史兼容名，不能把它们当成三套实现：
+
+| 语义 | 当前推荐入口 | 兼容/历史名称 | 说明 |
+|---|---|---|---|
+| 完整组合根 | `craft` | 无 | 装配 Core、Context、Capability、Quality、Host Bridge |
+| 知识 | `craft-knowledge` / daily component MCP | `component-knowledge`、`craft-context` 的知识投影 | 默认只暴露日常小工具面；高级面与默认面共享 KnowledgeSource、Evidence 和 Context Receipt |
+| 记忆 | `craft-memory` / daily component MCP | `component-memory`、`craft-context` 的记忆投影 | 默认只暴露受管候选/当前 scope 解析；高级面与默认面共享 MemoryLedger 和 scope 规则 |
+| 能力发现 | `craft-capability` | 无 | 发现、激活、授权、调用严格分离 |
+| 通用质量 | `craft-quality` | `craft-skill-quality` | Skill、MCP、Host、Memory、Knowledge 都是 Subject，不限于 Skill |
+| 经验/工作流演进 | `craft-experience` / daily component MCP | `component-experience`、旧 workflow-evolution 名称 | 默认是观察到草案的最小路径；只产生 Candidate，不能绕过 Eval/Signoff/Canary |
+
+`craft-runtime`、`craft-workflow` 若尚未出现在 Marketplace，不应在文档中宣称已是可安装产品；它们目前属于内部领域概念或未来投影。发布门禁应同时覆盖 Codex 与 Claude manifest、Marketplace 独立仓库和所有组件的工具面，避免宿主缓存旧协议或旧名称。
 
 | Area | State | Boundary |
 |---|---|---|

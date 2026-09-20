@@ -154,7 +154,7 @@ test("v0.12.43 keeps the shared helpers from widening what a caller refuses", as
   assert.match(project, /function recordDigest\(value: unknown\): string/u);
 });
 
-test("v0.12.33 an absent scope is reported rather than searched, and a half scope still fails", () => {
+test("v0.12.34 an absent scope is reported rather than searched, and a half scope still fails", () => {
   // A read-only resolution must not fail a turn because the Host could not name a scope, and it
   // must not fall back to searching every scope either.
   assert.equal(optionalScope({}), null);
@@ -165,7 +165,7 @@ test("v0.12.33 an absent scope is reported rather than searched, and a half scop
   assert.throws(() => optionalScope({ scope_id: "p" }), /scope_kind/u);
 });
 
-test("v0.12.33 the shared default helpers keep absence and null apart", () => {
+test("v0.12.34 the shared default helpers keep absence and null apart", () => {
   assert.equal(fallback(undefined, "d"), "d");
   assert.equal(fallback("v", "d"), "v");
   // `null` is a value, not an absence: a default must not replace it.

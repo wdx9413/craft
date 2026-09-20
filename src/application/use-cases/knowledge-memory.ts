@@ -17,6 +17,8 @@ export function installKnowledgeMemoryMethods(serviceClass: typeof CraftService)
   serviceClass.prototype.knowledgeSourceList = function (args) { return this.knowledgeSources.sourceList(args); };
   serviceClass.prototype.knowledgeSourceTransition = function (args) { return this.knowledgeSources.sourceTransition(args); };
   serviceClass.prototype.memoryLedgerRemember = function (args) { return this.memoryLedger.remember(args); };
+  serviceClass.prototype.memoryLedgerGet = function (args) { return this.memoryLedger.get(args); };
+  serviceClass.prototype.memoryLedgerList = function (args) { return this.memoryLedger.list(args); };
   serviceClass.prototype.memoryLedgerTransition = function (args) { return this.memoryLedger.transition(args); };
   serviceClass.prototype.memoryLedgerCompatBind = function (args) { return this.memoryLedger.compatBind(args); };
   serviceClass.prototype.contextResolutionResolve = function (args) { return this.contextResolution.resolve(args); };

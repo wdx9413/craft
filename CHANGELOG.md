@@ -1,9 +1,16 @@
 # Changelog
 
-> Note on numbering: the declared package version remains **0.12.33**. The
-> `v0.12.34`–`v0.12.43` headings below name **incremental work on that revision**,
+> Note on numbering: the declared package version is now **0.12.34**. Earlier
+> `v0.12.34`–`v0.12.43` headings name **incremental work on the previous revision**,
 > not releases. Each is a self-contained change set with its own 100%-coverage
 > test script; the version bump happens only when the work is released.
+
+## v0.12.34
+
+- 统一 `Agent / Harness / Environment / Context / State` 契约，并将 `Goal → Target → Plan → Step → Accept → Outcome` 接入 VerifiedWorkLoop。
+- 新增单点能力 `EvaluationContract`，阶段从机制证据单调推进到 `routeable`，不会因单次调用或握手自动放行。
+- 统一发布版本元数据、组件依赖、插件 manifest、MCP serverInfo 与 Marketplace 校验；Schema 与 Protocol 版本独立保留。
+- `craft-knowledge`、`craft-memory`、`craft-experience` 的 Codex Hook Bridge 现可独立工作：仅注入各自范围内的 Context；Memory 只接受 `记住：…` 或 `/remember: …`；Experience 仅从“本地修改 + 可观察验证”生成脱敏 Observation 和候选请求，绝不记录聊天正文或自动发布 Workflow。
 
 ## v0.12.43 (continued) - origin/main merged: 0.12.32's work re-expressed on the split kernels
 

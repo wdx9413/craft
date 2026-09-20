@@ -88,23 +88,35 @@ test("v0.12.19 keeps Console and Agent mode as a mode-neutral plan over verified
 
     const loop = new VerifiedWorkLoopKernel(f.store); f.store.create("task_control_contract", "contract", { task_id: "task" }); f.store.create("task_run", "run", { contract_id: "contract" }); f.store.create("state_snapshot", "snapshot", { workspace_id: "workspace", snapshot_digest: "sha256:one", workspace_state_revision: 1 });
     assert.equal((loop.create({ work_loop_id: "loop", task_id: "task", contract_id: "contract", task_run_id: "run", snapshot_id: "snapshot" }).loop as JsonObject).phase, "prepare");
+    const explicit = loop.create({ work_loop_id: "explicit-semantics", task_id: "task", contract_id: "contract", task_run_id: "run", snapshot_id: "snapshot", goal: "deliver verified output", mode: "execute", target: { subject: "report", scope: "project", desired_state: "saved" }, plan: { strategy: "smallest-safe", steps: [{ id: "inspect", description: "inspect state", action: "read", preconditions: ["scope known"] }] }, accept: { criteria: ["report exists"], observer: "fixture" } }).loop as JsonObject;
+    assert.equal((explicit.task_semantics as JsonObject).mode, "execute");
+    // Preserve the compatibility fallbacks too: old callers may only carry a title
+    // and the older `acceptance_criteria` field rather than a full Task semantic object.
+    f.store.create("task", "title-only", { project_id: "project", title: "Fallback goal", status: "active" });
+    f.store.create("task_control_contract", "title-contract", { task_id: "title-only" });
+    f.store.create("task_run", "title-run", { contract_id: "title-contract" });
+    const fallback = loop.create({ work_loop_id: "fallback-semantics", task_id: "title-only", contract_id: "title-contract", task_run_id: "title-run", snapshot_id: "snapshot", mode: "verify", acceptance_criteria: ["artifact exists"] }).loop as JsonObject;
+    assert.equal((((fallback.task_semantics as JsonObject).accept as JsonObject).criteria as string[])[0], "artifact exists");
     f.store.create("task_run_state", "running", { task_run_id: "run", status: "running", action: "host", actor: "host" });
     assert.equal((loop.advance({ work_loop_id: "loop", task_run_state_id: "running", snapshot_id: "snapshot" }).loop as JsonObject).phase, "act");
     assert.equal((loop.decide({ work_loop_id: "loop", decision: "accept", actor: "human", summary: "accepted" }).decision as JsonObject).decision, "accept");
-    assert.equal((loop.get({ work_loop_id: "loop" }).protocol as JsonObject).current_phase, "learn");
+    assert.equal((loop.get({ work_loop_id: "loop" }).protocol as JsonObject).current_phase, "evaluate");
     f.store.create("verified_work_loop", "legacy-observation", { task_run_id: "run", workspace_id: "workspace", latest_snapshot_id: "snapshot", lifecycle: "active" });
     f.store.create("task_run_state", "legacy-delivery", { task_run_id: "run", status: "ready_for_delivery", action: "host", actor: "host" });
     assert.equal((loop.advance({ work_loop_id: "legacy-observation", task_run_state_id: "legacy-delivery", snapshot_id: "snapshot" }).loop as JsonObject).phase, "deliver");
+    f.store.create("verified_work_loop", "legacy-blocked", { task_run_id: "run", workspace_id: "workspace", latest_snapshot_id: "snapshot", lifecycle: "active" });
+    f.store.create("task_run_state", "legacy-blocked-state", { task_run_id: "run", status: "blocked", action: "pause", actor: "runtime" });
+    assert.equal((loop.advance({ work_loop_id: "legacy-blocked", task_run_state_id: "legacy-blocked-state", snapshot_id: "snapshot" }).loop as JsonObject).unified_phase, "define");
     f.store.create("verified_work_loop", "legacy-decision", { lifecycle: "active" });
     assert.equal((loop.get({ work_loop_id: "legacy-decision" }).protocol as JsonObject).current_phase, "prepare");
     assert.equal((loop.decide({ work_loop_id: "legacy-decision", decision: "approve", actor: "human", summary: "approved" }).decision as JsonObject).decision, "approve");
-    assert.equal((loop.get({ work_loop_id: "legacy-decision" }).protocol as JsonObject).current_phase, "act");
+    assert.equal((loop.get({ work_loop_id: "legacy-decision" }).protocol as JsonObject).current_phase, "dispatch");
     const mcp = new McpServer(f.service, "full");
     for (const [name, args] of [["craft_knowledge_memory_install_builtins", {}], ["craft_work_runtime_mode_configure", { profile_id: "mcp-console", mode: "console", allowed_hosts: ["codex-cli"], default_host: "codex-cli" }]] as [string, JsonObject][]) {
       const response = await mcp.handle({ id: name, method: "tools/call", params: { name, arguments: args } }); assert.equal((response?.result as JsonObject).isError, false, name);
     }
     assert.equal(new McpServer(f.service, "core").tools.some((tool) => tool.name === "craft_context_resolution_resolve"), true);
-    assert.equal(VERSION, "0.12.33");
+    assert.equal(VERSION, "0.12.34");
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
@@ -222,7 +234,7 @@ test("v0.12.19 fails closed for untrusted, stale, restricted, malformed and drif
     assert.equal((f.service.workRuntimeModeGet({ plan_id: facadePlan.id }).plan as JsonObject).id, facadePlan.id);
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
-test("v0.12.33 resolves a body that lives in the content store and refuses a broken reference", async () => {
+test("v0.12.34 resolves a body that lives in the content store and refuses a broken reference", async () => {
   const f = await fixture();
   try {
     const source = f.sources.sourceRegister({ source_id: "content-body", kind: "custom", label: "Content body", scope_kind: "project", scope_id: "project",
@@ -243,5 +255,29 @@ test("v0.12.33 resolves a body that lives in the content store and refuses a bro
     f.store.create("memory_ledger", "broken-body", { source_id: String(source.id), kind: "preference", scope: { kind: "project", id: "project" },
       content_digest: "sha256:broken", sensitivity: "internal", valid_until: null, status: "active" });
     await assert.rejects(() => f.context.resolve({ query: "alpha", scope_kind: "project", scope_id: "project", memory_ids: ["broken-body"] }), /reference is missing/u);
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("v0.12.34 resolves named accumulated Context members without widening Memory", async () => {
+  const f = await fixture();
+  try {
+    const source = f.sources.sourceRegister({ source_id: "member-source", kind: "custom", label: "Member source", scope_kind: "project", scope_id: "project", locator: "local", content_digest: "sha256:member", trust: "bounded", access: "read_only" }).source as JsonObject;
+    const memory = f.ledger.remember({ memory_id: "member-memory", source_id: source.id, kind: "preference", scope_kind: "project", scope_id: "project", content: "alpha memory" }).memory as JsonObject;
+    const contributor = {
+      member: "experience" as const,
+      async contribute() { return { member: "experience" as const, receipt_id: "experience-receipt", items: [{ id: "experience-item", content: "alpha procedure" }], omitted_count: 0 }; },
+    };
+    const context = new ContextResolutionKernel(f.store, [contributor]);
+    const memoryOnly = await context.resolve({ receipt_id: "member-memory-only", query: "alpha", scope_kind: "project", scope_id: "project", members: ["memory"] }) as JsonObject;
+    assert.equal((memoryOnly.items as JsonObject[])[0]!.memory_id, memory.id);
+    assert.deepEqual(memoryOnly.contributions, []);
+    assert.deepEqual((memoryOnly.receipt as JsonObject).members, ["memory"]);
+    const experienceOnly = await context.resolve({ receipt_id: "member-experience-only", query: "alpha", scope_kind: "project", scope_id: "project", members: ["experience"] }) as JsonObject;
+    assert.deepEqual(experienceOnly.items, []);
+    assert.equal((experienceOnly.contributions as JsonObject[])[0]!.member, "experience");
+    await assert.rejects(() => context.resolve({ query: "alpha", scope_kind: "project", scope_id: "project", members: ["experience"], memory_ids: [memory.id] }), /excluded/);
+    await assert.rejects(() => context.resolve({ query: "alpha", scope_kind: "project", scope_id: "project", members: [] }), /non-empty/);
+    await assert.rejects(() => context.resolve({ query: "alpha", scope_kind: "project", scope_id: "project", members: ["history"] }), /accumulated/);
+    await assert.rejects(() => context.resolve({ query: "alpha", scope_kind: "project", scope_id: "project", members: ["unsupported"] }), /unsupported/);
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });

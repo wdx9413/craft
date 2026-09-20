@@ -69,9 +69,9 @@ test("v0.12.43 fails on the kernel a removed capability owed instead of leaving 
   } finally { await close(f); }
 });
 
-test("v0.12.43 claims the Ledger's writes, the derived signals, and nothing else", async () => {
+test("v0.12.43 claims the Ledger's scoped reads and writes, the derived signals, and nothing else", async () => {
   for (const owned of [
-    "craft_memory_ledger_remember", "craft_memory_ledger_transition", "craft_memory_ledger_compat_bind",
+    "craft_memory_ledger_remember", "craft_memory_ledger_get", "craft_memory_ledger_list", "craft_memory_ledger_transition", "craft_memory_ledger_compat_bind",
     // The derived signals are owned because `src/memory-wiring.ts` moved into this package as
     // `memory-signals.ts`. Claiming them needed no behaviour change, only the file move — which is
     // the difference between an ownership declaration and an aspiration.
@@ -101,7 +101,7 @@ test("v0.12.43 claims the Ledger's writes, the derived signals, and nothing else
 
   assert.deepEqual(names.filter((name) => MEMORY_OWNS.test(name)).sort(), [
     "craft_memory_capture_propose", "craft_memory_decay_get", "craft_memory_hybrid_scores",
-    "craft_memory_ledger_compat_bind", "craft_memory_ledger_remember", "craft_memory_ledger_transition",
+    "craft_memory_ledger_compat_bind", "craft_memory_ledger_get", "craft_memory_ledger_list", "craft_memory_ledger_remember", "craft_memory_ledger_transition",
     "craft_memory_promotion_preview", "craft_memory_usage_record",
   ]);
   assert.equal(memoryCapability.name, "memory");
@@ -119,7 +119,7 @@ test("v0.12.43 keeps the Memory projection at the name space it promised, and re
 
   // Behaviour preservation against the literal this replaced:
   // `/^craft_(memory|knowledge_source|knowledge_bootstrap|context_resolution|retrieval_adapter)/`.
-  const previous = /^craft_(memory|knowledge_source|knowledge_bootstrap|context_resolution|retrieval_adapter)/;
+  const previous = /^craft_(memory|knowledge_source|knowledge_bootstrap|context_resolution|decision_context_gate|retrieval_adapter)/;
   const exposed = surfaceToolNames("component-memory");
   for (const name of ACTIVE_TOOLS.map((tool) => tool.name).filter((name) => previous.test(name))) {
     assert(exposed.includes(name), `component-memory lost ${name}`);
@@ -142,7 +142,7 @@ test("v0.12.43 keeps the Memory projection at the name space it promised, and re
 
 test("v0.12.43 keeps component-context composing the frozen memory name space", () => {
   const context = COMPONENT_SURFACES["component-context"];
-  const previous = /^craft_(wiki|knowledge|claim|relation|memory|context_resolution|retrieval_adapter)/;
+  const previous = /^craft_(wiki|knowledge|claim|relation|memory|context_resolution|decision_context_gate|retrieval_adapter)/;
   const exposed = surfaceToolNames("component-context");
   const expected = ACTIVE_TOOLS.map((tool) => tool.name).filter((name) => previous.test(name));
   // `component-context` is a compatibility surface: the split must not change what an existing

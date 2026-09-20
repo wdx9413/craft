@@ -23,7 +23,7 @@ import { PROVIDER_CATALOG } from "../src/model-gateway.ts";
  */
 
 /** A pattern's identity is digests, and the prose is never stored — that is the module's design. */
-function pattern(store: CraftStore, args: { id: string; scenario: string; kind?: string; evidence?: number }): void {
+function pattern(store: CraftStore, args: { id: string; scenario: string; kind?: string; evidence?: number; scope?: { kind: string; id: string } }): void {
   const observationRefs = Array.from({ length: args.evidence ?? 2 }, (_, index) => ({ id: `${args.id}-obs-${index}`, version: 1 }));
   store.create("experience_pattern", args.id, {
     scenario_key: args.scenario,
@@ -33,6 +33,7 @@ function pattern(store: CraftStore, args: { id: string; scenario: string; kind?:
     applicability_digest: `sha256:applicability-${args.id}`,
     counterexample_digest: `sha256:counterexample-${args.id}`,
     evidence_ids: ["confirmed"],
+    ...(args.scope === undefined ? { scope: { kind: "project", id: "p" } } : { scope: args.scope }),
     status: "diagnostic_only",
     execution_visible: false,
     content_free: true,
@@ -171,19 +172,19 @@ test("v0.12.43 reaches the contribution through resolve, so the read side has a 
     // Assembled the way the foundation assembles it: the provider comes from the capability, and the
     // resolver is handed it. A contribution nothing invokes would be the defect this test exists for.
     const { contributed } = buildCapabilityRegistry(CRAFT_CAPABILITIES, f.core);
-    assert.deepEqual(contributed.map((provider) => provider.member), ["experience"]);
+    assert.deepEqual(contributed.map((provider) => provider.member), ["knowledge", "experience"]);
     const kernel = new ContextResolutionKernel(f.store, contributed);
     const resolved = await kernel.resolve({ query: "rollback", scope_kind: "project", scope_id: "p" });
     // Two different shapes, deliberately: `contributions` on the result is the **material** (the
     // items a caller may use), while the receipt keeps only a content-free summary of what was
     // selected. A receipt that carried the items would be storing retrieved content.
     const material = resolved.contributions as Array<{ member: string; receipt_id: string; items: unknown[] }>;
-    assert.equal(material.length, 1);
-    assert.equal(material[0]!.member, "experience");
-    assert.equal(material[0]!.items.length, 1);
-    const receipt = resolved.receipt as { contributions: Array<{ item_count: number }>; content_free: boolean };
-    assert.equal(receipt.contributions.length, 1);
-    assert.equal(receipt.contributions[0]!.item_count, 1);
+    assert.equal(material.length, 2);
+    const experienceMaterial = material.find((item) => item.member === "experience")!;
+    assert.equal(experienceMaterial.items.length, 1);
+    const receipt = resolved.receipt as { contributions: Array<{ member: string; item_count: number }>; content_free: boolean };
+    assert.equal(receipt.contributions.length, 2);
+    assert.equal(receipt.contributions.find((item) => item.member === "experience")!.item_count, 1);
     assert.equal(receipt.content_free, true);
     assert.equal(JSON.stringify(receipt).includes("scenario_key"), false, "the receipt carries no material");
 
@@ -194,7 +195,7 @@ test("v0.12.43 reaches the contribution through resolve, so the read side has a 
     // Changing the compiled experience changes the selection, and asking for the same receipt again
     // is then a conflict rather than a stale replay.
     const first = await kernel.resolve({ receipt_id: "pinned", query: "rollback", scope_kind: "project", scope_id: "p" });
-    assert.equal((first.contributions as unknown[]).length, 1);
+    assert.equal((first.contributions as unknown[]).length, 2);
     pattern(f.store, { id: "added", scenario: "deploy.rollback" });
     await assert.rejects(
       () => kernel.resolve({ receipt_id: "pinned", query: "rollback", scope_kind: "project", scope_id: "p" }),
@@ -216,7 +217,7 @@ test("v0.12.43 reflects an execution-visible pattern rather than asserting other
     // A pattern with no observation refs and no evidence is described as such rather than crashing:
     // the counts are the provenance, and zero is a real answer.
     f.store.create("experience_pattern", "bare", {
-      scenario_key: "deploy.rollback", kind: "success_strategy", status: "diagnostic_only", execution_visible: false,
+      scenario_key: "deploy.rollback", scope: { kind: "project", id: "p" }, kind: "success_strategy", status: "diagnostic_only", execution_visible: false,
     });
     const items = (await f.contribution.contribute(request("rollback"))).items;
     const bare = items.find((entry) => entry.pattern_id === "bare")!;
@@ -240,5 +241,16 @@ test("v0.12.43 keeps the ledger kernel and the contribution as separate surfaces
     // resolve context on a fresh install.
     const empty = await f.contribution.contribute(request("anything"));
     assert.deepEqual(empty, { member: "experience", items: [], receipt_id: "experience_contribution_none", omitted_count: 0 });
+  } finally { await close(f); }
+});
+
+test("unscoped legacy experience stays diagnostic and never crosses into a project Context", async () => {
+  const f = await fixture();
+  try {
+    pattern(f.store, { id: "legacy", scenario: "deploy.rollback", scope: undefined });
+    // Explicitly remove scope after the helper's safe current default: this models a record
+    // created before the scope field existed.
+    f.store.save("experience_pattern", "legacy", { ...f.store.get("experience_pattern", "legacy"), scope: undefined });
+    assert.deepEqual((await f.contribution.contribute(request("rollback"))).items, []);
   } finally { await close(f); }
 });

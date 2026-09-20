@@ -12,6 +12,8 @@ import { installHostSessionMethods } from "./host-session.ts";
 import { installDurableExperienceMethods } from "./durable-experience.ts";
 import { installLegacyKnowledgeMigrationMethods } from "./legacy-knowledge-migration.ts";
 import { installRuntimeLearningMethods } from "./runtime-learning.ts";
+import { installKnowledgeAutoReviewMethods } from "./knowledge-auto-review.ts";
+import { installDecisionContextGateMethods } from "./decision-context-gate.ts";
 
 /** Thin application use cases that delegate to one owned domain kernel. */
 declare module "../craft-service.ts" {
@@ -21,6 +23,8 @@ declare module "../craft-service.ts" {
     knowledgeSourceList(args: JsonObject): JsonObject;
     knowledgeSourceTransition(args: JsonObject): JsonObject;
     memoryLedgerRemember(args: JsonObject): JsonObject;
+    memoryLedgerGet(args: JsonObject): JsonObject;
+    memoryLedgerList(args: JsonObject): JsonObject;
     memoryLedgerTransition(args: JsonObject): JsonObject;
     memoryLedgerCompatBind(args: JsonObject): JsonObject;
     contextResolutionResolve(args: JsonObject): JsonObject | Promise<JsonObject>;
@@ -44,6 +48,7 @@ declare module "../craft-service.ts" {
     memoryConsolidateGoverned(args: JsonObject): JsonObject;
     workflowDagValidate(args: JsonObject): JsonObject;
     workflowDagSave(args: JsonObject): JsonObject;
+    workflowDagGet(args: JsonObject): JsonObject;
     workflowDagTransition(args: JsonObject): JsonObject;
     workflowDagCheckpoint(args: JsonObject): JsonObject;
     workflowDagResume(args: JsonObject): JsonObject;
@@ -56,6 +61,7 @@ declare module "../craft-service.ts" {
     taskStateReplay(args: JsonObject): JsonObject;
     legacyKnowledgeMigrationDiscover(args: JsonObject): Promise<JsonObject>;
     legacyKnowledgeMigrationCandidateImport(args: JsonObject): Promise<JsonObject>;
+    legacyKnowledgeMigrationRebindProvenance(args: JsonObject): Promise<JsonObject>;
     legacyKnowledgeMigrationPublish(args: JsonObject): Promise<JsonObject>;
     legacyKnowledgeMigrationRetract(args: JsonObject): Promise<JsonObject>;
     legacyKnowledgeMigrationFailureReport(args: JsonObject): JsonObject;
@@ -65,6 +71,14 @@ declare module "../craft-service.ts" {
     knowledgeCandidateReview(args: JsonObject): JsonObject;
     knowledgeCandidatePublish(args: JsonObject): Promise<JsonObject>;
     knowledgeCandidateRetract(args: JsonObject): Promise<JsonObject>;
+    knowledgeAutoReview(args?: JsonObject): JsonObject;
+    knowledgePromotionPolicyGet(): JsonObject;
+    knowledgePromotionPolicySave(args: JsonObject): JsonObject;
+    knowledgeClaimSupportRecord(args: JsonObject): JsonObject;
+    knowledgeHostReview(args: JsonObject): JsonObject;
+    knowledgeCandidateModelReview(args: JsonObject): Promise<JsonObject>;
+    decisionContextGateOpen(args: JsonObject): Promise<JsonObject>;
+    decisionContextGateGet(args: JsonObject): JsonObject;
     knowledgeMigrationFailureReport(args: JsonObject): JsonObject;
     knowledgeExpirySweep(args?: JsonObject): JsonObject;
     knowledgeConflictResolve(args: JsonObject): JsonObject;
@@ -164,6 +178,8 @@ export function installKernelDelegateMethods(serviceClass: typeof CraftService):
   installDurableExperienceMethods(serviceClass);
   installLegacyKnowledgeMigrationMethods(serviceClass);
   installRuntimeLearningMethods(serviceClass);
+  installKnowledgeAutoReviewMethods(serviceClass);
+  installDecisionContextGateMethods(serviceClass);
   serviceClass.prototype.knowledgeSourceSnapshot = function (args) { return this.legacyKnowledgeMigration.sourceSnapshot(args); };
   serviceClass.prototype.knowledgeSourceDiff = function (args) { return this.legacyKnowledgeMigration.sourceDiff(args); };
   serviceClass.prototype.knowledgeCandidateImport = function (args) { return this.legacyKnowledgeMigrationCandidateImport(args); };
@@ -196,6 +212,7 @@ export function installKernelDelegateMethods(serviceClass: typeof CraftService):
   serviceClass.prototype.runtimeProofRehydrate = function (args) { return this.runtimeProof.rehydrate(args); };
   serviceClass.prototype.workflowDagValidate = function (args) { return this.workflowDag.validate(args); };
   serviceClass.prototype.workflowDagSave = function (args) { return this.workflowDag.save(args); };
+  serviceClass.prototype.workflowDagGet = function (args) { return this.workflowDag.get(args); };
   serviceClass.prototype.workflowDagTransition = function (args) { return this.workflowDag.transition(args); };
   serviceClass.prototype.workflowDagCheckpoint = function (args) { return this.workflowDag.checkpoint(args); };
   serviceClass.prototype.workflowDagResume = function (args) { return this.workflowDag.resume(args); };

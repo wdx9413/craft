@@ -4,6 +4,7 @@ import { stableDigest, payload } from "../../src/digest.ts";
 
 const OUTCOMES = new Set(["passed", "failed", "inconclusive"]);
 const AXES = new Set(["context", "tools", "generation", "orchestration", "memory", "output"]);
+const PROCEDURE_KINDS = new Set(["workflow", "graph"]);
 const SECRET = /(?:api[_-]?key|authorization|cookie|password|secret|token)\s*[:=]\s*[^\s]{8,}/iu;
 
 function text(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); const result = value.trim(); if (SECRET.test(result)) throw new Error(`${name} must not contain credentials or secrets`); return result; }
@@ -39,12 +40,13 @@ export class WorkflowEvolutionKernel {
     if (observations.some((item) => item.scenario_key !== scenarioKey || item.lifecycle !== "accepted")) throw new Error("Workflow Evolution observations do not match the scenario");
     if (new Set(observations.map((item) => `${(item.source as JsonObject).kind}:${(item.source as JsonObject).id}:${(item.source as JsonObject).digest}`)).size < 2) throw new Error("Workflow Evolution requires independent source records");
     const axes = strings(args.design_axes, "design_axes", 1); if (axes.length > 2 || axes.some((axis) => !AXES.has(axis))) throw new Error("Workflow Evolution may change at most two supported design axes");
-    const identity = { scenario_key: scenarioKey, observation_refs: observations.map((item) => ({ id: item.id, version: item.version, source: item.source, outcome: item.outcome, evidence_ids: item.evidence_ids })), hypothesis: text(args.hypothesis, "hypothesis"), design_axes: axes, output_contract_ref: text(args.output_contract_ref, "output_contract_ref"), lifecycle: "awaiting_model", content_stored: false };
+    const procedureKind = text(args.procedure_kind ?? "workflow", "procedure_kind"); if (!PROCEDURE_KINDS.has(procedureKind)) throw new Error("Workflow Evolution procedure_kind is unsupported");
+    const identity = { scenario_key: scenarioKey, observation_refs: observations.map((item) => ({ id: item.id, version: item.version, source: item.source, outcome: item.outcome, evidence_ids: item.evidence_ids })), hypothesis: text(args.hypothesis, "hypothesis"), design_axes: axes, procedure_kind: procedureKind, output_contract_ref: text(args.output_contract_ref, "output_contract_ref"), lifecycle: "awaiting_model", content_stored: false };
     const requestId = String(args.request_id ?? `workflow_evolution_request_${stableDigest(identity).slice(-20)}`); const existing = this.store.find("workflow_evolution_request", requestId); const identityDigest = stableDigest(identity);
     if (existing) { if (existing.identity_digest !== identityDigest) throw new Error("Workflow Evolution request idempotency conflict"); return { request: existing, idempotent: true }; }
     const request = this.store.create("workflow_evolution_request", requestId, { ...identity, identity_digest: identityDigest });
     this.store.appendEvent(`workflow-evolution:${scenarioKey}`, "workflow_evolution.proposed", { request_id: request.id, observation_count: observations.length });
-    return { request, idempotent: false, next_action: "issue_a_model_ticket_or_submit_a_host_distilled_workflow_draft" };
+    return { request, idempotent: false, next_action: procedureKind === "graph" ? "issue_a_model_ticket_or_submit_a_host_distilled_graph_draft" : "issue_a_model_ticket_or_submit_a_host_distilled_workflow_draft" };
   }
 
   submit(args: JsonObject): JsonObject {
@@ -62,9 +64,13 @@ export class WorkflowEvolutionKernel {
       const target = ticket.target as JsonObject;
       if (target.id !== request.id || Number(target.version) !== Number(request.version)) throw new Error("Model Ticket does not belong to this Workflow Evolution request");
     }
-    const replacement = args.replaces_workflow_id === undefined ? null : this.store.get("workflow", text(args.replaces_workflow_id, "replaces_workflow_id"));
-    const identity = { request_id: request.id, request_version: request.version, model_ticket_id: ticketId, workflow_id: text(args.workflow_id, "workflow_id"), name: text(args.name, "name"), description: text(args.description, "description"), inputs: strings(args.inputs ?? [], "inputs"), steps: args.steps, replaces_workflow: replacement === null ? null : { id: replacement.id, version: replacement.version }, lifecycle: "draft" };
-    if (!Array.isArray(identity.steps) || !identity.steps.length) throw new Error("steps must be a non-empty array");
+    const procedureKind = text(request.procedure_kind ?? "workflow", "procedure_kind"); if (!PROCEDURE_KINDS.has(procedureKind)) throw new Error("Workflow Evolution procedure_kind is unsupported");
+    const replacementKind = procedureKind === "graph" ? "workflow_dag" : "workflow";
+    const replacement = args.replaces_workflow_id === undefined ? null : this.store.get(replacementKind, text(args.replaces_workflow_id, "replaces_workflow_id"));
+    const graph = procedureKind === "graph" ? { nodes: args.nodes, edges: args.edges ?? [], outputs: args.outputs ?? {}, checkpoint_policy: args.checkpoint_policy ?? { mode: "step" } } : null;
+    const identity = { request_id: request.id, request_version: request.version, model_ticket_id: ticketId, procedure_kind: procedureKind, workflow_id: text(args.workflow_id, "workflow_id"), name: text(args.name, "name"), description: text(args.description, "description"), inputs: strings(args.inputs ?? [], "inputs"), steps: procedureKind === "workflow" ? args.steps : null, graph, replaces_workflow: replacement === null ? null : { kind: replacementKind, id: replacement.id, version: replacement.version }, lifecycle: "draft" };
+    if (procedureKind === "workflow" && (!Array.isArray(identity.steps) || !identity.steps.length)) throw new Error("steps must be a non-empty array");
+    if (procedureKind === "graph" && (!Array.isArray(graph!.nodes) || !graph!.nodes.length)) throw new Error("graph nodes must be a non-empty array");
     const proposalId = String(args.proposal_id ?? `workflow_evolution_proposal_${stableDigest(identity).slice(-20)}`); const identityDigest = stableDigest(identity);
     if (request.lifecycle !== "awaiting_model") throw new Error("Workflow Evolution request is no longer awaiting a proposal");
     const proposal = this.store.create("workflow_evolution_proposal", proposalId, { ...identity, identity_digest: identityDigest, publication_allowed: false });

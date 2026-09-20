@@ -1,6 +1,6 @@
 {
   "name": "craft-agent-harness",
-  "version": "0.12.33",
+  "version": "0.12.34",
   "description": "Cross-platform capability, workflow, evidence, and agent harness",
   "type": "module",
   "bin": {
@@ -13,7 +13,7 @@
     "clean": "node --experimental-strip-types scripts/clean.ts",
     "build": "pnpm run clean && pnpm run build:core && pnpm run build:plugin && pnpm run pack:plugin && pnpm run build:deepseek && pnpm run pack:adapters",
     "build:core": "node node_modules/typescript/bin/tsc -p tsconfig.build.json",
-    "build:plugin": "esbuild bin/craft-mcp.ts --bundle --platform=node --format=cjs --target=node23 --outfile=dist/plugin/craft-mcp.cjs && esbuild bin/craft-mcp-full.ts --bundle --platform=node --format=cjs --target=node23 --outfile=dist/plugin/craft-mcp-full.cjs && esbuild bin/craft-mcp-http.ts --bundle --platform=node --format=cjs --target=node23 --outfile=dist/plugin/craft-mcp-http.cjs && esbuild bin/craft-parser-worker.ts --bundle --platform=node --format=esm --target=node23 --outfile=dist/plugin/craft-parser-worker.js",
+    "build:plugin": "esbuild bin/craft-mcp.ts --bundle --platform=node --format=cjs --target=node23 --outfile=dist/plugin/craft-mcp.cjs && esbuild bin/craft-mcp-full.ts --bundle --platform=node --format=cjs --target=node23 --outfile=dist/plugin/craft-mcp-full.cjs && esbuild bin/craft-mcp-http.ts --bundle --platform=node --format=cjs --target=node23 --outfile=dist/plugin/craft-mcp-http.cjs && esbuild bin/craft-codex-hook.ts --bundle --platform=node --format=cjs --target=node23 --outfile=dist/plugin/craft-codex-hook.cjs && esbuild bin/craft-parser-worker.ts --bundle --platform=node --format=esm --target=node23 --outfile=dist/plugin/craft-parser-worker.js",
     "pack:plugin": "node --experimental-strip-types scripts/release/pack-plugin.ts",
     "build:deepseek": "node node_modules/typescript/bin/tsc -p adapters/deepseek-harness/tsconfig.json",
     "pack:adapters": "node --experimental-strip-types scripts/release/pack-adapters.ts",

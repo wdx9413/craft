@@ -46,8 +46,11 @@ import { installAdapterRuntimeMethods } from "./use-cases/adapter-runtime.ts";
 import { installKernelDelegateMethods } from "./use-cases/kernel-delegates.ts";
 import { object, text } from "../validation.ts";
 import { canonicalJson } from "../digest.ts";
+import { CRAFT_RELEASE_VERSION } from "../version.ts";
+import type { EvaluationContractInput, EvaluationStage } from "../evaluation-contract.ts";
+import { ComponentReadinessKernel } from "../component-readiness.ts";
 
-export const VERSION = "0.12.33";
+export const VERSION = CRAFT_RELEASE_VERSION;
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
 const TASK_STATUS = new Set(["active", "paused", "completed", "cancelled"]);
 const TASK_PERMISSION_MODES = new Set(["human_approval", "assisted_approval", "full_access"]);
@@ -257,6 +260,33 @@ export class CraftService extends ServiceFoundation {
     return this.memoryCandidatePropose({ ...args, kind, source_id: sourceId, scope_kind: args.scope_kind ?? args.scope ?? "user", scope_id: args.scope_id ?? "local" });
   }
   studioMemoryReview(args: JsonObject): JsonObject { return this.memoryCandidateReview(args); }
+  /**
+   * Capture an explicit user-authored memory without turning the whole chat into
+   * durable storage. The user statement becomes bounded Evidence; automatic
+   * acceptance is available only because the user explicitly requested recall.
+   */
+  memoryCaptureUserStatement(args: JsonObject): JsonObject {
+    if (args.explicit_consent !== true) throw new Error("Explicit user consent is required to capture durable Memory");
+    const content = assertNoSecret(document(args.content, "content"), "content");
+    const kind = String(args.kind ?? "preference");
+    if (!new Set(["working", "episodic", "preference", "procedural"]).has(kind)) throw new Error("Memory capture kind is unsupported");
+    const scopeKind = text(args.scope_kind ?? "user", "scope_kind"); const scopeId = text(args.scope_id ?? "local", "scope_id");
+    const topic = args.topic === undefined ? undefined : text(args.topic, "topic");
+    this.knowledgeMemoryInstallBuiltins();
+    const captureIdentity = { kind, scope_kind: scopeKind, scope_id: scopeId, topic: topic ?? null, content_digest: valueDigest(content) };
+    const suffix = valueDigest(captureIdentity).slice(-20);
+    const evidence = this.evidenceRecord({ evidence_id: String(args.evidence_id ?? `evidence_memory_statement_${suffix}`), source_type: "human", confidence: "bounded",
+      claim: "Explicit user statement captured for governed Memory.", locator: `memory-capture:${scopeKind}:${scopeId}`, metadata: { capture_digest: valueDigest(captureIdentity), user_authored: true } });
+    const proposed = this.memoryCandidatePropose({ candidate_id: String(args.candidate_id ?? `memory_candidate_statement_${suffix}`), source_id: "builtin.evidence-wiki", kind,
+      scope_kind: scopeKind, scope_id: scopeId, ...(topic === undefined ? {} : { topic }), content, sensitivity: args.sensitivity ?? "internal", confidence: "bounded",
+      evidence_ids: [evidence.id], proposed_by: "explicit-user-statement", valid_until: args.valid_until });
+    const candidate = proposed.candidate as JsonObject;
+    if (args.auto_accept !== true || candidate.status !== "candidate") return { ...proposed, evidence, auto_committed: false,
+      next_action: candidate.status === "conflict_pending" ? "resolve_conflict" : "review_or_accept" };
+    const reviewed = this.memoryCandidateReview({ candidate_id: candidate.id, decision: "approve", reviewer: "automated-user-statement-review", reason: "Direct user statement with bounded Evidence." }).candidate as JsonObject;
+    const remembered = this.memoryLedgerRememberApproved({ candidate_id: reviewed.id, memory_id: args.memory_id }).memory as JsonObject;
+    return { candidate: reviewed, memory: remembered, evidence, auto_committed: true, next_action: "available_for_scoped_context" };
+  }
   studioKnowledgeClaimSave(args: JsonObject): JsonObject {
     const evidence = args.evidence_ids === undefined ? this.evidenceRecord({ source_type: "human", confidence: "bounded", claim: "Studio-authored candidate.", locator: "studio://knowledge" }) : null;
     return this.knowledgeClaimSave({ ...args, evidence_ids: args.evidence_ids ?? [evidence?.id], scope: args.scope ?? "global" });
@@ -408,13 +438,28 @@ export class CraftService extends ServiceFoundation {
   workflowEvolutionObservations(args: JsonObject): JsonObject { return this.workflowEvolution.observations(args); }
   workflowEvolutionProposalGet(args: JsonObject): JsonObject { return this.workflowEvolution.get(args); }
   workflowEvolutionProposalSubmit(args: JsonObject): JsonObject {
+    const request = this.store.get("workflow_evolution_request", String(args.request_id));
+    const procedureKind = String(request.procedure_kind ?? "workflow");
+    // Validate a graph before it becomes a proposal record.  This is deliberately an asset
+    // validation, not execution: a valid graph still needs the existing evaluation, Signoff
+    // and Canary gates before Core may route it to the VerifiedWorkLoop.
+    if (procedureKind === "graph") this.workflowDagValidate({ nodes: args.nodes, edges: args.edges ?? [], inputs: args.inputs ?? [], outputs: args.outputs ?? {}, checkpoint_policy: args.checkpoint_policy ?? { mode: "step" } });
     const submitted = this.workflowEvolution.submit(args); const proposal = submitted.proposal as JsonObject;
-    if (submitted.idempotent === true) return { ...submitted, workflow: this.store.get("workflow", String(proposal.workflow_id)), next_action: "Run shadow and held-out evaluation, then use the existing Signoff and Canary gates before this Workflow can be selected." };
-    const workflow = this.workflowSave({ workflow_id: proposal.workflow_id, name: proposal.name, description: proposal.description,
-      inputs: proposal.inputs, steps: proposal.steps, derived_from: { workflow_evolution_proposal_id: proposal.id,
-        workflow_evolution_proposal_version: proposal.version, request_id: proposal.request_id, request_version: proposal.request_version,
-        model_ticket_id: proposal.model_ticket_id, replaces_workflow: proposal.replaces_workflow, design_axes: this.store.get("workflow_evolution_request", String(proposal.request_id), Number(proposal.request_version)).design_axes } });
-    return { ...submitted, workflow, next_action: "Run shadow and held-out evaluation, then use the existing Signoff and Canary gates before this Workflow can be selected." };
+    const nextAction = "Run shadow and held-out evaluation, then use the existing Signoff and Canary gates before this Procedure can be selected.";
+    if (submitted.idempotent === true) {
+      const kind = String(proposal.procedure_kind ?? "workflow") === "graph" ? "workflow_dag" : "workflow";
+      return { ...submitted, workflow: this.store.get(kind, String(proposal.workflow_id)), next_action: nextAction };
+    }
+    const derivedFrom = { workflow_evolution_proposal_id: proposal.id, workflow_evolution_proposal_version: proposal.version,
+      request_id: proposal.request_id, request_version: proposal.request_version, model_ticket_id: proposal.model_ticket_id,
+      replaces_workflow: proposal.replaces_workflow, design_axes: this.store.get("workflow_evolution_request", String(proposal.request_id), Number(proposal.request_version)).design_axes };
+    const workflow = procedureKind === "graph"
+      ? (this.workflowDagSave({ workflow_id: proposal.workflow_id, name: proposal.name, description: proposal.description,
+        nodes: (proposal.graph as JsonObject).nodes, edges: (proposal.graph as JsonObject).edges, inputs: proposal.inputs,
+        outputs: (proposal.graph as JsonObject).outputs, checkpoint_policy: (proposal.graph as JsonObject).checkpoint_policy, derived_from: derivedFrom }).workflow as JsonObject)
+      : this.workflowSave({ workflow_id: proposal.workflow_id, name: proposal.name, description: proposal.description,
+        inputs: proposal.inputs, steps: proposal.steps, derived_from: derivedFrom });
+    return { ...submitted, workflow, next_action: nextAction };
   }
 
   /** Where the circuit breakers would sit for a given plan, without running anything. */
@@ -503,6 +548,10 @@ export class CraftService extends ServiceFoundation {
       data_space_id: dataSpaceId(this.store.paths.root),
       counts: Object.fromEntries(kinds.map((kind) => [kind, this.store.count(kind)])) };
   }
+
+  /** Content-free readiness for a separately mounted component product. */
+  componentReadinessGet(args: JsonObject): JsonObject { return new ComponentReadinessKernel(this.store).get(args); }
+  componentDiagnose(args: JsonObject): JsonObject { return new ComponentReadinessKernel(this.store).diagnose(args); }
 
   sourceAdd(args: JsonObject): Promise<JsonObject> {
     const label = args.label === undefined ? undefined : text(args.label, "label");
@@ -2612,9 +2661,22 @@ export class CraftService extends ServiceFoundation {
     const claimId = String(args.claim_id ?? id("knowledge_claim")); const existing = this.store.find("knowledge_claim", claimId);
     const contentDigest = valueDigest(content);
     const title = args.title === undefined ? undefined : assertNoSecret(text(args.title, "title"), "title");
-    const identity = { kind, content_digest: contentDigest, scope, evidence_ids: evidenceIds, tags, valid_until: validUntil, ...(title ? { title } : {}) };
-    if (existing) { if (existing.identity_digest !== valueDigest(identity)) throw new Error("Knowledge claim idempotency conflict"); return { claim: existing, idempotent: true }; }
-    const contentRef = this.store.contentStore.writeSync({ kind: "knowledge", record_id: claimId, version: 1, scope, status: "candidate", sensitivity: "internal", source_id: String(args.source_id ?? "builtin.evidence-wiki"), title, body: content });
+    // The source is part of a claim's identity and must survive outside its Markdown
+    // reference.  Otherwise a source revocation cannot stop an already-reviewed claim from
+    // entering Context after a database reload or bundle import.
+    const sourceId = String(args.source_id ?? "builtin.evidence-wiki");
+    const identity = { kind, content_digest: contentDigest, scope, source_id: sourceId, evidence_ids: evidenceIds, tags, valid_until: validUntil, ...(title ? { title } : {}) };
+    if (existing) {
+      // v0.12.33 claims did not persist source_id in their identity.  Keep a
+      // one-way compatibility match so a previously completed import remains
+      // idempotent; it does not make the legacy record eligible for a newly
+      // revoked external Source, because it still resolves as the built-in
+      // source until a reviewed migration explicitly re-attributes it.
+      const legacyIdentity = { kind, content_digest: contentDigest, scope, evidence_ids: evidenceIds, tags, valid_until: validUntil, ...(title ? { title } : {}) };
+      if (existing.identity_digest !== valueDigest(identity) && existing.identity_digest !== valueDigest(legacyIdentity)) throw new Error("Knowledge claim idempotency conflict");
+      return { claim: existing, idempotent: true };
+    }
+    const contentRef = this.store.contentStore.writeSync({ kind: "knowledge", record_id: claimId, version: 1, scope, status: "candidate", sensitivity: "internal", source_id: sourceId, title, body: content });
     const claim = this.store.create("knowledge_claim", claimId, { ...identity, content_ref: contentRef, identity_digest: valueDigest(identity), status: "candidate", review: null });
     return { claim, idempotent: false };
   }
@@ -2628,6 +2690,18 @@ export class CraftService extends ServiceFoundation {
       const evidenceIds = Array.isArray(claim.evidence_ids) ? claim.evidence_ids as unknown[] : [];
       const supported = evidenceIds.some((e) => ["bounded", "confirmed"].includes(String(this.store.get("evidence", String(e)).confidence)));
       if (!supported) throw new Error("Reviewed knowledge claim requires bounded or confirmed Evidence");
+      // Review is a controlled transition, not a way to bless a legacy import.
+      // The source must be an explicit, currently active trust boundary so later
+      // revocation can remove the claim from Context deterministically.
+      const sourceId = typeof claim.source_id === "string" ? claim.source_id : null;
+      if (!sourceId) throw new Error("Reviewed knowledge claim requires an explicit active Source");
+      // Earlier in-process callers could save a new Claim before mounting the
+      // built-in source descriptor.  It is a local, deterministic descriptor,
+      // so install it here rather than weakening the source requirement.  This
+      // does not repair a legacy Claim with no explicit source_id.
+      if (sourceId === "builtin.evidence-wiki" && !this.store.find("knowledge_source", sourceId)) this.knowledgeMemoryInstallBuiltins();
+      const source = this.store.find("knowledge_source", sourceId);
+      if (!source || source.status !== "active" || source.trust === "untrusted") throw new Error("Reviewed knowledge claim requires an active trusted Source");
     }
     const saved = this.store.save("knowledge_claim", String(claim.id), { ...recordPayload(claim), status, review: { reviewer, reason_digest: valueDigest(reason), reviewed_at: new Date().toISOString() } });
     return { claim: saved };
@@ -2687,13 +2761,15 @@ export class CraftService extends ServiceFoundation {
       if (claim.status !== "reviewed") { excluded.push({ claim_id: claim.id, reason: "not_reviewed" }); return []; }
       if (claim.valid_until && Date.parse(String(claim.valid_until)) < now) { excluded.push({ claim_id: claim.id, reason: "expired" }); return []; }
       if (claim.scope !== "global" && claim.scope !== scope) { excluded.push({ claim_id: claim.id, reason: "out_of_scope" }); return []; }
-      const haystack = `${String(claim.content)} ${(claim.tags as string[]).join(" ")}`.toLowerCase(); const score = terms.reduce((total, term) => total + Number(haystack.includes(term)), 0);
+      const claimContent = claim.content_ref ? this.store.contentStore.readCompatSync(claim.content_ref as never).body : String(claim.content ?? "");
+      const haystack = `${claimContent} ${(claim.tags as string[]).join(" ")}`.toLowerCase(); const score = terms.reduce((total, term) => total + Number(haystack.includes(term)), 0);
       if (!score) { excluded.push({ claim_id: claim.id, reason: "not_matched" }); return []; }
       return [{ claim, score }];
     }).sort((left, right) => right.score - left.score || String(left.claim.id).localeCompare(String(right.claim.id)));
     const included: JsonObject[] = []; let usedChars = 0;
     for (const item of matched) {
-      const content = assertNoSecret(text(item.claim.content, "claim.content"), "claim.content"); const rendered = `[Knowledge ${item.claim.id}]\n${content}\nEvidence: ${(item.claim.evidence_ids as string[]).join(", ")}\n`;
+      const rawContent = item.claim.content_ref ? this.store.contentStore.readCompatSync(item.claim.content_ref as never).body : item.claim.content;
+      const content = assertNoSecret(text(rawContent, "claim.content"), "claim.content"); const rendered = `[Knowledge ${item.claim.id}]\n${content}\nEvidence: ${(item.claim.evidence_ids as string[]).join(", ")}\n`;
       if (included.length >= maxItems || usedChars + rendered.length > maxChars) { excluded.push({ claim_id: item.claim.id, reason: "budget" }); continue; }
       usedChars += rendered.length; included.push({ claim_id: item.claim.id, claim_version: item.claim.version, content, evidence_ids: item.claim.evidence_ids, score: item.score, valid_until: item.claim.valid_until });
     }
@@ -2878,7 +2954,7 @@ export class CraftService extends ServiceFoundation {
       budget_account_id: args.budget_account_id, budget_account_version: args.budget_account_version }).contract as JsonObject;
     const baseline = this.stateWorkspace.observe({ workspace_id: workspace.id, adapter: args.state_adapter ?? "file_tree", paths: args.state_paths, artifact_ids: args.artifact_ids });
     const prepared = this.taskRunPrepare({ ...args, contract_id: control.id, workspace: workspace.root_path }); const taskRun = prepared.task_run as JsonObject;
-    const loop = this.verifiedWorkLoops.create({ work_loop_id: args.work_loop_id, task_id: task.id, contract_id: control.id, task_run_id: taskRun.id, snapshot_id: (baseline.snapshot as JsonObject).id });
+    const loop = this.verifiedWorkLoops.create({ work_loop_id: args.work_loop_id, task_id: task.id, contract_id: control.id, task_run_id: taskRun.id, snapshot_id: (baseline.snapshot as JsonObject).id, goal: args.goal ?? task.goal ?? task.title, mode: args.mode, target: args.target, plan: args.plan, accept: args.accept ?? args.acceptance ?? (args.acceptance_criteria === undefined ? undefined : { criteria: args.acceptance_criteria }) });
     return { task, contract: control, baseline_snapshot: baseline.snapshot, ...prepared, work_loop: loop.loop, work_loop_idempotent: loop.idempotent };
   }
   verifiedWorkLoopAdvance(args: JsonObject): JsonObject {
@@ -2910,6 +2986,9 @@ export class CraftService extends ServiceFoundation {
     return { resumed, advance: this.verifiedWorkLoopAdvance({ work_loop_id: loop.id, environment: args.environment, budget: args.budget, state_adapter: args.state_adapter, state_paths: args.state_paths }) };
   }
   verifiedWorkLoopGet(args: JsonObject): JsonObject { return this.verifiedWorkLoops.get(args); }
+  evaluationContractDefine(args: JsonObject): JsonObject { return this.evaluationContracts.define(args as unknown as EvaluationContractInput & { contract_id?: string }); }
+  evaluationContractRecord(args: JsonObject): JsonObject { return this.evaluationContracts.record(args as unknown as { contract_id: string; stage: EvaluationStage; evidence?: string[]; metrics?: JsonObject }); }
+  evaluationContractGet(args: JsonObject): JsonObject { return this.evaluationContracts.get(text(args.contract_id, "contract_id")); }
   verifiedWorkLoopWorkbenchPrepare(args: JsonObject): JsonObject {
     const root = resolve(text(args.workspace, "workspace")); const includePaths = uniqueTextArray(args.include_paths ?? ["."], "include_paths").sort();
     const workspaceId = args.workspace_id === undefined ? `workspace_loop_${valueDigest({ root, include_paths: includePaths }).slice(-16)}` : text(args.workspace_id, "workspace_id"); const existing = this.store.find("workspace", workspaceId);
@@ -3120,10 +3199,28 @@ export class CraftService extends ServiceFoundation {
     } finally { index.close(); }
   }
   knowledgeSearch(args: JsonObject): JsonObject {
+    const query = text(args.query, "query");
+    const scope = args.scope === undefined ? null : text(args.scope, "scope");
+    const includeCandidates = args.include_candidates !== false;
+    const terms = [...new Set(query.toLowerCase().match(/[\p{L}\p{N}_-]+/gu) ?? [])];
+    const governed = this.store.list("knowledge_claim", 10_000).flatMap((claim) => {
+      if (claim.status !== "reviewed" && (!includeCandidates || claim.status !== "candidate")) return [];
+      if (scope !== null && claim.scope !== "global" && claim.scope !== scope) return [];
+      if (claim.valid_until && Date.parse(String(claim.valid_until)) < Date.now()) return [];
+      const content = claim.content_ref ? this.store.contentStore.readCompatSync(claim.content_ref as never).body : String(claim.content ?? "");
+      const score = terms.reduce((total, term) => total + Number(`${content} ${Array.isArray(claim.tags) ? claim.tags.join(" ") : ""}`.toLowerCase().includes(term)), 0);
+      return score > 0 ? [{ kind: "governed_claim", claim_id: claim.id, claim_version: claim.version, status: claim.status,
+        scope: claim.scope, content, content_digest: claim.content_digest, evidence_ids: claim.evidence_ids,
+        score, relations: this.relationSummary(`claim:${String(claim.id)}`) }] : [];
+    });
     const index = this.knowledgeIndex();
     try {
-      const hits = index.search(text(args.query, "query"), { limit: args.limit === undefined ? undefined : finiteInteger(args.limit, "limit", 1, 1, 100) });
-      return { hits: hits.map((hit) => ({ ...hit, relations: this.relationSummary(hit.path) })) };
+      const limit = args.limit === undefined ? 20 : finiteInteger(args.limit, "limit", 1, 1, 100);
+      const indexed = index.search(query, { limit }).map((hit) => ({ ...hit, kind: "indexed_document", score: hit.rank, relations: this.relationSummary(hit.path) }));
+      const hits = [...governed, ...indexed]
+        .sort((left, right) => Number(right.score) - Number(left.score) || JSON.stringify(left).localeCompare(JSON.stringify(right)))
+        .slice(0, limit);
+      return { hits, queried_governed_claims: true, include_candidates: includeCandidates };
     }
     finally { index.close(); }
   }
@@ -3139,15 +3236,19 @@ export class CraftService extends ServiceFoundation {
    * the budget or the provenance trail.
    */
   async memorySearch(args: JsonObject): Promise<JsonObject> {
+    if (args.scope_kind === undefined || args.scope_id === undefined) {
+      return { memories: [], count: 0, omitted_count: 0, receipt_id: null, content_free_receipt: true,
+        skipped: true, reason: "scope_unavailable" };
+    }
     const resolution = await this.contextResolution.resolve({
       query: text(args.query, "query"),
-      scope_kind: args.scope_kind ?? "project",
+      scope_kind: args.scope_kind,
       scope_id: text(args.scope_id, "scope_id"),
       max_items: args.max_items ?? 8,
       max_chars: args.max_chars ?? 4000
     });
     const items = (resolution.items as JsonObject[]) ?? [];
-    const receipt = resolution.receipt as JsonObject;
+    const receipt = resolution.receipt as JsonObject | null;
     // The loop gets references and a bounded excerpt; raw restricted content is
     // never handed to the model, matching the knowledge path's discipline.
     return {
@@ -3159,8 +3260,8 @@ export class CraftService extends ServiceFoundation {
         reason: item.reason
       })),
       count: items.length,
-      omitted_count: receipt.omitted_count,
-      receipt_id: receipt.id,
+      omitted_count: receipt?.omitted_count ?? 0,
+      receipt_id: receipt?.id ?? null,
       content_free_receipt: true
     };
   }
@@ -3681,6 +3782,19 @@ export class CraftService extends ServiceFoundation {
   localRuntimeServiceGet(args: JsonObject = {}): JsonObject { return this.localRuntimeService.get(args); }
   projectBundleExport(args: JsonObject): JsonObject { return this.projectBundles.export(args); }
   projectBundleVerify(args: JsonObject): JsonObject { return this.projectBundles.verify(args); }
+  knowledgeMemoryBundleExport(args: JsonObject): JsonObject { return this.knowledgeMemoryBundles.export(args); }
+  knowledgeMemoryBundleVerify(args: JsonObject): JsonObject { return this.knowledgeMemoryBundles.verify(args); }
+  knowledgeMemoryBundleImportPlan(args: JsonObject): JsonObject { return this.knowledgeMemoryBundles.importPlan(args); }
+  knowledgeMemoryBundleImportApply(args: JsonObject): JsonObject { return this.knowledgeMemoryBundles.importApply(args); }
+  knowledgeMemoryBundleManage(args: JsonObject): JsonObject {
+    const operation = text(args.operation, "operation");
+    const request = { ...args }; delete request.operation;
+    if (operation === "export") return this.knowledgeMemoryBundleExport(request);
+    if (operation === "verify") return this.knowledgeMemoryBundleVerify(request);
+    if (operation === "import_plan") return this.knowledgeMemoryBundleImportPlan(request);
+    if (operation === "import_apply") return this.knowledgeMemoryBundleImportApply(request);
+    throw new Error("Knowledge/Memory Bundle operation is unsupported");
+  }
   feedbackLearningRecord(args: JsonObject): JsonObject { return this.feedbackLearning.record(args); }
   feedbackLearningResolve(args: JsonObject): JsonObject { return this.feedbackLearning.resolve(args); }
   domainEvaluatorSave(args: JsonObject): JsonObject { return this.domainEvaluators.save(args); }

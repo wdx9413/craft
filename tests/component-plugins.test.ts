@@ -18,17 +18,17 @@ test("public MCP products resolve to bounded Runtime surfaces while legacy surfa
   assert.deepEqual(MCP_PRODUCT_NAMES, ["full", "context", "knowledge", "memory", "capability", "quality", "experience", "admin"]);
   assert.equal(productSurfaceOf("full"), "syscall");
   assert.equal(productSurfaceOf("context"), "component-context");
-  assert.equal(productSurfaceOf("knowledge"), "component-knowledge");
-  assert.equal(productSurfaceOf("memory"), "component-memory");
+  assert.equal(productSurfaceOf("knowledge"), "component-knowledge-daily");
+  assert.equal(productSurfaceOf("memory"), "component-memory-daily");
   assert.equal(productSurfaceOf("capability"), "component-capability");
   assert.equal(productSurfaceOf("quality"), "component-quality");
-  assert.equal(productSurfaceOf("experience"), "component-experience");
+  assert.equal(productSurfaceOf("experience"), "component-experience-daily");
   assert.equal(productSurfaceOf("admin"), "full");
   assert.equal(resolveMcpProductMode([], {}), "syscall");
   assert.equal(resolveMcpProductMode(["--product", "context"], {}), "component-context");
   assert.equal(resolveMcpProductMode(["--surface", "component-memory"], {}), "component-memory");
   assert.equal(resolveMcpProductMode([], { CRAFT_MCP_PRODUCT: "quality" }), "component-quality");
-  assert.equal(resolveMcpProductMode(["--product", "memory", "--surface", "component-memory"], {}), "component-memory");
+  assert.equal(resolveMcpProductMode(["--product", "memory", "--surface", "component-memory-daily"], {}), "component-memory-daily");
   assert.throws(() => resolveMcpProductMode(["--product", "unknown"], {}), /Unknown Craft MCP product/);
   assert.throws(() => resolveMcpProductMode(["--product"], {}), /requires a value/);
   assert.throws(() => resolveMcpProductMode(["--surface", "--product"], {}), /requires a value/);
@@ -85,6 +85,11 @@ test("surface registry keeps generic quality and every bounded projection determ
   assert.deepEqual(resolveSurfaceToolNames("core", tools, core), ["craft_info", "craft_workspace_get"]);
   assert.deepEqual(resolveSurfaceToolNames("syscall", tools, core), ["craft_describe", "craft_list", "craft_get", "craft_create", "craft_update", "craft_run", "craft_cancel", "craft_search", "craft_info", "craft_default_route", "craft_default_route_resume", "craft_default_route_find", "craft_default_route_execute", "craft_task_checkpoint", "craft_evidence_record", "craft_knowledge_bootstrap_install"]);
   assert.deepEqual(resolveSurfaceToolNames("evaluation", tools, core), ["craft_evaluation_run_record"]);
+  // Daily products must not advertise actions that are absent from a stale or
+  // deliberately minimal Host catalog.  This covers both sides of the bounded
+  // projection filter rather than relying on the full catalog only.
+  assert.deepEqual(resolveSurfaceToolNames("component-knowledge-daily", tools, core), ["craft_info"]);
+  assert.deepEqual(resolveSurfaceToolNames("component-memory-daily", [], core), []);
   assert.throws(() => resolveSurfaceToolNames("not-a-surface", tools, core), /Unknown Craft MCP surface/);
 });
 
@@ -95,6 +100,7 @@ test("component plugin manifests use public MCP products rather than internal su
     const server = mcp.mcpServers[name];
     assert.equal(manifest.name, name);
     assert.equal(manifest.version, VERSION);
+    if (["craft-knowledge", "craft-memory", "craft-experience"].includes(name)) assert.equal(manifest.hooks, "./hooks/hooks.json");
     const product = name === "craft-skill-quality" ? "quality" : name === "craft-experience" ? "experience" : name.slice(6);
     assert.deepEqual(server.args, ["dist/plugin/craft-mcp.cjs", "--product", product]);
   }

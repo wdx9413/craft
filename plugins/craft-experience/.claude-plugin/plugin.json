@@ -1,0 +1,13 @@
+{
+  "name": "craft-experience",
+  "version": "0.12.34",
+  "description": "Create bounded Workflow drafts from sanitized observations in Claude Code.",
+  "author": { "name": "wdx9413" },
+  "skills": "./skills/craft-experience/",
+  "mcpServers": {
+    "craft-experience": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/dist/plugin/craft-mcp.cjs", "--product", "experience"]
+    }
+  }
+}

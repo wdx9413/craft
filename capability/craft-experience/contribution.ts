@@ -36,9 +36,9 @@ export class ExperienceContribution implements ContextContributionProvider {
    * Select the patterns that mention this query, bounded, and described only by provenance.
    *
    * Matching is on `scenario_key`, because that is the only handle a pattern has: a pattern is
-   * keyed by the scenario its observations came from, not by a scope. The request's scope is
-   * therefore **not** used, and the receipt does not claim it was — a scope filter here would look
-   * like it restricted the result when nothing about a pattern could satisfy it.
+ * keyed by the scenario and its source scope.  Older unscoped patterns remain diagnostic
+ * records, but cannot enter a Host Context: pretending an unknown scope matched the current
+ * project would create exactly the cross-project memory leak the Context boundary prevents.
    */
   async contribute(request: ContextRequest): Promise<ContextContribution> {
     const wanted = terms(request.query);
@@ -47,7 +47,9 @@ export class ExperienceContribution implements ContextContributionProvider {
         pattern,
         // A scenario is a match when any query term appears in its key. Deliberately loose: this
         // decides what to *point at*, and the consumer reads the record before acting on it.
-        score: wanted.reduce((sum, term) => sum + Number(String(pattern.scenario_key).toLowerCase().includes(term)), 0),
+        score: pattern.scope && (pattern.scope as JsonObject).kind === request.scope_kind && (pattern.scope as JsonObject).id === request.scope_id
+          ? wanted.reduce((sum, term) => sum + Number(String(pattern.scenario_key).toLowerCase().includes(term)), 0)
+          : 0,
       }))
       .filter((candidate) => candidate.score > 0)
       .sort((left, right) => right.score - left.score || String(left.pattern.id).localeCompare(String(right.pattern.id)));

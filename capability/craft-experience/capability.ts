@@ -15,11 +15,10 @@
  * | `workflow-evolution` | sanitized execution observations, and the bounded model-proposal request they justify |
  * | `evaluation-model-profile` | the secret-free model configuration an evaluation runs under |
  *
- * It declares no `contributes` yet, and that is a measured gap rather than a design choice:
- * every tool this capability exposes is on the **write** side — observe, compile, propose,
- * decide — and no Craft tool reads experience back into a turn's context. Recorded here so
- * the absence is visible at the place a reader would look for the read side, instead of
- * being inferred from a tool list.
+ * Its `contributes` hook has an intentionally narrow read side: it returns only scoped,
+ * content-free pattern references.  Observation, compilation, proposal and decision stay
+ * on the write side, and neither a diagnostic pattern nor an accepted intervention becomes
+ * execution instructions without a separate governed route.
  */
 import type { CraftCapability } from "../../src/capability-protocol.ts";
 import { CORE_KERNELS } from "../../src/capability-protocol.ts";
@@ -56,6 +55,7 @@ export { EXPERIENCE_OWNS };
 export const experienceCapability: CraftCapability = {
   name: "experience",
   product: "craft-experience",
+  evaluation: { input_contract: "sanitized-observation", output_contract: "gated-experience-candidate", fixture_id: "experience-fixture-v1", host_compatibility: ["fixture", "codex", "claude"] },
   owns: EXPERIENCE_OWNS,
   /**
    * Assemble the kernels from the environment the core already decided.

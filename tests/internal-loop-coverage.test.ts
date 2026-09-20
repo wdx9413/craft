@@ -188,7 +188,7 @@ test("a task conversation turn records the user turn, streams the model reply an
   }
 });
 
-test("the v0.12.33 readiness, protocol and isolation facade methods project the runtime helpers", async () => {
+test("the v0.12.34 readiness, protocol and isolation facade methods project the runtime helpers", async () => {
     const f = await fixture();
     try {
       const service = new CraftService(f.store);
@@ -213,7 +213,7 @@ test("the distribution plan reports the download story and the remaining gap", a
   try {
     const service = new CraftService(f.store);
     const plan = service.distributionPlanGet({});
-    assert.equal(plan.version, "0.12.33");
+    assert.equal(plan.version, "0.12.34");
     assert.equal(plan.user_download_available, false);
     assert.equal(plan.channel, "developer_command_only");
     assert.ok(Array.isArray(plan.remainder));

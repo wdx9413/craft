@@ -13,6 +13,7 @@ const MAX_BYTES = 256 * 1024;
 
 type Entry = JsonObject & { rel_path: string; page_digest: string; title: string; summary: string; eligibility: string; reason: string | null; category: string; knowledge_type: string; scope: string; project: string | null; tags: string[]; evidence_type: string | null };
 type CandidateHandler = (entry: Entry, migration: JsonObject, sourceId: string, candidateId: string) => { evidence_id: string; claim_id: string };
+type ModelAssessment = { candidate_id: string; source_digest: string; decision: "supported" | "revalidate" | "reject"; reason: string };
 
 function digest(value: unknown): string { return `sha256:${createHash("sha256").update(typeof value === "string" ? value : JSON.stringify(value)).digest("hex")}`; }
 function id(prefix: string): string { return `${prefix}_${randomUUID().replaceAll("-", "")}`; }
@@ -87,6 +88,112 @@ export class LegacyKnowledgeMigrationKernel {
     return { candidates, failures, report_id: failures.length ? this.report(String(migration.id), "import", failures) : null };
   }
 
+  /**
+   * Repair provenance omitted by an older candidate-only import.
+   *
+   * It never changes a Claim's status, body, Evidence confidence, or Source trust.
+   * It only reconnects an existing Claim to the immutable Source descriptor already
+   * pinned by its migration Candidate, after proving the local page still has the
+   * captured digest.  That lets the normal evidence review distinguish
+   * "source is known but not revalidated" from "source is unknown".
+   */
+  async rebindProvenance(args: JsonObject): Promise<JsonObject> {
+    const migration = this.store.get("legacy_knowledge_migration", text(args.migration_id, "migration_id"));
+    const requested = args.candidate_ids === undefined ? null : new Set(
+      Array.isArray(args.candidate_ids) && args.candidate_ids.length
+        ? args.candidate_ids.map((item) => text(item, "candidate_ids item"))
+        : (() => { throw new Error("candidate_ids must be a non-empty array"); })(),
+    );
+    const candidates = this.store.list("legacy_knowledge_migration_candidate", MAX_FILES,
+      (candidate) => candidate.migration_id === migration.id && (requested === null || requested.has(String(candidate.id))));
+    const rebound: JsonObject[] = []; const unchanged: JsonObject[] = []; const failures: JsonObject[] = [];
+    for (const candidate of candidates) {
+      if (candidate.status !== "candidate" || !candidate.claim_id || !candidate.source_id) {
+        unchanged.push({ candidate_id: candidate.id, reason: "candidate_not_rebindable" }); continue;
+      }
+      const entry = (migration.entries as Entry[]).find((item) => item.rel_path === candidate.source_locator);
+      if (!entry) { failures.push(this.failure(String(migration.id), "rebind_provenance", String(candidate.source_locator ?? candidate.id), "source_entry_missing")); continue; }
+      const state = await this.sourceState(String(migration.source_root), entry);
+      if (state !== "current") { failures.push(this.failure(String(migration.id), "rebind_provenance", entry.rel_path, state)); continue; }
+      const source = this.store.find("knowledge_source", String(candidate.source_id));
+      if (!source || source.status !== "active" || source.trust === "untrusted") { failures.push(this.failure(String(migration.id), "rebind_provenance", entry.rel_path, "source_unavailable")); continue; }
+      const claim = this.store.find("knowledge_claim", String(candidate.claim_id));
+      if (!claim) { failures.push(this.failure(String(migration.id), "rebind_provenance", entry.rel_path, "claim_missing")); continue; }
+      if (claim.source_id === candidate.source_id && claim.source_page_digest === candidate.source_digest) {
+        unchanged.push({ candidate_id: candidate.id, claim_id: claim.id, reason: "already_bound" }); continue;
+      }
+      const saved = this.store.save("knowledge_claim", String(claim.id), { ...payload(claim), source_id: candidate.source_id,
+        source_locator: candidate.source_locator, source_page_digest: candidate.source_digest,
+        provenance_rebound_at: new Date().toISOString(), provenance_rebound_by: "offline-migration-rebind" });
+      rebound.push({ candidate_id: candidate.id, claim_id: saved.id, claim_version: saved.version, source_id: saved.source_id, source_page_digest: saved.source_page_digest });
+    }
+    return { migration_id: migration.id, rebound, unchanged, failures, report_id: failures.length ? this.report(String(migration.id), "rebind_provenance", failures) : null, content_free: true };
+  }
+
+  /**
+   * Apply a Host model's bounded content review to imported candidates.
+   *
+   * The model is allowed to judge whether the immutable page is coherent and
+   * useful enough to enter Context as historical, bounded knowledge.  It is not
+   * allowed to turn that page into confirmed live-system truth.  A supported
+   * assessment therefore creates bounded Evidence, restores the complete
+   * sanitised page body, and moves the Claim to `reviewed`; an uncertain or
+   * negative assessment only records the decision.
+   */
+  async reviewCandidates(args: JsonObject): Promise<JsonObject> {
+    const migration = this.store.get("legacy_knowledge_migration", text(args.migration_id, "migration_id"));
+    const reviewer = text(args.reviewer, "reviewer"); const modelRef = text(args.model_ref, "model_ref");
+    if (!Array.isArray(args.assessments) || !args.assessments.length) throw new Error("assessments must be a non-empty array");
+    const assessments = (args.assessments as JsonObject[]).map((value): ModelAssessment => {
+      const decision = text(value.decision, "assessment decision") as ModelAssessment["decision"];
+      if (!new Set(["supported", "revalidate", "reject"]).has(decision)) throw new Error("assessment decision is unsupported");
+      return { candidate_id: text(value.candidate_id, "assessment candidate_id"), source_digest: text(value.source_digest, "assessment source_digest"), decision, reason: text(value.reason, "assessment reason") };
+    });
+    if (new Set(assessments.map((item) => item.candidate_id)).size !== assessments.length) throw new Error("assessment candidate_ids must be unique");
+    const reviewed: JsonObject[] = []; const deferred: JsonObject[] = []; const failures: JsonObject[] = [];
+    for (const assessment of assessments) {
+      const candidate = this.store.find("legacy_knowledge_migration_candidate", assessment.candidate_id);
+      if (!candidate || candidate.migration_id !== migration.id || candidate.status !== "candidate" || !candidate.claim_id) {
+        failures.push({ candidate_id: assessment.candidate_id, code: "candidate_not_reviewable" }); continue;
+      }
+      if (candidate.source_digest !== assessment.source_digest) {
+        failures.push({ candidate_id: candidate.id, code: "assessment_source_digest_mismatch" }); continue;
+      }
+      const entry = (migration.entries as Entry[]).find((item) => item.rel_path === candidate.source_locator);
+      if (!entry) { failures.push({ candidate_id: candidate.id, code: "source_entry_missing" }); continue; }
+      const page = await this.readSourcePage(String(migration.source_root), entry);
+      if (!page) { failures.push({ candidate_id: candidate.id, code: "source_unavailable_or_drifted" }); continue; }
+      const reviewIdentity = { candidate_id: candidate.id, claim_id: candidate.claim_id, source_digest: candidate.source_digest, decision: assessment.decision, reviewer, model_ref: modelRef, reason_digest: digest(assessment.reason), policy: "bounded_model_source_review_v1" };
+      const reviewId = `knowledge_model_review_${digest(reviewIdentity).slice(-24)}`;
+      const prior = this.store.find("knowledge_model_review", reviewId);
+      const review = prior ?? this.store.create("knowledge_model_review", reviewId, { ...reviewIdentity, automated: true, reviewed_at: new Date().toISOString(), content_free: true });
+      if (assessment.decision !== "supported") { deferred.push({ candidate_id: candidate.id, decision: assessment.decision, review_id: review.id }); continue; }
+      const claim = this.store.get("knowledge_claim", String(candidate.claim_id));
+      const reviewedScope = candidate.scope === "shared" ? "global"
+        : candidate.project ? `project:${String(candidate.project)}` : "project:unbound";
+      if (claim.status === "reviewed" && claim.scope === reviewedScope) { reviewed.push({ candidate_id: candidate.id, claim_id: claim.id, review_id: review.id, idempotent: true }); continue; }
+      if (!new Set(["candidate", "reviewed"]).has(String(claim.status))) { failures.push({ candidate_id: candidate.id, code: "claim_not_candidate" }); continue; }
+      const evidenceId = `evidence_${reviewId}`;
+      const evidence = this.store.find("evidence", evidenceId) ?? this.store.create("evidence", evidenceId, {
+        source_type: "model_source_review", confidence: "bounded",
+        claim: "Immutable source page was reviewed for coherent historical reuse; live-system validity was not asserted.",
+        locator: String(page.metadata.evidence_ref), observed_at: new Date().toISOString(),
+        metadata: { source_id: candidate.source_id, source_locator: candidate.source_locator, source_digest: candidate.source_digest, review_id: review.id, reviewer, model_ref: modelRef },
+      });
+      const nextVersion = Number(claim.version) + 1;
+      const contentRef = this.store.contentStore.writeSync({ kind: "knowledge", record_id: String(claim.id), version: nextVersion,
+        scope: reviewedScope, status: "reviewed", sensitivity: "internal", source_id: String(candidate.source_id), title: String(candidate.title), body: page.body.trim() });
+      const evidenceIds = [...new Set([...(Array.isArray(claim.evidence_ids) ? claim.evidence_ids.map(String) : []), String(evidence.id)])].sort();
+      const saved = this.store.save("knowledge_claim", String(claim.id), { ...payload(claim), source_id: candidate.source_id,
+        source_locator: candidate.source_locator, source_page_digest: candidate.source_digest, legacy_scope: claim.scope, scope: reviewedScope, content_ref: contentRef,
+        content_digest: contentRef.digest, evidence_ids: evidenceIds, status: "reviewed",
+        review: { reviewer, model_ref: modelRef, review_id: review.id, reason_digest: digest(assessment.reason), reviewed_at: new Date().toISOString(), automated: true, confidence: "bounded" } });
+      this.store.save("legacy_knowledge_migration_candidate", String(candidate.id), { ...payload(candidate), model_review_id: review.id, reviewed_claim_version: saved.version });
+      reviewed.push({ candidate_id: candidate.id, claim_id: saved.id, claim_version: saved.version, review_id: review.id, evidence_id: evidence.id, idempotent: false });
+    }
+    return { migration_id: migration.id, reviewed, deferred, failures, reviewer, model_ref: modelRef };
+  }
+
   publishReady(args: JsonObject): JsonObject {
     const candidate = this.store.get("legacy_knowledge_migration_candidate", text(args.candidate_id, "candidate_id"));
     if (candidate.status === "published") return { candidate, idempotent: true };
@@ -147,6 +254,19 @@ export class LegacyKnowledgeMigrationKernel {
       const content = await readFile(resolved, "utf8"); if (!safe(content)) return "source_sensitive_or_disallowed";
       return digest(content) === entry.page_digest ? "current" : "source_digest_drift";
     } catch { return "source_unavailable"; }
+  }
+
+  private async readSourcePage(sourceRoot: string, entry: Entry): Promise<{ metadata: Record<string, string>; body: string } | null> {
+    const target = resolve(sourceRoot, entry.rel_path); const relativePath = relative(sourceRoot, target);
+    if (!relativePath || relativePath.startsWith("..")) return null;
+    try {
+      const resolved = await realpath(target); if (relative(sourceRoot, resolved).startsWith("..")) return null;
+      const info = await stat(resolved); if (!info.isFile() || info.size > MAX_BYTES) return null;
+      const content = await readFile(resolved, "utf8"); if (!safe(content) || digest(content) !== entry.page_digest) return null;
+      const parsed = frontmatter(content);
+      if (parsed.metadata.status !== "confirmed" || !parsed.metadata.evidence_ref || !parsed.body.trim()) return null;
+      return parsed;
+    } catch { return null; }
   }
 
   private excluded(rel_path: string, page_digest: string, reason: string, title = "", category = "", knowledge_type = ""): Entry { return { rel_path, page_digest, title, summary: "", eligibility: "excluded", reason, category, knowledge_type, scope: "project", project: null, tags: [], evidence_type: null }; }

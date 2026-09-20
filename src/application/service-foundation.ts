@@ -58,6 +58,8 @@ import { TaskRunKernel } from "../task-run.ts";
 import { TaskBenchmarkKernel } from "../task-benchmark.ts";
 import { StateWorkspaceKernel } from "../state-workspace.ts";
 import { VerifiedWorkLoopKernel } from "../verified-work-loop.ts";
+import { KnowledgeAutoReviewKernel } from "../knowledge-auto-review.ts";
+import { DecisionPointContextGate } from "../decision-context-gate.ts";
 import { EvalCampaignKernel } from "../eval-campaign.ts";
 import type { ProjectKnowledgeKernel } from "../../capability/craft-knowledge/project-knowledge.ts";
 import { CapabilityConnectorKernel } from "../capability-connector.ts";
@@ -108,6 +110,7 @@ import { FeedbackLearningKernel } from "../feedback-learning.ts";
 import { HandoffManifestKernel } from "../handoff-manifest.ts";
 import { LocalRuntimeServiceKernel } from "../local-runtime-service.ts";
 import { ProjectBundleKernel } from "../project-bundle.ts";
+import { KnowledgeMemoryBundleKernel } from "../knowledge-memory-bundle.ts";
 import { ReplayRunnerKernel } from "../replay-runner.ts";
 import { VerifiedAutonomousWorkKernel, SandboxConformanceKernel, TraceExplorerKernel } from "../verified-autonomous-work.ts";
 import { ActionGatewayKernel, AcceptanceGateKernel, DurableWorkerKernel, ProviderRouterKernel, A2AProtocolKernel } from "../runtime-completion.ts";
@@ -157,6 +160,7 @@ import { ContentMigrationKernel } from "../content-migration.ts";
 import { TraceReviewKernel } from "../trace-review.ts";
 import { MemoryMaintenanceKernel } from "../memory-maintenance.ts";
 import { RuntimeModelProbeKernel } from "../runtime-model-probe.ts";
+import { EvaluationContractKernel } from "../evaluation-contract.ts";
 
 /**
  * Stable composition root for the service. Domain behavior stays in focused
@@ -219,6 +223,8 @@ export abstract class ServiceFoundation {
   readonly taskBenchmarks: TaskBenchmarkKernel;
   readonly stateWorkspace: StateWorkspaceKernel;
   readonly verifiedWorkLoops: VerifiedWorkLoopKernel;
+  readonly knowledgeAutoReviewKernel: KnowledgeAutoReviewKernel;
+  readonly decisionContextGate: DecisionPointContextGate;
   readonly evalCampaigns: EvalCampaignKernel;
   readonly projectKnowledge: ProjectKnowledgeKernel;
   readonly capabilityConnectors: CapabilityConnectorKernel;
@@ -283,6 +289,7 @@ export abstract class ServiceFoundation {
   readonly runtimeModelProbe: RuntimeModelProbeKernel;
   readonly mcpTasks: McpTaskKernel;
   readonly runtimeProof: RuntimeProofKernel;
+  readonly evaluationContracts: EvaluationContractKernel;
   readonly remoteInterop: RemoteInteropKernel;
   readonly platformOperations: PlatformOperationsKernel;
   readonly modelProviders: readonly ModelProviderSpec[];
@@ -311,6 +318,7 @@ export abstract class ServiceFoundation {
   readonly replayRunner: ReplayRunnerKernel;
   readonly localRuntimeService: LocalRuntimeServiceKernel;
   readonly projectBundles: ProjectBundleKernel;
+  readonly knowledgeMemoryBundles: KnowledgeMemoryBundleKernel;
   readonly feedbackLearning: FeedbackLearningKernel;
   readonly domainEvaluators: DomainEvaluatorKernel;
   readonly handoffManifests: HandoffManifestKernel;
@@ -404,6 +412,7 @@ export abstract class ServiceFoundation {
     this.taskBenchmarks = new TaskBenchmarkKernel(store, this.deliveryEvaluation);
     this.stateWorkspace = new StateWorkspaceKernel(store);
     this.verifiedWorkLoops = new VerifiedWorkLoopKernel(store);
+    this.knowledgeAutoReviewKernel = new KnowledgeAutoReviewKernel(store);
     this.evalCampaigns = new EvalCampaignKernel(store, this.taskBenchmarks);
     this.projectKnowledge = capabilities.registry.require<ProjectKnowledgeKernel>(KNOWLEDGE_KERNELS.projectKnowledge);
     this.capabilityConnectors = new CapabilityConnectorKernel(store);
@@ -418,6 +427,7 @@ export abstract class ServiceFoundation {
     // concern still has to be able to resolve what that concern holds.
     this.contextResolution = new ContextResolutionKernel(store, capabilities.contributed);
     this.contextProjection = new ContextProjectionKernel(store);
+    this.decisionContextGate = new DecisionPointContextGate(store, this.contextResolution);
     this.stateView = new StateViewKernel(store);
     this.knowledgeRelations = capabilities.registry.require<KnowledgeRelationKernel>(KNOWLEDGE_KERNELS.relations);
     this.memoryGovernance = new MemoryGovernanceKernel(store, this.memoryLedger);
@@ -461,6 +471,7 @@ export abstract class ServiceFoundation {
     this.runtimeModelProbe = new RuntimeModelProbeKernel(store, this.modelProviders, modelTransport ?? null);
     this.mcpTasks = new McpTaskKernel(store);
     this.runtimeProof = new RuntimeProofKernel(store);
+    this.evaluationContracts = new EvaluationContractKernel(store);
     this.contentMigration = new ContentMigrationKernel(store);
     this.remoteInterop = new RemoteInteropKernel(store);
     this.platformOperations = new PlatformOperationsKernel(store);
@@ -489,6 +500,7 @@ export abstract class ServiceFoundation {
     this.replayRunner = new ReplayRunnerKernel(store);
     this.localRuntimeService = new LocalRuntimeServiceKernel(store);
     this.projectBundles = new ProjectBundleKernel(store);
+    this.knowledgeMemoryBundles = new KnowledgeMemoryBundleKernel(store);
     this.feedbackLearning = new FeedbackLearningKernel(store);
     this.domainEvaluators = new DomainEvaluatorKernel(store);
     this.handoffManifests = new HandoffManifestKernel(store);

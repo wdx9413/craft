@@ -105,9 +105,9 @@ test("v0.12.43 claims the families its kernels implement and no others", async (
   assert.equal(knowledgeCapability.name, "knowledge");
   assert.equal(knowledgeCapability.product, "craft-knowledge");
   assert.equal(knowledgeCapability.owns, KNOWLEDGE_OWNS);
-  // The read side exists as tools but not as a ContextContributionProvider, and inventing one
-  // no caller invokes would be a claim with no user.
-  assert.equal(knowledgeCapability.contributes, undefined);
+  // Reviewed knowledge now enters the shared Context Resolution seam. Candidates remain
+  // discoverable to a human but never become a Host contribution.
+  assert.equal(typeof knowledgeCapability.contributes, "function");
   // A capability cannot be declared twice, and the registry is what says so.
   const f = await fixture();
   try {
@@ -123,7 +123,7 @@ test("v0.12.43 keeps the Knowledge projection at exactly the name space it promi
   // Behaviour preservation for the four families the product already promised, plus the
   // `project` repair measured below. The previous literal was
   // `/^craft_(wiki|knowledge|claim|relation|context_resolution|retrieval_adapter)/`.
-  const previous = /^craft_(wiki|knowledge|claim|relation|context_resolution|retrieval_adapter)/;
+  const previous = /^craft_(wiki|knowledge|claim|relation|context_resolution|decision_context_gate|retrieval_adapter)/;
   const exposed = surfaceToolNames("component-knowledge");
   const expected = ACTIVE_TOOLS.map((tool) => tool.name).filter((name) => previous.test(name));
   for (const name of expected) assert(exposed.includes(name), `component-knowledge lost ${name}`);
@@ -166,7 +166,7 @@ test("v0.12.43 owns the Source registry now that it no longer shares a class wit
 
 test("v0.12.43 composes the Context product from both members without restating them", () => {
   const context = COMPONENT_SURFACES["component-context"];
-  const previous = /^craft_(wiki|knowledge|claim|relation|memory|context_resolution|retrieval_adapter)/;
+  const previous = /^craft_(wiki|knowledge|claim|relation|memory|context_resolution|decision_context_gate|retrieval_adapter)/;
   const exposed = surfaceToolNames("component-context");
   const expected = ACTIVE_TOOLS.map((tool) => tool.name).filter((name) => previous.test(name));
   // `component-context` is the user-facing composition, so it must remain exactly the union

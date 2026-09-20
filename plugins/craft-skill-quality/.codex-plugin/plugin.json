@@ -1,6 +1,6 @@
 {
   "name": "craft-skill-quality",
-  "version": "0.12.33",
+  "version": "0.12.34",
   "description": "Compatibility alias for Craft Quality; evaluates versioned Agent assets with repeatable evidence.",
   "author": { "name": "wdx9413", "url": "https://github.com/wdx9413" },
   "homepage": "https://github.com/wdx9413/craft",

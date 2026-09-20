@@ -22,7 +22,7 @@ async function server(t: { after: (fn: () => Promise<void>) => void }): Promise<
 }
 
 test("v0.12.41 answers server/discover without claiming the target revision", () => {
-  const discovered = discoverResult({ server_name: "craft", version: "0.12.33" });
+  const discovered = discoverResult({ server_name: "craft", version: "0.12.34" });
   // The revision this build actually speaks.
   assert.equal(discovered.protocolVersion, "2025-11-25");
   assert.deepEqual(discovered.supported_revisions, [...MCP_PROTOCOL_VERSIONS]);
@@ -31,7 +31,7 @@ test("v0.12.41 answers server/discover without claiming the target revision", ()
   assert.equal((discovered.supported_revisions as string[]).includes(MCP_ASSESSED_REVISION), false);
   assert.equal(discovered.migration_status, MCP_MIGRATION_STATUS);
   assert.equal(discovered.resultType, "complete");
-  assert.deepEqual(discovered.serverInfo, { name: "craft", version: "0.12.33" });
+  assert.deepEqual(discovered.serverInfo, { name: "craft", version: "0.12.34" });
 
   // Defaults name the server rather than emitting an empty identity, and a
   // whitespace-only name is rejected as a name.

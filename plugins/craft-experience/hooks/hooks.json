@@ -1,0 +1,22 @@
+{
+  "description": "Record content-free verified local coding observations for Craft Experience.",
+  "hooks": {
+    "PostToolUse": [{
+      "matcher": "Bash|^apply_patch$|Edit|Write",
+      "hooks": [{
+        "type": "command",
+        "command": "node ${PLUGIN_ROOT}/dist/plugin/craft-codex-hook.cjs --member experience",
+        "timeout": 3,
+        "statusMessage": "Recording verified Craft Experience signals"
+      }]
+    }],
+    "Stop": [{
+      "hooks": [{
+        "type": "command",
+        "command": "node ${PLUGIN_ROOT}/dist/plugin/craft-codex-hook.cjs --member experience",
+        "timeout": 3,
+        "statusMessage": "Finalizing verified Craft Experience"
+      }]
+    }]
+  }
+}

@@ -124,6 +124,46 @@ memory 的派生信号原本是 `src/memory-wiring.ts` 的纯函数加门面薄�
 - `infrastructure` 提供存储、路径、进程和平台适配；领域代码通过明确接口使用它。
 - Trace/Evidence 是横切事实链：动作、工具、验收和结果必须带同一关联标识。
 
+## v0.12.34 概念层与代码层收敛
+
+代码分层应服从领域关系，而不是把每个 MCP 名字都当作一个内核：
+
+```text
+interfaces（MCP / CLI / plugin projection）
+        ↓
+application（commands / queries / coordinators）
+        ↓
+domains
+  control      Goal / Task Contract / Policy / Budget / Lifecycle
+  context      Knowledge / Memory / Experience / Resolution / Retrieval
+  capability   Asset / Connector / Activation / Kit / Health
+  execution    Runtime / Host / Action / Receipt / State / Recovery
+  quality      Verification / Acceptance / Evaluation / Attribution
+  evolution    Pattern / Candidate / Signoff / Canary / Rollback
+        ↓
+infrastructure（SQLite / Markdown / Trace archive / platform adapters）
+```
+
+这里的边界有三个硬规则：
+
+1. `Agent = Model + Harness`；Harness 是一次工作的策略组合，使用 Runtime，不拥有 Runtime。`Context` 是可追溯投影，`State` 才是控制态和工作区态事实源，二者不能互换。
+2. `craft-memory`、`craft-knowledge`、`craft-capability`、`craft-quality`、`craft-experience` 是能力投影，不应各自复制 Store、Policy、Trace 或 Eval。只读查询可以直接走组件 MCP；写入、发布和外部 effect 必须回到 Control Plane 与 Verified Work Loop。
+3. Capability Adapter 负责外部差异（MCP、Serena、Codex、Claude、向量服务），Core Kernel 负责不可绕过的事实、策略和证据。把共享内核搬进能力包只会造成第二套账本，不能因为“可插拔”而移动。
+
+当前仍需收敛的结构债务：`src/application/craft-service.ts` 约 4500 行，应按 commands/queries/coordinators 渐进拆成薄门面；`service-foundation.ts → interfaces/canonical-tools.ts` 的单向依赖豁免应通过把工具目录移到中立 `mcp/tool-catalog` 消除；`distribution-and-first-run.ts` 应拆为 credential/config、readiness、protocol negotiation、platform probe 和 release plan 五个职责。只在每次拆分都能保持现有契约和测试证据时迁移，不能为了目录整齐复制实现。
+
+### 版本边界
+
+发布版本、数据/Schema 版本和外部协议版本是三类不同身份：
+
+| 类型 | 示例 | 规则 |
+| --- | --- | --- |
+| Product release | `package.json`、插件 manifest、Marketplace release | 只能有一个发布源，其他文件由门禁或构建生成 |
+| Schema/adapter version | `compiler_version`、`RUNTIME_VERSION`、manifest schema | 与产品版本解耦，只有契约变化才升级 |
+| Protocol version | MCP/A2A 的日期或协议号 | 由协议适配器声明，不能被当成 Craft 发布版本 |
+
+v0.12.34 已将产品发布号集中到 `src/version.ts`，并由发布门禁校验 CraftService、组件 package、Codex/Claude manifest、MCP serverInfo、Marketplace 和插件 bundle。Adapter/Compiler 使用独立的 Schema 版本，MCP/A2A 继续使用协议版本；历史模块注释只作为变更记录，不参与当前能力宣称。
+
 ## 兼容与拆分策略
 
 `src/service.ts` 与 `src/mcp.ts` 是稳定的薄兼容入口，真实实现分别位于 `src/application/craft-service.ts` 和 `src/interfaces/mcp-server.ts`。第三方继续使用旧路径不会失效；后续新增代码应从分层入口或具体领域模块导入，避免再把门面做成新的上帝模块。这两个文件，加上 `domains/index.ts`、`infrastructure/index.ts`，是审计脚本中按构造豁免的再导出入口。

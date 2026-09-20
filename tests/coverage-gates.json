@@ -70,6 +70,8 @@
       "tests": [
         "tests/universal-runtime.test.ts",
         "tests/verified-work-loop.test.ts",
+        "tests/knowledge-memory-operability.test.ts",
+        "tests/component-procedure-graph.test.ts",
         "tests/capability-memory-package.test.ts",
         "tests/capability-knowledge-package.test.ts",
         "tests/experience-contribution.test.ts"
@@ -114,6 +116,16 @@
       "branches": true
     },
     {
+      "name": "codex-component-hook-bridge",
+      "include": [
+        "src/codex-hook-bridge.ts"
+      ],
+      "tests": [
+        "tests/codex-hook-bridge.test.ts"
+      ],
+      "branches": true
+    },
+    {
       "name": "verification-plane",
       "include": [
         "src/verification-plane.ts"
@@ -133,6 +145,7 @@
       ],
       "tests": [
         "tests/evaluation-model-workflow-evolution.test.ts",
+        "tests/component-procedure-graph.test.ts",
         "tests/capability-experience-package.test.ts",
         "tests/experience-contribution.test.ts"
       ],
@@ -447,9 +460,33 @@
       ],
       "tests": [
         "tests/v01231-agent-foundation.test.ts",
+        "tests/component-procedure-graph.test.ts",
         "tests/v01232-observability-memory.test.ts"
       ],
       "branches": false
+    },
+    {
+      "name": "memory-governance",
+      "include": [
+        "src/memory-governance.ts"
+      ],
+      "tests": [
+        "tests/v01231-agent-foundation.test.ts",
+        "tests/component-procedure-graph.test.ts",
+        "tests/v01232-observability-memory.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "knowledge-promotion-policy",
+      "include": [
+        "src/knowledge-auto-review.ts"
+      ],
+      "tests": [
+        "tests/knowledge-memory-operability.test.ts",
+        "tests/knowledge-promotion-policy.test.ts"
+      ],
+      "branches": true
     },
     {
       "name": "observability-memory",

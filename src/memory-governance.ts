@@ -4,7 +4,7 @@ import type { MemoryLedgerKernel } from "../capability/craft-memory/memory-ledge
 
 const SECRET = /(?:api[_-]?key|authorization|cookie|password|passwd|secret|token)\s*[:=]\s*[^\s]{6,}/iu;
 const KINDS = new Set(["working", "episodic", "preference", "procedural"]);
-const STATUSES = new Set(["candidate", "approved", "rejected", "conflict_pending", "expired"]);
+const STATUSES = new Set(["candidate", "approved", "rejected", "superseded", "conflict_pending", "expired"]);
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified"]);
 const SCOPE = new Set(["user", "project", "workspace", "task", "session"]);
 const POLICY_MODES = new Set(["off", "propose", "governed"]);
@@ -51,18 +51,24 @@ export class MemoryGovernanceKernel {
     const scopeId = text(args.scope_id, "scope_id"); const content = noSecret(text(args.content, "content"), "content");
     const confidence = text(args.confidence ?? "unverified", "confidence"); if (!CONFIDENCE.has(confidence)) throw new Error("confidence is unsupported");
     const ids = evidenceIds(args.evidence_ids); ids.forEach((e) => this.store.get("evidence", e));
-    const sourceId = text(args.source_id, "source_id"); this.store.get("knowledge_source", sourceId);
+    const sourceId = text(args.source_id, "source_id"); const source = this.store.get("knowledge_source", sourceId);
+    if (source.status !== "active" || source.trust === "untrusted") throw new Error("Memory Source is unavailable");
     let validUntil: string | null = null;
     if (args.valid_until !== undefined && args.valid_until !== null) { const parsed = new Date(text(args.valid_until, "valid_until")); if (Number.isNaN(parsed.valueOf())) throw new Error("valid_until must be an ISO timestamp"); validUntil = parsed.toISOString(); }
     if (validUntil === null && kind === "working") validUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
     if (validUntil === null && kind === "episodic") validUntil = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
     if (kind === "procedural" && !ids.length) throw new Error("procedural memory requires Evidence");
-    const identity = { source_id: sourceId, kind, scope: { kind: scopeKind, id: scopeId }, topic: String(args.topic ?? ""), content_digest: digest(content), sensitivity: String(args.sensitivity ?? "internal"), confidence, evidence_ids: ids, valid_until: validUntil };
+    const topic = args.topic === undefined ? "" : text(args.topic, "topic");
+    const identity = { source_id: sourceId, kind, scope: { kind: scopeKind, id: scopeId }, topic, content_digest: digest(content), sensitivity: String(args.sensitivity ?? "internal"), confidence, evidence_ids: ids, valid_until: validUntil };
     const candidateId = String(args.candidate_id ?? id("memory_candidate")); const existing = this.store.find("memory_candidate", candidateId);
     if (existing) { if (existing.identity_digest !== digest(identity)) throw new Error("Memory candidate idempotency conflict"); return { candidate: existing, idempotent: true }; }
-    const conflicts = this.store.list("memory_candidate", 10_000, (item) => Boolean(item.status !== "rejected" && item.status !== "expired" && item.scope && JSON.stringify(item.scope) === JSON.stringify(identity.scope) && item.topic === identity.topic && item.content_digest !== identity.content_digest));
-    const status = conflicts.length ? "conflict_pending" : "candidate";
-    const candidate = this.store.create("memory_candidate", candidateId, { ...identity, content, status, conflict_ids: conflicts.map((x) => x.id), proposed_by: String(args.proposed_by ?? "agent"), identity_digest: digest(identity) });
+    // Empty subjects are deliberately *not* treated as mutually contradictory.
+    // A missing classifier must cause less automation, not turn every preference in
+    // a scope into one impossible conflict set.
+    const conflicts = topic ? this.store.list("memory_candidate", 10_000, (item) => Boolean(!["rejected", "superseded", "expired"].includes(String(item.status)) && item.scope && JSON.stringify(item.scope) === JSON.stringify(identity.scope) && item.topic === topic && item.content_digest !== identity.content_digest)) : [];
+    const conflictingMemories = topic ? this.store.list("memory_ledger", 10_000, (item) => Boolean(item.status === "active" && item.topic === topic && item.scope && JSON.stringify(item.scope) === JSON.stringify(identity.scope) && item.content_digest !== identity.content_digest)) : [];
+    const status = conflicts.length || conflictingMemories.length ? "conflict_pending" : "candidate";
+    const candidate = this.store.create("memory_candidate", candidateId, { ...identity, content, status, conflict_ids: conflicts.map((x) => x.id), conflicting_memory_ids: conflictingMemories.map((x) => x.id), proposed_by: String(args.proposed_by ?? "agent"), identity_digest: digest(identity) });
     for (const conflict of conflicts) this.store.save("memory_candidate", String(conflict.id), { ...payload(conflict), status: "conflict_pending", conflict_ids: [...new Set([...(conflict.conflict_ids as string[] ?? []), candidate.id])] });
     const eligible = policy.mode === "governed" && conflicts.length === 0 && ids.length > 0 && ids.every((e) => {
       const confidenceValue = String(this.store.get("evidence", e).confidence);
@@ -71,9 +77,9 @@ export class MemoryGovernanceKernel {
     if (eligible) {
       const approved = this.store.save("memory_candidate", candidateId, { ...payload(candidate), status: "approved", review: { reviewer: "governed-policy", reason_digest: digest("policy threshold"), reviewed_at: new Date().toISOString() } });
       const memory = this.remember({ candidate_id: approved.id }).memory as JsonObject;
-      return { candidate: approved, conflicts, memory, auto_committed: true, idempotent: false, policy };
+      return { candidate: approved, conflicts, conflicting_memories: conflictingMemories, memory, auto_committed: true, idempotent: false, policy };
     }
-    return { candidate, conflicts, auto_committed: false, idempotent: false, policy };
+    return { candidate, conflicts, conflicting_memories: conflictingMemories, auto_committed: false, idempotent: false, policy };
   }
 
   review(args: JsonObject): JsonObject {
@@ -91,9 +97,19 @@ export class MemoryGovernanceKernel {
 
   remember(args: JsonObject): JsonObject {
     const candidate = this.store.get("memory_candidate", text(args.candidate_id, "candidate_id")); if (candidate.status !== "approved") throw new Error("Only approved Memory candidates can enter the Ledger");
-    const result = this.ledger.remember({ memory_id: args.memory_id, source_id: candidate.source_id, kind: candidate.kind, scope_kind: (candidate.scope as JsonObject).kind, scope_id: (candidate.scope as JsonObject).id, content: candidate.content, sensitivity: candidate.sensitivity, confidence: candidate.confidence, evidence_ids: candidate.evidence_ids, valid_until: candidate.valid_until });
+    const result = this.ledger.remember({ memory_id: args.memory_id, source_id: candidate.source_id, kind: candidate.kind, scope_kind: (candidate.scope as JsonObject).kind, scope_id: (candidate.scope as JsonObject).id, content: candidate.content, topic: candidate.topic || undefined, sensitivity: candidate.sensitivity, confidence: candidate.confidence, evidence_ids: candidate.evidence_ids, valid_until: candidate.valid_until });
+    const memory = result.memory as JsonObject;
+    // Resolve a newer preference by retiring the old *Ledger* entries only after
+    // the replacement itself has been accepted and materialised.  The old records
+    // remain auditable, but Context Resolution can no longer choose them.
+    const supersededMemoryIds = Array.isArray(candidate.supersedes_memory_ids) ? candidate.supersedes_memory_ids as string[] : [];
+    const superseded = supersededMemoryIds.map((memoryId) => {
+      const previous = this.store.get("memory_ledger", memoryId);
+      if (previous.status !== "active") return previous;
+      return this.ledger.transition({ memory_id: previous.id, status: "superseded", replacement_id: memory.id, reason: `superseded by ${memory.id}` }).memory as JsonObject;
+    });
     const saved = this.store.save("memory_candidate", String(candidate.id), { ...payload(candidate), ledger_memory_id: (result.memory as JsonObject).id, status: "approved" });
-    return { candidate: saved, memory: result.memory };
+    return { candidate: saved, memory: result.memory, superseded };
   }
 
   listConflicts(args: JsonObject = {}): JsonObject { return { conflicts: this.store.list("memory_candidate", Number(args.limit ?? 100), (x) => x.status === "conflict_pending") }; }
@@ -101,7 +117,11 @@ export class MemoryGovernanceKernel {
     const candidate = this.store.get("memory_candidate", text(args.candidate_id, "candidate_id")); const resolution = text(args.resolution, "resolution");
     if (!new Set(["keep", "supersede", "dismiss"]).has(resolution)) throw new Error("resolution is unsupported");
     const reason = noSecret(text(args.reason, "reason"), "reason"); const conflictIds = Array.isArray(candidate.conflict_ids) ? candidate.conflict_ids as string[] : [];
-    const saved = this.store.save("memory_candidate", String(candidate.id), { ...payload(candidate), status: resolution === "dismiss" ? "candidate" : "candidate", conflict_resolution: { resolution, actor: text(args.actor, "actor"), reason_digest: digest(reason), at: new Date().toISOString() }, conflict_ids: [] });
+    const conflictingMemoryIds = Array.isArray(candidate.conflicting_memory_ids) ? candidate.conflicting_memory_ids as string[] : [];
+    // This records a *selection*, not an unproved mutation.  Actual Ledger
+    // supersession happens in `remember` only after the selected candidate has
+    // passed review and acquired its own immutable body/version.
+    const saved = this.store.save("memory_candidate", String(candidate.id), { ...payload(candidate), status: "candidate", conflict_resolution: { resolution, actor: text(args.actor, "actor"), reason_digest: digest(reason), at: new Date().toISOString() }, conflict_ids: [], conflicting_memory_ids: [], ...(resolution === "supersede" ? { supersedes_memory_ids: conflictingMemoryIds, supersedes_candidate_ids: conflictIds } : {}) });
     for (const conflictId of conflictIds) { const other = this.store.find("memory_candidate", String(conflictId)); if (other) this.store.save("memory_candidate", String(other.id), { ...payload(other), conflict_ids: (other.conflict_ids as string[] ?? []).filter((x) => x !== candidate.id), status: "candidate" }); }
     return { candidate: saved };
   }

@@ -179,6 +179,19 @@ export type HookPhase = typeof HOOK_PHASES[number];
  */
 export const GATING_PHASES: ReadonlySet<HookPhase> = new Set<HookPhase>(["permission_check", "tool_before"]);
 
+/** Stable names used by the unified Harness lifecycle. They map onto the existing HookPlane
+ * phases so older components keep their protocol while new components can speak the domain flow. */
+export const HARNESS_HOOK_POINTS = [
+  "before_context", "before_activation", "before_preflight", "before_execute",
+  "after_receipt", "after_observe", "before_accept", "after_outcome", "before_candidate_publish",
+] as const;
+export type HarnessHookPoint = typeof HARNESS_HOOK_POINTS[number];
+export const HARNESS_HOOK_PHASE_MAP: Readonly<Record<HarnessHookPoint, HookPhase>> = {
+  before_context: "context_resolve", before_activation: "capability_discover", before_preflight: "permission_check",
+  before_execute: "tool_before", after_receipt: "tool_after", after_observe: "tool_after",
+  before_accept: "permission_check", after_outcome: "task_settle", before_candidate_publish: "task_settle",
+};
+
 /** What a hook is shown. Members are optional because a stage only sees what exists yet. */
 export interface HookContext {
   readonly phase: HookPhase;
@@ -302,6 +315,19 @@ export interface CraftCapability {
   /** The MCP product name, when this capability is exposed as a bounded product. */
   readonly product?: string;
   /**
+   * The capability's single-point Evaluation Contract descriptor.
+   *
+   * Product capabilities must provide it at assembly time.  It stays optional
+   * in this low-level type so test-only hooks and in-process probes can model a
+   * seam without accidentally becoming installable products.
+   */
+  readonly evaluation?: {
+    readonly input_contract: string;
+    readonly output_contract: string;
+    readonly fixture_id: string;
+    readonly host_compatibility: readonly string[];
+  };
+  /**
    * Tool names this capability owns.
    *
    * Declared by the capability rather than inferred from a shared rule list, so two
@@ -400,6 +426,9 @@ export function buildCapabilityRegistry(
 
   for (const capability of capabilities) {
     if (names.has(capability.name)) throw new Error(`capability already registered: ${capability.name}`);
+    if (capability.product && !capability.evaluation) {
+      throw new Error(`product capability ${capability.name} requires an Evaluation Contract descriptor`);
+    }
     names.add(capability.name);
   }
   // Registration order is the capability order, so a capability may depend on one
