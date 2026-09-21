@@ -19,7 +19,8 @@ function integer(value: unknown, name: string, minimum: number, maximum: number)
 /**
  * A small product-proof protocol. It does not execute a model; it makes a
  * real Host session and an independent observed outcome mandatory before a
- * Harness result can count.  The five-trial promotion rule is intentionally
+ * Harness result can count. A plan may pin one Host (the normal paired setup)
+ * or two Hosts for replication. The five-trial promotion rule is intentionally
  * strict; 3–4 trial experiments remain diagnostic/inconclusive.
  */
 export class RuntimeAcceptanceKernel {
@@ -27,7 +28,8 @@ export class RuntimeAcceptanceKernel {
   constructor(store: CraftStore) { this.store = store; }
 
   plan(args: JsonObject): JsonObject {
-    const caseIds = unique(args.case_ids, "case_ids", 2); const hostIds = unique(args.host_ids, "host_ids", 2);
+    const caseIds = unique(args.case_ids, "case_ids", 2); const hostIds = unique(args.host_ids, "host_ids");
+    if (hostIds.length > 2) throw new Error("host_ids must contain one or two Hosts");
     const trials = integer(args.trials_per_pair, "trials_per_pair", 3, 5);
     const identity = { case_ids: caseIds, host_ids: hostIds, baseline_harness: text(args.baseline_harness, "baseline_harness"), candidate_harness: text(args.candidate_harness, "candidate_harness"), environment_fingerprint: text(args.environment_fingerprint, "environment_fingerprint"), budget_fingerprint: text(args.budget_fingerprint, "budget_fingerprint"), trials_per_pair: trials, observer_kind: text(args.observer_kind, "observer_kind") };
     if (identity.baseline_harness === identity.candidate_harness) throw new Error("Runtime acceptance candidate must differ from baseline");

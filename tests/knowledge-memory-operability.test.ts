@@ -121,8 +121,12 @@ test("explicit user memory is scoped, conflict-aware and retires only the replac
     assert.equal(memories.length, 1);
     assert.match(String(memories[0]!.content), /avoiding sugar/u);
     const gate = await f.service.decisionContextGateOpen({ gate_id: "diet-decision", decision_kind: "prepare_order", query: "sugar coffee",
-      scope_kind: "user", scope_id: "didi", require_context: true });
+      scope_kind: "user", scope_id: "didi", require_context: true, required_constraint_ids: ["diet-sugar", "scope-user"], recalled_constraint_ids: ["diet-sugar"],
+      context_input_tokens: 42, error_injection_count: 0, cost_units: 0.01, latency_ms: 5, cache_observation: "unavailable" });
     assert.equal((gate.gate as JsonObject).status, "ready");
+    assert.equal(((gate.gate as JsonObject).decision_metrics as JsonObject).constraint_recall_at_decision, 0.5);
+    assert.equal(((gate.gate as JsonObject).decision_metrics as JsonObject).cache_observation, "unavailable");
+    await assert.rejects(() => f.service.decisionContextGateOpen({ gate_id: "invalid-recall", decision_kind: "prepare_order", query: "sugar coffee", scope_kind: "user", scope_id: "didi", required_constraint_ids: ["diet-sugar"], recalled_constraint_ids: ["unknown"] }), /subset/);
     const skipped = await f.service.decisionContextGateOpen({ gate_id: "scope-required", decision_kind: "prepare_order", query: "sugar", require_context: true });
     assert.equal((skipped.gate as JsonObject).status, "skipped");
     assert.equal(((await f.service.decisionContextGateGet({ gate_id: "scope-required" })).gate as JsonObject).status, "skipped");
@@ -173,7 +177,7 @@ test("component diagnosis distinguishes a reachable MCP process from a stale or 
     assert.equal(stale.runtime_reachable, true);
     assert.equal(stale.host_attachment, "bundle_or_surface_mismatch");
     assert((stale.missing_tools as string[]).includes("craft_knowledge_search"));
-    const current = f.service.componentDiagnose({ component: "experience", observed_tool_names: ["craft_component_readiness_get", "craft_workflow_evolution_observe", "craft_workflow_evolution_propose"] });
+    const current = f.service.componentDiagnose({ component: "experience", observed_tool_names: ["craft_component_readiness_get", "craft_experience_observe", "craft_experience_procedure_draft"] });
     assert.equal(current.host_attachment, "surface_matches");
     assert.match(String(f.service.componentDiagnose({ component: "memory" }).host_attachment), /this_mcp_process_replied/u);
     assert.throws(() => f.service.componentDiagnose({ component: "memory", observed_tool_names: [" "] }), /non-empty/u);

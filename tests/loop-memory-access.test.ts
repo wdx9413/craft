@@ -97,7 +97,7 @@ test("v0.12.35 the loop's memory tools dispatch against a real store", async (t)
   const memories = found.memories as JsonObject[];
   assert.equal(memories.length, 1);
   assert.equal(memories[0]!.memory_id, "mem-ledger");
-  assert.equal(memories[0]!.reason, "keyword_overlap");
+  assert.equal(memories[0]!.reason, "keyword_bm25");
   // A receipt is still produced, so reading did not cost the audit trail.
   assert.equal(found.content_free_receipt, true);
   assert.match(String(found.receipt_id), /^standalone-ctx-|^context_resolution_/u);

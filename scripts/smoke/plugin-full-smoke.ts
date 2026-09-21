@@ -29,8 +29,10 @@ try {
   child.stdin.end(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: MCP_PREFERRED_PROTOCOL_VERSION } })}\n${JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list" })}\n`);
   const responses = await Promise.race([responsesPromise, new Promise<never>((_, reject) => setTimeout(() => reject(new Error(errors || "Full MCP smoke test timed out")), 5_000))]);
   assert.equal(responses[0].result.serverInfo.version, manifest.version);
-  assert((responses[1].result.tools as Array<{ name: string }>).some((tool) => tool.name === "craft_skill_proposal_publish"));
-  console.log("Bundled full MCP starts and retains legacy tools.");
+  const tools = responses[1].result.tools as Array<{ name: string }>;
+  assert(tools.some((tool) => tool.name === "craft_skill_proposal_publish"));
+  assert(!tools.some((tool) => /^craft_workflow_(?:evolution|dag)_/u.test(tool.name)));
+  console.log("Bundled full MCP starts and excludes retired Workflow Evolution/DAG tools.");
 } finally {
   if (child.exitCode === null) { child.kill(); await once(child, "exit"); }
   await rm(dataRoot, { recursive: true, force: true });

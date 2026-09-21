@@ -16,7 +16,8 @@ async function fixture() {
 async function dispose(f: Awaited<ReturnType<typeof fixture>>) { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 
 test("Codex hook scope and explicit memory parser never retain arbitrary prompts", () => {
-  assert.deepEqual(codexProjectScope("/work/../craft"), { kind: "project", id: resolve("/craft") });
+  assert.deepEqual(codexProjectScope("/work/../craft")?.kind, "project");
+  assert.match(String(codexProjectScope("/work/../craft")?.id), /^project:/u);
   assert.equal(codexProjectScope(" "), null);
   assert.equal(explicitMemoryStatement("ordinary conversation"), null);
   assert.equal(explicitMemoryStatement("记住：我偏好无糖咖啡"), "我偏好无糖咖啡");
@@ -38,7 +39,7 @@ test("Hook signal sanitizer accepts only local edit or verification metadata", (
   assert.equal(sanitizer.signal({ tool_name: "Bash", tool_input: { command: "echo hello" } }), null);
 });
 
-test("Knowledge and Memory hooks resolve only their named Context member", async () => {
+test("Knowledge, Memory and Experience hooks resolve only their named Context member", async () => {
   const f = await fixture();
   try {
     const scope = resolve("/project/craft");
@@ -53,11 +54,22 @@ test("Knowledge and Memory hooks resolve only their named Context member", async
     assert.doesNotMatch(String(knowledge.additionalContext), /short feedback/u);
     const memory = await bridge.handle("memory", { hook_event_name: "UserPromptSubmit", cwd: scope, prompt: "记住：我本周只喝无糖咖啡" });
     assert.match(String(memory.additionalContext), /无糖咖啡/u);
-    const stored = f.service.memoryLedgerList({ scope_kind: "project", scope_id: scope, include_history: true }).memories as JsonObject[];
-    assert.equal(stored.length, 2);
+    const canonicalScope = codexProjectScope(scope)!;
+    const stored = f.service.memoryLedgerList({ scope_kind: "project", scope_id: canonicalScope.id, include_history: true }).memories as JsonObject[];
+    assert.equal(stored.length, 1);
     assert(stored.some((item) => String(item.content).includes("无糖咖啡")));
     await bridge.handle("memory", { hook_event_name: "UserPromptSubmit", cwd: scope, prompt: "这句话不能被存成长期记忆" });
-    assert.equal((f.service.memoryLedgerList({ scope_kind: "project", scope_id: scope, include_history: true }).memories as JsonObject[]).length, 2);
+    assert.equal((f.service.memoryLedgerList({ scope_kind: "project", scope_id: canonicalScope.id, include_history: true }).memories as JsonObject[]).length, 1);
+    const procedureRef = f.store.contentStore.writeSync({ kind: "experience", folder: "prompts", record_id: "hook-procedure", version: 1, scope: `project:${canonicalScope.id}`, status: "routeable", sensitivity: "internal", source_id: "fixture", title: "终态验证", body: "# 终态验证\n\n先运行验证。" });
+    f.store.create("experience_procedure", "hook-procedure", { scope: `project:${canonicalScope.id}`, lifecycle: "routeable", routeable: true, procedure_kind: "prompt", trigger: "verification", title: "终态验证", acceptance_ref: "acceptance:fixture", scenario_signature: { project: canonicalScope.id }, content_ref: procedureRef, content_digest: procedureRef.digest });
+    const experience = await bridge.handle("experience", { hook_event_name: "UserPromptSubmit", cwd: scope, prompt: "Which verification command should I use?" });
+    assert.match(String(experience.additionalContext), /先运行验证/u);
+    assert.doesNotMatch(String(experience.additionalContext), /focused verification|short feedback/u);
+    const proof = f.service.activationProofDoctor({});
+    const components = proof.components as JsonObject[];
+    assert.equal(components.find((item) => item.component === "knowledge")!.status, "executed");
+    assert.equal(components.find((item) => item.component === "memory")!.explicit_memory_written, true);
+    assert.equal(components.find((item) => item.component === "experience")!.context_receipt_id !== null, true);
   } finally { await dispose(f); }
 });
 
@@ -147,13 +159,13 @@ test("Lifecycle hooks record boundaries without counting readiness as component 
   const f = await fixture();
   try {
     const bridge = new CodexHookBridge(f.service);
-    await bridge.handle("knowledge", { hook_event_name: "SessionStart", cwd: "/project/craft", session_id: "session", source: "startup" });
+    await bridge.handle("knowledge", { hook_event_name: "SessionStart", cwd: "/project/craft", session_id: "session", source: "claude" });
     await bridge.handle("knowledge", { hook_event_name: "Stop", cwd: "/project/craft", session_id: "session", turn_id: "turn" });
     await bridge.handle("knowledge", { hook_event_name: "SessionEnd", cwd: "/project/craft", session_id: "session", reason: "other" });
     const events = f.store.events("codex-hook").filter((event) => event.event_type === "codex_hook.lifecycle");
     assert.equal(events.length, 3);
     assert.deepEqual(events.map((event) => (event.payload as JsonObject).event), ["SessionStart", "Stop", "SessionEnd"]);
     assert(events.every((event) => ((event.payload as JsonObject).usage as JsonObject).component_used === false));
-    assert.equal(((events[0]!.payload as JsonObject).scope as JsonObject).id, resolve("/project/craft"));
+    assert.match(String(((events[0]!.payload as JsonObject).scope as JsonObject).id), /^project:/u);
   } finally { await dispose(f); }
 });

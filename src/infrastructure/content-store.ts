@@ -4,7 +4,9 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSyn
 import { dirname, join, resolve } from "node:path";
 import type { CraftPaths } from "./paths.ts";
 
-export type ContentKind = "knowledge" | "memory";
+export type ContentKind = "knowledge" | "memory" | "experience";
+/** Experience keeps human-readable procedures by format without splitting its fact ledger. */
+export type ExperienceFolder = "workflows" | "graphs" | "prompts";
 export type ContentStatus = "candidate" | "reviewed" | "active" | "disputed" | "superseded" | "expired" | "revoked";
 
 export interface ContentWriteInput {
@@ -20,6 +22,10 @@ export interface ContentWriteInput {
   title?: string;
   /** Existing path used by source-aware migrations when a semantic rename is needed. */
   current_path?: string;
+  /** Only Experience documents may select a managed, format-specific folder. */
+  folder?: ExperienceFolder;
+  /** Domain-owned scalar metadata that remains visible in the Markdown frontmatter. */
+  frontmatter?: Readonly<Record<string, string | number | boolean>>;
 }
 
 export interface ContentRef {
@@ -45,6 +51,7 @@ export interface ContentManifest {
   body_digest: string;
   updated_at: string;
   title?: string;
+  [key: string]: string | number | boolean | undefined;
 }
 
 export interface ContentReadResult { body: string; manifest: ContentManifest; }
@@ -77,7 +84,7 @@ function parseDocument(raw: string): { manifest: ContentManifest; body: string }
     record_version: Number(fields.get("record_version")), scope: fields.get("scope"), status: fields.get("status"),
     sensitivity: fields.get("sensitivity"), source_id: fields.get("source_id"), body_digest: fields.get("body_digest"), updated_at: fields.get("updated_at"),
   } as Partial<ContentManifest>;
-  if (manifest.schema_version !== "craft.content.v1" || (manifest.record_kind !== "knowledge" && manifest.record_kind !== "memory")
+  if (manifest.schema_version !== "craft.content.v1" || !["knowledge", "memory", "experience"].includes(String(manifest.record_kind))
     || !manifest.record_id || !Number.isSafeInteger(manifest.record_version) || !manifest.scope || !manifest.status
     || !manifest.sensitivity || !manifest.source_id || !manifest.body_digest || !manifest.updated_at) {
     throw new Error("Content Markdown frontmatter is incomplete");
@@ -127,33 +134,37 @@ export class MarkdownContentStore {
   readonly paths: CraftPaths;
   constructor(paths: CraftPaths) { this.paths = paths; }
 
-  pathFor(kind: ContentKind, recordId: string, version?: number): string {
-    const directory = kind === "knowledge" ? this.paths.knowledgeContentDir : this.paths.memoryContentDir;
+  pathFor(kind: ContentKind, recordId: string, version?: number, folder?: ExperienceFolder): string {
+    const directory = this.directory(kind, folder);
     return join(directory, `${safeFileName(recordId)}${version === undefined ? "" : `.v${version}`}.md`);
   }
 
   /** Stable, human-readable path. The hash suffix keeps duplicate titles distinct. */
-  namedPathFor(kind: ContentKind, recordId: string, version: number | undefined, title: string): string {
-    const directory = kind === "knowledge" ? this.paths.knowledgeContentDir : this.paths.memoryContentDir;
+  namedPathFor(kind: ContentKind, recordId: string, version: number | undefined, title: string, folder?: ExperienceFolder): string {
+    const directory = this.directory(kind, folder);
     safeFileName(recordId);
     return join(directory, `${titleSlug(title)}--${idSuffix(recordId)}${version === undefined ? "" : `.v${version}`}.md`);
   }
 
   legacyPathFor(kind: ContentKind, recordId: string, version?: number): string {
-    const directory = kind === "knowledge" ? join(this.paths.root, "content", "knowledge", "md") : join(this.paths.root, "content", "memory", "md");
+    const directory = join(this.paths.root, "content", kind, "md");
     return join(directory, `${safeFileName(recordId)}${version === undefined ? "" : `.v${version}`}.md`);
   }
 
   isCanonicalRef(ref: Pick<ContentRef, "kind" | "record_id" | "version" | "path">): boolean {
-    const directory = resolve(ref.kind === "knowledge" ? this.paths.knowledgeContentDir : this.paths.memoryContentDir);
-    return dirname(resolve(ref.path)) === directory && resolve(ref.path).endsWith(`.v${ref.version}.md`);
+    const directory = resolve(this.directory(ref.kind));
+    const target = resolve(ref.path);
+    const inDirectory = ref.kind === "experience"
+      ? target.startsWith(`${directory}/`) || target.startsWith(`${directory}\\`)
+      : dirname(target) === directory;
+    return inDirectory && target.endsWith(`.v${ref.version}.md`);
   }
 
   async write(input: ContentWriteInput): Promise<ContentRef> {
     if (!Number.isSafeInteger(input.version) || input.version < 1) throw new Error("Content version must be a positive integer");
     validateContentBody(input.body);
     const title = contentTitle(input.body, input.title, input.record_id);
-    const path = this.namedPathFor(input.kind, input.record_id, input.version, title);
+    const path = this.namedPathFor(input.kind, input.record_id, input.version, title, input.folder);
     await mkdir(resolve(path, ".."), { recursive: true });
     const digest = bodyDigest(input.body);
     const existingPath = existsSync(path) ? path : this.findCanonicalPath(input.kind, input.record_id, input.version);
@@ -177,7 +188,7 @@ export class MarkdownContentStore {
     if (!Number.isSafeInteger(input.version) || input.version < 1) throw new Error("Content version must be a positive integer");
     validateContentBody(input.body);
     const title = contentTitle(input.body, input.title, input.record_id);
-    const path = this.namedPathFor(input.kind, input.record_id, input.version, title); mkdirSync(resolve(path, ".."), { recursive: true });
+    const path = this.namedPathFor(input.kind, input.record_id, input.version, title, input.folder); mkdirSync(resolve(path, ".."), { recursive: true });
     const digest = bodyDigest(input.body);
     const existingPath = existsSync(path) ? path : this.findCanonicalPath(input.kind, input.record_id, input.version);
     try {
@@ -201,10 +212,10 @@ export class MarkdownContentStore {
     if (!Number.isSafeInteger(input.version) || input.version < 1) throw new Error("Content version must be a positive integer");
     validateContentBody(input.body);
     const title = contentTitle(input.body, input.title, input.record_id);
-    const currentPath = input.current_path ?? this.findCanonicalPath(input.kind, input.record_id, input.version) ?? this.pathFor(input.kind, input.record_id, input.version);
+    const currentPath = input.current_path ?? this.findCanonicalPath(input.kind, input.record_id, input.version) ?? this.pathFor(input.kind, input.record_id, input.version, input.folder);
     // Ordinary rewrites preserve the current path; source-aware migrations may
     // explicitly pass current_path to opt into a semantic filename rename.
-    const path = input.current_path ? this.namedPathFor(input.kind, input.record_id, input.version, title) : currentPath;
+    const path = input.current_path ? this.namedPathFor(input.kind, input.record_id, input.version, title, input.folder ?? this.folderOf(input.kind, currentPath)) : currentPath;
     const existing = parseDocument(readFileSync(currentPath, "utf8"));
     if (existing.manifest.record_id !== input.record_id || existing.manifest.record_kind !== input.kind
       || existing.manifest.record_version !== input.version) throw new Error("Content rewrite identity conflict");
@@ -267,11 +278,11 @@ export class MarkdownContentStore {
   private async readPath(path: string): Promise<ContentReadResult> { return parseDocument(await readFile(path, "utf8")); }
 
   private findCanonicalPath(kind: ContentKind, recordId: string, version: number): string | null {
-    const directory = kind === "knowledge" ? this.paths.knowledgeContentDir : this.paths.memoryContentDir;
+    const directory = this.directory(kind);
     try {
       const suffix = `--${idSuffix(recordId)}.v${version}.md`;
-      for (const name of readdirSync(directory).filter((item) => item.endsWith(suffix))) {
-        const path = join(directory, name);
+      for (const path of this.files(directory, kind === "experience")) {
+        if (!path.endsWith(suffix)) continue;
         try {
           const manifest = parseDocument(readFileSync(path, "utf8")).manifest;
           if (manifest.record_kind === kind && manifest.record_version === version) return path;
@@ -287,10 +298,27 @@ export class MarkdownContentStore {
     return null;
   }
 
+  private files(directory: string, recursive: boolean): string[] {
+    const result: string[] = [];
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name);
+      if (entry.isFile()) result.push(path);
+      else if (recursive && entry.isDirectory()) result.push(...this.files(path, true));
+    }
+    return result;
+  }
+
   private manifest(input: ContentWriteInput, digest: string): ContentManifest {
-    return { schema_version: "craft.content.v1", record_kind: input.kind, record_id: input.record_id,
+    const base: ContentManifest = { schema_version: "craft.content.v1", record_kind: input.kind, record_id: input.record_id,
       record_version: input.version, scope: input.scope, status: input.status, sensitivity: input.sensitivity, source_id: input.source_id,
       body_digest: digest, updated_at: new Date().toISOString(), title: contentTitle(input.body, input.title, input.record_id) };
+    const protectedFields = new Set(Object.keys(base));
+    for (const [key, value] of Object.entries(input.frontmatter ?? {})) {
+      if (!/^[a-z][a-z0-9_]*$/u.test(key) || protectedFields.has(key)) throw new Error("Content frontmatter key is invalid or reserved");
+      if (typeof value === "string" && SECRET.test(value)) throw new Error("Content frontmatter must not contain credentials or secrets");
+      base[key] = value;
+    }
+    return base;
   }
 
   private ref(kind: ContentKind, recordId: string, version: number, path: string, digest: string, body: string, title: string): ContentRef {
@@ -298,14 +326,30 @@ export class MarkdownContentStore {
   }
 
   private serialize(manifest: ContentManifest, body: string): string {
-    const lines = Object.entries(manifest).map(([key, value]) => `${key}: ${typeof value === "number" ? value : quote(value)}`);
+    const lines = Object.entries(manifest).map(([key, value]) => `${key}: ${typeof value === "number" || typeof value === "boolean" ? value : quote(String(value))}`);
     return `---\n${lines.join("\n")}\n---\n${body}`;
+  }
+
+  private directory(kind: ContentKind, folder?: ExperienceFolder): string {
+    if (kind === "knowledge" || kind === "memory") {
+      if (folder !== undefined) throw new Error("Only Experience content supports folders");
+      return kind === "knowledge" ? this.paths.knowledgeContentDir : this.paths.memoryContentDir;
+    }
+    if (folder === undefined) return this.paths.experienceContentDir;
+    if (!["workflows", "graphs", "prompts"].includes(folder)) throw new Error("Experience content folder is unsupported");
+    return join(this.paths.experienceContentDir, folder);
+  }
+
+  private folderOf(kind: ContentKind, path: string): ExperienceFolder | undefined {
+    if (kind !== "experience") return undefined;
+    const relative = resolve(path).slice(resolve(this.paths.experienceContentDir).length + 1).split(/[\\/]/u)[0];
+    return relative === "workflows" || relative === "graphs" || relative === "prompts" ? relative : undefined;
   }
 }
 
 export function contentReference(value: unknown): value is ContentRef {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const item = value as Record<string, unknown>;
-  return (item.kind === "knowledge" || item.kind === "memory") && typeof item.record_id === "string" && Number.isSafeInteger(item.version)
+  return (item.kind === "knowledge" || item.kind === "memory" || item.kind === "experience") && typeof item.record_id === "string" && Number.isSafeInteger(item.version)
     && typeof item.path === "string" && typeof item.digest === "string" && item.format === "markdown";
 }

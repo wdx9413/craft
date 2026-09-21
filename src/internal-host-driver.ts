@@ -292,10 +292,21 @@ export class InternalHostDriver implements HostDriver {
         messages = compacted.messages;
         this.store.save("internal_session", `session_${dispatch.id}`, { dispatch_id: dispatch.id, messages: persistedConversation(messages), compacted: compacted.compacted, omitted: compacted.omitted, summary_digest: compacted.summary_digest, content_free: true });
         const tools = this.tools;
-        const request = buildChatRequest(provider, { model: String(dispatch.model), messages: messages as ChatMessage[], tools: tools.length ? [...tools] : undefined });
+        // DeepSeek caches exact prefixes automatically.  The current turn is
+        // deliberately the dynamic suffix; all preceding conversation items are
+        // retained in order, so providers with the same contract may reuse them.
+        const request = buildChatRequest(provider, { model: String(dispatch.model), messages: messages as ChatMessage[], tools: tools.length ? [...tools] : undefined,
+          cache_prefix_messages: Math.max(0, messages.length - 1) });
         options.observe?.({ stream: "stdout", bytes: request.prompt_tokens_estimate, digest: digestJson(request.url) });
-        this.trace.append({ trace_id: traceId, event_kind: "model.request", source: "internal-host", trust: "observed", summary: "model request", usage: { input_tokens: request.prompt_tokens_estimate }, data: { provider: provider.provider, model: dispatch.model, compacted: compacted.compacted } });
+        this.trace.append({ trace_id: traceId, event_kind: "model.request", source: "internal-host", trust: "observed", summary: "model request", usage: { input_tokens: request.prompt_tokens_estimate },
+          data: { provider: provider.provider, model: dispatch.model, compacted: compacted.compacted, context_cache: request.context_cache } });
         const result = await this.transport.complete(provider, request);
+        this.store.create("model_context_cache_receipt", `model_context_cache_${dispatch.id}_${state.steps + 1}`, {
+          dispatch_id: dispatch.id, provider: provider.provider, model: dispatch.model, layout: request.context_cache,
+          cache_hit_tokens: result.usage?.cache_hit_tokens ?? null, cache_miss_tokens: result.usage?.cache_miss_tokens ?? null,
+          observation: result.usage?.cache_hit_tokens === undefined ? "unavailable" : "observed",
+          content_free: true,
+        });
         const tokens = (result.usage?.input_tokens ?? 0) + (result.usage?.output_tokens ?? 0);
         const parsedCalls = (result.tool_calls ?? []).map((call) => ({ id: call.id, name: call.function.name, arguments: (() => { try { return JSON.parse(call.function.arguments || "{}"); } catch { throw new Error("tool arguments must be valid JSON"); } })() }));
         const proposed = parsedCalls.length ? parsedCalls[0] : parseAction(result.text);

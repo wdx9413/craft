@@ -11,7 +11,7 @@ import { createHash } from "node:crypto";
 import type { CraftStore, JsonObject } from "./infrastructure/store.ts";
 import { payload } from "./digest.ts";
 import { text } from "./validation.ts";
-import { contentReference } from "./infrastructure/content-store.ts";
+import { contentReference, type ContentRef } from "./infrastructure/content-store.ts";
 
 type Verdict = "eligible" | "revalidation_required" | "rejected" | "already_reviewed";
 type Confidence = "bounded" | "confirmed";
@@ -72,6 +72,57 @@ export class KnowledgeAutoReviewKernel {
     return { policy: saved, idempotent: false };
   }
 
+  /** Build the exact bounded material a Host-managed model must inspect. */
+  reviewPacket(args: JsonObject): JsonObject {
+    const claim = this.store.get("knowledge_claim", text(args.claim_id, "claim_id"));
+    const source = typeof claim.source_id === "string" ? this.store.find("knowledge_source", claim.source_id) : null;
+    if (!source || source.status !== "active" || source.trust === "untrusted") return { status: "unavailable", reason: "source_unavailable", packet: null };
+    if (!claimContentIsIntact(this.store, claim)) return { status: "unavailable", reason: "claim_content_unavailable", packet: null };
+    const fragments: JsonObject[] = [];
+    for (const evidenceId of Array.isArray(claim.evidence_ids) ? claim.evidence_ids : []) {
+      const evidence = this.store.find("evidence", String(evidenceId));
+      if (!evidence || typeof evidence.fragment_id !== "string") continue;
+      const fragment = this.store.find("knowledge_fragment", evidence.fragment_id); const ref = fragment?.content_ref;
+      if (!fragment || !contentReference(ref)) continue;
+      try { fragments.push({ evidence_id: evidence.id, fragment_id: fragment.id, locator: fragment.locator, source_revision_id: fragment.source_revision_id, content_digest: fragment.content_digest, content: this.store.contentStore.readCompatSync(ref as ContentRef).body }); } catch { /* unavailable fragment remains unavailable */ }
+    }
+    if (!fragments.length) return { status: "unavailable", reason: "evidence_fragment_unavailable", packet: null };
+    const content = typeof claim.content === "string" ? claim.content : this.store.contentStore.readCompatSync(claim.content_ref as ContentRef).body;
+    const packet = { schema_version: "craft.knowledge-semantic-review.v1", claim: { id: claim.id, version: claim.version, kind: claim.kind, scope: claim.scope, content, content_digest: claim.content_digest },
+      source: { id: source.id, version: source.version, content_digest: source.content_digest, trust: source.trust }, evidence_fragments: fragments,
+      rubric: { supported: "Claim is directly supported by supplied fragments within the same scope.", contradicted: "Supplied fragments contradict the Claim.", insufficient: "Fragments do not establish the Claim or scope." } };
+    return { status: "ready", packet, packet_digest: digest(packet) };
+  }
+
+  /** Optional OpenAI-compatible reviewer. Credentials are read only at call time. */
+  async providerReview(args: JsonObject): Promise<JsonObject> {
+    const packetResult = this.reviewPacket({ claim_id: text(args.claim_id, "claim_id") });
+    if (packetResult.status !== "ready") return packetResult;
+    const endpoint = typeof args.endpoint === "string" ? args.endpoint.trim() : "";
+    const model = typeof args.model === "string" ? args.model.trim() : "";
+    const credentialEnv = typeof args.credential_env === "string" ? args.credential_env.trim() : "";
+    const key = credentialEnv ? process.env[credentialEnv] : undefined;
+    if (!endpoint || !model || !credentialEnv || !key) return { status: "unavailable", reason: "semantic_provider_unavailable", packet_digest: packetResult.packet_digest };
+    try {
+      const response = await fetch(endpoint, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${key}` }, body: JSON.stringify({ model,
+        response_format: { type: "json_object" }, messages: [
+          { role: "system", content: "Return JSON only: {decision: supported|needs_evidence|rejected, reason_code: short_snake_case}. Decide only from the supplied evidence packet." },
+          { role: "user", content: JSON.stringify(packetResult.packet) },
+        ] }), signal: AbortSignal.timeout(Number(args.timeout_ms ?? 10_000)) });
+      if (!response.ok) return { status: "unavailable", reason: `semantic_provider_http_${response.status}`, packet_digest: packetResult.packet_digest };
+      const body = await response.json() as { choices?: Array<{ message?: { content?: string } }> }; const content = body.choices?.[0]?.message?.content;
+      if (!content) return { status: "unavailable", reason: "semantic_provider_empty_response", packet_digest: packetResult.packet_digest };
+      const verdict = JSON.parse(content) as { decision?: string; reason_code?: string };
+      if (!verdict.decision || !["supported", "needs_evidence", "rejected"].includes(verdict.decision)) return { status: "unavailable", reason: "semantic_provider_invalid_response", packet_digest: packetResult.packet_digest };
+      const review = this.hostReview({ claim_id: args.claim_id, host_kind: "independent", host_run_key: `provider:${model}:${String(packetResult.packet_digest).slice(-16)}`,
+        model_ref: model, source_digest: ((packetResult.packet as JsonObject).source as JsonObject).content_digest, packet_digest: packetResult.packet_digest,
+        decision: verdict.decision, reason_code: verdict.reason_code ?? verdict.decision });
+      return { status: "completed", packet_digest: packetResult.packet_digest, review };
+    } catch (error) {
+      return { status: "unavailable", reason: error instanceof Error ? error.name : "semantic_provider_request_failed", packet_digest: packetResult.packet_digest };
+    }
+  }
+
   /**
    * Add one independently observable support record to a candidate Claim.
    * The exact evidence and observation key are both unique: repeating one
@@ -125,6 +176,7 @@ export class KnowledgeAutoReviewKernel {
     const rubricId = text(args.rubric_id ?? "knowledge-host-review-v1", "rubric_id");
     const modelRef = text(args.model_ref ?? "host-managed", "model_ref");
     const suppliedSourceDigest = text(args.source_digest, "source_digest");
+    const packetDigest = args.packet_digest === undefined ? null : text(args.packet_digest, "packet_digest");
     const reasonCode = text(args.reason_code ?? (decision === "supported" ? "rubric_pass" : decision), "reason_code");
     if (!/^[a-z0-9][a-z0-9_-]{0,63}$/u.test(reasonCode)) throw new Error("reason_code must be a short stable identifier");
     const now = args.now === undefined ? Date.now() : Date.parse(text(args.now, "now"));
@@ -134,6 +186,10 @@ export class KnowledgeAutoReviewKernel {
     const sourceDigest = source?.content_digest;
     if (!source || typeof sourceDigest !== "string" || sourceDigest !== suppliedSourceDigest) {
       throw new Error("source_digest must match the active Claim Source");
+    }
+    if (packetDigest !== null) {
+      const packet = this.reviewPacket({ claim_id: claim.id });
+      if (packet.status !== "ready" || packet.packet_digest !== packetDigest) throw new Error("packet_digest must match the exact semantic review packet");
     }
     const priorReviewId = claim.status === "reviewed" && typeof (claim.review as JsonObject | undefined)?.review_id === "string"
       ? String((claim.review as JsonObject).review_id) : null;
@@ -155,13 +211,13 @@ export class KnowledgeAutoReviewKernel {
     const identity = {
       claim_id: claim.id, claim_version: claim.version, claim_identity_digest: claim.identity_digest ?? null,
       source_id: source.id, source_digest: sourceDigest, host_kind: hostKind, host_run_key: hostRunKey,
-      model_ref: modelRef, rubric_id: rubricId, decision, reason_code: reasonCode, blocking_reasons: blockingReasons,
+      model_ref: modelRef, rubric_id: rubricId, packet_digest: packetDigest, decision, reason_code: reasonCode, blocking_reasons: blockingReasons,
     };
     const reviewId = `knowledge_host_review_${String(claim.id)}_${digest(identity).slice(-16)}`;
     const existing = this.store.find("knowledge_host_review", reviewId);
     const review = existing ?? this.store.create("knowledge_host_review", reviewId, {
       ...identity, identity_digest: digest(identity), reviewed_at: new Date(now).toISOString(),
-      automated: true, host_attested: true, content_free: true,
+      automated: true, host_attested: true, packet_attested: packetDigest !== null, content_free: true,
     });
     const promotable = decision === "supported" && !blockingReasons.length;
     if (!promotable || claim.status === "reviewed") {
@@ -185,7 +241,7 @@ export class KnowledgeAutoReviewKernel {
       ...payload(claim), evidence_ids: evidenceIds, status: "reviewed",
       review: {
         reviewer: `host:${hostKind}`, review_id: review.id, host_run_key: hostRunKey, model_ref: modelRef,
-        rubric_id: rubricId, source_digest: sourceDigest, reason_code: reasonCode,
+        rubric_id: rubricId, source_digest: sourceDigest, packet_digest: packetDigest, reason_code: reasonCode,
         reviewed_at: new Date(now).toISOString(), automated: true, host_attested: true,
       },
     });

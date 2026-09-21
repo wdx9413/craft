@@ -113,10 +113,10 @@ test("v0.12.24 exposes a bounded Workflow Evolution plugin surface and keeps it 
   const f = await fixture();
   try {
     const surface = "component-experience"; const names = surfaceToolNames(surface);
-    assert(names.includes("craft_workflow_evolution_observe")); assert(names.includes("craft_evaluation_model_profile_save"));
+    assert(names.includes("craft_experience_observe")); assert(names.includes("craft_evaluation_model_profile_save"));
     assert(!names.includes("craft_capability_search")); assert(!names.includes("craft_verified_work_loop_prepare"));
     const server = new McpServer(f.service, surface);
-    const response = await server.handle({ id: "observe", method: "tools/call", params: { name: "craft_workflow_evolution_observe", arguments: { observation_id: "mcp", scenario_key: "mcp", source_kind: "external", source_id: "one", source_digest: "sha256:one", outcome: "passed", evidence_ids: ["confirmed"], sanitized: true } } });
+    const response = await server.handle({ id: "observe", method: "tools/call", params: { name: "craft_experience_observe", arguments: { observation_id: "mcp", scenario_key: "mcp", source_kind: "external", source_id: "one", source_digest: "sha256:one", outcome: "passed", evidence_ids: ["confirmed"], sanitized: true } } });
     assert.equal((response?.result as JsonObject).isError, false);
     const blocked = await server.handle({ id: "blocked", method: "tools/call", params: { name: "craft_capability_search", arguments: { query: "x" } } });
     assert.equal((blocked?.error as JsonObject).code, -32602);
@@ -130,14 +130,14 @@ test("v0.12.24 routes every reserved model and Workflow-evolution operation thro
     const profile = (await server.handlers.craft_evaluation_model_profile_save({ profile_id: "mcp-profile", provider: "qwen", model: "qwen-plus", purposes: ["workflow_evolution"] })).profile as JsonObject;
     assert.equal(((await server.handlers.craft_evaluation_model_profile_get({ profile_id: profile.id })).profile as JsonObject).id, profile.id);
     assert.equal(((await server.handlers.craft_evaluation_model_profile_list({ limit: 1 })).profiles as JsonObject[]).length, 1);
-    const first = (await server.handlers.craft_workflow_evolution_observe({ observation_id: "mcp-first", scenario_key: "mcp-flow", source_kind: "customer_execution", source_id: "one", source_digest: "sha256:one", outcome: "passed", evidence_ids: ["confirmed"], sanitized: true })).observation as JsonObject;
-    const second = (await server.handlers.craft_workflow_evolution_observe({ observation_id: "mcp-second", scenario_key: "mcp-flow", source_kind: "customer_execution", source_id: "two", source_digest: "sha256:two", outcome: "failed", evidence_ids: ["confirmed"], sanitized: true })).observation as JsonObject;
-    assert.equal(((await server.handlers.craft_workflow_evolution_observations({ scenario_key: "mcp-flow" })).observations as JsonObject[]).length, 2);
-    const request = (await server.handlers.craft_workflow_evolution_propose({ request_id: "mcp-request", scenario_key: "mcp-flow", observation_ids: [first.id, second.id], hypothesis: "preserve the observed verification sequence", design_axes: ["orchestration"], output_contract_ref: "contract:mcp-workflow" })).request as JsonObject;
+    const first = (await server.handlers.craft_experience_observe({ observation_id: "mcp-first", scenario_key: "mcp-flow", source_kind: "customer_execution", source_id: "one", source_digest: "sha256:one", outcome: "passed", evidence_ids: ["confirmed"], sanitized: true })).observation as JsonObject;
+    const second = (await server.handlers.craft_experience_observe({ observation_id: "mcp-second", scenario_key: "mcp-flow", source_kind: "customer_execution", source_id: "two", source_digest: "sha256:two", outcome: "failed", evidence_ids: ["confirmed"], sanitized: true })).observation as JsonObject;
+    assert.equal(((await server.handlers.craft_experience_patterns_list({ scenario_key: "mcp-flow" })).observations as JsonObject[]).length, 2);
+    const request = (await server.handlers.craft_experience_procedure_draft({ request_id: "mcp-request", scenario_key: "mcp-flow", observation_ids: [first.id, second.id], hypothesis: "preserve the observed verification sequence", design_axes: ["orchestration"], output_contract_ref: "contract:mcp-workflow" })).request as JsonObject;
     const ticket = (await server.handlers.craft_evaluation_model_ticket_issue({ ticket_id: "mcp-ticket", profile_id: profile.id, purpose: "workflow_evolution", workflow_evolution_request_id: request.id, input_ref: "external:batch", output_contract_ref: "contract:mcp-workflow" })).ticket as JsonObject;
-    const submitted = await server.handlers.craft_workflow_evolution_proposal_submit({ proposal_id: "mcp-proposal", request_id: request.id, model_ticket_id: ticket.id, workflow_id: "mcp-draft", name: "MCP draft", description: "A bounded draft from sanitized evidence.", inputs: [], steps: [{ type: "assertion" }] });
+    const submitted = await server.handlers.craft_experience_procedure_submit({ proposal_id: "mcp-proposal", request_id: request.id, model_ticket_id: ticket.id, workflow_id: "mcp-draft", name: "MCP draft", description: "A bounded draft from sanitized evidence.", inputs: [], steps: [{ type: "assertion" }] });
     assert.equal(((submitted.workflow as JsonObject).lifecycle), "draft");
-    assert.equal(((await server.handlers.craft_workflow_evolution_proposal_get({ proposal_id: "mcp-proposal", request_id: request.id })).proposal as JsonObject).id, "mcp-proposal");
+    assert.equal(((await server.handlers.craft_experience_procedure_get({ proposal_id: "mcp-proposal", request_id: request.id })).proposal as JsonObject).id, "mcp-proposal");
   } finally { await close(f); }
 });
 

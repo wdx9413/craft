@@ -9,11 +9,11 @@ Use Memory as a scoped, revisable context ledger — not a transcript archive. R
 
 Default loop for a coding task:
 
-1. In Codex, first check whether the trusted `craft-memory` Hook already supplied a Context Receipt. If it did, reuse that bounded Context; otherwise call `craft_component_readiness_get` with `component: "memory"`.
-   If a configured component is not callable in this conversation, call `craft_component_diagnose`; an enabled marketplace entry alone does not prove the current Host attached its MCP process.
+1. In Codex or Claude Code, first check whether the trusted `craft-memory` Hook already supplied a Context Receipt. If it did, reuse that bounded Context; otherwise call `craft_component_readiness_get` with `component: "memory"`.
+   A loaded Skill or enabled marketplace entry does not prove the current Host attached its MCP process. If the component is not callable in this conversation, state `unavailable` once; call `craft_component_diagnose` only when the MCP is callable but its surface looks stale or incomplete.
    Readiness is only an availability preflight: it does not read Memory, resolve Context, or count as using this component. When the task requires Memory, continue with the actual bounded resolution or governed write call.
 2. If the current task has no explicit scope, skip resolution rather than searching a global store.
-3. Use `craft_context_resolution_resolve` only for the current project/task scope and retain its receipt with the outcome.
+3. Use `craft_context_resolution_resolve` only for the current task/project scope; pass `user_scope_id` only when that user scope is explicitly intended. Working Notes are TTL-bound and excluded unless `include_working_notes: true` is explicitly required.
 4. When the user explicitly asks to remember a stable, useful, non-sensitive fact, prefer the single governed call `craft_memory_capture_user_statement` with `explicit_consent: true`. In Codex, `记住：…` or `/remember: …` is the only Hook-captured syntax; other phrasing still requires this explicit MCP call. It creates bounded user-statement Evidence and may `auto_accept` only when no same-topic conflict exists. Otherwise resolve the conflict, then review and materialize the candidate.
 5. Run proposal-only `craft_memory_maintenance_run` after a bounded batch, not after every message. Resolve conflicts, expiry, and revocation before reuse.
 

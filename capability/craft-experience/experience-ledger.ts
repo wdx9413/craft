@@ -7,7 +7,7 @@ const OBSERVATION_KINDS = new Set(["success", "failure", "correction"]);
 const PATTERN_KINDS = new Set(["success_strategy", "failure_pattern"]);
 const AXES = new Set(["context", "tools", "generation", "orchestration", "memory", "output"]);
 const SUBJECT_KINDS = new Set(["workflow", "harness_refinement", "capability_asset", "activation_profile"]);
-const SOURCES = new Set(["verified_work_loop_receipt", "outcome", "acceptance_gate", "trace"]);
+const SOURCES = new Set(["verified_work_loop_receipt", "outcome", "acceptance_gate", "trace", "experience_legacy_source"]);
 const SECRET = /(?:api[_-]?key|authorization|cookie|password|secret|token)\s*[:=]\s*[^\s]{8,}/iu;
 
 function text(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`); const result = value.trim(); if (SECRET.test(result)) throw new Error(`${name} must not contain credentials or secrets`); return result; }

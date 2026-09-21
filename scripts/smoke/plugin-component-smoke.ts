@@ -7,7 +7,9 @@ import { join, resolve } from "node:path";
 import { MCP_PREFERRED_PROTOCOL_VERSION } from "../../src/distribution-and-first-run.ts";
 
 const root = resolve(import.meta.dirname, "..", "..");
-const components = ["craft-context", "craft-quality", "craft-knowledge", "craft-memory", "craft-capability", "craft-skill-quality", "craft-experience"];
+import { RELEASE_PRODUCTS } from "../../src/release-catalog.ts";
+
+const components = RELEASE_PRODUCTS.filter((product) => product.name !== "craft").map((product) => product.name);
 
 async function smoke(name: string): Promise<void> {
   const pluginRoot = join(root, "plugins", name);
@@ -29,10 +31,12 @@ async function smoke(name: string): Promise<void> {
     child.stdin.end(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: MCP_PREFERRED_PROTOCOL_VERSION } })}\n${JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list" })}\n`);
     const result = await Promise.race([responses, new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`${name} timed out`)), 5_000))]);
     const tools = result[1].result.tools as Array<{ name: string }>;
-    assert.equal(result[0].result.serverInfo.version, "0.12.35");
+    assert.equal(result[0].result.serverInfo.version, "0.12.36");
     assert(tools.length > 0);
-    assert(tools.some((tool) => tool.name === "craft_info"));
+    const expectedDailyTool = ["craft-knowledge", "craft-memory", "craft-experience"].includes(name) ? "craft_component_readiness_get" : "craft_info";
+    assert(tools.some((tool) => tool.name === expectedDailyTool));
     assert(!tools.some((tool) => tool.name === "craft_verified_work_loop_prepare"));
+    if (name === "craft-experience") assert(!tools.some((tool) => /^craft_workflow_(?:evolution|dag)_/u.test(tool.name)));
   } finally {
     if (child.exitCode === null) { child.kill(); await once(child, "exit"); }
     await rm(data, { recursive: true, force: true });

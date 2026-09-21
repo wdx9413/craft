@@ -125,6 +125,15 @@ test("v0.12.34 accepts only observed two-Host/two-Case five-trial evidence befor
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
+test("runtime acceptance supports a same-Codex-Host paired plan and rejects an unbounded host matrix", async () => {
+  const f = await fixture();
+  try {
+    const plan = f.service.runtimeAcceptancePlan({ plan_id: "same-host", case_ids: ["code-fix", "file-delivery"], host_ids: ["codex"], baseline_harness: "baseline", candidate_harness: "candidate", environment_fingerprint: "env", budget_fingerprint: "budget", trials_per_pair: 5, observer_kind: "independent-workspace" }).plan as JsonObject;
+    assert.deepEqual(plan.host_ids, ["codex"]);
+    assert.throws(() => f.service.runtimeAcceptancePlan({ case_ids: ["code-fix", "file-delivery"], host_ids: ["codex", "claude", "other"], baseline_harness: "baseline", candidate_harness: "candidate", environment_fingerprint: "env", budget_fingerprint: "budget", trials_per_pair: 5, observer_kind: "independent-workspace" }), /one or two/);
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
 test("runtime acceptance rejects malformed, mismatched and incomplete observations", async () => {
   const f = await fixture();
   try {

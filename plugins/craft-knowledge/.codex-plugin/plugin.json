@@ -1,15 +1,23 @@
 {
   "name": "craft-knowledge",
-  "version": "0.12.35",
+  "version": "0.12.36",
   "description": "Standalone governed knowledge for people and AI hosts.",
-  "author": { "name": "wdx9413", "url": "https://github.com/wdx9413" },
+  "author": {
+    "name": "wdx9413",
+    "url": "https://github.com/wdx9413"
+  },
   "homepage": "https://github.com/wdx9413/craft",
   "repository": "https://github.com/wdx9413/craft",
   "license": "MIT",
-  "keywords": ["knowledge", "wiki", "evidence", "mcp"],
+  "keywords": [
+    "knowledge",
+    "wiki",
+    "evidence",
+    "mcp"
+  ],
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
-  "hooks": "./hooks/hooks.json",
+  "hooks": "./hooks/codex-hooks.json",
   "interface": {
     "displayName": "Craft Knowledge",
     "shortDescription": "Evidence-backed knowledge without the full runtime.",
@@ -19,7 +27,13 @@
     "brandColor": "#000000",
     "composerIcon": "./assets/craft-icon.svg",
     "logo": "./assets/craft-icon.svg",
-    "capabilities": ["Knowledge sources", "Evidence Wiki", "Context resolution"],
-    "defaultPrompt": ["Search my governed knowledge for this question and cite the selected revisions."]
+    "capabilities": [
+      "Knowledge sources",
+      "Evidence Wiki",
+      "Context resolution"
+    ],
+    "defaultPrompt": [
+      "Search my governed knowledge for this question and cite the selected revisions."
+    ]
   }
 }

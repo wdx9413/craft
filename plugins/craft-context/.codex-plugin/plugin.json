@@ -1,6 +1,6 @@
 {
   "name": "craft-context",
-  "version": "0.12.35",
+  "version": "0.12.36",
   "description": "Standalone governed knowledge, scoped memory, and reproducible context for AI hosts.",
   "author": { "name": "wdx9413", "url": "https://github.com/wdx9413" },
   "homepage": "https://github.com/wdx9413/craft",

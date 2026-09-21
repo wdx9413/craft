@@ -1,12 +1,13 @@
 import { createHash, randomUUID } from "node:crypto";
 import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
 import type { MemoryLedgerKernel } from "../capability/craft-memory/memory-ledger.ts";
+import { scopeEnvelope } from "./scope-policy.ts";
+import { SCOPE_KINDS } from "./validation.ts";
 
 const SECRET = /(?:api[_-]?key|authorization|cookie|password|passwd|secret|token)\s*[:=]\s*[^\s]{6,}/iu;
 const KINDS = new Set(["working", "episodic", "preference", "procedural"]);
 const STATUSES = new Set(["candidate", "approved", "rejected", "superseded", "conflict_pending", "expired"]);
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified"]);
-const SCOPE = new Set(["user", "project", "workspace", "task", "session"]);
 const POLICY_MODES = new Set(["off", "propose", "governed"]);
 const POLICY_CONFIDENCE = new Set(["confirmed", "bounded"]);
 function id(prefix: string): string { return `${prefix}_${randomUUID().replaceAll("-", "")}`; }
@@ -47,20 +48,29 @@ export class MemoryGovernanceKernel {
     const policy = this.policyGet().policy as JsonObject;
     if (policy.mode === "off") return { candidate: null, conflicts: [], auto_committed: false, status: "disabled", policy };
     const kind = text(args.kind, "kind"); if (!KINDS.has(kind)) throw new Error("memory kind is unsupported");
-    const scopeKind = text(args.scope_kind, "scope_kind"); if (!SCOPE.has(scopeKind)) throw new Error("scope_kind is unsupported");
-    const scopeId = text(args.scope_id, "scope_id"); const content = noSecret(text(args.content, "content"), "content");
+    const scopeKind = text(args.scope_kind, "scope_kind"); if (!SCOPE_KINDS.has(scopeKind)) throw new Error("scope_kind is unsupported");
+    const scopeId = text(args.scope_id, "scope_id"); const scope = { kind: scopeKind, id: scopeId }; const envelope = scopeEnvelope(args.scope_envelope, scope); const content = noSecret(text(args.content, "content"), "content");
     const confidence = text(args.confidence ?? "unverified", "confidence"); if (!CONFIDENCE.has(confidence)) throw new Error("confidence is unsupported");
     const ids = evidenceIds(args.evidence_ids); ids.forEach((e) => this.store.get("evidence", e));
     const sourceId = text(args.source_id, "source_id"); const source = this.store.get("knowledge_source", sourceId);
     if (source.status !== "active" || source.trust === "untrusted") throw new Error("Memory Source is unavailable");
-    let validUntil: string | null = null;
+    const candidateId = String(args.candidate_id ?? id("memory_candidate")); const existing = this.store.find("memory_candidate", candidateId);
+    let validUntil: string | null = existing && args.valid_until === undefined
+      ? (typeof existing.valid_until === "string" ? existing.valid_until : null)
+      : null;
     if (args.valid_until !== undefined && args.valid_until !== null) { const parsed = new Date(text(args.valid_until, "valid_until")); if (Number.isNaN(parsed.valueOf())) throw new Error("valid_until must be an ISO timestamp"); validUntil = parsed.toISOString(); }
     if (validUntil === null && kind === "working") validUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
     if (validUntil === null && kind === "episodic") validUntil = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
     if (kind === "procedural" && !ids.length) throw new Error("procedural memory requires Evidence");
     const topic = args.topic === undefined ? "" : text(args.topic, "topic");
-    const identity = { source_id: sourceId, kind, scope: { kind: scopeKind, id: scopeId }, topic, content_digest: digest(content), sensitivity: String(args.sensitivity ?? "internal"), confidence, evidence_ids: ids, valid_until: validUntil };
-    const candidateId = String(args.candidate_id ?? id("memory_candidate")); const existing = this.store.find("memory_candidate", candidateId);
+    const observedAt = args.observed_at === undefined && typeof existing?.observed_at === "string"
+      ? existing.observed_at
+      : (args.observed_at === undefined ? new Date().toISOString() : new Date(text(args.observed_at, "observed_at")).toISOString());
+    const effectiveFrom = args.effective_from === undefined && typeof existing?.effective_from === "string"
+      ? existing.effective_from
+      : (args.effective_from === undefined ? observedAt : new Date(text(args.effective_from, "effective_from")).toISOString());
+    if (Number.isNaN(Date.parse(observedAt)) || Number.isNaN(Date.parse(effectiveFrom))) throw new Error("Memory temporal fields must be ISO timestamps");
+    const identity = { source_id: sourceId, kind, scope, scope_envelope: envelope, topic, content_digest: digest(content), sensitivity: String(args.sensitivity ?? "internal"), confidence, evidence_ids: ids, valid_until: validUntil, observed_at: observedAt, effective_from: effectiveFrom };
     if (existing) { if (existing.identity_digest !== digest(identity)) throw new Error("Memory candidate idempotency conflict"); return { candidate: existing, idempotent: true }; }
     // Empty subjects are deliberately *not* treated as mutually contradictory.
     // A missing classifier must cause less automation, not turn every preference in
@@ -97,7 +107,7 @@ export class MemoryGovernanceKernel {
 
   remember(args: JsonObject): JsonObject {
     const candidate = this.store.get("memory_candidate", text(args.candidate_id, "candidate_id")); if (candidate.status !== "approved") throw new Error("Only approved Memory candidates can enter the Ledger");
-    const result = this.ledger.remember({ memory_id: args.memory_id, source_id: candidate.source_id, kind: candidate.kind, scope_kind: (candidate.scope as JsonObject).kind, scope_id: (candidate.scope as JsonObject).id, content: candidate.content, topic: candidate.topic || undefined, sensitivity: candidate.sensitivity, confidence: candidate.confidence, evidence_ids: candidate.evidence_ids, valid_until: candidate.valid_until });
+    const result = this.ledger.remember({ memory_id: args.memory_id, source_id: candidate.source_id, kind: candidate.kind, scope_kind: (candidate.scope as JsonObject).kind, scope_id: (candidate.scope as JsonObject).id, scope_envelope: candidate.scope_envelope, content: candidate.content, topic: candidate.topic || undefined, sensitivity: candidate.sensitivity, confidence: candidate.confidence, evidence_ids: candidate.evidence_ids, valid_until: candidate.valid_until, observed_at: candidate.observed_at, effective_from: candidate.effective_from });
     const memory = result.memory as JsonObject;
     // Resolve a newer preference by retiring the old *Ledger* entries only after
     // the replacement itself has been accepted and materialised.  The old records

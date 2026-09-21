@@ -7,5 +7,7 @@ export function installKnowledgeAutoReviewMethods(serviceClass: typeof CraftServ
   serviceClass.prototype.knowledgePromotionPolicyGet = function () { return this.knowledgeAutoReviewKernel.policyGet(); };
   serviceClass.prototype.knowledgePromotionPolicySave = function (args) { return this.knowledgeAutoReviewKernel.policySave(args); };
   serviceClass.prototype.knowledgeClaimSupportRecord = function (args) { return this.knowledgeAutoReviewKernel.supportRecord(args); };
+  serviceClass.prototype.knowledgeSemanticReviewPacket = function (args) { return this.knowledgeAutoReviewKernel.reviewPacket(args); };
+  serviceClass.prototype.knowledgeSemanticProviderReview = function (args) { return this.knowledgeAutoReviewKernel.providerReview(args); };
   serviceClass.prototype.knowledgeHostReview = function (args) { return this.knowledgeAutoReviewKernel.hostReview(args); };
 }

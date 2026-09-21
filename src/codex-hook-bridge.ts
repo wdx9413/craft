@@ -7,9 +7,11 @@
  */
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
+import { projectIdentityFromRoot } from "./scope-identity.ts";
 import type { CraftService } from "./service.ts";
 import type { JsonObject } from "./infrastructure/store.ts";
 import { payload, stableDigest } from "./digest.ts";
+import { CRAFT_RELEASE_VERSION } from "./version.ts";
 
 export type CodexHookMember = "knowledge" | "memory" | "experience";
 type HookEvent = "SessionStart" | "SessionEnd" | "UserPromptSubmit" | "PostToolUse" | "Stop";
@@ -46,9 +48,17 @@ function nestedText(value: unknown, names: readonly string[]): string | null {
   return null;
 }
 
+function hookHost(input: HookInput): "codex" | "claude" {
+  return /claude/iu.test(text(input.source) ?? "") ? "claude" : "codex";
+}
+
 export function codexProjectScope(cwd: unknown): { kind: "project"; id: string } | null {
   const value = text(cwd);
-  return value ? { kind: "project", id: resolve(value) } : null;
+  if (!value) return null;
+  // Keep the old absolute path as a local alias in the journal only. Context
+  // uses a Git-derived identity so another checkout of the same repository can
+  // resolve the same scoped records without scanning every project.
+  return projectIdentityFromRoot(resolve(value)).canonical_scope as { kind: "project"; id: string };
 }
 
 /** Only an explicit command is allowed to retain a user authored statement. */
@@ -125,10 +135,21 @@ export class HookLearningCoordinator {
     const evidence = this.service.store.find("evidence", evidenceId) ?? this.service.evidenceRecord({ evidence_id: evidenceId,
       source_type: "codex_hook", confidence: outcome === "passed" ? "confirmed" : "bounded",
       claim: `Codex local verification ${outcome}.`, locator: `codex-hook:${sourceDigest}`, metadata: { content_stored: false, signal_count: (journal.signals as unknown[]).length } });
-    const scenarioKey = `coding.local_verification.${outcome}`;
+    const scenarioSignature = {
+      schema: "craft.scenario-signature.v1",
+      project: journal.scope,
+      target_class: "local_workspace_change",
+      effect_class: "workspace_write",
+      verifier: "local_verification",
+      failure_signature: outcome === "failed" ? stableDigest((journal.signals as JsonObject[]).filter((signal) => signal.kind === "verification").map((signal) => signal.digest)) : null,
+      host_revision: "codex-hook-v1",
+      capability_revision: "craft-experience@0.12.36",
+    };
+    const scenarioKey = `scenario:${stableDigest(scenarioSignature).slice(-24)}`;
     const observation = this.service.workflowEvolutionObserve({ observation_id: `workflow_evolution_observation_${sourceDigest.slice(-20)}`,
       scenario_key: scenarioKey, source_kind: "codex_hook_turn", source_id: turn, source_digest: sourceDigest, outcome,
-      evidence_ids: [evidence.id], sanitized: true, content_stored: false });
+      scope: `${String((journal.scope as JsonObject).kind)}:${String((journal.scope as JsonObject).id)}`,
+      scenario_signature: scenarioSignature, evidence_ids: [evidence.id], sanitized: true, content_stored: false });
     const observations = this.service.workflowEvolutionObservations({ scenario_key: scenarioKey, limit: 100 }).observations as JsonObject[];
     const distinct = observations.filter((item) => String((item.source as JsonObject).id) !== turn).slice(0, 1);
     if (!distinct.length) return { evidence, observation: observation.observation, request: null, next_action: "await_an_independent_verified_turn" };
@@ -168,10 +189,17 @@ export class CodexHookBridge {
   private async prompt(member: CodexHookMember, input: HookInput): Promise<JsonObject> {
     const scope = codexProjectScope(input.cwd); const prompt = text(input.prompt) ?? text(input.user_prompt);
     if (!scope || !prompt) return {};
+    // Persist the current checkout only as an alias. The receipt still names the
+    // canonical Git identity, so it is portable and does not leak the path.
+    if (typeof input.cwd === "string") this.service.scopeIdentityResolveProject({ project_root: input.cwd });
+    let memoryWritten = false;
     if (member === "memory") {
       const statement = explicitMemoryStatement(prompt);
-      if (statement) this.service.memoryCaptureUserStatement({ content: statement, kind: "episodic", scope_kind: scope.kind, scope_id: scope.id,
-        explicit_consent: true, auto_accept: true, sensitivity: "internal" });
+      if (statement) {
+        this.service.memoryCaptureUserStatement({ content: statement, kind: "episodic", scope_kind: scope.kind, scope_id: scope.id,
+          explicit_consent: true, auto_accept: true, sensitivity: "internal" });
+        memoryWritten = true;
+      }
     }
     const resolved = await this.service.contextResolutionResolve({ query: prompt, scope_kind: scope.kind, scope_id: scope.id,
       members: [member], max_items: 6, max_chars: 3_000 });
@@ -179,8 +207,12 @@ export class CodexHookBridge {
     const contributions = resolved.contributions as JsonObject[];
     const selected = [...items.map((item) => ({ type: "memory", id: item.memory_id, version: item.memory_version, content: item.content })),
       ...contributions.flatMap((contribution) => Array.isArray(contribution.items) ? contribution.items : [])];
+    const receipt = resolved.receipt as JsonObject | null;
+    this.service.activationProofRecord({ host: hookHost(input), component: member, event: "UserPromptSubmit", session_id: text(input.session_id) ?? "unknown",
+      turn_id: text(input.turn_id), context_receipt_id: receipt?.id ?? undefined, memory_written: memoryWritten, observation_written: false,
+      plugin_release: CRAFT_RELEASE_VERSION, hook_trusted: true, mcp_reachable: true });
     if (!selected.length) return {};
-    return { additionalContext: JSON.stringify({ source: `craft-${member}`, scope, receipt_id: (resolved.receipt as JsonObject | null)?.id ?? null, selected }) };
+    return { additionalContext: JSON.stringify({ source: `craft-${member}`, scope, receipt_id: receipt?.id ?? null, selected }) };
   }
 
   private tool(input: HookInput): JsonObject {
@@ -190,7 +222,10 @@ export class CodexHookBridge {
   }
 
   private stop(member: CodexHookMember, input: HookInput): JsonObject {
-    if (member === "experience") this.learning.finalize(input);
+    const finalized = member === "experience" ? this.learning.finalize(input) : null;
+    this.service.activationProofRecord({ host: hookHost(input), component: member, event: "Stop", session_id: text(input.session_id) ?? "unknown",
+      turn_id: text(input.turn_id), memory_written: false, observation_written: finalized !== null,
+      plugin_release: CRAFT_RELEASE_VERSION, hook_trusted: true, mcp_reachable: true });
     this.lifecycle(member, "Stop", input);
     return {};
   }
@@ -215,6 +250,10 @@ export class CodexHookBridge {
       readiness_state: readiness.state,
       usage: { kind: "readiness_only", component_used: false, context_resolved: false },
     });
+    this.service.activationProofRecord({ host: hookHost(input), component: member, event, session_id: text(input.session_id) ?? "unknown",
+      turn_id: text(input.turn_id), memory_written: false, observation_written: false,
+      plugin_release: CRAFT_RELEASE_VERSION, hook_trusted: true, mcp_reachable: true });
+    if (event === "SessionEnd") this.service.memoryMaintenanceSchedule({ stage: "light", lease_id: `codex-${member}-${text(input.session_id) ?? "unknown"}` });
     return {};
   }
 }

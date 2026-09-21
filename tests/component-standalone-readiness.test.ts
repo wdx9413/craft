@@ -27,7 +27,7 @@ test("public standalone component products expose small daily paths while advanc
     const expected: Record<string, readonly string[]> = {
       knowledge: ["craft_component_readiness_get", "craft_knowledge_source_register", "craft_evidence_record", "craft_knowledge_claim_save", "craft_knowledge_host_review", "craft_knowledge_support_record", "craft_knowledge_promotion_policy_get", "craft_knowledge_auto_review", "craft_context_resolution_resolve"],
       memory: ["craft_component_readiness_get", "craft_memory_candidate_propose", "craft_memory_ledger_get", "craft_memory_ledger_list", "craft_memory_maintenance_run"],
-      experience: ["craft_component_readiness_get", "craft_workflow_evolution_observe", "craft_workflow_evolution_propose", "craft_workflow_dag_get"],
+      experience: ["craft_component_readiness_get", "craft_experience_observe", "craft_experience_procedure_draft", "craft_experience_procedure_submit", "craft_experience_procedure_get", "craft_procedure_create", "craft_procedure_get", "craft_procedure_list", "craft_procedure_gate", "craft_procedure_export_skill"],
     };
     for (const [product, required] of Object.entries(expected)) {
       const daily = new McpServer(f.service, productSurfaceOf(product));
@@ -39,6 +39,35 @@ test("public standalone component products expose small daily paths while advanc
     assert(new McpServer(f.service, "component-knowledge").tools.length > new McpServer(f.service, productSurfaceOf("knowledge")).tools.length);
     assert(new McpServer(f.service, "component-memory").tools.length > new McpServer(f.service, productSurfaceOf("memory")).tools.length);
     assert(new McpServer(f.service, "component-experience").tools.length > new McpServer(f.service, productSurfaceOf("experience")).tools.length);
+    const dailyExperience = new McpServer(f.service, productSurfaceOf("experience")).tools.map((tool) => tool.name);
+    assert(!dailyExperience.some((name) => name.startsWith("craft_workflow_evolution_") || name.startsWith("craft_workflow_dag_")));
+    assert(dailyExperience.includes("craft_experience_observe"));
+    assert(dailyExperience.includes("craft_experience_procedure_draft"));
+    assert(!dailyExperience.some((name) => name.includes("projection")));
+  } finally { await dispose(f); }
+});
+
+test("daily Experience aliases preserve the bounded legacy evolution behavior", async () => {
+  const f = await fixture();
+  try {
+    const experience = new McpServer(f.service, productSurfaceOf("experience"));
+    const evidence = f.store.create("evidence", "experience-alias-evidence", { confidence: "bounded" });
+    const inputs = [
+      { source_id: "one", source_digest: "sha256:one", outcome: "failed" },
+      { source_id: "two", source_digest: "sha256:two", outcome: "passed" },
+    ];
+    for (const [index, input] of inputs.entries()) {
+      await experience.handlers.craft_experience_observe({ observation_id: `experience-alias-${index}`, scenario_key: "coding.retry", source_kind: "outcome", evidence_ids: [evidence.id], sanitized: true, ...input });
+    }
+    const patterns = await experience.handlers.craft_experience_patterns_list({ scenario_key: "coding.retry" }) as JsonObject;
+    const observations = patterns.observations as JsonObject[];
+    const drafted = await experience.handlers.craft_experience_procedure_draft({ request_id: "experience-alias-request", scenario_key: "coding.retry", observation_ids: observations.map((item) => item.id), hypothesis: "Bound retries.", design_axes: ["orchestration"], output_contract_ref: "acceptance:tests-pass" }) as JsonObject;
+    assert.equal((drafted.request as JsonObject).procedure_kind, "workflow");
+    const submitted = await experience.handlers.craft_experience_procedure_submit({ proposal_id: "experience-alias-proposal", request_id: (drafted.request as JsonObject).id, workflow_id: "experience-alias-workflow", name: "Bounded retry", description: "A linear procedure remains the default.", inputs: [], steps: [{ type: "assertion" }] }) as JsonObject;
+    const proposal = submitted.proposal as JsonObject;
+    assert.equal(proposal.procedure_kind, "workflow");
+    assert.equal(((await experience.handlers.craft_experience_procedure_get({ proposal_id: proposal.id }) as JsonObject).proposal as JsonObject).id, proposal.id);
+    assert.throws(() => experience.handlers.craft_experience_procedure_draft({ scenario_key: "coding.retry", observation_ids: observations.map((item) => item.id), hypothesis: "No evidence for a graph.", design_axes: ["orchestration"], procedure_kind: "graph", output_contract_ref: "acceptance:tests-pass" }), /Graph/);
   } finally { await dispose(f); }
 });
 
@@ -67,7 +96,7 @@ test("standalone readiness makes empty ledgers and the coding experience thresho
 
     const first = f.store.create("outcome", "coding-outcome-a", { status: "passed" });
     const second = f.store.create("outcome", "coding-outcome-b", { status: "passed" });
-    const observe = experience.handlers.craft_workflow_evolution_observe;
+    const observe = experience.handlers.craft_experience_observe;
     await observe({ scenario_key: "coding:test-failure-recovery", source_kind: "outcome", source_id: first.id, source_digest: "sha256:a", outcome: "passed", evidence_ids: [evidence.id], sanitized: true });
     await observe({ scenario_key: "coding:test-failure-recovery", source_kind: "outcome", source_id: second.id, source_digest: "sha256:b", outcome: "passed", evidence_ids: [evidence.id], sanitized: true });
     const experienceReady = await experience.handlers.craft_component_readiness_get({ component: "experience" }) as JsonObject;

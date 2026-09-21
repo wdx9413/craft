@@ -109,6 +109,7 @@ import { DomainEvaluatorKernel } from "../domain-evaluator.ts";
 import { FeedbackLearningKernel } from "../feedback-learning.ts";
 import { HandoffManifestKernel } from "../handoff-manifest.ts";
 import { LocalRuntimeServiceKernel } from "../local-runtime-service.ts";
+import { ProcedureAutomationKernel } from "../../capability/craft-experience/procedure-automation.ts";
 import { ProjectBundleKernel } from "../project-bundle.ts";
 import { KnowledgeMemoryBundleKernel } from "../knowledge-memory-bundle.ts";
 import { ReplayRunnerKernel } from "../replay-runner.ts";
@@ -120,10 +121,13 @@ import { HarnessTopologyKernel } from "../harness-topology.ts";
 import { RuntimeReadinessKernel } from "../runtime-readiness.ts";
 import { AssuredPilotKernel } from "../assured-pilot.ts";
 import { CapabilityKitRuntime } from "../capability-kit-runtime.ts";
+import { EngineeringQualityProfileKernel } from "../../capability/engineering-quality-profile.ts";
 import type { KnowledgeSourceRegistry } from "../../capability/craft-knowledge/knowledge-source-registry.ts";
 import type { MemoryLedgerKernel } from "../../capability/craft-memory/memory-ledger.ts";
 import type { MemorySignalsKernel } from "../../capability/craft-memory/memory-signals-kernel.ts";
 import { ContextResolutionKernel } from "../context-resolution.ts";
+import { ScopeIdentityKernel } from "../scope-identity.ts";
+import { MaintenanceScheduler } from "../maintenance-scheduler.ts";
 import { ContextProjectionKernel } from "../context-projection.ts";
 import { StateViewKernel } from "../state-view.ts";
 import type { KnowledgeRelationKernel } from "../../capability/craft-knowledge/knowledge-relation.ts";
@@ -144,6 +148,7 @@ import { EvaluationCoordinator } from "./coordinators/evaluation-coordinator.ts"
 import { WorkspaceCoordinator } from "./coordinators/workspace-coordinator.ts";
 import { DurableActionLoopKernel } from "../durable-action-loop.ts";
 import type { ExperienceLedgerKernel } from "../../capability/craft-experience/experience-ledger.ts";
+import type { ProcedureStore } from "../../capability/craft-experience/procedure-projection.ts";
 import { KNOWLEDGE_KERNELS } from "../../capability/craft-knowledge/capability.ts";
 import { MEMORY_KERNELS } from "../../capability/craft-memory/capability.ts";
 import { EXPERIENCE_KERNELS } from "../../capability/craft-experience/capability.ts";
@@ -166,6 +171,8 @@ import { ContextWorkingSetKernel } from "../context-working-set.ts";
 import { GraphCompilerKernel } from "../graph-compiler.ts";
 import { CapabilityIntakeKernel } from "../capability-intake.ts";
 import { WorkbenchCommandKernel } from "../workbench-command.ts";
+import { ActivationProofKernel } from "../activation-proof.ts";
+import { ComponentHistoryMigrationKernel } from "../component-history-migration.ts";
 
 /**
  * Stable composition root for the service. Domain behavior stays in focused
@@ -235,6 +242,12 @@ export abstract class ServiceFoundation {
   readonly capabilityConnectors: CapabilityConnectorKernel;
   readonly capabilityAccess: CapabilityAccessKernel;
   readonly capabilityKits: CapabilityKitRuntime;
+  /** Explicit opt-in sample; it is not a default Host capability. */
+  readonly engineeringQualityProfile: EngineeringQualityProfileKernel;
+  /** Host-reported, content-free proof; configuration alone is never evidence. */
+  readonly activationProof: ActivationProofKernel;
+  /** Explicit compatibility migration plan/apply seam for the three components. */
+  readonly componentHistoryMigration: ComponentHistoryMigrationKernel;
   /**
    * The three pieces `KnowledgeMemoryRuntime` used to be one of.
    *
@@ -246,6 +259,8 @@ export abstract class ServiceFoundation {
   readonly memoryLedger: MemoryLedgerKernel;
   readonly memorySignals: MemorySignalsKernel;
   readonly contextResolution: ContextResolutionKernel;
+  /** Stable cross-device project identity and aliases, shared by all components. */
+  readonly scopeIdentity: ScopeIdentityKernel;
   /** The durable projection: what a session omitted, and the ids a later call can bring back. */
   readonly contextProjection: ContextProjectionKernel;
   /** One read-only view of `state`, assembled from the records that carry it. */
@@ -263,6 +278,7 @@ export abstract class ServiceFoundation {
   readonly verificationPlane: VerificationPlane;
   readonly durableActionLoops: DurableActionLoopKernel;
   readonly experienceLedger: ExperienceLedgerKernel;
+  readonly experienceProcedures: ProcedureStore;
   readonly evaluationModelProfiles: EvaluationModelProfileKernel;
   readonly workflowEvolution: WorkflowEvolutionKernel;
   readonly hostActivationManifests: HostActivationManifestKernel;
@@ -291,6 +307,7 @@ export abstract class ServiceFoundation {
   readonly contentMigration: ContentMigrationKernel;
   readonly traceReviews: TraceReviewKernel;
   readonly memoryMaintenance: MemoryMaintenanceKernel;
+  readonly maintenanceScheduler: MaintenanceScheduler;
   readonly runtimeModelProbe: RuntimeModelProbeKernel;
   readonly mcpTasks: McpTaskKernel;
   readonly runtimeProof: RuntimeProofKernel;
@@ -332,6 +349,7 @@ export abstract class ServiceFoundation {
   readonly contextPlane: ContextPlaneKernel;
   readonly replayRunner: ReplayRunnerKernel;
   readonly localRuntimeService: LocalRuntimeServiceKernel;
+  readonly procedureAutomation: ProcedureAutomationKernel;
   readonly projectBundles: ProjectBundleKernel;
   readonly knowledgeMemoryBundles: KnowledgeMemoryBundleKernel;
   readonly feedbackLearning: FeedbackLearningKernel;
@@ -433,6 +451,9 @@ export abstract class ServiceFoundation {
     this.capabilityConnectors = new CapabilityConnectorKernel(store);
     this.capabilityAccess = new CapabilityAccessKernel(store, this.catalog);
     this.capabilityKits = new CapabilityKitRuntime(store);
+    this.engineeringQualityProfile = new EngineeringQualityProfileKernel(store);
+    this.activationProof = new ActivationProofKernel(store);
+    this.componentHistoryMigration = new ComponentHistoryMigrationKernel(store);
     this.knowledgeSources = capabilities.registry.require<KnowledgeSourceRegistry>(KNOWLEDGE_KERNELS.sources);
     this.memoryLedger = capabilities.registry.require<MemoryLedgerKernel>(MEMORY_KERNELS.ledger);
     this.memorySignals = capabilities.registry.require<MemorySignalsKernel>(MEMORY_KERNELS.signals);
@@ -440,6 +461,7 @@ export abstract class ServiceFoundation {
     // The context plane stays in the core: `component-knowledge`, `component-memory` and
     // `component-context` all expose `craft_context_resolution_*`, so a Host that loads only one
     // concern still has to be able to resolve what that concern holds.
+    this.scopeIdentity = new ScopeIdentityKernel(store);
     this.contextResolution = new ContextResolutionKernel(store, capabilities.contributed);
     this.contextWorkingSets = new ContextWorkingSetKernel(store, this.contextResolution);
     this.contextProjection = new ContextProjectionKernel(store);
@@ -460,6 +482,7 @@ export abstract class ServiceFoundation {
     this.releaseQualifications = new ReleaseQualificationKernel(store);
     this.verificationPlane = new VerificationPlane(store);
     this.experienceLedger = capabilities.registry.require<ExperienceLedgerKernel>(EXPERIENCE_KERNELS.ledger);
+    this.experienceProcedures = capabilities.registry.require<ProcedureStore>(EXPERIENCE_KERNELS.procedures);
     this.evaluationModelProfiles = capabilities.registry.require<EvaluationModelProfileKernel>(EXPERIENCE_KERNELS.modelProfiles);
     this.workflowEvolution = capabilities.registry.require<WorkflowEvolutionKernel>(EXPERIENCE_KERNELS.workflowEvolution);
     this.hostActivationManifests = new HostActivationManifestKernel(store, this.hostProfiles);
@@ -487,6 +510,7 @@ export abstract class ServiceFoundation {
     this.memoryConsolidation = new MemoryConsolidationKernel(store);
     this.traceReviews = new TraceReviewKernel(store);
     this.memoryMaintenance = new MemoryMaintenanceKernel(store);
+    this.maintenanceScheduler = new MaintenanceScheduler(store, this.memoryMaintenance);
     this.runtimeModelProbe = new RuntimeModelProbeKernel(store, this.modelProviders, modelTransport ?? null);
     this.mcpTasks = new McpTaskKernel(store);
     this.runtimeProof = new RuntimeProofKernel(store);
@@ -519,6 +543,7 @@ export abstract class ServiceFoundation {
     this.contextPlane = new ContextPlaneKernel(store);
     this.replayRunner = new ReplayRunnerKernel(store);
     this.localRuntimeService = new LocalRuntimeServiceKernel(store);
+    this.procedureAutomation = new ProcedureAutomationKernel(store);
     this.projectBundles = new ProjectBundleKernel(store);
     this.knowledgeMemoryBundles = new KnowledgeMemoryBundleKernel(store);
     this.feedbackLearning = new FeedbackLearningKernel(store);

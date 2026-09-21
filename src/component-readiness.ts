@@ -54,6 +54,7 @@ export class ComponentReadinessKernel {
     const expected = REQUIRED_TOOLS[name];
     const observed = args.observed_tool_names === undefined ? null : toolNames(args.observed_tool_names);
     const missing = observed === null ? [] : expected.filter((tool) => !observed.includes(tool));
+    const execution = this.executionProof(name, args.session_id);
     return {
       ...readiness,
       runtime_reachable: true,
@@ -64,7 +65,9 @@ export class ComponentReadinessKernel {
       missing_tools: missing,
       host_attachment: observed === null ? "this_mcp_process_replied; compare this release with the Host cache when another conversation cannot see it"
         : missing.length ? "bundle_or_surface_mismatch" : "surface_matches",
-      next_action: missing.length ? "reinstall_or_restart_the_host_then_compare_initialize_and_tools_list" : readiness.next_action,
+      execution_proof: execution,
+      next_action: missing.length ? "reinstall_or_restart_the_host_then_compare_initialize_and_tools_list"
+        : execution.status === "not_observed" ? "run_one_real_host_turn_then_recheck_with_session_id" : readiness.next_action,
     };
   }
 
@@ -111,14 +114,15 @@ export class ComponentReadinessKernel {
   }
 
   private experience(): JsonObject {
-    const observations = this.store.count("workflow_evolution_observation");
+    const observations = this.store.count("workflow_evolution_observation") + this.store.count("experience_observation");
     const requests = countByStatus(this.store, "workflow_evolution_request");
     const proposals = countByStatus(this.store, "workflow_evolution_proposal");
+    const procedures = countByStatus(this.store, "experience_procedure");
     const patterns = this.store.count("experience_pattern");
     const state = observations < 2 ? "independent_observations_required"
       : (proposals.draft ?? 0) === 0 ? "draft_proposal_available" : "evaluation_required";
     return {
-      component: "experience", state, counts: { observations, patterns, requests, draft_proposals: proposals.draft ?? 0, shadow_experiments: this.store.count("experience_shadow_experiment") },
+      component: "experience", state, counts: { observations, patterns, requests, draft_proposals: proposals.draft ?? 0, procedures, shadow_experiments: this.store.count("experience_shadow_experiment") },
       next_action: state === "independent_observations_required" ? "record_two_sanitized_evidence_backed_outcomes_for_one_scenario"
         : state === "draft_proposal_available" ? "propose_a_workflow_change_with_at_most_two_design_axes"
           : "evaluate_the_draft_in_shadow_then_use_signoff_and_canary_before_routing",
@@ -130,12 +134,23 @@ export class ComponentReadinessKernel {
       },
     };
   }
+
+  private executionProof(name: ComponentName, sessionId: unknown): JsonObject {
+    const session = typeof sessionId === "string" && sessionId.trim() ? sessionId.trim() : null;
+    const receipts = this.store.list("activation_proof_receipt", 10_000, (item) => item.component === name && (session === null || item.session_id === session));
+    const current = receipts.filter((item) => item.plugin_release === CRAFT_RELEASE_VERSION);
+    return { status: current.length ? "executed" : receipts.length ? "stale_plugin_or_receipt" : "not_observed", executions: current.length,
+      context_receipt_id: current.find((item) => typeof item.context_receipt_id === "string")?.context_receipt_id ?? null,
+      hook_trusted: current.some((item) => item.hook_trusted === true), mcp_reachable: current.some((item) => item.mcp_reachable === true),
+      ...(name === "memory" ? { explicit_memory_written: current.some((item) => item.memory_written === true) } : {}),
+      ...(name === "experience" ? { verified_observation_written: current.some((item) => item.observation_written === true) } : {}) };
+  }
 }
 
 const REQUIRED_TOOLS: Readonly<Record<"knowledge" | "memory" | "experience", readonly string[]>> = {
   knowledge: ["craft_component_readiness_get", "craft_knowledge_search", "craft_context_resolution_resolve"],
   memory: ["craft_component_readiness_get", "craft_context_resolution_resolve", "craft_memory_maintenance_run"],
-  experience: ["craft_component_readiness_get", "craft_workflow_evolution_observe", "craft_workflow_evolution_propose"],
+  experience: ["craft_component_readiness_get", "craft_experience_observe", "craft_experience_procedure_draft"],
 };
 
 function ensureMountedComponent(requested: ComponentName, mounted?: ComponentName): void {

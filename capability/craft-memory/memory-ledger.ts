@@ -26,6 +26,7 @@ import type { CraftStore, JsonObject } from "../../src/infrastructure/store.ts";
 import { noCredentialAssignment, parseScope, sortedUniqueList, text } from "../../src/validation.ts";
 import { canonicalJson, stableDigest, payload } from "../../src/digest.ts";
 import { contentReference } from "../../src/infrastructure/content-store.ts";
+import { scopeEnvelope } from "../../src/scope-policy.ts";
 
 const MEMORY_KINDS = new Set(["working", "episodic", "preference", "procedural"]);
 const MEMORY_STATUS = new Set(["active", "superseded", "revoked", "expired"]);
@@ -49,11 +50,14 @@ export class MemoryLedgerKernel {
     const source = this.store.get("knowledge_source", text(args.source_id, "source_id")); if (source.status !== "active") throw new Error("Knowledge Source is not active");
     const kind = text(args.kind, "kind"); if (!MEMORY_KINDS.has(kind)) throw new Error("Memory kind is unsupported");
     const sensitivity = text(args.sensitivity ?? "internal", "sensitivity"); if (!SENSITIVITIES.has(sensitivity)) throw new Error("Memory sensitivity is unsupported");
-    const memoryScope = parseScope(args); const evidenceIds = sortedUniqueList(args.evidence_ids, "evidence_ids"); evidenceIds.forEach((item) => this.store.get("evidence", item));
+    const memoryScope = parseScope(args); const envelope = scopeEnvelope(args.scope_envelope, memoryScope); const evidenceIds = sortedUniqueList(args.evidence_ids, "evidence_ids"); evidenceIds.forEach((item) => this.store.get("evidence", item));
     const content = noCredentialAssignment(text(args.content, "content"), "content"); const confidence = text(args.confidence ?? "bounded", "confidence");
     if (!CONFIDENCES.has(confidence)) throw new Error("Memory confidence is unsupported");
     if ((kind === "procedural" || confidence === "confirmed") && !evidenceIds.length) throw new Error("Procedural or confirmed Memory requires Evidence");
-    const explicitValidUntil = date(args.valid_until, "valid_until");
+    const memoryId = String(args.memory_id ?? `memory_ledger_${randomUUID().replaceAll("-", "")}`); const existing = this.store.find("memory_ledger", memoryId);
+    const explicitValidUntil = args.valid_until === undefined && existing
+      ? (typeof existing.valid_until === "string" ? existing.valid_until : null)
+      : date(args.valid_until, "valid_until");
     // A working note and an episode are both about now, so they get a default lifetime; a
     // preference or a procedure is meant to outlive the turn that wrote it and does not.
     const validUntil = explicitValidUntil ?? (kind === "working" ? new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
@@ -63,13 +67,23 @@ export class MemoryLedgerKernel {
     // `preference:diet:sugar`).  It is deliberately not inferred from prose:
     // an LLM guess must not silently merge two unrelated memories.
     const topic = args.topic === undefined ? undefined : text(args.topic, "topic");
-    const identity = { source_id: source.id, source_version: source.version, kind, scope: memoryScope, content_digest: stableDigest(content), sensitivity, confidence, evidence_ids: evidenceIds, valid_until: validUntil, ...(topic === undefined ? {} : { topic }) };
-    const memoryId = String(args.memory_id ?? `memory_ledger_${randomUUID().replaceAll("-", "")}`); const existing = this.store.find("memory_ledger", memoryId); const identityDigest = stableDigest(identity);
+    const observedAt = args.observed_at === undefined && typeof existing?.observed_at === "string"
+      ? existing.observed_at
+      : (date(args.observed_at, "observed_at") ?? new Date().toISOString());
+    const effectiveFrom = args.effective_from === undefined && typeof existing?.effective_from === "string"
+      ? existing.effective_from
+      : (date(args.effective_from, "effective_from") ?? observedAt);
+    // `working_note:true` is the new task/session-only form.  Older callers still
+    // write `kind: working`; keep those records readable as a migration bridge
+    // instead of silently making existing projects lose their current notes.
+    const workingNote = kind === "working" && args.working_note === true;
+    const identity = { source_id: source.id, source_version: source.version, kind, scope: memoryScope, scope_envelope: envelope, content_digest: stableDigest(content), sensitivity, confidence, evidence_ids: evidenceIds, valid_until: validUntil, observed_at: observedAt, effective_from: effectiveFrom, working_note: workingNote, ...(topic === undefined ? {} : { topic }) };
+    const identityDigest = stableDigest(identity);
     if (existing) { if (existing.identity_digest !== identityDigest) throw new Error("Memory Ledger idempotency conflict"); return { memory: existing, idempotent: true }; }
     // The body lives in the content store; the record keeps the reference and the digest, so
     // the Ledger indexes memory rather than holding it, and a rewritten body is a drift error.
     const contentRef = this.store.contentStore.writeSync({ kind: "memory", record_id: memoryId, version: 1, scope: `${memoryScope.kind}:${memoryScope.id}`, status: "active", sensitivity, source_id: String(source.id), body: content });
-    return { memory: this.store.create("memory_ledger", memoryId, { ...identity, content_ref: contentRef, identity_digest: identityDigest, status: "active", supersedes_id: null }), idempotent: false };
+    return { memory: this.store.create("memory_ledger", memoryId, { ...identity, content_ref: contentRef, identity_digest: identityDigest, status: "active", supersedes_id: null, contradiction_ids: [], derived_from_ids: [], ...(workingNote ? {} : { working_legacy_compatibility: kind === "working" }) }), idempotent: false };
   }
 
   /**

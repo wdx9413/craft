@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -56,12 +56,12 @@ test("Experience turns independent observations into a draft Graph Procedure wit
   try {
     const experience = new McpServer(f.service, productSurfaceOf("experience"));
     f.store.create("evidence", "evidence", { confidence: "bounded", summary: "sanitized fixture evidence" });
-    const first = await experience.handlers.craft_workflow_evolution_observe({ observation_id: "first", scenario_key: "coding.retry", source_kind: "outcome", source_id: "one", source_digest: "sha256:one", outcome: "failed", evidence_ids: ["evidence"], sanitized: true }) as JsonObject;
-    const second = await experience.handlers.craft_workflow_evolution_observe({ observation_id: "second", scenario_key: "coding.retry", source_kind: "outcome", source_id: "two", source_digest: "sha256:two", outcome: "passed", evidence_ids: ["evidence"], sanitized: true }) as JsonObject;
-    const request = (await experience.handlers.craft_workflow_evolution_propose({ request_id: "graph-request", scenario_key: "coding.retry", observation_ids: [(first.observation as JsonObject).id, (second.observation as JsonObject).id], hypothesis: "Bound retries and stop for an explicit approval.", design_axes: ["orchestration"], procedure_kind: "graph", output_contract_ref: "acceptance:tests-pass" })).request as JsonObject;
+    const first = await experience.handlers.craft_experience_observe({ observation_id: "first", scenario_key: "coding.retry", source_kind: "outcome", source_id: "one", source_digest: "sha256:one", outcome: "failed", evidence_ids: ["evidence"], execution_shape: ["branch", "approval"], sanitized: true }) as JsonObject;
+    const second = await experience.handlers.craft_experience_observe({ observation_id: "second", scenario_key: "coding.retry", source_kind: "outcome", source_id: "two", source_digest: "sha256:two", outcome: "passed", evidence_ids: ["evidence"], execution_shape: ["branch", "approval"], sanitized: true }) as JsonObject;
+    const request = (await experience.handlers.craft_experience_procedure_draft({ request_id: "graph-request", scenario_key: "coding.retry", observation_ids: [(first.observation as JsonObject).id, (second.observation as JsonObject).id], hypothesis: "Bound retries and stop for an explicit approval.", design_axes: ["orchestration"], procedure_kind: "graph", output_contract_ref: "acceptance:tests-pass" })).request as JsonObject;
     assert.throws(() => f.service.workflowEvolutionPropose({ request_id: "graph-request", scenario_key: "coding.retry", observation_ids: [(first.observation as JsonObject).id, (second.observation as JsonObject).id], hypothesis: "Bound retries and stop for an explicit approval.", design_axes: ["orchestration"], procedure_kind: "workflow", output_contract_ref: "acceptance:tests-pass" }), /idempotency/u);
     assert.throws(() => f.service.workflowEvolution.submit({ request_id: request.id, workflow_id: "invalid-graph", name: "Invalid graph", description: "No nodes.", inputs: [], nodes: [] }), /graph nodes/u);
-    const graph = await experience.handlers.craft_workflow_evolution_proposal_submit({ proposal_id: "graph-proposal", request_id: request.id, workflow_id: "coding-retry-graph", name: "Bounded coding retry", description: "A candidate graph with a decision-point human gate.", inputs: ["task_contract"],
+    const graph = await experience.handlers.craft_experience_procedure_submit({ proposal_id: "graph-proposal", request_id: request.id, workflow_id: "coding-retry-graph", name: "Bounded coding retry", description: "A candidate graph with a decision-point human gate.", inputs: ["task_contract"],
       nodes: [
         { id: "inspect", type: "action", side_effect: "read_only" },
         { id: "verify", type: "condition", depends_on: ["inspect"], side_effect: "read_only" },
@@ -80,7 +80,14 @@ test("Experience turns independent observations into a draft Graph Procedure wit
     assert.equal(workflow.automation_authority, false);
     assert.equal((workflow.derived_from as JsonObject).workflow_evolution_proposal_id, "graph-proposal");
     assert.equal(((workflow.graph as JsonObject).edges as JsonObject[]).length, 5);
-    assert.equal(((await experience.handlers.craft_workflow_dag_get({ workflow_id: workflow.id })).workflow as JsonObject).id, workflow.id);
+    const procedure = graph.procedure as JsonObject;
+    const definitionRef = procedure.definition_ref as JsonObject;
+    assert.match(String(definitionRef.path), /experience[\\/]procedures[\\/]graphs[\\/]/u);
+    const definition = JSON.parse(await readFile(String(definitionRef.path), "utf8")) as JsonObject;
+    assert.equal(definition.schema_version, "craft.procedure.v1");
+    assert.equal(definition.kind, "graph");
+    assert.equal(((definition.definition as JsonObject).nodes as JsonObject[]).length, 4);
+    assert.equal((((await experience.handlers.craft_experience_procedure_get({ proposal_id: "graph-proposal" })) as JsonObject).proposal as JsonObject).id, "graph-proposal");
     assert.match(String(graph.next_action), /shadow and held-out/u);
     assert.throws(() => f.service.workflowDagValidate({ nodes: [{ id: "a", type: "action" }, { id: "b", type: "action" }], edges: [{ id: "a-b", from: "a", to: "b", kind: "success" }, { id: "b-a", from: "b", to: "a", kind: "failure" }] }), /unbounded cycle/u);
   } finally { await dispose(f); }
@@ -90,8 +97,8 @@ test("Experience keeps a graph proposal deterministic when optional graph fields
   const f = await fixture();
   try {
     f.store.create("evidence", "evidence", { confidence: "confirmed", summary: "sanitized fixture evidence" });
-    f.service.workflowEvolutionObserve({ observation_id: "default-one", scenario_key: "coding.default-graph", source_kind: "outcome", source_id: "one", source_digest: "sha256:one", outcome: "failed", evidence_ids: ["evidence"], sanitized: true });
-    f.service.workflowEvolutionObserve({ observation_id: "default-two", scenario_key: "coding.default-graph", source_kind: "outcome", source_id: "two", source_digest: "sha256:two", outcome: "passed", evidence_ids: ["evidence"], sanitized: true });
+    f.service.workflowEvolutionObserve({ observation_id: "default-one", scenario_key: "coding.default-graph", source_kind: "outcome", source_id: "one", source_digest: "sha256:one", outcome: "failed", evidence_ids: ["evidence"], execution_shape: ["recovery"], sanitized: true });
+    f.service.workflowEvolutionObserve({ observation_id: "default-two", scenario_key: "coding.default-graph", source_kind: "outcome", source_id: "two", source_digest: "sha256:two", outcome: "passed", evidence_ids: ["evidence"], execution_shape: ["recovery"], sanitized: true });
     const request = f.service.workflowEvolutionPropose({ request_id: "default-graph-request", scenario_key: "coding.default-graph", hypothesis: "Retry only after a failed terminal assertion.", design_axes: ["orchestration"], procedure_kind: "graph", output_contract_ref: "acceptance:tests-pass" }).request as JsonObject;
     assert.throws(() => f.service.workflowEvolutionPropose({ scenario_key: "coding.default-graph", hypothesis: "Reject an unsupported procedure type.", design_axes: ["orchestration"], procedure_kind: "tree", output_contract_ref: "acceptance:tests-pass" }), /procedure_kind is unsupported/u);
     const proposal = f.service.workflowEvolution.submit({ request_id: request.id, workflow_id: "default-graph", name: "Default graph", description: "Graph defaults remain explicit in the persisted draft.", inputs: [], nodes: [{ id: "inspect", type: "action" }] }).proposal as JsonObject;

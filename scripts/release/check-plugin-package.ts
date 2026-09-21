@@ -3,10 +3,12 @@ import { spawnSync } from "node:child_process";
 import { access, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { RELEASE_PRODUCTS } from "../../src/release-catalog.ts";
 
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const pluginRoot = join(root, "plugins", "craft");
-const componentNames = ["craft-context", "craft-quality", "craft-knowledge", "craft-memory", "craft-capability", "craft-skill-quality", "craft-experience"];
+const componentNames = RELEASE_PRODUCTS.filter((product) => product.name !== "craft").map((product) => product.name);
+const hookMembers = { "craft-knowledge": "knowledge", "craft-memory": "memory", "craft-experience": "experience" } as const;
 const normalizeText = (value: string): string => value.replaceAll("\r\n", "\n");
 const packageJson = JSON.parse(await readFile(join(root, "package.json"), "utf8")) as { version: string };
 const pluginManifest = JSON.parse(await readFile(join(pluginRoot, ".codex-plugin", "plugin.json"), "utf8")) as { name: string; version: string; skills: string; mcpServers: string; interface?: { composerIcon?: string; logo?: string } };
@@ -37,11 +39,22 @@ for (const name of componentNames) {
   assert.equal(componentManifest.interface?.logo, "./assets/craft-icon.svg");
   await access(join(componentRoot, "assets", "craft-icon.svg"));
   await access(join(componentRoot, "dist", "plugin", "craft-mcp.cjs"));
-  if (["craft-knowledge", "craft-memory", "craft-experience"].includes(name)) {
-    assert.equal(componentManifest.hooks, "./hooks/hooks.json");
-    await access(join(componentRoot, "hooks", "hooks.json"));
-    await access(join(componentRoot, "dist", "plugin", "craft-codex-hook.cjs"));
-  }
+    if (name in hookMembers) {
+      assert.equal(componentManifest.hooks, "./hooks/codex-hooks.json");
+      const hookPath = join(componentRoot, "hooks", "codex-hooks.json");
+      await access(hookPath);
+      await access(join(componentRoot, "dist", "plugin", "craft-codex-hook.cjs"));
+      const hooks = JSON.parse(await readFile(hookPath, "utf8")) as { hooks: Record<string, Array<{ hooks: Array<{ type?: string; command?: string; additionalContextLimit?: unknown }> }>> };
+      assert(!JSON.stringify(hooks).includes("mcp_tool"), `${name} must not require an MCP Hook handler`);
+      assert(!JSON.stringify(hooks).includes("${CLAUDE_PLUGIN_ROOT}"), `${name} must use the Codex root variable`);
+      for (const group of Object.values(hooks.hooks).flat()) {
+        for (const handler of group.hooks) {
+          assert.equal(handler.type, "command", `${name} Hook handlers must use the portable command type`);
+          assert.equal(handler.command, `node "\${PLUGIN_ROOT}/dist/plugin/craft-codex-hook.cjs" --member ${hookMembers[name as keyof typeof hookMembers]}`);
+          assert.equal(handler.additionalContextLimit, undefined, `${name} must keep the shared Hook file portable`);
+        }
+      }
+    }
   const source = await readFile(join(root, "skills", name, "SKILL.md"), "utf8");
   const packed = await readFile(join(componentRoot, "skills", name, "SKILL.md"), "utf8");
   assert.equal(normalizeText(packed), normalizeText(source));
@@ -51,10 +64,11 @@ for (const name of componentNames) {
 // names here because a stale `evolution` argument still parses as JSON but selects no surface.
 for (const [name, product] of [["craft-knowledge", "knowledge"], ["craft-memory", "memory"], ["craft-experience", "experience"]] as const) {
   const manifest = JSON.parse(await readFile(join(root, "plugins", name, ".claude-plugin", "plugin.json"), "utf8")) as {
-    name: string; version: string; mcpServers: Record<string, { args: string[] }>;
+    name: string; version: string; hooks?: string; mcpServers: Record<string, { args: string[] }>;
   };
   assert.equal(manifest.name, name);
-  assert.equal(manifest.version, packageJson.version);
+    assert.equal(manifest.version, packageJson.version);
+    assert.equal(manifest.hooks, "./hooks/hooks.json");
   assert.deepEqual(manifest.mcpServers[name]?.args.slice(-2), ["--product", product]);
 }
 

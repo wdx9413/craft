@@ -33,7 +33,7 @@ function assertNoSecret(value: unknown, name: string): void {
   if (value && typeof value === "object") Object.values(value as JsonObject).forEach((item) => assertNoSecret(item, name));
 }
 
-type Manifest = JsonObject & { id: string; manifest_version: string; depends_on: JsonObject[]; hooks: string[] };
+type Manifest = JsonObject & { id: string; manifest_version: string; depends_on: JsonObject[]; hooks: string[]; metadata?: JsonObject };
 
 /**
  * The installable capability boundary. This module validates and projects Kits,
@@ -160,10 +160,13 @@ export class CapabilityKitRuntime {
     const manifestVersion = text(input.version, "manifest.version"); if (!SEMVER.test(manifestVersion)) throw new Error("manifest.version must be semantic version");
     const compatibility = text(input.compatibility, "manifest.compatibility"); if (!/^\^\d+\.\d+\.\d+$/u.test(compatibility)) throw new Error("manifest.compatibility must be a caret semantic version");
     const dependsOn = input.depends_on === undefined ? [] : this.dependencyDeclarations(input.depends_on);
+    const metadata = input.metadata === undefined ? undefined : object(input.metadata, "manifest.metadata");
+    if (metadata !== undefined) assertNoSecret(metadata, "manifest.metadata");
     return { id, manifest_version: manifestVersion, name: text(input.name, "manifest.name"), description: text(input.description, "manifest.description"), compatibility,
       depends_on: dependsOn, provides: strings(input.provides, "manifest.provides"), effects: strings(input.effects, "manifest.effects", EFFECTS), data_scopes: strings(input.data_scopes, "manifest.data_scopes"),
       entrypoints: strings(input.entrypoints, "manifest.entrypoints"), hooks: strings(input.hooks, "manifest.hooks", PHASES), surfaces: strings(input.surfaces, "manifest.surfaces", SURFACES),
-      healthcheck: text(input.healthcheck, "manifest.healthcheck"), eval_suite: text(input.eval_suite, "manifest.eval_suite") };
+      healthcheck: text(input.healthcheck, "manifest.healthcheck"), eval_suite: text(input.eval_suite, "manifest.eval_suite"),
+      ...(metadata === undefined ? {} : { metadata }) };
   }
 
   private dependencyDeclarations(value: unknown): JsonObject[] {

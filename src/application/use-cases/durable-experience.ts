@@ -15,4 +15,9 @@ export function installDurableExperienceMethods(serviceClass: typeof CraftServic
   serviceClass.prototype.experienceLedgerEvaluate = function (args) { return this.experienceLedger.evaluate(args); };
   serviceClass.prototype.experienceLedgerDecide = function (args) { return this.experienceLedger.decide(args); };
   serviceClass.prototype.experienceLedgerGet = function (args) { return this.experienceLedger.get(args); };
+  serviceClass.prototype.experienceProcedureDraft = function (args) { return this.experienceProcedures.draft(args); };
+  serviceClass.prototype.experienceProcedureGate = function (args) { return this.experienceProcedures.gate(args); };
+  serviceClass.prototype.experienceProcedureGet = function (args) { return this.experienceProcedures.get(args); };
+  serviceClass.prototype.experienceProcedureList = function (args = {}) { return this.experienceProcedures.list(args); };
+  serviceClass.prototype.experienceProcedureSkillExport = function (args) { return this.experienceProcedures.skillExport(args); };
 }

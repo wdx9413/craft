@@ -50,7 +50,7 @@ test("Capability Connectors require explicit source approval, retain only metada
     assert.equal((f.service.capabilityConnectorHealthRecord({ connector_id: builtin.id, status: "healthy", source_digest: builtin.metadata_digest, observed_by: "test" }).health as JsonObject).status, "healthy");
     assert.equal((f.service.capabilityConnectorList({ limit: 1 }).connectors as JsonObject[]).length, 1);
     assert.throws(() => f.service.capabilityConnectorList({ limit: 0 }), /between/);
-    assert.equal(VERSION, "0.12.35");
+    assert.equal(VERSION, "0.12.36");
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 

@@ -1,0 +1,9 @@
+{
+  "description": "Inject bounded reviewed Craft Knowledge for the current project only.",
+  "hooks": {
+    "SessionStart": [{ "hooks": [{ "type": "command", "command": "node \"${PLUGIN_ROOT}/dist/plugin/craft-codex-hook.cjs\" --member knowledge", "timeout": 3, "statusMessage": "Checking Craft Knowledge lifecycle" }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node \"${PLUGIN_ROOT}/dist/plugin/craft-codex-hook.cjs\" --member knowledge", "timeout": 3, "statusMessage": "Resolving scoped Craft Knowledge" }] }],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "node \"${PLUGIN_ROOT}/dist/plugin/craft-codex-hook.cjs\" --member knowledge", "timeout": 3, "statusMessage": "Closing Craft Knowledge turn" }] }],
+    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "node \"${PLUGIN_ROOT}/dist/plugin/craft-codex-hook.cjs\" --member knowledge", "timeout": 3, "statusMessage": "Closing Craft Knowledge session" }] }]
+  }
+}

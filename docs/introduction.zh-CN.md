@@ -1,6 +1,6 @@
 # Craft：受控 Agent 工作运行时
 
-> 本文是 Craft 的总览入口。它解释产品解决的问题、关键概念如何连接、当前实现做到哪里，以及在面试或架构评审中应如何准确回答。当前实现基线为 v0.12.34；旧版本号只表示历史里程碑。
+> 本文是 Craft 的总览入口。它解释产品解决的问题、关键概念如何连接、当前实现做到哪里，以及在面试或架构评审中应如何准确回答。当前实现基线为 v0.12.36；旧版本号只表示历史里程碑。
 
 ## 一句话
 
@@ -71,12 +71,16 @@ Context     = History + Knowledge + Memory + Experience + State
 
 这里的 `Tool` 是模型能够请求的动作面，Skill、MCP、插件和 Workflow 都可以作为 Capability 的供给或包装；`Knowledge`、`Memory`、`Experience` 通常通过 Capability Adapter 接入。`Environment` 不是单一目录：Sandbox 负责隔离，Runtime 负责生命周期、回执、检查点和恢复。`Context` 只是面向当前模型的受限投影，不能替代 State 或 Trace。
 
+v0.12.36 补齐三个独立组件的持续积累边界：项目以 Git remote 优先的 canonical identity 识别，路径仅是本机 alias；Knowledge Source 以不可变 revision、fragment、Evidence 与 Candidate 保鲜，并可由当前 Host 对精确 Review Packet 自动复核低风险只读 Claim；Memory 使用 topic、生效时间、有效期和 supersede/revoke 历史选择当前事实；Experience 只从真实终态形成 Procedure Candidate，其中 Workflow/Graph 用受管 JSON 保存权威定义、Markdown 仅作审阅视图，Prompt Procedure 才以 Markdown 为正文。未配置 Provider 时，语义复核与向量检索明确返回 `unavailable` 或回退已验证 keyword，不伪造结果。跨机器只交换可验证的 Bundle JSON；目录/Git 工作树 Transport 不复制 SQLite、凭据或聊天正文，且不会替用户提交 Git。
+
+本版的跨机器同步使用带 `device_id`、`export_id` 与 `cursor` 的可重放数据 Bundle：同步 canonical scope、来源 revision、Evidence、受管正文、Observation 与 Candidate，但不带绝对路径、密钥、完整聊天、未脱敏输出或本机阈值。重复记录是 duplicate，不同内容同 ID 是 Conflict Set/Candidate，绝不 last-write-wins。
+
 ## 两种使用方式：完整流程与单点能力
 
 Craft 采用“两扇入口、一套账本”：
 
 1. **完整 Craft / Codex 控制台**：适合交付、写入、长任务和跨会话恢复，走 `Goal → Clarify → Activate → Preflight → Host → Observe → Accept → Learn`。Codex 插件模式复用当前 App 的 embedded Host，不会另起 Codex CLI。
-2. **独立组件 MCP/Skill/插件**：`craft-memory`、`craft-knowledge`、`craft-capability`、`craft-quality`、`craft-experience` 可以单独给 Codex、Claude、IDE 或其他 Agent 使用。只读查询和候选草拟可直接调用；任何写入、发布、外部 effect 仍回到同一 Control Plane、Policy、Trace 和 Eval。
+2. **独立认知组件 MCP/Skill/插件**：`craft-knowledge`、`craft-memory`、`craft-experience` 可以单独给 Codex、Claude、IDE 或其他 Agent 使用。它们共享同一 Evidence、Trace、Policy、Receipt 与 Eval 账本；写入、发布和外部 effect 仍受同一 Control Plane 约束。
 
 单点能力不是“低配的另一套 Craft”，而是共享内核的产品投影。它们也必须分别评测：先证明机制，再证明 Fixture、真实 Host、业务 Case，最后才可能成为 `routeable` 能力。
 
@@ -96,7 +100,7 @@ v0.12.20 将最后的“学习”变成可运行的双速闭环：本次 Session
 
 v0.12.21 进一步把主链压缩为“定义 → 准备 → 行动 → 交付 → 学习”，并将 `VerifiedWorkLoop` 固定为唯一公开工作门面。`UncertaintyPolicy` 允许模型在 Safety Floor 内自主增加求证强度，人工介入只是可配置兜底；`ReferencePilot` 用两个无正文 Case、每臂五次配对 Trial 区分机制通过与真实价值证明。详见 [Platform Ideal State v1](technical/modules/platform-ideal-state-v1.md)。
 
-v0.12.28 将产品收敛为完整 Craft 与三个推荐的独立入口：`craft-context`（知识、记忆和最小上下文）、`craft-capability`（能力发现）和 `craft-quality`（通用 Subject 评测）。完整插件统一装配 Core、Context、Capability、Quality 和 Host Bridge；旧 Knowledge、Memory、Skill Quality 名称仅保留兼容。Codex App 默认是 `embedded` Execution Host，Craft 不会因此另起 Codex CLI。详见 [组件插件架构](technical/modules/component-plugin-architecture.md)。
+v0.12.36 将公开产品收敛为完整 `craft` 与三个独立认知入口：`craft-knowledge`、`craft-memory`、`craft-experience`。`craft-context`、`craft-skill-quality` 及旧 Workflow/DAG MCP 名称只允许一次性数据迁移读取，不再作为安装或执行入口。Codex App 默认是 `embedded` Execution Host，Craft 不会因此另起 Codex CLI。
 
 v0.12.33 补齐“能部署、能证明”的外层：远程运行将 principal、tenant、scope、receipt 与一次性 handle 固定在同一任务上；真正的效果比较必须引用真实 Host Session 和独立 Outcome Observer，而不是模型自述。发布者签名、A2A v1 Task 与远程 MCP 都是可替换 Adapter，仍受既有 Capability、Signoff 与 Policy 约束。详见 [Runtime Proof 与远程部署边界](technical/modules/runtime-proof-deployment.md)。
 
@@ -106,7 +110,7 @@ v0.12.30 补齐“能部署、能证明”的外层：远程运行将 principal�
 
 当前工作树继续补强两处长期运行短板：`DurableActionLoop` 让每个 Work Item 必须经过“行动 → Receipt → 再观察 → 验收”才能成为已证明进度；`ExperienceLedger` 将观察、诊断模式与接受/拒绝的干预提案分层保存。它们不改变版本号，也不把未验证知识直接塞回执行 Host。详见 [Durable Action Loop 与 Experience Ledger](technical/modules/durable-action-experience.md)。
 
-v0.12.34 同时补齐独立知识、记忆与经验组件的真实使用闭环：`craft_knowledge_search` 会合并受管 Claim 与 Markdown 索引，但 Candidate 仅供诊断；只有 Reviewed、来源仍 active 的 Knowledge 会进入 Context Resolution。缺少 scope 的 Memory 查询明确 `skipped`，绝不退化为全局检索；Experience 只有带当前 scope 的内容无关模式引用才能进入 Context，避免跨项目串台。`craft_knowledge_memory_bundle` 支持两台机器之间的受控导出、校验、冲突计划与明确导入；它传递可校验正文和来源引用，不复制 SQLite、聊天或凭据。详见 [Knowledge、Memory 与 Context](technical/modules/knowledge-memory-context.md)。
+v0.12.34 同时补齐独立知识、记忆与经验组件的真实使用闭环：`craft_knowledge_search` 会合并受管 Claim 与 Markdown 索引，但 Candidate 仅供诊断；只有 Reviewed、来源仍 active 的 Knowledge 会进入 Context Resolution。缺少 scope 的 Memory 查询明确 `skipped`，绝不退化为全局检索；Experience 只有带当前 scope 且经 Shadow、Held-out、Signoff、Canary 成为 routeable 的 Procedure 才能进入 Context，其中 Workflow/Graph 使用受管 JSON 定义、Prompt 使用 Markdown，避免跨项目串台与未证实经验误导。`craft_knowledge_memory_bundle` 支持两台机器之间的受控导出、校验、冲突计划与明确导入；它传递可校验正文、结构化 Procedure 定义和来源引用，不复制 SQLite、聊天或凭据。详见 [Knowledge、Memory 与 Context](technical/modules/knowledge-memory-context.md)。
 
 v0.12.23 增加 `VerificationPlane`：它从变更类型、effect、Candidate 与真实 Host 需求推导最小验证集，收集环境一致的 Evidence Receipt，并判定 `eligible / rejected / inconclusive`。单元覆盖率只是其中一个确定性检查；对抗、恢复、真实 Host 和 Candidate 还需更强验证。该模块不执行命令、不持久化原始内容，仍通过既有 Host / Runtime Seam 运行实际检查。详见 [Verification Plane](technical/modules/verification-plane.md)。
 

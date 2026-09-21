@@ -90,7 +90,7 @@ test("v0.12.43 claims the tool families its kernels implement and no others", as
   // `craft_experience_capture_*` are kernels this capability does not assemble, so claiming
   // them would be a false statement about ownership.
   for (const owned of [
-    "craft_experience_ledger_observe", "craft_workflow_evolution_propose",
+    "craft_experience_ledger_observe", "craft_experience_procedure_draft",
     "craft_evaluation_model_profile_save", "craft_route_workflow_proposal", "craft_workflow_rollback",
   ]) assert(EXPERIENCE_OWNS.test(owned), `${owned} must be owned`);
 

@@ -496,8 +496,9 @@ test("service compatibility paths cover explicit studio nodes, claim evidence de
     await assert.rejects(service.adapterInstall({ manifest_path: join(f.root, "missing-adapter.json"), integrity: "sha256:missing" }));
     f.store.create("knowledge_claim", "claim", { status: "candidate", evidence_ids: "bad" });
     assert.throws(() => service.knowledgeConflictResolve({ claim_id: "claim", decision: "reviewed", reviewer: "r", reason: "r" }), /Evidence/);
-    f.store.create("evidence", "ev", { confidence: "bounded" });
-    f.store.create("knowledge_claim", "claim-array", { status: "candidate", evidence_ids: ["ev"] });
+    f.store.create("knowledge_source", "claim-review-source", { status: "active", access: "read_only" });
+    f.store.create("evidence", "ev", { confidence: "bounded", source_id: "claim-review-source" });
+    f.store.create("knowledge_claim", "claim-array", { status: "candidate", source_id: "claim-review-source", evidence_ids: ["ev"] });
     assert.equal((service.knowledgeConflictResolve({ claim_id: "claim-array", decision: "reviewed", reviewer: "r", reason: "r" }).claim as JsonObject).status, "reviewed");
     assert.throws(() => service.modelAdd({ id: "!!!" }), /model id|name/);
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }

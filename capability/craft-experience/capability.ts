@@ -1,11 +1,9 @@
 /**
  * The Experience capability.
  *
- * Experience is the accumulated context member whose carrier is a Workflow. It is named
- * after the concept rather than the carrier on purpose: the Workflow is the current shape a
- * proven strategy takes, and a graph or a profile would be another. `evolution` is the
- * overall accumulation mechanism that spans all three accumulating members, so it names the
- * mechanism, not this one member.
+ * Experience is the accumulated Context member. Its governed output is a Procedure: a
+ * workflow, graph, or short prompt-shaped procedure. These Craft-owned learned assets are
+ * deliberately separate from installed Capability Skills and Workflows.
  *
  * The package owns three kernels and nothing else:
  *
@@ -15,10 +13,9 @@
  * | `workflow-evolution` | sanitized execution observations, and the bounded model-proposal request they justify |
  * | `evaluation-model-profile` | the secret-free model configuration an evaluation runs under |
  *
- * Its `contributes` hook has an intentionally narrow read side: it returns only scoped,
- * content-free pattern references.  Observation, compilation, proposal and decision stay
- * on the write side, and neither a diagnostic pattern nor an accepted intervention becomes
- * execution instructions without a separate governed route.
+ * Its read side returns only scoped, routeable Procedures: checked JSON definitions for
+ * Workflow/Graph and Markdown-native Prompt Procedures. Observation, patterns and candidates
+ * stay diagnostic; they cannot become Context merely by existing.
  */
 import type { CraftCapability } from "../../src/capability-protocol.ts";
 import { CORE_KERNELS } from "../../src/capability-protocol.ts";
@@ -27,6 +24,7 @@ import type { ModelProviderSpec } from "../../src/model-gateway.ts";
 import { ExperienceContribution } from "./contribution.ts";
 import { EvaluationModelProfileKernel } from "./evaluation-model-profile.ts";
 import { ExperienceLedgerKernel } from "./experience-ledger.ts";
+import { ProcedureStore } from "./procedure-projection.ts";
 import { EXPERIENCE_OWNS } from "./ownership.ts";
 import { WorkflowEvolutionKernel } from "./workflow-evolution.ts";
 
@@ -40,6 +38,7 @@ import { WorkflowEvolutionKernel } from "./workflow-evolution.ts";
 export const EXPERIENCE_KERNELS = {
   ledger: "experience.ledger",
   workflowEvolution: "experience.workflow_evolution",
+  procedures: "experience.procedures",
   modelProfiles: "experience.model_profiles",
 } as const;
 
@@ -70,16 +69,12 @@ export const experienceCapability: CraftCapability = {
     const providers = registry.require<readonly ModelProviderSpec[]>(CORE_KERNELS.modelProviders);
     registry.provide(EXPERIENCE_KERNELS.ledger, new ExperienceLedgerKernel(store));
     registry.provide(EXPERIENCE_KERNELS.workflowEvolution, new WorkflowEvolutionKernel(store));
+    registry.provide(EXPERIENCE_KERNELS.procedures, new ProcedureStore(store));
     registry.provide(EXPERIENCE_KERNELS.modelProfiles, new EvaluationModelProfileKernel(store, providers));
   },
   /**
-   * The read side, which is the only one of the three members that has one.
-   *
-   * Knowledge and memory read back through `ContextResolutionKernel.resolve` in the core; experience
-   * cannot, because its records are content-free by construction and marked
-   * `execution_visible: false`. So it contributes what it *can* honestly contribute — which compiled
-   * experience applies, at which version, and whether anything reached Signoff — and never the
-   * instructions, which do not exist in Craft to leak in the first place.
+   * Context receives only routeable Procedure projections. This keeps diagnostic learning useful
+   * without letting unproven inference steer a Host.
    */
   contributes: (registry) => new ExperienceContribution(registry.require<CraftStore>(CORE_KERNELS.store)),
 };

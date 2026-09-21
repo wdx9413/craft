@@ -14,7 +14,13 @@
 
 切法是**成员边界**，不是代码大小：`KnowledgeSourceRegistry` 是 knowledge 成员的写入侧，`MemoryLedgerKernel` 是 memory 成员的写入侧，而 `ContextResolutionKernel` 是**三个累积成员共用的读取侧**。
 
-最后一条决定了它必须留在核心：`component-knowledge`、`component-memory`、`component-context` 三个产品**都**暴露 `craft_context_resolution_*` 与 `craft_retrieval_adapter_*`。只装一个关注点的宿主仍然要能解析那个关注点持有的材料，所以读取侧不能属于任一成员的包。Memory 不声明 `contributes`：它由核心 Resolver 直接读取 Ledger，避免同一成员被两个 Provider 重复装载。Knowledge 声明唯一的 `KnowledgeContribution`：它只投影已 `reviewed`、未过期、同 scope 或 global、且 Source 仍 active/非 untrusted 的 Claim。这样“搜索中看到一个 candidate”与“把它交给执行 Host”是两条刻意不同的路径；Experience 只贡献当前 scope 的内容无关模式引用，旧的未标 scope 记录仍可诊断，但绝不进入 Context。
+最后一条决定了它必须留在核心：`component-knowledge`、`component-memory`、`component-context` 三个产品**都**暴露 `craft_context_resolution_*` 与 `craft_retrieval_adapter_*`。只装一个关注点的宿主仍然要能解析那个关注点持有的材料，所以读取侧不能属于任一成员的包。Memory 由核心 Resolver 直接读取 Ledger，避免同一成员被两个 Provider 重复装载。Knowledge 只投影已 `reviewed`、未过期、且 Source 仍 active/非 untrusted 的 Claim。这样“搜索中看到一个 candidate”与“把它交给执行 Host”是两条刻意不同的路径；Experience 只贡献已路由 Procedure：Workflow/Graph 为摘要校验后的 JSON 定义，Prompt 为 Markdown。Observation、Pattern、Candidate 和未标 scope 的旧记录仍可诊断，但绝不进入 Context。
+
+### Scope 不是一棵树
+
+每条 Knowledge、Memory 或 Procedure 都可携带 `Scope Envelope`：`applicability`（适用于哪里）、`custody`（谁拥有）、`audience`（谁可见）、`purpose`（working note / preference / episode / fact / procedure）、`retention` 和可选 `tenant_id`。它们是正交字段；`project` 不是 `user` 或 `team` 的父节点。
+
+Context 的工作通道为 `task → session → project → explicit team → explicit organization`，个人通道为明确指定的 `user`。团队、组织、用户与 global 都只能由 Host/调用方明确给出，绝不扫描全部记录或根据模型文本推断身份。旧记录没有 Envelope 时保持原精确 scope 的兼容语义；新 Envelope 才可要求 principal/tenant 匹配。`global` 也只能经 `include_global=true` 显式读入。
 
 ## Knowledge Source
 
@@ -32,7 +38,7 @@
 
 ## Memory Ledger
 
-Ledger 统一四种 Memory：`working`、`episodic`、`preference`、`procedural`。每项都有精确 Source（**及该 Source 当时的版本**）、user/project/workspace/task scope、content digest、sensitivity、confidence、Evidence、有效期和撤销/替代关系。
+Ledger 统一四种 Memory：`working`、`episodic`、`preference`、`procedural`。每项都有精确 Source（**及该 Source 当时的版本**）、适用 scope、Scope Envelope、content digest、sensitivity、confidence、Evidence、有效期和撤销/替代关系。`working_note:true` 是短生命周期、默认不装载的兼容桥；Task/Run State 仍属于 Runtime，而不是长期记忆。
 
 `craft-memory` 的日常面既可写也可读：候选经 Evidence review 后 materialize 到 Ledger；`craft_memory_ledger_get` 读取一条正文，`craft_memory_ledger_list` 只列调用方明确给出的 scope，默认只含 active 项，历史项必须显式 `include_history=true`。没有 scope 绝不退回全局或跨项目扫描。这样单独安装的 Memory MCP 不需要 Core 主插件也能维护可迁移的记忆，但仍共享同一 Content Store、Evidence、Policy 和 Context Receipt。
 
@@ -53,7 +59,7 @@ Ledger 统一四种 Memory：`working`、`episodic`、`preference`、`procedural
 
 ## Context Resolution Receipt
 
-Context Resolution 只在一个精确 scope 内选择 active、非 `untrusted` 且未过期的 Ledger 项，遵守条目数和字符预算；同时调用 Knowledge/Experience 的受限 Contribution。`restricted` 项默认不装载，只有调用方显式声明 `allow_restricted=true` 才可选择。调用返回当前 Host 所需的正文或引用，但持久 `context_resolution_receipt` 只保存：查询摘要、Source/Memory/Knowledge 精确版本、内容 digest、选择理由、预算和遗漏数量；不保存重复正文。
+Context Resolution 只在一个明确 scope 栈内选择 active、非 `untrusted`、未过期、且 Scope Envelope 对当前 principal/tenant/purpose 允许的 Ledger 项，遵守条目数和字符预算；同时调用 Knowledge/Experience 的受限 Contribution。`restricted` 项默认不装载，只有调用方显式声明 `allow_restricted=true` 才可选择。调用返回当前 Host 所需的正文或引用，但持久 `context_resolution_receipt` 只保存：查询摘要、Source/Memory/Knowledge 精确版本、内容 digest、选择理由、预算和遗漏数量；不保存重复正文。
 
 调用方可通过 `members: ["knowledge"]`、`["memory"]` 或 `["experience"]` 选择一个累积成员。该选择同样进入 Receipt identity；因此 Knowledge 与 Memory 的独立 Codex Hook 不会互相装载材料。省略 `members` 仍保持兼容的全部累积成员解析；`history` 和 `state` 不是可选检索成员，分别属于 Host 与当前 Run。
 

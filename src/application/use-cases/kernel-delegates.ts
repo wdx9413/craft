@@ -22,6 +22,7 @@ declare module "../craft-service.ts" {
     knowledgeSourceRegister(args: JsonObject): JsonObject;
     knowledgeSourceList(args: JsonObject): JsonObject;
     knowledgeSourceTransition(args: JsonObject): JsonObject;
+    knowledgeSourceIngest(args: JsonObject): JsonObject;
     memoryLedgerRemember(args: JsonObject): JsonObject;
     memoryLedgerGet(args: JsonObject): JsonObject;
     memoryLedgerList(args: JsonObject): JsonObject;
@@ -31,6 +32,10 @@ declare module "../craft-service.ts" {
     contextResolutionGet(args: JsonObject): JsonObject;
     retrievalAdapterConfigure(args: JsonObject): JsonObject;
     retrievalAdapterEvaluate(args: JsonObject): JsonObject;
+    scopeIdentityResolveProject(args: JsonObject): JsonObject;
+    scopeAliasBind(args: JsonObject): JsonObject;
+    scopeAliasMigrate(args: JsonObject): JsonObject;
+    memoryMaintenanceSchedule(args: JsonObject): JsonObject;
     relationSave(args: JsonObject): JsonObject;
     relationRetract(args: JsonObject): JsonObject;
     relationGet(args: JsonObject): JsonObject;
@@ -99,6 +104,8 @@ declare module "../craft-service.ts" {
     knowledgePromotionPolicyGet(): JsonObject;
     knowledgePromotionPolicySave(args: JsonObject): JsonObject;
     knowledgeClaimSupportRecord(args: JsonObject): JsonObject;
+    knowledgeSemanticReviewPacket(args: JsonObject): JsonObject;
+    knowledgeSemanticProviderReview(args: JsonObject): Promise<JsonObject>;
     knowledgeHostReview(args: JsonObject): JsonObject;
     knowledgeCandidateModelReview(args: JsonObject): Promise<JsonObject>;
     decisionContextGateOpen(args: JsonObject): Promise<JsonObject>;
@@ -186,6 +193,11 @@ declare module "../craft-service.ts" {
     experienceLedgerEvaluate(args: JsonObject): JsonObject;
     experienceLedgerDecide(args: JsonObject): JsonObject;
     experienceLedgerGet(args: JsonObject): JsonObject;
+    experienceProcedureDraft(args: JsonObject): JsonObject;
+    experienceProcedureGate(args: JsonObject): JsonObject;
+    experienceProcedureGet(args: JsonObject): JsonObject;
+    experienceProcedureList(args?: JsonObject): JsonObject;
+    experienceProcedureSkillExport(args: JsonObject): JsonObject;
   }
 }
 

@@ -73,6 +73,32 @@
       "branches": true
     },
     {
+      "name": "engineering-quality-profile",
+      "include": [
+        "capability/engineering-quality-profile.ts"
+      ],
+      "tests": [
+        "tests/engineering-quality-profile.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "activation-proof-and-runtime-acceptance",
+      "include": [
+        "src/activation-proof.ts",
+        "src/component-history-migration.ts",
+        "src/decision-context-gate.ts",
+        "src/runtime-acceptance.ts"
+      ],
+      "tests": [
+        "tests/activation-proof-and-history.test.ts",
+        "tests/decision-context-gate-coverage.test.ts",
+        "tests/runtime-proof.test.ts",
+        "tests/branch-boundary-fill.test.ts"
+      ],
+      "branches": true
+    },
+    {
       "name": "universal-runtime",
       "include": [
         "capability/craft-knowledge/knowledge-source-registry.ts",
@@ -88,7 +114,9 @@
         "tests/component-procedure-graph.test.ts",
         "tests/capability-memory-package.test.ts",
         "tests/capability-knowledge-package.test.ts",
-        "tests/experience-contribution.test.ts"
+        "tests/experience-contribution.test.ts",
+        "tests/v01236-components.test.ts",
+        "tests/turn-cognitive-runtime.test.ts"
       ],
       "branches": true
     },
@@ -161,7 +189,8 @@
         "tests/evaluation-model-workflow-evolution.test.ts",
         "tests/component-procedure-graph.test.ts",
         "tests/capability-experience-package.test.ts",
-        "tests/experience-contribution.test.ts"
+        "tests/experience-contribution.test.ts",
+        "tests/v01236-components.test.ts"
       ],
       "branches": true
     },

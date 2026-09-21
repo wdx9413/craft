@@ -35,6 +35,7 @@
  * audit would reject it.
  */
 import type { JsonObject } from "./infrastructure/store.ts";
+import { COGNITIVE_SCOPE_KINDS } from "./scope-policy.ts";
 
 /** A non-empty string, trimmed. An absent or blank value is an error. */
 export function text(value: unknown, name: string): string {
@@ -110,7 +111,7 @@ export interface ScopeRef { readonly kind: string; readonly id: string }
  * `SCOPE_KINDS` set of every module that parses a scope. Two of those modules defined
  * `scope(args)` identically, which is why it lives here rather than in either of them.
  */
-export const SCOPE_KINDS: ReadonlySet<string> = new Set(["user", "project", "workspace", "task", "session"]);
+export const SCOPE_KINDS: ReadonlySet<string> = new Set(COGNITIVE_SCOPE_KINDS);
 
 /** Read `{scope_kind, scope_id}` from arguments, rejecting an unsupported kind. */
 export function parseScope(args: JsonObject): ScopeRef {

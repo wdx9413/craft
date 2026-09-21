@@ -49,6 +49,9 @@ import { canonicalJson } from "../digest.ts";
 import { CRAFT_RELEASE_VERSION } from "../version.ts";
 import type { EvaluationContractInput, EvaluationStage } from "../evaluation-contract.ts";
 import { ComponentReadinessKernel, type ComponentName } from "../component-readiness.ts";
+import { WorkControl } from "./coordinators/work-control.ts";
+import { ForgeDispatchCoordinator } from "./coordinators/forge-dispatch.ts";
+import { scopeEnvelope, scopeFromKey } from "../scope-policy.ts";
 
 export const VERSION = CRAFT_RELEASE_VERSION;
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
@@ -65,7 +68,7 @@ const ACCEPTANCE_METHODS = new Set(["program", "model", "human", "business_signa
 const ACCEPTANCE_RESULTS = new Set(["passed", "failed", "blocked"]);
 const DOMAIN_FIELD_TYPES = new Set(["text", "path", "integer", "boolean", "choice"]);
 const KNOWLEDGE_KINDS = new Set(["fact", "rule", "decision", "term", "failure_mode"]);
-const KNOWLEDGE_STATUSES = new Set(["candidate", "reviewed", "disputed", "superseded", "expired"]);
+const KNOWLEDGE_STATUSES = new Set(["candidate", "reviewed", "disputed", "superseded", "expired", "stale"]);
 const KNOWLEDGE_RELATIONS = new Set(["supports", "contradicts", "supersedes", "applies_to", "depends_on"]);
 
 function id(prefix: string): string { return `${prefix}_${randomUUID().replaceAll("-", "")}`; }
@@ -234,6 +237,8 @@ function validateModelInput(args: JsonObject, id: string): CraftModelConfig {
 }
 
 export class CraftService extends ServiceFoundation {
+  readonly workControl: WorkControl;
+  readonly forgeDispatch: ForgeDispatchCoordinator;
 
   constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter?: unknown,
     dockerSandbox?: unknown, egressBroker?: unknown, hostOwnerId?: string, hostProfiles?: readonly import("../host-registry.ts").HostProfile[],
@@ -241,6 +246,14 @@ export class CraftService extends ServiceFoundation {
     modelTransport?: import("../model-gateway.ts").ModelTransport, traceArchiveBackends?: readonly TraceArchiveRuntimeBackend[]) {
     super(store, semanticProvider, isolatedAdapter as never, dockerSandbox as never, egressBroker as never, hostOwnerId,
       hostProfiles, modelProviders, modelTransport, traceArchiveBackends);
+    this.workControl = new WorkControl(store, {
+      prepare: (args) => this.verifiedWorkLoopPrepareInternal(args),
+      advance: (args) => this.verifiedWorkLoopAdvanceInternal(args),
+      decide: (args) => this.verifiedWorkLoopDecideInternal(args),
+      resume: (args) => this.verifiedWorkLoopResumeInternal(args),
+      get: (args) => this.verifiedWorkLoopGetInternal(args),
+    });
+    this.forgeDispatch = new ForgeDispatchCoordinator(store);
   }
 
   /** Studio facade: all writes go through governed Claim/Ledger/DAG kernels. */
@@ -278,7 +291,7 @@ export class CraftService extends ServiceFoundation {
     const evidence = this.evidenceRecord({ evidence_id: String(args.evidence_id ?? `evidence_memory_statement_${suffix}`), source_type: "human", confidence: "bounded",
       claim: "Explicit user statement captured for governed Memory.", locator: `memory-capture:${scopeKind}:${scopeId}`, metadata: { capture_digest: valueDigest(captureIdentity), user_authored: true } });
     const proposed = this.memoryCandidatePropose({ candidate_id: String(args.candidate_id ?? `memory_candidate_statement_${suffix}`), source_id: "builtin.evidence-wiki", kind,
-      scope_kind: scopeKind, scope_id: scopeId, ...(topic === undefined ? {} : { topic }), content, sensitivity: args.sensitivity ?? "internal", confidence: "bounded",
+      scope_kind: scopeKind, scope_id: scopeId, ...(args.scope_envelope === undefined ? {} : { scope_envelope: args.scope_envelope }), ...(topic === undefined ? {} : { topic }), content, sensitivity: args.sensitivity ?? "internal", confidence: "bounded",
       evidence_ids: [evidence.id], proposed_by: "explicit-user-statement", valid_until: args.valid_until });
     const candidate = proposed.candidate as JsonObject;
     if (args.auto_accept !== true || candidate.status !== "candidate") return { ...proposed, evidence, auto_committed: false,
@@ -446,9 +459,18 @@ export class CraftService extends ServiceFoundation {
     if (procedureKind === "graph") this.workflowDagValidate({ nodes: args.nodes, edges: args.edges ?? [], inputs: args.inputs ?? [], outputs: args.outputs ?? {}, checkpoint_policy: args.checkpoint_policy ?? { mode: "step" } });
     const submitted = this.workflowEvolution.submit(args); const proposal = submitted.proposal as JsonObject;
     const nextAction = "Run shadow and held-out evaluation, then use the existing Signoff and Canary gates before this Procedure can be selected.";
+    if (procedureKind === "prompt") {
+      const procedure = this.experienceProcedures.draft({ proposal_id: proposal.id, procedure_kind: "prompt", title: proposal.name,
+        description: proposal.prompt ?? proposal.description, trigger: args.trigger ?? request.scenario_key,
+        acceptance_ref: args.acceptance_ref ?? request.output_contract_ref, evidence_ids: args.evidence_ids ?? (request.observation_refs as JsonObject[]).flatMap((item) => item.evidence_ids as string[]) });
+      return { ...submitted, procedure: procedure.procedure, next_action: nextAction };
+    }
     if (submitted.idempotent === true) {
       const kind = String(proposal.procedure_kind ?? "workflow") === "graph" ? "workflow_dag" : "workflow";
-      return { ...submitted, workflow: this.store.get(kind, String(proposal.workflow_id)), next_action: nextAction };
+      const procedure = this.experienceProcedures.draft({ proposal_id: proposal.id, procedure_kind: proposal.procedure_kind,
+        title: proposal.name, description: proposal.description, trigger: args.trigger ?? request.scenario_key,
+        acceptance_ref: args.acceptance_ref ?? request.output_contract_ref, evidence_ids: args.evidence_ids ?? (request.observation_refs as JsonObject[]).flatMap((item) => item.evidence_ids as string[]) });
+      return { ...submitted, workflow: this.store.get(kind, String(proposal.workflow_id)), procedure: procedure.procedure, next_action: nextAction };
     }
     const derivedFrom = { workflow_evolution_proposal_id: proposal.id, workflow_evolution_proposal_version: proposal.version,
       request_id: proposal.request_id, request_version: proposal.request_version, model_ticket_id: proposal.model_ticket_id,
@@ -459,7 +481,10 @@ export class CraftService extends ServiceFoundation {
         outputs: (proposal.graph as JsonObject).outputs, checkpoint_policy: (proposal.graph as JsonObject).checkpoint_policy, derived_from: derivedFrom }).workflow as JsonObject)
       : this.workflowSave({ workflow_id: proposal.workflow_id, name: proposal.name, description: proposal.description,
         inputs: proposal.inputs, steps: proposal.steps, derived_from: derivedFrom });
-    return { ...submitted, workflow, next_action: nextAction };
+    const procedure = this.experienceProcedures.draft({ proposal_id: proposal.id, procedure_kind: proposal.procedure_kind,
+      title: proposal.name, description: proposal.description, trigger: args.trigger ?? request.scenario_key,
+      acceptance_ref: args.acceptance_ref ?? request.output_contract_ref, evidence_ids: args.evidence_ids ?? (request.observation_refs as JsonObject[]).flatMap((item) => item.evidence_ids as string[]) });
+    return { ...submitted, workflow, procedure: procedure.procedure, next_action: nextAction };
   }
 
   /** Where the circuit breakers would sit for a given plan, without running anything. */
@@ -552,6 +577,10 @@ export class CraftService extends ServiceFoundation {
   /** Content-free readiness for a separately mounted component product. */
   componentReadinessGet(args: JsonObject, mountedComponent?: ComponentName): JsonObject { return new ComponentReadinessKernel(this.store).get(args, mountedComponent); }
   componentDiagnose(args: JsonObject, mountedComponent?: ComponentName): JsonObject { return new ComponentReadinessKernel(this.store).diagnose(args, mountedComponent); }
+  activationProofDoctor(args: JsonObject = {}): JsonObject { return this.activationProof.doctor(args); }
+  activationProofRecord(args: JsonObject): JsonObject { return this.activationProof.record(args); }
+  componentHistoryKnowledgeReviewedMigrate(args: JsonObject = {}): JsonObject { return this.componentHistoryMigration.knowledgeReviewed(args); }
+  componentHistoryExperienceMigrate(args: JsonObject = {}): JsonObject { return this.componentHistoryMigration.experienceWorkflowEvolution(args); }
 
   sourceAdd(args: JsonObject): Promise<JsonObject> {
     const label = args.label === undefined ? undefined : text(args.label, "label");
@@ -787,6 +816,16 @@ export class CraftService extends ServiceFoundation {
   capabilityKitSetState(args: JsonObject): JsonObject { return this.capabilityKits.setState(args); }
   capabilityKitConformance(args: JsonObject): JsonObject { return this.capabilityKits.conformance(args); }
   capabilityKitDistribution(args: JsonObject): JsonObject { return this.capabilityKits.distribution(args); }
+  engineeringQualityProfileInstall(): JsonObject { return this.engineeringQualityProfile.install(); }
+  engineeringQualityProfileCaseSave(args: JsonObject): JsonObject { return this.engineeringQualityProfile.caseSave(args); }
+  engineeringQualityProfileActivate(args: JsonObject): JsonObject { return this.engineeringQualityProfile.activate(args); }
+  engineeringQualityProfileTrialContext(args: JsonObject): JsonObject { return this.engineeringQualityProfile.trialContext(args); }
+  engineeringQualityProfileContribution(args: JsonObject): JsonObject { return this.engineeringQualityProfile.contribute(args); }
+  engineeringQualityProfileReviewAggregate(args: JsonObject): JsonObject { return this.engineeringQualityProfile.reviewAggregate(args); }
+  engineeringQualityProfileEvaluationPlan(args: JsonObject): JsonObject { return this.engineeringQualityProfile.evaluationPlan(args); }
+  engineeringQualityProfileEvaluationRecord(args: JsonObject): JsonObject { return this.engineeringQualityProfile.evaluationRecord(args); }
+  engineeringQualityProfileEvaluationEvaluate(args: JsonObject): JsonObject { return this.engineeringQualityProfile.evaluationEvaluate(args); }
+  engineeringQualityProfileEvaluationGet(args: JsonObject): JsonObject { return this.engineeringQualityProfile.evaluationGet(args); }
   workRuntimeModeConfigure(args: JsonObject): JsonObject { return this.workRuntimeModes.configure(args); }
   workRuntimeModePrepare(args: JsonObject): JsonObject { return this.workRuntimeModes.prepare(args); }
   workRuntimeModeGet(args: JsonObject): JsonObject { return this.workRuntimeModes.get(args); }
@@ -2665,15 +2704,17 @@ export class CraftService extends ServiceFoundation {
     // reference.  Otherwise a source revocation cannot stop an already-reviewed claim from
     // entering Context after a database reload or bundle import.
     const sourceId = String(args.source_id ?? "builtin.evidence-wiki");
-    const identity = { kind, content_digest: contentDigest, scope, source_id: sourceId, evidence_ids: evidenceIds, tags, valid_until: validUntil, ...(title ? { title } : {}) };
+    const envelope = scopeEnvelope(args.scope_envelope, scopeFromKey(scope));
+    const identity = { kind, content_digest: contentDigest, scope, scope_envelope: envelope, source_id: sourceId, evidence_ids: evidenceIds, tags, valid_until: validUntil, ...(title ? { title } : {}) };
     if (existing) {
       // v0.12.33 claims did not persist source_id in their identity.  Keep a
       // one-way compatibility match so a previously completed import remains
       // idempotent; it does not make the legacy record eligible for a newly
       // revoked external Source, because it still resolves as the built-in
       // source until a reviewed migration explicitly re-attributes it.
-      const legacyIdentity = { kind, content_digest: contentDigest, scope, evidence_ids: evidenceIds, tags, valid_until: validUntil, ...(title ? { title } : {}) };
-      if (existing.identity_digest !== valueDigest(identity) && existing.identity_digest !== valueDigest(legacyIdentity)) throw new Error("Knowledge claim idempotency conflict");
+      const legacyIdentity = { kind, content_digest: contentDigest, scope, source_id: sourceId, evidence_ids: evidenceIds, tags, valid_until: validUntil, ...(title ? { title } : {}) };
+      const olderIdentity = { kind, content_digest: contentDigest, scope, evidence_ids: evidenceIds, tags, valid_until: validUntil, ...(title ? { title } : {}) };
+      if (existing.identity_digest !== valueDigest(identity) && existing.identity_digest !== valueDigest(legacyIdentity) && existing.identity_digest !== valueDigest(olderIdentity)) throw new Error("Knowledge claim idempotency conflict");
       return { claim: existing, idempotent: true };
     }
     const contentRef = this.store.contentStore.writeSync({ kind: "knowledge", record_id: claimId, version: 1, scope, status: "candidate", sensitivity: "internal", source_id: sourceId, title, body: content });
@@ -2945,7 +2986,7 @@ export class CraftService extends ServiceFoundation {
     if (launch.run_id) { const host = this.store.get("host_run", String(launch.run_id)); if (!new Set(["completed", "failed", "cancelled", "interrupted"]).has(String(host.status))) this.hostRunCancel({ run_id: host.id, reason: args.reason }); }
     return this.taskRuns.cancel(args);
   }
-  verifiedWorkLoopPrepare(args: JsonObject): JsonObject {
+  private verifiedWorkLoopPrepareInternal(args: JsonObject): JsonObject {
     const workspace = this.store.get("workspace", text(args.workspace_id, "workspace_id"));
     const task = args.task_id === undefined ? this.taskOpen({ title: args.title, goal: args.goal, project_id: args.project_id }).task as JsonObject : this.store.get("task", text(args.task_id, "task_id"));
     const control = this.taskControlSave({ contract_id: args.contract_id, task_id: task.id, workspace: workspace.root_path,
@@ -2957,13 +2998,13 @@ export class CraftService extends ServiceFoundation {
     const loop = this.verifiedWorkLoops.create({ work_loop_id: args.work_loop_id, task_id: task.id, contract_id: control.id, task_run_id: taskRun.id, snapshot_id: (baseline.snapshot as JsonObject).id, goal: args.goal ?? task.goal ?? task.title, mode: args.mode, target: args.target, plan: args.plan, accept: args.accept ?? args.acceptance ?? (args.acceptance_criteria === undefined ? undefined : { criteria: args.acceptance_criteria }) });
     return { task, contract: control, baseline_snapshot: baseline.snapshot, ...prepared, work_loop: loop.loop, work_loop_idempotent: loop.idempotent };
   }
-  verifiedWorkLoopAdvance(args: JsonObject): JsonObject {
+  private verifiedWorkLoopAdvanceInternal(args: JsonObject): JsonObject {
     const loop = this.store.get("verified_work_loop", text(args.work_loop_id, "work_loop_id")); const taskRun = this.store.get("task_run", String(loop.task_run_id));
     const state = this.taskRunRefresh({ task_run_id: taskRun.id, environment: args.environment, budget: args.budget }).state as JsonObject;
     const snapshot = this.stateWorkspace.observe({ workspace_id: loop.workspace_id, adapter: args.state_adapter ?? "file_tree", paths: args.state_paths, artifact_ids: args.artifact_ids, snapshot_id: args.snapshot_id }).snapshot as JsonObject;
     return this.verifiedWorkLoops.advance({ work_loop_id: loop.id, task_run_state_id: state.id, snapshot_id: snapshot.id, receipt_id: args.receipt_id });
   }
-  verifiedWorkLoopDecide(args: JsonObject): JsonObject {
+  private verifiedWorkLoopDecideInternal(args: JsonObject): JsonObject {
     const loop = this.store.get("verified_work_loop", text(args.work_loop_id, "work_loop_id")); const run = this.store.get("task_run", String(loop.task_run_id)); const launch = this.store.get("work_launch", String(run.launch_id));
     const decision = String(args.decision);
     if (decision === "approve" && args.approved !== true) throw new Error("Verified Work Loop approve requires approved=true");
@@ -2979,13 +3020,24 @@ export class CraftService extends ServiceFoundation {
     if (decision === "accept" || decision === "reject") return { ...recorded, review: this.acceptanceHumanReview({ plan_id: launch.acceptance_plan_id, criterion_id: args.criterion_id, reviewer: args.actor, result: decision === "accept" ? "passed" : "failed", summary: args.summary }) };
     return recorded;
   }
-  verifiedWorkLoopResume(args: JsonObject): JsonObject {
+  private verifiedWorkLoopResumeInternal(args: JsonObject): JsonObject {
     const loop = this.store.get("verified_work_loop", text(args.work_loop_id, "work_loop_id")); if (loop.lifecycle === "needs_replan") throw new Error("Verified Work Loop requires a fresh prepare after input or workspace drift");
     const beforeResume = this.verifiedWorkLoopAdvance({ work_loop_id: loop.id, environment: args.environment, budget: args.budget, state_adapter: args.state_adapter, state_paths: args.state_paths }); if ((beforeResume.state as JsonObject).status === "needs_replan") throw new Error("Verified Work Loop requires a fresh prepare after input or workspace drift");
     const run = this.store.get("task_run", String(loop.task_run_id)); const resumed = this.taskRunResume({ task_run_id: run.id, environment: args.environment, budget: args.budget });
     return { resumed, advance: this.verifiedWorkLoopAdvance({ work_loop_id: loop.id, environment: args.environment, budget: args.budget, state_adapter: args.state_adapter, state_paths: args.state_paths }) };
   }
-  verifiedWorkLoopGet(args: JsonObject): JsonObject { return this.verifiedWorkLoops.get(args); }
+  private verifiedWorkLoopGetInternal(args: JsonObject): JsonObject { return this.verifiedWorkLoops.get(args); }
+  verifiedWorkLoopPrepare(args: JsonObject): JsonObject { return this.workControl.prepare(args); }
+  verifiedWorkLoopAdvance(args: JsonObject): JsonObject { return this.workControl.advance(args); }
+  verifiedWorkLoopDecide(args: JsonObject): JsonObject { return this.workControl.decide(args); }
+  /** Legacy facade retains its historical throw-on-drift contract. New callers use WorkControl directly. */
+  verifiedWorkLoopResume(args: JsonObject): JsonObject { return this.verifiedWorkLoopResumeInternal(args); }
+  workControlPrepare(args: JsonObject): JsonObject { return this.workControl.prepare(args); }
+  workControlAdvance(args: JsonObject): JsonObject { return this.workControl.advance(args); }
+  workControlDecide(args: JsonObject): JsonObject { return this.workControl.decide(args); }
+  workControlResume(args: JsonObject): JsonObject { return this.workControl.resume(args); }
+  workControlGet(args: JsonObject): JsonObject { return this.workControl.get(args); }
+  verifiedWorkLoopGet(args: JsonObject): JsonObject { return this.workControl.get(args); }
   evaluationContractDefine(args: JsonObject): JsonObject { return this.evaluationContracts.define(args as unknown as EvaluationContractInput & { contract_id?: string }); }
   evaluationContractRecord(args: JsonObject): JsonObject { return this.evaluationContracts.record(args as unknown as { contract_id: string; stage: EvaluationStage; evidence?: string[]; metrics?: JsonObject }); }
   evaluationContractGet(args: JsonObject): JsonObject { return this.evaluationContracts.get(text(args.contract_id, "contract_id")); }
@@ -3778,14 +3830,33 @@ export class CraftService extends ServiceFoundation {
   localRuntimeServiceConfigure(args: JsonObject): JsonObject { return this.localRuntimeService.configure(args); }
   localRuntimeServiceStart(args: JsonObject = {}): JsonObject { return this.localRuntimeService.start(args); }
   localRuntimeServiceStop(args: JsonObject = {}): JsonObject { return this.localRuntimeService.stop(args); }
-  localRuntimeServiceTick(args: JsonObject = {}): JsonObject { return this.localRuntimeService.tick(args); }
+  localRuntimeServiceTick(args: JsonObject = {}): JsonObject {
+    // A Local Runtime tick is the only scheduler integration point.  It first
+    // advances due, routeable Workflow jobs, then preserves the older wakeup
+    // queue semantics for Hosts that do not install Procedure Automation.
+    const automation = this.procedureAutomation.tick(args);
+    const runtime = this.localRuntimeService.tick(args);
+    return { ...runtime, automation };
+  }
   localRuntimeServiceGet(args: JsonObject = {}): JsonObject { return this.localRuntimeService.get(args); }
+  procedureAutomationSave(args: JsonObject): JsonObject { return this.procedureAutomation.save(args); }
+  procedureAutomationPause(args: JsonObject): JsonObject { return this.procedureAutomation.pause(args); }
+  procedureAutomationRun(args: JsonObject): JsonObject { return this.procedureAutomation.run(args); }
+  procedureAutomationTick(args: JsonObject = {}): JsonObject { return this.procedureAutomation.tick(args); }
+  procedureAutomationGet(args: JsonObject): JsonObject { return this.procedureAutomation.get(args); }
+  procedureAutomationEligibility(args: JsonObject): JsonObject { return this.procedureAutomation.eligibility(args); }
+  ticketDispatchScan(args: JsonObject): JsonObject { return this.forgeDispatch.scan(args); }
+  ticketDispatchEvaluate(args: JsonObject): JsonObject { return this.forgeDispatch.evaluate(args); }
+  forgePolicySave(args: JsonObject): JsonObject { return this.forgeDispatch.policySave(args); }
+  forgeActionPrepare(args: JsonObject): JsonObject { return this.forgeDispatch.actionPrepare(args); }
+  forgeActionGet(args: JsonObject): JsonObject { return this.forgeDispatch.get(args); }
   projectBundleExport(args: JsonObject): JsonObject { return this.projectBundles.export(args); }
   projectBundleVerify(args: JsonObject): JsonObject { return this.projectBundles.verify(args); }
   knowledgeMemoryBundleExport(args: JsonObject): JsonObject { return this.knowledgeMemoryBundles.export(args); }
   knowledgeMemoryBundleVerify(args: JsonObject): JsonObject { return this.knowledgeMemoryBundles.verify(args); }
   knowledgeMemoryBundleImportPlan(args: JsonObject): JsonObject { return this.knowledgeMemoryBundles.importPlan(args); }
   knowledgeMemoryBundleImportApply(args: JsonObject): JsonObject { return this.knowledgeMemoryBundles.importApply(args); }
+  knowledgeMemoryBundleTransport(args: JsonObject): JsonObject { return this.knowledgeMemoryBundles.transport(args); }
   knowledgeMemoryBundleManage(args: JsonObject): JsonObject {
     const operation = text(args.operation, "operation");
     const request = { ...args }; delete request.operation;
@@ -3793,6 +3864,8 @@ export class CraftService extends ServiceFoundation {
     if (operation === "verify") return this.knowledgeMemoryBundleVerify(request);
     if (operation === "import_plan") return this.knowledgeMemoryBundleImportPlan(request);
     if (operation === "import_apply") return this.knowledgeMemoryBundleImportApply(request);
+    if (operation === "transport_write") return this.knowledgeMemoryBundleTransport({ ...request, operation: "write" });
+    if (operation === "transport_read") return this.knowledgeMemoryBundleTransport({ ...request, operation: "read" });
     throw new Error("Knowledge/Memory Bundle operation is unsupported");
   }
   feedbackLearningRecord(args: JsonObject): JsonObject { return this.feedbackLearning.record(args); }

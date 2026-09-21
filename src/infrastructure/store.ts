@@ -84,7 +84,11 @@ export class CraftStore {
   }
 
   private rebuildDomainIndexes(database: DatabaseSync): void {
-    const entries: Array<[string, ContentKind]> = [[this.paths.knowledgeDatabaseFile, "knowledge"], [this.paths.memoryDatabaseFile, "memory"]];
+    const entries: Array<[string, ContentKind]> = [
+      [this.paths.knowledgeDatabaseFile, "knowledge"],
+      [this.paths.memoryDatabaseFile, "memory"],
+      [this.paths.experienceDatabaseFile, "experience"],
+    ];
     const rows = database.prepare("SELECT kind,id,version,payload_json,updated_at FROM records").all() as Array<Record<string, unknown>>;
     for (const [path, domain] of entries) {
       const index = new DatabaseSync(path);

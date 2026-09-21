@@ -219,6 +219,40 @@ test("runtime acceptance records every outcome branch and evaluates incomplete, 
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
+test("runtime acceptance covers generated identifiers, duplicate slots and non-five-trial candidate wins", async () => {
+  const f = await fixture("craft-acceptance-generated-");
+  try {
+    const k = new RuntimeAcceptanceKernel(f.store);
+    const planArgs = { case_ids: ["case-a", "case-b"], host_ids: ["host-a"], trials_per_pair: 3, baseline_harness: "base", candidate_harness: "candidate", environment_fingerprint: "env", budget_fingerprint: "budget", observer_kind: "observer" };
+    assert.throws(() => k.plan({ ...planArgs, case_ids: ["case-a", "case-a"] }), /unique/);
+    assert.throws(() => k.plan({ ...planArgs, trials_per_pair: 2 }), /integer/);
+    const plan = k.plan(planArgs).plan as JsonObject;
+    assert.equal(k.plan({ ...planArgs, plan_id: plan.id }).idempotent, true);
+    assert.equal(k.get({ plan_id: plan.id }).evaluation, null);
+    assert.throws(() => k.record({ plan_id: plan.id, host_id: "host-a", case_id: "outside", arm: "baseline", harness: "base", trial_index: 1, environment_fingerprint: "env", budget_fingerprint: "budget", host_session_id: "missing", observation_id: "missing" }), /Case/);
+
+    const record = (caseId: string, trial: number, arm: "baseline" | "candidate") => {
+      const suffix = `${caseId}-${trial}-${arm}`;
+      f.store.create("host_session", `session-${suffix}`, { host_id: "host-a", trace_id: `trace-${suffix}`, environment_fingerprint: "env" });
+      f.store.create("outcome_observation", `observation-${suffix}`, { trace_id: `trace-${suffix}`, host_id: "host-a", observer_kind: "observer", observer_id: "independent", verdict: arm === "candidate" ? "passed" : "failed" });
+      return { plan_id: plan.id, host_id: "host-a", case_id: caseId, arm, harness: arm === "candidate" ? "candidate" : "base", trial_index: trial, environment_fingerprint: "env", budget_fingerprint: "budget", host_session_id: `session-${suffix}`, observation_id: `observation-${suffix}` };
+    };
+    const first = record("case-a", 1, "baseline");
+    assert.match(String((k.record(first).record as JsonObject).id), /^runtime_acceptance_record_/);
+    assert.equal(k.record(first).idempotent, true);
+    f.store.create("outcome_observation", "alternative-observation", { trace_id: "trace-case-a-1-baseline", host_id: "host-a", observer_kind: "observer", observer_id: "independent", verdict: "passed" });
+    assert.throws(() => k.record({ ...first, observation_id: "alternative-observation" }), /idempotency conflict/);
+    assert.throws(() => k.record({ ...first, record_id: "different-id-same-slot" }), /slot is already recorded/);
+    for (const caseId of ["case-a", "case-b"]) for (const trial of [1, 2, 3]) for (const arm of ["baseline", "candidate"] as const) {
+      if (caseId === "case-a" && trial === 1 && arm === "baseline") continue;
+      k.record(record(caseId, trial, arm));
+    }
+    const evaluation = k.evaluate({ plan_id: plan.id });
+    assert.equal((evaluation.evaluation as JsonObject).status, "inconclusive");
+    assert.equal(k.evaluate({ plan_id: plan.id }).idempotent, true);
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
 test("v0.12.13 action, gate and provider compatibility paths are exercised", async () => {
   const f = await fixture("craft-v013-branches-");
   try {

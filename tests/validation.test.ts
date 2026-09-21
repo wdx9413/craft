@@ -98,10 +98,10 @@ test("v0.12.43 records why stateful-compute keeps its own stricter strings", asy
 });
 
 test("v0.12.43 reads a scope and refuses an unsupported kind", () => {
-  assert.deepEqual([...SCOPE_KINDS], ["user", "project", "workspace", "task", "session"]);
+  assert.deepEqual([...SCOPE_KINDS], ["user", "project", "workspace", "task", "session", "team", "organization", "global"]);
   assert.deepEqual(parseScope({ scope_kind: "project", scope_id: "p" }), { kind: "project", id: "p" });
   for (const kind of SCOPE_KINDS) assert.equal(parseScope({ scope_kind: kind, scope_id: "x" }).kind, kind);
-  assert.throws(() => parseScope({ scope_kind: "global", scope_id: "p" }), /scope_kind is unsupported/u);
+  assert.deepEqual(parseScope({ scope_kind: "global", scope_id: "p" }), { kind: "global", id: "p" });
   assert.throws(() => parseScope({ scope_id: "p" }), /scope_kind must not be empty/u);
   assert.throws(() => parseScope({ scope_kind: "project" }), /scope_id must not be empty/u);
   // The kind is validated before the id, so a fully empty call reports the kind rather than

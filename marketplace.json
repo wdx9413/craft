@@ -1,6 +1,6 @@
 {
   "name": "craft-marketplace",
-  "version": "0.12.35",
+  "version": "0.12.36",
   "interface": {
     "displayName": "Craft"
   },
@@ -18,45 +18,39 @@
       "category": "Productivity"
     },
     {
-      "name": "craft-context",
-      "source": { "source": "local", "path": "./plugins/craft-context" },
-      "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
-      "category": "Productivity"
-    },
-    {
-      "name": "craft-quality",
-      "source": { "source": "local", "path": "./plugins/craft-quality" },
-      "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
-      "category": "Developer Tools"
-    },
-    {
       "name": "craft-knowledge",
-      "source": { "source": "local", "path": "./plugins/craft-knowledge" },
-      "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
+      "source": {
+        "source": "local",
+        "path": "./plugins/craft-knowledge"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
       "category": "Productivity"
     },
     {
       "name": "craft-memory",
-      "source": { "source": "local", "path": "./plugins/craft-memory" },
-      "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
+      "source": {
+        "source": "local",
+        "path": "./plugins/craft-memory"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
       "category": "Productivity"
     },
     {
-      "name": "craft-capability",
-      "source": { "source": "local", "path": "./plugins/craft-capability" },
-      "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
-      "category": "Developer Tools"
-    },
-    {
-      "name": "craft-skill-quality",
-      "source": { "source": "local", "path": "./plugins/craft-skill-quality" },
-      "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
-      "category": "Developer Tools"
-    },
-    {
       "name": "craft-experience",
-      "source": { "source": "local", "path": "./plugins/craft-experience" },
-      "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
+      "source": {
+        "source": "local",
+        "path": "./plugins/craft-experience"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
       "category": "Developer Tools"
     }
   ]

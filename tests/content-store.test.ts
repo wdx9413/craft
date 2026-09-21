@@ -135,6 +135,20 @@ test("content titles provide readable Unicode filenames without changing identit
   await f.store.close();
 });
 
+test("Experience Markdown is stored by Procedure format while preserving one canonical content root", async () => {
+  const f = await fixture();
+  const content = new MarkdownContentStore(f.paths);
+  try {
+    const graph = content.writeSync({ kind: "experience", folder: "graphs", record_id: "procedure-graph", version: 1, title: "恢复分支", scope: "project:craft", status: "candidate", sensitivity: "internal", source_id: "fixture", body: "# 恢复分支" });
+    assert.match(graph.path, /experience[\\/]md[\\/]graphs[\\/]恢复分支--[a-f0-9]{12}\.v1\.md$/u);
+    assert.equal(content.readSync(graph).body, "# 恢复分支");
+    const rewritten = content.rewriteSync({ kind: "experience", record_id: "procedure-graph", version: 1, current_path: graph.path, title: "恢复分支新版", scope: "project:craft", status: "routeable", sensitivity: "internal", source_id: "fixture", body: "# 恢复分支新版" });
+    assert.match(rewritten.path, /experience[\\/]md[\\/]graphs[\\/]恢复分支新版--[a-f0-9]{12}\.v1\.md$/u);
+    assert.equal(content.readSync(rewritten).body, "# 恢复分支新版");
+    assert.throws(() => content.writeSync({ kind: "knowledge", folder: "graphs", record_id: "bad", version: 1, scope: "project:craft", status: "candidate", sensitivity: "internal", source_id: "fixture", body: "bad" }), /Experience content supports folders/u);
+  } finally { await f.store.close(); }
+});
+
 test("content verification reports primitive adapter failures without assuming Error objects", async () => {
   const f = await fixture();
   const content = new MarkdownContentStore(f.paths);

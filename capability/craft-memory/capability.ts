@@ -24,9 +24,9 @@
  * for this package. Until it moves, those four families are projected by the product and not
  * claimed as ownership.
  *
- * It declares no `contributes`, for the same measured reason as the other two members: the read
- * side is `ContextResolutionKernel`, which takes a query and returns a bounded pack. Declaring a
- * second provider here would give the same member two contributors, which
+ * It declares no `contributes`: the read side is `ContextResolutionKernel`, which takes a query
+ * and returns a bounded pack. Knowledge and Experience do provide their distinct read
+ * projections; declaring a second Memory provider here would give the same member two contributors, which
  * `buildCapabilityRegistry` rejects outright.
  */
 import type { CraftCapability } from "../../src/capability-protocol.ts";

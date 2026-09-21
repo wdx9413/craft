@@ -1,6 +1,7 @@
 import { cp, mkdir, rm } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { RELEASE_PRODUCTS } from "../../src/release-catalog.ts";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const pluginRoot = resolve(root, "plugins", "craft");
@@ -8,7 +9,7 @@ const sourceSkill = resolve(root, "skills", "craft-route");
 const targetSkill = resolve(pluginRoot, "skills", "craft-route");
 const sourceBundles = ["craft-mcp.cjs", "craft-mcp-full.cjs", "craft-mcp-http.cjs", "craft-codex-hook.cjs", "craft-parser-worker.js"];
 const targetBundleDirectory = resolve(pluginRoot, "dist", "plugin");
-const components = ["craft-context", "craft-quality", "craft-knowledge", "craft-memory", "craft-capability", "craft-skill-quality", "craft-experience"];
+const components = RELEASE_PRODUCTS.filter((product) => product.name !== "craft").map((product) => product.name);
 const pluginsRoot = resolve(root, "plugins");
 
 function insidePlugin(path: string): boolean {

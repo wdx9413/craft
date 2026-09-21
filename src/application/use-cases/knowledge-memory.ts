@@ -16,6 +16,7 @@ export function installKnowledgeMemoryMethods(serviceClass: typeof CraftService)
   serviceClass.prototype.knowledgeSourceRegister = function (args) { return this.knowledgeSources.sourceRegister(args); };
   serviceClass.prototype.knowledgeSourceList = function (args) { return this.knowledgeSources.sourceList(args); };
   serviceClass.prototype.knowledgeSourceTransition = function (args) { return this.knowledgeSources.sourceTransition(args); };
+  serviceClass.prototype.knowledgeSourceIngest = function (args) { return this.knowledgeSources.sourceIngest(args); };
   serviceClass.prototype.memoryLedgerRemember = function (args) { return this.memoryLedger.remember(args); };
   serviceClass.prototype.memoryLedgerGet = function (args) { return this.memoryLedger.get(args); };
   serviceClass.prototype.memoryLedgerList = function (args) { return this.memoryLedger.list(args); };
@@ -25,4 +26,8 @@ export function installKnowledgeMemoryMethods(serviceClass: typeof CraftService)
   serviceClass.prototype.contextResolutionGet = function (args) { return this.contextResolution.receiptGet(args); };
   serviceClass.prototype.retrievalAdapterConfigure = function (args) { return this.contextResolution.retrievalConfigure(args); };
   serviceClass.prototype.retrievalAdapterEvaluate = function (args) { return this.contextResolution.retrievalEvaluate(args); };
+  serviceClass.prototype.scopeIdentityResolveProject = function (args) { return this.scopeIdentity.resolveProject(args); };
+  serviceClass.prototype.scopeAliasBind = function (args) { return this.scopeIdentity.bindAlias(args); };
+  serviceClass.prototype.scopeAliasMigrate = function (args) { return this.scopeIdentity.migrateAlias(args); };
+  serviceClass.prototype.memoryMaintenanceSchedule = function (args) { return this.maintenanceScheduler.tick(args); };
 }

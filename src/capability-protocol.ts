@@ -84,10 +84,18 @@ export function pluggableMembers(): ContextMember[] {
 /** Where a capability's contribution is read from, mirroring craft's existing scopes. */
 export interface ContextRequest {
   readonly query: string;
-  readonly scope_kind: "user" | "project" | "task" | "workspace" | "session";
+  readonly scope_kind: "user" | "project" | "task" | "workspace" | "session" | "team" | "organization" | "global";
   readonly scope_id: string;
   readonly max_items: number;
   readonly max_chars: number;
+  /** Ordered applicability scopes chosen by the core resolver. */
+  readonly scope_stack?: readonly Readonly<{ kind: string; id: string }>[];
+  /** Host-attested identity used only to enforce audience/tenant policy. */
+  readonly principal_id?: string;
+  readonly principal_ids?: readonly string[];
+  readonly tenant_id?: string;
+  /** The caller may request one cognitive purpose; omitted means no purpose filter. */
+  readonly cognitive_purpose?: "working_note" | "preference" | "episode" | "fact" | "procedure";
 }
 
 /** A bounded contribution, with the provenance a reader needs to trust it. */
@@ -132,7 +140,7 @@ export interface TaskOutcome {
   readonly outcome: "succeeded" | "failed" | "waiting" | "blocked";
   /** Digests of the observable result, not the result. */
   readonly result_digests: readonly string[];
-  readonly scope_kind: "user" | "project" | "task" | "workspace" | "session";
+  readonly scope_kind: "user" | "project" | "task" | "workspace" | "session" | "team" | "organization" | "global";
   readonly scope_id: string;
 }
 

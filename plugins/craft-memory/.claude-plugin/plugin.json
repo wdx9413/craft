@@ -1,13 +1,20 @@
 {
   "name": "craft-memory",
-  "version": "0.12.35",
+  "version": "0.12.36",
   "description": "Standalone scoped and evidence-linked memory for Claude Code.",
-  "author": { "name": "wdx9413" },
+  "author": {
+    "name": "wdx9413"
+  },
   "skills": "./skills/craft-memory/",
+  "hooks": "./hooks/hooks.json",
   "mcpServers": {
     "craft-memory": {
       "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/dist/plugin/craft-mcp.cjs", "--product", "memory"]
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/dist/plugin/craft-mcp.cjs",
+        "--product",
+        "memory"
+      ]
     }
   }
 }

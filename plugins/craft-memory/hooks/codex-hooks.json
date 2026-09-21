@@ -1,0 +1,9 @@
+{
+  "description": "Resolve scoped Craft Memory and capture only explicit remember commands.",
+  "hooks": {
+    "SessionStart": [{ "hooks": [{ "type": "command", "command": "node \"${PLUGIN_ROOT}/dist/plugin/craft-codex-hook.cjs\" --member memory", "timeout": 3, "statusMessage": "Checking Craft Memory lifecycle" }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node \"${PLUGIN_ROOT}/dist/plugin/craft-codex-hook.cjs\" --member memory", "timeout": 3, "statusMessage": "Resolving scoped Craft Memory" }] }],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "node \"${PLUGIN_ROOT}/dist/plugin/craft-codex-hook.cjs\" --member memory", "timeout": 3, "statusMessage": "Closing Craft Memory turn" }] }],
+    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "node \"${PLUGIN_ROOT}/dist/plugin/craft-codex-hook.cjs\" --member memory", "timeout": 3, "statusMessage": "Closing Craft Memory session" }] }]
+  }
+}

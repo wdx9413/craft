@@ -28,6 +28,8 @@ Usage:
   craft init [options]          Configure Craft
   craft config show             Print redacted configuration
   craft doctor                  Check runtime, credentials, storage, and adapters
+  craft migrate history [--apply]
+                                Plan (default) or explicitly apply legacy Knowledge/Experience repair
   craft version                 Print the Craft product version
   craft run --goal <text>       Run a governed standalone Agent task
   craft run --project <id> ...  Attach the run to a durable Project Brain
@@ -224,13 +226,23 @@ async function doctor(paths: ReturnType<typeof craftPaths>): Promise<JsonObject>
     initialized: Boolean(config),
     data_root: paths.root,
   };
-  if (!config) return { ...result, status: "needs_init", next: "craft init --mode agent --runtime direct-api ..." };
+  const activation = await activationDoctor(paths);
+  if (!config) return { ...result, activation, status: "needs_init", next: "craft init --mode agent --runtime direct-api ..." };
   const runtime = config.runtime;
   const provider = runtime.provider ? providerFromConfig(runtime.provider) : null;
   return { ...result, runtime: runtime.kind, provider: provider ? { ...credentialStatus(provider), model: runtime.provider?.model } : null,
     storage: { database: paths.databaseFile, exists: await fileExists(paths.databaseFile) },
+    activation,
     status: runtime.kind === "direct-api" && provider && credentialStatus(provider).configured ? "ready" : "needs_configuration",
     next: runtime.kind === "direct-api" ? "craft run --goal \"...\"" : "craft init --mode agent --runtime direct-api ..." };
+}
+
+/** Read only already-persisted Host proof; doctor never pretends config is execution. */
+async function activationDoctor(paths: ReturnType<typeof craftPaths>): Promise<JsonObject> {
+  if (!await fileExists(paths.databaseFile)) return { status: "storage_unavailable", reason: "no_local_store" };
+  const store = await new CraftStore(paths).open();
+  try { return new CraftService(store).activationProofDoctor({}); }
+  finally { store.close(); }
 }
 
 async function fileExists(path: string): Promise<boolean> {
@@ -379,12 +391,16 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     }
     throw new Error("semantic requires configure, disable, or status.");
   }
-  if (["source", "capability", "task", "kit", "worker", "inbox", "home", "serve", "gui", "usage", "settings", "codex", "claude", "host-run", "supervisor", "command", "adapter", "openapi"].includes(args[0] ?? "")) {
+  if (["source", "capability", "task", "kit", "worker", "inbox", "home", "serve", "gui", "usage", "settings", "codex", "claude", "host-run", "supervisor", "command", "adapter", "openapi", "migrate"].includes(args[0] ?? "")) {
     const store = await new CraftStore(paths).open();
     const service = await CraftService.open(store);
     try {
       let result: unknown;
-      if (args[0] === "command" && args[1] === "plan") result = service.commandPlan(commandRequest(args));
+      if (args[0] === "migrate" && args[1] === "history") {
+        const apply = args.includes("--apply");
+        result = { knowledge: service.componentHistoryKnowledgeReviewedMigrate({ apply }), experience: service.componentHistoryExperienceMigrate({ apply }), mode: apply ? "applied" : "dry_run" };
+      }
+      else if (args[0] === "command" && args[1] === "plan") result = service.commandPlan(commandRequest(args));
       else if (args[0] === "command" && args[1] === "run") result = await service.commandRun(commandRequest(args));
       else if (args[0] === "command" && args[1] === "observe") result = service.commandObserve({ run_id: args[2] });
       else if (args[0] === "command" && args[1] === "cancel") result = service.commandCancel({ run_id: args[2] });

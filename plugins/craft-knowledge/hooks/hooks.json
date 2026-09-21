@@ -4,7 +4,7 @@
     "SessionStart": [{
       "hooks": [{
         "type": "command",
-        "command": "node ${PLUGIN_ROOT}/dist/plugin/craft-codex-hook.cjs --member knowledge",
+        "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/plugin/craft-codex-hook.cjs\" --member knowledge",
         "timeout": 3,
         "statusMessage": "Checking Craft Knowledge lifecycle"
       }]
@@ -12,23 +12,15 @@
     "UserPromptSubmit": [{
       "hooks": [{
         "type": "command",
-        "command": "node ${PLUGIN_ROOT}/dist/plugin/craft-codex-hook.cjs --member knowledge",
+        "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/plugin/craft-codex-hook.cjs\" --member knowledge",
         "timeout": 3,
-        "statusMessage": "Resolving scoped Craft Knowledge",
-        "additionalContextLimit": 3200
-      }, {
-        "type": "mcp_tool",
-        "server": "craft-knowledge",
-        "tool": "craft_knowledge_search",
-        "input": { "query": "${prompt}", "limit": 6 },
-        "timeout": 3,
-        "statusMessage": "Calling Craft Knowledge MCP"
+        "statusMessage": "Resolving scoped Craft Knowledge"
       }]
     }],
     "Stop": [{
       "hooks": [{
         "type": "command",
-        "command": "node ${PLUGIN_ROOT}/dist/plugin/craft-codex-hook.cjs --member knowledge",
+        "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/plugin/craft-codex-hook.cjs\" --member knowledge",
         "timeout": 3,
         "statusMessage": "Closing Craft Knowledge turn"
       }]
@@ -36,7 +28,7 @@
     "SessionEnd": [{
       "hooks": [{
         "type": "command",
-        "command": "node ${PLUGIN_ROOT}/dist/plugin/craft-codex-hook.cjs --member knowledge",
+        "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/plugin/craft-codex-hook.cjs\" --member knowledge",
         "timeout": 3,
         "statusMessage": "Closing Craft Knowledge session"
       }]

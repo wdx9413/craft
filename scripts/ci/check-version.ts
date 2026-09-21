@@ -1,6 +1,7 @@
 import { existsSync, readdirSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
+import { RELEASE_PRODUCTS } from "../../src/release-catalog.ts";
 
 /**
  * One release version, enforced.
@@ -25,17 +26,14 @@ if (typeof packageVersion !== "string" || !/^\d+\.\d+\.\d+$/.test(packageVersion
   throw new Error("package.json must provide a semantic version as the release source of truth");
 }
 
-for (const path of ["plugins/craft/.codex-plugin/plugin.json", "plugins/craft-context/.codex-plugin/plugin.json",
-  "plugins/craft-quality/.codex-plugin/plugin.json", "plugins/craft-knowledge/.codex-plugin/plugin.json",
-  "plugins/craft-memory/.codex-plugin/plugin.json", "plugins/craft-capability/.codex-plugin/plugin.json",
-  "plugins/craft-skill-quality/.codex-plugin/plugin.json", "plugins/craft-experience/.codex-plugin/plugin.json", ".claude-plugin/plugin.json",
+for (const path of [...RELEASE_PRODUCTS.map((product) => `plugins/${product.name}/.codex-plugin/plugin.json`), ".claude-plugin/plugin.json",
   "adapters/workbuddy-expert/.codebuddy-plugin/plugin.json", "adapters/workbuddy-connector/connector-meta.json",
   "adapters/deepseek-harness/package.json"]) {
   const manifestVersion = (await json(path)).version;
   if (manifestVersion !== packageVersion) throw new Error(`${path} version ${String(manifestVersion)} differs from package.json ${packageVersion}`);
 }
 
-for (const path of ["plugins/craft-knowledge/.claude-plugin/plugin.json", "plugins/craft-memory/.claude-plugin/plugin.json", "plugins/craft-experience/.claude-plugin/plugin.json"]) {
+for (const path of RELEASE_PRODUCTS.filter((product) => product.hookMember).map((product) => `plugins/${product.name}/.claude-plugin/plugin.json`)) {
   const manifestVersion = (await json(path)).version;
   if (manifestVersion !== packageVersion) throw new Error(`${path} version ${String(manifestVersion)} differs from package.json ${packageVersion}`);
 }
@@ -85,13 +83,11 @@ if (existsSync(resolve(marketplaceRoot, "release.json"))) {
     throw new Error(`craft-marketplace/release.json version ${String(marketplaceVersion)} differs from craft package.json ${packageVersion}`);
   }
 
-  const marketplaceManifests = ["plugins/craft/.codex-plugin/plugin.json",
-    "plugins/craft-capability/.codex-plugin/plugin.json", "plugins/craft-context/.codex-plugin/plugin.json",
-    "plugins/craft-knowledge/.codex-plugin/plugin.json", "plugins/craft-knowledge/.claude-plugin/plugin.json",
-    "plugins/craft-memory/.codex-plugin/plugin.json", "plugins/craft-memory/.claude-plugin/plugin.json",
-    "plugins/craft-quality/.codex-plugin/plugin.json", "plugins/craft-skill-quality/.codex-plugin/plugin.json",
-    "plugins/craft-experience/.codex-plugin/plugin.json", "plugins/craft-experience/.claude-plugin/plugin.json",
-    ".claude-plugin/marketplace.json"];
+  const marketplaceManifests = [
+    ...RELEASE_PRODUCTS.map((product) => `plugins/${product.name}/.codex-plugin/plugin.json`),
+    ...RELEASE_PRODUCTS.filter((product) => product.hookMember).map((product) => `plugins/${product.name}/.claude-plugin/plugin.json`),
+    ".claude-plugin/marketplace.json",
+  ];
   for (const path of marketplaceManifests) {
     if (!existsSync(resolve(marketplaceRoot, path))) continue;
     const manifestVersion = (await jsonAt(marketplaceRoot, path)).version;

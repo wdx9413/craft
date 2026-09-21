@@ -49,6 +49,9 @@ _Avoid_: 把 Target 当成一句未经澄清的用户原话
 **Plan**：为 Target 选择的候选实现路径，包含有序或有依赖的 Step、能力、权限、预算、前置条件和风险。Plan 是运行时计划，不自动成为可复用 Workflow；只有经过评测和发布的 Plan 才能形成 Workflow 资产。
 _Avoid_: 把模型草稿、Workflow 和已批准执行计划混为一物
 
+**Automation Job**：将一个已 `routeable` 的、确定性 Workflow Procedure 绑定到明确工作区、触发节奏、输入、允许 effect、验证 Step 和有限重试的持久执行委托。它可由 cron、CI、托盘或系统服务调用 Tick，但 Craft 不因此安装系统服务、保存凭据或把 Prompt/Graph 伪装成无人值守执行能力。每次执行都产生 Checkpoint、Receipt、Outcome；重试耗尽后转为 Handoff。
+_Avoid_: 任意 Agent 对话、已安装 cron、自动化发布、Workflow 草稿
+
 **Step**：Plan 中最小可观察工作单元，至少声明目标、前置条件、Action、预期状态变化、Receipt 和失败处置。Step 完成必须经过再观察，不能只由 Host 返回文本决定。
 _Avoid_: 把模型的一次回复或一次 Tool call 自动当作已完成 Step
 
@@ -61,7 +64,7 @@ _Avoid_: 把每种模式实现成一套独立 Store、Policy 或生命周期
 **Hook**：挂在既定生命周期时点上的扩展机制，例如 `before_activation`、`before_execute`、`after_receipt`、`after_observe`、`before_accept` 和 `after_outcome`。Hook 可以观察、补充摘要或请求阻断，但不能自行成为新的事实账本、绕过 Permission、直接扩大 effect，或替代 Receipt/Acceptance。它是跨 Harness、Capability 和 Runtime 的设计范式/扩展 seam，不是 Harness 的第五个组成面。
 _Avoid_: 把 Hook 当成任意 Tool、隐藏的第二条主流程或隐式副作用入口
 
-**Knowledge / Memory / Experience / Trace**：Knowledge 是有来源和 Evidence 的可复核主张；Memory 是有作用域、有效期和撤销关系的可持续上下文；Experience 是从多个 Trial/Outcome 归纳出的候选模式；Trace 是过程证据链。只有 Experience Candidate 通过评测和晋级后才可成为可路由资产。
+**Knowledge / Memory / Experience / Trace**：Knowledge 是有来源和 Evidence 的可复核主张；Memory 是有作用域、有效期和撤销关系的可持续上下文；Experience 是从多个 Trial/Outcome 归纳出的学习域，包含 Observation、Pattern 与 Procedure；Trace 是过程证据链。Context 在开始时可受限装载三者：Knowledge 只读 reviewed Claim，Memory 只读当前有效条目，Experience 只读已 routeable 的 Procedure。Workflow/Graph Procedure 的权威内容是经摘要校验的 JSON 定义，Markdown 仅为审阅视图；Prompt Procedure 才以 Markdown 为权威正文。Observation、Pattern 与 Candidate 只供复盘/评测；Procedure 通过评测和晋级后才成为可路由资产。三者的 `scope` 只回答“适用于哪里”；归属、受众、用途、租期与 tenant 由 Scope Envelope 单独表达，不能从一条项目路径或模型猜测中推出。
 _Avoid_: 把 Trace 直接当记忆、把未经验证记忆直接当 Skill
 
 **Evaluation Contract**：每个可独立暴露的能力都必须声明 fixture、契约/边界、对抗与泄漏、恢复/幂等、成本/延迟和兼容性检查。`mechanism_passed`、`fixture_passed`、`host_verified`、`business_eligible`、`routeable` 是递进状态，不可用单元覆盖率或单次成功替代。
@@ -145,6 +148,9 @@ _Avoid_: Context Profile、Evidence Wiki
 
 **Context Resolution Receipt**：一次向 Host 提供受限上下文的内容无关回执，固定选中的知识/记忆版本、选择理由和预算。它不保存重复正文，不授予执行权。
 _Avoid_: Prompt、Activation Profile
+
+**Scope Envelope**：认知记录的适用范围、归属（custody）、受众（audience）、用途（purpose）、留存（retention）和可选 tenant 约束。它不是简单 scope 层级，也不是 ACL 的替代实现；Context 先按明确 scope 栈选择，再按 Envelope 过滤。个人、项目、团队和组织资料不能因名称相似自动互相提升或合并。
+_Avoid_: 全局默认、从模型文本推断身份、路径即团队身份
 
 **Knowledge Support**：一条把 Candidate Knowledge Claim 与独立 Evidence/Observation 绑定的追加式支持记录。同一 Claim 上同一个 Evidence 或 Observation Key 只能计一次；它用于自动晋升阈值，不是聊天重复次数计数器。
 _Avoid_: 同一段 Prompt 的重复提交、模型自评、人工审批票数

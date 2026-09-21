@@ -72,6 +72,8 @@ test("user model configs produce provider specs and secret-free public views", (
   assert.deepEqual(specsFromModels([openai, anthropic]).map((item) => item.provider), ["user-openai", "user-anthropic"]);
   assert.equal((publicModel(openai, {} as NodeJS.ProcessEnv) as JsonObject).configured, false);
   assert.equal((publicModel(openai, { USER_MODEL_KEY: "configured" }) as JsonObject).configured, true);
+  const deepseek = { ...openai, id: "deepseek-custom", baseUrl: "https://api.deepseek.com/v1" };
+  assert.equal(((publicModel(deepseek, {} as NodeJS.ProcessEnv).context_cache as JsonObject).mode), "automatic_prefix");
   assert.equal(specFromConfig({ ...openai, name: "" }).label, "user-openai");
 });
 
@@ -151,6 +153,32 @@ test("request rendering matches each wire format", () => {
   ]);
   const openaiExtras = buildChatRequest(openaiSpec(), { model: "demo-std", messages: [{ role: "user", content: "hi" }], tools: [], stream: true });
   assert.equal(openaiExtras.body.stream, true);
+});
+
+test("DeepSeek cache is an exact-prefix layout with observed usage only", () => {
+  const deepseek = PROVIDER_CATALOG.find((item) => item.provider === "deepseek")!;
+  const messages = [
+    { role: "system" as const, content: "stable policy" },
+    { role: "user" as const, content: "earlier turn" },
+    { role: "assistant" as const, content: "earlier answer" },
+    { role: "user" as const, content: "current turn" },
+  ];
+  const request = buildChatRequest(deepseek, { model: "deepseek-chat", messages, cache_prefix_messages: 3 });
+  assert.deepEqual(request.context_cache, {
+    mode: "automatic_prefix", eligible: true, prefix_message_count: 3,
+    prefix_digest: request.context_cache.prefix_digest, reason: null,
+  });
+  assert.ok(request.context_cache.prefix_digest);
+  assert.equal("cache_key" in request.body, false);
+  assert.equal(buildChatRequest(deepseek, { model: "deepseek-chat", messages, cache_prefix_messages: 3 }).context_cache.prefix_digest,
+    request.context_cache.prefix_digest);
+  const response = parseChatResponse(deepseek, { model: "deepseek-chat", choices: [{ message: { content: "ok" } }],
+    usage: { prompt_tokens: 100, completion_tokens: 4, prompt_cache_hit_tokens: 76, prompt_cache_miss_tokens: 24 } });
+  assert.deepEqual(response.usage, { input_tokens: 100, output_tokens: 4, cache_hit_tokens: 76, cache_miss_tokens: 24 });
+  const unavailable = parseChatResponse(deepseek, { choices: [{ message: { content: "ok" } }], usage: { prompt_tokens: 1, completion_tokens: 1 } });
+  assert.deepEqual(unavailable.usage, { input_tokens: 1, output_tokens: 1 });
+  const missOnly = parseChatResponse(deepseek, { choices: [{ message: { content: "ok" } }], usage: { prompt_tokens: 3, completion_tokens: 1, prompt_cache_miss_tokens: 3 } });
+  assert.deepEqual(missOnly.usage, { input_tokens: 3, output_tokens: 1, cache_hit_tokens: 0, cache_miss_tokens: 3 });
 });
 
 test("request rendering rejects malformed conversations", () => {

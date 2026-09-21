@@ -1,6 +1,7 @@
 import type { JsonObject } from "./infrastructure/store.ts";
 import type { CraftModelConfig, ModelProtocol } from "./settings.ts";
 import { text } from "./validation.ts";
+import { stableDigest } from "./digest.ts";
 
 /**
  * The model gateway.
@@ -14,6 +15,20 @@ import { text } from "./validation.ts";
 export type { ModelProtocol };
 export type ModelTier = "small" | "standard" | "frontier";
 
+/**
+ * A provider's cache is a provider-side optimisation, not a second Craft
+ * store.  The only portable control Craft has is keeping a reusable prefix
+ * byte-for-byte stable and recording what the provider actually reported.
+ */
+export interface ContextCacheSpec {
+  readonly mode: "none" | "automatic_prefix";
+  readonly requires_exact_prefix: boolean;
+  readonly usage_fields: "none" | "deepseek";
+}
+
+const NO_CONTEXT_CACHE: ContextCacheSpec = { mode: "none", requires_exact_prefix: false, usage_fields: "none" };
+const DEEPSEEK_CONTEXT_CACHE: ContextCacheSpec = { mode: "automatic_prefix", requires_exact_prefix: true, usage_fields: "deepseek" };
+
 export interface ModelProviderSpec {
   provider: string;
   label: string;
@@ -25,6 +40,8 @@ export interface ModelProviderSpec {
   /** A relative ordering hint; it is never presented as a price. */
   cost_hint: number;
   supports_tools: boolean;
+  /** Optional for adapters compiled against the pre-cache public contract. */
+  context_cache?: ContextCacheSpec;
 }
 
 const PROVIDER_NAME = /^[a-z][a-z0-9-]{0,31}$/u;
@@ -37,14 +54,14 @@ const TIER_ORDER: readonly ModelTier[] = ["frontier", "standard", "small"];
  * a declared provider is still unusable until its environment variable exists.
  */
 export const PROVIDER_CATALOG: readonly ModelProviderSpec[] = [
-  { provider: "deepseek", label: "DeepSeek", protocol: "openai-compatible", base_url: "https://api.deepseek.com/v1", api_key_env: "DEEPSEEK_API_KEY", chat_path: "/chat/completions", models: { small: "deepseek-chat", standard: "deepseek-chat", frontier: "deepseek-reasoner" }, cost_hint: 1, supports_tools: true },
-  { provider: "volcengine", label: "火山引擎方舟", protocol: "openai-compatible", base_url: "https://ark.cn-beijing.volces.com/api/v3", api_key_env: "ARK_API_KEY", chat_path: "/chat/completions", models: { small: "doubao-lite", standard: "doubao-pro", frontier: "doubao-pro-32k" }, cost_hint: 2, supports_tools: true },
-  { provider: "qwen", label: "通义千问", protocol: "openai-compatible", base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1", api_key_env: "DASHSCOPE_API_KEY", chat_path: "/chat/completions", models: { small: "qwen-turbo", standard: "qwen-plus", frontier: "qwen-max" }, cost_hint: 2, supports_tools: true },
-  { provider: "kimi", label: "Kimi (Moonshot)", protocol: "openai-compatible", base_url: "https://api.moonshot.cn/v1", api_key_env: "MOONSHOT_API_KEY", chat_path: "/chat/completions", models: { small: "moonshot-v1-8k", standard: "moonshot-v1-32k", frontier: "moonshot-v1-128k" }, cost_hint: 2, supports_tools: true },
-  { provider: "glm", label: "智谱 GLM", protocol: "openai-compatible", base_url: "https://open.bigmodel.cn/api/paas/v4", api_key_env: "ZHIPU_API_KEY", chat_path: "/chat/completions", models: { small: "glm-4-flash", standard: "glm-4-air", frontier: "glm-4-plus" }, cost_hint: 1, supports_tools: true },
-  { provider: "minimax", label: "MiniMax", protocol: "openai-compatible", base_url: "https://api.minimax.chat/v1", api_key_env: "MINIMAX_API_KEY", chat_path: "/text/chatcompletion_v2", models: { standard: "abab6.5s-chat", frontier: "abab6.5-chat" }, cost_hint: 2, supports_tools: false },
-  { provider: "gpt", label: "OpenAI GPT", protocol: "openai-compatible", base_url: "https://api.openai.com/v1", api_key_env: "OPENAI_API_KEY", chat_path: "/chat/completions", models: { small: "gpt-4o-mini", standard: "gpt-4o", frontier: "gpt-4.1" }, cost_hint: 6, supports_tools: true },
-  { provider: "claude", label: "Anthropic Claude", protocol: "anthropic", base_url: "https://api.anthropic.com/v1", api_key_env: "ANTHROPIC_API_KEY", chat_path: "/messages", models: { small: "claude-haiku-4", standard: "claude-sonnet-4", frontier: "claude-opus-4" }, cost_hint: 7, supports_tools: true },
+  { provider: "deepseek", label: "DeepSeek", protocol: "openai-compatible", base_url: "https://api.deepseek.com/v1", api_key_env: "DEEPSEEK_API_KEY", chat_path: "/chat/completions", models: { small: "deepseek-chat", standard: "deepseek-chat", frontier: "deepseek-reasoner" }, cost_hint: 1, supports_tools: true, context_cache: DEEPSEEK_CONTEXT_CACHE },
+  { provider: "volcengine", label: "火山引擎方舟", protocol: "openai-compatible", base_url: "https://ark.cn-beijing.volces.com/api/v3", api_key_env: "ARK_API_KEY", chat_path: "/chat/completions", models: { small: "doubao-lite", standard: "doubao-pro", frontier: "doubao-pro-32k" }, cost_hint: 2, supports_tools: true, context_cache: NO_CONTEXT_CACHE },
+  { provider: "qwen", label: "通义千问", protocol: "openai-compatible", base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1", api_key_env: "DASHSCOPE_API_KEY", chat_path: "/chat/completions", models: { small: "qwen-turbo", standard: "qwen-plus", frontier: "qwen-max" }, cost_hint: 2, supports_tools: true, context_cache: NO_CONTEXT_CACHE },
+  { provider: "kimi", label: "Kimi (Moonshot)", protocol: "openai-compatible", base_url: "https://api.moonshot.cn/v1", api_key_env: "MOONSHOT_API_KEY", chat_path: "/chat/completions", models: { small: "moonshot-v1-8k", standard: "moonshot-v1-32k", frontier: "moonshot-v1-128k" }, cost_hint: 2, supports_tools: true, context_cache: NO_CONTEXT_CACHE },
+  { provider: "glm", label: "智谱 GLM", protocol: "openai-compatible", base_url: "https://open.bigmodel.cn/api/paas/v4", api_key_env: "ZHIPU_API_KEY", chat_path: "/chat/completions", models: { small: "glm-4-flash", standard: "glm-4-air", frontier: "glm-4-plus" }, cost_hint: 1, supports_tools: true, context_cache: NO_CONTEXT_CACHE },
+  { provider: "minimax", label: "MiniMax", protocol: "openai-compatible", base_url: "https://api.minimax.chat/v1", api_key_env: "MINIMAX_API_KEY", chat_path: "/text/chatcompletion_v2", models: { standard: "abab6.5s-chat", frontier: "abab6.5-chat" }, cost_hint: 2, supports_tools: false, context_cache: NO_CONTEXT_CACHE },
+  { provider: "gpt", label: "OpenAI GPT", protocol: "openai-compatible", base_url: "https://api.openai.com/v1", api_key_env: "OPENAI_API_KEY", chat_path: "/chat/completions", models: { small: "gpt-4o-mini", standard: "gpt-4o", frontier: "gpt-4.1" }, cost_hint: 6, supports_tools: true, context_cache: NO_CONTEXT_CACHE },
+  { provider: "claude", label: "Anthropic Claude", protocol: "anthropic", base_url: "https://api.anthropic.com/v1", api_key_env: "ANTHROPIC_API_KEY", chat_path: "/messages", models: { small: "claude-haiku-4", standard: "claude-sonnet-4", frontier: "claude-opus-4" }, cost_hint: 7, supports_tools: true, context_cache: NO_CONTEXT_CACHE },
 ];
 
 
@@ -56,6 +73,18 @@ function httpUrl(value: unknown, name: string): string {
     throw new Error(`${name} must be an HTTP(S) URL without credentials or query data`);
   }
   return raw.replace(/\/+$/u, "");
+}
+
+function cacheSpec(provider: string, baseUrl: string, value: unknown): ContextCacheSpec {
+  if (value === undefined) return provider === "deepseek" || new URL(baseUrl).hostname === "api.deepseek.com" ? DEEPSEEK_CONTEXT_CACHE : NO_CONTEXT_CACHE;
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("context_cache must be an object");
+  const input = value as JsonObject;
+  const mode = text(input.mode, "context_cache.mode");
+  const usageFields = text(input.usage_fields ?? "none", "context_cache.usage_fields");
+  if (mode !== "none" && mode !== "automatic_prefix") throw new Error("context_cache.mode is unsupported");
+  if (usageFields !== "none" && usageFields !== "deepseek") throw new Error("context_cache.usage_fields is unsupported");
+  if (typeof input.requires_exact_prefix !== "boolean") throw new Error("context_cache.requires_exact_prefix must be boolean");
+  return { mode, usage_fields: usageFields, requires_exact_prefix: input.requires_exact_prefix };
 }
 
 /** Define and validate a legacy provider declaration used by the runtime API. */
@@ -77,17 +106,19 @@ export function defineProvider(input: JsonObject): ModelProviderSpec {
   if (typeof supportsTools !== "boolean") throw new Error("supports_tools must be a boolean");
   const costHint = input.cost_hint === undefined ? 1 : Number(input.cost_hint);
   if (!Number.isFinite(costHint) || costHint < 0) throw new Error("cost_hint must be a non-negative number");
+  const baseUrl = httpUrl(input.base_url, "base_url");
   return { provider, label: input.label === undefined ? provider : text(input.label, "label"), protocol: protocol as ModelProtocol,
-    base_url: httpUrl(input.base_url, "base_url"), api_key_env: apiKeyEnv,
+    base_url: baseUrl, api_key_env: apiKeyEnv,
     chat_path: input.chat_path === undefined ? (protocol === "anthropic" ? "/messages" : "/chat/completions") : text(input.chat_path, "chat_path"),
-    models, cost_hint: costHint, supports_tools: supportsTools };
+    models, cost_hint: costHint, supports_tools: supportsTools, context_cache: cacheSpec(provider, baseUrl, input.context_cache) };
 }
 
 export interface ChatToolDefinition { type: "function"; function: { name: string; description?: string; parameters?: JsonObject } }
 export interface ChatToolCall { id: string; type: "function"; function: { name: string; arguments: string } }
 export interface ChatMessage { role: "system" | "user" | "assistant" | "tool"; content: string | null; tool_call_id?: string; tool_calls?: ChatToolCall[] }
-export interface ChatRequest { url: string; headers: JsonObject; body: JsonObject; prompt_tokens_estimate: number }
-export interface ChatResult { text: string; model: string | null; usage: { input_tokens: number; output_tokens: number } | null; tool_calls?: ChatToolCall[] }
+export interface ContextCacheLayout { mode: ContextCacheSpec["mode"]; eligible: boolean; prefix_message_count: number; prefix_digest: string | null; reason: string | null }
+export interface ChatRequest { url: string; headers: JsonObject; body: JsonObject; prompt_tokens_estimate: number; context_cache: ContextCacheLayout }
+export interface ChatResult { text: string; model: string | null; usage: { input_tokens: number; output_tokens: number; cache_hit_tokens?: number; cache_miss_tokens?: number } | null; tool_calls?: ChatToolCall[] }
 
 /** Build a provider spec from a user-configured model entry. */
 export function specFromConfig(model: CraftModelConfig): ModelProviderSpec {
@@ -100,7 +131,7 @@ export function specFromConfig(model: CraftModelConfig): ModelProviderSpec {
     api_key_env: model.apiKeyEnv,
     chat_path: chatPath,
     models: { standard: model.model }, cost_hint: 1,
-    supports_tools: model.supportsTools,
+    supports_tools: model.supportsTools, context_cache: cacheSpec(model.id, model.baseUrl, undefined),
   };
 }
 
@@ -115,7 +146,7 @@ export function publicModel(model: CraftModelConfig, env: NodeJS.ProcessEnv = pr
   const configured = typeof value === "string" && value.length > 0;
   return { id: model.id, name: model.name, protocol: model.protocol,
     baseUrl: model.baseUrl, model: model.model, apiKeyEnv: model.apiKeyEnv,
-    configured, supportsTools: model.supportsTools };
+    configured, supportsTools: model.supportsTools, context_cache: cacheSpec(model.id, model.baseUrl, undefined) };
 }
 
 /**
@@ -127,7 +158,7 @@ export function publicProvider(spec: ModelProviderSpec, env: NodeJS.ProcessEnv =
   const configured = typeof value === "string" && value.length > 0;
   return { provider: spec.provider, label: spec.label, protocol: spec.protocol,
     base_url: spec.base_url, api_key_env: spec.api_key_env,
-    models: spec.models, cost_hint: spec.cost_hint, supports_tools: spec.supports_tools, configured };
+    models: spec.models, cost_hint: spec.cost_hint, supports_tools: spec.supports_tools, context_cache: spec.context_cache ?? NO_CONTEXT_CACHE, configured };
 }
 
 /**
@@ -166,7 +197,7 @@ export function selectModel(spec: ModelProviderSpec, tier: ModelTier): { tier: M
  * `env:NAME` so a reader can tell at a glance that no secret is present.
  */
 export function buildChatRequest(spec: ModelProviderSpec, options: {
-  model: string; messages: ChatMessage[]; max_tokens?: number; temperature?: number; tools?: ChatToolDefinition[]; stream?: boolean;
+  model: string; messages: ChatMessage[]; max_tokens?: number; temperature?: number; tools?: ChatToolDefinition[]; stream?: boolean; cache_prefix_messages?: number;
 }): ChatRequest {
   const model = text(options.model, "model");
   if (!Array.isArray(options.messages) || !options.messages.length) throw new Error("chat request requires at least one message");
@@ -176,6 +207,15 @@ export function buildChatRequest(spec: ModelProviderSpec, options: {
     if (message.content !== null && typeof message.content !== "string") throw new Error(`chat message ${index} content must be a string or null`);
     return { ...message };
   });
+  const prefixCount = options.cache_prefix_messages ?? 0;
+  if (!Number.isInteger(prefixCount) || prefixCount < 0 || prefixCount > messages.length) throw new Error("cache_prefix_messages must be between 0 and the message count");
+  const reusablePrefix = messages.slice(0, prefixCount);
+  const cache = spec.context_cache ?? NO_CONTEXT_CACHE;
+  const contextCache: ContextCacheLayout = cache.mode === "automatic_prefix" && reusablePrefix.length > 0
+    ? { mode: "automatic_prefix", eligible: true, prefix_message_count: reusablePrefix.length, prefix_digest: stableDigest(reusablePrefix), reason: null }
+    : { mode: cache.mode, eligible: false, prefix_message_count: reusablePrefix.length,
+      prefix_digest: reusablePrefix.length ? stableDigest(reusablePrefix) : null,
+      reason: cache.mode === "none" ? "provider_cache_unsupported" : "no_reusable_prefix" };
   const promptChars = messages.reduce((total, message) => total + String(message.content ?? "").length, 0);
   const promptTokensEstimate = Math.max(1, Math.ceil(promptChars / 4));
   const headers: JsonObject = { "content-type": "application/json" };
@@ -193,7 +233,7 @@ export function buildChatRequest(spec: ModelProviderSpec, options: {
     body = { model, messages, max_tokens: options.max_tokens ?? 4_096,
       ...(options.temperature === undefined ? {} : { temperature: options.temperature }), ...(options.tools?.length ? { tools: options.tools } : {}), ...(options.stream ? { stream: true } : {}) };
   }
-  return { url: `${spec.base_url}${spec.chat_path}`, headers, body, prompt_tokens_estimate: promptTokensEstimate };
+  return { url: `${spec.base_url}${spec.chat_path}`, headers, body, prompt_tokens_estimate: promptTokensEstimate, context_cache: contextCache };
 }
 
 /** Normalize either wire format into text plus usage. A malformed payload fails closed. */
@@ -217,8 +257,20 @@ export function parseChatResponse(spec: ModelProviderSpec, payload: unknown): Ch
     const fn = item.function as JsonObject;
     return { id: String(item.id ?? `tool_${index + 1}`), type: "function" as const, function: { name: String(fn.name), arguments: typeof fn.arguments === "string" ? fn.arguments : JSON.stringify(fn.arguments ?? {}) } };
   }) : [];
+  const inputTokens = Number(usage?.prompt_tokens ?? 0);
+  const cachedDetails = usage?.prompt_tokens_details && typeof usage.prompt_tokens_details === "object" && !Array.isArray(usage.prompt_tokens_details)
+    ? usage.prompt_tokens_details as JsonObject : null;
+  const hasCachedFromDetails = typeof cachedDetails?.cached_tokens === "number";
+  const hasDeepSeekCache = typeof usage?.prompt_cache_hit_tokens === "number" || typeof usage?.prompt_cache_miss_tokens === "number" || hasCachedFromDetails;
+  const cache = spec.context_cache ?? NO_CONTEXT_CACHE;
+  const cacheHit = cache.usage_fields === "deepseek" && hasDeepSeekCache
+    ? Number(usage?.prompt_cache_hit_tokens ?? cachedDetails?.cached_tokens ?? (typeof usage?.prompt_cache_miss_tokens === "number" ? 0 : undefined)) : null;
+  const knownCacheHit = cacheHit !== null && Number.isFinite(cacheHit) ? cacheHit : 0;
+  const cacheMiss = cache.usage_fields === "deepseek" && hasDeepSeekCache ? Number(usage?.prompt_cache_miss_tokens ?? Math.max(0, inputTokens - knownCacheHit)) : null;
+  const cacheUsage = cacheHit !== null && cacheMiss !== null && Number.isFinite(cacheHit) && cacheHit >= 0 && Number.isFinite(cacheMiss) && cacheMiss >= 0
+    ? { cache_hit_tokens: cacheHit, cache_miss_tokens: cacheMiss } : {};
   return { text: message.content === null ? "" : message.content, model: body.model === undefined ? null : String(body.model), ...(toolCalls.length ? { tool_calls: toolCalls } : {}),
-    usage: usage ? { input_tokens: Number(usage.prompt_tokens ?? 0), output_tokens: Number(usage.completion_tokens ?? 0) } : null };
+    usage: usage ? { input_tokens: inputTokens, output_tokens: Number(usage.completion_tokens ?? 0), ...cacheUsage } : null };
 }
 
 /**

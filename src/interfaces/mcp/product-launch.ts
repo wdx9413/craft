@@ -6,13 +6,9 @@
  */
 export const MCP_PRODUCT_SURFACES = {
   full: "syscall",
-  context: "component-context",
   knowledge: "component-knowledge-daily",
   memory: "component-memory-daily",
-  capability: "component-capability",
-  quality: "component-quality",
   experience: "component-experience-daily",
-  admin: "full",
 } as const;
 
 export type McpProduct = keyof typeof MCP_PRODUCT_SURFACES;

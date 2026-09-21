@@ -157,7 +157,7 @@ test("the primary syscall surface composes every built-in Craft component on dem
       ["memory_ledger", "remember", "craft_memory_ledger_remember"],
       ["capability", "search", "craft_capability_search"],
       ["evaluation_run", "record", "craft_evaluation_run_record"],
-      ["workflow_evolution", "observe", "craft_workflow_evolution_observe"],
+      ["experience", "observe", "craft_experience_observe"],
     ] as const;
     for (const [resource, operation, tool] of expected) {
       const contract = await describe(resource, operation);

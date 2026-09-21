@@ -9,13 +9,25 @@
 import type { ContextContribution, ContextContributionProvider, ContextRequest } from "../../src/capability-protocol.ts";
 import type { CraftStore, JsonObject } from "../../src/infrastructure/store.ts";
 import { contentReference } from "../../src/infrastructure/content-store.ts";
+import { scopeAllows, scopeEnvelope, type ScopeAccess } from "../../src/scope-policy.ts";
 
 function terms(query: string): string[] {
   return query.toLowerCase().match(/[\p{L}\p{N}_-]+/gu) ?? [];
 }
 
-function scopeMatches(claimScope: unknown, request: ContextRequest): boolean {
-  return claimScope === "global" || claimScope === `${request.scope_kind}:${request.scope_id}`;
+function recordScope(value: unknown): { kind: string; id: string } {
+  if (value === "global") return { kind: "global", id: "global" };
+  const [kind, ...rest] = String(value ?? "").split(":");
+  return { kind: kind || "project", id: rest.join(":") || "unresolved" };
+}
+
+function scopeMatches(claimScope: unknown, request: ContextRequest, projectAliases: readonly string[]): boolean {
+  const scopes = request.scope_stack ?? [{ kind: request.scope_kind, id: request.scope_id }];
+  return scopes.some((scope) => claimScope === `${scope.kind}:${scope.id}` || claimScope === "global" && scope.kind === "global") || request.scope_kind === "project" && projectAliases.includes(String(claimScope));
+}
+
+function access(request: ContextRequest): ScopeAccess {
+  return { principal_id: request.principal_id, principal_ids: request.principal_ids, tenant_id: request.tenant_id, purpose: request.cognitive_purpose };
 }
 
 /** A small, receipt-bearing projection of reviewed evidence-backed claims. */
@@ -30,9 +42,15 @@ export class KnowledgeContribution implements ContextContributionProvider {
     // A reviewed claim is not automatically trustworthy merely because its review record
     // exists.  Sources can be revoked after review; Context must fail closed in that case.
     const sources = new Map(this.store.list("knowledge_source", 10_000).map((source) => [String(source.id), source]));
+    const projectAliases = request.scope_kind === "project"
+      ? this.store.list("scope_alias", 10_000, (alias) => alias.status === "active" && JSON.stringify(alias.scope) === JSON.stringify({ kind: "project", id: request.scope_id }))
+        .map((alias) => `project:${String(alias.alias)}`)
+      : [];
     const matches = this.store.list("knowledge_claim", 10_000)
       .flatMap((claim) => {
-        if (claim.status !== "reviewed" || !scopeMatches(claim.scope, request)
+        const claimScope = String(claim.scope ?? "");
+        const applicability = recordScope(claimScope);
+        if (claim.status !== "reviewed" || !scopeMatches(claim.scope, request, projectAliases) || !scopeAllows(scopeEnvelope(claim.scope_envelope, applicability), access(request))
           || claim.valid_until !== null && claim.valid_until !== undefined && Date.parse(String(claim.valid_until)) < now) return [];
         // Legacy records without a persisted source cannot become execution Context
         // merely because an old Markdown frontmatter happened to name one.  The

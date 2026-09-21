@@ -1,4 +1,4 @@
-# Current Capability Matrix (v0.12.35)
+# Current Capability Matrix (v0.12.36)
 
 ## 单点能力的统一评测契约
 
@@ -18,7 +18,7 @@
 
 ## 当前架构审查结论
 
-当前矩阵大多记录“本地协议已实现”，但仍需避免把协议状态写成产品承诺：`Runtime Proof`、`Host Session`、`Outcome Observer`、A2A、真实模型和外部隔离仍依赖 Adapter/部署证据；`Automatic experience publication` 仍不是自动行为。v0.12.34 的主目标应是把这些事实接入同一 `VerifiedWorkLoop`，而不是再增加新的平行 MCP 入口。
+当前矩阵大多记录“本地协议已实现”，但仍需避免把协议状态写成产品承诺：`Runtime Proof`、`Host Session`、`Outcome Observer`、A2A、真实模型和外部隔离仍依赖 Adapter/部署证据；`Automatic experience publication` 仍不是自动行为。v0.12.36 的主目标是把这些事实接入同一 `VerifiedWorkLoop`，而不是再增加新的平行 MCP 入口。
 
 ## 对外名称与兼容别名
 
@@ -29,8 +29,8 @@
 | 完整组合根 | `craft` | 无 | 装配 Core、Context、Capability、Quality、Host Bridge |
 | 知识 | `craft-knowledge` / daily component MCP | `component-knowledge`、`craft-context` 的知识投影 | 默认只暴露日常小工具面；高级面与默认面共享 KnowledgeSource、Evidence 和 Context Receipt |
 | 记忆 | `craft-memory` / daily component MCP | `component-memory`、`craft-context` 的记忆投影 | 默认只暴露受管候选/当前 scope 解析；高级面与默认面共享 MemoryLedger 和 scope 规则 |
-| 能力发现 | `craft-capability` | 无 | 发现、激活、授权、调用严格分离 |
-| 通用质量 | `craft-quality` | `craft-skill-quality` | Skill、MCP、Host、Memory、Knowledge 都是 Subject，不限于 Skill |
+| 能力发现 | `craft` 内的 Capability Kit / MCP | `craft-capability` | `craft-capability` 是退休的公共产品名；发现、激活、授权、调用仍严格分离 |
+| 通用质量 | `craft` 内的 Verification / Eval / Quality MCP | `craft-quality`、`craft-skill-quality` | 两者都是退休的公共产品名；Skill、MCP、Host、Memory、Knowledge 都是 Subject，不限于 Skill |
 | 经验/工作流演进 | `craft-experience` / daily component MCP | `component-experience`、旧 workflow-evolution 名称 | 默认是观察到草案的最小路径；只产生 Candidate，不能绕过 Eval/Signoff/Canary |
 
 `craft-runtime`、`craft-workflow` 若尚未出现在 Marketplace，不应在文档中宣称已是可安装产品；它们目前属于内部领域概念或未来投影。发布门禁应同时覆盖 Codex 与 Claude manifest、Marketplace 独立仓库和所有组件的工具面，避免宿主缓存旧协议或旧名称。
@@ -53,7 +53,8 @@
 | Context selection | implemented | exact references and digests; vector search remains optional |
 | Knowledge Source / Memory Ledger | implemented and tested locally | source scope, digest, trust/access, legacy reference bindings, expiry/revocation and sensitivity are explicit; external systems remain source-owned |
 | Legacy formal knowledge migration | implemented and tested locally | one-time offline importer reads 53 eligible `kefu_llm_wiki` pages into candidate/Evidence records; runtime MCP/Host never scans the legacy tree; no legacy DB/MCP/Gate/FTS index or raw body is copied |
-| Context Resolution Receipt | implemented and tested locally | content-free exact memory/source versions and budgets; untrusted/revoked sources and restricted memory fail closed by default |
+| Context Resolution Receipt | implemented and tested locally | content-free exact memory/source versions and budgets; untrusted/revoked sources and restricted memory fail closed by default；决策门会记录约束召回、漏召回、输入 token、错误注入、成本/时延和“真实缓存观测 / unavailable”，不会把布局优化写成缓存命中 |
+| Activation & Proof / `craft doctor` | implemented and tested locally | Host Hook 只有写入当前 release 的 content-free execution proof 后，Doctor 才报告已执行；manifest、MCP 配置或 readiness 本身都不是执行证明。历史 Knowledge/Experience 修复先 dry-run，显式 apply 后仍把来源链不全的记录标为 `revalidation_required` |
 | Runtime Execution Attempt | implemented and tested locally | content-free Task/Run/Host/Environment/Effect facts; `effect_unknown` requires reconciliation and cannot be replayed automatically |
 | Context Working Set | implemented and tested locally | fixed five-member selection with selected/omitted explanation; history/state remain Host/current-task boundaries; vector remains optional |
 | Workbench Commands | implemented and tested locally | versioned, idempotent human commands; UI delegates through Craft Service and never writes Store directly |
@@ -90,7 +91,7 @@
 | Remote Tenant / Task Binding | implemented and tested locally | opaque one-time handle is bound to Task, tenant data-space, principal/receipt digests, audience, scopes and expiry; remote result/cancel/stream reads must re-authorize and tenant disable/revocation fails closed |
 | Host Session Protocol | implemented and tested locally | content-free contiguous events map into the canonical Trace; embedded Host only reports facts and never causes a second CLI to start |
 | Independent Outcome Observer | implemented and tested locally | observed snapshot and Evidence are distinct from Host self-report; it never independently grants promotion |
-| Runtime Acceptance Campaign | implemented and tested locally | requires two declared Hosts, two sanitized Cases, pinned environment/budget and independent observed outcomes; 3–4 trials are diagnostic and only strict five-trial evidence can become eligible for later Signoff/Canary |
+| Runtime Acceptance Campaign | implemented and tested locally | requires two sanitized Cases、一个固定 Host 的完整 baseline/candidate 配对（或两个 Host 的复制验证）、固定环境/预算和独立 Outcome；3–4 次只用于诊断，只有完整五次证据才可进入后续 Signoff/Canary |
 | Publisher provenance attestation | implemented and tested locally | public-key signature proves a digest was signed and fails stale on digest drift; it never installs, activates or replaces existing certification |
 | A2A v1 Adapter | implemented and tested locally | HTTPS Agent Card plus `message/send`, `tasks/get` and `tasks/cancel` are grant-bound, idempotent, digest-only protocol projections; remote identity, Artifact content and production transport remain deployment work |
 | Automatic experience publication | not automatic | Evaluation, Signoff, Canary, and human publication remain mandatory |

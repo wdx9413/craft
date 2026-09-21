@@ -58,7 +58,7 @@ test("v0.12.19 makes Knowledge Sources, Memory Ledger, receipts and retrieval se
     assert.throws(() => f.context.retrievalEvaluate({ adapter_id: vector2.id, metrics: { recall: 2, cross_project_leak_count: 0, latency_ms: 0, cost_usd: 0 } }), /invalid/);
 
     const resolved = await f.context.resolve({ receipt_id: "context", query: "controlled workflow", scope_kind: "project", scope_id: "project", memory_ids: [replacement.id], retrieval_adapter_id: vector2.id, max_items: 3, max_chars: 200 }) as JsonObject;
-    assert.equal((resolved.receipt as JsonObject).retrieval_mode, "vector"); assert.equal((resolved.items as JsonObject[]).length, 1);
+    assert.equal((resolved.receipt as JsonObject).retrieval_mode, "keyword"); assert.equal((resolved.items as JsonObject[]).length, 1);
     assert.equal(((await f.context.resolve({ receipt_id: "context", query: "controlled workflow", scope_kind: "project", scope_id: "project", memory_ids: [replacement.id], retrieval_adapter_id: vector2.id, max_items: 3, max_chars: 200 })) as JsonObject).idempotent, true);
     await assert.rejects(() => f.context.resolve({ query: "x", scope_kind: "project", scope_id: "other", memory_ids: [replacement.id] }), /unavailable/);
     await assert.rejects(() => f.context.resolve({ query: "workflow", scope_kind: "project", scope_id: "project", memory_ids: [procedural.id], max_chars: 1 }), /exceeds/);
@@ -116,7 +116,7 @@ test("v0.12.19 keeps Console and Agent mode as a mode-neutral plan over verified
       const response = await mcp.handle({ id: name, method: "tools/call", params: { name, arguments: args } }); assert.equal((response?.result as JsonObject).isError, false, name);
     }
     assert.equal(new McpServer(f.service, "core").tools.some((tool) => tool.name === "craft_context_resolution_resolve"), true);
-    assert.equal(VERSION, "0.12.35");
+    assert.equal(VERSION, "0.12.36");
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
@@ -197,9 +197,9 @@ test("v0.12.19 fails closed for untrusted, stale, restricted, malformed and drif
     const fallback = await f.context.resolve({ query: "alpha", scope_kind: "project", scope_id: "project", retrieval_adapter_id: nested.id, max_items: 1, max_chars: 5 }) as JsonObject;
     assert.equal((fallback.receipt as JsonObject).retrieval_mode, "keyword"); assert.equal((fallback.receipt as JsonObject).omitted_count, 2);
     const keywordResult = await f.context.resolve({ query: "alpha", scope_kind: "project", scope_id: "project", source_ids: [generatedSource.id], max_items: 2, max_chars: 200 }) as JsonObject;
-    assert.equal((keywordResult.items as JsonObject[])[0].reason, "keyword_overlap");
+    assert.equal((keywordResult.items as JsonObject[])[0].reason, "keyword_bm25");
     f.context.retrievalEvaluate({ adapter_id: nested.id, metrics: { recall: 1, cross_project_leak_count: 0, latency_ms: 0, cost_usd: 0 } });
-    assert.equal((((await f.context.resolve({ query: "alpha", scope_kind: "project", scope_id: "project", retrieval_adapter_id: nested.id, max_items: 1, max_chars: 200 })) as JsonObject).items as JsonObject[])[0].reason, "evaluated_vector_adapter");
+    assert.equal((((await f.context.resolve({ query: "alpha", scope_kind: "project", scope_id: "project", retrieval_adapter_id: nested.id, max_items: 1, max_chars: 200 })) as JsonObject).items as JsonObject[])[0].reason, "keyword_bm25");
     assert.equal((((await f.context.resolve({ query: "!!!", scope_kind: "project", scope_id: "project" })) as JsonObject).items as JsonObject[]).length, 0);
     const skipped = await f.context.resolve({ query: "no scope", scope_kind: " ", scope_id: "" }) as JsonObject;
     assert.equal(skipped.skipped, true);

@@ -1,11 +1,18 @@
 # Changelog
 
-> Note on numbering: the declared package version is now **0.12.35**. Earlier
+> Note on numbering: the declared package version is now **0.12.36**. Earlier
 > `v0.12.34`–`v0.12.43` headings name **incremental work on the previous revision**,
 > not releases. Each is a self-contained change set with its own 100%-coverage
 > test script; the version bump happens only when the work is released.
 
-## v0.12.35（本次发布）
+## v0.12.36（本次发布）
+
+- Git-first canonical Project Identity 与本机 path/旧 scope alias，避免跨机器串台；Context Receipt 记录 scope 栈、遮蔽与排除理由。
+- 真实 Keyword/BM25 检索与可选 OpenAI-compatible embedding 适配器；未配置或未评测的向量检索明确回退并记录 unavailable。
+- Knowledge Source 引入不可变 revision、fragment、Evidence 与 candidate ingest；来源漂移使旧 Claim 显式 stale，不静默复用。
+- Memory 引入 observed/effective 时间、topic 冲突弃权和自动 Light maintenance；Experience Graph 只接受确有执行形态证据的候选。
+
+## v0.12.35（历史发布）
 
 - 收口 P0-P2 控制面：新增 Runtime Execution Attempt、Context Working Set、Workbench Command、Capability Intake 和 Graph Compiler；Graph 只生成交给 `VerifiedWorkLoop` 的 Plan。
 - 运行 Attempt 绑定 Task/Run/Host/Environment/Effect/Receipt/Observation，并将 `effect_unknown` 固定为需人工或受控 reconcile、禁止自动重放；上下文回执只保存引用、预算与选择原因。

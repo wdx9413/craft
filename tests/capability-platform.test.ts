@@ -38,6 +38,8 @@ test("Capability Kit installs with pinned dependencies, exposes one distribution
     const child = f.service.capabilityKitInstall({ manifest: manifest("example.child", {
       depends_on: [{ kit_id: base.id, manifest_version: base.manifest_version }],
     }) });
+    const profiled = f.service.capabilityKitInstall({ manifest: manifest("example.profile", { metadata: { explicit_task_binding: true } }) }).kit as JsonObject;
+    assert.deepEqual((profiled.manifest as JsonObject).metadata, { explicit_task_binding: true });
     assert.equal((child.kit as JsonObject).status, "installed");
     assert.equal((f.service.capabilityKitInstall({ manifest: manifest("example.child", {
       depends_on: [{ kit_id: base.id, manifest_version: base.manifest_version }],

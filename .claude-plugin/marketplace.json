@@ -1,20 +1,32 @@
 {
   "name": "craft-marketplace",
+  "version": "0.12.36",
   "owner": {
     "name": "wdx9413"
   },
   "metadata": {
-    "description": "Craft capability, workflow, evaluation, and orchestration tools"
+    "description": "Craft's supported v0.12.36 plugin products. Retired projections are intentionally absent."
   },
   "plugins": [
     {
       "name": "craft",
-      "source": {
-        "source": "github",
-        "repo": "wdx9413/craft",
-        "ref": "main"
-      },
-      "description": "Discover, orchestrate, evaluate, and reuse Agent capabilities."
+      "source": { "source": "local", "path": "./plugins/craft" },
+      "description": "The full Craft runtime plugin."
+    },
+    {
+      "name": "craft-knowledge",
+      "source": { "source": "local", "path": "./plugins/craft-knowledge" },
+      "description": "Evidence-backed governed knowledge."
+    },
+    {
+      "name": "craft-memory",
+      "source": { "source": "local", "path": "./plugins/craft-memory" },
+      "description": "Scoped and evidence-linked memory."
+    },
+    {
+      "name": "craft-experience",
+      "source": { "source": "local", "path": "./plugins/craft-experience" },
+      "description": "Bounded experience observations and procedure drafts."
     }
   ]
 }
