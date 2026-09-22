@@ -150,12 +150,12 @@ export class ContextResolutionKernel {
     const preferred = new Map<string, number>();
     for (const candidate of candidates) {
       const topic = typeof candidate.memory.topic === "string" && candidate.memory.topic ? candidate.memory.topic : `entry:${candidate.memory.id}`;
-      const rank = scopeRank.get(canonicalJson(candidate.memory.scope)) ?? Number.MAX_SAFE_INTEGER;
+      const rank = scopeRank.get(canonicalJson(candidate.memory.scope))!;
       preferred.set(topic, Math.min(preferred.get(topic) ?? Number.MAX_SAFE_INTEGER, rank));
     }
     const scopedCandidates = candidates.filter((candidate) => {
       const topic = typeof candidate.memory.topic === "string" && candidate.memory.topic ? candidate.memory.topic : `entry:${candidate.memory.id}`;
-      return (scopeRank.get(canonicalJson(candidate.memory.scope)) ?? Number.MAX_SAFE_INTEGER) === preferred.get(topic);
+      return scopeRank.get(canonicalJson(candidate.memory.scope))! === preferred.get(topic);
     });
     const temporal = temporalMemorySelect(scopedCandidates.map((item) => item.memory), now, args.history_view === true);
     const available = scopedCandidates.filter((item) => temporal.selected.some((memory) => memory.id === item.memory.id));

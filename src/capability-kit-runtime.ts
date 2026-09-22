@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
 import { object, text } from "./validation.ts";
 import { canonicalJson, stableDigest, payload } from "./digest.ts";
+import { CRAFT_RELEASE_VERSION } from "./version.ts";
 
 const KIT_ID = /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/u;
 const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u;
@@ -204,5 +205,5 @@ export class CapabilityKitRuntime {
 }
 
 function builtin(id: string, name: string, provides: string[], effects: string[], entrypoints: string[], hooks: string[]): JsonObject {
-  return { id, version: "1.0.0", name, description: `${name} is a built-in declarative Capability Kit.`, compatibility: "^0.12.34", provides, effects, data_scopes: ["project_root"], entrypoints, hooks, surfaces: ["skill", "mcp", "cli", "plugin"], healthcheck: "builtin-declared", eval_suite: "capability-platform-fixtures" };
+  return { id, version: "1.0.0", name, description: `${name} is a built-in declarative Capability Kit.`, compatibility: `^${CRAFT_RELEASE_VERSION}`, provides, effects, data_scopes: ["project_root"], entrypoints, hooks, surfaces: ["skill", "mcp", "cli", "plugin"], healthcheck: "builtin-declared", eval_suite: "capability-platform-fixtures" };
 }

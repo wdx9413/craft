@@ -48,7 +48,7 @@ export function engineeringQualityProfileManifest(): JsonObject {
     version: ENGINEERING_QUALITY_PROFILE_VERSION,
     name: "Engineering quality profile",
     description: "An explicit, task-bound engineering-quality profile with evidence-only contributions.",
-    compatibility: "^0.12.34",
+    compatibility: "^0.12.37",
     provides: ["quality_profile", "root_cause_minimal_change", "risk_driven_verification", "independent_dual_review"],
     effects: [...EFFECTS],
     data_scopes: ["task_bound_workspace", "evidence_reference"],
@@ -131,16 +131,16 @@ export class EngineeringQualityProfileKernel {
     if (ruleId === "independent-dual-review") {
       const axis = text(proposal.review_axis, "proposal.review_axis");
       const baselineDigest = sha256(proposal.baseline_digest, "proposal.baseline_digest");
+      const reviewerId = proposal.reviewer_id === undefined ? `legacy:${axis}` : text(proposal.reviewer_id, "proposal.reviewer_id");
+      const blindInputDigest = proposal.blind_input_digest === undefined ? baselineDigest : sha256(proposal.blind_input_digest, "proposal.blind_input_digest");
       const reviewId = String(args.review_id ?? `engineering_quality_review_${stableDigest({ activation_id: activation.id, axis, baseline_digest: baselineDigest }).slice(-20)}`);
       const identity = { activation_id: activation.id, activation_version: activation.version, contribution_id: contribution.id,
-        contribution_version: contribution.version, axis, baseline_digest: baselineDigest, evidence_ids: evidenceIds };
-      const existing = this.store.find("engineering_quality_profile_review", reviewId);
-      if (existing) {
-        if (existing.identity_digest !== stableDigest(identity)) throw new Error("Engineering Quality Profile review idempotency conflict");
-      } else {
-        this.store.create("engineering_quality_profile_review", reviewId, { ...identity, identity_digest: stableDigest(identity),
-          visibility_scope: "axis_isolated", raw_findings_stored: false });
-      }
+        contribution_version: contribution.version, axis, baseline_digest: baselineDigest, reviewer_id: reviewerId, blind_input_digest: blindInputDigest, evidence_ids: evidenceIds };
+      // `rulePhase` prevents a second axis submission before this point, so an
+      // independently supplied review id cannot be safely reused.  Always use
+      // create rather than retaining a dead idempotency branch.
+      this.store.create("engineering_quality_profile_review", reviewId, { ...identity, identity_digest: stableDigest(identity),
+        visibility_scope: "axis_isolated", raw_findings_stored: false });
     }
     return result;
   }
@@ -153,6 +153,7 @@ export class EngineeringQualityProfileKernel {
     }
     const baselineDigests = new Set(reviews.map((review) => String(review.baseline_digest)));
     if (baselineDigests.size !== 1) throw new Error("Engineering Quality Profile reviews must use the same fixed baseline");
+    if (new Set(reviews.map((review) => String(review.reviewer_id))).size !== REVIEW_AXES.length) throw new Error("Engineering Quality Profile review axes require independent reviewers");
     const reproductionEvidenceIds = strings(args.reproduction_evidence_ids, "reproduction_evidence_ids");
     for (const evidenceId of reproductionEvidenceIds) {
       const evidence = this.store.get("evidence", evidenceId);
@@ -195,29 +196,14 @@ export class EngineeringQualityProfileKernel {
   }
 
   evaluationRecord(args: JsonObject): JsonObject {
+    // Kept only so existing local journals remain readable.  A caller-supplied
+    // boolean result is not proof and is deliberately excluded from promotion.
     const plan = this.store.get("engineering_quality_profile_evaluation_plan", text(args.plan_id, "plan_id"));
     if (plan.status !== "collecting") throw new Error("Engineering Quality Profile evaluation is not collecting observations");
-    this.activation(plan.activation_id);
     const caseId = text(args.case_id, "case_id"); if (!(plan.case_ids as string[]).includes(caseId)) throw new Error("Engineering Quality Profile Case is not in the plan");
     const trialIndex = Number(args.trial_index); if (!Number.isInteger(trialIndex) || trialIndex < 1 || trialIndex > Number(plan.trials_per_pair)) throw new Error("Engineering Quality Profile trial_index is outside the plan");
     const arm = text(args.arm, "arm"); if (arm !== "baseline" && arm !== "profile") throw new Error("Engineering Quality Profile arm is unsupported");
-    const session = this.store.get("host_session", text(args.host_session_id, "host_session_id"));
-    if (session.host_id !== plan.host_id || session.environment_fingerprint !== plan.environment_fingerprint) throw new Error("Engineering Quality Profile Host Session does not match the plan");
-    const observation = this.store.get("outcome_observation", text(args.observation_id, "observation_id"));
-    if (observation.trace_id !== session.trace_id || observation.host_id !== plan.host_id || observation.observer_kind !== plan.observer_kind || observation.observer_id === plan.host_id) {
-      throw new Error("Engineering Quality Profile Outcome Observation is not independent or does not match the Host Session");
-    }
-    const rootCauseEvidenceIds = strings(args.root_cause_evidence_ids, "root_cause_evidence_ids", 0); rootCauseEvidenceIds.forEach((evidenceId) => this.store.get("evidence", evidenceId));
-    const deterministicAcceptancePassed = boolean(args.deterministic_acceptance_passed, "deterministic_acceptance_passed");
-    const siblingCallerPassed = boolean(args.sibling_caller_passed, "sibling_caller_passed");
-    const unauthorizedEffect = boolean(args.unauthorized_effect, "unauthorized_effect");
-    const safetyRegression = boolean(args.safety_regression, "safety_regression");
-    const factualRegression = boolean(args.factual_regression, "factual_regression");
-    const identity = { plan_id: plan.id, plan_version: plan.version, case_id: caseId, trial_index: trialIndex, arm,
-      host_session_id: session.id, host_session_version: session.version, observation_id: observation.id, observation_version: observation.version,
-      deterministic_acceptance_passed: deterministicAcceptancePassed, sibling_caller_passed: siblingCallerPassed, unauthorized_effect: unauthorizedEffect,
-      safety_regression: safetyRegression, factual_regression: factualRegression, root_cause_evidence_ids: rootCauseEvidenceIds,
-      retry_count: nonNegativeNumber(args.retry_count, "retry_count", true), cost_units: nonNegativeNumber(args.cost_units, "cost_units"), latency_ms: nonNegativeNumber(args.latency_ms, "latency_ms") };
+    const identity = { plan_id: plan.id, plan_version: plan.version, case_id: caseId, trial_index: trialIndex, arm, legacy: true };
     const recordId = String(args.record_id ?? `engineering_quality_profile_evaluation_record_${stableDigest({ plan_id: plan.id, case_id: caseId, trial_index: trialIndex, arm }).slice(-20)}`);
     const existing = this.store.find("engineering_quality_profile_evaluation_record", recordId);
     if (existing) {
@@ -227,18 +213,37 @@ export class EngineeringQualityProfileKernel {
     const duplicate = this.store.list("engineering_quality_profile_evaluation_record", 10_000, (record) => record.plan_id === plan.id && record.case_id === caseId && record.trial_index === trialIndex && record.arm === arm)[0];
     if (duplicate) throw new Error("Engineering Quality Profile evaluation slot is already recorded");
     const record = this.store.create("engineering_quality_profile_evaluation_record", recordId, { ...identity, identity_digest: stableDigest(identity),
-      observation_verdict: observation.verdict, raw_receipt_stored: false });
-    const reasons = arm === "profile" ? [
-      ...(unauthorizedEffect ? ["unauthorized_effect"] : []), ...(deterministicAcceptancePassed ? [] : ["deterministic_acceptance_failed"]),
-      ...(safetyRegression ? ["safety_regression"] : []), ...(factualRegression ? ["factual_regression"] : []),
-      ...(siblingCallerPassed ? [] : ["sibling_caller_regression"]), ...(rootCauseEvidenceIds.length ? [] : ["root_cause_evidence_missing"]),
-    ] : [];
-    if (!reasons.length) return { plan, record, idempotent: false };
-    const rejectionId = `engineering_quality_profile_rejection_${stableDigest({ plan_id: plan.id, record_id: record.id, reasons }).slice(-20)}`;
-    const rejection = this.store.create("engineering_quality_profile_rejection", rejectionId, { plan_id: plan.id, record_id: record.id, reasons,
-      re_evaluation_condition: "Use a new fixed-version Profile activation and complete fresh paired trials.", raw_content_stored: false });
-    const rejected = this.store.save("engineering_quality_profile_evaluation_plan", String(plan.id), { ...payload(plan), status: "rejected", rejection_id: rejection.id });
-    return { plan: rejected, record, rejection, idempotent: false };
+      status: "revalidation_required", deterministic_acceptance_passed: false, sibling_caller_passed: false,
+      retry_count: 0, cost_units: 0, latency_ms: 0, raw_receipt_stored: false });
+    return { plan, record, idempotent: false };
+  }
+
+  evaluationReceiptRecord(args: JsonObject): JsonObject {
+    const plan = this.store.get("engineering_quality_profile_evaluation_plan", text(args.plan_id, "plan_id"));
+    if (plan.status !== "collecting") throw new Error("Engineering Quality Profile evaluation is not collecting observations");
+    const caseId = text(args.case_id, "case_id"); if (!(plan.case_ids as string[]).includes(caseId)) throw new Error("Engineering Quality Profile Case is not in the plan");
+    const trialIndex = Number(args.trial_index); if (!Number.isInteger(trialIndex) || trialIndex < 1 || trialIndex > Number(plan.trials_per_pair)) throw new Error("Engineering Quality Profile trial_index is outside the plan");
+    const arm = text(args.arm, "arm"); if (arm !== "baseline" && arm !== "profile") throw new Error("Engineering Quality Profile arm is unsupported");
+    const session = this.store.get("host_session", text(args.host_session_id, "host_session_id"));
+    if (session.status !== "terminal" || session.host_id !== plan.host_id || session.environment_fingerprint !== plan.environment_fingerprint || session.model_fingerprint !== plan.model_fingerprint || session.budget_fingerprint !== plan.budget_fingerprint) throw new Error("Engineering Quality Profile Host receipt does not match the fixed plan");
+    const observation = this.store.get("outcome_observation", text(args.observation_id, "observation_id"));
+    if (observation.trace_id !== session.trace_id || observation.host_id !== plan.host_id || observation.observer_kind !== plan.observer_kind || observation.observer_id === plan.host_id) throw new Error("Engineering Quality Profile Outcome Observation is not independent or does not match the Host Session");
+    const receipt = object(args.receipt, "receipt");
+    const evidenceIds = strings(receipt.evidence_ids, "receipt.evidence_ids");
+    const evidence = evidenceIds.map((id) => this.store.get("evidence", id));
+    if (evidence.some((item) => item.source_type !== "program" || item.confidence !== "confirmed")) throw new Error("Engineering Quality Profile receipt requires confirmed program Evidence");
+    const testCase = this.store.get("engineering_quality_profile_case", caseId);
+    ["frozen_input_digest", "workspace_snapshot_digest", "acceptance_command_digest", "sibling_caller_assertion_digest"].forEach((key) => {
+      const expected = key === "workspace_snapshot_digest" ? sha256(receipt[key], `receipt.${key}`) : testCase[key];
+      if (key !== "workspace_snapshot_digest" && receipt[key] !== expected) throw new Error(`Engineering Quality Profile receipt ${key} drifted`);
+    });
+    const identity = { plan_id: plan.id, plan_version: plan.version, case_id: caseId, trial_index: trialIndex, arm, host_session_id: session.id, host_session_version: session.version, observation_id: observation.id, observation_version: observation.version, receipt_digest: stableDigest(receipt), evidence_ids: evidenceIds, retry_count: nonNegativeNumber(receipt.retry_count, "receipt.retry_count", true), cost_units: nonNegativeNumber(receipt.cost_units, "receipt.cost_units"), latency_ms: nonNegativeNumber(receipt.latency_ms, "receipt.latency_ms") };
+    const recordId = String(args.record_id ?? `engineering_quality_profile_evaluation_record_${stableDigest({ plan_id: plan.id, case_id: caseId, trial_index: trialIndex, arm }).slice(-20)}`);
+    const existing = this.store.find("engineering_quality_profile_evaluation_record", recordId); if (existing) { if (existing.identity_digest !== stableDigest(identity)) throw new Error("Engineering Quality Profile evaluation record idempotency conflict"); return { plan, record: existing, idempotent: true }; }
+    if (this.store.list("engineering_quality_profile_evaluation_record", 10_000, (record) => record.plan_id === plan.id && record.case_id === caseId && record.trial_index === trialIndex && record.arm === arm).length) throw new Error("Engineering Quality Profile evaluation slot is already recorded");
+    const passed = observation.verdict === "passed";
+    const record = this.store.create("engineering_quality_profile_evaluation_record", recordId, { ...identity, identity_digest: stableDigest(identity), status: "verified", deterministic_acceptance_passed: passed, sibling_caller_passed: passed, unauthorized_effect: false, safety_regression: !passed, factual_regression: !passed, root_cause_evidence_ids: evidenceIds, raw_receipt_stored: false });
+    return { plan, record, idempotent: false };
   }
 
   evaluationEvaluate(args: JsonObject): JsonObject {
@@ -319,6 +324,8 @@ export class EngineeringQualityProfileKernel {
       const axis = text(proposal.review_axis, "proposal.review_axis");
       if (!(REVIEW_AXES as readonly string[]).includes(axis)) throw new Error("Engineering Quality Profile review axis is unsupported");
       sha256(proposal.baseline_digest, "proposal.baseline_digest"); sha256(proposal.finding_digest, "proposal.finding_digest");
+      if (proposal.blind_input_digest !== undefined) sha256(proposal.blind_input_digest, "proposal.blind_input_digest");
+      if (proposal.reviewer_id !== undefined) text(proposal.reviewer_id, "proposal.reviewer_id");
       if (this.store.list("engineering_quality_profile_review", 10_000, (review) => review.activation_id === activation.id && review.axis === axis).length) {
         throw new Error("Engineering Quality Profile review axis is already recorded");
       }

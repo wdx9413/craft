@@ -104,6 +104,7 @@ test("v0.12.43 reads a scope and refuses an unsupported kind", () => {
   assert.deepEqual(parseScope({ scope_kind: "global", scope_id: "p" }), { kind: "global", id: "p" });
   assert.throws(() => parseScope({ scope_id: "p" }), /scope_kind must not be empty/u);
   assert.throws(() => parseScope({ scope_kind: "project" }), /scope_id must not be empty/u);
+  assert.throws(() => parseScope({ scope_kind: "unsupported", scope_id: "x" }), /unsupported/u);
   // The kind is validated before the id, so a fully empty call reports the kind rather than
   // whichever field happened to be read first.
   assert.throws(() => parseScope({}), /scope_kind/u);

@@ -824,6 +824,7 @@ export class CraftService extends ServiceFoundation {
   engineeringQualityProfileReviewAggregate(args: JsonObject): JsonObject { return this.engineeringQualityProfile.reviewAggregate(args); }
   engineeringQualityProfileEvaluationPlan(args: JsonObject): JsonObject { return this.engineeringQualityProfile.evaluationPlan(args); }
   engineeringQualityProfileEvaluationRecord(args: JsonObject): JsonObject { return this.engineeringQualityProfile.evaluationRecord(args); }
+  engineeringQualityProfileEvaluationReceiptRecord(args: JsonObject): JsonObject { return this.engineeringQualityProfile.evaluationReceiptRecord(args); }
   engineeringQualityProfileEvaluationEvaluate(args: JsonObject): JsonObject { return this.engineeringQualityProfile.evaluationEvaluate(args); }
   engineeringQualityProfileEvaluationGet(args: JsonObject): JsonObject { return this.engineeringQualityProfile.evaluationGet(args); }
   workRuntimeModeConfigure(args: JsonObject): JsonObject { return this.workRuntimeModes.configure(args); }
@@ -3842,6 +3843,7 @@ export class CraftService extends ServiceFoundation {
   procedureAutomationSave(args: JsonObject): JsonObject { return this.procedureAutomation.save(args); }
   procedureAutomationPause(args: JsonObject): JsonObject { return this.procedureAutomation.pause(args); }
   procedureAutomationRun(args: JsonObject): JsonObject { return this.procedureAutomation.run(args); }
+  procedureAutomationReceiptRecord(args: JsonObject): JsonObject { return this.procedureAutomation.receiptRecord(args); }
   procedureAutomationTick(args: JsonObject = {}): JsonObject { return this.procedureAutomation.tick(args); }
   procedureAutomationGet(args: JsonObject): JsonObject { return this.procedureAutomation.get(args); }
   procedureAutomationEligibility(args: JsonObject): JsonObject { return this.procedureAutomation.eligibility(args); }

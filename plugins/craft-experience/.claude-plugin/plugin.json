@@ -1,6 +1,6 @@
 {
   "name": "craft-experience",
-  "version": "0.12.36",
+  "version": "0.12.37",
   "description": "Create bounded Workflow drafts from sanitized observations in Claude Code.",
   "author": {
     "name": "wdx9413"

@@ -17,6 +17,10 @@ test("v0.12.32 memory governance is candidate-first, conflict-aware and expiring
     const evidence = service.evidenceRecord({ evidence_id: "ev", source_type: "test", claim: "verified", confidence: "confirmed" });
     const first = service.memoryCandidatePropose({ candidate_id: "c1", source_id: source.id, kind: "preference", scope_kind: "project", scope_id: "p", topic: "editor", content: "use markdown", evidence_ids: [evidence.id] }).candidate as JsonObject;
     assert.equal(first.status, "candidate");
+    assert.equal(service.memoryCandidatePropose({ candidate_id: "c1", source_id: source.id, kind: "preference", scope_kind: "project", scope_id: "p", topic: "editor", content: "use markdown", evidence_ids: [evidence.id] }).idempotent, true);
+    const dated = service.memoryCandidatePropose({ candidate_id: "dated", source_id: source.id, kind: "preference", scope_kind: "project", scope_id: "p", topic: "dated", content: "dated", evidence_ids: [evidence.id], observed_at: "2026-01-01T00:00:00.000Z", effective_from: "2026-01-02T00:00:00.000Z" }).candidate as JsonObject;
+    assert.equal(dated.observed_at, "2026-01-01T00:00:00.000Z");
+    assert.throws(() => service.memoryCandidatePropose({ candidate_id: "bad-date", source_id: source.id, kind: "preference", scope_kind: "project", scope_id: "p", topic: "bad-date", content: "bad", observed_at: "never" }), /Invalid time value|ISO/u);
     const conflict = service.memoryCandidatePropose({ candidate_id: "c2", source_id: source.id, kind: "preference", scope_kind: "project", scope_id: "p", topic: "editor", content: "use json", evidence_ids: [evidence.id] }).candidate as JsonObject;
     assert.equal(conflict.status, "conflict_pending");
     assert.throws(() => service.memoryCandidateReview({ candidate_id: "c2", decision: "approve", reviewer: "human", reason: "ok" }), /conflict/);
@@ -43,6 +47,7 @@ test("v0.12.32 workflow DAG validates, checkpoints and detects drift", async () 
   const { root, store, service } = await fixture();
   try {
     const workflow = service.workflowDagSave({ workflow_id: "wf", name: "DAG", nodes: [{ id: "a", type: "action" }, { id: "b", type: "human_gate", depends_on: ["a"], side_effect: "local_write" }] }).workflow as JsonObject;
+    assert.equal((service.workflowDagGet({ workflow_id: workflow.id, version: workflow.version }).workflow as JsonObject).id, workflow.id);
     assert.equal(workflow.lifecycle, "draft");
     assert.throws(() => service.workflowDagValidate({ nodes: [{ id: "a", type: "action", depends_on: ["b"] }, { id: "b", type: "action", depends_on: ["a"] }] }), /cycle/);
     const checkpoint = service.workflowDagCheckpoint({ checkpoint_id: "cp", run_id: "run", workflow_id: "wf", completed: ["a"], pending: ["b"], state_digest: "sha256:state" }).checkpoint as JsonObject;
@@ -66,7 +71,10 @@ test("v0.12.32 task state is append-only and optimistic-concurrency protected", 
     assert.throws(() => service.taskStateTransition({ task_id: "bad", state: "unknown" }), /unsupported/);
     assert.throws(() => service.taskStateTransition({ task_id: "bad", state: "running", expected_revision: -1 }), /non-negative/);
     assert.throws(() => service.taskStateTransition({ task_id: "bad", state: "running", expected_revision: 1.5 }), /non-negative/);
+    assert.throws(() => service.taskStateTransition({ task_id: "bad", state: "running", actor: " " }), /actor must not be empty/u);
     assert.throws(() => service.taskStateTransition({ task_id: "bad", state: "running", evidence_ids: ["missing"] }), /Unknown evidence/);
+    store.create("task_state_projection", "implicit", { task_id: "implicit" });
+    assert.equal((service.taskStateTransition({ task_id: "implicit", state: "running" }).projection as JsonObject).state_revision, 1);
     assert.equal((service.taskStateGet({ task_id: "missing" }).projection), null);
     assert.deepEqual(service.taskStateReplay({ task_id: "missing" }), { task_id: "missing", state: "prepared", state_revision: 0, event_count: 0 });
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }

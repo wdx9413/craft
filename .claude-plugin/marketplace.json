@@ -1,11 +1,11 @@
 {
   "name": "craft-marketplace",
-  "version": "0.12.36",
+  "version": "0.12.37",
   "owner": {
     "name": "wdx9413"
   },
   "metadata": {
-    "description": "Craft's supported v0.12.36 plugin products. Retired projections are intentionally absent."
+    "description": "Craft's supported v0.12.37 plugin products. Retired projections are intentionally absent."
   },
   "plugins": [
     {

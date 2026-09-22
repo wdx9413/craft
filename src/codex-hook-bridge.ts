@@ -143,7 +143,7 @@ export class HookLearningCoordinator {
       verifier: "local_verification",
       failure_signature: outcome === "failed" ? stableDigest((journal.signals as JsonObject[]).filter((signal) => signal.kind === "verification").map((signal) => signal.digest)) : null,
       host_revision: "codex-hook-v1",
-      capability_revision: "craft-experience@0.12.36",
+      capability_revision: `craft-experience@${CRAFT_RELEASE_VERSION}`,
     };
     const scenarioKey = `scenario:${stableDigest(scenarioSignature).slice(-24)}`;
     const observation = this.service.workflowEvolutionObserve({ observation_id: `workflow_evolution_observation_${sourceDigest.slice(-20)}`,

@@ -87,7 +87,11 @@ export class KnowledgeAutoReviewKernel {
       try { fragments.push({ evidence_id: evidence.id, fragment_id: fragment.id, locator: fragment.locator, source_revision_id: fragment.source_revision_id, content_digest: fragment.content_digest, content: this.store.contentStore.readCompatSync(ref as ContentRef).body }); } catch { /* unavailable fragment remains unavailable */ }
     }
     if (!fragments.length) return { status: "unavailable", reason: "evidence_fragment_unavailable", packet: null };
-    const content = typeof claim.content === "string" ? claim.content : this.store.contentStore.readCompatSync(claim.content_ref as ContentRef).body;
+    // `CraftStore.record` materializes a valid content reference before this
+    // kernel sees the Claim; `claimContentIsIntact` above rejects an invalid
+    // reference.  Keep one canonical body path rather than an unreachable
+    // second read of the same reference.
+    const content = String(claim.content);
     const packet = { schema_version: "craft.knowledge-semantic-review.v1", claim: { id: claim.id, version: claim.version, kind: claim.kind, scope: claim.scope, content, content_digest: claim.content_digest },
       source: { id: source.id, version: source.version, content_digest: source.content_digest, trust: source.trust }, evidence_fragments: fragments,
       rubric: { supported: "Claim is directly supported by supplied fragments within the same scope.", contradicted: "Supplied fragments contradict the Claim.", insufficient: "Fragments do not establish the Claim or scope." } };

@@ -120,5 +120,7 @@ test("a failing child is reported as failed rather than thrown at the parent", a
   assert.equal(empty.status, "failed");
   assert.equal(empty.dispatch_id, "subagent_op-3");
   assert.equal(empty.steps, 0);
+  const missingDispatch = await executeSubagent({ operation_id: "op-4", task_id: "t", objective: "look",
+    plan, prepare: () => ({}), execute: async () => ({ receipt: { status: "failed", loop: {} } }) });
+  assert.equal(missingDispatch.dispatch_id, "subagent_op-4");
 });
-

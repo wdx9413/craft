@@ -71,7 +71,7 @@ test("v0.12.18 grants only healthy, scoped, one-time remote read authority and r
     assert.throws(() => full.handlers.craft_federated_delegation_revoke({ grant_id: grant.id, reason: "late", evidence_ids: [f.confirmed.id] }), /Terminal/);
     assert.equal((await full.handlers.craft_federated_delegation_reconcile({ grant_id: grant.id })).idempotent, true);
     assert.equal((await full.handlers.craft_federated_delegation_get({ grant_id: grant.id })).grant !== undefined, true);
-    assert.equal(VERSION, "0.12.36");
+    assert.equal(VERSION, "0.12.37");
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 

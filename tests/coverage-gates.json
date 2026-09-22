@@ -15,9 +15,9 @@
     "way but 100% in its own group -- so a single combined run would have turned",
     "this into a stricter gate than the one it replaces.",
     "",
-    "`branches: false` records the groups that never asserted branch coverage.",
-    "Their modules sit at 56-74% branch coverage; requiring 100% would be a new",
-    "gate, not a preserved one."
+    "Every managed group asserts 100% line, function, and branch coverage.",
+    "Platform-only branches may remain explicitly skipped on platforms where they",
+    "are structurally unreachable; no ordinary module is exempt from branch coverage."
   ],
   "thresholds": {
     "lines": 100,
@@ -202,9 +202,11 @@
         "src/mcp-http.ts"
       ],
       "tests": [
-        "tests/trust-web-runtime.test.ts"
+        "tests/trust-web-runtime.test.ts",
+        "tests/coverage-fill.test.ts",
+        "tests/remaining-branch-cases.test.ts"
       ],
-      "branches": false
+      "branches": true
     },
     {
       "name": "generic-adapter-runtime",
@@ -212,9 +214,11 @@
         "src/generic-adapter-runtime.ts"
       ],
       "tests": [
-        "tests/generic-adapter-runtime.test.ts"
+        "tests/generic-adapter-runtime.test.ts",
+        "tests/coverage-fill.test.ts",
+        "tests/remaining-branch-cases.test.ts"
       ],
-      "branches": false
+      "branches": true
     },
     {
       "name": "turn-cognitive-runtime",
@@ -249,9 +253,11 @@
         "src/a2a-v1-adapter.ts"
       ],
       "tests": [
-        "tests/runtime-proof.test.ts"
+        "tests/runtime-proof.test.ts",
+        "tests/coverage-fill.test.ts",
+        "tests/remaining-branch-cases.test.ts"
       ],
-      "branches": false
+      "branches": true
     },
     {
       "name": "durable-experience",
@@ -393,8 +399,7 @@
         "tests/subagent-execution.test.ts",
         "tests/subagent-run.test.ts"
       ],
-      "branches": false,
-      "branchesNote": "line and function coverage are 100%; branch coverage measures 97.62%, and the remainder is the defensive operand combinations inside the shared `bounded()` upper/lower guards (a non-integer AND out-of-range value can never be both at once). Asserting them individually is outstanding work, so this group records where it stands instead of asserting a threshold it does not yet meet."
+      "branches": true
     },
     {
       "name": "coverage-gate-report",
@@ -504,9 +509,10 @@
       "tests": [
         "tests/v01231-agent-foundation.test.ts",
         "tests/component-procedure-graph.test.ts",
-        "tests/v01232-observability-memory.test.ts"
+        "tests/v01232-observability-memory.test.ts",
+        "tests/workflow-dag-coverage.test.ts"
       ],
-      "branches": false
+      "branches": true
     },
     {
       "name": "memory-governance",
@@ -562,9 +568,12 @@
         "src/application/use-cases/legacy-knowledge-migration.ts"
       ],
       "tests": [
-        "tests/legacy-knowledge-migration.test.ts"
+        "tests/legacy-knowledge-migration.test.ts",
+        "tests/legacy-knowledge-migration-coverage.test.ts",
+        "tests/coverage-fill.test.ts",
+        "tests/remaining-branch-cases.test.ts"
       ],
-      "branches": false
+      "branches": true
     }
   ]
 }

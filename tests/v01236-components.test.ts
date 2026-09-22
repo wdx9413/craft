@@ -15,7 +15,7 @@ async function fixture() {
 }
 async function dispose(f: Awaited<ReturnType<typeof fixture>>) { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 
-test("v0.12.36 resolves one canonical project through an explicit legacy alias without global fallback", async () => {
+test("v0.12.37 resolves one canonical project through an explicit legacy alias without global fallback", async () => {
   const f = await fixture();
   try {
     f.service.knowledgeMemoryInstallBuiltins();
@@ -31,7 +31,7 @@ test("v0.12.36 resolves one canonical project through an explicit legacy alias w
   } finally { await dispose(f); }
 });
 
-test("v0.12.36 records actual keyword fallback when an eligible vector adapter has no provider credential", async () => {
+test("v0.12.37 records actual keyword fallback when an eligible vector adapter has no provider credential", async () => {
   const f = await fixture();
   try {
     f.service.knowledgeMemoryInstallBuiltins();
@@ -45,7 +45,7 @@ test("v0.12.36 records actual keyword fallback when an eligible vector adapter h
   } finally { await dispose(f); }
 });
 
-test("v0.12.36 keeps hybrid unavailable until its embedding provider can really run", async () => {
+test("v0.12.37 keeps hybrid unavailable until its embedding provider can really run", async () => {
   const f = await fixture();
   try {
     f.service.knowledgeMemoryInstallBuiltins();
@@ -59,7 +59,7 @@ test("v0.12.36 keeps hybrid unavailable until its embedding provider can really 
   } finally { await dispose(f); }
 });
 
-test("v0.12.36 ingests immutable source revisions as Evidence and candidates, never reviewed context", async () => {
+test("v0.12.37 ingests immutable source revisions as Evidence and candidates, never reviewed context", async () => {
   const f = await fixture();
   try {
     const sourceRoot = join(f.root, "notes"); await (await import("node:fs/promises")).mkdir(sourceRoot);
@@ -77,7 +77,7 @@ test("v0.12.36 ingests immutable source revisions as Evidence and candidates, ne
   } finally { await dispose(f); }
 });
 
-test("v0.12.36 ingests only bounded readable files and makes stale reviewed claims explicit", async () => {
+test("v0.12.37 ingests only bounded readable files and makes stale reviewed claims explicit", async () => {
     const f = await fixture();
   try {
     const sourceRoot = join(f.root, "source-tree"); await mkdir(join(sourceRoot, "nested"), { recursive: true }); await mkdir(join(sourceRoot, "zzz")); await mkdir(join(sourceRoot, ".git")); await mkdir(join(sourceRoot, "node_modules"));
@@ -107,7 +107,7 @@ test("v0.12.36 ingests only bounded readable files and makes stale reviewed clai
   } finally { await dispose(f); }
 });
 
-test("v0.12.36 keeps temporal conflict abstention and schedules only bounded maintenance", async () => {
+test("v0.12.37 keeps temporal conflict abstention and schedules only bounded maintenance", async () => {
   const f = await fixture();
   try {
     f.service.knowledgeMemoryInstallBuiltins();
@@ -120,7 +120,7 @@ test("v0.12.36 keeps temporal conflict abstention and schedules only bounded mai
   } finally { await dispose(f); }
 });
 
-test("v0.12.36 exports replayable schema-3 bundles and turns merge collisions into candidates", async () => {
+test("v0.12.37 exports replayable schema-3 bundles and turns merge collisions into candidates", async () => {
   const source = await fixture(); const target = await fixture();
   try {
     source.service.knowledgeMemoryInstallBuiltins();
@@ -228,7 +228,8 @@ test("semantic review packet is fragment-bound and a routeable Prompt Procedure 
     const markdown = await readFile(procedurePath, "utf8");
     assert.match(markdown, /procedure_kind: "prompt"[\s\S]*lifecycle: "routeable"/u);
     const context = await f.service.contextResolutionResolve({ receipt_id: "procedure-context", query: "delivery tests", scope_kind: "project", scope_id: "p", members: ["experience"] });
-    assert.match(JSON.stringify(context.contributions), /Run focused tests/u);
+    assert.match(JSON.stringify(context.contributions), /content_digest/u);
+    assert.doesNotMatch(JSON.stringify(context.contributions), /Run focused tests/u);
     const exported = f.service.experienceProcedureSkillExport({ procedure_id: procedure.id });
     assert.equal((exported.export as JsonObject).enabled, false);
     assert.match(String((exported.export as JsonObject).path), /experience[\\/]skills[\\/]/u);

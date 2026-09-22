@@ -63,7 +63,8 @@ test("Knowledge, Memory and Experience hooks resolve only their named Context me
     const procedureRef = f.store.contentStore.writeSync({ kind: "experience", folder: "prompts", record_id: "hook-procedure", version: 1, scope: `project:${canonicalScope.id}`, status: "routeable", sensitivity: "internal", source_id: "fixture", title: "终态验证", body: "# 终态验证\n\n先运行验证。" });
     f.store.create("experience_procedure", "hook-procedure", { scope: `project:${canonicalScope.id}`, lifecycle: "routeable", routeable: true, procedure_kind: "prompt", trigger: "verification", title: "终态验证", acceptance_ref: "acceptance:fixture", scenario_signature: { project: canonicalScope.id }, content_ref: procedureRef, content_digest: procedureRef.digest });
     const experience = await bridge.handle("experience", { hook_event_name: "UserPromptSubmit", cwd: scope, prompt: "Which verification command should I use?" });
-    assert.match(String(experience.additionalContext), /先运行验证/u);
+    assert.match(String(experience.additionalContext), /content_digest/u);
+    assert.doesNotMatch(String(experience.additionalContext), /先运行验证/u);
     assert.doesNotMatch(String(experience.additionalContext), /focused verification|short feedback/u);
     const proof = f.service.activationProofDoctor({});
     const components = proof.components as JsonObject[];
@@ -162,10 +163,12 @@ test("Lifecycle hooks record boundaries without counting readiness as component 
     await bridge.handle("knowledge", { hook_event_name: "SessionStart", cwd: "/project/craft", session_id: "session", source: "claude" });
     await bridge.handle("knowledge", { hook_event_name: "Stop", cwd: "/project/craft", session_id: "session", turn_id: "turn" });
     await bridge.handle("knowledge", { hook_event_name: "SessionEnd", cwd: "/project/craft", session_id: "session", reason: "other" });
+    await bridge.handle("knowledge", { hook_event_name: "SessionEnd", cwd: "/project/craft", reason: "missing-session" });
     const events = f.store.events("codex-hook").filter((event) => event.event_type === "codex_hook.lifecycle");
-    assert.equal(events.length, 3);
-    assert.deepEqual(events.map((event) => (event.payload as JsonObject).event), ["SessionStart", "Stop", "SessionEnd"]);
+    assert.equal(events.length, 4);
+    assert.deepEqual(events.map((event) => (event.payload as JsonObject).event), ["SessionStart", "Stop", "SessionEnd", "SessionEnd"]);
     assert(events.every((event) => ((event.payload as JsonObject).usage as JsonObject).component_used === false));
     assert.match(String(((events[0]!.payload as JsonObject).scope as JsonObject).id), /^project:/u);
+    assert.equal((events[3]!.payload as JsonObject).session_id, "unknown");
   } finally { await dispose(f); }
 });

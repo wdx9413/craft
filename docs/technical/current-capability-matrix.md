@@ -1,4 +1,4 @@
-# Current Capability Matrix (v0.12.36)
+# Current Capability Matrix (v0.12.37)
 
 ## 单点能力的统一评测契约
 
@@ -18,7 +18,7 @@
 
 ## 当前架构审查结论
 
-当前矩阵大多记录“本地协议已实现”，但仍需避免把协议状态写成产品承诺：`Runtime Proof`、`Host Session`、`Outcome Observer`、A2A、真实模型和外部隔离仍依赖 Adapter/部署证据；`Automatic experience publication` 仍不是自动行为。v0.12.36 的主目标是把这些事实接入同一 `VerifiedWorkLoop`，而不是再增加新的平行 MCP 入口。
+当前矩阵大多记录“本地协议已实现”，但仍需避免把协议状态写成产品承诺：`Runtime Proof`、`Host Session`、`Outcome Observer`、A2A、真实模型和外部隔离仍依赖 Adapter/部署证据；`Automatic experience publication` 仍不是自动行为。v0.12.37 的主目标是把这些事实接入同一 `VerifiedWorkLoop`，而不是再增加新的平行 MCP 入口。
 
 ## 对外名称与兼容别名
 

@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import { access, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { RELEASE_PRODUCTS, RETIRED_MCP_PREFIXES, RETIRED_PUBLIC_PRODUCTS, releaseManifest } from "../../src/release-catalog.ts";
+import { RELEASE_PRODUCTS, RETIRED_MCP_PREFIXES, RETIRED_PUBLIC_PRODUCTS, externalDistributionContract, releaseManifest } from "../../src/release-catalog.ts";
 import { CRAFT_RELEASE_VERSION } from "../../src/version.ts";
 
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
+assert.deepEqual(JSON.parse(await readFile(join(root, "distribution-contract.json"), "utf8")), externalDistributionContract(), "distribution contract must be generated from ReleaseCatalog");
 for (const path of ["marketplace.json", ".agents/plugins/marketplace.json"]) {
   const actual = JSON.parse(await readFile(join(root, path), "utf8")) as { version?: string; plugins?: Array<{ name?: string; source?: { path?: string } }> };
   assert.equal(actual.version, CRAFT_RELEASE_VERSION, `${path} release mismatch`);

@@ -267,7 +267,9 @@ test("runtime acceptance covers pre-evaluation, duplicate slots, ties and baseli
   const f = await fixture("craft-acceptance-remaining-");
   try {
     const k = new RuntimeAcceptanceKernel(f.store);
+    assert.throws(() => k.plan({ case_ids: [], host_ids: ["h1"], trials_per_pair: 3, baseline_harness: "base", candidate_harness: "cand", environment_fingerprint: "e", budget_fingerprint: "b", observer_kind: "o" }), /non-empty/u);
     assert.throws(() => k.plan({ case_ids: ["dup", "dup"], host_ids: ["h1", "h2"], trials_per_pair: 3, baseline_harness: "base", candidate_harness: "cand", environment_fingerprint: "e", budget_fingerprint: "b", observer_kind: "o" }), /unique/);
+    assert.throws(() => k.plan({ case_ids: ["one", "two", "three"], host_ids: ["h1"], trials_per_pair: 3, baseline_harness: "base", candidate_harness: "cand", environment_fingerprint: "e", budget_fingerprint: "b", observer_kind: "o" }), /exactly 2/u);
     assert.throws(() => k.plan({ case_ids: ["c1", "c2"], host_ids: ["h1", "h2"], trials_per_pair: 3.5, baseline_harness: "base", candidate_harness: "cand", environment_fingerprint: "e", budget_fingerprint: "b", observer_kind: "o" }), /integer/);
     const plan = k.plan({ plan_id: "p", case_ids: ["c1", "c2"], host_ids: ["h1", "h2"], trials_per_pair: 3, baseline_harness: "base", candidate_harness: "cand", environment_fingerprint: "e", budget_fingerprint: "b", observer_kind: "o" }).plan as JsonObject;
     assert.equal(k.plan({ plan_id: "p", case_ids: ["c1", "c2"], host_ids: ["h1", "h2"], trials_per_pair: 3, baseline_harness: "base", candidate_harness: "cand", environment_fingerprint: "e", budget_fingerprint: "b", observer_kind: "o" }).idempotent, true);
@@ -279,6 +281,20 @@ test("runtime acceptance covers pre-evaluation, duplicate slots, ties and baseli
     assert.throws(() => k.record({ ...rec, record_id: "r2" }), /slot/);
     const result = k.evaluate({ plan_id: plan.id });
     assert.equal((result.evaluation as JsonObject).status, "inconclusive");
+    const complete = k.plan({ plan_id: "complete", case_ids: ["c1", "c2"], host_ids: ["h1"], trials_per_pair: 3, baseline_harness: "base", candidate_harness: "cand", environment_fingerprint: "e", budget_fingerprint: "b", observer_kind: "o" }).plan as JsonObject;
+    for (const caseId of ["c1", "c2"]) for (let trial = 1; trial <= 3; trial += 1) {
+      const baselineVerdict = trial === 2 ? "failed" : "passed";
+      const candidateVerdict = trial === 3 && caseId === "c1" ? "failed" : "passed";
+      f.store.create("runtime_acceptance_record", `complete-${caseId}-${trial}-baseline`, { plan_id: complete.id, host_id: "h1", case_id: caseId, trial_index: trial, arm: "baseline", verdict: baselineVerdict });
+      f.store.create("runtime_acceptance_record", `complete-${caseId}-${trial}-candidate`, { plan_id: complete.id, host_id: "h1", case_id: caseId, trial_index: trial, arm: "candidate", verdict: candidateVerdict });
+    }
+    assert.equal((k.evaluate({ plan_id: complete.id }).evaluation as JsonObject).status, "inconclusive");
+    const rejected = k.plan({ plan_id: "rejected", case_ids: ["c1", "c2"], host_ids: ["h1"], trials_per_pair: 3, baseline_harness: "base", candidate_harness: "cand", environment_fingerprint: "e", budget_fingerprint: "b", observer_kind: "o" }).plan as JsonObject;
+    for (const caseId of ["c1", "c2"]) for (let trial = 1; trial <= 3; trial += 1) {
+      f.store.create("runtime_acceptance_record", `rejected-${caseId}-${trial}-baseline`, { plan_id: rejected.id, host_id: "h1", case_id: caseId, trial_index: trial, arm: "baseline", verdict: "passed" });
+      f.store.create("runtime_acceptance_record", `rejected-${caseId}-${trial}-candidate`, { plan_id: rejected.id, host_id: "h1", case_id: caseId, trial_index: trial, arm: "candidate", verdict: "failed" });
+    }
+    assert.equal((k.evaluate({ plan_id: rejected.id }).evaluation as JsonObject).status, "rejected");
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 

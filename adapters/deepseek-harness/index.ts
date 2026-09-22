@@ -3,6 +3,9 @@ import { defineTool } from "@deepseek-ai/dsh-tools";
 
 export const name = "craft-adapter";
 export const inject = ["tools"];
+// npm supplies this from the package manifest at runtime.  Do not duplicate a
+// Craft release literal here: this adapter is packaged independently.
+const adapterVersion = process.env.npm_package_version;
 type AdapterConfig = { npxCommand?: string; packageSpec?: string; dataDir?: string };
 type ToolArgs = { tool: string; arguments_json?: string };
 type Context = { tools: { register(tool: unknown): void } };
@@ -54,7 +57,7 @@ function callCraft(command: string, packageSpec: string, args: ToolArgs, dataDir
       resolveOnce(response.result?.structuredContent ?? response.result);
     });
     child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize",
-      params: { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "dsh-craft-adapter", version: "0.12.23" } } })}\n`);
+      params: { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "dsh-craft-adapter", version: adapterVersion ?? "unversioned" } } })}\n`);
     child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`);
     child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call",
       params: { name: args.tool, arguments: toolArguments } })}\n`);
@@ -73,6 +76,6 @@ export function apply(ctx: Context, config: AdapterConfig = {}): void {
     output: { schema: { type: "object" }, render: (_args: unknown, value: unknown) =>
       [{ type: "text", text: JSON.stringify(value, null, 2) }] },
     execute: (args: ToolArgs) => callCraft(config.npxCommand || "npx",
-      config.packageSpec || "craft-agent-harness@0.12.23", args, config.dataDir),
+      config.packageSpec || (adapterVersion ? `craft-agent-harness@${adapterVersion}` : "craft-agent-harness"), args, config.dataDir),
   }));
 }

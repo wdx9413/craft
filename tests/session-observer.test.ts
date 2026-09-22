@@ -35,7 +35,8 @@ test("v0.12.29 host session protocol appends contiguous host facts into the cano
     assert.throws(() => f.sessions.open({ task_id: "task", host_id: " ", environment_fingerprint: "env", policy_fingerprint: "policy", capability_fingerprint: "capability" }), /host_id/);
     const generated = f.sessions.open({ task_id: "task-2", host_id: "host-2", environment_fingerprint: "env-2", policy_fingerprint: "policy-2", capability_fingerprint: "capability-2" });
     assert.match(String((generated.session as { id: string }).id), /^host_session_/);
-    const explicit = f.sessions.open({ session_id: "explicit", task_id: "task-3", host_id: "host-3", environment_fingerprint: "env-3", policy_fingerprint: "policy-3", capability_fingerprint: "capability-3" });
+    const explicit = f.sessions.open({ session_id: "explicit", task_id: "task-3", host_id: "host-3", environment_fingerprint: "env-3", policy_fingerprint: "policy-3", capability_fingerprint: "capability-3", model_fingerprint: "model-3", budget_fingerprint: "budget-3" });
+    assert.equal((explicit.session as { model_fingerprint: string }).model_fingerprint, "model-3");
     assert.equal((f.sessions.append({ session_id: (explicit.session as { id: string }).id, kind: "host.receipt", sequence: 2 }).event as { sequence: number }).sequence, 2);
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });

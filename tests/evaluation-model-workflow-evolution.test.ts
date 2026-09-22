@@ -178,3 +178,29 @@ test("v0.12.24 rejects malformed evolution inputs and keeps generated drafts, ti
     assert.match(String((kernel.submit({ request_id: third.id, workflow_id: "implicit-inputs", name: "Implicit", description: "Implicit", steps: [{ type: "assertion" }] }).proposal as JsonObject).id), /^workflow_evolution_proposal_/);
   } finally { await close(f); }
 });
+
+test("Workflow Evolution covers graph evidence, signature drift, and prompt-only draft fallbacks", async () => {
+  const f = await fixture();
+  try {
+    const kernel = f.service.workflowEvolution;
+    assert.throws(() => kernel.observe({ scenario_key: "bad-shape", source_kind: "external", source_id: "one", source_digest: "one", outcome: "passed", evidence_ids: ["confirmed"], execution_shape: ["unsupported"], sanitized: true }), /execution_shape/u);
+    assert.throws(() => kernel.observe({ scenario_key: "bad-signature", source_kind: "external", source_id: "one", source_digest: "one", outcome: "passed", evidence_ids: ["confirmed"], scenario_signature: [] as never, sanitized: true }), /Signature/u);
+    const first = kernel.observe({ observation_id: "signature-one", scenario_key: "signature", source_kind: "external", source_id: "one", source_digest: "one", outcome: "passed", evidence_ids: ["confirmed"], scenario_signature: { digest: "one" }, sanitized: true }).observation as JsonObject;
+    const second = kernel.observe({ observation_id: "signature-two", scenario_key: "signature", source_kind: "external", source_id: "two", source_digest: "two", outcome: "passed", evidence_ids: ["confirmed"], scenario_signature: { digest: "two" }, sanitized: true }).observation as JsonObject;
+    assert.throws(() => kernel.propose({ scenario_key: "signature", observation_ids: [first.id, second.id], hypothesis: "h", design_axes: ["tools"], output_contract_ref: "contract" }), /share a Scenario Signature/u);
+    const graphOne = kernel.observe({ observation_id: "graph-one", scenario_key: "graph", source_kind: "external", source_id: "graph-one", source_digest: "one", outcome: "passed", evidence_ids: ["confirmed"], sanitized: true }).observation as JsonObject;
+    const graphTwo = kernel.observe({ observation_id: "graph-two", scenario_key: "graph", source_kind: "external", source_id: "graph-two", source_digest: "two", outcome: "passed", evidence_ids: ["confirmed"], sanitized: true }).observation as JsonObject;
+    assert.throws(() => kernel.propose({ scenario_key: "graph", observation_ids: [graphOne.id, graphTwo.id], hypothesis: "h", design_axes: ["tools"], procedure_kind: "graph", output_contract_ref: "contract" }), /Graph Procedure/u);
+    const promptOne = kernel.observe({ observation_id: "prompt-one", scenario_key: "prompt", source_kind: "external", source_id: "prompt-one", source_digest: "one", outcome: "passed", evidence_ids: ["confirmed"], execution_shape: ["branch"], sanitized: true }).observation as JsonObject;
+    const promptTwo = kernel.observe({ observation_id: "prompt-two", scenario_key: "prompt", source_kind: "external", source_id: "prompt-two", source_digest: "two", outcome: "passed", evidence_ids: ["confirmed"], execution_shape: ["branch"], sanitized: true }).observation as JsonObject;
+    const promptRequest = kernel.propose({ request_id: "prompt-request", scenario_key: "prompt", observation_ids: [promptOne.id, promptTwo.id], hypothesis: "h", design_axes: ["output"], procedure_kind: "prompt", output_contract_ref: "contract" });
+    assert.equal(promptRequest.next_action, "issue_a_model_ticket_or_submit_a_host_distilled_prompt_procedure");
+    const proposal = kernel.submit({ request_id: "prompt-request", name: "Prompt", description: "Prompt fallback", inputs: [] }).proposal as JsonObject;
+    assert.match(String(proposal.workflow_id), /^prompt_/u);
+    assert.equal(proposal.prompt, "Prompt fallback");
+    f.store.create("workflow_evolution_observation", "legacy-signature-one", { scenario_key: "legacy-signature", source: { kind: "external", id: "legacy-one", digest: "one" }, outcome: "passed", evidence_ids: ["confirmed"], lifecycle: "accepted" });
+    f.store.create("workflow_evolution_observation", "legacy-signature-two", { scenario_key: "legacy-signature", source: { kind: "external", id: "legacy-two", digest: "two" }, outcome: "passed", evidence_ids: ["confirmed"], execution_shape: [], lifecycle: "accepted" });
+    assert.equal(((kernel.propose({ scenario_key: "legacy-signature", hypothesis: "legacy", design_axes: ["tools"], output_contract_ref: "contract" }).request as JsonObject).scenario_signature as JsonObject).source, "legacy_scenario_key");
+    assert.equal(((kernel.propose({ scenario_key: "legacy-signature", hypothesis: "legacy with explicit input", design_axes: ["tools"], output_contract_ref: "contract", scenario_signature: { digest: "explicit" } }).request as JsonObject).scenario_signature as JsonObject).digest, "explicit");
+  } finally { await close(f); }
+});

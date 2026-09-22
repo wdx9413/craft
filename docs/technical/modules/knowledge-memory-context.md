@@ -1,6 +1,6 @@
 # Knowledge Source、Memory Ledger 与 Context Resolution
 
-> 状态：三个模块，两个能力包 + 一个核心控制面。v0.12.19 曾把它们收敛为**一个** Module（`knowledge-memory-runtime.ts`）；v0.12.43 沿**上下文成员边界**把它切开，因为一个类同时服务两个成员，导致两个成员都无法成为能力包。本文标题没变，因为它从一开始就是准确的；文件名随实现改名。
+> 状态：三个模块，两个能力包 + 一个核心控制面。v0.12.19 曾把它们收敛为**一个** Module（`knowledge-memory-runtime.ts`）；当前 v0.12.37 沿**上下文成员边界**把它切开，因为一个类同时服务两个成员，导致两个成员都无法成为能力包。本文标题没变，因为它从一开始就是准确的；文件名随实现改名。
 
 ```text
 知识来源描述符                                   capability/craft-knowledge/knowledge-source-registry.ts

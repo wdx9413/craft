@@ -1,6 +1,6 @@
 # 上下文的五个成员，以及每个成员由谁持有
 
-> 状态：架构结论 + 当前实测状态。基线 v0.12.33（工作版本号未升）。本文记录**决定**与**实测**，两者分开标注；未决问题集中在最后一节，不散落在正文里。
+> 状态：架构结论 + 当前实测状态。发布基线 v0.12.37。本文记录**决定**与**实测**，两者分开标注；未决问题集中在最后一节，不散落在正文里。
 
 本文回答一个反复被问到的问题：`context` 到底由什么组成、每一项存在哪里、谁负责管理它。`src/capability-protocol.ts` 是这套结论的代码形式，本文是它的散文形式；两者不一致时以代码为准，并把文档修好。
 
@@ -66,7 +66,7 @@ Craft 自己跑循环时（`internal-host-driver.ts`，与 `codex-cli`、`claude
 
 - **丢弃 ≠ 压缩。** 淘汰整段是确定性的、可逆的、不需要模型调用；摘要会**替换**原文，不可逆，需要模型，并且产生一个**派生**事实——必须带来源，否则分不清一条原始回合和一条对它的总结。Craft 的整体设计是"无内容 + digest 钉住"，所以摘要必须是带 scope、带归属的内容，且**不能静默替代原文**。
 - **可逆性目前跨不了调用。** `craft_context_project` 的说明写着"omitted segments are named and can be restored"，但 `craft_context_restore` 要求调用方**把原始 segments 数组再传一遍**——而被省略的东西按定义就是调用方手上不再完整持有的。实测：只传 `segment_id` 会抛 `Context segment s2 does not exist`，且 `context_segment` 集合为空（没有任何持久化）。所以"可逆"只在调用方那份数组的生命周期内成立。
-- **压缩结果曾经只能写不能读。** `context_compaction` 与 `work_note` 此前没有读回动词，恢复中的会话只能知道"曾经压缩过一次"，无法知道压缩后是什么。已在 v0.12.43 补上 `craft_runtime_truth_compaction_get` / `_list` / `craft_runtime_truth_work_note_get`（记录 id 就是 session id，所以恢复只知道自己名字即可）。
+- **压缩结果曾经只能写不能读。** `context_compaction` 与 `work_note` 此前没有读回动词，恢复中的会话只能知道"曾经压缩过一次"，无法知道压缩后是什么。当前 v0.12.37 提供 `craft_runtime_truth_compaction_get` / `_list` / `craft_runtime_truth_work_note_get`（记录 id 就是 session id，所以恢复只知道自己名字即可）。
 
 ## 目标、计划与验收：为什么它们是内置的
 

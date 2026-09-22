@@ -10,7 +10,7 @@
 import { randomUUID } from "node:crypto";
 import type { CraftStore, JsonObject } from "../../src/infrastructure/store.ts";
 import { payload, stableDigest } from "../../src/digest.ts";
-import { normalizeSteps, resolveInputs, runStep, substitute } from "../../src/workflow.ts";
+import { normalizeSteps, resolveInputs, substitute } from "../../src/workflow.ts";
 import { ProcedureDefinitionStore, procedureDefinitionRef, type ProcedureDefinition } from "./procedure-definition.ts";
 
 type TriggerKind = "manual" | "interval";
@@ -45,16 +45,6 @@ function declaredEffects(definition: ProcedureDefinition): Set<string> {
     throw new Error("Procedure Automation supports only read_only or local_write Effects");
   }
   return effects;
-}
-
-function receiptStep(step: JsonObject, result: JsonObject): JsonObject {
-  return {
-    step_id: step.id, type: step.type, effect: step.side_effect,
-    passed: result.passed === true,
-    ...(typeof result.exit_code === "number" ? { exit_code: result.exit_code } : {}),
-    ...(typeof result.expected_exit_code === "number" ? { expected_exit_code: result.expected_exit_code } : {}),
-    ...(typeof result.error === "string" ? { error: result.error } : {}),
-  };
 }
 
 /**
@@ -133,59 +123,45 @@ export class ProcedureAutomationKernel {
     const attempt = Number(job.failure_count ?? 0) + 1;
     const running = this.store.create("procedure_automation_run", runId, {
       job_id: job.id, job_version: job.version, procedure_id: job.procedure_id, procedure_version: job.procedure_version,
-      started_at: now, attempt, status: "running", trigger: args.trigger ?? "manual",
+      started_at: now, attempt, status: "awaiting_host_dispatch", trigger: args.trigger ?? "manual",
     });
-    let receipt: JsonObject;
-    try {
-      const procedure = this.routeableWorkflow(String(job.procedure_id), Number(job.procedure_version));
-      const definition = this.definition(procedure);
-      const steps = this.workflowSteps(definition, object(job.inputs, "automation.inputs"));
-      const allowed = declaredEffects(definition);
-      const receipts: JsonObject[] = [];
-      for (const [index, step] of steps.entries()) {
-        const effect = String(step.side_effect);
-        if (!allowed.has(effect) || effect === "local_write" && job.allow_local_write !== true) {
-          receipts.push({ step_id: step.id, type: step.type, effect, passed: false, error: "effect_not_authorized" });
-        } else {
-          receipts.push(receiptStep(step, runStep(step, String(job.workspace))));
-        }
-        const checkpoint = this.store.create("procedure_automation_checkpoint", `${runId}_${index + 1}`, {
-          run_id: running.id, sequence: index + 1, step_id: step.id, result_digest: stableDigest(receipts.at(-1)),
-          passed: receipts.at(-1)?.passed === true,
-        });
-        if (checkpoint.passed !== true && step.continue_on_failure !== true) break;
-      }
-      const verifier = receipts.find((step) => step.step_id === job.verifier_step_id);
-      const passed = verifier?.passed === true && receipts.length === steps.length && receipts.every((step) => step.passed === true);
-      receipt = this.store.create("procedure_automation_receipt", `procedure_automation_receipt_${runId}`, {
-        run_id: running.id, procedure_id: procedure.id, procedure_version: procedure.version,
-        status: passed ? "passed" : "failed", verifier_step_id: job.verifier_step_id,
-        step_receipts: receipts, captured_at: new Date().toISOString(), raw_output_stored: false,
-      });
-    } catch (error) {
-      receipt = this.store.create("procedure_automation_receipt", `procedure_automation_receipt_${runId}`, {
-        run_id: running.id, procedure_id: job.procedure_id, procedure_version: job.procedure_version,
-        status: "failed", verifier_step_id: job.verifier_step_id, step_receipts: [], captured_at: new Date().toISOString(),
-        error: error instanceof Error ? error.name : "automation_error", raw_output_stored: false,
-      });
-    }
-    const passed = receipt.status === "passed";
-    const outcome = this.store.create("procedure_automation_outcome", `procedure_automation_outcome_${runId}`, {
-      run_id: running.id, receipt_id: receipt.id, status: passed ? "accepted" : "failed",
-      acceptance_ref: this.store.get("experience_procedure", String(job.procedure_id)).acceptance_ref,
-      acceptance_source: "verifier_step", observed_at: new Date().toISOString(),
+    const dispatch = this.store.create("procedure_automation_dispatch", `procedure_automation_dispatch_${runId}`, {
+      run_id: running.id, job_id: job.id, procedure_id: job.procedure_id, procedure_version: job.procedure_version,
+      definition_digest: job.definition_digest, workspace_ref: stableDigest({ workspace: job.workspace }), inputs_digest: stableDigest(job.inputs),
+      allowed_effects: declaredEffects(this.definition(this.routeableWorkflow(String(job.procedure_id), Number(job.procedure_version)))).size === 0 ? [] : ["read_only", ...(job.allow_local_write === true ? ["local_write"] : [])],
+      status: "awaiting_external_host", execution_authority: false, raw_content_stored: false,
     });
-    const completed = this.store.save("procedure_automation_run", runId, {
-      ...payload(running), status: passed ? "completed" : "failed", receipt_id: receipt.id, outcome_id: outcome.id,
-      completed_at: new Date().toISOString(),
+    this.store.appendEvent(`automation:${job.id}`, "automation.awaiting_host", { job_id: job.id, run_id: running.id, dispatch_id: dispatch.id });
+    return { run: running, dispatch, job, idempotent: false };
+  }
+
+  /** External Codex/CI/cron records a terminal Host receipt; Craft never executes the workflow. */
+  receiptRecord(args: JsonObject): JsonObject {
+    const run = this.store.get("procedure_automation_run", text(args.run_id, "run_id"));
+    if (run.status !== "awaiting_host_dispatch") throw new Error("Procedure Automation run is not awaiting a Host receipt");
+    const job = this.store.get("procedure_automation_job", String(run.job_id));
+    const session = this.store.get("host_session", text(args.host_session_id, "host_session_id"));
+    if (session.status !== "terminal") throw new Error("Procedure Automation requires a terminal Host Session");
+    const observation = this.store.get("outcome_observation", text(args.observation_id, "observation_id"));
+    if (observation.trace_id !== session.trace_id || observation.observer_id === session.host_id) throw new Error("Procedure Automation requires an independent Outcome Observation");
+    const evidenceIds = Array.isArray(args.acceptance_evidence_ids) ? args.acceptance_evidence_ids.map((value) => text(value, "acceptance_evidence_ids")) : [];
+    if (!evidenceIds.length) throw new Error("Procedure Automation requires acceptance Evidence");
+    evidenceIds.forEach((id) => this.store.get("evidence", id));
+    const passed = observation.verdict === "passed";
+    const receipt = this.store.create("procedure_automation_receipt", `procedure_automation_receipt_${run.id}`, {
+      run_id: run.id, procedure_id: run.procedure_id, procedure_version: run.procedure_version, status: passed ? "passed" : "failed",
+      verifier_step_id: job.verifier_step_id, host_session_id: session.id, host_session_version: session.version,
+      observation_id: observation.id, observation_version: observation.version, acceptance_evidence_ids: evidenceIds.sort(), raw_output_stored: false,
     });
-    const progress = this.progress(job, receipt);
-    const settlement = passed && progress.changed ? this.settleQuota(job, completed, outcome, now) : null;
-    const savedJob = this.afterRun(job, completed, outcome, now, progress, settlement);
-    this.store.appendEvent(`automation:${job.id}`, passed ? "automation.completed" : "automation.failed", {
-      job_id: job.id, run_id: completed.id, outcome_id: outcome.id, receipt_id: receipt.id,
+    const outcome = this.store.create("procedure_automation_outcome", `procedure_automation_outcome_${run.id}`, {
+      run_id: run.id, receipt_id: receipt.id, status: passed ? "accepted" : "failed", acceptance_ref: this.store.get("experience_procedure", String(job.procedure_id)).acceptance_ref,
+      acceptance_source: "independent_host_observation", observed_at: timestamp(args.observed_at, "observed_at"),
     });
-    return { run: completed, receipt, outcome, job: savedJob, progress, settlement, idempotent: false };
+    const completed = this.store.save("procedure_automation_run", String(run.id), { ...payload(run), status: passed ? "completed" : "failed", receipt_id: receipt.id, outcome_id: outcome.id, completed_at: timestamp(args.observed_at, "observed_at") });
+    const progress = { digest: stableDigest({ receipt: receipt.id, observation: observation.id, verdict: observation.verdict }), changed: true, prior_digest: job.last_progress_digest ?? null, verifier_observed: true };
+    const settlement = passed ? this.settleQuota(job, completed, outcome, timestamp(args.observed_at, "observed_at")) : null;
+    const savedJob = this.afterRun(job, completed, outcome, timestamp(args.observed_at, "observed_at"), progress, settlement);
+    return { run: completed, receipt, outcome, job: savedJob, progress, settlement };
   }
 
   tick(args: JsonObject = {}): JsonObject {

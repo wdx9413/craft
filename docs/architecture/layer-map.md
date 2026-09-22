@@ -85,9 +85,9 @@ mcp/                        共享协议契约
 曾经无法被声明，原因记在 `capability-catalog.ts` 里：`knowledge-memory-runtime.ts` 是**一个类同时服务两个成员的写入**
 （knowledge 侧 `installBuiltins`/`sourceRegister`/`sourceList`/`sourceTransition`，memory 侧
 `remember`/`transition`/`compatBind`/`get`），因此它既不属于 knowledge 包也不属于 memory 包。
-v0.12.43 沿**成员边界**把它切成三块：Source 注册表进 knowledge 包、Ledger 进 memory 包、
+当前 v0.12.37 沿**成员边界**把它切成三块：Source 注册表进 knowledge 包、Ledger 进 memory 包、
 `src/context-resolution.ts` 留在核心（读取侧被三个产品共同投影，所以不属于任一成员）。
-memory 的派生信号原本是 `src/memory-wiring.ts` 的纯函数加门面薄包装，v0.12.43 一并搬进包里成为
+memory 的派生信号原本是 `src/memory-wiring.ts` 的纯函数加门面薄包装，当前 v0.12.37 一并搬进包里成为
 `memory.signals` 内核，因此那些族现在**可以**被声明。仍未被声明的是 `MemoryConsolidationKernel` 的四个族，
 以及由 `WorkbenchKernel` 服务的 `craft_memory_remember`/`_transition`——名字记在
 `capability/craft-memory/capability.ts` 里。
@@ -150,7 +150,7 @@ infrastructure（SQLite / Markdown / Trace archive / platform adapters）
 2. `craft-memory`、`craft-knowledge`、`craft-capability`、`craft-quality`、`craft-experience` 是能力投影，不应各自复制 Store、Policy、Trace 或 Eval。只读查询可以直接走组件 MCP；写入、发布和外部 effect 必须回到 Control Plane 与 Verified Work Loop。
 3. Capability Adapter 负责外部差异（MCP、Serena、Codex、Claude、向量服务），Core Kernel 负责不可绕过的事实、策略和证据。把共享内核搬进能力包只会造成第二套账本，不能因为“可插拔”而移动。
 
-当前仍需收敛的结构债务：`src/application/craft-service.ts` 约 4500 行，应按 commands/queries/coordinators 渐进拆成薄门面；`service-foundation.ts → interfaces/canonical-tools.ts` 的单向依赖豁免应通过把工具目录移到中立 `mcp/tool-catalog` 消除；`distribution-and-first-run.ts` 应拆为 credential/config、readiness、protocol negotiation、platform probe 和 release plan 五个职责。只在每次拆分都能保持现有契约和测试证据时迁移，不能为了目录整齐复制实现。
+当前仍需收敛的结构债务：`src/application/craft-service.ts` 约 4700 行，应按认知、运行、能力、质量四类 coordinator 渐进拆成薄门面；`service-foundation.ts → interfaces/canonical-tools.ts` 的单向依赖豁免应通过把工具目录移到中立 `mcp/tool-catalog` 消除；`distribution-and-first-run.ts` 应拆为 credential/config、readiness、protocol negotiation、platform probe 和 release plan 五个职责。只在每次拆分都能保持现有契约和测试证据时迁移，不能为了目录整齐复制实现。
 
 ### 版本边界
 

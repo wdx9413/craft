@@ -1,6 +1,6 @@
 {
   "name": "craft",
-  "version": "0.12.36",
+  "version": "0.12.37",
   "description": "An evolvable Agent runtime with context, capability discovery, verified execution, quality evidence, and bounded workflow evolution.",
   "author": {
     "name": "wdx9413",

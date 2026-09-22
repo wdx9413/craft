@@ -17,7 +17,6 @@
  */
 import type { ContextRequest, ContextContribution, ContextContributionProvider } from "../../src/capability-protocol.ts";
 import type { CraftStore, JsonObject } from "../../src/infrastructure/store.ts";
-import { ProcedureDefinitionStore, procedureDefinitionRef } from "./procedure-definition.ts";
 import { scopeAllows, scopeEnvelope, type ScopeAccess } from "../../src/scope-policy.ts";
 
 /** Tokenize a query the same way `ContextResolutionKernel.resolve` does, so matching agrees. */
@@ -26,15 +25,14 @@ function terms(query: string): string[] {
 }
 
 function recordScope(value: unknown): { kind: string; id: string } {
-  const [kind, ...rest] = String(value ?? "").split(":");
-  return { kind: kind || "project", id: rest.join(":") || "unresolved" };
+  const [kind, ...rest] = String(value).split(":");
+  return { kind, id: rest.join(":") };
 }
 
 export class ExperienceContribution implements ContextContributionProvider {
   readonly member = "experience" as const;
   readonly store: CraftStore;
-  readonly definitions: ProcedureDefinitionStore;
-  constructor(store: CraftStore) { this.store = store; this.definitions = new ProcedureDefinitionStore(store.paths); }
+  constructor(store: CraftStore) { this.store = store; }
 
   /**
    * Select routeable Procedures that match this scoped decision point.
@@ -84,8 +82,6 @@ export class ExperienceContribution implements ContextContributionProvider {
 
   /** The Gate state makes the Procedure projection safe for this bounded Context. */
   private describe(procedure: JsonObject): JsonObject {
-    const content = this.store.contentStore.readCompatSync(procedure.content_ref as never).body;
-    const definition = procedureDefinitionRef(procedure.definition_ref) ? this.definitions.read(procedure.definition_ref) : null;
     return {
       kind: "experience_procedure",
       procedure_id: String(procedure.id),
@@ -94,10 +90,11 @@ export class ExperienceContribution implements ContextContributionProvider {
       trigger: String(procedure.trigger),
       acceptance_ref: String(procedure.acceptance_ref),
       scenario_signature: procedure.scenario_signature,
-      content,
       content_digest: procedure.content_digest,
-      definition_ref: procedure.definition_ref ?? null,
-      definition,
+      // A Context contribution is a routeable pointer, never an instruction
+      // payload.  A Host must explicitly materialize a procedure under its
+      // Task/Policy receipt before it can read the checked body or definition.
+      definition_digest: procedure.definition_digest ?? null,
       routeable: true,
     };
   }

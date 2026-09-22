@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, unlink } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { KnowledgeSourceRegistry } from "../capability/craft-knowledge/knowledge-source-registry.ts";
 import { MemoryLedgerKernel } from "../capability/craft-memory/memory-ledger.ts";
 import { ContextResolutionKernel } from "../src/context-resolution.ts";
+import { KeywordRetrievalPort, OpenAiCompatibleEmbeddingRetrievalPort } from "../src/retrieval-port.ts";
 import { McpServer } from "../src/mcp.ts";
 import { craftPaths } from "../src/infrastructure/paths.ts";
 import { CraftService, VERSION } from "../src/service.ts";
@@ -23,7 +24,9 @@ async function fixture() {
 test("v0.12.19 makes Knowledge Sources, Memory Ledger, receipts and retrieval selection explicit", async () => {
   const f = await fixture();
   try {
+    f.sources.sourceRegister({ source_id: "builtin.evidence-wiki", kind: "evidence_wiki", label: "Craft Evidence Wiki", scope_kind: "user", scope_id: "local", locator: "~/.craft_data/wiki", content_digest: "builtin:evidence-wiki:v1", trust: "verified", access: "proposal_only" });
     const builtins = f.sources.installBuiltins().sources as JsonObject[]; assert.deepEqual(builtins.map((item) => item.id).sort(), ["builtin.evidence-wiki", "builtin.serena-project-knowledge"]);
+    assert.equal(builtins.find((item) => item.id === "builtin.evidence-wiki")!.locator, "~/.craft_data/wiki");
     assert.equal((f.sources.installBuiltins().sources as JsonObject[])[0].id, "builtin.evidence-wiki");
     const source = f.sources.sourceRegister({ source_id: "kefu", kind: "kefu_wiki", label: "Formal wiki", scope_kind: "project", scope_id: "project", locator: "/wiki", content_digest: "sha256:kefu", trust: "verified", access: "read_only" }).source as JsonObject;
     assert.equal((f.sources.sourceRegister({ source_id: "kefu", kind: "kefu_wiki", label: "Formal wiki", scope_kind: "project", scope_id: "project", locator: "/wiki", content_digest: "sha256:kefu", trust: "verified", access: "read_only" }) as JsonObject).idempotent, true);
@@ -41,6 +44,7 @@ test("v0.12.19 makes Knowledge Sources, Memory Ledger, receipts and retrieval se
     assert.throws(() => f.ledger.remember({ source_id: source.id, kind: "working", scope_kind: "project", scope_id: "project", content: "token=secretsecret" }), /credentials/);
     assert.throws(() => f.ledger.transition({ memory_id: working.id, status: "superseded", reason: "new" }), /replacement/);
     const replacement = f.ledger.remember({ memory_id: "replacement", source_id: source.id, kind: "preference", scope_kind: "project", scope_id: "project", content: "Keep changes minimal" }).memory as JsonObject;
+    assert.equal(f.ledger.remember({ memory_id: "replacement", source_id: source.id, kind: "preference", scope_kind: "project", scope_id: "project", content: "Keep changes minimal" }).idempotent, true);
     assert.equal((f.ledger.transition({ memory_id: working.id, status: "superseded", replacement_id: replacement.id, reason: "new policy" }).memory as JsonObject).status, "superseded");
     assert.throws(() => f.ledger.transition({ memory_id: procedural.id, status: "active", reason: "x" }), /unsupported/);
     f.store.create("memory_item", "legacy", { scope: "project", content: "legacy", status: "active" });
@@ -116,7 +120,7 @@ test("v0.12.19 keeps Console and Agent mode as a mode-neutral plan over verified
       const response = await mcp.handle({ id: name, method: "tools/call", params: { name, arguments: args } }); assert.equal((response?.result as JsonObject).isError, false, name);
     }
     assert.equal(new McpServer(f.service, "core").tools.some((tool) => tool.name === "craft_context_resolution_resolve"), true);
-    assert.equal(VERSION, "0.12.36");
+    assert.equal(VERSION, "0.12.37");
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
@@ -255,6 +259,64 @@ test("v0.12.34 resolves a body that lives in the content store and refuses a bro
     f.store.create("memory_ledger", "broken-body", { source_id: String(source.id), kind: "preference", scope: { kind: "project", id: "project" },
       content_digest: "sha256:broken", sensitivity: "internal", valid_until: null, status: "active" });
     await assert.rejects(() => f.context.resolve({ query: "alpha", scope_kind: "project", scope_id: "project", memory_ids: ["broken-body"] }), /reference is missing/u);
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("Knowledge ingest refuses a registered symlink root before reading any source file", async () => {
+  const f = await fixture();
+  try {
+    const target = join(f.root, "knowledge-target"); const locator = join(f.root, "knowledge-link");
+    await mkdir(target); await writeFile(join(target, "README.md"), "safe text", "utf8"); await symlink(target, locator);
+    const source = f.sources.sourceRegister({ source_id: "symlink-source", kind: "readme", label: "Symlink source", scope_kind: "project", scope_id: "project", locator,
+      content_digest: "sha256:symlink", trust: "bounded", access: "read_only" }).source as JsonObject;
+    const result = f.sources.sourceIngest({ source_id: source.id });
+    assert.equal(result.reason, "source_root_symlink_unsupported");
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("Context retrieval reopens an expired embedding circuit before making a new decision", async () => {
+  const f = await fixture();
+  try {
+    const adapter = f.context.retrievalConfigure({ adapter_id: "expired-circuit", strategy: "vector", provider_fingerprint: "provider", configuration: {} }).adapter as JsonObject;
+    const healthId = `retrieval_adapter_health_${adapter.id}`;
+    f.store.create("retrieval_adapter_health", healthId, { adapter_id: adapter.id, adapter_version: adapter.version, status: "open", open_until: "2000-01-01T00:00:00.000Z", consecutive_transient_failures: 3, last_error: "timeout", updated_at: "2000-01-01T00:00:00.000Z" });
+    await f.context.resolve({ query: "nothing", scope_kind: "project", scope_id: "project", retrieval_adapter_id: adapter.id });
+    assert.equal(f.store.get("retrieval_adapter_health", healthId).status, "half_open");
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("Context records unavailable embedding fallbacks and preserves an explicit no-reason retrieval result", async () => {
+  const f = await fixture();
+  try {
+    const source = f.sources.sourceRegister({ source_id: "fallback-source", kind: "readme", label: "Fallback", scope_kind: "project", scope_id: "project", locator: "README", content_digest: "sha256:fallback", trust: "bounded", access: "read_only" }).source as JsonObject;
+    const memory = f.ledger.remember({ memory_id: "fallback-memory", source_id: source.id, kind: "preference", scope_kind: "project", scope_id: "project", content: "fallback evidence" }).memory as JsonObject;
+    const secondMemory = f.ledger.remember({ memory_id: "fallback-memory-second", source_id: source.id, kind: "preference", scope_kind: "project", scope_id: "project", content: "fallback second evidence" }).memory as JsonObject;
+    const bare = f.store.create("retrieval_adapter", "bare-vector", { strategy: "vector", status: "eligible", provider_fingerprint: "provider" });
+    f.store.create("retrieval_adapter_health", "retrieval_adapter_health_bare-vector", { adapter_id: bare.id, adapter_version: bare.version, status: "open", open_until: "2999-01-01T00:00:00.000Z", consecutive_transient_failures: 3, last_error: "timeout" });
+    const fallback = await f.context.resolve({ query: "fallback", scope_kind: "project", scope_id: "project", retrieval_adapter_id: bare.id });
+    assert.equal(((fallback.receipt as JsonObject).retrieval_execution as JsonObject).model, null);
+    const bareNoCircuit = f.store.create("retrieval_adapter", "bare-vector-no-circuit", { strategy: "vector", status: "eligible", provider_fingerprint: "provider" });
+    await f.context.resolve({ query: "fallback", scope_kind: "project", scope_id: "project", retrieval_adapter_id: bareNoCircuit.id });
+    const privateKernel = f.context as unknown as { recordRetrievalHealth(adapter: JsonObject, execution: { used: string; unavailable_reason: string | null }, now: Date): void };
+    privateKernel.recordRetrievalHealth(bare, { used: "keyword", unavailable_reason: null }, new Date("2026-01-01T00:00:00.000Z"));
+    assert.equal(f.store.get("retrieval_adapter_health", "retrieval_adapter_health_bare-vector").last_error, "embedding_request_failed");
+    const original = KeywordRetrievalPort.prototype.search;
+    KeywordRetrievalPort.prototype.search = async () => ({ hits: [{ id: String(memory.id), score: 1, reason: undefined as never }], execution: { requested: "keyword", used: "keyword", provider: "local", model: null, latency_ms: 0, cost_summary: null, unavailable_reason: null } });
+    try {
+      const resolved = await f.context.resolve({ query: "fallback", scope_kind: "project", scope_id: "project", memory_ids: [memory.id] });
+      assert.equal((resolved.items as JsonObject[])[0]!.reason, "required");
+      const unrequired = await f.context.resolve({ query: "fallback", scope_kind: "project", scope_id: "project" });
+      assert.equal((unrequired.items as JsonObject[])[0]!.reason, "not_selected");
+    } finally { KeywordRetrievalPort.prototype.search = original; }
+    const embeddingOriginal = OpenAiCompatibleEmbeddingRetrievalPort.prototype.search;
+    const hybridKeywordOriginal = KeywordRetrievalPort.prototype.search;
+    OpenAiCompatibleEmbeddingRetrievalPort.prototype.search = async () => ({ hits: [{ id: String(memory.id), score: 1, reason: "vector" }, { id: String(secondMemory.id), score: 0.5, reason: "vector" }], execution: { requested: "hybrid", used: "vector", provider: "fixture", model: "fixture", latency_ms: 0, cost_summary: null, unavailable_reason: null } });
+    KeywordRetrievalPort.prototype.search = async () => ({ hits: [{ id: String(secondMemory.id), score: 1, reason: "keyword" }, { id: String(memory.id), score: 0.5, reason: "keyword" }], execution: { requested: "keyword", used: "keyword", provider: "local", model: null, latency_ms: 0, cost_summary: null, unavailable_reason: null } });
+    try {
+      const hybrid = f.store.create("retrieval_adapter", "hybrid-vector", { strategy: "hybrid", status: "eligible", provider_fingerprint: "provider", configuration: {} });
+      const resolved = await f.context.resolve({ query: "fallback", scope_kind: "project", scope_id: "project", retrieval_adapter_id: hybrid.id });
+      assert.equal(((resolved.receipt as JsonObject).retrieval_execution as JsonObject).used, "hybrid");
+    } finally { OpenAiCompatibleEmbeddingRetrievalPort.prototype.search = embeddingOriginal; KeywordRetrievalPort.prototype.search = hybridKeywordOriginal; }
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 

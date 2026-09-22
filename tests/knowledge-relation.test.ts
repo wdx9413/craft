@@ -172,4 +172,4 @@ test("the relation kernels are reachable over MCP with the craft_relation_* surf
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("the running service version is the one under test", () => { assert.equal(VERSION, "0.12.36"); });
+test("the running service version is the one under test", () => { assert.equal(VERSION, "0.12.37"); });

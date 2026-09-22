@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -92,6 +92,9 @@ test("a Codex Host review promotes one exact current Claim without an independen
       source_digest: `sha256:${"b".repeat(64)}`, decision: "supported", model_ref: "host-managed",
       rubric_id: "knowledge-host-review-v1", reason_code: "rubric_pass", now: "2026-09-20T00:00:00.000Z",
     };
+    assert.equal((f.service.knowledgeSemanticReviewPacket({ claim_id: claim.id }) as JsonObject).status, "unavailable");
+    assert.equal((await f.service.knowledgeSemanticProviderReview({ claim_id: claim.id }) as JsonObject).status, "unavailable");
+    assert.throws(() => f.service.knowledgeHostReview({ ...args, packet_digest: "sha256:not-the-packet" }), /packet_digest/u);
     const result = f.service.knowledgeHostReview(args);
     assert.equal(result.promoted, true);
     assert.equal(result.status, "reviewed");
@@ -216,4 +219,65 @@ test("promotion policy rejects malformed inputs and reports every non-promotable
     assert.equal(byId.get("future")!.verdict, "revalidation_required");
     assert.equal(byId.get("noncandidate")!.verdict, "rejected");
   } finally { await close(f); }
+});
+
+test("semantic review packets and provider responses stay evidence-bound across every unavailable outcome", async () => {
+  const f = await fixture();
+  const originalFetch = globalThis.fetch;
+  const previousKey = process.env.CRAFT_SEMANTIC_TEST_KEY;
+  try {
+    const makePacketClaim = (id: string) => {
+      const fragmentRef = f.store.contentStore.writeSync({ kind: "knowledge", record_id: `${id}-fragment`, version: 1, scope: "project:demo", status: "current", sensitivity: "internal", source_id: "source", body: "Focused tests verify the changed behavior." });
+      f.store.create("knowledge_fragment", `${id}-fragment`, { source_id: "source", source_revision_id: `${id}-revision`, locator: `${id}.md#1`, content_ref: fragmentRef, content_digest: fragmentRef.digest });
+      f.store.create("evidence", `${id}-evidence`, { source_type: "knowledge_fragment", confidence: "confirmed", fragment_id: `${id}-fragment` });
+      return f.service.knowledgeClaimSave({ claim_id: id, kind: "fact", content: "Run focused tests first.", scope: "project:demo", source_id: "source", evidence_ids: [`${id}-evidence`] }).claim as JsonObject;
+    };
+    const claim = makePacketClaim("semantic-ready");
+    const packet = f.service.knowledgeSemanticReviewPacket({ claim_id: claim.id }) as JsonObject;
+    assert.equal(packet.status, "ready");
+    const base = { claim_id: claim.id, endpoint: "https://semantic.fixture", model: "fixture", credential_env: "CRAFT_SEMANTIC_TEST_KEY" };
+    assert.equal((await f.service.knowledgeSemanticProviderReview({ claim_id: claim.id }) as JsonObject).reason, "semantic_provider_unavailable");
+    process.env.CRAFT_SEMANTIC_TEST_KEY = "fixture-key";
+    globalThis.fetch = async () => ({ ok: false, status: 503 }) as Response;
+    assert.equal((await f.service.knowledgeSemanticProviderReview(base) as JsonObject).reason, "semantic_provider_http_503");
+    globalThis.fetch = async () => ({ ok: true, json: async () => ({ choices: [] }) }) as Response;
+    assert.equal((await f.service.knowledgeSemanticProviderReview(base) as JsonObject).reason, "semantic_provider_empty_response");
+    globalThis.fetch = async () => ({ ok: true, json: async () => ({ choices: [{ message: { content: "{}" } }] }) }) as Response;
+    assert.equal((await f.service.knowledgeSemanticProviderReview(base) as JsonObject).reason, "semantic_provider_invalid_response");
+    globalThis.fetch = async () => { throw new Error("network"); };
+    assert.equal((await f.service.knowledgeSemanticProviderReview(base) as JsonObject).reason, "Error");
+    globalThis.fetch = async () => ({ ok: true, json: async () => ({ choices: [{ message: { content: JSON.stringify({ decision: "supported", reason_code: "supported" }) } }] }) }) as Response;
+    assert.equal((await f.service.knowledgeSemanticProviderReview(base) as JsonObject).status, "completed");
+    const fresh = makePacketClaim("semantic-packet-check");
+    assert.throws(() => f.service.knowledgeHostReview({ claim_id: fresh.id, host_run_key: "packet-check", source_digest: `sha256:${"b".repeat(64)}`, decision: "supported", packet_digest: "sha256:wrong" }), /packet_digest/u);
+    const noSource = f.store.create("knowledge_claim", "packet-no-source", { status: "candidate", content: "body", evidence_ids: [] });
+    assert.equal((f.service.knowledgeSemanticReviewPacket({ claim_id: noSource.id }) as JsonObject).reason, "source_unavailable");
+    const noBody = f.store.create("knowledge_claim", "packet-no-body", { status: "candidate", source_id: "source", evidence_ids: [] });
+    assert.equal((f.service.knowledgeSemanticReviewPacket({ claim_id: noBody.id }) as JsonObject).reason, "claim_content_unavailable");
+    const noEvidence = f.store.create("knowledge_claim", "packet-no-evidence", { status: "candidate", source_id: "source", content: "body" });
+    assert.equal((f.service.knowledgeSemanticReviewPacket({ claim_id: noEvidence.id }) as JsonObject).reason, "evidence_fragment_unavailable");
+    const missingFragment = f.store.create("knowledge_claim", "packet-missing-fragment", { status: "candidate", source_id: "source", content: "body", evidence_ids: ["packet-evidence-missing"] });
+    f.store.create("evidence", "packet-evidence-missing", { confidence: "confirmed", fragment_id: "missing" });
+    assert.equal((f.service.knowledgeSemanticReviewPacket({ claim_id: missingFragment.id }) as JsonObject).reason, "evidence_fragment_unavailable");
+    const invalidFragment = f.store.create("knowledge_claim", "packet-invalid-fragment", { status: "candidate", source_id: "source", content: "body", evidence_ids: ["packet-evidence-invalid"] });
+    f.store.create("evidence", "packet-evidence-invalid", { confidence: "confirmed", fragment_id: "invalid" }); f.store.create("knowledge_fragment", "invalid", {});
+    assert.equal((f.service.knowledgeSemanticReviewPacket({ claim_id: invalidFragment.id }) as JsonObject).reason, "evidence_fragment_unavailable");
+    const thrownFragment = makePacketClaim("semantic-thrown-fragment");
+    await unlink(String((f.store.get("knowledge_fragment", "semantic-thrown-fragment-fragment").content_ref as JsonObject).path));
+    assert.equal((f.service.knowledgeSemanticReviewPacket({ claim_id: thrownFragment.id }) as JsonObject).reason, "evidence_fragment_unavailable");
+    const bodyRef = f.store.contentStore.writeSync({ kind: "knowledge", record_id: "semantic-ref-body", version: 1, scope: "project:demo", status: "candidate", sensitivity: "internal", source_id: "source", body: "body through ref" });
+    const refBody = f.store.create("knowledge_claim", "semantic-ref-body", { status: "candidate", source_id: "source", scope: "project:demo", content_ref: bodyRef, evidence_ids: ["semantic-ready-evidence"] });
+    f.store.save("knowledge_claim", String(refBody.id), { ...refBody, content: null });
+    assert.equal((f.service.knowledgeSemanticReviewPacket({ claim_id: refBody.id }) as JsonObject).status, "ready");
+    const fallbackReason = makePacketClaim("semantic-reason-fallback");
+    globalThis.fetch = async () => ({ ok: true, json: async () => ({ choices: [{ message: { content: JSON.stringify({ decision: "supported" }) } }] }) }) as Response;
+    assert.equal((await f.service.knowledgeSemanticProviderReview({ ...base, claim_id: fallbackReason.id }) as JsonObject).status, "completed");
+    const thrownString = makePacketClaim("semantic-thrown-string");
+    globalThis.fetch = async () => { throw "network"; };
+    assert.equal((await f.service.knowledgeSemanticProviderReview({ ...base, claim_id: thrownString.id }) as JsonObject).reason, "semantic_provider_request_failed");
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (previousKey === undefined) delete process.env.CRAFT_SEMANTIC_TEST_KEY; else process.env.CRAFT_SEMANTIC_TEST_KEY = previousKey;
+    await close(f);
+  }
 });

@@ -34,7 +34,32 @@ async function routeableWorkflow(f: Awaited<ReturnType<typeof fixture>>, id: str
   });
 }
 
-test("routeable Workflow jobs run through Local Runtime ticks with receipts and outcomes", async () => {
+function externalReceipt(f: Awaited<ReturnType<typeof fixture>>, runId: string, verdict: "passed" | "failed", suffix = runId) {
+  f.store.create("host_session", `session-${suffix}`, { host_id: "codex", trace_id: `trace-${suffix}`, status: "terminal" });
+  f.store.create("outcome_observation", `observation-${suffix}`, { trace_id: `trace-${suffix}`, host_id: "codex", observer_id: "workspace-verifier", verdict });
+  f.store.create("evidence", `evidence-${suffix}`, { source_type: "program", confidence: "confirmed" });
+  return f.service.procedureAutomationReceiptRecord({ run_id: runId, host_session_id: `session-${suffix}`, observation_id: `observation-${suffix}`, acceptance_evidence_ids: [`evidence-${suffix}`], observed_at: "2030-01-01T00:00:00.000Z" });
+}
+
+test("Automation only dispatches work and accepts an independent terminal Host receipt", async () => {
+  const f = await fixture();
+  try {
+    await routeableWorkflow(f, "external", "result.txt");
+    f.service.procedureAutomationSave({ job_id: "external-job", procedure_id: "external", workspace: f.workspace, verifier_step_id: "verify-artifact" });
+    const prepared = f.service.procedureAutomationRun({ job_id: "external-job", run_id: "external-run" });
+    assert.equal((prepared.run as JsonObject).status, "awaiting_host_dispatch");
+    assert.ok((prepared.dispatch as JsonObject).id);
+    f.store.create("host_session", "external-session", { host_id: "codex", trace_id: "external-trace", status: "terminal" });
+    f.store.create("outcome_observation", "external-observation", { trace_id: "external-trace", host_id: "codex", observer_id: "workspace-verifier", verdict: "passed" });
+    f.store.create("evidence", "external-evidence", { source_type: "program", confidence: "confirmed" });
+    const completed = f.service.procedureAutomationReceiptRecord({ run_id: "external-run", host_session_id: "external-session", observation_id: "external-observation", acceptance_evidence_ids: ["external-evidence"] });
+    assert.equal((completed.run as JsonObject).status, "completed");
+    assert.equal((completed.outcome as JsonObject).acceptance_source, "independent_host_observation");
+    assert.throws(() => f.service.procedureAutomationReceiptRecord({ run_id: "external-run", host_session_id: "external-session", observation_id: "external-observation", acceptance_evidence_ids: [] }), /not awaiting/u);
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("routeable Workflow jobs dispatch through Local Runtime ticks and await external receipts", async () => {
   const f = await fixture();
   try {
     await mkdir(f.workspace, { recursive: true });
@@ -47,7 +72,10 @@ test("routeable Workflow jobs run through Local Runtime ticks with receipts and 
     const tick = f.service.localRuntimeServiceTick({ service_id: "local", now: "2030-01-01T00:00:00.000Z" });
     assert.equal(((tick.automation as JsonObject).count), 1);
     const view = f.service.procedureAutomationGet({ job_id: "good-job" });
-    assert.equal(((view.runs as JsonObject[])[0]!.status), "completed");
+    assert.equal(((view.runs as JsonObject[])[0]!.status), "awaiting_host_dispatch");
+    const completed = externalReceipt(f, String((view.runs as JsonObject[])[0]!.id), "passed");
+    assert.equal((completed.outcome as JsonObject).status, "accepted");
+    assert.equal(((f.service.procedureAutomationGet({ job_id: "good-job" }).runs as JsonObject[])[0]!.status), "completed");
     assert.equal((view.job as JsonObject).failure_count, 0);
     const mcp = new McpServer(f.service, "full");
     const response = await mcp.handle({ id: 1, method: "tools/call", params: { name: "craft_automation_job_get", arguments: { job_id: "good-job" } } });
@@ -55,7 +83,7 @@ test("routeable Workflow jobs run through Local Runtime ticks with receipts and 
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("Automation fails closed for non-routeable procedures and creates a handoff after bounded retries", async () => {
+test("Automation fails closed for non-routeable procedures and creates a handoff after external failure", async () => {
   const f = await fixture();
   try {
     const procedure = await routeableWorkflow(f, "missing", "missing.txt");
@@ -64,7 +92,9 @@ test("Automation fails closed for non-routeable procedures and creates a handoff
       verifier_step_id: "verify-artifact", max_attempts: 1 }) as JsonObject;
     assert.equal((saved.job as JsonObject).status, "active");
     const run = f.service.procedureAutomationRun({ job_id: "missing-job", now: "2030-01-01T00:00:00.000Z" });
-    assert.equal((run.outcome as JsonObject).status, "failed");
+    assert.equal((run.run as JsonObject).status, "awaiting_host_dispatch");
+    const failed = externalReceipt(f, String((run.run as JsonObject).id), "failed");
+    assert.equal((failed.outcome as JsonObject).status, "failed");
     const view = f.service.procedureAutomationGet({ job_id: "missing-job" });
     assert.equal((view.job as JsonObject).status, "requires_handoff");
     assert.equal((view.notices as JsonObject[]).length, 1);
@@ -73,7 +103,7 @@ test("Automation fails closed for non-routeable procedures and creates a handoff
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("Automation spends quota only for accepted verifier progress and hands off repeated no-progress work", async () => {
+test("Automation spends quota only after accepted external verification and stops at quota", async () => {
   const f = await fixture();
   try {
     await mkdir(f.workspace, { recursive: true });
@@ -82,14 +112,15 @@ test("Automation spends quota only for accepted verifier progress and hands off 
     f.service.procedureAutomationSave({ job_id: "bounded-job", procedure_id: "bounded", workspace: f.workspace,
       verifier_step_id: "verify-artifact", quota_slots: 2, max_no_progress: 2 });
     const first = f.service.procedureAutomationRun({ job_id: "bounded-job", run_id: "first", now: "2030-01-01T00:00:00.000Z" });
-    assert.equal((first.settlement as JsonObject).slots, 1);
-    assert.equal((first.progress as JsonObject).changed, true);
+    const firstReceipt = externalReceipt(f, "first", "passed");
+    assert.equal((firstReceipt.settlement as JsonObject).slots, 1);
+    assert.equal((firstReceipt.progress as JsonObject).changed, true);
     const second = f.service.procedureAutomationRun({ job_id: "bounded-job", run_id: "second", now: "2030-01-01T00:01:00.000Z" });
-    assert.equal(second.settlement, null);
-    assert.equal((second.progress as JsonObject).changed, false);
+    const secondReceipt = externalReceipt(f, "second", "passed");
+    assert.equal((secondReceipt.settlement as JsonObject).slots, 1);
     const third = f.service.procedureAutomationRun({ job_id: "bounded-job", run_id: "third", now: "2030-01-01T00:02:00.000Z" });
-    assert.equal((third.job as JsonObject).status, "requires_handoff");
-    assert.equal(((f.service.procedureAutomationEligibility({ job_id: "bounded-job", now: "2030-01-01T00:03:00.000Z" }).eligibility as JsonObject).decision), "handoff");
+    assert.equal(third.status, "skipped");
+    assert.equal(((f.service.procedureAutomationEligibility({ job_id: "bounded-job", now: "2030-01-01T00:03:00.000Z" }).eligibility as JsonObject).reason), "quota_exhausted");
     const mcp = new McpServer(f.service, "full");
     const response = await mcp.handle({ id: 1, method: "tools/call", params: { name: "craft_automation_job_eligibility", arguments: { job_id: "bounded-job" } } });
     assert.equal((response?.result as JsonObject).isError, false);

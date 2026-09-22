@@ -20,7 +20,7 @@ test("activation proof distinguishes observed execution, stale evidence and abse
     const proof = new ActivationProofKernel(f.store);
     const context = f.store.create("context_resolution_receipt", "ctx", { identity_digest: "ctx" });
     const first = proof.record({ receipt_id: "known", host: "codex", component: "knowledge", event: "UserPromptSubmit", session_id: "s", context_receipt_id: context.id, hook_trusted: true, mcp_reachable: true });
-    assert.equal((first.receipt as JsonObject).plugin_release, "0.12.36");
+    assert.equal((first.receipt as JsonObject).plugin_release, "0.12.37");
     assert.equal(proof.record({ receipt_id: "known", host: "codex", component: "knowledge", event: "UserPromptSubmit", session_id: "s", context_receipt_id: context.id, hook_trusted: true, mcp_reachable: true }).idempotent, true);
     assert.throws(() => proof.record({ receipt_id: "known", host: "codex", component: "knowledge", event: "Stop", session_id: "s", hook_trusted: true, mcp_reachable: true }), /idempotency/);
     proof.record({ host: "claude", component: "memory", event: "UserPromptSubmit", session_id: "s", memory_written: true, plugin_release: "0.0.1", hook_trusted: true, mcp_reachable: true });

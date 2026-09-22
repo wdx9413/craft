@@ -1,11 +1,17 @@
 # Changelog
 
-> Note on numbering: the declared package version is now **0.12.36**. Earlier
+> Note on numbering: the declared package version is now **0.12.37**. Earlier
 > `v0.12.34`–`v0.12.43` headings name **incremental work on the previous revision**,
 > not releases. Each is a self-contained change set with its own 100%-coverage
 > test script; the version bump happens only when the work is released.
 
-## v0.12.36（本次发布）
+## v0.12.37（本次发布）
+
+- Engineering Quality Profile 仅接纳 Task/Activation/Host 环境、模型与预算指纹都固定的 `VerifiedEvaluationReceipt`；旧的直接记录一律 `revalidation_required`，不能用于 routeable 晋级。
+- Experience Procedure 自动化不再在 Craft 进程内执行命令或自判 accepted，只能产生受限 `awaiting_host_dispatch` 请求，并由外部 Host 回执、独立 Observation 与既有 Acceptance 收口。
+- 对外分发契约固定为 `craft-knowledge`、`craft-memory`、`craft-experience`；Marketplace 和 common-use 的同步/校验均绑定版本、来源和摘要，安装事务先预检并可回滚。
+
+## v0.12.36（历史发布）
 
 - Git-first canonical Project Identity 与本机 path/旧 scope alias，避免跨机器串台；Context Receipt 记录 scope 栈、遮蔽与排除理由。
 - 真实 Keyword/BM25 检索与可选 OpenAI-compatible embedding 适配器；未配置或未评测的向量检索明确回退并记录 unavailable。

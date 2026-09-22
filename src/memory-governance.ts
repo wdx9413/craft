@@ -69,7 +69,6 @@ export class MemoryGovernanceKernel {
     const effectiveFrom = args.effective_from === undefined && typeof existing?.effective_from === "string"
       ? existing.effective_from
       : (args.effective_from === undefined ? observedAt : new Date(text(args.effective_from, "effective_from")).toISOString());
-    if (Number.isNaN(Date.parse(observedAt)) || Number.isNaN(Date.parse(effectiveFrom))) throw new Error("Memory temporal fields must be ISO timestamps");
     const identity = { source_id: sourceId, kind, scope, scope_envelope: envelope, topic, content_digest: digest(content), sensitivity: String(args.sensitivity ?? "internal"), confidence, evidence_ids: ids, valid_until: validUntil, observed_at: observedAt, effective_from: effectiveFrom };
     if (existing) { if (existing.identity_digest !== digest(identity)) throw new Error("Memory candidate idempotency conflict"); return { candidate: existing, idempotent: true }; }
     // Empty subjects are deliberately *not* treated as mutually contradictory.

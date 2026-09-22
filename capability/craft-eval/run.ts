@@ -2,7 +2,7 @@
  * A real evaluation run against the live local model.
  *
  * This exercises the closed learning loop end to end rather than echoing text:
- * the model is asked to produce artifacts, v0.12.36 grades them deterministically
+ * the model is asked to produce artifacts, v0.12.37 grades them deterministically
  * from observed bytes, v0.12.38 attributes any failure, and v0.12.34 decides
  * whether the outcome is worth capturing as a lesson.
  *

@@ -1,0 +1,23 @@
+{
+  "version": "0.12.37",
+  "products": [
+    {
+      "name": "craft-knowledge",
+      "surface": "component-knowledge-daily",
+      "hook_member": "knowledge",
+      "category": "Productivity"
+    },
+    {
+      "name": "craft-memory",
+      "surface": "component-memory-daily",
+      "hook_member": "memory",
+      "category": "Productivity"
+    },
+    {
+      "name": "craft-experience",
+      "surface": "component-experience-daily",
+      "hook_member": "experience",
+      "category": "Developer Tools"
+    }
+  ]
+}

@@ -46,7 +46,8 @@ test("Experience is a Context member, but only routeable Procedure projections a
     const item = contributed.items[0]!;
     assert.equal(item.kind, "experience_procedure");
     assert.equal(item.procedure_id, "verified");
-    assert.match(String(item.content), /Use this verified procedure/u);
+    assert.equal(item.content, undefined);
+    assert.match(String(item.content_digest), /^sha256:/u);
     assert.equal(JSON.stringify(contributed).includes("diagnostic"), false);
   } finally { await close(f); }
 });
@@ -63,6 +64,9 @@ test("Experience honors scope, query and budget without falling back to diagnost
     const bounded = await f.contribution.contribute(request("rollback", { max_items: 1 }));
     assert.equal(bounded.items.length, 1);
     assert.equal(bounded.omitted_count, 1);
+    const tooSmall = await f.contribution.contribute(request("rollback", { max_chars: 1 }));
+    assert.deepEqual(tooSmall.items, []);
+    assert.equal(tooSmall.omitted_count, 2);
     assert.deepEqual((await f.contribution.contribute(request("!!!"))).items, []);
   } finally { await close(f); }
 });

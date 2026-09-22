@@ -17,7 +17,7 @@ import {
   verificationCaptureSignals
 } from "../src/verification-sensor.ts";
 
-test("v0.12.36 passes an exit code check only when the code matches", () => {
+test("v0.12.37 passes an exit code check only when the code matches", () => {
   const passed = evaluateVerificationCheck({ kind: "exit_code", name: "tests", expected_exit_code: 0, observed_exit_code: 0 });
   assert.equal(passed.verdict, "passed");
   assert.equal(passed.reason, "exit_code_matched");
@@ -36,7 +36,7 @@ test("v0.12.36 passes an exit code check only when the code matches", () => {
   assert.throws(() => evaluateVerificationCheck({ kind: "exit_code", name: "n", observed_exit_code: "x" }), /observed_exit_code must be an integer/u);
 });
 
-test("v0.12.36 blocks a check that never ran instead of failing the work", () => {
+test("v0.12.37 blocks a check that never ran instead of failing the work", () => {
   // The distinction that keeps the learning signal honest: a missing
   // observation means "we could not tell", not "it broke".
   const blocked = evaluateVerificationCheck({ kind: "exit_code", name: "tests" });
@@ -54,7 +54,7 @@ test("v0.12.36 blocks a check that never ran instead of failing the work", () =>
   assert.equal(evaluateVerificationCheck({ kind: "observed_present" in {} ? "file_absent" : "file_absent", name: "n", observed_present: null }).verdict, "blocked");
 });
 
-test("v0.12.36 matches expected output as substring or pattern", () => {
+test("v0.12.37 matches expected output as substring or pattern", () => {
   const contains = evaluateVerificationCheck({ kind: "output_contains", name: "n", expected_substring: "BUILD OK", observed_output: "step 1\nBUILD OK\n" });
   assert.equal(contains.verdict, "passed");
   assert.equal(contains.reason, "substring_present");
@@ -72,7 +72,7 @@ test("v0.12.36 matches expected output as substring or pattern", () => {
   assert.equal(invalid.reason, "pattern_invalid");
 });
 
-test("v0.12.36 compares file digests and file absence", () => {
+test("v0.12.37 compares file digests and file absence", () => {
   const digest = "sha256:" + "b".repeat(64);
   assert.equal(evaluateVerificationCheck({ kind: "file_digest", name: "n", expected_digest: digest, observed_digest: digest }).verdict, "passed");
   const mismatch = evaluateVerificationCheck({ kind: "file_digest", name: "n", expected_digest: digest, observed_digest: "sha256:" + "c".repeat(64) });
@@ -86,7 +86,7 @@ test("v0.12.36 compares file digests and file absence", () => {
   assert.equal(present.reason, "file_present");
 });
 
-test("v0.12.36 rejects malformed checks rather than guessing", () => {
+test("v0.12.37 rejects malformed checks rather than guessing", () => {
   assert.throws(() => evaluateVerificationCheck({ kind: "telepathy", name: "n" }), /kind is unsupported: telepathy/u);
   assert.throws(() => evaluateVerificationCheck({ kind: "exit_code", name: "" }), /name must not be empty/u);
   assert.throws(() => evaluateVerificationCheck({ kind: "output_contains", name: "n", observed_output: "x" }), /expected_substring must not be empty/u);
@@ -98,7 +98,7 @@ test("v0.12.36 rejects malformed checks rather than guessing", () => {
   assert.throws(() => evaluateVerificationCheck({ kind: "file_digest", name: "n", expected_digest: "d", observed_digest: 42 }), /observed_digest must be a string/u);
 });
 
-test("v0.12.36 only persists digests, never observed content", () => {
+test("v0.12.37 only persists digests, never observed content", () => {
   // The sensor must be safe to record: raw output can carry secrets, so the
   // result carries a digest and a reason code instead.
   const secret = "token=abcd1234efgh5678";
@@ -107,7 +107,7 @@ test("v0.12.36 only persists digests, never observed content", () => {
   assert.match(result.observed_digest, /^sha256:[0-9a-f]{64}$/u);
 });
 
-test("v0.12.36 combines checks conservatively and order-independently", () => {
+test("v0.12.37 combines checks conservatively and order-independently", () => {
   const pass = (name: string) => evaluateVerificationCheck({ kind: "exit_code", name, observed_exit_code: 0 });
   const fail = (name: string) => evaluateVerificationCheck({ kind: "exit_code", name, observed_exit_code: 1 });
   const blocked = (name: string) => evaluateVerificationCheck({ kind: "exit_code", name });
@@ -140,7 +140,7 @@ test("v0.12.36 combines checks conservatively and order-independently", () => {
   assert.deepEqual(summarizeVerification([fail("b"), pass("a")]).verdict, "failed");
 });
 
-test("v0.12.36 rejects an unusable verification plan", () => {
+test("v0.12.37 rejects an unusable verification plan", () => {
   assert.throws(() => summarizeVerification([]), /at least one check/u);
   assert.throws(() => summarizeVerification([evaluateVerificationCheck({ kind: "exit_code", name: "a" }), evaluateVerificationCheck({ kind: "exit_code", name: "a" })]), /names must be unique/u);
   // Deliberately violates the verdict union: the point is that a corrupted or
@@ -152,7 +152,7 @@ test("v0.12.36 rejects an unusable verification plan", () => {
   assert.throws(() => runVerification({ checks: [[]] }), /check must be an object/u);
 });
 
-test("v0.12.36 turns an observed failure into a capture signal", () => {
+test("v0.12.37 turns an observed failure into a capture signal", () => {
   const signals = verificationCaptureSignals({ checks: [{ kind: "exit_code", name: "tests", observed_exit_code: 1 }] });
   assert.equal(signals.outcome, "failed");
   assert.equal(signals.succeeded, false);
@@ -182,7 +182,7 @@ test("v0.12.36 turns an observed failure into a capture signal", () => {
   assert.throws(() => verificationCaptureSignals({ checks: [{ kind: "exit_code", name: "t" }], retries: 1.5 }), /retries must be a non-negative integer/u);
 });
 
-test("v0.12.36 the loop itself can run verification", () => {
+test("v0.12.37 the loop itself can run verification", () => {
   // The whole point of V1: a tool the loop cannot mount cannot close the loop.
   const names = DEFAULT_INTERNAL_TOOLS.map((definition) => definition.function.name);
   assert.equal(names.includes("verification_evaluate"), true);
@@ -200,7 +200,7 @@ test("v0.12.36 the loop itself can run verification", () => {
   }
 });
 
-test("v0.12.36 exposes verification over MCP end to end", async (t) => {
+test("v0.12.37 exposes verification over MCP end to end", async (t) => {
   const root = join(tmpdir(), `craft-v01236-mcp-${process.pid}-${Date.now()}`);
   await mkdir(root, { recursive: true });
   const store = await new CraftStore(craftPaths(root)).open();

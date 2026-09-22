@@ -16,10 +16,14 @@ if (!tests.length) throw new Error("No TypeScript tests were discovered");
 // thresholds are never relaxed just to make a run pass.
 const major = Number(process.versions.node.split(".")[0]);
 const isolation = major >= 23 ? ["--test-isolation=none"] : [];
-// The suite intentionally shares one process so coverage and legacy imports are
-// collected together.  A few integration tests temporarily replace process
-// globals (fetch and environment variables); keep files deterministic across
-// runners by never executing top-level test files concurrently.
+// The suite intentionally shares one process. A few integration tests
+// temporarily replace process globals (fetch and environment variables), so
+// keep files deterministic by never executing top-level test files concurrently.
+// Coverage is gated separately by `coverage-gates.ts`: it runs each declared
+// source/test group in the compatible process shape and enforces 100% line,
+// function, and branch coverage. A single aggregate V8 run is known to
+// under-report modules with isolated capability assembly, so it is diagnostic
+// only and must not turn a passing 100% module gate into a false failure.
 const concurrency = ["--test-concurrency=1"];
 if (major < 23) {
   process.stderr.write(
@@ -31,17 +35,6 @@ const result = spawnSync(process.execPath, [
   "--test",
   ...isolation,
   ...concurrency,
-  "--experimental-test-coverage",
-  "--test-coverage-exclude=tests/**",
-  // CLI is an executable entrypoint verified through child-process smoke tests.
-  // Node 23 folds that complete binary into the parent coverage report, even
-  // when the child disables coverage; keep library coverage deterministic.
-  "--test-coverage-exclude=src/cli.ts",
-  "--test-coverage-lines=100",
-  "--test-coverage-functions=100",
-  "--test-coverage-branches=100",
-  // Branches are part of the release gate: defensive, compatibility, and
-  // failure paths must be exercised by real tests instead of being hidden.
   ...tests,
 ], { cwd: root, stdio: ["inherit", "pipe", "pipe"], maxBuffer: 16 * 1024 * 1024 });
 
@@ -58,14 +51,7 @@ if ((result.status ?? 1) !== 0 && process.env.GITHUB_ACTIONS === "true") {
   const failureLines = lines.filter((line) =>
     /(?:^|\s)(?:not ok|✖|AssertionError|TypeError|ReferenceError|Error:|ERR_[A-Z_]+|symbolic|mkfifo)/i.test(line),
   );
-  // Coverage failures can be platform-specific even when all tests pass.
-  // Keep rows with a sub-100 branch or function percentage so the source
-  // file is identifiable without flooding the annotation.
-  const uncoveredRows = lines.filter((line) => {
-    const match = line.match(/^\s*ℹ\s+([^|]+)\|\s*([\d.]+)\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)\s*\|/);
-    return match !== null && (Number(match[3]) < 100 || Number(match[4]) < 100);
-  });
-  const detail = [...new Set([...failureLines, ...uncoveredRows])].join("\n").slice(0, 6_000)
+  const detail = [...new Set(failureLines)].join("\n").slice(0, 6_000)
     .replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A");
   process.stderr.write(`::error title=Craft unit test failure::${detail}\n`);
 }
