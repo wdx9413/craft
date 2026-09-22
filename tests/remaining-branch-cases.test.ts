@@ -818,10 +818,18 @@ test("verified work and web validation conflict branches are explicit", async ()
 });
 
 test("MCP HTTP server uses safe default host and injected runtime lifecycle", async () => {
-  const runtime = { server: { handle: async () => undefined }, close: () => undefined };
-  const served = await serveMcpHttp({ port: 0, start: async () => runtime });
-  assert.ok(served.server);
-  served.close();
+  const originalListen = Server.prototype.listen;
+  const originalClose = Server.prototype.close;
+  let runtimeClosed = false;
+  (Server.prototype as unknown as { listen: (...args: unknown[]) => Server }).listen = (function (this: Server, ...args: unknown[]) { const callback = args.at(-1); if (typeof callback === "function") callback(); return this; }) as unknown as (...args: unknown[]) => Server;
+  (Server.prototype as unknown as { close: () => Server }).close = (function (this: Server) { return this; }) as unknown as () => Server;
+  try {
+    const runtime = { server: { handle: async () => undefined }, close: () => { runtimeClosed = true; } };
+    const served = await serveMcpHttp({ port: 0, start: async () => runtime });
+    assert.ok(served.server);
+    served.close();
+    assert.equal(runtimeClosed, true);
+  } finally { Server.prototype.listen = originalListen; Server.prototype.close = originalClose; }
 });
 
 test("MCP HTTP server evaluates the documented default port without binding it", async () => {

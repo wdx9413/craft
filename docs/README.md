@@ -31,7 +31,7 @@
 - [**上下文的五个成员**](technical/modules/context-members.md)：`history` / `knowledge` / `memory` / `experience` / `state` 各由谁持有、门槛是什么、`state` 具体存什么、历史压缩的实测状态；区分"决定"与"实测"，并集中列出未决问题。**问 context 由什么组成时先读这一篇。**
 - [**Capability 扩展协议**](technical/modules/capability-protocol.md)：进程内的能力契约（`CraftCapability` / 注册表装配 / 归属与投影 / hook 与单点埋点 / 能力包分层）。**MCP 是对外协议，这一篇是内部协议。**
 - [上下文与记忆管理](technical/modules/context-memory.md)：CVMM 类比、按需工作集、偏好范围与后台整理目标。
-- [Knowledge Source、Memory Ledger 与 Context Resolution](technical/modules/knowledge-memory-context.md)：统一知识来源、兼容旧记忆、受限装配回执与可选向量检索准入；**v0.12.43 沿成员边界切成三个模块**（两个能力包 + 一个核心控制面），以及为什么读取侧必须留在核心。
+- [Knowledge Source、Memory Ledger 与 Context Resolution](technical/modules/knowledge-memory-context.md)：统一知识来源、兼容旧记忆、受限装配回执与可选向量检索准入；按成员边界切成两个能力包与一个核心控制面，以及为什么读取侧必须留在核心。历史拆分版本只在 changelog 中保留。
 - [Turn Cognitive Runtime](technical/modules/turn-cognitive-runtime.md)：每轮按需做上下文、能力、工作、候选记忆和评测决策；不强制把对话变成任务。
 - [Evaluation Model Profile 与 Workflow Evolution](technical/modules/evaluation-model-workflow-evolution.md)：真实模型的 secret-free 调用契约，以及脱敏执行记录到受限 Workflow 草案的晋级链。
 - [Console 与独立 Agent 运行模式](technical/modules/work-runtime-modes.md)：以同一 Policy、State、Receipt、Eval 内核支持 Host 控制台与模型无关 Agent 计划。

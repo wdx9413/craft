@@ -36,11 +36,11 @@ function verifiedReceipt(f: Awaited<ReturnType<typeof fixture>>, plan: JsonObjec
   const sessionId = `${caseId}-${trial}-${arm}`;
   f.store.create("host_session", sessionId, { host_id: "codex", environment_fingerprint: "environment", model_fingerprint: "model", budget_fingerprint: "budget", trace_id: `trace-${sessionId}`, status: "terminal" });
   f.store.create("outcome_observation", `observation-${sessionId}`, { trace_id: `trace-${sessionId}`, host_id: "codex", observer_id: "independent-verifier", observer_kind: "workspace", verdict });
-  const proof = evidence(f.service, `proof-${sessionId}`);
-  return f.service.engineeringQualityProfileEvaluationReceiptRecord({ plan_id: plan.id, case_id: caseId, trial_index: trial, arm, host_session_id: sessionId, observation_id: `observation-${sessionId}`, receipt: {
-    frozen_input_digest: `sha256:input-${caseId}`, workspace_snapshot_digest: `sha256:workspace-${caseId}-${trial}-${arm}`,
-    acceptance_command_digest: `sha256:accept-${caseId}`, sibling_caller_assertion_digest: `sha256:sibling-${caseId}`,
-    evidence_ids: [proof.id], retry_count: 0, cost_units: 1, latency_ms: 10,
+  const check = (name: string, status: "passed" | "failed" = "passed") => ({ evidence_id: evidence(f.service, `proof-${sessionId}-${name}`).id, command_digest: `sha256:command-${name}`, result_digest: `sha256:result-${name}-${sessionId}`, status });
+  return f.service.engineeringQualityProfileVerifiedReceiptImport({ plan_id: plan.id, case_id: caseId, trial_index: trial, arm, host_session_id: sessionId, observation_id: `observation-${sessionId}`, verified_receipt: {
+    kind: "craft.engineering-evaluation.v1", issued_by: "engineering-eval-cli", host_terminal: check("host"), frozen_input_digest: `sha256:input-${caseId}`,
+    workspace_before_digest: `sha256:before-${caseId}-${trial}-${arm}`, workspace_after_digest: `sha256:after-${caseId}-${trial}-${arm}`,
+    acceptance: check("acceptance"), siblings: [check("sibling-a"), check("sibling-b")], effect_check: check("effect"), safety_check: check("safety"), factual_check: check("factual"), root_cause_evidence_ids: [evidence(f.service, `proof-${sessionId}-root`).id], retry_count: 0, cost_units: 1, latency_ms: 10,
   } });
 }
 
@@ -60,6 +60,7 @@ test("Engineering Quality Profile is an explicit, revocable Kit with only local 
     assert.equal(activation.activation_profile_id, "engineering-quality-profile");
     const mcp = new McpServer(f.service, "full");
     assert.equal(mcp.tools.some((tool) => tool.name === "craft_engineering_quality_profile_evaluation_plan"), true);
+    assert.equal(mcp.tools.some((tool) => tool.name === "craft_engineering_quality_profile_evaluation_receipt_record"), false);
     const context = await mcp.handle({ id: 1, method: "tools/call", params: { name: "craft_engineering_quality_profile_trial_context", arguments: { activation_id: activation.id } } });
     assert.equal((context?.result as JsonObject).isError, false);
     assert.throws(() => f.service.engineeringQualityProfileActivate({ task_id: task.id, activation_id: activation.id, profile_version: "different" }), /version/u);
@@ -205,34 +206,47 @@ test("Engineering Quality Profile receipt protocol rejects forged, drifted, dupl
       return { sessionId, observationId: `receipt-observation-${suffix}`, proof };
     };
     const valid = make("valid");
-    const base = { plan_id: plan.id, case_id: cases[0], trial_index: 1, arm: "baseline", host_session_id: valid.sessionId, observation_id: valid.observationId,
-      receipt: { frozen_input_digest: "sha256:input-receipt-case-1", workspace_snapshot_digest: "sha256:workspace", acceptance_command_digest: "sha256:accept-receipt-case-1",
-        sibling_caller_assertion_digest: "sha256:sibling-receipt-case-1", evidence_ids: [valid.proof.id], retry_count: 0, cost_units: 1, latency_ms: 1 } };
-    assert.equal((f.service.engineeringQualityProfileEvaluationReceiptRecord(base).record as JsonObject).status, "verified");
-    assert.equal(f.service.engineeringQualityProfileEvaluationReceiptRecord(base).idempotent, true);
-    assert.throws(() => f.service.engineeringQualityProfileEvaluationReceiptRecord({ ...base, receipt: { ...(base.receipt as JsonObject), cost_units: 2 } }), /idempotency/u);
-    assert.throws(() => f.service.engineeringQualityProfileEvaluationReceiptRecord({ ...base, record_id: "other" }), /slot/u);
+    const strict = (frozenInput: string, overrides: JsonObject = {}) => {
+      const check = { evidence_id: valid.proof.id, command_digest: "sha256:command", result_digest: "sha256:result", status: "passed" };
+      return { kind: "craft.engineering-evaluation.v1", issued_by: "engineering-eval-cli", host_terminal: check, frozen_input_digest: frozenInput, workspace_before_digest: "sha256:before", workspace_after_digest: "sha256:after", acceptance: check, siblings: [check, check], effect_check: check, safety_check: check, factual_check: check, root_cause_evidence_ids: [valid.proof.id], retry_count: 0, cost_units: 1, latency_ms: 1, ...overrides };
+    };
+    const base = { plan_id: plan.id, case_id: cases[0], trial_index: 1, arm: "baseline", host_session_id: valid.sessionId, observation_id: valid.observationId, verified_receipt: strict("sha256:input-receipt-case-1") };
+    assert.equal((f.service.engineeringQualityProfileVerifiedReceiptImport(base).record as JsonObject).status, "verified");
+    assert.equal(f.service.engineeringQualityProfileVerifiedReceiptImport(base).idempotent, true);
+    assert.throws(() => f.service.engineeringQualityProfileVerifiedReceiptImport({ ...base, verified_receipt: strict("sha256:input-receipt-case-1", { cost_units: 2 }) }), /idempotency/u);
+    assert.throws(() => f.service.engineeringQualityProfileVerifiedReceiptImport({ ...base, record_id: "other" }), /slot/u);
     const invalidSession = make("running", { status: "running" });
-    assert.throws(() => f.service.engineeringQualityProfileEvaluationReceiptRecord({ ...base, case_id: cases[1], host_session_id: invalidSession.sessionId, observation_id: invalidSession.observationId,
-      receipt: { ...(base.receipt as JsonObject), frozen_input_digest: "sha256:input-receipt-case-2", acceptance_command_digest: "sha256:accept-receipt-case-2", sibling_caller_assertion_digest: "sha256:sibling-receipt-case-2", evidence_ids: [invalidSession.proof.id] } }), /fixed plan/u);
+    assert.throws(() => f.service.engineeringQualityProfileVerifiedReceiptImport({ ...base, case_id: cases[1], host_session_id: invalidSession.sessionId, observation_id: invalidSession.observationId,
+      verified_receipt: strict("sha256:input-receipt-case-2") }), /fixed plan/u);
     const driftedSession = make("drift", { model_fingerprint: "other" });
-    assert.throws(() => f.service.engineeringQualityProfileEvaluationReceiptRecord({ ...base, case_id: cases[2], host_session_id: driftedSession.sessionId, observation_id: driftedSession.observationId,
-      receipt: { ...(base.receipt as JsonObject), frozen_input_digest: "sha256:input-receipt-case-3", acceptance_command_digest: "sha256:accept-receipt-case-3", sibling_caller_assertion_digest: "sha256:sibling-receipt-case-3", evidence_ids: [driftedSession.proof.id] } }), /fixed plan/u);
+    assert.throws(() => f.service.engineeringQualityProfileVerifiedReceiptImport({ ...base, case_id: cases[2], host_session_id: driftedSession.sessionId, observation_id: driftedSession.observationId,
+      verified_receipt: strict("sha256:input-receipt-case-3") }), /fixed plan/u);
     const nonIndependent = make("self", { observer_id: "codex" });
-    assert.throws(() => f.service.engineeringQualityProfileEvaluationReceiptRecord({ ...base, case_id: cases[3], host_session_id: nonIndependent.sessionId, observation_id: nonIndependent.observationId,
-      receipt: { ...(base.receipt as JsonObject), frozen_input_digest: "sha256:input-receipt-case-4", acceptance_command_digest: "sha256:accept-receipt-case-4", sibling_caller_assertion_digest: "sha256:sibling-receipt-case-4", evidence_ids: [nonIndependent.proof.id] } }), /independent/u);
+    assert.throws(() => f.service.engineeringQualityProfileVerifiedReceiptImport({ ...base, case_id: cases[3], host_session_id: nonIndependent.sessionId, observation_id: nonIndependent.observationId,
+      verified_receipt: strict("sha256:input-receipt-case-4") }), /independent/u);
     const badEvidence = make("evidence");
     const weak = evidence(f.service, "weak-receipt", "human");
-    assert.throws(() => f.service.engineeringQualityProfileEvaluationReceiptRecord({ ...base, case_id: cases[4], host_session_id: badEvidence.sessionId, observation_id: badEvidence.observationId,
-      receipt: { ...(base.receipt as JsonObject), frozen_input_digest: "sha256:input-receipt-case-5", acceptance_command_digest: "sha256:accept-receipt-case-5", sibling_caller_assertion_digest: "sha256:sibling-receipt-case-5", evidence_ids: [weak.id] } }), /program Evidence/u);
+    assert.throws(() => f.service.engineeringQualityProfileVerifiedReceiptImport({ ...base, case_id: cases[4], host_session_id: badEvidence.sessionId, observation_id: badEvidence.observationId,
+      verified_receipt: { ...strict("sha256:input-receipt-case-5"), host_terminal: { evidence_id: weak.id, command_digest: "sha256:command", result_digest: "sha256:result", status: "passed" } } }), /program Evidence/u);
     const digestDrift = make("digest");
-    assert.throws(() => f.service.engineeringQualityProfileEvaluationReceiptRecord({ ...base, case_id: cases[5], host_session_id: digestDrift.sessionId, observation_id: digestDrift.observationId,
-      receipt: { ...(base.receipt as JsonObject), frozen_input_digest: "sha256:drift", acceptance_command_digest: "sha256:accept-receipt-case-6", sibling_caller_assertion_digest: "sha256:sibling-receipt-case-6", evidence_ids: [digestDrift.proof.id] } }), /frozen_input_digest drifted/u);
+    assert.throws(() => f.service.engineeringQualityProfileVerifiedReceiptImport({ ...base, case_id: cases[5], host_session_id: digestDrift.sessionId, observation_id: digestDrift.observationId,
+      verified_receipt: strict("sha256:drift") }), /frozen_input_digest drifted/u);
     assert.throws(() => f.service.engineeringQualityProfileEvaluationPlan({ plan_id: plan.id, activation_id: activation.id, host_id: "other", case_ids: cases,
       model_fingerprint: "model", environment_fingerprint: "environment", budget_fingerprint: "budget", trials_per_pair: 5 }), /idempotency/u);
-    assert.throws(() => f.service.engineeringQualityProfileEvaluationReceiptRecord({ ...base, arm: "unsupported" }), /unsupported/u);
-    assert.throws(() => f.service.engineeringQualityProfileEvaluationReceiptRecord({ ...base, case_id: "unknown" }), /not in the plan/u);
-    assert.throws(() => f.service.engineeringQualityProfileEvaluationReceiptRecord({ ...base, trial_index: 6 }), /outside/u);
+    assert.throws(() => f.service.engineeringQualityProfileVerifiedReceiptImport({ ...base, arm: "unsupported" }), /unsupported/u);
+    assert.throws(() => f.service.engineeringQualityProfileVerifiedReceiptImport({ ...base, case_id: "unknown" }), /not in the plan/u);
+    assert.throws(() => f.service.engineeringQualityProfileVerifiedReceiptImport({ ...base, trial_index: 6 }), /outside/u);
+    const blocker = make("blocker");
+    const blocked = f.service.engineeringQualityProfileVerifiedReceiptImport({ ...base, case_id: cases[6], host_session_id: blocker.sessionId, observation_id: blocker.observationId,
+      verified_receipt: strict("sha256:input-receipt-case-7", { effect_check: { evidence_id: valid.proof.id, command_digest: "sha256:command", result_digest: "sha256:result", status: "failed" } }) });
+    assert.equal((blocked.record as JsonObject).status, "rejected");
+    assert.ok((f.service.engineeringQualityProfileEvaluationGet({ plan_id: plan.id }).rejection as JsonObject).id);
+    const secondBlocker = make("second-blocker");
+    assert.equal((f.service.engineeringQualityProfileVerifiedReceiptImport({ ...base, case_id: cases[7], host_session_id: secondBlocker.sessionId, observation_id: secondBlocker.observationId,
+      verified_receipt: strict("sha256:input-receipt-case-8", { safety_check: { evidence_id: valid.proof.id, command_digest: "sha256:command", result_digest: "sha256:result", status: "failed" } }) }).record as JsonObject).status, "rejected");
+    const failedObservation = make("failed-observation", { verdict: "failed" });
+    assert.equal((f.service.engineeringQualityProfileVerifiedReceiptImport({ ...base, case_id: cases[8], host_session_id: failedObservation.sessionId, observation_id: failedObservation.observationId,
+      verified_receipt: strict("sha256:input-receipt-case-9") }).record as JsonObject).status, "rejected");
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
@@ -279,13 +293,6 @@ test("Engineering Quality Profile covers invalid receipt forms and every termina
     assert.throws(() => f.service.engineeringQualityProfileEvaluationRecord({ plan_id: plan.id, case_id: cases[1], trial_index: 0, arm: "baseline" }), /outside/u);
     assert.throws(() => f.service.engineeringQualityProfileEvaluationRecord({ plan_id: plan.id, case_id: cases[1], trial_index: 1, arm: "unsupported" }), /unsupported/u);
     assert.throws(() => f.service.engineeringQualityProfileEvaluationRecord({ plan_id: plan.id, case_id: cases[1], trial_index: 1, arm: "baseline", record_id: "legacy" }), /idempotency/u);
-    const session = "receipt-session";
-    f.store.create("host_session", session, { host_id: "codex", environment_fingerprint: "environment", model_fingerprint: "model", budget_fingerprint: "budget", trace_id: "receipt-trace", status: "terminal" });
-    f.store.create("outcome_observation", "receipt-observation", { trace_id: "receipt-trace", host_id: "codex", observer_id: "verifier", observer_kind: "workspace", verdict: "passed" });
-    const receipt = { frozen_input_digest: "sha256:input-verdict-case-1", workspace_snapshot_digest: "sha256:workspace", acceptance_command_digest: "sha256:accept-verdict-case-1", sibling_caller_assertion_digest: "sha256:sibling-verdict-case-1", evidence_ids: [proof.id], retry_count: 0, cost_units: 1, latency_ms: 1 };
-    assert.throws(() => f.service.engineeringQualityProfileEvaluationReceiptRecord({ plan_id: plan.id, case_id: cases[0], trial_index: 1, arm: "baseline", host_session_id: session, observation_id: "receipt-observation", receipt: { ...receipt, evidence_ids: "bad" } }), /array/u);
-    assert.throws(() => f.service.engineeringQualityProfileEvaluationReceiptRecord({ plan_id: plan.id, case_id: cases[0], trial_index: 1, arm: "baseline", host_session_id: session, observation_id: "receipt-observation", receipt: { ...receipt, retry_count: -1 } }), /non-negative/u);
-    assert.throws(() => f.service.engineeringQualityProfileEvaluationReceiptRecord({ plan_id: plan.id, case_id: cases[0], trial_index: 1, arm: "baseline", host_session_id: session, observation_id: "receipt-observation", receipt: { ...receipt, cost_units: -1 } }), /non-negative/u);
     f.store.save("engineering_quality_profile_evaluation_plan", String(plan.id), { ...plan, rejection_id: "manual-rejection" });
     f.store.create("engineering_quality_profile_rejection", "manual-rejection", { reason: "fixture" });
     const rejected = f.service.engineeringQualityProfileEvaluationEvaluate({ plan_id: plan.id, evaluation_id: "rejected-evaluation" }).evaluation as JsonObject;
@@ -298,7 +305,8 @@ test("Engineering Quality Profile covers invalid receipt forms and every termina
     assert.throws(() => f.service.engineeringQualityProfileEvaluationEvaluate({ plan_id: plan.id, evaluation_id: "rejected-evaluation" }), /idempotency/u);
     f.store.save("engineering_quality_profile_evaluation_plan", String(plan.id), { ...f.store.get("engineering_quality_profile_evaluation_plan", String(plan.id)), status: "evaluated" });
     assert.throws(() => f.service.engineeringQualityProfileEvaluationRecord({ plan_id: plan.id, case_id: cases[0], trial_index: 1, arm: "baseline" }), /not collecting/u);
-    assert.throws(() => f.service.engineeringQualityProfileEvaluationReceiptRecord({ plan_id: plan.id, case_id: cases[0], trial_index: 1, arm: "baseline", host_session_id: session, observation_id: "receipt-observation", receipt }), /not collecting/u);
+    assert.throws(() => f.service.engineeringQualityProfileEvaluationReceiptRecord({ plan_id: plan.id, case_id: cases[0], trial_index: 1, arm: "baseline" }), /not collecting/u);
+    assert.throws(() => f.service.engineeringQualityProfileVerifiedReceiptImport({ plan_id: plan.id }), /not collecting/u);
     const unevaluated = f.service.engineeringQualityProfileEvaluationPlan({ plan_id: "unevaluated", activation_id: activation.id, host_id: "codex", case_ids: cases,
       model_fingerprint: "model", environment_fingerprint: "environment", budget_fingerprint: "budget", trials_per_pair: 5 }).plan as JsonObject;
     assert.equal(f.service.engineeringQualityProfileEvaluationGet({ plan_id: unevaluated.id }).evaluation, null);

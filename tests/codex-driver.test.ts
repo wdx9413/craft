@@ -50,6 +50,22 @@ test("Codex Host Driver binds workspace writes to one exact Craft authorization"
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
+test("Codex Host Driver evaluation mode ignores user configuration and rules", async () => {
+  let argv: string[] = [];
+  const capture: CodexExecutor = async (request) => { argv = [...request.argv]; return success(request); };
+  const f = await fixture("evaluation-mode", capture);
+  try {
+    const dispatch = f.driver.prepare({ dispatch_id: "evaluation", task_id: f.task.id, workspace: f.root, prompt: "x", model: "test-model", evaluation_mode: true }).dispatch as JsonObject;
+    await f.driver.execute({ dispatch_id: dispatch.id, prompt: "x" });
+    assert.equal(argv.includes("--ignore-user-config"), true);
+    assert.equal(argv.includes("--ignore-rules"), true);
+    const ordinary = f.driver.prepare({ dispatch_id: "ordinary", task_id: f.task.id, workspace: f.root, prompt: "x", evaluation_mode: false }).dispatch as JsonObject;
+    await f.driver.execute({ dispatch_id: ordinary.id, prompt: "x" });
+    assert.equal(argv.includes("--ignore-user-config"), false);
+    assert.throws(() => f.driver.prepare({ task_id: f.task.id, workspace: f.root, prompt: "x", evaluation_mode: "yes" as never }), /boolean/u);
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
 test("Codex Host Driver fails closed on drift, invalid input, process errors, and malformed output", async () => {
   const f = await fixture("failure", async () => { throw new Error("missing executable"); });
   try {

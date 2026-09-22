@@ -26,6 +26,19 @@
   },
   "groups": [
     {
+      "name": "craft-codebase",
+      "include": [
+        "capability/craft-codebase/capability.ts",
+        "capability/craft-codebase/ownership.ts",
+        "capability/craft-codebase/codebase-index.ts",
+        "src/application/use-cases/codebase.ts"
+      ],
+      "tests": [
+        "tests/craft-codebase.test.ts"
+      ],
+      "branches": true
+    },
+    {
       "name": "v01235-control-plane",
       "include": [
         "src/runtime-execution-attempt.ts",
@@ -75,10 +88,24 @@
     {
       "name": "engineering-quality-profile",
       "include": [
-        "capability/engineering-quality-profile.ts"
+        "capability/engineering-quality-profile.ts",
+        "capability/verified-evaluation-receipt.ts"
       ],
       "tests": [
-        "tests/engineering-quality-profile.test.ts"
+        "tests/engineering-quality-profile.test.ts",
+        "tests/verified-evaluation-receipt.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "engineering-evaluation-runner",
+      "include": [
+        "capability/engineering-evaluation-runner.ts",
+        "src/codex-driver.ts"
+      ],
+      "tests": [
+        "tests/engineering-evaluation-runner.test.ts",
+        "tests/codex-driver.test.ts"
       ],
       "branches": true
     },

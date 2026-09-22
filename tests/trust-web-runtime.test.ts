@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { Server } from "node:http";
 import { createMcpHttpHandler, serveMcpHttp } from "../src/mcp-http.ts";
 import { RemoteMcpAccessPolicy } from "../src/remote-mcp-access.ts";
 import { McpServer } from "../src/mcp.ts";
@@ -16,6 +17,14 @@ async function fixture() {
   return { root, store, service: new CraftService(store) };
 }
 async function close(f: Awaited<ReturnType<typeof fixture>>) { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+
+async function withMockedMcpListen<T>(run: () => Promise<T>): Promise<T> {
+  const originalListen = Server.prototype.listen;
+  const originalClose = Server.prototype.close;
+  (Server.prototype as unknown as { listen: (...args: unknown[]) => Server }).listen = (function (this: Server, ...args: unknown[]) { const callback = args.at(-1); if (typeof callback === "function") callback(); return this; }) as unknown as (...args: unknown[]) => Server;
+  (Server.prototype as unknown as { close: () => Server }).close = (function (this: Server) { return this; }) as unknown as () => Server;
+  try { return await run(); } finally { Server.prototype.listen = originalListen; Server.prototype.close = originalClose; }
+}
 
 test("v0.12.26 trust profiles compound scoped evidence without granting authority", async () => {
   const f = await fixture();
@@ -116,8 +125,10 @@ test("v0.12.26 exposes MCP over a bounded HTTP POST boundary", async () => {
   const remoteAccepted = { statusCode: 0, setHeader() {}, body: "", end(value = "") { this.body = value; } };
   await authorizedHandler({ url: "/mcp", method: "POST", headers: { accept: "application/json", authorization: "Bearer token" }, async *[Symbol.asyncIterator]() { yield "{}"; } } as never, remoteAccepted as never);
   assert.equal(remoteAccepted.statusCode, 200);
-  const started = await serveMcpHttp({ port: 0, start: async () => ({ server: { handle: async () => undefined }, close() {} }) }); started.close();
-  const previousDataDir = process.env.CRAFT_DATA_DIR; const temporaryDataDir = await mkdtemp(join(tmpdir(), "craft-http-default-")); process.env.CRAFT_DATA_DIR = temporaryDataDir;
-  const defaultStarted = await serveMcpHttp({ port: 0 }); defaultStarted.close(); await rm(temporaryDataDir, { recursive: true, force: true });
-  if (previousDataDir === undefined) delete process.env.CRAFT_DATA_DIR; else process.env.CRAFT_DATA_DIR = previousDataDir;
+  await withMockedMcpListen(async () => {
+    const started = await serveMcpHttp({ port: 0, start: async () => ({ server: { handle: async () => undefined }, close() {} }) }); started.close();
+    const previousDataDir = process.env.CRAFT_DATA_DIR; const temporaryDataDir = await mkdtemp(join(tmpdir(), "craft-http-default-")); process.env.CRAFT_DATA_DIR = temporaryDataDir;
+    const defaultStarted = await serveMcpHttp({ port: 0 }); defaultStarted.close(); await rm(temporaryDataDir, { recursive: true, force: true });
+    if (previousDataDir === undefined) delete process.env.CRAFT_DATA_DIR; else process.env.CRAFT_DATA_DIR = previousDataDir;
+  });
 });

@@ -12,12 +12,13 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      # Pinned to the v4 commits resolved from each publisher repository.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
         with:
           # Keep CI on the package-manager version declared in package.json.
           version: 11.19.0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
           cache: pnpm
@@ -29,7 +30,7 @@ jobs:
       - name: Build core
         run: pnpm run build:core
       - name: Build plugin bundle
-        run: pnpm run build:plugin
+        run: pnpm run build:plugin && pnpm run pack:plugin
       - name: Build DeepSeek adapter
         run: pnpm run build:deepseek
       - name: Package host adapters
@@ -43,7 +44,10 @@ jobs:
       - name: Declaration/implementation consistency audit
         run: pnpm run audit:consistency
       - name: Unit tests and 100% coverage
-        run: pnpm run test:ts
+        # `test:ts` only executes assertions.  The separate, per-module gate is
+        # the release contract for line/function/branch coverage and must run in
+        # CI too; a descriptive step name is not evidence.
+        run: pnpm run test:ts && pnpm run test:coverage-gates
       - name: CLI smoke test
         run: pnpm run test:smoke
       - name: Isolated plugin smoke test

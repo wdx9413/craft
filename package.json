@@ -39,6 +39,7 @@
     "eval:governance": "node --experimental-strip-types capability/craft-eval/suite.ts governance",
     "eval:abstraction": "node --experimental-strip-types capability/craft-eval/abstraction.ts",
     "eval:live": "node --experimental-strip-types capability/craft-eval/run.ts && node --experimental-strip-types capability/craft-eval/recurrence.ts && node --experimental-strip-types capability/craft-eval/suite.ts",
+    "engineering:eval": "node --experimental-strip-types scripts/engineering-eval.ts",
     "coverage:branches:report": "c8 --all --src=src --exclude=src/cli.ts --exclude=src/**/index.ts --exclude=**/*.d.ts --reporter=json --reporter=text --report-dir=coverage node --test --test-isolation=none --test-concurrency=1 tests/*.test.ts && node --experimental-strip-types scripts/branch-gap-report.ts",
     "knowledge:import-offline": "node --experimental-strip-types scripts/import-legacy-knowledge.ts",
     "check:ts": "node --experimental-strip-types src/cli.ts --help",

@@ -1,0 +1,39 @@
+name: engineering-eval
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  codex-evaluation:
+    # Refuse tags and branches: this is an operator-invoked evaluation of main,
+    # never a PR/fork job and never a release/push automation.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: codex-evals
+    steps:
+      # Pinned to the v4 commits resolved from each publisher repository.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 11.19.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build:core
+      - name: Run protected Codex paired evaluation
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: >-
+          pnpm engineering:eval -- --model gpt-5.1-codex-mini
+          --fixtures tests/fixtures/engineering-eval --store .craft-eval-store
+          --archive .craft-eval-archive --timeout-ms 120000 --output-limit 262144 --trials 5
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: engineering-eval-receipts
+          path: .craft-eval-archive/*.json
+          if-no-files-found: error

@@ -26,12 +26,16 @@ import type { CraftCapability } from "./capability-protocol.ts";
 import { knowledgeCapability } from "../capability/craft-knowledge/capability.ts";
 import { memoryCapability } from "../capability/craft-memory/capability.ts";
 import { experienceCapability } from "../capability/craft-experience/capability.ts";
+import { codebaseCapability } from "../capability/craft-codebase/capability.ts";
 
 /** Ordered by dependency: a capability may require a kernel an earlier one provided. */
 export const CRAFT_CAPABILITIES: readonly CraftCapability[] = [
   knowledgeCapability,
   memoryCapability,
   experienceCapability,
+  // A snapshot-pinned, read-only analysis capability.  It intentionally has no
+  // product field and therefore cannot widen the three external components.
+  codebaseCapability,
 ];
 
 /**

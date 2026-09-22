@@ -48,7 +48,6 @@ import { object, text } from "../validation.ts";
 import { canonicalJson } from "../digest.ts";
 import { CRAFT_RELEASE_VERSION } from "../version.ts";
 import type { EvaluationContractInput, EvaluationStage } from "../evaluation-contract.ts";
-import { ComponentReadinessKernel, type ComponentName } from "../component-readiness.ts";
 import { WorkControl } from "./coordinators/work-control.ts";
 import { ForgeDispatchCoordinator } from "./coordinators/forge-dispatch.ts";
 import { scopeEnvelope, scopeFromKey } from "../scope-policy.ts";
@@ -574,14 +573,6 @@ export class CraftService extends ServiceFoundation {
       counts: Object.fromEntries(kinds.map((kind) => [kind, this.store.count(kind)])) };
   }
 
-  /** Content-free readiness for a separately mounted component product. */
-  componentReadinessGet(args: JsonObject, mountedComponent?: ComponentName): JsonObject { return new ComponentReadinessKernel(this.store).get(args, mountedComponent); }
-  componentDiagnose(args: JsonObject, mountedComponent?: ComponentName): JsonObject { return new ComponentReadinessKernel(this.store).diagnose(args, mountedComponent); }
-  activationProofDoctor(args: JsonObject = {}): JsonObject { return this.activationProof.doctor(args); }
-  activationProofRecord(args: JsonObject): JsonObject { return this.activationProof.record(args); }
-  componentHistoryKnowledgeReviewedMigrate(args: JsonObject = {}): JsonObject { return this.componentHistoryMigration.knowledgeReviewed(args); }
-  componentHistoryExperienceMigrate(args: JsonObject = {}): JsonObject { return this.componentHistoryMigration.experienceWorkflowEvolution(args); }
-
   sourceAdd(args: JsonObject): Promise<JsonObject> {
     const label = args.label === undefined ? undefined : text(args.label, "label");
     return this.catalog.addSource(text(args.path, "path"), label,
@@ -816,17 +807,6 @@ export class CraftService extends ServiceFoundation {
   capabilityKitSetState(args: JsonObject): JsonObject { return this.capabilityKits.setState(args); }
   capabilityKitConformance(args: JsonObject): JsonObject { return this.capabilityKits.conformance(args); }
   capabilityKitDistribution(args: JsonObject): JsonObject { return this.capabilityKits.distribution(args); }
-  engineeringQualityProfileInstall(): JsonObject { return this.engineeringQualityProfile.install(); }
-  engineeringQualityProfileCaseSave(args: JsonObject): JsonObject { return this.engineeringQualityProfile.caseSave(args); }
-  engineeringQualityProfileActivate(args: JsonObject): JsonObject { return this.engineeringQualityProfile.activate(args); }
-  engineeringQualityProfileTrialContext(args: JsonObject): JsonObject { return this.engineeringQualityProfile.trialContext(args); }
-  engineeringQualityProfileContribution(args: JsonObject): JsonObject { return this.engineeringQualityProfile.contribute(args); }
-  engineeringQualityProfileReviewAggregate(args: JsonObject): JsonObject { return this.engineeringQualityProfile.reviewAggregate(args); }
-  engineeringQualityProfileEvaluationPlan(args: JsonObject): JsonObject { return this.engineeringQualityProfile.evaluationPlan(args); }
-  engineeringQualityProfileEvaluationRecord(args: JsonObject): JsonObject { return this.engineeringQualityProfile.evaluationRecord(args); }
-  engineeringQualityProfileEvaluationReceiptRecord(args: JsonObject): JsonObject { return this.engineeringQualityProfile.evaluationReceiptRecord(args); }
-  engineeringQualityProfileEvaluationEvaluate(args: JsonObject): JsonObject { return this.engineeringQualityProfile.evaluationEvaluate(args); }
-  engineeringQualityProfileEvaluationGet(args: JsonObject): JsonObject { return this.engineeringQualityProfile.evaluationGet(args); }
   workRuntimeModeConfigure(args: JsonObject): JsonObject { return this.workRuntimeModes.configure(args); }
   workRuntimeModePrepare(args: JsonObject): JsonObject { return this.workRuntimeModes.prepare(args); }
   workRuntimeModeGet(args: JsonObject): JsonObject { return this.workRuntimeModes.get(args); }

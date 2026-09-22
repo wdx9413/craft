@@ -14,6 +14,7 @@ export const SURFACE_RULES: ReadonlyArray<{ name: string; pattern: RegExp }> = [
   { name: "execution", pattern: /^craft_(sandbox|docker|effect|egress|credential|execution|managed|platform|isolated|local|external|recovery|durable|trigger|webhook|orchestration|runtime|autonomy|speculative|web)/ },
   { name: "knowledge", pattern: /^craft_(wiki|knowledge|context|memory|project|semantic|claim|relation|turn)/ },
   { name: "workspace", pattern: /^craft_(workspace|work_object|change_set|state|transaction|lineage|hydration|dehydration|artifact|evidence|untrusted)/ },
+  { name: "codebase", pattern: /^craft_codebase_/ },
   { name: "collaboration", pattern: /^craft_(a2a|enterprise|agent|expert|federated|attention|work_coordinator|home|decision|guided|strategy)/ },
   { name: "workflow", pattern: /^craft_/ },
 ];

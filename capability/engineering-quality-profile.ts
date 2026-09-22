@@ -8,6 +8,7 @@ import type { CraftStore, JsonObject } from "../src/infrastructure/store.ts";
 import { payload, stableDigest } from "../src/digest.ts";
 import { CapabilityKitRuntime } from "../src/capability-kit-runtime.ts";
 import { object, text } from "../src/validation.ts";
+import { receiptEvidenceIds, receiptPassed, verifiedEvaluationReceipt } from "./verified-evaluation-receipt.ts";
 
 export const ENGINEERING_QUALITY_PROFILE_ID = "engineering-quality-profile";
 export const ENGINEERING_QUALITY_PROFILE_VERSION = "1.0.0";
@@ -24,11 +25,6 @@ function strings(value: unknown, name: string, minimum = 1): string[] {
 function boolean(value: unknown, name: string): boolean {
   if (typeof value !== "boolean") throw new Error(`${name} must be a boolean`);
   return value;
-}
-function nonNegativeNumber(value: unknown, name: string, integer = false): number {
-  const result = Number(value);
-  if (!Number.isFinite(result) || result < 0 || (integer && !Number.isInteger(result))) throw new Error(`${name} must be a non-negative${integer ? " integer" : " number"}`);
-  return result;
 }
 function exactFive(value: unknown): number {
   const result = Number(value);
@@ -219,6 +215,12 @@ export class EngineeringQualityProfileKernel {
   }
 
   evaluationReceiptRecord(args: JsonObject): JsonObject {
+    // Compatibility only: old callers supplied a hand-written receipt object.
+    // It remains readable but never becomes promotion evidence.
+    return this.evaluationRecord(args);
+  }
+
+  evaluationVerifiedReceiptImport(args: JsonObject): JsonObject {
     const plan = this.store.get("engineering_quality_profile_evaluation_plan", text(args.plan_id, "plan_id"));
     if (plan.status !== "collecting") throw new Error("Engineering Quality Profile evaluation is not collecting observations");
     const caseId = text(args.case_id, "case_id"); if (!(plan.case_ids as string[]).includes(caseId)) throw new Error("Engineering Quality Profile Case is not in the plan");
@@ -228,21 +230,22 @@ export class EngineeringQualityProfileKernel {
     if (session.status !== "terminal" || session.host_id !== plan.host_id || session.environment_fingerprint !== plan.environment_fingerprint || session.model_fingerprint !== plan.model_fingerprint || session.budget_fingerprint !== plan.budget_fingerprint) throw new Error("Engineering Quality Profile Host receipt does not match the fixed plan");
     const observation = this.store.get("outcome_observation", text(args.observation_id, "observation_id"));
     if (observation.trace_id !== session.trace_id || observation.host_id !== plan.host_id || observation.observer_kind !== plan.observer_kind || observation.observer_id === plan.host_id) throw new Error("Engineering Quality Profile Outcome Observation is not independent or does not match the Host Session");
-    const receipt = object(args.receipt, "receipt");
-    const evidenceIds = strings(receipt.evidence_ids, "receipt.evidence_ids");
+    const receipt = verifiedEvaluationReceipt(args.verified_receipt);
+    const evidenceIds = receiptEvidenceIds(receipt);
     const evidence = evidenceIds.map((id) => this.store.get("evidence", id));
     if (evidence.some((item) => item.source_type !== "program" || item.confidence !== "confirmed")) throw new Error("Engineering Quality Profile receipt requires confirmed program Evidence");
     const testCase = this.store.get("engineering_quality_profile_case", caseId);
-    ["frozen_input_digest", "workspace_snapshot_digest", "acceptance_command_digest", "sibling_caller_assertion_digest"].forEach((key) => {
-      const expected = key === "workspace_snapshot_digest" ? sha256(receipt[key], `receipt.${key}`) : testCase[key];
-      if (key !== "workspace_snapshot_digest" && receipt[key] !== expected) throw new Error(`Engineering Quality Profile receipt ${key} drifted`);
-    });
-    const identity = { plan_id: plan.id, plan_version: plan.version, case_id: caseId, trial_index: trialIndex, arm, host_session_id: session.id, host_session_version: session.version, observation_id: observation.id, observation_version: observation.version, receipt_digest: stableDigest(receipt), evidence_ids: evidenceIds, retry_count: nonNegativeNumber(receipt.retry_count, "receipt.retry_count", true), cost_units: nonNegativeNumber(receipt.cost_units, "receipt.cost_units"), latency_ms: nonNegativeNumber(receipt.latency_ms, "receipt.latency_ms") };
+    if (receipt.frozen_input_digest !== testCase.frozen_input_digest) throw new Error("Engineering Quality Profile receipt frozen_input_digest drifted");
+    const identity = { plan_id: plan.id, plan_version: plan.version, case_id: caseId, trial_index: trialIndex, arm, host_session_id: session.id, host_session_version: session.version, observation_id: observation.id, observation_version: observation.version, receipt_digest: stableDigest(receipt), evidence_ids: evidenceIds.sort(), retry_count: receipt.retry_count, cost_units: receipt.cost_units, latency_ms: receipt.latency_ms };
     const recordId = String(args.record_id ?? `engineering_quality_profile_evaluation_record_${stableDigest({ plan_id: plan.id, case_id: caseId, trial_index: trialIndex, arm }).slice(-20)}`);
     const existing = this.store.find("engineering_quality_profile_evaluation_record", recordId); if (existing) { if (existing.identity_digest !== stableDigest(identity)) throw new Error("Engineering Quality Profile evaluation record idempotency conflict"); return { plan, record: existing, idempotent: true }; }
     if (this.store.list("engineering_quality_profile_evaluation_record", 10_000, (record) => record.plan_id === plan.id && record.case_id === caseId && record.trial_index === trialIndex && record.arm === arm).length) throw new Error("Engineering Quality Profile evaluation slot is already recorded");
-    const passed = observation.verdict === "passed";
-    const record = this.store.create("engineering_quality_profile_evaluation_record", recordId, { ...identity, identity_digest: stableDigest(identity), status: "verified", deterministic_acceptance_passed: passed, sibling_caller_passed: passed, unauthorized_effect: false, safety_regression: !passed, factual_regression: !passed, root_cause_evidence_ids: evidenceIds, raw_receipt_stored: false });
+    const passed = receiptPassed(receipt) && observation.verdict === "passed";
+    const record = this.store.create("engineering_quality_profile_evaluation_record", recordId, { ...identity, identity_digest: stableDigest(identity), status: passed ? "verified" : "rejected", deterministic_acceptance_passed: receipt.acceptance.status === "passed", sibling_caller_passed: receipt.siblings.every((item) => item.status === "passed"), unauthorized_effect: receipt.effect_check.status !== "passed", safety_regression: receipt.safety_check.status !== "passed", factual_regression: receipt.factual_check.status !== "passed", root_cause_evidence_ids: [...receipt.root_cause_evidence_ids], raw_receipt_stored: false });
+    if (!passed && !plan.rejection_id) {
+      const rejection = this.store.create("engineering_quality_profile_rejection", `engineering_quality_profile_rejection_${stableDigest(identity).slice(-20)}`, { plan_id: plan.id, case_id: caseId, trial_index: trialIndex, arm, reason: "verified_evaluation_receipt_blocker", receipt_digest: stableDigest(receipt), handoff_required: true });
+      this.store.save("engineering_quality_profile_evaluation_plan", String(plan.id), { ...payload(plan), rejection_id: rejection.id });
+    }
     return { plan, record, idempotent: false };
   }
 

@@ -1,0 +1,16 @@
+{
+  "name": "@craft/capability-codebase",
+  "version": "0.12.37",
+  "private": true,
+  "description": "Craft internal read-only codebase structure capability",
+  "type": "module",
+  "main": "capability.ts",
+  "exports": {
+    ".": "./capability.ts",
+    "./ownership": "./ownership.ts",
+    "./codebase-index": "./codebase-index.ts"
+  },
+  "files": ["capability.ts", "ownership.ts", "codebase-index.ts"],
+  "peerDependencies": { "craft-agent-harness": "0.12.37" },
+  "license": "MIT"
+}

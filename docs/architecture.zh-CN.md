@@ -173,7 +173,7 @@ v0.12.20 用 `ContinualHarnessView → Refinement → bounded Session activation
 
 v0.12.21 将上述能力收口到 `VerifiedWorkLoop` 唯一公开门面，并增加 `UncertaintyPolicy → Resolution → optional Adjudication` 和 `ReferencePilot → 5× paired Qualification → Platform Assessment`。自动化只可提升求证强度，不能提升权限；机制验收与真实业务效果分别记录，证据不足时明确返回 `inconclusive`。
 
-v0.12.36 的完整 `craft` 插件是组合根；`craft-knowledge`、`craft-memory`、`craft-experience` 是唯一独立安装投影。它们复用稳定 Component SDK/MCP/Bundle 契约而不是私有源码；旧 Context、Skill Quality、Workflow Evolution 和 Workflow DAG 仅保留迁移读取。Execution Host 分为 `embedded`、`managed`、`remote`；Codex/Claude 插件模式默认复用当前宿主，不启动第二个 CLI。
+当前 v0.12.37 的完整 `craft` 插件是内部组合根；`craft-knowledge`、`craft-memory`、`craft-experience` 是唯一独立安装投影。它们复用稳定 Component SDK/MCP/Bundle 契约而不是私有源码；旧 Context、Skill Quality、Workflow Evolution 和 Workflow DAG 仅保留迁移读取。Execution Host 分为 `embedded`、`managed`、`remote`；Codex/Claude 插件模式默认复用当前宿主，不启动第二个 CLI。
 
 v0.12.23 增加 `VerificationPlane` 深模块。它位于开发变更与既有执行/评测模块之间：调用方只提交无正文 Change 描述，模块按风险生成 Contract、确定性端到端、状态机、对抗、恢复、Host Conformance、Eval 与 Release Qualification 检查；回执必须绑定同一环境与 Evidence。它不新增命令执行入口，也不把测试通过误写为业务价值证明。详见 [Verification Plane](technical/modules/verification-plane.md)。
 

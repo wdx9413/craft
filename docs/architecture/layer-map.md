@@ -41,6 +41,9 @@ capability/                 能力包：拥有内核、声明归属、按协议�
     experience-ledger.ts    内容无关的经验观察与诊断模式
     workflow-evolution.ts   脱敏执行观察与有界模型提案请求
     evaluation-model-profile.ts  评测所用的无凭据模型配置
+  craft-codebase/           内部、显式启用的只读代码库结构 Capability（非外发产品）
+    codebase-index.ts       checkpoint 绑定的符号、关系、诊断、查询与 content-free receipt
+    capability.ts           只声明归属；不贡献新的 Context member
 interfaces/                 外部协议入口
   mcp-server.ts             MCP 工具定义、分发与错误映射
   mcp/surface-registry.ts   Domain / Component / Syscall surface 投影

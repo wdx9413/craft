@@ -152,6 +152,8 @@ import type { ProcedureStore } from "../../capability/craft-experience/procedure
 import { KNOWLEDGE_KERNELS } from "../../capability/craft-knowledge/capability.ts";
 import { MEMORY_KERNELS } from "../../capability/craft-memory/capability.ts";
 import { EXPERIENCE_KERNELS } from "../../capability/craft-experience/capability.ts";
+import { CODEBASE_KERNELS } from "../../capability/craft-codebase/capability.ts";
+import type { CodebaseIndexKernel } from "../../capability/craft-codebase/codebase-index.ts";
 import { CRAFT_CAPABILITIES } from "../capability-catalog.ts";
 import { CORE_KERNELS, buildCapabilityRegistry } from "../capability-protocol.ts";
 import { HookPlane } from "../hook-plane.ts";
@@ -242,6 +244,8 @@ export abstract class ServiceFoundation {
   readonly capabilityConnectors: CapabilityConnectorKernel;
   readonly capabilityAccess: CapabilityAccessKernel;
   readonly capabilityKits: CapabilityKitRuntime;
+  /** Optional, explicit, read-only Workspace structural analysis. */
+  readonly codebase: CodebaseIndexKernel;
   /** Explicit opt-in sample; it is not a default Host capability. */
   readonly engineeringQualityProfile: EngineeringQualityProfileKernel;
   /** Host-reported, content-free proof; configuration alone is never evidence. */
@@ -451,6 +455,7 @@ export abstract class ServiceFoundation {
     this.capabilityConnectors = new CapabilityConnectorKernel(store);
     this.capabilityAccess = new CapabilityAccessKernel(store, this.catalog);
     this.capabilityKits = new CapabilityKitRuntime(store);
+    this.codebase = capabilities.registry.require<CodebaseIndexKernel>(CODEBASE_KERNELS.index);
     this.engineeringQualityProfile = new EngineeringQualityProfileKernel(store);
     this.activationProof = new ActivationProofKernel(store);
     this.componentHistoryMigration = new ComponentHistoryMigrationKernel(store);
