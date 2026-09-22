@@ -60,15 +60,15 @@ for (const name of componentNames) {
   assert.equal(normalizeText(packed), normalizeText(source));
 }
 
-// These three are standalone products in Claude Code as well as Codex.  Keep the product
-// names here because a stale `evolution` argument still parses as JSON but selects no surface.
-for (const [name, product] of [["craft-knowledge", "knowledge"], ["craft-memory", "memory"], ["craft-experience", "experience"]] as const) {
+// Public products select only their declared bounded MCP product.  A stale or
+// widened value must never make a component bundle expose the full surface.
+for (const [name, product, hooked] of [["craft-knowledge", "knowledge", true], ["craft-memory", "memory", true], ["craft-experience", "experience", true], ["craft-codebase", "codebase", false]] as const) {
   const manifest = JSON.parse(await readFile(join(root, "plugins", name, ".claude-plugin", "plugin.json"), "utf8")) as {
     name: string; version: string; hooks?: string; mcpServers: Record<string, { args: string[] }>;
   };
   assert.equal(manifest.name, name);
-    assert.equal(manifest.version, packageJson.version);
-    assert.equal(manifest.hooks, "./hooks/hooks.json");
+  assert.equal(manifest.version, packageJson.version);
+  assert.equal(manifest.hooks, hooked ? "./hooks/hooks.json" : undefined);
   assert.deepEqual(manifest.mcpServers[name]?.args.slice(-2), ["--product", product]);
 }
 

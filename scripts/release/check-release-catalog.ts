@@ -20,7 +20,9 @@ for (const product of RELEASE_PRODUCTS) {
   if (product.hookMember) assert.equal(codex.hooks, "./hooks/codex-hooks.json", `${product.name} must retain its Codex Hook bridge`);
   if (product.name !== "craft") {
     const claude = JSON.parse(await readFile(join(rootPath, ".claude-plugin", "plugin.json"), "utf8")) as { name?: string; version?: string; hooks?: string };
-    assert.equal(claude.name, product.name); assert.equal(claude.version, CRAFT_RELEASE_VERSION); assert.equal(claude.hooks, "./hooks/hooks.json");
+    assert.equal(claude.name, product.name); assert.equal(claude.version, CRAFT_RELEASE_VERSION);
+    if (product.hookMember) assert.equal(claude.hooks, "./hooks/hooks.json");
+    else assert.equal(claude.hooks, undefined, `${product.name} must not install an automatic Hook`);
   }
 }
 const server = await readFile(join(root, "src", "interfaces", "mcp-server.ts"), "utf8");

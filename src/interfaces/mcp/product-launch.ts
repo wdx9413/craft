@@ -9,6 +9,7 @@ export const MCP_PRODUCT_SURFACES = {
   knowledge: "component-knowledge-daily",
   memory: "component-memory-daily",
   experience: "component-experience-daily",
+  codebase: "component-codebase",
 } as const;
 
 export type McpProduct = keyof typeof MCP_PRODUCT_SURFACES;

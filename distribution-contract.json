@@ -18,6 +18,12 @@
       "surface": "component-experience-daily",
       "hook_member": "experience",
       "category": "Developer Tools"
+    },
+    {
+      "name": "craft-codebase",
+      "surface": "component-codebase",
+      "hook_member": null,
+      "category": "Developer Tools"
     }
   ]
 }

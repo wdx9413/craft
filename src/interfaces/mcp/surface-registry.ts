@@ -3,6 +3,7 @@ import type { Tool } from "../../mcp/tool-schema.ts";
 import { EXPERIENCE_COMPONENT } from "../../../capability/craft-experience/ownership.ts";
 import { KNOWLEDGE_COMPONENT, KNOWLEDGE_CONTEXT_SOURCE } from "../../../capability/craft-knowledge/ownership.ts";
 import { MEMORY_COMPONENT, MEMORY_CONTEXT_SOURCE } from "../../../capability/craft-memory/ownership.ts";
+import { CODEBASE_OWNS } from "../../../capability/craft-codebase/ownership.ts";
 
 // Tool surfaces are a bounded projection over the canonical tool catalog. The
 // registry owns only names and matching rules; execution remains in McpServer.
@@ -58,6 +59,10 @@ export const COMPONENT_SURFACES: Readonly<Record<string, RegExp>> = {
   // kernel implements but the same product serves. The shared context verbs are not part of
   // it: experience is not resolved through the context plane.
   "component-experience": EXPERIENCE_COMPONENT,
+  // Codebase is a read-only structural capability, not a cognitive Context
+  // member.  Its standalone product exposes only explicit activation, index,
+  // and snapshot-pinned query tools.
+  "component-codebase": CODEBASE_OWNS,
 };
 
 /**

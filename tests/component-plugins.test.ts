@@ -14,14 +14,15 @@ import { MCP_PRODUCT_NAMES, productSurfaceOf, resolveMcpProductMode } from "../s
 import { RELEASE_PRODUCTS } from "../src/release-catalog.ts";
 
 const components = RELEASE_PRODUCTS.map((product) => product.name);
-const internalComponentSurfaces = ["component-context", "component-quality", "component-knowledge", "component-memory", "component-capability", "component-skill-quality", "component-experience"] as const;
+const internalComponentSurfaces = ["component-context", "component-quality", "component-knowledge", "component-memory", "component-capability", "component-skill-quality", "component-experience", "component-codebase"] as const;
 
 test("public MCP products resolve only maintained install products", () => {
-  assert.deepEqual(MCP_PRODUCT_NAMES, ["full", "knowledge", "memory", "experience"]);
+  assert.deepEqual(MCP_PRODUCT_NAMES, ["full", "knowledge", "memory", "experience", "codebase"]);
   assert.equal(productSurfaceOf("full"), "syscall");
   assert.equal(productSurfaceOf("knowledge"), "component-knowledge-daily");
   assert.equal(productSurfaceOf("memory"), "component-memory-daily");
   assert.equal(productSurfaceOf("experience"), "component-experience-daily");
+  assert.equal(productSurfaceOf("codebase"), "component-codebase");
   assert.equal(resolveMcpProductMode([], {}), "syscall");
   assert.equal(resolveMcpProductMode(["--surface", "component-memory"], {}), "component-memory");
   assert.equal(resolveMcpProductMode([], { CRAFT_MCP_PRODUCT: "memory" }), "component-memory-daily");
@@ -45,6 +46,7 @@ test("internal component surfaces remain bounded while only three cognition prod
     "component-capability": "craft_capability_search",
     "component-skill-quality": "craft_evaluation_run_record",
     "component-experience": "craft_experience_observe",
+    "component-codebase": "craft_codebase_status",
   } as const;
   for (const [surface, tool] of Object.entries(expected)) {
     const names = surfaceToolNames(surface);
@@ -72,6 +74,7 @@ test("surface registry keeps generic quality and every bounded projection determ
   assert.equal(componentForSurface("component-memory-daily"), "memory");
   assert.equal(componentForSurface("component-experience"), "experience");
   assert.equal(componentForSurface("component-experience-daily"), "experience");
+  assert.equal(componentForSurface("component-codebase"), undefined);
   assert.equal(componentForSurface("component-context"), undefined);
   assert.equal(domainSurfaceOf("craft_capability_search"), "governance");
   assert.equal(domainSurfaceOf("craft_evaluation_run_record"), "evaluation");
@@ -106,6 +109,7 @@ test("component plugin manifests use public MCP products rather than internal su
     assert.equal(manifest.name, name);
     assert.equal(manifest.version, VERSION);
     if (["craft-knowledge", "craft-memory", "craft-experience"].includes(name)) assert.equal(manifest.hooks, "./hooks/codex-hooks.json");
+    if (name === "craft-codebase") assert.equal(manifest.hooks, undefined);
     const product = name === "craft" ? "full" : name === "craft-experience" ? "experience" : name.slice(6);
     assert.deepEqual(server.args, ["dist/plugin/craft-mcp.cjs", "--product", product]);
   }

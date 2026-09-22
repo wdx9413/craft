@@ -33,7 +33,7 @@ async function smoke(name: string): Promise<void> {
     const tools = result[1].result.tools as Array<{ name: string }>;
     assert.equal(result[0].result.serverInfo.version, "0.12.37");
     assert(tools.length > 0);
-    const expectedDailyTool = ["craft-knowledge", "craft-memory", "craft-experience"].includes(name) ? "craft_component_readiness_get" : "craft_info";
+    const expectedDailyTool = name === "craft-codebase" ? "craft_codebase_status" : ["craft-knowledge", "craft-memory", "craft-experience"].includes(name) ? "craft_component_readiness_get" : "craft_info";
     assert(tools.some((tool) => tool.name === expectedDailyTool));
     assert(!tools.some((tool) => tool.name === "craft_verified_work_loop_prepare"));
     if (name === "craft-experience") assert(!tools.some((tool) => /^craft_workflow_(?:evolution|dag)_/u.test(tool.name)));

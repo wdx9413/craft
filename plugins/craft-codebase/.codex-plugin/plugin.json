@@ -1,0 +1,38 @@
+{
+  "name": "craft-codebase",
+  "version": "0.12.37",
+  "description": "Snapshot-pinned, read-only structural repository analysis for AI hosts.",
+  "author": {
+    "name": "wdx9413",
+    "url": "https://github.com/wdx9413"
+  },
+  "homepage": "https://github.com/wdx9413/craft",
+  "repository": "https://github.com/wdx9413/craft",
+  "license": "MIT",
+  "keywords": [
+    "codebase",
+    "repository",
+    "impact-analysis",
+    "mcp"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Craft Codebase",
+    "shortDescription": "Explicit, read-only codebase structure and impact analysis.",
+    "longDescription": "Build a checkpoint-pinned structural index only when explicitly requested, then query symbols, callers, and candidate impact without reading source bodies into context or granting write authority.",
+    "developerName": "wdx9413",
+    "category": "Developer Tools",
+    "brandColor": "#000000",
+    "composerIcon": "./assets/craft-icon.svg",
+    "logo": "./assets/craft-icon.svg",
+    "capabilities": [
+      "Explicit codebase activation",
+      "Snapshot-pinned structural index",
+      "Static callers and candidate impact"
+    ],
+    "defaultPrompt": [
+      "Activate read-only codebase analysis for the declared workspace, build a checkpoint-pinned index, then inspect the requested symbol or candidate impact."
+    ]
+  }
+}

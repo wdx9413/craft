@@ -9,8 +9,8 @@ import { CRAFT_RELEASE_VERSION } from "./version.ts";
  * new internal kernel from accidentally becoming a public install surface.
  */
 export type ReleaseProduct = {
-  readonly name: "craft" | "craft-knowledge" | "craft-memory" | "craft-experience";
-  readonly surface: "full" | "component-knowledge-daily" | "component-memory-daily" | "component-experience-daily";
+  readonly name: "craft" | "craft-knowledge" | "craft-memory" | "craft-experience" | "craft-codebase";
+  readonly surface: "full" | "component-knowledge-daily" | "component-memory-daily" | "component-experience-daily" | "component-codebase";
   readonly hookMember?: "knowledge" | "memory" | "experience";
   readonly category: "Productivity" | "Developer Tools";
   readonly external_marketplace: boolean;
@@ -21,6 +21,7 @@ export const RELEASE_PRODUCTS: readonly ReleaseProduct[] = [
   { name: "craft-knowledge", surface: "component-knowledge-daily", hookMember: "knowledge", category: "Productivity", external_marketplace: true },
   { name: "craft-memory", surface: "component-memory-daily", hookMember: "memory", category: "Productivity", external_marketplace: true },
   { name: "craft-experience", surface: "component-experience-daily", hookMember: "experience", category: "Developer Tools", external_marketplace: true },
+  { name: "craft-codebase", surface: "component-codebase", category: "Developer Tools", external_marketplace: true },
 ];
 
 /** Compatibility data may be migrated once, but is never an installable product. */
