@@ -53,7 +53,7 @@ DeepSeek Harness supplies the visual grammar: quiet blue-neutral surfaces, hairl
 - **Memorable signature:** A restrained three-column workbench around a single compact composer, rendered with translucent hairlines rather than card-heavy panels.
 - **Restraint:** Tables, forms, activity and destructive actions use familiar product controls; no visual treatment may obscure execution state.
 - **Anti-references:** Marketing gradients, oversized rounded cards and saturated blue-as-brand treatments are deliberately excluded.
-- **Token ownership/runtime mapping:** `studio/app.css` is canonical (Model B). The frontmatter mirrors `--bg*`, `--text*`, `--accent`, `--r*`, `--hair`, `--shadow*` and scrollbar tokens. `app.css` is served unchanged by `src/workbench-server.ts`; desktop packaging copies the same folder through `scripts/package-desktop.ts`.
+- **Token ownership/runtime mapping:** `workbench/app.css` is canonical (Model B). The frontmatter mirrors `--bg*`, `--text*`, `--accent`, `--r*`, `--hair`, `--shadow*` and scrollbar tokens. `app.css` is served unchanged by `core/workbench-server.ts`; the Tauri sidecar preparation copies that same workbench through `desktop/scripts/prepare-sidecar.mjs`.
 
 ## Colors
 

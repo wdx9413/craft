@@ -3,11 +3,11 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { ReleaseQualificationKernel } from "../src/release-qualification.ts";
-import { CraftService } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
-import { UncertaintyPolicyKernel } from "../src/uncertainty-policy.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { ReleaseQualificationKernel } from "../core/release-qualification.ts";
+import { CraftService } from "../core/service.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { UncertaintyPolicyKernel } from "../core/uncertainty-policy.ts";
 
 async function fixture() { const store = await new CraftStore(craftPaths(mkdtempSync(join(tmpdir(), "craft-121-")))).open(); store.create("evidence", "confirmed", { confidence: "confirmed" }); store.create("evidence", "bounded", { confidence: "bounded" }); store.create("evidence", "bad", { confidence: "unverified" }); return { store, uncertainty: new UncertaintyPolicyKernel(store), qualification: new ReleaseQualificationKernel(store) }; }
 

@@ -4,10 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { ProcedureDefinitionStore } from "../capability/craft-experience/procedure-definition.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
-import { McpServer } from "../src/mcp.ts";
-import { CraftService } from "../src/service.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { McpServer } from "../core/mcp.ts";
+import { CraftService } from "../core/service.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-procedure-automation-"));

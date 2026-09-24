@@ -1,6 +1,6 @@
 /** Immutable, evidence-addressed execution receipt accepted only by the local evaluation adapter. */
-import type { JsonObject } from "../src/infrastructure/store.ts";
-import { object, text } from "../src/validation.ts";
+import type { JsonObject } from "../core/infrastructure/store.ts";
+import { object, text } from "../core/validation.ts";
 
 export const VERIFIED_EVALUATION_RECEIPT_KIND = "craft.engineering-evaluation.v1";
 

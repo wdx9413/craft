@@ -4,11 +4,11 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { McpServer } from "../src/mcp.ts";
-import { CraftService } from "../src/service.ts";
-import { publishSkill } from "../src/skill-publisher.ts";
-import { CraftStore } from "../src/infrastructure/store.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { McpServer } from "../core/mcp.ts";
+import { CraftService } from "../core/service.ts";
+import { publishSkill } from "../core/skill-publisher.ts";
+import { CraftStore } from "../core/infrastructure/store.ts";
 
 const digest = (value: string): string => createHash("sha256").update(value).digest("hex");
 

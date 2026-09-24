@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { classifyComplexity, createBudgetState, estimatePromptTokens, estimateTokens, remainingTokens, routeModel, spendTokens, truncateToBudget } from "../src/token-budget.ts";
+import { classifyComplexity, createBudgetState, estimatePromptTokens, estimateTokens, remainingTokens, routeModel, spendTokens, truncateToBudget } from "../core/token-budget.ts";
 
 test("estimateTokens never returns zero and handles CJK", () => {
   assert.equal(estimateTokens(""), 1);

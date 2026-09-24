@@ -15,9 +15,9 @@
  *     silently copy files.
  */
 import { resolve } from "node:path";
-import { craftPaths, ensureLayout } from "../src/infrastructure/paths.ts";
-import { CraftStore, SCHEMA_VERSION } from "../src/infrastructure/store.ts";
-import { applyMigrations, backupDatabase, MIGRATIONS } from "../src/infrastructure/store-migrations.ts";
+import { craftPaths, ensureLayout } from "../core/infrastructure/paths.ts";
+import { CraftStore, SCHEMA_VERSION } from "../core/infrastructure/store.ts";
+import { applyMigrations, backupDatabase, MIGRATIONS } from "../core/infrastructure/store-migrations.ts";
 
 const args = new Set(process.argv.slice(2));
 const dryRun = args.has("--dry-run");

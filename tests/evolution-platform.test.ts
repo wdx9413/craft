@@ -4,10 +4,10 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { McpServer } from "../src/mcp.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftService } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
+import { McpServer } from "../core/mcp.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftService } from "../core/service.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 
 function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
 

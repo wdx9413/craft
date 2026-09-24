@@ -3,9 +3,9 @@ import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftService } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftService } from "../core/service.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 
 test("promotion separates cost from duration and is required before a Workflow becomes verified", async () => {
   const root = join(tmpdir(), `craft-v097-promotion-${process.pid}-${Date.now()}`);

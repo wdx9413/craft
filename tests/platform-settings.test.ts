@@ -3,13 +3,13 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir, tmpdir } from "node:os";
-import { craftPaths, dataRoot } from "../src/infrastructure/paths.ts";
-import { defaultSettings, loadSettings, loadSettingsSync, normalizeSettings, publicSettings, resetSettings, resetSettingsSync, saveSettings } from "../src/settings.ts";
-import { CraftStore } from "../src/infrastructure/store.ts";
-import { CraftService } from "../src/service.ts";
-import { UsageKernel } from "../src/usage.ts";
-import { McpServer } from "../src/mcp.ts";
-import { WorkbenchWebApp } from "../src/workbench-server.ts";
+import { craftPaths, dataRoot } from "../core/infrastructure/paths.ts";
+import { defaultSettings, loadSettings, loadSettingsSync, normalizeSettings, publicSettings, resetSettings, resetSettingsSync, saveSettings } from "../core/settings.ts";
+import { CraftStore } from "../core/infrastructure/store.ts";
+import { CraftService } from "../core/service.ts";
+import { UsageKernel } from "../core/usage.ts";
+import { McpServer } from "../core/mcp.ts";
+import { WorkbenchWebApp } from "../core/workbench-server.ts";
 
 test("settings persist, validate, and support a relocatable data root", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-settings-"));

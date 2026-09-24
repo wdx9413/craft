@@ -1,4 +1,4 @@
-import { analyzeUntrustedContent } from "../src/untrusted-parser.ts";
+import { analyzeUntrustedContent } from "../core/untrusted-parser.ts";
 
 let input = "";
 process.stdin.setEncoding("utf8");

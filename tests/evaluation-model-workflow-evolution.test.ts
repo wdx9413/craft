@@ -4,11 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { EvaluationModelProfileKernel } from "../capability/craft-experience/evaluation-model-profile.ts";
-import { McpServer, surfaceToolNames } from "../src/mcp.ts";
-import { PROVIDER_CATALOG } from "../src/model-gateway.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftService } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
+import { McpServer, surfaceToolNames } from "../core/mcp.ts";
+import { PROVIDER_CATALOG } from "../core/model-gateway.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftService } from "../core/service.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-v01224-")); const store = await new CraftStore(craftPaths(root)).open();

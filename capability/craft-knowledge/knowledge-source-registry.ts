@@ -19,10 +19,10 @@ import { randomUUID } from "node:crypto";
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
-import type { CraftStore, JsonObject } from "../../src/infrastructure/store.ts";
-import { noCredentialAssignment, parseScope, text } from "../../src/validation.ts";
-import { stableDigest, payload } from "../../src/digest.ts";
-import { scopeEnvelope } from "../../src/scope-policy.ts";
+import type { CraftStore, JsonObject } from "../../core/infrastructure/store.ts";
+import { noCredentialAssignment, parseScope, text } from "../../core/validation.ts";
+import { stableDigest, payload } from "../../core/digest.ts";
+import { scopeEnvelope } from "../../core/scope-policy.ts";
 
 const SOURCE_KINDS = new Set(["evidence_wiki", "serena", "kefu_wiki", "project_note", "readme", "custom"]);
 const TRUSTS = new Set(["untrusted", "bounded", "verified"]);

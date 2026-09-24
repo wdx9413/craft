@@ -3,11 +3,11 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { InternalHostDriver } from "../src/internal-host-driver.ts";
-import { defineProvider } from "../src/model-gateway.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftStore } from "../src/infrastructure/store.ts";
-import { executeSubagent, planSubagentExecution } from "../src/subagent-execution.ts";
+import { InternalHostDriver } from "../core/internal-host-driver.ts";
+import { defineProvider } from "../core/model-gateway.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftStore } from "../core/infrastructure/store.ts";
+import { executeSubagent, planSubagentExecution } from "../core/subagent-execution.ts";
 
 /**
  * P0-3: a Sub-agent is an execution body, not only a governance record.

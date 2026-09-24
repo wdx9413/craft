@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-import { CraftStore } from "../src/infrastructure/store.ts";
-import { CraftService } from "../src/service.ts";
-import { CodexHookBridge, type CodexHookMember } from "../src/codex-hook-bridge.ts";
+import { CraftStore } from "../core/infrastructure/store.ts";
+import { CraftService } from "../core/service.ts";
+import { CodexHookBridge, type CodexHookMember } from "../core/codex-hook-bridge.ts";
 
 function member(argv: readonly string[]): CodexHookMember {
   const index = argv.indexOf("--member"); const value = index < 0 ? null : argv[index + 1];

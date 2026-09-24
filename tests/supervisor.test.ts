@@ -4,10 +4,10 @@ import { createServer, request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { atomicPrivateJson, craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftService } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
-import { assertSupervisorOwner, LocalSupervisor, SupervisorClient } from "../src/supervisor.ts";
+import { atomicPrivateJson, craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftService } from "../core/service.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { assertSupervisorOwner, LocalSupervisor, SupervisorClient } from "../core/supervisor.ts";
 
 async function fixture(name: string) { const root = join(tmpdir(), `craft-supervisor-${name}-${process.pid}-${Date.now()}`); const paths = craftPaths(root); const store = await new CraftStore(paths).open(); const service = new CraftService(store); return { root, paths, store, service }; }
 function raw(url: string, method: string, token: string, body: string): Promise<{ status: number; value: JsonObject }> { return new Promise((resolve, reject) => { const data = Buffer.from(body); const req = request(url, { method, headers: { authorization: `Bearer ${token}`, "content-length": data.length } }, (res) => { const chunks: Buffer[] = []; res.on("data", (chunk: Buffer) => chunks.push(chunk)); res.on("end", () => { try { resolve({ status: Number(res.statusCode), value: JSON.parse(Buffer.concat(chunks).toString("utf8")) as JsonObject }); } catch (error) { reject(error); } }); }); req.once("error", reject); req.end(data); }); }

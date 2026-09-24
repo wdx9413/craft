@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftStore, SCHEMA_VERSION } from "../src/infrastructure/store.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftStore, SCHEMA_VERSION } from "../core/infrastructure/store.ts";
 
 async function fixture(): Promise<{ root: string; store: CraftStore }> {
   const root = join(tmpdir(), `craft-store-${process.pid}-${Date.now()}-${Math.random()}`);

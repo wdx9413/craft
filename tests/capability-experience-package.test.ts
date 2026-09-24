@@ -11,15 +11,15 @@ import {
 import { EvaluationModelProfileKernel } from "../capability/craft-experience/evaluation-model-profile.ts";
 import { ExperienceLedgerKernel } from "../capability/craft-experience/experience-ledger.ts";
 import { WorkflowEvolutionKernel } from "../capability/craft-experience/workflow-evolution.ts";
-import { CRAFT_CAPABILITIES } from "../src/capability-catalog.ts";
-import { buildCapabilityRegistry, CORE_KERNELS, type CraftCapability } from "../src/capability-protocol.ts";
-import { CraftStore } from "../src/infrastructure/store.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { PROVIDER_CATALOG } from "../src/model-gateway.ts";
-import { CraftService } from "../src/service.ts";
-import { ACTIVE_TOOLS } from "../src/interfaces/mcp-server.ts";
-import { surfaceToolNames } from "../src/mcp.ts";
-import { COMPONENT_SURFACES } from "../src/interfaces/mcp/surface-registry.ts";
+import { CRAFT_CAPABILITIES } from "../core/capability-catalog.ts";
+import { buildCapabilityRegistry, CORE_KERNELS, type CraftCapability } from "../core/capability-protocol.ts";
+import { CraftStore } from "../core/infrastructure/store.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { PROVIDER_CATALOG } from "../core/model-gateway.ts";
+import { CraftService } from "../core/service.ts";
+import { ACTIVE_TOOLS } from "../core/interfaces/mcp-server.ts";
+import { surfaceToolNames } from "../core/mcp.ts";
+import { COMPONENT_SURFACES } from "../core/interfaces/mcp/surface-registry.ts";
 
 /** The environment the core contributes, i.e. everything a capability is allowed to require. */
 async function fixture() {

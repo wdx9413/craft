@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
-import { canonicalJson, digestJson, payload, stableDigest } from "../src/digest.ts";
+import { canonicalJson, digestJson, payload, stableDigest } from "../core/digest.ts";
 
 /** What the digest of a string is, computed without going through the module under test. */
 const sha256Of = (text: string): string => `sha256:${createHash("sha256").update(text).digest("hex")}`;

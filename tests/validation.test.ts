@@ -12,7 +12,7 @@ import {
   sortedUniqueList,
   text,
   uniqueList,
-} from "../src/validation.ts";
+} from "../core/validation.ts";
 
 /**
  * The shared validators, which had no test of their own.
@@ -90,7 +90,7 @@ test("v0.12.43 records why stateful-compute keeps its own stricter strings", asy
   // that keeps the recorded reason honest: `stateful-compute.ts` throws for `required: true` with
   // an empty array, and `sortedUniqueList` does not. If that module is ever migrated, this test
   // fails and the migration has to be a deliberate behaviour change.
-  const source = await import("node:fs/promises").then((fs) => fs.readFile(new URL("../src/stateful-compute.ts", import.meta.url), "utf8"));
+  const source = await import("node:fs/promises").then((fs) => fs.readFile(new URL("../core/stateful-compute.ts", import.meta.url), "utf8"));
   assert.match(source, /function strings\(value: unknown, name: string, required = false\)/u);
   assert.match(source, /required && !result\.length/u);
   // And the shared one does not carry that guard, so the two cannot have been the same function.
@@ -142,7 +142,7 @@ test("v0.12.43 keeps the shared helpers from widening what a caller refuses", as
   // true. `guided-work.ts` matches a different pattern with a different message, and
   // `project-knowledge.ts` guards four terms instead of six and returns nothing.
   const read = (name: string) => import("node:fs/promises").then((fs) => fs.readFile(new URL(`../${name}`, import.meta.url), "utf8"));
-  const guided = await read("src/guided-work.ts");
+  const guided = await read("core/guided-work.ts");
   assert.match(guided, /function noSecret\(value: string, name: string\): string/u);
   assert.match(guided, /sensitive assignments/u);
   const project = await read("capability/craft-knowledge/project-knowledge.ts");

@@ -3,12 +3,12 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { defaultHooks } from "../src/hooks.ts";
-import { McpServer } from "../src/mcp.ts";
-import { MetricsKernel, usageTokens } from "../src/metrics.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftService } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
+import { defaultHooks } from "../core/hooks.ts";
+import { McpServer } from "../core/mcp.ts";
+import { MetricsKernel, usageTokens } from "../core/metrics.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftService } from "../core/service.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 
 const ISO = (offsetMs: number) => new Date(Date.parse("2026-01-01T00:00:00.000Z") + offsetMs).toISOString();
 

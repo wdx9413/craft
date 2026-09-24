@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { getBrowserInvocation, openBrowser, type BrowserSpawner } from "../src/browser.ts";
+import { getBrowserInvocation, openBrowser, type BrowserSpawner } from "../core/browser.ts";
 
 test("browser invocation uses the native opener on each desktop platform", () => {
   assert.deepEqual(getBrowserInvocation("win32", "http://localhost"), { command: "cmd.exe", args: ["/c", "start", "", "http://localhost"] });

@@ -3,10 +3,10 @@ import assert from "node:assert/strict";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CraftStore } from "../src/infrastructure/store.ts";
-import { McpTaskKernel } from "../src/mcp-tasks.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftService } from "../src/service.ts";
+import { CraftStore } from "../core/infrastructure/store.ts";
+import { McpTaskKernel } from "../core/mcp-tasks.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftService } from "../core/service.ts";
 
 async function setup() {
   const root = await mkdtemp(join(tmpdir(), "craft-mcp-task-"));

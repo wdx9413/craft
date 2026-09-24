@@ -5,52 +5,52 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
-import { IntentCompilerKernel } from "../src/intent-compiler.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { IntentCompilerKernel } from "../core/intent-compiler.ts";
 import { ProjectKnowledgeKernel } from "../capability/craft-knowledge/project-knowledge.ts";
-import { RemoteRuntimeKernel } from "../src/remote-runtime.ts";
-import { TaskStateKernel } from "../src/task-state.ts";
-import { RuntimeAcceptanceKernel } from "../src/runtime-acceptance.ts";
-import { WorkflowDagKernel } from "../src/workflow-dag.ts";
-import { McpRegistryKernel } from "../src/mcp-registry.ts";
-import { createOidcJwksVerifier } from "../src/oidc-jwks.ts";
-import { A2AV1AdapterKernel } from "../src/a2a-v1-adapter.ts";
-import { SupplyChainAttestationKernel } from "../src/supply-chain-attestation.ts";
-import { InternalHostDriver } from "../src/internal-host-driver.ts";
-import { defineProvider } from "../src/model-gateway.ts";
-import type { ChatResult } from "../src/model-gateway.ts";
-import { WebOperationKernel } from "../src/web-operation.ts";
-import { CostLedgerKernel } from "../src/cost-ledger.ts";
-import { FeedbackLearningKernel } from "../src/feedback-learning.ts";
-import { V01226Runtime, defineAdapterManifest, importOpenApiDocument } from "../src/generic-adapter-runtime.ts";
-import { TraceKernel } from "../src/trace-kernel.ts";
-import { RuntimeTruthKernel } from "../src/runtime-truth-kernel.ts";
-import { standardizeTrace, toOtlpTrace, parseToolCalls, compactConversation, toolResultMessage, exportOtlp } from "../src/runtime-truth.ts";
-import { buildChatRequest as buildGatewayChatRequest, parseChatResponse as parseGatewayChatResponse } from "../src/model-gateway.ts";
-import { ActionGatewayKernel, AcceptanceGateKernel } from "../src/runtime-completion.ts";
+import { RemoteRuntimeKernel } from "../core/remote-runtime.ts";
+import { TaskStateKernel } from "../core/task-state.ts";
+import { RuntimeAcceptanceKernel } from "../core/runtime-acceptance.ts";
+import { WorkflowDagKernel } from "../core/workflow-dag.ts";
+import { McpRegistryKernel } from "../core/mcp-registry.ts";
+import { createOidcJwksVerifier } from "../core/oidc-jwks.ts";
+import { A2AV1AdapterKernel } from "../core/a2a-v1-adapter.ts";
+import { SupplyChainAttestationKernel } from "../core/supply-chain-attestation.ts";
+import { InternalHostDriver } from "../core/internal-host-driver.ts";
+import { defineProvider } from "../core/model-gateway.ts";
+import type { ChatResult } from "../core/model-gateway.ts";
+import { WebOperationKernel } from "../core/web-operation.ts";
+import { CostLedgerKernel } from "../core/cost-ledger.ts";
+import { FeedbackLearningKernel } from "../core/feedback-learning.ts";
+import { V01226Runtime, defineAdapterManifest, importOpenApiDocument } from "../core/generic-adapter-runtime.ts";
+import { TraceKernel } from "../core/trace-kernel.ts";
+import { RuntimeTruthKernel } from "../core/runtime-truth-kernel.ts";
+import { standardizeTrace, toOtlpTrace, parseToolCalls, compactConversation, toolResultMessage, exportOtlp } from "../core/runtime-truth.ts";
+import { buildChatRequest as buildGatewayChatRequest, parseChatResponse as parseGatewayChatResponse } from "../core/model-gateway.ts";
+import { ActionGatewayKernel, AcceptanceGateKernel } from "../core/runtime-completion.ts";
 import { ProjectBrainKernel } from "../capability/craft-knowledge/project-brain.ts";
-import { WorkSessionKernel } from "../src/work-session.ts";
-import { WorkbenchExperienceKernel } from "../src/workbench-experience.ts";
+import { WorkSessionKernel } from "../core/work-session.ts";
+import { WorkbenchExperienceKernel } from "../core/workbench-experience.ts";
 import { MemoryLedgerKernel } from "../capability/craft-memory/memory-ledger.ts";
-import { MemoryGovernanceKernel } from "../src/memory-governance.ts";
-import { ContextPlaneKernel } from "../src/context-plane.ts";
-import { DomainEvaluatorKernel } from "../src/domain-evaluator.ts";
-import { LocalRuntimeServiceKernel } from "../src/local-runtime-service.ts";
-import { ProjectBundleKernel } from "../src/project-bundle.ts";
-import { ReplayRunnerKernel } from "../src/replay-runner.ts";
-import { VerifiedAutonomousWorkKernel } from "../src/verified-autonomous-work.ts";
-import { kind as stateKind, StateWorkspaceKernel } from "../src/state-workspace.ts";
-import { TrustProfileKernel } from "../src/trust-profile.ts";
-import { WorkbenchWebApp } from "../src/workbench-server.ts";
-import { normalizeSettings, defaultSettings } from "../src/settings.ts";
-import { CapabilityConnectorKernel } from "../src/capability-connector.ts";
-import { LongTaskWorkerKernel } from "../src/long-task-worker.ts";
-import { HomeKernel } from "../src/home.ts";
-import { serveMcpHttp } from "../src/mcp-http.ts";
+import { MemoryGovernanceKernel } from "../core/memory-governance.ts";
+import { ContextPlaneKernel } from "../core/context-plane.ts";
+import { DomainEvaluatorKernel } from "../core/domain-evaluator.ts";
+import { LocalRuntimeServiceKernel } from "../core/local-runtime-service.ts";
+import { ProjectBundleKernel } from "../core/project-bundle.ts";
+import { ReplayRunnerKernel } from "../core/replay-runner.ts";
+import { VerifiedAutonomousWorkKernel } from "../core/verified-autonomous-work.ts";
+import { kind as stateKind, StateWorkspaceKernel } from "../core/state-workspace.ts";
+import { TrustProfileKernel } from "../core/trust-profile.ts";
+import { WorkbenchWebApp } from "../core/workbench-server.ts";
+import { normalizeSettings, defaultSettings } from "../core/settings.ts";
+import { CapabilityConnectorKernel } from "../core/capability-connector.ts";
+import { LongTaskWorkerKernel } from "../core/long-task-worker.ts";
+import { HomeKernel } from "../core/home.ts";
+import { serveMcpHttp } from "../core/mcp-http.ts";
 import { Server } from "node:http";
-import { LegacyKnowledgeMigrationKernel } from "../src/legacy-knowledge-migration.ts";
-import { HostRunKernel } from "../src/host-run.ts";
+import { LegacyKnowledgeMigrationKernel } from "../core/legacy-knowledge-migration.ts";
+import { HostRunKernel } from "../core/host-run.ts";
 
 const digest = (value: string) => `sha256:${createHash("sha256").update(value).digest("hex")}`;
 
@@ -411,7 +411,7 @@ test("runtime truth persistence covers defaults, idempotency and event validatio
 test("OS security defaults and receipt replay are covered", async () => {
   const f = await fixture("craft-os-remaining-");
   try {
-    const { OsSecurityKernel } = await import("../src/os-security.ts");
+    const { OsSecurityKernel } = await import("../core/os-security.ts");
     const os = new OsSecurityKernel(f.store);
     assert.equal((os.plan({ platform: "linux", workspace: f.root }).plan as JsonObject).status, "planned");
     const plan = os.plan({ plan_id: "p", platform: "linux", workspace: f.root }).plan as JsonObject;
@@ -492,21 +492,21 @@ test("memory governance covers conflict resolution, expiry and consolidation ide
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("service compatibility paths cover explicit studio nodes, claim evidence defaults and model normalization", async () => {
+test("service compatibility paths cover explicit workbench nodes, claim evidence defaults and model normalization", async () => {
   const f = await fixture("craft-service-remaining-");
   try {
-    const { CraftService } = await import("../src/service.ts");
+    const { CraftService } = await import("../core/service.ts");
     const service = new CraftService(f.store);
     await assert.rejects((service as unknown as { invokeInternalAction: (action: string, args: JsonObject) => Promise<JsonObject> }).invokeInternalAction("workspace_write", { task_id: "session-task", workspace: f.root, relative_path: "note.txt", content: "note" }), /approval/);
     await service.settingsUpdate({ models: [{ id: "configured", name: "Configured", protocol: "openai-compatible", baseUrl: "https://example.test/v1", model: "configured", apiKeyEnv: "CONFIGURED_KEY", supportsTools: false }] });
     const configuredService = new CraftService(f.store);
     assert.equal((configuredService.modelProviderList().providers as JsonObject[]).some((item) => item.provider === "configured"), true);
-    service.studioWorkflowSave({ workflow_id: "nodes", name: "Nodes", nodes: [{ id: "n", type: "action", side_effect: "read_only", depends_on: [] }] });
-    service.studioWorkflowSave({ workflow_id: "steps", name: "Steps", steps: [{ id: "s", type: "action" }] });
-    service.studioWorkflowSave({ workflow_id: "steps-complete", name: "Steps complete", steps: [{ id: "s", type: "action", side_effect: "read_only", action: "noop", depends_on: [] }] });
-    service.studioWorkflowCompatSave({ workflow_id: "compat", name: "Compat", steps: [{ id: "s", type: "action" }] });
-    service.studioWorkflowCompatSave({ workflow_id: "compat-inputs", name: "Compat inputs", description: "desc", inputs: [{ id: "x" }], steps: [] });
-    service.studioKnowledgeClaimSave({ claim_id: "studio-claim", kind: "fact", content: "candidate" });
+    service.workbenchWorkflowSave({ workflow_id: "nodes", name: "Nodes", nodes: [{ id: "n", type: "action", side_effect: "read_only", depends_on: [] }] });
+    service.workbenchWorkflowSave({ workflow_id: "steps", name: "Steps", steps: [{ id: "s", type: "action" }] });
+    service.workbenchWorkflowSave({ workflow_id: "steps-complete", name: "Steps complete", steps: [{ id: "s", type: "action", side_effect: "read_only", action: "noop", depends_on: [] }] });
+    service.workbenchWorkflowCompatSave({ workflow_id: "compat", name: "Compat", steps: [{ id: "s", type: "action" }] });
+    service.workbenchWorkflowCompatSave({ workflow_id: "compat-inputs", name: "Compat inputs", description: "desc", inputs: [{ id: "x" }], steps: [] });
+    service.workbenchKnowledgeClaimSave({ claim_id: "studio-claim", kind: "fact", content: "candidate" });
     service.capabilityProjection({ candidates: [], token_budget: 1 });
     service.durableRunRecover({ owner: "none" });
     await assert.rejects(service.adapterInstall({ manifest_path: join(f.root, "missing-adapter.json"), integrity: "sha256:missing" }));
@@ -650,22 +650,22 @@ test("v01226 adapter runtime hits both default and defensive alternatives", asyn
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("Workbench Studio routes are reachable through the shared service bridge", async () => {
-  const f = await fixture("craft-studio-routes-");
+test("Workbench routes are reachable through the shared service bridge", async () => {
+  const f = await fixture("craft-workbench-routes-");
   try {
-    const { CraftService } = await import("../src/service.ts");
-    const app = new WorkbenchWebApp(new CraftService(f.store), "secret", "http://127.0.0.1:4173", { studioDir: null });
+    const { CraftService } = await import("../core/service.ts");
+    const app = new WorkbenchWebApp(new CraftService(f.store), "secret", "http://127.0.0.1:4173", { workbenchDir: null });
     const req = (method: "GET" | "POST", path: string, body: unknown = {}) => app.handle({ method, path, token: "secret", body: JSON.stringify(body), origin: "http://127.0.0.1:4173" });
-    assert.equal(req("GET", "/api/studio/resources").status, 200);
-    assert.equal(req("POST", "/api/studio/resources").status, 404);
-    assert.notEqual(req("POST", "/api/studio/memory").status, 404);
-    assert.equal(req("GET", "/api/studio/memory").status, 404);
-    assert.notEqual(req("POST", "/api/studio/memory/missing/retire").status, 404);
-    assert.notEqual(req("POST", "/api/studio/knowledge/claims").status, 404);
-    assert.equal(req("GET", "/api/studio/knowledge/claims").status, 404);
-    assert.notEqual(req("POST", "/api/studio/workflows").status, 404);
-    assert.equal(req("GET", "/api/studio/workflows").status, 404);
-    const call = (body: unknown) => app.handleAsync({ method: "POST", path: "/api/studio/call", token: "secret", body: JSON.stringify(body), origin: "http://127.0.0.1:4173" });
+    assert.equal(req("GET", "/api/workbench/resources").status, 200);
+    assert.equal(req("POST", "/api/workbench/resources").status, 404);
+    assert.notEqual(req("POST", "/api/workbench/memory").status, 404);
+    assert.equal(req("GET", "/api/workbench/memory").status, 404);
+    assert.notEqual(req("POST", "/api/workbench/memory/missing/retire").status, 404);
+    assert.notEqual(req("POST", "/api/workbench/knowledge/claims").status, 404);
+    assert.equal(req("GET", "/api/workbench/knowledge/claims").status, 404);
+    assert.notEqual(req("POST", "/api/workbench/workflows").status, 404);
+    assert.equal(req("GET", "/api/workbench/workflows").status, 404);
+    const call = (body: unknown) => app.handleAsync({ method: "POST", path: "/api/workbench/call", token: "secret", body: JSON.stringify(body), origin: "http://127.0.0.1:4173" });
     assert.equal((await call({ tool: "not_craft" })).status, 422);
     assert.equal((await call({})).status, 422);
     assert.equal((await call({ tool: "craft_unknown" })).status, 422);
@@ -677,7 +677,7 @@ test("Workbench Studio routes are reachable through the shared service bridge", 
 test("small compatibility kernels exercise explicit invalid and default branches", async () => {
   const f = await fixture("craft-small-branches-");
   try {
-    const { OsSecurityKernel } = await import("../src/os-security.ts");
+    const { OsSecurityKernel } = await import("../core/os-security.ts");
     const os = new OsSecurityKernel(f.store);
     assert.throws(() => os.plan({ platform: "linux", workspace: f.root, network: "bad" }), /network/);
     assert.throws(() => os.plan({ platform: "linux", workspace: f.root, filesystem: "bad" }), /filesystem/);
@@ -779,7 +779,7 @@ test("remaining state, trust, org sync and model defaults are exercised", async 
     trust.record({ profile_id: "tp", scope: { task_class: "class", project_id: "project", capability_revision: "c", model_ref: "m", host_ref: "h" }, passed: 1, failed: 0, evidence_ids: ["ev"] });
     assert.equal(trust.list({}).count, 1);
     assert.equal(trust.list({ task_class: "class" }).count, 1);
-    const { OrgSyncKernel } = await import("../src/org-sync.ts");
+    const { OrgSyncKernel } = await import("../core/org-sync.ts");
     const org = new OrgSyncKernel(f.store);
     const prepared = org.prepare({ sync_id: "sync", workspace_id: "w" });
     const md = String((prepared.manifest as JsonObject).manifest_digest);
@@ -788,7 +788,7 @@ test("remaining state, trust, org sync and model defaults are exercised", async 
     const explicitDigest = String((preparedExplicit.manifest as JsonObject).manifest_digest);
     assert.equal(org.apply({ sync_id: "sync-explicit", base_digest: explicitDigest, current_digest: explicitDigest, tombstones: null }).status, "applied");
     f.store.create("usage_ledger", "usage-defaults", { input_tokens: null, output_tokens: undefined, cost_usd: 1 });
-    assert.equal(Number((new (await import("../src/cost-ledger.ts")).CostLedgerKernel(f.store).report() as JsonObject).total_cost_usd) >= 1, true);
+    assert.equal(Number((new (await import("../core/cost-ledger.ts")).CostLedgerKernel(f.store).report() as JsonObject).total_cost_usd) >= 1, true);
     const provider = defineProvider({ provider: "anthropic", label: "A", protocol: "anthropic", base_url: "https://example.test", api_key_env: "A_KEY", models: { standard: "a" } });
     const request = buildGatewayChatRequest(provider, { model: "a", messages: [{ role: "user", content: "x" }], tools: [] });
     assert.equal((request.body as JsonObject).system, undefined);
@@ -879,13 +879,13 @@ test("remaining fallback branches are exercised through bounded seams", async ()
     f.store.save("work_session", "session", { ...withoutBrainVersion, status: "running" });
     sessions.refresh({ session_id: "session" });
 
-    const { CraftService } = await import("../src/service.ts");
+    const { CraftService } = await import("../core/service.ts");
     const service = new CraftService(f.store);
     (service as unknown as { assertShadowWorkflowReadOnly: (workflow: JsonObject) => void }).assertShadowWorkflowReadOnly({});
     (service as unknown as { assertShadowWorkflowReadOnly: (workflow: JsonObject) => void }).assertShadowWorkflowReadOnly({ steps: [] });
     (service as unknown as { assertShadowWorkflowReadOnly: (workflow: JsonObject) => void }).assertShadowWorkflowReadOnly({ steps: [{}] });
     await assert.rejects((service as unknown as { invokeInternalAction: (action: string, args: JsonObject) => Promise<JsonObject> }).invokeInternalAction("workspace_write", { task_id: "session-task", workspace: f.root, relative_path: "note-approved.txt", content: "note", approval_ref: "approval" }), /approval/);
-    service.studioWorkflowCompatSave({ workflow_id: "compat-empty-steps", name: "Empty steps" });
+    service.workbenchWorkflowCompatSave({ workflow_id: "compat-empty-steps", name: "Empty steps" });
     const claim = f.store.create("knowledge_claim", "claim-null-evidence", { kind: "fact", content: "x", evidence_ids: null, status: "candidate" });
     assert.throws(() => service.knowledgeClaimReview({ claim_id: claim.id, status: "reviewed", reviewer: "r", reason: "r" }), /Evidence/);
     await service.settingsUpdate({ models: [{ id: "model", name: "Model", protocol: "openai-compatible", baseUrl: "https://model.example/v1", model: "model", apiKeyEnv: "CRAFT_FINAL_KEY", supportsTools: false }] });

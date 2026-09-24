@@ -3,11 +3,11 @@ import { mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { McpServer, SYSCALL_TOOLS, TOOL_REGISTRY, TOOLS, VERB_DEFAULT_OPERATION, surfaceToolNames } from "../src/mcp.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftService } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
-import { buildRegistry, catalogOf, findEntry, measureSurface, parseToolName, resolveEntry } from "../src/tool-plane.ts";
+import { McpServer, SYSCALL_TOOLS, TOOL_REGISTRY, TOOLS, VERB_DEFAULT_OPERATION, surfaceToolNames } from "../core/mcp.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftService } from "../core/service.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { buildRegistry, catalogOf, findEntry, measureSurface, parseToolName, resolveEntry } from "../core/tool-plane.ts";
 
 test("the registry is a lossless re-index of every legacy tool", () => {
   assert.equal(TOOL_REGISTRY.length, TOOLS.length);

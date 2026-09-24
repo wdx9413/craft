@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { CraftStore, type JsonObject } from "../../src/infrastructure/store.ts";
-import { stableDigest, payload } from "../../src/digest.ts";
+import { CraftStore, type JsonObject } from "../../core/infrastructure/store.ts";
+import { stableDigest, payload } from "../../core/digest.ts";
 
 const OUTCOMES = new Set(["passed", "failed", "inconclusive"]);
 const AXES = new Set(["context", "tools", "generation", "orchestration", "memory", "output"]);

@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { access, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { RELEASE_PRODUCTS } from "../../src/release-catalog.ts";
+import { RELEASE_PRODUCTS } from "../../core/release-catalog.ts";
 
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const pluginRoot = join(root, "plugins", "craft");

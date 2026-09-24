@@ -5,14 +5,14 @@ import { join } from "node:path";
 import test from "node:test";
 import { KnowledgeSourceRegistry } from "../capability/craft-knowledge/knowledge-source-registry.ts";
 import { MemoryLedgerKernel } from "../capability/craft-memory/memory-ledger.ts";
-import { ContextResolutionKernel } from "../src/context-resolution.ts";
-import { KeywordRetrievalPort, OpenAiCompatibleEmbeddingRetrievalPort } from "../src/retrieval-port.ts";
-import { McpServer } from "../src/mcp.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftService, VERSION } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
-import { VerifiedWorkLoopKernel } from "../src/verified-work-loop.ts";
-import { WorkRuntimeModeKernel } from "../src/work-runtime-mode.ts";
+import { ContextResolutionKernel } from "../core/context-resolution.ts";
+import { KeywordRetrievalPort, OpenAiCompatibleEmbeddingRetrievalPort } from "../core/retrieval-port.ts";
+import { McpServer } from "../core/mcp.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftService, VERSION } from "../core/service.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { VerifiedWorkLoopKernel } from "../core/verified-work-loop.ts";
+import { WorkRuntimeModeKernel } from "../core/work-runtime-mode.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-v1219-")); const store = await new CraftStore(craftPaths(root)).open();

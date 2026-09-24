@@ -6,13 +6,13 @@ import { tmpdir } from "node:os";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
-import { CraftStore } from "../src/infrastructure/store.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { contentTitle, MarkdownContentStore } from "../src/infrastructure/content-store.ts";
-import { CraftService } from "../src/application/craft-service.ts";
-import { ContentMigrationKernel } from "../src/content-migration.ts";
-import { MemoryConsolidationKernel } from "../src/memory-consolidation.ts";
-import { McpServer } from "../src/mcp.ts";
+import { CraftStore } from "../core/infrastructure/store.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { contentTitle, MarkdownContentStore } from "../core/infrastructure/content-store.ts";
+import { CraftService } from "../core/application/craft-service.ts";
+import { ContentMigrationKernel } from "../core/content-migration.ts";
+import { MemoryConsolidationKernel } from "../core/memory-consolidation.ts";
+import { McpServer } from "../core/mcp.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-content-store-"));

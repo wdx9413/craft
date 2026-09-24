@@ -3,11 +3,11 @@ import test from "node:test";
 import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CraftService } from "../src/service.ts";
-import { CraftStore } from "../src/infrastructure/store.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { resolveStandaloneContext } from "../src/cli.ts";
-import type { JsonObject } from "../src/infrastructure/store.ts";
+import { CraftService } from "../core/service.ts";
+import { CraftStore } from "../core/infrastructure/store.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { resolveStandaloneContext } from "../core/cli.ts";
+import type { JsonObject } from "../core/infrastructure/store.ts";
 
 /**
  * `craft run` used to hand the Host a hardcoded, empty context and call it a

@@ -3,15 +3,15 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { HookPlane } from "../src/hook-plane.ts";
-import { ownerOfTool } from "../src/capability-catalog.ts";
-import { buildCapabilityRegistry, CORE_KERNELS, type CraftCapability, type Hook, type HookContext } from "../src/capability-protocol.ts";
-import { CRAFT_CAPABILITIES } from "../src/capability-catalog.ts";
-import { CraftStore } from "../src/infrastructure/store.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { PROVIDER_CATALOG } from "../src/model-gateway.ts";
-import { CraftService } from "../src/service.ts";
-import { McpServer } from "../src/mcp.ts";
+import { HookPlane } from "../core/hook-plane.ts";
+import { ownerOfTool } from "../core/capability-catalog.ts";
+import { buildCapabilityRegistry, CORE_KERNELS, type CraftCapability, type Hook, type HookContext } from "../core/capability-protocol.ts";
+import { CRAFT_CAPABILITIES } from "../core/capability-catalog.ts";
+import { CraftStore } from "../core/infrastructure/store.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { PROVIDER_CATALOG } from "../core/model-gateway.ts";
+import { CraftService } from "../core/service.ts";
+import { McpServer } from "../core/mcp.ts";
 
 /**
  * The hook plane's real call site, and the three pieces of instrumentation the protocol owed.

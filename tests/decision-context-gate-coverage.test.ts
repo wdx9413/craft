@@ -3,9 +3,9 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { DecisionPointContextGate } from "../src/decision-context-gate.ts";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
+import { DecisionPointContextGate } from "../core/decision-context-gate.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-decision-context-gate-"));

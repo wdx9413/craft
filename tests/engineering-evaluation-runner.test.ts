@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { EngineeringEvaluationRunner, loadEngineeringEvaluationCases, validateEvaluationCommand, workspaceSnapshotDigest } from "../capability/engineering-evaluation-runner.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftStore } from "../src/infrastructure/store.ts";
-import { CraftService } from "../src/service.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftStore } from "../core/infrastructure/store.ts";
+import { CraftService } from "../core/service.ts";
 
 test("Engineering evaluation fixtures only admit declared Node argv arrays inside their fixture root", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-engineering-eval-fixture-"));

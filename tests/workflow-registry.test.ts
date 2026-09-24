@@ -3,8 +3,8 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import type { JsonObject } from "../src/infrastructure/store.ts";
-import { diffWorkflowCatalog, discoverWorkflows, isWorkflowFile, normalizeWorkflowDefinition, planWorkflowRetirement, describeWorkflow } from "../src/workflow-registry.ts";
+import type { JsonObject } from "../core/infrastructure/store.ts";
+import { diffWorkflowCatalog, discoverWorkflows, isWorkflowFile, normalizeWorkflowDefinition, planWorkflowRetirement, describeWorkflow } from "../core/workflow-registry.ts";
 
 test("normalizeWorkflowDefinition validates shape", () => {
   const ok = normalizeWorkflowDefinition({ id: "test.wf", version: 2, title: "Test", steps: [{ type: "command", command: ["echo", "hi"] }] });

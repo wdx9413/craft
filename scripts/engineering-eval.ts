@@ -4,11 +4,11 @@ import { mkdir } from "node:fs/promises";
 import { platform, versions } from "node:process";
 import { resolve } from "node:path";
 import { EngineeringEvaluationRunner } from "../capability/engineering-evaluation-runner.ts";
-import { digestJson } from "../src/digest.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftStore } from "../src/infrastructure/store.ts";
-import { CraftService } from "../src/service.ts";
-import { executeHostProcess } from "../src/host-driver.ts";
+import { digestJson } from "../core/digest.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftStore } from "../core/infrastructure/store.ts";
+import { CraftService } from "../core/service.ts";
+import { executeHostProcess } from "../core/host-driver.ts";
 
 const required = new Set(["model", "fixtures", "store", "archive", "timeout-ms", "output-limit", "trials"]);
 

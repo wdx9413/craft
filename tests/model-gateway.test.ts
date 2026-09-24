@@ -3,13 +3,13 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { beginLoop, budgetBand, chargeTurn, completeLoop, defineLoopLimits, failLoop, loopSummary, observeStep } from "../src/agent-loop.ts";
-import { InternalHostDriver, parseAction } from "../src/internal-host-driver.ts";
+import { beginLoop, budgetBand, chargeTurn, completeLoop, defineLoopLimits, failLoop, loopSummary, observeStep } from "../core/agent-loop.ts";
+import { InternalHostDriver, parseAction } from "../core/internal-host-driver.ts";
 import { PROVIDER_CATALOG, buildChatRequest, credentialStatus, createFetchTransport, defineProvider, parseChatResponse,
   providerFromConfig, publicProvider, publicModel, selectModel, specFromConfig, specsFromModels, unconfiguredTransport, type ChatRequest, type ChatResult,
-  type ModelProviderSpec, type ModelTransport } from "../src/model-gateway.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
+  type ModelProviderSpec, type ModelTransport } from "../core/model-gateway.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 
 const openaiSpec = (): ModelProviderSpec => defineProvider({ provider: "demo", label: "Demo", protocol: "openai-compatible",
   base_url: "https://example.test/v1", api_key_env: "DEMO_API_KEY",
@@ -80,7 +80,7 @@ test("user model configs produce provider specs and secret-free public views", (
 test("legacy episodic and semantic memory facade remains auditable and idempotent", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-memory-compat-"));
   const store = await new CraftStore(craftPaths(root)).open();
-  const service = new (await import("../src/service.ts")).CraftService(store);
+  const service = new (await import("../core/service.ts")).CraftService(store);
   try {
     const remembered = service.memoryConsolidationRemember({ memory_id: "episode-1", scope: "task:compat", content: "Observed a stable workflow", source: "test" });
     assert.equal((remembered.memory as JsonObject).consolidated, false);

@@ -3,9 +3,9 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftService } from "../src/service.ts";
-import { CraftStore } from "../src/infrastructure/store.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftService } from "../core/service.ts";
+import { CraftStore } from "../core/infrastructure/store.ts";
 
 test("service persists capabilities, tasks, feedback, artifacts, evidence, and versioned assets", async () => {
   const root = join(tmpdir(), `craft-service-${process.pid}-${Date.now()}`);

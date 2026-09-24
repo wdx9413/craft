@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { validateJsonSchema } from "../src/json-schema.ts";
+import { validateJsonSchema } from "../core/json-schema.ts";
 
 test("bounded JSON Schema validates nested objects, arrays, scalars, enums, and bounds", () => {
   const schema = { type: "object", required: ["name", "items"], additionalProperties: false, properties: { name: { type: "string", minLength: 2, maxLength: 5 }, items: { type: "array", minItems: 1, maxItems: 2, items: { type: "integer", minimum: 1, maximum: 3 } }, enabled: { type: "boolean" }, ratio: { type: "number" }, empty: { type: "null" }, mode: { type: "string", enum: ["a", "b"], const: "a" } } };

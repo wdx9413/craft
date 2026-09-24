@@ -1,5 +1,21 @@
 # Craft 分层与目录地图
 
+
+## 目录改名：src/ → core/，studio/ → workbench/
+
+两个顶层目录已按职责改名，路径与代码标识符同时更新：
+
+| 旧 | 新 | 说明 |
+| --- | --- | --- |
+| `src/` | `core/` | 内核、应用、领域、基础设施与协议入口的根 |
+| `studio/` | `workbench/` | 桌面 UI 资源（`index.html` / `app.css` / `app.js`） |
+
+随之更新的绑定：`tsconfig*.json` 的 include、`package.json` 的 `bin` / `files` / 覆盖率脚本、`tests/coverage-gates.json` 的模块路径、`scripts/ci/*` 的遍历根与豁免路径、`locateWorkbench()` 的查找目录、HTTP 路由 `/studio/*` → `/workbench/*` 与 `/api/studio/*` → `/api/workbench/*`。构建产物由 `dist/src/` 变为 `dist/core/`。
+
+**未改名的两类**：`studio_plugin` / `studio_skill` 是**持久化记录 kind**，改名会让既有数据库记录成为孤儿，因此保留；`CHANGELOG.md`、`docs/releases` 与 `docs/research` 中的历史路径是当时的记录，不追改。
+
+本文以下内容中的 `core/` 均指改名后的路径。
+
 本文记录当前代码的职责边界，不改变版本号或运行时协议。目录按“入口 → 应用 → 领域 → 基础设施”理解；历史导入路径仍由根目录兼容导出保留。
 
 ## 命名：路径里不写版本号
@@ -8,7 +24,7 @@
 
 此前每个版本会新增一个 `vNNNNN-*.ts` 模块并配一条 `test:vNNNNN` 脚本，于是文件名记录的是“哪个版本加的”而不是“这个模块做什么”，且版本号在发布后仍永久留在路径里。这些文件已按职责改名（例如 `v01236-verification.ts` → `verification-sensor.ts`、`v01211-runtime.ts` → `continuous-runtime.ts`）。
 
-`scripts/check-version.ts` 现在会把任何形如 `src/vNNNNN-*.ts` 的新文件判为构建失败，所以约定由门禁维持，而不是靠记忆。
+`scripts/check-version.ts` 现在会把任何形如 `core/vNNNNN-*.ts` 的新文件判为构建失败，所以约定由门禁维持，而不是靠记忆。
 
 ## 依赖方向由脚本强制
 
@@ -16,11 +32,11 @@
 
 未在下列豁免清单中的向上导入会直接失败。清单中的条目一旦不再出现也会失败，避免豁免比它描述的问题活得更久。
 
-当前豁免 1 处：`src/application/service-foundation.ts` 指向 `src/interfaces/canonical-tools.ts` 的依赖（后者转出 `mcp-server` 的工具表，需要先把该表移到中立模块）。
+当前豁免 1 处：`core/application/service-foundation.ts` 指向 `core/interfaces/canonical-tools.ts` 的依赖（后者转出 `mcp-server` 的工具表，需要先把该表移到中立模块）。
 
-审计同时覆盖 `capability/`（能力包目录）。**能力包按第 1 层计**：能力拥有内核、只装配自己拥有的内核，因此可以用 infrastructure 与领域内核，但**不得**导入 `application/` 或 `interfaces/`。理由是方向：能力由核心发现，若能力能反过来导入发现它的门面，依赖就双向成立，两边都无法单独替换。此前这些文件在 `src/` 下时本来就在审计范围内，若搬迁时不扩展遍历，把内核移出 `src/` 就会让它静默脱离检查——正是该脚本被重写时要堵住的“换个位置就让规则失效”。扩展后已用探针证伪：`capability/_probe-upward.ts` 导入 `src/interfaces/mcp-server.ts` 时审计报出该边并退出 1。
+审计同时覆盖 `capability/`（能力包目录）。**能力包按第 1 层计**：能力拥有内核、只装配自己拥有的内核，因此可以用 infrastructure 与领域内核，但**不得**导入 `application/` 或 `interfaces/`。理由是方向：能力由核心发现，若能力能反过来导入发现它的门面，依赖就双向成立，两边都无法单独替换。此前这些文件在 `core/` 下时本来就在审计范围内，若搬迁时不扩展遍历，把内核移出 `core/` 就会让它静默脱离检查——正是该脚本被重写时要堵住的“换个位置就让规则失效”。扩展后已用探针证伪：`capability/_probe-upward.ts` 导入 `core/interfaces/mcp-server.ts` 时审计报出该边并退出 1。
 
-此前豁免 5 处，其中 4 处已按清单自己写明的修法消除：`service-foundation.ts` 原先位于 `src/` 根，却导入 `application/coordinators/*` 四个 Coordinator。它只被 `src/application/craft-service.ts` 唯一导入，因此已迁入 `application/`；层级随之相等，那 4 条依赖不再构成向上导入，豁免条目也一并删除（而不是留到被报为 stale）。第 5 条指向 `interfaces/`，层级仍然更高，因此迁移后依然成立并保留。
+此前豁免 5 处，其中 4 处已按清单自己写明的修法消除：`service-foundation.ts` 原先位于 `src/` 根，却导入 `application/coordinators/*` 四个 Coordinator。它只被 `core/application/craft-service.ts` 唯一导入，因此已迁入 `application/`；层级随之相等，那 4 条依赖不再构成向上导入，豁免条目也一并删除（而不是留到被报为 stale）。第 5 条指向 `interfaces/`，层级仍然更高，因此迁移后依然成立并保留。
 
 ```text
 capability/                 能力包：拥有内核、声明归属、按协议被核心发现
@@ -53,27 +69,27 @@ interfaces/                 外部协议入口
   mcp/workspace-handlers.ts Workspace / Transaction handler 注册
 application/                用例与应用门面
   craft-service.ts          CraftService 兼容门面与跨域编排
-  service-foundation.ts     内核装配基座（原 src/ 根；迁入后 4 条 Coordinator 向上导入消失）
+  service-foundation.ts     内核装配基座（由 `src/` 根迁入；迁入后 4 条 Coordinator 向上导入消失）
   coordinators/             Work / Runtime / Evaluation / Workspace 应用上下文
   use-cases/                按领域安装的用例组（Adapter、Trace、Knowledge、Memory 等）
 domains/                    稳定业务内核的命名空间分组
   index.ts                  controlPlane / execution / evidence / knowledge / integration
 infrastructure/             持久化、路径和运行环境
   index.ts                  CraftStore / CraftPaths 入口
-  store.ts                  SQLite 存储内核（原 src/ 根）
-  store-migrations.ts       迁移表与备份（原 src/ 根）
-  paths.ts                  CraftPaths 布局（原 src/ 根）
+  store.ts                  SQLite 存储内核（由 `src/` 根迁入）
+  store-migrations.ts       迁移表与备份（由 `src/` 根迁入）
+  paths.ts                  CraftPaths 布局（由 `src/` 根迁入）
 mcp/                        共享协议契约
   tool-schema.ts            Tool 类型与参数 Schema 工厂（原 interfaces/mcp/ 下）
-根 src/*.ts                 现有领域内核与基础设施原语
+根 core/*.ts                 现有领域内核与基础设施原语
   capability-protocol.ts    进程内扩展协议（CraftCapability / Hook / runPhase）
   capability-catalog.ts     内置能力集，核心唯一命名能力的地方
 ```
 
 ## 能力包的装配规则
 
-`src/capability-protocol.ts` 定义能力是什么（名字、归属、`register`、可选上下文贡献、生命周期 hook），
-`src/capability-catalog.ts` 是核心**唯一**点名能力的地方，且只点 `CraftCapability` 描述符，不点内核。
+`core/capability-protocol.ts` 定义能力是什么（名字、归属、`register`、可选上下文贡献、生命周期 hook），
+`core/capability-catalog.ts` 是核心**唯一**点名能力的地方，且只点 `CraftCapability` 描述符，不点内核。
 
 `buildCapabilityRegistry(capabilities, core)` 里 `core` 是宿主进程自己贡献的内核（store、设置推导出的模型目录），
 在任何能力之前注册。存在这个参数是因为**能力不能拥有它运行的环境**：store 与模型目录在能力集确定之前就已决定，
@@ -89,8 +105,8 @@ mcp/                        共享协议契约
 （knowledge 侧 `installBuiltins`/`sourceRegister`/`sourceList`/`sourceTransition`，memory 侧
 `remember`/`transition`/`compatBind`/`get`），因此它既不属于 knowledge 包也不属于 memory 包。
 当前 v0.12.37 沿**成员边界**把它切成三块：Source 注册表进 knowledge 包、Ledger 进 memory 包、
-`src/context-resolution.ts` 留在核心（读取侧被三个产品共同投影，所以不属于任一成员）。
-memory 的派生信号原本是 `src/memory-wiring.ts` 的纯函数加门面薄包装，当前 v0.12.37 一并搬进包里成为
+`core/context-resolution.ts` 留在核心（读取侧被三个产品共同投影，所以不属于任一成员）。
+memory 的派生信号原本是 `core/memory-wiring.ts` 的纯函数加门面薄包装，当前 v0.12.37 一并搬进包里成为
 `memory.signals` 内核，因此那些族现在**可以**被声明。仍未被声明的是 `MemoryConsolidationKernel` 的四个族，
 以及由 `WorkbenchKernel` 服务的 `craft_memory_remember`/`_transition`——名字记在
 `capability/craft-memory/capability.ts` 里。
@@ -115,7 +131,7 @@ memory 的派生信号原本是 `src/memory-wiring.ts` 的纯函数加门面薄�
 `craft_knowledge_bootstrap_install` 是同一个 handler 的两个名字，旧字面量只匹配后一个，于是
 宿主能用一个名字 bootstrap 而不能用另一个。
 
-**关于根目录的实情。** 上面的层目录目前主要是入口与再导出，绝大多数实现仍在 `src/` 根下（约 168 个模块，层目录内约 36 个）。因此上表的含义是“导入方向规则”，不是“文件已经在这些目录里”。逐步迁移才刚开始，尚无时间表。
+**关于根目录的实情。** 上面的层目录目前主要是入口与再导出，绝大多数实现仍在 `core/` 根下（约 168 个模块，层目录内约 36 个）。因此上表的含义是“导入方向规则”，不是“文件已经在这些目录里”。逐步迁移才刚开始，尚无时间表。
 
 `store.ts`、`paths.ts` 与 `store-migrations.ts` 已迁入 `infrastructure/`。此前 `infrastructure/index.ts` 因此被列为再导出豁免：它转出的 `store.ts`、`paths.ts` 本是基础设施实现却位于根目录，于是按层排序会读成“向上导入”。三者移入后该入口只导入本层，**豁免已删除**。移动 `store.ts` 还暴露出 `store-migrations.ts` 的同类问题——`infrastructure/store.ts` 反向依赖根目录的它，被审计判为向上导入；它同样是纯持久化模块，因此一并下移，而不是新增一条豁免。
 
@@ -153,7 +169,7 @@ infrastructure（SQLite / Markdown / Trace archive / platform adapters）
 2. `craft-memory`、`craft-knowledge`、`craft-capability`、`craft-quality`、`craft-experience` 是能力投影，不应各自复制 Store、Policy、Trace 或 Eval。只读查询可以直接走组件 MCP；写入、发布和外部 effect 必须回到 Control Plane 与 Verified Work Loop。
 3. Capability Adapter 负责外部差异（MCP、Serena、Codex、Claude、向量服务），Core Kernel 负责不可绕过的事实、策略和证据。把共享内核搬进能力包只会造成第二套账本，不能因为“可插拔”而移动。
 
-当前仍需收敛的结构债务：`src/application/craft-service.ts` 约 4700 行，应按认知、运行、能力、质量四类 coordinator 渐进拆成薄门面；`service-foundation.ts → interfaces/canonical-tools.ts` 的单向依赖豁免应通过把工具目录移到中立 `mcp/tool-catalog` 消除；`distribution-and-first-run.ts` 应拆为 credential/config、readiness、protocol negotiation、platform probe 和 release plan 五个职责。只在每次拆分都能保持现有契约和测试证据时迁移，不能为了目录整齐复制实现。
+当前仍需收敛的结构债务：`core/application/craft-service.ts` 约 4700 行，应按认知、运行、能力、质量四类 coordinator 渐进拆成薄门面；`service-foundation.ts → interfaces/canonical-tools.ts` 的单向依赖豁免应通过把工具目录移到中立 `mcp/tool-catalog` 消除；`distribution-and-first-run.ts` 应拆为 credential/config、readiness、protocol negotiation、platform probe 和 release plan 五个职责。只在每次拆分都能保持现有契约和测试证据时迁移，不能为了目录整齐复制实现。
 
 ### 版本边界
 
@@ -165,11 +181,11 @@ infrastructure（SQLite / Markdown / Trace archive / platform adapters）
 | Schema/adapter version | `compiler_version`、`RUNTIME_VERSION`、manifest schema | 与产品版本解耦，只有契约变化才升级 |
 | Protocol version | MCP/A2A 的日期或协议号 | 由协议适配器声明，不能被当成 Craft 发布版本 |
 
-v0.12.34 已将产品发布号集中到 `src/version.ts`，并由发布门禁校验 CraftService、组件 package、Codex/Claude manifest、MCP serverInfo、Marketplace 和插件 bundle。Adapter/Compiler 使用独立的 Schema 版本，MCP/A2A 继续使用协议版本；历史模块注释只作为变更记录，不参与当前能力宣称。
+v0.12.34 已将产品发布号集中到 `core/version.ts`，并由发布门禁校验 CraftService、组件 package、Codex/Claude manifest、MCP serverInfo、Marketplace 和插件 bundle。Adapter/Compiler 使用独立的 Schema 版本，MCP/A2A 继续使用协议版本；历史模块注释只作为变更记录，不参与当前能力宣称。
 
 ## 兼容与拆分策略
 
-`src/service.ts` 与 `src/mcp.ts` 是稳定的薄兼容入口，真实实现分别位于 `src/application/craft-service.ts` 和 `src/interfaces/mcp-server.ts`。第三方继续使用旧路径不会失效；后续新增代码应从分层入口或具体领域模块导入，避免再把门面做成新的上帝模块。这两个文件，加上 `domains/index.ts`、`infrastructure/index.ts`，是审计脚本中按构造豁免的再导出入口。
+`core/service.ts` 与 `core/mcp.ts` 是稳定的薄兼容入口，真实实现分别位于 `core/application/craft-service.ts` 和 `core/interfaces/mcp-server.ts`。第三方继续使用旧路径不会失效；后续新增代码应从分层入口或具体领域模块导入，避免再把门面做成新的上帝模块。这两个文件，加上 `domains/index.ts`、`infrastructure/index.ts`，是审计脚本中按构造豁免的再导出入口。
 
 大型实现文件仍会按领域边界渐进拆分，每次拆分都通过类型检查、完整测试和适配器 smoke test 验证。MCP 的工具 Schema、Surface Registry 和 Runtime / Work / Evaluation / Workspace Handler 已从协议服务器中抽出；应用层也已建立四个 Coordinator 上下文，先集中依赖再逐步迁移编排方法，仍由同一个兼容分发入口承接。
 
@@ -181,7 +197,7 @@ v0.12.34 已将产品发布号集中到 `src/version.ts`，并由发布门禁校
 
 仍待拆分的是 `distribution-and-first-run.ts`：它同时含凭据解析、首次运行就绪、MCP 协议协商、隔离能力探测与分发计划五件事。
 
-拆分的前置——抽出共享校验助手——已部分完成。`src/validation.ts` 提供 `text`、`object`、`list`，从 129 个文件里移除了 158 份逐字重复的定义（`text` 122、`object` 35、`list` 1）。
+拆分的前置——抽出共享校验助手——已部分完成。`core/validation.ts` 提供 `text`、`object`、`list`，从 129 个文件里移除了 158 份逐字重复的定义（`text` 122、`object` 35、`list` 1）。
 
 但“各文件的副本签名并不一致”经实测只对了一半，而剩下的一半**不能**按名字合并：
 

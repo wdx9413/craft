@@ -3,11 +3,11 @@ import { readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { CodexHostKernel, executeCodex, type CodexExecutor } from "../src/codex-driver.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftService } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
-import { McpServer } from "../src/mcp.ts";
+import { CodexHostKernel, executeCodex, type CodexExecutor } from "../core/codex-driver.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftService } from "../core/service.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { McpServer } from "../core/mcp.ts";
 
 async function fixture(name: string, executor: CodexExecutor) {
   const root = join(tmpdir(), `craft-codex-${name}-${process.pid}-${Date.now()}`); const store = await new CraftStore(craftPaths(root)).open();

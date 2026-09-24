@@ -3,15 +3,15 @@ import { mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { McpServer } from "../src/mcp.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftService } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
-import { MCP_ASSESSED_REVISION, MCP_MIGRATION_STATUS, MCP_PROTOCOL_VERSIONS } from "../src/distribution-and-first-run.ts";
+import { McpServer } from "../core/mcp.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftService } from "../core/service.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { MCP_ASSESSED_REVISION, MCP_MIGRATION_STATUS, MCP_PROTOCOL_VERSIONS } from "../core/distribution-and-first-run.ts";
 import {
   MCP_REVISION_REQUIREMENTS, discoverResult, forwardCompatibility,
   normalizeResultType, outboundResult, pingPolicy, readRequestMeta
-} from "../src/mcp-forward-compat.ts";
+} from "../core/mcp-forward-compat.ts";
 
 async function server(t: { after: (fn: () => Promise<void>) => void }): Promise<McpServer> {
   const root = join(tmpdir(), `craft-v01241-mcp-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`);

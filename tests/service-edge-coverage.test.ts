@@ -3,35 +3,35 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { CraftService } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
+import { CraftService } from "../core/service.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
 
 test("service facades exercise defaults, compatibility views, and model validation", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-service-edge-"));
   const store = await new CraftStore(craftPaths(root)).open();
   const service = new CraftService(store);
   try {
-  assert.equal((service.studioResourceView() as JsonObject).version, "0.12.37");
-    assert.throws(() => service.studioResourceCatalogView({ kind: "unknown", limit: 1 }), /kind must be/);
-    assert.deepEqual((service.studioResourceCatalogView({ kind: "memory", limit: 2 }).items as unknown[]), []);
-    assert.deepEqual((service.studioResourceCatalogView({ kind: "workflows", limit: 2 }).runs as unknown[]), []);
-    assert.deepEqual((service.studioResourceCatalogView({ kind: "plugins", limit: 2 }).items as unknown[]), []);
-    assert.deepEqual((service.studioResourceCatalogView({ kind: "skills", limit: 2 }).items as unknown[]), []);
+  assert.equal((service.workbenchResourceView() as JsonObject).version, "0.12.37");
+    assert.throws(() => service.workbenchResourceCatalogView({ kind: "unknown", limit: 1 }), /kind must be/);
+    assert.deepEqual((service.workbenchResourceCatalogView({ kind: "memory", limit: 2 }).items as unknown[]), []);
+    assert.deepEqual((service.workbenchResourceCatalogView({ kind: "workflows", limit: 2 }).runs as unknown[]), []);
+    assert.deepEqual((service.workbenchResourceCatalogView({ kind: "plugins", limit: 2 }).items as unknown[]), []);
+    assert.deepEqual((service.workbenchResourceCatalogView({ kind: "skills", limit: 2 }).items as unknown[]), []);
 
-    const memory = service.studioMemorySave({ content: "temporary context", kind: "working" });
+    const memory = service.workbenchMemorySave({ content: "temporary context", kind: "working" });
     assert.equal((memory.candidate as JsonObject).status, "candidate");
-    const claim = service.studioKnowledgeClaimSave({ kind: "fact", content: "bounded fact" });
+    const claim = service.workbenchKnowledgeClaimSave({ kind: "fact", content: "bounded fact" });
     assert.equal((claim.claim as JsonObject).status, "candidate");
     const reviewSource = service.knowledgeSourceRegister({ source_id: "studio-review-source", kind: "custom", label: "studio review", scope_kind: "project", scope_id: "studio", locator: "offline://studio", content_digest: "sha256:studio", trust: "bounded", access: "read_only" }).source as JsonObject;
     const explicitEvidence = store.create("evidence", "studio-evidence", { source_id: reviewSource.id, source_type: "human", confidence: "bounded", claim: "checked" });
-    assert.equal((service.studioKnowledgeClaimSave({ kind: "fact", content: "evidence bound", evidence_ids: [explicitEvidence.id] }).claim as JsonObject).status, "candidate");
-    const workflow = service.studioWorkflowSave({ name: "placeholder" });
+    assert.equal((service.workbenchKnowledgeClaimSave({ kind: "fact", content: "evidence bound", evidence_ids: [explicitEvidence.id] }).claim as JsonObject).status, "candidate");
+    const workflow = service.workbenchWorkflowSave({ name: "placeholder" });
     assert.equal((workflow.workflow as JsonObject).lifecycle, "draft");
-    const workflowFromSteps = service.studioWorkflowSave({ name: "steps", steps: [{ id: "s" }] });
+    const workflowFromSteps = service.workbenchWorkflowSave({ name: "steps", steps: [{ id: "s" }] });
     assert.equal((workflowFromSteps.workflow as JsonObject).lifecycle, "draft");
-    assert.equal((service.studioWorkflowSave({ name: "bad", nodes: "nope" }).workflow as JsonObject).lifecycle, "draft");
-    assert.equal((service.studioWorkflowSave({ name: "nodes", nodes: [{ id: "n", type: "action", side_effect: "read_only", depends_on: [] }] }).workflow as JsonObject).lifecycle, "draft");
+    assert.equal((service.workbenchWorkflowSave({ name: "bad", nodes: "nope" }).workflow as JsonObject).lifecycle, "draft");
+    assert.equal((service.workbenchWorkflowSave({ name: "nodes", nodes: [{ id: "n", type: "action", side_effect: "read_only", depends_on: [] }] }).workflow as JsonObject).lifecycle, "draft");
 
     assert.throws(() => service.modelAdd({ id: "bad", name: "Bad", baseUrl: "ftp://model", model: "m", apiKeyEnv: "KEY" }), /http/);
     assert.throws(() => service.modelAdd({ id: "bad", name: "Bad", baseUrl: "https://model", model: "m", apiKeyEnv: "bad key" }), /environment/);

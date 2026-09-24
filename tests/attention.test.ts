@@ -12,11 +12,11 @@ import "./acceptance.test.ts";
 import "./acceptance-runner.test.ts";
 import "./acceptance-worker.test.ts";
 import "./domain-kit.test.ts";
-import { AttentionKernel } from "../src/attention.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftStore } from "../src/infrastructure/store.ts";
-import { CraftService } from "../src/service.ts";
-import { McpServer } from "../src/mcp.ts";
+import { AttentionKernel } from "../core/attention.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftStore } from "../core/infrastructure/store.ts";
+import { CraftService } from "../core/service.ts";
+import { McpServer } from "../core/mcp.ts";
 
 async function fixture() { const root = await mkdtemp(path.join(tmpdir(), "craft-attention-")); const store = await new CraftStore(craftPaths(root)).open(); return { store, kernel: new AttentionKernel(store) }; }
 

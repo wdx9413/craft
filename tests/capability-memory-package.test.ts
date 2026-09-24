@@ -8,16 +8,16 @@ import { MemoryLedgerKernel } from "../capability/craft-memory/memory-ledger.ts"
 import { MemorySignalsKernel } from "../capability/craft-memory/memory-signals-kernel.ts";
 import { MEMORY_COMPONENT, MEMORY_CONTEXT_SOURCE } from "../capability/craft-memory/ownership.ts";
 import { KnowledgeSourceRegistry } from "../capability/craft-knowledge/knowledge-source-registry.ts";
-import { CRAFT_CAPABILITIES } from "../src/capability-catalog.ts";
-import { buildCapabilityRegistry, CORE_KERNELS } from "../src/capability-protocol.ts";
-import { ContextResolutionKernel } from "../src/context-resolution.ts";
-import { CraftStore } from "../src/infrastructure/store.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { ACTIVE_TOOLS } from "../src/interfaces/mcp-server.ts";
-import { COMPONENT_SURFACES } from "../src/interfaces/mcp/surface-registry.ts";
-import { surfaceToolNames } from "../src/mcp.ts";
-import { PROVIDER_CATALOG } from "../src/model-gateway.ts";
-import { CraftService } from "../src/service.ts";
+import { CRAFT_CAPABILITIES } from "../core/capability-catalog.ts";
+import { buildCapabilityRegistry, CORE_KERNELS } from "../core/capability-protocol.ts";
+import { ContextResolutionKernel } from "../core/context-resolution.ts";
+import { CraftStore } from "../core/infrastructure/store.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { ACTIVE_TOOLS } from "../core/interfaces/mcp-server.ts";
+import { COMPONENT_SURFACES } from "../core/interfaces/mcp/surface-registry.ts";
+import { surfaceToolNames } from "../core/mcp.ts";
+import { PROVIDER_CATALOG } from "../core/model-gateway.ts";
+import { CraftService } from "../core/service.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-memory-package-"));

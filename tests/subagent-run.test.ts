@@ -3,10 +3,10 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { defineProvider } from "../src/model-gateway.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftService } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
+import { defineProvider } from "../core/model-gateway.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftService } from "../core/service.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 
 /**
  * The Sub-agent Run reached from the wire.
@@ -117,7 +117,7 @@ test("a Sub-agent Run is declared over MCP and never inherits write authority", 
   const f = await fixture();
   try {
     const operation = parent(f.service, { max_tokens: 20_000 });
-    const { McpServer } = await import("../src/mcp.ts");
+    const { McpServer } = await import("../core/mcp.ts");
     const server = new McpServer(f.service, "full");
     const listed = ((await server.handle({ id: 1, method: "tools/list" }))?.result as JsonObject)
       .tools as JsonObject[];

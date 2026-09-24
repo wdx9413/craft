@@ -3,13 +3,13 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { McpServer } from "../src/mcp.ts";
-import { AgentEvalLabKernel } from "../src/agent-eval-lab.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftService, VERSION } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
-import { WorkbenchWebApp } from "../src/workbench-server.ts";
-import { WorkCoordinatorKernel } from "../src/work-coordinator.ts";
+import { McpServer } from "../core/mcp.ts";
+import { AgentEvalLabKernel } from "../core/agent-eval-lab.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftService, VERSION } from "../core/service.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { WorkbenchWebApp } from "../core/workbench-server.ts";
+import { WorkCoordinatorKernel } from "../core/work-coordinator.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-native-runtime-")); await writeFile(join(root, "note.txt"), "one");

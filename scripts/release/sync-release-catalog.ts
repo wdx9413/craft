@@ -1,8 +1,8 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { RELEASE_PRODUCTS, externalDistributionContract, releaseManifest } from "../../src/release-catalog.ts";
-import { CRAFT_RELEASE_VERSION } from "../../src/version.ts";
+import { RELEASE_PRODUCTS, externalDistributionContract, releaseManifest } from "../../core/release-catalog.ts";
+import { CRAFT_RELEASE_VERSION } from "../../core/version.ts";
 
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 

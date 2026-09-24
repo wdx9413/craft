@@ -3,10 +3,10 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { HostSessionEventKernel } from "../src/host-session-events.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
-import { TraceKernel } from "../src/trace-kernel.ts";
+import { HostSessionEventKernel } from "../core/host-session-events.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { TraceKernel } from "../core/trace-kernel.ts";
 
 /**
  * Gap 5: can the harness be replaced without losing the session?

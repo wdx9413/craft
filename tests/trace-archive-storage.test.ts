@@ -3,14 +3,14 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { ObjectTraceArchiveStore, type TraceArchiveBundle, type TraceObjectBackend } from "../src/trace-archive-store.ts";
-import { TraceArchiveStorageKernel } from "../src/trace-archive-storage.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
-import { TraceKernel } from "../src/trace-kernel.ts";
-import { CraftService } from "../src/service.ts";
-import { McpServer } from "../src/mcp.ts";
-import { MaintenanceKernel } from "../src/maintenance.ts";
+import { ObjectTraceArchiveStore, type TraceArchiveBundle, type TraceObjectBackend } from "../core/trace-archive-store.ts";
+import { TraceArchiveStorageKernel } from "../core/trace-archive-storage.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { TraceKernel } from "../core/trace-kernel.ts";
+import { CraftService } from "../core/service.ts";
+import { McpServer } from "../core/mcp.ts";
+import { MaintenanceKernel } from "../core/maintenance.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-trace-archive-storage-"));

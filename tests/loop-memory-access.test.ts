@@ -3,12 +3,12 @@ import { mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { DEFAULT_INTERNAL_TOOLS, INTERNAL_ONLY_TOOLS } from "../src/internal-host-driver.ts";
-import { DEFAULT_INTERNAL_AUTHORIZATION, authorizedTools, classifyTool } from "../src/internal-tool-authorization.ts";
-import { TOOLS } from "../src/mcp.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftService } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
+import { DEFAULT_INTERNAL_TOOLS, INTERNAL_ONLY_TOOLS } from "../core/internal-host-driver.ts";
+import { DEFAULT_INTERNAL_AUTHORIZATION, authorizedTools, classifyTool } from "../core/internal-tool-authorization.ts";
+import { TOOLS } from "../core/mcp.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftService } from "../core/service.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 
 /**
  * B2: the wiring gap was that the loop could write memories but never read

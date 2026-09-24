@@ -4,9 +4,9 @@ import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftService } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftService } from "../core/service.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 
 test("trial-backed orchestration captures pinned routes, trace, evidence, cost, outcomes, and comparisons", async () => {
   const root = join(tmpdir(), `craft-orchestration-trial-${process.pid}-${Date.now()}`);

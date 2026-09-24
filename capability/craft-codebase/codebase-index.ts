@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { lstatSync, readFileSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
-import { stableDigest } from "../../src/digest.ts";
-import { CraftStore, type JsonObject } from "../../src/infrastructure/store.ts";
+import { stableDigest } from "../../core/digest.ts";
+import { CraftStore, type JsonObject } from "../../core/infrastructure/store.ts";
 
 const ANALYZER = "builtin-regex-static-v1";
 const SOURCE_EXTENSIONS = new Set(["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"]);

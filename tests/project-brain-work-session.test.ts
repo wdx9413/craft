@@ -3,14 +3,14 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftStore } from "../src/infrastructure/store.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftStore } from "../core/infrastructure/store.ts";
 import { ProjectBrainKernel } from "../capability/craft-knowledge/project-brain.ts";
-import { WorkSessionKernel } from "../src/work-session.ts";
-import { WorkbenchExperienceKernel } from "../src/workbench-experience.ts";
-import { LongTaskWorkerKernel } from "../src/long-task-worker.ts";
-import { CraftService } from "../src/service.ts";
-import { McpServer } from "../src/mcp.ts";
+import { WorkSessionKernel } from "../core/work-session.ts";
+import { WorkbenchExperienceKernel } from "../core/workbench-experience.ts";
+import { LongTaskWorkerKernel } from "../core/long-task-worker.ts";
+import { CraftService } from "../core/service.ts";
+import { McpServer } from "../core/mcp.ts";
 
 async function fixture() { const root = await mkdtemp(path.join(tmpdir(), "craft-v129-")); const store = await new CraftStore(craftPaths(root)).open(); return { store, brain: new ProjectBrainKernel(store) }; }
 
@@ -72,7 +72,7 @@ test("Long Task checkpoints validate task-run ownership, expiry and malformed st
 test("legacy memory consolidation covers default scope, source, confidence and search filters", async () => {
   const f = await fixture();
   try {
-    const memory = new (await import("../src/memory-consolidation.ts")).MemoryConsolidationKernel(f.store);
+    const memory = new (await import("../core/memory-consolidation.ts")).MemoryConsolidationKernel(f.store);
     const first = memory.remember({ memory_id: "legacy-memory", content: "A bounded observation" });
     assert.equal((first.memory as Record<string, unknown>).scope, "task");
     assert.equal((first.memory as Record<string, unknown>).source, "work");

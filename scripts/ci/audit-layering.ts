@@ -71,9 +71,9 @@ const CAPABILITY_RANK = 1;
  * removed rather than left to excuse a problem that is gone.
  */
 const REEXPORT_BARRELS = new Set([
-  "src/service.ts",
-  "src/mcp.ts",
-  "src/domains/index.ts",
+  "core/service.ts",
+  "core/mcp.ts",
+  "core/domains/index.ts",
 ]);
 
 /**
@@ -92,8 +92,8 @@ const REEXPORT_BARRELS = new Set([
  */
 const KNOWN_UPWARD: Array<{ file: string; target: string; reason: string }> = [
   {
-    file: "src/application/service-foundation.ts",
-    target: "src/interfaces/canonical-tools.ts",
+    file: "core/application/service-foundation.ts",
+    target: "core/interfaces/canonical-tools.ts",
     reason: "canonical-tools re-exports the tool table from mcp-server; the table must move to a neutral module. Time-boxed: remove by moving the table, not by widening this list.",
   },
 ];
@@ -109,7 +109,7 @@ function walk(dir: string, out: string[] = []): string[] {
 
 const toRepoPath = (absolute: string): string => relative(root, absolute).split("\\").join("/");
 const segmentOf = (repositoryPath: string): string =>
-  repositoryPath.startsWith("src/") ? repositoryPath.slice(4).split("/")[0] : "";
+  repositoryPath.startsWith("core/") ? repositoryPath.slice(5).split("/")[0] : "";
 /**
  * Rank of a file or import target.
  *
@@ -119,8 +119,8 @@ const segmentOf = (repositoryPath: string): string =>
  */
 const rankOf = (repositoryPath: string): number | null => {
   if (repositoryPath.startsWith("capability/")) return CAPABILITY_RANK;
-  if (!repositoryPath.startsWith("src/")) return null;
-  const rest = repositoryPath.slice(4);
+  if (!repositoryPath.startsWith("core/")) return null;
+  const rest = repositoryPath.slice(5);
   const segment = segmentOf(repositoryPath);
   if (segment.endsWith(".ts")) return RANK[""]; // directly under src/
   return segment in RANK ? RANK[segment] : RANK[""];
@@ -129,7 +129,7 @@ const rankOf = (repositoryPath: string): number | null => {
 const observed = new Map<string, { file: string; target: string; source: string }>();
 
 // `capability/` is walked as well as `src/`, for the reason stated on CAPABILITY_RANK.
-const scanned = [...walk(resolve(root, "src")), ...walk(resolve(root, "capability"))];
+const scanned = [...walk(resolve(root, "core")), ...walk(resolve(root, "capability"))];
 
 for (const file of scanned) {
   const repositoryPath = toRepoPath(file);

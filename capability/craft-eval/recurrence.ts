@@ -13,9 +13,9 @@
  * Run with `WORKBUDDY_API_KEY` set:
  *   node --experimental-strip-types eval/recurrence.ts
  */
-import { abstractAcrossTrajectories } from "../../src/trajectory-abstraction.ts";
-import { summarizeAttributions } from "../../src/failure-attribution.ts";
-import { evaluateVerificationCheck } from "../../src/verification-sensor.ts";
+import { abstractAcrossTrajectories } from "../../core/trajectory-abstraction.ts";
+import { summarizeAttributions } from "../../core/failure-attribution.ts";
+import { evaluateVerificationCheck } from "../../core/verification-sensor.ts";
 import { ask, requireEvaluationCredential } from "./model.ts";
 import { COUNTING_TASKS } from "./cases.ts";
 

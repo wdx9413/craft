@@ -5,10 +5,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
-import { McpServer } from "../src/mcp.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftService } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
+import { McpServer } from "../core/mcp.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftService } from "../core/service.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 
 const execFile = promisify(executeFile);
 
@@ -95,9 +95,9 @@ test("Kit CLI exposes the same declarative built-ins without generating executab
   try {
     const { NODE_V8_COVERAGE: _coverage, ...environment } = process.env;
     const options = { cwd: process.cwd(), env: { ...environment, CRAFT_DATA_DIR: root } };
-    const installed = await execFile(process.execPath, ["--no-experimental-test-coverage", "--experimental-strip-types", "src/cli.ts", "kit", "install-builtins"], options);
+    const installed = await execFile(process.execPath, ["--no-experimental-test-coverage", "--experimental-strip-types", "core/cli.ts", "kit", "install-builtins"], options);
     assert.equal((JSON.parse(installed.stdout).kits as JsonObject[]).length, 2);
-    const described = await execFile(process.execPath, ["--no-experimental-test-coverage", "--experimental-strip-types", "src/cli.ts", "kit", "describe", "builtin.local-workspace"], options);
+    const described = await execFile(process.execPath, ["--no-experimental-test-coverage", "--experimental-strip-types", "core/cli.ts", "kit", "describe", "builtin.local-workspace"], options);
     const distribution = JSON.parse(described.stdout).distribution as JsonObject;
     assert.equal(distribution.execution_authority, false);
     assert.equal(Object.hasOwn(distribution.descriptors as object, "plugin"), true);

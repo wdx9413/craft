@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { canonicalJson, stableDigest } from "../../src/digest.ts";
-import { credentialStatus, selectModel, type ModelProviderSpec, type ModelTier } from "../../src/model-gateway.ts";
-import { CraftStore, type JsonObject } from "../../src/infrastructure/store.ts";
+import { canonicalJson, stableDigest } from "../../core/digest.ts";
+import { credentialStatus, selectModel, type ModelProviderSpec, type ModelTier } from "../../core/model-gateway.ts";
+import { CraftStore, type JsonObject } from "../../core/infrastructure/store.ts";
 
 const PURPOSES = new Set(["evaluation", "workflow_evolution"]);
 const SECRET = /(?:api[_-]?key|authorization|cookie|password|secret|token)\s*[:=]\s*[^\s]{8,}/iu;

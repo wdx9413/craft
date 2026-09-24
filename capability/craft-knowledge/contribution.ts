@@ -6,10 +6,10 @@
  * an execution Host.  Keeping that distinction here prevents an import or a
  * draft Wiki page from silently changing future behaviour.
  */
-import type { ContextContribution, ContextContributionProvider, ContextRequest } from "../../src/capability-protocol.ts";
-import type { CraftStore, JsonObject } from "../../src/infrastructure/store.ts";
-import { contentReference } from "../../src/infrastructure/content-store.ts";
-import { scopeAllows, scopeEnvelope, type ScopeAccess } from "../../src/scope-policy.ts";
+import type { ContextContribution, ContextContributionProvider, ContextRequest } from "../../core/capability-protocol.ts";
+import type { CraftStore, JsonObject } from "../../core/infrastructure/store.ts";
+import { contentReference } from "../../core/infrastructure/content-store.ts";
+import { scopeAllows, scopeEnvelope, type ScopeAccess } from "../../core/scope-policy.ts";
 
 function terms(query: string): string[] {
   return query.toLowerCase().match(/[\p{L}\p{N}_-]+/gu) ?? [];

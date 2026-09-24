@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { type JsonObject } from "../src/infrastructure/store.ts";
-import { AXIS_LEDGER, CAPABILITY_AXES, LEDGERS, defineEvalCase, defineEvalSuite, gradeCase, summarizeSuiteRun } from "../src/eval-suite.ts";
-import { checkFor, evalCases, evaluationSuite } from "../src/eval-cases.ts";
+import { type JsonObject } from "../core/infrastructure/store.ts";
+import { AXIS_LEDGER, CAPABILITY_AXES, LEDGERS, defineEvalCase, defineEvalSuite, gradeCase, summarizeSuiteRun } from "../core/eval-suite.ts";
+import { checkFor, evalCases, evaluationSuite } from "../core/eval-cases.ts";
 
 const anyCase = (id: string, axis = "memory", evidence = "kernel"): JsonObject =>
   ({ id, axis, evidence, partition: "held_out", sanitized: true, approved_by: "reviewer", description: `case ${id}` });

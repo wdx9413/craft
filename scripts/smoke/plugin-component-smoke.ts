@@ -4,10 +4,10 @@ import { once } from "node:events";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { MCP_PREFERRED_PROTOCOL_VERSION } from "../../src/distribution-and-first-run.ts";
+import { MCP_PREFERRED_PROTOCOL_VERSION } from "../../core/distribution-and-first-run.ts";
 
 const root = resolve(import.meta.dirname, "..", "..");
-import { RELEASE_PRODUCTS } from "../../src/release-catalog.ts";
+import { RELEASE_PRODUCTS } from "../../core/release-catalog.ts";
 
 const components = RELEASE_PRODUCTS.filter((product) => product.name !== "craft").map((product) => product.name);
 

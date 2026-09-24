@@ -38,7 +38,7 @@ Docker 驱动不会自动拉取镜像，也不声称 Docker Desktop、Linux Engi
 `craft_sandbox_egress_deliver` 将已签发且仍活动的 Sandbox Ticket、同 Task 的一次性 Egress Authorization 和安全 JSON 文件名绑定。Sandbox Profile 必须保持 `network=denied` 且使用 `workspace_overlay`；Broker 在宿主侧完成请求后，将脱敏响应封装成 `trust=untrusted_external_response`、`execution_authority=false` 的 JSON，只写入该 Ticket 哈希隔离的 `~/.craft_data/runtime/sandbox-inbox`。绑定先持久化为 pending；文件写入或请求结果不明时进入 indeterminate，不能自动重放。当前仍缺少企业代理、证书策略、DNS 策略扩展、流式大对象及响应内容类型解析；Inbox 文件进入规划上下文前仍须走不可信内容提取和审查。
 - 命令/工作目录校验不等于命令全部文件访问受限；超时、输出上限、进程树取消和 CPU/内存/磁盘限制需要执行后端与集成测试补齐。
 
-因此当前定位是隔离适配雏形，不能宣传为完整安全沙箱。依据：[策略](../../../src/execution-policy.ts)、[本地适配器](../../../src/isolated.ts)。
+因此当前定位是隔离适配雏形，不能宣传为完整安全沙箱。依据：[策略](../../../core/execution-policy.ts)、[本地适配器](../../../core/isolated.ts)。
 
 ## 目标：分级执行后端
 

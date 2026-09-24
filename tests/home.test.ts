@@ -3,11 +3,11 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { HomeKernel } from "../src/home.ts";
-import { McpServer } from "../src/mcp.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftService } from "../src/service.ts";
-import { CraftStore } from "../src/infrastructure/store.ts";
+import { HomeKernel } from "../core/home.ts";
+import { McpServer } from "../core/mcp.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftService } from "../core/service.ts";
+import { CraftStore } from "../core/infrastructure/store.ts";
 
 async function fixture() { const root = await mkdtemp(path.join(tmpdir(), "craft-home-")); const store = await new CraftStore(craftPaths(root)).open(); return { store, home: new HomeKernel(store) }; }
 

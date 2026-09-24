@@ -3,14 +3,14 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { InternalHostDriver } from "../src/internal-host-driver.ts";
-import { classifyTool } from "../src/internal-tool-authorization.ts";
-import { McpServer, TOOLS } from "../src/mcp.ts";
-import { defineProvider, type ModelProviderSpec } from "../src/model-gateway.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { summarizeConversation } from "../src/runtime-truth.ts";
-import { CraftService } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
+import { InternalHostDriver } from "../core/internal-host-driver.ts";
+import { classifyTool } from "../core/internal-tool-authorization.ts";
+import { McpServer, TOOLS } from "../core/mcp.ts";
+import { defineProvider, type ModelProviderSpec } from "../core/model-gateway.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { summarizeConversation } from "../core/runtime-truth.ts";
+import { CraftService } from "../core/service.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 
 const loopSpec = (): ModelProviderSpec => defineProvider({ provider: "demo", label: "Demo", protocol: "openai-compatible",
   base_url: "https://example.test/v1", api_key_env: "DEMO_API_KEY",

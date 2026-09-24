@@ -3,9 +3,9 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { CraftService } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
+import { CraftService } from "../core/service.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
 
 async function fixture() { const root = await mkdtemp(join(tmpdir(), "craft-v01231-")); const store = await new CraftStore(craftPaths(root)).open(); const service = new CraftService(store); return { root, store, service }; }
 
@@ -28,7 +28,7 @@ test("v0.12.32 memory governance is candidate-first, conflict-aware and expiring
     const approved = service.memoryCandidateReview({ candidate_id: "c2", decision: "approve", reviewer: "human", reason: "checked" }).candidate as JsonObject;
     const memory = service.memoryLedgerRememberApproved({ candidate_id: approved.id }).memory as JsonObject;
     assert.equal(memory.status, "active");
-    const studioCandidate = service.studioMemorySave({ candidate_id: "studio-c", source_id: source.id, kind: "working", scope_kind: "project", scope_id: "p", content: "temporary context", evidence_ids: [evidence.id] }).candidate as JsonObject;
+    const studioCandidate = service.workbenchMemorySave({ candidate_id: "studio-c", source_id: source.id, kind: "working", scope_kind: "project", scope_id: "p", content: "temporary context", evidence_ids: [evidence.id] }).candidate as JsonObject;
     assert.equal(studioCandidate.status, "candidate");
     assert.equal(store.find("memory_item", "studio-c"), null);
     const expired = service.memoryExpirySweep({ now: "2035-01-01T00:00:00.000Z" });

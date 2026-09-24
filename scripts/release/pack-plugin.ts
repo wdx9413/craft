@@ -1,7 +1,7 @@
 import { cp, mkdir, rm } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { RELEASE_PRODUCTS } from "../../src/release-catalog.ts";
+import { RELEASE_PRODUCTS } from "../../core/release-catalog.ts";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const pluginRoot = resolve(root, "plugins", "craft");

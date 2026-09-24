@@ -3,9 +3,9 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
-import { CraftService } from "../src/service.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { CraftService } from "../core/service.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
 
 async function fixture() {
   const root = await mkdtemp(path.join(tmpdir(), "craft-federation-"));

@@ -6,13 +6,13 @@ import test from "node:test";
 import { codebaseCapability, CODEBASE_KERNELS } from "../capability/craft-codebase/capability.ts";
 import { CodebaseIndexKernel } from "../capability/craft-codebase/codebase-index.ts";
 import { CODEBASE_OWNS } from "../capability/craft-codebase/ownership.ts";
-import { CRAFT_CAPABILITIES } from "../src/capability-catalog.ts";
-import { buildCapabilityRegistry, CORE_KERNELS } from "../src/capability-protocol.ts";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { PROVIDER_CATALOG } from "../src/model-gateway.ts";
-import { McpServer, surfaceToolNames } from "../src/mcp.ts";
-import { CraftService } from "../src/service.ts";
+import { CRAFT_CAPABILITIES } from "../core/capability-catalog.ts";
+import { buildCapabilityRegistry, CORE_KERNELS } from "../core/capability-protocol.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { PROVIDER_CATALOG } from "../core/model-gateway.ts";
+import { McpServer, surfaceToolNames } from "../core/mcp.ts";
+import { CraftService } from "../core/service.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-codebase-")); const project = join(root, "project"); await mkdir(join(project, "src"), { recursive: true });

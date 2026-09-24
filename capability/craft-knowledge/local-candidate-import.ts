@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { relative, resolve } from "node:path";
-import { CraftStore, type JsonObject } from "../../src/infrastructure/store.ts";
-import { text } from "../../src/validation.ts";
+import { CraftStore, type JsonObject } from "../../core/infrastructure/store.ts";
+import { text } from "../../core/validation.ts";
 
 function digest(value: string): string { return `sha256:${createHash("sha256").update(value).digest("hex")}`; }
 

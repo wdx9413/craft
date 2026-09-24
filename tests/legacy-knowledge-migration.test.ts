@@ -3,11 +3,11 @@ import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { McpServer } from "../src/mcp.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftService } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
-import { LegacyKnowledgeMigrationKernel } from "../src/legacy-knowledge-migration.ts";
+import { McpServer } from "../core/mcp.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftService } from "../core/service.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { LegacyKnowledgeMigrationKernel } from "../core/legacy-knowledge-migration.ts";
 
 const eligible = `---\ntitle: Reusable workflow\nstatus: confirmed\ncategory: workflows\nknowledge_type: workflow\nevidence_type: test\nevidence_ref: tests/reusable.test.ts\nreuse_reason: Apply the checked workflow after review.\nscope: project\nproject: demo\ntags: demo, workflow\n---\n\n# Reusable workflow\n\nRaw body is never retained.\n`;
 const sensitive = `---\ntitle: Sensitive note\nstatus: confirmed\ncategory: workflows\nknowledge_type: workflow\nevidence_type: test\nevidence_ref: x\nreuse_reason: token=supersecretvalue\nscope: project\n---\n\nsecret body\n`;

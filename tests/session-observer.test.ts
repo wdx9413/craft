@@ -3,13 +3,13 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { HostSessionEventKernel } from "../src/host-session-events.ts";
-import { McpServer } from "../src/mcp.ts";
-import { OutcomeObserverKernel } from "../src/outcome-observer.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftService } from "../src/service.ts";
-import { CraftStore } from "../src/infrastructure/store.ts";
-import { TraceKernel } from "../src/trace-kernel.ts";
+import { HostSessionEventKernel } from "../core/host-session-events.ts";
+import { McpServer } from "../core/mcp.ts";
+import { OutcomeObserverKernel } from "../core/outcome-observer.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftService } from "../core/service.ts";
+import { CraftStore } from "../core/infrastructure/store.ts";
+import { TraceKernel } from "../core/trace-kernel.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-v01229-session-")); const store = await new CraftStore(craftPaths(root)).open();

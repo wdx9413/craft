@@ -83,7 +83,7 @@ Tasks 从核心协议移出、成为扩展；`roots`、`sampling`、`logging` �
 
 ### 协议版本是内联字面量，且没有协商矩阵
 
-[`mcp-server.ts`](../../src/interfaces/mcp-server.ts#L1552-L1558)：
+[`mcp-server.ts`](../../core/interfaces/mcp-server.ts#L1552-L1558)：
 
 ```ts
 if (request.method === "initialize") {
@@ -110,7 +110,7 @@ if (request.method === "initialize") {
 
 ### 请求面只有 5 个方法
 
-[`mcp-server.ts:1545-1585`](../../src/interfaces/mcp-server.ts#L1545-L1585) 的 `handle()`
+[`mcp-server.ts:1545-1585`](../../core/interfaces/mcp-server.ts#L1545-L1585) 的 `handle()`
 处理集合是：`initialize`、`notifications/initialized`、`ping`、`tools/list`、
 `tools/call`；其余一律 `-32601 Method not found`。
 
@@ -125,7 +125,7 @@ if (request.method === "initialize") {
 
 ### 关键风险：握手缓冲逻辑会变成遗迹
 
-[`mcp-stdio.ts:19-44`](../../src/mcp-stdio.ts#L19-L44) 在 `await start()` **之前**就挂上
+[`mcp-stdio.ts:19-44`](../../core/mcp-stdio.ts#L19-L44) 在 `await start()` **之前**就挂上
 `line` 监听，把初始化期间到达的 stdin 行推入 `pending[]` 缓冲：
 
 ```ts
@@ -171,7 +171,7 @@ SEP-1576 已关闭，见 [`craft-v0.12.1-plan-2026-09-13.md`](craft-v0.12.1-plan
 
 Craft 有一整套“人在环”语义：`durable-action-loop`、`guided-work`、
 `acceptance` 的人工验收、`task-control` 的 handoff、
-[`workbench-server.ts`](../../src/workbench-server.ts#L136-L142) 的
+[`workbench-server.ts`](../../core/workbench-server.ts#L136-L142) 的
 `guided-work/decide` 与 `acceptance-plans/human-review`。
 
 MRTR 的 `input_required` 语义与这些能力**表面相似、归属不同**：
@@ -228,7 +228,7 @@ Craft 的插件包把 MCP bundle 固化在 `plugins/craft/dist/plugin/`，宿主
 - 不受支持版本返回显式降级/错误，去掉静默回落；
 - 11 个 bundle 与 4 处消费方硬编码改为引用同一常量；
 - 测试钉住“版本常量单一定义”与“协商行为”。
-- 明确 [`mcp-stdio.ts`](../../src/mcp-stdio.ts#L19-L44) 缓冲逻辑在新协议下的去留。
+- 明确 [`mcp-stdio.ts`](../../core/mcp-stdio.ts#L19-L44) 缓冲逻辑在新协议下的去留。
 
 ### S2｜无状态传输路径与旧握手双轨
 

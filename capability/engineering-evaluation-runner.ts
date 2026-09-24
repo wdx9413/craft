@@ -9,11 +9,11 @@ import { createHash, randomUUID } from "node:crypto";
 import { cp, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { dirname, join, isAbsolute, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { CodexHostKernel, type CodexExecutor } from "../src/codex-driver.ts";
-import { digestJson } from "../src/digest.ts";
-import type { CraftService } from "../src/service.ts";
-import type { CraftStore, JsonObject } from "../src/infrastructure/store.ts";
-import { executeHostProcess, type HostExecutor } from "../src/host-driver.ts";
+import { CodexHostKernel, type CodexExecutor } from "../core/codex-driver.ts";
+import { digestJson } from "../core/digest.ts";
+import type { CraftService } from "../core/service.ts";
+import type { CraftStore, JsonObject } from "../core/infrastructure/store.ts";
+import { executeHostProcess, type HostExecutor } from "../core/host-driver.ts";
 import { VERIFIED_EVALUATION_RECEIPT_KIND, type ProgramCheck } from "./verified-evaluation-receipt.ts";
 
 export type EvaluationCommand = readonly ["node", ...string[]];

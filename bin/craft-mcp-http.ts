@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { serveMcpHttp } from "../src/mcp-http.ts";
-import { resolveMcpProductMode } from "../src/interfaces/mcp/product-launch.ts";
+import { serveMcpHttp } from "../core/mcp-http.ts";
+import { resolveMcpProductMode } from "../core/interfaces/mcp/product-launch.ts";
 
 const port = Number(process.env.CRAFT_MCP_PORT ?? 8787);
 let mode: string;

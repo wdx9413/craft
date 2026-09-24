@@ -20,7 +20,7 @@
  * *set WORKBUDDY_API_KEY before running Craft* when the variable is absent, so the
  * configuration here carries only the endpoint and the budget.
  */
-import { buildChatRequest, createFetchTransport, credentialStatus, defineProvider, selectModel } from "../../src/model-gateway.ts";
+import { buildChatRequest, createFetchTransport, credentialStatus, defineProvider, selectModel } from "../../core/model-gateway.ts";
 
 export const EVAL_PROVIDER = defineProvider({
   provider: "workbuddy", label: "WorkBuddy Local", protocol: "openai-compatible",

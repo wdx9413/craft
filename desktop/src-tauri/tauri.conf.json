@@ -1,0 +1,13 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Craft Workbench",
+  "version": "0.1.0",
+  "identifier": "dev.craft.workbench",
+  "build": { "beforeBuildCommand": "pnpm run prepare-sidecar", "beforeDevCommand": "pnpm run prepare-sidecar", "frontendDist": "../../workbench" },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [],
+    "security": { "csp": "default-src 'self' http://127.0.0.1:*; connect-src 'self' http://127.0.0.1:*; img-src 'self' data: http://127.0.0.1:*; style-src 'self' 'unsafe-inline' http://127.0.0.1:*; script-src 'self' http://127.0.0.1:*" }
+  },
+  "bundle": { "active": true, "targets": ["nsis"], "icon": ["../../assets/craft.ico"], "resources": ["resources/app"] }
+}

@@ -3,11 +3,11 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { compact, compactWithPromotion } from "../src/compaction.ts";
-import { ContextProjectionKernel } from "../src/context-projection.ts";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { McpServer } from "../src/mcp.ts";
+import { compact, compactWithPromotion } from "../core/compaction.ts";
+import { ContextProjectionKernel } from "../core/context-projection.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { McpServer } from "../core/mcp.ts";
 
 /**
  * The durable projection, which exists because the tool promised something it could not do.
@@ -125,7 +125,7 @@ test("v0.12.43 reports a restore that cannot fit rather than silently dropping i
 test("v0.12.43 reaches both paths through the MCP tools a Host actually calls", async () => {
   const f = await fixture();
   try {
-    const { CraftService } = await import("../src/service.ts");
+    const { CraftService } = await import("../core/service.ts");
     const server = new McpServer(new CraftService(f.store), "full");
     const call = async (name: string, args: JsonObject) => {
       const response = await server.handle({ id: 1, method: "tools/call", params: { name, arguments: args } });

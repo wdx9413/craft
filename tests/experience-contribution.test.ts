@@ -4,12 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { ExperienceContribution } from "../capability/craft-experience/contribution.ts";
-import { CRAFT_CAPABILITIES } from "../src/capability-catalog.ts";
-import { buildCapabilityRegistry, CORE_KERNELS } from "../src/capability-protocol.ts";
-import { ContextResolutionKernel } from "../src/context-resolution.ts";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { PROVIDER_CATALOG } from "../src/model-gateway.ts";
+import { CRAFT_CAPABILITIES } from "../core/capability-catalog.ts";
+import { buildCapabilityRegistry, CORE_KERNELS } from "../core/capability-protocol.ts";
+import { ContextResolutionKernel } from "../core/context-resolution.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { PROVIDER_CATALOG } from "../core/model-gateway.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-experience-contribution-"));

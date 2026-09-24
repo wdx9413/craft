@@ -4,10 +4,10 @@
  * Task-bound Kit activation, digest-only contribution, Evidence reference, or
  * evaluation receipt already understood by Craft's generic control plane.
  */
-import type { CraftStore, JsonObject } from "../src/infrastructure/store.ts";
-import { payload, stableDigest } from "../src/digest.ts";
-import { CapabilityKitRuntime } from "../src/capability-kit-runtime.ts";
-import { object, text } from "../src/validation.ts";
+import type { CraftStore, JsonObject } from "../core/infrastructure/store.ts";
+import { payload, stableDigest } from "../core/digest.ts";
+import { CapabilityKitRuntime } from "../core/capability-kit-runtime.ts";
+import { object, text } from "../core/validation.ts";
 import { receiptEvidenceIds, receiptPassed, verifiedEvaluationReceipt } from "./verified-evaluation-receipt.ts";
 
 export const ENGINEERING_QUALITY_PROFILE_ID = "engineering-quality-profile";

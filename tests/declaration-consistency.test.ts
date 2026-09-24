@@ -4,16 +4,16 @@ import { mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { DEFAULT_INTERNAL_AUTHORIZATION, classifyTool } from "../src/internal-tool-authorization.ts";
-import { McpServer, TOOLS } from "../src/mcp.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftService } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
+import { DEFAULT_INTERNAL_AUTHORIZATION, classifyTool } from "../core/internal-tool-authorization.ts";
+import { McpServer, TOOLS } from "../core/mcp.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftService } from "../core/service.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import {
   MCP_ASSESSED_REVISION, MCP_MIGRATION_STATUS, MCP_PREFERRED_PROTOCOL_VERSION, MCP_PROTOCOL_VERSIONS
-} from "../src/distribution-and-first-run.ts";
-import { checkConsistency, mcpDeclarations, observeMcpFacts } from "../src/declaration-consistency.ts";
-import { forwardCompatibility, outboundResult } from "../src/mcp-forward-compat.ts";
+} from "../core/distribution-and-first-run.ts";
+import { checkConsistency, mcpDeclarations, observeMcpFacts } from "../core/declaration-consistency.ts";
+import { forwardCompatibility, outboundResult } from "../core/mcp-forward-compat.ts";
 
 /**
  * The v0.12.41 forward-compatibility facts, defaulting to the true state of this
@@ -141,8 +141,8 @@ test("v0.12.39 checks the live implementation, not a copy of it", async (t) => {
   // These facts are read from the shipping source or from the running handler.
   // If someone adopts 2026-07-28 in the handler without updating the runtime, or
   // updates the runtime without the handler, this fails.
-  const runtime = readFileSync("src/distribution-and-first-run.ts", "utf8");
-  const server = readFileSync("src/interfaces/mcp-server.ts", "utf8");
+  const runtime = readFileSync("core/distribution-and-first-run.ts", "utf8");
+  const server = readFileSync("core/interfaces/mcp-server.ts", "utf8");
 
   const declared = [...runtime.matchAll(/"(\d{4}-\d{2}-\d{2})"/gu)].map((match) => match[1]!);
 

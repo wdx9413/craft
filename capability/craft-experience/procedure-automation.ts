@@ -8,9 +8,9 @@
  * one or silently turns a learned procedure into an operating-system service.
  */
 import { randomUUID } from "node:crypto";
-import type { CraftStore, JsonObject } from "../../src/infrastructure/store.ts";
-import { payload, stableDigest } from "../../src/digest.ts";
-import { normalizeSteps, resolveInputs, substitute } from "../../src/workflow.ts";
+import type { CraftStore, JsonObject } from "../../core/infrastructure/store.ts";
+import { payload, stableDigest } from "../../core/digest.ts";
+import { normalizeSteps, resolveInputs, substitute } from "../../core/workflow.ts";
 import { ProcedureDefinitionStore, procedureDefinitionRef, type ProcedureDefinition } from "./procedure-definition.ts";
 
 type TriggerKind = "manual" | "interval";

@@ -22,11 +22,11 @@
  * they hold.
  */
 import { randomUUID } from "node:crypto";
-import type { CraftStore, JsonObject } from "../../src/infrastructure/store.ts";
-import { noCredentialAssignment, parseScope, sortedUniqueList, text } from "../../src/validation.ts";
-import { canonicalJson, stableDigest, payload } from "../../src/digest.ts";
-import { contentReference } from "../../src/infrastructure/content-store.ts";
-import { scopeEnvelope } from "../../src/scope-policy.ts";
+import type { CraftStore, JsonObject } from "../../core/infrastructure/store.ts";
+import { noCredentialAssignment, parseScope, sortedUniqueList, text } from "../../core/validation.ts";
+import { canonicalJson, stableDigest, payload } from "../../core/digest.ts";
+import { contentReference } from "../../core/infrastructure/content-store.ts";
+import { scopeEnvelope } from "../../core/scope-policy.ts";
 
 const MEMORY_KINDS = new Set(["working", "episodic", "preference", "procedural"]);
 const MEMORY_STATUS = new Set(["active", "superseded", "revoked", "expired"]);

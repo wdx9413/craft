@@ -29,9 +29,9 @@
  * projections; declaring a second Memory provider here would give the same member two contributors, which
  * `buildCapabilityRegistry` rejects outright.
  */
-import type { CraftCapability } from "../../src/capability-protocol.ts";
-import { CORE_KERNELS } from "../../src/capability-protocol.ts";
-import type { CraftStore } from "../../src/infrastructure/store.ts";
+import type { CraftCapability } from "../../core/capability-protocol.ts";
+import { CORE_KERNELS } from "../../core/capability-protocol.ts";
+import type { CraftStore } from "../../core/infrastructure/store.ts";
 import { MemoryLedgerKernel } from "./memory-ledger.ts";
 import { MemorySignalsKernel } from "./memory-signals-kernel.ts";
 import { MEMORY_OWNS } from "./ownership.ts";

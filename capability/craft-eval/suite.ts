@@ -12,18 +12,18 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Bm25Index, decideExperienceCapture } from "../../src/context-retrieval-capture.ts";
+import { Bm25Index, decideExperienceCapture } from "../../core/context-retrieval-capture.ts";
 import { KnowledgeRelationKernel } from "../craft-knowledge/knowledge-relation.ts";
 import { memoryDecayWeight, rankWithDecay } from "../craft-memory/memory-signals.ts";
-import { evaluateVerificationCheck } from "../../src/verification-sensor.ts";
-import { pinConstraints, verifyPinIntact } from "../../src/governance-pinning.ts";
+import { evaluateVerificationCheck } from "../../core/verification-sensor.ts";
+import { pinConstraints, verifyPinIntact } from "../../core/governance-pinning.ts";
 import { ask, EVAL_MODEL, requireEvaluationCredential } from "./model.ts";
 import { ARITHMETIC } from "./cases.ts";
-import { CraftStore } from "../../src/infrastructure/store.ts";
-import { craftPaths } from "../../src/infrastructure/paths.ts";
-import { CraftService } from "../../src/service.ts";
-import { checkFor, evalCases } from "../../src/eval-cases.ts";
-import { LEDGERS, defineEvalSuite, gradeCase, summarizeSuiteRun } from "../../src/eval-suite.ts";
+import { CraftStore } from "../../core/infrastructure/store.ts";
+import { craftPaths } from "../../core/infrastructure/paths.ts";
+import { CraftService } from "../../core/service.ts";
+import { checkFor, evalCases } from "../../core/eval-cases.ts";
+import { LEDGERS, defineEvalSuite, gradeCase, summarizeSuiteRun } from "../../core/eval-suite.ts";
 
 type Json = Record<string, unknown>;
 

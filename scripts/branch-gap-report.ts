@@ -12,7 +12,7 @@ const rows: Array<{ file: string; branch: string; line: number; column: number; 
 let total = 0;
 let covered = 0;
 for (const [file, data] of Object.entries(report)) {
-  if (!file.includes(`${resolve(root, "src")}/`) || file.endsWith(".d.ts")) continue;
+  if (!file.includes(`${resolve(root, "core")}/`) || file.endsWith(".d.ts")) continue;
   for (const [branch, hits] of Object.entries(data.b ?? {})) {
     for (const [index, hit] of hits.entries()) {
       total += 1;

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createMcpHttpHandler } from "../src/mcp-http.ts";
-import { RemoteMcpAccessError, RemoteMcpAccessPolicy } from "../src/remote-mcp-access.ts";
+import { createMcpHttpHandler } from "../core/mcp-http.ts";
+import { RemoteMcpAccessError, RemoteMcpAccessPolicy } from "../core/remote-mcp-access.ts";
 
 function policy(overrides: Partial<ConstructorParameters<typeof RemoteMcpAccessPolicy>[0]> = {}) {
   return new RemoteMcpAccessPolicy({

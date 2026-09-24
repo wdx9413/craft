@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
-import { CraftStore, type JsonObject } from "../../src/infrastructure/store.ts";
-import { text } from "../../src/validation.ts";
+import { CraftStore, type JsonObject } from "../../core/infrastructure/store.ts";
+import { text } from "../../core/validation.ts";
 
 type MemoryDescriptor = { memory_id: string; path: string; name: string; digest: string; size_bytes: number };
 

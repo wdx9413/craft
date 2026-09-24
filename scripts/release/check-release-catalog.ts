@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { access, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { RELEASE_PRODUCTS, RETIRED_MCP_PREFIXES, RETIRED_PUBLIC_PRODUCTS, externalDistributionContract, releaseManifest } from "../../src/release-catalog.ts";
-import { CRAFT_RELEASE_VERSION } from "../../src/version.ts";
+import { RELEASE_PRODUCTS, RETIRED_MCP_PREFIXES, RETIRED_PUBLIC_PRODUCTS, externalDistributionContract, releaseManifest } from "../../core/release-catalog.ts";
+import { CRAFT_RELEASE_VERSION } from "../../core/version.ts";
 
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 assert.deepEqual(JSON.parse(await readFile(join(root, "distribution-contract.json"), "utf8")), externalDistributionContract(), "distribution contract must be generated from ReleaseCatalog");
@@ -25,7 +25,7 @@ for (const product of RELEASE_PRODUCTS) {
     else assert.equal(claude.hooks, undefined, `${product.name} must not install an automatic Hook`);
   }
 }
-const server = await readFile(join(root, "src", "interfaces", "mcp-server.ts"), "utf8");
+const server = await readFile(join(root, "core", "interfaces", "mcp-server.ts"), "utf8");
 for (const prefix of RETIRED_MCP_PREFIXES) assert(!server.includes(`tool("${prefix}`), `${prefix} must not be public`);
 for (const product of RETIRED_PUBLIC_PRODUCTS) {
   const marketplace = JSON.stringify(releaseManifest());

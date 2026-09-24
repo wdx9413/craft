@@ -12,7 +12,7 @@ import { join, relative } from "node:path";
  * This is deliberately not a style linter. A style pass can be adopted on its
  * own terms later; these two rules encode correctness that already bit us.
  */
-const roots = ["src", "scripts", "tests", "docs", "adapters", "plugins"];
+const roots = ["core", "scripts", "tests", "docs", "adapters", "plugins"];
 const skip = /(^|\/)(node_modules|dist|\.git|\.venv|br-tools|coverage)(\/|$)/u;
 
 function walk(dir: string, out: string[] = []): string[] {

@@ -4,10 +4,10 @@ import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
-import { LegacyKnowledgeMigrationKernel } from "../src/legacy-knowledge-migration.ts";
-import { CraftService } from "../src/service.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { LegacyKnowledgeMigrationKernel } from "../core/legacy-knowledge-migration.ts";
+import { CraftService } from "../core/service.ts";
 
 const page = `---
 title: Coverage page

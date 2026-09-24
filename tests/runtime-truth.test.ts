@@ -3,12 +3,12 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
-import { MAX_TOOL_RESULT_CHARS, compactConversation, createWorkNote, exportOtlp, parseSseFrames, parseToolCalls, standardizeTrace, toOtlpTrace, toolResultMessage, traceCorrelation, truncateToolResult } from "../src/runtime-truth.ts";
-import { RuntimeTruthKernel } from "../src/runtime-truth-kernel.ts";
-import { CraftService } from "../src/service.ts";
-import { McpServer } from "../src/mcp.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { MAX_TOOL_RESULT_CHARS, compactConversation, createWorkNote, exportOtlp, parseSseFrames, parseToolCalls, standardizeTrace, toOtlpTrace, toolResultMessage, traceCorrelation, truncateToolResult } from "../core/runtime-truth.ts";
+import { RuntimeTruthKernel } from "../core/runtime-truth-kernel.ts";
+import { CraftService } from "../core/service.ts";
+import { McpServer } from "../core/mcp.ts";
 
 test("an oversized tool result is cut to a stated head instead of evicting the conversation", () => {
   const payload = { items: "x".repeat(MAX_TOOL_RESULT_CHARS + 500), tail: "dropped" };

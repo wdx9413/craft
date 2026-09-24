@@ -3,10 +3,10 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { ActivationProofKernel } from "../src/activation-proof.ts";
-import { ComponentHistoryMigrationKernel } from "../src/component-history-migration.ts";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
+import { ActivationProofKernel } from "../core/activation-proof.ts";
+import { ComponentHistoryMigrationKernel } from "../core/component-history-migration.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-activation-proof-"));

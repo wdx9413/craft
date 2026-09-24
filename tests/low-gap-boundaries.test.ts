@@ -3,13 +3,13 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { A2ATransportKernel } from "../src/a2a-transport.ts";
-import { OrgSyncKernel } from "../src/org-sync.ts";
+import { A2ATransportKernel } from "../core/a2a-transport.ts";
+import { OrgSyncKernel } from "../core/org-sync.ts";
 import { ProjectKnowledgeKernel } from "../capability/craft-knowledge/project-knowledge.ts";
-import { StateWorkspaceKernel, kind } from "../src/state-workspace.ts";
-import { CraftService } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
+import { StateWorkspaceKernel, kind } from "../core/state-workspace.ts";
+import { CraftService } from "../core/service.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
 
 test("small compatibility kernels cover explicit fallback, conflict, and boundary outcomes", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-low-gap-"));

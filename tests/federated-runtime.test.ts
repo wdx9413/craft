@@ -4,12 +4,12 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { McpServer, surfaceToolNames } from "../src/mcp.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftService, VERSION } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
-import { RuntimeModelProbeKernel } from "../src/runtime-model-probe.ts";
-import type { ModelProviderSpec, ModelTransport } from "../src/model-gateway.ts";
+import { McpServer, surfaceToolNames } from "../core/mcp.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftService, VERSION } from "../core/service.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { RuntimeModelProbeKernel } from "../core/runtime-model-probe.ts";
+import type { ModelProviderSpec, ModelTransport } from "../core/model-gateway.ts";
 
 function digest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
 

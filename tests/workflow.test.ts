@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { approvedEffects, executeSteps, normalizeSteps, redact, resolveInputs, runStep, safePath,
-  substitute } from "../src/workflow.ts";
+  substitute } from "../core/workflow.ts";
 
 test("workflow inputs, substitution, paths, redaction, and policies are deterministic", () => {
   assert.deepEqual(resolveInputs([{ name: "a", default: 1 }, { name: "b", required: true }], { b: 2 }), { a: 1, b: 2 });

@@ -3,11 +3,11 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftService } from "../src/service.ts";
-import { McpServer } from "../src/mcp.ts";
-import { A2ATransportKernel } from "../src/a2a-transport.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftService } from "../core/service.ts";
+import { McpServer } from "../core/mcp.ts";
+import { A2ATransportKernel } from "../core/a2a-transport.ts";
 
 test("v0.12.12 security, registry, A2A and organization boundaries are fail closed", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-boundaries-")); const store = await new CraftStore(craftPaths(root)).open();

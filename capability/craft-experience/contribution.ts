@@ -15,9 +15,9 @@
  * reusable procedure. A procedure becomes usable Context only after shadow, held-out,
  * signoff and canary gates make it routeable.
  */
-import type { ContextRequest, ContextContribution, ContextContributionProvider } from "../../src/capability-protocol.ts";
-import type { CraftStore, JsonObject } from "../../src/infrastructure/store.ts";
-import { scopeAllows, scopeEnvelope, type ScopeAccess } from "../../src/scope-policy.ts";
+import type { ContextRequest, ContextContribution, ContextContributionProvider } from "../../core/capability-protocol.ts";
+import type { CraftStore, JsonObject } from "../../core/infrastructure/store.ts";
+import { scopeAllows, scopeEnvelope, type ScopeAccess } from "../../core/scope-policy.ts";
 
 /** Tokenize a query the same way `ContextResolutionKernel.resolve` does, so matching agrees. */
 function terms(query: string): string[] {

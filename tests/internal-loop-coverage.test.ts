@@ -3,12 +3,12 @@ import test from "node:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CraftService } from "../src/service.ts";
-import { CraftStore } from "../src/infrastructure/store.ts";
-import { McpServer } from "../src/mcp.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { publicModel, specFromConfig, specsFromModels } from "../src/model-gateway.ts";
-import type { CraftModelConfig } from "../src/settings.ts";
+import { CraftService } from "../core/service.ts";
+import { CraftStore } from "../core/infrastructure/store.ts";
+import { McpServer } from "../core/mcp.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { publicModel, specFromConfig, specsFromModels } from "../core/model-gateway.ts";
+import type { CraftModelConfig } from "../core/settings.ts";
 
 /**
  * Coverage hedge for the seams the tiered internal loop introduced.

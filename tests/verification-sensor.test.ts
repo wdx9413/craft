@@ -3,19 +3,19 @@ import { mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { DEFAULT_INTERNAL_AUTHORIZATION, authorizedTools, classifyTool } from "../src/internal-tool-authorization.ts";
-import { DEFAULT_INTERNAL_TOOLS } from "../src/internal-host-driver.ts";
-import { McpServer, TOOLS } from "../src/mcp.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftService } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
-import { decideExperienceCapture } from "../src/context-retrieval-capture.ts";
+import { DEFAULT_INTERNAL_AUTHORIZATION, authorizedTools, classifyTool } from "../core/internal-tool-authorization.ts";
+import { DEFAULT_INTERNAL_TOOLS } from "../core/internal-host-driver.ts";
+import { McpServer, TOOLS } from "../core/mcp.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftService } from "../core/service.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { decideExperienceCapture } from "../core/context-retrieval-capture.ts";
 import {
   evaluateVerificationCheck,
   runVerification,
   summarizeVerification,
   verificationCaptureSignals
-} from "../src/verification-sensor.ts";
+} from "../core/verification-sensor.ts";
 
 test("v0.12.37 passes an exit code check only when the code matches", () => {
   const passed = evaluateVerificationCheck({ kind: "exit_code", name: "tests", expected_exit_code: 0, observed_exit_code: 0 });

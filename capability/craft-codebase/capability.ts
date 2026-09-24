@@ -1,6 +1,6 @@
-import type { CraftCapability } from "../../src/capability-protocol.ts";
-import { CORE_KERNELS } from "../../src/capability-protocol.ts";
-import type { CraftStore } from "../../src/infrastructure/store.ts";
+import type { CraftCapability } from "../../core/capability-protocol.ts";
+import { CORE_KERNELS } from "../../core/capability-protocol.ts";
+import type { CraftStore } from "../../core/infrastructure/store.ts";
 import { CodebaseIndexKernel } from "./codebase-index.ts";
 import { CODEBASE_OWNS } from "./ownership.ts";
 

@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ACTIVE_TOOLS } from "../src/interfaces/mcp-server.ts";
-import type { Tool } from "../src/mcp/tool-schema.ts";
-import { tool } from "../src/mcp/tool-schema.ts";
-import type { ChatToolDefinition } from "../src/model-gateway.ts";
-import { INTERNAL_ONLY_TOOLS } from "../src/internal-host-driver.ts";
+import { ACTIVE_TOOLS } from "../core/interfaces/mcp-server.ts";
+import type { Tool } from "../core/mcp/tool-schema.ts";
+import { tool } from "../core/mcp/tool-schema.ts";
+import type { ChatToolDefinition } from "../core/model-gateway.ts";
+import { INTERNAL_ONLY_TOOLS } from "../core/internal-host-driver.ts";
 import { DEFAULT_INTERNAL_AUTHORIZATION, TOOL_AUTHORIZATIONS, actionNameOf, authorizationAllows, authorizedTools,
-  classifyTool, internalToolDefinitions, toChatToolDefinition } from "../src/internal-tool-authorization.ts";
+  classifyTool, internalToolDefinitions, toChatToolDefinition } from "../core/internal-tool-authorization.ts";
 
 type ParameterSchema = { name: string; type: string; enum?: string[] };
 

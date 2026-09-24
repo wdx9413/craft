@@ -31,7 +31,7 @@
         "capability/craft-codebase/capability.ts",
         "capability/craft-codebase/ownership.ts",
         "capability/craft-codebase/codebase-index.ts",
-        "src/application/use-cases/codebase.ts"
+        "core/application/use-cases/codebase.ts"
       ],
       "tests": [
         "tests/craft-codebase.test.ts"
@@ -39,13 +39,163 @@
       "branches": true
     },
     {
+      "name": "action-gate",
+      "include": [
+        "core/action-gate.ts"
+      ],
+      "tests": [
+        "tests/action-gate.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "receipt",
+      "include": [
+        "core/receipt.ts"
+      ],
+      "tests": [
+        "tests/receipt.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "subscription-drift",
+      "include": [
+        "core/subscription-drift.ts"
+      ],
+      "tests": [
+        "tests/subscription-drift.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "subscription-authorization",
+      "include": [
+        "core/subscription-authorization.ts"
+      ],
+      "tests": [
+        "tests/subscription-authorization.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "prepared-state",
+      "include": [
+        "core/prepared-state.ts"
+      ],
+      "tests": [
+        "tests/prepared-state.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "adjudication-queue",
+      "include": [
+        "core/adjudication-queue.ts"
+      ],
+      "tests": [
+        "tests/adjudication-queue.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "decision-surface",
+      "include": [
+        "core/decision-surface.ts"
+      ],
+      "tests": [
+        "tests/decision-surface.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "capability-base",
+      "include": [
+        "core/capability-base.ts"
+      ],
+      "tests": [
+        "tests/capability-base.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "browser-driving",
+      "include": [
+        "core/browser-driving.ts"
+      ],
+      "tests": [
+        "tests/browser-driving.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "honest-claims",
+      "include": [
+        "core/honest-claims.ts"
+      ],
+      "tests": [
+        "tests/honest-claims.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "object-model",
+      "include": [
+        "core/object-model.ts"
+      ],
+      "tests": [
+        "tests/object-model.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "human-touchpoints",
+      "include": [
+        "core/human-touchpoints.ts"
+      ],
+      "tests": [
+        "tests/human-touchpoints.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "object-hatching",
+      "include": [
+        "core/object-hatching.ts"
+      ],
+      "tests": [
+        "tests/object-hatching.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "authorization",
+      "include": [
+        "core/authorization.ts"
+      ],
+      "tests": [
+        "tests/authorization.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "object-rail",
+      "include": [
+        "core/object-rail.ts"
+      ],
+      "tests": [
+        "tests/object-rail.test.ts"
+      ],
+      "branches": true
+    },
+    {
       "name": "v01235-control-plane",
       "include": [
-        "src/runtime-execution-attempt.ts",
-        "src/context-working-set.ts",
-        "src/graph-compiler.ts",
-        "src/capability-intake.ts",
-        "src/workbench-command.ts"
+        "core/runtime-execution-attempt.ts",
+        "core/context-working-set.ts",
+        "core/graph-compiler.ts",
+        "core/capability-intake.ts",
+        "core/workbench-command.ts"
       ],
       "tests": [
         "tests/v01235-control-plane.test.ts"
@@ -55,10 +205,10 @@
     {
       "name": "federated-runtime",
       "include": [
-        "src/federated-delegation.ts",
-        "src/harness-topology.ts",
-        "src/runtime-readiness.ts",
-        "src/runtime-model-probe.ts"
+        "core/federated-delegation.ts",
+        "core/harness-topology.ts",
+        "core/runtime-readiness.ts",
+        "core/runtime-model-probe.ts"
       ],
       "tests": [
         "tests/federated-runtime.test.ts"
@@ -68,7 +218,7 @@
     {
       "name": "assured-pilot",
       "include": [
-        "src/assured-pilot.ts"
+        "core/assured-pilot.ts"
       ],
       "tests": [
         "tests/assured-pilot.test.ts"
@@ -78,7 +228,7 @@
     {
       "name": "capability-platform",
       "include": [
-        "src/capability-kit-runtime.ts"
+        "core/capability-kit-runtime.ts"
       ],
       "tests": [
         "tests/capability-platform.test.ts"
@@ -101,7 +251,7 @@
       "name": "engineering-evaluation-runner",
       "include": [
         "capability/engineering-evaluation-runner.ts",
-        "src/codex-driver.ts"
+        "core/codex-driver.ts"
       ],
       "tests": [
         "tests/engineering-evaluation-runner.test.ts",
@@ -112,10 +262,10 @@
     {
       "name": "activation-proof-and-runtime-acceptance",
       "include": [
-        "src/activation-proof.ts",
-        "src/component-history-migration.ts",
-        "src/decision-context-gate.ts",
-        "src/runtime-acceptance.ts"
+        "core/activation-proof.ts",
+        "core/component-history-migration.ts",
+        "core/decision-context-gate.ts",
+        "core/runtime-acceptance.ts"
       ],
       "tests": [
         "tests/activation-proof-and-history.test.ts",
@@ -130,9 +280,9 @@
       "include": [
         "capability/craft-knowledge/knowledge-source-registry.ts",
         "capability/craft-memory/memory-ledger.ts",
-        "src/context-resolution.ts",
-        "src/work-runtime-mode.ts",
-        "src/verified-work-loop.ts"
+        "core/context-resolution.ts",
+        "core/work-runtime-mode.ts",
+        "core/verified-work-loop.ts"
       ],
       "tests": [
         "tests/universal-runtime.test.ts",
@@ -150,8 +300,8 @@
     {
       "name": "continual-harness",
       "include": [
-        "src/continual-harness.ts",
-        "src/stateful-compute.ts"
+        "core/continual-harness.ts",
+        "core/stateful-compute.ts"
       ],
       "tests": [
         "tests/continual-harness.test.ts"
@@ -161,8 +311,8 @@
     {
       "name": "platform-ideal-state",
       "include": [
-        "src/uncertainty-policy.ts",
-        "src/release-qualification.ts"
+        "core/uncertainty-policy.ts",
+        "core/release-qualification.ts"
       ],
       "tests": [
         "tests/platform-ideal-state.test.ts"
@@ -172,11 +322,11 @@
     {
       "name": "component-plugins",
       "include": [
-        "src/host-protocol.ts",
-        "src/host-bridge.ts",
-        "src/interfaces/mcp/surface-registry.ts",
-        "src/interfaces/mcp/product-launch.ts",
-        "src/data-space.ts"
+        "core/host-protocol.ts",
+        "core/host-bridge.ts",
+        "core/interfaces/mcp/surface-registry.ts",
+        "core/interfaces/mcp/product-launch.ts",
+        "core/data-space.ts"
       ],
       "tests": [
         "tests/component-plugins.test.ts",
@@ -187,7 +337,7 @@
     {
       "name": "codex-component-hook-bridge",
       "include": [
-        "src/codex-hook-bridge.ts"
+        "core/codex-hook-bridge.ts"
       ],
       "tests": [
         "tests/codex-hook-bridge.test.ts"
@@ -197,7 +347,7 @@
     {
       "name": "verification-plane",
       "include": [
-        "src/verification-plane.ts"
+        "core/verification-plane.ts"
       ],
       "tests": [
         "tests/verification-plane.test.ts"
@@ -224,9 +374,9 @@
     {
       "name": "trust-web-runtime",
       "include": [
-        "src/trust-profile.ts",
-        "src/web-operation.ts",
-        "src/mcp-http.ts"
+        "core/trust-profile.ts",
+        "core/web-operation.ts",
+        "core/mcp-http.ts"
       ],
       "tests": [
         "tests/trust-web-runtime.test.ts",
@@ -238,7 +388,7 @@
     {
       "name": "generic-adapter-runtime",
       "include": [
-        "src/generic-adapter-runtime.ts"
+        "core/generic-adapter-runtime.ts"
       ],
       "tests": [
         "tests/generic-adapter-runtime.test.ts",
@@ -250,7 +400,7 @@
     {
       "name": "turn-cognitive-runtime",
       "include": [
-        "src/turn-cognitive-runtime.ts"
+        "core/turn-cognitive-runtime.ts"
       ],
       "tests": [
         "tests/turn-cognitive-runtime.test.ts"
@@ -260,9 +410,9 @@
     {
       "name": "remote-mcp-access",
       "include": [
-        "src/remote-mcp-access.ts",
-        "src/host-session-events.ts",
-        "src/outcome-observer.ts"
+        "core/remote-mcp-access.ts",
+        "core/host-session-events.ts",
+        "core/outcome-observer.ts"
       ],
       "tests": [
         "tests/remote-mcp-access.test.ts",
@@ -273,11 +423,11 @@
     {
       "name": "runtime-proof",
       "include": [
-        "src/remote-runtime.ts",
-        "src/oidc-jwks.ts",
-        "src/supply-chain-attestation.ts",
-        "src/runtime-acceptance.ts",
-        "src/a2a-v1-adapter.ts"
+        "core/remote-runtime.ts",
+        "core/oidc-jwks.ts",
+        "core/supply-chain-attestation.ts",
+        "core/runtime-acceptance.ts",
+        "core/a2a-v1-adapter.ts"
       ],
       "tests": [
         "tests/runtime-proof.test.ts",
@@ -289,7 +439,7 @@
     {
       "name": "durable-experience",
       "include": [
-        "src/durable-action-loop.ts",
+        "core/durable-action-loop.ts",
         "capability/craft-experience/experience-ledger.ts"
       ],
       "tests": [
@@ -301,8 +451,8 @@
     {
       "name": "trace-storage",
       "include": [
-        "src/trace-archive-store.ts",
-        "src/trace-archive-storage.ts"
+        "core/trace-archive-store.ts",
+        "core/trace-archive-storage.ts"
       ],
       "tests": [
         "tests/trace-archive-store.test.ts",
@@ -317,7 +467,7 @@
     {
       "name": "first-run-readiness",
       "include": [
-        "src/distribution-and-first-run.ts"
+        "core/distribution-and-first-run.ts"
       ],
       "tests": [
         "tests/first-run-readiness.test.ts"
@@ -327,7 +477,7 @@
     {
       "name": "ideal-state-gaps",
       "include": [
-        "src/context-retrieval-capture.ts"
+        "core/context-retrieval-capture.ts"
       ],
       "tests": [
         "tests/ideal-state-gaps.test.ts"
@@ -349,7 +499,7 @@
     {
       "name": "verification-sensor",
       "include": [
-        "src/verification-sensor.ts"
+        "core/verification-sensor.ts"
       ],
       "tests": [
         "tests/verification-sensor.test.ts"
@@ -359,7 +509,7 @@
     {
       "name": "trajectory-abstraction",
       "include": [
-        "src/trajectory-abstraction.ts"
+        "core/trajectory-abstraction.ts"
       ],
       "tests": [
         "tests/trajectory-abstraction.test.ts"
@@ -369,7 +519,7 @@
     {
       "name": "failure-attribution",
       "include": [
-        "src/failure-attribution.ts"
+        "core/failure-attribution.ts"
       ],
       "tests": [
         "tests/failure-attribution.test.ts"
@@ -379,7 +529,7 @@
     {
       "name": "declaration-consistency",
       "include": [
-        "src/declaration-consistency.ts"
+        "core/declaration-consistency.ts"
       ],
       "tests": [
         "tests/declaration-consistency.test.ts"
@@ -389,7 +539,7 @@
     {
       "name": "governance-pinning",
       "include": [
-        "src/governance-pinning.ts"
+        "core/governance-pinning.ts"
       ],
       "tests": [
         "tests/governance-pinning.test.ts"
@@ -399,7 +549,7 @@
     {
       "name": "mcp-forward-compat",
       "include": [
-        "src/mcp-forward-compat.ts"
+        "core/mcp-forward-compat.ts"
       ],
       "tests": [
         "tests/mcp-forward-compat.test.ts"
@@ -409,8 +559,8 @@
     {
       "name": "eval-suite",
       "include": [
-        "src/eval-suite.ts",
-        "src/eval-cases.ts"
+        "core/eval-suite.ts",
+        "core/eval-cases.ts"
       ],
       "tests": [
         "tests/eval-suite.test.ts"
@@ -420,7 +570,7 @@
     {
       "name": "subagent-execution",
       "include": [
-        "src/subagent-execution.ts"
+        "core/subagent-execution.ts"
       ],
       "tests": [
         "tests/subagent-execution.test.ts",
@@ -441,9 +591,9 @@
     {
       "name": "capability-protocol",
       "include": [
-        "src/capability-protocol.ts",
-        "src/hook-plane.ts",
-        "src/capability-catalog.ts"
+        "core/capability-protocol.ts",
+        "core/hook-plane.ts",
+        "core/capability-catalog.ts"
       ],
       "tests": [
         "tests/capability-protocol.test.ts",
@@ -473,7 +623,7 @@
     {
       "name": "shared-digest",
       "include": [
-        "src/digest.ts"
+        "core/digest.ts"
       ],
       "tests": [
         "tests/digest-canonical.test.ts"
@@ -483,7 +633,7 @@
     {
       "name": "shared-validation",
       "include": [
-        "src/validation.ts"
+        "core/validation.ts"
       ],
       "tests": [
         "tests/validation.test.ts"
@@ -493,7 +643,7 @@
     {
       "name": "compaction",
       "include": [
-        "src/compaction.ts"
+        "core/compaction.ts"
       ],
       "tests": [
         "tests/compaction-edges.test.ts",
@@ -507,7 +657,7 @@
     {
       "name": "context-projection",
       "include": [
-        "src/context-projection.ts"
+        "core/context-projection.ts"
       ],
       "tests": [
         "tests/context-projection.test.ts",
@@ -518,7 +668,7 @@
     {
       "name": "state-view",
       "include": [
-        "src/state-view.ts"
+        "core/state-view.ts"
       ],
       "tests": [
         "tests/state-view.test.ts",
@@ -529,9 +679,9 @@
     {
       "name": "agent-foundation",
       "include": [
-        "src/memory-governance.ts",
-        "src/workflow-dag.ts",
-        "src/task-state.ts"
+        "core/memory-governance.ts",
+        "core/workflow-dag.ts",
+        "core/task-state.ts"
       ],
       "tests": [
         "tests/v01231-agent-foundation.test.ts",
@@ -544,7 +694,7 @@
     {
       "name": "memory-governance",
       "include": [
-        "src/memory-governance.ts"
+        "core/memory-governance.ts"
       ],
       "tests": [
         "tests/v01231-agent-foundation.test.ts",
@@ -556,7 +706,7 @@
     {
       "name": "knowledge-promotion-policy",
       "include": [
-        "src/knowledge-auto-review.ts"
+        "core/knowledge-auto-review.ts"
       ],
       "tests": [
         "tests/knowledge-memory-operability.test.ts",
@@ -567,8 +717,8 @@
     {
       "name": "observability-memory",
       "include": [
-        "src/trace-review.ts",
-        "src/memory-maintenance.ts"
+        "core/trace-review.ts",
+        "core/memory-maintenance.ts"
       ],
       "tests": [
         "tests/v01232-observability-memory.test.ts"
@@ -578,8 +728,8 @@
     {
       "name": "mcp-tasks-runtime-proof",
       "include": [
-        "src/mcp-tasks.ts",
-        "src/runtime-proof.ts"
+        "core/mcp-tasks.ts",
+        "core/runtime-proof.ts"
       ],
       "tests": [
         "tests/mcp-tasks.test.ts",
@@ -591,8 +741,8 @@
     {
       "name": "legacy-knowledge-migration",
       "include": [
-        "src/legacy-knowledge-migration.ts",
-        "src/application/use-cases/legacy-knowledge-migration.ts"
+        "core/legacy-knowledge-migration.ts",
+        "core/application/use-cases/legacy-knowledge-migration.ts"
       ],
       "tests": [
         "tests/legacy-knowledge-migration.test.ts",

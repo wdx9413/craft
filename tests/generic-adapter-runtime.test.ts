@@ -4,12 +4,12 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftStore } from "../src/infrastructure/store.ts";
-import { V01226Runtime, defineAdapterManifest, importOpenApiDocument, type CommandSpawner } from "../src/generic-adapter-runtime.ts";
-import type { JsonObject } from "../src/infrastructure/store.ts";
-import { CraftService } from "../src/service.ts";
-import { McpServer } from "../src/mcp.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftStore } from "../core/infrastructure/store.ts";
+import { V01226Runtime, defineAdapterManifest, importOpenApiDocument, type CommandSpawner } from "../core/generic-adapter-runtime.ts";
+import type { JsonObject } from "../core/infrastructure/store.ts";
+import { CraftService } from "../core/service.ts";
+import { McpServer } from "../core/mcp.ts";
 
 async function fixture() { const root = await mkdtemp(join(tmpdir(), "craft-v01226-")); const store = await new CraftStore(craftPaths(root)).open(); return { root, store, runtime: new V01226Runtime(store) }; }
 async function close(f: Awaited<ReturnType<typeof fixture>>) { f.store.close(); await rm(f.root, { recursive: true, force: true }); }

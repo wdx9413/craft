@@ -4,12 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { existsSync, readdirSync } from "node:fs";
 import test from "node:test";
-import { McpServer, CORE_TOOLS } from "../src/mcp.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftService, VERSION } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
-import { TRACE_SCHEMA_VERSION, TraceKernel } from "../src/trace-kernel.ts";
-import { MaintenanceKernel } from "../src/maintenance.ts";
+import { McpServer, CORE_TOOLS } from "../core/mcp.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftService, VERSION } from "../core/service.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { TRACE_SCHEMA_VERSION, TraceKernel } from "../core/trace-kernel.ts";
+import { MaintenanceKernel } from "../core/maintenance.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-trace-evolution-"));

@@ -3,12 +3,12 @@ import { mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { McpServer, CORE_TOOLS, TOOLS } from "../src/mcp.ts";
-import { LocalIsolatedAdapter, processExitCode, runLocalProcess } from "../src/isolated.ts";
-import { decideExecution } from "../src/execution-policy.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftService } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
+import { McpServer, CORE_TOOLS, TOOLS } from "../core/mcp.ts";
+import { LocalIsolatedAdapter, processExitCode, runLocalProcess } from "../core/isolated.ts";
+import { decideExecution } from "../core/execution-policy.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftService } from "../core/service.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 
 test("capability planning creates an auditable minimal activation profile and rejects unsafe assets", async () => {
   const root = join(tmpdir(), `craft-v099-capability-${process.pid}-${Date.now()}`);

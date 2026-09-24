@@ -3,11 +3,11 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { GenericCliHostKernel } from "../src/generic-driver.ts";
-import type { HostExecutionResult } from "../src/host-driver.ts";
-import { defineHostProfile } from "../src/host-registry.ts";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
+import { GenericCliHostKernel } from "../core/generic-driver.ts";
+import type { HostExecutionResult } from "../core/host-driver.ts";
+import { defineHostProfile } from "../core/host-registry.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-generic-"));

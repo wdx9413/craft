@@ -3,11 +3,11 @@ import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
-import { CraftService } from "../src/service.ts";
-import { McpServer } from "../src/mcp.ts";
-import { ActionGatewayKernel, AcceptanceGateKernel, A2AProtocolKernel, DurableWorkerKernel, ProviderRouterKernel } from "../src/runtime-completion.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { CraftService } from "../core/service.ts";
+import { McpServer } from "../core/mcp.ts";
+import { ActionGatewayKernel, AcceptanceGateKernel, A2AProtocolKernel, DurableWorkerKernel, ProviderRouterKernel } from "../core/runtime-completion.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-v1213-"));

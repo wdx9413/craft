@@ -3,10 +3,10 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { Catalog } from "../src/catalog.ts";
-import { diffKnowledgeBase, KnowledgeIndex, scanKnowledgeBase } from "../src/knowledge-index.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftStore } from "../src/infrastructure/store.ts";
+import { Catalog } from "../core/catalog.ts";
+import { diffKnowledgeBase, KnowledgeIndex, scanKnowledgeBase } from "../core/knowledge-index.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftStore } from "../core/infrastructure/store.ts";
 
 /**
  * BM25 was added as an extra signal fused into the existing ranking, not as a

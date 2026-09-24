@@ -5,11 +5,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import test from "node:test";
-import { DockerSandboxAdapter, dockerRequestDigest, runDocker, type DockerResult, type DockerRunner } from "../src/docker-sandbox.ts";
-import { McpServer } from "../src/mcp.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftService } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
+import { DockerSandboxAdapter, dockerRequestDigest, runDocker, type DockerResult, type DockerRunner } from "../core/docker-sandbox.ts";
+import { McpServer } from "../core/mcp.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftService } from "../core/service.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 
 const dockerCaps = { filesystem: "workspace_overlay", network: "denied", features: ["process_isolation", "cancel"],
   network_allowlist: [], limits: { memory_mb: 128, timeout_ms: 1_000, pids: 32, cpu_count: 0.5 } };

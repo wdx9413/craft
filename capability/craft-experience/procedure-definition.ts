@@ -6,9 +6,9 @@
  */
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { stableDigest } from "../../src/digest.ts";
-import type { CraftPaths } from "../../src/infrastructure/paths.ts";
-import type { JsonObject } from "../../src/infrastructure/store.ts";
+import { stableDigest } from "../../core/digest.ts";
+import type { CraftPaths } from "../../core/infrastructure/paths.ts";
+import type { JsonObject } from "../../core/infrastructure/store.ts";
 
 export type ProcedureKind = "workflow" | "graph";
 

@@ -14,9 +14,9 @@ Trace、Verification、Evaluation、Capability Kit、Context/Memory、Host Sessi
 
 - **当前代码事实**：按 [`current-capability-matrix.md`](../technical/current-capability-matrix.md)、
   [`remote-mcp-session-observer.md`](../technical/modules/remote-mcp-session-observer.md)、
-  [`remote-mcp-access.ts`](../../src/remote-mcp-access.ts)、
-  [`host-session-events.ts`](../../src/host-session-events.ts) 和
-  [`outcome-observer.ts`](../../src/outcome-observer.ts) 判断。
+  [`remote-mcp-access.ts`](../../core/remote-mcp-access.ts)、
+  [`host-session-events.ts`](../../core/host-session-events.ts) 和
+  [`outcome-observer.ts`](../../core/outcome-observer.ts) 判断。
 - **行业事实**：仅取协议所有方或模型厂商的一手公开资料；每项之后与 Craft 的结论
   分开写。
 - “本地契约 + 单元测试”不视为“真实 IdP、真实 Host、真实业务环境已经部署”。

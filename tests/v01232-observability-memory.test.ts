@@ -3,13 +3,13 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { ComponentTraceKernel } from "../src/component-trace.ts";
-import { MaintenanceKernel } from "../src/maintenance.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { McpServer } from "../src/mcp.ts";
-import { CraftService } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
-import { TraceKernel } from "../src/trace-kernel.ts";
+import { ComponentTraceKernel } from "../core/component-trace.ts";
+import { MaintenanceKernel } from "../core/maintenance.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { McpServer } from "../core/mcp.ts";
+import { CraftService } from "../core/service.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { TraceKernel } from "../core/trace-kernel.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-v01232-"));

@@ -3,10 +3,10 @@ import test from "node:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftStore } from "../src/infrastructure/store.ts";
-import { EvaluationContractKernel } from "../src/evaluation-contract.ts";
-import { digestContract, normalizeTaskSemantics, validateHarness } from "../src/runtime-contracts.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftStore } from "../core/infrastructure/store.ts";
+import { EvaluationContractKernel } from "../core/evaluation-contract.ts";
+import { digestContract, normalizeTaskSemantics, validateHarness } from "../core/runtime-contracts.ts";
 
 test("v0.12.34 normalizes task semantics and keeps turn mode lightweight", () => {
   assert.deepEqual(normalizeTaskSemantics({ goal: "chat", mode: "turn", target: { subject: "ignored" } }), { goal: "chat", mode: "turn" });

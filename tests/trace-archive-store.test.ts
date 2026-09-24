@@ -11,7 +11,7 @@ import {
   ObjectTraceArchiveStore,
   type TraceArchiveBundle,
   type TraceObjectBackend,
-} from "../src/trace-archive-store.ts";
+} from "../core/trace-archive-store.ts";
 
 function bundle(): TraceArchiveBundle {
   return {

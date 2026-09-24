@@ -3,9 +3,9 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { configureSemanticSearch, initializeConfig, loadConfig, setMode, type InitInput } from "../src/config.ts";
-import { atomicPrivateJson, craftPaths, dataRoot, ensureLayout } from "../src/infrastructure/paths.ts";
-import type { JsonObject } from "../src/infrastructure/store.ts";
+import { configureSemanticSearch, initializeConfig, loadConfig, setMode, type InitInput } from "../core/config.ts";
+import { atomicPrivateJson, craftPaths, dataRoot, ensureLayout } from "../core/infrastructure/paths.ts";
+import type { JsonObject } from "../core/infrastructure/store.ts";
 
 async function temporaryRoot(): Promise<string> {
   const root = join(tmpdir(), `craft-ts-${process.pid}-${Date.now()}-${Math.random()}`);

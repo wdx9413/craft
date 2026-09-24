@@ -14,7 +14,7 @@ import {
   type Hook,
   type HookContext,
   type HookOutcome,
-} from "../src/capability-protocol.ts";
+} from "../core/capability-protocol.ts";
 
 const base = { input_digest: "sha256:x", scope_kind: "project" as const, scope_id: "p" };
 

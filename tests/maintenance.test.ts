@@ -3,10 +3,10 @@ import { mkdir, mkdtemp, readdir, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { LocalMaintenanceWorker, MaintenanceKernel } from "../src/maintenance.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftService } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
+import { LocalMaintenanceWorker, MaintenanceKernel } from "../core/maintenance.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftService } from "../core/service.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 
 async function fixture() { const root = await mkdtemp(path.join(tmpdir(), "craft-maintenance-")); const paths = craftPaths(root); const store = await new CraftStore(paths).open(); const service = new CraftService(store); return { root, paths, store, service, kernel: new MaintenanceKernel(service) }; }
 type PrivateWorker = { acquire(retry?: boolean): Promise<void>; release(): Promise<void>; heartbeat(now: string): Promise<void>; reclaimStale(): Promise<void>; assertSameOwner(expected: JsonObject, actual: JsonObject): void };

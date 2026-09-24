@@ -7,9 +7,9 @@ import assert from "node:assert/strict";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { RuntimeProofKernel } from "../src/runtime-proof.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { RuntimeProofKernel } from "../core/runtime-proof.ts";
 
 async function setup() {
   const root = await mkdtemp(join(tmpdir(), "craft-runtime-proof-"));

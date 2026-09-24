@@ -1,0 +1,13 @@
+{
+  "name": "craft-workbench-desktop",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "prepare-sidecar": "node scripts/prepare-sidecar.mjs",
+    "dev": "pnpm run prepare-sidecar && tauri dev",
+    "build": "pnpm run prepare-sidecar && tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0"
+  }
+}

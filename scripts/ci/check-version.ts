@@ -1,7 +1,7 @@
 import { existsSync, readdirSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
-import { RELEASE_PRODUCTS } from "../../src/release-catalog.ts";
+import { RELEASE_PRODUCTS } from "../../core/release-catalog.ts";
 
 /**
  * One release version, enforced.
@@ -38,9 +38,9 @@ for (const path of RELEASE_PRODUCTS.filter((product) => product.hookMember).map(
   if (manifestVersion !== packageVersion) throw new Error(`${path} version ${String(manifestVersion)} differs from package.json ${packageVersion}`);
 }
 
-const versionSource = await readFile(resolve(root, "src/version.ts"), "utf8");
+const versionSource = await readFile(resolve(root, "core/version.ts"), "utf8");
 const match = versionSource.match(/CRAFT_RELEASE_VERSION = "([^"]+)"/u);
-if (match?.[1] !== packageVersion) throw new Error(`src/version.ts CRAFT_RELEASE_VERSION differs from package.json ${packageVersion}`);
+if (match?.[1] !== packageVersion) throw new Error(`core/version.ts CRAFT_RELEASE_VERSION differs from package.json ${packageVersion}`);
 
 for (const path of ["capability/craft-knowledge/package.json", "capability/craft-memory/package.json", "capability/craft-experience/package.json", "capability/craft-codebase/package.json", "adapters/deepseek-harness/package.json"]) {
   const component = await json(path);
@@ -123,7 +123,7 @@ function walk(dir: string, out: string[] = []): string[] {
   return out;
 }
 
-const versionedSources = walk(resolve(root, "src"))
+const versionedSources = walk(resolve(root, "core"))
   .map((file) => relative(root, file).split("\\").join("/"))
   .filter((path) => /(^|\/)v\d{4,}[-.]/u.test(path));
 

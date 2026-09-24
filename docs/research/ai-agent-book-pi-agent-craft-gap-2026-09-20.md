@@ -230,10 +230,10 @@ Craft 的目标边界来自 [ADR-0021](../adr/0021-agent-harness-runtime-context
 | 能力 | Craft 当前证据 | 判断 | 与 Pi/书相比的主要差距 |
 |---|---|---|---|
 | Agent loop | [Agent-native runtime](../technical/modules/agent-native-runtime.md)明确 Host 执行、Craft 治理 | 边界正确 | 缺标准化的 turn/model/tool/effect 细粒度适配；尚不能从真实 Host 事件判断“还在思考、卡工具、已自然停”。 |
-| Host session | [`src/host-session-events.ts`](../../src/host-session-events.ts)实现连续序号、幂等事件、摘要/引用、不存原始聊天 | 已实现控制面骨架 | 事件种类较粗，缺 turn/lane/tool invocation/pending effect/settlement/heartbeat。 |
-| 防跑偏/验收 | [`src/verified-work-loop.ts`](../../src/verified-work-loop.ts)绑定 Task/Contract/Run/Snapshot；workspace drift 和连续无进展会 `needs_replan` | 已实现并有测试 | “进展”主要看 snapshot/state，未消费 Host 工具指纹、重复错误、上下文退化和里程碑语义。 |
-| 长任务 | [`src/long-task-worker.ts`](../../src/long-task-worker.ts)支持 suspend、wake、revalidate、fresh host dispatch、expiry tick | 协议存在 | 没有证明实际 scheduler、lease、heartbeat、worker crash recovery 与外部唤醒已部署运行。 |
-| Compaction | [`src/compaction.ts`](../../src/compaction.ts)统一预算、protected segments、加权选择、fallback、promotion | 策略较强 | 缺 Host 轮次完整性、branch summary、overflow retry、summary lineage 与真实 provider token 使用联动。 |
+| Host session | [`src/host-session-events.ts`](../../core/host-session-events.ts)实现连续序号、幂等事件、摘要/引用、不存原始聊天 | 已实现控制面骨架 | 事件种类较粗，缺 turn/lane/tool invocation/pending effect/settlement/heartbeat。 |
+| 防跑偏/验收 | [`src/verified-work-loop.ts`](../../core/verified-work-loop.ts)绑定 Task/Contract/Run/Snapshot；workspace drift 和连续无进展会 `needs_replan` | 已实现并有测试 | “进展”主要看 snapshot/state，未消费 Host 工具指纹、重复错误、上下文退化和里程碑语义。 |
+| 长任务 | [`src/long-task-worker.ts`](../../core/long-task-worker.ts)支持 suspend、wake、revalidate、fresh host dispatch、expiry tick | 协议存在 | 没有证明实际 scheduler、lease、heartbeat、worker crash recovery 与外部唤醒已部署运行。 |
+| Compaction | [`src/compaction.ts`](../../core/compaction.ts)统一预算、protected segments、加权选择、fallback、promotion | 策略较强 | 缺 Host 轮次完整性、branch summary、overflow retry、summary lineage 与真实 provider token 使用联动。 |
 | Memory/Knowledge | [Context & Memory](../technical/modules/context-memory.md)区分工作/情景/偏好/程序记忆并设候选治理 | 模型比 Pi 完整 | 数据是否落地、候选审核入口、冲突合并、检索注入和回执仍需端到端操作性验证。 |
 | Tools/Permissions | Capability/Policy/Contract/Receipt 的治理意图强于 Pi 默认 | 方向正确 | 真实 Host 是否能在每个副作用前停住、未知结果如何 reconcile，尚缺参考适配器和故障注入证据。 |
 | Skills/Extensions | 有 Capability 搜索、门禁和可路由 Workflow | 治理强、开发便利性较弱 | 缺 Pi 式低摩擦包生态和动态 loadout 转录；但不能以牺牲权限边界换便利。 |
@@ -418,7 +418,7 @@ Craft 目前“设计大体齐、纵向实证不足”。下一步最有价值�
 - [Agent-native runtime](../technical/modules/agent-native-runtime.md)
 - [Long Task Worker](../technical/modules/long-task-worker.zh-CN.md)
 - [Context & Memory](../technical/modules/context-memory.md)
-- [`HostSessionEventKernel`](../../src/host-session-events.ts)
-- [`VerifiedWorkLoopKernel`](../../src/verified-work-loop.ts)
-- [`LongTaskWorkerKernel`](../../src/long-task-worker.ts)
-- [Compaction implementation](../../src/compaction.ts)
+- [`HostSessionEventKernel`](../../core/host-session-events.ts)
+- [`VerifiedWorkLoopKernel`](../../core/verified-work-loop.ts)
+- [`LongTaskWorkerKernel`](../../core/long-task-worker.ts)
+- [Compaction implementation](../../core/compaction.ts)

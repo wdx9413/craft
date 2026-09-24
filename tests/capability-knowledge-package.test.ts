@@ -19,15 +19,15 @@ import { KnowledgeSourceRegistry } from "../capability/craft-knowledge/knowledge
 import { ProjectBrainKernel } from "../capability/craft-knowledge/project-brain.ts";
 import { ProjectKnowledgeKernel } from "../capability/craft-knowledge/project-knowledge.ts";
 import { WikiCandidateGovernanceKernel } from "../capability/craft-knowledge/wiki-candidate-governance.ts";
-import { CRAFT_CAPABILITIES } from "../src/capability-catalog.ts";
-import { buildCapabilityRegistry, CORE_KERNELS } from "../src/capability-protocol.ts";
-import { CraftStore } from "../src/infrastructure/store.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { PROVIDER_CATALOG } from "../src/model-gateway.ts";
-import { ACTIVE_TOOLS } from "../src/interfaces/mcp-server.ts";
-import { COMPONENT_SURFACES } from "../src/interfaces/mcp/surface-registry.ts";
-import { surfaceToolNames } from "../src/mcp.ts";
-import { CraftService } from "../src/service.ts";
+import { CRAFT_CAPABILITIES } from "../core/capability-catalog.ts";
+import { buildCapabilityRegistry, CORE_KERNELS } from "../core/capability-protocol.ts";
+import { CraftStore } from "../core/infrastructure/store.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { PROVIDER_CATALOG } from "../core/model-gateway.ts";
+import { ACTIVE_TOOLS } from "../core/interfaces/mcp-server.ts";
+import { COMPONENT_SURFACES } from "../core/interfaces/mcp/surface-registry.ts";
+import { surfaceToolNames } from "../core/mcp.ts";
+import { CraftService } from "../core/service.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-knowledge-package-"));

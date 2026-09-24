@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import type { JsonObject } from "../src/infrastructure/store.ts";
+import type { JsonObject } from "../core/infrastructure/store.ts";
 import {
   MCP_ASSESSED_REVISION,
   MCP_MIGRATION_STATUS,
@@ -16,7 +16,7 @@ import {
   isolationCapability,
   negotiateProtocolVersion,
   readCredentialFile
-} from "../src/distribution-and-first-run.ts";
+} from "../core/distribution-and-first-run.ts";
 
 async function workspace(): Promise<{ root: string; cleanup: () => Promise<void> }> {
   const root = await mkdtemp(path.join(tmpdir(), "craft-v01233-"));

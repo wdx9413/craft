@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
-import { CraftStore, type JsonObject } from "../../src/infrastructure/store.ts";
-import { text } from "../../src/validation.ts";
-import { digestJson } from "../../src/digest.ts";
+import { CraftStore, type JsonObject } from "../../core/infrastructure/store.ts";
+import { text } from "../../core/validation.ts";
+import { digestJson } from "../../core/digest.ts";
 
 function id(prefix: string): string { return `${prefix}_${randomUUID().replaceAll("-", "")}`; }
 

@@ -3,12 +3,12 @@ import { mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftStore, SCHEMA_VERSION, type JsonObject } from "../src/infrastructure/store.ts";
-import { defineHook, defaultHooks, runHooks, planHooks, type HookRun } from "../src/hooks.ts";
-import { RuntimeDriver, runtimeDriverInternalsForTest, type RuntimeOperation } from "../src/runtime-driver.ts";
-import { ExternalEffectKernel } from "../src/effects.ts";
-import { HookedEffectKernel } from "../src/hooked-effect-kernel.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftStore, SCHEMA_VERSION, type JsonObject } from "../core/infrastructure/store.ts";
+import { defineHook, defaultHooks, runHooks, planHooks, type HookRun } from "../core/hooks.ts";
+import { RuntimeDriver, runtimeDriverInternalsForTest, type RuntimeOperation } from "../core/runtime-driver.ts";
+import { ExternalEffectKernel } from "../core/effects.ts";
+import { HookedEffectKernel } from "../core/hooked-effect-kernel.ts";
 
 async function fixture(): Promise<{ root: string; store: CraftStore; runtime: RuntimeDriver }> {
   const root = join(tmpdir(), `craft-runtime-${process.pid}-${Date.now()}-${Math.random()}`);
@@ -435,7 +435,7 @@ test("runHooksSync returns blocked when a fail_closed hook fails synchronously",
       target: "builtin:audit-log", fail_policy: "fail_closed", timeout_ms: 1000,
     }),
   ];
-  const result = await import("../src/hooks.ts").then((m) => m.runHooksSync(hooks, "before_effect", {}, {
+  const result = await import("../core/hooks.ts").then((m) => m.runHooksSync(hooks, "before_effect", {}, {
     invoke: () => ({ ok: false, detail: "denied" }),
   }));
   assert.equal(result.blocked, true);
@@ -448,7 +448,7 @@ test("runHooksSync surfaces thrown exceptions as failed outcomes", async () => {
       target: "builtin:audit-log", fail_policy: "fail_closed", timeout_ms: 1000,
     }),
   ];
-  const m = await import("../src/hooks.ts");
+  const m = await import("../core/hooks.ts");
   const result = m.runHooksSync(hooks, "before_effect", {}, {
     invoke: () => { throw new Error("sync boom"); },
   });
@@ -667,7 +667,7 @@ test("runHooksSync completes and returns blocked=false on the happy path", async
   // The final return statement must be reached when no hook fails —
   // proving the loop terminates with `blocked = false` rather than
   // returning early through the fail_closed branch.
-  const m = await import("../src/hooks.ts");
+  const m = await import("../core/hooks.ts");
   const hooks = [
     defineHook({
       id: "audit-ok", point: "before_effect", kind: "builtin",

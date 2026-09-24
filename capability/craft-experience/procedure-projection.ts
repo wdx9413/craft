@@ -10,10 +10,10 @@
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import type { CraftStore, JsonObject } from "../../src/infrastructure/store.ts";
-import { stableDigest, payload } from "../../src/digest.ts";
+import type { CraftStore, JsonObject } from "../../core/infrastructure/store.ts";
+import { stableDigest, payload } from "../../core/digest.ts";
 import { ProcedureDefinitionStore, procedureDefinitionRef, type ProcedureDefinition, type ProcedureKind } from "./procedure-definition.ts";
-import { scopeEnvelope } from "../../src/scope-policy.ts";
+import { scopeEnvelope } from "../../core/scope-policy.ts";
 
 const STAGES = ["shadow", "held_out", "signoff", "canary"] as const;
 type Stage = typeof STAGES[number];

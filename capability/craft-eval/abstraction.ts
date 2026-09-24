@@ -15,8 +15,8 @@
  * No model call, so no credential is needed:
  *   node --experimental-strip-types eval/abstraction.ts
  */
-import { abstractAcrossTrajectories } from "../../src/trajectory-abstraction.ts";
-import { summarizeAttributions } from "../../src/failure-attribution.ts";
+import { abstractAcrossTrajectories } from "../../core/trajectory-abstraction.ts";
+import { summarizeAttributions } from "../../core/failure-attribution.ts";
 
 // Observed live: 'craft' -> 'tfarC' (run 1) and 'tfarc' expected; the same
 // case-folding defect recurred on a second reverse attempt in run 2.

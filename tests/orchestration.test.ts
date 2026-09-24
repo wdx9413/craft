@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { addCosts, dispatchNodes, normalizeNodes, orchestrationOutcome, planStatus,
-  recoverExpiredLeases, submitNode } from "../src/orchestration.ts";
+  recoverExpiredLeases, submitNode } from "../core/orchestration.ts";
 
 const base = () => normalizeNodes([
   { id: "research", role: "researcher", objective: "find", profile_ids: ["astra", "luna"] },

@@ -3,11 +3,11 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { compact, compactWithPromotion } from "../src/compaction.ts";
-import { ContextProjectionKernel } from "../src/context-projection.ts";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { StateViewKernel } from "../src/state-view.ts";
+import { compact, compactWithPromotion } from "../core/compaction.ts";
+import { ContextProjectionKernel } from "../core/context-projection.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { StateViewKernel } from "../core/state-view.ts";
 
 /**
  * The validation and edge branches of the compaction policy, the durable projection, and the state

@@ -4,12 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { Server } from "node:http";
-import { createMcpHttpHandler, serveMcpHttp } from "../src/mcp-http.ts";
-import { RemoteMcpAccessPolicy } from "../src/remote-mcp-access.ts";
-import { McpServer } from "../src/mcp.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftService } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
+import { createMcpHttpHandler, serveMcpHttp } from "../core/mcp-http.ts";
+import { RemoteMcpAccessPolicy } from "../core/remote-mcp-access.ts";
+import { McpServer } from "../core/mcp.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftService } from "../core/service.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-v01225-"));

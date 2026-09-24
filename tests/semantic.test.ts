@@ -3,13 +3,13 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { Catalog } from "../src/catalog.ts";
-import { initializeConfig } from "../src/config.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
+import { Catalog } from "../core/catalog.ts";
+import { initializeConfig } from "../core/config.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
 import { cosine, embeddingFingerprint, OpenAiCompatibleEmbeddingProvider, sanitizeEmbeddingText, semanticFailureReason,
-  type EmbeddingProvider } from "../src/semantic.ts";
-import { CraftStore } from "../src/infrastructure/store.ts";
-import { CraftService } from "../src/service.ts";
+  type EmbeddingProvider } from "../core/semantic.ts";
+import { CraftStore } from "../core/infrastructure/store.ts";
+import { CraftService } from "../core/service.ts";
 
 class StubEmbeddings implements EmbeddingProvider {
   readonly fingerprint: string;

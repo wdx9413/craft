@@ -12,14 +12,14 @@
 | Domain / scope | Authoritative source | Source type | Reviewed date |
 |---|---|---|---|
 | Runtime vocabulary and lifecycle | `CONTEXT.md` | domain context | 2026-09-17 |
-| Desktop/package boundaries | `scripts/package-desktop.ts`, `scripts/windows-launcher.cs` | implementation contract | 2026-09-17 |
+| Desktop/package boundaries | `desktop/src-tauri`, `desktop/scripts/prepare-sidecar.mjs` | implementation contract | 2026-09-24 |
 | Model credentials | `src/settings.ts`, `src/model-gateway.ts` | security implementation | 2026-09-17 |
 
 ## Visual contract
 
 - Project `DESIGN.md`: `DESIGN.md`.
 - Token ownership: existing runtime CSS is canonical.
-- Runtime source: `studio/app.css`, served by `src/workbench-server.ts` and copied by `scripts/package-desktop.ts`.
+- Runtime source: `workbench/app.css`, served by `core/workbench-server.ts` and copied into the Tauri sidecar by `desktop/scripts/prepare-sidecar.mjs`.
 - Themes: light (default), dark and system-following; reduced motion is always respected.
 
 ## Canonical UI Map
@@ -30,6 +30,7 @@
 | Scrollbar | Global Studio stylesheet | `studio/app.css` | geometry exceptions only | stylesheet assertion |
 | Toast | Studio toast host | `studio/app.js` | success / warning / info / error | interaction review |
 | CRUD | Same-origin Studio API | `src/workbench-server.ts` | model create / edit / delete | `tests/studio-server.test.ts` |
+| Desktop observation | UIA discovery, then visual/OCR fallback | `adapters/windows-uia.ps1`, `adapters/windows-vision-cli.ts` | semantic / visual fallback | adapter contract tests |
 
 ## Component behavior
 
@@ -50,6 +51,10 @@ Buttons and icon buttons use native `<button>` elements, pointer cursors, hover/
 | Edit memory | Memory inline editor | save a replacement record; do not rewrite prior memory | Memory | toast | retain entered content and show error | inline editor | `studio/app.js` |
 | Edit knowledge page | Knowledge inline editor | save a new local Markdown revision | Knowledge | toast | retain entered content and show error | inline editor | `studio/app.js` |
 | Edit workflow | Workflow inline editor | save a draft version; no automatic execution | Workflows | toast | retain entered JSON and show error | inline editor | `studio/app.js` |
+| In-app webpage | View menu / URL sheet | validate `http(s)` before opening | isolated `embedded` WebView | toast | preserve URL and show error | URL field | `workbench/app.js`, `desktop/src-tauri/src/lib.rs` |
+| Managed browser login | View menu / URL sheet | validate `http(s)` before opening | visible, independent Edge profile | toast, then user completes login | preserve URL and show error | URL field | `workbench/app.js`, `desktop/src-tauri/src/lib.rs`, `adapters/browser-cdp.ts` |
+| Observe self-drawn desktop UI | user selects an already-running application | UIA tree first; bundled local OCR match only when UIA is incomplete | evidence-only visual fallback | show candidate and confidence | no unique/fresh match: recapture or hand off | candidate review | `windows-uia.ps1`, `windows-vision-cli.ts` |
+| Visual desktop click | explicit user release | recapture and require exactly one OCR target | same target window | receipt | reject stale/ambiguous/low-confidence target | Craft approval | `windows-desktop-vision.ts` |
 
 ## Navigation and responsive behavior
 

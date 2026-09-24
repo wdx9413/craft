@@ -9,8 +9,8 @@
  *
  * This script mutates each fact in turn and confirms the check notices.
  */
-import { MCP_ASSESSED_REVISION, MCP_MIGRATION_STATUS, MCP_PROTOCOL_VERSIONS } from "../../src/distribution-and-first-run.ts";
-import { checkConsistency, mcpDeclarations, observeMcpFacts } from "../../src/declaration-consistency.ts";
+import { MCP_ASSESSED_REVISION, MCP_MIGRATION_STATUS, MCP_PROTOCOL_VERSIONS } from "../../core/distribution-and-first-run.ts";
+import { checkConsistency, mcpDeclarations, observeMcpFacts } from "../../core/declaration-consistency.ts";
 
 // Annotated with the observer's own parameter type: each mutation below is
 // *deliberately* wrong, so `base` must not inherit narrow literal types from the

@@ -3,11 +3,11 @@ import { mkdir, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import test from "node:test";
-import { McpServer } from "../src/mcp.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftService } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
-import { MCP_PREFERRED_PROTOCOL_VERSION, MCP_PROTOCOL_VERSIONS } from "../src/distribution-and-first-run.ts";
+import { McpServer } from "../core/mcp.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftService } from "../core/service.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { MCP_PREFERRED_PROTOCOL_VERSION, MCP_PROTOCOL_VERSIONS } from "../core/distribution-and-first-run.ts";
 
 /**
  * The supported MCP revision list must exist once.
@@ -21,13 +21,13 @@ import { MCP_PREFERRED_PROTOCOL_VERSION, MCP_PROTOCOL_VERSIONS } from "../src/di
 const ROOT = resolve(import.meta.dirname, "..");
 
 /** The one module allowed to define the list. */
-const DEFINITION = "src/distribution-and-first-run.ts";
+const DEFINITION = "core/distribution-and-first-run.ts";
 /**
  * The declaration side is deliberately a second copy: a claim that referenced
  * the implementation constant would compare a value with itself and could never
  * fail. See `declaration-consistency.ts` for the same reasoning.
  */
-const INDEPENDENT_DECLARATION = "src/declaration-consistency.ts";
+const INDEPENDENT_DECLARATION = "core/declaration-consistency.ts";
 
 async function sourceFiles(dir: string, out: string[] = []): Promise<string[]> {
   for (const entry of await readdir(dir, { withFileTypes: true })) {
@@ -40,7 +40,7 @@ async function sourceFiles(dir: string, out: string[] = []): Promise<string[]> {
 
 test("the supported MCP revision list is defined in exactly one place", async () => {
   const carriers: string[] = [];
-  for (const file of await sourceFiles(resolve(ROOT, "src"))) {
+  for (const file of await sourceFiles(resolve(ROOT, "core"))) {
     const source = await readFile(file, "utf8");
     // `2025-03-26` is the oldest supported revision and appears in no prose, so
     // it identifies a literal copy of the list rather than a mention of a
@@ -51,7 +51,7 @@ test("the supported MCP revision list is defined in exactly one place", async ()
   assert.deepEqual(carriers.sort(), [DEFINITION, INDEPENDENT_DECLARATION].sort());
 
   // The handler must not carry a second copy of the table.
-  const handler = await readFile(resolve(ROOT, "src/interfaces/mcp-server.ts"), "utf8");
+  const handler = await readFile(resolve(ROOT, "core/interfaces/mcp-server.ts"), "utf8");
   assert.equal(handler.includes("\"2025-03-26\""), false, "the initialize handler must not inline the revision list");
 });
 

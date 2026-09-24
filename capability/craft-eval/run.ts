@@ -11,9 +11,9 @@
  * Run with `WORKBUDDY_API_KEY` set:
  *   node --experimental-strip-types eval/run.ts
  */
-import { decideExperienceCapture } from "../../src/context-retrieval-capture.ts";
-import { evaluateVerificationCheck, summarizeVerification, verificationCaptureSignals } from "../../src/verification-sensor.ts";
-import { attributeFailure } from "../../src/failure-attribution.ts";
+import { decideExperienceCapture } from "../../core/context-retrieval-capture.ts";
+import { evaluateVerificationCheck, summarizeVerification, verificationCaptureSignals } from "../../core/verification-sensor.ts";
+import { attributeFailure } from "../../core/failure-attribution.ts";
 import { ask, EVAL_MODEL, requireEvaluationCredential } from "./model.ts";
 import { DETERMINISTIC_TASKS } from "./cases.ts";
 
@@ -68,7 +68,7 @@ console.log(`captured lessons: ${trajectories.filter((item) => item.captured ===
 
 // Feed the observed trajectories into the abstraction pass: it decides for
 // itself whether anything recurred enough to generalise.
-const { abstractAcrossTrajectories } = await import("../../src/trajectory-abstraction.ts");
+const { abstractAcrossTrajectories } = await import("../../core/trajectory-abstraction.ts");
 const abstraction = abstractAcrossTrajectories({ trajectories, scope: "project" });
 console.log(`abstractions: ${String(abstraction.abstraction_count)} sufficient_evidence=${String(abstraction.sufficient_evidence)}`);
 console.log(`trajectories:\n${JSON.stringify(trajectories, null, 1)}`);

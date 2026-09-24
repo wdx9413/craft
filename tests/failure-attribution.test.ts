@@ -3,12 +3,12 @@ import { mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { DEFAULT_INTERNAL_AUTHORIZATION, authorizedTools, classifyTool } from "../src/internal-tool-authorization.ts";
-import { McpServer, TOOLS } from "../src/mcp.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftService } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
-import { FAILURE_CLASSES, attributeFailure, summarizeAttributions } from "../src/failure-attribution.ts";
+import { DEFAULT_INTERNAL_AUTHORIZATION, authorizedTools, classifyTool } from "../core/internal-tool-authorization.ts";
+import { McpServer, TOOLS } from "../core/mcp.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftService } from "../core/service.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { FAILURE_CLASSES, attributeFailure, summarizeAttributions } from "../core/failure-attribution.ts";
 
 test("v0.12.38 names each failure class from its distinguishing signal", () => {
   // One signal per class, asserted in pipeline order.

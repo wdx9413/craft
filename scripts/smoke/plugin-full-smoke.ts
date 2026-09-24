@@ -5,7 +5,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { MCP_PREFERRED_PROTOCOL_VERSION } from "../../src/distribution-and-first-run.ts";
+import { MCP_PREFERRED_PROTOCOL_VERSION } from "../../core/distribution-and-first-run.ts";
 
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const pluginRoot = join(root, "plugins", "craft");

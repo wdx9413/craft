@@ -3,15 +3,15 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
-import { AutonomyKernel } from "../src/autonomy.ts";
-import { GenericCliHostKernel } from "../src/generic-driver.ts";
-import { defineHooks } from "../src/hooks.ts";
-import { defineHostProfile, hostProfilesFromConfig } from "../src/host-registry.ts";
-import { KnowledgeIndex, locateSnippet, scanKnowledgeBase } from "../src/knowledge-index.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
-import { classifyComplexity } from "../src/token-budget.ts";
-import { describeJsonFailure, normalizeWorkflowDefinition } from "../src/workflow-registry.ts";
+import { AutonomyKernel } from "../core/autonomy.ts";
+import { GenericCliHostKernel } from "../core/generic-driver.ts";
+import { defineHooks } from "../core/hooks.ts";
+import { defineHostProfile, hostProfilesFromConfig } from "../core/host-registry.ts";
+import { KnowledgeIndex, locateSnippet, scanKnowledgeBase } from "../core/knowledge-index.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { classifyComplexity } from "../core/token-budget.ts";
+import { describeJsonFailure, normalizeWorkflowDefinition } from "../core/workflow-registry.ts";
 
 async function scratch(name: string) {
   const root = await mkdtemp(join(tmpdir(), `craft-cov-${name}-${process.pid}-`));

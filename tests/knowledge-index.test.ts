@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { chunkMarkdown, diffKnowledgeBase, KnowledgeIndex, knowledgeQueryTokens, locateSnippet, scanKnowledgeBase } from "../src/knowledge-index.ts";
+import { chunkMarkdown, diffKnowledgeBase, KnowledgeIndex, knowledgeQueryTokens, locateSnippet, scanKnowledgeBase } from "../core/knowledge-index.ts";
 
 test("scanKnowledgeBase discovers markdown and computes digests", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-kn-"));

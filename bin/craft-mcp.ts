@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { serveMcpStdio } from "../src/mcp-stdio.ts";
-import { resolveMcpProductMode } from "../src/interfaces/mcp/product-launch.ts";
+import { serveMcpStdio } from "../core/mcp-stdio.ts";
+import { resolveMcpProductMode } from "../core/interfaces/mcp/product-launch.ts";
 
 // `--product` is the stable public entry point. `--surface` remains an
 // intentionally explicit compatibility seam for existing integrations.

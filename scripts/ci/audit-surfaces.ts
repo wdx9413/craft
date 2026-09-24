@@ -1,5 +1,5 @@
-import { ACTIVE_TOOLS } from "../../src/interfaces/mcp-server.ts";
-import { COMPONENT_SURFACES, SURFACE_RULES, domainSurfaceOf } from "../../src/interfaces/mcp/surface-registry.ts";
+import { ACTIVE_TOOLS } from "../../core/interfaces/mcp-server.ts";
+import { COMPONENT_SURFACES, SURFACE_RULES, domainSurfaceOf } from "../../core/interfaces/mcp/surface-registry.ts";
 
 /**
  * Checks that a tool's surface is the one its name declares.

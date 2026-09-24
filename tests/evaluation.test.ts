@@ -3,10 +3,10 @@ import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { aggregateEvaluation, compareEvaluationAggregates, type EvaluationAggregate } from "../src/evaluation.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftService } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
+import { aggregateEvaluation, compareEvaluationAggregates, type EvaluationAggregate } from "../core/evaluation.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftService } from "../core/service.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 
 test("evaluation aggregation summarizes numeric metrics and compares every direction", () => {
   const run = { id: "run", suite_id: "suite", suite_version: 1, split: "held_out",

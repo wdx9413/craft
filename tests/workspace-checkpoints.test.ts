@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import { mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
-import { McpServer } from "../src/mcp.ts";
+import { McpServer } from "../core/mcp.ts";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftService } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
-import { snapshotNodeKind } from "../src/workspace.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftService } from "../core/service.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { snapshotNodeKind } from "../core/workspace.ts";
 
 test("workspace checkpoints preserve a file-state timeline and require approval to restore", async () => {
   const root = join(tmpdir(), `craft-workspace-${process.pid}-${Date.now()}`);

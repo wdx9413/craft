@@ -3,14 +3,14 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { assetDigest, assetRef, defineAsset, routeAssets, type AssetEnvelope } from "../src/assets.ts";
-import { McpServer } from "../src/mcp.ts";
-import { compareAcrossModels, defineTrials } from "../src/model-independence.ts";
-import { defineProvider, type ChatRequest, type ChatResult, type ModelProviderSpec, type ModelTransport } from "../src/model-gateway.ts";
-import { craftPaths } from "../src/infrastructure/paths.ts";
-import { CraftService } from "../src/service.ts";
-import { CraftStore, type JsonObject } from "../src/infrastructure/store.ts";
-import { parseAction } from "../src/internal-host-driver.ts";
+import { assetDigest, assetRef, defineAsset, routeAssets, type AssetEnvelope } from "../core/assets.ts";
+import { McpServer } from "../core/mcp.ts";
+import { compareAcrossModels, defineTrials } from "../core/model-independence.ts";
+import { defineProvider, type ChatRequest, type ChatResult, type ModelProviderSpec, type ModelTransport } from "../core/model-gateway.ts";
+import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CraftService } from "../core/service.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { parseAction } from "../core/internal-host-driver.ts";
 
 const spec = (): ModelProviderSpec => defineProvider({ provider: "demo", label: "Demo", protocol: "openai-compatible",
   base_url: "https://example.test/v1", api_key_env: "DEMO_API_KEY", models: { standard: "demo-std" } });
