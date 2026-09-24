@@ -41,6 +41,18 @@ cov-*/
 /plugins/*/dist/
 /plugins/*/skills/
 
+# Tauri desktop shell. `desktop/scripts/prepare-sidecar.mjs` deletes and rebuilds
+# `src-tauri/resources/app` from `dist/`, the Workbench sources, `assets/ocr` and a
+# copy of the running Node executable on every dev and build run, and Cargo
+# regenerates `src-tauri/target`. Together they were 6.6 GB of regenerable output,
+# 88 MB of which is a single copied `node.exe`; none of it belongs in history. The
+# app source, `Cargo.lock`, the capability scope and `tauri.conf.json` stay tracked,
+# because the desktop contract test reads them. `gen/schemas` is Tauri-generated and
+# its own template ignores it.
+/desktop/src-tauri/target/
+/desktop/src-tauri/resources/app/
+/desktop/src-tauri/gen/schemas/
+
 # Credentials. Craft can import a desktop credential file, so a stray `.env` or key
 # in the working tree is a realistic accident. The secret detectors in
 # `src/federation.ts` and `src/materialization.ts` only run on specific data paths,
