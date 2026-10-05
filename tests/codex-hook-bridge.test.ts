@@ -74,6 +74,57 @@ test("Knowledge, Memory and Experience hooks resolve only their named Context me
   } finally { await dispose(f); }
 });
 
+test("Context Hook resolves one shared receipt and records each component without duplicate recall", async () => {
+  const f = await fixture();
+  try {
+    const cwd = resolve("/project/craft"); const scope = codexProjectScope(cwd)!;
+    f.service.knowledgeMemoryInstallBuiltins();
+    const evidence = f.service.evidenceRecord({ source_type: "program", confidence: "confirmed", claim: "fixture" });
+    const claim = f.service.knowledgeClaimSave({ source_id: "builtin.evidence-wiki", kind: "rule", scope: `project:${cwd}`, content: "Run focused verification.", evidence_ids: [evidence.id] }).claim as JsonObject;
+    f.service.knowledgeClaimReview({ claim_id: claim.id, status: "reviewed", reviewer: "fixture", reason: "verified" });
+    f.service.memoryLedgerRemember({ source_id: "builtin.evidence-wiki", kind: "preference", scope_kind: "project", scope_id: scope.id, content: "Prefer short feedback.", confidence: "bounded" });
+    const bridge = new CodexHookBridge(f.service);
+    const response = await bridge.handle("context", { hook_event_name: "UserPromptSubmit", cwd, session_id: "context-session", turn_id: "context-turn", prompt: "verification feedback" });
+    const injected = JSON.parse(String(response.additionalContext)) as JsonObject;
+    assert.equal(injected.source, "craft-context");
+    assert.equal(f.store.count("context_resolution_receipt"), 1);
+    const receipt = f.store.get("context_resolution_receipt", String(injected.receipt_id));
+    assert.deepEqual(receipt.members, ["experience", "knowledge", "memory"]);
+    assert.match(JSON.stringify(injected.selected), /focused verification|short feedback/u);
+    const proofs = f.store.list("activation_proof_receipt", 10);
+    assert.deepEqual(proofs.map((item) => item.component).sort(), ["experience", "knowledge", "memory"]);
+    assert(proofs.every((item) => item.context_receipt_id === receipt.id));
+    await bridge.handle("context", { hook_event_name: "UserPromptSubmit", cwd, prompt: "记住：我偏好无糖咖啡" });
+    assert.equal((f.service.memoryLedgerList({ scope_kind: "project", scope_id: scope.id, include_history: true }).memories as JsonObject[]).length, 2);
+  } finally { await dispose(f); }
+});
+
+test("Context Hook keeps sibling recall available after a rejected memory capture and records Experience once", async () => {
+  const f = await fixture();
+  try {
+    const bridge = new CodexHookBridge(f.service); const cwd = "/project/craft";
+    const original = f.service.memoryCaptureUserStatement;
+    f.service.memoryCaptureUserStatement = () => { throw new Error("fixture private content"); };
+    await bridge.handle("context", { hook_event_name: "UserPromptSubmit", cwd, prompt: "记住：我偏好无糖咖啡" });
+    f.service.memoryCaptureUserStatement = () => { throw "opaque failure"; };
+    await bridge.handle("context", { hook_event_name: "UserPromptSubmit", cwd, prompt: "记住：我偏好红茶" });
+    f.service.memoryCaptureUserStatement = original;
+    assert.equal(f.store.count("context_resolution_receipt"), 2);
+    const failures = f.store.events("codex-hook").filter((event) => event.event_type === "codex_hook.failed");
+    assert.equal(failures.length, 2);
+    assert.equal((failures[1]!.payload as JsonObject).error_type, "unknown");
+    assert.doesNotMatch(JSON.stringify(failures), /fixture private content|opaque failure|无糖咖啡|红茶/u);
+    await bridge.handle("context", { hook_event_name: "SessionStart", cwd, session_id: "session" });
+    await bridge.handle("context", { hook_event_name: "PostToolUse", cwd, session_id: "session", turn_id: "turn", tool_name: "Edit" });
+    await bridge.handle("context", { hook_event_name: "PostToolUse", cwd, session_id: "session", turn_id: "turn", tool_name: "Bash", tool_input: { command: "npm test" }, tool_response: { exit_code: 0 } });
+    await bridge.handle("context", { hook_event_name: "Stop", cwd, session_id: "session", turn_id: "turn" });
+    await bridge.handle("context", { hook_event_name: "SessionEnd", cwd, session_id: "session" });
+    assert.equal(f.store.list("workflow_evolution_observation", 10).length, 1);
+    assert.equal(f.store.events("codex-hook").filter((event) => event.event_type === "codex_hook.lifecycle").length, 9);
+    assert.deepEqual(await bridge.handle("context", { hook_event_name: "UnknownEvent", cwd }), {});
+  } finally { await dispose(f); }
+});
+
 test("Experience hooks persist only redacted verified signals and propose after two independent turns", async () => {
   const f = await fixture();
   try {

@@ -1,11 +1,16 @@
 # Changelog
 
-> Note on numbering: the declared package version is now **0.12.38**. Earlier
+> Note on numbering: the declared package version is now **0.12.39**. Earlier
 > `v0.12.34`–`v0.12.43` headings name **incremental work on the previous revision**,
 > not releases. Each is a self-contained change set with its own 100%-coverage
 > test script; the version bump happens only when the work is released.
 
-## v0.12.38（本次发布）
+## v0.12.39（本次发布）
+
+- `craft-context` 的 Codex/Claude 插件增加单入口生命周期 Hook：提示阶段一次解析 Knowledge、Memory、Experience 的共享限额回执；显式记忆写入失败不阻断其余召回；Experience 继续只记录脱敏的本地编辑与验证信号。
+- 单独安装 Context 即可保留四个子能力的 MCP 工具；独立插件仍可按需安装，Skill + MCP 的无 Hook 路径保持可用。
+
+## v0.12.38（历史发布）
 
 - 发布默认聚合的 `craft-context` 与 Knowledge、Memory、Experience、Codebase 四个独立组件，均提供 Codex、Claude、独立 Skill + MCP 和 DSH 接入；进入 Git 仓库自动建立或复用基础索引，Hook 保持可选。
 - 收紧 Knowledge 历史和当前读取权限、Qualification/Verification 身份绑定及检索无答案评测；Procedure 孤儿版本可在受控重试时恢复。
@@ -1836,7 +1841,7 @@ tests assert the tier rather than trusting the name.
 
 9 tests at 100% line, branch and function coverage.
 
-## v0.12.39
+## v0.12.39（历史增量工作）
 
 Declaration/implementation consistency (G8).
 

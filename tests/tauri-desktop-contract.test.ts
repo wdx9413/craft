@@ -21,7 +21,7 @@ test("Tauri desktop keeps the Workbench sidecar and untrusted embedded pages in 
   assert.match(rust, /recv_timeout/);
   assert.match(rust, /WebviewUrl::App\("index.html"/);
   assert.match(rust, /workbench_request/);
-  assert.equal(config.version, "0.12.38");
+  assert.equal(config.version, "0.12.39");
   assert.deepEqual(config.bundle.resources, { "../../dist/desktop/app/": "app/" });
   assert.match(rust, /Craft 本地运行时启动失败：/);
   assert.match(rust, /cli\.to_string_lossy\(\)\.replace\('\\\\', "\/"\)/);

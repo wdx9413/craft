@@ -112,15 +112,16 @@ test("component plugin manifests use public MCP products rather than internal su
     const server = mcp.mcpServers[name];
     assert.equal(manifest.name, name);
     assert.equal(manifest.version, VERSION);
-    if (["craft-knowledge", "craft-memory", "craft-experience"].includes(name)) assert.equal(manifest.hooks, "./hooks/codex-hooks.json");
+    if (["craft-context", "craft-knowledge", "craft-memory", "craft-experience"].includes(name)) assert.equal(manifest.hooks, "./hooks/codex-hooks.json");
     if (name === "craft-codebase") assert.equal(manifest.hooks, undefined);
     const product = name === "craft" ? "full" : name === "craft-experience" ? "experience" : name.slice(6);
     assert.deepEqual(server.args, ["dist/plugin/craft-mcp.cjs", "--product", product]);
   }
 });
 
-test("Knowledge, Memory, and Experience declare equivalent command-only lifecycle Hooks for Codex and Claude", async () => {
+test("Context and standalone products declare equivalent command-only lifecycle Hooks for Codex and Claude", async () => {
   const expected = {
+    "craft-context": { member: "context", events: ["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop", "SessionEnd"] },
     "craft-knowledge": { member: "knowledge", events: ["SessionStart", "UserPromptSubmit", "Stop", "SessionEnd"] },
     "craft-memory": { member: "memory", events: ["SessionStart", "UserPromptSubmit", "Stop", "SessionEnd"] },
     "craft-experience": { member: "experience", events: ["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop", "SessionEnd"] },

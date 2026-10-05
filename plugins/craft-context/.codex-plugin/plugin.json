@@ -1,6 +1,6 @@
 {
   "name": "craft-context",
-  "version": "0.12.38",
+  "version": "0.12.39",
   "description": "craft-context governed context and repository tools",
   "author": {
     "name": "wdx9413"
@@ -19,8 +19,8 @@
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Craft Context",
-    "shortDescription": "Give an Agent governed knowledge and memory.",
-    "longDescription": "Connect scoped knowledge sources, preserve evidence-linked memory, and resolve the smallest reproducible context pack. It never grants execution authority or silently imports private chat history.",
+    "shortDescription": "Provide governed knowledge, memory, experience, and repository context.",
+    "longDescription": "Resolve scoped Knowledge, Memory, and routeable Experience in one bounded receipt, and prepare a repository index when needed. It never grants execution authority or silently imports private chat history.",
     "developerName": "wdx9413",
     "category": "Productivity",
     "brandColor": "#000000",
@@ -30,11 +30,14 @@
       "Knowledge sources",
       "Evidence Wiki",
       "Memory ledger",
+      "Routeable procedures",
+      "Repository indexing",
       "Context resolution",
       "Retrieval evaluation"
     ],
     "defaultPrompt": [
-      "Use Craft Context to resolve the smallest relevant knowledge and memory set for this request. Explain the selected source versions and do not write a durable memory unless I explicitly approve it."
+      "Use Craft Context to resolve bounded project knowledge, memory, and verified procedures. Prepare repository structure only when relevant, explain the receipt and source versions, and write durable memory only on my explicit request."
     ]
-  }
+  },
+  "hooks": "./hooks/codex-hooks.json"
 }

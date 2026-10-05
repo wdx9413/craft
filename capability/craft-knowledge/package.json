@@ -1,6 +1,6 @@
 {
   "name": "@craft/capability-knowledge",
-  "version": "0.12.38",
+  "version": "0.12.39",
   "description": "Craft Knowledge capability: evidence-backed claims, Wiki context, relations, and the project index",
   "type": "module",
   "main": "./dist/capability.js",
@@ -50,9 +50,9 @@
   "license": "MIT",
   "types": "./dist/capability.d.ts",
   "dependencies": {
-    "craft-common-store-local": "0.12.38",
-    "craft-common-base": "0.12.38",
-    "craft-common-log": "0.12.38"
+    "craft-common-store-local": "0.12.39",
+    "craft-common-base": "0.12.39",
+    "craft-common-log": "0.12.39"
   },
   "engines": {
     "node": ">=23"

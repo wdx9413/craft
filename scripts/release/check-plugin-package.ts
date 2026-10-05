@@ -8,7 +8,7 @@ import { RELEASE_PRODUCTS } from "../../core/release-catalog.ts";
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const pluginRoot = join(root, "plugins", "craft");
 const componentNames = RELEASE_PRODUCTS.filter((product) => product.name !== "craft").map((product) => product.name);
-const hookMembers = { "craft-knowledge": "knowledge", "craft-memory": "memory", "craft-experience": "experience" } as const;
+const hookMembers = { "craft-context": "context", "craft-knowledge": "knowledge", "craft-memory": "memory", "craft-experience": "experience" } as const;
 const normalizeText = (value: string): string => value.replaceAll("\r\n", "\n");
 const packageJson = JSON.parse(await readFile(join(root, "package.json"), "utf8")) as { version: string };
 const pluginManifest = JSON.parse(await readFile(join(pluginRoot, ".codex-plugin", "plugin.json"), "utf8")) as { name: string; version: string; skills: string; mcpServers: string; interface?: { composerIcon?: string; logo?: string } };
@@ -62,7 +62,7 @@ for (const name of componentNames) {
 
 // Public products select only their declared bounded MCP product.  A stale or
 // widened value must never make a component bundle expose the full surface.
-for (const [name, product, hooked] of [["craft-knowledge", "knowledge", true], ["craft-memory", "memory", true], ["craft-experience", "experience", true], ["craft-codebase", "codebase", false]] as const) {
+for (const [name, product, hooked] of [["craft-context", "context", true], ["craft-knowledge", "knowledge", true], ["craft-memory", "memory", true], ["craft-experience", "experience", true], ["craft-codebase", "codebase", false]] as const) {
   const manifest = JSON.parse(await readFile(join(root, "plugins", name, ".claude-plugin", "plugin.json"), "utf8")) as {
     name: string; version: string; hooks?: string; mcpServers: Record<string, { args: string[] }>;
   };

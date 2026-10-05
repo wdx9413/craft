@@ -11,14 +11,14 @@ import { CRAFT_RELEASE_VERSION } from "./version.ts";
 export type ReleaseProduct = {
   readonly name: "craft" | "craft-context" | "craft-knowledge" | "craft-memory" | "craft-experience" | "craft-codebase";
   readonly surface: "full" | "component-context-daily" | "component-knowledge-daily" | "component-memory-daily" | "component-experience-daily" | "component-codebase";
-  readonly hookMember?: "knowledge" | "memory" | "experience";
+  readonly hookMember?: "context" | "knowledge" | "memory" | "experience";
   readonly category: "Productivity" | "Developer Tools";
   readonly external_marketplace: boolean;
 };
 
 export const RELEASE_PRODUCTS: readonly ReleaseProduct[] = [
   { name: "craft", surface: "full", category: "Productivity", external_marketplace: false },
-  { name: "craft-context", surface: "component-context-daily", category: "Developer Tools", external_marketplace: true },
+  { name: "craft-context", surface: "component-context-daily", hookMember: "context", category: "Developer Tools", external_marketplace: true },
   { name: "craft-knowledge", surface: "component-knowledge-daily", hookMember: "knowledge", category: "Productivity", external_marketplace: true },
   { name: "craft-memory", surface: "component-memory-daily", hookMember: "memory", category: "Productivity", external_marketplace: true },
   { name: "craft-experience", surface: "component-experience-daily", hookMember: "experience", category: "Developer Tools", external_marketplace: true },

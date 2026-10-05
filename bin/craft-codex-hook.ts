@@ -5,8 +5,8 @@ import { CodexHookBridge, type CodexHookMember } from "../core/codex-hook-bridge
 
 function member(argv: readonly string[]): CodexHookMember {
   const index = argv.indexOf("--member"); const value = index < 0 ? null : argv[index + 1];
-  if (value === "knowledge" || value === "memory" || value === "experience") return value;
-  throw new Error("--member must be knowledge, memory, or experience");
+  if (value === "context" || value === "knowledge" || value === "memory" || value === "experience") return value;
+  throw new Error("--member must be context, knowledge, memory, or experience");
 }
 
 async function main(): Promise<void> {

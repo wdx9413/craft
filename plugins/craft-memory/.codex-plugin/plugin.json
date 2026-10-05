@@ -1,6 +1,6 @@
 {
   "name": "craft-memory",
-  "version": "0.12.38",
+  "version": "0.12.39",
   "description": "craft-memory governed context and repository tools",
   "author": {
     "name": "wdx9413"

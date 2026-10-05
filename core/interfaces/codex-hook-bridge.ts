@@ -1,5 +1,5 @@
 /**
- * Bounded Codex lifecycle integration for the three standalone Craft products.
+ * Bounded Codex lifecycle integration for Craft Context and its standalone products.
  *
  * This module deliberately does not read transcripts, execute Host actions, or
  * mutate a Workflow. It turns the small, documented Hook event envelope into
@@ -13,7 +13,9 @@ import type { JsonObject } from "../infrastructure/store.ts";
 import { payload, stableDigest } from "../digest.ts";
 import { CRAFT_RELEASE_VERSION } from "../version.ts";
 
-export type CodexHookMember = "knowledge" | "memory" | "experience";
+type ComponentHookMember = "knowledge" | "memory" | "experience";
+export type CodexHookMember = "context" | ComponentHookMember;
+const CONTEXT_MEMBERS: readonly ComponentHookMember[] = ["knowledge", "memory", "experience"];
 type HookEvent = "SessionStart" | "SessionEnd" | "UserPromptSubmit" | "PostToolUse" | "Stop";
 type HookInput = JsonObject & {
   hook_event_name?: string;
@@ -179,6 +181,18 @@ export class CodexHookBridge {
   async handle(member: CodexHookMember, input: HookInput): Promise<JsonObject> {
     try {
       const event = text(input.hook_event_name) as HookEvent | null;
+      if (member === "context") {
+        if (event === "SessionStart" || event === "SessionEnd") {
+          for (const component of CONTEXT_MEMBERS) this.lifecycle(component, event, input, component === "memory");
+          return {};
+        }
+        if (event === "UserPromptSubmit") return await this.prompt(member, input);
+        if (event === "PostToolUse") return this.tool(input);
+        if (event === "Stop") {
+          for (const component of CONTEXT_MEMBERS) this.stop(component, input);
+        }
+        return {};
+      }
       if (event === "SessionStart" || event === "SessionEnd") return this.lifecycle(member, event, input);
       if (event === "UserPromptSubmit") return await this.prompt(member, input);
       if (event === "PostToolUse" && member === "experience") return this.tool(input);
@@ -194,27 +208,32 @@ export class CodexHookBridge {
   private async prompt(member: CodexHookMember, input: HookInput): Promise<JsonObject> {
     const scope = codexProjectScope(input.cwd); const prompt = text(input.prompt) ?? text(input.user_prompt);
     if (!scope || !prompt) return {};
+    const members = member === "context" ? CONTEXT_MEMBERS : [member];
     // Persist the current checkout only as an alias. The receipt still names the
     // canonical Git identity, so it is portable and does not leak the path.
     if (typeof input.cwd === "string") this.service.scopeIdentityResolveProject({ project_root: input.cwd });
     let memoryWritten = false;
-    if (member === "memory") {
+    if (members.includes("memory")) {
       const statement = explicitMemoryStatement(prompt);
       if (statement) {
-        this.service.memoryCaptureUserStatement({ content: statement, kind: "episodic", scope_kind: scope.kind, scope_id: scope.id,
-          explicit_consent: true, auto_accept: true, sensitivity: "internal" });
-        memoryWritten = true;
+        try {
+          this.service.memoryCaptureUserStatement({ content: statement, kind: "episodic", scope_kind: scope.kind, scope_id: scope.id,
+            explicit_consent: true, auto_accept: true, sensitivity: "internal" });
+          memoryWritten = true;
+        } catch (error) {
+          this.service.store.appendEvent("codex-hook", "codex_hook.failed", { member: "memory", event: "UserPromptSubmit", error_type: error instanceof Error ? error.name : "unknown" });
+        }
       }
     }
     const resolved = await this.service.contextResolutionResolve({ query: prompt, scope_kind: scope.kind, scope_id: scope.id,
-      members: [member], max_items: 6, max_chars: 3_000 });
+      members: [...members], max_items: 6, max_chars: 3_000 });
     const items = resolved.items as JsonObject[];
     const contributions = resolved.contributions as JsonObject[];
     const selected = [...items.map((item) => ({ type: "memory", id: item.memory_id, version: item.memory_version, content: item.content })),
       ...contributions.flatMap((contribution) => Array.isArray(contribution.items) ? contribution.items : [])];
     const receipt = resolved.receipt as JsonObject | null;
-    this.service.activationProofRecord({ host: hookHost(input), component: member, event: "UserPromptSubmit", session_id: text(input.session_id) ?? "unknown",
-      turn_id: text(input.turn_id), context_receipt_id: receipt?.id ?? undefined, memory_written: memoryWritten, observation_written: false,
+    for (const component of members) this.service.activationProofRecord({ host: hookHost(input), component, event: "UserPromptSubmit", session_id: text(input.session_id) ?? "unknown",
+      turn_id: text(input.turn_id), context_receipt_id: receipt?.id ?? undefined, memory_written: component === "memory" && memoryWritten, observation_written: false,
       plugin_release: CRAFT_RELEASE_VERSION, hook_trusted: true, mcp_reachable: true });
     if (!selected.length) return {};
     return { additionalContext: JSON.stringify({ source: `craft-${member}`, scope, receipt_id: receipt?.id ?? null, selected }) };
@@ -226,7 +245,7 @@ export class CodexHookBridge {
     return {};
   }
 
-  private stop(member: CodexHookMember, input: HookInput): JsonObject {
+  private stop(member: ComponentHookMember, input: HookInput): JsonObject {
     const finalized = member === "experience" ? this.learning.finalize(input) : null;
     this.service.activationProofRecord({ host: hookHost(input), component: member, event: "Stop", session_id: text(input.session_id) ?? "unknown",
       turn_id: text(input.turn_id), memory_written: false, observation_written: finalized !== null,
@@ -240,7 +259,7 @@ export class CodexHookBridge {
    * particular, readiness here is intentionally marked as readiness-only so a
    * lifecycle hook can never masquerade as a Knowledge/Memory retrieval.
    */
-  private lifecycle(member: CodexHookMember, event: HookEvent, input: HookInput): JsonObject {
+  private lifecycle(member: ComponentHookMember, event: HookEvent, input: HookInput, scheduleMaintenance = true): JsonObject {
     const readiness = this.service.componentReadinessGet({ component: member });
     const scope = codexProjectScope(input.cwd);
     this.service.store.appendEvent("codex-hook", "codex_hook.lifecycle", {
@@ -258,7 +277,7 @@ export class CodexHookBridge {
     this.service.activationProofRecord({ host: hookHost(input), component: member, event, session_id: text(input.session_id) ?? "unknown",
       turn_id: text(input.turn_id), memory_written: false, observation_written: false,
       plugin_release: CRAFT_RELEASE_VERSION, hook_trusted: true, mcp_reachable: true });
-    if (event === "SessionEnd") this.service.memoryMaintenanceSchedule({ stage: "light", lease_id: `codex-${member}-${text(input.session_id) ?? "unknown"}` });
+    if (event === "SessionEnd" && scheduleMaintenance) this.service.memoryMaintenanceSchedule({ stage: "light", lease_id: `codex-${member}-${text(input.session_id) ?? "unknown"}` });
     return {};
   }
 }
