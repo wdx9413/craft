@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { EvaluationModelProfileKernel } from "../capability/craft-experience/evaluation-model-profile.ts";
+import { validateGraphControl } from "../capability/craft-experience/procedure-graph.ts";
 import { McpServer, surfaceToolNames } from "../core/mcp.ts";
 import { PROVIDER_CATALOG } from "../core/model-gateway.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
@@ -19,6 +20,31 @@ async function close(f: Awaited<ReturnType<typeof fixture>>) { f.store.close(); 
 function observation(service: CraftService, id: string, sourceId: string, outcome: string = "passed") {
   return service.workflowEvolutionObserve({ observation_id: id, scenario_key: "support-refund", source_kind: "external_execution", source_id: sourceId, source_digest: `sha256:${sourceId}`, outcome, evidence_ids: ["confirmed"], sanitized: true, content_stored: false }).observation as JsonObject;
 }
+
+test("graph proposal retries compare validated control instead of silently changing it", async () => {
+  const f = await fixture();
+  try {
+    const nodes = [
+      { id: "start", type: "action", side_effect: "read_only", requires: [], provides: ["result"], acceptance_ref: "acceptance:start" },
+      { id: "exit", type: "action", side_effect: "read_only", requires: ["result"], provides: [], acceptance_ref: "acceptance:exit" },
+    ];
+    const edges = [{ id: "edge", from: "start", to: "exit", kind: "success", max_traversals: 1 }];
+    const control = { scenario_id: "scenario", title: "Scenario", entries: [{ id: "entry", node_id: "start", required_inputs: [], preconditions: [] }],
+      exits: [{ id: "done", node_id: "exit", required_outputs: ["result"], acceptance_ref: "acceptance:exit" }],
+      subscenarios: [{ id: "sub", title: "Sub", entry_id: "entry", exit_id: "done", allowed_nodes: ["start", "exit"], allowed_edges: ["edge"], allowed_effects: ["read_only"], max_transitions: 2, max_visits: 2 }] };
+    f.store.create("workflow_evolution_request", "graph-retry", { lifecycle: "awaiting_model", procedure_kind: "graph", scenario_key: "scenario" });
+    f.store.create("workflow_evolution_proposal", "graph-prior", { request_id: "graph-retry", graph: { graph_control: validateGraphControl(control, nodes, edges) } });
+    const retry = { request_id: "graph-retry", proposal_id: "graph-prior", graph_control: control, nodes, edges };
+    assert.equal(f.service.workflowEvolution.submit(retry).idempotent, true);
+    assert.throws(() => f.service.workflowEvolution.submit({ ...retry, graph_control: { ...control, title: "Changed" } }), /Graph proposal idempotency conflict/);
+    assert.throws(() => f.service.workflowEvolution.submit({ request_id: "graph-retry", proposal_id: "graph-prior" }), /Graph proposal idempotency conflict/);
+    f.store.create("workflow_evolution_proposal", "graph-missing-control", { request_id: "graph-retry", graph: {} });
+    assert.throws(() => f.service.workflowEvolution.submit({ ...retry, proposal_id: "graph-missing-control" }), /Graph proposal idempotency conflict/);
+    f.store.create("workflow_evolution_request", "graph-new", { lifecycle: "awaiting_model", procedure_kind: "graph", scenario_key: "scenario" });
+    const newProposal = f.service.workflowEvolution.submit({ request_id: "graph-new", proposal_id: "graph-new-proposal", workflow_id: "graph", name: "Graph", description: "Graph", inputs: [], nodes, edges, graph_control: control }).proposal as JsonObject;
+    assert.equal(((newProposal.graph as JsonObject).graph_control as JsonObject).scenario_id, "scenario");
+  } finally { await close(f); }
+});
 
 test("v0.12.24 reserves a secret-free model profile and fails closed until explicit enablement and credentials", async () => {
   const f = await fixture();

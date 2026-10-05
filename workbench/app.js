@@ -1,3 +1,12 @@
+import { createAssetRevisionPage } from './asset-revisions.js';
+import { createContextWorkflowPages } from './context-workflows.js';
+import { createResourcePages } from './resource-pages.js';
+import { createModelSetup } from './model-setup.js';
+import { createLatestRequest } from './latest-request.js';
+import { groupByFolder, createProjectPage } from './project-page.js';
+import { createRuntimeClient } from './runtime-client.js';
+import { mountEntry } from './entry-shell.js';
+
 /* Craft Workbench — desktop shell for the Craft runtime.
    Layout borrows from the VS Code family (fixed viewport, activity rail,
    document tabs, context panel, status bar) and from the AI desktop clients
@@ -15,7 +24,7 @@
     selectedTask: null, selectedTaskTitle: '', collapsedFolders: {}, showAllFolders: {}, folderGroups: null,
     counts: {}, settings: null, theme: 'light',
     execution: { mode: '', provider: null, tier: 'standard' },
-    pendingSheet: null, modelWizard: null,
+    pendingSheet: null,
     // The rail's task list has two shapes: grouped by folder (the default) or a
     // single flat list ordered by latest update. The rail header carries the
     // switch, so the shape is view state rather than a URL.
@@ -308,20 +317,10 @@
 
   // ---------------------------------------------------------------------- api
 
-  function api(path, init) {
-    init = init || {};
-    var headers = { authorization: 'Bearer ' + state.token };
-    if (init.body !== undefined) headers['content-type'] = 'application/json';
-    return fetch(path, { method: init.method || 'GET', headers: headers, body: init.body === undefined ? undefined : JSON.stringify(init.body) })
-      .then(function (response) {
-        return response.text().then(function (text) {
-          var data = {};
-          if (text) { try { data = JSON.parse(text); } catch (_) { data = { error: text }; } }
-          if (!response.ok) throw new Error(data.error || ('HTTP ' + response.status));
-          return data;
-        });
-      });
-  }
+  var api = createRuntimeClient({
+    invoke: window.__TAURI__ && window.__TAURI__.core ? window.__TAURI__.core.invoke : null,
+    fetch: window.fetch.bind(window), token: function () { return state.token; }
+  });
 
   function readUpload(input, accepted, callback) {
     var file = input && input.files && input.files[0];
@@ -469,6 +468,11 @@
   // A folder deliberately has no nav entry: it is an attribute of a task — picked
   // when the task is created and shown as a group in the rail — not a place. It
   // used to sit here as 一级菜单 and duplicated the rail's own grouping.
+  var resourcePages = createResourcePages({
+    api: api, presentation: { icon: icon, esc: esc, head: head, emptyState: emptyState, asideBlock: asideBlock, catalogRows: catalogRows, countChip: countChip, label: label, STATUS_LABELS: STATUS_LABELS, shortTime: shortTime },
+    editors: { memory: openMemoryEditor, workflow: openWorkflowEditor }, refresh: paint, notify: toast, fail: fail
+  });
+  var contextPages = createContextWorkflowPages({ api: api, esc: esc, fail: fail });
   var NAV = [
     // 对象轨 is the plan's primary surface (文档 8 / 15.3): it answers 「我的东西在哪」,
     // and everything else in this rail is a supporting tool rather than the main screen.
@@ -481,9 +485,12 @@
     { key: 'skills', label: '技能', title: '技能', sub: '把具体方法与提示词作为可复用资产管理', icon: 'spark', view: viewSkills },
     { key: 'connectors', label: '连接器', title: '连接器', sub: '连接本机目录、MCP 服务和外部来源', icon: 'server', view: viewCapabilities },
     { key: 'models', label: '模型', title: '模型', sub: '配置任务对话和推理使用的模型', icon: 'cpu', view: viewModels },
-    { key: 'memory', label: '记忆', title: '记忆', sub: '查看被保存的短期与长期任务记忆', icon: 'db', view: viewMemory },
+    { key: 'memory', label: '记忆', title: '记忆', sub: '查看被保存的短期与长期任务记忆', icon: 'db', view: resourcePages.memory },
     { key: 'knowledge', label: '知识', title: '知识', sub: '将 Markdown、JSON 和可核验结论组织成知识库', icon: 'layers', view: viewKnowledge },
-    { key: 'workflows', label: '工作流', title: '工作流', sub: '查看复用流程及其运行记录', icon: 'refresh', view: viewWorkflows }
+    { key: 'asset-revisions', label: '版本与依据', title: '版本与依据', sub: '查看修订、使用依据和恢复候选', icon: 'layers', view: createAssetRevisionPage({ api: api, esc: esc, fail: fail }) },
+    { key: 'context-usage', label: '上下文使用', title: '上下文使用', sub: '按范围查看提供记录与验证依据', icon: 'layers', view: contextPages.usage },
+    { key: 'workflow-designs', label: '梳理流程', title: '梳理流程', sub: '从真实样例整理可交接规格', icon: 'refresh', view: contextPages.designs },
+    { key: 'workflows', label: '工作流', title: '工作流', sub: '查看复用流程及其运行记录', icon: 'refresh', view: resourcePages.workflows }
   ];
 
   // Settings remains routable, but is deliberately anchored at the rail bottom
@@ -569,6 +576,8 @@
 
   // ------------------------------------------------------------------- render
 
+  var viewRequests = createLatestRequest();
+
   function paint(page) {
     state.page = page;
     var def = definition(page);
@@ -586,8 +595,7 @@
 
     var content = $('content');
     content.innerHTML = skeleton();
-    Promise.resolve(def.view()).then(function (view) {
-      if (state.page !== def.key) return;
+    viewRequests(function (ticket) { return def.view(ticket); }, function (view) {
       content.innerHTML = view.html;
       // Render contextual info into the right panel
       if (panel) panel.innerHTML = view.aside || '';
@@ -617,7 +625,7 @@
         state.pendingSheet = null;
         if (pending.page === state.page) pending.run();
       }
-    }).catch(function (error) {
+    }, function (error) {
       content.innerHTML = '<div class="callout warn">' + icon('alert') + '<span>页面加载失败：' + esc(error.message) + '</span></div>';
     });
   }
@@ -835,35 +843,6 @@
   // themselves and unioned with the folder records, because a task may point at
   // a folder that has no record yet (the local store has such a case) and
   // listing records alone would make those tasks vanish.
-
-  function groupByFolder(projects, tasks) {
-    var groups = [];
-    var index = {};
-    function ensure(key, name, known) {
-      if (!index[key]) {
-        index[key] = { key: key, name: name, known: !!known, tasks: [] };
-        groups.push(index[key]);
-      } else if (name && !index[key].known && known) {
-        index[key].name = name; index[key].known = true;
-      }
-      return index[key];
-    }
-    projects.forEach(function (item) {
-      var key = String(item.project_id || '');
-      if (key) ensure(key, item.name || key, true);
-    });
-    var fallback = null;
-    tasks.forEach(function (task) {
-      var key = task.project_id ? String(task.project_id) : '';
-      // The default bucket is not a real folder record: marking it known=false
-      // keeps the folder page from trying to fetch a brain snapshot for it.
-      var group = key ? ensure(key, key, false) : (fallback || (fallback = ensure('', '默认', false)));
-      group.tasks.push(task);
-    });
-    // 「默认」goes last: it is the bucket for tasks that never chose a folder.
-    groups.sort(function (a, b) { return (a.key === '') - (b.key === ''); });
-    return groups;
-  }
 
   function taskRowHtml(task) {
     var active = state.selectedTask === task.id;
@@ -1167,21 +1146,15 @@
     projectAction('outcomes', { verdict: val('outcome-verdict'), summary: val('outcome-summary'), evidence_ids: [], artifact_ids: [] });
   }
 
-  function viewProjects() {
-    return Promise.all([
-      settled(api('/api/projects?limit=200'), { projects: [] }),
-      api('/api/home?limit=' + TASK_LIST_LIMIT)
-    ]).then(function (results) {
-      var projects = results[0].projects || [];
-      var tasks = results[1].tasks || [];
-      // The same union the rail uses: folder records plus anything a task points
-      // at, so a folder the store has no record for still shows up with its
-      // tasks instead of making them unreachable from this page.
-      var groups = groupByFolder(projects, tasks);
+  var loadProjectPage = createProjectPage(api, TASK_LIST_LIMIT);
+  function viewProjects(ticket) {
+    var selected = state.selectedProject;
+    return loadProjectPage(selected).then(function (page) {
+      if (!ticket.current()) return null;
+      var groups = page.groups;
+      var selectedGroup = page.selectedGroup;
       state.folderGroups = groups;
       paintFolderTree();
-      var selected = state.selectedProject;
-      var selectedGroup = groups.filter(function (group) { return group.key === selected; })[0] || null;
 
       var rows = groups.length
         ? groups.map(function (group) {
@@ -1199,7 +1172,7 @@
       var chain = Promise.resolve();
 
       if (selectedGroup && selectedGroup.known) {
-        chain = api('/api/projects/' + encodeURIComponent(selectedGroup.key)).then(function (snapshot) {
+        chain = Promise.resolve(page.snapshot).then(function (snapshot) {
           var groups = [
             ['目标', 'spark', snapshot.goals || []],
             ['决策', 'check', snapshot.decisions || []],
@@ -1329,7 +1302,7 @@
     return '<div class="card">' + head(title, sub, right) + '<div class="card-body">' + body + '</div></div>';
   }
 
-  function viewTask() {
+  function viewTask(ticket) {
     var taskId = state.selectedTask;
     if (!taskId) {
       return Promise.resolve({
@@ -1342,6 +1315,7 @@
       api('/api/tasks/' + encodeURIComponent(taskId)),
       settled(api('/api/workbench-experience?task_id=' + encodeURIComponent(taskId) + '&limit=100'), { sessions: [], launches: [], traces: [], outcomes: [], artifacts: [], timeline: [], next_action: '' })
     ]).then(function (results) {
+      if (!ticket.current()) return null;
       var detail = results[0], experience = results[1];
       var task = detail.task || {};
       var checkpoints = detail.checkpoints || [];
@@ -2240,19 +2214,6 @@
     });
   }
 
-  function viewMemory() {
-    return api('/api/workbench/resources?kind=memory&limit=100').then(function (result) {
-      var items = result.items || [];
-      var rows = items.length ? '<div class="rows">' + items.map(function (item) { return '<div class="row"><span class="row-lead muted">' + icon('db') + '</span><div class="row-main"><span class="row-title">' + esc(item.content || item.id) + '</span><span class="row-sub">' + esc([item.kind, item.scope, item.source].filter(Boolean).join(' · ')) + '</span></div><div class="row-actions"><button class="btn sm" data-memory-edit="' + esc(item.id) + '">编辑</button><button class="btn sm danger" data-memory-retire="' + esc(item.id) + '">停用</button></div></div>'; }).join('') + '</div>' : '';
-      return {
-        html: '<div class="stack"><div class="card">' + head('记忆', '这是 Craft 已保存且仍有效的本地记忆；可由你手动维护', '<button class="btn primary" id="memory-add" type="button">' + icon('plus') + '添加记忆</button>') +
-          '<div class="card-body">' + (rows || emptyState('还没有可展示的记忆', '任务运行并显式保存记忆后，它会以结构化记录出现在这里。', 'db')) + '</div></div></div>',
-        aside: asideBlock('记忆范围', '', '<div class="aside-note">编辑不会原地篡改旧记录：Craft 会写入替代版本并保留人工来源。任务页只展示任务自身的短期记忆。</div>'),
-        mounts: [function (root) { var add = root.querySelector('#memory-add'); if (add) add.onclick = function () { openMemoryEditor(); }; root.querySelectorAll('[data-memory-edit]').forEach(function (button) { button.onclick = function () { var item = items.filter(function (entry) { return entry.id === button.getAttribute('data-memory-edit'); })[0]; if (item) openMemoryEditor(item); }; }); root.querySelectorAll('[data-memory-retire]').forEach(function (button) { button.onclick = function () { api('/api/workbench/memory/' + encodeURIComponent(button.getAttribute('data-memory-retire')) + '/retire', { method: 'POST', body: {} }).then(function () { toast('记忆已停用'); paint('memory'); }).catch(fail); }; }); }]
-      };
-    });
-  }
-
   function viewKnowledge() {
     return api('/api/knowledge').then(function (result) {
       var claims = result.claims || [], pages = result.pages || [], bundles = result.bundles || [];
@@ -2264,21 +2225,6 @@
           '<div class="card">' + head('知识包', '运行任务时可绑定的已整理上下文', countChip(bundles.length)) + '<div class="card-body">' + (bundles.length ? catalogRows(bundles, 'inbox', function (item) { return item.id; }, function (item) { return (item.claim_refs || []).length + ' 条结论 · ' + (item.scope || '未设范围'); }) : emptyState('还没有知识包', '知识包需要由真实知识记录生成。', 'inbox')) + '</div></div></div>',
         aside: asideBlock('可追溯性', '', '<div class="aside-note">知识页面的修改写入新 Markdown 版本；人工新增结论会附带来源证据，仍可再审核。</div>'),
         mounts: [function (root) { var wiki = root.querySelector('#wiki-add'), claim = root.querySelector('#claim-add'); if (wiki) wiki.onclick = function () { openKnowledgePageEditor(); }; if (claim) claim.onclick = openKnowledgeClaimEditor; root.querySelectorAll('[data-wiki-edit]').forEach(function (button) { button.onclick = function () { var page = pages.filter(function (entry) { return entry.id === button.getAttribute('data-wiki-edit'); })[0]; if (page) openKnowledgePageEditor(page); }; }); }]
-      };
-    });
-  }
-
-  function viewWorkflows() {
-    return api('/api/workbench/resources?kind=workflows&limit=100').then(function (result) {
-      var workflows = result.workflows || [], runs = result.runs || [];
-      var workflowRows = workflows.length ? '<div class="rows">' + workflows.map(function (item) { return '<div class="row"><span class="row-lead muted">' + icon('refresh') + '</span><div class="row-main"><span class="row-title">' + esc(item.name || item.id) + '</span><span class="row-sub">' + esc(item.description || '没有说明') + '</span></div><button class="btn sm" data-workflow-edit="' + esc(item.id) + '">编辑</button></div>'; }).join('') + '</div>' : '';
-      return {
-        html: '<div class="stack"><div class="card">' + head('工作流', '可复用的步骤编排；可手动编辑为草稿', '<button class="btn primary" id="workflow-add">' + icon('plus') + '新建工作流</button>') + '<div class="card-body">' +
-          (workflowRows || emptyState('还没有工作流', '新建一个工作流草稿，或后续从插件导入。', 'refresh')) + '</div></div>' +
-          '<div class="card">' + head('工作流运行', '实际运行过的记录', countChip(runs.length)) + '<div class="card-body">' +
-          (catalogRows(runs, 'play', function (item) { return item.workflow_id || item.id; }, function (item) { return [label(STATUS_LABELS, item.status, item.status), shortTime(item.updated_at)].filter(Boolean).join(' · '); }) || emptyState('还没有工作流运行', '没有执行记录时不会填充示例数据。', 'play')) + '</div></div></div>',
-        aside: asideBlock('运行记录', '', '<div class="aside-note">保存只会生成或更新草稿；运行仍要经过任务权限、审批与观测链路。打开任务可查看相关流程记录。</div>'),
-        mounts: [function (root) { var add = root.querySelector('#workflow-add'); if (add) add.onclick = function () { openWorkflowEditor(); }; root.querySelectorAll('[data-workflow-edit]').forEach(function (button) { button.onclick = function () { var workflow = workflows.filter(function (entry) { return entry.id === button.getAttribute('data-workflow-edit'); })[0]; if (workflow) openWorkflowEditor(workflow); }; }); }]
       };
     });
   }
@@ -2651,9 +2597,10 @@
   // only shown under 高级.
 
   var wizardAdvanced = false;
+  var modelSetup = createModelSetup(PROVIDER_PRESETS, api);
 
   function openModelSheet(wizard) {
-    state.modelWizard = wizard;
+    modelSetup.open(wizard);
     wizardAdvanced = false;
     openSheet(function (panel) { renderModelSheet(panel); });
   }
@@ -2663,7 +2610,7 @@
   }
 
   function renderModelSheet(panel) {
-    var w = state.modelWizard;
+    var w = modelSetup.view();
     var preset = w.preset ? presetOf(w.preset) : null;
     if (!w.name && preset) w.name = preset.label;
     var editing = !!w.editing;
@@ -2687,9 +2634,7 @@
         (w.preset ? '' : ' disabled') + '>下一步</button></div>';
     } else if (w.step === 2) {
       var suggestions = preset.models || [];
-      html += '<div class="field"><label for="w-key">' + esc(preset.label) + ' 的 API Key</label>' +
-        '<input id="w-key" type="password" placeholder="从服务商后台复制后粘贴到这里" autocomplete="off">' +
-        '<span class="hint">' + (editing ? '留空表示不改动已设置的密钥。' : 'Craft 不会把它写进配置文件。') + '</span></div>';
+      html += '<div class="aside-note">此处只登记模型；密钥通过系统环境变量配置，不在页面中收集。</div>';
       html += '<div class="field"><label for="w-model">用哪个模型</label>' +
         '<input id="w-model" type="text" list="w-model-options" value="' + esc(w.model || suggestions[0] || '') + '" placeholder="模型名称">' +
         '<datalist id="w-model-options">' + suggestions.map(function (m) { return '<option value="' + esc(m) + '"></option>'; }).join('') + '</datalist>' +
@@ -2735,23 +2680,16 @@
     var readAdvanced = function () {
       var node = panel.querySelector('#w-name');
       if (!node) return;
-      w.name = String(node.value || '').trim();
-      w.baseUrl = String((panel.querySelector('#w-baseurl') || {}).value || '').trim().replace(/\/+$/, '');
-      w.protocol = (panel.querySelector('#w-protocol') || {}).value || 'openai-compatible';
-      w.env = String((panel.querySelector('#w-envname') || {}).value || '').trim();
+      modelSetup.change({ type: 'fields', name: node.value,
+        baseUrl: (panel.querySelector('#w-baseurl') || {}).value,
+        protocol: (panel.querySelector('#w-protocol') || {}).value || 'openai-compatible',
+        env: (panel.querySelector('#w-envname') || {}).value });
     };
 
     panel.querySelectorAll('[data-preset]').forEach(function (button) {
       button.onclick = function () {
         readAdvanced();
-        w.preset = button.getAttribute('data-preset');
-        var picked = presetOf(w.preset);
-        w.model = (picked.models || [])[0] || '';
-        w.name = picked.label;
-        w.baseUrl = picked.baseUrl;
-        w.protocol = picked.protocol;
-        w.env = picked.env;
-        w.step = 2;
+        modelSetup.change({ type: 'select', key: button.getAttribute('data-preset') });
         rerender();
       };
     });
@@ -2759,20 +2697,14 @@
     var next = panel.querySelector('#w-next');
     if (next) next.onclick = function () {
       readAdvanced();
-      if (w.step === 1) { if (!w.preset) return; w.step = 2; }
-      else {
-        var modelNode = panel.querySelector('#w-model');
-        w.model = modelNode ? String(modelNode.value || '').trim() : w.model;
-        if (!w.model) { toast('请选择或填写一个模型', true); return; }
-        var keyNode = panel.querySelector('#w-key');
-        w.pastedKey = keyNode ? String(keyNode.value || '').trim() : '';
-        w.step = 3;
-      }
+      var modelNode = panel.querySelector('#w-model');
+      try { modelSetup.change({ type: 'next', model: modelNode ? modelNode.value : w.model }); }
+      catch (error) { toast(error.message, true); return; }
       rerender();
     };
 
     var prev = panel.querySelector('#w-prev');
-    if (prev) prev.onclick = function () { readAdvanced(); w.step = Math.max(1, w.step - 1); rerender(); };
+    if (prev) prev.onclick = function () { readAdvanced(); modelSetup.change({ type: 'back' }); rerender(); };
 
     var adv = panel.querySelector('#w-adv');
     if (adv) adv.onclick = function () { readAdvanced(); wizardAdvanced = !wizardAdvanced; rerender(); };
@@ -2789,28 +2721,12 @@
     var save = panel.querySelector('#w-save');
     if (save) save.onclick = function () {
       readAdvanced();
-      var payload = {
-        id: w.editing ? w.editing.id : w.preset,
-        name: w.name || (preset ? preset.label : w.preset),
-        protocol: w.protocol || (preset ? preset.protocol : 'openai-compatible'),
-        baseUrl: w.baseUrl || (preset ? preset.baseUrl : ''),
-        model: w.model,
-        apiKeyEnv: w.env || (preset ? preset.env : 'CRAFT_API_KEY'),
-        supportsTools: true
-      };
-      if (!payload.id) { toast('请先选择服务商', true); return; }
-      if (!/^[a-z0-9-]+$/.test(payload.id)) { toast('服务商标识只能用小写字母、数字和短横线', true); return; }
-      if (!payload.baseUrl) { toast('请填写服务地址', true); return; }
-      if (!/^https?:\/\//.test(payload.baseUrl)) { toast('服务地址要以 http:// 或 https:// 开头', true); return; }
-      if (!/^[A-Z_][A-Z0-9_]*$/i.test(payload.apiKeyEnv)) { toast('环境变量名格式不正确', true); return; }
-      var request = w.editing
-        ? api('/api/config/models/' + encodeURIComponent(w.editing.id), { method: 'PATCH', body: payload })
-        : api('/api/config/models', { method: 'POST', body: payload });
-      request.then(function () {
-        state.execution = { mode: 'provider', provider: payload.id, tier: 'standard' };
+      modelSetup.save().then(function (result) {
+        if (!result.current) return;
+        state.execution = { mode: 'provider', provider: result.provider, tier: 'standard' };
         execSave();
         renderStatusExecution();
-        toast(w.editing ? '已保存' : '已添加模型「' + payload.name + '」');
+        toast(result.editing ? '已保存' : '已添加模型「' + result.name + '」');
         if (state.page === 'models') paint('models'); else go('models');
       }).catch(fail);
     };
@@ -2846,7 +2762,7 @@
     applyTheme();
     renderStatusExecution();
 
-    if (!state.token) {
+    if (!state.token && !(window.__TAURI__ && window.__TAURI__.core)) {
       $('content').innerHTML = '<div class="callout warn">' + icon('key') +
         '<span>这个页面没有访问凭证。请从 Craft Workbench 桌面图标重新打开。</span></div>';
       $('rail-status').setAttribute('data-state', 'bad');
@@ -2865,7 +2781,7 @@
       app.setAttribute('data-aside', next); $('aside-toggle').setAttribute('aria-pressed', String(next === 'collapsed'));
     };
     var settings = $('settings-nav');
-    if (settings) settings.setAttribute('aria-current', String(current === 'settings'));
+    if (settings) settings.setAttribute('aria-current', String(state.page === 'settings'));
     document.querySelectorAll('[data-menu]').forEach(function (button) { button.onclick = function () { openTopMenu(button.getAttribute('data-menu'), button); }; });
     document.addEventListener('click', function (event) { if (!event.target.closest('[data-menu], #top-menu')) closeTopMenu(); });
     // The folder tree lives in the static rail markup, so bind once here instead
@@ -2977,11 +2893,24 @@
 
     paint(state.page);
 
-    // First-run setup: without a model Craft cannot do anything, so open the
-    // wizard in the right panel (never a modal) instead of leaving a dead app.
+    var entry = mountEntry({ root: $('entry-root'), legacy: $('app'), api: api, window: window,
+      navigate: function (page, task) { if (page === 'task') openTask(task.id); else go(page); },
+      resize: function (mode) {
+        var native = window.__TAURI__ && window.__TAURI__.core;
+        return native ? native.invoke('entry_window_mode', { mode: mode }) : Promise.resolve();
+      }
+    });
+    $('jump-new-task').onclick = function () { entry.session.fresh(); entry.show('launcher'); };
+    if (!params.has('page')) entry.show('launcher');
+    if (window.__TAURI__ && window.__TAURI__.event) {
+      window.__TAURI__.event.listen('craft-entry-open', function () { entry.show('launcher'); }).catch(fail);
+    }
+
+    // Model-backed pages need first-run setup; scoped records and design drafts
+    // remain usable offline without model configuration.
     api('/api/config/models').then(function (result) {
       var models = result.models || [];
-      if (!models.length) openExecutionSetup();
+      if (!models.length && !['context-usage', 'workflow-designs', 'asset-revisions'].includes(state.page)) openExecutionSetup();
     }).catch(function () { /* ignore, the settings page can be opened manually */ });
   }
 

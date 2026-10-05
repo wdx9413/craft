@@ -9,8 +9,8 @@ import { CRAFT_RELEASE_VERSION } from "./version.ts";
  * new internal kernel from accidentally becoming a public install surface.
  */
 export type ReleaseProduct = {
-  readonly name: "craft" | "craft-knowledge" | "craft-memory" | "craft-experience" | "craft-codebase";
-  readonly surface: "full" | "component-knowledge-daily" | "component-memory-daily" | "component-experience-daily" | "component-codebase";
+  readonly name: "craft" | "craft-context" | "craft-knowledge" | "craft-memory" | "craft-experience" | "craft-codebase";
+  readonly surface: "full" | "component-context-daily" | "component-knowledge-daily" | "component-memory-daily" | "component-experience-daily" | "component-codebase";
   readonly hookMember?: "knowledge" | "memory" | "experience";
   readonly category: "Productivity" | "Developer Tools";
   readonly external_marketplace: boolean;
@@ -18,6 +18,7 @@ export type ReleaseProduct = {
 
 export const RELEASE_PRODUCTS: readonly ReleaseProduct[] = [
   { name: "craft", surface: "full", category: "Productivity", external_marketplace: false },
+  { name: "craft-context", surface: "component-context-daily", category: "Developer Tools", external_marketplace: true },
   { name: "craft-knowledge", surface: "component-knowledge-daily", hookMember: "knowledge", category: "Productivity", external_marketplace: true },
   { name: "craft-memory", surface: "component-memory-daily", hookMember: "memory", category: "Productivity", external_marketplace: true },
   { name: "craft-experience", surface: "component-experience-daily", hookMember: "experience", category: "Developer Tools", external_marketplace: true },
@@ -25,7 +26,7 @@ export const RELEASE_PRODUCTS: readonly ReleaseProduct[] = [
 ];
 
 /** Compatibility data may be migrated once, but is never an installable product. */
-export const RETIRED_PUBLIC_PRODUCTS = ["craft-context", "craft-quality", "craft-capability", "craft-skill-quality"] as const;
+export const RETIRED_PUBLIC_PRODUCTS = ["craft-quality", "craft-capability", "craft-skill-quality"] as const;
 export const RETIRED_MCP_PREFIXES = ["craft_workflow_evolution_", "craft_workflow_dag_"] as const;
 
 export function releaseProduct(name: string): ReleaseProduct | undefined {

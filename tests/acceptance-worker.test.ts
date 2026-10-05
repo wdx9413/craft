@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -11,6 +11,46 @@ import { McpServer } from "../core/mcp.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 
 function job(workspace: string, relativePath: string, configuration: JsonObject = {}, extra: JsonObject = {}): JsonObject { return { input: { workspace, relative_path: relativePath, ...extra }, evaluator_configuration: configuration }; }
+
+test("acceptance rejects scalar coercion, invalid percentages and supplied null thresholds", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-acceptance-scalars-"));
+  const total = { lines: { pct: 100 }, branches: { pct: 100 }, functions: { pct: 100 }, statements: { pct: 100 } };
+  try {
+    for (const pct of [null, true, "100", "", [], {}, 101, -1]) {
+      await writeFile(join(root, "coverage.json"), JSON.stringify({ total: { ...total, lines: { pct } } }));
+      await assert.rejects(evaluateCoverageReport(job(root, "coverage.json")), /finite|exceed/);
+    }
+    await writeFile(join(root, "coverage.json"), JSON.stringify({ total }));
+    for (const lines_threshold of [null, true, "100", "", [], {}]) await assert.rejects(evaluateCoverageReport(job(root, "coverage.json", { lines_threshold })), /finite/);
+    for (const max_bytes of [true, "100", null, Number.MAX_SAFE_INTEGER + 1]) await assert.rejects(evaluateFileArtifact(job(root, "coverage.json", { max_bytes })), /positive/);
+    for (const duration of [null, false, "", " ", [], {}]) {
+      await writeFile(join(root, "probe.json"), JSON.stringify({ streams: [{ codec_type: "video", width: 1, height: 1 }], format: { duration } }));
+      await assert.rejects(evaluateMediaProbeReport(job(root, "probe.json")), /finite/);
+    }
+    await writeFile(join(root, "probe.json"), JSON.stringify({ streams: [{ codec_type: "video", width: 1, height: 1 }], format: { duration: "0.25" } }));
+    assert.equal((await evaluateMediaProbeReport(job(root, "probe.json"))).result, "passed");
+    for (const key of ["min_duration_seconds", "min_width", "min_height"]) await assert.rejects(evaluateMediaProbeReport(job(root, "probe.json", { [key]: null })), /finite/);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("acceptance refuses linked parent directories and still accepts nested in-workspace artifacts", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-acceptance-parents-"));
+  try {
+    const workspace = join(root, "workspace"), outside = join(root, "outside");
+    await mkdir(join(workspace, "nested", "reports"), { recursive: true }); await mkdir(outside);
+    const content = JSON.stringify({ total: { lines: { pct: 100 }, branches: { pct: 100 }, functions: { pct: 100 }, statements: { pct: 100 } } });
+    await writeFile(join(outside, "report.json"), content);
+    await writeFile(join(workspace, "nested", "reports", "report.json"), content);
+    await symlink(outside, join(workspace, "linked"), "junction");
+    await symlink(join(workspace, "nested"), join(workspace, "internal-linked"), "junction");
+    for (const path of ["linked/report.json", "internal-linked/reports/report.json"]) {
+      await assert.rejects(evaluateCoverageReport(job(workspace, path)), /symbolic link/);
+      await assert.rejects(evaluateFileArtifact(job(workspace, path)), /symbolic link/);
+    }
+    assert.equal((await evaluateFileArtifact(job(workspace, "nested/reports/report.json"))).result, "passed");
+    assert.equal((await evaluateCoverageReport(job(workspace, "nested/reports/report.json"))).result, "passed");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
 
 test("file artifact evaluator checks portable paths, types, size, extension, and digest", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-file-evaluator-")); const content = Buffer.from("artifact"); await writeFile(join(root, "result.txt"), content); await mkdir(join(root, "folder")); await symlink(join(root, "folder"), join(root, "linked-folder"), "junction"); const digest = createHash("sha256").update(content).digest("hex");

@@ -1,0 +1,61 @@
+(node:81338) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:81338) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+✔ v0.12.34 keeps the original context so a projection can be reversed (1.639625ms)
+✔ v0.12.34 restores an omitted segment instead of having destroyed it (0.395292ms)
+✔ v0.12.34 validates context inputs and reports a sealed digest (0.258458ms)
+✔ v0.12.34 breaks projection ties by recency so the result is deterministic (0.19325ms)
+✔ v0.12.34 refuses to restore a segment that cannot fit (0.115958ms)
+✔ v0.12.34 keeps an already-present segment when restoring (0.044209ms)
+✔ v0.12.34 promotes an omitted segment above the others so it fits (0.136458ms)
+✔ v0.12.34 ranks a rare identifier above a common word with BM25 (9.202167ms)
+✔ v0.12.34 orders equal BM25 scores by id so ranking is stable (0.806833ms)
+✔ v0.12.34 treats a query with no identifier tokens as unboosted (0.255333ms)
+✔ v0.12.34 ignores query terms absent from the corpus (0.13675ms)
+✔ v0.12.34 returns nothing for queries that match no document (0.092834ms)
+✔ v0.12.34 validates BM25 documents and tuning constants (0.127833ms)
+✔ v0.12.34 fuses ranked lists by reciprocal rank and counts sources (0.126417ms)
+✔ v0.12.34 orders equal fusion scores by id so fusion is stable (0.033625ms)
+✔ v0.12.34 honours relaxed BM25 constants without changing correctness (0.11925ms)
+✔ v0.12.34 captures a failure lesson deterministically (0.276041ms)
+✔ v0.12.34 rejects malformed capture signals rather than guessing (0.101792ms)
+✔ v0.12.34 builds a reviewable experience record with provenance (0.1545ms)
+✔ v0.12.34 exposes all three gaps as reachable MCP tools (39.384208ms)
+✔ shared ranking prevents weak Memory starving Knowledge; required items and aggregate budgets hold (12.115167ms)
+✔ history returns revoked/expired versions diagnostically; as-of uses recorded knowledge and current ACL (12.675208ms)
+✔ ingestion keeps unchanged review, invalidates edits/deletions, and exposes cursor drift (19.316083ms)
+✔ persisted vector cache survives adapter instances; batches are bounded and dimension failures fall back (20.739459ms)
+✔ retrieval eligibility requires executed labelled results, not caller-reported scores (13.823667ms)
+✔ compiler resolves imports, aliases and methods without matching comments, strings or unrelated same names (30.968292ms)
+✔ MCP initialize, tool list and readiness expose one actual schema fingerprint (13.588917ms)
+✔ LSP relations retain real endpoints and reject dangling, malformed or out-of-range facts (0.664333ms)
+✔ changed document guards remain fail-closed even if a stale claim is externally marked reviewed (9.856667ms)
+✔ scoped maintenance proposes actionable versioned work; verified feedback only breaks relevance ties (16.712667ms)
+✔ keyword dataset grading measures missed queries, validates scopes and can run through MCP (18.543542ms)
+✔ vector disk cache works in a fresh process; provider usage, cache writes and resource bounds fail closed (277.472375ms)
+✔ retrieval evaluation rejects adapter drift and records unavailable embedded-process fingerprint (19.84925ms)
+✔ source ingestion caps total bytes and files before persisting a partial manifest (1596.530708ms)
+✔ ablation preparation uses real campaign slots, requires curated cases and never fabricates results (2421.6535ms)
+✔ history reads all recorded versions within budget and scoped document bundles preserve freshness guards (42.592833ms)
+✔ compiler refuses oversized graphs, handles incomplete declarations and bounds its parsed-file cache (259.731583ms)
+✔ unmatched governed claims and sparse contribution descriptors do not invent lexical matches (10.413166ms)
+✔ compiler IO cannot reach working files or emit artifacts; warm binding observes a changed dependency (26.087834ms)
+✔ default BM25 retrieves Chinese words and mixed code identifiers without punctuation artifacts (1.101875ms)
+ℹ tests 40
+ℹ suites 0
+ℹ pass 40
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5652.3555
+ℹ start of coverage report
+ℹ ------------------------------------------------------------------------------
+ℹ file                          | line % | branch % | funcs % | uncovered lines
+ℹ ------------------------------------------------------------------------------
+ℹ core                          |        |          |         | 
+ℹ  context-retrieval-capture.ts | 100.00 |   100.00 |  100.00 | 
+ℹ ------------------------------------------------------------------------------
+ℹ all files                     | 100.00 |   100.00 |  100.00 | 
+ℹ ------------------------------------------------------------------------------
+ℹ end of coverage report

@@ -3,6 +3,7 @@ import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import { relative, resolve } from "node:path";
 import type { JsonObject } from "./infrastructure/store.ts";
 import { CraftStore } from "./infrastructure/store.ts";
+import { scopeEnvelope, scopeFromKey } from "./scope-policy.ts";
 
 const CATEGORIES = new Set(["projects", "domains", "troubleshooting", "decisions", "workflows"]);
 const TYPES = new Map<string, string>([["domain_rule", "fact"], ["technical_decision", "decision"], ["workflow", "rule"], ["troubleshooting", "failure_mode"], ["stable_project_fact", "fact"]]);
@@ -185,7 +186,8 @@ export class LegacyKnowledgeMigrationKernel {
         scope: reviewedScope, status: "reviewed", sensitivity: "internal", source_id: String(candidate.source_id), title: String(candidate.title), body: page.body.trim() });
       const evidenceIds = [...new Set([...(Array.isArray(claim.evidence_ids) ? claim.evidence_ids.map(String) : []), String(evidence.id)])].sort();
       const saved = this.store.save("knowledge_claim", String(claim.id), { ...payload(claim), source_id: candidate.source_id,
-        source_locator: candidate.source_locator, source_page_digest: candidate.source_digest, legacy_scope: claim.scope, scope: reviewedScope, content_ref: contentRef,
+        source_locator: candidate.source_locator, source_page_digest: candidate.source_digest, legacy_scope: claim.scope, scope: reviewedScope,
+        scope_envelope: scopeEnvelope(undefined, scopeFromKey(reviewedScope)), content_ref: contentRef,
         content_digest: contentRef.digest, evidence_ids: evidenceIds, status: "reviewed",
         review: { reviewer, model_ref: modelRef, review_id: review.id, reason_digest: digest(assessment.reason), reviewed_at: new Date().toISOString(), automated: true, confidence: "bounded" } });
       this.store.save("legacy_knowledge_migration_candidate", String(candidate.id), { ...payload(candidate), model_review_id: review.id, reviewed_claim_version: saved.version });

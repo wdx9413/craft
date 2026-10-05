@@ -15,7 +15,7 @@ async function fixture() { const root = await mkdtemp(path.join(tmpdir(), "craft
 
 test("Workbench web application exposes a token-gated same-origin API and bounded JSON actions", async () => {
   const f = await fixture(); const app = new WorkbenchWebApp(f.service, "secret", "http://127.0.0.1:4173");
-  assert.match(app.handle({ method: "GET", path: "/" }).body, /Craft Workbench/); assert.match(app.handle({ method: "GET", path: "/" }).body, /引导工作/); assert.match(app.handle({ method: "GET", path: "/" }).body, /先固定目标和资料，再回答必要决策/); assert.match(app.handle({ method: "GET", path: "/" }).body, /结果：/); assert.deepEqual(JSON.parse(app.handle({ method: "GET", path: "/health" }).body), { status: "ok", version: VERSION });
+  assert.deepEqual(app.handle({ method: "GET", path: "/" }), app.handle({ method: "GET", path: "/workbench" })); assert.deepEqual(JSON.parse(app.handle({ method: "GET", path: "/health" }).body), { status: "ok", version: VERSION });
   assert.equal(app.handle({ method: "GET", path: "/api/home", token: "secret", origin: "https://evil.example" }).status, 403);
   assert.equal(app.handle({ method: "GET", path: "/api/home" }).status, 401); assert.equal(app.handle({ method: "GET", path: "/api/home", token: "x" }).status, 401); assert.equal(app.handle({ method: "GET", path: "/api/home", token: "xxxxxx" }).status, 401);
   assert.equal(app.handle({ method: "GET", path: "/api/home", token: "secret" }).status, 200);
@@ -69,8 +69,10 @@ test("Workbench web application exposes a token-gated same-origin API and bounde
   f.service.attentionRefresh = (() => { throw "failure"; }) as typeof f.service.attentionRefresh; assert.equal(JSON.parse(app.handle({ method: "POST", path: "/api/inbox/refresh", token: "secret", body: "{}" }).body).error, "failure"); f.store.close();
 });
 
-test("local Workbench server binds loopback, serves headers, handles bodies, and owns its lifecycle", async () => {
-  const f = await fixture(); const server = new LocalWorkbenchServer(f.service, "network-token"); const started = await server.start(0); const origin = started.url.split("/#")[0];
+test("local Workbench server binds loopback, serves headers, handles bodies, and owns its lifecycle", async (t) => {
+  const f = await fixture(); const server = new LocalWorkbenchServer(f.service, "network-token");
+  t.after(async () => { try { await server.close(); } finally { f.store.close(); } });
+  const started = await server.start(0); const origin = started.url.split("/#")[0];
   assert.equal(started.token, "network-token"); assert.equal((await fetch(`${origin}/`)).status, 200); const health = await fetch(`${origin}/health`); assert.equal(health.headers.get("x-content-type-options"), "nosniff");
   assert.equal((await fetch(`${origin}/api/home`, { headers: { authorization: "Basic x" } })).status, 401);
   assert.equal((await fetch(`${origin}/api/home`, { headers: { authorization: "Bearer network-token" } })).status, 200);
@@ -79,7 +81,7 @@ test("local Workbench server binds loopback, serves headers, handles bodies, and
   }
   assert.equal((await fetch(`${origin}/api/inbox/refresh`, { method: "POST", headers: { authorization: "Bearer network-token", origin }, body: "{}" })).status, 200);
   assert.equal((await fetch(`${origin}/api/inbox/refresh`, { method: "POST", headers: { authorization: "Bearer network-token" }, body: "x".repeat(66_000) })).status, 413);
-  await assert.rejects(() => server.start(0), /already running/); await server.close(); await server.close(); f.store.close();
+  await assert.rejects(() => server.start(0), /already running/); await server.close(); await server.close();
 });
 
 test("local Workbench evaluates registered file acceptance after its Host Run completes", async () => {

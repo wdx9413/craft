@@ -196,7 +196,7 @@ test("v0.12.11 kernels exercise default, invalid and transition branches", async
     const costs = new CostLedgerKernel(f.store);
     assert.throws(() => costs.priceSave({ provider: "", model: "m", input_per_million: 1, output_per_million: 1 }), /provider/);
     assert.throws(() => costs.priceSave({ provider: "x", model: "m", input_per_million: -1, output_per_million: 1 }), /non-negative/);
-    assert.throws(() => costs.usageRecord({ provider: "x", model: "m" }), /No provider price/);
+    assert.throws(() => costs.usageRecord({ provider: "x", model: "m", input_tokens: 0, output_tokens: 0 }), /No provider price/);
     assert.deepEqual(costs.report().entries instanceof Array, true);
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });

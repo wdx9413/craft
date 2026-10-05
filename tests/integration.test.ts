@@ -45,17 +45,23 @@ test("workflow registry scan and retirement plan via MCP", async () => {
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("knowledge index sync and search via MCP", async () => {
+test("knowledge index sync preserves local search without leaking unreviewed documents through MCP", async () => {
   const f = await fixture("kn");
   try {
     await writeFile(join(f.root, "doc.md"), "# Hello\nCraft 确定性工作流");
     const mcp = new McpServer(f.service, "full");
     const sync = await mcp.handlers.craft_knowledge_index_sync({ project_root: f.root }) as JsonObject;
     assert.equal(sync.documents, 1);
-    const search = await mcp.handlers.craft_knowledge_search({ query: "工作流" }) as JsonObject;
+    const unscoped = await mcp.handlers.craft_knowledge_search({ query: "工作流" }) as JsonObject;
+    assert.deepEqual(unscoped.hits, []);
+    assert.equal(unscoped.reason, "scope_unavailable");
+    const scoped = await mcp.handlers.craft_knowledge_search({ query: "工作流", scope_kind: "project", scope_id: f.root }) as JsonObject;
+    assert.deepEqual(scoped.hits, []);
+    // The compatibility index is a local diagnostic, not reviewed Knowledge.
+    const search = f.service.knowledgeSearch({ query: "工作流" });
     assert.ok((search.hits as JsonObject[]).length >= 1);
     // short single-char token triggers LIKE fallback
-    const short = await mcp.handlers.craft_knowledge_search({ query: "工" }) as JsonObject;
+    const short = f.service.knowledgeSearch({ query: "工" });
     assert.ok((short.hits as JsonObject[]).length >= 1);
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });

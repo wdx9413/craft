@@ -298,6 +298,7 @@ export class InternalHostDriver implements HostDriver {
         const request = buildChatRequest(provider, { model: String(dispatch.model), messages: messages as ChatMessage[], tools: tools.length ? [...tools] : undefined,
           cache_prefix_messages: Math.max(0, messages.length - 1) });
         options.observe?.({ stream: "stdout", bytes: request.prompt_tokens_estimate, digest: digestJson(request.url) });
+        if (options.signal?.aborted) { state = failLoop(state, "cancelled"); failure = "cancelled"; break; }
         this.trace.append({ trace_id: traceId, event_kind: "model.request", source: "internal-host", trust: "observed", summary: "model request", usage: { input_tokens: request.prompt_tokens_estimate },
           data: { provider: provider.provider, model: dispatch.model, compacted: compacted.compacted, context_cache: request.context_cache } });
         const result = await this.transport.complete(provider, request);
@@ -308,9 +309,15 @@ export class InternalHostDriver implements HostDriver {
           content_free: true,
         });
         const tokens = (result.usage?.input_tokens ?? 0) + (result.usage?.output_tokens ?? 0);
+        // Cancellation cannot turn a late reply into completion or permission to act.
+        // The request already happened, so retain its reported usage before stopping.
+        if (options.signal?.aborted) { state = failLoop(chargeTurn(state, tokens), "cancelled"); failure = "cancelled"; break; }
         const parsedCalls = (result.tool_calls ?? []).map((call) => ({ id: call.id, name: call.function.name, arguments: (() => { try { return JSON.parse(call.function.arguments || "{}"); } catch { throw new Error("tool arguments must be valid JSON"); } })() }));
-        const proposed = parsedCalls.length ? parsedCalls[0] : parseAction(result.text);
-        if (!proposed || !this.invokeAction) {
+        const textAction = parsedCalls.length ? null : parseAction(result.text);
+        const calls: Array<{ id: string | null; action: string; args: JsonObject }> = textAction
+          ? [{ id: null, action: textAction.action, args: textAction.args }]
+          : parsedCalls.map((call) => ({ id: call.id, action: call.name, args: call.arguments as JsonObject }));
+        if (!calls.length || !this.invokeAction) {
           // Charge the completing turn before finishing: it was billed like any
           // other, and leaving it out under-reports the run's cost by one turn.
           state = chargeTurn(state, tokens);
@@ -319,10 +326,6 @@ export class InternalHostDriver implements HostDriver {
           this.trace.append({ trace_id: traceId, event_kind: "model.final", source: "internal-host", trust: "observed", summary: "model final", data: { text_digest: digestJson(finalMessage) }, usage: result.usage ?? {} });
           break;
         }
-        const calls: Array<{ id: string | null; action: string; args: JsonObject }> = parsedCalls.length
-          ? parsedCalls.map((call) => ({ id: call.id, action: call.name, args: call.arguments as JsonObject }))
-          : [{ id: null, action: "action" in proposed ? proposed.action : proposed.name,
-              args: ("args" in proposed ? proposed.args : proposed.arguments) as JsonObject }];
         // A turn may propose several calls and every one of them is answered. The
         // assistant message below echoes all of the turn's calls, so leaving any
         // id without a result is not a shortened turn -- it is an invalid

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readdir, unlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, unlink, writeFile } from "node:fs/promises";
+import { getEventListeners } from "node:events";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -10,6 +11,63 @@ import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 
 async function fixture() { const root = await mkdtemp(path.join(tmpdir(), "craft-maintenance-")); const paths = craftPaths(root); const store = await new CraftStore(paths).open(); const service = new CraftService(store); return { root, paths, store, service, kernel: new MaintenanceKernel(service) }; }
 type PrivateWorker = { acquire(retry?: boolean): Promise<void>; release(): Promise<void>; heartbeat(now: string): Promise<void>; reclaimStale(): Promise<void>; assertSameOwner(expected: JsonObject, actual: JsonObject): void };
+
+test("worker releases each completed wait listener and cancellation leaves no listener or lock", async () => {
+  const f = await fixture(); const controller = new AbortController(); const listenerCounts: number[] = [];
+  try {
+    const worker = new LocalMaintenanceWorker(f.kernel, f.paths, { afterTick: async () => {
+      listenerCounts.push(getEventListeners(controller.signal, "abort").length);
+    } });
+    assert.equal((await worker.run({ intervalMs: 100, maxTicks: 3, signal: controller.signal })).ticks, 3);
+    assert.deepEqual(listenerCounts, [0, 0, 0]);
+    assert.equal(getEventListeners(controller.signal, "abort").length, 0);
+    assert.equal((await worker.run({ intervalMs: 100, maxTicks: 2 })).ticks, 2);
+    const originalAdd = controller.signal.addEventListener.bind(controller.signal);
+    controller.signal.addEventListener = (...args: Parameters<AbortSignal["addEventListener"]>) => {
+      originalAdd(...args); controller.abort();
+    };
+    assert.equal((await worker.run({ intervalMs: 10_000, maxTicks: 2, signal: controller.signal })).ticks, 1);
+    assert.equal(getEventListeners(controller.signal, "abort").length, 0);
+    await assert.rejects(readFile(path.join(f.paths.runtimeDir, "maintenance.lock.json")), { code: "ENOENT" });
+    assert.equal((await worker.status()).status, "stopped");
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("stale lock tokens remain opaque metadata rather than recovery paths", async () => {
+  const f = await fixture();
+  try {
+    const lock = path.join(f.paths.runtimeDir, "maintenance.lock.json");
+    const owner = { pid: 999, token: "../outside/old\\lock", host: "host", heartbeat_at: new Date(Date.now() - 10_000).toISOString() };
+    await writeFile(lock, JSON.stringify(owner));
+    const worker = new LocalMaintenanceWorker(f.kernel, f.paths, { host: "host", staleAfterMs: 1_000, isProcessAlive: () => false });
+    assert.equal((await worker.run({ maxTicks: 1 })).ticks, 1);
+    const recovered = (await readdir(f.paths.runtimeDir)).filter((name) => name.startsWith("maintenance.lock.recovered."));
+    assert.equal(recovered.length, 1);
+    assert.match(recovered[0], /^maintenance\.lock\.recovered\.\d+\.[a-f0-9]{64}\.json$/);
+    assert.deepEqual(JSON.parse(await readFile(path.join(f.paths.runtimeDir, recovered[0]), "utf8")), owner);
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("maintenance schedules populated lifecycle projections and records their actual counts", async () => {
+  const f = await fixture();
+  try {
+    const now = "2030-01-01T00:00:00.000Z"; const calls: JsonObject[] = [];
+    f.store.create("trace", "trace", {});
+    f.store.create("knowledge_claim", "claim", {});
+    f.store.create("memory_ledger", "memory", {});
+    f.service.traceRetentionSweep = (args) => { calls.push({ component: "trace", ...args }); return { archived: 2, deleted: 1 }; };
+    f.service.knowledgeExpirySweep = (args) => { calls.push({ component: "knowledge", ...args }); return { count: 3 }; };
+    f.service.memoryExpirySweep = (args) => { calls.push({ component: "memory", ...args }); return { count: 4 }; };
+    const result = f.kernel.tick({ now, limit: 5 });
+    assert.deepEqual(calls, [{ component: "trace", now, limit: 5 }, { component: "knowledge", now }, { component: "memory", now }]);
+    for (const record of [result.status, result.receipt] as JsonObject[]) {
+      assert.equal(record.trace_archived, 2); assert.equal(record.trace_deleted, 1);
+      assert.equal(record.expired_knowledge, 3); assert.equal(record.expired_memory, 4);
+    }
+    f.store.create("memory_candidate", "candidate", {}); calls.length = 0;
+    f.kernel.tick({ now }); assert.equal(calls.filter((call) => call.component === "memory").length, 1);
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
 
 test("maintenance tick safely reconciles bounded control-plane state and persists health", async () => {
   const f = await fixture(); f.store.create("hub_source", "hub", { status: "active" });

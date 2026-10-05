@@ -8,6 +8,8 @@ import { productSurfaceOf } from "../core/interfaces/mcp/product-launch.ts";
 import { CraftService } from "../core/service.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
+import { ComponentReadinessKernel } from "../core/component-readiness.ts";
+import { CRAFT_RELEASE_VERSION } from "../core/version.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-standalone-components-"));
@@ -21,6 +23,41 @@ async function dispose(f: Awaited<ReturnType<typeof fixture>>) {
   await rm(f.root, { recursive: true, force: true });
 }
 
+test("component diagnosis filters execution receipts by component, session and release without claiming model benefit", async () => {
+  const f = await fixture();
+  try {
+    const kernel = new ComponentReadinessKernel(f.store);
+    assert.throws(() => kernel.get({ component: null }), /component must be/);
+    assert.throws(() => kernel.diagnose({ component: "knowledge" }, "memory"), /mounted component/);
+    for (const observed_tool_names of [null, [false], [" "]]) assert.throws(() => kernel.diagnose({ component: "memory", observed_tool_names }), /observed_tool_names/);
+    const empty = kernel.diagnose({ component: "memory" });
+    assert.equal((empty.execution_proof as JsonObject).status, "not_observed");
+    assert.equal(empty.next_action, "run_one_real_host_turn_then_recheck_with_session_id");
+    assert.equal(kernel.diagnose({ component: "memory", observed_tool_names: [] }).host_attachment, "bundle_or_surface_mismatch");
+    f.store.create("activation_proof_receipt", "stale", { component: "memory", session_id: "old", plugin_release: "legacy" });
+    assert.equal((kernel.diagnose({ component: "memory", session_id: "old" }).execution_proof as JsonObject).status, "stale_plugin_or_receipt");
+    f.store.create("activation_proof_receipt", "other-session", { component: "memory", session_id: "other", plugin_release: CRAFT_RELEASE_VERSION, memory_written: true });
+    f.store.create("activation_proof_receipt", "current-no-context", { component: "memory", session_id: "current", plugin_release: CRAFT_RELEASE_VERSION });
+    let selected = kernel.diagnose({ component: "memory", session_id: " current " });
+    assert.deepEqual(selected.execution_proof, { status: "executed", executions: 1, context_receipt_id: null, hook_trusted: false, mcp_reachable: false, explicit_memory_written: false });
+    f.store.create("activation_proof_receipt", "current", { component: "memory", session_id: "current", plugin_release: CRAFT_RELEASE_VERSION, context_receipt_id: "context", hook_trusted: true, mcp_reachable: true, memory_written: true, body: "private-content" });
+    selected = kernel.diagnose({ component: "memory", session_id: "current", observed_tool_names: [...empty.expected_tools as string[], "extra", "extra"] });
+    assert.equal(selected.host_attachment, "surface_matches");
+    assert.deepEqual(selected.execution_proof, { status: "executed", executions: 2, context_receipt_id: "context", hook_trusted: true, mcp_reachable: true, explicit_memory_written: true });
+    assert.equal(selected.host_session_verified, false);
+    assert.equal(selected.model_effect_proven, false);
+    assert(!JSON.stringify(selected).includes("private-content"));
+    assert.equal((kernel.diagnose({ component: "memory", session_id: " " }).execution_proof as JsonObject).executions, 3);
+    for (const [id, observation_written] of [["negative", false], ["positive", true]] as const) {
+      f.store.create("activation_proof_receipt", id, { component: "experience", session_id: id, plugin_release: CRAFT_RELEASE_VERSION, observation_written });
+      assert.equal((kernel.diagnose({ component: "experience", session_id: id }).execution_proof as JsonObject).verified_observation_written, observation_written);
+    }
+    f.store.create("knowledge_claim", "same-a", { status: "candidate" });
+    f.store.create("knowledge_claim", "same-b", { status: "candidate" });
+    assert.equal(((kernel.diagnose({ component: "knowledge" }).counts as JsonObject).claims as JsonObject).candidate, 2);
+  } finally { await dispose(f); }
+});
+
 test("public standalone component products expose small daily paths while advanced surfaces remain explicit", async () => {
   const f = await fixture();
   try {
@@ -32,7 +69,7 @@ test("public standalone component products expose small daily paths while advanc
     for (const [product, required] of Object.entries(expected)) {
       const daily = new McpServer(f.service, productSurfaceOf(product));
       const names = daily.tools.map((tool) => tool.name);
-      assert(names.length <= 16, `${product} daily surface must stay within the tool budget`);
+      assert(names.length <= 24, `${product} daily surface must stay within the tool budget`);
       for (const name of required) assert(names.includes(name), `${product} daily surface must expose ${name}`);
       assert(!names.includes("craft_verified_work_loop_prepare"));
     }
@@ -138,8 +175,9 @@ test("standalone Knowledge exposes Host-managed review without a separate model 
     const evidence = await knowledge.handlers.craft_evidence_record({ evidence_id: "host-evidence", source_type: "observation", confidence: "bounded", claim: "fixture" }) as JsonObject;
     const saved = await knowledge.handlers.craft_knowledge_claim_save({ claim_id: "host-claim", kind: "fact", scope: "project:demo", content: "Run the focused test.", source_id: "host-source", evidence_ids: [evidence.id] }) as JsonObject;
     const reviewed = await knowledge.handlers.craft_knowledge_host_review({ claim_id: (saved.claim as JsonObject).id, host_run_key: "codex:fixture:turn", source_digest: `sha256:${"a".repeat(64)}`, decision: "supported" }) as JsonObject;
-    assert.equal(reviewed.promoted, true);
-    assert.equal((reviewed.claim as JsonObject).status, "reviewed");
+    assert.equal(reviewed.promoted, false);
+    assert.equal((reviewed.claim as JsonObject).status, "candidate");
+    assert.equal((reviewed.review as JsonObject).validation_status, "revalidation_required");
   } finally { await dispose(f); }
 });
 

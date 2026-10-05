@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import type { JsonObject } from "../../core/infrastructure/store.ts";
-import { text } from "../../core/validation.ts";
-import { digestJson } from "../../core/digest.ts";
+import type { JsonObject } from "../../common/craft-common-store-local/src/store.ts";
+import { text } from "../../common/craft-common-base/src/validation.ts";
+import { digestJson } from "../../common/craft-common-base/src/digest.ts";
 
 /**
  * v0.12.35 memory / knowledge / self-evolution wiring.

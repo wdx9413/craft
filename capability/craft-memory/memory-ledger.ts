@@ -22,11 +22,11 @@
  * they hold.
  */
 import { randomUUID } from "node:crypto";
-import type { CraftStore, JsonObject } from "../../core/infrastructure/store.ts";
-import { noCredentialAssignment, parseScope, sortedUniqueList, text } from "../../core/validation.ts";
-import { canonicalJson, stableDigest, payload } from "../../core/digest.ts";
-import { contentReference } from "../../core/infrastructure/content-store.ts";
-import { scopeEnvelope } from "../../core/scope-policy.ts";
+import type { CraftStore, JsonObject } from "../../common/craft-common-store-local/src/store.ts";
+import { noCredentialAssignment, optionalScope, parseScope, sortedUniqueList, text, type ScopeRef } from "../../common/craft-common-base/src/validation.ts";
+import { canonicalJson, stableDigest, payload } from "../../common/craft-common-base/src/digest.ts";
+import { contentReference } from "../../common/craft-common-store-local/src/content-store.ts";
+import { scopeAccess, scopeAllows, scopeEnvelope, sourceAllows, type ScopeAccess } from "../../common/craft-common-base/src/scope-policy.ts";
 
 const MEMORY_KINDS = new Set(["working", "episodic", "preference", "procedural"]);
 const MEMORY_STATUS = new Set(["active", "superseded", "revoked", "expired"]);
@@ -102,7 +102,12 @@ export class MemoryLedgerKernel {
       const replacement = this.store.get("memory_ledger", replacementId);
       if (replacement.status !== "active" || canonicalJson(replacement.scope) !== canonicalJson(memory.scope)) throw new Error("Memory replacement must be active in the same scope");
     }
-    return { memory: this.store.save("memory_ledger", String(memory.id), { ...payload(memory), status, replacement_id: replacementId, transition_reason_digest: stableDigest(noCredentialAssignment(text(args.reason, "reason"), "reason")) }) };
+    const reasonDigest = stableDigest(noCredentialAssignment(text(args.reason, "reason"), "reason"));
+    const expectedVersion = args.expected_version ?? memory.version;
+    if (!Number.isInteger(expectedVersion) || Number(expectedVersion) < 1) throw new Error("expected_version must be a positive integer");
+    if (memory.status === status && memory.replacement_id === replacementId && memory.transition_reason_digest === reasonDigest) return { memory, idempotent: true };
+    if (memory.status !== "active") throw new Error("Memory transition requires an active entry");
+    return { memory: this.store.updateIfVersion("memory_ledger", String(memory.id), Number(expectedVersion), { ...payload(memory), status, replacement_id: replacementId, transition_reason_digest: reasonDigest }), idempotent: false };
   }
 
   /**
@@ -122,7 +127,12 @@ export class MemoryLedgerKernel {
   }
 
   get(args: JsonObject): JsonObject {
-    const memory = this.store.get("memory_ledger", text(args.memory_id, "memory_id"), args.version === undefined ? undefined : Number(args.version));
+    const memoryId = text(args.memory_id, "memory_id");
+    const current = this.store.get("memory_ledger", memoryId);
+    const scope = optionalScope(args), access = scopeAccess(args), allowRestricted = args.allow_restricted === true;
+    if (!this.visible(current, scope, access, allowRestricted)) throw new Error("Memory scope or audience denied");
+    const memory = args.version === undefined ? current : this.store.get("memory_ledger", memoryId, Number(args.version));
+    if (canonicalJson(memory.scope) !== canonicalJson(current.scope) || !this.visible(memory, scope, access, allowRestricted)) throw new Error("Memory historical scope or audience denied");
     return { memory: { ...memory, content: this.content(memory) } };
   }
 
@@ -141,10 +151,18 @@ export class MemoryLedgerKernel {
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error("limit must be an integer between 1 and 100");
     if (args.include_history !== undefined && typeof args.include_history !== "boolean") throw new Error("include_history must be boolean");
     const includeHistory = args.include_history === true;
-    const scopeDigest = canonicalJson(scope);
-    const memories = this.store.list("memory_ledger", limit, (item) => canonicalJson(item.scope) === scopeDigest && (includeHistory || item.status === "active"))
+    const access = scopeAccess(args), allowRestricted = args.allow_restricted === true;
+    const memories = this.store.list("memory_ledger", limit, (item) => this.visible(item, scope, access, allowRestricted) && (includeHistory || item.status === "active"))
       .map((memory) => ({ ...memory, content: this.content(memory) }));
     return { scope, include_history: includeHistory, count: memories.length, memories };
+  }
+
+  private visible(memory: JsonObject, requestedScope: ScopeRef | null, access: ScopeAccess, allowRestricted: boolean): boolean {
+    const scope = memory.scope as ScopeRef;
+    if (requestedScope !== null && canonicalJson(scope) !== canonicalJson(requestedScope)
+      || !scopeAllows(scopeEnvelope(memory.scope_envelope, scope), access) || memory.sensitivity === "restricted" && !allowRestricted) return false;
+    const source = this.store.find("knowledge_source", String(memory.source_id));
+    return source !== null && sourceAllows(source, access);
   }
 
   /**

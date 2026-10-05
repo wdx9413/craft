@@ -38,9 +38,17 @@ import { discoverResult, forwardCompatibility } from "../mcp-forward-compat.ts";
 import { dockerRequestDigest } from "../docker-sandbox.ts";
 import { egressRequestDigest } from "../egress.ts";
 import { ServiceFoundation } from "./service-foundation.ts";
+import { ProcedureConfiguration } from "../../capability/craft-experience/procedure-configuration.ts";
+import { ComponentAssets } from "./coordinators/component-assets.ts";
+import { ContextUsageWorkbench } from "./coordinators/context-usage.ts";
+import { WorkflowDesignWorkbench } from "./coordinators/workflow-design.ts";
+import { CognitiveWorkbenchCoordinator } from "./coordinators/cognitive-workbench.ts";
+import { CognitiveWriteCoordinator } from "./coordinators/cognitive-write.ts";
+import { workbenchWorkflowInput } from "./use-cases/workbench-workflow-input.ts";
 import type { TraceArchiveRuntimeBackend } from "../trace-archive-storage.ts";
 import { dataSpaceId } from "../data-space.ts";
-import { actionNameOf, classifyTool } from "../internal-tool-authorization.ts";
+import { classifyTool } from "../internal-tool-authorization.ts";
+import { createActionHandlers } from "./actions/action-handlers.ts";
 import { executeSubagent, planSubagentExecution } from "../subagent-execution.ts";
 import { installAdapterRuntimeMethods } from "./use-cases/adapter-runtime.ts";
 import { installKernelDelegateMethods } from "./use-cases/kernel-delegates.ts";
@@ -51,6 +59,7 @@ import type { EvaluationContractInput, EvaluationStage } from "../evaluation-con
 import { WorkControl } from "./coordinators/work-control.ts";
 import { ForgeDispatchCoordinator } from "./coordinators/forge-dispatch.ts";
 import { scopeEnvelope, scopeFromKey } from "../scope-policy.ts";
+import { claimReadable } from "../../capability/craft-knowledge/claim-access.ts";
 
 export const VERSION = CRAFT_RELEASE_VERSION;
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
@@ -238,6 +247,8 @@ function validateModelInput(args: JsonObject, id: string): CraftModelConfig {
 export class CraftService extends ServiceFoundation {
   readonly workControl: WorkControl;
   readonly forgeDispatch: ForgeDispatchCoordinator;
+  readonly cognitiveWorkbench: CognitiveWorkbenchCoordinator;
+  readonly cognitiveWrites: CognitiveWriteCoordinator;
 
   constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter?: unknown,
     dockerSandbox?: unknown, egressBroker?: unknown, hostOwnerId?: string, hostProfiles?: readonly import("../host-registry.ts").HostProfile[],
@@ -253,85 +264,48 @@ export class CraftService extends ServiceFoundation {
       get: (args) => this.verifiedWorkLoopGetInternal(args),
     });
     this.forgeDispatch = new ForgeDispatchCoordinator(store);
+    this.cognitiveWrites = new CognitiveWriteCoordinator(store, this.knowledgeSources, this.memoryGovernance,
+      (args) => this.evidenceRecord(args), (args) => this.knowledgeClaimReview(args));
+    this.cognitiveWorkbench = new CognitiveWorkbenchCoordinator({
+      store, resourceCatalog: (args) => this.workbenchResourceCatalogView(args),
+      registerSource: (args) => this.knowledgeSourceRegister(args),
+      proposeMemory: (args) => this.memoryCandidatePropose(args),
+      recordEvidence: (args) => this.evidenceRecord(args), saveClaim: (args) => this.knowledgeClaimSave(args),
+    });
   }
 
-  /** Studio facade: all writes go through governed Claim/Ledger/DAG kernels. */
-  workbenchResourceView(args: JsonObject = {}): JsonObject {
-    if (args.kind !== undefined) return this.workbenchResourceCatalogView(args);
-    const limit = Number(args.limit ?? 50);
-    return { version: VERSION, resources: {
-      claims: this.store.list("knowledge_claim", limit), wiki: this.store.list("wiki_page", limit),
-      memory_candidates: this.store.list("memory_candidate", limit), memories: this.store.list("memory_ledger", limit),
-      workflows: this.store.list("workflow_dag", limit), task_states: this.store.list("task_state_projection", limit),
-    } };
+  procedureConfigurationSave(args: JsonObject): JsonObject { return new ProcedureConfiguration(this.store).save(args); }
+  componentAssetInspect(member: string, args: JsonObject): JsonObject { return new ComponentAssets(this.store).inspect(member, args); }
+  componentAssetRestore(member: string, args: JsonObject): JsonObject { return new ComponentAssets(this.store).restore(member, args, {
+    memory: a => this.memoryCandidatePropose({ ...a, proposal_only: true }), knowledge: a => this.knowledgeClaimSave(a), experience: a => this.procedureConfigurationSave(a), codebase: a => this.codebaseIndexBuild(a),
+  }); }
+  workbenchContextUsage(args: JsonObject): JsonObject { return new ContextUsageWorkbench(this.store).get(args); }
+  workbenchContextRetire(args: JsonObject): JsonObject {
+    return new ContextUsageWorkbench(this.store).retire(args, (member, id, version) => member === "memory"
+      ? this.memoryLedgerTransition({ memory_id: id, expected_version: version, status: "revoked", reason: "Retired from scoped usage view" })
+      : this.knowledgeClaimReview({ claim_id: id, status: "expired", reviewer: "studio-user", reason: "Retired from scoped usage view" }));
   }
-  workbenchMemorySave(args: JsonObject): JsonObject {
-    const sourceId = String(args.source_id ?? "studio-local-source");
-    if (!this.store.find("knowledge_source", sourceId)) this.knowledgeSourceRegister({ source_id: sourceId, kind: "custom", label: "Studio local memory", scope_kind: "user", scope_id: "local", locator: "studio://memory", content_digest: valueDigest(sourceId), trust: "bounded", access: "proposal_only" });
-    const kind = ["working", "episodic", "preference", "procedural"].includes(String(args.kind)) ? args.kind : "episodic";
-    return this.memoryCandidatePropose({ ...args, kind, source_id: sourceId, scope_kind: args.scope_kind ?? args.scope ?? "user", scope_id: args.scope_id ?? "local" });
-  }
+  workbenchWorkflowDesignSave(args: JsonObject): JsonObject { return new WorkflowDesignWorkbench(this.store).save(args); }
+  workbenchWorkflowDesignGet(args: JsonObject): JsonObject { return new WorkflowDesignWorkbench(this.store).get(args); }
+  workbenchWorkflowDesignList(args: JsonObject): JsonObject { return new WorkflowDesignWorkbench(this.store).list(args); }
+  workbenchResourceView(args: JsonObject = {}): JsonObject { return this.cognitiveWorkbench.resources(args); }
+  workbenchMemorySave(args: JsonObject): JsonObject { return this.cognitiveWorkbench.saveMemory(args); }
   workbenchMemoryReview(args: JsonObject): JsonObject { return this.memoryCandidateReview(args); }
   /**
    * Capture an explicit user-authored memory without turning the whole chat into
    * durable storage. The user statement becomes bounded Evidence; automatic
    * acceptance is available only because the user explicitly requested recall.
    */
-  memoryCaptureUserStatement(args: JsonObject): JsonObject {
-    if (args.explicit_consent !== true) throw new Error("Explicit user consent is required to capture durable Memory");
-    const content = assertNoSecret(document(args.content, "content"), "content");
-    const kind = String(args.kind ?? "preference");
-    if (!new Set(["working", "episodic", "preference", "procedural"]).has(kind)) throw new Error("Memory capture kind is unsupported");
-    const scopeKind = text(args.scope_kind ?? "user", "scope_kind"); const scopeId = text(args.scope_id ?? "local", "scope_id");
-    const topic = args.topic === undefined ? undefined : text(args.topic, "topic");
-    this.knowledgeMemoryInstallBuiltins();
-    const captureIdentity = { kind, scope_kind: scopeKind, scope_id: scopeId, topic: topic ?? null, content_digest: valueDigest(content) };
-    const suffix = valueDigest(captureIdentity).slice(-20);
-    const evidence = this.evidenceRecord({ evidence_id: String(args.evidence_id ?? `evidence_memory_statement_${suffix}`), source_type: "human", confidence: "bounded",
-      claim: "Explicit user statement captured for governed Memory.", locator: `memory-capture:${scopeKind}:${scopeId}`, metadata: { capture_digest: valueDigest(captureIdentity), user_authored: true } });
-    const proposed = this.memoryCandidatePropose({ candidate_id: String(args.candidate_id ?? `memory_candidate_statement_${suffix}`), source_id: "builtin.evidence-wiki", kind,
-      scope_kind: scopeKind, scope_id: scopeId, ...(args.scope_envelope === undefined ? {} : { scope_envelope: args.scope_envelope }), ...(topic === undefined ? {} : { topic }), content, sensitivity: args.sensitivity ?? "internal", confidence: "bounded",
-      evidence_ids: [evidence.id], proposed_by: "explicit-user-statement", valid_until: args.valid_until });
-    const candidate = proposed.candidate as JsonObject;
-    if (args.auto_accept !== true || candidate.status !== "candidate") return { ...proposed, evidence, auto_committed: false,
-      next_action: candidate.status === "conflict_pending" ? "resolve_conflict" : "review_or_accept" };
-    const reviewed = this.memoryCandidateReview({ candidate_id: candidate.id, decision: "approve", reviewer: "automated-user-statement-review", reason: "Direct user statement with bounded Evidence." }).candidate as JsonObject;
-    const remembered = this.memoryLedgerRememberApproved({ candidate_id: reviewed.id, memory_id: args.memory_id }).memory as JsonObject;
-    return { candidate: reviewed, memory: remembered, evidence, auto_committed: true, next_action: "available_for_scoped_context" };
-  }
-  workbenchKnowledgeClaimSave(args: JsonObject): JsonObject {
-    const evidence = args.evidence_ids === undefined ? this.evidenceRecord({ source_type: "human", confidence: "bounded", claim: "Studio-authored candidate.", locator: "studio://knowledge" }) : null;
-    return this.knowledgeClaimSave({ ...args, evidence_ids: args.evidence_ids ?? [evidence?.id], scope: args.scope ?? "global" });
-  }
-  workbenchWorkflowSave(args: JsonObject): JsonObject {
-    const steps = Array.isArray(args.steps) ? args.steps as JsonObject[] : [];
-    const nodes = Array.isArray(args.nodes) ? args.nodes : steps.map((step, index) => ({ id: String(step.id ?? `step-${index + 1}`), type: String(step.type ?? "action"), side_effect: String(step.side_effect ?? "read_only"), ...(step.action === undefined ? {} : { action: step.action }), depends_on: Array.isArray(step.depends_on) ? step.depends_on : [] }));
-    return this.workflowDagSave({ ...args, nodes: nodes.length ? nodes : [{ id: "studio-placeholder", type: "action", side_effect: "read_only", action: "noop", depends_on: [] }] });
-  }
-  knowledgeExpirySweep(args: JsonObject = {}): JsonObject {
-    const now = new Date(args.now === undefined ? Date.now() : text(args.now, "now")); if (Number.isNaN(now.valueOf())) throw new Error("now must be an ISO timestamp"); const expired: JsonObject[] = [];
-    for (const claim of this.store.list("knowledge_claim", 10_000, (x) => x.status === "reviewed" && Boolean(x.valid_until) && Date.parse(String(x.valid_until)) < now.valueOf())) expired.push(this.store.save("knowledge_claim", String(claim.id), { ...recordPayload(claim), status: "expired", expiry_reason_digest: valueDigest("valid_until elapsed") }));
-    return { expired, count: expired.length, now: now.toISOString() };
-  }
-  knowledgeConflictResolve(args: JsonObject): JsonObject {
-    const claim = this.store.get("knowledge_claim", text(args.claim_id, "claim_id")); const decision = text(args.decision, "decision"); if (!new Set(["reviewed", "disputed", "superseded"]).has(decision)) throw new Error("knowledge conflict decision is unsupported");
-    if (decision === "reviewed") { const ids = Array.isArray(claim.evidence_ids) ? claim.evidence_ids as unknown[] : []; if (!ids.some((e) => ["bounded", "confirmed"].includes(String(this.store.get("evidence", String(e)).confidence)))) throw new Error("Conflict resolution requires bounded or confirmed Evidence"); }
-    return this.knowledgeClaimReview({ claim_id: claim.id, status: decision, reviewer: args.reviewer, reason: args.reason });
-  }
+  memoryCaptureUserStatement(args: JsonObject): JsonObject { return this.cognitiveWrites.captureUserStatement(args); }
+  workbenchKnowledgeClaimSave(args: JsonObject): JsonObject { return this.cognitiveWorkbench.saveClaim(args); }
+  workbenchWorkflowSave(args: JsonObject): JsonObject { return this.workflowDagSave(workbenchWorkflowInput(args)); }
+  knowledgeExpirySweep(args: JsonObject = {}): JsonObject { return this.cognitiveWrites.sweepExpiredClaims(args); }
+  knowledgeConflictResolve(args: JsonObject): JsonObject { return this.cognitiveWrites.resolveClaimConflict(args); }
 
-  /**
-   * The canonical MCP handler table, contributed by the mounted McpServer.
-   *
-   * The tool catalog is a single source, and so is its dispatch: instead of a
-   * second hand-maintained whitelist that could drift from the public surface,
-   * the internal loop addresses the *same* handlers the MCP surface exposes.
-   * Authorization is then a property of the tier gate, not of a duplicate list.
-   * A service with no McpServer mounted simply has no external dispatch, so the
-   * loop falls back to the bounded table below.
-   */
+  /** Application dispatch belongs to the use cases, never to a mounted transport. */
   private canonicalHandlers: Record<string, (input: JsonObject) => JsonObject | Promise<JsonObject>> | null = null;
 
-  /** Contributed by McpServer so the internal loop and MCP share one dispatch. */
+  /** Compatibility injection for existing application callers; MCP does not mutate it. */
   registerCanonicalHandlers(handlers: Record<string, (input: JsonObject) => JsonObject | Promise<JsonObject>>): void {
     this.canonicalHandlers = handlers;
   }
@@ -344,16 +318,16 @@ export class CraftService extends ServiceFoundation {
    * and must be inside the tiers this host mounted -- by default read and
    * candidate, so "Craft works on its own" can observe and propose but cannot
    * approve its own work. The second is dispatch: the action is resolved
-   * against the canonical MCP handler table when a server is mounted, and
-   * otherwise against the bounded fallback table below, so an action that is
-   * not a real public operation fails closed either way.
+   * against the application handler table, plus the existing bounded local
+   * aliases. Mounting a transport grants no additional authorization.
    */
   protected async invokeInternalAction(action: string, args: JsonObject): Promise<JsonObject> {
     const tier = classifyTool(`craft_${action}`);
     if (!this.internalHost.authorization.includes(tier)) {
       throw new Error(`Internal host action is not permitted: ${action} (tier ${tier} is outside the mounted authorization)`);
     }
-    const canonicalHandler = this.canonicalHandlers?.[`craft_${action}`];
+    this.canonicalHandlers ??= createActionHandlers(this);
+    const canonicalHandler = this.canonicalHandlers[`craft_${action}`];
     if (canonicalHandler) return canonicalHandler(args);
     const handler = this.internalFallbackActions()[action];
     if (!handler) throw new Error(`Internal host action is not permitted: ${action} (not a known operation)`);
@@ -361,11 +335,11 @@ export class CraftService extends ServiceFoundation {
   }
 
   /**
-   * The bounded surface the loop keeps when no MCP server is mounted.
+   * The stable bounded surface advertised to the internal loop.
    *
    * This is the read-and-record core the internal host was originally built
-   * around; it stays as the offline/no-server fallback so a standalone service
-   * still gives the loop something useful without widening its authority.
+   * around; local workspace aliases remain here. Application dispatch is
+   * available independently of transports, without widening advertised authority.
    */
   private internalFallbackActions(): Record<string, (input: JsonObject) => JsonObject | Promise<JsonObject>> {
     return {
@@ -410,17 +384,12 @@ export class CraftService extends ServiceFoundation {
   }
 
   /**
-   * The tool names the internal loop is actually able to route.
-   *
-   * Built from the two tables `invokeInternalAction` dispatches against, so the
-   * advertised surface and the answerable surface cannot diverge: a name is here
-   * exactly when a call to it would resolve. The canonical table is consulted
-   * live, which is why a host that mounts its MCP server after the service was
-   * constructed still gets the wide surface.
+   * Preserve the standalone loop's minimal advertised surface. Every offered
+   * action routes through the application table/local aliases; mounting MCP or
+   * Workbench cannot inflate model input or alter this selection policy.
    */
   protected dispatchableInternalActions(): ReadonlySet<string> {
     const names = new Set(Object.keys(this.internalFallbackActions()));
-    for (const canonical of Object.keys(this.canonicalHandlers ?? {})) names.add(actionNameOf(canonical));
     return names;
   }
 
@@ -455,9 +424,13 @@ export class CraftService extends ServiceFoundation {
     // Validate a graph before it becomes a proposal record.  This is deliberately an asset
     // validation, not execution: a valid graph still needs the existing evaluation, Signoff
     // and Canary gates before Core may route it to the VerifiedWorkLoop.
-    if (procedureKind === "graph") this.workflowDagValidate({ nodes: args.nodes, edges: args.edges ?? [], inputs: args.inputs ?? [], outputs: args.outputs ?? {}, checkpoint_policy: args.checkpoint_policy ?? { mode: "step" } });
+    if (procedureKind === "graph" && args.graph_control === undefined) this.workflowDagValidate({ nodes: args.nodes, edges: args.edges ?? [], inputs: args.inputs ?? [], outputs: args.outputs ?? {}, checkpoint_policy: args.checkpoint_policy ?? { mode: "step" } });
     const submitted = this.workflowEvolution.submit(args); const proposal = submitted.proposal as JsonObject;
     const nextAction = "Run shadow and held-out evaluation, then use the existing Signoff and Canary gates before this Procedure can be selected.";
+    if (proposal.composition !== undefined || (proposal.graph as JsonObject | null)?.graph_control !== undefined) {
+      const procedure = this.experienceProcedures.draft({ proposal_id: proposal.id });
+      return { ...submitted, workflow: null, procedure: procedure.procedure, next_action: nextAction };
+    }
     if (procedureKind === "prompt") {
       const procedure = this.experienceProcedures.draft({ proposal_id: proposal.id, procedure_kind: "prompt", title: proposal.name,
         description: proposal.prompt ?? proposal.description, trigger: args.trigger ?? request.scenario_key,
@@ -2840,8 +2813,19 @@ export class CraftService extends ServiceFoundation {
     const claim = this.store.create("knowledge_claim", claimId, { ...identity, content_ref: contentRef, identity_digest: valueDigest(identity), status: "candidate", review: null });
     return { claim, idempotent: false };
   }
-  knowledgeClaimGet(args: JsonObject): JsonObject { return { claim: this.store.get("knowledge_claim", text(args.claim_id, "claim_id"), args.version === undefined ? undefined : finiteInteger(args.version, "version", 1)) }; }
-  knowledgeClaimList(args: JsonObject): JsonObject { return this.list("knowledge_claim", "claims", args); }
+  knowledgeClaimGet(args: JsonObject): JsonObject {
+    const id = text(args.claim_id, "claim_id");
+    const current = this.store.get("knowledge_claim", id);
+    if (!claimReadable(this.store, current, args)) throw new Error("Knowledge claim scope or audience denied");
+    const claim = args.version === undefined ? current : this.store.get("knowledge_claim", id, finiteInteger(args.version, "version", 1));
+    if (!claimReadable(this.store, claim, args) || claim.scope !== current.scope) throw new Error("Knowledge claim historical scope or audience denied");
+    return { claim };
+  }
+  knowledgeClaimList(args: JsonObject): JsonObject {
+    const query = String(args.query ?? "").toLowerCase();
+    return { claims: this.store.list("knowledge_claim", finiteInteger(args.limit, "limit", 20, 1, 1_000), (claim) =>
+      claimReadable(this.store, claim, args) && (!query || JSON.stringify(claim).toLowerCase().includes(query))) };
+  }
   knowledgeClaimReview(args: JsonObject): JsonObject {
     const claim = this.store.get("knowledge_claim", text(args.claim_id, "claim_id")); const status = text(args.status, "status");
     if (!KNOWLEDGE_STATUSES.has(status) || status === "candidate") throw new Error("Knowledge claim review status is unsupported");
@@ -2863,7 +2847,7 @@ export class CraftService extends ServiceFoundation {
       const source = this.store.find("knowledge_source", sourceId);
       if (!source || source.status !== "active" || source.trust === "untrusted") throw new Error("Reviewed knowledge claim requires an active trusted Source");
     }
-    const saved = this.store.save("knowledge_claim", String(claim.id), { ...recordPayload(claim), status, review: { reviewer, reason_digest: valueDigest(reason), reviewed_at: new Date().toISOString() } });
+    const saved = this.store.save("knowledge_claim", String(claim.id), { ...recordPayload(claim), status, review: { reviewer, ...(status === "reviewed" ? { source_digest: this.store.get("knowledge_source", String(claim.source_id)).content_digest } : {}), reason_digest: valueDigest(reason), reviewed_at: new Date().toISOString() } });
     return { claim: saved };
   }
   async wikiPageSave(args: JsonObject): Promise<JsonObject> {

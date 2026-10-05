@@ -1,34 +1,64 @@
 {
   "name": "@craft/capability-knowledge",
-  "version": "0.12.37",
-  "private": true,
+  "version": "0.12.38",
   "description": "Craft Knowledge capability: evidence-backed claims, Wiki context, relations, and the project index",
   "type": "module",
-  "main": "capability.ts",
+  "main": "./dist/capability.js",
   "exports": {
-    ".": "./capability.ts",
-    "./ownership": "./ownership.ts",
-    "./knowledge-workbench": "./knowledge-workbench.ts",
-    "./knowledge-bound-launch": "./knowledge-bound-launch.ts",
-    "./knowledge-relation": "./knowledge-relation.ts",
-    "./wiki-candidate-governance": "./wiki-candidate-governance.ts",
-    "./local-candidate-import": "./local-candidate-import.ts",
-    "./project-knowledge": "./project-knowledge.ts",
-    "./project-brain": "./project-brain.ts"
+    ".": {
+      "types": "./dist/capability.d.ts",
+      "default": "./dist/capability.js"
+    },
+    "./ownership": {
+      "types": "./dist/ownership.d.ts",
+      "default": "./dist/ownership.js"
+    },
+    "./knowledge-workbench": {
+      "types": "./dist/knowledge-workbench.d.ts",
+      "default": "./dist/knowledge-workbench.js"
+    },
+    "./knowledge-bound-launch": {
+      "types": "./dist/knowledge-bound-launch.d.ts",
+      "default": "./dist/knowledge-bound-launch.js"
+    },
+    "./knowledge-relation": {
+      "types": "./dist/knowledge-relation.d.ts",
+      "default": "./dist/knowledge-relation.js"
+    },
+    "./wiki-candidate-governance": {
+      "types": "./dist/wiki-candidate-governance.d.ts",
+      "default": "./dist/wiki-candidate-governance.js"
+    },
+    "./local-candidate-import": {
+      "types": "./dist/local-candidate-import.d.ts",
+      "default": "./dist/local-candidate-import.js"
+    },
+    "./project-knowledge": {
+      "types": "./dist/project-knowledge.d.ts",
+      "default": "./dist/project-knowledge.js"
+    },
+    "./project-brain": {
+      "types": "./dist/project-brain.d.ts",
+      "default": "./dist/project-brain.js"
+    },
+    "./package.json": "./package.json"
   },
   "files": [
-    "capability.ts",
-    "ownership.ts",
-    "knowledge-workbench.ts",
-    "knowledge-bound-launch.ts",
-    "knowledge-relation.ts",
-    "wiki-candidate-governance.ts",
-    "local-candidate-import.ts",
-    "project-knowledge.ts",
-    "project-brain.ts"
+    "dist",
+    "README.md"
   ],
-  "peerDependencies": {
-    "craft-agent-harness": "0.12.37"
+  "license": "MIT",
+  "types": "./dist/capability.d.ts",
+  "dependencies": {
+    "craft-common-store-local": "0.12.38",
+    "craft-common-base": "0.12.38",
+    "craft-common-log": "0.12.38"
   },
-  "license": "MIT"
+  "engines": {
+    "node": ">=23"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
 }

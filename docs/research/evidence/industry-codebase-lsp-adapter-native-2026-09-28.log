@@ -1,0 +1,43 @@
+(node:80700) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:80700) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+✔ LSP adapter normalizes nested multi-language symbols using exact UTF-16 snapshot positions (1.649666ms)
+✔ LSP adapter rejects invalid digests, positions, nesting and unbounded input (15.36475ms)
+✔ shared ranking prevents weak Memory starving Knowledge; required items and aggregate budgets hold (34.70575ms)
+✔ history returns revoked/expired versions diagnostically; as-of uses recorded knowledge and current ACL (14.873292ms)
+✔ ingestion keeps unchanged review, invalidates edits/deletions, and exposes cursor drift (22.186417ms)
+✔ persisted vector cache survives adapter instances; batches are bounded and dimension failures fall back (21.143791ms)
+✔ retrieval eligibility requires executed labelled results, not caller-reported scores (12.973667ms)
+✔ compiler resolves imports, aliases and methods without matching comments, strings or unrelated same names (30.098959ms)
+✔ MCP initialize, tool list and readiness expose one actual schema fingerprint (20.130542ms)
+✔ LSP relations retain real endpoints and reject dangling, malformed or out-of-range facts (0.800334ms)
+✔ changed document guards remain fail-closed even if a stale claim is externally marked reviewed (10.647208ms)
+✔ scoped maintenance proposes actionable versioned work; verified feedback only breaks relevance ties (14.930833ms)
+✔ keyword dataset grading measures missed queries, validates scopes and can run through MCP (19.623166ms)
+✔ vector disk cache works in a fresh process; provider usage, cache writes and resource bounds fail closed (269.129208ms)
+✔ retrieval evaluation rejects adapter drift and records unavailable embedded-process fingerprint (18.1385ms)
+✔ source ingestion caps total bytes and files before persisting a partial manifest (1209.696792ms)
+✔ ablation preparation uses real campaign slots, requires curated cases and never fabricates results (2335.20875ms)
+✔ history reads all recorded versions within budget and scoped document bundles preserve freshness guards (43.706625ms)
+✔ compiler refuses oversized graphs, handles incomplete declarations and bounds its parsed-file cache (253.952792ms)
+✔ unmatched governed claims and sparse contribution descriptors do not invent lexical matches (20.748333ms)
+✔ compiler IO cannot reach working files or emit artifacts; warm binding observes a changed dependency (26.481666ms)
+ℹ tests 21
+ℹ suites 0
+ℹ pass 21
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5135.005917
+ℹ start of coverage report
+ℹ -----------------------------------------------------------------
+ℹ file             | line % | branch % | funcs % | uncovered lines
+ℹ -----------------------------------------------------------------
+ℹ capability       |        |          |         | 
+ℹ  craft-codebase  |        |          |         | 
+ℹ   lsp-adapter.ts | 100.00 |   100.00 |  100.00 | 
+ℹ -----------------------------------------------------------------
+ℹ all files        | 100.00 |   100.00 |  100.00 | 
+ℹ -----------------------------------------------------------------
+ℹ end of coverage report

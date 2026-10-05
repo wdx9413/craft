@@ -173,7 +173,7 @@ export class KnowledgeAutoReviewKernel {
   hostReview(args: JsonObject): JsonObject {
     const claim = this.store.get("knowledge_claim", text(args.claim_id, "claim_id"));
     const hostKind = text(args.host_kind ?? "codex", "host_kind");
-    if (!new Set(["codex", "claude", "independent"]).has(hostKind)) throw new Error("host_kind must be codex, claude, or independent");
+    if (!/^[a-z][a-z0-9_-]{0,63}$/u.test(hostKind)) throw new Error("host_kind must be a bounded Host identifier");
     const hostRunKey = text(args.host_run_key, "host_run_key");
     const decision = text(args.decision, "decision") as HostReviewDecision;
     if (!new Set<HostReviewDecision>(["supported", "needs_evidence", "rejected"]).has(decision)) throw new Error("decision must be supported, needs_evidence, or rejected");
@@ -191,19 +191,23 @@ export class KnowledgeAutoReviewKernel {
     if (!source || typeof sourceDigest !== "string" || sourceDigest !== suppliedSourceDigest) {
       throw new Error("source_digest must match the active Claim Source");
     }
-    if (packetDigest !== null) {
-      const packet = this.reviewPacket({ claim_id: claim.id });
-      if (packet.status !== "ready" || packet.packet_digest !== packetDigest) throw new Error("packet_digest must match the exact semantic review packet");
-    }
     const priorReviewId = claim.status === "reviewed" && typeof (claim.review as JsonObject | undefined)?.review_id === "string"
       ? String((claim.review as JsonObject).review_id) : null;
     const priorReview = priorReviewId ? this.store.find("knowledge_host_review", priorReviewId) : null;
-    if (priorReview) return { review: priorReview, claim, promoted: false, idempotent: true, status: "already_reviewed", blocking_reasons: [] };
+    // Promotion changes the Claim version. Only an exact replay of its original
+    // packet/reviewer identity may use the original attestation after that change.
+    const reviewIdentity = { packet_digest: packetDigest, host_kind: hostKind, host_run_key: hostRunKey, model_ref: modelRef, rubric_id: rubricId, decision, reason_code: reasonCode };
+    const replay = priorReview && packetDigest !== null && Object.entries(reviewIdentity).every(([key, value]) => priorReview[key] === value);
+    if (!replay && packetDigest !== null) {
+      const packet = this.reviewPacket({ claim_id: claim.id });
+      if (packet.status !== "ready" || packet.packet_digest !== packetDigest) throw new Error("packet_digest must match the exact semantic review packet");
+    }
     const credibleEvidence = Array.isArray(claim.evidence_ids) && claim.evidence_ids.some((id) => {
       const evidence = this.store.find("evidence", String(id));
       return evidence && ["bounded", "confirmed"].includes(String(evidence.confidence));
     });
     const blockingReasons: string[] = [];
+    if (decision === "supported" && packetDigest === null) blockingReasons.push("semantic_review_packet_required");
     if (claim.status !== "candidate" && claim.status !== "reviewed") blockingReasons.push(`claim_status_${String(claim.status)}`);
     if (source.status !== "active" || source.trust === "untrusted") blockingReasons.push("source_not_trusted_active");
     if (!credibleEvidence) blockingReasons.push("credible_evidence_missing");
@@ -211,6 +215,9 @@ export class KnowledgeAutoReviewKernel {
     if (claim.valid_until && Date.parse(String(claim.valid_until)) < now) blockingReasons.push("claim_expired");
     const contradictions = this.store.list("knowledge_relation", 10_000, (relation) => relation.relation === "contradicts" && (relation.from_claim_id === claim.id || relation.to_claim_id === claim.id));
     if (contradictions.length) blockingReasons.push("contradiction_requires_adjudication");
+
+    if (replay) return { review: priorReview, claim, promoted: false, idempotent: true,
+      status: blockingReasons.length ? "revalidation_required" : "already_reviewed", current_valid: !blockingReasons.length, blocking_reasons: blockingReasons };
 
     const identity = {
       claim_id: claim.id, claim_version: claim.version, claim_identity_digest: claim.identity_digest ?? null,
@@ -222,6 +229,7 @@ export class KnowledgeAutoReviewKernel {
     const review = existing ?? this.store.create("knowledge_host_review", reviewId, {
       ...identity, identity_digest: digest(identity), reviewed_at: new Date(now).toISOString(),
       automated: true, host_attested: true, packet_attested: packetDigest !== null, content_free: true,
+      validation_status: packetDigest === null ? "revalidation_required" : "packet_bound",
     });
     const promotable = decision === "supported" && !blockingReasons.length;
     if (!promotable || claim.status === "reviewed") {
@@ -313,7 +321,7 @@ export class KnowledgeAutoReviewKernel {
     // with an active Source and credible Evidence can use it.  The result remains
     // auditable through both this review record and the normal Claim review field.
     if (autoPromote && policy.automatic && verdict === "eligible") {
-      reviewedClaim = this.store.save("knowledge_claim", String(claim.id), { ...payload(claim), status: "reviewed", review: { reviewer: "automated-promotion-policy", reason_digest: digest({ review_id: review.id, verdict, policy_id: policy.id, policy_revision: policy.revision }), reviewed_at: new Date(now).toISOString(), automated: true, policy_id: policy.id, policy_revision: policy.revision } });
+      reviewedClaim = this.store.save("knowledge_claim", String(claim.id), { ...payload(claim), status: "reviewed", review: { reviewer: "automated-promotion-policy", source_digest: this.store.get("knowledge_source", String(claim.source_id)).content_digest, reason_digest: digest({ review_id: review.id, verdict, policy_id: policy.id, policy_revision: policy.revision }), reviewed_at: new Date(now).toISOString(), automated: true, policy_id: policy.id, policy_revision: policy.revision } });
     }
     return { claim_id: claim.id, claim_version: claim.version, verdict, reasons, review, claim: reviewedClaim ?? claim, promoted: reviewedClaim !== null, independent_support: this.supports(claim).length, required_independent_support: policy.minimum_independent_support, idempotent: existing !== null };
   }

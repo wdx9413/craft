@@ -1,8 +1,9 @@
+import { analyzeTypeScript } from "./typescript-analysis.ts";
 import { createHash } from "node:crypto";
 import { lstatSync, readFileSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
-import { stableDigest } from "../../core/digest.ts";
-import { CraftStore, type JsonObject } from "../../core/infrastructure/store.ts";
+import { stableDigest } from "../../common/craft-common-base/src/digest.ts";
+import { CraftStore, type JsonObject } from "../../common/craft-common-store-local/src/store.ts";
 
 const ANALYZER = "builtin-regex-static-v1";
 const SOURCE_EXTENSIONS = new Set(["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"]);
@@ -10,7 +11,7 @@ const MAX_RESULTS = 100;
 
 type SourceFile = { readonly path: string; readonly digest: string; readonly content: string; readonly language: string };
 type Node = JsonObject & { readonly id: string; readonly kind: "file" | "symbol"; readonly path: string; readonly name: string; readonly source_digest: string; readonly span: JsonObject };
-type Edge = JsonObject & { readonly id: string; readonly kind: "imports" | "calls"; readonly from_node_id: string; readonly to_node_id: string; readonly provenance: "extracted" | "heuristic"; readonly confidence: "high" | "partial"; readonly source_span: JsonObject };
+type Edge = JsonObject & { readonly id: string; readonly kind: "imports" | "calls" | "references" | "implements" | "type_definition"; readonly from_node_id: string; readonly to_node_id: string; readonly provenance: "extracted" | "heuristic"; readonly confidence: "high" | "partial"; readonly source_span: JsonObject };
 
 function text(value: unknown, name: string): string {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
@@ -95,7 +96,7 @@ export class CodebaseIndexKernel {
     const indexes = this.store.list("codebase_index", 1_000, (item) => item.workspace_id === workspaceId).map((index) => this.indexStatus(index, workspace));
     const ordered = indexes.sort((left, right) => String(right.created_at).localeCompare(String(left.created_at)));
     const readiness = activation?.status !== "active" ? "disabled" : ordered.length === 0 ? "index_required" : ordered[0]!.status === "ready" ? "ready" : "rebuild_required";
-    return { workspace_id: workspaceId, enabled: activation?.status === "active", activation, analyzer: ANALYZER, readiness, indexes: ordered };
+    return { workspace_id: workspaceId, enabled: activation?.status === "active", activation, analyzer: ordered[0]?.analyzer ?? "typescript-checker", readiness, indexes: ordered };
   }
 
   build(args: JsonObject): JsonObject {
@@ -105,6 +106,10 @@ export class CodebaseIndexKernel {
     const entries = Array.isArray(checkpoint.entries) ? checkpoint.entries as JsonObject[] : [];
     const sourceEntries = entries.filter((entry) => SOURCE_EXTENSIONS.has(extension(String(entry.path))));
     const files = sourceEntries.map((entry) => this.sourceFile(String(checkpoint.snapshot_root), entry));
+    if (args.analyzer !== "heuristic" && files.length) {
+      if (args.analyzer !== undefined && args.analyzer !== "typescript") throw new Error("Unsupported Codebase analyzer");
+      return this.importAnalysis({ ...args, checkpoint_id: checkpointId, analysis: analyzeTypeScript(files) });
+    }
     const unsupportedEntries = entries.filter((entry) => !SOURCE_EXTENSIONS.has(extension(String(entry.path))));
     const snapshotDigest = stableDigest(entries.map((entry) => ({ path: entry.path, digest: entry.digest, size_bytes: entry.size_bytes })));
     const identity = { workspace_id: workspaceId, checkpoint_id: checkpointId, snapshot_digest: snapshotDigest, analyzer: ANALYZER };
@@ -129,6 +134,54 @@ export class CodebaseIndexKernel {
       if (previous.checkpoint_id !== checkpointId) this.store.save("codebase_index", String(previous.id), { ...recordPayload(previous), status: "stale", stale_reason: "new_workspace_checkpoint" });
     }
     const index = this.store.create("codebase_index", indexId, { ...identity, identity_digest: stableDigest(identity), status: "ready", source_file_count: files.length, analysis, nodes: graph.nodes, edges: graph.edges, diagnostics: graph.diagnostics, raw_content_stored: false });
+    return { index: this.indexStatus(index, workspace), idempotent: false };
+  }
+
+  /** Normalized adapter boundary: no executable plugins or source bodies enter the store. */
+  importAnalysis(args: JsonObject): JsonObject {
+    const workspaceId = identifier(args.workspace_id, "workspace_id"); const workspace = this.store.get("workspace", workspaceId); this.requireActive(args, workspaceId);
+    const checkpointId = identifier(args.checkpoint_id, "checkpoint_id"); const checkpoint = this.store.get("workspace_checkpoint", checkpointId);
+    if (checkpoint.workspace_id !== workspaceId || workspace.latest_checkpoint_id !== checkpointId) throw new Error("Analysis requires the latest workspace checkpoint");
+    const input = args.analysis as JsonObject;
+    if (!input || Array.isArray(input) || typeof input !== "object" || input.format !== "craft-static-analysis-v1") throw new Error("Unsupported analysis format");
+    if (JSON.stringify(input).length > 2_000_000) throw new Error("Analysis exceeds 2 MiB budget");
+    const analyzer = text(input.analyzer, "analysis.analyzer"); const analyzerVersion = text(input.analyzer_version, "analysis.analyzer_version");
+    if (analyzer.length > 100 || analyzerVersion.length > 100) throw new Error("Analyzer identity exceeds budget");
+    if (!Array.isArray(input.nodes) || !input.nodes.length || input.nodes.length > 10_000 || !Array.isArray(input.edges) || input.edges.length > 20_000) throw new Error("Analysis nodes/edges exceed budget or are missing");
+    const entries = new Map((checkpoint.entries as JsonObject[]).map((entry) => [String(entry.path), entry]));
+    const files = new Map<string, SourceFile>();
+    const fileAt = (path: string): SourceFile => {
+      const cached = files.get(path); if (cached) return cached;
+      const entry = entries.get(path); if (!entry) throw new Error("Analysis path is outside checkpoint");
+      const file = this.sourceFile(String(checkpoint.snapshot_root), entry); files.set(path, file); return file;
+    };
+    const range = (value: unknown, file: SourceFile): JsonObject => {
+      const offsets = value as JsonObject; const start = offsets?.start_offset; const end = offsets?.end_offset;
+      if (!Number.isInteger(start) || !Number.isInteger(end) || Number(start) < 0 || Number(end) < Number(start) || Number(end) > file.content.length) throw new Error("Analysis span is outside snapshot (UTF-16 offsets required)");
+      return span(file.content, Number(start), Number(end) - Number(start));
+    };
+    const identity = { workspace_id: workspaceId, checkpoint_id: checkpointId, analyzer, analyzer_version: analyzerVersion, input_digest: stableDigest({ ...input, diagnostics: undefined }) };
+    const indexId = identifier(args.index_id ?? `codebase_index_${stableDigest(identity).slice(-20)}`, "index_id");
+    const existing = this.store.find("codebase_index", indexId);
+    if (existing) { if (existing.identity_digest !== stableDigest(identity)) throw new Error("Codebase index idempotency conflict"); return { index: this.indexStatus(existing, workspace), idempotent: true }; }
+    const nodes: Node[] = input.nodes.map((raw) => {
+      const item = raw as JsonObject; const path = text(item.path, "node.path"); const file = fileAt(path);
+      if (item.source_digest !== file.digest) throw new Error("Analysis source digest mismatch");
+      if (item.kind !== "file" && item.kind !== "symbol") throw new Error("Unsupported analysis node kind");
+      return { id: identifier(item.id, "node.id"), kind: item.kind, path, name: text(item.name, "node.name"), source_digest: file.digest, span: range(item.span, file), language: text(item.language, "node.language") };
+    });
+    const byId = new Map(nodes.map((node) => [node.id, node])); if (byId.size !== nodes.length) throw new Error("Analysis node ids must be unique");
+    const edges: Edge[] = input.edges.map((raw) => {
+      const item = raw as JsonObject; const from = byId.get(String(item.from_node_id)); const to = byId.get(String(item.to_node_id));
+      if (!from || !to) throw new Error("Analysis edge endpoint is missing");
+      if (!["calls", "imports", "references", "implements", "type_definition"].includes(String(item.kind))) throw new Error("Unsupported analysis edge kind");
+      const sourceSpan = range(item.source_span, fileAt(from.path));
+      return { id: edgeId(indexId, String(item.kind), from.id, to.id, sourceSpan), kind: item.kind as Edge["kind"], from_node_id: from.id, to_node_id: to.id, source_span: sourceSpan, provenance: "extracted", confidence: "partial", producer: "external_adapter" };
+    });
+    const analysis = { analyzer, analyzer_version: analyzerVersion, provenance: "adapter_reported", certainty: "partial", offset_encoding: "utf-16", supported_languages: [...new Set(nodes.map((node) => node.language))].sort(), supported_file_count: files.size, unsupported_file_count: entries.size - files.size, total_checkpoint_file_count: entries.size, scope_digest: stableDigest({ workspace_id: workspaceId, checkpoint_id: checkpointId, allowed_paths: workspace.include_paths }), allowed_paths: workspace.include_paths };
+    for (const previous of this.store.list("codebase_index", 1_000, item => item.workspace_id === workspaceId && item.status === "ready" && item.checkpoint_id !== checkpointId))
+      this.store.save("codebase_index", String(previous.id), { ...recordPayload(previous), status: "stale", stale_reason: "new_workspace_checkpoint" });
+    const index = this.store.create("codebase_index", indexId, { ...identity, identity_digest: stableDigest(identity), status: "ready", analysis, source_file_count: files.size, nodes: sorted(nodes), edges: sorted([...new Map(edges.map((edge) => [edge.id, edge])).values()]), diagnostics: input.diagnostics ?? [], raw_content_stored: false });
     return { index: this.indexStatus(index, workspace), idempotent: false };
   }
 
@@ -179,6 +232,7 @@ export class CodebaseIndexKernel {
   }
   private readyIndex(args: JsonObject): { index: JsonObject; workspace: JsonObject } {
     const index = this.store.get("codebase_index", identifier(args.index_id, "index_id")); const workspace = this.store.get("workspace", String(index.workspace_id)); this.requireActive(args, String(index.workspace_id));
+    if (args.workspace_id !== undefined && args.workspace_id !== index.workspace_id) throw new Error("Index does not belong to requested workspace");
     const status = this.indexStatus(index, workspace); if (status.status !== "ready") throw new Error(`Codebase index is ${status.status}`);
     return { index, workspace };
   }
@@ -222,8 +276,11 @@ export class CodebaseIndexKernel {
   private node(index: JsonObject, id: string): Node { const node = (index.nodes as Node[]).find((candidate) => candidate.id === id); if (!node) throw new Error("Codebase node is not in index"); return node; }
   private symbol(index: JsonObject, args: JsonObject): Node { const node = args.symbol_id === undefined ? this.node(index, text(args.node_id, "node_id")) : this.node(index, text(args.symbol_id, "symbol_id")); if (node.kind !== "symbol") throw new Error("Codebase caller lookup requires a symbol node"); return node; }
   private receipt(kind: string, index: JsonObject, workspace: JsonObject, query: JsonObject, result: JsonObject): JsonObject {
-    const identity = { kind, index_id: index.id, index_revision_digest: index.identity_digest, workspace_id: workspace.id, query, result_digest: stableDigest(result) }; const receiptId = `codebase_receipt_${stableDigest(identity).slice(-20)}`; const existing = this.store.find("codebase_query_receipt", receiptId);
-    const receipt = existing ?? this.store.create("codebase_query_receipt", receiptId, { ...identity, receipt_digest: stableDigest(identity), content_free: true, analyzer: ANALYZER, analysis: index.analysis });
-    return { ...result, receipt, index: this.indexStatus(index, workspace) };
+    const identity = { kind, index_id: index.id, index_revision_digest: index.identity_digest, workspace_id: workspace.id, query, result_digest: stableDigest(result) }; const receiptId = `codebase_receipt_${stableDigest(identity).slice(-20)}`;
+    return this.store.transaction(() => {
+      const existing = this.store.find("codebase_query_receipt", receiptId);
+      const receipt = existing ?? this.store.create("codebase_query_receipt", receiptId, { ...identity, receipt_digest: stableDigest(identity), content_free: true, analyzer: index.analyzer, analysis: index.analysis });
+      return { ...result, receipt, index: this.indexStatus(index, workspace) };
+    });
   }
 }

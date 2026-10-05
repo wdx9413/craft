@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { CraftStore, type JsonObject } from "../../core/infrastructure/store.ts";
-import { object, optionalScope } from "../../core/validation.ts";
-import { stableDigest, payload } from "../../core/digest.ts";
+import { CraftStore, type JsonObject } from "../../common/craft-common-store-local/src/store.ts";
+import { object, optionalScope } from "../../common/craft-common-base/src/validation.ts";
+import { stableDigest, payload } from "../../common/craft-common-base/src/digest.ts";
 
 const OBSERVATION_KINDS = new Set(["success", "failure", "correction"]);
 const PATTERN_KINDS = new Set(["success_strategy", "failure_pattern"]);

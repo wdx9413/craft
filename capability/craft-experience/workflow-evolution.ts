@@ -1,6 +1,8 @@
+import { validateGraphControl } from "./procedure-graph.ts";
 import { randomUUID } from "node:crypto";
-import { CraftStore, type JsonObject } from "../../core/infrastructure/store.ts";
-import { stableDigest, payload } from "../../core/digest.ts";
+import { CraftStore, type JsonObject } from "../../common/craft-common-store-local/src/store.ts";
+import { validateProcedureComposition } from "./procedure-composition.ts";
+import { stableDigest, payload } from "../../common/craft-common-base/src/digest.ts";
 
 const OUTCOMES = new Set(["passed", "failed", "inconclusive"]);
 const AXES = new Set(["context", "tools", "generation", "orchestration", "memory", "output"]);
@@ -24,13 +26,22 @@ export class WorkflowEvolutionKernel {
     const evidenceIds = strings(args.evidence_ids, "evidence_ids", 1); for (const evidenceId of evidenceIds) this.assertEvidence(evidenceId);
     const outcome = text(args.outcome, "outcome"); if (!OUTCOMES.has(outcome)) throw new Error("Workflow Evolution outcome is unsupported");
     const source = { kind: text(args.source_kind, "source_kind"), id: text(args.source_id, "source_id"), digest: text(args.source_digest, "source_digest"), scope: args.scope === undefined ? null : text(args.scope, "scope") };
+    let verification: JsonObject | null = null;
+    if (args.verification !== undefined) {
+      const receipt = args.verification as JsonObject;
+      if (!receipt || typeof receipt !== "object" || Array.isArray(receipt)) throw new Error("Verification receipt must be an object");
+      const startedAt = text(receipt.started_at, "verification.started_at"), completedAt = text(receipt.completed_at, "verification.completed_at");
+      if (!Number.isFinite(Date.parse(startedAt)) || !Number.isFinite(Date.parse(completedAt)) || Date.parse(completedAt) < Date.parse(startedAt)) throw new Error("Verification receipt timestamps are invalid");
+      if (!Number.isInteger(receipt.exit_code) || (outcome === "passed" && receipt.exit_code !== 0) || (outcome === "failed" && receipt.exit_code === 0)) throw new Error("Verification outcome contradicts exit_code");
+      verification = { contract_ref: text(receipt.contract_ref, "verification.contract_ref"), workspace_revision: text(receipt.workspace_revision, "verification.workspace_revision"), evidence_digest: text(receipt.evidence_digest, "verification.evidence_digest"), producer: text(receipt.producer, "verification.producer"), started_at: startedAt, completed_at: completedAt, exit_code: receipt.exit_code, provenance: "host_attested", independently_verified: false };
+    }
     const executionShape = args.execution_shape === undefined ? [] : strings(args.execution_shape, "execution_shape");
     const allowedShapes = new Set(["branch", "parallel_join", "approval", "recovery", "compensation", "retry"]);
     if (executionShape.some((shape) => !allowedShapes.has(shape))) throw new Error("Workflow Evolution execution_shape is unsupported");
     const scenarioKey = text(args.scenario_key, "scenario_key");
     const scenarioSignature = args.scenario_signature === undefined ? { digest: stableDigest(scenarioKey), source: "legacy_scenario_key" } : args.scenario_signature;
     if (!scenarioSignature || typeof scenarioSignature !== "object" || Array.isArray(scenarioSignature)) throw new Error("Workflow Evolution Scenario Signature is invalid");
-    const identity = { scenario_key: scenarioKey, scenario_signature: scenarioSignature, source, outcome, failure_type: args.failure_type === undefined ? null : text(args.failure_type, "failure_type"), evidence_ids: evidenceIds, execution_shape: executionShape, sanitized: true, content_stored: false };
+    const identity = { scenario_key: scenarioKey, scenario_signature: scenarioSignature, source, outcome, ...(verification ? { verification } : {}), failure_type: args.failure_type === undefined ? null : text(args.failure_type, "failure_type"), evidence_ids: evidenceIds, execution_shape: executionShape, sanitized: true, content_stored: false };
     const observationId = String(args.observation_id ?? `workflow_evolution_observation_${stableDigest(identity).slice(-20)}`); const existing = this.store.find("workflow_evolution_observation", observationId); const identityDigest = stableDigest(identity);
     if (existing) { if (existing.identity_digest !== identityDigest) throw new Error("Workflow Evolution observation idempotency conflict"); return { observation: existing, idempotent: true }; }
     const observation = this.store.create("workflow_evolution_observation", observationId, { ...identity, identity_digest: identityDigest, lifecycle: "accepted" });
@@ -63,6 +74,15 @@ export class WorkflowEvolutionKernel {
     const explicitProposalId = args.proposal_id === undefined ? null : text(args.proposal_id, "proposal_id");
     const prior = explicitProposalId === null ? null : this.store.find("workflow_evolution_proposal", explicitProposalId);
     if (prior) {
+      const priorControl = (prior.graph as JsonObject | undefined)?.graph_control;
+      if (priorControl !== undefined || args.graph_control !== undefined) {
+        if (priorControl === undefined || args.graph_control === undefined || stableDigest(priorControl) !== stableDigest(validateGraphControl(args.graph_control, args.nodes, args.edges))) throw new Error("Graph proposal idempotency conflict: graph_control changed or missing");
+      }
+      if (prior.composition !== undefined || args.composition !== undefined) {
+        const priorBody = { composition: prior.composition, steps: prior.steps };
+        const retryBody = { composition: args.composition, steps: args.steps };
+        if (stableDigest(priorBody) !== stableDigest(retryBody)) throw new Error("Workflow Evolution composition idempotency conflict");
+      }
       if (prior.request_id !== request.id) throw new Error("Workflow Evolution proposal idempotency conflict");
       return { proposal: prior, request, idempotent: true };
     }
@@ -74,10 +94,11 @@ export class WorkflowEvolutionKernel {
       if (target.id !== request.id || Number(target.version) !== Number(request.version)) throw new Error("Model Ticket does not belong to this Workflow Evolution request");
     }
     const procedureKind = text(request.procedure_kind ?? "workflow", "procedure_kind"); if (!PROCEDURE_KINDS.has(procedureKind)) throw new Error("Workflow Evolution procedure_kind is unsupported");
+    const composition = args.composition === undefined ? undefined : validateProcedureComposition(procedureKind, args.composition, args.steps);
     const replacementKind = procedureKind === "graph" ? "workflow_dag" : "workflow";
     const replacement = procedureKind === "prompt" || args.replaces_workflow_id === undefined ? null : this.store.get(replacementKind, text(args.replaces_workflow_id, "replaces_workflow_id"));
-    const graph = procedureKind === "graph" ? { nodes: args.nodes, edges: args.edges ?? [], outputs: args.outputs ?? {}, checkpoint_policy: args.checkpoint_policy ?? { mode: "step" } } : null;
-    const identity = { request_id: request.id, request_version: request.version, model_ticket_id: ticketId, procedure_kind: procedureKind, workflow_id: procedureKind === "prompt" ? String(args.workflow_id ?? `prompt_${stableDigest({ request: request.id, name: args.name }).slice(-16)}`) : text(args.workflow_id, "workflow_id"), name: text(args.name, "name"), description: text(args.description, "description"), inputs: strings(args.inputs ?? [], "inputs"), steps: procedureKind === "workflow" ? args.steps : null, graph, prompt: procedureKind === "prompt" ? text(args.prompt ?? args.description, "prompt") : null, replaces_workflow: replacement === null ? null : { kind: replacementKind, id: replacement.id, version: replacement.version }, lifecycle: "draft" };
+    const graph = procedureKind === "graph" ? { nodes: args.nodes, edges: args.edges ?? [], outputs: args.outputs ?? {}, checkpoint_policy: args.checkpoint_policy ?? { mode: "step" }, ...(args.graph_control === undefined ? {} : { graph_control: validateGraphControl(args.graph_control, args.nodes, args.edges) }) } : null;
+    const identity = { request_id: request.id, request_version: request.version, model_ticket_id: ticketId, procedure_kind: procedureKind, workflow_id: procedureKind === "prompt" ? String(args.workflow_id ?? `prompt_${stableDigest({ request: request.id, name: args.name }).slice(-16)}`) : text(args.workflow_id, "workflow_id"), name: text(args.name, "name"), description: text(args.description, "description"), inputs: strings(args.inputs ?? [], "inputs"), steps: procedureKind === "workflow" ? args.steps : null, ...(composition ? { composition } : {}), graph, prompt: procedureKind === "prompt" ? text(args.prompt ?? args.description, "prompt") : null, replaces_workflow: replacement === null ? null : { kind: replacementKind, id: replacement.id, version: replacement.version }, lifecycle: "draft" };
     if (procedureKind === "workflow" && (!Array.isArray(identity.steps) || !identity.steps.length)) throw new Error("steps must be a non-empty array");
     if (procedureKind === "graph" && (!Array.isArray(graph!.nodes) || !graph!.nodes.length)) throw new Error("graph nodes must be a non-empty array");
     const proposalId = String(args.proposal_id ?? `workflow_evolution_proposal_${stableDigest(identity).slice(-20)}`); const identityDigest = stableDigest(identity);

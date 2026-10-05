@@ -17,7 +17,7 @@ const components = RELEASE_PRODUCTS.map((product) => product.name);
 const internalComponentSurfaces = ["component-context", "component-quality", "component-knowledge", "component-memory", "component-capability", "component-skill-quality", "component-experience", "component-codebase"] as const;
 
 test("public MCP products resolve only maintained install products", () => {
-  assert.deepEqual(MCP_PRODUCT_NAMES, ["full", "knowledge", "memory", "experience", "codebase"]);
+  assert.deepEqual(MCP_PRODUCT_NAMES, ["full", "context", "knowledge", "memory", "experience", "codebase"]);
   assert.equal(productSurfaceOf("full"), "syscall");
   assert.equal(productSurfaceOf("knowledge"), "component-knowledge-daily");
   assert.equal(productSurfaceOf("memory"), "component-memory-daily");
@@ -33,7 +33,7 @@ test("public MCP products resolve only maintained install products", () => {
   assert.throws(() => resolveMcpProductMode(["--product", "memory", "--product", "memory"], {}), /only once/);
   assert.throws(() => resolveMcpProductMode(["--product", "memory", "--surface", "component-knowledge"], {}), /conflict/);
   assert.throws(() => resolveMcpProductMode([], { CRAFT_MCP_PRODUCT: "memory", CRAFT_MCP_SURFACE: "component-knowledge" }), /conflict/);
-  assert.throws(() => productSurfaceOf("context"), /Unknown Craft MCP product/);
+  assert.equal(productSurfaceOf("context"), "component-context-daily");
 });
 
 test("internal component surfaces remain bounded while only three cognition products are installable", () => {
@@ -98,6 +98,10 @@ test("surface registry keeps generic quality and every bounded projection determ
   // projection filter rather than relying on the full catalog only.
   assert.deepEqual(resolveSurfaceToolNames("component-knowledge-daily", tools, core), []);
   assert.deepEqual(resolveSurfaceToolNames("component-memory-daily", [], core), []);
+  assert.deepEqual(resolveSurfaceToolNames("component-context-daily", [
+    { name: "craft_info" }, { name: "craft_context_open" }, { name: "craft_knowledge_source_list" },
+    { name: "craft_codebase_status" }, { name: "craft_unrelated" },
+  ] as never[], core), ["craft_info", "craft_context_open", "craft_knowledge_source_list", "craft_codebase_status"]);
   assert.throws(() => resolveSurfaceToolNames("not-a-surface", tools, core), /Unknown Craft MCP surface/);
 });
 
@@ -198,4 +202,18 @@ test("component McpServer cannot call tools outside its mounted boundary", async
     const response = await server.handle({ id: 1, method: "tools/call", params: { name: "craft_verified_work_loop_prepare", arguments: {} } });
     assert.equal((response?.error as { code: number }).code, -32602);
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("portable Agent Plugins manifests contain only standard Skill and MCP contracts", async () => {
+  for (const product of RELEASE_PRODUCTS.filter(item => item.name !== "craft")) {
+    const root = join(import.meta.dirname, "..", "plugins", product.name);
+    const manifest = JSON.parse(await readFile(join(root, "plugin.json"), "utf8"));
+    assert.equal(manifest.$schema, "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json");
+    assert.equal(manifest.name, product.name); assert.equal(manifest.version, VERSION);
+    assert.deepEqual(Object.keys(manifest).sort(), ["$schema", "description", "license", "name", "version"]);
+    const mcp = JSON.parse(await readFile(join(root, "mcp.json"), "utf8"));
+    assert.equal(mcp.$schema, "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json");
+    assert.deepEqual(mcp.mcpServers[product.name], { type: "stdio", command: "node", args: ["${PLUGIN_ROOT}/dist/plugin/craft-mcp.cjs", "--product", product.name.replace("craft-", "")] });
+    assert.equal(await readFile(join(root, "skills", product.name, "SKILL.md"), "utf8"), await readFile(join(import.meta.dirname, "..", "skills", product.name, "SKILL.md"), "utf8"));
+  }
 });

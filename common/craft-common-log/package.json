@@ -1,0 +1,48 @@
+{
+  "name": "craft-common-log",
+  "version": "0.12.38",
+  "description": "Content-free telemetry, evaluation and OTLP observability SDK",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./otlp": {
+      "types": "./dist/otlp.d.ts",
+      "default": "./dist/otlp.js"
+    },
+    "./store-sink": {
+      "types": "./dist/store-sink.d.ts",
+      "default": "./dist/store-sink.js"
+    },
+    "./evaluation-contract": {
+      "types": "./dist/evaluation-contract.d.ts",
+      "default": "./dist/evaluation-contract.js"
+    },
+    "./cost-ledger": {
+      "types": "./dist/cost-ledger.d.ts",
+      "default": "./dist/cost-ledger.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=23"
+  },
+  "dependencies": {
+    "craft-common-store-local": "0.12.38",
+    "craft-common-base": "0.12.38",
+    "@types/node": ">=23 <26"
+  },
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

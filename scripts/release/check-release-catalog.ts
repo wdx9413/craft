@@ -25,6 +25,8 @@ for (const product of RELEASE_PRODUCTS) {
     else assert.equal(claude.hooks, undefined, `${product.name} must not install an automatic Hook`);
   }
 }
+const claudeMarket = JSON.parse(await readFile(join(root, ".claude-plugin", "marketplace.json"), "utf8"));
+assert.deepEqual(claudeMarket.plugins.map((item: { name: string }) => item.name), RELEASE_PRODUCTS.map(product => product.name), "Claude marketplace must match ReleaseCatalog");
 const server = await readFile(join(root, "core", "interfaces", "mcp-server.ts"), "utf8");
 for (const prefix of RETIRED_MCP_PREFIXES) assert(!server.includes(`tool("${prefix}`), `${prefix} must not be public`);
 for (const product of RETIRED_PUBLIC_PRODUCTS) {

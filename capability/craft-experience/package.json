@@ -1,24 +1,44 @@
 {
   "name": "@craft/capability-experience",
-  "version": "0.12.37",
-  "private": true,
+  "version": "0.12.38",
   "description": "Craft Experience capability: content-free observations, bounded Workflow evolution, and evaluation model profiles",
   "type": "module",
-  "main": "capability.ts",
+  "main": "./dist/capability.js",
   "exports": {
-    ".": "./capability.ts",
-    "./experience-ledger": "./experience-ledger.ts",
-    "./workflow-evolution": "./workflow-evolution.ts",
-    "./evaluation-model-profile": "./evaluation-model-profile.ts"
+    ".": {
+      "types": "./dist/capability.d.ts",
+      "default": "./dist/capability.js"
+    },
+    "./experience-ledger": {
+      "types": "./dist/experience-ledger.d.ts",
+      "default": "./dist/experience-ledger.js"
+    },
+    "./workflow-evolution": {
+      "types": "./dist/workflow-evolution.d.ts",
+      "default": "./dist/workflow-evolution.js"
+    },
+    "./evaluation-model-profile": {
+      "types": "./dist/evaluation-model-profile.d.ts",
+      "default": "./dist/evaluation-model-profile.js"
+    },
+    "./package.json": "./package.json"
   },
   "files": [
-    "capability.ts",
-    "experience-ledger.ts",
-    "workflow-evolution.ts",
-    "evaluation-model-profile.ts"
+    "dist",
+    "README.md"
   ],
-  "peerDependencies": {
-    "craft-agent-harness": "0.12.37"
+  "license": "MIT",
+  "types": "./dist/capability.d.ts",
+  "dependencies": {
+    "craft-common-store-local": "0.12.38",
+    "craft-common-base": "0.12.38",
+    "craft-common-log": "0.12.38"
   },
-  "license": "MIT"
+  "engines": {
+    "node": ">=23"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
 }

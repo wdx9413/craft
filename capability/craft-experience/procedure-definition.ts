@@ -4,11 +4,12 @@
  * Workflow and Graph are machine-readable assets, so Markdown can only be their
  * review view. Prompt Procedures remain Markdown-native and do not use this store.
  */
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { join, resolve } from "node:path";
-import { stableDigest } from "../../core/digest.ts";
-import type { CraftPaths } from "../../core/infrastructure/paths.ts";
-import type { JsonObject } from "../../core/infrastructure/store.ts";
+import { stableDigest } from "../../common/craft-common-base/src/digest.ts";
+import type { CraftPaths } from "../../common/craft-common-store-local/src/paths.ts";
+import type { JsonObject } from "../../common/craft-common-store-local/src/store.ts";
 
 export type ProcedureKind = "workflow" | "graph";
 
@@ -35,6 +36,7 @@ export interface ProcedureDefinition extends JsonObject {
   scenario_signature: JsonObject;
   evidence_ids: string[];
   proposal_ref: { id: string; version: number };
+  provenance?: "user_configuration";
   definition: JsonObject;
 }
 
@@ -68,20 +70,29 @@ export class ProcedureDefinitionStore {
   readonly paths: CraftPaths;
   constructor(paths: CraftPaths) { this.paths = paths; }
 
-  write(value: ProcedureDefinition, title: string): ProcedureDefinitionRef {
+  write(value: ProcedureDefinition, title: string, orphaned?: (path: string) => boolean): ProcedureDefinitionRef {
     const checked = definition(value);
     const canonical = JSON.stringify(checked, null, 2);
     const digest = stableDigest(checked);
     const path = refPath(this.paths, checked.kind, checked.procedure_id, checked.procedure_version, title);
     mkdirSync(resolve(path, ".."), { recursive: true, mode: 0o700 });
+    let publish = false;
     try {
       const existing = this.read({ format: "json", procedure_id: checked.procedure_id, procedure_version: checked.procedure_version, kind: checked.kind, path, digest });
       if (stableDigest(existing) !== digest) throw new Error("Procedure definition version already exists with different content");
     } catch (error) {
-      if (!(error instanceof Error) || !/ENOENT|no such file/iu.test(error.message)) throw error;
-      const temporary = `${path}.${process.pid}.${Date.now()}.tmp`;
-      writeFileSync(temporary, `${canonical}\n`, { encoding: "utf8", mode: 0o600 });
-      renameSync(temporary, path);
+      if (!(error instanceof Error) || !/ENOENT|no such file/iu.test(error.message) && !orphaned?.(path)) throw error;
+      publish = true;
+    }
+    if (publish) {
+      const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
+      try {
+        writeFileSync(temporary, `${canonical}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
+        renameSync(temporary, path);
+      } catch (error) {
+        try { unlinkSync(temporary); } catch { /* rename may already have consumed it */ }
+        throw error;
+      }
     }
     return { format: "json", procedure_id: checked.procedure_id, procedure_version: checked.procedure_version, kind: checked.kind, path, digest };
   }

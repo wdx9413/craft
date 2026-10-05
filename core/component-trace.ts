@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { JsonObject } from "./infrastructure/store.ts";
 import { TraceKernel } from "./trace-kernel.ts";
+import { operationEventId } from "../common/craft-common-log/src/index.ts";
 
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
@@ -23,6 +24,7 @@ export type ComponentTraceResult = {
   result?: JsonObject;
   error?: unknown;
   correlation: JsonObject | null;
+  telemetry_error?: string;
 };
 
 /**
@@ -52,41 +54,49 @@ export class ComponentTraceKernel {
       : typeof input.correlation_trace_id === "string" && input.correlation_trace_id.trim()
         ? input.correlation_trace_id.trim() : null;
     const traceId = explicitTraceId ?? `component:${this.sessionId}:${args.requestId}`;
-    const existing = this.trace.store.find("trace", traceId);
+    let telemetryError: unknown;
+    const observe = (write: () => void): void => {
+      try { write(); } catch (error) { telemetryError = error; }
+    };
+    const existing: JsonObject | null = (() => {
+      try { return this.trace.store.find("trace", traceId); }
+      catch (error) { telemetryError = error; return null; }
+    })();
     const taskId = existing?.task_id ?? text(input.task_id, `mcp:${this.sessionId}`);
     const correlation = { trace_id: traceId, task_id: taskId, session_id: this.sessionId,
       request_id: args.requestId, component: args.component, operation: args.operation,
       auto_finalized: explicitTraceId === null };
     const terminal = existing && ["completed", "failed", "cancelled", "blocked"].includes(String(existing.status));
-    if (existing && !terminal && !Number.isInteger(Number(existing.next_sequence))) {
-      const eventCount = this.trace.store.list("trace_event", 10_000, (event) => event.trace_id === traceId).length;
-      this.trace.store.save("trace", traceId, { ...existing, next_sequence: eventCount, event_count: eventCount });
-    }
-    if (!existing) this.trace.start({ trace_id: traceId, task_id: taskId,
-      metadata: { component: args.component, operation: args.operation, session_id: this.sessionId, request_id: args.requestId } });
-    if (!terminal) {
-      this.trace.append({ trace_id: traceId, event_id: `${traceId}:call.started`, event_kind: "component.call.started",
+    const eventKey = `${this.sessionId}:${args.requestId}:${args.operation}`;
+    observe(() => {
+      if (existing && !terminal && !Number.isInteger(Number(existing.next_sequence))) {
+        const eventCount = this.trace.store.list("trace_event", 10_000, (event) => event.trace_id === traceId).length;
+        this.trace.store.save("trace", traceId, { ...existing, next_sequence: eventCount, event_count: eventCount });
+      }
+      if (!existing) this.trace.start({ trace_id: traceId, task_id: taskId,
+        metadata: { component: args.component, operation: args.operation, session_id: this.sessionId, request_id: args.requestId } });
+      if (!terminal) this.trace.append({ trace_id: traceId, event_id: operationEventId(traceId, eventKey, "started"), event_kind: "component.call.started",
         actor: "host", source: args.component, trust: "observed", data: { input_digest: digest(input), request_id: args.requestId },
         summary: `${args.component}.${args.operation} started` });
-    }
+    });
     try {
       const result = await args.handler();
-      if (!terminal) {
-        this.trace.append({ trace_id: traceId, event_id: `${traceId}:call.completed`, event_kind: "component.call.completed",
+      if (!terminal) observe(() => {
+        this.trace.append({ trace_id: traceId, event_id: operationEventId(traceId, eventKey, "completed"), event_kind: "component.call.completed",
           actor: "host", source: args.component, trust: "observed", status: "completed",
           data: { result_digest: digest(result ?? {}) }, summary: `${args.component}.${args.operation} completed` });
         if (explicitTraceId === null) this.trace.finalize({ trace_id: traceId, status: "completed", summary: "Component call completed" });
-      }
-      return { ok: true, result, correlation };
+      });
+      return { ok: true, result, correlation, ...(telemetryError ? { telemetry_error: telemetryError instanceof Error ? telemetryError.name : "TelemetryError" } : {}) };
     } catch (error) {
-      if (!terminal) {
+      if (!terminal) observe(() => {
         const errorName = error instanceof Error ? error.name : "NonErrorThrow";
-        this.trace.append({ trace_id: traceId, event_id: `${traceId}:call.failed`, event_kind: "component.call.failed",
+        this.trace.append({ trace_id: traceId, event_id: operationEventId(traceId, eventKey, "failed"), event_kind: "component.call.failed",
           actor: "host", source: args.component, trust: "observed", status: "failed",
           error_class: errorName, data: { error_class: errorName }, summary: `${args.component}.${args.operation} failed` });
         if (explicitTraceId === null) this.trace.finalize({ trace_id: traceId, status: "failed", summary: "Component call failed" });
-      }
-      return { ok: false, error, correlation };
+      });
+      return { ok: false, error, correlation, ...(telemetryError ? { telemetry_error: telemetryError instanceof Error ? telemetryError.name : "TelemetryError" } : {}) };
     }
   }
 }

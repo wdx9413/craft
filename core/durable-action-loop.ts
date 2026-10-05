@@ -36,14 +36,16 @@ export class DurableActionLoopKernel {
     const ids = new Set(items.map((item) => item.id));
     if (ids.size !== items.length || items.some((item) => item.depends_on.some((dependency) => !ids.has(dependency)))) throw new Error("Work item dependencies must reference unique declared items");
     if (this.hasCycle(items)) throw new Error("Work item dependencies must not contain a cycle");
-    const identity = { work_loop_id: workLoop.id, work_loop_version: workLoop.version, task_id: workLoop.task_id, task_run_id: workLoop.task_run_id,
+    const maxParallel = Number(args.max_parallel ?? 1);
+    if (!Number.isInteger(maxParallel) || maxParallel < 1 || maxParallel > 8) throw new Error("max_parallel must be in 1..8");
+    const identity = { ...(maxParallel === 1 ? {} : { max_parallel: maxParallel }), work_loop_id: workLoop.id, work_loop_version: workLoop.version, task_id: workLoop.task_id, task_run_id: workLoop.task_run_id,
       workspace_id: workLoop.workspace_id, initial_snapshot_id: snapshot.id, initial_snapshot_version: snapshot.version, initial_snapshot_digest: snapshot.snapshot_digest,
-      items: items.map((item) => ({ id: item.id, depends_on: item.depends_on, acceptance_digest: item.acceptance_digest })) };
+      items: items.map((item) => ({ id: item.id, ...(item.effect === "local_write" ? {} : { effect: item.effect }), depends_on: item.depends_on, acceptance_digest: item.acceptance_digest })) };
     const loopId = String(args.action_loop_id ?? `durable_action_loop_${stableDigest(identity).slice(-20)}`); const existing = this.store.find("durable_action_loop", loopId); const identityDigest = stableDigest(identity);
     if (existing) { if (existing.identity_digest !== identityDigest) throw new Error("Durable Action Loop idempotency conflict"); return { loop: existing, idempotent: true }; }
     const traceId = `durable_action_loop:${loopId}`;
-    const loop = this.store.create("durable_action_loop", loopId, { ...identity, identity_digest: identityDigest, trace_id: traceId, lifecycle: "active", latest_snapshot_id: snapshot.id, latest_snapshot_version: snapshot.version, latest_snapshot_digest: snapshot.snapshot_digest, needs_replan_reason: null });
-    for (const item of items) this.store.create("durable_work_item", `${loop.id}:${item.id}`, { action_loop_id: loop.id, item_key: item.id, depends_on: item.depends_on, acceptance_digest: item.acceptance_digest, status: "pending" });
+    const loop = this.store.create("durable_action_loop", loopId, { ...identity, max_parallel: maxParallel, identity_digest: identityDigest, trace_id: traceId, lifecycle: "active", latest_snapshot_id: snapshot.id, latest_snapshot_version: snapshot.version, latest_snapshot_digest: snapshot.snapshot_digest, needs_replan_reason: null });
+    for (const item of items) this.store.create("durable_work_item", `${loop.id}:${item.id}`, { action_loop_id: loop.id, item_key: item.id, depends_on: item.depends_on, acceptance_digest: item.acceptance_digest, effect: item.effect, status: "pending" });
     this.trace?.start({ trace_id: traceId, task_id: String(loop.task_id), run_id: String(loop.task_run_id), environment_fingerprint: String(snapshot.snapshot_digest), metadata: { durable_action_loop_id: loop.id, verified_work_loop_id: loop.work_loop_id } });
     this.appendTrace(loop, `durable.loop.created`, { work_item_count: items.length, initial_snapshot_ref: snapshot.id }, `durable_action_loop:${loop.id}:created`, null, { ref: snapshot.id });
     return { loop, idempotent: false };
@@ -51,12 +53,17 @@ export class DurableActionLoopKernel {
 
   next(args: JsonObject): JsonObject {
     const loop = this.store.get("durable_action_loop", text(args.action_loop_id, "action_loop_id"));
-    const items = this.items(loop.id as string); const pendingAction = this.store.list("durable_action", 10_000, (item) => item.action_loop_id === loop.id && new Set(["proposed", "dispatched"]).has(String(item.lifecycle)))[0];
+    const items = this.items(loop.id as string).filter(item => item.status !== "superseded");
+    const pending = this.store.list("durable_action", 10_000, item => item.action_loop_id === loop.id && ["proposed", "dispatched"].includes(String(item.lifecycle)));
+    const pendingAction = pending[0];
     if (loop.lifecycle !== "active") return { loop, next_action: loop.lifecycle === "needs_replan" ? "replan" : "none", pending_action: pendingAction ?? null };
-    if (pendingAction) return { loop, next_action: "await_receipt", pending_action: pendingAction };
-    if (items.every((item) => item.status === "verified")) return { loop: this.complete(loop), next_action: "none", pending_action: null };
-    const ready = items.filter((item) => item.status === "pending" && (item.depends_on as string[]).every((dependency) => items.some((candidate) => candidate.item_key === dependency && candidate.status === "verified")));
-    return { loop, next_action: ready.length ? "propose_action" : "resolve_blocker", ready_items: ready.map((item) => ({ item_key: item.item_key, acceptance_digest: item.acceptance_digest })) };
+    if (items.every(item => item.status === "verified")) return { loop: this.complete(loop), next_action: "none", pending_action: null };
+    const ready = items.filter(item => item.status === "pending" && !pending.some(action => action.item_key === item.item_key)
+      && (item.depends_on as string[]).every(dependency => items.some(candidate => candidate.item_key === dependency && candidate.status === "verified")));
+    const parallel = pending.length < Number(loop.max_parallel ?? 1) && pending.every(action => items.find(item => item.item_key === action.item_key)!.effect === "read_only");
+    const allowed = pending.length ? ready.filter(item => parallel && item.effect === "read_only") : ready;
+    if (pendingAction && !allowed.length) return { loop, next_action: "await_receipt", pending_action: pendingAction };
+    return { loop, next_action: allowed.length ? "propose_action" : "resolve_blocker", ready_items: allowed.map(item => ({ item_key: item.item_key, acceptance_digest: item.acceptance_digest })) };
   }
 
   propose(args: JsonObject): JsonObject {
@@ -97,7 +104,8 @@ export class DurableActionLoopKernel {
     let progressProved = false; let itemStatus: string | null = null;
     if (action.kind === "verify" && outcome === "succeeded") {
       const acceptance = this.reference(args.acceptance_ref, "acceptance_ref");
-      if (acceptance.kind !== "acceptance_gate" || String(this.store.get(String(acceptance.kind), String(acceptance.id), Number(acceptance.version)).verdict) !== "passed") throw new Error("Verification requires a passed Acceptance Gate");
+      const gate = this.store.get(String(acceptance.kind), String(acceptance.id), Number(acceptance.version));
+      if (acceptance.kind !== "acceptance_gate" || (gate.status ?? gate.verdict) !== "passed") throw new Error("Verification requires a passed Acceptance Gate");
       progressProved = true; itemStatus = "verified";
     }
     if (outcome === "blocked") itemStatus = "blocked";
@@ -110,7 +118,7 @@ export class DurableActionLoopKernel {
     const changedOutsideAction = args.input_drift === true; const savedLoop = changedOutsideAction ? this.store.save("durable_action_loop", String(loop.id), { ...payload(loop), lifecycle: "needs_replan", needs_replan_reason: text(args.replan_reason ?? "input_drift", "replan_reason"), latest_snapshot_id: snapshot.id, latest_snapshot_version: snapshot.version, latest_snapshot_digest: snapshot.snapshot_digest }) : this.store.save("durable_action_loop", String(loop.id), { ...payload(loop), latest_snapshot_id: snapshot.id, latest_snapshot_version: snapshot.version, latest_snapshot_digest: snapshot.snapshot_digest });
     this.appendTrace(savedLoop, "durable.action.observed", { action_id: savedAction.id, outcome, progress_proved: progressProved, receipt_ref: receipt }, `durable_action:${action.id}:observed`, { ref: action.expected_snapshot_id }, { ref: snapshot.id });
     if (savedLoop.lifecycle === "needs_replan") this.appendTrace(savedLoop, "durable.loop.needs_replan", { reason: savedLoop.needs_replan_reason }, `durable_action_loop:${savedLoop.id}:needs_replan:${savedLoop.version}`, { ref: action.expected_snapshot_id }, { ref: snapshot.id });
-    if (outcome === "blocked") this.finalizeTrace(savedLoop, "blocked", "durable action blocked");
+    if (outcome === "blocked" && args.recoverable !== true) this.finalizeTrace(savedLoop, "blocked", "durable action blocked");
     return { action: savedAction, loop: savedLoop, progress_proved: progressProved, next_action: savedLoop.lifecycle === "needs_replan" ? "replan" : this.next({ action_loop_id: savedLoop.id }).next_action };
   }
 
@@ -138,7 +146,7 @@ export class DurableActionLoopKernel {
     if (!Array.isArray(depends)) throw new Error(`work_items[${index}].depends_on must be an array`);
     const dependsOn = depends.map((item) => text(item, `work_items[${index}].depends_on`));
     if (new Set(dependsOn).size !== dependsOn.length || dependsOn.includes(id)) throw new Error("Work item dependencies must be unique and cannot reference itself");
-    return { id, depends_on: dependsOn.sort(), acceptance_digest: text(input.acceptance_digest, `work_items[${index}].acceptance_digest`) };
+    return { id, effect: input.effect ?? "local_write", depends_on: dependsOn.sort(), acceptance_digest: text(input.acceptance_digest, `work_items[${index}].acceptance_digest`) };
   }
   private hasCycle(items: WorkItem[]): boolean {
     const graph = new Map(items.map((item) => [item.id, item.depends_on])); const visited = new Set<string>(); const stack = new Set<string>();

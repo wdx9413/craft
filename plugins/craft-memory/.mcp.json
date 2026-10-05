@@ -1,1 +1,13 @@
-{"mcpServers":{"craft-memory":{"command":"node","args":["dist/plugin/craft-mcp.cjs","--product","memory"],"cwd":"."}}}
+{
+  "mcpServers": {
+    "craft-memory": {
+      "command": "node",
+      "args": [
+        "dist/plugin/craft-mcp.cjs",
+        "--product",
+        "memory"
+      ],
+      "cwd": "."
+    }
+  }
+}

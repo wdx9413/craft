@@ -1,4 +1,9 @@
 import type { CraftService } from "../craft-service.ts";
+import type { JsonObject } from "../../infrastructure/store.ts";
+
+declare module "../craft-service.ts" {
+  interface CraftService { contextResolutionFeedback(args: JsonObject): JsonObject; knowledgeSearchScoped(args: JsonObject): Promise<JsonObject>; }
+}
 
 /**
  * The three delegations that used to reach one class.
@@ -12,6 +17,7 @@ import type { CraftService } from "../craft-service.ts";
  * aspirational.
  */
 export function installKnowledgeMemoryMethods(serviceClass: typeof CraftService): void {
+  serviceClass.prototype.knowledgeSearchScoped = function (args) { return this.contextResolution.searchKnowledge(args); };
   serviceClass.prototype.knowledgeMemoryInstallBuiltins = function () { return this.knowledgeSources.installBuiltins(); };
   serviceClass.prototype.knowledgeSourceRegister = function (args) { return this.knowledgeSources.sourceRegister(args); };
   serviceClass.prototype.knowledgeSourceList = function (args) { return this.knowledgeSources.sourceList(args); };
@@ -23,9 +29,10 @@ export function installKnowledgeMemoryMethods(serviceClass: typeof CraftService)
   serviceClass.prototype.memoryLedgerTransition = function (args) { return this.memoryLedger.transition(args); };
   serviceClass.prototype.memoryLedgerCompatBind = function (args) { return this.memoryLedger.compatBind(args); };
   serviceClass.prototype.contextResolutionResolve = function (args) { return this.contextResolution.resolve(args); };
+  serviceClass.prototype.contextResolutionFeedback = function (args) { return this.contextResolution.feedback(args); };
   serviceClass.prototype.contextResolutionGet = function (args) { return this.contextResolution.receiptGet(args); };
   serviceClass.prototype.retrievalAdapterConfigure = function (args) { return this.contextResolution.retrievalConfigure(args); };
-  serviceClass.prototype.retrievalAdapterEvaluate = function (args) { return this.contextResolution.retrievalEvaluate(args); };
+  serviceClass.prototype.retrievalAdapterEvaluate = function (args) { return args.dataset === undefined ? this.contextResolution.retrievalEvaluate(args) : this.contextResolution.retrievalRun(args); };
   serviceClass.prototype.scopeIdentityResolveProject = function (args) { return this.scopeIdentity.resolveProject(args); };
   serviceClass.prototype.scopeAliasBind = function (args) { return this.scopeIdentity.bindAlias(args); };
   serviceClass.prototype.scopeAliasMigrate = function (args) { return this.scopeIdentity.migrateAlias(args); };

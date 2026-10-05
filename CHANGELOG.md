@@ -1,11 +1,17 @@
 # Changelog
 
-> Note on numbering: the declared package version is now **0.12.37**. Earlier
+> Note on numbering: the declared package version is now **0.12.38**. Earlier
 > `v0.12.34`–`v0.12.43` headings name **incremental work on the previous revision**,
 > not releases. Each is a self-contained change set with its own 100%-coverage
 > test script; the version bump happens only when the work is released.
 
-## v0.12.37（本次发布）
+## v0.12.38（本次发布）
+
+- 发布默认聚合的 `craft-context` 与 Knowledge、Memory、Experience、Codebase 四个独立组件，均提供 Codex、Claude、独立 Skill + MCP 和 DSH 接入；进入 Git 仓库自动建立或复用基础索引，Hook 保持可选。
+- 收紧 Knowledge 历史和当前读取权限、Qualification/Verification 身份绑定及检索无答案评测；Procedure 孤儿版本可在受控重试时恢复。
+- 将公共协议、本地 Store、无内容观测 SDK 与四能力打包为独立包；分发仓同步插件 bundle、Skill、版本和来源摘要。本地测试不构成真实 Host、IdP 或生产收益证明。
+
+## v0.12.37（历史发布）
 
 - Engineering Quality Profile 仅接纳 Task/Activation/Host 环境、模型与预算指纹都固定的 `VerifiedEvaluationReceipt`；旧的直接记录一律 `revalidation_required`，不能用于 routeable 晋级。
 - Experience Procedure 自动化不再在 Craft 进程内执行命令或自判 accepted，只能产生受限 `awaiting_host_dispatch` 请求，并由外部 Host 回执、独立 Observation 与既有 Acceptance 收口。

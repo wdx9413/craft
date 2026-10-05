@@ -33,7 +33,7 @@ declare module "../craft-service.ts" {
     contextResolutionResolve(args: JsonObject): JsonObject | Promise<JsonObject>;
     contextResolutionGet(args: JsonObject): JsonObject;
     retrievalAdapterConfigure(args: JsonObject): JsonObject;
-    retrievalAdapterEvaluate(args: JsonObject): JsonObject;
+    retrievalAdapterEvaluate(args: JsonObject): JsonObject | Promise<JsonObject>;
     scopeIdentityResolveProject(args: JsonObject): JsonObject;
     scopeAliasBind(args: JsonObject): JsonObject;
     scopeAliasMigrate(args: JsonObject): JsonObject;
@@ -197,6 +197,14 @@ declare module "../craft-service.ts" {
     experienceLedgerGet(args: JsonObject): JsonObject;
     experienceProcedureDraft(args: JsonObject): JsonObject;
     experienceProcedureGate(args: JsonObject): JsonObject;
+    procedureInvocationBind(args: JsonObject): JsonObject;
+    procedureInvocationDispatch(args: JsonObject): JsonObject;
+    procedureInvocationReport(args: JsonObject): JsonObject;
+    procedureInvocationResume(args: JsonObject): JsonObject;
+    procedureInvocationTransition(args: JsonObject): JsonObject;
+    procedureInvocationGet(args: JsonObject): JsonObject;
+    procedureInvocationEvaluate(args: JsonObject): JsonObject;
+    experienceProcedurePlan(args: JsonObject): JsonObject;
     experienceProcedureGet(args: JsonObject): JsonObject;
     experienceProcedureList(args?: JsonObject): JsonObject;
     experienceProcedureSkillExport(args: JsonObject): JsonObject;

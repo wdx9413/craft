@@ -1,19 +1,15 @@
-# Craft adapter for DeepSeek Harness
+# Craft for DeepSeek Harness
 
-This Cordis bundle exposes Craft's MCP tools through one `craft_call` tool while
-keeping Craft's TypeScript core and `~/.craft_data` store independent of DSH.
+Build generates one self-contained Cordis plugin for each of `craft-context`, `craft-knowledge`, `craft-memory`, `craft-experience` and `craft-codebase` under `dist/adapters/dsh/` and `plugins/<product>/dsh/`.
 
-Prerequisites: Node.js 23+ and DeepSeek Harness. Craft is resolved as an npm package.
+Install the desired generated directory:
 
-Install the repository bundle directly from Git, preferably pinned to a tag or
-commit:
-
-```bash
-dsh plugin --profile default add github:wdx9413/craft#main
+```sh
+dsh plugin --profile default add /absolute/path/plugins/craft-context/dsh
 ```
 
-During development, the standalone adapter directory can also be installed:
+Each product registers `craft_<product>_tools` for schema and Skill discovery, and `craft_<product>_call` for validated MCP calls. The bundled local runtime requires Node.js 23+ and works without Hooks or npm downloads. All products honor `CRAFT_DATA_DIR`, otherwise they share the normal Craft local data space.
 
-```bash
-dsh plugin --profile default add ./adapters/deepseek-harness
-```
+The generic development adapter retains configurable `product`, `npxCommand`, `packageSpec`, `bundlePath` and `dataDir`. Choose a pinned packageSpec when using the npx fallback. Use the generated product directory for an offline installation.
+
+The sibling `craft-common-use` installer also supports direct DSH Skill + MCP registration using its existing MCP loader. Local protocol tests do not prove a DSH model session loaded and used these tools; verify that in the target Host.

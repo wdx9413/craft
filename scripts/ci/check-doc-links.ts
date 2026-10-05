@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
+import { rootDesignDocuments } from "./root-design-documents.ts";
 
 /**
  * Checks that the documentation's own structure is intact.
@@ -52,6 +53,7 @@ function relativeLinks(text: string): string[] {
 
 const documents = walk(docs);
 if (!documents.length) throw new Error("no documentation was found; the docs path is wrong");
+documents.push(...rootDesignDocuments(root));
 
 const broken: Array<{ file: string; target: string; kind: "missing" | "directory" }> = [];
 let linkCount = 0;

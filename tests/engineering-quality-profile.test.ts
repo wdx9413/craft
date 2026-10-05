@@ -7,6 +7,7 @@ import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { McpServer } from "../core/mcp.ts";
 import { CraftService } from "../core/service.ts";
+import { stableDigest } from "../core/digest.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-engineering-profile-"));
@@ -21,7 +22,15 @@ function evidence(service: CraftService, id: string, sourceType = "program") {
 function registerCases(f: Awaited<ReturnType<typeof fixture>>, caseIds: string[]) {
   return caseIds.map((caseId) => f.service.engineeringQualityProfileCaseSave({ case_id: caseId, case_kind: "bug-fix-shared-caller",
     frozen_input_digest: `sha256:input-${caseId}`, allowed_workspace_ref: `workspace://${caseId}`,
-    acceptance_command_digest: `sha256:accept-${caseId}`, sibling_caller_assertion_digest: `sha256:sibling-${caseId}`, sanitized: true }).case as JsonObject);
+    acceptance_command_digest: `sha256:accept-${caseId}`, sibling_caller_assertion_digest: stableDigest(["sha256:sibling-a", "sha256:sibling-b"]), sanitized: true }).case as JsonObject);
+}
+
+function programCheck(f: Awaited<ReturnType<typeof fixture>>, caseId: string, slot: string, name: string, status = "passed") {
+  const command_digest = name === "acceptance" ? `sha256:accept-${caseId}` : `sha256:${name}`;
+  const result_digest = stableDigest({ slot, name, status });
+  const id = `proof-${slot}-${name}-${status}`;
+  if (!f.store.find("evidence", id)) f.service.evidenceRecord({ evidence_id: id, source_type: "program", confidence: "confirmed", claim: "independent fixture result", metadata: { case_id: caseId, command_digest, result_digest, status, check_kind: name === "root" ? "root_cause" : name } });
+  return { evidence_id: id, command_digest, result_digest, status };
 }
 
 async function activeProfile(f: Awaited<ReturnType<typeof fixture>>) {
@@ -36,11 +45,11 @@ function verifiedReceipt(f: Awaited<ReturnType<typeof fixture>>, plan: JsonObjec
   const sessionId = `${caseId}-${trial}-${arm}`;
   f.store.create("host_session", sessionId, { host_id: "codex", environment_fingerprint: "environment", model_fingerprint: "model", budget_fingerprint: "budget", trace_id: `trace-${sessionId}`, status: "terminal" });
   f.store.create("outcome_observation", `observation-${sessionId}`, { trace_id: `trace-${sessionId}`, host_id: "codex", observer_id: "independent-verifier", observer_kind: "workspace", verdict });
-  const check = (name: string, status: "passed" | "failed" = "passed") => ({ evidence_id: evidence(f.service, `proof-${sessionId}-${name}`).id, command_digest: `sha256:command-${name}`, result_digest: `sha256:result-${name}-${sessionId}`, status });
+  const check = (name: string, status: "passed" | "failed" = "passed") => programCheck(f, caseId, sessionId, name, status);
   return f.service.engineeringQualityProfileVerifiedReceiptImport({ plan_id: plan.id, case_id: caseId, trial_index: trial, arm, host_session_id: sessionId, observation_id: `observation-${sessionId}`, verified_receipt: {
     kind: "craft.engineering-evaluation.v1", issued_by: "engineering-eval-cli", host_terminal: check("host"), frozen_input_digest: `sha256:input-${caseId}`,
     workspace_before_digest: `sha256:before-${caseId}-${trial}-${arm}`, workspace_after_digest: `sha256:after-${caseId}-${trial}-${arm}`,
-    acceptance: check("acceptance"), siblings: [check("sibling-a"), check("sibling-b")], effect_check: check("effect"), safety_check: check("safety"), factual_check: check("factual"), root_cause_evidence_ids: [evidence(f.service, `proof-${sessionId}-root`).id], retry_count: 0, cost_units: 1, latency_ms: 10,
+    acceptance: check("acceptance"), siblings: [check("sibling-a"), check("sibling-b")], effect_check: check("effect"), safety_check: check("safety"), factual_check: check("factual"), root_cause_evidence_ids: [check("root").evidence_id], retry_count: 0, cost_units: 1, latency_ms: 10,
   } });
 }
 
@@ -207,12 +216,24 @@ test("Engineering Quality Profile receipt protocol rejects forged, drifted, dupl
     };
     const valid = make("valid");
     const strict = (frozenInput: string, overrides: JsonObject = {}) => {
-      const check = { evidence_id: valid.proof.id, command_digest: "sha256:command", result_digest: "sha256:result", status: "passed" };
-      return { kind: "craft.engineering-evaluation.v1", issued_by: "engineering-eval-cli", host_terminal: check, frozen_input_digest: frozenInput, workspace_before_digest: "sha256:before", workspace_after_digest: "sha256:after", acceptance: check, siblings: [check, check], effect_check: check, safety_check: check, factual_check: check, root_cause_evidence_ids: [valid.proof.id], retry_count: 0, cost_units: 1, latency_ms: 1, ...overrides };
+      const caseId = frozenInput.replace(/^sha256:(input-)?/u, "");
+      const check = (name: string, status = "passed") => programCheck(f, caseId, caseId, name, status);
+      return { kind: "craft.engineering-evaluation.v1", issued_by: "engineering-eval-cli", host_terminal: check("host"), frozen_input_digest: frozenInput, workspace_before_digest: "sha256:before", workspace_after_digest: "sha256:after", acceptance: check("acceptance"), siblings: [check("sibling-a"), check("sibling-b")], effect_check: check("effect"), safety_check: check("safety"), factual_check: check("factual"), root_cause_evidence_ids: [check("root").evidence_id], retry_count: 0, cost_units: 1, latency_ms: 1, ...overrides };
     };
     const base = { plan_id: plan.id, case_id: cases[0], trial_index: 1, arm: "baseline", host_session_id: valid.sessionId, observation_id: valid.observationId, verified_receipt: strict("sha256:input-receipt-case-1") };
     assert.equal((f.service.engineeringQualityProfileVerifiedReceiptImport(base).record as JsonObject).status, "verified");
     assert.equal(f.service.engineeringQualityProfileVerifiedReceiptImport(base).idempotent, true);
+    const good = base.verified_receipt;
+    assert.throws(() => f.service.engineeringQualityProfileVerifiedReceiptImport({ ...base, verified_receipt: { ...good, effect_check: good.host_terminal } }), /distinct Evidence/);
+    assert.throws(() => f.service.engineeringQualityProfileVerifiedReceiptImport({ ...base, verified_receipt: { ...good, acceptance: { ...good.acceptance, command_digest: "sha256:wrong" } } }), /command binding/);
+    assert.throws(() => f.service.engineeringQualityProfileVerifiedReceiptImport({ ...base, verified_receipt: { ...good, siblings: [good.host_terminal, good.siblings[1]] } }), /distinct Evidence/);
+    assert.throws(() => f.service.engineeringQualityProfileVerifiedReceiptImport({ ...base, verified_receipt: { ...good, siblings: [{ ...good.siblings[0], command_digest: "sha256:wrong" }, good.siblings[1]] } }), /command binding/);
+    for (const change of [{ case_id: "foreign" }, { command_digest: "sha256:other" }, { result_digest: "sha256:other" }, { status: "failed" }]) {
+      const proof = f.store.get("evidence", String(good.host_terminal.evidence_id));
+      f.store.save("evidence", String(proof.id), { ...proof, metadata: { ...(proof.metadata as JsonObject), ...change } });
+      assert.throws(() => f.service.engineeringQualityProfileVerifiedReceiptImport(base), /contradicts/);
+      f.store.save("evidence", String(proof.id), proof);
+    }
     assert.throws(() => f.service.engineeringQualityProfileVerifiedReceiptImport({ ...base, verified_receipt: strict("sha256:input-receipt-case-1", { cost_units: 2 }) }), /idempotency/u);
     assert.throws(() => f.service.engineeringQualityProfileVerifiedReceiptImport({ ...base, record_id: "other" }), /slot/u);
     const invalidSession = make("running", { status: "running" });
@@ -238,15 +259,23 @@ test("Engineering Quality Profile receipt protocol rejects forged, drifted, dupl
     assert.throws(() => f.service.engineeringQualityProfileVerifiedReceiptImport({ ...base, trial_index: 6 }), /outside/u);
     const blocker = make("blocker");
     const blocked = f.service.engineeringQualityProfileVerifiedReceiptImport({ ...base, case_id: cases[6], host_session_id: blocker.sessionId, observation_id: blocker.observationId,
-      verified_receipt: strict("sha256:input-receipt-case-7", { effect_check: { evidence_id: valid.proof.id, command_digest: "sha256:command", result_digest: "sha256:result", status: "failed" } }) });
+      verified_receipt: strict("sha256:input-receipt-case-7", { effect_check: programCheck(f, "receipt-case-7", "receipt-case-7", "effect", "failed") }) });
     assert.equal((blocked.record as JsonObject).status, "rejected");
     assert.ok((f.service.engineeringQualityProfileEvaluationGet({ plan_id: plan.id }).rejection as JsonObject).id);
     const secondBlocker = make("second-blocker");
     assert.equal((f.service.engineeringQualityProfileVerifiedReceiptImport({ ...base, case_id: cases[7], host_session_id: secondBlocker.sessionId, observation_id: secondBlocker.observationId,
-      verified_receipt: strict("sha256:input-receipt-case-8", { safety_check: { evidence_id: valid.proof.id, command_digest: "sha256:command", result_digest: "sha256:result", status: "failed" } }) }).record as JsonObject).status, "rejected");
+      verified_receipt: strict("sha256:input-receipt-case-8", { safety_check: programCheck(f, "receipt-case-8", "receipt-case-8", "safety", "failed") }) }).record as JsonObject).status, "rejected");
     const failedObservation = make("failed-observation", { verdict: "failed" });
     assert.equal((f.service.engineeringQualityProfileVerifiedReceiptImport({ ...base, case_id: cases[8], host_session_id: failedObservation.sessionId, observation_id: failedObservation.observationId,
       verified_receipt: strict("sha256:input-receipt-case-9") }).record as JsonObject).status, "rejected");
+    for (const [index, change] of [{ case_id: "foreign" }, { status: "failed" }, { check_kind: "defect_reproduction" }].entries()) {
+      const caseId = cases[index + 9]!;
+      const receipt = strict(`sha256:input-${caseId}`);
+      const root = f.store.get("evidence", String(receipt.root_cause_evidence_ids[0]));
+      f.store.save("evidence", String(root.id), { ...root, metadata: { ...(root.metadata as JsonObject), ...change } });
+      const host = make(`root-${index}`);
+      assert.equal((f.service.engineeringQualityProfileVerifiedReceiptImport({ ...base, case_id: caseId, host_session_id: host.sessionId, observation_id: host.observationId, verified_receipt: receipt }).record as JsonObject).status, "rejected");
+    }
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
@@ -302,6 +331,8 @@ test("Engineering Quality Profile covers invalid receipt forms and every termina
     assert.equal(f.service.engineeringQualityProfileEvaluationEvaluate({ plan_id: plan.id, evaluation_id: "rejected-evaluation" }).idempotent, true);
     f.store.create("engineering_quality_profile_evaluation_record", "changed-evaluation-input", { plan_id: plan.id, case_id: cases[0], trial_index: 1, arm: "profile",
       deterministic_acceptance_passed: true, sibling_caller_passed: true, retry_count: 0, cost_units: 0, latency_ms: 0 });
+    assert.equal(f.service.engineeringQualityProfileEvaluationEvaluate({ plan_id: plan.id, evaluation_id: "rejected-evaluation" }).idempotent, true);
+    for (const id of ["legacy", "changed-evaluation-input"]) f.store.save("engineering_quality_profile_evaluation_record", id, { ...f.store.get("engineering_quality_profile_evaluation_record", id), receipt_validation_version: 2 });
     assert.throws(() => f.service.engineeringQualityProfileEvaluationEvaluate({ plan_id: plan.id, evaluation_id: "rejected-evaluation" }), /idempotency/u);
     f.store.save("engineering_quality_profile_evaluation_plan", String(plan.id), { ...f.store.get("engineering_quality_profile_evaluation_plan", String(plan.id)), status: "evaluated" });
     assert.throws(() => f.service.engineeringQualityProfileEvaluationRecord({ plan_id: plan.id, case_id: cases[0], trial_index: 1, arm: "baseline" }), /not collecting/u);
@@ -317,7 +348,7 @@ test("Engineering Quality Profile covers invalid receipt forms and every termina
     const failedPlan = f.service.engineeringQualityProfileEvaluationPlan({ plan_id: "failed-plan", activation_id: activation.id, host_id: "codex", case_ids: cases.slice(1).concat(cases[0]),
       model_fingerprint: "model", environment_fingerprint: "environment", budget_fingerprint: "budget", trials_per_pair: 5 }).plan as JsonObject;
     for (const caseId of failedPlan.case_ids as string[]) for (let trial = 1; trial <= 5; trial += 1) for (const arm of ["baseline", "profile"] as const) {
-      f.store.create("engineering_quality_profile_evaluation_record", `failed-${caseId}-${trial}-${arm}`, { plan_id: failedPlan.id, case_id: caseId, trial_index: trial, arm,
+      f.store.create("engineering_quality_profile_evaluation_record", `failed-${caseId}-${trial}-${arm}`, { receipt_validation_version: 2, plan_id: failedPlan.id, case_id: caseId, trial_index: trial, arm,
         deterministic_acceptance_passed: !(caseId === cases[0] && trial === 1 && arm === "profile"), sibling_caller_passed: true, retry_count: 0, cost_units: 0, latency_ms: 0 });
     }
     assert.equal((f.service.engineeringQualityProfileEvaluationEvaluate({ plan_id: failedPlan.id }).evaluation as JsonObject).status, "rejected");

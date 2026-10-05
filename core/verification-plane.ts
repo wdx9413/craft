@@ -57,7 +57,12 @@ export class VerificationPlane {
     const derivedRisk = deriveRisk(changeKinds, effects, candidateChange, requiresRealHost);
     const requested = args.requested_risk_level === undefined ? derivedRisk : text(args.requested_risk_level, "requested_risk_level") as Risk;
     if (!RISK.has(requested)) throw new Error("requested_risk_level is unsupported");
-    const risk = maxRisk(derivedRisk, requested); const identity = { change_ref: text(args.change_ref, "change_ref"), change_kinds: [...changeKinds].sort(), effects: [...effects].sort(), candidate_change: candidateChange, requires_real_host: requiresRealHost, environment_fingerprint: text(args.environment_fingerprint, "environment_fingerprint"), requested_risk_level: requested, risk_level: risk, content_stored: false };
+    const risk = maxRisk(derivedRisk, requested); const identity = { change_ref: text(args.change_ref, "change_ref"), change_kinds: [...changeKinds].sort(), effects: [...effects].sort(), candidate_change: candidateChange, requires_real_host: requiresRealHost, environment_fingerprint: text(args.environment_fingerprint, "environment_fingerprint"),
+      budget_fingerprint: args.budget_fingerprint === undefined ? null : text(args.budget_fingerprint, "budget_fingerprint"),
+      input_fingerprint: args.input_fingerprint === undefined ? null : text(args.input_fingerprint, "input_fingerprint"),
+      model_fingerprint: args.model_fingerprint === undefined ? null : text(args.model_fingerprint, "model_fingerprint"),
+      acceptance_fingerprint: args.acceptance_fingerprint === undefined ? null : text(args.acceptance_fingerprint, "acceptance_fingerprint"),
+      host: args.host === undefined ? null : text(args.host, "host"), requested_risk_level: requested, risk_level: risk, content_stored: false };
     const verificationId = String(args.verification_id ?? `verification_${digestJson(identity).slice(-16)}`); const identityDigest = digestJson(identity); const existing = this.store.find("verification_plan", verificationId);
     if (existing) { if (existing.identity_digest !== identityDigest) throw new Error("Verification Plan idempotency conflict"); const checks = this.checks(existing.id); return { verification: { ...existing, checks }, checks, idempotent: true }; }
     const verification = this.store.create("verification_plan", verificationId, { ...identity, identity_digest: identityDigest, risk_escalated: RANK[risk] > RANK[requested], execution_authority: "none", lifecycle: "planned" });
@@ -90,9 +95,19 @@ export class VerificationPlane {
     const failed = checks.some((check) => check.status === "failed"); const complete = checks.every((check) => check.status === "passed"); const candidate = verification.candidate_change === true;
     const qualificationId = args.release_qualification_id === undefined ? undefined : text(args.release_qualification_id, "release_qualification_id");
     const qualification = qualificationId === undefined ? undefined : this.store.get("release_qualification", qualificationId);
-    const qualificationVerdict = candidate ? String(qualification?.conclusion ?? "inconclusive") : "not_required";
+    const pilot = qualification?.pilot_id ? this.store.find("reference_pilot", String(qualification.pilot_id)) : null;
+    const qualificationBound = !candidate || !!qualification && !!pilot && qualification.lifecycle === "completed"
+      && qualification.candidate_ref === verification.change_ref
+      && qualification.environment_fingerprint === verification.environment_fingerprint
+      && typeof verification.budget_fingerprint === "string" && qualification.budget_fingerprint === verification.budget_fingerprint
+      && typeof verification.input_fingerprint === "string" && qualification.input_fingerprint === verification.input_fingerprint
+      && typeof verification.model_fingerprint === "string" && qualification.model_fingerprint === verification.model_fingerprint
+      && typeof verification.acceptance_fingerprint === "string" && qualification.acceptance_fingerprint === verification.acceptance_fingerprint
+      && typeof verification.host === "string" && pilot.host === verification.host
+      && pilot.version === qualification.pilot_version;
+    const qualificationVerdict = candidate ? qualificationBound ? String(qualification!.conclusion) : "inconclusive" : "not_required";
     const verdict = failed || qualificationVerdict === "rejected" ? "rejected" : !complete || qualificationVerdict !== "eligible" && qualificationVerdict !== "not_required" ? "inconclusive" : "eligible";
-    const identity = { verification_id: verification.id, verification_version: verification.version, check_versions: checks.map((check) => [check.id, check.version, check.status]), release_qualification_id: qualificationId ?? null, release_qualification_version: qualification?.version ?? null, verdict };
+    const identity = { verification_id: verification.id, verification_version: verification.version, check_versions: checks.map((check) => [check.id, check.version, check.status]), release_qualification_id: qualificationId ?? null, release_qualification_version: qualification?.version ?? null, qualification_bound: qualificationBound, verdict };
     const assessmentId = String(args.assessment_id ?? `verification_assessment_${digestJson(identity).slice(-16)}`); const identityDigest = digestJson(identity); const existing = this.store.find("verification_assessment", assessmentId);
     if (existing) { if (existing.identity_digest !== identityDigest) throw new Error("Verification Assessment idempotency conflict"); return { assessment: existing, verdict, idempotent: true }; }
     const assessment = this.store.create("verification_assessment", assessmentId, { ...identity, identity_digest: identityDigest, recommendation: verdict === "eligible" ? "eligible_for_declared_next_gate" : verdict === "rejected" ? "fix_or_rollback_before_progress" : "collect_missing_comparable_evidence" });

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, symlink, unlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -58,7 +58,7 @@ test("v0.12.19 makes Knowledge Sources, Memory Ledger, receipts and retrieval se
     const vector = f.context.retrievalConfigure({ adapter_id: "vector", strategy: "vector", provider_fingerprint: "embed:v1", configuration: { timeout_ms: 100 } }).adapter as JsonObject;
     assert.equal((f.context.retrievalEvaluate({ adapter_id: vector.id, metrics: { recall: 0.7, cross_project_leak_count: 1, latency_ms: 2, cost_usd: 0.01 } }).evaluation as JsonObject).verdict, "rejected");
     const vector2 = f.context.retrievalConfigure({ adapter_id: "vector-2", strategy: "vector", provider_fingerprint: "embed:v1", configuration: {} }).adapter as JsonObject;
-    assert.equal((f.context.retrievalEvaluate({ adapter_id: vector2.id, metrics: { recall: 0.9, cross_project_leak_count: 0, latency_ms: 2, cost_usd: 0.01 }, max_latency_ms: 3, max_cost_usd: 0.02 }).adapter as JsonObject).status, "eligible");
+    assert.equal((f.context.retrievalEvaluate({ adapter_id: vector2.id, metrics: { recall: 0.9, cross_project_leak_count: 0, latency_ms: 2, cost_usd: 0.01 }, max_latency_ms: 3, max_cost_usd: 0.02 }).adapter as JsonObject).status, "rejected");
     assert.throws(() => f.context.retrievalEvaluate({ adapter_id: vector2.id, metrics: { recall: 2, cross_project_leak_count: 0, latency_ms: 0, cost_usd: 0 } }), /invalid/);
 
     const resolved = await f.context.resolve({ receipt_id: "context", query: "controlled workflow", scope_kind: "project", scope_id: "project", memory_ids: [replacement.id], retrieval_adapter_id: vector2.id, max_items: 3, max_chars: 200 }) as JsonObject;
@@ -120,7 +120,7 @@ test("v0.12.19 keeps Console and Agent mode as a mode-neutral plan over verified
       const response = await mcp.handle({ id: name, method: "tools/call", params: { name, arguments: args } }); assert.equal((response?.result as JsonObject).isError, false, name);
     }
     assert.equal(new McpServer(f.service, "core").tools.some((tool) => tool.name === "craft_context_resolution_resolve"), true);
-    assert.equal(VERSION, "0.12.37");
+    assert.equal(VERSION, "0.12.38");
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
@@ -228,7 +228,7 @@ test("v0.12.19 fails closed for untrusted, stale, restricted, malformed and drif
     const facadeMemory = f.service.memoryLedgerRemember({ memory_id: "facade-memory", source_id: facadeSource.id, kind: "working", scope_kind: "project", scope_id: "project", content: "facade context" }).memory as JsonObject;
     f.store.create("memory_item", "facade-legacy", { content: "legacy" }); assert.ok((f.service.memoryLedgerCompatBind({ legacy_kind: "memory_item", legacy_id: "facade-legacy", source_id: facadeSource.id }).binding as JsonObject).id);
     const facadeRetrieval = f.service.retrievalAdapterConfigure({ adapter_id: "facade-keyword", strategy: "keyword" }).adapter as JsonObject;
-    assert.equal((f.service.retrievalAdapterEvaluate({ adapter_id: facadeRetrieval.id, metrics: { recall: 0, cross_project_leak_count: 0, latency_ms: 0, cost_usd: 0 } }).adapter as JsonObject).status, "eligible");
+    assert.equal(((await f.service.retrievalAdapterEvaluate({ adapter_id: facadeRetrieval.id, metrics: { recall: 0, cross_project_leak_count: 0, latency_ms: 0, cost_usd: 0 } })).adapter as JsonObject).status, "eligible");
     const facadeResolution = await f.service.contextResolutionResolve({ receipt_id: "facade-resolution", query: "facade", scope_kind: "project", scope_id: "project", memory_ids: [facadeMemory.id] }) as JsonObject;
     assert.equal((f.service.contextResolutionGet({ receipt_id: (facadeResolution.receipt as JsonObject).id as string }).receipt as JsonObject).id, "facade-resolution");
     assert.equal((f.service.memoryLedgerTransition({ memory_id: facadeMemory.id, status: "expired", reason: "done" }).memory as JsonObject).status, "expired");
@@ -252,8 +252,13 @@ test("v0.12.34 resolves a body that lives in the content store and refuses a bro
 
     // A body that disappeared is a failure, not an empty memory: the receipt would otherwise
     // describe a pack the caller cannot read.
-    await unlink(String((memory.content_ref as JsonObject).path));
+    const contentPath = String((memory.content_ref as JsonObject).path);
+    const originalDocument = await readFile(contentPath);
+    await unlink(contentPath);
     await assert.rejects(() => f.context.resolve({ query: "alpha", scope_kind: "project", scope_id: "project", source_ids: [String(source.id)] }), /ENOENT|no such file/u);
+    // Restore this fixture before testing a different broken record; otherwise its
+    // unrelated missing file can fail first and mask the intended assertion.
+    await writeFile(contentPath, originalDocument);
 
     // A record with neither an inline body nor a usable reference is refused by name.
     f.store.create("memory_ledger", "broken-body", { source_id: String(source.id), kind: "preference", scope: { kind: "project", id: "project" },

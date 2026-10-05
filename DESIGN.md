@@ -1,7 +1,7 @@
 ---
 version: alpha
-name: Craft Studio
-description: A dense local-first desktop workbench that treats every task as a continuing conversation, while retaining Craft's warm operational signature.
+name: Craft
+description: One explicit task and context across a lightweight entry, companion view and artifact workspace, retaining Craft's warm operational signature.
 colors:
   background: "#FFFFFF"
   chrome: "rgb(249, 250, 251)"
@@ -25,7 +25,7 @@ rounded:
   composer: "22px"
   pill: "999px"
 spacing:
-  titlebar: "40px; compact navigation and application menus only"
+  titlebar: "40px"
   statusbar: "24px"
   rail: "232px"
   aside: "280px"
@@ -36,7 +36,7 @@ components:
   scrollbar: { thumb: "--scrollbar-thumb" }
 ---
 
-# Craft Studio Design System
+# Craft Design System
 
 ## Overview
 
@@ -46,14 +46,14 @@ DeepSeek Harness supplies the visual grammar: quiet blue-neutral surfaces, hairl
 
 ### Product context and register
 
-- **Audience and primary job:** Operators running, checking and resuming governed agent work from a local desktop workbench.
-- **Locale(s) and language policy:** `zh-CN` and `en-US`; the primary Studio copy is concise Chinese with system and CJK font fallbacks.
+- **Audience and primary job:** People starting, continuing and checking governed tasks beside their existing applications.
+- **Locale(s) and language policy:** Primary copy is concise `zh-CN` with system and CJK font fallbacks; complete `en-US` localization remains a target, not an acceptance claim.
 - **Usage scene:** A desktop application used repeatedly beside terminals and editors; high information density is more valuable than decorative empty space.
 - **Register:** Product.
-- **Memorable signature:** A restrained three-column workbench around a single compact composer, rendered with translucent hairlines rather than card-heavy panels.
+- **Memorable signature:** One task changes scale: lightweight entry, selected material beside a draft, then a focused artifact workspace. These are presentation modes, not separate agents.
 - **Restraint:** Tables, forms, activity and destructive actions use familiar product controls; no visual treatment may obscure execution state.
 - **Anti-references:** Marketing gradients, oversized rounded cards and saturated blue-as-brand treatments are deliberately excluded.
-- **Token ownership/runtime mapping:** `workbench/app.css` is canonical (Model B). The frontmatter mirrors `--bg*`, `--text*`, `--accent`, `--r*`, `--hair`, `--shadow*` and scrollbar tokens. `app.css` is served unchanged by `core/workbench-server.ts`; the Tauri sidecar preparation copies that same workbench through `desktop/scripts/prepare-sidecar.mjs`.
+- **Token ownership/runtime mapping:** [workbench/app.css](workbench/app.css) is canonical (Model B). The frontmatter mirrors `--bg*`, `--text*`, `--accent`, `--r*`, `--hair`, `--shadow*` and scrollbar tokens. `app.css` is served unchanged by [core/interfaces/workbench-server.ts](core/interfaces/workbench-server.ts); `core/workbench-server.ts` is only a compatibility re-export. The Tauri sidecar preparation copies that same workbench through [desktop/scripts/prepare-sidecar.mjs](desktop/scripts/prepare-sidecar.mjs).
 
 ## Colors
 
@@ -66,6 +66,10 @@ The system sans stack prioritizes native rendering and CJK coverage. Interface t
 ## Layout
 
 The shell owns the viewport and uses a 40px title bar, 24px status bar, 232px rail and 280px contextual aside. The title bar contains only rail/navigation controls and File/Edit/View/Help; the browser app host retains actual window controls. Both rail and contextual aside can collapse without changing content semantics. Each scrollable panel owns its overflow; loading and feedback preserve the surrounding geometry.
+
+The preceding geometry remains the advanced Workbench layout. The approved unified entry uses `workbench/entry.css`: a 64px header, 220px task rail, and a 38% material pane in companion mode. At narrow widths the task rail becomes a compact horizontal region; navigation is not removed. Launcher mode presents intent and selected materials first, with recent task continuation. `entry.css` consumes `app.css` variables (`--font`, `--bg`, `--text`, `--line`, `--accent`, `--accent-soft`, `--primary-fill`); it does not redefine the palette. Model, plugin and capability management remain accessible through the advanced Workbench.
+
+This is an intentional change from conversation-first density to explicit context and draft-first work, approved on 2026-09-28. Visual QA and native platform acceptance are still pending; see `design-qa.md`.
 
 ## Elevation & Depth
 

@@ -21,8 +21,8 @@ function ids(value: unknown, name: string): string[] {
 }
 function metric(value: unknown, name: string): number | null {
   if (value === undefined) return null;
-  const result = Number(value); if (!Number.isFinite(result) || result < 0) throw new Error(`${name} must be a non-negative number`);
-  return result;
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) throw new Error(`${name} must be a non-negative number`);
+  return value;
 }
 function cacheObservation(value: unknown): "observed" | "unavailable" {
   if (value === undefined) return "unavailable";
@@ -43,11 +43,12 @@ export class DecisionPointContextGate {
     const required = args.require_context === true;
     const resolution = await this.context.resolve({ query, scope_kind: args.scope_kind, scope_id: args.scope_id,
       memory_ids: args.memory_ids, source_ids: args.source_ids, retrieval_adapter_id: args.retrieval_adapter_id,
-      max_items: args.max_items, max_chars: args.max_chars, allow_restricted: args.allow_restricted, receipt_id: args.context_receipt_id });
+      members: args.members, max_items: args.max_items, max_chars: args.max_chars, allow_restricted: args.allow_restricted, receipt_id: args.context_receipt_id });
     const items = (resolution.items as JsonObject[] | undefined) ?? [];
     const receipt = resolution.receipt as JsonObject | null | undefined;
     const skipped = resolution.skipped === true;
-    const status = skipped ? "skipped" : required && items.length === 0 ? "blocked" : "ready";
+    const contributionCount = ((resolution.contributions ?? []) as JsonObject[]).reduce((count, contribution) => count + (contribution.items as unknown[]).length, 0);
+    const status = skipped ? "skipped" : required && items.length + contributionCount === 0 ? "blocked" : "ready";
     const action = status === "ready" ? "continue" : status === "blocked" ? "clarify_or_replan" : "declare_scope";
     const requiredConstraints = ids(args.required_constraint_ids, "required_constraint_ids");
     const recalledConstraints = ids(args.recalled_constraint_ids, "recalled_constraint_ids");

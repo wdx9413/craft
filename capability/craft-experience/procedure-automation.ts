@@ -1,16 +1,16 @@
 /**
- * Deterministic local execution for an already routeable Experience Procedure.
+ * Restricted external Host dispatch for an already routeable Experience Procedure.
  *
- * This is intentionally narrower than an Agent runner: it executes only a
- * checked Workflow definition, never a Prompt or Graph, never external effects,
- * and persists a receipt, checkpoints, outcome and handoff for every attempt.
+ * This never executes a Workflow, Prompt or Graph itself. It prepares a checked
+ * linear Workflow request, then binds independently observed results to that
+ * request before recording an outcome, quota settlement or handoff.
  * A host cron, tray process or CI runner may call `tick`; Craft never installs
  * one or silently turns a learned procedure into an operating-system service.
  */
 import { randomUUID } from "node:crypto";
-import type { CraftStore, JsonObject } from "../../core/infrastructure/store.ts";
-import { payload, stableDigest } from "../../core/digest.ts";
-import { normalizeSteps, resolveInputs, substitute } from "../../core/workflow.ts";
+import type { CraftStore, JsonObject } from "../../common/craft-common-store-local/src/store.ts";
+import { payload, stableDigest } from "../../common/craft-common-base/src/digest.ts";
+import { normalizeSteps, resolveInputs, substitute } from "../../common/craft-common-base/src/workflow.ts";
 import { ProcedureDefinitionStore, procedureDefinitionRef, type ProcedureDefinition } from "./procedure-definition.ts";
 
 type TriggerKind = "manual" | "interval";
@@ -83,7 +83,10 @@ export class ProcedureAutomationKernel {
       quota_slots: integer(args.quota_slots, "quota_slots", 24, 1, 10_000),
       quota_window_seconds: integer(args.quota_window_seconds, "quota_window_seconds", 86_400, 60, 2_592_000),
       max_no_progress: integer(args.max_no_progress, "max_no_progress", 2, 1, 100),
+      dispatch_timeout_seconds: integer(args.dispatch_timeout_seconds, "dispatch_timeout_seconds", 900, 1, 86_400),
       notification: args.notification === undefined ? "record_only" : text(args.notification, "notification"),
+      task_id: args.task_id === undefined ? null : text(args.task_id, "task_id"),
+      activation_id: args.activation_id === undefined ? null : text(args.activation_id, "activation_id"),
     };
     const jobId = String(args.job_id ?? `procedure_automation_job_${stableDigest(identity).slice(-20)}`);
     const existing = this.store.find("procedure_automation_job", jobId);
@@ -109,6 +112,10 @@ export class ProcedureAutomationKernel {
   }
 
   run(args: JsonObject): JsonObject {
+    return this.store.transaction(() => this.dispatch(args));
+  }
+
+  private dispatch(args: JsonObject): JsonObject {
     const job = this.store.get("procedure_automation_job", text(args.job_id, "job_id"));
     if (job.status !== "active") return { status: "skipped", reason: `job_${String(job.status)}`, job };
     const now = timestamp(args.now, "now");
@@ -120,16 +127,35 @@ export class ProcedureAutomationKernel {
       if (existing.job_id !== job.id) throw new Error("Procedure Automation run idempotency conflict");
       return { run: existing, idempotent: true };
     }
+    const pending = this.store.list("procedure_automation_run", 100_000, item => item.job_id === job.id && ["awaiting_host_dispatch", "effect_unknown"].includes(String(item.status)))[0];
+    if (pending) {
+      if (pending.status === "effect_unknown") return { status: "requires_handoff", reason: "reconciliation_required", job, run: pending };
+      if (typeof pending.lease_expires_at !== "string" || Date.parse(pending.lease_expires_at) <= Date.parse(now)) {
+        const handoff = this.store.create("procedure_automation_handoff", `procedure_automation_handoff_${pending.id}`, {
+          job_id: job.id, run_id: pending.id, reason: "host_receipt_timeout", status: "open", action: "reconcile_original_dispatch_before_retry",
+        });
+        const run = this.store.save("procedure_automation_run", String(pending.id), { ...payload(pending), status: "effect_unknown", handoff_id: handoff.id });
+        const waiting = this.store.save("procedure_automation_job", String(job.id), { ...payload(job), status: "requires_handoff", handoff_id: handoff.id });
+        return { status: "requires_handoff", reason: "host_receipt_timeout", job: waiting, run, handoff };
+      }
+      return { status: "skipped", reason: "awaiting_host_receipt", job, run: pending };
+    }
     const attempt = Number(job.failure_count ?? 0) + 1;
+    const activation = job.activation_id ? this.store.get("capability_kit_activation", String(job.activation_id)) : null;
+    if (activation && (activation.status !== "active" || activation.task_id !== job.task_id)) throw new Error("Automation Task Activation is unavailable");
     const running = this.store.create("procedure_automation_run", runId, {
       job_id: job.id, job_version: job.version, procedure_id: job.procedure_id, procedure_version: job.procedure_version,
       started_at: now, attempt, status: "awaiting_host_dispatch", trigger: args.trigger ?? "manual",
+      task_id: job.task_id, activation_id: job.activation_id, activation_version: activation?.version ?? null,
+      lease_expires_at: nextInterval(now, Number(job.dispatch_timeout_seconds ?? 900)),
     });
     const dispatch = this.store.create("procedure_automation_dispatch", `procedure_automation_dispatch_${runId}`, {
       run_id: running.id, job_id: job.id, procedure_id: job.procedure_id, procedure_version: job.procedure_version,
       definition_digest: job.definition_digest, workspace_ref: stableDigest({ workspace: job.workspace }), inputs_digest: stableDigest(job.inputs),
       allowed_effects: declaredEffects(this.definition(this.routeableWorkflow(String(job.procedure_id), Number(job.procedure_version)))).size === 0 ? [] : ["read_only", ...(job.allow_local_write === true ? ["local_write"] : [])],
       status: "awaiting_external_host", execution_authority: false, raw_content_stored: false,
+      task_id: running.task_id, activation_id: running.activation_id, activation_version: running.activation_version,
+      fencing_token: runId, lease_expires_at: running.lease_expires_at,
     });
     this.store.appendEvent(`automation:${job.id}`, "automation.awaiting_host", { job_id: job.id, run_id: running.id, dispatch_id: dispatch.id });
     return { run: running, dispatch, job, idempotent: false };
@@ -137,17 +163,42 @@ export class ProcedureAutomationKernel {
 
   /** External Codex/CI/cron records a terminal Host receipt; Craft never executes the workflow. */
   receiptRecord(args: JsonObject): JsonObject {
+    return this.store.transaction(() => this.acceptReceipt(args));
+  }
+
+  private acceptReceipt(args: JsonObject): JsonObject {
     const run = this.store.get("procedure_automation_run", text(args.run_id, "run_id"));
-    if (run.status !== "awaiting_host_dispatch") throw new Error("Procedure Automation run is not awaiting a Host receipt");
+    if (!["awaiting_host_dispatch", "effect_unknown"].includes(String(run.status))) throw new Error("Procedure Automation run is not awaiting a Host receipt");
     const job = this.store.get("procedure_automation_job", String(run.job_id));
     const session = this.store.get("host_session", text(args.host_session_id, "host_session_id"));
     if (session.status !== "terminal") throw new Error("Procedure Automation requires a terminal Host Session");
+    const terminal = this.store.list("host_session_event", 100_000, item => item.session_id === session.id && item.sequence === session.next_sequence)[0];
+    if (!terminal || !["session.completed", "session.failed", "session.cancelled"].includes(String(terminal.kind))) throw new Error("Automation terminal Host event is missing");
+    const dispatch = this.store.get("procedure_automation_dispatch", `procedure_automation_dispatch_${run.id}`);
+    const bindingDigest = stableDigest(payload(dispatch));
+    if (!run.task_id || !run.activation_id) throw new Error("Legacy Automation requires task-bound Activation revalidation");
+    const task = this.store.get("task", String(run.task_id));
+    const activation = this.store.get("capability_kit_activation", String(run.activation_id));
+    const procedure = this.routeableWorkflow(run.procedure_id);
+    if (task.status !== "active" || activation.status !== "active" || activation.task_id !== task.id
+      || activation.version !== run.activation_version || procedure.version !== run.procedure_version
+      || procedure.definition_digest !== dispatch.definition_digest || session.task_id !== task.id
+      || session.capability_fingerprint !== bindingDigest) throw new Error("Automation receipt binding drifted");
+    if (this.store.list("procedure_automation_receipt", 100_000, item => item.host_session_id === session.id || item.observation_id === args.observation_id).length) throw new Error("Automation receipt cannot be replayed");
     const observation = this.store.get("outcome_observation", text(args.observation_id, "observation_id"));
-    if (observation.trace_id !== session.trace_id || observation.observer_id === session.host_id) throw new Error("Procedure Automation requires an independent Outcome Observation");
+    if (!session.trace_id || observation.trace_id !== session.trace_id || !observation.observer_id
+      || observation.observer_id === session.host_id || observation.subject_digest !== bindingDigest) throw new Error("Procedure Automation requires an independent Outcome Observation");
     const evidenceIds = Array.isArray(args.acceptance_evidence_ids) ? args.acceptance_evidence_ids.map((value) => text(value, "acceptance_evidence_ids")) : [];
     if (!evidenceIds.length) throw new Error("Procedure Automation requires acceptance Evidence");
-    evidenceIds.forEach((id) => this.store.get("evidence", id));
-    const passed = observation.verdict === "passed";
+    const evidence = evidenceIds.map(id => this.store.get("evidence", id));
+    const expectedStatus = observation.verdict === "passed" ? "passed" : "failed";
+    for (const item of evidence) {
+      const metadata = object(item.metadata, "acceptance Evidence metadata");
+      if (item.source_type !== "program" || item.confidence !== "confirmed" || metadata.dispatch_digest !== bindingDigest
+        || metadata.verifier_step_id !== job.verifier_step_id || metadata.status !== expectedStatus
+        || typeof metadata.state_after_digest !== "string" || !/^sha256:[a-f0-9]{64}$/u.test(metadata.state_after_digest)) throw new Error("Automation acceptance Evidence is not bound to the verifier");
+    }
+    const passed = terminal.kind === "session.completed" && observation.verdict === "passed";
     const receipt = this.store.create("procedure_automation_receipt", `procedure_automation_receipt_${run.id}`, {
       run_id: run.id, procedure_id: run.procedure_id, procedure_version: run.procedure_version, status: passed ? "passed" : "failed",
       verifier_step_id: job.verifier_step_id, host_session_id: session.id, host_session_version: session.version,
@@ -158,9 +209,14 @@ export class ProcedureAutomationKernel {
       acceptance_source: "independent_host_observation", observed_at: timestamp(args.observed_at, "observed_at"),
     });
     const completed = this.store.save("procedure_automation_run", String(run.id), { ...payload(run), status: passed ? "completed" : "failed", receipt_id: receipt.id, outcome_id: outcome.id, completed_at: timestamp(args.observed_at, "observed_at") });
-    const progress = { digest: stableDigest({ receipt: receipt.id, observation: observation.id, verdict: observation.verdict }), changed: true, prior_digest: job.last_progress_digest ?? null, verifier_observed: true };
+    const progressDigest = stableDigest(evidence.map(item => (item.metadata as JsonObject).state_after_digest).sort());
+    const progress = { digest: progressDigest, changed: job.last_progress_digest !== progressDigest, prior_digest: job.last_progress_digest ?? null, verifier_observed: true };
     const settlement = passed ? this.settleQuota(job, completed, outcome, timestamp(args.observed_at, "observed_at")) : null;
     const savedJob = this.afterRun(job, completed, outcome, timestamp(args.observed_at, "observed_at"), progress, settlement);
+    if (run.handoff_id) {
+      const handoff = this.store.get("procedure_automation_handoff", String(run.handoff_id));
+      this.store.save("procedure_automation_handoff", String(handoff.id), { ...payload(handoff), status: "resolved", receipt_id: receipt.id });
+    }
     return { run: completed, receipt, outcome, job: savedJob, progress, settlement };
   }
 
@@ -206,6 +262,7 @@ export class ProcedureAutomationKernel {
 
   private workflowSteps(definition: ProcedureDefinition, inputs: JsonObject): JsonObject[] {
     const spec = object(definition.definition, "procedure.definition");
+    if (spec.composition !== undefined) throw new Error("Composed Procedures require an explicit Entry/Exit Host plan; use craft_procedure_plan");
     const resolved = resolveInputs(Array.isArray(spec.inputs) ? spec.inputs as JsonObject[] : [], inputs);
     if (!Array.isArray(spec.steps) || !spec.steps.length) throw new Error("Workflow Procedure must contain steps");
     return normalizeSteps(substitute(spec.steps, resolved) as JsonObject[]);
@@ -220,12 +277,6 @@ export class ProcedureAutomationKernel {
     if (spentSlots >= Number(job.quota_slots)) return { decision: "skip", reason: "quota_exhausted", spent_slots: spentSlots, quota_slots: job.quota_slots, window_start: windowStart };
     if (Number(job.no_progress_count ?? 0) >= Number(job.max_no_progress)) return { decision: "handoff", reason: "no_progress_limit", spent_slots: spentSlots, quota_slots: job.quota_slots, window_start: windowStart };
     return { decision: "run", reason: "eligible", spent_slots: spentSlots, quota_slots: job.quota_slots, window_start: windowStart };
-  }
-
-  private progress(job: JsonObject, receipt: JsonObject): JsonObject {
-    const verifier = (receipt.step_receipts as JsonObject[]).find((item) => item.step_id === job.verifier_step_id) ?? null;
-    const digest = stableDigest({ verifier, receipt_status: receipt.status });
-    return { digest, changed: job.last_progress_digest !== digest, prior_digest: job.last_progress_digest ?? null, verifier_observed: verifier !== null };
   }
 
   private settleQuota(job: JsonObject, run: JsonObject, outcome: JsonObject, now: string): JsonObject {

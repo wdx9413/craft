@@ -70,17 +70,16 @@ test("without a mounted server the loop offers exactly the surface it can answer
   }
 });
 
-test("mounting the MCP server widens the loop surface without advertising anything unroutable", async () => {
+test("mounting the MCP server does not change the bounded application loop surface", async () => {
   const f = await fixture();
   try {
     const before = advertised(f.service);
-    // The driver resolves its surface per request, so a server mounted after the
-    // service was constructed still contributes its dispatch.
+    // Transport construction must not install or widen application dispatch.
     new McpServer(f.service);
     const after = advertised(f.service);
     const dispatchable = (f.service as unknown as DispatchProbe).dispatchableInternalActions();
 
-    assert.ok(after.length > before.length, "a mounted server did not widen the surface");
+    assert.deepEqual(after, before);
     for (const name of after) {
       assert.ok(dispatchable.has(name), `${name} is advertised but cannot be dispatched`);
     }
@@ -247,4 +246,3 @@ test("a governance constraint can be defined as data while the loop can only che
     await rm(f.root, { recursive: true, force: true });
   }
 });
-

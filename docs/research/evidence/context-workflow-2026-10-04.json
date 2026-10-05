@@ -1,0 +1,148 @@
+{
+  "date": "2026-10-04",
+  "new_module_tests": {
+    "passed": 7,
+    "failed": 0,
+    "line_percent": 100,
+    "branch_percent": 100,
+    "function_percent": 100,
+    "modules": [
+      "core/application/coordinators/context-usage.ts",
+      "core/application/coordinators/workflow-design.ts",
+      "workbench/context-workflows.js",
+      "scripts/eval/completion-contract.ts"
+    ]
+  },
+  "changed_lines": [
+    {
+      "file": "core/context-resolution.ts",
+      "covered_changed_lines": [
+        281,
+        282,
+        283
+      ],
+      "uncovered_changed_lines": []
+    },
+    {
+      "file": "core/application/craft-service.ts",
+      "covered_changed_lines": [
+        41,
+        42,
+        274,
+        275,
+        276,
+        277,
+        278,
+        279,
+        280,
+        281,
+        282
+      ],
+      "uncovered_changed_lines": []
+    },
+    {
+      "file": "core/interfaces/workbench-server.ts",
+      "covered_changed_lines": [
+        75,
+        76,
+        303,
+        304,
+        305,
+        306,
+        307
+      ],
+      "uncovered_changed_lines": []
+    },
+    {
+      "file": "workbench/app.js",
+      "covered_changed_lines": [
+        1,
+        474,
+        489,
+        490,
+        2911
+      ],
+      "uncovered_changed_lines": []
+    }
+  ],
+  "regression": {
+    "passed": 68,
+    "sandbox_socket_retry_passed": 5
+  },
+  "browser": {
+    "status": "passed",
+    "checks": [
+      "render",
+      "save",
+      "resume",
+      "scope-query",
+      "no-page-errors",
+      "model-setup-branches"
+    ]
+  },
+  "installed_bundle_conformance": {
+    "artifact_sha256": "7239bb8881121c2588cc405146fc8a68c73263283e06cfa584c79df155fa75c0",
+    "reports": [
+      {
+        "product": "knowledge",
+        "status": "passed",
+        "level": "workflow_verified",
+        "transport": "stdio",
+        "schema_digest": "sha256:33191d3ec6750359a329427c61545daaa616686801a0c8d47208829fb26784be",
+        "entrypoint_digest": "7239bb8881121c2588cc405146fc8a68c73263283e06cfa584c79df155fa75c0",
+        "protocol": "2025-11-25",
+        "tool_count": 20,
+        "calls": 17,
+        "host_session_verified": false
+      },
+      {
+        "product": "memory",
+        "status": "passed",
+        "level": "workflow_verified",
+        "transport": "stdio",
+        "schema_digest": "sha256:121df778497a67b3561efad1737451f6ab1bfbdee426d86a9ae7d16974108c61",
+        "entrypoint_digest": "7239bb8881121c2588cc405146fc8a68c73263283e06cfa584c79df155fa75c0",
+        "protocol": "2025-11-25",
+        "tool_count": 20,
+        "calls": 9,
+        "host_session_verified": false
+      },
+      {
+        "product": "experience",
+        "status": "passed",
+        "level": "workflow_verified",
+        "transport": "stdio",
+        "schema_digest": "sha256:10dd32828e81632e74252739e58bfe5c803502fdb0bbc72d259256be3229c73c",
+        "entrypoint_digest": "7239bb8881121c2588cc405146fc8a68c73263283e06cfa584c79df155fa75c0",
+        "protocol": "2025-11-25",
+        "tool_count": 24,
+        "calls": 40,
+        "host_session_verified": false
+      },
+      {
+        "product": "codebase",
+        "status": "passed",
+        "level": "workflow_verified",
+        "transport": "stdio",
+        "schema_digest": "sha256:6da498d0e24f48dd7aa63b2bf32c36c75ee8d94f0df20a877b35b2d61cb4bc55",
+        "entrypoint_digest": "7239bb8881121c2588cc405146fc8a68c73263283e06cfa584c79df155fa75c0",
+        "protocol": "2025-11-25",
+        "tool_count": 12,
+        "calls": 8,
+        "host_session_verified": false
+      }
+    ]
+  },
+  "real_model_trial": {
+    "status": "blocked",
+    "host": "Codex CLI 0.151.0",
+    "model": "gpt-6-astra",
+    "exit_code": 1,
+    "output_present": false,
+    "reason": "configured model requires newer Codex CLI",
+    "model_effect_proven": false,
+    "production_effect_proven": false
+  },
+  "active_session_refreshed": false,
+  "full_repository_coverage_claimed": false
+}

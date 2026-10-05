@@ -1,0 +1,7 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "craft-memory",
+  "version": "0.12.38",
+  "description": "Standalone craft-memory Skill and MCP",
+  "license": "MIT"
+}

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import { CraftStore, type JsonObject } from "../../core/infrastructure/store.ts";
-import { object, text } from "../../core/validation.ts";
-import { digestJson } from "../../core/digest.ts";
+import { CraftStore, type JsonObject } from "../../common/craft-common-store-local/src/store.ts";
+import { object, text } from "../../common/craft-common-base/src/validation.ts";
+import { digestJson } from "../../common/craft-common-base/src/digest.ts";
 
 function array(value: unknown, name: string): unknown[] {
   if (!Array.isArray(value)) throw new Error(`${name} must be an array`);

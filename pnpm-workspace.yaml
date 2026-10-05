@@ -1,3 +1,14 @@
+packages:
+  - desktop
+  - adapters/deepseek-harness
+  - common/craft-common-store-local
+  - common/craft-common-base
+  - common/craft-common-log
+  - capability/craft-knowledge
+  - capability/craft-memory
+  - capability/craft-experience
+  - capability/craft-codebase
+autoInstallPeers: false
 allowBuilds:
   esbuild: true
-  tesseract.js: set this to true or false
+  tesseract.js: false

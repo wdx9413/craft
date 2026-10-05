@@ -1,32 +1,42 @@
 {
   "name": "craft-marketplace",
-  "version": "0.12.37",
+  "version": "0.12.38",
   "owner": {
     "name": "wdx9413"
   },
   "metadata": {
-    "description": "Craft's supported v0.12.37 plugin products. Retired projections are intentionally absent."
+    "description": "Craft's supported v0.12.38 plugin products. Retired projections are intentionally absent."
   },
   "plugins": [
     {
       "name": "craft",
-      "source": { "source": "local", "path": "./plugins/craft" },
-      "description": "The full Craft runtime plugin."
+      "source": "./",
+      "description": "craft Skill and MCP"
+    },
+    {
+      "name": "craft-context",
+      "source": "./plugins/craft-context",
+      "description": "craft-context Skill and MCP"
     },
     {
       "name": "craft-knowledge",
-      "source": { "source": "local", "path": "./plugins/craft-knowledge" },
-      "description": "Evidence-backed governed knowledge."
+      "source": "./plugins/craft-knowledge",
+      "description": "craft-knowledge Skill and MCP"
     },
     {
       "name": "craft-memory",
-      "source": { "source": "local", "path": "./plugins/craft-memory" },
-      "description": "Scoped and evidence-linked memory."
+      "source": "./plugins/craft-memory",
+      "description": "craft-memory Skill and MCP"
     },
     {
       "name": "craft-experience",
-      "source": { "source": "local", "path": "./plugins/craft-experience" },
-      "description": "Bounded experience observations and procedure drafts."
+      "source": "./plugins/craft-experience",
+      "description": "craft-experience Skill and MCP"
+    },
+    {
+      "name": "craft-codebase",
+      "source": "./plugins/craft-codebase",
+      "description": "craft-codebase Skill and MCP"
     }
   ]
 }

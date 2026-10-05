@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { assetDigest, assetRef, defineAsset, routeAssets, type AssetEnvelope } from "../core/assets.ts";
 import { McpServer } from "../core/mcp.ts";
-import { compareAcrossModels, defineTrials } from "../core/model-independence.ts";
+import { compareAcrossModels, defineTrials, type ModelTrial } from "../core/model-independence.ts";
 import { defineProvider, type ChatRequest, type ChatResult, type ModelProviderSpec, type ModelTransport } from "../core/model-gateway.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftService } from "../core/service.ts";
@@ -176,6 +176,31 @@ test("cross-model comparison only verifies invariants that held everywhere", () 
   ], ["i1", "i3"]);
   assert.equal(unmet.conclusion, "inconclusive");
   assert.deepEqual(unmet.unmet, ["i3"]);
+});
+
+test("repeated trials cannot manufacture cross-model independence or hide a failure", () => {
+  const trial: ModelTrial = { model: "a", asset_ref: "capability:x@1", verdict: "passed", observed_invariants: ["i1"] };
+  const repeated = compareAcrossModels([trial, { ...trial }], ["i1"]);
+  assert.equal(repeated.conclusion, "inconclusive");
+  assert.deepEqual(repeated.models, ["a"]);
+  assert.equal(repeated.trials, 2);
+  const mixed = compareAcrossModels([trial, { ...trial, model: "b" }, { ...trial, verdict: "failed" }], ["i1"]);
+  assert.equal(mixed.conclusion, "rejected");
+  assert.deepEqual(mixed.core_stable, []);
+  assert.deepEqual(mixed.model_sensitive, ["i1"]);
+  assert.deepEqual(mixed.per_invariant, [{ invariant: "i1", held_by: ["a", "b"], failed_by: ["a"], stable: false }]);
+});
+
+test("trial declarations normalize identifiers without mutating the caller", () => {
+  const input = { model: " model-a ", asset_ref: " capability:x@1 ", verdict: "passed", observed_invariants: [" i1 "], tokens: 0 };
+  const before = { ...input, observed_invariants: [...input.observed_invariants] };
+  assert.deepEqual(defineTrials([input]), [{ model: "model-a", asset_ref: "capability:x@1", verdict: "passed", observed_invariants: ["i1"], tokens: 0 }]);
+  assert.deepEqual(input, before);
+  for (const entry of [[], 1, "trial"]) assert.throws(() => defineTrials([entry]), /must be an object/);
+  for (const model of [1, " "]) assert.throws(() => defineTrials([{ ...input, model }]), /needs a model/);
+  for (const asset_ref of [1, " "]) assert.throws(() => defineTrials([{ ...input, asset_ref }]), /needs an asset_ref/);
+  for (const tokens of [-1, 0.5, Infinity, NaN]) assert.throws(() => defineTrials([{ ...input, tokens }]), /non-negative integer/);
+  assert.throws(() => defineTrials([{ ...input, observed_invariants: ["i1", " i1 "] }]), /must not repeat/);
 });
 
 test("trial declaration fails closed", () => {

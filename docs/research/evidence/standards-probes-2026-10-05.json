@@ -1,0 +1,42 @@
+{
+  "date": "2026-10-05",
+  "baseline": "9ada1c7a92dfc3847837b063081176696ca9f463",
+  "scope": "current source plus uncommitted changes; no UI",
+  "isolated_temporary_stores": true,
+  "implementation_modified": false,
+  "probes": {
+    "private_claim_read": {
+      "fixture_audience": { "mode": "private", "principal_ids": ["owner"] },
+      "local_mcp": {
+        "craft_knowledge_claim_get": { "returned_body": true, "isError": false },
+        "craft_knowledge_claim_list": { "returned_body": true, "isError": false },
+        "craft_knowledge_asset_inspect": { "returned_body": false, "isError": true }
+      },
+      "remote_identity_adapter": {
+        "principal": "other",
+        "tenant": "tenant-a",
+        "craft_knowledge_claim_get": { "returned_body": true, "isError": false },
+        "craft_knowledge_claim_list": { "returned_body": true, "isError": false },
+        "craft_knowledge_asset_inspect": { "returned_body": false, "isError": true }
+      },
+      "https_or_idp_tested": false,
+      "cross_tenant_read_proven": false
+    },
+    "procedure_configuration_db_failure": {
+      "failure_point": "Store.create(experience_procedure) after definition JSON write",
+      "first_save_error": "injected database write failure",
+      "procedure_record_after_failure": null,
+      "configuration_record_after_failure": null,
+      "definition_json_files_after_failure": 1,
+      "same_id_title_changed_definition_retry_error": "Procedure definition digest drifted",
+      "actual_disk_failure_or_process_kill_tested": false
+    },
+    "scoped_list_body_reads": {
+      "record_count": 201,
+      "requested_limit": 1,
+      "returned": 1,
+      "body_reads": 201,
+      "measured_latency": false
+    }
+  }
+}

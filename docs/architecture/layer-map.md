@@ -1,5 +1,19 @@
 # Craft 分层与目录地图
 
+## 当前可发布包边界
+
+`craft-agent-harness` 是宿主/编排包，不是子能力的运行时基础库。当前依赖方向为：
+
+```text
+craft-agent-harness → craft-knowledge / craft-memory / craft-experience / craft-codebase
+                    → craft-common-base / craft-common-store-local / craft-common-log
+craft-common-log → craft-common-base / craft-common-store-local
+craft-common-base → craft-common-store-local（共享 JsonObject 类型）
+craft-common-store-local → 无 Craft 包依赖
+```
+
+四个子能力可在不安装宿主包的 Node 环境加载。`core/infrastructure/{store,paths,content-store,store-migrations}.ts`、`core/{capability-protocol,digest,scope-policy,validation,workflow,retrieval-port,cost-ledger,evaluation-contract}.ts` 等旧路径仅保留兼容再导出；实现和类型的归属在 `common/`。Skill、MCP 与各 Host 插件是接入面，Hook 可选。包边界和发布/验收限制详见 [公共包与接入验收](../technical/modules/common-packages.md)。
+
 
 ## 目录改名：src/ → core/，studio/ → workbench/
 
@@ -28,15 +42,15 @@
 
 ## 依赖方向由脚本强制
 
-`scripts/audit-layering.ts`（`pnpm run audit:layering`，已接入 `test` 链与 CI）按层级排序检查导入方向：**内层不得导入外层**。它对每个文件判定其所在层，再与该次导入的目标层比较——因此把违规文件搬进 `application/` 无法让检查静默通过。
+`scripts/ci/audit-layering.ts`（`pnpm run audit:layering`）使用 TypeScript AST 检查静态导入、字面量动态导入、再导出目的地与运行时循环：**内层不得导入外层**。审计覆盖 core、capability、adapters、bin、workbench 和 desktop 的 Node 源码，生成目录不参与。Rust 平台桥接由原生构建与测试验证，不把 Node 导入图当作 Rust 验证。
 
-未在下列豁免清单中的向上导入会直接失败。清单中的条目一旦不再出现也会失败，避免豁免比它描述的问题活得更久。
+向上导入与运行时循环直接失败；当前没有导入豁免。兼容再导出入口允许保留，但消费者按实际目的地判层，不能借 barrel 绕过检查。稳定 CLI 入口按接口层判定；craft-eval 是评测 Harness，不是可选领域内核。
 
-当前豁免 1 处：`core/application/service-foundation.ts` 指向 `core/interfaces/canonical-tools.ts` 的依赖（后者转出 `mcp-server` 的工具表，需要先把该表移到中立模块）。
+工具目录已迁入 `core/mcp/tool-catalog.ts`，应用和 MCP 共同消费，不再由应用反向读取协议服务器。动作绑定属于 `core/application/actions/`，由内部 Host、Workbench 和 MCP 独立消费；构造 MCP 不再安装或扩大内部执行面。Workbench、MCP 传输、Supervisor 与 Hook 桥接实现属于接口层；验收 worker、维护与 Engineering Host Runner 属于应用层。旧路径只保留兼容导出。
 
 审计同时覆盖 `capability/`（能力包目录）。**能力包按第 1 层计**：能力拥有内核、只装配自己拥有的内核，因此可以用 infrastructure 与领域内核，但**不得**导入 `application/` 或 `interfaces/`。理由是方向：能力由核心发现，若能力能反过来导入发现它的门面，依赖就双向成立，两边都无法单独替换。此前这些文件在 `core/` 下时本来就在审计范围内，若搬迁时不扩展遍历，把内核移出 `core/` 就会让它静默脱离检查——正是该脚本被重写时要堵住的“换个位置就让规则失效”。扩展后已用探针证伪：`capability/_probe-upward.ts` 导入 `core/interfaces/mcp-server.ts` 时审计报出该边并退出 1。
 
-此前豁免 5 处，其中 4 处已按清单自己写明的修法消除：`service-foundation.ts` 原先位于 `src/` 根，却导入 `application/coordinators/*` 四个 Coordinator。它只被 `core/application/craft-service.ts` 唯一导入，因此已迁入 `application/`；层级随之相等，那 4 条依赖不再构成向上导入，豁免条目也一并删除（而不是留到被报为 stale）。第 5 条指向 `interfaces/`，层级仍然更高，因此迁移后依然成立并保留。
+历史上存在五处豁免；foundation 迁层消除四处，工具目录抽取消除最后一处。Store Schema 常量也已独立，存储与迁移之间不再形成运行时循环。
 
 ```text
 capability/                 能力包：拥有内核、声明归属、按协议被核心发现
@@ -57,19 +71,18 @@ capability/                 能力包：拥有内核、声明归属、按协议�
     experience-ledger.ts    内容无关的经验观察与诊断模式
     workflow-evolution.ts   脱敏执行观察与有界模型提案请求
     evaluation-model-profile.ts  评测所用的无凭据模型配置
-  craft-codebase/           内部、显式启用的只读代码库结构 Capability（非外发产品）
+  craft-codebase/           显式启用的只读代码库结构 Capability（可独立外发）
     codebase-index.ts       checkpoint 绑定的符号、关系、诊断、查询与 content-free receipt
     capability.ts           只声明归属；不贡献新的 Context member
 interfaces/                 外部协议入口
   mcp-server.ts             MCP 工具定义、分发与错误映射
   mcp/surface-registry.ts   Domain / Component / Syscall surface 投影
-  mcp/runtime-handlers.ts   Runtime 与 Adapter handler 注册
-  mcp/work-handlers.ts      Work / Host / Task handler 注册
-  mcp/evaluation-handlers.ts Evaluation / Acceptance handler 注册
-  mcp/workspace-handlers.ts Workspace / Transaction handler 注册
+  mcp/*-handlers.ts         旧导入路径的兼容再导出，不持有业务绑定
 application/                用例与应用门面
   craft-service.ts          CraftService 兼容门面与跨域编排
   service-foundation.ts     内核装配基座（由 `src/` 根迁入；迁入后 4 条 Coordinator 向上导入消失）
+  actions/                 中立动作绑定；不依赖协议服务器，不授予新权限
+  coordinators/cognitive-write.ts  Memory 捕获与 Knowledge 生命周期写入规则
   coordinators/             Work / Runtime / Evaluation / Workspace 应用上下文
   use-cases/                按领域安装的用例组（Adapter、Trace、Knowledge、Memory 等）
 domains/                    稳定业务内核的命名空间分组
@@ -169,7 +182,7 @@ infrastructure（SQLite / Markdown / Trace archive / platform adapters）
 2. `craft-memory`、`craft-knowledge`、`craft-capability`、`craft-quality`、`craft-experience` 是能力投影，不应各自复制 Store、Policy、Trace 或 Eval。只读查询可以直接走组件 MCP；写入、发布和外部 effect 必须回到 Control Plane 与 Verified Work Loop。
 3. Capability Adapter 负责外部差异（MCP、Serena、Codex、Claude、向量服务），Core Kernel 负责不可绕过的事实、策略和证据。把共享内核搬进能力包只会造成第二套账本，不能因为“可插拔”而移动。
 
-当前仍需收敛的结构债务：`core/application/craft-service.ts` 约 4700 行，应按认知、运行、能力、质量四类 coordinator 渐进拆成薄门面；`service-foundation.ts → interfaces/canonical-tools.ts` 的单向依赖豁免应通过把工具目录移到中立 `mcp/tool-catalog` 消除；`distribution-and-first-run.ts` 应拆为 credential/config、readiness、protocol negotiation、platform probe 和 release plan 五个职责。只在每次拆分都能保持现有契约和测试证据时迁移，不能为了目录整齐复制实现。
+当前仍需收敛的结构债务：`core/application/craft-service.ts` 应按认知、运行、能力、质量四类 coordinator 渐进拆成薄门面；当前已抽出认知 Workbench 协调模块，中立 `mcp/tool-catalog` 已消除 application → interfaces 工具目录反向依赖及其豁免；`distribution-and-first-run.ts` 应拆为 credential/config、readiness、protocol negotiation、platform probe 和 release plan 五个职责。只在每次拆分都能保持现有契约和测试证据时迁移，不能为了目录整齐复制实现。
 
 ### 版本边界
 
@@ -185,7 +198,13 @@ v0.12.34 已将产品发布号集中到 `core/version.ts`，并由发布门禁�
 
 ## 兼容与拆分策略
 
-`core/service.ts` 与 `core/mcp.ts` 是稳定的薄兼容入口，真实实现分别位于 `core/application/craft-service.ts` 和 `core/interfaces/mcp-server.ts`。第三方继续使用旧路径不会失效；后续新增代码应从分层入口或具体领域模块导入，避免再把门面做成新的上帝模块。这两个文件，加上 `domains/index.ts`、`infrastructure/index.ts`，是审计脚本中按构造豁免的再导出入口。
+### Git 与分发产物归属
+
+Craft 主仓记录源码、测试、构建和发布契约、插件元数据、根 `pnpm-lock.yaml`、桌面 `Cargo.lock`、领域词汇及 ADR。根 `dist/`、子项目依赖链接、Cargo `target/`、桌面 staging、插件生成的 `dist/skills`、覆盖率、日志、截图、凭据和本机数据不属于源码提交；忽略它们不意味着删除用户数据。`.serena/project.yml` 是现有用户配置，是否共享需明确决定，不能随本轮代码整目录提交。
+
+`craft-marketplace` 的插件 bundle 和 `craft-common-use` 的 bundle/Skill 是分发产品本身，必须由同步脚本生成、记录来源与摘要并纳入各自发布提交；不能照搬主仓的生成目录忽略规则。dirty 构建必须明确不可仅凭 HEAD 复现，不得把来源提交号当作产物内容证明。当前没有自动 stage、commit 或 push。
+
+`core/service.ts` 与 `core/mcp.ts` 是稳定的薄兼容入口，真实实现分别位于 `core/application/craft-service.ts` 和 `core/interfaces/mcp-server.ts`。第三方继续使用旧路径不会失效；后续新增代码应从分层入口或具体领域模块导入，避免再把门面做成新的上帝模块。这些入口及 `domains/index.ts`、`infrastructure/index.ts` 的消费者仍按真实导出目的地审计，不享有路径豁免。
 
 大型实现文件仍会按领域边界渐进拆分，每次拆分都通过类型检查、完整测试和适配器 smoke test 验证。MCP 的工具 Schema、Surface Registry 和 Runtime / Work / Evaluation / Workspace Handler 已从协议服务器中抽出；应用层也已建立四个 Coordinator 上下文，先集中依赖再逐步迁移编排方法，仍由同一个兼容分发入口承接。
 

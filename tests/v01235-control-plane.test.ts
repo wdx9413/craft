@@ -113,10 +113,17 @@ test("v0.12.35 Context Working Set explains selection and keeps host members fix
     assert.ok((await kernel.get({ working_set_id: String((defaults.working_set as JsonObject).id), version: 1 })).working_set);
     await assert.rejects(() => kernel.resolve({ query: "x", members: [] }), /non-empty/);
     await assert.rejects(() => kernel.resolve({ query: "x", members: ["unsupported"] }), /unsupported/);
-    const contributingResolver = new ContextResolutionKernel(f.store, [{ member: "experience", contribute: async () => ({ member: "experience", items: [{ ref_id: "exp" }], receipt_id: "exp-receipt", omitted_count: 1 }) }]);
+    const experienceItem: JsonObject = { ref_id: "exp" };
+    const contributingResolver = new ContextResolutionKernel(f.store, [{ member: "experience", contribute: async () => ({ member: "experience", items: [experienceItem], receipt_id: "exp-receipt", omitted_count: 1 }) }]);
     const contributingKernel = new ContextWorkingSetKernel(f.store, contributingResolver);
+    // A bare reference is not a relevance signal in the shared retrieval corpus.
+    const unmatched = await contributingKernel.resolve({ working_set_id: "unmatched", query: "focused", members: ["experience"], scope_kind: "project", scope_id: "p" });
+    assert.deepEqual(unmatched.selected_refs, []);
+    experienceItem.trigger = "focused tests";
     const contributed = await contributingKernel.resolve({ working_set_id: "contributed", query: "focused", members: ["experience"], scope_kind: "project", scope_id: "p" });
     assert.equal((contributed.selected_refs as string[]).includes("exp@latest"), true);
+    const unrelated = await contributingKernel.resolve({ working_set_id: "unrelated", query: "deployment", members: ["experience"], scope_kind: "project", scope_id: "p" });
+    assert.deepEqual(unrelated.selected_refs, []);
     const fakeKernel = new ContextWorkingSetKernel(f.store, { resolve: async () => ({ items: [{ memory_id: "memory-only" }], contributions: [{ items: [{ memory_id: "memory-ref" }, { id: "id-ref" }, { ref_id: "full", version: 2 }] }, { items: "not-an-array" }], receipt: {} }) } as never);
     const fake = await fakeKernel.resolve({ working_set_id: "fake", query: "fake", members: ["memory"], scope_kind: "project", scope_id: "p" });
     assert.equal((fake.selected_refs as string[]).length, 4);

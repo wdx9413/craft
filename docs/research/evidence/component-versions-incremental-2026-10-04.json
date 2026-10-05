@@ -1,0 +1,157 @@
+{
+  "baseline": "/private/tmp/craft-all-components-baseline-20261004",
+  "files": [
+    {
+      "file": "core/memory-governance.ts",
+      "changed_lines": 1,
+      "checked_lines": 1,
+      "uncovered": []
+    },
+    {
+      "file": "core/durable-action-loop.ts",
+      "changed_lines": 1,
+      "checked_lines": 1,
+      "uncovered": []
+    },
+    {
+      "file": "core/mcp/tool-catalog.ts",
+      "changed_lines": 13,
+      "checked_lines": 13,
+      "uncovered": []
+    },
+    {
+      "file": "core/mcp/tool-schema.ts",
+      "changed_lines": 12,
+      "checked_lines": 11,
+      "uncovered": []
+    },
+    {
+      "file": "core/application/craft-service.ts",
+      "changed_lines": 9,
+      "checked_lines": 7,
+      "uncovered": []
+    },
+    {
+      "file": "core/application/procedure-invocation.ts",
+      "changed_lines": 29,
+      "checked_lines": 26,
+      "uncovered": []
+    },
+    {
+      "file": "core/application/procedure-graph-progress.ts",
+      "changed_lines": 113,
+      "checked_lines": 106,
+      "uncovered": []
+    },
+    {
+      "file": "core/application/procedure-work-items.ts",
+      "changed_lines": 48,
+      "checked_lines": 43,
+      "uncovered": []
+    },
+    {
+      "file": "core/application/coordinators/component-assets.ts",
+      "changed_lines": 138,
+      "checked_lines": 130,
+      "uncovered": []
+    },
+    {
+      "file": "core/application/use-cases/durable-experience.ts",
+      "changed_lines": 1,
+      "checked_lines": 1,
+      "uncovered": []
+    },
+    {
+      "file": "core/application/use-cases/kernel-delegates.ts",
+      "changed_lines": 1,
+      "checked_lines": 1,
+      "uncovered": []
+    },
+    {
+      "file": "core/application/actions/action-handlers.ts",
+      "changed_lines": 10,
+      "checked_lines": 10,
+      "uncovered": []
+    },
+    {
+      "file": "core/infrastructure/store.ts",
+      "changed_lines": 7,
+      "checked_lines": 5,
+      "uncovered": []
+    },
+    {
+      "file": "core/interfaces/workbench-server.ts",
+      "changed_lines": 6,
+      "checked_lines": 5,
+      "uncovered": []
+    },
+    {
+      "file": "core/interfaces/mcp/surface-registry.ts",
+      "changed_lines": 4,
+      "checked_lines": 4,
+      "uncovered": []
+    },
+    {
+      "file": "capability/craft-experience/workflow-evolution.ts",
+      "changed_lines": 3,
+      "checked_lines": 2,
+      "uncovered": []
+    },
+    {
+      "file": "capability/craft-experience/procedure-composition.ts",
+      "changed_lines": 31,
+      "checked_lines": 30,
+      "uncovered": []
+    },
+    {
+      "file": "capability/craft-experience/procedure-configuration.ts",
+      "changed_lines": 42,
+      "checked_lines": 33,
+      "uncovered": []
+    },
+    {
+      "file": "capability/craft-experience/procedure-projection.ts",
+      "changed_lines": 7,
+      "checked_lines": 6,
+      "uncovered": []
+    },
+    {
+      "file": "capability/craft-experience/procedure-definition.ts",
+      "changed_lines": 1,
+      "checked_lines": 1,
+      "uncovered": []
+    },
+    {
+      "file": "capability/craft-experience/procedure-graph.ts",
+      "changed_lines": 77,
+      "checked_lines": 70,
+      "uncovered": []
+    },
+    {
+      "file": "capability/craft-codebase/ownership.ts",
+      "changed_lines": 1,
+      "checked_lines": 1,
+      "uncovered": []
+    },
+    {
+      "file": "capability/craft-knowledge/knowledge-source-registry.ts",
+      "changed_lines": 22,
+      "checked_lines": 22,
+      "uncovered": []
+    },
+    {
+      "file": "workbench/asset-revisions.js",
+      "changed_lines": 41,
+      "checked_lines": 40,
+      "uncovered": []
+    },
+    {
+      "file": "workbench/app.js",
+      "changed_lines": 3,
+      "checked_lines": 2,
+      "uncovered": []
+    }
+  ],
+  "uncovered_files": 0,
+  "coverage_source": "Node V8 and Chromium V8"
+}

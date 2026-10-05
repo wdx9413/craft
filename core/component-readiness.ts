@@ -58,6 +58,8 @@ export class ComponentReadinessKernel {
     return {
       ...readiness,
       runtime_reachable: true,
+      verification_level: "tool_call_verified",
+      host_session_verified: false,
       expected_product: `craft-${name}`,
       expected_release: CRAFT_RELEASE_VERSION,
       expected_tools: expected,
@@ -150,7 +152,7 @@ export class ComponentReadinessKernel {
 const REQUIRED_TOOLS: Readonly<Record<"knowledge" | "memory" | "experience", readonly string[]>> = {
   knowledge: ["craft_component_readiness_get", "craft_knowledge_search", "craft_context_resolution_resolve"],
   memory: ["craft_component_readiness_get", "craft_context_resolution_resolve", "craft_memory_maintenance_run"],
-  experience: ["craft_component_readiness_get", "craft_experience_observe", "craft_experience_procedure_draft"],
+  experience: ["craft_component_readiness_get", "craft_context_resolution_resolve", "craft_scope_identity_resolve_project", "craft_experience_observe", "craft_experience_procedure_draft", "craft_procedure_get", "craft_procedure_gate", "craft_procedure_plan", "craft_procedure_invocation_bind", "craft_procedure_invocation_get"],
 };
 
 function ensureMountedComponent(requested: ComponentName, mounted?: ComponentName): void {

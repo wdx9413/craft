@@ -1,0 +1,480 @@
+{
+  "date": "2026-09-28",
+  "delivery_scope": "local implementation and deployable artifacts; no production deployment",
+  "head": "9ada1c7a92dfc3847837b063081176696ca9f463",
+  "working_tree": "pre-existing unrelated changes preserved; not committed",
+  "tests": {
+    "affected_regression": {
+      "tests": 257,
+      "pass": 257,
+      "fail": 0
+    },
+    "component_checks": {
+      "tests": 22,
+      "pass": 22,
+      "fail": 0
+    },
+    "runtime_package": {
+      "tests": 6,
+      "pass": 6,
+      "fail": 0
+    },
+    "remote_isolation": {
+      "tests": 1,
+      "pass": 1,
+      "fail": 0
+    },
+    "python_tests": {
+      "tests": 5,
+      "pass": 5,
+      "fail": 0
+    }
+  },
+  "incremental_coverage": {
+    "baseline": "pre-turn dirty-worktree snapshot, not HEAD",
+    "statements": 633,
+    "statements_covered": 633,
+    "branch_paths": 708,
+    "branch_paths_covered": 708,
+    "files": [
+      {
+        "file": "capability/craft-codebase/codebase-index.ts",
+        "statements": 13,
+        "statements_covered": 13,
+        "branch_paths": 16,
+        "branch_paths_covered": 16,
+        "missing_lines": [],
+        "missing_branches": []
+      },
+      {
+        "file": "capability/craft-codebase/lsp-adapter.ts",
+        "statements": 19,
+        "statements_covered": 19,
+        "branch_paths": 22,
+        "branch_paths_covered": 22,
+        "missing_lines": [],
+        "missing_branches": []
+      },
+      {
+        "file": "capability/craft-codebase/typescript-analysis.ts",
+        "statements": 86,
+        "statements_covered": 86,
+        "branch_paths": 77,
+        "branch_paths_covered": 77,
+        "missing_lines": [],
+        "missing_branches": []
+      },
+      {
+        "file": "capability/craft-experience/contribution.ts",
+        "statements": 3,
+        "statements_covered": 3,
+        "branch_paths": 6,
+        "branch_paths_covered": 6,
+        "missing_lines": [],
+        "missing_branches": []
+      },
+      {
+        "file": "capability/craft-experience/procedure-composition.ts",
+        "statements": 17,
+        "statements_covered": 17,
+        "branch_paths": 22,
+        "branch_paths_covered": 22,
+        "missing_lines": [],
+        "missing_branches": []
+      },
+      {
+        "file": "capability/craft-knowledge/contribution.ts",
+        "statements": 16,
+        "statements_covered": 16,
+        "branch_paths": 18,
+        "branch_paths_covered": 18,
+        "missing_lines": [],
+        "missing_branches": []
+      },
+      {
+        "file": "capability/craft-knowledge/knowledge-source-registry.ts",
+        "statements": 76,
+        "statements_covered": 76,
+        "branch_paths": 69,
+        "branch_paths_covered": 69,
+        "missing_lines": [],
+        "missing_branches": []
+      },
+      {
+        "file": "core/capability-protocol.ts",
+        "statements": 2,
+        "statements_covered": 2,
+        "branch_paths": 0,
+        "branch_paths_covered": 0,
+        "missing_lines": [],
+        "missing_branches": []
+      },
+      {
+        "file": "core/context-resolution.ts",
+        "statements": 105,
+        "statements_covered": 105,
+        "branch_paths": 151,
+        "branch_paths_covered": 151,
+        "missing_lines": [],
+        "missing_branches": []
+      },
+      {
+        "file": "core/context-retrieval-capture.ts",
+        "statements": 3,
+        "statements_covered": 3,
+        "branch_paths": 6,
+        "branch_paths_covered": 6,
+        "missing_lines": [],
+        "missing_branches": []
+      },
+      {
+        "file": "core/durable-action-loop.ts",
+        "statements": 18,
+        "statements_covered": 18,
+        "branch_paths": 44,
+        "branch_paths_covered": 44,
+        "missing_lines": [],
+        "missing_branches": []
+      },
+      {
+        "file": "core/knowledge-memory-bundle.ts",
+        "statements": 4,
+        "statements_covered": 4,
+        "branch_paths": 2,
+        "branch_paths_covered": 2,
+        "missing_lines": [],
+        "missing_branches": []
+      },
+      {
+        "file": "core/memory-maintenance.ts",
+        "statements": 15,
+        "statements_covered": 15,
+        "branch_paths": 21,
+        "branch_paths_covered": 21,
+        "missing_lines": [],
+        "missing_branches": []
+      },
+      {
+        "file": "core/retrieval-evaluation.ts",
+        "statements": 55,
+        "statements_covered": 55,
+        "branch_paths": 53,
+        "branch_paths_covered": 53,
+        "missing_lines": [],
+        "missing_branches": []
+      },
+      {
+        "file": "core/retrieval-port.ts",
+        "statements": 58,
+        "statements_covered": 58,
+        "branch_paths": 64,
+        "branch_paths_covered": 64,
+        "missing_lines": [],
+        "missing_branches": []
+      },
+      {
+        "file": "core/application/procedure-invocation.ts",
+        "statements": 66,
+        "statements_covered": 66,
+        "branch_paths": 97,
+        "branch_paths_covered": 97,
+        "missing_lines": [],
+        "missing_branches": []
+      },
+      {
+        "file": "core/application/actions/action-handlers.ts",
+        "statements": 1,
+        "statements_covered": 1,
+        "branch_paths": 5,
+        "branch_paths_covered": 5,
+        "missing_lines": [],
+        "missing_branches": []
+      },
+      {
+        "file": "core/application/use-cases/kernel-delegates.ts",
+        "statements": 1,
+        "statements_covered": 1,
+        "branch_paths": 0,
+        "branch_paths_covered": 0,
+        "missing_lines": [],
+        "missing_branches": []
+      },
+      {
+        "file": "core/application/use-cases/knowledge-memory.ts",
+        "statements": 1,
+        "statements_covered": 1,
+        "branch_paths": 3,
+        "branch_paths_covered": 3,
+        "missing_lines": [],
+        "missing_branches": []
+      },
+      {
+        "file": "core/interfaces/mcp-server.ts",
+        "statements": 16,
+        "statements_covered": 16,
+        "branch_paths": 8,
+        "branch_paths_covered": 8,
+        "missing_lines": [],
+        "missing_branches": []
+      },
+      {
+        "file": "core/mcp/tool-catalog.ts",
+        "statements": 8,
+        "statements_covered": 8,
+        "branch_paths": 0,
+        "branch_paths_covered": 0,
+        "missing_lines": [],
+        "missing_branches": []
+      },
+      {
+        "file": "core/mcp/tool-schema.ts",
+        "statements": 1,
+        "statements_covered": 1,
+        "branch_paths": 0,
+        "branch_paths_covered": 0,
+        "missing_lines": [],
+        "missing_branches": []
+      },
+      {
+        "file": "scripts/eval/component-ablation.ts",
+        "statements": 41,
+        "statements_covered": 41,
+        "branch_paths": 23,
+        "branch_paths_covered": 23,
+        "missing_lines": [],
+        "missing_branches": []
+      },
+      {
+        "file": "scripts/release/pack-plugin.ts",
+        "statements": 3,
+        "statements_covered": 3,
+        "branch_paths": 1,
+        "branch_paths_covered": 1,
+        "missing_lines": [],
+        "missing_branches": []
+      },
+      {
+        "file": "scripts/smoke/component-conformance.ts",
+        "statements": 5,
+        "statements_covered": 5,
+        "branch_paths": 0,
+        "branch_paths_covered": 0,
+        "missing_lines": [],
+        "missing_branches": []
+      }
+    ]
+  },
+  "native_module_gates": [
+    {
+      "group": "codebase-lsp-adapter",
+      "exit_code": 0,
+      "evidence_file": "industry-codebase-lsp-adapter-native-2026-09-28.log"
+    },
+    {
+      "group": "craft-codebase",
+      "exit_code": 0,
+      "evidence_file": "industry-craft-codebase-native-2026-09-28.log"
+    },
+    {
+      "group": "universal-runtime",
+      "exit_code": 0,
+      "evidence_file": "industry-universal-runtime-native-2026-09-28.log"
+    },
+    {
+      "group": "evaluation-model-workflow-evolution",
+      "exit_code": 0,
+      "evidence_file": "industry-evaluation-model-workflow-evolution-native-2026-09-28.log"
+    },
+    {
+      "group": "durable-experience",
+      "exit_code": 0,
+      "evidence_file": "industry-durable-experience-native-2026-09-28.log"
+    },
+    {
+      "group": "ideal-state-gaps",
+      "exit_code": 0,
+      "evidence_file": "industry-ideal-state-gaps-native-2026-09-28.log"
+    },
+    {
+      "group": "capability-protocol",
+      "exit_code": 0,
+      "evidence_file": "industry-capability-protocol-native-2026-09-28.log"
+    },
+    {
+      "group": "observability-memory",
+      "exit_code": 0,
+      "evidence_file": "industry-observability-memory-native-2026-09-28.log"
+    },
+    {
+      "group": "application-dispatch",
+      "exit_code": 0,
+      "evidence_file": "industry-application-dispatch-native-2026-09-28.log"
+    },
+    {
+      "group": "retrieval-port",
+      "exit_code": 0,
+      "evidence_file": "industry-retrieval-port-native-2026-09-28.log"
+    },
+    {
+      "group": "knowledge-contribution",
+      "exit_code": 0,
+      "evidence_file": "industry-knowledge-contribution-native-2026-09-28.log"
+    },
+    {
+      "group": "cost-ledger",
+      "exit_code": 0,
+      "evidence_file": "industry-cost-ledger-native-2026-09-28.log"
+    },
+    {
+      "group": "procedure-composition",
+      "exit_code": 0,
+      "evidence_file": "industry-procedure-composition-native-2026-09-28.log"
+    },
+    {
+      "group": "procedure-invocation",
+      "exit_code": 0,
+      "evidence_file": "industry-procedure-invocation-native-2026-09-28.log"
+    },
+    {
+      "group": "typescript-analysis",
+      "exit_code": 0,
+      "evidence_file": "industry-typescript-analysis-native-2026-09-28.log"
+    },
+    {
+      "group": "retrieval-evaluation",
+      "exit_code": 0,
+      "evidence_file": "industry-retrieval-evaluation-native-2026-09-28.log"
+    },
+    {
+      "group": "component-ablation",
+      "exit_code": 0,
+      "evidence_file": "industry-component-ablation-native-2026-09-28.log"
+    }
+  ],
+  "python_coverage": {
+    "covered_lines": 74,
+    "num_statements": 74,
+    "percent_covered": 100.0,
+    "percent_covered_display": "100",
+    "missing_lines": 0,
+    "excluded_lines": 0,
+    "percent_statements_covered": 100.0,
+    "percent_statements_covered_display": "100",
+    "num_branches": 30,
+    "num_partial_branches": 0,
+    "covered_branches": 30,
+    "missing_branches": 0,
+    "percent_branches_covered": 100.0,
+    "percent_branches_covered_display": "100"
+  },
+  "python_mcp": {
+    "status": "passed",
+    "analyzer": "jedi-static",
+    "version": "0.19.2",
+    "mcp_calls": 5,
+    "fixture": "checkpoint-pinned cross-file alias plus negative comments/strings"
+  },
+  "stdio": {
+    "artifact_sha256": "8cd70a03e345b83cfa88689ea8370ef83c6f38050f3960c1a7968c9919a1af7b",
+    "reports": [
+      {
+        "product": "knowledge",
+        "status": "passed",
+        "level": "workflow_verified",
+        "transport": "stdio",
+        "schema_digest": "sha256:33191d3ec6750359a329427c61545daaa616686801a0c8d47208829fb26784be",
+        "entrypoint_digest": "8cd70a03e345b83cfa88689ea8370ef83c6f38050f3960c1a7968c9919a1af7b",
+        "protocol": "2025-11-25",
+        "tool_count": 20,
+        "calls": 17,
+        "host_session_verified": false
+      },
+      {
+        "product": "memory",
+        "status": "passed",
+        "level": "workflow_verified",
+        "transport": "stdio",
+        "schema_digest": "sha256:121df778497a67b3561efad1737451f6ab1bfbdee426d86a9ae7d16974108c61",
+        "entrypoint_digest": "8cd70a03e345b83cfa88689ea8370ef83c6f38050f3960c1a7968c9919a1af7b",
+        "protocol": "2025-11-25",
+        "tool_count": 20,
+        "calls": 9,
+        "host_session_verified": false
+      },
+      {
+        "product": "experience",
+        "status": "passed",
+        "level": "workflow_verified",
+        "transport": "stdio",
+        "schema_digest": "sha256:10dd32828e81632e74252739e58bfe5c803502fdb0bbc72d259256be3229c73c",
+        "entrypoint_digest": "8cd70a03e345b83cfa88689ea8370ef83c6f38050f3960c1a7968c9919a1af7b",
+        "protocol": "2025-11-25",
+        "tool_count": 24,
+        "calls": 40,
+        "host_session_verified": false
+      },
+      {
+        "product": "codebase",
+        "status": "passed",
+        "level": "workflow_verified",
+        "transport": "stdio",
+        "schema_digest": "sha256:6da498d0e24f48dd7aa63b2bf32c36c75ee8d94f0df20a877b35b2d61cb4bc55",
+        "entrypoint_digest": "8cd70a03e345b83cfa88689ea8370ef83c6f38050f3960c1a7968c9919a1af7b",
+        "protocol": "2025-11-25",
+        "tool_count": 12,
+        "calls": 8,
+        "host_session_verified": false
+      }
+    ]
+  },
+  "checks": {
+    "typecheck": "passed",
+    "core_build": "passed",
+    "bundled_build": "passed",
+    "plugin_package": "passed",
+    "release_catalog": "passed",
+    "layering": "364 modules, zero violations",
+    "surface_audit": "passed",
+    "consistency_mutations": "9 of 9 detected",
+    "diff_check": "passed"
+  },
+  "coverage_inventory": {
+    "status": "incomplete",
+    "missing_count": 201,
+    "whole_repository_coverage_proven": false
+  },
+  "source_sha256": {
+    "core/retrieval-port.ts": "d713b0b25e2aafc1b49e4551843d1c5e8a9da0c4fd2379c3e54f16fed6c88236",
+    "core/memory-maintenance.ts": "47ff7551057d78ddbab857879ef39f953ab7d3b6c8e8bd8b76acff0901ce6d70",
+    "core/retrieval-evaluation.ts": "55212ab219151f99b46ff93e09476714dc4874cf5ee12a53fe509e6c979665ed",
+    "core/context-retrieval-capture.ts": "d28d00aea768f5a8f11b57d38db2447aeb395899429d7a691d82e2f4e7bab0ee",
+    "core/capability-protocol.ts": "b6db0cd286bb178ebd49afa715c6576bd57f85423dad60929238d1cfd4589d64",
+    "core/context-resolution.ts": "591b8c559f88db27676e97ec284fb7324dbd41a611306f8bd83ceeb49812b6a5",
+    "core/knowledge-memory-bundle.ts": "03950ddea443c88765792a79daf83152369b6dbc644ad7a9f3d169a95b5243ef",
+    "core/durable-action-loop.ts": "44715756aae6d746fe6c7149f632a53cfabc574c195cc7ef63c1fe08aa5a5659",
+    "core/mcp/tool-catalog.ts": "ccb9c1a558dfe7d6b44595b97b3366ef4aa95ec07df8b834f4119703549257af",
+    "core/mcp/tool-schema.ts": "18b97a4118e1ab6e7bce267392d7da5d0cd139095796398360207b79c17614bb",
+    "core/application/procedure-invocation.ts": "d79712e1dc52eb5c6ffe77b46ca256f290666bb809b366de71049365c0fe729a",
+    "core/application/use-cases/kernel-delegates.ts": "19e21a7b522eb7be72341474442f7a340746104d90b9e5ff5cb3fe91439c2989",
+    "core/application/use-cases/knowledge-memory.ts": "7614eb465b557295d3dde5e01eb0bf7c969c119501bab867f99fd3b2224a47a3",
+    "core/application/actions/action-handlers.ts": "2c699448f73b8dd3710163ffa97d4a575f59a0fa86a326f3d30d58ad463e2e89",
+    "core/interfaces/mcp-server.ts": "8e910488119c3adc76ea8b59505dd27240e58ce45e4270fd59de47cf790d84af",
+    "capability/craft-experience/procedure-composition.ts": "0032387e06a7ec866f031bdb6b368faeb42c3851820fe470b2e7c3803ce7e1e7",
+    "capability/craft-experience/contribution.ts": "58a03c6a83b4ec02bcfa4b469211127d952648be821d4d908ab2665958aa204c",
+    "capability/craft-codebase/codebase-index.ts": "ccebfe7833535c26f008b16e812513bb4bf004e656c833a9a55064ee6c76c3c3",
+    "capability/craft-codebase/lsp-adapter.ts": "695a69b425bbc469e3871983933c4adc2a193251cf527b0d2c3f7f7abe478e7a",
+    "capability/craft-codebase/typescript-analysis.ts": "c2495ad9a8d14bc7e11313a3178a83fd1fbb998767e22916350a327dc637bb51",
+    "capability/craft-knowledge/contribution.ts": "4a4652b84790283e9aae67c0fa2f870b69fd9a56e107b0f4adadc1281d124b0e",
+    "capability/craft-knowledge/knowledge-source-registry.ts": "f4baa6c2a488cba2d57a171b0919eec75696b288c79a905ade56fa936a576963",
+    "scripts/eval/component-ablation.ts": "03ef4cbbf61e4de3e068e5a12745c442cebd233cb9c00d31bfa211b1b870e96c",
+    "scripts/release/pack-plugin.ts": "db9d6c2f40b38daf64f7de79053309f2c83e81caa1164f00578b12f65de24a14",
+    "scripts/smoke/component-conformance.ts": "b67015c8859f7b96ec358c79d722ecdf71b0afa302c7561e84f4303d618f1860"
+  },
+  "limitations": [
+    "Actual Host attachment and model outcome uplift have not been verified for this build.",
+    "Codebase graph storage is bounded, not a persistent sharded large-repository index.",
+    "Java and Go real language-server analysis is not verified.",
+    "Dynamic runtime graph loops and compensation are outside the bounded Route Invocation contract.",
+    "Ablation catalog is development material, not approved held-out results."
+  ]
+}

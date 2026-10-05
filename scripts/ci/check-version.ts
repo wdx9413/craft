@@ -33,6 +33,14 @@ for (const path of [...RELEASE_PRODUCTS.map((product) => `plugins/${product.name
   if (manifestVersion !== packageVersion) throw new Error(`${path} version ${String(manifestVersion)} differs from package.json ${packageVersion}`);
 }
 
+if ((await json("desktop/package.json")).version !== packageVersion) throw new Error("Desktop package release drift");
+if ((await json("desktop/src-tauri/tauri.conf.json")).version !== packageVersion) throw new Error("Desktop installer release drift");
+for (const path of ["desktop/src-tauri/Cargo.toml", "desktop/src-tauri/Cargo.lock"]) {
+  const source = await readFile(resolve(root, path), "utf8");
+  const project = source.match(/name = "craft-workbench-desktop"\r?\nversion = "([^"]+)"/u);
+  if (project?.[1] !== packageVersion) throw new Error(`${path} Desktop release drift`);
+}
+
 for (const path of RELEASE_PRODUCTS.filter((product) => product.hookMember).map((product) => `plugins/${product.name}/.claude-plugin/plugin.json`)) {
   const manifestVersion = (await json(path)).version;
   if (manifestVersion !== packageVersion) throw new Error(`${path} version ${String(manifestVersion)} differs from package.json ${packageVersion}`);
@@ -42,11 +50,16 @@ const versionSource = await readFile(resolve(root, "core/version.ts"), "utf8");
 const match = versionSource.match(/CRAFT_RELEASE_VERSION = "([^"]+)"/u);
 if (match?.[1] !== packageVersion) throw new Error(`core/version.ts CRAFT_RELEASE_VERSION differs from package.json ${packageVersion}`);
 
-for (const path of ["capability/craft-knowledge/package.json", "capability/craft-memory/package.json", "capability/craft-experience/package.json", "capability/craft-codebase/package.json", "adapters/deepseek-harness/package.json"]) {
+for (const path of ["common/craft-common-store-local/package.json", "common/craft-common-base/package.json", "common/craft-common-log/package.json",
+  "capability/craft-knowledge/package.json", "capability/craft-memory/package.json", "capability/craft-experience/package.json", "capability/craft-codebase/package.json", "adapters/deepseek-harness/package.json"]) {
   const component = await json(path);
   if (component.version !== packageVersion) throw new Error(`${path} version ${String(component.version)} differs from package.json ${packageVersion}`);
   const peers = (component.peerDependencies ?? {}) as Record<string, unknown>;
-  if (peers["craft-agent-harness"] !== undefined && peers["craft-agent-harness"] !== packageVersion) throw new Error(`${path} craft-agent-harness peer differs from package.json ${packageVersion}`);
+  const dependencies = (component.dependencies ?? {}) as Record<string, unknown>;
+  if (peers["craft-agent-harness"] !== undefined || dependencies["craft-agent-harness"] !== undefined) throw new Error(`${path} must not depend on craft-agent-harness`);
+  for (const [name, version] of Object.entries(dependencies)) {
+    if (name.startsWith("craft-common-") && version !== packageVersion) throw new Error(`${path} ${name} dependency differs from package.json ${packageVersion}`);
+  }
 }
 
 for (const path of ["README.md", "README.en.md"]) {

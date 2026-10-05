@@ -1,5 +1,6 @@
 {
   "name": "craft-workbench-desktop",
+  "version": "0.12.38",
   "private": true,
   "type": "module",
   "scripts": {

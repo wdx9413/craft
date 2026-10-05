@@ -1,0 +1,19 @@
+{
+  "name": "craft-context",
+  "version": "0.12.38",
+  "description": "craft-context governed context and repository tools",
+  "author": {
+    "name": "wdx9413"
+  },
+  "skills": "./skills/",
+  "mcpServers": {
+    "craft-context": {
+      "command": "node",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/dist/plugin/craft-mcp.cjs",
+        "--product",
+        "context"
+      ]
+    }
+  }
+}

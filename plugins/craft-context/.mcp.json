@@ -1,1 +1,13 @@
-{"mcpServers":{"craft-context":{"command":"node","args":["dist/plugin/craft-mcp.cjs","--product","context"],"cwd":"."}}}
+{
+  "mcpServers": {
+    "craft-context": {
+      "command": "node",
+      "args": [
+        "dist/plugin/craft-mcp.cjs",
+        "--product",
+        "context"
+      ],
+      "cwd": "."
+    }
+  }
+}

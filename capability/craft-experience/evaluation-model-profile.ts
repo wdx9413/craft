@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { canonicalJson, stableDigest } from "../../core/digest.ts";
-import { credentialStatus, selectModel, type ModelProviderSpec, type ModelTier } from "../../core/model-gateway.ts";
-import { CraftStore, type JsonObject } from "../../core/infrastructure/store.ts";
+import { canonicalJson, stableDigest } from "../../common/craft-common-base/src/digest.ts";
+import { credentialStatus, selectModel, type ModelProviderSpec, type ModelTier } from "../../common/craft-common-base/src/model-compat.ts";
+import { CraftStore, type JsonObject } from "../../common/craft-common-store-local/src/store.ts";
 
 const PURPOSES = new Set(["evaluation", "workflow_evolution"]);
 const SECRET = /(?:api[_-]?key|authorization|cookie|password|secret|token)\s*[:=]\s*[^\s]{8,}/iu;

@@ -23,7 +23,7 @@ export class DeliveryLoopKernel {
   refresh(args: JsonObject): JsonObject {
     const launch = this.store.get("work_launch", text(args.launch_id, "launch_id")); const run = launch.run_id ? this.store.find("host_run", String(launch.run_id)) : null;
     const assessment = launch.acceptance_plan_id ? this.store.find("acceptance_assessment", `assessment_${launch.acceptance_plan_id}`) : null;
-    const delivery = run && terminal(run.status) ? this.deliveries.observe({ launch_id: launch.id, delivery_id: `delivery_${launch.id}_${run.version}_${assessment?.version ?? 0}` }).delivery as JsonObject : null;
+    const delivery = run && terminal(run.status) ? this.deliveries.observe({ launch_id: launch.id, delivery_id: `delivery_${launch.id}_${launch.version}_${run.version}_${assessment?.version ?? 0}` }).delivery as JsonObject : null;
     const deliveryStatus = String(delivery?.status ?? "awaiting_host"); const guidance = nextAction(deliveryStatus);
     const identity = { launch_id: launch.id, launch_version: launch.version, run_id: run?.id ?? null, run_version: run?.version ?? null, assessment_id: assessment?.id ?? null, assessment_version: assessment?.version ?? null, delivery_id: delivery?.id ?? null, delivery_version: delivery?.version ?? null, delivery_status: deliveryStatus, ...guidance };
     const loopId = String(args.loop_id ?? `delivery_loop_${launch.id}`); const current = this.store.find("delivery_loop", loopId); const stateDigest = digestJson(identity);

@@ -25,7 +25,7 @@ const KINDS = new Set([
   "experience_observation", "experience_pattern", "experience_intervention",
   "workflow_evolution_observation", "workflow_evolution_request", "workflow_evolution_proposal",
   "experience_procedure", "experience_procedure_gate", "experience_skill_export",
-  "project_identity", "scope_alias", "knowledge_source_revision", "knowledge_fragment",
+  "project_identity", "scope_alias", "knowledge_source_revision", "knowledge_document", "knowledge_fragment",
   "knowledge_ingest_candidate", "memory_candidate", "memory_usage_signal", "maintenance_schedule_receipt",
 ]);
 const CONTENT_KINDS: Readonly<Record<string, "knowledge" | "memory" | "experience">> = {
@@ -103,6 +103,7 @@ export class KnowledgeMemoryBundleKernel {
     ]);
     sourceIds.delete("");
     const revisions = this.store.list("knowledge_source_revision", limit, (item) => sourceIds.has(String(item.source_id)));
+    const documents = this.store.list("knowledge_document", limit, item => sourceIds.has(String(item.source_id)));
     const revisionIds = new Set(revisions.map((item) => String(item.id)));
     const fragments = this.store.list("knowledge_fragment", limit, (item) => revisionIds.has(String(item.source_revision_id)));
     const evidence = this.store.list("evidence", limit, (item) => evidenceIds.has(String(item.id)) || revisionIds.has(String(item.source_revision_id)));
@@ -138,6 +139,7 @@ export class KnowledgeMemoryBundleKernel {
       ...aliases.map((record) => this.entry("scope_alias", record)),
       ...sources.map((record) => this.entry("knowledge_source", record)),
       ...revisions.map((record) => this.entry("knowledge_source_revision", record)),
+      ...documents.map(record => this.entry("knowledge_document", record)),
       ...fragments.map((record) => this.entry("knowledge_fragment", record)),
       ...evidence.map((record) => this.entry("evidence", record)),
       ...claims.map((record) => this.entry("knowledge_claim", record)),
@@ -287,7 +289,10 @@ export class KnowledgeMemoryBundleKernel {
     }
     if (entry.kind === "experience_procedure") {
       if (entry.procedure_definition !== undefined) {
-        if (entry.procedure_definition.procedure_id !== entry.id || entry.procedure_definition.procedure_version !== entry.version) throw new Error("Data Bundle Procedure definition identity is invalid");
+        const definitionRef = isObject(next.definition_ref, "Procedure definition reference");
+        // Promotion advances the record version, not its immutable JSON definition.
+        if (entry.procedure_definition.procedure_id !== entry.id || entry.procedure_definition.procedure_version !== definitionRef.procedure_version
+          || entry.procedure_definition.procedure_version > entry.version || stableDigest(entry.procedure_definition) !== definitionRef.digest) throw new Error("Data Bundle Procedure definition identity is invalid");
         const ref = new ProcedureDefinitionStore(this.store.paths).write(entry.procedure_definition, String(next.title ?? entry.id));
         next.definition_ref = ref; next.definition_digest = ref.digest;
       } else if (procedureDefinitionRef(next.definition_ref)) {
@@ -338,7 +343,7 @@ export class KnowledgeMemoryBundleKernel {
   }
 
   private rank(kind: string): number {
-    return ["project_identity", "scope_alias", "knowledge_source", "knowledge_source_revision", "knowledge_fragment", "evidence", "knowledge_claim", "knowledge_claim_support", "memory_ledger", "memory_candidate", "memory_usage_signal", "experience_observation", "experience_pattern", "experience_intervention", "workflow_evolution_observation", "workflow_evolution_request", "workflow_evolution_proposal", "experience_procedure", "experience_procedure_gate", "experience_skill_export"].indexOf(kind) + 1 || 99;
+    return ["project_identity", "scope_alias", "knowledge_source", "knowledge_source_revision", "knowledge_document", "knowledge_fragment", "evidence", "knowledge_claim", "knowledge_claim_support", "memory_ledger", "memory_candidate", "memory_usage_signal", "experience_observation", "experience_pattern", "experience_intervention", "workflow_evolution_observation", "workflow_evolution_request", "workflow_evolution_proposal", "experience_procedure", "experience_procedure_gate", "experience_skill_export", "maintenance_schedule_receipt"].indexOf(kind) + 1;
   }
 
   private transportReceipt(operation: "write" | "read", transport: string, root: string, fileName: string, bundleDigest: string): JsonObject {

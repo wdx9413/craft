@@ -57,10 +57,12 @@ export class ScopeIdentityKernel {
     const identity = projectIdentityFromRoot(root, typeof args.project_id === "string" ? args.project_id : undefined);
     const canonical = identity.canonical_scope as ScopeRef;
     const projectId = canonical.id;
-    const existing = this.store.find("project_identity", projectId);
-    const saved = existing ?? this.store.create("project_identity", projectId, { ...identity, identity_digest: stableDigest({ canonical, project_kind: identity.project_kind, remote_digest: identity.remote_digest }) });
-    const alias = this.bindAlias({ scope_kind: "project", scope_id: projectId, alias_kind: "path", alias: identity.local_path_alias });
-    return { identity: saved, alias: alias.alias, idempotent: Boolean(existing) && alias.idempotent === true };
+    return this.store.transaction(() => {
+      const existing = this.store.find("project_identity", projectId);
+      const saved = existing ?? this.store.create("project_identity", projectId, { ...identity, identity_digest: stableDigest({ canonical, project_kind: identity.project_kind, remote_digest: identity.remote_digest }) });
+      const alias = this.bindAlias({ scope_kind: "project", scope_id: projectId, alias_kind: "path", alias: identity.local_path_alias });
+      return { identity: saved, alias: alias.alias, idempotent: Boolean(existing) && alias.idempotent === true };
+    });
   }
 
   bindAlias(args: JsonObject): JsonObject {
@@ -68,12 +70,14 @@ export class ScopeIdentityKernel {
     if (scopeKind !== "project" || !scopeId || !alias || !new Set<ScopeAliasKind>(["path", "legacy", "git_remote", "user_named"]).has(aliasKind as ScopeAliasKind)) throw new Error("Scope Alias is invalid");
     const id = `scope_alias_${hash(canonicalJson({ scopeKind, scopeId, aliasKind, alias }))}`;
     const identity = { scope: { kind: scopeKind, id: scopeId }, alias_kind: aliasKind, alias, alias_digest: stableDigest(alias) };
-    const existing = this.store.find("scope_alias", id);
-    if (existing) {
-      if (existing.identity_digest !== stableDigest(identity)) throw new Error("Scope Alias idempotency conflict");
-      return { alias: existing, idempotent: true };
-    }
-    return { alias: this.store.create("scope_alias", id, { ...identity, identity_digest: stableDigest(identity), status: "active" }), idempotent: false };
+    return this.store.transaction(() => {
+      const existing = this.store.find("scope_alias", id);
+      if (existing) {
+        if (existing.identity_digest !== stableDigest(identity)) throw new Error("Scope Alias idempotency conflict");
+        return { alias: existing, idempotent: true };
+      }
+      return { alias: this.store.create("scope_alias", id, { ...identity, identity_digest: stableDigest(identity), status: "active" }), idempotent: false };
+    });
   }
 
   /** Bind known historical scope ids without destroying their source records. */

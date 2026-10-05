@@ -397,7 +397,7 @@ test("MCP stdio default runtime accepts buffered initialization", async () => {
     const serving = serveMcpStdio({ mode: "full", input, write: (line) => output.push(line) });
     input.end('{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}\n');
     await serving;
-    assert.equal((JSON.parse(output[0]) as { result: { serverInfo: { version: string } } }).result.serverInfo.version, "0.12.37");
+    assert.equal((JSON.parse(output[0]) as { result: { serverInfo: { version: string } } }).result.serverInfo.version, "0.12.38");
   } finally { if (original === undefined) delete process.env.CRAFT_DATA_DIR; else process.env.CRAFT_DATA_DIR = original; await rm(root, { recursive: true, force: true }); }
 });
 
@@ -437,4 +437,10 @@ test("MCP server mounts one domain surface and rejects tools outside it", async 
     const outside = await server.handle({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "craft_source_add", arguments: {} } });
     assert.equal((outside?.error as { code: number }).code, -32602);
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("stdio initialization failure closes its reader instead of leaving clients waiting forever", async () => {
+  const input = new PassThrough();
+  await assert.rejects(serveMcpStdio({ mode: "core", input, write: () => assert.fail("no response before initialization"), start: async () => { throw new Error("fixture startup failure"); } }), /fixture startup failure/);
+  assert.equal(input.isPaused(), true); input.destroy();
 });

@@ -17,6 +17,31 @@ async function fixture(name: string, executor: CodexExecutor) {
 const success: CodexExecutor = async () => ({ exitCode: 0, signal: null, stderr: "progress", timedOut: false, outputLimited: false,
   stdout: [JSON.stringify({ type: "thread.started", thread_id: "thread-1" }), JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "done" } }), JSON.stringify({ type: "turn.completed", usage: { input_tokens: 2, output_tokens: 1 } })].join("\n") });
 
+test("Codex terminal receipts reject absent, contradictory, interrupted, and truncated completion", async () => {
+  const f = await fixture("terminal-contract", success);
+  try {
+    const completed = { type: "turn.completed" };
+    const cases = [
+      { name: "empty", events: [] },
+      { name: "failed", events: [{ type: "turn.failed" }] },
+      { name: "error-before-completion", events: [{ type: "error" }, completed] },
+      { name: "failed-before-completion", events: [{ type: "turn.failed" }, completed] },
+      { name: "duplicate-completion", events: [completed, completed] },
+      { name: "trailing-event", events: [completed, { type: "item.completed" }] },
+      { name: "cancelled", events: [completed], cancelled: true },
+      { name: "truncated", events: [completed], outputLimited: true },
+      { name: "signalled", events: [completed], signal: "SIGTERM" as NodeJS.Signals },
+    ];
+    for (const item of cases) {
+      const driver = new CodexHostKernel(f.store, async () => ({ exitCode: 0, signal: null, stderr: "", timedOut: false, outputLimited: false, ...item, stdout: item.events.map(event => JSON.stringify(event)).join("\n") }));
+      driver.prepare({ dispatch_id: item.name, task_id: f.task.id, workspace: f.root, prompt: "inspect" });
+      const result = await driver.execute({ dispatch_id: item.name, prompt: "inspect" });
+      assert.equal((result.receipt as JsonObject).status, "failed", item.name);
+      assert.equal((await driver.execute({ dispatch_id: item.name, prompt: "inspect" })).idempotent, true);
+    }
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
 test("Codex Host Driver prepares exact read-only work and records JSONL receipts", async () => {
   const f = await fixture("read", success);
   try {
@@ -102,4 +127,15 @@ test("Codex process executor uses argv without a shell and bounds or terminates 
   const controller = new AbortController(); const cancelled = executeCodex({ executable: process.execPath, argv: ["-e", "setInterval(()=>{},1000)"], cwd: process.cwd(), stdin: "", timeoutMs: 2000, outputLimit: 100, signal: controller.signal }); controller.abort(); assert.equal((await cancelled).cancelled, true);
   const preCancelled = new AbortController(); preCancelled.abort(); assert.equal((await executeCodex({ executable: process.execPath, argv: ["-e", "setInterval(()=>{},1000)"], cwd: process.cwd(), stdin: "", timeoutMs: 2000, outputLimit: 100, signal: preCancelled.signal })).cancelled, true);
   await assert.rejects(executeCodex({ executable: "craft-command-that-does-not-exist", argv: [], cwd: process.cwd(), stdin: "", timeoutMs: 100, outputLimit: 100 }));
+});
+
+test("Host stdin failures settle after child exit and preserve cancellation and timeout", async () => {
+  const request = { executable: process.execPath, argv: ["-e", "process.exit(0)"], cwd: process.cwd(),
+    stdin: "x".repeat(8 * 1024 * 1024), timeoutMs: 2_000, outputLimit: 100 };
+  await assert.rejects(executeCodex(request), /EPIPE|ECONNRESET/u);
+  const controller = new AbortController(); controller.abort();
+  const cancelled = await executeCodex({ ...request, signal: controller.signal });
+  assert.equal(cancelled.cancelled, true);
+  const timeout = await executeCodex({ ...request, argv: ["-e", "setInterval(()=>{},1000)"], timeoutMs: 5 });
+  assert.equal(timeout.timedOut, true);
 });

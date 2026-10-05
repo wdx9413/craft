@@ -1,42 +1,23 @@
-# Craft Codebase：显式、只读的代码库结构分析
+# Craft Codebase：自动准备、只读的代码库结构分析
 
-`craft-codebase` 是完整内部 Craft 的可选 Capability。它回答的是“在一个指定 Workspace
-checkpoint 下，哪些文件、符号、导入和静态调用候选存在”；它不是 Knowledge、Memory、Experience
-的第四个累积成员，也不会默认成为 Host 的上下文。
+Codebase 提供独立 Skill/MCP 产品，也包含在默认 Craft Context 聚合产品中。它查询固定 Workspace checkpoint 的结构事实，代码引用与 Knowledge、Memory、Experience 一起按预算提供；代码正文不会自动转成累积知识或记忆。
 
-## 启用与查询
+## 使用合同
 
-调用方必须先创建 Craft Workspace 与 checkpoint，再显式调用：
+普通仓库任务调用 `craft_codebase_repository_ensure`，或聚合入口 `craft_context_open`：自动识别 Git 根目录、建立或复用基础索引，不需要用户逐仓库激活。忽略规则、退出配置、缓存与预算见 [Craft Context](craft-context.md)。
 
-1. `craft_codebase_activate`：仅记录对该 Workspace 的只读分析授权，不扫描文件；
-2. `craft_codebase_index_build`：仅从指定 checkpoint 的快照副本构建索引；
-3. `craft_codebase_symbol_find`、`craft_codebase_callers_find`、`craft_codebase_impact_query` 或
-   `craft_codebase_context_slice`：查询同一个 ready revision；
-4. `craft_codebase_deactivate`：停止查询。已存在索引保留为本地记录，但不会再被使用。
+高级范围控制保留 `craft_codebase_workspace_open` 指定 root 和 include_paths，`craft_codebase_activate` 启用；`craft_codebase_refresh` 创建当前 checkpoint 并构建索引。已有 checkpoint 可直接 `craft_codebase_index_build`。symbol_find、callers_find、impact_query、context_slice 必须引用同一 ready index。新 checkpoint 使旧索引 stale；deactivate 停止查询，自动入口不会擅自重新启用。
 
-`context_slice` 返回路径、source digest、source span 和 node id，**不返回源码正文**；Host 若要
-读取正文，仍必须通过原有 Workspace/Policy 路径。在新的 checkpoint 成为 Workspace 的最新
-checkpoint 后，旧 revision 一律是 `stale`，查询失败关闭，直到显式重新 build。
+查询返回路径、UTF-16 span、digest、node 和 receipt，不返回正文。工作树漂移不能用当前文件冒充历史快照。影响查询是有界静态候选集，不能作为运行时路径或发布安全证明。
 
-## 当前内置分析器边界
+## 分析器
 
-首期分析器是 `builtin-regex-static-v1`：它只处理 TS/JS 文件的基础声明、相对导入及调用候选。
-导入边带 `provenance=extracted` / `confidence=high`；调用边带
-`provenance=heuristic` / `confidence=partial`。未解析 import、歧义调用和不支持文件会出现在
-diagnostics，不能被解释为“没有影响”。`impact` 始终是静态候选范围，绝不是运行时路径、发布安全
-结论或安全审计。
+自动入口默认基础分析，按文件持久缓存文件及常见声明，不推断调用关系。按需使用 `index_depth: "semantic"` 或高级 `craft_codebase_index_build` 时，TS/JS 使用 TypeScript checker，在仅含 checkpoint 文件的内存 CompilerHost 中解析别名、导入、函数和方法调用。不会读取仓库外文件或执行项目代码。支持进程内文件解析缓存，最多 2,000 文件、2,000 万字符、10,000 节点和 20,000 边。缺少外部依赖、动态调用等保留 unresolved；`analyzer: "heuristic"` 是显式旧分析器降级。
 
-每个 index 和 query receipt 都携带 `analysis`：解析器、`certainty=partial`、明确允许路径的
-scope digest、支持/未支持文件数、语言集合和诊断数。`craft_codebase_status` 的 `readiness` 明确
-区分 `disabled`、`index_required`、`ready` 与 `rebuild_required`；它是 codebase 的首跑诊断，
-不能把“已安装”误说成“已完成语义分析”。
+Python 适配器见 [脚本](../../../scripts/codebase/analyze-python.py)，固定 Jedi 0.19.2，输入显式 checkpoint documents，输出 `craft-static-analysis-v1`。LSP adapter 接收 DocumentSymbol 和显式关系：calls/imports/references/implements/type_definition。只提供符号时不会猜调用关系。其他语言可通过同一 analysis_import 合同接成熟分析器。
 
-没有 Serena、GitNexus、网络、shell、watcher、Hook 安装、代码写入或外部 effect。外部分析器要以
-显式 Capability Adapter 接入，并将其版本、健康状态、允许 root 与结果重新绑定到同一个 checkpoint
-revision；在那之前，`craft-codebase` 不宣称使用了已安装的 Serena。
+导入校验文件归属、source_digest、UTF-16 span、节点引用和大小预算；analyzer/version 随索引固定。外部事实标为 adapter_reported/partial，不能证明分析器真实运行或完整覆盖动态行为。
 
-## 发布边界
+## 限制
 
-此 Capability 没有 `product` 投影，也不改变 `craft-knowledge`、`craft-memory`、
-`craft-experience` 三个外发产品。它仅出现在完整 Craft 的 full MCP surface；组件 surface、
-Marketplace 与 common-use 均不会自动得到 `craft_codebase_*` 工具。
+当前图仍按有界 index record 保存，尚无大仓持久分片索引；超限需缩小 include_paths。TS 缓存只复用解析树，checkpoint 变化仍重新绑定与建图。Python、TS 的合成项目验证不等于所有真实项目 precision/recall 达标。Hook 不参与分析必要链路；安装状态不等于当前 Host 会话已完成真实调用。

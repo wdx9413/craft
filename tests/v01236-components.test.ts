@@ -41,7 +41,7 @@ test("v0.12.37 records actual keyword fallback when an eligible vector adapter h
     const resolved = await f.service.contextResolutionResolve({ receipt_id: "vector-fallback", query: "retrieval", scope_kind: "project", scope_id: "p", retrieval_adapter_id: "vector" });
     const receipt = resolved.receipt as JsonObject;
     assert.equal(((receipt.retrieval_execution as JsonObject).used), "keyword");
-    assert.equal(((receipt.retrieval_execution as JsonObject).unavailable_reason), "embedding_provider_unavailable");
+    assert.equal(((receipt.retrieval_execution as JsonObject).unavailable_reason), "retrieval_evaluation_required");
   } finally { await dispose(f); }
 });
 
@@ -54,7 +54,7 @@ test("v0.12.37 keeps hybrid unavailable until its embedding provider can really 
     f.service.retrievalAdapterEvaluate({ adapter_id: configured.id, metrics: { recall: 1, cross_project_leak_count: 0, latency_ms: 1, cost_usd: 0 } });
     const result = await f.service.contextResolutionResolve({ receipt_id: "hybrid-receipt", query: "focused tests", scope_kind: "project", scope_id: "project:hybrid", retrieval_adapter_id: configured.id }) as JsonObject;
     assert.equal((result.receipt as JsonObject).retrieval_mode, "keyword");
-    assert.equal(((result.receipt as JsonObject).retrieval_execution as JsonObject).unavailable_reason, "embedding_provider_unavailable");
+    assert.equal(((result.receipt as JsonObject).retrieval_execution as JsonObject).unavailable_reason, "retrieval_evaluation_required");
     assert.equal(((result.items as JsonObject[])[0]).reason, "keyword_bm25");
   } finally { await dispose(f); }
 });
@@ -185,19 +185,20 @@ test("eligible vector retrieval persists safe configuration, caches embeddings, 
     f.service.memoryLedgerRemember({ memory_id: "vector-memory", source_id: "builtin.evidence-wiki", kind: "preference", scope_kind: "project", scope_id: "p", content: "alpha retrieval uses evidence." });
     const adapter = f.service.retrievalAdapterConfigure({ adapter_id: "vector-success", strategy: "vector", provider_fingerprint: "fixture-v1", configuration: { endpoint: "https://fixture.local/embeddings", model: "fixture-embed", credential_env: "CRAFT_VECTOR_TEST_KEY" } }).adapter as JsonObject;
     assert.equal(((adapter.configuration as JsonObject).model), "fixture-embed");
-    f.service.retrievalAdapterEvaluate({ adapter_id: adapter.id, metrics: { recall: 1, cross_project_leak_count: 0, latency_ms: 1, cost_usd: 0 } });
+    const dataset = { documents: [{ id: "a", body: "alpha", scope: "p" }], cases: [{ query: "alpha", scope: "p", expected_ids: ["a"] }] };
+    await f.service.retrievalAdapterEvaluate({ adapter_id: adapter.id, dataset }); calls = 0;
     const first = await f.service.contextResolutionResolve({ receipt_id: "vector-success-one", query: "alpha", scope_kind: "project", scope_id: "p", retrieval_adapter_id: adapter.id });
     const second = await f.service.contextResolutionResolve({ receipt_id: "vector-success-two", query: "alpha", scope_kind: "project", scope_id: "p", retrieval_adapter_id: adapter.id });
     assert.equal(((first.receipt as JsonObject).retrieval_execution as JsonObject).used, "vector");
     assert.equal(((second.receipt as JsonObject).retrieval_execution as JsonObject).used, "vector"); assert.equal(calls, 1);
     const hybrid = f.service.retrievalAdapterConfigure({ adapter_id: "hybrid-success", strategy: "hybrid", provider_fingerprint: "fixture-v1", configuration: { endpoint: "https://fixture.local/embeddings", model: "fixture-embed", credential_env: "CRAFT_VECTOR_TEST_KEY" } }).adapter as JsonObject;
-    f.service.retrievalAdapterEvaluate({ adapter_id: hybrid.id, metrics: { recall: 1, cross_project_leak_count: 0, latency_ms: 1, cost_usd: 0 } });
+    await f.service.retrievalAdapterEvaluate({ adapter_id: hybrid.id, dataset });
     const hybridResult = await f.service.contextResolutionResolve({ receipt_id: "hybrid-success", query: "alpha", scope_kind: "project", scope_id: "p", retrieval_adapter_id: hybrid.id });
     assert.equal(((hybridResult.receipt as JsonObject).retrieval_execution as JsonObject).used, "hybrid");
     assert.equal(((hybridResult.items as JsonObject[])[0]).reason, "hybrid_rrf");
-    globalThis.fetch = async () => { throw new Error("network_failure"); };
     const failed = f.service.retrievalAdapterConfigure({ adapter_id: "vector-failure", strategy: "vector", provider_fingerprint: "fixture-v2", configuration: { endpoint: "https://fixture.local/failure", model: "fixture-embed-v2", credential_env: "CRAFT_VECTOR_TEST_KEY" } }).adapter as JsonObject;
-    f.service.retrievalAdapterEvaluate({ adapter_id: failed.id, metrics: { recall: 1, cross_project_leak_count: 0, latency_ms: 1, cost_usd: 0 } });
+    await f.service.retrievalAdapterEvaluate({ adapter_id: failed.id, dataset });
+    globalThis.fetch = async () => { throw new Error("network_failure"); };
     for (const receipt_id of ["failure-one", "failure-two", "failure-three"]) await f.service.contextResolutionResolve({ receipt_id, query: "alpha", scope_kind: "project", scope_id: "p", retrieval_adapter_id: failed.id });
     const opened = await f.service.contextResolutionResolve({ receipt_id: "failure-open", query: "alpha", scope_kind: "project", scope_id: "p", retrieval_adapter_id: failed.id });
     assert.equal(((opened.receipt as JsonObject).retrieval_execution as JsonObject).unavailable_reason, "embedding_circuit_open");

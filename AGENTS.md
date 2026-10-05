@@ -19,8 +19,8 @@
 
 ### Craft 子能力
 
-- 每次任务开始和结束，优先复用可信 Craft Hook；Hook 不可用时，分别调用 `craft-knowledge`、`craft-memory`、`craft-experience`。
-- `craft-codebase`：仅在需要 checkpoint 固定的符号、静态调用方或候选影响范围时调用；局部文件修改和运行时判断使用常规源码、测试与诊断工具。
+- 每次任务开始和结束，优先复用可信 Craft Hook 回执；无匹配回执时优先使用 `craft-context`，未安装聚合入口时分别调用 `craft-knowledge`、`craft-memory`、`craft-experience`。同一任务复用已有匹配回执，避免重复召回。
+- `craft-codebase`：仓库任务开始时自动识别仓库、建立或复用基础索引；聚合入口已准备索引时直接复用。需要静态调用方或候选影响范围时再请求语义分析；运行时判断继续使用源码、测试与诊断工具。
 
 ## 测试策略
 

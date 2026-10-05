@@ -171,3 +171,48 @@ test("the internal host's loop-only exports are exactly the workspace pair", () 
   assert.deepEqual(INTERNAL_ONLY_TOOLS.map((definition) => definition.function.name),
     ["workspace_read", "workspace_write"]);
 });
+
+test("resource and terminal verb boundaries cannot be confused with read-looking prefixes", () => {
+  for (const name of ["craft_search_publish", "craft_get_approve", "craft_preview_unknown", "craft_read_execute"]) {
+    assert.equal(classifyTool(name), "governed", name);
+  }
+  for (const resource of ["credential", "secret", "sandbox", "docker", "egress", "isolation", "isolated"]) {
+    assert.equal(classifyTool(`craft_${resource}_get`), "forbidden");
+    assert.equal(classifyTool(`craft_project_${resource}_search`), "forbidden");
+  }
+  assert.equal(classifyTool("craft_secretary_get"), "read", "resource matching uses whole segments");
+  assert.equal(classifyTool("craft_publish_preview"), "read", "the terminal verb decides non-forbidden resources");
+});
+
+test("each projection rechecks both the live catalog and live dispatchable actions", () => {
+  const search = tool("craft_alpha_search", "Search.");
+  const publish = tool("craft_beta_publish", "Publish.");
+  let catalog: readonly Tool[] = [search, publish];
+  let answerable = new Set(["alpha_search", "beta_publish"]);
+  let catalogReads = 0; let routeReads = 0;
+  const project = () => internalToolDefinitions(() => { catalogReads++; return catalog; }, DEFAULT_INTERNAL_AUTHORIZATION, [],
+    () => { routeReads++; return answerable; }).map(item => item.function.name);
+  assert.deepEqual(project(), ["alpha_search"], "being dispatchable does not grant a governed tier");
+  answerable = new Set(["beta_publish"]);
+  assert.deepEqual(project(), [], "revoked dispatchability removes the formerly advertised read");
+  answerable = new Set(["alpha_search"]); catalog = [publish];
+  assert.deepEqual(project(), [], "a stale route does not restore a removed catalog entry");
+  catalog = [search];
+  assert.deepEqual(project(), ["alpha_search"]);
+  assert.equal(catalogReads, 4); assert.equal(routeReads, 4);
+});
+
+test("projection preserves frozen catalog, authorization and extras without replacing canonical definitions", () => {
+  const source = tool("craft_alpha_get", "Canonical.", ["query"], true);
+  Object.freeze(source.inputSchema); Object.freeze(source);
+  const catalog = Object.freeze([source]);
+  const authorization = Object.freeze(["read"] as const);
+  const extra: ChatToolDefinition = Object.freeze({ type: "function", function: Object.freeze({ name: "alpha_get", description: "Shadow." }) });
+  const extras = Object.freeze([extra]);
+  const before = JSON.stringify({ catalog, authorization, extras });
+  const result = internalToolDefinitions(() => catalog, authorization, extras);
+  assert.equal(result.length, 1);
+  assert.equal(result[0].function.description, "Canonical.");
+  assert.deepEqual(parametersOf(result[0]).required, ["query"]);
+  assert.equal(JSON.stringify({ catalog, authorization, extras }), before);
+});

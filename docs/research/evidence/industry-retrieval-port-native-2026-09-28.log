@@ -1,0 +1,46 @@
+(node:80879) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:80879) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+✔ shared ranking prevents weak Memory starving Knowledge; required items and aggregate budgets hold (42.842625ms)
+✔ history returns revoked/expired versions diagnostically; as-of uses recorded knowledge and current ACL (24.868542ms)
+✔ ingestion keeps unchanged review, invalidates edits/deletions, and exposes cursor drift (35.68925ms)
+✔ persisted vector cache survives adapter instances; batches are bounded and dimension failures fall back (25.439083ms)
+✔ retrieval eligibility requires executed labelled results, not caller-reported scores (18.76225ms)
+✔ compiler resolves imports, aliases and methods without matching comments, strings or unrelated same names (33.578167ms)
+✔ MCP initialize, tool list and readiness expose one actual schema fingerprint (22.104333ms)
+✔ LSP relations retain real endpoints and reject dangling, malformed or out-of-range facts (0.6875ms)
+✔ changed document guards remain fail-closed even if a stale claim is externally marked reviewed (12.403292ms)
+✔ scoped maintenance proposes actionable versioned work; verified feedback only breaks relevance ties (16.609542ms)
+✔ keyword dataset grading measures missed queries, validates scopes and can run through MCP (24.453833ms)
+✔ vector disk cache works in a fresh process; provider usage, cache writes and resource bounds fail closed (271.260708ms)
+✔ retrieval evaluation rejects adapter drift and records unavailable embedded-process fingerprint (19.926333ms)
+✔ source ingestion caps total bytes and files before persisting a partial manifest (1649.252583ms)
+✔ ablation preparation uses real campaign slots, requires curated cases and never fabricates results (2377.912375ms)
+✔ history reads all recorded versions within budget and scoped document bundles preserve freshness guards (42.592208ms)
+✔ compiler refuses oversized graphs, handles incomplete declarations and bounds its parsed-file cache (250.616292ms)
+✔ unmatched governed claims and sparse contribution descriptors do not invent lexical matches (19.574292ms)
+✔ compiler IO cannot reach working files or emit artifacts; warm binding observes a changed dependency (26.202041ms)
+✔ temporal retrieval excludes future and invalid dates without destroying historical events (0.308084ms)
+✔ temporal retrieval keeps conflicts explicit and deterministically selects equivalent revisions (0.142041ms)
+✔ keyword retrieval is local, bounded to supplied documents and stable on score ties (0.193167ms)
+✔ embedding retrieval rejects malformed vectors and never caches a partial invalid response (9.576458ms)
+✔ embedding retrieval respects indexed order, deduplicates inputs, caches valid vectors and rejects dimension drift (1.774792ms)
+✔ embedding unavailability never pretends vector execution or leaks a provider error body (0.844083ms)
+ℹ tests 25
+ℹ suites 0
+ℹ pass 25
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5641.39875
+ℹ start of coverage report
+ℹ -------------------------------------------------------------------
+ℹ file               | line % | branch % | funcs % | uncovered lines
+ℹ -------------------------------------------------------------------
+ℹ core               |        |          |         | 
+ℹ  retrieval-port.ts | 100.00 |   100.00 |  100.00 | 
+ℹ -------------------------------------------------------------------
+ℹ all files          | 100.00 |   100.00 |  100.00 | 
+ℹ -------------------------------------------------------------------
+ℹ end of coverage report

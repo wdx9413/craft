@@ -64,7 +64,14 @@ export class CodexHostKernel implements HostDriver {
     let result: CodexExecutionResult;
     try { result = await this.executor({ executable: "codex", argv, cwd: String(dispatch.workspace), stdin: prompt, timeoutMs: Number(dispatch.timeout_ms), outputLimit: Number(dispatch.output_limit), signal: options.signal, observe: options.observe }); }
     catch (error) { result = { exitCode: null, signal: null, stdout: "", stderr: error instanceof Error ? error.message : "Codex process failed", timedOut: false, cancelled: options.signal?.aborted ?? false, outputLimited: false }; }
-    const parsed = parseEvents(result.stdout); const status = result.exitCode === 0 && !result.timedOut && parsed.invalidLines === 0 ? "completed" : "failed";
+    const parsed = parseEvents(result.stdout);
+    // Process success is not a Host terminal fact. A single successful terminal
+    // must end an intact stream, with no failure or interrupted transport.
+    const completed = parsed.events.filter(event => event.type === "turn.completed");
+    const failed = parsed.events.some(event => event.type === "turn.failed" || event.type === "error");
+    const status = result.exitCode === 0 && !result.timedOut && !result.cancelled && !result.outputLimited
+      && result.signal === null && parsed.invalidLines === 0 && !failed
+      && completed.length === 1 && parsed.events.at(-1) === completed[0] ? "completed" : "failed";
     const receiptPayload = { dispatch_id: dispatch.id, task_id: dispatch.task_id, host: "codex-cli", sandbox: dispatch.sandbox, model: dispatch.model, model_fingerprint: digestJson({ model: dispatch.model }), evaluation_mode: dispatch.evaluation_mode === true, status, exit_code: result.exitCode, signal: result.signal, timed_out: result.timedOut, cancelled: result.cancelled ?? false, output_limited: result.outputLimited, invalid_jsonl_lines: parsed.invalidLines, event_count: parsed.events.length, event_types: [...new Set(parsed.events.map((event) => String(event.type)))], thread_id: parsed.threadId, final_message: parsed.finalMessage, usage: parsed.usage, stderr_digest: digestJson(result.stderr), completed_at: new Date().toISOString() };
     const directory = join(this.store.paths.artifactsDir, "codex"); await mkdir(directory, { recursive: true }); const receiptPath = join(directory, `${dispatch.id}.json`); await writeFile(receiptPath, `${JSON.stringify(receiptPayload, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
     const receipt = this.store.create("codex_receipt", `receipt_${dispatch.id}`, { ...receiptPayload, uri: pathToFileURL(receiptPath).toString(), digest: digestJson(receiptPayload) });

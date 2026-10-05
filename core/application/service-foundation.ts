@@ -1,5 +1,6 @@
 import { Catalog } from "../catalog.ts";
 import { CraftStore, type JsonObject } from "../infrastructure/store.ts";
+import { CraftTelemetry, StoreTelemetrySink } from "../../common/craft-common-log/src/index.ts";
 import type { EmbeddingProvider } from "../semantic.ts";
 import { LocalIsolatedAdapter } from "../isolated.ts";
 import { WorkspaceState } from "../workspace.ts";
@@ -37,7 +38,7 @@ import { GenericCliHostKernel } from "../generic-driver.ts";
 import { HostRunKernel } from "../host-run.ts";
 import { type HostProfile, mergeHostProfiles } from "../host-registry.ts";
 import { InternalHostDriver } from "../internal-host-driver.ts";
-import { canonicalToolCatalog } from "../interfaces/canonical-tools.ts";
+import { canonicalToolCatalog } from "../mcp/canonical-tools.ts";
 import { MetricsKernel } from "../metrics.ts";
 import { PROVIDER_CATALOG, specsFromModels, type ModelProviderSpec, type ModelTransport } from "../model-gateway.ts";
 import { loadSettingsSync } from "../settings.ts";
@@ -163,6 +164,7 @@ import { WorkCoordinator } from "./coordinators/work-coordinator.ts";
 import { RuntimeCoordinator } from "./coordinators/runtime-coordinator.ts";
 import { EvaluationCoordinator } from "./coordinators/evaluation-coordinator.ts";
 import { WorkspaceCoordinator } from "./coordinators/workspace-coordinator.ts";
+import { ProcedureInvocationKernel } from "./procedure-invocation.ts";
 import { DurableActionLoopKernel } from "../durable-action-loop.ts";
 import type { ExperienceLedgerKernel } from "../../capability/craft-experience/experience-ledger.ts";
 import type { ProcedureStore } from "../../capability/craft-experience/procedure-projection.ts";
@@ -332,6 +334,7 @@ export abstract class ServiceFoundation {
   readonly releaseQualifications: ReleaseQualificationKernel;
   readonly verificationPlane: VerificationPlane;
   readonly durableActionLoops: DurableActionLoopKernel;
+  readonly procedureInvocations: ProcedureInvocationKernel;
   readonly experienceLedger: ExperienceLedgerKernel;
   readonly experienceProcedures: ProcedureStore;
   readonly evaluationModelProfiles: EvaluationModelProfileKernel;
@@ -482,6 +485,7 @@ export abstract class ServiceFoundation {
     const capabilities = buildCapabilityRegistry(CRAFT_CAPABILITIES, {
       [CORE_KERNELS.store]: store,
       [CORE_KERNELS.modelProviders]: this.modelProviders,
+      [CORE_KERNELS.telemetry]: new CraftTelemetry(new StoreTelemetrySink(store)),
     });
     this.knowledgeLaunch = capabilities.registry.require<KnowledgeBoundLaunchKernel>(KNOWLEDGE_KERNELS.boundLaunch);
     this.knowledgeWorkbench = capabilities.registry.require<KnowledgeWorkbenchKernel>(KNOWLEDGE_KERNELS.workbench);
@@ -628,6 +632,7 @@ export abstract class ServiceFoundation {
     this.traceExplorer = new TraceExplorerKernel(store);
     this.actionGateway = new ActionGatewayKernel(store, store.paths.root);
     this.acceptanceGates = new AcceptanceGateKernel(store);
+    this.procedureInvocations = new ProcedureInvocationKernel(store, this.durableActionLoops, this.acceptanceGates);
     this.durableWorker = new DurableWorkerKernel(store);
     this.providerRouter = new ProviderRouterKernel(store);
     this.a2aProtocol = new A2AProtocolKernel();

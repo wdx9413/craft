@@ -265,6 +265,8 @@ test("every guard operator is enforced, and a non-numeric actual is outside the 
     assert.equal(run({ rows: 1, workers: 1, retries: 0, env: "eval" }).guard_violation, "workers");
     assert.equal(run({ rows: 1, workers: 2, retries: 1, env: "eval" }).guard_violation, "retries");
     assert.equal(run({ rows: 1, workers: 2, retries: 0, env: "prod" }).guard_violation, "env");
+    // prod is rejected by the safety floor before the learned guard runs.
+    assert.equal(run({ rows: 1, workers: 2, retries: 0, env: "staging" }).guard_violation, "env");
     // A field present but not a number cannot satisfy a comparison, so it is outside.
     assert.equal(run({ rows: "100", workers: 2, retries: 0, env: "eval" }).guard_violation, "rows");
     // Omitting the context entirely is not "no bounds apply": every declared field is

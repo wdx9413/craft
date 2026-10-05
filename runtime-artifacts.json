@@ -1,0 +1,81 @@
+{
+  "npm_files": [
+    "bin",
+    "core",
+    "capability",
+    "common",
+    "dist/core",
+    "dist/capability",
+    "dist/common",
+    "dist/bin",
+    "dist/plugin",
+    "dist/adapters",
+    "workbench",
+    "skills",
+    "adapters",
+    "assets/ocr",
+    "runtime-artifacts.json",
+    "plugins",
+    ".claude-plugin",
+    "README.md",
+    "README.en.md",
+    "LICENSE",
+    "docs",
+    "scripts/codebase",
+    "scripts/eval"
+  ],
+  "desktop_copies": [
+    {
+      "source": "dist/core",
+      "target": "dist/core"
+    },
+    {
+      "source": "dist/capability",
+      "target": "dist/capability"
+    },
+    {
+      "source": "dist/common",
+      "target": "dist/common"
+    },
+    {
+      "source": "dist/bin",
+      "target": "dist/bin"
+    },
+    {
+      "source": "workbench",
+      "target": "dist/workbench"
+    },
+    {
+      "source": "assets/ocr",
+      "target": "assets/ocr"
+    },
+    {
+      "source": "package.json",
+      "target": "package.json"
+    },
+    {
+      "source": "adapters/windows-vision-cli.ts",
+      "target": "adapters/windows-vision-cli.ts"
+    },
+    {
+      "source": "adapters/windows-vision-native.ps1",
+      "target": "adapters/windows-vision-native.ps1"
+    },
+    {
+      "source": "adapters/browser-cdp.ts",
+      "target": "adapters/browser-cdp.ts"
+    },
+    {
+      "source": "adapters/browser-cdp-cli.ts",
+      "target": "adapters/browser-cdp-cli.ts"
+    },
+    {
+      "source": "adapters/cdp-session.ts",
+      "target": "adapters/cdp-session.ts"
+    },
+    {
+      "source": "adapters/windows-uia.ps1",
+      "target": "adapters/windows-uia.ps1"
+    }
+  ]
+}

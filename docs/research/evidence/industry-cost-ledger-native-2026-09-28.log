@@ -1,0 +1,50 @@
+(node:80921) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:80921) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+✔ cost ledger rejects missing, coerced and unsafe metrics before writing (15.02475ms)
+✔ cost ledger keeps explicit zero and scoped totals distinct from missing metrics (17.165834ms)
+✔ cost report marks each invalid historical metric unavailable without changing records (9.723208ms)
+✔ cost report does not return overflowed cost or unsafe token sums (8.076167ms)
+✔ cost report distinguishes an exact limit from a truncated project ledger (234.882583ms)
+✔ cost ledger refuses non-finite calculated costs without partial writes (8.809208ms)
+✔ usage pins the exact historical price version and content across price updates (9.37275ms)
+✔ usage refuses malformed historical price rates before creating a ledger record (11.175458ms)
+✔ shared ranking prevents weak Memory starving Knowledge; required items and aggregate budgets hold (16.939208ms)
+✔ history returns revoked/expired versions diagnostically; as-of uses recorded knowledge and current ACL (13.940708ms)
+✔ ingestion keeps unchanged review, invalidates edits/deletions, and exposes cursor drift (23.575458ms)
+✔ persisted vector cache survives adapter instances; batches are bounded and dimension failures fall back (22.32825ms)
+✔ retrieval eligibility requires executed labelled results, not caller-reported scores (12.196792ms)
+✔ compiler resolves imports, aliases and methods without matching comments, strings or unrelated same names (30.136792ms)
+✔ MCP initialize, tool list and readiness expose one actual schema fingerprint (24.787041ms)
+✔ LSP relations retain real endpoints and reject dangling, malformed or out-of-range facts (0.699583ms)
+✔ changed document guards remain fail-closed even if a stale claim is externally marked reviewed (10.033792ms)
+✔ scoped maintenance proposes actionable versioned work; verified feedback only breaks relevance ties (14.9515ms)
+✔ keyword dataset grading measures missed queries, validates scopes and can run through MCP (19.934792ms)
+✔ vector disk cache works in a fresh process; provider usage, cache writes and resource bounds fail closed (265.509125ms)
+✔ retrieval evaluation rejects adapter drift and records unavailable embedded-process fingerprint (21.992542ms)
+✔ source ingestion caps total bytes and files before persisting a partial manifest (1652.8975ms)
+✔ ablation preparation uses real campaign slots, requires curated cases and never fabricates results (2369.395458ms)
+✔ history reads all recorded versions within budget and scoped document bundles preserve freshness guards (43.368458ms)
+✔ compiler refuses oversized graphs, handles incomplete declarations and bounds its parsed-file cache (260.238292ms)
+✔ unmatched governed claims and sparse contribution descriptors do not invent lexical matches (15.912583ms)
+✔ compiler IO cannot reach working files or emit artifacts; warm binding observes a changed dependency (28.565833ms)
+ℹ tests 27
+ℹ suites 0
+ℹ pass 27
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5889.198334
+ℹ start of coverage report
+ℹ ------------------------------------------------------------------
+ℹ file              | line % | branch % | funcs % | uncovered lines
+ℹ ------------------------------------------------------------------
+ℹ core              |        |          |         | 
+ℹ  cost-ledger.ts   | 100.00 |   100.00 |  100.00 | 
+ℹ  mcp              |        |          |         | 
+ℹ   tool-catalog.ts | 100.00 |   100.00 |  100.00 | 
+ℹ ------------------------------------------------------------------
+ℹ all files         | 100.00 |   100.00 |  100.00 | 
+ℹ ------------------------------------------------------------------
+ℹ end of coverage report

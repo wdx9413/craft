@@ -20,6 +20,61 @@ function contract(f: Awaited<ReturnType<typeof fixture>>, id: string, effect = "
   return f.service.taskControlSave({ contract_id: id, task_id: f.task.id, workspace: f.root, allowed_effects: [effect], acceptance_required: acceptance }).contract as JsonObject;
 }
 
+for (const changed of ["host", "launch", "acceptance"] as const) {
+  test(`Task Run rejects a stale delivery projection after ${changed} facts change`, async () => {
+    const f = await fixture();
+    try {
+      const control = contract(f, "stale", "local_write", true);
+      const prepared = f.service.taskRunPrepare({ contract_id: control.id, task_run_id: "stale-run", host: "codex-cli",
+        workspace: f.root, prompt: "edit", sandbox: "workspace-write", acceptance_name: "review",
+        acceptance_criteria: [{ id: "human", name: "Human", method: "human", required: true }] });
+      const launchId = String((prepared.launch as JsonObject).id);
+      f.service.workLaunchDecide({ launch_id: launchId, actor: "user", approved: true, prompt: "edit" });
+      const launch = f.service.workLaunchGet({ launch_id: launchId }).launch as JsonObject;
+      await f.service.hostRuns.wait(String(launch.run_id));
+      f.service.acceptanceHumanReview({ plan_id: launch.acceptance_plan_id, criterion_id: "human", reviewer: "user", result: "passed", summary: "checked" });
+      assert.equal((f.service.taskRunRefresh({ task_run_id: "stale-run" }).state as JsonObject).action, "deliver");
+      const loopId = `delivery_loop_${launchId}`;
+      const oldLoop = f.store.get("delivery_loop", loopId);
+      const oldDelivery = f.store.get("work_delivery", String(oldLoop.delivery_id));
+      const kind = changed === "host" ? "host_run" : changed === "launch" ? "work_launch" : "acceptance_assessment";
+      const id = changed === "host" ? String(launch.run_id) : changed === "launch" ? launchId : `assessment_${launch.acceptance_plan_id}`;
+      const previous = f.store.get(kind, id);
+      f.store.save(kind, id, { ...previous, status: changed === "launch" ? previous.status : "failed" });
+      const state = f.service.taskRunRefresh({ task_run_id: "stale-run" }).state as JsonObject;
+      assert.deepEqual([state.status, state.action], ["blocked", "human_handoff"]);
+      const handoff = f.service.taskRunHandoff({ task_run_id: "stale-run", reason: "stale_projection" }).handoff as JsonObject;
+      assert.equal(handoff.resume_action, "human_handoff");
+      assert.deepEqual(f.store.get("delivery_loop", loopId), oldLoop, "reading stale guidance must not silently rewrite its evidence");
+      f.service.deliveryLoopRefresh({ launch_id: launchId });
+      assert.notEqual(f.store.get("delivery_loop", loopId).delivery_id, oldDelivery.id);
+      assert.deepEqual(f.store.get("work_delivery", String(oldDelivery.id)), oldDelivery);
+      assert.equal((f.service.taskRunRefresh({ task_run_id: "stale-run" }).state as JsonObject).action,
+        changed === "launch" ? "deliver" : "retry_or_handoff");
+    } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+  });
+}
+
+test("Task Run rejects missing or foreign delivery pins even when versions happen to match", async () => {
+  const f = await fixture();
+  try {
+    const control = contract(f, "pins");
+    const prepared = f.service.taskRunPrepare({ contract_id: control.id, task_run_id: "pin-run", host: "codex-cli",
+      workspace: f.root, prompt: "read", sandbox: "read-only" });
+    const launch = prepared.launch as JsonObject;
+    await f.service.hostRuns.wait(String(launch.run_id));
+    const id = `delivery_loop_${launch.id}`; const valid = f.store.get("delivery_loop", id);
+    for (const patch of [{ launch_id: "foreign" }, { run_id: "foreign" }, { assessment_id: "foreign" },
+      { launch_version: null }, { run_version: null }, { assessment_version: 1 }]) {
+      f.store.save("delivery_loop", id, { ...valid, ...patch });
+      assert.equal((f.service.taskRunRefresh({ task_run_id: "pin-run" }).state as JsonObject).action, "human_handoff");
+    }
+    f.store.save("delivery_loop", id, valid);
+    assert.equal((f.service.taskRunRefresh({ task_run_id: "pin-run" }).state as JsonObject).action, "deliver");
+    assert.equal(f.service.taskRunRefresh({ task_run_id: "pin-run" }).idempotent, true);
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
 test("Task Run binds a real read-only launch, persists only digests, and safely pauses, resumes, hands off, and cancels", async () => {
   const f = await fixture();
   try {
@@ -39,7 +94,7 @@ test("Task Run binds a real read-only launch, persists only digests, and safely 
     assert.equal((f.service.taskRunCancel({ task_run_id: taskRun.id, reason: "done" }).run as JsonObject).lifecycle, "cancelled"); assert.equal(f.service.taskRunCancel({ task_run_id: taskRun.id, reason: "done" }).idempotent, true);
     assert.equal((f.service.taskRunRefresh({ task_run_id: taskRun.id }).state as JsonObject).status, "cancelled"); assert.throws(() => f.service.taskRunPause({ task_run_id: taskRun.id, reason: "again" }), /Cancelled/); assert.throws(() => f.service.taskRunResume({ task_run_id: taskRun.id }), /Cancelled/);
     assert.throws(() => f.service.taskRunGet({ task_run_id: "" }), /task_run_id/);
-    assert.equal(VERSION, "0.12.37");
+    assert.equal(VERSION, "0.12.38");
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 

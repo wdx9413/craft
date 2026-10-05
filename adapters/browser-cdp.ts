@@ -49,6 +49,8 @@ export class BrowserCdpAdapter {
       const url = requiredString(request.url, "url");
       if (!/^https?:\/\/\S+$/iu.test(url)) throw new Error("url must be an http(s) URL");
       const result = await this.session.call("Page.navigate", { url });
+      if (result.errorText) throw new Error("Browser navigation failed");
+      if (!result.frameId) throw new Error("Browser navigation produced no frame");
       return this.#receipt(requestId, request.operation, result);
     }
     if (request.operation === "observe") {
@@ -81,6 +83,6 @@ export class BrowserCdpAdapter {
 
   #receipt(requestId: string, operation: BrowserOperation, result: Record<string, unknown>): Record<string, unknown> {
     const value = result.result as Record<string, unknown> | undefined;
-    return { request_id: requestId, operation, result: "succeeded", adapter: "browser_cdp", result_digest: digest(value?.value ?? null), raw_page_content_stored: false };
+    return { request_id: requestId, operation, result: "succeeded", adapter: "browser_cdp", result_digest: digest(value?.value ?? result), raw_page_content_stored: false };
   }
 }

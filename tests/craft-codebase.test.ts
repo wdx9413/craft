@@ -42,6 +42,8 @@ test("craft-codebase is an internal non-context Capability with an owned read-on
   try {
     assert.equal(codebaseCapability.name, "codebase"); assert.equal(codebaseCapability.product, undefined); assert.equal(codebaseCapability.contributes, undefined);
     for (const name of ["craft_codebase_activate", "craft_codebase_index_build", "craft_codebase_context_slice"]) assert(CODEBASE_OWNS.test(name));
+    assert.equal(CODEBASE_OWNS.test("craft_codebase_asset_inspect"), false);
+    assert.equal(CODEBASE_OWNS.test("craft_codebase_asset_restore"), false);
     assert.equal(CODEBASE_OWNS.test("craft_knowledge_search"), false);
     const disabled = f.kernel.status({ workspace_id: f.workspace.id }); assert.equal(disabled.enabled, false); assert.equal(disabled.readiness, "disabled");
     const defaultActivation = f.kernel.activate({ workspace_id: f.workspace.id, activation_id: "default_activation" }).activation as JsonObject;
@@ -62,7 +64,7 @@ test("craft-codebase is explicit, snapshot-pinned, content-free, and exposes str
     const built = f.kernel.build({ workspace_id: f.workspace.id }).index as JsonObject; assert.equal(built.status, "ready"); assert.equal(built.raw_content_stored, false); assert.equal((built.analysis as JsonObject).certainty, "partial"); assert(Number((built.analysis as JsonObject).unsupported_file_count) >= 1); assert.equal(f.kernel.build({ workspace_id: f.workspace.id, checkpoint_id: f.checkpoint.id }).idempotent, true);
     assert.equal(f.kernel.status({ workspace_id: f.workspace.id }).readiness, "ready");
     const found = f.kernel.findSymbol({ workspace_id: f.workspace.id, index_id: built.id, query: "TARGET" }); const target = (found.symbols as JsonObject[])[0];
-    assert.equal(target.name, "target"); assert.equal((found.receipt as JsonObject).content_free, true); assert.equal((found.receipt as JsonObject).analyzer, "builtin-regex-static-v1"); assert.equal(((found.receipt as JsonObject).analysis as JsonObject).certainty, "partial");
+    assert.equal(target.name, "target"); assert.equal((found.receipt as JsonObject).content_free, true); assert.equal((found.receipt as JsonObject).analyzer, "typescript-checker"); assert.equal(((found.receipt as JsonObject).analysis as JsonObject).certainty, "partial");
     assert.equal((f.kernel.findSymbol({ workspace_id: f.workspace.id, index_id: built.id, query: "shared" }).symbols as JsonObject[]).length, 2);
     const callers = f.kernel.findCallers({ workspace_id: f.workspace.id, index_id: built.id, symbol_id: target.id, limit: 1 });
     assert((callers.callers as JsonObject[]).length >= 1); assert.equal((((callers.callers as JsonObject[])[0].edge as JsonObject).confidence), "partial");
@@ -141,5 +143,19 @@ test("craft-codebase is reachable only from full MCP and does not widen publishe
     await full.handlers.craft_codebase_context_slice({ workspace_id: f.workspace.id, index_id: (built.index as JsonObject).id, node_ids: [target.id] });
     const deactivated = await full.handlers.craft_codebase_deactivate({ workspace_id: f.workspace.id, actor: "mcp" });
     assert.equal((deactivated.activation as JsonObject).status, "disabled");
+  } finally { await close(f); }
+});
+
+
+test("explicit analyzer choices preserve the heuristic fallback without accepting unknown analyzers", async () => {
+  const f = await fixture();
+  try {
+    active(f);
+    assert.throws(() => f.kernel.build({ workspace_id: f.workspace.id, analyzer: "unknown" }), /Unsupported/);
+    assert.equal(((f.kernel.build({ workspace_id: f.workspace.id, analyzer: "typescript" }).index as JsonObject).analysis as JsonObject).analyzer, "typescript-checker");
+    assert.equal(((f.kernel.build({ workspace_id: f.workspace.id, analyzer: "heuristic", index_id: "explicit-heuristic" }).index as JsonObject).analysis as JsonObject).analyzer, "builtin-regex-static-v1");
+    assert.equal(f.kernel.build({ workspace_id: f.workspace.id, analyzer: "heuristic", index_id: "explicit-heuristic" }).idempotent, true);
+    f.service.workspaceCheckpoint({ workspace_id: f.workspace.id, checkpoint_id: "another-checkpoint", label: "same files new identity" });
+    assert.throws(() => f.kernel.build({ workspace_id: f.workspace.id, analyzer: "heuristic", index_id: "explicit-heuristic" }), /idempotency conflict/);
   } finally { await close(f); }
 });

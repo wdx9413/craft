@@ -1,0 +1,77 @@
+(node:82371) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:82371) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+✔ v0.12.43 assembles the Experience capability from the catalog rather than in place (19.530958ms)
+✔ v0.12.43 fails on the kernel a removed capability owed instead of leaving it undefined (18.00025ms)
+✔ v0.12.43 refuses a capability that tries to provide the environment it runs in (18.111ms)
+✔ v0.12.43 claims the tool families its kernels implement and no others (24.66225ms)
+✔ v0.12.43 derives the component surface from the capability so the two cannot drift (1.117458ms)
+✔ v0.12.43 keeps the service working through the assembled capability (18.770333ms)
+✔ Durable Action Loop only advances a work item after a receipt, re-observation, and passed acceptance (34.691167ms)
+✔ Durable Action Loop detects drift on resume and rejects missing receipt or cross-workspace state (19.150584ms)
+✔ Experience Ledger keeps execution observations, diagnostic patterns, rejected alternatives, and exact Signoff separate from active assets (20.168541ms)
+✔ The bounded durable and experience surfaces are independently callable over MCP (35.473625ms)
+✔ Durable Action Loop covers defensive and non-executing paths (19.246084ms)
+✔ Durable Action Loop rejects malformed inputs and records blocked or failed verification without claiming progress (23.814ms)
+✔ Experience Ledger covers generated records and inconclusive maintenance outcomes (15.689042ms)
+✔ Experience Ledger rejects malformed, conflicting, uncalibrated, and stale evolution decisions (18.472917ms)
+✔ parallel capacity remains bounded and a pending write excludes parallel reads (13.997125ms)
+✔ serial loop creation retains the pre-parallel identity and replays old records (12.434792ms)
+✔ shared ranking prevents weak Memory starving Knowledge; required items and aggregate budgets hold (15.05425ms)
+✔ history returns revoked/expired versions diagnostically; as-of uses recorded knowledge and current ACL (14.268958ms)
+✔ ingestion keeps unchanged review, invalidates edits/deletions, and exposes cursor drift (23.568417ms)
+✔ persisted vector cache survives adapter instances; batches are bounded and dimension failures fall back (28.432625ms)
+✔ retrieval eligibility requires executed labelled results, not caller-reported scores (19.831458ms)
+✔ compiler resolves imports, aliases and methods without matching comments, strings or unrelated same names (34.116542ms)
+✔ MCP initialize, tool list and readiness expose one actual schema fingerprint (18.767083ms)
+✔ LSP relations retain real endpoints and reject dangling, malformed or out-of-range facts (0.884958ms)
+✔ changed document guards remain fail-closed even if a stale claim is externally marked reviewed (12.69625ms)
+✔ scoped maintenance proposes actionable versioned work; verified feedback only breaks relevance ties (18.924334ms)
+✔ keyword dataset grading measures missed queries, validates scopes and can run through MCP (25.893958ms)
+✔ vector disk cache works in a fresh process; provider usage, cache writes and resource bounds fail closed (291.863875ms)
+✔ retrieval evaluation rejects adapter drift and records unavailable embedded-process fingerprint (22.427584ms)
+✔ source ingestion caps total bytes and files before persisting a partial manifest (1683.674125ms)
+✔ ablation preparation uses real campaign slots, requires curated cases and never fabricates results (2680.942834ms)
+✔ history reads all recorded versions within budget and scoped document bundles preserve freshness guards (44.362542ms)
+✔ compiler refuses oversized graphs, handles incomplete declarations and bounds its parsed-file cache (293.914625ms)
+✔ unmatched governed claims and sparse contribution descriptors do not invent lexical matches (13.642042ms)
+✔ compiler IO cannot reach working files or emit artifacts; warm binding observes a changed dependency (29.768542ms)
+✔ default BM25 retrieves Chinese words and mixed code identifiers without punctuation artifacts (1.205333ms)
+✔ nested invocation uses public seams, defers child evidence, accepts aliases only after child exit and survives restart (85.212209ms)
+✔ failed child verification blocks parent; pending dispatch remains reconcilable without double dispatch (18.683083ms)
+✔ strict invocation inputs, optimistic concurrency, policy, scope and revocation checks fail closed (15.8505ms)
+✔ evidence is tied to exact invocation, call, Task, inputs, state revision and expiry (23.110291ms)
+✔ receipt binding rejects foreign sessions, observations, outputs and evidence and rolls back partial persistence (37.965083ms)
+✔ resume invalidates drift and budget/Task changes stop new dispatches (15.202333ms)
+✔ paired trials require terminal and identical context, expose route outcomes without promotion (84.728791ms)
+✔ active budget balances, malformed refs, missing artifacts and post-dispatch drift are enforced (37.584041ms)
+✔ content-free metrics are attributed to each route and comparable only under the paired context (36.412791ms)
+✔ MCP wire validates bind, all invocation operations and real Host observation field types (58.98075ms)
+✔ failed nested exit blocks parent consumption and late receipt cannot erase workspace drift (51.021916ms)
+✔ blocked, inconclusive and retryable failures retain verdicts and require fresh safe-retry evidence before continuing (184.722458ms)
+✔ Host cancellation is a distinct terminal result and cannot be automatically reopened (17.975542ms)
+✔ explicit read-only parallel group dispatches independently and joins before exit (34.856417ms)
+✔ recovery rejects handoff failures, exhausted retries and drift after verified resolution (124.434458ms)
+✔ parallel group schema bounds and a failed Host with a passing observation remain failures (18.401083ms)
+✔ parallel receipt draining preserves each blocker and recovery cannot skip unresolved siblings (120.509625ms)
+ℹ tests 53
+ℹ suites 0
+ℹ pass 53
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 7475.808709
+ℹ start of coverage report
+ℹ -------------------------------------------------------------------------
+ℹ file                     | line % | branch % | funcs % | uncovered lines
+ℹ -------------------------------------------------------------------------
+ℹ capability               |        |          |         | 
+ℹ  craft-experience        |        |          |         | 
+ℹ   experience-ledger.ts   | 100.00 |   100.00 |  100.00 | 
+ℹ core                     |        |          |         | 
+ℹ  durable-action-loop.ts  | 100.00 |   100.00 |  100.00 | 
+ℹ -------------------------------------------------------------------------
+ℹ all files                | 100.00 |   100.00 |  100.00 | 
+ℹ -------------------------------------------------------------------------
+ℹ end of coverage report

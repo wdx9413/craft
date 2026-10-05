@@ -8,8 +8,26 @@ import { ReleaseQualificationKernel } from "../core/release-qualification.ts";
 import { CraftService } from "../core/service.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { UncertaintyPolicyKernel } from "../core/uncertainty-policy.ts";
+import { digestJson, payload } from "../core/digest.ts";
 
 async function fixture() { const store = await new CraftStore(craftPaths(mkdtempSync(join(tmpdir(), "craft-121-")))).open(); store.create("evidence", "confirmed", { confidence: "confirmed" }); store.create("evidence", "bounded", { confidence: "bounded" }); store.create("evidence", "bad", { confidence: "unverified" }); return { store, uncertainty: new UncertaintyPolicyKernel(store), qualification: new ReleaseQualificationKernel(store) }; }
+
+function boundTrial(f: Awaited<ReturnType<typeof fixture>>, args: JsonObject): JsonObject {
+  const slot = f.store.get("release_qualification_slot", String(args.slot_id));
+  const qualification = f.store.get("release_qualification", String(slot.qualification_id));
+  const evidenceId = `trial:${slot.id}`;
+  f.store.create("evidence", evidenceId, { confidence: "confirmed", source_type: "program", metadata: { release_qualification: {
+    qualification_id: qualification.id, slot_id: slot.id, arm: slot.arm, pair_index: slot.pair_index,
+    pilot_id: qualification.pilot_id, pilot_version: qualification.pilot_version, host: f.store.get("reference_pilot", String(qualification.pilot_id)).host,
+    candidate_ref: qualification.candidate_ref, environment_fingerprint: args.environment_fingerprint,
+    budget_fingerprint: args.budget_fingerprint, primary_value: args.primary_value,
+    input_fingerprint: qualification.input_fingerprint, model_fingerprint: qualification.model_fingerprint,
+    acceptance_fingerprint: qualification.acceptance_fingerprint,
+    guardrails_digest: digestJson(args.guardrails ?? {}), mechanism_passed: args.mechanism_passed === true,
+  } } });
+  return { ...args, evidence_ids: [evidenceId] };
+}
+function recordTrial(f: Awaited<ReturnType<typeof fixture>>, args: JsonObject): JsonObject { return f.qualification.record(boundTrial(f, args)); }
 
 test("v0.12.23 resolves uncertainty by layered policy without granting execution authority", async () => {
   const f = await fixture(); const core = f.uncertainty.save({ policy_id: "core", scope: "core", mode: "bounded_autonomous", on_uncertain: "collecting", fallback: "unchanged", escalations: ["deterministic_check", "independent_evaluator"], max_attempts: 2 }).policy as JsonObject;
@@ -35,9 +53,9 @@ test("v0.12.23 qualifies two content-free five-pair Reference Pilots", async () 
   const devPlan = f.qualification.plan({ qualification_id: "q-dev", pilot_id: dev.id, baseline_ref: "codex", candidate_ref: "craft", environment_fingerprint: "env", budget_fingerprint: "budget" }); assert.equal((devPlan.slots as JsonObject[]).length, 10); assert.equal(f.qualification.plan({ qualification_id: "q-dev", pilot_id: dev.id, baseline_ref: "codex", candidate_ref: "craft", environment_fingerprint: "env", budget_fingerprint: "budget" }).idempotent, true);
   const filePlan = f.qualification.plan({ qualification_id: "q-file", pilot_id: file.id, baseline_ref: "codex", candidate_ref: "craft", environment_fingerprint: "env", budget_fingerprint: "budget" });
   assert.equal(f.qualification.evaluate({ qualification_id: "q-dev" }).conclusion, "inconclusive");
-  for (const slot of devPlan.slots as JsonObject[]) { const candidate = slot.arm === "candidate"; f.qualification.record({ slot_id: slot.id, mechanism_passed: true, primary_value: candidate ? 4 : 8, guardrails: { quality: true, safety: true }, evidence_ids: ["confirmed"], environment_fingerprint: "env", budget_fingerprint: "budget" }); }
+  for (const slot of devPlan.slots as JsonObject[]) { const candidate = slot.arm === "candidate"; recordTrial(f, { slot_id: slot.id, mechanism_passed: true, primary_value: candidate ? 4 : 8, guardrails: { quality: true, safety: true }, evidence_ids: ["confirmed"], environment_fingerprint: "env", budget_fingerprint: "budget" }); }
   const eligible = f.qualification.evaluate({ qualification_id: "q-dev" }); assert.equal(eligible.conclusion, "eligible"); assert.equal(f.qualification.evaluate({ qualification_id: "q-dev" }).idempotent, true);
-  for (const slot of filePlan.slots as JsonObject[]) f.qualification.record({ slot_id: slot.id, mechanism_passed: true, primary_value: 1, guardrails: {}, evidence_ids: ["bounded"], environment_fingerprint: "env", budget_fingerprint: "budget" });
+  for (const slot of filePlan.slots as JsonObject[]) recordTrial(f, { slot_id: slot.id, mechanism_passed: true, primary_value: 1, guardrails: {}, evidence_ids: ["bounded"], environment_fingerprint: "env", budget_fingerprint: "budget" });
   assert.equal(f.qualification.evaluate({ qualification_id: "q-file" }).conclusion, "inconclusive"); const platform = f.qualification.platformAssess({ development_qualification_id: "q-dev", file_qualification_id: "q-file" }); assert.equal(platform.status, "eligible"); assert.equal(platform.platform_ideal_state_v1, true);
   assert.throws(() => f.qualification.pilotSave({ kind: "video", name: "x", case_ref: "x", primary_metric: "x", sanitized: true }), /kind/); assert.throws(() => f.qualification.pilotSave({ kind: "development", name: "x", case_ref: "x", primary_metric: "x", sanitized: false }), /sanitized/); assert.throws(() => f.qualification.pilotSave({ kind: "development", name: "x", case_ref: "x", primary_metric: "x", direction: "sideways", sanitized: true }), /direction/);
 });
@@ -45,10 +63,72 @@ test("v0.12.23 qualifies two content-free five-pair Reference Pilots", async () 
 test("v0.12.23 rejects non-comparable, unsafe and unsupported qualification evidence", async () => {
   const f = await fixture(); const pilot = f.qualification.pilotSave({ pilot_id: "p", kind: "development", name: "P", case_ref: "case", primary_metric: "minutes", direction: "lower_is_better", effect_threshold: 1, sanitized: true }).pilot as JsonObject;
   const plans = ["drift", "regress"].map((id) => f.qualification.plan({ qualification_id: id, pilot_id: pilot.id, baseline_ref: "b", candidate_ref: "c", environment_fingerprint: "env", budget_fingerprint: "budget" })); const filePilot = f.qualification.pilotSave({ pilot_id: "file", kind: "file_delivery", name: "File", case_ref: "case:file", primary_metric: "ready", sanitized: true }).pilot as JsonObject; const pending = f.qualification.plan({ qualification_id: "pending", pilot_id: filePilot.id, baseline_ref: "b", candidate_ref: "c", environment_fingerprint: "env", budget_fingerprint: "budget" });
-  for (const slot of plans[0]!.slots as JsonObject[]) f.qualification.record({ slot_id: slot.id, mechanism_passed: true, primary_value: 1, guardrails: {}, evidence_ids: ["confirmed"], environment_fingerprint: slot.arm === "candidate" ? "drift" : "env", budget_fingerprint: "budget" }); assert.equal(f.qualification.evaluate({ qualification_id: "drift" }).conclusion, "inconclusive");
-  for (const slot of plans[1]!.slots as JsonObject[]) f.qualification.record({ slot_id: slot.id, mechanism_passed: slot.arm === "baseline", primary_value: slot.arm === "candidate" ? 9 : 4, guardrails: { safety: slot.arm === "baseline" }, evidence_ids: ["confirmed"], environment_fingerprint: "env", budget_fingerprint: "budget" }); assert.equal(f.qualification.evaluate({ qualification_id: "regress" }).conclusion, "rejected");
+  for (const slot of plans[0]!.slots as JsonObject[]) recordTrial(f, { slot_id: slot.id, mechanism_passed: true, primary_value: 1, guardrails: {}, evidence_ids: ["confirmed"], environment_fingerprint: slot.arm === "candidate" ? "drift" : "env", budget_fingerprint: "budget" }); assert.equal(f.qualification.evaluate({ qualification_id: "drift" }).conclusion, "inconclusive");
+  for (const slot of plans[1]!.slots as JsonObject[]) recordTrial(f, { slot_id: slot.id, mechanism_passed: slot.arm === "baseline", primary_value: slot.arm === "candidate" ? 9 : 4, guardrails: {}, evidence_ids: ["confirmed"], environment_fingerprint: "env", budget_fingerprint: "budget" }); assert.equal(f.qualification.evaluate({ qualification_id: "regress" }).conclusion, "rejected");
   assert.equal(f.qualification.platformAssess({ development_qualification_id: "regress", file_qualification_id: "pending" }).status, "inconclusive");
   const slot = (pending.slots as JsonObject[])[0]!; assert.throws(() => f.qualification.record({ slot_id: slot.id, mechanism_passed: true, primary_value: 1, guardrails: { x: 1 }, evidence_ids: ["confirmed"], environment_fingerprint: "env", budget_fingerprint: "budget" }), /booleans/); assert.throws(() => f.qualification.record({ slot_id: slot.id, mechanism_passed: true, primary_value: 1, guardrails: {}, evidence_ids: ["bad"], environment_fingerprint: "env", budget_fingerprint: "budget" }), /confirmed or bounded/);
+});
+
+test("Qualification refuses omitted guardrails, unbound and reused Trial evidence", async () => {
+  const f = await fixture();
+  const pilot = f.qualification.pilotSave({ pilot_id: "bound", kind: "development", name: "Bound", case_ref: "fixture", primary_metric: "score", direction: "higher_is_better", guardrail_names: ["safety"], sanitized: true }).pilot as JsonObject;
+  const plan = f.qualification.plan({ pilot_id: pilot.id, baseline_ref: "baseline", candidate_ref: "candidate", environment_fingerprint: "env", budget_fingerprint: "budget", input_fingerprint: "input", model_fingerprint: "model", acceptance_fingerprint: "accept" });
+  const [first, second] = plan.slots as JsonObject[];
+  const args = { slot_id: first!.id, primary_value: 1, mechanism_passed: true, guardrails: { safety: true }, evidence_ids: ["confirmed"], environment_fingerprint: "env", budget_fingerprint: "budget" };
+  assert.throws(() => f.qualification.record({ ...args, guardrails: {} }), /declared names/);
+  assert.throws(() => f.qualification.record(args), /not bound/);
+  assert.throws(() => f.qualification.record({ ...args, evidence_ids: ["confirmed", "confirmed"] }), /distinct/);
+  const bound = boundTrial(f, args);
+  assert.equal((f.qualification.record(bound).slot as JsonObject).status, "completed");
+  assert.throws(() => f.qualification.record({ ...bound, slot_id: second!.id }), /not bound|another Trial/);
+  const next = boundTrial(f, { ...args, slot_id: second!.id });
+  const original = f.store.get("evidence", String((bound.evidence_ids as string[])[0]));
+  const replacement = f.store.get("evidence", String((next.evidence_ids as string[])[0]));
+  f.store.save("evidence", String(original.id), { ...payload(original), metadata: replacement.metadata });
+  assert.throws(() => f.qualification.record({ ...next, evidence_ids: [original.id] }), /another Trial/);
+  f.store.save("evidence", String(original.id), payload(original));
+  assert.equal((f.qualification.record(next).slot as JsonObject).status, "completed");
+});
+
+test("Qualification detects Pilot drift and incomplete or changed stored Trial proof", async () => {
+  const f = await fixture();
+  const pilot = f.qualification.pilotSave({ pilot_id: "integrity", kind: "development", name: "Integrity", case_ref: "fixture", primary_metric: "score", direction: "higher_is_better", sanitized: true }).pilot as JsonObject;
+  const make = (id: string) => f.qualification.plan({ qualification_id: id, pilot_id: pilot.id, baseline_ref: "baseline", candidate_ref: "candidate", environment_fingerprint: "env", budget_fingerprint: "budget" });
+  const drift = make("pilot-drift");
+  f.store.save("reference_pilot", String(pilot.id), payload(pilot));
+  assert.throws(() => recordTrial(f, { slot_id: (drift.slots as JsonObject[])[0]!.id, primary_value: 1, mechanism_passed: true, guardrails: {}, environment_fingerprint: "env", budget_fingerprint: "budget" }), /Pilot changed/);
+  const latestPilot = f.store.get("reference_pilot", String(pilot.id));
+  const filled = (id: string) => {
+    const plan = make(id);
+    for (const slot of plan.slots as JsonObject[]) recordTrial(f, { slot_id: slot.id, primary_value: slot.arm === "candidate" ? 2 : 1, mechanism_passed: true, guardrails: {}, environment_fingerprint: "env", budget_fingerprint: "budget" });
+    return plan.slots as JsonObject[];
+  };
+  const missing = filled("proof-missing");
+  const first = f.store.get("release_qualification_slot", String(missing[0]!.id));
+  f.store.save("release_qualification_slot", String(first.id), { ...payload(first), evidence_ids: null });
+  assert.equal(f.qualification.evaluate({ qualification_id: "proof-missing" }).conclusion, "inconclusive");
+  const reused = filled("proof-reused");
+  const second = f.store.get("release_qualification_slot", String(reused[1]!.id));
+  f.store.save("release_qualification_slot", String(second.id), { ...payload(second), evidence_ids: f.store.get("release_qualification_slot", String(reused[0]!.id)).evidence_ids });
+  assert.equal(f.qualification.evaluate({ qualification_id: "proof-reused" }).conclusion, "inconclusive");
+  const gone = filled("proof-gone");
+  const missingEvidence = f.store.get("release_qualification_slot", String(gone[0]!.id));
+  f.store.save("release_qualification_slot", String(missingEvidence.id), { ...payload(missingEvidence), evidence_ids: ["absent"] });
+  assert.equal(f.qualification.evaluate({ qualification_id: "proof-gone" }).conclusion, "inconclusive");
+  const altered = filled("proof-altered");
+  const evidenceId = String((f.store.get("release_qualification_slot", String(altered[0]!.id)).evidence_ids as string[])[0]);
+  const evidence = f.store.get("evidence", evidenceId);
+  f.store.save("evidence", evidenceId, { ...payload(evidence), metadata: { release_qualification: { wrong: true } } });
+  assert.equal(f.qualification.evaluate({ qualification_id: "proof-altered" }).conclusion, "inconclusive");
+  const noMetadata = filled("proof-no-metadata");
+  const noMetadataId = String((f.store.get("release_qualification_slot", String(noMetadata[0]!.id)).evidence_ids as string[])[0]);
+  const noMetadataEvidence = f.store.get("evidence", noMetadataId);
+  f.store.save("evidence", noMetadataId, { ...payload(noMetadataEvidence), metadata: {} });
+  assert.equal(f.qualification.evaluate({ qualification_id: "proof-no-metadata" }).conclusion, "inconclusive");
+  const pilotChange = filled("evaluation-pilot-drift");
+  assert.equal(pilotChange.length, 10);
+  f.store.save("reference_pilot", String(latestPilot.id), payload(latestPilot));
+  assert.equal(f.qualification.evaluate({ qualification_id: "evaluation-pilot-drift" }).conclusion, "inconclusive");
 });
 
 test("v0.12.23 validates uncertainty policy boundaries and idempotency", async () => {
@@ -93,13 +173,13 @@ test("v0.12.23 validates qualification inputs and both metric directions", async
   assert.throws(() => f.qualification.plan({ qualification_id: "higher-q", pilot_id: higher.id, baseline_ref: "other", candidate_ref: "c", environment_fingerprint: "env", budget_fingerprint: "budget" }), /idempotency/);
   assert.throws(() => f.qualification.record({ slot_id: (plan.slots as JsonObject[])[0]!.id, mechanism_passed: true, primary_value: 1, guardrails: {}, evidence_ids: [], environment_fingerprint: "env", budget_fingerprint: "budget" }), /requires Evidence/);
   for (const slot of plan.slots as JsonObject[]) {
-    const result = f.qualification.record({ slot_id: slot.id, mechanism_passed: true, primary_value: slot.arm === "candidate" ? 12 : 9, guardrails: { safety: true }, evidence_ids: ["confirmed"], environment_fingerprint: "env", budget_fingerprint: "budget" });
+    const result = recordTrial(f, { slot_id: slot.id, mechanism_passed: true, primary_value: slot.arm === "candidate" ? 12 : 9, guardrails: {}, evidence_ids: ["confirmed"], environment_fingerprint: "env", budget_fingerprint: "budget" });
     assert.equal(f.qualification.record({ slot_id: slot.id }).idempotent, true); assert.equal((result.slot as JsonObject).status, "completed");
   }
   assert.equal(f.qualification.evaluate({ qualification_id: "higher-q" }).conclusion, "eligible");
   const lower = f.qualification.pilotSave({ pilot_id: "lower", kind: "file_delivery", name: "Lower", case_ref: "case", primary_metric: "errors", effect_threshold: 1, sanitized: true }).pilot as JsonObject;
   const negative = f.qualification.plan({ qualification_id: "negative", pilot_id: lower.id, baseline_ref: "b", candidate_ref: "c", environment_fingerprint: "env", budget_fingerprint: "budget" });
-  for (const slot of negative.slots as JsonObject[]) f.qualification.record({ slot_id: slot.id, mechanism_passed: true, primary_value: slot.arm === "candidate" ? 8 : 2, guardrails: {}, evidence_ids: ["confirmed"], environment_fingerprint: "env", budget_fingerprint: "budget" });
+  for (const slot of negative.slots as JsonObject[]) recordTrial(f, { slot_id: slot.id, mechanism_passed: true, primary_value: slot.arm === "candidate" ? 8 : 2, guardrails: {}, evidence_ids: ["confirmed"], environment_fingerprint: "env", budget_fingerprint: "budget" });
   assert.equal(f.qualification.evaluate({ qualification_id: "negative" }).conclusion, "rejected");
   assert.throws(() => f.qualification.platformAssess({ development_qualification_id: "negative", file_qualification_id: "higher-q" }), /development and file-delivery/);
   const generatedPilot = f.qualification.pilotSave({ kind: "file_delivery", name: "Generated", case_ref: "case:g", primary_metric: "ready", sanitized: true }).pilot as JsonObject;
@@ -112,7 +192,7 @@ test("v0.12.23 validates qualification inputs and both metric directions", async
   const missingSlot = (missingCollections.slots as JsonObject[])[0]!;
   assert.throws(() => f.qualification.record({ slot_id: missingSlot.id, mechanism_passed: true, primary_value: 1, environment_fingerprint: "env", budget_fingerprint: "budget" }), /requires Evidence/);
   const rejectedFile = f.qualification.plan({ qualification_id: "file-rejected", pilot_id: generatedPilot.id, baseline_ref: "b", candidate_ref: "c", environment_fingerprint: "env", budget_fingerprint: "budget" });
-  for (const item of rejectedFile.slots as JsonObject[]) f.qualification.record({ slot_id: item.id, mechanism_passed: false, primary_value: 1, evidence_ids: ["confirmed"], environment_fingerprint: "env", budget_fingerprint: "budget" });
+  for (const item of rejectedFile.slots as JsonObject[]) recordTrial(f, { slot_id: item.id, mechanism_passed: false, primary_value: 1, evidence_ids: ["confirmed"], environment_fingerprint: "env", budget_fingerprint: "budget" });
   f.qualification.evaluate({ qualification_id: "file-rejected" });
   assert.equal(f.qualification.platformAssess({ development_qualification_id: "higher-q", file_qualification_id: "file-rejected" }).status, "rejected");
 });
@@ -141,7 +221,7 @@ test("v0.12.23 exposes the complete platform qualification protocol through Craf
   const file = service.referencePilotSave({ pilot_id: "svc-file", kind: "file_delivery", name: "File", case_ref: "fixture:file", primary_metric: "score", direction: "higher_is_better", sanitized: true }).pilot as JsonObject;
   for (const [id, pilot] of [["svc-q-dev", development], ["svc-q-file", file]] as [string, JsonObject][]) {
     const planned = service.releaseQualificationPlan({ qualification_id: id, pilot_id: pilot.id, baseline_ref: "b", candidate_ref: "c", environment_fingerprint: "env", budget_fingerprint: "budget" });
-    for (const slot of planned.slots as JsonObject[]) service.releaseQualificationRecord({ slot_id: slot.id, primary_value: slot.arm === "candidate" ? 2 : 1, mechanism_passed: true, guardrails: {}, evidence_ids: ["confirmed"], environment_fingerprint: "env", budget_fingerprint: "budget" });
+    for (const slot of planned.slots as JsonObject[]) service.releaseQualificationRecord(boundTrial(f, { slot_id: slot.id, primary_value: slot.arm === "candidate" ? 2 : 1, mechanism_passed: true, guardrails: {}, evidence_ids: ["confirmed"], environment_fingerprint: "env", budget_fingerprint: "budget" }));
     assert.equal(service.releaseQualificationEvaluate({ qualification_id: id }).conclusion, "eligible");
   }
   assert.equal(service.platformIdealStateAssess({ development_qualification_id: "svc-q-dev", file_qualification_id: "svc-q-file" }).platform_ideal_state_v1, true);

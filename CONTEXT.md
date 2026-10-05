@@ -94,6 +94,9 @@ _Avoid_: 证据、结果
 _Avoid_: 输出、观点
 
 **Receipt**：某个 Host、Adapter 或控制协议观察到的动作事实记录。Receipt 证明动作或协议状态，不自动证明业务交付质量。
+
+**Control Session**：一次浏览器或应用控制的有界授权上下文，固定 Task、Activation、Policy、Host、目标身份、操作范围与预算。宿主批准只绑定其中一个动作；动作回执与终态观察不等同于业务验收。
+_Avoid_: 浏览器连接、工具调用、用户批准参数
 _Avoid_: Outcome、验收
 
 **Outcome**：一个 Trial 的终态结论，基于已经记录的事实形成。Host 完成、领域验收通过和 Outcome 是不同层次的事实。
@@ -166,8 +169,11 @@ _Avoid_: 数据库备份、自动同步、跨租户复制
 
 ## 执行与交付
 
-**Host**：实际请求模型、调用原生工具或运行命令的外部执行环境，例如 Codex、Claude 或其他 MCP Host。Craft 对未经过其协议的 Host 行为不作保证。
-_Avoid_: Craft Runtime、Agent
+**Workbench**：供人查看任务事实、作出批准与接管工作的人机协作界面。它不是执行授权的事实源。
+_Avoid_: Desktop、Host、第二套 Runtime
+
+**Desktop**：承载 Workbench、窗口、操作系统权限和 Host 生命周期的桌面宿主。桌面窗口可见不代表控制能力已启用或获准执行。
+_Avoid_: Workbench、浏览器控制、已授权 Capability
 
 **Adapter**：位于一个明确 Seam 的 Host、Sandbox、Evaluator 或外部系统适配实现。Adapter 把外部差异收进实现，不改变上层事实语义。
 _Avoid_: 模块、策略
@@ -252,6 +258,21 @@ _Avoid_: UI 私写状态、无版本覆盖
 
 ## 评测与演进
 
+**Procedure Entry**：复用一个 Procedure 的命名入口，声明该次工作必须已有的材料、前置证据及可选择的交付路径。选择入口不代表前序工作已经完成。
+_Avoid_: 任意跳转到某一步、自动满足前置条件
+
+**Procedure Exit**：一次 Procedure 调用的命名交付边界，声明应交付的材料和验收契约。审查完成可以交付问题清单，不等于代码获准发布；选择出口也不代表验收通过。
+_Avoid_: 成功布尔值、进程退出码、自动批准发布
+
+**Procedure Route**：从一个 Entry 到一个 Exit 的明确有序步骤。流程粒度、入口数量和子流程复用独立于控制流形状；选定路径后顺序执行的仍是 Workflow，运行时条件分支、并行或回环才需要 Graph。
+_Avoid_: 隐式跳过步骤、任意 Graph 跳转
+
+**Procedure Call**：父 Procedure 对另一个 Procedure 精确版本的复用，显式映射输入和输出，并保留子流程自己的验收边界。复用不扩大作用域或 effect，也不绕过子流程当前的撤销状态。
+_Avoid_: 复制粘贴、跟随最新版、第二套执行器
+
+**Procedure Invocation**：在确定任务、输入和工作状态下，对某个 Procedure 精确版本及入口、出口的一次实际调用。嵌套调用各自保留前置条件和出口验收，只有已验收的材料才能交给父调用。
+_Avoid_: 流程定义、一次工具调用、执行计划即完成
+
 **Trial**：以精确 Subject、Harness、输入、环境和预算执行或观察的一次可比较尝试。它是评测的最小实验单位。
 _Avoid_: Task Run、会话
 
@@ -278,3 +299,11 @@ _Avoid_: 直接脚本执行、Task Run
 
 **Canary**：向有限、可观察范围暴露已签发 Candidate 的验证阶段。回归会停止候选流量并指向精确回滚目标。
 _Avoid_: 自动发布、A/B 结论
+
+### 四组件补充术语
+
+- Document revision：一个来源内文档内容的版本；局部变更只撤销该文档的 Claim 适用性。
+- Historical Context：按业务有效时间和系统获知时间查询的诊断上下文，不授予当前执行权限。
+- Recovery Evidence：绑定一次失败回执及当前目标状态的安全重试证据。
+- Parallel Group：Route 内明确声明的独立只读步骤集合，全部验收后汇合。
+- Retrieval Evaluation Run：实际对固定语料与标注查询执行检索产生的结果，区别于调用方报告的指标。

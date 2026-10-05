@@ -17,6 +17,14 @@ export function installDurableExperienceMethods(serviceClass: typeof CraftServic
   serviceClass.prototype.experienceLedgerGet = function (args) { return this.experienceLedger.get(args); };
   serviceClass.prototype.experienceProcedureDraft = function (args) { return this.experienceProcedures.draft(args); };
   serviceClass.prototype.experienceProcedureGate = function (args) { return this.experienceProcedures.gate(args); };
+  serviceClass.prototype.procedureInvocationBind = function (args) { return this.procedureInvocations.bind(args); };
+  serviceClass.prototype.procedureInvocationDispatch = function (args) { return this.procedureInvocations.dispatch(args); };
+  serviceClass.prototype.procedureInvocationReport = function (args) { return this.procedureInvocations.report(args); };
+  serviceClass.prototype.procedureInvocationResume = function (args) { return this.procedureInvocations.resume(args); };
+  serviceClass.prototype.procedureInvocationTransition = function (args) { return this.procedureInvocations.transition(args); };
+  serviceClass.prototype.procedureInvocationGet = function (args) { return this.procedureInvocations.get(args); };
+  serviceClass.prototype.procedureInvocationEvaluate = function (args) { return this.procedureInvocations.evaluate(args); };
+  serviceClass.prototype.experienceProcedurePlan = function (args) { return this.experienceProcedures.plan(args); };
   serviceClass.prototype.experienceProcedureGet = function (args) { return this.experienceProcedures.get(args); };
   serviceClass.prototype.experienceProcedureList = function (args = {}) { return this.experienceProcedures.list(args); };
   serviceClass.prototype.experienceProcedureSkillExport = function (args) { return this.experienceProcedures.skillExport(args); };

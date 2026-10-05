@@ -1,0 +1,14 @@
+{
+  "status": "passed",
+  "covered_app_lines": [
+    490,
+    2913
+  ],
+  "checks": [
+    "history",
+    "compare",
+    "restore_candidate",
+    "no_browser_errors"
+  ],
+  "host_session_verified": false
+}

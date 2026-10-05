@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -25,6 +25,13 @@ test("Craft Workbench serves its Codex-style app from beside the runtime", async
   const index = app.handle({ method: "GET", path: "/workbench" });
   assert.equal(index.status, 200); assert.match(index.contentType, /text\/html/); assert.match(index.body, /Craft Workbench/);
   assert.equal(app.handle({ method: "GET", path: "/workbench/" }).status, 200);
+  assert.deepEqual(app.handle({ method: "GET", path: "/" }), index);
+  for (const name of ["latest-request.js", "project-page.js", "runtime-client.js", "resource-pages.js", "model-setup.js", "entry-shell.js", "entry-session.js", "entry-view.js", "entry.css"]) {
+    const rootAsset = app.handle({ method: "GET", path: `/${name}` });
+    assert.equal(rootAsset.status, 200);
+    assert.deepEqual(rootAsset, app.handle({ method: "GET", path: `/workbench/${name}` }));
+    assert.equal(rootAsset.body, await readFile(path.join(repoRoot, "workbench", name), "utf8"));
+  }
   assert.match(app.handle({ method: "GET", path: "/workbench/app.css" }).body, /--bg-rail/);
   assert.match(app.handle({ method: "GET", path: "/workbench/app.js" }).body, /workbench\/call/);
   // v0.12.34: the approval surface must actually be served and wired, not merely

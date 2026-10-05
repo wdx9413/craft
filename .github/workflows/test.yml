@@ -29,6 +29,8 @@ jobs:
         run: pnpm run clean
       - name: Build core
         run: pnpm run build:core
+      - name: Build standalone common and capability packages
+        run: pnpm run build:common
       - name: Build plugin bundle
         run: pnpm run build:plugin && pnpm run pack:plugin
       - name: Build DeepSeek adapter
@@ -47,7 +49,7 @@ jobs:
         # `test:ts` only executes assertions.  The separate, per-module gate is
         # the release contract for line/function/branch coverage and must run in
         # CI too; a descriptive step name is not evidence.
-        run: pnpm run test:ts && pnpm run test:coverage-gates
+        run: pnpm run audit:coverage-inventory -- --check && pnpm run test:ts && pnpm run test:coverage-gates
       - name: CLI smoke test
         run: pnpm run test:smoke
       - name: Isolated plugin smoke test

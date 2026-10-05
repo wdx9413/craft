@@ -20,6 +20,9 @@ coverage/
 htmlcov/
 build/
 /dist/
+/common/*/dist/
+/capability/craft-*/dist/
+/.serena/
 /adapters/deepseek-harness/dist/
 .test-install/
 node_modules/
@@ -32,6 +35,7 @@ cov-*/
 .workbuddy/
 .workbuddy-ai/
 .tmp-*
+.DS_Store
 
 # `pack-plugin` regenerates these from `dist/plugin` on every `pnpm build`, and a
 # component plugin only needs them at runtime. The bundles were byte-identical
@@ -40,9 +44,10 @@ cov-*/
 # only the generated `dist/` and `skills/` trees are ignored.
 /plugins/*/dist/
 /plugins/*/skills/
+/plugins/*/dsh/
 
 # Tauri desktop shell. `desktop/scripts/prepare-sidecar.mjs` deletes and rebuilds
-# `src-tauri/resources/app` from `dist/`, the Workbench sources, `assets/ocr` and a
+# root `dist/desktop/app` from `dist/`, the Workbench sources, `assets/ocr` and a
 # copy of the running Node executable on every dev and build run, and Cargo
 # regenerates `src-tauri/target`. Together they were 6.6 GB of regenerable output,
 # 88 MB of which is a single copied `node.exe`; none of it belongs in history. The
@@ -69,4 +74,3 @@ cov-*/
 credentials.json
 credentials.yaml
 credentials.yml
-

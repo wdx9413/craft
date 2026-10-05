@@ -1,0 +1,96 @@
+(node:80777) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:80777) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+✔ v0.12.43 assembles the Experience capability from the catalog rather than in place (14.256875ms)
+✔ v0.12.43 fails on the kernel a removed capability owed instead of leaving it undefined (9.089208ms)
+✔ v0.12.43 refuses a capability that tries to provide the environment it runs in (7.962416ms)
+✔ v0.12.43 claims the tool families its kernels implement and no others (18.04675ms)
+✔ v0.12.43 derives the component surface from the capability so the two cannot drift (0.688375ms)
+✔ v0.12.43 keeps the service working through the assembled capability (8.922875ms)
+✔ strict MCP: each standalone resolves its own member, scope, gate and aggregate budget without hooks (66.57875ms)
+✔ Knowledge search fails closed without scope and separates candidate inspection from Context (35.269167ms)
+✔ Experience accepts array contracts over MCP and remains candidate until quality gates (25.128166ms)
+✔ Codebase alone can declare, checkpoint, activate, query and refresh changed paths (37.877209ms)
+✔ Hook observations never mistake command success, old edits or session identity for verified task success (67.804333ms)
+✔ external code analyzers import only checkpoint-bound UTF-16 facts for Java, Python and Go (37.11775ms)
+✔ memory transitions reject stale writes and repeat without adding versions (14.62675ms)
+✔ Context feedback pins the exact receipt without mutating source status or crossing members (18.431875ms)
+✔ explicit verification intake validates sequence and outcome while retaining host-attested provenance (13.306875ms)
+✔ Knowledge source digest drift invalidates reviewed claims (16.812083ms)
+✔ Codebase bootstrap recovers an interrupted declaration and exposes unavailable freshness (16.83225ms)
+✔ Hook verification before any edit is observable but cannot establish a verified change (18.273834ms)
+✔ standalone Memory reads and writes only its named scope (12.546375ms)
+✔ standalone Knowledge registers a source, writes a candidate, and only reviewed evidence enters governed search (11.4615ms)
+✔ Experience turns independent observations into a draft Graph Procedure without creating a second executor (20.773625ms)
+✔ Experience keeps a graph proposal deterministic when optional graph fields are omitted (11.224583ms)
+✔ v0.12.24 reserves a secret-free model profile and fails closed until explicit enablement and credentials (13.566875ms)
+✔ v0.12.24 evolves only independent sanitized evidence into a new draft Workflow and never publishes it (14.812625ms)
+✔ v0.12.24 exposes a bounded Workflow Evolution plugin surface and keeps it separate from discovery and work execution (11.439792ms)
+✔ v0.12.24 routes every reserved model and Workflow-evolution operation through the component MCP surface (15.168209ms)
+✔ v0.12.24 rejects malformed evolution inputs and keeps generated drafts, ticket checks, and request identity deterministic (14.827041ms)
+✔ Workflow Evolution covers graph evidence, signature drift, and prompt-only draft fallbacks (14.365458ms)
+✔ Experience is a Context member, but only routeable Procedure projections are injected (11.552709ms)
+✔ Experience honors scope, query and budget without falling back to diagnostic history (12.037625ms)
+✔ Experience reaches Context Resolution beside Knowledge and remains replayable (14.818125ms)
+✔ Fresh or candidate-only Experience produces an empty Context contribution (10.051125ms)
+✔ shared ranking prevents weak Memory starving Knowledge; required items and aggregate budgets hold (13.800542ms)
+✔ history returns revoked/expired versions diagnostically; as-of uses recorded knowledge and current ACL (15.196ms)
+✔ ingestion keeps unchanged review, invalidates edits/deletions, and exposes cursor drift (27.786917ms)
+✔ persisted vector cache survives adapter instances; batches are bounded and dimension failures fall back (23.180625ms)
+✔ retrieval eligibility requires executed labelled results, not caller-reported scores (12.996792ms)
+✔ compiler resolves imports, aliases and methods without matching comments, strings or unrelated same names (17.213792ms)
+✔ MCP initialize, tool list and readiness expose one actual schema fingerprint (10.840791ms)
+✔ LSP relations retain real endpoints and reject dangling, malformed or out-of-range facts (0.842917ms)
+✔ changed document guards remain fail-closed even if a stale claim is externally marked reviewed (9.658ms)
+✔ scoped maintenance proposes actionable versioned work; verified feedback only breaks relevance ties (14.830291ms)
+✔ keyword dataset grading measures missed queries, validates scopes and can run through MCP (17.544333ms)
+✔ vector disk cache works in a fresh process; provider usage, cache writes and resource bounds fail closed (282.318084ms)
+✔ retrieval evaluation rejects adapter drift and records unavailable embedded-process fingerprint (18.204917ms)
+✔ source ingestion caps total bytes and files before persisting a partial manifest (1237.430916ms)
+✔ ablation preparation uses real campaign slots, requires curated cases and never fabricates results (2458.6065ms)
+✔ history reads all recorded versions within budget and scoped document bundles preserve freshness guards (42.246583ms)
+✔ compiler refuses oversized graphs, handles incomplete declarations and bounds its parsed-file cache (270.192917ms)
+✔ unmatched governed claims and sparse contribution descriptors do not invent lexical matches (21.284625ms)
+✔ compiler IO cannot reach working files or emit artifacts; warm binding observes a changed dependency (25.974167ms)
+✔ full development and standalone review select explicit routes, preserving child acceptance and no execution (35.736958ms)
+✔ composition rejects ambiguous and unreachable contracts before persistence (0.709459ms)
+✔ plans fail closed for identity, scope, input, effects, evidence and integrity (37.2ms)
+✔ child calls pin versions and digest, propagate permission limits and reject recursion/expansion (97.929625ms)
+✔ composition rejects disguised calls, ambiguous binding names and colliding plan paths (24.822708ms)
+✔ promoted parent/child Procedures remain pinned and plannable after portable import (74.641917ms)
+✔ v0.12.37 resolves one canonical project through an explicit legacy alias without global fallback (21.872125ms)
+✔ v0.12.37 records actual keyword fallback when an eligible vector adapter has no provider credential (10.023291ms)
+✔ v0.12.37 keeps hybrid unavailable until its embedding provider can really run (9.714292ms)
+✔ v0.12.37 ingests immutable source revisions as Evidence and candidates, never reviewed context (10.730958ms)
+✔ v0.12.37 ingests only bounded readable files and makes stale reviewed claims explicit (16.268125ms)
+✔ v0.12.37 keeps temporal conflict abstention and schedules only bounded maintenance (10.717666ms)
+✔ v0.12.37 exports replayable schema-3 bundles and turns merge collisions into candidates (19.793875ms)
+✔ portable bundles rehydrate Workflow JSON definitions under the receiving Experience domain (20.2545ms)
+✔ bundle directory transport writes only a verified portable JSON envelope (17.406875ms)
+✔ eligible vector retrieval persists safe configuration, caches embeddings, and opens a bounded circuit (23.370917ms)
+✔ semantic review packet is fragment-bound and a routeable Prompt Procedure remains Markdown-native (20.084166ms)
+✔ more-specific memory scopes shadow parent topics while working notes remain opt-in (11.592ms)
+✔ scope envelopes keep team data opt-in, audience-bound, and separate from personal/project context (10.528667ms)
+✔ global Knowledge is read only when explicitly requested, not as a project fallback (9.786917ms)
+ℹ tests 71
+ℹ suites 0
+ℹ pass 71
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 6428.473083
+ℹ start of coverage report
+ℹ ------------------------------------------------------------------------------
+ℹ file                          | line % | branch % | funcs % | uncovered lines
+ℹ ------------------------------------------------------------------------------
+ℹ capability                    |        |          |         | 
+ℹ  craft-experience             |        |          |         | 
+ℹ   capability.ts               | 100.00 |   100.00 |  100.00 | 
+ℹ   contribution.ts             | 100.00 |   100.00 |  100.00 | 
+ℹ   evaluation-model-profile.ts | 100.00 |   100.00 |  100.00 | 
+ℹ   workflow-evolution.ts       | 100.00 |   100.00 |  100.00 | 
+ℹ ------------------------------------------------------------------------------
+ℹ all files                     | 100.00 |   100.00 |  100.00 | 
+ℹ ------------------------------------------------------------------------------
+ℹ end of coverage report

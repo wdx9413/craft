@@ -101,7 +101,8 @@ test("settings, usage, MCP, and Workbench surfaces are exposed", async () => {
     assert.equal(app.handle({ method: "PATCH", path: "/api/settings", token: "token", body: JSON.stringify({ theme: "light" }) }).status, 200);
     assert.equal(app.handle({ method: "POST", path: "/api/settings/reset", token: "token", body: "{}" }).status, 200);
     const html = app.handle({ method: "GET", path: "/" });
-    assert.match(html.body, /平台设置与 Token 用量/u);
+    assert.match(html.body, /Craft Workbench/u);
+    assert.deepEqual(html, app.handle({ method: "GET", path: "/workbench" }));
     assert.equal(app.handle({ method: "GET", path: "/api/settings" }).status, 401);
     assert.equal(app.handle({ method: "GET", path: "/api/settings", token: "token", origin: "http://evil" }).status, 403);
     const mcp = new McpServer(service, "full");

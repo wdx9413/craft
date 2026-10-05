@@ -1,3 +1,4 @@
+import { validateGraphControl } from "./procedure-graph.ts";
 /**
  * The routeable Procedure store for Experience.
  *
@@ -8,12 +9,13 @@
  * Procedures remain Markdown-native. All three stay separate from Skill
  * installation and active Capability Workflows.
  */
-import { mkdirSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import type { CraftStore, JsonObject } from "../../core/infrastructure/store.ts";
-import { stableDigest, payload } from "../../core/digest.ts";
+import type { CraftStore, JsonObject } from "../../common/craft-common-store-local/src/store.ts";
+import { stableDigest, payload } from "../../common/craft-common-base/src/digest.ts";
 import { ProcedureDefinitionStore, procedureDefinitionRef, type ProcedureDefinition, type ProcedureKind } from "./procedure-definition.ts";
-import { scopeEnvelope } from "../../core/scope-policy.ts";
+import { ProcedurePlanner, validateProcedureComposition } from "./procedure-composition.ts";
+import { scopeEnvelope } from "../../common/craft-common-base/src/scope-policy.ts";
 
 const STAGES = ["shadow", "held_out", "signoff", "canary"] as const;
 type Stage = typeof STAGES[number];
@@ -52,14 +54,19 @@ export class ProcedureStore {
     if (!KINDS.has(procedureKind)) throw new Error("Experience Procedure kind is unsupported");
     const scenarioSignature = args.scenario_signature ?? request.scenario_signature;
     if (!scenarioSignature || typeof scenarioSignature !== "object" || Array.isArray(scenarioSignature)) throw new Error("Experience Procedure requires Scenario Signature");
+    const composition = proposal.composition === undefined ? null : validateProcedureComposition(procedureKind, proposal.composition, proposal.steps);
+    const graph = proposal.graph as JsonObject | null;
+    const control = graph?.graph_control === undefined ? null : validateGraphControl(graph.graph_control, graph.nodes, graph.edges);
     const procedureScope = this.scope(request);
     const envelope = scopeEnvelope(args.scope_envelope ?? request.scope_envelope, scopeRef(procedureScope));
     const identity = {
       proposal_id: proposal.id, proposal_version: proposal.version, request_id: request.id, request_version: request.version,
       procedure_kind: procedureKind, scenario_signature: scenarioSignature,
       scope: procedureScope, scope_envelope: envelope,
+      ...(composition ? { entrypoints: composition.entries, exits: composition.exits } : {}),
+      ...(control ? { scenario_id: control.scenario_id, graph_control: control, entrypoints: (control.entries as JsonObject[]).map(entry => ({ ...entry, routes: (control.subscenarios as JsonObject[]).filter(s => s.entry_id === entry.id).map(s => ({ exit_id: s.exit_id, subscenario_id: s.id })) })), exits: control.exits } : {}),
       trigger: text(args.trigger ?? request.scenario_key, "trigger"), preconditions: strings(args.preconditions ?? [], "preconditions"),
-      allowed_effects: strings(args.allowed_effects ?? ["read"], "allowed_effects", 1),
+      allowed_effects: strings(args.allowed_effects ?? (control ? (graph!.nodes as JsonObject[]).map(node => node.side_effect) : composition ? (proposal.steps as JsonObject[]).map(step => step.side_effect) : ["read"]), "allowed_effects", 1),
       acceptance_ref: text(args.acceptance_ref ?? request.output_contract_ref, "acceptance_ref"),
       failure_disposition: text(args.failure_disposition ?? "checkpoint_and_handoff", "failure_disposition"),
       evidence_ids: strings(args.evidence_ids ?? (request.observation_refs as JsonObject[]).flatMap((item) => item.evidence_ids as string[]), "evidence_ids", 1),
@@ -98,22 +105,54 @@ export class ProcedureStore {
 
   /** Persist one independently evidenced promotion gate. Gates are ordered and append-only. */
   gate(args: JsonObject): JsonObject {
+    return this.store.transaction(() => this.recordGate(args));
+  }
+
+  private recordGate(args: JsonObject): JsonObject {
     const procedure = this.store.get("experience_procedure", text(args.procedure_id, "procedure_id"));
     const stage = text(args.stage, "stage") as Stage; if (!(STAGES as readonly string[]).includes(stage)) throw new Error("Experience Procedure gate is unsupported");
-    const expected = STAGES.indexOf(stage); const completed = Array.isArray(procedure.completed_gates) ? procedure.completed_gates.map(String) : [];
-    if (stage !== "shadow" && !completed.includes(STAGES[expected - 1]!)) throw new Error("Experience Procedure gate order is invalid");
+    const expected = STAGES.indexOf(stage);
+    const invalidated = procedure.lifecycle === "rejected" || procedure.lifecycle === "rolled_back";
+    const completed = !invalidated && Array.isArray(procedure.completed_gates) ? procedure.completed_gates.map(String) : [];
     const evidenceIds = strings(args.evidence_ids, "evidence_ids", 1); for (const evidenceId of evidenceIds) this.assertEvidence(evidenceId);
     const passed = args.passed === true;
     const identity = { procedure_id: procedure.id, procedure_version: procedure.version, stage, evidence_ids: evidenceIds, passed, verdict: text(args.verdict ?? (passed ? "passed" : "failed"), "verdict") };
-    const id = String(args.gate_id ?? `experience_procedure_gate_${stableDigest(identity).slice(-20)}`); const existing = this.store.find("experience_procedure_gate", id);
-    if (existing) { if (existing.identity_digest !== stableDigest(identity)) throw new Error("Experience Procedure gate idempotency conflict"); return { gate: existing, procedure, idempotent: true }; }
-    const gate = this.store.create("experience_procedure_gate", id, { ...identity, identity_digest: stableDigest(identity) });
-    const next = passed ? [...new Set([...completed, stage])] : completed;
+    // A retry binds the request and immutable asset, not the version the first
+    // successful transition itself incremented. Replays never reapply a gate.
+    const requestDigest = stableDigest({ ...identity, procedure_version: null, asset_digest: procedure.identity_digest });
+    const id = String(args.gate_id ?? `experience_procedure_gate_${requestDigest.slice(-20)}`);
+    const existing = this.store.find("experience_procedure_gate", id);
+    if (existing) {
+      const matches = existing.request_digest === undefined
+        ? existing.identity_digest === stableDigest({ ...identity, procedure_version: existing.procedure_version })
+          && this.store.get("experience_procedure", String(procedure.id), Number(existing.procedure_version)).identity_digest === procedure.identity_digest
+        : existing.request_digest === requestDigest;
+      if (!matches) throw new Error("Experience Procedure gate idempotency conflict");
+      return { gate: existing, procedure, idempotent: true };
+    }
+    if (args.expected_version !== undefined && (!Number.isSafeInteger(args.expected_version) || args.expected_version !== procedure.version)) throw new Error("Experience Procedure expected_version is invalid or stale");
+    if (!STAGES.slice(0, expected).every(prior => completed.includes(prior))) throw new Error("Experience Procedure gate order is invalid");
+    if (passed && Array.isArray(procedure.entrypoints)) {
+      for (const entry of procedure.entrypoints as JsonObject[]) for (const route of entry.routes as JsonObject[]) {
+        const covered = evidenceIds.some(id => {
+          const metadata = this.store.get("evidence", id).metadata as JsonObject | undefined;
+          return metadata?.procedure_definition_digest === procedure.definition_digest && metadata?.entry_id === entry.id
+            && metadata?.exit_id === route.exit_id && (route.subscenario_id === undefined || metadata?.subscenario_id === route.subscenario_id) && metadata?.stage === stage && metadata?.status === "passed";
+        });
+        if (!covered) throw new Error(`Composition gate requires route Evidence: ${entry.id}/${route.exit_id}/${stage}`);
+      }
+    }
+    const gate = this.store.create("experience_procedure_gate", id, { ...identity, identity_digest: stableDigest(identity), request_digest: requestDigest });
+    // A failure invalidates the complete qualification. Rerunning an earlier
+    // stage invalidates downstream passes even when the new result is positive.
+    const next = passed ? [...STAGES.slice(0, expected), stage] : [];
     const lifecycle = !passed ? (stage === "canary" ? "rolled_back" : "rejected") : stage === "canary" ? "routeable" : "candidate";
     const saved = this.store.save("experience_procedure", String(procedure.id), { ...payload(procedure), completed_gates: next, lifecycle, routeable: lifecycle === "routeable", rollback_gate_id: lifecycle === "rolled_back" ? gate.id : null });
     this.refreshMarkdown(saved);
     return { gate, procedure: saved, idempotent: false };
   }
+
+  plan(args: JsonObject): JsonObject { return new ProcedurePlanner(this.store).plan(args); }
 
   get(args: JsonObject): JsonObject { return { procedure: this.store.get("experience_procedure", text(args.procedure_id, "procedure_id")) }; }
 
@@ -127,16 +166,36 @@ export class ProcedureStore {
     const procedure = this.store.get("experience_procedure", text(args.procedure_id, "procedure_id"));
     if (procedure.lifecycle !== "routeable" || procedure.routeable !== true) throw new Error("Only routeable Experience Procedures can be exported as Skills");
     const exportId = String(args.export_id ?? `experience_skill_export_${stableDigest({ procedure_id: procedure.id, version: procedure.version }).slice(-20)}`);
-    const existing = this.store.find("experience_skill_export", exportId); if (existing) return { export: existing, idempotent: true };
-    const source = this.store.contentStore.readCompatSync(procedure.content_ref as never).body;
+    const definition = procedureDefinitionRef(procedure.definition_ref) ? this.definitions.read(procedure.definition_ref) : null;
+    if (!procedure.content_ref && !definition) throw new Error("Procedure has no checked export content");
+    // User-authored configurations keep checked JSON as their content authority.
+    const source = procedure.content_ref ? this.store.contentStore.readCompatSync(procedure.content_ref as never).body : this.markdown(procedure);
     const name = text(args.skill_name ?? String(procedure.id).replace(/^experience_procedure_/u, "craft-procedure-"), "skill_name");
     const markdown = `---\nname: ${yaml(name)}\ndescription: ${yaml(`Disabled Craft Procedure export: ${String(procedure.title)}`)}\ncraft_procedure_id: ${yaml(String(procedure.id))}\ncraft_procedure_version: ${Number(procedure.version)}\nenabled: false\n---\n\n# ${String(procedure.title)}\n\n${source}`;
-    const directory = resolve(this.store.paths.experienceDir, "skills", exportId); mkdirSync(directory, { recursive: true, mode: 0o700 });
-    const path = join(directory, "SKILL.md"); writeFileSync(path, markdown, { encoding: "utf8", mode: 0o600 });
-    const definition = procedureDefinitionRef(procedure.definition_ref) ? this.definitions.read(procedure.definition_ref) : null;
+    const contentDigest = stableDigest(markdown);
+    const existing = this.store.find("experience_skill_export", exportId);
+    if (existing) {
+      if (existing.procedure_id !== procedure.id || existing.procedure_version !== procedure.version || existing.content_digest !== contentDigest) throw new Error("Experience Skill export idempotency conflict");
+      return { export: existing, idempotent: true };
+    }
+    const root = resolve(this.store.paths.experienceDir);
+    if (lstatSync(root).isSymbolicLink()) throw new Error("Experience export root must not be a symbolic link");
+    const skills = join(root, "skills"); mkdirSync(skills, { recursive: true, mode: 0o700 });
+    if (lstatSync(skills).isSymbolicLink()) throw new Error("Experience skills directory must not be a symbolic link");
+    // IDs are ledger keys, never paths. Claim a new directory exclusively;
+    // pre-existing files/directories (including symlinks) belong to their owner.
+    const directory = join(skills, stableDigest(exportId).slice(7));
+    mkdirSync(directory, { mode: 0o700 });
+    const path = join(directory, "SKILL.md");
     const definitionPath = definition ? join(directory, "PROCEDURE.json") : null;
-    if (definitionPath) writeFileSync(definitionPath, `${JSON.stringify(definition, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
-    return { export: this.store.create("experience_skill_export", exportId, { procedure_id: procedure.id, procedure_version: procedure.version, path, definition_path: definitionPath, content_digest: stableDigest(markdown), enabled: false, status: "draft" }), idempotent: false };
+    try {
+      writeFileSync(path, markdown, { encoding: "utf8", mode: 0o600, flag: "wx" });
+      if (definitionPath) writeFileSync(definitionPath, `${JSON.stringify(definition, null, 2)}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
+      return { export: this.store.create("experience_skill_export", exportId, { procedure_id: procedure.id, procedure_version: procedure.version, path, definition_path: definitionPath, content_digest: contentDigest, enabled: false, status: "draft" }), idempotent: false };
+    } catch (error) {
+      rmSync(directory, { recursive: true, force: true });
+      throw error;
+    }
   }
 
   private scope(request: JsonObject): string {
@@ -155,8 +214,8 @@ export class ProcedureStore {
   private definition(id: string, kind: ProcedureKind, identity: JsonObject, proposal: JsonObject): ProcedureDefinition {
     const graph = proposal.graph as JsonObject | null;
     const definition = kind === "workflow"
-      ? { inputs: proposal.inputs ?? [], steps: proposal.steps ?? [] }
-      : { inputs: proposal.inputs ?? [], nodes: graph?.nodes ?? [], edges: graph?.edges ?? [], outputs: graph?.outputs ?? {}, checkpoint_policy: graph?.checkpoint_policy ?? { mode: "step" } };
+      ? { inputs: proposal.inputs ?? [], steps: proposal.steps ?? [], ...(proposal.composition === undefined ? {} : { composition: proposal.composition }) }
+      : { inputs: proposal.inputs ?? [], nodes: graph?.nodes ?? [], edges: graph?.edges ?? [], outputs: graph?.outputs ?? {}, checkpoint_policy: graph?.checkpoint_policy ?? { mode: "step" }, ...(graph?.graph_control === undefined ? {} : { graph_control: graph.graph_control }) };
     return {
       schema_version: "craft.procedure.v1", procedure_id: id, procedure_version: 1, kind,
       scope: String(identity.scope), trigger: String(identity.trigger), preconditions: identity.preconditions as string[],
@@ -167,7 +226,8 @@ export class ProcedureStore {
   }
 
   private markdown(value: JsonObject): string {
-    return `# ${String(value.title)}\n\n## Trigger\n${String(value.trigger)}\n\n## Preconditions\n${(value.preconditions as string[]).map((item) => `- ${item}`).join("\n") || "- None"}\n\n## Allowed effects\n${(value.allowed_effects as string[]).map((item) => `- ${item}`).join("\n")}\n\n## Acceptance\n${String(value.acceptance_ref)}\n\n## Failure disposition\n${String(value.failure_disposition)}\n\n## Evidence\n${(value.evidence_ids as string[]).map((item) => `- ${item}`).join("\n")}\n\n${String(value.description)}`;
+    const contracts = Array.isArray(value.entrypoints) ? `\n\n## Entry / Exit contracts\n\n\`\`\`json\n${JSON.stringify({ entries: value.entrypoints, exits: value.exits }, null, 2)}\n\`\`\`` : "";
+    return `# ${String(value.title)}\n\n## Trigger\n${String(value.trigger)}\n\n## Preconditions\n${((value.preconditions ?? []) as string[]).map((item) => `- ${item}`).join("\n") || "- None"}\n\n## Allowed effects\n${((value.allowed_effects ?? []) as string[]).map((item) => `- ${item}`).join("\n")}\n\n## Acceptance\n${String(value.acceptance_ref)}\n\n## Failure disposition\n${String(value.failure_disposition)}\n\n## Evidence\n${((value.evidence_ids ?? []) as string[]).map((item) => `- ${item}`).join("\n")}\n\n${String(value.description)}${contracts}`;
   }
 
   /** The Markdown review view stays human-inspectable after promotion. */

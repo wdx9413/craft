@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { stableDigest } from "../core/digest.ts";
 import { McpServer } from "../core/mcp.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftService } from "../core/service.ts";
@@ -229,5 +230,36 @@ test("Experience Ledger rejects malformed, conflicting, uncalibrated, and stale 
     assert.equal((kernel.decide({ intervention_id: signed.id, decision: "accept", signoff_id: "exact", reason: "x" }).intervention as JsonObject).lifecycle, "accepted");
     assert.throws(() => kernel.decide({ intervention_id: signed.id, decision: "reject", reason: "x" }), /without rollback/);
     assert.equal((kernel.evaluate({ intervention_id: proposal.id, assessment_id: "inconclusive" }).intervention as JsonObject).lifecycle, "inconclusive"); assert.throws(() => kernel.evaluate({ intervention_id: proposal.id, assessment_id: "eligible" }), /Only a draft/);
+  } finally { await close(f); }
+});
+
+
+test("parallel capacity remains bounded and a pending write excludes parallel reads", async () => {
+  const f = await fixture();
+  try {
+    const work_items = [{ id: "a", effect: "local_write", acceptance_digest: "a" }, { id: "b", effect: "read_only", acceptance_digest: "b" }];
+    for (const max_parallel of [0, 9, 1.5]) assert.throws(() => f.service.durableActionLoopCreate({ work_loop_id: "loop", work_items, max_parallel }), /max_parallel/);
+    const loop = f.service.durableActionLoopCreate({ action_loop_id: "parallel", work_loop_id: "loop", work_items, max_parallel: 2 }).loop as JsonObject;
+    assert.throws(() => f.service.durableActionLoopCreate({ action_loop_id: "parallel", work_loop_id: "loop", work_items: work_items.map(item => ({ ...item, effect: "read_only" })), max_parallel: 2 }), /conflict/);
+    f.service.durableActionLoopPropose({ action_loop_id: loop.id, item_key: "a", kind: "execute", action_digest: "a" });
+    assert.equal(f.service.durableActionLoopNext({ action_loop_id: loop.id }).next_action, "await_receipt");
+    f.store.save("durable_action_loop", String(loop.id), { ...loop, max_parallel: undefined });
+    assert.equal(f.service.durableActionLoopNext({ action_loop_id: loop.id }).next_action, "await_receipt");
+  } finally { await close(f); }
+});
+
+
+test("serial loop creation retains the pre-parallel identity and replays old records", async () => {
+  const f = await fixture();
+  try {
+    const work = f.store.get("verified_work_loop", "loop"), snapshot = f.store.get("state_snapshot", "before");
+    const identity = { work_loop_id: work.id, work_loop_version: work.version, task_id: work.task_id, task_run_id: work.task_run_id,
+      workspace_id: work.workspace_id, initial_snapshot_id: snapshot.id, initial_snapshot_version: snapshot.version, initial_snapshot_digest: snapshot.snapshot_digest,
+      items: [{ id: "legacy", depends_on: [], acceptance_digest: "legacy" }] };
+    const id = `durable_action_loop_${stableDigest(identity).slice(-20)}`;
+    f.store.create("durable_action_loop", id, { ...identity, identity_digest: stableDigest(identity), trace_id: `durable_action_loop:${id}`, lifecycle: "active", latest_snapshot_id: snapshot.id, latest_snapshot_version: snapshot.version, latest_snapshot_digest: snapshot.snapshot_digest, needs_replan_reason: null });
+    const args = { work_loop_id: "loop", work_items: [{ id: "legacy", acceptance_digest: "legacy" }] };
+    const replay = f.service.durableActionLoopCreate(args); assert.equal(replay.idempotent, true); assert.equal((replay.loop as JsonObject).id, id);
+    assert.equal(f.service.durableActionLoopCreate({ ...args, max_parallel: 1 }).idempotent, true);
   } finally { await close(f); }
 });

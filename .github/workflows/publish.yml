@@ -28,4 +28,14 @@ jobs:
       # version no other manifest agrees with is worth failing loudly and early.
       - run: pnpm run version:check
       - run: pnpm test
+      # Publish bottom-up so every package dependency is resolvable when the
+      # root harness is published. npm trusted publishing must be configured
+      # for these package names before the release workflow is enabled.
+      - run: pnpm --dir common/craft-common-store-local publish --provenance --access public --no-git-checks
+      - run: pnpm --dir common/craft-common-base publish --provenance --access public --no-git-checks
+      - run: pnpm --dir common/craft-common-log publish --provenance --access public --no-git-checks
+      - run: pnpm --dir capability/craft-knowledge publish --provenance --access public --no-git-checks
+      - run: pnpm --dir capability/craft-memory publish --provenance --access public --no-git-checks
+      - run: pnpm --dir capability/craft-experience publish --provenance --access public --no-git-checks
+      - run: pnpm --dir capability/craft-codebase publish --provenance --access public --no-git-checks
       - run: pnpm publish --provenance --access public --no-git-checks

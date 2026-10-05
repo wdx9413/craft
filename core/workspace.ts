@@ -93,6 +93,18 @@ export class WorkspaceState {
     return { workspace: this.store.get("workspace", workspaceId), checkpoints: this.checkpoints(workspaceId), changes: this.changes(workspaceId) };
   }
 
+  /** Read only the declared paths; never infer freshness from a checkpoint id. */
+  freshness(args: JsonObject): JsonObject {
+    const workspace = this.store.get("workspace", identifier(args.workspace_id, "workspace_id", "workspace"));
+    if (!workspace.latest_checkpoint_id) return { status: "unavailable", reason: "checkpoint_required", changed_paths: [] };
+    const checkpoint = this.checkpointFor(String(workspace.id), String(workspace.latest_checkpoint_id));
+    const entries = (workspace.include_paths as string[]).flatMap((path) => files(String(workspace.root_path), path));
+    const before = new Map((checkpoint.entries as SnapshotEntry[]).map((entry) => [entry.path, entry.digest]));
+    const after = new Map(entries.map((entry) => [entry.path, entry.digest]));
+    const changed = [...new Set([...before.keys(), ...after.keys()])].filter((path) => before.get(path) !== after.get(path)).sort();
+    return { workspace_id: workspace.id, checkpoint_id: checkpoint.id, status: changed.length ? "changed" : "current", changed_paths: changed };
+  }
+
   checkpoint(args: JsonObject): JsonObject {
     const workspaceId = identifier(args.workspace_id, "workspace_id", "workspace");
     const workspace = this.store.get("workspace", workspaceId);

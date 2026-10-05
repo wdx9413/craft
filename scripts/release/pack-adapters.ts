@@ -1,7 +1,8 @@
-import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deflateRawSync } from "node:zlib";
+import { externalMarketplaceProducts } from "../../core/release-catalog.ts";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -76,6 +77,31 @@ async function collect(root: string, current = root): Promise<string[]> {
 const manifest = JSON.parse(await readFile(join(projectRoot, "package.json"), "utf8")) as { version: string };
 const outputDir = join(projectRoot, "dist");
 await mkdir(outputDir, { recursive: true });
+
+// The compiled adapter lives under the root artifact tree, never beside sources.
+const deepseekOutput = join(outputDir, "adapters", "deepseek-harness");
+await mkdir(deepseekOutput, { recursive: true });
+for (const name of ["package.json", "README.md", "cordis.patch.yml", "index.ts"]) {
+  await cp(join(projectRoot, "adapters", "deepseek-harness", name), join(deepseekOutput, name));
+}
+
+// Each DSH product is independently installable and runs its own local MCP bundle.
+for (const product of externalMarketplaceProducts()) {
+  const target = join(outputDir, "adapters", "dsh", product.name);
+  await mkdir(target, { recursive: true });
+  await cp(join(deepseekOutput, "dist"), join(target, "dist"), { recursive: true });
+  await mkdir(join(target, "runtime"), { recursive: true });
+  for (const file of ["craft-mcp.cjs", "craft-parser-worker.js"]) await cp(join(projectRoot, "dist", "plugin", file), join(target, "runtime", file));
+  await cp(join(projectRoot, "plugins", product.name, "skills", product.name), join(target, "skills", product.name), { recursive: true });
+  const selected = product.name.replace("craft-", "");
+  await writeFile(join(target, "package.json"), JSON.stringify({ name: `dsh-${product.name}`, version: manifest.version, type: "module", main: "dist/index.js", peerDependencies: { "@deepseek-ai/cordis": "*", "@deepseek-ai/dsh-tools": "*" }, dsh: { bundle: { patch: "./cordis.patch.yml" } } }, null, 2) + "\n");
+  await writeFile(join(target, "cordis.patch.yml"), `- insert:\n    - id: ${product.name}\n      name: dsh-${product.name}\n      config:\n        product: ${selected}\n`);
+  await writeFile(join(target, "README.md"), `# ${product.name} for DSH\n\nInstall this directory with dsh plugin --profile default add <directory>.\nUse craft_${selected}_tools to discover MCP schemas, then craft_${selected}_call.\nFollow skills/${product.name}/SKILL.md; the complete Skill is bundled here.\nThe local runtime works without npx downloads or Hooks. CRAFT_DATA_DIR may be shared with other Hosts.\n`);
+  const entries: Entry[] = [];
+  for (const file of await collect(target)) entries.push({ name: file, data: await readFile(join(target, file)) });
+  await writeFile(join(outputDir, `${product.name}-dsh-v${manifest.version}.zip`), archive(entries));
+  await cp(target, join(projectRoot, "plugins", product.name, "dsh"), { recursive: true });
+}
 
 for (const adapter of adapters) {
   const root = join(projectRoot, adapter.directory);

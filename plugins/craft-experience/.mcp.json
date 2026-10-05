@@ -1,1 +1,13 @@
-{"mcpServers":{"craft-experience":{"command":"node","args":["dist/plugin/craft-mcp.cjs","--product","experience"],"cwd":"."}}}
+{
+  "mcpServers": {
+    "craft-experience": {
+      "command": "node",
+      "args": [
+        "dist/plugin/craft-mcp.cjs",
+        "--product",
+        "experience"
+      ],
+      "cwd": "."
+    }
+  }
+}

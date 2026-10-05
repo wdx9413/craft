@@ -71,11 +71,67 @@ const schemaFor = (name: string): JsonObject => {
   return { type: "string" };
 };
 
-const objectSchema = (required: string[] = [], optional: string[] = []): JsonObject => ({ type: "object",
-  properties: Object.fromEntries([...required, ...optional].map((name) => [name, schemaFor(name)])), required,
+// Domain contracts override the legacy name heuristic. Keep ambiguous names local
+// to their tool so fixing one product cannot change unrelated admin operations.
+const TYPES_BY_TOOL: Readonly<Record<string, Readonly<Record<string, ParamType>>>> = {
+  craft_procedure_configuration_save: { scope: "string", definition: "object", scope_envelope: "object", principal_ids: "array" },
+  craft_knowledge_asset_inspect: { before_version: "integer", principal_ids: "array" },
+  craft_knowledge_asset_restore: { principal_ids: "array" },
+  craft_memory_asset_inspect: { before_version: "integer", principal_ids: "array" },
+  craft_memory_asset_restore: { principal_ids: "array" },
+  craft_experience_asset_inspect: { before_version: "integer", principal_ids: "array" },
+  craft_experience_asset_restore: { principal_ids: "array" },
+  craft_codebase_asset_inspect: { before_version: "integer", principal_ids: "array" },
+  craft_codebase_asset_restore: { principal_ids: "array" },
+
+  craft_context_open: { members: "array", principal_ids: "array", include_codebase: "boolean", include_global: "boolean", include_working_notes: "boolean" },
+  craft_evidence_record: { confidence: "string" },
+  craft_component_diagnose: { observed_tool_names: "array" },
+  craft_context_resolution_feedback: { members: "array" },
+  craft_retrieval_adapter_evaluate: { dataset: "object", metrics: "object" },
+  craft_context_resolution_resolve: { members: "array", principal_ids: "array", include_global: "boolean", include_working_notes: "boolean", history_view: "boolean" },
+  craft_decision_context_gate_open: { members: "array", require_context: "boolean" },
+  craft_knowledge_search: { scope: "string", include_candidates: "boolean", include_global: "boolean", principal_ids: "array" },
+  craft_knowledge_claim_save: { scope: "string", scope_envelope: "object" },
+  craft_knowledge_source_register: { scope_envelope: "object" },
+  craft_knowledge_source_ingest: { max_files: "integer", max_chars_per_fragment: "integer" },
+  craft_knowledge_auto_review: { auto_promote: "boolean" },
+  craft_knowledge_memory_bundle: { allow_local_write: "boolean", include_candidates: "boolean", include_global: "boolean" },
+  craft_memory_capture_user_statement: { explicit_consent: "boolean", auto_accept: "boolean", scope_envelope: "object" },
+  craft_memory_candidate_propose: { confidence: "string", scope_envelope: "object" },
+  craft_memory_ledger_get: { principal_ids: "array" },
+  craft_memory_ledger_list: { include_history: "boolean", principal_ids: "array" },
+  craft_memory_maintenance_run: { principal_ids: "array" },
+  craft_memory_maintenance_schedule: { budget_available: "boolean", idle: "boolean", model_available: "boolean" },
+  craft_experience_observe: { verification: "object", scope: "string", scenario_signature: "object", execution_shape: "array" },
+  craft_experience_procedure_draft: { design_axes: "array", observation_ids: "array" },
+  craft_experience_procedure_submit: { composition: "object", graph_control: "object", inputs: "array", steps: "array", nodes: "array", edges: "array", outputs: "object", checkpoint_policy: "object" },
+  craft_procedure_create: { scenario_signature: "object", preconditions: "array", scope_envelope: "object" },
+  craft_host_session_open: { environment_fingerprint: "string", policy_fingerprint: "string", capability_fingerprint: "string", model_fingerprint: "string", budget_fingerprint: "string" },
+  craft_outcome_observer_observe: { environment_fingerprint: "string" },
+  craft_procedure_invocation_transition: { scope: "string", expected_version: "integer", principal_ids: "array" },
+  craft_procedure_invocation_bind: { model_fingerprint: "string", budget_fingerprint: "string", scope: "string", expected_version: "integer", principal_ids: "array", procedure_version: "integer", input_refs: "object", allowed_effects: "array", max_dispatches: "integer", ttl_ms: "integer" },
+  craft_procedure_invocation_dispatch: { scope: "string", expected_version: "integer", principal_ids: "array", precondition_evidence: "object" },
+  craft_procedure_invocation_report: { scope: "string", expected_version: "integer", principal_ids: "array", output_refs: "object", acceptance_evidence_ids: "array" },
+  craft_procedure_invocation_resume: { scope: "string", expected_version: "integer", principal_ids: "array" },
+  craft_procedure_invocation_get: { scope: "string", expected_version: "integer", principal_ids: "array" },
+  craft_procedure_invocation_evaluate: { scope: "string", expected_version: "integer", principal_ids: "array", baseline_ids: "array", candidate_ids: "array" },
+  craft_procedure_plan: { procedure_version: "integer", scope: "string", input_refs: "object", precondition_evidence: "object", principal_ids: "array" },
+  craft_procedure_gate: { passed: "boolean" },
+  craft_procedure_list: { scope: "string" },
+  craft_experience_procedure_gate: { passed: "boolean" },
+  craft_experience_procedure_projection_list: { scope: "string" },
+  craft_experience_procedure_projection_draft: { scenario_signature: "object", preconditions: "array" },
+  craft_codebase_analysis_import: { analysis: "object" },
+  craft_codebase_context_slice: { node_ids: "array" },
+  craft_codebase_impact_query: { max_depth: "integer" },
+};
+
+const objectSchema = (toolName: string, required: string[] = [], optional: string[] = []): JsonObject => ({ type: "object",
+  properties: Object.fromEntries([...required, ...optional].map((name) => [name, TYPES_BY_TOOL[toolName]?.[name] ? { type: TYPES_BY_TOOL[toolName][name] } : schemaFor(name)])), required,
   additionalProperties: false });
 
 export const tool = (name: string, description: string, required: string[] = [], readOnly = false,
   optional: string[] = []): Tool => ({
-  name, description, inputSchema: objectSchema(required, optional), ...(readOnly ? { annotations: { readOnlyHint: true } } : {}),
+  name, description, inputSchema: objectSchema(name, required, optional), ...(readOnly ? { annotations: { readOnlyHint: true } } : {}),
 });

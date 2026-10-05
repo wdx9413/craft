@@ -1,0 +1,83 @@
+/* Shares Craft's canonical semantic tokens; no second theme or runtime. */
+.entry-shell { position: fixed; inset: 0; z-index: 20; background: var(--bg); color: var(--text); display: flex; flex-direction: column; font: 14px/1.6 var(--font); }
+.entry-shell[hidden], .app[hidden] { display: none; }
+.entry-shell button, .entry-file { cursor: pointer; border: 1px solid var(--line); background: var(--bg); color: var(--text); border-radius: 9px; padding: 8px 12px; font: inherit; }
+.entry-shell button:hover, .entry-file:hover { background: var(--bg-elevated); }
+.entry-shell button:active { transform: translateY(1px); }
+.entry-shell button:disabled { cursor: not-allowed; opacity: .5; transform: none; }
+.entry-shell :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.entry-header { min-height: 64px; display: flex; align-items: center; gap: 18px; padding: 10px 24px; border-bottom: 1px solid var(--line); }
+.entry-header .entry-brand { color: var(--accent); border: 0; font-size: 23px; font-weight: 650; padding-left: 0; }
+.entry-header .entry-command { margin: auto; color: var(--text-2); border-radius: 999px; min-width: 260px; }
+.entry-header nav { display: flex; gap: 8px; }
+.entry-shell [aria-pressed="true"], .entry-shell [aria-current="true"] { background: var(--accent-soft); border-color: var(--accent); }
+.entry-layout { flex: 1; min-height: 0; display: flex; }
+.entry-rail { flex: 0 0 220px; min-width: 0; background: var(--bg-chrome); padding: 26px 16px 16px; border-right: 1px solid var(--line); display: flex; flex-direction: column; gap: 14px; }
+.entry-shell h2 { font-size: 14px; font-weight: 550; margin: 0 0 14px; }
+.entry-task-list { flex: 1; overflow: auto; min-height: 0; }
+.entry-task-list button { display: block; width: 100%; text-align: left; margin-bottom: 6px; overflow-wrap: anywhere; background: transparent; border-color: transparent; }
+.entry-task-list [aria-current="true"] { border-left: 3px solid var(--accent); background: var(--accent-soft); }
+.entry-rail-foot { display: grid; gap: 8px; }
+.entry-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.entry-status { min-height: 30px; padding: 7px 28px; font-size: 12px; color: var(--text-2); }
+.entry-error { padding: 0 28px; color: var(--danger); overflow-wrap: anywhere; }
+.entry-error:not(:empty) { padding-bottom: 10px; }
+.entry-panels { display: flex; flex: 1; min-height: 0; overflow: auto; }
+.entry-sources { padding: 24px 28px; flex: 0 0 38%; min-width: 0; border-right: 1px solid var(--line); overflow: auto; }
+.entry-materials { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+.entry-material { display: flex; align-items: center; gap: 4px; padding: 4px 8px; background: var(--bg-inset); border-radius: 8px; max-width: 100%; overflow-wrap: anywhere; }
+.entry-material button { font-size: 12px; border: 0; background: transparent; white-space: nowrap; }
+.entry-file { display: inline-flex; max-width: 100%; gap: 10px; align-items: center; }
+.entry-file input { max-width: 180px; font-size: 12px; }
+.entry-note { color: var(--text-2); font-size: 12px; line-height: 1.7; }
+.entry-sources details { border-top: 1px solid var(--line); padding: 16px 0; }
+.entry-shell summary { cursor: pointer; font-weight: 550; overflow-wrap: anywhere; }
+.entry-sources pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.85; }
+.entry-document { flex: 1; min-width: 0; max-width: 980px; margin: 0 auto; padding: 28px 48px; width: 100%; display: flex; flex-direction: column; }
+.entry-document-meta { display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: var(--text-2); }
+.entry-document h1 { font-size: clamp(24px, 3vw, 38px); line-height: 1.35; margin: 30px 0 24px; overflow-wrap: anywhere; }
+.entry-label { color: var(--text-2); font-size: 12px; }
+.entry-shell textarea { resize: none; color: var(--text); background: var(--bg); font: inherit; line-height: 1.8; border: 1px solid var(--line); border-radius: 10px; padding: 12px; width: 100%; }
+.entry-document textarea { min-height: 280px; flex: 1; font-size: 16px; border-color: transparent; padding: 12px 0; }
+.entry-compose { border-top: 1px solid var(--line); padding: 16px 28px 10px; }
+.entry-compose > label { font-size: 12px; color: var(--text-2); }
+.entry-compose textarea { min-height: 74px; max-height: 160px; margin: 5px 0 8px; }
+.entry-compose-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.entry-compose-foot label { color: var(--text-2); font-size: 12px; }
+.entry-compose-foot select { flex: 1; min-width: 80px; max-width: 240px; background: var(--bg); color: var(--text); padding: 8px; border: 1px solid var(--line); border-radius: 8px; }
+.entry-shell .entry-primary { margin-left: auto; background: var(--primary-fill); color: var(--bg); min-width: 108px; border-radius: 999px; }
+.entry-launch { margin: auto; width: min(100%, 760px); padding: 24px 36px; }
+.entry-launch h1 { font-size: 32px; margin: 10px 0; }
+.entry-eyebrow { color: var(--accent); font-size: 12px; letter-spacing: .1em; }
+.entry-launch .entry-sources { padding: 8px 0; border: 0; }
+.entry-launch details { display: none; }
+.entry-recent { border-top: 1px solid var(--line); margin-top: 20px; padding-top: 16px; }
+.entry-recent button { margin: 0 8px 8px 0; }
+.entry-shell[data-mode="launcher"] .entry-rail { display: none; }
+.entry-shell[data-mode="launcher"] .entry-compose { width: min(100%, 760px); margin: 0 auto; }
+@media (max-width: 1000px) {
+  .entry-rail { flex-basis: 176px; }
+  .entry-header { padding: 8px 16px; gap: 10px; }
+  .entry-header .entry-command { min-width: 0; font-size: 12px; }
+  .entry-document { padding: 20px 26px; }
+}
+@media (max-width: 680px) {
+  .entry-layout { flex-direction: column; }
+  .entry-rail { flex: 0 0 auto; max-height: 150px; padding: 10px 18px; gap: 8px; overflow: auto; border-right: 0; border-bottom: 1px solid var(--line); }
+  .entry-rail > h2, .entry-rail > .entry-note { display: none; }
+  .entry-task-list, .entry-rail-foot { display: flex; gap: 6px; flex-shrink: 0; }
+  .entry-task-list button { width: auto; flex-shrink: 0; }
+  .entry-rail-foot button { font-size: 12px; }
+  .entry-main { min-height: 0; }
+  .entry-header { flex-wrap: wrap; }
+  .entry-header nav { margin-left: auto; }
+  .entry-header .entry-command { display: none; }
+  .entry-panels { display: block; }
+  .entry-sources { border-right: 0; border-bottom: 1px solid var(--line); padding: 16px 22px; }
+  .entry-compose { padding: 12px 18px; }
+  .entry-launch { padding: 16px 22px; }
+  .entry-launch h1 { font-size: 25px; }
+  .entry-document textarea { min-height: 300px; }
+}
+/* Respect reduced motion even when a shared control supplies a transition. */
+@media (prefers-reduced-motion: reduce) { .entry-shell * { transition: none !important; } }

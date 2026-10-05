@@ -25,6 +25,12 @@ function recordAll(f: Awaited<ReturnType<typeof fixture>>, verification: JsonObj
   }
 }
 
+const candidateBinding = { budget_fingerprint: "budget:one", input_fingerprint: "input:one", model_fingerprint: "model:one", acceptance_fingerprint: "accept:one", host: "codex" };
+function qualification(f: Awaited<ReturnType<typeof fixture>>, id: string, changeRef: string, conclusion: string, overrides: JsonObject = {}) {
+  const pilot = f.store.create("reference_pilot", `pilot-${id}`, { host: "codex" });
+  return f.store.create("release_qualification", id, { pilot_id: pilot.id, pilot_version: pilot.version, candidate_ref: changeRef, environment_fingerprint: "env:one", ...candidateBinding, lifecycle: "completed", conclusion, ...overrides });
+}
+
 test("v0.12.23 derives a deterministic risk-matched verification plan without executing a Host", async () => {
   const f = await fixture();
   try {
@@ -71,15 +77,35 @@ test("v0.12.23 records only planned, evidence-backed, same-environment verificat
 test("v0.12.23 requires an eligible release qualification before a candidate verification can be eligible", async () => {
   const f = await fixture();
   try {
-    const verification = f.plane.plan({ verification_id: "candidate-change", change_ref: "candidate:one", change_kinds: ["harness"], effects: ["read_only"], candidate_change: true, environment_fingerprint: "env:one", content_stored: false }).verification as JsonObject;
+    const verification = f.plane.plan({ verification_id: "candidate-change", change_ref: "candidate:one", change_kinds: ["harness"], effects: ["read_only"], candidate_change: true, environment_fingerprint: "env:one", content_stored: false, ...candidateBinding }).verification as JsonObject;
     recordAll(f, verification);
     assert.equal(f.plane.assess({ verification_id: verification.id }).verdict, "inconclusive");
-    f.store.create("release_qualification", "rejected-qualification", { conclusion: "rejected" });
+    qualification(f, "rejected-qualification", "candidate:one", "rejected");
     assert.equal(f.plane.assess({ verification_id: verification.id, release_qualification_id: "rejected-qualification" }).verdict, "rejected");
-    f.store.create("release_qualification", "eligible-qualification", { conclusion: "eligible" });
+    qualification(f, "eligible-qualification", "candidate:one", "eligible");
     const assessed = f.plane.assess({ verification_id: verification.id, release_qualification_id: "eligible-qualification" });
     assert.equal(assessed.verdict, "eligible");
     assert.equal((assessed.assessment as JsonObject).release_qualification_id, "eligible-qualification");
+  } finally { await close(f); }
+});
+
+test("candidate verification refuses qualifications from another candidate, environment, budget, input, model, acceptance or Host", async () => {
+  const f = await fixture();
+  try {
+    const plan = f.plane.plan({ change_ref: "candidate:bound", change_kinds: ["harness"], effects: ["read_only"], candidate_change: true, environment_fingerprint: "env:one", ...candidateBinding }).verification as JsonObject;
+    recordAll(f, plan);
+    for (const [field, value] of Object.entries({ candidate_ref: "other", environment_fingerprint: "env:other", budget_fingerprint: "budget:other", input_fingerprint: "input:other", model_fingerprint: "model:other", acceptance_fingerprint: "accept:other" })) {
+      const q = qualification(f, `wrong-${field}`, "candidate:bound", "eligible", { [field]: value });
+      const assessment = f.plane.assess({ verification_id: plan.id, release_qualification_id: q.id });
+      assert.equal(assessment.verdict, "inconclusive", field);
+      assert.equal((assessment.assessment as JsonObject).qualification_bound, false);
+    }
+    const wrongHost = qualification(f, "wrong-host", "candidate:bound", "eligible");
+    const pilot = f.store.get("reference_pilot", String(wrongHost.pilot_id));
+    f.store.save("reference_pilot", String(pilot.id), { host: "claude" });
+    assert.equal(f.plane.assess({ verification_id: plan.id, release_qualification_id: wrongHost.id }).verdict, "inconclusive");
+    const valid = qualification(f, "valid-bound", "candidate:bound", "eligible");
+    assert.equal(f.plane.assess({ verification_id: plan.id, release_qualification_id: valid.id }).verdict, "eligible");
   } finally { await close(f); }
 });
 
@@ -138,8 +164,8 @@ test("v0.12.23 keeps validation, idempotency conflicts, and defensive branches e
     const direct = f.plane.plan({ verification_id: "direct", change_ref: "git:direct", change_kinds: ["code"], effects: ["read_only"], environment_fingerprint: "env:one" }).verification as JsonObject;
     f.plane.record({ verification_id: direct.id, check_id: "contract", status: "inconclusive", summary: "direct planned id", environment_fingerprint: "env:one" });
 
-    const candidate = f.plane.plan({ verification_id: "assess-idempotency", change_ref: "candidate:two", change_kinds: ["harness"], effects: ["read_only"], candidate_change: true, environment_fingerprint: "env:one" }).verification as JsonObject;
-    recordAll(f, candidate); f.store.create("release_qualification", "qualification-a", { conclusion: "eligible" }); f.store.create("release_qualification", "qualification-b", { conclusion: "inconclusive" });
+    const candidate = f.plane.plan({ verification_id: "assess-idempotency", change_ref: "candidate:two", change_kinds: ["harness"], effects: ["read_only"], candidate_change: true, environment_fingerprint: "env:one", ...candidateBinding }).verification as JsonObject;
+    recordAll(f, candidate); qualification(f, "qualification-a", "candidate:two", "eligible"); qualification(f, "qualification-b", "candidate:two", "inconclusive");
     assert.equal(f.plane.assess({ assessment_id: "fixed", verification_id: candidate.id, release_qualification_id: "qualification-a" }).idempotent, false);
     assert.equal(f.plane.assess({ assessment_id: "fixed", verification_id: candidate.id, release_qualification_id: "qualification-a" }).idempotent, true);
     assert.throws(() => f.plane.assess({ assessment_id: "fixed", verification_id: candidate.id, release_qualification_id: "qualification-b" }), /idempotency/);

@@ -1,6 +1,6 @@
 {
   "name": "craft-marketplace",
-  "version": "0.12.37",
+  "version": "0.12.38",
   "interface": {
     "displayName": "Craft"
   },
@@ -16,6 +16,18 @@
         "authentication": "ON_INSTALL"
       },
       "category": "Productivity"
+    },
+    {
+      "name": "craft-context",
+      "source": {
+        "source": "local",
+        "path": "./plugins/craft-context"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
     },
     {
       "name": "craft-knowledge",

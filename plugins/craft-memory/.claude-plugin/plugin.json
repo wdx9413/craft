@@ -1,11 +1,11 @@
 {
   "name": "craft-memory",
-  "version": "0.12.37",
-  "description": "Standalone scoped and evidence-linked memory for Claude Code.",
+  "version": "0.12.38",
+  "description": "craft-memory governed context and repository tools",
   "author": {
     "name": "wdx9413"
   },
-  "skills": "./skills/craft-memory/",
+  "skills": "./skills/",
   "hooks": "./hooks/hooks.json",
   "mcpServers": {
     "craft-memory": {

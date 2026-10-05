@@ -1,0 +1,168 @@
+{
+  "date": "2026-09-28",
+  "baseline": "start-of-turn dirty workspace snapshot",
+  "affected_regressions": {
+    "passed": 84,
+    "failed": 0
+  },
+  "packaging_protocol_tests": {
+    "passed": 14,
+    "failed": 0
+  },
+  "incremental_coverage": [
+    {
+      "file": "core/component-readiness.ts",
+      "changed_lines": 1,
+      "covered_lines": 1,
+      "branch_paths": 0,
+      "covered_branch_paths": 0
+    },
+    {
+      "file": "core/durable-action-loop.ts",
+      "changed_lines": 2,
+      "covered_lines": 2,
+      "branch_paths": 3,
+      "covered_branch_paths": 3
+    },
+    {
+      "file": "core/mcp/tool-catalog.ts",
+      "changed_lines": 7,
+      "covered_lines": 7,
+      "branch_paths": 0,
+      "covered_branch_paths": 0
+    },
+    {
+      "file": "core/mcp/tool-schema.ts",
+      "changed_lines": 8,
+      "covered_lines": 8,
+      "branch_paths": 0,
+      "covered_branch_paths": 0
+    },
+    {
+      "file": "core/application/service-foundation.ts",
+      "changed_lines": 3,
+      "covered_lines": 3,
+      "branch_paths": 0,
+      "covered_branch_paths": 0
+    },
+    {
+      "file": "core/application/use-cases/durable-experience.ts",
+      "changed_lines": 6,
+      "covered_lines": 6,
+      "branch_paths": 6,
+      "covered_branch_paths": 6
+    },
+    {
+      "file": "core/application/use-cases/kernel-delegates.ts",
+      "changed_lines": 6,
+      "covered_lines": 6,
+      "branch_paths": 0,
+      "covered_branch_paths": 0
+    },
+    {
+      "file": "core/application/actions/action-handlers.ts",
+      "changed_lines": 6,
+      "covered_lines": 6,
+      "branch_paths": 5,
+      "covered_branch_paths": 5
+    },
+    {
+      "file": "core/interfaces/mcp/surface-registry.ts",
+      "changed_lines": 1,
+      "covered_lines": 1,
+      "branch_paths": 0,
+      "covered_branch_paths": 0
+    },
+    {
+      "file": "capability/craft-experience/procedure-composition.ts",
+      "changed_lines": 4,
+      "covered_lines": 4,
+      "branch_paths": 4,
+      "covered_branch_paths": 4
+    },
+    {
+      "file": "core/application/procedure-invocation.ts",
+      "changed_lines": 275,
+      "covered_lines": 275,
+      "branch_paths": 223,
+      "covered_branch_paths": 223
+    }
+  ],
+  "native_coverage": {
+    "procedure_invocation": {
+      "lines": 100,
+      "branches": 100,
+      "functions": 100
+    },
+    "procedure_composition": {
+      "lines": 100,
+      "branches": 100,
+      "functions": 100
+    }
+  },
+  "stdio": {
+    "artifact_sha256": "fa7952c237abafaa6057bcc42f1328c732e3cf38b5d45ecc2d72ba77fac3b966",
+    "reports": [
+      {
+        "product": "knowledge",
+        "status": "passed",
+        "level": "workflow_verified",
+        "transport": "stdio",
+        "protocol": "2025-11-25",
+        "tool_count": 20,
+        "calls": 17,
+        "host_session_verified": false
+      },
+      {
+        "product": "memory",
+        "status": "passed",
+        "level": "workflow_verified",
+        "transport": "stdio",
+        "protocol": "2025-11-25",
+        "tool_count": 20,
+        "calls": 9,
+        "host_session_verified": false
+      },
+      {
+        "product": "experience",
+        "status": "passed",
+        "level": "workflow_verified",
+        "transport": "stdio",
+        "protocol": "2025-11-25",
+        "tool_count": 24,
+        "calls": 40,
+        "host_session_verified": false
+      },
+      {
+        "product": "codebase",
+        "status": "passed",
+        "level": "workflow_verified",
+        "transport": "stdio",
+        "protocol": "2025-11-25",
+        "tool_count": 12,
+        "calls": 8,
+        "host_session_verified": false
+      }
+    ]
+  },
+  "real_hosts": {
+    "codex": {
+      "status": "skill_and_mcp_verified",
+      "hooks": false,
+      "thread_id": "01a0e3c7-37e0-75b3-92a7-467a58038db5",
+      "artifact_sha256": "fa7952c237abafaa6057bcc42f1328c732e3cf38b5d45ecc2d72ba77fac3b966",
+      "invocation_execution_verified": false
+    },
+    "claude": {
+      "status": "blocked",
+      "reason": "authentication_required"
+    },
+    "cursor": {
+      "status": "blocked",
+      "reason": "authentication_required"
+    }
+  },
+  "deployed": false,
+  "automatic_promotion": false,
+  "external_receipt_provenance": "host_attested"
+}

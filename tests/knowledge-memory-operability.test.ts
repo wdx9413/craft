@@ -177,8 +177,16 @@ test("component diagnosis distinguishes a reachable MCP process from a stale or 
     assert.equal(stale.runtime_reachable, true);
     assert.equal(stale.host_attachment, "bundle_or_surface_mismatch");
     assert((stale.missing_tools as string[]).includes("craft_knowledge_search"));
-    const current = f.service.componentDiagnose({ component: "experience", observed_tool_names: ["craft_component_readiness_get", "craft_experience_observe", "craft_experience_procedure_draft"] });
+    const legacyExperience = f.service.componentDiagnose({ component: "experience", observed_tool_names: ["craft_component_readiness_get", "craft_context_resolution_resolve", "craft_scope_identity_resolve_project", "craft_experience_observe", "craft_experience_procedure_draft"] });
+    assert.equal(legacyExperience.host_attachment, "bundle_or_surface_mismatch");
+    assert.deepEqual(legacyExperience.missing_tools, ["craft_procedure_get", "craft_procedure_gate", "craft_procedure_plan", "craft_procedure_invocation_bind", "craft_procedure_invocation_get"]);
+    const publishedTools = new McpServer(f.service, productSurfaceOf("experience")).tools.map((tool) => tool.name);
+    const planningOnly = f.service.componentDiagnose({ component: "experience", observed_tool_names: publishedTools.filter((name) => !name.startsWith("craft_procedure_invocation_")) });
+    assert.equal(planningOnly.host_attachment, "bundle_or_surface_mismatch");
+    assert.deepEqual(planningOnly.missing_tools, ["craft_procedure_invocation_bind", "craft_procedure_invocation_get"]);
+    const current = f.service.componentDiagnose({ component: "experience", observed_tool_names: publishedTools });
     assert.equal(current.host_attachment, "surface_matches");
+    assert.deepEqual(current.missing_tools, []);
     assert.match(String(f.service.componentDiagnose({ component: "memory" }).host_attachment), /this_mcp_process_replied/u);
     assert.throws(() => f.service.componentDiagnose({ component: "memory", observed_tool_names: [" "] }), /non-empty/u);
   } finally { await close(f); }

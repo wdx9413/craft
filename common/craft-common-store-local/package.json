@@ -1,0 +1,50 @@
+{
+  "name": "craft-common-store-local",
+  "version": "0.12.38",
+  "description": "Versioned SQLite and Markdown local persistence with Craft-compatible paths",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./store-migrations": {
+      "types": "./dist/store-migrations.d.ts",
+      "default": "./dist/store-migrations.js"
+    },
+    "./content-store": {
+      "types": "./dist/content-store.d.ts",
+      "default": "./dist/content-store.js"
+    },
+    "./store-schema": {
+      "types": "./dist/store-schema.d.ts",
+      "default": "./dist/store-schema.js"
+    },
+    "./paths": {
+      "types": "./dist/paths.d.ts",
+      "default": "./dist/paths.js"
+    },
+    "./store": {
+      "types": "./dist/store.d.ts",
+      "default": "./dist/store.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=23"
+  },
+  "dependencies": {
+    "@types/node": ">=23 <26"
+  },
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

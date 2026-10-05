@@ -88,8 +88,17 @@ export function truncateToBudget(value: string, maxTokens: number): { text: stri
   if (estimated <= maxTokens) return { text: value, truncated: false, estimated_tokens: estimated };
   // Keep the head: a truncated payload usually fails at its tail, and the head
   // preserves the shape the model needs to reason about what it is looking at.
-  const keep = Math.max(1, Math.floor([...value].length * (maxTokens / estimated)));
-  const clipped = `${[...value].slice(0, keep).join("")}…[truncated]`;
+  // Include the marker in the same estimate. Character ratios do not bound a
+  // prefix when its CJK density differs from the full payload's density.
+  const marker = maxTokens >= estimateTokens("…[truncated]") ? "…[truncated]" : "…";
+  const characters = [...value];
+  let keep = 0; let upper = characters.length;
+  while (keep < upper) {
+    const middle = Math.ceil((keep + upper) / 2);
+    if (estimateTokens(characters.slice(0, middle).join("") + marker) <= maxTokens) keep = middle;
+    else upper = middle - 1;
+  }
+  const clipped = characters.slice(0, keep).join("") + marker;
   return { text: clipped, truncated: true, estimated_tokens: estimateTokens(clipped) };
 }
 

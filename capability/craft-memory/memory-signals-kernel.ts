@@ -18,8 +18,8 @@
  * something the composition can check. Wrapping also keeps the exports stable for the two callers
  * that import the functions directly (`capability/craft-eval/suite.ts` scoring, and the tests).
  */
-import type { CraftStore } from "../../core/infrastructure/store.ts";
-import type { JsonObject } from "../../core/infrastructure/store.ts";
+import type { CraftStore } from "../../common/craft-common-store-local/src/store.ts";
+import type { JsonObject } from "../../common/craft-common-store-local/src/store.ts";
 import {
   hybridMemoryScores,
   memoryDecayWeight,

@@ -64,3 +64,42 @@ test("v0.12.29 remote MCP access validates configuration, principal shape and ro
   const badClock = policy({ now: () => "not-a-date" });
   await assert.rejects(() => badClock.authorize({ authorization: "Bearer opaque-token", secure_transport: true }), /clock/);
 });
+
+
+test("principal routing cannot run without an authorization policy", async () => {
+  const handler = createMcpHttpHandler({ handle: async () => { throw new Error("must not execute"); } }, { authorizedHandler: () => { throw new Error("must not route"); } });
+  const response = { statusCode: 0, setHeader() {}, end() {} };
+  await handler({ url: "/mcp", method: "POST", headers: {}, async *[Symbol.asyncIterator]() { yield Buffer.from("{}"); } } as never, response as never);
+  assert.equal(response.statusCode, 401);
+});
+
+test("principal routing selects only the verified handler and fails closed before reading the body", async () => {
+  let bodyReads = 0;
+  let routeCalls = 0;
+  let selectedCalls = 0;
+  const request = { url: "/mcp", method: "POST", headers: { authorization: "Bearer opaque-token" },
+    async *[Symbol.asyncIterator]() { bodyReads++; yield Buffer.from('{"tenant":"spoofed"}'); } };
+  const response = { statusCode: 0, body: "", setHeader() {}, end(value = "") { this.body = value; } };
+  const fallback = { handle: async () => { throw new Error("must not use default handler"); } };
+  const authorizedHandler = async (receipt: Awaited<ReturnType<RemoteMcpAccessPolicy["authorize"]>>) => {
+    routeCalls++;
+    assert.equal(receipt.status, "accepted");
+    assert.equal(receipt.audience, "https://craft.example.test/mcp");
+    assert.match(receipt.subject_digest, /^sha256:/);
+    return { handle: async () => { selectedCalls++; return { principal: receipt.subject_digest }; } };
+  };
+  await createMcpHttpHandler(fallback, { remoteAccess: policy(), authorizedHandler, secureTransport: () => true })(request as never, response as never);
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual([bodyReads, routeCalls, selectedCalls], [1, 1, 1]);
+  assert.equal(response.body.includes("spoofed"), false);
+
+  // Missing TLS proof must reject before dispatch or payload parsing.
+  await createMcpHttpHandler(fallback, { remoteAccess: policy(), authorizedHandler })(request as never, response as never);
+  assert.equal(response.statusCode, 401);
+  assert.deepEqual([bodyReads, routeCalls, selectedCalls], [1, 1, 1]);
+  await createMcpHttpHandler(fallback, { remoteAccess: policy(), secureTransport: () => true,
+    authorizedHandler: () => { throw new RemoteMcpAccessError("No authorized tenant route"); },
+  })(request as never, response as never);
+  assert.equal(response.statusCode, 401);
+  assert.deepEqual([bodyReads, routeCalls, selectedCalls], [1, 1, 1]);
+});

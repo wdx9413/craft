@@ -1,0 +1,28 @@
+services:
+  craft:
+    build:
+      context: ../..
+      dockerfile: deploy/components/Dockerfile
+    ports:
+      - "127.0.0.1:8787:8787"
+    volumes:
+      - ./config.json:/config/config.json:ro
+      - ${CRAFT_REMOTE_DATA:?set writable tenant data directory}:/data
+    secrets:
+      - introspection_authorization
+      - tls_key
+      - tls_cert
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+secrets:
+  introspection_authorization:
+    file: ${CRAFT_INTROSPECTION_AUTH_FILE:?set token introspection authorization file}
+  tls_key:
+    file: ${CRAFT_TLS_KEY_FILE:?set TLS private key file}
+  tls_cert:
+    file: ${CRAFT_TLS_CERT_FILE:?set TLS certificate file}

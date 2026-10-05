@@ -1,0 +1,109 @@
+{
+  "packaged": {
+    "artifact_sha256": "fba3bd43243b7b2a8dc32286e0d1abc788fe9e10259e3340de83af1cc3b00c27",
+    "reports": [
+      {
+        "product": "knowledge",
+        "status": "passed",
+        "level": "workflow_verified",
+        "transport": "stdio",
+        "schema_digest": "sha256:034d59f45297e9e5394626bbb4eb64f478cc57deaff1c7eb0889b9d62946b591",
+        "entrypoint_digest": "fba3bd43243b7b2a8dc32286e0d1abc788fe9e10259e3340de83af1cc3b00c27",
+        "protocol": "2025-11-25",
+        "tool_count": 22,
+        "calls": 22,
+        "host_session_verified": false
+      },
+      {
+        "product": "memory",
+        "status": "passed",
+        "level": "workflow_verified",
+        "transport": "stdio",
+        "schema_digest": "sha256:a39dca481803d672b0d44e06f9adf425f49932cbd3f4b7434632b2ca9c351dc2",
+        "entrypoint_digest": "fba3bd43243b7b2a8dc32286e0d1abc788fe9e10259e3340de83af1cc3b00c27",
+        "protocol": "2025-11-25",
+        "tool_count": 22,
+        "calls": 14,
+        "host_session_verified": false
+      },
+      {
+        "product": "experience",
+        "status": "passed",
+        "level": "workflow_verified",
+        "transport": "stdio",
+        "schema_digest": "sha256:c0a1d31994d963bec00eacfea6c06d7142943be76cdf0d5a0e2ff9cd9c233d87",
+        "entrypoint_digest": "fba3bd43243b7b2a8dc32286e0d1abc788fe9e10259e3340de83af1cc3b00c27",
+        "protocol": "2025-11-25",
+        "tool_count": 28,
+        "calls": 46,
+        "host_session_verified": false
+      },
+      {
+        "product": "codebase",
+        "status": "passed",
+        "level": "workflow_verified",
+        "transport": "stdio",
+        "schema_digest": "sha256:0e2994f6db145e10f93c13682ab85b290bc664d5fdf6b4b9467c7abbd266cfae",
+        "entrypoint_digest": "fba3bd43243b7b2a8dc32286e0d1abc788fe9e10259e3340de83af1cc3b00c27",
+        "protocol": "2025-11-25",
+        "tool_count": 15,
+        "calls": 13,
+        "host_session_verified": false
+      }
+    ]
+  },
+  "installed": {
+    "artifact_sha256": "fba3bd43243b7b2a8dc32286e0d1abc788fe9e10259e3340de83af1cc3b00c27",
+    "reports": [
+      {
+        "product": "knowledge",
+        "status": "passed",
+        "level": "workflow_verified",
+        "transport": "stdio",
+        "schema_digest": "sha256:034d59f45297e9e5394626bbb4eb64f478cc57deaff1c7eb0889b9d62946b591",
+        "entrypoint_digest": "fba3bd43243b7b2a8dc32286e0d1abc788fe9e10259e3340de83af1cc3b00c27",
+        "protocol": "2025-11-25",
+        "tool_count": 22,
+        "calls": 22,
+        "host_session_verified": false
+      },
+      {
+        "product": "memory",
+        "status": "passed",
+        "level": "workflow_verified",
+        "transport": "stdio",
+        "schema_digest": "sha256:a39dca481803d672b0d44e06f9adf425f49932cbd3f4b7434632b2ca9c351dc2",
+        "entrypoint_digest": "fba3bd43243b7b2a8dc32286e0d1abc788fe9e10259e3340de83af1cc3b00c27",
+        "protocol": "2025-11-25",
+        "tool_count": 22,
+        "calls": 14,
+        "host_session_verified": false
+      },
+      {
+        "product": "experience",
+        "status": "passed",
+        "level": "workflow_verified",
+        "transport": "stdio",
+        "schema_digest": "sha256:c0a1d31994d963bec00eacfea6c06d7142943be76cdf0d5a0e2ff9cd9c233d87",
+        "entrypoint_digest": "fba3bd43243b7b2a8dc32286e0d1abc788fe9e10259e3340de83af1cc3b00c27",
+        "protocol": "2025-11-25",
+        "tool_count": 28,
+        "calls": 46,
+        "host_session_verified": false
+      },
+      {
+        "product": "codebase",
+        "status": "passed",
+        "level": "workflow_verified",
+        "transport": "stdio",
+        "schema_digest": "sha256:0e2994f6db145e10f93c13682ab85b290bc664d5fdf6b4b9467c7abbd266cfae",
+        "entrypoint_digest": "fba3bd43243b7b2a8dc32286e0d1abc788fe9e10259e3340de83af1cc3b00c27",
+        "protocol": "2025-11-25",
+        "tool_count": 15,
+        "calls": 13,
+        "host_session_verified": false
+      }
+    ]
+  },
+  "running_session_reloaded": false
+}

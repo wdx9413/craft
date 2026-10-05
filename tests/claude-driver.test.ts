@@ -17,6 +17,26 @@ const success: HostExecutor = async () => ({ exitCode: 0, signal: null, stderr: 
 ].join("\n") });
 async function fixture(name: string, executor: HostExecutor = success) { const root = join(tmpdir(), `craft-claude-${name}-${process.pid}-${Date.now()}`); const store = await new CraftStore(craftPaths(root)).open(); const service = new CraftService(store); const task = service.taskOpen({ title: name, goal: "Run Claude safely" }).task as JsonObject; return { root, store, service, task, driver: new ClaudeHostKernel(store, executor) }; }
 
+test("Claude requires exactly one final success event and an intact process result", async () => {
+  const completed = JSON.stringify({ type: "result", subtype: "success" });
+  const cases = [
+    { stdout: "" }, { stdout: JSON.stringify({ type: "assistant" }) },
+    { stdout: JSON.stringify({ type: "result", subtype: "error_max_turns" }) },
+    { stdout: JSON.stringify({ type: "result", subtype: "success", is_error: true }) },
+    { stdout: `${completed}\n${completed}` }, { stdout: `${completed}\n{}` },
+    { stdout: `${JSON.stringify({ type: "error" })}\n${completed}` },
+    { stdout: completed, cancelled: true }, { stdout: completed, outputLimited: true },
+    { stdout: completed, signal: "SIGTERM" as const },
+  ];
+  for (const [index, variant] of cases.entries()) {
+    const f = await fixture(`terminal-${index}`, async () => ({ exitCode: 0, signal: null, stderr: "", timedOut: false, outputLimited: false, ...variant }));
+    try {
+      const { dispatch } = f.driver.prepare({ dispatch_id: "terminal", task_id: f.task.id, workspace: f.root, prompt: "inspect" });
+      assert.equal(((await f.driver.execute({ dispatch_id: (dispatch as JsonObject).id, prompt: "inspect" })).receipt as JsonObject).status, "failed");
+    } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+  }
+});
+
 test("Claude Driver prepares bounded read-only execution and captures a sanitized stream receipt", async () => {
   let seen: JsonObject | undefined; const f = await fixture("read", async (request) => { seen = request as unknown as JsonObject; return success(request); });
   try {

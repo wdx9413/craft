@@ -8,7 +8,7 @@ import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { CraftStore } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
-import { contentTitle, MarkdownContentStore } from "../core/infrastructure/content-store.ts";
+import { contentReference, contentTitle, MarkdownContentStore } from "../core/infrastructure/content-store.ts";
 import { CraftService } from "../core/application/craft-service.ts";
 import { ContentMigrationKernel } from "../core/content-migration.ts";
 import { MemoryConsolidationKernel } from "../core/memory-consolidation.ts";
@@ -145,6 +145,15 @@ test("Experience Markdown is stored by Procedure format while preserving one can
     const rewritten = content.rewriteSync({ kind: "experience", record_id: "procedure-graph", version: 1, current_path: graph.path, title: "恢复分支新版", scope: "project:craft", status: "routeable", sensitivity: "internal", source_id: "fixture", body: "# 恢复分支新版" });
     assert.match(rewritten.path, /experience[\\/]md[\\/]graphs[\\/]恢复分支新版--[a-f0-9]{12}\.v1\.md$/u);
     assert.equal(content.readSync(rewritten).body, "# 恢复分支新版");
+    const prompt = content.writeSync({ kind: "experience", folder: "prompts", record_id: "procedure-prompt", version: 1, title: "提示词", scope: "project:craft", status: "candidate", sensitivity: "internal", source_id: "fixture", body: "# 提示词" });
+    const rewrittenPrompt = content.rewriteSync({ kind: "experience", record_id: "procedure-prompt", version: 1, current_path: prompt.path, title: "提示词新版", scope: "project:craft", status: "candidate", sensitivity: "internal", source_id: "fixture", body: "# 提示词新版" });
+    assert.match(rewrittenPrompt.path, /experience[\\/]md[\\/]prompts[\\/]提示词新版--[a-f0-9]{12}\.v1\.md$/u);
+    const plain = content.writeSync({ kind: "experience", record_id: "procedure-plain", version: 1, title: "普通流程", scope: "project:craft", status: "candidate", sensitivity: "internal", source_id: "fixture", body: "# 普通流程" });
+    const rewrittenPlain = content.rewriteSync({ kind: "experience", record_id: "procedure-plain", version: 1, current_path: plain.path, title: "普通流程新版", scope: "project:craft", status: "candidate", sensitivity: "internal", source_id: "fixture", body: "# 普通流程新版" });
+    assert.match(rewrittenPlain.path, /experience[\\/]md[\\/]普通流程新版--[a-f0-9]{12}\.v1\.md$/u);
+    assert.equal(contentReference(graph), true);
+    assert.equal(contentReference({ ...graph, kind: "memory" }), true);
+    assert.throws(() => content.pathFor("experience", "bad", 1, "other" as never), /folder is unsupported/u);
     assert.throws(() => content.writeSync({ kind: "knowledge", folder: "graphs", record_id: "bad", version: 1, scope: "project:craft", status: "candidate", sensitivity: "internal", source_id: "fixture", body: "bad" }), /Experience content supports folders/u);
   } finally { await f.store.close(); }
 });
@@ -183,6 +192,15 @@ test("content frontmatter validates every required field and accepts plain scala
   const invalidKind = { ...fields, record_kind: "other" };
   await writeFile(join(f.root, "invalid-kind.md"), `---\n${Object.entries(invalidKind).map(([key, value]) => `${key}: ${value}`).join("\n")}\n---\nbody`, "utf8");
   assert.throws(() => content.readUncheckedSync(join(f.root, "invalid-kind.md")), /incomplete/);
+  const withMetadata = content.writeSync({ kind: "knowledge", record_id: "metadata", version: 1, scope: "global", status: "active", sensitivity: "internal", source_id: "source", body: "body", frontmatter: { topic: "release", score: 1 } });
+  assert.equal(content.readUncheckedSync(withMetadata.path).manifest.topic, "release");
+  assert.throws(() => content.writeSync({ kind: "knowledge", record_id: "reserved", version: 1, scope: "global", status: "active", sensitivity: "internal", source_id: "source", body: "body", frontmatter: { status: "other" } }), /invalid or reserved/);
+  assert.throws(() => content.writeSync({ kind: "knowledge", record_id: "secret-meta", version: 1, scope: "global", status: "active", sensitivity: "internal", source_id: "source", body: "body", frontmatter: { topic: "password: 12345678" } }), /credentials/);
+  for (const [name, extra] of [["unsafe-key", "Bad: value"], ["unsafe-value", 'note: "password: 12345678"'], ["nonscalar", "note: {}"]]) {
+    const path = join(f.root, `${name}.md`);
+    await writeFile(path, `---\n${Object.entries(fields).map(([key, value]) => `${key}: ${value}`).join("\n")}\n${extra}\n---\nbody`, "utf8");
+    assert.throws(() => content.readUncheckedSync(path), /unsafe metadata/);
+  }
   await f.store.close();
 });
 
@@ -441,7 +459,7 @@ test("knowledge memory runtime fails closed when a referenced body disappears", 
   const memory = f.service.memoryLedgerRemember({ memory_id: "runtime-memory", source_id: source.id, kind: "episodic", scope_kind: "user", scope_id: "local", content: "body" }).memory as Record<string, unknown>;
   await unlink(String((memory.content_ref as Record<string, unknown>).path));
   assert.throws(() => f.service.memoryLedger.get({ memory_id: "runtime-memory" }), /ENOENT|no such file|body/);
-  f.store.create("memory_ledger", "missing-ref", { scope: "user:local", status: "active" });
+  f.store.create("memory_ledger", "missing-ref", { scope: { kind: "user", id: "local" }, source_id: source.id, status: "active" });
   assert.throws(() => f.service.memoryLedger.get({ memory_id: "missing-ref" }), /reference is missing/);
   await f.store.close();
 });

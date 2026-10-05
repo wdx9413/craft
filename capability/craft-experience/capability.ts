@@ -17,10 +17,10 @@
  * Workflow/Graph and Markdown-native Prompt Procedures. Observation, patterns and candidates
  * stay diagnostic; they cannot become Context merely by existing.
  */
-import type { CraftCapability } from "../../core/capability-protocol.ts";
-import { CORE_KERNELS } from "../../core/capability-protocol.ts";
-import type { CraftStore } from "../../core/infrastructure/store.ts";
-import type { ModelProviderSpec } from "../../core/model-gateway.ts";
+import type { CraftCapability } from "../../common/craft-common-base/src/capability-protocol.ts";
+import { CORE_KERNELS } from "../../common/craft-common-base/src/capability-protocol.ts";
+import type { CraftStore } from "../../common/craft-common-store-local/src/store.ts";
+import type { ModelProviderSpec } from "../../common/craft-common-base/src/model-compat.ts";
 import { ExperienceContribution } from "./contribution.ts";
 import { EvaluationModelProfileKernel } from "./evaluation-model-profile.ts";
 import { ExperienceLedgerKernel } from "./experience-ledger.ts";

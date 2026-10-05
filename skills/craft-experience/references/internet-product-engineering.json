@@ -1,0 +1,323 @@
+{
+  "nodes": [
+    {
+      "id": "requirement",
+      "type": "action",
+      "side_effect": "read_only",
+      "requires": [
+        "request"
+      ],
+      "provides": [
+        "spec"
+      ],
+      "acceptance_ref": "requirement-contract",
+      "instruction": "澄清互联网产品需求、用户目标、边界与验收，输出已确认规格和未决问题。"
+    },
+    {
+      "id": "diagnose",
+      "type": "action",
+      "side_effect": "read_only",
+      "requires": [
+        "request"
+      ],
+      "provides": [
+        "spec"
+      ],
+      "acceptance_ref": "diagnose-contract",
+      "instruction": "核对复现与日志证据，定位根因；未复现或原因未证实时明确记录，输出诊断与修复边界。"
+    },
+    {
+      "id": "implement",
+      "type": "action",
+      "side_effect": "local_write",
+      "requires": [
+        "spec"
+      ],
+      "provides": [
+        "diff"
+      ],
+      "acceptance_ref": "implement-contract",
+      "instruction": "按规格实现最小变更，记录变更范围、工作区修订和 diff；不部署或对外发布。"
+    },
+    {
+      "id": "test",
+      "type": "action",
+      "side_effect": "read_only",
+      "requires": [
+        "diff"
+      ],
+      "provides": [
+        "tests"
+      ],
+      "acceptance_ref": "test-contract",
+      "instruction": "针对当前 diff 执行相关验证，记录命令、退出码和覆盖范围；失败保留证据并走返工边。"
+    },
+    {
+      "id": "review",
+      "type": "action",
+      "side_effect": "read_only",
+      "requires": [
+        "diff",
+        "tests"
+      ],
+      "provides": [
+        "report"
+      ],
+      "acceptance_ref": "review-contract",
+      "instruction": "审查当前 diff 与测试证据，输出 findings；区分发现问题与交付完成。"
+    },
+    {
+      "id": "delivery",
+      "type": "action",
+      "side_effect": "read_only",
+      "requires": [
+        "diff",
+        "tests",
+        "report"
+      ],
+      "provides": [],
+      "acceptance_ref": "delivery-contract",
+      "instruction": "确认当前 diff、测试、评审属于本轮有效产物，整理交付与未验证风险。交付就绪不表示已部署。"
+    },
+    {
+      "id": "diagnosed",
+      "type": "action",
+      "side_effect": "read_only",
+      "requires": [
+        "spec"
+      ],
+      "provides": [],
+      "acceptance_ref": "diagnosed-contract",
+      "instruction": "交付有依据的诊断报告，明确事实、假设与未决问题，不把报告完成解释为根因已确认。"
+    },
+    {
+      "id": "reviewed",
+      "type": "action",
+      "side_effect": "read_only",
+      "requires": [
+        "report"
+      ],
+      "provides": [],
+      "acceptance_ref": "reviewed-contract",
+      "instruction": "交付针对给定 diff 的评审结果，不把评审完成解释为问题已修复。"
+    }
+  ],
+  "edges": [
+    {
+      "id": "requirements",
+      "from": "requirement",
+      "to": "implement",
+      "kind": "success",
+      "max_traversals": 5
+    },
+    {
+      "id": "fix",
+      "from": "diagnose",
+      "to": "implement",
+      "kind": "success",
+      "max_traversals": 5
+    },
+    {
+      "id": "diagnosis",
+      "from": "diagnose",
+      "to": "diagnosed",
+      "kind": "success",
+      "max_traversals": 5
+    },
+    {
+      "id": "tests",
+      "from": "implement",
+      "to": "test",
+      "kind": "success",
+      "max_traversals": 5
+    },
+    {
+      "id": "review",
+      "from": "test",
+      "to": "review",
+      "kind": "success",
+      "max_traversals": 5
+    },
+    {
+      "id": "deliver",
+      "from": "review",
+      "to": "delivery",
+      "kind": "success",
+      "max_traversals": 5
+    },
+    {
+      "id": "review_only",
+      "from": "review",
+      "to": "reviewed",
+      "kind": "success",
+      "max_traversals": 5
+    },
+    {
+      "id": "rework",
+      "from": "review",
+      "to": "implement",
+      "kind": "condition",
+      "max_traversals": 5,
+      "predicate_ref": "changes_requested",
+      "rework": true
+    },
+    {
+      "id": "retry",
+      "from": "test",
+      "to": "implement",
+      "kind": "retry",
+      "max_traversals": 5
+    }
+  ],
+  "graph_control": {
+    "scenario_id": "internet-product-engineering",
+    "title": "互联网产研",
+    "entries": [
+      {
+        "id": "requirements",
+        "node_id": "requirement",
+        "required_inputs": [
+          "request"
+        ],
+        "preconditions": []
+      },
+      {
+        "id": "bug",
+        "node_id": "diagnose",
+        "required_inputs": [
+          "request"
+        ],
+        "preconditions": []
+      },
+      {
+        "id": "cr",
+        "node_id": "review",
+        "required_inputs": [
+          "diff",
+          "tests"
+        ],
+        "preconditions": []
+      }
+    ],
+    "exits": [
+      {
+        "id": "delivery",
+        "node_id": "delivery",
+        "required_outputs": [
+          "diff",
+          "tests",
+          "report"
+        ],
+        "acceptance_ref": "delivery-contract"
+      },
+      {
+        "id": "diagnosis",
+        "node_id": "diagnosed",
+        "required_outputs": [
+          "spec"
+        ],
+        "acceptance_ref": "diagnosed-contract"
+      },
+      {
+        "id": "reviewed",
+        "node_id": "reviewed",
+        "required_outputs": [
+          "report"
+        ],
+        "acceptance_ref": "reviewed-contract"
+      }
+    ],
+    "subscenarios": [
+      {
+        "id": "feature",
+        "title": "需求研发",
+        "entry_id": "requirements",
+        "exit_id": "delivery",
+        "allowed_nodes": [
+          "requirement",
+          "implement",
+          "test",
+          "review",
+          "delivery"
+        ],
+        "allowed_edges": [
+          "requirements",
+          "tests",
+          "review",
+          "deliver",
+          "rework",
+          "retry"
+        ],
+        "allowed_effects": [
+          "read_only",
+          "local_write"
+        ],
+        "max_transitions": 20,
+        "max_visits": 5
+      },
+      {
+        "id": "bugfix",
+        "title": "Bug 修复",
+        "entry_id": "bug",
+        "exit_id": "delivery",
+        "allowed_nodes": [
+          "diagnose",
+          "implement",
+          "test",
+          "review",
+          "delivery"
+        ],
+        "allowed_edges": [
+          "fix",
+          "tests",
+          "review",
+          "deliver",
+          "rework",
+          "retry"
+        ],
+        "allowed_effects": [
+          "read_only",
+          "local_write"
+        ],
+        "max_transitions": 20,
+        "max_visits": 5
+      },
+      {
+        "id": "diagnosis",
+        "title": "Bug 诊断",
+        "entry_id": "bug",
+        "exit_id": "diagnosis",
+        "allowed_nodes": [
+          "diagnose",
+          "diagnosed"
+        ],
+        "allowed_edges": [
+          "diagnosis"
+        ],
+        "allowed_effects": [
+          "read_only"
+        ],
+        "max_transitions": 1,
+        "max_visits": 1
+      },
+      {
+        "id": "cr",
+        "title": "Code Review",
+        "entry_id": "cr",
+        "exit_id": "reviewed",
+        "allowed_nodes": [
+          "review",
+          "reviewed"
+        ],
+        "allowed_edges": [
+          "review_only"
+        ],
+        "allowed_effects": [
+          "read_only"
+        ],
+        "max_transitions": 1,
+        "max_visits": 1
+      }
+    ]
+  }
+}

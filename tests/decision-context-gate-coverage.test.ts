@@ -31,6 +31,13 @@ test("decision context gate records only measured inputs and covers ready, block
     const blocked = await gate.open({ gate_id: "blocked", decision_kind: "choose", query: "q", require_context: true });
     assert.equal((blocked.gate as JsonObject).action, "clarify_or_replan");
 
+    context.reply = { items: [], receipt: null, contributions: [{ member: "knowledge", items: [{ claim_id: "reviewed-rule" }] }] };
+    const contributed = await gate.open({ gate_id: "contributed", decision_kind: "choose", query: "q", require_context: true });
+    assert.equal((contributed.gate as JsonObject).status, "ready");
+    context.reply = { items: [], receipt: null, contributions: [{ member: "knowledge", items: [] }] };
+    const emptyContribution = await gate.open({ gate_id: "empty-contribution", decision_kind: "choose", query: "q", require_context: true });
+    assert.equal((emptyContribution.gate as JsonObject).status, "blocked");
+
     f.store.create("task", "task", { title: "test" });
     const receipt = f.store.create("context_resolution_receipt", "receipt", { identity_digest: "receipt" });
     context.reply = { items: [{ memory_id: "m" }], receipt };
@@ -53,6 +60,11 @@ test("decision context gate records only measured inputs and covers ready, block
       { required_constraint_ids: ["a"], recalled_constraint_ids: ["b"] },
       { context_input_tokens: -1 },
       { context_input_tokens: Number.NaN },
+      { context_input_tokens: null },
+      { cost_units: false },
+      { latency_ms: "0" },
+      { error_injection_count: "" },
+      { cache_observation: "observed", cache_hit_tokens: null },
       { cache_observation: "invalid" },
     ]) await assert.rejects(() => gate.open({ gate_id: `invalid-${JSON.stringify(input)}`, decision_kind: "choose", query: "q", ...input }), /array|unique|subset|non-negative|cache_observation/);
   } finally {

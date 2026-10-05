@@ -551,7 +551,7 @@ dependencies = [
 
 [[package]]
 name = "craft-workbench-desktop"
-version = "0.1.0"
+version = "0.12.38"
 dependencies = [
  "serde",
  "tauri",

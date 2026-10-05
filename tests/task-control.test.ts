@@ -24,6 +24,52 @@ async function terminalLaunch(f: Awaited<ReturnType<typeof fixture>>, id: string
   const launch = prepared.launch as JsonObject; await f.service.hostRuns.wait(String(launch.run_id)); return launch;
 }
 
+test("cancelled or interrupted Host facts cannot be promoted by a passed acceptance projection", async () => {
+  const f = await fixture(); let executions = 0;
+  f.service.codexHost.executor = async () => { executions++; throw new Error("projection must not dispatch"); };
+  try {
+    for (const status of ["cancelled", "interrupted", "failed"]) {
+      const contract = f.service.taskControlSave({ contract_id: status, task_id: f.task.id, workspace: f.root,
+        acceptance_required: true }).contract as JsonObject;
+      f.store.create("host_run", `run-${status}`, { status });
+      f.store.create("acceptance_assessment", `assessment_plan-${status}`, { status: "passed" });
+      f.store.create("work_launch", `launch-${status}`, { task_id: f.task.id, workspace: f.root,
+        sandbox: "read-only", status: "running", run_id: `run-${status}`, acceptance_plan_id: `plan-${status}` });
+      const bound = f.service.taskControlBindLaunch({ contract_id: contract.id, launch_id: `launch-${status}` });
+      const state = bound.state as JsonObject;
+      assert.deepEqual([state.status, state.action, state.actor], ["recovery", "retry_or_handoff", "human"]);
+      const view = f.service.taskControlGet({ contract_id: contract.id });
+      assert.equal((view.delivery_loop as JsonObject).delivery_status, "host_failed");
+      const handoff = f.service.taskControlHandoff({ contract_id: contract.id, reason: "recovery" }).handoff as JsonObject;
+      assert.equal(handoff.state_version, state.version);
+      assert.equal(handoff.resume_action, "retry_or_handoff");
+      assert.equal(f.service.taskControlRefresh({ contract_id: contract.id }).idempotent, true);
+      assert.equal(f.service.taskControlHandoff({ contract_id: contract.id, reason: "recovery" }).idempotent, true);
+      assert.equal(f.store.get("host_run", `run-${status}`).status, status);
+    }
+    assert.equal(executions, 0, "a recovery projection and handoff do not authorize or start a retry");
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("handoff snapshots stay immutable when the task advances to a new state", async () => {
+  const f = await fixture();
+  try {
+    const contract = f.service.taskControlSave({ task_id: f.task.id, workspace: f.root }).contract as JsonObject;
+    const initial = f.service.taskControlHandoff({ handoff_id: "paused", contract_id: contract.id, reason: "user_pause" });
+    const saved = f.store.get("task_control_handoff", "paused");
+    assert.equal((initial.handoff as JsonObject).resume_action, "prepare_work_launch");
+    f.store.create("work_launch", "pending", { task_id: f.task.id, workspace: f.root, sandbox: "read-only", status: "prepared" });
+    f.service.taskControlBindLaunch({ contract_id: contract.id, launch_id: "pending" });
+    assert.throws(() => f.service.taskControlHandoff({ handoff_id: "paused", contract_id: contract.id, reason: "user_pause" }), /idempotency conflict/);
+    const next = f.service.taskControlHandoff({ contract_id: contract.id, reason: "operator_handoff" }).handoff as JsonObject;
+    assert.notEqual(next.id, saved.id);
+    assert.ok(Number(next.state_version) > Number(saved.state_version));
+    assert.equal(next.resume_action, "wait_for_host");
+    assert.deepEqual(f.store.get("task_control_handoff", "paused"), saved);
+    assert.equal((f.service.taskControlGet({ contract_id: contract.id }).handoffs as JsonObject[]).length, 2);
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
 test("task control pins one task boundary and materializes a deterministic delivery state", async () => {
   const f = await fixture();
   try {
@@ -44,7 +90,7 @@ test("task control pins one task boundary and materializes a deterministic deliv
     assert.equal((view.contract as JsonObject).launch_id, launch.id); assert.equal((view.delivery_loop as JsonObject).action, "deliver");
     const home = f.service.homeView({ limit: 10 });
     assert.equal(((home.task_controls as JsonObject[])[0]).action, "deliver");
-    assert.equal(VERSION, "0.12.37");
+    assert.equal(VERSION, "0.12.38");
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 

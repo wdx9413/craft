@@ -1,0 +1,429 @@
+{
+  "date": "2026-10-04",
+  "baseline": "working tree snapshot at /tmp/craft-review-before-20261004/craft before this review; includes pre-existing uncommitted implementation",
+  "head": "9ada1c7a92dfc3847837b063081176696ca9f463",
+  "method": "difflib.SequenceMatcher changed/inserted current lines; c8 statement start line and branch line in this delta; merged V8 reports from related tests and isolated HTTPS tests",
+  "coverage_report": "/tmp/craft-context-review-coverage/coverage-final.json",
+  "statements": {
+    "covered": 200,
+    "total": 200,
+    "percent": 100
+  },
+  "branches": {
+    "covered": 232,
+    "total": 232,
+    "percent": 100
+  },
+  "files": [
+    {
+      "path": "core/memory-maintenance.ts",
+      "before_sha256": "47ff7551057d78ddbab857879ef39f953ab7d3b6c8e8bd8b76acff0901ce6d70",
+      "after_sha256": "a1c19ad1a020eaaab5cf6842145189a05539245b1e06c489013e5c2d0a29f22f",
+      "changed_lines": [
+        3,
+        54,
+        55,
+        56,
+        57,
+        58,
+        59,
+        60,
+        61,
+        64,
+        65,
+        66,
+        67
+      ],
+      "statements": {
+        "covered": 13,
+        "total": 13
+      },
+      "branches": {
+        "covered": 18,
+        "total": 18
+      }
+    },
+    {
+      "path": "core/context-resolution.ts",
+      "before_sha256": "ea5cd5aace897e185cb5b4f8b0d5c9a91b61b6feaf1e48fc5ace610a19b52342",
+      "after_sha256": "5707f67231bb15ee66a8093a00db3dc415f3768c74b4ece2352fb376ff1a0d27",
+      "changed_lines": [
+        39,
+        89,
+        91,
+        164,
+        165,
+        166,
+        167,
+        168,
+        169,
+        170,
+        171,
+        172,
+        174,
+        175,
+        180,
+        181,
+        182,
+        187,
+        191,
+        192,
+        193,
+        221,
+        222,
+        223,
+        224,
+        270,
+        271,
+        273,
+        274,
+        275,
+        276,
+        277,
+        278,
+        279,
+        280,
+        281,
+        296,
+        311,
+        312,
+        342,
+        343,
+        344,
+        345,
+        346,
+        347,
+        350,
+        352,
+        356,
+        357,
+        358
+      ],
+      "statements": {
+        "covered": 50,
+        "total": 50
+      },
+      "branches": {
+        "covered": 55,
+        "total": 55
+      }
+    },
+    {
+      "path": "core/scope-policy.ts",
+      "before_sha256": "6ed523c1f203f00d66a317bdaa57c966cf5a35e2b3668d10b78cd40fd4ddec06",
+      "after_sha256": "95ed3e8b4c3a4f93e24d7af054c0abefb8a36382d5df5e438ecf7052b892c60d",
+      "changed_lines": [
+        106,
+        107,
+        108,
+        109,
+        110,
+        111
+      ],
+      "statements": {
+        "covered": 6,
+        "total": 6
+      },
+      "branches": {
+        "covered": 1,
+        "total": 1
+      }
+    },
+    {
+      "path": "core/mcp/tool-catalog.ts",
+      "before_sha256": "ba994515a2b79eb996f26def19ff42d1e8ddbc6ef55875fb0cb3f0f3831374bc",
+      "after_sha256": "2ea52e85fb9e1b3fd8bf2f25d1f51d5126e334a5b0e8d3d763445a733770f6f6",
+      "changed_lines": [
+        8,
+        491,
+        492,
+        1114
+      ],
+      "statements": {
+        "covered": 4,
+        "total": 4
+      },
+      "branches": {
+        "covered": 0,
+        "total": 0
+      }
+    },
+    {
+      "path": "core/mcp/tool-schema.ts",
+      "before_sha256": "1bbb2defbc3eaa273d3ff150fd725503713ab5093089c8f294398abf1c1068a0",
+      "after_sha256": "530bdc5995f360bc76815ff73b337dddfacafebda5d25cb9cc6a53efe8332c5f",
+      "changed_lines": [
+        87,
+        102,
+        103,
+        104
+      ],
+      "statements": {
+        "covered": 4,
+        "total": 4
+      },
+      "branches": {
+        "covered": 0,
+        "total": 0
+      }
+    },
+    {
+      "path": "core/application/procedure-graph-progress.ts",
+      "before_sha256": "eb3c45dafef321aad4965e71f3681b4f553c370562ebeb1aecde47be464e710f",
+      "after_sha256": "07647c2618dd2c9e7bface7c87689d8dbd47c4396ab081f011be3b18855a8a54",
+      "changed_lines": [
+        88,
+        89,
+        90,
+        91,
+        92,
+        93
+      ],
+      "statements": {
+        "covered": 6,
+        "total": 6
+      },
+      "branches": {
+        "covered": 6,
+        "total": 6
+      }
+    },
+    {
+      "path": "core/application/use-cases/repository-context.ts",
+      "before_sha256": "39957c80b396c49a748be393f89ac8d40f75ec0a7cb7404a2d83ac4f8ca40a25",
+      "after_sha256": "0afa2f526447871495b498bbe9d2d02c2db09c674ab221bc464618c8f270463c",
+      "changed_lines": [
+        6,
+        7,
+        36,
+        37,
+        38,
+        39,
+        41,
+        47,
+        55,
+        63,
+        65,
+        66,
+        70,
+        76,
+        82,
+        86,
+        87,
+        88,
+        89,
+        90,
+        91,
+        92,
+        93,
+        94,
+        97
+      ],
+      "statements": {
+        "covered": 25,
+        "total": 25
+      },
+      "branches": {
+        "covered": 44,
+        "total": 44
+      }
+    },
+    {
+      "path": "capability/craft-memory/memory-ledger.ts",
+      "before_sha256": "b958a394cbe20f8b4958c2a5c0b9fab81218b9d6489978e96640bcd1908a67a5",
+      "after_sha256": "eb7cc563195c1983064720ab99132cf21b2c0850a1a9afb8525609c3f36a33ab",
+      "changed_lines": [
+        26,
+        29,
+        130,
+        131,
+        132,
+        133,
+        134,
+        135,
+        154,
+        155,
+        158,
+        159,
+        160,
+        161,
+        162,
+        163,
+        164,
+        165
+      ],
+      "statements": {
+        "covered": 18,
+        "total": 18
+      },
+      "branches": {
+        "covered": 18,
+        "total": 18
+      }
+    },
+    {
+      "path": "capability/craft-experience/contribution.ts",
+      "before_sha256": "58a03c6a83b4ec02bcfa4b469211127d952648be821d4d908ab2665958aa204c",
+      "after_sha256": "62d1b0d42428cc2c5ad0b2fadaab6a8d8845e5f47070e03dc2286bcf4a49438d",
+      "changed_lines": [
+        48,
+        49,
+        50,
+        51,
+        52,
+        53,
+        54,
+        57
+      ],
+      "statements": {
+        "covered": 8,
+        "total": 8
+      },
+      "branches": {
+        "covered": 10,
+        "total": 10
+      }
+    },
+    {
+      "path": "capability/craft-experience/procedure-projection.ts",
+      "before_sha256": "a86e49e4b1e0ff64794bb60e4ed9eb788391c46cac4dca29036b66b7c10f695c",
+      "after_sha256": "32317299d87c88999e1eae6636150befc49d6b4efffcf1bb6ec34a3581027cd7",
+      "changed_lines": [
+        169,
+        170,
+        171,
+        172
+      ],
+      "statements": {
+        "covered": 4,
+        "total": 4
+      },
+      "branches": {
+        "covered": 7,
+        "total": 7
+      }
+    },
+    {
+      "path": "capability/craft-codebase/basic-analysis.ts",
+      "before_sha256": "22af0faacb9048a1fcfba405f6a1e3c2ea0fba02f631a52f5c821d121674790c",
+      "after_sha256": "43b801055f3b6222e670bb178d6c2047102fdda386f7824c58360ddfa74a856e",
+      "changed_lines": [
+        4,
+        5,
+        13,
+        24,
+        29
+      ],
+      "statements": {
+        "covered": 5,
+        "total": 5
+      },
+      "branches": {
+        "covered": 3,
+        "total": 3
+      }
+    },
+    {
+      "path": "capability/craft-codebase/repository-files.ts",
+      "before_sha256": "c4bc06a8da7e376e93b6352ba04b7282d4b62790f8c15cf6bd0aa7b129a127e7",
+      "after_sha256": "10a7a27c4b6f98c09ac88e2a03373c6f25d3883a548730a3eed84bdf229b0275",
+      "changed_lines": [
+        10,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        41
+      ],
+      "statements": {
+        "covered": 8,
+        "total": 8
+      },
+      "branches": {
+        "covered": 11,
+        "total": 11
+      }
+    },
+    {
+      "path": "capability/craft-knowledge/contribution.ts",
+      "before_sha256": "4a4652b84790283e9aae67c0fa2f870b69fd9a56e107b0f4adadc1281d124b0e",
+      "after_sha256": "f2863c978274f49746985783508ac4097ccebf2e88142ade7d48c4e78ebbeed4",
+      "changed_lines": [
+        12,
+        52,
+        53,
+        54,
+        55,
+        56,
+        57,
+        58,
+        60,
+        63,
+        64,
+        65,
+        66,
+        69,
+        75,
+        76,
+        77,
+        81,
+        82,
+        85,
+        88,
+        89,
+        90,
+        91,
+        94
+      ],
+      "statements": {
+        "covered": 25,
+        "total": 25
+      },
+      "branches": {
+        "covered": 37,
+        "total": 37
+      }
+    },
+    {
+      "path": "deploy/components/server.ts",
+      "before_sha256": "5ec6fe870fdb795423f8e58b171970de685f7c6d45d4bf02b4428b48672d097f",
+      "after_sha256": "8ef95ea31bd5c4dca4ff9d5f72e8a01ef170cb3f4aeaf591434fb3987ed4f689",
+      "changed_lines": [
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        70
+      ],
+      "statements": {
+        "covered": 24,
+        "total": 24
+      },
+      "branches": {
+        "covered": 22,
+        "total": 22
+      }
+    }
+  ]
+}

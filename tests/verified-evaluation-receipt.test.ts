@@ -13,7 +13,14 @@ test("Verified Evaluation Receipt validates every independent program check and 
   assert.equal(receiptPayload(accepted).kind, "craft.engineering-evaluation.v1");
   const failed = verifiedEvaluationReceipt(receipt({ acceptance: { evidence_id: "accept", command_digest: "sha256:command", result_digest: "sha256:result", status: "failed" } }));
   assert.equal(receiptPassed(failed), false);
+  assert.equal(receiptPassed(verifiedEvaluationReceipt(receipt({ retry_count: "unavailable" }))), false);
+  assert.equal(receiptPassed(verifiedEvaluationReceipt(receipt({ cost_units: "unavailable" }))), false);
   for (const invalid of [
     receipt({ kind: "other" }), receipt({ issued_by: "other" }), receipt({ siblings: [] }), receipt({ root_cause_evidence_ids: [] }), receipt({ root_cause_evidence_ids: ["root", "root"] }), receipt({ frozen_input_digest: "invalid" }), receipt({ acceptance: { evidence_id: "x", command_digest: "sha256:x", result_digest: "sha256:y", status: "other" } }), receipt({ retry_count: -1 }), receipt({ retry_count: 0.5 }), receipt({ cost_units: -1 }), receipt({ latency_ms: Number.NaN }), null,
   ]) assert.throws(() => verifiedEvaluationReceipt(invalid));
+  for (const field of ["retry_count", "cost_units", "latency_ms"]) {
+    for (const value of [null, "", "0", false, true, undefined]) {
+      assert.throws(() => verifiedEvaluationReceipt(receipt({ [field]: value })), /non-negative/);
+    }
+  }
 });

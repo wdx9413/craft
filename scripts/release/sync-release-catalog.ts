@@ -16,6 +16,9 @@ for (const path of ["marketplace.json", ".agents/plugins/marketplace.json"]) {
   await writeJson(join(root, path), { ...existing, version: CRAFT_RELEASE_VERSION, plugins: releaseManifest().plugins });
 }
 await writeJson(join(root, "distribution-contract.json"), externalDistributionContract());
+const claudePath = join(root, ".claude-plugin", "marketplace.json");
+const claude = JSON.parse(await readFile(claudePath, "utf8"));
+await writeJson(claudePath, { ...claude, version: CRAFT_RELEASE_VERSION, plugins: RELEASE_PRODUCTS.map(product => ({ name: product.name, source: product.name === "craft" ? "./" : `./plugins/${product.name}`, description: `${product.name} Skill and MCP` })) });
 
 for (const product of RELEASE_PRODUCTS) {
   for (const relative of [".codex-plugin/plugin.json", ...(product.name === "craft" ? [] : [".claude-plugin/plugin.json"])]) {

@@ -39,7 +39,7 @@ test("Runtime Truth standardizes legacy traces and maps every span kind to OTLP"
   const correlation = traceCorrelation({ trace_id: "t", run_id: "r", operation_id: "o" }); assert.equal(correlation.trace_id, "t"); assert.equal((correlation.baggage as JsonObject).run_id, "r"); assert.equal((correlation.baggage as JsonObject).operation_id, "o");
   const otlp = toOtlpTrace(legacy, [legacy, { trace_id: "t", sequence: 2, event_kind: "model.request", trust: "observed", data: {} }, { trace_id: "t", sequence: 3, event_kind: "state.observed", trust: "observed", data: {} }]);
   const spans = (((otlp.resourceSpans as JsonObject[])[0]!.scopeSpans as JsonObject[])[0]!.spans as JsonObject[]);
-  assert.deepEqual(spans.map((span) => span.kind), [3, 2, 1]); assert.equal(spans[0]!.status && (spans[0]!.status as JsonObject).code, 1);
+  assert.deepEqual(spans.map((span) => span.kind), [3, 2, 1]); assert.equal(spans[0]!.status && (spans[0]!.status as JsonObject).code, 0);
   assert.throws(() => standardizeTrace({ trace_id: "" }), /trace_id/);
   assert.throws(() => standardizeTrace({ trace_id: "t", sequence: -1 }), /sequence/);
 });

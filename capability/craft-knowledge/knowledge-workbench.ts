@@ -1,4 +1,4 @@
-import { CraftStore, type JsonObject } from "../../core/infrastructure/store.ts";
+import { CraftStore, type JsonObject } from "../../common/craft-common-store-local/src/store.ts";
 
 function limit(value: unknown): number {
   const result = value === undefined ? 50 : Number(value);

@@ -83,7 +83,7 @@ test("local policy can lower a threshold without turning off deterministic safet
   } finally { await close(f); }
 });
 
-test("a Codex Host review promotes one exact current Claim without an independent provider key", async () => {
+test("legacy Host review without an evidence packet stays a non-promoting review record", async () => {
   const f = await fixture();
   try {
     const { claim } = candidate(f.service, "codex-reviewed");
@@ -96,10 +96,11 @@ test("a Codex Host review promotes one exact current Claim without an independen
     assert.equal((await f.service.knowledgeSemanticProviderReview({ claim_id: claim.id }) as JsonObject).status, "unavailable");
     assert.throws(() => f.service.knowledgeHostReview({ ...args, packet_digest: "sha256:not-the-packet" }), /packet_digest/u);
     const result = f.service.knowledgeHostReview(args);
-    assert.equal(result.promoted, true);
-    assert.equal(result.status, "reviewed");
-    assert.equal(((result.claim as JsonObject).review as JsonObject).reviewer, "host:codex");
-    assert.equal(((result.evidence as JsonObject).metadata as JsonObject).model_ref, "host-managed");
+    assert.equal(result.promoted, false);
+    assert.equal(result.status, "needs_evidence");
+    assert.equal((result.claim as JsonObject).status, "candidate");
+    assert.equal((result.review as JsonObject).validation_status, "revalidation_required");
+    assert.ok((result.blocking_reasons as string[]).includes("semantic_review_packet_required"));
     assert.equal(f.service.knowledgeHostReview(args).idempotent, true);
   } finally { await close(f); }
 });
@@ -109,7 +110,7 @@ test("Host review keeps insufficient, stale, conflicted, and rejected Claims out
   try {
     const { claim } = candidate(f.service, "host-blocked");
     const base = { claim_id: claim.id, host_run_key: "codex:one", source_digest: `sha256:${"b".repeat(64)}`, decision: "supported", now: "2026-09-20T00:00:00.000Z" };
-    assert.throws(() => f.service.knowledgeHostReview({ ...base, host_kind: "other" }), /host_kind/u);
+    assert.throws(() => f.service.knowledgeHostReview({ ...base, host_kind: "invalid host name" }), /host_kind/u);
     assert.throws(() => f.service.knowledgeHostReview({ ...base, source_digest: "sha256:wrong" }), /source_digest/u);
     assert.throws(() => f.service.knowledgeHostReview({ ...base, decision: "maybe" }), /decision/u);
     assert.throws(() => f.service.knowledgeHostReview({ ...base, reason_code: "not a stable code" }), /reason_code/u);
@@ -235,6 +236,19 @@ test("semantic review packets and provider responses stay evidence-bound across 
     const claim = makePacketClaim("semantic-ready");
     const packet = f.service.knowledgeSemanticReviewPacket({ claim_id: claim.id }) as JsonObject;
     assert.equal(packet.status, "ready");
+    const hostClaim = makePacketClaim("host-packet");
+    const hostPacket = f.service.knowledgeSemanticReviewPacket({ claim_id: hostClaim.id });
+    const hostArgs = { claim_id: hostClaim.id, host_run_key: "host:packet", source_digest: `sha256:${"b".repeat(64)}`, packet_digest: hostPacket.packet_digest, decision: "supported" };
+    const promoted = f.service.knowledgeHostReview(hostArgs);
+    assert.equal(promoted.promoted, true);
+    assert.equal(f.service.knowledgeHostReview(hostArgs).idempotent, true);
+    const live = f.store.get("knowledge_claim", String(hostClaim.id));
+    f.store.save("knowledge_claim", String(hostClaim.id), { ...live, valid_until: "2000-01-01T00:00:00Z" });
+    const expiredReplay = f.service.knowledgeHostReview(hostArgs);
+    assert.equal(expiredReplay.status, "revalidation_required");
+    assert.equal(expiredReplay.current_valid, false);
+    assert.deepEqual(expiredReplay.blocking_reasons, ["claim_expired"]);
+    assert.throws(() => f.service.knowledgeHostReview({ ...hostArgs, packet_digest: "sha256:drift" }), /packet_digest/u);
     const base = { claim_id: claim.id, endpoint: "https://semantic.fixture", model: "fixture", credential_env: "CRAFT_SEMANTIC_TEST_KEY" };
     assert.equal((await f.service.knowledgeSemanticProviderReview({ claim_id: claim.id }) as JsonObject).reason, "semantic_provider_unavailable");
     process.env.CRAFT_SEMANTIC_TEST_KEY = "fixture-key";

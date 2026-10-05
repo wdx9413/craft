@@ -40,7 +40,15 @@ export class TaskRunKernel {
     const observedBudget = args.budget === undefined ? String(run.budget_digest) : digestJson(args.budget);
     const observedStability = digestJson({ contract_status: contract.status, contract_version: contract.version, activation_profile: contract.activation_profile ?? null, budget_account: contract.budget_account ?? null, task_id: launch.task_id, workspace: launch.workspace, prompt_digest: launch.prompt_digest, environment_digest: observedEnvironment, budget_digest: observedBudget });
     const drift = observedStability !== run.stability_digest;
-    const hostRun = launch.run_id ? this.store.find("host_run", String(launch.run_id)) : null; const loop = this.store.find("delivery_loop", `delivery_loop_${launch.id}`);
+    const hostRun = launch.run_id ? this.store.find("host_run", String(launch.run_id)) : null;
+    const observedLoop = this.store.find("delivery_loop", `delivery_loop_${launch.id}`);
+    const assessment = launch.acceptance_plan_id ? this.store.find("acceptance_assessment", `assessment_${launch.acceptance_plan_id}`) : null;
+    // A cached delivery decision is guidance only for the exact facts it saw.
+    // Refreshing a Task Run must not promote stale acceptance or silently rerun it.
+    const loop = observedLoop && digestJson([observedLoop.launch_id, observedLoop.launch_version,
+      observedLoop.run_id, observedLoop.run_version, observedLoop.assessment_id, observedLoop.assessment_version])
+      === digestJson([launch.id, launch.version, hostRun?.id ?? null, hostRun?.version ?? null,
+        assessment?.id ?? null, assessment?.version ?? null]) ? observedLoop : null;
     const state = this.state(run, launch, hostRun, loop, drift); const identity = { task_run_id: run.id, task_run_version: run.version, lifecycle: run.lifecycle, launch_id: launch.id, launch_version: launch.version, host_run_id: hostRun?.id ?? null, host_run_version: hostRun?.version ?? null, delivery_loop_id: loop?.id ?? null, delivery_loop_version: loop?.version ?? null, observed_environment_digest: observedEnvironment, observed_budget_digest: observedBudget, drift, ...state };
     const stateId = `task_run_state_${run.id}`; const existing = this.store.find("task_run_state", stateId); const stateDigest = digestJson(identity);
     if (existing?.state_digest === stateDigest) return { state: existing, idempotent: true };

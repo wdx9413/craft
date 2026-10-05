@@ -1,0 +1,67 @@
+{
+  "name": "craft-common-base",
+  "version": "0.12.38",
+  "description": "Capability contracts and shared deterministic primitives",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./validation": {
+      "types": "./dist/validation.d.ts",
+      "default": "./dist/validation.js"
+    },
+    "./retrieval-port": {
+      "types": "./dist/retrieval-port.d.ts",
+      "default": "./dist/retrieval-port.js"
+    },
+    "./workflow": {
+      "types": "./dist/workflow.d.ts",
+      "default": "./dist/workflow.js"
+    },
+    "./capability-protocol": {
+      "types": "./dist/capability-protocol.d.ts",
+      "default": "./dist/capability-protocol.js"
+    },
+    "./retrieval-terms": {
+      "types": "./dist/retrieval-terms.d.ts",
+      "default": "./dist/retrieval-terms.js"
+    },
+    "./scope-policy": {
+      "types": "./dist/scope-policy.d.ts",
+      "default": "./dist/scope-policy.js"
+    },
+    "./model-compat": {
+      "types": "./dist/model-compat.d.ts",
+      "default": "./dist/model-compat.js"
+    },
+    "./digest": {
+      "types": "./dist/digest.d.ts",
+      "default": "./dist/digest.js"
+    },
+    "./bm25": {
+      "types": "./dist/bm25.d.ts",
+      "default": "./dist/bm25.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=23"
+  },
+  "dependencies": {
+    "craft-common-store-local": "0.12.38",
+    "@types/node": ">=23 <26"
+  },
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

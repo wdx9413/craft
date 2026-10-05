@@ -41,3 +41,13 @@ test("observation can require visible user login takeover without reading creden
   assert.match(String(calls[0]?.params?.expression), /input\[type=/);
   assert.doesNotMatch(String(calls[0]?.params?.expression), /document\.cookie|\.value/);
 });
+
+test("navigation protocol responses cannot masquerade as successful page navigation", async () => {
+  for (const result of [{ errorText: "net::ERR_CONNECTION_REFUSED" }, {}]) {
+    const adapter = new BrowserCdpAdapter({ async call() { return result; } });
+    await assert.rejects(adapter.execute({ request_id: "navigation", operation: "navigate", url: "https://portal.example.test" }), /navigation/);
+  }
+  const first = await new BrowserCdpAdapter({ async call() { return { frameId: "first" }; } }).execute({ request_id: "first", operation: "navigate", url: "https://portal.example.test" });
+  const second = await new BrowserCdpAdapter({ async call() { return { frameId: "second" }; } }).execute({ request_id: "second", operation: "navigate", url: "https://portal.example.test" });
+  assert.notEqual(first.result_digest, second.result_digest);
+});

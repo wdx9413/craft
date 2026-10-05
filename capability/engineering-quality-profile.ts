@@ -221,6 +221,10 @@ export class EngineeringQualityProfileKernel {
   }
 
   evaluationVerifiedReceiptImport(args: JsonObject): JsonObject {
+    return this.store.transaction(() => this.importVerifiedReceipt(args));
+  }
+
+  private importVerifiedReceipt(args: JsonObject): JsonObject {
     const plan = this.store.get("engineering_quality_profile_evaluation_plan", text(args.plan_id, "plan_id"));
     if (plan.status !== "collecting") throw new Error("Engineering Quality Profile evaluation is not collecting observations");
     const caseId = text(args.case_id, "case_id"); if (!(plan.case_ids as string[]).includes(caseId)) throw new Error("Engineering Quality Profile Case is not in the plan");
@@ -236,11 +240,24 @@ export class EngineeringQualityProfileKernel {
     if (evidence.some((item) => item.source_type !== "program" || item.confidence !== "confirmed")) throw new Error("Engineering Quality Profile receipt requires confirmed program Evidence");
     const testCase = this.store.get("engineering_quality_profile_case", caseId);
     if (receipt.frozen_input_digest !== testCase.frozen_input_digest) throw new Error("Engineering Quality Profile receipt frozen_input_digest drifted");
-    const identity = { plan_id: plan.id, plan_version: plan.version, case_id: caseId, trial_index: trialIndex, arm, host_session_id: session.id, host_session_version: session.version, observation_id: observation.id, observation_version: observation.version, receipt_digest: stableDigest(receipt), evidence_ids: evidenceIds.sort(), retry_count: receipt.retry_count, cost_units: receipt.cost_units, latency_ms: receipt.latency_ms };
+    const checks = [receipt.host_terminal, receipt.acceptance, ...receipt.siblings, receipt.effect_check, receipt.safety_check, receipt.factual_check];
+    if (new Set(evidenceIds).size !== evidenceIds.length) throw new Error("Engineering Quality Profile checks require distinct Evidence");
+    if (receipt.acceptance.command_digest !== testCase.acceptance_command_digest
+      || stableDigest(receipt.siblings.map(check => check.command_digest)) !== testCase.sibling_caller_assertion_digest) throw new Error("Engineering Quality Profile verifier command binding drifted");
+    for (const check of checks) {
+      const metadata = object(this.store.get("evidence", check.evidence_id).metadata, "program Evidence metadata");
+      if (metadata.case_id !== caseId || metadata.command_digest !== check.command_digest
+        || metadata.result_digest !== check.result_digest || metadata.status !== check.status) throw new Error("Engineering Quality Profile program Evidence contradicts the receipt");
+    }
+    const rootSupported = receipt.root_cause_evidence_ids.every(id => {
+      const metadata = object(this.store.get("evidence", id).metadata, "root cause Evidence metadata");
+      return metadata.case_id === caseId && metadata.status === "passed" && metadata.check_kind === "root_cause";
+    });
+    const identity = { receipt_validation_version: 2, plan_id: plan.id, plan_version: plan.version, case_id: caseId, trial_index: trialIndex, arm, host_session_id: session.id, host_session_version: session.version, observation_id: observation.id, observation_version: observation.version, receipt_digest: stableDigest(receipt), evidence_ids: evidenceIds.sort(), retry_count: receipt.retry_count, cost_units: receipt.cost_units, latency_ms: receipt.latency_ms };
     const recordId = String(args.record_id ?? `engineering_quality_profile_evaluation_record_${stableDigest({ plan_id: plan.id, case_id: caseId, trial_index: trialIndex, arm }).slice(-20)}`);
     const existing = this.store.find("engineering_quality_profile_evaluation_record", recordId); if (existing) { if (existing.identity_digest !== stableDigest(identity)) throw new Error("Engineering Quality Profile evaluation record idempotency conflict"); return { plan, record: existing, idempotent: true }; }
     if (this.store.list("engineering_quality_profile_evaluation_record", 10_000, (record) => record.plan_id === plan.id && record.case_id === caseId && record.trial_index === trialIndex && record.arm === arm).length) throw new Error("Engineering Quality Profile evaluation slot is already recorded");
-    const passed = receiptPassed(receipt) && observation.verdict === "passed";
+    const passed = receiptPassed(receipt) && observation.verdict === "passed" && rootSupported;
     const record = this.store.create("engineering_quality_profile_evaluation_record", recordId, { ...identity, identity_digest: stableDigest(identity), status: passed ? "verified" : "rejected", deterministic_acceptance_passed: receipt.acceptance.status === "passed", sibling_caller_passed: receipt.siblings.every((item) => item.status === "passed"), unauthorized_effect: receipt.effect_check.status !== "passed", safety_regression: receipt.safety_check.status !== "passed", factual_regression: receipt.factual_check.status !== "passed", root_cause_evidence_ids: [...receipt.root_cause_evidence_ids], raw_receipt_stored: false });
     if (!passed && !plan.rejection_id) {
       const rejection = this.store.create("engineering_quality_profile_rejection", `engineering_quality_profile_rejection_${stableDigest(identity).slice(-20)}`, { plan_id: plan.id, case_id: caseId, trial_index: trialIndex, arm, reason: "verified_evaluation_receipt_blocker", receipt_digest: stableDigest(receipt), handoff_required: true });
@@ -255,7 +272,7 @@ export class EngineeringQualityProfileKernel {
     const slots = (plan.case_ids as string[]).flatMap((caseId) => Array.from({ length: Number(plan.trials_per_pair) }, (_, index) => ({ caseId, trial: index + 1 })));
     const pairs = slots.map((slot) => ({ ...slot, baseline: records.find((record) => record.case_id === slot.caseId && record.trial_index === slot.trial && record.arm === "baseline"),
       profile: records.find((record) => record.case_id === slot.caseId && record.trial_index === slot.trial && record.arm === "profile") }));
-    const completePairs = pairs.filter((pair) => pair.baseline && pair.profile) as Array<{ caseId: string; trial: number; baseline: JsonObject; profile: JsonObject }>;
+    const completePairs = pairs.filter((pair) => pair.baseline?.receipt_validation_version === 2 && pair.profile?.receipt_validation_version === 2) as Array<{ caseId: string; trial: number; baseline: JsonObject; profile: JsonObject }>;
     const incompletePairs = pairs.length - completePairs.length;
     const average = (items: JsonObject[], field: string) => items.length ? items.reduce((total, item) => total + Number(item[field]), 0) / items.length : Infinity;
     const baseline = completePairs.map((pair) => pair.baseline); const profile = completePairs.map((pair) => pair.profile);

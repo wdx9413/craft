@@ -1,4 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
+import { optionalScope } from "./validation.ts";
+import { scopeAccess, scopeAllows, scopeEnvelope, sourceAllows } from "./scope-policy.ts";
+import { canonicalJson } from "./digest.ts";
 import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
 
 const STAGES = new Set(["light", "review", "deep"]);
@@ -47,12 +50,21 @@ export class MemoryMaintenanceKernel {
     if (!STAGES.has(stage)) throw new Error("Memory maintenance stage is unsupported");
     const now = args.now === undefined ? new Date().toISOString() : text(args.now, "now");
     if (Number.isNaN(Date.parse(now))) throw new Error("now must be an ISO timestamp");
-    const ledger = this.store.list("memory_ledger", 10_000);
+    const scope = optionalScope(args), access = scopeAccess(args);
+    const visible = (item: JsonObject): boolean => {
+      if (scope !== null && canonicalJson(item.scope) !== canonicalJson(scope)
+        || !scopeAllows(scopeEnvelope(item.scope_envelope, (item.scope ?? { kind: "global", id: "global" }) as { kind: string; id: string }), access)
+        || item.sensitivity === "restricted" && args.allow_restricted !== true) return false;
+      const source = item.source_id ? this.store.find("knowledge_source", String(item.source_id)) : null;
+      return source === null || sourceAllows(source, access);
+    };
+    const ledger = this.store.list("memory_ledger", 10_000, visible);
     // Read legacy entries only while no governed records exist.  This keeps
     // migration reversible without mixing two accounting systems in one run.
-    const candidates = ledger.length ? ledger : this.store.list("episodic_memory", 10_000);
-    const candidateKind = ledger.length ? "memory_ledger" : "episodic_memory";
-    const semantic = this.store.list("semantic_memory", 10_000, (item) => item.status === "active");
+    const useLedger = this.store.count("memory_ledger") > 0 || scope !== null;
+    const candidates = useLedger ? ledger : this.store.list("episodic_memory", 10_000, visible);
+    const candidateKind = useLedger ? "memory_ledger" : "episodic_memory";
+    const semantic = this.store.list("semantic_memory", 10_000, item => item.status === "active" && visible(item));
     const findings: JsonObject[] = [];
     const seen = new Set<string>();
     for (const memory of candidates) {
@@ -73,14 +85,18 @@ export class MemoryMaintenanceKernel {
       }
     }
     const maintenanceId = String(args.maintenance_id ?? `memory_maintenance_${randomUUID().replaceAll("-", "")}`);
-    const identity = { stage, now, memory_kind: candidateKind, memory_ids: candidates.map((item) => item.id).sort(), semantic_ids: semantic.map((item) => item.id).sort(), finding_digest: digest(findings) };
+    const identity = { scope, stage, now, memory_kind: candidateKind, memory_ids: candidates.map((item) => item.id).sort(), semantic_ids: semantic.map((item) => item.id).sort(), finding_digest: digest(findings) };
     const existing = this.store.find("memory_maintenance_run", maintenanceId);
     if (existing) {
       if (existing.identity_digest !== digest(identity)) throw new Error("Memory maintenance idempotency conflict");
       return { run: existing, findings, idempotent: true };
     }
     const proposal = stage === "deep" && findings.length > 0
-      ? this.store.create("memory_maintenance_candidate", `${maintenanceId}:candidate`, { source_kind: candidateKind, source_ids: candidates.map((item) => item.id), finding_digest: digest(findings), status: "candidate", publication_allowed: false, raw_content_stored: false })
+      ? this.store.create("memory_maintenance_candidate", `${maintenanceId}:candidate`, { source_kind: candidateKind, source_ids: candidates.map((item) => item.id),
+        actions: findings.filter(item => ["duplicate", "expired_active"].includes(String(item.kind))).map(item => ({ memory_id: item.memory_id,
+          expected_version: candidates.find(memory => memory.id === item.memory_id)!.version,
+          action: item.kind === "expired_active" ? "expire" : "review_duplicate", requires_review: item.kind !== "expired_active" })),
+        scope, finding_digest: digest(findings), status: "candidate", publication_allowed: false, raw_content_stored: false })
       : null;
     const run = this.store.create("memory_maintenance_run", maintenanceId, { ...identity, identity_digest: digest(identity), finding_count: findings.length, candidate_id: proposal?.id ?? null, status: "completed", raw_content_stored: false });
     return { run, findings, candidate: proposal, idempotent: false };

@@ -620,6 +620,73 @@ test("the internal host cancels and reports a non-Error transport failure", asyn
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
+for (const phase of ["before", "reply-action", "reply-final"] as const) {
+  test(`the internal host respects cancellation at ${phase} without issuing later work`, async () => {
+    const f = await store(); const controller = new AbortController();
+    let requests = 0; let actions = 0;
+    try {
+      const task = f.store.create("task", "cancel-boundary", { title: "t", goal: "g" });
+      const driver = new InternalHostDriver(f.store, { providers: [openaiSpec()],
+        transport: { complete: async () => {
+          requests++; controller.abort();
+          return { text: phase === "reply-final" ? "done" : '{"action":"anything"}', model: "fake", usage: { input_tokens: 2, output_tokens: 1 } };
+        } }, invokeAction: () => { actions++; return { ok: true }; } });
+      driver.prepare({ task_id: task.id, dispatch_id: "cancel-boundary", prompt: "go" });
+      if (phase === "before") controller.abort();
+      const result = await driver.execute({ dispatch_id: "cancel-boundary", prompt: "go" }, { signal: controller.signal });
+      assert.equal(actions, 0, "cancelled work must not execute a proposed action");
+      assert.equal(requests, phase === "before" ? 0 : 1, "pre-cancelled work must not call a model");
+      const receipt = result.receipt as JsonObject;
+      assert.equal(receipt.status, "failed");
+      assert.equal(receipt.failure, "cancelled");
+      assert.equal((receipt.loop as JsonObject).verdict, "cancelled");
+      assert.equal((receipt.loop as JsonObject).tokens_used, phase === "before" ? 0 : 3);
+      assert.equal(receipt.final_message, null);
+      assert.equal((await driver.execute({ dispatch_id: "cancel-boundary", prompt: "go" })).idempotent, true);
+      assert.equal(requests, phase === "before" ? 0 : 1);
+    } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+  });
+}
+
+test("cancellation during an action stops later calls in the same model reply", async () => {
+  const f = await store(); const controller = new AbortController();
+  const actions: string[] = []; let requests = 0;
+  try {
+    const task = f.store.create("task", "cancel-between-actions", { title: "t", goal: "g" });
+    const driver = new InternalHostDriver(f.store, { providers: [openaiSpec()],
+      transport: { complete: async () => { requests++; return { text: "", model: "fake", usage: null,
+        tool_calls: ["first", "second"].map(name => ({ id: name, type: "function" as const, function: { name, arguments: "{}" } })) }; } },
+      invokeAction: action => { actions.push(action); controller.abort(); return { ok: true }; } });
+    driver.prepare({ task_id: task.id, dispatch_id: "cancel-between-actions", prompt: "go" });
+    const result = await driver.execute({ dispatch_id: "cancel-between-actions", prompt: "go" }, { signal: controller.signal });
+    assert.deepEqual(actions, ["first"]);
+    assert.equal(requests, 1);
+    assert.equal((result.receipt as JsonObject).failure, "cancelled");
+    assert.equal((result.receipt as JsonObject).status, "failed");
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("non-Error action failures are redacted while reported cache usage remains observable", async () => {
+  const f = await store(); const controller = new AbortController(); let requests = 0;
+  try {
+    const task = f.store.create("task", "redacted-tool", { title: "t", goal: "g" });
+    const driver = new InternalHostDriver(f.store, { providers: [openaiSpec()],
+      transport: { complete: async () => { requests++; return { text: requests === 1 ? '{"action":"read"}' : "done", model: "fake",
+        usage: { input_tokens: 2, output_tokens: 1, cache_hit_tokens: 1, cache_miss_tokens: 1 } }; } },
+      invokeAction: () => { throw "token=fixture-only"; } });
+    driver.prepare({ task_id: task.id, dispatch_id: "redacted-tool", prompt: "go" });
+    const result = await driver.execute({ dispatch_id: "redacted-tool", prompt: "go" }, { signal: controller.signal });
+    assert.equal((result.receipt as JsonObject).status, "completed");
+    assert.equal(requests, 2);
+    const session = f.store.get("internal_session", "session_redacted-tool");
+    assert.equal((session.messages as JsonObject[])[2].content, '{"error":"[redacted]"}');
+    const cache = f.store.get("model_context_cache_receipt", "model_context_cache_redacted-tool_1");
+    assert.equal(cache.observation, "observed");
+    assert.equal(cache.cache_hit_tokens, 1);
+    assert.equal(cache.cache_miss_tokens, 1);
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
 test("the internal host redacts credentials from a final message", async () => {
   const f = await store();
   try {

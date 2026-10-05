@@ -14,6 +14,33 @@ async function fixture(): Promise<{ root: string; store: CraftStore }> {
   return { root, store };
 }
 
+test("latest-first ordering uses insertion order when timestamps tie", async () => {
+  const { root, store } = await fixture();
+  try {
+    store.create("ordering", "z-first", { value: 1 });
+    store.create("ordering", "a-last", { value: 2 });
+    store.database.prepare("UPDATE records SET updated_at=? WHERE kind=?").run("2026-01-01T00:00:00.000Z", "ordering");
+    assert.deepEqual(store.list("ordering").map((item) => item.id), ["a-last", "z-first"]);
+    assert.deepEqual(store.list("ordering", 1, () => true).map((item) => item.id), ["a-last"]);
+    store.save("ordering", "z-first", { value: 3 });
+    store.database.prepare("UPDATE records SET updated_at=? WHERE kind=?").run("2026-01-01T00:00:00.000Z", "ordering");
+    assert.equal(store.list("ordering", 1)[0].id, "z-first");
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("version history remains bounded and excludes the current version", async () => {
+  const { root, store } = await fixture();
+  try {
+    store.create("history", "item", { value: 1 });
+    store.save("history", "item", { value: 2 });
+    store.save("history", "item", { value: 3 });
+    assert.deepEqual(store.history("history", "item", 3, 2).map(record => record.value), [2, 1]);
+    assert.deepEqual(store.history("history", "item", 2, 1).map(record => record.value), [1]);
+    assert.throws(() => store.history("history", "item", 0, 1), /history bounds/);
+    assert.throws(() => store.history("history", "item", 3, 102), /history bounds/);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
 test("store initializes once, commits, and rolls back atomically", async () => {
   const { root, store } = await fixture();
   try {
@@ -33,6 +60,54 @@ test("store initializes once, commits, and rolls back atomically", async () => {
     store.close();
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("nested record operations share an atomic transaction with isolated savepoint rollback", async () => {
+  const { root, store } = await fixture();
+  try {
+    store.transaction(() => {
+      store.create("atomic", "outer", {});
+      assert.throws(() => store.transaction(() => { store.create("atomic", "inner", {}); throw new Error("inner failure"); }), /inner failure/);
+      store.create("atomic", "after", {});
+    });
+    assert.equal(store.find("atomic", "inner"), null);
+    assert.ok(store.find("atomic", "outer"));
+    assert.ok(store.find("atomic", "after"));
+    assert.throws(() => store.transaction(() => { store.create("atomic", "rolled-back", {}); throw new Error("outer failure"); }), /outer failure/);
+    assert.equal(store.find("atomic", "rolled-back"), null);
+    store.create("atomic", "recovered", {});
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("migration payload updates and content hydration remain recoverable", async () => {
+  const { root, store } = await fixture();
+  try {
+    store.create("migration", "one", { value: "before" });
+    assert.equal(store.rawRecords().length, 1);
+    assert.equal(store.rawRecords("migration")[0]!.payload.value, "before");
+    store.replacePayload("migration", "one", 1, { value: "after", id: "cannot-overwrite" });
+    assert.equal(store.get("migration", "one").value, "after");
+    assert.throws(() => store.replacePayload("migration", "absent", 1, {}), /Unknown record/);
+    store.replacePayloadBatch([]);
+    assert.throws(() => store.replacePayloadBatch([{ kind: "migration", id: "one", version: 1, payload: { value: "partial" } }, { kind: "migration", id: "absent", version: 1, payload: {} }]), /Unknown record/);
+    assert.equal(store.get("migration", "one").value, "after");
+    store.replacePayloadBatch([{ kind: "migration", id: "one", version: 1, payload: { value: "committed" } }]);
+    assert.equal(store.get("migration", "one").value, "committed");
+    const ref = store.contentStore.writeSync({ kind: "knowledge", record_id: "body", version: 1, scope: "project:test", status: "candidate", sensitivity: "internal", source_id: "fixture", body: "readable body" });
+    store.create("knowledge_claim", "body", { content_ref: ref });
+    assert.equal(store.get("knowledge_claim", "body").content, "readable body");
+    store.create("memory_ledger", "bad-ref", { content_ref: { path: "/missing" } });
+    assert.equal(store.get("memory_ledger", "bad-ref").content_unavailable, true);
+    for (const kind of ["episodic_memory", "semantic_memory", "unrelated_record"]) {
+      store.create(kind, "compat-body", { content_ref: ref });
+      assert.equal(store.get(kind, "compat-body").content, kind === "unrelated_record" ? undefined : "readable body");
+    }
+    store.create("legacy", "bad-string-ref", { content_ref: "invalid" });
+    store.create("legacy", "bad-array-ref", { content_ref: [] });
+    store.close();
+    await store.open();
+    assert.equal(store.get("knowledge_claim", "body").content, "readable body");
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
 test("closed stores reject access and legacy databases are only detected", async () => {
@@ -94,6 +169,11 @@ test("versioned records and events provide the shared persistence primitives", a
     assert.deepEqual(store.events("a").map((x) => x.event_type), ["started", "finished"]);
     assert.equal(store.remove("thing", "a"), 2);
     assert.equal(store.remove("thing", "a"), 0);
+    store.create("trace", "archived", {});
+    store.create("trace_event", "event", {});
+    store.create("trace_feedback", "feedback", {});
+    assert.equal(store.removeTraceRecords("archived", ["event"], ["feedback"]), 3);
+    assert.equal(store.find("trace_feedback", "feedback"), null);
   } finally {
     store.close();
     await rm(root, { recursive: true, force: true });

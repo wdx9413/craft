@@ -1,0 +1,261 @@
+{
+  "date": "2026-09-27",
+  "baseline": "/tmp/craft-hookless-baseline-20260927",
+  "scope": "Changes made in this task only; pre-existing and concurrent changes excluded. Not whole-repository coverage.",
+  "runtime_incremental": {
+    "line_covered": 377,
+    "line_total": 377,
+    "branches_covered": 331,
+    "branches_total": 331,
+    "files": [
+      {
+        "file": "core/retrieval-port.ts",
+        "changed_lines": 2,
+        "covered_lines": 2,
+        "branch_gaps": []
+      },
+      {
+        "file": "core/decision-context-gate.ts",
+        "changed_lines": 3,
+        "covered_lines": 3,
+        "branch_gaps": []
+      },
+      {
+        "file": "core/workspace.ts",
+        "changed_lines": 12,
+        "covered_lines": 12,
+        "branch_gaps": []
+      },
+      {
+        "file": "core/capability-protocol.ts",
+        "changed_lines": 4,
+        "covered_lines": 4,
+        "branch_gaps": []
+      },
+      {
+        "file": "core/context-resolution.ts",
+        "changed_lines": 41,
+        "covered_lines": 41,
+        "branch_gaps": []
+      },
+      {
+        "file": "core/knowledge-auto-review.ts",
+        "changed_lines": 2,
+        "covered_lines": 2,
+        "branch_gaps": []
+      },
+      {
+        "file": "core/retrieval-terms.ts",
+        "changed_lines": 8,
+        "covered_lines": 8,
+        "branch_gaps": []
+      },
+      {
+        "file": "core/component-readiness.ts",
+        "changed_lines": 3,
+        "covered_lines": 3,
+        "branch_gaps": []
+      },
+      {
+        "file": "core/mcp/tool-catalog.ts",
+        "changed_lines": 11,
+        "covered_lines": 11,
+        "branch_gaps": []
+      },
+      {
+        "file": "core/mcp/tool-schema.ts",
+        "changed_lines": 31,
+        "covered_lines": 31,
+        "branch_gaps": []
+      },
+      {
+        "file": "core/application/craft-service.ts",
+        "changed_lines": 1,
+        "covered_lines": 1,
+        "branch_gaps": []
+      },
+      {
+        "file": "core/application/use-cases/codebase.ts",
+        "changed_lines": 23,
+        "covered_lines": 23,
+        "branch_gaps": []
+      },
+      {
+        "file": "core/application/use-cases/knowledge-memory.ts",
+        "changed_lines": 7,
+        "covered_lines": 7,
+        "branch_gaps": []
+      },
+      {
+        "file": "core/application/actions/action-handlers.ts",
+        "changed_lines": 13,
+        "covered_lines": 13,
+        "branch_gaps": []
+      },
+      {
+        "file": "core/interfaces/mcp-server.ts",
+        "changed_lines": 6,
+        "covered_lines": 6,
+        "branch_gaps": []
+      },
+      {
+        "file": "core/interfaces/mcp-http.ts",
+        "changed_lines": 10,
+        "covered_lines": 10,
+        "branch_gaps": []
+      },
+      {
+        "file": "core/interfaces/codex-hook-bridge.ts",
+        "changed_lines": 17,
+        "covered_lines": 17,
+        "branch_gaps": []
+      },
+      {
+        "file": "core/interfaces/mcp/surface-registry.ts",
+        "changed_lines": 6,
+        "covered_lines": 6,
+        "branch_gaps": []
+      },
+      {
+        "file": "capability/craft-memory/memory-ledger.ts",
+        "changed_lines": 6,
+        "covered_lines": 6,
+        "branch_gaps": []
+      },
+      {
+        "file": "capability/craft-experience/workflow-evolution.ts",
+        "changed_lines": 10,
+        "covered_lines": 10,
+        "branch_gaps": []
+      },
+      {
+        "file": "capability/craft-experience/contribution.ts",
+        "changed_lines": 2,
+        "covered_lines": 2,
+        "branch_gaps": []
+      },
+      {
+        "file": "capability/craft-codebase/codebase-index.ts",
+        "changed_lines": 48,
+        "covered_lines": 48,
+        "branch_gaps": []
+      },
+      {
+        "file": "capability/craft-codebase/lsp-adapter.ts",
+        "changed_lines": 39,
+        "covered_lines": 39,
+        "branch_gaps": []
+      },
+      {
+        "file": "capability/craft-codebase/ownership.ts",
+        "changed_lines": 1,
+        "covered_lines": 1,
+        "branch_gaps": []
+      },
+      {
+        "file": "capability/craft-knowledge/contribution.ts",
+        "changed_lines": 13,
+        "covered_lines": 13,
+        "branch_gaps": []
+      },
+      {
+        "file": "deploy/components/server.ts",
+        "changed_lines": 58,
+        "covered_lines": 58,
+        "branch_gaps": []
+      }
+    ]
+  },
+  "installer_incremental": {
+    "line_covered": 127,
+    "line_total": 127,
+    "branches_covered": 103,
+    "branches_total": 103,
+    "files": [
+      {
+        "file": "init.mjs",
+        "line_total": 95,
+        "line_covered": 95,
+        "branch_gaps": []
+      },
+      {
+        "file": "agents.mjs",
+        "line_total": 32,
+        "line_covered": 32,
+        "branch_gaps": []
+      }
+    ]
+  },
+  "stdio_conformance": {
+    "artifact_sha256": "008ad99368ff9108173a9d5dafd948728d684a670f2b2ab26a964aca17759895",
+    "reports": [
+      {
+        "product": "knowledge",
+        "status": "passed",
+        "level": "workflow_verified",
+        "transport": "stdio",
+        "protocol": "2025-11-25",
+        "tool_count": 20,
+        "calls": 17,
+        "host_session_verified": false
+      },
+      {
+        "product": "memory",
+        "status": "passed",
+        "level": "workflow_verified",
+        "transport": "stdio",
+        "protocol": "2025-11-25",
+        "tool_count": 20,
+        "calls": 9,
+        "host_session_verified": false
+      },
+      {
+        "product": "experience",
+        "status": "passed",
+        "level": "workflow_verified",
+        "transport": "stdio",
+        "protocol": "2025-11-25",
+        "tool_count": 17,
+        "calls": 21,
+        "host_session_verified": false
+      },
+      {
+        "product": "codebase",
+        "status": "passed",
+        "level": "workflow_verified",
+        "transport": "stdio",
+        "protocol": "2025-11-25",
+        "tool_count": 12,
+        "calls": 8,
+        "host_session_verified": false
+      }
+    ]
+  },
+  "tests": {
+    "runtime": {
+      "passed": 134,
+      "failed": 0
+    },
+    "installer": {
+      "passed": 6,
+      "failed": 0
+    },
+    "protocol_and_package": {
+      "passed": 25,
+      "failed": 0,
+      "overlaps_runtime": true
+    }
+  },
+  "codebase_full_gate": {
+    "lines": 100,
+    "functions": 100,
+    "branches": 100
+  },
+  "not_verified": [
+    "All live host sessions",
+    "Docker image build (daemon unavailable)",
+    "Real identity provider and production deployment",
+    "Model task outcome improvement",
+    "Whole-repository coverage inventory"
+  ]
+}

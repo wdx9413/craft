@@ -17,10 +17,17 @@ test("Tauri desktop keeps the Workbench sidecar and untrusted embedded pages in 
   assert.match(rust, /matches!\(parsed\.scheme\(\), "http" \| "https"\)/);
   assert.match(rust, /global_shortcut/);
   assert.match(rust, /tauri_plugin_notification/);
-  assert.match(rust, /command\.env\("CRAFT_DATA_DIR", data_root\)/);
-  assert.match(rust, /app_local_data_dir\(\).*join\("craft-data"\)/s);
+  assert.doesNotMatch(rust, /command\.env\("CRAFT_DATA_DIR"/);
+  assert.match(rust, /recv_timeout/);
+  assert.match(rust, /WebviewUrl::App\("index.html"/);
+  assert.match(rust, /workbench_request/);
+  assert.equal(config.version, "0.12.38");
+  assert.deepEqual(config.bundle.resources, { "../../dist/desktop/app/": "app/" });
   assert.match(rust, /Craft 本地运行时启动失败：/);
   assert.match(rust, /cli\.to_string_lossy\(\)\.replace\('\\\\', "\/"\)/);
-  assert.match(sidecar, /dist", "core"/);
-  assert.match(sidecar, /dist", "workbench"/);
+  assert.match(sidecar, /prepareRuntimeArtifact\(root\)/);
+  const artifact = JSON.parse(await readFile(path.join(root, "runtime-artifacts.json"), "utf8"));
+  for (const target of ["dist/core", "dist/capability", "dist/bin", "dist/workbench"]) {
+    assert.ok(artifact.desktop_copies.some((entry: { target: string }) => entry.target === target));
+  }
 });

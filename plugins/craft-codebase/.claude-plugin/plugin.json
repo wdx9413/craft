@@ -1,11 +1,11 @@
 {
   "name": "craft-codebase",
-  "version": "0.12.37",
-  "description": "Read-only checkpoint-pinned repository analysis for Claude Code.",
+  "version": "0.12.38",
+  "description": "craft-codebase governed context and repository tools",
   "author": {
     "name": "wdx9413"
   },
-  "skills": "./skills/craft-codebase/",
+  "skills": "./skills/",
   "mcpServers": {
     "craft-codebase": {
       "command": "node",

@@ -7,8 +7,13 @@
     "skipLibCheck": true,
     "declaration": true,
     "rootDir": ".",
-    "outDir": "dist",
-    "types": ["node"]
+    "outDir": "../../dist/adapters/deepseek-harness/dist",
+    "types": [
+      "node"
+    ],
+    "rewriteRelativeImportExtensions": true
   },
-  "include": ["index.ts", "types.d.ts"]
+  "include": [
+    "*.ts"
+  ]
 }

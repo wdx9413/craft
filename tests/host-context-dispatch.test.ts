@@ -17,7 +17,8 @@ test("validated capability context is bound to Codex and Claude dispatches", asy
     const task = service.taskOpen({ title: "Brief", goal: "Prepare brief" }).task as JsonObject;
     const plan = (await service.logicalActivationPlan({ plan_id: "brief-plan", task_id: task.id, query: "brief helper" })).plan as JsonObject;
     const success = async () => ({ exitCode: 0, signal: null, stdout: "", stderr: "", timedOut: false, cancelled: false, outputLimited: false });
-    service.codexHost.executor = success; service.claudeHost.executor = success;
+    service.codexHost.executor = async () => ({ ...await success(), stdout: JSON.stringify({ type: "turn.completed", usage: {} }) });
+    service.claudeHost.executor = async () => ({ ...await success(), stdout: JSON.stringify({ type: "result", subtype: "success" }) });
     const common = { task_id: task.id, workspace: root, prompt: "Prepare the brief", plan_id: plan.id, max_chars: 500 };
     const codex = await service.capabilityContextDispatchPrepare({ ...common, host: "codex-cli", dispatch_id: "codex-context" }); const codexDispatch = codex.dispatch as JsonObject;
     assert.equal(codexDispatch.activation_plan_id, plan.id); assert.equal(typeof codexDispatch.activation_context_digest, "string");
@@ -42,6 +43,6 @@ test("validated capability context is bound to Codex and Claude dispatches", asy
     await writeFile(join(sourcePath, "SKILL.md"), `${skill}\nChanged.`);
     await assert.rejects(service.capabilityContextDispatchExecute({ host: "codex-cli", dispatch_id: codexDispatch.id, prompt: common.prompt }), /digest drifted/);
     await service.sourceScan({ source_id: source.id });
-    assert.equal(VERSION, "0.12.37");
+    assert.equal(VERSION, "0.12.38");
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });

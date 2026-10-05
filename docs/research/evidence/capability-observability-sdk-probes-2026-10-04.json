@@ -1,0 +1,80 @@
+{
+  "shared_trace": {
+    "error": "Trace event idempotency conflict",
+    "executed_calls": 1,
+    "events": 2
+  },
+  "telemetry_failure": {
+    "handler_completed": true,
+    "reported_ok": false,
+    "reported_error": "fixture telemetry sink failure"
+  },
+  "otlp": {
+    "parent_link_matches": false,
+    "has_timestamps": false,
+    "running_status": 1,
+    "export_partial": {
+      "endpoint": "https://collector.example/v1/traces",
+      "status": 200,
+      "accepted": true,
+      "response_digest": "sha256:b3c1157b1c1bf664bf6ce50dba27baa3d5ce4933d5b0f52396cb36cce192ec4b"
+    }
+  },
+  "evaluation_stage_bookkeeping": {
+    "status": "routeable",
+    "submitted_evidence": 0,
+    "domain_procedure_gate_exercised": false
+  },
+  "surfaces": [
+    {
+      "mode": "component-context-daily",
+      "tools": 72,
+      "trace_tools": [],
+      "evaluation_tools": [
+        "craft_procedure_invocation_evaluate"
+      ]
+    },
+    {
+      "mode": "component-knowledge-daily",
+      "tools": 22,
+      "trace_tools": [],
+      "evaluation_tools": []
+    },
+    {
+      "mode": "component-memory-daily",
+      "tools": 22,
+      "trace_tools": [],
+      "evaluation_tools": []
+    },
+    {
+      "mode": "component-experience-daily",
+      "tools": 28,
+      "trace_tools": [],
+      "evaluation_tools": [
+        "craft_procedure_invocation_evaluate"
+      ]
+    },
+    {
+      "mode": "component-codebase",
+      "tools": 15,
+      "trace_tools": [],
+      "evaluation_tools": []
+    }
+  ],
+  "date": "2026-10-04",
+  "environment": "isolated temporary local CraftStore; injected telemetry/export failures; no real collector",
+  "existing_tests": {
+    "passed": 51,
+    "failed": 0,
+    "log": "/tmp/craft-sdk-audit-tests.log"
+  },
+  "source_sha256": {
+    "core/component-trace.ts": "e2bc497b0b47cc169367ab8251609eb550a23b00ba229a7773286498ef049a41",
+    "core/runtime-truth.ts": "c8e754d359ad7be5e5ee6d3e04409b5095172ecedcf105d86a45fd572deaa8cd",
+    "core/evaluation-contract.ts": "7051a7cf620acd5265db66cee8d85e2e426c6005ed556242fe1ba4d528b54799",
+    "core/interfaces/mcp-server.ts": "8e910488119c3adc76ea8b59505dd27240e58ce45e4270fd59de47cf790d84af",
+    "core/interfaces/mcp/surface-registry.ts": "a770a275dd54713cbd3a8fb45539795ce9946061eae131ab525557ce2f661df1",
+    "core/capability-protocol.ts": "b6db0cd286bb178ebd49afa715c6576bd57f85423dad60929238d1cfd4589d64",
+    "core/cost-ledger.ts": "69f201eaa358b6996d600ddc163ef490d03d89bd63490d2d2777ec887cc6214d"
+  }
+}

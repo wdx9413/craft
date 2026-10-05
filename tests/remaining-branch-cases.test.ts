@@ -565,7 +565,8 @@ test("workbench experience selects each safe next action and validates filters",
 test("runtime truth and model wire formats cover legacy, tool and compaction branches", async () => {
   const legacy = standardizeTrace({ schema: "craft.trace.v1", id: "legacy", event_type: "tool.call", data: { token: "secret", value: 1 }, sequence: 2, parent_span_id: "p" });
   assert.equal(legacy.legacy_schema, "craft.trace.v1");
-  assert.equal((toOtlpTrace({ trace_id: "t", event_kind: "model.reply", sequence: 0, parent_span_id: "p" }, [legacy]).resourceSpans as JsonObject[]).length, 1);
+  assert.equal((toOtlpTrace({ trace_id: "legacy", event_kind: "model.reply", sequence: 0, parent_span_id: "p" }, [legacy]).resourceSpans as JsonObject[]).length, 1);
+  assert.throws(() => toOtlpTrace({ trace_id: "t" }, [legacy]), /one trace/);
   const calls = parseToolCalls({ choices: [{ message: { tool_calls: [{ function: { name: "fn", arguments: { x: 1 } } }] } }], content: [{ type: "tool_use", id: "u", name: "anthropic", input: {} }] });
   assert.equal(calls.length, 2);
   assert.equal(parseToolCalls({ choices: [{ message: { tool_calls: [{ function: { name: "default-args" } }] } }] })[0]?.arguments && typeof parseToolCalls({ choices: [{ message: { tool_calls: [{ function: { name: "default-args" } }] } }] })[0]?.arguments, "object");

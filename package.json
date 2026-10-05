@@ -1,6 +1,6 @@
 {
   "name": "craft-agent-harness",
-  "version": "0.12.37",
+  "version": "0.12.38",
   "description": "Cross-platform capability, workflow, evidence, and agent harness",
   "type": "module",
   "bin": {
@@ -11,7 +11,7 @@
   },
   "scripts": {
     "clean": "node --experimental-strip-types scripts/clean.ts",
-    "build": "pnpm run clean && pnpm run build:core && pnpm run build:plugin && pnpm run pack:plugin && pnpm run build:deepseek && pnpm run pack:adapters",
+    "build": "pnpm run clean && pnpm run build:core && pnpm run build:common && pnpm run build:plugin && pnpm run pack:plugin && pnpm run build:deepseek && pnpm run pack:adapters",
     "build:core": "node node_modules/typescript/bin/tsc -p tsconfig.build.json",
     "build:plugin": "esbuild bin/craft-mcp.ts --bundle --platform=node --format=cjs --target=node23 --outfile=dist/plugin/craft-mcp.cjs && esbuild bin/craft-mcp-full.ts --bundle --platform=node --format=cjs --target=node23 --outfile=dist/plugin/craft-mcp-full.cjs && esbuild bin/craft-mcp-http.ts --bundle --platform=node --format=cjs --target=node23 --outfile=dist/plugin/craft-mcp-http.cjs && esbuild bin/craft-codex-hook.ts --bundle --platform=node --format=cjs --target=node23 --outfile=dist/plugin/craft-codex-hook.cjs && esbuild bin/craft-parser-worker.ts --bundle --platform=node --format=esm --target=node23 --outfile=dist/plugin/craft-parser-worker.js",
     "pack:plugin": "node --experimental-strip-types scripts/release/pack-plugin.ts",
@@ -22,11 +22,11 @@
     "desktop:dev": "pnpm run build:core && pnpm --dir desktop run dev",
     "desktop:build": "pnpm run build:core && pnpm --dir desktop run build",
     "pack:desktop": "pnpm run desktop:build",
-    "pack:desktop:legacy": "node --experimental-strip-types scripts/release/package-desktop.ts",
     "prepack": "pnpm run build",
     "test": "pnpm run build && pnpm run typecheck && pnpm run audit:layering && pnpm run audit:surfaces && pnpm run audit:docs && pnpm run audit:consistency && pnpm run test:ts && pnpm run test:coverage-gates && pnpm run test:smoke && pnpm run test:plugin",
     "test:ts": "pnpm run version:check && node --experimental-strip-types scripts/ci/test.ts",
     "test:coverage-gates": "node --experimental-strip-types scripts/coverage/coverage-gates.ts",
+    "audit:coverage-inventory": "node --experimental-strip-types scripts/coverage/check-coverage-inventory.ts",
     "test:smoke": "node dist/core/cli.js --help",
     "test:plugin": "pnpm run release:check && node --experimental-strip-types scripts/release/check-plugin-package.ts && node --experimental-strip-types scripts/release/check-plugin-version.ts && node --experimental-strip-types scripts/smoke/plugin-smoke.ts && node --experimental-strip-types scripts/smoke/plugin-component-smoke.ts && node --experimental-strip-types scripts/smoke/plugin-full-smoke.ts",
     "version:check": "node --experimental-strip-types scripts/ci/check-version.ts",
@@ -47,7 +47,8 @@
     "knowledge:import-offline": "node --experimental-strip-types scripts/import-legacy-knowledge.ts",
     "check:ts": "node --experimental-strip-types core/cli.ts --help",
     "lint": "node --experimental-strip-types scripts/ci/lint.ts",
-    "typecheck": "node node_modules/typescript/bin/tsc --noEmit"
+    "typecheck": "node node_modules/typescript/bin/tsc --noEmit",
+    "build:common": "node --experimental-strip-types scripts/release/build-common-packages.ts"
   },
   "engines": {
     "node": ">=23"
@@ -56,17 +57,26 @@
     "bin",
     "core",
     "capability",
+    "common",
     "dist/core",
+    "dist/capability",
+    "dist/common",
+    "dist/bin",
     "dist/plugin",
+    "dist/adapters",
     "workbench",
     "skills",
     "adapters",
+    "assets/ocr",
+    "runtime-artifacts.json",
     "plugins",
     ".claude-plugin",
     "README.md",
     "README.en.md",
     "LICENSE",
-    "docs"
+    "docs",
+    "scripts/codebase",
+    "scripts/eval"
   ],
   "keywords": [
     "agent",
@@ -87,12 +97,19 @@
   "devDependencies": {
     "@types/node": ">=23 <26",
     "c8": "10.1.3",
-    "esbuild": "^0.28.2",
-    "typescript": ">=5.8 <7"
+    "esbuild": "^0.28.2"
   },
   "dependencies": {
     "tesseract.js": "^7.0.0",
-    "yaml": "^2.9.0"
+    "yaml": "^2.9.0",
+    "typescript": ">=5.8 <7",
+    "craft-common-store-local": "0.12.38",
+    "craft-common-base": "0.12.38",
+    "craft-common-log": "0.12.38",
+    "@craft/capability-knowledge": "0.12.38",
+    "@craft/capability-memory": "0.12.38",
+    "@craft/capability-experience": "0.12.38",
+    "@craft/capability-codebase": "0.12.38"
   },
   "packageManager": "pnpm@11.19.0"
 }

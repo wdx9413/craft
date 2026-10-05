@@ -66,8 +66,10 @@ test("v0.12.34 Evaluation Contract advances monotonically to routeable", async (
     const id = String((created.contract as Record<string, unknown>).id);
     assert.equal(kernel.define({ contract_id: id, capability_id: "memory", capability_version: 1, input_contract: "query", output_contract: "bounded-items" }).idempotent, true);
     assert.throws(() => kernel.record({ contract_id: id, stage: "integration_passed" }), /one gate/);
-    for (const stage of ["fixture_passed", "conformance_passed", "integration_passed", "host_verified", "business_eligible", "routeable"] as const) kernel.record({ contract_id: id, stage, evidence: [`eval:${stage}`] });
-    assert.equal((kernel.get(id).contract as Record<string, unknown>).status, "routeable");
+    for (const stage of ["mechanism_passed", "fixture_passed", "conformance_passed", "integration_passed", "host_verified", "business_eligible", "routeable"] as const) kernel.record({ contract_id: id, stage, evidence: [`eval:${stage}`] });
+    assert.equal((kernel.get(id).contract as Record<string, unknown>).reported_stage, "routeable");
+    assert.equal((kernel.get(id).contract as Record<string, unknown>).status, "defined");
+    assert.equal(kernel.get(id).routeable, false);
     assert.throws(() => kernel.record({ contract_id: id, stage: "mechanism_passed" }), /cannot move backwards/);
     assert.throws(() => kernel.define({ capability_id: "", capability_version: 1, input_contract: "q", output_contract: "r" }), /requires capability/);
     assert.throws(() => kernel.define({ capability_id: "memory", capability_version: 0, input_contract: "q", output_contract: "r" }), /requires capability/);
@@ -80,6 +82,8 @@ test("v0.12.34 Evaluation Contract advances monotonically to routeable", async (
     const secondId = String((second.contract as Record<string, unknown>).id);
     await Promise.resolve();
     store.save("evaluation_contract", secondId, { ...(store.get("evaluation_contract", secondId)), stage_history: undefined });
-    kernel.record({ contract_id: secondId, stage: "fixture_passed", metrics: { score: 1 } });
+    assert.throws(() => kernel.record({ contract_id: secondId, stage: "mechanism_passed", metrics: { score: 1 } }), /evidence references/);
+    kernel.record({ contract_id: secondId, stage: "mechanism_passed", evidence: ["eval:mechanism"] });
+    kernel.record({ contract_id: secondId, stage: "fixture_passed", evidence: ["eval:fixture"], metrics: { score: 1 } });
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });

@@ -2,6 +2,7 @@
 import { createInterface } from "node:readline/promises";
 import { createHash } from "node:crypto";
 import { access, readFile } from "node:fs/promises";
+import { realpathSync } from "node:fs";
 import { stdin, stdout } from "node:process";
 import { pathToFileURL } from "node:url";
 import { initializeConfig, loadConfig, setMode, type CraftMode, type DirectProvider,
@@ -486,7 +487,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
       : "Provider mode is configured; connect through the Craft plugin or MCP server.\n");
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   main().catch((error: unknown) => {
     process.stderr.write(`craft: ${error instanceof Error ? error.message : String(error)}\n`);
     process.exitCode = 1;

@@ -1,6 +1,12 @@
 {
-  "version": "0.12.37",
+  "version": "0.12.38",
   "products": [
+    {
+      "name": "craft-context",
+      "surface": "component-context-daily",
+      "hook_member": null,
+      "category": "Developer Tools"
+    },
     {
       "name": "craft-knowledge",
       "surface": "component-knowledge-daily",

@@ -1,0 +1,89 @@
+(node:80825) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:80825) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+✔ v0.12.43 assembles the Experience capability from the catalog rather than in place (14.692917ms)
+✔ v0.12.43 fails on the kernel a removed capability owed instead of leaving it undefined (9.979708ms)
+✔ v0.12.43 refuses a capability that tries to provide the environment it runs in (9.148666ms)
+✔ v0.12.43 claims the tool families its kernels implement and no others (21.01525ms)
+✔ v0.12.43 derives the component surface from the capability so the two cannot drift (0.705333ms)
+✔ v0.12.43 keeps the service working through the assembled capability (9.117292ms)
+✔ v0.12.43 assembles the Knowledge capability from the catalog rather than in place (7.588708ms)
+✔ v0.12.43 fails on the kernel a removed capability owed instead of leaving it undefined (8.095542ms)
+✔ v0.12.43 claims the families its kernels implement and no others (7.8875ms)
+✔ v0.12.43 keeps the Knowledge projection at exactly the name space it promised (0.754583ms)
+✔ v0.12.43 owns the Source registry now that it no longer shares a class with memory (0.266791ms)
+✔ v0.12.43 composes the Context product from both members without restating them (0.324375ms)
+✔ v0.12.43 keeps the service working through the assembled capability (9.416292ms)
+✔ v0.12.43 assembles the Memory capability from the catalog rather than in place (7.48675ms)
+✔ v0.12.43 fails on the kernel a removed capability owed instead of leaving it undefined (7.094583ms)
+✔ v0.12.43 claims the Ledger's scoped reads and writes, the derived signals, and nothing else (0.459584ms)
+✔ v0.12.43 keeps the Memory projection at the name space it promised, and repairs one name (0.356417ms)
+✔ v0.12.43 keeps component-context composing the frozen memory name space (0.244625ms)
+✔ v0.12.43 exposes every signal through the registered kernel, not only through the module (7.505167ms)
+✔ v0.12.43 keeps the ledger closed without a Source and keeps the facade working (16.466208ms)
+✔ v0.12.43 resolves memory through a kernel in the core, not through either member's package (8.640459ms)
+✔ v0.12.43 fixes the nature of each context member (0.340334ms)
+✔ v0.12.43 attaches hooks across the whole flow, not only after a write (0.04225ms)
+✔ v0.12.43 orders hooks by the flow before the number (0.105417ms)
+✔ v0.12.43 separates a hook that contributes context from one that only records (0.126084ms)
+✔ v0.12.43 assembles capabilities without the core naming an implementation (0.088334ms)
+✔ installable capability products require a single-point Evaluation Contract while test probes do not (0.115459ms)
+✔ v0.12.43 refuses two capabilities claiming one name or one kernel (0.108708ms)
+✔ v0.12.43 requires a kernel to exist before it is resolved (0.046292ms)
+✔ v0.12.43 rejects any dependency on a capability declared later (0.051167ms)
+✔ v0.12.43 only lets accumulated members be contributed (0.153958ms)
+✔ v0.12.43 refuses two capabilities contributing one context member (0.064167ms)
+✔ v0.12.43 refuses a hook that writes outside the accumulating stage (0.263042ms)
+✔ v0.12.43 fails an evolution hook that runs before its inputs exist (0.110625ms)
+✔ v0.12.43 breaks an accumulation tie by name so the order is total (0.047375ms)
+✔ v0.12.43 does not require a producer for a member that needs none (0.033ms)
+✔ v0.12.43 runs one phase in order and reports every outcome (0.164458ms)
+✔ v0.12.43 lets only a gating phase refuse, and stops the phase there (0.136083ms)
+✔ v0.12.43 reports a throwing hook as unobserved rather than failing the work (0.195667ms)
+✔ v0.12.43 runs no hook for a phase nothing attached to (0.043958ms)
+✔ v0.12.43 stops a tool call at tool_before and does not dispatch it (24.816708ms)
+✔ v0.12.43 runs both tool phases and records who ran, without recording what was said (22.107959ms)
+✔ v0.12.43 attributes a tool to its owning capability, and leaves the rest unowned (7.060584ms)
+✔ v0.12.43 leaves the dispatch path untouched when nothing is attached (6.752958ms)
+✔ v0.12.43 still answers when a service has no hook plane at all (21.481959ms)
+✔ v0.12.43 answers what will run at a phase before it runs (7.139792ms)
+✔ v0.12.43 refuses to let a hook claim an owner it does not have (7.818458ms)
+✔ shared ranking prevents weak Memory starving Knowledge; required items and aggregate budgets hold (14.321625ms)
+✔ history returns revoked/expired versions diagnostically; as-of uses recorded knowledge and current ACL (12.996209ms)
+✔ ingestion keeps unchanged review, invalidates edits/deletions, and exposes cursor drift (18.140125ms)
+✔ persisted vector cache survives adapter instances; batches are bounded and dimension failures fall back (21.805667ms)
+✔ retrieval eligibility requires executed labelled results, not caller-reported scores (12.127167ms)
+✔ compiler resolves imports, aliases and methods without matching comments, strings or unrelated same names (30.953083ms)
+✔ MCP initialize, tool list and readiness expose one actual schema fingerprint (13.085459ms)
+✔ LSP relations retain real endpoints and reject dangling, malformed or out-of-range facts (0.788292ms)
+✔ changed document guards remain fail-closed even if a stale claim is externally marked reviewed (10.832416ms)
+✔ scoped maintenance proposes actionable versioned work; verified feedback only breaks relevance ties (16.401ms)
+✔ keyword dataset grading measures missed queries, validates scopes and can run through MCP (17.056625ms)
+✔ vector disk cache works in a fresh process; provider usage, cache writes and resource bounds fail closed (273.949125ms)
+✔ retrieval evaluation rejects adapter drift and records unavailable embedded-process fingerprint (17.613416ms)
+✔ source ingestion caps total bytes and files before persisting a partial manifest (1227.262458ms)
+✔ ablation preparation uses real campaign slots, requires curated cases and never fabricates results (2403.554542ms)
+✔ history reads all recorded versions within budget and scoped document bundles preserve freshness guards (43.052333ms)
+✔ compiler refuses oversized graphs, handles incomplete declarations and bounds its parsed-file cache (265.923375ms)
+✔ unmatched governed claims and sparse contribution descriptors do not invent lexical matches (20.201542ms)
+✔ compiler IO cannot reach working files or emit artifacts; warm binding observes a changed dependency (28.113375ms)
+ℹ tests 66
+ℹ suites 0
+ℹ pass 66
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5463.603333
+ℹ start of coverage report
+ℹ ------------------------------------------------------------------------
+ℹ file                    | line % | branch % | funcs % | uncovered lines
+ℹ ------------------------------------------------------------------------
+ℹ core                    |        |          |         | 
+ℹ  capability-catalog.ts  | 100.00 |   100.00 |  100.00 | 
+ℹ  capability-protocol.ts | 100.00 |   100.00 |  100.00 | 
+ℹ  hook-plane.ts          | 100.00 |   100.00 |  100.00 | 
+ℹ ------------------------------------------------------------------------
+ℹ all files               | 100.00 |   100.00 |  100.00 | 
+ℹ ------------------------------------------------------------------------
+ℹ end of coverage report

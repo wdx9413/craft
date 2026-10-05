@@ -1,0 +1,369 @@
+{
+  "date": "2026-10-04",
+  "release_version": "0.12.37",
+  "products": [
+    "craft-context",
+    "craft-knowledge",
+    "craft-memory",
+    "craft-experience",
+    "craft-codebase"
+  ],
+  "access_forms": [
+    "codex-plugin",
+    "claude-plugin",
+    "skill-and-mcp",
+    "dsh-native-plugin"
+  ],
+  "local_tests": {
+    "affected_regressions": {
+      "counts": {
+        "tests": 70,
+        "pass": 70,
+        "fail": 0
+      },
+      "coverage_rows": []
+    },
+    "new_module_coverage": {
+      "counts": {
+        "tests": 9,
+        "pass": 9,
+        "fail": 0
+      },
+      "coverage_rows": [
+        "ℹ   adapter-tools.ts       | 100.00 |   100.00 |  100.00 | ",
+        "ℹ   index.ts               | 100.00 |   100.00 |  100.00 | ",
+        "ℹ   mcp-client.ts          | 100.00 |   100.00 |  100.00 | ",
+        "ℹ   basic-analysis.ts      | 100.00 |   100.00 |  100.00 | ",
+        "ℹ   repository-files.ts    | 100.00 |   100.00 |  100.00 | ",
+        "ℹ    repository-context.ts | 100.00 |   100.00 |  100.00 | ",
+        "ℹ all files                | 100.00 |   100.00 |  100.00 | "
+      ]
+    },
+    "shared_resolution_coverage": {
+      "counts": {
+        "tests": 108,
+        "pass": 108,
+        "fail": 0
+      },
+      "coverage_rows": [
+        "ℹ  context-resolution.ts | 100.00 |   100.00 |  100.00 | ",
+        "ℹ all files              | 100.00 |   100.00 |  100.00 | "
+      ]
+    },
+    "distribution_matrix": {
+      "counts": {
+        "tests": 2,
+        "pass": 2,
+        "fail": 0
+      },
+      "coverage_rows": []
+    },
+    "concurrent_cold_start": {
+      "counts": {
+        "tests": 1,
+        "pass": 1,
+        "fail": 0
+      },
+      "coverage_rows": []
+    },
+    "remote_https": {
+      "counts": {
+        "tests": 6,
+        "pass": 6,
+        "fail": 0
+      },
+      "coverage_rows": []
+    },
+    "portable_installer": {
+      "counts": {
+        "tests": 7,
+        "pass": 7,
+        "fail": 0
+      }
+    }
+  },
+  "runtime_delta_coverage": {
+    "scope": "runtime lines added or changed in this turn relative to pre-turn snapshot",
+    "totals": {
+      "statements": [
+        279,
+        279
+      ],
+      "branches": [
+        227,
+        227
+      ]
+    },
+    "files": [
+      {
+        "file": "adapters/deepseek-harness/adapter-tools.ts",
+        "statements": [
+          35,
+          35
+        ],
+        "branches": [
+          30,
+          30
+        ]
+      },
+      {
+        "file": "adapters/deepseek-harness/index.ts",
+        "statements": [
+          3,
+          3
+        ],
+        "branches": [
+          2,
+          2
+        ]
+      },
+      {
+        "file": "adapters/deepseek-harness/mcp-client.ts",
+        "statements": [
+          45,
+          45
+        ],
+        "branches": [
+          36,
+          36
+        ]
+      },
+      {
+        "file": "capability/craft-codebase/basic-analysis.ts",
+        "statements": [
+          28,
+          28
+        ],
+        "branches": [
+          15,
+          15
+        ]
+      },
+      {
+        "file": "capability/craft-codebase/repository-files.ts",
+        "statements": [
+          48,
+          48
+        ],
+        "branches": [
+          54,
+          54
+        ]
+      },
+      {
+        "file": "core/context-resolution.ts",
+        "statements": [
+          14,
+          14
+        ],
+        "branches": [
+          13,
+          13
+        ]
+      },
+      {
+        "file": "core/release-catalog.ts",
+        "statements": [
+          4,
+          4
+        ],
+        "branches": [
+          0,
+          0
+        ]
+      },
+      {
+        "file": "core/application/actions/action-handlers.ts",
+        "statements": [
+          2,
+          2
+        ],
+        "branches": [
+          2,
+          2
+        ]
+      },
+      {
+        "file": "core/application/use-cases/codebase.ts",
+        "statements": [
+          5,
+          5
+        ],
+        "branches": [
+          2,
+          2
+        ]
+      },
+      {
+        "file": "core/application/use-cases/repository-context.ts",
+        "statements": [
+          81,
+          81
+        ],
+        "branches": [
+          67,
+          67
+        ]
+      },
+      {
+        "file": "core/infrastructure/store.ts",
+        "statements": [
+          2,
+          2
+        ],
+        "branches": [
+          0,
+          0
+        ]
+      },
+      {
+        "file": "core/interfaces/mcp-stdio.ts",
+        "statements": [
+          3,
+          3
+        ],
+        "branches": [
+          3,
+          3
+        ]
+      },
+      {
+        "file": "core/interfaces/mcp/product-launch.ts",
+        "statements": [
+          1,
+          1
+        ],
+        "branches": [
+          0,
+          0
+        ]
+      },
+      {
+        "file": "core/interfaces/mcp/surface-registry.ts",
+        "statements": [
+          5,
+          5
+        ],
+        "branches": [
+          3,
+          3
+        ]
+      },
+      {
+        "file": "core/mcp/tool-catalog.ts",
+        "statements": [
+          2,
+          2
+        ],
+        "branches": [
+          0,
+          0
+        ]
+      },
+      {
+        "file": "core/mcp/tool-schema.ts",
+        "statements": [
+          1,
+          1
+        ],
+        "branches": [
+          0,
+          0
+        ]
+      }
+    ],
+    "misses": []
+  },
+  "component_stdio_conformance": {
+    "artifact_sha256": "2c9edae9108666395157884977bfa201208ed05409534dc1d45b4b4e4856616f",
+    "reports": [
+      {
+        "product": "knowledge",
+        "status": "passed",
+        "level": "workflow_verified",
+        "transport": "stdio",
+        "schema_digest": "sha256:33191d3ec6750359a329427c61545daaa616686801a0c8d47208829fb26784be",
+        "entrypoint_digest": "2c9edae9108666395157884977bfa201208ed05409534dc1d45b4b4e4856616f",
+        "protocol": "2025-11-25",
+        "tool_count": 20,
+        "calls": 17,
+        "host_session_verified": false
+      },
+      {
+        "product": "memory",
+        "status": "passed",
+        "level": "workflow_verified",
+        "transport": "stdio",
+        "schema_digest": "sha256:121df778497a67b3561efad1737451f6ab1bfbdee426d86a9ae7d16974108c61",
+        "entrypoint_digest": "2c9edae9108666395157884977bfa201208ed05409534dc1d45b4b4e4856616f",
+        "protocol": "2025-11-25",
+        "tool_count": 20,
+        "calls": 9,
+        "host_session_verified": false
+      },
+      {
+        "product": "experience",
+        "status": "passed",
+        "level": "workflow_verified",
+        "transport": "stdio",
+        "schema_digest": "sha256:10dd32828e81632e74252739e58bfe5c803502fdb0bbc72d259256be3229c73c",
+        "entrypoint_digest": "2c9edae9108666395157884977bfa201208ed05409534dc1d45b4b4e4856616f",
+        "protocol": "2025-11-25",
+        "tool_count": 24,
+        "calls": 40,
+        "host_session_verified": false
+      },
+      {
+        "product": "codebase",
+        "status": "passed",
+        "level": "workflow_verified",
+        "transport": "stdio",
+        "schema_digest": "sha256:51a36aad50e4f818fcb6c0b30b6a8258050004278a26c474850f1532945e9dd4",
+        "entrypoint_digest": "2c9edae9108666395157884977bfa201208ed05409534dc1d45b4b4e4856616f",
+        "protocol": "2025-11-25",
+        "tool_count": 13,
+        "calls": 8,
+        "host_session_verified": false
+      }
+    ]
+  },
+  "remote_template_coverage": {
+    "lines": 100,
+    "branches": 100,
+    "functions": 90.91,
+    "note": "Existing deny-only unscoped fallback is unreachable behind mandatory principal routing; whole-template function gate was not met. New deployment guard branches are covered."
+  },
+  "validated": [
+    "typescript typecheck and build emit",
+    "layering: 372 modules, 0 violations",
+    "surface audit",
+    "release catalog",
+    "plugin package",
+    "plugin version"
+  ],
+  "not_claimed": [
+    "new bundles installed in user hosts",
+    "real Codex/Claude/DSH model sessions with these bundles",
+    "remote production deployment",
+    "real identity provider integration",
+    "Docker image build",
+    "whole repository test suite or coverage"
+  ],
+  "distribution_sync": {
+    "marketplace": "5 products verified against source",
+    "common_use": "5 product Skills and bundle digests verified",
+    "bundle_sha256": "2c9edae9108666395157884977bfa201208ed05409534dc1d45b4b4e4856616f"
+  },
+  "diff_review": {
+    "source": "clean in all three repositories",
+    "generated_artifacts": "git diff --check flags whitespace-only lines in bundled TypeScript license comments; vendor license preserved"
+  },
+  "component_end_receipts": {
+    "knowledge": "context_resolution_84611640fd9b49d8b07e27b58641bc81",
+    "memory": "context_resolution_aea7a822b4fd4004835b0aee16b9b32d",
+    "experience": {
+      "scenario_key": "craft-context-host-portability",
+      "observations": 0
+    }
+  }
+}

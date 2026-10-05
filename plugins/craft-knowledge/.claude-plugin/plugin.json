@@ -1,11 +1,11 @@
 {
   "name": "craft-knowledge",
-  "version": "0.12.37",
-  "description": "Standalone governed knowledge for Claude Code.",
+  "version": "0.12.38",
+  "description": "craft-knowledge governed context and repository tools",
   "author": {
     "name": "wdx9413"
   },
-  "skills": "./skills/craft-knowledge/",
+  "skills": "./skills/",
   "hooks": "./hooks/hooks.json",
   "mcpServers": {
     "craft-knowledge": {

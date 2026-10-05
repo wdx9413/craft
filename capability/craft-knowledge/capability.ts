@@ -27,9 +27,9 @@
  * projects only reviewed claims; diagnostic searches may expose candidates to a human, but a
  * candidate can never enter an execution Host's Context merely because it was imported.
  */
-import type { CraftCapability } from "../../core/capability-protocol.ts";
-import { CORE_KERNELS } from "../../core/capability-protocol.ts";
-import type { CraftStore } from "../../core/infrastructure/store.ts";
+import type { CraftCapability } from "../../common/craft-common-base/src/capability-protocol.ts";
+import { CORE_KERNELS } from "../../common/craft-common-base/src/capability-protocol.ts";
+import type { CraftStore } from "../../common/craft-common-store-local/src/store.ts";
 import { KnowledgeBoundLaunchKernel } from "./knowledge-bound-launch.ts";
 import { KnowledgeRelationKernel } from "./knowledge-relation.ts";
 import { KnowledgeSourceRegistry } from "./knowledge-source-registry.ts";

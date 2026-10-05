@@ -1,0 +1,41 @@
+{
+  "baseline": "working tree snapshot /tmp/craft-candidate-scope-before before bounded scope-candidate correction",
+  "instrument": "c8 V8 coverage; changed source statement/branch start lines against snapshot",
+  "tests": [
+    "tests/context-candidate-scope.test.ts",
+    "tests/knowledge-contribution.test.ts",
+    "tests/experience-contribution.test.ts",
+    "tests/context-source-access.test.ts"
+  ],
+  "test_count": 14,
+  "passed": 14,
+  "modules": {
+    "capability/craft-experience/contribution.ts": {
+      "statements": [
+        8,
+        8
+      ],
+      "branches": [
+        11,
+        11
+      ],
+      "miss_statements": [],
+      "miss_branches": []
+    },
+    "capability/craft-knowledge/contribution.ts": {
+      "statements": [
+        24,
+        24
+      ],
+      "branches": [
+        35,
+        35
+      ],
+      "miss_statements": [],
+      "miss_branches": []
+    }
+  },
+  "limits": [
+    "Store.list still reads and hydrates the full collection; this correction prevents foreign/unauthorized records consuming the candidate cap, not a SQL pagination optimization."
+  ]
+}

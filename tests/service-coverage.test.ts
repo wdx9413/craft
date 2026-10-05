@@ -68,7 +68,7 @@ test("knowledge index falls back to its default file and accepts explicit limits
     await writeFile(join(f.root, "a.md"), "# A\nalpha beta gamma");
     const sync = await mcp.handlers.craft_knowledge_index_sync({ project_root: f.root, limit: 10 }) as JsonObject;
     assert.equal(sync.documents, 1);
-    const search = await mcp.handlers.craft_knowledge_search({ query: "alpha", limit: 5 }) as JsonObject;
+    const search = service.knowledgeSearch({ query: "alpha", limit: 5 });
     assert.equal((search.hits as JsonObject[]).length, 1);
     store.close();
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
@@ -87,6 +87,10 @@ test("execution budget plan handles defaults, tiers and truncation", async () =>
     assert.equal(full.complexity, "frontier");
     assert.equal((full.routing as JsonObject).model, "strong-model");
     assert.equal((full.truncation as JsonObject).truncated, true);
+    assert.equal((full.truncation as JsonObject).estimated_tokens, 1);
+    const mixed = await mcp.handlers.craft_execution_budget_plan({ host: "codex-cli", limit: 100_000,
+      texts: ["中".repeat(20) + "x".repeat(100)], max_result_tokens: 10 }) as JsonObject;
+    assert.deepEqual(mixed.truncation, { text: "中".repeat(7) + "…[truncated]", truncated: true, estimated_tokens: 10 });
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 

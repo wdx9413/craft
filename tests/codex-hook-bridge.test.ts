@@ -122,14 +122,14 @@ test("Hook journal covers missing identity, updates signals, and learning record
     assert(first);
     assert.equal(bridge.journal.record({ cwd, turn_id: "duplicate" }, signal)?.id, first.id);
     for (const turn of ["failed-one", "failed-two"]) {
-      await bridge.handle("experience", { hook_event_name: "PostToolUse", cwd, session_id: turn, tool_name: "Edit" });
-      await bridge.handle("experience", { hook_event_name: "PostToolUse", cwd, session_id: turn, tool_name: "Bash", tool_input: { command: "npm test" }, tool_response: { status: "failed" } });
-      await bridge.handle("experience", { hook_event_name: "Stop", cwd, session_id: turn });
+      await bridge.handle("experience", { hook_event_name: "PostToolUse", cwd, session_id: turn, turn_id: turn, tool_name: "Edit" });
+      await bridge.handle("experience", { hook_event_name: "PostToolUse", cwd, session_id: turn, turn_id: turn, tool_name: "Bash", tool_input: { command: "npm test" }, tool_response: { status: "failed" } });
+      await bridge.handle("experience", { hook_event_name: "Stop", cwd, session_id: turn, turn_id: turn });
     }
     assert.equal(f.store.list("workflow_evolution_request", 10).length, 1);
     const evidence = f.store.list("evidence", 10);
     assert.equal(evidence.length, 2);
-    await bridge.handle("experience", { hook_event_name: "Stop", cwd, session_id: "failed-two" });
+    await bridge.handle("experience", { hook_event_name: "Stop", cwd, session_id: "failed-two", turn_id: "failed-two" });
     assert.equal(f.store.list("evidence", 10).length, 2);
   } finally { await dispose(f); }
 });

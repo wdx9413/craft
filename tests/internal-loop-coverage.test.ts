@@ -39,13 +39,16 @@ function modelArgs(overrides: Record<string, unknown> = {}): Record<string, unkn
   };
 }
 
-test("registering the canonical handlers routes the loop through the MCP dispatch", async () => {
+test("application dispatch works before transport construction and matches MCP results", async () => {
   const f = await fixture();
   try {
     const service = new CraftService(f.store);
+    const invoke = (service as unknown as {
+      invokeInternalAction: (action: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>;
+    }).invokeInternalAction.bind(service);
+    const before = await invoke("capability_search", { query: "knowledge" });
     const server = new McpServer(service);
-    // The server contributes the canonical table on construction, so a real
-    // read-tier action must resolve through it rather than the fallback table.
+    // Transport mounting cannot change the neutral use-case result.
     const viaMcp = await server.handle({ id: 1, method: "tools/call",
       params: { name: "craft_capability_search", arguments: { query: "knowledge" } } });
     assert.equal((viaMcp?.result as Record<string, unknown>).isError, false);
@@ -53,6 +56,7 @@ test("registering the canonical handlers routes the loop through the MCP dispatc
       invokeInternalAction: (action: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>;
     }).invokeInternalAction("capability_search", { query: "knowledge" });
     assert.ok(Array.isArray(dispatched.capabilities));
+    assert.deepEqual(dispatched, before);
   } finally {
     f.store.close();
     await rm(f.root, { recursive: true, force: true });
@@ -213,7 +217,7 @@ test("the distribution plan reports the download story and the remaining gap", a
   try {
     const service = new CraftService(f.store);
     const plan = service.distributionPlanGet({});
-    assert.equal(plan.version, "0.12.37");
+    assert.equal(plan.version, "0.12.38");
     assert.equal(plan.user_download_available, false);
     assert.equal(plan.channel, "developer_command_only");
     assert.ok(Array.isArray(plan.remainder));

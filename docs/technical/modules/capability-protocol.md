@@ -86,6 +86,8 @@ hook 的调用点是 **MCP `tools/call`**，实现在 `src/hook-plane.ts`（`Hoo
 
 ## 包布局与分层
 
+当前 `CraftCapability`、注册表和共用纯函数的实现位于 `craft-common-base`；`core/capability-protocol.ts` 是旧导入路径的兼容再导出。能力包直接依赖公共包，不声明 `craft-agent-harness` 为 peer 或 runtime dependency。宿主负责发现、装配和暴露 MCP；第三方能力可用同一协议与 `craft-common-log` 接入，Hook 不是前提。参见 [公共包与接入验收](common-packages.md)。
+
 ```text
 capability/
   craft-eval/               评测入口（suite / run / recurrence / abstraction / cases / model）

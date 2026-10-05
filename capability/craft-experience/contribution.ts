@@ -15,13 +15,14 @@
  * reusable procedure. A procedure becomes usable Context only after shadow, held-out,
  * signoff and canary gates make it routeable.
  */
-import type { ContextRequest, ContextContribution, ContextContributionProvider } from "../../core/capability-protocol.ts";
-import type { CraftStore, JsonObject } from "../../core/infrastructure/store.ts";
-import { scopeAllows, scopeEnvelope, type ScopeAccess } from "../../core/scope-policy.ts";
+import type { ContextRequest, ContextContribution, ContextContributionProvider } from "../../common/craft-common-base/src/capability-protocol.ts";
+import type { CraftStore, JsonObject } from "../../common/craft-common-store-local/src/store.ts";
+import { scopeAllows, scopeEnvelope, type ScopeAccess } from "../../common/craft-common-base/src/scope-policy.ts";
+import { retrievalTerms } from "../../common/craft-common-base/src/retrieval-terms.ts";
 
 /** Tokenize a query the same way `ContextResolutionKernel.resolve` does, so matching agrees. */
 function terms(query: string): string[] {
-  return query.toLowerCase().match(/[\p{L}\p{N}_-]+/gu) ?? [];
+  return retrievalTerms(query);
 }
 
 function recordScope(value: unknown): { kind: string; id: string } {
@@ -44,13 +45,16 @@ export class ExperienceContribution implements ContextContributionProvider {
     const wanted = terms(request.query);
     const scopes = request.scope_stack ?? [{ kind: request.scope_kind, id: request.scope_id }];
     const access: ScopeAccess = { principal_id: request.principal_id, principal_ids: request.principal_ids, tenant_id: request.tenant_id, purpose: request.cognitive_purpose };
-    const procedures = this.store.list("experience_procedure", 10_000)
+    // Filter the complete collection before applying the candidate cap. Store.list
+    // still scans all records; unrelated projects must not consume this scope's budget.
+    const eligible = this.store.list("experience_procedure", 10_001, procedure =>
+      procedure.lifecycle === "routeable" && procedure.routeable === true && scopes.some(scope => procedure.scope === `${scope.kind}:${scope.id}`)
+      && scopeAllows(scopeEnvelope(procedure.scope_envelope, recordScope(procedure.scope)), access));
+    if (eligible.length > 10_000) throw new Error("Experience candidate budget exceeded; narrow the scope stack");
+    const procedures = eligible
       .map((procedure) => ({
         procedure,
-        score: procedure.lifecycle === "routeable" && procedure.routeable === true && scopes.some((scope) => procedure.scope === `${scope.kind}:${scope.id}`)
-          && scopeAllows(scopeEnvelope(procedure.scope_envelope, recordScope(procedure.scope)), access)
-          ? wanted.reduce((sum, term) => sum + Number(`${String(procedure.trigger)} ${String(procedure.title)}`.toLowerCase().includes(term)), 0)
-          : 0,
+        score: request.candidate_mode ? 1 : wanted.reduce((sum, term) => sum + Number(`${String(procedure.trigger)} ${String(procedure.title)} ${JSON.stringify(procedure.entrypoints ?? [])}`.toLowerCase().includes(term)), 0),
       }))
       .filter((candidate) => candidate.score > 0)
       .sort((left, right) => right.score - left.score || String(left.procedure.id).localeCompare(String(right.procedure.id)));
@@ -65,7 +69,7 @@ export class ExperienceContribution implements ContextContributionProvider {
       const size = JSON.stringify(candidate.item).length;
       // The budget is respected by stopping, not by truncating an item: a partial reference would
       // be a reference that does not resolve.
-      if (usedChars + size > request.max_chars) break;
+      if (usedChars + size > request.max_chars) continue;
       usedChars += size;
       items.push(candidate.item); selectedReferences.push(candidate.reference);
     }
@@ -88,6 +92,8 @@ export class ExperienceContribution implements ContextContributionProvider {
       procedure_version: Number(procedure.version),
       procedure_kind: String(procedure.procedure_kind),
       trigger: String(procedure.trigger),
+      retrieval_text: `${String(procedure.trigger)} ${String(procedure.title)} ${JSON.stringify(procedure.entrypoints ?? [])}`,
+      ...(Array.isArray(procedure.entrypoints) ? { entrypoints: procedure.entrypoints } : {}),
       acceptance_ref: String(procedure.acceptance_ref),
       scenario_signature: procedure.scenario_signature,
       content_digest: procedure.content_digest,

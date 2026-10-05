@@ -46,6 +46,36 @@ test("truncateToBudget caps oversized text", () => {
   assert.throws(() => truncateToBudget(123 as never, 10), /string/);
 });
 
+test("truncation includes its marker in the cap for tiny and mixed-script budgets", () => {
+  for (const value of ["x".repeat(100), "中".repeat(30), "中".repeat(20) + "x".repeat(100), "😀".repeat(50)]) {
+    for (const cap of [1, 2, 3, 4, 5, 10, 20]) {
+      const result = truncateToBudget(value, cap);
+      assert.ok(result.estimated_tokens <= cap, `cap=${cap}, actual=${result.estimated_tokens}, input=${value.slice(0, 8)}`);
+      assert.equal(result.estimated_tokens, estimateTokens(result.text));
+      if (result.truncated) {
+        const marker = cap >= estimateTokens("…[truncated]") ? "…[truncated]" : "…";
+        assert.ok(result.text.endsWith(marker));
+        const prefix = result.text.slice(0, -marker.length);
+        assert.ok(value.startsWith(prefix));
+        assert.ok(!/[\uD800-\uDBFF]$/u.test(prefix), "do not split a surrogate pair");
+        const nextPrefix = [...value].slice(0, [...prefix].length + 1).join("");
+        assert.ok(estimateTokens(nextPrefix + marker) > cap, "retain the longest prefix fitting with the marker");
+      } else assert.equal(result.text, value);
+    }
+  }
+});
+
+test("budget preserves exact-fit Unicode text and handles default complexity counts", () => {
+  for (const value of ["", "中文", "😀a", "ab中cd"]) {
+    assert.deepEqual(truncateToBudget(value, estimateTokens(value)), {
+      text: value, truncated: false, estimated_tokens: estimateTokens(value),
+    });
+  }
+  assert.equal(classifyComplexity({ steps: undefined, distinct_paths: null, context_chars: undefined,
+    requires_external_write: false, requires_multi_step_reasoning: false } as never), "small");
+  assert.throws(() => createBudgetState(10, 0.5), /reserve/);
+});
+
 test("classifyComplexity returns deterministic tiers", () => {
   assert.equal(classifyComplexity({ steps: 1, distinct_paths: 0, context_chars: 100, requires_external_write: false, requires_multi_step_reasoning: false }), "small");
   assert.equal(classifyComplexity({ steps: 5, distinct_paths: 0, context_chars: 100, requires_external_write: false, requires_multi_step_reasoning: false }), "standard");

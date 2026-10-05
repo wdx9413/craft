@@ -79,7 +79,7 @@ export class MemoryGovernanceKernel {
     const status = conflicts.length || conflictingMemories.length ? "conflict_pending" : "candidate";
     const candidate = this.store.create("memory_candidate", candidateId, { ...identity, content, status, conflict_ids: conflicts.map((x) => x.id), conflicting_memory_ids: conflictingMemories.map((x) => x.id), proposed_by: String(args.proposed_by ?? "agent"), identity_digest: digest(identity) });
     for (const conflict of conflicts) this.store.save("memory_candidate", String(conflict.id), { ...payload(conflict), status: "conflict_pending", conflict_ids: [...new Set([...(conflict.conflict_ids as string[] ?? []), candidate.id])] });
-    const eligible = policy.mode === "governed" && conflicts.length === 0 && ids.length > 0 && ids.every((e) => {
+    const eligible = args.proposal_only !== true && policy.mode === "governed" && conflicts.length === 0 && ids.length > 0 && ids.every((e) => {
       const confidenceValue = String(this.store.get("evidence", e).confidence);
       return policy.min_confidence === "bounded" ? ["bounded", "confirmed"].includes(confidenceValue) : confidenceValue === "confirmed";
     });

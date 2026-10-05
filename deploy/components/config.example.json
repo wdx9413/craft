@@ -1,0 +1,13 @@
+{
+  "issuer": "https://identity.example.com",
+  "audience": "https://craft.example.com/mcp",
+  "introspection_url": "https://identity.example.com/oauth/introspect",
+  "introspection_authorization_file": "/run/secrets/introspection_authorization",
+  "tls_key_file": "/run/secrets/tls_key",
+  "tls_cert_file": "/run/secrets/tls_cert",
+  "data_root": "/data",
+  "product": "knowledge",
+  "host": "0.0.0.0",
+  "port": 8787,
+  "routes": {}
+}

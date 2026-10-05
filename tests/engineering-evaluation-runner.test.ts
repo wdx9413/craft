@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { cp, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { access, cp, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { EngineeringEvaluationRunner, loadEngineeringEvaluationCases, validateEvaluationCommand, workspaceSnapshotDigest } from "../capability/engineering-evaluation-runner.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
-import { CraftStore } from "../core/infrastructure/store.ts";
+import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { CraftService } from "../core/service.ts";
 
 test("Engineering evaluation fixtures only admit declared Node argv arrays inside their fixture root", async () => {
@@ -67,15 +67,100 @@ test("Engineering evaluation runner uses disposable fixture copies and records o
   const root = await mkdtemp(join(tmpdir(), "craft-engineering-eval-run-"));
   const fixtureRoot = join(dirname(import.meta.filename), "fixtures", "engineering-eval");
   const store = await new CraftStore(craftPaths(root)).open();
+  const workspaces: string[] = [];
   try {
     const runner = new EngineeringEvaluationRunner(store, new CraftService(store), { fixture_root: fixtureRoot, archive_root: join(root, "archive"), model: "test-model", codex_version: "test-codex", environment_fingerprint: "sha256:environment", timeout_ms: 2_000, output_limit: 8_192, trials_per_pair: 5,
-      executor: async (request) => { const match = request.stdin.match(/lib\/(case-\d+\.mjs)/u); if (!match) throw new Error("missing fixture target"); await writeFile(join(request.cwd, "lib", match[1]!), "export function normalize(value) { return String(value).trim(); }\n"); return { exitCode: 0, signal: null, stderr: "", timedOut: false, outputLimited: false, stdout: `${JSON.stringify({ type: "thread.started", thread_id: "fixture" })}\n${JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "root cause found" } })}\n${JSON.stringify({ type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } })}` }; },
+      executor: async (request) => { workspaces.push(request.cwd); const match = request.stdin.match(/lib\/(case-\d+\.mjs)/u); if (!match) throw new Error("missing fixture target"); await writeFile(join(request.cwd, "lib", match[1]!), "export function normalize(value) { return String(value).trim(); }\n"); return { exitCode: 0, signal: null, stderr: "", timedOut: false, outputLimited: false, stdout: `${JSON.stringify({ type: "thread.started", thread_id: "fixture" })}\n${JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "root cause found" } })}\n${JSON.stringify({ type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } })}` }; },
     });
     const result = await runner.run();
-    // The injected executor makes all receipts valid; real elapsed timing is still
-    // compared, so this deterministic fake may remain a candidate rejection.
-    assert.equal(["shadow_candidate", "rejected"].includes(String(result.evaluation.status)), true);
+    // Reproducing a defect is not a root-cause proof. Internal retries and money
+    // are not measured by this CLI stream, even when all fixture programs pass.
+    assert.equal(result.evaluation.status, "rejected");
+    assert.ok(store.list("engineering_quality_profile_evaluation_record", 1_000).every(record => record.cost_units === "unavailable" && record.retry_count === "unavailable" && record.status === "rejected"));
     assert.equal((store.list("engineering_quality_profile_evaluation_record", 1_000)).length, 120);
     assert.match(result.archive, /engineering-evaluation-/u);
+    assert.equal(workspaces.length, 120);
+    for (const workspace of workspaces) await assert.rejects(access(dirname(workspace)), { code: "ENOENT" });
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("runner interruptions clean owned workspaces, preserve partial receipts and archive a content-free handoff", async (t) => {
+  for (const failure of ["snapshot", "receipt", "later-receipt", "archive"] as const) {
+    const root = await mkdtemp(join(tmpdir(), "craft-runner-handoff-"));
+    const store = await new CraftStore(craftPaths(root)).open();
+    const service = new CraftService(store);
+    const fixtureRoot = join(dirname(import.meta.filename), "fixtures", "engineering-eval");
+    const sourceDigest = await workspaceSnapshotDigest(fixtureRoot);
+    const archive = join(root, "archive");
+    const workspaces: string[] = [];
+    const privateMessage = "private-verifier-output-that-must-not-be-archived";
+    const originalImport = service.engineeringQualityProfileVerifiedReceiptImport.bind(service);
+    let imports = 0;
+    const mocked = t.mock.method(service, "engineeringQualityProfileVerifiedReceiptImport", (args: JsonObject) => {
+      imports++;
+      if (failure === "later-receipt" && imports === 1) return originalImport(args);
+      if (failure === "receipt") throw privateMessage;
+      throw new Error(privateMessage);
+    });
+    try {
+      if (failure === "archive") await writeFile(archive, "owned fixture file");
+      const runner = new EngineeringEvaluationRunner(store, service, {
+        fixture_root: fixtureRoot, archive_root: archive, model: "test-model", codex_version: "test-codex",
+        environment_fingerprint: "sha256:environment", timeout_ms: 2_000, output_limit: 8_192, trials_per_pair: 5,
+        executor: async (request) => {
+          workspaces.push(request.cwd);
+          if (failure === "snapshot") await symlink(join(request.cwd, "lib"), join(request.cwd, "invalid-link"), "dir");
+          return { exitCode: 0, signal: null, stdout: '{"type":"turn.completed"}', stderr: "", timedOut: false, outputLimited: false };
+        },
+        program_executor: async () => ({ exitCode: 0, signal: null, stdout: "", stderr: "", timedOut: false, outputLimited: false }),
+      });
+      await assert.rejects(runner.run(), failure === "archive" ? /EEXIST/ : /Engineering evaluation interrupted; handoff/);
+      assert.equal(workspaces.length, failure === "later-receipt" ? 2 : 1, "never start another slot after interruption");
+      for (const workspace of workspaces) await assert.rejects(access(dirname(workspace)), { code: "ENOENT" });
+      assert.equal(await workspaceSnapshotDigest(fixtureRoot), sourceDigest);
+      const plan = store.list("engineering_quality_profile_evaluation_plan", 10)[0]!;
+      const handoff = store.get("engineering_quality_profile_rejection", String(plan.runner_handoff_id));
+      assert.equal(handoff.handoff_required, true);
+      assert.equal(handoff.reason, "runner_interrupted");
+      assert.equal(handoff.case_id, "bug-fix-shared-caller-01");
+      assert.equal(handoff.trial_index, 1);
+      assert.equal(handoff.arm, failure === "later-receipt" ? "profile" : "baseline");
+      assert.match(String(handoff.error_digest), /^sha256:[a-f0-9]{64}$/);
+      const evaluation = store.list("engineering_quality_profile_evaluation", 10)[0]!;
+      assert.equal(evaluation.status, "rejected");
+      assert.equal(evaluation.routeable_candidate, false);
+      const records = store.list("engineering_quality_profile_evaluation_record", 100);
+      assert.equal(records.length, failure === "later-receipt" ? 1 : 0);
+      if (failure === "later-receipt") assert.notEqual(plan.rejection_id, handoff.id, "preserve the first receipt rejection too");
+      else assert.equal(plan.rejection_id, handoff.id);
+      if (failure !== "archive") {
+        const archived = await readFile(join(archive, (await readdir(archive))[0]!), "utf8");
+        assert.equal(archived.includes(privateMessage), false);
+        assert.equal(archived.includes(workspaces[0]!), false);
+        assert.equal(JSON.parse(archived).runner_handoff.id, handoff.id);
+        assert.equal(JSON.parse(archived).records.length, records.length);
+      }
+    } finally { mocked.mock.restore(); store.close(); await rm(root, { recursive: true, force: true }); }
+  }
+});
+
+test("fixture preparation failure is archived before any Host dispatch", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-runner-preparation-"));
+  const store = await new CraftStore(craftPaths(root)).open();
+  const fixtureRoot = join(root, "fixtures");
+  try {
+    await mkdir(fixtureRoot);
+    await cp(join(dirname(import.meta.filename), "fixtures", "engineering-eval", "cases.json"), join(fixtureRoot, "cases.json"));
+    let executions = 0;
+    const runner = new EngineeringEvaluationRunner(store, new CraftService(store), {
+      fixture_root: fixtureRoot, archive_root: join(root, "archive"), model: "fixture", codex_version: "fixture",
+      environment_fingerprint: "sha256:fixture", timeout_ms: 1_000, output_limit: 1_024, trials_per_pair: 5,
+      executor: async () => { executions++; throw new Error("must not dispatch"); },
+    });
+    await assert.rejects(runner.run(), /Engineering evaluation interrupted/);
+    assert.equal(executions, 0);
+    assert.equal(store.list("host_session", 100).length, 0);
+    assert.equal(store.list("engineering_quality_profile_evaluation", 10)[0]!.status, "rejected");
+    assert.equal((await readdir(join(root, "archive"))).length, 1);
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
