@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CRAFT_RELEASE_VERSION } from "../../core/version.ts";
 import { RELEASE_PRODUCTS } from "../../core/release-catalog.ts";
@@ -51,7 +51,12 @@ for (const component of components) {
     for (const member of components.filter(name => name !== "craft-context")) await cp(resolve(root, "skills", member), resolve(componentSkill, "references", member), { recursive: true });
   }
   if (component === "craft-codebase" || component === "craft-context") {
-    await cp(resolve(root, "scripts", "codebase"), resolve(componentRoot, "scripts", "codebase"), { recursive: true });
+    const targetScripts = resolve(componentRoot, "scripts", "codebase");
+    await rm(targetScripts, { recursive: true, force: true });
+    await cp(resolve(root, "scripts", "codebase"), targetScripts, {
+      recursive: true,
+      filter: (path) => basename(path) !== "__pycache__" && !path.endsWith(".pyc"),
+    });
   }
   // Portable core contains only Skill + MCP. Native Hook manifests remain optional compatibility artifacts.
   await writeFile(resolve(componentRoot, "plugin.json"), JSON.stringify({ $schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json", name: component, version: CRAFT_RELEASE_VERSION, description: `Standalone ${component} Skill and MCP`, license: "MIT" }, null, 2) + "\n");
