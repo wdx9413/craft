@@ -11,7 +11,6 @@ import { CraftStore, type JsonObject } from "../infrastructure/store.ts";
 import { approvedEffects, executeSteps, normalizeSteps, resolveInputs, SIDE_EFFECTS, substitute } from "../workflow.ts";
 import { addCosts, dispatchNodes, normalizeNodes, orchestrationOutcome, planStatus, recoverExpiredLeases, submitNode,
   type PlanNode } from "../orchestration.ts";
-import { aggregateEvaluation, compareEvaluationAggregates, type EvaluationAggregate } from "../evaluation.ts";
 import { publishSkill, rollbackSkillPublication } from "../skill-publisher.ts";
 import { loadConfig } from "../config.ts";
 import { loadSettingsSync, publicSettings, resetSettingsSync, saveSettingsSync, type CraftSettingsPatch, type CraftModelConfig, type ModelProtocol } from "../settings.ts";
@@ -23,7 +22,6 @@ import { compareAcrossModels, defineTrials } from "../model-independence.ts";
 import { credentialStatus, publicProvider, selectModel, unconfiguredTransport } from "../model-gateway.ts";
 import { OpenAiCompatibleEmbeddingProvider, type EmbeddingProvider } from "../semantic.ts";
 import { discoverWorkflows, diffWorkflowCatalog, planWorkflowRetirement, type WorkflowUsage } from "../workflow-registry.ts";
-import { KnowledgeIndex, diffKnowledgeBase, scanKnowledgeBase } from "../knowledge-index.ts";
 import { classifyComplexity, createBudgetState, estimatePromptTokens, estimateTokens, routeModel, spendTokens, truncateToBudget } from "../token-budget.ts";
 import { defaultHooks, defineHooks, runHooks, type HookSpec } from "../hooks.ts";
 import { decideExecution } from "../execution-policy.ts";
@@ -47,6 +45,8 @@ import { ComponentAssets } from "./coordinators/component-assets.ts";
 import { ContextUsageWorkbench } from "./coordinators/context-usage.ts";
 import { WorkflowDesignWorkbench } from "./coordinators/workflow-design.ts";
 import { CognitiveWorkbenchCoordinator } from "./coordinators/cognitive-workbench.ts";
+import { EvaluationRunCoordinator } from "./coordinators/evaluation-runs.ts";
+import { CognitiveSearchCoordinator } from "./coordinators/cognitive-search.ts";
 import { CognitiveWriteCoordinator } from "./coordinators/cognitive-write.ts";
 import { workbenchWorkflowInput } from "./use-cases/workbench-workflow-input.ts";
 import type { TraceArchiveRuntimeBackend } from "../trace-archive-storage.ts";
@@ -56,8 +56,8 @@ import { createActionHandlers } from "./actions/action-handlers.ts";
 import { executeSubagent, planSubagentExecution } from "../subagent-execution.ts";
 import { installAdapterRuntimeMethods } from "./use-cases/adapter-runtime.ts";
 import { installKernelDelegateMethods } from "./use-cases/kernel-delegates.ts";
-import { object, text } from "../validation.ts";
-import { canonicalJson } from "../digest.ts";
+import { array, finiteInteger, object, text } from "../validation.ts";
+import { canonicalJson, payload as recordPayload } from "../digest.ts";
 import { CRAFT_RELEASE_VERSION } from "../version.ts";
 import type { EvaluationContractInput, EvaluationStage } from "../evaluation-contract.ts";
 import { WorkControl } from "./coordinators/work-control.ts";
@@ -87,13 +87,6 @@ function document(value: unknown, name: string): string {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
   return value;
 }
-function finiteInteger(value: unknown, name: string, fallback: number, minimum = 1, maximum = Number.MAX_SAFE_INTEGER): number {
-  const number = value === undefined ? fallback : Number(value);
-  if (!Number.isFinite(number) || !Number.isInteger(number) || number < minimum || number > maximum) {
-    throw new Error(`${name} must be an integer between ${minimum} and ${maximum}`);
-  }
-  return number;
-}
 function optionalBoolean(value: unknown, name: string): boolean | undefined {
   if (value === undefined) return undefined;
   if (typeof value !== "boolean") throw new Error(`${name} must be a boolean`);
@@ -110,16 +103,6 @@ function optionalScore(value: unknown, name: string): number | null {
   const score = Number(value);
   if (!Number.isFinite(score) || score < 0 || score > 1) throw new Error(`${name} must be between 0 and 1`);
   return score;
-}
-function array(value: unknown, name: string): unknown[] {
-  if (!Array.isArray(value)) throw new Error(`${name} must be an array`);
-  return value;
-}
-
-function recordPayload(record: JsonObject): JsonObject {
-  const { id: _id, version: _version, created_at: _created, updated_at: _updated, ...payload } = record;
-  if (payload.content_ref !== undefined) delete payload.content;
-  return payload;
 }
 function uniqueTextArray(value: unknown, name: string, minimum = 1): string[] {
   const values = array(value, name).map((item) => text(item, name));
@@ -221,17 +204,6 @@ function validIsoTime(value: unknown, name: string): number {
   return parsed;
 }
 
-function metricMean(aggregate: JsonObject, metric: string): number | null {
-  const summary = (aggregate.costs as JsonObject)[metric] as JsonObject | undefined;
-  return typeof summary?.mean === "number" && Number.isFinite(summary.mean) ? summary.mean : null;
-}
-
-function binomial(n: number, k: number): number {
-  let value = 1;
-  for (let index = 1; index <= k; index += 1) value = value * (n - k + index) / index;
-  return value;
-}
-
 function validateModelInput(args: JsonObject, id: string): CraftModelConfig {
   const name = text(args.name, "name");
   const protocol = (args.protocol === "anthropic" || args.protocol === "openai-compatible"
@@ -250,6 +222,8 @@ export class CraftService extends ServiceFoundation {
   readonly forgeDispatch: ForgeDispatchCoordinator;
   readonly cognitiveWorkbench: CognitiveWorkbenchCoordinator;
   readonly cognitiveWrites: CognitiveWriteCoordinator;
+  readonly cognitiveSearch: CognitiveSearchCoordinator;
+  readonly evaluationRuns: EvaluationRunCoordinator;
 
   constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter?: unknown,
     dockerSandbox?: unknown, egressBroker?: unknown, hostOwnerId?: string, hostProfiles?: readonly import("../host-registry.ts").HostProfile[],
@@ -264,7 +238,9 @@ export class CraftService extends ServiceFoundation {
       resume: (args) => this.verifiedWorkLoopResumeInternal(args),
       get: (args) => this.verifiedWorkLoopGetInternal(args),
     });
+    this.evaluationRuns = new EvaluationRunCoordinator(store, args => this.workflowTrialRun(args), args => this.gradeRecord(args));
     this.forgeDispatch = new ForgeDispatchCoordinator(store);
+    this.cognitiveSearch = new CognitiveSearchCoordinator(store, this.contextResolution, this.knowledgeRelations);
     this.cognitiveWrites = new CognitiveWriteCoordinator(store, this.knowledgeSources, this.memoryGovernance,
       (args) => this.evidenceRecord(args), (args) => this.knowledgeClaimReview(args));
     this.cognitiveWorkbench = new CognitiveWorkbenchCoordinator({
@@ -3294,120 +3270,12 @@ export class CraftService extends ServiceFoundation {
     return { decisions, total: decisions.length };
   }
 
-  private knowledgeIndex(): KnowledgeIndex { return new KnowledgeIndex(this.store.paths.knowledgeIndex ?? `${this.store.paths.root}/knowledge-index.sqlite`); }
-  knowledgeIndexSync(args: JsonObject): JsonObject {
-    const root = text(args.project_root, "project_root");
-    const index = this.knowledgeIndex();
-    try {
-      const current = scanKnowledgeBase(root, { limit: args.limit === undefined ? undefined : finiteInteger(args.limit, "limit", 1, 1, 2000) });
-      const previous = index.catalog();
-      const plan = diffKnowledgeBase(previous, current);
-      const result = index.apply(plan, root);
-      return { ...result, plan: { added: plan.added.length, changed: plan.changed.length, removed: plan.removed.length } };
-    } finally { index.close(); }
-  }
-  knowledgeSearch(args: JsonObject): JsonObject {
-    const query = text(args.query, "query");
-    const scope = args.scope === undefined ? null : text(args.scope, "scope");
-    const includeCandidates = args.include_candidates !== false;
-    const terms = [...new Set(query.toLowerCase().match(/[\p{L}\p{N}_-]+/gu) ?? [])];
-    const governed = this.store.list("knowledge_claim", 10_000).flatMap((claim) => {
-      if (claim.status !== "reviewed" && (!includeCandidates || claim.status !== "candidate")) return [];
-      if (scope !== null && claim.scope !== "global" && claim.scope !== scope) return [];
-      if (claim.valid_until && Date.parse(String(claim.valid_until)) < Date.now()) return [];
-      const content = claim.content_ref ? this.store.contentStore.readCompatSync(claim.content_ref as never).body : String(claim.content ?? "");
-      const score = terms.reduce((total, term) => total + Number(`${content} ${Array.isArray(claim.tags) ? claim.tags.join(" ") : ""}`.toLowerCase().includes(term)), 0);
-      return score > 0 ? [{ kind: "governed_claim", claim_id: claim.id, claim_version: claim.version, status: claim.status,
-        scope: claim.scope, content, content_digest: claim.content_digest, evidence_ids: claim.evidence_ids,
-        score, relations: this.relationSummary(`claim:${String(claim.id)}`) }] : [];
-    });
-    const index = this.knowledgeIndex();
-    try {
-      const limit = args.limit === undefined ? 20 : finiteInteger(args.limit, "limit", 1, 1, 100);
-      const indexed = index.search(query, { limit }).map((hit) => ({ ...hit, kind: "indexed_document", score: hit.rank, relations: this.relationSummary(hit.path) }));
-      const hits = [...governed, ...indexed]
-        .sort((left, right) => Number(right.score) - Number(left.score) || JSON.stringify(left).localeCompare(JSON.stringify(right)))
-        .slice(0, limit);
-      return { hits, queried_governed_claims: true, include_candidates: includeCandidates };
-    }
-    finally { index.close(); }
-  }
-
-  /**
-   * Read memories for the current turn.
-   *
-   * This is the read half of the wiring gap: `memory_ledger` could be written
-   * from the loop but never read, so an agent could record a lesson and never
-   * benefit from it. It delegates to the governed resolver so every read still
-   * produces a content-free receipt with per-memory reasons and an explicit
-   * omitted count — the agent gains memory access without gaining a way around
-   * the budget or the provenance trail.
-   */
-  async memorySearch(args: JsonObject): Promise<JsonObject> {
-    if (args.scope_kind === undefined || args.scope_id === undefined) {
-      return { memories: [], count: 0, omitted_count: 0, receipt_id: null, content_free_receipt: true,
-        skipped: true, reason: "scope_unavailable" };
-    }
-    const resolution = await this.contextResolution.resolve({
-      query: text(args.query, "query"),
-      scope_kind: args.scope_kind,
-      scope_id: text(args.scope_id, "scope_id"),
-      max_items: args.max_items ?? 8,
-      max_chars: args.max_chars ?? 4000
-    });
-    const items = (resolution.items as JsonObject[]) ?? [];
-    const receipt = resolution.receipt as JsonObject | null;
-    // The loop gets references and a bounded excerpt; raw restricted content is
-    // never handed to the model, matching the knowledge path's discipline.
-    return {
-      memories: items.map((item) => ({
-        memory_id: item.memory_id,
-        memory_version: item.memory_version,
-        content: item.content,
-        sensitivity: item.sensitivity,
-        reason: item.reason
-      })),
-      count: items.length,
-      omitted_count: receipt?.omitted_count ?? 0,
-      receipt_id: receipt?.id ?? null,
-      content_free_receipt: true
-    };
-  }
-
-  /** One-hop relation summary for a knowledge document, so a loop can decide whether to descend. */
-  private relationSummary(path: string): JsonObject[] {
-    const { relations } = this.knowledgeRelations.neighbors({ kind: "knowledge_document", id: path });
-    return (relations as JsonObject[]).map((edge) => ({
-      relation_id: edge.relation_id, relation: edge.relation, direction: edge.direction,
-      other: edge.direction === "forward" ? edge.target : edge.source, confidence: edge.confidence,
-    }));
-  }
-
-  /** Declare where a knowledge document belongs and, optionally, when it stops being trustworthy. */
-  knowledgeScopeSet(args: JsonObject): JsonObject {
-    const entries = array(args.entries, "entries").map((item) => {
-      if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error("knowledge scope entries must be objects");
-      return item as JsonObject;
-    });
-    const index = this.knowledgeIndex();
-    try { return { entries: index.setScope(entries as never) }; }
-    finally { index.close(); }
-  }
-
-  knowledgeScopeList(args: JsonObject): JsonObject {
-    const index = this.knowledgeIndex();
-    try {
-      const scope = args.scope === undefined ? undefined : String(args.scope);
-      return { entries: index.scopeCatalog(scope), expired: index.expired() };
-    } finally { index.close(); }
-  }
-
-  /** Forget expired documents from the rebuildable projection. Markdown files are never touched. */
-  knowledgeScopeForget(): JsonObject {
-    const index = this.knowledgeIndex();
-    try { return index.forgetExpired(); }
-    finally { index.close(); }
-  }
+  knowledgeIndexSync(args: JsonObject): JsonObject { return this.cognitiveSearch.knowledgeIndexSync(args); }
+  knowledgeSearch(args: JsonObject): JsonObject { return this.cognitiveSearch.knowledgeSearch(args); }
+  async memorySearch(args: JsonObject): Promise<JsonObject> { return this.cognitiveSearch.memorySearch(args); }
+  knowledgeScopeSet(args: JsonObject): JsonObject { return this.cognitiveSearch.knowledgeScopeSet(args); }
+  knowledgeScopeList(args: JsonObject): JsonObject { return this.cognitiveSearch.knowledgeScopeList(args); }
+  knowledgeScopeForget(): JsonObject { return this.cognitiveSearch.knowledgeScopeForget(); }
 
   /** Read-only projection of runs, outcomes and cost per successful outcome. */
   metricsReport(args: JsonObject = {}): JsonObject {
@@ -3990,226 +3858,13 @@ export class CraftService extends ServiceFoundation {
     return { trial, trace: this.store.events(`trial:${trialId}`), outcome };
   }
 
-  evaluationRunRecord(args: JsonObject): JsonObject {
-    const suite = this.store.get("evaluation_suite", text(args.suite_id, "suite_id"),
-      args.suite_version === undefined ? undefined : finiteInteger(args.suite_version, "suite_version", 1));
-    const split = String(args.split);
-    if (!EVAL_SPLITS.has(split)) throw new Error(`Unsupported evaluation split: ${split}`);
-    const subjectType = text(args.subject_type, "subject_type");
-    const subjectId = text(args.subject_id, "subject_id");
-    const subjectVersion = finiteInteger(args.subject_version, "subject_version", 1);
-    this.store.get(subjectType, subjectId, subjectVersion);
-    const trialIds = array(args.trial_ids, "trial_ids").map((value) => text(value, "trial_id"));
-    if (!trialIds.length || new Set(trialIds).size !== trialIds.length) {
-      throw new Error("trial_ids must contain unique trials");
-    }
-    const cases = array(suite.cases ?? [], "suite cases") as JsonObject[];
-    const allowedCases = new Set(cases.filter((item) => item.split === split).map((item) => String(item.case_id)));
-    const outcomes = trialIds.map((trialId) => {
-      const trial = this.store.get("trial", trialId);
-      if (trial.subject_type !== subjectType || trial.subject_id !== subjectId ||
-          Number(trial.subject_version) !== subjectVersion) throw new Error(`Trial subject mismatch: ${trialId}`);
-      if (!trial.case_id || !allowedCases.has(String(trial.case_id))) {
-        throw new Error(`Trial case is not in the ${split} suite partition: ${trialId}`);
-      }
-      const outcome = this.store.find("outcome", `outcome_${trialId}`);
-      if (!outcome) throw new Error(`Trial has no outcome: ${trialId}`);
-      return outcome;
-    });
-    const verdict = outcomes.every((outcome) => outcome.verdict === "passed") ? "passed" : "failed";
-    return this.store.create("evaluation_run", String(args.run_id ?? id("evalrun")), {
-      suite_id: suite.id, suite_version: suite.version, split, subject_type: subjectType,
-      subject_id: subjectId, subject_version: subjectVersion, trial_ids: trialIds, verdict,
-      metrics: object(args.metrics ?? {}, "metrics"),
-    });
-  }
-
-  evaluationRunAggregate(args: JsonObject): JsonObject {
-    const run = this.store.get("evaluation_run", text(args.run_id, "run_id"));
-    const trials = (run.trial_ids as string[]).map((trialId) => this.store.get("trial", trialId));
-    const outcomes = trials.map((trial) => this.store.get("outcome", `outcome_${trial.id}`));
-    return aggregateEvaluation(run, trials, outcomes);
-  }
-
-  evaluationCompare(args: JsonObject): JsonObject {
-    const baselineId = text(args.baseline_run_id, "baseline_run_id");
-    const candidateId = text(args.candidate_run_id, "candidate_run_id");
-    if (baselineId === candidateId) throw new Error("Evaluation comparison requires two different runs");
-    const baseline = this.evaluationRunAggregate({ run_id: baselineId }) as EvaluationAggregate;
-    const candidate = this.evaluationRunAggregate({ run_id: candidateId }) as EvaluationAggregate;
-    for (const field of ["suite_id", "suite_version", "split", "subject_type"] as const) {
-      if (baseline[field] !== candidate[field]) throw new Error(`Evaluation runs are not comparable: ${field} differs`);
-    }
-    if (JSON.stringify(baseline.case_ids) !== JSON.stringify(candidate.case_ids)) {
-      throw new Error("Evaluation runs are not comparable: case_ids differ");
-    }
-    return this.store.create("evaluation_comparison", String(args.comparison_id ?? id("comparison")), {
-      baseline_run_id: baselineId, candidate_run_id: candidateId,
-      suite_id: baseline.suite_id, suite_version: baseline.suite_version, split: baseline.split,
-      subject_type: baseline.subject_type, case_ids: baseline.case_ids,
-      baseline, candidate, comparison: compareEvaluationAggregates(baseline, candidate),
-    });
-  }
-
-  evaluationRunnerRun(args: JsonObject): JsonObject {
-    const taskId = text(args.task_id, "task_id");
-    this.store.get("task", taskId);
-    const suite = this.store.get("evaluation_suite", text(args.suite_id, "suite_id"),
-      args.suite_version === undefined ? undefined : finiteInteger(args.suite_version, "suite_version", 1));
-    const split = text(args.split, "split");
-    if (!EVAL_SPLITS.has(split)) throw new Error(`Unsupported evaluation split: ${split}`);
-    const projectRoot = text(args.project_root, "project_root");
-    const trialsPerCase = finiteInteger(args.trials_per_case, "trials_per_case", 1, 1, 20);
-    const subjects = array(args.subjects, "subjects").map((raw, index) => {
-      const subject = object(raw, `subjects[${index}]`);
-      if (text(subject.subject_type, `subjects[${index}].subject_type`) !== "workflow") {
-        throw new Error("Automatic Eval Runner currently executes only workflow subjects; Agent subjects require a Host runtime operation");
-      }
-      const subjectId = text(subject.subject_id, `subjects[${index}].subject_id`);
-      const subjectVersion = finiteInteger(subject.subject_version, `subjects[${index}].subject_version`, 1);
-      this.store.get("workflow", subjectId, subjectVersion);
-      return { label: text(subject.label, `subjects[${index}].label`), subject_id: subjectId, subject_version: subjectVersion };
-    });
-    if (subjects.length < 2 || new Set(subjects.map((subject) => subject.label)).size !== subjects.length) {
-      throw new Error("Eval Runner requires at least two uniquely labelled subjects");
-    }
-    const cases = (suite.cases as JsonObject[]).filter((item) => item.split === split);
-    if (!cases.length) throw new Error(`Evaluation Suite has no ${split} cases`);
-    const runner = this.store.create("evaluation_runner", String(args.runner_id ?? id("eval_runner")), { task_id: taskId,
-      suite_id: suite.id, suite_version: suite.version, split, trials_per_case: trialsPerCase, status: "running",
-      subjects, environment_fingerprint: fingerprint(object(args.environment ?? {}, "environment")) });
-    const evaluationRuns = subjects.map((subject) => {
-      const trialIds: string[] = [];
-      for (const item of cases) for (let attempt = 1; attempt <= trialsPerCase; attempt += 1) {
-        const trial = this.workflowTrialRun({ trial_id: id("trial"), task_id: taskId, workflow_id: subject.subject_id,
-          version: subject.subject_version, case_id: item.case_id, project_root: projectRoot,
-          inputs: object(item.inputs ?? {}, "case inputs"), environment: args.environment ?? {}, budget: args.budget ?? {} });
-        trialIds.push(String((trial.trial as JsonObject).id));
-      }
-      return this.evaluationRunRecord({ suite_id: suite.id, suite_version: suite.version, split, subject_type: "workflow",
-        subject_id: subject.subject_id, subject_version: subject.subject_version, trial_ids: trialIds });
-    });
-    const comparisons = evaluationRuns.slice(1).map((candidate, index) => this.evaluationCompare({
-      baseline_run_id: evaluationRuns[0].id, candidate_run_id: candidate.id,
-      comparison_id: `${runner.id}_${index + 1}` }));
-    const completed = this.store.save("evaluation_runner", String(runner.id), { ...recordPayload(runner), status: "completed",
-      evaluation_run_ids: evaluationRuns.map((run) => run.id), comparison_ids: comparisons.map((comparison) => comparison.id) });
-    return { runner: completed, evaluation_runs: evaluationRuns, comparisons, comparison: comparisons[0].comparison,
-      aggregate: { baseline_trials: (evaluationRuns[0].trial_ids as string[]).length,
-        candidate_trials: (evaluationRuns[1].trial_ids as string[]).length, cases: cases.length, trials_per_case: trialsPerCase } };
-  }
-
-  evaluationProgramGrade(args: JsonObject): JsonObject {
-    const evaluation = this.store.get("evaluation_run", text(args.evaluation_run_id, "evaluation_run_id"));
-    const grader = this.store.get("grader", text(args.grader_id, "grader_id"),
-      args.grader_version === undefined ? undefined : finiteInteger(args.grader_version, "grader_version", 1));
-    if (grader.grader_type !== "program") throw new Error("Automatic evaluation grading requires a program grader");
-    const configuration = object(grader.configuration, "grader configuration");
-    const minimumPassRate = configuration.minimum_pass_rate === undefined ? 1 : Number(configuration.minimum_pass_rate);
-    const maximumDuration = configuration.maximum_mean_duration_ms === undefined ? Number.POSITIVE_INFINITY
-      : Number(configuration.maximum_mean_duration_ms);
-    if (!Number.isFinite(minimumPassRate) || minimumPassRate < 0 || minimumPassRate > 1 ||
-      (!Number.isFinite(maximumDuration) && maximumDuration !== Number.POSITIVE_INFINITY) || maximumDuration < 0) {
-      throw new Error("Program grader configuration is invalid");
-    }
-    const aggregate = this.evaluationRunAggregate({ run_id: evaluation.id });
-    const duration = (aggregate.costs as JsonObject).duration_ms as JsonObject | undefined;
-    const passed = Number(aggregate.pass_rate) >= minimumPassRate && (duration?.mean === undefined || Number(duration.mean) <= maximumDuration);
-    const grades = (evaluation.trial_ids as string[]).map((trialId) => {
-      const gradeId = `grade_${createHash("sha256").update(JSON.stringify([trialId, grader.id, grader.version])).digest("hex")}`;
-      const existing = this.store.find("grade", gradeId);
-      if (existing) return existing;
-      const outcome = this.store.get("outcome", `outcome_${trialId}`);
-      return this.gradeRecord({ trial_id: trialId, grader_id: grader.id, grader_version: grader.version,
-        verdict: passed ? "passed" : "failed", score: Number(aggregate.pass_rate),
-        summary: `Program grader evaluated evaluation run ${evaluation.id}.`, evidence_ids: outcome.evidence_ids,
-        metadata: { evaluation_run_id: evaluation.id, pass_rate: aggregate.pass_rate, minimum_pass_rate: minimumPassRate,
-          maximum_mean_duration_ms: maximumDuration } });
-    });
-    return { grades, passed, aggregate };
-  }
-
-  private evaluationPairedComparison(baselineRun: JsonObject, candidateRun: JsonObject): JsonObject {
-    const indexed = (run: JsonObject) => {
-      const occurrences = new Map<string, number>();
-      return new Map((run.trial_ids as string[]).map((trialId) => {
-        const trial = this.store.get("trial", trialId); const caseId = String(trial.case_id);
-        const occurrence = (occurrences.get(caseId) ?? 0) + 1; occurrences.set(caseId, occurrence);
-        return [`${caseId}:${occurrence}`, this.store.get("outcome", `outcome_${trialId}`)];
-      }));
-    };
-    const baseline = indexed(baselineRun); const candidate = indexed(candidateRun);
-    let candidateWins = 0; let baselineWins = 0; let ties = 0;
-    for (const [key, baselineOutcome] of baseline) {
-      const candidateOutcome = candidate.get(key)!;
-      const baselinePassed = baselineOutcome.verdict === "passed"; const candidatePassed = candidateOutcome.verdict === "passed";
-      if (candidatePassed && !baselinePassed) candidateWins += 1;
-      else if (baselinePassed && !candidatePassed) baselineWins += 1;
-      else ties += 1;
-    }
-    return { matched_trials: candidateWins + baselineWins + ties, candidate_wins: candidateWins,
-      baseline_wins: baselineWins, ties, unmatched_baseline_trials: baseline.size - (candidateWins + baselineWins + ties),
-      unmatched_candidate_trials: candidate.size - (candidateWins + baselineWins + ties) };
-  }
-
-  evaluationPromotionAssess(args: JsonObject): JsonObject {
-    const comparison = this.store.get("evaluation_comparison", text(args.comparison_id, "comparison_id"));
-    const baselineRun = this.store.get("evaluation_run", String(comparison.baseline_run_id));
-    const candidateRun = this.store.get("evaluation_run", String(comparison.candidate_run_id));
-    const minTrials = finiteInteger(args.min_trials, "min_trials", 2, 1, 10_000);
-    const minimumDelta = args.min_pass_rate_delta === undefined ? 0 : Number(args.min_pass_rate_delta);
-    const maximumCostRatio = args.max_cost_regression_ratio === undefined ? Number.POSITIVE_INFINITY : Number(args.max_cost_regression_ratio);
-    const maximumDurationRatio = args.max_duration_regression_ratio === undefined ? Number.POSITIVE_INFINITY : Number(args.max_duration_regression_ratio);
-    const costMetric = args.cost_metric === undefined ? "tokens" : text(args.cost_metric, "cost_metric");
-    if (!Number.isFinite(minimumDelta) || minimumDelta < -1 || minimumDelta > 1 ||
-      (!Number.isFinite(maximumCostRatio) && maximumCostRatio !== Number.POSITIVE_INFINITY) || maximumCostRatio < 0 ||
-      (!Number.isFinite(maximumDurationRatio) && maximumDurationRatio !== Number.POSITIVE_INFINITY) || maximumDurationRatio < 0) {
-      throw new Error("Promotion thresholds are invalid");
-    }
-    const baseline = comparison.baseline as JsonObject; const candidate = comparison.candidate as JsonObject;
-    const paired = this.evaluationPairedComparison(baselineRun, candidateRun);
-    const baselineCost = metricMean(baseline, costMetric); const candidateCost = metricMean(candidate, costMetric);
-    const baselineDuration = metricMean(baseline, "duration_ms"); const candidateDuration = metricMean(candidate, "duration_ms");
-    const costRatio = baselineCost === null || candidateCost === null ? null : candidateCost / Math.max(1, baselineCost);
-    const durationRatio = baselineDuration === null || candidateDuration === null ? null : candidateDuration / Math.max(1, baselineDuration);
-    const checks = [
-      { check: "held_out", passed: comparison.split === "held_out" },
-      { check: "minimum_trials", passed: Number(baseline.total) >= minTrials && Number(candidate.total) >= minTrials },
-      { check: "pass_rate", passed: Number(candidate.pass_rate) - Number(baseline.pass_rate) >= minimumDelta },
-      { check: "cost_regression", passed: maximumCostRatio === Number.POSITIVE_INFINITY || (costRatio !== null && costRatio <= maximumCostRatio) },
-      { check: "duration_regression", passed: maximumDurationRatio === Number.POSITIVE_INFINITY || (durationRatio !== null && durationRatio <= maximumDurationRatio) },
-      { check: "paired_cases", passed: Number(paired.matched_trials) >= minTrials },
-    ];
-    const eligible = checks.every((check) => check.passed);
-    const promotion = this.store.create("evaluation_promotion", String(args.promotion_id ?? id("promotion")), {
-      comparison_id: comparison.id, baseline_run_id: baselineRun.id, candidate_run_id: candidateRun.id, eligible, checks,
-      paired, thresholds: { min_trials: minTrials, min_pass_rate_delta: minimumDelta, cost_metric: costMetric,
-        max_cost_regression_ratio: maximumCostRatio, max_duration_regression_ratio: maximumDurationRatio },
-    });
-    return { eligible, promotion, comparison: { ...comparison, paired, cost_metric: costMetric,
-      cost_regression_ratio: costRatio, duration_regression_ratio: durationRatio } };
-  }
-
-  evaluationReliabilityAssess(args: JsonObject): JsonObject {
-    const comparison = this.store.get("evaluation_comparison", text(args.comparison_id, "comparison_id"));
-    const baselineRun = this.store.get("evaluation_run", String(comparison.baseline_run_id)); const candidateRun = this.store.get("evaluation_run", String(comparison.candidate_run_id));
-    const minTrials = finiteInteger(args.min_trials, "min_trials", 20, 2, 10_000); const maxBudgetRatio = Number(args.max_budget_ratio ?? 1);
-    if (!Number.isFinite(maxBudgetRatio) || maxBudgetRatio < 0) throw new Error("max_budget_ratio must be non-negative");
-    const paired = this.evaluationPairedComparison(baselineRun, candidateRun);
-    const baselineTrials = (baselineRun.trial_ids as string[]).map((trialId) => this.store.get("trial", trialId));
-    const candidateTrials = (candidateRun.trial_ids as string[]).map((trialId) => this.store.get("trial", trialId));
-    const baselineEnvironment = object(baselineTrials[0].environment, "baseline environment");
-    const environmentsMatch = [...baselineTrials, ...candidateTrials].every((trial) => fingerprint(object(trial.environment, "trial environment")) === fingerprint(baselineEnvironment));
-    const budgetsMatch = [...baselineTrials, ...candidateTrials].every((trial) => {
-      const baselineBudget = object(baselineTrials[0].budget, "baseline budget"); const ratio = Number(Object.entries(object(trial.budget, "trial budget")).every(([key, value]) => Number(value) <= Number(baselineBudget[key]) * maxBudgetRatio));
-      return ratio === 1;
-    });
-    const decisive = Number(paired.candidate_wins) + Number(paired.baseline_wins);
-    const pValue = decisive === 0 ? 1 : 2 ** -decisive * Array.from({ length: Number(paired.baseline_wins) + 1 }, (_, index) => binomial(decisive, Number(paired.candidate_wins) + index)).reduce((sum, value) => sum + value, 0);
-    const status = Number(paired.matched_trials) < minTrials || !environmentsMatch || !budgetsMatch ? "inconclusive" : pValue <= 0.05 && Number(paired.candidate_wins) > Number(paired.baseline_wins) ? "eligible" : "rejected";
-    const assessment = this.store.create("evaluation_reliability", String(args.assessment_id ?? id("reliability")), { comparison_id: comparison.id, status, min_trials: minTrials, max_budget_ratio: maxBudgetRatio, paired, p_value: pValue, environments_match: environmentsMatch, budgets_match: budgetsMatch });
-    return { status, assessment };
-  }
+  evaluationRunRecord(args: JsonObject): JsonObject { return this.evaluationRuns.evaluationRunRecord(args); }
+  evaluationRunAggregate(args: JsonObject): JsonObject { return this.evaluationRuns.evaluationRunAggregate(args); }
+  evaluationCompare(args: JsonObject): JsonObject { return this.evaluationRuns.evaluationCompare(args); }
+  evaluationRunnerRun(args: JsonObject): JsonObject { return this.evaluationRuns.evaluationRunnerRun(args); }
+  evaluationProgramGrade(args: JsonObject): JsonObject { return this.evaluationRuns.evaluationProgramGrade(args); }
+  evaluationPromotionAssess(args: JsonObject): JsonObject { return this.evaluationRuns.evaluationPromotionAssess(args); }
+  evaluationReliabilityAssess(args: JsonObject): JsonObject { return this.evaluationRuns.evaluationReliabilityAssess(args); }
 
   judgeAdapterSave(args: JsonObject): JsonObject {
     const graderType = text(args.grader_type, "grader_type"); if (!new Set(["model", "human"]).has(graderType)) throw new Error("Judge adapter must be model or human");

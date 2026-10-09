@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
-import { extname, isAbsolute, join, relative } from "node:path";
+import { extname, isAbsolute, join, relative, sep } from "node:path";
 
 export type RepositoryFile = { path: string; digest: string; content: string; language: string };
 export type RepositoryFiles = { root: string; state: "ready" | "disabled" | "not_repository"; files: RepositoryFile[]; omitted: number };
@@ -45,7 +45,8 @@ export function repositoryFiles(root: string, _query = ""): RepositoryFiles {
     if (!existsSync(absolute)) continue;
     const stat = lstatSync(absolute);
     // Reject links, including a symlinked ancestor, before reading source bodies.
-    if (!stat.isFile() || realpathSync(absolute) !== absolute || isAbsolute(relative(root, absolute)) || relative(root, absolute).startsWith("..")) { omitted++; continue; }
+    const delta = relative(root, absolute);
+    if (!stat.isFile() || realpathSync(absolute) !== absolute || isAbsolute(delta) || delta === ".." || delta.startsWith(`..${sep}`)) { omitted++; continue; }
     if (files.length >= 500 || stat.size > 512 * 1024 || bytes + stat.size > 8 * 1024 * 1024) { omitted++; continue; }
     const content = readFileSync(absolute, "utf8");
     if (content.includes("\0")) { omitted++; continue; }

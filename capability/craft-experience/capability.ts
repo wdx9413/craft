@@ -5,16 +5,17 @@
  * workflow, graph, or short prompt-shaped procedure. These Craft-owned learned assets are
  * deliberately separate from installed Capability Skills and Workflows.
  *
- * The package owns three kernels and nothing else:
+ * The package owns four kernels:
  *
  * | kernel | what it holds |
  * |---|---|
  * | `experience-ledger` | content-free, Evidence-backed observations and their diagnostic patterns |
  * | `workflow-evolution` | sanitized execution observations, and the bounded model-proposal request they justify |
+ * | `procedure-store` | governed Procedure persistence and routeable projections |
  * | `evaluation-model-profile` | the secret-free model configuration an evaluation runs under |
  *
- * Its read side returns only scoped, routeable Procedures: checked JSON definitions for
- * Workflow/Graph and Markdown-native Prompt Procedures. Observation, patterns and candidates
+ * Its Context read side returns scoped, routeable Procedure references. ProcedureStore
+ * owns their Workflow/Graph definitions and Markdown-native Prompt bodies. Observation, patterns and candidates
  * stay diagnostic; they cannot become Context merely by existing.
  */
 import type { CraftCapability } from "../../common/craft-common-base/src/capability-protocol.ts";

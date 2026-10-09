@@ -13,7 +13,9 @@ function numericValues(records: JsonObject[], field: "scores" | "costs"): Map<st
     const metrics = record[field] as JsonObject;
     for (const [name, value] of Object.entries(metrics)) {
       if (typeof value !== "number" || !Number.isFinite(value)) continue;
-      values.set(name, [...(values.get(name) ?? []), value]);
+      const metric = values.get(name);
+      if (metric) metric.push(value);
+      else values.set(name, [value]);
     }
   }
   return values;
@@ -99,4 +101,22 @@ export function compareEvaluationAggregates(baseline: EvaluationAggregate,
     failure_types: countDeltas(baseline.failure_types, candidate.failure_types),
     assessment,
   };
+}
+
+/** One-sided paired sign test; logarithmic summation avoids overflow on large trial sets. */
+export function pairedSignTestProbability(candidateWins: number, baselineWins: number): number {
+  if (![candidateWins, baselineWins, candidateWins + baselineWins].every(value => Number.isSafeInteger(value) && value >= 0)) {
+    throw new Error("Paired win counts must be non-negative safe integers");
+  }
+  const total = candidateWins + baselineWins;
+  if (!candidateWins) return 1;
+  let logProbability = -total * Math.LN2, logTail = Number.NEGATIVE_INFINITY;
+  for (let successes = 0; successes <= total; successes++) {
+    if (successes >= candidateWins) {
+      const larger = Math.max(logTail, logProbability), smaller = Math.min(logTail, logProbability);
+      logTail = larger + Math.log1p(Math.exp(smaller - larger));
+    }
+    if (successes < total) logProbability += Math.log(total - successes) - Math.log(successes + 1);
+  }
+  return Math.min(1, Math.exp(logTail));
 }

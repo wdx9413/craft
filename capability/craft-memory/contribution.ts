@@ -1,7 +1,8 @@
 import type { ContextContribution, ContextContributionProvider, ContextRequest } from "../../common/craft-common-base/src/capability-protocol.ts";
 import { ContextBudget, contextAssetMatches, contextAssetRef } from "../../common/craft-common-base/src/context-assets.ts";
 import { canonicalJson, stableDigest } from "../../common/craft-common-base/src/digest.ts";
-import { KeywordRetrievalPort, temporalMemorySelect } from "../../common/craft-common-base/src/retrieval-port.ts";
+import { KeywordRetrievalPort } from "../../common/craft-common-base/src/keyword-retrieval.ts";
+import { temporalMemorySelect } from "../../common/craft-common-base/src/memory-temporal-policy.ts";
 import { scopeAllows, scopeEnvelope, scopeEnvelopeReceipt, sourceAllows, type ScopeAccess } from "../../common/craft-common-base/src/scope-policy.ts";
 import { text } from "../../common/craft-common-base/src/validation.ts";
 import { contentReference } from "../../common/craft-common-store-local/src/content-store.ts";
@@ -55,7 +56,10 @@ export class MemoryContribution implements ContextContributionProvider {
         && (selectedSourceIds === null || selectedSourceIds.has(String(item.source_id)));
     };
     const records = this.records(request, readable, scopes);
-    const candidates = records.map(memory => ({ memory, body: this.content(memory) }));
+    // Expired or not-yet-effective overrides must not hide a valid broader preference.
+    const temporalParts = scopes.map(scope => temporalMemorySelect(records.filter(memory => canonicalJson(memory.scope) === canonicalJson(scope)), validAt, request.history_view === true));
+    const temporal = { selected: temporalParts.flatMap(part => part.selected), excluded: temporalParts.flatMap(part => part.excluded) };
+    const candidates = temporal.selected.map(memory => ({ memory, body: this.content(memory) }));
     const scopeRank = new Map(scopes.map((scope, index) => [canonicalJson(scope), index]));
     const preferred = new Map<string, number>();
     const topicOf = (memory: JsonObject) => typeof memory.topic === "string" && memory.topic ? memory.topic : `entry:${memory.id}`;
@@ -64,8 +68,7 @@ export class MemoryContribution implements ContextContributionProvider {
       preferred.set(topic, Math.min(preferred.get(topic) ?? Number.MAX_SAFE_INTEGER, rank));
     }
     const scoped = candidates.filter(({ memory }) => request.history_view === true || scopeRank.get(canonicalJson(memory.scope))! === preferred.get(topicOf(memory)));
-    const temporal = temporalMemorySelect(scoped.map(item => item.memory), validAt, request.history_view === true);
-    const available = scoped.filter(item => temporal.selected.some(memory => memory.id === item.memory.id && memory.version === item.memory.version));
+    const available = scoped;
     for (const item of available) { guard.track("memory_ledger", String(item.memory.id)); guard.track("knowledge_source", String(item.memory.source_id)); }
     const recheck = () => {
       sources.clear();
@@ -73,9 +76,16 @@ export class MemoryContribution implements ContextContributionProvider {
       guard.assertCurrent();
     };
     const feedback = this.store.list("context_feedback", 10_000, item => item.outcome === "helpful" && item.evidence_verified === true, false);
+    const usages = new Map<string, number>();
+    for (const item of feedback) {
+      const references = Array.isArray(item.memory_refs) ? item.memory_refs as JsonObject[] : [];
+      const used = new Set(references.filter(ref => ref && typeof ref.memory_id === "string" && typeof ref.content_digest === "string")
+        .map(ref => canonicalJson([ref.memory_id, ref.content_digest])));
+      for (const key of used) usages.set(key, (usages.get(key) ?? 0) + 1);
+    }
     const items = available.map(({ memory, body }) => {
       const confirmedAt = latestMemoryConfirmation(this.store, memory, now.toISOString());
-      const usage = feedback.filter(item => (item.memory_refs as JsonObject[]).some(ref => ref.memory_id === memory.id && ref.content_digest === memory.content_digest)).length;
+      const usage = usages.get(canonicalJson([memory.id, memory.content_digest])) ?? 0;
       const weight = memoryDecayWeight({ confirmed_at: confirmedAt ?? memory.observed_at ?? memory.updated_at, now: now.toISOString(), accesses: usage, trust: sourceOf(String(memory.source_id))!.trust === "verified" ? "verified" : "bounded" });
       return { memory_id: memory.id, memory_version: memory.version, source_id: memory.source_id, content: body, content_digest: memory.content_digest,
         sensitivity: memory.sensitivity, status: memory.status, scope: memory.scope, scope_envelope: scopeEnvelopeReceipt(scopeEnvelope(memory.scope_envelope, memory.scope as { kind: string; id: string })),
@@ -97,7 +107,7 @@ export class MemoryContribution implements ContextContributionProvider {
     return this.store.transaction(() => {
       recheck();
       return { member: this.member, items: selected, receipt_id: `memory_contribution_${stableDigest(selected).slice(-24)}`, omitted_count: matchingCount - selected.length, read_refs: guard.refs(),
-        diagnostics: { eligible_memory_count: candidates.length, after_scope_precedence_count: scoped.length, after_temporal_policy_count: available.length, temporal_excluded: temporal.excluded } };
+        diagnostics: { eligible_memory_count: records.length, after_scope_precedence_count: scoped.length, after_temporal_policy_count: candidates.length, temporal_excluded: temporal.excluded } };
     });
   }
 

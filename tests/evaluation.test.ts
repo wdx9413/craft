@@ -3,7 +3,7 @@ import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { aggregateEvaluation, compareEvaluationAggregates, type EvaluationAggregate } from "../core/evaluation.ts";
+import { aggregateEvaluation, compareEvaluationAggregates, pairedSignTestProbability, type EvaluationAggregate } from "../core/evaluation.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftService } from "../core/service.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
@@ -121,4 +121,48 @@ test("evaluation comparisons enforce a common benchmark and support every subjec
     store.close();
     await rm(root, { recursive: true, force: true });
   }
+});
+
+
+test("paired sign probabilities remain finite at scale and agree with exact small cases", () => {
+  assert.equal(pairedSignTestProbability(0, 0), 1);
+  assert.equal(pairedSignTestProbability(0, 5), 1);
+  assert(Math.abs(pairedSignTestProbability(5, 0) - 1 / 32) < 1e-14);
+  assert(Math.abs(pairedSignTestProbability(2, 2) - 11 / 16) < 1e-14);
+  const balanced = pairedSignTestProbability(5000, 5000);
+  assert(Number.isFinite(balanced) && balanced > 0.5 && balanced < 0.51);
+  assert.equal(pairedSignTestProbability(10000, 0), 0);
+  for (const invalid of [-1, 0.5, Infinity, NaN]) assert.throws(() => pairedSignTestProbability(invalid, 1), /safe integers/);
+});
+
+test("legacy comparisons with unmatched repeated trials remain inconclusive and cannot qualify for promotion", async () => {
+  const root = join(tmpdir(), `craft-unpaired-${process.pid}-${Date.now()}`);
+  const store = await new CraftStore(craftPaths(root)).open();
+  try {
+    const service = new CraftService(store);
+    const task = service.taskOpen({ title: "Paired evaluation", goal: "Reject unmatched trials" }).task as JsonObject;
+    const workflow = service.workflowSave({ workflow_id: "paired", name: "Paired" });
+    const suite = service.evaluationSuiteSave({ suite_id: "paired", name: "Paired", cases: [{ case_id: "a", split: "held_out" }, { case_id: "b", split: "held_out" }] });
+    const run = (name: string, cases: string[]) => {
+      const trialIds = cases.map((case_id, index) => {
+        const trial = service.trialStart({ trial_id: `${name}-${index}`, task_id: task.id, case_id, subject_type: "workflow", subject_id: workflow.id, subject_version: workflow.version, environment: {}, budget: {} });
+        service.outcomeRecord({ trial_id: trial.id, verdict: "passed", summary: "Fixture passed" });
+        return trial.id;
+      });
+      return service.evaluationRunRecord({ run_id: name, suite_id: suite.id, split: "held_out", subject_type: "workflow", subject_id: workflow.id, subject_version: workflow.version, trial_ids: trialIds });
+    };
+    const baseline = run("baseline", ["a", "a", "b"]), candidate = run("candidate", ["a", "b", "b"]);
+    for (const [base, next] of [[baseline, candidate], [candidate, baseline]]) {
+      assert.throws(() => service.evaluationCompare({ baseline_run_id: base!.id, candidate_run_id: next!.id }), /case_ids differ/);
+      const comparison = store.create("evaluation_comparison", `legacy-${base!.id}`, { baseline_run_id: base!.id, candidate_run_id: next!.id, split: "held_out",
+        baseline: service.evaluationRunAggregate({ run_id: base!.id }), candidate: service.evaluationRunAggregate({ run_id: next!.id }) });
+      assert.equal(service.evaluationReliabilityAssess({ comparison_id: comparison.id, min_trials: 2 }).status, "inconclusive");
+      const promotion = service.evaluationPromotionAssess({ comparison_id: comparison.id, min_trials: 2 });
+      assert.equal(promotion.eligible, false);
+      const paired = (promotion.promotion as JsonObject).paired as JsonObject;
+      assert.equal(paired.matched_trials, 2);
+      assert.equal(paired.unmatched_baseline_trials, 1);
+      assert.equal(paired.unmatched_candidate_trials, 1);
+    }
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });

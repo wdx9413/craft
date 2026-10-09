@@ -261,6 +261,9 @@ test("published tarball contents typecheck and run outside the monorepo", async 
       import { CraftStore, craftPaths } from 'craft-common-store-local';
       import { CraftTelemetry } from 'craft-common-log';
       import { buildCapabilityRegistry, CORE_KERNELS } from 'craft-common-base';
+      import { KeywordRetrievalPort } from 'craft-common-base/keyword-retrieval';
+      import { temporalMemorySelect } from 'craft-common-base/memory-temporal-policy';
+      import { OpenAiCompatibleEmbeddingRetrievalPort } from 'craft-common-base/embedding-retrieval';
       import { knowledgeCapability } from '@craft/capability-knowledge';
       import { memoryCapability } from '@craft/capability-memory';
       import { experienceCapability } from '@craft/capability-experience';
@@ -268,6 +271,10 @@ test("published tarball contents typecheck and run outside the monorepo", async 
       import { codebaseCapability } from '@craft/capability-codebase';
       const store = await new CraftStore(craftPaths('./data')).open();
       try {
+        const keyword = await new KeywordRetrievalPort().search('alpha', [{ id: 'a', body: 'alpha' }]);
+        if (keyword.hits[0]?.id !== 'a') throw new Error('focused keyword export failed');
+        if (temporalMemorySelect([], new Date(), false).selected.length) throw new Error('focused temporal export failed');
+        if ((await new OpenAiCompatibleEmbeddingRetrievalPort({}).search('alpha', [])).execution.unavailable_reason !== 'embedding_provider_unavailable') throw new Error('focused provider export failed');
         const events = [];
         const telemetry = new CraftTelemetry({ append: event => { events.push(event); } });
         for (const capability of [knowledgeCapability, memoryCapability, experienceCapability, codebaseCapability]) {
@@ -283,7 +290,7 @@ test("published tarball contents typecheck and run outside the monorepo", async 
       } finally { store.close(); }
     `;
     await writeFile(join(dir, "consumer.mjs"), source);
-    await writeFile(join(dir, "consumer.mts"), source);
+    await writeFile(join(dir, "consumer.mts"), "import type { RetrievalPort } from 'craft-common-base/retrieval-contract';\n" + source + "\nconst checkedPort: RetrievalPort = new KeywordRetrievalPort(); void checkedPort;\n");
     const typecheck = spawnSync(process.execPath, [join(root, "node_modules/typescript/bin/tsc"), "--noEmit", "--strict", "--module", "NodeNext", "--moduleResolution", "NodeNext", "--target", "ES2024", "--types", "node", "consumer.mts"], { cwd: dir, encoding: "utf8" });
     assert.equal(typecheck.status, 0, typecheck.stdout + typecheck.stderr);
     const runtime = spawnSync(process.execPath, ["consumer.mjs"], { cwd: dir, encoding: "utf8" });

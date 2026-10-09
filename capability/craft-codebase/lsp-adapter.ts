@@ -5,11 +5,14 @@ import type { JsonObject } from "../../common/craft-common-store-local/src/store
 export function normalizeLspSymbols(input: JsonObject): JsonObject {
   if (typeof input.analyzer !== "string" || !input.analyzer || typeof input.analyzer_version !== "string" || !input.analyzer_version) throw new Error("LSP analyzer identity required");
   if (!Array.isArray(input.documents) || input.documents.length > 1000) throw new Error("LSP documents exceed budget");
-  const nodes: JsonObject[] = []; const paths = new Set<string>();
+  const nodes: JsonObject[] = []; const documents = new Map<string, JsonObject>();
+  const endpoints = new Map<string, Map<number, JsonObject>>();
   for (const raw of input.documents) {
     const doc = raw as JsonObject;
-    if (!doc || typeof doc.path !== "string" || paths.has(doc.path) || typeof doc.content !== "string" || doc.content.length > 2_000_000 || typeof doc.language !== "string" || !Array.isArray(doc.symbols)) throw new Error("Invalid or duplicate LSP document");
-    paths.add(doc.path);
+    if (!doc || typeof doc.path !== "string" || documents.has(doc.path) || typeof doc.content !== "string" || doc.content.length > 2_000_000 || typeof doc.language !== "string" || !Array.isArray(doc.symbols)) throw new Error("Invalid or duplicate LSP document");
+    documents.set(doc.path, doc);
+    const documentEndpoints = new Map<number, JsonObject>();
+    endpoints.set(doc.path, documentEndpoints);
     const sourceDigest = createHash("sha256").update(doc.content).digest("hex");
     if (sourceDigest !== doc.source_digest) throw new Error("LSP source digest mismatch");
     const lines = doc.content.split("\n"), offsets = [0];
@@ -28,7 +31,10 @@ export function normalizeLspSymbols(input: JsonObject): JsonObject {
         const start = offset(range?.start as JsonObject), end = offset(range?.end as JsonObject);
         if (end < start) throw new Error("LSP range is reversed");
         const id = `lsp_${createHash("sha256").update(JSON.stringify([doc.path, symbol.name, start, end])).digest("hex").slice(0, 24)}`;
-        nodes.push({ id, kind: "symbol", path: doc.path, language: doc.language, name: symbol.name, source_digest: sourceDigest, span: { start_offset: start, end_offset: end } });
+        const node = { id, kind: "symbol", path: doc.path, language: doc.language, name: symbol.name, source_digest: sourceDigest, span: { start_offset: start, end_offset: end } };
+        nodes.push(node);
+        // Preserve the first matching symbol when nested symbols share a start position.
+        if (!documentEndpoints.has(start)) documentEndpoints.set(start, node);
         if (nodes.length > 10_000) throw new Error("LSP symbol count exceeds budget");
         if (symbol.children !== undefined) { if (!Array.isArray(symbol.children)) throw new Error("LSP children must be an array"); visit(symbol.children, depth + 1); }
       }
@@ -42,12 +48,13 @@ export function normalizeLspSymbols(input: JsonObject): JsonObject {
     if (!relation || !["calls", "imports", "references", "implements", "type_definition"].includes(String(relation.kind))) throw new Error("Invalid LSP relation kind");
     const endpoint = (value: unknown): JsonObject => {
       const ref = value as JsonObject;
-      const found = nodes.find(node => node.path === ref?.path && (node.span as JsonObject).start_offset === ref.start_offset);
+      const found = typeof ref?.path === "string" && typeof ref.start_offset === "number"
+        ? endpoints.get(ref.path)?.get(ref.start_offset) : undefined;
       if (!found) throw new Error("LSP relation endpoint is outside supplied symbols");
       return found;
     };
     const from = endpoint(relation.from), to = endpoint(relation.to);
-    const source = (input.documents as unknown[]).find(raw => (raw as JsonObject).path === from.path) as JsonObject;
+    const source = documents.get(String(from.path))!;
     const span = relation.source_span as JsonObject;
     if (!Number.isSafeInteger(span?.start_offset) || !Number.isSafeInteger(span?.end_offset) || Number(span.start_offset) < 0
       || Number(span.end_offset) < Number(span.start_offset) || Number(span.end_offset) > String(source.content).length) throw new Error("LSP relation span is outside source");

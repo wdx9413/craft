@@ -20,6 +20,14 @@ test("temporal retrieval excludes future and invalid dates without destroying hi
 });
 
 test("temporal retrieval keeps conflicts explicit and deterministically selects equivalent revisions", () => {
+  const three = [memory("a", { content_digest: "same", version: 3 }), memory("b", { content_digest: "same", version: 2 }), memory("c", { content_digest: "different" })];
+  for (const order of [three, [...three].reverse()]) {
+    const conflict = temporalMemorySelect(order, now, false);
+    assert.deepEqual(conflict.selected, []);
+    assert.deepEqual(conflict.excluded.map(item => item.memory_id).sort(), ["a", "b", "c"]);
+    assert(conflict.excluded.every(item => item.reason === "temporal_conflict_abstain"));
+    assert.equal(temporalMemorySelect(order, now, true).selected.length, 3);
+  }
   assert.equal(temporalMemorySelect([memory("a"), memory("b")], now, false).excluded[0]!.reason, "temporal_conflict_abstain");
   assert.deepEqual(temporalMemorySelect([memory("a", { content_digest: "same" }), memory("b", { content_digest: "same", version: 2 })], now, false).selected.map(x => x.id), ["b"]);
   const fallback = [{ id: "a", status: "active", topic: "", updated_at: "2026-09-25", version: 1 }, { id: "b", status: "active", version: 1 }, { id: "invalid", status: "active", effective_from: false }];

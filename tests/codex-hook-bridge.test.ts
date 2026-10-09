@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -14,6 +15,44 @@ async function fixture() {
   return { root, store, service: await CraftService.open(store) };
 }
 async function dispose(f: Awaited<ReturnType<typeof fixture>>) { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+
+test("session-only Hook events join one generated turn and stop cannot finalize it twice", async () => {
+  const f = await fixture();
+  try {
+    const bridge = new CodexHookBridge(f.service), base = { cwd: f.root, session_id: "generated-turn" };
+    await bridge.handle("context", { ...base, hook_event_name: "UserPromptSubmit", prompt: "verify changes" });
+    const session = f.store.list("context_hook_session", 10)[0]!;
+    await bridge.handle("context", { ...base, hook_event_name: "PostToolUse", tool_name: "Edit" });
+    await bridge.handle("context", { ...base, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "npm test" }, tool_response: { exit_code: 0 } });
+    const journal = f.store.list("codex_hook_turn", 10)[0]!;
+    assert.equal(journal.turn_id, session.last_turn_id);
+    assert.equal(journal.verification_outcome, "passed");
+    await bridge.handle("context", { ...base, hook_event_name: "Stop" });
+    assert(f.store.list("activation_proof_receipt", 100).some(proof => proof.event === "Stop" && proof.component === "experience" && proof.turn_id === journal.turn_id && proof.observation_written === true));
+    await bridge.handle("context", { ...base, hook_event_name: "Stop" });
+    await bridge.handle("context", { ...base, hook_event_name: "PostToolUse", tool_name: "Edit" });
+    assert.equal((f.store.list("codex_hook_turn", 10)[0]!.signals as JsonObject[]).length, 2);
+    assert.deepEqual(f.store.get("context_hook_session", String(session.id)).pending_turn_ids, []);
+  } finally { await dispose(f); }
+});
+
+test("overlapping Hook turns refuse missing IDs even after one explicitly closes", async () => {
+  const f = await fixture();
+  try {
+    const bridge = new CodexHookBridge(f.service), base = { cwd: f.root, session_id: "overlap" };
+    for (const turn_id of ["one", "two"]) await bridge.handle("context", { ...base, turn_id, hook_event_name: "UserPromptSubmit", prompt: "verify changes" });
+    await bridge.handle("context", { ...base, hook_event_name: "PostToolUse", tool_name: "Edit" });
+    await bridge.handle("context", { ...base, turn_id: "one", hook_event_name: "Stop" });
+    await bridge.handle("context", { ...base, hook_event_name: "PostToolUse", tool_name: "Edit" });
+    assert(f.store.list("codex_hook_turn", 10).every(turn => turn.closed_at && (turn.signals as JsonObject[]).length === 0));
+    await bridge.handle("context", { ...base, turn_id: "two", hook_event_name: "PostToolUse", tool_name: "Edit" });
+    assert(f.store.list("codex_hook_turn", 10).some(turn => turn.turn_id === "two" && !turn.closed_at));
+    await bridge.handle("context", { ...base, turn_id: "two", hook_event_name: "Stop" });
+    await bridge.handle("context", { ...base, hook_event_name: "UserPromptSubmit", prompt: "new independent turn" });
+    await bridge.handle("context", { ...base, hook_event_name: "PostToolUse", tool_name: "Edit" });
+    assert.equal(f.store.list("codex_hook_turn", 10).filter(turn => !turn.closed_at).length, 1);
+  } finally { await dispose(f); }
+});
 
 test("Codex hook scope and explicit memory parser never retain arbitrary prompts", () => {
   assert.deepEqual(codexProjectScope("/work/../craft")?.kind, "project");
@@ -221,5 +260,53 @@ test("Lifecycle hooks record boundaries without counting readiness as component 
     assert(events.every((event) => ((event.payload as JsonObject).usage as JsonObject).component_used === false));
     assert.match(String(((events[0]!.payload as JsonObject).scope as JsonObject).id), /^project:/u);
     assert.equal((events[3]!.payload as JsonObject).session_id, "unknown");
+  } finally { await dispose(f); }
+});
+
+
+test("explicit stopped turns reject late signals and repeated learning, including turns without edits", async () => {
+  const f = await fixture();
+  try {
+    const bridge = new CodexHookBridge(f.service), base = { cwd: f.root, session_id: "closed", turn_id: "explicit" };
+    await bridge.handle("context", { ...base, hook_event_name: "PostToolUse", tool_name: "Edit" });
+    await bridge.handle("context", { ...base, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "npm test" }, tool_response: { exit_code: 0 } });
+    await bridge.handle("context", { ...base, hook_event_name: "Stop" });
+    const closed = bridge.journal.find(base)!;
+    assert(closed.closed_at);
+    await bridge.handle("context", { ...base, hook_event_name: "PostToolUse", tool_name: "Edit" });
+    await bridge.handle("context", { ...base, hook_event_name: "Stop" });
+    assert.deepEqual(bridge.journal.find(base), closed);
+    assert.equal(f.store.list("workflow_evolution_observation", 10).length, 1);
+    const empty = { ...base, turn_id: "empty" };
+    await bridge.handle("context", { ...empty, hook_event_name: "Stop" });
+    await bridge.handle("context", { ...empty, hook_event_name: "PostToolUse", tool_name: "Edit" });
+    assert.deepEqual(bridge.journal.find(empty)!.signals, []);
+  } finally { await dispose(f); }
+});
+
+
+test("reused native turn IDs remain distinct across sessions and legacy journals stay readable", async () => {
+  const f = await fixture();
+  try {
+    const bridge = new CodexHookBridge(f.service), base = { cwd: f.root, turn_id: "turn-1" };
+    for (const session_id of ["session-a", "session-b"]) {
+      const input = { ...base, session_id };
+      await bridge.handle("experience", { ...input, hook_event_name: "PostToolUse", tool_use_id: "same-edit-id", tool_name: "Edit" });
+      await bridge.handle("experience", { ...input, hook_event_name: "PostToolUse", tool_use_id: "same-check-id", tool_name: "Bash", tool_input: { command: "npm test" }, tool_response: { exit_code: 0 } });
+      await bridge.handle("experience", { ...input, hook_event_name: "Stop" });
+    }
+    const journals = f.store.list("codex_hook_turn", 10);
+    assert.equal(journals.length, 2);
+    assert(journals.every(journal => journal.closed_at && (journal.signals as JsonObject[]).length === 2));
+    assert.equal(f.store.list("workflow_evolution_observation", 10).length, 2);
+    assert.equal(f.store.list("workflow_evolution_request", 10).length, 1);
+    const scope = codexProjectScope(f.root)!;
+    const turn = "legacy-turn";
+    const legacyId = `codex_hook_turn_${createHash("sha256").update(JSON.stringify({ scope, turn })).digest("hex").slice(-20)}`;
+    f.store.create("codex_hook_turn", legacyId, { scope, turn_id: turn, session_id: "legacy-session", signals: [], content_stored: false });
+    assert.equal(bridge.journal.find({ ...base, turn_id: turn, session_id: "legacy-session" })?.id, legacyId);
+    assert.equal(bridge.journal.find({ ...base, turn_id: turn, session_id: "foreign-session" }), null);
+    await bridge.handle("experience", { ...base, turn_id: turn, session_id: "legacy-session", hook_event_name: "Stop" });
+    assert(f.store.get("codex_hook_turn", legacyId).closed_at);
   } finally { await dispose(f); }
 });

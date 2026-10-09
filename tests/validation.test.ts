@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   SCOPE_KINDS,
+  array,
+  finiteInteger,
   list,
   noCredentialAssignment,
   object,
@@ -174,4 +176,15 @@ test("the shared default helpers keep absence and null apart", () => {
   assert.equal(optionalText(undefined, "name"), null);
   assert.equal(optionalText(" v ", "name"), "v");
   assert.throws(() => optionalText("", "name"), /name/u);
+});
+
+
+test("required arrays and bounded integers preserve coercion, defaults and errors", () => {
+  const values = [1, "two"];
+  assert.equal(array(values, "values"), values);
+  for (const value of [undefined, null, {}, "values"]) assert.throws(() => array(value, "values"), /values must be an array/);
+  assert.equal(finiteInteger(undefined, "limit", 5, 1, 10), 5);
+  assert.equal(finiteInteger("10", "limit", 5, 1, 10), 10);
+  assert.equal(finiteInteger(null, "limit", 5, 0, 10), 0);
+  for (const value of [0, 11, 1.5, Infinity, "bad"]) assert.throws(() => finiteInteger(value, "limit", 5, 1, 10), /between 1 and 10/);
 });

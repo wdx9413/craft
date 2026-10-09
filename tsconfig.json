@@ -9,7 +9,8 @@
     "verbatimModuleSyntax": true,
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
-    "types": ["node"]
+    "types": ["node"],
+    "erasableSyntaxOnly": true
   },
   "include": ["core/**/*.ts", "bin/**/*.ts", "capability/**/*.ts", "common/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts", "adapters/**/*.ts"]
 }

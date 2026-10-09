@@ -11,7 +11,7 @@ import type { CraftStore, JsonObject } from "../../common/craft-common-store-loc
 import { ContextReadGuard, type ContextReadRef } from "../../common/craft-common-store-local/src/context-access-guard.ts";
 import { contentReference } from "../../common/craft-common-store-local/src/content-store.ts";
 import { scopeAllows, scopeEnvelope, sourceAllows, type ScopeAccess } from "../../common/craft-common-base/src/scope-policy.ts";
-import { KeywordRetrievalPort } from "../../common/craft-common-base/src/retrieval-port.ts";
+import { KeywordRetrievalPort } from "../../common/craft-common-base/src/keyword-retrieval.ts";
 
 function recordScope(value: unknown): { kind: string; id: string } {
   if (value === "global") return { kind: "global", id: "global" };
@@ -67,7 +67,7 @@ export class KnowledgeContribution implements ContextContributionProvider {
     const eligible = this.store.listScoped("knowledge_claim", [...(request.scope_stack ?? [{ kind: request.scope_kind, id: request.scope_id }]), ...projectAliases.map(alias => recordScope(alias))], 10_001, (claim) => {
         const applicability = recordScope(claim.scope);
         if ((claim.status !== "reviewed" && !(includeCandidates && claim.status === "candidate")) || !scopeMatches(claim.scope, request, projectAliases) || !scopeAllows(scopeEnvelope(claim.scope_envelope, applicability), access(request))
-          || !validAt(claim.valid_until, now)) return false;
+          || claim.sensitivity === "restricted" && request.allow_restricted !== true || !validAt(claim.valid_until, now)) return false;
         // Legacy records without a persisted source cannot become execution Context
         // merely because an old Markdown frontmatter happened to name one.  The
         // database record is the governed authority.  Fresh claims always persist

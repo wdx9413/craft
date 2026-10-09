@@ -14,6 +14,28 @@ import { ContextResolutionKernel } from "../core/context-resolution.ts";
 import { payload } from "../core/digest.ts";
 const scope = { kind: "project", id: "p" };
 const request: ContextRequest = { query: "alpha", scope_kind: "project", scope_id: "p", max_items: 10, max_chars: 10000 };
+
+for (const [name, validity] of [
+  ["expired", { valid_until: "2021-01-01T00:00:00Z" }],
+  ["future", { effective_from: "2099-01-01T00:00:00Z" }],
+  ["valid", { valid_until: "2099-01-01T00:00:00Z" }],
+] as const) {
+  test(`Memory ${name} task preference preserves temporal scope precedence in SDK and Context`, async () => {
+    const f = await fixture();
+    try {
+      f.remember("project", { topic: "theme", effective_from: "2020-01-01T00:00:00Z" });
+      f.remember("task", { scope_kind: "task", scope_id: "t", topic: "theme", effective_from: "2020-01-01T00:00:00Z", ...validity });
+      const now = "2026-10-09T00:00:00Z";
+      const local = await f.reader.contribute({ ...request, now, scope_stack: [{ kind: "task", id: "t" }, scope] });
+      const expected = name === "valid" ? "task" : "project";
+      assert.deepEqual(local.items.map(item => item.memory_id), [expected]);
+      const shared = await new ContextResolutionKernel(f.store, [f.reader]).resolve({ query: "alpha", scope_kind: "task", scope_id: "t", project_scope_id: "p", now });
+      assert.deepEqual((shared.items as JsonObject[]).map(item => item.memory_id), [expected]);
+      const history = await f.reader.contribute({ ...request, now, history_view: true, candidate_mode: true, scope_stack: [{ kind: "task", id: "t" }, scope] });
+      assert.deepEqual(history.items.map(item => item.memory_id).sort(), ["project", "task"]);
+    } finally { await f.close(); }
+  });
+}
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-memory-contribution-"));
   const store = await new CraftStore(craftPaths(root)).open(), writer = await new CraftStore(craftPaths(root)).open();
@@ -148,5 +170,29 @@ test("historical Memory receipts pin the Source of the returned version, not a n
     assertContextReadCurrent(f.store, receipt);
     f.writer.save("knowledge_source", "source", { status: "revoked", trust: "verified", scope });
     assert.throws(() => assertContextReadCurrent(f.store, receipt), /changed during recall/);
+  } finally { await f.close(); }
+});
+
+
+test("verified feedback counts each matching revision once and ignores stale or malformed references", async () => {
+  const f = await fixture();
+  try {
+    const memory = f.remember("weighted", { observed_at: "2026-10-01T00:00:00Z" });
+    const context = { ...request, now: "2026-10-10T00:00:00Z", candidate_mode: true };
+    const baseline = (await f.reader.contribute(context)).items[0]!.ranking_weight;
+    assert(typeof baseline === "number");
+    const ref = { memory_id: memory.id, content_digest: memory.content_digest };
+    f.store.create("context_feedback", "first", { outcome: "helpful", evidence_verified: true, memory_refs: [ref] });
+    const once = (await f.reader.contribute(context)).items[0]!.ranking_weight;
+    assert(typeof once === "number");
+    assert(once > baseline);
+    f.store.save("context_feedback", "first", { outcome: "helpful", evidence_verified: true, memory_refs: [ref, ref] });
+    for (const [id, extra] of [["stale", { memory_refs: [{ ...ref, content_digest: "old" }] }], ["missing", {}], ["malformed", { memory_refs: [null, "invalid", {}] }], ["unverified", { memory_refs: [ref], evidence_verified: false }], ["unhelpful", { memory_refs: [ref], outcome: "unhelpful" }]] as const) {
+      f.store.create("context_feedback", id, { outcome: "helpful", evidence_verified: true, ...extra });
+    }
+    assert.equal((await f.reader.contribute(context)).items[0]!.ranking_weight, once);
+    f.store.create("context_feedback", "second", { outcome: "helpful", evidence_verified: true, memory_refs: [ref] });
+    const twice = (await f.reader.contribute(context)).items[0]!.ranking_weight;
+    assert(typeof twice === "number" && twice > once);
   } finally { await f.close(); }
 });
