@@ -25,6 +25,10 @@
     "./memory-capture": {
       "types": "./dist/memory-capture.d.ts",
       "default": "./dist/memory-capture.js"
+    },
+    "./contribution": {
+      "types": "./dist/contribution.d.ts",
+      "default": "./dist/contribution.js"
     }
   },
   "files": [

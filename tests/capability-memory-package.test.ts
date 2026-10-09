@@ -107,10 +107,7 @@ test("claims the Ledger's scoped reads and writes, the derived signals, and noth
   assert.equal(memoryCapability.name, "memory");
   assert.equal(memoryCapability.product, "craft-memory");
   assert.equal(memoryCapability.owns, MEMORY_OWNS);
-  // The read side is `ContextResolutionKernel`, which is in the core and therefore not this
-  // capability's to contribute. Declaring one here would give the member two contributors, which
-  // the registry rejects outright.
-  assert.equal(memoryCapability.contributes, undefined);
+  assert.equal(typeof memoryCapability.contributes, "function");
 });
 
 test("keeps the Memory projection at the name space it promised, and repairs one name", () => {

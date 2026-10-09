@@ -521,9 +521,8 @@ export abstract class ServiceFoundation {
     this.memoryLedger = capabilities.registry.require<MemoryLedgerKernel>(MEMORY_KERNELS.ledger);
     this.memorySignals = capabilities.registry.require<MemorySignalsKernel>(MEMORY_KERNELS.signals);
     this.hookPlane = new HookPlane(capabilities.hooks);
-    // The context plane stays in the core: `component-knowledge`, `component-memory` and
-    // `component-context` all expose `craft_context_resolution_*`, so a Host that loads only one
-    // concern still has to be able to resolve what that concern holds.
+    // Capabilities own governed candidates; the shared Context plane owns retrieval,
+    // cross-member budgets and receipts for every product surface.
     this.scopeIdentity = new ScopeIdentityKernel(store);
     this.contextResolution = new ContextResolutionKernel(store, capabilities.contributed);
     this.contextWorkingSets = new ContextWorkingSetKernel(store, this.contextResolution);

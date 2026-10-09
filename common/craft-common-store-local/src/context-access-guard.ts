@@ -56,13 +56,14 @@ export class ContextReadGuard {
     this.tracked.set(key, { kind, id, version });
   }
   contribution(member: string, item: JsonObject): void {
-    const kind = member === "knowledge" ? "knowledge_claim" : "experience_procedure";
-    const id = item.claim_id ?? item.procedure_id;
+    const kind = member === "memory" ? "memory_ledger" : member === "knowledge" ? "knowledge_claim" : "experience_procedure";
+    const id = item.memory_id ?? item.claim_id ?? item.procedure_id;
     if (typeof id !== "string") return; // External providers retain their own authority contract.
     this.track(kind, id);
     const record = this.store.find(kind, id, undefined, false);
     if (!record) return;
-    if (typeof record.source_id === "string") this.track("knowledge_source", record.source_id);
+    const sourceId = item.source_id ?? record.source_id;
+    if (typeof sourceId === "string") this.track("knowledge_source", sourceId);
     if (typeof record.document_id === "string") this.track("knowledge_document", record.document_id);
     if (member === "experience") this.track("experience_release", id);
   }

@@ -1,3 +1,6 @@
+import { codeContextCandidates } from "./context-search.ts";
+import { contextAssetMatches, contextAssetRef, requiredContextRef } from "../../common/craft-common-base/src/context-assets.ts";
+import { assertContextReadCurrent, type ContextReadRef } from "../../common/craft-common-store-local/src/context-access-guard.ts";
 import { analyzeTypeScript } from "./typescript-analysis.ts";
 import { createHash } from "node:crypto";
 import { lstatSync, readFileSync } from "node:fs";
@@ -185,6 +188,48 @@ export class CodebaseIndexKernel {
     return { index: this.indexStatus(index, workspace), idempotent: false };
   }
 
+  /** Governed code candidates, not an accumulated Context member or raw index. */
+  contextProjection(args: JsonObject): JsonObject {
+    return this.store.transaction(() => {
+      const { index, workspace } = this.readyIndex(args);
+      const query = text(args.query, "query"), limit = bounded(args.limit, "limit", 100);
+      if (args.required_refs !== undefined && !Array.isArray(args.required_refs)) throw new Error("required_refs must be an array");
+      const required = ((args.required_refs ?? []) as unknown[]).map(requiredContextRef).filter(ref => ref.member === "codebase");
+      const scope = args.scope as JsonObject | undefined ?? { kind: "workspace", id: workspace.id };
+      const normalize = (node: JsonObject): JsonObject => ({ node_id: node.id, path: node.path, name: node.name, kind: node.kind, language: node.language, selection_reason: node.selection_reason, span: node.span, source_digest: node.source_digest, version: index.version, index_id: index.id, checkpoint_id: index.checkpoint_id });
+      const found = codeContextCandidates(index, query, limit);
+      const candidates = [...found.symbols as JsonObject[]];
+      for (const node of index.nodes as JsonObject[]) if (required.some(ref => contextAssetMatches(ref, contextAssetRef("codebase", normalize(node), scope))) && !candidates.some(candidate => candidate.id === node.id)) candidates.unshift(node);
+      const references = candidates.map(normalize);
+      for (const ref of required) if (!references.some(item => contextAssetMatches(ref, contextAssetRef("codebase", item, scope)))) throw new Error("Required Codebase reference is unavailable");
+      const activation = this.store.get("codebase_activation", String(args.activation_id ?? `codebase_activation_${workspace.id}`));
+      const checkpoint = this.store.get("workspace_checkpoint", String(index.checkpoint_id));
+      const readRefs: ContextReadRef[] = [
+        { kind: "codebase_index", id: String(index.id), version: Number(index.version) },
+        { kind: "workspace", id: String(workspace.id), version: Number(workspace.version) },
+        { kind: "workspace_checkpoint", id: String(checkpoint.id), version: Number(checkpoint.version) },
+        { kind: "codebase_activation", id: String(activation.id), version: Number(activation.version) },
+      ];
+      return { workspace_id: workspace.id, index_id: index.id, checkpoint_id: index.checkpoint_id, activation_id: activation.id,
+        candidates: references, query_omitted_count: found.omitted_count, read_refs: readRefs, configuration_digest: this.repositoryConfigurationDigest(workspace), candidate_only: true };
+    });
+  }
+
+  /** Revalidate the exact index/activation and selected file digests after shared Context awaits. */
+  assertContextProjectionCurrent(projection: JsonObject, selected: readonly JsonObject[]): void {
+    assertContextReadCurrent(this.store, projection);
+    const { index, workspace } = this.readyIndex(projection);
+    if (this.repositoryConfigurationDigest(workspace) !== projection.configuration_digest) throw new Error("Codebase repository configuration changed during recall");
+    const checkpoint = this.store.get("workspace_checkpoint", String(index.checkpoint_id));
+    const entries = new Map((checkpoint.entries as JsonObject[]).map(entry => [String(entry.path), entry]));
+    for (const item of selected) if (!(projection.candidates as JsonObject[]).some(candidate => stableDigest(candidate) === stableDigest(item))) throw new Error("Codebase reference was not projected");
+    for (const path of new Set(selected.map(item => String(item.path)))) {
+      const entry = entries.get(path);
+      if (!entry) throw new Error("Codebase projection path is outside checkpoint");
+      this.sourceFile(String(workspace.root_path), entry);
+    }
+  }
+
   findSymbol(args: JsonObject): JsonObject {
     const { index, workspace } = this.readyIndex(args); const query = text(args.query, "query").toLowerCase(); const limit = bounded(args.limit, "limit", 20);
     const nodes = (index.nodes as Node[]).filter((node) => node.kind === "symbol" && (node.name.toLowerCase() === query || node.name.toLowerCase().includes(query))).sort((left, right) => Number(right.name.toLowerCase() === query) - Number(left.name.toLowerCase() === query) || left.id.localeCompare(right.id)).slice(0, limit);
@@ -229,6 +274,13 @@ export class CodebaseIndexKernel {
   private requireActive(args: JsonObject, workspaceId: string): void {
     const activation = this.store.find("codebase_activation", String(args.activation_id ?? `codebase_activation_${workspaceId}`));
     if (!activation || activation.workspace_id !== workspaceId || activation.status !== "active") throw new Error("Codebase is not explicitly active for this workspace");
+  }
+  private repositoryConfigurationDigest(workspace: JsonObject): string | null {
+    const path = safeChild(String(workspace.root_path), ".craft-codebase.json");
+    const stat = lstatSync(path, { throwIfNoEntry: false });
+    if (!stat) return null;
+    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("Repository config must be a regular file");
+    return digest(readFileSync(path, "utf8"));
   }
   private readyIndex(args: JsonObject): { index: JsonObject; workspace: JsonObject } {
     const index = this.store.get("codebase_index", identifier(args.index_id, "index_id")); const workspace = this.store.get("workspace", String(index.workspace_id)); this.requireActive(args, String(index.workspace_id));

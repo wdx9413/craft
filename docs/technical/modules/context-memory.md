@@ -66,6 +66,18 @@ Context Virtual Memory Management（CVMM）在 Craft 中是应用层类比：模
 
 `craft_memory_maintenance_cycle` 提供一个可恢复的后台学习游标：它按终态 Trace 的稳定 ID 顺序分批生成 `learning_observation`，只保存 Trace/版本/环境指纹和摘要 digest，不保存原始 Prompt、回复或敏感正文。观察可以成为后续 Experience/Memory Candidate 的输入，但不会自动写入正式 Memory，也不会绕过评测、Signoff 或 Canary。Worker 宕机后可用相同 `cursor` 重放，重复批次保持幂等。
 
+## Memory 候选读取与 Context 编排
+
+Memory 的受控读取由子能力的 `MemoryContribution` 提供，并通过 `memoryCapability.contributes` 装配。Knowledge、Memory、Experience 使用同一个 contribution 协议；不再由 Context resolver 直接查询 `memory_ledger` 或解释其正文存储。
+
+- Memory 负责范围/主题优先级、当前与历史版本、事实有效时间与记录时间、当前受众/Source/敏感性/working note 条件，授权后才水合正文；提供确认、衰减注解及内容无关的版本复核信息。
+- Context 负责共享关键词/向量/混合检索、必要引用、跨成员去重、预算、最终回执和输出复核。Memory 错误仍不因 `allow_partial` 静默降级。
+- 历史条目会固定返回版本实际使用的 Source；新版本换绑其他 Source 不会让历史回执漏掉旧 Source 的撤销检查。
+
+独立 SDK 可导入 `@craft/capability-memory/contribution`；`candidate_mode:true` 提供受控候选给 Context 统一排名，普通调用支持本地关键词与材料预算。Memory 子能力不反向依赖 Harness。显式传入另一个 Memory provider 可以替换默认本地 adapter；旧的 `ContextResolutionKernel(store, contributors)` 调用未传 Memory 时默认装配本地 provider，保持兼容。
+
+公开工具名及 Context 顶层 Memory `items` 结构保持；不要求迁移已有数据或启用 Hook。回归由 `memory-contribution.test.ts` 覆盖独立注册、provider 替换、读取前授权、历史 Source、SDK await 撤销及必需材料；原有跨进程撤销、时态、范围预算和 Hook/Working Set 用例继续复用。新增读取 module 与 Context resolver 的行、分支、函数覆盖率均要求 100%。
+
 ## 单独使用 `craft-memory`
 
 `craft-memory` 默认 MCP 面是日常小面：Readiness、来源 bootstrap、候选、审核、批准写入、当前 scope 的 Context Resolution 与 proposal-only Maintenance。完整的 `component-memory` 是显式高级面，保留给诊断、迁移和治理工具；二者共享同一 Ledger、Evidence、Receipt 与 Policy，绝不创建第二套记忆库。

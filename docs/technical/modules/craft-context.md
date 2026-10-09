@@ -64,3 +64,11 @@ DSH 也能走通用安装器的 Skill + MCP 路径，通过已有 `dsh-mcp-clien
 ## 验证范围
 
 `tests/repository-context.test.ts` 覆盖自动接入、缓存、变更/删除、worktree、忽略/退出、预算、去重与降级；`tests/dsh-product-adapter.test.ts` 覆盖协议交互和故障；`tests/context-distribution.test.ts` 从五产品四种产物执行真实本地 MCP 调用。DSH 测试替换的只有宿主注册函数，不把该测试称为真实 DSH 模型会话验收。
+
+## 子能力读取分层
+
+Knowledge、Memory、Experience 通过各自的 contribution 提供受控候选，Context 统一排名、去重、预算和回执。Codebase 保持任务代码投影：`CodebaseIndexKernel.contextProjection` 隐藏索引读取、必需节点补齐和引用生成，Context 不读取 `codebase_index` 或其 nodes。投影仍由 Working Set 统一预算；不是第六种持久 Context 成员。
+
+`assertContextProjectionCurrent` 在共享召回完成后复核索引、Workspace、Checkpoint 和 activation 的固定版本，并固定仓库配置摘要、检查选中文件摘要。异步等待期间的停用、重建、源码变化不会产生成功 Pack。旧工具名和结构引用格式保持，SDK 沿用独立 `./codebase-index` 导出，不新增 Harness 反向依赖或 MCP 工具。
+
+验收入口为 `tests/codebase-context-projection.test.ts`：独立 SDK 投影、词面不命中时的必需节点补齐、非法引用、四种漂移、Context 不读索引表的替换测试；原有预算、Hook/Working Set、仓库 onboarding 与 Codebase 测试继续复用。

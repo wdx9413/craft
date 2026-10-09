@@ -20,7 +20,8 @@
       "tests": [
         "tests/context-revocation-race.test.ts",
         "tests/context-optimization.test.ts",
-        "tests/context-read-snapshot.test.ts"
+        "tests/context-read-snapshot.test.ts",
+        "tests/memory-contribution.test.ts"
       ],
       "branches": true
     },
@@ -46,7 +47,9 @@
         "tests/service-edge-coverage.test.ts",
         "tests/context-aggregation-policy.test.ts",
         "tests/context-optimization.test.ts",
-        "tests/codebase-view-lifecycle.test.ts"
+        "tests/codebase-view-lifecycle.test.ts",
+        "tests/memory-contribution.test.ts",
+        "tests/codebase-context-projection.test.ts"
       ],
       "branches": true
     },
@@ -135,7 +138,8 @@
         "tests/context-revocation-race.test.ts",
         "tests/context-candidate-scope.test.ts",
         "tests/context-aggregation-policy.test.ts",
-        "tests/context-read-snapshot.test.ts"
+        "tests/context-read-snapshot.test.ts",
+        "tests/memory-contribution.test.ts"
       ],
       "branches": true
     },
@@ -333,7 +337,8 @@
         "tests/craft-codebase.test.ts",
         "tests/component-hookless.test.ts",
         "tests/industry-gaps.test.ts",
-        "tests/repository-context.test.ts"
+        "tests/repository-context.test.ts",
+        "tests/codebase-context-projection.test.ts"
       ],
       "branches": true
     },
@@ -501,7 +506,8 @@
         "tests/context-remediation.test.ts",
         "tests/context-revocation-race.test.ts",
         "tests/context-optimization.test.ts",
-        "tests/context-working-set-budget.test.ts"
+        "tests/context-working-set-budget.test.ts",
+        "tests/codebase-context-projection.test.ts"
       ],
       "branches": true
     },
@@ -607,7 +613,8 @@
         "tests/context-remediation.test.ts",
         "tests/context-revocation-race.test.ts",
         "tests/context-optimization.test.ts",
-        "tests/context-read-snapshot.test.ts"
+        "tests/context-read-snapshot.test.ts",
+        "tests/memory-contribution.test.ts"
       ],
       "branches": true
     },
@@ -817,7 +824,8 @@
       ],
       "tests": [
         "tests/memory-wiring.test.ts",
-        "tests/capability-memory-package.test.ts"
+        "tests/capability-memory-package.test.ts",
+        "tests/memory-contribution.test.ts"
       ],
       "branches": true
     },
@@ -926,7 +934,8 @@
         "tests/capability-knowledge-package.test.ts",
         "tests/capability-memory-package.test.ts",
         "tests/capability-experience-package.test.ts",
-        "tests/industry-gaps.test.ts"
+        "tests/industry-gaps.test.ts",
+        "tests/memory-contribution.test.ts"
       ],
       "branches": true
     },
@@ -942,7 +951,8 @@
       "tests": [
         "tests/capability-knowledge-package.test.ts",
         "tests/capability-memory-package.test.ts",
-        "tests/capability-experience-package.test.ts"
+        "tests/capability-experience-package.test.ts",
+        "tests/memory-contribution.test.ts"
       ],
       "branches": true
     },
@@ -1374,7 +1384,8 @@
         "tests/context-revocation-race.test.ts",
         "tests/context-optimization.test.ts",
         "tests/codebase-view-lifecycle.test.ts",
-        "tests/context-working-set-budget.test.ts"
+        "tests/context-working-set-budget.test.ts",
+        "tests/codebase-context-projection.test.ts"
       ],
       "branches": true
     },
@@ -1386,6 +1397,23 @@
       "tests": [
         "tests/context-host-evaluation.test.ts",
         "tests/component-ablation-execution.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "memory-contribution",
+      "include": [
+        "capability/craft-memory/contribution.ts"
+      ],
+      "tests": [
+        "tests/memory-contribution.test.ts",
+        "tests/context-revocation-race.test.ts",
+        "tests/context-aggregation-policy.test.ts",
+        "tests/context-candidate-scope.test.ts",
+        "tests/industry-gaps.test.ts",
+        "tests/universal-runtime.test.ts",
+        "tests/context-remediation.test.ts",
+        "tests/context-optimization.test.ts"
       ],
       "branches": true
     }

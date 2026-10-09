@@ -4,13 +4,13 @@
  * Memory is the accumulated context member gated by **explicit approval**. Where knowledge is
  * gated by Evidence — a claim carries the Evidence that backs it — a memory entry additionally
  * answers "whose memory is this, and may it be recalled here": it carries a scope, a
- * sensitivity, a validity window and the Knowledge Source version it came from. `resolve`
+ * sensitivity, a validity window and the Knowledge Source version it came from. `MemoryContribution`
  * enforces that scope, refuses `restricted` entries unless the caller asks for them, drops an
  * expired entry, and refuses a Source that is not active or is `untrusted`.
  *
  * That gate is why the member exists separately from knowledge, and it is why the tools this
  * package implements are the Ledger's writes plus the signals derived from recall history.
- * Reading is the shared context plane, which belongs to no capability.
+ * Candidate reading belongs here; cross-member selection belongs to Context.
  *
  * | kernel | what it holds |
  * |---|---|
@@ -25,14 +25,13 @@
  * for this package. Until it moves, those four families are projected by the product and not
  * claimed as ownership.
  *
- * It declares no `contributes`: the read side is `ContextResolutionKernel`, which takes a query
- * and returns a bounded pack. Knowledge and Experience do provide their distinct read
- * projections; declaring a second Memory provider here would give the same member two contributors, which
- * `buildCapabilityRegistry` rejects outright.
+ * `MemoryContribution` owns candidate eligibility and read snapshots. Context combines
+ * those candidates with other members using its shared retrieval, budget and receipt.
  */
 import type { CraftCapability } from "../../common/craft-common-base/src/capability-protocol.ts";
 import { CORE_KERNELS } from "../../common/craft-common-base/src/capability-protocol.ts";
 import type { CraftStore } from "../../common/craft-common-store-local/src/store.ts";
+import { MemoryContribution } from "./contribution.ts";
 import { MemoryGovernanceKernel } from "./memory-governance.ts";
 import { MemoryLedgerKernel } from "./memory-ledger.ts";
 import { MemorySignalsKernel } from "./memory-signals-kernel.ts";
@@ -49,6 +48,7 @@ export const memoryCapability: CraftCapability = {
   product: "craft-memory",
   evaluation: { input_contract: "scoped-memory-request", output_contract: "bounded-memory-ledger-result", fixture_id: "memory-fixture-v1", host_compatibility: ["fixture", "codex", "claude"] },
   owns: MEMORY_OWNS,
+  contributes: registry => new MemoryContribution(registry.require<CraftStore>(CORE_KERNELS.store)),
   register(registry): void {
     const store = registry.require<CraftStore>(CORE_KERNELS.store);
     const ledger = new MemoryLedgerKernel(store);

@@ -1,6 +1,6 @@
 import { ContextBudget } from "../common/craft-common-base/src/context-assets.ts";
-import { latestMemoryConfirmation } from "../capability/craft-memory/memory-governance.ts";
-import { ContextReadGuard, ContextAccessChangedError } from "./context-access-guard.ts";
+import { MemoryContribution } from "../capability/craft-memory/contribution.ts";
+import { ContextReadGuard } from "./context-access-guard.ts";
 /**
  * The context plane: retrieving accumulated material into a bounded, reproducible pack.
  *
@@ -22,24 +22,19 @@ import { ContextReadGuard, ContextAccessChangedError } from "./context-access-gu
  *    how many were dropped by the budget, so a caller can tell "nothing matched" from "the
  *    budget was too small".
  *
- * It belongs to the **core** and not to a capability, for a reason the projection already
- * encodes: `component-knowledge`, `component-memory` and `component-context` all expose
- * `craft_context_resolution_*` and `craft_retrieval_adapter_*`. A Host that loads only one
- * concern still has to be able to resolve what that concern holds, so the read side cannot
- * belong to either member's package.
+ * The core owns shared retrieval and pack selection. Each capability owns candidate
+ * eligibility, temporal/access rules and its content projection through contribution.
  */
-import { memoryDecayWeight } from "../capability/craft-memory/memory-signals.ts";
 import { runRetrievalEvaluation } from "./retrieval-evaluation.ts";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { CraftStore, JsonObject } from "./infrastructure/store.ts";
 import { noCredentialAssignment, object, optionalScope, sortedUniqueList, text } from "./validation.ts";
-import { canonicalJson, stableDigest, payload } from "./digest.ts";
-import { contentReference } from "./infrastructure/content-store.ts";
+import { stableDigest, payload } from "./digest.ts";
 import { CONTEXT_MEMBERS, type ContextContribution, type ContextContributionProvider, type ContextMember, type ContextRequest } from "./capability-protocol.ts";
 import { ScopeIdentityKernel } from "./scope-identity.ts";
-import { KeywordRetrievalPort, OpenAiCompatibleEmbeddingRetrievalPort, temporalMemorySelect } from "./retrieval-port.ts";
-import { scopeAccess, scopeAllows, scopeEnvelope, scopeEnvelopeReceipt, sourceAllows } from "./scope-policy.ts";
+import { KeywordRetrievalPort, OpenAiCompatibleEmbeddingRetrievalPort } from "./retrieval-port.ts";
+import { scopeAccess, sourceAllows } from "./scope-policy.ts";
 import { contextAssetMatches, contextAssetRef, requiredContextRef } from "../common/craft-common-base/src/context-assets.ts";
 
 const STRATEGIES = new Set(["keyword", "vector", "hybrid"]);
@@ -63,20 +58,12 @@ function noSecretValue(value: unknown, name: string): void {
 
 export class ContextResolutionKernel {
   readonly store: CraftStore;
-  /**
-   * The capabilities' read sides, in capability order.
-   *
-   * Passed in rather than imported, because which contributions exist is decided by assembly and
-   * this module must not name a package. Empty is the normal case for a deliberately minimal
-   * assembly; Knowledge and Experience declare their distinct projections when installed, and a
-   * core assembled without a capability set resolves exactly as it did before contributions
-   * existed.
-   */
+  /** Registered contributions; an explicit Memory provider replaces the legacy default adapter. */
   readonly contributors: readonly ContextContributionProvider[];
   readonly scopes: ScopeIdentityKernel;
   constructor(store: CraftStore, contributors: readonly ContextContributionProvider[] = []) {
     this.store = store;
-    this.contributors = contributors;
+    this.contributors = contributors.some(provider => provider.member === "memory") ? contributors : [new MemoryContribution(store), ...contributors];
     this.scopes = new ScopeIdentityKernel(store);
   }
 
@@ -178,64 +165,18 @@ export class ContextResolutionKernel {
     const health = adapter ? this.retrievalHealth(adapter, now) : null;
     const circuitOpen = health?.status === "open" && Date.parse(String(health.open_until)) > now.valueOf();
     const requestedStrategy = adapter?.status === "eligible" && !circuitOpen ? adapter.strategy : "keyword";
-    const selectedSourceIds = sourceIds.length ? new Set(sourceIds) : null;
-    const sources = new Map<string, JsonObject | null>();
-    const sourceOf = (id: string) => {
-      if (!sources.has(id)) {
-        const source = this.store.find("knowledge_source", id);
-        if (sources.size >= 10_001) return source;
-        sources.set(id, source);
-      }
-      return sources.get(id);
-    };
     for (const sourceId of sourceIds) {
       guard.track("knowledge_source", sourceId);
-      const source = sourceOf(sourceId);
+      const source = this.store.find("knowledge_source", sourceId);
       if (!source || source.status !== "active" || source.trust === "untrusted" || !sourceAllows(source, access)) throw new Error("Requested Knowledge Source is unavailable in this Context");
     }
     const historical = args.history_view === true || args.as_of !== undefined || args.known_at !== undefined;
-    const validAt = args.as_of === undefined ? now : new Date(text(args.as_of, "as_of"));
-    if (!Number.isFinite(validAt.valueOf())) throw new Error("as_of must be an ISO timestamp");
-    const readable = (item: JsonObject) => {
-      const source = sourceOf(String(item.source_id));
-      const envelope = scopeEnvelope(item.scope_envelope, item.scope as { kind: string; id: string });
-      const latest = this.store.find("memory_ledger", String(item.id), undefined, false);
-      if (!latest) return false;
-      if (!scopeAllows(scopeEnvelope(latest.scope_envelope, latest.scope as { kind: string; id: string }), access)
-        || canonicalJson(latest.scope) !== canonicalJson(item.scope) || !allowRestricted && latest.sensitivity === "restricted") return false;
-      return (args.history_view === true || item.status === "active") && source?.status === "active" && source.trust !== "untrusted" && sourceAllows(source, access) && scopeAllows(envelope, access)
-        && (item.kind !== "working" || args.include_working_notes === true || item.working_note !== true || requestedIds.includes(String(item.id)))
-        && (allowRestricted || item.sensitivity !== "restricted")
-        && (selectedSourceIds === null || selectedSourceIds.has(String(item.source_id)));
-    };
-    const records = includeMemory ? this.memoryRecords(args, readable, scopeResolution.attempted_scopes) : [];
-    const candidates = records
-      .map((item) => ({ memory: item, envelope: scopeEnvelope(item.scope_envelope, item.scope as { kind: string; id: string }), body: this.content(item), required: requestedIds.includes(String(item.id)) || requiredRefs.some(ref => contextAssetMatches(ref, contextAssetRef("memory", { memory_id: item.id, memory_version: item.version, content_digest: item.content_digest }, item.scope as JsonObject))), key: historical ? `${String(item.id)}@${String(item.version)}` : String(item.id) }));
-    // Scope is a precedence stack, not one flat corpus: a task preference may
-    // shadow the same topic in its project or user scope before temporal
-    // conflict resolution decides which current version is usable.
-    const scopeRank = new Map(scopeResolution.attempted_scopes.map((scope, index) => [canonicalJson(scope), index]));
-    const preferred = new Map<string, number>();
-    for (const candidate of candidates) {
-      const topic = typeof candidate.memory.topic === "string" && candidate.memory.topic ? candidate.memory.topic : `entry:${candidate.memory.id}`;
-      const rank = scopeRank.get(canonicalJson(candidate.memory.scope))!;
-      preferred.set(topic, Math.min(preferred.get(topic) ?? Number.MAX_SAFE_INTEGER, rank));
-    }
-    const scopedCandidates = candidates.filter((candidate) => {
-      const topic = typeof candidate.memory.topic === "string" && candidate.memory.topic ? candidate.memory.topic : `entry:${candidate.memory.id}`;
-      return args.history_view === true || scopeRank.get(canonicalJson(candidate.memory.scope))! === preferred.get(topic);
-    });
-    const temporal = temporalMemorySelect(scopedCandidates.map((item) => item.memory), validAt, args.history_view === true);
-    const available = scopedCandidates.filter((item) => temporal.selected.some((memory) => memory.id === item.memory.id && memory.version === item.memory.version));
-    for (const item of available) { guard.track("memory_ledger", String(item.memory.id)); guard.track("knowledge_source", String(item.memory.source_id)); }
-    const recheck = () => {
-      sources.clear();
-      if (available.some(item => !readable(item.memory))) throw new ContextAccessChangedError();
-      guard.assertCurrent();
-    };
+    if (args.as_of !== undefined && !Number.isFinite(Date.parse(text(args.as_of, "as_of")))) throw new Error("as_of must be an ISO timestamp");
+    const recheck = () => guard.assertCurrent();
     const port = (requestedStrategy === "vector" || requestedStrategy === "hybrid") && adapter ? new OpenAiCompatibleEmbeddingRetrievalPort((adapter.configuration ?? {}) as JsonObject, join(this.store.paths.root, "retrieval-embeddings.sqlite"), recheck) : new KeywordRetrievalPort();
     // All members enumerate only authorized candidates; a single corpus controls ranking.
     const recalled: ContextContribution[] = [];
+    let memoryPart: ContextContribution | undefined;
     const contributorFailures: JsonObject[] = [];
     for (const contributor of this.contributors) {
       if (members !== null && !members.has(contributor.member)) continue;
@@ -243,19 +184,24 @@ export class ContextResolutionKernel {
       try { contribution = await contributor.contribute({ query,
         scope_kind: scopeResolution.canonical_scope.kind as ContextRequest["scope_kind"], scope_id: scopeResolution.canonical_scope.id,
         max_items: 10_000, max_chars: 8_000_000, candidate_mode: true,
-        now: now.toISOString(), source_ids: sourceIds, scope_stack: scopeResolution.attempted_scopes, ...access, cognitive_purpose: access.purpose });
+        now: now.toISOString(), source_ids: sourceIds, scope_stack: scopeResolution.attempted_scopes, ...access, cognitive_purpose: access.purpose,
+        memory_ids: requestedIds, required_refs: requiredRefs, allow_restricted: allowRestricted, include_working_notes: args.include_working_notes === true, history_view: args.history_view === true, as_of: args.as_of as string | undefined, known_at: args.known_at as string | undefined });
         if (contribution.member !== contributor.member || !Number.isSafeInteger(contribution.omitted_count) || contribution.omitted_count < 0) throw new Error("Context contributor returned invalid member or omission count");
         if (contribution.items.length > 10_000 || contribution.items.reduce((n, item) => n + JSON.stringify(item).length, 0) > 8_000_000)
           throw new Error("Context contributor exceeded the aggregate budget");
       }
       catch (error) {
-        if (args.allow_partial !== true) throw error;
+        if (contributor.member === "memory" || args.allow_partial !== true) throw error;
         contributorFailures.push({ member: contributor.member, reason: "contribution_unavailable" });
         continue;
       }
+      for (const ref of contribution.read_refs ?? []) guard.track(ref.kind, ref.id, ref.version);
       for (const item of contribution.items) guard.contribution(contribution.member, item);
-      recalled.push(contribution);
+      if (contributor.member === "memory") memoryPart = contribution;
+      else recalled.push(contribution);
     }
+    const available = (memoryPart?.items ?? []).map(item => ({ item, body: String(item.content), required: requestedIds.includes(String(item.memory_id)) || requiredRefs.some(ref => contextAssetMatches(ref, contextAssetRef("memory", item, item.scope as JsonObject))), key: historical ? `${item.memory_id}@${item.memory_version}` : String(item.memory_id) }));
+    const memoryDiagnostics = memoryPart?.diagnostics ?? { eligible_memory_count: available.length, after_scope_precedence_count: available.length, after_temporal_policy_count: available.length, temporal_excluded: [] };
     const extra = recalled.flatMap((part, group) => part.items.map((item, index) => ({
       id: `contribution:${group}:${index}`, group, item,
       body: String(item.retrieval_text ?? item.content ?? item.trigger ?? ""),
@@ -284,23 +230,20 @@ export class ContextResolutionKernel {
     }
     recheck();
     const hitScores = new Map(retrieval.hits.map((hit) => [hit.id, hit]));
-    const feedback = this.store.list("context_feedback", 10_000, item => item.outcome === "helpful" && item.evidence_verified === true);
-    const usage = (memory: JsonObject): number => feedback.filter(item => (item.memory_refs as JsonObject[]).some(ref => ref.memory_id === memory.id && ref.content_digest === memory.content_digest)).length;
-    const weight = (memory: JsonObject): number => memoryDecayWeight({ confirmed_at: latestMemoryConfirmation(this.store, memory, now.toISOString()) ?? memory.observed_at ?? memory.updated_at, now: now.toISOString(), accesses: usage(memory), trust: sources.get(String(memory.source_id))!.trust === "verified" ? "verified" : "bounded" });
     const candidatesRanked = available.map((item) => ({ ...item, hit: hitScores.get(item.key) ?? null, score: hitScores.get(item.key)?.score ?? 0 }))
-      .filter((item) => item.required || item.score > 0).sort((left, right) => Number(right.required) - Number(left.required) || right.score - left.score || String(left.memory.id).localeCompare(String(right.memory.id)));
+      .filter((item) => item.required || item.score > 0).sort((left, right) => Number(right.required) - Number(left.required) || right.score - left.score || String(left.item.memory_id).localeCompare(String(right.item.memory_id)));
     if (!includeMemory && requestedIds.length) throw new Error("Requested Memory is excluded by Context members");
-    for (const memoryId of requestedIds) if (!candidatesRanked.some((item) => item.memory.id === memoryId)) throw new Error("Required Memory is unavailable in this Context");
+    for (const memoryId of requestedIds) if (!candidatesRanked.some((item) => item.item.memory_id === memoryId)) throw new Error("Required Memory is unavailable in this Context");
     const items: JsonObject[] = []; let usedChars = 0;
     const selectedExtras = new Set<string>(); let contributionChars = 0;
     const pool = [
-      ...candidatesRanked.map(candidate => ({ id: candidate.key, required: candidate.required, score: candidate.score, weight: weight(candidate.memory), size: candidate.body.length, memory: candidate, extra: null })),
+      ...candidatesRanked.map(candidate => ({ id: candidate.key, required: candidate.required, score: candidate.score, weight: Number(candidate.item.ranking_weight ?? 1), size: candidate.body.length, memory: candidate, extra: null })),
       ...extra.filter(candidate => hitScores.has(candidate.id) || candidate.required).map(candidate => ({ id: candidate.id, required: candidate.required, score: hitScores.get(candidate.id)?.score ?? 0, weight: 1,
         size: JSON.stringify(candidate.item).length, memory: null, extra: candidate })),
     ].sort((a, b) => Number(b.required) - Number(a.required) || b.score - a.score || b.weight - a.weight || a.id.localeCompare(b.id));
     for (const required of requiredRefs) {
       const present = pool.some(candidate => contextAssetMatches(required, candidate.memory
-        ? contextAssetRef("memory", { memory_id: candidate.memory.memory.id, memory_version: candidate.memory.memory.version, content_digest: candidate.memory.memory.content_digest }, candidate.memory.memory.scope as JsonObject)
+        ? contextAssetRef("memory", candidate.memory.item, candidate.memory.item.scope as JsonObject)
         : contextAssetRef(recalled[candidate.extra!.group]!.member, candidate.extra!.item, scopeResolution.canonical_scope as unknown as JsonObject)));
       if (!present) throw new Error("Required Context reference is unavailable");
     }
@@ -309,7 +252,7 @@ export class ContextResolutionKernel {
     for (const candidate of pool) {
       // Retrieval text may be lowercased or enriched with tags; it is not the fact's content.
       const contentKey = candidate.memory ? stableDigest(candidate.memory.body) : candidate.extra!.item.procedure_id ? stableDigest(candidate.extra!.item) : stableDigest(candidate.extra!.item.content ?? candidate.extra!.body);
-      const reference = candidate.memory ? { member: "memory", id: candidate.memory.memory.id, version: candidate.memory.memory.version, source_id: candidate.memory.memory.source_id }
+      const reference = candidate.memory ? { member: "memory", id: candidate.memory.item.memory_id, version: candidate.memory.item.memory_version, source_id: candidate.memory.item.source_id }
         : { member: recalled[candidate.extra!.group]!.member, id: candidate.extra!.item.claim_id ?? candidate.extra!.item.procedure_id, version: candidate.extra!.item.claim_version ?? candidate.extra!.item.procedure_version, source_id: candidate.extra!.item.source_id ?? null };
       if (args.deduplicate === true && !historical && !candidate.required && selectedContent.has(contentKey)) {
         duplicates++;
@@ -320,10 +263,8 @@ export class ContextResolutionKernel {
       if (candidate.memory) {
         const value = candidate.memory;
         usedChars += candidate.size;
-        items.push({ memory_id: value.memory.id, memory_version: value.memory.version, source_id: value.memory.source_id, content: value.body,
-          content_digest: value.memory.content_digest, sensitivity: value.memory.sensitivity, status: value.memory.status,
-          ranking_weight: candidate.weight, reason: value.required ? "required" : value.hit?.reason ?? "not_selected", score: candidate.score,
-          scope: value.memory.scope, scope_envelope: scopeEnvelopeReceipt(value.envelope), execution_context: !historical });
+        const { confirmed_at: _confirmedAt, ...projection } = value.item;
+        items.push({ ...projection, ranking_weight: candidate.weight, reason: value.required ? "required" : value.hit?.reason ?? "not_selected", score: candidate.score });
       } else {
         selectedExtras.add(candidate.id); contributionChars += candidate.size;
       }
@@ -339,9 +280,9 @@ export class ContextResolutionKernel {
     const selectedGuard = new ContextReadGuard(this.store, guard.refs());
     for (const alias of scopeResolution.matched_aliases) selectedGuard.track("scope_alias", String(alias.id));
     for (const sourceId of sourceIds) selectedGuard.track("knowledge_source", sourceId);
-    for (const item of items) { selectedGuard.track("memory_ledger", String(item.memory_id)); selectedGuard.track("knowledge_source", String(item.source_id)); }
+    for (const item of items) selectedGuard.contribution("memory", item);
     for (const contribution of contributions) for (const item of contribution.items) selectedGuard.contribution(contribution.member, item);
-    const identity = { read_refs: selectedGuard.refs(), history_view: args.history_view === true, as_of: args.as_of ?? null, known_at: args.known_at ?? null, execution_context: !historical, query_digest: stableDigest(query), scope: requestedScope, canonical_scope: scopeResolution.canonical_scope, attempted_scopes: scopeResolution.attempted_scopes, scope_access: { principal_present: Boolean(access.principal_id || access.principal_ids?.length), tenant_present: Boolean(access.tenant_id), purpose: access.purpose ?? null }, retrieval_adapter_id: adapter?.id ?? null, retrieval_adapter_version: adapter?.version ?? null, retrieval_mode: retrieval.execution.used, retrieval_execution: executionIdentity, allow_restricted: allowRestricted, memory_refs: items.map((item) => ({ memory_id: item.memory_id, memory_version: item.memory_version, content_digest: item.content_digest, reason: item.reason, score: item.score, confirmed_at: latestMemoryConfirmation(this.store, { id: item.memory_id, version: item.memory_version, content_digest: item.content_digest }, now.toISOString()) })), max_items: maxItems, max_chars: maxChars, used_chars: usedChars,
+    const identity = { read_refs: selectedGuard.refs(), history_view: args.history_view === true, as_of: args.as_of ?? null, known_at: args.known_at ?? null, execution_context: !historical, query_digest: stableDigest(query), scope: requestedScope, canonical_scope: scopeResolution.canonical_scope, attempted_scopes: scopeResolution.attempted_scopes, scope_access: { principal_present: Boolean(access.principal_id || access.principal_ids?.length), tenant_present: Boolean(access.tenant_id), purpose: access.purpose ?? null }, retrieval_adapter_id: adapter?.id ?? null, retrieval_adapter_version: adapter?.version ?? null, retrieval_mode: retrieval.execution.used, retrieval_execution: executionIdentity, allow_restricted: allowRestricted, memory_refs: items.map((item) => ({ memory_id: item.memory_id, memory_version: item.memory_version, content_digest: item.content_digest, reason: item.reason, score: item.score, confirmed_at: available.find(candidate => candidate.item.memory_id === item.memory_id && candidate.item.memory_version === item.memory_version)!.item.confirmed_at ?? null })), max_items: maxItems, max_chars: maxChars, used_chars: usedChars,
       // What the contributions selected is part of the receipt's identity, so replaying the same
       // resolution against changed compiled experience is a conflict rather than a silent second
       // receipt describing a different pack.
@@ -358,7 +299,7 @@ export class ContextResolutionKernel {
       recheck();
       const existing = this.store.find("context_resolution_receipt", receiptId);
       if (existing) { if (existing.identity_digest !== identityDigest) throw new Error("Context Resolution Receipt idempotency conflict"); return { receipt: existing, items, contributions, idempotent: true }; }
-      return { receipt: this.store.create("context_resolution_receipt", receiptId, { ...identity, retrieval_execution: retrieval.execution, scope_aliases: scopeResolution.matched_aliases.map((alias) => ({ id: alias.id, alias_kind: alias.alias_kind, alias_digest: alias.alias_digest })), excluded_scopes: [...scopeResolution.excluded_scopes, ...temporal.excluded], identity_digest: identityDigest, omitted_count: candidatesRanked.length - items.length, explanation: { eligible_memory_count: candidates.length, after_scope_precedence_count: scopedCandidates.length, after_temporal_policy_count: available.length, matching_memory_count: candidatesRanked.length, selected_memory_count: items.length, budget_omitted_count: candidatesRanked.length - items.length, selection: "scope_then_policy_then_shared_bm25_or_hybrid_then_required_and_budget" }, content_free: true }), items, contributions, idempotent: false };
+      return { receipt: this.store.create("context_resolution_receipt", receiptId, { ...identity, retrieval_execution: retrieval.execution, scope_aliases: scopeResolution.matched_aliases.map((alias) => ({ id: alias.id, alias_kind: alias.alias_kind, alias_digest: alias.alias_digest })), excluded_scopes: [...scopeResolution.excluded_scopes, ...(memoryDiagnostics.temporal_excluded as JsonObject[])], identity_digest: identityDigest, omitted_count: candidatesRanked.length - items.length, explanation: { eligible_memory_count: memoryDiagnostics.eligible_memory_count, after_scope_precedence_count: memoryDiagnostics.after_scope_precedence_count, after_temporal_policy_count: memoryDiagnostics.after_temporal_policy_count, matching_memory_count: candidatesRanked.length, selected_memory_count: items.length, budget_omitted_count: candidatesRanked.length - items.length, selection: "scope_then_policy_then_shared_bm25_or_hybrid_then_required_and_budget" }, content_free: true }), items, contributions, idempotent: false };
     });
   }
 
@@ -403,20 +344,6 @@ export class ContextResolutionKernel {
 
   receiptGet(args: JsonObject): JsonObject { return { receipt: this.store.get("context_resolution_receipt", text(args.receipt_id, "receipt_id"), args.version === undefined ? undefined : Number(args.version)) }; }
 
-  /** History is diagnostic. Current permissions also gate every historical version. */
-  private memoryRecords(args: JsonObject, readable: (item: JsonObject) => boolean, scopes: readonly { kind: string; id: string }[]): JsonObject[] {
-    if (args.history_view !== true && args.as_of === undefined && args.known_at === undefined) {
-      const candidates = this.store.listScoped("memory_ledger", scopes, 10_001, readable);
-      if (candidates.length > 10_000) throw new Error("Memory candidate budget exceeded; narrow scope or source selection");
-      return candidates;
-    }
-    const knownAt = args.known_at ?? args.as_of;
-    if (knownAt !== undefined && (typeof knownAt !== "string" || !Number.isFinite(Date.parse(knownAt)))) throw new Error("known_at must be an ISO timestamp");
-    const candidates = this.store.listScoped("memory_ledger", scopes, 10_001, readable, { known_at: knownAt as string | undefined, history: args.history_view === true });
-    if (candidates.length > 10_000) throw new Error("Memory history budget exceeded; narrow the ledger before historical retrieval");
-    return candidates;
-  }
-
   private members(value: unknown): Set<ContextMember> | null {
     if (value === undefined) return null;
     if (!Array.isArray(value) || !value.length) throw new Error("members must be a non-empty Context member list");
@@ -428,20 +355,6 @@ export class ContextResolutionKernel {
       selected.add(member);
     }
     return selected;
-  }
-
-  /**
-   * One entry's body, from wherever it lives.
-   *
-   * A record written before the content store existed still carries `content` inline; otherwise
-   * the body is read back through its reference, so a moved or edited file cannot be mistaken
-   * for the memory the receipt names.
-   */
-  private content(memory: JsonObject): string {
-    if (typeof memory.content === "string") return memory.content;
-    const ref = memory.content_ref;
-    if (!contentReference(ref)) throw new Error("Memory content reference is missing");
-    return this.store.contentStore.readCompatSync(ref).body;
   }
 
   private retrievalHealth(adapter: JsonObject, now: Date): JsonObject | null {

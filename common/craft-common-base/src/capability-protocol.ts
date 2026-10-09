@@ -50,6 +50,7 @@
  * experience pluggable** — which is also why only those three are candidates for their
  * own package.
  */
+import type { ContextReadRef } from "../../craft-common-store-local/src/context-access-guard.ts";
 import type { JsonObject } from "../../craft-common-store-local/src/store.ts";
 
 /** A context member a capability can contribute to, and how it behaves. */
@@ -100,6 +101,14 @@ export interface ContextRequest {
   readonly source_ids?: readonly string[];
   /** Internal authorized candidate enumeration for unified retrieval. */
   readonly candidate_mode?: boolean;
+  /** Memory-specific read controls, interpreted by the Memory contribution. */
+  readonly memory_ids?: readonly string[];
+  readonly required_refs?: readonly JsonObject[];
+  readonly allow_restricted?: boolean;
+  readonly include_working_notes?: boolean;
+  readonly history_view?: boolean;
+  readonly as_of?: string;
+  readonly known_at?: string;
 }
 
 /** A bounded contribution, with the provenance a reader needs to trust it. */
@@ -112,6 +121,10 @@ export interface ContextContribution {
   readonly receipt_id: string;
   /** How many candidates were dropped by the budget, stated rather than hidden. */
   readonly omitted_count: number;
+  /** Version fence for the authorized corpus; no bodies or authorization rules. */
+  readonly read_refs?: readonly ContextReadRef[];
+  /** Content-free selection diagnostics supplied by the owning capability. */
+  readonly diagnostics?: JsonObject;
 }
 
 /**

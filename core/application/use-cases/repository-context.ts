@@ -3,7 +3,6 @@ import type { CraftService } from "../craft-service.ts";
 import type { JsonObject } from "../../infrastructure/store.ts";
 import { stableDigest } from "../../digest.ts";
 import { repositoryRoot } from "../../../capability/craft-codebase/repository-files.ts";
-import { codeContextCandidates } from "../../../capability/craft-codebase/context-search.ts";
 import { ContextBudget, contextAssetMatches, contextAssetRef, requiredContextRef } from "../../../common/craft-common-base/src/context-assets.ts";
 import { estimateTokens } from "../../token-budget.ts";
 
@@ -29,20 +28,12 @@ export async function openContext(service: CraftService, args: JsonObject): Prom
   const taskKind = args.task_kind ?? (/review|bug|debug|code|开发|代码|修复|排查|重构|测试/iu.test(args.query) ? "code" : "general");
   if (!["code", "review", "debug", "development", "knowledge", "general"].includes(String(taskKind))) throw new Error("Unsupported Context task_kind");
   const codeFirst = ["code", "review", "debug", "development"].includes(String(taskKind)) || codeRequired.length > 0;
-  let queryOmitted = 0;
-  let candidates: JsonObject[] = [];
-  if (codebase.status === "ready") {
-    // Reuse the public kernel's activation and checkpoint checks before reading its nodes.
-    service.codebaseSymbolFind({ workspace_id: codebase.workspace_id, index_id: codebase.index_id, query: args.query, limit: 1 });
-    const index = service.store.get("codebase_index", String(codebase.index_id));
-    const found = codeContextCandidates(index, args.query, 100);
-    candidates = found.symbols as JsonObject[]; queryOmitted = Number(found.omitted_count);
-    for (const node of index.nodes as JsonObject[]) if (codeRequired.some(ref => contextAssetMatches(ref, contextAssetRef("codebase", { ...node, version: index.version, index_id: index.id, checkpoint_id: index.checkpoint_id }, scope))) && !candidates.some(candidate => candidate.id === node.id)) candidates.unshift(node);
-  }
-  const normalize = (node: JsonObject) => ({ node_id: node.id, path: node.path, name: node.name, kind: node.kind, language: node.language, selection_reason: node.selection_reason, span: node.span, source_digest: node.source_digest, version: service.store.get("codebase_index", String(codebase.index_id)).version, index_id: codebase.index_id, checkpoint_id: codebase.checkpoint_id });
+  const projection = codebase.status === "ready" ? service.codebase.contextProjection({ workspace_id: codebase.workspace_id, index_id: codebase.index_id, query: args.query, limit: 100, required_refs: codeRequired, scope }) : null;
+  const queryOmitted = Number(projection?.query_omitted_count ?? 0);
+  const candidates = (projection?.candidates ?? []) as JsonObject[];
   const context = await service.contextWorkingSets.resolve({ ...controls, query: args.query, scope_kind: scope.kind, scope_id: scope.id,
     max_chars: maxChars, max_items: maxItems, required_refs: required, allow_partial: true, deduplicate: true,
-    members: args.members ?? ["knowledge", "memory", "experience", "history", "state"], codebase_candidates: candidates.map(normalize), prefer_codebase: codeFirst });
+    members: args.members ?? ["knowledge", "memory", "experience", "history", "state"], codebase_candidates: candidates, prefer_codebase: codeFirst });
   const receipt = context.receipt as JsonObject;
   const references = context.codebase_references as JsonObject[];
   const budgetOmitted = Number(context.codebase_budget_omitted_count), budgetRebalanced = context.codebase_budget_rebalanced;
@@ -67,6 +58,7 @@ export async function openContext(service: CraftService, args: JsonObject): Prom
   if (args.max_tokens !== undefined && (!Number.isSafeInteger(args.max_tokens) || Number(args.max_tokens) < 1 || estimatedTokens > Number(args.max_tokens))) throw new Error("Context injection exceeds estimated token budget or max_tokens is invalid");
   return service.store.transaction(() => {
     assertContextReadCurrent(service.store, receipt);
+    if (projection) service.codebase.assertContextProjectionCurrent(projection, references);
     const packReceipt = service.store.find("context_pack_receipt", id) ?? service.store.create("context_pack_receipt", id, { ...packIdentity, identity_digest: stableDigest(packIdentity), content_free: true });
     return { ...context, items: injectionItems, contributions: injectionContributions, already_emitted_refs: alreadyEmitted, hook_reused: alreadyEmitted.length > 0, asset_refs: assetRefs, injection_measurement: { measurement_scope: "material_projection_excludes_protocol_envelope_and_host_history_bodies", serialized_chars: injection.length, estimated_tokens: estimatedTokens, tokenizer: "cjk_char_latin_four_char_estimate", exact: false, host_measured_tokens: null }, partial: reasons.length > 0, codebase: { ...codebase, references }, pack_receipt: packReceipt, host_execution_authority: false };
   });
