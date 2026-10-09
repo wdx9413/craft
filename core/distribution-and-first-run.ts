@@ -198,28 +198,19 @@ export function isolationCapability(platform: string): JsonObject {
   };
 }
 
-/**
- * The distribution entry point a user is expected to use.
- *
- * Before v0.12.33 the only way to obtain a desktop build was to run
- * `pnpm run pack:desktop` on a developer machine, and the release workflow
- * uploaded no assets, so the answer to "where do I download this" was "nowhere".
- */
+/** Desktop distribution belongs to the separate, currently paused presentation project. */
 export function distributionPlan(input: JsonObject): JsonObject {
   const version = text(input.version, "version");
   const repository = text(input.repository, "repository");
-  const releaseAssetsAvailable = input.release_assets_available === true;
-  const base = `https://github.com/${repository}/releases/download/v${version}`;
   return {
     version,
-    user_download_available: releaseAssetsAvailable,
-    channel: releaseAssetsAvailable ? "github_release_asset" : "developer_command_only",
-    assets: [
-      { platform: "windows", name: `craft-workbench-windows-v${version}.zip`, url: releaseAssetsAvailable ? `${base}/craft-workbench-windows-v${version}.zip` : null, requires_runner: "windows-latest" },
-      { platform: "macos", name: `craft-workbench-macos-v${version}.dmg`, url: releaseAssetsAvailable ? `${base}/craft-workbench-macos-v${version}.dmg` : null, requires_runner: "macos-latest" }
-    ],
-    remainder: releaseAssetsAvailable ? [] : ["publish a GitHub release so assets are attached", "build the DMG on a native macOS runner"],
-    plan_digest: digestJson({ version, releaseAssetsAvailable })
+    user_download_available: false,
+    channel: "separate_project",
+    presentation_status: "paused",
+    project: "craft-workbench",
+    assets: [],
+    remainder: ["Workbench/Desktop moved to the sibling craft-workbench project; desktop release automation is paused"],
+    plan_digest: digestJson({ version, repository, presentation_status: "paused" })
   };
 }
 

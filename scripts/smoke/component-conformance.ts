@@ -1,6 +1,7 @@
+import { experienceGraphTemplate } from "../../capability/craft-experience/procedure-templates.ts";
 /** Isolated stdio workflow contract for any launcher consuming the shared component bundle. */
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 import { mkdtemp, writeFile, rm, mkdir, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -10,7 +11,7 @@ import type { JsonObject } from "../../core/infrastructure/store.ts";
 
 const bundle = resolve(process.argv[2] ?? "dist/plugin/craft-mcp.cjs");
 const reports: JsonObject[] = [];
-for (const product of ["knowledge", "memory", "experience", "codebase"]) {
+for (const product of ["context", "knowledge", "memory", "experience", "codebase"]) {
   const root = await mkdtemp(join(tmpdir(), `craft-wire-${product}-`));
   const child = spawn(process.execPath, [bundle, "--product", product], { env: { ...process.env, CRAFT_DATA_DIR: join(root, "data") }, stdio: ["pipe", "pipe", "pipe"] });
   let sequence = 0, output = "", calls = 0; const pending = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void }>();
@@ -52,13 +53,29 @@ for (const product of ["knowledge", "memory", "experience", "codebase"]) {
     };
     if (product === "codebase") await call("craft_info");
     const scope = { scope_kind: "project", scope_id: "fixture" };
-    if (product !== "codebase") {
-      await call("craft_component_diagnose", { component: product, observed_tool_names: tools.map(tool => tool.name) });
+    if (product !== "codebase" && product !== "context") {
+      if (tools.some(tool => tool.name === "craft_component_diagnose")) await call("craft_component_diagnose", { component: product, observed_tool_names: tools.map(tool => tool.name) });
+      else await call("craft_component_readiness_get", { component: product });
       const context = await call("craft_context_resolution_resolve", { ...scope, query: "verification" });
       assert.deepEqual(context.receipt.members, [product]);
-      await call("craft_context_resolution_feedback", { receipt_id: context.receipt.id, outcome: "irrelevant" });
+      if (tools.some(tool => tool.name === "craft_context_resolution_feedback")) await call("craft_context_resolution_feedback", { receipt_id: context.receipt.id, outcome: "irrelevant" });
     }
-    if (product === "knowledge") {
+    if (product === "context") {
+      const repo = join(root, "repo"); await mkdir(repo); execFileSync("git", ["-C", repo, "init", "-q"]);
+      await writeFile(join(repo, "verify.ts"), "export function verify() {}\n");
+      await call("craft_knowledge_bootstrap_install");
+      const first = await call("craft_context_open", { project_root: repo, query: "verify code", task_kind: "code", session_id: "smoke", turn_id: "turn" });
+      assert.equal(first.codebase.status, "ready"); assert(first.working_set.id); assert(first.codebase.references.length);
+      const project = first.receipt.scope;
+      await call("craft_memory_capture_user_statement", { content: "verify code before delivery", explicit_consent: true, auto_accept: true, scope_kind: project.kind, scope_id: project.id });
+      const pack = await call("craft_context_open", { project_root: repo, query: "verify code", task_kind: "code", session_id: "smoke", turn_id: "turn" });
+      assert.equal(pack.items.length, 1); assert(pack.asset_refs.some((ref: any) => ref.member === "codebase"));
+      const replay = await call("craft_context_open", { project_root: repo, query: "verify code", task_kind: "code", session_id: "smoke", turn_id: "turn" }); assert.equal(replay.pack_receipt.id, pack.pack_receipt.id);
+      const discovered = await call("craft_context_tools_discover", { intent: "memory" }); assert(discovered.tools.some((tool: any) => tool.name === "craft_memory_governance"));
+      await call("craft_memory_governance", { action: "tasks", scope_kind: project.kind, scope_id: project.id });
+      await call("craft_memory_governance", { action: "topics", content: "verify code", scope_kind: project.kind, scope_id: project.id });
+      await call("craft_context_resolution_feedback", { receipt_id: pack.pack_receipt.id, outcome: "helpful", usage_stage: "used", asset_refs: pack.asset_refs });
+    } else if (product === "knowledge") {
       await call("craft_knowledge_bootstrap_install");
       const evidence = await call("craft_evidence_record", { source_type: "observation", confidence: "bounded", claim: "Fixture verification observed" });
       const saved = await call("craft_knowledge_claim_save", { kind: "fact", content: "Run verification", scope: "project:fixture", source_id: "builtin.evidence-wiki", evidence_ids: [evidence.id] });
@@ -114,7 +131,7 @@ for (const product of ["knowledge", "memory", "experience", "codebase"]) {
       assert((await call("craft_procedure_list", { scope: "project:fixture" })).procedures.some((item: any) => item.id === composed.procedure.id));
       const current = (await call("craft_procedure_get", { procedure_id: composed.procedure.id })).procedure;
       await asset(product, current, scope);
-      const configuration = await call("craft_procedure_configuration_save", { procedure_id: "internet-product-engineering", scope: "project:fixture", title: "互联网产研", procedure_kind: "graph", definition: JSON.parse(await readFile(new URL("../../skills/craft-experience/references/internet-product-engineering.json", import.meta.url), "utf8")) });
+      const configuration = await call("craft_procedure_configuration_save", { procedure_id: "internet-product-engineering", scope: "project:fixture", title: "互联网产研", procedure_kind: "graph", definition: experienceGraphTemplate("internet-product-engineering") });
       assert.equal(configuration.procedure.routeable, false);
       const planned = await call("craft_procedure_plan", { procedure_id: current.id, procedure_version: current.version, scope: "project:fixture", entry_id: "review", exit_id: "reviewed", input_refs: { diff: "fixture:diff" }, allowed_effects: ["read_only"] });
       assert.equal(planned.execution_authorized, false); assert.equal(planned.plan.acceptance_status, "not_evaluated"); assert.equal(planned.expanded_step_count, 1);

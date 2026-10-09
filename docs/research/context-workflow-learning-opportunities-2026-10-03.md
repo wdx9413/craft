@@ -37,7 +37,7 @@ Craft 已有知识/记忆管理、受限上下文、Experience 候选与晋级�
 
 | 对照点 | 当前源码证据 | 判断 |
 | --- | --- | --- |
-| 人工管理上下文 | [资源页](../../workbench/resource-pages.js)提供记忆新增、编辑、停用；[主界面](../../workbench/app.js)的 `viewKnowledge` 展示 Claim、页面、知识包，支持编辑。 | 已有管理面，不能说 Craft 只服务 Agent 或没有 UI。 |
+| 人工管理上下文 | [资源页（已迁移）](../technical/modules/presentation-separation.md)提供记忆新增、编辑、停用；[主界面（已迁移）](../technical/modules/presentation-separation.md)的 `viewKnowledge` 展示 Claim、页面、知识包，支持编辑。 | 已有管理面，不能说 Craft 只服务 Agent 或没有 UI。 |
 | 人工设计工作流 | `openWorkflowEditor` 要求填写输入与步骤 JSON；[输入适配](../../core/application/use-cases/workbench-workflow-input.ts)转为现有 DAG 草稿。 | 最接近 loop-me 的现有入口，但仍偏开发者表单，缺少此入口内的访谈式规格整理。 |
 | 经验形成 | [WorkflowEvolutionKernel](../../capability/craft-experience/workflow-evolution.ts)校验同 Scenario Signature、至少两条独立来源、最多两个设计轴。 | 已有证据驱动链，用户口述不能冒充两次实际运行。 |
 | 验证后才能复用 | [ProcedureStore](../../capability/craft-experience/procedure-projection.ts)保存 candidate，按 shadow、held_out、signoff、canary 晋级；[ExperienceContribution](../../capability/craft-experience/contribution.ts)仅注入匹配 scope 的 routeable Procedure。 | 应保持既有门禁；增加前端入口不应降低可信度要求。 |
@@ -47,7 +47,7 @@ Craft 已有知识/记忆管理、受限上下文、Experience 候选与晋级�
 | 下一次是否拿到经验 | [ContextResolutionKernel](../../core/context-resolution.ts)记录范围、条目引用、预算和 contribution；现有代码已统一候选排序。 | 可以复用回执做用户解释；不要照抄旧报告，把已补齐的统一检索再列为缺口。 |
 | 是否改善结果 | Invocation 的 `evaluate` 比较 3–100 对终态调用，固定 scope、Entry/Exit、输入、初始快照、Host、模型和预算；结果保留 `host_attested`，不自动晋级。 | 评测接口已存在；本次没有运行真实配对实验，不能宣称已证明学习收益。 |
 
-相关现有测试已阅读：[资源页](../../tests/workbench-resource-pages.test.ts)、[自动化](../../tests/procedure-automation.test.ts)、[Procedure 调用](../../tests/procedure-invocation.test.ts)。它们是机制测试参考，本次研究未重新执行产品测试。
+相关现有测试已阅读：[资源页（已迁移）](../technical/modules/presentation-separation.md)、[自动化](../../tests/procedure-automation.test.ts)、[Procedure 调用](../../tests/procedure-invocation.test.ts)。它们是机制测试参考，本次研究未重新执行产品测试。
 
 ## 4. 最值得做的三个改进
 

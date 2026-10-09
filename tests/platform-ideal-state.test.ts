@@ -29,7 +29,7 @@ function boundTrial(f: Awaited<ReturnType<typeof fixture>>, args: JsonObject): J
 }
 function recordTrial(f: Awaited<ReturnType<typeof fixture>>, args: JsonObject): JsonObject { return f.qualification.record(boundTrial(f, args)); }
 
-test("v0.12.23 resolves uncertainty by layered policy without granting execution authority", async () => {
+test("resolves uncertainty by layered policy without granting execution authority", async () => {
   const f = await fixture(); const core = f.uncertainty.save({ policy_id: "core", scope: "core", mode: "bounded_autonomous", on_uncertain: "collecting", fallback: "unchanged", escalations: ["deterministic_check", "independent_evaluator"], max_attempts: 2 }).policy as JsonObject;
   const global = f.uncertainty.save({ policy_id: "global", scope: "global", mode: "autonomous", on_uncertain: "collecting", fallback: "abstained", escalations: ["additional_trial"], confidence_threshold: 0.8, consistency_threshold: 0.9, max_attempts: 1 }).policy as JsonObject;
   assert.equal((f.uncertainty.save({ policy_id: "core", scope: "core", mode: "bounded_autonomous", on_uncertain: "collecting", fallback: "unchanged", escalations: ["deterministic_check", "independent_evaluator"], max_attempts: 2 }).policy as JsonObject).id, core.id);
@@ -46,7 +46,7 @@ test("v0.12.23 resolves uncertainty by layered policy without granting execution
   assert.throws(() => f.uncertainty.save({ scope: "wrong" }), /scope/); assert.throws(() => f.uncertainty.save({ scope: "global", mode: "bad" }), /mode/); assert.throws(() => f.uncertainty.save({ scope: "global", mode: "autonomous", on_uncertain: "human_required", human_fallback: false }), /disabled/); assert.throws(() => f.uncertainty.resolve({ policy_ids: [global.id], subject_ref: "x" }), /Core Safety Floor/);
 });
 
-test("v0.12.23 qualifies two content-free five-pair Reference Pilots", async () => {
+test("qualifies two content-free five-pair Reference Pilots", async () => {
   const f = await fixture(); const dev = f.qualification.pilotSave({ pilot_id: "dev", kind: "development", name: "Codex development", case_ref: "fixture:repo", primary_metric: "human_intervention_minutes", direction: "lower_is_better", effect_threshold: 1, guardrail_names: ["quality", "safety"], sanitized: true }).pilot as JsonObject;
   const file = f.qualification.pilotSave({ pilot_id: "file", kind: "file_delivery", name: "File package", case_ref: "fixture:file", primary_metric: "ready_for_next_stage", direction: "higher_is_better", effect_threshold: 0.1, sanitized: true }).pilot as JsonObject;
   assert.equal(f.qualification.pilotSave({ pilot_id: "dev", kind: "development", name: "Codex development", case_ref: "fixture:repo", primary_metric: "human_intervention_minutes", direction: "lower_is_better", effect_threshold: 1, guardrail_names: ["safety", "quality"], sanitized: true }).idempotent, true);
@@ -60,7 +60,7 @@ test("v0.12.23 qualifies two content-free five-pair Reference Pilots", async () 
   assert.throws(() => f.qualification.pilotSave({ kind: "video", name: "x", case_ref: "x", primary_metric: "x", sanitized: true }), /kind/); assert.throws(() => f.qualification.pilotSave({ kind: "development", name: "x", case_ref: "x", primary_metric: "x", sanitized: false }), /sanitized/); assert.throws(() => f.qualification.pilotSave({ kind: "development", name: "x", case_ref: "x", primary_metric: "x", direction: "sideways", sanitized: true }), /direction/);
 });
 
-test("v0.12.23 rejects non-comparable, unsafe and unsupported qualification evidence", async () => {
+test("rejects non-comparable, unsafe and unsupported qualification evidence", async () => {
   const f = await fixture(); const pilot = f.qualification.pilotSave({ pilot_id: "p", kind: "development", name: "P", case_ref: "case", primary_metric: "minutes", direction: "lower_is_better", effect_threshold: 1, sanitized: true }).pilot as JsonObject;
   const plans = ["drift", "regress"].map((id) => f.qualification.plan({ qualification_id: id, pilot_id: pilot.id, baseline_ref: "b", candidate_ref: "c", environment_fingerprint: "env", budget_fingerprint: "budget" })); const filePilot = f.qualification.pilotSave({ pilot_id: "file", kind: "file_delivery", name: "File", case_ref: "case:file", primary_metric: "ready", sanitized: true }).pilot as JsonObject; const pending = f.qualification.plan({ qualification_id: "pending", pilot_id: filePilot.id, baseline_ref: "b", candidate_ref: "c", environment_fingerprint: "env", budget_fingerprint: "budget" });
   for (const slot of plans[0]!.slots as JsonObject[]) recordTrial(f, { slot_id: slot.id, mechanism_passed: true, primary_value: 1, guardrails: {}, evidence_ids: ["confirmed"], environment_fingerprint: slot.arm === "candidate" ? "drift" : "env", budget_fingerprint: "budget" }); assert.equal(f.qualification.evaluate({ qualification_id: "drift" }).conclusion, "inconclusive");
@@ -131,7 +131,7 @@ test("Qualification detects Pilot drift and incomplete or changed stored Trial p
   assert.equal(f.qualification.evaluate({ qualification_id: "evaluation-pilot-drift" }).conclusion, "inconclusive");
 });
 
-test("v0.12.23 validates uncertainty policy boundaries and idempotency", async () => {
+test("validates uncertainty policy boundaries and idempotency", async () => {
   const f = await fixture();
   assert.throws(() => f.uncertainty.save({ scope: " " }), /must not be empty/);
   assert.throws(() => f.uncertainty.save({ scope: "global", on_uncertain: "invent" }), /action/);
@@ -161,7 +161,7 @@ test("v0.12.23 validates uncertainty policy boundaries and idempotency", async (
   assert.throws(() => f.uncertainty.adjudicate({ adjudication_id: "fixed-a", resolution_id: eligible.id, decision: "rejected", actor: "x", reason: "x", scope: "x", valid_until: "x", evidence_ids: ["bounded"] }), /idempotency/);
 });
 
-test("v0.12.23 validates qualification inputs and both metric directions", async () => {
+test("validates qualification inputs and both metric directions", async () => {
   const f = await fixture();
   assert.throws(() => f.qualification.pilotSave({ kind: "development", name: " ", case_ref: "x", primary_metric: "x", sanitized: true }), /must not be empty/);
   assert.throws(() => f.qualification.pilotSave({ kind: "development", name: "x", case_ref: "x", primary_metric: "x", effect_threshold: -1, sanitized: true }), /non-negative/);
@@ -197,7 +197,7 @@ test("v0.12.23 validates qualification inputs and both metric directions", async
   assert.equal(f.qualification.platformAssess({ development_qualification_id: "higher-q", file_qualification_id: "file-rejected" }).status, "rejected");
 });
 
-test("v0.12.23 keeps defensive persisted-state guards reachable", async () => {
+test("keeps defensive persisted-state guards reachable", async () => {
   const f = await fixture();
   const core = f.uncertainty.save({ policy_id: "def-core", scope: "core", on_uncertain: "collecting", fallback: "unchanged", escalations: ["deterministic_check"] }).policy as JsonObject;
   const global = f.uncertainty.save({ policy_id: "def-global", scope: "global" }).policy as JsonObject;
@@ -212,7 +212,7 @@ test("v0.12.23 keeps defensive persisted-state guards reachable", async () => {
   assert.match(String(adjudication.id), /^adjudication_/);
 });
 
-test("v0.12.23 exposes the complete platform qualification protocol through CraftService", async () => {
+test("exposes the complete platform qualification protocol through CraftService", async () => {
   const f = await fixture(); const service = new CraftService(f.store);
   const core = service.uncertaintyPolicySave({ policy_id: "svc-core", scope: "core", on_uncertain: "human_required", fallback: "unchanged", human_fallback: true }).policy as JsonObject;
   const resolution = service.uncertaintyResolve({ policy_ids: [core.id], subject_ref: "svc", evidence_confidences: ["unverified"] }).resolution as JsonObject;

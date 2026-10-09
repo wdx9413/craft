@@ -100,7 +100,9 @@ for (const product of externalMarketplaceProducts()) {
   const entries: Entry[] = [];
   for (const file of await collect(target)) entries.push({ name: file, data: await readFile(join(target, file)) });
   await writeFile(join(outputDir, `${product.name}-dsh-v${manifest.version}.zip`), archive(entries));
-  await cp(target, join(projectRoot, "plugins", product.name, "dsh"), { recursive: true });
+  const pluginAdapter = join(projectRoot, "plugins", product.name, "dsh");
+  await rm(pluginAdapter, { recursive: true, force: true });
+  await cp(target, pluginAdapter, { recursive: true });
 }
 
 for (const adapter of adapters) {

@@ -9,7 +9,7 @@ import { CraftService } from "../core/service.ts";
 import { McpServer } from "../core/mcp.ts";
 import { A2ATransportKernel } from "../core/a2a-transport.ts";
 
-test("v0.12.12 security, registry, A2A and organization boundaries are fail closed", async () => {
+test("security, registry, A2A and organization boundaries are fail closed", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-boundaries-")); const store = await new CraftStore(craftPaths(root)).open();
   try {
     const service = new CraftService(store);

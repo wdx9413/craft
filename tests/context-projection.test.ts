@@ -35,7 +35,7 @@ async function close(f: { store: CraftStore; root: string }) {
   await rm(f.root, { recursive: true, force: true });
 }
 
-test("v0.12.43 restores an omitted segment across calls, without re-supplying it", async () => {
+test("restores an omitted segment across calls, without re-supplying it", async () => {
   const f = await fixture();
   try {
     const projected = f.kernel.project({ max_tokens: 120, segments: SEGMENTS, session_id: "session-1" });
@@ -64,7 +64,7 @@ test("v0.12.43 restores an omitted segment across calls, without re-supplying it
   } finally { await close(f); }
 });
 
-test("v0.12.43 distinguishes the stored path from the argument path instead of pretending", async () => {
+test("distinguishes the stored path from the argument path instead of pretending", async () => {
   const f = await fixture();
   try {
     // No session id: the stateless path the tool has always accepted. It still works, and it says
@@ -85,7 +85,7 @@ test("v0.12.43 distinguishes the stored path from the argument path instead of p
   } finally { await close(f); }
 });
 
-test("v0.12.43 replaces a session's segments rather than accumulating them", async () => {
+test("replaces a session's segments rather than accumulating them", async () => {
   const f = await fixture();
   try {
     f.kernel.project({ max_tokens: 1_000, segments: SEGMENTS, session_id: "s" });
@@ -101,7 +101,7 @@ test("v0.12.43 replaces a session's segments rather than accumulating them", asy
   } finally { await close(f); }
 });
 
-test("v0.12.43 reports a restore that cannot fit rather than silently dropping it", async () => {
+test("reports a restore that cannot fit rather than silently dropping it", async () => {
   const f = await fixture();
   try {
     f.kernel.project({ max_tokens: 120, segments: SEGMENTS, session_id: "tight" });
@@ -122,7 +122,7 @@ test("v0.12.43 reports a restore that cannot fit rather than silently dropping i
   } finally { await close(f); }
 });
 
-test("v0.12.43 reaches both paths through the MCP tools a Host actually calls", async () => {
+test("reaches both paths through the MCP tools a Host actually calls", async () => {
   const f = await fixture();
   try {
     const { CraftService } = await import("../core/service.ts");
@@ -146,7 +146,7 @@ test("v0.12.43 reaches both paths through the MCP tools a Host actually calls", 
   } finally { await close(f); }
 });
 
-test("v0.12.43 makes one policy serve all three callers that used to have their own", () => {
+test("makes one policy serve all three callers that used to have their own", () => {
   // Three inputs, one implementation. The transcript's contiguous reservation, the segment bag's
   // weight competition, and protection by subtraction are now three *inputs* rather than three
   // functions, so a divergence between them is a configuration rather than a rewrite.

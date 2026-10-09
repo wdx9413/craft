@@ -18,6 +18,7 @@
 import type { ContextRequest, ContextContribution, ContextContributionProvider } from "../../common/craft-common-base/src/capability-protocol.ts";
 import type { CraftStore, JsonObject } from "../../common/craft-common-store-local/src/store.ts";
 import { scopeAllows, scopeEnvelope, type ScopeAccess } from "../../common/craft-common-base/src/scope-policy.ts";
+import { activeProcedure } from "./procedure-release.ts";
 import { retrievalTerms } from "../../common/craft-common-base/src/retrieval-terms.ts";
 
 /** Tokenize a query the same way `ContextResolutionKernel.resolve` does, so matching agrees. */
@@ -47,9 +48,9 @@ export class ExperienceContribution implements ContextContributionProvider {
     const access: ScopeAccess = { principal_id: request.principal_id, principal_ids: request.principal_ids, tenant_id: request.tenant_id, purpose: request.cognitive_purpose };
     // Filter the complete collection before applying the candidate cap. Store.list
     // still scans all records; unrelated projects must not consume this scope's budget.
-    const eligible = this.store.list("experience_procedure", 10_001, procedure =>
-      procedure.lifecycle === "routeable" && procedure.routeable === true && scopes.some(scope => procedure.scope === `${scope.kind}:${scope.id}`)
-      && scopeAllows(scopeEnvelope(procedure.scope_envelope, recordScope(procedure.scope)), access));
+    const eligible = this.store.listScoped("experience_procedure", scopes, 10_001, procedure =>
+      scopes.some(scope => procedure.scope === `${scope.kind}:${scope.id}`)
+      && scopeAllows(scopeEnvelope(procedure.scope_envelope, recordScope(procedure.scope)), access)).map(latest => activeProcedure(this.store, String(latest.id))).filter((item): item is JsonObject => item !== null);
     if (eligible.length > 10_000) throw new Error("Experience candidate budget exceeded; narrow the scope stack");
     const procedures = eligible
       .map((procedure) => ({
@@ -88,6 +89,8 @@ export class ExperienceContribution implements ContextContributionProvider {
   private describe(procedure: JsonObject): JsonObject {
     return {
       kind: "experience_procedure",
+      scope: recordScope(procedure.scope),
+      content_version: procedure.content_version ?? (procedure.definition_ref as JsonObject | undefined)?.procedure_version ?? procedure.version,
       procedure_id: String(procedure.id),
       procedure_version: Number(procedure.version),
       procedure_kind: String(procedure.procedure_kind),

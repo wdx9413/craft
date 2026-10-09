@@ -1,3 +1,4 @@
+import { discoverContextTools } from "../../mcp/context-tools.ts";
 import type { CraftService } from "../craft-service.ts";
 import type { JsonObject } from "../../infrastructure/store.ts";
 import type { ComponentName } from "../../component-readiness.ts";
@@ -20,6 +21,7 @@ export function createActionHandlers(service: CraftService, mountedComponent?: C
       ...createEvaluationHandlers(service),
       ...createWorkspaceHandlers(service),
       craft_info: () => service.info(),
+      craft_context_tools_discover: (a) => discoverContextTools(a),
       craft_context_open: (a) => service.contextOpen(a),
       craft_codebase_repository_ensure: (a) => service.codebaseRepositoryEnsure(a),
       craft_component_readiness_get: (a) => service.componentReadinessGet(a, mountedComponent),
@@ -121,6 +123,8 @@ export function createActionHandlers(service: CraftService, mountedComponent?: C
       craft_experience_observe: (a) => service.workflowEvolutionObserve(a), craft_experience_patterns_list: (a) => service.workflowEvolutionObservations(a), craft_experience_procedure_draft: (a) => service.workflowEvolutionPropose(a), craft_experience_procedure_submit: (a) => service.workflowEvolutionProposalSubmit(a), craft_experience_procedure_get: (a) => service.workflowEvolutionProposalGet(a),
       craft_experience_procedure_projection_draft: (a) => service.experienceProcedureDraft(a), craft_experience_procedure_gate: (a) => service.experienceProcedureGate(a), craft_experience_procedure_projection_get: (a) => service.experienceProcedureGet(a), craft_experience_procedure_projection_list: (a) => service.experienceProcedureList(a), craft_experience_procedure_skill_export: (a) => service.experienceProcedureSkillExport(a),
       craft_procedure_configuration_save: (a) => service.procedureConfigurationSave(a),
+      craft_experience_graph_inspect: (a) => service.experienceGraphInspect(a),
+      craft_experience_graph_edit: (a) => service.experienceGraphEdit(a),
       craft_knowledge_asset_inspect: (a) => service.componentAssetInspect("knowledge", a),
       craft_knowledge_asset_restore: (a) => service.componentAssetRestore("knowledge", a),
       craft_memory_asset_inspect: (a) => service.componentAssetInspect("memory", a),
@@ -408,6 +412,12 @@ export function createActionHandlers(service: CraftService, mountedComponent?: C
       craft_memory_ledger_remember: service.memoryLedgerRemember.bind(service), craft_memory_ledger_get: service.memoryLedgerGet.bind(service), craft_memory_ledger_list: service.memoryLedgerList.bind(service), craft_memory_ledger_transition: service.memoryLedgerTransition.bind(service), craft_memory_ledger_compat_bind: service.memoryLedgerCompatBind.bind(service),
       craft_memory_candidate_propose: service.memoryCandidatePropose.bind(service), craft_memory_candidate_review: service.memoryCandidateReview.bind(service), craft_memory_ledger_remember_approved: service.memoryLedgerRememberApproved.bind(service), craft_memory_capture_user_statement: service.memoryCaptureUserStatement.bind(service),
       craft_memory_policy_save: service.memoryPolicySave.bind(service), craft_memory_policy_get: service.memoryPolicyGet.bind(service),
+      craft_memory_governance: (a) => {
+        if (a.action === "topics") return service.memoryGovernance.topicSuggestions(a);
+        if (a.action === "confirm") return service.memoryGovernance.confirm(a);
+        if (a.action === "tasks") return service.memoryGovernance.governanceTasks(a);
+        throw new Error("Unsupported Memory governance action");
+      },
       craft_memory_conflict_list: service.memoryConflictList.bind(service), craft_memory_conflict_resolve: service.memoryConflictResolve.bind(service), craft_memory_expiry_sweep: service.memoryExpirySweep.bind(service), craft_memory_session_finalize: service.memorySessionFinalize.bind(service),
       craft_context_resolution_feedback: (a) => service.contextResolutionFeedback(componentArgs(a)),
       craft_context_resolution_resolve: (a) => service.contextResolutionResolve(componentArgs(a)), craft_context_resolution_get: service.contextResolutionGet.bind(service),

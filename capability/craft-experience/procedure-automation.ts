@@ -8,6 +8,7 @@
  * one or silently turns a learned procedure into an operating-system service.
  */
 import { randomUUID } from "node:crypto";
+import { activeProcedure } from "./procedure-release.ts";
 import type { CraftStore, JsonObject } from "../../common/craft-common-store-local/src/store.ts";
 import { payload, stableDigest } from "../../common/craft-common-base/src/digest.ts";
 import { normalizeSteps, resolveInputs, substitute } from "../../common/craft-common-base/src/workflow.ts";
@@ -205,7 +206,7 @@ export class ProcedureAutomationKernel {
       observation_id: observation.id, observation_version: observation.version, acceptance_evidence_ids: evidenceIds.sort(), raw_output_stored: false,
     });
     const outcome = this.store.create("procedure_automation_outcome", `procedure_automation_outcome_${run.id}`, {
-      run_id: run.id, receipt_id: receipt.id, status: passed ? "accepted" : "failed", acceptance_ref: this.store.get("experience_procedure", String(job.procedure_id)).acceptance_ref,
+      run_id: run.id, receipt_id: receipt.id, status: passed ? "accepted" : "failed", acceptance_ref: this.routeableWorkflow(String(job.procedure_id), Number(job.procedure_version)).acceptance_ref,
       acceptance_source: "independent_host_observation", observed_at: timestamp(args.observed_at, "observed_at"),
     });
     const completed = this.store.save("procedure_automation_run", String(run.id), { ...payload(run), status: passed ? "completed" : "failed", receipt_id: receipt.id, outcome_id: outcome.id, completed_at: timestamp(args.observed_at, "observed_at") });
@@ -249,7 +250,8 @@ export class ProcedureAutomationKernel {
   }
 
   private routeableWorkflow(procedureId: unknown, version?: number): JsonObject {
-    const procedure = this.store.get("experience_procedure", text(procedureId, "procedure_id"), version);
+    const procedure = activeProcedure(this.store, text(procedureId, "procedure_id"));
+    if (!procedure || version !== undefined && procedure.version !== version) throw new Error("Procedure release unavailable or version drifted");
     if (procedure.lifecycle !== "routeable" || procedure.routeable !== true) throw new Error("Only routeable Procedure can be automated");
     if (procedure.procedure_kind !== "workflow") throw new Error("Procedure Automation supports only workflow Procedures; Graph and Prompt require a Host Adapter");
     return procedure;

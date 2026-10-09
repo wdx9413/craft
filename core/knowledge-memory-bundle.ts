@@ -15,6 +15,7 @@ import { contentReference } from "./infrastructure/content-store.ts";
 import { canonicalJson, payload, stableDigest } from "./digest.ts";
 import { optionalScope, text } from "./validation.ts";
 import { ProcedureDefinitionStore, procedureDefinitionRef, type ProcedureDefinition } from "../capability/craft-experience/procedure-definition.ts";
+import { syncGraphVersionManifest } from "../capability/craft-experience/graph-version-manifest.ts";
 
 const FORMAT = "craft.knowledge-memory-bundle";
 const SCHEMA = 3;
@@ -202,9 +203,10 @@ export class KnowledgeMemoryBundleKernel {
     const entries = bundle.records.map((entry) => this.entryFrom(entry));
     const actions = new Map((plan.decisions as JsonObject[]).map((item) => [`${String(item.kind)}:${String(item.id)}`, String(item.action)]));
     const imported: string[] = [];
+    const manifests: JsonObject[] = [];
     for (const entry of entries.sort((left, right) => this.rank(left.kind) - this.rank(right.kind) || left.kind.localeCompare(right.kind) || left.id.localeCompare(right.id))) {
       if (actions.get(`${entry.kind}:${entry.id}`) !== "add") continue;
-      this.importEntry(entry);
+      const manifest = this.importEntry(entry); if (manifest) manifests.push({ graph_id: entry.id, ...manifest });
       imported.push(`${entry.kind}:${entry.id}`);
     }
     const conflicts = (plan.decisions as JsonObject[]).filter((item) => item.action === "conflict");
@@ -216,7 +218,7 @@ export class KnowledgeMemoryBundleKernel {
       duplicates: Number(plan.duplicates), conflicts: Number(plan.conflicts), conflict_free: Number(plan.conflicts) === 0,
       imported_at: new Date().toISOString(), merge_receipt: { device_id: bundle.device_id ?? null, export_id: bundle.export_id ?? null, cursor: bundle.cursor ?? null },
     });
-    return { import: receipt, plan, idempotent: false };
+    return { import: receipt, plan, graph_manifests: manifests, idempotent: false };
   }
 
   /**
@@ -266,7 +268,7 @@ export class KnowledgeMemoryBundleKernel {
     return { ...base, digest: entryDigest(base) };
   }
 
-  private importEntry(entry: BundleEntry): void {
+  private importEntry(entry: BundleEntry): JsonObject | undefined {
     const next = { ...entry.payload };
     const contentKind = CONTENT_KINDS[entry.kind];
     if (contentKind) {
@@ -303,6 +305,7 @@ export class KnowledgeMemoryBundleKernel {
       }
     }
     this.store.save(entry.kind, entry.id, next, entry.version);
+    if (entry.kind === "experience_procedure" && ["workflow", "graph"].includes(String(next.procedure_kind))) return syncGraphVersionManifest(this.store, entry.id);
   }
 
   private bundle(value: unknown): JsonObject & { format: string; schema_version: number; scope: JsonObject; records: unknown[]; digest: string; device_id?: string; export_id?: string; cursor?: string | null } {

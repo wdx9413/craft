@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { experienceGraphTemplate } from "../capability/craft-experience/procedure-templates.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { fixture, scope, spec } from "./helpers/procedure-invocation-fixture.ts";
@@ -9,7 +9,7 @@ import { ProcedureStore } from "../capability/craft-experience/procedure-project
 import { ProcedureDefinitionStore } from "../capability/craft-experience/procedure-definition.ts";
 import { validateGraphControl, selectGraph } from "../capability/craft-experience/procedure-graph.ts";
 
-export function graph(): JsonObject { return JSON.parse(readFileSync(new URL("../skills/craft-experience/references/internet-product-engineering.json", import.meta.url), "utf8")); }
+export function graph(): JsonObject { return experienceGraphTemplate("internet-product-engineering"); }
 
 test("failed configuration publication is retryable after a changed definition and preserves referenced versions", async () => {
   const f = await fixture();

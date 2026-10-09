@@ -15,7 +15,7 @@ function policy(overrides: Partial<ConstructorParameters<typeof RemoteMcpAccessP
   });
 }
 
-test("v0.12.29 remote MCP access is HTTPS-only, audience-bound, scope-bound and token-free in receipts", async () => {
+test("remote MCP access is HTTPS-only, audience-bound, scope-bound and token-free in receipts", async () => {
   const access = policy();
   const receipt = await access.authorize({ authorization: "Bearer opaque-token", secure_transport: true });
   assert.equal(receipt.status, "accepted");
@@ -33,7 +33,7 @@ test("v0.12.29 remote MCP access is HTTPS-only, audience-bound, scope-bound and 
   await assert.rejects(() => policy({ verifyAccessToken: async () => ({ subject: "user", issuer: "https://issuer.example.test", audience: "https://craft.example.test/mcp", scopes: ["craft.invoke"], expires_at: "2029-12-31T23:59:00.000Z" }) }).authorize({ authorization: "Bearer opaque-token", secure_transport: true }), /expired/);
 });
 
-test("v0.12.29 remote MCP access limits principals and HTTP denies before invoking MCP", async () => {
+test("remote MCP access limits principals and HTTP denies before invoking MCP", async () => {
   const limited = policy({ requestsPerMinute: 1 });
   await limited.authorize({ authorization: "Bearer opaque-token", secure_transport: true });
   await assert.rejects(() => limited.authorize({ authorization: "Bearer opaque-token", secure_transport: true }), (error: unknown) => error instanceof RemoteMcpAccessError && error.statusCode === 429);
@@ -47,7 +47,7 @@ test("v0.12.29 remote MCP access limits principals and HTTP denies before invoki
   assert.equal(denied.statusCode, 401); assert.equal(calls.length, 1);
 });
 
-test("v0.12.29 remote MCP access validates configuration, principal shape and rolling rate windows", async () => {
+test("remote MCP access validates configuration, principal shape and rolling rate windows", async () => {
   assert.throws(() => new RemoteMcpAccessPolicy({ issuer: " ", audience: "a" }), /issuer/);
   assert.throws(() => new RemoteMcpAccessPolicy({ issuer: "i", audience: "a", requiredScopes: ["a", "a"] }), /unique/);
   assert.throws(() => new RemoteMcpAccessPolicy({ issuer: "i", audience: "a", requestsPerMinute: 0 }), /positive/);

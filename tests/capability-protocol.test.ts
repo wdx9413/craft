@@ -43,7 +43,7 @@ const capability = (name: string, extra: Partial<CraftCapability> = {}): CraftCa
   ...extra,
 });
 
-test("v0.12.43 fixes the nature of each context member", () => {
+test("fixes the nature of each context member", () => {
   assert.deepEqual([...CONTEXT_MEMBERS], ["history", "knowledge", "memory", "experience", "state"]);
   // `history` is the Host's: craft is content-free and keeps only a digest.
   assert.equal(CONTEXT_MEMBER_SOURCES.history, "host_provided");
@@ -53,7 +53,7 @@ test("v0.12.43 fixes the nature of each context member", () => {
   assert.deepEqual(pluggableMembers(), ["knowledge", "memory", "experience"]);
 });
 
-test("v0.12.43 attaches hooks across the whole flow, not only after a write", () => {
+test("attaches hooks across the whole flow, not only after a write", () => {
   // The stages follow the run in order, and both sides of an effect are present: a rule
   // that must stop a tool call needs `tool_before`, and one that records a lesson needs
   // `task_settle`. Only two stages may refuse, and both stand in front of an effect.
@@ -64,7 +64,7 @@ test("v0.12.43 attaches hooks across the whole flow, not only after a write", ()
   assert.deepEqual([...GATING_PHASES].sort(), ["permission_check", "tool_before"]);
 });
 
-test("v0.12.43 orders hooks by the flow before the number", () => {
+test("orders hooks by the flow before the number", () => {
   // A hook cannot place itself before `turn_start` by choosing a small enough `order`:
   // phase order is the run's order and dominates.
   const ordered = orderHooks([
@@ -76,7 +76,7 @@ test("v0.12.43 orders hooks by the flow before the number", () => {
   assert.deepEqual(ordered.map((entry) => entry.name), ["early-stage", "mid-a", "mid-b", "late-stage"]);
 });
 
-test("v0.12.43 separates a hook that contributes context from one that only records", () => {
+test("separates a hook that contributes context from one that only records", () => {
   // A `task_settle` hook may contribute a member, or merely write a ledger entry no future
   // context resolves. Only the first can be depended on, so only the first is ordered.
   assert.equal(contributesContext(accumulating("a", 1, ["memory"])), true);
@@ -88,7 +88,7 @@ test("v0.12.43 separates a hook that contributes context from one that only reco
   assert.equal(hooks.length, 1);
 });
 
-test("v0.12.43 assembles capabilities without the core naming an implementation", () => {
+test("assembles capabilities without the core naming an implementation", () => {
   const assembled: string[] = [];
   const { registry } = buildCapabilityRegistry([
     { name: "first", owns: /^craft_first_/, register: (r) => { r.provide("firstKernel", { ok: true }); assembled.push("first"); } },
@@ -110,7 +110,7 @@ test("installable capability products require a single-point Evaluation Contract
   assert.doesNotThrow(() => buildCapabilityRegistry([capability("probe-only")]));
 });
 
-test("v0.12.43 refuses two capabilities claiming one name or one kernel", () => {
+test("refuses two capabilities claiming one name or one kernel", () => {
   assert.throws(() => buildCapabilityRegistry([capability("same"), capability("same")]), /capability already registered: same/u);
   assert.throws(
     () => buildCapabilityRegistry([
@@ -122,20 +122,20 @@ test("v0.12.43 refuses two capabilities claiming one name or one kernel", () => 
   assert.throws(() => buildCapabilityRegistry([{ name: "a", owns: /^a/, register: (r) => r.provide("  ", 1) }]), /kernel name must not be empty/u);
 });
 
-test("v0.12.43 requires a kernel to exist before it is resolved", () => {
+test("requires a kernel to exist before it is resolved", () => {
   const { registry } = buildCapabilityRegistry([capability("a")]);
   assert.throws(() => registry.require("missing"), /kernel is not registered: missing/u);
   assert.equal(registry.optional("missing"), undefined);
 });
 
-test("v0.12.43 rejects any dependency on a capability declared later", () => {
+test("rejects any dependency on a capability declared later", () => {
   assert.throws(() => buildCapabilityRegistry([
     { name: "consumer", owns: /^c/, register: (r) => r.require("late") },
     { name: "producer", owns: /^p/, register: (r) => r.provide("late", 1) },
   ]), /kernel is not registered: late/u);
 });
 
-test("v0.12.43 only lets accumulated members be contributed", () => {
+test("only lets accumulated members be contributed", () => {
   const provider = (member: string) => ({
     member: member as never,
     contribute: async () => ({ member: member as never, items: [], receipt_id: "r", omitted_count: 0 }),
@@ -145,7 +145,7 @@ test("v0.12.43 only lets accumulated members be contributed", () => {
   assert.throws(() => buildCapabilityRegistry([capability("s", { contributes: () => provider("state") })]), /only accumulated members can be contributed; state is current/u);
 });
 
-test("v0.12.43 refuses two capabilities contributing one context member", () => {
+test("refuses two capabilities contributing one context member", () => {
   const provider = (member: string) => ({
     member: member as never,
     contribute: async () => ({ member: member as never, items: [], receipt_id: "r", omitted_count: 0 }),
@@ -156,7 +156,7 @@ test("v0.12.43 refuses two capabilities contributing one context member", () => 
   );
 });
 
-test("v0.12.43 refuses a hook that writes outside the accumulating stage", () => {
+test("refuses a hook that writes outside the accumulating stage", () => {
   // `writes` describes a context member, and only `task_settle` produces one. Declaring it
   // on a gating hook would be a category error, not a harmless extra field.
   const bogus = { ...hook("gate", "tool_before", 1), writes: ["memory"] } as unknown as Hook;
@@ -182,7 +182,7 @@ test("v0.12.43 refuses a hook that writes outside the accumulating stage", () =>
   ]), /hook already registered: h/u);
 });
 
-test("v0.12.43 fails an evolution hook that runs before its inputs exist", () => {
+test("fails an evolution hook that runs before its inputs exist", () => {
   // The check an earlier draft only appeared to make: a loop that walked the hooks,
   // tested a condition, and discarded the result.
   assert.throws(
@@ -201,7 +201,7 @@ test("v0.12.43 fails an evolution hook that runs before its inputs exist", () =>
   assert.deepEqual(hooks.map((entry) => entry.name), ["record-memory", "record-knowledge", "distil"]);
 });
 
-test("v0.12.43 breaks an accumulation tie by name so the order is total", () => {
+test("breaks an accumulation tie by name so the order is total", () => {
   // Two contributors at the same `order` would otherwise be ordered by registration, which
   // varies with capability declaration. Sorting by name makes the sequence reproducible.
   const { hooks } = buildCapabilityRegistry([
@@ -211,14 +211,14 @@ test("v0.12.43 breaks an accumulation tie by name so the order is total", () => 
   assert.deepEqual(hooks.map((entry) => entry.name), ["alpha", "zeta"]);
 });
 
-test("v0.12.43 does not require a producer for a member that needs none", () => {
+test("does not require a producer for a member that needs none", () => {
   const { hooks } = buildCapabilityRegistry([
     capability("experience", { hooks: [accumulating("distil", 1, ["experience"], ["history", "state"])] }),
   ]);
   assert.equal(hooks.length, 1);
 });
 
-test("v0.12.43 runs one phase in order and reports every outcome", async () => {
+test("runs one phase in order and reports every outcome", async () => {
   const seen: string[] = [];
   const { hooks } = buildCapabilityRegistry([
     capability("a", { hooks: [
@@ -234,7 +234,7 @@ test("v0.12.43 runs one phase in order and reports every outcome", async () => {
   assert.deepEqual(result.outcomes.map((entry) => entry.hook), ["first", "second"]);
 });
 
-test("v0.12.43 lets only a gating phase refuse, and stops the phase there", async () => {
+test("lets only a gating phase refuse, and stops the phase there", async () => {
   const seen: string[] = [];
   const { hooks } = buildCapabilityRegistry([
     capability("a", { hooks: [
@@ -254,7 +254,7 @@ test("v0.12.43 lets only a gating phase refuse, and stops the phase there", asyn
   await assert.rejects(runPhase("tool_after", base, observing), /hook bad refused at phase tool_after, which cannot refuse/u);
 });
 
-test("v0.12.43 reports a throwing hook as unobserved rather than failing the work", async () => {
+test("reports a throwing hook as unobserved rather than failing the work", async () => {
   // Accumulation is a side channel. A hook that breaks must not change the outcome of the
   // work it watched, so the failure is reported as an observation that did not happen.
   const { hooks } = buildCapabilityRegistry([
@@ -274,7 +274,7 @@ test("v0.12.43 reports a throwing hook as unobserved rather than failing the wor
   assert.equal(odd.outcomes[0]!.outcome.kind === "unobserved" && odd.outcomes[0]!.outcome.reason, "plain");
 });
 
-test("v0.12.43 runs no hook for a phase nothing attached to", async () => {
+test("runs no hook for a phase nothing attached to", async () => {
   const { hooks } = buildCapabilityRegistry([capability("a", { hooks: [hook("only", "turn_start", 1)] })]);
   const result = await runPhase("turn_end", base, hooks);
   assert.deepEqual(result.outcomes, []);

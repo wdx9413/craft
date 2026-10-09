@@ -16,7 +16,7 @@ import { checkConsistency, mcpDeclarations, observeMcpFacts } from "../core/decl
 import { forwardCompatibility, outboundResult } from "../core/mcp-forward-compat.ts";
 
 /**
- * The v0.12.41 forward-compatibility facts, defaulting to the true state of this
+ * The forward-compatibility facts, defaulting to the true state of this
  * build. Kept in one place so adding a declared fact does not require editing
  * every fixture, which is how a check quietly stops checking.
  */
@@ -26,7 +26,7 @@ const forwardFacts = {
   compliantWithTarget: false,
 };
 
-test("v0.12.39 confirms claims the observation supports", () => {
+test("confirms claims the observation supports", () => {
   const report = checkConsistency({
     declarations: [{ id: "a", statement: "s", source: "f", expects: { x: 1, list: ["b", "a"] } }],
     observed: { x: 1, list: ["a", "b"] },
@@ -39,7 +39,7 @@ test("v0.12.39 confirms claims the observation supports", () => {
   assert.equal((report.findings as JsonObject[])[0]!.verdict, "confirmed");
 });
 
-test("v0.12.39 treats an unchecked claim as unverified, never as passing", () => {
+test("treats an unchecked claim as unverified, never as passing", () => {
   // This is the state the MCP revision declaration sat in: nobody ever compared
   // it to the handler, and "not checked" was read as "fine".
   const report = checkConsistency({
@@ -53,7 +53,7 @@ test("v0.12.39 treats an unchecked claim as unverified, never as passing", () =>
   assert.deepEqual((report.findings as JsonObject[])[0]!.unchecked, ["never_observed"]);
 });
 
-test("v0.12.39 reports both sides of a contradiction", () => {
+test("reports both sides of a contradiction", () => {
   const report = checkConsistency({
     declarations: [{ id: "a", statement: "s", source: "f", expects: { n: 1 } }],
     observed: { n: 2 },
@@ -65,7 +65,7 @@ test("v0.12.39 reports both sides of a contradiction", () => {
   assert.deepEqual((report.findings as JsonObject[])[0]!.mismatches, ["n: declared 1, observed 2"]);
 });
 
-test("v0.12.39 lets a proven contradiction outrank an unchecked fact", () => {
+test("lets a proven contradiction outrank an unchecked fact", () => {
   // If one claim is provably wrong, a missing fact elsewhere cannot rescue it.
   const report = checkConsistency({
     declarations: [{ id: "a", statement: "s", source: "f", expects: { wrong: 1, missing: 2 } }],
@@ -77,7 +77,7 @@ test("v0.12.39 lets a proven contradiction outrank an unchecked fact", () => {
   assert.deepEqual(finding.unchecked, ["missing"]);
 });
 
-test("v0.12.39 rejects an unusable declaration set", () => {
+test("rejects an unusable declaration set", () => {
   const expects = { expects: { x: 1 }, observed: { x: 1 } };
   assert.throws(() => checkConsistency({ declarations: [], observed: { x: 1 } }), /must be a non-empty array/u);
   assert.throws(() => checkConsistency({ declarations: "nope", observed: { x: 1 } }), /must be a non-empty array/u);
@@ -92,7 +92,7 @@ test("v0.12.39 rejects an unusable declaration set", () => {
   assert.throws(() => checkConsistency({ declarations: [{ id: "a", statement: "s", source: "f", expects: { x: 1 } }], observed: [] }), /observed must be an object/u);
 });
 
-test("v0.12.39 detects a declaration that drifted ahead of the code", () => {
+test("detects a declaration that drifted ahead of the code", () => {
   // The real 2026-07-28 shape: the runtime records that revision as assessed,
   // while the handler advertises only the older set. Reproduced from the actual
   // constants rather than from literals, so the fixture cannot drift itself.
@@ -137,7 +137,7 @@ test("v0.12.39 detects a declaration that drifted ahead of the code", () => {
     ["mcp.advertised_versions"]);
 });
 
-test("v0.12.39 checks the live implementation, not a copy of it", async (t) => {
+test("checks the live implementation, not a copy of it", async (t) => {
   // These facts are read from the shipping source or from the running handler.
   // If someone adopts 2026-07-28 in the handler without updating the runtime, or
   // updates the runtime without the handler, this fails.
@@ -152,7 +152,7 @@ test("v0.12.39 checks the live implementation, not a copy of it", async (t) => {
   // constant instead, the regex found nothing and the claim looked contradicted
   // when the code was in fact correct. Driving the handler cannot go blind that
   // way, and it is what the declaration actually claims about.
-  const liveRoot = join(tmpdir(), `craft-v01239-live-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  const liveRoot = join(tmpdir(), `craft-declaration-consistency-live-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   await mkdir(liveRoot, { recursive: true });
   const liveStore = await new CraftStore(craftPaths(liveRoot)).open();
   t.after(async () => { liveStore.close(); await rm(liveRoot, { recursive: true, force: true }); });
@@ -213,8 +213,8 @@ test("v0.12.39 checks the live implementation, not a copy of it", async (t) => {
   assert.deepEqual(aspirationalReport.contradicted_ids, ["mcp.removed_methods_acknowledged"]);
 });
 
-test("v0.12.39 is reachable from the loop and from MCP", async (t) => {
-  const root = join(tmpdir(), `craft-v01239-mcp-${process.pid}-${Date.now()}`);
+test("is reachable from the loop and from MCP", async (t) => {
+  const root = join(tmpdir(), `craft-declaration-consistency-mcp-${process.pid}-${Date.now()}`);
   await mkdir(root, { recursive: true });
   const store = await new CraftStore(craftPaths(root)).open();
   t.after(async () => { store.close(); await rm(root, { recursive: true, force: true }); });

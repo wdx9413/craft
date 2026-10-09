@@ -177,7 +177,7 @@ export class CraftStore {
       return { ...payload, id, version: next, created_at: now, updated_at: now };
   }
 
-  find(kind: string, id: string, version?: number): JsonObject | null {
+  find(kind: string, id: string, version?: number, hydrate = true): JsonObject | null {
     const row = version === undefined
       ? this.database.prepare(
         "SELECT * FROM records WHERE kind=? AND id=? ORDER BY version DESC LIMIT 1",
@@ -185,7 +185,7 @@ export class CraftStore {
       : this.database.prepare(
         "SELECT * FROM records WHERE kind=? AND id=? AND version=?",
       ).get(kind, id, version);
-    return row ? this.record(row as Record<string, unknown>) : null;
+    return row ? this.record(row as Record<string, unknown>, hydrate) : null;
   }
 
   get(kind: string, id: string, version?: number): JsonObject {
@@ -194,15 +194,55 @@ export class CraftStore {
     return record;
   }
 
-  list(kind: string, limit = 20, predicate?: (record: JsonObject) => boolean): JsonObject[] {
+  list(kind: string, limit = 20, predicate?: (record: JsonObject) => boolean, hydrate = true, dependencies?: { source_ids: string[]; document_ids: string[] }): JsonObject[] {
     const bounded = validLimit(limit);
     const rows = this.database.prepare(`SELECT r.* FROM records r JOIN (
       SELECT id,MAX(version) version FROM records WHERE kind=? GROUP BY id
       ) latest ON latest.id=r.id AND latest.version=r.version
-      WHERE r.kind=? ORDER BY r.updated_at DESC,r.rowid DESC,r.id DESC ${predicate ? "" : "LIMIT ?"}`)
-      .all(...(predicate ? [kind, kind] : [kind, kind, bounded]));
-    const records = rows.map((row) => this.record(row as Record<string, unknown>));
-    return (predicate ? records.filter(predicate) : records).slice(0, bounded);
+      WHERE r.kind=? ${dependencies ? "AND (json_array_length(?)=0 OR json_extract(r.payload_json,'$.source_id') IN (SELECT value FROM json_each(?))) AND (json_array_length(?)=0 OR json_extract(r.payload_json,'$.document_id') IN (SELECT value FROM json_each(?)))" : ""} ORDER BY r.updated_at DESC,r.rowid DESC,r.id DESC ${predicate ? "" : "LIMIT ?"}`)
+      .all(kind, kind, ...(dependencies ? [JSON.stringify(dependencies.source_ids), JSON.stringify(dependencies.source_ids), JSON.stringify(dependencies.document_ids), JSON.stringify(dependencies.document_ids)] : []), ...(predicate ? [] : [bounded]));
+    const records: JsonObject[] = [];
+    for (const row of rows) {
+      const record = this.record(row as Record<string, unknown>, hydrate);
+      if (predicate && !predicate(record)) continue;
+      records.push(record);
+      if (records.length === bounded) break;
+    }
+    return records;
+  }
+
+  /** SQL scope filtering precedes body hydration. Additional ACL predicates use metadata only. */
+  listScoped(kind: string, scopes: readonly { kind: string; id: string }[], limit = 20, predicate?: (record: JsonObject) => boolean, temporal?: { known_at?: string; history?: boolean }): JsonObject[] {
+    const bounded = validLimit(limit);
+    if (!Array.isArray(scopes) || scopes.some(scope => !scope || typeof scope.kind !== "string" || typeof scope.id !== "string")) throw new Error("Invalid scoped query");
+    if (!scopes.length) return [];
+    const scopeSql = `EXISTS (SELECT 1 FROM json_each(?) s WHERE
+      json_extract(r.payload_json,'$.scope')=CASE WHEN json_extract(s.value,'$.kind')='global' THEN 'global' ELSE json_extract(s.value,'$.kind')||':'||json_extract(s.value,'$.id') END
+      OR (json_extract(r.payload_json,'$.scope.kind')=json_extract(s.value,'$.kind') AND json_extract(r.payload_json,'$.scope.id')=json_extract(s.value,'$.id')))`;
+    const values = [JSON.stringify(scopes)];
+    if (temporal?.known_at !== undefined && !Number.isFinite(Date.parse(temporal.known_at))) throw new Error("Invalid scoped known_at");
+    const cutoff = temporal?.known_at === undefined ? "" : " AND updated_at<=?";
+    const timeValues = temporal?.known_at === undefined ? [] : [new Date(temporal.known_at).toISOString()];
+    const watermark = Number(this.database.prepare("SELECT COALESCE(MAX(rowid),0) watermark FROM records").get()!.watermark);
+    const latest = temporal?.history === true ? "" : ` JOIN (SELECT id,MAX(version) version FROM records WHERE kind=? AND rowid<=?${cutoff} GROUP BY id) latest ON latest.id=r.id AND latest.version=r.version`;
+    const parameters = [...(temporal?.history === true ? [] : [kind, watermark, ...timeValues]), kind, ...timeValues, ...values, watermark];
+    const statement = this.database.prepare(`SELECT r.*,r.rowid read_rowid FROM records r${latest} WHERE r.kind=?${cutoff} AND ${scopeSql} AND r.rowid<=? AND (r.updated_at<? OR (r.updated_at=? AND r.rowid<?)) ORDER BY r.updated_at DESC,r.rowid DESC LIMIT 512`);
+    const selected: JsonObject[] = [];
+    // Short, bounded metadata pages avoid retaining a SQLite iterator while a
+    // predicate performs nested Store reads. Only authorized results hydrate.
+    let cursorTime = "\uffff", cursorRow = Number.MAX_SAFE_INTEGER;
+    for (;;) {
+      const rows = statement.all(...parameters, cursorTime, cursorTime, cursorRow);
+      for (const row of rows) {
+        if (predicate && !predicate(this.record(row as Record<string, unknown>, false))) continue;
+        selected.push(this.record(row as Record<string, unknown>));
+        if (selected.length === bounded) return selected;
+      }
+      if (rows.length < 512) break;
+      const last = rows[rows.length - 1]!;
+      cursorTime = String(last.updated_at); cursorRow = Number(last.read_rowid);
+    }
+    return selected;
   }
 
   count(kind: string): number {
@@ -307,10 +347,10 @@ export class CraftStore {
     });
   }
 
-  private record(row: Record<string, unknown>): JsonObject {
+  private record(row: Record<string, unknown>, hydrate = true): JsonObject {
     const payload = JSON.parse(String(row.payload_json)) as JsonObject;
     const record: JsonObject = { ...payload, id: row.id, version: row.version, created_at: row.created_at, updated_at: row.updated_at };
-    if (record.content_ref && (row.kind === "knowledge_claim" || row.kind === "memory_ledger" || row.kind === "episodic_memory" || row.kind === "semantic_memory")) {
+    if (hydrate && record.content_ref && (row.kind === "knowledge_claim" || row.kind === "memory_ledger" || row.kind === "episodic_memory" || row.kind === "semantic_memory")) {
       try { record.content = this.contentStore.readCompatSync(record.content_ref as never).body; }
       catch { record.content_unavailable = true; }
     }

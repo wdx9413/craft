@@ -82,7 +82,7 @@ test("Experience turns independent observations into a draft Graph Procedure wit
     assert.equal(((workflow.graph as JsonObject).edges as JsonObject[]).length, 5);
     const procedure = graph.procedure as JsonObject;
     const definitionRef = procedure.definition_ref as JsonObject;
-    assert.match(String(definitionRef.path), /experience[\\/]procedures[\\/]graphs[\\/]/u);
+    assert.match(String(definitionRef.path), /experience[\\/]graph[\\/].+[\\/]versions[\\/]000001\.json$/u);
     const definition = JSON.parse(await readFile(String(definitionRef.path), "utf8")) as JsonObject;
     assert.equal(definition.schema_version, "craft.procedure.v1");
     assert.equal(definition.kind, "graph");

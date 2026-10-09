@@ -153,7 +153,7 @@ codex plugin add craft@craft-marketplace
 
 插件只读取 `plugins/craft/` 中的 manifest、`craft-route` Skill 和两个单文件 MCP bundle；不会把源码、桌面应用、适配器包或 source map 复制进插件缓存。`skills/craft` 与 `skills/craft-clarify` 可作为独立可选包安装，但这样不会自动获得 MCP 数据层。
 
-从 v0.12.16 起，插件发行物固定在 `plugins/craft/`；Codex 把该轻量目录复制到缓存后无需再执行 `npm install`，也不会依赖源码仓库的 `node_modules`。桌面安装包（Windows ZIP、macOS DMG）由 `.github/workflows/desktop-release.yml` 在发布时构建并作为 GitHub Release asset 上传，用户有下载入口；它们不会进入插件目录或 npm 包（`files` 白名单已收窄到 `dist/src` 与 `dist/plugin`），也不进入 Git 历史。升级后请重新安装插件，并在新会话中验证 `craft_info`。
+Workbench/Desktop 展示源码已迁到同级 `craft-workbench/`，核心默认不提供页面，桌面自动发布暂停。核心 Skill/MCP 与四个子能力继续独立使用。详见 [展示层拆分说明](docs/technical/modules/presentation-separation.md)。
 
 ## 接入 Claude Code
 

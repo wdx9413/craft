@@ -248,7 +248,7 @@ test("MCP negotiates protocols, lists tools, dispatches every handler, and repor
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
-test("MCP exposes the 0.9.7 controlled host adapter, promotion gate, and adaptive harness controls", async () => {
+test("MCP exposes the controlled host adapter, promotion gate, and adaptive harness controls", async () => {
   const root = join(tmpdir(), `craft-mcp-runtime-${process.pid}-${Date.now()}`);
   await mkdir(root, { recursive: true });
   await writeFile(join(root, "ok.txt"), "ok");

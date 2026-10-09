@@ -1,5 +1,8 @@
 # Local Workbench Web
 
+> 2026-10-08：页面源码已拆到同级 `craft-workbench/`，核心默认只提供 API。本文页面行为仅在显式启用展示项目时适用，见 [拆分说明](presentation-separation.md)。
+
+
 v0.11.0 提供首个可见工作台。运行 `craft serve` 后，Craft 只在 `127.0.0.1` 启动 HTTP 服务，并输出带 URL Fragment 会话令牌的本地地址。Fragment 不会随页面请求发送；页面只把令牌放入本机 API 的 Authorization Header。
 
 v0.11.1 增加本地目标创建和任务详情。详情展示与任务精确关联的 Checkpoint、反馈、运行、Trial、Outcome、Evidence、Artifact、Lineage、等待与待处理状态；缺失引用被忽略而不是伪造。创建目标只写入 Craft 本地状态，不会启动模型、调用外部系统或隐式选择执行权限。

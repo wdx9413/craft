@@ -19,7 +19,7 @@ async function fixture() {
   return { root, store, service, workspace };
 }
 
-test("v0.12.3 distinguishes portable, guarded, isolated and external autonomy", async () => {
+test("distinguishes portable, guarded, isolated and external autonomy", async () => {
   const f = await fixture(); const { store, service } = f;
   assert.equal(VERSION, "0.12.39");
   assert.throws(() => service.autonomyLadderDecide({ effect: "nope" }), /unsupported/);
@@ -172,7 +172,7 @@ test("Agent Eval Lab rejects incomparable or unobserved Host attempts", async ()
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("Full MCP starts one comparable Agent Eval attempt and exposes every v0.12.3 action", async () => {
+test("Full MCP starts one comparable Agent Eval attempt and exposes every action", async () => {
   const f = await fixture();
   try {
     const full = new McpServer(f.service, "full");

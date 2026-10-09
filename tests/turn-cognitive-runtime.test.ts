@@ -25,7 +25,7 @@ function hostProposal(runtime: TurnCognitiveRuntime, sourceId: string, proposalI
   return runtime.proposalSubmit({ proposal_id: proposalId, scope_kind: "project", scope_id: "project", semantic_owner: "host", host_adapter_id: "codex", input_digest: "sha256:turn", intents: ["conversation", "knowledge", "capability", "task", "execution"], signals: ["needs_context", "needs_capability", "needs_workflow", "needs_execution", "durable_value"], memory_candidate: { source_id: sourceId, kind: "episodic", content: "The user chose verified receipts for this project.", sensitivity: "internal" } }).proposal as JsonObject;
 }
 
-test("v0.12.28 makes a Host proposal policy-aware without turning a candidate into memory", async () => {
+test("makes a Host proposal policy-aware without turning a candidate into memory", async () => {
   const f = await fixture();
   try {
     const p = policy(f.runtime); const proposal = hostProposal(f.runtime, String(f.source.id));
@@ -42,7 +42,7 @@ test("v0.12.28 makes a Host proposal policy-aware without turning a candidate in
   } finally { await close(f); }
 });
 
-test("v0.12.43 lets the context decision see every accumulated member, not only knowledge", async () => {
+test("lets the context decision see every accumulated member, not only knowledge", async () => {
   const f = await fixture();
   try {
     const p = policy(f.runtime, "context-members");
@@ -74,7 +74,7 @@ test("v0.12.43 lets the context decision see every accumulated member, not only 
   } finally { await close(f); }
 });
 
-test("v0.12.28 keeps console hooks declarative and validates Agent-mode semantic ownership", async () => {
+test("keeps console hooks declarative and validates Agent-mode semantic ownership", async () => {
   const f = await fixture();
   try {
     const manual = f.runtime.hostAdapterSave({ adapter_id: "manual", host: "codex" }).adapter as JsonObject;
@@ -90,7 +90,7 @@ test("v0.12.28 keeps console hooks declarative and validates Agent-mode semantic
   } finally { await close(f); }
 });
 
-test("v0.12.28 evaluates deterministic turn decisions and rejects cross-scope fixtures", async () => {
+test("evaluates deterministic turn decisions and rejects cross-scope fixtures", async () => {
   const f = await fixture();
   try {
     const p = policy(f.runtime);
@@ -105,7 +105,7 @@ test("v0.12.28 evaluates deterministic turn decisions and rejects cross-scope fi
   } finally { await close(f); }
 });
 
-test("v0.12.28 rejects unsafe, stale, and malformed turn inputs", async () => {
+test("rejects unsafe, stale, and malformed turn inputs", async () => {
   const f = await fixture();
   try {
     assert.throws(() => f.runtime.policySave({ scope_kind: "bad", scope_id: "project" }), /scope_kind/);
@@ -128,7 +128,7 @@ test("v0.12.28 rejects unsafe, stale, and malformed turn inputs", async () => {
   } finally { await close(f); }
 });
 
-test("v0.12.28 covers conservative policy branches, candidate lifecycle, and replay guards", async () => {
+test("covers conservative policy branches, candidate lifecycle, and replay guards", async () => {
   const f = await fixture();
   try {
     const observed = f.runtime.policySave({ policy_id: "observed", scope_kind: "project", scope_id: "project", mode: "observe_only", memory_capture: "none", evaluation_capture: "none" }).policy as JsonObject;
@@ -169,7 +169,7 @@ test("v0.12.28 covers conservative policy branches, candidate lifecycle, and rep
   } finally { await close(f); }
 });
 
-test("v0.12.28 exhausts default, generated-id, and negative decision paths", async () => {
+test("exhausts default, generated-id, and negative decision paths", async () => {
   const f = await fixture();
   try {
     const defaults = f.runtime.policySave({ scope_kind: "project", scope_id: "project", mode: "candidate_only" }).policy as JsonObject;
@@ -197,7 +197,7 @@ test("v0.12.28 exhausts default, generated-id, and negative decision paths", asy
   } finally { await close(f); }
 });
 
-test("v0.12.28 records replay-safe receipts and generated evaluation records", async () => {
+test("records replay-safe receipts and generated evaluation records", async () => {
   const f = await fixture();
   try {
     const p = policy(f.runtime, "replay"); const first = hostProposal(f.runtime, String(f.source.id), "receipt-first");
@@ -216,7 +216,7 @@ test("v0.12.28 records replay-safe receipts and generated evaluation records", a
   } finally { await close(f); }
 });
 
-test("v0.12.28 exposes every Turn Cognitive operation through the CraftService facade", async () => {
+test("exposes every Turn Cognitive operation through the CraftService facade", async () => {
   const f = await fixture();
   try {
     const service = new CraftService(f.store);

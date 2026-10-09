@@ -11,7 +11,7 @@ import { StatefulComputeKernel } from "../core/stateful-compute.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 
 async function fixture() {
-  const root = await mkdtemp(join(tmpdir(), "craft-v1220-")); const store = await new CraftStore(craftPaths(root)).open();
+  const root = await mkdtemp(join(tmpdir(), "craft-continual-harness-")); const store = await new CraftStore(craftPaths(root)).open();
   store.create("task", "task", { title: "Goal", status: "active" });
   store.create("evidence", "confirmed", { confidence: "confirmed" }); store.create("evidence", "bounded", { confidence: "bounded" }); store.create("evidence", "bad", { confidence: "unverified" });
   store.create("memory_ledger", "memory", { status: "active" }); store.create("workflow", "workflow", { lifecycle: "verified" });
@@ -20,7 +20,7 @@ async function fixture() {
   return { root, store, harness: new ContinualHarnessKernel(store), compute: new StatefulComputeKernel(store) };
 }
 
-test("v0.12.20 turns trajectory evidence into bounded or governed Harness refinements", async () => {
+test("turns trajectory evidence into bounded or governed Harness refinements", async () => {
   const f = await fixture();
   try {
     assert.throws(() => f.harness.viewCreate({ task_id: "task", bindings: [{ kind: "bad", id: "memory" }] }), /unsupported/);
@@ -104,7 +104,7 @@ test("v0.12.20 turns trajectory evidence into bounded or governed Harness refine
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("v0.12.20 keeps stateful compute and Sub-agent calls generic, receipt-bound and non-executing", async () => {
+test("keeps stateful compute and Sub-agent calls generic, receipt-bound and non-executing", async () => {
   const f = await fixture();
   try {
     assert.throws(() => f.compute.hostRegister({ kind: "vendor-agent", label: "x" }), /unsupported/);

@@ -13,7 +13,7 @@ import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 const execFile = promisify(executeFile);
 
 async function fixture() {
-  const root = await mkdtemp(join(tmpdir(), "craft-v01218-"));
+  const root = await mkdtemp(join(tmpdir(), "craft-capability-platform-"));
   const store = await new CraftStore(craftPaths(root)).open();
   return { root, store, service: new CraftService(store) };
 }
@@ -91,7 +91,7 @@ test("Kit conformance publishes Serena and local Workspace samples and keeps MCP
 });
 
 test("Kit CLI exposes the same declarative built-ins without generating executable code", async () => {
-  const root = await mkdtemp(join(tmpdir(), "craft-v01218-cli-"));
+  const root = await mkdtemp(join(tmpdir(), "craft-capability-platform-cli-"));
   try {
     const { NODE_V8_COVERAGE: _coverage, ...environment } = process.env;
     const options = { cwd: process.cwd(), env: { ...environment, CRAFT_DATA_DIR: root } };

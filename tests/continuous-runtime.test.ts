@@ -17,7 +17,7 @@ import { ProjectBundleKernel } from "../core/project-bundle.ts";
 import { ReplayRunnerKernel } from "../core/replay-runner.ts";
 
 async function fixture() {
-  const root = await mkdtemp(join(tmpdir(), "craft-v1211-"));
+  const root = await mkdtemp(join(tmpdir(), "craft-continuous-runtime-"));
   const store = await new CraftStore(craftPaths(root)).open();
   store.create("project_brain", "brain", { project_id: "project", status: "active", name: "Project" });
   store.create("task", "task", { project_id: "project", status: "active", title: "Task" });
@@ -27,7 +27,7 @@ async function fixture() {
   return { root, store, service: new CraftService(store) };
 }
 
-test("v0.12.12 adds the unified context, replay, service, bundle and feedback kernels", async () => {
+test("adds the unified context, replay, service, bundle and feedback kernels", async () => {
   const f = await fixture();
   try {
     const context = new ContextPlaneKernel(f.store);
@@ -133,7 +133,7 @@ test("v0.12.12 adds the unified context, replay, service, bundle and feedback ke
   } finally { f.store.close(); }
 });
 
-test("v0.12.11 kernels exercise default, invalid and transition branches", async () => {
+test("kernels exercise default, invalid and transition branches", async () => {
   const f = await fixture();
   try {
     const context = new ContextPlaneKernel(f.store);

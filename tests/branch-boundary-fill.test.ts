@@ -28,7 +28,7 @@ import { RuntimeAssuranceKernel } from "../core/runtime-assurance.ts";
 import { PlatformExecutionKernel } from "../core/platform-execution.ts";
 import { CampaignRunnerKernel } from "../core/campaign-runner.ts";
 import { TraceKernel } from "../core/trace-kernel.ts";
-import { V01226Runtime } from "../core/generic-adapter-runtime.ts";
+import { GenericAdapterRuntime } from "../core/generic-adapter-runtime.ts";
 import { CraftService } from "../core/service.ts";
 import { standardizeTrace, traceCorrelation, toOtlpTrace, compactConversation, parseToolCalls } from "../core/runtime-truth.ts";
 
@@ -153,7 +153,7 @@ test("legacy kernel argument guards exercise non-string and non-object defensive
       () => new RuntimeAcceptanceKernel(f.store).plan({ case_ids: 7 }),
       () => new TraceKernel(f.store).start({ task_id: 7 }),
       () => new WebOperationKernel(f.store).get({ operation_id: 7 }),
-      () => new V01226Runtime(f.store).adapterGet(7 as never),
+      () => new GenericAdapterRuntime(f.store).adapterGet(7 as never),
     ];
     for (const invoke of cases) assert.throws(invoke, /must not be empty|must be an object|Unknown|task_id|nodes must|non-empty array/);
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
@@ -253,8 +253,8 @@ test("runtime acceptance covers generated identifiers, duplicate slots and non-f
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("v0.12.13 action, gate and provider compatibility paths are exercised", async () => {
-  const f = await fixture("craft-v013-branches-");
+test("action, gate and provider compatibility paths are exercised", async () => {
+  const f = await fixture("craft-branch-boundary-fill-branches-");
   try {
     const action = new ActionGatewayKernel(f.store, f.root);
     f.store.create("task", "task", { title: "task" });

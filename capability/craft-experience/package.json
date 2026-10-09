@@ -21,7 +21,31 @@
       "types": "./dist/evaluation-model-profile.d.ts",
       "default": "./dist/evaluation-model-profile.js"
     },
-    "./package.json": "./package.json"
+    "./graph-assets": {
+      "types": "./dist/graph-assets.d.ts",
+      "default": "./dist/graph-assets.js"
+    },
+    "./package.json": "./package.json",
+    "./procedure-release": {
+      "types": "./dist/procedure-release.d.ts",
+      "default": "./dist/procedure-release.js"
+    },
+    "./graph-matching": {
+      "types": "./dist/graph-matching.d.ts",
+      "default": "./dist/graph-matching.js"
+    },
+    "./procedure-composition": {
+      "types": "./dist/procedure-composition.d.ts",
+      "default": "./dist/procedure-composition.js"
+    },
+    "./procedure-configuration": {
+      "types": "./dist/procedure-configuration.d.ts",
+      "default": "./dist/procedure-configuration.js"
+    },
+    "./procedure-projection": {
+      "types": "./dist/procedure-projection.d.ts",
+      "default": "./dist/procedure-projection.js"
+    }
   },
   "files": [
     "dist",

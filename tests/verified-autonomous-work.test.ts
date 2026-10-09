@@ -11,7 +11,7 @@ import { ContextPlaneKernel } from "../core/context-plane.ts";
 import { VerifiedAutonomousWorkKernel, SandboxConformanceKernel, TraceExplorerKernel } from "../core/verified-autonomous-work.ts";
 
 async function fixture() {
-  const root = await mkdtemp(join(tmpdir(), "craft-v1212-"));
+  const root = await mkdtemp(join(tmpdir(), "craft-verified-autonomous-work-"));
   const store = await new CraftStore(craftPaths(root)).open();
   store.create("task", "task", { project_id: "project", status: "active", title: "Task" });
   store.create("trace", "trace", { task_id: "task", status: "completed", model_fingerprint: "m", environment_fingerprint: "e" });
@@ -20,7 +20,7 @@ async function fixture() {
   return { store, service: new CraftService(store), contextId: String((context.manifest as JsonObject).id) };
 }
 
-test("v0.12.12 verifies action authorization, re-observation, delivery, handoff and platform admission", async () => {
+test("verifies action authorization, re-observation, delivery, handoff and platform admission", async () => {
   const f = await fixture();
   try {
     const kernel = new VerifiedAutonomousWorkKernel(f.store);
@@ -95,7 +95,7 @@ test("v0.12.12 verifies action authorization, re-observation, delivery, handoff 
   } finally { f.store.close(); }
 });
 
-test("v0.12.12 defaults and failure states remain explicit", async () => {
+test("defaults and failure states remain explicit", async () => {
   const f = await fixture();
   try {
     const kernel = new VerifiedAutonomousWorkKernel(f.store);
@@ -128,7 +128,7 @@ test("v0.12.12 defaults and failure states remain explicit", async () => {
   } finally { f.store.close(); }
 });
 
-test("v0.12.12 compatibility kernels cover generated ids and guarded transitions", async () => {
+test("compatibility kernels cover generated ids and guarded transitions", async () => {
   const f = await fixture();
   try {
     const kernel = new VerifiedAutonomousWorkKernel(f.store);

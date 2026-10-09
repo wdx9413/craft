@@ -23,7 +23,7 @@ import type { ChatResult } from "../core/model-gateway.ts";
 import { WebOperationKernel } from "../core/web-operation.ts";
 import { CostLedgerKernel } from "../core/cost-ledger.ts";
 import { FeedbackLearningKernel } from "../core/feedback-learning.ts";
-import { V01226Runtime, defineAdapterManifest, importOpenApiDocument } from "../core/generic-adapter-runtime.ts";
+import { GenericAdapterRuntime, defineAdapterManifest, importOpenApiDocument } from "../core/generic-adapter-runtime.ts";
 import { TraceKernel } from "../core/trace-kernel.ts";
 import { RuntimeTruthKernel } from "../core/runtime-truth-kernel.ts";
 import { standardizeTrace, toOtlpTrace, parseToolCalls, compactConversation, toolResultMessage, exportOtlp } from "../core/runtime-truth.ts";
@@ -150,7 +150,7 @@ test("workflow, registry and OIDC defensive branches are covered", async () => {
 });
 
 test("context, replay, local service, bundle, feedback and cost ledgers cover defaults and conflicts", async () => {
-  const f = await fixture("craft-v01211-branches-");
+  const f = await fixture("craft-remaining-branch-cases-branches-");
   try {
     const context = new ContextPlaneKernel(f.store);
     const saved = context.save({ project_id: "p", task_id: "t", manifest_id: "m" });
@@ -190,12 +190,12 @@ test("context, replay, local service, bundle, feedback and cost ledgers cover de
 });
 
 test("adapter runtime covers manifest defaults, updates, routing and OpenAPI fallbacks", async () => {
-  const f = await fixture("craft-v01226-branches-");
+  const f = await fixture("craft-remaining-branch-cases-branches-");
   try {
     assert.equal(defineAdapterManifest({ adapter_id: "a", version: "1", kind: "command" }).entry, "builtin");
     assert.throws(() => defineAdapterManifest({ adapter_id: "bad", version: "1", kind: "command", platforms: ["darwin", "darwin"] }), /unique/);
     assert.throws(() => defineAdapterManifest({ adapter_id: "bad", version: "1", kind: "command", effects: ["unknown"] }), /effect/);
-    const runtime = new V01226Runtime(f.store);
+    const runtime = new GenericAdapterRuntime(f.store);
     runtime.adapterRegister({ adapter_id: "a", version: "1", kind: "command" });
     assert.equal(runtime.adapterRegister({ adapter_id: "a", version: "1", kind: "command" }).idempotent, true);
     assert.equal((runtime.adapterRegister({ adapter_id: "a", version: "2", kind: "command" }).manifest as JsonObject).version, 2);
@@ -630,12 +630,12 @@ test("legacy runtime validation and state/trust boundaries are exercised", async
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("v01226 adapter runtime hits both default and defensive alternatives", async () => {
-  const f = await fixture("craft-v01226-extra-");
+test("adapter runtime hits both default and defensive alternatives", async () => {
+  const f = await fixture("craft-remaining-branch-cases-extra-");
   try {
     assert.throws(() => defineAdapterManifest({ adapter_id: "x", version: "1", kind: "command", platforms: "any" as never }), /array/);
     assert.throws(() => defineAdapterManifest({ adapter_id: "x", version: "1", kind: "command", capabilities: "run" as never }), /array/);
-    const runtime = new V01226Runtime(f.store);
+    const runtime = new GenericAdapterRuntime(f.store);
     assert.throws(() => runtime.commandPlan({ argv: "echo" as never }), /array/);
     assert.throws(() => runtime.commandPlan({ argv: ["echo"], effect: "unsupported" }), /effect/);
     assert.throws(() => runtime.commandPlan({ argv: ["echo"], output_limit: 255 }), /between/);
@@ -847,7 +847,7 @@ test("MCP HTTP server evaluates the documented default port without binding it",
 test("remaining fallback branches are exercised through bounded seams", async () => {
   const f = await fixture("craft-final-branches-");
   try {
-    const runtime = new V01226Runtime(f.store);
+    const runtime = new GenericAdapterRuntime(f.store);
     runtime.modelRoute({ objective: "cost", candidates: [{ id: "missing", quality: 1 }, { id: "priced", cost: 2 }] });
     runtime.modelRoute({ objective: "latency", candidates: [{ id: "missing", quality: 1 }, { id: "fast", latency_ms: 2 }] });
     runtime.modelRoute({ objective: "quality", candidates: [{ id: "missing" }, { id: "rated", quality: 2 }] });

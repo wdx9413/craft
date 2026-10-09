@@ -18,7 +18,7 @@ import {
 /** A deterministic stand-in for the real estimator, so tests never vary. */
 const estimate = (value: string) => Math.ceil(value.length / 4);
 
-test("v0.12.34 keeps the original context so a projection can be reversed", () => {
+test("keeps the original context so a projection can be reversed", () => {
   const context = new ReversibleContext(estimate);
   assert.equal(context.size, 0);
   assert.equal(context.totalTokens, 0);
@@ -48,7 +48,7 @@ test("v0.12.34 keeps the original context so a projection can be reversed", () =
   assert.equal(full.segments.length, 2);
 });
 
-test("v0.12.34 restores an omitted segment instead of having destroyed it", () => {
+test("restores an omitted segment instead of having destroyed it", () => {
   const context = new ReversibleContext(estimate);
   context.append("keep", "system", "a".repeat(40), 5);
   context.append("optional", "user", "b".repeat(40), 1);
@@ -68,7 +68,7 @@ test("v0.12.34 restores an omitted segment instead of having destroyed it", () =
   assert.equal(context.original().length, 2);
 });
 
-test("v0.12.34 validates context inputs and reports a sealed digest", () => {
+test("validates context inputs and reports a sealed digest", () => {
   const context = new ReversibleContext(estimate);
   context.append("a", "user", "hello", 1);
   // Duplicate ids would make restore() ambiguous.
@@ -87,7 +87,7 @@ test("v0.12.34 validates context inputs and reports a sealed digest", () => {
   assert.equal(sealed.tokens, 2);
 });
 
-test("v0.12.34 breaks projection ties by recency so the result is deterministic", () => {
+test("breaks projection ties by recency so the result is deterministic", () => {
   const context = new ReversibleContext(estimate);
   // Equal weights: only one fits, and the more recent must win.
   context.append("older", "user", "a".repeat(40), 1);
@@ -98,7 +98,7 @@ test("v0.12.34 breaks projection ties by recency so the result is deterministic"
   assert.deepEqual(context.project(12).segments.map((segment) => segment.id), ["newer"]);
 });
 
-test("v0.12.34 refuses to restore a segment that cannot fit", () => {
+test("refuses to restore a segment that cannot fit", () => {
   const context = new ReversibleContext(estimate);
   // The target is the only segment, and it alone exceeds the cap, so no
   // promotion can make it fit: the restore must report failure rather than
@@ -110,7 +110,7 @@ test("v0.12.34 refuses to restore a segment that cannot fit", () => {
   assert.equal(context.restore("big", 200).segments.length, 1);
 });
 
-test("v0.12.34 keeps an already-present segment when restoring", () => {
+test("keeps an already-present segment when restoring", () => {
   const context = new ReversibleContext(estimate);
   context.append("a", "system", "a".repeat(20), 2);
   context.append("b", "user", "b".repeat(20), 1);
@@ -121,7 +121,7 @@ test("v0.12.34 keeps an already-present segment when restoring", () => {
   assert.equal(restored.complete, true);
 });
 
-test("v0.12.34 promotes an omitted segment above the others so it fits", () => {
+test("promotes an omitted segment above the others so it fits", () => {
   const context = new ReversibleContext(estimate);
   // Three segments, all of equal size; only two fit in the cap. Without
   // promotion the last-ranked ("c") is the one pushed out.
@@ -142,7 +142,7 @@ test("v0.12.34 promotes an omitted segment above the others so it fits", () => {
   assert.deepEqual(context.project(12).omitted, ["a"]);
 });
 
-test("v0.12.34 ranks a rare identifier above a common word with BM25", () => {
+test("ranks a rare identifier above a common word with BM25", () => {
   const index = new Bm25Index();
   index.add("noise", "the agent runs the task and the agent reports the task");
   index.add("target", "failed with error code TS-999 during the run");
@@ -166,7 +166,7 @@ test("v0.12.34 ranks a rare identifier above a common word with BM25", () => {
   assert.equal(tied.length > 0, true);
 });
 
-test("v0.12.34 orders equal BM25 scores by id so ranking is stable", () => {
+test("orders equal BM25 scores by id so ranking is stable", () => {
   const index = new Bm25Index();
   // Two documents with identical content score identically, so the only thing
   // deciding the order is the id tie-break.
@@ -178,7 +178,7 @@ test("v0.12.34 orders equal BM25 scores by id so ranking is stable", () => {
   assert.deepEqual(scored.map((item) => item.id), ["alpha", "zulu"]);
 });
 
-test("v0.12.34 treats a query with no identifier tokens as unboosted", () => {
+test("treats a query with no identifier tokens as unboosted", () => {
   const index = new Bm25Index();
   index.add("doc", "plain words only here");
   const [scored] = index.score("plain");
@@ -187,7 +187,7 @@ test("v0.12.34 treats a query with no identifier tokens as unboosted", () => {
   assert.equal(scored!.exact_identifier, false);
 });
 
-test("v0.12.34 ignores query terms absent from the corpus", () => {
+test("ignores query terms absent from the corpus", () => {
   const index = new Bm25Index();
   index.add("doc", "alpha beta");
   // "zzz" matches nothing, so it must contribute no score and no document
@@ -200,7 +200,7 @@ test("v0.12.34 ignores query terms absent from the corpus", () => {
   assert.deepEqual(index.score("zzz"), []);
 });
 
-test("v0.12.34 returns nothing for queries that match no document", () => {
+test("returns nothing for queries that match no document", () => {
   const index = new Bm25Index();
   index.add("only", "alpha beta");
   assert.deepEqual(index.score("gamma"), []);
@@ -211,7 +211,7 @@ test("v0.12.34 returns nothing for queries that match no document", () => {
   assert.equal(index.score("alpha").length, 1);
 });
 
-test("v0.12.34 validates BM25 documents and tuning constants", () => {
+test("validates BM25 documents and tuning constants", () => {
   const index = new Bm25Index();
   index.add("one", "alpha");
   assert.throws(() => index.add("one", "beta"), /already exists/u);
@@ -224,7 +224,7 @@ test("v0.12.34 validates BM25 documents and tuning constants", () => {
   assert.equal(tuned.score("alpha").length, 1);
 });
 
-test("v0.12.34 fuses ranked lists by reciprocal rank and counts sources", () => {
+test("fuses ranked lists by reciprocal rank and counts sources", () => {
   const fused = fuseRankings([[{ id: "a" }, { id: "b" }], [{ id: "b" }, { id: "c" }]]);
   // "b" appears in both lists, so it must outrank items seen once.
   assert.equal(fused[0]!.id, "b");
@@ -237,7 +237,7 @@ test("v0.12.34 fuses ranked lists by reciprocal rank and counts sources", () => 
   assert.throws(() => fuseRankings([], 0), /k must be a positive number/u);
 });
 
-test("v0.12.34 orders equal fusion scores by id so fusion is stable", () => {
+test("orders equal fusion scores by id so fusion is stable", () => {
   // Two lists each contributing one distinct id at the same rank produce equal
   // scores, so only the id tie-break decides the order.
   const fused = fuseRankings([[{ id: "b" }], [{ id: "a" }]]);
@@ -245,7 +245,7 @@ test("v0.12.34 orders equal fusion scores by id so fusion is stable", () => {
   assert.deepEqual(fused.map((item) => item.id), ["a", "b"]);
 });
 
-test("v0.12.34 honours relaxed BM25 constants without changing correctness", () => {
+test("honours relaxed BM25 constants without changing correctness", () => {
   // b = 0 disables length normalisation, which is a documented BM25
   // configuration rather than an edge case to reject. Term *frequency* still
   // counts, so a document repeating the term outranks one mentioning it once —
@@ -267,7 +267,7 @@ test("v0.12.34 honours relaxed BM25 constants without changing correctness", () 
   assert.ok(damped[0]!.score / damped[1]!.score < scored[0]!.score / scored[1]!.score);
 });
 
-test("v0.12.34 captures a failure lesson deterministically", () => {
+test("captures a failure lesson deterministically", () => {
   const failure = decideExperienceCapture({ outcome: "failed" });
   assert.equal(failure.capture, true);
   assert.equal(failure.kind, "failure_lesson");
@@ -309,7 +309,7 @@ test("v0.12.34 captures a failure lesson deterministically", () => {
   assert.equal(decideExperienceCapture({ outcome: "failed" }).dedupe_key, failure.dedupe_key);
 });
 
-test("v0.12.34 rejects malformed capture signals rather than guessing", () => {
+test("rejects malformed capture signals rather than guessing", () => {
   assert.throws(() => decideExperienceCapture({ outcome: "maybe" }), /outcome is unsupported/u);
   assert.throws(() => decideExperienceCapture({ outcome: "succeeded", retries: -1 }), /retries must be a non-negative integer/u);
   assert.throws(() => decideExperienceCapture({ outcome: "succeeded", corrections: 1.5 }), /corrections must be a non-negative integer/u);
@@ -317,7 +317,7 @@ test("v0.12.34 rejects malformed capture signals rather than guessing", () => {
   assert.throws(() => decideExperienceCapture({ outcome: "succeeded", threshold: -1 }), /threshold must be a non-negative number/u);
 });
 
-test("v0.12.34 builds a reviewable experience record with provenance", () => {
+test("builds a reviewable experience record with provenance", () => {
   const record = buildExperienceRecord({ outcome: "failed", summary: "ts-999 means a stale build cache", task_id: "task-1" });
   assert.equal(record.kind, "failure_lesson");
   assert.equal(record.scope, "project");
@@ -348,8 +348,8 @@ test("v0.12.34 builds a reviewable experience record with provenance", () => {
   assert.throws(() => buildExperienceRecord({ outcome: "succeeded", summary: "nothing notable" }), /did not meet the capture threshold/u);
 });
 
-test("v0.12.34 exposes all three gaps as reachable MCP tools", async (t) => {
-  const root = join(tmpdir(), `craft-v01234-mcp-${process.pid}-${Date.now()}`);
+test("exposes all three gaps as reachable MCP tools", async (t) => {
+  const root = join(tmpdir(), `craft-ideal-state-gaps-mcp-${process.pid}-${Date.now()}`);
   await mkdir(root, { recursive: true });
   const store = await new CraftStore(craftPaths(root)).open();
   t.after(async () => { store.close(); await rm(root, { recursive: true, force: true }); });

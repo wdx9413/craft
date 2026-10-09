@@ -16,7 +16,7 @@ import {
   shouldProposeMemory
 } from "../capability/craft-memory/memory-signals.ts";
 
-test("v0.12.35 decays a memory by age with a half-life rather than a cutoff", () => {
+test("decays a memory by age with a half-life rather than a cutoff", () => {
   const fresh = memoryDecayWeight({ confirmed_at: "2026-01-01T00:00:00Z", now: "2026-01-01T00:00:00Z" });
   // A brand-new bounded memory is worth its full base weight.
   assert.equal(fresh, 0.85);
@@ -38,7 +38,7 @@ test("v0.12.35 decays a memory by age with a half-life rather than a cutoff", ()
   assert.ok(ancient < fresh);
 });
 
-test("v0.12.35 raises a memory's weight with successful accesses, capped", () => {
+test("raises a memory's weight with successful accesses, capped", () => {
   const base = { confirmed_at: "2026-01-01T00:00:00Z", now: "2026-01-01T00:00:00Z", trust: "verified" as const };
   const unused = memoryDecayWeight({ ...base, accesses: 0 });
   const used = memoryDecayWeight({ ...base, accesses: 3 });
@@ -52,21 +52,21 @@ test("v0.12.35 raises a memory's weight with successful accesses, capped", () =>
   assert.equal(capped, Number((1 + 10 * 0.15).toFixed(6)));
 });
 
-test("v0.12.35 clamps a future timestamp instead of inflating the weight", () => {
+test("clamps a future timestamp instead of inflating the weight", () => {
   // A clock skew must not let a memory outrank every legitimate one.
   const future = memoryDecayWeight({ confirmed_at: "2027-01-01T00:00:00Z", now: "2026-01-01T00:00:00Z" });
   const now = memoryDecayWeight({ confirmed_at: "2026-01-01T00:00:00Z", now: "2026-01-01T00:00:00Z" });
   assert.equal(future, now);
 });
 
-test("v0.12.35 rejects malformed decay inputs", () => {
+test("rejects malformed decay inputs", () => {
   assert.throws(() => memoryDecayWeight({ confirmed_at: "not-a-date", now: "2026-01-01T00:00:00Z" }), /confirmed_at must be an ISO timestamp/u);
   assert.throws(() => memoryDecayWeight({ confirmed_at: "2026-01-01T00:00:00Z", now: "nope" }), /now must be an ISO timestamp/u);
   assert.throws(() => memoryDecayWeight({ confirmed_at: "2026-01-01T00:00:00Z", now: "2026-01-01T00:00:00Z", accesses: -1 }), /accesses must be a non-negative integer/u);
   assert.throws(() => memoryDecayWeight({ confirmed_at: "2026-01-01T00:00:00Z", now: "2026-01-01T00:00:00Z", trust: "unknown" }), /trust must be verified or bounded/u);
 });
 
-test("v0.12.35 reranks by base score times decay and breaks ties by id", () => {
+test("reranks by base score times decay and breaks ties by id", () => {
   const ranked = rankWithDecay([
     { id: "stale", base_score: 3, decay: 0.1 },
     { id: "fresh", base_score: 2, decay: 1 },
@@ -82,7 +82,7 @@ test("v0.12.35 reranks by base score times decay and breaks ties by id", () => {
   assert.deepEqual(rankWithDecay([]), []);
 });
 
-test("v0.12.35 proposes a candidate in review-by-exception mode without being asked", () => {
+test("proposes a candidate in review-by-exception mode without being asked", () => {
   // The point of A4: a correction alone is enough, with no durable_value signal.
   const corrected = shouldProposeMemory({ signals: [], succeeded: true, corrections: 1 });
   assert.equal(corrected.propose, true);
@@ -105,7 +105,7 @@ test("v0.12.35 proposes a candidate in review-by-exception mode without being as
   assert.deepEqual(deduped.reasons, ["durable_value"]);
 });
 
-test("v0.12.35 preserves strict capture mode exactly", () => {
+test("preserves strict capture mode exactly", () => {
   // A project that wants full manual approval keeps the historical behaviour:
   // only an explicit durable_value signal proposes anything.
   assert.equal(shouldProposeMemory({ signals: ["durable_value"], succeeded: true, mode: "strict" }).propose, true);
@@ -123,7 +123,7 @@ test("v0.12.35 preserves strict capture mode exactly", () => {
   assert.equal(shouldProposeMemory({ succeeded: true, mode: "strict" }).propose, false);
 });
 
-test("v0.12.35 defaults a promoted legacy memory's kind when none is given", () => {
+test("defaults a promoted legacy memory's kind when none is given", () => {
   // A legacy memory_item with no explicit kind becomes a fact; guessing anything
   // more specific would invent semantics the old record never carried.
   const defaulted = planLegacyPromotion({ legacy_kind: "memory_item", legacy_id: "m9", content: "the port is 8080" });
@@ -131,7 +131,7 @@ test("v0.12.35 defaults a promoted legacy memory's kind when none is given", () 
   assert.equal(defaulted.legacy_version, 1);
 });
 
-test("v0.12.35 promotes a legacy memory only as an approvable candidate", () => {
+test("promotes a legacy memory only as an approvable candidate", () => {
   const promotion = planLegacyPromotion({
     legacy_kind: "memory_item", legacy_id: "m1", legacy_version: 3, content: "prefers pnpm", scope: "user", kind: "preference",
   });
@@ -161,7 +161,7 @@ test("v0.12.35 promotes a legacy memory only as an approvable candidate", () => 
     promotion.promotion_id);
 });
 
-test("v0.12.35 rejects an unsupported legacy promotion", () => {
+test("rejects an unsupported legacy promotion", () => {
   assert.throws(() => planLegacyPromotion({ legacy_kind: "other", legacy_id: "x", content: "y" }), /Legacy Memory kind is unsupported/u);
   assert.throws(() => planLegacyPromotion({ legacy_kind: "memory_item", legacy_id: "x", content: "y", scope: "galaxy" }), /Legacy Memory scope is unsupported/u);
   assert.throws(() => planLegacyPromotion({ legacy_kind: "memory_item", legacy_id: "x", content: "y", kind: "guess" }), /Promoted Memory kind is unsupported/u);
@@ -169,7 +169,7 @@ test("v0.12.35 rejects an unsupported legacy promotion", () => {
   assert.throws(() => planLegacyPromotion({ legacy_kind: "memory_item", legacy_id: "x", content: "" }), /content must not be empty/u);
 });
 
-test("v0.12.35 falls back to keyword-only scoring when no adapter is eligible", () => {
+test("falls back to keyword-only scoring when no adapter is eligible", () => {
   const candidates = [
     { id: "a", similarity: 0.9, keyword_score: 0 },
     { id: "b", similarity: null, keyword_score: 2 },
@@ -187,7 +187,7 @@ test("v0.12.35 falls back to keyword-only scoring when no adapter is eligible", 
   assert.deepEqual(keywordTied.map((entry) => entry.id), ["a", "z"]);
 });
 
-test("v0.12.35 fuses vector and keyword rankings when the adapter is eligible", () => {
+test("fuses vector and keyword rankings when the adapter is eligible", () => {
   const candidates = [
     { id: "both", similarity: 0.8, keyword_score: 3 },
     { id: "vector_only", similarity: 0.95, keyword_score: 0 },
@@ -209,7 +209,7 @@ test("v0.12.35 fuses vector and keyword rankings when the adapter is eligible", 
   assert.throws(() => hybridMemoryScores([], { vectorEligible: true, k: 0 }), /Fusion k must be a positive number/u);
 });
 
-test("v0.12.35 counts a memory as used only when the turn succeeded", () => {
+test("counts a memory as used only when the turn succeeded", () => {
   const used = memoryUsageEvidence({ memory_ids: ["m1", "m2"], outcome: "succeeded", turn_id: "t1", receipt_id: "r1" });
   assert.equal(used.counted_as_use, true);
   assert.equal(used.receipt_id, "r1");
@@ -230,7 +230,7 @@ test("v0.12.35 counts a memory as used only when the turn succeeded", () => {
     used.evidence_id);
 });
 
-test("v0.12.35 rejects malformed usage evidence", () => {
+test("rejects malformed usage evidence", () => {
   assert.throws(() => memoryUsageEvidence({ memory_ids: [], outcome: "succeeded", turn_id: "t" }), /memory_ids must not be empty/u);
   assert.throws(() => memoryUsageEvidence({ memory_ids: ["m1", "m1"], outcome: "succeeded", turn_id: "t" }), /memory_ids must be unique/u);
   assert.throws(() => memoryUsageEvidence({ memory_ids: ["m1"], outcome: "maybe", turn_id: "t" }), /outcome is unsupported/u);
@@ -241,8 +241,8 @@ test("v0.12.35 rejects malformed usage evidence", () => {
   assert.equal(memoryUsageEvidence({ memory_ids: ["m1"], outcome: "abandoned", turn_id: "t3" }).counted_as_use, false);
 });
 
-test("v0.12.35 makes the five new capabilities reachable through MCP", async (t) => {
-  const root = join(tmpdir(), `craft-v01235-mcp-${process.pid}-${Date.now()}`);
+test("makes the five new capabilities reachable through MCP", async (t) => {
+  const root = join(tmpdir(), `craft-memory-wiring-mcp-${process.pid}-${Date.now()}`);
   await mkdir(root, { recursive: true });
   const store = await new CraftStore(craftPaths(root)).open();
   t.after(async () => { store.close(); await rm(root, { recursive: true, force: true }); });

@@ -15,13 +15,13 @@ import { VerifiedWorkLoopKernel } from "../core/verified-work-loop.ts";
 import { WorkRuntimeModeKernel } from "../core/work-runtime-mode.ts";
 
 async function fixture() {
-  const root = await mkdtemp(join(tmpdir(), "craft-v1219-")); const store = await new CraftStore(craftPaths(root)).open();
+  const root = await mkdtemp(join(tmpdir(), "craft-universal-runtime-")); const store = await new CraftStore(craftPaths(root)).open();
   store.create("task", "task", { project_id: "project", title: "Goal", goal: "deliver", status: "active" });
   store.create("evidence", "evidence", { confidence: "confirmed", summary: "verified" });
   return { root, store, sources: new KnowledgeSourceRegistry(store), ledger: new MemoryLedgerKernel(store), context: new ContextResolutionKernel(store), modes: new WorkRuntimeModeKernel(store, ["codex-cli", "internal"]), service: new CraftService(store) };
 }
 
-test("v0.12.19 makes Knowledge Sources, Memory Ledger, receipts and retrieval selection explicit", async () => {
+test("makes Knowledge Sources, Memory Ledger, receipts and retrieval selection explicit", async () => {
   const f = await fixture();
   try {
     f.sources.sourceRegister({ source_id: "builtin.evidence-wiki", kind: "evidence_wiki", label: "Craft Evidence Wiki", scope_kind: "user", scope_id: "local", locator: "~/.craft_data/wiki", content_digest: "builtin:evidence-wiki:v1", trust: "verified", access: "proposal_only" });
@@ -73,7 +73,7 @@ test("v0.12.19 makes Knowledge Sources, Memory Ledger, receipts and retrieval se
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("v0.12.19 keeps Console and Agent mode as a mode-neutral plan over verified work", async () => {
+test("keeps Console and Agent mode as a mode-neutral plan over verified work", async () => {
   const f = await fixture();
   try {
     assert.throws(() => f.modes.configure({ mode: "bad", allowed_hosts: [] }), /unsupported/);
@@ -124,7 +124,7 @@ test("v0.12.19 keeps Console and Agent mode as a mode-neutral plan over verified
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("v0.12.19 fails closed for untrusted, stale, restricted, malformed and drifting runtime facts", async () => {
+test("fails closed for untrusted, stale, restricted, malformed and drifting runtime facts", async () => {
   const f = await fixture();
   try {
     const trusted = f.sources.sourceRegister({ source_id: "trusted", kind: "readme", label: "README", scope_kind: "project", scope_id: "project", locator: "README.md", content_digest: "sha256:readme", trust: "bounded", access: "read_only" }).source as JsonObject;
@@ -238,7 +238,7 @@ test("v0.12.19 fails closed for untrusted, stale, restricted, malformed and drif
     assert.equal((f.service.workRuntimeModeGet({ plan_id: facadePlan.id }).plan as JsonObject).id, facadePlan.id);
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
-test("v0.12.34 resolves a body that lives in the content store and refuses a broken reference", async () => {
+test("resolves a body that lives in the content store and refuses a broken reference", async () => {
   const f = await fixture();
   try {
     const source = f.sources.sourceRegister({ source_id: "content-body", kind: "custom", label: "Content body", scope_kind: "project", scope_id: "project",
@@ -325,7 +325,7 @@ test("Context records unavailable embedding fallbacks and preserves an explicit 
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("v0.12.34 resolves named accumulated Context members without widening Memory", async () => {
+test("resolves named accumulated Context members without widening Memory", async () => {
   const f = await fixture();
   try {
     const source = f.sources.sourceRegister({ source_id: "member-source", kind: "custom", label: "Member source", scope_kind: "project", scope_id: "project", locator: "local", content_digest: "sha256:member", trust: "bounded", access: "read_only" }).source as JsonObject;

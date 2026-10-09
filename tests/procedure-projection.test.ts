@@ -74,8 +74,10 @@ test("Skill export never overwrites existing directories or symlinks and rejects
     symlinkSync(target, skills, "junction");
     assert.throws(() => f.procedures.skillExport({ procedure_id: p.id }), /skills directory must not be a symbolic link/);
     unlinkSync(skills); renameSync(`${skills}-original`, skills);
+    const prompt = f.promote(f.draft({ procedure_kind: "prompt" }));
     renameSync(root, `${root}-original`); symlinkSync(`${root}-original`, root, "junction");
-    assert.throws(() => f.procedures.skillExport({ procedure_id: p.id }), /export root must not be a symbolic link/);
+    assert.throws(() => f.procedures.skillExport({ procedure_id: p.id }), /(?:export root|Experience path) must not be a symbolic link/);
+    assert.throws(() => f.procedures.skillExport({ procedure_id: prompt.id }), /export root must not be a symbolic link/);
     unlinkSync(root); renameSync(`${root}-original`, root);
     assert.equal(f.store.count("experience_skill_export"), 0);
   } finally { f.close(); }

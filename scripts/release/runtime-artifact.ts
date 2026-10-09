@@ -4,7 +4,7 @@ import { createRequire } from "node:module";
 import { basename, dirname, resolve, sep } from "node:path";
 
 type Copy = { source: string; target: string };
-type Artifact = { npm_files: string[]; desktop_copies: Copy[] };
+type Artifact = { npm_files: string[]; runtime_copies: Copy[] };
 type RuntimePackage = { name: string; source: string };
 
 function localPath(root: string, path: string): string {
@@ -20,16 +20,17 @@ function validatePhysicalPath(root: string, path: string): void {
   if (actual !== root && !actual.startsWith(`${root}${sep}`)) throw new Error("Artifact symlink escapes project");
 }
 
-/** npm and Desktop consume one product graph; dependency collisions fail before deleting staging. */
-export async function prepareRuntimeArtifact(root: string, binary = process.execPath): Promise<string> {
+/** npm and isolated runtime bundles consume one core product graph; dependency collisions fail before deleting staging. */
+export async function prepareRuntimeArtifact(root: string, binary = process.execPath, stagingRoot = root): Promise<string> {
   root = realpathSync(root);
+  stagingRoot = realpathSync(stagingRoot);
   const artifact: Artifact = JSON.parse(await readFile(resolve(root, "runtime-artifacts.json"), "utf8"));
   const manifest = JSON.parse(await readFile(resolve(root, "package.json"), "utf8"));
   if (JSON.stringify(manifest.files) !== JSON.stringify(artifact.npm_files)) throw new Error("npm runtime artifact contract drift");
-  const output = resolve(root, "dist", "desktop", "app");
-  validatePhysicalPath(root, output);
+  const output = resolve(stagingRoot, "dist", "runtime", "app");
+  validatePhysicalPath(stagingRoot, output);
   const destinations = new Set<string>();
-  for (const entry of artifact.desktop_copies) {
+  for (const entry of artifact.runtime_copies) {
     const target = localPath(output, entry.target);
     if (destinations.has(target)) throw new Error("Duplicate artifact target");
     destinations.add(target);
@@ -76,7 +77,7 @@ export async function prepareRuntimeArtifact(root: string, binary = process.exec
   // Only this explicit, reproducible staging directory is owned by this module.
   await rm(output, { recursive: true, force: true });
   await mkdir(output, { recursive: true });
-  for (const entry of artifact.desktop_copies) {
+  for (const entry of artifact.runtime_copies) {
     const target = localPath(output, entry.target);
     await mkdir(dirname(target), { recursive: true });
     await cp(localPath(root, entry.source), target, { recursive: true });

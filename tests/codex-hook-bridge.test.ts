@@ -192,16 +192,16 @@ test("Hook bridge is fail-open for unsupported events and component failures", a
     assert.deepEqual(await bridge.handle("knowledge", { hook_event_name: "UnknownEvent", cwd: "/project/craft" }), {});
     assert.deepEqual(await bridge.handle("knowledge", { hook_event_name: "Stop", cwd: "/project/craft" }), {});
     assert.deepEqual(await bridge.handle("experience", { hook_event_name: "UserPromptSubmit", cwd: "/project/craft", user_prompt: "no stored context" }), {});
-    const original = f.service.contextResolutionResolve;
-    f.service.contextResolutionResolve = async () => { throw new Error("fixture failure"); };
+    const original = f.service.contextWorkingSets.resolve;
+    f.service.contextWorkingSets.resolve = async () => { throw new Error("fixture failure"); };
     assert.deepEqual(await bridge.handle("knowledge", { hook_event_name: "UserPromptSubmit", cwd: "/project/craft", prompt: "context" }), {});
-    f.service.contextResolutionResolve = original;
-    f.service.contextResolutionResolve = async () => ({ items: [{ memory_id: "stub", memory_version: 1, content: "stub" }], contributions: [{ items: "not-an-array" }], receipt: null }) as never;
+    f.service.contextWorkingSets.resolve = original;
+    f.service.contextWorkingSets.resolve = async () => ({ items: [{ memory_id: "stub", memory_version: 1, content: "stub" }], contributions: [{ items: "not-an-array" }], receipt: null }) as never;
     const projected = await bridge.handle("knowledge", { hook_event_name: "UserPromptSubmit", cwd: "/project/craft", prompt: "context" });
     assert.match(String(projected.additionalContext), /"receipt_id":null/u);
-    f.service.contextResolutionResolve = async () => { throw "fixture failure"; };
+    f.service.contextWorkingSets.resolve = async () => { throw "fixture failure"; };
     assert.deepEqual(await bridge.handle("knowledge", { hook_event_name: "UserPromptSubmit", cwd: "/project/craft", prompt: "context" }), {});
-    f.service.contextResolutionResolve = original;
+    f.service.contextWorkingSets.resolve = original;
     assert.equal(f.store.events("codex-hook").filter((event) => event.event_type === "codex_hook.failed").length, 2);
     assert.deepEqual(await bridge.handle("knowledge", { hook_event_name: "UserPromptSubmit", prompt: "context" }), {});
   } finally { await dispose(f); }

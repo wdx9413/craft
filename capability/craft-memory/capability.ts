@@ -15,6 +15,7 @@
  * | kernel | what it holds |
  * |---|---|
  * | `memory-ledger` | `remember`, `transition`, `compatBind`, `get` — content-addressed, Source-pinned, Evidence-checked entries |
+ * | `memory-governance` | consent policy, candidate review, conflict selection, approved commit, topic suggestions and confirmations |
  * | `memory-signals` | `memoryDecayWeight`, `rankWithDecay`, `shouldProposeMemory`, `planLegacyPromotion`, `hybridMemoryScores`, `memoryUsageEvidence` — pure functions over recall history |
  *
  * One thing that is **not** here, recorded rather than left to be discovered:
@@ -32,12 +33,13 @@
 import type { CraftCapability } from "../../common/craft-common-base/src/capability-protocol.ts";
 import { CORE_KERNELS } from "../../common/craft-common-base/src/capability-protocol.ts";
 import type { CraftStore } from "../../common/craft-common-store-local/src/store.ts";
+import { MemoryGovernanceKernel } from "./memory-governance.ts";
 import { MemoryLedgerKernel } from "./memory-ledger.ts";
 import { MemorySignalsKernel } from "./memory-signals-kernel.ts";
 import { MEMORY_OWNS } from "./ownership.ts";
 
 /** Kernel names this capability registers, and the core requires back. */
-export const MEMORY_KERNELS = { ledger: "memory.ledger", signals: "memory.signals" } as const;
+export const MEMORY_KERNELS = { ledger: "memory.ledger", signals: "memory.signals", governance: "memory.governance" } as const;
 
 /** Tool families this capability implements. Declared in `ownership.ts` beside the projection. */
 export { MEMORY_OWNS };
@@ -49,7 +51,9 @@ export const memoryCapability: CraftCapability = {
   owns: MEMORY_OWNS,
   register(registry): void {
     const store = registry.require<CraftStore>(CORE_KERNELS.store);
-    registry.provide(MEMORY_KERNELS.ledger, new MemoryLedgerKernel(store));
+    const ledger = new MemoryLedgerKernel(store);
+    registry.provide(MEMORY_KERNELS.ledger, ledger);
+    registry.provide(MEMORY_KERNELS.governance, new MemoryGovernanceKernel(store, ledger));
     registry.provide(MEMORY_KERNELS.signals, new MemorySignalsKernel(store));
   },
 };

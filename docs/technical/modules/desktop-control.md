@@ -4,7 +4,7 @@
 
 ## 安装、构建和数据
 
-从 Craft 根目录执行 pnpm install；根 workspace 和锁文件统一管理现有子项目。子项目可以有 pnpm 依赖链接。开发 node_modules 不进入发布包；桌面 staging 位于 dist/desktop/app，包含 core、capability、bin、Workbench 和运行依赖。npm 文件列表与 Desktop 拷贝图由 runtime-artifacts.json 约束；来源缺失、路径逃逸、依赖冲突在删除 staging 前失败。DeepSeek 编译与可安装元数据位于 dist/adapters/deepseek-harness。Cargo target 是独立的工具缓存。
+Workbench/Tauri 展示层现属于同级 `craft-workbench/`，桌面 staging 位于该项目的 `dist/runtime/app`，运行包只复制核心代码与依赖，页面由 Tauri 单独打包。核心 workspace 不含 desktop。这里的 Windows UIA/OCR 自动化仍保留在核心。详见 [展示层拆分说明](presentation-separation.md)。
 
 桌面主界面加载 bundled index，通过 workbench_request 访问子进程返回的固定 loopback 地址；JavaScript 不持有运行时认证 token。桥接只接受固定 HTTP 方法、/api/ 路径和有界请求。外部网页不获得主界面权限。启动超时会终止子进程，日志管道持续消费。
 

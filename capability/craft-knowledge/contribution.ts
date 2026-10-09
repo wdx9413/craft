@@ -8,14 +8,15 @@
  */
 import type { ContextContribution, ContextContributionProvider, ContextRequest } from "../../common/craft-common-base/src/capability-protocol.ts";
 import type { CraftStore, JsonObject } from "../../common/craft-common-store-local/src/store.ts";
+import { ContextReadGuard, type ContextReadRef } from "../../common/craft-common-store-local/src/context-access-guard.ts";
 import { contentReference } from "../../common/craft-common-store-local/src/content-store.ts";
 import { scopeAllows, scopeEnvelope, sourceAllows, type ScopeAccess } from "../../common/craft-common-base/src/scope-policy.ts";
 import { KeywordRetrievalPort } from "../../common/craft-common-base/src/retrieval-port.ts";
 
 function recordScope(value: unknown): { kind: string; id: string } {
   if (value === "global") return { kind: "global", id: "global" };
-  const [kind, ...rest] = String(value ?? "").split(":");
-  return { kind: kind || "project", id: rest.join(":") || "unresolved" };
+  const [kind, ...rest] = String(value).split(":");
+  return { kind, id: rest.join(":") };
 }
 
 function scopeMatches(claimScope: unknown, request: ContextRequest, projectAliases: readonly string[]): boolean {
@@ -50,20 +51,20 @@ export class KnowledgeContribution implements ContextContributionProvider {
     // A reviewed claim is not automatically trustworthy merely because its review record
     // exists.  Sources can be revoked after review; Context must fail closed in that case.
     const sources = new Map<string, JsonObject | null>();
+    const dependencies = new Map<string, { source: JsonObject; document: JsonObject | null }>();
     const sourceFor = (sourceId: string): JsonObject | null => {
       if (sources.has(sourceId)) return sources.get(sourceId)!;
       const source = this.store.find("knowledge_source", sourceId);
       if (sources.size < 10_001) sources.set(sourceId, source);
       return source;
     };
-    const projectAliases = request.scope_kind === "project"
+    const aliases = request.scope_kind === "project"
       ? this.store.list("scope_alias", 10_001, (alias) => alias.status === "active" && JSON.stringify(alias.scope) === JSON.stringify({ kind: "project", id: request.scope_id }))
-        .map((alias) => `project:${String(alias.alias)}`)
       : [];
+    const projectAliases = aliases.map(alias => `project:${String(alias.alias)}`);
     if (projectAliases.length > 10_000) throw new Error("Knowledge candidate budget exceeded; narrow project aliases");
-    // Store.list currently reads the collection, then filters before slicing. This
-    // protects scoped recall from unrelated projects; it is not a SQL paging optimization.
-    const eligible = this.store.list("knowledge_claim", 10_001, (claim) => {
+    // SQL scope selection and metadata predicates precede content hydration.
+    const eligible = this.store.listScoped("knowledge_claim", [...(request.scope_stack ?? [{ kind: request.scope_kind, id: request.scope_id }]), ...projectAliases.map(alias => recordScope(alias))], 10_001, (claim) => {
         const applicability = recordScope(claim.scope);
         if ((claim.status !== "reviewed" && !(includeCandidates && claim.status === "candidate")) || !scopeMatches(claim.scope, request, projectAliases) || !scopeAllows(scopeEnvelope(claim.scope_envelope, applicability), access(request))
           || !validAt(claim.valid_until, now)) return false;
@@ -80,20 +81,31 @@ export class KnowledgeContribution implements ContextContributionProvider {
         // Craft and does not represent an external trust assertion.
         if (!source || !sourceAllows(source, access(request))) return false;
         if (request.source_ids?.length && !request.source_ids.includes(sourceId)) return false;
-        if (claim.document_id) {
-          const document = this.store.find("knowledge_document", String(claim.document_id));
-          if (!document || document.status !== "current" || document.content_digest !== claim.document_digest) return false;
-        }
+        const document = claim.document_id ? this.store.find("knowledge_document", String(claim.document_id)) : null;
+        if (claim.document_id && (!document || document.status !== "current" || document.content_digest !== claim.document_digest)) return false;
         const review = claim.review as JsonObject | undefined;
-        return !(claim.status === "reviewed" && review?.source_digest !== undefined && review.source_digest !== source.content_digest);
+        if (claim.status === "reviewed" && review?.source_digest !== undefined && review.source_digest !== source.content_digest) return false;
+        dependencies.set(String(claim.id), { source, document }); return true;
       });
     if (eligible.length > 10_000) throw new Error("Knowledge candidate budget exceeded; narrow scope or source filters");
+    // Capture the exact authorized corpus before the first await. Dependencies are
+    // revision metadata, so SDK callers share the same read fence as Context.
+    const refs: ContextReadRef[] = aliases.map(alias => ({ kind: "scope_alias", id: String(alias.id), version: Number(alias.version) }));
+    for (const claim of eligible) {
+      refs.push({ kind: "knowledge_claim", id: String(claim.id), version: Number(claim.version) });
+      const { source, document } = dependencies.get(String(claim.id))!;
+      refs.push({ kind: "knowledge_source", id: String(source.id), version: Number(source.version) });
+      if (document) refs.push({ kind: "knowledge_document", id: String(document.id), version: Number(document.version) });
+    }
+    const guard = new ContextReadGuard(this.store, refs);
+    for (const ref of refs) guard.track(ref.kind, ref.id);
     const matches = eligible.map((claim) => {
         const content = this.content(claim);
         const haystack = `${content} ${Array.isArray(claim.tags) ? claim.tags.join(" ") : ""}`.toLowerCase();
         return { claim, content, body: haystack };
       });
     const ranking = await new KeywordRetrievalPort().search(request.query, matches.map(match => ({ id: String(match.claim.id), body: match.body })));
+    guard.assertCurrent();
     const scores = new Map(ranking.hits.map(hit => [hit.id, hit.score]));
     const ranked = matches.filter(match => request.candidate_mode || scores.has(String(match.claim.id)))
       .sort((a, b) => (scores.get(String(b.claim.id)) ?? 0) - (scores.get(String(a.claim.id)) ?? 0) || String(a.claim.id).localeCompare(String(b.claim.id)));
@@ -104,6 +116,7 @@ export class KnowledgeContribution implements ContextContributionProvider {
       if (items.length >= request.max_items) break;
       const item = {
         kind: "knowledge_claim",
+        scope: recordScope(match.claim.scope),
         claim_id: match.claim.id,
         claim_version: match.claim.version,
         status: match.claim.status,
@@ -119,6 +132,7 @@ export class KnowledgeContribution implements ContextContributionProvider {
       usedChars += size;
       items.push(item);
     }
+    guard.assertCurrent();
     return {
       member: this.member,
       items,

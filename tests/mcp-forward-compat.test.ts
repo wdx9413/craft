@@ -14,14 +14,14 @@ import {
 } from "../core/mcp-forward-compat.ts";
 
 async function server(t: { after: (fn: () => Promise<void>) => void }): Promise<McpServer> {
-  const root = join(tmpdir(), `craft-v01241-mcp-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  const root = join(tmpdir(), `craft-mcp-forward-compat-mcp-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   await mkdir(root, { recursive: true });
   const store = await new CraftStore(craftPaths(root)).open();
   t.after(async () => { store.close(); await rm(root, { recursive: true, force: true }); });
   return new McpServer(new CraftService(store));
 }
 
-test("v0.12.41 answers server/discover without claiming the target revision", () => {
+test("answers server/discover without claiming the target revision", () => {
   const discovered = discoverResult({ server_name: "craft", version: "0.12.34" });
   // The revision this build actually speaks.
   assert.equal(discovered.protocolVersion, "2025-11-25");
@@ -39,7 +39,7 @@ test("v0.12.41 answers server/discover without claiming the target revision", ()
   assert.equal((discoverResult({ server_name: "   " }).serverInfo as JsonObject).name, "craft");
 });
 
-test("v0.12.41 reads resultType the way the revision requires", () => {
+test("reads resultType the way the revision requires", () => {
   // 2026-07-28: a client MUST treat an absent field as "complete".
   const absent = normalizeResultType({});
   assert.equal(absent.resultType, "complete");
@@ -61,7 +61,7 @@ test("v0.12.41 reads resultType the way the revision requires", () => {
   assert.throws(() => normalizeResultType({ resultType: "maybe" }), /resultType is unsupported/u);
 });
 
-test("v0.12.41 does not emit a resultType it cannot honour", () => {
+test("does not emit a resultType it cannot honour", () => {
   // Emitting `resultType` while speaking 2025-11-25 would be the premature
   // declaration this project keeps catching, so it is omitted and announced.
   const out = outboundResult({ result: { tools: [] } });
@@ -74,7 +74,7 @@ test("v0.12.41 does not emit a resultType it cannot honour", () => {
   assert.deepEqual(outboundResult({}).result, {});
 });
 
-test("v0.12.41 makes ping retention conditional rather than accidental", () => {
+test("makes ping retention conditional rather than accidental", () => {
   // Serving ping is correct on every revision this build speaks.
   const current = pingPolicy({ protocol_version: "2025-11-25" });
   assert.equal(current.serve_ping, true);
@@ -91,7 +91,7 @@ test("v0.12.41 makes ping retention conditional rather than accidental", () => {
   assert.equal(pingPolicy().speaking, "2025-11-25");
 });
 
-test("v0.12.41 tolerates per-request _meta from a newer client", () => {
+test("tolerates per-request _meta from a newer client", () => {
   // A 2025-11-25 client never sends this, so reading it is purely additive.
   const none = readRequestMeta({});
   assert.equal(none.present, false);
@@ -123,7 +123,7 @@ test("v0.12.41 tolerates per-request _meta from a newer client", () => {
   assert.throws(() => readRequestMeta({ _meta: [] }), /_meta must be an object/u);
 });
 
-test("v0.12.41 reports readiness as a number and never claims compliance", () => {
+test("reports readiness as a number and never claims compliance", () => {
   const report = forwardCompatibility();
   assert.equal(report.target_revision, MCP_ASSESSED_REVISION);
   assert.equal(report.total_requirements, MCP_REVISION_REQUIREMENTS.length);
@@ -143,7 +143,7 @@ test("v0.12.41 reports readiness as a number and never claims compliance", () =>
   assert.equal(forwardCompatibility({ protocol_version: "2025-11-25" }).speaking, "2025-11-25");
 });
 
-test("v0.12.41 serves discover and tolerates _meta on the live server", async (t) => {
+test("serves discover and tolerates _meta on the live server", async (t) => {
   const mcp = await server(t);
 
   // A real `server/discover` round trip, as a 2026-07-28 client would issue it.

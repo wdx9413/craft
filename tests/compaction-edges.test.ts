@@ -22,7 +22,7 @@ const ONE = (value: string): number => Math.max(1, Math.ceil(value.length / 4));
 const seg = (id: string, content = "x", weight?: number): { id: string; role: string; content: string; weight?: number } =>
   ({ id, role: "user", content, ...(weight === undefined ? {} : { weight }) });
 
-test("v0.12.43 refuses a compaction request it cannot honour", () => {
+test("refuses a compaction request it cannot honour", () => {
   const segments = [seg("a")];
   for (const bad of [0, -1, 1.5, Number.NaN]) {
     assert.throws(() => compact({ segments, max_tokens: bad }), /max_tokens must be a positive integer/u, String(bad));
@@ -54,14 +54,14 @@ test("v0.12.43 refuses a compaction request it cannot honour", () => {
   assert.equal(empty.summary, null);
 });
 
-test("v0.12.43 reports a promotion it cannot make instead of returning a projection without it", () => {
+test("reports a promotion it cannot make instead of returning a projection without it", () => {
   const segments = [seg("big", "x".repeat(400))];
   assert.throws(() => compactWithPromotion({ segments, max_tokens: 1, estimate: ONE }, "big"), /cannot be restored within 1 tokens/u);
   // The id is checked before the budget, so a typo is reported as a typo.
   assert.throws(() => compactWithPromotion({ segments, max_tokens: 1, estimate: ONE }, ""), /does not exist/u);
 });
 
-test("v0.12.43 validates the projection and restore arguments", async () => {
+test("validates the projection and restore arguments", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-projection-edges-"));
   const store = await new CraftStore(craftPaths(root)).open();
   const kernel = new ContextProjectionKernel(store);
@@ -111,7 +111,7 @@ test("v0.12.43 validates the projection and restore arguments", async () => {
   }
 });
 
-test("v0.12.43 covers the state view's remaining rungs and edges", async () => {
+test("covers the state view's remaining rungs and edges", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-state-edges-"));
   const store = await new CraftStore(craftPaths(root)).open();
   const kernel = new StateViewKernel(store);

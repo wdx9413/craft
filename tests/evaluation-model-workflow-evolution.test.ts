@@ -12,7 +12,7 @@ import { CraftService } from "../core/service.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 
 async function fixture() {
-  const root = await mkdtemp(join(tmpdir(), "craft-v01224-")); const store = await new CraftStore(craftPaths(root)).open();
+  const root = await mkdtemp(join(tmpdir(), "craft-evaluation-model-workflow-evolution-")); const store = await new CraftStore(craftPaths(root)).open();
   const service = new CraftService(store); const evidence = service.evidenceRecord({ evidence_id: "confirmed", source_type: "program", confidence: "confirmed", claim: "sanitized outcome observed" });
   return { root, store, service, evidence };
 }
@@ -46,7 +46,7 @@ test("graph proposal retries compare validated control instead of silently chang
   } finally { await close(f); }
 });
 
-test("v0.12.24 reserves a secret-free model profile and fails closed until explicit enablement and credentials", async () => {
+test("reserves a secret-free model profile and fails closed until explicit enablement and credentials", async () => {
   const f = await fixture();
   try {
     const kernel = new EvaluationModelProfileKernel(f.store, PROVIDER_CATALOG, {});
@@ -98,7 +98,7 @@ test("v0.12.24 reserves a secret-free model profile and fails closed until expli
   } finally { await close(f); }
 });
 
-test("v0.12.24 evolves only independent sanitized evidence into a new draft Workflow and never publishes it", async () => {
+test("evolves only independent sanitized evidence into a new draft Workflow and never publishes it", async () => {
   const f = await fixture();
   try {
     assert.throws(() => f.service.workflowEvolutionObserve({ scenario_key: "x", source_kind: "external", source_id: "one", source_digest: "d", outcome: "passed", evidence_ids: ["confirmed"], sanitized: false }), /sanitized/);
@@ -135,7 +135,7 @@ test("v0.12.24 evolves only independent sanitized evidence into a new draft Work
   } finally { await close(f); }
 });
 
-test("v0.12.24 exposes a bounded Workflow Evolution plugin surface and keeps it separate from discovery and work execution", async () => {
+test("exposes a bounded Workflow Evolution plugin surface and keeps it separate from discovery and work execution", async () => {
   const f = await fixture();
   try {
     const surface = "component-experience"; const names = surfaceToolNames(surface);
@@ -149,7 +149,7 @@ test("v0.12.24 exposes a bounded Workflow Evolution plugin surface and keeps it 
   } finally { await close(f); }
 });
 
-test("v0.12.24 routes every reserved model and Workflow-evolution operation through the component MCP surface", async () => {
+test("routes every reserved model and Workflow-evolution operation through the component MCP surface", async () => {
   const f = await fixture();
   try {
     const server = new McpServer(f.service, "component-experience");
@@ -167,7 +167,7 @@ test("v0.12.24 routes every reserved model and Workflow-evolution operation thro
   } finally { await close(f); }
 });
 
-test("v0.12.24 rejects malformed evolution inputs and keeps generated drafts, ticket checks, and request identity deterministic", async () => {
+test("rejects malformed evolution inputs and keeps generated drafts, ticket checks, and request identity deterministic", async () => {
   const f = await fixture();
   try {
     const kernel = f.service.workflowEvolution;

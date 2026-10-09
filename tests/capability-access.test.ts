@@ -11,7 +11,7 @@ import { CraftService } from "../core/service.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 
 test("capability planning creates an auditable minimal activation profile and rejects unsafe assets", async () => {
-  const root = join(tmpdir(), `craft-v099-capability-${process.pid}-${Date.now()}`);
+  const root = join(tmpdir(), `craft-capability-access-capability-${process.pid}-${Date.now()}`);
   const store = await new CraftStore(craftPaths(root)).open(); const service = new CraftService(store);
   try {
     const task = service.taskOpen({ title: "Diagnose", goal: "Inspect a timeout without changing code" }).task as JsonObject;
@@ -65,8 +65,8 @@ test("capability planning creates an auditable minimal activation profile and re
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
-test("v0.9.9 diagnostic Expert bounds context, child count and host receipts", async () => {
-  const root = join(tmpdir(), `craft-v099-expert-${process.pid}-${Date.now()}`);
+test("diagnostic Expert bounds context, child count and host receipts", async () => {
+  const root = join(tmpdir(), `craft-capability-access-expert-${process.pid}-${Date.now()}`);
   const store = await new CraftStore(craftPaths(root)).open(); const service = new CraftService(store);
   try {
     const task = service.taskOpen({ title: "Diagnose", goal: "Find a failure" }).task as JsonObject;
@@ -109,8 +109,8 @@ test("v0.9.9 diagnostic Expert bounds context, child count and host receipts", a
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
-test("v0.9.9 reliability, adaptation, feedback and canary stay gated", async () => {
-  const root = join(tmpdir(), `craft-v099-eval-${process.pid}-${Date.now()}`);
+test("reliability, adaptation, feedback and canary stay gated", async () => {
+  const root = join(tmpdir(), `craft-capability-access-eval-${process.pid}-${Date.now()}`);
   await mkdir(root, { recursive: true }); const store = await new CraftStore(craftPaths(join(root, "data"))).open(); const service = new CraftService(store);
   try {
     const task = service.taskOpen({ title: "Evaluate", goal: "Compare" }).task as JsonObject;
@@ -193,8 +193,8 @@ test("v0.9.9 reliability, adaptation, feedback and canary stay gated", async () 
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
-test("v0.9.9 MCP core is compact while full mode remains compatible", async () => {
-  const root = join(tmpdir(), `craft-v099-mcp-${process.pid}-${Date.now()}`);
+test("MCP core is compact while full mode remains compatible", async () => {
+  const root = join(tmpdir(), `craft-capability-access-mcp-${process.pid}-${Date.now()}`);
   const store = await new CraftStore(craftPaths(root)).open();
   try {
     const core = new McpServer(new CraftService(store), "core"); const full = new McpServer(new CraftService(store), "full");
@@ -212,7 +212,7 @@ test("v0.9.9 MCP core is compact while full mode remains compatible", async () =
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
-test("v0.9.9 local isolation fails closed and denies network through the platform adapter", async () => {
+test("local isolation fails closed and denies network through the platform adapter", async () => {
   assert.equal(processExitCode(null), 1);
   const calls: JsonObject[] = [];
   const unavailable = new LocalIsolatedAdapter({ platform: "win32", helperAvailable: () => false });
@@ -245,7 +245,7 @@ test("v0.9.9 local isolation fails closed and denies network through the platfor
   else assert.match(output.stderr, /spawn|operation|not permitted/i);
   assert.equal((await runLocalProcess({ helper: process.execPath, argv: ["-e", "process.kill(process.pid, 'SIGTERM')"], cwd: tmpdir() })).code, 1);
   assert.equal((await runLocalProcess({ helper: "/not/a-command", argv: [], cwd: tmpdir() })).code, 1);
-  const root = join(tmpdir(), `craft-v099-isolated-${process.pid}-${Date.now()}`); const store = await new CraftStore(craftPaths(root)).open(); const service = new CraftService(store, undefined,
+  const root = join(tmpdir(), `craft-capability-access-isolated-${process.pid}-${Date.now()}`); const store = await new CraftStore(craftPaths(root)).open(); const service = new CraftService(store, undefined,
     new LocalIsolatedAdapter({ platform: "darwin", helperAvailable: () => true, runner: async () => ({ code: 0, stdout: "", stderr: "" }) }));
   try {
     const task = service.taskOpen({ title: "Isolated", goal: "Run true" }).task as JsonObject;
@@ -264,7 +264,7 @@ test("v0.9.9 local isolation fails closed and denies network through the platfor
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
-test("v0.9.9 execution policy keeps normal read work portable and restricts risky effects", () => {
+test("execution policy keeps normal read work portable and restricts risky effects", () => {
   assert.deepEqual(decideExecution({ effect: "read_only", platform: "win32" }), {
     tier: "host_read_only", autonomous: true, requires_approval: false, requires_isolation: false, reason: "read_only_host_execution",
   });

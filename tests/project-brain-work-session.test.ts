@@ -12,9 +12,9 @@ import { LongTaskWorkerKernel } from "../core/long-task-worker.ts";
 import { CraftService } from "../core/service.ts";
 import { McpServer } from "../core/mcp.ts";
 
-async function fixture() { const root = await mkdtemp(path.join(tmpdir(), "craft-v129-")); const store = await new CraftStore(craftPaths(root)).open(); return { store, brain: new ProjectBrainKernel(store) }; }
+async function fixture() { const root = await mkdtemp(path.join(tmpdir(), "craft-project-brain-work-session-")); const store = await new CraftStore(craftPaths(root)).open(); return { store, brain: new ProjectBrainKernel(store) }; }
 
-test("v0.12.12 Project Brain joins goals, decisions, materials, outcomes and experience", async () => {
+test("Project Brain joins goals, decisions, materials, outcomes and experience", async () => {
   const f = await fixture(); const brain = f.brain;
   const opened = brain.open({ project_id: "p1", name: "Video project", description: "private material" }); assert.equal(opened.idempotent, false);
   assert.equal(brain.open({ project_id: "p1", name: "Video project", description: "private material" }).idempotent, true);
@@ -149,7 +149,7 @@ test("project brain covers default identities, revisions and projection limits",
   } finally { f.store.close(); }
 });
 
-test("v0.12.12 service and MCP expose the new surfaces", async () => {
+test("service and MCP expose the new surfaces", async () => {
   // The service now exposes the default bounded model tool surface and the dispatch/session binding.
   const f = await fixture(); const service = new CraftService(f.store); const opened = service.projectBrainOpen({ project_id: "p3" }); f.store.create("task", "task3", { project_id: "p3", title: "Task", goal: "Goal", status: "active" }); service.projectBrainGoalSave({ project_id: "p3", title: "Ship" }); service.projectBrainDecisionSave({ project_id: "p3", title: "Choose", rationale: "reason", chosen_ref: "wf" }); service.projectBrainMaterialBind({ project_id: "p3", name: "brief", uri: "file:///brief", content_digest: "sha256:b" }); const prepared = service.workSessionPrepare({ project_id: "p3", task_id: "task3", session_id: "s3" }); service.workSessionGet({ session_id: "s3" }); service.workSessionRefresh({ session_id: "s3" }); f.store.create("work_launch", "launch3", { task_id: "task3", status: "prepared" }); service.workSessionBindLaunch({ session_id: "s3", launch_id: "launch3" }); service.workSessionComplete({ session_id: "s3", summary: "done" }); service.projectBrainOutcomeRecord({ project_id: "p3", session_id: "s3", verdict: "passed", summary: "done" }); service.projectBrainExperienceRecord({ project_id: "p3", name: "pattern", pattern: "pattern" }); service.workbenchExperienceQuery({ project_id: "p3" }); service.workbenchExperienceGet({ session_id: "s3" }); service.workbenchExperienceReview({ project_id: "p3" }); const checkpoint = service.longTaskSuspend({ session_id: "s3", wait_condition: "approval" }); service.longTaskGet({ checkpoint_id: (checkpoint.checkpoint as Record<string, unknown>).id }); service.longTaskList({ session_id: "s3" }); service.longTaskWake({ checkpoint_id: (checkpoint.checkpoint as Record<string, unknown>).id, signal: "approved" }); service.longTaskResume({ checkpoint_id: (checkpoint.checkpoint as Record<string, unknown>).id }); service.longTaskTick({ now: "2020-01-01T00:00:00.000Z" });
   f.store.create("trace", "mcp-trace", { task_id: "task3", status: "running", model_fingerprint: "m", environment_fingerprint: "e" }); f.store.create("trace_event", "mcp-trace:1", { trace_id: "mcp-trace", sequence: 1, event_kind: "step", action_contract: { action: "read" }, input_refs: [], output_refs: [], created_at: "2030-01-01T00:00:01Z" }); f.store.create("trace_event", "mcp-trace:2", { trace_id: "mcp-trace", sequence: 2, event_kind: "step", action_contract: { action: "write" }, input_refs: [], output_refs: [], created_at: "2030-01-01T00:00:02Z" }); f.store.create("trial", "mcp-trial", { task_id: "task3" }); f.store.create("outcome", "mcp-outcome", { trial_id: "mcp-trial", verdict: "passed" }); f.store.create("artifact", "mcp-artifact", { task_id: "task3", kind: "file" });
@@ -158,7 +158,7 @@ test("v0.12.12 service and MCP expose the new surfaces", async () => {
   assert.equal((service.info().counts as Record<string, number>).project_brain, 1); const response = await server.handle({ id: 1, method: "tools/call", params: { name: "craft_project_brain_get", arguments: { project_id: "p3" } } }); assert.equal((response?.result as Record<string, unknown>).isError, false); assert.equal((opened.brain as Record<string, unknown>).project_id, "p3"); assert.equal((prepared.session as Record<string, unknown>).project_id, "p3"); assert.ok(mcpCheckpoint); f.store.close();
 });
 
-test("v0.12.18 internal Host advertises only bounded Craft actions", async () => {
+test("internal Host advertises only bounded Craft actions", async () => {
   const f = await fixture(); const service = new CraftService(f.store);
   // The loop now addresses the full canonical catalog, but only through the
   // read/candidate tiers: it can observe and propose, never approve its own work.

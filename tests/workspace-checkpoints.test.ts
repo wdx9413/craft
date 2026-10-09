@@ -39,7 +39,7 @@ test("workspace checkpoints preserve a file-state timeline and require approval 
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
-test("v0.9.10 rejects workspace roots, paths, and snapshots that escape the declared file tree", async () => {
+test("rejects workspace roots, paths, and snapshots that escape the declared file tree", async () => {
   const root = join(tmpdir(), `craft-workspace-boundary-${process.pid}-${Date.now()}`);
   const worktree = join(root, "worktree");
   const store = await new CraftStore(craftPaths(join(root, "craft"))).open();
@@ -66,7 +66,7 @@ test("v0.9.10 rejects workspace roots, paths, and snapshots that escape the decl
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
-test("v0.9.10 covers snapshot lifecycle boundaries and exposes its read-only state in the compact MCP surface", async () => {
+test("covers snapshot lifecycle boundaries and exposes its read-only state in the compact MCP surface", async () => {
   assert.throws(() => snapshotNodeKind({ isFile: () => false, isDirectory: () => false }, "special"), /regular files/);
   const root = join(tmpdir(), `craft-workspace-lifecycle-${process.pid}-${Date.now()}`);
   const worktree = join(root, "worktree");

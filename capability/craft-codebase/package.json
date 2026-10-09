@@ -17,7 +17,15 @@
       "types": "./dist/codebase-index.d.ts",
       "default": "./dist/codebase-index.js"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./context-search": {
+      "types": "./dist/context-search.d.ts",
+      "default": "./dist/context-search.js"
+    },
+    "./repository-onboarding": {
+      "types": "./dist/repository-onboarding.d.ts",
+      "default": "./dist/repository-onboarding.js"
+    }
   },
   "files": [
     "dist",

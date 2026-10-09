@@ -7,7 +7,7 @@ import test from "node:test";
 import { promisify } from "node:util";
 import { prepareRuntimeArtifact } from "../scripts/release/runtime-artifact.ts";
 
-test("the copied runtime starts CLI and serves Workbench without source or development dependencies", async () => {
+test("the copied runtime starts CLI and token-gated API without presentation or development dependencies", async () => {
   const isolated = await mkdtemp(join(tmpdir(), "craft-runtime-install-"));
   const product = join(isolated, "app");
   try {
@@ -28,8 +28,10 @@ test("the copied runtime starts CLI and serves Workbench without source or devel
         const app = new WorkbenchWebApp(new CraftService(store), 'isolated', 'http://127.0.0.1:1');
         for (const path of ['/', '/workbench/app.js', '/workbench/runtime-client.js', '/workbench/project-page.js', '/workbench/resource-pages.js', '/workbench/model-setup.js']) {
           const response = app.handle({ method: 'GET', path });
-          if (response.status !== 200 || !response.body.length) throw new Error('Missing packaged asset: ' + path);
+          if (response.status !== 404) throw new Error('Core unexpectedly exposes UI: ' + path);
         }
+        if (app.handle({ method: 'GET', path: '/api/home' }).status !== 401) throw new Error('API lost authentication');
+        if (app.handle({ method: 'GET', path: '/api/home', token: 'isolated' }).status !== 200) throw new Error('Core API unavailable');
         console.log('isolated-runtime-ok');
       } finally { store.close(); }
     `], options);

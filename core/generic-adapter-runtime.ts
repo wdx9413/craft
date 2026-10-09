@@ -201,6 +201,9 @@ export class V01226Runtime {
   evaluatorRun(input: { evaluator_id: string; observations: JsonObject }): JsonObject { const evaluator = this.store.get("domain_evaluator", required(input.evaluator_id, "evaluator_id")); const observations = obj(input.observations, "observations"); const missing = (evaluator.criteria as string[]).filter((criterion) => observations[criterion] === undefined); return { evaluator_id: evaluator.id, verdict: missing.length ? "inconclusive" : "passed", missing, observations }; }
 }
 
+/** Semantic public name; the original export remains compatible with existing callers. */
+export { V01226Runtime as GenericAdapterRuntime };
+
 export async function importOpenApiDocument(runtime: V01226Runtime, source: string | JsonObject): Promise<JsonObject> {
   const document = typeof source === "string" ? parse(source) as JsonObject : source;
   const paths = obj(document.paths ?? {}, "paths"); const operations: JsonObject[] = [];

@@ -40,7 +40,7 @@ async function close(f: Awaited<ReturnType<typeof fixture>>) {
   await rm(f.root, { recursive: true, force: true });
 }
 
-test("v0.12.43 assembles the Experience capability from the catalog rather than in place", async () => {
+test("assembles the Experience capability from the catalog rather than in place", async () => {
   const f = await fixture();
   try {
     const { registry } = buildCapabilityRegistry(CRAFT_CAPABILITIES, f.core);
@@ -55,7 +55,7 @@ test("v0.12.43 assembles the Experience capability from the catalog rather than 
   } finally { await close(f); }
 });
 
-test("v0.12.43 fails on the kernel a removed capability owed instead of leaving it undefined", async () => {
+test("fails on the kernel a removed capability owed instead of leaving it undefined", async () => {
   const f = await fixture();
   try {
     // The property the contract exists for: a capability cannot be omitted silently.
@@ -68,7 +68,7 @@ test("v0.12.43 fails on the kernel a removed capability owed instead of leaving 
   } finally { await close(f); }
 });
 
-test("v0.12.43 refuses a capability that tries to provide the environment it runs in", async () => {
+test("refuses a capability that tries to provide the environment it runs in", async () => {
   const f = await fixture();
   try {
     const intruder: CraftCapability = {
@@ -82,7 +82,7 @@ test("v0.12.43 refuses a capability that tries to provide the environment it run
   } finally { await close(f); }
 });
 
-test("v0.12.43 claims the tool families its kernels implement and no others", async () => {
+test("claims the tool families its kernels implement and no others", async () => {
   const f = await fixture();
   // Every alternative here is served by one of the three kernels. The list is deliberately not
   // `^craft_experience_`: `craft_experience_mine`, `craft_experience_pattern_*`,
@@ -121,7 +121,7 @@ test("v0.12.43 claims the tool families its kernels implement and no others", as
   await close(f);
 });
 
-test("v0.12.43 derives the component surface from the capability so the two cannot drift", () => {
+test("derives the component surface from the capability so the two cannot drift", () => {
   // `COMPONENT_SURFACES` is a projection and `owns` is ownership. The projection may be wider
   // — it adds the context tools a Host needs to resolve what the capability stored — but never
   // narrower, because then a tool the capability exposes would be unreachable through the very
@@ -142,7 +142,7 @@ test("v0.12.43 derives the component surface from the capability so the two cann
   assert(owned.length >= 3);
 });
 
-test("v0.12.43 keeps the service working through the assembled capability", async () => {
+test("keeps the service working through the assembled capability", async () => {
   const f = await fixture();
   try {
     // The facade still exposes the three kernels, now resolved from the registry rather than

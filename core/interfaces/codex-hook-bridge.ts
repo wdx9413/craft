@@ -1,3 +1,4 @@
+import { assertContextReadCurrent } from "../context-access-guard.ts";
 /**
  * Bounded Codex lifecycle integration for Craft Context and its standalone products.
  *
@@ -209,34 +210,51 @@ export class CodexHookBridge {
     const scope = codexProjectScope(input.cwd); const prompt = text(input.prompt) ?? text(input.user_prompt);
     if (!scope || !prompt) return {};
     const members = member === "context" ? CONTEXT_MEMBERS : [member];
+    // Native Hosts need not supply turn_id. Mint a local turn for this prompt and
+    // return it to the Host; never reuse a prompt digest across different turns.
+    const sessionId = text(input.session_id);
+    if (sessionId && !text(input.turn_id)) {
+      const sessionKey = `context_hook_session_${stableDigest({ scope, session_id: sessionId }).slice(-24)}`;
+      const turnId = this.service.store.transaction(() => {
+        const prior = this.service.store.find("context_hook_session", sessionKey), sequence = Number(prior?.sequence ?? 0) + 1;
+        const generated = `hook_turn_${sessionKey.slice(-24)}_${sequence}`;
+        this.service.store.save("context_hook_session", sessionKey, { scope, session_id: sessionId, sequence, last_turn_id: generated, content_free: true }); return generated;
+      });
+      input = { ...input, session_id: sessionId, turn_id: turnId };
+    }
     // Persist the current checkout only as an alias. The receipt still names the
     // canonical Git identity, so it is portable and does not leak the path.
     if (typeof input.cwd === "string") this.service.scopeIdentityResolveProject({ project_root: input.cwd });
-    let memoryWritten = false;
+    let memoryWritten = false; let captureSummary: JsonObject | null = null;
     if (members.includes("memory")) {
       const statement = explicitMemoryStatement(prompt);
       if (statement) {
         try {
-          this.service.memoryCaptureUserStatement({ content: statement, kind: "episodic", scope_kind: scope.kind, scope_id: scope.id,
+          const captured = this.service.memoryCaptureUserStatement({ content: statement, kind: /prefer|default|默认|以后|总是|不要|优先/iu.test(statement) ? "preference" : "episodic", scope_kind: scope.kind, scope_id: scope.id,
             explicit_consent: true, auto_accept: true, sensitivity: "internal" });
-          memoryWritten = true;
+          memoryWritten = captured.auto_committed === true;
+          captureSummary = { candidate_id: (captured.candidate as JsonObject | null)?.id ?? null, next_action: captured.next_action, topic_suggestions: captured.topic_suggestions ?? [], memory_written: memoryWritten };
         } catch (error) {
           this.service.store.appendEvent("codex-hook", "codex_hook.failed", { member: "memory", event: "UserPromptSubmit", error_type: error instanceof Error ? error.name : "unknown" });
         }
       }
     }
-    const resolved = await this.service.contextResolutionResolve({ query: prompt, scope_kind: scope.kind, scope_id: scope.id,
+    const resolved = await this.service.contextWorkingSets.resolve({ query: prompt, session_id: text(input.session_id) ?? undefined, turn_id: text(input.turn_id) ?? undefined, scope_kind: scope.kind, scope_id: scope.id,
       members: [...members], max_items: 6, max_chars: 3_000 });
     const items = resolved.items as JsonObject[];
     const contributions = resolved.contributions as JsonObject[];
     const selected = [...items.map((item) => ({ type: "memory", id: item.memory_id, version: item.memory_version, content: item.content })),
       ...contributions.flatMap((contribution) => Array.isArray(contribution.items) ? contribution.items : [])];
     const receipt = resolved.receipt as JsonObject | null;
-    for (const component of members) this.service.activationProofRecord({ host: hookHost(input), component, event: "UserPromptSubmit", session_id: text(input.session_id) ?? "unknown",
-      turn_id: text(input.turn_id), context_receipt_id: receipt?.id ?? undefined, memory_written: component === "memory" && memoryWritten, observation_written: false,
-      plugin_release: CRAFT_RELEASE_VERSION, hook_trusted: true, mcp_reachable: true });
-    if (!selected.length) return {};
-    return { additionalContext: JSON.stringify({ source: `craft-${member}`, scope, receipt_id: receipt?.id ?? null, selected }) };
+    return this.service.store.transaction(() => {
+      assertContextReadCurrent(this.service.store, receipt);
+      for (const component of members) this.service.activationProofRecord({ host: hookHost(input), component, event: "UserPromptSubmit", session_id: text(input.session_id) ?? "unknown",
+        turn_id: text(input.turn_id), context_receipt_id: receipt?.id ?? undefined, memory_written: component === "memory" && memoryWritten, observation_written: false,
+        plugin_release: CRAFT_RELEASE_VERSION, hook_trusted: true, mcp_reachable: true });
+      if (!selected.length && !captureSummary) return {};
+      if (selected.length) this.service.contextWorkingSets.recordEmission({ query: prompt, session_id: text(input.session_id) ?? undefined, turn_id: text(input.turn_id) ?? undefined, scope_kind: scope.kind, scope_id: scope.id }, resolved);
+      return { additionalContext: JSON.stringify({ source: `craft-${member}`, scope, receipt_id: receipt?.id ?? null, session_id: text(input.session_id), turn_id: text(input.turn_id), memory_capture: captureSummary, selected }) };
+    });
   }
 
   private tool(input: HookInput): JsonObject {

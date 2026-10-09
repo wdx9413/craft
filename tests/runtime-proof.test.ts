@@ -12,12 +12,12 @@ import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 const d = (value: string) => `sha256:${value.repeat(64).slice(0, 64)}`;
 
 async function fixture() {
-  const root = await mkdtemp(path.join(tmpdir(), "craft-v01230-")); const store = await new CraftStore(craftPaths(root)).open(); const service = new CraftService(store);
+  const root = await mkdtemp(path.join(tmpdir(), "craft-runtime-proof-")); const store = await new CraftStore(craftPaths(root)).open(); const service = new CraftService(store);
   store.create("task", "task", { title: "runtime proof" }); store.create("evidence", "evidence", { confidence: "confirmed" });
   return { root, store, service };
 }
 
-test("v0.12.34 binds remote task operations to one tenant, principal, receipt, scope and opaque one-time handle", async () => {
+test("binds remote task operations to one tenant, principal, receipt, scope and opaque one-time handle", async () => {
   const f = await fixture();
   try {
     const tenant = f.service.remoteTenantRegister({ tenant_id: "tenant", data_space_id: "space", key_envelope_ref: "kms:key", retention_policy_ref: "retention:v1", deletion_policy_ref: "delete:v1" }).tenant as JsonObject;
@@ -51,7 +51,7 @@ test("v0.12.34 binds remote task operations to one tenant, principal, receipt, s
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("v0.12.34 verifies a real JWKS-signed OIDC resource token without retaining it", async () => {
+test("verifies a real JWKS-signed OIDC resource token without retaining it", async () => {
   const keys = generateKeyPairSync("rsa", { modulusLength: 2048 }); const jwk = keys.publicKey.export({ format: "jwk" }) as JsonObject; jwk.kid = "key"; jwk.use = "sig";
   const header = Buffer.from(JSON.stringify({ alg: "RS256", kid: "key" })).toString("base64url"); const claims = Buffer.from(JSON.stringify({ iss: "https://issuer.example.test/", aud: ["craft"], sub: "subject", scope: "craft.read craft.write", client_id: "client", exp: 1_900_000_000 })).toString("base64url");
   const signature = sign("RSA-SHA256", Buffer.from(`${header}.${claims}`), keys.privateKey).toString("base64url"); const token = `${header}.${claims}.${signature}`;
@@ -98,7 +98,7 @@ test("OIDC JWKS verifier fails closed for malformed metadata, keys, claims, and 
   assert.equal((await explicit(make({ alg: "RS256", kid: "key" }, base))).subject, "subject");
 });
 
-test("v0.12.34 keeps publisher signatures separate from capability activation and makes drift fail closed", async () => {
+test("keeps publisher signatures separate from capability activation and makes drift fail closed", async () => {
   const f = await fixture();
   try {
     const keys = generateKeyPairSync("ed25519"); const publicKey = keys.publicKey.export({ type: "spki", format: "pem" }).toString(); const subjectDigest = d("c");
@@ -111,7 +111,7 @@ test("v0.12.34 keeps publisher signatures separate from capability activation an
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("v0.12.34 accepts only observed two-Host/two-Case five-trial evidence before default activation", async () => {
+test("accepts only observed two-Host/two-Case five-trial evidence before default activation", async () => {
   const f = await fixture();
   try {
     const plan = f.service.runtimeAcceptancePlan({ plan_id: "plan", case_ids: ["code", "file"], host_ids: ["codex", "other"], baseline_harness: "single", candidate_harness: "retrieval", environment_fingerprint: "env", budget_fingerprint: "budget", trials_per_pair: 5, observer_kind: "workspace" }).plan as JsonObject;
@@ -160,7 +160,7 @@ test("runtime acceptance rejects malformed, mismatched and incomplete observatio
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("v0.12.34 adapts A2A v1 only through a consumed read-only delegation grant", async () => {
+test("adapts A2A v1 only through a consumed read-only delegation grant", async () => {
   const f = await fixture();
   try {
     f.store.create("federated_delegation_grant", "grant", { status: "consumed", effect: "read_only", grant_digest: d("g") });

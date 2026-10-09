@@ -7,7 +7,7 @@ import { checkFor, evalCases, evaluationSuite } from "../core/eval-cases.ts";
 const anyCase = (id: string, axis = "memory", evidence = "kernel"): JsonObject =>
   ({ id, axis, evidence, partition: "held_out", sanitized: true, approved_by: "reviewer", description: `case ${id}` });
 
-test("v0.12.42 refuses a unit test outside the capability ledger", () => {
+test("refuses a unit test outside the capability ledger", () => {
   // The category error that inflated the end-to-end axis: a case graded from a
   // synthetic input shows nothing about behaviour, so it cannot belong to a ledger
   // that claims to measure behaviour. Any ledger other than `capability` is such a
@@ -27,7 +27,7 @@ test("v0.12.42 refuses a unit test outside the capability ledger", () => {
   assert.throws(() => defineEvalCase(anyCase("x", "memory", "vibes")), /evidence is unsupported/u);
 });
 
-test("v0.12.42 enforces every held-out rule the existing contract enforces", () => {
+test("enforces every held-out rule the existing contract enforces", () => {
   const defined = defineEvalCase(anyCase("a"));
   assert.equal(defined.partition, "held_out");
   assert.equal(defined.sanitized, true);
@@ -44,7 +44,7 @@ test("v0.12.42 enforces every held-out rule the existing contract enforces", () 
   assert.throws(() => defineEvalCase({ axis: "memory", evidence: "kernel", partition: "held_out", sanitized: true, approved_by: "r", description: "d" }), /id must not be empty/u);
 });
 
-test("v0.12.42 makes a suite content-addressed and axis-accounted", () => {
+test("makes a suite content-addressed and axis-accounted", () => {
   const suite = defineEvalSuite({ suite_id: "s", version: "1", cases: [anyCase("b"), anyCase("a", "knowledge")] });
   assert.equal(suite.case_count, 2);
   // Sorted by id, so case order cannot change an identity.
@@ -73,7 +73,7 @@ test("v0.12.42 makes a suite content-addressed and axis-accounted", () => {
   assert.throws(() => defineEvalSuite({ version: "1", cases: [anyCase("a")] }), /suite_id must not be empty/u);
 });
 
-test("v0.12.42 never counts an unobserved case as a failure or a pass", () => {
+test("never counts an unobserved case as a failure or a pass", () => {
   // An unreachable endpoint or a refusal is not a capability gap, and counting
   // it as one would turn an outage into a finding about the system.
   const unobserved = gradeCase({ case_id: "a", observed: false });
@@ -100,7 +100,7 @@ test("v0.12.42 never counts an unobserved case as a failure or a pass", () => {
   assert.throws(() => gradeCase({ observed: true, passed: true }), /case_id must not be empty/u);
 });
 
-test("v0.12.42 never emits a single number across both ledgers", () => {
+test("never emits a single number across both ledgers", () => {
   // The whole point of the ledger shape. A run where capability passes and no
   // behavioural case ran must NOT produce a headline that could be quoted — that is
   // how "13/13" hides "nothing about the output was measured".
@@ -159,7 +159,7 @@ test("v0.12.42 never emits a single number across both ledgers", () => {
   assert.doesNotMatch(String(withModel.quotable_reason), /safety/u);
 });
 
-test("v0.12.42 can quote a headline once every ledger is observed", () => {
+test("can quote a headline once every ledger is observed", () => {
   // The current axis-to-ledger map gives no axis to `value`, so `defineEvalSuite`
   // cannot produce this input today. It is still a legal input to the summariser,
   // and it must work the moment a real value case exists — otherwise adding one
@@ -186,7 +186,7 @@ test("v0.12.42 can quote a headline once every ledger is observed", () => {
   assert.equal((report.value as JsonObject).sufficient_evidence, true);
 });
 
-test("v0.12.42 counts model observations rather than describing them", () => {
+test("counts model observations rather than describing them", () => {
   // A capability case is graded from a kernel result even when a model was involved
   // elsewhere in the run, so only genuine behavioural observations count.
   const suite = defineEvalSuite({ suite_id: "s", version: "1", cases: [
@@ -207,7 +207,7 @@ test("v0.12.42 counts model observations rather than describing them", () => {
   assert.equal(report.quotable, false);
 });
 
-test("v0.12.42 reports every rate with its denominator", () => {
+test("reports every rate with its denominator", () => {
   const suite = defineEvalSuite({ suite_id: "s", version: "1", cases: [anyCase("a"), anyCase("b"), anyCase("c", "knowledge"), anyCase("d", "workflow")] });
   const report = summarizeSuiteRun({ suite, results: [
     gradeCase({ case_id: "a", observed: true, passed: true }),
@@ -236,7 +236,7 @@ test("v0.12.42 reports every rate with its denominator", () => {
   assert.equal((report.value as JsonObject).observed, 0);
 });
 
-test("v0.12.42 refuses results that would distort the denominator", () => {
+test("refuses results that would distort the denominator", () => {
   const suite = defineEvalSuite({ suite_id: "s", version: "1", cases: [anyCase("a"), anyCase("b")] });
   // A result for an unknown case would inflate the score.
   assert.throws(() => summarizeSuiteRun({ suite, results: [gradeCase({ case_id: "ghost", observed: true, passed: true })] }),
@@ -256,7 +256,7 @@ test("v0.12.42 refuses results that would distort the denominator", () => {
   assert.throws(() => summarizeSuiteRun({ suite: { suite_id: "s" }, results: [gradeCase({ case_id: "a", observed: true, passed: true })] }), /suite\.cases must be a non-empty array/u);
 });
 
-test("v0.12.43 defines a well-formed suite over every axis and ledger", () => {
+test("defines a well-formed suite over every axis and ledger", () => {
   const suite = evaluationSuite();
   assert.equal(suite.suite_id, "craft.subcapabilities");
   const byAxis = suite.by_axis as JsonObject;
@@ -295,7 +295,7 @@ test("v0.12.43 defines a well-formed suite over every axis and ledger", () => {
   }
 });
 
-test("v0.12.43 gives every case a deterministic byte-level check", () => {
+test("gives every case a deterministic byte-level check", () => {
   // The grading rule for the whole suite: no case may be decided by opinion.
   for (const entry of evalCases()) {
     assert.ok(["equals", "contains"].includes(entry.check.kind), `${entry.case.id} has no byte-level check`);

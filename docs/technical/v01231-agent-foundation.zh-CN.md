@@ -20,6 +20,6 @@ Workflow DAG 支持 action、condition、parallel、human_gate、retry、compens
 
 ## 运行验证
 
-- `tests/v01231-agent-foundation.test.ts` 覆盖 Candidate/Conflict/TTL、DAG/Checkpoint/漂移和 Task Event/Projection/并发保护。
+- `tests/agent-foundation.test.ts` 覆盖 Candidate/Conflict/TTL、DAG/Checkpoint/漂移和 Task Event/Projection/并发保护。
 - `pnpm typecheck` 验证全量 TypeScript 类型。
 - 生产远程 State Adapter、Secret Broker、对象存储、OIDC/JWKS 和分布式 Lease 仅保留契约与本地 conformance，不构成部署证明。

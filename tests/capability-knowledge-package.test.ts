@@ -1,3 +1,4 @@
+import { KnowledgeClaimGovernance } from "../capability/craft-knowledge/claim-governance.ts";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -46,16 +47,16 @@ async function close(f: Awaited<ReturnType<typeof fixture>>) {
 }
 
 const KERNEL_CLASSES = [
-  KnowledgeSourceRegistry, KnowledgeWorkbenchKernel, KnowledgeBoundLaunchKernel, KnowledgeRelationKernel,
+  KnowledgeClaimGovernance, KnowledgeSourceRegistry, KnowledgeWorkbenchKernel, KnowledgeBoundLaunchKernel, KnowledgeRelationKernel,
   WikiCandidateGovernanceKernel, LocalCandidateImportKernel, ProjectKnowledgeKernel, ProjectBrainKernel,
 ];
 
-test("v0.12.43 assembles the Knowledge capability from the catalog rather than in place", async () => {
+test("assembles the Knowledge capability from the catalog rather than in place", async () => {
   const f = await fixture();
   try {
     const { registry } = buildCapabilityRegistry(CRAFT_CAPABILITIES, f.core);
     const instances = Object.values(KNOWLEDGE_KERNELS).map((name) => registry.require<{ store: CraftStore }>(name));
-    assert.equal(instances.length, 8);
+    assert.equal(instances.length, 9);
     // Each registered kernel is one of the eight classes, and every class is registered — so a
     // kernel added to the package without a name, or a name without a kernel, fails here.
     assert.deepEqual(
@@ -66,7 +67,7 @@ test("v0.12.43 assembles the Knowledge capability from the catalog rather than i
   } finally { await close(f); }
 });
 
-test("v0.12.43 fails on the kernel a removed capability owed instead of leaving it undefined", async () => {
+test("fails on the kernel a removed capability owed instead of leaving it undefined", async () => {
   const f = await fixture();
   try {
     const { registry } = buildCapabilityRegistry([], f.core);
@@ -77,7 +78,7 @@ test("v0.12.43 fails on the kernel a removed capability owed instead of leaving 
   } finally { await close(f); }
 });
 
-test("v0.12.43 claims the families its kernels implement and no others", async () => {
+test("claims the families its kernels implement and no others", async () => {
   // Each of these is backed by one of the eight kernels, checked against `craft-service.ts`.
   for (const owned of [
     "craft_relation_relate", "craft_relation_traverse", "craft_knowledge_workbench_view",
@@ -95,7 +96,7 @@ test("v0.12.43 claims the families its kernels implement and no others", async (
   // facade or by `wiki-candidate-governance.ts` rather than by a kernel this package assembles;
   // the rest belong to other members or to the shared context plane.
   for (const foreign of [
-    "craft_knowledge_claim_save", "craft_wiki_page_save", "craft_knowledge_evaluation_run",
+    "craft_wiki_page_save", "craft_knowledge_evaluation_run",
     "craft_memory_ledger_remember", "craft_context_resolution_resolve", "craft_retrieval_adapter_evaluate",
   ]) assert(!KNOWLEDGE_OWNS.test(foreign), `${foreign} must not be owned`);
 
@@ -116,7 +117,7 @@ test("v0.12.43 claims the families its kernels implement and no others", async (
   } finally { await close(f); }
 });
 
-test("v0.12.43 keeps the Knowledge projection at exactly the name space it promised", () => {
+test("keeps the Knowledge projection at exactly the name space it promised", () => {
   const surface = COMPONENT_SURFACES["component-knowledge"];
   assert(surface, "component-knowledge must be a declared surface");
 
@@ -144,7 +145,7 @@ test("v0.12.43 keeps the Knowledge projection at exactly the name space it promi
   assert(exposed.includes("craft_project_brain_open"));
 });
 
-test("v0.12.43 owns the Source registry now that it no longer shares a class with memory", () => {
+test("owns the Source registry now that it no longer shares a class with memory", () => {
   // This test replaces one that asserted the opposite. Before the split the Source registry lived
   // in `knowledge-memory-runtime.ts`, one class serving this member's Sources *and* memory's
   // Ledger writes, so the capability could not own them and the product projected them on the
@@ -160,11 +161,11 @@ test("v0.12.43 owns the Source registry now that it no longer shares a class wit
   }
   // And the tool the facade still implements stays projected-but-unowned, so the distinction
   // this test used to draw is still drawn somewhere.
-  assert(!KNOWLEDGE_OWNS.test("craft_knowledge_claim_save"));
+  assert(KNOWLEDGE_OWNS.test("craft_knowledge_claim_save"));
   assert(exposed.includes("craft_knowledge_claim_save"));
 });
 
-test("v0.12.43 composes the Context product from both members without restating them", () => {
+test("composes the Context product from both members without restating them", () => {
   const context = COMPONENT_SURFACES["component-context"];
   const previous = /^craft_(wiki|knowledge|claim|relation|memory|context_resolution|decision_context_gate|retrieval_adapter)/;
   const exposed = surfaceToolNames("component-context");
@@ -178,7 +179,7 @@ test("v0.12.43 composes the Context product from both members without restating 
   assert(!context.test("craft_workflow_evolution_observe"));
 });
 
-test("v0.12.43 keeps the service working through the assembled capability", async () => {
+test("keeps the service working through the assembled capability", async () => {
   const f = await fixture();
   try {
     // Two behaviours from two different kernels in the package, through the facade, prove the

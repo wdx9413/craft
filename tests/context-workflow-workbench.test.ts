@@ -117,7 +117,7 @@ test("actual resolution pins knowledge and procedure references; revoked sources
     assert.equal(request("GET", `/api/workbench/workflow-designs/${id}?scope=project:demo`).status, 200);
     assert.equal(request("GET", `/api/workbench/workflow-designs/${id}?scope=project:other`).status, 422);
     assert.equal(request("GET", "/api/workbench/workflow-designs?scope=project:demo").status, 200);
-    assert.equal(request("GET", "/workbench/context-workflows.js").status, 200);
+    assert.equal(request("GET", "/workbench/context-workflows.js").status, 404);
     f.store.create("memory_ledger", "retire-me", { scope: { kind: "project", id: "demo" }, status: "active", content: "export", source_id: "source", kind: "episodic", sensitivity: "internal" });
     assert.equal(request("POST", "/api/workbench/context-retire", { scope_kind: "project", scope_id: "demo", member: "memory", id: "retire-me", expected_version: 1 }).status, 200);
     assert.equal(f.store.get("memory_ledger", "retire-me").status, "revoked");

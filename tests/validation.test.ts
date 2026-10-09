@@ -32,7 +32,7 @@ import {
  * | `sortedUniqueList` | absent unless `required` | rejected | **sorted** |
  */
 
-test("v0.12.43 reads a non-empty trimmed string", () => {
+test("reads a non-empty trimmed string", () => {
   assert.equal(text("  value  ", "name"), "value");
   assert.equal(text("x", "name"), "x");
   for (const bad of [undefined, null, "", "   ", 1, true, {}, []]) {
@@ -40,7 +40,7 @@ test("v0.12.43 reads a non-empty trimmed string", () => {
   }
 });
 
-test("v0.12.43 reads a plain object and refuses arrays and null", () => {
+test("reads a plain object and refuses arrays and null", () => {
   const value = { a: 1 };
   assert.equal(object(value, "name"), value);
   assert.deepEqual(object({}, "name"), {});
@@ -51,7 +51,7 @@ test("v0.12.43 reads a plain object and refuses arrays and null", () => {
   }
 });
 
-test("v0.12.43 distinguishes the three list contracts", () => {
+test("distinguishes the three list contracts", () => {
   // `list`: `undefined` is an absent optional field, and a repeat is tolerated.
   assert.deepEqual(list(undefined, "f"), []);
   assert.deepEqual(list(["b", "a", "b"], "f"), ["b", "a", "b"]);
@@ -85,7 +85,7 @@ test("v0.12.43 distinguishes the three list contracts", () => {
   assert.deepEqual(sortedUniqueList([], "f", true), [], "an empty array is still an array");
 });
 
-test("v0.12.43 records why stateful-compute keeps its own stricter strings", async () => {
+test("records why stateful-compute keeps its own stricter strings", async () => {
   // The divergence is a contract difference, not a spelling difference, and this is the assertion
   // that keeps the recorded reason honest: `stateful-compute.ts` throws for `required: true` with
   // an empty array, and `sortedUniqueList` does not. If that module is ever migrated, this test
@@ -97,7 +97,7 @@ test("v0.12.43 records why stateful-compute keeps its own stricter strings", asy
   assert.deepEqual(sortedUniqueList([], "f", true), []);
 });
 
-test("v0.12.43 reads a scope and refuses an unsupported kind", () => {
+test("reads a scope and refuses an unsupported kind", () => {
   assert.deepEqual([...SCOPE_KINDS], ["user", "project", "workspace", "task", "session", "team", "organization", "global"]);
   assert.deepEqual(parseScope({ scope_kind: "project", scope_id: "p" }), { kind: "project", id: "p" });
   for (const kind of SCOPE_KINDS) assert.equal(parseScope({ scope_kind: kind, scope_id: "x" }).kind, kind);
@@ -110,7 +110,7 @@ test("v0.12.43 reads a scope and refuses an unsupported kind", () => {
   assert.throws(() => parseScope({}), /scope_kind/u);
 });
 
-test("v0.12.43 refuses an assigned credential but not the words alone", () => {
+test("refuses an assigned credential but not the words alone", () => {
   assert.equal(noCredentialAssignment("ordinary text", "field"), "ordinary text");
   // A secret-like *assignment* is refused in each spelling the pattern covers.
   for (const bad of [
@@ -125,7 +125,7 @@ test("v0.12.43 refuses an assigned credential but not the words alone", () => {
   assert.equal(noCredentialAssignment("token=short", "field"), "token=short");
 });
 
-test("v0.12.43 records the authorization-header gap it does not close", () => {
+test("records the authorization-header gap it does not close", () => {
   // Found by writing this test, and recorded rather than fixed: the pattern requires eight
   // non-space characters *immediately* after the separator, and a scheme word is shorter than
   // that. So the most recognisable credential form there is slips through.
@@ -137,7 +137,7 @@ test("v0.12.43 records the authorization-header gap it does not close", () => {
   // blast radius rather than a drive-by fix during a split. Pinned here so it cannot be lost.
 });
 
-test("v0.12.43 keeps the shared helpers from widening what a caller refuses", async () => {
+test("keeps the shared helpers from widening what a caller refuses", async () => {
   // The two look-alike guards that were deliberately **not** merged, asserted so the reason stays
   // true. `guided-work.ts` matches a different pattern with a different message, and
   // `project-knowledge.ts` guards four terms instead of six and returns nothing.
@@ -155,7 +155,7 @@ test("v0.12.43 keeps the shared helpers from widening what a caller refuses", as
   assert.match(project, /function recordDigest\(value: unknown\): string/u);
 });
 
-test("v0.12.34 an absent scope is reported rather than searched, and a half scope still fails", () => {
+test("an absent scope is reported rather than searched, and a half scope still fails", () => {
   // A read-only resolution must not fail a turn because the Host could not name a scope, and it
   // must not fall back to searching every scope either.
   assert.equal(optionalScope({}), null);
@@ -166,7 +166,7 @@ test("v0.12.34 an absent scope is reported rather than searched, and a half scop
   assert.throws(() => optionalScope({ scope_id: "p" }), /scope_kind/u);
 });
 
-test("v0.12.34 the shared default helpers keep absence and null apart", () => {
+test("the shared default helpers keep absence and null apart", () => {
   assert.equal(fallback(undefined, "d"), "d");
   assert.equal(fallback("v", "d"), "v");
   // `null` is a value, not an absence: a default must not replace it.

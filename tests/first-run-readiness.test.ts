@@ -19,11 +19,11 @@ import {
 } from "../core/distribution-and-first-run.ts";
 
 async function workspace(): Promise<{ root: string; cleanup: () => Promise<void> }> {
-  const root = await mkdtemp(path.join(tmpdir(), "craft-v01233-"));
+  const root = await mkdtemp(path.join(tmpdir(), "craft-first-run-readiness-"));
   return { root, cleanup: () => rm(root, { recursive: true, force: true }) };
 }
 
-test("v0.12.34 resolves credentials so an installed overlay outranks the ambient environment", () => {
+test("resolves credentials so an installed overlay outranks the ambient environment", () => {
   const ambient: NodeJS.ProcessEnv = { DEEPSEEK_API_KEY: "from-machine", ARK_API_KEY: "keep" };
   const overlay: NodeJS.ProcessEnv = { DEEPSEEK_API_KEY: "pasted-in-studio", EMPTY: "" };
   const resolved = createCredentialResolver([ambient, overlay]).env;
@@ -35,7 +35,7 @@ test("v0.12.34 resolves credentials so an installed overlay outranks the ambient
   assert.deepEqual(createCredentialResolver([]).env, {});
 });
 
-test("v0.12.34 reports first-run readiness as a user-facing metric", () => {
+test("reports first-run readiness as a user-facing metric", () => {
   const models: JsonObject[] = [
     { id: "a", apiKeyEnv: "DEEPSEEK_API_KEY" },
     { id: "b", apiKeyEnv: "OPENAI_API_KEY" }
@@ -88,7 +88,7 @@ test("v0.12.34 reports first-run readiness as a user-facing metric", () => {
   assert.equal(partly.remedy, null);
 });
 
-test("v0.12.34 negotiates the MCP protocol version and records a downgrade instead of hiding it", () => {
+test("negotiates the MCP protocol version and records a downgrade instead of hiding it", () => {
   for (const version of MCP_PROTOCOL_VERSIONS) {
     const negotiation = negotiateProtocolVersion(version);
     assert.equal(negotiation.negotiated, version);
@@ -116,7 +116,7 @@ test("v0.12.34 negotiates the MCP protocol version and records a downgrade inste
   assert.equal(negotiateProtocolVersion(42).reason, "client_did_not_negotiate");
 });
 
-test("v0.12.34 refuses to adopt the 2026-07-28 revision while MRTR and Tasks are unresolved", () => {
+test("refuses to adopt the 2026-07-28 revision while MRTR and Tasks are unresolved", () => {
   const blocked = assessMcpMigration({ has_durable_tasks: true });
   assert.equal(blocked.status, "blocked");
   assert.equal((blocked.blocking as string[]).length, 2);
@@ -137,7 +137,7 @@ test("v0.12.34 refuses to adopt the 2026-07-28 revision while MRTR and Tasks are
   assert.equal(assessMcpMigration({}).status, "blocked");
 });
 
-test("v0.12.34 states platform isolation honestly, including that Windows is not enforced", () => {
+test("states platform isolation honestly, including that Windows is not enforced", () => {
   const darwin = isolationCapability("darwin");
   assert.equal(darwin.enforced, true);
   assert.equal(darwin.autonomous_generated_code, true);
@@ -157,26 +157,18 @@ test("v0.12.34 states platform isolation honestly, including that Windows is not
   assert.throws(() => isolationCapability("plan9"), /Unsupported platform/u);
 });
 
-test("v0.12.34 answers where a user actually downloads the desktop build", () => {
-  const unavailable = distributionPlan({ version: "0.12.34", repository: "wdx9413/craft" });
-  assert.equal(unavailable.user_download_available, false);
-  assert.equal(unavailable.channel, "developer_command_only");
-  assert.equal((unavailable.assets as JsonObject[]).every((asset) => asset.url === null), true);
-  assert.deepEqual(unavailable.remainder, ["publish a GitHub release so assets are attached", "build the DMG on a native macOS runner"]);
-
-  const available = distributionPlan({ version: "0.12.34", repository: "wdx9413/craft", release_assets_available: true });
-  assert.equal(available.user_download_available, true);
-  assert.equal(available.channel, "github_release_asset");
-  assert.deepEqual(available.remainder, []);
-  const windows = (available.assets as JsonObject[])[0]!;
-  assert.match(String(windows.url), /releases\/download\/v0\.12\.34\/craft-workbench-windows-v0\.12\.34\.zip$/u);
-  const macos = (available.assets as JsonObject[])[1]!;
-  assert.equal(macos.requires_runner, "macos-latest");
-
+test("desktop downloads stay paused after presentation moves out of core", () => {
+  const plan = distributionPlan({ version: "0.12.39", repository: "wdx9413/craft" });
+  assert.equal(plan.user_download_available, false);
+  assert.equal(plan.channel, "separate_project");
+  assert.equal(plan.presentation_status, "paused");
+  assert.equal(plan.project, "craft-workbench");
+  assert.deepEqual(plan.assets, []);
+  assert.deepEqual(distributionPlan({ version: "0.12.39", repository: "wdx9413/craft", release_assets_available: true }), plan);
   assert.throws(() => distributionPlan({ repository: "a/b" }), /version must not be empty/u);
 });
 
-test("v0.12.34 reads a launcher-written credential file and never leaks values into its report", async () => {
+test("reads a launcher-written credential file and never leaks values into its report", async () => {
   const space = await workspace();
   try {
     const missing = readCredentialFile(path.join(space.root, "absent.env"));
@@ -227,7 +219,7 @@ test("v0.12.34 reads a launcher-written credential file and never leaks values i
   }
 });
 
-test("v0.12.34 feeds a credential file straight into readiness for a desktop first run", async () => {
+test("feeds a credential file straight into readiness for a desktop first run", async () => {
   const space = await workspace();
   try {
     const file = path.join(space.root, "credentials.env");

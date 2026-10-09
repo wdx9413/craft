@@ -16,7 +16,7 @@ import {
 const constraint = (id: string, effect = "external_write"): JsonObject =>
   ({ id, kind: "prohibited_effect", statement: `Never ${effect} outside the company domain`, effect, scope: "company" });
 
-test("v0.12.40 renders a deterministic pin block", () => {
+test("renders a deterministic pin block", () => {
   const block = pinConstraints([constraint("no-external-email"), constraint("no-prod-drop", "destructive")]);
   // Sorted by id, so two callers listing the same rules in different orders get
   // the same digest — otherwise a re-ordered list would look like a policy change.
@@ -39,7 +39,7 @@ test("v0.12.40 renders a deterministic pin block", () => {
   assert.equal(defineConstraint({ id: "x", kind: "prohibited_effect", statement: "s", effect: "e" }).scope, "*");
 });
 
-test("v0.12.40 takes constraints out of the eviction competition", () => {
+test("takes constraints out of the eviction competition", () => {
   // The whole defence: a constraint is NOT ranked against task state. Here the
   // budget fits one small segment, and the constraint is far larger than it.
   const plan = compactionPlan({
@@ -71,7 +71,7 @@ test("v0.12.40 takes constraints out of the eviction competition", () => {
   assert.equal(tight.constraints_preserved, true);
 });
 
-test("v0.12.40 never silently protects an undeclared rule", () => {
+test("never silently protects an undeclared rule", () => {
   // `declared-rule` is a real constraint that has no matching segment in the
   // context, so it is reported as unbound rather than quietly treated as
   // satisfied. `undeclared-rule` is a segment that LOOKS like a constraint but
@@ -89,7 +89,7 @@ test("v0.12.40 never silently protects an undeclared rule", () => {
   assert.deepEqual(plan.kept, ["undeclared-rule"]);
 });
 
-test("v0.12.40 defaults what the caller left out instead of failing", () => {
+test("defaults what the caller left out instead of failing", () => {
   // A segment with no weight defaults to 1 and no tokens is estimated from its
   // content, so a caller supplying raw text is not forced to pre-compute both.
   const plan = compactionPlan({
@@ -132,7 +132,7 @@ test("v0.12.40 defaults what the caller left out instead of failing", () => {
   assert.throws(() => defineConstraint({}), /kind must not be empty/u);
 });
 
-test("v0.12.40 rejects unusable compaction inputs", () => {
+test("rejects unusable compaction inputs", () => {
   const base = { constraints: [constraint("c")], segments: [] };
   assert.throws(() => compactionPlan({ ...base, max_tokens: 10, segments: "nope" }), /segments must be an array/u);
   assert.throws(() => compactionPlan({ ...base, max_tokens: 0 }), /max_tokens must be a positive integer/u);
@@ -143,7 +143,7 @@ test("v0.12.40 rejects unusable compaction inputs", () => {
   assert.throws(() => compactionPlan({ max_tokens: 10, segments: [] }), /constraints must be a non-empty array/u);
 });
 
-test("v0.12.40 verifies integrity by content, not by presence", () => {
+test("verifies integrity by content, not by presence", () => {
   const block = pinConstraints([constraint("no-external-email")]);
   const intact = verifyPinIntact({ constraints: [constraint("no-external-email")], rendered: block.text });
   assert.equal(intact.intact, true);
@@ -169,7 +169,7 @@ test("v0.12.40 verifies integrity by content, not by presence", () => {
   assert.throws(() => verifyPinIntact({ rendered: "x" }), /constraints must be a non-empty array/u);
 });
 
-test("v0.12.40 attributes decay to the constraint only when it caused it", () => {
+test("attributes decay to the constraint only when it caused it", () => {
   // The measurement from the paper: same request, same model, only context differs.
   const decay = detectConstraintDecay({ violated_before_compaction: false, violated_after_compaction: true, constraint_dropped: true });
   assert.equal(decay.decay_detected, true);
@@ -194,7 +194,7 @@ test("v0.12.40 attributes decay to the constraint only when it caused it", () =>
   assert.throws(() => detectConstraintDecay({ violated_before_compaction: false, violated_after_compaction: true, constraint_dropped: "yes" }), /constraint_dropped must be a boolean/u);
 });
 
-test("v0.12.40 reports which channel a constraint travels on", () => {
+test("reports which channel a constraint travels on", () => {
   // Craft has no system channel, so its governance lives on the compacted ones.
   const risk = constraintChannelRisk({ channels: ["memory", "tool_output"] });
   assert.equal(risk.exposure, 78);
@@ -213,7 +213,7 @@ test("v0.12.40 reports which channel a constraint travels on", () => {
   assert.throws(() => constraintChannelRisk({}), /must be a non-empty array/u);
 });
 
-test("v0.12.40 exposes the read half to the loop and keeps pinning governed", async (t) => {
+test("exposes the read half to the loop and keeps pinning governed", async (t) => {
   // The asymmetry is the point: the loop must be able to CHECK its guardrail,
   // but must not be able to REDEFINE one.
   const mounted = new Set(DEFAULT_INTERNAL_AUTHORIZATION);
@@ -227,7 +227,7 @@ test("v0.12.40 exposes the read half to the loop and keeps pinning governed", as
     assert.equal(authorizedTools(TOOLS, DEFAULT_INTERNAL_AUTHORIZATION).some((tool) => tool.name === name), true, `${name} missing from the projection`);
   }
 
-  const root = join(tmpdir(), `craft-v01240-mcp-${process.pid}-${Date.now()}`);
+  const root = join(tmpdir(), `craft-governance-pinning-mcp-${process.pid}-${Date.now()}`);
   await mkdir(root, { recursive: true });
   const store = await new CraftStore(craftPaths(root)).open();
   t.after(async () => { store.close(); await rm(root, { recursive: true, force: true }); });

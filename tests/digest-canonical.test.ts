@@ -37,13 +37,13 @@ const GOLDEN: ReadonlyArray<[string, unknown, string]> = [
   ["deep", { l1: { l2: { l3: { l4: { l5: "bottom" } } } } }, "sha256:e2896e2d7d965dabf25a845479e8c738d50c3b39318a3646b2ce4041e3fa2cb5"],
 ];
 
-test("v0.12.43 keeps the digests the 18 merged copies produced", () => {
+test("keeps the digests the 18 merged copies produced", () => {
   for (const [name, value, expected] of GOLDEN) {
     assert.equal(stableDigest(value), expected, `${name} changed identity`);
   }
 });
 
-test("v0.12.43 states the difference between a stable digest and a JSON digest", () => {
+test("states the difference between a stable digest and a JSON digest", () => {
   // The reason this module exports two names instead of one `digest`. Key order is the whole
   // difference, so the case that shows it is a permutation — for `{a:1}` the two agree, and
   // asserting they always differ would be false.
@@ -56,7 +56,7 @@ test("v0.12.43 states the difference between a stable digest and a JSON digest",
   assert.equal(digestJson({ a: 1 }), sha256Of(JSON.stringify({ a: 1 })));
 });
 
-test("v0.12.43 serializes arrays in order and object keys in sorted order", () => {
+test("serializes arrays in order and object keys in sorted order", () => {
   assert.equal(canonicalJson([]), "[]");
   assert.equal(canonicalJson([1, [2, 3]]), "[1,[2,3]]");
   // Array order is meaning, so it is preserved; key order is not, so it is normalized.
@@ -83,7 +83,7 @@ test("v0.12.43 serializes arrays in order and object keys in sorted order", () =
   assert.notEqual(stableDigest({ a: undefined }), stableDigest({}));
 });
 
-test("v0.12.43 keeps record payloads free of the store's own bookkeeping", () => {
+test("keeps record payloads free of the store's own bookkeeping", () => {
   // Identity digests are computed over the remainder: `id`, `version` and the timestamps say
   // where a record lives, not what it says.
   assert.deepEqual(payload({ id: "a", version: 2, created_at: "t", updated_at: "t", content: 1 }), { content: 1 });
@@ -93,7 +93,7 @@ test("v0.12.43 keeps record payloads free of the store's own bookkeeping", () =>
   assert.deepEqual(payload({ Id: "a", Version: 1, content: 2 }), { Id: "a", Version: 1, content: 2 });
 });
 
-test("v0.12.34 a payload does not return a body that lives behind a content reference", () => {
+test("a payload does not return a body that lives behind a content reference", () => {
   // The body moved to the content store, so returning a stale copy of it would hand a caller
   // text no digest protects.
   assert.deepEqual(payload({ id: "a", version: 1, content: "inline", content_ref: { path: "x" } }), { content_ref: { path: "x" } });

@@ -41,7 +41,19 @@
       "types": "./dist/project-brain.d.ts",
       "default": "./dist/project-brain.js"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./claim-governance": {
+      "types": "./dist/claim-governance.d.ts",
+      "default": "./dist/claim-governance.js"
+    },
+    "./knowledge-source-registry": {
+      "types": "./dist/knowledge-source-registry.d.ts",
+      "default": "./dist/knowledge-source-registry.js"
+    },
+    "./contribution": {
+      "types": "./dist/contribution.d.ts",
+      "default": "./dist/contribution.js"
+    }
   },
   "files": [
     "dist",

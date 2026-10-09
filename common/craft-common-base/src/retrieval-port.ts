@@ -49,8 +49,9 @@ export class OpenAiCompatibleEmbeddingRetrievalPort implements RetrievalPort {
   readonly endpoint: string; readonly model: string; readonly credentialEnv: string;
   readonly cachePath?: string;
   readonly revision: string;
-  constructor(configuration: JsonObject, cachePath?: string) {
-    this.cachePath = cachePath;
+  readonly beforeRequest?: () => void;
+  constructor(configuration: JsonObject, cachePath?: string, beforeRequest?: () => void) {
+    this.cachePath = cachePath; this.beforeRequest = beforeRequest;
     this.revision = typeof configuration.model_revision === "string" ? configuration.model_revision : "unversioned";
     this.endpoint = typeof configuration.endpoint === "string" ? configuration.endpoint : "";
     this.model = typeof configuration.model === "string" ? configuration.model : "";
@@ -90,6 +91,7 @@ export class OpenAiCompatibleEmbeddingRetrievalPort implements RetrievalPort {
         }
         const inputs = batch.map(cacheKey => input[cacheKeys.indexOf(cacheKey)]!);
         unavailableReason = "embedding_request_failed";
+        this.beforeRequest?.();
         const response = await fetch(this.endpoint, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${key}` }, body: JSON.stringify({ model: this.model, input: inputs }), signal: AbortSignal.any([deadline, AbortSignal.timeout(10_000)]) });
         if (!response.ok) { unavailableReason = `http_${response.status}`; throw new Error(unavailableReason); }
         unavailableReason = "invalid_embedding_response";
@@ -104,6 +106,7 @@ export class OpenAiCompatibleEmbeddingRetrievalPort implements RetrievalPort {
       // A provider may change dimensions between requests while retaining its model name.
       // Reject the mixed result before caching it; existing valid entries remain intact.
       if (new Set(vectors.map(vector => vector.length)).size !== 1) throw new Error("invalid_embedding_response");
+      this.beforeRequest?.(); // Do not publish embeddings computed from a revoked corpus.
       if (database) {
         database.exec("BEGIN IMMEDIATE");
         try {

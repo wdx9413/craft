@@ -1,3 +1,4 @@
+import { activeProcedure } from "../../../capability/craft-experience/procedure-release.ts";
 import type { CraftStore, JsonObject } from "../../infrastructure/store.ts";
 import { payload, stableDigest } from "../../digest.ts";
 import { object, text } from "../../validation.ts";
@@ -73,7 +74,11 @@ export class ComponentAssets {
         && (array(receipt.memory_refs).some(ref => ref.memory_id === current.id) || array(receipt.contributions).some(part => array(part.references).some(ref => ref.id === current.id)));
     });
     const feedback = this.store.list("context_feedback", 101, item => receipts.some(r => r.id === item.receipt_id));
-    const details: JsonObject = {};
+    const corrections = this.store.list("context_correction_task", 100, task => {
+      const ref = task.asset_ref as JsonObject;
+      return task.status === "pending_review" && ref.member === member && (member === "codebase" ? ref.index_id === current.id : ref.id === current.id);
+    });
+    const details: JsonObject = { corrections: corrections.map(task => ({ id: task.id, outcome: task.outcome, asset_ref: task.asset_ref, status: task.status })) };
     if (member === "knowledge" && source) {
       const documents = this.store.list("knowledge_document", 101, doc => doc.source_id === source.id);
       details.documents = documents.slice(0, 100).map(doc => ({ id: doc.id, path: doc.path, status: doc.status, content_digest: doc.content_digest })); details.documents_truncated = documents.length > 100;
@@ -87,6 +92,8 @@ export class ComponentAssets {
       details.feedback = feedback.slice(0, 100).map(f => ({ outcome: f.outcome, evidence_verified: f.evidence_verified === true }));
     }
     if (member === "experience") {
+      const active = activeProcedure(this.store, String(current.id));
+      details.release = { current_record_version: active?.version ?? null, test_record_version: current.lifecycle === "candidate" ? current.version : null };
       details.configuration = procedureDefinitionRef(current.definition_ref) ? new ProcedureDefinitionStore(this.store.paths).read(current.definition_ref).definition : null;
       details.invocations = this.store.list("procedure_invocation", 20, r => r.procedure_id === current.id && r.scope === current.scope).map(r => ({ id: r.id, lifecycle: r.lifecycle, procedure_version: r.procedure_version, definition_digest: r.definition_digest, subscenario_id: r.subscenario_id, graph_state: r.graph_state, dispatch_count: r.dispatch_count, max_dispatches: r.max_dispatches }));
       details.gates = this.store.list("experience_procedure_gate", 100, g => g.procedure_id === current.id);

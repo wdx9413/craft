@@ -195,6 +195,5 @@
   "core/workflow-registry.ts",
   "core/workflow.ts",
   "core/workspace-observer.ts",
-  "core/workspace.ts",
-  "workbench/app.js"
+  "core/workspace.ts"
 ]

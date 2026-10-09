@@ -14,6 +14,8 @@ import { join, resolve } from "node:path";
 import type { CraftStore, JsonObject } from "../../common/craft-common-store-local/src/store.ts";
 import { stableDigest, payload } from "../../common/craft-common-base/src/digest.ts";
 import { ProcedureDefinitionStore, procedureDefinitionRef, type ProcedureDefinition, type ProcedureKind } from "./procedure-definition.ts";
+import { activeProcedure, preserveProcedureRelease, updateProcedureRelease, selectedProcedure } from "./procedure-release.ts";
+import { syncGraphVersionManifest } from "./graph-version-manifest.ts";
 import { ProcedurePlanner, validateProcedureComposition } from "./procedure-composition.ts";
 import { scopeEnvelope } from "../../common/craft-common-base/src/scope-policy.ts";
 
@@ -48,6 +50,11 @@ export class ProcedureStore {
 
   /** Create a candidate Procedure from an existing bounded proposal record. */
   draft(args: JsonObject): JsonObject {
+    const result = this.draftCandidate(args), procedure = result.procedure as JsonObject;
+    return procedureDefinitionRef(procedure.definition_ref) ? { ...result, ...syncGraphVersionManifest(this.store, String(procedure.id)) } : result;
+  }
+
+  private draftCandidate(args: JsonObject): JsonObject {
     const proposal = this.store.get("workflow_evolution_proposal", text(args.proposal_id, "proposal_id"));
     const request = this.store.get("workflow_evolution_request", String(proposal.request_id), Number(proposal.request_version));
     const procedureKind = text(args.procedure_kind ?? proposal.procedure_kind ?? "workflow", "procedure_kind");
@@ -105,7 +112,20 @@ export class ProcedureStore {
 
   /** Persist one independently evidenced promotion gate. Gates are ordered and append-only. */
   gate(args: JsonObject): JsonObject {
-    return this.store.transaction(() => this.recordGate(args));
+    const result = this.store.transaction(() => {
+      if (args.release_channel !== "current") return this.recordGate(args);
+      if (args.passed !== false || args.stage !== "canary") throw new Error("Current release operation only supports explicit canary revocation");
+      const active = activeProcedure(this.store, text(args.procedure_id, "procedure_id"));
+      if (!active || args.expected_version !== active.version) throw new Error("Current release version conflict or unavailable");
+      const evidenceIds = strings(args.evidence_ids, "evidence_ids", 1); evidenceIds.forEach(id => this.assertEvidence(id));
+      preserveProcedureRelease(this.store, active);
+      const release = this.store.get("experience_release", String(active.id));
+      this.store.save("experience_release", String(active.id), { ...payload(release), status: "revoked", evidence_ids: evidenceIds });
+      const latest = this.store.get("experience_procedure", String(active.id));
+      if (latest.routeable === true) this.store.save("experience_procedure", String(active.id), { ...payload(latest), lifecycle: "rolled_back", routeable: false });
+      return { procedure: this.store.get("experience_procedure", String(active.id)), release_revoked: true, candidate_preserved: latest.routeable !== true };
+    }), procedure = result.procedure as JsonObject;
+    return procedureDefinitionRef(procedure.definition_ref) ? { ...result, ...syncGraphVersionManifest(this.store, String(procedure.id)) } : result;
   }
 
   private recordGate(args: JsonObject): JsonObject {
@@ -148,13 +168,19 @@ export class ProcedureStore {
     const next = passed ? [...STAGES.slice(0, expected), stage] : [];
     const lifecycle = !passed ? (stage === "canary" ? "rolled_back" : "rejected") : stage === "canary" ? "routeable" : "candidate";
     const saved = this.store.save("experience_procedure", String(procedure.id), { ...payload(procedure), completed_gates: next, lifecycle, routeable: lifecycle === "routeable", rollback_gate_id: lifecycle === "rolled_back" ? gate.id : null });
+    updateProcedureRelease(this.store, saved);
     this.refreshMarkdown(saved);
     return { gate, procedure: saved, idempotent: false };
   }
 
   plan(args: JsonObject): JsonObject { return new ProcedurePlanner(this.store).plan(args); }
 
-  get(args: JsonObject): JsonObject { return { procedure: this.store.get("experience_procedure", text(args.procedure_id, "procedure_id")) }; }
+  get(args: JsonObject): JsonObject {
+    const id = text(args.procedure_id, "procedure_id");
+    const procedure = args.release_channel === undefined ? this.store.get("experience_procedure", id, args.version === undefined ? undefined : Number(args.version)) : selectedProcedure(this.store, id, args.release_channel);
+    if (!procedure) throw new Error("Procedure release unavailable");
+    return { procedure };
+  }
 
   list(args: JsonObject = {}): JsonObject {
     const scope = args.scope === undefined ? null : text(args.scope, "scope");
@@ -163,8 +189,8 @@ export class ProcedureStore {
 
   /** Export only a routeable Procedure and keep it disabled until a Host installs it. */
   skillExport(args: JsonObject): JsonObject {
-    const procedure = this.store.get("experience_procedure", text(args.procedure_id, "procedure_id"));
-    if (procedure.lifecycle !== "routeable" || procedure.routeable !== true) throw new Error("Only routeable Experience Procedures can be exported as Skills");
+    const procedure = activeProcedure(this.store, text(args.procedure_id, "procedure_id"));
+    if (!procedure || procedure.lifecycle !== "routeable" || procedure.routeable !== true) throw new Error("Only routeable Experience Procedures can be exported as Skills");
     const exportId = String(args.export_id ?? `experience_skill_export_${stableDigest({ procedure_id: procedure.id, version: procedure.version }).slice(-20)}`);
     const definition = procedureDefinitionRef(procedure.definition_ref) ? this.definitions.read(procedure.definition_ref) : null;
     if (!procedure.content_ref && !definition) throw new Error("Procedure has no checked export content");

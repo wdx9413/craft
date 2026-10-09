@@ -9,7 +9,7 @@ import { detectEnvironmentBlocker, findShortfall, parseCoverageRows } from "./co
  * `scripts/test.ts` covers the common case: every test, one run, 100% line and
  * function coverage across all of `src/`. A subset of modules is held to a
  * stricter standard, including branch coverage, and that subset used to live one
- * release at a time in `package.json` -- `test:v01216` ... `test:v01242`, each
+ * group at a time in `package.json`, each
  * hard-coding both its modules and its test files. Two consequences made it
  * worth replacing: renaming a module broke its gate silently, and every release
  * added another script plus another `&&` to the aggregate chain.

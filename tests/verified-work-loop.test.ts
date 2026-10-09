@@ -238,7 +238,7 @@ test("Verified Work Loop pauses progress assumptions after repeated identical ru
   } finally { await Promise.all(f.store.list("host_run", 100).map((run) => f.service.hostRuns.wait(String(run.id)))); f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("v0.12.3 retains deterministic rejection and idempotency branches", async () => {
+test("retains deterministic rejection and idempotency branches", async () => {
   const f = await fixture();
   let directHostRunId = "";
   try {

@@ -30,7 +30,11 @@
       "types": "./dist/store.d.ts",
       "default": "./dist/store.js"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./context-access-guard": {
+      "types": "./dist/context-access-guard.d.ts",
+      "default": "./dist/context-access-guard.js"
+    }
   },
   "files": [
     "dist",

@@ -1,5 +1,8 @@
 # Craft 分层与目录地图
 
+> 2026-10-08 更新：展示源码 `workbench/`、`desktop/` 已迁到同级 `craft-workbench/`，下文的展示层架构属于该可选项目。核心构建不再依赖它们。见 [拆分说明](../technical/modules/presentation-separation.md)。
+
+
 ## 当前可发布包边界
 
 `craft-agent-harness` 是宿主/编排包，不是子能力的运行时基础库。当前依赖方向为：
@@ -42,7 +45,7 @@ craft-common-store-local → 无 Craft 包依赖
 
 ## 依赖方向由脚本强制
 
-`scripts/ci/audit-layering.ts`（`pnpm run audit:layering`）使用 TypeScript AST 检查静态导入、字面量动态导入、再导出目的地与运行时循环：**内层不得导入外层**。审计覆盖 core、capability、adapters、bin、workbench 和 desktop 的 Node 源码，生成目录不参与。Rust 平台桥接由原生构建与测试验证，不把 Node 导入图当作 Rust 验证。
+`scripts/ci/audit-layering.ts`（`pnpm run audit:layering`）使用 TypeScript AST 检查静态导入、字面量动态导入、再导出目的地与运行时循环：**内层不得导入外层**。核心审计覆盖 common、core、capability、adapters、bin 和 scripts/release 的 Node 源码，生成目录不参与。Rust 平台桥接由原生构建与测试验证，不把 Node 导入图当作 Rust 验证。
 
 向上导入与运行时循环直接失败；当前没有导入豁免。兼容再导出入口允许保留，但消费者按实际目的地判层，不能借 barrel 绕过检查。稳定 CLI 入口按接口层判定；craft-eval 是评测 Harness，不是可选领域内核。
 

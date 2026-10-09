@@ -59,7 +59,7 @@ test("shared object graphs invalidate dependents and prevent stale writes", asyn
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
-test("v0.10.0 assembles attributable bounded context and preserves memory history", async () => {
+test("assembles attributable bounded context and preserves memory history", async () => {
   const root = join(tmpdir(), `craft-memory-${process.pid}-${Date.now()}`);
   const worktree = join(root, "worktree");
   const store = await new CraftStore(craftPaths(join(root, "craft"))).open();
@@ -124,7 +124,7 @@ test("v0.10.0 assembles attributable bounded context and preserves memory histor
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
-test("v0.10.0 rejects malformed workbench state and cross-workspace dependencies", async () => {
+test("rejects malformed workbench state and cross-workspace dependencies", async () => {
   const root = join(tmpdir(), `craft-workbench-errors-${process.pid}-${Date.now()}`);
   const worktree = join(root, "worktree");
   const store = await new CraftStore(craftPaths(join(root, "craft"))).open();

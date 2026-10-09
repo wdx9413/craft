@@ -7,3 +7,4 @@ export * from "./retrieval-terms.ts";
 export * from "./retrieval-port.ts";
 export * from "./bm25.ts";
 export * from "./model-compat.ts";
+export * from "./context-assets.ts";

@@ -8,7 +8,7 @@ import { CraftService } from "../core/service.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 
 test("promotion separates cost from duration and is required before a Workflow becomes verified", async () => {
-  const root = join(tmpdir(), `craft-v097-promotion-${process.pid}-${Date.now()}`);
+  const root = join(tmpdir(), `craft-promotion-gates-promotion-${process.pid}-${Date.now()}`);
   const store = await new CraftStore(craftPaths(root)).open(); const service = new CraftService(store);
   try {
     const task = service.taskOpen({ title: "Promotion", goal: "Compare exactly" }).task as JsonObject;
@@ -57,7 +57,7 @@ test("promotion separates cost from duration and is required before a Workflow b
 });
 
 test("runtime adapters can lease and report only their declared controlled operations", async () => {
-  const root = join(tmpdir(), `craft-v097-adapter-${process.pid}-${Date.now()}`);
+  const root = join(tmpdir(), `craft-promotion-gates-adapter-${process.pid}-${Date.now()}`);
   const store = await new CraftStore(craftPaths(root)).open(); const service = new CraftService(store);
   try {
     const task = service.taskOpen({ title: "Adapter", goal: "Host work stays attributable" }).task as JsonObject;

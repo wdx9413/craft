@@ -40,7 +40,7 @@ test("control-plane budgets reserve and settle resources idempotently", async ()
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
-test("v0.10.2 prevents hierarchical budget oversell and settles child actuals into the parent", async () => {
+test("prevents hierarchical budget oversell and settles child actuals into the parent", async () => {
   const root = join(tmpdir(), `craft-budget-tree-${process.pid}-${Date.now()}`); const store = await new CraftStore(craftPaths(root)).open();
   const service = new CraftService(store);
   try {
@@ -76,7 +76,7 @@ test("v0.10.2 prevents hierarchical budget oversell and settles child actuals in
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
-test("v0.10.2 releases waiting environments and revalidates state before resume", async () => {
+test("releases waiting environments and revalidates state before resume", async () => {
   const root = join(tmpdir(), `craft-wait-${process.pid}-${Date.now()}`); const worktree = join(root, "worktree");
   const store = await new CraftStore(craftPaths(join(root, "craft"))).open(); const service = new CraftService(store);
   try {
@@ -112,7 +112,7 @@ test("v0.10.2 releases waiting environments and revalidates state before resume"
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
-test("v0.10.2 ingests untrusted external events idempotently and wakes only exact waits", async () => {
+test("ingests untrusted external events idempotently and wakes only exact waits", async () => {
   const root = join(tmpdir(), `craft-events-${process.pid}-${Date.now()}`); const worktree = join(root, "worktree");
   const store = await new CraftStore(craftPaths(join(root, "craft"))).open(); const service = new CraftService(store);
   try {
@@ -146,7 +146,7 @@ test("v0.10.2 ingests untrusted external events idempotently and wakes only exac
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
-test("v0.10.2 sweeps due time waits in bounded batches and fails closed without current policy", async () => {
+test("sweeps due time waits in bounded batches and fails closed without current policy", async () => {
   const root = join(tmpdir(), `craft-time-sweep-${process.pid}-${Date.now()}`); const store = await new CraftStore(craftPaths(root)).open();
   const service = new CraftService(store);
   try {
@@ -171,7 +171,7 @@ test("v0.10.2 sweeps due time waits in bounded batches and fails closed without 
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
-test("v0.10.2 bounds fallback by trigger, attempts, and reserved budget through MCP", async () => {
+test("bounds fallback by trigger, attempts, and reserved budget through MCP", async () => {
   const root = join(tmpdir(), `craft-fallback-${process.pid}-${Date.now()}`); const store = await new CraftStore(craftPaths(root)).open();
   const service = new CraftService(store);
   try {

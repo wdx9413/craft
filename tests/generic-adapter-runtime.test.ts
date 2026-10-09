@@ -6,12 +6,12 @@ import { join } from "node:path";
 import test from "node:test";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftStore } from "../core/infrastructure/store.ts";
-import { V01226Runtime, defineAdapterManifest, importOpenApiDocument, type CommandSpawner } from "../core/generic-adapter-runtime.ts";
+import { GenericAdapterRuntime, defineAdapterManifest, importOpenApiDocument, type CommandSpawner } from "../core/generic-adapter-runtime.ts";
 import type { JsonObject } from "../core/infrastructure/store.ts";
 import { CraftService } from "../core/service.ts";
 import { McpServer } from "../core/mcp.ts";
 
-async function fixture() { const root = await mkdtemp(join(tmpdir(), "craft-v01226-")); const store = await new CraftStore(craftPaths(root)).open(); return { root, store, runtime: new V01226Runtime(store) }; }
+async function fixture() { const root = await mkdtemp(join(tmpdir(), "craft-generic-adapter-runtime-")); const store = await new CraftStore(craftPaths(root)).open(); return { root, store, runtime: new GenericAdapterRuntime(store) }; }
 async function close(f: Awaited<ReturnType<typeof fixture>>) { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 
 function fakeSpawner(code = 0): CommandSpawner {
@@ -34,7 +34,7 @@ function errorSpawner(): CommandSpawner {
   }) as unknown as CommandSpawner;
 }
 
-test("v0.12.26 generic adapter manifest lifecycle is governed and reversible", async () => {
+test("generic adapter manifest lifecycle is governed and reversible", async () => {
   const f = await fixture(); try {
     assert.throws(() => defineAdapterManifest({ adapter_id: "", version: "1", kind: "command" }), /adapter_id/);
     assert.throws(() => defineAdapterManifest({ adapter_id: "bad", version: "1", kind: "bad" as never }), /unsupported/);
@@ -61,9 +61,9 @@ test("v0.12.26 generic adapter manifest lifecycle is governed and reversible", a
   } finally { await close(f); }
 });
 
-test("v0.12.26 command adapter plans and returns receipts on all platforms", async () => {
+test("command adapter plans and returns receipts on all platforms", async () => {
   const f = await fixture(); try {
-    f.runtime = new V01226Runtime(f.store, fakeSpawner());
+    f.runtime = new GenericAdapterRuntime(f.store, fakeSpawner());
     assert.throws(() => f.runtime.commandPlan({ argv: [] }), /argv/);
     assert.throws(() => f.runtime.commandPlan({ argv: ["echo"], effect: "destructive", shell: "/bin/sh" }), /approval/);
     const plan = f.runtime.commandPlan({ argv: [process.execPath, "-e", "console.log('ok')"] }); assert.equal((plan.plan as { status: string }).status, "planned");
@@ -75,13 +75,13 @@ test("v0.12.26 command adapter plans and returns receipts on all platforms", asy
     assert.equal(f.runtime.commandCancel(String((completed.run as { id: string }).id)).idempotent, true);
     assert.throws(() => f.runtime.commandObserve("missing"), /Unknown/);
     const shell = await f.runtime.commandRun({ argv: ["echo shell-ok"], shell: process.platform === "win32" ? "cmd.exe" : "/bin/sh", effect: "read_only" }); assert.equal((shell.receipt as { status: string }).status, "completed");
-    const slow = new V01226Runtime(f.store, slowSpawner()); const pending = slow.commandRun({ run_id: "cancel-run", argv: ["wait"] }); await new Promise<void>((resolve) => setImmediate(resolve)); assert.equal(slow.commandCancel("cancel-run").requested, true); assert.equal((await pending).receipt && ((await pending).receipt as { status: string }).status, "cancelled");
-    const timed = new V01226Runtime(f.store, slowSpawner()); assert.equal(((await timed.commandRun({ run_id: "timeout-run", argv: ["wait"], timeout_ms: 100 })).receipt as { status: string }).status, "cancelled");
-    const errored = new V01226Runtime(f.store, errorSpawner()); assert.equal(((await errored.commandRun({ run_id: "error-run", argv: ["bad"] })).receipt as { status: string }).status, "failed");
+    const slow = new GenericAdapterRuntime(f.store, slowSpawner()); const pending = slow.commandRun({ run_id: "cancel-run", argv: ["wait"] }); await new Promise<void>((resolve) => setImmediate(resolve)); assert.equal(slow.commandCancel("cancel-run").requested, true); assert.equal((await pending).receipt && ((await pending).receipt as { status: string }).status, "cancelled");
+    const timed = new GenericAdapterRuntime(f.store, slowSpawner()); assert.equal(((await timed.commandRun({ run_id: "timeout-run", argv: ["wait"], timeout_ms: 100 })).receipt as { status: string }).status, "cancelled");
+    const errored = new GenericAdapterRuntime(f.store, errorSpawner()); assert.equal(((await errored.commandRun({ run_id: "error-run", argv: ["bad"] })).receipt as { status: string }).status, "failed");
   } finally { await close(f); }
 });
 
-test("v0.12.26 context projection, durable runtime, trust, routing, delivery and portability", async () => {
+test("context projection, durable runtime, trust, routing, delivery and portability", async () => {
   const f = await fixture(); try {
     const context = f.runtime.contextManifestSave({ manifest_id: "ctx", project_id: "p", knowledge_refs: ["k"], capability_refs: ["c"], workflow_refs: [], excluded_refs: [] }); assert.equal((context.manifest as { manifest_id: string }).manifest_id, "ctx"); assert.equal((f.runtime.contextManifestSave({ manifest_id: "ctx" }) as { idempotent: boolean }).idempotent, true);
     const projection = f.runtime.capabilityProject({ candidates: [{ id: "a", capability: "a", token_cost: 3 }, { id: "b", capability: "b", token_cost: 10 }], required: ["a"], token_budget: 5 }); assert.deepEqual((projection.selected as Array<{ id: string }>).map((item) => item.id), ["a"]); assert.equal((projection.excluded as Array<{ reason: string }>)[0].reason, "not_required");
@@ -104,7 +104,7 @@ test("v0.12.26 context projection, durable runtime, trust, routing, delivery and
   } finally { await close(f); }
 });
 
-test("v0.12.26 OpenAPI importer creates read/write adapter contracts", async () => {
+test("OpenAPI importer creates read/write adapter contracts", async () => {
   const f = await fixture(); try {
     const imported = await importOpenApiDocument(f.runtime, "openapi: 3.0.0\ninfo:\n  title: Demo API\npaths:\n  /items:\n    get:\n      operationId: listItems\n    post:\n      operationId: createItem\n"); const manifest = imported.manifest as { kind: string; metadata: { operations: Array<{ effect: string }> } }; assert.equal(manifest.kind, "openapi"); assert.deepEqual(manifest.metadata.operations.map((item) => item.effect), ["read", "external_write"]);
     await assert.rejects(importOpenApiDocument(f.runtime, { openapi: "3.0.0", paths: {} }), /no operations/);
@@ -113,13 +113,13 @@ test("v0.12.26 OpenAPI importer creates read/write adapter contracts", async () 
   } finally { await close(f); }
 });
 
-test("v0.12.26 Service and MCP expose the shared runtime without a second execution model", async () => {
+test("Service and MCP expose the shared runtime without a second execution model", async () => {
   const f = await fixture(); try {
     const service = new CraftService(f.store); const manifest = { adapter_id: "svc.command", version: "1", kind: "command", platforms: ["any"], capabilities: ["command.run"], permissions: [], effects: ["read_only"], signature: "ed25519:test" };
     service.adapterManifestSave(manifest); service.adapterManifestGet({ adapter_id: "svc.command" }); service.adapterManifestList({}); service.adapterHealth({ adapter_id: "svc.command" }); service.adapterConformance({ adapter_id: "svc.command" }); service.adapterQuarantine({ adapter_id: "svc.command", reason: "test" }); service.adapterRollback({ adapter_id: "svc.command" });
     const manifestPath = join(f.root, "service-adapter.json"); await writeFile(manifestPath, JSON.stringify({ ...manifest, adapter_id: "svc.file" })); await service.adapterInstall({ manifest_path: manifestPath });
     const plan = service.commandPlan({ argv: ["echo", "service"] }); const run = await service.commandRun({ argv: [process.execPath, "-e", "console.log('service')"] }); service.commandObserve({ run_id: String((run.run as { id: string }).id) }); service.commandCancel({ run_id: String((run.run as { id: string }).id) }); await service.commandRetry({ run_id: String((run.run as { id: string }).id) });
-    service.contextManifestV01226Save({ manifest_id: "svc-context", project_id: "p", task_id: "t" }); service.capabilityProjection({ candidates: [{ id: "c", token_cost: 1 }] }); service.durableRunStart({ run_id: "svc-durable" }); service.durableRunTick({ owner: "svc" }); service.durableRunComplete({ run_id: "svc-durable", status: "completed" }); service.durableRunRecover({}); service.trustCurveRecord({ scope: "svc", passed: 1, failed: 0 }); service.modelRouteV01226({ candidates: [{ id: "m", quality: 1 }] }); service.deliveryGateV01226({ artifacts: ["a"], evidence: ["e"] }); service.taskHandoffManifest({ context_manifest: { id: "c" }, host: { id: "h" }, task: { id: "t" } }); new V01226Runtime(f.store).evaluatorDefine({ evaluator_id: "svc-eval", domain: "general", criteria: ["ok"] }); service.domainEvaluatorRun({ evaluator_id: "svc-eval", observations: { ok: true } }); await service.openApiImport({ document: "openapi: 3.0.0\npaths:\n  /x:\n    get: {}\n" });
+    service.contextManifestV01226Save({ manifest_id: "svc-context", project_id: "p", task_id: "t" }); service.capabilityProjection({ candidates: [{ id: "c", token_cost: 1 }] }); service.durableRunStart({ run_id: "svc-durable" }); service.durableRunTick({ owner: "svc" }); service.durableRunComplete({ run_id: "svc-durable", status: "completed" }); service.durableRunRecover({}); service.trustCurveRecord({ scope: "svc", passed: 1, failed: 0 }); service.modelRouteV01226({ candidates: [{ id: "m", quality: 1 }] }); service.deliveryGateV01226({ artifacts: ["a"], evidence: ["e"] }); service.taskHandoffManifest({ context_manifest: { id: "c" }, host: { id: "h" }, task: { id: "t" } }); new GenericAdapterRuntime(f.store).evaluatorDefine({ evaluator_id: "svc-eval", domain: "general", criteria: ["ok"] }); service.domainEvaluatorRun({ evaluator_id: "svc-eval", observations: { ok: true } }); await service.openApiImport({ document: "openapi: 3.0.0\npaths:\n  /x:\n    get: {}\n" });
     const mcp = new McpServer(service, "full"); const call = async (name: string, arguments_: Record<string, unknown>) => mcp.handle({ jsonrpc: "2.0", id: name, method: "tools/call", params: { name, arguments: arguments_ } });
     await call("craft_adapter_manifest_save", { adapter_id: "mcp.command", version: "1", kind: "command" }); await call("craft_adapter_manifest_get", { adapter_id: "mcp.command" }); await call("craft_adapter_manifest_list", {}); await call("craft_adapter_health", { adapter_id: "mcp.command" }); await call("craft_adapter_conformance", { adapter_id: "mcp.command" }); await call("craft_adapter_quarantine", { adapter_id: "mcp.command", reason: "test" }); await call("craft_adapter_rollback", { adapter_id: "mcp.command" });
     await call("craft_command_plan", { argv: ["echo", "mcp"] }); const mcpRun = await call("craft_command_run", { argv: [process.execPath, "-e", "console.log('mcp')"] }); const mcpPayload = mcpRun?.result as { structuredContent?: { run?: { id: string } } } | undefined; const mcpRunId = String(mcpPayload?.structuredContent?.run?.id ?? ""); if (mcpRunId) { await call("craft_command_observe", { run_id: mcpRunId }); await call("craft_command_cancel", { run_id: mcpRunId }); }
@@ -128,7 +128,7 @@ test("v0.12.26 Service and MCP expose the shared runtime without a second execut
   } finally { await close(f); }
 });
 
-test("v0.12.26 rejects null, empty and malformed adapter inputs", async () => {
+test("rejects null, empty and malformed adapter inputs", async () => {
   const f = await fixture();
   try {
     assert.throws(() => defineAdapterManifest({ adapter_id: null as never, version: "1", kind: "command" }), /adapter_id/);
@@ -143,7 +143,7 @@ test("v0.12.26 rejects null, empty and malformed adapter inputs", async () => {
   } finally { await close(f); }
 });
 
-test("v0.12.26 covers adapter, command and durable defensive branches", async () => {
+test("covers adapter, command and durable defensive branches", async () => {
   const f = await fixture();
   try {
     const unsupportedPlatform = process.platform === "darwin" ? "linux" : "darwin";
@@ -159,10 +159,10 @@ test("v0.12.26 covers adapter, command and durable defensive branches", async ()
     await writeFile(manifestPath, JSON.stringify({ ...base, adapter_id: "unsigned.adapter", signature: undefined }));
     await assert.rejects(f.runtime.adapterInstall(manifestPath), /signature or expected integrity/);
 
-    const shellFalse = new V01226Runtime(f.store, fakeSpawner());
+    const shellFalse = new GenericAdapterRuntime(f.store, fakeSpawner());
     const run = await shellFalse.commandRun({ run_id: "branch-run", argv: ["echo", "x"], shell: false, cwd: f.root, output_limit: 256, timeout_ms: 100 });
     assert.equal((run.receipt as JsonObject).status, "completed");
-    const cross = new V01226Runtime(f.store, slowSpawner());
+    const cross = new GenericAdapterRuntime(f.store, slowSpawner());
     f.store.create("command_run", "cross-run", { request: { argv: ["wait"] }, status: "running" });
     assert.equal(cross.commandCancel("cross-run").cross_process, true);
     assert.throws(() => cross.commandCancel("missing-cross"), /Unknown/);

@@ -12,11 +12,11 @@ import { CraftStore } from "../core/infrastructure/store.ts";
 import { TraceKernel } from "../core/trace-kernel.ts";
 
 async function fixture() {
-  const root = await mkdtemp(join(tmpdir(), "craft-v01229-session-")); const store = await new CraftStore(craftPaths(root)).open();
+  const root = await mkdtemp(join(tmpdir(), "craft-session-observer-session-")); const store = await new CraftStore(craftPaths(root)).open();
   const trace = new TraceKernel(store); return { root, store, trace, sessions: new HostSessionEventKernel(store, trace), observers: new OutcomeObserverKernel(store, trace) };
 }
 
-test("v0.12.29 host session protocol appends contiguous host facts into the canonical Trace", async () => {
+test("host session protocol appends contiguous host facts into the canonical Trace", async () => {
   const f = await fixture();
   try {
     const opened = f.sessions.open({ session_id: "session", trace_id: "trace", task_id: "task", host_id: "codex-app", environment_fingerprint: "env", policy_fingerprint: "policy", capability_fingerprint: "capability" });
@@ -41,7 +41,7 @@ test("v0.12.29 host session protocol appends contiguous host facts into the cano
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("v0.12.29 session protocol rejects unordered, unknown and sensitive host events", async () => {
+test("session protocol rejects unordered, unknown and sensitive host events", async () => {
   const f = await fixture();
   try {
     f.sessions.open({ session_id: "session", task_id: "task", host_id: "host", environment_fingerprint: "env", policy_fingerprint: "policy", capability_fingerprint: "capability" });
@@ -64,7 +64,7 @@ test("v0.12.29 session protocol rejects unordered, unknown and sensitive host ev
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("v0.12.29 an independent observer records external outcome facts without turning host claims into outcomes", async () => {
+test("an independent observer records external outcome facts without turning host claims into outcomes", async () => {
   const f = await fixture();
   try {
     f.trace.start({ trace_id: "trace", task_id: "task", environment_fingerprint: "env" });
@@ -88,7 +88,7 @@ test("v0.12.29 an independent observer records external outcome facts without tu
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("v0.12.29 exposes the session protocol and observer through CraftService and Full MCP", async () => {
+test("exposes the session protocol and observer through CraftService and Full MCP", async () => {
   const f = await fixture();
   try {
     const service = new CraftService(f.store); const mcp = new McpServer(service, "full");

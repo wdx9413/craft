@@ -3,6 +3,7 @@ import { createInterface } from "node:readline/promises";
 import { createHash } from "node:crypto";
 import { access, readFile } from "node:fs/promises";
 import { realpathSync } from "node:fs";
+import { resolve } from "node:path";
 import { stdin, stdout } from "node:process";
 import { pathToFileURL } from "node:url";
 import { initializeConfig, loadConfig, setMode, type CraftMode, type DirectProvider,
@@ -65,8 +66,9 @@ Usage:
                                 Run the authenticated local Supervisor
   craft supervisor status       Check the local Supervisor
   craft home                    Show the unified Workbench Home projection
-  craft serve [--port 4173]     Start the local-only Workbench web app
-  craft gui [--port 4173]       Alias for serve; open the local Workbench
+  craft serve [--port 4173]     Start the local-only API (UI disabled by default)
+    --workbench-dir <path>     Explicitly mount the separate craft-workbench UI
+  craft gui --workbench-dir <path> [--port 4173]  Open an explicitly mounted UI
   craft inbox refresh           Refresh the unified attention inbox
   craft inbox list [options]    List prioritized attention cards
   craft inbox ack <id>          Acknowledge a card without resolving its source
@@ -442,9 +444,14 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
       else if (args[0] === "settings" && args[1] === "reset") result = service.settingsReset();
       else if (args[0] === "settings" && args[1] === "update") result = service.settingsUpdate(JSON.parse(option(args, "--json") ?? "{}") as JsonObject);
       else if (args[0] === "serve" || args[0] === "gui") {
-        const supervisor = new LocalSupervisor(service, paths); const supervisorRun = await supervisor.startOrReuse(0); const server = new LocalWorkbenchServer(service);
+        const directory = option(args, "--workbench-dir");
+        if (args[0] === "gui" && !directory) throw new Error("Workbench has moved to craft-workbench; use its start command or pass --workbench-dir explicitly");
+        const workbenchDir = directory ? resolve(directory) : null;
+        if (workbenchDir !== null) await access(resolve(workbenchDir, "index.html"));
+        const supervisor = new LocalSupervisor(service, paths); const supervisorRun = await supervisor.startOrReuse(0); const server = new LocalWorkbenchServer(service, undefined, { workbenchDir });
         try { const started = await server.start(option(args, "--port") === undefined ? 4173 : Number(option(args, "--port"))); const workbenchUrl = started.url.replace("/#token=", "/workbench#token=");
-          stdout.write(`Craft Workbench: ${workbenchUrl}\nLegacy status page: ${started.url}\n`);
+          stdout.write(`Craft API: ${started.url}\n`);
+          if (workbenchDir !== null) stdout.write(`Craft Workbench: ${workbenchUrl}\n`);
           if (args[0] === "gui") openBrowser(workbenchUrl); await new Promise<void>((resolve) => { const stop = () => resolve(); process.once("SIGINT", stop); process.once("SIGTERM", stop); }); }
         finally { await server.close(); if (supervisorRun.owned) await supervisor.close(); } return;
       }

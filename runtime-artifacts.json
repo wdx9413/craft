@@ -10,7 +10,6 @@
     "dist/bin",
     "dist/plugin",
     "dist/adapters",
-    "workbench",
     "skills",
     "adapters",
     "assets/ocr",
@@ -24,7 +23,7 @@
     "scripts/codebase",
     "scripts/eval"
   ],
-  "desktop_copies": [
+  "runtime_copies": [
     {
       "source": "dist/core",
       "target": "dist/core"
@@ -40,10 +39,6 @@
     {
       "source": "dist/bin",
       "target": "dist/bin"
-    },
-    {
-      "source": "workbench",
-      "target": "dist/workbench"
     },
     {
       "source": "assets/ocr",

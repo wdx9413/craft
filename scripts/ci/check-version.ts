@@ -33,14 +33,6 @@ for (const path of [...RELEASE_PRODUCTS.map((product) => `plugins/${product.name
   if (manifestVersion !== packageVersion) throw new Error(`${path} version ${String(manifestVersion)} differs from package.json ${packageVersion}`);
 }
 
-if ((await json("desktop/package.json")).version !== packageVersion) throw new Error("Desktop package release drift");
-if ((await json("desktop/src-tauri/tauri.conf.json")).version !== packageVersion) throw new Error("Desktop installer release drift");
-for (const path of ["desktop/src-tauri/Cargo.toml", "desktop/src-tauri/Cargo.lock"]) {
-  const source = await readFile(resolve(root, path), "utf8");
-  const project = source.match(/name = "craft-workbench-desktop"\r?\nversion = "([^"]+)"/u);
-  if (project?.[1] !== packageVersion) throw new Error(`${path} Desktop release drift`);
-}
-
 for (const path of RELEASE_PRODUCTS.filter((product) => product.hookMember).map((product) => `plugins/${product.name}/.claude-plugin/plugin.json`)) {
   const manifestVersion = (await json(path)).version;
   if (manifestVersion !== packageVersion) throw new Error(`${path} version ${String(manifestVersion)} differs from package.json ${packageVersion}`);

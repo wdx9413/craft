@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { realpathSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
@@ -8,10 +9,10 @@ import { prepareRuntimeArtifact } from "../scripts/release/runtime-artifact.ts";
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-artifact-"));
   const manifest: Record<string, unknown> = { files: ["dist/core"] };
-  const artifact = { npm_files: ["dist/core"], desktop_copies: [{ source: "input", target: "dist/core/entry.js" }] };
+  const artifact = { npm_files: ["dist/core"], runtime_copies: [{ source: "input", target: "dist/core/entry.js" }] };
   await writeFile(join(root, "input"), "compiled-runtime");
-  await mkdir(join(root, "dist/desktop/app"), { recursive: true });
-  await writeFile(join(root, "dist/desktop/app", "previous"), "preserve-until-preflight");
+  await mkdir(join(root, "dist/runtime/app"), { recursive: true });
+  await writeFile(join(root, "dist/runtime/app", "previous"), "preserve-until-preflight");
   async function configure() {
     await writeFile(join(root, "package.json"), JSON.stringify(manifest));
     await writeFile(join(root, "runtime-artifacts.json"), JSON.stringify(artifact));
@@ -38,6 +39,21 @@ test("runtime artifact consumes npm graph and copies actual dependency bytes wit
     assert.equal(JSON.parse(await readFile(join(result, "node_modules/beta/package.json"), "utf8")).version, "1");
     await assert.rejects(readFile(join(result, "previous")), /ENOENT/);
   } finally { await f.close(); }
+});
+
+test("an external consumer owns staging without copying presentation into the runtime", async () => {
+  const f = await fixture();
+  const consumer = await mkdtemp(join(tmpdir(), "craft-presentation-"));
+  try {
+    const output = await prepareRuntimeArtifact(f.root, process.execPath, consumer);
+    assert.equal(output, join(realpathSync(consumer), "dist/runtime/app"));
+    assert.equal(await readFile(join(output, "dist/core/entry.js"), "utf8"), "compiled-runtime");
+    assert.equal(await readFile(join(f.root, "dist/runtime/app/previous"), "utf8"), "preserve-until-preflight");
+    await rm(join(consumer, "dist"), { recursive: true });
+    await symlink(join(f.root, "dist"), join(consumer, "dist"), process.platform === "win32" ? "junction" : "dir");
+    await assert.rejects(prepareRuntimeArtifact(f.root, process.execPath, consumer), /symlink escapes/);
+    assert.equal(await readFile(join(f.root, "dist/runtime/app/previous"), "utf8"), "preserve-until-preflight");
+  } finally { await f.close(); await rm(consumer, { recursive: true, force: true }); }
 });
 
 test("runtime artifact resolves seven declared workspace packages without node_modules links", async () => {
@@ -68,24 +84,24 @@ test("runtime artifact resolves seven declared workspace packages without node_m
 
 test("preflight rejects contract/path/target/dependency drift without deleting existing staging", async () => {
   const f = await fixture();
-  const preserved = async () => assert.equal(await readFile(join(f.root, "dist/desktop/app/previous"), "utf8"), "preserve-until-preflight");
+  const preserved = async () => assert.equal(await readFile(join(f.root, "dist/runtime/app/previous"), "utf8"), "preserve-until-preflight");
   try {
     f.manifest.files = [];
     await f.configure();
     await assert.rejects(prepareRuntimeArtifact(f.root), /contract drift/); await preserved();
     f.manifest.files = ["dist/core"];
     for (const path of [".", "../escape"]) {
-      f.artifact.desktop_copies[0].target = path; await f.configure();
+      f.artifact.runtime_copies[0].target = path; await f.configure();
       await assert.rejects(prepareRuntimeArtifact(f.root), /inside its product/); await preserved();
     }
-    f.artifact.desktop_copies[0].target = "dist/core/entry.js";
-    f.artifact.desktop_copies.push({ ...f.artifact.desktop_copies[0] }); await f.configure();
+    f.artifact.runtime_copies[0].target = "dist/core/entry.js";
+    f.artifact.runtime_copies.push({ ...f.artifact.runtime_copies[0] }); await f.configure();
     await assert.rejects(prepareRuntimeArtifact(f.root), /Duplicate/); await preserved();
-    f.artifact.desktop_copies.pop(); f.artifact.desktop_copies[0].source = "../escape"; await f.configure();
+    f.artifact.runtime_copies.pop(); f.artifact.runtime_copies[0].source = "../escape"; await f.configure();
     await assert.rejects(prepareRuntimeArtifact(f.root), /inside its product/); await preserved();
-    f.artifact.desktop_copies[0].source = "missing"; await f.configure();
+    f.artifact.runtime_copies[0].source = "missing"; await f.configure();
     await assert.rejects(prepareRuntimeArtifact(f.root), /ENOENT/); await preserved();
-    f.artifact.desktop_copies[0].source = "input";
+    f.artifact.runtime_copies[0].source = "input";
     f.manifest.dependencies = { "../escape": "1" }; await f.configure();
     await assert.rejects(prepareRuntimeArtifact(f.root), /package name/); await preserved();
     f.manifest.dependencies = { alpha: "1", beta: "1" };
@@ -107,17 +123,17 @@ test("artifact source and generated output cannot escape through filesystem syml
   try {
     await writeFile(join(outside, "input"), "outside");
     await symlink(join(outside, "input"), join(f.root, "linked-input"));
-    f.artifact.desktop_copies[0].source = "linked-input";
+    f.artifact.runtime_copies[0].source = "linked-input";
     await f.configure();
     await assert.rejects(prepareRuntimeArtifact(f.root), /symlink escapes/);
-    f.artifact.desktop_copies[0].source = "input";
+    f.artifact.runtime_copies[0].source = "input";
     await f.configure();
-    await rm(join(f.root, "dist/desktop/app"), { recursive: true });
-    await symlink(outside, join(f.root, "dist/desktop/app"), "junction");
+    await rm(join(f.root, "dist/runtime/app"), { recursive: true });
+    await symlink(outside, join(f.root, "dist/runtime/app"), "junction");
     await assert.rejects(prepareRuntimeArtifact(f.root), /symlink escapes/);
     assert.equal(await readFile(join(outside, "input"), "utf8"), "outside");
-    await rm(join(f.root, "dist/desktop/app"));
-    await rm(join(f.root, "dist/desktop"), { recursive: true });
+    await rm(join(f.root, "dist/runtime/app"));
+    await rm(join(f.root, "dist/runtime"), { recursive: true });
     assert.ok(await prepareRuntimeArtifact(f.root));
   } finally { await f.close(); await rm(outside, { recursive: true, force: true }); }
 });

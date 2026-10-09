@@ -1,3 +1,4 @@
+import { experienceGraphTemplate } from "../capability/craft-experience/procedure-templates.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { execFileSync } from "node:child_process";
@@ -98,7 +99,7 @@ test("configured Workflow and Graph export checked definitions as disabled Skill
   const f = await fixture();
   try {
     const procedures = new ProcedureStore(f.store);
-    const graph = JSON.parse(readFileSync(new URL("../skills/craft-experience/references/internet-product-engineering.json", import.meta.url), "utf8"));
+    const graph = experienceGraphTemplate("internet-product-engineering");
     for (const [kind, definition] of [["workflow", spec()], ["graph", graph]] as const) {
       let p = f.service.procedureConfigurationSave({ procedure_id: `configured-${kind}`, scope, scenario_id: "review", title: "Configured Review", procedure_kind: kind, definition }).procedure as JsonObject;
       assert.equal(p.content_ref, undefined);

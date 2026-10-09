@@ -82,19 +82,18 @@ const DAILY_COMPONENT_TOOLS: Readonly<Record<string, readonly string[]>> = {
   "component-memory-daily": [
     "craft_memory_asset_inspect", "craft_memory_asset_restore",
     "craft_component_readiness_get", "craft_component_diagnose", "craft_knowledge_bootstrap_install", "craft_knowledge_source_list",
-    "craft_memory_capture_user_statement", "craft_memory_candidate_propose", "craft_memory_candidate_review", "craft_memory_ledger_remember_approved",
+    "craft_memory_governance", "craft_memory_capture_user_statement", "craft_memory_candidate_propose", "craft_memory_candidate_review", "craft_memory_ledger_remember_approved",
     "craft_memory_ledger_get", "craft_memory_ledger_list", "craft_memory_conflict_list", "craft_memory_conflict_resolve",
     "craft_context_resolution_resolve", "craft_context_resolution_feedback", "craft_memory_maintenance_run", "craft_memory_maintenance_schedule", "craft_knowledge_memory_bundle",
     "craft_scope_identity_resolve_project", "craft_decision_context_gate_open", "craft_memory_ledger_transition",
   ],
-  // Invocation transitions/evaluation and diagnosis remain on the
-  // explicit advanced surface; daily bind/dispatch/report/resume/get form a complete
-  // ordinary invocation path within the bounded Host tool budget.
+  // Graph transitions and paired evaluation complete the scenario iteration path.
+  // Diagnostic compatibility aliases remain on the explicit advanced surface.
   "component-experience-daily": [
-    "craft_experience_asset_inspect", "craft_experience_asset_restore", "craft_procedure_configuration_save",
+    "craft_experience_asset_inspect", "craft_experience_asset_restore", "craft_procedure_configuration_save", "craft_experience_graph_inspect", "craft_experience_graph_edit",
     "craft_component_readiness_get", "craft_evidence_record", "craft_experience_observe",
     "craft_experience_patterns_list", "craft_experience_procedure_draft", "craft_experience_procedure_submit", "craft_experience_procedure_get",
-    "craft_procedure_invocation_bind", "craft_procedure_invocation_dispatch", "craft_procedure_invocation_report", "craft_procedure_invocation_resume", "craft_procedure_invocation_get",
+    "craft_procedure_invocation_bind", "craft_procedure_invocation_dispatch", "craft_procedure_invocation_report", "craft_procedure_invocation_resume", "craft_procedure_invocation_get", "craft_procedure_invocation_transition", "craft_procedure_invocation_evaluate",
     "craft_procedure_create", "craft_procedure_plan", "craft_procedure_get", "craft_procedure_list", "craft_procedure_gate", "craft_procedure_export_skill",
     "craft_scope_identity_resolve_project", "craft_context_resolution_resolve", "craft_decision_context_gate_open",
   ],
@@ -119,7 +118,7 @@ export function domainSurfaceOf(toolName: string): string {
 
 export function surfaceToolNames(surface: string, activeTools: readonly Tool[], coreToolNames: ReadonlySet<string>): string[] {
   if (surface === "component-context-daily") {
-    const names = new Set(["craft_info", "craft_context_open", ...Object.values(DAILY_COMPONENT_TOOLS).flat(), ...surfaceToolNames("component-codebase", activeTools, coreToolNames)]);
+    const names = new Set(["craft_info", "craft_context_open", "craft_context_tools_discover", ...Object.values(DAILY_COMPONENT_TOOLS).flat(), ...surfaceToolNames("component-codebase", activeTools, coreToolNames)]);
     return activeTools.filter(tool => names.has(tool.name)).map(tool => tool.name);
   }
   if (surface === "full") return activeTools.map((tool) => tool.name);

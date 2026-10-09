@@ -29,12 +29,12 @@ const REAL_TABLE = [
 
 const THRESHOLDS: CoverageThresholds = { lines: 100, functions: 100, branches: 100 };
 
-test("v0.12.43 declares the column order it depends on", () => {
+test("declares the column order it depends on", () => {
   // The export exists so a reader never has to guess the order from the regex.
   assert.deepEqual([...COVERAGE_COLUMNS], ["line", "branch", "funcs"]);
 });
 
-test("v0.12.43 reads line, branch and funcs from the right columns", () => {
+test("reads line, branch and funcs from the right columns", () => {
   const rows = parseCoverageRows(REAL_TABLE);
   // The directory row carries no percentages, so it is not a module row.
   assert.equal(rows.length, 4);
@@ -58,14 +58,14 @@ test("v0.12.43 reads line, branch and funcs from the right columns", () => {
   assert.notEqual(isolated.line, isolated.funcs);
 });
 
-test("v0.12.43 parses nothing from text that carries no table", () => {
+test("parses nothing from text that carries no table", () => {
   assert.deepEqual(parseCoverageRows(""), []);
   assert.deepEqual(parseCoverageRows("all tests passed\nno table here"), []);
   // The header itself has no numbers, so it must not become a row.
   assert.deepEqual(parseCoverageRows("ℹ file | line % | branch % | funcs % | uncovered lines"), []);
 });
 
-test("v0.12.43 reports a line or function shortfall whenever it appears", () => {
+test("reports a line or function shortfall whenever it appears", () => {
   const rows = parseCoverageRows(REAL_TABLE);
   // With branch gated every below-threshold column counts: a2a-transport is low
   // only on branch, the other two on line and funcs.
@@ -77,7 +77,7 @@ test("v0.12.43 reports a line or function shortfall whenever it appears", () => 
   assert.deepEqual(ungated, ["craft-service.ts", "isolated.ts"]);
 });
 
-test("v0.12.43 never reports an ungated branch gap as a shortfall", () => {
+test("never reports an ungated branch gap as a shortfall", () => {
   // The regression that motivated this module: a branch gap in a `branches: false`
   // group used to be printed as a coverage failure while a real function gap in the
   // same group went unreported.
@@ -90,7 +90,7 @@ test("v0.12.43 never reports an ungated branch gap as a shortfall", () => {
   assert.equal(findShortfall(funcsOnly, THRESHOLDS, false).length, 1);
 });
 
-test("v0.12.43 excludes the aggregate row from any shortfall", () => {
+test("excludes the aggregate row from any shortfall", () => {
   // `all files` is routinely below 100 while every module row passes; counting it
   // would fail every group.
   const rows = parseCoverageRows(REAL_TABLE);
@@ -100,13 +100,13 @@ test("v0.12.43 excludes the aggregate row from any shortfall", () => {
   assert.deepEqual(findShortfall(aggregateOnly, THRESHOLDS, true), []);
 });
 
-test("v0.12.43 passes a table whose modules all meet the thresholds", () => {
+test("passes a table whose modules all meet the thresholds", () => {
   const clean = parseCoverageRows("ℹ  memory-wiring.ts | 100.00 | 100.00 | 100.00 | ");
   assert.deepEqual(findShortfall(clean, THRESHOLDS, true), []);
   assert.deepEqual(findShortfall(clean, THRESHOLDS, false), []);
 });
 
-test("v0.12.43 separates a blocked spawn from a coverage gap", () => {
+test("separates a blocked spawn from a coverage gap", () => {
   // The two produce the same red gate and need opposite responses, so a blocked
   // run must be named as such rather than printed as a missing test.
   const blocked = detectEnvironmentBlocker("Error: spawn EPERM\n  at child_process");

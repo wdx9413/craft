@@ -1,3 +1,4 @@
+import { KnowledgeClaimGovernance } from "../../capability/craft-knowledge/claim-governance.ts";
 import { Catalog } from "../catalog.ts";
 import { CraftStore, type JsonObject } from "../infrastructure/store.ts";
 import { CraftTelemetry, StoreTelemetrySink } from "../../common/craft-common-log/src/index.ts";
@@ -278,6 +279,7 @@ export abstract class ServiceFoundation {
    * A single property could not be owned by either capability package, which is why
    * `craft-memory` could not be declared until this split.
    */
+  readonly knowledgeClaims: KnowledgeClaimGovernance;
   readonly knowledgeSources: KnowledgeSourceRegistry;
   readonly memoryLedger: MemoryLedgerKernel;
   readonly memorySignals: MemorySignalsKernel;
@@ -514,6 +516,7 @@ export abstract class ServiceFoundation {
     this.engineeringQualityProfile = new EngineeringQualityProfileKernel(store);
     this.activationProof = new ActivationProofKernel(store);
     this.componentHistoryMigration = new ComponentHistoryMigrationKernel(store);
+    this.knowledgeClaims = capabilities.registry.require<KnowledgeClaimGovernance>(KNOWLEDGE_KERNELS.claims);
     this.knowledgeSources = capabilities.registry.require<KnowledgeSourceRegistry>(KNOWLEDGE_KERNELS.sources);
     this.memoryLedger = capabilities.registry.require<MemoryLedgerKernel>(MEMORY_KERNELS.ledger);
     this.memorySignals = capabilities.registry.require<MemorySignalsKernel>(MEMORY_KERNELS.signals);
@@ -528,7 +531,7 @@ export abstract class ServiceFoundation {
     this.decisionContextGate = new DecisionPointContextGate(store, this.contextResolution);
     this.stateView = new StateViewKernel(store);
     this.knowledgeRelations = capabilities.registry.require<KnowledgeRelationKernel>(KNOWLEDGE_KERNELS.relations);
-    this.memoryGovernance = new MemoryGovernanceKernel(store, this.memoryLedger);
+    this.memoryGovernance = capabilities.registry.require<MemoryGovernanceKernel>(MEMORY_KERNELS.governance);
     this.workflowDag = new WorkflowDagKernel(store);
     this.graphCompiler = new GraphCompilerKernel(this.workflowDag);
     this.capabilityIntake = new CapabilityIntakeKernel(store);

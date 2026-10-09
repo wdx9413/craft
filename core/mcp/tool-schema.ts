@@ -43,7 +43,7 @@ const OBJECT_PARAMS = ["input", "inputs", "metadata", "policy", "dimensions", "e
 const ARRAY_PARAMS = ["completed", "pending", "decisions", "artifacts", "steps", "cases", "capabilities",
   "allowed_side_effects", "approved_side_effects", "nodes", "artifact_ids", "evidence_ids",
   "trial_ids", "grade_ids", "pattern_ids", "failure_modes", "receipt_ids", "criteria", "acceptance_criteria", "allowed_extensions", "fields", "capability_requirements", "object_schemas", "components", "action_contracts", "bindings", "source_refs", "changes", "tags", "claim_ids", "evidence_ids", "expected_claim_ids", "case_ids",
-  "allowed_operations", "allowed_effects", "require_approval_for", "operations", "subjects", "children", "trusted_hosts", "command_allowlist", "path_allowlist", "kinds", "effects", "allowed_kinds", "dependencies", "aliases", "assets", "asset_ids", "connector_ticket_ids", "artifact_ids", "final_artifact_ids", "evidence_ids", "gold_case_ids", "output_contract", "trial_ids", "include_paths", "affected_paths", "object_ids", "depends_on", "source_paths", "applies_to", "patches", "snapshot_refs", "triggers", "allowed_hosts", "allowed_actions", "approval_required_actions", "detected_instructions", "citations", "allowed_fields", "argv", "sources", "providers", "budget_ids", "recovery_item_ids", "memory_kinds", "object_types", "required_memory_ids", "required_object_ids", "benchmark_ids", "memory_ids", "source_ids", "paths", "state_paths", "turns", "messages", "events", "decisions", "constraints", "open_questions", "artifacts", "roles", "changed_paths", "materials", "non_goals", "input_refs", "output_refs", "evidence_ids", "gold_case_ids", "contamination_flags", "trace_ids", "knowledge_refs", "capability_refs", "workflow_refs", "excluded_refs", "selection_rationale", "change_kinds", "platforms", "permissions", "required", "candidates", "required_artifacts", "required_evidence", "evidence_refs", "criteria",
+  "allowed_operations", "allowed_effects", "require_approval_for", "operations", "subjects", "children", "trusted_hosts", "command_allowlist", "path_allowlist", "kinds", "effects", "allowed_kinds", "dependencies", "aliases", "assets", "asset_ids", "connector_ticket_ids", "artifact_ids", "final_artifact_ids", "evidence_ids", "gold_case_ids", "output_contract", "trial_ids", "include_paths", "affected_paths", "object_ids", "depends_on", "source_paths", "applies_to", "patches", "snapshot_refs", "triggers", "allowed_hosts", "allowed_actions", "approval_required_actions", "detected_instructions", "citations", "allowed_fields", "argv", "sources", "providers", "budget_ids", "recovery_item_ids", "memory_kinds", "object_types", "required_memory_ids", "required_object_ids", "benchmark_ids", "memory_ids", "source_ids", "document_ids", "paths", "state_paths", "turns", "messages", "events", "decisions", "constraints", "open_questions", "artifacts", "roles", "changed_paths", "materials", "non_goals", "input_refs", "output_refs", "evidence_ids", "gold_case_ids", "contamination_flags", "trace_ids", "knowledge_refs", "capability_refs", "workflow_refs", "excluded_refs", "selection_rationale", "change_kinds", "platforms", "permissions", "required", "candidates", "required_artifacts", "required_evidence", "evidence_refs", "criteria",
   // Action gate: `guard` is an array of { field, op, value } clauses.
   "guard",
   // Evidence receipt: `proofs` is an array of observed proofs, `cross_checks` an array of
@@ -75,6 +75,9 @@ const schemaFor = (name: string): JsonObject => {
 // to their tool so fixing one product cannot change unrelated admin operations.
 const TYPES_BY_TOOL: Readonly<Record<string, Readonly<Record<string, ParamType>>>> = {
   craft_procedure_configuration_save: { scope: "string", definition: "object", scope_envelope: "object", principal_ids: "array" },
+  craft_knowledge_evaluation_run: { expected_relevant_refs: "array", retrieved_refs: "array", citation_judgements: "array" },
+  craft_experience_graph_inspect: { cases: "array", input_keys: "array", scope: "string", configuration: "object", principal_ids: "array" },
+  craft_experience_graph_edit: { scope: "string", configuration: "object", scope_envelope: "object", principal_ids: "array", before_version: "integer" },
   craft_knowledge_asset_inspect: { before_version: "integer", principal_ids: "array" },
   craft_knowledge_asset_restore: { principal_ids: "array" },
   craft_memory_asset_inspect: { before_version: "integer", principal_ids: "array" },
@@ -84,12 +87,13 @@ const TYPES_BY_TOOL: Readonly<Record<string, Readonly<Record<string, ParamType>>
   craft_codebase_asset_inspect: { before_version: "integer", principal_ids: "array" },
   craft_codebase_asset_restore: { principal_ids: "array" },
 
-  craft_context_open: { members: "array", principal_ids: "array", include_codebase: "boolean", include_global: "boolean", include_working_notes: "boolean" },
+  craft_context_open: { max_tokens: "integer", required_refs: "array", history_refs: "array", state_refs: "array", members: "array", principal_ids: "array", include_codebase: "boolean", include_global: "boolean", include_working_notes: "boolean" },
   craft_evidence_record: { confidence: "string" },
   craft_component_diagnose: { observed_tool_names: "array" },
-  craft_context_resolution_feedback: { members: "array" },
+  craft_context_resolution_feedback: { injected_tokens: "integer", schema_tokens: "integer", history_tokens: "integer", asset_refs: "array", members: "array" },
   craft_retrieval_adapter_evaluate: { dataset: "object", metrics: "object" },
-  craft_context_resolution_resolve: { members: "array", principal_ids: "array", include_global: "boolean", include_working_notes: "boolean", history_view: "boolean" },
+  craft_context_working_set_resolve: { required_refs: "array", history_refs: "array", state_refs: "array", members: "array" },
+  craft_context_resolution_resolve: { required_refs: "array", members: "array", principal_ids: "array", include_global: "boolean", include_working_notes: "boolean", history_view: "boolean" },
   craft_decision_context_gate_open: { members: "array", require_context: "boolean" },
   craft_knowledge_search: { scope: "string", include_candidates: "boolean", include_global: "boolean", principal_ids: "array" },
   craft_knowledge_claim_save: { scope: "string", scope_envelope: "object" },
@@ -97,6 +101,7 @@ const TYPES_BY_TOOL: Readonly<Record<string, Readonly<Record<string, ParamType>>
   craft_knowledge_source_ingest: { max_files: "integer", max_chars_per_fragment: "integer" },
   craft_knowledge_auto_review: { auto_promote: "boolean" },
   craft_knowledge_memory_bundle: { allow_local_write: "boolean", include_candidates: "boolean", include_global: "boolean" },
+  craft_memory_governance: { principal_ids: "array", explicit_consent: "boolean" },
   craft_memory_capture_user_statement: { explicit_consent: "boolean", auto_accept: "boolean", scope_envelope: "object" },
   craft_memory_candidate_propose: { confidence: "string", scope_envelope: "object" },
   craft_memory_ledger_get: { principal_ids: "array" },

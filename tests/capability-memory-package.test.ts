@@ -41,7 +41,7 @@ async function close(f: Awaited<ReturnType<typeof fixture>>) {
   await rm(f.root, { recursive: true, force: true });
 }
 
-test("v0.12.43 assembles the Memory capability from the catalog rather than in place", async () => {
+test("assembles the Memory capability from the catalog rather than in place", async () => {
   const f = await fixture();
   try {
     const { registry } = buildCapabilityRegistry(CRAFT_CAPABILITIES, f.core);
@@ -53,11 +53,11 @@ test("v0.12.43 assembles the Memory capability from the catalog rather than in p
     assert.equal(ledger.store, f.store);
     // Two kernels: the Ledger's writes and the signals derived from recall history. The count is
     // the check that the package grows deliberately rather than by accumulation.
-    assert.deepEqual(Object.values(MEMORY_KERNELS).sort(), ["memory.ledger", "memory.signals"]);
+    assert.deepEqual(Object.values(MEMORY_KERNELS).sort(), ["memory.governance", "memory.ledger", "memory.signals"]);
   } finally { await close(f); }
 });
 
-test("v0.12.43 fails on the kernel a removed capability owed instead of leaving it undefined", async () => {
+test("fails on the kernel a removed capability owed instead of leaving it undefined", async () => {
   const f = await fixture();
   try {
     const { registry } = buildCapabilityRegistry([], f.core);
@@ -69,7 +69,7 @@ test("v0.12.43 fails on the kernel a removed capability owed instead of leaving 
   } finally { await close(f); }
 });
 
-test("v0.12.43 claims the Ledger's scoped reads and writes, the derived signals, and nothing else", async () => {
+test("claims the Ledger's scoped reads and writes, the derived signals, and nothing else", async () => {
   for (const owned of [
     "craft_memory_ledger_remember", "craft_memory_ledger_get", "craft_memory_ledger_list", "craft_memory_ledger_transition", "craft_memory_ledger_compat_bind",
     // The derived signals are owned because `src/memory-wiring.ts` moved into this package as
@@ -100,9 +100,9 @@ test("v0.12.43 claims the Ledger's scoped reads and writes, the derived signals,
   }
 
   assert.deepEqual(names.filter((name) => MEMORY_OWNS.test(name)).sort(), [
-    "craft_memory_capture_propose", "craft_memory_decay_get", "craft_memory_hybrid_scores",
-    "craft_memory_ledger_compat_bind", "craft_memory_ledger_get", "craft_memory_ledger_list", "craft_memory_ledger_remember", "craft_memory_ledger_transition",
-    "craft_memory_promotion_preview", "craft_memory_usage_record",
+    "craft_memory_candidate_propose", "craft_memory_candidate_review", "craft_memory_capture_propose", "craft_memory_conflict_list", "craft_memory_conflict_resolve", "craft_memory_decay_get", "craft_memory_expiry_sweep", "craft_memory_governance", "craft_memory_hybrid_scores",
+    "craft_memory_ledger_compat_bind", "craft_memory_ledger_get", "craft_memory_ledger_list", "craft_memory_ledger_remember", "craft_memory_ledger_remember_approved", "craft_memory_ledger_transition",
+    "craft_memory_policy_get", "craft_memory_policy_save", "craft_memory_promotion_preview", "craft_memory_session_finalize", "craft_memory_usage_record",
   ]);
   assert.equal(memoryCapability.name, "memory");
   assert.equal(memoryCapability.product, "craft-memory");
@@ -113,7 +113,7 @@ test("v0.12.43 claims the Ledger's scoped reads and writes, the derived signals,
   assert.equal(memoryCapability.contributes, undefined);
 });
 
-test("v0.12.43 keeps the Memory projection at the name space it promised, and repairs one name", () => {
+test("keeps the Memory projection at the name space it promised, and repairs one name", () => {
   const surface = COMPONENT_SURFACES["component-memory"];
   assert(surface, "component-memory must be a declared surface");
 
@@ -140,7 +140,7 @@ test("v0.12.43 keeps the Memory projection at the name space it promised, and re
   assert(surface.test("craft_knowledge_memory_install_builtins"));
 });
 
-test("v0.12.43 keeps component-context composing the frozen memory name space", () => {
+test("keeps component-context composing the frozen memory name space", () => {
   const context = COMPONENT_SURFACES["component-context"];
   const previous = /^craft_(wiki|knowledge|claim|relation|memory|context_resolution|decision_context_gate|retrieval_adapter)/;
   const exposed = surfaceToolNames("component-context");
@@ -155,7 +155,7 @@ test("v0.12.43 keeps component-context composing the frozen memory name space", 
   }
 });
 
-test("v0.12.43 exposes every signal through the registered kernel, not only through the module", async () => {
+test("exposes every signal through the registered kernel, not only through the module", async () => {
   const f = await fixture();
   try {
     const { registry } = buildCapabilityRegistry(CRAFT_CAPABILITIES, f.core);
@@ -178,7 +178,7 @@ test("v0.12.43 exposes every signal through the registered kernel, not only thro
   } finally { await close(f); }
 });
 
-test("v0.12.43 keeps the ledger closed without a Source and keeps the facade working", async () => {
+test("keeps the ledger closed without a Source and keeps the facade working", async () => {
   const f = await fixture();
   try {
     // Provenance is mandatory: the Source must exist and be active.
@@ -204,7 +204,7 @@ test("v0.12.43 keeps the ledger closed without a Source and keeps the facade wor
   } finally { await close(f); }
 });
 
-test("v0.12.43 resolves memory through a kernel in the core, not through either member's package", async () => {
+test("resolves memory through a kernel in the core, not through either member's package", async () => {
   const f = await fixture();
   try {
     const context = new ContextResolutionKernel(f.store);

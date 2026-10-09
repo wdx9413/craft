@@ -90,8 +90,8 @@ test("Knowledge contribution reads canonical bodies, sorts deterministically and
     f.claim("file", { content: null, content_ref });
     // CraftStore normally hydrates content. Exercise the read-side Interface
     // with a reference-only row, as allowed by the contribution contract.
-    const list = f.store.list.bind(f.store);
-    t.mock.method(f.store, "list", (...args: Parameters<CraftStore["list"]>) => list(...args).map(row => {
+    const list = f.store.listScoped.bind(f.store);
+    t.mock.method(f.store, "listScoped", (...args: Parameters<CraftStore["listScoped"]>) => list(...args).map(row => {
       if (args[0] !== "knowledge_claim" || row.id !== "file") return row;
       const projected = { ...row }; delete projected.content; return projected;
     }));

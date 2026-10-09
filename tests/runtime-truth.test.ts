@@ -142,7 +142,7 @@ test("Runtime Truth persistence and Full MCP expose the same bounded operations"
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
-test("v0.12.43 reads back the compaction and work note a long-running session persisted", async () => {
+test("reads back the compaction and work note a long-running session persisted", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-runtime-truth-read-")); const store = await new CraftStore(craftPaths(root)).open();
   try {
     const kernel = new RuntimeTruthKernel(store);

@@ -12,7 +12,7 @@ import { CraftService } from "../core/service.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 
 async function fixture() {
-  const root = await mkdtemp(join(tmpdir(), "craft-v01225-"));
+  const root = await mkdtemp(join(tmpdir(), "craft-trust-web-runtime-"));
   const store = await new CraftStore(craftPaths(root)).open();
   return { root, store, service: new CraftService(store) };
 }
@@ -26,7 +26,7 @@ async function withMockedMcpListen<T>(run: () => Promise<T>): Promise<T> {
   try { return await run(); } finally { Server.prototype.listen = originalListen; Server.prototype.close = originalClose; }
 }
 
-test("v0.12.26 trust profiles compound scoped evidence without granting authority", async () => {
+test("trust profiles compound scoped evidence without granting authority", async () => {
   const f = await fixture();
   try {
     const scope = { task_class: "unit-test", capability_revision: "cap@1", model_ref: "model@1", host_ref: "host@1", effect: "read_only", data_scope: "project" };
@@ -70,7 +70,7 @@ test("v0.12.26 trust profiles compound scoped evidence without granting authorit
   } finally { await close(f); }
 });
 
-test("v0.12.26 web boundary observes GET and prepares adapter-only browser actions", async () => {
+test("web boundary observes GET and prepares adapter-only browser actions", async () => {
   const f = await fixture();
   try {
     const fetchImpl = async (_input: RequestInfo | URL, init?: RequestInit) => new Response(init?.method === "HEAD" ? null : "hello world", { status: 200, headers: { "content-type": "text/plain" } });
@@ -97,7 +97,7 @@ test("v0.12.26 web boundary observes GET and prepares adapter-only browser actio
   } finally { await close(f); }
 });
 
-test("v0.12.26 exposes MCP over a bounded HTTP POST boundary", async () => {
+test("exposes MCP over a bounded HTTP POST boundary", async () => {
   const calls: unknown[] = [];
   const handler = createMcpHttpHandler({ handle: async (message) => { calls.push(message); return { jsonrpc: "2.0", id: 1, result: {} }; } });
   const response = { statusCode: 0, headers: new Map<string, string>(), body: "", setHeader(name: string, value: string) { this.headers.set(name, value); }, end(value = "") { this.body = value; } };

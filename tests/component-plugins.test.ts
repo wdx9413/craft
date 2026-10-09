@@ -94,7 +94,7 @@ test("surface registry keeps generic quality and every bounded projection determ
   assert.deepEqual(resolveSurfaceToolNames("syscall", tools, core), ["craft_describe", "craft_list", "craft_get", "craft_create", "craft_update", "craft_run", "craft_cancel", "craft_search", "craft_info", "craft_default_route", "craft_default_route_resume", "craft_default_route_find", "craft_default_route_execute", "craft_task_checkpoint", "craft_evidence_record", "craft_knowledge_bootstrap_install"]);
   assert.deepEqual(resolveSurfaceToolNames("evaluation", tools, core), ["craft_evaluation_run_record"]);
   // Daily products must not advertise actions that are absent from a stale or
-  // deliberately minimal Host catalog.  This covers both sides of the bounded
+  // deliberately minimal Host catalog. This covers both sides of the bounded
   // projection filter rather than relying on the full catalog only.
   assert.deepEqual(resolveSurfaceToolNames("component-knowledge-daily", tools, core), []);
   assert.deepEqual(resolveSurfaceToolNames("component-memory-daily", [], core), []);

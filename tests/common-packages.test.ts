@@ -213,6 +213,7 @@ test("each capability package loads and registers outside the harness checkout",
       import { knowledgeCapability } from '@craft/capability-knowledge';
       import { memoryCapability } from '@craft/capability-memory';
       import { experienceCapability } from '@craft/capability-experience';
+      import { ExperienceGraphAssets } from '@craft/capability-experience/graph-assets';
       import { codebaseCapability } from '@craft/capability-codebase';
       const store = await new CraftStore(craftPaths(process.env.CRAFT_TEST_DATA_DIR)).open();
       try {
@@ -221,6 +222,11 @@ test("each capability package loads and registers outside the harness checkout",
           buildCapabilityRegistry([capability], { [CORE_KERNELS.store]: store, [CORE_KERNELS.modelProviders]: [], [CORE_KERNELS.telemetry]: new CraftTelemetry(new StoreTelemetrySink(store)) });
         }
         if (store.get('external', 'record').value !== 1) throw new Error('store round trip failed');
+        const graphs = new ExperienceGraphAssets(store);
+        const template = graphs.inspect({ action: 'template' });
+        const draft = graphs.edit({ action: 'save', graph_id: 'sdk-scene', scope: 'project:sdk', configuration: template.configuration });
+        const submitted = graphs.edit({ action: 'submit', graph_id: 'sdk-scene', scope: 'project:sdk', expected_draft_digest: draft.draft_digest });
+        if (submitted.procedure.content_version !== 1 || submitted.procedure.routeable) throw new Error('isolated graph authoring failed');
         console.log('isolated-capabilities-ok');
       } finally { store.close(); }
     `;
@@ -258,6 +264,7 @@ test("published tarball contents typecheck and run outside the monorepo", async 
       import { knowledgeCapability } from '@craft/capability-knowledge';
       import { memoryCapability } from '@craft/capability-memory';
       import { experienceCapability } from '@craft/capability-experience';
+      import { ExperienceGraphAssets } from '@craft/capability-experience/graph-assets';
       import { codebaseCapability } from '@craft/capability-codebase';
       const store = await new CraftStore(craftPaths('./data')).open();
       try {
@@ -268,6 +275,10 @@ test("published tarball contents typecheck and run outside the monorepo", async 
         }
         await telemetry.record({ signal: 'log', capability_id: 'third-party', operation: 'read', trace_id: 'tarball', span_id: 'span', parent_span_id: null, outcome: 'succeeded' });
         if (events.length !== 1) throw new Error('tarball telemetry failed');
+        const graphs = new ExperienceGraphAssets(store);
+        const template = graphs.inspect({ action: 'template' });
+        const draft = graphs.edit({ action: 'save', graph_id: 'tarball-graph', scope: 'project:sdk', configuration: template.configuration });
+        graphs.edit({ action: 'submit', graph_id: 'tarball-graph', scope: 'project:sdk', expected_draft_digest: draft.draft_digest });
         console.log('tarball-consumer-ok');
       } finally { store.close(); }
     `;

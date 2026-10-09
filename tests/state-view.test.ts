@@ -42,7 +42,7 @@ const stateOf = (store: CraftStore, overrides: JsonObject = {}, suffix = ""): vo
   store.create("task_run_state", `task_run_state_run${suffix}`, { status: "running", action: "wait_for_host", ...overrides });
 };
 
-test("v0.12.43 reports a task that has not started rather than an empty view", async () => {
+test("reports a task that has not started rather than an empty view", async () => {
   const f = await fixture();
   try {
     const view = f.kernel.get({});
@@ -58,7 +58,7 @@ test("v0.12.43 reports a task that has not started rather than an empty view", a
   } finally { await close(f); }
 });
 
-test("v0.12.43 names the records it read, so the basis is visible", async () => {
+test("names the records it read, so the basis is visible", async () => {
   const f = await fixture();
   try {
     scaffold(f.store);
@@ -80,7 +80,7 @@ test("v0.12.43 names the records it read, so the basis is visible", async () => 
   } finally { await close(f); }
 });
 
-test("v0.12.43 lets a stopped run override a loop that still has work queued", async () => {
+test("lets a stopped run override a loop that still has work queued", async () => {
   const f = await fixture();
   try {
     // Rung 1 of the precedence. A cancelled run is not "working" because a delivery loop still has an
@@ -100,7 +100,7 @@ test("v0.12.43 lets a stopped run override a loop that still has work queued", a
   } finally { await close(f); }
 });
 
-test("v0.12.43 reports drift before anything downstream of it", async () => {
+test("reports drift before anything downstream of it", async () => {
   const f = await fixture();
   try {
     // Rung 2. `needs_replan` means the pinned inputs changed, so every downstream reading is about a
@@ -116,7 +116,7 @@ test("v0.12.43 reports drift before anything downstream of it", async () => {
   } finally { await close(f); }
 });
 
-test("v0.12.43 reports a pending approval as a human decision, not as the loop's action", async () => {
+test("reports a pending approval as a human decision, not as the loop's action", async () => {
   const f = await fixture();
   try {
     // Rung 3, and the reason it outranks the loop: an approval is a human decision, and surfacing
@@ -134,7 +134,7 @@ test("v0.12.43 reports a pending approval as a human decision, not as the loop's
   } finally { await close(f); }
 });
 
-test("v0.12.43 falls back to the run state when there is no loop, and reports who acts", async () => {
+test("falls back to the run state when there is no loop, and reports who acts", async () => {
   const f = await fixture();
   try {
     scaffold(f.store);
@@ -159,7 +159,7 @@ test("v0.12.43 falls back to the run state when there is no loop, and reports wh
   } finally { await close(f); }
 });
 
-test("v0.12.43 serves the view read-only through the facade and MCP", async () => {
+test("serves the view read-only through the facade and MCP", async () => {
   const f = await fixture();
   try {
     scaffold(f.store);

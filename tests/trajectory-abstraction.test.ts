@@ -18,7 +18,7 @@ import {
 const failing = (trace: string, task: string, checks: string[], observedAt = 0): JsonObject =>
   ({ trace_id: trace, task_id: task, failed_checks: checks, outcome: "failed", observed_at: observedAt });
 
-test("v0.12.37 derives a signature from the failure set, not its order", () => {
+test("derives a signature from the failure set, not its order", () => {
   // Order independence is the point: the same failure reported in a different
   // sequence is still the same failure.
   assert.equal(trajectoryFailureSignature({ failed_checks: ["b", "a"] }), "a|b");
@@ -31,7 +31,7 @@ test("v0.12.37 derives a signature from the failure set, not its order", () => {
   assert.throws(() => trajectoryFailureSignature({ failed_checks: [""] }), /must not be empty/u);
 });
 
-test("v0.12.37 matches failures by check identity, not by task id", () => {
+test("matches failures by check identity, not by task id", () => {
   // Running this against a real model exposed the hole: checks named per task
   // (`rev-1:exact`, `rev-2:exact`) are the same failure but never matched, so
   // recurrence across tasks was invisible and the floor could never be met.
@@ -63,7 +63,7 @@ test("v0.12.37 matches failures by check identity, not by task id", () => {
   assert.deepEqual(candidates[0]!.failed_checks, ["exact"]);
 });
 
-test("v0.12.37 generalises only across independent trajectories", () => {
+test("generalises only across independent trajectories", () => {
   const analysis = findRecurringFailures({ trajectories: [
     failing("t1", "task-a", ["tests"], 1),
     failing("t2", "task-b", ["tests"], 2),
@@ -78,7 +78,7 @@ test("v0.12.37 generalises only across independent trajectories", () => {
   assert.equal(analysis.considered, 2);
 });
 
-test("v0.12.37 refuses to generalise one task retrying itself", () => {
+test("refuses to generalise one task retrying itself", () => {
   // The rule that keeps abstraction from becoming confident hallucination: two
   // attempts at the SAME task is one story told twice, not a pattern.
   const analysis = findRecurringFailures({ trajectories: [
@@ -96,7 +96,7 @@ test("v0.12.37 refuses to generalise one task retrying itself", () => {
     /not supported by enough independent trajectories: single_task_recurrence/u);
 });
 
-test("v0.12.37 needs at least two observations before anything is claimed", () => {
+test("needs at least two observations before anything is claimed", () => {
   const analysis = findRecurringFailures({ trajectories: [failing("t1", "task-a", ["tests"])] });
   const candidates = analysis.candidates as JsonObject[];
   assert.equal(candidates[0]!.publishable, false);
@@ -109,7 +109,7 @@ test("v0.12.37 needs at least two observations before anything is claimed", () =
   assert.equal(empty.considered, 0);
 });
 
-test("v0.12.37 groups by signature so distinct failures stay distinct", () => {
+test("groups by signature so distinct failures stay distinct", () => {
   const analysis = findRecurringFailures({ trajectories: [
     failing("t1", "task-a", ["tests"], 1),
     failing("t2", "task-b", ["tests"], 2),
@@ -135,7 +135,7 @@ test("v0.12.37 groups by signature so distinct failures stay distinct", () => {
   assert.deepEqual(ordered.map((item) => item.signature), ["x", "y"]);
 });
 
-test("v0.12.37 rejects evidence that could fake recurrence", () => {
+test("rejects evidence that could fake recurrence", () => {
   const replayed = { trajectories: [failing("t1", "task-a", ["tests"]), failing("t1", "task-b", ["tests"])] };
   // One run reported twice is the most dangerous way to fool this function.
   assert.throws(() => findRecurringFailures(replayed), /must reference distinct traces/u);
@@ -150,7 +150,7 @@ test("v0.12.37 rejects evidence that could fake recurrence", () => {
   assert.throws(() => findRecurringFailures({ trajectories: [{ trace_id: "t", task_id: "k", outcome: "failed", failed_checks: [7] }] }), /failed_checks must not be empty/u);
 });
 
-test("v0.12.37 builds an abstraction that cannot overclaim", () => {
+test("builds an abstraction that cannot overclaim", () => {
   const trajectories = [failing("t1", "task-a", ["tests"], 1), failing("t2", "task-b", ["tests"], 2)];
   const abstraction = buildAbstraction({ trajectories, signature: "tests", scope: "project" });
   assert.equal(abstraction.kind, "recurring_failure");
@@ -191,7 +191,7 @@ test("v0.12.37 builds an abstraction that cannot overclaim", () => {
   assert.throws(() => buildAbstraction({ trajectories, signature: "lint" }), /No trajectories exhibit that failure signature/u);
 });
 
-test("v0.12.37 runs the whole pass and reports what it nearly found", () => {
+test("runs the whole pass and reports what it nearly found", () => {
   const report = abstractAcrossTrajectories({ trajectories: [
     failing("t1", "task-a", ["tests"], 1),
     failing("t2", "task-b", ["tests"], 2),
@@ -215,7 +215,7 @@ test("v0.12.37 runs the whole pass and reports what it nearly found", () => {
   assert.equal(none.considered, 0);
 });
 
-test("v0.12.37 is reachable from the loop and from MCP", async (t) => {
+test("is reachable from the loop and from MCP", async (t) => {
   // The read/observe half must be mountable by the loop, or the wiring gap is
   // reproduced. `craft_abstraction_build` is deliberately NOT: minting an
   // abstraction is a claim about the future that needs review, so it belongs in
@@ -230,7 +230,7 @@ test("v0.12.37 is reachable from the loop and from MCP", async (t) => {
     assert.equal(authorizedTools(TOOLS, DEFAULT_INTERNAL_AUTHORIZATION).some((tool) => tool.name === name), true, `${name} missing from the projection`);
   }
 
-  const root = join(tmpdir(), `craft-v01237-mcp-${process.pid}-${Date.now()}`);
+  const root = join(tmpdir(), `craft-trajectory-abstraction-mcp-${process.pid}-${Date.now()}`);
   await mkdir(root, { recursive: true });
   const store = await new CraftStore(craftPaths(root)).open();
   t.after(async () => { store.close(); await rm(root, { recursive: true, force: true }); });

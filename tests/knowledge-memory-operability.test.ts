@@ -75,7 +75,7 @@ test("automated knowledge review records why legacy imports require live revalid
     const legacy = f.service.knowledgeClaimSave({ claim_id: "legacy-claim", kind: "fact", content: "An old repository observation.",
       scope: "legacy:project", evidence_ids: [legacyEvidence.id] }).claim as JsonObject;
     // Simulate the pre-provenance records which the migration left in the local
-    // database.  The reviewer must not recover their trust from Markdown text.
+    // database. The reviewer must not recover their trust from Markdown text.
     f.store.save("knowledge_claim", String(legacy.id), { ...legacy, source_id: null, scope: "legacy:project" });
     const currentEvidence = sourceAndEvidence(f.service);
     const secondCurrentEvidence = f.service.evidenceRecord({ evidence_id: "current-evidence-2", claim: "A second independent fixture observation", source_type: "observation", confidence: "confirmed" });

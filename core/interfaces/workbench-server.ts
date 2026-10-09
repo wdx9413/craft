@@ -3,8 +3,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { type AddressInfo } from "node:net";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { CraftService, VERSION } from "../application/craft-service.ts";
 import { runBuiltinAcceptanceTicks } from "../acceptance-worker.ts";
 import { createActionHandlers } from "../application/actions/action-handlers.ts";
@@ -35,22 +34,6 @@ function failure(error: unknown): WebResponse { return json(error instanceof Syn
   { error: error instanceof Error ? error.message : String(error) }); }
 function boundedLimit(value: string | null, fallback: number): number { if (value === null || value === "") return fallback; const parsed = Number(value); if (!Number.isInteger(parsed) || parsed < 1 || parsed > 1_000) throw new Error("limit must be an integer between 1 and 1000"); return parsed; }
 function queryValue(url: URL, key: string): string | undefined { const value = url.searchParams.get(key); return value === null ? undefined : value; }
-
-/**
- * The Studio is a Codex-style HTML app that lives beside the packaged runtime
- * rather than inside the bundle, so it stays editable without a rebuild. Walk
- * up from this module (src/ in development, dist/src/ after a build) and use
- * the first directory that actually holds the app.
- */
-export function locateWorkbench(start?: string): string | null {
-  let directory = start ?? dirname(fileURLToPath(import.meta.url));
-  for (let depth = 0; depth < 4; depth += 1) {
-    const candidate = join(directory, "workbench");
-    if (existsSync(join(candidate, "index.html"))) return candidate;
-    directory = dirname(directory);
-  }
-  return null;
-}
 
 const WORKBENCH_ASSETS: Readonly<Record<string, { file: string; type: string }>> = {
   "/entry.css": { file: "entry.css", type: "text/css; charset=utf-8" },
@@ -98,7 +81,8 @@ export class WorkbenchWebApp {
   readonly service: CraftService; readonly token: string; readonly origin: string; readonly workbenchDir: string | null;
   constructor(service: CraftService, token: string, origin: string, options: { workbenchDir?: string | null } = {}) {
     this.service = service; this.token = token; this.origin = origin;
-    this.workbenchDir = options.workbenchDir === undefined ? locateWorkbench() : options.workbenchDir;
+    // Presentation is owned by craft-workbench and must be mounted explicitly.
+    this.workbenchDir = options.workbenchDir ?? null;
   }
   handle(request: WebRequest): WebResponse {
     const url = new URL(request.path, this.origin); const path = url.pathname;
@@ -379,14 +363,15 @@ export class WorkbenchWebApp {
 
   #workbenchAsset(path: string): WebResponse {
     const asset = WORKBENCH_ASSETS[path];
-    if (!asset || this.workbenchDir === null) return json(404, { error: "Not found" });
+    if (!asset || this.workbenchDir === null || !existsSync(join(this.workbenchDir, asset.file))) return json(404, { error: "Not found" });
     return { status: 200, contentType: asset.type, body: readFileSync(join(this.workbenchDir, asset.file), "utf8") };
   }
 }
 
 export class LocalWorkbenchServer {
+  readonly workbenchDir: string | null;
   readonly service: CraftService; readonly token: string; readonly acceptanceTick: () => Promise<unknown>; #server: Server | null = null; #acceptanceTimer: NodeJS.Timeout | null = null; #acceptanceRunning = false;
-  constructor(service: CraftService, token = randomBytes(32).toString("base64url"), options: { acceptanceTick?: () => Promise<unknown> } = {}) { this.service = service; this.token = token; this.acceptanceTick = options.acceptanceTick ?? (() => runBuiltinAcceptanceTicks(this.service)); }
+  constructor(service: CraftService, token = randomBytes(32).toString("base64url"), options: { acceptanceTick?: () => Promise<unknown>; workbenchDir?: string | null } = {}) { this.service = service; this.token = token; this.workbenchDir = options.workbenchDir ?? null; this.acceptanceTick = options.acceptanceTick ?? (() => runBuiltinAcceptanceTicks(this.service)); }
   async start(port = 4173): Promise<{ url: string; token: string }> {
     if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error("port must be an integer between 0 and 65535");
     if (this.#server) throw new Error("Workbench server is already running");
@@ -399,7 +384,7 @@ export class LocalWorkbenchServer {
         // NB: hand over the raw url, not `.pathname`. `handle` reads limits and
         // ids from `url.searchParams`, so stripping the query here silently
         // dropped every `?limit=` / `?project_id=` a caller sent.
-        const pending = size > MAX_BODY ? Promise.resolve(json(413, { error: "Request body exceeds 64 KiB" })) : new WorkbenchWebApp(this.service, this.token, origin).handleAsync({ method: String(request.method),
+        const pending = size > MAX_BODY ? Promise.resolve(json(413, { error: "Request body exceeds 64 KiB" })) : new WorkbenchWebApp(this.service, this.token, origin, { workbenchDir: this.workbenchDir }).handleAsync({ method: String(request.method),
           path: String(request.url), token: auth, origin: request.headers.origin, body: Buffer.concat(chunks).toString("utf8") });
         void pending.then((result) => {
           response.writeHead(result.status, { "content-type": result.contentType, "content-length": Buffer.byteLength(result.body), ...SECURITY_HEADERS }); response.end(result.body); }); }); });

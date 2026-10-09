@@ -192,7 +192,7 @@ test("a task conversation turn records the user turn, streams the model reply an
   }
 });
 
-test("the v0.12.34 readiness, protocol and isolation facade methods project the runtime helpers", async () => {
+test("the readiness, protocol and isolation facade methods project the runtime helpers", async () => {
     const f = await fixture();
     try {
       const service = new CraftService(f.store);
@@ -219,11 +219,11 @@ test("the distribution plan reports the download story and the remaining gap", a
     const plan = service.distributionPlanGet({});
     assert.equal(plan.version, "0.12.39");
     assert.equal(plan.user_download_available, false);
-    assert.equal(plan.channel, "developer_command_only");
+    assert.equal(plan.channel, "separate_project");
     assert.ok(Array.isArray(plan.remainder));
     const published = service.distributionPlanGet({ release_assets_available: true });
-    assert.equal(published.user_download_available, true);
-    assert.equal(published.channel, "github_release_asset");
+    assert.equal(published.user_download_available, false);
+    assert.equal(published.channel, "separate_project");
   } finally {
     f.store.close();
     await rm(f.root, { recursive: true, force: true });

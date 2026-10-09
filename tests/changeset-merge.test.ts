@@ -40,7 +40,7 @@ test("ChangeSets merge non-conflicting fields and invalidate only transitive dep
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
-test("v0.10.1 detects same-field conflicts and rejects malformed or unsafe patches", async () => {
+test("detects same-field conflicts and rejects malformed or unsafe patches", async () => {
   const root = join(tmpdir(), `craft-patch-errors-${process.pid}-${Date.now()}`); const worktree = join(root, "worktree");
   const store = await new CraftStore(craftPaths(join(root, "craft"))).open(); const service = new CraftService(store);
   try {

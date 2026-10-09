@@ -8,7 +8,7 @@ import { CraftService } from "../core/service.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 
 test("experience mining produces bounded success and failure patterns, then advances only a read-only held-out shadow run", async () => {
-  const root = join(tmpdir(), `craft-v098-shadow-${process.pid}-${Date.now()}`);
+  const root = join(tmpdir(), `craft-experience-mining-shadow-${process.pid}-${Date.now()}`);
   await mkdir(root, { recursive: true }); await writeFile(join(root, "ok.txt"), "ok");
   const store = await new CraftStore(craftPaths(join(root, "data"))).open(); const service = new CraftService(store);
   try {
@@ -52,7 +52,7 @@ test("experience mining produces bounded success and failure patterns, then adva
 });
 
 test("shadow evaluation rejects non-held-out, non-read-only, or unsuccessful proposals without publication", async () => {
-  const root = join(tmpdir(), `craft-v098-reject-${process.pid}-${Date.now()}`);
+  const root = join(tmpdir(), `craft-experience-mining-reject-${process.pid}-${Date.now()}`);
   await mkdir(root, { recursive: true }); const store = await new CraftStore(craftPaths(join(root, "data"))).open(); const service = new CraftService(store);
   try {
     const task = service.taskOpen({ title: "Reject", goal: "Do not publish" }).task as JsonObject;

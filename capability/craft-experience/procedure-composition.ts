@@ -1,3 +1,4 @@
+import { assertProcedureTestIsolation, selectedProcedure } from "./procedure-release.ts";
 import { selectGraph } from "./procedure-graph.ts";
 /** Entry/exit contracts compile to Host plans; this module never executes steps. */
 import type { CraftStore, JsonObject } from "../../common/craft-common-store-local/src/store.ts";
@@ -123,6 +124,10 @@ export class ProcedurePlanner {
   plan(args: JsonObject, options: { deferPreconditions?: boolean } = {}): JsonObject {
     const scope = text(args.scope, "scope"), access = scopeAccess(args);
     const allowed = new Set(names(args.allowed_effects, "allowed_effects", 1).map(effect));
+    if (args.release_channel === "test" && [...allowed].some(effect => effect !== "read_only")) {
+      if (args.test_workspace_id === undefined) throw new Error("Test Procedures require read_only effects or isolated workspaces");
+      assertProcedureTestIsolation(this.store, args);
+    }
     const evidence = bindings(args.precondition_evidence ?? {}, "precondition_evidence");
     const inputRefs = bindings(args.input_refs, "input_refs");
     const definitions = new ProcedureDefinitionStore(this.store.paths);
@@ -131,8 +136,8 @@ export class ProcedurePlanner {
       const id = text(selection.procedure_id, "procedure_id"), pinned = version(selection.procedure_version);
       if (ancestors.includes(id)) throw new Error("Recursive Procedure Call is forbidden");
       if (ancestors.length >= 8) throw new Error("Procedure Call depth exceeds 8");
-      const procedure = this.store.get("experience_procedure", id);
-      if (procedure.version !== pinned || procedure.routeable !== true || procedure.lifecycle !== "routeable") throw new Error(`Procedure unavailable, revoked, or version drifted: ${id}`);
+      const procedure = selectedProcedure(this.store, id, args.release_channel);
+      if (!procedure || procedure.version !== pinned || args.release_channel !== "test" && (procedure.routeable !== true || procedure.lifecycle !== "routeable")) throw new Error(`Procedure unavailable, revoked, or version drifted: ${id}`);
       if (procedure.scope !== scope || !scopeAllows(scopeEnvelope(procedure.scope_envelope, scopeFromKey(scope)), access)) throw new Error(`Procedure scope or audience denied: ${id}`);
       if (!procedureDefinitionRef(procedure.definition_ref)) throw new Error("Procedure has no checked definition");
       const definition = definitions.read(procedure.definition_ref);

@@ -20,7 +20,7 @@
 ## 主要入口
 
 - [上下文投影及撤回](../../core/application/coordinators/context-usage.ts)、[回执引用补齐](../../core/context-resolution.ts)。
-- [工作流设计服务](../../core/application/coordinators/workflow-design.ts)、[两个页面](../../workbench/context-workflows.js)。
+- [工作流设计服务](../../core/application/coordinators/workflow-design.ts)、[两个页面（已迁移）](../technical/modules/presentation-separation.md)。
 - [Experience 设计指南](../../skills/craft-experience/references/design.md)。
 - [独立评测样例及判分器](../../scripts/eval/completion-contract.ts)。
 

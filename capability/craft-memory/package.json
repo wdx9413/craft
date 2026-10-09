@@ -17,7 +17,15 @@
       "types": "./dist/memory-ledger.d.ts",
       "default": "./dist/memory-ledger.js"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./memory-governance": {
+      "types": "./dist/memory-governance.d.ts",
+      "default": "./dist/memory-governance.js"
+    },
+    "./memory-capture": {
+      "types": "./dist/memory-capture.d.ts",
+      "default": "./dist/memory-capture.js"
+    }
   },
   "files": [
     "dist",

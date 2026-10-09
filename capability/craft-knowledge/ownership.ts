@@ -33,13 +33,13 @@
  * `craft_knowledge_scope_*` are `ProjectKnowledgeKernel`, and `craft_project_brain_*` is
  * `ProjectBrainKernel`.
  *
- * Note what is still absent: `craft_knowledge_claim_*`, `craft_wiki_page_*` and
+ * Claim save/get/list/review now belongs to this package through `knowledge.claims`. Still absent: `craft_wiki_page_*` and
  * `craft_knowledge_evaluation_*` live in `craft-service.ts` and `wiki-candidate-governance.ts`
  * respectively rather than in a kernel this package assembles, so they are projected by the
  * product and not claimed as ownership. `craft_knowledge_bootstrap_install` is a second name for
  * `installBuiltins`, so it is owned.
  */
-export const KNOWLEDGE_FAMILIES = "craft_(?:relation_|knowledge_source_|knowledge_memory_install_builtins|knowledge_bootstrap_install|knowledge_workbench|knowledge_context_work_launch|knowledge_context_bundle_preview|knowledge_index_|knowledge_search|knowledge_scope_|wiki_skill_candidate_|wiki_candidate_local_import|project_knowledge_|project_brain_)";
+export const KNOWLEDGE_FAMILIES = "craft_(?:relation_|knowledge_claim_|knowledge_source_|knowledge_memory_install_builtins|knowledge_bootstrap_install|knowledge_workbench|knowledge_context_work_launch|knowledge_context_bundle_preview|knowledge_index_|knowledge_search|knowledge_scope_|wiki_skill_candidate_|wiki_candidate_local_import|project_knowledge_|project_brain_)";
 
 /**
  * The product projection, kept as the name space it has always been, plus one repair.

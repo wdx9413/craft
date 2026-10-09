@@ -14,12 +14,12 @@ import { CraftService, VERSION } from "../core/service.ts";
 import { McpServer } from "../core/mcp.ts";
 
 async function fixture() {
-  const root = await mkdtemp(join(tmpdir(), "craft-v0124-"));
+  const root = await mkdtemp(join(tmpdir(), "craft-autonomous-platform-"));
   const store = await new CraftStore(craftPaths(join(root, "data"))).open();
   return { root, store };
 }
 
-test("v0.12.4 bounded autonomous runtime executes, checkpoints, resumes, and cancels", async () => {
+test("bounded autonomous runtime executes, checkpoints, resumes, and cancels", async () => {
   const f = await fixture();
   try {
     const kernel = new AutonomousRuntimeKernel(f.store);
@@ -82,7 +82,7 @@ test("v0.12.4 bounded autonomous runtime executes, checkpoints, resumes, and can
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("v0.12.4 capability lifecycle covers install, activate, upgrade, disable and retirement", async () => {
+test("capability lifecycle covers install, activate, upgrade, disable and retirement", async () => {
   const f = await fixture();
   try {
     const kernel = new CapabilityLifecycleKernel(f.store);
@@ -124,7 +124,7 @@ test("v0.12.4 capability lifecycle covers install, activate, upgrade, disable an
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("v0.12.4 memory consolidation and remote interop preserve provenance and fail closed", async () => {
+test("memory consolidation and remote interop preserve provenance and fail closed", async () => {
   const f = await fixture();
   try {
     const memory = new MemoryConsolidationKernel(f.store);
@@ -177,7 +177,7 @@ test("v0.12.4 memory consolidation and remote interop preserve provenance and fa
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("v0.12.4 platform operations export role decisions and the MCP surface", async () => {
+test("platform operations export role decisions and the MCP surface", async () => {
   const f = await fixture();
   try {
     const service = new CraftService(f.store); const ops = new PlatformOperationsKernel(f.store);

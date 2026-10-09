@@ -1,3 +1,4 @@
+import { latestMemoryConfirmation } from "../capability/craft-memory/memory-governance.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { optionalScope } from "./validation.ts";
 import { scopeAccess, scopeAllows, scopeEnvelope, sourceAllows } from "./scope-policy.ts";
@@ -65,6 +66,7 @@ export class MemoryMaintenanceKernel {
     const candidates = useLedger ? ledger : this.store.list("episodic_memory", 10_000, visible);
     const candidateKind = useLedger ? "memory_ledger" : "episodic_memory";
     const semantic = this.store.list("semantic_memory", 10_000, item => item.status === "active" && visible(item));
+    const confirmations = useLedger ? candidates.map(memory => ({ memory_id: memory.id, memory_version: memory.version, confirmed_at: latestMemoryConfirmation(this.store, memory, now) })).filter(item => item.confirmed_at !== null) : [];
     const findings: JsonObject[] = [];
     const seen = new Set<string>();
     for (const memory of candidates) {
@@ -85,11 +87,11 @@ export class MemoryMaintenanceKernel {
       }
     }
     const maintenanceId = String(args.maintenance_id ?? `memory_maintenance_${randomUUID().replaceAll("-", "")}`);
-    const identity = { scope, stage, now, memory_kind: candidateKind, memory_ids: candidates.map((item) => item.id).sort(), semantic_ids: semantic.map((item) => item.id).sort(), finding_digest: digest(findings) };
+    const identity = { scope, stage, now, memory_kind: candidateKind, memory_ids: candidates.map((item) => item.id).sort(), semantic_ids: semantic.map((item) => item.id).sort(), finding_digest: digest(findings), confirmation_digest: digest(confirmations) };
     const existing = this.store.find("memory_maintenance_run", maintenanceId);
     if (existing) {
       if (existing.identity_digest !== digest(identity)) throw new Error("Memory maintenance idempotency conflict");
-      return { run: existing, findings, idempotent: true };
+      return { run: existing, findings, confirmations, idempotent: true };
     }
     const proposal = stage === "deep" && findings.length > 0
       ? this.store.create("memory_maintenance_candidate", `${maintenanceId}:candidate`, { source_kind: candidateKind, source_ids: candidates.map((item) => item.id),
@@ -99,7 +101,7 @@ export class MemoryMaintenanceKernel {
         scope, finding_digest: digest(findings), status: "candidate", publication_allowed: false, raw_content_stored: false })
       : null;
     const run = this.store.create("memory_maintenance_run", maintenanceId, { ...identity, identity_digest: digest(identity), finding_count: findings.length, candidate_id: proposal?.id ?? null, status: "completed", raw_content_stored: false });
-    return { run, findings, candidate: proposal, idempotent: false };
+    return { run, findings, confirmations, candidate: proposal, idempotent: false };
   }
 
   get(args: JsonObject): JsonObject {

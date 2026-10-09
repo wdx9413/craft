@@ -6,7 +6,7 @@ test("coverage inventory exposes omitted production files independently of green
   const result = coverageInventory(["core/known.ts", "core/new.ts", "core/known.ts", "core/types.d.ts", "tests/test.ts", "core/data.json", "adapters/dist/generated.js", "adapters/node_modules/vendor.js", "workbench/page.js"], [{ name: "known", include: ["core/known.ts"] }]);
   assert.equal(result.status, "incomplete");
   assert.deepEqual(result.managed, ["core/known.ts"]);
-  assert.deepEqual(result.missing, ["core/new.ts", "workbench/page.js"]);
+  assert.deepEqual(result.missing, ["core/new.ts"]);
   assert.equal(result.coverage_proven, false);
   assert.equal(result.native_coverage, "separate_required");
   assert.equal(coverageInventory(["core/known.ts"], [{ name: "known", include: ["core/known.ts"] }]).status, "complete");

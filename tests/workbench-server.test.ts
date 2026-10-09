@@ -73,7 +73,7 @@ test("local Workbench server binds loopback, serves headers, handles bodies, and
   const f = await fixture(); const server = new LocalWorkbenchServer(f.service, "network-token");
   t.after(async () => { try { await server.close(); } finally { f.store.close(); } });
   const started = await server.start(0); const origin = started.url.split("/#")[0];
-  assert.equal(started.token, "network-token"); assert.equal((await fetch(`${origin}/`)).status, 200); const health = await fetch(`${origin}/health`); assert.equal(health.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(started.token, "network-token"); assert.equal((await fetch(`${origin}/`)).status, 404); const health = await fetch(`${origin}/health`); assert.equal(health.headers.get("x-content-type-options"), "nosniff");
   assert.equal((await fetch(`${origin}/api/home`, { headers: { authorization: "Basic x" } })).status, 401);
   assert.equal((await fetch(`${origin}/api/home`, { headers: { authorization: "Bearer network-token" } })).status, 200);
   for (const route of ["/api/project-brain?project_id=local&limit=1", "/api/workbench-experience?project_id=local&task_id=t&limit=1", "/api/traces?task_id=t&event_kind=x&limit=1", "/api/long-task-checkpoints?session_id=s&limit=1", "/api/workbench/resources?kind=memory&task_id=t&limit=1"]) {

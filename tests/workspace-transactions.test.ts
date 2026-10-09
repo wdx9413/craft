@@ -54,7 +54,7 @@ test("workspace transactions use an exact baseline and approved rollback", async
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
-test("v0.9.11 compiles only passed trajectories into a static script proposal and requires an exact Signoff", async () => {
+test("compiles only passed trajectories into a static script proposal and requires an exact Signoff", async () => {
   const root = join(tmpdir(), `craft-trajectory-${process.pid}-${Date.now()}`);
   const store = await new CraftStore(craftPaths(join(root, "craft"))).open();
   const service = new CraftService(store);

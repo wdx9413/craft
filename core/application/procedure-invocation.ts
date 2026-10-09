@@ -2,6 +2,7 @@ import type { CraftStore, JsonObject } from "../infrastructure/store.ts";
 import { payload, stableDigest } from "../digest.ts";
 import { object, text, uniqueList } from "../validation.ts";
 import { scopeAccess, scopeAllows, scopeEnvelope, scopeFromKey } from "../scope-policy.ts";
+import { assertProcedureTestIsolation, selectedProcedure } from "../../capability/craft-experience/procedure-release.ts";
 import { ProcedurePlanner } from "../../capability/craft-experience/procedure-composition.ts";
 import { ProcedureDefinitionStore, type ProcedureDefinitionRef } from "../../capability/craft-experience/procedure-definition.ts";
 import { DurableActionLoopKernel } from "../durable-action-loop.ts";
@@ -41,6 +42,7 @@ export class ProcedureInvocationKernel {
       if (task.status !== "active" || work.lifecycle !== "active" || contract.task_id !== task.id || contract.version !== work.contract_version) throw new Error("Invocation requires an active same-Task Work Loop and current contract");
       const effects = uniqueList(args.allowed_effects, "allowed_effects");
       if (!effects.length || effects.some(effect => !["read_only", "local_write"].includes(effect) || !(contract.allowed_effects as string[]).includes(effect))) throw new Error("Invocation effects exceed Task contract or supported local effects");
+      if (args.release_channel === "test" && effects.includes("local_write")) assertProcedureTestIsolation(this.store, args, work.workspace_id);
       const maxDispatches = integer(args.max_dispatches, "max_dispatches", 500);
       const ttl = integer(args.ttl_ms, "ttl_ms", 86_400_000);
       const compiled = new ProcedurePlanner(this.store).plan(args, { deferPreconditions: true });
@@ -59,7 +61,7 @@ export class ProcedureInvocationKernel {
         this.store.save("durable_work_item", String(marker.id), { ...payload(marker), status: "dormant" });
       }
       const invocation = this.store.create("procedure_invocation", id, { ...(graph ? { graph: plan.graph, graph_state: graphPrepared!.graph_state, subscenario_id: (graph.scenario as JsonObject).id, scenario_id: (graph.control as JsonObject).scenario_id, scenario_digest: stableDigest(graph.scenario) } : {}), request_digest: requestDigest, work_loop_id: work.id, task_id: work.task_id, task_run_id: work.task_run_id,
-        contract_id: contract.id, contract_version: contract.version, workspace_id: work.workspace_id, scope: args.scope, action_loop_id: loop.id,
+        release_channel: args.release_channel ?? "current", test_workspace_id: args.test_workspace_id ?? null, baseline_workspace_id: args.baseline_workspace_id ?? null, contract_id: contract.id, contract_version: contract.version, workspace_id: work.workspace_id, scope: args.scope, action_loop_id: loop.id,
         procedure_id: plan.procedure_id, procedure_version: plan.procedure_version, definition_digest: plan.definition_digest, entry_id: plan.entry_id, exit_id: args.exit_id,
         plan_digest: compiled.plan_digest, input_digest: stableDigest(rootInputs), initial_snapshot_digest: snapshot.snapshot_digest,
         host_id: text(args.host_id, "host_id"), model_fingerprint: text(args.model_fingerprint, "model_fingerprint"), budget_fingerprint: text(args.budget_fingerprint, "budget_fingerprint"),
@@ -294,9 +296,10 @@ export class ProcedureInvocationKernel {
       const limits = object(budget.limits, "budget limits"), used = object(budget.used, "budget used"), reserved = object(budget.reserved, "budget reserved");
       if (budget.status !== "active" || budget.owner_id !== run.task_id || Object.keys(limits).some(key => Number(limits[key]) <= Number(used[key] ?? 0) + Number(reserved[key] ?? 0))) throw new Error("Task budget exhausted or unavailable");
     }
+    if (run.release_channel === "test" && (run.allowed_effects as string[]).includes("local_write")) assertProcedureTestIsolation(this.store, run, work.workspace_id);
     for (const node of run.nodes as Node[]) {
-      const procedure = this.store.get("experience_procedure", String(node.procedure_id));
-      if (procedure.routeable !== true || procedure.lifecycle !== "routeable" || procedure.version !== node.procedure_version || procedure.definition_digest !== node.definition_digest) throw new Error("Procedure revoked or version drifted; replan required");
+      const procedure = selectedProcedure(this.store, String(node.procedure_id), run.release_channel);
+      if (!procedure || run.release_channel !== "test" && (procedure.routeable !== true || procedure.lifecycle !== "routeable") || procedure.version !== node.procedure_version || procedure.definition_digest !== node.definition_digest) throw new Error("Procedure revoked or version drifted; replan required");
       new ProcedureDefinitionStore(this.store.paths).read(procedure.definition_ref as ProcedureDefinitionRef);
     }
     this.access(run, args);

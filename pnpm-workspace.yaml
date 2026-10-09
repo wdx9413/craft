@@ -1,5 +1,4 @@
 packages:
-  - desktop
   - adapters/deepseek-harness
   - common/craft-common-store-local
   - common/craft-common-base

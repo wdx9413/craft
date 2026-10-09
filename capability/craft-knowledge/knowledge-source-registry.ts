@@ -186,7 +186,7 @@ export class KnowledgeSourceRegistry {
           this.store.save("knowledge_document", String(prior.id), { ...payload(prior), status: current ? "changed" : "deleted" });
         }
       }
-      for (const claim of this.store.list("knowledge_claim", 100_000, item => item.source_id === source.id && Boolean(item.source_revision_id))) {
+      for (const claim of this.store.list("knowledge_claim", 100_000, item => item.source_id === source.id && Boolean(item.source_revision_id), false, { source_ids: [String(source.id)], document_ids: [] })) {
         const obsolete = claim.document_id ? invalid.has(String(claim.document_id)) : claim.source_revision_id !== revision.id;
         if (obsolete && ["reviewed", "candidate"].includes(String(claim.status))) this.store.save("knowledge_claim", String(claim.id), { ...payload(claim), status: "stale", revalidation_required: true, stale_since_revision: revision.id });
       }

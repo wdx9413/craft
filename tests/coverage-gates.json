@@ -1,23 +1,9 @@
 {
   "$comment": [
-    "Per-module coverage gates, expressed as data instead of as a chain of scripts.",
-    "",
-    "These groups were previously one `package.json` script per release",
-    "(`test:v01216` ... `test:v01242`), each naming both its modules and its test",
-    "files. That made the script list a second changelog and tied every coverage",
-    "gate to a version number: renaming a module silently broke its gate, and",
-    "adding one release meant another register-*.mjs script and another `&&` in the",
-    "The same groups are defined here once.",
-    "",
-    "Each group runs as its own `node --test` invocation, exactly as before.",
-    "Running all tests against every group in one process was measured to under-",
-    "report some modules -- `context-retrieval-capture.ts` reads 98.67% lines that",
-    "way but 100% in its own group -- so a single combined run would have turned",
-    "this into a stricter gate than the one it replaces.",
-    "",
-    "Every managed group asserts 100% line, function, and branch coverage.",
-    "Platform-only branches may remain explicitly skipped on platforms where they",
-    "are structurally unreachable; no ordinary module is exempt from branch coverage."
+    "Coverage gates are grouped by capability or behavior, never by release number.",
+    "Each group names its source modules and tests and runs as a separate Node test process.",
+    "Every managed group asserts 100% line, function and branch coverage.",
+    "Platform-only unreachable branches require explicit platform metadata; ordinary modules have no exemptions."
   ],
   "thresholds": {
     "lines": 100,
@@ -26,68 +12,218 @@
   },
   "groups": [
     {
+      "name": "context-revocation-race",
+      "include": [
+        "common/craft-common-store-local/src/context-access-guard.ts",
+        "core/context-access-guard.ts"
+      ],
+      "tests": [
+        "tests/context-revocation-race.test.ts",
+        "tests/context-optimization.test.ts",
+        "tests/context-read-snapshot.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "context-remediation",
+      "include": [
+        "common/craft-common-base/src/context-assets.ts",
+        "capability/craft-codebase/context-search.ts",
+        "capability/craft-codebase/repository-onboarding.ts",
+        "capability/craft-experience/procedure-release.ts",
+        "capability/craft-experience/graph-matching.ts",
+        "core/mcp/context-tools.ts",
+        "capability/craft-memory/memory-capture.ts",
+        "capability/craft-knowledge/claim-governance.ts"
+      ],
+      "tests": [
+        "tests/context-remediation.test.ts",
+        "tests/repository-context.test.ts",
+        "tests/knowledge-memory-operability.test.ts",
+        "tests/industry-gaps.test.ts",
+        "tests/validation.test.ts",
+        "tests/remaining-branch-cases.test.ts",
+        "tests/service-edge-coverage.test.ts",
+        "tests/context-aggregation-policy.test.ts",
+        "tests/context-optimization.test.ts",
+        "tests/codebase-view-lifecycle.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "experience-graph-assets",
+      "include": [
+        "capability/craft-experience/graph-assets.ts",
+        "capability/craft-experience/graph-version-manifest.ts",
+        "capability/craft-experience/procedure-definition.ts",
+        "capability/craft-experience/procedure-configuration.ts",
+        "capability/craft-experience/procedure-templates.ts"
+      ],
+      "tests": [
+        "tests/experience-graph-assets.test.ts",
+        "tests/graph-version-manifest.test.ts",
+        "tests/procedure-runtime-graph.test.ts",
+        "tests/component-procedure-graph.test.ts",
+        "tests/context-remediation.test.ts"
+      ],
+      "branches": true
+    },
+    {
       "name": "knowledge-claim-access",
-      "include": ["capability/craft-knowledge/claim-access.ts"],
-      "tests": ["tests/context-source-access.test.ts"],
+      "include": [
+        "capability/craft-knowledge/claim-access.ts"
+      ],
+      "tests": [
+        "tests/context-source-access.test.ts"
+      ],
       "branches": true
     },
     {
       "name": "scope-identity",
-      "include": ["core/scope-identity.ts"],
-      "tests": ["tests/scope-identity.test.ts", "tests/knowledge-scope.test.ts", "tests/v01236-components.test.ts", "tests/repository-context.test.ts"],
+      "include": [
+        "core/scope-identity.ts"
+      ],
+      "tests": [
+        "tests/scope-identity.test.ts",
+        "tests/knowledge-scope.test.ts",
+        "tests/component-integration.test.ts",
+        "tests/repository-context.test.ts"
+      ],
       "branches": true
     },
     {
       "name": "common-base-package",
-      "include": ["common/craft-common-base/src/*.ts"],
-      "tests": ["tests/common-base-boundaries.test.ts", "tests/capability-protocol.test.ts", "tests/digest-canonical.test.ts", "tests/validation.test.ts", "tests/retrieval-port.test.ts", "tests/component-hookless.test.ts", "tests/workflow.test.ts", "tests/industry-gaps.test.ts", "tests/coverage-fill.test.ts", "tests/remaining-branch-cases.test.ts", "tests/model-gateway.test.ts", "tests/knowledge-scope.test.ts", "tests/common-packages.test.ts", "tests/catalog-search-regression.test.ts", "tests/ideal-state-gaps.test.ts", "tests/v01236-components.test.ts"],
+      "include": [
+        "common/craft-common-base/src/*.ts"
+      ],
+      "tests": [
+        "tests/common-base-boundaries.test.ts",
+        "tests/capability-protocol.test.ts",
+        "tests/digest-canonical.test.ts",
+        "tests/validation.test.ts",
+        "tests/retrieval-port.test.ts",
+        "tests/component-hookless.test.ts",
+        "tests/workflow.test.ts",
+        "tests/industry-gaps.test.ts",
+        "tests/coverage-fill.test.ts",
+        "tests/remaining-branch-cases.test.ts",
+        "tests/model-gateway.test.ts",
+        "tests/knowledge-scope.test.ts",
+        "tests/common-packages.test.ts",
+        "tests/catalog-search-regression.test.ts",
+        "tests/ideal-state-gaps.test.ts",
+        "tests/component-integration.test.ts"
+      ],
       "branches": true
     },
     {
       "name": "common-store-local-package",
-      "include": ["common/craft-common-store-local/src/*.ts"],
-      "tests": ["tests/store.test.ts", "tests/content-store.test.ts", "tests/store-migrations.test.ts", "tests/private-json.test.ts", "tests/config.test.ts", "tests/platform-settings.test.ts", "tests/coverage-fill.test.ts", "tests/remaining-branch-cases.test.ts", "tests/common-packages.test.ts"],
+      "include": [
+        "common/craft-common-store-local/src/*.ts"
+      ],
+      "tests": [
+        "tests/store.test.ts",
+        "tests/content-store.test.ts",
+        "tests/store-migrations.test.ts",
+        "tests/private-json.test.ts",
+        "tests/config.test.ts",
+        "tests/platform-settings.test.ts",
+        "tests/coverage-fill.test.ts",
+        "tests/remaining-branch-cases.test.ts",
+        "tests/common-packages.test.ts",
+        "tests/context-optimization.test.ts",
+        "tests/context-revocation-race.test.ts",
+        "tests/context-candidate-scope.test.ts",
+        "tests/context-aggregation-policy.test.ts",
+        "tests/context-read-snapshot.test.ts"
+      ],
       "branches": true
     },
     {
       "name": "common-log-sdk",
-      "include": ["common/craft-common-log/src/*.ts"],
-      "tests": ["tests/common-packages.test.ts", "tests/cost-ledger.test.ts", "tests/v01234-contracts.test.ts", "tests/runtime-truth.test.ts", "tests/v01232-observability-memory.test.ts"],
+      "include": [
+        "common/craft-common-log/src/*.ts"
+      ],
+      "tests": [
+        "tests/common-packages.test.ts",
+        "tests/cost-ledger.test.ts",
+        "tests/runtime-contracts.test.ts",
+        "tests/runtime-truth.test.ts",
+        "tests/observability-memory.test.ts"
+      ],
       "branches": true
     },
     {
       "name": "component-versions-runtime-graph",
-      "include": ["capability/craft-experience/procedure-graph.ts", "capability/craft-experience/procedure-configuration.ts", "core/application/procedure-graph-progress.ts", "core/application/procedure-work-items.ts", "core/application/coordinators/component-assets.ts", "workbench/asset-revisions.js"],
-      "tests": ["tests/procedure-runtime-graph.test.ts", "tests/component-asset-revisions.test.ts", "tests/procedure-invocation.test.ts", "tests/procedure-composition.test.ts", "tests/asset-revisions-page.test.ts", "tests/context-spec-regressions.test.ts", "tests/context-aggregation-policy.test.ts"],
+      "include": [
+        "capability/craft-experience/procedure-graph.ts",
+        "capability/craft-experience/procedure-configuration.ts",
+        "core/application/procedure-graph-progress.ts",
+        "core/application/procedure-work-items.ts",
+        "core/application/coordinators/component-assets.ts"
+      ],
+      "tests": [
+        "tests/procedure-runtime-graph.test.ts",
+        "tests/component-asset-revisions.test.ts",
+        "tests/procedure-invocation.test.ts",
+        "tests/procedure-composition.test.ts",
+        "tests/context-spec-regressions.test.ts",
+        "tests/context-aggregation-policy.test.ts",
+        "tests/context-remediation.test.ts",
+        "tests/experience-graph-assets.test.ts"
+      ],
       "branches": true
     },
     {
       "name": "task-run",
-      "include": ["core/task-run.ts"],
-      "tests": ["tests/task-run.test.ts"],
+      "include": [
+        "core/task-run.ts"
+      ],
+      "tests": [
+        "tests/task-run.test.ts"
+      ],
       "branches": true
     },
     {
       "name": "task-delivery-control",
-      "include": ["core/task-control.ts", "core/delivery-loop.ts", "core/work-delivery.ts"],
-      "tests": ["tests/task-control.test.ts", "tests/delivery-loop.test.ts", "tests/work-delivery.test.ts"],
+      "include": [
+        "core/task-control.ts",
+        "core/delivery-loop.ts",
+        "core/work-delivery.ts"
+      ],
+      "tests": [
+        "tests/task-control.test.ts",
+        "tests/delivery-loop.test.ts",
+        "tests/work-delivery.test.ts"
+      ],
       "branches": true
     },
     {
       "name": "token-budget",
-      "include": ["core/token-budget.ts"],
-      "tests": ["tests/token-budget.test.ts", "tests/service-coverage.test.ts"],
+      "include": [
+        "core/token-budget.ts"
+      ],
+      "tests": [
+        "tests/token-budget.test.ts",
+        "tests/service-coverage.test.ts"
+      ],
       "branches": true
     },
     {
       "name": "internal-tool-authorization",
-      "include": ["core/internal-tool-authorization.ts"],
-      "tests": ["tests/internal-tool-authorization.test.ts"],
+      "include": [
+        "core/internal-tool-authorization.ts"
+      ],
+      "tests": [
+        "tests/internal-tool-authorization.test.ts"
+      ],
       "branches": true
     },
     {
       "name": "internal-host-driver",
-      "include": ["core/internal-host-driver.ts"],
+      "include": [
+        "core/internal-host-driver.ts"
+      ],
       "tests": [
         "tests/model-gateway.test.ts",
         "tests/internal-loop-coverage.test.ts",
@@ -100,14 +236,23 @@
     },
     {
       "name": "capability-assets",
-      "include": ["core/assets.ts", "core/model-independence.ts"],
-      "tests": ["tests/capability-assets.test.ts"],
+      "include": [
+        "core/assets.ts",
+        "core/model-independence.ts"
+      ],
+      "tests": [
+        "tests/capability-assets.test.ts"
+      ],
       "branches": true
     },
     {
       "name": "root-design-documents",
-      "include": ["scripts/ci/root-design-documents.ts"],
-      "tests": ["tests/root-design-documents.test.ts"],
+      "include": [
+        "scripts/ci/root-design-documents.ts"
+      ],
+      "tests": [
+        "tests/root-design-documents.test.ts"
+      ],
       "branches": true
     },
     {
@@ -129,7 +274,8 @@
         "tests/store.test.ts",
         "tests/coverage-fill.test.ts",
         "tests/remaining-branch-cases.test.ts",
-        "tests/store-migrations.test.ts"
+        "tests/store-migrations.test.ts",
+        "tests/context-remediation.test.ts"
       ],
       "branches": true
     },
@@ -156,14 +302,23 @@
     },
     {
       "name": "procedure-automation",
-      "include": ["capability/craft-experience/procedure-automation.ts"],
-      "tests": ["tests/procedure-automation.test.ts", "tests/procedure-composition.test.ts"],
+      "include": [
+        "capability/craft-experience/procedure-automation.ts"
+      ],
+      "tests": [
+        "tests/procedure-automation.test.ts",
+        "tests/procedure-composition.test.ts"
+      ],
       "branches": true
     },
     {
       "name": "delivery-evaluation",
-      "include": ["core/delivery-evaluation.ts"],
-      "tests": ["tests/delivery-evaluation.test.ts"],
+      "include": [
+        "core/delivery-evaluation.ts"
+      ],
+      "tests": [
+        "tests/delivery-evaluation.test.ts"
+      ],
       "branches": true
     },
     {
@@ -333,7 +488,7 @@
       "branches": true
     },
     {
-      "name": "v01235-control-plane",
+      "name": "control-plane",
       "include": [
         "core/runtime-execution-attempt.ts",
         "core/context-working-set.ts",
@@ -342,7 +497,11 @@
         "core/workbench-command.ts"
       ],
       "tests": [
-        "tests/v01235-control-plane.test.ts"
+        "tests/control-plane.test.ts",
+        "tests/context-remediation.test.ts",
+        "tests/context-revocation-race.test.ts",
+        "tests/context-optimization.test.ts",
+        "tests/context-working-set-budget.test.ts"
       ],
       "branches": true
     },
@@ -429,7 +588,27 @@
         "core/work-runtime-mode.ts",
         "core/verified-work-loop.ts"
       ],
-      "tests": ["tests/universal-runtime.test.ts", "tests/verified-work-loop.test.ts", "tests/knowledge-memory-operability.test.ts", "tests/component-procedure-graph.test.ts", "tests/capability-memory-package.test.ts", "tests/capability-knowledge-package.test.ts", "tests/experience-contribution.test.ts", "tests/v01236-components.test.ts", "tests/turn-cognitive-runtime.test.ts", "tests/component-hookless.test.ts", "tests/industry-gaps.test.ts", "tests/repository-context.test.ts", "tests/context-source-access.test.ts", "tests/context-aggregation-policy.test.ts", "tests/context-candidate-scope.test.ts"],
+      "tests": [
+        "tests/universal-runtime.test.ts",
+        "tests/verified-work-loop.test.ts",
+        "tests/knowledge-memory-operability.test.ts",
+        "tests/component-procedure-graph.test.ts",
+        "tests/capability-memory-package.test.ts",
+        "tests/capability-knowledge-package.test.ts",
+        "tests/experience-contribution.test.ts",
+        "tests/component-integration.test.ts",
+        "tests/turn-cognitive-runtime.test.ts",
+        "tests/component-hookless.test.ts",
+        "tests/industry-gaps.test.ts",
+        "tests/repository-context.test.ts",
+        "tests/context-source-access.test.ts",
+        "tests/context-aggregation-policy.test.ts",
+        "tests/context-candidate-scope.test.ts",
+        "tests/context-remediation.test.ts",
+        "tests/context-revocation-race.test.ts",
+        "tests/context-optimization.test.ts",
+        "tests/context-read-snapshot.test.ts"
+      ],
       "branches": true
     },
     {
@@ -498,7 +677,19 @@
         "capability/craft-experience/evaluation-model-profile.ts",
         "capability/craft-experience/workflow-evolution.ts"
       ],
-      "tests": ["tests/evaluation-model-workflow-evolution.test.ts", "tests/component-procedure-graph.test.ts", "tests/capability-experience-package.test.ts", "tests/experience-contribution.test.ts", "tests/v01236-components.test.ts", "tests/component-hookless.test.ts", "tests/procedure-composition.test.ts", "tests/industry-gaps.test.ts", "tests/context-candidate-scope.test.ts", "tests/context-aggregation-policy.test.ts"],
+      "tests": [
+        "tests/evaluation-model-workflow-evolution.test.ts",
+        "tests/component-procedure-graph.test.ts",
+        "tests/capability-experience-package.test.ts",
+        "tests/experience-contribution.test.ts",
+        "tests/component-integration.test.ts",
+        "tests/component-hookless.test.ts",
+        "tests/procedure-composition.test.ts",
+        "tests/industry-gaps.test.ts",
+        "tests/context-candidate-scope.test.ts",
+        "tests/context-aggregation-policy.test.ts",
+        "tests/context-remediation.test.ts"
+      ],
       "branches": true
     },
     {
@@ -819,9 +1010,9 @@
         "core/task-state.ts"
       ],
       "tests": [
-        "tests/v01231-agent-foundation.test.ts",
+        "tests/agent-foundation.test.ts",
         "tests/component-procedure-graph.test.ts",
-        "tests/v01232-observability-memory.test.ts",
+        "tests/observability-memory.test.ts",
         "tests/workflow-dag-coverage.test.ts"
       ],
       "branches": true
@@ -829,12 +1020,15 @@
     {
       "name": "memory-governance",
       "include": [
-        "core/memory-governance.ts"
+        "core/memory-governance.ts",
+        "capability/craft-memory/memory-governance.ts"
       ],
       "tests": [
-        "tests/v01231-agent-foundation.test.ts",
+        "tests/agent-foundation.test.ts",
         "tests/component-procedure-graph.test.ts",
-        "tests/v01232-observability-memory.test.ts"
+        "tests/observability-memory.test.ts",
+        "tests/context-remediation.test.ts",
+        "tests/memory-commit-optimization.test.ts"
       ],
       "branches": true
     },
@@ -856,7 +1050,14 @@
         "core/trace-review.ts",
         "core/memory-maintenance.ts"
       ],
-      "tests": ["tests/v01232-observability-memory.test.ts", "tests/industry-gaps.test.ts", "tests/context-source-access.test.ts", "tests/context-aggregation-policy.test.ts", "tests/context-candidate-scope.test.ts"],
+      "tests": [
+        "tests/observability-memory.test.ts",
+        "tests/industry-gaps.test.ts",
+        "tests/context-source-access.test.ts",
+        "tests/context-aggregation-policy.test.ts",
+        "tests/context-candidate-scope.test.ts",
+        "tests/memory-commit-optimization.test.ts"
+      ],
       "branches": true
     },
     {
@@ -895,37 +1096,52 @@
         "core/application/actions/evaluation-handlers.ts",
         "core/application/actions/workspace-handlers.ts"
       ],
-      "tests": ["tests/action-handlers.test.ts", "tests/mcp.test.ts", "tests/internal-tool-authorization.test.ts", "tests/industry-gaps.test.ts"],
+      "tests": [
+        "tests/action-handlers.test.ts",
+        "tests/mcp.test.ts",
+        "tests/internal-tool-authorization.test.ts",
+        "tests/industry-gaps.test.ts"
+      ],
       "branches": true
     },
     {
       "name": "runtime-artifact-graph",
-      "include": ["scripts/release/runtime-artifact.ts"],
-      "tests": ["tests/runtime-artifact.test.ts"],
+      "include": [
+        "scripts/release/runtime-artifact.ts"
+      ],
+      "tests": [
+        "tests/runtime-artifact.test.ts"
+      ],
       "branches": true
     },
     {
       "name": "browser-control-adapter",
-      "include": ["adapters/browser-control.ts"],
-      "tests": ["tests/browser-control.test.ts"],
+      "include": [
+        "adapters/browser-control.ts"
+      ],
+      "tests": [
+        "tests/browser-control.test.ts"
+      ],
       "branches": true
     },
     {
       "name": "store-control-authority",
-      "include": ["core/application/control-authority.ts"],
-      "tests": ["tests/control-authority.test.ts"],
+      "include": [
+        "core/application/control-authority.ts"
+      ],
+      "tests": [
+        "tests/control-authority.test.ts"
+      ],
       "branches": true
     },
     {
       "name": "control-session-lifecycle",
-      "include": ["capability/control-session.ts"],
-      "tests": ["tests/control-session.test.ts"],
-      "branches": true
-    },
-    {
-      "name": "workbench-interactions",
-      "include": ["workbench/latest-request.js", "workbench/project-page.js", "workbench/resource-pages.js", "workbench/model-setup.js"],
-      "tests": ["tests/workbench-latest-request.test.ts", "tests/workbench-project-page.test.ts", "tests/workbench-resource-pages.test.ts", "tests/workbench-model-setup.test.ts"],
+      "include": [
+        "capability/control-session.ts"
+      ],
+      "tests": [
+        "tests/control-session.test.ts"
+      ],
       "branches": true
     },
     {
@@ -935,76 +1151,134 @@
         "core/application/coordinators/cognitive-workbench.ts",
         "core/application/coordinators/cognitive-write.ts",
         "core/application/use-cases/workbench-workflow-input.ts",
-        "workbench/runtime-client.js",
         "scripts/ci/layer-graph.ts"
       ],
       "tests": [
         "tests/cdp-session.test.ts",
         "tests/cognitive-workbench.test.ts",
         "tests/cognitive-write.test.ts",
-        "tests/workbench-runtime-client.test.ts",
         "tests/layer-graph.test.ts"
       ],
       "branches": true
     },
     {
       "name": "acceptance-worker",
-      "include": ["core/application/acceptance-worker.ts"],
-      "tests": ["tests/acceptance-worker.test.ts"],
+      "include": [
+        "core/application/acceptance-worker.ts"
+      ],
+      "tests": [
+        "tests/acceptance-worker.test.ts"
+      ],
       "branches": true
     },
     {
       "name": "retrieval-port",
-      "include": ["common/craft-common-base/src/retrieval-port.ts"],
-      "tests": ["tests/retrieval-port.test.ts", "tests/industry-gaps.test.ts"],
+      "include": [
+        "common/craft-common-base/src/retrieval-port.ts"
+      ],
+      "tests": [
+        "tests/retrieval-port.test.ts",
+        "tests/industry-gaps.test.ts",
+        "tests/context-revocation-race.test.ts"
+      ],
       "branches": true
     },
     {
       "name": "knowledge-contribution",
-      "include": ["capability/craft-knowledge/contribution.ts"],
-      "tests": ["tests/knowledge-contribution.test.ts", "tests/industry-gaps.test.ts", "tests/context-source-access.test.ts", "tests/context-aggregation-policy.test.ts", "tests/context-candidate-scope.test.ts"],
+      "include": [
+        "capability/craft-knowledge/contribution.ts"
+      ],
+      "tests": [
+        "tests/knowledge-contribution.test.ts",
+        "tests/industry-gaps.test.ts",
+        "tests/context-source-access.test.ts",
+        "tests/context-aggregation-policy.test.ts",
+        "tests/context-candidate-scope.test.ts",
+        "tests/context-remediation.test.ts",
+        "tests/context-optimization.test.ts",
+        "tests/context-read-snapshot.test.ts"
+      ],
       "branches": true
     },
     {
       "name": "procedure-projection",
-      "include": ["capability/craft-experience/procedure-projection.ts"],
-      "tests": ["tests/procedure-projection.test.ts", "tests/procedure-composition.test.ts", "tests/component-procedure-graph.test.ts", "tests/context-spec-regressions.test.ts", "tests/context-aggregation-policy.test.ts", "tests/procedure-runtime-graph.test.ts", "tests/component-asset-revisions.test.ts"],
+      "include": [
+        "capability/craft-experience/procedure-projection.ts"
+      ],
+      "tests": [
+        "tests/procedure-projection.test.ts",
+        "tests/procedure-composition.test.ts",
+        "tests/component-procedure-graph.test.ts",
+        "tests/context-spec-regressions.test.ts",
+        "tests/context-aggregation-policy.test.ts",
+        "tests/procedure-runtime-graph.test.ts",
+        "tests/component-asset-revisions.test.ts",
+        "tests/context-remediation.test.ts"
+      ],
       "branches": true
     },
     {
       "name": "component-readiness",
-      "include": ["core/component-readiness.ts"],
-      "tests": ["tests/component-standalone-readiness.test.ts"],
+      "include": [
+        "core/component-readiness.ts"
+      ],
+      "tests": [
+        "tests/component-standalone-readiness.test.ts"
+      ],
       "branches": true
     },
     {
       "name": "claude-host-driver",
-      "include": ["core/claude-driver.ts"],
-      "tests": ["tests/claude-driver.test.ts"],
+      "include": [
+        "core/claude-driver.ts"
+      ],
+      "tests": [
+        "tests/claude-driver.test.ts"
+      ],
       "branches": true
     },
     {
       "name": "private-json-and-paths",
-      "include": ["common/craft-common-store-local/src/paths.ts"],
-      "tests": ["tests/private-json.test.ts", "tests/config.test.ts", "tests/platform-settings.test.ts"],
+      "include": [
+        "common/craft-common-store-local/src/paths.ts"
+      ],
+      "tests": [
+        "tests/private-json.test.ts",
+        "tests/config.test.ts",
+        "tests/platform-settings.test.ts"
+      ],
       "branches": true
     },
     {
       "name": "cost-ledger",
-      "include": ["common/craft-common-log/src/cost-ledger.ts", "core/mcp/tool-catalog.ts"],
-      "tests": ["tests/cost-ledger.test.ts", "tests/industry-gaps.test.ts"],
+      "include": [
+        "common/craft-common-log/src/cost-ledger.ts",
+        "core/mcp/tool-catalog.ts"
+      ],
+      "tests": [
+        "tests/cost-ledger.test.ts",
+        "tests/industry-gaps.test.ts"
+      ],
       "branches": true
     },
     {
       "name": "local-supervisor",
-      "include": ["core/interfaces/supervisor.ts"],
-      "tests": ["tests/supervisor.test.ts"],
+      "include": [
+        "core/interfaces/supervisor.ts"
+      ],
+      "tests": [
+        "tests/supervisor.test.ts"
+      ],
       "branches": true
     },
     {
       "name": "maintenance-worker",
-      "include": ["core/application/maintenance.ts"],
-      "tests": ["tests/maintenance.test.ts"],
+      "include": [
+        "core/application/maintenance.ts"
+      ],
+      "tests": [
+        "tests/maintenance.test.ts"
+      ],
       "branches": true
     },
     {
@@ -1018,20 +1292,24 @@
         "tests/industry-gaps.test.ts",
         "tests/procedure-runtime-graph.test.ts",
         "tests/procedure-projection.test.ts",
-        "tests/component-asset-revisions.test.ts"
+        "tests/component-asset-revisions.test.ts",
+        "tests/context-remediation.test.ts"
       ],
       "branches": true
     },
     {
       "name": "procedure-invocation",
-      "include": ["core/application/procedure-invocation.ts"],
-      "tests": ["tests/procedure-invocation.test.ts", "tests/industry-gaps.test.ts", "tests/procedure-runtime-graph.test.ts", "tests/activation-proof-and-history.test.ts", "tests/component-asset-revisions.test.ts"],
-      "branches": true
-    },
-    {
-      "name": "unified-entry",
-      "include": ["workbench/entry-session.js", "workbench/entry-shell.js", "workbench/entry-view.js"],
-      "tests": ["tests/entry-session.test.ts", "tests/entry-shell.test.ts"],
+      "include": [
+        "core/application/procedure-invocation.ts"
+      ],
+      "tests": [
+        "tests/procedure-invocation.test.ts",
+        "tests/industry-gaps.test.ts",
+        "tests/procedure-runtime-graph.test.ts",
+        "tests/activation-proof-and-history.test.ts",
+        "tests/component-asset-revisions.test.ts",
+        "tests/context-remediation.test.ts"
+      ],
       "branches": true
     },
     {
@@ -1069,20 +1347,46 @@
       "include": [
         "core/application/coordinators/context-usage.ts",
         "core/application/coordinators/workflow-design.ts",
-        "workbench/context-workflows.js",
         "scripts/eval/completion-contract.ts"
       ],
       "tests": [
         "tests/context-workflow-workbench.test.ts",
-        "tests/context-workflow-pages.test.ts",
         "tests/completion-contract.test.ts"
       ],
       "branches": true
     },
     {
       "name": "repository-context-products",
-      "include": ["capability/craft-codebase/repository-files.ts", "capability/craft-codebase/basic-analysis.ts", "core/application/use-cases/repository-context.ts", "adapters/deepseek-harness/mcp-client.ts", "adapters/deepseek-harness/adapter-tools.ts", "adapters/deepseek-harness/index.ts"],
-      "tests": ["tests/repository-context.test.ts", "tests/dsh-product-adapter.test.ts", "tests/context-spec-regressions.test.ts", "tests/context-aggregation-policy.test.ts"],
+      "include": [
+        "capability/craft-codebase/repository-files.ts",
+        "capability/craft-codebase/basic-analysis.ts",
+        "core/application/use-cases/repository-context.ts",
+        "adapters/deepseek-harness/mcp-client.ts",
+        "adapters/deepseek-harness/adapter-tools.ts",
+        "adapters/deepseek-harness/index.ts"
+      ],
+      "tests": [
+        "tests/repository-context.test.ts",
+        "tests/dsh-product-adapter.test.ts",
+        "tests/context-spec-regressions.test.ts",
+        "tests/context-aggregation-policy.test.ts",
+        "tests/context-remediation.test.ts",
+        "tests/context-revocation-race.test.ts",
+        "tests/context-optimization.test.ts",
+        "tests/codebase-view-lifecycle.test.ts",
+        "tests/context-working-set-budget.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "context-host-evaluation",
+      "include": [
+        "core/context-host-evaluation.ts"
+      ],
+      "tests": [
+        "tests/context-host-evaluation.test.ts",
+        "tests/component-ablation-execution.test.ts"
+      ],
       "branches": true
     }
   ]

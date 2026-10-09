@@ -31,7 +31,7 @@ function qualification(f: Awaited<ReturnType<typeof fixture>>, id: string, chang
   return f.store.create("release_qualification", id, { pilot_id: pilot.id, pilot_version: pilot.version, candidate_ref: changeRef, environment_fingerprint: "env:one", ...candidateBinding, lifecycle: "completed", conclusion, ...overrides });
 }
 
-test("v0.12.23 derives a deterministic risk-matched verification plan without executing a Host", async () => {
+test("derives a deterministic risk-matched verification plan without executing a Host", async () => {
   const f = await fixture();
   try {
     const first = f.plane.plan({ verification_id: "read-change", change_ref: "git:abc", change_kinds: ["code"], effects: ["read_only"], environment_fingerprint: "env:one", content_stored: false });
@@ -46,7 +46,7 @@ test("v0.12.23 derives a deterministic risk-matched verification plan without ex
   } finally { await close(f); }
 });
 
-test("v0.12.23 escalates verification strength but never permits a caller to weaken write, Host, or candidate checks", async () => {
+test("escalates verification strength but never permits a caller to weaken write, Host, or candidate checks", async () => {
   const f = await fixture();
   try {
     const result = f.plane.plan({ verification_id: "high-change", change_ref: "git:def", change_kinds: ["host", "policy"], effects: ["external_write"], candidate_change: true, requires_real_host: true, requested_risk_level: "low", environment_fingerprint: "env:one", content_stored: false });
@@ -57,7 +57,7 @@ test("v0.12.23 escalates verification strength but never permits a caller to wea
   } finally { await close(f); }
 });
 
-test("v0.12.23 records only planned, evidence-backed, same-environment verification receipts and distinguishes rejection from missing proof", async () => {
+test("records only planned, evidence-backed, same-environment verification receipts and distinguishes rejection from missing proof", async () => {
   const f = await fixture();
   try {
     const verification = f.plane.plan({ verification_id: "write-change", change_ref: "git:ghi", change_kinds: ["code"], effects: ["local_write"], environment_fingerprint: "env:one", content_stored: false }).verification as JsonObject;
@@ -74,7 +74,7 @@ test("v0.12.23 records only planned, evidence-backed, same-environment verificat
   } finally { await close(f); }
 });
 
-test("v0.12.23 requires an eligible release qualification before a candidate verification can be eligible", async () => {
+test("requires an eligible release qualification before a candidate verification can be eligible", async () => {
   const f = await fixture();
   try {
     const verification = f.plane.plan({ verification_id: "candidate-change", change_ref: "candidate:one", change_kinds: ["harness"], effects: ["read_only"], candidate_change: true, environment_fingerprint: "env:one", content_stored: false, ...candidateBinding }).verification as JsonObject;
@@ -109,7 +109,7 @@ test("candidate verification refuses qualifications from another candidate, envi
   } finally { await close(f); }
 });
 
-test("v0.12.23 exposes the VerificationPlane through the public CraftService seam", async () => {
+test("exposes the VerificationPlane through the public CraftService seam", async () => {
   const f = await fixture();
   try {
     const service = new CraftService(f.store);
@@ -135,7 +135,7 @@ test("verification planning mounts on the generic quality surface and its Skill-
   } finally { await close(f); }
 });
 
-test("v0.12.23 keeps validation, idempotency conflicts, and defensive branches evidence-backed", async () => {
+test("keeps validation, idempotency conflicts, and defensive branches evidence-backed", async () => {
   const f = await fixture();
   try {
     f.store.create("evidence", "unverified", { confidence: "unverified" });

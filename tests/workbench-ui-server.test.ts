@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftService, VERSION } from "../core/service.ts";
 import { CraftStore } from "../core/infrastructure/store.ts";
-import { LocalWorkbenchServer, WorkbenchWebApp, locateWorkbench, workbenchBridge } from "../core/workbench-server.ts";
+import { LocalWorkbenchServer, WorkbenchWebApp, workbenchBridge } from "../core/workbench-server.ts";
 
 async function fixture() {
   const root = await mkdtemp(path.join(tmpdir(), "craft-workbench-"));
@@ -14,43 +14,26 @@ async function fixture() {
   return { root, store, service: new CraftService(store) };
 }
 
-test("Craft Workbench serves its Codex-style app from beside the runtime", async () => {
+test("core serves no UI by default and accepts an explicit presentation mount", async (t) => {
   const f = await fixture();
-  const repoRoot = path.resolve(import.meta.dirname, "..");
-  assert.equal(locateWorkbench(), path.join(repoRoot, "workbench"));
-  assert.equal(locateWorkbench(repoRoot), path.join(repoRoot, "workbench"));
-  assert.equal(locateWorkbench(path.join(tmpdir(), "craft-workbench-absent")), null);
-
-  const app = new WorkbenchWebApp(f.service, "studio-token", "http://127.0.0.1:4173");
-  const index = app.handle({ method: "GET", path: "/workbench" });
-  assert.equal(index.status, 200); assert.match(index.contentType, /text\/html/); assert.match(index.body, /Craft Workbench/);
-  assert.equal(app.handle({ method: "GET", path: "/workbench/" }).status, 200);
-  assert.deepEqual(app.handle({ method: "GET", path: "/" }), index);
-  for (const name of ["latest-request.js", "project-page.js", "runtime-client.js", "resource-pages.js", "model-setup.js", "entry-shell.js", "entry-session.js", "entry-view.js", "entry.css"]) {
-    const rootAsset = app.handle({ method: "GET", path: `/${name}` });
-    assert.equal(rootAsset.status, 200);
-    assert.deepEqual(rootAsset, app.handle({ method: "GET", path: `/workbench/${name}` }));
-    assert.equal(rootAsset.body, await readFile(path.join(repoRoot, "workbench", name), "utf8"));
+  t.after(() => f.store.close());
+  await writeFile(path.join(f.root, "index.html"), "<main>External presentation</main>");
+  const app = new WorkbenchWebApp(f.service, "secret", "http://127.0.0.1:4173");
+  assert.equal(app.workbenchDir, null);
+  for (const route of ["/", "/workbench", "/workbench/app.js", "/app.css"]) {
+    assert.equal(app.handle({ method: "GET", path: route }).status, 404);
   }
-  assert.match(app.handle({ method: "GET", path: "/workbench/app.css" }).body, /--bg-rail/);
-  assert.match(app.handle({ method: "GET", path: "/workbench/app.js" }).body, /workbench\/call/);
-  // v0.12.34: the approval surface must actually be served and wired, not merely
-  // described. The runtime's headline guarantee is an approval gate, so a Studio
-  // without a place to approve is the inconsistency this release removes.
-  const workbenchScript = app.handle({ method: "GET", path: "/workbench/app.js" }).body;
-  assert.match(workbenchScript, /\/api\/inbox\/refresh/);
-  assert.match(workbenchScript, /\/api\/inbox\/decide/);
-  assert.match(workbenchScript, /待我批准/);
-  assert.match(workbenchScript, /viewApprovals/);
-  // The nav entry and the view must agree, or the page is unreachable.
-  assert.match(workbenchScript, /key: 'approvals'[\s\S]*?view: viewApprovals/);
-  // Decisions must be persistence-backed: a deferred card needs a future instant.
-  assert.match(workbenchScript, /deferred_until/);
-  assert.equal(app.handle({ method: "GET", path: "/workbench/missing.css" }).status, 404);
-  assert.equal(new WorkbenchWebApp(f.service, "studio-token", "http://127.0.0.1:4173", { workbenchDir: null })
-    .handle({ method: "GET", path: "/workbench" }).status, 404);
+  const mounted = new WorkbenchWebApp(f.service, "secret", "http://127.0.0.1:4173", { workbenchDir: f.root });
+  assert.equal(mounted.handle({ method: "GET", path: "/" }).body, "<main>External presentation</main>");
+  assert.equal(mounted.handle({ method: "GET", path: "/workbench/app.js" }).status, 404);
+  assert.equal(mounted.handle({ method: "GET", path: "/workbench/missing.js" }).status, 404);
+  assert.equal(new WorkbenchWebApp(f.service, "secret", "http://127.0.0.1:4173", { workbenchDir: null }).workbenchDir, null);
   assert.equal(workbenchBridge(f.service), workbenchBridge(f.service));
-  f.store.close();
+  const server = new LocalWorkbenchServer(f.service, "secret", { workbenchDir: f.root });
+  t.after(() => server.close());
+  const { url } = await server.start(0);
+  assert.equal(await (await fetch(url)).text(), "<main>External presentation</main>");
+  assert.equal((await fetch(new URL("/api/home", url))).status, 401);
 });
 
 test("Craft Workbench projects model, project, connector and source reads over the same-origin API", async () => {
@@ -150,7 +133,7 @@ test("the Studio bridge forwards a bounded craft_ call behind the same guards as
 
   const server = new LocalWorkbenchServer(f.service, "network-token"); const started = await server.start(0); const origin = started.url.split("/#")[0];
   try {
-    assert.match((await (await fetch(`${origin}/workbench`)).text()), /Craft Workbench/);
+    assert.equal((await fetch(`${origin}/workbench`)).status, 404);
     assert.equal((await fetch(`${origin}/api/workbench/call`, { method: "POST", headers: { authorization: "Bearer network-token", origin }, body: JSON.stringify({ tool: "craft_info" }) })).status, 200);
   } finally { await server.close(); f.store.close(); }
 });

@@ -1,7 +1,7 @@
 /** Coverage denominator, independent of whether any selected test group is green. */
 export interface CoverageGroup { name: string; include: readonly string[]; }
 export function coverageInventory(files: readonly string[], groups: readonly CoverageGroup[], baseline: readonly string[] = []) {
-  const production = [...new Set(files.filter(path => /^(core|capability|common|adapters|bin|workbench)\//u.test(path)
+  const production = [...new Set(files.filter(path => /^(core|capability|common|adapters|bin)\//u.test(path)
     && /\.(ts|js|mjs|cjs)$/u.test(path) && !path.endsWith(".d.ts")
     && !path.split("/").some(part => ["node_modules", "dist", "target"].includes(part))))].sort();
   const includes = groups.flatMap(group => [...group.include]);

@@ -1,5 +1,5 @@
 // Restores the remote branch's Runtime Proof test, which the merge lost: both sides added
-// `tests/runtime-proof.test.ts`, and this branch's file (the v0.12.30 remote-task, acceptance
+// `tests/runtime-proof.test.ts`, and this branch's file (the remote-task, acceptance
 // and attestation tests) won the path. The subject here is `src/runtime-proof.ts`, so the file
 // is named after the kernel it drives.
 import test from "node:test";

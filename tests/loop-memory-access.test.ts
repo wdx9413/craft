@@ -18,7 +18,7 @@ import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
  * can dispatch it.
  */
 
-test("v0.12.35 the internal loop can read and propose memories", () => {
+test("the internal loop can read and propose memories", () => {
   const names = DEFAULT_INTERNAL_TOOLS.map((definition) => definition.function.name);
   assert.equal(names.includes("memory_search"), true);
   assert.equal(names.includes("memory_capture_propose"), true);
@@ -28,7 +28,7 @@ test("v0.12.35 the internal loop can read and propose memories", () => {
   }
 });
 
-test("v0.12.35 memory tools land in tiers the loop actually mounts", () => {
+test("memory tools land in tiers the loop actually mounts", () => {
   // A tool whose tier is outside DEFAULT_INTERNAL_AUTHORIZATION is invisible to
   // the loop no matter how good it is. This is the exact failure mode the
   // assessment described, so it is asserted rather than assumed.
@@ -49,7 +49,7 @@ test("v0.12.35 memory tools land in tiers the loop actually mounts", () => {
   assert.equal(mounted.has("governed"), false);
 });
 
-test("v0.12.35 the projection exposes loop tools that are actually authorized", () => {
+test("the projection exposes loop tools that are actually authorized", () => {
   const projected = authorizedTools(TOOLS, DEFAULT_INTERNAL_AUTHORIZATION).map((tool) => tool.name);
   // The projection must be a filter, not a pass-through: governed and forbidden
   // tools stay out.
@@ -64,8 +64,8 @@ test("v0.12.35 the projection exposes loop tools that are actually authorized", 
   }
 });
 
-test("v0.12.35 the loop's memory tools dispatch against a real store", async (t) => {
-  const root = join(tmpdir(), `craft-v01235-loop-${process.pid}-${Date.now()}`);
+test("the loop's memory tools dispatch against a real store", async (t) => {
+  const root = join(tmpdir(), `craft-loop-memory-access-loop-${process.pid}-${Date.now()}`);
   await mkdir(root, { recursive: true });
   const store = await new CraftStore(craftPaths(root)).open();
   t.after(async () => { store.close(); await rm(root, { recursive: true, force: true }); });

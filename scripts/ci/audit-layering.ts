@@ -14,7 +14,7 @@ function walk(directory: string): void {
     }
   }
 }
-for (const directory of ["common", "core", "capability", "adapters", "bin", "workbench", "desktop", "scripts/release"]) walk(resolve(root, directory));
+for (const directory of ["common", "core", "capability", "adapters", "bin", "scripts/release"]) walk(resolve(root, directory));
 const packageExports: Record<string, string> = {};
 for (const directory of ["common", "capability"]) {
   for (const entry of readdirSync(resolve(root, directory), { withFileTypes: true })) {

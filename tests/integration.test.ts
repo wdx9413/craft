@@ -11,7 +11,7 @@ import { defineHostProfile, type HostProfile } from "../core/host-registry.ts";
 import { KnowledgeIndex, locateSnippet } from "../core/knowledge-index.ts";
 
 async function fixture(name: string, hostProfiles?: HostProfile[]) {
-  const root = await mkdtemp(join(tmpdir(), `craft-v0121-${name}-${process.pid}-`));
+  const root = await mkdtemp(join(tmpdir(), `craft-integration-${name}-${process.pid}-`));
   const store = await new CraftStore(craftPaths(root)).open();
   const service = new CraftService(store, undefined, undefined, undefined, undefined, undefined, hostProfiles);
   return { root, store, service };

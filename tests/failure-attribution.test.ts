@@ -10,7 +10,7 @@ import { CraftService } from "../core/service.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { FAILURE_CLASSES, attributeFailure, summarizeAttributions } from "../core/failure-attribution.ts";
 
-test("v0.12.38 names each failure class from its distinguishing signal", () => {
+test("names each failure class from its distinguishing signal", () => {
   // One signal per class, asserted in pipeline order.
   const cases: Array<[JsonObject, string]> = [
     [{ evidence_already_in_input: true }, "echo_gap"],
@@ -39,7 +39,7 @@ test("v0.12.38 names each failure class from its distinguishing signal", () => {
   }
 });
 
-test("v0.12.38 refuses to name a cause it cannot support", () => {
+test("refuses to name a cause it cannot support", () => {
   // The central rule: a plausible cause is worse than an admitted gap, because
   // a wrong cause produces a confident, useless, permanently repeated lesson.
   const empty = attributeFailure({});
@@ -54,7 +54,7 @@ test("v0.12.38 refuses to name a cause it cannot support", () => {
   assert.equal(attributeFailure({ wrong_scope_applied: false }).observed_count, 1);
 });
 
-test("v0.12.38 attributes by pipeline position, not by which signal arrived", () => {
+test("attributes by pipeline position, not by which signal arrived", () => {
   // A fact absent from the source cannot also have been mis-scoped. Naming the
   // downstream cause would send the fix to the wrong layer.
   const multi = attributeFailure({
@@ -85,7 +85,7 @@ test("v0.12.38 attributes by pipeline position, not by which signal arrived", ()
   }).failure_class, "unattributed");
 });
 
-test("v0.12.38 counts how much of the picture was actually observed", () => {
+test("counts how much of the picture was actually observed", () => {
   const partial = attributeFailure({ source_contained_answer: false });
   assert.equal(partial.observed_count, 1);
   // Nine signals now, including the contamination check.
@@ -104,7 +104,7 @@ test("v0.12.38 counts how much of the picture was actually observed", () => {
   assert.deepEqual(signals, [...signals].sort());
 });
 
-test("v0.12.38 catches a memory claim that was really the current turn", () => {
+test("catches a memory claim that was really the current turn", () => {
   // The contamination that makes a system look like it remembers when it is only
   // repeating what it was just told. The answer itself is fine, which is exactly
   // why the claim needs its own class: nothing else in this taxonomy fires.
@@ -122,7 +122,7 @@ test("v0.12.38 catches a memory claim that was really the current turn", () => {
   assert.throws(() => attributeFailure({ evidence_already_in_input: "yes" }), /evidence_already_in_input must be a boolean/u);
 });
 
-test("v0.12.38 rejects a malformed observation rather than coercing it", () => {
+test("rejects a malformed observation rather than coercing it", () => {
   // Truthy strings must not silently become `true`: that would turn a caller's
   // bug into a confident diagnosis.
   assert.throws(() => attributeFailure({ source_contained_answer: "yes" }), /source_contained_answer must be a boolean/u);
@@ -130,7 +130,7 @@ test("v0.12.38 rejects a malformed observation rather than coercing it", () => {
   assert.throws(() => attributeFailure({ answer_wrong_with_full_context: "true" }), /answer_wrong_with_full_context must be a boolean/u);
 });
 
-test("v0.12.38 ranks where the system is actually weakest", () => {
+test("ranks where the system is actually weakest", () => {
   const summary = summarizeAttributions({ failures: [
     { relevant_retrieved: false },
     { answer_in_context: false },
@@ -152,7 +152,7 @@ test("v0.12.38 ranks where the system is actually weakest", () => {
   assert.deepEqual(summary.classes, FAILURE_CLASSES);
 });
 
-test("v0.12.38 reports an all-unattributed run as having no primary", () => {
+test("reports an all-unattributed run as having no primary", () => {
   // Silence must not be reported as a finding.
   const summary = summarizeAttributions({ failures: [{}, { unknown_thing: undefined }] });
   assert.equal(summary.primary, null);
@@ -161,14 +161,14 @@ test("v0.12.38 reports an all-unattributed run as having no primary", () => {
   assert.deepEqual(summary.ranking, [{ failure_class: "unattributed", count: 2 }]);
 });
 
-test("v0.12.38 rejects an unusable attribution run", () => {
+test("rejects an unusable attribution run", () => {
   assert.throws(() => summarizeAttributions({ failures: [] }), /must be a non-empty array/u);
   assert.throws(() => summarizeAttributions({ failures: "nope" }), /must be a non-empty array/u);
   assert.throws(() => summarizeAttributions({ failures: ["nope"] }), /failures\[0\] must be an object/u);
   assert.throws(() => summarizeAttributions({ failures: [[]] }), /failures\[0\] must be an object/u);
 });
 
-test("v0.12.38 is reachable from the loop and from MCP", async (t) => {
+test("is reachable from the loop and from MCP", async (t) => {
   const mounted = new Set(DEFAULT_INTERNAL_AUTHORIZATION);
   // `_get` is the suffix the classifier reads as `read`; a bare `_attribute`
   // matches no verb and would fall through to `governed`, leaving the loop
@@ -180,7 +180,7 @@ test("v0.12.38 is reachable from the loop and from MCP", async (t) => {
     assert.equal(authorizedTools(TOOLS, DEFAULT_INTERNAL_AUTHORIZATION).some((tool) => tool.name === name), true, `${name} missing from the projection`);
   }
 
-  const root = join(tmpdir(), `craft-v01238-mcp-${process.pid}-${Date.now()}`);
+  const root = join(tmpdir(), `craft-failure-attribution-mcp-${process.pid}-${Date.now()}`);
   await mkdir(root, { recursive: true });
   const store = await new CraftStore(craftPaths(root)).open();
   t.after(async () => { store.close(); await rm(root, { recursive: true, force: true }); });

@@ -1,3 +1,13 @@
 # @craft/capability-experience
 
 Standalone experience kernel package. Depends on `craft-common-store-local`, `craft-common-base`, and `craft-common-log`; it does not depend on `craft-agent-harness`. Import the capability descriptor and register it with a `CraftStore` and optional `CraftTelemetry` via `CORE_KERNELS`. The existing Skill and MCP plugin remains the Host-facing surface.
+
+`@craft/capability-experience/graph-assets` exports `ExperienceGraphAssets(store)` for standalone Graph authoring. `inspect` supports list, template, read, draft, validate and diff; `edit` supports save, submit and migrate. Every asset operation carries an explicit scope and the current access metadata. Saving an existing asset requires `expected_version`; replacing or submitting a draft requires `expected_draft_digest`.
+
+Use a meaningful lowercase English graph_id such as `product-development`, `code-review` or `bug-diagnosis`; the folder uses that ID directly without an appended digest. Legacy hashed names remain readable.
+
+Scenario JSON belongs to the selected data root's `experience/graph/<graph-id>/`: `graph.yml` contains only current_version and test_version (JSON content revisions, nullable). It is rebuilt from the ledger after changes and during inspection; hand editing cannot activate a version. Existing human README files are preserved. `draft.json` is editable and `versions/000001.json` is immutable. The manifest does not participate in definition digests and does not replace execution gates. New candidates retain the prior qualified release through an independent, record-pinned release pointer. Candidate failures do not retire another content revision. Explicit current-release revocation preserves a different test candidate. Workflow is a restricted flow form within Experience Graph; old workflow/graph formats and managed legacy paths stay readable. Migration copies checked historical definitions and preserves existing references. Submission remains a candidate and clears prior gates; typed experience relations never execute.
+
+MCP exposes the same loop through `craft_experience_graph_inspect` and `craft_experience_graph_edit`. Default Experience and Context surfaces also include Graph transitions and paired Invocation evaluation. The Runtime supplies the read-only internet-product-engineering template; Skills provide the calling instructions.
+
+Use `./procedure-release` for release selection and `./graph-matching` for named route suggestions. Test-channel planning uses the same planner and runtime: read-only by default; local writes require disjoint checkpointed baseline/test workspaces bound to the test Work Loop. No second executor is introduced.

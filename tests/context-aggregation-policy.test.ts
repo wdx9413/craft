@@ -149,8 +149,9 @@ test("Context reports query truncation, omitted files and unavailable contributi
     writeFileSync(join(f.repo, "large.ts"), "x".repeat(512 * 1024 + 1));
     const limited = await f.service.contextOpen({ project_root: f.repo, query: "alpha", max_items: 1 });
     const reasons = (limited.pack_receipt as JsonObject).partial_reasons as string[];
-    assert(reasons.includes("codebase_query_truncated")); assert(reasons.includes("codebase_files_omitted"));
-    assert.equal((limited.codebase as JsonObject).query_omitted_count, 1);
+    assert(reasons.includes("codebase_budget_exhausted"));
+    assert(reasons.includes("codebase_files_omitted"));
+    assert.equal((limited.codebase as JsonObject).query_omitted_count, 0);
     const claim = { scope: `${f.scope.kind}:${f.scope.id}`, source_id: "builtin.evidence-wiki", status: "reviewed", content: "alpha", evidence_ids: [] };
     f.store.database.prepare("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<10001) INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) SELECT 'knowledge_claim','claim_'||i,1,?,'2026-01-01','2026-01-01' FROM n").run(JSON.stringify(claim));
     const partial = await f.service.contextOpen({ project_root: f.repo, query: "alpha", include_codebase: false });

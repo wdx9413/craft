@@ -22,5 +22,5 @@
 
 ## 验收
 
-`tests/v01235-control-plane.test.ts` 覆盖成功、失败、幂等、漂移、未知副作用、权限和 MCP 入口；新增五个模块的增量行、函数、分支覆盖率均为 100%。真实 Codex/Claude 的业务价值仍需由 Reference Pilot 取得 `host_verified` 和 `business_eligible` 证据后才能宣称。
+`tests/control-plane.test.ts` 覆盖成功、失败、幂等、漂移、未知副作用、权限和 MCP 入口；新增五个模块的增量行、函数、分支覆盖率均为 100%。真实 Codex/Claude 的业务价值仍需由 Reference Pilot 取得 `host_verified` 和 `business_eligible` 证据后才能宣称。
 

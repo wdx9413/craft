@@ -152,7 +152,7 @@ export class MemoryLedgerKernel {
     if (args.include_history !== undefined && typeof args.include_history !== "boolean") throw new Error("include_history must be boolean");
     const includeHistory = args.include_history === true;
     const access = scopeAccess(args), allowRestricted = args.allow_restricted === true;
-    const memories = this.store.list("memory_ledger", limit, (item) => this.visible(item, scope, access, allowRestricted) && (includeHistory || item.status === "active"))
+    const memories = this.store.listScoped("memory_ledger", [scope], limit, (item) => this.visible(item, scope, access, allowRestricted) && (includeHistory || item.status === "active"))
       .map((memory) => ({ ...memory, content: this.content(memory) }));
     return { scope, include_history: includeHistory, count: memories.length, memories };
   }

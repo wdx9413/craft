@@ -67,7 +67,7 @@ async function workspace(t: { after(fn: () => unknown): void }, prefix: string) 
   return { dir, open };
 }
 
-test("v0.12.34 a fresh harness resumes a session started by an earlier one", async (t) => {
+test("a fresh harness resumes a session started by an earlier one", async (t) => {
   const { dir, open } = await workspace(t, "craft-harness-swap-");
 
   // --- harness #1: starts a session and appends two events, then goes away ---
@@ -117,7 +117,7 @@ test("v0.12.34 a fresh harness resumes a session started by an earlier one", asy
   assert.deepEqual((afterResume.events as JsonObject[]).map((event) => event.sequence), [1, 2, 3]);
 });
 
-test("v0.12.34 a paused session is resumed from the log alone, across harnesses", async (t) => {
+test("a paused session is resumed from the log alone, across harnesses", async (t) => {
   const { dir, open } = await workspace(t, "craft-harness-resume-");
 
   const first = await bootHarness(dir, open);
@@ -153,7 +153,7 @@ test("v0.12.34 a paused session is resumed from the log alone, across harnesses"
   assert.throws(() => second.sessions.resume({ session_id: "session-swap-2", reason_digest: "sha256:again" }), /not paused/u);
 });
 
-test("v0.12.34 replaying a session does not depend on the harness that wrote it", async (t) => {
+test("replaying a session does not depend on the harness that wrote it", async (t) => {
   const { dir, open } = await workspace(t, "craft-harness-replay-");
 
   const first = await bootHarness(dir, open);

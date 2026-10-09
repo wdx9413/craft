@@ -33,7 +33,7 @@
  */
 
 /** Tool families the Memory package's kernels implement. */
-export const MEMORY_FAMILIES = "craft_memory_(?:ledger_(?:remember|get|list|transition|compat_bind)|decay_get|hybrid_scores|usage_record|capture_propose|promotion_preview)\\b";
+export const MEMORY_FAMILIES = "craft_memory_(?:ledger_(?:remember|get|list|transition|compat_bind)|decay_get|hybrid_scores|usage_record|capture_propose|promotion_preview|candidate_(?:propose|review)|policy_(?:get|save)|ledger_remember_approved|conflict_(?:list|resolve)|expiry_sweep|session_finalize|governance)\\b";
 
 /**
  * The frozen memory name space, used by `component-context`.

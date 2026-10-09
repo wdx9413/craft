@@ -19,7 +19,7 @@ export function repositoryRoot(path: unknown): { root: string; isRepository: boo
 }
 
 /** Git ignore rules, local opt-out and bounded source selection precede all content reads. */
-export function repositoryFiles(root: string): RepositoryFiles {
+export function repositoryFiles(root: string, _query = ""): RepositoryFiles {
   root = realpathSync(root);
   const configPath = join(root, ".craft-codebase.json");
   if (existsSync(configPath) && lstatSync(configPath).isSymbolicLink()) throw new Error("Repository config must be a regular file");
@@ -36,6 +36,8 @@ export function repositoryFiles(root: string): RepositoryFiles {
   try { ignored = git(root, ["check-ignore", "--no-index", "-z", "--stdin"], paths.map(path => `${path}\0`).join("")); }
   catch (error) { if ((error as { status?: number }).status !== 1) throw error; }
   const ignoredPaths = new Set(ignored.split("\0"));
+  // A task query changes a Context view, never the repository fact snapshot.
+  // Keep the bounded source set stable across Hosts and repeated queries.
   const files: RepositoryFile[] = []; let omitted = 0; let bytes = 0;
   for (const path of paths) {
     if (ignoredPaths.has(path) || !EXTENSIONS.has(extname(path).toLowerCase()) || GENERATED.test(path) || excludes.some(p => path === p || path.startsWith(`${String(p).replace(/\/$/u, "")}/`))) continue;

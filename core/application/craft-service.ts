@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { ContextHostEvaluation } from "../context-host-evaluation.ts";
 import { readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { isAbsolute, join, resolve, win32 } from "node:path";
@@ -39,6 +40,7 @@ import { dockerRequestDigest } from "../docker-sandbox.ts";
 import { egressRequestDigest } from "../egress.ts";
 import { ServiceFoundation } from "./service-foundation.ts";
 import { ProcedureConfiguration } from "../../capability/craft-experience/procedure-configuration.ts";
+import { ExperienceGraphAssets } from "../../capability/craft-experience/graph-assets.ts";
 import { ComponentAssets } from "./coordinators/component-assets.ts";
 import { ContextUsageWorkbench } from "./coordinators/context-usage.ts";
 import { WorkflowDesignWorkbench } from "./coordinators/workflow-design.ts";
@@ -59,7 +61,6 @@ import type { EvaluationContractInput, EvaluationStage } from "../evaluation-con
 import { WorkControl } from "./coordinators/work-control.ts";
 import { ForgeDispatchCoordinator } from "./coordinators/forge-dispatch.ts";
 import { scopeEnvelope, scopeFromKey } from "../scope-policy.ts";
-import { claimReadable } from "../../capability/craft-knowledge/claim-access.ts";
 
 export const VERSION = CRAFT_RELEASE_VERSION;
 const CONFIDENCE = new Set(["confirmed", "bounded", "unverified", "rejected"]);
@@ -75,8 +76,6 @@ const EXPERT_TYPES = new Set(["diagnostic_research"]);
 const ACCEPTANCE_METHODS = new Set(["program", "model", "human", "business_signal"]);
 const ACCEPTANCE_RESULTS = new Set(["passed", "failed", "blocked"]);
 const DOMAIN_FIELD_TYPES = new Set(["text", "path", "integer", "boolean", "choice"]);
-const KNOWLEDGE_KINDS = new Set(["fact", "rule", "decision", "term", "failure_mode"]);
-const KNOWLEDGE_STATUSES = new Set(["candidate", "reviewed", "disputed", "superseded", "expired", "stale"]);
 const KNOWLEDGE_RELATIONS = new Set(["supports", "contradicts", "supersedes", "applies_to", "depends_on"]);
 
 function id(prefix: string): string { return `${prefix}_${randomUUID().replaceAll("-", "")}`; }
@@ -275,6 +274,17 @@ export class CraftService extends ServiceFoundation {
   }
 
   procedureConfigurationSave(args: JsonObject): JsonObject { return new ProcedureConfiguration(this.store).save(args); }
+  experienceGraphInspect(args: JsonObject): JsonObject {
+    const graphs = new ExperienceGraphAssets(this.store);
+    if (args.action === "evaluate_applicability") return new ContextHostEvaluation(this.store).evaluateGraphApplicability(args, input => graphs.inspect(input));
+    return graphs.inspect(args);
+  }
+  experienceGraphEdit(args: JsonObject): JsonObject {
+    const evaluation = new ContextHostEvaluation(this.store);
+    if (args.action === "improvement_propose") return evaluation.proposeGraphImprovement(args);
+    if (args.action === "improvement_save" || args.action === "improvement_submit") return evaluation.submitGraphImprovement({ ...args, action: args.action === "improvement_save" ? "save" : "submit" }, new ExperienceGraphAssets(this.store));
+    return new ExperienceGraphAssets(this.store).edit(args);
+  }
   componentAssetInspect(member: string, args: JsonObject): JsonObject { return new ComponentAssets(this.store).inspect(member, args); }
   componentAssetRestore(member: string, args: JsonObject): JsonObject { return new ComponentAssets(this.store).restore(member, args, {
     memory: a => this.memoryCandidatePropose({ ...a, proposal_only: true }), knowledge: a => this.knowledgeClaimSave(a), experience: a => this.procedureConfigurationSave(a), codebase: a => this.codebaseIndexBuild(a),
@@ -2784,72 +2794,10 @@ export class CraftService extends ServiceFoundation {
     const recommendation = this.store.create("strategy_recommendation", recommendationId, { ...identity, identity_digest: valueDigest(identity), status: recommended ? "recommended" : "insufficient", selected_subject: recommended ? { type: candidate.subject_type, id: candidate.subject_id, version: candidate.subject_version } : null, rationale: { comparable, pass_rate_delta: passDelta, cost_delta: costMetric ? costDelta : null, assessment: comparison.assessment }, automation_authority: false });
     return { recommendation, idempotent: false };
   }
-  knowledgeClaimSave(args: JsonObject): JsonObject {
-    const kind = text(args.kind, "kind"); if (!KNOWLEDGE_KINDS.has(kind)) throw new Error("Knowledge claim kind is unsupported");
-    const content = assertNoSecret(document(args.content, "content"), "content"); const scope = String(args.scope ?? "global");
-    const evidenceIds = uniqueTextArray(args.evidence_ids, "evidence_ids"); evidenceIds.forEach((item) => this.store.get("evidence", item));
-    const tags = optionalTextArray(args.tags, "tags"); const validUntil = args.valid_until === undefined ? null : new Date(validIsoTime(args.valid_until, "valid_until")).toISOString();
-    const claimId = String(args.claim_id ?? id("knowledge_claim")); const existing = this.store.find("knowledge_claim", claimId);
-    const contentDigest = valueDigest(content);
-    const title = args.title === undefined ? undefined : assertNoSecret(text(args.title, "title"), "title");
-    // The source is part of a claim's identity and must survive outside its Markdown
-    // reference.  Otherwise a source revocation cannot stop an already-reviewed claim from
-    // entering Context after a database reload or bundle import.
-    const sourceId = String(args.source_id ?? "builtin.evidence-wiki");
-    const envelope = scopeEnvelope(args.scope_envelope, scopeFromKey(scope));
-    const identity = { kind, content_digest: contentDigest, scope, scope_envelope: envelope, source_id: sourceId, evidence_ids: evidenceIds, tags, valid_until: validUntil, ...(title ? { title } : {}) };
-    if (existing) {
-      // v0.12.33 claims did not persist source_id in their identity.  Keep a
-      // one-way compatibility match so a previously completed import remains
-      // idempotent; it does not make the legacy record eligible for a newly
-      // revoked external Source, because it still resolves as the built-in
-      // source until a reviewed migration explicitly re-attributes it.
-      const legacyIdentity = { kind, content_digest: contentDigest, scope, source_id: sourceId, evidence_ids: evidenceIds, tags, valid_until: validUntil, ...(title ? { title } : {}) };
-      const olderIdentity = { kind, content_digest: contentDigest, scope, evidence_ids: evidenceIds, tags, valid_until: validUntil, ...(title ? { title } : {}) };
-      if (existing.identity_digest !== valueDigest(identity) && existing.identity_digest !== valueDigest(legacyIdentity) && existing.identity_digest !== valueDigest(olderIdentity)) throw new Error("Knowledge claim idempotency conflict");
-      return { claim: existing, idempotent: true };
-    }
-    const contentRef = this.store.contentStore.writeSync({ kind: "knowledge", record_id: claimId, version: 1, scope, status: "candidate", sensitivity: "internal", source_id: sourceId, title, body: content });
-    const claim = this.store.create("knowledge_claim", claimId, { ...identity, content_ref: contentRef, identity_digest: valueDigest(identity), status: "candidate", review: null });
-    return { claim, idempotent: false };
-  }
-  knowledgeClaimGet(args: JsonObject): JsonObject {
-    const id = text(args.claim_id, "claim_id");
-    const current = this.store.get("knowledge_claim", id);
-    if (!claimReadable(this.store, current, args)) throw new Error("Knowledge claim scope or audience denied");
-    const claim = args.version === undefined ? current : this.store.get("knowledge_claim", id, finiteInteger(args.version, "version", 1));
-    if (!claimReadable(this.store, claim, args) || claim.scope !== current.scope) throw new Error("Knowledge claim historical scope or audience denied");
-    return { claim };
-  }
-  knowledgeClaimList(args: JsonObject): JsonObject {
-    const query = String(args.query ?? "").toLowerCase();
-    return { claims: this.store.list("knowledge_claim", finiteInteger(args.limit, "limit", 20, 1, 1_000), (claim) =>
-      claimReadable(this.store, claim, args) && (!query || JSON.stringify(claim).toLowerCase().includes(query))) };
-  }
-  knowledgeClaimReview(args: JsonObject): JsonObject {
-    const claim = this.store.get("knowledge_claim", text(args.claim_id, "claim_id")); const status = text(args.status, "status");
-    if (!KNOWLEDGE_STATUSES.has(status) || status === "candidate") throw new Error("Knowledge claim review status is unsupported");
-    const reviewer = text(args.reviewer, "reviewer"); const reason = assertNoSecret(document(args.reason, "reason"), "reason");
-    if (status === "reviewed") {
-      const evidenceIds = Array.isArray(claim.evidence_ids) ? claim.evidence_ids as unknown[] : [];
-      const supported = evidenceIds.some((e) => ["bounded", "confirmed"].includes(String(this.store.get("evidence", String(e)).confidence)));
-      if (!supported) throw new Error("Reviewed knowledge claim requires bounded or confirmed Evidence");
-      // Review is a controlled transition, not a way to bless a legacy import.
-      // The source must be an explicit, currently active trust boundary so later
-      // revocation can remove the claim from Context deterministically.
-      const sourceId = typeof claim.source_id === "string" ? claim.source_id : null;
-      if (!sourceId) throw new Error("Reviewed knowledge claim requires an explicit active Source");
-      // Earlier in-process callers could save a new Claim before mounting the
-      // built-in source descriptor.  It is a local, deterministic descriptor,
-      // so install it here rather than weakening the source requirement.  This
-      // does not repair a legacy Claim with no explicit source_id.
-      if (sourceId === "builtin.evidence-wiki" && !this.store.find("knowledge_source", sourceId)) this.knowledgeMemoryInstallBuiltins();
-      const source = this.store.find("knowledge_source", sourceId);
-      if (!source || source.status !== "active" || source.trust === "untrusted") throw new Error("Reviewed knowledge claim requires an active trusted Source");
-    }
-    const saved = this.store.save("knowledge_claim", String(claim.id), { ...recordPayload(claim), status, review: { reviewer, ...(status === "reviewed" ? { source_digest: this.store.get("knowledge_source", String(claim.source_id)).content_digest } : {}), reason_digest: valueDigest(reason), reviewed_at: new Date().toISOString() } });
-    return { claim: saved };
-  }
+  knowledgeClaimSave(args: JsonObject): JsonObject { return this.knowledgeClaims.knowledgeClaimSave(args); }
+  knowledgeClaimGet(args: JsonObject): JsonObject { return this.knowledgeClaims.knowledgeClaimGet(args); }
+  knowledgeClaimList(args: JsonObject): JsonObject { return this.knowledgeClaims.knowledgeClaimList(args); }
+  knowledgeClaimReview(args: JsonObject): JsonObject { return this.knowledgeClaims.knowledgeClaimReview(args); }
   async wikiPageSave(args: JsonObject): Promise<JsonObject> {
     const title = assertNoSecret(text(args.title, "title"), "title"); const body = assertNoSecret(document(args.body, "body"), "body"); const scope = String(args.scope ?? "global");
     const claimIds = optionalTextArray(args.claim_ids, "claim_ids"); claimIds.forEach((item) => this.store.get("knowledge_claim", item));
@@ -3024,6 +2972,7 @@ export class CraftService extends ServiceFoundation {
   }
   knowledgeEvaluationCaseList(args: JsonObject): JsonObject { return this.list("knowledge_evaluation_case", "cases", args); }
   knowledgeEvaluationRun(args: JsonObject): JsonObject {
+    if (args.mode === "citation_support") return { assessment: new ContextHostEvaluation(this.store).evaluateKnowledge(args), changes_routing: false };
     const caseIds = args.case_ids === undefined ? this.store.list("knowledge_evaluation_case", 10_000).map((item) => String(item.id)) : uniqueTextArray(args.case_ids, "case_ids"); if (!caseIds.length) throw new Error("Knowledge evaluation requires at least one case");
     const topK = finiteInteger(args.top_k, "top_k", 5, 1, 50); const now = args.now ?? new Date().toISOString(); const results = caseIds.map((caseId) => { const item = this.store.get("knowledge_evaluation_case", caseId); const compiled = this.wikiContextCompile({ query: item.query, scope: item.scope, max_items: topK, max_chars: 100_000, now }); const selected = (compiled.included as JsonObject[]).map((claim) => String(claim.claim_id)); const expected = item.expected_claim_ids as string[]; const matched = expected.filter((claim) => selected.includes(claim)); const evidenceCovered = matched.filter((claim) => Array.isArray(this.store.get("knowledge_claim", claim).evidence_ids) && (this.store.get("knowledge_claim", claim).evidence_ids as unknown[]).length > 0); return { case_id: item.id, selected_claim_ids: selected, expected_claim_ids: expected, matched_claim_ids: matched, recall: matched.length / expected.length, evidence_coverage: evidenceCovered.length / expected.length, candidate_leaks: selected.filter((claim) => this.store.get("knowledge_claim", claim).status !== "reviewed") }; });
     const recall = results.reduce((total, item) => total + item.recall, 0) / results.length; const evidenceCoverage = results.reduce((total, item) => total + item.evidence_coverage, 0) / results.length; const leaked = results.reduce((total, item) => total + item.candidate_leaks.length, 0); const minRecall = Number(args.min_recall ?? 1); const minEvidence = Number(args.min_evidence_coverage ?? 1); if (![minRecall, minEvidence].every((value) => Number.isFinite(value) && value >= 0 && value <= 1)) throw new Error("Knowledge evaluation thresholds must be between 0 and 1");

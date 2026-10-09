@@ -61,7 +61,7 @@ const observing = (name: string, phase: Hook["phase"], seen: HookContext[]): Hoo
   run: async (context) => { seen.push(context); return { kind: "observed", refs: [`${name}:ok`] }; },
 });
 
-test("v0.12.43 stops a tool call at tool_before and does not dispatch it", async () => {
+test("stops a tool call at tool_before and does not dispatch it", async () => {
   const f = await fixture([refusing("probe-gate", "tool_before")]);
   try {
     // The probe capability owns no tool, and `craft_info` is owned by no capability either, so
@@ -83,7 +83,7 @@ test("v0.12.43 stops a tool call at tool_before and does not dispatch it", async
   } finally { await close(f); }
 });
 
-test("v0.12.43 runs both tool phases and records who ran, without recording what was said", async () => {
+test("runs both tool phases and records who ran, without recording what was said", async () => {
   const seen: HookContext[] = [];
   const f = await fixture([observing("probe-before", "tool_before", seen), observing("probe-after", "tool_after", seen)]);
   try {
@@ -120,7 +120,7 @@ test("v0.12.43 runs both tool phases and records who ran, without recording what
   } finally { await close(f); }
 });
 
-test("v0.12.43 attributes a tool to its owning capability, and leaves the rest unowned", async () => {
+test("attributes a tool to its owning capability, and leaves the rest unowned", async () => {
   const seen: HookContext[] = [];
   const f = await fixture([observing("probe-before", "tool_before", seen)]);
   try {
@@ -143,7 +143,7 @@ test("v0.12.43 attributes a tool to its owning capability, and leaves the rest u
   } finally { await close(f); }
 });
 
-test("v0.12.43 leaves the dispatch path untouched when nothing is attached", async () => {
+test("leaves the dispatch path untouched when nothing is attached", async () => {
   const f = await fixture([]);
   try {
     const plane = new HookPlane([]);
@@ -156,7 +156,7 @@ test("v0.12.43 leaves the dispatch path untouched when nothing is attached", asy
   } finally { await close(f); }
 });
 
-test("v0.12.43 still answers when a service has no hook plane at all", async () => {
+test("still answers when a service has no hook plane at all", async () => {
   const f = await fixture([]);
   try {
     // A server over a service without the plane behaves exactly as it did before hooks existed,
@@ -168,7 +168,7 @@ test("v0.12.43 still answers when a service has no hook plane at all", async () 
   } finally { await close(f); }
 });
 
-test("v0.12.43 answers what will run at a phase before it runs", async () => {
+test("answers what will run at a phase before it runs", async () => {
   const seen: HookContext[] = [];
   const f = await fixture([
     { ...observing("later", "tool_before", seen), order: 9 },
@@ -187,7 +187,7 @@ test("v0.12.43 answers what will run at a phase before it runs", async () => {
   } finally { await close(f); }
 });
 
-test("v0.12.43 refuses to let a hook claim an owner it does not have", async () => {
+test("refuses to let a hook claim an owner it does not have", async () => {
   const f = await fixture([]);
   try {
     // `owned` is written by the registry, never by the hook, so a capability cannot appear in

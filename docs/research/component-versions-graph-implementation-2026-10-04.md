@@ -19,7 +19,7 @@
 
 ## 产研配置和实际路径
 
-[可复用的互联网产研配置](../../skills/craft-experience/references/internet-product-engineering.json)是一份共享定义，包含三个入口、三个出口、四个子场景。Bug 诊断与 Bug 修复共用 bug 入口，选择不同目标和允许路径。每次 Invocation 固定一个子场景及其目标出口；换目标必须显式重新规划。
+[可复用的互联网产研配置](../../capability/craft-experience/procedure-templates.ts)是一份共享定义，包含三个入口、三个出口、四个子场景。Bug 诊断与 Bug 修复共用 bug 入口，选择不同目标和允许路径。每次 Invocation 固定一个子场景及其目标出口；换目标必须显式重新规划。
 
 ```mermaid
 flowchart LR

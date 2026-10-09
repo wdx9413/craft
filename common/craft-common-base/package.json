@@ -46,7 +46,11 @@
       "types": "./dist/bm25.d.ts",
       "default": "./dist/bm25.js"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./context-assets": {
+      "types": "./dist/context-assets.d.ts",
+      "default": "./dist/context-assets.js"
+    }
   },
   "files": [
     "dist",

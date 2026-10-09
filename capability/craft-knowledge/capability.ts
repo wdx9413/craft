@@ -1,3 +1,4 @@
+import { KnowledgeClaimGovernance } from "./claim-governance.ts";
 /**
  * The Knowledge capability.
  *
@@ -49,6 +50,7 @@ import { KnowledgeContribution } from "./contribution.ts";
  */
 export const KNOWLEDGE_KERNELS = {
   sources: "knowledge.sources",
+  claims: "knowledge.claims",
   boundLaunch: "knowledge.bound_launch",
   workbench: "knowledge.workbench",
   relations: "knowledge.relations",
@@ -73,7 +75,7 @@ export const knowledgeCapability: CraftCapability = {
   evaluation: { input_contract: "scoped-query-or-claim", output_contract: "evidence-backed-knowledge", fixture_id: "knowledge-fixture-v1", host_compatibility: ["fixture", "codex", "claude"] },
   owns: KNOWLEDGE_OWNS,
   /**
-   * Assemble the seven kernels from the store the core already opened.
+   * Assemble the registered kernels from the store the core already opened.
    *
    * Nothing here reads a settings file or a path: a capability that resolved its own
    * environment could not be replaced by a differently configured one.
@@ -83,6 +85,7 @@ export const knowledgeCapability: CraftCapability = {
     // The Source registry is this member's, now that it no longer shares a class with the
     // Memory Ledger. Its tools become the capability's to claim rather than the core's to
     // project on its behalf, which is the whole point of cutting the class along the member.
+    registry.provide(KNOWLEDGE_KERNELS.claims, new KnowledgeClaimGovernance(store));
     registry.provide(KNOWLEDGE_KERNELS.sources, new KnowledgeSourceRegistry(store));
     registry.provide(KNOWLEDGE_KERNELS.workbench, new KnowledgeWorkbenchKernel(store));
     registry.provide(KNOWLEDGE_KERNELS.boundLaunch, new KnowledgeBoundLaunchKernel(store));

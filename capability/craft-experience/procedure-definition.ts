@@ -4,9 +4,9 @@
  * Workflow and Graph are machine-readable assets, so Markdown can only be their
  * review view. Prompt Procedures remain Markdown-native and do not use this store.
  */
-import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { stableDigest } from "../../common/craft-common-base/src/digest.ts";
 import type { CraftPaths } from "../../common/craft-common-store-local/src/paths.ts";
 import type { JsonObject } from "../../common/craft-common-store-local/src/store.ts";
@@ -46,9 +46,25 @@ function slug(value: string): string {
   return result || "untitled";
 }
 
-function refPath(paths: CraftPaths, kind: ProcedureKind, id: string, version: number, title: string): string {
-  const suffix = stableDigest(id).slice(-12);
-  return join(paths.experienceProcedureDir, kind === "workflow" ? "workflows" : "graphs", `${slug(title)}--${suffix}.v${version}.json`);
+export function experienceGraphDirectory(paths: CraftPaths, id: string, legacy = false): string {
+  const portable = /^[a-z0-9][a-z0-9_-]{0,95}$/u.test(id) && !/^(?:con|prn|aux|nul|com[0-9]|lpt[0-9])$/iu.test(id);
+  return join(paths.experienceDir, "graph", !legacy && portable ? id : `${slug(id)}--${stableDigest(id).slice(-12)}`);
+}
+
+/** Check every managed component, including the leaf; local data never follows links. */
+export function checkedExperiencePath(paths: CraftPaths, path: string, create = false): string {
+  const root = resolve(paths.experienceDir), target = resolve(path), part = relative(root, target);
+  if (!part || part.startsWith("..") || isAbsolute(part)) throw new Error("Experience path is outside the managed directory");
+  let current = root;
+  for (const segment of ["", ...part.split(/[\\/]/u)]) {
+    current = segment ? join(current, segment) : current;
+    try { if (lstatSync(current).isSymbolicLink()) throw new Error("Experience path must not be a symbolic link"); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      if (create && current !== target) mkdirSync(current, { mode: 0o700 });
+    }
+  }
+  return target;
 }
 
 function definition(value: unknown): ProcedureDefinition {
@@ -74,14 +90,12 @@ export class ProcedureDefinitionStore {
     const checked = definition(value);
     const canonical = JSON.stringify(checked, null, 2);
     const digest = stableDigest(checked);
-    const path = refPath(this.paths, checked.kind, checked.procedure_id, checked.procedure_version, title);
-    mkdirSync(resolve(path, ".."), { recursive: true, mode: 0o700 });
+    const path = checkedExperiencePath(this.paths, join(experienceGraphDirectory(this.paths, checked.procedure_id), "versions", `${String(checked.procedure_version).padStart(6, "0")}.json`), true);
     let publish = false;
     try {
-      const existing = this.read({ format: "json", procedure_id: checked.procedure_id, procedure_version: checked.procedure_version, kind: checked.kind, path, digest });
-      if (stableDigest(existing) !== digest) throw new Error("Procedure definition version already exists with different content");
+      this.read({ format: "json", procedure_id: checked.procedure_id, procedure_version: checked.procedure_version, kind: checked.kind, path, digest });
     } catch (error) {
-      if (!(error instanceof Error) || !/ENOENT|no such file/iu.test(error.message) && !orphaned?.(path)) throw error;
+      if (!(error instanceof Error) || !/ENOENT|no such file/iu.test(error.message) && !(error.message === "Procedure definition digest drifted" && orphaned?.(path))) throw error;
       publish = true;
     }
     if (publish) {
@@ -98,15 +112,23 @@ export class ProcedureDefinitionStore {
   }
 
   read(ref: ProcedureDefinitionRef): ProcedureDefinition {
-    const root = resolve(this.paths.experienceProcedureDir);
-    const path = resolve(ref.path);
-    if (!(path.startsWith(`${root}/`) || path.startsWith(`${root}\\`)) || !path.endsWith(`.v${ref.procedure_version}.json`)) throw new Error("Procedure definition path is outside the managed directory");
+    const path = resolve(ref.path), legacyRoot = resolve(this.paths.experienceProcedureDir);
+    const filename = `${String(ref.procedure_version).padStart(6, "0")}.json`;
+    const canonical = join(experienceGraphDirectory(this.paths, ref.procedure_id), "versions", filename);
+    const previous = join(experienceGraphDirectory(this.paths, ref.procedure_id, true), "versions", filename);
+    if (path !== canonical && path !== previous && (!(path.startsWith(`${legacyRoot}/`) || path.startsWith(`${legacyRoot}\\`)) || !path.endsWith(`.v${ref.procedure_version}.json`))) throw new Error("Procedure definition path is outside the managed directory");
+    checkedExperiencePath(this.paths, path);
     const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("Procedure definition is invalid");
     const value = definition(parsed);
     if (value.schema_version !== "craft.procedure.v1" || value.procedure_id !== ref.procedure_id || value.procedure_version !== ref.procedure_version || value.kind !== ref.kind) throw new Error("Procedure definition metadata drifted");
     if (stableDigest(value) !== ref.digest) throw new Error("Procedure definition digest drifted");
     return value;
+  }
+
+  /** Copy a checked legacy revision; old references and active invocations stay valid. */
+  migrate(ref: ProcedureDefinitionRef): ProcedureDefinitionRef {
+    const value = this.read(ref); return this.write(value, value.trigger);
   }
 }
 

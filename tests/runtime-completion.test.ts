@@ -10,13 +10,13 @@ import { McpServer } from "../core/mcp.ts";
 import { ActionGatewayKernel, AcceptanceGateKernel, A2AProtocolKernel, DurableWorkerKernel, ProviderRouterKernel } from "../core/runtime-completion.ts";
 
 async function fixture() {
-  const root = await mkdtemp(join(tmpdir(), "craft-v1213-"));
+  const root = await mkdtemp(join(tmpdir(), "craft-runtime-completion-"));
   const store = await new CraftStore(craftPaths(root)).open();
   store.create("task", "task", { project_id: "project", title: "Task", goal: "Goal", status: "active" });
   return { root, store, service: new CraftService(store) };
 }
 
-test("v0.12.18 action gateway enforces workspace boundaries and approval", async () => {
+test("action gateway enforces workspace boundaries and approval", async () => {
   const f = await fixture();
   try {
     const kernel = new ActionGatewayKernel(f.store);
@@ -42,7 +42,7 @@ test("v0.12.18 action gateway enforces workspace boundaries and approval", async
   } finally { f.store.close(); }
 });
 
-test("v0.12.18 acceptance, worker and provider kernels form a durable local control path", async () => {
+test("acceptance, worker and provider kernels form a durable local control path", async () => {
   const f = await fixture();
   try {
     const gate = new AcceptanceGateKernel(f.store);
@@ -79,7 +79,7 @@ test("v0.12.18 acceptance, worker and provider kernels form a durable local cont
   } finally { f.store.close(); }
 });
 
-test("v0.12.18 A2A standard operations are HTTPS-only and content-free", async () => {
+test("A2A standard operations are HTTPS-only and content-free", async () => {
   const response = async () => ({ ok: true, status: 200, json: async () => ({ task_id: "remote", status: "working" }) }) as Response;
   const fetchImpl = (async () => response()) as unknown as typeof fetch;
   const kernel = new A2AProtocolKernel();
@@ -94,7 +94,7 @@ test("v0.12.18 A2A standard operations are HTTPS-only and content-free", async (
   assert.equal(defaulted.task_id, null); assert.equal(defaulted.status, "accepted");
 });
 
-test("v0.12.18 service and MCP expose the new runtime surface", async () => {
+test("service and MCP expose the new runtime surface", async () => {
   const f = await fixture();
   try {
     const service = f.service;
@@ -117,7 +117,7 @@ test("v0.12.18 service and MCP expose the new runtime surface", async () => {
   } finally { f.store.close(); }
 });
 
-test("v0.12.13 validates nullish and empty protocol inputs explicitly", async () => {
+test("validates nullish and empty protocol inputs explicitly", async () => {
   const f = await fixture();
   try {
     const action = new ActionGatewayKernel(f.store);
