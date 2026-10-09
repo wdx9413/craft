@@ -2,7 +2,7 @@
 
 Workbench/Desktop presentation has moved to the sibling `craft-workbench/` project. Core serves APIs without UI by default; desktop release automation is paused. See [presentation separation](docs/technical/modules/presentation-separation.md).
 
-> Current release: v0.12.39. Craft is a general work runtime for people and AI. The default `craft` plugin includes Knowledge, Memory, Capability discovery, Skill Quality, and Workflow Evolution behind one shared control plane; each remains available as an optional standalone component. In Codex, the current app is the embedded execution host; Craft does not start another Codex CLI by default.
+> Current release: v0.12.40. Craft is a general work runtime for people and AI. The default `craft` plugin includes Knowledge, Memory, Capability discovery, Skill Quality, and Workflow Evolution behind one shared control plane; each remains available as an optional standalone component. In Codex, the current app is the embedded execution host; Craft does not start another Codex CLI by default.
 
 [中文](README.md) | [English](README.en.md)
 

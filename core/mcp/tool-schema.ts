@@ -114,6 +114,8 @@ const TYPES_BY_TOOL: Readonly<Record<string, Readonly<Record<string, ParamType>>
   craft_procedure_create: { scenario_signature: "object", preconditions: "array", scope_envelope: "object" },
   craft_host_session_open: { environment_fingerprint: "string", policy_fingerprint: "string", capability_fingerprint: "string", model_fingerprint: "string", budget_fingerprint: "string" },
   craft_outcome_observer_observe: { environment_fingerprint: "string" },
+  craft_procedure_host_control: { scope: "string", input: "object", principal_ids: "array" },
+  craft_procedure_decision_evaluate: { scope: "string", expected_version: "integer", principal_ids: "array" },
   craft_procedure_invocation_transition: { scope: "string", expected_version: "integer", principal_ids: "array" },
   craft_procedure_invocation_bind: { model_fingerprint: "string", budget_fingerprint: "string", scope: "string", expected_version: "integer", principal_ids: "array", procedure_version: "integer", input_refs: "object", allowed_effects: "array", max_dispatches: "integer", ttl_ms: "integer" },
   craft_procedure_invocation_dispatch: { scope: "string", expected_version: "integer", principal_ids: "array", precondition_evidence: "object" },

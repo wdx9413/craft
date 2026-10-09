@@ -1,11 +1,18 @@
 # Changelog
 
-> Note on numbering: the declared package version is now **0.12.39**. Earlier
+> Note on numbering: the declared package version is now **0.12.40**. Earlier
 > `v0.12.34`–`v0.12.43` headings name **incremental work on the previous revision**,
 > not releases. Each is a self-contained change set with its own 100%-coverage
 > test script; the version bump happens only when the work is released.
 
-## v0.12.39（本次发布）
+## v0.12.40（本次发布）
+
+- 修复全局 Context 召回对 `global:global` scope 的兼容，保持显式范围授权。
+- Experience 增加嵌入式 Host 准备、快照、Session 和 Observation 接口，复用现有 Runtime；不在 Craft 内执行命令或启动子 Host。
+- Graph 决策支持声明式条件、已验收事实摘要绑定、人工确认与受限返工；缺失、歧义或过期证据阻止推进。Host 上报不自动成为独立验收或晋级资格。
+- 具体产研流程作为本地 Experience 数据保存，不随公共插件发布。
+
+## v0.12.39（历史发布）
 
 - `craft-context` 的 Codex/Claude 插件增加单入口生命周期 Hook：提示阶段一次解析 Knowledge、Memory、Experience 的共享限额回执；显式记忆写入失败不阻断其余召回；Experience 继续只记录脱敏的本地编辑与验证信号。
 - 单独安装 Context 即可保留四个子能力的 MCP 工具；独立插件仍可按需安装，Skill + MCP 的无 Hook 路径保持可用。

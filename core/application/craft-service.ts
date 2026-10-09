@@ -1,5 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { ContextHostEvaluation } from "../context-host-evaluation.ts";
+import { procedureHostControl } from "./procedure-host-control.ts";
+import { procedureDecisionEvaluate } from "./procedure-decision.ts";
 import { readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { isAbsolute, join, resolve, win32 } from "node:path";
@@ -273,6 +275,8 @@ export class CraftService extends ServiceFoundation {
     });
   }
 
+  procedureHostControl(args: JsonObject): JsonObject { return procedureHostControl(this, args); }
+  procedureDecisionEvaluate(args: JsonObject): JsonObject { return procedureDecisionEvaluate(this, args); }
   procedureConfigurationSave(args: JsonObject): JsonObject { return new ProcedureConfiguration(this.store).save(args); }
   experienceGraphInspect(args: JsonObject): JsonObject {
     const graphs = new ExperienceGraphAssets(this.store);

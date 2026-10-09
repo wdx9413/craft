@@ -217,7 +217,7 @@ test("the distribution plan reports the download story and the remaining gap", a
   try {
     const service = new CraftService(f.store);
     const plan = service.distributionPlanGet({});
-    assert.equal(plan.version, "0.12.39");
+    assert.equal(plan.version, "0.12.40");
     assert.equal(plan.user_download_available, false);
     assert.equal(plan.channel, "separate_project");
     assert.ok(Array.isArray(plan.remainder));

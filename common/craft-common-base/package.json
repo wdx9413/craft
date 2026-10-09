@@ -1,6 +1,6 @@
 {
   "name": "craft-common-base",
-  "version": "0.12.39",
+  "version": "0.12.40",
   "description": "Capability contracts and shared deterministic primitives",
   "type": "module",
   "main": "./dist/index.js",
@@ -60,7 +60,7 @@
     "node": ">=23"
   },
   "dependencies": {
-    "craft-common-store-local": "0.12.39",
+    "craft-common-store-local": "0.12.40",
     "@types/node": ">=23 <26"
   },
   "license": "MIT",

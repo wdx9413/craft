@@ -179,3 +179,19 @@ for (const action of ["resolve", "searchKnowledge"] as const) {
     } finally { await f.close(); }
   });
 }
+
+test("global scoped reads accept legacy, keyed and object forms without leaking project records", async () => {
+  const f = await fixture();
+  try {
+    for (const [id, scope] of [["legacy", "global"], ["keyed", "global:global"], ["object", { kind: "global", id: "global" }], ["private", "project:other"]] as const)
+      f.store.create("global_scope_probe", id, { scope });
+    assert.deepEqual(f.store.listScoped("global_scope_probe", [{ kind: "global", id: "global" }]).map(r => r.id).sort(), ["keyed", "legacy", "object"]);
+    assert.deepEqual(f.store.listScoped("global_scope_probe", [{ kind: "project", id: "other" }]).map(r => r.id), ["private"]);
+    const { ExperienceContribution } = await import("../capability/craft-experience/contribution.ts");
+    f.store.create("experience_procedure", "global-procedure", { scope: "global:global", title: "产品研发", trigger: "产品研发", procedure_kind: "graph", lifecycle: "routeable", routeable: true });
+    const kernel = new ContextResolutionKernel(f.store, [new ExperienceContribution(f.store)]);
+    const resolved = await kernel.resolve({ scope_kind: "global", scope_id: "global", query: "产品研发", members: ["experience"], max_chars: 6000 });
+    const contribution = (resolved.contributions as JsonObject[]).find(c => c.member === "experience")!;
+    assert.equal((contribution.items as JsonObject[])[0]?.procedure_id, "global-procedure");
+  } finally { await f.close(); }
+});

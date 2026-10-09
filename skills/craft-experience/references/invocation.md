@@ -29,3 +29,11 @@
 回执分别保留 passed、failed、blocked、inconclusive、cancelled。blocked/inconclusive 等待补证；failed 仅在定义的 `failure_disposition: "retry"` 下可重试；cancelled 保持终态。补证后 `resume` 传 `recovery_evidence_id`：program/confirmed Evidence 的 metadata 必须绑定 invocation_id、receipt_id、当前 snapshot_digest、workspace_state_revision、safe_to_retry: true 与未来 expires_at。恢复会重验 Policy、版本、TTL 和预算。每工作项最多重试三次，派发总数仍受 max_dispatches 约束。
 
 Route 可声明 `parallel_groups: [["review", "test"]]`，每组 2–8 个连续、独立的 read_only 指令步骤。组内不得消费彼此的输出，也不能包含 procedure_call。从 get 返回的 ready 工作项逐个取得派发，Host 可并发执行；report 仍使用最新 expected_version 顺序提交。所有分支验收后才能汇合。local_write 保持串行。运行时条件分支、回环和补偿需单独的 Graph 合同，不能由这项并行声明推断。
+
+## 嵌入式 Host 与 Graph 决策
+
+Experience daily 可使用 `craft_procedure_host_control`，通过 `action` 和 `input` 复用 Runtime。`prepare` 只准备计划并延迟 Host 启动；已有 Invocation 的 `snapshot`、`session_open`、`session_close`、`observe` 从受控调用派生工作区与执行身份。先通过 discovery 读取实际工具 schema，不能自行替换工作区或执行身份。它不会执行命令或启动子 Host。
+
+Graph 节点验收后使用 `craft_procedure_decision_evaluate`，传当前 Invocation 版本、稳定 decision_id、receipt_id、snapshot_id 和 fact_evidence_id。条件来自节点的 `decision_rules`：每条为 `{field, op, value}`，支持 eq、gte 和 `{field, op: "eq_field", value_field}`；多条为 AND。缺失关键值、未知规则、无唯一匹配边时返回 blocked。
+
+程序事实置于验收 Evidence 的 `metadata.fact_values`；`fact_values_ref` 必须是 `artifact:` 加 Runtime stableDigest 的事实摘要，且属于该回执的 output_refs。条件边及返工边均校验摘要；返工还要求已验收事实 `safe_to_retry: true`。人工确认必须使用绑定当前调用、回执和快照的有效 human Evidence，程序不能代替。事实语义仍为 host_attested；真实测试日志和独立审查另行保留，不能据此自动晋级。

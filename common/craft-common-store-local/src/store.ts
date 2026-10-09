@@ -217,7 +217,8 @@ export class CraftStore {
     if (!Array.isArray(scopes) || scopes.some(scope => !scope || typeof scope.kind !== "string" || typeof scope.id !== "string")) throw new Error("Invalid scoped query");
     if (!scopes.length) return [];
     const scopeSql = `EXISTS (SELECT 1 FROM json_each(?) s WHERE
-      json_extract(r.payload_json,'$.scope')=CASE WHEN json_extract(s.value,'$.kind')='global' THEN 'global' ELSE json_extract(s.value,'$.kind')||':'||json_extract(s.value,'$.id') END
+      json_extract(r.payload_json,'$.scope')=json_extract(s.value,'$.kind')||':'||json_extract(s.value,'$.id')
+      OR (json_extract(s.value,'$.kind')='global' AND json_extract(r.payload_json,'$.scope')='global')
       OR (json_extract(r.payload_json,'$.scope.kind')=json_extract(s.value,'$.kind') AND json_extract(r.payload_json,'$.scope.id')=json_extract(s.value,'$.id')))`;
     const values = [JSON.stringify(scopes)];
     if (temporal?.known_at !== undefined && !Number.isFinite(Date.parse(temporal.known_at))) throw new Error("Invalid scoped known_at");

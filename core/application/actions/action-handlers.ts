@@ -133,6 +133,8 @@ export function createActionHandlers(service: CraftService, mountedComponent?: C
       craft_experience_asset_restore: (a) => service.componentAssetRestore("experience", a),
       craft_codebase_asset_inspect: (a) => service.componentAssetInspect("codebase", a),
       craft_codebase_asset_restore: (a) => service.componentAssetRestore("codebase", a),
+      craft_procedure_host_control: (a) => service.procedureHostControl(a),
+      craft_procedure_decision_evaluate: (a) => service.procedureDecisionEvaluate(a),
       craft_procedure_invocation_bind: (a) => service.procedureInvocationBind(a),
       craft_procedure_invocation_dispatch: (a) => service.procedureInvocationDispatch(a),
       craft_procedure_invocation_report: (a) => service.procedureInvocationReport(a),

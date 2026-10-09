@@ -93,6 +93,7 @@ const DAILY_COMPONENT_TOOLS: Readonly<Record<string, readonly string[]>> = {
     "craft_experience_asset_inspect", "craft_experience_asset_restore", "craft_procedure_configuration_save", "craft_experience_graph_inspect", "craft_experience_graph_edit",
     "craft_component_readiness_get", "craft_evidence_record", "craft_experience_observe",
     "craft_experience_patterns_list", "craft_experience_procedure_draft", "craft_experience_procedure_submit", "craft_experience_procedure_get",
+    "craft_procedure_host_control", "craft_procedure_decision_evaluate",
     "craft_procedure_invocation_bind", "craft_procedure_invocation_dispatch", "craft_procedure_invocation_report", "craft_procedure_invocation_resume", "craft_procedure_invocation_get", "craft_procedure_invocation_transition", "craft_procedure_invocation_evaluate",
     "craft_procedure_create", "craft_procedure_plan", "craft_procedure_get", "craft_procedure_list", "craft_procedure_gate", "craft_procedure_export_skill",
     "craft_scope_identity_resolve_project", "craft_context_resolution_resolve", "craft_decision_context_gate_open",
