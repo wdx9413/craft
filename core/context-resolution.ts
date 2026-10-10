@@ -1,3 +1,4 @@
+import { observeOperation } from "../common/craft-common-log/src/index.ts";
 import { ContextBudget } from "../common/craft-common-base/src/context-assets.ts";
 import { MemoryContribution } from "../capability/craft-memory/contribution.ts";
 import { ContextReadGuard } from "./context-access-guard.ts";
@@ -147,6 +148,10 @@ export class ContextResolutionKernel {
   }
 
   async resolve(args: JsonObject): Promise<JsonObject> {
+    return observeOperation(this.store, "context", "resolve", args, () => this.resolveContext(args));
+  }
+
+  private async resolveContext(args: JsonObject): Promise<JsonObject> {
     const query = noCredentialAssignment(text(args.query, "query"), "query"); const requestedScope = optionalScope(args);
     // Without a scope this returns nothing and says why. It does not search every scope, and it
     // writes no receipt for a resolution that did not happen.
@@ -273,7 +278,11 @@ export class ContextResolutionKernel {
     const contributionItems = selectedExtras.size;
     const contributions = recalled.map((part, group) => {
       const selected = extra.filter(candidate => candidate.group === group && selectedExtras.has(candidate.id)).map(candidate => candidate.item);
-      return { ...part, items: selected, receipt_id: `contribution_${stableDigest(selected).slice(-24)}`,
+      const matches = extra.filter(candidate => candidate.group === group && (hitScores.has(candidate.id) || candidate.required)).length;
+      const diagnostics = part.member === "experience" ? { ...part.diagnostics, matching_count: matches, selected_count: selected.length,
+        reason: selected.length ? "recalled_not_bound" : matches ? "budget_excluded" : part.items.length ? "query_not_matched" : part.diagnostics?.reason,
+        execution_started: false } : part.diagnostics;
+      return { ...part, diagnostics, items: selected, receipt_id: `contribution_${stableDigest(selected).slice(-24)}`,
         omitted_count: part.omitted_count + extra.filter(candidate => candidate.group === group && (hitScores.has(candidate.id) || candidate.required)).length - selected.length };
     });
     const executionIdentity = { requested: retrieval.execution.requested, used: retrieval.execution.used, provider: retrieval.execution.provider, model: retrieval.execution.model, unavailable_reason: retrieval.execution.unavailable_reason };
@@ -290,7 +299,7 @@ export class ContextResolutionKernel {
       deduplicated_count: duplicates, deduplicated_refs: duplicateRefs, deduplicated_refs_omitted_count: duplicates - duplicateRefs.length,
       contributor_failures: contributorFailures, partial: contributorFailures.length > 0,
       members: members === null ? null : [...members].sort(),
-      contributions: contributions.map((contribution) => ({ member: contribution.member, receipt_id: contribution.receipt_id, item_count: contribution.items.length, omitted_count: contribution.omitted_count,
+      contributions: contributions.map((contribution) => ({ member: contribution.member, receipt_id: contribution.receipt_id, item_count: contribution.items.length, omitted_count: contribution.omitted_count, diagnostics: contribution.diagnostics,
         references: contribution.items.map(item => ({ id: item.claim_id ?? item.procedure_id, version: item.claim_version ?? item.procedure_version,
           digest: item.content_digest, source_id: item.source_id ?? null, reason: item.reason ?? "routeable_scope_match" })) })) };
     const identityDigest = stableDigest(identity);

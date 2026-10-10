@@ -147,33 +147,36 @@ export class McpServer {
     if (request.method === "tools/list") return this.ok(request.id, { tools: this.tools, _meta: { "craft/runtime-fingerprint": this.fingerprint } });
     if (request.method !== "tools/call") return this.error(request.id, -32601, `Method not found: ${request.method}`);
     if (!request.params || typeof request.params !== "object" || Array.isArray(request.params)) {
-      return this.error(request.id, -32602, "Tool call params must be an object");
+      return this.reject(request.id, "Tool call params must be an object", request.params);
     }
     const params = request.params as JsonObject;
-    const supplied = params.arguments ?? {};
+    const supplied = params.arguments === undefined ? {} : params.arguments;
     if (!supplied || typeof supplied !== "object" || Array.isArray(supplied)) {
-      return this.error(request.id, -32602, "Tool arguments must be an object");
+      return this.reject(request.id, "Tool arguments must be an object", supplied);
     }
     const name = String(params.name);
     if (!this.tools.some((tool) => tool.name === name) && (this.mode !== "full" || !this.handlers[name])) {
-      return this.error(request.id, -32602, `Unknown tool: ${name}`);
+      return this.reject(request.id, `Unknown tool: ${name}`, supplied);
     }
     // The two hook phases that stand in front of and behind an effect. `tool_before` is a gating
     // phase, so this is the point where "a hook can stop a tool call" stops being a comment: a
     // refusal returns without dispatching, and `tool_after` therefore does not run for it either.
     const context = this.hooks === undefined ? undefined : HookPlane.toolContext(name, supplied, classifyTool);
-    if (context) {
-      const gate = await this.hooks!.run("tool_before", context);
-      if (gate.denied) {
-        const refusal = gate.outcomes.find((entry) => entry.outcome.kind === "denied")!;
-        const reason = refusal.outcome.kind === "denied" ? refusal.outcome.reason : "denied";
-        return this.ok(request.id, { content: [{ type: "text", text: `Denied by hook ${refusal.hook}${refusal.capability ? ` (${refusal.capability})` : ""}: ${reason}` }],
-          structuredContent: { denied: true, hook: refusal.hook, capability: refusal.capability ?? null, reason }, isError: true });
-      }
-    }
     const requestId = String(request.id);
     const traced = name !== "craft_info" && name !== "craft_describe" && name !== "craft_list" && name !== "craft_get" && !name.startsWith("craft_trace_");
     const dispatch = async (): Promise<JsonObject> => {
+      if (context) {
+        const gate = await this.hooks!.run("tool_before", context);
+        if (gate.denied) {
+          const refusal = gate.outcomes.find((entry) => entry.outcome.kind === "denied")!;
+          const reason = refusal.outcome.kind === "denied" ? refusal.outcome.reason : "denied";
+          const denied = { denied: true, hook: refusal.hook, capability: refusal.capability ?? null, reason };
+          if (traced) return denied;
+          const captured = await this.componentTrace.capture({ requestId, component: "craft-mcp", operation: "hook.denied", input: supplied as JsonObject, handler: () => denied });
+          return { ...denied, trace_correlation: captured.correlation, ...(captured.telemetry_error ? { telemetry_error: captured.telemetry_error } : {}) };
+        }
+      }
+
       // Standalone contracts are checked at the wire boundary, including calls
       // from clients that do not validate JSON Schema themselves.
       if (this.mode.endsWith("-daily") || this.mode === "component-codebase") {
@@ -198,8 +201,9 @@ export class McpServer {
         return this.ok(request.id, { content: [{ type: "text", text: captured.error instanceof Error ? captured.error.message : String(captured.error) }],
           trace_correlation: captured.correlation, ...(captured.telemetry_error ? { telemetry_error: captured.telemetry_error } : {}), isError: true });
       }
-      const result = { ...(captured.result ?? {}), ...(captured.correlation === null ? {} : { trace_correlation: captured.correlation }),
+      const result: JsonObject = { ...(captured.result ?? {}), ...(captured.correlation === null ? {} : { trace_correlation: captured.correlation }),
         ...(captured.telemetry_error ? { telemetry_error: captured.telemetry_error } : {}) };
+      if (result.denied === true) return this.ok(request.id, { content: [{ type: "text", text: `Denied by hook ${String(result.hook)}: ${String(result.reason)}` }], structuredContent: result, isError: true });
       if (context) await this.hooks!.run("tool_after", context);
       return this.ok(request.id, { content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
         structuredContent: result, isError: false });
@@ -207,6 +211,13 @@ export class McpServer {
       return this.ok(request.id, { content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }],
         isError: true });
     }
+  }
+
+  private async reject(requestId: unknown, message: string, input: unknown): Promise<JsonObject> {
+    const captured = await this.componentTrace.capture({ requestId: String(requestId), component: "craft-mcp", operation: "protocol.reject",
+      input: { envelope: input }, handler: () => { throw Object.assign(new Error(message), { code: "ERR_INVALID_PARAMS" }); } });
+    return { jsonrpc: "2.0", id: requestId, error: { code: -32602, message, data: { trace_correlation: captured.correlation,
+      ...(captured.telemetry_error ? { telemetry_error: captured.telemetry_error } : {}) } } };
   }
 
   private dispatchTool(name: string, args: JsonObject): JsonObject | Promise<JsonObject> | undefined {

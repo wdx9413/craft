@@ -1,6 +1,6 @@
 {
   "name": "craft-common-store-local",
-  "version": "0.12.40",
+  "version": "0.12.41",
   "description": "Versioned SQLite and Markdown local persistence with Craft-compatible paths",
   "type": "module",
   "main": "./dist/index.js",

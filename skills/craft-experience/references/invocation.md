@@ -37,3 +37,7 @@ Experience daily 可使用 `craft_procedure_host_control`，通过 `action` 和 
 Graph 节点验收后使用 `craft_procedure_decision_evaluate`，传当前 Invocation 版本、稳定 decision_id、receipt_id、snapshot_id 和 fact_evidence_id。条件来自节点的 `decision_rules`：每条为 `{field, op, value}`，支持 eq、gte 和 `{field, op: "eq_field", value_field}`；多条为 AND。缺失关键值、未知规则、无唯一匹配边时返回 blocked。
 
 程序事实置于验收 Evidence 的 `metadata.fact_values`；`fact_values_ref` 必须是 `artifact:` 加 Runtime stableDigest 的事实摘要，且属于该回执的 output_refs。条件边及返工边均校验摘要；返工还要求已验收事实 `safe_to_retry: true`。人工确认必须使用绑定当前调用、回执和快照的有效 human Evidence，程序不能代替。事实语义仍为 host_attested；真实测试日志和独立审查另行保留，不能据此自动晋级。
+
+## Host 衔接
+
+已选定精确版本、Entry/Subscenario/Exit，并且有真实输入引用、Host 身份和现有 Work Loop 时，可用 `craft_procedure_host_control(action: start, input: <完整 bind 参数>)` 原子完成规划和绑定。它复用原有门禁，不启动第二个 Host。随后用 `action: next` 读取就绪工作项、当前版本和快照；有未报告派发时先收齐回执。按返回工具继续 dispatch/report/transition，直到独立出口验收。候选、缺少输入或不明确的路由保持阻塞；`craft_experience_graph_inspect(action: diagnose, scope, graph_id)` 给出数据根、草稿/正式状态和下一步工具。

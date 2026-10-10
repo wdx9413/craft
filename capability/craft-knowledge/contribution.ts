@@ -1,3 +1,4 @@
+import { observeOperation } from "../../common/craft-common-log/src/index.ts";
 /**
  * The governed Knowledge read side.
  *
@@ -42,6 +43,10 @@ export class KnowledgeContribution implements ContextContributionProvider {
   constructor(store: CraftStore) { this.store = store; }
 
   async contribute(request: ContextRequest): Promise<ContextContribution> {
+    return observeOperation(this.store, "knowledge", "contribute", request, () => this.readContribution(request));
+  }
+
+  private async readContribution(request: ContextRequest): Promise<ContextContribution> {
     return this.search(request, false);
   }
 

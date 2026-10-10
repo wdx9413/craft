@@ -1,3 +1,4 @@
+import { observeOperation } from "../../../common/craft-common-log/src/index.ts";
 import { assertContextReadCurrent } from "../../context-access-guard.ts";
 import type { CraftService } from "../craft-service.ts";
 import type { JsonObject } from "../../infrastructure/store.ts";
@@ -10,6 +11,10 @@ export { ensureRepository } from "../../../capability/craft-codebase/repository-
 import { ensureRepository } from "../../../capability/craft-codebase/repository-onboarding.ts";
 
 export async function openContext(service: CraftService, args: JsonObject): Promise<JsonObject> {
+  return observeOperation(service.store, "context", "open", args, () => resolveRepositoryContext(service, args));
+}
+
+async function resolveRepositoryContext(service: CraftService, args: JsonObject): Promise<JsonObject> {
   if (typeof args.query !== "string" || !args.query.trim()) throw new Error("query must not be empty");
   if (args.include_codebase !== undefined && typeof args.include_codebase !== "boolean") throw new Error("include_codebase must be boolean");
   if (args.index_depth !== undefined && !["basic", "semantic"].includes(String(args.index_depth))) throw new Error("index_depth must be basic or semantic");
@@ -19,7 +24,7 @@ export async function openContext(service: CraftService, args: JsonObject): Prom
   const identity = service.scopeIdentityResolveProject({ project_root: root }).identity as JsonObject;
   const scope = identity.canonical_scope as JsonObject;
   let codebase: JsonObject;
-  try { codebase = args.include_codebase === false ? { status: "skipped", reason: "not_requested" } : ensureRepository(service, { project_root: root, index_depth: args.index_depth, query: args.query }); }
+  try { codebase = args.include_codebase === false ? { status: "skipped", reason: "not_requested" } : observeOperation(service.store, "codebase", "repository_ensure", { project_root: root, index_depth: args.index_depth }, () => ensureRepository(service, { project_root: root, index_depth: args.index_depth, query: args.query })); }
   catch { codebase = { status: "unavailable", reason: "repository_index_failed" }; }
   if (args.required_refs !== undefined && !Array.isArray(args.required_refs)) throw new Error("required_refs must be an array");
   const required = ((args.required_refs ?? []) as unknown[]).map(requiredContextRef);

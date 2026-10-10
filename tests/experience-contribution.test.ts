@@ -38,7 +38,7 @@ function procedure(store: CraftStore, args: { id: string; title: string; trigger
 test("Experience is a Context member, but only routeable Procedure projections are injected", async () => {
   const f = await fixture();
   try {
-    f.store.create("experience_pattern", "diagnostic", { scope: { kind: "project", id: "p" }, scenario_key: "coding.verification", status: "diagnostic_only", content_free: true });
+    f.store.create("experience_pattern", "hidden-pattern", { scope: { kind: "project", id: "p" }, scenario_key: "coding.verification", status: "diagnostic_only", content_free: true });
     procedure(f.store, { id: "verified", title: "Terminal verification", trigger: "verification" });
     const contributed = await f.contribution.contribute(request("verification"));
     assert.equal(contributed.member, "experience");
@@ -48,7 +48,7 @@ test("Experience is a Context member, but only routeable Procedure projections a
     assert.equal(item.procedure_id, "verified");
     assert.equal(item.content, undefined);
     assert.match(String(item.content_digest), /^sha256:/u);
-    assert.equal(JSON.stringify(contributed).includes("diagnostic"), false);
+    assert.equal(JSON.stringify(contributed).includes("hidden-pattern"), false);
   } finally { await close(f); }
 });
 
@@ -91,6 +91,7 @@ test("Fresh or candidate-only Experience produces an empty Context contribution"
   const f = await fixture();
   try {
     procedure(f.store, { id: "candidate", title: "Candidate", trigger: "anything", lifecycle: "candidate" });
-    assert.deepEqual(await f.contribution.contribute(request("anything")), { member: "experience", items: [], receipt_id: "experience_contribution_none", omitted_count: 0 });
+    assert.deepEqual(await f.contribution.contribute(request("anything")), { member: "experience", items: [], receipt_id: "experience_contribution_none", omitted_count: 0,
+      diagnostics: { scoped_procedure_count: 1, has_draft: false, routeable_count: 0, candidate_count: 1, reason: "no_promoted_release", next_tool: "craft_experience_graph_inspect", next_action: "diagnose", execution_started: false } });
   } finally { await close(f); }
 });

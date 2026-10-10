@@ -62,7 +62,7 @@ test("DSH local bundles discover their Skill without network or an npm package v
     writeFileSync(join(f.root, "skills/craft-context/SKILL.md"), "Use repository context");
     const local = adapterTools({}, pathToFileURL(join(f.root, "dist/adapter-tools.js")).href);
     assert.equal((await local[0]!.execute({ tool: "" })).skill, "Use repository context");
-    process.env.npm_package_version = "0.12.40"; adapterTools();
+    process.env.npm_package_version = "0.12.41"; adapterTools();
     delete process.env.npm_package_version; adapterTools();
   } finally { if (before === undefined) delete process.env.npm_package_version; else process.env.npm_package_version = before; f.cleanup(); }
 });

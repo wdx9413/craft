@@ -1,6 +1,6 @@
 {
   "name": "@craft/capability-codebase",
-  "version": "0.12.40",
+  "version": "0.12.41",
   "description": "Craft internal read-only codebase structure capability",
   "type": "module",
   "main": "./dist/capability.js",
@@ -34,9 +34,9 @@
   "license": "MIT",
   "types": "./dist/capability.d.ts",
   "dependencies": {
-    "craft-common-store-local": "0.12.40",
-    "craft-common-base": "0.12.40",
-    "craft-common-log": "0.12.40",
+    "craft-common-store-local": "0.12.41",
+    "craft-common-base": "0.12.41",
+    "craft-common-log": "0.12.41",
     "typescript": ">=5.8 <7"
   },
   "engines": {

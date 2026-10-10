@@ -1,3 +1,4 @@
+import { observeOperation } from "../../common/craft-common-log/src/index.ts";
 import { codeContextCandidates } from "./context-search.ts";
 import { contextAssetMatches, contextAssetRef, requiredContextRef } from "../../common/craft-common-base/src/context-assets.ts";
 import { assertContextReadCurrent, type ContextReadRef } from "../../common/craft-common-store-local/src/context-access-guard.ts";
@@ -190,6 +191,10 @@ export class CodebaseIndexKernel {
 
   /** Governed code candidates, not an accumulated Context member or raw index. */
   contextProjection(args: JsonObject): JsonObject {
+    return observeOperation(this.store, "codebase", "context_projection", args, () => this.projectContext(args));
+  }
+
+  private projectContext(args: JsonObject): JsonObject {
     return this.store.transaction(() => {
       const { index, workspace } = this.readyIndex(args);
       const query = text(args.query, "query"), limit = bounded(args.limit, "limit", 100);

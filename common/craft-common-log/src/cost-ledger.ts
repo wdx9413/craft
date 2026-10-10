@@ -12,6 +12,7 @@ function priceRates(record: JsonObject): { input: number; output: number } {
   return { input: Number(input), output: Number(output) };
 }
 function metricTotal(entries: JsonObject[], key: typeof METRICS[number]): number | null {
+  if (!entries.length) return null;
   let total = 0;
   for (const entry of entries) {
     const value = entry[key];

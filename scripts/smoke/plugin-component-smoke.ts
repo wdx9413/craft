@@ -36,7 +36,7 @@ async function smoke(name: string): Promise<void> {
     child.stdin.end(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: MCP_PREFERRED_PROTOCOL_VERSION } })}\n${JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list" })}\n${JSON.stringify({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: callTool, arguments: callArguments } })}\n`);
     const result = await Promise.race([responses, new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`${name} timed out`)), 5_000))]);
     const tools = result[1].result.tools as Array<{ name: string }>;
-    assert.equal(result[0].result.serverInfo.version, "0.12.40");
+    assert.equal(result[0].result.serverInfo.version, "0.12.41");
     assert(tools.length > 0);
     assert(tools.some((tool) => tool.name === expectedDailyTool));
     assert(tools.some((tool) => tool.name === callTool));

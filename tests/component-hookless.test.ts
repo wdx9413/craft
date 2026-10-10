@@ -135,16 +135,18 @@ test("Hook observations never mistake command success, old edits or session iden
   try {
     const bridge = new CodexHookBridge(f.service); const sanitizer = new HookSignalSanitizer();
     for (const command of ["npm --version", "npm install", "echo pytest", "npm test; true", "npm test | cat", "npm test\ntrue"]) assert.equal(sanitizer.signal({ tool_name: "Bash", tool_input: { command }, tool_response: { exit_code: 0 } }), null);
-    const base = { cwd: f.root, session_id: "session", turn_id: "turn" };
+    let base = { cwd: f.root, session_id: "session", turn_id: "turn" };
     const event = async (tool: string, command: string, exit_code: number) => bridge.handle("experience", { ...base, hook_event_name: "PostToolUse", tool_name: tool, tool_input: { command }, tool_response: { exit_code } });
     await event("Edit", "", 0); await event("Bash", "npm --version", 0); await event("Bash", "npm test", 1);
     await bridge.handle("experience", { ...base, hook_event_name: "Stop" });
     assert.equal(f.store.list("workflow_evolution_observation", 10)[0]!.outcome, "failed");
     await event("Bash", "npm test", 0);
-    assert.equal(bridge.journal.find(base)!.verification_outcome, "passed");
+    assert.equal(bridge.journal.find(base)!.verification_outcome, "failed");
+    base = { ...base, turn_id: "next-turn" };
     await event("Edit", "", 0);
     assert.equal(bridge.journal.find(base)!.verification_outcome, null);
     await event("Bash", "npm test", 0);
+    assert.equal(bridge.journal.find(base)!.verification_outcome, "passed");
     await bridge.handle("experience", { ...base, hook_event_name: "Stop" });
     assert(f.store.list("evidence", 10).every((record) => record.confidence === "bounded"));
     assert.equal(bridge.journal.find({ cwd: f.root, session_id: "session" }), null);

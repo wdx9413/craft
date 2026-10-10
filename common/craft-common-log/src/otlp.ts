@@ -33,7 +33,7 @@ export function standardizeTrace(input: RecordValue): RecordValue {
     output_refs: Array.isArray(source.output_refs) ? source.output_refs.map(item => text(item, "output_refs")) : [],
     data_digest: source.data_digest ?? digest(clean(source.data ?? {})), raw_content: false,
     occurred_at: source.occurred_at ?? source.created_at ?? source.updated_at ?? null,
-    duration_ms: source.duration_ms ?? null,
+    duration_ms: source.duration_ms ?? null, operation_id: source.operation_id ?? null,
     ...(legacy ? { legacy_schema: "craft.trace.v1" } : {}) };
 }
 
@@ -62,14 +62,25 @@ export function toOtlpTrace(input: RecordValue, events: RecordValue[] = []): Rec
   const traceHex = /^[0-9a-f]{32}$/iu.test(traceId) ? traceId.toLowerCase() : createHash("sha256").update(traceId).digest("hex").slice(0, 32);
   const known = new Map(normalized.map(event => [String(event.span_id), spanHex(traceId, String(event.span_id))]));
   const fallbackMillis = Date.now();
-  const spans = normalized.map(event => {
-    const start = nanos(event.occurred_at ?? trace.occurred_at, fallbackMillis);
+  const groups = new Map<string, RecordValue[]>();
+  for (const event of normalized) {
     const duration = event.duration_ms === null ? 0 : Number(event.duration_ms);
     if (!Number.isFinite(duration) || duration < 0) throw new Error("trace duration_ms must be non-negative");
+    nanos(event.occurred_at ?? trace.occurred_at, fallbackMillis);
+    const id = String(event.span_id), group = groups.get(id) ?? [];
+    group.push(event); groups.set(id, group);
+  }
+  const spans = [...groups.values()].map(group => {
+    const event = group[group.length - 1]!;
+    const start = group.reduce((earliest, item) => {
+      const time = nanos(item.occurred_at ?? trace.occurred_at, fallbackMillis);
+      return time < earliest ? time : earliest;
+    }, nanos(group[0]!.occurred_at ?? trace.occurred_at, fallbackMillis));
+    const duration = Math.max(...group.map(item => Number(item.duration_ms ?? 0)));
     const parent = event.parent_span_id === null ? undefined : String(event.parent_span_id);
     return { traceId: traceHex, spanId: known.get(String(event.span_id))!,
       ...(parent ? { parentSpanId: known.get(parent) ?? (/^[0-9a-f]{16}$/iu.test(parent) ? parent.toLowerCase() : spanHex(traceId, parent)) } : {}),
-      name: String(event.event_kind), kind: String(event.event_kind).startsWith("tool.") ? 3 : String(event.event_kind).startsWith("model.") ? 2 : 1,
+      name: String(event.operation_id ?? event.event_kind), kind: String(event.event_kind).startsWith("tool.") ? 3 : String(event.event_kind).startsWith("model.") ? 2 : 1,
       startTimeUnixNano: String(start), endTimeUnixNano: String(start + BigInt(Math.trunc(duration * 1_000_000))),
       attributes: [
         { key: "craft.schema", value: { stringValue: TRACE_SCHEMA } },

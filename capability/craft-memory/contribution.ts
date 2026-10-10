@@ -1,3 +1,4 @@
+import { observeOperation } from "../../common/craft-common-log/src/index.ts";
 import type { ContextContribution, ContextContributionProvider, ContextRequest } from "../../common/craft-common-base/src/capability-protocol.ts";
 import { ContextBudget, contextAssetMatches, contextAssetRef } from "../../common/craft-common-base/src/context-assets.ts";
 import { canonicalJson, stableDigest } from "../../common/craft-common-base/src/digest.ts";
@@ -18,6 +19,10 @@ export class MemoryContribution implements ContextContributionProvider {
   constructor(store: CraftStore) { this.store = store; }
 
   async contribute(request: ContextRequest): Promise<ContextContribution> {
+    return observeOperation(this.store, "memory", "contribute", request, () => this.readContribution(request));
+  }
+
+  private async readContribution(request: ContextRequest): Promise<ContextContribution> {
     const budget = new ContextBudget(request.max_items, request.max_chars);
     const now = new Date(request.now === undefined ? Date.now() : text(request.now, "now"));
     if (!Number.isFinite(now.valueOf())) throw new Error("now must be an ISO timestamp");

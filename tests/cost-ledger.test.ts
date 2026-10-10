@@ -41,7 +41,7 @@ test("cost ledger rejects missing, coerced and unsafe metrics before writing", a
 test("cost ledger keeps explicit zero and scoped totals distinct from missing metrics", async () => {
   const f = await fixture();
   try {
-    assert.deepEqual(f.costs.report(), { entries: [], total_cost_usd: 0, total_input_tokens: 0, total_output_tokens: 0, truncated: false, unavailable_metrics: [] });
+    assert.deepEqual(f.costs.report(), { entries: [], total_cost_usd: null, total_input_tokens: null, total_output_tokens: null, truncated: false, unavailable_metrics: ["cost_usd", "input_tokens", "output_tokens"] });
     assert.throws(() => f.costs.usageRecord({ provider: "none", model: "none", input_tokens: 0, output_tokens: 0 }), /No provider price/);
     const price = f.costs.priceSave({ provider: "local", model: "fixture", input_per_million: 0, output_per_million: 0 }).price as JsonObject;
     const updated = f.costs.priceSave({ provider: "local", model: "fixture", price_id: price.id, input_per_million: 1, output_per_million: 2, effective_at: "2026-01-01T00:00:00Z" }).price as JsonObject;
@@ -78,7 +78,7 @@ test("cost report marks each invalid historical metric unavailable without chang
     const historical = f.store.create("usage_ledger", "legacy-partial", { project_id: "old", input_tokens: 1, output_tokens: 2 });
     const before = f.store.get("usage_ledger", "legacy-partial");
     assert.equal(f.costs.report({ project_id: "old" }).total_cost_usd, null);
-    assert.equal(f.costs.report({ project_id: "other" }).total_cost_usd, 0);
+    assert.equal(f.costs.report({ project_id: "other" }).total_cost_usd, null);
     assert.deepEqual(f.store.get("usage_ledger", "legacy-partial"), before); assert.equal(before.id, historical.id);
   } finally { t.mock.restoreAll(); await f.close(); }
 });

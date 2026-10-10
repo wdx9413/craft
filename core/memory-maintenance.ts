@@ -120,7 +120,7 @@ export class MemoryMaintenanceKernel {
     const limit = args.limit === undefined ? 50 : Number(args.limit);
     if (!Number.isInteger(cursor) || cursor < 0) throw new Error("cursor must be a non-negative integer");
     if (!Number.isInteger(limit) || limit < 1 || limit > 500) throw new Error("limit must be an integer between 1 and 500");
-    const traces = this.store.list("trace", 10_000, (item) => new Set(["completed", "failed", "cancelled", "blocked"]).has(String(item.status)))
+    const traces = this.store.list("trace", 10_000, (item) => item.telemetry_only !== true && !String(item.id).startsWith("component:") && new Set(["completed", "failed", "cancelled", "blocked"]).has(String(item.status)))
       .sort((left, right) => String(left.id).localeCompare(String(right.id)));
     const batch = traces.slice(cursor, cursor + limit);
     const observations = batch.map((trace) => {

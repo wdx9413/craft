@@ -338,11 +338,12 @@ export class CraftStore {
   }
 
   /** Atomically remove a trace and its versioned records after archival. */
-  removeTraceRecords(traceId: string, eventIds: readonly string[], feedbackIds: readonly string[]): number {
+  removeTraceRecords(traceId: string, eventIds: readonly string[], feedbackIds: readonly string[], telemetryIds: readonly string[] = []): number {
     return this.transaction((database) => {
       let changes = Number(database.prepare("DELETE FROM records WHERE kind='trace' AND id=?").run(traceId).changes);
       for (const id of eventIds) changes += Number(database.prepare("DELETE FROM records WHERE kind='trace_event' AND id=?").run(id).changes);
       for (const id of feedbackIds) changes += Number(database.prepare("DELETE FROM records WHERE kind='trace_feedback' AND id=?").run(id).changes);
+      for (const id of telemetryIds) changes += Number(database.prepare("DELETE FROM records WHERE kind='telemetry_event' AND id=? AND json_extract(payload_json, '$.trace_id')=?").run(id, traceId).changes);
       changes += Number(database.prepare("DELETE FROM events WHERE stream=?").run(`trace:${traceId}`).changes);
       return changes;
     });

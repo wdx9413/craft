@@ -60,16 +60,16 @@ test("runtime artifact resolves seven declared workspace packages without node_m
   const f = await fixture();
   const names = ["craft-common-store-local", "craft-common-base", "craft-common-log", "@craft/capability-knowledge", "@craft/capability-memory", "@craft/capability-experience", "@craft/capability-codebase"];
   try {
-    f.manifest.dependencies = Object.fromEntries(names.map(name => [name, "0.12.40"]));
+    f.manifest.dependencies = Object.fromEntries(names.map(name => [name, "0.12.41"]));
     for (const name of names) {
       const folder = name.startsWith("@craft/") ? join(f.root, "capability", `craft-${name.slice("@craft/capability-".length)}`) : join(f.root, "common", name);
       await mkdir(folder, { recursive: true });
-      await writeFile(join(folder, "package.json"), JSON.stringify({ name, version: "0.12.40" }));
+      await writeFile(join(folder, "package.json"), JSON.stringify({ name, version: "0.12.41" }));
     }
     await f.configure();
     const result = await prepareRuntimeArtifact(f.root);
     for (const name of names) assert.equal(JSON.parse(await readFile(join(result, "node_modules", name, "package.json"), "utf8")).name, name);
-    await writeFile(join(f.root, "common", "craft-common-base", "package.json"), JSON.stringify({ name: "wrong", version: "0.12.40" }));
+    await writeFile(join(f.root, "common", "craft-common-base", "package.json"), JSON.stringify({ name: "wrong", version: "0.12.41" }));
     await assert.rejects(prepareRuntimeArtifact(f.root), /identity conflict/);
     await rm(join(f.root, "common", "craft-common-base", "package.json"));
     await assert.rejects(prepareRuntimeArtifact(f.root), /MODULE_NOT_FOUND|Cannot find module/);

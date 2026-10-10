@@ -61,7 +61,7 @@ export class TraceKernel {
       if (existing.identity_digest !== identityDigest) throw new Error("Trace idempotency conflict");
       return { trace: existing, idempotent: true };
     }
-    return { trace: this.store.create("trace", traceId, { schema: TRACE_SCHEMA_VERSION, schema_revision: TRACE_SCHEMA_REVISION, ...identity, identity_digest: identityDigest, status: "running", next_sequence: 0, event_count: 0, started_at: new Date().toISOString(), metadata_digest: stableDigest(safeData(args.metadata, "metadata")) }), idempotent: false };
+    return { trace: this.store.create("trace", traceId, { schema: TRACE_SCHEMA_VERSION, schema_revision: TRACE_SCHEMA_REVISION, ...identity, ...(args.telemetry_only === true ? { telemetry_only: true } : {}), identity_digest: identityDigest, status: "running", next_sequence: 0, event_count: 0, started_at: new Date().toISOString(), metadata_digest: stableDigest(safeData(args.metadata, "metadata")) }), idempotent: false };
   }
 
   append(args: JsonObject): JsonObject {
@@ -122,7 +122,7 @@ export class TraceKernel {
     if (trace) return { trace, events: this.store.list("trace_event", Number.MAX_SAFE_INTEGER, (item) => item.trace_id === trace.id).sort((a, b) => Number(a.sequence) - Number(b.sequence)), feedback: this.store.list("trace_feedback", Number.MAX_SAFE_INTEGER, (item) => item.trace_id === trace.id) };
     const archive = this.store.find("trace_archive", traceId); if (!archive) throw new Error(`Unknown trace: ${traceId}`);
     const bundle = this.archives.read(this.archivePointer(archive));
-    return { trace: bundle.trace, events: bundle.events, feedback: bundle.feedback, archived: true, archive };
+    return { trace: bundle.trace, events: bundle.events, feedback: bundle.feedback, ...(bundle.telemetry_events ? { telemetry_events: bundle.telemetry_events } : {}), archived: true, archive };
   }
 
   query(args: JsonObject = {}): JsonObject {
@@ -158,6 +158,30 @@ export class TraceKernel {
     return { policy: this.store.create("trace_policy", policyId, { ...identity, identity_digest: stableDigest(identity), policy_revision: 1, archive_before_delete: true, automatic_after_archive: true, deletion_requires_review: false }), idempotent: false };
   }
 
+  /** Bounded on-use maintenance works in short-lived plugin processes without a daemon. */
+  maintain(args: JsonObject = {}): JsonObject {
+    const now = args.now === undefined ? new Date().toISOString() : text(args.now, "now");
+    const nowMs = Date.parse(now);
+    if (!Number.isFinite(nowMs)) throw new Error("now must be an ISO timestamp");
+    return this.store.transaction(() => {
+      const previous = this.store.find("maintenance_component", "trace_retention");
+      const due = previous?.next_retry_at || previous?.next_run_at ? Date.parse(String(previous.next_retry_at ?? previous.next_run_at)) : Date.parse(String(previous?.last_success_at ?? "")) + 3_600_000;
+      if (Number.isFinite(due) && due > nowMs) return { status: "not_due", maintenance: previous };
+      try {
+        const result = this.retentionSweep({ now, limit: 20 });
+        const next = new Date(nowMs + (Number(result.archived) === 20 ? 60_000 : 3_600_000)).toISOString();
+        const maintenance = this.store.save("maintenance_component", "trace_retention", { status: "healthy", last_attempt_at: now,
+          last_success_at: now, next_run_at: next, next_retry_at: null, consecutive_failures: 0, archived: result.archived, trigger: "operation" });
+        return { status: "completed", maintenance, result };
+      } catch (error) {
+        const maintenance = this.store.save("maintenance_component", "trace_retention", { status: "degraded", last_attempt_at: now,
+          last_success_at: previous?.last_success_at ?? null, next_retry_at: new Date(nowMs + 60_000).toISOString(),
+          consecutive_failures: Number(previous?.consecutive_failures ?? 0) + 1, error_code: "TRACE_ARCHIVE_FAILED", trigger: "operation" });
+        return { status: "failed", maintenance };
+      }
+    });
+  }
+
   /** Archive and remove only terminal traces older than the retention window. */
   retentionSweep(args: JsonObject = {}): JsonObject {
     const now = args.now === undefined ? new Date().toISOString() : String(args.now);
@@ -173,10 +197,15 @@ export class TraceKernel {
     const archives: string[] = []; let deleted = 0;
     for (const trace of candidates) {
       const result = this.get({ trace_id: trace.id }); const events = result.events as JsonObject[]; const feedback = result.feedback as JsonObject[];
+      const telemetry = this.store.list("telemetry_event", Number.MAX_SAFE_INTEGER, event => event.trace_id === trace.id);
       const existing = this.store.find("trace_archive", String(trace.id));
-      const archive = existing ? this.archivePointer(existing) : this.archives.write({ trace_id: String(trace.id), trace_version: Number(trace.version), archived_at: now, trace, events, feedback });
+      const archive = existing ? this.archivePointer(existing) : this.archives.write({ trace_id: String(trace.id), trace_version: Number(trace.version), archived_at: now, trace, events, feedback, ...(telemetry.length ? { telemetry_events: telemetry } : {}) });
       if (!existing) this.store.create("trace_archive", String(trace.id), { trace_id: trace.id, trace_version: trace.version, task_id: trace.task_id, status: trace.status, archived_at: now, last_event_at: trace.last_event_at ?? trace.updated_at, event_count: events.length, feedback_count: feedback.length, archive_backend_id: archive.backend_id ?? "local", archive_storage: archive.storage, archive_locator: archive.locator, archive_uri: archive.uri, archive_format: archive.format, content_digest: archive.content_digest, bytes: archive.bytes });
-      this.store.removeTraceRecords(String(trace.id), events.map((event) => String(event.id)), feedback.map((item) => String(item.id)));
+      // Verify durable bytes even when retrying a previously published archive pointer.
+      const archived = this.archives.read(archive);
+      if (archived.trace_id !== trace.id || archived.trace_version !== trace.version) throw new Error("Trace archive does not match terminal record");
+      const telemetryIds = (archived.telemetry_events ?? []).map(event => String(event.id));
+      this.store.removeTraceRecords(String(trace.id), events.map((event) => String(event.id)), feedback.map((item) => String(item.id)), telemetryIds);
       archives.push(archive.uri); deleted += 1;
     }
     return { schema: TRACE_SCHEMA_VERSION, now, policy_id: policy.id, policy_revision: policy.revision, policy_source: policy.source, max_days: maxDays, cutoff: new Date(cutoff).toISOString(), scanned: candidates.length, archived: archives.length, deleted, archives };

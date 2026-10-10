@@ -1,3 +1,4 @@
+import { observedKernel } from "../../common/craft-common-log/src/index.ts";
 /**
  * The Experience capability.
  *
@@ -68,10 +69,10 @@ export const experienceCapability: CraftCapability = {
   register(registry): void {
     const store = registry.require<CraftStore>(CORE_KERNELS.store);
     const providers = registry.require<readonly ModelProviderSpec[]>(CORE_KERNELS.modelProviders);
-    registry.provide(EXPERIENCE_KERNELS.ledger, new ExperienceLedgerKernel(store));
-    registry.provide(EXPERIENCE_KERNELS.workflowEvolution, new WorkflowEvolutionKernel(store));
-    registry.provide(EXPERIENCE_KERNELS.procedures, new ProcedureStore(store));
-    registry.provide(EXPERIENCE_KERNELS.modelProfiles, new EvaluationModelProfileKernel(store, providers));
+    registry.provide(EXPERIENCE_KERNELS.ledger, observedKernel(store, "experience", new ExperienceLedgerKernel(store)));
+    registry.provide(EXPERIENCE_KERNELS.workflowEvolution, observedKernel(store, "experience", new WorkflowEvolutionKernel(store)));
+    registry.provide(EXPERIENCE_KERNELS.procedures, observedKernel(store, "experience", new ProcedureStore(store)));
+    registry.provide(EXPERIENCE_KERNELS.modelProfiles, observedKernel(store, "experience", new EvaluationModelProfileKernel(store, providers)));
   },
   /**
    * Context receives only routeable Procedure projections. This keeps diagnostic learning useful

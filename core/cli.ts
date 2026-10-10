@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { ComponentTraceKernel } from "./component-trace.ts";
+import { TraceKernel } from "./trace-kernel.ts";
 import { createInterface } from "node:readline/promises";
 import { createHash } from "node:crypto";
 import { access, readFile } from "node:fs/promises";
@@ -347,6 +349,14 @@ async function runStandalone(args: string[], paths: ReturnType<typeof craftPaths
 }
 
 export async function main(args = process.argv.slice(2)): Promise<void> {
+  if (args.includes("--help") || args.includes("-h") || ["version", "paths"].includes(args[0] ?? "")) return dispatchMain(args);
+  const store = await new CraftStore(craftPaths()).open();
+  try {
+    await new ComponentTraceKernel(new TraceKernel(store), "cli").run({ requestId: "command", component: "craft-cli", operation: "command", input: { args }, handler: () => dispatchMain(args) });
+  } finally { store.close(); }
+}
+
+async function dispatchMain(args: string[]): Promise<void> {
   const paths = craftPaths();
   if (args.includes("--help") || args.includes("-h")) {
     stdout.write(HELP);

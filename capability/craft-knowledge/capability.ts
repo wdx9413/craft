@@ -1,3 +1,4 @@
+import { observedKernel } from "../../common/craft-common-log/src/index.ts";
 import { KnowledgeClaimGovernance } from "./claim-governance.ts";
 /**
  * The Knowledge capability.
@@ -84,15 +85,15 @@ export const knowledgeCapability: CraftCapability = {
     // The Source registry is this member's, now that it no longer shares a class with the
     // Memory Ledger. Its tools become the capability's to claim rather than the core's to
     // project on its behalf, which is the whole point of cutting the class along the member.
-    registry.provide(KNOWLEDGE_KERNELS.claims, new KnowledgeClaimGovernance(store));
-    registry.provide(KNOWLEDGE_KERNELS.sources, new KnowledgeSourceRegistry(store));
-    registry.provide(KNOWLEDGE_KERNELS.workbench, new KnowledgeWorkbenchKernel(store));
-    registry.provide(KNOWLEDGE_KERNELS.boundLaunch, new KnowledgeBoundLaunchKernel(store));
-    registry.provide(KNOWLEDGE_KERNELS.relations, new KnowledgeRelationKernel(store));
-    registry.provide(KNOWLEDGE_KERNELS.wikiCandidates, new WikiCandidateGovernanceKernel(store));
-    registry.provide(KNOWLEDGE_KERNELS.localImport, new LocalCandidateImportKernel(store));
-    registry.provide(KNOWLEDGE_KERNELS.projectKnowledge, new ProjectKnowledgeKernel(store));
-    registry.provide(KNOWLEDGE_KERNELS.projectBrain, new ProjectBrainKernel(store));
+    registry.provide(KNOWLEDGE_KERNELS.claims, observedKernel(store, "knowledge", new KnowledgeClaimGovernance(store)));
+    registry.provide(KNOWLEDGE_KERNELS.sources, observedKernel(store, "knowledge", new KnowledgeSourceRegistry(store)));
+    registry.provide(KNOWLEDGE_KERNELS.workbench, observedKernel(store, "knowledge", new KnowledgeWorkbenchKernel(store)));
+    registry.provide(KNOWLEDGE_KERNELS.boundLaunch, observedKernel(store, "knowledge", new KnowledgeBoundLaunchKernel(store)));
+    registry.provide(KNOWLEDGE_KERNELS.relations, observedKernel(store, "knowledge", new KnowledgeRelationKernel(store)));
+    registry.provide(KNOWLEDGE_KERNELS.wikiCandidates, observedKernel(store, "knowledge", new WikiCandidateGovernanceKernel(store)));
+    registry.provide(KNOWLEDGE_KERNELS.localImport, observedKernel(store, "knowledge", new LocalCandidateImportKernel(store)));
+    registry.provide(KNOWLEDGE_KERNELS.projectKnowledge, observedKernel(store, "knowledge", new ProjectKnowledgeKernel(store)));
+    registry.provide(KNOWLEDGE_KERNELS.projectBrain, observedKernel(store, "knowledge", new ProjectBrainKernel(store)));
   },
   contributes: (registry) => new KnowledgeContribution(registry.require<CraftStore>(CORE_KERNELS.store)),
 };

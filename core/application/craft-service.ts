@@ -1,3 +1,5 @@
+import { ComponentTraceKernel } from "../component-trace.ts";
+import { observeMethods } from "../../common/craft-common-log/src/index.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { ContextHostEvaluation } from "../context-host-evaluation.ts";
 import { procedureHostControl } from "./procedure-host-control.ts";
@@ -249,6 +251,11 @@ export class CraftService extends ServiceFoundation {
       proposeMemory: (args) => this.memoryCandidatePropose(args),
       recordEvidence: (args) => this.evidenceRecord(args), saveClaim: (args) => this.knowledgeClaimSave(args),
     });
+    const calls = new ComponentTraceKernel(this.trace, "sdk");
+    observeMethods(this, store, name => {
+      const member = /^(knowledge|memory|experience|procedure|workflowEvolution|codebase|context)[A-Z]/u.exec(name)?.[1];
+      return member === "procedure" || member === "workflowEvolution" ? "experience" : member ?? null;
+    }, (component, operation, input, handler) => calls.run({ requestId: randomUUID(), component, operation, input: { args: input }, handler }));
   }
 
   procedureHostControl(args: JsonObject): JsonObject { return procedureHostControl(this, args); }
@@ -492,7 +499,9 @@ export class CraftService extends ServiceFoundation {
     const config = await loadConfig(store.paths);
     const semanticProvider = config?.semanticSearch ? new OpenAiCompatibleEmbeddingProvider(config.semanticSearch.provider) : undefined;
     const declared = hostProfilesFromConfig(config?.hostProfiles);
-    return new CraftService(store, semanticProvider, undefined, undefined, undefined, hostOwnerId, declared);
+    const service = new CraftService(store, semanticProvider, undefined, undefined, undefined, hostOwnerId, declared);
+    try { service.trace.maintain(); } catch { /* Call capture reports telemetry failures without blocking business work. */ }
+    return service;
   }
 
   info(): JsonObject {

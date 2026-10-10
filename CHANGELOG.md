@@ -1,11 +1,18 @@
 # Changelog
 
-> Note on numbering: the declared package version is now **0.12.40**. Earlier
+> Note on numbering: the declared package version is now **0.12.41**. Earlier
 > `v0.12.34`–`v0.12.43` headings name **incremental work on the previous revision**,
 > not releases. Each is a self-contained change set with its own 100%-coverage
 > test script; the version bump happens only when the work is released.
 
-## v0.12.40（本次发布）
+## v0.12.41（本次发布）
+
+- 补齐 Graph 中文子场景召回、未使用原因诊断，以及 Host 规划、绑定、派发与恢复的执行衔接；保留既有发布门槛和验收约束。
+- MCP、SDK、CLI、Hook 共用调用观测，补齐内部父子 span、耗时、安全错误码和回执引用；区分部分成功与完成，修复终态 Trace 复用时漏记事件。
+- 正常调用与服务启动按需执行有界归档，归档包含 telemetry 并在清理前读回验证；诊断展示维护状态，未计量费用保持未知。
+- 同步五个外部插件、公共包和适配器版本；日志不保存完整 Prompt、知识或记忆正文。
+
+## v0.12.40（历史发布）
 
 - 修复全局 Context 召回对 `global:global` scope 的兼容，保持显式范围授权。
 - Experience 增加嵌入式 Host 准备、快照、Session 和 Observation 接口，复用现有 Runtime；不在 Craft 内执行命令或启动子 Host。

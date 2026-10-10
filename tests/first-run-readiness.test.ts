@@ -158,13 +158,13 @@ test("states platform isolation honestly, including that Windows is not enforced
 });
 
 test("desktop downloads stay paused after presentation moves out of core", () => {
-  const plan = distributionPlan({ version: "0.12.40", repository: "wdx9413/craft" });
+  const plan = distributionPlan({ version: "0.12.41", repository: "wdx9413/craft" });
   assert.equal(plan.user_download_available, false);
   assert.equal(plan.channel, "separate_project");
   assert.equal(plan.presentation_status, "paused");
   assert.equal(plan.project, "craft-workbench");
   assert.deepEqual(plan.assets, []);
-  assert.deepEqual(distributionPlan({ version: "0.12.40", repository: "wdx9413/craft", release_assets_available: true }), plan);
+  assert.deepEqual(distributionPlan({ version: "0.12.41", repository: "wdx9413/craft", release_assets_available: true }), plan);
   assert.throws(() => distributionPlan({ repository: "a/b" }), /version must not be empty/u);
 });
 

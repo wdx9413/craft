@@ -1,23 +1,7 @@
-import { createHash } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import type { JsonObject } from "./infrastructure/store.ts";
 import { TraceKernel } from "./trace-kernel.ts";
-import { operationEventId } from "../common/craft-common-log/src/index.ts";
-
-function canonical(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
-  if (value && typeof value === "object") {
-    return `{${Object.entries(value as JsonObject).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`).join(",")}}`;
-  }
-  return JSON.stringify(value);
-}
-
-function digest(value: unknown): string {
-  return `sha256:${createHash("sha256").update(canonical(value)).digest("hex")}`;
-}
-
-function text(value: unknown, fallback: string): string {
-  return typeof value === "string" && value.trim() ? value.trim() : fallback;
-}
+import { currentOperation, observeOperation, operationErrorCode, operationResultStatus } from "../common/craft-common-log/src/index.ts";
 
 export type ComponentTraceResult = {
   ok: boolean;
@@ -27,76 +11,68 @@ export type ComponentTraceResult = {
   telemetry_error?: string;
 };
 
-/**
- * Adds one content-free Trace envelope around a host/component operation.
- * Explicit trace ids join an existing parent run; omitted ids get a short-lived
- * terminal trace so standalone plugin calls remain observable by default.
- */
+/** Content-free capture shared by protocol, Hook and embedded service entrances. */
 export class ComponentTraceKernel {
   readonly trace: TraceKernel;
   readonly sessionId: string;
+  constructor(trace: TraceKernel, sessionId: string) { this.trace = trace; this.sessionId = sessionId; }
 
-  constructor(trace: TraceKernel, sessionId: string) {
-    this.trace = trace;
-    this.sessionId = sessionId;
+  async capture(args: { requestId: string; component: string; operation: string; input: JsonObject; handler: () => JsonObject | Promise<JsonObject> }): Promise<ComponentTraceResult> {
+    let correlation: JsonObject | null = null, telemetryError: unknown;
+    const metadata = () => ({ correlation, ...(telemetryError ? { telemetry_error: telemetryError instanceof Error ? telemetryError.name : "TelemetryError" } : {}) });
+    try {
+      const result = await this.run({ ...args, correlated: value => { correlation = value; }, telemetryFailed: error => { telemetryError = error; } });
+      return { ok: true, result, ...metadata() };
+    } catch (error) { return { ok: false, error, ...metadata() }; }
   }
 
-  async capture(args: {
-    requestId: string;
-    component: string;
-    operation: string;
-    input: JsonObject;
-    handler: () => JsonObject | Promise<JsonObject>;
-  }): Promise<ComponentTraceResult> {
-    const input = args.input;
-    const explicitTraceId = typeof input.trace_id === "string" && input.trace_id.trim()
-      ? input.trace_id.trim()
-      : typeof input.correlation_trace_id === "string" && input.correlation_trace_id.trim()
-        ? input.correlation_trace_id.trim() : null;
-    const traceId = explicitTraceId ?? `component:${this.sessionId}:${args.requestId}`;
-    let telemetryError: unknown;
-    const observe = (write: () => void): void => {
-      try { write(); } catch (error) { telemetryError = error; }
-    };
-    const existing: JsonObject | null = (() => {
-      try { return this.trace.store.find("trace", traceId); }
-      catch (error) { telemetryError = error; return null; }
-    })();
-    const taskId = existing?.task_id ?? text(input.task_id, `mcp:${this.sessionId}`);
-    const correlation = { trace_id: traceId, task_id: taskId, session_id: this.sessionId,
-      request_id: args.requestId, component: args.component, operation: args.operation,
-      auto_finalized: explicitTraceId === null };
-    const terminal = existing && ["completed", "failed", "cancelled", "blocked"].includes(String(existing.status));
-    const eventKey = `${this.sessionId}:${args.requestId}:${args.operation}`;
+  run<T>(args: { requestId: string; component: string; operation: string; input: JsonObject; handler: () => T;
+    correlated?: (value: JsonObject) => void; telemetryFailed?: (error: unknown) => void }): T {
+    const input = args.input, parent = currentOperation(this.trace.store);
+    const supplied = input.trace_id ?? input.correlation_trace_id;
+    const explicit = typeof supplied === "string" && supplied.trim() ? supplied.trim() : null;
+    let traceId = explicit ?? parent?.traceId ?? `component:${this.sessionId}:${randomUUID()}`;
+    const telemetryFailed = args.telemetryFailed ?? parent?.onError;
+    const observe = (write: () => void): void => { try { write(); } catch (error) { telemetryFailed?.(error); } };
+    if (!parent) observe(() => { this.trace.maintain(); });
+    let existing: JsonObject | null = null, archived = false;
+    observe(() => { existing = this.trace.store.find("trace", traceId); archived = this.trace.store.find("trace_archive", traceId) !== null; });
+    const prior = existing as JsonObject | null;
+    const terminal = archived || prior && ["completed", "failed", "cancelled", "blocked"].includes(String(prior.status));
+    const linked = terminal ? traceId : null;
+    if (terminal) { traceId = `component:${this.sessionId}:${randomUUID()}`; existing = null; }
+    const automatic = terminal || explicit === null && !parent;
+    const taskId = prior?.task_id ?? (typeof input.task_id === "string" ? input.task_id : `component:${this.sessionId}`);
+    const correlation: JsonObject = { trace_id: traceId, task_id: taskId, session_id: this.sessionId, request_id: args.requestId,
+      component: args.component, operation: args.operation, auto_finalized: Boolean(automatic), linked_trace_id: linked };
     observe(() => {
-      if (existing && !terminal && !Number.isInteger(Number(existing.next_sequence))) {
-        const eventCount = this.trace.store.list("trace_event", 10_000, (event) => event.trace_id === traceId).length;
-        this.trace.store.save("trace", traceId, { ...existing, next_sequence: eventCount, event_count: eventCount });
+      if (existing && !Number.isInteger(Number(existing.next_sequence))) {
+        const count = this.trace.store.list("trace_event", 10_000, event => event.trace_id === traceId).length;
+        this.trace.store.save("trace", traceId, { ...existing, next_sequence: count, event_count: count });
       }
-      if (!existing) this.trace.start({ trace_id: traceId, task_id: taskId,
-        metadata: { component: args.component, operation: args.operation, session_id: this.sessionId, request_id: args.requestId } });
-      if (!terminal) this.trace.append({ trace_id: traceId, event_id: operationEventId(traceId, eventKey, "started"), event_kind: "component.call.started",
-        actor: "host", source: args.component, trust: "observed", data: { input_digest: digest(input), request_id: args.requestId },
-        summary: `${args.component}.${args.operation} started` });
+      if (!existing) this.trace.start({ trace_id: traceId, task_id: taskId, telemetry_only: true });
     });
+    args.correlated?.(correlation);
+    const completed = (result: unknown): void => {
+      if (automatic) observe(() => this.trace.finalize({ trace_id: traceId, status: "completed", verdict: operationResultStatus(result), summary: "Component handler returned" }));
+    };
+    const failed = (error: unknown): void => {
+      if (automatic) observe(() => this.trace.finalize({ trace_id: traceId, status: "failed", verdict: operationErrorCode(error), summary: "Component handler failed" }));
+    };
     try {
-      const result = await args.handler();
-      if (!terminal) observe(() => {
-        this.trace.append({ trace_id: traceId, event_id: operationEventId(traceId, eventKey, "completed"), event_kind: "component.call.completed",
-          actor: "host", source: args.component, trust: "observed", status: "completed",
-          data: { result_digest: digest(result ?? {}) }, summary: `${args.component}.${args.operation} completed` });
-        if (explicitTraceId === null) this.trace.finalize({ trace_id: traceId, status: "completed", summary: "Component call completed" });
+      const result = observeOperation(this.trace.store, args.component, args.operation, input, args.handler, {
+        traceId, onError: telemetryFailed,
+        observe: ({ event, phase, refs }) => {
+          if (event.operation === args.operation && event.capability_id === args.component && phase === "started") correlation.span_id ??= event.span_id;
+          this.trace.append({ trace_id: traceId, event_id: event.event_id, event_kind: `component.call.${phase}`, actor: "host",
+            source: event.capability_id, trust: "observed", span_id: event.span_id, parent_span_id: event.parent_span_id,
+            operation_id: event.operation, duration_ms: event.attributes.duration_ms, status: event.attributes.status,
+            error_class: phase === "failed" ? event.attributes.reason_code : undefined,
+            input_refs: phase === "started" ? refs : [], output_refs: phase === "completed" ? refs : [], data: event.attributes, summary: `${event.capability_id}.${event.operation} ${phase}` });
+        },
       });
-      return { ok: true, result, correlation, ...(telemetryError ? { telemetry_error: telemetryError instanceof Error ? telemetryError.name : "TelemetryError" } : {}) };
-    } catch (error) {
-      if (!terminal) observe(() => {
-        const errorName = error instanceof Error ? error.name : "NonErrorThrow";
-        this.trace.append({ trace_id: traceId, event_id: operationEventId(traceId, eventKey, "failed"), event_kind: "component.call.failed",
-          actor: "host", source: args.component, trust: "observed", status: "failed",
-          error_class: errorName, data: { error_class: errorName }, summary: `${args.component}.${args.operation} failed` });
-        if (explicitTraceId === null) this.trace.finalize({ trace_id: traceId, status: "failed", summary: "Component call failed" });
-      });
-      return { ok: false, error, correlation, ...(telemetryError ? { telemetry_error: telemetryError instanceof Error ? telemetryError.name : "TelemetryError" } : {}) };
-    }
+      if (result instanceof Promise) return result.then(value => { completed(value); return value; }, error => { failed(error); throw error; }) as T;
+      completed(result); return result;
+    } catch (error) { failed(error); throw error; }
   }
 }

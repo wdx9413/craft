@@ -1,3 +1,5 @@
+import { ComponentTraceKernel } from "../component-trace.ts";
+import { randomUUID as hookRequestId } from "node:crypto";
 import { assertContextReadCurrent } from "../context-access-guard.ts";
 /**
  * Bounded Codex lifecycle integration for Craft Context and its standalone products.
@@ -206,7 +208,16 @@ export class CodexHookBridge {
   }
 
   async handle(member: CodexHookMember, input: HookInput): Promise<JsonObject> {
-    try {
+    const captured = await new ComponentTraceKernel(this.service.trace, "hook").capture({ requestId: hookRequestId(), component: "craft-hook",
+      operation: "handle", input: { member, envelope: input }, handler: () => this.dispatch(member, input) });
+    if (!captured.ok) {
+      this.service.store.appendEvent("codex-hook", "codex_hook.failed", { member, error_type: captured.error instanceof Error ? captured.error.name : "unknown" });
+      return {};
+    }
+    return captured.result ?? {};
+  }
+
+  private async dispatch(member: CodexHookMember, input: HookInput): Promise<JsonObject> {
       const event = text(input.hook_event_name) as HookEvent | null;
       input = this.correlateTurn(input, event);
       if (member === "context") {
@@ -226,11 +237,6 @@ export class CodexHookBridge {
       if (event === "PostToolUse" && member === "experience") return this.tool(input);
       if (event === "Stop") return this.stop(member, input);
       return {};
-    } catch (error) {
-      // Hook failures are deliberately fail-open. The trace contains only the class of error.
-      this.service.store.appendEvent("codex-hook", "codex_hook.failed", { member, event: String(input.hook_event_name), error_type: error instanceof Error ? error.name : "unknown" });
-      return {};
-    }
   }
 
   private correlateTurn(input: HookInput, event: HookEvent | null): HookInput {

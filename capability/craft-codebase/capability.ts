@@ -1,3 +1,4 @@
+import { observedKernel } from "../../common/craft-common-log/src/index.ts";
 import type { CraftCapability } from "../../common/craft-common-base/src/capability-protocol.ts";
 import { CORE_KERNELS } from "../../common/craft-common-base/src/capability-protocol.ts";
 import type { CraftStore } from "../../common/craft-common-store-local/src/store.ts";
@@ -18,6 +19,7 @@ export const codebaseCapability: CraftCapability = {
   evaluation: { input_contract: "declared-workspace-checkpoint", output_contract: "snapshot-pinned-structural-references", fixture_id: "codebase-fixture-v1", host_compatibility: ["fixture", "codex", "claude"] },
   owns: CODEBASE_OWNS,
   register(registry): void {
-    registry.provide(CODEBASE_KERNELS.index, new CodebaseIndexKernel(registry.require<CraftStore>(CORE_KERNELS.store)));
+    const store = registry.require<CraftStore>(CORE_KERNELS.store);
+    registry.provide(CODEBASE_KERNELS.index, observedKernel(store, "codebase", new CodebaseIndexKernel(registry.require<CraftStore>(CORE_KERNELS.store))));
   },
 };

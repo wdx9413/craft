@@ -53,7 +53,7 @@ test("binds sealed evaluation access, recovery evidence, trusted capability vers
       const response = await mcp.handle({ id: name, method: "tools/call", params: { name, arguments: args } });
       assert.equal((response?.result as JsonObject).isError, false, name);
     }
-    assert.equal(VERSION, "0.12.40");
+    assert.equal(VERSION, "0.12.41");
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
