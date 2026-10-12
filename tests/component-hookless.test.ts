@@ -135,7 +135,7 @@ test("Hook observations never mistake command success, old edits or session iden
   try {
     const bridge = new CodexHookBridge(f.service); const sanitizer = new HookSignalSanitizer();
     for (const command of ["npm --version", "npm install", "echo pytest", "npm test; true", "npm test | cat", "npm test\ntrue"]) assert.equal(sanitizer.signal({ tool_name: "Bash", tool_input: { command }, tool_response: { exit_code: 0 } }), null);
-    const base = { cwd: f.root, session_id: "session", turn_id: "turn" };
+    let base = { cwd: f.root, session_id: "session", turn_id: "turn" };
     await bridge.handle("experience", { ...base, hook_event_name: "UserPromptSubmit", prompt: "Fix and verify this change" });
     const event = async (tool: string, command: string, exit_code: number) => bridge.handle("experience", { ...base, hook_event_name: "PostToolUse", tool_name: tool, tool_input: { command }, tool_response: { exit_code } });
     await event("Edit", "", 0); await event("Bash", "npm --version", 0); await event("Bash", "npm test", 1);

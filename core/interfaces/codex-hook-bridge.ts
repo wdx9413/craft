@@ -128,9 +128,10 @@ export class HookTurnJournal {
   bindContextReceipt(input: HookInput, receipt: JsonObject): void {
     const scope = codexProjectScope(input.cwd); const turn = this.turn(input);
     if (!scope || !turn) return;
-    const id = `codex_hook_turn_${digest({ scope, turn }).slice(-20)}`;
-    const existing = this.service.store.find("codex_hook_turn", id);
-    this.service.store.save("codex_hook_turn", id, { ...(existing ?? {}), scope, session_id: text(input.session_id) ?? "unknown", turn_id: turn, context_receipt_id: receipt.id, content_free: true });
+    const existing = this.find(input);
+    const id = existing ? String(existing.id) : this.journalId(scope, turn, input);
+    const prior = existing ?? this.service.store.find("codex_hook_turn", id);
+    this.service.store.save("codex_hook_turn", id, { ...(prior ?? { scope, session_id: text(input.session_id) ?? "unknown", turn_id: turn, signals: [], has_edit: false, verification_outcome: null, content_stored: false }), context_receipt_id: receipt.id, content_free: true });
   }
 
   find(input: HookInput): JsonObject | null {
@@ -159,13 +160,7 @@ export class HookTurnJournal {
   }
 
   private turn(input: HookInput): string | null {
-    const explicit = text(input.turn_id);
-    if (explicit) return explicit;
-    const scope = codexProjectScope(input.cwd), sessionId = text(input.session_id);
-    if (!scope || !sessionId) return null;
-    const sessionKey = `context_hook_session_${stableDigest({ scope, session_id: sessionId }).slice(-24)}`;
-    const saved = this.service.store.find("context_hook_session", sessionKey);
-    return typeof saved?.last_turn_id === "string" ? saved.last_turn_id : null;
+    return text(input.turn_id);
   }
 }
 
@@ -184,7 +179,7 @@ export class HookLearningCoordinator {
     if (suppliedScenario && journal.scenario_key && journal.scenario_key !== suppliedScenario) throw new Error("scenario_key conflicts with the turn's recorded scenario");
     if (suppliedScenario && !journal.scenario_key) this.service.store.save("codex_hook_turn", String(journal.id), { ...payload(journal), scenario_key: suppliedScenario });
     const scenario = suppliedScenario ?? text(journal.scenario_key);
-    return this.service.learningCycleFinalize({ host: hookHost(input), task_id: String(journal.turn_id), turn_id: String(journal.turn_id), context_receipt_id: journal.context_receipt_id,
+    return this.service.learningCycleFinalize({ host: hookHost(input), task_id: String(journal.id), turn_id: String(journal.turn_id), context_receipt_id: journal.context_receipt_id,
       verified: true, verification_outcome: journal.verification_outcome, verification_ref: stableDigest(journal.verification_receipts), ...(scenario ? { scenario_key: scenario } : {}) });
   }
 }

@@ -71,18 +71,8 @@ export class ComponentTraceKernel {
             input_refs: phase === "started" ? refs : [], output_refs: phase === "completed" ? refs : [], data: event.attributes, summary: `${event.capability_id}.${event.operation} ${phase}` });
         },
       });
-      return { ok: true, result, correlation, ...(telemetryError ? { telemetry_error: telemetryError instanceof Error ? telemetryError.name : "TelemetryError" } : {}) };
-    } catch (error) {
-      if (!terminal) observe(() => {
-        const errorName = error instanceof Error ? error.name : "NonErrorThrow";
-        const safeError = error && typeof error === "object" ? error as { code?: unknown; stage?: unknown; safeDetails?: unknown } : {};
-        this.trace.append({ trace_id: traceId, event_id: operationEventId(traceId, eventKey, "failed"), event_kind: "component.call.failed",
-          actor: "host", source: args.component, trust: "observed", status: "failed",
-          error_class: errorName, data: { error_class: errorName, error_code: typeof safeError.code === "string" ? safeError.code : null,
-            stage: typeof safeError.stage === "string" ? safeError.stage : "dispatch", details: safeError.safeDetails && typeof safeError.safeDetails === "object" ? safeError.safeDetails : {} }, summary: `${args.component}.${args.operation} failed` });
-        if (explicitTraceId === null) this.trace.finalize({ trace_id: traceId, status: "failed", summary: "Component call failed" });
-      });
-      return { ok: false, error, correlation, ...(telemetryError ? { telemetry_error: telemetryError instanceof Error ? telemetryError.name : "TelemetryError" } : {}) };
-    }
+      if (result instanceof Promise) return result.then(value => { completed(value); return value; }, error => { failed(error); throw error; }) as T;
+      completed(result); return result;
+    } catch (error) { failed(error); throw error; }
   }
 }

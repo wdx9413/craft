@@ -44,7 +44,8 @@ test("overlapping Hook turns refuse missing IDs even after one explicitly closes
     await bridge.handle("context", { ...base, hook_event_name: "PostToolUse", tool_name: "Edit" });
     await bridge.handle("context", { ...base, turn_id: "one", hook_event_name: "Stop" });
     await bridge.handle("context", { ...base, hook_event_name: "PostToolUse", tool_name: "Edit" });
-    assert(f.store.list("codex_hook_turn", 10).every(turn => turn.closed_at && (turn.signals as JsonObject[]).length === 0));
+    assert(f.store.list("codex_hook_turn", 10).every(turn => (turn.signals as JsonObject[]).length === 0));
+    assert(f.store.list("codex_hook_turn", 10).some(turn => turn.turn_id === "one" && turn.closed_at));
     await bridge.handle("context", { ...base, turn_id: "two", hook_event_name: "PostToolUse", tool_name: "Edit" });
     assert(f.store.list("codex_hook_turn", 10).some(turn => turn.turn_id === "two" && !turn.closed_at));
     await bridge.handle("context", { ...base, turn_id: "two", hook_event_name: "Stop" });
@@ -319,7 +320,7 @@ test("Hook journal covers missing identity, updates signals, and learning record
     bridge.journal.bindContextReceipt({ cwd, turn_id: "orphan-without-session" }, { id: "orphan-receipt" });
     for (const turn of ["failed-one", "failed-two"]) {
       await bridge.handle("experience", { hook_event_name: "UserPromptSubmit", cwd, session_id: turn, turn_id: turn, prompt: "Fix and verify" });
-      assert.equal(typeof bridge.journal.find({ cwd, turn_id: turn })?.context_receipt_id, "string");
+      assert.equal(typeof bridge.journal.find({ cwd, session_id: turn, turn_id: turn })?.context_receipt_id, "string");
       await bridge.handle("experience", { hook_event_name: "PostToolUse", cwd, session_id: turn, turn_id: turn, tool_name: "Edit" });
       await bridge.handle("experience", { hook_event_name: "PostToolUse", cwd, session_id: turn, turn_id: turn, tool_name: "Bash", tool_input: { command: "npm test" }, tool_response: { status: "failed" } });
       await bridge.handle("experience", { hook_event_name: "Stop", cwd, session_id: turn, turn_id: turn, scenario_key: "coding.feature-implementation" });
@@ -360,6 +361,9 @@ test("Hook mints a fresh turn when the Host omits its native turn identifier", a
     const bridge = new CodexHookBridge(f.service); const cwd = "/project/craft";
     await bridge.handle("experience", { hook_event_name: "UserPromptSubmit", cwd, session_id: "native-less", prompt: "Review this change" });
     const firstTurn = String(f.store.list("context_hook_session", 10)[0]!.last_turn_id);
+    await bridge.handle("experience", { hook_event_name: "PostToolUse", cwd, session_id: "native-less", tool_name: "Edit" });
+    await bridge.handle("experience", { hook_event_name: "PostToolUse", cwd, session_id: "native-less", tool_name: "Bash", tool_input: { command: "npm test" }, tool_response: { exit_code: 0 } });
+    await bridge.handle("experience", { hook_event_name: "Stop", cwd, session_id: "native-less" });
     await bridge.handle("experience", { hook_event_name: "UserPromptSubmit", cwd, session_id: "native-less", prompt: "Review the next change" });
     const secondTurn = String(f.store.list("context_hook_session", 10)[0]!.last_turn_id);
     assert.match(firstTurn, /^hook_turn_/u); assert.match(secondTurn, /^hook_turn_/u); assert.notEqual(firstTurn, secondTurn);
@@ -367,7 +371,7 @@ test("Hook mints a fresh turn when the Host omits its native turn identifier", a
     await bridge.handle("experience", { hook_event_name: "PostToolUse", cwd, session_id: "native-less", tool_name: "Edit" });
     await bridge.handle("experience", { hook_event_name: "PostToolUse", cwd, session_id: "native-less", tool_name: "Bash", tool_input: { command: "npm test" }, tool_response: { exit_code: 0 } });
     await bridge.handle("experience", { hook_event_name: "Stop", cwd, session_id: "native-less" });
-    assert.equal(f.store.list("workflow_evolution_observation", 10).length, 1);
+    assert.equal(f.store.list("workflow_evolution_observation", 10).length, 2);
   } finally { await dispose(f); }
 });
 
@@ -393,6 +397,7 @@ test("explicit stopped turns reject late signals and repeated learning, includin
   const f = await fixture();
   try {
     const bridge = new CodexHookBridge(f.service), base = { cwd: f.root, session_id: "closed", turn_id: "explicit" };
+    await bridge.handle("context", { ...base, hook_event_name: "UserPromptSubmit", prompt: "Fix and verify this change" });
     await bridge.handle("context", { ...base, hook_event_name: "PostToolUse", tool_name: "Edit" });
     await bridge.handle("context", { ...base, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "npm test" }, tool_response: { exit_code: 0 } });
     await bridge.handle("context", { ...base, hook_event_name: "Stop" });
@@ -416,9 +421,10 @@ test("reused native turn IDs remain distinct across sessions and legacy journals
     const bridge = new CodexHookBridge(f.service), base = { cwd: f.root, turn_id: "turn-1" };
     for (const session_id of ["session-a", "session-b"]) {
       const input = { ...base, session_id };
+      await bridge.handle("experience", { ...input, hook_event_name: "UserPromptSubmit", prompt: "Fix and verify this change" });
       await bridge.handle("experience", { ...input, hook_event_name: "PostToolUse", tool_use_id: "same-edit-id", tool_name: "Edit" });
       await bridge.handle("experience", { ...input, hook_event_name: "PostToolUse", tool_use_id: "same-check-id", tool_name: "Bash", tool_input: { command: "npm test" }, tool_response: { exit_code: 0 } });
-      await bridge.handle("experience", { ...input, hook_event_name: "Stop" });
+      await bridge.handle("experience", { ...input, hook_event_name: "Stop", scenario_key: "coding.feature-implementation" });
     }
     const journals = f.store.list("codex_hook_turn", 10);
     assert.equal(journals.length, 2);
