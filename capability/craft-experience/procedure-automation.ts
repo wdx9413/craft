@@ -251,7 +251,7 @@ export class ProcedureAutomationKernel {
 
   private routeableWorkflow(procedureId: unknown, version?: number): JsonObject {
     const procedure = activeProcedure(this.store, text(procedureId, "procedure_id"));
-    if (!procedure || version !== undefined && procedure.version !== version) throw new Error("Procedure release unavailable or version drifted");
+    if (!procedure || version !== undefined && procedure.version !== version) throw new Error("Procedure release unavailable, version drifted, or is not routeable");
     if (procedure.lifecycle !== "routeable" || procedure.routeable !== true) throw new Error("Only routeable Procedure can be automated");
     if (procedure.procedure_kind !== "workflow") throw new Error("Procedure Automation supports only workflow Procedures; Graph and Prompt require a Host Adapter");
     return procedure;

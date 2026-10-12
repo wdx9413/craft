@@ -14,7 +14,7 @@ export type ParamType = "boolean" | "integer" | "number" | "object" | "array" | 
  * the one genuinely ambiguous name (`requirements` is an object for sandbox planning
  * and an array for signoff policies).
  */
-const BOOLEAN_PARAMS = ["scan", "enabled", "allow_execution", "allow_external_write", "require_held_out", "require_outcome_passed", "retryable", "requires_external_effect", "supports_pause_resume", "supports_evidence_receipts", "generated_code", "requires_credential", "has_compensation", "approved", "start_trial", "untrusted_input", "confirmed_original_runner_stopped", "sanitized", "active", "acceptance_required", "trusted", "unattended", "reobserve_required", "compensation_or_handoff", "require_governance", "accepted", "stale", "crash_recovery", "reobserved", "delivered", "allowed", "allow_restricted", "privacy_reviewed", "complete", "content_stored", "candidate_change", "requires_real_host"];
+const BOOLEAN_PARAMS = ["scan", "enabled", "allow_execution", "allow_external_write", "require_held_out", "require_outcome_passed", "retryable", "requires_external_effect", "supports_pause_resume", "supports_evidence_receipts", "generated_code", "requires_credential", "has_compensation", "approved", "start_trial", "untrusted_input", "confirmed_original_runner_stopped", "sanitized", "active", "acceptance_required", "trusted", "unattended", "reobserve_required", "compensation_or_handoff", "require_governance", "accepted", "stale", "crash_recovery", "reobserved", "delivered", "allowed", "allow_restricted", "privacy_reviewed", "complete", "content_stored", "candidate_change", "requires_real_host", "verified"];
 const INTEGER_PARAMS = ["limit", "max_days", "version", "capacity", "max_concurrency", "size_bytes", "subject_version", "expected_version", "max_candidates",
   "suite_version", "configuration_version", "harness_configuration_version", "target_version", "profile_version",
   "grader_version", "policy_version", "signoff_policy_version", "lease_ttl_seconds", "ttl_seconds", "trials_per_case", "window_size", "max_attempts", "min_trials", "harness_version", "ir_version", "runtime_adapter_version", "agreed", "total", "expected_state_revision", "expected_revision", "observed_revision", "max_chars", "max_items", "timeout_ms", "output_limit", "max_turns", "after_sequence", "context_profile_version", "activation_profile_version", "budget_account_version", "contract_version", "conformance_version", "max_latency_ms", "dormant_after_days"];
@@ -127,6 +127,9 @@ const TYPES_BY_TOOL: Readonly<Record<string, Readonly<Record<string, ParamType>>
   craft_procedure_gate: { passed: "boolean" },
   craft_procedure_list: { scope: "string" },
   craft_experience_procedure_gate: { passed: "boolean" },
+  craft_experience_learning_evaluation_dispatch: {},
+  craft_experience_learning_evaluation_result: { evidence_ids: "array" },
+  craft_experience_learning_request_get: {},
   craft_experience_procedure_projection_list: { scope: "string" },
   craft_experience_procedure_projection_draft: { scenario_signature: "object", preconditions: "array" },
   craft_codebase_analysis_import: { analysis: "object" },

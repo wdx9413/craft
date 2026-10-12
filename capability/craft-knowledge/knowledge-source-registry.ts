@@ -216,7 +216,19 @@ export class KnowledgeSourceRegistry {
           const evidence = this.store.find("evidence", evidenceId) ?? this.store.create("evidence", evidenceId, { source_type: "knowledge_fragment", source_id: source.id, source_revision_id: fragment.source_revision_id, fragment_id: fragment.id, locator: fragment.locator, claim: "Source fragment retained for review.", confidence: source.trust === "verified" ? "bounded" : "unverified", content_digest: fragment.content_digest, observed_at: new Date().toISOString() });
           const claimId = `knowledge_claim_from_${fragmentId}`;
           const identity = { source_id: source.id, source_revision_id: fragment.source_revision_id, document_id: doc.id, document_digest: doc.digest, fragment_id: fragment.id, scope: `${(source.scope as JsonObject).kind}:${(source.scope as JsonObject).id}`, scope_envelope: source.scope_envelope, kind: "fact", content_digest: fragment.content_digest, evidence_ids: [evidence.id], valid_until: null };
-          const claim = this.store.find("knowledge_claim", claimId) ?? this.store.create("knowledge_claim", claimId, { ...identity, content_ref: fragment.content_ref, identity_digest: stableDigest(identity), status: "candidate", review: null, ingest_generated: true, publication_allowed: false });
+          // Exact current text in the same scope can share a candidate across
+          // independently registered Sources. Legacy/revalidation rows are never
+          // reused by this path, so stale Claims need live source reconstruction.
+          const shared = this.store.list("knowledge_claim", 100_000, item => item.status === "candidate" && item.content_digest === fragment.content_digest && item.scope === identity.scope && item.source_id !== source.id)[0];
+          let claim = this.store.find("knowledge_claim", claimId) ?? (shared
+            ? this.store.save("knowledge_claim", String(shared.id), { ...payload(shared), evidence_ids: [...new Set([...(Array.isArray(shared.evidence_ids) ? shared.evidence_ids as unknown[] : []).map(String), String(evidence.id)])].sort() })
+            : this.store.create("knowledge_claim", claimId, { ...identity, content_ref: fragment.content_ref, identity_digest: stableDigest(identity), status: "candidate", review: null, ingest_generated: true, publication_allowed: false }));
+          if (source.trust === "verified" && ["bounded", "confirmed"].includes(String(evidence.confidence))) {
+            const observationKey = `knowledge-source:${String(source.id)}:${String(doc.digest)}`;
+            const supportIdentity = { claim_id: claim.id, claim_version: claim.version, evidence_id: evidence.id, observation_key: observationKey, scope: identity.scope };
+            const supportId = `knowledge_support_${stableDigest(supportIdentity).slice(-24)}`;
+            if (!this.store.find("knowledge_claim_support", supportId)) this.store.create("knowledge_claim_support", supportId, { ...supportIdentity, identity_digest: stableDigest(supportIdentity), recorded_at: new Date().toISOString(), source_type: evidence.source_type, confidence: evidence.confidence });
+          }
           const candidateId = `knowledge_ingest_candidate_${fragmentId}`;
           const candidate = this.store.find("knowledge_ingest_candidate", candidateId) ?? this.store.create("knowledge_ingest_candidate", candidateId, { source_id: source.id, source_revision_id: fragment.source_revision_id, fragment_id: fragment.id, claim_id: claim.id, evidence_id: evidence.id, scope: identity.scope, status: "candidate", structural_review: "pending", semantic_review: "pending", publication_allowed: false });
           fragments.push(fragment); candidates.push(candidate);

@@ -1,0 +1,47 @@
+{
+  "schema": "craft.experience-learning-adapter.v1",
+  "mcp": {
+    "transport": "stdio",
+    "command": "craft-mcp",
+    "args": ["--surface", "component-experience-daily"],
+    "poll_interval_seconds": 30
+  },
+  "distillation": {
+    "input_tool": "craft_experience_learning_request_get",
+    "submit_tool": "craft_experience_procedure_submit",
+    "model_purpose": "workflow_evolution",
+    "required_observations": 2,
+    "store_raw_observations": false,
+    "must_preserve_observed_failure_branches": true
+  },
+  "evaluation": {
+    "dispatch_tool": "craft_experience_learning_evaluation_dispatch",
+    "result_tool": "craft_experience_learning_evaluation_result",
+    "stages": ["shadow", "held_out", "signoff", "canary"],
+    "held_out_set_ref": "REPLACE_WITH_INDEPENDENT_CASE_SET_REF",
+    "signoff_ref": "REPLACE_WITH_REVIEWER_IDENTITY_OR_APPROVAL_REF",
+    "evidence_source_type": "program",
+    "evidence_confidence": "confirmed",
+    "evidence_metadata_required": [
+      "experience_evaluation_dispatch_id",
+      "procedure_id",
+      "procedure_version",
+      "definition_digest",
+      "baseline_version",
+      "stage",
+      "status",
+      "evaluator_ref",
+      "environment_digest"
+    ],
+    "held_out_additional_metadata_required": ["held_out_set_ref", "independent_of_training"],
+    "signoff_additional_metadata_required": ["signoff_ref"]
+  },
+  "safety": {
+    "secrets_from_environment_only": true,
+    "raw_prompts_or_repository_content_persisted": false,
+    "publish_only_after_canary": true,
+    "candidate_failure_preserves_previous_current": true,
+    "automatic_skill_install": false,
+    "automatic_remote_push": false
+  }
+}

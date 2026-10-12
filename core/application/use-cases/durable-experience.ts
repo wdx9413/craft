@@ -1,4 +1,5 @@
 import type { CraftService } from "../craft-service.ts";
+import { ExperienceLearningEvaluation } from "../../../capability/craft-experience/learning-evaluation.ts";
 
 /** Narrow public delegates for durable long-task progress and diagnostic learning. */
 export function installDurableExperienceMethods(serviceClass: typeof CraftService): void {
@@ -17,6 +18,10 @@ export function installDurableExperienceMethods(serviceClass: typeof CraftServic
   serviceClass.prototype.experienceLedgerGet = function (args) { return this.experienceLedger.get(args); };
   serviceClass.prototype.experienceProcedureDraft = function (args) { return this.experienceProcedures.draft(args); };
   serviceClass.prototype.experienceProcedureGate = function (args) { return this.experienceProcedures.gate(args); };
+  serviceClass.prototype.experienceLearningEvaluationDispatch = function (args) { return new ExperienceLearningEvaluation(this.store).dispatch(args); };
+  serviceClass.prototype.experienceLearningEvaluationResult = function (args) {
+    return new ExperienceLearningEvaluation(this.store).result(args, (gateArgs) => this.experienceProcedures.gate(gateArgs));
+  };
   serviceClass.prototype.procedureInvocationBind = function (args) { return this.procedureInvocations.bind(args); };
   serviceClass.prototype.procedureInvocationDispatch = function (args) { return this.procedureInvocations.dispatch(args); };
   serviceClass.prototype.procedureInvocationReport = function (args) { return this.procedureInvocations.report(args); };

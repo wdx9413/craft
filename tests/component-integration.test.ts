@@ -69,6 +69,7 @@ test("ingests immutable source revisions as Evidence and candidates, never revie
     const ingested = f.service.knowledgeSourceIngest({ source_id: source.id, root: sourceRoot, max_files: 5, max_chars_per_fragment: 200 });
     assert.equal((ingested.fragments as JsonObject[]).length, 1);
     assert.equal((ingested.candidates as JsonObject[])[0]?.status, "candidate");
+    assert.equal(((ingested.automatic_review as JsonObject).summary as JsonObject).revalidation_required, 1);
     assert.equal(f.store.list("knowledge_claim", 10).length, 1);
     assert.equal(f.store.list("knowledge_claim", 10)[0]?.status, "candidate");
     await writeFile(join(sourceRoot, "README.md"), "# Rule\nRun full verification before delivery.\n", "utf8");
@@ -104,6 +105,23 @@ test("ingests only bounded readable files and makes stale reviewed claims explic
     const emptyPath = join(sourceRoot, "empty.md"); await writeFile(emptyPath, "\n\n", "utf8");
     const emptySource = f.service.knowledgeSourceRegister({ source_id: "empty-file", kind: "readme", label: "empty", scope_kind: "project", scope_id: "p", locator: emptyPath, content_digest: "empty", trust: "bounded", access: "read_only" }).source as JsonObject;
     assert.deepEqual(f.service.knowledgeSourceIngest({ source_id: emptySource.id, max_chars_per_fragment: 100 }).fragments, []);
+  } finally { await dispose(f); }
+});
+
+test("automatic Knowledge review promotes only exact support from two active trusted Sources", async () => {
+  const f = await fixture();
+  try {
+    const roots = [join(f.root, "source-a"), join(f.root, "source-b")];
+    for (const root of roots) { await mkdir(root); await writeFile(join(root, "rule.md"), "Run focused verification before delivery.", "utf8"); }
+    const sources = roots.map((root, index) => f.service.knowledgeSourceRegister({ source_id: `trusted-${index}`, kind: "readme", label: `trusted-${index}`, scope_kind: "project", scope_id: "shared", locator: root, content_digest: "registered", trust: "verified", access: "read_only" }).source as JsonObject);
+    const first = f.service.knowledgeSourceIngest({ source_id: sources[0]!.id, max_chars_per_fragment: 200 });
+    const claimId = String((first.candidates as JsonObject[])[0]!.claim_id);
+    assert.equal(f.store.get("knowledge_claim", claimId).status, "candidate");
+    f.service.knowledgeSourceIngest({ source_id: sources[1]!.id, max_chars_per_fragment: 200 });
+    assert.equal(f.store.get("knowledge_claim", claimId).status, "reviewed");
+    assert.equal(f.store.list("knowledge_claim_support", 10_000, item => item.claim_id === claimId).length, 2);
+    const stale = f.store.list("knowledge_claim", 10_000).filter(item => item.status === "revalidation_required");
+    assert.equal(stale.length, 0);
   } finally { await dispose(f); }
 });
 

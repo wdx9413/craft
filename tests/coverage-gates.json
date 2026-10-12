@@ -700,6 +700,16 @@
       "branches": true
     },
     {
+      "name": "host-learning-cycle",
+      "include": [
+        "core/application/use-cases/learning-cycle.ts"
+      ],
+      "tests": [
+        "tests/codex-hook-bridge.test.ts"
+      ],
+      "branches": true
+    },
+    {
       "name": "trust-web-runtime",
       "include": [
         "core/trust-profile.ts",
@@ -1371,6 +1381,7 @@
         "capability/craft-codebase/repository-files.ts",
         "capability/craft-codebase/basic-analysis.ts",
         "core/application/use-cases/repository-context.ts",
+        "core/operation-error.ts",
         "adapters/deepseek-harness/mcp-client.ts",
         "adapters/deepseek-harness/adapter-tools.ts",
         "adapters/deepseek-harness/index.ts"
@@ -1414,6 +1425,16 @@
         "tests/universal-runtime.test.ts",
         "tests/context-remediation.test.ts",
         "tests/context-optimization.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "experience-learning-evaluation",
+      "include": [
+        "capability/craft-experience/learning-evaluation.ts"
+      ],
+      "tests": [
+        "tests/experience-learning-automation.test.ts"
       ],
       "branches": true
     }

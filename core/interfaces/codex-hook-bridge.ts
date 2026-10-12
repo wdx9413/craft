@@ -23,6 +23,7 @@ type HookInput = JsonObject & {
   cwd?: string;
   session_id?: string;
   turn_id?: string;
+  scenario_key?: string;
   source?: string;
   reason?: string;
   stop_hook_active?: boolean;
@@ -119,12 +120,28 @@ export class HookTurnJournal {
       : this.service.store.create("codex_hook_turn", journalId, next);
   }
 
+  bindContextReceipt(input: HookInput, receipt: JsonObject): void {
+    const scope = codexProjectScope(input.cwd); const turn = this.turn(input);
+    if (!scope || !turn) return;
+    const id = `codex_hook_turn_${digest({ scope, turn }).slice(-20)}`;
+    const existing = this.service.store.find("codex_hook_turn", id);
+    this.service.store.save("codex_hook_turn", id, { ...(existing ?? {}), scope, session_id: text(input.session_id) ?? "unknown", turn_id: turn, context_receipt_id: receipt.id, content_free: true });
+  }
+
   find(input: HookInput): JsonObject | null {
     const scope = codexProjectScope(input.cwd); const turn = this.turn(input);
     return !scope || !turn ? null : this.service.store.find("codex_hook_turn", `codex_hook_turn_${digest({ scope, turn }).slice(-20)}`);
   }
 
-  private turn(input: HookInput): string | null { return text(input.turn_id); }
+  private turn(input: HookInput): string | null {
+    const explicit = text(input.turn_id);
+    if (explicit) return explicit;
+    const scope = codexProjectScope(input.cwd), sessionId = text(input.session_id);
+    if (!scope || !sessionId) return null;
+    const sessionKey = `context_hook_session_${stableDigest({ scope, session_id: sessionId }).slice(-24)}`;
+    const saved = this.service.store.find("context_hook_session", sessionKey);
+    return typeof saved?.last_turn_id === "string" ? saved.last_turn_id : null;
+  }
 }
 
 /** Converts a verified local coding turn into only a proposal request. */
@@ -136,37 +153,14 @@ export class HookLearningCoordinator {
   finalize(input: HookInput): JsonObject | null {
     const journal = this.journal.find(input);
     if (!journal || journal.has_edit !== true || !["passed", "failed"].includes(String(journal.verification_outcome))) return null;
-    const turn = String(journal.turn_id); const outcome = String(journal.verification_outcome) as "passed" | "failed";
-    const identity = { scope: journal.scope, turn, outcome, signals: journal.signals };
-    const sourceDigest = stableDigest(identity);
-    const evidenceId = `evidence_codex_hook_${sourceDigest.slice(-20)}`;
-    const evidence = this.service.store.find("evidence", evidenceId) ?? this.service.evidenceRecord({ evidence_id: evidenceId,
-      source_type: "codex_hook", confidence: "bounded",
-      claim: `Codex local verification ${outcome}.`, locator: `codex-hook:${sourceDigest}`, metadata: { provenance: "host_hook_observation", independently_verified: false, edit_revision: journal.edit_revision, verification_receipts: journal.verification_receipts, content_stored: false, signal_count: (journal.signals as unknown[]).length } });
-    const scenarioSignature = {
-      schema: "craft.scenario-signature.v1",
-      project: journal.scope,
-      target_class: "local_workspace_change",
-      effect_class: "workspace_write",
-      verifier: "local_verification",
-      failure_signature: outcome === "failed" ? stableDigest((journal.verification_receipts as JsonObject[]).map(({ verifier, outcome }) => ({ verifier, outcome }))) : null,
-      host_revision: "codex-hook-v1",
-      capability_revision: `craft-experience@${CRAFT_RELEASE_VERSION}`,
-    };
-    const scenarioKey = `scenario:${stableDigest(scenarioSignature).slice(-24)}`;
-    const observation = this.service.workflowEvolutionObserve({ observation_id: `workflow_evolution_observation_${sourceDigest.slice(-20)}`,
-      scenario_key: scenarioKey, source_kind: "codex_hook_turn", source_id: turn, source_digest: sourceDigest, outcome,
-      scope: `${String((journal.scope as JsonObject).kind)}:${String((journal.scope as JsonObject).id)}`,
-      scenario_signature: scenarioSignature, evidence_ids: [evidence.id], sanitized: true, content_stored: false });
-    const observations = this.service.workflowEvolutionObservations({ scenario_key: scenarioKey, limit: 100 }).observations as JsonObject[];
-    const distinct = observations.filter((item) => String((item.source as JsonObject).id) !== turn).slice(0, 1);
-    if (!distinct.length) return { evidence, observation: observation.observation, request: null, next_action: "await_an_independent_verified_turn" };
-    const reference = distinct[0]!;
-    const request = this.service.workflowEvolutionPropose({ scenario_key: scenarioKey,
-      observation_ids: [String(reference.id), String((observation.observation as JsonObject).id)],
-      hypothesis: outcome === "failed" ? "At the failed terminal verification decision point, preserve the failure receipt and require bounded recovery before retry." : "Keep a terminal verification step before declaring a local coding task complete.",
-      design_axes: ["orchestration"], procedure_kind: "workflow", output_contract_ref: "acceptance:terminal-verification" });
-    return { evidence, observation: observation.observation, request: request.request, next_action: "candidate_request_only_requires_independent_distillation_and_quality_gates" };
+    if (typeof journal.context_receipt_id !== "string") return null;
+    const suppliedScenario = text(input.scenario_key);
+    if (suppliedScenario && !/^[a-z0-9][a-z0-9._/-]{0,95}$/u.test(suppliedScenario)) throw new Error("scenario_key must be a bounded stable identifier");
+    if (suppliedScenario && journal.scenario_key && journal.scenario_key !== suppliedScenario) throw new Error("scenario_key conflicts with the turn's recorded scenario");
+    if (suppliedScenario && !journal.scenario_key) this.service.store.save("codex_hook_turn", String(journal.id), { ...payload(journal), scenario_key: suppliedScenario });
+    const scenario = suppliedScenario ?? text(journal.scenario_key);
+    return this.service.learningCycleFinalize({ host: hookHost(input), task_id: String(journal.turn_id), turn_id: String(journal.turn_id), context_receipt_id: journal.context_receipt_id,
+      verified: true, verification_outcome: journal.verification_outcome, verification_ref: stableDigest(journal.verification_receipts), ...(scenario ? { scenario_key: scenario } : {}) });
   }
 }
 
@@ -246,6 +240,7 @@ export class CodexHookBridge {
     const selected = [...items.map((item) => ({ type: "memory", id: item.memory_id, version: item.memory_version, content: item.content })),
       ...contributions.flatMap((contribution) => Array.isArray(contribution.items) ? contribution.items : [])];
     const receipt = resolved.receipt as JsonObject | null;
+    if (receipt) this.journal.bindContextReceipt(input, receipt);
     return this.service.store.transaction(() => {
       assertContextReadCurrent(this.service.store, receipt);
       for (const component of members) this.service.activationProofRecord({ host: hookHost(input), component, event: "UserPromptSubmit", session_id: text(input.session_id) ?? "unknown",

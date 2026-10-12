@@ -8,6 +8,7 @@ test("all neutral action bindings use the supplied application and preserve call
   const calls: Array<{ method: string; args: unknown[] }> = [];
   const target = new Proxy({}, { get: (_target, name) => {
     if (name === "trace" || name === "hookPlane") return undefined;
+    if (name === "memoryGovernance") return new Proxy({}, { get: (_kernel, method) => (...args: unknown[]) => { const call = { method: `memoryGovernance.${String(method)}`, args }; calls.push(call); return { method: call.method }; } });
     return (...args: unknown[]) => { const call = { method: String(name), args }; calls.push(call); return { method: call.method }; };
   } }) as CraftService;
   const neutral = createActionHandlers(target);
@@ -15,7 +16,8 @@ test("all neutral action bindings use the supplied application and preserve call
   const supplied = { marker: "unchanged" };
   for (const [name, handler] of Object.entries(neutral)) {
     calls.length = 0;
-    const result = await handler(supplied);
+    const args = name === "craft_memory_governance" ? { action: "tasks" } : supplied;
+    const result = await handler(args);
     assert.ok(calls.length > 0, name);
     assert.equal(result.method, calls.at(-1)?.method, name);
   }
@@ -24,6 +26,13 @@ test("all neutral action bindings use the supplied application and preserve call
   assert.deepEqual(calls[0], { method: "componentReadinessGet", args: [supplied, undefined] });
   await memory.craft_component_diagnose(supplied);
   assert.deepEqual(calls[1], { method: "componentDiagnose", args: [supplied, "memory"] });
+  calls.length = 0;
+  await neutral.craft_memory_governance({ action: "topics" });
+  await neutral.craft_memory_governance({ action: "confirm" });
+  assert.deepEqual(calls.map((call) => call.method), ["memoryGovernance.topicSuggestions", "memoryGovernance.confirm"]);
+  assert.deepEqual(await memory.craft_memory_maintenance_run({}), { skipped: true, reason: "scope_unavailable" });
+  await memory.craft_memory_maintenance_run({ scope_kind: "project", scope_id: "demo" });
+  assert.throws(() => neutral.craft_memory_governance({ action: "unsupported" }), /Unsupported Memory governance action/);
   for (const name of ["craft_context_resolution_resolve", "craft_context_resolution_feedback", "craft_decision_context_gate_open"]) {
     for (const args of [supplied, { ...supplied, members: ["memory"] }]) {
       calls.length = 0;

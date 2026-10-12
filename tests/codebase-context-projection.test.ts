@@ -10,6 +10,7 @@ import { CraftService } from "../core/service.ts";
 import { CodebaseIndexKernel } from "../capability/craft-codebase/codebase-index.ts";
 import { contextAssetRef } from "../common/craft-common-base/src/context-assets.ts";
 import { payload } from "../core/digest.ts";
+import { codeContextCandidates } from "../capability/craft-codebase/context-search.ts";
 async function fixture() {
   const root = mkdtempSync(join(tmpdir(), "craft-codebase-projection-")), repo = join(root, "repo"); mkdirSync(repo);
   execFileSync("git", ["-C", repo, "init", "-q"]);
@@ -44,6 +45,18 @@ test("Codebase SDK owns bounded candidates, mandatory completion and exact norma
     assert.throws(() => f.sdk.assertContextProjectionCurrent(projection, [{ ...candidates[0], path: "outside.ts" }]), /not projected/);
     assert.throws(() => f.sdk.assertContextProjectionCurrent({ ...projection, candidates: [{ ...candidates[0], path: "outside.ts" }] }, [{ ...candidates[0], path: "outside.ts" }]), /outside checkpoint/);
   } finally { f.close(); }
+});
+
+test("Codebase ranks lexical hits and dependency neighbours together before applying the limit", () => {
+  const nodes = [
+    { id: "a", path: "a.ts", name: "loginAuthHandler", kind: "symbol" },
+    { id: "b", path: "b.ts", name: "authUtility", kind: "symbol" },
+    { id: "c", path: "c.ts", name: "loginElse", kind: "symbol" },
+    { id: "d", path: "d.ts", name: "unrelated", kind: "symbol" },
+  ];
+  const result = codeContextCandidates({ nodes, edges: [{ from_node_id: "a", to_node_id: "d" }] }, "login auth", 3);
+  assert.deepEqual((result.symbols as JsonObject[]).map(item => item.id), ["a", "b", "c"]);
+  assert.equal(result.omitted_count, 1);
 });
 
 for (const mutation of ["index", "checkpoint", "deactivate", "file", "config"] as const) {

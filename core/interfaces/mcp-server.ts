@@ -196,7 +196,7 @@ export class McpServer {
         : { ok: true, result: await dispatch(), correlation: null };
       if (!captured.ok) {
         return this.ok(request.id, { content: [{ type: "text", text: captured.error instanceof Error ? captured.error.message : String(captured.error) }],
-          trace_correlation: captured.correlation, ...(captured.telemetry_error ? { telemetry_error: captured.telemetry_error } : {}), isError: true });
+          structuredContent: safeFailure(captured.error), trace_correlation: captured.correlation, ...(captured.telemetry_error ? { telemetry_error: captured.telemetry_error } : {}), isError: true });
       }
       const result = { ...(captured.result ?? {}), ...(captured.correlation === null ? {} : { trace_correlation: captured.correlation }),
         ...(captured.telemetry_error ? { telemetry_error: captured.telemetry_error } : {}) };
@@ -205,7 +205,7 @@ export class McpServer {
         structuredContent: result, isError: false });
     } catch (error) {
       return this.ok(request.id, { content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }],
-        isError: true });
+        structuredContent: safeFailure(error), isError: true });
     }
   }
 
@@ -246,4 +246,13 @@ export class McpServer {
   private error(requestId: unknown, code: number, message: string): JsonObject {
     return { jsonrpc: "2.0", id: requestId, error: { code, message } };
   }
+}
+
+function safeFailure(error: unknown): JsonObject {
+  if (!error || typeof error !== "object") return { error_code: "INTERNAL_ERROR", stage: "dispatch", details: {} };
+  const value = error as { code?: unknown; stage?: unknown; safeDetails?: unknown };
+  const code = typeof value.code === "string" ? value.code : "INTERNAL_ERROR";
+  const stage = typeof value.stage === "string" ? value.stage : "dispatch";
+  const details = value.safeDetails && typeof value.safeDetails === "object" && !Array.isArray(value.safeDetails) ? value.safeDetails as JsonObject : {};
+  return { error_code: code, stage, details };
 }

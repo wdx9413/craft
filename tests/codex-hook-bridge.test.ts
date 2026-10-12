@@ -114,7 +114,12 @@ test("Context Hook keeps sibling recall available after a rejected memory captur
     assert.equal(failures.length, 2);
     assert.equal((failures[1]!.payload as JsonObject).error_type, "unknown");
     assert.doesNotMatch(JSON.stringify(failures), /fixture private content|opaque failure|无糖咖啡|红茶/u);
+    f.service.memoryCaptureUserStatement = () => ({ candidate: null, next_action: "none" });
+    await bridge.handle("context", { hook_event_name: "UserPromptSubmit", cwd, session_id: "session", turn_id: "capture-empty", prompt: "记住：这个项目使用 Java" });
+    f.service.memoryCaptureUserStatement = original;
+    await bridge.handle("context", { hook_event_name: "UserPromptSubmit", cwd, session_id: "session", turn_id: "capture-success", prompt: "记住：以后默认使用 Node.js" });
     await bridge.handle("context", { hook_event_name: "SessionStart", cwd, session_id: "session" });
+    await bridge.handle("context", { hook_event_name: "UserPromptSubmit", cwd, session_id: "session", turn_id: "turn", prompt: "Fix the failing test" });
     await bridge.handle("context", { hook_event_name: "PostToolUse", cwd, session_id: "session", turn_id: "turn", tool_name: "Edit" });
     await bridge.handle("context", { hook_event_name: "PostToolUse", cwd, session_id: "session", turn_id: "turn", tool_name: "Bash", tool_input: { command: "npm test" }, tool_response: { exit_code: 0 } });
     await bridge.handle("context", { hook_event_name: "Stop", cwd, session_id: "session", turn_id: "turn" });
@@ -130,9 +135,13 @@ test("Experience hooks persist only redacted verified signals and propose after 
   try {
     const bridge = new CodexHookBridge(f.service); const cwd = "/project/craft";
     for (const turn of ["one", "two"]) {
+      await bridge.handle("experience", { hook_event_name: "UserPromptSubmit", cwd, session_id: "session", turn_id: turn, prompt: "Implement a verified change" });
       await bridge.handle("experience", { hook_event_name: "PostToolUse", cwd, session_id: "session", turn_id: turn, tool_name: "apply_patch", tool_input: { patch: "secret=abcdefghijklmnop" } });
       await bridge.handle("experience", { hook_event_name: "PostToolUse", cwd, session_id: "session", turn_id: turn, tool_name: "Bash", tool_input: { command: "pnpm test" }, tool_response: { exit_code: 0 } });
-      await bridge.handle("experience", { hook_event_name: "Stop", cwd, session_id: "session", turn_id: turn });
+      await bridge.handle("experience", { hook_event_name: "Stop", cwd, session_id: "session", turn_id: turn, scenario_key: "coding.feature-implementation" });
+    }
+    for (const scenario_key of ["coding.feature-implementation", "bad scenario", "coding.other-scenario"]) {
+      await bridge.handle("experience", { hook_event_name: "Stop", cwd, session_id: "session", turn_id: "two", scenario_key });
     }
     const journals = f.store.list("codex_hook_turn", 10);
     assert.equal(journals.length, 2);
@@ -160,6 +169,96 @@ test("Experience ignores unverified and unrelated local tool events", async () =
   } finally { await dispose(f); }
 });
 
+test("MCP Host completion enters the same verified Experience proposal loop idempotently", async () => {
+  const f = await fixture();
+  try {
+    const server = new (await import("../core/mcp.ts")).McpServer(f.service, "full");
+    const context = await f.service.contextOpen({ project_root: f.root, query: "task completion", include_codebase: false, task_id: "task-one" });
+    const receiptId = String((context.receipt as JsonObject).id);
+    const call = async (taskId: string) => server.handle({ jsonrpc: "2.0", id: taskId, method: "tools/call", params: { name: "craft_learning_cycle_finalize", arguments: { host: "mcp_host", task_id: taskId, turn_id: "turn", context_receipt_id: receiptId, verified: true, verification_outcome: taskId === "task-one" ? "passed" : "failed", verification_ref: `test-run:${taskId}`, scenario_key: "coding.feature-implementation" } } }) as Promise<any>;
+    const first = await call("task-one"); assert.equal(first.result.structuredContent.status, "observed");
+    const replay = await call("task-one"); assert.equal(replay.result.structuredContent.idempotent, true);
+    const second = await call("task-two"); assert.equal(second.result.structuredContent.status, "candidate_request");
+    assert.equal(f.store.list("workflow_evolution_observation", 10).length, 2);
+    assert.equal(f.store.list("workflow_evolution_request", 10).length, 1);
+    assert.equal(f.store.list("memory_candidate", 100).length, 0);
+    const ignored = await server.handle({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "craft_learning_cycle_finalize", arguments: { host: "mcp_host", task_id: "task-three", turn_id: "turn", context_receipt_id: receiptId, verified: false, verification_outcome: "passed", verification_ref: "test-run:three" } } }) as any;
+    assert.equal(ignored.result.structuredContent.status, "ignored");
+  } finally { await dispose(f); }
+});
+
+test("MCP learning completion rejects unbound, malformed, or unverified terminal signals", async () => {
+  const f = await fixture();
+  try {
+    const { McpServer } = await import("../core/mcp.ts");
+    const server = new McpServer(f.service, "full");
+    const context = await f.service.contextOpen({ project_root: f.root, query: "completion", include_codebase: false });
+    const receiptId = String((context.receipt as JsonObject).id);
+    const base = { host: "mcp_host", task_id: "task", turn_id: "turn", context_receipt_id: receiptId, verified: true, verification_outcome: "passed", verification_ref: "test:verified", scenario_key: "coding.feature-implementation" };
+    const call = (args: JsonObject) => server.handle({ jsonrpc: "2.0", id: "invalid", method: "tools/call", params: { name: "craft_learning_cycle_finalize", arguments: args } }) as Promise<any>;
+    assert.equal((await call({ ...base, context_receipt_id: String((context.pack_receipt as JsonObject).id), verified: false })).result.structuredContent.status, "ignored");
+    for (const args of [{ ...base, host: "MCP" }, { ...base, verification_outcome: "unknown" }, { ...base, context_receipt_id: "missing" }, { ...base, verified: false }]) {
+      const result = await call(args); assert.equal(result.result.isError, args.verified === false ? false : true);
+    }
+    for (const key of ["host", "task_id", "turn_id", "context_receipt_id", "verification_outcome", "verification_ref"]) {
+      const result = await call({ ...base, [key]: " " }); assert.equal(result.result.isError, true, key);
+    }
+    f.store.create("context_resolution_receipt", "missing-scope", { scope: null });
+    assert.equal((await call({ ...base, context_receipt_id: "missing-scope" })).result.isError, true);
+    f.store.create("context_resolution_receipt", "invalid-scope", { scope: { kind: "project" } });
+    assert.equal((await call({ ...base, context_receipt_id: "invalid-scope" })).result.isError, true);
+    f.store.create("context_resolution_receipt", "task-bound", { scope: { kind: "project", id: "project" }, task_id: "owner-task" });
+    assert.equal((await call({ ...base, context_receipt_id: "task-bound" })).result.isError, true);
+    const failed = await call({ ...base, verification_outcome: "failed" }); assert.equal(failed.result.structuredContent.status, "observed");
+  } finally { await dispose(f); }
+});
+
+test("MCP completion keeps unclassified task observations out of cross-task Experience candidates", async () => {
+  const f = await fixture();
+  try {
+    const context = await f.service.contextOpen({ project_root: f.root, query: "completion", include_codebase: false });
+    const base = { host: "mcp_host", turn_id: "turn", context_receipt_id: String((context.receipt as JsonObject).id), verified: true, verification_outcome: "passed", verification_ref: "test:verified" };
+    const first = f.service.learningCycleFinalize({ ...base, task_id: "one" });
+    const second = f.service.learningCycleFinalize({ ...base, task_id: "two" });
+    assert.equal(first.status, "observed"); assert.equal(first.next_action, "stable_scenario_key_required_for_cross_task_learning");
+    assert.equal(second.status, "observed"); assert.equal(second.request, null);
+    assert.equal(f.store.list("workflow_evolution_observation", 10).length, 2);
+    assert.equal(f.store.list("workflow_evolution_request", 10).length, 0);
+    assert.throws(() => f.service.learningCycleFinalize({ ...base, task_id: "bad", scenario_key: "feature implementation" }), /bounded stable identifier/u);
+  } finally { await dispose(f); }
+});
+
+test("verified repeated tasks create a pinned distillation ticket readable through the Experience request tool", async () => {
+  const f = await fixture();
+  try {
+    f.store.create("evaluation_model_profile", "experience-distiller", { provider: "qwen", model: "qwen-plus", lifecycle: "active",
+      purposes: ["workflow_evolution"], network_execution_enabled: false, identity_digest: "profile-digest" });
+    const context = await f.service.contextOpen({ project_root: f.root, query: "verified work", include_codebase: false });
+    const base = { host: "mcp_host", turn_id: "turn", context_receipt_id: String((context.receipt as JsonObject).id), verified: true,
+      verification_outcome: "passed", verification_ref: "test:verification", scenario_key: "coding.distillation" };
+    f.service.learningCycleFinalize({ ...base, task_id: "first" });
+    const finalized = f.service.learningCycleFinalize({ ...base, task_id: "second" });
+    assert.equal(finalized.status, "candidate_request");
+    assert.equal((finalized.model_ticket as JsonObject).status, "needs_enablement");
+    const replay = f.service.learningCycleFinalize({ ...base, task_id: "second" });
+    assert.equal(replay.status, "candidate_request"); assert.equal(replay.idempotent, true);
+    assert.equal(f.store.list("workflow_evolution_request", 10).length, 1);
+    const materials = f.service.learningCycleRequestGet({ request_id: String((finalized.request as JsonObject).id) });
+    assert.equal((materials.observations as JsonObject[]).length, 2);
+    assert.equal(materials.content_stored, false);
+    assert.equal(materials.execution_authority, false);
+    assert.equal((materials.observations as JsonObject[]).some(item => "verification_ref" in item), false);
+    assert.throws(() => f.service.learningCycleRequestGet({ request_id: " " }), /request_id must not be empty/u);
+    f.store.create("workflow_evolution_request", "empty-learning-request", { observation_refs: null });
+    assert.deepEqual(f.service.learningCycleRequestGet({ request_id: "empty-learning-request" }).observations, []);
+    const submitted = f.service.workflowEvolutionProposalSubmit({ request_id: String((finalized.request as JsonObject).id), workflow_id: "distilled-workflow",
+      name: "Verified completion", description: "Check the terminal verifier.", inputs: [], steps: [{ id: "verify", type: "assertion" }] });
+    assert.equal((submitted.procedure as JsonObject).lifecycle, "candidate");
+    const afterSubmission = f.service.learningCycleFinalize({ ...base, task_id: "second" });
+    assert.equal(afterSubmission.status, "candidate_submitted"); assert.equal(afterSubmission.idempotent, true);
+  } finally { await dispose(f); }
+});
+
 test("Hook journal covers missing identity, updates signals, and learning records failed verification", async () => {
   const f = await fixture();
   try {
@@ -169,13 +268,22 @@ test("Hook journal covers missing identity, updates signals, and learning record
     assert(signal);
     assert.equal(bridge.journal.record({ cwd }, signal), null);
     assert.equal(bridge.journal.find({ cwd }), null);
+    bridge.journal.bindContextReceipt({ cwd }, { id: "orphan" });
+    assert.equal(bridge.journal.find({ cwd, session_id: "missing-session" }), null);
     const first = bridge.journal.record({ cwd, turn_id: "duplicate" }, signal);
     assert(first);
     assert.equal(bridge.journal.record({ cwd, turn_id: "duplicate" }, signal)?.id, first.id);
+    bridge.journal.record({ cwd, turn_id: "no-receipt" }, signal);
+    const passed = sanitizer.signal({ tool_name: "Bash", tool_input: { command: "npm test" }, tool_response: { exit_code: 0 } });
+    assert(passed); bridge.journal.record({ cwd, turn_id: "no-receipt" }, passed);
+    assert.equal(bridge.learning.finalize({ cwd, turn_id: "no-receipt" }), null);
+    bridge.journal.bindContextReceipt({ cwd, turn_id: "orphan-without-session" }, { id: "orphan-receipt" });
     for (const turn of ["failed-one", "failed-two"]) {
+      await bridge.handle("experience", { hook_event_name: "UserPromptSubmit", cwd, session_id: turn, turn_id: turn, prompt: "Fix and verify" });
+      assert.equal(typeof bridge.journal.find({ cwd, turn_id: turn })?.context_receipt_id, "string");
       await bridge.handle("experience", { hook_event_name: "PostToolUse", cwd, session_id: turn, turn_id: turn, tool_name: "Edit" });
       await bridge.handle("experience", { hook_event_name: "PostToolUse", cwd, session_id: turn, turn_id: turn, tool_name: "Bash", tool_input: { command: "npm test" }, tool_response: { status: "failed" } });
-      await bridge.handle("experience", { hook_event_name: "Stop", cwd, session_id: turn, turn_id: turn });
+      await bridge.handle("experience", { hook_event_name: "Stop", cwd, session_id: turn, turn_id: turn, scenario_key: "coding.feature-implementation" });
     }
     assert.equal(f.store.list("workflow_evolution_request", 10).length, 1);
     const evidence = f.store.list("evidence", 10);
@@ -204,6 +312,23 @@ test("Hook bridge is fail-open for unsupported events and component failures", a
     f.service.contextWorkingSets.resolve = original;
     assert.equal(f.store.events("codex-hook").filter((event) => event.event_type === "codex_hook.failed").length, 2);
     assert.deepEqual(await bridge.handle("knowledge", { hook_event_name: "UserPromptSubmit", prompt: "context" }), {});
+  } finally { await dispose(f); }
+});
+
+test("Hook mints a fresh turn when the Host omits its native turn identifier", async () => {
+  const f = await fixture();
+  try {
+    const bridge = new CodexHookBridge(f.service); const cwd = "/project/craft";
+    await bridge.handle("experience", { hook_event_name: "UserPromptSubmit", cwd, session_id: "native-less", prompt: "Review this change" });
+    const firstTurn = String(f.store.list("context_hook_session", 10)[0]!.last_turn_id);
+    await bridge.handle("experience", { hook_event_name: "UserPromptSubmit", cwd, session_id: "native-less", prompt: "Review the next change" });
+    const secondTurn = String(f.store.list("context_hook_session", 10)[0]!.last_turn_id);
+    assert.match(firstTurn, /^hook_turn_/u); assert.match(secondTurn, /^hook_turn_/u); assert.notEqual(firstTurn, secondTurn);
+    assert.equal(f.store.list("context_hook_session", 10)[0]!.sequence, 2);
+    await bridge.handle("experience", { hook_event_name: "PostToolUse", cwd, session_id: "native-less", tool_name: "Edit" });
+    await bridge.handle("experience", { hook_event_name: "PostToolUse", cwd, session_id: "native-less", tool_name: "Bash", tool_input: { command: "npm test" }, tool_response: { exit_code: 0 } });
+    await bridge.handle("experience", { hook_event_name: "Stop", cwd, session_id: "native-less" });
+    assert.equal(f.store.list("workflow_evolution_observation", 10).length, 1);
   } finally { await dispose(f); }
 });
 

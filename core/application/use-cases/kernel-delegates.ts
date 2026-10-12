@@ -13,6 +13,7 @@ import { installDurableExperienceMethods } from "./durable-experience.ts";
 import { installLegacyKnowledgeMigrationMethods } from "./legacy-knowledge-migration.ts";
 import { installRuntimeLearningMethods } from "./runtime-learning.ts";
 import { installKnowledgeAutoReviewMethods } from "./knowledge-auto-review.ts";
+import { installLearningCycleMethods } from "./learning-cycle.ts";
 import { installDecisionContextGateMethods } from "./decision-context-gate.ts";
 import { installQualityProfileMethods } from "./quality-profile.ts";
 import { installCodebaseMethods } from "./codebase.ts";
@@ -197,6 +198,8 @@ declare module "../craft-service.ts" {
     experienceLedgerGet(args: JsonObject): JsonObject;
     experienceProcedureDraft(args: JsonObject): JsonObject;
     experienceProcedureGate(args: JsonObject): JsonObject;
+    experienceLearningEvaluationDispatch(args: JsonObject): JsonObject;
+    experienceLearningEvaluationResult(args: JsonObject): JsonObject;
     procedureInvocationBind(args: JsonObject): JsonObject;
     procedureInvocationDispatch(args: JsonObject): JsonObject;
     procedureInvocationReport(args: JsonObject): JsonObject;
@@ -225,6 +228,7 @@ export function installKernelDelegateMethods(serviceClass: typeof CraftService):
   installLegacyKnowledgeMigrationMethods(serviceClass);
   installRuntimeLearningMethods(serviceClass);
   installKnowledgeAutoReviewMethods(serviceClass);
+  installLearningCycleMethods(serviceClass);
   installDecisionContextGateMethods(serviceClass);
   installQualityProfileMethods(serviceClass);
   installCodebaseMethods(serviceClass);

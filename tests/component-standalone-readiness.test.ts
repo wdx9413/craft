@@ -64,12 +64,12 @@ test("public standalone component products expose small daily paths while advanc
     const expected: Record<string, readonly string[]> = {
       knowledge: ["craft_component_readiness_get", "craft_knowledge_source_register", "craft_evidence_record", "craft_knowledge_claim_save", "craft_knowledge_host_review", "craft_knowledge_support_record", "craft_knowledge_promotion_policy_get", "craft_knowledge_auto_review", "craft_context_resolution_resolve"],
       memory: ["craft_component_readiness_get", "craft_memory_candidate_propose", "craft_memory_ledger_get", "craft_memory_ledger_list", "craft_memory_maintenance_run"],
-      experience: ["craft_component_readiness_get", "craft_experience_observe", "craft_experience_procedure_draft", "craft_experience_procedure_submit", "craft_experience_procedure_get", "craft_procedure_create", "craft_procedure_get", "craft_procedure_list", "craft_procedure_gate", "craft_procedure_export_skill"],
+      experience: ["craft_component_readiness_get", "craft_learning_cycle_finalize", "craft_experience_learning_request_get", "craft_experience_learning_evaluation_dispatch", "craft_experience_learning_evaluation_result", "craft_experience_observe", "craft_experience_procedure_draft", "craft_experience_procedure_submit", "craft_experience_procedure_get", "craft_procedure_create", "craft_procedure_get", "craft_procedure_list", "craft_procedure_gate", "craft_procedure_export_skill"],
     };
     for (const [product, required] of Object.entries(expected)) {
       const daily = new McpServer(f.service, productSurfaceOf(product));
       const names = daily.tools.map((tool) => tool.name);
-      assert(names.length <= (product === "experience" ? 28 : 24), `${product} daily surface must stay within the tool budget`);
+      assert(names.length <= (product === "experience" ? 31 : 24), `${product} daily surface must stay within the tool budget`);
       for (const name of required) assert(names.includes(name), `${product} daily surface must expose ${name}`);
       assert(!names.includes("craft_verified_work_loop_prepare"));
     }

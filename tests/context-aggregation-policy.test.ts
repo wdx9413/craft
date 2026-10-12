@@ -82,7 +82,16 @@ test("Context pack exposes partial coverage, budget omissions, disabled and unav
   const f = await fixture();
   try {
     const ready = await f.service.contextOpen({ project_root: f.repo, query: "alpha" });
-    assert.equal(ready.partial, true); assert(((ready.pack_receipt as JsonObject).partial_reasons as string[]).includes("codebase_partial_analysis"));
+    assert.equal(ready.context_status, "resolved"); assert.equal(ready.pack_status, "ready"); assert.equal(ready.partial, false);
+    assert.equal((ready.codebase as JsonObject).analysis_confidence, "partial");
+    const repeated = await f.service.contextOpen({ project_root: f.repo, query: "alpha" });
+    assert.equal((repeated.pack_receipt as JsonObject).id, (ready.pack_receipt as JsonObject).id);
+    const stateId = `${String((ready.codebase as JsonObject).workspace_id)}_basic`;
+    const state = f.store.get("codebase_repository_state", stateId) as JsonObject;
+    f.store.save("codebase_repository_state", stateId, { workspace_id: state.workspace_id, checkpoint_id: state.checkpoint_id, policy_version: state.policy_version, index_id: state.index_id, summary: { ...(state.summary as JsonObject), unsupported_file_count: 1 } });
+    const unsupported = await f.service.contextOpen({ project_root: f.repo, query: "alpha" });
+    assert.equal(unsupported.pack_status, "partial");
+    assert(((unsupported.pack_receipt as JsonObject).partial_reasons as string[]).includes("codebase_analyzer_unsupported_files"));
     const tiny = await f.service.contextOpen({ project_root: f.repo, query: "alpha", max_chars: 1 });
     assert(Number((tiny.codebase as JsonObject).budget_omitted_count) > 0);
     assert(((tiny.pack_receipt as JsonObject).partial_reasons as string[]).includes("codebase_budget_exhausted"));
@@ -91,6 +100,29 @@ test("Context pack exposes partial coverage, budget omissions, disabled and unav
     assert(((unavailable.pack_receipt as JsonObject).partial_reasons as string[]).includes("codebase_unavailable"));
     const skipped = await f.service.contextOpen({ project_root: f.repo, query: "alpha", include_codebase: false });
     assert.equal(skipped.partial, false); assert.deepEqual((skipped.pack_receipt as JsonObject).partial_reasons, []);
+  } finally { f.close(); }
+});
+
+test("Context failures identify safe input fields and the failing budget stage", async () => {
+  const f = await fixture();
+  try {
+    const server = new McpServer(f.service, "component-context-daily");
+    const invalid = await server.handle({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "craft_context_open", arguments: { project_root: f.repo, query: "", include_codebase: false } } }) as any;
+    assert.deepEqual(invalid.result.structuredContent, { error_code: "INVALID_INPUT", stage: "input_validation", details: { field: "query" } });
+    const limited = await server.handle({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "craft_context_open", arguments: { project_root: f.repo, query: "alpha", include_codebase: false, max_items: 0 } } }) as any;
+    assert.equal(limited.result.structuredContent.error_code, "LIMIT_EXCEEDED");
+    assert.equal(limited.result.structuredContent.stage, "budget_validation");
+    assert.equal(limited.result.structuredContent.details.budget, "max_items");
+    await assert.rejects(f.service.contextOpen({ project_root: f.repo, query: "alpha", include_codebase: "false" }), /include_codebase/);
+    await assert.rejects(f.service.contextOpen({ project_root: f.repo, query: "alpha", index_depth: "unknown" }), /index_depth/);
+    await assert.rejects(f.service.contextOpen({ project_root: f.repo, query: "alpha", task_kind: "unknown" }), /task_kind/);
+    await assert.rejects(f.service.contextOpen({ project_root: f.repo, query: "alpha", max_chars: 0 }), /Context budget/);
+    await assert.rejects(f.service.contextOpen({ project_root: f.repo, query: "alpha", max_tokens: 0 }), /max_tokens/);
+    await assert.rejects(f.service.contextOpen({ project_root: f.repo, query: "alpha", max_tokens: 1 }), /max_tokens/);
+    await assert.rejects(f.service.contextOpen({ project_root: f.repo, query: "alpha", max_tokens: "invalid" }), /max_tokens/);
+    await assert.rejects(f.service.contextOpen({ project_root: f.repo, query: "alpha", required_refs: "invalid" }), /required_refs must be an array/);
+    await assert.rejects(f.service.contextOpen({ project_root: f.repo, query: "alpha", required_refs: [{}] }), /invalid reference/);
+    await assert.rejects(f.service.contextOpen({ project_root: f.repo, query: "alpha", include_codebase: false, required_refs: [{ member: "codebase", id: "missing" }] }), /Required Codebase material is unavailable/);
   } finally { f.close(); }
 });
 

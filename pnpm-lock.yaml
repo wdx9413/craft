@@ -8,36 +8,36 @@ importers:
 
   .:
     dependencies:
-      typescript:
-        specifier: '>=5.8 <7'
-        version: 6.0.3
+      '@craft/capability-codebase':
+        specifier: 0.12.42
+        version: link:capability/craft-codebase
+      '@craft/capability-experience':
+        specifier: 0.12.42
+        version: link:capability/craft-experience
+      '@craft/capability-knowledge':
+        specifier: 0.12.42
+        version: link:capability/craft-knowledge
+      '@craft/capability-memory':
+        specifier: 0.12.42
+        version: link:capability/craft-memory
+      craft-common-base:
+        specifier: 0.12.42
+        version: link:common/craft-common-base
+      craft-common-log:
+        specifier: 0.12.42
+        version: link:common/craft-common-log
+      craft-common-store-local:
+        specifier: 0.12.42
+        version: link:common/craft-common-store-local
       tesseract.js:
         specifier: ^7.0.0
         version: 7.0.0
+      typescript:
+        specifier: '>=5.8 <7'
+        version: 6.0.3
       yaml:
         specifier: ^2.9.0
         version: 2.9.0
-      craft-common-store-local:
-        specifier: 0.12.40
-        version: link:common/craft-common-store-local
-      craft-common-base:
-        specifier: 0.12.40
-        version: link:common/craft-common-base
-      craft-common-log:
-        specifier: 0.12.40
-        version: link:common/craft-common-log
-      '@craft/capability-knowledge':
-        specifier: 0.12.40
-        version: link:capability/craft-knowledge
-      '@craft/capability-memory':
-        specifier: 0.12.40
-        version: link:capability/craft-memory
-      '@craft/capability-experience':
-        specifier: 0.12.40
-        version: link:capability/craft-experience
-      '@craft/capability-codebase':
-        specifier: 0.12.40
-        version: link:capability/craft-codebase
     devDependencies:
       '@types/node':
         specifier: '>=23 <26'
@@ -53,60 +53,54 @@ importers:
 
   capability/craft-codebase:
     dependencies:
-      craft-common-store-local:
-        specifier: 0.12.40
-        version: link:../../common/craft-common-store-local
       craft-common-base:
-        specifier: 0.12.40
+        specifier: 0.12.42
         version: link:../../common/craft-common-base
       craft-common-log:
-        specifier: 0.12.40
+        specifier: 0.12.42
         version: link:../../common/craft-common-log
+      craft-common-store-local:
+        specifier: 0.12.42
+        version: link:../../common/craft-common-store-local
       typescript:
         specifier: '>=5.8 <7'
         version: 6.0.3
 
   capability/craft-experience:
     dependencies:
-      craft-common-store-local:
-        specifier: 0.12.40
-        version: link:../../common/craft-common-store-local
       craft-common-base:
-        specifier: 0.12.40
+        specifier: 0.12.42
         version: link:../../common/craft-common-base
       craft-common-log:
-        specifier: 0.12.40
+        specifier: 0.12.42
         version: link:../../common/craft-common-log
+      craft-common-store-local:
+        specifier: 0.12.42
+        version: link:../../common/craft-common-store-local
 
   capability/craft-knowledge:
     dependencies:
-      craft-common-store-local:
-        specifier: 0.12.40
-        version: link:../../common/craft-common-store-local
       craft-common-base:
-        specifier: 0.12.40
+        specifier: 0.12.42
         version: link:../../common/craft-common-base
       craft-common-log:
-        specifier: 0.12.40
+        specifier: 0.12.42
         version: link:../../common/craft-common-log
+      craft-common-store-local:
+        specifier: 0.12.42
+        version: link:../../common/craft-common-store-local
 
   capability/craft-memory:
     dependencies:
-      craft-common-store-local:
-        specifier: 0.12.40
-        version: link:../../common/craft-common-store-local
       craft-common-base:
-        specifier: 0.12.40
+        specifier: 0.12.42
         version: link:../../common/craft-common-base
       craft-common-log:
-        specifier: 0.12.40
+        specifier: 0.12.42
         version: link:../../common/craft-common-log
-
-  common/craft-common-store-local:
-    dependencies:
-      '@types/node':
-        specifier: '>=23 <26'
-        version: 25.9.5
+      craft-common-store-local:
+        specifier: 0.12.42
+        version: link:../../common/craft-common-store-local
 
   common/craft-common-base:
     dependencies:
@@ -114,7 +108,7 @@ importers:
         specifier: '>=23 <26'
         version: 25.9.5
       craft-common-store-local:
-        specifier: 0.12.40
+        specifier: 0.12.42
         version: link:../craft-common-store-local
 
   common/craft-common-log:
@@ -123,12 +117,17 @@ importers:
         specifier: '>=23 <26'
         version: 25.9.5
       craft-common-base:
-        specifier: 0.12.40
+        specifier: 0.12.42
         version: link:../craft-common-base
       craft-common-store-local:
-        specifier: 0.12.40
+        specifier: 0.12.42
         version: link:../craft-common-store-local
 
+  common/craft-common-store-local:
+    dependencies:
+      '@types/node':
+        specifier: '>=23 <26'
+        version: 25.9.5
 
 packages:
 
@@ -313,18 +312,6 @@ packages:
   '@pkgjs/parseargs@0.11.0':
     resolution: {integrity: sha512-+1VkjdD0QBLPodGrJUeqarH8VAIvQODIbwh9XpP5Syisf7YoQgsJKPNFoqqLQlu+VQ/tVSshMR6loPMn8U+dPg==}
     engines: {node: '>=14'}
-
-
-
-
-
-
-
-
-
-
-
-
 
   '@types/istanbul-lib-coverage@2.0.6':
     resolution: {integrity: sha512-2QF/t/auWm0lsy8XtKVPG19v3sSOQlJe/YHZgfjb/KBBHOGSV+J2q/S671rcq9uTBrLAXmZpqJiaQbMT+zNU1w==}
@@ -743,18 +730,6 @@ snapshots:
 
   '@pkgjs/parseargs@0.11.0':
     optional: true
-
-
-
-
-
-
-
-
-
-
-
-
 
   '@types/istanbul-lib-coverage@2.0.6': {}
 

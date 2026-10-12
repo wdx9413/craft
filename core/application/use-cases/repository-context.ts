@@ -5,28 +5,33 @@ import { stableDigest } from "../../digest.ts";
 import { repositoryRoot } from "../../../capability/craft-codebase/repository-files.ts";
 import { ContextBudget, contextAssetMatches, contextAssetRef, requiredContextRef } from "../../../common/craft-common-base/src/context-assets.ts";
 import { estimateTokens } from "../../token-budget.ts";
+import { CraftOperationError } from "../../operation-error.ts";
 
 export { ensureRepository } from "../../../capability/craft-codebase/repository-onboarding.ts";
 import { ensureRepository } from "../../../capability/craft-codebase/repository-onboarding.ts";
 
 export async function openContext(service: CraftService, args: JsonObject): Promise<JsonObject> {
-  if (typeof args.query !== "string" || !args.query.trim()) throw new Error("query must not be empty");
-  if (args.include_codebase !== undefined && typeof args.include_codebase !== "boolean") throw new Error("include_codebase must be boolean");
-  if (args.index_depth !== undefined && !["basic", "semantic"].includes(String(args.index_depth))) throw new Error("index_depth must be basic or semantic");
+  if (typeof args.query !== "string" || !args.query.trim()) throw new CraftOperationError("INVALID_INPUT", "input_validation", "query must not be empty", { field: "query" });
+  if (args.include_codebase !== undefined && typeof args.include_codebase !== "boolean") throw new CraftOperationError("INVALID_INPUT", "input_validation", "include_codebase must be boolean", { field: "include_codebase" });
+  if (args.index_depth !== undefined && !["basic", "semantic"].includes(String(args.index_depth))) throw new CraftOperationError("INVALID_INPUT", "input_validation", "index_depth must be basic or semantic", { field: "index_depth", allowed: ["basic", "semantic"] });
   const maxChars = Number(args.max_chars ?? 12000); const maxItems = Number(args.max_items ?? 12);
-  new ContextBudget(maxItems, maxChars);
+  try { new ContextBudget(maxItems, maxChars); }
+  catch { throw new CraftOperationError("LIMIT_EXCEEDED", "budget_validation", "Context budget is invalid", { budget: !Number.isSafeInteger(maxItems) || maxItems < 1 ? "max_items" : "max_chars", max_items: maxItems, max_chars: maxChars, minimum: 1 }); }
   const { root } = repositoryRoot(args.project_root);
   const identity = service.scopeIdentityResolveProject({ project_root: root }).identity as JsonObject;
   const scope = identity.canonical_scope as JsonObject;
   let codebase: JsonObject;
   try { codebase = args.include_codebase === false ? { status: "skipped", reason: "not_requested" } : ensureRepository(service, { project_root: root, index_depth: args.index_depth, query: args.query }); }
   catch { codebase = { status: "unavailable", reason: "repository_index_failed" }; }
-  if (args.required_refs !== undefined && !Array.isArray(args.required_refs)) throw new Error("required_refs must be an array");
-  const required = ((args.required_refs ?? []) as unknown[]).map(requiredContextRef);
+  if (args.required_refs !== undefined && !Array.isArray(args.required_refs)) throw new CraftOperationError("INVALID_INPUT", "input_validation", "required_refs must be an array", { field: "required_refs" });
+  let required: JsonObject[];
+  try { required = ((args.required_refs ?? []) as unknown[]).map(requiredContextRef); }
+  catch { throw new CraftOperationError("INVALID_INPUT", "input_validation", "required_refs contains an invalid reference", { field: "required_refs" }); }
   const codeRequired = required.filter(ref => ref.member === "codebase");
+  if (codeRequired.length && codebase.status !== "ready") throw new CraftOperationError("REQUIRED_MATERIAL_UNAVAILABLE", "codebase_projection", "Required Codebase material is unavailable", { member: "codebase", reason: codebase.reason });
   const controls = Object.fromEntries(["source_ids", "memory_ids", "retrieval_adapter_id", "allow_restricted", "principal_id", "principal_ids", "tenant_id", "cognitive_purpose", "user_scope_id", "team_scope_id", "organization_scope_id", "session_scope_id", "include_global", "include_working_notes", "now", "task_id", "session_id", "turn_id", "history_refs", "state_refs"].filter(key => args[key] !== undefined).map(key => [key, args[key]]));
   const taskKind = args.task_kind ?? (/review|bug|debug|code|开发|代码|修复|排查|重构|测试/iu.test(args.query) ? "code" : "general");
-  if (!["code", "review", "debug", "development", "knowledge", "general"].includes(String(taskKind))) throw new Error("Unsupported Context task_kind");
+  if (!["code", "review", "debug", "development", "knowledge", "general"].includes(String(taskKind))) throw new CraftOperationError("INVALID_INPUT", "input_validation", "Unsupported Context task_kind", { field: "task_kind" });
   const codeFirst = ["code", "review", "debug", "development"].includes(String(taskKind)) || codeRequired.length > 0;
   const projection = codebase.status === "ready" ? service.codebase.contextProjection({ workspace_id: codebase.workspace_id, index_id: codebase.index_id, query: args.query, limit: 100, required_refs: codeRequired, scope }) : null;
   const queryOmitted = Number(projection?.query_omitted_count ?? 0);
@@ -41,9 +46,9 @@ export async function openContext(service: CraftService, args: JsonObject): Prom
   const reasons: string[] = [];
   if (receipt?.partial === true) reasons.push("context_contribution_unavailable");
   if (codebase.status === "unavailable") reasons.push("codebase_unavailable");
-  if (codebase.status === "ready" && (codebase.summary as JsonObject).certainty !== "complete") reasons.push("codebase_partial_analysis");
+  if (codebase.status === "ready" && Number((codebase.summary as JsonObject).unsupported_file_count) > 0) reasons.push("codebase_analyzer_unsupported_files");
   if (Number(codebase.omitted_files ?? 0) > 0) reasons.push("codebase_files_omitted");
-  if (budgetOmitted > 0 || codebase.status === "ready" && (Number(receipt?.total_items ?? 0) >= maxItems || Number(receipt?.total_used_chars ?? 0) >= maxChars)) reasons.push("codebase_budget_exhausted");
+  if (budgetOmitted > 0) reasons.push("codebase_budget_exhausted");
   if (queryOmitted > 0) reasons.push("codebase_query_truncated");
   codebase = { ...codebase, budget_omitted_count: budgetOmitted, query_omitted_count: queryOmitted, budget_rebalanced: budgetRebalanced };
   const assetRefs = context.asset_refs as JsonObject[];
@@ -55,11 +60,13 @@ export async function openContext(service: CraftService, args: JsonObject): Prom
   const injectionContributions = (context.contributions as JsonObject[]).map(part => ({ ...part, items: (part.items as JsonObject[]).filter(item => novel(String(part.member), item)) }));
   const injection = JSON.stringify({ items: injectionItems, contributions: injectionContributions, host_refs: context.host_refs, codebase_references: references });
   const estimatedTokens = estimateTokens(injection);
-  if (args.max_tokens !== undefined && (!Number.isSafeInteger(args.max_tokens) || Number(args.max_tokens) < 1 || estimatedTokens > Number(args.max_tokens))) throw new Error("Context injection exceeds estimated token budget or max_tokens is invalid");
+  if (args.max_tokens !== undefined && (!Number.isSafeInteger(args.max_tokens) || Number(args.max_tokens) < 1 || estimatedTokens > Number(args.max_tokens))) throw new CraftOperationError("LIMIT_EXCEEDED", "injection_budget", "Context injection exceeds estimated token budget or max_tokens is invalid", { budget: "max_tokens", estimated_tokens: estimatedTokens, limit: args.max_tokens });
   return service.store.transaction(() => {
     assertContextReadCurrent(service.store, receipt);
     if (projection) service.codebase.assertContextProjectionCurrent(projection, references);
     const packReceipt = service.store.find("context_pack_receipt", id) ?? service.store.create("context_pack_receipt", id, { ...packIdentity, identity_digest: stableDigest(packIdentity), content_free: true });
-    return { ...context, items: injectionItems, contributions: injectionContributions, already_emitted_refs: alreadyEmitted, hook_reused: alreadyEmitted.length > 0, asset_refs: assetRefs, injection_measurement: { measurement_scope: "material_projection_excludes_protocol_envelope_and_host_history_bodies", serialized_chars: injection.length, estimated_tokens: estimatedTokens, tokenizer: "cjk_char_latin_four_char_estimate", exact: false, host_measured_tokens: null }, partial: reasons.length > 0, codebase: { ...codebase, references }, pack_receipt: packReceipt, host_execution_authority: false };
+    const contextStatus = receipt?.partial === true ? "partial" : "resolved";
+    const packStatus = reasons.length ? "partial" : "ready";
+    return { ...context, context_status: contextStatus, pack_status: packStatus, items: injectionItems, contributions: injectionContributions, already_emitted_refs: alreadyEmitted, hook_reused: alreadyEmitted.length > 0, asset_refs: assetRefs, injection_measurement: { measurement_scope: "material_projection_excludes_protocol_envelope_and_host_history_bodies", serialized_chars: injection.length, estimated_tokens: estimatedTokens, tokenizer: "cjk_char_latin_four_char_estimate", exact: false, host_measured_tokens: null }, partial: reasons.length > 0, codebase: { ...codebase, analysis_confidence: (codebase.summary as JsonObject | undefined)?.certainty ?? null, references }, pack_receipt: packReceipt, host_execution_authority: false };
   });
 }

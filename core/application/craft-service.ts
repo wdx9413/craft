@@ -38,6 +38,7 @@ import {
   compactionPlan, defineConstraint, pinConstraints, verifyPinIntact
 } from "../governance-pinning.ts";
 import { discoverResult, forwardCompatibility } from "../mcp-forward-compat.ts";
+import { discoverContextTools } from "../mcp/context-tools.ts";
 import { dockerRequestDigest } from "../docker-sandbox.ts";
 import { egressRequestDigest } from "../egress.ts";
 import { ServiceFoundation } from "./service-foundation.ts";
@@ -246,6 +247,7 @@ function validateModelInput(args: JsonObject, id: string): CraftModelConfig {
 }
 
 export class CraftService extends ServiceFoundation {
+  contextToolsDiscover(args: JsonObject): JsonObject { return discoverContextTools(args); }
   readonly workControl: WorkControl;
   readonly forgeDispatch: ForgeDispatchCoordinator;
   readonly cognitiveWorkbench: CognitiveWorkbenchCoordinator;

@@ -1,9 +1,17 @@
 # Changelog
 
-> Note on numbering: the declared package version is now **0.12.40**. Earlier
+> Note on numbering: the declared package version is now **0.12.42**. Earlier
 > `v0.12.34`–`v0.12.43` headings name **incremental work on the previous revision**,
 > not releases. Each is a self-contained change set with its own 100%-coverage
 > test script; the version bump happens only when the work is released.
+
+## v0.12.42（本次发布）
+
+- 修复 Context 的错误分类、失败阶段和预算字段回执；区分解析状态与 pack 投影状态，必需 Codebase 引用缺失时明确失败。
+- Codebase 保留本次引用投影完整度与索引分析置信度的区别；小仓库不会仅因 basic analyzer 被误标为解析失败。
+- Knowledge 注册来源摄取后自动运行现有审核门槛；相同范围、相同文本只在两份独立可信来源支持时自动晋升，旧的待重验记录不会被此路径复活。
+- 增加 `craft_learning_cycle_finalize`，供无 Hook 的 MCP/Skill Host 提交带 Context receipt 的已验证终态；重复提交幂等，产出 Observation/候选请求，不绕过 Experience 的独立评测和晋级 Gate。
+- Memory 继续只接受显式用户授权；自动晋升策略和撤销、冲突、过期规则不变。
 
 ## v0.12.40（本次发布）
 

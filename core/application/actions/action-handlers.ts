@@ -1,4 +1,3 @@
-import { discoverContextTools } from "../../mcp/context-tools.ts";
 import type { CraftService } from "../craft-service.ts";
 import type { JsonObject } from "../../infrastructure/store.ts";
 import type { ComponentName } from "../../component-readiness.ts";
@@ -21,8 +20,10 @@ export function createActionHandlers(service: CraftService, mountedComponent?: C
       ...createEvaluationHandlers(service),
       ...createWorkspaceHandlers(service),
       craft_info: () => service.info(),
-      craft_context_tools_discover: (a) => discoverContextTools(a),
+      craft_context_tools_discover: service.contextToolsDiscover.bind(service),
       craft_context_open: (a) => service.contextOpen(a),
+      craft_learning_cycle_finalize: (a) => service.learningCycleFinalize(a),
+      craft_experience_learning_request_get: (a) => service.learningCycleRequestGet(a),
       craft_codebase_repository_ensure: (a) => service.codebaseRepositoryEnsure(a),
       craft_component_readiness_get: (a) => service.componentReadinessGet(a, mountedComponent),
       craft_component_diagnose: (a) => service.componentDiagnose(a, mountedComponent),
@@ -122,6 +123,8 @@ export function createActionHandlers(service: CraftService, mountedComponent?: C
       craft_evaluation_model_profile_save: (a) => service.evaluationModelProfileSave(a), craft_evaluation_model_profile_get: (a) => service.evaluationModelProfileGet(a), craft_evaluation_model_profile_list: (a) => service.evaluationModelProfileList(a), craft_evaluation_model_ticket_issue: (a) => service.evaluationModelTicketIssue(a),
       craft_experience_observe: (a) => service.workflowEvolutionObserve(a), craft_experience_patterns_list: (a) => service.workflowEvolutionObservations(a), craft_experience_procedure_draft: (a) => service.workflowEvolutionPropose(a), craft_experience_procedure_submit: (a) => service.workflowEvolutionProposalSubmit(a), craft_experience_procedure_get: (a) => service.workflowEvolutionProposalGet(a),
       craft_experience_procedure_projection_draft: (a) => service.experienceProcedureDraft(a), craft_experience_procedure_gate: (a) => service.experienceProcedureGate(a), craft_experience_procedure_projection_get: (a) => service.experienceProcedureGet(a), craft_experience_procedure_projection_list: (a) => service.experienceProcedureList(a), craft_experience_procedure_skill_export: (a) => service.experienceProcedureSkillExport(a),
+      craft_experience_learning_evaluation_dispatch: (a) => service.experienceLearningEvaluationDispatch(a),
+      craft_experience_learning_evaluation_result: (a) => service.experienceLearningEvaluationResult(a),
       craft_procedure_configuration_save: (a) => service.procedureConfigurationSave(a),
       craft_experience_graph_inspect: (a) => service.experienceGraphInspect(a),
       craft_experience_graph_edit: (a) => service.experienceGraphEdit(a),

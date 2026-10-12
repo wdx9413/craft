@@ -36,8 +36,11 @@ export function codeContextCandidates(index: JsonObject, query: string, limit = 
     }
   }
   const orderedNeighbours = [...neighbours.values()].sort((a, b) => Number(b.score) - Number(a.score) || String(a.path).localeCompare(String(b.path)) || String(a.id).localeCompare(String(b.id)));
-  const complete = new Map<string, JsonObject>([...candidates.values(), ...orderedNeighbours, ...ranked.slice(seeds.length).map((row): JsonObject => ({ ...row.node, score: row.score, selection_reason: "lexical_match" }))].map(node => [String(node.id), node]));
-  const symbols = [...complete.values()].slice(0, limit);
+  const complete = new Map<string, JsonObject>([...candidates.values(), ...orderedNeighbours, ...ranked.map((row): JsonObject => ({ ...row.node, score: row.score, selection_reason: "lexical_match" }))].map(node => [String(node.id), node]));
+  const ordered = [...complete.values()].sort((a, b) => Number(b.score) - Number(a.score)
+    || Number(a.selection_reason === "dependency_neighbour") - Number(b.selection_reason === "dependency_neighbour")
+    || String(a.path).localeCompare(String(b.path)) || String(a.id).localeCompare(String(b.id)));
+  const symbols = ordered.slice(0, limit);
   const selected = new Set(symbols.map(node => String(node.id)));
   const mapEdges = edges.filter(edge => selected.has(String(edge.from_node_id)) && selected.has(String(edge.to_node_id)));
   return { symbols, omitted_count: complete.size - symbols.length, query_aliases: aliases, candidate_only: true,
