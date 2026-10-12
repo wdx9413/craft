@@ -22,3 +22,15 @@ test("LSP adapter rejects invalid digests, positions, nesting and unbounded inpu
   assert.throws(() => normalizeLspSymbols({ ...input, documents: [{ ...doc, symbols: [nested] }] }), /nesting/);
   assert.throws(() => normalizeLspSymbols({ ...input, documents: [{ ...doc, symbols: Array(10001).fill({ name: "x", range }) }] }), /count/);
 });
+
+
+test("LSP indexed relation endpoints preserve first-symbol selection and bounded relation batches", () => {
+  const relation = { kind: "references", from: { path: "a.py", start_offset: 7 }, to: { path: "a.py", start_offset: 7 }, source_span: { start_offset: 7, end_offset: 10 } };
+  const value = normalizeLspSymbols({ ...input, relations: Array(20_000).fill(relation) });
+  const nodes = value.nodes as JsonObject[], edges = value.edges as JsonObject[];
+  assert.equal(edges.length, 20_000);
+  assert(edges.every(edge => edge.from_node_id === nodes[0]!.id && edge.to_node_id === nodes[0]!.id));
+  assert.notEqual(nodes[0]!.id, nodes[1]!.id);
+  assert.throws(() => normalizeLspSymbols({ ...input, relations: [{ ...relation, to: { path: "missing.py", start_offset: 7 } }] }), /outside supplied symbols/);
+  assert.throws(() => normalizeLspSymbols({ ...input, relations: [{ ...relation, to: { path: "a.py", start_offset: "7" } }] }), /outside supplied symbols/);
+});

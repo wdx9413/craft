@@ -14,7 +14,7 @@
 | --- | --- | --- |
 | Matt Pocock Skills | [`mattpocock/skills`](https://github.com/mattpocock/skills) | 官方 README 将其定位为可组合、可修改、面向真实工程的 Skills；当前 `main` 目录共有 **38 个** `SKILL.md`，其中 18 个 engineering、9 个 `in-progress`、4 个 misc、7 个 productivity。插件清单只正式发布 engineering + productivity 的 25 个；另外 13 个是 `in-progress` / misc。目录枚举依据 [GitHub tree API](https://api.github.com/repos/mattpocock/skills/git/trees/main?recursive=1) 与 [plugin manifest](https://raw.githubusercontent.com/mattpocock/skills/main/.claude-plugin/plugin.json)。 |
 | i-have-adhd | [`ayghri/i-have-adhd`](https://github.com/ayghri/i-have-adhd) | 同名仓库不止一个，例如 `iizcm/i-have-adhd-skill`、`hackersatyamrastogi/i-have-adhd`；它们不是同一实现。本报告只讨论维护者仓 `ayghri/i-have-adhd` 的 [`skills/i-have-adhd/SKILL.md`](https://raw.githubusercontent.com/ayghri/i-have-adhd/main/skills/i-have-adhd/SKILL.md)。 |
-| Ponytail | 本机已安装的 [`SKILL.md`](/Users/didi/.agents/skills/ponytail/SKILL.md)，并以 [`meo9805/ponytail`](https://github.com/meo9805/ponytail) 上游的 [portability 文档](https://github.com/meo9805/ponytail/blob/main/docs/agent-portability.md) 交叉核验 | 当前本机安装内容是单个 `ponytail` Skill；上游另有 `ponytail-review`、`ponytail-audit`、`ponytail-debt`、`ponytail-gain`、`ponytail-help`。本报告将本机文件作为本轮实际可见行为的权威，不推定本机与上游版本完全一致。 |
+| Ponytail | 本机已安装的 `/Users/didi/.agents/skills/ponytail/SKILL.md`（当时本机路径），并以 [`meo9805/ponytail`](https://github.com/meo9805/ponytail) 上游的 [portability 文档](https://github.com/meo9805/ponytail/blob/main/docs/agent-portability.md) 交叉核验 | 当前本机安装内容是单个 `ponytail` Skill；上游另有 `ponytail-review`、`ponytail-audit`、`ponytail-debt`、`ponytail-gain`、`ponytail-help`。本报告将本机文件作为本轮实际可见行为的权威，不推定本机与上游版本完全一致。 |
 
 ### 1.2 Craft 对照基线
 
@@ -142,7 +142,7 @@
 
 ### 4.1 本机实际规则
 
-本轮本机文件 [`/Users/didi/.agents/skills/ponytail/SKILL.md`](/Users/didi/.agents/skills/ponytail/SKILL.md) 是唯一的本机行为证据。它默认 `full`，另有 `lite` / `ultra`，以“惰性是高效而非草率”为前提，给出一条由高到低的决策梯：
+本轮本机文件 `/Users/didi/.agents/skills/ponytail/SKILL.md`（当时本机路径） 是唯一的本机行为证据。它默认 `full`，另有 `lite` / `ultra`，以“惰性是高效而非草率”为前提，给出一条由高到低的决策梯：
 
 ```text
 需求真的存在？
@@ -275,7 +275,7 @@ flowchart LR
 
 ### 本地一手来源
 
-- [本机 Ponytail Skill](/Users/didi/.agents/skills/ponytail/SKILL.md)
+- 本机 Ponytail Skill：`/Users/didi/.agents/skills/ponytail/SKILL.md`（历史本机证据，不是仓库内可访问文件）
 - [Craft Capability Kit Runtime](../technical/modules/capability-kit-runtime.md)
 - [Craft Experience Skill](../../skills/craft-experience/SKILL.md) · [Quality Skill](../../skills/craft-quality/SKILL.md)
 - [Procedure Automation 实现](../../capability/craft-experience/procedure-automation.ts) · [对应测试](../../tests/procedure-automation.test.ts)

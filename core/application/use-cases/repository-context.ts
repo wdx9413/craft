@@ -1,3 +1,4 @@
+import { observeOperation } from "../../../common/craft-common-log/src/index.ts";
 import { assertContextReadCurrent } from "../../context-access-guard.ts";
 import type { CraftService } from "../craft-service.ts";
 import type { JsonObject } from "../../infrastructure/store.ts";
@@ -21,7 +22,7 @@ export async function openContext(service: CraftService, args: JsonObject): Prom
   const identity = service.scopeIdentityResolveProject({ project_root: root }).identity as JsonObject;
   const scope = identity.canonical_scope as JsonObject;
   let codebase: JsonObject;
-  try { codebase = args.include_codebase === false ? { status: "skipped", reason: "not_requested" } : ensureRepository(service, { project_root: root, index_depth: args.index_depth, query: args.query }); }
+  try { codebase = args.include_codebase === false ? { status: "skipped", reason: "not_requested" } : observeOperation(service.store, "codebase", "repository_ensure", { project_root: root, index_depth: args.index_depth }, () => ensureRepository(service, { project_root: root, index_depth: args.index_depth, query: args.query })); }
   catch { codebase = { status: "unavailable", reason: "repository_index_failed" }; }
   if (args.required_refs !== undefined && !Array.isArray(args.required_refs)) throw new CraftOperationError("INVALID_INPUT", "input_validation", "required_refs must be an array", { field: "required_refs" });
   let required: JsonObject[];

@@ -5,7 +5,8 @@ import { gzipSync, gunzipSync } from "node:zlib";
 import type { JsonObject } from "./infrastructure/store.ts";
 import { object, text } from "./validation.ts";
 
-const FORMAT = "craft.trace.archive.v1";
+const FORMAT = "craft.trace.archive.v2";
+const LEGACY_FORMAT = "craft.trace.archive.v1";
 const LOCAL_STORAGE = "local_jsonl_gzip";
 const OBJECT_STORAGE = "object_jsonl_gzip";
 
@@ -16,13 +17,14 @@ export type TraceArchiveBundle = {
   trace: JsonObject;
   events: JsonObject[];
   feedback: JsonObject[];
+  telemetry_events?: JsonObject[];
 };
 
 export type TraceArchivePointer = {
   /** Logical storage plugin chosen when the segment was written. */
   backend_id?: string;
   storage: typeof LOCAL_STORAGE | typeof OBJECT_STORAGE;
-  format: typeof FORMAT;
+  format: typeof FORMAT | typeof LEGACY_FORMAT;
   locator: string;
   uri: string;
   content_digest: string;
@@ -55,7 +57,7 @@ function validTimestamp(value: string): string {
   return value;
 }
 
-function line(type: "trace" | "event" | "feedback", value: JsonObject): string {
+function line(type: "trace" | "event" | "feedback" | "telemetry", value: JsonObject): string {
   return JSON.stringify({ type, value });
 }
 
@@ -67,6 +69,7 @@ function encode(bundle: TraceArchiveBundle): EncodedArchive {
   const records = [line("trace", object(bundle.trace, "trace"))];
   for (const event of bundle.events) records.push(line("event", object(event, "event")));
   for (const feedback of bundle.feedback) records.push(line("feedback", object(feedback, "feedback")));
+  for (const event of bundle.telemetry_events ?? []) records.push(line("telemetry", object(event, "telemetry")));
   const payload = `${records.join("\n")}\n`;
   const contentDigest = digest(payload);
   const manifest = JSON.stringify({ format: FORMAT, trace_id: traceId, trace_version: traceVersion, archived_at: archivedAt, content_digest: contentDigest });
@@ -80,14 +83,14 @@ function decode(body: Uint8Array, pointer: TraceArchivePointer): TraceArchiveBun
   if (lines.length < 3 || lines.at(-1) !== "") throw new Error("Trace archive JSONL is malformed");
   let manifest: JsonObject;
   try { manifest = object(JSON.parse(lines[0]), "archive manifest"); } catch { throw new Error("Trace archive JSONL is malformed"); }
-  if (manifest.format !== FORMAT || manifest.content_digest !== pointer.content_digest) throw new Error("Trace archive digest does not match pointer");
+  if (manifest.format !== pointer.format || ![FORMAT, LEGACY_FORMAT].includes(String(manifest.format)) || manifest.content_digest !== pointer.content_digest) throw new Error("Trace archive digest does not match pointer");
   const payload = `${lines.slice(1, -1).join("\n")}\n`;
   if (digest(payload) !== pointer.content_digest) throw new Error("Trace archive digest does not match payload");
   const traceId = text(manifest.trace_id, "archive trace_id");
   const traceVersion = Number(manifest.trace_version);
   if (!Number.isInteger(traceVersion) || traceVersion < 1) throw new Error("Trace archive trace_version is invalid");
   const archivedAt = validTimestamp(text(manifest.archived_at, "archive archived_at"));
-  const events: JsonObject[] = []; const feedback: JsonObject[] = []; let trace: JsonObject | null = null;
+  const events: JsonObject[] = []; const feedback: JsonObject[] = []; const telemetry: JsonObject[] = []; let trace: JsonObject | null = null;
   for (const item of lines.slice(1, -1)) {
     let record: JsonObject;
     try { record = object(JSON.parse(item), "archive record"); } catch { throw new Error("Trace archive JSONL is malformed"); }
@@ -95,10 +98,11 @@ function decode(body: Uint8Array, pointer: TraceArchivePointer): TraceArchiveBun
     if (record.type === "trace" && trace === null) trace = value;
     else if (record.type === "event") events.push(value);
     else if (record.type === "feedback") feedback.push(value);
+    else if (record.type === "telemetry") telemetry.push(value);
     else throw new Error("Trace archive record is unsupported");
   }
   if (trace === null) throw new Error("Trace archive is missing its trace record");
-  return { trace_id: traceId, trace_version: traceVersion, archived_at: archivedAt, trace, events, feedback };
+  return { trace_id: traceId, trace_version: traceVersion, archived_at: archivedAt, trace, events, feedback, ...(telemetry.length ? { telemetry_events: telemetry } : {}) };
 }
 
 function dateParts(archivedAt: string): [string, string, string] {
@@ -137,7 +141,7 @@ export class LocalTraceArchiveStore implements TraceArchiveStore {
   }
 
   read(value: TraceArchivePointer): TraceArchiveBundle {
-    if (value.storage !== LOCAL_STORAGE || value.format !== FORMAT) throw new Error("Trace archive storage is unsupported");
+    if (value.storage !== LOCAL_STORAGE || ![FORMAT, LEGACY_FORMAT].includes(value.format)) throw new Error("Trace archive storage is unsupported");
     const locator = safeLocator(value.locator, "trace-archive");
     return decode(readFileSync(join(this.logsDir, ...locator.split("/"))), value);
   }
@@ -160,7 +164,7 @@ export class ObjectTraceArchiveStore implements TraceArchiveStore {
   }
 
   read(value: TraceArchivePointer): TraceArchiveBundle {
-    if (value.storage !== OBJECT_STORAGE || value.format !== FORMAT) throw new Error("Trace archive storage is unsupported");
+    if (value.storage !== OBJECT_STORAGE || ![FORMAT, LEGACY_FORMAT].includes(value.format)) throw new Error("Trace archive storage is unsupported");
     return decode(this.backend.get(safeLocator(value.locator, this.prefix)), value);
   }
 }

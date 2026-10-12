@@ -1,3 +1,5 @@
+import { ComponentTraceKernel } from "../component-trace.ts";
+import { randomUUID as hookRequestId } from "node:crypto";
 import { assertContextReadCurrent } from "../context-access-guard.ts";
 /**
  * Bounded Codex lifecycle integration for Craft Context and its standalone products.
@@ -101,23 +103,26 @@ export class HookTurnJournal {
   record(input: HookInput, signal: Signal): JsonObject | null {
     const scope = codexProjectScope(input.cwd); const turn = this.turn(input);
     if (!scope || !turn) return null;
-    const journalId = `codex_hook_turn_${digest({ scope, turn }).slice(-20)}`;
-    const existing = this.service.store.find("codex_hook_turn", journalId);
-    const priorSignals = Array.isArray(existing?.signals) ? existing.signals as JsonObject[] : [];
-    if (priorSignals.some((item) => item.id === signal.id)) return existing!;
-    const signals = [...priorSignals, signal];
-    const lastEdit = signals.findLastIndex((item) => item.kind === "edit");
-    const checks = new Map<string, string>();
-    for (const item of signals.slice(lastEdit + 1)) if (item.kind === "verification") checks.set(String(item.verifier), String(item.outcome));
-    const outcomes = [...checks.values()];
-    const next = { scope, session_id: text(input.session_id) ?? "unknown", turn_id: turn, signals,
-      has_edit: signals.some((item) => item.kind === "edit"),
-      verification_outcome: !outcomes.length || outcomes.includes("unknown") ? null : outcomes.includes("failed") ? "failed" : "passed",
-      edit_revision: lastEdit < 0 ? null : signals[lastEdit]!.digest,
-      verification_receipts: [...checks].map(([verifier, outcome]) => ({ verifier, outcome, edit_revision: lastEdit < 0 ? null : signals[lastEdit]!.digest })),
-      content_stored: false, updated_at: new Date().toISOString() } satisfies JsonObject;
-    return existing ? this.service.store.save("codex_hook_turn", journalId, { ...payload(existing), ...next })
-      : this.service.store.create("codex_hook_turn", journalId, next);
+    return this.service.store.transaction(() => {
+      const existing = this.find(input);
+      const journalId = existing ? String(existing.id) : this.journalId(scope, turn, input);
+      if (existing?.closed_at) return null;
+      const priorSignals = Array.isArray(existing?.signals) ? existing.signals as JsonObject[] : [];
+      if (priorSignals.some((item) => item.id === signal.id)) return existing!;
+      const signals = [...priorSignals, signal];
+      const lastEdit = signals.findLastIndex((item) => item.kind === "edit");
+      const checks = new Map<string, string>();
+      for (const item of signals.slice(lastEdit + 1)) if (item.kind === "verification") checks.set(String(item.verifier), String(item.outcome));
+      const outcomes = [...checks.values()];
+      const next = { scope, session_id: text(input.session_id) ?? "unknown", turn_id: turn, signals,
+        has_edit: signals.some((item) => item.kind === "edit"),
+        verification_outcome: !outcomes.length || outcomes.includes("unknown") ? null : outcomes.includes("failed") ? "failed" : "passed",
+        edit_revision: lastEdit < 0 ? null : signals[lastEdit]!.digest,
+        verification_receipts: [...checks].map(([verifier, outcome]) => ({ verifier, outcome, edit_revision: lastEdit < 0 ? null : signals[lastEdit]!.digest })),
+        content_stored: false, updated_at: new Date().toISOString() } satisfies JsonObject;
+      return existing ? this.service.store.save("codex_hook_turn", journalId, { ...payload(existing), ...next })
+        : this.service.store.create("codex_hook_turn", journalId, next);
+    });
   }
 
   bindContextReceipt(input: HookInput, receipt: JsonObject): void {
@@ -130,7 +135,27 @@ export class HookTurnJournal {
 
   find(input: HookInput): JsonObject | null {
     const scope = codexProjectScope(input.cwd); const turn = this.turn(input);
-    return !scope || !turn ? null : this.service.store.find("codex_hook_turn", `codex_hook_turn_${digest({ scope, turn }).slice(-20)}`);
+    if (!scope || !turn) return null;
+    const current = this.service.store.find("codex_hook_turn", this.journalId(scope, turn, input));
+    if (current) return current;
+    const legacy = this.service.store.find("codex_hook_turn", `codex_hook_turn_${digest({ scope, turn }).slice(-20)}`);
+    return legacy && (legacy.session_id ?? "unknown") === (text(input.session_id) ?? "unknown") ? legacy : null;
+  }
+
+  close(input: HookInput): void {
+    const scope = codexProjectScope(input.cwd), turn = this.turn(input);
+    if (!scope || !turn) return;
+    const existing = this.find(input);
+    const journalId = existing ? String(existing.id) : this.journalId(scope, turn, input);
+    if (existing?.closed_at) return;
+    const next = { ...(existing ? payload(existing) : { scope, session_id: text(input.session_id) ?? "unknown", turn_id: turn,
+      signals: [], has_edit: false, verification_outcome: null, content_stored: false }), closed_at: new Date().toISOString() };
+    if (existing) this.service.store.save("codex_hook_turn", journalId, next);
+    else this.service.store.create("codex_hook_turn", journalId, next);
+  }
+
+  private journalId(scope: { kind: "project"; id: string }, turn: string, input: HookInput): string {
+    return `codex_hook_turn_${digest({ scope, session_id: text(input.session_id) ?? "unknown", turn }).slice(-20)}`;
   }
 
   private turn(input: HookInput): string | null {
@@ -174,8 +199,18 @@ export class CodexHookBridge {
   }
 
   async handle(member: CodexHookMember, input: HookInput): Promise<JsonObject> {
-    try {
+    const captured = await new ComponentTraceKernel(this.service.trace, "hook").capture({ requestId: hookRequestId(), component: "craft-hook",
+      operation: "handle", input: { member, envelope: input }, handler: () => this.dispatch(member, input) });
+    if (!captured.ok) {
+      this.service.store.appendEvent("codex-hook", "codex_hook.failed", { member, error_type: captured.error instanceof Error ? captured.error.name : "unknown" });
+      return {};
+    }
+    return captured.result ?? {};
+  }
+
+  private async dispatch(member: CodexHookMember, input: HookInput): Promise<JsonObject> {
       const event = text(input.hook_event_name) as HookEvent | null;
+      input = this.correlateTurn(input, event);
       if (member === "context") {
         if (event === "SessionStart" || event === "SessionEnd") {
           for (const component of CONTEXT_MEMBERS) this.lifecycle(component, event, input, component === "memory");
@@ -193,29 +228,42 @@ export class CodexHookBridge {
       if (event === "PostToolUse" && member === "experience") return this.tool(input);
       if (event === "Stop") return this.stop(member, input);
       return {};
-    } catch (error) {
-      // Hook failures are deliberately fail-open. The trace contains only the class of error.
-      this.service.store.appendEvent("codex-hook", "codex_hook.failed", { member, event: String(input.hook_event_name), error_type: error instanceof Error ? error.name : "unknown" });
-      return {};
-    }
+  }
+
+  private correlateTurn(input: HookInput, event: HookEvent | null): HookInput {
+    const scope = codexProjectScope(input.cwd), sessionId = text(input.session_id);
+    if (!scope || !sessionId) return input;
+    const sessionKey = `context_hook_session_${stableDigest({ scope, session_id: sessionId }).slice(-24)}`;
+    return this.service.store.transaction(() => {
+      const prior = this.service.store.find("context_hook_session", sessionKey);
+      let pending = Array.isArray(prior?.pending_turn_ids) ? prior.pending_turn_ids as string[] : [];
+      let ambiguous = prior?.ambiguous === true;
+      let turnId = text(input.turn_id);
+      if (event === "UserPromptSubmit" && (text(input.prompt) || text(input.user_prompt))) {
+        const sequence = Number(prior?.sequence ?? 0) + 1;
+        turnId ??= `hook_turn_${sessionKey.slice(-24)}_${sequence}`;
+        if (!pending.includes(turnId)) pending = [...pending, turnId];
+        ambiguous ||= pending.length > 1;
+        this.service.store.save("context_hook_session", sessionKey, { scope, session_id: sessionId, sequence, last_turn_id: turnId, pending_turn_ids: pending, ambiguous, content_free: true });
+      } else if (event === "PostToolUse" || event === "Stop") {
+        // Overlapping turns stay ambiguous until all are closed; a delayed event
+        // must never be attributed to whichever turn happens to remain.
+        if (!turnId && !ambiguous && pending.length === 1) turnId = pending[0]!;
+        if (event === "Stop" && turnId && pending.includes(turnId)) {
+          pending = pending.filter(id => id !== turnId);
+          this.service.store.save("context_hook_session", sessionKey, { ...payload(prior!), pending_turn_ids: pending, ambiguous: pending.length > 0 && ambiguous });
+        }
+      } else if ((event === "SessionStart" || event === "SessionEnd") && prior) {
+        this.service.store.save("context_hook_session", sessionKey, { ...payload(prior), pending_turn_ids: [], ambiguous: false });
+      }
+      return turnId ? { ...input, turn_id: turnId } : input;
+    });
   }
 
   private async prompt(member: CodexHookMember, input: HookInput): Promise<JsonObject> {
     const scope = codexProjectScope(input.cwd); const prompt = text(input.prompt) ?? text(input.user_prompt);
     if (!scope || !prompt) return {};
     const members = member === "context" ? CONTEXT_MEMBERS : [member];
-    // Native Hosts need not supply turn_id. Mint a local turn for this prompt and
-    // return it to the Host; never reuse a prompt digest across different turns.
-    const sessionId = text(input.session_id);
-    if (sessionId && !text(input.turn_id)) {
-      const sessionKey = `context_hook_session_${stableDigest({ scope, session_id: sessionId }).slice(-24)}`;
-      const turnId = this.service.store.transaction(() => {
-        const prior = this.service.store.find("context_hook_session", sessionKey), sequence = Number(prior?.sequence ?? 0) + 1;
-        const generated = `hook_turn_${sessionKey.slice(-24)}_${sequence}`;
-        this.service.store.save("context_hook_session", sessionKey, { scope, session_id: sessionId, sequence, last_turn_id: generated, content_free: true }); return generated;
-      });
-      input = { ...input, session_id: sessionId, turn_id: turnId };
-    }
     // Persist the current checkout only as an alias. The receipt still names the
     // canonical Git identity, so it is portable and does not leak the path.
     if (typeof input.cwd === "string") this.service.scopeIdentityResolveProject({ project_root: input.cwd });
@@ -259,7 +307,11 @@ export class CodexHookBridge {
   }
 
   private stop(member: ComponentHookMember, input: HookInput): JsonObject {
-    const finalized = member === "experience" ? this.learning.finalize(input) : null;
+    const finalized = member === "experience" ? this.service.store.transaction(() => {
+      const result = this.learning.finalize(input);
+      this.journal.close(input);
+      return result;
+    }) : null;
     this.service.activationProofRecord({ host: hookHost(input), component: member, event: "Stop", session_id: text(input.session_id) ?? "unknown",
       turn_id: text(input.turn_id), memory_written: false, observation_written: finalized !== null,
       plugin_release: CRAFT_RELEASE_VERSION, hook_trusted: true, mcp_reachable: true });

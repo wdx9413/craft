@@ -1,3 +1,4 @@
+import { observedKernel } from "../../common/craft-common-log/src/index.ts";
 import { KnowledgeClaimGovernance } from "./claim-governance.ts";
 /**
  * The Knowledge capability.
@@ -6,10 +7,12 @@ import { KnowledgeClaimGovernance } from "./claim-governance.ts";
  * Evidence that backs it, and a Wiki page carries the claim identity rather than a copy of it.
  * That gate is why this member is a capability and not a convenience store.
  *
- * The package owns seven kernels and nothing else:
+ * The package owns nine kernels:
  *
  * | kernel | what it holds |
  * |---|---|
+ * | `knowledge-claim-governance` | reviewed claim lifecycle and governed reads |
+ * | `knowledge-source-registry` | source identity, trust and availability shared with Memory |
  * | `knowledge-workbench` | the bounded read-only Workbench projection and a Context Bundle preview |
  * | `knowledge-bound-launch` | a Work Launch pinned to one exact Context Bundle, revalidated before any Host run |
  * | `knowledge-relation` | typed, evidence-backed relations between addressable knowledge objects |
@@ -18,11 +21,8 @@ import { KnowledgeClaimGovernance } from "./claim-governance.ts";
  * | `project-knowledge` | the rebuildable Markdown index projection, its search and its scope expiry |
  * | `project-brain` | the project's goals, decisions, bound material and recorded outcomes |
  *
- * Two things it deliberately does **not** own: the Knowledge Source registry
- * (`knowledge-memory-runtime.ts`, which serves memory's writes too, so it stays in the core),
- * and the claim and Wiki page write verbs, which still live in the `craft-service.ts` facade.
- * Both are named in `ownership.ts` where the projection is declared, because the product must
- * still expose them even though this package does not implement them.
+ * The core service facade delegates claim and source operations to these kernels.
+ * Wiki page write orchestration remains in the facade.
  *
  * Its `KnowledgeContribution` is the one governed read side used by Context Resolution.  It
  * projects only reviewed claims; diagnostic searches may expose candidates to a human, but a
@@ -85,15 +85,15 @@ export const knowledgeCapability: CraftCapability = {
     // The Source registry is this member's, now that it no longer shares a class with the
     // Memory Ledger. Its tools become the capability's to claim rather than the core's to
     // project on its behalf, which is the whole point of cutting the class along the member.
-    registry.provide(KNOWLEDGE_KERNELS.claims, new KnowledgeClaimGovernance(store));
-    registry.provide(KNOWLEDGE_KERNELS.sources, new KnowledgeSourceRegistry(store));
-    registry.provide(KNOWLEDGE_KERNELS.workbench, new KnowledgeWorkbenchKernel(store));
-    registry.provide(KNOWLEDGE_KERNELS.boundLaunch, new KnowledgeBoundLaunchKernel(store));
-    registry.provide(KNOWLEDGE_KERNELS.relations, new KnowledgeRelationKernel(store));
-    registry.provide(KNOWLEDGE_KERNELS.wikiCandidates, new WikiCandidateGovernanceKernel(store));
-    registry.provide(KNOWLEDGE_KERNELS.localImport, new LocalCandidateImportKernel(store));
-    registry.provide(KNOWLEDGE_KERNELS.projectKnowledge, new ProjectKnowledgeKernel(store));
-    registry.provide(KNOWLEDGE_KERNELS.projectBrain, new ProjectBrainKernel(store));
+    registry.provide(KNOWLEDGE_KERNELS.claims, observedKernel(store, "knowledge", new KnowledgeClaimGovernance(store)));
+    registry.provide(KNOWLEDGE_KERNELS.sources, observedKernel(store, "knowledge", new KnowledgeSourceRegistry(store)));
+    registry.provide(KNOWLEDGE_KERNELS.workbench, observedKernel(store, "knowledge", new KnowledgeWorkbenchKernel(store)));
+    registry.provide(KNOWLEDGE_KERNELS.boundLaunch, observedKernel(store, "knowledge", new KnowledgeBoundLaunchKernel(store)));
+    registry.provide(KNOWLEDGE_KERNELS.relations, observedKernel(store, "knowledge", new KnowledgeRelationKernel(store)));
+    registry.provide(KNOWLEDGE_KERNELS.wikiCandidates, observedKernel(store, "knowledge", new WikiCandidateGovernanceKernel(store)));
+    registry.provide(KNOWLEDGE_KERNELS.localImport, observedKernel(store, "knowledge", new LocalCandidateImportKernel(store)));
+    registry.provide(KNOWLEDGE_KERNELS.projectKnowledge, observedKernel(store, "knowledge", new ProjectKnowledgeKernel(store)));
+    registry.provide(KNOWLEDGE_KERNELS.projectBrain, observedKernel(store, "knowledge", new ProjectBrainKernel(store)));
   },
   contributes: (registry) => new KnowledgeContribution(registry.require<CraftStore>(CORE_KERNELS.store)),
 };

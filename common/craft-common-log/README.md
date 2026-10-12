@@ -11,3 +11,7 @@ const receipt = await telemetry.record({ signal: "usage", capability_id: "my-cap
 ```
 
 Attributes are limited to bounded identifiers, digests, counters and status fields. Raw prompts, tool results, and credentials are rejected.
+
+`observeOperation(store, component, operation, input, run)` preserves synchronous and async return types and propagates parent spans through awaited calls. Capability registrations use `observedKernel`; the CraftService facade, MCP and Hook entrances also create canonical Traces. Standalone kernel classes can use `observedKernel` explicitly. Only input/result digests, bounded receipt identifiers, duration, safe error categories and business status are retained. A returned handler is distinct from `partial`, `unavailable` or `denied` business results. Telemetry-only Traces are excluded from automatic experience learning.
+
+Normal plugin calls and service startup run a bounded Trace retention sweep when due. The cadence and last success/failure are persisted as `maintenance_component:trace_retention`, visible through component diagnosis. Archive v2 includes associated telemetry and is read back before hot records are removed; v1 archives remain readable. This is on-use maintenance: an idle process does not wake itself, while the existing worker supports continuous maintenance. Usage requires actual measurements; an empty cost ledger reports unknown totals, while measured zero remains zero.

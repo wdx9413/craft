@@ -142,10 +142,12 @@ test("Hook observations never mistake command success, old edits or session iden
     await bridge.handle("experience", { ...base, hook_event_name: "Stop" });
     assert.equal(f.store.list("workflow_evolution_observation", 10)[0]!.outcome, "failed");
     await event("Bash", "npm test", 0);
-    assert.equal(bridge.journal.find(base)!.verification_outcome, "passed");
+    assert.equal(bridge.journal.find(base)!.verification_outcome, "failed");
+    base = { ...base, turn_id: "next-turn" };
     await event("Edit", "", 0);
     assert.equal(bridge.journal.find(base)!.verification_outcome, null);
     await event("Bash", "npm test", 0);
+    assert.equal(bridge.journal.find(base)!.verification_outcome, "passed");
     await bridge.handle("experience", { ...base, hook_event_name: "Stop" });
     assert(f.store.list("evidence", 10).every((record) => record.confidence === "bounded"));
     assert.equal(bridge.journal.find({ cwd: f.root, session_id: "session" }), null);

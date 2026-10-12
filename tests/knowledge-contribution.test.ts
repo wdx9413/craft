@@ -7,8 +7,44 @@ import { KnowledgeContribution } from "../capability/craft-knowledge/contributio
 import type { ContextRequest } from "../core/capability-protocol.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
+import { ContextResolutionKernel } from "../core/context-resolution.ts";
+import { assertContextReadCurrent } from "../common/craft-common-store-local/src/context-access-guard.ts";
 
 const request: ContextRequest = { query: "alpha", scope_kind: "project", scope_id: "demo", max_items: 10, max_chars: 10000, now: "2026-09-27T10:00:00Z" };
+
+test("Knowledge Context excludes restricted bodies unless explicitly allowed", async t => {
+  const f = await fixture();
+  try {
+    const ref = f.store.contentStore.writeSync({ kind: "knowledge", record_id: "restricted", version: 1, scope: "project:demo", status: "reviewed", sensitivity: "restricted", source_id: "source", body: "alpha secret fixture" });
+    f.claim("restricted", { sensitivity: "restricted", content: undefined, content_ref: ref });
+    t.mock.method(f.store.contentStore, "readCompatSync", () => { throw new Error("Restricted body must not be hydrated"); });
+    assert.deepEqual((await f.reader.contribute(request)).items, []);
+    const kernel = new ContextResolutionKernel(f.store, [f.reader]);
+    assert.deepEqual(((await kernel.resolve({ ...request, members: ["knowledge"] })).contributions as JsonObject[])[0]!.items, []);
+    t.mock.restoreAll();
+    assert.equal((await f.reader.contribute({ ...request, allow_restricted: true })).items[0]!.claim_id, "restricted");
+    const allowed = await kernel.resolve({ ...request, members: ["knowledge"], allow_restricted: true });
+    assert.deepEqual((allowed.contributions as JsonObject[]).flatMap(part => (part.items as JsonObject[]).map(item => item.claim_id)), ["restricted"]);
+  } finally { await f.close(); }
+});
+
+test("Context recalls project aliases without an identity record and fences alias revocation", async () => {
+  const f = await fixture();
+  try {
+    f.claim("alias", { scope: "project:old-name" });
+    f.claim("foreign", { scope: "project:other" });
+    f.store.create("scope_alias", "active", { status: "active", scope: { kind: "project", id: "demo" }, alias: "old-name" });
+    const kernel = new ContextResolutionKernel(f.store, [f.reader]);
+    const result = await kernel.resolve({ ...request, members: ["knowledge"] });
+    assert.deepEqual((result.contributions as JsonObject[]).flatMap(part => (part.items as JsonObject[]).map(item => item.claim_id)), ["alias"]);
+    const receipt = result.receipt as JsonObject;
+    assert((receipt.read_refs as JsonObject[]).some(ref => ref.kind === "scope_alias" && ref.id === "active"));
+    f.store.save("scope_alias", "active", { status: "revoked", scope: { kind: "project", id: "demo" }, alias: "old-name" });
+    assert.throws(() => assertContextReadCurrent(f.store, receipt), /changed during recall/);
+    const reopened = await kernel.resolve({ ...request, members: ["knowledge"] });
+    assert.deepEqual((reopened.contributions as JsonObject[]).flatMap(part => part.items as JsonObject[]), []);
+  } finally { await f.close(); }
+});
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-knowledge-contribution-"));
   const store = await new CraftStore(craftPaths(root)).open();

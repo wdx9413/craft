@@ -204,3 +204,20 @@ test("standalone Knowledge and Memory surfaces expose the same portable bundle p
     }
   } finally { await close(f); }
 });
+
+
+test("diagnostic knowledge search applies restricted and invalid-expiry filters before loading bodies", async t => {
+  const f = await fixture();
+  try {
+    const evidence = sourceAndEvidence(f.service);
+    const claim = f.service.knowledgeClaimSave({ claim_id: "restricted", kind: "fact", content: "alpha fixture", scope: "project:p", source_id: "notes", evidence_ids: [evidence.id] }).claim as JsonObject;
+    f.store.save("knowledge_claim", String(claim.id), { ...claim, sensitivity: "restricted" });
+    const mocked = t.mock.method(f.store.contentStore, "readCompatSync", () => { throw new Error("Body must not be loaded"); });
+    assert.deepEqual(f.service.knowledgeSearch({ query: "alpha", scope: "project:p" }).hits, []);
+    mocked.mock.restore();
+    assert.equal((f.service.knowledgeSearch({ query: "alpha", scope: "project:p", allow_restricted: true }).hits as JsonObject[])[0]!.claim_id, claim.id);
+    f.store.save("knowledge_claim", String(claim.id), { ...claim, valid_until: "invalid", sensitivity: "internal" });
+    t.mock.method(f.store.contentStore, "readCompatSync", () => { throw new Error("Invalid-expiry body must not be loaded"); });
+    assert.deepEqual(f.service.knowledgeSearch({ query: "alpha", scope: "project:p" }).hits, []);
+  } finally { await close(f); }
+});

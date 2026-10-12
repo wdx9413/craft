@@ -1,3 +1,4 @@
+import { observedKernel } from "../../common/craft-common-log/src/index.ts";
 /**
  * The Memory capability.
  *
@@ -51,9 +52,9 @@ export const memoryCapability: CraftCapability = {
   contributes: registry => new MemoryContribution(registry.require<CraftStore>(CORE_KERNELS.store)),
   register(registry): void {
     const store = registry.require<CraftStore>(CORE_KERNELS.store);
-    const ledger = new MemoryLedgerKernel(store);
+    const ledger = observedKernel(store, "memory", new MemoryLedgerKernel(store));
     registry.provide(MEMORY_KERNELS.ledger, ledger);
-    registry.provide(MEMORY_KERNELS.governance, new MemoryGovernanceKernel(store, ledger));
-    registry.provide(MEMORY_KERNELS.signals, new MemorySignalsKernel(store));
+    registry.provide(MEMORY_KERNELS.governance, observedKernel(store, "memory", new MemoryGovernanceKernel(store, ledger)));
+    registry.provide(MEMORY_KERNELS.signals, observedKernel(store, "memory", new MemorySignalsKernel(store)));
   },
 };

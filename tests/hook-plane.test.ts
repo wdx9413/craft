@@ -80,6 +80,7 @@ test("stops a tool call at tool_before and does not dispatch it", async () => {
     // that no longer happens would be deciding about nothing.
     assert.deepEqual(f.plane.records.map((record) => record.phase), ["tool_before"]);
     assert.equal(f.plane.records[0]!.denied, true);
+    assert.ok(f.store.list("trace_event", 100).some(event => event.status === "denied"));
   } finally { await close(f); }
 });
 

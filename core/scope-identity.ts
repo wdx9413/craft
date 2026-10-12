@@ -101,7 +101,7 @@ export class ScopeIdentityKernel {
       if (project) {
         const candidates = this.store.list("scope_alias", 10_000, (item) => item.status === "active" && String(item.alias) === project.id);
         const direct = this.store.find("project_identity", project.id);
-        const canonical = direct ? direct.canonical_scope as ScopeRef : candidates[0]?.scope as ScopeRef | undefined;
+        const canonical = direct ? direct.canonical_scope as ScopeRef : (candidates[0]?.scope as ScopeRef | undefined) ?? project;
         if (canonical) {
           attempted.push(canonical); aliases.push(...candidates);
           // Read legacy/path aliases only as bounded project aliases for this

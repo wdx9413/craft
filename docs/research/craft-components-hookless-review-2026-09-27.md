@@ -31,7 +31,7 @@ Skill 决定何时调用，MCP 提供可调用接口，Runtime 执行校验和�
 | Experience | 无 Hook 时 `craft_context_resolution_resolve`，选 `members: ["experience"]` | daily 没有 resolve；该调用返回 `Unknown tool` | 观察与 Procedure 操作存在，但按 Skill 的开始检索链断裂；需受限 Experience resolve。 |
 | Codebase | 声明 workspace，创建/选择 checkpoint，再 build | 独立面仅 `craft_info` + 8 个 codebase 工具；缺 Workspace 建立/checkpoint 操作 | 空数据空间不能只按独立 Skill 完成首跑；增加受限 bootstrap 或 snapshot manifest 导入，不能要求临时切到 full。 |
 
-来源：[daily surface registry](../../core/interfaces/mcp/surface-registry.ts)、[product mapping](../../core/interfaces/mcp/product-launch.ts)、[Knowledge Skill](../../plugins/craft-knowledge/skills/craft-knowledge/SKILL.md)、[Memory Skill](../../plugins/craft-memory/skills/craft-memory/SKILL.md)、[Experience Skill](../../plugins/craft-experience/skills/craft-experience/SKILL.md)、[Codebase Skill](../../plugins/craft-codebase/skills/craft-codebase/SKILL.md)。隔离枚举 tools/list：Knowledge 16、Memory 16、Experience 13、Codebase 9。
+来源：[daily surface registry](../../core/interfaces/mcp/surface-registry.ts)、[product mapping](../../core/interfaces/mcp/product-launch.ts)、[Knowledge Skill](../../skills/craft-knowledge/SKILL.md)、[Memory Skill](../../skills/craft-memory/SKILL.md)、[Experience Skill](../../skills/craft-experience/SKILL.md)、[Codebase Skill](../../skills/craft-codebase/SKILL.md)。隔离枚举 tools/list：Knowledge 16、Memory 16、Experience 13、Codebase 9。
 
 Codebase 现有测试在 fixture 中直接调用 `service.workspaceOpen` 和 `workspaceCheckpoint`，然后测 Codebase；这证明内核可用，未证明独立插件从空环境可用。[现有 Codebase 测试](../../tests/craft-codebase.test.ts)
 

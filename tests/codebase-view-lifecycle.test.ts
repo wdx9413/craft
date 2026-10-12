@@ -11,6 +11,19 @@ import { CraftService } from "../core/service.ts";
 import { repositoryFiles } from "../capability/craft-codebase/repository-files.ts";
 import { codeContextCandidates } from "../capability/craft-codebase/context-search.ts";
 
+test("repository discovery accepts legal paths beginning with two dots", () => {
+  const root = mkdtempSync(join(tmpdir(), "craft-dot-path-"));
+  try {
+    execFileSync("git", ["-C", root, "init", "-q"]);
+    mkdirSync(join(root, "..helpers"));
+    writeFileSync(join(root, "..helpers.ts"), "export const helper = 1;");
+    writeFileSync(join(root, "..helpers", "nested.ts"), "export const nested = 1;");
+    const selected = repositoryFiles(root);
+    assert.deepEqual(selected.files.map(file => file.path), ["..helpers.ts", "..helpers/nested.ts"]);
+    assert.equal(selected.omitted, 0);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("changing query in a bounded large repository changes views without checkpoint churn", async () => {
   const root = mkdtempSync(join(tmpdir(), "craft-codebase-view-")), repo = join(root, "repo"); mkdirSync(repo);
   execFileSync("git", ["-C", repo, "init", "-q"]);

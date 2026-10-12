@@ -151,3 +151,18 @@ export function fallback<T>(value: T | undefined, defaultValue: T): T { return v
 
 /** `text`, but an absent value is `null` instead of an error. */
 export function optionalText(value: unknown, name: string): string | null { return value === undefined ? null : text(value, name); }
+
+/** Required array; unlike list, an absent value is invalid. */
+export function array(value: unknown, name: string): unknown[] {
+  if (!Array.isArray(value)) throw new Error(`${name} must be an array`);
+  return value;
+}
+
+/** Bounded integer with legacy numeric coercion and an undefined-only default. */
+export function finiteInteger(value: unknown, name: string, fallback: number, minimum = 1, maximum = Number.MAX_SAFE_INTEGER): number {
+  const number = value === undefined ? fallback : Number(value);
+  if (!Number.isFinite(number) || !Number.isInteger(number) || number < minimum || number > maximum) {
+    throw new Error(`${name} must be an integer between ${minimum} and ${maximum}`);
+  }
+  return number;
+}

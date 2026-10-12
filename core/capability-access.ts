@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { Catalog } from "./catalog.ts";
 import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
 import { SIDE_EFFECTS } from "./workflow.ts";
-import { object, text } from "./validation.ts";
+import { array, finiteInteger, object, text } from "./validation.ts";
 
 const ASSET_TYPES = new Set(["skill", "mcp_server", "tool", "workflow", "adapter", "validator", "grader", "eval_suite"]);
 const TRUST_LEVELS = new Set(["trusted", "untrusted", "verified"]);
@@ -12,22 +12,10 @@ const SECRET_ASSIGNMENT = /(?:api[_-]?key|authorization|cookie|password|secret|t
 
 function id(prefix: string): string { return `${prefix}_${randomUUID().replaceAll("-", "")}`; }
 
-function array(value: unknown, name: string): unknown[] {
-  if (!Array.isArray(value)) throw new Error(`${name} must be an array`);
-  return value;
-}
-
 function optionalBoolean(value: unknown, name: string): boolean | undefined {
   if (value === undefined) return undefined;
   if (typeof value !== "boolean") throw new Error(`${name} must be a boolean`);
   return value;
-}
-function finiteInteger(value: unknown, name: string, fallback: number, minimum = 1, maximum = Number.MAX_SAFE_INTEGER): number {
-  const number = value === undefined ? fallback : Number(value);
-  if (!Number.isFinite(number) || !Number.isInteger(number) || number < minimum || number > maximum) {
-    throw new Error(`${name} must be an integer between ${minimum} and ${maximum}`);
-  }
-  return number;
 }
 function optionalTextArray(value: unknown, name: string, fallback: string[] = []): string[] {
   if (value === undefined) return fallback;

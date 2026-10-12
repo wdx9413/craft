@@ -6,7 +6,25 @@ import { object, text } from "../validation.ts";
 export function procedureHostControl(service: CraftService, args: JsonObject): JsonObject {
   const action = text(args.action, "action"), input = object(args.input, "input");
   if (action === "prepare") return { ...service.verifiedWorkLoopWorkbenchPrepare({ ...input, interaction_mode: "plan", defer_host_start: true }), host_execution_authority: false };
+  if (action === "start") return service.store.transaction(() => {
+    // Reuse the same planner and bind contract; no alternate authority or execution path.
+    const binding = { ...input };
+    for (const key of ["principal_id", "principal_ids", "tenant_id", "cognitive_purpose"]) delete binding[key];
+    for (const key of ["scope", "principal_id", "principal_ids", "tenant_id", "cognitive_purpose"]) if (args[key] !== undefined) binding[key] = args[key];
+    const plan = service.experienceProcedurePlan(binding);
+    const state = service.procedureInvocationBind(binding);
+    return { ...state, plan, usage_status: "bound", next_tool: "craft_procedure_host_control", next_action: "next", host_execution_authority: false };
+  });
   const state = service.procedureInvocationGet(args), run = object(state.invocation, "invocation");
+  if (action === "next") {
+    const dispatches = state.dispatches as JsonObject[], receipts = state.receipts as JsonObject[];
+    const pending = dispatches.filter(dispatch => !receipts.some(receipt => receipt.id === dispatch.id));
+    if (pending.length) return { ...state, usage_status: "awaiting_receipt", next_tool: "craft_procedure_invocation_report", pending_dispatch_ids: pending.map(dispatch => dispatch.id), host_execution_authority: false };
+    const items = state.work_items as JsonObject[];
+    const ready = items.filter(item => run.lifecycle === "active" && (state.loop as JsonObject).lifecycle === "active" && item.status === "pending" && (item.depends_on as string[]).every(id => items.some(other => other.item_key === id && other.status === "verified")));
+    return { ...state, usage_status: run.lifecycle, next_tool: run.lifecycle === "completed" ? null : ready.length ? "craft_procedure_invocation_dispatch" : run.graph ? "craft_procedure_invocation_transition" : "craft_procedure_invocation_resume",
+      ready_item_keys: ready.map(item => item.item_key), expected_version: run.version, snapshot_id: (state.loop as JsonObject).latest_snapshot_id, host_execution_authority: false };
+  }
   if (action === "snapshot") return service.stateWorkspaceObserve({ workspace_id: run.workspace_id });
   if (!["session_open", "session_close", "observe"].includes(action)) throw new Error("Unsupported Procedure Host operation");
   const dispatch = service.store.get("procedure_invocation_dispatch", text(input.dispatch_id, "dispatch_id"));

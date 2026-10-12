@@ -1,3 +1,5 @@
+import { ProcedureDefinitionStore, procedureDefinitionRef } from "./procedure-definition.ts";
+import { observeOperation } from "../../common/craft-common-log/src/index.ts";
 /**
  * The Experience read side: routeable Procedures are the only Experience material
  * eligible for Context. Workflow and Graph additionally carry their checked JSON
@@ -43,25 +45,34 @@ export class ExperienceContribution implements ContextContributionProvider {
    * Knowledge and Memory, but it never reads an unscoped legacy record or a diagnostic pattern.
    */
   async contribute(request: ContextRequest): Promise<ContextContribution> {
+    return observeOperation(this.store, "experience", "contribute", request, () => this.readContribution(request));
+  }
+
+  private async readContribution(request: ContextRequest): Promise<ContextContribution> {
     const wanted = terms(request.query);
     const scopes = request.scope_stack ?? [{ kind: request.scope_kind, id: request.scope_id }];
     const access: ScopeAccess = { principal_id: request.principal_id, principal_ids: request.principal_ids, tenant_id: request.tenant_id, purpose: request.cognitive_purpose };
     // Filter the complete collection before applying the candidate cap. Store.list
     // still scans all records; unrelated projects must not consume this scope's budget.
-    const eligible = this.store.listScoped("experience_procedure", scopes, 10_001, procedure =>
+    const scoped = this.store.listScoped("experience_procedure", scopes, 10_001, procedure =>
       scopes.some(scope => procedure.scope === `${scope.kind}:${scope.id}`)
-      && scopeAllows(scopeEnvelope(procedure.scope_envelope, recordScope(procedure.scope)), access)).map(latest => activeProcedure(this.store, String(latest.id))).filter((item): item is JsonObject => item !== null);
+      && scopeAllows(scopeEnvelope(procedure.scope_envelope, recordScope(procedure.scope)), access));
+    const hasDraft = this.store.listScoped("experience_graph_draft", scopes, 1, draft =>
+      scopes.some(scope => draft.scope === `${scope.kind}:${scope.id}`)
+      && scopeAllows(scopeEnvelope(draft.scope_envelope, recordScope(draft.scope)), access)).length > 0;
+    const eligible = scoped.map(latest => activeProcedure(this.store, String(latest.id))).filter((item): item is JsonObject => item !== null);
     if (eligible.length > 10_000) throw new Error("Experience candidate budget exceeded; narrow the scope stack");
+    const descriptions = new Map(eligible.map(procedure => [String(procedure.id), this.describe(procedure)]));
     const procedures = eligible
       .map((procedure) => ({
         procedure,
-        score: request.candidate_mode ? 1 : wanted.reduce((sum, term) => sum + Number(`${String(procedure.trigger)} ${String(procedure.title)} ${JSON.stringify(procedure.entrypoints ?? [])}`.toLowerCase().includes(term)), 0),
+        score: request.candidate_mode ? 1 : wanted.reduce((sum, term) => sum + Number(String(descriptions.get(String(procedure.id))!.retrieval_text).toLowerCase().includes(term)), 0),
       }))
       .filter((candidate) => candidate.score > 0)
       .sort((left, right) => right.score - left.score || String(left.procedure.id).localeCompare(String(right.procedure.id)));
 
     const selected: Array<{ item: JsonObject; reference: string }> = procedures
-      .map((candidate) => ({ item: this.describe(candidate.procedure), reference: `procedure:${String(candidate.procedure.id)}@${Number(candidate.procedure.version)}` }));
+      .map((candidate) => ({ item: descriptions.get(String(candidate.procedure.id))!, reference: `procedure:${String(candidate.procedure.id)}@${Number(candidate.procedure.version)}` }));
     const items: JsonObject[] = [];
     let usedChars = 0;
     const selectedReferences: string[] = [];
@@ -82,11 +93,18 @@ export class ExperienceContribution implements ContextContributionProvider {
       // resolution produces the same receipt without the receipt holding the query.
       receipt_id: `experience_contribution_${selectedReferences.join("+") || "none"}`,
       omitted_count: selected.length - items.length,
+      diagnostics: { scoped_procedure_count: scoped.length, has_draft: hasDraft, routeable_count: eligible.length, candidate_count: scoped.filter(p => p.lifecycle === "candidate").length,
+        reason: eligible.length ? items.length ? "recalled_not_bound" : "query_or_budget_not_matched" : scoped.length ? "no_promoted_release" : hasDraft ? "draft_not_submitted" : "no_accessible_procedure_in_scope",
+        next_tool: "craft_experience_graph_inspect", next_action: "diagnose", execution_started: false },
     };
   }
 
   /** The Gate state makes the Procedure projection safe for this bounded Context. */
   private describe(procedure: JsonObject): JsonObject {
+    const definition = procedure.procedure_kind === "graph" && procedureDefinitionRef(procedure.definition_ref)
+      ? new ProcedureDefinitionStore(this.store.paths).read(procedure.definition_ref).definition : null;
+    const control = definition?.graph_control as JsonObject | undefined;
+    const routes = Array.isArray(control?.subscenarios) ? (control.subscenarios as JsonObject[]).map(s => ({ id: s.id, title: s.title, entry_id: s.entry_id, exit_id: s.exit_id })) : [];
     return {
       kind: "experience_procedure",
       scope: recordScope(procedure.scope),
@@ -95,7 +113,7 @@ export class ExperienceContribution implements ContextContributionProvider {
       procedure_version: Number(procedure.version),
       procedure_kind: String(procedure.procedure_kind),
       trigger: String(procedure.trigger),
-      retrieval_text: `${String(procedure.trigger)} ${String(procedure.title)} ${JSON.stringify(procedure.entrypoints ?? [])}`,
+      retrieval_text: `${String(procedure.trigger)} ${String(procedure.title)} ${JSON.stringify(procedure.entrypoints ?? [])} ${JSON.stringify(routes)}`,
       ...(Array.isArray(procedure.entrypoints) ? { entrypoints: procedure.entrypoints } : {}),
       acceptance_ref: String(procedure.acceptance_ref),
       scenario_signature: procedure.scenario_signature,
@@ -105,6 +123,8 @@ export class ExperienceContribution implements ContextContributionProvider {
       // Task/Policy receipt before it can read the checked body or definition.
       definition_digest: procedure.definition_digest ?? null,
       routeable: true,
+      host_next_step: procedure.procedure_kind === "graph" ? "match_graph_then_plan_and_bind" : "select_entry_exit_then_plan_and_bind",
+      execution_started: false,
     };
   }
 

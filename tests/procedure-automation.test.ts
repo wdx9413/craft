@@ -299,7 +299,7 @@ test("Automation fails closed for non-routeable procedures and creates a handoff
     assert.equal((view.job as JsonObject).status, "requires_handoff");
     assert.equal((view.notices as JsonObject[]).length, 1);
     f.store.save("experience_procedure", String(procedure.id), { ...procedure, lifecycle: "candidate", routeable: false });
-    assert.throws(() => f.service.procedureAutomationSave({ procedure_id: "missing", workspace: f.workspace, verifier_step_id: "verify-artifact" }), /routeable/u);
+    assert.throws(() => f.service.procedureAutomationSave({ procedure_id: "missing", workspace: f.workspace, verifier_step_id: "verify-artifact" }), /Procedure release unavailable or version drifted/u);
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 

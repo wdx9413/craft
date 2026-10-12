@@ -97,18 +97,22 @@ export class ExperienceGraphAssets {
       try { return this.preview(null, this.input(args)); }
       catch (error) { return { valid: false, errors: [{ message: String((error as Error).message) }], execution_authorized: false }; }
     }
-    if (action === "list") {
+    if (action === "list" || action === "diagnose") {
       const limit = Number(args.limit ?? 30); if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error("Graph list limit requires 1..100");
       text(args.scope, "scope");
       const items = this.store.list("experience_procedure", limit + 1, p => procedureDefinitionRef(p.definition_ref) && this.allowed(p, args)
-        && (args.scenario_id === undefined || p.scenario_id === args.scenario_id || (p.scenario_signature as JsonObject | undefined)?.scenario_id === args.scenario_id));
-      const drafts = this.store.list("experience_graph_draft", limit + 1, p => this.allowed(p, args) && (args.scenario_id === undefined || p.scenario_id === args.scenario_id));
+        && (args.graph_id === undefined || p.id === args.graph_id) && (args.scenario_id === undefined || p.scenario_id === args.scenario_id || (p.scenario_signature as JsonObject | undefined)?.scenario_id === args.scenario_id));
+      const drafts = this.store.list("experience_graph_draft", limit + 1, p => this.allowed(p, args) && (args.graph_id === undefined || p.id === args.graph_id) && (args.scenario_id === undefined || p.scenario_id === args.scenario_id));
       return { graphs: items.slice(0, limit).map(p => ({ graph_id: p.id, title: p.title, scenario_id: p.scenario_id ?? (p.scenario_signature as JsonObject | undefined)?.scenario_id ?? null,
+        usage_status: activeProcedure(this.store, String(p.id)) ? "available_requires_host_binding" : "no_promoted_release",
+        pending_gates: ["shadow", "held_out", "signoff", "canary"].filter(stage => !((p.completed_gates ?? []) as string[]).includes(stage)),
+        next_tool: activeProcedure(this.store, String(p.id)) ? "craft_procedure_plan" : "craft_procedure_gate",
         record_version: p.version, content_version: (p.definition_ref as JsonObject).procedure_version, definition_digest: p.definition_digest, lifecycle: p.lifecycle,
         eligible_version: activeProcedure(this.store, String(p.id))?.version ?? null, definition_ref: p.definition_ref,
         draft_path: this.path(String(p.id)), draft_exists: existsSync(this.path(String(p.id))), provenance: p.provenance ?? "learned", template_id: p.template_id ?? null, ...syncGraphVersionManifest(this.store, String(p.id)) })),
-        drafts: drafts.slice(0, limit).map(p => ({ graph_id: p.id, title: p.title, scenario_id: p.scenario_id, path: this.path(String(p.id)), saved_draft_digest: p.draft_digest })),
-        has_more: items.length > limit || drafts.length > limit, execution_authorized: false };
+        drafts: drafts.slice(0, limit).map(p => ({ graph_id: p.id, title: p.title, scenario_id: p.scenario_id, path: this.path(String(p.id)), saved_draft_digest: p.draft_digest, usage_status: "draft_not_submitted", next_tool: "craft_experience_graph_edit", next_action: "submit" })),
+        has_more: items.length > limit || drafts.length > limit, data_root: this.store.paths.root, scope: args.scope,
+        reason: items.length || drafts.length ? "inspect_asset_status" : "no_accessible_graph_in_scope", manifest_role: "derived_view_not_activation_config", execution_authorized: false };
     }
     const id = text(args.graph_id, "graph_id");
     if (action === "draft") return this.draft(id, args);

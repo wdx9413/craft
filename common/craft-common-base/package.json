@@ -50,6 +50,22 @@
     "./context-assets": {
       "types": "./dist/context-assets.d.ts",
       "default": "./dist/context-assets.js"
+    },
+    "./retrieval-contract": {
+      "types": "./dist/retrieval-contract.d.ts",
+      "default": "./dist/retrieval-contract.js"
+    },
+    "./keyword-retrieval": {
+      "types": "./dist/keyword-retrieval.d.ts",
+      "default": "./dist/keyword-retrieval.js"
+    },
+    "./embedding-retrieval": {
+      "types": "./dist/embedding-retrieval.d.ts",
+      "default": "./dist/embedding-retrieval.js"
+    },
+    "./memory-temporal-policy": {
+      "types": "./dist/memory-temporal-policy.d.ts",
+      "default": "./dist/memory-temporal-policy.js"
     }
   },
   "files": [
