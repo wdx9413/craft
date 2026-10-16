@@ -1,5 +1,5 @@
 {
-  "description": "Resolve scoped Craft Memory and capture only explicit remember commands.",
+  "description": "Resolve scoped Craft Memory and automatically capture classified stable facts into the session tier.",
   "hooks": {
     "SessionStart": [{
       "hooks": [{

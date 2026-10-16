@@ -218,6 +218,7 @@ test("validates BM25 documents and tuning constants", () => {
   assert.throws(() => index.add("two", ""), /value must not be empty/u);
   assert.throws(() => new Bm25Index({ k1: 0 }), /k1 must be positive/u);
   assert.throws(() => new Bm25Index({ b: 2 }), /b must be between 0 and 1/u);
+  assert.throws(() => new Bm25Index({ b: -0.1 }), /b must be between 0 and 1/u);
   // The tuned constants are accepted and used.
   const tuned = new Bm25Index({ k1: 2, b: 0.5 });
   tuned.add("doc", "alpha beta gamma");

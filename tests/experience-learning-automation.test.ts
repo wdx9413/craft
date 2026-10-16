@@ -3,6 +3,7 @@ import test from "node:test";
 import { fixture, scope, spec } from "./helpers/procedure-invocation-fixture.ts";
 import type { JsonObject } from "../core/infrastructure/store.ts";
 import { stableDigest } from "../core/digest.ts";
+import { AUTOMATIC_SIGNOFF_POLICY } from "../capability/craft-experience/scenario-evaluation.ts";
 
 function evidence(f: Awaited<ReturnType<typeof fixture>>, dispatch: JsonObject, status = "passed", extra: JsonObject = {}): string {
   const id = `proof-${String(dispatch.id)}-${stableDigest({ status, extra }).slice(-8)}`;
@@ -25,6 +26,30 @@ async function candidate(f: Awaited<ReturnType<typeof fixture>>, id: string): Pr
     procedure_kind: "workflow", definition: spec(), evidence_ids: [`source-${id}`] }).procedure as JsonObject;
 }
 
+test("evaluation adapter can poll only bounded pending dispatches and resolved work leaves the queue", async () => {
+  const f = await fixture();
+  try {
+    const cand = await candidate(f, "pending-queue");
+    const shadow = f.service.experienceLearningEvaluationDispatch({ procedure_id: cand.id }).dispatch as JsonObject;
+    const pending = f.service.experienceLearningEvaluationList({}) as JsonObject;
+    assert.equal(pending.count, 1);
+    assert.equal((pending.dispatches as JsonObject[])[0]?.id, shadow.id);
+    assert.throws(() => f.service.experienceLearningEvaluationList({ limit: 0 }), /between 1 and 1000/u);
+    assert.throws(() => f.service.experienceLearningEvaluationList({ limit: 1.5 }), /between 1 and 1000/u);
+    assert.throws(() => f.service.experienceLearningEvaluationList({ limit: 1_001 }), /between 1 and 1000/u);
+
+    const passedShadow = evidence(f, shadow);
+    const heldOut = f.service.experienceLearningEvaluationResult({ dispatch_id: shadow.id, evidence_ids: [passedShadow] }).next_dispatch as JsonObject;
+    const afterShadow = f.service.experienceLearningEvaluationList({ limit: 1 }) as JsonObject;
+    assert.equal(afterShadow.count, 1);
+    assert.equal((afterShadow.dispatches as JsonObject[])[0]?.id, heldOut.id);
+
+    const failedHeldOut = evidence(f, heldOut, "failed", { held_out_set_ref: "held-out:v1", independent_of_training: true });
+    f.service.experienceLearningEvaluationResult({ dispatch_id: heldOut.id, evidence_ids: [failedHeldOut] });
+    assert.deepEqual(f.service.experienceLearningEvaluationList({}), { dispatches: [], count: 0 });
+  } finally { await f.close(); }
+});
+
 test("Experience evaluation queues ordered gates and publishes only after Canary evidence", async () => {
   const f = await fixture();
   try {
@@ -34,7 +59,7 @@ test("Experience evaluation queues ordered gates and publishes only after Canary
     assert.equal(f.service.experienceLearningEvaluationDispatch({ procedure_id: p.id }).idempotent, true);
     for (const stage of ["shadow", "held_out", "signoff", "canary"]) {
       assert.equal(dispatch.stage, stage);
-      const extra = stage === "held_out" ? { held_out_set_ref: "dataset:independent-v1", independent_of_training: true } : stage === "signoff" ? { signoff_ref: "review:approved-v1" } : {};
+      const extra = stage === "held_out" ? { held_out_set_ref: "dataset:independent-v1", independent_of_training: true } : stage === "signoff" ? { signoff_policy_ref: AUTOMATIC_SIGNOFF_POLICY } : {};
       const id = evidence(f, dispatch, "passed", extra);
       const result = f.service.experienceLearningEvaluationResult({ dispatch_id: dispatch.id, evidence_ids: [id] });
       assert.equal(f.service.experienceLearningEvaluationResult({ dispatch_id: dispatch.id, evidence_ids: [id] }).idempotent, true);
@@ -91,7 +116,7 @@ test("Held-out and Signoff require their distinct independent records", async ()
       }
     }
     const missingSignoff = evidence(f, dispatch);
-    assert.throws(() => f.service.experienceLearningEvaluationResult({ dispatch_id: dispatch.id, evidence_ids: [missingSignoff] }), /reviewer reference/u);
+    assert.throws(() => f.service.experienceLearningEvaluationResult({ dispatch_id: dispatch.id, evidence_ids: [missingSignoff] }), /automatic policy Evidence/u);
   } finally { await f.close(); }
 });
 

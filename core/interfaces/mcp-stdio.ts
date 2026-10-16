@@ -6,6 +6,7 @@ import { CraftStore, type JsonObject } from "../infrastructure/store.ts";
 type Mode = string;
 type Server = Pick<McpServer, "handle">;
 type Start = (mode: Mode) => Promise<{ server: Server; close: () => void }>;
+type BackgroundStop = () => void | Promise<void>;
 
 async function start(mode: Mode): Promise<{ server: Server; close: () => void }> {
   const store = await new CraftStore().open();
@@ -21,6 +22,7 @@ export async function serveMcpStdio(options: {
   input: NodeJS.ReadableStream;
   write: (line: string) => void;
   start?: Start;
+  afterStart?: (server: Server) => BackgroundStop | undefined | Promise<BackgroundStop | undefined>;
 }): Promise<void> {
   const input = createInterface({ input: options.input, crlfDelay: Infinity });
   const pending: string[] = [];
@@ -29,8 +31,11 @@ export async function serveMcpStdio(options: {
   input.on("line", (line) => { pending.push(line); wake?.(); });
   input.on("close", () => { closed = true; wake?.(); });
   let runtime: Awaited<ReturnType<Start>>;
+  let stopBackground: BackgroundStop | undefined;
   try { runtime = await (options.start ?? start)(options.mode); }
   catch (error) { input.close(); options.input.pause(); throw error; }
+  try { stopBackground = await options.afterStart?.(runtime.server); }
+  catch (error) { runtime.close(); input.close(); options.input.pause(); throw error; }
   try {
     while (pending.length || !closed) {
       if (!pending.length) await new Promise<void>((resolve) => { wake = resolve; });
@@ -42,5 +47,8 @@ export async function serveMcpStdio(options: {
       catch { response = parseError(); }
       if (response) options.write(`${JSON.stringify(response)}\n`);
     }
-  } finally { runtime.close(); }
+  } finally {
+    try { await stopBackground?.(); }
+    finally { runtime.close(); }
+  }
 }

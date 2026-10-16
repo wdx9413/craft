@@ -127,7 +127,7 @@ test("ingestion failures expose bounded path/reason, and all component tools are
     const source = f.inspect("knowledge", "files", { kind: "knowledge_source", action: "explain" });
     assert((source.ingestions as JsonObject[]).some(r => r.path === "large.md" && r.reason === "file_byte_budget_exceeded"));
     for (const member of ["knowledge", "memory", "experience", "codebase"]) {
-      const mcp = new McpServer(f.service, member === "codebase" ? "component-codebase" : `component-${member}-daily`);
+      const mcp = new McpServer(f.service, `component-${member}`);
       const kind = { knowledge: "knowledge_claim", memory: "memory_ledger", experience: "experience_procedure", codebase: "codebase_index" }[member]!;
       f.store.create(kind, member, { scope: "project:assets" });
       for (const verb of ["inspect", "restore"]) assert(mcp.tools.some(t => t.name === `craft_${member}_asset_${verb}`));

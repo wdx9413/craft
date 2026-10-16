@@ -252,10 +252,11 @@ test("trace archive query and retention branches remain observable", async () =>
     f.store.create("trace_policy", "nullish", { max_days: 1, identity_digest: "sha256:x" });
     assert.equal(trace.retentionPlan({ policy_id: "nullish", max_days: 1, max_events: 1, replace: true }).idempotent, false);
     trace.start({ trace_id: "existing-archive", task_id: "task" }); trace.finalize({ trace_id: "existing-archive", status: "completed", summary: "done" });
+    f.store.save("trace", "existing-archive", { ...f.store.get("trace", "existing-archive"), last_event_at: "2020-01-01T00:00:00Z" });
     const existingTrace = f.store.get("trace", "existing-archive");
-    f.store.save("trace", "existing-archive", { ...existingTrace, last_event_at: "2020-01-01T00:00:00Z" });
-    const pointer = trace.archives.write({ trace_id: "existing-archive", trace_version: 1, archived_at: "2020-01-01T00:00:00Z", trace: { id: "existing-archive" }, events: [], feedback: [] });
-    f.store.create("trace_archive", "existing-archive", { trace_id: "existing-archive", trace_version: 1, status: "completed", archive_storage: pointer.storage, archive_locator: pointer.locator, archive_uri: pointer.uri, archive_format: pointer.format, content_digest: pointer.content_digest, bytes: pointer.bytes });
+    const existingVersion = Number(existingTrace.version);
+    const pointer = trace.archives.write({ trace_id: "existing-archive", trace_version: existingVersion, archived_at: "2020-01-01T00:00:00Z", trace: { id: "existing-archive", version: existingVersion }, events: [], feedback: [] });
+    f.store.create("trace_archive", "existing-archive", { trace_id: "existing-archive", trace_version: existingVersion, status: "completed", archive_storage: pointer.storage, archive_locator: pointer.locator, archive_uri: pointer.uri, archive_format: pointer.format, content_digest: pointer.content_digest, bytes: pointer.bytes });
     assert.equal(trace.retentionSweep({ now: "2030-01-01T00:00:00Z", max_days: 1 }).archived, 1);
     const eventPointer = trace.archives.write({ trace_id: "archived-events", trace_version: 1, archived_at: "2020-01-01T00:00:00Z", trace: { id: "archived-events", task_id: "task" }, events: [{ id: "archive-event", event_kind: "archived" }], feedback: [] });
     f.store.create("trace_archive", "archived-events", { trace_id: "archived-events", trace_version: 1, task_id: "task", status: "completed", archive_storage: eventPointer.storage, archive_locator: eventPointer.locator, archive_uri: eventPointer.uri, archive_format: eventPointer.format, content_digest: eventPointer.content_digest, bytes: eventPointer.bytes });
@@ -472,6 +473,7 @@ test("memory governance covers conflict resolution, expiry and consolidation ide
     assert.equal((second.candidate as JsonObject).status, "conflict_pending");
     assert.throws(() => memory.review({ candidate_id: "c2", decision: "approve", reviewer: "r", reason: "r" }), /conflict/);
     memory.resolveConflict({ candidate_id: "c2", resolution: "keep", actor: "r", reason: "keep" });
+    memory.resolveConflict({ candidate_id: "c1", resolution: "keep", actor: "r", reason: "keep" });
     memory.review({ candidate_id: "c1", decision: "approve", reviewer: "r", reason: "r" });
     memory.review({ candidate_id: "c2", decision: "approve", reviewer: "r", reason: "r" });
     memory.consolidate({ candidate_ids: ["c1", "c2"], consolidation_id: "cons", summary: "summary" });
@@ -853,7 +855,8 @@ test("remaining fallback branches are exercised through bounded seams", async ()
     runtime.modelRoute({ objective: "quality", candidates: [{ id: "missing" }, { id: "rated", quality: 2 }] });
 
     const archiveBundle = { trace_id: "archived-query", trace_version: 1, archived_at: "2030-01-01T00:00:00Z", trace: { id: "archived-query", task_id: "task" }, events: [{ event_kind: "first" }, { event_kind: "second" }], feedback: [] };
-    const archiveStore = { write: () => ({ storage: "local_jsonl_gzip", format: "craft.trace.archive.v1", locator: "trace-archive/x", uri: "craft://trace-archive/local/x", content_digest: digest("archive"), bytes: 1, backend_id: "backend" }), read: () => archiveBundle } as never;
+    let latestArchive = archiveBundle as JsonObject;
+    const archiveStore = { write: (bundle: JsonObject) => { latestArchive = bundle; return { storage: "local_jsonl_gzip", format: "craft.trace.archive.v1", locator: "trace-archive/x", uri: "craft://trace-archive/local/x", content_digest: digest("archive"), bytes: 1, backend_id: "backend" }; }, read: (pointer: JsonObject) => pointer.trace_id === "archived-query" ? archiveBundle : latestArchive } as never;
     f.store.create("trace_archive", "archived-query", { trace_id: "archived-query", task_id: "task", archive_storage: "local_jsonl_gzip", archive_format: "craft.trace.archive.v1", archive_locator: "trace-archive/x", archive_uri: "craft://trace-archive/local/x", content_digest: digest("archive"), bytes: 1 });
     assert.equal(new TraceKernel(f.store, archiveStore).query({ trace_id: "archived-query" }).count, 2);
     const retention = new TraceKernel(f.store, archiveStore);

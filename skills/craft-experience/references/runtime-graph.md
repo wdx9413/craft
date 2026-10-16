@@ -2,6 +2,26 @@
 
 当用户需要同一场景的不同任务路径、运行中分支或返工时读取本页。
 
+## 场景目录与 Hook 映射
+
+场景分类由 Host 模型根据任务目标、改动区域、副作用、输入输出和终态验证信号提出；Craft 负责目录结构、键校验、冲突状态和晋升。目录统一保存在 Craft 用户数据根目录的 Experience 分区：`$CRAFT_DATA_DIR/experience/projects/<project-id>/experience-scenarios.json`，默认根目录为 `~/.craft_data`。`<project-id>` 是稳定 `project:` 身份去掉前缀后的部分；仓库中不创建 `.craft_data`。
+
+Codex Hook 没有模型推理步骤，可在同一个目录中配置精确验证命令到已有场景键的映射，作为自动观察时的辅助分类信号：
+
+```json
+{
+  "schema": "craft.experience-scenario-catalog.v1",
+  "scenarios": [
+    {
+      "scenario_key": "coding.test-failure-recovery",
+      "verification_commands": ["pnpm test:focused"]
+    }
+  ]
+}
+```
+
+命令在去除首尾空格后精确匹配；一条命令若映射到多个场景、映射冲突、目录格式错误、缺失或超限时，Hook 将该观察记为未分类。Hook 不根据命令内容自行发明语义场景。Skill/MCP Host 则由当前任务模型读取场景目录并直接分类，不要求预先配置命令映射。目录保留场景标识、验证器摘要及观察引用，不保存任务正文；它不改变 Workflow 的 Shadow、held-out、signoff 和 Canary 晋级门槛。
+
 场景资产统一叫 Experience Graph，Workflow 是其中的受限流程形式；执行图允许有界回路。层级是「场景 → 子场景 → 入口/合法路径/目标出口 → Invocation」。互联网产研是场景，需求研发、Bug 修复、Bug 诊断、CR 是子场景。多个子场景可以共用入口，按目标出口和允许的路径区分。
 
 ## 配置与版本

@@ -7,7 +7,6 @@ import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftService } from "../core/service.ts";
 import { McpServer } from "../core/mcp.ts";
-import { productSurfaceOf } from "../core/interfaces/mcp/product-launch.ts";
 import { CodexHookBridge, HookSignalSanitizer } from "../core/codex-hook-bridge.ts";
 import { ContextResolutionKernel } from "../core/context-resolution.ts";
 import { createActionHandlers } from "../core/application/actions/action-handlers.ts";
@@ -17,8 +16,12 @@ async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-hookless-"));
   const store = await new CraftStore(craftPaths(join(root, "data"))).open();
   const service = new CraftService(store);
-  const servers = Object.fromEntries(["knowledge", "memory", "experience", "codebase"].map((product) => [product, new McpServer(service, productSurfaceOf(product))]));
-  return { root, store, service, servers, close: async () => { store.close(); await rm(root, { recursive: true, force: true }); } };
+  const servers = Object.fromEntries([
+    ["knowledge", "component-knowledge-daily"], ["memory", "component-memory-daily"],
+    ["experience", "component-experience-daily"], ["codebase", "component-codebase"],
+  ].map(([product, surface]) => [product!, new McpServer(service, surface!)]));
+  const experienceAdvanced = new McpServer(service, "component-experience");
+  return { root, store, service, servers, experienceAdvanced, close: async () => { store.close(); await rm(root, { recursive: true, force: true }); } };
 }
 
 async function call(server: McpServer, name: string, args: JsonObject = {}, failure?: RegExp): Promise<JsonObject> {
@@ -44,21 +47,21 @@ test("strict MCP: each standalone resolves its own member, scope, gate and aggre
       const gate = await call(server, "craft_decision_context_gate_open", { query: "测试", decision_kind: "plan", scope_kind: scope.kind, scope_id: scope.id, require_context: true });
       assert.equal((gate.gate as JsonObject).status, "blocked");
     }
-    const saved = await call(f.servers.memory!, "craft_memory_capture_user_statement", { content: "先运行单元测试", explicit_consent: true, auto_accept: true, scope_kind: scope.kind, scope_id: scope.id });
+    const saved = await call(f.servers.memory!, "craft_memory_capture_user_statement", { content: "先运行单元测试", session_id: "hookless-session", project_scope_id: scope.id });
     assert(saved);
-    const memories = (await call(f.servers.memory!, "craft_memory_ledger_list", { scope_kind: scope.kind, scope_id: scope.id })).memories as JsonObject[];
+    const memories = (await call(f.servers.memory!, "craft_memory_ledger_list", { scope_kind: "session", scope_id: "hookless-session" })).memories as JsonObject[];
     assert.equal(memories.length, 1);
     f.store.create("knowledge_claim", "rule", { status: "reviewed", source_id: "builtin.evidence-wiki", scope: `${scope.kind}:${scope.id}`, content: "运行测试", evidence_ids: [] });
-    const isolated = await call(f.servers.memory!, "craft_context_resolution_resolve", { query: "测试", scope_kind: scope.kind, scope_id: scope.id });
+    const isolated = await call(f.servers.memory!, "craft_context_resolution_resolve", { query: "测试", scope_kind: scope.kind, scope_id: scope.id, session_scope_id: "hookless-session", session_id: "hookless-session" });
     assert.equal((isolated.items as unknown[]).length, 1);
     assert.deepEqual(isolated.contributions, []);
-    const aggregate = await f.service.contextResolutionResolve({ query: "测试", scope_kind: scope.kind, scope_id: scope.id, max_items: 1, max_chars: 20 });
+    const aggregate = await f.service.contextResolutionResolve({ query: "测试", scope_kind: scope.kind, scope_id: scope.id, session_scope_id: "hookless-session", session_id: "hookless-session", max_items: 1, max_chars: 20 });
     assert.equal((aggregate.receipt as JsonObject).total_items, 1);
     assert(Number((aggregate.receipt as JsonObject).total_used_chars) <= 20);
     const gate = await call(f.servers.knowledge!, "craft_decision_context_gate_open", { query: "测试", decision_kind: "plan", scope_kind: scope.kind, scope_id: scope.id, require_context: true });
     assert.equal((gate.gate as JsonObject).status, "ready");
     await call(f.servers.memory!, "craft_memory_ledger_transition", { memory_id: memories[0]!.id, status: "revoked", reason: "user correction" });
-    const empty = await call(f.servers.memory!, "craft_context_resolution_resolve", { query: "测试", scope_kind: scope.kind, scope_id: scope.id });
+    const empty = await call(f.servers.memory!, "craft_context_resolution_resolve", { query: "测试", scope_kind: scope.kind, scope_id: scope.id, session_scope_id: "hookless-session", session_id: "hookless-session" });
     assert.deepEqual(empty.items, []);
     const missing = await call(f.servers.memory!, "craft_context_resolution_resolve", { query: "测试" });
     assert.equal(missing.reason, "scope_unavailable");
@@ -96,10 +99,10 @@ test("Experience accepts array contracts over MCP and remains candidate until qu
     const evidence = await call(server, "craft_evidence_record", { source_type: "observation", confidence: "bounded", claim: "Observed fixture test result" });
     for (const id of ["one", "two"]) await call(server, "craft_experience_observe", { source_kind: "fixture", source_id: id, source_digest: `sha256:${id}`, scope: "project:demo", outcome: "passed", sanitized: true, scenario_key: "coding:verify", evidence_ids: [evidence.id] });
     const args = { scenario_key: "coding:verify", hypothesis: "Run focused tests", design_axes: ["orchestration"], output_contract_ref: "acceptance:tests" };
-    await call(server, "craft_experience_procedure_draft", { ...args, design_axes: {} }, /must be array/);
+    await call(server, "craft_experience_procedure_draft", { ...args, design_axes: {} }, /must be (?:an )?array/);
     const draft = (await call(server, "craft_experience_procedure_draft", args)).request as JsonObject;
     const proposal = (await call(server, "craft_experience_procedure_submit", { request_id: draft.id, workflow_id: "verify", name: "Verify", description: "Run tests", inputs: [], steps: [{ type: "assertion" }] })).proposal as JsonObject;
-    const procedure = (await call(server, "craft_procedure_create", { proposal_id: proposal.id, preconditions: [], trigger: "verify" })).procedure as JsonObject;
+    const procedure = (await call(f.experienceAdvanced, "craft_procedure_create", { proposal_id: proposal.id, preconditions: [], trigger: "verify" })).procedure as JsonObject;
     assert.equal(procedure.routeable, false);
     const resolved = await call(server, "craft_context_resolution_resolve", { query: "verify", scope_kind: "project", scope_id: "demo" });
     assert.equal(((resolved.contributions as JsonObject[])[0]!.items as unknown[]).length, 0);
@@ -120,6 +123,11 @@ test("Codebase alone can declare, checkpoint, activate, query and refresh change
     const built = (await call(server, "craft_codebase_refresh", { workspace_id: "demo" })).index as JsonObject;
     const args = { workspace_id: "demo", index_id: built.id };
     const symbols = (await call(server, "craft_codebase_symbol_find", { ...args, query: "target" })).symbols as JsonObject[];
+    const outline = await call(server, "craft_codebase_symbols_overview", { ...args, path: "main.ts" });
+    assert.equal((outline.symbols as JsonObject[]).some(symbol => symbol.name === "target"), true);
+    const controlFlow = await call(server, "craft_codebase_control_flow_query", { ...args, node_id: symbols[0]!.id });
+    assert.equal(controlFlow.status, "complete");
+    assert.equal(controlFlow.source_content_included, false);
     const slice = await call(server, "craft_codebase_context_slice", { ...args, node_ids: [symbols[0]!.id] });
     assert.equal(slice.content_included, false);
     await writeFile(join(project, "main.ts"), "export function changed() {}\n");
@@ -184,7 +192,7 @@ test("external code analyzers import only checkpoint-bound UTF-16 facts for Java
     await call(server, "craft_codebase_analysis_import", { ...args, analysis: { ...analysis, format: "unknown" } }, /format/);
     await call(server, "craft_codebase_analysis_import", { ...args, analysis: { ...analysis, nodes: [] } }, /budget/);
     await call(server, "craft_codebase_analysis_import", { ...args, analysis: { ...analysis, analyzer: "a".repeat(101) } }, /budget/);
-    await call(server, "craft_codebase_analysis_import", { ...args, analysis: { ...analysis, extra: "a".repeat(2_000_000) } }, /budget/);
+    await call(server, "craft_codebase_analysis_import", { ...args, analysis: { ...analysis, extra: "a".repeat(68_000_001) } }, /budget/);
     await call(server, "craft_codebase_analysis_import", { ...args, index_id: index.id, analysis: { ...analysis, analyzer_version: "2" } }, /conflict/);
     await writeFile(join(root, "a.py"), "def changed(): pass"); await call(server, "craft_codebase_refresh", { workspace_id: "languages" });
     await call(server, "craft_codebase_analysis_import", args, /latest/);
@@ -210,17 +218,19 @@ test("memory transitions reject stale writes and repeat without adding versions"
 test("Context feedback pins the exact receipt without mutating source status or crossing members", async () => {
   const f = await fixture();
   try {
-    const result = await call(f.servers.memory!, "craft_context_resolution_resolve", { scope_kind: "project", scope_id: "feedback", query: "test" });
+    const context = new McpServer(f.service, "component-context");
+    const result = await call(context, "craft_context_resolution_resolve", { scope_kind: "project", scope_id: "feedback", query: "test" });
     const args = { receipt_id: (result.receipt as JsonObject).id, outcome: "helpful", feedback_id: "feedback" };
-    assert.equal((await call(f.servers.memory!, "craft_context_resolution_feedback", args)).idempotent, false);
-    assert.equal((await call(f.servers.memory!, "craft_context_resolution_feedback", args)).idempotent, true);
-    await call(f.servers.memory!, "craft_context_resolution_feedback", { ...args, outcome: "invalid" }, /Unsupported/);
-    await call(f.servers.memory!, "craft_context_resolution_feedback", { ...args, outcome: "stale" }, /conflict/);
-    await call(f.servers.knowledge!, "craft_context_resolution_feedback", args, /another component/);
+    assert.equal((await call(context, "craft_context_resolution_feedback", args)).idempotent, false);
+    assert.equal((await call(context, "craft_context_resolution_feedback", args)).idempotent, true);
+    await call(context, "craft_context_resolution_feedback", { ...args, outcome: "invalid" }, /Unsupported/);
+    await call(context, "craft_context_resolution_feedback", { ...args, outcome: "stale" }, /conflict/);
+    const unavailable = await f.servers.knowledge!.handle({ jsonrpc: "2.0", id: "test", method: "tools/call", params: { name: "craft_context_resolution_feedback", arguments: args } }) as JsonObject;
+    assert.match(String((unavailable.error as JsonObject).message), /Unknown tool/);
     const e = f.service.evidenceRecord({ source_type: "observation", confidence: "bounded", claim: "feedback fixture" });
     const saved = f.service.contextResolutionFeedback({ ...args, feedback_id: "unmounted", evidence_ids: [e.id] }); assert(saved.feedback);
     assert.equal((result.receipt as JsonObject).content_free, true);
-    assert.equal((await call(f.servers.memory!, "craft_context_resolution_feedback", { receipt_id: args.receipt_id, outcome: "stale" })).idempotent, false);
+    assert.equal((await call(context, "craft_context_resolution_feedback", { receipt_id: args.receipt_id, outcome: "stale" })).idempotent, false);
     const unmounted = createActionHandlers(f.service);
     await unmounted.craft_context_resolution_resolve!({ scope_kind: "project", scope_id: "feedback", query: "test" });
   } finally { await f.close(); }

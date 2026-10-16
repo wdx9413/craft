@@ -1,9 +1,15 @@
 # Changelog
 
-> Note on numbering: the declared package version is now **0.12.42**. Earlier
+> Note on numbering: the declared package version is now **0.12.44**. Earlier
 > `v0.12.34`–`v0.12.43` headings name **incremental work on the previous revision**,
 > not releases. Each is a self-contained change set with its own 100%-coverage
 > test script; the version bump happens only when the work is released.
+
+## v0.12.44（本次发布）
+
+- 完成 Codebase 多语言静态分析与增量索引改造，扩展 TypeScript、Python、Java 解析和查询，并加入 LSP worker、控制流与数据流事实；索引仍报告预算和语言覆盖边界。
+- Experience 增加项目级场景分类、评测和自动学习 Worker；学习结果继续经过来源验证、独立评测与既有晋级 Gate。
+- 收紧独立 MCP 日常工具面与预算，Procedure 图编辑等高级操作保留在显式高级面；统一发布版本、Marketplace 清单和插件 bundle。
 
 ## v0.12.42（本次发布）
 

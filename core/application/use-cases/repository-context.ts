@@ -7,6 +7,7 @@ import { repositoryRoot } from "../../../capability/craft-codebase/repository-fi
 import { ContextBudget, contextAssetMatches, contextAssetRef, requiredContextRef } from "../../../common/craft-common-base/src/context-assets.ts";
 import { estimateTokens } from "../../token-budget.ts";
 import { CraftOperationError } from "../../operation-error.ts";
+import { codebaseFailureDiagnostic } from "./codebase-failure.ts";
 
 export { ensureRepository } from "../../../capability/craft-codebase/repository-onboarding.ts";
 import { ensureRepository } from "../../../capability/craft-codebase/repository-onboarding.ts";
@@ -21,9 +22,16 @@ export async function openContext(service: CraftService, args: JsonObject): Prom
   const { root } = repositoryRoot(args.project_root);
   const identity = service.scopeIdentityResolveProject({ project_root: root }).identity as JsonObject;
   const scope = identity.canonical_scope as JsonObject;
+  let knowledgeSourceDiscovery: JsonObject;
+  try {
+    knowledgeSourceDiscovery = observeOperation(service.store, "knowledge", "project_source_discovery", { scope, project_root_digest: stableDigest(root) },
+      () => service.knowledgeSources.discoverProjectSources({ project_root: root, scope_kind: scope.kind, scope_id: scope.id }));
+  } catch {
+    knowledgeSourceDiscovery = { status: "unavailable", reason: "project_source_discovery_failed", sources_registered: 0, sources_ingested: 0, candidates_created: 0 };
+  }
   let codebase: JsonObject;
   try { codebase = args.include_codebase === false ? { status: "skipped", reason: "not_requested" } : observeOperation(service.store, "codebase", "repository_ensure", { project_root: root, index_depth: args.index_depth }, () => ensureRepository(service, { project_root: root, index_depth: args.index_depth, query: args.query })); }
-  catch { codebase = { status: "unavailable", reason: "repository_index_failed" }; }
+  catch (error) { codebase = { status: "unavailable", reason: "repository_index_failed", ...codebaseFailureDiagnostic(error) }; }
   if (args.required_refs !== undefined && !Array.isArray(args.required_refs)) throw new CraftOperationError("INVALID_INPUT", "input_validation", "required_refs must be an array", { field: "required_refs" });
   let required: JsonObject[];
   try { required = ((args.required_refs ?? []) as unknown[]).map(requiredContextRef); }
@@ -53,7 +61,7 @@ export async function openContext(service: CraftService, args: JsonObject): Prom
   if (queryOmitted > 0) reasons.push("codebase_query_truncated");
   codebase = { ...codebase, budget_omitted_count: budgetOmitted, query_omitted_count: queryOmitted, budget_rebalanced: budgetRebalanced };
   const assetRefs = context.asset_refs as JsonObject[];
-  const packIdentity = { scope, asset_refs: assetRefs, context_receipt_id: receipt?.id ?? null, working_set_id: (context.working_set as JsonObject).id, task_kind: taskKind, partial: reasons.length > 0, partial_reasons: reasons, codebase: { status: codebase.status, reason: codebase.reason ?? null, index_id: codebase.index_id ?? null, checkpoint_id: codebase.checkpoint_id ?? null, omitted_files: codebase.omitted_files ?? 0, budget_omitted_count: budgetOmitted, query_omitted_count: queryOmitted, references }, max_items: maxItems, max_chars: maxChars, total_items: items, total_used_chars: chars };
+  const packIdentity = { scope, asset_refs: assetRefs, context_receipt_id: receipt?.id ?? null, working_set_id: (context.working_set as JsonObject).id, task_kind: taskKind, partial: reasons.length > 0, partial_reasons: reasons, codebase: { status: codebase.status, reason: codebase.reason ?? null, failure_code: codebase.failure_code ?? null, failure_stage: codebase.failure_stage ?? null, failure_details: codebase.failure_details ?? {}, index_id: codebase.index_id ?? null, checkpoint_id: codebase.checkpoint_id ?? null, omitted_files: codebase.omitted_files ?? 0, omitted_by_language: codebase.omitted_by_language ?? {}, budget_omitted_count: budgetOmitted, query_omitted_count: queryOmitted, references }, max_items: maxItems, max_chars: maxChars, total_items: items, total_used_chars: chars };
   const id = `context_pack_${stableDigest(packIdentity).slice(-24)}`;
   const alreadyEmitted = service.contextWorkingSets.emittedRefs({ ...args, scope_kind: scope.kind, scope_id: scope.id }, assetRefs);
   const novel = (member: string, item: JsonObject) => !alreadyEmitted.some(ref => contextAssetMatches(ref, contextAssetRef(member, item, scope)));
@@ -68,6 +76,6 @@ export async function openContext(service: CraftService, args: JsonObject): Prom
     const packReceipt = service.store.find("context_pack_receipt", id) ?? service.store.create("context_pack_receipt", id, { ...packIdentity, identity_digest: stableDigest(packIdentity), content_free: true });
     const contextStatus = receipt?.partial === true ? "partial" : "resolved";
     const packStatus = reasons.length ? "partial" : "ready";
-    return { ...context, context_status: contextStatus, pack_status: packStatus, items: injectionItems, contributions: injectionContributions, already_emitted_refs: alreadyEmitted, hook_reused: alreadyEmitted.length > 0, asset_refs: assetRefs, injection_measurement: { measurement_scope: "material_projection_excludes_protocol_envelope_and_host_history_bodies", serialized_chars: injection.length, estimated_tokens: estimatedTokens, tokenizer: "cjk_char_latin_four_char_estimate", exact: false, host_measured_tokens: null }, partial: reasons.length > 0, codebase: { ...codebase, analysis_confidence: (codebase.summary as JsonObject | undefined)?.certainty ?? null, references }, pack_receipt: packReceipt, host_execution_authority: false };
+    return { ...context, context_status: contextStatus, pack_status: packStatus, items: injectionItems, contributions: injectionContributions, knowledge_source_discovery: knowledgeSourceDiscovery, already_emitted_refs: alreadyEmitted, hook_reused: alreadyEmitted.length > 0, asset_refs: assetRefs, injection_measurement: { measurement_scope: "material_projection_excludes_protocol_envelope_and_host_history_bodies", serialized_chars: injection.length, estimated_tokens: estimatedTokens, tokenizer: "cjk_char_latin_four_char_estimate", exact: false, host_measured_tokens: null }, partial: reasons.length > 0, codebase: { ...codebase, analysis_confidence: (codebase.summary as JsonObject | undefined)?.certainty ?? null, references }, pack_receipt: packReceipt, host_execution_authority: false };
   });
 }

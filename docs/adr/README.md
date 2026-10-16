@@ -29,6 +29,7 @@
 | [0023](0023-effect-unknown-requires-reconciliation.md) | 外部 Effect 未知时必须先对账，禁止自动重放 |
 | [0024](0024-capability-supply-chain-governance.md) | 能力必须经过来源、扫描、Conformance、审批和可回滚的供应链治理 |
 | [0025](0025-context-working-set-is-the-retrieval-seam.md) | Context Working Set 是可解释、可复现、可评测的检索边界 |
+| [0026](0026-project-scoped-scenario-taxonomies.md) | Knowledge 与 Experience 场景分类按能力分域、按项目分层 |
 
 ## 与技术文档的关系
 
@@ -42,3 +43,4 @@
 | 0006 | [Uncertainty Policy](../technical/modules/platform-ideal-state-v1.md) |
 | 0021 | [架构与分层地图](../architecture/layer-map.md)、[Craft 架构](../architecture.zh-CN.md) |
 | 0022、0023、0024、0025 | [v0.12.35 控制面收口](../technical/modules/v01235-control-plane.md) |
+| 0026 | [Knowledge 与 Experience 场景分类契约](../technical/modules/scenario-taxonomy.md) |

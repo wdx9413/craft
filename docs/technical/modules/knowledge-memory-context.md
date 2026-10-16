@@ -51,7 +51,7 @@ Ledger 统一四种 Memory：`working`、`episodic`、`preference`、`procedural
 
 ### 形成、冲突与遗忘
 
-显式用户陈述可通过 `craft_memory_capture_user_statement` 写入，但必须携带 `explicit_consent: true`；它只把该陈述作为带 digest 的 bounded Evidence，不把整段聊天自动入库。`working` 默认 24 小时过期、`episodic` 默认 30 天过期；`preference` 与 `procedural` 必须显式维护或撤销，不能以压缩为名覆盖原条目。
+Host 可将分类出的稳定事实自动通过 `craft_memory_capture_user_statement` 写入会话层；直接的用户陈述也可走同一入口。它只把被选中的事实作为带 digest 的 bounded Evidence，不把整段聊天自动入库。单条事实先留在会话层，同一项目跨两个独立会话重复且无冲突后自动晋升到项目层；同一事实在三个项目中成立且无冲突后自动晋升到全局层。`working` 默认 24 小时过期、`episodic` 默认 30 天过期；`preference` 与 `procedural` 可通过替代、撤销或有效期退出，不覆盖历史条目。
 
 可选 `topic` 是稳定的冲突键，例如 `preference:diet:sugar`。Craft 不会从自然语言猜 topic：无法确定主题时宁可降低自动化程度，也不把不相关的偏好混成冲突。相同 scope + topic 的新候选会进入 `conflict_pending`；选择 `supersede` 后，仍要先完成 Evidence review 并 materialize 新 Ledger 项，旧项才转为 `superseded` 并指向替代项。旧正文和版本保留审计，不再被 Context 召回。
 

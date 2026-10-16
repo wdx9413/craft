@@ -9,6 +9,7 @@ import { McpServer } from "../core/mcp.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { publicModel, specFromConfig, specsFromModels } from "../core/model-gateway.ts";
 import type { CraftModelConfig } from "../core/settings.ts";
+import { CRAFT_RELEASE_VERSION } from "../core/version.ts";
 
 /**
  * Coverage hedge for the seams the tiered internal loop introduced.
@@ -217,7 +218,7 @@ test("the distribution plan reports the download story and the remaining gap", a
   try {
     const service = new CraftService(f.store);
     const plan = service.distributionPlanGet({});
-    assert.equal(plan.version, "0.12.42");
+    assert.equal(plan.version, CRAFT_RELEASE_VERSION);
     assert.equal(plan.user_download_available, false);
     assert.equal(plan.channel, "separate_project");
     assert.ok(Array.isArray(plan.remainder));

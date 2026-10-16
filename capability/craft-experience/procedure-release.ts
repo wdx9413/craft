@@ -3,6 +3,17 @@ import { relative, isAbsolute, sep } from "node:path";
 import { text } from "../../common/craft-common-base/src/validation.ts";
 import type { CraftStore, JsonObject } from "../../common/craft-common-store-local/src/store.ts";
 import { payload } from "../../common/craft-common-base/src/digest.ts";
+import { experienceScenarioIsRetired } from "./scenario-catalog.ts";
+
+export function belongsToRetiredScenario(store: CraftStore, procedure: JsonObject): boolean {
+  const signature = procedure.scenario_signature as JsonObject | undefined;
+  const project = signature?.project as JsonObject | undefined;
+  const signatureProjectId = typeof project?.id === "string" ? project.id.replace(/^project:/u, "") : "";
+  const scope = typeof procedure.scope === "string" ? procedure.scope : "";
+  const projectId = signatureProjectId || (scope.startsWith("project:") ? scope.slice("project:".length) : "");
+  const scenarioKey = typeof signature?.scenario_key === "string" ? signature.scenario_key : "";
+  return Boolean(projectId && scenarioKey && experienceScenarioIsRetired(store.paths.experienceDir, projectId, scenarioKey));
+}
 
 /** Publication is independent of the newest candidate. Pointers always pin a qualified record. */
 export function preserveProcedureRelease(store: CraftStore, current: JsonObject | null): void {
@@ -14,10 +25,12 @@ export function preserveProcedureRelease(store: CraftStore, current: JsonObject 
 
 export function activeProcedure(store: CraftStore, id: string): JsonObject | null {
   const latest = store.get("experience_procedure", id);
+  if (belongsToRetiredScenario(store, latest)) return null;
   if (latest.routeable === true && latest.lifecycle === "routeable") return latest;
   const release = store.find("experience_release", id);
   if (!release || release.status !== "active") return null;
   const active = store.get("experience_procedure", id, Number(release.record_version));
+  if (belongsToRetiredScenario(store, active)) return null;
   // Failure of this same asset revokes it; a different candidate cannot displace it.
   if (latest.definition_digest === active.definition_digest) return null;
   return { ...active, scope_envelope: latest.scope_envelope };

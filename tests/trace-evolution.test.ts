@@ -25,7 +25,7 @@ test("Trace Kernel provides canonical append, observation, feedback and terminal
     assert.equal((start.trace as JsonObject).schema, TRACE_SCHEMA_VERSION);
     assert.equal(f.service.traceStart({ trace_id: "trace", task_id: "task", trial_id: "trial", model_fingerprint: "model:v1", environment_fingerprint: "env:v1", capability_fingerprint: "cap:v1", policy_fingerprint: "policy:v1", metadata: { source: "test" } }).idempotent, true);
     assert.throws(() => f.service.traceStart({ trace_id: "trace", task_id: "other" }), /idempotency conflict/);
-    const eventInput = { trace_id: "trace", event_id: "event-1", event_kind: "action.started", actor: "model", source: "codex", trust: "untrusted", data: { action: "inspect" }, action_contract: { effect: "read_only" }, state_before: { digest: "before" }, state_after: { digest: "after" }, input_refs: ["input-1"], output_refs: ["output-1"], capability_revision: "cap:v1", policy_revision: "policy:v1", model_fingerprint: "model:v1", environment_fingerprint: "env:v1", workspace_before: "snap-before", workspace_after: "snap-after", usage: { input_tokens: 10, output_tokens: 5 }, cost_usd: 0.01, duration_ms: 20, summary: "inspect" };
+    const eventInput = { trace_id: "trace", event_id: "event-1", event_kind: "action.started", operation_id: "craft_knowledge_search", actor: "model", source: "codex", trust: "untrusted", data: { action: "inspect" }, action_contract: { effect: "read_only" }, state_before: { digest: "before" }, state_after: { digest: "after" }, input_refs: ["input-1"], output_refs: ["output-1"], capability_revision: "cap:v1", policy_revision: "policy:v1", model_fingerprint: "model:v1", environment_fingerprint: "env:v1", workspace_before: "snap-before", workspace_after: "snap-after", usage: { input_tokens: 10, output_tokens: 5 }, cost_usd: 0.01, duration_ms: 20, summary: "inspect" };
     const first = f.service.traceAppend(eventInput); assert.equal((first.event as JsonObject).sequence, 1);
     assert.equal(f.service.traceAppend(eventInput).idempotent, true);
     assert.throws(() => f.service.traceAppend({ ...eventInput, data: { action: "different" } }), /idempotency conflict/);
@@ -46,6 +46,8 @@ test("Trace Kernel provides canonical append, observation, feedback and terminal
     assert.throws(() => f.service.traceFinalize({ trace_id: "invalid-final", status: "running", summary: "bad" }), /unsupported/);
     const details = f.service.traceGet({ trace_id: "trace" }); assert.equal((details.events as JsonObject[]).length, 4); assert.equal((details.feedback as JsonObject[]).length, 1);
     assert.equal((f.service.traceQuery({ trace_id: "trace", event_kind: "state.observed" }).events as JsonObject[]).length, 1);
+    assert.equal((f.service.traceQuery({ operation_id: "craft_knowledge_search" }).events as JsonObject[]).length, 1);
+    assert.equal((f.service.traceQuery({ operation_id: "craft_memory_ledger_list" }).events as JsonObject[]).length, 0);
     assert.equal((f.service.traceQuery({ task_id: "task", limit: 1 }).events as JsonObject[]).length, 1);
     assert.equal((f.service.traceReplayBundle({ trace_id: "trace" }).replayable), false);
     assert.equal((f.service.traceCaseCompile({ trace_id: "trace", case_id: "case", summary: "sanitized trace case" }).case as JsonObject).sanitized, true);
@@ -69,7 +71,7 @@ test("Trace replay and retention policies are deterministic and bounded", async 
     assert.throws(() => f.service.traceRetentionPlan({ max_days: 0 }), /positive integer/);
     assert.throws(() => f.service.traceRetentionPlan({ max_events: 0 }), /positive integer/);
     assert.throws(() => f.service.traceQuery({ limit: 0 }), /between 1 and 10000/);
-    assert.equal(VERSION, "0.12.42");
+    assert.equal(VERSION, "0.12.44");
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
@@ -87,12 +89,12 @@ test("legacy Trial Trace is projected into the canonical Trace and MCP surfaces 
     }
     const calls: [string, JsonObject][] = [
       ["craft_trace_start", { trace_id: "mcp-trace", task_id: "task" }],
-      ["craft_trace_append", { trace_id: "mcp-trace", event_kind: "action", data: {}, action_contract: { effect: "read_only" } }],
+      ["craft_trace_append", { trace_id: "mcp-trace", event_kind: "action", operation_id: "craft_knowledge_search", data: {}, action_contract: { effect: "read_only" } }],
       ["craft_trace_observe", { trace_id: "mcp-trace", state_before: {}, state_after: {}, summary: "observed" }],
       ["craft_trace_feedback", { trace_id: "mcp-trace", signal: "accepted", summary: "accepted" }],
       ["craft_trace_finalize", { trace_id: "mcp-trace", status: "completed", summary: "complete" }],
       ["craft_trace_get", { trace_id: "mcp-trace" }],
-      ["craft_trace_query", { trace_id: "mcp-trace" }],
+      ["craft_trace_query", { trace_id: "mcp-trace", operation_id: "craft_knowledge_search" }],
       ["craft_trace_replay_bundle", { trace_id: "mcp-trace" }],
       ["craft_trace_case_compile", { trace_id: "mcp-trace", summary: "case" }],
       ["craft_trace_retention_plan", { policy_id: "mcp-policy", max_days: 10, max_events: 20 }],
@@ -109,7 +111,7 @@ test("Trace retention archives terminal records for seven days and preserves act
   const f = await fixture();
   try {
     f.service.traceStart({ trace_id: "old", task_id: "task" });
-    f.service.traceAppend({ trace_id: "old", event_kind: "action", data: {}, action_contract: { effect: "read_only" } });
+    f.service.traceAppend({ trace_id: "old", event_kind: "action", operation_id: "craft_experience_observe", data: {}, action_contract: { effect: "read_only" } });
     f.service.traceFeedback({ trace_id: "old", signal: "corrected", summary: "reviewed" });
     f.service.traceFinalize({ trace_id: "old", status: "completed", summary: "done" });
     const old = new Date("2020-01-01T00:00:00.000Z").toISOString();
@@ -122,6 +124,7 @@ test("Trace retention archives terminal records for seven days and preserves act
     const archived = f.service.traceGet({ trace_id: "old" });
     assert.equal(archived.archived, true); assert.equal((archived.trace as JsonObject).status, "completed"); assert.equal((archived.events as JsonObject[]).length, 3);
     assert.equal((f.service.traceQuery({ trace_id: "old" }).events as JsonObject[]).every((event) => event.archived === true), true);
+    assert.equal((f.service.traceQuery({ trace_id: "old", operation_id: "craft_experience_observe" }).events as JsonObject[]).length, 1);
     assert.equal(f.store.events("trace:old").length, 0);
     assert.equal(f.store.get("trace", "active").status, "running");
     const archiveDir = join(f.store.paths.logsDir, "trace-archive");

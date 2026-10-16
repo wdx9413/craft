@@ -9,7 +9,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const pluginRoot = resolve(root, "plugins", "craft");
 const sourceSkill = resolve(root, "skills", "craft-route");
 const targetSkill = resolve(pluginRoot, "skills", "craft-route");
-const sourceBundles = ["craft-mcp.cjs", "craft-mcp-full.cjs", "craft-mcp-http.cjs", "craft-codex-hook.cjs", "craft-parser-worker.js"];
+const sourceBundles = ["craft-mcp.cjs", "craft-mcp-full.cjs", "craft-mcp-http.cjs", "craft-codex-hook.cjs", "craft-parser-worker.js", "craft-experience-learning-worker.js"];
 const targetBundleDirectory = resolve(pluginRoot, "dist", "plugin");
 const components = RELEASE_PRODUCTS.filter((product) => product.name !== "craft").map((product) => product.name);
 const pluginsRoot = resolve(root, "plugins");
@@ -42,7 +42,9 @@ for (const component of components) {
   // The parser worker is resolved relative to the bundle's own directory at
   // startup (`resolveParserWorkerPath`), so a component plugin that ships the
   // MCP bundle without it cannot boot on its own.
-  for (const bundle of ["craft-mcp.cjs", "craft-codex-hook.cjs", "craft-parser-worker.js"]) {
+  const componentBundles = ["craft-mcp.cjs", "craft-codex-hook.cjs", "craft-parser-worker.js"];
+  if (["craft-context", "craft-knowledge", "craft-experience"].includes(component)) componentBundles.push("craft-experience-learning-worker.js");
+  for (const bundle of componentBundles) {
     await cp(resolve(root, "dist", "plugin", bundle), resolve(componentBundleDirectory, bundle));
   }
   await mkdir(resolve(componentRoot, "skills"), { recursive: true });
@@ -57,6 +59,13 @@ for (const component of components) {
       recursive: true,
       filter: (path) => basename(path) !== "__pycache__" && !path.endsWith(".pyc"),
     });
+    const analyzerTarget = resolve(targetScripts, "analyzers");
+    await mkdir(analyzerTarget, { recursive: true });
+    await cp(resolve(root, "capability", "craft-codebase", "analyzers", "analyze-python.py"), resolve(analyzerTarget, "analyze-python.py"));
+    await cp(resolve(root, "capability", "craft-codebase", "analyzers", "python-control-flow.py"), resolve(analyzerTarget, "python-control-flow.py"));
+    await cp(resolve(root, "capability", "craft-codebase", "analyzers", "python-data-flow.py"), resolve(analyzerTarget, "python-data-flow.py"));
+    await cp(resolve(root, "capability", "craft-codebase", "analyzers", "AnalyzeJava.java"), resolve(analyzerTarget, "AnalyzeJava.java"));
+    await cp(resolve(root, "capability", "craft-codebase", "analyzers", "AnalyzeJavaControlFlow.java"), resolve(analyzerTarget, "AnalyzeJavaControlFlow.java"));
   }
   // Portable core contains only Skill + MCP. Native Hook manifests remain optional compatibility artifacts.
   await writeFile(resolve(componentRoot, "plugin.json"), JSON.stringify({ $schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json", name: component, version: CRAFT_RELEASE_VERSION, description: `Standalone ${component} Skill and MCP`, license: "MIT" }, null, 2) + "\n");

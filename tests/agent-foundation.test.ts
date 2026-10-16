@@ -13,6 +13,7 @@ test("memory governance is candidate-first, conflict-aware and expiring", async 
   const { root, store, service } = await fixture();
   try {
     service.knowledgeMemoryInstallBuiltins();
+    service.memoryPolicySave({ mode: "propose" });
     const source = service.knowledgeSourceRegister({ source_id: "src", kind: "custom", label: "test", scope_kind: "project", scope_id: "p", locator: "local", content_digest: "sha256:test", trust: "bounded", access: "proposal_only" }).source as JsonObject;
     const evidence = service.evidenceRecord({ evidence_id: "ev", source_type: "test", claim: "verified", confidence: "confirmed" });
     const first = service.memoryCandidatePropose({ candidate_id: "c1", source_id: source.id, kind: "preference", scope_kind: "project", scope_id: "p", topic: "editor", content: "use markdown", evidence_ids: [evidence.id] }).candidate as JsonObject;
@@ -83,6 +84,7 @@ test("task state is append-only and optimistic-concurrency protected", async () 
 test("governance kernels fail closed on invalid, drifted and idempotent inputs", async () => {
   const { root, store, service } = await fixture();
   try {
+    service.memoryPolicySave({ mode: "propose" });
     const source = service.knowledgeSourceRegister({ source_id: "edge-source", kind: "custom", label: "edge", scope_kind: "project", scope_id: "p", locator: "offline://edge", content_digest: "sha256:edge", trust: "bounded", access: "proposal_only" }).source as JsonObject;
     const evidence = service.evidenceRecord({ evidence_id: "edge-evidence", source_type: "test", claim: "bounded", confidence: "bounded" });
     const generated = service.memoryCandidatePropose({ source_id: source.id, kind: "working", scope_kind: "project", scope_id: "p", content: "temporary", topic: "edge", valid_until: "2999-01-01T00:00:00.000Z" }).candidate as JsonObject;
@@ -109,7 +111,7 @@ test("governance kernels fail closed on invalid, drifted and idempotent inputs",
     assert.equal(ledger.id, "edge-memory");
     assert.throws(() => service.memoryConflictResolve({ candidate_id: String(approved.id), resolution: "bad", actor: "r", reason: "x" }), /unsupported/);
     const noConflict = service.memoryConflictResolve({ candidate_id: String(approved.id), resolution: "dismiss", actor: "r", reason: "x" }).candidate as JsonObject;
-    assert.equal(noConflict.status, "candidate");
+    assert.equal(noConflict.status, "rejected");
     assert.throws(() => service.memoryExpirySweep({ now: "bad" }), /ISO/);
     const expired = service.memoryExpirySweep({ now: "2999-01-01T00:00:00.000Z" });
     assert.ok(Number(expired.count) >= 1);
@@ -142,7 +144,7 @@ test("governance kernels fail closed on invalid, drifted and idempotent inputs",
     assert.throws(() => service.memoryCandidateReview({ candidate_id: String(noConflict.id), decision: "bad", reviewer: "r", reason: "x" }), /decision/);
     assert.equal((service.memoryConflictList({}).conflicts as JsonObject[]).length, 0);
     store.save("memory_candidate", String(noConflict.id), { ...store.get("memory_candidate", String(noConflict.id)), conflict_ids: "bad" });
-    assert.equal((service.memoryConflictResolve({ candidate_id: noConflict.id, resolution: "dismiss", actor: "r", reason: "x" }).candidate as JsonObject).status, "candidate");
+    assert.equal((service.memoryConflictResolve({ candidate_id: noConflict.id, resolution: "dismiss", actor: "r", reason: "x" }).candidate as JsonObject).status, "rejected");
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
@@ -235,6 +237,6 @@ test("memory governance keeps policy, conflict replacement, expiry and consolida
     assert.match(String((service.memoryConsolidateGoverned({ candidate_ids: [a.id, b.id], summary: "summary again" }) as JsonObject).consolidation), /\[object Object\]/u);
     store.create("memory_candidate", "other-conflict", { status: "candidate", conflict_ids: null });
     store.create("memory_candidate", "missing-arrays", { status: "candidate", conflict_ids: ["other-conflict"] });
-    assert.equal((service.memoryConflictResolve({ candidate_id: "missing-arrays", resolution: "dismiss", actor: "reviewer", reason: "cleanup" }).candidate as JsonObject).status, "candidate");
+    assert.equal((service.memoryConflictResolve({ candidate_id: "missing-arrays", resolution: "dismiss", actor: "reviewer", reason: "cleanup" }).candidate as JsonObject).status, "rejected");
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });

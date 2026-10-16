@@ -76,7 +76,7 @@ export function digestJson(value: unknown): string {
  * nested `undefined` one way everywhere and silently changed the digest of `[undefined]`.
  */
 export function canonicalJson(value: unknown): string {
-  const serialized = nested(value);
+  const serialized = nested(value, new Map());
   if (serialized === undefined) throw new Error(`canonicalJson cannot serialize ${typeof value}`);
   return serialized;
 }
@@ -96,11 +96,20 @@ export function canonicalJson(value: unknown): string {
  * `string | undefined` and is private: callers get {@link canonicalJson}, which guarantees a
  * string or throws.
  */
-function nested(value: unknown): string | undefined {
-  if (Array.isArray(value)) return `[${value.map((item) => nested(item)).join(",")}]`;
+function nested(value: unknown, keyOrderCache: Map<string, string[]>): string | undefined {
+  if (Array.isArray(value)) return `[${value.map((item) => nested(item, keyOrderCache)).join(",")}]`;
   if (value && typeof value === "object") {
-    return `{${Object.entries(value as JsonObject).sort(([left], [right]) => left.localeCompare(right, "zh"))
-      .map(([key, child]) => `${JSON.stringify(key)}:${nested(child)}`).join(",")}}`;
+    const entries = Object.entries(value as JsonObject);
+    const signature = JSON.stringify(entries.map(([key]) => key).sort());
+    let orderedKeys = keyOrderCache.get(signature);
+    if (!orderedKeys) {
+      orderedKeys = entries.map(([key]) => key).sort((left, right) => left.localeCompare(right, "zh"));
+      // A single input may contain many unrelated object shapes. Bound the cache so that
+      // canonicalizing untrusted or unusually heterogeneous data cannot retain every shape.
+      if (keyOrderCache.size < 256) keyOrderCache.set(signature, orderedKeys);
+    }
+    const values = new Map(entries);
+    return `{${orderedKeys.map((key) => `${JSON.stringify(key)}:${nested(values.get(key), keyOrderCache)}`).join(",")}}`;
   }
   return JSON.stringify(value);
 }
@@ -110,9 +119,68 @@ function nested(value: unknown): string | undefined {
  *
  * The `sha256:` prefix is part of the returned value and therefore part of the identity a
  * record stores, which is why the one prefix-less variant next door is not merged into this.
+ * The streamed writer preserves {@link canonicalJson}'s byte order without retaining the full
+ * serialized value in memory.
  */
 export function stableDigest(value: unknown): string {
-  return `sha256:${createHash("sha256").update(canonicalJson(value)).digest("hex")}`;
+  return stableDigestStreaming(value);
+}
+
+/**
+ * Stable digest with bounded serialization memory for large values. The emitted bytes match
+ * canonicalJson exactly, including its historical nested-undefined behavior.
+ */
+export function stableDigestStreaming(value: unknown): string {
+  const hash = createHash("sha256");
+  const keyOrderCache = new Map<string, string[]>();
+  let chunks: string[] = [];
+  let chunkLength = 0;
+  const flush = (): void => {
+    hash.update(chunks.join(""));
+    chunks = [];
+    chunkLength = 0;
+  };
+  const append = (chunk: string): void => {
+    chunks.push(chunk);
+    chunkLength += chunk.length;
+    if (chunkLength >= 32_768) flush();
+  };
+  const write = (item: unknown): boolean => {
+    if (Array.isArray(item)) {
+      append("[");
+      for (let index = 0; index < item.length; index++) {
+        if (index) append(",");
+        write(item[index]);
+      }
+      append("]");
+      return true;
+    }
+    if (item && typeof item === "object") {
+      const entries = Object.entries(item as JsonObject);
+      const signature = JSON.stringify(entries.map(([key]) => key).sort());
+      let orderedKeys = keyOrderCache.get(signature);
+      if (!orderedKeys) {
+        orderedKeys = entries.map(([key]) => key).sort((left, right) => left.localeCompare(right, "zh"));
+        if (keyOrderCache.size < 256) keyOrderCache.set(signature, orderedKeys);
+      }
+      const values = new Map(entries);
+      append("{");
+      orderedKeys.forEach((key, index) => {
+        if (index) append(",");
+        append(`${JSON.stringify(key)}:`);
+        if (!write(values.get(key))) append("undefined");
+      });
+      append("}");
+      return true;
+    }
+    const serialized = JSON.stringify(item);
+    if (serialized === undefined) return false;
+    append(serialized);
+    return true;
+  };
+  if (!write(value)) throw new Error(`canonicalJson cannot serialize ${typeof value}`);
+  flush();
+  return `sha256:${hash.digest("hex")}`;
 }
 
 /**

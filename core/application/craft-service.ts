@@ -29,6 +29,7 @@ import { defaultHooks, defineHooks, runHooks, type HookSpec } from "../hooks.ts"
 import { decideExecution } from "../execution-policy.ts";
 import { assessMcpMigration, createCredentialResolver, distributionPlan, firstRunReadiness, isolationCapability, negotiateProtocolVersion, readCredentialFile } from "../distribution-and-first-run.ts";
 import { Bm25Index, buildExperienceRecord, decideExperienceCapture, fuseRankings } from "../context-retrieval-capture.ts";
+import { experienceScenarioIsRetired } from "../../capability/craft-experience/scenario-catalog.ts";
 
 import { evaluateVerificationCheck, runVerification, verificationCaptureSignals } from "../verification-sensor.ts";
 import { abstractAcrossTrajectories, buildAbstraction, trajectoryFailureSignature } from "../trajectory-abstraction.ts";
@@ -60,7 +61,7 @@ import { executeSubagent, planSubagentExecution } from "../subagent-execution.ts
 import { installAdapterRuntimeMethods } from "./use-cases/adapter-runtime.ts";
 import { installKernelDelegateMethods } from "./use-cases/kernel-delegates.ts";
 import { array, finiteInteger, object, text } from "../validation.ts";
-import { canonicalJson, payload as recordPayload } from "../digest.ts";
+import { canonicalJson, payload as recordPayload, stableDigest } from "../digest.ts";
 import { CRAFT_RELEASE_VERSION } from "../version.ts";
 import type { EvaluationContractInput, EvaluationStage } from "../evaluation-contract.ts";
 import { WorkControl } from "./coordinators/work-control.ts";
@@ -296,6 +297,8 @@ export class CraftService extends ServiceFoundation {
    * acceptance is available only because the user explicitly requested recall.
    */
   memoryCaptureUserStatement(args: JsonObject): JsonObject { return this.cognitiveWrites.captureUserStatement(args); }
+  /** Internal Host Hook path for bounded, automatically classified stable facts. */
+  memoryCaptureObservedFact(args: JsonObject): JsonObject { return this.cognitiveWrites.captureObservedFact(args); }
   workbenchKnowledgeClaimSave(args: JsonObject): JsonObject { return this.cognitiveWorkbench.saveClaim(args); }
   workbenchWorkflowSave(args: JsonObject): JsonObject { return this.workflowDagSave(workbenchWorkflowInput(args)); }
   knowledgeExpirySweep(args: JsonObject = {}): JsonObject { return this.cognitiveWrites.sweepExpiredClaims(args); }
@@ -344,6 +347,7 @@ export class CraftService extends ServiceFoundation {
     return {
       capability_search: (input) => this.capabilitySearch(input),
       knowledge_search: (input) => this.knowledgeSearch(input),
+      knowledge_scenario_list: (input) => this.knowledgeScenarioList(input),
       // v0.12.35: the read half of memory access, plus a candidate-only write.
       // `memory_capture_propose` deliberately routes to the governed candidate
       // path rather than the ledger write, so a loop tool call cannot create a
@@ -409,9 +413,31 @@ export class CraftService extends ServiceFoundation {
   }
 
   evaluationModelProfileSave(args: JsonObject): JsonObject { return this.evaluationModelProfiles.save(args); }
+  evaluationModelProfileEnsureSingle(args: JsonObject): JsonObject {
+    const purpose = text(args.purpose, "purpose");
+    this.evaluationModelTicketList({ purpose, limit: 1 }); // Reuse the profile kernel's canonical purpose validator before any setup work.
+    const active = (this.evaluationModelProfileList({ limit: 1_000 }).profiles as JsonObject[])
+      .filter(profile => profile.lifecycle === "active" && Array.isArray(profile.purposes) && (profile.purposes as unknown[]).includes(purpose));
+    if (active.length > 1) return { status: "ambiguous", reason: "multiple_active_profiles_for_purpose", profile_count: active.length, profile: null };
+    if (active.length === 1) {
+      const profile = active[0]!;
+      return { status: (profile.readiness as JsonObject | undefined)?.status ?? "unavailable", profile, idempotent: true };
+    }
+    const configured = this.modelList().models as JsonObject[];
+    if (configured.length !== 1) return { status: "unavailable", reason: configured.length ? "multiple_models_require_explicit_profile" : "no_configured_model", profile: null };
+    const model = configured[0]!;
+    const modelIdentity = { provider: model.id, model: model.model, base_url: model.baseUrl, api_key_env: model.apiKeyEnv };
+    const profileId = `evaluation_model_profile_auto_${stableDigest({ purpose, model: modelIdentity }).slice(-24)}`;
+    const created = this.evaluationModelProfileSave({ profile_id: profileId, provider: model.id, model: model.model, purposes: [purpose],
+      network_execution_enabled: true, max_attempts: 1, max_output_tokens: 2_048 });
+    const profile = created.profile as JsonObject;
+    return { status: (created.readiness as JsonObject | undefined)?.status ?? "unavailable", profile, idempotent: created.idempotent === true };
+  }
   evaluationModelProfileGet(args: JsonObject): JsonObject { return this.evaluationModelProfiles.get(args); }
   evaluationModelProfileList(args: JsonObject): JsonObject { return this.evaluationModelProfiles.list(args); }
   evaluationModelTicketIssue(args: JsonObject): JsonObject { return this.evaluationModelProfiles.issue(args); }
+  evaluationModelTicketList(args: JsonObject): JsonObject { return this.evaluationModelProfiles.ticketList(args); }
+  evaluationModelTicketComplete(args: JsonObject): JsonObject { return this.evaluationModelProfiles.ticketComplete(args); }
 
   workflowEvolutionObserve(args: JsonObject): JsonObject { return this.workflowEvolution.observe(args); }
   workflowEvolutionPropose(args: JsonObject): JsonObject { return this.workflowEvolution.propose(args); }
@@ -419,7 +445,19 @@ export class CraftService extends ServiceFoundation {
   workflowEvolutionProposalGet(args: JsonObject): JsonObject { return this.workflowEvolution.get(args); }
   workflowEvolutionProposalSubmit(args: JsonObject): JsonObject {
     const request = this.store.get("workflow_evolution_request", String(args.request_id));
+    const signature = request.scenario_signature as JsonObject | undefined;
+    const project = signature?.project as JsonObject | undefined;
+    const projectId = typeof project?.id === "string" ? project.id.replace(/^project:/u, "") : "";
+    if (projectId && typeof signature?.scenario_key === "string"
+      && experienceScenarioIsRetired(this.store.paths.experienceDir, projectId, signature.scenario_key)) {
+      throw new Error("Experience scenario is retired; proposal submission is blocked");
+    }
     const procedureKind = String(request.procedure_kind ?? "workflow");
+    const firstObservation = (request.observation_refs as JsonObject[] | undefined)?.[0];
+    const source = firstObservation?.source as JsonObject | undefined;
+    const scope = typeof source?.scope === "string" ? source.scope : "project:unresolved";
+    const scenarioProcedureId = String(args.procedure_id ?? `experience_procedure_${stableDigest({ scope, procedure_kind: procedureKind, scenario_signature: request.scenario_signature }).slice(-20)}`);
+    const revisionArgs = { procedure_id: scenarioProcedureId, evolve: true };
     // Validate a graph before it becomes a proposal record.  This is deliberately an asset
     // validation, not execution: a valid graph still needs the existing evaluation, Signoff
     // and Canary gates before Core may route it to the VerifiedWorkLoop.
@@ -427,18 +465,18 @@ export class CraftService extends ServiceFoundation {
     const submitted = this.workflowEvolution.submit(args); const proposal = submitted.proposal as JsonObject;
     const nextAction = "Run shadow and held-out evaluation, then use the existing Signoff and Canary gates before this Procedure can be selected.";
     if (proposal.composition !== undefined || (proposal.graph as JsonObject | null)?.graph_control !== undefined) {
-      const procedure = this.experienceProcedures.draft({ proposal_id: proposal.id });
+      const procedure = this.experienceProcedures.draft({ proposal_id: proposal.id, ...revisionArgs });
       return { ...submitted, workflow: null, procedure: procedure.procedure, next_action: nextAction };
     }
     if (procedureKind === "prompt") {
-      const procedure = this.experienceProcedures.draft({ proposal_id: proposal.id, procedure_kind: "prompt", title: proposal.name,
+      const procedure = this.experienceProcedures.draft({ proposal_id: proposal.id, ...revisionArgs, procedure_kind: "prompt", title: proposal.name,
         description: proposal.prompt ?? proposal.description, trigger: args.trigger ?? request.scenario_key,
         acceptance_ref: args.acceptance_ref ?? request.output_contract_ref, evidence_ids: args.evidence_ids ?? (request.observation_refs as JsonObject[]).flatMap((item) => item.evidence_ids as string[]) });
       return { ...submitted, procedure: procedure.procedure, next_action: nextAction };
     }
     if (submitted.idempotent === true) {
       const kind = String(proposal.procedure_kind ?? "workflow") === "graph" ? "workflow_dag" : "workflow";
-      const procedure = this.experienceProcedures.draft({ proposal_id: proposal.id, procedure_kind: proposal.procedure_kind,
+      const procedure = this.experienceProcedures.draft({ proposal_id: proposal.id, ...revisionArgs, procedure_kind: proposal.procedure_kind,
         title: proposal.name, description: proposal.description, trigger: args.trigger ?? request.scenario_key,
         acceptance_ref: args.acceptance_ref ?? request.output_contract_ref, evidence_ids: args.evidence_ids ?? (request.observation_refs as JsonObject[]).flatMap((item) => item.evidence_ids as string[]) });
       return { ...submitted, workflow: this.store.get(kind, String(proposal.workflow_id)), procedure: procedure.procedure, next_action: nextAction };
@@ -451,8 +489,8 @@ export class CraftService extends ServiceFoundation {
         nodes: (proposal.graph as JsonObject).nodes, edges: (proposal.graph as JsonObject).edges, inputs: proposal.inputs,
         outputs: (proposal.graph as JsonObject).outputs, checkpoint_policy: (proposal.graph as JsonObject).checkpoint_policy, derived_from: derivedFrom }).workflow as JsonObject)
       : this.workflowSave({ workflow_id: proposal.workflow_id, name: proposal.name, description: proposal.description,
-        inputs: proposal.inputs, steps: proposal.steps, derived_from: derivedFrom });
-    const procedure = this.experienceProcedures.draft({ proposal_id: proposal.id, procedure_kind: proposal.procedure_kind,
+        inputs: (proposal.inputs as unknown[]).map(input => typeof input === "string" ? { name: input, required: true } : input), steps: proposal.steps, derived_from: derivedFrom });
+    const procedure = this.experienceProcedures.draft({ proposal_id: proposal.id, ...revisionArgs, procedure_kind: proposal.procedure_kind,
       title: proposal.name, description: proposal.description, trigger: args.trigger ?? request.scenario_key,
       acceptance_ref: args.acceptance_ref ?? request.output_contract_ref, evidence_ids: args.evidence_ids ?? (request.observation_refs as JsonObject[]).flatMap((item) => item.evidence_ids as string[]) });
     return { ...submitted, workflow, procedure: procedure.procedure, next_action: nextAction };
@@ -3283,6 +3321,9 @@ export class CraftService extends ServiceFoundation {
 
   knowledgeIndexSync(args: JsonObject): JsonObject { return this.cognitiveSearch.knowledgeIndexSync(args); }
   knowledgeSearch(args: JsonObject): JsonObject { return this.cognitiveSearch.knowledgeSearch(args); }
+  knowledgeScenarioList(args: JsonObject): JsonObject { return this.cognitiveSearch.knowledgeScenarioList(args); }
+  knowledgeScenarioRetire(args: JsonObject): JsonObject { return this.cognitiveSearch.knowledgeScenarioRetire(args); }
+  knowledgeScenarioMigrationPropose(args: JsonObject): JsonObject { return this.cognitiveSearch.knowledgeScenarioMigrationPropose(args); }
   async memorySearch(args: JsonObject): Promise<JsonObject> { return this.cognitiveSearch.memorySearch(args); }
   knowledgeScopeSet(args: JsonObject): JsonObject { return this.cognitiveSearch.knowledgeScopeSet(args); }
   knowledgeScopeList(args: JsonObject): JsonObject { return this.cognitiveSearch.knowledgeScopeList(args); }

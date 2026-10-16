@@ -1,0 +1,49 @@
+{
+  "cases": [
+    {
+      "query": "delegate authentication checker constructor",
+      "path": "middleware/authchecker/delegate_auth_checker.go",
+      "name": "NewDelegateAuthChecker"
+    },
+    {
+      "query": "SSO login authentication middleware",
+      "path": "middleware/auth.go",
+      "name": "SsoLoginAuth"
+    }
+  ],
+  "call_graph_cases": [
+    {
+      "target_path": "middleware/authchecker/delegate_auth_checker.go",
+      "target_name": "NewDelegateAuthChecker",
+      "callers": [
+        {
+          "path": "middleware/auth.go",
+          "name": "SsoAuth"
+        },
+        {
+          "path": "middleware/auth.go",
+          "name": "SsoLoginAuth"
+        }
+      ]
+    }
+  ],
+  "impact_cases": [
+    {
+      "target_path": "middleware/authchecker/delegate_auth_checker.go",
+      "target_name": "NewDelegateAuthChecker",
+      "direction": "incoming",
+      "relation_kind": "calls",
+      "max_depth": 1,
+      "nodes": [
+        {
+          "path": "middleware/auth.go",
+          "name": "SsoAuth"
+        },
+        {
+          "path": "middleware/auth.go",
+          "name": "SsoLoginAuth"
+        }
+      ]
+    }
+  ]
+}

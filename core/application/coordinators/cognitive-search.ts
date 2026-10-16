@@ -3,6 +3,7 @@ import { KnowledgeIndex, diffKnowledgeBase, scanKnowledgeBase } from "../../know
 import type { ContextResolutionKernel } from "../../context-resolution.ts";
 import type { KnowledgeRelationKernel } from "../../../capability/craft-knowledge/knowledge-relation.ts";
 import { contentReference } from "../../../common/craft-common-store-local/src/content-store.ts";
+import { knowledgeScenarioIsActive, listKnowledgeScenarios, proposeKnowledgeScenarioMigration, retireKnowledgeScenario } from "../../../capability/craft-knowledge/scenario-catalog.ts";
 import { array, finiteInteger, object, text } from "../../validation.ts";
 
 /** Owns local diagnostic projections and the loop's governed Memory read path. */
@@ -28,13 +29,21 @@ export class CognitiveSearchCoordinator {
   }
   knowledgeSearch(args: JsonObject): JsonObject {
     const query = text(args.query, "query");
-    const scope = args.scope === undefined ? null : text(args.scope, "scope");
+    const scope = args.scope === undefined
+      ? args.scope_kind !== undefined && args.scope_id !== undefined ? `${text(args.scope_kind, "scope_kind")}:${text(args.scope_id, "scope_id")}` : null
+      : text(args.scope, "scope");
+    const scenarioKey = args.scenario_key === undefined ? null : text(args.scenario_key, "scenario_key");
+    if (scenarioKey !== null && !/^[a-z0-9][a-z0-9._/-]{0,95}$/u.test(scenarioKey)) throw new Error("scenario_key must be a bounded stable identifier");
+    const scenarioParts = scope?.split(":") ?? [];
+    const scenarioActive = scenarioKey === null || scenarioParts[0] === "project"
+      && knowledgeScenarioIsActive(this.store.paths.knowledgeDir, scenarioParts.slice(1).join(":"), scenarioKey);
     const includeCandidates = args.include_candidates !== false;
     const terms = [...new Set(query.toLowerCase().match(/[\p{L}\p{N}_-]+/gu) ?? [])];
     const governed = this.store.list("knowledge_claim", 10_000).flatMap((claim) => {
       if (claim.sensitivity === "restricted" && args.allow_restricted !== true) return [];
       if (claim.status !== "reviewed" && (!includeCandidates || claim.status !== "candidate")) return [];
       if (scope !== null && claim.scope !== "global" && claim.scope !== scope) return [];
+      if (scenarioKey !== null && (!scenarioActive || claim.scenario_key !== scenarioKey && claim.coarse_scenario_key !== scenarioKey)) return [];
       if (claim.valid_until !== undefined && claim.valid_until !== null
         && (typeof claim.valid_until !== "string" || !Number.isFinite(Date.parse(claim.valid_until)) || Date.parse(claim.valid_until) < Date.now())) return [];
       if (claim.content_ref && !contentReference(claim.content_ref)) throw new Error("Knowledge content reference is invalid");
@@ -47,13 +56,41 @@ export class CognitiveSearchCoordinator {
     const index = this.knowledgeIndex();
     try {
       const limit = args.limit === undefined ? 20 : finiteInteger(args.limit, "limit", 1, 1, 100);
-      const indexed = index.search(query, { limit }).map((hit) => ({ ...hit, kind: "indexed_document", score: hit.rank, relations: this.relationSummary(hit.path) }));
+      const indexed = scenarioKey === null ? index.search(query, { limit }).map((hit) => ({ ...hit, kind: "indexed_document", score: hit.rank, relations: this.relationSummary(hit.path) })) : [];
       const hits = [...governed, ...indexed]
         .sort((left, right) => Number(right.score) - Number(left.score) || JSON.stringify(left).localeCompare(JSON.stringify(right)))
         .slice(0, limit);
-      return { hits, queried_governed_claims: true, include_candidates: includeCandidates };
+      return { hits, queried_governed_claims: true, include_candidates: includeCandidates,
+        ...(scenarioKey !== null ? { scenario_filter: { scenario_key: scenarioKey, status: scenarioActive ? "active" : "inactive_or_unclassified" } } : {}) };
     }
     finally { index.close(); }
+  }
+
+  knowledgeScenarioList(args: JsonObject): JsonObject {
+    const scope = text(args.scope ?? `${text(args.scope_kind, "scope_kind")}:${text(args.scope_id, "scope_id")}`, "scope");
+    const [kind, ...parts] = scope.split(":");
+    if (kind !== "project" || !parts.length) throw new Error("Knowledge scenario catalog requires an explicit project scope");
+    return { scope, ...listKnowledgeScenarios(this.store.paths.knowledgeDir, parts.join(":")) };
+  }
+
+  knowledgeScenarioRetire(args: JsonObject): JsonObject {
+    const scope = text(args.scope ?? `${text(args.scope_kind, "scope_kind")}:${text(args.scope_id, "scope_id")}`, "scope");
+    const [kind, ...parts] = scope.split(":");
+    if (kind !== "project" || !parts.length) throw new Error("Knowledge scenario retirement requires an explicit project scope");
+    return retireKnowledgeScenario({ knowledge_dir: this.store.paths.knowledgeDir, project_id: parts.join(":"),
+      scenario_key: text(args.scenario_key, "scenario_key"), expected_catalog_version: finiteInteger(args.expected_catalog_version, "expected_catalog_version", 0, 0),
+      request_id: text(args.request_id, "request_id"), reason: text(args.reason, "reason") });
+  }
+
+  knowledgeScenarioMigrationPropose(args: JsonObject): JsonObject {
+    const scope = text(args.scope ?? `${text(args.scope_kind, "scope_kind")}:${text(args.scope_id, "scope_id")}`, "scope");
+    const [kind, ...parts] = scope.split(":");
+    if (kind !== "project" || !parts.length) throw new Error("Knowledge scenario migration requires an explicit project scope");
+    if (!Array.isArray(args.source_keys) || !Array.isArray(args.targets)) throw new Error("Knowledge scenario migration sources and targets must be arrays");
+    return proposeKnowledgeScenarioMigration({ knowledge_dir: this.store.paths.knowledgeDir, project_id: parts.join(":"),
+      mode: text(args.mode, "mode") as "merge" | "split", source_keys: args.source_keys as string[], targets: args.targets as Array<{ scenario_key: string; definition: unknown }>,
+      expected_catalog_version: finiteInteger(args.expected_catalog_version, "expected_catalog_version", 0, 0),
+      request_id: text(args.request_id, "request_id"), reason: text(args.reason, "reason") });
   }
 
   /**

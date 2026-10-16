@@ -88,9 +88,11 @@ test("memory capture modes are explicit and Evidence-gated", async () => {
   try {
     f.service.knowledgeMemoryInstallBuiltins();
     const source = f.service.knowledgeSourceRegister({ source_id: "source", kind: "custom", label: "test", scope_kind: "project", scope_id: "p", locator: "memory://test", content_digest: "sha256:source", trust: "bounded", access: "proposal_only" }).source as JsonObject;
-    assert.equal((f.service.memoryPolicyGet().policy as JsonObject).mode, "propose");
-    f.service.memoryPolicySave({ mode: "propose" });
-    assert.equal(f.service.memoryPolicySave({ mode: "propose", updated_by: "test" }).idempotent, true);
+    assert.equal((f.service.memoryPolicyGet().policy as JsonObject).mode, "governed");
+    assert.equal((f.service.memoryPolicyGet().policy as JsonObject).min_confidence, "bounded");
+    f.service.memoryPolicySave({ mode: "governed", min_confidence: "bounded" });
+    assert.equal(f.service.memoryPolicySave({ mode: "governed", min_confidence: "bounded", updated_by: "test" }).idempotent, true);
+    assert.equal(f.service.memoryPolicySave({ mode: "propose", updated_by: "test" }).idempotent, false);
     assert.equal(f.service.memoryPolicySave({ mode: "governed", updated_by: "test" }).idempotent, false);
     f.store.create("memory_policy", "legacy-policy", { mode: "propose", min_confidence: "confirmed", auto_commit: false, identity_digest: "sha256:legacy" });
     assert.equal((f.service.memoryPolicySave({ policy_id: "legacy-policy", mode: "governed", updated_by: "test" }).policy as JsonObject).policy_revision, 2);

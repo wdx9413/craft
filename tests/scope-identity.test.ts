@@ -54,6 +54,10 @@ test("identity and aliases are idempotent and scope stacks remain explicit", asy
     const project = kernel.resolveStack(scope, { session_scope_id: "session", team_scope_id: "team", organization_scope_id: "org", user_scope_id: "user", include_global: true });
     assert(project.attempted_scopes.some(item => item.kind === "global"));
     assert(project.excluded_scopes.some(item => item.reason === "session_scope_requires_task_request"));
+    const ownSession = kernel.resolveStack(scope, { session_scope_id: "session", session_id: "session" });
+    assert(ownSession.attempted_scopes.some(item => item.kind === "session" && item.id === "session"));
+    const otherSession = kernel.resolveStack(scope, { session_scope_id: "session", session_id: "other-session" });
+    assert(otherSession.excluded_scopes.some(item => item.reason === "session_scope_requires_task_request"));
     const inherited = kernel.resolveStack({ kind: "task", id: "task" }, { project_scope_id: scope.id, session_scope_id: "session" });
     assert(inherited.attempted_scopes.some(item => item.kind === "session"));
     assert(kernel.resolveStack({ kind: "workspace", id: "workspace" }, { project_root: root, project_id: "named" }).attempted_scopes.some(item => item.id === scope.id));

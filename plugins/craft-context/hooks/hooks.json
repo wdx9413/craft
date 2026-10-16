@@ -1,5 +1,5 @@
 {
-  "description": "Resolve one bounded Knowledge, Memory, and Experience context receipt; record only explicit memory and verified local signals.",
+  "description": "Resolve one bounded Knowledge, Memory, and Experience context receipt; automatically capture classified stable Memory facts and verified local signals.",
   "hooks": {
     "SessionStart": [{ "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/plugin/craft-codex-hook.cjs\" --member context", "timeout": 3, "statusMessage": "Checking Craft Context lifecycle" }] }],
     "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/plugin/craft-codex-hook.cjs\" --member context", "timeout": 3, "statusMessage": "Resolving scoped Craft Context" }] }],

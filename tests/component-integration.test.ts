@@ -78,6 +78,57 @@ test("ingests immutable source revisions as Evidence and candidates, never revie
   } finally { await dispose(f); }
 });
 
+test("Knowledge promotes an ingested fact only after two independent verified sources support it", async () => {
+  const f = await fixture();
+  try {
+    const body = "# Project rule\nRun focused verification before delivery.\n";
+    const roots = [join(f.root, "notes-a"), join(f.root, "notes-b")];
+    const claims: JsonObject[] = [];
+    let sharedClaimId = "";
+    for (const [index, root] of roots.entries()) {
+      await mkdir(root);
+      await writeFile(join(root, "README.md"), body, "utf8");
+      if (index === 0) await writeFile(join(root, "copied-note.md"), body, "utf8");
+      f.service.knowledgeSourceRegister({ source_id: `source-${index}`, kind: "readme", label: `verified-${index}`, scope_kind: "project", scope_id: "p", locator: root, content_digest: `registered-${index}`, trust: "verified", access: "read_only" });
+      const result = f.service.knowledgeSourceIngest({ source_id: `source-${index}`, max_chars_per_fragment: 200 });
+      claims.push(...(result.candidates as JsonObject[]));
+      const claimId = String((result.candidates as JsonObject[])[0]!.claim_id);
+      sharedClaimId = claimId;
+      const review = (result.automatic_review as JsonObject).assessments as JsonObject[];
+      if (index === 0) {
+        assert.equal(review[0]!.promoted, false);
+        assert.deepEqual(review[0]!.reasons, ["independent_support_below_threshold"]);
+        assert.equal(f.store.get("knowledge_claim", claimId).status, "candidate");
+        assert.equal(f.store.count("knowledge_claim_support"), 1);
+        const duplicate = f.service.evidenceRecord({ evidence_id: "duplicate-source-evidence", source_type: "knowledge_fragment", confidence: "bounded", claim: "Copied text is still one source." });
+        f.store.create("knowledge_claim_support", "duplicate-source-support", { claim_id: claimId, evidence_id: duplicate.id, observation_key: "knowledge-source:source-0", scope: "project:p", confidence: "bounded" });
+        const rechecked = f.service.knowledgeAutoReview({ claim_ids: [claimId] }).assessments as JsonObject[];
+        assert.equal(rechecked[0]!.promoted, false);
+        assert.equal(rechecked[0]!.independent_support, 1);
+        const revokedSource = f.service.knowledgeSourceRegister({ source_id: "revoked-support-source", kind: "readme", label: "revoked corroboration", scope_kind: "project", scope_id: "p", locator: root, content_digest: "revoked-source", trust: "verified", access: "read_only" }).source as JsonObject;
+        const revokedEvidence = f.service.evidenceRecord({ evidence_id: "revoked-source-evidence", source_type: "knowledge_fragment", confidence: "bounded", claim: "Support from this source will be revoked." });
+        f.store.save("evidence", String(revokedEvidence.id), { ...revokedEvidence, source_id: revokedSource.id });
+        f.service.knowledgeClaimSupportRecord({ claim_id: claimId, evidence_id: revokedEvidence.id, observation_key: "knowledge-source:revoked-support-source", scope: "project:p" });
+        f.service.knowledgeSourceTransition({ source_id: revokedSource.id, status: "revoked", reason: "fixture trust revoked" });
+        const revokedRecheck = f.service.knowledgeAutoReview({ claim_ids: [claimId] }).assessments as JsonObject[];
+        assert.equal(revokedRecheck[0]!.promoted, false);
+        assert.equal(revokedRecheck[0]!.independent_support, 1);
+      } else {
+        assert.equal(review[0]!.promoted, true);
+        assert.equal(review[0]!.independent_support, 2);
+        assert.equal(f.store.get("knowledge_claim", claimId).status, "reviewed");
+      }
+    }
+    assert.equal(new Set(claims.map(item => item.claim_id)).size, 1);
+    // The append-only ledger retains duplicate/revoked support history; the
+    // assessment exposes only two currently independent, active sources.
+    assert.equal(f.store.count("knowledge_claim_support"), 4);
+    assert.equal(f.store.list("knowledge_claim_support", 10, item => item.claim_id === sharedClaimId).length, 4);
+    const search = await f.service.knowledgeSearchScoped({ query: "focused verification delivery", scope_kind: "project", scope_id: "p" });
+    assert.equal((search.hits as JsonObject[]).length, 1);
+  } finally { await dispose(f); }
+});
+
 test("ingests only bounded readable files and makes stale reviewed claims explicit", async () => {
     const f = await fixture();
   try {

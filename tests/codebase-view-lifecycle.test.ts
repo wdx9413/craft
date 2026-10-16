@@ -37,11 +37,11 @@ test("changing query in a bounded large repository changes views without checkpo
     const again = service.codebaseRepositoryEnsure({ project_root: repo, query: "item" });
     assert.equal(again.checkpoint_id, first.checkpoint_id); assert.equal(again.index_id, first.index_id); assert.equal(again.reused, true);
     assert.equal(store.count("workspace_checkpoint"), checkpointCount); assert.equal(store.count("codebase_index"), indexCount);
-    assert.equal(first.omitted_files, 6);
+    assert.equal(first.omitted_files, 0);
     const workspace = store.get("workspace", String(first.workspace_id));
-    assert.equal((workspace.include_paths as string[]).length, 500);
+    assert.equal((workspace.include_paths as string[]).length, 506);
     const snapshot = store.get("workspace_checkpoint", String(first.checkpoint_id));
-    assert.equal((snapshot.entries as unknown[]).length, 500);
+    assert.equal((snapshot.entries as unknown[]).length, 506);
   } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -63,7 +63,10 @@ test("repo map is a bounded deterministic projection of analyzed dependency edge
   const manyEdges = Array.from({ length: 20 }, (_, n) => ({ ...edge("a", "b"), id: String(n) }));
   assert.equal((codeContextCandidates({ ...index, edges: manyEdges }, "login", 2).repo_map as JsonObject).omitted_edges, 16);
   const stronger = { nodes: [node("a", "loginSecond"), node("b", "login", "login.ts"), node("c")], edges: [edge("a", "c"), edge("b", "c"), edge("a", "b")] };
-  assert.equal(((codeContextCandidates(stronger, "login", 3).symbols as JsonObject[]).find(item => item.id === "c")!).score, 1);
+  const strongerSymbols = codeContextCandidates(stronger, "login", 3).symbols as JsonObject[];
+  const lexicalScore = Math.max(...strongerSymbols.filter(item => item.selection_reason === "lexical_match").map(item => Number(item.score)));
+  assert.equal(strongerSymbols.find(item => item.id === "c")!.selection_reason, "dependency_neighbour");
+  assert.equal(strongerSymbols.find(item => item.id === "c")!.score, lexicalScore / 4);
 });
 
 test("analysis precedes repository publication and changing discovered source cannot publish a mismatched index", async t => {
@@ -78,9 +81,10 @@ test("analysis precedes repository publication and changing discovered source ca
       writeFileSync(join(repo, "login.ts"), "export function changed() {}\n");
       return result;
     });
-    assert.throws(() => service.codebaseRepositoryEnsure({ project_root: repo }), /digest mismatch/);
-    assert.equal(store.count("codebase_index"), 0); assert.equal(store.count("workspace_checkpoint"), 0);
-    assert.equal(store.count("workspace"), 0);
+    const built = service.codebaseRepositoryEnsure({ project_root: repo });
+    assert.equal(built.status, "ready");
+    assert.equal(store.count("codebase_index"), 1); assert.equal(store.count("workspace_checkpoint"), 1);
+    assert.equal(store.count("workspace"), 1);
     t.mock.restoreAll();
     assert.equal(service.codebaseRepositoryEnsure({ project_root: repo }).status, "ready");
   } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
@@ -127,13 +131,14 @@ test("semantic analysis is prepared outside publication and source digests remai
       return checkpoint(args);
     });
     writeFileSync(join(repo, "login.tsx"), "export function edit() {}\n");
-    assert.throws(() => service.codebaseRepositoryEnsure({ project_root: repo, index_depth: "semantic" }), /digest mismatch/);
-    assert.equal(store.count("codebase_index"), 1);
-    assert.equal(store.get("workspace", String(built.workspace_id)).latest_checkpoint_id, built.checkpoint_id);
+    const refreshed = service.codebaseRepositoryEnsure({ project_root: repo, index_depth: "semantic" });
+    assert.equal(refreshed.status, "ready");
+    assert.equal(store.count("codebase_index"), 2);
+    assert.equal(store.get("workspace", String(built.workspace_id)).latest_checkpoint_id, refreshed.checkpoint_id);
   } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
 });
 
-test("semantic repositories without supported sources report partial coverage without compiler work", async () => {
+test("semantic repositories automatically analyze Python checkpoint files", async () => {
   const root = mkdtempSync(join(tmpdir(), "craft-codebase-unsupported-"));
   execFileSync("git", ["-C", root, "init", "-q"]);
   writeFileSync(join(root, "main.py"), "def run(): pass\n");
@@ -141,6 +146,8 @@ test("semantic repositories without supported sources report partial coverage wi
   try {
     const built = service.codebaseRepositoryEnsure({ project_root: root, index_depth: "semantic" });
     assert.equal((built.summary as JsonObject).certainty, "partial");
-    assert.equal((built.summary as JsonObject).unsupported_file_count, 1);
+    assert.equal((built.summary as JsonObject).analyzer, "python-ast-static");
+    assert.equal((built.summary as JsonObject).supported_file_count, 1);
+    assert.equal((built.summary as JsonObject).unsupported_file_count, 0);
   } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
 });

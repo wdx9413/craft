@@ -126,7 +126,7 @@ test("configuration revisions are immutable candidates, preserve gates only on i
     assert.notEqual(next.definition_digest, f.p.definition_digest);
     assert.equal(f.store.get("experience_procedure", "scenario", Number(f.p.version)).routeable, true);
     assert.equal(f.store.count("experience_observation"), 0);
-    const mcp = new McpServer(f.service, "component-experience-daily");
+    const mcp = new McpServer(f.service, "component-experience");
     const response = await mcp.handle({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "craft_procedure_configuration_save", arguments: { procedure_id: "configured-via-mcp", title: "互联网产研", scope, procedure_kind: "graph", definition: graph() } } });
     assert.equal((response!.result as JsonObject).isError, false, JSON.stringify(response));
   } finally { await f.close(); }

@@ -2,8 +2,11 @@ import { randomUUID } from "node:crypto";
 import { canonicalJson, stableDigest } from "../../common/craft-common-base/src/digest.ts";
 import { credentialStatus, selectModel, type ModelProviderSpec, type ModelTier } from "../../common/craft-common-base/src/model-compat.ts";
 import { CraftStore, type JsonObject } from "../../common/craft-common-store-local/src/store.ts";
+import { scopeFromKey } from "../../common/craft-common-base/src/scope-policy.ts";
+import { listKnowledgeScenarios } from "../craft-knowledge/scenario-catalog.ts";
 
-const PURPOSES = new Set(["evaluation", "workflow_evolution"]);
+const PURPOSES = new Set(["evaluation", "workflow_evolution", "knowledge_scenario_classification"]);
+const KNOWLEDGE_CLASSIFIABLE_STATUSES = new Set(["candidate", "reviewed"]);
 const SECRET = /(?:api[_-]?key|authorization|cookie|password|secret|token)\s*[:=]\s*[^\s]{8,}/iu;
 
 function text(value: unknown, name: string): string {
@@ -62,11 +65,58 @@ export class EvaluationModelProfileKernel {
     return { profile, readiness: this.readiness(profile), idempotent: false };
   }
 
-  get(args: JsonObject): JsonObject { const profile = this.store.get("evaluation_model_profile", text(args.profile_id, "profile_id"), args.version === undefined ? undefined : integer(args.version, "version", 1, 1, Number.MAX_SAFE_INTEGER)); return { profile, readiness: this.readiness(profile) }; }
+  get(args: JsonObject): JsonObject {
+    const profile = this.store.get("evaluation_model_profile", text(args.profile_id, "profile_id"), args.version === undefined ? undefined : integer(args.version, "version", 1, 1, Number.MAX_SAFE_INTEGER));
+    const spec = this.provider(profile.provider);
+    return { profile, provider: { provider: spec.provider, label: spec.label, protocol: spec.protocol, base_url: spec.base_url,
+      api_key_env: spec.api_key_env, chat_path: spec.chat_path, models: spec.models, cost_hint: spec.cost_hint, supports_tools: spec.supports_tools,
+      context_cache: spec.context_cache ?? { mode: "none", requires_exact_prefix: false, usage_fields: "none" } }, readiness: this.readiness(profile) };
+  }
 
   list(args: JsonObject = {}): JsonObject {
     const limit = integer(args.limit, "limit", 100, 1, 1_000);
     return { profiles: this.store.list("evaluation_model_profile", limit).map((profile) => ({ ...profile, readiness: this.readiness(profile) })) };
+  }
+
+  ticketList(args: JsonObject = {}): JsonObject {
+    const limit = integer(args.limit, "limit", 100, 1, 1_000);
+    const purpose = args.purpose === undefined ? null : text(args.purpose, "purpose");
+    if (purpose !== null && !PURPOSES.has(purpose)) throw new Error("purpose is unsupported");
+    const tickets = this.store.list("evaluation_model_ticket", limit, (ticket) => {
+      if (purpose !== null && ticket.purpose !== purpose) return false;
+      const target = ticket.target as JsonObject | undefined;
+      if (target?.kind === "knowledge_scenario_classification") {
+        if (ticket.purpose !== "knowledge_scenario_classification") return false;
+        if (ticket.status !== "ready_for_adapter") return false;
+        const claim = this.store.find("knowledge_claim", String(target.id));
+        if (!claim || !KNOWLEDGE_CLASSIFIABLE_STATUSES.has(String(claim.status)) || typeof claim.scenario_key === "string"
+          || Number(claim.version) !== Number(target.version) || claim.content_digest !== target.content_digest) return false;
+        const scope = scopeFromKey(String(claim.scope ?? "global"));
+        if (scope.kind !== "project") return false;
+        return Number(listKnowledgeScenarios(this.store.paths.knowledgeDir, scope.id).catalog_version) === Number(target.catalog_version);
+      }
+      if (ticket.purpose === "evaluation") return true;
+      if (ticket.purpose !== "workflow_evolution") return false;
+      if (target?.kind !== "workflow_evolution_request") return false;
+      const request = this.store.find("workflow_evolution_request", String(target.id));
+      return request?.lifecycle === "awaiting_model" && Number(request.version) === Number(target.version);
+    });
+    return { tickets: tickets.map((ticket) => {
+      const profile = this.store.get("evaluation_model_profile", String(ticket.profile_id), Number(ticket.profile_version));
+      const readiness = this.readiness(profile);
+      return { ...ticket, readiness };
+    }) };
+  }
+
+  ticketComplete(args: JsonObject): JsonObject {
+    const ticketId = text(args.ticket_id, "ticket_id");
+    const ticket = this.store.get("evaluation_model_ticket", ticketId);
+    if (ticket.purpose !== "knowledge_scenario_classification" || ticket.status !== "ready_for_adapter") throw new Error("Only a ready Knowledge classification ticket can be completed");
+    const resultDigest = text(args.result_digest, "result_digest");
+    if (!/^sha256:[a-f0-9]{64}$/u.test(resultDigest)) throw new Error("result_digest must be a SHA-256 digest");
+    const completed = this.store.save("evaluation_model_ticket", ticketId, { ...ticket, status: "completed", result_digest: resultDigest, completed_at: new Date().toISOString() });
+    this.store.appendEvent(`evaluation-model:${ticket.profile_id}`, "evaluation_model.ticket_completed", { ticket_id: ticket.id, purpose: ticket.purpose, result_digest: resultDigest });
+    return { ticket: completed, idempotent: completed === ticket };
   }
 
   issue(args: JsonObject): JsonObject {
@@ -100,6 +150,18 @@ export class EvaluationModelProfileKernel {
       const dispatch = this.store.get("campaign_runner_dispatch", text(args.campaign_dispatch_id, "campaign_dispatch_id"));
       if (dispatch.status !== "issued") throw new Error("Campaign Runner dispatch is not issuable");
       return { kind: "campaign_runner_dispatch", id: dispatch.id, version: dispatch.version, campaign_id: dispatch.runner_id, slot_id: dispatch.slot_id };
+    }
+    if (purpose === "knowledge_scenario_classification") {
+      const claim = this.store.get("knowledge_claim", text(args.knowledge_claim_id, "knowledge_claim_id"));
+      const scope = scopeFromKey(String(claim.scope ?? "global"));
+      const source = typeof claim.source_id === "string" ? this.store.find("knowledge_source", claim.source_id) : null;
+      if (!KNOWLEDGE_CLASSIFIABLE_STATUSES.has(String(claim.status)) || typeof claim.scenario_key === "string" || scope.kind !== "project"
+        || !source || source.status !== "active" || source.trust === "untrusted") {
+        throw new Error("Knowledge scenario ticket requires an unclassified project Claim from an active trusted Source");
+      }
+      const catalog = listKnowledgeScenarios(this.store.paths.knowledgeDir, scope.id);
+      return { kind: "knowledge_scenario_classification", id: claim.id, version: claim.version,
+        content_digest: claim.content_digest, scope: claim.scope, catalog_version: catalog.catalog_version };
     }
     const request = this.store.get("workflow_evolution_request", text(args.workflow_evolution_request_id, "workflow_evolution_request_id"));
     if (request.lifecycle !== "awaiting_model") throw new Error("Workflow Evolution request is not awaiting a model proposal");

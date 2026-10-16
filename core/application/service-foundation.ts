@@ -589,7 +589,7 @@ export abstract class ServiceFoundation {
     this.memoryConsolidation = new MemoryConsolidationKernel(store);
     this.traceReviews = new TraceReviewKernel(store);
     this.memoryMaintenance = new MemoryMaintenanceKernel(store);
-    this.maintenanceScheduler = new MaintenanceScheduler(store, this.memoryMaintenance);
+    this.maintenanceScheduler = new MaintenanceScheduler(store, this.memoryMaintenance, (args) => this.memoryGovernance.expirySweep(args));
     this.runtimeModelProbe = new RuntimeModelProbeKernel(store, this.modelProviders, modelTransport ?? null);
     this.mcpTasks = new McpTaskKernel(store);
     this.runtimeProof = new RuntimeProofKernel(store);

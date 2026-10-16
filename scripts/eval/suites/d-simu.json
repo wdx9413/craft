@@ -1,0 +1,48 @@
+{
+  "cases": [
+    { "query": "conversation scheduler for multi-turn simulation", "path": "scheduler/conversation_scheduler.py", "name": "ConversationScheduler", "language": "python" },
+    { "query": "initialize the customer service API agent", "path": "scheduler/customer_service_agent.py", "name": "CustomerServiceAgent", "language": "python" },
+    { "query": "start multiple conversations concurrently", "path": "scheduler/conversation_scheduler.py", "name": "start_multiple_conversations", "language": "python" },
+    { "query": "simulation HTTP service task orchestration", "path": "service/http_server.py", "name": "SimulationService", "language": "python" },
+    { "query": "execute a queued simulation task", "path": "service/http_server.py", "name": "run_task", "language": "python" },
+    { "query": "start simulation API endpoint", "path": "service/http_server.py", "name": "start_simulation", "language": "python" },
+    { "query": "resolve user role data path", "path": "service/http_server.py", "name": "resolve_user_role_data_path", "language": "python" },
+    { "query": "load cached user role records", "path": "service/http_server.py", "name": "load_user_role_data", "language": "python" },
+    { "query": "normalize a row for the conversation viewer", "path": "eval_platform_frontend/src/pages/ConversationViewer.jsx", "name": "normalizeRow", "language": "javascript" },
+    { "query": "parse stored agent messages and normalize content types", "path": "eval_platform_frontend/src/pages/ConversationViewer.jsx", "name": "normalizeAgentMessages", "language": "javascript" },
+    { "query": "decode base64 JSON input", "path": "main_wrapper.py", "name": "decode_base64_json", "language": "python" },
+    { "query": "extract simulation request parameters", "path": "main_wrapper.py", "name": "extract_parameters", "language": "python" },
+    { "query": "如何启动多组并发对话", "path": "scheduler/conversation_scheduler.py", "name": "start_multiple_conversations", "language": "python" },
+    { "query": "启动仿真任务的 HTTP 接口", "path": "service/http_server.py", "name": "start_simulation", "language": "python" }
+  ],
+  "call_graph_cases": [
+    {
+      "target_path": "scheduler/conversation_scheduler.py",
+      "target_name": "ConversationScheduler",
+      "callers": [
+        { "path": "main.py", "name": "main" },
+        { "path": "service/http_server.py", "name": "run_task" }
+      ]
+    },
+    {
+      "target_path": "scheduler/customer_service_agent.py",
+      "target_name": "CustomerServiceAgent",
+      "callers": [
+        { "path": "scheduler/conversation_scheduler.py", "name": "_create_customer_service_agent" }
+      ]
+    }
+  ],
+  "impact_cases": [
+    {
+      "target_path": "scheduler/customer_service_agent.py",
+      "target_name": "CustomerServiceAgent",
+      "direction": "incoming",
+      "relation_kind": "calls",
+      "max_depth": 2,
+      "nodes": [
+        { "path": "scheduler/conversation_scheduler.py", "name": "_create_customer_service_agent" },
+        { "path": "scheduler/conversation_scheduler.py", "name": "__init__" }
+      ]
+    }
+  ]
+}

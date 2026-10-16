@@ -44,9 +44,9 @@
 }
 ```
 
-每条节点必须属于所选最新 checkpoint，digest 和 UTF-16 offset 必须匹配。仅存路径、符号、span、digest 和关系，限制 2 MB/10,000 nodes/20,000 edges。结果标记 `adapter_reported/partial`。LSP 的 Java/Python/Go 符号标准化 fixture 已验证，关系边需显式提供。默认 TS/JS 已使用 TypeScript checker；Python 的真实 Jedi 分析及 MCP 导入验收见 [Codebase](craft-codebase.md)。Java/Go 尚未完成真实语言服务器接入验收。
+每条节点必须属于所选最新 checkpoint，digest 和 UTF-16 offset 必须匹配。仅存路径、符号、span、digest 和关系，限制 2 MB/10,000 nodes/20,000 edges。外部 adapter 的结果标记 `adapter_reported/partial`。显式 stdio LSP 客户端可按需请求 references、definitions、incoming calls、implementations、type definitions 和 type hierarchy；definitions 通过 references provider 找到快照内引用，再调用 definition provider，最多每符号 20 个且总量 500 个位置。查询仍是构建时的有界快照数据，不提供任意光标的实时响应。默认 TS/JS 已使用 TypeScript checker；Python 的真实 Jedi 分析及 MCP 导入验收见 [Codebase](craft-codebase.md)。Java/Go 尚未完成真实语言服务器接入验收。
 
-已有 LSP DocumentSymbol 导出可用 `node scripts/codebase/normalize-lsp.ts lsp-documents.json` 转换。输入为 `{analyzer,analyzer_version,documents:[{path,language,content,source_digest,symbols}]}`，其中 symbols 为 LSP DocumentSymbol 数组。输出可直接作为 analysis 提交。它支持嵌套符号、CRLF 与 UTF-16，不启动语言服务器、不制造调用关系。AST/SCIP 生产方可以直接输出上述规范；没有捆绑 Java/Python/Go 语言服务器或 SCIP protobuf 解析器。
+已有 LSP DocumentSymbol 导出可用 `node scripts/codebase/normalize-lsp.ts lsp-documents.json` 转换。另有显式 stdio 客户端 `node --experimental-strip-types scripts/codebase/analyze-lsp.ts request.json`，可启动用户配置的语言服务器并将 checkpoint 文档发给 `textDocument/documentSymbol`；请求包含命令、参数、工作目录及带 digest 的文档列表。配置 `relations` 可选 `references`、`definitions`、`calls`、`implementations`、`type_definitions`、`type_hierarchy`，客户端按服务器能力调用 references、definition、call hierarchy incoming、implementation、typeDefinition 和 Type Hierarchy，并将 `Location`/`LocationLink` 的 URI 与范围绑定到 checkpoint 符号。definitions 先从符号位置枚举引用，再对快照内引用位置请求 definition，最多每符号 20 个且总量 500 个位置；它不能替代编辑器对任意光标位置的实时 go-to-definition。客户端不使用 shell、不由自动索引调用，也不捆绑或安装服务器；外部服务器进程本身不受 Craft 沙箱约束。关系状态区分未请求、已分析和 partial；外部来源的图边仍标为 partial 置信度。AST/SCIP 生产方也可以直接输出静态分析规范。
 
 ## 验收与升级
 

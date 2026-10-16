@@ -39,11 +39,11 @@ export function operationResultStatus(result: unknown): string {
 
 function references(result: unknown): string[] {
   const outer = object(result), value = Array.isArray(outer.args) ? object(outer.args.find(item => item && typeof item === "object" && !Array.isArray(item))) : outer, refs: string[] = [];
-  for (const key of ["receipt", "pack_receipt", "working_set", "procedure", "invocation", "run", "observation", "evidence", "claim", "source", "memory", "index", "workspace", "artifact", "document", "dispatch"]) {
+  for (const key of ["receipt", "pack_receipt", "working_set", "procedure", "invocation", "run", "observation", "evidence", "claim", "source", "memory", "index", "workspace", "artifact", "document", "dispatch", "request", "candidate", "proposal", "support"]) {
     const id = object(value[key]).id;
     if (ref(id)) refs.push(id);
   }
-  for (const key of ["receipt_id", "invocation_id", "procedure_id", "workspace_id", "index_id", "snapshot_id", "task_id", "task_run_id", "evidence_id", "source_id", "memory_id", "claim_id", "dispatch_id"]) if (ref(value[key])) refs.push(value[key]);
+  for (const key of ["receipt_id", "invocation_id", "procedure_id", "workspace_id", "index_id", "snapshot_id", "task_id", "task_run_id", "evidence_id", "source_id", "memory_id", "claim_id", "dispatch_id", "request_id", "candidate_id", "proposal_id", "support_id"]) if (ref(value[key])) refs.push(value[key]);
   for (const key of ["input_refs", "output_refs"]) for (const id of Object.values(object(value[key]))) if (ref(id)) refs.push(id);
   return [...new Set(refs)].slice(0, 8);
 }

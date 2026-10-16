@@ -50,8 +50,8 @@ test("deployable HTTPS component binds verified principals to isolated tenant st
       assert.equal(response.status, 200); assert.equal(response.body.result.isError, false, JSON.stringify(response.body)); return response.body.result.structuredContent;
     };
     await call("alice", "craft_knowledge_bootstrap_install");
-    await call("alice", "craft_memory_capture_user_statement", { scope_kind: "project", scope_id: "same", content: "Alice prefers scoped verification", explicit_consent: true, auto_accept: true });
-    const scope = { scope_kind: "project", scope_id: "same" };
+    await call("alice", "craft_memory_capture_user_statement", { session_id: "alice-session", project_scope_id: "same", content: "Alice prefers scoped verification" });
+    const scope = { scope_kind: "session", scope_id: "alice-session" };
     assert.equal((await call("alice", "craft_memory_ledger_list", scope)).memories.length, 1);
     assert.equal((await call("bob", "craft_memory_ledger_list", scope)).memories.length, 0);
     const forged = await send("bob", "tools/call", { name: "craft_memory_ledger_list", arguments: { ...scope, tenant_id: "tenant_a" } }); assert.equal(forged.body.result.isError, true);

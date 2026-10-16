@@ -88,7 +88,7 @@ test("Context pack exposes partial coverage, budget omissions, disabled and unav
     assert.equal((repeated.pack_receipt as JsonObject).id, (ready.pack_receipt as JsonObject).id);
     const stateId = `${String((ready.codebase as JsonObject).workspace_id)}_basic`;
     const state = f.store.get("codebase_repository_state", stateId) as JsonObject;
-    f.store.save("codebase_repository_state", stateId, { workspace_id: state.workspace_id, checkpoint_id: state.checkpoint_id, policy_version: state.policy_version, index_id: state.index_id, summary: { ...(state.summary as JsonObject), unsupported_file_count: 1 } });
+    f.store.save("codebase_repository_state", stateId, { workspace_id: state.workspace_id, checkpoint_id: state.checkpoint_id, policy_version: state.policy_version, adapter_config_digest: state.adapter_config_digest, index_id: state.index_id, summary: { ...(state.summary as JsonObject), unsupported_file_count: 1 } });
     const unsupported = await f.service.contextOpen({ project_root: f.repo, query: "alpha" });
     assert.equal(unsupported.pack_status, "partial");
     assert(((unsupported.pack_receipt as JsonObject).partial_reasons as string[]).includes("codebase_analyzer_unsupported_files"));
@@ -98,6 +98,9 @@ test("Context pack exposes partial coverage, budget omissions, disabled and unav
     writeFileSync(join(f.repo, ".craft-codebase.json"), "bad json");
     const unavailable = await f.service.contextOpen({ project_root: f.repo, query: "alpha" });
     assert(((unavailable.pack_receipt as JsonObject).partial_reasons as string[]).includes("codebase_unavailable"));
+    assert.equal((unavailable.codebase as JsonObject).failure_code, "OPERATION_FAILED");
+    assert.equal((unavailable.codebase as JsonObject).failure_stage, "repository_ensure");
+    assert.deepEqual((unavailable.codebase as JsonObject).failure_details, {});
     const skipped = await f.service.contextOpen({ project_root: f.repo, query: "alpha", include_codebase: false });
     assert.equal(skipped.partial, false); assert.deepEqual((skipped.pack_receipt as JsonObject).partial_reasons, []);
   } finally { f.close(); }

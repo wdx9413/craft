@@ -4,10 +4,12 @@ import { text } from "../../common/craft-common-base/src/validation.ts";
 import { scopeEnvelope, scopeFromKey } from "../../common/craft-common-base/src/scope-policy.ts";
 import { KnowledgeSourceRegistry } from "./knowledge-source-registry.ts";
 import { claimReadable } from "./claim-access.ts";
+import { knowledgeScenarioCanClassify, updateKnowledgeScenarioClaim, validateKnowledgeScenarioDefinition } from "./scenario-catalog.ts";
 const KNOWLEDGE_KINDS = new Set(["fact", "rule", "decision", "term", "failure_mode"]);
 const KNOWLEDGE_STATUSES = new Set(["candidate", "reviewed", "disputed", "superseded", "expired", "stale"]);
 function id(prefix: string): string { return `${prefix}_${randomUUID().replaceAll("-", "")}`; }
 function valueDigest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`; }
+function rawContentDigest(value: string): string { return `sha256:${createHash("sha256").update(value).digest("hex")}`; }
 const SECRET_ASSIGNMENT = /(?:api[_-]?key|authorization|cookie|password|secret|token)["']?\s*[:=]\s*[^\s]+/iu;
 function document(value: unknown, name: string): string {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
@@ -72,6 +74,19 @@ export class KnowledgeClaimGovernance {
     // entering Context after a database reload or bundle import.
     const sourceId = String(args.source_id ?? "builtin.evidence-wiki");
     const envelope = scopeEnvelope(args.scope_envelope, scopeFromKey(scope));
+    const scenarioKey = args.scenario_key === undefined ? undefined : text(args.scenario_key, "scenario_key");
+    const coarseScenarioKey = args.coarse_scenario_key === undefined ? undefined : text(args.coarse_scenario_key, "coarse_scenario_key");
+    const scenarioDefinition = validateKnowledgeScenarioDefinition(args.scenario_definition);
+    const coarseScenarioDefinition = validateKnowledgeScenarioDefinition(args.coarse_scenario_definition);
+    if (coarseScenarioDefinition && !coarseScenarioKey) throw new Error("coarse scenario definition requires coarse_scenario_key");
+    if (coarseScenarioKey && !scenarioKey) throw new Error("coarse_scenario_key requires scenario_key");
+    if ((scenarioKey || coarseScenarioKey) && scopeFromKey(scope).kind !== "project") throw new Error("Knowledge scenario classification requires project scope");
+    if ((scenarioKey && !/^[a-z0-9][a-z0-9._/-]{0,95}$/u.test(scenarioKey)) || (coarseScenarioKey && !/^[a-z0-9][a-z0-9._/-]{0,95}$/u.test(coarseScenarioKey))
+      || scenarioKey !== undefined && scenarioKey === coarseScenarioKey) throw new Error("Knowledge scenario keys must be distinct bounded stable identifiers");
+    if (scenarioKey && !knowledgeScenarioCanClassify(this.store.paths.knowledgeDir, scopeFromKey(scope).id, scenarioKey)
+      || coarseScenarioKey && !knowledgeScenarioCanClassify(this.store.paths.knowledgeDir, scopeFromKey(scope).id, coarseScenarioKey)) {
+      throw new Error("Knowledge scenario is conflicted or retired and cannot receive classifications");
+    }
     const identity = { kind, content_digest: contentDigest, scope, scope_envelope: envelope, source_id: sourceId, evidence_ids: evidenceIds, tags, valid_until: validUntil, ...(title ? { title } : {}) };
     if (existing) {
       // v0.12.33 claims did not persist source_id in their identity.  Keep a
@@ -81,12 +96,47 @@ export class KnowledgeClaimGovernance {
       // source until a reviewed migration explicitly re-attributes it.
       const legacyIdentity = { kind, content_digest: contentDigest, scope, source_id: sourceId, evidence_ids: evidenceIds, tags, valid_until: validUntil, ...(title ? { title } : {}) };
       const olderIdentity = { kind, content_digest: contentDigest, scope, evidence_ids: evidenceIds, tags, valid_until: validUntil, ...(title ? { title } : {}) };
-      if (existing.identity_digest !== valueDigest(identity) && existing.identity_digest !== valueDigest(legacyIdentity) && existing.identity_digest !== valueDigest(olderIdentity)) throw new Error("Knowledge claim idempotency conflict");
-      return { claim: existing, idempotent: true };
+      const classifiedIdentity = { ...identity, ...(scenarioKey ? { scenario_key: scenarioKey } : {}), ...(coarseScenarioKey ? { coarse_scenario_key: coarseScenarioKey } : {}) };
+      // Source-ingested Claims use a stronger Source Revision/Document/Fragment identity digest.
+      // Allow only an exact match of the currently persisted claim fields so a classifier can add
+      // scenario metadata without replacing that provenance identity or the review decision.
+      const currentClaimIdentity = { kind: existing.kind, content_digest: existing.content_digest, scope: existing.scope,
+        scope_envelope: existing.scope_envelope, source_id: existing.source_id,
+        evidence_ids: Array.isArray(existing.evidence_ids) ? existing.evidence_ids : [],
+        tags: Array.isArray(existing.tags) ? existing.tags : [], valid_until: existing.valid_until ?? null,
+        ...(typeof existing.title === "string" ? { title: existing.title } : {}) };
+      let ingestedBodyMatches = false;
+      if (existing.ingest_generated === true && existing.content_ref) {
+        try {
+          ingestedBodyMatches = this.store.contentStore.readCompatSync(existing.content_ref as never).body === content
+            && existing.content_digest === rawContentDigest(content);
+        } catch { /* A missing or invalid protected body cannot authorize a classification write. */ }
+      }
+      const ingestedIdentity = { ...identity, content_digest: existing.content_digest };
+      const exactIngestedClaim = ingestedBodyMatches && existing.ingest_generated === true
+        && valueDigest(ingestedIdentity) === valueDigest(currentClaimIdentity);
+      if (existing.identity_digest !== valueDigest(identity) && existing.identity_digest !== valueDigest(classifiedIdentity)
+        && existing.identity_digest !== valueDigest(legacyIdentity) && existing.identity_digest !== valueDigest(olderIdentity) && !exactIngestedClaim) {
+        throw new Error("Knowledge claim idempotency conflict");
+      }
+      let saved = existing;
+      let previousScenarioCatalog: JsonObject | null = null;
+      if (scenarioKey && (existing.scenario_key !== scenarioKey || (existing.coarse_scenario_key ?? null) !== (coarseScenarioKey ?? null))) {
+        if (typeof existing.scenario_key === "string") previousScenarioCatalog = updateKnowledgeScenarioClaim(this.store.paths.knowledgeDir, existing, "inactive");
+        saved = this.store.save("knowledge_claim", String(existing.id), { ...recordPayload(existing), scenario_key: scenarioKey,
+          ...(coarseScenarioKey ? { coarse_scenario_key: coarseScenarioKey } : { coarse_scenario_key: null }) });
+      }
+      const scenarioCatalog = updateKnowledgeScenarioClaim(this.store.paths.knowledgeDir, { ...saved,
+        ...(scenarioDefinition ? { scenario_definition: scenarioDefinition } : {}), ...(coarseScenarioDefinition ? { coarse_scenario_definition: coarseScenarioDefinition } : {}) });
+      return { claim: saved, idempotent: saved === existing, ...(scenarioCatalog ? { scenario_catalog: scenarioCatalog } : {}),
+        ...(previousScenarioCatalog ? { previous_scenario_catalog: previousScenarioCatalog } : {}) };
     }
     const contentRef = this.store.contentStore.writeSync({ kind: "knowledge", record_id: claimId, version: 1, scope, status: "candidate", sensitivity: "internal", source_id: sourceId, title, body: content });
-    const claim = this.store.create("knowledge_claim", claimId, { ...identity, content_ref: contentRef, identity_digest: valueDigest(identity), status: "candidate", review: null });
-    return { claim, idempotent: false };
+    const claim = this.store.create("knowledge_claim", claimId, { ...identity, ...(scenarioKey ? { scenario_key: scenarioKey } : {}),
+      ...(coarseScenarioKey ? { coarse_scenario_key: coarseScenarioKey } : {}), content_ref: contentRef, identity_digest: valueDigest(identity), status: "candidate", review: null });
+    const scenarioCatalog = updateKnowledgeScenarioClaim(this.store.paths.knowledgeDir, { ...claim,
+      ...(scenarioDefinition ? { scenario_definition: scenarioDefinition } : {}), ...(coarseScenarioDefinition ? { coarse_scenario_definition: coarseScenarioDefinition } : {}) });
+    return { claim, idempotent: false, ...(scenarioCatalog ? { scenario_catalog: scenarioCatalog } : {}) };
   }
   knowledgeClaimGet(args: JsonObject): JsonObject {
     const id = text(args.claim_id, "claim_id");
@@ -129,7 +179,8 @@ export class KnowledgeClaimGovernance {
       if (!source || source.status !== "active" || source.trust === "untrusted") throw new Error("Reviewed knowledge claim requires an active trusted Source");
     }
     const saved = this.store.save("knowledge_claim", String(claim.id), { ...recordPayload(claim), status, review: { reviewer, ...(status === "reviewed" ? { source_digest: this.store.get("knowledge_source", String(claim.source_id)).content_digest } : {}), reason_digest: valueDigest(reason), reviewed_at: new Date().toISOString() } });
-    return { claim: saved };
+    const scenarioCatalog = updateKnowledgeScenarioClaim(this.store.paths.knowledgeDir, saved);
+    return { claim: saved, ...(scenarioCatalog ? { scenario_catalog: scenarioCatalog } : {}) };
   }
   synchronize(args: JsonObject = {}): JsonObject {
     const now = new Date(args.now === undefined ? Date.now() : text(args.now, "now"));
@@ -144,7 +195,11 @@ export class KnowledgeClaimGovernance {
         : !source || source.status !== "active" || source.trust === "untrusted" || (claim.review as JsonObject | null)?.source_digest !== undefined && (claim.review as JsonObject).source_digest !== source.content_digest
           || claim.document_id && (!document || document.status !== "current" || document.content_digest !== claim.document_digest) ? "stale"
         : contradictions.has(String(claim.id)) ? "disputed" : null;
-      if (status) affected.push(this.store.save("knowledge_claim", String(claim.id), { ...recordPayload(claim), status, revalidation_required: true, synchronization_at: now.toISOString() }));
+      if (status) {
+        const saved = this.store.save("knowledge_claim", String(claim.id), { ...recordPayload(claim), status, revalidation_required: true, synchronization_at: now.toISOString() });
+        updateKnowledgeScenarioClaim(this.store.paths.knowledgeDir, saved, "inactive");
+        affected.push(saved);
+      }
     }
     return { affected, count: affected.length, now: now.toISOString() };
   }

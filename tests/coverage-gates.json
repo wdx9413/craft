@@ -28,19 +28,38 @@
     {
       "name": "context-remediation",
       "include": [
+        "common/craft-common-base/src/bm25.ts",
         "common/craft-common-base/src/context-assets.ts",
         "capability/craft-codebase/context-search.ts",
+        "capability/craft-codebase/symbol-kind.ts",
+        "capability/craft-codebase/python-analysis.ts",
+        "capability/craft-codebase/multi-language-analysis.ts",
+        "capability/craft-codebase/typescript-incremental.ts",
+        "capability/craft-codebase/python-incremental.ts",
+        "capability/craft-codebase/java-analysis.ts",
+        "capability/craft-codebase/java-incremental.ts",
         "capability/craft-codebase/repository-onboarding.ts",
         "capability/craft-experience/procedure-release.ts",
         "capability/craft-experience/graph-matching.ts",
         "core/mcp/context-tools.ts",
         "capability/craft-memory/memory-capture.ts",
-        "capability/craft-knowledge/claim-governance.ts"
+        "capability/craft-memory/memory-files.ts",
+        "capability/craft-knowledge/claim-governance.ts",
+        "capability/craft-knowledge/scenario-catalog.ts"
       ],
       "tests": [
+        "tests/ideal-state-gaps.test.ts",
         "tests/context-remediation.test.ts",
+        "tests/codebase-context-search.test.ts",
         "tests/repository-context.test.ts",
+        "tests/typescript-incremental.test.ts",
+        "tests/python-incremental.test.ts",
+        "tests/python-analysis.test.ts",
+        "tests/java-analysis.test.ts",
+        "tests/java-incremental.test.ts",
         "tests/knowledge-memory-operability.test.ts",
+        "tests/knowledge-scenario-catalog.test.ts",
+        "tests/knowledge-promotion-policy.test.ts",
         "tests/industry-gaps.test.ts",
         "tests/validation.test.ts",
         "tests/remaining-branch-cases.test.ts",
@@ -49,7 +68,8 @@
         "tests/context-optimization.test.ts",
         "tests/codebase-view-lifecycle.test.ts",
         "tests/memory-contribution.test.ts",
-        "tests/codebase-context-projection.test.ts"
+        "tests/codebase-context-projection.test.ts",
+        "tests/memory-tiers.test.ts"
       ],
       "branches": true
     },
@@ -153,7 +173,8 @@
         "tests/cost-ledger.test.ts",
         "tests/runtime-contracts.test.ts",
         "tests/runtime-truth.test.ts",
-        "tests/observability-memory.test.ts"
+        "tests/observability-memory.test.ts",
+        "tests/trace-evolution.test.ts"
       ],
       "branches": true
     },
@@ -294,13 +315,44 @@
       "branches": true
     },
     {
+      "name": "codebase-lsp-stdio-client",
+      "include": [
+        "capability/craft-codebase/lsp-stdio-client.ts"
+      ],
+      "tests": [
+        "tests/codebase-lsp-stdio-client.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "codebase-lsp-relations",
+      "include": [
+        "capability/craft-codebase/lsp-relations.ts"
+      ],
+      "tests": [
+        "tests/codebase-lsp-relations.test.ts"
+      ],
+      "branches": true
+    },
+    {
       "name": "codebase-lsp-adapter",
       "include": [
-        "capability/craft-codebase/lsp-adapter.ts"
+        "capability/craft-codebase/lsp-adapter.ts",
+        "capability/craft-codebase/symbol-kind.ts"
       ],
       "tests": [
         "tests/codebase-lsp-adapter.test.ts",
         "tests/industry-gaps.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "codebase-definition-query",
+      "include": [
+        "capability/craft-codebase/definition-query.ts"
+      ],
+      "tests": [
+        "tests/codebase-definition-query.test.ts"
       ],
       "branches": true
     },
@@ -326,15 +378,34 @@
       "branches": true
     },
     {
+      "name": "codebase-control-flow",
+      "include": [
+        "capability/craft-codebase/control-flow.ts"
+      ],
+      "tests": [
+        "tests/control-flow.test.ts"
+      ],
+      "branches": true
+    },
+    {
       "name": "craft-codebase",
       "include": [
         "capability/craft-codebase/capability.ts",
         "capability/craft-codebase/ownership.ts",
         "capability/craft-codebase/codebase-index.ts",
+        "capability/craft-codebase/java-analysis.ts",
+        "capability/craft-codebase/java-incremental.ts",
+        "capability/craft-codebase/control-flow.ts",
+        "capability/craft-codebase/data-flow.ts",
+        "capability/craft-codebase/lsp-diagnostics-query.ts",
         "core/application/use-cases/codebase.ts"
       ],
       "tests": [
         "tests/craft-codebase.test.ts",
+        "tests/java-analysis.test.ts",
+        "tests/java-incremental.test.ts",
+        "tests/control-flow.test.ts",
+        "tests/data-flow.test.ts",
         "tests/component-hookless.test.ts",
         "tests/industry-gaps.test.ts",
         "tests/repository-context.test.ts",
@@ -705,7 +776,8 @@
         "core/application/use-cases/learning-cycle.ts"
       ],
       "tests": [
-        "tests/codex-hook-bridge.test.ts"
+        "tests/codex-hook-bridge.test.ts",
+        "tests/evaluation-model-workflow-evolution.test.ts"
       ],
       "branches": true
     },
@@ -1048,7 +1120,8 @@
         "tests/component-procedure-graph.test.ts",
         "tests/observability-memory.test.ts",
         "tests/context-remediation.test.ts",
-        "tests/memory-commit-optimization.test.ts"
+        "tests/memory-commit-optimization.test.ts",
+        "tests/cognitive-write.test.ts"
       ],
       "branches": true
     },
@@ -1338,7 +1411,8 @@
         "capability/craft-codebase/typescript-analysis.ts"
       ],
       "tests": [
-        "tests/industry-gaps.test.ts"
+        "tests/industry-gaps.test.ts",
+        "tests/repository-context.test.ts"
       ],
       "branches": true
     },
@@ -1380,6 +1454,7 @@
       "include": [
         "capability/craft-codebase/repository-files.ts",
         "capability/craft-codebase/basic-analysis.ts",
+        "core/application/use-cases/codebase-failure.ts",
         "core/application/use-cases/repository-context.ts",
         "core/operation-error.ts",
         "adapters/deepseek-harness/mcp-client.ts",
@@ -1391,6 +1466,7 @@
         "tests/dsh-product-adapter.test.ts",
         "tests/context-spec-regressions.test.ts",
         "tests/context-aggregation-policy.test.ts",
+        "tests/codebase-failure.test.ts",
         "tests/context-remediation.test.ts",
         "tests/context-revocation-race.test.ts",
         "tests/context-optimization.test.ts",
@@ -1434,7 +1510,121 @@
         "capability/craft-experience/learning-evaluation.ts"
       ],
       "tests": [
-        "tests/experience-learning-automation.test.ts"
+        "tests/experience-learning-automation.test.ts",
+        "tests/scenario-evaluation.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "experience-scenario-catalog",
+      "include": [
+        "capability/craft-experience/scenario-catalog.ts"
+      ],
+      "tests": [
+        "tests/experience-scenario-catalog.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "experience-scenario-evaluation-contract",
+      "include": [
+        "capability/craft-experience/scenario-evaluation.ts"
+      ],
+      "tests": [
+        "tests/scenario-evaluation.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "experience-distilled-workflow-contract",
+      "include": [
+        "deploy/experience-learning/workflow-contract.ts"
+      ],
+      "tests": [
+        "tests/experience-workflow-contract.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "knowledge-learning-worker",
+      "include": [
+        "deploy/experience-learning/knowledge-sync.ts"
+      ],
+      "tests": [
+        "tests/knowledge-learning-worker.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "knowledge-classification-worker",
+      "include": [
+        "deploy/experience-learning/knowledge-classification.ts"
+      ],
+      "tests": [
+        "tests/knowledge-classification-worker.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "experience-learning-resilience",
+      "include": [
+        "deploy/experience-learning/learning-tick.ts"
+      ],
+      "tests": [
+        "tests/experience-learning-worker.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "learning-worker-supervisor",
+      "include": [
+        "core/interfaces/learning-worker-supervisor.ts"
+      ],
+      "tests": [
+        "tests/learning-worker-supervisor.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "codebase-lsp-snapshot-files",
+      "include": [
+        "capability/craft-codebase/lsp-snapshot-files.ts"
+      ],
+      "tests": [
+        "tests/codebase-lsp-snapshot-files.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "codebase-lsp-runtime",
+      "include": [
+        "capability/craft-codebase/lsp-config.ts",
+        "capability/craft-codebase/lsp-worker.ts"
+      ],
+      "tests": [
+        "tests/codebase-lsp-config.test.ts",
+        "tests/codebase-lsp-worker.test.ts",
+        "tests/repository-context.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "codebase-impact-evaluation",
+      "include": [
+        "scripts/eval/codebase-impact-evaluation.ts"
+      ],
+      "tests": [
+        "tests/codebase-impact-evaluation.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "codebase-retrieval-language-strata",
+      "include": [
+        "scripts/eval/codebase-retrieval-strata.ts"
+      ],
+      "tests": [
+        "tests/codebase-retrieval-strata.test.ts"
       ],
       "branches": true
     }

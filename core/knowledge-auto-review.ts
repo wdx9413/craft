@@ -12,6 +12,7 @@ import type { CraftStore, JsonObject } from "./infrastructure/store.ts";
 import { payload } from "./digest.ts";
 import { text } from "./validation.ts";
 import { contentReference, type ContentRef } from "./infrastructure/content-store.ts";
+import { updateKnowledgeScenarioClaim } from "../capability/craft-knowledge/scenario-catalog.ts";
 
 type Verdict = "eligible" | "revalidation_required" | "rejected" | "already_reviewed";
 type Confidence = "bounded" | "confirmed";
@@ -257,6 +258,7 @@ export class KnowledgeAutoReviewKernel {
         reviewed_at: new Date(now).toISOString(), automated: true, host_attested: true,
       },
     });
+    updateKnowledgeScenarioClaim(this.store.paths.knowledgeDir, reviewedClaim, "reviewed");
     return { review, evidence, claim: reviewedClaim, promoted: true, idempotent: existing !== null, status: "reviewed", blocking_reasons: [] };
   }
 
@@ -283,6 +285,7 @@ export class KnowledgeAutoReviewKernel {
   private assessOne(claimId: string, now: number, autoPromote: boolean, policy: PromotionPolicy): JsonObject {
     const claim = this.store.get("knowledge_claim", claimId);
     const reasons: string[] = [];
+    let independentSupportCount = 0;
     let verdict: Verdict;
     if (claim.status === "reviewed") verdict = "already_reviewed";
     else if (claim.status !== "candidate") { verdict = "rejected"; reasons.push(`claim_status_${String(claim.status)}`); }
@@ -300,11 +303,19 @@ export class KnowledgeAutoReviewKernel {
       else if (source.status !== "active" || source.trust === "untrusted") reasons.push("source_not_trusted_active");
       if (!credibleEvidence.length) reasons.push("credible_evidence_missing");
       const supports = this.supports(claim);
+      const supportKeys = new Set<string>();
       const independentSupport = supports.filter((support) => {
         const evidence = this.store.find("evidence", String(support.evidence_id));
-        return evidence && ["bounded", "confirmed"].includes(String(evidence.confidence))
-          && CONFIDENCE_ORDER[String(evidence.confidence) as Confidence] >= CONFIDENCE_ORDER[policy.minimum_confidence];
+        if (!evidence || !["bounded", "confirmed"].includes(String(evidence.confidence))
+          || CONFIDENCE_ORDER[String(evidence.confidence) as Confidence] < CONFIDENCE_ORDER[policy.minimum_confidence]) return false;
+        const evidenceSource = typeof evidence.source_id === "string" ? this.store.find("knowledge_source", evidence.source_id) : null;
+        if (evidenceSource && (evidenceSource.status !== "active" || evidenceSource.trust === "untrusted")) return false;
+        const key = String(support.observation_key ?? support.evidence_id);
+        if (supportKeys.has(key)) return false;
+        supportKeys.add(key);
+        return true;
       });
+      independentSupportCount = independentSupport.length;
       if (independentSupport.length < policy.minimum_independent_support) reasons.push("independent_support_below_threshold");
       if (!claimContentIsIntact(this.store, claim)) reasons.push("content_reference_invalid");
       if (claim.valid_until && Date.parse(String(claim.valid_until)) < now) reasons.push("claim_expired");
@@ -322,8 +333,9 @@ export class KnowledgeAutoReviewKernel {
     // auditable through both this review record and the normal Claim review field.
     if (autoPromote && policy.automatic && verdict === "eligible") {
       reviewedClaim = this.store.save("knowledge_claim", String(claim.id), { ...payload(claim), status: "reviewed", review: { reviewer: "automated-promotion-policy", source_digest: this.store.get("knowledge_source", String(claim.source_id)).content_digest, reason_digest: digest({ review_id: review.id, verdict, policy_id: policy.id, policy_revision: policy.revision }), reviewed_at: new Date(now).toISOString(), automated: true, policy_id: policy.id, policy_revision: policy.revision } });
+      updateKnowledgeScenarioClaim(this.store.paths.knowledgeDir, reviewedClaim, "reviewed");
     }
-    return { claim_id: claim.id, claim_version: claim.version, verdict, reasons, review, claim: reviewedClaim ?? claim, promoted: reviewedClaim !== null, independent_support: this.supports(claim).length, required_independent_support: policy.minimum_independent_support, idempotent: existing !== null };
+    return { claim_id: claim.id, claim_version: claim.version, verdict, reasons, review, claim: reviewedClaim ?? claim, promoted: reviewedClaim !== null, independent_support: independentSupportCount, required_independent_support: policy.minimum_independent_support, idempotent: existing !== null };
   }
 
   private policy(): PromotionPolicy & JsonObject {

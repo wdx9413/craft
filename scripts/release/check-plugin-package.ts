@@ -26,6 +26,7 @@ for (const path of [
   join(pluginRoot, "skills", "craft-route", "SKILL.md"),
   join(pluginRoot, "dist", "plugin", "craft-mcp.cjs"),
   join(pluginRoot, "dist", "plugin", "craft-mcp-full.cjs"),
+  join(pluginRoot, "dist", "plugin", "craft-experience-learning-worker.js"),
 ]) await access(path);
 
 for (const name of componentNames) {
@@ -39,6 +40,14 @@ for (const name of componentNames) {
   assert.equal(componentManifest.interface?.logo, "./assets/craft-icon.svg");
   await access(join(componentRoot, "assets", "craft-icon.svg"));
   await access(join(componentRoot, "dist", "plugin", "craft-mcp.cjs"));
+  if (name === "craft-codebase" || name === "craft-context") {
+    await access(join(componentRoot, "scripts", "codebase", "analyzers", "python-control-flow.py"));
+    await access(join(componentRoot, "scripts", "codebase", "analyzers", "python-data-flow.py"));
+    await access(join(componentRoot, "scripts", "codebase", "analyzers", "AnalyzeJavaControlFlow.java"));
+  }
+  if (["craft-context", "craft-knowledge", "craft-experience"].includes(name)) {
+    await access(join(componentRoot, "dist", "plugin", "craft-experience-learning-worker.js"));
+  }
     if (name in hookMembers) {
       assert.equal(componentManifest.hooks, "./hooks/codex-hooks.json");
       const hookPath = join(componentRoot, "hooks", "codex-hooks.json");

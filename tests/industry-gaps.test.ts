@@ -15,7 +15,7 @@ import { KnowledgeContribution } from "../capability/craft-knowledge/contributio
 import { KnowledgeSourceRegistry } from "../capability/craft-knowledge/knowledge-source-registry.ts";
 import { OpenAiCompatibleEmbeddingRetrievalPort, KeywordRetrievalPort } from "../core/retrieval-port.ts";
 import ts from "typescript";
-import { analyzeTypeScript, createCheckpointCompilerHost } from "../capability/craft-codebase/typescript-analysis.ts";
+import { analyzeTypeScript, createCheckpointCompilerHost, exceedsTypeScriptFileUnitBudget } from "../capability/craft-codebase/typescript-analysis.ts";
 import { normalizeLspSymbols } from "../capability/craft-codebase/lsp-adapter.ts";
 import { runRetrievalEvaluation } from "../core/retrieval-evaluation.ts";
 import { CraftService } from "../core/service.ts";
@@ -171,14 +171,74 @@ test("compiler resolves imports, aliases and methods without matching comments, 
     source("c.ts", "import missing from 'unavailable-package';\nfunction target() {}\nfunction unrelated() { target(); }")];
   const result = analyzeTypeScript(files), nodes = result.nodes as JsonObject[], edges = result.edges as JsonObject[];
   const target = nodes.find(node => node.path === "a.ts" && node.name === "target")!;
+  assert.equal(target.id, `ts_${stableDigest(["a.ts", files[0]!.content.indexOf("target"), "target"]).slice(-24)}`, "symbol IDs are a persisted graph identity contract");
+  assert.equal(nodes.find(node => node.kind === "file" && node.path === "a.ts")!.id, `ts_${stableDigest(["a.ts", "file"]).slice(-24)}`, "file IDs are a persisted graph identity contract");
+  assert.equal(target.declaration_kind, "function");
+  assert.equal(files[0]!.content.slice(Number((target.declaration_span as JsonObject).start_offset), Number((target.declaration_span as JsonObject).end_offset)), "export function target() {}");
   const incoming = edges.filter(edge => edge.kind === "calls" && edge.to_node_id === target.id);
   assert.equal(incoming.length, 1); assert.equal(nodes.find(node => node.id === incoming[0]!.from_node_id)!.name, "caller");
   const method = nodes.find(node => node.name === "method")!;
   assert(edges.some(edge => edge.to_node_id === method.id && edge.kind === "calls"));
+  const semantic = analyzeTypeScript([source("types.ts", "export interface Contract {}\nexport interface Extended extends Contract {}\nexport class Base {}\nexport class Child extends Base {}\nexport type ContractAlias = Contract;\nexport enum Mode { Ready }\nexport const config = 1;\nexport class Implementation implements Contract { value: ContractAlias; method(input: ContractAlias): Contract { return input; } }\n"),
+    source("use.ts", "import { Implementation, Contract } from './types';\nexport function use(value: Implementation): Contract { return value.method(value.value); }\n")]);
+  const semanticNodes = semantic.nodes as JsonObject[];
+  const declarationKind = (name: string) => semanticNodes.find(node => node.name === name)?.declaration_kind;
+  assert.equal(declarationKind("Contract"), "interface");
+  assert.equal(declarationKind("ContractAlias"), "type");
+  assert.equal(declarationKind("Implementation"), "class");
+  assert.equal(declarationKind("method"), "method");
+  assert.equal(declarationKind("value"), "property");
+  assert.equal(declarationKind("Mode"), "enum");
+  assert.equal(declarationKind("Ready"), "enum_member");
+  assert.equal(declarationKind("config"), "variable");
+  assert.equal(declarationKind("input"), "parameter");
+  const semanticEdges = semantic.edges as JsonObject[];
+  assert(semanticEdges.some(edge => edge.kind === "references"));
+  assert(semanticEdges.some(edge => edge.kind === "implements"));
+  assert(semanticEdges.some(edge => edge.kind === "extends"));
+  assert(semanticEdges.some(edge => edge.kind === "type_definition"));
+  const unknownType = analyzeTypeScript([source("unknown.ts", "export function f(value: MissingType): MissingType { return value; }\nexport class MissingImplementation implements MissingInterface {}")]);
+  assert(Number((unknownType.diagnostics as JsonObject).unresolved_relations) > 0);
   const again = analyzeTypeScript(files);
   assert.equal((again.diagnostics as JsonObject).reused_file_count, 3);
   assert.deepEqual(again.nodes, nodes); assert.deepEqual(again.edges, edges);
   assert.throws(() => analyzeTypeScript(Array.from({ length: 2001 }, () => files[0]!)), /budget/);
+  assert.throws(() => analyzeTypeScript(files, { include_paths: ["outside.ts"] }), /include_paths/);
+});
+
+test("TypeScript file-unit caches remain complete when the combined graph reaches its budget", () => {
+  const files = Array.from({ length: 61 }, (_, fileIndex) => {
+    const declarations = Array.from({ length: 1_000 }, (_, index) => `export const value${fileIndex * 1_000 + index} = ${index};`).join("\n");
+    const reference = fileIndex === 60 ? `const invokesOmitted = value60999;\n` : "";
+    return source(`unit-${String(fileIndex).padStart(2, "0")}.ts`, `${reference}${declarations}`);
+  });
+  const analysis = analyzeTypeScript(files, { include_file_units: true });
+  const diagnostics = analysis.diagnostics as JsonObject;
+  const units = analysis.file_units as JsonObject[];
+  assert.equal(diagnostics.budget_limited, true);
+  assert(Number(diagnostics.omitted_nodes) > 0);
+  assert.equal(units.length, files.length);
+  assert.equal(units.every(unit => unit.budget_limited === false), true);
+  assert((units.flatMap(unit => unit.nodes as JsonObject[])).length > (analysis.nodes as JsonObject[]).length);
+  const graphNodeIds = new Set((analysis.nodes as JsonObject[]).map(node => node.id));
+  const omittedUnitTarget = (units.flatMap(unit => unit.edges as JsonObject[])).find(edge => edge.kind === "references" && !graphNodeIds.has(String(edge.to_node_id)));
+  assert(omittedUnitTarget, "per-file units must retain references to declarations omitted from the bounded combined graph");
+  assert.equal((analysis.edges as JsonObject[]).some(edge => edge.to_node_id === omittedUnitTarget.to_node_id), false);
+});
+
+test("TypeScript cache admission bounds per-file and aggregate unit bytes", () => {
+  assert.equal(exceedsTypeScriptFileUnitBudget(0, 0, 1), false);
+  assert.equal(exceedsTypeScriptFileUnitBudget(16_000_000, 0, 1), true);
+  assert.equal(exceedsTypeScriptFileUnitBudget(0, 128_000_000, 1), true);
+});
+
+test("an oversized TypeScript file unit is marked partial instead of entering the incremental cache", () => {
+  const declarations = Array.from({ length: 70_000 }, (_, index) => `export const value${index} = ${index};`).join("\n");
+  const analysis = analyzeTypeScript([source("oversized-unit.ts", declarations)], { include_file_units: true });
+  const unit = (analysis.file_units as JsonObject[])[0]!;
+  assert.equal((analysis.diagnostics as JsonObject).budget_limited, true);
+  assert.equal(unit.budget_limited, true);
+  assert((unit.nodes as JsonObject[]).length > 0);
 });
 
 test("MCP initialize, tool list and readiness expose one actual schema fingerprint", async () => {
@@ -376,14 +436,41 @@ test("history reads all recorded versions within budget and scoped document bund
   } finally { await f.close(); await target.close(); }
 });
 
-test("compiler refuses oversized graphs, handles incomplete declarations and bounds its parsed-file cache", () => {
+test("compiler returns an explicit bounded partial graph, handles incomplete declarations and bounds its parsed-file cache", () => {
   const file = (path: string, content: string) => ({ path, content, digest: stableDigest([path, content]), language: "typescript" });
   const uncertain = analyzeTypeScript([file("main.ts", '/// <reference path="missing.ts" />\nexport default function () {}\n(() => 1)(); const object = { method: () => 2 }; object.method();')]);
   assert(Number((uncertain.diagnostics as JsonObject).unresolved_relations) > 0);
-  const many = Array.from({ length: 10001 }, (_, n) => `const variable${n}=1;`).join("\n");
-  assert.throws(() => analyzeTypeScript([file("many.ts", many)]), /graph exceeds/);
+  const many = Array.from({ length: 60_001 }, (_, n) => `const variable${n}=1;`).join("\n");
+  const bounded = analyzeTypeScript([file("many.ts", many)]);
+  const diagnostics = bounded.diagnostics as JsonObject;
+  assert.equal(bounded.format, "craft-static-analysis-v1");
+  assert((bounded.nodes as JsonObject[]).length <= 60_000);
+  assert.equal(diagnostics.budget_limited, true);
+  assert(Number(diagnostics.omitted_nodes) > 0);
+  assert.equal((bounded.edges as JsonObject[]).every(edge => {
+    const ids = new Set((bounded.nodes as JsonObject[]).map(node => node.id));
+    return ids.has(String(edge.from_node_id)) && ids.has(String(edge.to_node_id));
+  }), true);
+  const repeatedCalls = `export function target() {}\nexport function caller() { ${Array.from({ length: 155_000 }, () => "target();").join(" ")} }`;
+  const boundedEdges = analyzeTypeScript([file("calls.ts", repeatedCalls)]);
+  assert.equal((boundedEdges.diagnostics as JsonObject).budget_limited, true);
+  assert(Number((boundedEdges.diagnostics as JsonObject).omitted_edges) > 0);
+  assert((boundedEdges.edges as JsonObject[]).length <= 150_000);
+  assert.throws(() => analyzeTypeScript([file(`${"p".repeat(32_000_001)}.ts`, "")]), /file graph exceeds/);
   analyzeTypeScript(Array.from({ length: 2000 }, (_, n) => file(`cache${n}.ts`, "export {};")));
   assert.equal((analyzeTypeScript([file("new-cache.ts", "export {};")]).nodes as JsonObject[]).length, 1);
+});
+
+test("compiler reserves every checkpoint file node before declaration-heavy files exhaust graph limits", () => {
+  const files = Array.from({ length: 2_000 }, (_, fileIndex) => source(`src/file-${fileIndex}.ts`,
+    Array.from({ length: 31 }, (_, symbolIndex) => `export function fn${fileIndex}_${symbolIndex}() {}`).join("\n")));
+  const result = analyzeTypeScript(files);
+  const nodes = result.nodes as JsonObject[];
+  const requiredFiles = nodes.filter(node => node.kind === "file");
+  assert.equal(requiredFiles.length, files.length);
+  assert.deepEqual(new Set(requiredFiles.map(node => node.path)), new Set(files.map(file => file.path)));
+  assert.equal((result.diagnostics as JsonObject).budget_limited, true);
+  assert(Number((result.diagnostics as JsonObject).omitted_nodes) > 0);
 });
 
 test("unmatched governed claims and sparse contribution descriptors do not invent lexical matches", async () => {

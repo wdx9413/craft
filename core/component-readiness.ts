@@ -102,10 +102,15 @@ export class ComponentReadinessKernel {
     const ledger = countByStatus(this.store, "memory_ledger");
     const candidates = countByStatus(this.store, "memory_candidate");
     const signals = this.store.count("memory_usage_signal");
+    const feedback = this.store.list("context_feedback", 10_001, item => Array.isArray(item.memory_refs) && item.memory_refs.length > 0);
+    const feedbackCount = Math.min(feedback.length, 10_000);
+    const verifiedHelpfulFeedback = feedback.slice(0, 10_000).filter(item => item.outcome === "helpful" && item.evidence_verified === true).length;
     const state = activeSources === 0 ? "bootstrap_required"
       : (ledger.active ?? 0) === 0 ? "candidate_or_approval_required" : "ready";
     return {
-      component: "memory", state, counts: { active_sources: activeSources, ledger, candidates, usage_signals: signals, context_receipts: this.store.count("context_resolution_receipt") },
+      component: "memory", state, counts: { active_sources: activeSources, ledger, candidates, usage_signals: signals,
+        memory_feedback_records: feedbackCount, verified_helpful_memory_feedback_records: verifiedHelpfulFeedback,
+        memory_feedback_records_truncated: feedback.length > 10_000, context_receipts: this.store.count("context_resolution_receipt") },
       next_action: state === "bootstrap_required" ? "install_or_register_a_scoped_source"
         : state === "candidate_or_approval_required" ? "propose_and_review_one_scoped_evidence_linked_memory"
           : "resolve_only_the_current_scope_and_record_outcome_linked_usage",

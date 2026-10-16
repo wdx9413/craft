@@ -73,16 +73,15 @@ export const COMPONENT_SURFACES: Readonly<Record<string, RegExp>> = {
  */
 const DAILY_COMPONENT_TOOLS: Readonly<Record<string, readonly string[]>> = {
   "component-knowledge-daily": [
-    "craft_knowledge_asset_inspect", "craft_knowledge_asset_restore",
     "craft_component_readiness_get", "craft_component_diagnose", "craft_knowledge_bootstrap_install", "craft_knowledge_source_list",
-    "craft_knowledge_source_register", "craft_knowledge_source_ingest", "craft_evidence_record", "craft_knowledge_search", "craft_knowledge_claim_get", "craft_knowledge_promotion_policy_get", "craft_knowledge_host_review", "craft_knowledge_support_record", "craft_knowledge_auto_review",
-    "craft_knowledge_claim_save", "craft_context_resolution_resolve", "craft_context_resolution_feedback", "craft_knowledge_memory_bundle",
-    "craft_knowledge_semantic_review_packet", "craft_scope_identity_resolve_project", "craft_decision_context_gate_open",
+    "craft_knowledge_source_register", "craft_knowledge_source_ingest", "craft_evidence_record", "craft_knowledge_search", "craft_knowledge_scenario_list", "craft_knowledge_scenario_migration_propose", "craft_knowledge_promotion_policy_get", "craft_knowledge_host_review", "craft_knowledge_support_record", "craft_knowledge_auto_review",
+    "craft_knowledge_claim_save", "craft_knowledge_claim_list", "craft_evaluation_model_profile_ensure_single", "craft_evaluation_model_profile_get", "craft_evaluation_model_ticket_issue", "craft_evaluation_model_ticket_list", "craft_evaluation_model_ticket_complete", "craft_context_resolution_resolve", "craft_knowledge_memory_bundle",
+    "craft_scope_identity_resolve_project", "craft_decision_context_gate_open",
   ],
   "component-memory-daily": [
     "craft_memory_asset_inspect", "craft_memory_asset_restore",
     "craft_component_readiness_get", "craft_component_diagnose", "craft_knowledge_bootstrap_install", "craft_knowledge_source_list",
-    "craft_memory_governance", "craft_memory_capture_user_statement", "craft_memory_candidate_propose", "craft_memory_candidate_review", "craft_memory_ledger_remember_approved",
+    "craft_memory_governance", "craft_memory_capture_user_statement", "craft_memory_capture_observed_fact", "craft_memory_candidate_propose", "craft_memory_candidate_review", "craft_memory_ledger_remember_approved",
     "craft_memory_ledger_get", "craft_memory_ledger_list", "craft_memory_conflict_list", "craft_memory_conflict_resolve",
     "craft_context_resolution_resolve", "craft_context_resolution_feedback", "craft_memory_maintenance_run", "craft_memory_maintenance_schedule", "craft_knowledge_memory_bundle",
     "craft_scope_identity_resolve_project", "craft_decision_context_gate_open", "craft_memory_ledger_transition",
@@ -90,12 +89,14 @@ const DAILY_COMPONENT_TOOLS: Readonly<Record<string, readonly string[]>> = {
   // Graph transitions and paired evaluation complete the scenario iteration path.
   // Diagnostic compatibility aliases remain on the explicit advanced surface.
   "component-experience-daily": [
-    "craft_experience_asset_inspect", "craft_experience_asset_restore", "craft_procedure_configuration_save", "craft_experience_graph_inspect", "craft_experience_graph_edit", "craft_learning_cycle_finalize",
+    "craft_experience_scenario_list", "craft_experience_scenario_migration_propose", "craft_learning_cycle_finalize",
+    "craft_evaluation_model_profile_get", "craft_evaluation_model_ticket_list",
     "craft_component_readiness_get", "craft_evidence_record", "craft_experience_observe",
     "craft_experience_patterns_list", "craft_experience_procedure_draft", "craft_experience_procedure_submit", "craft_experience_procedure_get",
-    "craft_experience_learning_request_get", "craft_experience_learning_evaluation_dispatch", "craft_experience_learning_evaluation_result",
+    "craft_experience_learning_request_get", "craft_experience_learning_evaluation_dispatch", "craft_experience_learning_evaluation_dispatch_list", "craft_experience_learning_evaluation_run", "craft_experience_learning_evaluation_result",
     "craft_procedure_invocation_bind", "craft_procedure_invocation_dispatch", "craft_procedure_invocation_report", "craft_procedure_invocation_resume", "craft_procedure_invocation_get", "craft_procedure_invocation_transition",
-    "craft_procedure_create", "craft_procedure_plan", "craft_procedure_get", "craft_procedure_list", "craft_procedure_gate", "craft_procedure_export_skill",
+    "craft_procedure_host_control", "craft_procedure_export_skill",
+    "craft_procedure_plan", "craft_procedure_get", "craft_procedure_list", "craft_procedure_gate",
     "craft_scope_identity_resolve_project", "craft_context_resolution_resolve", "craft_decision_context_gate_open",
   ],
 };

@@ -1,6 +1,6 @@
 {
   "name": "craft-context",
-  "version": "0.12.42",
+  "version": "0.12.44",
   "description": "craft-context governed context and repository tools",
   "author": {
     "name": "wdx9413"

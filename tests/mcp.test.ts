@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import test from "node:test";
@@ -370,6 +372,60 @@ test("MCP stdio buffers an eager Host request, serializes responses, and closes 
   assert.equal((JSON.parse(output[1]) as { error: { code: number } }).error.code, -32700);
 });
 
+test("MCP stdio starts and stops its background learning runtime with the server lifetime", async () => {
+  const input = new PassThrough(); let runtimeClosed = false, workerStopped = false, startedWithServer = false;
+  const serving = serveMcpStdio({ mode: "component-context-daily", input, write: () => undefined,
+    start: async () => ({ server: { handle: async () => undefined }, close: () => { runtimeClosed = true; } }),
+    afterStart: server => { startedWithServer = typeof server.handle === "function"; return async () => { await Promise.resolve(); workerStopped = true; }; },
+  });
+  input.end(); await serving;
+  assert.equal(startedWithServer, true); assert.equal(workerStopped, true); assert.equal(runtimeClosed, true);
+});
+
+test("MCP stdio closes the runtime when background startup fails", async () => {
+  const input = new PassThrough(); let runtimeClosed = false;
+  await assert.rejects(serveMcpStdio({ mode: "component-context-daily", input, write: () => undefined,
+    start: async () => ({ server: { handle: async () => undefined }, close: () => { runtimeClosed = true; } }),
+    afterStart: () => { throw new Error("background startup failed"); },
+  }), /background startup failed/u);
+  assert.equal(runtimeClosed, true);
+});
+
+test("Context MCP runs both learning polls through traced calls without writing worker output to MCP stdout", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-context-learning-loop-"));
+  try {
+    const child = spawn(process.execPath, ["--experimental-strip-types", fileURLToPath(new URL("../bin/craft-mcp.ts", import.meta.url)), "--product", "context"], {
+      env: { ...process.env, CRAFT_DATA_DIR: root, CRAFT_CONTINUOUS_LEARNING: "1" }, stdio: ["pipe", "pipe", "pipe"],
+    });
+    let output = "", stderr = "";
+    child.stdout.setEncoding("utf8").on("data", chunk => { output += chunk; });
+    child.stderr.setEncoding("utf8").on("data", chunk => { stderr += chunk; });
+    child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-11-25" } })}\n`);
+    const expected = new Set(["craft_evaluation_model_ticket_list", "craft_experience_learning_evaluation_dispatch_list", "craft_knowledge_source_list"]);
+    let observed = new Set<string>();
+    for (let attempt = 0; attempt < 100 && observed.size < expected.size; attempt++) {
+      const probe = await new CraftStore(craftPaths(root)).open();
+      try { observed = new Set(probe.list("trace_event", 10_000, event => expected.has(String(event.operation_id))).map(event => String(event.operation_id))); }
+      finally { probe.close(); }
+      if (observed.size < expected.size) await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    child.stdin.end();
+    const exit = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
+      child.once("error", reject); child.once("close", (code, signal) => resolve({ code, signal }));
+    });
+    assert.equal(exit.code, 0, stderr);
+    const lines = output.trim().split("\n");
+    assert.equal(lines.length, 1);
+    assert.equal(JSON.parse(lines[0]!).result.serverInfo.version, "0.12.44");
+    assert.deepEqual(observed, expected);
+    const store = await new CraftStore(craftPaths(root)).open();
+    try {
+      const calls = store.list("trace_event", 10_000, event => expected.has(String(event.operation_id)));
+      assert.deepEqual(new Set(calls.map(event => String(event.operation_id))), expected);
+    } finally { store.close(); }
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test("MCP stdio waits for a Host request that arrives after startup", async () => {
   const input = new PassThrough(); const output: string[] = [];
   const serving = serveMcpStdio({ mode: "core", input, write: (line) => output.push(line), start: async () => ({
@@ -397,7 +453,7 @@ test("MCP stdio default runtime accepts buffered initialization", async () => {
     const serving = serveMcpStdio({ mode: "full", input, write: (line) => output.push(line) });
     input.end('{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}\n');
     await serving;
-    assert.equal((JSON.parse(output[0]) as { result: { serverInfo: { version: string } } }).result.serverInfo.version, "0.12.42");
+    assert.equal((JSON.parse(output[0]) as { result: { serverInfo: { version: string } } }).result.serverInfo.version, "0.12.44");
   } finally { if (original === undefined) delete process.env.CRAFT_DATA_DIR; else process.env.CRAFT_DATA_DIR = original; await rm(root, { recursive: true, force: true }); }
 });
 

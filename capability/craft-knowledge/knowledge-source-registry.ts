@@ -23,6 +23,7 @@ import type { CraftStore, JsonObject } from "../../common/craft-common-store-loc
 import { noCredentialAssignment, parseScope, text } from "../../common/craft-common-base/src/validation.ts";
 import { stableDigest, payload } from "../../common/craft-common-base/src/digest.ts";
 import { scopeEnvelope } from "../../common/craft-common-base/src/scope-policy.ts";
+import { updateKnowledgeScenarioClaim } from "./scenario-catalog.ts";
 
 const SOURCE_KINDS = new Set(["evidence_wiki", "serena", "kefu_wiki", "project_note", "readme", "custom"]);
 const TRUSTS = new Set(["untrusted", "bounded", "verified"]);
@@ -49,7 +50,8 @@ function files(root: string, limit: number): string[] {
 
 export class KnowledgeSourceRegistry {
   readonly store: CraftStore;
-  constructor(store: CraftStore) { this.store = store; }
+  readonly resolvePath: (path: string) => string;
+  constructor(store: CraftStore, resolvePath: (path: string) => string = realpathSync) { this.store = store; this.resolvePath = resolvePath; }
 
   /**
    * Register the two descriptors Craft itself ships with.
@@ -72,6 +74,60 @@ export class KnowledgeSourceRegistry {
       this.sourceRegister({ source_id: "builtin.serena-project-knowledge", kind: "serena", label: "Serena project knowledge", scope_kind: "project", scope_id: "selected-project", locator: ".serena/memories", content_digest: "builtin:serena-project-knowledge:v1", trust: "bounded", access: "read_only" }).source,
     ];
     return { sources };
+  }
+
+  /**
+   * Enrol only the small set of project documents that Craft can safely discover by convention.
+   * Descriptors and all derived Knowledge records live in the central data root; project files
+   * remain read-only inputs. Newly enrolled files are ingested once so a cold project produces
+   * candidates immediately, while the background worker handles later revisions.
+   */
+  discoverProjectSources(args: JsonObject): JsonObject {
+    const projectRoot = resolve(text(args.project_root, "project_root"));
+    const rootStat = lstatSync(projectRoot);
+    if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) return { status: "skipped", reason: "project_root_not_regular_directory", sources_registered: 0, sources_ingested: 0, candidates_created: 0 };
+    const root = this.resolvePath(projectRoot);
+    const scope = parseScope({ scope_kind: args.scope_kind, scope_id: args.scope_id });
+    if (scope.kind !== "project") throw new Error("Project Knowledge discovery requires project scope");
+    const candidates = [
+      { relative_path: "README.md", kind: "readme", label: "Project README" },
+      { relative_path: "AGENTS.md", kind: "project_note", label: "Project Agent Instructions" },
+      { relative_path: ".serena/memories", kind: "serena", label: "Serena Project Memories" },
+    ];
+    let registered = 0, ingested = 0, candidateCount = 0, skipped = 0, failedIngests = 0;
+    const sourceRefs: string[] = [];
+    for (const candidate of candidates) {
+      const locator = join(root, candidate.relative_path);
+      let current = root;
+      let safe = true;
+      for (const part of candidate.relative_path.split(sep)) {
+        current = join(current, part);
+        try {
+          const stat = lstatSync(current);
+          if (stat.isSymbolicLink() || (current !== locator && !stat.isDirectory())) { safe = false; break; }
+        } catch { safe = false; break; }
+      }
+      if (!safe) { skipped++; continue; }
+      const stat = lstatSync(locator);
+      if (!stat.isFile() && !(candidate.kind === "serena" && stat.isDirectory())) { skipped++; continue; }
+      const realLocator = this.resolvePath(locator);
+      if (!within(root, realLocator)) { skipped++; continue; }
+      const sourceId = `project_autodiscovered_${stableDigest({ scope, root, path: candidate.relative_path }).slice(-24)}`;
+      const result = this.sourceRegister({ source_id: sourceId, kind: candidate.kind, label: candidate.label, scope_kind: scope.kind, scope_id: scope.id,
+        locator: realLocator, content_digest: stableDigest({ schema: "craft.project-knowledge-source.v1", scope, path: candidate.relative_path }), trust: "bounded", access: "read_only" });
+      sourceRefs.push(sourceId);
+      if (result.idempotent !== true) {
+        registered++;
+        try {
+          const output = this.sourceIngest({ source_id: sourceId, max_files: candidate.kind === "serena" ? 50 : 1 });
+          if (output.status === "completed" || output.status === "partial") {
+            ingested++;
+            candidateCount += Array.isArray(output.candidates) ? output.candidates.length : 0;
+          }
+        } catch { failedIngests++; /* One malformed project document must not prevent the other bounded Sources. */ }
+      }
+    }
+    return { status: "ready", sources_registered: registered, sources_ingested: ingested, candidates_created: candidateCount, skipped_sources: skipped, failed_ingests: failedIngests, source_refs: sourceRefs };
   }
 
   private builtinLocator(sourceId: string, current: string, legacy: readonly string[]): string {
@@ -110,7 +166,13 @@ export class KnowledgeSourceRegistry {
   sourceTransition(args: JsonObject): JsonObject {
     const source = this.store.get("knowledge_source", text(args.source_id, "source_id")); const status = text(args.status, "status");
     if (!TRANSITIONS.has(status)) throw new Error("Knowledge Source status is unsupported");
-    return { source: this.store.save("knowledge_source", String(source.id), { ...payload(source), status, transition_reason_digest: stableDigest(noCredentialAssignment(text(args.reason, "reason"), "reason")) }) };
+    const saved = this.store.save("knowledge_source", String(source.id), { ...payload(source), status, transition_reason_digest: stableDigest(noCredentialAssignment(text(args.reason, "reason"), "reason")) });
+    for (const claim of this.store.list("knowledge_claim", 100_000, item => item.source_id === source.id && typeof item.scenario_key === "string", false, { source_ids: [String(source.id)], document_ids: [] })) {
+      const review = claim.review as JsonObject | null;
+      const stillReviewed = status === "active" && saved.trust !== "untrusted" && review?.source_digest === saved.content_digest && claim.status === "reviewed";
+      updateKnowledgeScenarioClaim(this.store.paths.knowledgeDir, claim, stillReviewed ? "reviewed" : "inactive");
+    }
+    return { source: saved };
   }
 
   /**
@@ -188,7 +250,10 @@ export class KnowledgeSourceRegistry {
       }
       for (const claim of this.store.list("knowledge_claim", 100_000, item => item.source_id === source.id && Boolean(item.source_revision_id), false, { source_ids: [String(source.id)], document_ids: [] })) {
         const obsolete = claim.document_id ? invalid.has(String(claim.document_id)) : claim.source_revision_id !== revision.id;
-        if (obsolete && ["reviewed", "candidate"].includes(String(claim.status))) this.store.save("knowledge_claim", String(claim.id), { ...payload(claim), status: "stale", revalidation_required: true, stale_since_revision: revision.id });
+        if (obsolete && ["reviewed", "candidate"].includes(String(claim.status))) {
+          const stale = this.store.save("knowledge_claim", String(claim.id), { ...payload(claim), status: "stale", revalidation_required: true, stale_since_revision: revision.id });
+          updateKnowledgeScenarioClaim(this.store.paths.knowledgeDir, stale, "inactive");
+        }
       }
       const fragments: JsonObject[] = [], candidates: JsonObject[] = [];
       for (const doc of selected) {
@@ -216,18 +281,21 @@ export class KnowledgeSourceRegistry {
           const evidence = this.store.find("evidence", evidenceId) ?? this.store.create("evidence", evidenceId, { source_type: "knowledge_fragment", source_id: source.id, source_revision_id: fragment.source_revision_id, fragment_id: fragment.id, locator: fragment.locator, claim: "Source fragment retained for review.", confidence: source.trust === "verified" ? "bounded" : "unverified", content_digest: fragment.content_digest, observed_at: new Date().toISOString() });
           const claimId = `knowledge_claim_from_${fragmentId}`;
           const identity = { source_id: source.id, source_revision_id: fragment.source_revision_id, document_id: doc.id, document_digest: doc.digest, fragment_id: fragment.id, scope: `${(source.scope as JsonObject).kind}:${(source.scope as JsonObject).id}`, scope_envelope: source.scope_envelope, kind: "fact", content_digest: fragment.content_digest, evidence_ids: [evidence.id], valid_until: null };
-          // Exact current text in the same scope can share a candidate across
-          // independently registered Sources. Legacy/revalidation rows are never
-          // reused by this path, so stale Claims need live source reconstruction.
-          const shared = this.store.list("knowledge_claim", 100_000, item => item.status === "candidate" && item.content_digest === fragment.content_digest && item.scope === identity.scope && item.source_id !== source.id)[0];
+          // Exact current text in the same scope shares one candidate across
+          // source revisions, duplicate files, and independent Sources. Legacy
+          // or stale Claims are never reused by this path.
+          const shared = this.store.list("knowledge_claim", 100_000, item => item.status === "candidate" && item.content_digest === fragment.content_digest && item.scope === identity.scope && item.id !== claimId)[0];
           let claim = this.store.find("knowledge_claim", claimId) ?? (shared
             ? this.store.save("knowledge_claim", String(shared.id), { ...payload(shared), evidence_ids: [...new Set([...(Array.isArray(shared.evidence_ids) ? shared.evidence_ids as unknown[] : []).map(String), String(evidence.id)])].sort() })
             : this.store.create("knowledge_claim", claimId, { ...identity, content_ref: fragment.content_ref, identity_digest: stableDigest(identity), status: "candidate", review: null, ingest_generated: true, publication_allowed: false }));
           if (source.trust === "verified" && ["bounded", "confirmed"].includes(String(evidence.confidence))) {
-            const observationKey = `knowledge-source:${String(source.id)}:${String(doc.digest)}`;
+            // A revision or a copied file inside one registered Source is not
+            // independent corroboration. Count that Source once for this Claim.
+            const observationKey = `knowledge-source:${String(source.id)}`;
             const supportIdentity = { claim_id: claim.id, claim_version: claim.version, evidence_id: evidence.id, observation_key: observationKey, scope: identity.scope };
             const supportId = `knowledge_support_${stableDigest(supportIdentity).slice(-24)}`;
-            if (!this.store.find("knowledge_claim_support", supportId)) this.store.create("knowledge_claim_support", supportId, { ...supportIdentity, identity_digest: stableDigest(supportIdentity), recorded_at: new Date().toISOString(), source_type: evidence.source_type, confidence: evidence.confidence });
+            const sourceSupport = this.store.list("knowledge_claim_support", 10_000, item => item.claim_id === claim.id && item.observation_key === observationKey)[0];
+            if (!sourceSupport && !this.store.find("knowledge_claim_support", supportId)) this.store.create("knowledge_claim_support", supportId, { ...supportIdentity, identity_digest: stableDigest(supportIdentity), recorded_at: new Date().toISOString(), source_type: evidence.source_type, confidence: evidence.confidence });
           }
           const candidateId = `knowledge_ingest_candidate_${fragmentId}`;
           const candidate = this.store.find("knowledge_ingest_candidate", candidateId) ?? this.store.create("knowledge_ingest_candidate", candidateId, { source_id: source.id, source_revision_id: fragment.source_revision_id, fragment_id: fragment.id, claim_id: claim.id, evidence_id: evidence.id, scope: identity.scope, status: "candidate", structural_review: "pending", semantic_review: "pending", publication_allowed: false });

@@ -68,6 +68,16 @@ test("reserves a secret-free model profile and fails closed until explicit enabl
     assert.throws(() => kernel.list({ limit: 0 }), /limit/);
     assert.equal((kernel.get({ profile_id: profile.id, version: profile.version }).profile as JsonObject).id, profile.id);
     assert.equal((kernel.get({ profile_id: profile.id }).profile as JsonObject).id, profile.id);
+    const qwenProvider = PROVIDER_CATALOG.find(item => item.provider === "qwen")!;
+    const cachedKernel = new EvaluationModelProfileKernel(f.store, [{ ...qwenProvider,
+      context_cache: { mode: "automatic_prefix", requires_exact_prefix: true, usage_fields: "none" } }], {});
+    const cachedProfile = cachedKernel.save({ profile_id: "cached-provider", provider: "qwen", model: "qwen-plus" }).profile as JsonObject;
+    assert.equal((cachedKernel.get({ profile_id: cachedProfile.id }).provider as JsonObject).context_cache instanceof Object, true);
+    const legacyKernel = new EvaluationModelProfileKernel(f.store, [{ ...qwenProvider, context_cache: undefined }], {});
+    const legacyProfile = legacyKernel.save({ profile_id: "legacy-provider", provider: "qwen", model: "qwen-plus" }).profile as JsonObject;
+    assert.deepEqual((legacyKernel.get({ profile_id: legacyProfile.id }).provider as JsonObject).context_cache,
+      { mode: "none", requires_exact_prefix: false, usage_fields: "none" });
+    assert.equal((kernel.ticketList().tickets as JsonObject[]).length >= 0, true);
     assert.throws(() => kernel.get({ profile_id: profile.id, version: 0 }), /version/);
 
     observation(f.service, "one", "record-one"); observation(f.service, "two", "record-two", "failed");
@@ -95,6 +105,103 @@ test("reserves a secret-free model profile and fails closed until explicit enabl
     f.store.create("evaluation_model_profile", "inactive", { provider: "qwen", lifecycle: "disabled", purposes: ["evaluation"] });
     assert.throws(() => kernel.issue({ profile_id: "inactive", purpose: "evaluation", campaign_dispatch_id: "issued-dispatch", input_ref: "case", output_contract_ref: "contract" }), /not active/);
     assert.throws(() => kernel.issue({ profile_id: evalProfile.id, purpose: "evaluation", campaign_dispatch_id: "missing", input_ref: "case", output_contract_ref: "contract" }), /Unknown/);
+  } finally { await close(f); }
+});
+
+test("Knowledge classification tickets track the live candidate and keep result records content free", async () => {
+  const f = await fixture();
+  try {
+    f.store.create("knowledge_source", "source-1", { status: "active", trust: "verified" });
+    f.store.create("knowledge_claim", "claim-1", { status: "candidate", scope: "project:demo", version: 1,
+      content_digest: "sha256:claim", source_id: "source-1" });
+    f.store.create("knowledge_claim", "reviewed-claim", { status: "reviewed", scope: "project:demo", version: 1,
+      content_digest: "sha256:reviewed", source_id: "source-1" });
+    const kernel = new EvaluationModelProfileKernel(f.store, PROVIDER_CATALOG, { DASHSCOPE_API_KEY: "configured-for-test" });
+    const saved = kernel.save({ profile_id: "knowledge-classifier", provider: "qwen", model: "qwen-plus",
+      purposes: ["knowledge_scenario_classification"], network_execution_enabled: true });
+    const profile = saved.profile as JsonObject;
+    const issued = kernel.issue({ profile_id: profile.id, purpose: "knowledge_scenario_classification", knowledge_claim_id: "claim-1",
+      input_ref: "craft-knowledge://claim/claim-1/v1/catalog/0", output_contract_ref: "craft-knowledge-scenario-classification-v1" });
+    const ticket = issued.ticket as JsonObject;
+    assert.equal(ticket.status, "ready_for_adapter");
+    const reviewedTicket = kernel.issue({ profile_id: profile.id, purpose: "knowledge_scenario_classification", knowledge_claim_id: "reviewed-claim",
+      input_ref: "craft-knowledge://claim/reviewed-claim/v1/catalog/0", output_contract_ref: "craft-knowledge-scenario-classification-v1" }).ticket as JsonObject;
+    assert.equal(reviewedTicket.status, "ready_for_adapter");
+    const target = ticket.target as JsonObject;
+    const staleTargets: Array<[string, JsonObject | undefined]> = [
+      ["missing", { ...target, id: "missing-claim" }],
+      ["rejected", { ...target, id: "rejected-claim", version: 1, content_digest: "sha256:rejected" }],
+      ["classified", { ...target, id: "classified-claim", version: 1, content_digest: "sha256:classified" }],
+      ["version", { ...target, version: 3 }],
+      ["digest", { ...target, content_digest: "sha256:changed" }],
+      ["scope", { ...target, id: "global-claim", version: 1, content_digest: "sha256:global" }],
+      ["missing-scope", { ...target, id: "issue-missing-scope", version: 1, content_digest: "sha256:no-scope" }],
+      ["missing-target", undefined],
+    ];
+    f.store.create("knowledge_claim", "rejected-claim", { status: "rejected", scope: "project:demo", version: 1, content_digest: "sha256:rejected" });
+    f.store.create("knowledge_claim", "classified-claim", { status: "candidate", scenario_key: "existing", scope: "project:demo", version: 1, content_digest: "sha256:classified" });
+    f.store.create("knowledge_claim", "global-claim", { status: "candidate", scope: "global", version: 1, content_digest: "sha256:global" });
+    f.store.create("knowledge_claim", "issue-missing-scope", { status: "candidate", version: 1, content_digest: "sha256:no-scope" });
+    for (const [suffix, staleTarget] of staleTargets) f.store.create("evaluation_model_ticket", `stale-${suffix}`, {
+      profile_id: profile.id, profile_version: profile.version, purpose: "knowledge_scenario_classification", status: "ready_for_adapter", target: staleTarget,
+    });
+    assert.equal((kernel.ticketList({ purpose: "knowledge_scenario_classification" }).tickets as JsonObject[]).length, 2);
+    assert.throws(() => kernel.ticketComplete({ ticket_id: ticket.id, result_digest: "bad" }), /SHA-256/u);
+    const resultDigest = `sha256:${"a".repeat(64)}`;
+    const completed = kernel.ticketComplete({ ticket_id: ticket.id, result_digest: resultDigest });
+    assert.equal((completed.ticket as JsonObject).status, "completed");
+    assert.equal((completed.ticket as JsonObject).result_digest, resultDigest);
+    assert.equal((kernel.ticketList({ purpose: "knowledge_scenario_classification" }).tickets as JsonObject[]).length, 1);
+    const reviewedTicketId = String(reviewedTicket.id);
+    assert.equal(((kernel.ticketComplete({ ticket_id: reviewedTicketId, result_digest: resultDigest }).ticket as JsonObject).status), "completed");
+    assert.throws(() => kernel.ticketComplete({ ticket_id: ticket.id, result_digest: resultDigest }), /Only a ready Knowledge/u);
+    f.store.create("evaluation_model_ticket", "foreign-ticket", { purpose: "workflow_evolution", status: "ready_for_adapter" });
+    assert.throws(() => kernel.ticketComplete({ ticket_id: "foreign-ticket", result_digest: resultDigest }), /Only a ready Knowledge/u);
+    f.store.save("knowledge_claim", "claim-1", { status: "reviewed", scope: "project:demo", content_digest: "sha256:claim" });
+    assert.deepEqual((kernel.ticketList({ purpose: "knowledge_scenario_classification" }).tickets as JsonObject[]).map(item => item.id), []);
+    assert.throws(() => kernel.issue({ profile_id: profile.id, purpose: "knowledge_scenario_classification", knowledge_claim_id: "missing",
+      input_ref: "input", output_contract_ref: "contract" }));
+    for (const [claimId, claimValue] of [
+      ["issue-rejected", { status: "rejected", scope: "project:demo", version: 1, content_digest: "sha256:rejected", source_id: "source-1" }],
+      ["issue-classified", { status: "candidate", scenario_key: "known", scope: "project:demo", version: 1, content_digest: "sha256:classified", source_id: "source-1" }],
+      ["issue-global", { status: "candidate", scope: "global", version: 1, content_digest: "sha256:global", source_id: "source-1" }],
+      ["untrusted-claim", { status: "candidate", scope: "project:demo", version: 1, content_digest: "sha256:untrusted", source_id: "untrusted-source" }],
+      ["missing-source-ref", { status: "candidate", scope: "project:demo", version: 1, content_digest: "sha256:no-source" }],
+      ["missing-scope", { status: "candidate", version: 1, content_digest: "sha256:no-scope", source_id: "source-1" }],
+    ] as const) f.store.create("knowledge_claim", claimId, claimValue);
+    f.store.create("knowledge_source", "untrusted-source", { status: "active", trust: "untrusted" });
+    for (const claimId of ["issue-rejected", "issue-classified", "issue-global", "untrusted-claim", "missing-source-ref", "missing-scope"]) {
+      assert.throws(() => kernel.issue({ profile_id: profile.id, purpose: "knowledge_scenario_classification", knowledge_claim_id: claimId,
+        input_ref: "input", output_contract_ref: "contract" }), /unclassified project Claim from an active trusted Source/u);
+    }
+    f.store.create("evaluation_model_ticket", "wrong-classification-purpose", { profile_id: profile.id, profile_version: profile.version,
+      purpose: "workflow_evolution", status: "ready_for_adapter", target: { kind: "knowledge_scenario_classification", id: "claim-1" } });
+    f.store.create("evaluation_model_ticket", "wrong-workflow-target", { profile_id: profile.id, profile_version: profile.version,
+      purpose: "workflow_evolution", status: "ready_for_adapter", target: { kind: "unknown" } });
+    f.store.create("evaluation_model_ticket", "evaluation-ticket", { profile_id: profile.id, profile_version: profile.version,
+      purpose: "evaluation", status: "ready_for_adapter", target: { kind: "unknown" } });
+    assert.equal((kernel.ticketList().tickets as JsonObject[]).some(item => item.id === "evaluation-ticket"), true);
+  } finally { await close(f); }
+});
+
+test("automatic Knowledge profile selection reuses one purpose profile and fails closed on ambiguity", async () => {
+  const f = await fixture();
+  try {
+    assert.equal(f.service.evaluationModelProfileEnsureSingle({ purpose: "knowledge_scenario_classification" }).reason, "no_configured_model");
+    f.service.modelAdd({ id: "qwen", name: "Qwen", baseUrl: "https://example.invalid/v1", model: "qwen-plus", apiKeyEnv: "DASHSCOPE_API_KEY" });
+    const first = f.service.evaluationModelProfileEnsureSingle({ purpose: "knowledge_scenario_classification" });
+    assert.equal(first.status, "needs_credential");
+    assert.equal((first.profile as JsonObject).network_execution_enabled, true);
+    assert.equal(f.service.evaluationModelProfileEnsureSingle({ purpose: "knowledge_scenario_classification" }).idempotent, true);
+    f.store.save("evaluation_model_profile", String((first.profile as JsonObject).id), { ...first.profile as JsonObject, lifecycle: "revoked" });
+    f.service.modelAdd({ id: "other", name: "Other", baseUrl: "https://example.invalid/v1", model: "other-model", apiKeyEnv: "OTHER_KEY" });
+    assert.equal(f.service.evaluationModelProfileEnsureSingle({ purpose: "knowledge_scenario_classification" }).reason, "multiple_models_require_explicit_profile");
+    f.service.evaluationModelProfileSave({ profile_id: "another-knowledge-profile", provider: "qwen", model: "qwen-plus",
+      purposes: ["knowledge_scenario_classification"] });
+    f.service.evaluationModelProfileSave({ profile_id: "second-knowledge-profile", provider: "qwen", model: "qwen-max",
+      purposes: ["knowledge_scenario_classification"] });
+    assert.equal(f.service.evaluationModelProfileEnsureSingle({ purpose: "knowledge_scenario_classification" }).reason, "multiple_active_profiles_for_purpose");
+    assert.throws(() => f.service.evaluationModelProfileEnsureSingle({ purpose: "unknown" }), /purpose is unsupported/u);
   } finally { await close(f); }
 });
 
@@ -129,6 +236,15 @@ test("evolves only independent sanitized evidence into a new draft Workflow and 
     assert.equal(workflow.lifecycle, "draft"); assert.equal((workflow.derived_from as JsonObject).workflow_evolution_proposal_id, "draft"); assert.equal((submitted.proposal as JsonObject).publication_allowed, false);
     assert.equal((f.service.workflowEvolutionProposalGet({ proposal_id: "draft" }).proposal as JsonObject).id, "draft");
     assert.equal(f.service.workflowEvolutionProposalSubmit({ proposal_id: "draft", request_id: request.id, model_ticket_id: ticket.id, workflow_id: "support-refund-v2", name: "Support refund verification", description: "A generic evidence-backed draft.", inputs: ["case_ref"], steps: [{ id: "verify", type: "assertion", evaluator: "file_exists", path: "receipt.txt" }], replaces_workflow_id: baseline.id }).idempotent, true);
+    const nextRequest = f.service.workflowEvolutionPropose({ request_id: "request-next", scenario_key: "support-refund", observation_ids: [first.id, second.id], hypothesis: "tighten the receipt check", design_axes: ["orchestration"], output_contract_ref: "contract:workflow" }).request as JsonObject;
+    const nextTicket = f.service.evaluationModelTicketIssue({ ticket_id: "ticket-next", profile_id: profile.id, purpose: "workflow_evolution", workflow_evolution_request_id: nextRequest.id, input_ref: "external:batch-next", output_contract_ref: "contract:workflow" }).ticket as JsonObject;
+    const next = f.service.workflowEvolutionProposalSubmit({ proposal_id: "draft-next", request_id: nextRequest.id, model_ticket_id: nextTicket.id, workflow_id: "support-refund-v3", name: "Support refund verification v2", description: "An iterated, bounded draft.", inputs: ["case_ref"], steps: [{ id: "verify", type: "assertion", evaluator: "file_exists", path: "receipt-v2.txt" }] });
+    const firstProcedure = submitted.procedure as JsonObject, nextProcedure = next.procedure as JsonObject;
+    assert.equal(nextProcedure.id, firstProcedure.id);
+    assert.equal(nextProcedure.version, Number(firstProcedure.version) + 1);
+    assert.equal(nextProcedure.lifecycle, "candidate");
+    assert.equal(((nextProcedure.definition_ref as JsonObject).procedure_version), 2);
+    assert.equal((f.store.get("experience_procedure", String(firstProcedure.id), Number(firstProcedure.version)).definition_ref as JsonObject).procedure_version, 1);
     assert.throws(() => f.service.workflowEvolutionProposalSubmit({ request_id: request.id, workflow_id: "again", name: "Again", description: "again", inputs: [], steps: [{ type: "assertion" }] }), /no longer awaiting/);
     assert.equal((f.service.workflowEvolutionProposalGet({ proposal_id: "draft", request_id: request.id }).request as JsonObject).id, request.id);
     assert.equal((f.service.workflowEvolutionObservations({}).observations as JsonObject[]).length, 3);
@@ -154,15 +270,23 @@ test("routes every reserved model and Workflow-evolution operation through the c
   try {
     const server = new McpServer(f.service, "component-experience");
     const profile = (await server.handlers.craft_evaluation_model_profile_save({ profile_id: "mcp-profile", provider: "qwen", model: "qwen-plus", purposes: ["workflow_evolution"] })).profile as JsonObject;
-    assert.equal(((await server.handlers.craft_evaluation_model_profile_get({ profile_id: profile.id })).profile as JsonObject).id, profile.id);
+    const profileDetails = await server.handlers.craft_evaluation_model_profile_get({ profile_id: profile.id });
+    assert.equal((profileDetails.profile as JsonObject).id, profile.id);
+    assert.equal((profileDetails.provider as JsonObject).provider, "qwen");
     assert.equal(((await server.handlers.craft_evaluation_model_profile_list({ limit: 1 })).profiles as JsonObject[]).length, 1);
     const first = (await server.handlers.craft_experience_observe({ observation_id: "mcp-first", scenario_key: "mcp-flow", source_kind: "customer_execution", source_id: "one", source_digest: "sha256:one", outcome: "passed", evidence_ids: ["confirmed"], sanitized: true })).observation as JsonObject;
     const second = (await server.handlers.craft_experience_observe({ observation_id: "mcp-second", scenario_key: "mcp-flow", source_kind: "customer_execution", source_id: "two", source_digest: "sha256:two", outcome: "failed", evidence_ids: ["confirmed"], sanitized: true })).observation as JsonObject;
     assert.equal(((await server.handlers.craft_experience_patterns_list({ scenario_key: "mcp-flow" })).observations as JsonObject[]).length, 2);
     const request = (await server.handlers.craft_experience_procedure_draft({ request_id: "mcp-request", scenario_key: "mcp-flow", observation_ids: [first.id, second.id], hypothesis: "preserve the observed verification sequence", design_axes: ["orchestration"], output_contract_ref: "contract:mcp-workflow" })).request as JsonObject;
     const ticket = (await server.handlers.craft_evaluation_model_ticket_issue({ ticket_id: "mcp-ticket", profile_id: profile.id, purpose: "workflow_evolution", workflow_evolution_request_id: request.id, input_ref: "external:batch", output_contract_ref: "contract:mcp-workflow" })).ticket as JsonObject;
+    const pendingTickets = (await server.handlers.craft_evaluation_model_ticket_list({ purpose: "workflow_evolution" })).tickets as JsonObject[];
+    assert.equal(pendingTickets.length, 1);
+    assert.equal((pendingTickets[0]!.readiness as JsonObject).status, "needs_enablement");
+    assert.throws(() => server.handlers.craft_evaluation_model_ticket_list({ purpose: "unsupported" }), /purpose is unsupported/u);
+    assert.throws(() => server.handlers.craft_evaluation_model_ticket_list({ limit: 0 }), /limit/u);
     const submitted = await server.handlers.craft_experience_procedure_submit({ proposal_id: "mcp-proposal", request_id: request.id, model_ticket_id: ticket.id, workflow_id: "mcp-draft", name: "MCP draft", description: "A bounded draft from sanitized evidence.", inputs: [], steps: [{ type: "assertion" }] });
     assert.equal(((submitted.workflow as JsonObject).lifecycle), "draft");
+    assert.equal(((await server.handlers.craft_evaluation_model_ticket_list({ purpose: "workflow_evolution" })).tickets as JsonObject[]).length, 0);
     assert.equal(((await server.handlers.craft_experience_procedure_get({ proposal_id: "mcp-proposal", request_id: request.id })).proposal as JsonObject).id, "mcp-proposal");
   } finally { await close(f); }
 });

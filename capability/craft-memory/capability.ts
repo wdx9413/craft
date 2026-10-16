@@ -2,7 +2,7 @@ import { observedKernel } from "../../common/craft-common-log/src/index.ts";
 /**
  * The Memory capability.
  *
- * Memory is the accumulated context member gated by **explicit approval**. Where knowledge is
+ * Memory is the accumulated context member gated by **evidence quality and conflict policy**. Where knowledge is
  * gated by Evidence — a claim carries the Evidence that backs it — a memory entry additionally
  * answers "whose memory is this, and may it be recalled here": it carries a scope, a
  * sensitivity, a validity window and the Knowledge Source version it came from. `MemoryContribution`
@@ -16,7 +16,7 @@ import { observedKernel } from "../../common/craft-common-log/src/index.ts";
  * | kernel | what it holds |
  * |---|---|
  * | `memory-ledger` | `remember`, `transition`, `compatBind`, `get` — content-addressed, Source-pinned, Evidence-checked entries |
- * | `memory-governance` | consent policy, candidate review, conflict selection, approved commit, topic suggestions and confirmations |
+ * | `memory-governance` | automatic quality-gated commit, conflict selection, candidate review, topic suggestions and confirmations |
  * | `memory-signals` | `memoryDecayWeight`, `rankWithDecay`, `shouldProposeMemory`, `planLegacyPromotion`, `hybridMemoryScores`, `memoryUsageEvidence` — pure functions over recall history |
  *
  * One thing that is **not** here, recorded rather than left to be discovered:

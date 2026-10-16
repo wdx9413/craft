@@ -127,11 +127,11 @@ export class TraceKernel {
 
   query(args: JsonObject = {}): JsonObject {
     const limit = args.limit === undefined ? 100 : Number(args.limit); if (!Number.isInteger(limit) || limit < 1 || limit > 10_000) throw new Error("limit must be an integer between 1 and 10000");
-    const traceId = args.trace_id === undefined ? null : text(args.trace_id, "trace_id"); const taskId = args.task_id === undefined ? null : text(args.task_id, "task_id"); const eventKind = args.event_kind === undefined ? null : text(args.event_kind, "event_kind");
-    const hot = this.store.list("trace_event", Number.MAX_SAFE_INTEGER, (item) => (traceId === null || item.trace_id === traceId) && (eventKind === null || item.event_kind === eventKind) && (taskId === null || this.store.find("trace", String(item.trace_id))?.task_id === taskId));
+    const traceId = args.trace_id === undefined ? null : text(args.trace_id, "trace_id"); const taskId = args.task_id === undefined ? null : text(args.task_id, "task_id"); const eventKind = args.event_kind === undefined ? null : text(args.event_kind, "event_kind"); const operationId = args.operation_id === undefined ? null : text(args.operation_id, "operation_id");
+    const hot = this.store.list("trace_event", Number.MAX_SAFE_INTEGER, (item) => (traceId === null || item.trace_id === traceId) && (eventKind === null || item.event_kind === eventKind) && (operationId === null || item.operation_id === operationId) && (taskId === null || this.store.find("trace", String(item.trace_id))?.task_id === taskId));
     const archived: JsonObject[] = this.store.list("trace_archive", Number.MAX_SAFE_INTEGER, (archive) => (traceId === null || archive.trace_id === traceId) && (taskId === null || archive.task_id === taskId)).flatMap((archive): JsonObject[] => {
       const bundle = this.archives.read(this.archivePointer(archive));
-      return bundle.events.filter((event) => eventKind === null || event.event_kind === eventKind).map((event) => ({ ...event, archived: true, archive_uri: archive.archive_uri }));
+      return bundle.events.filter((event) => (eventKind === null || event.event_kind === eventKind) && (operationId === null || event.operation_id === operationId)).map((event) => ({ ...event, archived: true, archive_uri: archive.archive_uri }));
     });
     const events = [...hot, ...archived].sort((a, b) => String(a.created_at ?? "").localeCompare(String(b.created_at ?? ""))).slice(0, limit);
     return { schema: TRACE_SCHEMA_VERSION, count: events.length, events };

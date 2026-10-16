@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
-import { canonicalJson, digestJson, payload, stableDigest } from "../core/digest.ts";
+import { canonicalJson, digestJson, payload, stableDigest, stableDigestStreaming } from "../core/digest.ts";
 
 /** What the digest of a string is, computed without going through the module under test. */
 const sha256Of = (text: string): string => `sha256:${createHash("sha256").update(text).digest("hex")}`;
@@ -43,6 +43,17 @@ test("keeps the digests the 18 merged copies produced", () => {
   }
 });
 
+test("streamed stable digests preserve canonical bytes across values and flush boundaries", () => {
+  for (const [, value, expected] of GOLDEN) assert.equal(stableDigestStreaming(value), expected);
+  const large = { rows: Array.from({ length: 2_000 }, (_, index) => ({ name: `符号-${index}-🚀`, span: [index, index + 3] })) };
+  assert.equal(stableDigestStreaming(large), stableDigest(large));
+  const distinctShapes = Array.from({ length: 257 }, (_, index) => ({ [`key-${index}`]: index }));
+  assert.equal(stableDigestStreaming(distinctShapes), stableDigest(distinctShapes));
+  assert.equal(stableDigestStreaming({ a: undefined }), stableDigest({ a: undefined }));
+  assert.throws(() => stableDigestStreaming(undefined), /cannot serialize undefined/u);
+  assert.throws(() => stableDigestStreaming(() => 1), /cannot serialize function/u);
+});
+
 test("states the difference between a stable digest and a JSON digest", () => {
   // The reason this module exports two names instead of one `digest`. Key order is the whole
   // difference, so the case that shows it is a permutation — for `{a:1}` the two agree, and
@@ -81,6 +92,22 @@ test("serializes arrays in order and object keys in sorted order", () => {
   // Which means nesting decides the digest, and the golden `undefined-element` entry pins it.
   assert.equal(stableDigest([undefined]), stableDigest([]));
   assert.notEqual(stableDigest({ a: undefined }), stableDigest({}));
+});
+
+test("reuses a bounded key-order shape cache without changing canonical bytes", () => {
+  const value = [
+    { z: 1, "键": 2, a: 3 },
+    { a: 4, z: 5, "键": 6 },
+    { "键": 7, a: 8, z: 9 },
+  ];
+  const expected = '[{"键":2,"a":3,"z":1},{"键":6,"a":4,"z":5},{"键":7,"a":8,"z":9}]';
+  assert.equal(canonicalJson(value), expected);
+  assert.equal(stableDigest(value), sha256Of(expected));
+});
+
+test("keeps canonical output correct after the per-call shape cache reaches its limit", () => {
+  const value = Array.from({ length: 257 }, (_, index) => ({ [`key-${index}`]: index }));
+  assert.equal(canonicalJson(value), `[${value.map(item => JSON.stringify(item)).join(",")}]`);
 });
 
 test("keeps record payloads free of the store's own bookkeeping", () => {

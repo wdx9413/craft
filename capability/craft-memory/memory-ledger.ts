@@ -27,6 +27,8 @@ import { noCredentialAssignment, optionalScope, parseScope, sortedUniqueList, te
 import { canonicalJson, stableDigest, payload } from "../../common/craft-common-base/src/digest.ts";
 import { contentReference } from "../../common/craft-common-store-local/src/content-store.ts";
 import { scopeAccess, scopeAllows, scopeEnvelope, sourceAllows, type ScopeAccess } from "../../common/craft-common-base/src/scope-policy.ts";
+import { temporalMemorySelect } from "../../common/craft-common-base/src/memory-temporal-policy.ts";
+import { MemoryFileStore } from "./memory-files.ts";
 
 const MEMORY_KINDS = new Set(["working", "episodic", "preference", "procedural"]);
 const MEMORY_STATUS = new Set(["active", "superseded", "revoked", "expired"]);
@@ -44,7 +46,8 @@ function date(value: unknown, name: string): string | null {
 
 export class MemoryLedgerKernel {
   readonly store: CraftStore;
-  constructor(store: CraftStore) { this.store = store; }
+  readonly files: MemoryFileStore;
+  constructor(store: CraftStore) { this.store = store; this.files = new MemoryFileStore(store); }
 
   remember(args: JsonObject): JsonObject {
     const source = this.store.get("knowledge_source", text(args.source_id, "source_id")); if (source.status !== "active") throw new Error("Knowledge Source is not active");
@@ -79,11 +82,16 @@ export class MemoryLedgerKernel {
     const workingNote = kind === "working" && args.working_note === true;
     const identity = { source_id: source.id, source_version: source.version, kind, scope: memoryScope, scope_envelope: envelope, content_digest: stableDigest(content), sensitivity, confidence, evidence_ids: evidenceIds, valid_until: validUntil, observed_at: observedAt, effective_from: effectiveFrom, working_note: workingNote, ...(topic === undefined ? {} : { topic }) };
     const identityDigest = stableDigest(identity);
-    if (existing) { if (existing.identity_digest !== identityDigest) throw new Error("Memory Ledger idempotency conflict"); return { memory: existing, idempotent: true }; }
+    if (existing) {
+      if (existing.identity_digest !== identityDigest) throw new Error("Memory Ledger idempotency conflict");
+      const projection = this.files.sync(memoryScope);
+      return { memory: existing, projection, idempotent: true };
+    }
     // The body lives in the content store; the record keeps the reference and the digest, so
     // the Ledger indexes memory rather than holding it, and a rewritten body is a drift error.
     const contentRef = this.store.contentStore.writeSync({ kind: "memory", record_id: memoryId, version: 1, scope: `${memoryScope.kind}:${memoryScope.id}`, status: "active", sensitivity, source_id: String(source.id), body: content });
-    return { memory: this.store.create("memory_ledger", memoryId, { ...identity, content_ref: contentRef, identity_digest: identityDigest, status: "active", supersedes_id: null, contradiction_ids: [], derived_from_ids: [], ...(workingNote ? {} : { working_legacy_compatibility: kind === "working" }) }), idempotent: false };
+    const memory = this.store.create("memory_ledger", memoryId, { ...identity, content_ref: contentRef, identity_digest: identityDigest, status: "active", supersedes_id: null, contradiction_ids: [], derived_from_ids: [], ...(workingNote ? {} : { working_legacy_compatibility: kind === "working" }) });
+    return { memory, projection: this.files.sync(memoryScope), idempotent: false };
   }
 
   /**
@@ -105,9 +113,10 @@ export class MemoryLedgerKernel {
     const reasonDigest = stableDigest(noCredentialAssignment(text(args.reason, "reason"), "reason"));
     const expectedVersion = args.expected_version ?? memory.version;
     if (!Number.isInteger(expectedVersion) || Number(expectedVersion) < 1) throw new Error("expected_version must be a positive integer");
-    if (memory.status === status && memory.replacement_id === replacementId && memory.transition_reason_digest === reasonDigest) return { memory, idempotent: true };
+    if (memory.status === status && memory.replacement_id === replacementId && memory.transition_reason_digest === reasonDigest) return { memory, projection: this.files.sync(memory.scope as ScopeRef), idempotent: true };
     if (memory.status !== "active") throw new Error("Memory transition requires an active entry");
-    return { memory: this.store.updateIfVersion("memory_ledger", String(memory.id), Number(expectedVersion), { ...payload(memory), status, replacement_id: replacementId, transition_reason_digest: reasonDigest }), idempotent: false };
+    const updated = this.store.updateIfVersion("memory_ledger", String(memory.id), Number(expectedVersion), { ...payload(memory), status, replacement_id: replacementId, transition_reason_digest: reasonDigest });
+    return { memory: updated, projection: this.files.sync(memory.scope as ScopeRef), idempotent: false };
   }
 
   /**
@@ -133,6 +142,7 @@ export class MemoryLedgerKernel {
     if (!this.visible(current, scope, access, allowRestricted)) throw new Error("Memory scope or audience denied");
     const memory = args.version === undefined ? current : this.store.get("memory_ledger", memoryId, Number(args.version));
     if (canonicalJson(memory.scope) !== canonicalJson(current.scope) || !this.visible(memory, scope, access, allowRestricted)) throw new Error("Memory historical scope or audience denied");
+    this.files.sync(memory.scope as ScopeRef);
     return { memory: { ...memory, content: this.content(memory) } };
   }
 
@@ -152,8 +162,10 @@ export class MemoryLedgerKernel {
     if (args.include_history !== undefined && typeof args.include_history !== "boolean") throw new Error("include_history must be boolean");
     const includeHistory = args.include_history === true;
     const access = scopeAccess(args), allowRestricted = args.allow_restricted === true;
-    const memories = this.store.listScoped("memory_ledger", [scope], limit, (item) => this.visible(item, scope, access, allowRestricted) && (includeHistory || item.status === "active"))
+    const listed = this.store.listScoped("memory_ledger", [scope], limit, (item) => this.visible(item, scope, access, allowRestricted) && (includeHistory || item.status === "active"));
+    const memories = temporalMemorySelect(listed, new Date(), includeHistory).selected
       .map((memory) => ({ ...memory, content: this.content(memory) }));
+    this.files.sync(scope);
     return { scope, include_history: includeHistory, count: memories.length, memories };
   }
 

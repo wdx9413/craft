@@ -9,26 +9,12 @@ function tokenize(value: string): string[] {
     /\p{Script=Han}/u.test(word) ? [...segmenter.segment(word)].filter(part => part.isWordLike).map(part => part.segment) : [word]);
 }
 
-/**
- * BM25 over a small corpus.
- *
- * Craft's existing rerank() is substring scoring with an exact-name boost. It
- * has no notion of term rarity, so a query containing a common word is dominated
- * by that word. BM25 weights a term by how rare it is in the corpus, which is
- * what makes `TS-999` find the one record that mentions it.
- *
- * The identifier boost is the Contextual-Retrieval lesson applied to Craft's
- * own data: digests, ticket ids and record kinds are exactly where embeddings
- * fail, so an exact identifier hit must outrank a semantic near-miss.
- */
+/** BM25 corpus with an inverted posting map, so scoring visits matching documents only. */
 export class Bm25Index {
-  // Tokens and their length live in one entry so a document can never be
-  // half-registered, which removes the need for defensive fallbacks in score().
-  readonly #entries = new Map<string, { tokens: string[]; length: number }>();
+  readonly #entries = new Map<string, { length: number; joined: string }>();
   #totalLength = 0;
   readonly #documentFrequency = new Map<string, number>();
-
-  /** Standard BM25 saturation and length-normalisation constants. */
+  readonly #postings = new Map<string, Map<string, number>>();
   readonly #k1: number;
   readonly #b: number;
 
@@ -45,48 +31,42 @@ export class Bm25Index {
     const key = text(id, "id");
     if (this.#entries.has(key)) throw new Error(`BM25 document ${key} already exists`);
     const tokens = tokenize(text(value, "value"));
-    this.#entries.set(key, { tokens, length: tokens.length });
+    const frequencies = new Map<string, number>();
+    for (const token of tokens) frequencies.set(token, (frequencies.get(token) ?? 0) + 1);
+    this.#entries.set(key, { length: tokens.length, joined: tokens.join(" ") });
     this.#totalLength += tokens.length;
-    for (const term of new Set(tokens)) {
+    for (const [term, frequency] of frequencies) {
       this.#documentFrequency.set(term, (this.#documentFrequency.get(term) ?? 0) + 1);
+      const posting = this.#postings.get(term) ?? new Map<string, number>();
+      posting.set(key, frequency);
+      this.#postings.set(term, posting);
     }
   }
 
-  /**
-   * Mean document length. Only ever called with at least one document — score()
-   * returns early on an empty index — so there is no empty-corpus case to guard.
-   */
-  #averageLength(): number {
-    return this.#totalLength / this.#entries.size;
-  }
+  #averageLength(): number { return this.#totalLength / this.#entries.size; }
 
   score(query: string): Array<{ id: string; score: number; exact_identifier: boolean }> {
     const terms = tokenize(text(query, "query"));
     if (!terms.length || !this.#entries.size) return [];
     const total = this.#entries.size;
-    const queryIdentifiers = terms.filter((term) => IDENTIFIER.test(term));
-    const results: Array<{ id: string; score: number; exact_identifier: boolean }> = [];
-
-    for (const [id, entry] of this.#entries) {
-      const frequencies = new Map<string, number>();
-      for (const token of entry.tokens) frequencies.set(token, (frequencies.get(token) ?? 0) + 1);
-      let score = 0;
-      for (const term of terms) {
-        const frequency = frequencies.get(term) ?? 0;
-        // A term absent from this document contributes nothing. A term present
-        // in the document was necessarily indexed, so its document frequency is
-        // always defined; score() never has to invent one.
-        if (!frequency) continue;
-        const df = this.#documentFrequency.get(term) as number;
-        const idf = Math.log(1 + (total - df + 0.5) / (df + 0.5));
-        score += idf * ((frequency * (this.#k1 + 1)) / (frequency + this.#k1 * (1 - this.#b + this.#b * (entry.length / this.#averageLength()))));
+    const queryIdentifiers = terms.filter(term => IDENTIFIER.test(term));
+    const scores = new Map<string, number>();
+    const averageLength = this.#averageLength();
+    for (const term of terms) {
+      const posting = this.#postings.get(term);
+      if (!posting) continue;
+      const df = this.#documentFrequency.get(term)!;
+      const idf = Math.log(1 + (total - df + 0.5) / (df + 0.5));
+      for (const [id, frequency] of posting) {
+        const entry = this.#entries.get(id)!;
+        const contribution = idf * ((frequency * (this.#k1 + 1)) / (frequency + this.#k1 * (1 - this.#b + this.#b * (entry.length / averageLength))));
+        scores.set(id, (scores.get(id) ?? 0) + contribution);
       }
-      if (score <= 0) continue;
-      // The join is what the identifier boost keys off.
-      const joined = entry.tokens.join(" ");
-      const exact = queryIdentifiers.some((term) => joined.includes(term));
-      if (exact) score += 10;
-      results.push({ id, score, exact_identifier: exact });
+    }
+    const results: Array<{ id: string; score: number; exact_identifier: boolean }> = [];
+    for (const [id, score] of scores) {
+      const exact = queryIdentifiers.some(term => this.#entries.get(id)!.joined.includes(term));
+      results.push({ id, score: score + (exact ? 10 : 0), exact_identifier: exact });
     }
     return results.sort((left, right) => right.score - left.score || left.id.localeCompare(right.id));
   }

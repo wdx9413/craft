@@ -109,7 +109,23 @@ test("discovery and Chinese code matching are bounded hints", () => {
   const found = codeContextCandidates({ nodes: [{ id: "b", name: "loginUser", path: "b.ts" }, { id: "a", name: "loginUser", path: "a.ts" }, { id: "z", name: "other", path: "z.ts" }] }, "登录", 1);
   assert.equal((found.symbols as JsonObject[])[0]!.id, "a"); assert.equal(found.omitted_count, 1);
   assert.equal((codeContextCandidates({ nodes: [] }, "x").symbols as unknown[]).length, 0);
-  for (const intent of [undefined, "recall", "knowledge", "memory", "experience", "code"]) { const discovery = discoverContextTools({ intent }); assert((discovery.tools as unknown[]).length > 0); assert(Number(discovery.schema_estimated_tokens) > 0); }
+  for (const intent of [undefined, "recall", "knowledge", "memory", "experience", "code", "code-analysis"]) { const discovery = discoverContextTools({ intent }); assert((discovery.tools as unknown[]).length > 0); assert(Number(discovery.schema_estimated_tokens) > 0); }
+  assert((discoverContextTools({ intent: "experience" }).tools as JsonObject[]).some(tool => tool.name === "craft_experience_scenario_list"));
+  assert((discoverContextTools({ intent: "experience" }).tools as JsonObject[]).some(tool => tool.name === "craft_learning_cycle_finalize"));
+  assert((discoverContextTools({ intent: "memory" }).tools as JsonObject[]).some(tool => tool.name === "craft_memory_capture_observed_fact"));
+  const codeTools = discoverContextTools({ intent: "code" }).tools as JsonObject[];
+  const codebaseNames = codeTools.filter(tool => String(tool.name).startsWith("craft_codebase_")).map(tool => tool.name).sort();
+  assert.deepEqual(codebaseNames, ["craft_codebase_callers_find", "craft_codebase_context_slice", "craft_codebase_impact_query",
+    "craft_codebase_relations_find", "craft_codebase_symbol_explore", "craft_codebase_symbol_find", "craft_codebase_symbol_read",
+    "craft_codebase_symbols_overview"].sort());
+  assert(codebaseNames.every(name => codeTools.find(tool => tool.name === name)?.annotations
+    && (codeTools.find(tool => tool.name === name)!.annotations as JsonObject).readOnlyHint === true));
+  const analysisTools = discoverContextTools({ intent: "code-analysis" }).tools as JsonObject[];
+  const analysisNames = analysisTools.filter(tool => String(tool.name).startsWith("craft_codebase_")).map(tool => tool.name).sort();
+  assert.deepEqual(analysisNames, [...codebaseNames, "craft_codebase_definition_find", "craft_codebase_control_flow_query",
+    "craft_codebase_data_flow_query", "craft_codebase_diagnostics_find"].sort());
+  assert.equal((discoverContextTools({ intent: "code" }).schema_estimated_tokens as number)
+    < (discoverContextTools({ intent: "code-analysis" }).schema_estimated_tokens as number), true);
   assert.throws(() => discoverContextTools({ intent: "bad" }), /intent/);
 });
 
@@ -250,17 +266,19 @@ test("standalone Claim SDK preserves validation, legacy replay and current/histo
   } finally { f.close(); }
 });
 
-test("Memory capture SDK preserves consent, policy-off, conflict and governed commit contracts", async () => {
+test("Memory capture SDK preserves policy-off, conflict and governed commit contracts", async () => {
   const { MemoryCapture } = await import("../capability/craft-memory/memory-capture.ts");
   const f = await fixture();
   try {
     const capture = new MemoryCapture(f.service.memoryGovernance, () => f.service.knowledgeMemoryInstallBuiltins(), args => f.service.evidenceRecord(args));
-    for (const args of [{ content: "x" }, { explicit_consent: true, content: null }, { explicit_consent: true, content: " " }, { explicit_consent: true, content: "token=secretvalue" }, { explicit_consent: true, content: "x", kind: "bad" }, { explicit_consent: true, content: "x", topic: "" }]) assert.throws(() => capture.captureUserStatement(args));
+    for (const args of [{ content: null }, { content: " " }, { content: "token=secretvalue" }, { content: "x", kind: "bad" }, { content: "x", topic: "" }]) assert.throws(() => capture.captureUserStatement(args));
     f.service.memoryGovernance.policySave({ mode: "off" }); const before = f.store.count("evidence");
-    assert.equal(capture.captureUserStatement({ explicit_consent: true, content: "x" }).status, "disabled"); assert.equal(f.store.count("evidence"), before);
+    assert.equal(capture.captureUserStatement({ content: "x" }).status, "disabled"); assert.equal(f.store.count("evidence"), before);
     f.service.memoryGovernance.policySave({ mode: "propose" });
-    const captured = capture.captureUserStatement({ explicit_consent: true, content: "Python preference", auto_accept: true, scope_kind: "user", scope_id: "local", topic: "language", evidence_id: "user1", candidate_id: "candidate1", memory_id: "memory1", sensitivity: "internal", scope_envelope: { applicability: { kind: "user", id: "local" }, audience: { mode: "scoped", principal_ids: [] }, purpose: "preference", tenant_id: null } });
-    assert.equal(captured.auto_committed, true);
+    const captured = capture.captureUserStatement({ content: "Python preference", scope_kind: "user", scope_id: "local", topic: "language", evidence_id: "user1", candidate_id: "candidate1", memory_id: "memory1", sensitivity: "internal", scope_envelope: { applicability: { kind: "user", id: "local" }, audience: { mode: "scoped", principal_ids: [] }, purpose: "preference", tenant_id: null } });
+    assert.equal(captured.auto_committed, false);
+    const reviewed = f.service.memoryCandidateReview({ candidate_id: "candidate1", decision: "approve", reviewer: "fixture", reason: "manual policy mode" }).candidate as JsonObject;
+    f.service.memoryLedgerRememberApproved({ candidate_id: reviewed.id, memory_id: "memory1" });
     const conflict = capture.captureUserStatement({ explicit_consent: true, content: "Java preference", topic: "language", auto_accept: true }); assert.equal(conflict.next_action, "resolve_conflict");
     assert.equal(capture.captureUserStatement({ explicit_consent: true, content: "keep task notes", kind: "working" }).next_action, "review_or_accept");
     f.service.memoryGovernance.policySave({ mode: "governed", min_confidence: "bounded" });
@@ -342,7 +360,9 @@ test("legacy receipts, direct required validation and code query truncation rema
     f.store.create("context_resolution_receipt", "legacy", { memory_refs: [], scope: { kind: "project", id: "p" }, identity_digest: "legacy" });
     assert(f.service.contextResolutionFeedback({ receipt_id: "legacy", outcome: "irrelevant" }).feedback);
     const ensured = f.service.codebaseRepositoryEnsure({ project_root: f.repo });
-    const node = (f.store.get("codebase_index", String(ensured.index_id)).nodes as JsonObject[])[0]!;
+    const index = f.store.get("codebase_index", String(ensured.index_id));
+    const firstShard = f.store.get("codebase_index_shard", String((index.shard_ids as string[])[0]));
+    const node = (firstShard.nodes as JsonObject[])[0]!;
     const ref = contextAssetRef("codebase", { ...node, version: 1, index_id: ensured.index_id, checkpoint_id: ensured.checkpoint_id }, f.scope);
     const requested = await f.service.contextOpen({ project_root: f.repo, query: "unmatched", required_refs: [ref] }); assert((requested.asset_refs as JsonObject[]).some(item => item.id === ref.id));
     f.store.create("memory_ledger", "required", { scope: f.scope, source_id: "builtin.evidence-wiki", status: "active", kind: "preference", sensitivity: "internal", content: "fixed", content_digest: stableDigest("fixed") });
@@ -426,9 +446,9 @@ test("governed Memory policy cannot auto-commit a conflict with a directly writt
     f.service.memoryGovernance.policySave({ mode: "governed" });
     const result = f.service.memoryGovernance.propose({ source_id: "builtin.evidence-wiki", kind: "preference", scope_kind: "user", scope_id: "local", topic: "language", content: "Java", confidence: "confirmed", evidence_ids: ["proof"] });
     assert.equal(result.auto_committed, false); assert.equal((result.candidate as JsonObject).status, "conflict_pending"); assert.equal(f.store.count("memory_ledger"), 1);
-    const captured = f.service.memoryCaptureUserStatement({ explicit_consent: true, content: "Rust", auto_accept: true, scope_id: "separate" }); const memory = captured.memory as JsonObject;
+    const captured = f.service.memoryCaptureUserStatement({ content: "Quartz", scope_id: "separate" }); const memory = captured.memory as JsonObject;
     f.service.memoryLedgerTransition({ memory_id: memory.id, status: "revoked", reason: "user request" });
-    assert.equal(f.service.memoryCaptureUserStatement({ explicit_consent: true, content: "Rust", auto_accept: true, scope_id: "separate" }).already_retained, undefined);
+    assert.equal(f.service.memoryCaptureUserStatement({ content: "Quartz", scope_id: "separate" }).already_retained, undefined);
   } finally { f.close(); }
 });
 

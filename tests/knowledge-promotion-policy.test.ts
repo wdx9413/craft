@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, unlink } from "node:fs/promises";
+import { mkdtemp, readFile, rm, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -39,6 +39,24 @@ test("automatic promotion requires independent evidence by default and records t
     assert.equal((f.store.get("knowledge_claim", String(claim.id)).review as JsonObject).reviewer, "automated-promotion-policy");
     assert.equal(((f.store.get("knowledge_claim", String(claim.id)).review as JsonObject).policy_revision), 1);
     assert.equal((f.service.knowledgeAutoReview({ claim_ids: [claim.id], now: "2026-09-20T00:00:00.000Z" }).assessments as JsonObject[])[0]!.verdict, "already_reviewed");
+  } finally { await close(f); }
+});
+
+test("automatic Claim promotion also advances its project scenario evidence reference", async () => {
+  const f = await fixture();
+  try {
+    const first = f.service.evidenceRecord({ evidence_id: "scene-first", source_type: "observation", confidence: "confirmed", claim: "first support" });
+    const claim = f.service.knowledgeClaimSave({ claim_id: "scene-auto", kind: "fact", content: "Use the focused validation.", scope: "project:demo",
+      source_id: "source", scenario_key: "engineering.validation.focused", coarse_scenario_key: "engineering.validation", evidence_ids: [first.id] }).claim as JsonObject;
+    f.service.knowledgeClaimSupportRecord({ claim_id: claim.id, evidence_id: first.id, observation_key: "scene:one" });
+    const second = f.service.evidenceRecord({ evidence_id: "scene-second", source_type: "receipt", confidence: "confirmed", claim: "second support" });
+    f.service.knowledgeClaimSupportRecord({ claim_id: claim.id, evidence_id: second.id, observation_key: "scene:two" });
+    const assessment = f.service.knowledgeAutoReview({ claim_ids: [claim.id], now: "2026-09-20T00:00:00.000Z" }).assessments as JsonObject[];
+    assert.equal(assessment[0]!.promoted, true);
+    const catalog = JSON.parse(await readFile(join(f.root, "knowledge", "projects", "demo", "knowledge-scenarios.json"), "utf8")) as JsonObject;
+    const scene = (catalog.scenarios as JsonObject[]).find(item => item.scenario_key === "engineering.validation.focused")!;
+    assert.equal(scene.lifecycle, "candidate");
+    assert.equal((scene.claim_refs as JsonObject[])[0]!.status, "reviewed");
   } finally { await close(f); }
 });
 
@@ -227,21 +245,25 @@ test("semantic review packets and provider responses stay evidence-bound across 
   const originalFetch = globalThis.fetch;
   const previousKey = process.env.CRAFT_SEMANTIC_TEST_KEY;
   try {
-    const makePacketClaim = (id: string) => {
+    const makePacketClaim = (id: string, scenarioKey?: string) => {
       const fragmentRef = f.store.contentStore.writeSync({ kind: "knowledge", record_id: `${id}-fragment`, version: 1, scope: "project:demo", status: "current", sensitivity: "internal", source_id: "source", body: "Focused tests verify the changed behavior." });
       f.store.create("knowledge_fragment", `${id}-fragment`, { source_id: "source", source_revision_id: `${id}-revision`, locator: `${id}.md#1`, content_ref: fragmentRef, content_digest: fragmentRef.digest });
       f.store.create("evidence", `${id}-evidence`, { source_type: "knowledge_fragment", confidence: "confirmed", fragment_id: `${id}-fragment` });
-      return f.service.knowledgeClaimSave({ claim_id: id, kind: "fact", content: "Run focused tests first.", scope: "project:demo", source_id: "source", evidence_ids: [`${id}-evidence`] }).claim as JsonObject;
+      return f.service.knowledgeClaimSave({ claim_id: id, kind: "fact", content: "Run focused tests first.", scope: "project:demo", source_id: "source",
+        ...(scenarioKey ? { scenario_key: scenarioKey } : {}), evidence_ids: [`${id}-evidence`] }).claim as JsonObject;
     };
     const claim = makePacketClaim("semantic-ready");
     const packet = f.service.knowledgeSemanticReviewPacket({ claim_id: claim.id }) as JsonObject;
     assert.equal(packet.status, "ready");
-    const hostClaim = makePacketClaim("host-packet");
+    const hostClaim = makePacketClaim("host-packet", "knowledge.semantic-review");
     const hostPacket = f.service.knowledgeSemanticReviewPacket({ claim_id: hostClaim.id });
     const hostArgs = { claim_id: hostClaim.id, host_run_key: "host:packet", source_digest: `sha256:${"b".repeat(64)}`, packet_digest: hostPacket.packet_digest, decision: "supported" };
     const promoted = f.service.knowledgeHostReview(hostArgs);
     assert.equal(promoted.promoted, true);
     assert.equal(f.service.knowledgeHostReview(hostArgs).idempotent, true);
+    const taxonomy = JSON.parse(await readFile(join(f.root, "knowledge", "projects", "demo", "knowledge-scenarios.json"), "utf8")) as JsonObject;
+    const scene = (taxonomy.scenarios as JsonObject[]).find(item => item.scenario_key === "knowledge.semantic-review")!;
+    assert.equal((scene.claim_refs as JsonObject[])[0]!.status, "reviewed");
     const live = f.store.get("knowledge_claim", String(hostClaim.id));
     f.store.save("knowledge_claim", String(hostClaim.id), { ...live, valid_until: "2000-01-01T00:00:00Z" });
     const expiredReplay = f.service.knowledgeHostReview(hostArgs);

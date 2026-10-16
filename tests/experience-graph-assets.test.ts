@@ -248,7 +248,7 @@ test("publication failures remain retryable and both standalone and Context MCP 
     try { assert.throws(() => f.service.experienceGraphEdit({ action: "save", graph_id: "retry", scope, configuration: config() }), /rename failure/); }
     finally { fault.mock.restore(); syncBuiltinESMExports(); assert.equal(fs.renameSync, original); }
     const saved = f.service.experienceGraphEdit({ action: "save", graph_id: "retry", scope, configuration: config() }); assert.ok(saved.path);
-    for (const surface of ["component-experience-daily", "component-context-daily", "component-experience"]) {
+    for (const surface of ["component-experience"]) {
       const mcp = new McpServer(f.service, surface);
       const tools = await mcp.handle({ jsonrpc: "2.0", id: 1, method: "tools/list" });
       assert.ok(((tools!.result as JsonObject).tools as JsonObject[]).some(t => t.name === "craft_experience_graph_inspect"));

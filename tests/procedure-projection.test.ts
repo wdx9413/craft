@@ -127,6 +127,29 @@ test("Procedure public projection lists, validates drafts and preserves identity
   } finally { f.close(); }
 });
 
+test("scenario evolution appends a Procedure revision and keeps the qualified current release pinned", async () => {
+  const f = await fixture();
+  try {
+    const first = f.draft({ procedure_id: "stable-scenario", evolve: true });
+    const current = f.promote(first);
+    f.store.create("workflow_evolution_request", "request-next", { scenario_key: "inspect", scenario_signature: { domain: "test" },
+      observation_refs: [{ source: { scope: "project:test" }, evidence_ids: ["e"] }], output_contract_ref: "acceptance:test" });
+    f.store.create("workflow_evolution_proposal", "proposal-next", { request_id: "request-next", request_version: 1,
+      name: "Inspect v2", description: "A tighter read only fixture", inputs: [], steps: [{ id: "check", type: "assertion", evaluator: "file_exists", path: "result.txt" }] });
+    const next = f.procedures.draft({ proposal_id: "proposal-next", procedure_id: first.id, evolve: true }).procedure as JsonObject;
+    assert.equal(next.id, first.id);
+    assert.equal(next.version, Number(current.version) + 1);
+    assert.equal(next.lifecycle, "candidate");
+    assert.deepEqual(next.completed_gates, []);
+    assert.equal((next.definition_ref as JsonObject).procedure_version, next.version);
+    assert.equal(f.store.get("experience_procedure", String(first.id), Number(first.version)).definition_digest, first.definition_digest);
+    assert.equal(f.procedures.get({ procedure_id: String(first.id), release_channel: "current" }).procedure &&
+      (f.procedures.get({ procedure_id: String(first.id), release_channel: "current" }).procedure as JsonObject).version, current.version);
+    assert.equal((f.procedures.get({ procedure_id: String(first.id), release_channel: "test" }).procedure as JsonObject).version, next.version);
+    assert.throws(() => f.procedures.draft({ proposal_id: "proposal-next", procedure_id: first.id, evolve: true, scenario_signature: { domain: "other" } }), /idempotency conflict/);
+  } finally { f.close(); }
+});
+
 test("Procedure projection handles legacy scopes, graph defaults and absent optional review metadata", async () => {
   const f = await fixture();
   try {

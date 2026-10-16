@@ -23,7 +23,15 @@ declare module "../craft-service.ts" {
     codebaseAnalysisImport(args: JsonObject): JsonObject;
     codebaseIndexBuild(args: JsonObject): JsonObject;
     codebaseSymbolFind(args: JsonObject): JsonObject;
+    codebaseSymbolExplore(args: JsonObject): JsonObject;
+    codebaseSymbolRead(args: JsonObject): JsonObject;
+    codebaseSymbolsOverview(args: JsonObject): JsonObject;
     codebaseCallersFind(args: JsonObject): JsonObject;
+    codebaseRelationsFind(args: JsonObject): JsonObject;
+    codebaseDefinitionFind(args: JsonObject): JsonObject;
+    codebaseControlFlowQuery(args: JsonObject): JsonObject;
+    codebaseDataFlowQuery(args: JsonObject): JsonObject;
+    codebaseDiagnosticsFind(args: JsonObject): Promise<JsonObject>;
     codebaseImpactQuery(args: JsonObject): JsonObject;
     codebaseContextSlice(args: JsonObject): JsonObject;
   }
@@ -55,7 +63,15 @@ export function installCodebaseMethods(serviceClass: typeof CraftService): void 
   serviceClass.prototype.codebaseAnalysisImport = function (args) { return this.codebase.importAnalysis(args); };
   serviceClass.prototype.codebaseIndexBuild = function (args) { return this.codebase.build(args); };
   serviceClass.prototype.codebaseSymbolFind = function (args) { return this.codebase.findSymbol(args); };
+  serviceClass.prototype.codebaseSymbolExplore = function (args) { return this.codebase.exploreSymbols(args); };
+  serviceClass.prototype.codebaseSymbolRead = function (args) { return this.codebase.symbolRead(args); };
+  serviceClass.prototype.codebaseSymbolsOverview = function (args) { return this.codebase.symbolsOverview(args); };
   serviceClass.prototype.codebaseCallersFind = function (args) { return this.codebase.findCallers(args); };
+  serviceClass.prototype.codebaseRelationsFind = function (args) { return this.codebase.findRelations(args); };
+  serviceClass.prototype.codebaseDefinitionFind = function (args) { return this.codebase.findDefinition(args); };
+  serviceClass.prototype.codebaseControlFlowQuery = function (args) { return this.codebase.controlFlow(args); };
+  serviceClass.prototype.codebaseDataFlowQuery = function (args) { return this.codebase.dataFlow(args); };
+  serviceClass.prototype.codebaseDiagnosticsFind = function (args) { return this.codebase.diagnostics(args); };
   serviceClass.prototype.codebaseImpactQuery = function (args) { return this.codebase.impact(args); };
   serviceClass.prototype.codebaseContextSlice = function (args) { return this.codebase.contextSlice(args); };
 }

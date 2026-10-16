@@ -53,6 +53,7 @@ declare module "../craft-service.ts" {
     memoryConflictResolve(args: JsonObject): JsonObject;
     memoryExpirySweep(args?: JsonObject): JsonObject;
     memorySessionFinalize(args: JsonObject): JsonObject;
+    memorySessionArchive(args: JsonObject): JsonObject;
     memoryConsolidateGoverned(args: JsonObject): JsonObject;
     workflowDagValidate(args: JsonObject): JsonObject;
     workflowDagSave(args: JsonObject): JsonObject;
@@ -198,7 +199,9 @@ declare module "../craft-service.ts" {
     experienceLedgerGet(args: JsonObject): JsonObject;
     experienceProcedureDraft(args: JsonObject): JsonObject;
     experienceProcedureGate(args: JsonObject): JsonObject;
+    experienceLearningEvaluationList(args: JsonObject): JsonObject;
     experienceLearningEvaluationDispatch(args: JsonObject): JsonObject;
+    experienceLearningEvaluationRun(args: JsonObject): JsonObject;
     experienceLearningEvaluationResult(args: JsonObject): JsonObject;
     procedureInvocationBind(args: JsonObject): JsonObject;
     procedureInvocationDispatch(args: JsonObject): JsonObject;
@@ -251,6 +254,7 @@ export function installKernelDelegateMethods(serviceClass: typeof CraftService):
   serviceClass.prototype.memoryConflictResolve = function (args) { return this.memoryGovernance.resolveConflict(args); };
   serviceClass.prototype.memoryExpirySweep = function (args = {}) { return this.memoryGovernance.expirySweep(args); };
   serviceClass.prototype.memorySessionFinalize = function (args) { return this.memoryGovernance.sessionFinalize(args); };
+  serviceClass.prototype.memorySessionArchive = function (args) { return this.memoryGovernance.ledger.files.archiveSession(String(args.session_id ?? "")); };
   serviceClass.prototype.memoryConsolidateGoverned = function (args) { return this.memoryGovernance.consolidate(args); };
   serviceClass.prototype.mcpTaskCreate = function (args) { return this.mcpTasks.create(args); };
   serviceClass.prototype.mcpTaskGet = function (args) { return this.mcpTasks.get(args); };

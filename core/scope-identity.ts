@@ -114,9 +114,12 @@ export class ScopeIdentityKernel {
       }
     }
     if (scope.kind !== "session" && typeof args.session_scope_id === "string" && args.session_scope_id.trim()) {
-      // Only a task may inherit a session.  A project request cannot silently
+      // Only a task may inherit another session. A project request cannot silently
       // read arbitrary transient notes from a session supplied by another Host.
+      // The current Host may explicitly include its own session when both
+      // session identifiers match; Hook memory then remains useful until archive.
       if (scope.kind === "task") attempted.splice(1, 0, { kind: "session", id: args.session_scope_id.trim() });
+      else if (typeof args.session_id === "string" && args.session_id.trim() === args.session_scope_id.trim()) attempted.push({ kind: "session", id: args.session_scope_id.trim() });
       else excluded.push({ scope: { kind: "session", id: args.session_scope_id.trim() }, reason: "session_scope_requires_task_request" });
     }
     for (const kind of ["team", "organization"] as const) {

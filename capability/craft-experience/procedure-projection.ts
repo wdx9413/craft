@@ -14,7 +14,8 @@ import { join, resolve } from "node:path";
 import type { CraftStore, JsonObject } from "../../common/craft-common-store-local/src/store.ts";
 import { stableDigest, payload } from "../../common/craft-common-base/src/digest.ts";
 import { ProcedureDefinitionStore, procedureDefinitionRef, type ProcedureDefinition, type ProcedureKind } from "./procedure-definition.ts";
-import { activeProcedure, preserveProcedureRelease, updateProcedureRelease, selectedProcedure } from "./procedure-release.ts";
+import { activeProcedure, belongsToRetiredScenario, preserveProcedureRelease, updateProcedureRelease, selectedProcedure } from "./procedure-release.ts";
+import { experienceScenarioIsRetired } from "./scenario-catalog.ts";
 import { syncGraphVersionManifest } from "./graph-version-manifest.ts";
 import { ProcedurePlanner, validateProcedureComposition } from "./procedure-composition.ts";
 import { scopeEnvelope } from "../../common/craft-common-base/src/scope-policy.ts";
@@ -50,7 +51,7 @@ export class ProcedureStore {
 
   /** Create a candidate Procedure from an existing bounded proposal record. */
   draft(args: JsonObject): JsonObject {
-    const result = this.draftCandidate(args), procedure = result.procedure as JsonObject;
+    const result = this.store.transaction(() => this.draftCandidate(args)), procedure = result.procedure as JsonObject;
     return procedureDefinitionRef(procedure.definition_ref) ? { ...result, ...syncGraphVersionManifest(this.store, String(procedure.id)) } : result;
   }
 
@@ -61,6 +62,13 @@ export class ProcedureStore {
     if (!KINDS.has(procedureKind)) throw new Error("Experience Procedure kind is unsupported");
     const scenarioSignature = args.scenario_signature ?? request.scenario_signature;
     if (!scenarioSignature || typeof scenarioSignature !== "object" || Array.isArray(scenarioSignature)) throw new Error("Experience Procedure requires Scenario Signature");
+    const signature = scenarioSignature as JsonObject;
+    const project = signature.project as JsonObject | undefined;
+    const projectId = typeof project?.id === "string" ? project.id.replace(/^project:/u, "") : "";
+    if (projectId && typeof signature.scenario_key === "string"
+      && experienceScenarioIsRetired(this.store.paths.experienceDir, projectId, signature.scenario_key)) {
+      throw new Error("Experience scenario is retired and cannot produce a Procedure");
+    }
     const composition = proposal.composition === undefined ? null : validateProcedureComposition(procedureKind, proposal.composition, proposal.steps);
     const graph = proposal.graph as JsonObject | null;
     const control = graph?.graph_control === undefined ? null : validateGraphControl(graph.graph_control, graph.nodes, graph.edges);
@@ -83,13 +91,16 @@ export class ProcedureStore {
     const existing = this.store.find("experience_procedure", id);
     const identityDigest = stableDigest(identity);
     if (existing) {
-      if (existing.identity_digest !== identityDigest) throw new Error("Experience Procedure idempotency conflict");
-      return { procedure: existing, idempotent: true };
+      if (existing.identity_digest === identityDigest) return { procedure: existing, idempotent: true };
+      const sameScenario = existing.scope === procedureScope && existing.procedure_kind === procedureKind
+        && stableDigest(existing.scenario_signature) === stableDigest(scenarioSignature);
+      if (args.evolve !== true || !sameScenario) throw new Error("Experience Procedure idempotency conflict");
     }
+    const version = Number(existing?.version ?? 0) + 1;
     const body = this.markdown(identity);
-    const definition = procedureKind === "prompt" ? null : this.definition(id, procedureKind as ProcedureKind, identity, proposal);
+    const definition = procedureKind === "prompt" ? null : this.definition(id, version, procedureKind as ProcedureKind, identity, proposal);
     const definitionRef = definition ? this.definitions.write(definition, String(identity.title)) : null;
-    const ref = this.store.contentStore.writeSync({ kind: "experience", record_id: id, version: 1,
+    const ref = this.store.contentStore.writeSync({ kind: "experience", record_id: id, version,
       scope: String(identity.scope), status: "candidate", sensitivity: "internal", source_id: `workflow-evolution:${String(proposal.id)}`,
       title: identity.title, body, folder: this.folder(procedureKind),
       frontmatter: {
@@ -107,7 +118,12 @@ export class ProcedureStore {
         definition_digest: definitionRef?.digest ?? "",
         revoked_by: "",
       } });
-    return { procedure: this.store.create("experience_procedure", id, { ...identity, lifecycle: "candidate", content_ref: ref, content_digest: ref.digest, definition_ref: definitionRef, definition_digest: definitionRef?.digest ?? null, identity_digest: identityDigest, routeable: false, publication_allowed: false }), idempotent: false };
+    const next = { ...identity, proposal_id: proposal.id, proposal_version: proposal.version, lifecycle: "candidate", completed_gates: [],
+      content_ref: ref, content_digest: ref.digest, definition_ref: definitionRef, definition_digest: definitionRef?.digest ?? null,
+      identity_digest: identityDigest, routeable: false, publication_allowed: false };
+    if (existing?.routeable === true) preserveProcedureRelease(this.store, existing);
+    const procedure = existing ? this.store.save("experience_procedure", id, next) : this.store.create("experience_procedure", id, next);
+    return { procedure, idempotent: false };
   }
 
   /** Persist one independently evidenced promotion gate. Gates are ordered and append-only. */
@@ -130,6 +146,7 @@ export class ProcedureStore {
 
   private recordGate(args: JsonObject): JsonObject {
     const procedure = this.store.get("experience_procedure", text(args.procedure_id, "procedure_id"));
+    if (belongsToRetiredScenario(this.store, procedure)) throw new Error("Experience scenario is retired; Procedure cannot qualify");
     const stage = text(args.stage, "stage") as Stage; if (!(STAGES as readonly string[]).includes(stage)) throw new Error("Experience Procedure gate is unsupported");
     const expected = STAGES.indexOf(stage);
     const invalidated = procedure.lifecycle === "rejected" || procedure.lifecycle === "rolled_back";
@@ -237,13 +254,13 @@ export class ProcedureStore {
     return "prompts";
   }
 
-  private definition(id: string, kind: ProcedureKind, identity: JsonObject, proposal: JsonObject): ProcedureDefinition {
+  private definition(id: string, version: number, kind: ProcedureKind, identity: JsonObject, proposal: JsonObject): ProcedureDefinition {
     const graph = proposal.graph as JsonObject | null;
     const definition = kind === "workflow"
-      ? { inputs: proposal.inputs ?? [], steps: proposal.steps ?? [], ...(proposal.composition === undefined ? {} : { composition: proposal.composition }) }
+      ? { inputs: ((proposal.inputs ?? []) as unknown[]).map(input => typeof input === "string" ? { name: input, required: true } : input), steps: proposal.steps ?? [], ...(proposal.composition === undefined ? {} : { composition: proposal.composition }) }
       : { inputs: proposal.inputs ?? [], nodes: graph?.nodes ?? [], edges: graph?.edges ?? [], outputs: graph?.outputs ?? {}, checkpoint_policy: graph?.checkpoint_policy ?? { mode: "step" }, ...(graph?.graph_control === undefined ? {} : { graph_control: graph.graph_control }) };
     return {
-      schema_version: "craft.procedure.v1", procedure_id: id, procedure_version: 1, kind,
+      schema_version: "craft.procedure.v1", procedure_id: id, procedure_version: version, kind,
       scope: String(identity.scope), trigger: String(identity.trigger), preconditions: identity.preconditions as string[],
       allowed_effects: identity.allowed_effects as string[], acceptance_ref: String(identity.acceptance_ref),
       failure_disposition: String(identity.failure_disposition), scenario_signature: identity.scenario_signature as JsonObject,

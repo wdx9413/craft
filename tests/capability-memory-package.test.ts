@@ -76,7 +76,7 @@ test("claims the Ledger's scoped reads and writes, the derived signals, and noth
     // `memory-signals.ts`. Claiming them needed no behaviour change, only the file move — which is
     // the difference between an ownership declaration and an aspiration.
     "craft_memory_decay_get", "craft_memory_hybrid_scores", "craft_memory_usage_record",
-    "craft_memory_capture_propose", "craft_memory_promotion_preview",
+    "craft_memory_capture_propose", "craft_memory_capture_observed_fact", "craft_memory_promotion_preview",
   ]) assert(MEMORY_OWNS.test(owned), `${owned} must be owned`);
 
   // A correction, asserted so it cannot regress: an earlier version of `MEMORY_OWNS` claimed
@@ -100,7 +100,7 @@ test("claims the Ledger's scoped reads and writes, the derived signals, and noth
   }
 
   assert.deepEqual(names.filter((name) => MEMORY_OWNS.test(name)).sort(), [
-    "craft_memory_candidate_propose", "craft_memory_candidate_review", "craft_memory_capture_propose", "craft_memory_conflict_list", "craft_memory_conflict_resolve", "craft_memory_decay_get", "craft_memory_expiry_sweep", "craft_memory_governance", "craft_memory_hybrid_scores",
+    "craft_memory_candidate_propose", "craft_memory_candidate_review", "craft_memory_capture_observed_fact", "craft_memory_capture_propose", "craft_memory_conflict_list", "craft_memory_conflict_resolve", "craft_memory_decay_get", "craft_memory_expiry_sweep", "craft_memory_governance", "craft_memory_hybrid_scores",
     "craft_memory_ledger_compat_bind", "craft_memory_ledger_get", "craft_memory_ledger_list", "craft_memory_ledger_remember", "craft_memory_ledger_remember_approved", "craft_memory_ledger_transition",
     "craft_memory_policy_get", "craft_memory_policy_save", "craft_memory_promotion_preview", "craft_memory_session_finalize", "craft_memory_usage_record",
   ]);

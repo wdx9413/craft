@@ -36,7 +36,7 @@ Knowledge、Memory 和 routeable Experience 共用排名、去重和条数/字�
 
 候选先按作用域和访问策略筛选，再执行 10,000 条上限，其他项目的新数据不会挤掉本项目的旧候选。独立严格接口超过候选预算明确报错；聚合的可选成员失败可降级为 `partial`。当前 Store predicate 仍读取全表再过滤，这是正确性修复，不是 SQL 分页或大数据性能保证。
 
-顶层和 `pack_receipt` 的 `partial`/`partial_reasons` 汇总成员失败、Codebase 不可用、基础分析不完整、遗漏文件、预算不足和符号查询截断。`codebase.budget_omitted_count` 与 `query_omitted_count` 区分引用被预算省略和查询本身截断；不同查询词的遗漏计数可能重叠，不代表精确的全仓漏检总数。条数/字符预算约束选中的材料，不是整个 MCP JSON 的精确 token 预算。
+顶层和 `pack_receipt` 的 `partial`/`partial_reasons` 汇总成员失败、Codebase 不可用、基础分析不完整、遗漏文件、预算不足和符号查询截断。`codebase.failure_code`、`failure_stage` 与白名单 `failure_details` 在自动索引失败时提供不含错误原文的诊断；`budget_omitted_count` 与 `query_omitted_count` 区分引用被预算省略和查询本身截断；不同查询词的遗漏计数可能重叠，不代表精确的全仓漏检总数。条数/字符预算约束选中的材料，不是整个 MCP JSON 的精确 token 预算。
 
 回执描述生成时的选择结果，不能替代当前授权。来源撤销、记忆更正、Procedure 门禁改变或代码变化后，应重新调用入口；本版未提供统一的只读回执重检 API。
 

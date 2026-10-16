@@ -37,14 +37,10 @@ cov-*/
 .tmp-*
 .DS_Store
 
-# `pack-plugin` regenerates these from `dist/plugin` on every `pnpm build`, and a
-# component plugin only needs them at runtime. The bundles were byte-identical
-# copies (8 x 2.25 MB) and the skill files were copies of `skills/<name>`, so this
-# kept 21.5 MB of duplicated build output in Git. Plugin metadata stays tracked:
-# only the generated `dist/` and `skills/` trees are ignored.
+# `pack-plugin` regenerates these from `dist/plugin` on every `pnpm build`; only
+# plugin metadata stays tracked.
 /plugins/*/dist/
 /plugins/*/skills/
-/plugins/*/dsh/
 
 # Credentials. Craft can import a desktop credential file, so a stray `.env` or key
 # in the working tree is a realistic accident. The secret detectors in

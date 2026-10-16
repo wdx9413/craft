@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { applyMigrations, backupDatabase } from "./store-migrations.ts";
 import { craftPaths, ensureLayout, type CraftPaths } from "./paths.ts";
@@ -149,6 +150,37 @@ export class CraftStore {
     });
   }
 
+  /** Create an immutable set atomically with one transaction/savepoint and bounded duplicate checks. */
+  createBatch(entries: readonly SaveEntry[]): JsonObject[] {
+    if (!entries.length) return [];
+    return this.transaction((database) => {
+      const seen = new Set<string>();
+      const idsByKind = new Map<string, string[]>();
+      for (const entry of entries) {
+        const key = JSON.stringify([entry.kind, entry.id]);
+        if (seen.has(key)) throw new Error(`${entry.kind} already exists: ${entry.id}`);
+        seen.add(key);
+        const ids = idsByKind.get(entry.kind) ?? [];
+        ids.push(entry.id);
+        idsByKind.set(entry.kind, ids);
+      }
+      for (const [kind, ids] of idsByKind) for (let offset = 0; offset < ids.length; offset += 500) {
+        const chunk = ids.slice(offset, offset + 500);
+        const placeholders = chunk.map(() => "?").join(",");
+        const existing = database.prepare(`SELECT id FROM records WHERE kind=? AND id IN (${placeholders}) LIMIT 1`)
+          .get(kind, ...chunk) as { id: string } | undefined;
+        if (existing) throw new Error(`${kind} already exists: ${existing.id}`);
+      }
+      const insert = database.prepare("INSERT INTO records(kind,id,version,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?)");
+      return entries.map((entry) => {
+        const payload = payloadOnly(entry.payload);
+        const now = new Date().toISOString();
+        insert.run(entry.kind, entry.id, 1, JSON.stringify(payload), now, now);
+        return { ...payload, id: entry.id, version: 1, created_at: now, updated_at: now };
+      });
+    });
+  }
+
   saveBatch(entries: SaveEntry[]): JsonObject[] {
     if (!entries.length) return [];
     return this.transaction((database) => entries.map((entry) => this.insert(database, entry)));
@@ -186,6 +218,24 @@ export class CraftStore {
         "SELECT * FROM records WHERE kind=? AND id=? AND version=?",
       ).get(kind, id, version);
     return row ? this.record(row as Record<string, unknown>, hydrate) : null;
+  }
+
+  /** Read a bounded set of latest records with one query per SQLite parameter batch. */
+  findMany(kind: string, ids: readonly string[], hydrate = true): JsonObject[] {
+    if (typeof kind !== "string" || !kind.trim()) throw new Error("kind must not be empty");
+    if (!Array.isArray(ids) || ids.length > 10_000 || ids.some(id => typeof id !== "string" || !id.trim())) throw new Error("record ids exceed read bounds");
+    const unique = [...new Set(ids)];
+    const byId = new Map<string, JsonObject>();
+    for (let offset = 0; offset < unique.length; offset += 500) {
+      const batch = unique.slice(offset, offset + 500);
+      const placeholders = batch.map(() => "?").join(",");
+      const rows = this.database.prepare(`SELECT r.* FROM records r JOIN (
+        SELECT id,MAX(version) version FROM records WHERE kind=? AND id IN (${placeholders}) GROUP BY id
+        ) latest ON latest.id=r.id AND latest.version=r.version WHERE r.kind=?`)
+        .all(kind, ...batch, kind) as Array<Record<string, unknown>>;
+      for (const row of rows) byId.set(String(row.id), this.record(row, hydrate));
+    }
+    return unique.flatMap(id => byId.has(id) ? [byId.get(id)!] : []);
   }
 
   get(kind: string, id: string, version?: number): JsonObject {
@@ -251,6 +301,30 @@ export class CraftStore {
       SELECT id,MAX(version) version FROM records WHERE kind=? GROUP BY id
       ) latest ON latest.id=r.id AND latest.version=r.version WHERE r.kind=?`)
       .get(kind, kind) as { count: number }).count);
+  }
+
+  /** Fingerprint exact latest record payloads without parsing or hydrating them. */
+  latestRecordsDigest(kind: string, ids: readonly string[]): string {
+    if (typeof kind !== "string" || !kind.trim()) throw new Error("kind must not be empty");
+    if (!Array.isArray(ids) || ids.length > 10_000 || ids.some(id => typeof id !== "string" || !id.trim())) throw new Error("record ids exceed digest bounds");
+    const requested = [...new Set(ids)].sort();
+    const hash = createHash("sha256");
+    hash.update(kind).update("\0");
+    if (requested.length) {
+      const placeholders = requested.map(() => "?").join(",");
+      const rows = this.database.prepare(`SELECT r.id,r.version,r.payload_json FROM records r JOIN (
+        SELECT id,MAX(version) version FROM records WHERE kind=? AND id IN (${placeholders}) GROUP BY id
+        ) latest ON latest.id=r.id AND latest.version=r.version WHERE r.kind=? ORDER BY r.id`)
+        .all(kind, ...requested, kind) as Array<{ id: string; version: number; payload_json: string }>;
+      const byId = new Map(rows.map(row => [row.id, row]));
+      for (const id of requested) {
+        const row = byId.get(id);
+        if (!row) { hash.update(id).update("\0missing\0"); continue; }
+        hash.update(id).update("\0").update(String(row.version)).update("\0")
+          .update(String(Buffer.byteLength(row.payload_json, "utf8"))).update("\0").update(row.payload_json).update("\0");
+      }
+    }
+    return hash.digest("hex");
   }
 
   /** Bounded metadata history for one asset. Scope/ACL checks belong to its caller. */

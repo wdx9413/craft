@@ -15,31 +15,36 @@ async function fixture() {
   return { store, service, module: service.cognitiveWrites, async close() { store.close(); await rm(root, { recursive: true, force: true }); } };
 }
 
-test("user statement capture keeps consent, identity, Evidence, review and commit together", async () => {
+test("user statement capture creates Evidence and automatically commits a conflict-free bounded candidate", async () => {
   const f = await fixture();
   try {
-    assert.throws(() => f.module.captureUserStatement({}), /consent/);
-    for (const content of [null, "", " ", 42]) assert.throws(() => f.module.captureUserStatement({ explicit_consent: true, content }), /empty/);
-    assert.throws(() => f.module.captureUserStatement({ explicit_consent: true, content: 'password":x' }), /sensitive assignments/);
-    assert.throws(() => f.module.captureUserStatement({ explicit_consent: true, content: "valid", kind: "invalid" }), /kind/);
-    assert.throws(() => f.module.captureUserStatement({ explicit_consent: true, content: "valid", topic: "" }), /topic/);
-    const proposal = f.module.captureUserStatement({ explicit_consent: true, content: "  Prefer focused tests.  " });
-    assert.equal(proposal.auto_committed, false); assert.equal(proposal.next_action, "review_or_accept");
+    for (const content of [null, "", " ", 42]) assert.throws(() => f.module.captureUserStatement({ content }), /empty/);
+    assert.throws(() => f.module.captureUserStatement({ content: 'password":x' }), /sensitive assignments/);
+    assert.throws(() => f.module.captureUserStatement({ content: "valid", kind: "invalid" }), /kind/);
+    assert.throws(() => f.module.captureUserStatement({ content: "valid", topic: "" }), /topic/);
+    const proposal = f.module.captureUserStatement({ content: "  Prefer focused tests.  " });
+    assert.equal(proposal.auto_committed, true); assert.equal(proposal.next_action, "available_for_scoped_context");
     const hash = (value: unknown) => `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
-    const identity = { kind: "preference", scope_kind: "user", scope_id: "local", topic: null, content_digest: hash("  Prefer focused tests.  ") };
+    const identity = { kind: "preference", scope_kind: "user", scope_id: "local", project_scope_id: null, topic: null, content_digest: hash("  Prefer focused tests.  ") };
     const suffix = hash(identity).slice(-20);
     assert.equal((proposal.evidence as JsonObject).id, `evidence_memory_statement_${suffix}`);
     assert.equal((proposal.candidate as JsonObject).id, `memory_candidate_statement_${suffix}`);
-    assert.equal(f.store.list("memory_ledger", 100).length, 0);
-    const accepted = f.module.captureUserStatement({ explicit_consent: true, content: "Use green theme", kind: "preference", topic: "ui:theme",
-      scope_kind: "project", scope_id: "p", scope_envelope: {}, evidence_id: "theme-evidence", candidate_id: "theme-candidate", memory_id: "theme-memory", sensitivity: "internal", auto_accept: true });
+    assert.equal((proposal.candidate as JsonObject).status, "approved");
+    assert.equal(f.store.list("memory_ledger", 100).length, 1);
+    const accepted = f.module.captureUserStatement({ content: "Use green theme", kind: "preference", topic: "ui:theme",
+      scope_kind: "project", scope_id: "p", scope_envelope: {}, evidence_id: "theme-evidence", candidate_id: "theme-candidate", memory_id: "theme-memory", sensitivity: "internal" });
     assert.equal(accepted.auto_committed, true); assert.equal(accepted.next_action, "available_for_scoped_context");
     assert.equal(f.store.get("memory_candidate", "theme-candidate").status, "approved");
-    assert.deepEqual(f.store.get("memory_ledger", "theme-memory").scope, { kind: "project", id: "p" });
+    const acceptedMemory = accepted.memory as JsonObject;
+    assert.deepEqual(f.store.get("memory_ledger", String(acceptedMemory.id)).scope, { kind: "project", id: "p" });
     assert.equal(f.store.get("evidence", "theme-evidence").confidence, "bounded");
-    const conflict = f.module.captureUserStatement({ explicit_consent: true, content: "Use blue theme", topic: "ui:theme", scope_kind: "project", scope_id: "p", auto_accept: true });
+    const conflict = f.module.captureUserStatement({ content: "Use blue theme", topic: "ui:theme", scope_kind: "project", scope_id: "p" });
     assert.equal(conflict.auto_committed, false); assert.equal(conflict.next_action, "resolve_conflict");
-    assert.equal(f.store.get("memory_ledger", "theme-memory").status, "active");
+    assert.equal(f.store.get("memory_ledger", String(acceptedMemory.id)).status, "active");
+    const resolved = f.service.memoryConflictResolve({ candidate_id: (conflict.candidate as JsonObject).id, resolution: "supersede", actor: "user", reason: "The preference changed." });
+    assert.equal(resolved.auto_committed, true);
+    assert.equal(f.store.get("memory_ledger", String(acceptedMemory.id)).status, "superseded");
+    assert.equal((resolved.memory as JsonObject).status, "active");
   } finally { await f.close(); }
 });
 
@@ -47,12 +52,12 @@ test("disabled capture writes nothing, while governed capture reports its actual
   const f = await fixture();
   try {
     f.service.memoryPolicySave({ mode: "off", updated_by: "operator" });
-    const disabled = f.module.captureUserStatement({ explicit_consent: true, content: "Prefer focused tests", auto_accept: true });
+    const disabled = f.module.captureUserStatement({ content: "Prefer focused tests" });
     assert.equal(disabled.status, "disabled"); assert.equal(disabled.next_action, "memory_disabled");
     assert.equal(disabled.candidate, null); assert.equal(disabled.auto_committed, false);
     for (const kind of ["knowledge_source", "evidence", "memory_candidate", "memory_ledger"]) assert.equal(f.store.list(kind, 100).length, 0);
     f.service.memoryPolicySave({ mode: "governed", min_confidence: "bounded", updated_by: "operator" });
-    const committed = f.module.captureUserStatement({ explicit_consent: true, content: "Use green theme", topic: "ui:theme", candidate_id: "governed-theme", auto_accept: true });
+    const committed = f.module.captureUserStatement({ content: "Use green theme", topic: "ui:theme", candidate_id: "governed-theme" });
     assert.equal(committed.auto_committed, true); assert.equal(committed.next_action, "available_for_scoped_context");
     assert.equal((committed.candidate as JsonObject).status, "approved");
     assert.equal((committed.memory as JsonObject).status, "active");
@@ -61,12 +66,12 @@ test("disabled capture writes nothing, while governed capture reports its actual
     // propose -> policy review -> ledger binding; a second review/commit would add revisions.
     assert.equal(f.store.get("memory_candidate", "governed-theme").version, 3);
     assert.equal((f.store.get("memory_candidate", "governed-theme").review as JsonObject).reviewer, "governed-policy");
-    const conflict = f.module.captureUserStatement({ explicit_consent: true, content: "Use blue theme", topic: "ui:theme", auto_accept: true });
+    const conflict = f.module.captureUserStatement({ content: "Use blue theme", topic: "ui:theme" });
     assert.equal(conflict.auto_committed, false); assert.equal(conflict.next_action, "resolve_conflict");
     assert.equal(f.store.list("memory_ledger", 100).length, 1);
     // A stricter governed threshold does not silently commit bounded user Evidence.
     f.service.memoryPolicySave({ mode: "governed", min_confidence: "confirmed", updated_by: "operator" });
-    const proposed = f.module.captureUserStatement({ explicit_consent: true, content: "Prefer small changes", candidate_id: "strict", auto_accept: false });
+    const proposed = f.module.captureUserStatement({ content: "Prefer small changes", candidate_id: "strict" });
     assert.equal(proposed.auto_committed, false); assert.equal((proposed.candidate as JsonObject).status, "candidate");
     assert.equal(f.store.list("memory_ledger", 100).length, 1);
   } finally { await f.close(); }
@@ -75,11 +80,13 @@ test("disabled capture writes nothing, while governed capture reports its actual
 test("expiry changes only elapsed reviewed claims and retains content references", async () => {
   const f = await fixture();
   try {
+    f.service.knowledgeMemoryInstallBuiltins();
+    const source = f.store.get("knowledge_source", "builtin.evidence-wiki");
     assert.equal(f.module.sweepExpiredClaims().count, 0);
     assert.throws(() => f.module.sweepExpiredClaims({ now: "invalid" }), /ISO/);
     f.store.create("knowledge_claim", "candidate", { status: "candidate", valid_until: "2000-01-01" });
-    f.store.create("knowledge_claim", "no-expiry", { status: "reviewed" });
-    f.store.create("knowledge_claim", "future", { status: "reviewed", valid_until: "2099-01-01" });
+    f.store.create("knowledge_claim", "no-expiry", { status: "reviewed", source_id: source.id, review: { source_digest: source.content_digest } });
+    f.store.create("knowledge_claim", "future", { status: "reviewed", source_id: source.id, review: { source_digest: source.content_digest }, valid_until: "2099-01-01" });
     f.store.create("knowledge_claim", "elapsed-legacy", { status: "reviewed", valid_until: "2000-01-01", content: "legacy" });
     f.store.create("knowledge_claim", "elapsed-ref", { status: "reviewed", valid_until: "2000-01-01", content_ref: { digest: "pinned" }, content: "must not duplicate" });
     assert.equal(f.module.sweepExpiredClaims({ now: "2030-01-01" }).count, 2);

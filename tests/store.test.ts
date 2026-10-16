@@ -41,6 +41,45 @@ test("version history remains bounded and excludes the current version", async (
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
+test("latest record payload fingerprints are order-stable and detect append, replacement, and missing rows", async () => {
+  const { root, store } = await fixture();
+  try {
+    store.create("fingerprint", "a", { value: 1 }); store.create("fingerprint", "b", { value: 2 });
+    const first = store.latestRecordsDigest("fingerprint", ["b", "a"]);
+    assert.equal(first, store.latestRecordsDigest("fingerprint", ["a", "b", "a"]));
+    assert.notEqual(first, store.latestRecordsDigest("fingerprint", ["a"]));
+    store.save("fingerprint", "a", { value: 3 });
+    const appended = store.latestRecordsDigest("fingerprint", ["a", "b"]);
+    assert.notEqual(appended, first);
+    store.replacePayload("fingerprint", "a", 2, { value: 4 });
+    assert.notEqual(store.latestRecordsDigest("fingerprint", ["a", "b"]), appended);
+    assert.notEqual(store.latestRecordsDigest("fingerprint", ["absent"]), store.latestRecordsDigest("fingerprint", []));
+    assert.throws(() => store.latestRecordsDigest("", ["a"]), /kind/);
+    assert.throws(() => store.latestRecordsDigest("fingerprint", [""]), /bounds/);
+    assert.throws(() => store.latestRecordsDigest("fingerprint", Array(10_001).fill("a")), /bounds/);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("findMany returns requested latest records, skips missing ids, and chunks SQLite parameters", async () => {
+  const { root, store } = await fixture();
+  try {
+    const entries = Array.from({ length: 501 }, (_, index) => ({ kind: "batch_read", id: `item_${index}`, payload: { value: index } }));
+    store.createBatch(entries);
+    store.save("batch_read", "item_0", { value: "newest" });
+    const ids = [...entries.map(item => item.id), "missing", "item_0"];
+    const found = store.findMany("batch_read", ids);
+    assert.equal(found.length, 501);
+    assert.equal(found[0]!.value, "newest");
+    assert.equal(found.at(-1)!.id, "item_500");
+    assert.deepEqual(store.findMany("batch_read", ["missing"]), []);
+    assert.deepEqual(store.findMany("batch_read", []), []);
+    assert.equal(store.findMany("batch_read", ["item_0"], false)[0]!.value, "newest");
+    assert.throws(() => store.findMany("", []), /kind/);
+    assert.throws(() => store.findMany("batch_read", [""]), /read bounds/);
+    assert.throws(() => store.findMany("batch_read", Array(10_001).fill("id")), /read bounds/);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
 test("store initializes once, commits, and rolls back atomically", async () => {
   const { root, store } = await fixture();
   try {
@@ -178,6 +217,39 @@ test("versioned records and events provide the shared persistence primitives", a
     store.close();
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("immutable record batches preserve create conflicts and rollback atomically", async () => {
+  const { root, store } = await fixture();
+  try {
+    assert.deepEqual(store.createBatch([]), []);
+    const entries = Array.from({ length: 501 }, (_, index) => ({ kind: "immutable_batch", id: `item_${index}`, payload: { value: index } }));
+    const created = store.createBatch(entries);
+    assert.equal(created.length, entries.length);
+    assert.equal(created[0]!.version, 1);
+    assert.equal(created.at(-1)!.value, 500);
+    assert.equal(store.count("immutable_batch"), entries.length);
+
+    assert.throws(() => store.createBatch([
+      { kind: "immutable_batch", id: "rolled_back", payload: {} },
+      { kind: "immutable_batch", id: "rolled_back", payload: {} },
+    ]), /already exists: rolled_back/u);
+    assert.equal(store.find("immutable_batch", "rolled_back"), null);
+
+    store.create("immutable_batch", "preexisting", {});
+    assert.throws(() => store.createBatch([
+      { kind: "immutable_batch", id: "also_rolled_back", payload: {} },
+      { kind: "immutable_batch", id: "preexisting", payload: {} },
+    ]), /already exists: preexisting/u);
+    assert.equal(store.find("immutable_batch", "also_rolled_back"), null);
+    assert.equal(store.createBatch([{ kind: "another_batch", id: "preexisting", payload: {} }])[0]!.version, 1);
+
+    assert.throws(() => store.transaction(() => {
+      store.createBatch([{ kind: "immutable_batch", id: "outer_rollback", payload: {} }]);
+      throw new Error("outer batch rollback");
+    }), /outer batch rollback/u);
+    assert.equal(store.find("immutable_batch", "outer_rollback"), null);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
 test("store preserves schema migration safety and uses keyword fallback when FTS5 is unavailable", async () => {

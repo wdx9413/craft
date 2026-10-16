@@ -62,14 +62,14 @@ test("public standalone component products expose small daily paths while advanc
   const f = await fixture();
   try {
     const expected: Record<string, readonly string[]> = {
-      knowledge: ["craft_component_readiness_get", "craft_knowledge_source_register", "craft_evidence_record", "craft_knowledge_claim_save", "craft_knowledge_host_review", "craft_knowledge_support_record", "craft_knowledge_promotion_policy_get", "craft_knowledge_auto_review", "craft_context_resolution_resolve"],
+      knowledge: ["craft_component_readiness_get", "craft_knowledge_source_register", "craft_evidence_record", "craft_knowledge_claim_save", "craft_knowledge_host_review", "craft_knowledge_support_record", "craft_knowledge_promotion_policy_get", "craft_knowledge_auto_review", "craft_knowledge_scenario_migration_propose", "craft_context_resolution_resolve"],
       memory: ["craft_component_readiness_get", "craft_memory_candidate_propose", "craft_memory_ledger_get", "craft_memory_ledger_list", "craft_memory_maintenance_run"],
-      experience: ["craft_component_readiness_get", "craft_learning_cycle_finalize", "craft_experience_learning_request_get", "craft_experience_learning_evaluation_dispatch", "craft_experience_learning_evaluation_result", "craft_experience_observe", "craft_experience_procedure_draft", "craft_experience_procedure_submit", "craft_experience_procedure_get", "craft_procedure_create", "craft_procedure_get", "craft_procedure_list", "craft_procedure_gate", "craft_procedure_export_skill"],
+      experience: ["craft_component_readiness_get", "craft_experience_scenario_list", "craft_experience_scenario_migration_propose", "craft_learning_cycle_finalize", "craft_experience_learning_request_get", "craft_experience_learning_evaluation_dispatch", "craft_experience_learning_evaluation_dispatch_list", "craft_experience_learning_evaluation_result", "craft_experience_observe", "craft_experience_procedure_draft", "craft_experience_procedure_submit", "craft_experience_procedure_get", "craft_procedure_get", "craft_procedure_list", "craft_procedure_gate", "craft_procedure_export_skill"],
     };
     for (const [product, required] of Object.entries(expected)) {
       const daily = new McpServer(f.service, productSurfaceOf(product));
       const names = daily.tools.map((tool) => tool.name);
-      assert(names.length <= (product === "experience" ? 31 : 24), `${product} daily surface must stay within the tool budget`);
+      assert(names.length <= (product === "experience" ? 32 : product === "knowledge" ? 25 : 24), `${product} daily surface must stay within the tool budget`);
       for (const name of required) assert(names.includes(name), `${product} daily surface must expose ${name}`);
       assert(!names.includes("craft_verified_work_loop_prepare"));
     }
@@ -77,6 +77,17 @@ test("public standalone component products expose small daily paths while advanc
     assert(new McpServer(f.service, "component-memory").tools.length > new McpServer(f.service, productSurfaceOf("memory")).tools.length);
     assert(new McpServer(f.service, "component-experience").tools.length > new McpServer(f.service, productSurfaceOf("experience")).tools.length);
     const dailyExperience = new McpServer(f.service, productSurfaceOf("experience")).tools.map((tool) => tool.name);
+    const experienceServer = new McpServer(f.service, productSurfaceOf("experience"));
+    assert.deepEqual(await experienceServer.handlers.craft_experience_scenario_list({ scope: "project:project-a" }), {
+      scope: "project:project-a", catalog_version: 0, scenarios: [],
+    });
+    assert.throws(() => experienceServer.handlers.craft_experience_scenario_list({ scope: "global" }), /explicit project scope/u);
+    const advancedExperience = new Set(new McpServer(f.service, "component-experience").tools.map((tool) => tool.name));
+    for (const name of ["craft_procedure_create", "craft_procedure_configuration_save", "craft_experience_graph_inspect",
+      "craft_experience_graph_edit", "craft_experience_asset_restore"]) {
+      assert(!dailyExperience.includes(name), `${name} belongs on the explicit advanced Experience surface`);
+      assert(advancedExperience.has(name), `${name} must remain available on the advanced Experience surface`);
+    }
     assert(!dailyExperience.some((name) => name.startsWith("craft_workflow_evolution_") || name.startsWith("craft_workflow_dag_")));
     assert(dailyExperience.includes("craft_experience_observe"));
     assert(dailyExperience.includes("craft_experience_procedure_draft"));
@@ -108,7 +119,7 @@ test("daily Experience aliases preserve the bounded legacy evolution behavior", 
   } finally { await dispose(f); }
 });
 
-test("standalone readiness makes empty ledgers and the coding experience threshold visible without reading bodies", async () => {
+test("standalone readiness reflects automatic memory commitment and the coding experience threshold without reading bodies", async () => {
   const f = await fixture();
   try {
     const knowledge = new McpServer(f.service, productSurfaceOf("knowledge"));
@@ -129,7 +140,31 @@ test("standalone readiness makes empty ledgers and the coding experience thresho
     const evidence = f.store.create("evidence", "coding-evidence", { confidence: "bounded", source: "fixture", summary: "observed test result" });
     await memory.handlers.craft_memory_candidate_propose({ source_id: "builtin.evidence-wiki", kind: "preference", scope_kind: "project", scope_id: "coding", content: "Run focused tests before a full suite.", evidence_ids: [evidence.id] });
     const memoryReady = await memory.handlers.craft_component_readiness_get({ component: "memory" }) as JsonObject;
-    assert.equal(memoryReady.state, "candidate_or_approval_required");
+    assert.equal(memoryReady.state, "ready");
+    assert.equal(((memoryReady.counts as JsonObject).ledger as JsonObject).active, 1);
+    assert.equal((memoryReady.counts as JsonObject).memory_feedback_records, 0);
+    f.store.create("context_feedback", "memory-feedback-without-refs", { outcome: "helpful", evidence_verified: true });
+    f.store.create("context_feedback", "memory-feedback-empty-refs", { memory_refs: [], outcome: "helpful", evidence_verified: true });
+    f.store.create("context_feedback", "memory-feedback-unverified", { memory_refs: [{ memory_id: "memory-under-test", memory_version: 1,
+      content_digest: "sha256:memory" }], outcome: "helpful", evidence_verified: false });
+    f.store.create("context_feedback", "memory-feedback-verified", { memory_refs: [{ memory_id: "memory-under-test", memory_version: 1,
+      content_digest: "sha256:memory" }], outcome: "helpful", evidence_verified: true });
+    f.store.create("context_feedback", "memory-feedback-irrelevant", { memory_refs: [{ memory_id: "memory-under-test", memory_version: 1,
+      content_digest: "sha256:memory" }], outcome: "irrelevant", evidence_verified: true });
+    const feedbackReady = await memory.handlers.craft_component_readiness_get({ component: "memory" }) as JsonObject;
+    assert.equal((feedbackReady.counts as JsonObject).memory_feedback_records, 3);
+    assert.equal((feedbackReady.counts as JsonObject).verified_helpful_memory_feedback_records, 1);
+    const originalList = f.store.list.bind(f.store);
+    f.store.list = ((kind: string, limit = 20, predicate?: (record: JsonObject) => boolean, hydrate = true,
+      dependencies?: { source_ids: string[]; document_ids: string[] }) => kind === "context_feedback"
+      ? Array.from({ length: 10_001 }, (_, index) => ({ id: `feedback-${index}`, memory_refs: [{ memory_id: "m" }], outcome: "helpful", evidence_verified: true }))
+      : originalList(kind, limit, predicate, hydrate, dependencies)) as typeof f.store.list;
+    try {
+      const cappedFeedback = await memory.handlers.craft_component_readiness_get({ component: "memory" }) as JsonObject;
+      assert.equal((cappedFeedback.counts as JsonObject).memory_feedback_records, 10_000);
+      assert.equal((cappedFeedback.counts as JsonObject).verified_helpful_memory_feedback_records, 10_000);
+      assert.equal((cappedFeedback.counts as JsonObject).memory_feedback_records_truncated, true);
+    } finally { f.store.list = originalList; }
 
     const first = f.store.create("outcome", "coding-outcome-a", { status: "passed" });
     const second = f.store.create("outcome", "coding-outcome-b", { status: "passed" });

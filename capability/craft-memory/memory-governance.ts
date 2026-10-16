@@ -4,6 +4,7 @@ import type { MemoryLedgerKernel } from "./memory-ledger.ts";
 import { scopeAccess, scopeAllows, scopeEnvelope } from "../../common/craft-common-base/src/scope-policy.ts";
 import { retrievalTerms } from "../../common/craft-common-base/src/retrieval-terms.ts";
 import { SCOPE_KINDS } from "../../common/craft-common-base/src/validation.ts";
+import { temporalMemorySelect } from "../../common/craft-common-base/src/memory-temporal-policy.ts";
 
 const SECRET = /(?:api[_-]?key|authorization|cookie|password|passwd|secret|token)\s*[:=]\s*[^\s]{6,}/iu;
 const KINDS = new Set(["working", "episodic", "preference", "procedural"]);
@@ -38,13 +39,13 @@ export class MemoryGovernanceKernel {
   policyGet(args: JsonObject = {}): JsonObject {
     const policyId = text(args.policy_id ?? "default", "policy_id");
     const stored = this.store.find("memory_policy", policyId);
-    return { policy: stored ?? { id: policyId, version: 1, mode: "propose", min_confidence: "confirmed", auto_commit: false, source: "builtin" } };
+    return { policy: stored ?? { id: policyId, version: 1, mode: "governed", min_confidence: "bounded", auto_commit: true, source: "builtin" } };
   }
 
   policySave(args: JsonObject): JsonObject {
     const policyId = text(args.policy_id ?? "default", "policy_id");
     const mode = text(args.mode, "mode"); if (!POLICY_MODES.has(mode)) throw new Error("memory policy mode is unsupported");
-    const minConfidence = text(args.min_confidence ?? "confirmed", "min_confidence");
+    const minConfidence = text(args.min_confidence ?? (mode === "governed" ? "bounded" : "confirmed"), "min_confidence");
     if (!POLICY_CONFIDENCE.has(minConfidence)) throw new Error("min_confidence must be confirmed or bounded");
     const updatedBy = noSecret(text(args.updated_by ?? "operator", "updated_by"), "updated_by");
     const identity = { mode, min_confidence: minConfidence, auto_commit: mode === "governed" };
@@ -75,6 +76,7 @@ export class MemoryGovernanceKernel {
     if (validUntil === null && kind === "episodic") validUntil = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
     if (kind === "procedural" && !ids.length) throw new Error("procedural memory requires Evidence");
     const topic = args.topic === undefined ? "" : text(args.topic, "topic");
+    const nowMillis = Date.now();
     const observedAt = args.observed_at === undefined && typeof existing?.observed_at === "string"
       ? existing.observed_at
       : (args.observed_at === undefined ? new Date().toISOString() : new Date(text(args.observed_at, "observed_at")).toISOString());
@@ -86,8 +88,8 @@ export class MemoryGovernanceKernel {
     // Empty subjects are deliberately *not* treated as mutually contradictory.
     // A missing classifier must cause less automation, not turn every preference in
     // a scope into one impossible conflict set.
-    const conflicts = topic ? this.store.listScoped("memory_candidate", [scope], 10_000, (item) => Boolean(!["rejected", "superseded", "expired"].includes(String(item.status)) && item.scope && JSON.stringify(item.scope) === JSON.stringify(identity.scope) && item.topic === topic && item.content_digest !== identity.content_digest)) : [];
-    const conflictingMemories = topic ? this.store.listScoped("memory_ledger", [scope], 10_000, (item) => Boolean(item.status === "active" && item.topic === topic && item.scope && JSON.stringify(item.scope) === JSON.stringify(identity.scope) && item.content_digest !== identity.content_digest)) : [];
+    const conflicts = topic ? this.store.listScoped("memory_candidate", [scope], 10_000, (item) => Boolean(!["rejected", "superseded", "expired"].includes(String(item.status)) && (!item.valid_until || Date.parse(String(item.valid_until)) >= nowMillis) && item.scope && JSON.stringify(item.scope) === JSON.stringify(identity.scope) && item.topic === topic && item.content_digest !== identity.content_digest)) : [];
+    const conflictingMemories = topic ? this.store.listScoped("memory_ledger", [scope], 10_000, (item) => Boolean(item.status === "active" && (!item.valid_until || Date.parse(String(item.valid_until)) >= nowMillis) && item.topic === topic && item.scope && JSON.stringify(item.scope) === JSON.stringify(identity.scope) && item.content_digest !== identity.content_digest)) : [];
     const status = conflicts.length || conflictingMemories.length ? "conflict_pending" : "candidate";
     const candidate = this.store.create("memory_candidate", candidateId, { ...identity, content, status, conflict_ids: conflicts.map((x) => x.id), conflicting_memory_ids: conflictingMemories.map((x) => x.id), proposed_by: String(args.proposed_by ?? "agent"), identity_digest: digest(identity) });
     for (const conflict of conflicts) this.store.save("memory_candidate", String(conflict.id), { ...payload(conflict), status: "conflict_pending", conflict_ids: [...new Set([...(conflict.conflict_ids as string[] ?? []), candidate.id])] });
@@ -97,7 +99,7 @@ export class MemoryGovernanceKernel {
     });
     if (eligible) {
       const approved = this.store.save("memory_candidate", candidateId, { ...payload(candidate), status: "approved", review: { reviewer: "governed-policy", reason_digest: digest("policy threshold"), reviewed_at: new Date().toISOString() } });
-      const memory = this.remember({ candidate_id: approved.id }).memory as JsonObject;
+      const memory = this.remember({ candidate_id: approved.id, ...(args.memory_id === undefined ? {} : { memory_id: args.memory_id }) }).memory as JsonObject;
       return { candidate: approved, conflicts, conflicting_memories: conflictingMemories, memory, auto_committed: true, idempotent: false, policy };
     }
     return { candidate, conflicts, conflicting_memories: conflictingMemories, auto_committed: false, idempotent: false, policy };
@@ -146,7 +148,8 @@ export class MemoryGovernanceKernel {
   /** Topic recommendations require confirmation; no inferred topic overwrites durable Memory. */
   topicSuggestions(args: JsonObject): JsonObject {
     const content = text(args.content, "content"), query = retrievalTerms(content), scope = { kind: text(args.scope_kind, "scope_kind"), id: text(args.scope_id, "scope_id") };
-    const scored = this.store.listScoped("memory_ledger", [scope], 10_001, item => item.status === "active" && (item.sensitivity !== "restricted" || args.allow_restricted === true) && scopeAllows(scopeEnvelope(item.scope_envelope, scope), scopeAccess(args))).map(item => {
+    const eligible = this.store.listScoped("memory_ledger", [scope], 10_001, item => item.status === "active" && (item.sensitivity !== "restricted" || args.allow_restricted === true) && scopeAllows(scopeEnvelope(item.scope_envelope, scope), scopeAccess(args)));
+    const scored = temporalMemorySelect(eligible, new Date(), false).selected.map(item => {
       const languageHint = /\b(?:python|java|javascript|typescript|rust|golang)\b/iu.test(content) && /\b(?:python|java|javascript|typescript|rust|golang)\b/iu.test(String(item.content));
       return { topic: item.topic || (languageHint ? "programming-language" : null), memory_id: item.id, memory_version: item.version, content_digest: item.content_digest, score: query.filter(term => String(item.content).toLowerCase().includes(term)).length + Number(languageHint), classification: "confirmation_required_hint" };
     }).filter(item => item.score > 0).sort((a, b) => b.score - a.score || String(a.topic).localeCompare(String(b.topic)));
@@ -182,21 +185,42 @@ export class MemoryGovernanceKernel {
     // This records a *selection*, not an unproved mutation.  Actual Ledger
     // supersession happens in `remember` only after the selected candidate has
     // passed review and acquired its own immutable body/version.
-    const saved = this.store.save("memory_candidate", String(candidate.id), { ...payload(candidate), status: "candidate", conflict_resolution: { resolution, actor: text(args.actor, "actor"), reason_digest: digest(reason), at: new Date().toISOString() }, conflict_ids: [], conflicting_memory_ids: [], ...(resolution === "supersede" ? { supersedes_memory_ids: conflictingMemoryIds, supersedes_candidate_ids: conflictIds } : {}) });
+    const saved = this.store.save("memory_candidate", String(candidate.id), { ...payload(candidate), status: resolution === "dismiss" ? "rejected" : "candidate", conflict_resolution: { resolution, actor: text(args.actor, "actor"), reason_digest: digest(reason), at: new Date().toISOString() }, conflict_ids: [], conflicting_memory_ids: [], ...(resolution === "supersede" ? { supersedes_memory_ids: conflictingMemoryIds, supersedes_candidate_ids: conflictIds } : {}) });
     for (const conflictId of conflictIds) { const other = this.store.find("memory_candidate", String(conflictId)); if (other) this.store.save("memory_candidate", String(other.id), { ...payload(other), conflict_ids: (other.conflict_ids as string[] ?? []).filter((x) => x !== candidate.id), status: "candidate" }); }
-    return { candidate: saved };
+    const policy = this.policyGet().policy as JsonObject;
+    const evidence = (saved.evidence_ids as string[] | undefined) ?? [];
+    const qualityMet = evidence.length > 0 && evidence.every(id => {
+      const confidence = String(this.store.get("evidence", id).confidence);
+      return policy.min_confidence === "bounded" ? ["bounded", "confirmed"].includes(confidence) : confidence === "confirmed";
+    });
+    if (resolution === "supersede" && policy.mode === "governed" && qualityMet) {
+      const approved = this.review({ candidate_id: saved.id, decision: "approve", reviewer: "governed-conflict-resolution", reason: "Conflict explicitly resolved; governed Evidence threshold met." }).candidate as JsonObject;
+      const committed = this.remember({ candidate_id: approved.id });
+      return { ...committed, conflict_resolution: resolution, auto_committed: true, policy };
+    }
+    return { candidate: saved, conflict_resolution: resolution, auto_committed: false, policy };
   }
 
   expirySweep(args: JsonObject = {}): JsonObject {
-    const now = new Date(args.now === undefined ? Date.now() : text(args.now, "now")); if (Number.isNaN(now.valueOf())) throw new Error("now must be an ISO timestamp"); const expired: JsonObject[] = [];
-    for (const candidate of this.store.list("memory_candidate", 10_000, (x) => x.status === "candidate" || x.status === "approved")) if (candidate.valid_until && Date.parse(String(candidate.valid_until)) < now.valueOf()) expired.push(this.store.save("memory_candidate", String(candidate.id), { ...payload(candidate), status: "expired" }));
-    for (const memory of this.store.list("memory_ledger", 10_000, (x) => Boolean(x.status === "active" && x.valid_until && Date.parse(String(x.valid_until)) < now.valueOf()))) expired.push(this.ledger.transition({ memory_id: memory.id, status: "expired", reason: "valid_until elapsed" }).memory as JsonObject);
-    return { expired, count: expired.length, now: now.toISOString() };
+    const now = new Date(args.now === undefined ? Date.now() : text(args.now, "now")); if (Number.isNaN(now.valueOf())) throw new Error("now must be an ISO timestamp");
+    const limit = args.limit === undefined ? 100 : Number(args.limit);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 1_000) throw new Error("limit must be an integer between 1 and 1000");
+    const expired: JsonObject[] = [];
+    const candidates = this.store.list("memory_candidate", 10_000, (x) => (x.status === "candidate" || x.status === "approved") && Boolean(x.valid_until && Date.parse(String(x.valid_until)) < now.valueOf()));
+    for (const candidate of candidates.slice(0, limit)) expired.push(this.store.save("memory_candidate", String(candidate.id), { ...payload(candidate), status: "expired" }));
+    const remaining = limit - expired.length;
+    if (remaining > 0) {
+      const memories = this.store.list("memory_ledger", 10_000, (x) => Boolean(x.status === "active" && x.valid_until && Date.parse(String(x.valid_until)) < now.valueOf()));
+      for (const memory of memories.slice(0, remaining)) expired.push(this.ledger.transition({ memory_id: memory.id, status: "expired", reason: "valid_until elapsed" }).memory as JsonObject);
+    }
+    return { expired, count: expired.length, limit, now: now.toISOString() };
   }
 
   sessionFinalize(args: JsonObject): JsonObject {
-    const summary = noSecret(text(args.summary, "summary"), "summary"); const candidateIds = evidenceIds(args.candidate_ids); const candidates = candidateIds.map((candidateId) => this.store.get("memory_candidate", candidateId));
-    return { session_id: text(args.session_id, "session_id"), summary_digest: digest(summary), candidates: candidates.map((candidate) => ({ candidate_id: candidate.id, status: candidate.status })) , content_free: true };
+    const sessionId = text(args.session_id, "session_id"); const summary = noSecret(text(args.summary, "summary"), "summary");
+    const candidateIds = evidenceIds(args.candidate_ids); const candidates = candidateIds.map((candidateId) => this.store.get("memory_candidate", candidateId));
+    const archive = this.ledger.files.archiveSession(sessionId);
+    return { session_id: sessionId, summary_digest: digest(summary), candidates: candidates.map((candidate) => ({ candidate_id: candidate.id, status: candidate.status })), archive, content_free: true };
   }
   consolidate(args: JsonObject): JsonObject {
     const ids = evidenceIds(args.candidate_ids); if (ids.length < 2) throw new Error("candidate_ids must contain at least two ids"); const candidates = ids.map((candidateId) => this.store.get("memory_candidate", candidateId));

@@ -33,5 +33,14 @@ for (const relative of packages) {
     body = body.replace(/\.\/([a-z0-9-]+)\.ts/gu, "./$1.js");
     writeFileSync(output, body);
   }
+  if (relative === "capability/craft-codebase") {
+    const analyzers = join(outDir, "analyzers");
+    mkdirSync(analyzers, { recursive: true });
+    cpSync(join(packageRoot, "analyzers", "analyze-python.py"), join(analyzers, "analyze-python.py"));
+    cpSync(join(packageRoot, "analyzers", "python-control-flow.py"), join(analyzers, "python-control-flow.py"));
+    cpSync(join(packageRoot, "analyzers", "python-data-flow.py"), join(analyzers, "python-data-flow.py"));
+    cpSync(join(packageRoot, "analyzers", "AnalyzeJava.java"), join(analyzers, "AnalyzeJava.java"));
+    cpSync(join(packageRoot, "analyzers", "AnalyzeJavaControlFlow.java"), join(analyzers, "AnalyzeJavaControlFlow.java"));
+  }
   process.stdout.write(`Built standalone package ${relative}\n`);
 }
