@@ -11,12 +11,15 @@ export interface ModelProviderSpec {
   models: Partial<Record<ModelTier, string>>;
   cost_hint: number;
   supports_tools: boolean;
+  /** Authentication is supplied by an installed Host CLI instead of an API key. */
+  host_managed_auth?: boolean;
   context_cache?: { readonly mode: "none" | "automatic_prefix"; readonly requires_exact_prefix: boolean; readonly usage_fields: "none" | "deepseek" };
 }
 
 const ORDER: readonly ModelTier[] = ["frontier", "standard", "small"];
 
 export function credentialStatus(spec: ModelProviderSpec, env: NodeJS.ProcessEnv = process.env): { provider: string; configured: boolean; api_key_env: string } {
+  if (spec.host_managed_auth) return { provider: spec.provider, configured: true, api_key_env: "host-managed-auth-store" };
   const value = env[spec.api_key_env];
   return { provider: spec.provider, configured: typeof value === "string" && value.length > 0, api_key_env: spec.api_key_env };
 }
