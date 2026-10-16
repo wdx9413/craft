@@ -16,6 +16,7 @@ type ScenarioTransition = { request_id: string; action: "retire" | "propose_merg
   source_keys?: string[]; target_keys?: string[]; proposal_digest?: string; previous_catalog_version: number; catalog_version: number; reason_digest: string };
 type MigrationProposal = { request_id: string; mode: "merge" | "split"; source_keys: string[];
   targets: Array<{ scenario_key: string; definition: unknown }>; expected_catalog_version: number; reason: string };
+type ScenarioScope = { kind: "project" | "global"; id: string };
 
 export function validateKnowledgeScenarioDefinition(value: unknown): ScenarioDefinition | undefined {
   if (value === undefined) return undefined;
@@ -34,6 +35,14 @@ export function knowledgeScenarioProjectId(value: string): string {
   return projectId;
 }
 
+function scenarioScope(id: string, kind: "project" | "global" = "project"): ScenarioScope {
+  if (kind === "global") {
+    if (id !== "global") throw new Error("Knowledge global scenario scope identity is invalid");
+    return { kind, id };
+  }
+  return { kind, id: knowledgeScenarioProjectId(id) };
+}
+
 function directory(path: string): void {
   try {
     const stat = lstatSync(path);
@@ -44,19 +53,36 @@ function directory(path: string): void {
   }
 }
 
-function readProjectCatalog(root: string, projectId: string): { catalog_version: number; scenarios: Scenario[]; transitions: ScenarioTransition[] } {
+function catalogPath(root: string, scope: ScenarioScope, create: boolean): string | null {
   let path = root;
-  for (const part of ["", "projects", projectId]) {
-    if (part) path = join(path, part);
+  const parts = scope.kind === "global" ? ["global"] : ["projects", scope.id];
+  if (create) directory(root);
+  else {
+    try {
+      const stat = lstatSync(root);
+      if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error("Knowledge scenario catalog path must contain regular directories");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    }
+  }
+  for (const part of parts) {
+    path = join(path, part);
+    if (create) { directory(path); continue; }
     try {
       const stat = lstatSync(path);
       if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error("Knowledge scenario catalog path must contain regular directories");
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return { catalog_version: 0, scenarios: [], transitions: [] };
+      if ((error as NodeJS.ErrnoException).code === "ENOENT" && !create) return null;
       throw error;
     }
   }
-  return readCatalog(join(path, "knowledge-scenarios.json"));
+  return join(path, "knowledge-scenarios.json");
+}
+
+function readScopeCatalog(root: string, scope: ScenarioScope): { catalog_version: number; scenarios: Scenario[]; transitions: ScenarioTransition[] } {
+  const path = catalogPath(root, scope, false);
+  return path ? readCatalog(path) : { catalog_version: 0, scenarios: [], transitions: [] };
 }
 
 function readCatalog(path: string): { catalog_version: number; scenarios: Scenario[]; transitions: ScenarioTransition[] } {
@@ -163,19 +189,17 @@ function withLock<T>(path: string, work: () => T): T {
 
 /** Persist only model-supplied classification and claim/evidence references, never knowledge bodies. */
 export function recordKnowledgeScenario(args: { knowledge_dir: string; project_id: string; scenario_key: string; coarse_scenario_key?: string;
-  claim_id: string; source_id: string; evidence_ids: string[]; status: "candidate" | "reviewed" | "inactive"; definition?: unknown; coarse_definition?: unknown }): JsonObject {
+  claim_id: string; source_id: string; evidence_ids: string[]; status: "candidate" | "reviewed" | "inactive"; definition?: unknown; coarse_definition?: unknown;
+  scope_kind?: "project" | "global" }): JsonObject {
   const { knowledge_dir: root, scenario_key: fineKey, coarse_scenario_key: coarseKey } = args;
-  const projectId = knowledgeScenarioProjectId(args.project_id);
+  const scope = scenarioScope(args.project_id, args.scope_kind ?? "project");
   const definition = validateKnowledgeScenarioDefinition(args.definition);
   const coarseDefinition = validateKnowledgeScenarioDefinition(args.coarse_definition);
   if (!KEY.test(fineKey) || (coarseKey !== undefined && (!KEY.test(coarseKey) || coarseKey === fineKey))
     || !args.claim_id || args.claim_id.length > 200 || !args.source_id || args.source_id.length > 200
     || !Array.isArray(args.evidence_ids) || args.evidence_ids.length > 100 || args.evidence_ids.some(id => typeof id !== "string" || id.length > 200)
     || !["candidate", "reviewed", "inactive"].includes(args.status)) throw new Error("Knowledge scenario classification identity is invalid");
-  directory(root);
-  const projects = join(root, "projects"); directory(projects);
-  const project = join(projects, projectId); directory(project);
-  const path = join(project, "knowledge-scenarios.json");
+  const path = catalogPath(root, scope, true)!;
   return withLock(path, () => {
     const catalog = readCatalog(path);
     if (catalog.scenarios.some(item => item.scenario_key === fineKey && item.lifecycle === "retired")
@@ -215,17 +239,14 @@ export function recordKnowledgeScenario(args: { knowledge_dir: string; project_i
 
 /** Retire one project scene without deleting its evidence references or history. */
 export function retireKnowledgeScenario(args: { knowledge_dir: string; project_id: string; scenario_key: string;
-  expected_catalog_version: number; request_id: string; reason: string }): JsonObject {
-  const projectId = knowledgeScenarioProjectId(args.project_id), key = args.scenario_key;
+  expected_catalog_version: number; request_id: string; reason: string; scope_kind?: "project" | "global" }): JsonObject {
+  const scope = scenarioScope(args.project_id, args.scope_kind ?? "project"), key = args.scenario_key;
   const reason = args.reason.trim();
   if (!KEY.test(key) || !Number.isSafeInteger(args.expected_catalog_version) || args.expected_catalog_version < 0
     || !args.request_id.trim() || args.request_id.length > 200 || !reason || reason.length > 500) {
     throw new Error("Knowledge scenario retirement request is invalid");
   }
-  directory(args.knowledge_dir);
-  const projects = join(args.knowledge_dir, "projects"); directory(projects);
-  const project = join(projects, projectId); directory(project);
-  const path = join(project, "knowledge-scenarios.json");
+  const path = catalogPath(args.knowledge_dir, scope, true)!;
   return withLock(path, () => {
     const catalog = readCatalog(path), reasonDigest = stableDigest(reason);
     const prior = catalog.transitions.find(item => item.request_id === args.request_id);
@@ -259,8 +280,8 @@ export function retireKnowledgeScenario(args: { knowledge_dir: string; project_i
 }
 
 /** Record a model-proposed merge/split as new candidate scenes; source scenes stay live until targets earn evidence. */
-export function proposeKnowledgeScenarioMigration(args: MigrationProposal & { knowledge_dir: string; project_id: string }): JsonObject {
-  const projectId = knowledgeScenarioProjectId(args.project_id), reason = args.reason.trim();
+export function proposeKnowledgeScenarioMigration(args: MigrationProposal & { knowledge_dir: string; project_id: string; scope_kind?: "project" | "global" }): JsonObject {
+  const scope = scenarioScope(args.project_id, args.scope_kind ?? "project"), reason = args.reason.trim();
   if (!Array.isArray(args.source_keys) || !Array.isArray(args.targets)) throw new Error("Knowledge scenario migration proposal is invalid");
   const sources = [...new Set(args.source_keys)], targets = args.targets;
   if ((args.mode !== "merge" && args.mode !== "split") || !Number.isSafeInteger(args.expected_catalog_version) || args.expected_catalog_version < 0
@@ -275,10 +296,7 @@ export function proposeKnowledgeScenarioMigration(args: MigrationProposal & { kn
   }
   const definitions = targets.map(target => validateKnowledgeScenarioDefinition(target.definition));
   if (definitions.some(definition => !definition)) throw new Error("Knowledge scenario migration requires a definition for every target");
-  directory(args.knowledge_dir);
-  const projects = join(args.knowledge_dir, "projects"); directory(projects);
-  const project = join(projects, projectId); directory(project);
-  const path = join(project, "knowledge-scenarios.json");
+  const path = catalogPath(args.knowledge_dir, scope, true)!;
   return withLock(path, () => {
     const catalog = readCatalog(path);
     const proposalDigest = stableDigest({ mode: args.mode, source_keys: sources,
@@ -312,36 +330,37 @@ export function proposeKnowledgeScenarioMigration(args: MigrationProposal & { kn
   });
 }
 
-export function knowledgeScenarioCanClassify(knowledgeDir: string, projectId: string, scenarioKey: string): boolean {
+export function knowledgeScenarioCanClassify(knowledgeDir: string, projectId: string, scenarioKey: string, scopeKind: "project" | "global" = "project"): boolean {
   if (!KEY.test(scenarioKey)) return false;
-  const normalizedProjectId = knowledgeScenarioProjectId(projectId);
-  const entry = readProjectCatalog(knowledgeDir, normalizedProjectId).scenarios.find(item => item.scenario_key === scenarioKey);
+  const scope = scenarioScope(projectId, scopeKind);
+  const entry = readScopeCatalog(knowledgeDir, scope).scenarios.find(item => item.scenario_key === scenarioKey);
   return !entry || entry.lifecycle === "candidate" || entry.lifecycle === "active";
 }
 
 export function updateKnowledgeScenarioClaim(knowledgeDir: string, claim: JsonObject, status?: "candidate" | "reviewed" | "inactive"): JsonObject | null {
   if (typeof claim.scenario_key !== "string") return null;
   const scope = scopeFromKey(String(claim.scope ?? "global"));
-  if (scope.kind !== "project") return null;
+  if (scope.kind !== "project" && scope.kind !== "global") return null;
   const evidenceIds = Array.isArray(claim.evidence_ids) ? claim.evidence_ids.map(String) : [];
-  return recordKnowledgeScenario({ knowledge_dir: knowledgeDir, project_id: scope.id, scenario_key: claim.scenario_key,
+  return recordKnowledgeScenario({ knowledge_dir: knowledgeDir, project_id: scope.id, scope_kind: scope.kind,
+    scenario_key: claim.scenario_key,
     ...(typeof claim.coarse_scenario_key === "string" ? { coarse_scenario_key: claim.coarse_scenario_key } : {}), claim_id: String(claim.id),
     source_id: String(claim.source_id ?? "unknown"), evidence_ids: evidenceIds, status: status ?? (claim.status === "reviewed" ? "reviewed" : claim.status === "candidate" ? "candidate" : "inactive"),
     ...(claim.scenario_definition !== undefined ? { definition: claim.scenario_definition } : {}),
     ...(claim.coarse_scenario_definition !== undefined ? { coarse_definition: claim.coarse_scenario_definition } : {}) });
 }
 
-export function knowledgeScenarioIsActive(knowledgeDir: string, projectId: string, scenarioKey: string): boolean {
+export function knowledgeScenarioIsActive(knowledgeDir: string, projectId: string, scenarioKey: string, scopeKind: "project" | "global" = "project"): boolean {
   if (!KEY.test(scenarioKey)) return false;
-  let normalizedProjectId: string;
-  try { normalizedProjectId = knowledgeScenarioProjectId(projectId); } catch { return false; }
-  const entry = readProjectCatalog(knowledgeDir, normalizedProjectId).scenarios.find(item => item.scenario_key === scenarioKey);
+  let scope: ScenarioScope;
+  try { scope = scenarioScope(projectId, scopeKind); } catch { return false; }
+  const entry = readScopeCatalog(knowledgeDir, scope).scenarios.find(item => item.scenario_key === scenarioKey);
   return entry?.lifecycle === "active";
 }
 
 /** Return the bounded, body-free taxonomy a Host model should consult before classifying a Claim. */
-export function listKnowledgeScenarios(knowledgeDir: string, projectId: string): JsonObject {
-  const catalog = readProjectCatalog(knowledgeDir, knowledgeScenarioProjectId(projectId));
+export function listKnowledgeScenarios(knowledgeDir: string, projectId: string, scopeKind: "project" | "global" = "project"): JsonObject {
+  const catalog = readScopeCatalog(knowledgeDir, scenarioScope(projectId, scopeKind));
   return { catalog_version: catalog.catalog_version, scenarios: catalog.scenarios.map(item => ({ scenario_key: item.scenario_key,
     tier: item.tier, ...(item.parent_scenario_key ? { parent_scenario_key: item.parent_scenario_key } : {}), lifecycle: item.lifecycle,
     ...(item.definition ? { definition: item.definition } : {}),

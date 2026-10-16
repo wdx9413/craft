@@ -43,6 +43,7 @@ for (const product of componentProducts) {
   if (name === "craft-context") {
     await access(join(componentRoot, "scripts", "codebase", "analyzers", "python-control-flow.py"));
     await access(join(componentRoot, "scripts", "codebase", "analyzers", "python-data-flow.py"));
+    await access(join(componentRoot, "scripts", "codebase", "analyzers", "AnalyzeJava.java"));
     await access(join(componentRoot, "scripts", "codebase", "analyzers", "AnalyzeJavaControlFlow.java"));
   }
   if (name === "craft-context") {

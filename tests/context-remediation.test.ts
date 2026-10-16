@@ -112,7 +112,21 @@ test("discovery and Chinese code matching are bounded hints", () => {
   for (const intent of [undefined, "recall", "knowledge", "memory", "experience", "code", "code-analysis"]) { const discovery = discoverContextTools({ intent }); assert((discovery.tools as unknown[]).length > 0); assert(Number(discovery.schema_estimated_tokens) > 0); }
   assert((discoverContextTools({ intent: "experience" }).tools as JsonObject[]).some(tool => tool.name === "craft_experience_scenario_list"));
   assert((discoverContextTools({ intent: "experience" }).tools as JsonObject[]).some(tool => tool.name === "craft_learning_cycle_finalize"));
-  assert((discoverContextTools({ intent: "memory" }).tools as JsonObject[]).some(tool => tool.name === "craft_memory_capture_observed_fact"));
+  const experienceTools = discoverContextTools({ intent: "experience" }).tools as JsonObject[];
+  for (const tool of ["craft_experience_procedure_submit", "craft_experience_procedure_get", "craft_experience_learning_request_get",
+    "craft_experience_learning_evaluation_dispatch", "craft_experience_learning_evaluation_dispatch_list",
+    "craft_experience_learning_evaluation_run", "craft_experience_learning_evaluation_result",
+    "craft_evaluation_model_profile_get", "craft_evaluation_model_ticket_list"])
+    assert(experienceTools.some(item => item.name === tool), `Experience discovery must include ${tool}`);
+  const knowledgeTools = discoverContextTools({ intent: "knowledge" }).tools as JsonObject[];
+  for (const tool of ["craft_knowledge_bootstrap_install", "craft_knowledge_source_list", "craft_knowledge_source_register", "craft_knowledge_source_ingest",
+    "craft_evidence_record", "craft_knowledge_claim_save", "craft_knowledge_claim_get", "craft_knowledge_claim_list",
+    "craft_knowledge_semantic_review_packet", "craft_knowledge_host_review", "craft_knowledge_auto_review", "craft_knowledge_promotion_policy_get"])
+    assert(knowledgeTools.some(item => item.name === tool), `Knowledge discovery must include ${tool}`);
+  const memoryTools = discoverContextTools({ intent: "memory" }).tools as JsonObject[];
+  for (const tool of ["craft_memory_capture_observed_fact", "craft_memory_ledger_get", "craft_memory_ledger_list", "craft_memory_ledger_transition",
+    "craft_memory_conflict_list", "craft_memory_conflict_resolve", "craft_memory_maintenance_run", "craft_memory_session_finalize"])
+    assert(memoryTools.some(item => item.name === tool), `Memory discovery must include ${tool}`);
   const codeTools = discoverContextTools({ intent: "code" }).tools as JsonObject[];
   const codebaseNames = codeTools.filter(tool => String(tool.name).startsWith("craft_codebase_")).map(tool => tool.name).sort();
   assert.deepEqual(codebaseNames, ["craft_codebase_callers_find", "craft_codebase_context_slice", "craft_codebase_impact_query",

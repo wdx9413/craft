@@ -48,6 +48,9 @@ export async function analyzeLspSnapshot(input: LspStdioRequest, timeoutMs = inp
   let stderrBytes = 0;
   const publishedDiagnostics = new Map<string, unknown[]>();
   const diagnosticWaiters = new Set<() => void>();
+  const activeWorkDoneProgress = new Set<string | number>();
+  const workDoneProgressWaiters = new Set<() => void>();
+  let workDoneProgressEvents = 0;
 
   const failPending = (error: Error) => {
     closed = error;
@@ -104,6 +107,16 @@ export async function analyzeLspSnapshot(input: LspStdioRequest, timeoutMs = inp
         }
         continue;
       }
+      if (message.method === "$/progress" && message.id === undefined) {
+        const params = asRecord(message.params), token = params?.token, value = asRecord(params?.value);
+        if ((typeof token === "string" || typeof token === "number") && value) {
+          if (value.kind === "begin") activeWorkDoneProgress.add(token);
+          else if (value.kind === "end") activeWorkDoneProgress.delete(token);
+          workDoneProgressEvents++;
+          for (const waiter of [...workDoneProgressWaiters]) waiter();
+        }
+        continue;
+      }
       if (message.id === undefined) continue;
       const item = pending.get(message.id);
       if (!item) continue;
@@ -131,7 +144,7 @@ export async function analyzeLspSnapshot(input: LspStdioRequest, timeoutMs = inp
 
   try {
     const initializeResult = await request("initialize", { processId: process.pid, rootUri: pathToFileURL(cwd).href, rootPath: cwd,
-      capabilities: { textDocument: { publishDiagnostics: { relatedInformation: true, versionSupport: true, codeDescriptionSupport: true, dataSupport: true }, diagnostic: { dynamicRegistration: false },
+      capabilities: { window: { workDoneProgress: true }, textDocument: { publishDiagnostics: { relatedInformation: true, versionSupport: true, codeDescriptionSupport: true, dataSupport: true }, diagnostic: { dynamicRegistration: false },
         documentSymbol: { hierarchicalDocumentSymbolSupport: true }, references: { dynamicRegistration: false }, definition: { dynamicRegistration: false, linkSupport: true }, callHierarchy: { dynamicRegistration: false },
         implementation: { dynamicRegistration: false, linkSupport: true }, typeDefinition: { dynamicRegistration: false, linkSupport: true },
         typeHierarchy: { dynamicRegistration: false } }, workspace: { workspaceFolders: true } },
@@ -196,6 +209,8 @@ export async function analyzeLspSnapshot(input: LspStdioRequest, timeoutMs = inp
       }));
       documents.push(...batch);
     }
+    const progressWait = activeWorkDoneProgress.size > 0 ? await waitForWorkDoneProgress(activeWorkDoneProgress, workDoneProgressWaiters, timeoutMs) : false;
+    const workDoneProgressWaited = progressWait || workDoneProgressEvents > 0;
     const symbolAnalysis = normalizeLspSymbols({ analyzer: input.analyzer, analyzer_version: input.analyzer_version, documents });
     const documentSymbolCache: JsonObject[] = [];
     let symbolCacheBytes = 0, symbolCacheOmittedDocuments = 0;
@@ -220,6 +235,8 @@ export async function analyzeLspSnapshot(input: LspStdioRequest, timeoutMs = inp
     const relationTypeHierarchy: JsonObject[] = [];
     let relationQueryFailures = 0;
     let relationQueryOmissions = 0;
+    let outgoingCallHierarchyAvailable = callsAvailable;
+    const relationCapabilityNotes = new Map<string, number>();
     let definitionLookups = 0;
     const seenDefinitionLocations = new Set<string>();
     const relationFailureStages = new Map<string, number>();
@@ -256,26 +273,34 @@ export async function analyzeLspSnapshot(input: LspStdioRequest, timeoutMs = inp
           if (prepareSucceeded && prepared !== null) {
             if (!Array.isArray(prepared)) failRelation("call_hierarchy_invalid_prepare_result");
             else {
-              const incomingCalls: JsonObject[] = [];
+              const incomingCalls: JsonObject[] = [], outgoingCalls: JsonObject[] = [];
               for (const item of prepared.slice(0, 10)) {
                 try {
                   const result = await request("callHierarchy/incomingCalls", { item: item as JsonObject });
-                  if (result === null) continue;
-                  if (!Array.isArray(result)) { failRelation("call_hierarchy_invalid_incoming_result"); continue; }
-                  incomingCalls.push(...result as JsonObject[]);
+                  if (result !== null) {
+                    if (!Array.isArray(result)) failRelation("call_hierarchy_invalid_incoming_result");
+                    else incomingCalls.push(...result as JsonObject[]);
+                  }
                 } catch (error) { failRelation(`call_hierarchy_incoming_failed_${safeFailureCode(error)}`); }
+                if (outgoingCallHierarchyAvailable) {
+                  try {
+                    const result = await request("callHierarchy/outgoingCalls", { item: item as JsonObject });
+                    if (result !== null) {
+                      if (!Array.isArray(result)) failRelation("call_hierarchy_invalid_outgoing_result");
+                      else outgoingCalls.push(...result as JsonObject[]);
+                    }
+                  } catch (error) {
+                    const failureCode = safeFailureCode(error);
+                    if (failureCode === "-32601") {
+                      relationCapabilityNotes.set("outgoing_call_hierarchy_unavailable", (relationCapabilityNotes.get("outgoing_call_hierarchy_unavailable") ?? 0) + 1);
+                      outgoingCallHierarchyAvailable = false;
+                    } else failRelation(`call_hierarchy_outgoing_failed_${failureCode}`);
+                  }
+                }
               }
-              relationCalls.push({ symbol_id: symbol.id, incoming_calls: incomingCalls });
+              relationCalls.push({ symbol_id: symbol.id, incoming_calls: incomingCalls, outgoing_calls: outgoingCalls });
             }
           }
-        }
-        if (implementationsAvailable) {
-          try {
-            const result = await request("textDocument/implementation", { textDocument: { uri }, position: selection });
-            const locations = normalizeLocations(result);
-            if (locations) relationImplementations.push({ symbol_id: symbol.id, locations });
-            else failRelation("implementation_invalid_result");
-          } catch (error) { failRelation(`implementation_request_failed_${safeFailureCode(error)}`); }
         }
         if (typeDefinitionsAvailable) {
           try {
@@ -340,6 +365,16 @@ export async function analyzeLspSnapshot(input: LspStdioRequest, timeoutMs = inp
         }
       }));
     }
+    if (implementationsAvailable) for (const symbol of ordinaryRelationSymbols) {
+      const { document, selection } = resolveLspSymbolPosition(input.documents, symbol);
+      const uri = pathToFileURL(resolve(cwd, document.path)).href;
+      try {
+        const result = await request("textDocument/implementation", { textDocument: { uri }, position: selection });
+        const locations = normalizeLocations(result);
+        if (locations) relationImplementations.push({ symbol_id: symbol.id, locations });
+        else failRelation("implementation_invalid_result");
+      } catch (error) { failRelation(`implementation_request_failed_${safeFailureCode(error)}`); }
+    }
     const collected = collectLspRelations({ cwd, documents: documents.map(document => ({ ...document, uri: pathToFileURL(resolve(cwd, String(document.path))).href })),
       nodes: symbolAnalysis.nodes, references: relationReferences, calls: relationCalls, implementations: relationImplementations, type_definitions: relationTypeDefinitions,
       definitions: relationDefinitions,
@@ -356,7 +391,7 @@ export async function analyzeLspSnapshot(input: LspStdioRequest, timeoutMs = inp
     const languageErrorCount = diagnosticItems.filter(item => asRecord(item)?.severity === 1).length;
     const languageWarningCount = diagnosticItems.filter(item => asRecord(item)?.severity === 2).length;
     const relationStatus = !requestedRelations.length ? "not_requested"
-      : unsupportedRelations.length > 0 || relationQueryFailures > 0 || relationOmittedCount > 0 || languageErrorCount > 0 ? "partial" : "analyzed";
+      : unsupportedRelations.length > 0 || relationQueryFailures > 0 || relationOmittedCount > 0 || languageErrorCount > 0 || progressWait ? "partial" : "analyzed";
     await request("shutdown", null);
     notify("exit", {});
     child.stdin.end();
@@ -370,6 +405,8 @@ export async function analyzeLspSnapshot(input: LspStdioRequest, timeoutMs = inp
       relation_omitted_count: relationOmittedCount, relation_query_failures: relationQueryFailures,
       relation_omitted_stages: collected.omitted_relation_stages,
       relation_failure_stages: [...relationFailureStages].map(([stage, count]) => ({ stage, count })),
+      relation_capability_notes: [...relationCapabilityNotes].map(([stage, count]) => ({ stage, count })),
+      ...(workDoneProgressEvents ? { work_done_progress_waited: workDoneProgressWaited, work_done_progress_timed_out: progressWait } : {}),
       language_diagnostics: { observed_document_count: diagnosticReports.length, item_count: diagnosticItems.length,
         error_count: languageErrorCount, warning_count: languageWarningCount },
       stderr_bytes_observed: stderrBytes } };
@@ -421,6 +458,20 @@ export async function waitForDiagnosticPublications(uris: readonly string[], pub
     const timer = setTimeout(finish, Math.min(timeoutMs, 5_000));
     wake = () => { if (uris.every(uri => published.has(uri))) finish(); };
     waiters.add(wake);
+  });
+}
+
+async function waitForWorkDoneProgress(active: ReadonlySet<string | number>, waiters: Set<() => void>, timeoutMs: number): Promise<boolean> {
+  return new Promise(resolveWait => {
+    const check = (): void => { if (!active.size) finish(false); };
+    const finish = (timedOut: boolean): void => {
+      clearTimeout(timer);
+      waiters.delete(check);
+      resolveWait(timedOut);
+    };
+    const timer = setTimeout(() => finish(true), timeoutMs);
+    waiters.add(check);
+    check();
   });
 }
 

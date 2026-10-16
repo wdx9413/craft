@@ -1,6 +1,6 @@
 {
   "name": "@craft/capability-experience",
-  "version": "0.12.44",
+  "version": "0.12.45",
   "description": "Craft Experience capability: content-free observations, bounded Workflow evolution, and evaluation model profiles",
   "type": "module",
   "main": "./dist/capability.js",
@@ -58,9 +58,9 @@
   "license": "MIT",
   "types": "./dist/capability.d.ts",
   "dependencies": {
-    "craft-common-store-local": "0.12.44",
-    "craft-common-base": "0.12.44",
-    "craft-common-log": "0.12.44"
+    "craft-common-store-local": "0.12.45",
+    "craft-common-base": "0.12.45",
+    "craft-common-log": "0.12.45"
   },
   "engines": {
     "node": ">=23"

@@ -2,13 +2,10 @@
 import { serveMcpStdio } from "../core/mcp-stdio.ts";
 import { resolveMcpProductMode } from "../core/interfaces/mcp/product-launch.ts";
 import { startContextLearningWorker } from "../core/interfaces/learning-worker-supervisor.ts";
-import { CODEBASE_LSP_WORKER_FLAG, runCodebaseLspWorker } from "../capability/craft-codebase/lsp-worker.ts";
+import { CODEBASE_LSP_WORKER_FLAG, runCodebaseLspWorkerSafely } from "../capability/craft-codebase/lsp-worker.ts";
 
 if (process.argv[2] === CODEBASE_LSP_WORKER_FLAG && process.argv.length === 3) {
-  runCodebaseLspWorker(process.stdin, line => process.stdout.write(line)).catch(() => {
-    process.stderr.write("Craft Codebase language analysis failed.\n");
-    process.exitCode = 1;
-  });
+  runCodebaseLspWorkerSafely(process.stdin, line => process.stdout.write(line));
 } else {
 
 // `--product` is the stable public entry point. `--surface` remains an

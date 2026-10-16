@@ -190,7 +190,8 @@ test("model classified project Knowledge advances with trusted Source reviews an
     assert.throws(() => f.service.knowledgeScenarioList({}), /scope_kind/u);
     const globalTaxonomy = await knowledgeMcp.handle({ jsonrpc: "2.0", id: "global-taxonomy", method: "tools/call",
       params: { name: "craft_knowledge_scenario_list", arguments: { scope: "global" } } });
-    assert.equal((globalTaxonomy?.result as JsonObject).isError, true, "Knowledge taxonomy reads must require an explicit project scope");
+    assert.equal((globalTaxonomy?.result as JsonObject).isError, false, "global Knowledge must have its own taxonomy");
+    assert.equal(((globalTaxonomy?.result as JsonObject).structuredContent as JsonObject).catalog_version, 0);
     const searchMcp = await knowledgeMcp.handle({ jsonrpc: "2.0", id: "search", method: "tools/call",
       params: { name: "craft_knowledge_search", arguments: { query: "release verification", scope: "project:p", scenario_key: "engineering.release.checks" } } });
     const searchResult = searchMcp?.result as JsonObject;
@@ -253,7 +254,7 @@ test("model classified project Knowledge advances with trusted Source reviews an
   } finally { await close(f); }
 });
 
-test("Knowledge scenario keys require bounded project-scoped fine and coarse identities", async () => {
+test("Knowledge scenario keys require bounded project or global fine and coarse identities", async () => {
   const f = await fixture();
   try {
     const evidence = sourceAndEvidence(f.service);
@@ -261,9 +262,57 @@ test("Knowledge scenario keys require bounded project-scoped fine and coarse ide
     assert.throws(() => f.service.knowledgeClaimSave({ ...base, coarse_scenario_key: "engineering" }), /requires scenario_key/u);
     assert.throws(() => f.service.knowledgeClaimSave({ ...base, scenario_key: "Bad Key" }), /bounded stable identifiers/u);
     assert.throws(() => f.service.knowledgeClaimSave({ ...base, scenario_key: "engineering", coarse_scenario_key: "engineering" }), /distinct bounded/u);
-    assert.throws(() => f.service.knowledgeClaimSave({ ...base, scope: "global", scenario_key: "engineering" }), /requires project scope/u);
+    assert.throws(() => f.service.knowledgeClaimSave({ ...base, scope: "global", scenario_key: "Bad Key" }), /bounded stable identifiers/u);
+    assert.throws(() => f.service.knowledgeClaimSave({ ...base, scope: "session:one", scenario_key: "engineering" }), /requires project or global scope/u);
     assert.throws(() => f.service.knowledgeClaimSave({ ...base, scenario_key: "engineering", coarse_scenario_definition:
       { summary: "x", applies_when: "x", excludes: "x" } }), /requires coarse_scenario_key/u);
+  } finally { await close(f); }
+});
+
+test("global Knowledge classification and scenario search stay isolated from project taxonomies", async () => {
+  const f = await fixture();
+  try {
+    const createSource = (sourceId: string, scopeKind: "project" | "global", scopeId: string) => f.service.knowledgeSourceRegister({
+      source_id: sourceId, kind: "project_note", label: sourceId, trust: "verified", scope_kind: scopeKind, scope_id: scopeId,
+      locator: `${sourceId}.md`, content_digest: `sha256:${sourceId.padEnd(64, "a").slice(0, 64)}` });
+    const saveReviewed = (id: string, sourceId: string, scope: string, text: string) => {
+      const evidence = f.service.evidenceRecord({ claim: `Evidence for ${id}`, source_type: "observation", confidence: "confirmed" });
+      const claim = f.service.knowledgeClaimSave({ claim_id: id, kind: "rule", content: text, scope, source_id: sourceId,
+        evidence_ids: [evidence.id], scenario_key: "engineering.testing", scenario_definition: {
+          summary: "测试工程规则", applies_when: "适用于测试流程", excludes: "不涉及构建规则" } }).claim as JsonObject;
+      return f.service.knowledgeClaimReview({ claim_id: claim.id, status: "reviewed", reviewer: "host-model", reason: "source verified" });
+    };
+    createSource("global-notes-a", "global", "global");
+    createSource("global-notes-b", "global", "global");
+    createSource("project-notes-a", "project", "p");
+    createSource("project-notes-b", "project", "p");
+    const globalFirst = saveReviewed("global-scene-a", "global-notes-a", "global", "Use stable tests for the global workflow.");
+    assert.equal((globalFirst.scenario_catalog as JsonObject).status, "candidate");
+    const globalSecond = saveReviewed("global-scene-b", "global-notes-b", "global", "Use stable tests for the global workflow.");
+    assert.equal((globalSecond.scenario_catalog as JsonObject).status, "active");
+    saveReviewed("project-scene-a", "project-notes-a", "project:p", "Use stable tests for the project workflow.");
+    const projectSecond = saveReviewed("project-scene-b", "project-notes-b", "project:p", "Use stable tests for the project workflow.");
+    assert.equal((projectSecond.scenario_catalog as JsonObject).status, "active");
+
+    const globalPath = join(f.root, "knowledge", "global", "knowledge-scenarios.json");
+    const projectPath = join(f.root, "knowledge", "projects", "p", "knowledge-scenarios.json");
+    assert.equal(JSON.parse(await readFile(globalPath, "utf8")).catalog_version, 4);
+    assert.equal(JSON.parse(await readFile(projectPath, "utf8")).catalog_version, 4);
+    assert.deepEqual((f.service.knowledgeScenarioList({ scope: "global" }).scenarios as JsonObject[]).map(item => item.scenario_key), ["engineering.testing"]);
+    assert.deepEqual((f.service.knowledgeSearch({ query: "stable tests", scope: "global", scenario_key: "engineering.testing" }).hits as JsonObject[])
+      .map(item => item.claim_id).sort(), ["global-scene-a", "global-scene-b"]);
+    assert.deepEqual((f.service.knowledgeSearch({ query: "stable tests", scope: "project:p", scenario_key: "engineering.testing" }).hits as JsonObject[])
+      .map(item => item.claim_id).sort(), ["project-scene-a", "project-scene-b"]);
+    const migration = f.service.knowledgeScenarioMigrationPropose({ scope: "global", mode: "split", source_keys: ["engineering.testing"],
+      targets: ["engineering.testing.unit", "engineering.testing.integration"].map(scenario_key => ({ scenario_key, definition: {
+        summary: "全球测试规则细分", applies_when: "规则明确适用于该测试边界", excludes: "与该测试边界无关的内容" } })),
+      expected_catalog_version: 4, request_id: "split-global-testing", reason: "global testing has distinct acceptance boundaries" });
+    assert.equal(migration.status, "candidate");
+    const retired = f.service.knowledgeScenarioRetire({ scope: "global", scenario_key: "engineering.testing", expected_catalog_version: 5,
+      request_id: "retire-global-testing", reason: "global taxonomy test" });
+    assert.equal(retired.status, "retired");
+    assert.deepEqual(f.service.knowledgeSearch({ query: "stable tests", scope: "global", scenario_key: "engineering.testing" }).hits, []);
+    assert.equal((f.service.knowledgeSearch({ query: "stable tests", scope: "project:p", scenario_key: "engineering.testing" }).hits as JsonObject[]).length, 2);
   } finally { await close(f); }
 });
 

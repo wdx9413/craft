@@ -3,6 +3,7 @@ import { KnowledgeIndex, diffKnowledgeBase, scanKnowledgeBase } from "../../know
 import type { ContextResolutionKernel } from "../../context-resolution.ts";
 import type { KnowledgeRelationKernel } from "../../../capability/craft-knowledge/knowledge-relation.ts";
 import { contentReference } from "../../../common/craft-common-store-local/src/content-store.ts";
+import { scopeFromKey } from "../../../common/craft-common-base/src/scope-policy.ts";
 import { knowledgeScenarioIsActive, listKnowledgeScenarios, proposeKnowledgeScenarioMigration, retireKnowledgeScenario } from "../../../capability/craft-knowledge/scenario-catalog.ts";
 import { array, finiteInteger, object, text } from "../../validation.ts";
 
@@ -35,8 +36,12 @@ export class CognitiveSearchCoordinator {
     const scenarioKey = args.scenario_key === undefined ? null : text(args.scenario_key, "scenario_key");
     if (scenarioKey !== null && !/^[a-z0-9][a-z0-9._/-]{0,95}$/u.test(scenarioKey)) throw new Error("scenario_key must be a bounded stable identifier");
     const scenarioParts = scope?.split(":") ?? [];
-    const scenarioActive = scenarioKey === null || scenarioParts[0] === "project"
-      && knowledgeScenarioIsActive(this.store.paths.knowledgeDir, scenarioParts.slice(1).join(":"), scenarioKey);
+    if (scenarioKey !== null && !scope) throw new Error("scenario_key requires an explicit Knowledge scope");
+    const scenarioKind = scenarioParts[0] === "global" && scenarioParts.length === 1 ? "global"
+      : scenarioParts[0] === "project" && scenarioParts.length > 1 ? "project" : null;
+    const scenarioId = scenarioKind === "global" ? "global" : scenarioParts.slice(1).join(":");
+    const scenarioActive = scenarioKey === null || scenarioKind !== null
+      && knowledgeScenarioIsActive(this.store.paths.knowledgeDir, scenarioId, scenarioKey, scenarioKind);
     const includeCandidates = args.include_candidates !== false;
     const terms = [...new Set(query.toLowerCase().match(/[\p{L}\p{N}_-]+/gu) ?? [])];
     const governed = this.store.list("knowledge_claim", 10_000).flatMap((claim) => {
@@ -44,6 +49,13 @@ export class CognitiveSearchCoordinator {
       if (claim.status !== "reviewed" && (!includeCandidates || claim.status !== "candidate")) return [];
       if (scope !== null && claim.scope !== "global" && claim.scope !== scope) return [];
       if (scenarioKey !== null && (!scenarioActive || claim.scenario_key !== scenarioKey && claim.coarse_scenario_key !== scenarioKey)) return [];
+      if (scenarioKey !== null) {
+        let claimScope;
+        try { claimScope = scopeFromKey(String(claim.scope ?? "global")); } catch { return []; }
+        // A project filter never borrows an identically named scene from the global catalog,
+        // and a global filter never borrows a project taxonomy.
+        if (scenarioKind !== claimScope.kind || (scenarioKind === "project" && scenarioId !== claimScope.id)) return [];
+      }
       if (claim.valid_until !== undefined && claim.valid_until !== null
         && (typeof claim.valid_until !== "string" || !Number.isFinite(Date.parse(claim.valid_until)) || Date.parse(claim.valid_until) < Date.now())) return [];
       if (claim.content_ref && !contentReference(claim.content_ref)) throw new Error("Knowledge content reference is invalid");
@@ -69,15 +81,19 @@ export class CognitiveSearchCoordinator {
   knowledgeScenarioList(args: JsonObject): JsonObject {
     const scope = text(args.scope ?? `${text(args.scope_kind, "scope_kind")}:${text(args.scope_id, "scope_id")}`, "scope");
     const [kind, ...parts] = scope.split(":");
-    if (kind !== "project" || !parts.length) throw new Error("Knowledge scenario catalog requires an explicit project scope");
-    return { scope, ...listKnowledgeScenarios(this.store.paths.knowledgeDir, parts.join(":")) };
+    if (kind === "global" && parts.length === 0) return { scope, ...listKnowledgeScenarios(this.store.paths.knowledgeDir, "global", "global") };
+    if (kind !== "project" || !parts.length) throw new Error("Knowledge scenario catalog requires an explicit project or global scope");
+    return { scope, ...listKnowledgeScenarios(this.store.paths.knowledgeDir, parts.join(":"), "project") };
   }
 
   knowledgeScenarioRetire(args: JsonObject): JsonObject {
     const scope = text(args.scope ?? `${text(args.scope_kind, "scope_kind")}:${text(args.scope_id, "scope_id")}`, "scope");
     const [kind, ...parts] = scope.split(":");
-    if (kind !== "project" || !parts.length) throw new Error("Knowledge scenario retirement requires an explicit project scope");
-    return retireKnowledgeScenario({ knowledge_dir: this.store.paths.knowledgeDir, project_id: parts.join(":"),
+    if (kind === "global" && parts.length === 0) return retireKnowledgeScenario({ knowledge_dir: this.store.paths.knowledgeDir, project_id: "global", scope_kind: "global",
+      scenario_key: text(args.scenario_key, "scenario_key"), expected_catalog_version: finiteInteger(args.expected_catalog_version, "expected_catalog_version", 0, 0),
+      request_id: text(args.request_id, "request_id"), reason: text(args.reason, "reason") });
+    if (kind !== "project" || !parts.length) throw new Error("Knowledge scenario retirement requires an explicit project or global scope");
+    return retireKnowledgeScenario({ knowledge_dir: this.store.paths.knowledgeDir, project_id: parts.join(":"), scope_kind: "project",
       scenario_key: text(args.scenario_key, "scenario_key"), expected_catalog_version: finiteInteger(args.expected_catalog_version, "expected_catalog_version", 0, 0),
       request_id: text(args.request_id, "request_id"), reason: text(args.reason, "reason") });
   }
@@ -85,9 +101,10 @@ export class CognitiveSearchCoordinator {
   knowledgeScenarioMigrationPropose(args: JsonObject): JsonObject {
     const scope = text(args.scope ?? `${text(args.scope_kind, "scope_kind")}:${text(args.scope_id, "scope_id")}`, "scope");
     const [kind, ...parts] = scope.split(":");
-    if (kind !== "project" || !parts.length) throw new Error("Knowledge scenario migration requires an explicit project scope");
+    const globalScope = kind === "global" && parts.length === 0;
+    if (!globalScope && (kind !== "project" || !parts.length)) throw new Error("Knowledge scenario migration requires an explicit project or global scope");
     if (!Array.isArray(args.source_keys) || !Array.isArray(args.targets)) throw new Error("Knowledge scenario migration sources and targets must be arrays");
-    return proposeKnowledgeScenarioMigration({ knowledge_dir: this.store.paths.knowledgeDir, project_id: parts.join(":"),
+    return proposeKnowledgeScenarioMigration({ knowledge_dir: this.store.paths.knowledgeDir, project_id: globalScope ? "global" : parts.join(":"), scope_kind: globalScope ? "global" : "project",
       mode: text(args.mode, "mode") as "merge" | "split", source_keys: args.source_keys as string[], targets: args.targets as Array<{ scenario_key: string; definition: unknown }>,
       expected_catalog_version: finiteInteger(args.expected_catalog_version, "expected_catalog_version", 0, 0),
       request_id: text(args.request_id, "request_id"), reason: text(args.reason, "reason") });

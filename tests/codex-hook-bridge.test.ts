@@ -818,7 +818,8 @@ test("verified repeated tasks create a pinned distillation ticket readable throu
     f.store.save("evaluation_model_ticket", String(ticket.id), { ...ticket, next_action: null });
     const replay = f.service.learningCycleFinalize({ ...base, task_id: "second" });
     assert.equal(replay.status, "candidate_request"); assert.equal(replay.idempotent, true);
-    assert.equal(replay.next_action, "configure_workflow_evolution_model_profile_then_distill_and_evaluate");
+    assert.equal(replay.distillation_mode, "current_host_model");
+    assert.equal(replay.next_action, "current_host_model_reads_pinned_request_submits_candidate_then_runs_ordered_evaluation_gates");
     assert.equal(f.store.list("workflow_evolution_request", 10).length, 1);
     const materials = f.service.learningCycleRequestGet({ request_id: String((finalized.request as JsonObject).id) });
     assert.equal((materials.observations as JsonObject[]).length, 2);
@@ -833,6 +834,35 @@ test("verified repeated tasks create a pinned distillation ticket readable throu
     assert.equal((submitted.procedure as JsonObject).lifecycle, "candidate");
     const afterSubmission = f.service.learningCycleFinalize({ ...base, task_id: "second" });
     assert.equal(afterSubmission.status, "candidate_submitted"); assert.equal(afterSubmission.idempotent, true);
+  } finally { await dispose(f); }
+});
+
+test("the current Host model can distill and submit a verified request without a configured Provider Profile", async () => {
+  const f = await fixture();
+  try {
+    const context = await f.service.contextOpen({ project_root: f.root, query: "verified repeated work", include_codebase: false });
+    const base = { host: "mcp_host", turn_id: "turn", context_receipt_id: String((context.receipt as JsonObject).id), verified: true,
+      verification_outcome: "passed", verification_ref: "test:host-distillation", scenario_key: "coding.host-distillation",
+      scenario_definition: { summary: "Deliver and verify a code change", applies_when: "The project changed and its verifier completed", excludes: "Read-only advice without a verified change" } };
+    assert.equal(f.service.learningCycleFinalize({ ...base, task_id: "host-first" }).status, "observed");
+    const finalized = f.service.learningCycleFinalize({ ...base, task_id: "host-second" });
+    assert.equal(finalized.status, "candidate_request");
+    assert.equal(finalized.model_ticket, null);
+    assert.equal(finalized.distillation_mode, "current_host_model");
+    assert.equal(finalized.next_action, "current_host_model_reads_pinned_request_submits_candidate_then_runs_ordered_evaluation_gates");
+    const requestId = String((finalized.request as JsonObject).id);
+    const pinned = f.service.learningCycleRequestGet({ request_id: requestId });
+    assert.equal((pinned.observations as JsonObject[]).length, 2);
+    assert.equal(pinned.content_stored, false);
+    const submitted = f.service.workflowEvolutionProposalSubmit({ request_id: requestId, workflow_id: "host-distilled-workflow",
+      name: "Verified completion", description: "Run the selected terminal verifier.", inputs: [],
+      steps: [{ id: "verify", type: "assertion", evaluator: "file_exists", path: "result.txt", side_effect: "read_only" }] });
+    const procedure = submitted.procedure as JsonObject;
+    assert.equal(procedure.lifecycle, "candidate");
+    assert.equal((submitted.proposal as JsonObject).model_ticket_id, null);
+    const dispatch = f.service.experienceLearningEvaluationDispatch({ procedure_id: String(procedure.id) }).dispatch as JsonObject;
+    assert.equal(dispatch.stage, "shadow");
+    assert.equal(f.store.count("evaluation_model_ticket"), 0);
   } finally { await dispose(f); }
 });
 

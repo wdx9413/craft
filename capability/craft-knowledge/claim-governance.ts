@@ -80,11 +80,15 @@ export class KnowledgeClaimGovernance {
     const coarseScenarioDefinition = validateKnowledgeScenarioDefinition(args.coarse_scenario_definition);
     if (coarseScenarioDefinition && !coarseScenarioKey) throw new Error("coarse scenario definition requires coarse_scenario_key");
     if (coarseScenarioKey && !scenarioKey) throw new Error("coarse_scenario_key requires scenario_key");
-    if ((scenarioKey || coarseScenarioKey) && scopeFromKey(scope).kind !== "project") throw new Error("Knowledge scenario classification requires project scope");
+    const scenarioScope = scopeFromKey(scope);
+    if ((scenarioKey || coarseScenarioKey) && scenarioScope.kind !== "project" && scenarioScope.kind !== "global") {
+      throw new Error("Knowledge scenario classification requires project or global scope");
+    }
+    const scenarioScopeKind = scenarioScope.kind === "global" ? "global" : "project";
     if ((scenarioKey && !/^[a-z0-9][a-z0-9._/-]{0,95}$/u.test(scenarioKey)) || (coarseScenarioKey && !/^[a-z0-9][a-z0-9._/-]{0,95}$/u.test(coarseScenarioKey))
       || scenarioKey !== undefined && scenarioKey === coarseScenarioKey) throw new Error("Knowledge scenario keys must be distinct bounded stable identifiers");
-    if (scenarioKey && !knowledgeScenarioCanClassify(this.store.paths.knowledgeDir, scopeFromKey(scope).id, scenarioKey)
-      || coarseScenarioKey && !knowledgeScenarioCanClassify(this.store.paths.knowledgeDir, scopeFromKey(scope).id, coarseScenarioKey)) {
+    if (scenarioKey && !knowledgeScenarioCanClassify(this.store.paths.knowledgeDir, scenarioScope.id, scenarioKey, scenarioScopeKind)
+      || coarseScenarioKey && !knowledgeScenarioCanClassify(this.store.paths.knowledgeDir, scenarioScope.id, coarseScenarioKey, scenarioScopeKind)) {
       throw new Error("Knowledge scenario is conflicted or retired and cannot receive classifications");
     }
     const identity = { kind, content_digest: contentDigest, scope, scope_envelope: envelope, source_id: sourceId, evidence_ids: evidenceIds, tags, valid_until: validUntil, ...(title ? { title } : {}) };

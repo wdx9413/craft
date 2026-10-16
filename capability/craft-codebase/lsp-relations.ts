@@ -16,12 +16,23 @@ export function selectLspRelationSymbols(nodes: readonly JsonObject[], limit: nu
     group.push(node);
     byPath.set(path, group);
   }
-  if (prioritizeCallables) for (const group of byPath.values()) group.sort((left, right) => {
-    const leftCallable = [6, 9, 12].includes(Number(left.symbol_kind));
-    const rightCallable = [6, 9, 12].includes(Number(right.symbol_kind));
-    return Number(rightCallable) - Number(leftCallable);
-  });
-  const groups = [...byPath.values()];
+  const compareText = (left: string, right: string): number => left < right ? -1 : left > right ? 1 : 0;
+  const compareSymbol = (left: JsonObject, right: JsonObject): number => {
+    const leftSpan = left.span && typeof left.span === "object" ? left.span as JsonObject : {};
+    const rightSpan = right.span && typeof right.span === "object" ? right.span as JsonObject : {};
+    const leftStart = Number.isSafeInteger(leftSpan.start_offset) ? Number(leftSpan.start_offset) : Number.MAX_SAFE_INTEGER;
+    const rightStart = Number.isSafeInteger(rightSpan.start_offset) ? Number(rightSpan.start_offset) : Number.MAX_SAFE_INTEGER;
+    return leftStart - rightStart || compareText(String(left.name ?? ""), String(right.name ?? "")) || compareText(String(left.id ?? ""), String(right.id ?? ""));
+  };
+  const groups = [...byPath.entries()].sort(([left], [right]) => compareText(left, right)).map(([, group]) => group.sort((left, right) => {
+    if (prioritizeCallables) {
+      const leftCallable = [6, 9, 12].includes(Number(left.symbol_kind));
+      const rightCallable = [6, 9, 12].includes(Number(right.symbol_kind));
+      const callableOrder = Number(rightCallable) - Number(leftCallable);
+      if (callableOrder) return callableOrder;
+    }
+    return compareSymbol(left, right);
+  }));
   const selected: JsonObject[] = [];
   for (let offset = 0; selected.length < limit; offset++) {
     const candidates = groups.map(group => group[offset]).filter((node): node is JsonObject => node !== undefined);
@@ -87,8 +98,9 @@ export function collectLspRelations(input: JsonObject): JsonObject {
   }
   for (const raw of input.calls as JsonObject[]) {
     const target = nodesById.get(String(raw.symbol_id));
-    if (!target || !Array.isArray(raw.incoming_calls)) { omit("call_target_or_incoming_invalid"); continue; }
-    for (const incoming of raw.incoming_calls as JsonObject[]) {
+    if (!target) { omit("call_target_or_incoming_invalid"); continue; }
+    if (raw.incoming_calls !== undefined && !Array.isArray(raw.incoming_calls)) { omit("call_target_or_incoming_invalid"); continue; }
+    for (const incoming of (raw.incoming_calls ?? []) as JsonObject[]) {
       const sourceItem = incoming.from as JsonObject | undefined;
       const sourceDoc = sourceItem && documentForUri(String(sourceItem.uri), root, byUri, byPath);
       const selection = sourceItem?.selectionRange as JsonObject | undefined;
@@ -102,6 +114,25 @@ export function collectLspRelations(input: JsonObject): JsonObject {
         const end = sourceDoc.index.offset(range.end as JsonObject | undefined);
         if (start === undefined || end === undefined || end < start) { omit("call_range_invalid"); continue; }
         append("calls", source, target, { start_offset: start, end_offset: end });
+      }
+    }
+    if (raw.outgoing_calls !== undefined && !Array.isArray(raw.outgoing_calls)) { omit("call_source_or_outgoing_invalid"); continue; }
+    const sourceDocument = byPath.get(String(target.path));
+    if (!sourceDocument) { if ((raw.outgoing_calls as unknown[] | undefined)?.length) omit("call_source_unmapped"); continue; }
+    for (const outgoing of (raw.outgoing_calls ?? []) as JsonObject[]) {
+      const targetItem = outgoing.to as JsonObject | undefined;
+      const targetDocument = targetItem && documentForUri(String(targetItem.uri), root, byUri, byPath);
+      const selection = targetItem?.selectionRange as JsonObject | undefined;
+      const targetOffset = targetDocument?.index.offset(selection?.start as JsonObject | undefined);
+      const callee = targetDocument && targetOffset !== undefined
+        ? nodesByPathOffset.get(targetDocument.path)?.get(targetOffset) : undefined;
+      if (!callee) { omit("outgoing_call_target_unmapped"); continue; }
+      if (!Array.isArray(outgoing.fromRanges)) { omit("outgoing_call_ranges_invalid"); continue; }
+      for (const range of outgoing.fromRanges as JsonObject[]) {
+        const start = sourceDocument.index.offset(range.start as JsonObject | undefined);
+        const end = sourceDocument.index.offset(range.end as JsonObject | undefined);
+        if (start === undefined || end === undefined || end < start) { omit("outgoing_call_range_invalid"); continue; }
+        append("calls", target, callee, { start_offset: start, end_offset: end });
       }
     }
   }

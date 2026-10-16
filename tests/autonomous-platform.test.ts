@@ -247,4 +247,4 @@ test("platform operations export role decisions and the MCP surface", async () =
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("release version is current", () => { assert.equal(VERSION, "0.12.44"); });
+test("release version is current", () => { assert.equal(VERSION, "0.12.45"); });

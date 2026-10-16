@@ -25,8 +25,24 @@ test("LSP relation budget rotates across files before selecting later symbols", 
     { id: "c1", path: "c.go" }, { id: "c2", path: "c.go", symbol_kind: 5 },
   ];
   assert.deepEqual(selectLspRelationSymbols(input, 4).map(node => node.id), ["a1", "b1", "c1", "b2"]);
+  assert.deepEqual(selectLspRelationSymbols([...input].reverse(), 4).map(node => node.id), ["a1", "b1", "c1", "b2"],
+    "bounded relation selection must not depend on language-server response ordering");
   assert.deepEqual(selectLspRelationSymbols(input, 20, true).map(node => node.id), ["a2", "b1", "c1", "a3", "b2", "c2", "a1"]);
   assert.deepEqual(selectLspRelationSymbols(input, 20).map(node => node.id), ["a1", "b1", "c1", "a2", "b2", "c2", "a3"]);
+  const canonicalOrder = [
+    { id: "z", path: "ordered.go", name: "same", span: { start_offset: 2 } },
+    { id: "z", path: "ordered.go", name: "same", span: { start_offset: 2 } },
+    { id: "fallback-b", path: "ordered.go", name: "same" },
+    { id: "a", path: "ordered.go", name: "same", span: { start_offset: 2 } },
+    { id: "b", path: "ordered.go", name: "first", span: { start_offset: 2 } },
+    { id: "fallback-a", path: "ordered.go", name: "same", span: { start_offset: "invalid" } },
+    { id: "earlier", path: "ordered.go", name: "same", span: { start_offset: 1 } },
+  ];
+  assert.deepEqual(selectLspRelationSymbols(canonicalOrder, 20).map(node => node.id), ["earlier", "b", "a", "z", "z", "fallback-a", "fallback-b"]);
+  assert.deepEqual(selectLspRelationSymbols([...canonicalOrder].reverse(), 20).map(node => node.id), ["earlier", "b", "a", "z", "z", "fallback-a", "fallback-b"]);
+  assert.deepEqual(selectLspRelationSymbols([
+    { path: "unnamed.go", span: { start_offset: 1 } }, { path: "unnamed.go", span: { start_offset: 1 } },
+  ], 2).map(node => node.id), [undefined, undefined]);
   const manyPaths = Array.from({ length: 10 }, (_, index) => ({ id: `p${index}`, path: `p${index}.go` }));
   assert.deepEqual(selectLspRelationSymbols(manyPaths, 4).map(node => node.id), ["p0", "p3", "p6", "p9"]);
   assert.deepEqual(selectLspRelationSymbols(input, 0), []);
@@ -42,6 +58,22 @@ test("LSP locations and call hierarchy map to exact checkpoint symbols and UTF-1
   assert.deepEqual(relations[0]!.from, { path, start_offset: inner.span.start_offset });
   assert.deepEqual(relations[0]!.to, { path, start_offset: target.span.start_offset });
   assert.deepEqual(relations[1]!.source_span, { start_offset: 40, end_offset: 46 });
+  assert.equal(result.omitted_relation_count, 0);
+});
+
+test("LSP outgoing call hierarchy maps callers to callees and deduplicates incoming facts", () => {
+  const input = base();
+  input.references = [];
+  input.calls = [
+    call,
+    { symbol_id: "caller", outgoing_calls: [{ to: { uri, selectionRange: symbols[0]!.selectionRange }, fromRanges: [range] }] },
+  ];
+  const result = collectLspRelations(input), relations = result.relations as JsonObject[];
+  assert.equal(relations.length, 1);
+  assert.equal(relations[0]!.kind, "calls");
+  assert.deepEqual(relations[0]!.from, { path, start_offset: caller.span.start_offset });
+  assert.deepEqual(relations[0]!.to, { path, start_offset: target.span.start_offset });
+  assert.deepEqual(relations[0]!.source_span, { start_offset: 40, end_offset: 46 });
   assert.equal(result.omitted_relation_count, 0);
 });
 
@@ -149,6 +181,33 @@ test("LSP call hierarchy rejects missing endpoints and malformed ranges while em
   const empty = collectLspRelations({ cwd, documents: [], nodes: [], references: [], calls: [] });
   assert.deepEqual(empty, { relations: [], omitted_relation_count: 0, omitted_relation_stages: [] });
   assert.throws(() => collectLspRelations({}), /Invalid LSP relation collection input/);
+});
+
+test("LSP outgoing call hierarchy rejects invalid source, target and call-site evidence", () => {
+  const input = base();
+  input.references = [];
+  input.nodes = [...input.nodes as JsonObject[], { id: "missing-path", kind: "symbol", path: "src/missing.js", span: { start_offset: 0, end_offset: 1 } }];
+  input.calls = [
+    { symbol_id: "unknown", outgoing_calls: [] },
+    { symbol_id: "target", incoming_calls: [], outgoing_calls: "invalid" },
+    { symbol_id: "missing-path", outgoing_calls: [{ to: { uri, selectionRange: symbols[0]!.selectionRange }, fromRanges: [range] }] },
+    { symbol_id: "caller", outgoing_calls: [{ to: { uri: "file:///outside/target.js", selectionRange: symbols[0]!.selectionRange }, fromRanges: [range] }] },
+    { symbol_id: "caller", outgoing_calls: [{ to: { uri, selectionRange: { start: { line: 99, character: 0 } } }, fromRanges: [range] }] },
+    { symbol_id: "caller", outgoing_calls: [{ to: { uri, selectionRange: symbols[0]!.selectionRange }, fromRanges: "invalid" }] },
+    { symbol_id: "caller", outgoing_calls: [{ to: { uri, selectionRange: symbols[0]!.selectionRange }, fromRanges: [{ start: { line: 99, character: 0 }, end: { line: 99, character: 1 } }] }] },
+    { symbol_id: "caller", outgoing_calls: [{ to: { uri, selectionRange: symbols[0]!.selectionRange }, fromRanges: [{ start: { line: 1, character: 9 }, end: { line: 1, character: 8 } }] }] },
+  ];
+  const result = collectLspRelations(input);
+  assert.deepEqual(result.relations, []);
+  assert.equal(result.omitted_relation_count, 8);
+  assert.deepEqual(result.omitted_relation_stages, [
+    { stage: "call_target_or_incoming_invalid", count: 1 },
+    { stage: "call_source_or_outgoing_invalid", count: 1 },
+    { stage: "call_source_unmapped", count: 1 },
+    { stage: "outgoing_call_target_unmapped", count: 2 },
+    { stage: "outgoing_call_ranges_invalid", count: 1 },
+    { stage: "outgoing_call_range_invalid", count: 2 },
+  ]);
 });
 
 test("LSP semantic locations reject unknown endpoints, out-of-snapshot facts and suppress self edges", () => {

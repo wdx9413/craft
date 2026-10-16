@@ -39,6 +39,7 @@ function lspFailureDiagnostic(error: unknown): JsonObject {
   const stage = /(?:during|at) ([a-zA-Z][\w/.-]*)/u.exec(message)?.[1];
   const signal = /signal (SIG[A-Z0-9]+)/u.exec(message)?.[1];
   const exitCode = /\(code (-?\d+), signal/u.exec(message)?.[1];
+  const protocolCode = /(?:protocol code |Language server request failed[^\n]*\()(-?\d+)\)/u.exec(message)?.[1];
   const reason = /timed out/iu.test(message) ? "request_timeout"
     : signal ? "server_crash"
     : /Unable to start configured language server/u.test(message) ? "server_unavailable"
@@ -46,7 +47,8 @@ function lspFailureDiagnostic(error: unknown): JsonObject {
     : /Language server request failed/u.test(message) ? "server_request_failed"
     : "analysis_failed";
   return { reason, ...(stage ? { failure_stage: stage } : {}), ...(signal ? { signal } : {}),
-    ...(exitCode && Number.isSafeInteger(Number(exitCode)) ? { exit_code: Number(exitCode) } : {}) };
+    ...(exitCode && Number.isSafeInteger(Number(exitCode)) ? { exit_code: Number(exitCode) } : {}),
+    ...(protocolCode !== undefined && Number.isSafeInteger(Number(protocolCode)) ? { protocol_error_code: Number(protocolCode) } : {}) };
 }
 
 type LspSourceFile = { readonly path: string; readonly content: string; readonly digest: string; readonly cached_symbols?: JsonObject[]; readonly cached_symbols_digest?: string };
@@ -70,6 +72,12 @@ function runConfiguredLsp(adapter: TrustedLspAdapter, files: readonly LspSourceF
       const output = execFileSync(process.execPath, entryArgs, { input: JSON.stringify(request), encoding: "utf8", timeout: 120_000,
         maxBuffer: 96 * 1024 * 1024, shell: false, stdio: ["pipe", "pipe", "ignore"] });
       result = JSON.parse(output) as JsonObject;
+    }
+    if (result.format === "craft-lsp-worker-failure-v1") {
+      const reason = String(result.reason ?? "analysis_failed");
+      const stage = typeof result.failure_stage === "string" ? ` during ${result.failure_stage}` : "";
+      const protocolCode = Number.isSafeInteger(result.protocol_error_code) ? ` (protocol code ${String(result.protocol_error_code)})` : "";
+      throw new Error(`${reason === "server_request_failed" ? "Language server request failed" : reason}${stage}${protocolCode}`);
     }
     return contextFiles.length ? { ...result, diagnostics: { ...(result.diagnostics as JsonObject), workspace_file_digests: contextFiles.map(({ path, digest }) => ({ path, digest })) } } : result;
   } finally { rmSync(root, { recursive: true, force: true }); }
@@ -201,7 +209,15 @@ function ensureRepositoryAttempt(service: RepositoryOnboardingPort, args: JsonOb
         if (Array.isArray(lspAnalysis.document_symbol_cache)) lspFileUnits.push(...(lspAnalysis.document_symbol_cache as JsonObject[]).map(unit => ({ ...unit,
           analyzer, analyzer_version: adapter.analyzer_version, adapter_config_digest: adapterConfigDigest })));
       }
-      catch (error) { degraded.push({ language: adapter.language, status: "unavailable", ...lspFailureDiagnostic(error) }); }
+      catch (error) {
+        const failure = lspFailureDiagnostic(error);
+        if (adapter.language === "go") {
+          semanticAnalyses.push(basicAnalysis(service.store, workspaceId, languageFiles));
+          degraded.push({ language: "go", status: "partial", reason: failure.reason, semantic_adapter_status: "unavailable",
+            failure_stage: failure.failure_stage, protocol_error_code: failure.protocol_error_code,
+            fallback_analyzer: "craft-basic-symbols", relations: "not_analyzed" });
+        } else degraded.push({ language: adapter.language, status: "unavailable", ...failure });
+      }
       if (languageFiles.length > bounded.length) degraded.push({ language: adapter.language, status: "partial", reason: "document_limit", omitted_documents: languageFiles.length - bounded.length });
     }
     for (const language of [...new Set(adapterlessFiles.filter(file => !adaptedPaths.has(file.path)).map(file => file.language))].sort()) {

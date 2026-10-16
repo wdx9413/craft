@@ -116,6 +116,9 @@ test("Knowledge classification tickets track the live candidate and keep result 
       content_digest: "sha256:claim", source_id: "source-1" });
     f.store.create("knowledge_claim", "reviewed-claim", { status: "reviewed", scope: "project:demo", version: 1,
       content_digest: "sha256:reviewed", source_id: "source-1" });
+    f.store.create("knowledge_source", "global-source", { status: "active", trust: "verified" });
+    f.store.create("knowledge_claim", "global-candidate", { status: "candidate", scope: "global", version: 1,
+      content_digest: "sha256:global-candidate", source_id: "global-source" });
     const kernel = new EvaluationModelProfileKernel(f.store, PROVIDER_CATALOG, { DASHSCOPE_API_KEY: "configured-for-test" });
     const saved = kernel.save({ profile_id: "knowledge-classifier", provider: "qwen", model: "qwen-plus",
       purposes: ["knowledge_scenario_classification"], network_execution_enabled: true });
@@ -127,6 +130,9 @@ test("Knowledge classification tickets track the live candidate and keep result 
     const reviewedTicket = kernel.issue({ profile_id: profile.id, purpose: "knowledge_scenario_classification", knowledge_claim_id: "reviewed-claim",
       input_ref: "craft-knowledge://claim/reviewed-claim/v1/catalog/0", output_contract_ref: "craft-knowledge-scenario-classification-v1" }).ticket as JsonObject;
     assert.equal(reviewedTicket.status, "ready_for_adapter");
+    const globalTicket = kernel.issue({ profile_id: profile.id, purpose: "knowledge_scenario_classification", knowledge_claim_id: "global-candidate",
+      input_ref: "craft-knowledge://claim/global-candidate/v1/catalog/0", output_contract_ref: "craft-knowledge-scenario-classification-v1" }).ticket as JsonObject;
+    assert.equal(globalTicket.status, "ready_for_adapter");
     const target = ticket.target as JsonObject;
     const staleTargets: Array<[string, JsonObject | undefined]> = [
       ["missing", { ...target, id: "missing-claim" }],
@@ -134,26 +140,27 @@ test("Knowledge classification tickets track the live candidate and keep result 
       ["classified", { ...target, id: "classified-claim", version: 1, content_digest: "sha256:classified" }],
       ["version", { ...target, version: 3 }],
       ["digest", { ...target, content_digest: "sha256:changed" }],
-      ["scope", { ...target, id: "global-claim", version: 1, content_digest: "sha256:global" }],
+      ["scope", { ...target, id: "session-claim", version: 1, content_digest: "sha256:session" }],
       ["missing-scope", { ...target, id: "issue-missing-scope", version: 1, content_digest: "sha256:no-scope" }],
       ["missing-target", undefined],
     ];
     f.store.create("knowledge_claim", "rejected-claim", { status: "rejected", scope: "project:demo", version: 1, content_digest: "sha256:rejected" });
     f.store.create("knowledge_claim", "classified-claim", { status: "candidate", scenario_key: "existing", scope: "project:demo", version: 1, content_digest: "sha256:classified" });
-    f.store.create("knowledge_claim", "global-claim", { status: "candidate", scope: "global", version: 1, content_digest: "sha256:global" });
+    f.store.create("knowledge_claim", "session-claim", { status: "candidate", scope: "session:one", version: 1, content_digest: "sha256:session" });
     f.store.create("knowledge_claim", "issue-missing-scope", { status: "candidate", version: 1, content_digest: "sha256:no-scope" });
     for (const [suffix, staleTarget] of staleTargets) f.store.create("evaluation_model_ticket", `stale-${suffix}`, {
       profile_id: profile.id, profile_version: profile.version, purpose: "knowledge_scenario_classification", status: "ready_for_adapter", target: staleTarget,
     });
-    assert.equal((kernel.ticketList({ purpose: "knowledge_scenario_classification" }).tickets as JsonObject[]).length, 2);
+    assert.equal((kernel.ticketList({ purpose: "knowledge_scenario_classification" }).tickets as JsonObject[]).length, 3);
     assert.throws(() => kernel.ticketComplete({ ticket_id: ticket.id, result_digest: "bad" }), /SHA-256/u);
     const resultDigest = `sha256:${"a".repeat(64)}`;
     const completed = kernel.ticketComplete({ ticket_id: ticket.id, result_digest: resultDigest });
     assert.equal((completed.ticket as JsonObject).status, "completed");
     assert.equal((completed.ticket as JsonObject).result_digest, resultDigest);
-    assert.equal((kernel.ticketList({ purpose: "knowledge_scenario_classification" }).tickets as JsonObject[]).length, 1);
+    assert.equal((kernel.ticketList({ purpose: "knowledge_scenario_classification" }).tickets as JsonObject[]).length, 2);
     const reviewedTicketId = String(reviewedTicket.id);
     assert.equal(((kernel.ticketComplete({ ticket_id: reviewedTicketId, result_digest: resultDigest }).ticket as JsonObject).status), "completed");
+    assert.equal(((kernel.ticketComplete({ ticket_id: globalTicket.id, result_digest: resultDigest }).ticket as JsonObject).status), "completed");
     assert.throws(() => kernel.ticketComplete({ ticket_id: ticket.id, result_digest: resultDigest }), /Only a ready Knowledge/u);
     f.store.create("evaluation_model_ticket", "foreign-ticket", { purpose: "workflow_evolution", status: "ready_for_adapter" });
     assert.throws(() => kernel.ticketComplete({ ticket_id: "foreign-ticket", result_digest: resultDigest }), /Only a ready Knowledge/u);
@@ -164,15 +171,15 @@ test("Knowledge classification tickets track the live candidate and keep result 
     for (const [claimId, claimValue] of [
       ["issue-rejected", { status: "rejected", scope: "project:demo", version: 1, content_digest: "sha256:rejected", source_id: "source-1" }],
       ["issue-classified", { status: "candidate", scenario_key: "known", scope: "project:demo", version: 1, content_digest: "sha256:classified", source_id: "source-1" }],
-      ["issue-global", { status: "candidate", scope: "global", version: 1, content_digest: "sha256:global", source_id: "source-1" }],
+      ["issue-session-scope", { status: "candidate", scope: "session:one", version: 1, content_digest: "sha256:session-scope", source_id: "source-1" }],
       ["untrusted-claim", { status: "candidate", scope: "project:demo", version: 1, content_digest: "sha256:untrusted", source_id: "untrusted-source" }],
       ["missing-source-ref", { status: "candidate", scope: "project:demo", version: 1, content_digest: "sha256:no-source" }],
       ["missing-scope", { status: "candidate", version: 1, content_digest: "sha256:no-scope", source_id: "source-1" }],
     ] as const) f.store.create("knowledge_claim", claimId, claimValue);
     f.store.create("knowledge_source", "untrusted-source", { status: "active", trust: "untrusted" });
-    for (const claimId of ["issue-rejected", "issue-classified", "issue-global", "untrusted-claim", "missing-source-ref", "missing-scope"]) {
+    for (const claimId of ["issue-rejected", "issue-classified", "issue-session-scope", "untrusted-claim", "missing-source-ref", "missing-scope"]) {
       assert.throws(() => kernel.issue({ profile_id: profile.id, purpose: "knowledge_scenario_classification", knowledge_claim_id: claimId,
-        input_ref: "input", output_contract_ref: "contract" }), /unclassified project Claim from an active trusted Source/u);
+        input_ref: "input", output_contract_ref: "contract" }), /unclassified (project or global )?Claim from an active trusted Source/u);
     }
     f.store.create("evaluation_model_ticket", "wrong-classification-purpose", { profile_id: profile.id, profile_version: profile.version,
       purpose: "workflow_evolution", status: "ready_for_adapter", target: { kind: "knowledge_scenario_classification", id: "claim-1" } });

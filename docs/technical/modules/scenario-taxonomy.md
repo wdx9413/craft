@@ -29,6 +29,7 @@
     knowledge.db
     md/                                  # Knowledge 正文与来源投影
     projects/{project-id}/knowledge-scenarios.json
+    global/knowledge-scenarios.json
   memory/
     memory.db
     memory.md
@@ -63,13 +64,13 @@ Catalog 是控制面元数据，不是逐场景复制正文的目录。项目 ID
 }
 ```
 
-Knowledge Catalog 条目另外保存 `claim_refs`，每个引用包含 Claim ID、Source ID、Evidence IDs 和候选/已审核/失效状态；不会保存 Claim 正文。分类前模型可调用 `craft_knowledge_scenario_list` 读取项目已有粗/细 key 与激活状态，再在 `craft_knowledge_claim_save` 提交项目 Claim 的 `scenario_key` 和可选 `coarse_scenario_key`。目录路径与 ID 校验由 Craft 固定处理。一个细场景至少有两个独立 Source 的已审核 Claim 才成为 active；一个粗场景至少有两个 active 细场景才成为 active。Source 撤销、Claim 失效或争议会从独立来源计数中退出。检索传入 `scenario_key` 时只返回 active 目录下匹配的受治理 Claim；普通检索仍受 Scope、Source 信任、Claim 状态和时效约束。
+Knowledge Catalog 条目另外保存 `claim_refs`，每个引用包含 Claim ID、Source ID、Evidence IDs 和候选/已审核/失效状态；不会保存 Claim 正文。项目与 global 各有自己的 Catalog 和 key 命名空间。分类前模型以 Claim 的精确 Scope 调用 `craft_knowledge_scenario_list`，再在 `craft_knowledge_claim_save` 提交匹配该 Scope 的 `scenario_key` 和可选 `coarse_scenario_key`。global Catalog 固定在 `knowledge/global/knowledge-scenarios.json`；项目 Catalog 固定在 `knowledge/projects/{project-id}/knowledge-scenarios.json`。目录路径与 ID 校验由 Craft 固定处理。一个细场景至少有两个独立 Source 的已审核 Claim 才成为 active；一个粗场景至少有两个 active 细场景才成为 active。Source 撤销、Claim 失效或争议会从独立来源计数中退出。场景检索只在请求的精确 Scope 内匹配 active Catalog，不会因为项目与 global 使用相同 key 而串用定义或证据；普通检索仍受 Scope、Source 信任、Claim 状态和时效约束。
 
 Experience Catalog 保存语义定义、验证器摘要、观察引用和场景层级；定义来自模型对已验证任务目标、变更区域、副作用和验收路径的归纳，不从 Knowledge 或 Memory 复制。Experience 与 Knowledge 分开保存 Catalog，不能跨能力复用分类 ID。Host 在分类前调用 `craft_experience_scenario_list` 读取当前项目的 active/candidate/conflicted 粗细场景、已有定义、验证器映射和独立观察计数。复用已有场景时沿用其定义；新场景由 Host 模型提出 key 与定义。细场景按目标或验收路径区分；粗场景要求多个细场景具有共同目标/验收边界，不能仅凭同一工具或命令合并。Hook 只可用唯一精确映射读取已存在场景，不得用命令摘要造语义 ID。
 
 Experience Catalog 自身治理晋升：目录只保存最多两个不同已验证任务 ID 的 SHA-256 摘要，不保存原始任务 ID；同一任务重试或重复 finalization 不增加独立计数。细场景在两个不同任务后自动 active，粗场景在两个 active 细场景后自动 active。晋升不接受调用方布尔开关，避免上游误报或重放导致提前激活。完整 Observation 和 Evidence 引用仍由 Experience Ledger 保留。
 
-Knowledge Catalog 同样保存模型提出的语义定义。分类 Worker 将 Claim 与当前项目 Catalog 一起交给模型；模型根据主题及适用范围/来源证据边界复用现有定义，或提出新的细场景定义，只有存在多个不同细场景时才建议粗父项。对已有 key 的定义采用首次写入固定，模型不能在普通分类调用中覆盖既有定义；定义修订需要单独的版本化迁移，以免分类漂移被静默吸收。
+Knowledge Catalog 同样保存模型提出的语义定义。分类 Worker 将 Claim 与该 Claim 所属 Scope 的 Catalog 一起交给模型；模型根据主题及适用范围/来源证据边界复用现有定义，或提出新的细场景定义，只有存在多个不同细场景时才建议粗父项。对已有 key 的定义采用首次写入固定，模型不能在普通分类调用中覆盖既有定义；定义修订需要单独的版本化迁移，以免分类漂移被静默吸收。项目与 global 目录互相隔离，即使 key 相同，也分别累计可信来源证据。
 
 ## 本轮验收
 
@@ -83,8 +84,8 @@ Knowledge Catalog 同样保存模型提出的语义定义。分类 Worker 将 Cl
 
 ## 退出操作
 
-Knowledge 和 Experience 通过 `craft_knowledge_scenario_retire` / `craft_experience_scenario_retire` 退出一个项目场景。调用必须绑定当前 `catalog_version`、稳定 `request_id` 和简短原因；只持久化原因摘要，不存原因正文。请求重放返回同一迁移结果；版本过期要求重新读取 Catalog。退出不会删除 Claim、Observation 或 Evidence 历史，后续误用该 key 会被拒绝或降为未分类。粗场景只有在所有子场景都已退出后才可退出。模型发现细场景边界变化时先提交合并/拆分候选；候选目标积累独立证据并自动晋升后，再退出旧 key。旧 Claim/Observation 与 Procedure 保留原场景引用，迁移不会伪造历史事实。
+Knowledge 和 Experience 通过 `craft_knowledge_scenario_retire` / `craft_experience_scenario_retire` 退出一个 Scope 内的场景。调用必须绑定当前 `catalog_version`、稳定 `request_id` 和简短原因；只持久化原因摘要，不存原因正文。请求重放返回同一迁移结果；版本过期要求重新读取 Catalog。退出不会删除 Claim、Observation 或 Evidence 历史，后续误用该 key 会被拒绝或降为未分类。粗场景只有在所有子场景都已退出后才可退出。模型发现细场景边界变化时先提交合并/拆分候选；候选目标积累独立证据并自动晋升后，再退出旧 key。旧 Claim/Observation 与 Procedure 保留原场景引用，迁移不会伪造历史事实。
 
 ## 尚未达到的运行验收
 
-Experience 目录由 Learning Cycle 根据模型提交的粗/细分类及验证 digest 更新，分类身份贯穿 Hook 观察；同一项目的目录更新经独占锁串行化，遗留平铺目录仍兼容。Knowledge 目录由项目 Claim 保存与审核调用更新，独立可信 Source 达阈值后激活；失效 Source 会撤销对应引用，场景检索要求目录仍 active。两套 Catalog 均有本地边界测试和 100% 增量覆盖。运行时 Host 是否持续发送模型分类、形成调用记录并更新 Catalog，必须在目标 Host 上现场验证；本地测试与 bundle smoke 不能替代这项运行验收。
+Experience 目录由 Learning Cycle 根据模型提交的粗/细分类及验证 digest 更新，分类身份贯穿 Hook 观察；同一项目的目录更新经独占锁串行化，遗留平铺目录仍兼容。Knowledge 项目与 global 目录由对应 Scope 的 Claim 保存与审核调用更新，独立可信 Source 达阈值后激活；失效 Source 会撤销对应引用，场景检索要求该 Scope 的目录仍 active。两套 Catalog 均有本地边界测试和 100% 增量覆盖。运行时 Host 是否持续发送模型分类、形成调用记录并更新 Catalog，必须在目标 Host 上现场验证；本地测试与 bundle smoke 不能替代这项运行验收。

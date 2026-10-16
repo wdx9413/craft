@@ -19,6 +19,7 @@ import { CraftService } from "../core/service.ts";
 import { digestJson, stableDigest } from "../common/craft-common-base/src/digest.ts";
 import { analyzePythonCheckpoint } from "../capability/craft-codebase/python-analysis.ts";
 import { analyzeJavaCheckpoint } from "../capability/craft-codebase/java-analysis.ts";
+import { CodeSymbolSearchIndex } from "../capability/craft-codebase/context-search.ts";
 
 const lspFixturePath = fileURLToPath(new URL("./fixtures/lsp-stdio-fixture.cjs", import.meta.url));
 
@@ -256,29 +257,62 @@ test("symbol search context rejects stale and invalid spans and stops at its ext
     const budgetContent = "a".repeat(2_100_000);
     const blankPath = "src/search-blank.ts";
     const blankContent = " ".repeat(32);
+    const ownerPath = "src/simulation-service.ts";
+    const ownerContent = "export class SimulationService {\n  run_task() { return 'queued'; }\n}\nexport function unrelatedTask() { return 'outside'; }\n";
+    const decoyPath = "src/sql-task.ts";
+    const decoyContent = "export function _execute_task() { return 'sql'; }\n";
     await writeFile(join(f.project, budgetPath), budgetContent);
     await writeFile(join(f.project, blankPath), blankContent);
+    await writeFile(join(f.project, ownerPath), ownerContent);
+    await writeFile(join(f.project, decoyPath), decoyContent);
     const checkpoint = f.service.workspaceCheckpoint({ workspace_id: f.workspace.id, checkpoint_id: "search_context_edges", label: "search context" }).checkpoint as JsonObject;
     const entries = new Map((checkpoint.entries as JsonObject[]).map(entry => [String(entry.path), entry]));
     const budgetEntry = entries.get(budgetPath)!;
     const blankEntry = entries.get(blankPath)!;
-    const context = (f.kernel as unknown as { symbolSearchContext(index: JsonObject, symbols: readonly JsonObject[]): Map<string, string> }).symbolSearchContext;
+    const ownerEntry = entries.get(ownerPath)!;
+    const decoyEntry = entries.get(decoyPath)!;
+    const context = (f.kernel as unknown as { symbolSearchContext(index: JsonObject, symbols: readonly JsonObject[]): {
+      identifiers: Map<string, string>; enclosingTypes: Map<string, string>;
+    } }).symbolSearchContext;
     const index = { checkpoint_id: checkpoint.id };
     const symbolAt = (id: string, path: string, sourceDigest: string, start: number, end: number): JsonObject => ({
       id, kind: "symbol", declaration_kind: "function", name: id, path, source_digest: sourceDigest, declaration_span: { start_offset: start, end_offset: end },
     });
 
-    assert.equal(context.call(f.kernel, index, [symbolAt("stale", budgetPath, "stale-digest", 0, 8)]).size, 0);
-    assert.equal(context.call(f.kernel, index, [symbolAt("invalid", budgetPath, String(budgetEntry.digest), -1, 8)]).size, 0);
-    assert.equal(context.call(f.kernel, index, [symbolAt("blank", blankPath, String(blankEntry.digest), 0, blankContent.length)]).size, 0);
+    assert.equal(context.call(f.kernel, index, [symbolAt("stale", budgetPath, "stale-digest", 0, 8)]).identifiers.size, 0);
+    assert.equal(context.call(f.kernel, index, [symbolAt("invalid", budgetPath, String(budgetEntry.digest), -1, 8)]).identifiers.size, 0);
+    assert.equal(context.call(f.kernel, index, [symbolAt("blank", blankPath, String(blankEntry.digest), 0, blankContent.length)]).identifiers.size, 0);
     const tied = context.call(f.kernel, index, [
       symbolAt("z", budgetPath, String(budgetEntry.digest), 0, 8),
       symbolAt("a", budgetPath, String(budgetEntry.digest), 0, 8),
     ]);
-    assert.deepEqual([...tied.keys()], ["a", "z"]);
+    assert.deepEqual([...tied.identifiers.keys()], ["a", "z"]);
     const bounded = context.call(f.kernel, index, Array.from({ length: 126 }, (_, number) =>
       symbolAt(`budget_${String(number).padStart(3, "0")}`, budgetPath, String(budgetEntry.digest), 0, budgetContent.length)));
-    assert.equal(bounded.size, 126);
+    assert.equal(bounded.identifiers.size, 126);
+
+    const classEnd = ownerContent.indexOf("\n}\n") + 2;
+    const owner = { ...symbolAt("simulation-service", ownerPath, String(ownerEntry.digest), 0, classEnd),
+      name: "SimulationService", declaration_kind: "class" };
+    const targetStart = ownerContent.indexOf("run_task");
+    const targetEnd = ownerContent.indexOf("}", targetStart) + 1;
+    const target = { ...symbolAt("run-task", ownerPath, String(ownerEntry.digest), targetStart, targetEnd),
+      name: "run_task", declaration_kind: "method" };
+    const unrelatedStart = ownerContent.indexOf("unrelatedTask");
+    const unrelatedEnd = ownerContent.indexOf("}", unrelatedStart) + 1;
+    const unrelated = { ...symbolAt("unrelated-task", ownerPath, String(ownerEntry.digest), unrelatedStart, unrelatedEnd),
+      name: "unrelatedTask", declaration_kind: "function" };
+    const decoyStart = decoyContent.indexOf("_execute_task");
+    const decoyEnd = decoyContent.indexOf("}", decoyStart) + 1;
+    const decoy = { ...symbolAt("execute-task", decoyPath, String(decoyEntry.digest), decoyStart, decoyEnd),
+      name: "_execute_task", declaration_kind: "function" };
+    const enriched = context.call(f.kernel, index, [owner, target, unrelated, decoy]);
+    assert.match(enriched.enclosingTypes.get("run-task") ?? "", /SimulationService/u);
+    assert.doesNotMatch(enriched.enclosingTypes.get("unrelated-task") ?? "", /SimulationService/u);
+    assert.doesNotMatch(enriched.enclosingTypes.get("execute-task") ?? "", /SimulationService/u);
+    const ranked = new CodeSymbolSearchIndex([owner, target, decoy], enriched.identifiers, enriched.enclosingTypes)
+      .rank("execute a queued simulation task", 3);
+    assert.equal(ranked[0]!.node.id, "run-task");
   } finally { await close(f); }
 });
 
@@ -301,9 +335,11 @@ test("symbol search context reserves extraction budget across checkpoint files",
     });
     const symbols = earlyPaths.map((path, index) => symbolAt(`padding_${index}`, path, `pad${index}`));
     symbols.push(symbolAt("target", targetPath, "target"));
-    const context = (f.kernel as unknown as { symbolSearchContext(index: JsonObject, symbols: readonly JsonObject[]): Map<string, string> }).symbolSearchContext;
+    const context = (f.kernel as unknown as { symbolSearchContext(index: JsonObject, symbols: readonly JsonObject[]): {
+      identifiers: Map<string, string>; enclosingTypes: Map<string, string>;
+    } }).symbolSearchContext;
     const extracted = context.call(f.kernel, { checkpoint_id: checkpoint.id }, symbols);
-    assert.match(extracted.get("target") ?? "", /distinctiveRetrievalNeedle/u);
+    assert.match(extracted.identifiers.get("target") ?? "", /distinctiveRetrievalNeedle/u);
   } finally { await close(f); }
 });
 

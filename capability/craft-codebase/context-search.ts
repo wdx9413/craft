@@ -31,6 +31,8 @@ const CODE_TERM_ALIASES: Record<string, readonly string[]> = {
 const ACTION_TERMS = new Set(["analyze", "build", "call", "collect", "combine", "create", "execute", "find", "launch", "lookup", "merge", "normalize", "persist", "plan", "resolve", "run", "search", "simulate", "start"]);
 const SYMBOL_ACTION_TERMS = new Set([...ACTION_TERMS, "cancel", "delete", "fetch", "get", "list", "read", "remove", "stop", "update"]);
 const GENERIC_ACTION_TERMS = new Set(["build", "call", "create", "execute", "run", "start"]);
+const STRUCTURE_TERMS = new Set(["adapter", "agent", "client", "controller", "engine", "factory", "manager", "processor", "repository", "scheduler", "server", "service", "store", "worker"]);
+const STRUCTURAL_DECLARATION_KINDS = new Set(["class", "enum", "interface", "struct", "type"]);
 const GENERIC_TASK_TERMS = new Set([...ACTION_TERMS, "api", "endpoint", "handler", "task", "job", "http", "multiple", "concurrent", "concurrency", "parallel"]);
 const GENERIC_SYMBOL_IDENTIFIERS = new Set([...GENERIC_TASK_TERMS, "conversation", "extract", "file", "id", "import", "module", "name", "path", "request", "result", "turn", "type", "value"]);
 
@@ -52,9 +54,12 @@ export class CodeSymbolSearchIndex {
   readonly #byId = new Map<string, JsonObject>();
   readonly #nameTermsById = new Map<string, ReadonlySet<string>>();
   readonly #pathTermsById = new Map<string, ReadonlySet<string>>();
+  readonly #ownerTermsById = new Map<string, ReadonlySet<string>>();
   readonly #partialNamesByTrigram = new Map<string, Set<string>>();
+  readonly #methodNames = new Set<string>();
 
-  constructor(nodes: readonly JsonObject[], searchContext: ReadonlyMap<string, string> = new Map()) {
+  constructor(nodes: readonly JsonObject[], searchContext: ReadonlyMap<string, string> = new Map(),
+    enclosingTypeContext: ReadonlyMap<string, string> = new Map()) {
     for (const node of nodes) {
       const id = String(node.id ?? "");
       if (!id || this.#byId.has(id)) continue;
@@ -66,6 +71,8 @@ export class CodeSymbolSearchIndex {
       this.#byId.set(id, node);
       this.#nameTermsById.set(id, new Set(nameTerms));
       this.#pathTermsById.set(id, new Set(pathTerms));
+      this.#ownerTermsById.set(id, new Set(identifierTerms(enclosingTypeContext.get(id) ?? "")));
+      if (node.declaration_kind === "method") this.#methodNames.add(name.toLowerCase());
       const characters = [...name.toLowerCase()];
       for (let offset = 0; offset + 3 <= characters.length; offset++) {
         const trigram = characters.slice(offset, offset + 3).join("");
@@ -85,9 +92,11 @@ export class CodeSymbolSearchIndex {
     const queryTerms = new Set(terms);
     const queryActionTerms = new Set(terms.filter(term => SYMBOL_ACTION_TERMS.has(term)));
     const queryNameTerms = identifierTerms(queryText);
+    const queryStructureTerms = new Set([...queryTerms].filter(term => STRUCTURE_TERMS.has(term)));
     const queryIdentifiers = (queryText.match(/[A-Za-z_$][A-Za-z0-9_$]*/gu) ?? []);
     const queryIdentifierNames = new Set(queryIdentifiers.map(term => term.toLowerCase()));
     const queryCodeIdentifiers = new Set(queryIdentifiers.filter(term => /[a-z][A-Z]/u.test(term)).map(term => term.toLowerCase()));
+    const explicitMethodMentioned = [...queryCodeIdentifiers].some(name => this.#methodNames.has(name));
     const queryTypeIdentifiers = new Set(queryIdentifiers.filter(term => /^[A-Z][A-Za-z0-9_$]*[A-Z][A-Za-z0-9_$]*$/u.test(term)));
     const explicitTerms = new Set(queryNameTerms);
     const analyzerIntent = identifierTerms(queryText).includes("analyzer");
@@ -98,10 +107,16 @@ export class CodeSymbolSearchIndex {
       const name = typeof node.name === "string" ? node.name.toLowerCase() : "";
       const nameTerms = this.#nameTermsById.get(hit.id)!;
       const pathTerms = this.#pathTermsById.get(hit.id)!;
+      const ownerTerms = this.#ownerTermsById.get(hit.id)!;
       const nameMatches = [...queryTerms].filter(term => nameTerms.has(term)).length;
       const pathMatches = [...queryTerms].filter(term => pathTerms.has(term)).length;
       const domainMatches = [...queryTerms].filter(term => !explicitTerms.has(term) && !GENERIC_TASK_TERMS.has(term) && nameTerms.has(term)).length;
+      const ownerDomainMatches = [...queryTerms].filter(term => !GENERIC_TASK_TERMS.has(term)
+        && !nameTerms.has(term) && !pathTerms.has(term) && ownerTerms.has(term)).length;
+      const ownerDomainMatch = ownerDomainMatches * 18;
       const declarationKind = String(node.declaration_kind ?? "");
+      const structureMatch = !explicitMethodMentioned && STRUCTURAL_DECLARATION_KINDS.has(declarationKind)
+        && [...queryStructureTerms].some(term => nameTerms.has(term)) ? 24 : 0;
       const declarationMatch = (terms.includes("function") || analyzerIntent) && declarationKind === "function" ? 24 : 0;
       const actionMatch = actionIntent && ["function", "method"].includes(declarationKind) ? 36 : 0;
       const exactIdentifierMatch = queryCodeIdentifiers.has(name)
@@ -122,7 +137,7 @@ export class CodeSymbolSearchIndex {
       const symbolActionTerms = [...nameTerms].filter(term => SYMBOL_ACTION_TERMS.has(term));
       const actionConflictPenalty = queryActionTerms.size > 0 && symbolActionTerms.length > 0
         && !symbolActionTerms.some(term => queryActionTerms.has(term)) ? 32 : 0;
-      return [hit.id, { node, score: hit.score + fieldMatch + domainMatches * 30 + declarationMatch + actionMatch + exactIdentifierMatch + exactWordMatch + namedMethodMatch + constructorMatch + namedActionMatch - testPathPenalty
+      return [hit.id, { node, score: hit.score + fieldMatch + domainMatches * 30 + ownerDomainMatch + structureMatch + declarationMatch + actionMatch + exactIdentifierMatch + exactWordMatch + namedMethodMatch + constructorMatch + namedActionMatch - testPathPenalty
         - actionConflictPenalty + (name === lowered ? 20 : name.startsWith(lowered) ? 5 : name.includes(lowered) ? 2 : 0) }] as const;
     }));
     // Preserve partial-name discovery such as `ensureRepo` -> `ensureRepository`.

@@ -26,9 +26,11 @@ const MAX_SHARD_BYTES = 1_000_000;
 const MAX_ROUTE_BYTES = 64 * 1024 * 1024;
 const MAX_ROUTE_SHARD_BYTES = 4 * 1024 * 1024;
 const CURRENT_GRAPH_STORAGE = "sharded-v4";
-const SEARCH_CONTEXT_DECLARATION_KINDS = new Set(["function", "method", "class", "interface", "type", "enum"]);
+const SEARCH_CONTEXT_DECLARATION_KINDS = new Set(["function", "method", "class", "interface", "type", "enum", "struct"]);
+const SEARCH_CONTEXT_CONTAINER_KINDS = new Set(["class", "interface", "type", "enum", "struct"]);
 
 type SourceFile = { readonly path: string; readonly digest: string; readonly content: string; readonly language: string };
+type SymbolSearchContext = { readonly identifiers: Map<string, string>; readonly enclosingTypes: Map<string, string> };
 type Node = JsonObject & { readonly id: string; readonly kind: "file" | "symbol"; readonly path: string; readonly name: string; readonly source_digest: string; readonly span: JsonObject };
 type Edge = JsonObject & { readonly id: string; readonly kind: "imports" | "calls" | "references" | "definitions" | "implements" | "extends" | "type_definition"; readonly from_node_id: string; readonly to_node_id: string; readonly provenance: "extracted" | "heuristic"; readonly confidence: "high" | "partial"; readonly source_span: JsonObject };
 type EdgeRoute = { bucket: string; id: string; digest: string };
@@ -866,21 +868,21 @@ export class CodebaseIndexKernel {
     }
     const symbols = this.loadNodes(index).filter(node => node.kind === "symbol");
     const searchContext = this.symbolSearchContext(index, symbols);
-    const search = new CodeSymbolSearchIndex(symbols, searchContext);
+    const search = new CodeSymbolSearchIndex(symbols, searchContext.identifiers, searchContext.enclosingTypes);
     this.#symbolSearchCache.set(String(index.id), { fingerprint, search });
     while (this.#symbolSearchCache.size > 2) this.#symbolSearchCache.delete(this.#symbolSearchCache.keys().next().value as string);
     return search;
   }
   /** Build ephemeral identifier-only search terms from digest-verified declarations. */
-  private symbolSearchContext(index: JsonObject, symbols: readonly Node[]): Map<string, string> {
+  private symbolSearchContext(index: JsonObject, symbols: readonly Node[]): SymbolSearchContext {
     const spans = symbols.filter(node => SEARCH_CONTEXT_DECLARATION_KINDS.has(String(node.declaration_kind ?? ""))
       && node.declaration_span && typeof node.declaration_span === "object");
-    if (!spans.length) return new Map();
+    if (!spans.length) return { identifiers: new Map(), enclosingTypes: new Map() };
     const checkpoint = this.store.get("workspace_checkpoint", String(index.checkpoint_id));
     const entries = new Map((checkpoint.entries as JsonObject[]).map(entry => [String(entry.path), entry]));
     const byPath = new Map<string, Node[]>();
     for (const symbol of spans) byPath.set(symbol.path, [...(byPath.get(symbol.path) ?? []), symbol]);
-    const contexts = new Map<string, string>();
+    const contexts = new Map<string, string>(), enclosingTypes = new Map<string, string>();
     const perPathBudget = Math.floor(2_000_000 / byPath.size);
     for (const [path, fileSymbols] of [...byPath].sort(([a], [b]) => a.localeCompare(b))) {
       const entry = entries.get(path);
@@ -888,18 +890,23 @@ export class CodebaseIndexKernel {
       const source = this.sourceFile(String(checkpoint.snapshot_root), entry);
       const orderedSymbols = fileSymbols.sort((a, b) => Number((a.declaration_span as JsonObject).start_offset) - Number((b.declaration_span as JsonObject).start_offset) || a.id.localeCompare(b.id));
       const perSymbolBudget = Math.floor(perPathBudget / orderedSymbols.length);
+      const containers: JsonObject[] = [];
       for (const symbol of orderedSymbols) {
         const range = symbol.declaration_span as JsonObject;
         const start = Number(range.start_offset), end = Number(range.end_offset);
         if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end < start || end > source.content.length) continue;
+        while (containers.length && Number((containers.at(-1)!.declaration_span as JsonObject).end_offset) < end) containers.pop();
+        const ownerNames = containers.slice(-8).map(owner => String(owner.name)).filter(Boolean);
+        if (ownerNames.length) enclosingTypes.set(symbol.id, ownerNames.join(" "));
         const snippet = source.content.slice(start, Math.min(end, start + Math.min(16_000, perSymbolBudget)));
         // Keep only code-like identifiers in the process-local BM25 corpus. Source prose and
         // bodies are neither persisted nor returned by symbol search.
         const identifiers = snippet.match(/[A-Za-z_$][\w$]*/gu) ?? [];
         if (identifiers.length) contexts.set(symbol.id, identifiers.join(" "));
+        if (SEARCH_CONTEXT_CONTAINER_KINDS.has(String(symbol.declaration_kind))) containers.push(symbol);
       }
     }
-    return contexts;
+    return { identifiers: contexts, enclosingTypes };
   }
   private impactDependencyDigest(dependencies: ImpactDependencies): string {
     const routes = [...dependencies.routes].sort(), shards = [...dependencies.shards].sort();

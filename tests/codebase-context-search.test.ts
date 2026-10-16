@@ -22,6 +22,29 @@ test("Codebase BM25 ranks exact names and camelCase natural-language matches det
   assert.throws(() => rankCodeSymbols(nodes, "session", 0), /positive integer/u);
 });
 
+test("Codebase favors a matching architecture type for object queries while action queries keep functions ahead", () => {
+  const scheduler = [
+    { ...symbol("type", "ConversationScheduler", "scheduler/conversation_scheduler.py"), declaration_kind: "class" },
+    { ...symbol("action", "start_multiple_conversations", "scheduler/conversation_scheduler.py"), declaration_kind: "function" },
+  ];
+  assert.equal(rankCodeSymbols(scheduler, "conversation scheduler for multi-turn simulation", 2)[0]!.node.id, "type");
+  assert.equal(rankCodeSymbols(scheduler, "start multiple conversations", 2)[0]!.node.id, "action");
+  assert.equal(rankCodeSymbols([
+    { ...symbol("manager", "UserManager", "src/user-manager.ts"), declaration_kind: "class" },
+    { ...symbol("method", "refreshSession", "src/user-manager.ts"), declaration_kind: "method" },
+    { ...symbol("unnamed-method", "", "src/user-manager.ts"), declaration_kind: "method", name: null },
+  ], "UserManager cache lifecycle", 2)[0]!.node.id, "manager");
+  assert.equal(rankCodeSymbols([
+    { ...symbol("manager", "UserManager", "src/user-manager.ts"), declaration_kind: "class" },
+    { ...symbol("method", "refreshSession", "src/user-manager.ts"), declaration_kind: "method" },
+    { ...symbol("unnamed-method", "", "src/user-manager.ts"), declaration_kind: "method", name: null },
+  ], "UserManager refreshSession", 2)[0]!.node.id, "method");
+  assert.equal(rankCodeSymbols([
+    { ...symbol("unrelated-type", "ConversationViewer", "ui/ConversationViewer.jsx"), declaration_kind: "class" },
+    { ...symbol("target", "normalizeRow", "ui/ConversationViewer.jsx"), declaration_kind: "function" },
+  ], "normalize a row for the conversation viewer", 2)[0]!.node.id, "target");
+});
+
 test("Codebase query normalization expands identifiers and common task-language variants", () => {
   const terms = codeQueryTerms("TypeScript semantic checker analyzer");
   assert(terms.includes("typescript") && terms.includes("type") && terms.includes("script"));

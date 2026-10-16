@@ -5,6 +5,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { MCP_PREFERRED_PROTOCOL_VERSION } from "../../core/distribution-and-first-run.ts";
+import { CRAFT_RELEASE_VERSION } from "../../core/version.ts";
 import { CraftStore } from "../../core/infrastructure/store.ts";
 import { craftPaths } from "../../core/infrastructure/paths.ts";
 
@@ -64,7 +65,8 @@ async function smoke(name: string): Promise<void> {
       const id = ++nextId;
       const response = new Promise<Record<string, any>>((resolveResponse, reject) => pending.set(id, { resolve: resolveResponse, reject }));
       child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, ...(params ? { params } : {}) })}\n`);
-      return withTimeout(response, timeoutMs, `${name}:${method}`);
+      const operation = params && typeof params.name === "string" ? `${method}:${params.name}` : method;
+      return withTimeout(response, timeoutMs, `${name}:${operation}`);
     };
     const expectedDailyTool = name === "craft-codebase" ? "craft_codebase_status" : name === "craft-context" ? "craft_context_open" : ["craft-knowledge", "craft-memory", "craft-experience"].includes(name) ? "craft_component_readiness_get" : "craft_info";
     const callTool = name === "craft-codebase" ? "craft_codebase_repository_ensure" : expectedDailyTool;
@@ -76,7 +78,7 @@ async function smoke(name: string): Promise<void> {
     const listed = await request("tools/list", undefined, timeoutMs);
     const result = await request("tools/call", { name: callTool, arguments: callArguments }, timeoutMs);
     const tools = listed.result.tools as Array<{ name: string; annotations?: { readOnlyHint?: boolean }; inputSchema?: { properties?: Record<string, { type?: string }> } }>;
-    assert.equal(initialized.result.serverInfo.version, "0.12.44");
+    assert.equal(initialized.result.serverInfo.version, CRAFT_RELEASE_VERSION);
     assert(tools.length > 0);
     assert(tools.some((tool) => tool.name === expectedDailyTool));
     assert(tools.some((tool) => tool.name === callTool));
@@ -92,6 +94,19 @@ async function smoke(name: string): Promise<void> {
         return response.result.structuredContent as { tools: Array<{ name: string; annotations?: { readOnlyHint?: boolean } }>; schema_estimated_tokens: number };
       };
       const core = await discover("code"), analysis = await discover("code-analysis");
+      const knowledge = await discover("knowledge"), experience = await discover("experience"), memory = await discover("memory");
+      for (const required of ["craft_knowledge_bootstrap_install", "craft_knowledge_source_list", "craft_knowledge_source_register", "craft_knowledge_source_ingest",
+        "craft_evidence_record", "craft_knowledge_claim_save", "craft_knowledge_claim_get", "craft_knowledge_claim_list",
+        "craft_knowledge_semantic_review_packet", "craft_knowledge_host_review", "craft_knowledge_auto_review", "craft_knowledge_promotion_policy_get"])
+        assert(knowledge.tools.some(tool => tool.name === required), `Knowledge discovery is missing ${required}`);
+      for (const required of ["craft_memory_capture_observed_fact", "craft_memory_ledger_get", "craft_memory_ledger_list", "craft_memory_ledger_transition",
+        "craft_memory_conflict_list", "craft_memory_conflict_resolve", "craft_memory_maintenance_run", "craft_memory_session_finalize"])
+        assert(memory.tools.some(tool => tool.name === required), `Memory discovery is missing ${required}`);
+      for (const required of ["craft_learning_cycle_finalize", "craft_experience_procedure_submit", "craft_experience_learning_request_get",
+        "craft_experience_learning_evaluation_dispatch", "craft_experience_learning_evaluation_dispatch_list",
+        "craft_experience_learning_evaluation_run", "craft_experience_learning_evaluation_result",
+        "craft_evaluation_model_profile_get", "craft_evaluation_model_ticket_list"])
+        assert(experience.tools.some(tool => tool.name === required), `Experience discovery is missing ${required}`);
       const names = (profile: typeof core) => profile.tools.filter((tool) => tool.name.startsWith("craft_codebase_")).map((tool) => tool.name).sort();
       assert.deepEqual(names(core), ["craft_codebase_callers_find", "craft_codebase_context_slice", "craft_codebase_impact_query",
         "craft_codebase_relations_find", "craft_codebase_symbol_explore", "craft_codebase_symbol_find", "craft_codebase_symbol_read",

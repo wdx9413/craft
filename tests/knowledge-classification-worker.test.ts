@@ -11,8 +11,10 @@ const claim: JsonObject = { id: "claim-1", version: 1, status: "candidate", scop
 
 function fixture(modelText = '{"decision":"classified","scenario_key":"build.validation","scenario_definition":{"summary":"构建验证规则","applies_when":"适用于项目构建验收","excludes":"与构建无关的事实"},"coarse_scenario_key":"engineering","coarse_scenario_definition":{"summary":"工程主题","applies_when":"属于项目工程实践","excludes":"业务领域事实"}}', claimStatus = "candidate", claimScope: string = String(claim.scope)) {
   const calls: Array<{ name: string; args: JsonObject }> = [];
-  const scopeEnvelope = { applicability: { kind: "project", id: claimScope.split(":").slice(1).join(":") },
-    custody: { kind: "project", id: claimScope.split(":").slice(1).join(":") }, audience: { mode: "scoped", principal_ids: [] }, purpose: "fact", retention: "long_term", tenant_id: null };
+  const scopeKind = claimScope === "global" ? "global" : "project";
+  const scopeId = scopeKind === "global" ? "global" : claimScope.split(":").slice(1).join(":");
+  const scopeEnvelope = { applicability: { kind: scopeKind, id: scopeId },
+    custody: { kind: scopeKind, id: scopeId }, audience: { mode: scopeKind === "global" ? "public" : "scoped", principal_ids: [] }, purpose: "fact", retention: "long_term", tenant_id: null };
   const client: KnowledgeClassificationClient = { async call(name, args = {}) {
     calls.push({ name, args });
     if (name === "craft_knowledge_claim_list") return { claims: [{ ...claim, status: claimStatus, scope: claimScope, scope_envelope: scopeEnvelope }] };
@@ -32,7 +34,7 @@ function fixture(modelText = '{"decision":"classified","scenario_key":"build.val
     assert.match(content, /Builds run with pnpm/u);
     assert.match(content, /engineering/u);
     const packet = JSON.parse(content) as JsonObject;
-    assert.equal(packet.project_id, claimScope === "project:project:canonical-project" ? "canonical-project" : "demo");
+    assert.equal(packet.scope, claimScope);
     assert.match(JSON.stringify(packet.taxonomy), /definition/u);
     return { text: modelText, model: "test-model", usage: { input_tokens: 10, output_tokens: 8 } };
   } };
@@ -69,6 +71,14 @@ test("classification uses the normalized project id for canonical scope model in
   const result = await runKnowledgeScenarioClassificationOnce({ client: f.client, providers: [provider], transport: f.transport });
   assert.equal((result.outcomes as JsonObject[])[0]?.status, "classified");
   assert.equal(f.calls.find(call => call.name === "craft_knowledge_scenario_list")?.args.scope, "project:project:canonical-project");
+});
+
+test("classification routes global Claims through the isolated global Knowledge taxonomy", async () => {
+  const f = fixture(undefined, "candidate", "global");
+  const result = await runKnowledgeScenarioClassificationOnce({ client: f.client, providers: [provider], transport: f.transport });
+  assert.equal((result.outcomes as JsonObject[])[0]?.status, "classified");
+  assert.equal(f.calls.find(call => call.name === "craft_knowledge_scenario_list")?.args.scope, "global");
+  assert.equal(f.calls.find(call => call.name === "craft_knowledge_claim_save")?.args.scope, "global");
 });
 
 test("uncertain output completes a content-free ticket without mutating the Claim", async () => {
@@ -142,7 +152,7 @@ test("classifier validates every model and Claim boundary with safe defaults", a
     { ...claim, id: "inactive-status", status: "rejected" },
     { ...claim, id: "already-classified", scenario_key: "existing" },
     { ...claim, id: "no-content", content: undefined },
-    { ...claim, id: "no-project", scope: "global" },
+    { ...claim, id: "unsupported-scope", scope: "session:one" },
     { ...claim, id: "missing-scope", scope: undefined },
   ];
   const filtering: KnowledgeClassificationClient = { async call(name, args) {

@@ -189,6 +189,47 @@ test("LSP onboarding degrades without a worker entry and supports packaged JavaS
   }
 });
 
+test("LSP worker failures retain safe request stage and protocol code in repository diagnostics", async () => {
+  const f = await fixture();
+  const previousEntry = process.argv[1];
+  try {
+    f.write("main.cpp", "int workerSymbol() { return 1; }\n");
+    f.write("main.ts", "export function fallbackSymbol() {}\n");
+    writeFileSync(join(f.store.paths.configDir, "codebase-lsp.json"), JSON.stringify({ schema_version: 1,
+      adapters: [{ language: "cpp", command: process.execPath, args: [resolve("tests/fixtures/lsp-stdio-fixture.cjs"), "request-error"] }] }));
+    delete (f.service as unknown as { analyzeLsp?: unknown }).analyzeLsp;
+    process.argv[1] = resolve("bin/craft-mcp.ts");
+    const result = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
+    assert.equal(result.status, "ready");
+    const summaryDiagnostics = (result.summary as JsonObject).diagnostics as JsonObject[];
+    const diagnostic = summaryDiagnostics.find(item => item.language === "cpp")
+      ?? summaryDiagnostics.flatMap(item => [
+        ...(Array.isArray(item.degraded_languages) ? item.degraded_languages as JsonObject[] : []),
+        ...(Array.isArray((item.diagnostics as JsonObject | undefined)?.degraded_languages) ? (item.diagnostics as JsonObject).degraded_languages as JsonObject[] : []),
+      ]).find(item => item.language === "cpp");
+    assert(diagnostic, JSON.stringify(result.summary));
+    assert.equal(diagnostic.reason, "server_request_failed");
+    assert.equal(diagnostic.failure_stage, "textDocument/documentSymbol");
+    assert.equal(diagnostic.protocol_error_code, -32603);
+    assert.equal(JSON.stringify(diagnostic).includes("fixture failure"), false);
+
+    f.write("main.cpp", "int changedWorkerSymbol() { return 2; }\n");
+    const workerPath = join(f.root, "safe-failure-worker.cjs");
+    writeFileSync(workerPath, "process.stdout.write(JSON.stringify({format:'craft-lsp-worker-failure-v1'}));\n");
+    process.argv[1] = workerPath;
+    const degraded = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
+    const degradedDiagnostics = (degraded.summary as JsonObject).diagnostics as JsonObject[];
+    const degradedDiagnostic = degradedDiagnostics.flatMap(item => Array.isArray(item.degraded_languages) ? item.degraded_languages as JsonObject[] : [])
+      .find(item => item.language === "cpp");
+    assert.equal(degradedDiagnostic?.reason, "analysis_failed");
+    assert.equal(degradedDiagnostic?.failure_stage, undefined);
+    assert.equal(degradedDiagnostic?.protocol_error_code, undefined);
+  } finally {
+    process.argv[1] = previousEntry!;
+    f.close();
+  }
+});
+
 test("Go LSP receives module context from the checkpoint and invalidates cached symbols when it changes", async () => {
   const f = await fixture();
   try {
@@ -253,6 +294,33 @@ test("Go without a trusted adapter stays searchable with explicit partial relati
       && (item.degraded_languages as JsonObject[]).some(language => language.language === "go" && language.status === "partial"
         && language.fallback_analyzer === "craft-basic-symbols" && language.relations === "not_analyzed")));
     assert.equal(index.edge_count, 0);
+  } finally { f.close(); }
+});
+
+test("Go LSP failure falls back to searchable basic symbols and preserves the relation gap", async () => {
+  const f = await fixture();
+  try {
+    f.write("go.mod", "module example.test/go-lsp-fallback\n\ngo 1.22\n");
+    f.write("main.go", "package main\n\nfunc RunQueuedTask() {}\ntype TaskManager struct{}\n");
+    writeFileSync(join(f.store.paths.configDir, "codebase-lsp.json"), JSON.stringify({ schema_version: 1,
+      adapters: [{ language: "go", command: process.execPath, analyzer_version: "test-go-failure" }] }));
+    (f.service as unknown as { analyzeLsp: () => never }).analyzeLsp = () => {
+      throw new Error("Language server request failed during textDocument/documentSymbol (0)");
+    };
+    const indexed = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
+    assert.equal(indexed.status, "ready");
+    const found = f.service.codebaseSymbolFind({ workspace_id: indexed.workspace_id, index_id: indexed.index_id, query: "RunQueuedTask" });
+    assert((found.symbols as JsonObject[]).some(symbol => symbol.name === "RunQueuedTask" && symbol.language === "go"));
+    const diagnostics = (indexed.summary as JsonObject).diagnostics as JsonObject[];
+    const degraded = diagnostics.flatMap(item => Array.isArray(item.degraded_languages) ? item.degraded_languages as JsonObject[] : [])
+      .find(item => item.language === "go");
+    assert.equal(degraded?.semantic_adapter_status, "unavailable");
+    assert.equal(degraded?.failure_stage, "textDocument/documentSymbol");
+    assert.equal(degraded?.protocol_error_code, 0);
+    assert.equal(degraded?.fallback_analyzer, "craft-basic-symbols");
+    assert.equal(degraded?.relations, "not_analyzed");
+    const index = f.store.get("codebase_index", String(indexed.index_id));
+    assert.equal((index.analysis as JsonObject).relation_analysis && ((index.analysis as JsonObject).relation_analysis as JsonObject).status, "not_analyzed");
   } finally { f.close(); }
 });
 
@@ -415,13 +483,15 @@ test("LSP adapter failures retain safe category and protocol stage in repository
     mkdirSync(join(f.repo, "src"));
     writeFileSync(join(f.store.paths.configDir, "codebase-lsp.json"), JSON.stringify({ schema_version: 1,
       adapters: [{ language: "cpp", command: process.execPath }] }));
-    const cases: Array<{ error: unknown; reason: string; stage?: string; signal?: string; exit_code?: number }> = [
+    const cases: Array<{ error: unknown; reason: string; stage?: string; signal?: string; exit_code?: number; protocol_error_code?: number }> = [
       { error: new Error("Language server exited before completion during textDocument/documentSymbol (code null, signal SIGTRAP)"),
         reason: "server_crash", stage: "textDocument/documentSymbol", signal: "SIGTRAP" },
       { error: new Error("Language server request timed out during textDocument/documentSymbol"),
         reason: "request_timeout", stage: "textDocument/documentSymbol" },
       { error: new Error("Unable to start configured language server"), reason: "server_unavailable" },
-      { error: new Error("Language server request failed (-32000)"), reason: "server_request_failed" },
+      { error: new Error("Language server request failed (-32000)"), reason: "server_request_failed", protocol_error_code: -32000 },
+      { error: new Error("Language server request failed during initialize (protocol code 999999999999999999999999)"),
+        reason: "server_request_failed", stage: "initialize" },
       { error: new Error("Language server exited before completion during initialize (code 4, signal none)"),
         reason: "analysis_failed", stage: "initialize", exit_code: 4 },
       { error: new Error("Language server exited before completion during initialize (code 999999999999999999999, signal none)"),
@@ -438,6 +508,7 @@ test("LSP adapter failures retain safe category and protocol stage in repository
       assert.equal(diagnostic.failure_stage, item.stage);
       assert.equal(diagnostic.signal, item.signal);
       assert.equal(diagnostic.exit_code, item.exit_code);
+      assert.equal(diagnostic.protocol_error_code, item.protocol_error_code);
       assert.equal(JSON.stringify(diagnostic).includes("private adapter failure"), false);
     }
   } finally { f.close(); }

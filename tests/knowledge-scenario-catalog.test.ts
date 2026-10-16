@@ -68,6 +68,57 @@ test("Knowledge scenario catalog normalizes canonical project scope ids at its p
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
+test("Knowledge scenario reads an absent data root as an empty scope catalog", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-knowledge-empty-scenarios-"));
+  try {
+    assert.deepEqual(listKnowledgeScenarios(join(root, "not-created"), "project-a"), { catalog_version: 0, scenarios: [] });
+    assert.deepEqual(listKnowledgeScenarios(join(root, "not-created"), "global", "global"), { catalog_version: 0, scenarios: [] });
+    assert.equal(knowledgeScenarioIsActive(join(root, "not-created"), "global", "scene.one", "global"), false);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("Knowledge scenario catalog propagates a non-ENOENT root inspection failure", async () => {
+  const root = await mkdtemp(join(tmpdir(), "knowledge-scenario-root-file-"));
+  try {
+    const fileRoot = join(root, "not-a-directory");
+    await writeFile(fileRoot, "file", "utf8");
+    assert.throws(() => listKnowledgeScenarios(fileRoot, "project-a"), /regular directories/u);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Knowledge global scenario scope requires the canonical global identity", async () => {
+  const root = await mkdtemp(join(tmpdir(), "knowledge-scenario-global-id-"));
+  try {
+    assert.throws(() => listKnowledgeScenarios(root, "not-global", "global"), /global scenario scope identity is invalid/u);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("global Knowledge scenarios use an isolated catalog and independent promotion evidence", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-knowledge-global-scenarios-")), knowledgeDir = join(root, "knowledge");
+  try {
+    const globalArgs = { ...args, project_id: "global", scope_kind: "global" as const, knowledge_dir: knowledgeDir };
+    assert.equal(recordKnowledgeScenario(globalArgs).status, "candidate");
+    const first = recordKnowledgeScenario({ ...globalArgs, status: "reviewed" });
+    assert.equal(first.status, "candidate");
+    const second = recordKnowledgeScenario({ ...globalArgs, claim_id: "global-claim-b", source_id: "global-source-b", status: "reviewed" });
+    assert.equal(second.status, "active");
+    const project = recordKnowledgeScenario({ ...args, knowledge_dir: knowledgeDir, status: "reviewed" });
+    assert.equal(project.status, "candidate", "global sources must not count toward a project scene");
+    assert.equal(knowledgeScenarioIsActive(knowledgeDir, "global", args.scenario_key, "global"), true);
+    assert.equal(knowledgeScenarioIsActive(knowledgeDir, args.project_id, args.scenario_key), false);
+    assert.equal(listKnowledgeScenarios(knowledgeDir, "global", "global").catalog_version, 3);
+    assert.equal(fs.existsSync(join(knowledgeDir, "global", "knowledge-scenarios.json")), true);
+    assert.equal(fs.existsSync(join(knowledgeDir, "projects", "project-a", "knowledge-scenarios.json")), true);
+    const demoted = recordKnowledgeScenario({ ...globalArgs, claim_id: "global-claim-b", source_id: "global-source-b", status: "inactive" });
+    assert.equal(demoted.status, "candidate");
+    assert.equal(knowledgeScenarioIsActive(knowledgeDir, "global", args.scenario_key, "global"), false);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test("Knowledge scenario catalog keeps conflicting identities out of promotion", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-knowledge-scenarios-conflict-")), knowledgeDir = join(root, "knowledge");
   try {
@@ -234,7 +285,9 @@ test("Knowledge scenario claim references default scope, provenance, and lifecyc
   const root = await mkdtemp(join(tmpdir(), "craft-knowledge-scenario-projection-"));
   try {
     assert.equal(updateKnowledgeScenarioClaim(root, { id: "missing-key", scope: "project:p" }), null);
-    assert.equal(updateKnowledgeScenarioClaim(root, { id: "global-scene", scenario_key: "scene.global" }), null);
+    const global = updateKnowledgeScenarioClaim(root, { id: "global-scene", scenario_key: "scene.global" });
+    assert.equal(global?.status, "candidate");
+    assert.equal(fs.existsSync(join(root, "global", "knowledge-scenarios.json")), true);
     assert.equal(updateKnowledgeScenarioClaim(root, { id: "user-scene", scenario_key: "scene.user", scope: "user:u" }), null);
     const projected = updateKnowledgeScenarioClaim(root, { id: "inactive-scene", scenario_key: "scene.inactive", scope: "project:p", status: "stale" });
     assert.equal(projected?.status, "candidate");

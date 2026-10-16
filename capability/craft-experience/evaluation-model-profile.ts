@@ -89,11 +89,11 @@ export class EvaluationModelProfileKernel {
         if (ticket.purpose !== "knowledge_scenario_classification") return false;
         if (ticket.status !== "ready_for_adapter") return false;
         const claim = this.store.find("knowledge_claim", String(target.id));
-        if (!claim || !KNOWLEDGE_CLASSIFIABLE_STATUSES.has(String(claim.status)) || typeof claim.scenario_key === "string"
+        if (!claim || typeof claim.scope !== "string" || !KNOWLEDGE_CLASSIFIABLE_STATUSES.has(String(claim.status)) || typeof claim.scenario_key === "string"
           || Number(claim.version) !== Number(target.version) || claim.content_digest !== target.content_digest) return false;
-        const scope = scopeFromKey(String(claim.scope ?? "global"));
-        if (scope.kind !== "project") return false;
-        return Number(listKnowledgeScenarios(this.store.paths.knowledgeDir, scope.id).catalog_version) === Number(target.catalog_version);
+        const scope = scopeFromKey(String(claim.scope));
+        if (scope.kind !== "project" && scope.kind !== "global") return false;
+        return Number(listKnowledgeScenarios(this.store.paths.knowledgeDir, scope.id, scope.kind).catalog_version) === Number(target.catalog_version);
       }
       if (ticket.purpose === "evaluation") return true;
       if (ticket.purpose !== "workflow_evolution") return false;
@@ -155,11 +155,11 @@ export class EvaluationModelProfileKernel {
       const claim = this.store.get("knowledge_claim", text(args.knowledge_claim_id, "knowledge_claim_id"));
       const scope = scopeFromKey(String(claim.scope ?? "global"));
       const source = typeof claim.source_id === "string" ? this.store.find("knowledge_source", claim.source_id) : null;
-      if (!KNOWLEDGE_CLASSIFIABLE_STATUSES.has(String(claim.status)) || typeof claim.scenario_key === "string" || scope.kind !== "project"
+      if (typeof claim.scope !== "string" || !KNOWLEDGE_CLASSIFIABLE_STATUSES.has(String(claim.status)) || typeof claim.scenario_key === "string" || scope.kind !== "project" && scope.kind !== "global"
         || !source || source.status !== "active" || source.trust === "untrusted") {
-        throw new Error("Knowledge scenario ticket requires an unclassified project Claim from an active trusted Source");
+        throw new Error("Knowledge scenario ticket requires an unclassified project or global Claim from an active trusted Source");
       }
-      const catalog = listKnowledgeScenarios(this.store.paths.knowledgeDir, scope.id);
+      const catalog = listKnowledgeScenarios(this.store.paths.knowledgeDir, scope.id, scope.kind);
       return { kind: "knowledge_scenario_classification", id: claim.id, version: claim.version,
         content_digest: claim.content_digest, scope: claim.scope, catalog_version: catalog.catalog_version };
     }

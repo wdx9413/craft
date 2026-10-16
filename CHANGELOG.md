@@ -1,7 +1,19 @@
+## v0.12.45（Host 缓存刷新与自进化验收）
+
+- 版本推进用于区分同版本但内容不同的 Host 缓存；统一 Context 包基于当前源码重新构建并同步到 Marketplace。
+- 验收三能力隔离数据根上的自动流程：Memory 分层晋升、Knowledge Claim 审核晋升、Experience Canary 迭代。
+- Knowledge 与 Experience 场景仍由模型提出语义定义，Craft 管理稳定 Catalog、层级、证据阈值与迁移。
+- Knowledge Catalog 按能力目录保存全局与项目场景：`~/.craft_data/knowledge/global/` 和 `~/.craft_data/knowledge/projects/{project_id}/`；分类、检索、退役与迁移均按精确 scope 隔离。
+- 没有可用 Provider Profile 时，Experience 回执交由当前 Host 模型读取脱敏请求并提交候选，继续走原有 Shadow、Held-out、Signoff、Canary Gate；Knowledge 日常 MCP 面补齐精确审核包工具。
+- Context 的 Experience 工具发现补齐候选读取/提交、评测派发与恢复、Model Profile/Ticket 查询，使当前 Host 能从回执走完并恢复发布前评测闭环，而不只看到观察和路由入口。
+- Context 的 Memory 工具发现补齐 Ledger 读取、撤销/转移、维护与会话归档入口；无 Hook 的 Host 也能执行记忆退出和临时记忆清理。
+- Context 的 Knowledge 工具发现补齐来源注册/枚举、候选读取和自动审核策略查询；无 Provider Profile 的当前 Host 可处理来源与待审核 Claim，晋升仍受原证据规则约束。
+- Knowledge Skill 为无 Provider Profile 增加当前 Host 的有界续处理路径：每个 Knowledge 任务最多审核一个仍绑定当前可信 Source 的候选，陈旧、争议与需重验 Claim 留在各自治理路径。
+
 # Changelog
 
-> Note on numbering: the declared package version is now **0.12.44**. Earlier
-> `v0.12.34`–`v0.12.43` headings name **incremental work on the previous revision**,
+> Note on numbering: this source candidate is **0.12.45**, based on the 0.12.44
+> release. Earlier `v0.12.34`–`v0.12.43` headings name **incremental work on the previous revision**,
 > not releases. Each is a self-contained change set with its own 100%-coverage
 > test script; the version bump happens only when the work is released.
 

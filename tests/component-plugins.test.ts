@@ -44,7 +44,14 @@ test("craft-context includes the complete published surfaces for Codebase, Knowl
   }
   for (const name of ["craft_context_open", "craft_knowledge_source_register", "craft_memory_ledger_transition", "craft_procedure_host_control", "craft_codebase_impact_query"])
     assert(context.has(name), `craft-context must expose ${name}`);
+  assert(context.has("craft_knowledge_semantic_review_packet"), "craft-context must expose the exact Knowledge review packet");
   assert(!context.has("craft_verified_work_loop_prepare"), "the component composition must not widen to the entire Craft runtime");
+});
+
+test("standalone Knowledge daily surface exposes the model review packet needed for automatic claim promotion", () => {
+  const knowledge = new Set(surfaceToolNames(productSurfaceOf("knowledge")));
+  for (const name of ["craft_evidence_record", "craft_knowledge_claim_save", "craft_knowledge_semantic_review_packet", "craft_knowledge_host_review"])
+    assert(knowledge.has(name), `Knowledge daily surface must expose ${name}`);
 });
 
 test("internal component surfaces remain bounded independently from the complete context composition", () => {

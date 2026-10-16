@@ -34,7 +34,7 @@ test("stdio LSP imports snapshot-bound symbols through Codebase and keeps relati
     assert.deepEqual(analysis.diagnostics, { budget_limited: false, omitted_symbols: 0, symbol_cache_hits: 0, symbol_cache_misses: 1, symbol_cache_omitted_documents: 0,
       relations: "not_requested", requested_relations: [], supported_relations: [], relation_candidate_symbol_count: 0, relation_symbol_count: 0,
       relation_query_omitted_count: 0, relation_response_omitted_count: 0, relation_collection_omitted_count: 0,
-      unsupported_relations: [], relation_omitted_count: 0, relation_query_failures: 0, relation_omitted_stages: [], relation_failure_stages: [],
+      unsupported_relations: [], relation_omitted_count: 0, relation_query_failures: 0, relation_omitted_stages: [], relation_failure_stages: [], relation_capability_notes: [],
       language_diagnostics: { observed_document_count: 0, item_count: 0, error_count: 0, warning_count: 0 }, stderr_bytes_observed: 0 });
     assert.equal((analysis.document_symbol_cache as JsonObject[]).length, 1);
     assert.equal((analysis.edges as JsonObject[]).length, 0);
@@ -143,7 +143,7 @@ test("stdio LSP preserves a bounded partial symbol graph and its omission diagno
     assert.deepEqual(analysis.diagnostics, { budget_limited: true, omitted_symbols: 1, symbol_cache_hits: 0, symbol_cache_misses: 1, symbol_cache_omitted_documents: 1,
       relations: "not_requested", requested_relations: [], supported_relations: [], relation_candidate_symbol_count: 0, relation_symbol_count: 0,
       relation_query_omitted_count: 0, relation_response_omitted_count: 0, relation_collection_omitted_count: 0,
-      unsupported_relations: [], relation_omitted_count: 0, relation_query_failures: 0, relation_omitted_stages: [], relation_failure_stages: [],
+      unsupported_relations: [], relation_omitted_count: 0, relation_query_failures: 0, relation_omitted_stages: [], relation_failure_stages: [], relation_capability_notes: [],
       language_diagnostics: { observed_document_count: 0, item_count: 0, error_count: 0, warning_count: 0 }, stderr_bytes_observed: 0 });
     assert.deepEqual(analysis.document_symbol_cache, []);
   } finally { rmSync(root, { recursive: true, force: true }); }
@@ -242,6 +242,75 @@ test("stdio LSP asks call hierarchy only for callable symbols", async () => {
     assert.equal((result.diagnostics as JsonObject).relations, "analyzed");
     assert.equal((result.diagnostics as JsonObject).relation_query_failures, 0);
     assert.equal((result.edges as JsonObject[]).filter(edge => edge.kind === "calls").length, 1);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("stdio LSP collects outgoing calls and reports malformed outgoing call hierarchy results", async () => {
+  const root = mkdtempSync(join(tmpdir(), "craft-lsp-outgoing-calls-"));
+  const content = "function target() {}\nfunction caller() { target(); }\n";
+  const documents = [{ path: "src/calls.js", language: "javascript", content, source_digest: digest(content) }];
+  try {
+    const outgoing = await analyzeLspSnapshot({ ...base(root, "relations-incoming-null"), documents, relations: ["calls"] });
+    assert.equal((outgoing.diagnostics as JsonObject).relations, "analyzed");
+    const callEdges = (outgoing.edges as JsonObject[]).filter(edge => edge.kind === "calls");
+    assert.equal(callEdges.length, 1);
+    assert.deepEqual(callEdges[0]!.source_span, { start_offset: content.indexOf("target();"), end_offset: content.indexOf("target();") + "target".length });
+
+    const nullable = await analyzeLspSnapshot({ ...base(root, "relations-outgoing-null"), documents, relations: ["calls"] });
+    assert.equal((nullable.diagnostics as JsonObject).relations, "analyzed");
+    for (const [mode, stage] of [
+      ["relations-outgoing-error", "call_hierarchy_outgoing_failed_-32603"],
+      ["relations-outgoing-invalid", "call_hierarchy_invalid_outgoing_result"],
+    ] as const) {
+      const result = await analyzeLspSnapshot({ ...base(root, mode), documents, relations: ["calls"] });
+      const diagnostics = result.diagnostics as JsonObject;
+      assert.equal(diagnostics.relations, "partial", mode);
+      assert((diagnostics.relation_failure_stages as JsonObject[]).some(item => item.stage === stage), mode);
+    }
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("Go LSP outgoing calls import into snapshot-bound Codebase queries", async () => {
+  const root = mkdtempSync(join(tmpdir(), "craft-lsp-go-outgoing-")), repo = join(root, "repo");
+  mkdirSync(join(repo, "src"), { recursive: true });
+  const content = "package sample\n\nfunc target() {}\nfunc caller() { target() }\n";
+  writeFileSync(join(repo, "src/calls.go"), content);
+  const store = await new CraftStore(craftPaths(join(root, "data"))).open();
+  try {
+    const service = new CraftService(store);
+    const workspace = service.workspaceOpen({ workspace_id: "lsp_go_outgoing", name: "Go LSP outgoing calls", root_path: repo, include_paths: ["src"] }).workspace as JsonObject;
+    const checkpoint = service.workspaceCheckpoint({ workspace_id: workspace.id, checkpoint_id: "lsp_go_outgoing_checkpoint", label: "Go outgoing call fixture" }).checkpoint as JsonObject;
+    service.codebaseActivate({ workspace_id: workspace.id, actor: "lsp-test" });
+    const analysis = await analyzeLspSnapshot({ ...base(String(checkpoint.snapshot_root), "relations-go-incoming-null"),
+      documents: [{ path: "src/calls.go", language: "go", content, source_digest: digest(content) }], relations: ["calls"] });
+    assert.equal((analysis.diagnostics as JsonObject).relations, "analyzed");
+    assert.equal((analysis.edges as JsonObject[]).filter(edge => edge.kind === "calls").length, 1);
+    const imported = service.codebaseAnalysisImport({ workspace_id: workspace.id, checkpoint_id: checkpoint.id, index_id: "lsp_go_outgoing_import", analysis });
+    const indexId = String((imported.index as JsonObject).id);
+    const caller = (service.codebaseSymbolFind({ workspace_id: workspace.id, index_id: indexId, query: "caller" }).symbols as JsonObject[])[0]!;
+    const calls = service.codebaseRelationsFind({ workspace_id: workspace.id, index_id: indexId, node_id: caller.id,
+      relation_kind: "calls", direction: "outgoing" }).relations as JsonObject[];
+    assert.equal(calls.length, 1);
+    assert.equal((calls[0]!.to as JsonObject).name, "target");
+    const impact = service.codebaseImpactQuery({ workspace_id: workspace.id, index_id: indexId, node_id: String((calls[0]!.to as JsonObject).id),
+      direction: "incoming", relation_kind: "calls", max_depth: 1, limit: 10 });
+    assert((impact.nodes as JsonObject[]).some(node => node.id === caller.id));
+    assert.equal((imported.index as JsonObject).checkpoint_id, checkpoint.id);
+  } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("stdio LSP stops requesting outgoing calls after the server reports MethodNotFound", async () => {
+  const root = mkdtempSync(join(tmpdir(), "craft-lsp-outgoing-unsupported-"));
+  const content = ["function target() {}", "function caller() { target(); }", ...Array.from({ length: 10 }, (_, index) => `function helper${index}() {}`)].join("\n") + "\n";
+  try {
+    const result = await analyzeLspSnapshot({ ...base(root, "relations-outgoing-unsupported"),
+      documents: [{ path: "src/calls.js", language: "javascript", content, source_digest: digest(content) }], relations: ["calls"] });
+    const diagnostics = result.diagnostics as JsonObject;
+    const notes = (diagnostics.relation_capability_notes as JsonObject[]).find(item => item.stage === "outgoing_call_hierarchy_unavailable");
+    assert.equal(diagnostics.relations, "analyzed");
+    assert(Number(notes?.count) > 0);
+    assert(Number(notes?.count) <= 8, "only the in-flight request batch may observe the unsupported capability");
+    assert.equal(diagnostics.relation_query_failures, 0);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -429,6 +498,7 @@ test("real clangd builds cross-file C++ caller, reference and bounded impact pat
       analyzer: "clangd", analyzer_version: clangdVersion ?? "unknown", relations: ["calls", "references", "definitions", "type_hierarchy"], documents: contents });
     const diagnostics = analysis.diagnostics as JsonObject;
     assert.equal(diagnostics.relations, "analyzed", JSON.stringify(diagnostics));
+    assert((diagnostics.relation_capability_notes as JsonObject[]).some(item => item.stage === "outgoing_call_hierarchy_unavailable"));
     assert.equal((analysis.edges as JsonObject[]).some(edge => edge.kind === "calls"), true);
     assert.equal((analysis.edges as JsonObject[]).some(edge => edge.kind === "references"), true);
     assert.equal((analysis.edges as JsonObject[]).some(edge => edge.kind === "definitions"), true);
@@ -502,7 +572,7 @@ test("stdio LSP reports invalid implementation and type definition result shapes
     const result = await analyzeLspSnapshot({ ...base(root, "relations-impl-invalid"), documents: [{ path: "src/relations.js", language: "javascript", content, source_digest: digest(content) }], relations: ["implementations", "type_definitions"] });
     assert.equal((result.diagnostics as JsonObject).relations, "partial");
     assert.deepEqual((result.diagnostics as JsonObject).relation_failure_stages, [
-      { stage: "implementation_invalid_result", count: 2 }, { stage: "type_definition_invalid_result", count: 2 },
+      { stage: "type_definition_invalid_result", count: 2 }, { stage: "implementation_invalid_result", count: 2 },
     ]);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
@@ -514,7 +584,7 @@ test("stdio LSP records implementation and type definition request failures with
     const result = await analyzeLspSnapshot({ ...base(root, "relations-semantic-error"), documents: [{ path: "src/relations.js", language: "javascript", content, source_digest: digest(content) }], relations: ["implementations", "type_definitions"] });
     assert.equal((result.diagnostics as JsonObject).relations, "partial");
     assert.deepEqual((result.diagnostics as JsonObject).relation_failure_stages, [
-      { stage: "implementation_request_failed_-32603", count: 2 }, { stage: "type_definition_request_failed_-32603", count: 2 },
+      { stage: "type_definition_request_failed_-32603", count: 2 }, { stage: "implementation_request_failed_-32603", count: 2 },
     ]);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
@@ -556,6 +626,40 @@ test("stdio LSP accepts an object-valued provider declaration and single-line do
     const result = await analyzeLspSnapshot({ ...base(root, "relations-object-provider"), documents: [{ path: "src/relations.js", language: "javascript", content, source_digest: digest(content) }], relations: ["references"] });
     assert.equal((result.diagnostics as JsonObject).relations, "analyzed");
     assert.deepEqual((result.diagnostics as JsonObject).supported_relations, ["references"]);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("stdio LSP waits for active work-done progress before querying snapshot relations", async () => {
+  const root = mkdtempSync(join(tmpdir(), "craft-lsp-progress-"));
+  try {
+    const result = await analyzeLspSnapshot({ ...base(root, "relations-progress"), relations: ["implementations"] });
+    const diagnostics = result.diagnostics as JsonObject;
+    assert.equal(diagnostics.work_done_progress_waited, true);
+    assert.equal(diagnostics.work_done_progress_timed_out, false);
+    assert.equal(diagnostics.relation_query_failures, 0);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("stdio LSP serializes implementation queries in stable symbol order", async () => {
+  const root = mkdtempSync(join(tmpdir(), "craft-lsp-implementation-order-"));
+  const content = "class First {}\nclass Second {}\n";
+  try {
+    const result = await analyzeLspSnapshot({ ...base(root, "relations-semantic-implementation-order"),
+      documents: [{ path: "src/implementation.js", language: "javascript", content, source_digest: digest(content) }], relations: ["implementations"] });
+    const diagnostics = result.diagnostics as JsonObject;
+    assert.equal(diagnostics.relation_candidate_symbol_count, 2);
+    assert.equal(diagnostics.relation_query_failures, 0);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("stdio LSP marks relation results partial when active work-done progress times out", async () => {
+  const root = mkdtempSync(join(tmpdir(), "craft-lsp-progress-timeout-"));
+  try {
+    const result = await analyzeLspSnapshot({ ...base(root, "relations-progress-timeout"), relations: ["implementations"] }, 50);
+    const diagnostics = result.diagnostics as JsonObject;
+    assert.equal(diagnostics.work_done_progress_waited, true);
+    assert.equal(diagnostics.work_done_progress_timed_out, true);
+    assert.equal(diagnostics.relations, "partial");
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

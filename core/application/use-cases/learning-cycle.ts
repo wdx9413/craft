@@ -169,10 +169,10 @@ export function installLearningCycleMethods(serviceClass: typeof CraftService): 
     }
     const submitted = evolutionRequest.lifecycle === "draft_submitted";
     return { status: submitted ? "candidate_submitted" : "candidate_request", observation: observed.observation, evidence, request: evolutionRequest, model_ticket: ticket, scenario_catalog: taxonomy,
+      distillation_mode: submitted ? null : ticket?.status === "ready_for_adapter" ? "configured_model_adapter" : "current_host_model",
       next_action: submitted ? "run_the_pinned_candidate_through_ordered_external_evaluation_gates"
         : ticket?.status === "ready_for_adapter" ? "model_adapter_distills_proposal_then_external_evaluator_runs_ordered_gates"
-          : ticket ? String(ticket.next_action ?? "configure_workflow_evolution_model_profile_then_distill_and_evaluate")
-            : "configure_workflow_evolution_model_profile_then_distill_and_evaluate",
+          : "current_host_model_reads_pinned_request_submits_candidate_then_runs_ordered_evaluation_gates",
       idempotent: observationReplay && request.idempotent === true && !ticketWasCreated };
   };
 }

@@ -78,7 +78,7 @@ test("public standalone component products expose small daily paths while advanc
     for (const [product, required] of Object.entries(expected)) {
       const daily = new McpServer(f.service, productSurfaceOf(product));
       const names = daily.tools.map((tool) => tool.name);
-      assert(names.length <= (product === "experience" ? 32 : product === "knowledge" ? 25 : 24), `${product} daily surface must stay within the tool budget`);
+      assert(names.length <= (product === "experience" ? 32 : product === "knowledge" ? 26 : 24), `${product} daily surface must stay within the tool budget`);
       for (const name of required) assert(names.includes(name), `${product} daily surface must expose ${name}`);
       assert(!names.includes("craft_verified_work_loop_prepare"));
     }

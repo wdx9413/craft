@@ -5,12 +5,12 @@ import { validateDistilledWorkflowSteps } from "../deploy/experience-learning/wo
 test("read-only assertions and coverage gates normalize to executable bounded steps", () => {
   assert.deepEqual(validateDistilledWorkflowSteps([
     { type: "assertion", evaluator: "file_exists", path: "." },
-    { id: "json-proof", type: "assertion", evaluator: "json_value", path: "package.json", field: "version", expected: "0.12.44", side_effect: "read_only" },
+    { id: "json-proof", type: "assertion", evaluator: "json_value", path: "package.json", field: "version", expected: "0.12.45", side_effect: "read_only" },
     { type: "coverage_gate", line_threshold: 100, branch_threshold: 95, function_threshold: 100, statement_threshold: 100 },
     { id: "coverage-proof", type: "coverage_gate", report: "coverage/custom.json", line_threshold: 0 },
   ]), [
     { id: "step_1", type: "assertion", evaluator: "file_exists", path: ".", side_effect: "read_only" },
-    { id: "json-proof", type: "assertion", evaluator: "json_value", path: "package.json", expected: "0.12.44", field: "version", side_effect: "read_only" },
+    { id: "json-proof", type: "assertion", evaluator: "json_value", path: "package.json", expected: "0.12.45", field: "version", side_effect: "read_only" },
     { id: "step_3", type: "coverage_gate", report: "coverage-summary.json", line_threshold: 100, branch_threshold: 95, function_threshold: 100, statement_threshold: 100, side_effect: "read_only" },
     { id: "coverage-proof", type: "coverage_gate", report: "coverage/custom.json", line_threshold: 0, side_effect: "read_only" },
   ]);

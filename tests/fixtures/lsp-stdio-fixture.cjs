@@ -4,9 +4,12 @@ let workspaceRequestSent = false;
 let activeDocumentSymbols = 0;
 let peakDocumentSymbols = 0;
 let completedDocumentSymbols = 0;
+let progressEnded = false;
+let activeImplementations = 0;
 const mode = process.argv[2] ?? "ok";
 const relationMode = mode.startsWith("relations");
 const semanticMode = mode.startsWith("relations-semantic");
+const goMode = mode.startsWith("relations-go");
 
 function send(message) {
   const body = Buffer.from(JSON.stringify({ jsonrpc: "2.0", ...message }));
@@ -56,6 +59,13 @@ process.stdin.on("data", chunk => {
     } else if (message.method === "textDocument/didOpen") {
       const { uri, text } = message.params.textDocument;
       opened.set(uri, text);
+      if (mode === "relations-progress" || mode === "relations-progress-timeout") {
+        send({ method: "$/progress", params: { token: {}, value: { kind: "begin" } } });
+        send({ id: "progress-create", method: "window/workDoneProgress/create", params: { token: "workspace-load" } });
+        send({ method: "$/progress", params: { token: "workspace-load", value: { kind: "begin", title: "Loading workspace" } } });
+        send({ method: "$/progress", params: { token: "workspace-load", value: { kind: "report", percentage: 50 } } });
+        if (mode === "relations-progress") setTimeout(() => { progressEnded = true; send({ method: "$/progress", params: { token: "workspace-load", value: { kind: "end" } } }); }, 50);
+      }
       if (["diagnostics-push", "diagnostics-push-empty", "diagnostics-push-delayed", "diagnostics-push-malformed", "diagnostics-push-many", "diagnostics-push-optionals", "relations-semantic-diagnostics-push", "relations-semantic-diagnostics-warning"].includes(mode)) {
         const item = { range: { start: { line: 0, character: 0 }, end: { line: 0, character: 3 } }, severity: mode.endsWith("-warning") ? 2 : 1, code: "E1", source: "fixture", message: "sample diagnostic" };
         const diagnostics = mode === "diagnostics-push-empty" ? [] : mode === "diagnostics-push-optionals" ? [{ range: item.range, message: "minimal diagnostic" }] : mode === "diagnostics-push-malformed"
@@ -116,13 +126,15 @@ process.stdin.on("data", chunk => {
         if (relationMode) {
           const lines = content.split("\n");
           const symbols = lines.flatMap((line, index) => {
-            const match = semanticMode || mode.startsWith("relations-hierarchy") || mode === "relations-noncallable-call-error"
+            const match = goMode ? /\bfunc\s+(?:\([^)]*\)\s*)?([A-Za-z_$][\w$]*)/u.exec(line)
+              : semanticMode || mode.startsWith("relations-hierarchy") || mode === "relations-noncallable-call-error"
               ? /\b(class|interface|function|let|const)\s+([A-Za-z_$][\w$]*)/u.exec(line)
               : /function\s+([A-Za-z_$][\w$]*)/u.exec(line);
             if (!match) return [];
-            const name = semanticMode || mode.startsWith("relations-hierarchy") ? match[2] : match[1];
+            const name = goMode || !(semanticMode || mode.startsWith("relations-hierarchy") || mode === "relations-noncallable-call-error")
+              ? match[1] : match[2];
             const start = match.index + match[0].lastIndexOf(name), end = start + name.length;
-            const kind = name === "model" ? 13 : /\bfunction\s+/u.test(line) ? 12 : 5;
+            const kind = name === "model" ? 13 : goMode || /\bfunction\s+/u.test(line) ? 12 : 5;
             return [{ name, kind, range: { start: { line: index, character: 0 }, end: { line: index, character: line.length } },
               selectionRange: { start: { line: index, character: start }, end: { line: index, character: end } } }];
           });
@@ -180,14 +192,14 @@ process.stdin.on("data", chunk => {
       if (mode === "relations-prepare-empty") { send({ id: message.id, result: [] }); continue; }
       const uri = message.params.textDocument.uri, position = message.params.position;
       const content = opened.get(uri) ?? "", lines = content.split("\n"), line = lines[position.line] ?? "";
-      const name = /function\s+([A-Za-z_$][\w$]*)/u.exec(line)?.[1];
+      const name = (goMode ? /\bfunc\s+(?:\([^)]*\)\s*)?([A-Za-z_$][\w$]*)/u : /function\s+([A-Za-z_$][\w$]*)/u).exec(line)?.[1];
       send({ id: message.id, result: name ? [{ name, kind: 12, uri,
         range: { start: { line: position.line, character: 0 }, end: { line: position.line, character: line.length } },
         selectionRange: { start: { line: position.line, character: position.character }, end: { line: position.line, character: position.character + name.length } } }] : null });
     } else if (message.method === "callHierarchy/incomingCalls") {
       const item = message.params.item, uri = item.uri, content = opened.get(uri) ?? "";
       if (mode === "relations-error") send({ id: message.id, error: { code: -32601, message: "method unavailable" } });
-      else if (mode === "relations-incoming-null") send({ id: message.id, result: null });
+      else if (mode === "relations-incoming-null" || mode === "relations-go-incoming-null") send({ id: message.id, result: null });
       else if (mode === "relations-incoming-invalid") send({ id: message.id, result: { invalid: true } });
       else if (item.name === "target") {
         const offset = content.indexOf("target();", content.indexOf("function caller"));
@@ -196,6 +208,26 @@ process.stdin.on("data", chunk => {
           range: { start: { line: 1, character: 0 }, end: { line: 1, character: content.split("\n")[1].length } },
           selectionRange: { start: { line: 1, character: "function ".length }, end: { line: 1, character: "function ".length + "caller".length } } },
         fromRanges: [{ start: { line: 1, character: offset - lineStart }, end: { line: 1, character: offset - lineStart + "target".length } }] }] });
+      } else send({ id: message.id, result: [] });
+    } else if (message.method === "callHierarchy/outgoingCalls") {
+      const item = message.params.item, uri = item.uri, content = opened.get(uri) ?? "";
+      if (mode === "relations-outgoing-unsupported") { send({ id: message.id, error: { code: -32601, message: "method unavailable" } }); continue; }
+      if (mode === "relations-outgoing-error") { send({ id: message.id, error: { code: -32603, message: "private outgoing failure" } }); continue; }
+      if (mode === "relations-outgoing-invalid") { send({ id: message.id, result: { invalid: true } }); continue; }
+      if (mode === "relations-outgoing-null") { send({ id: message.id, result: null }); continue; }
+      if (item.name === "caller") {
+        const callPattern = goMode ? "target()" : "target();", callerPattern = goMode ? "func caller" : "function caller";
+        const offset = content.indexOf(callPattern, content.indexOf(callerPattern));
+        const lineStart = content.lastIndexOf("\n", offset) + 1;
+        const targetPattern = goMode ? "func target" : "function target";
+        const targetStart = content.indexOf(targetPattern), targetOffset = targetStart + targetPattern.length - "target".length;
+        const targetLine = content.slice(0, targetStart).split("\n").length - 1;
+        const targetLineStart = content.lastIndexOf("\n", targetStart) + 1;
+        const callLine = content.slice(0, offset).split("\n").length - 1;
+        send({ id: message.id, result: [{ to: { name: "target", kind: 12, uri,
+          range: { start: { line: targetLine, character: 0 }, end: { line: targetLine, character: content.split("\n")[targetLine].length } },
+          selectionRange: { start: { line: targetLine, character: targetOffset - targetLineStart }, end: { line: targetLine, character: targetOffset - targetLineStart + "target".length } } },
+        fromRanges: [{ start: { line: callLine, character: offset - lineStart }, end: { line: callLine, character: offset - lineStart + "target".length } }] }] });
       } else send({ id: message.id, result: [] });
     } else if (message.method === "textDocument/prepareTypeHierarchy") {
       if (mode === "relations-hierarchy-error") { send({ id: message.id, error: { code: -32603, message: "private hierarchy failure" } }); continue; }
@@ -227,6 +259,13 @@ process.stdin.on("data", chunk => {
       send({ id: message.id, result: [] });
     } else if (message.method === "textDocument/implementation") {
       const uri = message.params.textDocument.uri, content = opened.get(uri) ?? "";
+      if (mode === "relations-semantic-implementation-order") {
+        activeImplementations++;
+        if (activeImplementations > 1) { activeImplementations--; send({ id: message.id, error: { code: -32603, message: "implementation requests overlapped" } }); continue; }
+        setTimeout(() => { activeImplementations--; send({ id: message.id, result: null }); }, 10);
+        continue;
+      }
+      if (mode === "relations-progress" && !progressEnded) { send({ id: message.id, error: { code: -32603, message: "workspace load is incomplete" } }); continue; }
       if (mode === "relations-semantic-error") { send({ id: message.id, error: { code: -32603, message: "private implementation failure" } }); continue; }
       if (mode === "relations-impl-invalid") send({ id: message.id, result: { invalid: true } });
       else if (semanticMode && content.split("\n")[message.params.position.line]?.includes("class Contract")) {
