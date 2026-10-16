@@ -263,6 +263,24 @@ test("Knowledge classification failures remain visible without dropping complete
     { diagnostics: "Craft Knowledge scenario classification failed for 1 Claim(s).\n", exit_code: 1 });
 });
 
+test("missing Knowledge model configuration is visible, safe, and fails one-shot learning", () => {
+  const skipped = { knowledge: { classification: { processed: 0, outcomes: [], skipped: true, reason: "no_configured_model" } } } as JsonObject;
+  const diagnostic = "Craft Knowledge scenario classification skipped (no_configured_model); configure one ready model profile to resume.\n";
+  assert.deepEqual(learningTickStatus(skipped, false), { diagnostics: diagnostic, exit_code: null },
+    "the continuous worker must report the blocker and keep polling for repaired configuration");
+  assert.deepEqual(learningTickStatus(skipped, true), { diagnostics: diagnostic, exit_code: 1 },
+    "a one-shot learning run must not report success when eligible Claims were left unclassified");
+  const unsafe = { knowledge: { classification: { skipped: true, reason: "private/path?api_key=secret" } } } as JsonObject;
+  assert.deepEqual(learningTickStatus(unsafe, false), {
+    diagnostics: "Craft Knowledge scenario classification skipped (configuration_unavailable); configure one ready model profile to resume.\n", exit_code: null,
+  }, "unrecognized provider details must not enter logs");
+  const credential = { knowledge: { classification: { skipped: true, reason: "set_CRAFT_MODEL_KEY" } } } as JsonObject;
+  assert.match(learningTickStatus(credential, false).diagnostics, /\(set_CRAFT_MODEL_KEY\)/u,
+    "a safe environment-variable name can tell the operator how to repair readiness without exposing its value");
+  assert.deepEqual(learningTickStatus({ knowledge: { classification: { processed: 0, outcomes: [] } } }, true),
+    { diagnostics: "", exit_code: null }, "a pass with no eligible Claims must remain quiet");
+});
+
 test("standalone learning modes call only their mounted Knowledge or Experience tools", async () => {
   const calls: string[] = [];
   const client: ExperienceLearningClient = { async call(name) {

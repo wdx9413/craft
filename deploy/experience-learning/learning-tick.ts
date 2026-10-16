@@ -10,6 +10,18 @@ function failureKind(error: unknown): string {
   return /^[A-Za-z][A-Za-z0-9]{0,31}$/u.test(name) ? name : "Error";
 }
 
+const SAFE_CLASSIFICATION_SKIP_REASONS = new Set([
+  "ambiguous", "model_profile_unavailable", "model_profile_not_ready", "multiple_active_profiles_for_purpose",
+  "multiple_models_require_explicit_profile", "needs_credential", "needs_enablement", "no_configured_model",
+  "provider_unavailable", "unavailable", "explicitly_enable_network_execution",
+]);
+
+function classificationSkipReason(classification: JsonObject): string {
+  const reason = classification.reason;
+  if (typeof reason === "string" && (SAFE_CLASSIFICATION_SKIP_REASONS.has(reason) || /^set_[A-Z][A-Z0-9_]{0,63}$/u.test(reason))) return reason;
+  return "configuration_unavailable";
+}
+
 /** A poll isolates Experience and Knowledge failures so the next scheduled pass can recover. */
 export async function runLearningTick(deps: LearningTickDependencies, syncKnowledge = false): Promise<JsonObject> {
   let experience: JsonObject;
@@ -31,6 +43,8 @@ export function learningTickStatus(result: JsonObject, once: boolean): { diagnos
   const classificationFailure = classification?.status === "failed"
     ? typeof classification.failure_kind === "string" && /^[A-Za-z][A-Za-z0-9]{0,31}$/u.test(classification.failure_kind) ? classification.failure_kind : "Error"
     : null;
+  const classificationSkipped = classification?.skipped === true;
+  const classificationSkip = classificationSkipped ? classificationSkipReason(classification!) : null;
   const failedClassifications = Array.isArray(classification?.outcomes)
     ? (classification.outcomes as unknown[]).filter(value => Boolean(value && typeof value === "object" && !Array.isArray(value)
       && (value as JsonObject).status === "failed")).length : 0;
@@ -59,10 +73,11 @@ export function learningTickStatus(result: JsonObject, once: boolean): { diagnos
     ...(experienceFailure ? [`Craft Experience learning pass failed (${experienceFailure}).\n`] : []),
     ...(knowledgeFailure ? [`Craft Knowledge learning pass failed (${knowledgeFailure}).\n`] : []),
     ...(classificationFailure ? [`Craft Knowledge scenario classification failed (${classificationFailure}).\n`] : []),
+    ...(classificationSkip ? [`Craft Knowledge scenario classification skipped (${classificationSkip}); configure one ready model profile to resume.\n`] : []),
     ...(!classificationFailure && failedClassifications ? [`Craft Knowledge scenario classification failed for ${failedClassifications} Claim(s)${stageSummary ? ` at ${stageSummary}` : ""}.\n`] : []),
     ...sourceIssues,
   ].join("");
-  return { diagnostics, exit_code: once && (experienceFailure !== null || knowledgeFailure !== null || classificationFailure !== null || failedClassifications > 0 || sourceIssues.length > 0) ? 1 : null };
+  return { diagnostics, exit_code: once && (experienceFailure !== null || knowledgeFailure !== null || classificationFailure !== null || classificationSkipped || failedClassifications > 0 || sourceIssues.length > 0) ? 1 : null };
 }
 
 export function learningFailureKind(error: unknown): string { return failureKind(error); }
