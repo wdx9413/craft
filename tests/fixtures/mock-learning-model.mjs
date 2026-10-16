@@ -18,7 +18,7 @@ globalThis.fetch = async (input, init) => {
   let state = { calls: 0, knowledge_classification_calls: 0 };
   try { state = { ...state, ...JSON.parse(readFileSync(statePath, "utf8")) }; } catch { /* first provider call */ }
   const system = String((request.messages ?? []).find(message => message.role === "system")?.content ?? "");
-  const isKnowledgeClassification = system.includes("Classify this evidence-backed project Knowledge Claim");
+  const isKnowledgeClassification = system.includes("Classify this evidence-backed Knowledge Claim");
   if (isKnowledgeClassification) {
     state.knowledge_classification_calls = Number(state.knowledge_classification_calls ?? 0) + 1;
     writeFileSync(statePath, JSON.stringify(state), { encoding: "utf8", mode: 0o600 });

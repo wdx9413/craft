@@ -762,6 +762,7 @@
       ],
       "tests": [
         "tests/evaluation-model-workflow-evolution.test.ts",
+        "tests/codex-hook-bridge.test.ts",
         "tests/component-procedure-graph.test.ts",
         "tests/capability-experience-package.test.ts",
         "tests/experience-contribution.test.ts",

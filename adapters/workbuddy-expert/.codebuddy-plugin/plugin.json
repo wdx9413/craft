@@ -1,16 +1,24 @@
 {
   "name": "craft-work-governance",
-  "version": "0.12.45",
+  "version": "0.12.46",
   "description": "Governs substantial work with durable tasks, evidence, verification, and reusable workflows.",
   "author": {
     "name": "wdx9413",
     "email": "wdx9413@users.noreply.github.com"
   },
-  "agents": ["./agents/craft-work-governance.md"],
-  "skills": ["./skills/craft-route"],
+  "agents": [
+    "./agents/craft-work-governance.md"
+  ],
+  "skills": [
+    "./skills/craft-route"
+  ],
   "homepage": "https://github.com/wdx9413/craft",
   "license": "MIT",
-  "keywords": ["workflow", "evidence", "evaluation"],
+  "keywords": [
+    "workflow",
+    "evidence",
+    "evaluation"
+  ],
   "expertType": "agent",
   "agentName": "craft-work-governance",
   "displayName": {
@@ -33,9 +41,18 @@
   },
   "plugin": "craft-work-governance",
   "tags": [
-    { "zh": "工作流", "en": "Workflow" },
-    { "zh": "证据链", "en": "Evidence" },
-    { "zh": "评测治理", "en": "Evaluation Governance" }
+    {
+      "zh": "工作流",
+      "en": "Workflow"
+    },
+    {
+      "zh": "证据链",
+      "en": "Evidence"
+    },
+    {
+      "zh": "评测治理",
+      "en": "Evaluation Governance"
+    }
   ],
   "quickPrompts": [
     {

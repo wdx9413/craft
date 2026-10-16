@@ -43,7 +43,25 @@ export class WorkflowEvolutionKernel {
     if (!scenarioSignature || typeof scenarioSignature !== "object" || Array.isArray(scenarioSignature)) throw new Error("Workflow Evolution Scenario Signature is invalid");
     const identity = { scenario_key: scenarioKey, scenario_signature: scenarioSignature, source, outcome, ...(verification ? { verification } : {}), failure_type: args.failure_type === undefined ? null : text(args.failure_type, "failure_type"), evidence_ids: evidenceIds, execution_shape: executionShape, sanitized: true, content_stored: false };
     const observationId = String(args.observation_id ?? `workflow_evolution_observation_${stableDigest(identity).slice(-20)}`); const existing = this.store.find("workflow_evolution_observation", observationId); const identityDigest = stableDigest(identity);
-    if (existing) { if (existing.identity_digest !== identityDigest) throw new Error("Workflow Evolution observation idempotency conflict"); return { observation: existing, idempotent: true }; }
+    if (existing) {
+      if (existing.identity_digest === identityDigest) return { observation: existing, idempotent: true };
+      const priorSignature = existing.scenario_signature as JsonObject | undefined;
+      const sameTerminalEvidence = stableDigest({ source: existing.source, outcome: existing.outcome, evidence_ids: existing.evidence_ids,
+        verification: existing.verification ?? null, failure_type: existing.failure_type ?? null, execution_shape: existing.execution_shape ?? [],
+        sanitized: existing.sanitized, content_stored: existing.content_stored })
+        === stableDigest({ source, outcome, evidence_ids: evidenceIds, verification, failure_type: identity.failure_type,
+          execution_shape: executionShape, sanitized: true, content_stored: false });
+      // scenario_signature has passed object validation above. A refinement
+      // also needs an explicit classified signature and unchanged Evidence.
+      const nextSignature = identity.scenario_signature as JsonObject;
+      const hasHostClassification = args.scenario_signature !== undefined && nextSignature.source !== "unclassified";
+      const isClassificationUpgrade = priorSignature?.source === "unclassified" && hasHostClassification && sameTerminalEvidence;
+      if (!isClassificationUpgrade) throw new Error("Workflow Evolution observation idempotency conflict");
+      const observation = this.store.updateIfVersion("workflow_evolution_observation", observationId, Number(existing.version),
+        { ...identity, identity_digest: identityDigest, lifecycle: existing.lifecycle });
+      this.store.appendEvent(`workflow-evolution:${identity.scenario_key}`, "workflow_evolution.classified", { observation_id: observation.id, outcome });
+      return { observation, idempotent: false, refined: true };
+    }
     const observation = this.store.create("workflow_evolution_observation", observationId, { ...identity, identity_digest: identityDigest, lifecycle: "accepted" });
     this.store.appendEvent(`workflow-evolution:${identity.scenario_key}`, "workflow_evolution.observed", { observation_id: observation.id, outcome });
     return { observation, idempotent: false };

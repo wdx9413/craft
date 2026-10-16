@@ -1,3 +1,9 @@
+## v0.12.46（Experience 终态分类续接）
+
+- Host 在 Hook 已写入未分类终态后补充语义场景时，原位升级同一 Observation 版本并复用 Evidence；不重复计数。
+- 分类升级仅允许从未分类到显式场景，需匹配相同 Host、turn、Context receipt、验证指纹和结果；兼容 0.12.45 已有的无终态摘要 Evidence。
+- 保持独立任务候选、模型提交以及 Shadow、Held-out、Signoff、Canary 晋级门槛。
+
 ## v0.12.45（Host 缓存刷新与自进化验收）
 
 - 版本推进用于区分同版本但内容不同的 Host 缓存；统一 Context 包基于当前源码重新构建并同步到 Marketplace。

@@ -110,22 +110,47 @@ export function installLearningCycleMethods(serviceClass: typeof CraftService): 
     // Taxonomy refinement must not mint a second observation for the same
     // terminal task. The fine key groups learning; coarse parents and verifier
     // digests are catalog metadata, not task evidence identity.
-    const identity = { host, task_id: taskId, turn_id: turnId, context_receipt_id: receipt.id, verification_ref: verificationRef, outcome, scope,
-      scenario_key: scenario ?? null };
+    // A Hook may finalize with its own task id before the Host model supplies
+    // semantic classification. Reuse that one unclassified completion when
+    // the later call is bound to the same terminal evidence and turn.
+    const terminalDigest = stableDigest({ host, turn_id: turnId, context_receipt_id: receipt.id,
+      verification_ref_digest: stableDigest(verificationRef), outcome, scope });
+    let effectiveTaskId = taskId;
+    if (scenarioInput !== undefined) {
+      const evidenceIds = new Set(this.store.list("evidence", 10_000, item => {
+        const metadata = item.metadata as JsonObject | undefined;
+        return metadata?.provenance === "host_completion_signal" && metadata.host === host && metadata.turn_id === turnId
+          && metadata.context_receipt_id === receipt.id && metadata.verification_ref_digest === stableDigest(verificationRef)
+          && (metadata.terminal_identity_digest === terminalDigest || metadata.terminal_identity_digest === undefined);
+      }).map(item => String(item.id)));
+      const priorUnclassified = this.store.list("workflow_evolution_observation", 10_000, item => {
+        const signature = item.scenario_signature as JsonObject | undefined;
+        const source = item.source as JsonObject | undefined;
+        return signature?.source === "unclassified" && item.outcome === outcome && source?.scope === `${scope.kind}:${scope.id}` && Array.isArray(item.evidence_ids)
+          && (item.evidence_ids as unknown[]).some(id => evidenceIds.has(String(id)));
+      });
+      const exact = priorUnclassified.find(item => (item.source as JsonObject | undefined)?.id === taskId);
+      const prior = exact ?? (priorUnclassified.length === 1 ? priorUnclassified[0] : null);
+      const priorTaskId = (prior?.source as JsonObject | undefined)?.id;
+      if (typeof priorTaskId === "string") effectiveTaskId = priorTaskId;
+    }
+    const identity = { host, task_id: effectiveTaskId, turn_id: turnId, context_receipt_id: receipt.id, verification_ref: verificationRef, outcome, scope };
     const sourceDigest = stableDigest(identity);
     // Outcomes belong to observations, not scenario identity. Otherwise a
     // successful and failed run could never be compared as one procedure.
     const scenarioSignature = scenario ? { schema: "craft.scenario-signature.v1", project: scope, scenario_key: scenario,
       target_class: "host_task_completion", host_revision: "craft-learning-cycle-v1" } : null;
+    const observationSignature = scenarioSignature ?? (scenarioInput === undefined
+      ? { schema: "craft.scenario-signature.v1", project: scope, source: "unclassified" } : null);
     const scenarioKey = scenarioSignature ? `scenario:${stableDigest(scenarioSignature).slice(-24)}` : null;
     const evidenceId = `evidence_learning_cycle_${sourceDigest.slice(-20)}`;
-    const evidence = this.store.find("evidence", evidenceId) ?? this.evidenceRecord({ evidence_id: evidenceId, source_type: "host_completion_signal", confidence: "bounded", claim: `Host reported terminal verification ${outcome}.`, locator: `context-receipt:${receipt.id}`, metadata: { provenance: "host_completion_signal", host, task_id: taskId, turn_id: turnId, verification_ref_digest: stableDigest(verificationRef), context_receipt_id: receipt.id, content_stored: false } });
+    const evidence = this.store.find("evidence", evidenceId) ?? this.evidenceRecord({ evidence_id: evidenceId, source_type: "host_completion_signal", confidence: "bounded", claim: `Host reported terminal verification ${outcome}.`, locator: `context-receipt:${receipt.id}`, metadata: { provenance: "host_completion_signal", terminal_identity_digest: terminalDigest, host, task_id: effectiveTaskId, turn_id: turnId, verification_ref_digest: stableDigest(verificationRef), context_receipt_id: receipt.id, content_stored: false } });
     const observationId = `workflow_evolution_observation_${sourceDigest.slice(-20)}`;
-    const observed = this.workflowEvolutionObserve({ observation_id: observationId, scenario_key: scenarioKey ?? `unclassified:${stableDigest({ scope, host }).slice(-24)}`, source_kind: `host:${host}`, source_id: taskId, source_digest: stableDigest({ taskId, turnId, outcome, verificationRef }), outcome, scope: `${scope.kind}:${scope.id}`, ...(scenarioSignature ? { scenario_signature: scenarioSignature } : {}), evidence_ids: [evidence.id], sanitized: true, content_stored: false });
+    const observed = this.workflowEvolutionObserve({ observation_id: observationId, scenario_key: scenarioKey ?? `unclassified:${stableDigest({ scope, host }).slice(-24)}`, source_kind: `host:${host}`, source_id: effectiveTaskId, source_digest: stableDigest({ taskId: effectiveTaskId, turnId, outcome, verificationRef }), outcome, scope: `${scope.kind}:${scope.id}`, ...(observationSignature ? { scenario_signature: observationSignature } : {}), evidence_ids: [evidence.id], sanitized: true, content_stored: false });
     const observationReplay = observed.idempotent === true;
     if (!scenarioKey) return { status: "observed", observation: observed.observation, evidence, request: null, next_action: "stable_scenario_key_required_for_cross_task_learning", idempotent: observationReplay };
     const observations = this.workflowEvolutionObservations({ scenario_key: scenarioKey, limit: 100 }).observations as JsonObject[];
-    const distinct = observations.filter(item => (item.source as JsonObject).id !== taskId);
+    const distinct = observations.filter(item => (item.source as JsonObject).id !== effectiveTaskId);
     const taxonomy = scope.kind === "project" ? recordExperienceScenario({ experience_dir: this.store.paths.experienceDir,
       project_id: scope.id.replace(/^project:/u, ""), scenario_key: scenario!, ...(coarseScenario ? { coarse_scenario_key: coarseScenario } : {}),
       ...(validatedScenarioDefinition ? { definition: validatedScenarioDefinition } : {}), ...(validatedCoarseScenarioDefinition ? { coarse_definition: validatedCoarseScenarioDefinition } : {}),

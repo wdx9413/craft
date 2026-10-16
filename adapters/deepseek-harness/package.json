@@ -1,10 +1,15 @@
 {
   "name": "dsh-craft-adapter",
-  "version": "0.12.45",
+  "version": "0.12.46",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "files": ["dist", "index.ts", "cordis.patch.yml", "README.md"],
+  "files": [
+    "dist",
+    "index.ts",
+    "cordis.patch.yml",
+    "README.md"
+  ],
   "peerDependencies": {
     "@deepseek-ai/cordis": "*",
     "@deepseek-ai/dsh-tools": "*"

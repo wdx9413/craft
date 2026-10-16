@@ -802,6 +802,69 @@ test("MCP completion keeps unclassified task observations out of cross-task Expe
   } finally { await dispose(f); }
 });
 
+test("Host scene classification refines the same terminal observation before independent tasks accumulate", async () => {
+  const f = await fixture();
+  try {
+    const context = await f.service.contextOpen({ project_root: f.root, query: "verified feature work", include_codebase: false });
+    const base = { host: "mcp_host", turn_id: "refine-turn-1", context_receipt_id: String((context.receipt as JsonObject).id), verified: true,
+      verification_outcome: "passed", verification_ref: "test:verified" };
+    const unclassified = f.service.learningCycleFinalize({ ...base, task_id: "refine-task-1" });
+    const original = unclassified.observation as JsonObject;
+    assert.equal((original.scenario_signature as JsonObject).source, "unclassified");
+    const originalSource = original.source as JsonObject;
+    const completionEvidenceId = String((original.evidence_ids as string[])[0]);
+    const completionEvidence = f.store.get("evidence", completionEvidenceId);
+    const legacyEvidenceMetadata = { ...(completionEvidence.metadata as JsonObject) };
+    delete legacyEvidenceMetadata.terminal_identity_digest;
+    f.store.save("evidence", completionEvidenceId, { ...completionEvidence, metadata: legacyEvidenceMetadata });
+    f.store.create("workflow_evolution_observation", "legacy-refinement", { scenario_key: "unclassified:legacy-refinement",
+      scenario_signature: { schema: "craft.scenario-signature.v1", source: "unclassified" },
+      source: { kind: "host:mcp_host", id: "legacy-refinement-task", digest: "legacy-refinement-digest", scope: originalSource.scope },
+      outcome: "passed", evidence_ids: original.evidence_ids, sanitized: true, content_stored: false, lifecycle: "accepted", identity_digest: "legacy" });
+    const legacyRefinement = f.service.workflowEvolutionObserve({ observation_id: "legacy-refinement", scenario_key: "scenario:legacy-refinement",
+      source_kind: "host:mcp_host", source_id: "legacy-refinement-task", source_digest: "legacy-refinement-digest", outcome: "passed", scope: originalSource.scope,
+      scenario_signature: { schema: "craft.scenario-signature.v1", scenario_key: "engineering.tests" }, evidence_ids: original.evidence_ids,
+      sanitized: true, content_stored: false });
+    assert.equal(legacyRefinement.refined, true);
+    assert.throws(() => f.service.workflowEvolutionObserve({ observation_id: original.id, scenario_key: "scenario:missing-classification",
+      source_kind: originalSource.kind, source_id: originalSource.id, source_digest: originalSource.digest, outcome: "passed", scope: originalSource.scope,
+      evidence_ids: original.evidence_ids, sanitized: true, content_stored: false }), /idempotency conflict/u);
+    assert.throws(() => f.service.workflowEvolutionObserve({ observation_id: original.id, scenario_key: "scenario:still-unclassified",
+      source_kind: originalSource.kind, source_id: originalSource.id, source_digest: originalSource.digest, outcome: "passed", scope: originalSource.scope,
+      scenario_signature: { schema: "craft.scenario-signature.v1", source: "unclassified" }, evidence_ids: original.evidence_ids,
+      sanitized: true, content_stored: false }), /idempotency conflict/u);
+    assert.throws(() => f.service.workflowEvolutionObserve({ observation_id: original.id, scenario_key: "scenario:rejected-refinement",
+      source_kind: originalSource.kind, source_id: originalSource.id, source_digest: originalSource.digest, outcome: "failed", scope: originalSource.scope,
+      scenario_signature: { schema: "craft.scenario-signature.v1", scenario_key: "engineering.tests" }, evidence_ids: original.evidence_ids,
+      sanitized: true, content_stored: false }), /idempotency conflict/u);
+    const verifiedInput = { observation_id: "verification-refinement", scenario_key: "unclassified:verification-refinement",
+      source_kind: "host:mcp_host", source_id: "verification-refinement-task", source_digest: "verification-refinement-digest", outcome: "passed",
+      scope: `project:${String(((context.receipt as JsonObject).scope as JsonObject).id)}`, scenario_signature: { schema: "craft.scenario-signature.v1", source: "unclassified" },
+      evidence_ids: original.evidence_ids, failure_type: "verified-run", verification: { contract_ref: "acceptance:test", workspace_revision: "revision:test",
+        evidence_digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", producer: "test", started_at: "2026-10-17T00:00:00.000Z",
+        completed_at: "2026-10-17T00:00:01.000Z", exit_code: 0 }, sanitized: true, content_stored: false };
+    f.service.workflowEvolutionObserve(verifiedInput);
+    const verifiedRefinement = f.service.workflowEvolutionObserve({ ...verifiedInput, scenario_key: "scenario:verification-refinement",
+      scenario_signature: { schema: "craft.scenario-signature.v1", scenario_key: "engineering.tests" } });
+    assert.equal(verifiedRefinement.refined, true);
+    const classified = f.service.learningCycleFinalize({ ...base, task_id: "host-skill-generated-task-id", scenario_key: "engineering.tests",
+      scenario_definition: { summary: "工程测试", applies_when: "工程改动通过自动化测试验证", excludes: "仅写文档" } });
+    const upgraded = classified.observation as JsonObject;
+    assert.equal(upgraded.id, original.id);
+    assert.equal(upgraded.version, Number(original.version) + 1);
+    assert.equal((upgraded.scenario_signature as JsonObject).scenario_key, "engineering.tests");
+    assert.equal(f.store.list("workflow_evolution_observation", 10).length, 3);
+    assert.equal(f.store.list("evidence", 10, item => (item.metadata as JsonObject | undefined)?.provenance === "host_completion_signal").length, 1);
+    const replay = f.service.learningCycleFinalize({ ...base, task_id: "refine-task-1", scenario_key: "engineering.tests" });
+    assert.equal((replay.observation as JsonObject).id, original.id);
+    assert.equal(replay.idempotent, true);
+    assert.throws(() => f.service.learningCycleFinalize({ ...base, task_id: "refine-task-1", scenario_key: "engineering.build" }), /idempotency conflict/u);
+    const independent = f.service.learningCycleFinalize({ ...base, turn_id: "refine-turn-2", task_id: "refine-task-2", scenario_key: "engineering.tests" });
+    assert.equal(independent.status, "candidate_request");
+    assert.equal(f.store.list("workflow_evolution_observation", 10).length, 4);
+  } finally { await dispose(f); }
+});
+
 test("verified repeated tasks create a pinned distillation ticket readable through the Experience request tool", async () => {
   const f = await fixture();
   try {
