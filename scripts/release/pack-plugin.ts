@@ -74,7 +74,9 @@ for (const component of components) {
   }
   // Portable core contains only Skill + MCP. Native Hook manifests remain optional compatibility artifacts.
   await writeFile(resolve(componentRoot, "plugin.json"), JSON.stringify({ $schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json", name: component, version: CRAFT_RELEASE_VERSION, description: `Standalone ${component} Skill and MCP`, license: "MIT" }, null, 2) + "\n");
-  await writeFile(resolve(componentRoot, "mcp.json"), JSON.stringify({ $schema: "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json", mcpServers: { [component]: { type: "stdio", command: "node", args: ["${PLUGIN_ROOT}/dist/plugin/craft-mcp.cjs", "--product", component.replace("craft-", "")] } } }, null, 2) + "\n");
+  const hostEnv = component === "craft-context" ? { env: { CRAFT_LEARNING_MODEL_HOST: "codex-cli" } } : {};
+  const mcpServer = { command: "node", args: ["${PLUGIN_ROOT}/dist/plugin/craft-mcp.cjs", "--product", component.replace("craft-", "")], ...hostEnv };
+  await writeFile(resolve(componentRoot, "mcp.json"), JSON.stringify({ $schema: "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json", mcpServers: { [component]: { type: "stdio", ...mcpServer } } }, null, 2) + "\n");
   const product = RELEASE_PRODUCTS.find(item => item.name === component)!;
   const selected = component.replace("craft-", "");
   for (const host of ["codex", "claude"]) {
@@ -88,7 +90,7 @@ for (const component of components) {
     if (!product.hookMember) delete manifest.hooks;
     await writeFile(resolve(componentRoot, `.${host}-plugin`, "plugin.json"), JSON.stringify(manifest, null, 2) + "\n");
   }
-  await writeFile(resolve(componentRoot, ".mcp.json"), JSON.stringify({ mcpServers: { [component]: { command: "node", args: ["dist/plugin/craft-mcp.cjs", "--product", selected], cwd: "." } } }, null, 2) + "\n");
+  await writeFile(resolve(componentRoot, ".mcp.json"), JSON.stringify({ mcpServers: { [component]: { command: "node", args: ["dist/plugin/craft-mcp.cjs", "--product", selected], cwd: ".", ...hostEnv } } }, null, 2) + "\n");
 }
 
 process.stdout.write(`Packed Craft and ${components.length} component plugins.\n`);

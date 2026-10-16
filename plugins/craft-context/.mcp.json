@@ -7,7 +7,10 @@
         "--product",
         "context"
       ],
-      "cwd": "."
+      "cwd": ".",
+      "env": {
+        "CRAFT_LEARNING_MODEL_HOST": "codex-cli"
+      }
     }
   }
 }

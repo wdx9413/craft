@@ -26,7 +26,7 @@
     "test:experience-learning-worker-coverage": "c8 --reporter=text --include=deploy/experience-learning/worker.ts --check-coverage --branches 100 --lines 100 --functions 100 node --test --test-concurrency=1 tests/experience-learning-worker.test.ts",
     "audit:coverage-inventory": "node --experimental-strip-types scripts/coverage/check-coverage-inventory.ts",
     "test:smoke": "node dist/core/cli.js --help",
-    "test:plugin": "pnpm run release:check && node --experimental-strip-types scripts/release/check-plugin-package.ts && node --experimental-strip-types scripts/release/check-plugin-version.ts && node --experimental-strip-types scripts/smoke/plugin-smoke.ts && node --experimental-strip-types scripts/smoke/plugin-component-smoke.ts && node --experimental-strip-types scripts/smoke/experience-autoevolution-smoke.ts && node --experimental-strip-types scripts/smoke/plugin-full-smoke.ts",
+    "test:plugin": "pnpm run release:check && node --experimental-strip-types scripts/release/check-plugin-package.ts && node --experimental-strip-types scripts/release/check-plugin-version.ts && node --experimental-strip-types --test tests/codex-host-plugin-config.test.ts && node --experimental-strip-types scripts/smoke/plugin-smoke.ts && node --experimental-strip-types scripts/smoke/plugin-component-smoke.ts && node --experimental-strip-types scripts/smoke/experience-autoevolution-smoke.ts && node --experimental-strip-types scripts/smoke/plugin-full-smoke.ts",
     "version:check": "node --experimental-strip-types scripts/ci/check-version.ts",
     "audit:layering": "node --experimental-strip-types scripts/ci/audit-layering.ts",
     "audit:surfaces": "node --experimental-strip-types scripts/ci/audit-surfaces.ts",
