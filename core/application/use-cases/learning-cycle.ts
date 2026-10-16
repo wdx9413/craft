@@ -163,27 +163,9 @@ export function installLearningCycleMethods(serviceClass: typeof CraftService): 
       : "Require a recorded terminal verification before marking a task complete, and preserve failed verification for bounded recovery.";
     const request = this.workflowEvolutionPropose({ scenario_key: scenarioKey, observation_ids: [String(distinct[0]!.id), observationId].sort(), hypothesis, design_axes: ["orchestration"], procedure_kind: "workflow", output_contract_ref: "acceptance:terminal-verification" });
     const evolutionRequest = request.request as JsonObject;
-    const configuredProfiles = this.evaluationModelProfileList({ limit: 100 }).profiles as JsonObject[];
-    const activeProfiles = configuredProfiles.filter(item => item.lifecycle === "active" && Array.isArray(item.purposes)
-      && (item.purposes as unknown[]).includes("workflow_evolution"));
-    let profile = activeProfiles.find(item => (item.readiness as JsonObject | undefined)?.status === "ready_for_adapter")
-      ?? activeProfiles[0];
-    if (!profile && activeProfiles.length === 0) {
-      const configuredModels = this.modelList().models as JsonObject[];
-      if (configuredModels.length === 1) {
-        const model = configuredModels[0]!;
-        const identity = { provider: model.id, model: model.model, base_url: model.baseUrl, api_key_env: model.apiKeyEnv };
-        profile = this.evaluationModelProfileSave({
-          profile_id: `evaluation_model_profile_auto_${stableDigest(identity).slice(-24)}`,
-          provider: model.id,
-          model: model.model,
-          purposes: ["workflow_evolution"],
-          network_execution_enabled: true,
-          max_attempts: 1,
-          max_output_tokens: 2_048,
-        }).profile as JsonObject;
-      }
-    }
+    const selectedProfile = this.evaluationModelProfileEnsureSingle({ purpose: "workflow_evolution" });
+    const profile = selectedProfile.profile && typeof selectedProfile.profile === "object"
+      ? selectedProfile.profile as JsonObject : null;
     const priorTicket = this.store.list("evaluation_model_ticket", 100, item => item.purpose === "workflow_evolution"
       && (item.target as JsonObject | undefined)?.id === evolutionRequest.id && Number((item.target as JsonObject).version) === Number(evolutionRequest.version))[0];
     let ticket = priorTicket ?? null, ticketWasCreated = false;

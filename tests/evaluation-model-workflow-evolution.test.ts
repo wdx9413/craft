@@ -158,12 +158,15 @@ test("Knowledge classification tickets track the live candidate and keep result 
     assert.equal((completed.ticket as JsonObject).status, "completed");
     assert.equal((completed.ticket as JsonObject).result_digest, resultDigest);
     assert.equal((kernel.ticketList({ purpose: "knowledge_scenario_classification" }).tickets as JsonObject[]).length, 2);
+    f.store.create("evaluation_model_ticket", "not-ready-ticket", { purpose: "knowledge_scenario_classification", status: "needs_credential" });
+    assert.throws(() => kernel.ticketComplete({ ticket_id: "not-ready-ticket", result_digest: resultDigest }), /not ready for completion/u);
     const reviewedTicketId = String(reviewedTicket.id);
     assert.equal(((kernel.ticketComplete({ ticket_id: reviewedTicketId, result_digest: resultDigest }).ticket as JsonObject).status), "completed");
     assert.equal(((kernel.ticketComplete({ ticket_id: globalTicket.id, result_digest: resultDigest }).ticket as JsonObject).status), "completed");
-    assert.throws(() => kernel.ticketComplete({ ticket_id: ticket.id, result_digest: resultDigest }), /Only a ready Knowledge/u);
-    f.store.create("evaluation_model_ticket", "foreign-ticket", { purpose: "workflow_evolution", status: "ready_for_adapter" });
-    assert.throws(() => kernel.ticketComplete({ ticket_id: "foreign-ticket", result_digest: resultDigest }), /Only a ready Knowledge/u);
+    assert.equal(kernel.ticketComplete({ ticket_id: ticket.id, result_digest: resultDigest }).idempotent, true);
+    assert.throws(() => kernel.ticketComplete({ ticket_id: ticket.id, result_digest: `sha256:${"b".repeat(64)}` }), /conflicts/u);
+    f.store.create("evaluation_model_ticket", "foreign-ticket", { purpose: "other", status: "ready_for_adapter" });
+    assert.throws(() => kernel.ticketComplete({ ticket_id: "foreign-ticket", result_digest: resultDigest }), /Knowledge classification or Workflow-evolution/u);
     f.store.save("knowledge_claim", "claim-1", { status: "reviewed", scope: "project:demo", content_digest: "sha256:claim" });
     assert.deepEqual((kernel.ticketList({ purpose: "knowledge_scenario_classification" }).tickets as JsonObject[]).map(item => item.id), []);
     assert.throws(() => kernel.issue({ profile_id: profile.id, purpose: "knowledge_scenario_classification", knowledge_claim_id: "missing",
@@ -209,6 +212,58 @@ test("automatic Knowledge profile selection reuses one purpose profile and fails
       purposes: ["knowledge_scenario_classification"] });
     assert.equal(f.service.evaluationModelProfileEnsureSingle({ purpose: "knowledge_scenario_classification" }).reason, "multiple_active_profiles_for_purpose");
     assert.throws(() => f.service.evaluationModelProfileEnsureSingle({ purpose: "unknown" }), /purpose is unsupported/u);
+  } finally { await close(f); }
+});
+
+test("Codex Host creates a purpose-bound gpt-6-luna profile without an API credential", async () => {
+  const previous = process.env.CRAFT_LEARNING_MODEL_HOST;
+  process.env.CRAFT_LEARNING_MODEL_HOST = "codex-cli";
+  const f = await fixture();
+  try {
+    f.service.modelAdd({ id: "qwen", name: "Qwen", baseUrl: "https://example.invalid/v1", model: "qwen-plus", apiKeyEnv: "DASHSCOPE_API_KEY" });
+    const selected = f.service.evaluationModelProfileEnsureSingle({ purpose: "knowledge_scenario_classification" });
+    assert.equal(selected.status, "ready_for_adapter");
+    assert.equal((selected.profile as JsonObject).provider, "codex-cli");
+    assert.equal((selected.profile as JsonObject).model, "gpt-6-luna");
+    assert.equal((selected.profile as JsonObject).network_execution_enabled, true);
+    assert.equal((selected.profile as JsonObject).api_key_env, "host-managed-auth-store");
+    assert.equal(f.service.evaluationModelProfileEnsureSingle({ purpose: "knowledge_scenario_classification" }).idempotent, true);
+    const details = f.service.evaluationModelProfileGet({ profile_id: (selected.profile as JsonObject).id });
+    assert.equal((details.provider as JsonObject).host_managed_auth, true);
+    assert.equal((details.readiness as JsonObject).configured, true);
+  } finally {
+    f.store.close(); await rm(f.root, { recursive: true, force: true });
+    if (previous === undefined) delete process.env.CRAFT_LEARNING_MODEL_HOST;
+    else process.env.CRAFT_LEARNING_MODEL_HOST = previous;
+  }
+});
+
+test("Workflow-evolution ticket completion records the exact submitted candidate idempotently", async () => {
+  const f = await fixture();
+  try {
+    observation(f.service, "ticket-observation-1", "independent-source-1");
+    observation(f.service, "ticket-observation-2", "independent-source-2", "failed");
+    const request = f.service.workflowEvolutionPropose({ request_id: "ticket-request", scenario_key: "support-refund",
+      observation_ids: ["ticket-observation-1", "ticket-observation-2"], hypothesis: "Reuse the verified checks",
+      design_axes: ["orchestration"], output_contract_ref: "contract:ticket" }).request as JsonObject;
+    const kernel = new EvaluationModelProfileKernel(f.store, PROVIDER_CATALOG, { DASHSCOPE_API_KEY: "configured-for-test" });
+    const profile = kernel.save({ profile_id: "ticket-profile", provider: "qwen", model: "qwen-plus",
+      purposes: ["workflow_evolution"], network_execution_enabled: true }).profile as JsonObject;
+    const ticket = kernel.issue({ ticket_id: "ticket-workflow", profile_id: profile.id, purpose: "workflow_evolution",
+      workflow_evolution_request_id: request.id, input_ref: "craft-experience://request", output_contract_ref: "contract:ticket" }).ticket as JsonObject;
+    assert.equal((kernel.ticketList({ purpose: "workflow_evolution" }).tickets as JsonObject[]).some(item => item.id === ticket.id), true);
+    const digest = `sha256:${"a".repeat(64)}`;
+    assert.throws(() => kernel.ticketComplete({ ticket_id: ticket.id, result_digest: digest }), /exact submitted candidate/u);
+    const submitted = f.service.workflowEvolutionProposalSubmit({ proposal_id: "ticket-proposal", request_id: request.id,
+      model_ticket_id: ticket.id, workflow_id: "ticket-workflow", name: "Ticket candidate", description: "Bounded candidate",
+      inputs: [], steps: [{ id: "check", type: "assertion", evaluator: "file_exists", path: "receipt.txt" }] });
+    const completed = kernel.ticketComplete({ ticket_id: ticket.id, result_digest: digest });
+    assert.equal((completed.ticket as JsonObject).status, "completed");
+    assert.equal(kernel.ticketComplete({ ticket_id: ticket.id, result_digest: digest }).idempotent, true);
+    assert.throws(() => kernel.ticketComplete({ ticket_id: ticket.id, result_digest: `sha256:${"b".repeat(64)}` }), /conflicts/u);
+    assert.equal((kernel.ticketList({ purpose: "workflow_evolution" }).tickets as JsonObject[]).some(item => item.id === ticket.id), false);
+    assert.equal(f.store.events("evaluation-model:ticket-profile").some(event => event.event_type === "evaluation_model.ticket_completed"), true);
+    assert.equal((submitted.proposal as JsonObject).model_ticket_id, ticket.id);
   } finally { await close(f); }
 });
 
@@ -287,8 +342,8 @@ test("routes every reserved model and Workflow-evolution operation through the c
     const request = (await server.handlers.craft_experience_procedure_draft({ request_id: "mcp-request", scenario_key: "mcp-flow", observation_ids: [first.id, second.id], hypothesis: "preserve the observed verification sequence", design_axes: ["orchestration"], output_contract_ref: "contract:mcp-workflow" })).request as JsonObject;
     const ticket = (await server.handlers.craft_evaluation_model_ticket_issue({ ticket_id: "mcp-ticket", profile_id: profile.id, purpose: "workflow_evolution", workflow_evolution_request_id: request.id, input_ref: "external:batch", output_contract_ref: "contract:mcp-workflow" })).ticket as JsonObject;
     const pendingTickets = (await server.handlers.craft_evaluation_model_ticket_list({ purpose: "workflow_evolution" })).tickets as JsonObject[];
-    assert.equal(pendingTickets.length, 1);
-    assert.equal((pendingTickets[0]!.readiness as JsonObject).status, "needs_enablement");
+    assert.equal(pendingTickets.length, 0, "tickets that are not ready for an adapter stay out of its work queue");
+    assert.equal(ticket.status, "needs_enablement");
     assert.throws(() => server.handlers.craft_evaluation_model_ticket_list({ purpose: "unsupported" }), /purpose is unsupported/u);
     assert.throws(() => server.handlers.craft_evaluation_model_ticket_list({ limit: 0 }), /limit/u);
     const submitted = await server.handlers.craft_experience_procedure_submit({ proposal_id: "mcp-proposal", request_id: request.id, model_ticket_id: ticket.id, workflow_id: "mcp-draft", name: "MCP draft", description: "A bounded draft from sanitized evidence.", inputs: [], steps: [{ type: "assertion" }] });

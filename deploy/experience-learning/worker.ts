@@ -5,10 +5,12 @@ import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
 import { createFetchTransport, buildChatRequest, defineProvider, PROVIDER_CATALOG, type ChatMessage, type ModelProviderSpec, type ModelTransport } from "../../core/model-gateway.ts";
 import { stableDigest } from "../../core/digest.ts";
+import { CRAFT_RELEASE_VERSION } from "../../core/version.ts";
 import type { JsonObject } from "../../core/infrastructure/store.ts";
 import { validateDistilledWorkflowSteps } from "./workflow-contract.ts";
 import { runKnowledgeSyncOnce, type KnowledgeLearningClient } from "./knowledge-sync.ts";
 import { runKnowledgeScenarioClassificationOnce } from "./knowledge-classification.ts";
+import { createLearningModelTransport } from "./codex-cli-transport.ts";
 import { learningFailureKind, learningTickStatus, runLearningTick as runResilientLearningTick } from "./learning-tick.ts";
 
 export interface ExperienceLearningClient { call(name: string, args?: JsonObject): Promise<JsonObject> }
@@ -154,6 +156,10 @@ export async function runDistillationOnce(deps: DistillationDependencies): Promi
       output_contract_ref: request.output_contract_ref, observations };
     if (JSON.stringify(input).length > 12_000) throw new Error("Pinned Experience request exceeds the distillation input limit");
     const messages: ChatMessage[] = [{ role: "system", content: system }, { role: "user", content: JSON.stringify(input) }];
+    if (deps.transport?.acquireCall && !deps.transport.acquireCall(provider.provider)) {
+      outcomes.push({ ticket_id: ticket.id, request_id: requestId, status: "skipped", reason: "model_call_budget_exhausted" });
+      break;
+    }
     const transport = deps.transport ?? createFetchTransport({ maxAttempts: Number(profile.max_attempts ?? 1) });
     const chat = await transport.complete(provider, buildChatRequest(provider, { model: string(profile.model, "profile.model", 200),
       messages, max_tokens: Number(profile.max_output_tokens ?? 4_096), temperature: Number(profile.temperature ?? 0) }));
@@ -168,11 +174,15 @@ export async function runDistillationOnce(deps: DistillationDependencies): Promi
       inputs, steps,
     });
     const procedure = result.procedure ? object(result.procedure, "submitted procedure") : null;
+    const proposal = result.proposal ? object(result.proposal, "submitted proposal") : null;
+    await deps.client.call("craft_evaluation_model_ticket_complete", { ticket_id: ticket.id,
+      result_digest: stableDigest({ ticket_id: ticket.id, request_id: requestId, proposal_id: proposal?.id ?? null,
+        procedure_id: procedure?.id ?? null, procedure_digest: proposal?.identity_digest ?? null, status: "candidate_submitted" }) });
     const firstDispatch = procedure && typeof procedure.id === "string"
       ? await deps.client.call("craft_experience_learning_evaluation_dispatch", { procedure_id: procedure.id })
       : null;
     outcomes.push({ ticket_id: ticket.id, request_id: requestId, status: "candidate_submitted",
-      proposal_id: (result.proposal as JsonObject | undefined)?.id ?? null,
+      proposal_id: proposal?.id ?? null,
       procedure_id: procedure?.id ?? null,
       evaluation_dispatch_id: (firstDispatch?.dispatch as JsonObject | undefined)?.id ?? null,
       evaluation_stage: (firstDispatch?.dispatch as JsonObject | undefined)?.stage ?? null });
@@ -229,7 +239,7 @@ export class McpStdioClient implements ExperienceLearningClient {
   }
 
   async initialize(): Promise<void> {
-    await this.request("initialize", { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "craft-continuous-learning-worker", version: "0.12.44" } });
+    await this.request("initialize", { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "craft-continuous-learning-worker", version: CRAFT_RELEASE_VERSION } });
     this.child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`);
   }
 
@@ -274,7 +284,8 @@ async function main(): Promise<void> {
     await client.initialize();
     do {
       const syncKnowledge = knowledgeEnabled && Date.now() - lastKnowledgeSync >= knowledgePollMs;
-      const result = await runLearningTick({ client }, syncKnowledge, components);
+      const modelTransport = createLearningModelTransport(process.env.CRAFT_LEARNING_MODEL_HOST);
+      const result = await runLearningTick({ client, ...(modelTransport ? { transport: modelTransport } : {}) }, syncKnowledge, components);
       const knowledge = result.knowledge as JsonObject | null;
       if (syncKnowledge && !knowledge?.failure_kind) lastKnowledgeSync = Date.now();
       const status = learningTickStatus(result, once);

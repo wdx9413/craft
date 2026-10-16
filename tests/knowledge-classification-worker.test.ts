@@ -73,6 +73,19 @@ test("classification uses the normalized project id for canonical scope model in
   assert.equal(f.calls.find(call => call.name === "craft_knowledge_scenario_list")?.args.scope, "project:project:canonical-project");
 });
 
+test("classification keeps a ready ticket retryable when the shared Host-call budget is exhausted", async () => {
+  const f = fixture();
+  let modelCalls = 0;
+  const transport: ModelTransport = { acquireCall: () => false, async complete() {
+    modelCalls += 1;
+    return { text: "{}", model: "test-model", usage: null };
+  } };
+  const result = await runKnowledgeScenarioClassificationOnce({ client: f.client, providers: [provider], transport });
+  assert.deepEqual(result.outcomes, [{ claim_id: "claim-1", ticket_id: "ticket-1", status: "skipped", reason: "model_call_budget_exhausted" }]);
+  assert.equal(modelCalls, 0);
+  assert.equal(f.calls.some(call => call.name === "craft_knowledge_claim_save" || call.name === "craft_evaluation_model_ticket_complete"), false);
+});
+
 test("classification routes global Claims through the isolated global Knowledge taxonomy", async () => {
   const f = fixture(undefined, "candidate", "global");
   const result = await runKnowledgeScenarioClassificationOnce({ client: f.client, providers: [provider], transport: f.transport });

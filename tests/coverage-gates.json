@@ -1583,6 +1583,16 @@
       "branches": true
     },
     {
+      "name": "codex-cli-learning-transport",
+      "include": [
+        "deploy/experience-learning/codex-cli-transport.ts"
+      ],
+      "tests": [
+        "tests/codex-cli-learning-transport.test.ts"
+      ],
+      "branches": true
+    },
+    {
       "name": "learning-worker-supervisor",
       "include": [
         "core/interfaces/learning-worker-supervisor.ts"

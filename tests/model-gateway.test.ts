@@ -19,7 +19,7 @@ const anthropicSpec = (): ModelProviderSpec => defineProvider({ provider: "demo-
 
 test("the provider catalog declares every requested family and no secret material", () => {
   assert.deepEqual(PROVIDER_CATALOG.map((spec) => spec.provider),
-    ["deepseek", "volcengine", "qwen", "kimi", "glm", "minimax", "gpt", "claude"]);
+    ["codex-cli", "deepseek", "volcengine", "qwen", "kimi", "glm", "minimax", "gpt", "claude"]);
   const serialized = JSON.stringify(PROVIDER_CATALOG);
   for (const spec of PROVIDER_CATALOG) {
     assert.match(spec.api_key_env, /^[A-Z_][A-Z0-9_]*$/u);
@@ -62,6 +62,8 @@ test("defaults fill in the provider label, chat path and tool support", () => {
   assert.equal(declared.chat_path, "/custom");
   assert.equal(declared.supports_tools, false);
   assert.equal(declared.cost_hint, 3);
+  assert.equal(defineProvider({ provider: "host-cli", protocol: "openai-compatible", base_url: "https://host.invalid/v1",
+    api_key_env: "HOST_AUTH", models: { small: "gpt-6-luna" }, host_managed_auth: true }).host_managed_auth, true);
 });
 
 test("user model configs produce provider specs and secret-free public views", () => {
@@ -111,6 +113,16 @@ test("credential status reports the variable name and never the value", () => {
   const view = publicProvider(spec, { DEMO_API_KEY: "secret-value" });
   assert.equal(view.configured, true);
   assert.equal(JSON.stringify(view).includes("secret-value"), false);
+});
+
+test("Codex CLI Host authentication is delegated to its Host store and cannot reach API transport", async () => {
+  const spec = PROVIDER_CATALOG.find(item => item.provider === "codex-cli")!;
+  assert.equal(spec.host_managed_auth, true);
+  assert.equal(spec.models.small, "gpt-6-luna");
+  assert.deepEqual(credentialStatus(spec, {}), { provider: "codex-cli", configured: true, api_key_env: "host-managed-auth-store" });
+  assert.equal((publicProvider(spec, {}) as JsonObject).host_managed_auth, true);
+  const request = buildChatRequest(spec, { model: "gpt-6-luna", messages: [{ role: "user", content: "fixture" }] });
+  await assert.rejects(createFetchTransport().complete(spec, request), /requires its Host-managed transport/u);
 });
 
 test("request rendering matches each wire format", () => {

@@ -285,7 +285,7 @@ const TOOL_DEFINITIONS: Tool[] = [
   tool("craft_evaluation_model_profile_ensure_single", "Reuse a sole active profile for one model purpose, or create a deterministic profile only when exactly one local model is configured; ambiguous configuration fails closed.", ["purpose"]),
   tool("craft_evaluation_model_ticket_issue", "Issue one content-free evaluation, Workflow-evolution, or Knowledge classification model call contract; only a later compatible Adapter may perform the network call.", ["profile_id", "purpose", "input_ref", "output_contract_ref"], false, ["ticket_id", "campaign_dispatch_id", "workflow_evolution_request_id", "knowledge_claim_id"]),
   tool("craft_evaluation_model_ticket_list", "List bounded model tickets for a compatible Adapter; resolved or stale Workflow-evolution requests are omitted.", [], true, ["purpose", "limit"]),
-  tool("craft_evaluation_model_ticket_complete", "Complete a Knowledge classification ticket with a content-free result digest after saving the classification or an uncertainty result.", ["ticket_id", "result_digest"]),
+  tool("craft_evaluation_model_ticket_complete", "Complete a Knowledge classification ticket after its result is saved, or a Workflow-evolution ticket after its exact candidate is submitted; records a content-free digest.", ["ticket_id", "result_digest"]),
   // The Experience product speaks in its own domain language.  The older
   // workflow_evolution MCP family has been retired; its storage and kernels
   // remain behind this seam so existing evidence stays usable.

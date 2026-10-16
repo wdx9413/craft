@@ -466,8 +466,10 @@ export abstract class ServiceFoundation {
     // The catalog is a safe, keyless discovery fallback. A saved configuration
     // takes precedence after restart, while a first-run Studio can still load
     // far enough to guide the user through adding one.
-    this.modelProviders = modelProviders && modelProviders.length ? modelProviders
-      : configuredModels.length ? configuredModels : PROVIDER_CATALOG;
+    const codexHostProvider = PROVIDER_CATALOG.filter((provider) => provider.provider === "codex-cli");
+    this.modelProviders = modelProviders && modelProviders.length ? [...modelProviders, ...codexHostProvider.filter((host) => !modelProviders.some((provider) => provider.provider === host.provider))]
+      : configuredModels.length ? [...configuredModels, ...codexHostProvider]
+        : PROVIDER_CATALOG;
     this.internalHost = new InternalHostDriver(store, { providers: this.modelProviders, transport: modelTransport,
       toolCatalog: () => canonicalToolCatalog(),
       dispatchable: () => this.dispatchableInternalActions(),

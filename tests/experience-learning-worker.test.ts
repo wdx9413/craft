@@ -27,6 +27,7 @@ function fixture(modelText = JSON.stringify({ name: "Verified flow", description
       observations: [{ outcome: "passed", sanitized: true, content_stored: false, execution_shape: ["inspect", "verify"], verification: { outcome: "passed" } },
         { outcome: "passed", sanitized: true, content_stored: false, execution_shape: ["inspect", "verify"], verification: { outcome: "passed" } }] };
     if (name === "craft_experience_procedure_submit") { queued = false; return { proposal: { id: "proposal-1" }, procedure: { id: "procedure-1" } }; }
+    if (name === "craft_evaluation_model_ticket_complete") return { ticket: { id: args.ticket_id, status: "completed" } };
     if (name === "craft_experience_learning_evaluation_dispatch") return { dispatch: { id: "dispatch-1", stage: "shadow" } };
     throw new Error(`unexpected tool ${name}`);
   } };
@@ -51,8 +52,23 @@ test("distillation worker turns a ready ticket into a candidate and retries from
   assert.equal(submit.args.model_ticket_id, "ticket-1");
   assert.equal(submit.args.workflow_id, "experience_" + (await import("../core/digest.ts")).stableDigest("request-1").slice(-20));
   assert.equal(submit.args.inputs instanceof Array && submit.args.inputs[0], "project_root");
+  const completion = f.calls.find(call => call.name === "craft_evaluation_model_ticket_complete");
+  assert.equal(completion?.args.ticket_id, "ticket-1");
+  assert.match(String(completion?.args.result_digest), /^sha256:[a-f0-9]{64}$/u);
   assert.equal((await runDistillationOnce(deps)).processed, 0);
   assert.equal(f.calls.filter(call => call.name === "craft_experience_procedure_submit").length, 1);
+});
+
+test("distillation completion binds a content-free digest when the adapter omits proposal metadata", async () => {
+  const f = fixture();
+  const client: ExperienceLearningClient = { async call(name, args) {
+    if (name === "craft_experience_procedure_submit") return { procedure: { id: "procedure-no-proposal" } };
+    return f.client.call(name, args);
+  } };
+  const result = await runDistillationOnce({ client, providers: [provider], transport: f.transport });
+  assert.equal(((result.outcomes as JsonObject[])[0]!).status, "candidate_submitted");
+  const complete = f.calls.find(call => call.name === "craft_evaluation_model_ticket_complete");
+  assert.match(String(complete?.args.result_digest), /^sha256:[a-f0-9]{64}$/u);
 });
 
 test("evaluation worker drains ordered dispatches and stops on an unconfigured scenario", async () => {
@@ -341,6 +357,14 @@ test("distillation worker skips tickets without current adapter readiness", asyn
   assert.equal(f.calls.some(call => call.name === "craft_experience_procedure_submit"), false);
 });
 
+test("distillation leaves a ready ticket untouched when the shared Host model-call budget is exhausted", async () => {
+  const f = fixture();
+  const transport = { acquireCall: () => false, async complete() { throw new Error("must not call model"); } };
+  const result = await runDistillationOnce({ client: f.client, providers: [provider], transport });
+  assert.deepEqual((result.outcomes as JsonObject[])[0], { ticket_id: "ticket-1", request_id: "request-1", status: "skipped", reason: "model_call_budget_exhausted" });
+  assert.equal(f.calls.some(call => call.name === "craft_experience_procedure_submit"), false);
+});
+
 test("distillation worker skips stale and graph requests until a compatible adapter exists", async () => {
   const f = fixture();
   const stale: ExperienceLearningClient = { async call(name, args) {
@@ -379,6 +403,26 @@ test("worker CLI negotiates real newline MCP stdio and completes one empty poll"
   const dataDir = mkdtempSync(join(tmpdir(), "craft-learning-worker-cli-"));
   const child = spawn(process.execPath, ["--experimental-strip-types", workerPath, "--once"], { env: {
     ...process.env, NODE_NO_WARNINGS: "1", CRAFT_DATA_DIR: dataDir, CRAFT_EXPERIENCE_MCP_COMMAND: process.execPath, CRAFT_EXPERIENCE_MCP_ARGS: JSON.stringify([fixturePath]),
+  }, stdio: ["ignore", "pipe", "pipe"] });
+  let stdout = "", stderr = "";
+  child.stdout.setEncoding("utf8").on("data", chunk => { stdout += chunk; });
+  child.stderr.setEncoding("utf8").on("data", chunk => { stderr += chunk; });
+  const exitCode = await new Promise<number>((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", code => resolve(code ?? -1));
+  });
+  assert.equal(exitCode, 0, stderr);
+  assert.deepEqual(JSON.parse(stdout.trim()), { processed: 0, outcomes: [], evaluation: { processed: 0, outcomes: [] }, knowledge: { sources_seen: 0, sources_selected: 0, outcomes: [], skipped_sources: 0, classification: { processed: 0, outcomes: [] } } });
+  rmSync(dataDir, { recursive: true, force: true });
+});
+
+test("worker selects the Codex Host transport for an empty poll without starting a model call", async () => {
+  const workerPath = fileURLToPath(new URL("../deploy/experience-learning/worker.ts", import.meta.url));
+  const fixturePath = fileURLToPath(new URL("./fixtures/experience-learning-mcp-fixture.cjs", import.meta.url));
+  const dataDir = mkdtempSync(join(tmpdir(), "craft-learning-codex-host-empty-"));
+  const child = spawn(process.execPath, ["--experimental-strip-types", workerPath, "--once"], { env: {
+    ...process.env, NODE_NO_WARNINGS: "1", CRAFT_DATA_DIR: dataDir, CRAFT_LEARNING_MODEL_HOST: "codex-cli",
+    CRAFT_EXPERIENCE_MCP_COMMAND: process.execPath, CRAFT_EXPERIENCE_MCP_ARGS: JSON.stringify([fixturePath]),
   }, stdio: ["ignore", "pipe", "pipe"] });
   let stdout = "", stderr = "";
   child.stdout.setEncoding("utf8").on("data", chunk => { stdout += chunk; });

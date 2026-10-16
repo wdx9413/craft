@@ -929,6 +929,32 @@ test("the current Host model can distill and submit a verified request without a
   } finally { await dispose(f); }
 });
 
+test("Codex learning Host gets a queued gpt-6-luna Experience ticket without Craft API model configuration", async () => {
+  const previousHost = process.env.CRAFT_LEARNING_MODEL_HOST;
+  process.env.CRAFT_LEARNING_MODEL_HOST = "codex-cli";
+  const f = await fixture();
+  try {
+    const context = await f.service.contextOpen({ project_root: f.root, query: "verified repeated work", include_codebase: false });
+    const base = { host: "mcp_host", turn_id: "codex-learning-turn", context_receipt_id: String((context.receipt as JsonObject).id),
+      verified: true, verification_outcome: "passed", verification_ref: "test:codex-learning", scenario_key: "coding.codex-learning" };
+    assert.equal(f.service.learningCycleFinalize({ ...base, task_id: "codex-first" }).status, "observed");
+    const finalized = f.service.learningCycleFinalize({ ...base, task_id: "codex-second" });
+    assert.equal(finalized.status, "candidate_request");
+    const ticket = finalized.model_ticket as JsonObject;
+    assert.equal(ticket.status, "ready_for_adapter");
+    assert.equal(ticket.purpose, "workflow_evolution");
+    const profile = f.service.evaluationModelProfileGet({ profile_id: String(ticket.profile_id) }).profile as JsonObject;
+    assert.equal(profile.provider, "codex-cli");
+    assert.equal(profile.model, "gpt-6-luna");
+    assert.equal(profile.api_key_env, "host-managed-auth-store");
+    assert.equal((f.service.evaluationModelTicketList({ purpose: "workflow_evolution" }).tickets as JsonObject[]).some(item => item.id === ticket.id), true);
+  } finally {
+    if (previousHost === undefined) delete process.env.CRAFT_LEARNING_MODEL_HOST;
+    else process.env.CRAFT_LEARNING_MODEL_HOST = previousHost;
+    await dispose(f);
+  }
+});
+
 test("a single configured Craft model bootstraps a bounded workflow evolution profile", async () => {
   const envName = "CRAFT_HOOK_AUTO_PROFILE_TEST_KEY";
   const previousKey = process.env[envName];

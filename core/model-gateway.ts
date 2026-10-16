@@ -40,6 +40,8 @@ export interface ModelProviderSpec {
   /** A relative ordering hint; it is never presented as a price. */
   cost_hint: number;
   supports_tools: boolean;
+  /** Authentication is supplied by an installed Host CLI instead of an API key. */
+  host_managed_auth?: boolean;
   /** Optional for adapters compiled against the pre-cache public contract. */
   context_cache?: ContextCacheSpec;
 }
@@ -54,6 +56,7 @@ const TIER_ORDER: readonly ModelTier[] = ["frontier", "standard", "small"];
  * a declared provider is still unusable until its environment variable exists.
  */
 export const PROVIDER_CATALOG: readonly ModelProviderSpec[] = [
+  { provider: "codex-cli", label: "Codex CLI Host", protocol: "openai-compatible", base_url: "https://codex-cli-host.invalid", api_key_env: "CODEX_CLI_AUTH_STORE", chat_path: "/host/exec", models: { small: "gpt-6-luna" }, cost_hint: 1, supports_tools: false, host_managed_auth: true, context_cache: NO_CONTEXT_CACHE },
   { provider: "deepseek", label: "DeepSeek", protocol: "openai-compatible", base_url: "https://api.deepseek.com/v1", api_key_env: "DEEPSEEK_API_KEY", chat_path: "/chat/completions", models: { small: "deepseek-chat", standard: "deepseek-chat", frontier: "deepseek-reasoner" }, cost_hint: 1, supports_tools: true, context_cache: DEEPSEEK_CONTEXT_CACHE },
   { provider: "volcengine", label: "火山引擎方舟", protocol: "openai-compatible", base_url: "https://ark.cn-beijing.volces.com/api/v3", api_key_env: "ARK_API_KEY", chat_path: "/chat/completions", models: { small: "doubao-lite", standard: "doubao-pro", frontier: "doubao-pro-32k" }, cost_hint: 2, supports_tools: true, context_cache: NO_CONTEXT_CACHE },
   { provider: "qwen", label: "通义千问", protocol: "openai-compatible", base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1", api_key_env: "DASHSCOPE_API_KEY", chat_path: "/chat/completions", models: { small: "qwen-turbo", standard: "qwen-plus", frontier: "qwen-max" }, cost_hint: 2, supports_tools: true, context_cache: NO_CONTEXT_CACHE },
@@ -110,7 +113,8 @@ export function defineProvider(input: JsonObject): ModelProviderSpec {
   return { provider, label: input.label === undefined ? provider : text(input.label, "label"), protocol: protocol as ModelProtocol,
     base_url: baseUrl, api_key_env: apiKeyEnv,
     chat_path: input.chat_path === undefined ? (protocol === "anthropic" ? "/messages" : "/chat/completions") : text(input.chat_path, "chat_path"),
-    models, cost_hint: costHint, supports_tools: supportsTools, context_cache: cacheSpec(provider, baseUrl, input.context_cache) };
+    models, cost_hint: costHint, supports_tools: supportsTools,
+    ...(input.host_managed_auth === true ? { host_managed_auth: true } : {}), context_cache: cacheSpec(provider, baseUrl, input.context_cache) };
 }
 
 export interface ChatToolDefinition { type: "function"; function: { name: string; description?: string; parameters?: JsonObject } }
@@ -154,6 +158,10 @@ export function publicModel(model: CraftModelConfig, env: NodeJS.ProcessEnv = pr
  * still work with ModelProviderSpec objects (runtime, internal host, etc.).
  */
 export function publicProvider(spec: ModelProviderSpec, env: NodeJS.ProcessEnv = process.env): JsonObject {
+  if (spec.host_managed_auth) return { provider: spec.provider, label: spec.label, protocol: spec.protocol,
+    base_url: spec.base_url, api_key_env: "host-managed-auth-store", models: spec.models,
+    cost_hint: spec.cost_hint, supports_tools: spec.supports_tools, configured: true,
+    host_managed_auth: true, context_cache: spec.context_cache ?? NO_CONTEXT_CACHE };
   const value = env[spec.api_key_env];
   const configured = typeof value === "string" && value.length > 0;
   return { provider: spec.provider, label: spec.label, protocol: spec.protocol,
@@ -165,6 +173,7 @@ export function publicProvider(spec: ModelProviderSpec, env: NodeJS.ProcessEnv =
  * Check whether a provider spec has its API key configured in the environment.
  */
 export function credentialStatus(spec: ModelProviderSpec, env: NodeJS.ProcessEnv = process.env): { provider: string; configured: boolean; api_key_env: string } {
+  if (spec.host_managed_auth) return { provider: spec.provider, configured: true, api_key_env: "host-managed-auth-store" };
   const value = env[spec.api_key_env];
   return { provider: spec.provider, configured: typeof value === "string" && value.length > 0, api_key_env: spec.api_key_env };
 }
@@ -278,7 +287,11 @@ export function parseChatResponse(spec: ModelProviderSpec, payload: unknown): Ch
  * default refuses with an actionable message instead of pretending to run; a
  * deployment (or a test) injects a real one.
  */
-export interface ModelTransport { complete(spec: ModelProviderSpec, request: ChatRequest): Promise<ChatResult> }
+export interface ModelTransport {
+  complete(spec: ModelProviderSpec, request: ChatRequest): Promise<ChatResult>;
+  /** Optional per-worker budget check performed before an external model call. */
+  acquireCall?(provider: string): boolean;
+}
 
 export interface FetchTransportOptions {
   env?: NodeJS.ProcessEnv;
@@ -309,6 +322,7 @@ export function createFetchTransport(options: FetchTransportOptions = {}): Model
   if (!Number.isInteger(maxResponseBytes) || maxResponseBytes < 1_024) throw new Error("maxResponseBytes must be at least 1024");
   return {
     complete: async (spec, request) => {
+      if (spec.host_managed_auth) throw new Error(`Model ${spec.provider} requires its Host-managed transport.`);
       const key = env[spec.api_key_env]?.trim();
       if (!key) throw new Error(`Model ${spec.provider} is not configured; set ${spec.api_key_env} before running Craft.`);
       const headers: Record<string, string> = { "content-type": "application/json" };

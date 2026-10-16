@@ -89,6 +89,10 @@ export async function runKnowledgeScenarioClassificationOnce(deps: KnowledgeClas
     let processingStage = "model_request";
     try {
       const messages: ChatMessage[] = [{ role: "system", content: system }, { role: "user", content: JSON.stringify(packet) }];
+      if (transport.acquireCall && !transport.acquireCall(provider.provider)) {
+        outcomes.push({ claim_id: claim.id, ticket_id: ticketId, status: "skipped", reason: "model_call_budget_exhausted" });
+        break;
+      }
       const response = await transport.complete(provider, buildChatRequest(provider, { model: String(profile.model), messages,
         max_tokens: Math.min(Number(profile.max_output_tokens ?? 2_048), 2_048), temperature: Number(profile.temperature ?? 0) }));
       const decision = parse(response.text);

@@ -418,6 +418,19 @@ export class CraftService extends ServiceFoundation {
     this.evaluationModelTicketList({ purpose, limit: 1 }); // Reuse the profile kernel's canonical purpose validator before any setup work.
     const active = (this.evaluationModelProfileList({ limit: 1_000 }).profiles as JsonObject[])
       .filter(profile => profile.lifecycle === "active" && Array.isArray(profile.purposes) && (profile.purposes as unknown[]).includes(purpose));
+    if (process.env.CRAFT_LEARNING_MODEL_HOST === "codex-cli") {
+      const codexProfiles = active.filter(profile => profile.provider === "codex-cli");
+      if (codexProfiles.length > 1) return { status: "ambiguous", reason: "multiple_active_profiles_for_purpose", profile_count: codexProfiles.length, profile: null };
+      if (codexProfiles.length === 1) {
+        const profile = codexProfiles[0]!;
+        return { status: (profile.readiness as JsonObject | undefined)?.status ?? "unavailable", profile, idempotent: true };
+      }
+      const profileId = `evaluation_model_profile_auto_codex_${stableDigest({ purpose, model: "gpt-6-luna" }).slice(-16)}`;
+      const created = this.evaluationModelProfileSave({ profile_id: profileId, provider: "codex-cli", model: "gpt-6-luna", purposes: [purpose],
+        network_execution_enabled: true, max_attempts: 1, max_output_tokens: 2_048 });
+      const profile = created.profile as JsonObject;
+      return { status: (created.readiness as JsonObject | undefined)?.status ?? "unavailable", profile, idempotent: created.idempotent === true };
+    }
     if (active.length > 1) return { status: "ambiguous", reason: "multiple_active_profiles_for_purpose", profile_count: active.length, profile: null };
     if (active.length === 1) {
       const profile = active[0]!;
