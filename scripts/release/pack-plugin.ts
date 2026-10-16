@@ -9,6 +9,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const pluginRoot = resolve(root, "plugins", "craft");
 const sourceSkill = resolve(root, "skills", "craft-route");
 const targetSkill = resolve(pluginRoot, "skills", "craft-route");
+const contextSkillMembers = ["craft-codebase", "craft-knowledge", "craft-memory", "craft-experience"];
 const sourceBundles = ["craft-mcp.cjs", "craft-mcp-full.cjs", "craft-mcp-http.cjs", "craft-codex-hook.cjs", "craft-parser-worker.js", "craft-experience-learning-worker.js"];
 const targetBundleDirectory = resolve(pluginRoot, "dist", "plugin");
 const components = RELEASE_PRODUCTS.filter((product) => product.name !== "craft").map((product) => product.name);
@@ -50,9 +51,13 @@ for (const component of components) {
   await mkdir(resolve(componentRoot, "skills"), { recursive: true });
   await cp(resolve(root, "skills", component), componentSkill, { recursive: true });
   if (component === "craft-context") {
-    for (const member of components.filter(name => name !== "craft-context")) await cp(resolve(root, "skills", member), resolve(componentSkill, "references", member), { recursive: true });
+    for (const member of contextSkillMembers) await cp(resolve(root, "skills", member), resolve(componentSkill, "references", member), { recursive: true });
+    const learningAdapter = resolve(root, "plugins", "craft-experience", "assets", "learning-adapter");
+    const contextLearningAdapter = resolve(componentSkill, "references", "craft-experience", "assets", "learning-adapter");
+    await rm(contextLearningAdapter, { recursive: true, force: true });
+    await cp(learningAdapter, contextLearningAdapter, { recursive: true });
   }
-  if (component === "craft-codebase" || component === "craft-context") {
+  if (component === "craft-context") {
     const targetScripts = resolve(componentRoot, "scripts", "codebase");
     await rm(targetScripts, { recursive: true, force: true });
     await cp(resolve(root, "scripts", "codebase"), targetScripts, {
@@ -77,7 +82,8 @@ for (const component of components) {
     const mcp = host === "codex" ? "./.mcp.json" : { [component]: { command: "node", args: ["${CLAUDE_PLUGIN_ROOT}/dist/plugin/craft-mcp.cjs", "--product", selected] } };
     const previousPath = resolve(componentRoot, `.${host}-plugin`, "plugin.json");
     const previous = existsSync(previousPath) ? JSON.parse(await readFile(previousPath, "utf8")) : {};
-    const manifest = { ...previous, name: component, version: CRAFT_RELEASE_VERSION, description: `${component} governed context and repository tools`, author: { name: "wdx9413" }, skills: "./skills/", mcpServers: mcp,
+    const description = component === "craft-context" ? "Complete Knowledge, Memory, Experience, and Codebase tools in one Craft entry point" : `${component} governed context and repository tools`;
+    const manifest = { ...previous, name: component, version: CRAFT_RELEASE_VERSION, description, author: { name: "wdx9413" }, skills: "./skills/", mcpServers: mcp,
       ...(product.hookMember ? { hooks: host === "codex" ? "./hooks/codex-hooks.json" : "./hooks/hooks.json" } : {}) };
     if (!product.hookMember) delete manifest.hooks;
     await writeFile(resolve(componentRoot, `.${host}-plugin`, "plugin.json"), JSON.stringify(manifest, null, 2) + "\n");

@@ -17,26 +17,6 @@
       "name": "craft-context",
       "source": "./plugins/craft-context",
       "description": "craft-context Skill and MCP"
-    },
-    {
-      "name": "craft-knowledge",
-      "source": "./plugins/craft-knowledge",
-      "description": "craft-knowledge Skill and MCP"
-    },
-    {
-      "name": "craft-memory",
-      "source": "./plugins/craft-memory",
-      "description": "craft-memory Skill and MCP"
-    },
-    {
-      "name": "craft-experience",
-      "source": "./plugins/craft-experience",
-      "description": "craft-experience Skill and MCP"
-    },
-    {
-      "name": "craft-codebase",
-      "source": "./plugins/craft-codebase",
-      "description": "craft-codebase Skill and MCP"
     }
   ]
 }

@@ -9,6 +9,12 @@ const GIT_MAX_BUFFER_BYTES = 32 * 1024 * 1024;
 
 export type GitEvaluationState = { revision: string | null; dirty: boolean | null; change_digest: string | null };
 
+export function assertEvaluationStateStable(label: string, before: GitEvaluationState, after: GitEvaluationState): GitEvaluationState {
+  if (before.revision !== after.revision || before.dirty !== after.dirty || before.change_digest !== after.change_digest)
+    throw new Error(`${label} source state changed during evaluation; rerun against a stable snapshot`);
+  return before;
+}
+
 export function digestEvaluationMaterial(content: string | Uint8Array): string {
   return createHash("sha256").update(content).digest("hex");
 }

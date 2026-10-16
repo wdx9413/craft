@@ -1,7 +1,7 @@
 {
   "name": "craft-context",
   "version": "0.12.44",
-  "description": "craft-context governed context and repository tools",
+  "description": "Complete Knowledge, Memory, Experience, and Codebase tools in one Craft entry point",
   "author": {
     "name": "wdx9413"
   },
@@ -19,24 +19,23 @@
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Craft Context",
-    "shortDescription": "Provide governed knowledge, memory, experience, and repository context.",
-    "longDescription": "Resolve scoped Knowledge, Memory, and routeable Experience in one bounded receipt, and prepare a repository index when needed. It never grants execution authority or silently imports private chat history.",
+    "shortDescription": "One complete entry point for Craft Knowledge, Memory, Experience, and Codebase.",
+    "longDescription": "Expose the full supported Knowledge, Memory, Experience, and read-only Codebase MCP tool surfaces through one plugin. Context resolution still produces bounded receipts; Codebase operations remain explicit and snapshot-pinned. The plugin does not grant execution authority or silently import private chat history.",
     "developerName": "wdx9413",
     "category": "Productivity",
     "brandColor": "#000000",
     "composerIcon": "./assets/craft-icon.svg",
     "logo": "./assets/craft-icon.svg",
     "capabilities": [
-      "Knowledge sources",
-      "Evidence Wiki",
-      "Memory ledger",
-      "Routeable procedures",
-      "Repository indexing",
-      "Context resolution",
-      "Retrieval evaluation"
+      "Complete Knowledge tools",
+      "Complete Memory tools",
+      "Complete Experience tools",
+      "Read-only Codebase tools",
+      "Unified context resolution",
+      "Repository indexing"
     ],
     "defaultPrompt": [
-      "Use Craft Context to resolve bounded project knowledge, memory, and verified procedures. Prepare repository structure only when relevant, explain the receipt and source versions, and write durable memory only on my explicit request."
+      "Use the Craft Context plugin as the complete entry point for Knowledge, Memory, Experience, and Codebase tools. Discover the relevant operation, preserve each component's evidence and safety gates, and use bounded context receipts when resolving project context."
     ]
   },
   "hooks": "./hooks/codex-hooks.json"

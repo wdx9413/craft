@@ -205,9 +205,15 @@ function ensureRepositoryAttempt(service: RepositoryOnboardingPort, args: JsonOb
       if (languageFiles.length > bounded.length) degraded.push({ language: adapter.language, status: "partial", reason: "document_limit", omitted_documents: languageFiles.length - bounded.length });
     }
     for (const language of [...new Set(adapterlessFiles.filter(file => !adaptedPaths.has(file.path)).map(file => file.language))].sort()) {
+      if (language === "go" && !configuredLanguages.has("go")) continue;
       const configuredLanguage = adapterlessFiles.filter(file => file.language === language).map(file => languageIdForFile(file.path)).find(Boolean);
       if (configuredLanguage && configuredLanguages.has(configuredLanguage)) continue;
       degraded.push({ language, status: "unavailable", reason: configuredLanguage ? "no_semantic_adapter" : "unsupported_lsp_language" });
+    }
+    const goFiles = selected.files.filter(file => file.language === "go" && !configuredLanguages.has("go"));
+    if (goFiles.length) {
+      semanticAnalyses.push(basicAnalysis(service.store, workspaceId, goFiles));
+      degraded.push({ language: "go", status: "partial", reason: "no_semantic_adapter", fallback_analyzer: "craft-basic-symbols", relations: "not_analyzed" });
     }
     if (semanticFiles.length) {
       try {

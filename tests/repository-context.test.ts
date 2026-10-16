@@ -232,6 +232,30 @@ test("Go LSP receives module context from the checkpoint and invalidates cached 
   } finally { f.close(); }
 });
 
+test("Go without a trusted adapter stays searchable with explicit partial relation coverage", async () => {
+  const f = await fixture();
+  try {
+    f.write("go.mod", "module example.test/go-fallback\n\ngo 1.22\n");
+    f.write("main.go", "package main\n\nfunc main() { NewService().Run() }\ntype Service struct{}\nfunc (s *Service) Run() {}\nfunc NewService() *Service { return &Service{} }\n");
+
+    const indexed = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
+    assert.equal(indexed.status, "ready");
+    const found = f.service.codebaseSymbolFind({ workspace_id: indexed.workspace_id, index_id: indexed.index_id, query: "Run" });
+    const symbols = found.symbols as JsonObject[];
+    assert(symbols.some(symbol => symbol.name === "Run" && symbol.language === "go" && symbol.path === "main.go"));
+    const constructor = f.service.codebaseSymbolFind({ workspace_id: indexed.workspace_id, index_id: indexed.index_id, query: "NewService" }).symbols as JsonObject[];
+    assert(constructor.some(symbol => symbol.name === "NewService" && symbol.language === "go"));
+    const index = f.store.get("codebase_index", String(indexed.index_id));
+    assert.deepEqual((index.analysis as JsonObject).relation_analysis, { status: "not_analyzed", analyzer: "craft-basic-symbols", edge_count: 0,
+      relation_kinds: [], reported_statuses: ["not_analyzed"], partial_reasons: ["degraded_languages"], next_action: "build_semantic_index" });
+    const diagnostics = (indexed.summary as JsonObject).diagnostics as JsonObject[];
+    assert(diagnostics.some(item => Array.isArray(item.degraded_languages)
+      && (item.degraded_languages as JsonObject[]).some(language => language.language === "go" && language.status === "partial"
+        && language.fallback_analyzer === "craft-basic-symbols" && language.relations === "not_analyzed")));
+    assert.equal(index.edge_count, 0);
+  } finally { f.close(); }
+});
+
 test("Go workspace context omissions are explicit in the semantic index receipt", async () => {
   const f = await fixture();
   try {

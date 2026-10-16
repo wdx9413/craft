@@ -41,12 +41,15 @@ test("worker supervisor starts isolated Knowledge and Experience workers and ski
     }) as unknown as typeof import("node:child_process").spawn;
     const stopExperience = await startContextLearningWorker({ mode: "component-experience-daily", server_entrypoint: f.server, env: {}, spawn_process: spawnWorker });
     const stopKnowledge = await startContextLearningWorker({ mode: "component-knowledge-daily", server_entrypoint: f.server, env: {}, spawn_process: spawnWorker });
-    assert.equal(launches.length, 2);
+    const stopContext = await startContextLearningWorker({ mode: "component-context-complete", server_entrypoint: f.server, env: {}, spawn_process: spawnWorker });
+    assert.equal(launches.length, 3);
     assert.deepEqual(JSON.parse(launches[0]!.env.CRAFT_EXPERIENCE_MCP_ARGS!), [realpathSync(f.server), "--product", "experience"]);
     assert.equal(launches[0]!.env.CRAFT_LEARNING_COMPONENTS, "experience");
     assert.deepEqual(JSON.parse(launches[1]!.env.CRAFT_EXPERIENCE_MCP_ARGS!), [realpathSync(f.server), "--product", "knowledge"]);
     assert.equal(launches[1]!.env.CRAFT_LEARNING_COMPONENTS, "knowledge");
-    await Promise.all([stopExperience?.(), stopKnowledge?.()]);
+    assert.deepEqual(JSON.parse(launches[2]!.env.CRAFT_EXPERIENCE_MCP_ARGS!), [realpathSync(f.server), "--product", "context"]);
+    assert.equal(launches[2]!.env.CRAFT_LEARNING_COMPONENTS, "experience,knowledge");
+    await Promise.all([stopExperience?.(), stopKnowledge?.(), stopContext?.()]);
     assert.equal(await startContextLearningWorker({ mode: "component-memory-daily", server_entrypoint: f.server, env: {} }), undefined);
     assert.equal(await startContextLearningWorker({ mode: "component-context-daily", server_entrypoint: f.server, env: { CRAFT_CONTINUOUS_LEARNING: "0" } }), undefined);
     assert.equal(await startContextLearningWorker({ mode: "component-context-daily", server_entrypoint: f.server, env: {}, exists: () => false, on_failure: value => failures.push(value) }), undefined);

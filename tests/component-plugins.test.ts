@@ -16,7 +16,7 @@ import { RELEASE_PRODUCTS } from "../core/release-catalog.ts";
 const components = RELEASE_PRODUCTS.map((product) => product.name);
 const internalComponentSurfaces = ["component-context", "component-quality", "component-knowledge", "component-memory", "component-capability", "component-skill-quality", "component-experience", "component-codebase"] as const;
 
-test("public MCP products resolve only maintained install products", () => {
+test("MCP launch modes resolve the complete context product and retained internal component modes", () => {
   assert.deepEqual(MCP_PRODUCT_NAMES, ["full", "context", "knowledge", "memory", "experience", "codebase"]);
   assert.equal(productSurfaceOf("full"), "syscall");
   assert.equal(productSurfaceOf("knowledge"), "component-knowledge-daily");
@@ -33,10 +33,21 @@ test("public MCP products resolve only maintained install products", () => {
   assert.throws(() => resolveMcpProductMode(["--product", "memory", "--product", "memory"], {}), /only once/);
   assert.throws(() => resolveMcpProductMode(["--product", "memory", "--surface", "component-knowledge"], {}), /conflict/);
   assert.throws(() => resolveMcpProductMode([], { CRAFT_MCP_PRODUCT: "memory", CRAFT_MCP_SURFACE: "component-knowledge" }), /conflict/);
-  assert.equal(productSurfaceOf("context"), "component-context-daily");
+  assert.equal(productSurfaceOf("context"), "component-context-complete");
 });
 
-test("internal component surfaces remain bounded while only three cognition products are installable", () => {
+test("craft-context includes the complete published surfaces for Codebase, Knowledge, Memory, and Experience", () => {
+  const context = new Set(surfaceToolNames(productSurfaceOf("context")));
+  for (const component of ["component-codebase", "component-knowledge", "component-memory", "component-experience"]) {
+    const missing = surfaceToolNames(component).filter(name => !context.has(name));
+    assert.deepEqual(missing, [], `craft-context must include every ${component} tool`);
+  }
+  for (const name of ["craft_context_open", "craft_knowledge_source_register", "craft_memory_ledger_transition", "craft_procedure_host_control", "craft_codebase_impact_query"])
+    assert(context.has(name), `craft-context must expose ${name}`);
+  assert(!context.has("craft_verified_work_loop_prepare"), "the component composition must not widen to the entire Craft runtime");
+});
+
+test("internal component surfaces remain bounded independently from the complete context composition", () => {
   assert.deepEqual(COMPONENT_SURFACE_NAMES, internalComponentSurfaces);
   const expected = {
     "component-context": "craft_memory_ledger_remember",
@@ -107,24 +118,21 @@ test("surface registry keeps generic quality and every bounded projection determ
 
 test("component plugin manifests use public MCP products rather than internal surface names", async () => {
   for (const name of components) {
+    const releaseProduct = RELEASE_PRODUCTS.find(product => product.name === name)!;
     const manifest = JSON.parse(await readFile(`plugins/${name}/.codex-plugin/plugin.json`, "utf8"));
     const mcp = JSON.parse(await readFile(`plugins/${name}/.mcp.json`, "utf8"));
     const server = mcp.mcpServers[name];
     assert.equal(manifest.name, name);
     assert.equal(manifest.version, VERSION);
-    if (["craft-context", "craft-knowledge", "craft-memory", "craft-experience"].includes(name)) assert.equal(manifest.hooks, "./hooks/codex-hooks.json");
-    if (name === "craft-codebase") assert.equal(manifest.hooks, undefined);
-    const product = name === "craft" ? "full" : name === "craft-experience" ? "experience" : name.slice(6);
+    assert.equal(manifest.hooks, releaseProduct.hookMember ? "./hooks/codex-hooks.json" : undefined);
+    const product = name === "craft" ? "full" : name.slice("craft-".length);
     assert.deepEqual(server.args, ["dist/plugin/craft-mcp.cjs", "--product", product]);
   }
 });
 
-test("Context and standalone products declare equivalent command-only lifecycle Hooks for Codex and Claude", async () => {
+test("the complete context plugin declares one command-only lifecycle Hook for Codex and Claude", async () => {
   const expected = {
     "craft-context": { member: "context", events: ["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop", "SessionEnd"] },
-    "craft-knowledge": { member: "knowledge", events: ["SessionStart", "UserPromptSubmit", "Stop", "SessionEnd"] },
-    "craft-memory": { member: "memory", events: ["SessionStart", "UserPromptSubmit", "Stop", "SessionEnd"] },
-    "craft-experience": { member: "experience", events: ["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop", "SessionEnd"] },
   } as const;
   for (const [name, contract] of Object.entries(expected)) {
     const codex = JSON.parse(await readFile(`plugins/${name}/.codex-plugin/plugin.json`, "utf8")) as { hooks?: string };

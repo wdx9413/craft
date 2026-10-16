@@ -658,6 +658,39 @@ test("content-addressed route records are checked before reuse", async () => {
   } finally { await close(f); }
 });
 
+test("codebase status returns bounded index metadata without legacy graph payloads", async () => {
+  const f = await fixture();
+  try {
+    active(f);
+    const built = index(f);
+    const stored = f.store.get("codebase_index", String(built.id));
+    for (let ordinal = 0; ordinal < 26; ordinal++) f.store.create("codebase_index", `history_${ordinal}`, {
+      workspace_id: f.workspace.id, checkpoint_id: f.checkpoint.id, status: "ready", analyzer: "typescript-checker", analyzer_version: "test",
+      created_at: new Date(Date.UTC(2000, 0, ordinal + 1)).toISOString(), node_count: 3, edge_count: 1, graph_storage: "sharded-v4",
+      graph_digest: `history_digest_${ordinal}`, relation_analysis: { status: "analyzed" },
+    });
+    f.store.save("codebase_index", String(built.id), { ...stored,
+      nodes: Array.from({ length: 2_000 }, (_, ordinal) => ({ id: `legacy_node_${ordinal}`, body: "x".repeat(1_000) })),
+      edges: Array.from({ length: 2_000 }, (_, ordinal) => ({ id: `legacy_edge_${ordinal}`, body: "x".repeat(1_000) })),
+      analysis: { allowed_paths: Array.from({ length: 2_000 }, (_, ordinal) => `src/${ordinal}.ts`) } });
+    const status = f.kernel.status({ workspace_id: f.workspace.id });
+    const statuses = status.indexes as JsonObject[];
+    assert.equal(statuses.length, 25);
+    const current = statuses.find(item => item.id === built.id)!;
+    assert.equal(current.graph_digest, built.graph_digest);
+    assert.equal(status.omitted_index_count, 2);
+    assert.equal("nodes" in current, false);
+    assert.equal("edges" in current, false);
+    assert.equal("analysis" in current, false);
+    assert(JSON.stringify(status).length < 10_000);
+    const full = new McpServer(f.service, "full");
+    const hostStatus = await full.handlers.craft_codebase_status({ workspace_id: f.workspace.id });
+    assert.equal((hostStatus.indexes as JsonObject[]).length, 25);
+    assert.equal((hostStatus.indexes as JsonObject[]).some(item => item.id === built.id), true);
+    assert(JSON.stringify(hostStatus).length < 12_000);
+  } finally { await close(f); }
+});
+
 test("craft-codebase rejects stale, inactive, unsafe, malformed, and ambiguous inputs without fallback", async () => {
   const f = await fixture();
   try {

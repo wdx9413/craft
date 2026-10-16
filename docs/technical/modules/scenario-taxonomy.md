@@ -87,4 +87,4 @@ Knowledge 和 Experience 通过 `craft_knowledge_scenario_retire` / `craft_exper
 
 ## 尚未达到的运行验收
 
-Experience 目录由 Learning Cycle 根据模型提交的粗/细分类及验证 digest 更新，分类身份贯穿 Hook 观察；同一项目的目录更新经独占锁串行化，遗留平铺目录仍兼容。Knowledge 目录由项目 Claim 保存与审核调用更新，独立可信 Source 达阈值后激活；失效 Source 会撤销对应引用，场景检索要求目录仍 active。两套 Catalog 均有本地边界测试和 100% 增量覆盖。尚未完成的验收是运行中的 `.43` Host：本地测试与 smoke 不能证明真实 Host 已发送模型分类并持续迭代。
+Experience 目录由 Learning Cycle 根据模型提交的粗/细分类及验证 digest 更新，分类身份贯穿 Hook 观察；同一项目的目录更新经独占锁串行化，遗留平铺目录仍兼容。Knowledge 目录由项目 Claim 保存与审核调用更新，独立可信 Source 达阈值后激活；失效 Source 会撤销对应引用，场景检索要求目录仍 active。两套 Catalog 均有本地边界测试和 100% 增量覆盖。运行时 Host 是否持续发送模型分类、形成调用记录并更新 Catalog，必须在目标 Host 上现场验证；本地测试与 bundle smoke 不能替代这项运行验收。

@@ -7,8 +7,7 @@ import { RELEASE_PRODUCTS } from "../../core/release-catalog.ts";
 
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const pluginRoot = join(root, "plugins", "craft");
-const componentNames = RELEASE_PRODUCTS.filter((product) => product.name !== "craft").map((product) => product.name);
-const hookMembers = { "craft-context": "context", "craft-knowledge": "knowledge", "craft-memory": "memory", "craft-experience": "experience" } as const;
+const componentProducts = RELEASE_PRODUCTS.filter((product) => product.name !== "craft");
 const normalizeText = (value: string): string => value.replaceAll("\r\n", "\n");
 const packageJson = JSON.parse(await readFile(join(root, "package.json"), "utf8")) as { version: string };
 const pluginManifest = JSON.parse(await readFile(join(pluginRoot, ".codex-plugin", "plugin.json"), "utf8")) as { name: string; version: string; skills: string; mcpServers: string; interface?: { composerIcon?: string; logo?: string } };
@@ -29,7 +28,8 @@ for (const path of [
   join(pluginRoot, "dist", "plugin", "craft-experience-learning-worker.js"),
 ]) await access(path);
 
-for (const name of componentNames) {
+for (const product of componentProducts) {
+  const name = product.name;
   const componentRoot = join(root, "plugins", name);
   const componentManifest = JSON.parse(await readFile(join(componentRoot, ".codex-plugin", "plugin.json"), "utf8")) as { name: string; version: string; skills: string; mcpServers: string; hooks?: string; interface?: { composerIcon?: string; logo?: string } };
   assert.equal(componentManifest.name, name);
@@ -40,15 +40,15 @@ for (const name of componentNames) {
   assert.equal(componentManifest.interface?.logo, "./assets/craft-icon.svg");
   await access(join(componentRoot, "assets", "craft-icon.svg"));
   await access(join(componentRoot, "dist", "plugin", "craft-mcp.cjs"));
-  if (name === "craft-codebase" || name === "craft-context") {
+  if (name === "craft-context") {
     await access(join(componentRoot, "scripts", "codebase", "analyzers", "python-control-flow.py"));
     await access(join(componentRoot, "scripts", "codebase", "analyzers", "python-data-flow.py"));
     await access(join(componentRoot, "scripts", "codebase", "analyzers", "AnalyzeJavaControlFlow.java"));
   }
-  if (["craft-context", "craft-knowledge", "craft-experience"].includes(name)) {
+  if (name === "craft-context") {
     await access(join(componentRoot, "dist", "plugin", "craft-experience-learning-worker.js"));
   }
-    if (name in hookMembers) {
+    if (product.hookMember) {
       assert.equal(componentManifest.hooks, "./hooks/codex-hooks.json");
       const hookPath = join(componentRoot, "hooks", "codex-hooks.json");
       await access(hookPath);
@@ -59,7 +59,7 @@ for (const name of componentNames) {
       for (const group of Object.values(hooks.hooks).flat()) {
         for (const handler of group.hooks) {
           assert.equal(handler.type, "command", `${name} Hook handlers must use the portable command type`);
-          assert.equal(handler.command, `node "\${PLUGIN_ROOT}/dist/plugin/craft-codex-hook.cjs" --member ${hookMembers[name as keyof typeof hookMembers]}`);
+          assert.equal(handler.command, `node "\${PLUGIN_ROOT}/dist/plugin/craft-codex-hook.cjs" --member ${product.hookMember}`);
           assert.equal(handler.additionalContextLimit, undefined, `${name} must keep the shared Hook file portable`);
         }
       }
@@ -69,16 +69,20 @@ for (const name of componentNames) {
   assert.equal(normalizeText(packed), normalizeText(source));
 }
 
-// Public products select only their declared bounded MCP product.  A stale or
-// widened value must never make a component bundle expose the full surface.
-for (const [name, product, hooked] of [["craft-context", "context", true], ["craft-knowledge", "knowledge", true], ["craft-memory", "memory", true], ["craft-experience", "experience", true], ["craft-codebase", "codebase", false]] as const) {
+// The public marketplace currently ships one complete context entry point.
+for (const { name, hookMember } of componentProducts) {
   const manifest = JSON.parse(await readFile(join(root, "plugins", name, ".claude-plugin", "plugin.json"), "utf8")) as {
     name: string; version: string; hooks?: string; mcpServers: Record<string, { args: string[] }>;
   };
   assert.equal(manifest.name, name);
   assert.equal(manifest.version, packageJson.version);
-  assert.equal(manifest.hooks, hooked ? "./hooks/hooks.json" : undefined);
-  assert.deepEqual(manifest.mcpServers[name]?.args.slice(-2), ["--product", product]);
+  assert.equal(manifest.hooks, hookMember ? "./hooks/hooks.json" : undefined);
+  assert.deepEqual(manifest.mcpServers[name]?.args.slice(-2), ["--product", name.replace("craft-", "")]);
+  if (name === "craft-context") {
+    for (const member of ["craft-codebase", "craft-knowledge", "craft-memory", "craft-experience"])
+      await access(join(root, "plugins", name, "skills", "craft-context", "references", member, "SKILL.md"));
+    await access(join(root, "plugins", name, "skills", "craft-context", "references", "craft-experience", "assets", "learning-adapter", "adapter.example.json"));
+  }
 }
 
 const sourceSkill = await readFile(join(root, "skills", "craft-route", "SKILL.md"), "utf8");
@@ -89,7 +93,7 @@ for (const marketplacePath of ["marketplace.json", ".agents/plugins/marketplace.
   const marketplace = JSON.parse(await readFile(join(root, marketplacePath), "utf8")) as { plugins: Array<{ name: string; source: { path: string } }> };
   const craft = marketplace.plugins.find((plugin) => plugin.name === "craft");
   assert.equal(craft?.source.path, "./plugins/craft", `${marketplacePath} must target the lightweight plugin directory`);
-  for (const name of componentNames) {
+  for (const { name } of componentProducts) {
     assert.equal(marketplace.plugins.find((plugin) => plugin.name === name)?.source.path, `./plugins/${name}`);
   }
 }

@@ -80,7 +80,7 @@ v0.12.37 补齐三个独立组件的持续积累边界：项目以 Git remote �
 Craft 采用“两扇入口、一套账本”：
 
 1. **完整 Craft / Codex 控制台**：适合交付、写入、长任务和跨会话恢复，走 `Goal → Clarify → Activate → Preflight → Host → Observe → Accept → Learn`。Codex 插件模式复用当前 App 的 embedded Host，不会另起 Codex CLI。
-2. **独立认知组件 MCP/Skill/插件**：`craft-knowledge`、`craft-memory`、`craft-experience` 可以单独给 Codex、Claude、IDE 或其他 Agent 使用。它们共享同一 Evidence、Trace、Policy、Receipt 与 Eval 账本；写入、发布和外部 effect 仍受同一 Control Plane 约束。
+2. **统一组件入口**：Codex 和 Claude 目前通过单个 `craft-context` 插件使用 Codebase、Knowledge、Memory、Experience 四层完整工具面。实现仍按 capability 分层，MCP 入口聚合这些能力；它们共享 Evidence、Trace、Policy、Receipt 与 Eval 账本，写入、发布和外部 effect 仍受同一 Control Plane 约束。
 
 单点能力不是“低配的另一套 Craft”，而是共享内核的产品投影。它们也必须分别评测：先证明机制，再证明 Fixture、真实 Host、业务 Case，最后才可能成为 `routeable` 能力。
 
@@ -100,7 +100,7 @@ v0.12.20 将最后的“学习”变成可运行的双速闭环：本次 Session
 
 v0.12.21 进一步把主链压缩为“定义 → 准备 → 行动 → 交付 → 学习”，并将 `VerifiedWorkLoop` 固定为唯一公开工作门面。`UncertaintyPolicy` 允许模型在 Safety Floor 内自主增加求证强度，人工介入只是可配置兜底；`ReferencePilot` 用两个无正文 Case、每臂五次配对 Trial 区分机制通过与真实价值证明。详见 [Platform Ideal State v1](technical/modules/platform-ideal-state-v1.md)。
 
-v0.12.37 将公开产品收敛为完整 `craft` 与三个独立认知入口：`craft-knowledge`、`craft-memory`、`craft-experience`。`craft-context`、`craft-skill-quality` 及旧 Workflow/DAG MCP 名称只允许一次性数据迁移读取，不再作为安装或执行入口。Codex App 默认是 `embedded` Execution Host，Craft 不会因此另起 Codex CLI。
+当前 Codex/Claude Marketplace 只分发 `craft-context` 聚合插件，不再分别打包 `craft-codebase`、`craft-knowledge`、`craft-memory`、`craft-experience`。内部 MCP 产品模式仍可供源码测试和分层开发使用；它们不代表独立 Marketplace 插件。Codex App 默认是 `embedded` Execution Host，Craft 不会因此另起 Codex CLI。
 
 v0.12.33 补齐“能部署、能证明”的外层：远程运行将 principal、tenant、scope、receipt 与一次性 handle 固定在同一任务上；真正的效果比较必须引用真实 Host Session 和独立 Outcome Observer，而不是模型自述。发布者签名、A2A v1 Task 与远程 MCP 都是可替换 Adapter，仍受既有 Capability、Signoff 与 Policy 约束。详见 [Runtime Proof 与远程部署边界](technical/modules/runtime-proof-deployment.md)。
 

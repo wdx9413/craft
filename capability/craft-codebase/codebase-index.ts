@@ -197,7 +197,12 @@ export class CodebaseIndexKernel {
     const indexes = this.store.list("codebase_index", 1_000, (item) => item.workspace_id === workspaceId).map((index) => this.indexStatus(index, workspace));
     const ordered = indexes.sort((left, right) => String(right.created_at).localeCompare(String(left.created_at)));
     const readiness = activation?.status !== "active" ? "disabled" : ordered.length === 0 ? "index_required" : ordered[0]!.status === "ready" ? "ready" : "rebuild_required";
-    return { workspace_id: workspaceId, enabled: activation?.status === "active", activation, analyzer: ordered[0]?.analyzer ?? "typescript-checker", readiness, indexes: ordered };
+    const recent = ordered.slice(0, 25);
+    return { workspace_id: workspaceId, enabled: activation?.status === "active", activation, analyzer: ordered[0]?.analyzer ?? "typescript-checker", readiness,
+      indexes: recent.map(index => ({ id: index.id, workspace_id: index.workspace_id, checkpoint_id: index.checkpoint_id, status: index.status,
+        analyzer: index.analyzer, analyzer_version: index.analyzer_version, created_at: index.created_at, node_count: index.node_count,
+        edge_count: index.edge_count, graph_storage: index.graph_storage, graph_digest: index.graph_digest,
+        relation_analysis: index.relation_analysis, stale_reason: index.stale_reason })), omitted_index_count: Math.max(0, ordered.length - recent.length) };
   }
 
   build(args: JsonObject): JsonObject {

@@ -13,19 +13,6 @@ import { RELEASE_PRODUCTS } from "../../core/release-catalog.ts";
 
 const components = RELEASE_PRODUCTS.filter((product) => product.name !== "craft").map((product) => product.name);
 
-async function assertCodebaseHostManifests(): Promise<void> {
-  const pluginRoot = join(root, "plugins", "craft-codebase");
-  const codex = JSON.parse(await readFile(join(pluginRoot, ".codex-plugin", "plugin.json"), "utf8"));
-  const claude = JSON.parse(await readFile(join(pluginRoot, ".claude-plugin", "plugin.json"), "utf8"));
-  const mcp = JSON.parse(await readFile(join(pluginRoot, ".mcp.json"), "utf8"));
-  assert.equal(codex.mcpServers, "./.mcp.json", "Codex manifest must load the packaged MCP config");
-  assert.deepEqual(mcp.mcpServers["craft-codebase"], {
-    command: "node", args: ["dist/plugin/craft-mcp.cjs", "--product", "codebase"], cwd: ".",
-  });
-  assert.equal(claude.mcpServers["craft-codebase"].command, "node");
-  assert.deepEqual(claude.mcpServers["craft-codebase"].args, ["${CLAUDE_PLUGIN_ROOT}/dist/plugin/craft-mcp.cjs", "--product", "codebase"]);
-}
-
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, name: string): Promise<T> {
   let timeout: ReturnType<typeof setTimeout>;
   return Promise.race([promise, new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(new Error(`${name} timed out`)), timeoutMs); })])
@@ -94,6 +81,10 @@ async function smoke(name: string): Promise<void> {
     assert(tools.some((tool) => tool.name === expectedDailyTool));
     assert(tools.some((tool) => tool.name === callTool));
     if (name === "craft-context") {
+      for (const required of ["craft_scope_identity_resolve_project", "craft_knowledge_scenario_list", "craft_memory_capture_observed_fact",
+        "craft_experience_scenario_list", "craft_procedure_plan", "craft_codebase_impact_query"]) {
+        assert(tools.some(tool => tool.name === required), `complete Context product is missing ${required}`);
+      }
       const discover = async (intent: string) => {
         const response = await request("tools/call", { name: "craft_context_tools_discover", arguments: { intent } }, timeoutMs);
         assert.equal(response.error, undefined, `Context ${intent} discovery failed: ${JSON.stringify(response.error)}`);
@@ -280,6 +271,5 @@ async function smoke(name: string): Promise<void> {
   }
 }
 
-await assertCodebaseHostManifests();
 for (const component of components) await smoke(component);
-process.stdout.write("All component plugin MCP surfaces completed initialize/tools-list/tools-call smoke tests.\n");
+process.stdout.write("The complete Context plugin completed initialize/tools-list/tools-call smoke tests for all three cognitive capabilities and Codebase.\n");

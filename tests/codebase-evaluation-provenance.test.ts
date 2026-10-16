@@ -4,7 +4,7 @@ import test from "node:test";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { checkpointManifestDigest, digestEvaluationMaterial, readGitEvaluationState } from "../scripts/eval/codebase-evaluation-provenance.ts";
+import { assertEvaluationStateStable, checkpointManifestDigest, digestEvaluationMaterial, readGitEvaluationState } from "../scripts/eval/codebase-evaluation-provenance.ts";
 
 test("evaluation provenance hashes suite material and a path-sorted checkpoint manifest", () => {
   assert.equal(digestEvaluationMaterial("suite"), "f8ebd43dbef1f029bf4930c65c9b7c5cc76af476927cee861ff18fcc73bfc4ab");
@@ -12,6 +12,17 @@ test("evaluation provenance hashes suite material and a path-sorted checkpoint m
   const reordered = checkpointManifestDigest([{ path: "a.ts", digest: "a", size_bytes: 1 }, { path: "b.ts", digest: "b", size_bytes: 2 }]);
   assert.equal(first, reordered);
   assert.notEqual(first, checkpointManifestDigest([{ path: "a.ts", digest: "changed", size_bytes: 1 }, { path: "b.ts", digest: "b", size_bytes: 2 }]));
+});
+
+test("evaluation provenance refuses to bind a report to source changed during its run", () => {
+  const before = { revision: "abc", dirty: true, change_digest: "before" };
+  assert.deepEqual(assertEvaluationStateStable("Craft checkout", before, { ...before }), before);
+  assert.throws(() => assertEvaluationStateStable("Craft checkout", before, { ...before, change_digest: "after" }),
+    /Craft checkout source state changed during evaluation/u);
+  assert.throws(() => assertEvaluationStateStable("Craft checkout", before, { ...before, dirty: false }),
+    /Craft checkout source state changed during evaluation/u);
+  assert.throws(() => assertEvaluationStateStable("evaluation repository", before, { ...before, revision: "def" }),
+    /evaluation repository source state changed during evaluation/u);
 });
 
 test("evaluation provenance records clean and dirty Git states and marks non-Git roots unavailable", () => {

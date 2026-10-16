@@ -18,10 +18,8 @@ import type { JsonObject } from "../../core/infrastructure/store.ts";
 const sourceMcpEntrypoint = process.env.CRAFT_SMOKE_MCP_ENTRYPOINT?.trim();
 const sourceHookEntrypoint = process.env.CRAFT_SMOKE_HOOK_ENTRYPOINT?.trim();
 const plugin = sourceMcpEntrypoint || resolve(import.meta.dirname, "../../plugins/craft-context/dist/plugin/craft-mcp.cjs");
-const standaloneKnowledgePlugin = sourceMcpEntrypoint || resolve(import.meta.dirname, "../../plugins/craft-knowledge/dist/plugin/craft-mcp.cjs");
-const standaloneExperiencePlugin = sourceMcpEntrypoint || resolve(import.meta.dirname, "../../plugins/craft-experience/dist/plugin/craft-mcp.cjs");
+const contextPlugin = plugin;
 const packagedContextHook = sourceHookEntrypoint || resolve(import.meta.dirname, "../../plugins/craft-context/dist/plugin/craft-codex-hook.cjs");
-const standaloneMemoryHook = sourceHookEntrypoint || resolve(import.meta.dirname, "../../plugins/craft-memory/dist/plugin/craft-codex-hook.cjs");
 const generatedWorkflow = { name: "Automatically distilled verification", description: "A read-only assertion distilled from verified tasks.", inputs: ["project_root", "case_path"],
   steps: [{ id: "sentinel", type: "assertion", evaluator: "file_exists", path: "{{case_path}}", side_effect: "read_only" }] };
 const revisedWorkflow = { name: "Automatically distilled verification v2", description: "Keep the prior check and add a newly verified marker.", inputs: ["project_root", "case_path"],
@@ -60,13 +58,7 @@ async function knowledgeClassificationCallCount(): Promise<number> {
   catch { return 0; }
 }
 function callPackagedMemoryHook(dataRoot: string, input: JsonObject): JsonObject {
-  const result = spawnSync(process.execPath, [standaloneMemoryHook, "--member", "memory"], {
-    cwd: projectRoot, env: { ...process.env, CRAFT_DATA_DIR: dataRoot }, input: JSON.stringify(input), encoding: "utf8", timeout: 10_000,
-  });
-  assert.equal(result.error, undefined, `packaged Memory Hook must start: ${result.error?.message ?? ""}`);
-  assert.equal(result.status, 0, `packaged Memory Hook must exit cleanly: ${result.stderr}`);
-  try { return JSON.parse(result.stdout) as JsonObject; }
-  catch { assert.fail(`packaged Memory Hook must return JSON: ${result.stdout}`); }
+  return callPackagedContextHook(dataRoot, input);
 }
 
 function callPackagedContextHook(dataRoot: string, input: JsonObject): JsonObject {
@@ -89,19 +81,19 @@ function recordVerifiedContextTask(dataRoot: string, sessionId: string, turnId: 
   callPackagedContextHook(dataRoot, { ...base, hook_event_name: "SessionEnd" });
 }
 
-interface StandaloneWorkerProbe {
+interface ContextWorkerProbe {
   seed?(dataRoot: string): Promise<void>;
   environment?: NodeJS.ProcessEnv;
   verifyArtifact?(dataRoot: string): Promise<void>;
   cleanup?(): Promise<void>;
 }
 
-async function verifyStandaloneWorker(component: "knowledge" | "experience", expected: string[], forbidden: string[], probe: StandaloneWorkerProbe = {}): Promise<void> {
+async function verifyContextWorker(component: "knowledge" | "experience", expected: string[], forbidden: string[], probe: ContextWorkerProbe = {}): Promise<void> {
   const root = await mkdtemp(join(tmpdir(), `craft-${component}-worker-data-`));
-  const entrypoint = component === "knowledge" ? standaloneKnowledgePlugin : standaloneExperiencePlugin;
+  const entrypoint = contextPlugin;
   try { await probe.seed?.(root); }
   catch (error) { await rm(root, { recursive: true, force: true }); await probe.cleanup?.(); throw error; }
-  const processHandle = spawn(process.execPath, [entrypoint, "--product", component], { env: { ...process.env,
+  const processHandle = spawn(process.execPath, [entrypoint, "--product", "context"], { env: { ...process.env,
     ...probe.environment, CRAFT_DATA_DIR: root, CRAFT_CONTINUOUS_LEARNING: "1", CRAFT_KNOWLEDGE_POLL_MS: "60000", CRAFT_EXPERIENCE_POLL_MS: "1000" },
     stdio: ["pipe", "pipe", "pipe"] });
   let output = "", errors = "";
@@ -404,7 +396,7 @@ try {
   assert.equal(exit.code, 0, childError);
   assert.equal(childOutput, "", "background Worker output must not leak into the MCP protocol stream");
   const standaloneKnowledgeProject = await mkdtemp(join(tmpdir(), "craft-standalone-knowledge-project-"));
-  const standaloneKnowledgeProbe: StandaloneWorkerProbe = {
+  const standaloneKnowledgeProbe: ContextWorkerProbe = {
     seed: async standaloneRoot => {
       await mkdir(standaloneKnowledgeProject, { recursive: true });
       const sourceRoots = ["source-a", "source-b"].map(name => join(standaloneKnowledgeProject, name));
@@ -437,20 +429,20 @@ try {
         if (promoted && calls.size === 2) break;
         await delay(100);
       }
-      assert(promoted, "standalone Knowledge worker must generate and auto-promote a Claim from two independent verified Sources");
-      assert.deepEqual(calls, new Set(["craft_knowledge_source_list", "craft_knowledge_source_ingest"]), "standalone Knowledge reads and ingests must be traced");
-      assert(existsSync(standalonePaths.knowledgeDatabaseFile), "standalone Knowledge records must persist under its own .craft_data root");
+      assert(promoted, "Context Knowledge worker must generate and auto-promote a Claim from two independent verified Sources");
+      assert.deepEqual(calls, new Set(["craft_knowledge_source_list", "craft_knowledge_source_ingest"]), "Context Knowledge reads and ingests must be traced");
+      assert(existsSync(standalonePaths.knowledgeDatabaseFile), "Context Knowledge records must persist under the configured .craft_data root");
       assert(isUnder(standalonePaths.knowledgeContentDir, (promoted!.content_ref as JsonObject | undefined)?.path),
-        "standalone Knowledge content must remain under .craft_data/knowledge");
+        "Context Knowledge content must remain under .craft_data/knowledge");
     },
     cleanup: async () => { await rm(standaloneKnowledgeProject, { recursive: true, force: true }); },
   };
-  await verifyStandaloneWorker("knowledge", ["craft_knowledge_source_list", "craft_knowledge_source_ingest"],
-    ["craft_evaluation_model_ticket_list", "craft_experience_learning_evaluation_dispatch_list"], standaloneKnowledgeProbe);
+  await verifyContextWorker("knowledge", ["craft_evaluation_model_ticket_list", "craft_experience_learning_evaluation_dispatch_list",
+    "craft_knowledge_source_list", "craft_knowledge_source_ingest"], [], standaloneKnowledgeProbe);
 
   const standaloneExperienceProject = await mkdtemp(join(tmpdir(), "craft-standalone-experience-project-"));
   const standaloneExperienceState = join(tmpdir(), `craft-standalone-experience-provider-${process.pid}-${Date.now()}.json`);
-  const standaloneExperienceProbe: StandaloneWorkerProbe = {
+  const standaloneExperienceProbe: ContextWorkerProbe = {
     seed: async standaloneRoot => {
       await mkdir(standaloneExperienceProject, { recursive: true });
       await writeFile(join(standaloneExperienceProject, "sentinel.txt"), "standalone candidate marker");
@@ -500,27 +492,27 @@ try {
         if (procedure && stages.size === 4 && runCount === 3 && calls.size === expected.length) break;
         await delay(100);
       }
-      assert(procedure, "standalone Experience worker must submit and promote a generated Workflow");
-      assert.deepEqual(stages, new Set(["shadow", "held_out", "signoff", "canary"]), "standalone Experience must pass the four ordered gates");
-      assert.equal(runCount, 3, "standalone Experience must run Shadow, Held-out and Canary evaluators");
-      assert.deepEqual(calls, new Set(expected), "standalone Experience ticket, distillation, submission and evaluation calls must be traced");
+      assert(procedure, "Context Experience worker must submit and promote a generated Workflow");
+      assert.deepEqual(stages, new Set(["shadow", "held_out", "signoff", "canary"]), "Context Experience must pass the four ordered gates");
+      assert.equal(runCount, 3, "Context Experience must run Shadow, Held-out and Canary evaluators");
+      assert.deepEqual(calls, new Set(expected), "Context Experience ticket, distillation, submission and evaluation calls must be traced");
       assert.equal(Number((JSON.parse(await readFile(standaloneExperienceState, "utf8")) as JsonObject).calls), 1,
-        "standalone Experience must send one bounded provider request to the local model fixture");
+        "Context Experience must send one bounded provider request to the local model fixture");
       assert(isUnder(standalonePaths.experienceContentDir, (procedure!.content_ref as JsonObject | undefined)?.path),
-        "standalone Experience review content must remain under .craft_data/experience");
+        "Context Experience review content must remain under .craft_data/experience");
       assert(isUnder(join(standalonePaths.experienceDir, "graph"), (procedure!.definition_ref as JsonObject | undefined)?.path),
-        "standalone Experience executable definition must remain under .craft_data/experience/graph");
+        "Context Experience executable definition must remain under .craft_data/experience/graph");
       const releaseStore = await new CraftStore(standalonePaths).open();
       try { assert.equal(releaseStore.find("experience_release", String(procedure!.id))?.record_version, procedure!.version,
-        "only the passing Canary may publish the current standalone Experience release"); }
+        "only the passing Canary may publish the current Experience release"); }
       finally { releaseStore.close(); }
     },
     cleanup: async () => { await Promise.all([rm(standaloneExperienceProject, { recursive: true, force: true }), rm(standaloneExperienceState, { force: true })]); },
   };
-  await verifyStandaloneWorker("experience", ["craft_evaluation_model_ticket_list", "craft_experience_learning_request_get", "craft_experience_procedure_submit",
-    "craft_experience_learning_evaluation_dispatch", "craft_experience_learning_evaluation_dispatch_list", "craft_experience_learning_evaluation_run"],
-    ["craft_knowledge_source_list"], standaloneExperienceProbe);
-  process.stdout.write("Memory promoted across tiers; standalone Knowledge generated a reviewed Claim; standalone Experience promoted a Workflow; Context Knowledge invalidated drift and Experience evolved the same Procedure through a baseline-comparing second Canary.\n");
+  await verifyContextWorker("experience", ["craft_evaluation_model_ticket_list", "craft_experience_learning_request_get", "craft_experience_procedure_submit",
+    "craft_experience_learning_evaluation_dispatch", "craft_experience_learning_evaluation_dispatch_list", "craft_experience_learning_evaluation_run",
+    "craft_knowledge_source_list"], [], standaloneExperienceProbe);
+  process.stdout.write("Context Hook promoted Memory across tiers; the complete Context worker generated and promoted a reviewed Knowledge Claim and an Experience Workflow; a later Canary evolved the same Procedure against its released baseline.\n");
 } finally {
   if (child && child.exitCode === null) {
     child.stdin.end();

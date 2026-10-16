@@ -119,6 +119,11 @@ export function domainSurfaceOf(toolName: string): string {
 }
 
 export function surfaceToolNames(surface: string, activeTools: readonly Tool[], coreToolNames: ReadonlySet<string>): string[] {
+  if (surface === "component-context-complete") {
+    const names = new Set(["craft_info", "craft_context_open", "craft_context_tools_discover", ...Object.values(DAILY_COMPONENT_TOOLS).flat()]);
+    const components = ["component-knowledge", "component-memory", "component-experience", "component-codebase"] as const;
+    return activeTools.filter(tool => names.has(tool.name) || components.some(component => COMPONENT_SURFACES[component].test(tool.name))).map(tool => tool.name);
+  }
   if (surface === "component-context-daily") {
     const names = new Set(["craft_info", "craft_context_open", "craft_context_tools_discover", ...Object.values(DAILY_COMPONENT_TOOLS).flat(), ...surfaceToolNames("component-codebase", activeTools, coreToolNames)]);
     return activeTools.filter(tool => names.has(tool.name)).map(tool => tool.name);

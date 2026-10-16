@@ -22,8 +22,6 @@ catch (error) {
 }
 
 if (mode) serveMcpStdio({ mode, input: process.stdin, write: (line) => process.stdout.write(line), afterStart: () => {
-  if (!["component-context-daily", "component-knowledge-daily", "component-experience-daily"].includes(mode)
-    || process.env.CRAFT_CONTINUOUS_LEARNING === "0") return undefined;
   return startContextLearningWorker({ mode, server_entrypoint: process.argv[1], env: process.env,
     on_failure: reason => process.stderr.write(`Craft ${mode} learning worker stopped (${reason}).\n`) });
 } }).catch(() => {

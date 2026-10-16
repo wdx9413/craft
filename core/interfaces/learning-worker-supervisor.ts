@@ -30,6 +30,7 @@ export function resolveLearningWorkerLaunch(serverEntrypoint: string, exists: (p
 export async function startContextLearningWorker(options: LearningWorkerSupervisorOptions): Promise<(() => Promise<void>) | undefined> {
   const components: Record<string, { product: string; learning: string }> = {
     "component-context-daily": { product: "context", learning: "experience,knowledge" },
+    "component-context-complete": { product: "context", learning: "experience,knowledge" },
     "component-knowledge-daily": { product: "knowledge", learning: "knowledge" },
     "component-experience-daily": { product: "experience", learning: "experience" },
   };

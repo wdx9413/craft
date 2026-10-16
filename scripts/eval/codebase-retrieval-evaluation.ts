@@ -9,7 +9,7 @@ import { craftPaths } from "../../core/infrastructure/paths.ts";
 import { CraftService } from "../../core/service.ts";
 import { scoreImpactSet, summarizeImpactCases, type ImpactCaseScore } from "./codebase-impact-evaluation.ts";
 import { summarizeRetrievalByLanguage } from "./codebase-retrieval-strata.ts";
-import { checkpointManifestDigest, digestEvaluationMaterial, readGitEvaluationState } from "./codebase-evaluation-provenance.ts";
+import { assertEvaluationStateStable, checkpointManifestDigest, digestEvaluationMaterial, readGitEvaluationState } from "./codebase-evaluation-provenance.ts";
 import { CODEBASE_LSP_CONFIG } from "../../capability/craft-codebase/lsp-config.ts";
 
 type RetrievalCase = { query: string; path: string; name: string; language?: string };
@@ -65,8 +65,8 @@ const defaultImpactCases: ImpactCase[] = [
     ] },
 ];
 
-function loadEvaluationSuite(path: string): EvaluationSuite {
-  const raw: unknown = JSON.parse(readFileSync(path, "utf8"));
+function loadEvaluationSuite(content: string): EvaluationSuite {
+  const raw: unknown = JSON.parse(content);
   assert.ok(raw !== null && typeof raw === "object" && !Array.isArray(raw), "evaluation suite must be a JSON object");
   const suite = raw as Partial<EvaluationSuite>;
   assert.ok(Array.isArray(suite.cases) && suite.cases.length > 0, "evaluation suite must include at least one retrieval case");
@@ -138,16 +138,23 @@ const lspConfigOption = args.indexOf("--lsp-config");
 const lspConfigPath = lspConfigOption >= 0 ? args[lspConfigOption + 1] : undefined;
 assert.ok(lspConfigOption < 0 || (lspConfigPath && lspConfigPath.length > 0), "--lsp-config requires a trusted LSP config path");
 if (lspConfigOption >= 0) args.splice(lspConfigOption, 2);
-const suite = suitePath ? loadEvaluationSuite(resolve(suitePath)) : undefined;
+const suiteMaterial = suitePath ? readFileSync(resolve(suitePath)) : undefined;
+const lspConfigMaterial = lspConfigPath ? readFileSync(resolve(lspConfigPath)) : undefined;
+const suite = suiteMaterial ? loadEvaluationSuite(suiteMaterial.toString("utf8")) : undefined;
 const cases = suite?.cases ?? defaultCases;
 const callGraphCases = suite?.call_graph_cases ?? defaultCallGraphCases;
 const impactCases = suite ? suite.impact_cases ?? [] : defaultImpactCases;
 const temporaryRoot = mkdtempSync(join(tmpdir(), "craft-codebase-retrieval-eval-"));
 const store = await new CraftStore(craftPaths(join(temporaryRoot, "data"))).open();
 try {
-  if (lspConfigPath) writeFileSync(join(store.paths.configDir, CODEBASE_LSP_CONFIG), readFileSync(resolve(lspConfigPath)), { flag: "wx" });
+  if (lspConfigMaterial) writeFileSync(join(store.paths.configDir, CODEBASE_LSP_CONFIG), lspConfigMaterial, { flag: "wx" });
   const service = new CraftService(store);
   const repository = resolve(args[0] ?? process.cwd());
+  const craftRoot = resolve(import.meta.dirname, "../..");
+  const craftStateBefore = readGitEvaluationState(craftRoot);
+  const repositoryStateBefore = readGitEvaluationState(repository);
+  assert.ok(craftStateBefore.revision, "Craft checkout must have Git provenance for evaluation");
+  assert.ok(repositoryStateBefore.revision, "evaluation repository must have Git provenance");
   const previousEntry = process.argv[1];
   process.argv[1] = resolve(import.meta.dirname, "../../bin/craft-mcp.ts");
   let ready: ReturnType<typeof service.codebaseRepositoryEnsure>;
@@ -209,21 +216,22 @@ try {
   });
   const multiHopImpactSummary = summarizeImpactCases(multiHopImpactCases);
   const rankBaseline = baselineIndex(nodes);
-  const workspaceRecord = store.get("workspace", String(ready.workspace_id));
   const checkpointRecord = store.get("workspace_checkpoint", String(ready.checkpoint_id));
   const analysisRecord = indexRecord.analysis as Record<string, unknown>;
-  const suiteMaterial = suitePath ? readFileSync(resolve(suitePath)) : JSON.stringify({ cases, callGraphCases, impactCases });
+  const craftRevision = assertEvaluationStateStable("Craft checkout", craftStateBefore, readGitEvaluationState(craftRoot));
+  const repositoryRevision = assertEvaluationStateStable("evaluation repository", repositoryStateBefore, readGitEvaluationState(repository));
+  const evaluationSuiteMaterial = suiteMaterial ?? JSON.stringify({ cases, callGraphCases, impactCases });
   const provenance = {
-    repository_revision: readGitEvaluationState(String(workspaceRecord.root_path)),
-    craft_revision: readGitEvaluationState(resolve(import.meta.dirname, "../..")),
-    evaluation_suite_sha256: digestEvaluationMaterial(suiteMaterial),
+    repository_revision: repositoryRevision,
+    craft_revision: craftRevision,
+    evaluation_suite_sha256: digestEvaluationMaterial(evaluationSuiteMaterial),
     checkpoint_id: ready.checkpoint_id,
     checkpoint_manifest_digest: checkpointManifestDigest(checkpointRecord.entries as Record<string, unknown>[]),
     graph_manifest_digest: String(indexRecord.graph_manifest_digest ?? ""),
     analyzer: analysisRecord.analyzer ?? null,
     analyzer_version: analysisRecord.analyzer_version ?? null,
     relation_analysis: analysisRecord.relation_analysis ?? null,
-    lsp_config_sha256: lspConfigPath ? digestEvaluationMaterial(readFileSync(resolve(lspConfigPath))) : null,
+    lsp_config_sha256: lspConfigMaterial ? digestEvaluationMaterial(lspConfigMaterial) : null,
     node_version: process.version,
   };
   const rows = cases.map(item => {

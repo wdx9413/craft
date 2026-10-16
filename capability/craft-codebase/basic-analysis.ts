@@ -2,7 +2,7 @@ import type { CraftStore, JsonObject } from "../../common/craft-common-store-loc
 import { stableDigest } from "../../common/craft-common-base/src/digest.ts";
 import type { RepositoryFile } from "./repository-files.ts";
 
-const ANALYZER_VERSION = "2";
+const ANALYZER_VERSION = "3";
 
 /** Durable per-file symbol cache; relations are deliberately left to semantic analyzers. */
 export function basicAnalysis(store: CraftStore, workspaceId: string, files: RepositoryFile[]): JsonObject {
@@ -13,7 +13,7 @@ export function basicAnalysis(store: CraftStore, workspaceId: string, files: Rep
     if (cached?.source_digest === file.digest && cached.analyzer_version === ANALYZER_VERSION) { nodes.push(...cached.nodes as JsonObject[]); omitted += Number(cached.omitted_symbols); reused++; continue; }
     const node = (kind: string, name: string, start: number, end: number): JsonObject => ({ id: `codebase_node_${stableDigest({ workspaceId, path: file.path, digest: file.digest, kind, name, start }).slice(-24)}`, kind, name, path: file.path, source_digest: file.digest, language: file.language, span: { start_offset: start, end_offset: end } });
     const parsed = [node("file", file.path, 0, 0)];
-    const pattern = /\b(?:function|class|interface|type|enum|const|let|var|def|func|struct|fn|trait|module)\s+([\p{L}_$][\p{L}\p{N}_$]*)/gu;
+    const pattern = /(?:\bfunc\s+(?:\([^)]*\)\s*)?|\b(?:function|class|interface|type|enum|const|let|var|def|struct|fn|trait|module)\s+)([\p{L}_$][\p{L}\p{N}_$]*)/gu;
     let fileOmitted = 0;
     for (const match of file.content.matchAll(pattern)) {
       if (parsed.length >= 16 || match[1]!.length > 200) { fileOmitted++; continue; }

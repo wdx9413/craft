@@ -3,32 +3,8 @@
   "products": [
     {
       "name": "craft-context",
-      "surface": "component-context-daily",
+      "surface": "component-context-complete",
       "hook_member": "context",
-      "category": "Developer Tools"
-    },
-    {
-      "name": "craft-knowledge",
-      "surface": "component-knowledge-daily",
-      "hook_member": "knowledge",
-      "category": "Productivity"
-    },
-    {
-      "name": "craft-memory",
-      "surface": "component-memory-daily",
-      "hook_member": "memory",
-      "category": "Productivity"
-    },
-    {
-      "name": "craft-experience",
-      "surface": "component-experience-daily",
-      "hook_member": "experience",
-      "category": "Developer Tools"
-    },
-    {
-      "name": "craft-codebase",
-      "surface": "component-codebase",
-      "hook_member": null,
       "category": "Developer Tools"
     }
   ]
