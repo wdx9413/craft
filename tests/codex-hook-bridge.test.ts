@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { activeProcedure } from "../capability/craft-experience/procedure-release.ts";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -99,6 +99,28 @@ test("Memory Hook automatically captures only classified stable project facts in
     const sessionMemoryPath = f.service.memoryGovernance.ledger.files.pathFor({ kind: "session", id: "automatic-memory-session" });
     assert.equal(existsSync(sessionMemoryPath!), true);
   } finally { await dispose(f); }
+});
+
+test("Hook Memory output projects promotion summaries and legacy journals default missing sessions safely", async () => {
+  const f = await fixture();
+  const originalCapture = f.service.memoryCaptureObservedFact;
+  try {
+    f.service.memoryCaptureObservedFact = (() => ({ auto_committed: false, candidate: { id: "candidate" }, next_action: "review",
+      topic_suggestions: [], memory_file: null, promotions: [{ tier: "session", auto_committed: false, memory_file: null }] })) as typeof f.service.memoryCaptureObservedFact;
+    const bridge = new CodexHookBridge(f.service);
+    const output = await bridge.handle("memory", { hook_event_name: "UserPromptSubmit", cwd: f.root,
+      session_id: "promotion-session", prompt: "本项目默认使用 Node.js" });
+    const emitted = JSON.parse(String(output.additionalContext)) as JsonObject;
+    assert.deepEqual((emitted.memory_capture as JsonObject).promotions, [{ tier: "session", auto_committed: false, memory_file: null }]);
+
+    const turn = "legacy-unknown-session", scope = codexProjectScope(f.root)!;
+    const legacyId = `codex_hook_turn_${createHash("sha256").update(JSON.stringify({ scope, turn })).digest("hex").slice(-20)}`;
+    f.store.create("codex_hook_turn", legacyId, { turn_id: turn });
+    assert.equal(bridge.journal.find({ cwd: f.root, turn_id: turn })?.id, legacyId);
+  } finally {
+    f.service.memoryCaptureObservedFact = originalCapture;
+    await dispose(f);
+  }
 });
 
 test("Memory SessionEnd removes the temporary Memory body and ledger rows", async () => {
@@ -387,6 +409,91 @@ test("Experience scenario catalogs keep coarse and fine identities distinct thro
   } finally { await dispose(f); }
 });
 
+test("Hook scenario catalog rejects malformed, linked and oversized metadata before classification", async () => {
+  const f = await fixture();
+  try {
+    const projectId = codexProjectScope(f.root)!.id.replace(/^project:/u, "");
+    const directory = join(f.store.paths.experienceDir, "projects", projectId);
+    await mkdir(directory, { recursive: true });
+    const catalogPath = join(directory, "experience-scenarios.json");
+    const bridge = new CodexHookBridge(f.service), base = { cwd: f.root, session_id: "invalid-catalogs" };
+    const malformed: unknown[] = [
+      null, [], { schema: "wrong", scenarios: [] }, { schema: "craft.experience-scenario-catalog.v1", scenarios: "bad" },
+      { schema: "craft.experience-scenario-catalog.v1", scenarios: Array.from({ length: 65 }, (_, i) => ({ scenario_key: `scene.${i}`, verification_commands: [] })) },
+      ...[null, [], {}, { scenario_key: "bad key", verification_commands: [] },
+        { scenario_key: "scene.valid", verification_commands: "bad" },
+        { scenario_key: "scene.valid", verification_commands: Array.from({ length: 33 }, () => "pnpm test") },
+        { scenario_key: "scene.valid", verification_commands: [1] },
+        { scenario_key: "scene.valid", verification_commands: ["x".repeat(501)] },
+        { scenario_key: "scene.valid", verification_commands: [], verification_digests: "bad" },
+        { scenario_key: "scene.valid", verification_commands: [], verification_digests: Array.from({ length: 33 }, () => "sha256:" + "a".repeat(64)) },
+        { scenario_key: "scene.valid", verification_commands: [], verification_digests: ["bad"] },
+        { scenario_key: "scene.valid", verification_commands: [], lifecycle: "retired" },
+      ].map(scenario => ({ schema: "craft.experience-scenario-catalog.v1", scenarios: [scenario] })),
+    ];
+    for (const [index, value] of malformed.entries()) {
+      await writeFile(catalogPath, JSON.stringify(value));
+      await bridge.handle("experience", { ...base, turn_id: `invalid-${index}`, hook_event_name: "PostToolUse", tool_name: "Bash",
+        tool_input: { command: "pnpm test" }, tool_response: { exit_code: 0 } });
+      const turn = f.store.list("codex_hook_turn", 100).find(item => item.turn_id === `invalid-${index}`)!;
+      assert.equal(turn.scenario_key, null);
+    }
+    await writeFile(catalogPath, "{");
+    await bridge.handle("experience", { ...base, turn_id: "invalid-json", hook_event_name: "PostToolUse", tool_name: "Bash",
+      tool_input: { command: "pnpm test" }, tool_response: { exit_code: 0 } });
+    await bridge.handle("experience", { session_id: "no-cwd", turn_id: "no-cwd", hook_event_name: "PostToolUse", tool_name: "Bash",
+      tool_input: { command: "pnpm test" }, tool_response: { exit_code: 0 } });
+    await bridge.handle("experience", { ...base, turn_id: "missing-command", hook_event_name: "PostToolUse", tool_name: "Bash", tool_response: { exit_code: 0 } });
+    await bridge.handle("context", { ...base, hook_event_name: "UserPromptSubmit" });
+    await unlink(catalogPath);
+    await writeFile(join(directory, "outside.json"), "{}");
+    await symlink(join(directory, "outside.json"), catalogPath);
+    await bridge.handle("experience", { ...base, turn_id: "linked-catalog", hook_event_name: "PostToolUse", tool_name: "Bash",
+      tool_input: { command: "pnpm test" }, tool_response: { exit_code: 0 } });
+    await unlink(catalogPath);
+    await writeFile(catalogPath, " ".repeat(16_385));
+    await bridge.handle("experience", { ...base, turn_id: "oversized-catalog", hook_event_name: "PostToolUse", tool_name: "Bash",
+      tool_input: { command: "pnpm test" }, tool_response: { exit_code: 0 } });
+
+    const turn = { cwd: f.root, session_id: "bound", turn_id: "bound-turn" };
+    bridge.journal.bindContextReceipt(turn, { id: "context-receipt" });
+    bridge.journal.bindContextReceipt(turn, { id: "context-receipt" });
+    assert.equal(bridge.journal.find(turn)?.context_receipt_id, "context-receipt");
+    for (const [turn_id, session_id] of [["legacy-match", "legacy-session"], ["legacy-mismatch", "different-session"]] as const) {
+      const legacyId = `codex_hook_turn_${createHash("sha256").update(JSON.stringify({ scope: codexProjectScope(f.root), turn: turn_id })).digest("hex").slice(-20)}`;
+      f.store.create("codex_hook_turn", legacyId, { session_id, turn_id });
+    }
+    assert.equal(bridge.journal.find({ cwd: f.root, session_id: "legacy-session", turn_id: "legacy-match" })?.turn_id, "legacy-match");
+    assert.equal(bridge.journal.find({ cwd: f.root, session_id: "other-session", turn_id: "legacy-mismatch" }), null);
+
+    const dispatch = bridge as unknown as { dispatch: () => Promise<undefined> };
+    const originalDispatch = dispatch.dispatch;
+    dispatch.dispatch = async () => undefined;
+    try { assert.deepEqual(await bridge.handle("context", { hook_event_name: "UnknownEvent" }), {}); }
+    finally { dispatch.dispatch = originalDispatch; }
+
+    await writeFile(catalogPath, JSON.stringify({ schema: "craft.experience-scenario-catalog.v1", scenarios: [
+      { scenario_key: "scene.verified", verification_commands: ["pnpm test"], lifecycle: "active" },
+    ] }));
+    for (const [turn_id, input] of [["tool-input-alias", { toolInput: { cmd: "pnpm test" } }], ["input-alias", { input: { script: "pnpm test" } }]] as const) {
+      await bridge.handle("experience", { ...base, turn_id, hook_event_name: "PostToolUse", tool_name: "Bash", ...input, tool_response: { exit_code: 0 } });
+      const aliasTurn = f.store.list("codex_hook_turn", 100).find(item => item.turn_id === turn_id)!;
+      assert.equal(((aliasTurn.signals as JsonObject[])[0]!.scenario_key), "scene.verified");
+    }
+    for (const turn_id of ["invalid-supplied-scene", "conflicting-supplied-scene"]) {
+      const input = { cwd: f.root, session_id: "finalize-scenes", turn_id };
+      await bridge.handle("experience", { ...input, hook_event_name: "PostToolUse", tool_name: "Edit" });
+      await bridge.handle("experience", { ...input, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "pnpm test" }, tool_response: { exit_code: 0 } });
+      bridge.journal.bindContextReceipt(input, { id: `receipt-${turn_id}` });
+    }
+    const errorsBefore = f.store.events("codex-hook").filter(event => event.event_type === "codex_hook.failed").length;
+    await bridge.handle("experience", { cwd: f.root, session_id: "finalize-scenes", turn_id: "invalid-supplied-scene", hook_event_name: "Stop", scenario_key: "bad scene" });
+    await bridge.handle("experience", { cwd: f.root, session_id: "finalize-scenes", turn_id: "conflicting-supplied-scene", hook_event_name: "Stop", scenario_key: "scene.other" });
+    const errorsAfter = f.store.events("codex-hook").filter(event => event.event_type === "codex_hook.failed").length;
+    assert.equal(errorsAfter, errorsBefore + 2);
+  } finally { await dispose(f); }
+});
+
 test("Experience cold start does not treat matching verifier commands as semantic scenarios", async () => {
   const f = await fixture();
   try {
@@ -606,12 +713,17 @@ test("MCP completion keeps unclassified task observations out of cross-task Expe
       scenario_definition: { summary: "项目测试", applies_when: "项目变更通过测试验证", excludes: "仅写文档" },
       coarse_scenario_definition: { summary: "项目工程交付", applies_when: "项目工程变更经过验收", excludes: "只读咨询" } });
     assert.equal((classified.observation as JsonObject).scenario_signature && ((classified.observation as JsonObject).scenario_signature as JsonObject).coarse_scenario_key, undefined);
-    const experienceMcp = new (await import("../core/mcp.ts")).McpServer(f.service, "component-experience-daily");
+    const experienceMcp = new (await import("../core/mcp.ts")).McpServer(f.service, "component-experience");
     const experienceTools = await experienceMcp.handle({ jsonrpc: "2.0", id: "experience-tools", method: "tools/list" });
     assert(((experienceTools?.result as JsonObject).tools as JsonObject[]).some(tool => tool.name === "craft_experience_scenario_retire"),
-      "Experience daily surface must expose scenario retirement");
+      "Experience advanced surface must expose scenario retirement");
     assert(((experienceTools?.result as JsonObject).tools as JsonObject[]).some(tool => tool.name === "craft_experience_scenario_migration_propose"),
-      "Experience daily surface must expose taxonomy migrations");
+      "Experience advanced surface must expose taxonomy migrations");
+    const experienceDaily = new (await import("../core/mcp.ts")).McpServer(f.service, "component-experience-daily");
+    const experienceDailyTools = await experienceDaily.handle({ jsonrpc: "2.0", id: "experience-daily-tools", method: "tools/list" });
+    const dailyNames = ((experienceDailyTools?.result as JsonObject).tools as JsonObject[]).map(tool => tool.name);
+    assert(dailyNames.includes("craft_experience_scenario_migration_propose"));
+    assert(!dailyNames.includes("craft_experience_scenario_retire"));
     const migrationBefore = f.service.experienceScenarioList({ scope: completionProjectScope });
     const migration = await experienceMcp.handle({ jsonrpc: "2.0", id: "experience-split-propose", method: "tools/call", params: {
       name: "craft_experience_scenario_migration_propose", arguments: { scope: completionProjectScope, mode: "split",
@@ -626,6 +738,15 @@ test("MCP completion keeps unclassified task observations out of cross-task Expe
     assert(f.store.list("trace_event", 10_000, event => event.operation_id === "craft_experience_scenario_migration_propose"
       && event.event_kind === "component.call.completed").length > 0, "taxonomy proposal must have a component Trace");
     const experienceCatalog = f.service.experienceScenarioList({ scope: completionProjectScope });
+    assert.throws(() => f.service.experienceScenarioRetire({ scope: "global", scenario_key: "x", expected_catalog_version: 0, request_id: "bad-scope", reason: "x" }), /explicit project scope/u);
+    assert.throws(() => f.service.experienceScenarioRetire({ scope_kind: "project", expected_catalog_version: 0, request_id: "incomplete-scope", reason: "x" }), /explicit project scope/u);
+    assert.throws(() => f.service.experienceScenarioRetire({ scope_kind: "project", scope_id: "project", expected_catalog_version: 0, request_id: "missing-key", reason: "x" }), /request is invalid/u);
+    assert.throws(() => f.service.experienceScenarioRetire({ scope: completionProjectScope, scenario_key: "x", expected_catalog_version: -1, request_id: "bad-version", reason: "x" }), /non-negative integer/u);
+    assert.throws(() => f.service.experienceScenarioRetire({ scope: completionProjectScope, scenario_key: "x", expected_catalog_version: 0, request_id: " ", reason: "x" }), /must not be empty/u);
+    assert.throws(() => f.service.experienceScenarioMigrationPropose({ scope: "global", source_keys: [], targets: [] }), /explicit project scope/u);
+    assert.throws(() => f.service.experienceScenarioMigrationPropose({ scope_kind: "project", source_keys: [], targets: [] }), /explicit project scope/u);
+    assert.throws(() => f.service.experienceScenarioMigrationPropose({ scope: completionProjectScope, source_keys: "x", targets: [] }), /must be arrays/u);
+    assert.throws(() => f.service.experienceScenarioMigrationPropose({ scope_kind: "project", scope_id: "project", mode: "split", source_keys: [], targets: [] }), /proposal is invalid/u);
     const retiredSignature = { schema: "craft.scenario-signature.v1", project: completionScope, scenario_key: "engineering.tests" };
     const routeableProcedure = f.store.create("experience_procedure", "routeable-retired-scene", { scope: completionProjectScope,
       lifecycle: "routeable", routeable: true, scenario_signature: retiredSignature, definition_digest: "sha256:procedure" });
@@ -650,6 +771,11 @@ test("MCP completion keeps unclassified task observations out of cross-task Expe
     assert.equal(f.store.find("experience_release", String(routeableProcedure.id))?.status, "revoked");
     assert.equal(f.store.get("experience_procedure", String(pendingProcedure.id)).lifecycle, "rolled_back");
     assert.equal(f.store.get("experience_evaluation_dispatch", String(pendingDispatch.id)).status, "cancelled");
+    const retirementReplay = f.service.experienceScenarioRetire({ scope: completionProjectScope, scenario_key: "engineering.tests",
+      expected_catalog_version: experienceCatalog.catalog_version, request_id: "retire-tests-v1", reason: "scenario definition is obsolete" });
+    assert.equal(retirementReplay.idempotent, true);
+    assert.equal(retirementReplay.revoked_procedure_count, 0);
+    assert.equal(retirementReplay.cancelled_dispatch_count, 0);
     assert.throws(() => f.service.experienceLearningEvaluationDispatch({ procedure_id: pendingProcedure.id }), /scenario is retired/u);
     assert.throws(() => f.service.experienceLearningEvaluationResult({ dispatch_id: pendingDispatch.id, evidence_ids: ["unused"] }), /already resolved/u);
     f.store.create("workflow_evolution_request", "retired-scene-request", { scenario_key: "scenario:retired",

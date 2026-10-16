@@ -168,9 +168,9 @@ export class KnowledgeSourceRegistry {
     if (!TRANSITIONS.has(status)) throw new Error("Knowledge Source status is unsupported");
     const saved = this.store.save("knowledge_source", String(source.id), { ...payload(source), status, transition_reason_digest: stableDigest(noCredentialAssignment(text(args.reason, "reason"), "reason")) });
     for (const claim of this.store.list("knowledge_claim", 100_000, item => item.source_id === source.id && typeof item.scenario_key === "string", false, { source_ids: [String(source.id)], document_ids: [] })) {
-      const review = claim.review as JsonObject | null;
-      const stillReviewed = status === "active" && saved.trust !== "untrusted" && review?.source_digest === saved.content_digest && claim.status === "reviewed";
-      updateKnowledgeScenarioClaim(this.store.paths.knowledgeDir, claim, stillReviewed ? "reviewed" : "inactive");
+      // Transitions only disable or revoke a Source. Every scenario claim that
+      // depends on it must leave the active catalog in either case.
+      updateKnowledgeScenarioClaim(this.store.paths.knowledgeDir, claim, "inactive");
     }
     return { source: saved };
   }

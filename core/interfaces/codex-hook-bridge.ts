@@ -94,11 +94,13 @@ type ProjectScenario = { scenario_key: string; coarse_scenario_key?: string };
 /** A verifier can resolve a project-owned fine scene, but cannot define semantic task identity by itself. */
 function projectScenarioKey(input: HookInput, signal: Signal, experienceDir: string): ProjectScenario | null {
   if (signal.kind !== "verification" || signal.outcome === "unknown") return null;
-  const root = text(input.cwd), command = nestedText(input.tool_input ?? input.toolInput ?? input.input, ["command", "cmd", "script"]);
-  if (!root || !command) return null;
+  const root = text(input.cwd);
+  if (!root) return null;
+  // This helper is called only for a sanitized verification Signal; the same
+  // command extraction above therefore always produced its verifier command.
+  const command = nestedText(input.tool_input ?? input.toolInput ?? input.input, ["command", "cmd", "script"])!;
   try {
-    const scope = codexProjectScope(root);
-    if (!scope) return null;
+    const scope = codexProjectScope(root)!;
     const projectId = scope.id.replace(/^project:/u, "");
     const projects = join(experienceDir, "projects"), directory = join(projects, projectId);
     const path = join(directory, "experience-scenarios.json");

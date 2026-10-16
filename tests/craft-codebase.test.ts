@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { codebaseCapability, CODEBASE_KERNELS } from "../capability/craft-codebase/capability.ts";
-import { CodebaseIndexKernel, contentAddressedShardIds, relationAnalysisSummary } from "../capability/craft-codebase/codebase-index.ts";
+import { CodebaseIndexKernel, contentAddressedShardIds, relationAnalysisSummary, controlFlowFallback, dataFlowFallback } from "../capability/craft-codebase/codebase-index.ts";
 import { queryCheckpointDiagnostics } from "../capability/craft-codebase/lsp-diagnostics-query.ts";
 import { CODEBASE_OWNS } from "../capability/craft-codebase/ownership.ts";
 import { CRAFT_CAPABILITIES } from "../core/capability-catalog.ts";
@@ -52,6 +52,15 @@ test("relation analysis coverage distinguishes empty, partial, analyzed and unkn
   assert.equal(adapterEdges.status, "partial");
   assert.deepEqual(adapterEdges.partial_reasons, ["adapter_reported_relations"]);
   assert.deepEqual(adapterEdges.relation_kinds, ["calls", "unknown"]);
+});
+
+test("control and data flow fallbacks remain source-free with or without analyzer diagnostics", () => {
+  assert.equal((controlFlowFallback({ diagnostic: { reason: "runtime_unavailable" } }, "java").partial_reasons as string[])[0], "runtime_unavailable");
+  assert.equal((controlFlowFallback({}, "python").partial_reasons as string[])[0], "analysis_unavailable");
+  assert.equal((controlFlowFallback({ result: { status: "complete" } }, "java").status), "complete");
+  assert.equal((dataFlowFallback({ diagnostic: { reason: "runtime_unavailable" } }, "python", "symbol", "value").partial_reasons as string[])[0], "runtime_unavailable");
+  assert.equal((dataFlowFallback({}, "python", "symbol", "value").partial_reasons as string[])[0], "analysis_unavailable");
+  assert.equal((dataFlowFallback({ result: { status: "complete" } }, "python", "symbol", "value").status), "complete");
 });
 
 async function fixture() {
@@ -325,15 +334,15 @@ test("control-flow queries enforce symbol kind, language and snapshot source fre
     const flowValue = (flowResponse!.result as JsonObject).structuredContent as JsonObject;
     assert.equal(flowValue.status, "complete");
     assert.equal(flowValue.source_content_included, false);
-    const previousPath = process.env.PATH;
+    const previousJavaPath = process.env.PATH;
     try {
       process.env.PATH = "";
       const unavailable = f.kernel.controlFlow({ workspace_id: f.workspace.id, index_id: pythonIndex.id, node_id: python.id });
       assert.equal(unavailable.status, "unavailable");
       assert.deepEqual(unavailable.partial_reasons, ["python_runtime_unavailable"]);
     } finally {
-      if (previousPath === undefined) delete process.env.PATH;
-      else process.env.PATH = previousPath;
+      if (previousJavaPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousJavaPath;
     }
     const fileNode = graphNodes(f, indexRecord).find(node => node.kind === "file")!;
     assert.throws(() => f.kernel.controlFlow({ workspace_id: f.workspace.id, index_id: indexRecord.id, node_id: fileNode.id }), /requires an indexed symbol/u);
@@ -382,6 +391,17 @@ test("control-flow queries enforce symbol kind, language and snapshot source fre
     const javaFlowValue = (javaFlowResponse!.result as JsonObject).structuredContent as JsonObject;
     assert.equal(javaFlowValue.status, "complete");
     assert.equal((javaFlowValue.receipt as JsonObject).kind, "control_flow_query");
+    const previousPath = process.env.PATH;
+    try {
+      process.env.PATH = "/craft-test/no-jdk-runtime";
+      const unavailable = f.kernel.controlFlow({ workspace_id: f.workspace.id, index_id: javaIndex.id, node_id: javaRoute.id });
+      assert.equal(unavailable.status, "unavailable");
+      assert((unavailable.partial_reasons as string[]).includes("jdk_unavailable"));
+      assert.equal(unavailable.source_content_included, false);
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+    }
   } finally { await close(f); }
 });
 
@@ -440,6 +460,22 @@ test("Agent data-flow query is checkpoint-pinned, source-free and available over
     const pythonValue = (pythonResponse!.result as JsonObject).structuredContent as JsonObject;
     assert.equal(pythonValue.status, "complete");
     assert.equal(pythonValue.source_content_included, false);
+
+    const previousPath = process.env.PATH;
+    try {
+      process.env.PATH = "/craft-test/no-python-runtime";
+      for (const result of [
+        f.kernel.controlFlow({ workspace_id: f.workspace.id, index_id: pythonIndex.id, node_id: route.id }),
+        f.kernel.dataFlow({ workspace_id: f.workspace.id, index_id: pythonIndex.id, node_id: route.id, variable: "value" }),
+      ]) {
+        assert.equal(result.status, "unavailable");
+        assert((result.partial_reasons as string[]).includes("python_runtime_unavailable"));
+        assert.equal(result.source_content_included, false);
+      }
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+    }
   } finally { await close(f); }
 });
 

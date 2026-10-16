@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { ExperienceContribution } from "../capability/craft-experience/contribution.ts";
+import { ProcedureDefinitionStore } from "../capability/craft-experience/procedure-definition.ts";
 import { CRAFT_CAPABILITIES } from "../core/capability-catalog.ts";
 import { buildCapabilityRegistry, CORE_KERNELS } from "../core/capability-protocol.ts";
 import { ContextResolutionKernel } from "../core/context-resolution.ts";
@@ -93,5 +94,40 @@ test("Fresh or candidate-only Experience produces an empty Context contribution"
     procedure(f.store, { id: "candidate", title: "Candidate", trigger: "anything", lifecycle: "candidate" });
     assert.deepEqual(await f.contribution.contribute(request("anything")), { member: "experience", items: [], receipt_id: "experience_contribution_none", omitted_count: 0,
       diagnostics: { scoped_procedure_count: 1, has_draft: false, routeable_count: 0, candidate_count: 1, reason: "no_promoted_release", next_tool: "craft_experience_graph_inspect", next_action: "diagnose", execution_started: false } });
+    const empty = await f.contribution.contribute({ ...request("anything"), scope_id: "empty" });
+    assert.equal((empty.diagnostics as JsonObject).reason, "no_accessible_procedure_in_scope");
+    f.store.create("experience_graph_draft", "draft-only", { scope: "project:draft-only", lifecycle: "draft" });
+    const draft = await f.contribution.contribute({ ...request("anything"), scope_id: "draft-only" });
+    assert.equal((draft.diagnostics as JsonObject).reason, "draft_not_submitted");
+  } finally { await close(f); }
+});
+
+test("Experience describes a routeable Graph with its checked subscenario routes", async () => {
+  const f = await fixture();
+  try {
+    const definitionRef = new ProcedureDefinitionStore(f.store.paths).write({
+      schema_version: "craft.procedure.v1", procedure_id: "graph-routes", procedure_version: 1, kind: "graph", scope: "project:p",
+      trigger: "graph route", preconditions: [], allowed_effects: ["read_only"], acceptance_ref: "acceptance:graph",
+      failure_disposition: "stop", scenario_signature: { project: "p", target_class: "fixture" }, evidence_ids: [],
+      proposal_ref: { id: "proposal", version: 1 }, definition: { graph_control: { subscenarios: [
+        { id: "review", title: "Review", entry_id: "start", exit_id: "done" },
+      ] } },
+    }, "Graph routes");
+    f.store.create("experience_procedure", "graph-routes", { procedure_kind: "graph", scope: "project:p", trigger: "graph route",
+      title: "Graph routes", acceptance_ref: "acceptance:graph", scenario_signature: { project: "p", target_class: "fixture" },
+      lifecycle: "routeable", routeable: true, entrypoints: [{ id: "start", routes: [] }], definition_ref: definitionRef, definition_digest: definitionRef.digest });
+    const contributed = await f.contribution.contribute(request("graph"));
+    assert.equal(contributed.items.length, 1);
+    assert.equal(contributed.items[0]!.host_next_step, "match_graph_then_plan_and_bind");
+    assert.match(String(contributed.items[0]!.retrieval_text), /Review/u);
+  } finally { await close(f); }
+});
+
+test("Experience candidate enumeration fails closed above its scope bound", async () => {
+  const f = await fixture();
+  try {
+    f.store.createBatch(Array.from({ length: 10_001 }, (_, index) => ({ kind: "experience_procedure", id: `bounded-${index}`,
+      payload: { scope: "project:p", lifecycle: "routeable", routeable: true } })));
+    await assert.rejects(f.contribution.contribute(request("anything")), /candidate budget exceeded/u);
   } finally { await close(f); }
 });

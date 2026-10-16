@@ -218,6 +218,9 @@ test("memory governance keeps policy, conflict replacement, expiry and consolida
     const old = service.memoryCandidatePropose({ candidate_id: "drink-old", source_id: source.id, kind: "preference", scope_kind: "project", scope_id: "p", topic: "drink", content: "coffee", evidence_ids: [evidence.id] }).candidate as JsonObject;
     service.memoryCandidateReview({ candidate_id: old.id, decision: "approve", reviewer: "reviewer", reason: "evidence" });
     const oldMemory = service.memoryLedgerRememberApproved({ candidate_id: old.id }).memory as JsonObject;
+    store.save("memory_ledger", String(oldMemory.id), { ...oldMemory, valid_until: "2030-01-01T00:00:00.000Z" });
+    const sameValue = service.memoryCandidatePropose({ candidate_id: "drink-same", source_id: source.id, kind: "preference", scope_kind: "project", scope_id: "p", topic: "drink", content: "coffee", evidence_ids: [evidence.id] }).candidate as JsonObject;
+    assert.equal(sameValue.status, "candidate", "a matching active Ledger value is not a conflict");
     const newer = service.memoryCandidatePropose({ candidate_id: "drink-new", source_id: source.id, kind: "preference", scope_kind: "project", scope_id: "p", topic: "drink", content: "tea", evidence_ids: [evidence.id] }).candidate as JsonObject;
     assert.equal(newer.status, "conflict_pending");
     service.memoryConflictResolve({ candidate_id: newer.id, resolution: "supersede", actor: "reviewer", reason: "newer evidence" });
@@ -227,7 +230,8 @@ test("memory governance keeps policy, conflict replacement, expiry and consolida
     assert.equal(store.get("memory_ledger", String(oldMemory.id)).status, "superseded");
     assert.equal((service.memoryLedgerRememberApproved({ candidate_id: newer.id }) as JsonObject).superseded instanceof Array, true);
     const expiring = service.memoryCandidatePropose({ candidate_id: "expired-candidate", source_id: source.id, kind: "working", scope_kind: "project", scope_id: "p", content: "soon gone", valid_until: "2020-01-01T00:00:00.000Z" }).candidate as JsonObject;
-    assert.equal(((service.memoryExpirySweep({ now: "2030-01-01T00:00:00.000Z" }) as JsonObject).expired as JsonObject[]).some((item) => item.id === expiring.id), true);
+    assert.equal(((service.memoryExpirySweep({ now: "2030-01-01T00:00:00.000Z", limit: 1 }) as JsonObject).expired as JsonObject[]).some((item) => item.id === expiring.id), true);
+    assert.throws(() => service.memoryExpirySweep({ limit: 0 }), /limit/);
     assert.equal(((service.memoryExpirySweep() as JsonObject).expired as JsonObject[]).length >= 0, true);
     const a = service.memoryCandidatePropose({ candidate_id: "consolidate-a", source_id: source.id, kind: "preference", scope_kind: "project", scope_id: "p", topic: "a", content: "one", evidence_ids: [evidence.id] }).candidate as JsonObject;
     const b = service.memoryCandidatePropose({ candidate_id: "consolidate-b", source_id: source.id, kind: "preference", scope_kind: "project", scope_id: "p", topic: "b", content: "two", evidence_ids: [evidence.id] }).candidate as JsonObject;

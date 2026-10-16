@@ -6,14 +6,124 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
-import { CraftTelemetry, StoreTelemetrySink, telemetryEvent, toOtlpTrace, exportOtlp } from "../common/craft-common-log/src/index.ts";
-import { CraftStore } from "../common/craft-common-store-local/src/store.ts";
+import { CraftTelemetry, StoreTelemetrySink, telemetryEvent, toOtlpTrace, exportOtlp, observeOperation, currentOperation, operationErrorCode, operationResultStatus, operationEventId, observeMethods, observedKernel, type OperationEvent } from "../common/craft-common-log/src/index.ts";
+import { CraftStore, type JsonObject } from "../common/craft-common-store-local/src/store.ts";
 import { craftPaths } from "../common/craft-common-store-local/src/paths.ts";
 import { ComponentTraceKernel } from "../core/component-trace.ts";
 import { TraceKernel } from "../core/trace-kernel.ts";
 import { EvaluationContractKernel } from "../common/craft-common-log/src/evaluation-contract.ts";
+import { ContextBudget, ContextBudgetError, contextAssetKey, contextAssetMatches, contextAssetRef, requiredContextRef } from "../common/craft-common-base/src/context-assets.ts";
+import { stableDigest } from "../common/craft-common-base/src/digest.ts";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
+test("Context asset references are explicit, scoped, and compare only pinned dimensions", () => {
+  assert.throws(() => contextAssetRef("unknown", { id: "x", version: 1 }, {}), /Unsupported Context asset member/u);
+  assert.throws(() => contextAssetRef("memory", { version: 1 }, {}), /Context asset id/u);
+  assert.throws(() => contextAssetRef("memory", { id: "x", version: 0 }, {}), /explicit and positive/u);
+  const ref = contextAssetRef("memory", { memory_id: "m1", memory_version: 2, content_version: 7,
+    content_digest: "sha256:content", scope: "project:p", source_id: "s", index_id: "i", checkpoint_id: "c" }, { scope: "global" });
+  assert.deepEqual(ref, { member: "memory", id: "m1", version: 2, content_version: 7, digest: "sha256:content",
+    scope: { kind: "project", id: "p" }, source_id: "s", index_id: "i", checkpoint_id: "c" });
+  const fallback = contextAssetRef("knowledge", { id: "k", version: 1 }, { kind: "project", id: "p" });
+  assert.equal(fallback.digest, stableDigest({ id: "k", version: 1 }));
+  assert.equal(fallback.content_version, 1);
+  assert.deepEqual(fallback.scope, { kind: "project", id: "p" });
+  assert.equal(fallback.source_id, null);
+  assert.equal(fallback.index_id, null);
+  assert.equal(fallback.checkpoint_id, null);
+  assert.equal(contextAssetKey(ref), "memory:m1@2");
+  assert.equal(contextAssetMatches({ member: "memory", id: "m1" }, ref), true);
+  assert.equal(contextAssetMatches({ member: "memory", id: "m1", version: 1 }, ref), false);
+  assert.equal(contextAssetMatches({ member: "memory", id: "m1", digest: "other" }, ref), false);
+  assert.equal(contextAssetMatches({ member: "memory", id: "m1", index_id: "other" }, ref), false);
+  assert.equal(contextAssetMatches({ member: "memory", id: "m1", checkpoint_id: "other" }, ref), false);
+});
+
+test("common operation instrumentation classifies outcomes, nests spans, and preserves method contracts", async () => {
+  for (const [error, code] of [[Object.assign(new Error("ignored"), { code: "EACCES" }), "EACCES"],
+    [new Error("access denied"), "ACCESS_DENIED"], [new Error("state conflict"), "STATE_CONFLICT"], [new Error("budget exceeded"), "LIMIT_EXCEEDED"],
+    [new Error("service unavailable"), "UNAVAILABLE"], [new Error("invalid input"), "INVALID_INPUT"], ["opaque", "OPERATION_FAILED"]] as const) {
+    assert.equal(operationErrorCode(error), code);
+  }
+  assert.deepEqual([
+    operationResultStatus({ denied: true }), operationResultStatus({ isError: true }), operationResultStatus({ valid: false }),
+    operationResultStatus({ status: "failed" }), operationResultStatus({ partial: true }), operationResultStatus({ receipt: { partial: true } }),
+    operationResultStatus({ status: "blocked" }), operationResultStatus({ codebase: { status: "unavailable" } }),
+    operationResultStatus({ manifest_status: "unavailable" }), operationResultStatus({ status: "ready" }),
+  ], ["denied", "failed", "failed", "failed", "partial", "partial", "blocked", "partial", "partial", "completed"]);
+
+  const dir = await mkdtemp(join(tmpdir(), "craft-operation-sdk-"));
+  const store = await new CraftStore(craftPaths(dir)).open();
+  const otherDir = await mkdtemp(join(tmpdir(), "craft-operation-other-"));
+  const otherStore = await new CraftStore(craftPaths(otherDir)).open();
+  try {
+    const events: OperationEvent[] = [];
+    let currentInside = false;
+    const input = { args: [{ receipt: { id: "input-receipt" } }] };
+    const output = observeOperation(store, "fixture", "outer", input, () => {
+      currentInside = currentOperation(store) !== undefined;
+      assert.equal(currentOperation(otherStore), undefined);
+      return observeOperation(store, "fixture", "inner", {}, () => ({ procedure_id: "proc", input_refs: { source: "source" } }));
+    }, { traceId: "explicit-trace", observe: item => events.push(item) });
+    assert.equal((output as JsonObject).procedure_id, "proc");
+    assert.equal(currentInside, true);
+    assert(events.some(item => item.phase === "started" && item.refs.includes("input-receipt")));
+    assert(events.some(item => item.phase === "completed" && item.refs.includes("source")));
+    assert(events.every(item => item.event.trace_id === "explicit-trace"));
+    assert.equal(currentOperation(store), undefined);
+    assert.equal(observeOperation(store, "fixture", "undefined-input", undefined, () => "ok"), "ok");
+
+    const failures: unknown[] = [];
+    assert.throws(() => observeOperation(store, "fixture", "sync-failure", {}, () => { throw new Error("budget exceeded"); }, { onError: error => failures.push(error) }), /budget exceeded/u);
+    await assert.rejects(observeOperation(store, "fixture", "async-failure", {}, () => Promise.reject(new Error("denied")), { onError: error => failures.push(error) }), /denied/u);
+    assert.throws(() => observeOperation(store, "fixture", "opaque-failure", {}, () => { throw "opaque failure"; }, { onError: error => failures.push(error) }), /opaque failure/u);
+    const nonErrorEvents: OperationEvent[] = [];
+    assert.throws(() => observeOperation(store, "fixture", "opaque-observed", {}, () => { throw "opaque failure"; }, { observe: item => nonErrorEvents.push(item) }), /opaque failure/u);
+    assert(nonErrorEvents.some(item => item.phase === "failed" && item.event.attributes.reason_code === "OPERATION_FAILED"));
+    const cyclic: Record<string, unknown> = {}; cyclic.self = cyclic;
+    assert.equal(observeOperation(store, "fixture", "digest-failure", cyclic, () => "ok", { onError: error => failures.push(error) }), "ok");
+    assert.equal(observeOperation(store, "fixture", "observe-failure", {}, () => "ok", {
+      observe: () => { throw new Error("observer unavailable"); }, onError: error => failures.push(error),
+    }), "ok");
+    const failedDir = await mkdtemp(join(tmpdir(), "craft-operation-closed-"));
+    const closedStore = await new CraftStore(craftPaths(failedDir)).open();
+    closedStore.close();
+    assert.equal(observeOperation(closedStore, "fixture", "sink-failure", {}, () => "ok", { onError: error => failures.push(error) }), "ok");
+    await rm(failedDir, { recursive: true, force: true });
+    assert(failures.length > 0);
+
+    class Facade { value(inputValue: string) { return inputValue; } }
+    const observed = new Facade();
+    observeMethods(observed, store, name => name === "value" ? "fixture" : null);
+    assert.equal(observed.value("preserved"), "preserved");
+    const captured = new Facade();
+    observeMethods(captured, store, () => "fixture", (_component, _name, args, run) => ({ original: run(), argument: args[0] }));
+    assert.deepEqual(captured.value("captured"), { original: "captured", argument: "captured" });
+    const kernel = observedKernel(store, "fixture", new Facade());
+    assert.equal(typeof (kernel as unknown as { value: unknown }).value, "function");
+    assert.equal(kernel.constructor, Facade);
+    assert.equal(kernel.value("proxied"), "proxied");
+  } finally { store.close(); otherStore.close(); await rm(dir, { recursive: true, force: true }); await rm(otherDir, { recursive: true, force: true }); }
+});
+
+test("required Context references and budgets reject invalid or over-budget inputs", () => {
+  for (const invalid of [null, [], "ref"]) assert.throws(() => requiredContextRef(invalid), /must be an object/u);
+  assert.throws(() => requiredContextRef({ member: "other", id: "x" }), /Unsupported required Context member/u);
+  assert.throws(() => requiredContextRef({ member: "memory", id: " " }), /required Context id/u);
+  assert.throws(() => requiredContextRef({ member: "memory", id: "x", version: 0 }), /must be positive/u);
+  assert.throws(() => requiredContextRef({ member: "memory", id: "x", digest: " " }), /required Context digest/u);
+  assert.deepEqual(requiredContextRef({ member: "memory", id: "x" }), { member: "memory", id: "x" });
+  for (const args of [[0, 1], [1, 0], [1.2, 1], [1, Number.NaN]]) assert.throws(() => new ContextBudget(args[0]!, args[1]!), ContextBudgetError);
+  const budget = new ContextBudget(2, 8);
+  assert.throws(() => budget.reserve(-1, 0, false, "invalid"), ContextBudgetError);
+  assert.throws(() => budget.reserve(0, Number.NaN, false, "invalid"), ContextBudgetError);
+  assert.equal(budget.reserve(1, 4, false, "optional"), true);
+  assert.equal(budget.reserve(2, 0, false, "optional"), false);
+  assert.throws(() => budget.reserve(0, 5, true, "required over budget"), /required over budget/u);
+  assert.equal(budget.items, 1);
+  assert.equal(budget.chars, 4);
+});
 
 test("shared telemetry separates sink failure from successful business work and enforces content-free events", async () => {
   const failing = new CraftTelemetry({ append: () => { throw new Error("offline"); } });
@@ -46,6 +156,13 @@ test("shared telemetry separates sink failure from successful business work and 
   assert.equal((await rawSink.record({ ...base, evidence_ids: ["e"] })).error?.message, "offline");
   await assert.rejects(() => failing.capture({ capability_id: "external", operation: "write", trace_id: "t" }, () => { throw new Error("business failed"); }), /business failed/);
   await assert.rejects(() => failing.capture({ capability_id: "external", operation: "write", trace_id: "t" }, () => { throw "raw failure"; }), /raw failure/);
+  const capturedEvents: string[] = [];
+  const recording = new CraftTelemetry({ append: event => { capturedEvents.push(event.outcome); } });
+  assert.equal((await recording.capture({ capability_id: "external", operation: "write", trace_id: "t" }, () => "ok")).result, "ok");
+  await assert.rejects(() => recording.capture({ capability_id: "external", operation: "write", trace_id: "t" }, () => { throw "raw failure"; }), /raw failure/);
+  assert.deepEqual(capturedEvents, ["observed", "succeeded", "observed", "failed"]);
+  assert.equal(operationEventId("trace", "request", "completed"), operationEventId("trace", "request", "completed"));
+  assert.throws(() => operationEventId("", "request", "completed"), /trace_id/);
 });
 
 test("local telemetry sink is idempotent and queryable by trace", async () => {
@@ -103,6 +220,12 @@ test("OTLP preserves parent links and timestamps and rejects partial receiver ac
   assert.equal(externalSpan.parentSpanId, "fedcba9876543210");
   assert.equal((externalSpan.status as Record<string, unknown>).code, 2);
   assert.equal(externalSpan.traceId, "0123456789abcdef0123456789abcdef");
+  const grouped = toOtlpTrace({ trace_id: "grouped", created_at: "2026-10-04T00:00:00.000Z" }, [
+    { trace_id: "grouped", span_id: "same", event_kind: "run", occurred_at: "2026-10-04T00:00:02.000Z", duration_ms: 1 },
+    { trace_id: "grouped", span_id: "same", event_kind: "run", occurred_at: "2026-10-04T00:00:01.000Z", duration_ms: 1 },
+  ]);
+  const groupedSpan = (((grouped.resourceSpans as Record<string, unknown>[])[0]!.scopeSpans as Record<string, unknown>[])[0]!.spans as Record<string, unknown>[])[0]!;
+  assert.equal(groupedSpan.startTimeUnixNano, "1791072001000000000");
   const completed = toOtlpTrace({ trace_id: "done", status: "completed" });
   const completedSpan = (((completed.resourceSpans as Record<string, unknown>[])[0]!.scopeSpans as Record<string, unknown>[])[0]!.spans as Record<string, unknown>[])[0]!;
   assert.equal((completedSpan.status as Record<string, unknown>).code, 1);

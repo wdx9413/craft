@@ -75,7 +75,7 @@ export function repositoryFiles(root: string, _query = ""): RepositoryFiles {
   const context_files: RepositoryContextFile[] = [];
   let contextFilesBytes = 0, context_files_omitted = 0;
   for (const path of paths) {
-    if (!GO_CONTEXT_FILES.has(path.split("/").pop() ?? "") || ignoredPaths.has(path)
+    if (!GO_CONTEXT_FILES.has(path.split("/").pop()!) || ignoredPaths.has(path)
       || GENERATED.test(path) || excludes.some(p => path === p || path.startsWith(`${String(p).replace(/\/$/u, "")}/`))) continue;
     const absolute = join(root, path);
     if (!existsSync(absolute) || hasSymlinkPath(root, path)) { context_files_omitted++; continue; }
@@ -119,7 +119,7 @@ export function repositoryFiles(root: string, _query = ""): RepositoryFiles {
   while (files.length < MAX_FILES && bytes < MAX_TOTAL_BYTES && progressed) {
     progressed = false;
     for (const group of groups) {
-      if (files.length >= MAX_FILES || bytes >= MAX_TOTAL_BYTES) break;
+      if (bytes >= MAX_TOTAL_BYTES) break;
       const queue = candidates.get(group)!;
       const cursor = cursors.get(group)!;
       if (cursor >= queue.length) continue;
@@ -141,6 +141,6 @@ export function repositoryFiles(root: string, _query = ""): RepositoryFiles {
   // across Hosts and produces the same checkpoint set on every machine.
   files.sort((left, right) => left.path < right.path ? -1 : 1);
   const omitted = Object.values(omitted_by_language).reduce((sum, count) => sum + count, 0);
-  context_files.sort((left, right) => left.path < right.path ? -1 : 1);
+  // context files retain the already sorted Git path order from `paths`.
   return { root, state: "ready", files, context_files, context_files_omitted, omitted, omitted_by_language };
 }

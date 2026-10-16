@@ -65,6 +65,8 @@ test("identity and aliases are idempotent and scope stacks remain explicit", asy
     assert.equal(kernel.resolveStack({ kind: "workspace", id: "workspace" }).canonical_scope.kind, "workspace");
     assert(kernel.resolveStack({ kind: "project", id: "old-id" }).matched_aliases.length > 0);
     assert.equal(kernel.resolveStack({ kind: "project", id: "unknown" }).canonical_scope.id, "unknown");
+    store.create("project_identity", "empty-canonical", { canonical_scope: null });
+    assert(kernel.resolveStack({ kind: "project", id: "empty-canonical" }).attempted_scopes.some(item => item.id === "empty-canonical"));
     for (const kind of ["session", "team", "organization", "user", "global"] as const) {
       const result = kernel.resolveStack({ kind, id: kind }, { session_scope_id: "session", team_scope_id: "team", organization_scope_id: "org", user_scope_id: "user", include_global: true });
       assert.equal(result.canonical_scope.kind, kind);

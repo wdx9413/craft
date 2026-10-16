@@ -419,6 +419,7 @@ test("Experience taxonomy merge and split proposals preserve live scenes until c
     assert.equal((afterSplit.scenarios as JsonObject[])
       .find(item => item.scenario_key === "engineering.tests.unit")?.lifecycle, "active");
     assert.throws(() => proposeExperienceScenarioMigration({ ...splitArgs, source_keys: [], request_id: "bad-empty" }), /proposal is invalid/u);
+    assert.throws(() => proposeExperienceScenarioMigration({ ...splitArgs, source_keys: "invalid" as unknown as string[], request_id: "bad-source-shape" }), /proposal is invalid/u);
     const currentVersion = Number(afterSplit.catalog_version);
     assert.throws(() => proposeExperienceScenarioMigration({ ...mergeArgs, expected_catalog_version: currentVersion,
       mode: "split", source_keys: ["engineering.tests.unit"], request_id: "bad-target-count" }), /proposal is invalid/u);
@@ -433,5 +434,19 @@ test("Experience taxonomy merge and split proposals preserve live scenes until c
       mode: "merge", source_keys: ["missing.scene", "engineering.tests.unit"], request_id: "bad-source" }), /existing, live fine scenes/u);
     assert.throws(() => proposeExperienceScenarioMigration({ ...mergeArgs, expected_catalog_version: currentVersion,
       targets: [{ scenario_key: "engineering.tests.unit", definition }], request_id: "source-as-target" }), /targets are invalid/u);
+
+    assert.throws(() => proposeExperienceScenarioMigration({ ...splitArgs, expected_catalog_version: currentVersion,
+      targets: [{ scenario_key: "engineering.tests", definition }, { scenario_key: "engineering.tests.unit.go", definition }],
+      request_id: "existing-non-source-target" }), /new keys within the catalog limit/u);
+
+    const catalogPath = join(experienceDir, "projects", "migration-project", "experience-scenarios.json");
+    const fullCatalog = JSON.parse(await readFile(catalogPath, "utf8")) as { scenarios: JsonObject[] };
+    fullCatalog.scenarios.push(...Array.from({ length: 64 - fullCatalog.scenarios.length }, (_, index) => ({
+      scenario_key: `capacity.scene.${index}`, tier: "fine", verification_commands: [],
+    })));
+    await writeFile(catalogPath, JSON.stringify({ ...fullCatalog, catalog_version: currentVersion }));
+    assert.throws(() => proposeExperienceScenarioMigration({ ...splitArgs, expected_catalog_version: currentVersion,
+      targets: [{ scenario_key: "capacity.new.one", definition }, { scenario_key: "capacity.new.two", definition }],
+      request_id: "catalog-capacity" }), /new keys within the catalog limit/u);
   } finally { await rm(root, { recursive: true, force: true }); }
 });

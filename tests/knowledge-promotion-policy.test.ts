@@ -237,6 +237,20 @@ test("promotion policy rejects malformed inputs and reports every non-promotable
     assert((byId.get("expired")!.reasons as string[]).includes("claim_expired"));
     assert.equal(byId.get("future")!.verdict, "revalidation_required");
     assert.equal(byId.get("noncandidate")!.verdict, "rejected");
+
+    f.service.knowledgePromotionPolicySave({ minimum_independent_support: 2, minimum_confidence: "confirmed", automatic: false });
+    f.service.knowledgeSourceRegister({ source_id: "support-untrusted", kind: "project_note", label: "Untrusted support", trust: "untrusted", scope_kind: "project", scope_id: "demo", locator: "untrusted-support.md", content_digest: `sha256:${"e".repeat(64)}` });
+    f.store.create("evidence", "support-bounded", { confidence: "bounded", source_id: "source" });
+    f.store.create("evidence", "support-confirmed", { confidence: "confirmed", source_id: "source" });
+    f.store.create("evidence", "support-untrusted-evidence", { confidence: "confirmed", source_id: "support-untrusted" });
+    f.store.create("evidence", "support-no-source", { confidence: "confirmed" });
+    const supportReview = raw("support-review", { evidence_ids: ["support-bounded", "support-confirmed", "support-untrusted-evidence", "support-no-source"] });
+    f.store.create("knowledge_claim_support", "support-review-bounded", { claim_id: supportReview.id, evidence_id: "support-bounded", observation_key: "bounded-run" });
+    f.store.create("knowledge_claim_support", "support-review-confirmed", { claim_id: supportReview.id, evidence_id: "support-confirmed", observation_key: "same-run" });
+    f.store.create("knowledge_claim_support", "support-review-duplicate", { claim_id: supportReview.id, evidence_id: "support-confirmed", observation_key: "same-run" });
+    f.store.create("knowledge_claim_support", "support-review-untrusted", { claim_id: supportReview.id, evidence_id: "support-untrusted-evidence", observation_key: "untrusted-run" });
+    f.store.create("knowledge_claim_support", "support-review-no-source", { claim_id: supportReview.id, evidence_id: "support-no-source" });
+    assert.equal((f.service.knowledgeAutoReview({ claim_ids: [supportReview.id], auto_promote: false }).assessments as JsonObject[])[0]!.verdict, "eligible");
   } finally { await close(f); }
 });
 

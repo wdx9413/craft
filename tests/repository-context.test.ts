@@ -81,6 +81,25 @@ test("repository ensure reuses an index published while another ensure was analy
   } finally { f.close(); }
 });
 
+test("semantic onboarding scans empty TypeScript and Python cache collections without crossing workspace boundaries", async () => {
+  const f = await fixture();
+  try {
+    f.write("main.cpp", "int main() { return 0; }\n");
+    f.store.save("codebase_semantic_file_analysis", "other-workspace-ts", {
+      workspace_id: "other-workspace", path: "other.ts", nodes: [], edges: [], unit_digest: "other-ts",
+    });
+    f.store.save("codebase_python_file_analysis", "other-workspace-python", {
+      workspace_id: "other-workspace", path: "other.py", nodes: [], edges: [], unit_digest: "other-python",
+    });
+
+    const result = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
+
+    assert.equal(result.status, "ready");
+    assert.equal(f.store.find("codebase_semantic_file_analysis", "other-workspace-ts")?.workspace_id, "other-workspace");
+    assert.equal(f.store.find("codebase_python_file_analysis", "other-workspace-python")?.workspace_id, "other-workspace");
+  } finally { f.close(); }
+});
+
 test("semantic repository onboarding uses only explicitly trusted LSP adapters and reindexes when they change", async () => {
   const f = await fixture();
   try {
@@ -1136,6 +1155,58 @@ test("repository source selection recognizes supported source and configuration 
     assert.equal(selected.files.find(file => file.path === "s.TS")?.language, "ts");
     assert.equal(selected.files.find(file => file.path.endsWith(".kt"))?.language, "kt");
     assert.equal(selected.files.find(file => file.path.endsWith(".yaml"))?.language, "yaml");
+  } finally { f.close(); }
+});
+
+test("repository source selection stops at its file-count limit", async () => {
+  const f = await fixture();
+  try {
+    mkdirSync(join(f.repo, "src"));
+    for (let index = 0; index < 1_201; index++) f.write(`src/file-${index}.ts`, "export {};\n");
+    const selected = repositoryFiles(f.repo);
+    assert.equal(selected.files.length, 1_200);
+    assert.equal(selected.omitted, 1);
+  } finally { f.close(); }
+});
+
+test("repository Go context files omit missing, linked, oversized and binary inputs and honor filters", async () => {
+  const f = await fixture();
+  try {
+    for (const directory of ["ignored", "vendor", "excluded", "large", "missing"]) mkdirSync(join(f.repo, directory));
+    f.write("ignored/go.mod", "module ignored\n"); f.write("vendor/go.mod", "module vendor\n");
+    f.write("excluded/go.sum", "excluded\n"); f.write("large/go.work", "x".repeat(512 * 1024 + 1));
+    f.write("missing/go.mod", "module missing\n");
+    f.git("add", "ignored/go.mod", "vendor/go.mod", "missing/go.mod");
+    rmSync(join(f.repo, "missing/go.mod"));
+    f.write(".gitignore", "ignored/go.mod\n");
+    writeFileSync(join(f.repo, "go.mod"), "module root\n");
+    writeFileSync(join(f.repo, "go.work.sum"), "github.com/example/module v1.0.0 h1:fixture=\n");
+    writeFileSync(join(f.repo, "go.sum"), "binary\0body");
+    writeFileSync(join(f.repo, "package.json"), "{}\n");
+    writeFileSync(join(f.repo, "go-work-target"), "module linked target\n");
+    symlinkSync(join(f.repo, "go-work-target"), join(f.repo, "go.work"));
+    f.git("add", "go.mod", "go.work.sum", "package.json");
+    f.write(".craft-codebase.json", JSON.stringify({ exclude_paths: ["excluded"] }));
+    const selected = repositoryFiles(f.repo);
+    assert.deepEqual(selected.context_files.map(item => item.path), ["go.mod", "go.work.sum"]);
+    assert.equal(selected.context_files_omitted, 4);
+  } finally { f.close(); }
+});
+
+test("repository file selection stops at the aggregate byte limit before visiting later languages", async () => {
+  const f = await fixture();
+  try {
+    mkdirSync(join(f.repo, "c")); mkdirSync(join(f.repo, "csharp")); mkdirSync(join(f.repo, "typescript"));
+    // The final C source reaches the aggregate cap before the 24th C# file is visited.
+    for (let index = 0; index < 24; index++) f.write(`c/file-${index}.c`, "x".repeat(index === 23 ? 524_277 : 524_268));
+    for (let index = 0; index < 30; index++) f.write(`csharp/later-${index}.cs`, "x".repeat(20));
+    f.write("typescript/main.ts", "x".repeat(11));
+    const selected = repositoryFiles(f.repo);
+    assert.equal(selected.files.length, 48);
+    assert.equal(selected.files.filter(file => file.language === "c").length, 24);
+    assert.equal(selected.files.filter(file => file.language === "cs").length, 23);
+    assert.equal(selected.files.some(file => file.path === "typescript/main.ts"), true);
+    assert.equal(selected.omitted, 7);
   } finally { f.close(); }
 });
 

@@ -167,7 +167,7 @@ test("model classified project Knowledge advances with trusted Source reviews an
     assert.equal((secondReview.scenario_catalog as JsonObject).status, "active");
     const scopedScene = f.service.knowledgeSearch({ query: "release verification", scope: "project:p", scenario_key: "engineering.release.checks" });
     assert.deepEqual((scopedScene.hits as JsonObject[]).map(item => item.claim_id).sort(), ["scenario-claim-a", "scenario-claim-b"]);
-    const knowledgeMcp = new McpServer(f.service, productSurfaceOf("knowledge"));
+    const knowledgeMcp = new McpServer(f.service, "component-knowledge");
     const listed = await knowledgeMcp.handle({ jsonrpc: "2.0", id: "tools", method: "tools/list" });
     const tools = ((listed?.result as JsonObject).tools as JsonObject[]);
     const saveSchema = tools.find(item => item.name === "craft_knowledge_claim_save")!.inputSchema as JsonObject;

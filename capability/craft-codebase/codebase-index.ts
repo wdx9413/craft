@@ -35,6 +35,19 @@ type EdgeRoute = { bucket: string; id: string; digest: string };
 type ImpactDependencies = { readonly routes: Set<string>; readonly shards: Set<string> };
 type NodeReadCache = { readonly routes: Map<string, JsonObject>; readonly shards: Map<string, Node[]>; readonly dependencies?: ImpactDependencies };
 type ImpactCacheEntry = { readonly fingerprint: string; readonly dependencies: ImpactDependencies; readonly result: JsonObject };
+type AnalyzerFlowResult = { result?: JsonObject; diagnostic?: JsonObject };
+
+/** Keep unavailable analyzer responses explicit and source-free. */
+export function controlFlowFallback(flow: AnalyzerFlowResult, language: string): JsonObject {
+  return flow.result ?? { status: "unavailable", language, blocks: [], edges: [],
+    partial_reasons: [String(flow.diagnostic?.reason ?? "analysis_unavailable")], source_content_included: false };
+}
+
+/** Keep unavailable data-flow responses explicit and source-free. */
+export function dataFlowFallback(flow: AnalyzerFlowResult, language: string, symbolId: string, variable: string): JsonObject {
+  return flow.result ?? { status: "unavailable", language, symbol_id: symbolId, variable, candidates: [], definitions: [], uses: [], flows: [],
+    partial_reasons: [String(flow.diagnostic?.reason ?? "analysis_unavailable")], source_content_included: false, interprocedural: false };
+}
 
 function text(value: unknown, name: string): string {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
@@ -587,7 +600,7 @@ export class CodebaseIndexKernel {
       ? analyzePythonControlFlow({ ...source, language }, { id: symbol.id, name: symbol.name, startOffset })
       : supportsJava ? analyzeJavaControlFlow(source, { id: symbol.id, name: symbol.name, startOffset })
         : { result: buildControlFlowGraph(source.content, source.path, symbol.id, startOffset) };
-    const result = flow.result ?? { status: "unavailable", language: supportsPython ? "python" : supportsJava ? "java" : "typescript", blocks: [], edges: [], partial_reasons: [String(flow.diagnostic?.reason ?? "analysis_unavailable")], source_content_included: false };
+    const result = controlFlowFallback(flow, supportsJava ? "java" : "python");
     return this.receipt("control_flow_query", index, workspace,
       { node_id: symbol.id, source_digest: source.digest }, { ...result, path: symbol.path, source_digest: source.digest });
   }
@@ -612,8 +625,7 @@ export class CodebaseIndexKernel {
       ? analyzePythonDataFlow({ ...source, language }, { id: symbol.id, name: symbol.name,
         startOffset: Number((symbol.span as JsonObject).start_offset) }, variable)
       : { result: buildDataFlowGraph(source.content, source.path, symbol.id, Number((symbol.span as JsonObject).start_offset), variable) };
-    const result = flow.result ?? { status: "unavailable", language, symbol_id: symbol.id, variable, candidates: [], definitions: [], uses: [], flows: [],
-      partial_reasons: [String(flow.diagnostic?.reason ?? "analysis_unavailable")], source_content_included: false, interprocedural: false };
+    const result = dataFlowFallback(flow, language, symbol.id, variable);
     return this.receipt("data_flow_query", index, workspace,
       { node_id: symbol.id, variable, source_digest: source.digest }, { ...result, path: symbol.path, source_digest: source.digest });
   }

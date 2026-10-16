@@ -9,7 +9,7 @@ import test from "node:test";
 import type { ChatResult, ModelProviderSpec, ModelTransport } from "../core/model-gateway.ts";
 import type { JsonObject } from "../core/infrastructure/store.ts";
 import { McpStdioClient, boundedPollInterval, learningComponents, mcpCommandOptions, runDistillationOnce, runEvaluationOnce, runLearningTick, type ExperienceLearningClient } from "../deploy/experience-learning/worker.ts";
-import { learningTickStatus } from "../deploy/experience-learning/learning-tick.ts";
+import { learningFailureKind, learningTickStatus } from "../deploy/experience-learning/learning-tick.ts";
 
 const provider: ModelProviderSpec = { provider: "test", label: "test", protocol: "openai-compatible", base_url: "https://example.invalid/v1",
   api_key_env: "TEST_KEY", chat_path: "/chat/completions", models: { standard: "test-model" }, cost_hint: 0, supports_tools: false };
@@ -233,6 +233,14 @@ test("Knowledge source failures and partial pages are visible and make one-shot 
   assert.deepEqual(learningTickStatus({ knowledge: { outcomes: [] } }, true), { diagnostics: "", exit_code: null });
 });
 
+test("learning failure diagnostics expose only safe error names", () => {
+  assert.equal(learningFailureKind(new TypeError("private provider response")), "TypeError");
+  assert.equal(learningFailureKind("private string failure"), "Error");
+  const unsafe = new Error("private");
+  unsafe.name = "path/private";
+  assert.equal(learningFailureKind(unsafe), "Error");
+});
+
 test("Knowledge classification failures remain visible without dropping completed source sync", async () => {
   const client: ExperienceLearningClient = { async call(name) {
     if (name === "craft_experience_learning_evaluation_dispatch_list" || name === "craft_evaluation_model_ticket_list") return { dispatches: [], tickets: [] };
@@ -247,8 +255,10 @@ test("Knowledge classification failures remain visible without dropping complete
   assert.equal(JSON.stringify(result).includes("private classification failure"), false);
   assert.deepEqual(learningTickStatus({ knowledge: { classification: { status: "failed", failure_kind: "invalid/private" } } }, true),
     { diagnostics: "Craft Knowledge scenario classification failed (Error).\n", exit_code: 1 });
-  assert.deepEqual(learningTickStatus({ knowledge: { classification: { outcomes: [{ status: "failed", failure_stage: "claim_save" }, null, { status: "unclassified" }] } } }, true),
-    { diagnostics: "Craft Knowledge scenario classification failed for 1 Claim(s) at claim_save:1.\n", exit_code: 1 });
+  assert.deepEqual(learningTickStatus({ knowledge: { classification: { outcomes: [
+    { status: "failed", failure_stage: "claim_save" }, { status: "failed", failure_stage: "taxonomy_list" }, null, { status: "unclassified" },
+  ] } } }, true),
+    { diagnostics: "Craft Knowledge scenario classification failed for 2 Claim(s) at claim_save:1,taxonomy_list:1.\n", exit_code: 1 });
   assert.deepEqual(learningTickStatus({ knowledge: { classification: { outcomes: [{ status: "failed" }] } } }, true),
     { diagnostics: "Craft Knowledge scenario classification failed for 1 Claim(s).\n", exit_code: 1 });
 });

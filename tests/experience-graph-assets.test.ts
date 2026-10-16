@@ -50,6 +50,8 @@ test("a scenario draft is discoverable, editable on disk and submitted as an imm
     assert.equal(f.store.count("experience_procedure"), 0);
     assert.equal((inspect({ action: "list", scenario_id: "internet-product-engineering" }).drafts as JsonObject[]).length, 1);
     assert.equal((inspect({ action: "list", scenario_id: "missing" }).drafts as JsonObject[]).length, 0);
+    assert.equal((inspect({ action: "list", graph_id: "engineering" }).drafts as JsonObject[]).length, 1);
+    assert.equal((inspect({ action: "list", graph_id: "missing" }).drafts as JsonObject[]).length, 0);
     assert.throws(() => edit({ action: "save", configuration: config() }), /digest conflict/);
     assert.throws(() => edit({ action: "submit", expected_draft_digest: "wrong" }), /digest conflict/);
     const raw = JSON.parse(readFileSync(String(saved.path), "utf8")) as JsonObject;
@@ -84,6 +86,8 @@ test("a scenario draft is discoverable, editable on disk and submitted as an imm
     assert.equal((list.graphs as JsonObject[])[0]!.template_id, "internet-product-engineering");
     assert.equal((inspect({ action: "list", scenario_id: "internet-product-engineering" }).graphs as JsonObject[]).length, 1);
     assert.equal((inspect({ action: "list", scenario_id: "other" }).graphs as JsonObject[]).length, 0);
+    assert.equal((inspect({ action: "list", graph_id: String(first.id) }).graphs as JsonObject[]).length, 1);
+    assert.equal((inspect({ action: "list", graph_id: "missing" }).graphs as JsonObject[]).length, 0);
     assert.throws(() => inspect({ action: "list", limit: 101 }), /limit/);
     assert.throws(() => inspect({ action: "read", graph_id: "engineering", scope: "project:other" }), /scope/);
     assert.throws(() => edit({ action: "save", scope: "project:other", configuration: config() }), /scope/);

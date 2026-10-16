@@ -52,6 +52,7 @@
         "tests/context-remediation.test.ts",
         "tests/codebase-context-search.test.ts",
         "tests/repository-context.test.ts",
+        "tests/multi-language-analysis.test.ts",
         "tests/typescript-incremental.test.ts",
         "tests/python-incremental.test.ts",
         "tests/python-analysis.test.ts",
@@ -60,6 +61,9 @@
         "tests/knowledge-memory-operability.test.ts",
         "tests/knowledge-scenario-catalog.test.ts",
         "tests/knowledge-promotion-policy.test.ts",
+        "tests/procedure-projection.test.ts",
+        "tests/experience-contribution.test.ts",
+        "tests/codex-hook-bridge.test.ts",
         "tests/industry-gaps.test.ts",
         "tests/validation.test.ts",
         "tests/remaining-branch-cases.test.ts",
@@ -300,7 +304,8 @@
         "tests/coverage-fill.test.ts",
         "tests/remaining-branch-cases.test.ts",
         "tests/store-migrations.test.ts",
-        "tests/context-remediation.test.ts"
+      "tests/context-remediation.test.ts",
+      "tests/context-read-snapshot.test.ts"
       ],
       "branches": true
     },
@@ -1250,6 +1255,7 @@
         "tests/cdp-session.test.ts",
         "tests/cognitive-workbench.test.ts",
         "tests/cognitive-write.test.ts",
+        "tests/memory-observed-fact-tool.test.ts",
         "tests/layer-graph.test.ts"
       ],
       "branches": true

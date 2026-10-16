@@ -214,7 +214,11 @@ test("Java analyzer resolution, JDK 8 compiler classpath and response budgets ar
   assert(scriptAnalyzer?.includes("scripts/codebase/analyzers/AnalyzeJava.java"));
   assert.equal(resolveJavaAnalyzerPath("/work", () => false, null), undefined);
   const originalEntry = process.argv[1];
-  try { process.argv[1] = undefined as unknown as string; assert.equal(resolveJavaAnalyzerPath("/work", () => false, null), undefined); }
+  try {
+    process.argv[1] = undefined as unknown as string;
+    assert.equal(resolveJavaAnalyzerPath("/work", () => false, null), undefined);
+    assert.equal(resolveJavaControlFlowAnalyzerPath("/work", () => false, null), undefined);
+  }
   finally { process.argv[1] = originalEntry!; }
 
   const file = source("Main.java", "class Main {}");

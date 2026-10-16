@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { ProcedureStore } from "../capability/craft-experience/procedure-projection.ts";
+import { recordExperienceScenario, retireExperienceScenario } from "../capability/craft-experience/scenario-catalog.ts";
 import { stableDigest } from "../core/digest.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
@@ -22,6 +23,24 @@ async function fixture() {
   }
   return { root, store, procedures, draft, promote, close() { store.close(); rmSync(root, { recursive: true, force: true }); } };
 }
+
+test("Procedure drafts and qualification reject a retired Experience scenario", async () => {
+  const f = await fixture();
+  try {
+    const signature = { project: { kind: "project", id: "project" }, scenario_key: "engineering.tests" };
+    const catalog = recordExperienceScenario({ experience_dir: f.store.paths.experienceDir, project_id: "project", scenario_key: "engineering.tests",
+      observation_id: "observation", verified_task_id: "task" });
+    retireExperienceScenario({ experience_dir: f.store.paths.experienceDir, project_id: "project", scenario_key: "engineering.tests",
+      expected_catalog_version: Number(catalog.catalog_version), request_id: "retire-for-projection", reason: "obsolete" });
+    f.store.create("workflow_evolution_request", "retired-request", { scenario_key: "engineering.tests", scenario_signature: signature,
+      observation_refs: [{ source: { scope: "project:project" }, evidence_ids: ["e"] }], output_contract_ref: "acceptance:test" });
+    f.store.create("workflow_evolution_proposal", "retired-proposal", { request_id: "retired-request", request_version: 1,
+      name: "Retired", description: "Must not draft", inputs: [], steps: [] });
+    assert.throws(() => f.procedures.draft({ proposal_id: "retired-proposal" }), /scenario is retired/u);
+    f.store.create("experience_procedure", "retired-procedure", { lifecycle: "candidate", routeable: false, scope: "project:project", scenario_signature: signature });
+    assert.throws(() => f.procedures.gate({ procedure_id: "retired-procedure", stage: "shadow", passed: true, evidence_ids: ["e"] }), /scenario is retired/u);
+  } finally { f.close(); }
+});
 
 test("Skill export treats IDs as opaque keys, remains disabled and binds replay to source/version/content", async () => {
   const f = await fixture();
@@ -115,6 +134,7 @@ test("Procedure public projection lists, validates drafts and preserves identity
     assert.equal((f.procedures.list({ scope: "project:test", limit: 1 }).procedures as JsonObject[]).length, 1);
     assert.deepEqual(f.procedures.list({ scope: "project:other" }).procedures, []);
     assert.throws(() => f.procedures.list({ scope: " " }), /must not be empty/);
+    assert.throws(() => f.procedures.plan({}), /scope/);
     assert.throws(() => f.procedures.gate({ procedure_id: p.id, stage: "unknown" }), /unsupported/);
     assert.throws(() => f.procedures.gate({ procedure_id: p.id, stage: "canary", evidence_ids: ["e"] }), /order/);
     f.store.create("evidence", "weak", { confidence: "unconfirmed" });
@@ -124,6 +144,27 @@ test("Procedure public projection lists, validates drafts and preserves identity
     const promoted = f.promote(p);
     const rollback = f.procedures.gate({ procedure_id: promoted.id, stage: "canary", passed: false, evidence_ids: ["e"] }).procedure as JsonObject;
     assert.equal(rollback.lifecycle, "rolled_back"); assert.equal(rollback.routeable, false);
+  } finally { f.close(); }
+});
+
+test("active release refuses a retired scenario after the latest candidate loses its signature", async () => {
+  const f = await fixture();
+  try {
+    const signature = { project: { kind: "project", id: "retire-project" }, scenario_key: "engineering.tests" };
+    const catalog = recordExperienceScenario({ experience_dir: f.store.paths.experienceDir, project_id: "retire-project", scenario_key: "engineering.tests",
+      observation_id: "observation", verified_task_id: "task" });
+    f.store.save("workflow_evolution_request", "request", { ...f.store.get("workflow_evolution_request", "request"),
+      scenario_key: "engineering.tests", scenario_signature: signature, observation_refs: [{ source: { scope: "project:retire-project" }, evidence_ids: ["e"] }] });
+    f.store.save("workflow_evolution_proposal", "proposal", { ...f.store.get("workflow_evolution_proposal", "proposal"), request_version: 2 });
+    const procedure = f.draft({ procedure_id: "retired-release", evolve: true, scenario_signature: signature });
+    f.promote(procedure);
+    const retired = retireExperienceScenario({ experience_dir: f.store.paths.experienceDir, project_id: "retire-project", scenario_key: "engineering.tests",
+      expected_catalog_version: Number(catalog.catalog_version), request_id: "retire-after-release", reason: "obsolete" });
+    assert.equal(retired.status, "retired");
+    const latest = f.store.get("experience_procedure", String(procedure.id));
+    f.store.save("experience_procedure", String(procedure.id), { ...latest, lifecycle: "candidate", routeable: false,
+      scenario_signature: { project: { kind: "project", id: "retire-project" } } });
+    assert.throws(() => f.procedures.get({ procedure_id: String(procedure.id), release_channel: "current" }), /release unavailable/);
   } finally { f.close(); }
 });
 
@@ -159,6 +200,12 @@ test("Procedure projection handles legacy scopes, graph defaults and absent opti
     f.store.save("workflow_evolution_proposal", "proposal", { ...proposal, request_version: 2, procedure_kind: "graph", inputs: null });
     const graph = f.draft();
     assert.deepEqual(f.procedures.definitions.read(graph.definition_ref as never).definition, { inputs: [], nodes: [], edges: [], outputs: {}, checkpoint_policy: { mode: "step" } });
+    const workflowRequest = f.store.create("workflow_evolution_request", "workflow-input-request", { ...request, scenario_key: "inspect-input" });
+    f.store.create("workflow_evolution_proposal", "workflow-input-proposal", { ...proposal, request_id: workflowRequest.id,
+      request_version: workflowRequest.version, inputs: ["source", { name: "optional", required: false }] });
+    const workflow = f.procedures.draft({ proposal_id: "workflow-input-proposal", procedure_id: "workflow-input" }).procedure as JsonObject;
+    assert.deepEqual(f.procedures.definitions.read(workflow.definition_ref as never).definition.inputs,
+      [{ name: "source", required: true }, { name: "optional", required: false }]);
     const legacy = f.draft({ procedure_id: "legacy", procedure_kind: "prompt" });
     const ref = legacy.content_ref as JsonObject;
     const oldBody = f.store.contentStore.readCompatSync(ref as never).body.replace("- read", "").replace("- e", "");

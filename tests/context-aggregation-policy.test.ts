@@ -141,6 +141,34 @@ test("Oversized contribution can degrade only the optional aggregate path", asyn
   } finally { f.close(); }
 });
 
+test("Experience contribution diagnostics distinguish budget, query and empty results", async () => {
+  const f = await fixture();
+  try {
+    const item = { scenario_id: "scenario-1", scenario_version: 1, content: "alpha experience", retrieval_text: "alpha experience" };
+    const provider = (items: JsonObject[], reason = "empty") => ({ member: "experience" as const, contribute: async () => ({ member: "experience" as const, receipt_id: "fixture-receipt", items, omitted_count: 0, diagnostics: { reason } }) });
+    const args = { query: "alpha", scope_kind: f.scope.kind, scope_id: f.scope.id, members: ["experience"] };
+
+    const budget = await new ContextResolutionKernel(f.store, [provider([item])]).resolve({ ...args, max_chars: 1 });
+    assert.equal(((budget.contributions as JsonObject[])[0]!.diagnostics as JsonObject).reason, "budget_excluded");
+
+    const unmatched = await new ContextResolutionKernel(f.store, [provider([{ ...item, retrieval_text: "unrelated" }])]).resolve(args);
+    assert.equal(((unmatched.contributions as JsonObject[])[0]!.diagnostics as JsonObject).reason, "query_not_matched");
+
+    const empty = await new ContextResolutionKernel(f.store, [provider([], "no_candidates")]).resolve(args);
+    assert.equal(((empty.contributions as JsonObject[])[0]!.diagnostics as JsonObject).reason, "no_candidates");
+  } finally { f.close(); }
+});
+
+test("Context feedback rejects receipts that include an unrequested member", async () => {
+  const f = await fixture();
+  try {
+    const result = await new ContextResolutionKernel(f.store).resolve({ query: "alpha", scope_kind: f.scope.kind, scope_id: f.scope.id, members: ["memory"] });
+    const receipt = result.receipt as JsonObject;
+    assert.deepEqual(receipt.members, ["memory"]);
+    assert.throws(() => new ContextResolutionKernel(f.store).feedback({ receipt_id: receipt.id, outcome: "helpful", members: ["experience"] }), /belongs to another component/);
+  } finally { f.close(); }
+});
+
 test("Restored repository checkpoints rebuild stale indexes and legacy analyzer caches", async () => {
   const f = await fixture();
   try {

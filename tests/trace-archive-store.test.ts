@@ -38,13 +38,14 @@ test("local Trace archive writes a private partitioned JSONL gzip segment and re
   const root = await mkdtemp(join(tmpdir(), "craft-trace-archive-"));
   try {
     const archives = new LocalTraceArchiveStore(join(root, "logs"));
-    const saved = archives.write(bundle());
+    const archived = { ...bundle(), telemetry_events: [{ id: "telemetry-1", trace_id: "trial:trace-1" }] };
+    const saved = archives.write(archived);
     assert.equal(saved.storage, "local_jsonl_gzip");
     assert.match(saved.locator, /^trace-archive\/2030\/01\/02\/trace-[a-f0-9]+\.v2\.[a-f0-9]+\.jsonl\.gz$/);
     assert.equal(saved.uri.startsWith("craft://trace-archive/local/"), true);
     assert.equal(saved.bytes > 0, true);
-    assert.deepEqual(archives.read(saved), bundle());
-    assert.deepEqual(archives.write(bundle()), saved);
+    assert.deepEqual(archives.read(saved), archived);
+    assert.deepEqual(archives.write(archived), saved);
     assert.throws(() => archives.read({ ...saved, locator: "../outside.jsonl.gz" }), /locator/);
     assert.throws(() => archives.read({ ...saved, content_digest: "sha256:bad" }), /digest/);
     assert.throws(() => archives.read({ ...saved, format: "bad" as never }), /storage/);

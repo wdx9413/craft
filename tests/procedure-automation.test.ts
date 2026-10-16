@@ -303,6 +303,21 @@ test("Automation fails closed for non-routeable procedures and creates a handoff
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
+test("Automation rejects an active release pointer to a non-routeable historical record", async () => {
+  const f = await fixture();
+  try {
+    const routeable = await routeableWorkflow(f, "corrupt-release", "result.txt");
+    const historical = f.store.save("experience_procedure", "corrupt-release", { ...routeable,
+      lifecycle: "candidate", routeable: false, definition_digest: "sha256:historical-candidate" });
+    f.store.save("experience_procedure", "corrupt-release", { ...historical,
+      lifecycle: "candidate", routeable: false, definition_digest: "sha256:latest-candidate" });
+    f.store.create("experience_release", "corrupt-release", { record_version: historical.version,
+      definition_digest: historical.definition_digest, status: "active" });
+    assert.throws(() => f.service.procedureAutomationSave({ ...binding, job_id: "corrupt-release-job",
+      procedure_id: "corrupt-release", workspace: f.workspace, verifier_step_id: "verify-artifact" }), /Only routeable Procedure/u);
+  } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
 test("Automation spends quota only after accepted external verification and stops at quota", async () => {
   const f = await fixture();
   try {

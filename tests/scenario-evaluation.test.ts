@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -159,6 +161,23 @@ test("scenario catalog symbolic links fail closed under the central Experience d
     await symlink(target, catalog);
     const dispatch = f.service.experienceLearningEvaluationDispatch({ procedure_id: f.procedure.id }).dispatch as JsonObject;
     assert.throws(() => f.service.experienceLearningEvaluationRun({ dispatch_id: dispatch.id }), /must not use symbolic links/u);
+    await rm(catalog);
+    await writeFile(catalog, "not-json");
+    assert.throws(() => f.service.experienceLearningEvaluationDispatch({ procedure_id: f.procedure.id }), SyntaxError);
+  } finally { await f.close(); }
+});
+
+test("retired scenarios stop dispatch, execution, and adapter results", async () => {
+  const f = await fixture();
+  try {
+    const dispatch = f.service.experienceLearningEvaluationDispatch({ procedure_id: f.procedure.id }).dispatch as JsonObject;
+    const catalogPath = join(f.scenarioDir, "experience-scenarios.json");
+    const catalog = JSON.parse(await readFile(catalogPath, "utf8")) as JsonObject;
+    (catalog.scenarios as JsonObject[])[0]!.lifecycle = "retired";
+    await writeFile(catalogPath, JSON.stringify(catalog));
+    assert.throws(() => f.service.experienceLearningEvaluationDispatch({ procedure_id: f.procedure.id }), /retired; candidate cannot be evaluated/u);
+    assert.throws(() => f.service.experienceLearningEvaluationRun({ dispatch_id: dispatch.id }), /retired; evaluation cannot execute/u);
+    assert.throws(() => f.service.experienceLearningEvaluationResult({ dispatch_id: dispatch.id, evidence_ids: ["missing"] }), /retired; evaluation result cannot qualify/u);
   } finally { await f.close(); }
 });
 
@@ -391,6 +410,23 @@ test("Canary runs the pinned current Procedure and binds both run receipts", asy
       thirdDispatch = result.next_dispatch as JsonObject;
     }
     assert.notEqual(thirdDispatch.baseline_version, null);
+    const scenarioCatalogPath = join(f.scenarioDir, "experience-scenarios.json");
+    const scenarioCatalogBytes = await readFile(scenarioCatalogPath, "utf8");
+    await writeFile(scenarioCatalogPath, "[]");
+    assert.throws(() => f.service.experienceLearningEvaluationRun({ dispatch_id: thirdDispatch.id }), /Canary baseline changed/u);
+    await writeFile(scenarioCatalogPath, "not-json");
+    assert.throws(() => f.service.experienceLearningEvaluationRun({ dispatch_id: thirdDispatch.id }), SyntaxError);
+    await writeFile(scenarioCatalogPath, scenarioCatalogBytes);
+    const originalLstat = fs.lstatSync;
+    let catalogReads = 0;
+    fs.lstatSync = ((...call: Parameters<typeof fs.lstatSync>) => {
+      if (String(call[0]) === scenarioCatalogPath && ++catalogReads === 2) throw new Error("scenario catalog read failed");
+      return originalLstat(...call);
+    }) as typeof fs.lstatSync;
+    syncBuiltinESMExports();
+    try {
+      assert.throws(() => f.service.experienceLearningEvaluationRun({ dispatch_id: thirdDispatch.id }), /scenario catalog read failed/u);
+    } finally { fs.lstatSync = originalLstat; syncBuiltinESMExports(); }
     const proxyStore = new Proxy(f.store, { get(target, property, receiver) {
       if (property === "get") return (kind: string, id: string, version?: number) => {
         const record = target.get(kind, id, version);

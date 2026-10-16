@@ -55,6 +55,15 @@ test("component diagnosis filters execution receipts by component, session and r
     f.store.create("knowledge_claim", "same-a", { status: "candidate" });
     f.store.create("knowledge_claim", "same-b", { status: "candidate" });
     assert.equal(((kernel.diagnose({ component: "knowledge" }).counts as JsonObject).claims as JsonObject).candidate, 2);
+
+    f.service.knowledgeMemoryInstallBuiltins();
+    assert.equal(kernel.get({ component: "memory" }).state, "candidate_or_approval_required");
+    f.service.memoryCaptureUserStatement({ content: "Keep project checks focused.", scope_kind: "user", scope_id: "local" });
+    f.store.create("usage_ledger", "observed-usage", { operation: "memory-read" });
+    const readyMemory = kernel.get({ component: "memory" });
+    assert.equal(readyMemory.state, "ready");
+    assert.equal(readyMemory.next_action, "resolve_only_the_current_scope_and_record_outcome_linked_usage");
+    assert.equal((kernel.diagnose({ component: "memory" }).observability as JsonObject).usage_measurement, "recorded");
   } finally { await dispose(f); }
 });
 

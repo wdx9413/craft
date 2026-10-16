@@ -41,6 +41,17 @@ test("version history remains bounded and excludes the current version", async (
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
+test("scoped record reads paginate metadata and bind valid time cutoffs", async () => {
+  const { root, store } = await fixture();
+  try {
+    store.createBatch(Array.from({ length: 513 }, (_, index) => ({ kind: "page", id: `page-${index}`,
+      payload: { scope: "project:p", value: index } })));
+    assert.equal(store.listScoped("page", [{ kind: "project", id: "p" }], 600).length, 513);
+    assert.equal(store.listScoped("page", [{ kind: "project", id: "p" }], 600, undefined, { known_at: "2030-01-01T00:00:00.000Z" }).length, 513);
+    assert.throws(() => store.listScoped("page", [{ kind: "project", id: "p" }], 600, undefined, { known_at: "invalid" }), /known_at/u);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
 test("latest record payload fingerprints are order-stable and detect append, replacement, and missing rows", async () => {
   const { root, store } = await fixture();
   try {
@@ -212,6 +223,9 @@ test("versioned records and events provide the shared persistence primitives", a
     store.create("trace_event", "event", {});
     store.create("trace_feedback", "feedback", {});
     assert.equal(store.removeTraceRecords("archived", ["event"], ["feedback"]), 3);
+    store.create("trace", "archived-with-telemetry", {});
+    store.create("telemetry_event", "telemetry", { trace_id: "archived-with-telemetry" });
+    assert.equal(store.removeTraceRecords("archived-with-telemetry", [], [], ["telemetry"]), 2);
     assert.equal(store.find("trace_feedback", "feedback"), null);
   } finally {
     store.close();
