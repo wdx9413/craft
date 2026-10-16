@@ -55,7 +55,7 @@ export class EvaluationModelProfileKernel {
     if (!Number.isFinite(temperature) || temperature < 0 || temperature > 2) throw new Error("temperature must be between 0 and 2");
     const identity = {
       provider: spec.provider, model, selected_tier: selected?.tier ?? null, requested_tier: requestedTier,
-      api_key_env: spec.api_key_env, temperature, max_output_tokens: integer(args.max_output_tokens, "max_output_tokens", 4_096, 1, 1_000_000),
+      api_key_env: credentialStatus(spec, this.env).api_key_env, temperature, max_output_tokens: integer(args.max_output_tokens, "max_output_tokens", 4_096, 1, 1_000_000),
       max_attempts: integer(args.max_attempts, "max_attempts", 1, 1, 20), purposes: strings(args.purposes, "purposes", ["evaluation", "workflow_evolution"]),
       network_execution_enabled: bool(args.network_execution_enabled, "network_execution_enabled", false),
     };
@@ -69,7 +69,8 @@ export class EvaluationModelProfileKernel {
     const profile = this.store.get("evaluation_model_profile", text(args.profile_id, "profile_id"), args.version === undefined ? undefined : integer(args.version, "version", 1, 1, Number.MAX_SAFE_INTEGER));
     const spec = this.provider(profile.provider);
     return { profile, provider: { provider: spec.provider, label: spec.label, protocol: spec.protocol, base_url: spec.base_url,
-      api_key_env: spec.api_key_env, chat_path: spec.chat_path, models: spec.models, cost_hint: spec.cost_hint, supports_tools: spec.supports_tools,
+      api_key_env: spec.host_managed_auth ? "host-managed-auth-store" : spec.api_key_env, chat_path: spec.chat_path, models: spec.models, cost_hint: spec.cost_hint, supports_tools: spec.supports_tools,
+      ...(spec.host_managed_auth ? { host_managed_auth: true } : {}),
       context_cache: spec.context_cache ?? { mode: "none", requires_exact_prefix: false, usage_fields: "none" } }, readiness: this.readiness(profile) };
   }
 
@@ -84,10 +85,10 @@ export class EvaluationModelProfileKernel {
     if (purpose !== null && !PURPOSES.has(purpose)) throw new Error("purpose is unsupported");
     const tickets = this.store.list("evaluation_model_ticket", limit, (ticket) => {
       if (purpose !== null && ticket.purpose !== purpose) return false;
+      if (ticket.status !== "ready_for_adapter") return false;
       const target = ticket.target as JsonObject | undefined;
       if (target?.kind === "knowledge_scenario_classification") {
         if (ticket.purpose !== "knowledge_scenario_classification") return false;
-        if (ticket.status !== "ready_for_adapter") return false;
         const claim = this.store.find("knowledge_claim", String(target.id));
         if (!claim || typeof claim.scope !== "string" || !KNOWLEDGE_CLASSIFIABLE_STATUSES.has(String(claim.status)) || typeof claim.scenario_key === "string"
           || Number(claim.version) !== Number(target.version) || claim.content_digest !== target.content_digest) return false;
@@ -111,9 +112,23 @@ export class EvaluationModelProfileKernel {
   ticketComplete(args: JsonObject): JsonObject {
     const ticketId = text(args.ticket_id, "ticket_id");
     const ticket = this.store.get("evaluation_model_ticket", ticketId);
-    if (ticket.purpose !== "knowledge_scenario_classification" || ticket.status !== "ready_for_adapter") throw new Error("Only a ready Knowledge classification ticket can be completed");
+    if (!(new Set(["knowledge_scenario_classification", "workflow_evolution"])).has(String(ticket.purpose))) throw new Error("Only a Knowledge classification or Workflow-evolution ticket can be completed");
     const resultDigest = text(args.result_digest, "result_digest");
     if (!/^sha256:[a-f0-9]{64}$/u.test(resultDigest)) throw new Error("result_digest must be a SHA-256 digest");
+    if (ticket.status === "completed") {
+      if (ticket.result_digest !== resultDigest) throw new Error("Evaluation Model Ticket completion digest conflicts with its prior result");
+      return { ticket, idempotent: true };
+    }
+    if (ticket.status !== "ready_for_adapter") throw new Error("Evaluation Model Ticket is not ready for completion");
+    if (ticket.purpose === "workflow_evolution") {
+      const target = ticket.target as JsonObject;
+      const proposal = this.store.list("workflow_evolution_proposal", 1_000, (item) => item.model_ticket_id === ticket.id
+        && item.request_id === target.id && Number(item.request_version) === Number(target.version))[0];
+      const request = proposal ? this.store.find("workflow_evolution_request", String(target.id)) : null;
+      if (!proposal || request?.lifecycle !== "draft_submitted" || request.proposal_id !== proposal.id) {
+        throw new Error("Workflow-evolution ticket requires its exact submitted candidate before completion");
+      }
+    }
     const completed = this.store.save("evaluation_model_ticket", ticketId, { ...ticket, status: "completed", result_digest: resultDigest, completed_at: new Date().toISOString() });
     this.store.appendEvent(`evaluation-model:${ticket.profile_id}`, "evaluation_model.ticket_completed", { ticket_id: ticket.id, purpose: ticket.purpose, result_digest: resultDigest });
     return { ticket: completed, idempotent: completed === ticket };
