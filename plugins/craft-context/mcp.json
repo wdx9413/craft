@@ -8,7 +8,10 @@
         "${PLUGIN_ROOT}/dist/plugin/craft-mcp.cjs",
         "--product",
         "context"
-      ]
+      ],
+      "env": {
+        "CRAFT_LEARNING_MODEL_HOST": "codex-cli"
+      }
     }
   }
 }
