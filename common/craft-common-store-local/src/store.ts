@@ -11,6 +11,11 @@ export type JsonObject = Record<string, unknown>;
 export type SaveEntry = { kind: string; id: string; payload: JsonObject; version?: number };
 export type RawRecord = { kind: string; id: string; version: number; payload: JsonObject; created_at: string; updated_at: string };
 const RESERVED_FIELDS = new Set(["id", "version", "created_at", "updated_at"]);
+const CONTENT_REFERENCE_RECORD_KINDS = [
+  "knowledge_claim", "knowledge_fragment", "wiki_page",
+  "memory_ledger", "episodic_memory", "semantic_memory",
+  "experience_procedure",
+] as const;
 
 function payloadOnly(payload: JsonObject): JsonObject {
   return Object.fromEntries(Object.entries(payload).filter(([key]) => !RESERVED_FIELDS.has(key)));
@@ -93,13 +98,18 @@ export class CraftStore {
       [this.paths.memoryDatabaseFile, "memory"],
       [this.paths.experienceDatabaseFile, "experience"],
     ];
-    const rows = database.prepare("SELECT kind,id,version,payload_json,updated_at FROM records").all() as Array<Record<string, unknown>>;
+    // `records` also contains large trace and archive payloads. Loading the whole table with
+    // `.all()` made every MCP product startup scale with the complete event history. The
+    // primary key starts with `kind`, so restrict the cursor to record families that can own a
+    // Markdown content reference and keep only one row resident at a time.
+    const placeholders = CONTENT_REFERENCE_RECORD_KINDS.map(() => "?").join(",");
+    const rows = database.prepare(`SELECT kind,id,version,payload_json,updated_at FROM records WHERE kind IN (${placeholders})`);
     for (const [path, domain] of entries) {
       const index = new DatabaseSync(path);
       try {
         index.exec("PRAGMA busy_timeout=15000; PRAGMA journal_mode=WAL; BEGIN IMMEDIATE; CREATE TABLE IF NOT EXISTS content_index (kind TEXT NOT NULL, id TEXT NOT NULL, version INTEGER NOT NULL, content_ref TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(kind,id,version)); DELETE FROM content_index;");
         const insert = index.prepare("INSERT INTO content_index(kind,id,version,content_ref,updated_at) VALUES(?,?,?,?,?)");
-        for (const row of rows) {
+        for (const row of rows.iterate(...CONTENT_REFERENCE_RECORD_KINDS) as Iterable<Record<string, unknown>>) {
           const payload = JSON.parse(String(row.payload_json)) as JsonObject;
           const ref = payload.content_ref;
           if (!ref || typeof ref !== "object" || Array.isArray(ref) || (ref as Record<string, unknown>).kind !== domain) continue;

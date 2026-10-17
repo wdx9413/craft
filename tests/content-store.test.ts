@@ -227,6 +227,44 @@ test("knowledge and memory writes persist body in Markdown and only a reference 
   knowledgeIndex.close(); memoryIndex.close(); reopened.close();
 });
 
+test("startup content indexes stream every content-bearing record family", async () => {
+  const f = await fixture();
+  const records = [
+    ["knowledge_fragment", "knowledge", "fragment"],
+    ["wiki_page", "knowledge", "wiki"],
+    ["episodic_memory", "memory", "episode"],
+    ["semantic_memory", "memory", "semantic"],
+    ["experience_procedure", "experience", "procedure"],
+  ] as const;
+  for (const [recordKind, contentKind, id] of records) {
+    const ref = f.store.contentStore.writeSync({ kind: contentKind, record_id: id, version: 1,
+      scope: "project:test", status: "candidate", sensitivity: "internal", source_id: "source:test", body: `Body ${id}` });
+    f.store.create(recordKind, id, { content_ref: ref });
+  }
+  f.store.create("knowledge_claim", "claim-without-reference", { content_ref: null });
+
+  await f.store.close();
+  const reopened = await new CraftStore(f.paths).open();
+  const databaseByContentKind = {
+    knowledge: new DatabaseSync(f.paths.knowledgeDatabaseFile),
+    memory: new DatabaseSync(f.paths.memoryDatabaseFile),
+    experience: new DatabaseSync(f.paths.experienceDatabaseFile),
+  };
+  try {
+    for (const [recordKind, contentKind, id] of records) {
+      const count = databaseByContentKind[contentKind].prepare("SELECT COUNT(*) count FROM content_index WHERE kind=? AND id=?")
+        .get(recordKind, id) as { count: number };
+      assert.equal(Number(count.count), 1, `${contentKind}/${recordKind}/${id} should be indexed`);
+    }
+    const missing = databaseByContentKind.knowledge.prepare("SELECT COUNT(*) count FROM content_index WHERE id=?")
+      .get("claim-without-reference") as { count: number };
+    assert.equal(Number(missing.count), 0);
+  } finally {
+    for (const database of Object.values(databaseByContentKind)) database.close();
+    reopened.close();
+  }
+});
+
 test("layout exposes flat content directories without forcing records on installation", async () => {
   const f = await fixture();
   assert.deepEqual(await readdir(f.paths.knowledgeContentDir), []);
