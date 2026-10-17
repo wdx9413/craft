@@ -6,6 +6,7 @@ import { stableDigest } from "../../common/craft-common-base/src/digest.ts";
 
 export const CODEBASE_LSP_CONFIG = "codebase-lsp.json";
 export const MAX_LSP_DOCUMENTS = 1_000;
+export const MAX_RELATION_SYMBOLS = 12_000;
 export const LSP_LANGUAGE_IDS: Readonly<Record<string, string>> = Object.freeze({
   ts: "typescript", mts: "typescript", cts: "typescript", tsx: "typescriptreact",
   js: "javascript", mjs: "javascript", cjs: "javascript", jsx: "javascriptreact",
@@ -74,7 +75,7 @@ function validateAdapter(value: unknown): TrustedLspAdapter {
   const max_documents = item.max_documents ?? 100;
   if (typeof max_documents !== "number" || !Number.isInteger(max_documents) || max_documents < 1 || max_documents > MAX_LSP_DOCUMENTS) throw new Error("invalid_document_limit");
   const relation_symbol_limit = item.relation_symbol_limit ?? 100;
-  if (typeof relation_symbol_limit !== "number" || !Number.isInteger(relation_symbol_limit) || relation_symbol_limit < 1 || relation_symbol_limit > 1_000) throw new Error("invalid_relation_symbol_limit");
+  if (typeof relation_symbol_limit !== "number" || !Number.isInteger(relation_symbol_limit) || relation_symbol_limit < 1 || relation_symbol_limit > MAX_RELATION_SYMBOLS) throw new Error("invalid_relation_symbol_limit");
   const request_timeout_ms = item.request_timeout_ms ?? 10_000;
   if (typeof request_timeout_ms !== "number" || !Number.isSafeInteger(request_timeout_ms) || request_timeout_ms < 1 || request_timeout_ms > 120_000) throw new Error("invalid_request_timeout");
   return { language, command, args: args as string[], analyzer_version, relations: relations as string[], max_documents, relation_symbol_limit, request_timeout_ms };

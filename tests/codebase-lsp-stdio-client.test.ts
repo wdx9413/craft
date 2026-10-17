@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
-import { analyzeLspSnapshot, resolveLspSymbolPosition, safeFailureCode, waitForClose, waitForDiagnosticPublications } from "../capability/craft-codebase/lsp-stdio-client.ts";
+import { analyzeLspSnapshot, ignoreLspStdinError, resolveLspSymbolPosition, safeFailureCode, waitForClose, waitForDiagnosticPublications } from "../capability/craft-codebase/lsp-stdio-client.ts";
 import { cacheLspDocumentSymbols, lspDocumentSymbolsDigest } from "../capability/craft-codebase/lsp-adapter.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
@@ -110,6 +110,8 @@ test("stdio LSP returns bounded push and pull diagnostics without confusing clea
     assert.equal((unpublished.diagnostics as JsonObject).status, "partial");
     assert.deepEqual((unpublished.diagnostics as JsonObject).unpublished_paths, [document.path]);
     await assert.rejects(analyzeLspSnapshot({ ...base(root), diagnostics_only: "yes" as never }), /Invalid or over-budget/);
+    await assert.doesNotReject(analyzeLspSnapshot({ ...base(root, "relation-budget-max"), relation_symbol_limit: 12_000 }));
+    await assert.rejects(analyzeLspSnapshot({ ...base(root, "relation-budget-over"), relation_symbol_limit: 12_001 }), /Invalid or over-budget/);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -685,6 +687,7 @@ test("stdio LSP handles empty symbols and rejects malformed response, timeout an
     await assert.rejects(analyzeLspSnapshot(base(root, "overflow-buffer"), 30_000), /response exceeds budget/);
     assert((await analyzeLspSnapshot(base(root, "split-frame"))).nodes instanceof Array);
     await assert.rejects(analyzeLspSnapshot(base(root, "exit-before")), /exited before completion during textDocument\/documentSymbol \(code 4, signal none\)/u);
+    await assert.rejects(analyzeLspSnapshot(base(root, "close-stdin")), /exited before completion during initialize \(code 4, signal none\)/u);
     await assert.rejects(analyzeLspSnapshot({ ...base(root, "close-after-response"), documents: [document, { ...document, path: "src/other.java" }] }), /Malformed language server frame/);
     await assert.rejects(analyzeLspSnapshot(base(root, "close-after-response")), /Malformed language server frame/);
     await assert.rejects(analyzeLspSnapshot(base(root, "error-unknown")), /unknown/);
@@ -728,4 +731,8 @@ test("LSP shutdown wait accepts an already successful exit and rejects an alread
     if (shouldReject) await assert.rejects(waitForClose(child, 100), /unsuccessfully/);
     else await waitForClose(child, 100);
   }
+});
+
+test("LSP stdin pipe errors are left for the child close handler to report", () => {
+  assert.doesNotThrow(() => ignoreLspStdinError(Object.assign(new Error("closed pipe"), { code: "EPIPE" })));
 });

@@ -11,6 +11,11 @@ const relationMode = mode.startsWith("relations");
 const semanticMode = mode.startsWith("relations-semantic");
 const goMode = mode.startsWith("relations-go");
 
+if (mode === "close-stdin") {
+  process.stdin.destroy();
+  setTimeout(() => process.exit(4), 10);
+}
+
 function send(message) {
   const body = Buffer.from(JSON.stringify({ jsonrpc: "2.0", ...message }));
   process.stdout.write(Buffer.concat([Buffer.from(`Content-Length: ${body.length}\r\n\r\n`), body]));

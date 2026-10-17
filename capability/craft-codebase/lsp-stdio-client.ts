@@ -4,7 +4,7 @@ import { realpathSync } from "node:fs";
 import { relative, resolve, isAbsolute, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { JsonObject } from "../../common/craft-common-store-local/src/store.ts";
-import { MAX_LSP_DOCUMENTS } from "./lsp-config.ts";
+import { MAX_LSP_DOCUMENTS, MAX_RELATION_SYMBOLS } from "./lsp-config.ts";
 import { cacheLspDocumentSymbols, lspDocumentSymbolsDigest, normalizeLspSymbols } from "./lsp-adapter.ts";
 import { collectLspRelations, selectLspRelationSymbols } from "./lsp-relations.ts";
 
@@ -17,7 +17,6 @@ const MAX_DOCUMENT_BYTES = 2_000_000;
 const MAX_TOTAL_BYTES = 64 * 1024 * 1024;
 const MAX_SYMBOL_CACHE_BYTES = 32 * 1024 * 1024;
 const MAX_RESPONSE_BYTES = 64 * 1024 * 1024;
-const MAX_RELATION_SYMBOLS = 1_000;
 const MAX_TYPE_HIERARCHY_ITEMS = 50;
 const MAX_DEFINITION_REFERENCES_PER_SYMBOL = 20;
 const MAX_DEFINITION_LOOKUPS = 500;
@@ -31,6 +30,9 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 
 type Pending = { method: string; resolve(value: unknown): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> };
 type JsonRpc = { readonly id?: number | string; readonly method?: string; readonly result?: unknown; readonly error?: { readonly message?: string; readonly code?: number }; readonly params?: JsonObject };
+
+/** The child close handler reports the stable process exit and pending method. */
+export function ignoreLspStdinError(_error: Error): void {}
 
 /**
  * Explicitly launch one configured LSP executable against supplied checkpoint
@@ -58,6 +60,10 @@ export async function analyzeLspSnapshot(input: LspStdioRequest, timeoutMs = inp
     pending.clear();
   };
   child.on("error", () => failPending(new Error("Unable to start configured language server")));
+  // A language server may exit before Node flushes the initialize frame. In
+  // that case the pipe reports EPIPE before the child's close event; handling
+  // it here lets close() provide the stable exit code and pending LSP method.
+  child.stdin.on("error", ignoreLspStdinError);
   child.on("close", (code, signal) => {
     if (!closed) {
       const method = pending.values().next().value?.method ?? "unknown request";

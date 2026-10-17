@@ -3,7 +3,7 @@ import test from "node:test";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { languageIdForFile, MAX_LSP_DOCUMENTS, readTrustedLspConfig } from "../capability/craft-codebase/lsp-config.ts";
+import { languageIdForFile, MAX_LSP_DOCUMENTS, MAX_RELATION_SYMBOLS, readTrustedLspConfig } from "../capability/craft-codebase/lsp-config.ts";
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), "craft-lsp-config-")); mkdirSync(join(root, "config"));
@@ -30,8 +30,10 @@ test("trusted LSP configuration accepts an executable and bounds its adapter con
     assert.deepEqual(second.adapters[0]!.relations, ["calls"]); assert.equal(second.adapters[0]!.max_documents, 4);
     assert.equal(second.adapters[0]!.relation_symbol_limit, 250);
     assert.equal(second.adapters[0]!.request_timeout_ms, 30_000);
-    write(f.dir, valid({ relation_symbol_limit: 1_000 }));
-    assert.equal(readTrustedLspConfig(f.dir).adapters[0]!.relation_symbol_limit, 1_000);
+    write(f.dir, valid({ relation_symbol_limit: 2_000 }));
+    assert.equal(readTrustedLspConfig(f.dir).adapters[0]!.relation_symbol_limit, 2_000);
+    write(f.dir, valid({ relation_symbol_limit: MAX_RELATION_SYMBOLS }));
+    assert.equal(readTrustedLspConfig(f.dir).adapters[0]!.relation_symbol_limit, MAX_RELATION_SYMBOLS);
     write(f.dir, { schema_version: 1, adapters: [...(valid() as any).adapters, ...(valid() as any).adapters] });
     const duplicate = readTrustedLspConfig(f.dir);
     assert.equal(duplicate.adapters.length, 1); assert.equal(duplicate.diagnostics[0]?.reason, "duplicate_language");
@@ -55,7 +57,7 @@ test("trusted LSP configuration rejects malformed files and reports invalid adap
       { language: "cpp", command: join(f.root, "missing") }, { language: "cpp", command: process.execPath, args: [3] },
       { language: "cpp", command: process.execPath, args: ["bad\narg"] }, { language: "cpp", command: process.execPath, relations: ["invented"] },
       { language: "cpp", command: process.execPath, max_documents: MAX_LSP_DOCUMENTS + 1 }, { language: "cpp", command: process.execPath, max_documents: 0 },
-      { language: "cpp", command: process.execPath, relation_symbol_limit: 0 }, { language: "cpp", command: process.execPath, relation_symbol_limit: 1_001 },
+      { language: "cpp", command: process.execPath, relation_symbol_limit: 0 }, { language: "cpp", command: process.execPath, relation_symbol_limit: MAX_RELATION_SYMBOLS + 1 },
       { language: "cpp", command: process.execPath, analyzer_version: "valid-1.0", args: Array.from({ length: 33 }, () => "x") },
       { language: "cpp", command: process.execPath, args: ["x".repeat(1025)] }, { language: "cpp", command: process.execPath, args: ["bad\0arg"] },
       { language: "cpp", command: process.execPath, relations: Array.from({ length: 7 }, () => "calls") },
