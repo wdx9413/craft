@@ -121,8 +121,15 @@ test("discovery and Chinese code matching are bounded hints", () => {
   const knowledgeTools = discoverContextTools({ intent: "knowledge" }).tools as JsonObject[];
   for (const tool of ["craft_knowledge_bootstrap_install", "craft_knowledge_source_list", "craft_knowledge_source_register", "craft_knowledge_source_ingest",
     "craft_evidence_record", "craft_knowledge_claim_save", "craft_knowledge_claim_get", "craft_knowledge_claim_list",
-    "craft_knowledge_semantic_review_packet", "craft_knowledge_host_review", "craft_knowledge_auto_review", "craft_knowledge_promotion_policy_get"])
+    "craft_knowledge_semantic_review_packet", "craft_knowledge_host_review", "craft_knowledge_auto_review", "craft_knowledge_promotion_policy_get",
+    "craft_knowledge_evaluation_case_save", "craft_knowledge_evaluation_case_list", "craft_knowledge_evaluation_run",
+    "craft_knowledge_evaluation_run_get", "craft_knowledge_evaluation_run_list"])
     assert(knowledgeTools.some(item => item.name === tool), `Knowledge discovery must include ${tool}`);
+  for (const tool of knowledgeTools.filter(item => String(item.name).startsWith("craft_knowledge_evaluation_"))) {
+    assert.equal((tool.inputSchema as JsonObject).type, "object");
+  }
+  assert.deepEqual((knowledgeTools.find(tool => tool.name === "craft_knowledge_evaluation_case_save")!.inputSchema as JsonObject).required, ["query", "expected_claim_ids"]);
+  assert(Object.hasOwn((knowledgeTools.find(tool => tool.name === "craft_knowledge_evaluation_run")!.inputSchema as JsonObject).properties as JsonObject, "case_ids"));
   const memoryTools = discoverContextTools({ intent: "memory" }).tools as JsonObject[];
   for (const tool of ["craft_memory_capture_observed_fact", "craft_memory_ledger_get", "craft_memory_ledger_list", "craft_memory_ledger_transition",
     "craft_memory_conflict_list", "craft_memory_conflict_resolve", "craft_memory_maintenance_run", "craft_memory_session_finalize"])

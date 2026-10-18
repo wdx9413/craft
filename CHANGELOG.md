@@ -1,3 +1,8 @@
+## v0.12.59（Knowledge 评测工具发现）
+
+- Context 的 Knowledge 工具发现新增固定评测用例保存、列表、执行与结果读取接口，允许 Agent 从统一入口建立和运行 Knowledge 检索评测。
+- 增加对工具名与输入参数结构的回归验证。
+
 ## v0.12.58（Knowledge 候选摄取幂等）
 
 - 相同来源片段合并到候选 Claim 时，仅在新增 Evidence 引用时保存新版本；重复摄取不再反复递增 Claim 版本，避免 Worker 对未变化内容空转重审。

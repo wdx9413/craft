@@ -28,4 +28,12 @@ for (const product of RELEASE_PRODUCTS) {
   }
 }
 
+const rootClaudePluginPath = join(root, ".claude-plugin", "plugin.json");
+const rootClaudePlugin = JSON.parse(await readFile(rootClaudePluginPath, "utf8")) as Record<string, unknown>;
+await writeJson(rootClaudePluginPath, { ...rootClaudePlugin, name: "craft", version: CRAFT_RELEASE_VERSION });
+
+const workbuddyPluginPath = join(root, "adapters", "workbuddy-expert", ".codebuddy-plugin", "plugin.json");
+const workbuddyPlugin = JSON.parse(await readFile(workbuddyPluginPath, "utf8")) as Record<string, unknown>;
+await writeJson(workbuddyPluginPath, { ...workbuddyPlugin, version: CRAFT_RELEASE_VERSION });
+
 process.stdout.write(`Release catalog synchronized at ${CRAFT_RELEASE_VERSION}.\n`);
