@@ -25,7 +25,9 @@ const MAX_DIAGNOSTICS_TOTAL = 2_000;
 const MAX_DIAGNOSTIC_MESSAGE_LENGTH = 2000;
 const TYPE_HIERARCHY_SYMBOL_KINDS = new Set([5, 10, 11, 23, 26]);
 const CALL_HIERARCHY_SYMBOL_KINDS = new Set([6, 9, 12]);
-const GO_IMPLEMENTATION_SYMBOL_KINDS = new Set([6, 11, 12]);
+// gopls reports implementing types from interface declarations. Ordinary
+// functions add no implementation edges, while method-position queries fail.
+const GO_IMPLEMENTATION_SYMBOL_KINDS = new Set([11]);
 const GO_TYPE_DEFINITION_SYMBOL_KINDS = new Set([5, 10, 11, 13, 23, 26]);
 const LSP_REQUEST_CONCURRENCY = 8;
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -381,10 +383,7 @@ export async function analyzeLspSnapshot(input: LspStdioRequest, timeoutMs = inp
         relationCapabilityNotes.set("go_implementation_ineligible_symbol_skipped", (relationCapabilityNotes.get("go_implementation_ineligible_symbol_skipped") ?? 0) + 1);
         continue;
       }
-      const positionSymbol = goAnalyzer && Number(symbol.symbol_kind) === 12 && symbol.declaration_span && typeof symbol.declaration_span === "object"
-        ? { ...symbol, span: { start_offset: (symbol.declaration_span as JsonObject).start_offset } }
-        : symbol;
-      const { document, selection } = resolveLspSymbolPosition(input.documents, positionSymbol);
+      const { document, selection } = resolveLspSymbolPosition(input.documents, symbol);
       const uri = pathToFileURL(resolve(cwd, document.path)).href;
       try {
         const result = await request("textDocument/implementation", { textDocument: { uri }, position: selection });
