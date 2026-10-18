@@ -142,6 +142,45 @@ test("semantic repository onboarding uses only explicitly trusted LSP adapters a
   } finally { f.close(); }
 });
 
+test("semantic repository onboarding rebuilds adapter relations when only the trusted LSP config changes", async () => {
+  const f = await fixture();
+  try {
+    f.write("main.cpp", "int stable() { return 1; }\n");
+    const configPath = join(f.store.paths.configDir, "codebase-lsp.json");
+    const writeConfig = (relationSymbolLimit: number) => writeFileSync(configPath, JSON.stringify({ schema_version: 1,
+      adapters: [{ language: "cpp", command: process.execPath, relation_symbol_limit: relationSymbolLimit }] }));
+    writeConfig(300);
+    const calls: JsonObject[] = [];
+    Object.assign(f.service, { analyzeLsp: (request: JsonObject) => {
+      calls.push(request);
+      const document = (request.documents as JsonObject[])[0]!;
+      return { format: "craft-static-analysis-v1", analyzer: "lsp-cpp", analyzer_version: "1", edges: [],
+        nodes: [{ id: "stable", kind: "symbol", path: "main.cpp", language: "cpp", name: "stable", source_digest: document.source_digest,
+          span: { start_offset: 4, end_offset: 10 } }], diagnostics: { relations: "analyzed" } };
+    } });
+
+    const first = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
+    const unchanged = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
+
+    assert.equal(first.status, "ready");
+    assert.equal(first.reused, false);
+    assert.equal(unchanged.reused, true);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0]!.relation_symbol_limit, 300);
+
+    writeConfig(301);
+    const reconfigured = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
+
+    assert.equal(reconfigured.status, "ready");
+    assert.equal(reconfigured.reused, false);
+    assert.notEqual(reconfigured.index_id, first.index_id);
+    assert.equal(calls.length, 2);
+    assert.equal(calls[1]!.relation_symbol_limit, 301);
+    assert.equal(f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" }).reused, true);
+    assert.equal(calls.length, 2);
+  } finally { f.close(); }
+});
+
 test("LSP onboarding degrades without a worker entry and supports packaged JavaScript worker entries", async () => {
   const unavailable = await fixture();
   const previousEntry = process.argv[1];
