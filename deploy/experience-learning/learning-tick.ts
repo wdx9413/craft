@@ -52,8 +52,14 @@ export function learningTickStatus(result: JsonObject, once: boolean): { diagnos
   if (Array.isArray(classification?.outcomes)) for (const value of classification.outcomes as unknown[]) {
     if (!value || typeof value !== "object" || Array.isArray(value) || (value as JsonObject).status !== "failed") continue;
     const stage = (value as JsonObject).failure_stage;
-    if (typeof stage === "string" && ["taxonomy_list", "ticket_issue", "model_request", "claim_save", "ticket_complete"].includes(stage)) {
-      classificationFailureStages.set(stage, (classificationFailureStages.get(stage) ?? 0) + 1);
+    const code = (value as JsonObject).failure_code;
+    const safeStage = typeof stage === "string" && ["taxonomy_list", "ticket_issue", "model_request", "response_parse", "response_validate",
+      "review_packet_validate", "host_review", "claim_review", "claim_save", "result_trace", "ticket_bind", "ticket_complete", "trace_finalize",
+      "attempt_state_check", "attempt_state_save"].includes(stage) ? stage : null;
+    const safeCode = typeof code === "string" && /^[a-z][a-z0-9_]{0,63}$/u.test(code) ? code : null;
+    if (safeStage) {
+      const key = safeCode ? `${safeStage}/${safeCode}` : safeStage;
+      classificationFailureStages.set(key, (classificationFailureStages.get(key) ?? 0) + 1);
     }
   }
   const stageSummary = [...classificationFailureStages].sort(([left], [right]) => left.localeCompare(right)).map(([stage, count]) => `${stage}:${count}`).join(",");

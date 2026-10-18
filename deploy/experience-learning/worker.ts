@@ -2,11 +2,13 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { createInterface } from "node:readline";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createFetchTransport, buildChatRequest, defineProvider, PROVIDER_CATALOG, type ChatMessage, type ModelProviderSpec, type ModelTransport } from "../../core/model-gateway.ts";
 import { stableDigest } from "../../core/digest.ts";
 import { CRAFT_RELEASE_VERSION } from "../../core/version.ts";
 import type { JsonObject } from "../../core/infrastructure/store.ts";
+import { craftPaths, dataRoot } from "../../core/infrastructure/paths.ts";
 import { validateDistilledWorkflowSteps } from "./workflow-contract.ts";
 import { runKnowledgeSyncOnce, type KnowledgeLearningClient } from "./knowledge-sync.ts";
 import { runKnowledgeScenarioClassificationOnce } from "./knowledge-classification.ts";
@@ -64,7 +66,8 @@ export function runLearningTick(deps: DistillationDependencies, syncKnowledge = 
     run_knowledge_pass: async () => {
       const ingestion = await runKnowledgeSyncOnce(deps.client as KnowledgeLearningClient);
       let classification: JsonObject;
-      try { classification = await runKnowledgeScenarioClassificationOnce({ client: deps.client, providers: deps.providers, transport: deps.transport }); }
+      try { classification = await runKnowledgeScenarioClassificationOnce({ client: deps.client, providers: deps.providers, transport: deps.transport,
+        state_file: join(craftPaths(dataRoot()).knowledgeDir, "classification-attempts.json") }); }
       catch (error) { classification = { status: "failed", failure_kind: learningFailureKind(error) }; }
       return { ...ingestion, classification };
     },

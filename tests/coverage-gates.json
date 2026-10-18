@@ -1565,10 +1565,12 @@
     {
       "name": "knowledge-classification-worker",
       "include": [
-        "deploy/experience-learning/knowledge-classification.ts"
+        "deploy/experience-learning/knowledge-classification.ts",
+        "deploy/experience-learning/knowledge-classification-state.ts"
       ],
       "tests": [
-        "tests/knowledge-classification-worker.test.ts"
+        "tests/knowledge-classification-worker.test.ts",
+        "tests/knowledge-classification-state.test.ts"
       ],
       "branches": true
     },

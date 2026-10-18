@@ -1,3 +1,9 @@
+## v0.12.56（Knowledge 失败票据抑制）
+
+- Knowledge 模型完成后若分类或审核失败，只保存票据、输入摘要、失败阶段、受控错误码和时间；相同输入不再每轮重复发送，状态保存在 `~/.craft_data/knowledge/classification-attempts.json`。
+- Claim/Evidence、场景目录、模型 Profile 或分类契约变化会形成新摘要并允许重试；模型请求未成功返回时仍保留重试能力。
+- Trace 与 Worker 诊断增加安全失败阶段和错误码，不保存模型回复或业务正文；增加重启恢复、输入变更、符号链接、状态损坏与容量边界覆盖。
+
 ## v0.12.55（学习 Worker 单实例锁）
 
 - 同一 `~/.craft_data` 下，Context Worker 原子占用 Knowledge 与 Experience 组件锁，Knowledge/Experience 独立 Worker 仅占用各自锁，避免多个 MCP 会话重复消费同一学习票据。

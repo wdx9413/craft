@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import { PROVIDER_CATALOG, type ChatResult, type ModelProviderSpec, type ModelTransport } from "../core/model-gateway.ts";
 import type { JsonObject } from "../core/infrastructure/store.ts";
@@ -92,6 +95,68 @@ test("candidate Claims receive an Evidence-bound Host review before scenario cla
   assert.equal(f.calls.find(call => call.name === "craft_evaluation_model_ticket_complete")?.args.trace_id, "trace-classification-1");
 });
 
+test("completed but rejected classifier responses are not retried for unchanged inputs", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-knowledge-classification-"));
+  try {
+    const stateFile = join(root, "knowledge", "classification-attempts.json"), f = fixture("not json");
+    let calls = 0;
+    const transport: ModelTransport = { async complete(spec, request) { calls += 1; return f.transport.complete!(spec, request); } };
+    const first = await runKnowledgeScenarioClassificationOnce({ client: f.client, providers: [provider], transport, state_file: stateFile });
+    const firstOutcome = (first.outcomes as JsonObject[])[0]!;
+    assert.equal(firstOutcome.failure_stage, "response_parse");
+    assert.equal(firstOutcome.failure_code, "response_not_json");
+    assert.equal(calls, 1);
+    const failedTrace = f.calls.find(call => call.name === "craft_trace_append" && call.args.event_kind === "classification.failed");
+    assert.match(String(failedTrace?.args.summary), /response_parse \(response_not_json\)/u);
+    assert.equal(JSON.stringify(failedTrace).includes("not json"), false);
+
+    const second = await runKnowledgeScenarioClassificationOnce({ client: f.client, providers: [provider], transport, state_file: stateFile });
+    assert.equal((second.outcomes as JsonObject[])[0]?.reason, "unchanged_failed_input");
+    assert.equal(calls, 1, "the persisted failed digest suppresses another Host call after process restart");
+
+    const originalCall = f.client.call.bind(f.client);
+    f.client.call = async (name, args = {}) => {
+      const result = await originalCall(name, args);
+      if (name === "craft_knowledge_semantic_review_packet") {
+        const packet = result.packet as JsonObject;
+        const fragments = packet.evidence_fragments as JsonObject[];
+        fragments[0] = { ...fragments[0], content: "The evidence changed." };
+      }
+      return result;
+    };
+    const changedTransport: ModelTransport = { async complete() {
+      calls += 1;
+      return { text: "not json", model: "test-model", usage: { input_tokens: 10, output_tokens: 2 } };
+    } };
+    const changed = await runKnowledgeScenarioClassificationOnce({ client: f.client, providers: [provider], transport: changedTransport, state_file: stateFile });
+    assert.equal((changed.outcomes as JsonObject[])[0]?.failure_code, "response_not_json", JSON.stringify((changed.outcomes as JsonObject[])[0]));
+    assert.equal(calls, 2, "changed trusted evidence creates a new input digest and permits a fresh attempt");
+    const saved = JSON.parse(await readFile(stateFile, "utf8")) as JsonObject;
+    assert.equal(JSON.stringify(saved).includes(claimContent), false, "the retry ledger stores digests and safe codes, never Claim or Evidence text");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("failure-state write errors are classified without exposing the Host response", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-knowledge-classification-state-race-"));
+  try {
+    const stateDir = join(root, "knowledge"), backupDir = join(root, "knowledge-original"), targetDir = join(root, "replacement");
+    await mkdir(stateDir); await mkdir(targetDir);
+    const stateFile = join(stateDir, "classification-attempts.json");
+    await writeFile(stateFile, JSON.stringify({ schema: "craft.knowledge-classification-attempts.v1", attempts: {} }));
+    const f = fixture("not json");
+    const transport: ModelTransport = { async complete() {
+      await rename(stateDir, backupDir);
+      await symlink(targetDir, stateDir);
+      return { text: "not json", model: "test-model", usage: null };
+    } };
+    const result = await runKnowledgeScenarioClassificationOnce({ client: f.client, providers: [provider], transport, state_file: stateFile });
+    const outcome = (result.outcomes as JsonObject[])[0]!;
+    assert.equal(outcome.failure_stage, "attempt_state_save");
+    assert.equal(outcome.failure_code, "response_not_json");
+    assert.equal(JSON.stringify(result).includes("not json"), false);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test("candidate review rejects malformed decisions and incomplete review packets", async () => {
   for (const scenario of ["missing-decision", "missing-packet-digest"] as const) {
     const f = fixture(scenario === "missing-decision" ? "{}" : '{"review_decision":"supported"}', "candidate");
@@ -109,6 +174,26 @@ test("candidate review rejects malformed decisions and incomplete review packets
     const result = await runKnowledgeScenarioClassificationOnce({ client: f.client, providers: [provider], transport: f.transport });
     assert.equal((result.outcomes as JsonObject[])[0]?.status, "failed", `${scenario} must leave the ticket retryable`);
     assert.equal(f.calls.some(call => call.name === "craft_evaluation_model_ticket_complete"), false);
+  }
+});
+
+test("candidate review maps source and packet drift to safe failure codes", async () => {
+  for (const [message, code] of [
+    ["source_digest must match the active Claim Source", "review_source_changed"],
+    ["packet_digest must match the exact semantic review packet", "review_packet_changed"],
+  ]) {
+    const f = fixture('{"review_decision":"supported"}', "candidate"), originalCall = f.client.call.bind(f.client);
+    f.client.call = async (name, args = {}) => {
+      if (name === "craft_knowledge_host_review") throw new Error(message);
+      return originalCall(name, args);
+    };
+    const result = await runKnowledgeScenarioClassificationOnce({ client: f.client, providers: [provider], transport: f.transport });
+    const outcome = (result.outcomes as JsonObject[])[0]!;
+    assert.equal(outcome.failure_stage, "host_review");
+    assert.equal(outcome.failure_code, code);
+    const failure = f.calls.find(call => call.name === "craft_trace_append" && call.args.event_kind === "classification.failed");
+    assert.match(String(failure?.args.summary), new RegExp(code, "u"));
+    assert.equal(JSON.stringify(failure).includes(message), false);
   }
 });
 

@@ -275,6 +275,10 @@ test("Knowledge classification failures remain visible without dropping complete
     { status: "failed", failure_stage: "claim_save" }, { status: "failed", failure_stage: "taxonomy_list" }, null, { status: "unclassified" },
   ] } } }, true),
     { diagnostics: "Craft Knowledge scenario classification failed for 2 Claim(s) at claim_save:1,taxonomy_list:1.\n", exit_code: 1 });
+  assert.deepEqual(learningTickStatus({ knowledge: { classification: { outcomes: [
+    { status: "failed", failure_stage: "response_validate", failure_code: "review_decision_invalid" },
+  ] } } }, true),
+    { diagnostics: "Craft Knowledge scenario classification failed for 1 Claim(s) at response_validate/review_decision_invalid:1.\n", exit_code: 1 });
   assert.deepEqual(learningTickStatus({ knowledge: { classification: { outcomes: [{ status: "failed" }] } } }, true),
     { diagnostics: "Craft Knowledge scenario classification failed for 1 Claim(s).\n", exit_code: 1 });
 });
