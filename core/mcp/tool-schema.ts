@@ -79,6 +79,7 @@ const ENUMS_BY_TOOL: Readonly<Record<string, Readonly<Record<string, readonly st
 // Domain contracts override the legacy name heuristic. Keep ambiguous names local
 // to their tool so fixing one product cannot change unrelated admin operations.
 const TYPES_BY_TOOL: Readonly<Record<string, Readonly<Record<string, ParamType>>>> = {
+  craft_evaluation_model_ticket_issue: { project_root: "string" },
   craft_procedure_configuration_save: { scope: "string", definition: "object", scope_envelope: "object", principal_ids: "array" },
   craft_knowledge_evaluation_run: { expected_relevant_refs: "array", retrieved_refs: "array", citation_judgements: "array" },
   craft_experience_graph_inspect: { cases: "array", input_keys: "array", scope: "string", configuration: "object", principal_ids: "array" },
@@ -101,7 +102,7 @@ const TYPES_BY_TOOL: Readonly<Record<string, Readonly<Record<string, ParamType>>
   craft_context_resolution_resolve: { required_refs: "array", members: "array", principal_ids: "array", include_global: "boolean", include_working_notes: "boolean", history_view: "boolean" },
   craft_decision_context_gate_open: { members: "array", require_context: "boolean" },
   craft_knowledge_search: { scope: "string", scenario_key: "string", include_candidates: "boolean", include_global: "boolean", principal_ids: "array" },
-  craft_knowledge_scenario_list: { scope: "string", scope_kind: "string", scope_id: "string" },
+  craft_knowledge_scenario_list: { scope: "string", scope_kind: "string", scope_id: "string", project_root: "string" },
   craft_experience_scenario_list: { scope: "string", scope_kind: "string", scope_id: "string" },
   craft_knowledge_scenario_retire: { scope: "string", scenario_key: "string", request_id: "string", reason: "string" },
   craft_experience_scenario_retire: { scope: "string", scenario_key: "string", request_id: "string", reason: "string" },

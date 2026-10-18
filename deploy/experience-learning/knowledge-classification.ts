@@ -1,3 +1,4 @@
+import { isAbsolute, resolve, sep } from "node:path";
 import { createFetchTransport, buildChatRequest, defineProvider, PROVIDER_CATALOG, type ChatMessage, type ModelProviderSpec, type ModelTransport } from "../../core/model-gateway.ts";
 import { stableDigest } from "../../core/digest.ts";
 import { CRAFT_RELEASE_VERSION } from "../../core/version.ts";
@@ -96,6 +97,17 @@ function redactKnowledgeModelText(value: unknown): unknown {
   return value;
 }
 
+function projectRootFromClaim(claim: JsonObject): string | undefined {
+  const contentRef = claim.content_ref;
+  if (!contentRef || typeof contentRef !== "object" || Array.isArray(contentRef)) return undefined;
+  const contentPath = (contentRef as JsonObject).path;
+  if (typeof contentPath !== "string" || !contentPath.trim() || !isAbsolute(contentPath)) return undefined;
+  const marker = `${sep}.craft_data${sep}knowledge${sep}md${sep}`;
+  const normalizedPath = resolve(contentPath);
+  const markerIndex = normalizedPath.lastIndexOf(marker);
+  return markerIndex > 0 ? normalizedPath.slice(0, markerIndex) : undefined;
+}
+
 /** Classify bounded candidate and reviewed project/global Claims through audited tickets; uncertain Claims stay unclassified. */
 export async function runKnowledgeScenarioClassificationOnce(deps: KnowledgeClassificationDependencies): Promise<JsonObject> {
   const maxClaims = deps.max_claims ?? 8;
@@ -131,11 +143,12 @@ export async function runKnowledgeScenarioClassificationOnce(deps: KnowledgeClas
   const transport = deps.transport ?? createFetchTransport({ maxAttempts: Number(profile.max_attempts ?? 1) });
   for (const claim of claims) {
     const scope = String(claim.scope);
+    const projectRoot = claim.scope === "global" ? undefined : deps.project_root ?? projectRootFromClaim(claim);
     let taxonomyResult: JsonObject, taxonomy: JsonObject, packet: JsonObject, reviewPacket: JsonObject, reviewPacketDigest: string,
       ticketId: string, claimContent: string, preparationStage = "taxonomy_list";
     try {
       taxonomyResult = await deps.client.call("craft_knowledge_scenario_list", { scope: claim.scope,
-        ...(claim.scope !== "global" && deps.project_root ? { project_root: deps.project_root } : {}) });
+        ...(claim.scope !== "global" && projectRoot ? { project_root: projectRoot } : {}) });
       preparationStage = "evidence_packet";
       const reviewResult = await deps.client.call("craft_knowledge_semantic_review_packet", { claim_id: claim.id });
       if (reviewResult.status !== "ready") {
@@ -175,7 +188,7 @@ export async function runKnowledgeScenarioClassificationOnce(deps: KnowledgeClas
       preparationStage = "ticket_issue";
       const ticketResult = await deps.client.call("craft_evaluation_model_ticket_issue", { profile_id: profile.id,
         purpose: "knowledge_scenario_classification", knowledge_claim_id: claim.id,
-        ...(claim.scope !== "global" && deps.project_root ? { project_root: deps.project_root } : {}),
+        ...(claim.scope !== "global" && projectRoot ? { project_root: projectRoot } : {}),
         input_ref: `craft-knowledge://claim/${claim.id}/v${claim.version}/${claim.status === "candidate" ? "evidence-review" : `catalog/${taxonomyResult.catalog_version}`}`,
         output_contract_ref: claim.status === "candidate" ? "craft-knowledge-evidence-review-v1" : "craft-knowledge-scenario-classification-v1" });
       const ticket = object(ticketResult.ticket, "classification ticket");
@@ -302,7 +315,7 @@ export async function runKnowledgeScenarioClassificationOnce(deps: KnowledgeClas
       if (Boolean(coarse) !== Boolean(coarseDefinition)) throw new Error("coarse scenario key and definition must be provided together");
       processingStage = "claim_save";
       const saved = await deps.client.call("craft_knowledge_claim_save", { ...common, scenario_key: scenarioKey, scenario_definition: scenarioDefinition,
-        ...(claim.scope !== "global" && deps.project_root ? { project_root: deps.project_root } : {}),
+        ...(claim.scope !== "global" && projectRoot ? { project_root: projectRoot } : {}),
         ...(coarse ? { coarse_scenario_key: coarse } : {}), ...(coarseDefinition ? { coarse_scenario_definition: coarseDefinition } : {}) });
       const classificationDigest = stableDigest({ packet, decision: { decision: "classified", scenario_key: scenarioKey, scenario_definition: scenarioDefinition,
         coarse_scenario_key: coarse ?? null, coarse_scenario_definition: coarseDefinition ?? null } });

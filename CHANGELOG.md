@@ -1,3 +1,9 @@
+## v0.12.63（Knowledge Worker 项目根目录恢复）
+
+- 后台 Knowledge 分类 Worker 从项目 Claim 的精确 `.craft_data/knowledge/md` 内容路径推导项目根目录，继续使用项目隔离的场景目录和模型票据；全局 Claim 不推导项目根目录。
+- MCP 场景目录查询与模型票据工具公开可选 `project_root` 参数，避免 Worker 传参被工具契约丢弃。
+- 增加路径有效性、错误路径、工具 Schema 和真实 MCP 调用回归验证。
+
 ## v0.12.60（项目级 Knowledge 隔离）
 
 - 项目 Knowledge 正文改为写入各自项目的 `.craft_data/knowledge/md`；场景目录也归属该项目的 `.craft_data/knowledge`，不再落入全局数据目录。

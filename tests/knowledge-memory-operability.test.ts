@@ -187,8 +187,10 @@ test("model classified project Knowledge advances with trusted Source reviews an
     const searchSchema = tools.find(item => item.name === "craft_knowledge_search")!.inputSchema as JsonObject;
     assert.equal(((searchSchema.properties as JsonObject).scenario_key as JsonObject).type, "string");
     assert(tools.some(item => item.name === "craft_knowledge_scenario_list"), "Knowledge MCP must expose the current project taxonomy to model classifiers");
+    const taxonomySchema = tools.find(item => item.name === "craft_knowledge_scenario_list")!.inputSchema as JsonObject;
+    assert.equal((((taxonomySchema.properties as JsonObject).project_root as JsonObject).type), "string");
     const taxonomyMcp = await knowledgeMcp.handle({ jsonrpc: "2.0", id: "taxonomy", method: "tools/call",
-      params: { name: "craft_knowledge_scenario_list", arguments: { scope: "project:p" } } });
+      params: { name: "craft_knowledge_scenario_list", arguments: { scope: "project:p", project_root: join(f.root, "projects", "p") } } });
     const taxonomyResult = taxonomyMcp?.result as JsonObject;
     assert.equal(taxonomyResult.isError, false, JSON.stringify(taxonomyResult));
     const taxonomy = taxonomyResult.structuredContent as JsonObject;

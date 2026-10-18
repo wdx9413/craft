@@ -115,6 +115,8 @@ test("Knowledge classification tickets track the live candidate and keep result 
   try {
     const knowledgeServer = new McpServer(f.service, "component-knowledge-daily");
     const knowledgeTools = ((await knowledgeServer.handle({ id: "schema", method: "tools/list" }))?.result as JsonObject).tools as JsonObject[];
+    const issueSchema = knowledgeTools.find(item => item.name === "craft_evaluation_model_ticket_issue")?.inputSchema as JsonObject;
+    assert.deepEqual(((issueSchema.properties as JsonObject).project_root), { type: "string" });
     const completionSchema = knowledgeTools.find(item => item.name === "craft_evaluation_model_ticket_complete")?.inputSchema as JsonObject;
     assert.deepEqual((completionSchema.properties as JsonObject).trace_id, { type: "string" });
     assert.equal((completionSchema.required as string[]).includes("trace_id"), false, "Workflow tickets do not require a Knowledge Trace");

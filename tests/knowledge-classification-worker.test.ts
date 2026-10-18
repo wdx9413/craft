@@ -384,6 +384,40 @@ test("worker classification accepts canonical project scopes and historical doub
     ["project:demo", "project:project:demo"]);
 });
 
+test("worker derives a project root from the exact project Knowledge content reference", async () => {
+  const f = fixture();
+  const projectRoot = "/workspace/derived-project";
+  const projectClaim = { ...claim, content_ref: { kind: "knowledge", path: join(projectRoot, ".craft_data", "knowledge", "md", "claim.md") } };
+  const client: KnowledgeClassificationClient = { async call(name, args) {
+    if (name === "craft_knowledge_claim_list") return { claims: [projectClaim] };
+    if (name === "craft_knowledge_scenario_list") assert.equal(args?.project_root, projectRoot);
+    return f.client.call(name, args);
+  } };
+  const result = await runKnowledgeScenarioClassificationOnce({ client, providers: [provider], transport: f.transport });
+  assert.equal((result.outcomes as JsonObject[])[0]?.status, "classified");
+  assert.equal(f.calls.find(call => call.name === "craft_knowledge_scenario_list")?.args.project_root, projectRoot);
+  assert.equal(f.calls.find(call => call.name === "craft_evaluation_model_ticket_issue")?.args.project_root, projectRoot);
+  assert.equal(f.calls.find(call => call.name === "craft_knowledge_claim_save")?.args.project_root, projectRoot);
+});
+
+test("worker ignores incomplete or unrelated project Knowledge content paths when deriving a root", async () => {
+  const invalidReferences: unknown[] = [undefined, null, [], {}, { path: 7 }, { path: "   " },
+    { path: "relative/.craft_data/knowledge/md/claim.md" }, { path: "/outside/claim.md" },
+    { path: "/.craft_data/knowledge/md/claim.md" }];
+  for (const contentRef of invalidReferences) {
+    const f = fixture();
+    const projectClaim = { ...claim, ...(contentRef === undefined ? {} : { content_ref: contentRef }) } as JsonObject;
+    const client: KnowledgeClassificationClient = { async call(name, args) {
+      if (name === "craft_knowledge_claim_list") return { claims: [projectClaim] };
+      if (name === "craft_knowledge_scenario_list") assert.equal(args?.project_root, undefined);
+      return f.client.call(name, args);
+    } };
+    const result = await runKnowledgeScenarioClassificationOnce({ client, providers: [provider], transport: f.transport });
+    assert.equal((result.outcomes as JsonObject[])[0]?.status, "classified");
+    assert.equal(f.calls.find(call => call.name === "craft_knowledge_scenario_list")?.args.project_root, undefined);
+  }
+});
+
 test("classification keeps a ready ticket retryable when the shared Host-call budget is exhausted", async () => {
   const f = fixture();
   let modelCalls = 0;
