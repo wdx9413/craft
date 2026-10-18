@@ -47,6 +47,11 @@ function digest(path: string): string {
   return createHash("sha256").update(readFileSync(path)).digest("hex");
 }
 
+export function snapshotStatIfPresent(path: string): Stats | undefined {
+  try { return lstatSync(path); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined; throw error; }
+}
+
 export function snapshotNodeKind(stat: Pick<Stats, "isFile" | "isDirectory">, path: string): "file" | "directory" {
   if (stat.isFile()) return "file";
   if (stat.isDirectory()) return "directory";
@@ -67,9 +72,31 @@ function copyEntries(root: string, snapshotRoot: string, entries: SnapshotEntry[
   for (const entry of entries) {
     const source = nested(root, entry.path);
     const target = nested(snapshotRoot, entry.path);
-    mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
+    const relativeParent = relative(snapshotRoot, dirname(target));
+    let current = snapshotRoot;
+    if (relativeParent !== "") for (const part of relativeParent.split(/[\\/]+/)) {
+      current = join(current, part);
+      if (!snapshotStatIfPresent(current)) mkdirSync(current, { mode: 0o700 });
+      const stat = lstatSync(current);
+      if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error(`workspace snapshot destination is unsafe: ${entry.path}`);
+    }
+    const targetStat = snapshotStatIfPresent(target);
+    if (targetStat && (targetStat.isSymbolicLink() || !targetStat.isFile()))
+      throw new Error(`workspace snapshot destination is unsafe: ${entry.path}`);
     copyFileSync(source, target);
   }
+}
+
+function projectCodebaseSnapshotRoot(root: string, workspaceId: string, checkpointId: string): string {
+  const path = join(root, ".craft_data", "codebase", "snapshots", workspaceId, checkpointId);
+  let current = root;
+  for (const part of [".craft_data", "codebase", "snapshots", workspaceId, checkpointId]) {
+    current = join(current, part);
+    if (!snapshotStatIfPresent(current)) mkdirSync(current, { mode: 0o700 });
+    const stat = lstatSync(current);
+    if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error("project Codebase snapshot path contains an unsafe directory");
+  }
+  return path;
 }
 
 export class WorkspaceState {
@@ -82,9 +109,11 @@ export class WorkspaceState {
     const rootPath = resolve(requiredText(args.root_path, "root_path"));
     if (!existsSync(rootPath) || !lstatSync(rootPath).isDirectory()) throw new Error("root_path must exist and be a directory");
     const includes = includePaths(args.include_paths);
+    const snapshotStorage = args.snapshot_storage ?? "global";
+    if (snapshotStorage !== "global" && snapshotStorage !== "project_codebase") throw new Error("snapshot_storage must be global or project_codebase");
     const workspace = this.store.create("workspace", workspaceId, { name: requiredText(args.name, "name"), root_path: rootPath,
       include_paths: includes, git_baseline_ref: args.git_baseline_ref === undefined ? null : requiredText(args.git_baseline_ref, "git_baseline_ref"),
-      state_revision: 1, latest_checkpoint_id: null });
+      snapshot_storage: snapshotStorage, state_revision: 1, latest_checkpoint_id: null });
     return { workspace, checkpoints: [], changes: [] };
   }
 
@@ -109,10 +138,13 @@ export class WorkspaceState {
     const workspaceId = identifier(args.workspace_id, "workspace_id", "workspace");
     const workspace = this.store.get("workspace", workspaceId);
     const checkpointId = identifier(args.checkpoint_id, "checkpoint_id", "workspace_checkpoint");
-    const snapshotRoot = join(this.paths.runtimeDir, "workspaces", workspaceId, "snapshots", checkpointId);
     const root = requiredText(workspace.root_path, "workspace.root_path");
+    const snapshotRoot = workspace.snapshot_storage === "project_codebase"
+      ? projectCodebaseSnapshotRoot(root, workspaceId, checkpointId)
+      : join(this.paths.runtimeDir, "workspaces", workspaceId, "snapshots", checkpointId);
     const entries = (workspace.include_paths as string[]).flatMap((path) => files(root, path)).sort((left, right) => left.path.localeCompare(right.path));
     if (new Set(entries.map((entry) => entry.path)).size !== entries.length) throw new Error("include_paths must not overlap");
+    mkdirSync(snapshotRoot, { recursive: true, mode: 0o700 });
     copyEntries(root, snapshotRoot, entries);
     const checkpoint = this.store.create("workspace_checkpoint", checkpointId, { workspace_id: workspaceId,
       label: requiredText(args.label, "label"), snapshot_root: snapshotRoot, entries,

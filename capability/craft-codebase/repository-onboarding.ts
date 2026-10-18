@@ -163,9 +163,16 @@ function ensureRepositoryAttempt(service: RepositoryOnboardingPort, args: JsonOb
   // A current snapshot and policy can be returned without invoking language
   // analyzers. This is the common path for repeated Context calls.
   const existingWorkspace = service.store.find("workspace", workspaceId);
+  const existingState = service.store.find("codebase_repository_state", `${workspaceId}_${depth}`);
+  const projectCheckpoint = service.store.list("workspace_checkpoint", 1_000, item => item.workspace_id === workspaceId)
+    .find(item => item.snapshot_root === join(root, ".craft_data", "codebase", "snapshots", workspaceId, String(item.id)));
+  const snapshotCheckpointId = String(existingWorkspace?.latest_checkpoint_id || existingState?.checkpoint_id || projectCheckpoint?.id || "");
+  const existingCheckpoint = snapshotCheckpointId ? service.store.find("workspace_checkpoint", snapshotCheckpointId) : undefined;
+  const expectedExistingSnapshotRoot = join(root, ".craft_data", "codebase", "snapshots", workspaceId, snapshotCheckpointId);
   if (existingWorkspace && JSON.stringify(existingWorkspace.include_paths) === JSON.stringify(includes)
+    && existingWorkspace.snapshot_storage === "project_codebase" && existingCheckpoint?.snapshot_root === expectedExistingSnapshotRoot
     && service.workspace.freshness({ workspace_id: workspaceId }).status === "current") {
-    const checkpointId = String(existingWorkspace.latest_checkpoint_id ?? "");
+    const checkpointId = String(existingWorkspace.latest_checkpoint_id ?? existingState?.checkpoint_id ?? "");
     const prior = service.store.find("codebase_repository_state", `${workspaceId}_${depth}`);
     const cachedIndex = prior ? service.store.find("codebase_index", String(prior.index_id)) : undefined;
     if (prior?.checkpoint_id === checkpointId && prior.policy_version === REPOSITORY_INDEX_POLICY && prior.adapter_config_digest === lspConfig.digest
@@ -393,10 +400,15 @@ function ensureRepositoryAttempt(service: RepositoryOnboardingPort, args: JsonOb
     if (selected.state === "disabled") return { ...base, status: "disabled", reason: "project_opt_out" };
     const old = service.store.find("workspace", workspaceId);
     if (!old && !includes.length) return { ...base, status: "empty", omitted_files: selected.omitted, omitted_by_language: selected.omitted_by_language };
-    if (!old) service.workspaceOpen({ workspace_id: workspaceId, root_path: root, include_paths: includes, name: root });
-    else if (JSON.stringify(old.include_paths) !== JSON.stringify(includes)) service.store.save("workspace", workspaceId, { ...payload(old), include_paths: includes });
+    if (!old) service.workspaceOpen({ workspace_id: workspaceId, root_path: root, include_paths: includes, name: root, snapshot_storage: "project_codebase" });
+    else if (JSON.stringify(old.include_paths) !== JSON.stringify(includes) || old.snapshot_storage !== "project_codebase")
+      service.store.save("workspace", workspaceId, { ...payload(old), include_paths: includes, snapshot_storage: "project_codebase" });
     const freshness = service.workspace.freshness({ workspace_id: workspaceId });
-    if (freshness.status !== "current") service.workspaceCheckpoint({ workspace_id: workspaceId, label: "automatic repository snapshot" });
+    const latestCheckpointId = String(service.store.get("workspace", workspaceId).latest_checkpoint_id ?? "");
+    const latestCheckpoint = latestCheckpointId ? service.store.find("workspace_checkpoint", latestCheckpointId) : undefined;
+    const expectedSnapshotRoot = join(root, ".craft_data", "codebase", "snapshots", workspaceId, latestCheckpointId);
+    if (freshness.status !== "current" || latestCheckpoint?.snapshot_root !== expectedSnapshotRoot)
+      service.workspaceCheckpoint({ workspace_id: workspaceId, label: "automatic repository snapshot" });
     const workspace = service.store.get("workspace", workspaceId);
     if (!activation) service.codebaseActivate({ workspace_id: workspaceId, actor: "repository-auto" });
     if (!includes.length) return { ...base, status: "empty", checkpoint_id: workspace.latest_checkpoint_id, omitted_files: selected.omitted, omitted_by_language: selected.omitted_by_language };

@@ -20,7 +20,7 @@ const LANGUAGE_GROUPS: Readonly<Record<string, string>> = Object.freeze(Object.f
   Object.entries(LANGUAGE_EXTENSIONS).flatMap(([group, extensions]) => extensions.map(extension => [extension, group])),
 ));
 const EXTENSIONS = new Set(Object.keys(LANGUAGE_GROUPS));
-const GENERATED = /(^|\/)(?:node_modules|vendor|dist|build|target|\.git|\.next|venv|\.venv|virtualenv|__pycache__)(\/|$)/u;
+const GENERATED = /(^|\/)(?:node_modules|vendor|dist|build|target|\.git|\.craft_data|\.next|venv|\.venv|virtualenv|__pycache__)(\/|$)/u;
 const MAX_FILES = 1200;
 const MAX_FILE_BYTES = 512 * 1024;
 const MAX_TOTAL_BYTES = 12 * 1024 * 1024;
