@@ -2,9 +2,10 @@ import type { CraftStore, JsonObject } from "../../common/craft-common-store-loc
 import { activeProcedure, belongsToRetiredScenario } from "./procedure-release.ts";
 import { stableDigest, payload } from "../../common/craft-common-base/src/digest.ts";
 import { lstatSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { ProcedureDefinitionStore, procedureDefinitionRef } from "./procedure-definition.ts";
 import { AUTOMATIC_SIGNOFF_POLICY, validateReadOnlyEvaluationSteps, validateScenarioEvaluation } from "./scenario-evaluation.ts";
+import { projectExperienceDirectory } from "../../core/project-experience-directory.ts";
 
 const STAGES = ["shadow", "held_out", "signoff", "canary"] as const;
 type Stage = typeof STAGES[number];
@@ -132,9 +133,15 @@ export class ExperienceLearningEvaluation {
   }
 
   private readScenarioEvaluation(projectId: string, scenarioKey: string): ReturnType<typeof validateScenarioEvaluation> | null {
-    const directory = join(this.store.paths.experienceDir, "projects", projectId), path = join(directory, "experience-scenarios.json");
+    let directory: string;
+    try { directory = projectExperienceDirectory(this.store, `project:${projectId}`); }
+    catch (error) {
+      if (error instanceof Error && error.message.includes("not registered")) return null;
+      throw error;
+    }
+    const path = join(directory, "experience-scenarios.json");
     try {
-      for (const entry of [this.store.paths.experienceDir, join(this.store.paths.experienceDir, "projects"), directory, path]) {
+      for (const entry of [dirname(directory), directory, path]) {
         if (lstatSync(entry).isSymbolicLink()) throw new Error("Experience scenario catalog must not use symbolic links");
       }
       if (lstatSync(path).size > 16_384) throw new Error("Experience scenario catalog exceeds 16384 bytes");

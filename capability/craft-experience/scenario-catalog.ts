@@ -14,6 +14,113 @@ type ScenarioTransition = { request_id: string; action: "retire" | "propose_merg
   source_keys?: string[]; target_keys?: string[]; proposal_digest?: string; previous_catalog_version: number; catalog_version: number; reason_digest: string };
 type MigrationProposal = { request_id: string; mode: "merge" | "split"; source_keys: string[];
   targets: Array<{ scenario_key: string; definition: unknown }>; expected_catalog_version: number; reason: string };
+export type ExperienceScenarioClassificationRequest = JsonObject & {
+  id: string; version: number; scope: string; status: "awaiting_model" | "classified" | "unclassified";
+  context: JsonObject; identity_digest: string; created_at: string;
+};
+
+const CLASSIFICATION_REQUEST_ID = /^[a-z][a-z0-9_-]{0,95}$/u;
+
+function classificationRequestPath(experienceDir: string, requestId: string): string {
+  if (!CLASSIFICATION_REQUEST_ID.test(requestId)) throw new Error("Experience classification request id is invalid");
+  return join(experienceDir, "scenario-classification", `${requestId}.json`);
+}
+
+function readClassificationRequest(experienceDir: string, requestId: string): ExperienceScenarioClassificationRequest | null {
+  const queueDir = join(experienceDir, "scenario-classification");
+  try {
+    const queueStat = lstatSync(queueDir);
+    if (queueStat.isSymbolicLink() || !queueStat.isDirectory()) throw new Error("Experience classification request directory is not regular");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+  const path = classificationRequestPath(experienceDir, requestId);
+  try {
+    const stat = lstatSync(path);
+    if (stat.isSymbolicLink() || !stat.isFile() || stat.size > 8_192) throw new Error("Experience classification request is linked, non-regular, or oversized");
+    const raw = JSON.parse(readFileSync(path, "utf8")) as JsonObject;
+    if (raw.schema !== "craft.experience-scenario-classification-request.v1" || raw.id !== requestId
+      || !Number.isSafeInteger(raw.version) || Number(raw.version) < 1
+      || !["awaiting_model", "classified", "unclassified"].includes(String(raw.status))
+      || typeof raw.scope !== "string" || !/^project:[A-Za-z0-9_-]{1,96}$/u.test(raw.scope)
+      || typeof raw.identity_digest !== "string" || !DIGEST.test(raw.identity_digest)
+      || !raw.context || typeof raw.context !== "object" || Array.isArray(raw.context)) throw new Error("Experience classification request is invalid");
+    return raw as ExperienceScenarioClassificationRequest;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+/** Store only a Host-authored sanitized task summary under this project's Experience data root. */
+export function createExperienceScenarioClassificationRequest(args: { experience_dir: string; request_id: string; scope: string; context: JsonObject }): JsonObject {
+  if (!/^project:[A-Za-z0-9_-]{1,96}$/u.test(args.scope)) throw new Error("Experience classification requires an explicit project scope");
+  const context = args.context;
+  if (context.sanitized !== true || context.content_stored !== false || typeof context.task_goal !== "string"
+    || !context.task_goal.trim() || context.task_goal.length > 320 || SECRET.test(context.task_goal)
+    || typeof context.effect_summary !== "string" || !context.effect_summary.trim() || context.effect_summary.length > 320 || SECRET.test(context.effect_summary)
+    || !Array.isArray(context.observed_paths) || context.observed_paths.length > 16
+    || context.observed_paths.some(path => typeof path !== "string" || path.length > 256 || path.startsWith("/") || path.includes("\\")
+      || path.split("/").some(part => !part || part === "." || part === ".." || part.startsWith("."))
+      || /(?:secret|token|credential|password|private|\.env)/iu.test(String(path)))) {
+    throw new Error("Experience classification context must be bounded, sanitized, and content-free");
+  }
+  if (!(new Set(["passed", "failed"])).has(String(context.outcome))
+    || typeof context.host !== "string" || !/^[a-z][a-z0-9_-]{0,63}$/u.test(context.host)
+    || typeof context.task_id !== "string" || !context.task_id.trim() || context.task_id.length > 200
+    || typeof context.turn_id !== "string" || !context.turn_id.trim() || context.turn_id.length > 200
+    || typeof context.context_receipt_id !== "string" || !context.context_receipt_id.trim() || context.context_receipt_id.length > 200
+    || typeof context.observation_id !== "string" || !/^workflow_evolution_observation_[a-z0-9_-]{1,96}$/u.test(context.observation_id)
+    || typeof context.verification_ref !== "string" || !context.verification_ref.trim() || context.verification_ref.length > 256
+    || /[\r\n\0]/u.test(context.verification_ref) || SECRET.test(context.verification_ref)) {
+    throw new Error("Experience classification task identity is invalid");
+  }
+  directory(args.experience_dir);
+  const queueDir = join(args.experience_dir, "scenario-classification");
+  directory(queueDir);
+  const path = classificationRequestPath(args.experience_dir, args.request_id);
+  return withCatalogLock(join(queueDir, "queue"), () => {
+    const existing = readClassificationRequest(args.experience_dir, args.request_id);
+    const identityDigest = stableDigest({ scope: args.scope, context });
+    if (existing) {
+      if (existing.identity_digest !== identityDigest) throw new Error("Experience classification request idempotency conflict");
+      return { request: existing, idempotent: true };
+    }
+    const request: ExperienceScenarioClassificationRequest = { schema: "craft.experience-scenario-classification-request.v1",
+      id: args.request_id, version: 1, scope: args.scope, status: "awaiting_model", context,
+      identity_digest: identityDigest, created_at: new Date().toISOString() };
+    persist(path, request);
+    return { request, idempotent: false };
+  });
+}
+
+export function getExperienceScenarioClassificationRequest(experienceDir: string, requestId: string): ExperienceScenarioClassificationRequest {
+  const request = readClassificationRequest(experienceDir, requestId);
+  if (!request) throw new Error("Experience classification request was not found");
+  return request;
+}
+
+export function completeExperienceScenarioClassificationRequest(args: { experience_dir: string; request_id: string; expected_version: number;
+  status: "classified" | "unclassified"; result_digest: string }): JsonObject {
+  if (!Number.isSafeInteger(args.expected_version) || args.expected_version < 1 || !DIGEST.test(args.result_digest)) throw new Error("Experience classification completion is invalid");
+  const queueDir = join(args.experience_dir, "scenario-classification");
+  directory(queueDir);
+  const path = classificationRequestPath(args.experience_dir, args.request_id);
+  return withCatalogLock(join(queueDir, "queue"), () => {
+    const request = readClassificationRequest(args.experience_dir, args.request_id);
+    if (!request) throw new Error("Experience classification request was not found");
+    if (request.status !== "awaiting_model") {
+      if (request.status !== args.status || request.result_digest !== args.result_digest) throw new Error("Experience classification completion conflicts with its prior result");
+      return { request, idempotent: true };
+    }
+    if (request.version !== args.expected_version) throw new Error("Experience classification request version is stale");
+    const completed = { ...request, version: request.version + 1, status: args.status, result_digest: args.result_digest,
+      completed_at: new Date().toISOString() };
+    persist(path, completed);
+    return { request: completed, idempotent: false };
+  });
+}
 
 export function validateExperienceScenarioDefinition(value: unknown): ScenarioDefinition | undefined {
   if (value === undefined) return undefined;
@@ -115,7 +222,7 @@ function upsert(nodes: ScenarioNode[], key: string, tier: "coarse" | "fine", par
   return node;
 }
 
-function persist(path: string, catalog: { catalog_version: number; scenarios: ScenarioNode[]; transitions?: ScenarioTransition[] }): void {
+function persist(path: string, catalog: JsonObject): void {
   const temporary = `${path}.${randomUUID()}.tmp`;
   let descriptor: number | undefined;
   try {
@@ -175,9 +282,7 @@ export function recordExperienceScenario(args: { experience_dir: string; project
   const definition = validateExperienceScenarioDefinition(args.definition);
   const coarseDefinition = validateExperienceScenarioDefinition(args.coarse_definition);
   directory(root);
-  const projects = join(root, "projects"); directory(projects);
-  const project = join(projects, projectId); directory(project);
-  const path = join(project, "experience-scenarios.json");
+  const path = join(root, "experience-scenarios.json");
   return withCatalogLock(path, () => {
     const catalog = readCatalog(path);
     if (catalog.scenarios.some(item => item.scenario_key === fineKey && item.lifecycle === "retired")
@@ -223,9 +328,7 @@ export function retireExperienceScenario(args: { experience_dir: string; project
     throw new Error("Experience scenario retirement request is invalid");
   }
   directory(root);
-  const projects = join(root, "projects"); directory(projects);
-  const project = join(projects, projectId); directory(project);
-  const path = join(project, "experience-scenarios.json");
+  const path = join(root, "experience-scenarios.json");
   return withCatalogLock(path, () => {
     const catalog = readCatalog(path), reasonDigest = stableDigest(reason);
     const prior = catalog.transitions.find(item => item.request_id === args.request_id);
@@ -277,9 +380,7 @@ export function proposeExperienceScenarioMigration(args: MigrationProposal & { e
   const definitions = targets.map(target => validateExperienceScenarioDefinition(target.definition));
   if (definitions.some(definition => !definition)) throw new Error("Experience scenario migration requires a definition for every target");
   directory(args.experience_dir);
-  const projects = join(args.experience_dir, "projects"); directory(projects);
-  const project = join(projects, args.project_id); directory(project);
-  const path = join(project, "experience-scenarios.json");
+  const path = join(args.experience_dir, "experience-scenarios.json");
   return withCatalogLock(path, () => {
     const catalog = readCatalog(path);
     const proposalDigest = stableDigest({ mode: args.mode, source_keys: sources,
@@ -329,18 +430,14 @@ export function experienceScenarioIsRetired(experienceDir: string, projectId: st
 /** List one project's body-free scene taxonomy without creating directories or catalog files. */
 export function listExperienceScenarios(experienceDir: string, projectId: string): JsonObject {
   if (!/^[A-Za-z0-9_-]{1,96}$/u.test(projectId)) throw new Error("Experience scenario project identity is invalid");
-  let current = experienceDir;
-  for (const part of ["", "projects", projectId]) {
-    if (part) current = join(current, part);
-    try {
-      const stat = lstatSync(current);
-      if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error("Experience scenario catalog path must contain regular directories");
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return { catalog_version: 0, scenarios: [] };
-      throw error;
-    }
+  try {
+    const stat = lstatSync(experienceDir);
+    if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error("Experience scenario catalog path must contain regular directories");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { catalog_version: 0, scenarios: [] };
+    throw error;
   }
-  const catalog = readCatalog(join(current, "experience-scenarios.json"));
+  const catalog = readCatalog(join(experienceDir, "experience-scenarios.json"));
   const scenarios = catalog.scenarios.map(node => ({ scenario_key: node.scenario_key, tier: node.tier,
     ...(node.parent_scenario_key ? { parent_scenario_key: node.parent_scenario_key } : {}), lifecycle: node.lifecycle,
     ...(node.definition ? { definition: node.definition } : {}),

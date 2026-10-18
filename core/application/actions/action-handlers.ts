@@ -24,6 +24,8 @@ export function createActionHandlers(service: CraftService, mountedComponent?: C
       craft_context_open: (a) => service.contextOpen(a),
       craft_learning_cycle_finalize: (a) => service.learningCycleFinalize(a),
       craft_experience_learning_request_get: (a) => service.learningCycleRequestGet(a),
+      craft_experience_scenario_classification_request_get: (a) => service.experienceScenarioClassificationRequestGet(a),
+      craft_experience_scenario_classification_request_complete: (a) => service.experienceScenarioClassificationRequestComplete(a),
       craft_codebase_repository_ensure: (a) => service.codebaseRepositoryEnsure(a),
       craft_component_readiness_get: (a) => service.componentReadinessGet(a, mountedComponent),
       craft_component_diagnose: (a) => service.componentDiagnose(a, mountedComponent),

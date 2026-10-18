@@ -15,7 +15,6 @@ import type { CraftStore, JsonObject } from "../../common/craft-common-store-loc
 import { stableDigest, payload } from "../../common/craft-common-base/src/digest.ts";
 import { ProcedureDefinitionStore, procedureDefinitionRef, type ProcedureDefinition, type ProcedureKind } from "./procedure-definition.ts";
 import { activeProcedure, belongsToRetiredScenario, preserveProcedureRelease, updateProcedureRelease, selectedProcedure } from "./procedure-release.ts";
-import { experienceScenarioIsRetired } from "./scenario-catalog.ts";
 import { syncGraphVersionManifest } from "./graph-version-manifest.ts";
 import { ProcedurePlanner, validateProcedureComposition } from "./procedure-composition.ts";
 import { scopeEnvelope } from "../../common/craft-common-base/src/scope-policy.ts";
@@ -66,7 +65,7 @@ export class ProcedureStore {
     const project = signature.project as JsonObject | undefined;
     const projectId = typeof project?.id === "string" ? project.id.replace(/^project:/u, "") : "";
     if (projectId && typeof signature.scenario_key === "string"
-      && experienceScenarioIsRetired(this.store.paths.experienceDir, projectId, signature.scenario_key)) {
+      && belongsToRetiredScenario(this.store, { scope: `project:${projectId}`, scenario_signature: signature })) {
       throw new Error("Experience scenario is retired and cannot produce a Procedure");
     }
     const composition = proposal.composition === undefined ? null : validateProcedureComposition(procedureKind, proposal.composition, proposal.steps);

@@ -8,12 +8,21 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import type { JsonObject } from "../core/infrastructure/store.ts";
-import { experienceScenarioCanClassify, experienceScenarioIsRetired, listExperienceScenarios, proposeExperienceScenarioMigration, recordExperienceScenario as persistExperienceScenario, retireExperienceScenario, validateExperienceScenarioDefinition } from "../capability/craft-experience/scenario-catalog.ts";
+import { completeExperienceScenarioClassificationRequest, createExperienceScenarioClassificationRequest, experienceScenarioCanClassify as canClassify, experienceScenarioIsRetired as isRetired, getExperienceScenarioClassificationRequest, listExperienceScenarios as listScenarios, proposeExperienceScenarioMigration as proposeMigration, recordExperienceScenario as persistExperienceScenario, retireExperienceScenario as persistRetirement, validateExperienceScenarioDefinition } from "../capability/craft-experience/scenario-catalog.ts";
 
 const digest = (value: string) => `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
+const classificationContext = { sanitized: true, content_stored: false, task_goal: "Repair validation", effect_summary: "Checks pass", outcome: "passed",
+  observed_paths: ["src/validation.ts"], host: "codex", task_id: "task-1", turn_id: "turn-1", context_receipt_id: "receipt-1",
+  observation_id: "workflow_evolution_observation_123", verification_ref: "test:focused" };
 function recordExperienceScenario(args: Omit<Parameters<typeof persistExperienceScenario>[0], "verified_task_id"> & { verified_task_id?: string }) {
-  return persistExperienceScenario({ ...args, verified_task_id: args.verified_task_id ?? args.observation_id });
+  return persistExperienceScenario({ ...args, experience_dir: projectDirectory(args.experience_dir, args.project_id), verified_task_id: args.verified_task_id ?? args.observation_id });
 }
+function projectDirectory(directory: string, projectId: string) { const path = join(directory, projectId); fs.mkdirSync(path, { recursive: true }); return path; }
+function listExperienceScenarios(directory: string, projectId: string) { return listScenarios(join(directory, projectId), projectId); }
+function experienceScenarioCanClassify(directory: string, projectId: string, key: string) { return canClassify(join(directory, projectId), projectId, key); }
+function experienceScenarioIsRetired(directory: string, projectId: string, key: string) { return isRetired(join(directory, projectId), projectId, key); }
+function retireExperienceScenario(args: Parameters<typeof persistRetirement>[0]) { return persistRetirement({ ...args, experience_dir: projectDirectory(args.experience_dir, args.project_id) }); }
+function proposeExperienceScenarioMigration(args: Parameters<typeof proposeMigration>[0]) { return proposeMigration({ ...args, experience_dir: projectDirectory(args.experience_dir, args.project_id) }); }
 
 test("Experience scenario listing is read-only, bounded, and project-scoped", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-experience-scenario-list-")), experienceDir = join(root, "experience");
@@ -42,14 +51,98 @@ test("Experience scenario listing is read-only, bounded, and project-scoped", as
     assert.equal(coarse.active_fine_child_count, 2);
     assert.equal(JSON.stringify(listed).includes("observation_refs"), false);
 
-    const projectDirectory = join(experienceDir, "projects", "linked-project"), target = join(root, "outside");
+    const projectDirectory = join(experienceDir, "linked-project"), target = join(root, "outside");
     await mkdir(target);
     await symlink(target, projectDirectory);
     assert.throws(() => listExperienceScenarios(experienceDir, "linked-project"), /regular directories/u);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("Experience taxonomy stores model classifications centrally and promotes from independent evidence", async () => {
+test("Experience taxonomy creates its missing project capability directory", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-experience-scenario-create-dir-"));
+  const experienceDir = join(root, "experience");
+  try {
+    assert.equal(existsSync(experienceDir), false);
+    const result = await persistExperienceScenario({ experience_dir: experienceDir, project_id: "project-new",
+      scenario_key: "engineering.tests.unit", observation_id: "verified-task-one", verified_task_id: "verified-task-one" });
+    assert.equal(result.status, "candidate");
+    assert.equal(existsSync(join(experienceDir, "experience-scenarios.json")), true);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("Experience scenario classification requests are bounded, idempotent, and versioned in the project directory", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-experience-classification-request-")), experienceDir = join(root, "project", ".craft_data", "experience");
+  const requestId = "scenario_classification_test-1", resultDigest = digest("classification result");
+  try {
+    await mkdir(experienceDir, { recursive: true });
+    const created = createExperienceScenarioClassificationRequest({ experience_dir: experienceDir, request_id: requestId, scope: "project:project-a", context: classificationContext });
+    assert.equal(created.idempotent, false);
+    const stored = created.request as JsonObject;
+    assert.equal(stored.status, "awaiting_model");
+    assert.equal(stored.version, 1);
+    assert.deepEqual(getExperienceScenarioClassificationRequest(experienceDir, requestId).context, classificationContext);
+    assert.equal(createExperienceScenarioClassificationRequest({ experience_dir: experienceDir, request_id: requestId, scope: "project:project-a", context: classificationContext }).idempotent, true);
+    assert.throws(() => createExperienceScenarioClassificationRequest({ experience_dir: experienceDir, request_id: requestId, scope: "project:project-a",
+      context: { ...classificationContext, effect_summary: "Different task" } }), /idempotency conflict/u);
+    const completed = completeExperienceScenarioClassificationRequest({ experience_dir: experienceDir, request_id: requestId, expected_version: 1,
+      status: "classified", result_digest: resultDigest });
+    assert.equal((completed.request as JsonObject).version, 2);
+    assert.equal(completeExperienceScenarioClassificationRequest({ experience_dir: experienceDir, request_id: requestId, expected_version: 1,
+      status: "classified", result_digest: resultDigest }).idempotent, true);
+    assert.throws(() => completeExperienceScenarioClassificationRequest({ experience_dir: experienceDir, request_id: requestId, expected_version: 1,
+      status: "unclassified", result_digest: resultDigest }), /conflicts/u);
+    assert.throws(() => getExperienceScenarioClassificationRequest(experienceDir, "missing_request"), /not found/u);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("Experience scenario classification request storage rejects malformed, unsafe, stale, and linked inputs", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-experience-classification-invalid-")), experienceDir = join(root, "experience");
+  const resultDigest = digest("classification result"), requestId = "scenario_classification_valid";
+  try {
+    assert.throws(() => getExperienceScenarioClassificationRequest(join(root, "missing"), requestId), /not found/u);
+    assert.throws(() => createExperienceScenarioClassificationRequest({ experience_dir: experienceDir, request_id: requestId, scope: "global", context: classificationContext }), /explicit project scope/u);
+    await mkdir(experienceDir);
+    assert.throws(() => createExperienceScenarioClassificationRequest({ experience_dir: experienceDir, request_id: "../escape", scope: "project:project-a", context: classificationContext }), /id is invalid/u);
+    for (const context of [
+      { ...classificationContext, sanitized: false },
+      { ...classificationContext, task_goal: "token=abcdefghijk" },
+      { ...classificationContext, observed_paths: ["../private.ts"] },
+      { ...classificationContext, outcome: "inconclusive" },
+      { ...classificationContext, host: "BAD HOST" },
+      { ...classificationContext, task_id: "" },
+      { ...classificationContext, observation_id: "bad" },
+      { ...classificationContext, verification_ref: "password=abcdefgh" },
+    ]) assert.throws(() => createExperienceScenarioClassificationRequest({ experience_dir: experienceDir, request_id: requestId, scope: "project:project-a", context }), /context|identity/u);
+
+    const first = createExperienceScenarioClassificationRequest({ experience_dir: experienceDir, request_id: requestId, scope: "project:project-a", context: classificationContext });
+    assert.equal(first.idempotent, false);
+    assert.throws(() => completeExperienceScenarioClassificationRequest({ experience_dir: experienceDir, request_id: requestId, expected_version: 0,
+      status: "classified", result_digest: resultDigest }), /completion is invalid/u);
+    assert.throws(() => completeExperienceScenarioClassificationRequest({ experience_dir: experienceDir, request_id: "missing_request", expected_version: 1,
+      status: "classified", result_digest: resultDigest }), /not found/u);
+    assert.throws(() => completeExperienceScenarioClassificationRequest({ experience_dir: experienceDir, request_id: requestId, expected_version: 2,
+      status: "classified", result_digest: resultDigest }), /stale/u);
+
+    const queueDir = join(experienceDir, "scenario-classification");
+    const file = join(queueDir, `${requestId}.json`);
+    await writeFile(file, "not-json", "utf8");
+    assert.throws(() => getExperienceScenarioClassificationRequest(experienceDir, requestId), /JSON/u);
+    await writeFile(file, JSON.stringify({ schema: "wrong" }), "utf8");
+    assert.throws(() => getExperienceScenarioClassificationRequest(experienceDir, requestId), /request is invalid/u);
+    await writeFile(file, JSON.stringify({ schema: "craft.experience-scenario-classification-request.v1", id: requestId, version: 1,
+      status: "awaiting_model", scope: "project:project-a", identity_digest: digest("id"), context: classificationContext }), "utf8");
+    const linked = join(queueDir, "linked.json");
+    await symlink(file, linked);
+    assert.throws(() => getExperienceScenarioClassificationRequest(experienceDir, "linked"), /linked, non-regular/u);
+
+    const blockedRoot = join(root, "blocked");
+    await mkdir(blockedRoot);
+    await symlink(queueDir, join(blockedRoot, "scenario-classification"));
+    assert.throws(() => getExperienceScenarioClassificationRequest(blockedRoot, requestId), /regular/u);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("Experience taxonomy stores classifications in the project data directory and promotes from independent evidence", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-experience-taxonomy-")), experienceDir = join(root, "experience");
   try {
     const args = { experience_dir: experienceDir, project_id: "project-ab12", scenario_key: "engineering.tests.typescript",
@@ -80,7 +173,7 @@ test("Experience taxonomy stores model classifications centrally and promotes fr
     assert.equal(promotedChild.status, "active");
     assert.equal(promotedChild.coarse_lifecycle, "active");
 
-    const path = join(experienceDir, "projects", "project-ab12", "experience-scenarios.json");
+    const path = join(experienceDir, "project-ab12", "experience-scenarios.json");
     const catalog = JSON.parse(await readFile(path, "utf8")) as JsonObject;
     assert.equal(catalog.catalog_version, 6);
     const nodes = catalog.scenarios as JsonObject[];
@@ -152,7 +245,7 @@ test("Experience scene definition drift conflicts the key instead of silently re
 
 test("Experience taxonomy reads legacy entries and serializes catalog updates", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-experience-taxonomy-lock-")), experienceDir = join(root, "experience");
-  const directory = join(experienceDir, "projects", "project-1"), path = join(directory, "experience-scenarios.json");
+  const directory = join(experienceDir, "project-1"), path = join(directory, "experience-scenarios.json");
   try {
     await mkdir(directory, { recursive: true });
     await writeFile(path, JSON.stringify({ schema: "craft.experience-scenario-catalog.v1", scenarios: [{ scenario_key: "legacy.review" }] }));
@@ -188,7 +281,7 @@ test("Experience taxonomy reads legacy entries and serializes catalog updates", 
 
 test("Experience taxonomy propagates lock creation errors and tolerates a lock removed during inspection", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-experience-taxonomy-lock-race-")), experienceDir = join(root, "experience");
-  const path = join(experienceDir, "projects", "project-1", "experience-scenarios.json"), lockPath = `${path}.lock`;
+  const path = join(experienceDir, "project-1", "experience-scenarios.json"), lockPath = `${path}.lock`;
   const args = { experience_dir: experienceDir, project_id: "project-1", scenario_key: "scenario.one", observation_id: "observation-one" };
   try {
     const originalOpen = fs.openSync;
@@ -200,7 +293,7 @@ test("Experience taxonomy propagates lock creation errors and tolerates a lock r
     try { assert.throws(() => recordExperienceScenario(args), /permission denied/u); }
     finally { fs.openSync = originalOpen; syncBuiltinESMExports(); }
 
-    await mkdir(join(experienceDir, "projects", "project-1"), { recursive: true });
+    await mkdir(join(experienceDir, "project-1"), { recursive: true });
     await writeFile(lockPath, `${process.pid}\n`);
     const originalLstat = fs.lstatSync;
     let firstInspection = true;
@@ -235,14 +328,14 @@ test("Experience scenario catalog handles fine-only scenes and rejects unsafe pa
 
     const actual = join(root, "actual"); await mkdir(actual);
     const linked = join(root, "linked"); await symlink(actual, linked);
-    assert.throws(() => recordExperienceScenario({ experience_dir: linked, project_id: "project-1",
-      scenario_key: "engineering.review", observation_id: "observation" }), /regular directories/u);
+    assert.throws(() => persistExperienceScenario({ experience_dir: linked, project_id: "project-1",
+      scenario_key: "engineering.review", observation_id: "observation", verified_task_id: "task" }), /regular directories/u);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
 test("Experience scenario catalog rejects malformed and conflicting persisted taxonomies", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-experience-taxonomy-invalid-"));
-  const directory = join(root, "experience", "projects", "project-1"), path = join(directory, "experience-scenarios.json");
+  const directory = join(root, "experience", "project-1"), path = join(directory, "experience-scenarios.json");
   await mkdir(directory, { recursive: true });
   try {
     const entry = { scenario_key: "fine.scene", tier: "fine", parent_scenario_key: "coarse.scene", verification_commands: [] };
@@ -439,7 +532,7 @@ test("Experience taxonomy merge and split proposals preserve live scenes until c
       targets: [{ scenario_key: "engineering.tests", definition }, { scenario_key: "engineering.tests.unit.go", definition }],
       request_id: "existing-non-source-target" }), /new keys within the catalog limit/u);
 
-    const catalogPath = join(experienceDir, "projects", "migration-project", "experience-scenarios.json");
+    const catalogPath = join(experienceDir, "migration-project", "experience-scenarios.json");
     const fullCatalog = JSON.parse(await readFile(catalogPath, "utf8")) as { scenarios: JsonObject[] };
     fullCatalog.scenarios.push(...Array.from({ length: 64 - fullCatalog.scenarios.length }, (_, index) => ({
       scenario_key: `capacity.scene.${index}`, tier: "fine", verification_commands: [],

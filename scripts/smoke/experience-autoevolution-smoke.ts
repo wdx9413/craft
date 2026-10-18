@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
@@ -26,8 +26,11 @@ const revisedWorkflow = { name: "Automatically distilled verification v2", descr
   steps: [{ id: "sentinel", type: "assertion", evaluator: "file_exists", path: "{{case_path}}", side_effect: "read_only" },
     { id: "sentinel-v2", type: "assertion", evaluator: "file_exists", path: "sentinel-v2.txt", side_effect: "read_only" }] };
 const delay = (milliseconds: number) => new Promise(resolveDelay => setTimeout(resolveDelay, milliseconds));
-const isUnder = (root: string, path: unknown): boolean => typeof path === "string"
-  && (resolve(path) === resolve(root) || resolve(path).startsWith(`${resolve(root)}${sep}`));
+const isUnder = (root: string, path: unknown): boolean => {
+  if (typeof path !== "string") return false;
+  const canonicalRoot = realpathSync(root), canonicalPath = realpathSync(path);
+  return canonicalPath === canonicalRoot || canonicalPath.startsWith(`${canonicalRoot}${sep}`);
+};
 function temporaryMemoryDirectory(sessionId: string): string {
   return join("/tmp", ".craft_data", "memory", createHash("sha256").update(sessionId).digest("hex").slice(0, 32));
 }
@@ -198,8 +201,7 @@ try {
         assert(!existsSync(temporaryMemoryDirectory(sessionId)), "archived Memory sessions must delete their temporary directories");
       }
     }
-    const projectId = String(project.id).replace(/^project:/u, "");
-    const scenarioDirectory = join(paths.experienceDir, "projects", projectId);
+    const scenarioDirectory = join(projectRoot, ".craft_data", "experience");
     await mkdir(scenarioDirectory, { recursive: true });
     await writeFile(join(scenarioDirectory, "experience-scenarios.json"), JSON.stringify(scenarioCatalog(projectRoot, "held-out-sentinel.txt")));
     recordVerifiedContextTask(dataRoot, "experience-session-one", "experience-turn-one");
@@ -303,8 +305,8 @@ try {
     "Knowledge classification must persist the model request, response and saved candidate Trace without content");
   assert((await knowledgeClassificationCallCount()) > 0, "the packaged learning worker must use its model to classify Knowledge");
   assert(existsSync(paths.knowledgeDatabaseFile), "Knowledge artifacts must persist in the central .craft_data/knowledge store");
-  assert(isUnder(paths.knowledgeContentDir, (promotedKnowledgeClaim!.content_ref as JsonObject | undefined)?.path),
-    "Knowledge content must stay under the central .craft_data/knowledge directory");
+  assert(isUnder(join(projectRoot, ".craft_data", "knowledge", "md"), (promotedKnowledgeClaim!.content_ref as JsonObject | undefined)?.path),
+    "Project-scoped Knowledge Markdown must stay under that project's .craft_data/knowledge/md directory");
   assert(isUnder(paths.experienceContentDir, (routeable!.content_ref as JsonObject | undefined)?.path),
     "Experience review content must stay under the central .craft_data/experience directory");
   assert(isUnder(join(paths.experienceDir, "graph"), (routeable!.definition_ref as JsonObject | undefined)?.path),
@@ -347,9 +349,7 @@ try {
   const firstProcedureId = String(routeable.id), firstProcedureVersion = Number(routeable.version);
   await writeFile(join(projectRoot, "sentinel-v2.txt"), "newly observed marker");
   await writeFile(join(projectRoot, "held-out-sentinel-v2.txt"), "independent held-out fixture for iteration two");
-  const firstSignature = routeable.scenario_signature as JsonObject;
-  const project = firstSignature.project as JsonObject;
-  const scenarioPath = join(paths.experienceDir, "projects", String(project.id).replace(/^project:/u, ""), "experience-scenarios.json");
+  const scenarioPath = join(projectRoot, ".craft_data", "experience", "experience-scenarios.json");
   await writeFile(scenarioPath, JSON.stringify(scenarioCatalog(projectRoot, "held-out-sentinel-v2.txt")));
 
   const nextStore = await new CraftStore(paths).open();
@@ -418,6 +418,7 @@ try {
       try {
         const project = projectIdentityFromRoot(standaloneKnowledgeProject).canonical_scope as JsonObject;
         const service = new CraftService(store);
+        service.scopeAliasBind({ scope_kind: "project", scope_id: project.id, alias_kind: "path", alias: standaloneKnowledgeProject });
         for (const [index, sourceRoot] of sourceRoots.entries()) service.knowledgeSourceRegister({ source_id: `standalone-knowledge-${index}`,
           kind: "readme", label: `Standalone verified source ${index}`, scope_kind: "project", scope_id: project.id, locator: sourceRoot,
           content_digest: `standalone-fixture:${index}`, trust: "verified", access: "read_only" });
@@ -441,8 +442,8 @@ try {
       assert(promoted, "Context Knowledge worker must generate and auto-promote a Claim from two independent verified Sources");
       assert.deepEqual(calls, new Set(["craft_knowledge_source_list", "craft_knowledge_source_ingest"]), "Context Knowledge reads and ingests must be traced");
       assert(existsSync(standalonePaths.knowledgeDatabaseFile), "Context Knowledge records must persist under the configured .craft_data root");
-      assert(isUnder(standalonePaths.knowledgeContentDir, (promoted!.content_ref as JsonObject | undefined)?.path),
-        "Context Knowledge content must remain under .craft_data/knowledge");
+      assert(isUnder(join(standaloneKnowledgeProject, ".craft_data", "knowledge", "md"), (promoted!.content_ref as JsonObject | undefined)?.path),
+        "Project-scoped Context Knowledge content must remain under the project's .craft_data/knowledge/md directory");
     },
     cleanup: async () => { await rm(standaloneKnowledgeProject, { recursive: true, force: true }); },
   };
@@ -473,8 +474,7 @@ try {
             verified: true, verification_outcome: "passed", verification_ref: `standalone:${taskId}`, scenario_key: "standalone-auto" });
           assert.equal(result.status, taskId.endsWith("two") ? "candidate_request" : "observed");
         }
-        const projectId = String(project.id).replace(/^project:/u, "");
-        const scenarioDirectory = join(standalonePaths.experienceDir, "projects", projectId);
+        const scenarioDirectory = join(standaloneExperienceProject, ".craft_data", "experience");
         await mkdir(scenarioDirectory, { recursive: true });
         await writeFile(join(scenarioDirectory, "experience-scenarios.json"),
           JSON.stringify(scenarioCatalog(standaloneExperienceProject, "held-out-sentinel.txt", "standalone-auto")));

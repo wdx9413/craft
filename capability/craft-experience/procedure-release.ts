@@ -4,15 +4,25 @@ import { text } from "../../common/craft-common-base/src/validation.ts";
 import type { CraftStore, JsonObject } from "../../common/craft-common-store-local/src/store.ts";
 import { payload } from "../../common/craft-common-base/src/digest.ts";
 import { experienceScenarioIsRetired } from "./scenario-catalog.ts";
+import { projectExperienceDirectory } from "../../core/project-experience-directory.ts";
 
 export function belongsToRetiredScenario(store: CraftStore, procedure: JsonObject): boolean {
   const signature = procedure.scenario_signature as JsonObject | undefined;
   const project = signature?.project as JsonObject | undefined;
   const signatureProjectId = typeof project?.id === "string" ? project.id.replace(/^project:/u, "") : "";
   const scope = typeof procedure.scope === "string" ? procedure.scope : "";
-  const projectId = signatureProjectId || (scope.startsWith("project:") ? scope.slice("project:".length) : "");
+  const projectId = (signatureProjectId || (scope.startsWith("project:") ? scope.slice("project:".length) : "")).replace(/^project:/u, "");
   const scenarioKey = typeof signature?.scenario_key === "string" ? signature.scenario_key : "";
-  return Boolean(projectId && scenarioKey && experienceScenarioIsRetired(store.paths.experienceDir, projectId, scenarioKey));
+  if (!/^[A-Za-z0-9_-]{1,96}$/u.test(projectId) || !scenarioKey) return false;
+  try {
+    const aliasDigest = typeof signature?.project_path_alias_digest === "string" ? signature.project_path_alias_digest : undefined;
+    const directory = projectExperienceDirectory(store, `project:${projectId}`, undefined, false, aliasDigest);
+    return experienceScenarioIsRetired(directory, projectId, scenarioKey);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("not registered")) return false;
+    if (error instanceof Error && error.message.includes("ambiguous")) return true;
+    throw error;
+  }
 }
 
 /** Publication is independent of the newest candidate. Pointers always pin a qualified record. */

@@ -29,7 +29,7 @@ import { defaultHooks, defineHooks, runHooks, type HookSpec } from "../hooks.ts"
 import { decideExecution } from "../execution-policy.ts";
 import { assessMcpMigration, createCredentialResolver, distributionPlan, firstRunReadiness, isolationCapability, negotiateProtocolVersion, readCredentialFile } from "../distribution-and-first-run.ts";
 import { Bm25Index, buildExperienceRecord, decideExperienceCapture, fuseRankings } from "../context-retrieval-capture.ts";
-import { experienceScenarioIsRetired } from "../../capability/craft-experience/scenario-catalog.ts";
+import { belongsToRetiredScenario } from "../../capability/craft-experience/procedure-release.ts";
 
 import { evaluateVerificationCheck, runVerification, verificationCaptureSignals } from "../verification-sensor.ts";
 import { abstractAcrossTrajectories, buildAbstraction, trajectoryFailureSignature } from "../trajectory-abstraction.ts";
@@ -462,7 +462,7 @@ export class CraftService extends ServiceFoundation {
     const project = signature?.project as JsonObject | undefined;
     const projectId = typeof project?.id === "string" ? project.id.replace(/^project:/u, "") : "";
     if (projectId && typeof signature?.scenario_key === "string"
-      && experienceScenarioIsRetired(this.store.paths.experienceDir, projectId, signature.scenario_key)) {
+      && belongsToRetiredScenario(this.store, { scope: `project:${projectId}`, scenario_signature: signature })) {
       throw new Error("Experience scenario is retired; proposal submission is blocked");
     }
     const procedureKind = String(request.procedure_kind ?? "workflow");

@@ -9,12 +9,14 @@ import { assertContextReadCurrent } from "../context-access-guard.ts";
  * scoped Context, bounded Memory capture, and content-free Experience signals.
  */
 import { createHash, randomUUID } from "node:crypto";
-import { lstatSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { lstatSync, readFileSync, realpathSync } from "node:fs";
+import { join, relative, resolve, sep } from "node:path";
 import { projectIdentityFromRoot } from "../scope-identity.ts";
 import type { CraftService } from "../application/craft-service.ts";
 import type { JsonObject } from "../infrastructure/store.ts";
 import { payload, stableDigest } from "../digest.ts";
+import { projectExperienceDirectory } from "../project-experience-directory.ts";
+import { deleteExperienceTaskGoal, readExperienceTaskGoal, storeExperienceTaskGoal } from "../experience-task-goals.ts";
 import { CRAFT_RELEASE_VERSION } from "../version.ts";
 
 type ComponentHookMember = "knowledge" | "memory" | "experience";
@@ -87,12 +89,43 @@ export function automaticMemoryFact(prompt: unknown): string | null {
   return fact && fact.length <= 700 ? fact : null;
 }
 
-type Signal = { readonly id: string; readonly tool: string; readonly kind: "edit" | "verification" | "other"; readonly outcome: "passed" | "failed" | "unknown"; readonly digest: string; readonly verifier: string | null; readonly scenario_key?: string; readonly coarse_scenario_key?: string };
+/** Keep only a short, redacted task goal for project Experience classification. */
+export function sanitizedExperienceTaskGoal(value: unknown): string | null {
+  const source = text(value);
+  if (!source || source.length > 8_000 || SECRET.test(source)) return null;
+  const goal = source.split(/\r?\n/u, 1)[0]!
+    .replace(/```[\s\S]*?```/gu, " ").replace(/`[^`]*`/gu, " ")
+    .replace(/\[[^\]]{1,200}\]\(https?:\/\/[^)]+\)/gu, " ").replace(/https?:\/\/\S+/giu, " ")
+    .replace(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/gu, " ")
+    .replace(/(?:\/[\w.-]+){2,}|[A-Za-z]:\\(?:[^\\\s]+\\)*[^\\\s]*/gu, " ")
+    .replace(/\b[a-f0-9]{32,}\b/giu, " ").replace(/\s+/gu, " ").replace(/^\s*[#>*-]+\s*/u, "").trim().slice(0, 320).trim();
+  return goal.length >= 8 ? goal : null;
+}
+
+function experienceTaskGoalArgs(service: CraftService, input: HookInput) {
+  const root = text(input.cwd), sessionId = text(input.session_id), turnId = text(input.turn_id), scope = codexProjectScope(root);
+  if (!root || !sessionId || !turnId || !scope) return null;
+  return { experience_dir: projectExperienceDirectory(service.store, scope.id, root, true), scope: scope.id, session_id: sessionId, turn_id: turnId };
+}
+
+type Signal = { readonly id: string; readonly tool: string; readonly kind: "edit" | "verification" | "other"; readonly outcome: "passed" | "failed" | "unknown"; readonly digest: string; readonly verifier: string | null; readonly scenario_key?: string; readonly coarse_scenario_key?: string; readonly observed_path?: string };
+
+const SENSITIVE_PATH = /(?:secret|token|credential|password|private|\.env)/iu;
+function observedProjectPath(value: unknown, projectRoot: unknown): string | null {
+  if (typeof value !== "string" || typeof projectRoot !== "string" || !value.trim() || value.length > 512 || value.includes("\\") || value.includes("\0")) return null;
+  try {
+    const root = realpathSync(projectRoot), absolute = resolve(root, value.trim()), target = realpathSync(absolute);
+    const path = relative(root, target), parts = path.split(sep);
+    if (!path || path.startsWith(`..${sep}`) || path === ".." || resolve(target) !== absolute || parts.some(part => !part || part.startsWith(".") || SENSITIVE_PATH.test(part))
+      || path.length > 256 || lstatSync(absolute).isSymbolicLink() || !lstatSync(target).isFile()) return null;
+    return path.split(sep).join("/");
+  } catch { return null; }
+}
 
 type ProjectScenario = { scenario_key: string; coarse_scenario_key?: string };
 
 /** A verifier can resolve a project-owned fine scene, but cannot define semantic task identity by itself. */
-function projectScenarioKey(input: HookInput, signal: Signal, experienceDir: string): ProjectScenario | null {
+function projectScenarioKey(input: HookInput, signal: Signal, service: CraftService): ProjectScenario | null {
   if (signal.kind !== "verification" || signal.outcome === "unknown") return null;
   const root = text(input.cwd);
   if (!root) return null;
@@ -101,10 +134,9 @@ function projectScenarioKey(input: HookInput, signal: Signal, experienceDir: str
   const command = nestedText(input.tool_input ?? input.toolInput ?? input.input, ["command", "cmd", "script"])!;
   try {
     const scope = codexProjectScope(root)!;
-    const projectId = scope.id.replace(/^project:/u, "");
-    const projects = join(experienceDir, "projects"), directory = join(projects, projectId);
+    const directory = projectExperienceDirectory(service.store, scope.id, root);
     const path = join(directory, "experience-scenarios.json");
-    for (const entry of [experienceDir, projects, directory, path]) {
+    for (const entry of [join(root, ".craft_data"), directory, path]) {
       const info = lstatSync(entry);
       if (info.isSymbolicLink() || (entry === path && !info.isFile())) return null;
       if (entry === path && info.size > 16_384) return null;
@@ -158,8 +190,9 @@ export class HookSignalSanitizer {
     const kind = /^(?:apply_patch|Edit|Write)$/iu.test(tool) || Boolean(command && EDIT.test(command)) ? "edit"
       : Boolean(command && VERIFY.test(command.trim()) && !/[;&|`$\n]/u.test(command)) ? "verification" : "other";
     if (kind === "other") return null;
-    const stable = { tool, kind, outcome, command_digest: command ? digest(command) : null, tool_use_id: text(input.tool_use_id) ?? text(input.toolUseId) ?? randomUUID() };
-    return { id: `codex_hook_signal_${digest(stable).slice(-20)}`, tool, kind, outcome, digest: digest(stable), verifier: command ? digest(command) : null };
+    const path = kind === "edit" ? observedProjectPath(nestedText(toolInput, ["file_path", "filePath", "path", "filename"]), input.cwd) : null;
+    const stable = { tool, kind, outcome, command_digest: command ? digest(command) : null, path, tool_use_id: text(input.tool_use_id) ?? text(input.toolUseId) ?? randomUUID() };
+    return { id: `codex_hook_signal_${digest(stable).slice(-20)}`, tool, kind, outcome, digest: digest(stable), verifier: command ? digest(command) : null, ...(path ? { observed_path: path } : {}) };
   }
 }
 
@@ -254,7 +287,7 @@ export class HookLearningCoordinator {
     }).map(evidence => String(evidence.id)));
     if (!evidenceIds.size) return null;
     const scope = journal.scope as JsonObject;
-    const scopeKey = `${scope.kind}:${scope.id}`;
+    const scopeKey = scope.kind === "project" ? `project:${String(scope.id).replace(/^project:/u, "")}` : `${scope.kind}:${scope.id}`;
     return this.service.store.list("workflow_evolution_observation", 10_000, observation => {
       const source = observation.source as JsonObject | undefined;
       return source?.scope === scopeKey && Array.isArray(observation.evidence_ids)
@@ -266,6 +299,14 @@ export class HookLearningCoordinator {
     const journal = this.journal.find(input);
     if (!journal || journal.has_edit !== true || !["passed", "failed"].includes(String(journal.verification_outcome))) return null;
     if (typeof journal.context_receipt_id !== "string") return null;
+    const projectRoot = text(input.cwd);
+    if (projectRoot) {
+      const resolved = this.service.scopeIdentityResolveProject({ project_root: projectRoot }).identity as JsonObject;
+      const receipt = this.service.store.find("context_resolution_receipt", String(journal.context_receipt_id));
+      const receiptScope = receipt?.scope as JsonObject | undefined;
+      if (receiptScope?.kind === "project" && resolved.canonical_scope
+        && stableDigest(resolved.canonical_scope) !== stableDigest(receiptScope)) throw new Error("Hook project root does not match the Context receipt scope");
+    }
     const prior = this.finalizedTurn(input, journal);
     if (prior) {
       if (prior.outcome !== journal.verification_outcome) throw new Error("Host turn already has a different terminal Experience outcome");
@@ -282,12 +323,20 @@ export class HookLearningCoordinator {
       this.service.store.save("codex_hook_turn", String(journal.id), { ...payload(journal), scenario_key: suppliedScenario, signals: alignedSignals });
     }
     const scenario = suppliedScenario ?? text(journal.scenario_key);
+    const taskGoalArgs = scenario ? null : experienceTaskGoalArgs(this.service, input);
+    const taskGoal = taskGoalArgs ? readExperienceTaskGoal(taskGoalArgs) : null;
     const signals = Array.isArray(journal.signals) ? journal.signals as JsonObject[] : [];
     const lastVerifier = [...signals].reverse().find(signal => signal.kind === "verification" && typeof signal.verifier === "string");
-    return this.service.learningCycleFinalize({ host: hookHost(input), task_id: String(journal.id), turn_id: String(journal.turn_id), context_receipt_id: journal.context_receipt_id,
-      verified: true, verification_outcome: journal.verification_outcome, verification_ref: stableDigest(journal.verification_receipts), ...(scenario ? { scenario_key: scenario } : {}),
+    const observedPaths = [...new Set(signals.filter(signal => signal.kind === "edit" && typeof signal.observed_path === "string")
+      .map(signal => String(signal.observed_path)))].slice(0, 16);
+    const finalized = this.service.learningCycleFinalize({ host: hookHost(input), task_id: String(journal.id), turn_id: String(journal.turn_id), context_receipt_id: journal.context_receipt_id,
+      verified: true, project_root: projectRoot, verification_outcome: journal.verification_outcome, verification_ref: stableDigest(journal.verification_receipts), ...(scenario ? { scenario_key: scenario } : {}),
+      ...(taskGoal ? { scenario_context: { task_goal: taskGoal,
+        effect_summary: `项目代码已修改并完成终态验证，结果为 ${String(journal.verification_outcome)}。`, sanitized: true, content_stored: false } } : {}),
+      observed_paths: observedPaths,
       ...(typeof journal.coarse_scenario_key === "string" ? { coarse_scenario_key: journal.coarse_scenario_key } : {}),
       ...(typeof lastVerifier?.verifier === "string" ? { scenario_verifier_digest: lastVerifier.verifier } : {}) });
+    return finalized;
   }
 }
 
@@ -369,6 +418,16 @@ export class CodexHookBridge {
     // Persist the current checkout only as an alias. The receipt still names the
     // canonical Git identity, so it is portable and does not leak the path.
     if (typeof input.cwd === "string") this.service.scopeIdentityResolveProject({ project_root: input.cwd });
+    if (members.includes("experience")) {
+      const taskGoal = sanitizedExperienceTaskGoal(prompt);
+      if (taskGoal) {
+        try {
+          const args = experienceTaskGoalArgs(this.service, input);
+          if (args) storeExperienceTaskGoal({ ...args, task_goal: taskGoal });
+        }
+        catch { this.service.store.appendEvent("codex-hook", "codex_hook.failed", { member: "experience", event: "UserPromptSubmit", error_type: "storage_unavailable" }); }
+      }
+    }
     let memoryWritten = false; let captureSummary: JsonObject | null = null;
     if (members.includes("memory")) {
       const explicitStatement = explicitMemoryStatement(prompt);
@@ -411,7 +470,9 @@ export class CodexHookBridge {
 
   private tool(input: HookInput): JsonObject {
     const captured = this.signals.signal(input); if (!captured) return {};
-    const scenario = projectScenarioKey(input, captured, this.service.store.paths.experienceDir);
+    const root = text(input.cwd);
+    if (root) this.service.scopeIdentityResolveProject({ project_root: root });
+    const scenario = projectScenarioKey(input, captured, this.service);
     this.journal.record(input, scenario ? { ...captured, scenario_key: scenario.scenario_key,
       ...(scenario.coarse_scenario_key ? { coarse_scenario_key: scenario.coarse_scenario_key } : {}) } : captured);
     return {};
@@ -420,6 +481,8 @@ export class CodexHookBridge {
   private stop(member: ComponentHookMember, input: HookInput): JsonObject {
     const finalized = member === "experience" ? this.service.store.transaction(() => {
       const result = this.learning.finalize(input);
+      const goalArgs = experienceTaskGoalArgs(this.service, input);
+      if (goalArgs) deleteExperienceTaskGoal(goalArgs);
       this.journal.close(input);
       return result;
     }) : null;

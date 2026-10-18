@@ -359,6 +359,40 @@ test("Workflow-evolution ticket completion records the exact submitted candidate
   } finally { await close(f); }
 });
 
+test("Experience classification tickets bind one awaiting project request through completion", async () => {
+  const f = await fixture();
+  try {
+    const kernel = new EvaluationModelProfileKernel(f.store, PROVIDER_CATALOG, { DASHSCOPE_API_KEY: "configured-for-test" });
+    const profile = kernel.save({ profile_id: "scenario-ticket-profile", provider: "qwen", model: "qwen-plus",
+      purposes: ["workflow_evolution"], network_execution_enabled: true }).profile as JsonObject;
+    const requestId = "scenario-ticket-request", scope = "project:demo", resultDigest = `sha256:${"a".repeat(64)}`;
+    f.store.create("experience_scenario_classification_request_ref", requestId, { scope, status: "awaiting_model", request_version: 1,
+      identity_digest: `sha256:${"b".repeat(64)}` });
+    const ticket = kernel.issue({ ticket_id: "scenario-ticket", profile_id: profile.id, purpose: "workflow_evolution",
+      experience_scenario_classification_request_id: requestId, experience_scenario_classification_scope: scope,
+      input_ref: "craft-experience://scenario-classification/request/v1", output_contract_ref: "craft-experience-scenario-classification-v1" }).ticket as JsonObject;
+    assert.equal(((ticket.target as JsonObject).kind), "experience_scenario_classification_request");
+    f.store.create("evaluation_model_ticket", "wrong-purpose-scenario-ticket", { profile_id: profile.id, profile_version: profile.version,
+      purpose: "evaluation", status: "ready_for_adapter", target: ticket.target });
+    assert.equal((kernel.ticketList().tickets as JsonObject[]).some(item => item.id === "wrong-purpose-scenario-ticket"), false);
+    assert.throws(() => kernel.ticketComplete({ ticket_id: ticket.id, result_digest: resultDigest }), /exact resolved request/u);
+    f.store.save("experience_scenario_classification_request_ref", requestId, { ...f.store.find("experience_scenario_classification_request_ref", requestId), scope: "project:other" });
+    assert.throws(() => kernel.ticketComplete({ ticket_id: ticket.id, result_digest: resultDigest }), /exact resolved request/u);
+    f.store.save("experience_scenario_classification_request_ref", requestId, { ...f.store.find("experience_scenario_classification_request_ref", requestId), scope, status: "awaiting_model" });
+    assert.throws(() => kernel.ticketComplete({ ticket_id: ticket.id, result_digest: resultDigest }), /exact resolved request/u);
+    f.store.save("experience_scenario_classification_request_ref", requestId, { ...f.store.find("experience_scenario_classification_request_ref", requestId), scope, status: "classified", result_digest: `sha256:${"c".repeat(64)}` });
+    assert.throws(() => kernel.ticketComplete({ ticket_id: ticket.id, result_digest: resultDigest }), /exact resolved request/u);
+    f.store.save("experience_scenario_classification_request_ref", requestId, { ...f.store.find("experience_scenario_classification_request_ref", requestId), scope, status: "classified", result_digest: resultDigest });
+    assert.equal((kernel.ticketComplete({ ticket_id: ticket.id, result_digest: resultDigest }).ticket as JsonObject).status, "completed");
+    assert.equal(kernel.ticketComplete({ ticket_id: ticket.id, result_digest: resultDigest }).idempotent, true);
+    f.store.create("experience_scenario_classification_request_ref", "already-done", { scope, status: "classified", request_version: 1,
+      identity_digest: `sha256:${"d".repeat(64)}`, result_digest: resultDigest });
+    assert.throws(() => kernel.issue({ ticket_id: "already-done-ticket", profile_id: profile.id, purpose: "workflow_evolution",
+      experience_scenario_classification_request_id: "already-done", experience_scenario_classification_scope: scope,
+      input_ref: "craft-experience://scenario-classification/done/v1", output_contract_ref: "craft-experience-scenario-classification-v1" }), /awaiting project request/u);
+  } finally { await close(f); }
+});
+
 test("evolves only independent sanitized evidence into a new draft Workflow and never publishes it", async () => {
   const f = await fixture();
   try {

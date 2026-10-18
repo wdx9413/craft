@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import type { ChatResult, ModelProviderSpec, ModelTransport } from "../core/model-gateway.ts";
 import type { JsonObject } from "../core/infrastructure/store.ts";
-import { McpStdioClient, boundedPollInterval, learningComponents, mcpCommandOptions, runDistillationOnce, runEvaluationOnce, runLearningTick, type ExperienceLearningClient } from "../deploy/experience-learning/worker.ts";
+import { McpStdioClient, boundedPollInterval, learningComponents, mcpCommandOptions, runDistillationOnce, runEvaluationOnce, runLearningTick, runOnce, type ExperienceLearningClient } from "../deploy/experience-learning/worker.ts";
 import { learningFailureKind, learningTickStatus } from "../deploy/experience-learning/learning-tick.ts";
 
 const provider: ModelProviderSpec = { provider: "test", label: "test", protocol: "openai-compatible", base_url: "https://example.invalid/v1",
@@ -204,14 +204,15 @@ test("continuous learning tick contains transient Experience and Knowledge failu
   } };
   const deps = { client, providers: [provider], transport: fixture().transport };
   const first = await runLearningTick(deps, true);
-  assert.deepEqual(first, { processed: 0, outcomes: [], failure_kind: "TypeError", knowledge: { status: "failed", failure_kind: "Error" } });
+  assert.deepEqual(first, { processed: 0, outcomes: [], scenario_classification: { status: "failed", failure_kind: "TypeError" },
+    failure_kind: "TypeError", evaluation: { processed: 0, outcomes: [] }, knowledge: { status: "failed", failure_kind: "Error" } });
   assert.deepEqual(learningTickStatus(first, true), { diagnostics: "Craft Experience learning pass failed (TypeError).\nCraft Knowledge learning pass failed (Error).\n", exit_code: 1 });
   assert.equal(JSON.stringify(first).includes("credential"), false);
   assert.equal(JSON.stringify(first).includes("locator"), false);
   const second = await runLearningTick(deps, true);
   assert.deepEqual(second, { processed: 0, outcomes: [], evaluation: { processed: 0, outcomes: [] }, knowledge: { sources_seen: 0, sources_selected: 0, outcomes: [], skipped_sources: 0, classification: { processed: 0, outcomes: [] } } });
   assert.deepEqual(learningTickStatus(second, true), { diagnostics: "", exit_code: null });
-  assert.equal(ticketAttempts, 2);
+  assert.equal(ticketAttempts, 4);
   assert.equal(sourceListAttempts, 2);
   const experienceOnly = await runLearningTick(deps);
   assert.equal(experienceOnly.knowledge, null);
@@ -314,7 +315,7 @@ test("standalone learning modes call only their mounted Knowledge or Experience 
   const deps = { client, providers: [provider], transport: fixture().transport };
   const experience = await runLearningTick(deps, true, ["experience"]);
   assert.deepEqual(experience, { processed: 0, outcomes: [], evaluation: { processed: 0, outcomes: [] }, knowledge: null });
-  assert.deepEqual(calls, ["craft_evaluation_model_ticket_list", "craft_experience_learning_evaluation_dispatch_list"]);
+  assert.deepEqual(calls, ["craft_evaluation_model_ticket_list", "craft_evaluation_model_ticket_list", "craft_experience_learning_evaluation_dispatch_list"]);
   calls.length = 0;
   const knowledge = await runLearningTick(deps, true, ["knowledge"]);
   assert.deepEqual(knowledge, { processed: 0, outcomes: [], skipped: true,
@@ -716,4 +717,53 @@ test("polling worker exits cleanly after a termination signal", async () => {
   assert.equal(exitCode, 0, stderr);
   assert.deepEqual(JSON.parse(stdout.trim()), { processed: 0, outcomes: [], evaluation: { processed: 0, outcomes: [] }, knowledge: { sources_seen: 0, sources_selected: 0, outcomes: [], skipped_sources: 0, classification: { processed: 0, outcomes: [] } } });
   rmSync(dataDir, { recursive: true, force: true });
+});
+
+test("runOnce contains scenario-classification queue failures and continues evaluation", async () => {
+  const client: ExperienceLearningClient = { async call(name) {
+    if (name === "craft_evaluation_model_ticket_list") return { tickets: [{ id: "classification-ticket", purpose: "workflow_evolution",
+      target: { kind: "experience_scenario_classification_request", id: "request-1", version: 1, scope: "project:craft" },
+      readiness: { status: "ready_for_adapter" } }] };
+    if (name === "craft_evaluation_model_profile_get") throw new Error("profile unavailable");
+    if (name === "craft_experience_learning_evaluation_dispatch_list") return { dispatches: [] };
+    throw new Error(`unexpected tool ${name}`);
+  } };
+  const result = await runOnce({ client });
+  assert.equal(result.failure_kind, "Error");
+  assert.deepEqual(result.scenario_classification, { status: "failed", failure_kind: "Error" });
+  assert.equal((result.evaluation as JsonObject).processed, 0);
+});
+
+test("runOnce classifies a verified task before distillation while using one model call", async () => {
+  let pending = true, modelCalls = 0;
+  const context: JsonObject = { sanitized: true, content_stored: false, task_goal: "Repair validation", effect_summary: "Focused checks pass",
+    outcome: "passed", observed_paths: ["src/validation.ts"], verification_ref: "test:focused", host: "codex", task_id: "task-1",
+    turn_id: "turn-1", context_receipt_id: "receipt-1", observation_id: "workflow_evolution_observation_123" };
+  const client: ExperienceLearningClient = { async call(name) {
+    if (name === "craft_evaluation_model_ticket_list") return { tickets: pending ? [{ id: "scenario-ticket", purpose: "workflow_evolution", profile_id: "profile-1",
+      profile_version: 1, target: { kind: "experience_scenario_classification_request", id: "scenario-request", version: 1, scope: "project:craft" },
+      readiness: { status: "ready_for_adapter" } }] : [] };
+    if (name === "craft_evaluation_model_profile_get") return { profile: { provider: "test", model: "test-model", version: 1, max_attempts: 1,
+      max_output_tokens: 256, temperature: 0 }, readiness: { status: "ready_for_adapter" } };
+    if (name === "craft_experience_scenario_classification_request_get") return { request: { id: "scenario-request", version: 1, status: "awaiting_model", context },
+      taxonomy: { catalog_version: 0, scenarios: [] } };
+    if (name === "craft_learning_cycle_finalize") return { status: "observed", observation: { id: context.observation_id,
+      scenario_signature: { schema: "craft.scenario-signature.v1", project: "project:craft" } },
+      scenario_catalog: { scenario_key: "validation.repair", status: "candidate", catalog_version: 1 } };
+    if (name === "craft_experience_scenario_classification_request_complete") return { request: { version: 2 } };
+    if (name === "craft_evaluation_model_ticket_complete") { pending = false; return {}; }
+    if (name === "craft_experience_learning_evaluation_dispatch_list") return { dispatches: [] };
+    if (name.startsWith("craft_trace_")) return {};
+    throw new Error(`unexpected tool ${name}`);
+  } };
+  const transport: ModelTransport = { acquireCall: () => true, async complete(): Promise<ChatResult> {
+    modelCalls += 1;
+    return { text: JSON.stringify({ decision: "classified", scenario_key: "validation.repair", scenario_definition: {
+      summary: "Validation repair", applies_when: "Code changes need validation", excludes: "Documentation-only work" } }),
+      model: "test-model", usage: null };
+  } };
+  const result = await runOnce({ client, providers: [provider], transport });
+  assert.equal(modelCalls, 1);
+  assert.equal(((result.scenario_classification as JsonObject).outcomes as JsonObject[])[0]?.status, "classified");
+  assert.equal((result.evaluation as JsonObject).processed, 0);
 });

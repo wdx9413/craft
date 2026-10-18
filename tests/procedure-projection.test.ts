@@ -4,14 +4,18 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { ProcedureStore } from "../capability/craft-experience/procedure-projection.ts";
+import { belongsToRetiredScenario } from "../capability/craft-experience/procedure-release.ts";
 import { recordExperienceScenario, retireExperienceScenario } from "../capability/craft-experience/scenario-catalog.ts";
 import { stableDigest } from "../core/digest.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import { projectExperienceDirectory } from "../core/project-experience-directory.ts";
 
 async function fixture() {
   const root = mkdtempSync(join(tmpdir(), "craft-procedure-projection-"));
   const store = await new CraftStore(craftPaths(root)).open();
+  for (const id of ["project:project", "project:retire-project"]) store.create("scope_alias", `alias-${id}`, { status: "active", alias_kind: "path", alias: root,
+    alias_digest: stableDigest(root), scope: { kind: "project", id } });
   const procedures = new ProcedureStore(store);
   store.create("evidence", "e", { confidence: "confirmed" });
   store.create("workflow_evolution_request", "request", { scenario_key: "inspect", scenario_signature: { domain: "test" }, observation_refs: [{ source: { scope: "project:test" }, evidence_ids: ["e"] }], output_contract_ref: "acceptance:test" });
@@ -28,9 +32,9 @@ test("Procedure drafts and qualification reject a retired Experience scenario", 
   const f = await fixture();
   try {
     const signature = { project: { kind: "project", id: "project" }, scenario_key: "engineering.tests" };
-    const catalog = recordExperienceScenario({ experience_dir: f.store.paths.experienceDir, project_id: "project", scenario_key: "engineering.tests",
+    const catalog = recordExperienceScenario({ experience_dir: projectExperienceDirectory(f.store, "project:project", f.root, true), project_id: "project", scenario_key: "engineering.tests",
       observation_id: "observation", verified_task_id: "task" });
-    retireExperienceScenario({ experience_dir: f.store.paths.experienceDir, project_id: "project", scenario_key: "engineering.tests",
+    retireExperienceScenario({ experience_dir: projectExperienceDirectory(f.store, "project:project", f.root), project_id: "project", scenario_key: "engineering.tests",
       expected_catalog_version: Number(catalog.catalog_version), request_id: "retire-for-projection", reason: "obsolete" });
     f.store.create("workflow_evolution_request", "retired-request", { scenario_key: "engineering.tests", scenario_signature: signature,
       observation_refs: [{ source: { scope: "project:project" }, evidence_ids: ["e"] }], output_contract_ref: "acceptance:test" });
@@ -40,6 +44,24 @@ test("Procedure drafts and qualification reject a retired Experience scenario", 
     f.store.create("experience_procedure", "retired-procedure", { lifecycle: "candidate", routeable: false, scope: "project:project", scenario_signature: signature });
     assert.throws(() => f.procedures.gate({ procedure_id: "retired-procedure", stage: "shadow", passed: true, evidence_ids: ["e"] }), /scenario is retired/u);
   } finally { f.close(); }
+});
+
+test("retired-scenario checks honor a pinned path alias and fail closed on ambiguous roots", async () => {
+  const f = await fixture();
+  const otherRoot = mkdtempSync(join(tmpdir(), "craft-procedure-other-project-"));
+  try {
+    assert.equal(belongsToRetiredScenario(f.store, { scope: "project:missing", scenario_signature: {
+      project: { kind: "project", id: "project:missing" }, scenario_key: "engineering.tests" } }), false);
+    const signature = { project: { kind: "project", id: "project:project" }, scenario_key: "engineering.tests",
+      project_path_alias_digest: stableDigest(f.root) };
+    assert.equal(belongsToRetiredScenario(f.store, { scope: "project:project", scenario_signature: signature }), false);
+    for (const [id, alias] of [["ambiguous-one", f.root], ["ambiguous-two", otherRoot]]) {
+      f.store.create("scope_alias", id, { status: "active", alias_kind: "path", alias, alias_digest: stableDigest(alias),
+        scope: { kind: "project", id: "project:ambiguous" } });
+    }
+    assert.equal(belongsToRetiredScenario(f.store, { scope: "project:ambiguous", scenario_signature: {
+      project: { kind: "project", id: "project:ambiguous" }, scenario_key: "engineering.tests" } }), true);
+  } finally { f.close(); rmSync(otherRoot, { recursive: true, force: true }); }
 });
 
 test("Skill export treats IDs as opaque keys, remains disabled and binds replay to source/version/content", async () => {
@@ -151,14 +173,14 @@ test("active release refuses a retired scenario after the latest candidate loses
   const f = await fixture();
   try {
     const signature = { project: { kind: "project", id: "retire-project" }, scenario_key: "engineering.tests" };
-    const catalog = recordExperienceScenario({ experience_dir: f.store.paths.experienceDir, project_id: "retire-project", scenario_key: "engineering.tests",
+    const catalog = recordExperienceScenario({ experience_dir: projectExperienceDirectory(f.store, "project:retire-project", f.root, true), project_id: "retire-project", scenario_key: "engineering.tests",
       observation_id: "observation", verified_task_id: "task" });
     f.store.save("workflow_evolution_request", "request", { ...f.store.get("workflow_evolution_request", "request"),
       scenario_key: "engineering.tests", scenario_signature: signature, observation_refs: [{ source: { scope: "project:retire-project" }, evidence_ids: ["e"] }] });
     f.store.save("workflow_evolution_proposal", "proposal", { ...f.store.get("workflow_evolution_proposal", "proposal"), request_version: 2 });
     const procedure = f.draft({ procedure_id: "retired-release", evolve: true, scenario_signature: signature });
     f.promote(procedure);
-    const retired = retireExperienceScenario({ experience_dir: f.store.paths.experienceDir, project_id: "retire-project", scenario_key: "engineering.tests",
+    const retired = retireExperienceScenario({ experience_dir: projectExperienceDirectory(f.store, "project:retire-project", f.root), project_id: "retire-project", scenario_key: "engineering.tests",
       expected_catalog_version: Number(catalog.catalog_version), request_id: "retire-after-release", reason: "obsolete" });
     assert.equal(retired.status, "retired");
     const latest = f.store.get("experience_procedure", String(procedure.id));

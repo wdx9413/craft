@@ -12,6 +12,7 @@ import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { stableDigest } from "../core/digest.ts";
 import { ExperienceLearningEvaluation } from "../capability/craft-experience/learning-evaluation.ts";
+import { projectExperienceDirectory } from "../core/project-experience-directory.ts";
 
 function set(cases: JsonObject[], independent = false): JsonObject {
   return { case_set_ref: stableDigest(cases), cases, ...(independent ? { independent_of_training: true } : {}) };
@@ -86,6 +87,7 @@ async function fixture() {
   await writeFile(join(projectRoot, "sentinel.txt"), "do not persist this file body");
   await writeFile(join(projectRoot, "held-out-sentinel.txt"), "independent held-out fixture");
   const project = projectIdentityFromRoot(projectRoot).canonical_scope as JsonObject;
+  service.scopeIdentityResolveProject({ project_root: projectRoot });
   const signature = { schema: "craft.scenario-signature.v1", project, scenario_key: "auto-build", target_class: "host_task_completion" };
   const sourceEvidence = service.evidenceRecord({ source_type: "program", confidence: "confirmed", claim: "Source observation" });
   const first = service.workflowEvolutionObserve({ scenario_key: "scenario:auto-build", scenario_signature: signature, scope: `project:${project.id}`,
@@ -100,8 +102,7 @@ async function fixture() {
   const procedure = submitted.procedure as JsonObject;
   const cases = (caseId: string, inputs: JsonObject = {}) => [{ case_id: caseId, project_root: projectRoot, inputs }];
   const scenarioId = String(project.id).replace(/^project:/u, "");
-  const scenarioDir = join(store.paths.experienceDir, "projects", scenarioId);
-  await mkdir(scenarioDir, { recursive: true });
+  const scenarioDir = projectExperienceDirectory(store, String(project.id), projectRoot, true);
   const config = { schema: "craft.experience-scenario-catalog.v1", scenarios: [{ scenario_key: "auto-build", verification_commands: ["pnpm test"],
     evaluation: { schema: "craft.experience-evaluation.v1", signoff_policy_ref: AUTOMATIC_SIGNOFF_POLICY,
       stages: { shadow: set(cases("shadow", { case_path: "sentinel.txt" })), held_out: set(cases("held-out", { case_path: "held-out-sentinel.txt" }), true), canary: set(cases("canary", { case_path: "sentinel.txt" })) } } }] };
@@ -136,6 +137,22 @@ test("the local evaluator runs pinned stages, writes content-free Evidence, appl
     assert.match(String(run.environment_digest), /^sha256:/u);
     assert.equal(run.environment_stable, true);
     assert.equal(JSON.stringify(run.results).includes("actual"), false);
+    const canaryEvidence = evidence.filter(item => (item.metadata as JsonObject).experience_evaluation_dispatch_id === dispatch.id).map(item => String(item.id));
+    assert.equal((f.service.experienceLearningEvaluationResult({ dispatch_id: dispatch.id, evidence_ids: canaryEvidence }).dispatch as JsonObject).status, "passed");
+  } finally { await f.close(); }
+});
+
+test("evaluation dispatch listing, idempotency, and evidence binding reject malformed replay", async () => {
+  const f = await fixture();
+  try {
+    assert.deepEqual(f.service.experienceLearningEvaluationList({}).count, 0);
+    assert.throws(() => f.service.experienceLearningEvaluationList({ limit: 0 }), /between 1 and 1000/u);
+    const dispatch = f.service.experienceLearningEvaluationDispatch({ procedure_id: f.procedure.id, dispatch_id: "stable-dispatch" }).dispatch as JsonObject;
+    assert.equal(f.service.experienceLearningEvaluationDispatch({ procedure_id: f.procedure.id, dispatch_id: "stable-dispatch" }).idempotent, true);
+    assert.equal((f.service.experienceLearningEvaluationList({ limit: 10 }).dispatches as JsonObject[]).length, 1);
+    const unbound = f.service.evidenceRecord({ source_type: "fact", confidence: "confirmed", claim: "unbound evidence",
+      metadata: { experience_evaluation_dispatch_id: dispatch.id } });
+    assert.throws(() => f.service.experienceLearningEvaluationResult({ dispatch_id: dispatch.id, evidence_ids: [String(unbound.id)] }), /not confirmed and bound/u);
   } finally { await f.close(); }
 });
 
@@ -149,6 +166,35 @@ test("missing project evaluation config leaves the dispatch awaiting an adapter 
     assert.equal(result.reason, "project_scenario_evaluator_not_configured");
     assert.equal((result.dispatch as JsonObject).status, "awaiting_adapter");
     assert.equal(f.store.count("evidence"), 1);
+  } finally { await f.close(); }
+});
+
+test("automatic evaluation leaves a valid project scene awaiting an adapter when its local root is unregistered", async () => {
+  const f = await fixture();
+  try {
+    const procedure = f.store.get("experience_procedure", String(f.procedure.id));
+    const signature = { ...(procedure.scenario_signature as JsonObject), project: { kind: "project", id: "project:unregistered" } };
+    f.store.save("experience_procedure", String(procedure.id), { ...procedure, scope: "project:unregistered", scenario_signature: signature });
+    const dispatch = f.service.experienceLearningEvaluationDispatch({ procedure_id: procedure.id }).dispatch as JsonObject;
+    const result = f.service.experienceLearningEvaluationRun({ dispatch_id: dispatch.id });
+    assert.equal((result.dispatch as JsonObject).status, "awaiting_adapter");
+    assert.equal(result.reason, "project_scenario_evaluator_not_configured");
+  } finally { await f.close(); }
+});
+
+test("automatic evaluation surfaces an invalid registered project root", async () => {
+  const f = await fixture();
+  const fileRoot = join(f.dataRoot, "registered-project-file");
+  try {
+    await writeFile(fileRoot, "not a directory");
+    f.store.create("scope_alias", "invalid-project-root", { status: "active", alias_kind: "path", alias: fileRoot,
+      alias_digest: stableDigest(fileRoot), scope: { kind: "project", id: "project:invalid-root" } });
+    const procedure = f.store.get("experience_procedure", String(f.procedure.id));
+    f.store.save("experience_procedure", String(procedure.id), { ...procedure, scope: "project:invalid-root",
+      scenario_signature: { schema: "craft.scenario-signature.v1", project: { kind: "project", id: "project:invalid-root" },
+        scenario_key: "auto-build" } });
+    const evaluator = new ExperienceLearningEvaluation(f.store) as unknown as { readScenarioEvaluation(projectId: string, scenarioKey: string): JsonObject | null };
+    assert.throws(() => evaluator.readScenarioEvaluation("invalid-root", "auto-build"), /project root must be a directory/u);
   } finally { await f.close(); }
 });
 

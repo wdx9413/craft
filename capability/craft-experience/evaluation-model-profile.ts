@@ -97,6 +97,12 @@ export class EvaluationModelProfileKernel {
         if (scope.kind !== "project" && scope.kind !== "global") return false;
         return Number(listKnowledgeScenarios(knowledgeDirectoryForScope(this.store, scope.kind === "global" ? "global" : `project:${scope.id}`), scope.id, scope.kind).catalog_version) === Number(target.catalog_version);
       }
+      if (target?.kind === "experience_scenario_classification_request") {
+        if (ticket.purpose !== "workflow_evolution") return false;
+        const request = this.store.find("experience_scenario_classification_request_ref", String(target.id));
+        return request?.status === "awaiting_model" && request.scope === target.scope
+          && Number(request.request_version) === Number(target.version);
+      }
       if (ticket.purpose === "evaluation") return true;
       if (ticket.purpose !== "workflow_evolution") return false;
       if (target?.kind !== "workflow_evolution_request") return false;
@@ -132,11 +138,17 @@ export class EvaluationModelProfileKernel {
     }
     if (ticket.purpose === "workflow_evolution") {
       const target = ticket.target as JsonObject;
-      const proposal = this.store.list("workflow_evolution_proposal", 1_000, (item) => item.model_ticket_id === ticket.id
-        && item.request_id === target.id && Number(item.request_version) === Number(target.version))[0];
-      const request = proposal ? this.store.find("workflow_evolution_request", String(target.id)) : null;
-      if (!proposal || request?.lifecycle !== "draft_submitted" || request.proposal_id !== proposal.id) {
-        throw new Error("Workflow-evolution ticket requires its exact submitted candidate before completion");
+      if (target.kind === "experience_scenario_classification_request") {
+        const request = this.store.find("experience_scenario_classification_request_ref", String(target.id));
+        if (!request || request.scope !== target.scope || !["classified", "unclassified"].includes(String(request.status))
+          || request.result_digest !== resultDigest) throw new Error("Experience classification ticket requires its exact resolved request before completion");
+      } else {
+        const proposal = this.store.list("workflow_evolution_proposal", 1_000, (item) => item.model_ticket_id === ticket.id
+          && item.request_id === target.id && Number(item.request_version) === Number(target.version))[0];
+        const request = proposal ? this.store.find("workflow_evolution_request", String(target.id)) : null;
+        if (!proposal || request?.lifecycle !== "draft_submitted" || request.proposal_id !== proposal.id) {
+          throw new Error("Workflow-evolution ticket requires its exact submitted candidate before completion");
+        }
       }
     }
     const completed = this.store.save("evaluation_model_ticket", ticketId, { ...ticket, status: "completed", result_digest: resultDigest,
@@ -243,6 +255,15 @@ export class EvaluationModelProfileKernel {
       const catalog = listKnowledgeScenarios(knowledgeDirectoryForScope(this.store, scope.kind === "global" ? "global" : `project:${scope.id}`), scope.id, scope.kind);
       return { kind: "knowledge_scenario_classification", id: claim.id, version: claim.version,
         content_digest: claim.content_digest, scope: claim.scope, catalog_version: catalog.catalog_version };
+    }
+    if (args.experience_scenario_classification_request_id !== undefined) {
+      const requestId = text(args.experience_scenario_classification_request_id, "experience_scenario_classification_request_id");
+      const scope = text(args.experience_scenario_classification_scope, "experience_scenario_classification_scope");
+      const reference = this.store.get("experience_scenario_classification_request_ref", requestId);
+      if (!/^project:[A-Za-z0-9_-]{1,96}$/u.test(scope) || reference.scope !== scope || reference.status !== "awaiting_model") {
+        throw new Error("Experience scenario classification ticket requires an awaiting project request");
+      }
+      return { kind: "experience_scenario_classification_request", id: requestId, version: reference.request_version, scope };
     }
     const request = this.store.get("workflow_evolution_request", text(args.workflow_evolution_request_id, "workflow_evolution_request_id"));
     if (request.lifecycle !== "awaiting_model") throw new Error("Workflow Evolution request is not awaiting a model proposal");

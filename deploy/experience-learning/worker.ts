@@ -12,6 +12,7 @@ import { craftPaths, dataRoot } from "../../core/infrastructure/paths.ts";
 import { validateDistilledWorkflowSteps } from "./workflow-contract.ts";
 import { runKnowledgeSyncOnce, type KnowledgeLearningClient } from "./knowledge-sync.ts";
 import { runKnowledgeScenarioClassificationOnce } from "./knowledge-classification.ts";
+import { runExperienceScenarioClassificationOnce } from "./experience-scenario-classification.ts";
 import { createLearningModelTransport } from "./codex-cli-transport.ts";
 import { learningFailureKind, learningTickStatus, runLearningTick as runResilientLearningTick } from "./learning-tick.ts";
 
@@ -43,9 +44,14 @@ export async function runEvaluationOnce(client: ExperienceLearningClient): Promi
 }
 
 export async function runOnce(deps: DistillationDependencies): Promise<JsonObject> {
+  let scenarioClassification: JsonObject;
+  try { scenarioClassification = await runExperienceScenarioClassificationOnce(deps); }
+  catch (error) { scenarioClassification = { status: "failed", failure_kind: safeWorkerErrorClass(error, "ClassificationError") }; }
   const distillation = await runDistillationOnce(deps);
   const evaluation = await runEvaluationOnce(deps.client);
-  return { ...distillation, evaluation };
+  const includeClassification = Number(scenarioClassification.processed ?? 0) > 0 || scenarioClassification.status === "failed" || scenarioClassification.skipped === true;
+  return { ...distillation, ...(includeClassification ? { scenario_classification: scenarioClassification } : {}),
+    ...(scenarioClassification.status === "failed" ? { failure_kind: String(scenarioClassification.failure_kind) } : {}), evaluation };
 }
 
 export function learningComponents(env: NodeJS.ProcessEnv = process.env): LearningComponent[] {
@@ -96,6 +102,9 @@ function array(value: unknown, name: string): unknown[] {
 function string(value: unknown, name: string, max = 2_000): string {
   if (typeof value !== "string" || !value.trim() || value.length > max) throw new Error(`${name} must be non-empty and at most ${max} characters`);
   return value.trim();
+}
+export function safeWorkerErrorClass(error: unknown, fallback: string): string {
+  return error instanceof Error && /^[A-Za-z][A-Za-z0-9]{0,63}$/u.test(error.name) ? error.name : fallback;
 }
 export function boundedPollInterval(value: string | undefined, fallback: number, minimum: number, maximum: number): number {
   if (value === undefined) return fallback;

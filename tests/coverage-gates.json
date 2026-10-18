@@ -1533,12 +1533,43 @@
       "branches": true
     },
     {
+      "name": "experience-scenario-classification-worker",
+      "include": [
+        "deploy/experience-learning/experience-scenario-classification.ts"
+      ],
+      "tests": [
+        "tests/experience-scenario-classification.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "experience-task-goals",
+      "include": [
+        "core/experience-task-goals.ts"
+      ],
+      "tests": [
+        "tests/experience-task-goals.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "project-experience-directory",
+      "include": [
+        "core/project-experience-directory.ts"
+      ],
+      "tests": [
+        "tests/project-experience-directory.test.ts"
+      ],
+      "branches": true
+    },
+    {
       "name": "experience-scenario-evaluation-contract",
       "include": [
         "capability/craft-experience/scenario-evaluation.ts"
       ],
       "tests": [
-        "tests/scenario-evaluation.test.ts"
+        "tests/scenario-evaluation.test.ts",
+        "tests/experience-learning-automation.test.ts"
       ],
       "branches": true
     },

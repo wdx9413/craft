@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { CraftService } from "../core/service.ts";
+import { CraftService, VERSION } from "../core/service.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 
@@ -12,7 +12,7 @@ test("service facades exercise defaults, compatibility views, and model validati
   const store = await new CraftStore(craftPaths(root)).open();
   const service = new CraftService(store);
   try {
-  assert.equal((service.workbenchResourceView() as JsonObject).version, "0.12.45");
+  assert.equal((service.workbenchResourceView() as JsonObject).version, VERSION);
     assert.throws(() => service.workbenchResourceCatalogView({ kind: "unknown", limit: 1 }), /kind must be/);
     assert.deepEqual((service.workbenchResourceCatalogView({ kind: "memory", limit: 2 }).items as unknown[]), []);
     assert.deepEqual((service.workbenchResourceCatalogView({ kind: "workflows", limit: 2 }).runs as unknown[]), []);

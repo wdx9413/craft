@@ -12,6 +12,7 @@ import { serveMcpStdio } from "../core/mcp-stdio.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftService } from "../core/service.ts";
 import { CraftStore } from "../core/infrastructure/store.ts";
+import { CRAFT_RELEASE_VERSION } from "../core/version.ts";
 
 test("MCP negotiates protocols, lists tools, dispatches every handler, and reports errors", async () => {
   const root = join(tmpdir(), `craft-mcp-${process.pid}-${Date.now()}`);
@@ -416,7 +417,7 @@ test("Context MCP runs both learning polls through traced calls without writing 
     assert.equal(exit.code, 0, stderr);
     const lines = output.trim().split("\n");
     assert.equal(lines.length, 1);
-    assert.equal(JSON.parse(lines[0]!).result.serverInfo.version, "0.12.45");
+    assert.equal(JSON.parse(lines[0]!).result.serverInfo.version, CRAFT_RELEASE_VERSION);
     assert.deepEqual(observed, expected);
     const store = await new CraftStore(craftPaths(root)).open();
     try {
@@ -453,7 +454,7 @@ test("MCP stdio default runtime accepts buffered initialization", async () => {
     const serving = serveMcpStdio({ mode: "full", input, write: (line) => output.push(line) });
     input.end('{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}\n');
     await serving;
-    assert.equal((JSON.parse(output[0]) as { result: { serverInfo: { version: string } } }).result.serverInfo.version, "0.12.45");
+    assert.equal((JSON.parse(output[0]) as { result: { serverInfo: { version: string } } }).result.serverInfo.version, CRAFT_RELEASE_VERSION);
   } finally { if (original === undefined) delete process.env.CRAFT_DATA_DIR; else process.env.CRAFT_DATA_DIR = original; await rm(root, { recursive: true, force: true }); }
 });
 

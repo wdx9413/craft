@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { activeProcedure } from "../capability/craft-experience/procedure-release.ts";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, rm, symlink, unlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -11,6 +11,9 @@ import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftService } from "../core/service.ts";
 import { defaultSettings } from "../core/settings.ts";
+import { stableDigest } from "../core/digest.ts";
+import { projectExperienceDirectory } from "../core/project-experience-directory.ts";
+import { sanitizedExperienceTaskGoal } from "../core/codex-hook-bridge.ts";
 
 async function fixture(models?: ReturnType<typeof defaultSettings>["models"]) {
   const root = await mkdtemp(join(tmpdir(), "craft-codex-hook-"));
@@ -27,6 +30,10 @@ async function fixture(models?: ReturnType<typeof defaultSettings>["models"]) {
   return { root, store, service };
 }
 async function dispose(f: Awaited<ReturnType<typeof fixture>>) { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
+function localExperienceDir(f: Awaited<ReturnType<typeof fixture>>): string {
+  const identity = f.service.scopeIdentityResolveProject({ project_root: f.root }).identity as JsonObject;
+  return projectExperienceDirectory(f.store, String((identity.canonical_scope as JsonObject).id), f.root, true);
+}
 
 test("session-only Hook events join one generated turn and stop cannot finalize it twice", async () => {
   const f = await fixture();
@@ -233,7 +240,7 @@ test("Context Hook resolves one shared receipt and records each component withou
 test("Context Hook keeps sibling recall available after a rejected memory capture and records Experience once", async () => {
   const f = await fixture();
   try {
-    const bridge = new CodexHookBridge(f.service); const cwd = "/project/craft";
+    const bridge = new CodexHookBridge(f.service); const cwd = f.root;
     const original = f.service.memoryCaptureUserStatement;
     f.service.memoryCaptureUserStatement = () => { throw new Error("fixture private content"); };
     await bridge.handle("context", { hook_event_name: "UserPromptSubmit", cwd, session_id: "failed-session", prompt: "记住：我偏好无糖咖啡" });
@@ -264,7 +271,7 @@ test("Context Hook keeps sibling recall available after a rejected memory captur
 test("Experience hooks persist only redacted verified signals and propose after two independent turns", async () => {
   const f = await fixture();
   try {
-    const bridge = new CodexHookBridge(f.service); const cwd = "/project/craft";
+    const bridge = new CodexHookBridge(f.service); const cwd = f.root;
     for (const turn of ["one", "two"]) {
       await bridge.handle("experience", { hook_event_name: "UserPromptSubmit", cwd, session_id: "session", turn_id: turn, prompt: "Implement a verified change" });
       await bridge.handle("experience", { hook_event_name: "PostToolUse", cwd, session_id: "session", turn_id: turn, tool_name: "apply_patch", tool_input: { patch: "secret=abcdefghijklmnop" } });
@@ -313,13 +320,13 @@ test("project Experience scenario catalog uses exact mappings and leaves unmappe
   const f = await fixture();
   try {
     const projectId = codexProjectScope(f.root)!.id.replace(/^project:/u, "");
-    const experienceDir = join(f.store.paths.experienceDir, "projects", projectId); await mkdir(experienceDir, { recursive: true });
+    const experienceDir = localExperienceDir(f);
     const catalogPath = join(experienceDir, "experience-scenarios.json");
     await writeFile(catalogPath, JSON.stringify({
       schema: "craft.experience-scenario-catalog.v1",
       scenarios: [{ scenario_key: "coding.test-failure-recovery", verification_commands: ["pnpm test:focused"] }],
     }));
-    assert.equal(existsSync(join(f.root, ".craft_data", "experience", "experience-scenarios.json")), false);
+    assert.equal(existsSync(join(f.store.paths.experienceDir, "projects", projectId, "experience-scenarios.json")), false);
     const bridge = new CodexHookBridge(f.service), base = { cwd: f.root, session_id: "catalog-session" };
     for (const turn_id of ["one", "two"]) {
       await bridge.handle("experience", { ...base, turn_id, hook_event_name: "UserPromptSubmit", prompt: "make a verified project change" });
@@ -366,8 +373,7 @@ test("Experience scenario catalogs keep coarse and fine identities distinct thro
   const f = await fixture();
   try {
     const projectId = codexProjectScope(f.root)!.id.replace(/^project:/u, "");
-    const directory = join(f.store.paths.experienceDir, "projects", projectId);
-    await mkdir(directory, { recursive: true });
+    const directory = localExperienceDir(f);
     const catalogPath = join(directory, "experience-scenarios.json");
     const catalog = (fineParent: string) => ({ schema: "craft.experience-scenario-catalog.v1", scenarios: [
       { scenario_key: "engineering.change", tier: "coarse", verification_commands: [] },
@@ -416,8 +422,7 @@ test("Hook scenario catalog rejects malformed, linked and oversized metadata bef
   const f = await fixture();
   try {
     const projectId = codexProjectScope(f.root)!.id.replace(/^project:/u, "");
-    const directory = join(f.store.paths.experienceDir, "projects", projectId);
-    await mkdir(directory, { recursive: true });
+    const directory = localExperienceDir(f);
     const catalogPath = join(directory, "experience-scenarios.json");
     const bridge = new CodexHookBridge(f.service), base = { cwd: f.root, session_id: "invalid-catalogs" };
     const malformed: unknown[] = [
@@ -527,8 +532,7 @@ test("project Experience command mapping fails closed on linked and oversized ca
   const f = await fixture();
   try {
     const projectId = codexProjectScope(f.root)!.id.replace(/^project:/u, "");
-    const directory = join(f.store.paths.experienceDir, "projects", projectId);
-    await mkdir(directory, { recursive: true });
+    const directory = localExperienceDir(f);
     const catalogPath = join(directory, "experience-scenarios.json"), target = join(f.root, "outside-scenario-catalog.json");
     const valid = JSON.stringify({ schema: "craft.experience-scenario-catalog.v1", scenarios: [
       { scenario_key: "coding.test", verification_commands: ["pnpm test:focused"] },
@@ -556,8 +560,8 @@ test("Experience ignores unverified and unrelated local tool events", async () =
   const f = await fixture();
   try {
     const bridge = new CodexHookBridge(f.service);
-    await bridge.handle("experience", { hook_event_name: "PostToolUse", cwd: "/project/craft", turn_id: "unverified", tool_name: "Bash", tool_input: { command: "echo hello" }, tool_response: { exit_code: 0 } });
-    await bridge.handle("experience", { hook_event_name: "Stop", cwd: "/project/craft", turn_id: "unverified" });
+    await bridge.handle("experience", { hook_event_name: "PostToolUse", cwd: f.root, turn_id: "unverified", tool_name: "Bash", tool_input: { command: "echo hello" }, tool_response: { exit_code: 0 } });
+    await bridge.handle("experience", { hook_event_name: "Stop", cwd: f.root, turn_id: "unverified" });
     assert.equal(f.store.list("workflow_evolution_observation", 10).length, 0);
     const sanitizer = new HookSignalSanitizer();
     assert.equal(sanitizer.signal({ tool_name: "web.run", tool_input: { query: "x" } }), null);
@@ -695,8 +699,8 @@ test("MCP completion keeps unclassified task observations out of cross-task Expe
     const base = { host: "mcp_host", turn_id: "turn", context_receipt_id: String((context.receipt as JsonObject).id), verified: true, verification_outcome: "passed", verification_ref: "test:verified" };
     const completionScope = (context.receipt as JsonObject).scope as JsonObject;
     const completionProjectScope = `project:${String(completionScope.id).replace(/^project:/u, "")}`;
-    assert.deepEqual(f.service.experienceScenarioList({ scope: "project:project" }), { scope: "project:project", catalog_version: 0, scenarios: [] });
-    assert.equal(f.service.experienceScenarioList({ scope_kind: "project", scope_id: "project" }).catalog_version, 0);
+    assert.deepEqual(f.service.experienceScenarioList({ scope: completionProjectScope, project_root: f.root }), { scope: completionProjectScope, catalog_version: 0, scenarios: [] });
+    assert.equal(f.service.experienceScenarioList({ scope_kind: "project", scope_id: String(completionScope.id).replace(/^project:/u, ""), project_root: f.root }).catalog_version, 0);
     assert.throws(() => f.service.experienceScenarioList({ scope: "global" }), /explicit project scope/u);
     assert.throws(() => f.service.experienceScenarioList({ scope_kind: "project" }), /explicit project scope/u);
     const first = f.service.learningCycleFinalize({ ...base, task_id: "one" });
@@ -728,6 +732,9 @@ test("MCP completion keeps unclassified task observations out of cross-task Expe
     assert(dailyNames.includes("craft_experience_scenario_migration_propose"));
     assert(!dailyNames.includes("craft_experience_scenario_retire"));
     const migrationBefore = f.service.experienceScenarioList({ scope: completionProjectScope });
+    assert.throws(() => f.service.experienceScenarioMigrationPropose({ scope: completionProjectScope, project_root: f.root,
+      mode: "merge", source_keys: ["missing.one", "missing.two"], targets: [{ scenario_key: "merged" }],
+      expected_catalog_version: migrationBefore.catalog_version, request_id: "merge-missing-v1", reason: "exercise registered root" }), /source|scenario|migration/iu);
     const migration = await experienceMcp.handle({ jsonrpc: "2.0", id: "experience-split-propose", method: "tools/call", params: {
       name: "craft_experience_scenario_migration_propose", arguments: { scope: completionProjectScope, mode: "split",
         source_keys: ["engineering.tests"], targets: [
@@ -774,7 +781,7 @@ test("MCP completion keeps unclassified task observations out of cross-task Expe
     assert.equal(f.store.find("experience_release", String(routeableProcedure.id))?.status, "revoked");
     assert.equal(f.store.get("experience_procedure", String(pendingProcedure.id)).lifecycle, "rolled_back");
     assert.equal(f.store.get("experience_evaluation_dispatch", String(pendingDispatch.id)).status, "cancelled");
-    const retirementReplay = f.service.experienceScenarioRetire({ scope: completionProjectScope, scenario_key: "engineering.tests",
+    const retirementReplay = f.service.experienceScenarioRetire({ scope: completionProjectScope, project_root: f.root, scenario_key: "engineering.tests",
       expected_catalog_version: experienceCatalog.catalog_version, request_id: "retire-tests-v1", reason: "scenario definition is obsolete" });
     assert.equal(retirementReplay.idempotent, true);
     assert.equal(retirementReplay.revoked_procedure_count, 0);
@@ -991,7 +998,7 @@ test("a single configured Craft model bootstraps a bounded workflow evolution pr
 test("Hook journal covers missing identity, updates signals, and learning records failed verification", async () => {
   const f = await fixture();
   try {
-    const bridge = new CodexHookBridge(f.service); const cwd = "/project/craft";
+    const bridge = new CodexHookBridge(f.service); const cwd = f.root;
     const sanitizer = new HookSignalSanitizer();
     const signal = sanitizer.signal({ tool_name: "Edit", tool_input: {} });
     assert(signal);
@@ -1026,18 +1033,18 @@ test("Hook bridge is fail-open for unsupported events and component failures", a
   const f = await fixture();
   try {
     const bridge = new CodexHookBridge(f.service);
-    assert.deepEqual(await bridge.handle("knowledge", { hook_event_name: "UnknownEvent", cwd: "/project/craft" }), {});
-    assert.deepEqual(await bridge.handle("knowledge", { hook_event_name: "Stop", cwd: "/project/craft" }), {});
-    assert.deepEqual(await bridge.handle("experience", { hook_event_name: "UserPromptSubmit", cwd: "/project/craft", user_prompt: "no stored context" }), {});
+    assert.deepEqual(await bridge.handle("knowledge", { hook_event_name: "UnknownEvent", cwd: f.root }), {});
+    assert.deepEqual(await bridge.handle("knowledge", { hook_event_name: "Stop", cwd: f.root }), {});
+    assert.deepEqual(await bridge.handle("experience", { hook_event_name: "UserPromptSubmit", cwd: f.root, user_prompt: "no stored context" }), {});
     const original = f.service.contextWorkingSets.resolve;
     f.service.contextWorkingSets.resolve = async () => { throw new Error("fixture failure"); };
-    assert.deepEqual(await bridge.handle("knowledge", { hook_event_name: "UserPromptSubmit", cwd: "/project/craft", prompt: "context" }), {});
+    assert.deepEqual(await bridge.handle("knowledge", { hook_event_name: "UserPromptSubmit", cwd: f.root, prompt: "context" }), {});
     f.service.contextWorkingSets.resolve = original;
     f.service.contextWorkingSets.resolve = async () => ({ items: [{ memory_id: "stub", memory_version: 1, content: "stub" }], contributions: [{ items: "not-an-array" }], receipt: null }) as never;
-    const projected = await bridge.handle("knowledge", { hook_event_name: "UserPromptSubmit", cwd: "/project/craft", prompt: "context" });
+    const projected = await bridge.handle("knowledge", { hook_event_name: "UserPromptSubmit", cwd: f.root, prompt: "context" });
     assert.match(String(projected.additionalContext), /"receipt_id":null/u);
     f.service.contextWorkingSets.resolve = async () => { throw "fixture failure"; };
-    assert.deepEqual(await bridge.handle("knowledge", { hook_event_name: "UserPromptSubmit", cwd: "/project/craft", prompt: "context" }), {});
+    assert.deepEqual(await bridge.handle("knowledge", { hook_event_name: "UserPromptSubmit", cwd: f.root, prompt: "context" }), {});
     f.service.contextWorkingSets.resolve = original;
     assert.equal(f.store.events("codex-hook").filter((event) => event.event_type === "codex_hook.failed").length, 2);
     assert.deepEqual(await bridge.handle("knowledge", { hook_event_name: "UserPromptSubmit", prompt: "context" }), {});
@@ -1047,7 +1054,7 @@ test("Hook bridge is fail-open for unsupported events and component failures", a
 test("Hook mints a fresh turn when the Host omits its native turn identifier", async () => {
   const f = await fixture();
   try {
-    const bridge = new CodexHookBridge(f.service); const cwd = "/project/craft";
+    const bridge = new CodexHookBridge(f.service); const cwd = f.root;
     await bridge.handle("experience", { hook_event_name: "UserPromptSubmit", cwd, session_id: "native-less", prompt: "Review this change" });
     const firstTurn = String(f.store.list("context_hook_session", 10)[0]!.last_turn_id);
     await bridge.handle("experience", { hook_event_name: "PostToolUse", cwd, session_id: "native-less", tool_name: "Edit" });
@@ -1068,10 +1075,10 @@ test("Lifecycle hooks record boundaries without counting readiness as component 
   const f = await fixture();
   try {
     const bridge = new CodexHookBridge(f.service);
-    await bridge.handle("knowledge", { hook_event_name: "SessionStart", cwd: "/project/craft", session_id: "session", source: "claude" });
-    await bridge.handle("knowledge", { hook_event_name: "Stop", cwd: "/project/craft", session_id: "session", turn_id: "turn" });
-    await bridge.handle("knowledge", { hook_event_name: "SessionEnd", cwd: "/project/craft", session_id: "session", reason: "other" });
-    await bridge.handle("knowledge", { hook_event_name: "SessionEnd", cwd: "/project/craft", reason: "missing-session" });
+    await bridge.handle("knowledge", { hook_event_name: "SessionStart", cwd: f.root, session_id: "session", source: "claude" });
+    await bridge.handle("knowledge", { hook_event_name: "Stop", cwd: f.root, session_id: "session", turn_id: "turn" });
+    await bridge.handle("knowledge", { hook_event_name: "SessionEnd", cwd: f.root, session_id: "session", reason: "other" });
+    await bridge.handle("knowledge", { hook_event_name: "SessionEnd", cwd: f.root, reason: "missing-session" });
     const events = f.store.events("codex-hook").filter((event) => event.event_type === "codex_hook.lifecycle");
     assert.equal(events.length, 4);
     assert.deepEqual(events.map((event) => (event.payload as JsonObject).event), ["SessionStart", "Stop", "SessionEnd", "SessionEnd"]);
@@ -1129,4 +1136,199 @@ test("reused native turn IDs remain distinct across sessions and legacy journals
     await bridge.handle("experience", { ...base, turn_id: turn, session_id: "legacy-session", hook_event_name: "Stop" });
     assert(f.store.get("codex_hook_turn", legacyId).closed_at);
   } finally { await dispose(f); }
+});
+
+test("verified Hook tasks create a scoped classification ticket from a redacted goal and remove staging data", async () => {
+  const previousHost = process.env.CRAFT_LEARNING_MODEL_HOST;
+  process.env.CRAFT_LEARNING_MODEL_HOST = "codex-cli";
+  const f = await fixture();
+  try {
+    await mkdir(join(f.root, "src"), { recursive: true });
+    await writeFile(join(f.root, "src", "index.ts"), "export const ready = true;\n");
+    const sanitizer = new HookSignalSanitizer();
+    assert.equal(sanitizer.signal({ cwd: f.root, tool_name: "Edit", tool_input: { file_path: "src/index.ts" } })?.observed_path, "src/index.ts");
+    assert.equal(sanitizer.signal({ cwd: f.root, tool_name: "Edit", tool_input: { file_path: "../outside.ts" } })?.observed_path, undefined);
+    assert.equal(sanitizer.signal({ cwd: f.root, tool_name: "Edit", tool_input: { file_path: ".craft_data/private.md" } })?.observed_path, undefined);
+    await symlink(join(f.root, "src", "index.ts"), join(f.root, "src", "linked.ts"));
+    assert.equal(sanitizer.signal({ cwd: f.root, tool_name: "Edit", tool_input: { file_path: "src/linked.ts" } })?.observed_path, undefined);
+    assert.equal(sanitizer.signal({ cwd: join(f.root, "missing"), tool_name: "Edit", tool_input: { file_path: "src/index.ts" } })?.observed_path, undefined);
+
+    const directContext = await f.service.contextOpen({ project_root: f.root, query: "verified change", include_codebase: false });
+    const directBase = { host: "codex", task_id: "unsafe-context", turn_id: "unsafe-context-turn",
+      context_receipt_id: String((directContext.receipt as JsonObject).id), verified: true, verification_outcome: "passed",
+      verification_ref: "test:verification" };
+    const directReceipt = f.store.get("context_resolution_receipt", String(directContext.receipt && (directContext.receipt as JsonObject).id));
+    const originalScope = directReceipt.scope as JsonObject;
+    f.store.save("context_resolution_receipt", String(directReceipt.id), { ...directReceipt,
+      scope: { ...originalScope, id: String(originalScope.id).replace(/^project:/u, "") } });
+    f.service.learningCycleFinalize({ ...directBase, task_id: "unprefixed-project-scope" });
+    f.store.save("context_resolution_receipt", String(directReceipt.id), { ...directReceipt, scope: originalScope });
+    const safeScenarioContext = { sanitized: true, content_stored: false, task_goal: "完善项目验证流程", effect_summary: "定点验证通过" };
+    for (const scenario_context of [null, { sanitized: true, content_stored: false, task_goal: "token=abcdefghijk", effect_summary: "verified" }]) {
+      assert.throws(() => f.service.learningCycleFinalize({ ...directBase, scenario_context }), /scenario_context/u);
+    }
+    assert.throws(() => f.service.learningCycleFinalize({ ...directBase, task_id: "unsanitized-context",
+      scenario_context: { ...safeScenarioContext, sanitized: false } }), /scenario_context/u);
+    assert.throws(() => f.service.learningCycleFinalize({ ...directBase, task_id: "stored-content-context",
+      scenario_context: { ...safeScenarioContext, content_stored: true } }), /scenario_context/u);
+    assert.throws(() => f.service.learningCycleFinalize({ ...directBase, task_id: "unsafe-verifier-ref",
+      verification_ref: "token=abcdefghijk", scenario_context: safeScenarioContext }), /verification_ref is not safe/u);
+    const directScope = (directContext.receipt as JsonObject).scope as JsonObject;
+    const directProjectId = String(directScope.id).replace(/^project:/u, "");
+    const directExperienceDir = localExperienceDir(f);
+    const { recordExperienceScenario, retireExperienceScenario } = await import("../capability/craft-experience/scenario-catalog.ts");
+    recordExperienceScenario({ experience_dir: directExperienceDir, project_id: directProjectId, scenario_key: "unknown.fine",
+      observation_id: "seed-unknown-fine", verified_task_id: "seed-unknown-fine" });
+    retireExperienceScenario({ experience_dir: directExperienceDir, project_id: directProjectId, scenario_key: "unknown.fine",
+      expected_catalog_version: 1, request_id: "retire-unknown-fine", reason: "no longer classified" });
+    assert.throws(() => f.service.learningCycleFinalize({ ...directBase, task_id: "coarse-without-known-fine",
+      scenario_key: "unknown.fine", coarse_scenario_key: "engineering", scenario_context: safeScenarioContext }), /requires scenario_key/u);
+    assert.equal(f.service.learningCycleFinalize({ ...directBase, task_id: "registered-root-inferred",
+      scenario_context: safeScenarioContext }).scenario_classification_request !== null, true);
+    assert.throws(() => f.service.learningCycleFinalize({ ...directBase, scenario_key: "coding.safe", expected_scenario_catalog_version: -1 }), /expected_scenario_catalog_version/u);
+    assert.equal(f.service.learningCycleFinalize({ ...directBase, task_id: "catalog-version-ok", scenario_key: "coding.safe",
+      expected_scenario_catalog_version: 2 }).status, "observed");
+    assert.throws(() => f.service.learningCycleFinalize({ ...directBase, task_id: "catalog-version-stale", scenario_key: "coding.safe",
+      expected_scenario_catalog_version: 2 }), /catalog changed/u);
+
+    const rawPrompt = "修复 Experience 场景分类触发链路\n```ts\nconst rawCodeMarker = 'must-not-persist';\n```";
+    assert.equal(sanitizedExperienceTaskGoal(rawPrompt), "修复 Experience 场景分类触发链路");
+    assert.equal(sanitizedExperienceTaskGoal("token=abcdefghijk"), null);
+    const bridge = new CodexHookBridge(f.service), base = { cwd: f.root, session_id: "auto-classification-session", turn_id: "auto-classification-turn" };
+    await bridge.handle("experience", { ...base, hook_event_name: "UserPromptSubmit", prompt: rawPrompt });
+    const experienceDir = localExperienceDir(f), pendingDir = join(experienceDir, "scenario-classification", "pending");
+    assert.equal((await readdir(pendingDir)).length, 1);
+    await bridge.handle("experience", { ...base, hook_event_name: "UserPromptSubmit", prompt: rawPrompt });
+    await bridge.handle("experience", { ...base, hook_event_name: "UserPromptSubmit", prompt: "Use a different goal for this same turn" });
+    await bridge.handle("experience", { ...base, hook_event_name: "PostToolUse", tool_name: "Edit" });
+    await bridge.handle("experience", { ...base, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "pnpm test:focused" }, tool_response: { exit_code: 0 } });
+    await bridge.handle("experience", { ...base, hook_event_name: "Stop" });
+
+    const references = f.store.list("experience_scenario_classification_request_ref", 10);
+    assert.equal(references.length, 2);
+    const hookReference = references.find(reference => {
+      const candidate = f.service.experienceScenarioClassificationRequestGet({ request_id: reference.id, scope: reference.scope, project_root: f.root }).request as JsonObject;
+      return (candidate.context as JsonObject).turn_id === base.turn_id;
+    })!;
+    const requestId = String(hookReference.id);
+    const scope = String(hookReference.scope);
+    assert.throws(() => f.service.experienceScenarioClassificationRequestGet({ request_id: requestId, project_root: f.root }), /explicit project scope/u);
+    assert.throws(() => f.service.experienceScenarioClassificationRequestGet({ request_id: requestId, scope: "global", project_root: f.root }), /explicit project scope/u);
+    assert.throws(() => f.service.experienceScenarioClassificationRequestGet({ request_id: " ", scope, project_root: f.root }), /explicit project scope/u);
+    assert.throws(() => f.service.experienceScenarioClassificationRequestGet({ request_id: requestId, scope: "project:other", project_root: f.root }), /reference scope/u);
+    const originalHookReference = f.store.find("experience_scenario_classification_request_ref", requestId)!;
+    f.store.save("experience_scenario_classification_request_ref", requestId, { ...originalHookReference, project_path_alias_digest: "invalid" });
+    assert.throws(() => f.service.experienceScenarioClassificationRequestGet({ request_id: requestId, scope, project_root: f.root }), /alias digest is invalid/u);
+    f.store.save("experience_scenario_classification_request_ref", requestId, originalHookReference);
+    const request = f.service.experienceScenarioClassificationRequestGet({ request_id: requestId, scope, project_root: f.root }).request as JsonObject;
+    assert.equal((f.service.experienceScenarioClassificationRequestGet({ request_id: requestId, scope }).request as JsonObject).scope, scope);
+    const unaliasedReference = references.find(reference => reference.id !== requestId)!;
+    const unaliasedRequest = f.service.experienceScenarioClassificationRequestGet({ request_id: unaliasedReference.id, scope: unaliasedReference.scope }).request as JsonObject;
+    assert.equal(f.service.experienceScenarioClassificationRequestComplete({ request_id: unaliasedReference.id, scope: unaliasedReference.scope,
+      expected_version: unaliasedRequest.version, status: "unclassified", result_digest: `sha256:${"2".repeat(64)}` }).idempotent, false);
+    const requestPath = join(localExperienceDir(f), "scenario-classification", `${requestId}.json`);
+    const requestSource = await readFile(requestPath, "utf8"), alteredRequest = JSON.parse(requestSource) as JsonObject;
+    alteredRequest.scope = "project:other";
+    await writeFile(requestPath, JSON.stringify(alteredRequest));
+    assert.throws(() => f.service.experienceScenarioClassificationRequestGet({ request_id: requestId, scope }), /request scope does not match/u);
+    assert.throws(() => f.service.experienceScenarioClassificationRequestComplete({ request_id: requestId, scope,
+      expected_version: request.version, status: "unclassified", result_digest: `sha256:${"1".repeat(64)}` }), /request scope does not match/u);
+    await writeFile(requestPath, requestSource);
+    for (const status of ["classified", "unclassified"] as const) {
+      f.store.save("experience_scenario_classification_request_ref", requestId, { ...originalHookReference,
+        status: "unclassified", result_digest: `sha256:${"2".repeat(64)}` });
+      assert.throws(() => f.service.experienceScenarioClassificationRequestComplete({ request_id: requestId, scope,
+        project_root: f.root, expected_version: request.version, status, result_digest: `sha256:${"3".repeat(64)}` }), /reference conflicts/u);
+      await writeFile(requestPath, requestSource);
+    }
+    f.store.save("experience_scenario_classification_request_ref", requestId, originalHookReference);
+    const context = request.context as JsonObject;
+    assert.throws(() => f.service.experienceScenarioClassificationRequestComplete({ request_id: requestId, scope,
+      project_root: f.root, expected_version: request.version, status: "pending", result_digest: `sha256:${"d".repeat(64)}` }), /status is invalid/u);
+    assert.throws(() => f.service.experienceScenarioClassificationRequestComplete({ request_id: requestId, scope: "global",
+      project_root: f.root, expected_version: request.version, status: "unclassified", result_digest: `sha256:${"e".repeat(64)}` }), /explicit project scope/u);
+    assert.throws(() => f.service.experienceScenarioClassificationRequestComplete({ request_id: requestId,
+      expected_version: request.version, status: "unclassified", result_digest: `sha256:${"e".repeat(64)}` }), /explicit project scope/u);
+    assert.throws(() => f.service.experienceScenarioClassificationRequestComplete({ request_id: requestId, scope,
+      expected_version: request.version, status: "unclassified", result_digest: null }), /completion is invalid/u);
+    f.store.save("experience_scenario_classification_request_ref", requestId, { ...originalHookReference, project_path_alias_digest: "invalid" });
+    assert.throws(() => f.service.experienceScenarioClassificationRequestComplete({ request_id: requestId, scope,
+      project_root: f.root, expected_version: request.version, status: "unclassified", result_digest: `sha256:${"f".repeat(64)}` }), /alias digest is invalid/u);
+    f.store.save("experience_scenario_classification_request_ref", requestId, originalHookReference);
+    f.store.save("experience_scenario_classification_request_ref", requestId, { ...originalHookReference, scope: "project:other" });
+    assert.throws(() => f.service.experienceScenarioClassificationRequestComplete({ request_id: requestId, scope,
+      project_root: f.root, expected_version: request.version, status: "unclassified", result_digest: `sha256:${"f".repeat(64)}` }), /reference scope/u);
+    f.store.save("experience_scenario_classification_request_ref", requestId, originalHookReference);
+    assert.equal(context.task_goal, "修复 Experience 场景分类触发链路");
+    assert.equal(context.sanitized, true);
+    assert.equal(context.content_stored, false);
+    const replay = f.service.learningCycleFinalize({ host: context.host, task_id: context.task_id, turn_id: context.turn_id,
+      context_receipt_id: context.context_receipt_id, verified: true, verification_outcome: context.outcome,
+      verification_ref: context.verification_ref, project_root: f.root, scenario_context: { task_goal: context.task_goal,
+        effect_summary: context.effect_summary, sanitized: true, content_stored: false }, observed_paths: context.observed_paths,
+      ...(typeof context.scenario_verifier_digest === "string" ? { scenario_verifier_digest: context.scenario_verifier_digest } : {}) });
+    assert.equal(replay.idempotent, true);
+    const tamperedReference = f.store.find("experience_scenario_classification_request_ref", requestId)!;
+    f.store.save("experience_scenario_classification_request_ref", requestId, { ...tamperedReference, identity_digest: "sha256:tampered" });
+    assert.throws(() => f.service.learningCycleFinalize({ host: context.host, task_id: context.task_id, turn_id: context.turn_id,
+      context_receipt_id: context.context_receipt_id, verified: true, verification_outcome: context.outcome,
+      verification_ref: context.verification_ref, project_root: f.root, scenario_context: { task_goal: context.task_goal,
+        effect_summary: context.effect_summary, sanitized: true, content_stored: false }, observed_paths: context.observed_paths,
+      ...(typeof context.scenario_verifier_digest === "string" ? { scenario_verifier_digest: context.scenario_verifier_digest } : {}) }),
+    /Experience classification request reference idempotency conflict/u);
+    const tickets = f.service.evaluationModelTicketList({ purpose: "workflow_evolution", limit: 10 }).tickets as JsonObject[];
+    const ticket = tickets.find(item => (item.target as JsonObject).id === requestId)!;
+    assert.equal((ticket.target as JsonObject).kind, "experience_scenario_classification_request");
+    const resultDigest = `sha256:${"a".repeat(64)}`;
+    assert.throws(() => f.service.evaluationModelTicketComplete({ ticket_id: ticket.id, result_digest: resultDigest }), /exact resolved request/u);
+    const requestContext = request.context as JsonObject;
+    f.store.save("experience_scenario_classification_request_ref", requestId, { ...hookReference, identity_digest: "sha256:tampered" });
+    assert.throws(() => f.service.learningCycleFinalize({ host: requestContext.host, task_id: requestContext.task_id, turn_id: requestContext.turn_id,
+      context_receipt_id: requestContext.context_receipt_id, verified: true, verification_outcome: requestContext.outcome,
+      verification_ref: requestContext.verification_ref, project_root: f.root, scenario_context: {
+        task_goal: requestContext.task_goal, effect_summary: requestContext.effect_summary, sanitized: true, content_stored: false },
+      observed_paths: requestContext.observed_paths }), /idempotency conflict/u);
+    const completed = f.service.experienceScenarioClassificationRequestComplete({ request_id: requestId, scope, project_root: f.root,
+      expected_version: request.version, status: "unclassified", result_digest: resultDigest });
+    assert.equal((completed.request as JsonObject).status, "unclassified");
+    assert.equal(f.service.experienceScenarioClassificationRequestComplete({ request_id: requestId, scope, project_root: f.root,
+      expected_version: request.version, status: "unclassified", result_digest: resultDigest }).idempotent, true);
+    assert.throws(() => f.service.experienceScenarioClassificationRequestComplete({ request_id: requestId, scope, project_root: f.root,
+      expected_version: request.version, status: "classified", result_digest: `sha256:${"b".repeat(64)}` }), /conflicts/u);
+    assert.throws(() => f.service.experienceScenarioClassificationRequestComplete({ request_id: requestId, scope, project_root: f.root,
+      expected_version: request.version, status: "unclassified", result_digest: `sha256:${"c".repeat(64)}` }), /conflicts/u);
+    assert.equal((f.service.evaluationModelTicketComplete({ ticket_id: ticket.id, result_digest: resultDigest }).ticket as JsonObject).status, "completed");
+    assert.equal((await readdir(pendingDir)).length, 0);
+    const requestFile = await readFile(join(experienceDir, "scenario-classification", `${requestId}.json`), "utf8");
+    assert.doesNotMatch(requestFile, /must-not-persist/u);
+    const journal = f.store.list("codex_hook_turn", 10)[0]!;
+    assert.doesNotMatch(JSON.stringify(journal), /must-not-persist/u);
+  } finally {
+    if (previousHost === undefined) delete process.env.CRAFT_LEARNING_MODEL_HOST;
+    else process.env.CRAFT_LEARNING_MODEL_HOST = previousHost;
+    await dispose(f);
+  }
+});
+
+test("Experience Hook finalization validates project receipt identity and finds non-project observations", async () => {
+  const f = await fixture();
+  const otherRoot = await mkdtemp(join(tmpdir(), "craft-codex-hook-other-project-"));
+  try {
+    const bridge = new CodexHookBridge(f.service), signalEdit = new HookSignalSanitizer().signal({ tool_name: "Edit" })!;
+    const signalVerify = new HookSignalSanitizer().signal({ tool_name: "Bash", tool_input: { command: "npm test" }, tool_response: { exit_code: 0 } })!;
+    const foreign = await f.service.contextOpen({ project_root: otherRoot, query: "foreign receipt", include_codebase: false });
+    const base = { cwd: f.root, session_id: "foreign-context-session", turn_id: "foreign-context-turn" };
+    bridge.journal.record(base, signalEdit);
+    bridge.journal.record(base, signalVerify);
+    bridge.journal.bindContextReceipt(base, foreign.receipt as JsonObject);
+    assert.throws(() => bridge.learning.finalize(base), /does not match the Context receipt/u);
+
+    const evidence = f.service.evidenceRecord({ source_type: "host_completion_signal", confidence: "bounded", claim: "user scope outcome",
+      metadata: { provenance: "host_completion_signal", host: "codex", turn_id: "user-turn", context_receipt_id: "user-receipt", content_stored: false } });
+    f.service.workflowEvolutionObserve({ scenario_key: "user-flow", source_kind: "host:codex", source_id: "user-task",
+      source_digest: "sha256:user-observation", outcome: "passed", scope: "user:user-1", evidence_ids: [evidence.id], sanitized: true, content_stored: false });
+    const journal = { scope: { kind: "user", id: "user-1" }, turn_id: "user-turn", context_receipt_id: "user-receipt" } as JsonObject;
+    const internal = bridge.learning as unknown as { finalizedTurn(input: JsonObject, value: JsonObject): JsonObject | null };
+    assert.equal((internal.finalizedTurn({}, journal)!.source as JsonObject).scope, "user:user-1");
+  } finally { await f.store.close(); await Promise.all([rm(f.root, { recursive: true, force: true }), rm(otherRoot, { recursive: true, force: true })]); }
 });
