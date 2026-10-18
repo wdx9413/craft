@@ -9,6 +9,7 @@ import { craftPaths } from "../../core/infrastructure/paths.ts";
 import { CraftService } from "../../core/service.ts";
 import { scoreImpactSet, summarizeImpactCases, type ImpactCaseScore } from "./codebase-impact-evaluation.ts";
 import { summarizeRetrievalByLanguage } from "./codebase-retrieval-strata.ts";
+import { readCodebaseEvaluationSymbolNodes } from "./codebase-evaluation-graph.ts";
 import { assertEvaluationStateStable, checkpointManifestDigest, digestEvaluationMaterial, readGitEvaluationState } from "./codebase-evaluation-provenance.ts";
 import { CODEBASE_LSP_CONFIG } from "../../capability/craft-codebase/lsp-config.ts";
 
@@ -162,8 +163,7 @@ try {
   finally { process.argv[1] = previousEntry!; }
   assert.equal(ready.status, "ready", "evaluation repository must have a ready semantic index");
   const indexRecord = store.get("codebase_index", String(ready.index_id));
-  const nodes = (indexRecord.node_shard_ids as string[]).flatMap(id => store.get("codebase_index_shard", id).nodes as Record<string, unknown>[])
-    .filter(node => node.kind === "symbol");
+  const nodes = readCodebaseEvaluationSymbolNodes(store, repository, String(ready.workspace_id), indexRecord);
   const callGraphRows = callGraphCases.map(item => {
     const targets = service.codebaseSymbolFind({ workspace_id: ready.workspace_id, index_id: ready.index_id, query: item.target_name, limit: 100 })
       .symbols as Array<{ readonly id: string; readonly name: string; readonly path: string }>;

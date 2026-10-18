@@ -1671,6 +1671,26 @@
       "branches": true
     },
     {
+      "name": "codebase-evaluation-graph",
+      "include": [
+        "scripts/eval/codebase-evaluation-graph.ts"
+      ],
+      "tests": [
+        "tests/codebase-evaluation-graph.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "codebase-evaluation-provenance",
+      "include": [
+        "scripts/eval/codebase-evaluation-provenance.ts"
+      ],
+      "tests": [
+        "tests/codebase-evaluation-provenance.test.ts"
+      ],
+      "branches": true
+    },
+    {
       "name": "codebase-retrieval-language-strata",
       "include": [
         "scripts/eval/codebase-retrieval-strata.ts"
