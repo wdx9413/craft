@@ -1,3 +1,9 @@
+## v0.12.55（学习 Worker 单实例锁）
+
+- 同一 `~/.craft_data` 下，Context Worker 原子占用 Knowledge 与 Experience 组件锁，Knowledge/Experience 独立 Worker 仅占用各自锁，避免多个 MCP 会话重复消费同一学习票据。
+- 锁元数据先完整写入私有临时文件，再通过同目录硬链接原子发布；活动锁不重复启动，死进程锁可恢复，损坏状态仍安全失败。
+- 为并发启动、死锁恢复、所有权变化、异常清理补充定向测试；模块增量覆盖率保持 100%。
+
 ## v0.12.54（Knowledge Ticket Trace 闭环）
 
 - Knowledge 分类与候选审核 Ticket 必须绑定真实 Host Trace，并验证模型完成和结果摘要；历史无可验证 Trace 的完成票据会重新发行恢复票据。

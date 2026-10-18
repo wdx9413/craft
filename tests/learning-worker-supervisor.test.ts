@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { realpathSync } from "node:fs";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { link, mkdir, mkdtemp, open, readFile, rename, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ChildProcess } from "node:child_process";
 import test from "node:test";
-import { resolveLearningWorkerLaunch, startContextLearningWorker } from "../core/interfaces/learning-worker-supervisor.ts";
+import { acquireLearningWorkerLocks, learningWorkerOwnerAlive, resolveLearningWorkerLaunch, startContextLearningWorker } from "../core/interfaces/learning-worker-supervisor.ts";
 
 async function fixture(worker = "setInterval(() => {}, 1000);\n") {
   const root = await mkdtemp(join(tmpdir(), "craft-learning-supervisor-"));
@@ -16,6 +16,16 @@ async function fixture(worker = "setInterval(() => {}, 1000);\n") {
   await writeFile(server, ""); await writeFile(serverTs, ""); await writeFile(workerPath, worker);
   return { root, server, serverTs, workerPath, close: () => rm(root, { recursive: true, force: true }) };
 }
+
+function startWorker(f: Awaited<ReturnType<typeof fixture>>, options: Parameters<typeof startContextLearningWorker>[0]) {
+  return startContextLearningWorker({ ...options, env: { CRAFT_DATA_DIR: f.root, ...options.env } });
+}
+
+test("worker owner liveness distinguishes dead processes from permission-denied probes", () => {
+  assert.equal(learningWorkerOwnerAlive(12, () => undefined), true);
+  assert.equal(learningWorkerOwnerAlive(12, () => { throw Object.assign(new Error("missing"), { code: "ESRCH" }); }), false);
+  assert.equal(learningWorkerOwnerAlive(12, () => { throw Object.assign(new Error("denied"), { code: "EPERM" }); }), true);
+});
 
 test("worker launch resolves source, packaged, built, and unavailable distributions", async () => {
   const f = await fixture();
@@ -30,8 +40,8 @@ test("worker launch resolves source, packaged, built, and unavailable distributi
   } finally { await f.close(); }
 });
 
-test("worker supervisor starts isolated Knowledge and Experience workers and skips unrelated products", async () => {
-  const f = await fixture(); const failures: string[] = [], launches: Array<{ args: string[]; env: NodeJS.ProcessEnv }> = [];
+test("worker supervisor starts one worker per free component and skips overlapping products", async () => {
+  const f = await fixture(); const failures: string[] = [], skips: string[] = [], launches: Array<{ args: string[]; env: NodeJS.ProcessEnv }> = [];
   try {
     const spawnWorker = ((_command: string, args: string[], options: { env: NodeJS.ProcessEnv }) => {
       launches.push({ args, env: options.env });
@@ -39,40 +49,251 @@ test("worker supervisor starts isolated Knowledge and Experience workers and ski
       child.kill = () => { queueMicrotask(() => child.emit("exit", 0)); return true; };
       return child;
     }) as unknown as typeof import("node:child_process").spawn;
-    const stopExperience = await startContextLearningWorker({ mode: "component-experience-daily", server_entrypoint: f.server, env: {}, spawn_process: spawnWorker });
-    const stopKnowledge = await startContextLearningWorker({ mode: "component-knowledge-daily", server_entrypoint: f.server, env: {}, spawn_process: spawnWorker });
-    const stopContext = await startContextLearningWorker({ mode: "component-context-complete", server_entrypoint: f.server, env: {}, spawn_process: spawnWorker });
-    assert.equal(launches.length, 3);
+    const stopExperience = await startWorker(f, { mode: "component-experience-daily", server_entrypoint: f.server, env: {}, spawn_process: spawnWorker });
+    assert.equal(await startWorker(f, { mode: "component-experience-daily", server_entrypoint: f.server, env: {}, spawn_process: spawnWorker }), undefined);
+    const stopKnowledge = await startWorker(f, { mode: "component-knowledge-daily", server_entrypoint: f.server, env: {}, spawn_process: spawnWorker });
+    const stopContext = await startWorker(f, { mode: "component-context-complete", server_entrypoint: f.server, env: {}, spawn_process: spawnWorker, on_skip: value => skips.push(value) });
+    assert.equal(launches.length, 2);
+    assert.deepEqual(skips, ["worker_already_running"]);
     assert.deepEqual(JSON.parse(launches[0]!.env.CRAFT_EXPERIENCE_MCP_ARGS!), [realpathSync(f.server), "--product", "experience"]);
     assert.equal(launches[0]!.env.CRAFT_LEARNING_COMPONENTS, "experience");
     assert.deepEqual(JSON.parse(launches[1]!.env.CRAFT_EXPERIENCE_MCP_ARGS!), [realpathSync(f.server), "--product", "knowledge"]);
     assert.equal(launches[1]!.env.CRAFT_LEARNING_COMPONENTS, "knowledge");
+    await Promise.all([stopExperience?.(), stopKnowledge?.()]);
+    const stopContextAfterRelease = await startWorker(f, { mode: "component-context-complete", server_entrypoint: f.server, env: {}, spawn_process: spawnWorker });
     assert.deepEqual(JSON.parse(launches[2]!.env.CRAFT_EXPERIENCE_MCP_ARGS!), [realpathSync(f.server), "--product", "context"]);
     assert.equal(launches[2]!.env.CRAFT_LEARNING_COMPONENTS, "experience,knowledge");
-    await Promise.all([stopExperience?.(), stopKnowledge?.(), stopContext?.()]);
-    assert.equal(await startContextLearningWorker({ mode: "component-memory-daily", server_entrypoint: f.server, env: {} }), undefined);
-    assert.equal(await startContextLearningWorker({ mode: "component-context-daily", server_entrypoint: f.server, env: { CRAFT_CONTINUOUS_LEARNING: "0" } }), undefined);
-    assert.equal(await startContextLearningWorker({ mode: "component-context-daily", server_entrypoint: f.server, env: {}, exists: () => false, on_failure: value => failures.push(value) }), undefined);
-    assert.equal(await startContextLearningWorker({ mode: "component-context-daily", env: {}, on_failure: value => failures.push(value) }), undefined);
+    await stopContextAfterRelease?.();
+    await stopContext?.();
+    assert.equal(await startWorker(f, { mode: "component-memory-daily", server_entrypoint: f.server, env: {} }), undefined);
+    assert.equal(await startWorker(f, { mode: "component-context-daily", server_entrypoint: f.server, env: { CRAFT_CONTINUOUS_LEARNING: "0" } }), undefined);
+    assert.equal(await startWorker(f, { mode: "component-context-daily", server_entrypoint: f.server, env: {}, exists: () => false, on_failure: value => failures.push(value) }), undefined);
+    assert.equal(await startWorker(f, { mode: "component-context-daily", env: {}, on_failure: value => failures.push(value) }), undefined);
     assert.deepEqual(failures, ["worker_entrypoint_unavailable", "worker_entrypoint_unavailable"]);
+  } finally { await f.close(); }
+});
+
+test("worker supervisor serializes concurrent MCP sessions and releases all component locks", async () => {
+  const f = await fixture(); const skips: string[] = [], launches: string[] = [];
+  try {
+    const spawnWorker = ((command: string) => {
+      launches.push(command);
+      const child = new EventEmitter() as EventEmitter & { kill: (signal?: string) => boolean };
+      child.kill = signal => { if (signal === "SIGTERM") queueMicrotask(() => child.emit("exit", 0)); return true; };
+      return child;
+    }) as unknown as typeof import("node:child_process").spawn;
+    const opts = { mode: "component-context-daily", server_entrypoint: f.server, env: {}, spawn_process: spawnWorker,
+      on_skip: (reason: string) => skips.push(reason) };
+    const [first, second] = await Promise.all([startWorker(f, opts), startWorker(f, opts)]);
+    assert.equal(launches.length, 1);
+    assert.equal([first, second].filter(Boolean).length, 1);
+    assert.deepEqual(skips, ["worker_already_running"]);
+    await (first ?? second)?.();
+    const knowledge = await startWorker(f, { ...opts, mode: "component-knowledge-daily" });
+    const experience = await startWorker(f, { ...opts, mode: "component-experience-daily" });
+    assert.equal(launches.length, 3, "both disjoint component workers may start after the combined worker releases its locks");
+    await Promise.all([knowledge?.(), experience?.()]);
+  } finally { await f.close(); }
+});
+
+test("worker lock publishes complete metadata atomically under concurrent startup", async () => {
+  const f = await fixture();
+  try {
+    const runtimeDir = join(f.root, "runtime");
+    let arrivals = 0, openGate!: () => void;
+    const gate = new Promise<void>(resolve => { openGate = resolve; });
+    const atomicFileSystem = { link: async (source: Parameters<typeof link>[0], destination: Parameters<typeof link>[1]) => {
+      arrivals += 1;
+      if (arrivals === 2) openGate();
+      await gate;
+      assert.match(await readFile(source, "utf8"), /"owner_id":"[^"]+"/u);
+      return link(source, destination);
+    } };
+    const [first, second] = await Promise.all([
+      acquireLearningWorkerLocks(runtimeDir, ["knowledge"], { file_system: atomicFileSystem }),
+      acquireLearningWorkerLocks(runtimeDir, ["knowledge"], { file_system: atomicFileSystem }),
+    ]);
+    assert.equal([first, second].filter(Boolean).length, 1);
+    assert.equal(JSON.parse(await readFile(join(runtimeDir, "learning-worker-knowledge.lock.json"), "utf8")).pid, process.pid);
+    await (first ?? second)?.();
+  } finally { await f.close(); }
+});
+
+test("worker lock preserves link errors and tolerates staging-link cleanup failures", async () => {
+  const f = await fixture();
+  try {
+    const runtimeDir = join(f.root, "runtime"); await mkdir(runtimeDir, { recursive: true });
+    const lockPath = join(runtimeDir, "learning-worker-knowledge.lock.json");
+    const denied = Object.assign(new Error("link denied"), { code: "EACCES" });
+    await assert.rejects(acquireLearningWorkerLocks(runtimeDir, ["knowledge"], {
+      file_system: { link: async () => { throw denied; } }
+    }), /link denied/u);
+
+    await writeFile(lockPath, JSON.stringify({ pid: process.pid, owner_id: "active-owner" }));
+    const active = await acquireLearningWorkerLocks(runtimeDir, ["knowledge"], {
+      file_system: { link: async () => { throw Object.assign(new Error("exists"), { code: "EEXIST" }); },
+        unlink: async path => { if (String(path).includes(".creating.")) throw new Error("staging cleanup failed"); return unlink(path); } }
+    });
+    assert.equal(active, null, "a complete active lock remains authoritative if staging cleanup fails");
+
+    const acquired = await acquireLearningWorkerLocks(runtimeDir, ["experience"], {
+      file_system: { unlink: async path => { if (String(path).includes(".creating.")) throw new Error("staging cleanup failed"); return unlink(path); } }
+    });
+    assert.equal(typeof acquired, "function", "a published lock remains usable when only its staging name cannot be removed");
+    await acquired?.();
+  } finally { await f.close(); }
+});
+
+test("worker supervisor recovers dead-owner locks and fails closed on invalid lock state", async () => {
+  const f = await fixture(); const failures: string[] = [], launches: string[] = [];
+  try {
+    const lockDir = join(f.root, "runtime"); const knowledgeLock = join(lockDir, "learning-worker-knowledge.lock.json");
+    await mkdir(lockDir, { recursive: true });
+    await writeFile(knowledgeLock, JSON.stringify({ pid: 999_999_999, owner_id: "stale-owner" }));
+    const spawnWorker = ((command: string) => {
+      launches.push(command);
+      const child = new EventEmitter() as EventEmitter & { kill: (signal?: string) => boolean };
+      child.kill = signal => { if (signal === "SIGTERM") queueMicrotask(() => child.emit("exit", 0)); return true; };
+      return child;
+    }) as unknown as typeof import("node:child_process").spawn;
+    const stop = await startWorker(f, { mode: "component-knowledge-daily", server_entrypoint: f.server, env: {}, spawn_process: spawnWorker });
+    assert.equal(launches.length, 1);
+    await stop?.();
+    await writeFile(knowledgeLock, "not-json");
+    assert.equal(await startWorker(f, { mode: "component-knowledge-daily", server_entrypoint: f.server, env: {}, spawn_process: spawnWorker,
+      on_failure: reason => failures.push(reason) }), undefined);
+    assert.deepEqual(failures, ["worker_lock_unavailable"]);
+    assert.equal(launches.length, 1, "an unreadable lock must never start another worker");
+  } finally { await f.close(); }
+});
+
+test("worker supervisor never removes a lock after ownership changes", async () => {
+  const f = await fixture(); const failures: string[] = [];
+  try {
+    const lockPath = join(f.root, "runtime", "learning-worker-experience.lock.json");
+    const fake = new EventEmitter() as EventEmitter & { kill: (signal?: string) => boolean };
+    fake.kill = signal => { if (signal === "SIGTERM") queueMicrotask(() => fake.emit("exit", 0)); return true; };
+    const stop = await startWorker(f, { mode: "component-experience-daily", server_entrypoint: f.server, env: {},
+      spawn_process: (() => fake) as unknown as typeof import("node:child_process").spawn,
+      on_failure: reason => failures.push(reason) });
+    await writeFile(lockPath, JSON.stringify({ pid: process.pid, owner_id: "replacement-owner" }));
+    await stop?.();
+    assert.deepEqual(failures, ["worker_lock_release_failed"]);
+    assert.equal(JSON.parse(await readFile(lockPath, "utf8")).owner_id, "replacement-owner");
+  } finally { await f.close(); }
+});
+
+test("worker component locks release partial acquisitions and preserve changed stale owners", async () => {
+  const f = await fixture();
+  try {
+    const runtimeDir = join(f.root, "runtime"), knowledgeLock = join(runtimeDir, "learning-worker-knowledge.lock.json");
+    await mkdir(runtimeDir, { recursive: true });
+    await writeFile(knowledgeLock, JSON.stringify({ pid: process.pid, owner_id: "knowledge-owner" }));
+    const acquired = await acquireLearningWorkerLocks(runtimeDir, ["experience", "knowledge"]);
+    assert.equal(acquired, null, "the context lock must release Experience when Knowledge is already owned");
+    const experienceOnly = await acquireLearningWorkerLocks(runtimeDir, ["experience"]);
+    assert.equal(typeof experienceOnly, "function");
+    await experienceOnly?.();
+
+    await writeFile(knowledgeLock, JSON.stringify({ pid: 999_999_999, owner_id: "stale-owner" }));
+    const replaceBeforeRecovery = {
+      rename: async (from: Parameters<typeof rename>[0], to: Parameters<typeof rename>[1]) => {
+        if (from === knowledgeLock) await writeFile(knowledgeLock, JSON.stringify({ pid: process.pid, owner_id: "replacement-owner" }));
+        return rename(from, to);
+      }
+    };
+    await assert.rejects(acquireLearningWorkerLocks(runtimeDir, ["knowledge"], { file_system: replaceBeforeRecovery,
+      is_process_alive: () => false }), /changed during recovery/u);
+    assert.equal(JSON.parse(await readFile(knowledgeLock, "utf8")).owner_id, "replacement-owner");
+
+    const failRestore = {
+      rename: async (from: Parameters<typeof rename>[0], to: Parameters<typeof rename>[1]) => {
+        if (String(from).includes(".recovered.")) throw new Error("restore failed");
+        if (from === knowledgeLock) await writeFile(knowledgeLock, JSON.stringify({ pid: process.pid, owner_id: "another-owner" }));
+        return rename(from, to);
+      }
+    };
+    await assert.rejects(acquireLearningWorkerLocks(runtimeDir, ["knowledge"], { file_system: failRestore,
+      is_process_alive: () => false }), /changed during recovery/u);
+  } finally { await f.close(); }
+});
+
+test("worker component locks fail closed when lock creation or metadata is invalid", async () => {
+  const f = await fixture();
+  try {
+    const runtimeDir = join(f.root, "runtime"); await mkdir(runtimeDir, { recursive: true });
+    const permissionDenied = Object.assign(new Error("permission denied"), { code: "EACCES" });
+    await assert.rejects(acquireLearningWorkerLocks(runtimeDir, ["knowledge"], {
+      file_system: { open: (async () => { throw permissionDenied; }) as unknown as typeof open }
+    }), /permission denied/u);
+    const lockPath = join(runtimeDir, "learning-worker-knowledge.lock.json");
+    await writeFile(lockPath, JSON.stringify({ pid: 0, owner_id: "" }));
+    await assert.rejects(acquireLearningWorkerLocks(runtimeDir, ["knowledge"]), /lock is invalid/u);
+  } finally { await f.close(); }
+});
+
+test("worker component lock cleanup preserves the primary write failure", async () => {
+  const f = await fixture();
+  try {
+    const fakeOpen = (async (...args: Parameters<typeof open>) => {
+      const handle = await open(...args);
+      return {
+        writeFile: async () => { throw new Error("lock write failed"); },
+        close: async () => { await handle.close(); throw new Error("lock close failed"); }
+      } as unknown as Awaited<ReturnType<typeof open>>;
+    }) as typeof open;
+    await assert.rejects(acquireLearningWorkerLocks(join(f.root, "runtime"), ["knowledge"], {
+      file_system: { open: fakeOpen, unlink: async () => { throw new Error("lock cleanup failed"); } }
+    }), /lock write failed/u);
+
+    const closeWorksOpen = (async (...args: Parameters<typeof open>) => {
+      const handle = await open(...args);
+      return { writeFile: async () => { throw new Error("lock write failed"); }, close: () => handle.close() } as unknown as Awaited<ReturnType<typeof open>>;
+    }) as typeof open;
+    await assert.rejects(acquireLearningWorkerLocks(join(f.root, "runtime-cleanup"), ["knowledge"], {
+      file_system: { open: closeWorksOpen }
+    }), /lock write failed/u);
+  } finally { await f.close(); }
+});
+
+test("worker supervisor releases earlier component locks when a later lock is occupied", async () => {
+  const f = await fixture();
+  try {
+    const runtimeDir = join(f.root, "runtime"), knowledgeLock = join(runtimeDir, "learning-worker-knowledge.lock.json");
+    await mkdir(runtimeDir, { recursive: true });
+    await writeFile(knowledgeLock, JSON.stringify({ pid: process.pid, owner_id: "knowledge-owner" }));
+    const skips: string[] = [], launches: string[] = [];
+    const spawnWorker = ((command: string) => {
+      launches.push(command);
+      const child = new EventEmitter() as EventEmitter & { kill: (signal?: string) => boolean };
+      child.kill = signal => { if (signal === "SIGTERM") queueMicrotask(() => child.emit("exit", 0)); return true; };
+      return child;
+    }) as unknown as typeof import("node:child_process").spawn;
+    const context = await startWorker(f, { mode: "component-context-daily", server_entrypoint: f.server, env: {}, spawn_process: spawnWorker,
+      on_skip: reason => skips.push(reason) });
+    assert.equal(context, undefined);
+    assert.deepEqual(skips, ["worker_already_running"]);
+    const experience = await startWorker(f, { mode: "component-experience-daily", server_entrypoint: f.server, env: {}, spawn_process: spawnWorker });
+    assert.equal(launches.length, 1, "the partial Experience lock must have been released");
+    await experience?.();
   } finally { await f.close(); }
 });
 
 test("worker supervisor validates its shutdown bound and contains synchronous spawn failures", async () => {
   const f = await fixture(); const failures: string[] = [];
   try {
-    for (const shutdown_timeout_ms of [0, 60_001]) await assert.rejects(startContextLearningWorker({ mode: "component-context-daily", server_entrypoint: f.server,
+    for (const shutdown_timeout_ms of [0, 60_001]) await assert.rejects(startWorker(f, { mode: "component-context-daily", server_entrypoint: f.server,
       env: {}, shutdown_timeout_ms }), /shutdown_timeout_ms/u);
-    for (const restart_base_delay_ms of [0, 30_001]) await assert.rejects(startContextLearningWorker({ mode: "component-context-daily", server_entrypoint: f.server,
+    for (const restart_base_delay_ms of [0, 30_001]) await assert.rejects(startWorker(f, { mode: "component-context-daily", server_entrypoint: f.server,
       env: {}, restart_base_delay_ms }), /restart_base_delay_ms/u);
     const spawnFailure = (() => { throw new Error("blocked"); }) as unknown as typeof import("node:child_process").spawn;
-    const stopSpawnFailure = await startContextLearningWorker({ mode: "component-context-daily", server_entrypoint: f.server, env: {}, restart_base_delay_ms: 1,
+    const stopSpawnFailure = await startWorker(f, { mode: "component-context-daily", server_entrypoint: f.server, env: {}, restart_base_delay_ms: 1,
       spawn_process: spawnFailure, on_failure: value => failures.push(value) });
     assert.equal(typeof stopSpawnFailure, "function");
     assert.deepEqual(failures, ["Error"]);
     await stopSpawnFailure?.();
     const nonErrorSpawnFailure = (() => { throw "blocked"; }) as unknown as typeof import("node:child_process").spawn;
-    const stopNonErrorSpawnFailure = await startContextLearningWorker({ mode: "component-context-daily", server_entrypoint: f.server, env: {}, restart_base_delay_ms: 1,
+    const stopNonErrorSpawnFailure = await startWorker(f, { mode: "component-context-daily", server_entrypoint: f.server, env: {}, restart_base_delay_ms: 1,
       spawn_process: nonErrorSpawnFailure, on_failure: value => failures.push(value) });
     assert.equal(typeof stopNonErrorSpawnFailure, "function");
     assert.deepEqual(failures, ["Error", "Error"]);
@@ -86,21 +307,21 @@ test("worker supervisor contains asynchronous startup errors and nonzero exits",
     const fake = new EventEmitter() as EventEmitter & { kill: () => boolean };
     fake.kill = () => false;
     const spawnFailure = (() => { queueMicrotask(() => fake.emit("error", new Error("spawn failure"))); return fake; }) as unknown as typeof import("node:child_process").spawn;
-    const stop = await startContextLearningWorker({ mode: "component-context-daily", server_entrypoint: f.server, env: {}, spawn_process: spawnFailure, on_failure: value => failures.push(value) });
+    const stop = await startWorker(f, { mode: "component-context-daily", server_entrypoint: f.server, env: {}, spawn_process: spawnFailure, on_failure: value => failures.push(value) });
     await new Promise(resolve => setImmediate(resolve)); await stop?.();
     assert.deepEqual(failures, ["Error"]);
 
     const invalidName = new EventEmitter() as EventEmitter & { kill: () => boolean };
     invalidName.kill = () => false;
     const spawnInvalidName = (() => { queueMicrotask(() => invalidName.emit("error", { name: "invalid name" })); return invalidName; }) as unknown as typeof import("node:child_process").spawn;
-    const stopInvalidName = await startContextLearningWorker({ mode: "component-context-daily", server_entrypoint: f.server, env: {}, spawn_process: spawnInvalidName, on_failure: value => failures.push(value) });
+    const stopInvalidName = await startWorker(f, { mode: "component-context-daily", server_entrypoint: f.server, env: {}, spawn_process: spawnInvalidName, on_failure: value => failures.push(value) });
     await new Promise(resolve => setImmediate(resolve)); await stopInvalidName?.();
     assert.deepEqual(failures, ["Error", "Error"]);
 
     const fakeExit = new EventEmitter() as EventEmitter & { kill: () => boolean };
     fakeExit.kill = () => false;
     const spawnExit = (() => { queueMicrotask(() => fakeExit.emit("exit", 7)); return fakeExit; }) as unknown as typeof import("node:child_process").spawn;
-    const stopExited = await startContextLearningWorker({ mode: "component-context-daily", server_entrypoint: f.server, env: {}, spawn_process: spawnExit, on_failure: value => failures.push(value) });
+    const stopExited = await startWorker(f, { mode: "component-context-daily", server_entrypoint: f.server, env: {}, spawn_process: spawnExit, on_failure: value => failures.push(value) });
     await new Promise(resolve => setImmediate(resolve)); await stopExited?.();
     assert.deepEqual(failures, ["Error", "Error", "worker_exit_7"]);
   } finally { await f.close(); }
@@ -116,7 +337,7 @@ test("worker supervisor restarts crashed workers with backoff and stops the repl
       if (children.length === 1) queueMicrotask(() => child.emit("error", { name: "invalid name" }));
       return child;
     }) as unknown as typeof import("node:child_process").spawn;
-    const stop = await startContextLearningWorker({ mode: "component-context-daily", server_entrypoint: f.server, env: {}, restart_base_delay_ms: 5,
+    const stop = await startWorker(f, { mode: "component-context-daily", server_entrypoint: f.server, env: {}, restart_base_delay_ms: 5,
       spawn_process: spawnRestart, on_failure: value => failures.push(value) });
     for (let attempt = 0; attempt < 50 && children.length < 2; attempt += 1) await new Promise(resolve => setTimeout(resolve, 2));
     assert.equal(children.length, 2, "an exited worker must restart after its bounded backoff");
@@ -134,7 +355,7 @@ test("worker supervisor restarts crashed workers with backoff and stops the repl
       if (staleChildren.length === 1) queueMicrotask(() => child.emit("exit", 9));
       return child;
     }) as unknown as typeof import("node:child_process").spawn;
-    const staleStop = await startContextLearningWorker({ mode: "component-context-daily", server_entrypoint: f.server, env: {}, restart_base_delay_ms: 5,
+    const staleStop = await startWorker(f, { mode: "component-context-daily", server_entrypoint: f.server, env: {}, restart_base_delay_ms: 5,
       spawn_process: spawnAfterExit, on_failure: value => failures.push(value) });
     for (let attempt = 0; attempt < 50 && staleChildren.length < 2; attempt += 1) await new Promise(resolve => setTimeout(resolve, 2));
     assert.equal(staleChildren.length, 2);
@@ -148,13 +369,13 @@ test("worker supervisor restarts crashed workers with backoff and stops the repl
 test("worker supervisor gracefully stops and force-stops an unresponsive child", async () => {
   const graceful = await fixture();
   try {
-    const stop = await startContextLearningWorker({ mode: "component-context-daily", server_entrypoint: graceful.server, env: {}, shutdown_timeout_ms: 500 });
+    const stop = await startWorker(graceful, { mode: "component-context-daily", server_entrypoint: graceful.server, env: {}, shutdown_timeout_ms: 500 });
     await stop?.();
   } finally { await graceful.close(); }
 
   const f = await fixture("process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);\n");
   try {
-    const stop = await startContextLearningWorker({ mode: "component-context-daily", server_entrypoint: f.server, env: {}, shutdown_timeout_ms: 20 });
+    const stop = await startWorker(f, { mode: "component-context-daily", server_entrypoint: f.server, env: {}, shutdown_timeout_ms: 20 });
     assert.equal(typeof stop, "function");
     await stop?.();
     await stop?.();
@@ -170,7 +391,7 @@ test("worker supervisor launches TypeScript MCP without recursion and settles a 
     const spawnFake = ((entrypoint: string, args: string[], options: { env: NodeJS.ProcessEnv; stdio?: unknown }) => {
       launch = { entrypoint, args, env: options.env, stdio: options.stdio }; return fake;
     }) as unknown as typeof import("node:child_process").spawn;
-    const stop = await startContextLearningWorker({ mode: "component-context-daily", server_entrypoint: f.serverTs, env: {}, shutdown_timeout_ms: 5,
+    const stop = await startWorker(f, { mode: "component-context-daily", server_entrypoint: f.serverTs, env: {}, shutdown_timeout_ms: 5,
       spawn_process: spawnFake });
     assert.equal(launch?.args[0], "--experimental-strip-types");
     assert.equal(launch?.env.CRAFT_CONTINUOUS_LEARNING, "0");
