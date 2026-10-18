@@ -60,6 +60,13 @@ test("Codebase query normalization expands identifiers and common task-language 
   for (const term of ["start", "multiple", "concurrent", "conversation"]) assert(conversationTask.includes(term));
   const simulationTask = codeQueryTerms("启动仿真任务的 HTTP 接口");
   for (const term of ["start", "simulation", "task", "http", "endpoint"]) assert(simulationTask.includes(term));
+  const counterTask = codeQueryTerms("synchronize daily visit counters");
+  for (const term of ["sync", "today", "count"]) assert(counterTask.includes(term));
+  const callbackTask = codeQueryTerms("process experiment completion or failure callback and update metrics");
+  for (const term of ["complete", "fail", "call", "back", "metric"]) assert(callbackTask.includes(term));
+  assert(codeQueryTerms("page robot intention records").includes("list"));
+  assert(codeQueryTerms("combine remote flow definitions with locally persisted slot relations").includes("find"));
+  assert(codeQueryTerms("check whether a robot function is enabled").includes("ability"));
   const userRoleCache = codeQueryTerms("load cached user role records");
   for (const term of ["cache", "data", "query", "read"]) assert(userRoleCache.includes(term));
   assert(codeQueryTerms("check whether a robot function is enabled").includes("open"));
@@ -81,6 +88,23 @@ test("Codebase query normalization expands identifiers and common task-language 
     { ...symbol("constant", "TYPESCRIPT_ANALYZER_VERSION", "src/typescript-analysis.ts"), declaration_kind: "variable" },
   ], "analyzer", 2);
   assert.equal(analyzer[0]!.node.id, "function");
+});
+
+test("Codebase maps Go business task wording to sync, callback, list, and ability symbols", () => {
+  const go = [
+    { ...symbol("sync-target", "(*VisitCountService).SyncVisitCount", "logic/visitlogic/visit_count_update.go"), declaration_kind: "method", language: "go" },
+    { ...symbol("sync-distractor", "(*VisitCountService).GetUserLogVisitCountFromRedis", "logic/visitlogic/visit_count_search.go"), declaration_kind: "method", language: "go" },
+    { ...symbol("callback-target", "(*ModelTrainingService).TrainExperimentCallBack", "logic/modellogic/model_training_callback_service.go"), declaration_kind: "method", language: "go" },
+    { ...symbol("callback-distractor", "(*ModelTrainingService).UpdateTrainingMetrics", "logic/modellogic/model_training_callback_service.go"), declaration_kind: "method", language: "go" },
+    { ...symbol("list-target", "(*OptimusTaskService).FindSlotList", "logic/optimus/optimus_slot_query.go"), declaration_kind: "method", language: "go" },
+    { ...symbol("list-distractor", "(*OptimusTaskService).GetSlotRelations", "logic/optimus/optimus_slot_query.go"), declaration_kind: "method", language: "go" },
+    { ...symbol("ability-target", "(*FuncService).IsRobotAbilityOpened", "logic/funclogic/robot_func.go"), declaration_kind: "method", language: "go" },
+    { ...symbol("ability-distractor", "(*FuncService).IsRobotFunctionEnabled", "logic/funclogic/robot_func.go"), declaration_kind: "method", language: "go" },
+  ];
+  assert.equal(rankCodeSymbols(go, "synchronize daily visit counters from cache into database", 8)[0]!.node.id, "sync-target");
+  assert.equal(rankCodeSymbols(go, "process model experiment completion or failure callback and update training metrics", 8)[0]!.node.id, "callback-target");
+  assert.equal(rankCodeSymbols(go, "combine remote flow definitions with locally persisted slot relations", 8)[0]!.node.id, "list-target");
+  assert.equal(rankCodeSymbols(go, "check whether a robot function is enabled", 8)[0]!.node.id, "ability-target");
 });
 
 test("Codebase retrieval gives symbol names and paths priority over generic analyzer aliases", () => {

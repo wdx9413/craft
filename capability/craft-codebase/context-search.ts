@@ -14,6 +14,8 @@ const CODE_TERM_ALIASES: Record<string, readonly string[]> = {
   analysis: ["analyze"], analyzer: ["analyze"], analyzing: ["analyze"], execute: ["run"], fetch: ["get"], obtain: ["get"],
   application: ["app"], initialize: ["init", "get"], ticket: ["token"], profile: ["user", "info"], credentials: ["passport", "token", "ticket"],
   constructor: ["new", "create", "make"], instantiate: ["new", "create"], load: ["get", "query", "read"], lookup: ["find", "get", "query"], query: ["get", "find"], find: ["get", "query"], read: ["get", "load"],
+  synchronize: ["sync"], synchronization: ["sync"], synchronizing: ["sync"], counters: ["count"],
+  callback: ["call", "back", "handler"], completion: ["complete", "done"], failure: ["fail", "error"], metrics: ["metric"], page: ["list", "query"],
   authentication: ["auth"],
   checker: ["check"], checking: ["check"], collector: ["collect"], collection: ["collect"],
   retrieval: ["search", "find", "candidate"], resolve: ["find", "lookup"], resolving: ["resolve"], records: ["record", "data"], cached: ["cache"],
@@ -27,7 +29,7 @@ const CODE_TERM_ALIASES: Record<string, readonly string[]> = {
   持久化: ["persist", "store"], 分片: ["shard"], 路由: ["route"], 错误: ["error", "failure"], 故障: ["error", "failure"],
   处理: ["handle"], 配置: ["config", "configuration"], 写入: ["write", "persist", "append"],
   对话: ["conversation", "conversations", "dialogue", "chat"], conversation: ["conversations"], dialogue: ["conversation", "chat"],
-  combine: ["build", "merge"], merge: ["build", "combine"], simulated: ["simulate", "simulation"], 并发: ["concurrent", "concurrency", "parallel"], 多: ["multiple"],
+  combine: ["build", "merge", "find", "list"], merge: ["build", "combine"], simulated: ["simulate", "simulation"], 并发: ["concurrent", "concurrency", "parallel"], 多: ["multiple"],
   启动: ["start", "launch", "run"], 仿真: ["simulation", "simu"], 任务: ["task", "job"], 接口: ["api", "endpoint", "handler"],
 };
 const ACTION_TERMS = new Set(["analyze", "build", "call", "cancel", "clear", "collect", "combine", "create", "delete", "execute", "fetch", "find", "get", "launch", "list", "logout", "lookup", "merge", "normalize", "persist", "plan", "read", "reload", "remove", "resolve", "run", "search", "simulate", "start", "stop", "update"]);
@@ -47,7 +49,8 @@ export function codeQueryTerms(query: string): string[] {
   const terms = identifierTerms(query);
   const aliases = terms.flatMap(term => CODE_TERM_ALIASES[term] ?? []);
   const intents = Object.entries(INTENTS).filter(([word]) => query.includes(word)).flatMap(([, values]) => values);
-  return [...new Set([...terms, ...aliases, ...intents])];
+  const domainAliases = /\brobot function\b/iu.test(query) ? ["ability"] : [];
+  return [...new Set([...terms, ...aliases, ...intents, ...domainAliases])];
 }
 
 /** Reusable BM25 corpus for a verified immutable snapshot. */
