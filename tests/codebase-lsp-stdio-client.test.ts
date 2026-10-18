@@ -313,14 +313,14 @@ test("Go LSP limits implementation and type definition requests to compatible sy
     const requests = JSON.parse(readFileSync(metricsPath, "utf8")) as Array<{ method: string; line: number; character: number; text: string }>;
     assert.equal(diagnostics.relations, "analyzed", JSON.stringify(diagnostics));
     assert.deepEqual(requests.filter(item => item.method === "implementation").map(item => [item.line, item.character, item.text]), [
-      [1, 0, "func Callable() {}"], [2, 5, "func WithoutRange() {}"], [5, 5, "type Port interface { Serve() }"],
+      [5, 5, "type Port interface { Serve() }"],
     ]);
     assert.deepEqual(requests.filter(item => item.method === "typeDefinition").map(item => item.text), [
       "var Payload = Label", "type Port interface { Serve() }", "type Concrete struct{}",
     ]);
     assert.deepEqual(diagnostics.relation_capability_notes, [
       { stage: "go_type_definition_ineligible_symbol_skipped", count: 3 },
-      { stage: "go_implementation_ineligible_symbol_skipped", count: 3 },
+      { stage: "go_implementation_ineligible_symbol_skipped", count: 5 },
     ]);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
