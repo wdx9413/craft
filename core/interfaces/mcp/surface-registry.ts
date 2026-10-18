@@ -65,6 +65,19 @@ export const COMPONENT_SURFACES: Readonly<Record<string, RegExp>> = {
   "component-codebase": new RegExp(`${CODEBASE_OWNS.source}|^craft_codebase_(?:asset_inspect|asset_restore|repository_ensure|workspace_open|refresh)$`),
 };
 
+const CODEBASE_CORE_TOOLS = [
+  "craft_info", "craft_codebase_repository_ensure", "craft_codebase_status", "craft_codebase_symbol_explore",
+  "craft_codebase_symbol_find", "craft_codebase_symbol_read", "craft_codebase_symbols_overview", "craft_codebase_context_slice",
+] as const;
+const CODEBASE_GRAPH_TOOLS = [
+  ...CODEBASE_CORE_TOOLS, "craft_codebase_callers_find", "craft_codebase_relations_find", "craft_codebase_impact_query",
+  "craft_codebase_change_impact", "craft_codebase_trace",
+] as const;
+const CODEBASE_ANALYSIS_TOOLS = [
+  ...CODEBASE_GRAPH_TOOLS, "craft_codebase_definition_find", "craft_codebase_control_flow_query", "craft_codebase_data_flow_query",
+  "craft_codebase_diagnostics_find",
+] as const;
+
 /**
  * The public component products are intentionally smaller than their advanced
  * compatibility surfaces.  A standalone Host should see the repeatable daily
@@ -103,7 +116,12 @@ const DAILY_COMPONENT_TOOLS: Readonly<Record<string, readonly string[]>> = {
 
 export const COMPONENT_SURFACE_NAMES: readonly string[] = Object.keys(COMPONENT_SURFACES);
 export const DOMAIN_SURFACE_NAMES: readonly string[] = SURFACE_RULES.map((rule) => rule.name);
-export const SURFACE_NAMES: readonly string[] = ["core", ...DOMAIN_SURFACE_NAMES, ...COMPONENT_SURFACE_NAMES, "syscall", "full"];
+export const SURFACE_NAMES: readonly string[] = ["core", ...DOMAIN_SURFACE_NAMES, ...COMPONENT_SURFACE_NAMES, "component-context-agent", "syscall", "full"];
+
+const CONTEXT_AGENT_CORE_TOOLS = [
+  "craft_info", "craft_context_open", "craft_context_tools_discover",
+  "craft_knowledge_search", "craft_memory_capture_observed_fact", "craft_learning_cycle_finalize",
+] as const;
 
 export type MountedComponent = "knowledge" | "memory" | "experience";
 
@@ -119,6 +137,11 @@ export function domainSurfaceOf(toolName: string): string {
 }
 
 export function surfaceToolNames(surface: string, activeTools: readonly Tool[], coreToolNames: ReadonlySet<string>): string[] {
+  if (surface === "component-context-agent") {
+    const names = new Set<string>([...CONTEXT_AGENT_CORE_TOOLS, ...CODEBASE_ANALYSIS_TOOLS, "craft_codebase_asset_inspect"]);
+    const syscall = new Set([...SYSCALL_VERBS, ...SYSCALL_PASSTHROUGH]);
+    return [...activeTools.filter(tool => names.has(tool.name) || syscall.has(tool.name)).map(tool => tool.name), ...SYSCALL_VERBS];
+  }
   if (surface === "component-context-complete") {
     const names = new Set(["craft_info", "craft_context_open", "craft_context_tools_discover", ...Object.values(DAILY_COMPONENT_TOOLS).flat()]);
     const components = ["component-knowledge", "component-memory", "component-experience", "component-codebase"] as const;

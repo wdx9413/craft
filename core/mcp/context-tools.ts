@@ -1,6 +1,7 @@
 import type { JsonObject } from "../infrastructure/store.ts";
 import { ACTIVE_TOOLS } from "./tool-catalog.ts";
 import { estimateTokens } from "../token-budget.ts";
+import { parseToolName } from "../tool-plane.ts";
 
 const TASK_TOOLS: Record<string, string[]> = {
   recall: ["craft_context_open", "craft_context_resolution_feedback"],
@@ -11,11 +12,15 @@ const TASK_TOOLS: Record<string, string[]> = {
   "code-analysis": ["craft_codebase_symbol_find", "craft_codebase_symbol_explore", "craft_codebase_symbol_read", "craft_codebase_symbols_overview", "craft_codebase_callers_find", "craft_codebase_relations_find", "craft_codebase_definition_find", "craft_codebase_control_flow_query", "craft_codebase_data_flow_query", "craft_codebase_diagnostics_find", "craft_codebase_impact_query", "craft_codebase_context_slice"],
 };
 
-/** Discovery is a small recommended subset. Existing Host tool registrations stay compatible. */
+/** Discovery returns exact legacy schemas and an executable route on compact Hosts. */
 export function discoverContextTools(args: JsonObject): JsonObject {
   const intent = String(args.intent ?? "recall");
   if (!Object.hasOwn(TASK_TOOLS, intent)) throw new Error("Unsupported Context tool intent");
   const names = new Set([...(TASK_TOOLS.recall!), ...TASK_TOOLS[intent]!]);
-  const tools = ACTIVE_TOOLS.filter(tool => names.has(tool.name));
-  return { intent, tools, schema_estimated_tokens: estimateTokens(JSON.stringify(tools)), exact: false, changes_host_registration: false };
+  const tools = ACTIVE_TOOLS.filter(tool => names.has(tool.name)).map(tool => {
+    const { resource, operation } = parseToolName(tool.name);
+    return { ...tool, syscall_route: { tool: "craft_run", arguments: { resource, operation, args: {} } } };
+  });
+  return { intent, tools, schema_estimated_tokens: estimateTokens(JSON.stringify(tools)), exact: false,
+    changes_host_registration: false, route_contract: "Call the returned syscall_route.tool with its arguments; place operation-specific values under arguments.args." };
 }

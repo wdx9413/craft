@@ -11,12 +11,25 @@ import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { dataSpaceId } from "../core/data-space.ts";
 import { MCP_PRODUCT_NAMES, productSurfaceOf, resolveMcpProductMode } from "../core/interfaces/mcp/product-launch.ts";
-import { RELEASE_PRODUCTS } from "../core/release-catalog.ts";
+import { RELEASE_PRODUCTS, externalDistributionContract, externalMarketplaceProducts, releaseManifest, releaseProduct, releaseProductNames } from "../core/release-catalog.ts";
 
 const components = RELEASE_PRODUCTS.map((product) => product.name);
 const internalComponentSurfaces = ["component-context", "component-quality", "component-knowledge", "component-memory", "component-capability", "component-skill-quality", "component-experience", "component-codebase"] as const;
 
-test("MCP launch modes resolve the complete context product and retained internal component modes", () => {
+test("release catalog publishes only the bounded Context surface", () => {
+  assert.deepEqual(releaseProductNames(), ["craft", "craft-context"]);
+  assert.equal(releaseProduct("craft-context")?.surface, "component-context-agent");
+  assert.equal(releaseProduct("missing"), undefined);
+  assert.deepEqual(externalMarketplaceProducts().map(product => product.name), ["craft-context"]);
+  assert.deepEqual(externalDistributionContract().products, [{
+    name: "craft-context", surface: "component-context-agent", hook_member: "context", category: "Developer Tools",
+  }]);
+  assert.equal(externalDistributionContract().version, VERSION);
+  assert.deepEqual(releaseManifest().plugins.map(plugin => plugin.name), ["craft", "craft-context"]);
+  assert.equal(releaseManifest().version, VERSION);
+});
+
+test("MCP launch modes resolve bounded Context and retained internal component modes", () => {
   assert.deepEqual(MCP_PRODUCT_NAMES, ["full", "context", "knowledge", "memory", "experience", "codebase"]);
   assert.equal(productSurfaceOf("full"), "syscall");
   assert.equal(productSurfaceOf("knowledge"), "component-knowledge-daily");
@@ -33,11 +46,11 @@ test("MCP launch modes resolve the complete context product and retained interna
   assert.throws(() => resolveMcpProductMode(["--product", "memory", "--product", "memory"], {}), /only once/);
   assert.throws(() => resolveMcpProductMode(["--product", "memory", "--surface", "component-knowledge"], {}), /conflict/);
   assert.throws(() => resolveMcpProductMode([], { CRAFT_MCP_PRODUCT: "memory", CRAFT_MCP_SURFACE: "component-knowledge" }), /conflict/);
-  assert.equal(productSurfaceOf("context"), "component-context-complete");
+  assert.equal(productSurfaceOf("context"), "component-context-agent");
 });
 
 test("craft-context includes the complete published surfaces for Codebase, Knowledge, Memory, and Experience", () => {
-  const context = new Set(surfaceToolNames(productSurfaceOf("context")));
+  const context = new Set(surfaceToolNames("component-context-complete"));
   for (const component of ["component-codebase", "component-knowledge", "component-memory", "component-experience"]) {
     const missing = surfaceToolNames(component).filter(name => !context.has(name));
     assert.deepEqual(missing, [], `craft-context must include every ${component} tool`);
@@ -46,6 +59,46 @@ test("craft-context includes the complete published surfaces for Codebase, Knowl
     assert(context.has(name), `craft-context must expose ${name}`);
   assert(context.has("craft_knowledge_semantic_review_packet"), "craft-context must expose the exact Knowledge review packet");
   assert(!context.has("craft_verified_work_loop_prepare"), "the component composition must not widen to the entire Craft runtime");
+});
+
+test("bounded Context exposes the finalizer and one syscall route within the Host tool limit", () => {
+  const names = surfaceToolNames(productSurfaceOf("context"));
+  const context = new Set(names);
+  assert(names.length <= 90, `Context registers ${names.length} tools; Host visibility limit is 90`);
+  for (const name of ["craft_describe", "craft_run", "craft_context_open", "craft_context_tools_discover",
+    "craft_knowledge_search", "craft_memory_capture_observed_fact", "craft_learning_cycle_finalize"])
+    assert(context.has(name), `craft-context must expose ${name}`);
+  for (const name of ["craft_codebase_data_flow_query", "craft_codebase_diagnostics_find"])
+    assert(context.has(name), `craft-context must expose read-only Codebase tool ${name}`);
+  assert(!context.has("craft_codebase_asset_restore"));
+});
+
+test("bounded Context routes discovered component operations through craft_run", async () => {
+  const root = await mkdtemp(join(tmpdir(), "craft-context-agent-"));
+  const store = await new CraftStore(craftPaths(root)).open();
+  try {
+    const server = new McpServer(new CraftService(store), productSurfaceOf("context"));
+    const discovered = server.service.contextToolsDiscover({ intent: "experience" });
+    const finalizer = (discovered.tools as JsonObject[]).find(tool => tool.name === "craft_learning_cycle_finalize");
+    assert.deepEqual(finalizer?.syscall_route, {
+      tool: "craft_run", arguments: { resource: "learning_cycle", operation: "finalize", args: {} },
+    });
+    const hidden = await server.handle({ id: 1, method: "tools/call", params: {
+      name: "craft_knowledge_claim_list", arguments: {},
+    } });
+    assert.equal((hidden?.error as JsonObject).code, -32602);
+    const routed = await server.handle({ id: 2, method: "tools/call", params: {
+      name: "craft_run", arguments: { resource: "knowledge", operation: "search", args: { query: "sample" } },
+    } });
+    const result = routed?.result as JsonObject;
+    assert.equal(result.isError, false);
+    assert.equal((result.structuredContent as JsonObject).reason, "scope_unavailable");
+    const invalidRoute = await server.handle({ id: 3, method: "tools/call", params: {
+      name: "craft_run", arguments: { resource: "knowledge", operation: "not_a_supported_operation", args: {} },
+    } });
+    assert.equal((invalidRoute?.result as JsonObject).isError, true);
+    assert.match(String(((invalidRoute?.result as JsonObject).content as JsonObject[])[0]?.text), /Unknown Craft operation/u);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
 test("standalone Knowledge daily surface exposes the model review packet needed for automatic claim promotion", () => {

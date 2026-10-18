@@ -3,7 +3,7 @@
   "products": [
     {
       "name": "craft-context",
-      "surface": "component-context-complete",
+      "surface": "component-context-agent",
       "hook_member": "context",
       "category": "Developer Tools"
     }
