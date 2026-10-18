@@ -285,9 +285,13 @@ export class KnowledgeSourceRegistry {
           // source revisions, duplicate files, and independent Sources. Legacy
           // or stale Claims are never reused by this path.
           const shared = this.store.list("knowledge_claim", 100_000, item => item.status === "candidate" && item.content_digest === fragment.content_digest && item.scope === identity.scope && item.id !== claimId)[0];
-          let claim = this.store.find("knowledge_claim", claimId) ?? (shared
-            ? this.store.save("knowledge_claim", String(shared.id), { ...payload(shared), evidence_ids: [...new Set([...(Array.isArray(shared.evidence_ids) ? shared.evidence_ids as unknown[] : []).map(String), String(evidence.id)])].sort() })
-            : this.store.create("knowledge_claim", claimId, { ...identity, content_ref: fragment.content_ref, identity_digest: stableDigest(identity), status: "candidate", review: null, ingest_generated: true, publication_allowed: false }));
+          let claim = this.store.find("knowledge_claim", claimId);
+          if (!claim && shared) {
+            const sharedEvidenceIds = (Array.isArray(shared.evidence_ids) ? shared.evidence_ids as unknown[] : []).map(String);
+            claim = sharedEvidenceIds.includes(String(evidence.id)) ? shared
+              : this.store.save("knowledge_claim", String(shared.id), { ...payload(shared), evidence_ids: [...new Set([...sharedEvidenceIds, String(evidence.id)])].sort() });
+          }
+          if (!claim) claim = this.store.create("knowledge_claim", claimId, { ...identity, content_ref: fragment.content_ref, identity_digest: stableDigest(identity), status: "candidate", review: null, ingest_generated: true, publication_allowed: false });
           if (source.trust === "verified" && ["bounded", "confirmed"].includes(String(evidence.confidence))) {
             // A revision or a copied file inside one registered Source is not
             // independent corroboration. Count that Source once for this Claim.

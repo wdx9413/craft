@@ -1,3 +1,8 @@
+## v0.12.58（Knowledge 候选摄取幂等）
+
+- 相同来源片段合并到候选 Claim 时，仅在新增 Evidence 引用时保存新版本；重复摄取不再反复递增 Claim 版本，避免 Worker 对未变化内容空转重审。
+- 增加跨重复文件、重复轮次摄取的回归验证，确保 Evidence 集合保持唯一且版本稳定。
+
 ## v0.12.57（Knowledge Host 结构化输出）
 
 - Knowledge 分类与 Evidence 审核向 Codex Host 传递严格 JSON Schema，CLI 使用 `--output-schema` 限定响应；不同响应契约使用独立 schema。

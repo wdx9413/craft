@@ -103,6 +103,29 @@ test("ingestion keeps unchanged review, invalidates edits/deletions, and exposes
   } finally { await f.close(); }
 });
 
+test("reingesting shared source fragments does not bump an unchanged candidate version", async () => {
+  const f = await fixture();
+  try {
+    const root = join(f.root, "duplicate-source"); await mkdir(root);
+    await writeFile(join(root, "a.md"), "Repeated source fact.");
+    await writeFile(join(root, "b.md"), "Repeated source fact.");
+    const sources = new KnowledgeSourceRegistry(f.store);
+    const source = sources.sourceRegister({ source_id: "duplicate-files", kind: "readme", label: "Duplicate files", ...f.scope,
+      locator: root, content_digest: "initial", trust: "verified", access: "read_only" }).source as JsonObject;
+
+    const first = sources.sourceIngest({ source_id: source.id });
+    const claimId = (first.candidates as JsonObject[])[1]!.claim_id as string;
+    const initial = f.store.get("knowledge_claim", claimId);
+    assert.equal(initial.version, 2);
+    assert.equal((initial.evidence_ids as string[]).length, 2);
+
+    sources.sourceIngest({ source_id: source.id });
+    const repeated = f.store.get("knowledge_claim", claimId);
+    assert.equal(repeated.version, initial.version);
+    assert.deepEqual(repeated.evidence_ids, initial.evidence_ids);
+  } finally { await f.close(); }
+});
+
 test("persisted vector cache survives adapter instances; batches are bounded and dimension failures fall back", async t => {
   const f = await fixture(); const old = process.env.CRAFT_INDUSTRY_EMBED_KEY; process.env.CRAFT_INDUSTRY_EMBED_KEY = "fixture";
   try {
