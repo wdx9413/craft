@@ -1476,6 +1476,23 @@ test("source discovery honors ignores, excludes, disabled and bounded reads with
   } finally { f.close(); }
 });
 
+test("repository source discovery never indexes project Craft data even when Git does not ignore it", async () => {
+  const f = await fixture();
+  try {
+    f.write("go.mod", "module example.com/project\n\ngo 1.23\n");
+    mkdirSync(join(f.repo, ".craft_data", "codebase", "runtime"), { recursive: true });
+    f.write(".craft_data/go.mod", "module example.com/private-data\n\ngo 1.23\n");
+    f.write(".craft_data/codebase/runtime/snapshot.go", "package snapshot\nfunc InternalSnapshot() {}\n");
+
+    const discovered = repositoryFiles(f.repo);
+
+    assert.deepEqual(discovered.files.map(file => file.path), []);
+    assert.deepEqual(discovered.context_files.map(file => file.path), ["go.mod"]);
+    assert.equal(discovered.omitted, 0);
+    assert.equal(discovered.context_files_omitted, 0);
+  } finally { f.close(); }
+});
+
 test("repository source selection recognizes supported source and configuration extensions", async () => {
   const f = await fixture();
   try {
