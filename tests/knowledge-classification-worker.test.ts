@@ -6,7 +6,8 @@ import { runKnowledgeScenarioClassificationOnce, type KnowledgeClassificationCli
 
 const provider: ModelProviderSpec = { provider: "test", label: "test", protocol: "openai-compatible", base_url: "https://example.invalid/v1",
   api_key_env: "TEST_KEY", chat_path: "/chat/completions", models: { standard: "test-model" }, cost_hint: 0, supports_tools: false };
-const claim: JsonObject = { id: "claim-1", version: 1, status: "candidate", scope: "project:demo", kind: "fact", content: "Builds run with pnpm.",
+const claimContent = "Builds run with pnpm.";
+const claim: JsonObject = { id: "claim-1", version: 1, status: "candidate", scope: "project:demo", kind: "fact",
   content_digest: "sha256:claim", source_id: "source-1", evidence_ids: ["evidence-1"], tags: ["build"] };
 
 function fixture(modelText = '{"decision":"classified","scenario_key":"build.validation","scenario_definition":{"summary":"构建验证规则","applies_when":"适用于项目构建验收","excludes":"与构建无关的事实"},"coarse_scenario_key":"engineering","coarse_scenario_definition":{"summary":"工程主题","applies_when":"属于项目工程实践","excludes":"业务领域事实"}}', claimStatus = "candidate", claimScope: string = String(claim.scope)) {
@@ -17,7 +18,10 @@ function fixture(modelText = '{"decision":"classified","scenario_key":"build.val
     custody: { kind: scopeKind, id: scopeId }, audience: { mode: scopeKind === "global" ? "public" : "scoped", principal_ids: [] }, purpose: "fact", retention: "long_term", tenant_id: null };
   const client: KnowledgeClassificationClient = { async call(name, args = {}) {
     calls.push({ name, args });
+    if (name === "craft_scope_identity_resolve_project") return { identity: { canonical_scope: { kind: "project", id: scopeId } } };
     if (name === "craft_knowledge_claim_list") return { claims: [{ ...claim, status: claimStatus, scope: claimScope, scope_envelope: scopeEnvelope }] };
+    if (name === "craft_knowledge_semantic_review_packet") return { status: "ready", packet: { claim: { id: claim.id, version: claim.version,
+      content_digest: claim.content_digest, content: claimContent } } };
     if (name === "craft_evaluation_model_profile_ensure_single") return { status: "ready_for_adapter", profile: { id: "profile-1", version: 1,
       provider: "test", model: "test-model", max_attempts: 1, max_output_tokens: 256, temperature: 0 } };
     if (name === "craft_evaluation_model_profile_get") return { profile: { id: "profile-1", version: 1, provider: "test", model: "test-model",
@@ -27,6 +31,8 @@ function fixture(modelText = '{"decision":"classified","scenario_key":"build.val
     if (name === "craft_evaluation_model_ticket_issue") return { ticket: { id: "ticket-1", status: "ready_for_adapter" } };
     if (name === "craft_knowledge_claim_save") return { claim: { id: "claim-1", version: 2 } };
     if (name === "craft_evaluation_model_ticket_complete") return { ticket: { id: "ticket-1", status: "completed" } };
+    if (name === "craft_trace_start") return { trace: { id: "trace-classification-1" } };
+    if (name === "craft_trace_append" || name === "craft_trace_finalize") return {};
     throw new Error(`unexpected tool ${name}`);
   } };
   const transport: ModelTransport = { async complete(_spec, request): Promise<ChatResult> {
@@ -46,12 +52,74 @@ test("classification uses the current project catalog, writes a candidate label,
   const result = await runKnowledgeScenarioClassificationOnce({ client: f.client, providers: [provider], transport: f.transport });
   assert.equal(result.processed, 1);
   assert.equal((result.outcomes as JsonObject[])[0]?.status, "classified");
+  assert.equal((result.outcomes as JsonObject[])[0]?.trace_id, "trace-classification-1");
   assert.equal(f.calls.find(call => call.name === "craft_evaluation_model_ticket_issue")?.args.input_ref, "craft-knowledge://claim/claim-1/v1/catalog/3");
   const saved = f.calls.find(call => call.name === "craft_knowledge_claim_save")?.args;
   assert.equal(saved?.claim_id, "claim-1");
+  assert.equal(saved?.content, claimContent, "content_ref-only Claims must reuse the exact trusted packet body when saving classification");
   assert.equal(saved?.scenario_key, "build.validation");
   assert.deepEqual(saved?.scenario_definition, { summary: "构建验证规则", applies_when: "适用于项目构建验收", excludes: "与构建无关的事实" });
-  assert.equal(f.calls.at(-1)?.name, "craft_evaluation_model_ticket_complete");
+  assert.equal(f.calls.find(call => call.name === "craft_evaluation_model_ticket_complete")?.args.ticket_id, "ticket-1");
+  const traceEvents = f.calls.filter(call => call.name === "craft_trace_append");
+  assert.deepEqual(traceEvents.map(call => call.args.event_kind), ["model.request", "model.completed", "classification.saved"]);
+  assert.equal(JSON.stringify(traceEvents).includes(claimContent), false, "Trace must not store the Claim body");
+  assert.equal(JSON.stringify(traceEvents).includes("构建验证规则"), false, "Trace must not store the model response");
+  assert.deepEqual(f.calls.filter(call => call.name === "craft_trace_finalize").map(call => call.args.status), ["completed"]);
+});
+
+test("classification redacts credential-shaped text from Claim and taxonomy fields before model dispatch", async () => {
+  const f = fixture();
+  const privateKey = "-----BEGIN PRIVATE KEY-----\nprivate-key-material\n-----END PRIVATE KEY-----";
+  const syntheticEmail = ["alice.private", String.fromCharCode(64), "example", ".invalid"].join("");
+  const syntheticIpv4 = [203, 0, 113, 42].join(".");
+  const secretClaim = `${claimContent} api_key=claim-secret Authorization: Bearer bearer-secret-value ghp_${"a".repeat(32)} ${privateKey} `
+    + `contact ${syntheticEmail} URL https://private.example/path?ref=private IP ${syntheticIpv4} IPv6 2001:db8::1 `
+    + "Unix /Users/alice.private/Documents/private-note Windows C:\\Users\\Alice\\Documents\\private-note";
+  const client: KnowledgeClassificationClient = { async call(name, args) {
+    if (name === "craft_knowledge_semantic_review_packet") return { status: "ready", packet: { claim: { id: claim.id, version: claim.version,
+      content_digest: claim.content_digest, content: secretClaim } } };
+    if (name === "craft_knowledge_scenario_list") return { catalog_version: 3, scenarios: [{ scenario_key: "engineering", tier: "coarse", lifecycle: "active",
+      definition: { summary: "password=\"taxonomy-secret value\"", applies_when: "项目工程实践", excludes: "业务事实" } }] };
+    return f.client.call(name, args);
+  } };
+  let modelPacket: JsonObject | undefined;
+  const transport: ModelTransport = { async complete(_spec, request): Promise<ChatResult> {
+    modelPacket = JSON.parse(String((request.body.messages as JsonObject[])[1]?.content)) as JsonObject;
+    return { text: '{"decision":"unclassified"}', model: "test-model", usage: null };
+  } };
+  const result = await runKnowledgeScenarioClassificationOnce({ client, providers: [provider], transport });
+  const packetText = JSON.stringify(modelPacket);
+  for (const secret of ["claim-secret", "bearer-secret-value", `ghp_${"a".repeat(32)}`, "private-key-material", "taxonomy-secret value",
+    syntheticEmail, "https://private.example/path?ref=private", syntheticIpv4, "2001:db8::1",
+    "/Users/alice.private/Documents/private-note", "C:\\Users\\Alice\\Documents\\private-note"])
+    assert.equal(packetText.includes(secret), false, `model packet must omit ${secret}`);
+  assert.match(packetText, /Builds run with pnpm\./u, "redaction preserves useful Knowledge content");
+  assert.equal((result.outcomes as JsonObject[])[0]?.status, "unclassified");
+});
+
+test("classification obtains Claim text only from the exact trusted evidence packet", async () => {
+  for (const packet of [
+    { status: "unavailable", packet: null },
+    { status: "ready", packet: { claim: { id: "other-claim", version: claim.version, content_digest: claim.content_digest, content: claimContent } } },
+    { status: "ready", packet: { claim: { id: claim.id, version: 2, content_digest: claim.content_digest, content: claimContent } } },
+    { status: "ready", packet: { claim: { id: claim.id, version: claim.version, content_digest: claim.content_digest, content: "   " } } },
+    { status: "ready", packet: { claim: { id: claim.id, version: claim.version, content_digest: "sha256:other", content: claimContent } } },
+  ]) {
+    const f = fixture();
+    let modelCalls = 0;
+    const client: KnowledgeClassificationClient = { async call(name, args) {
+      if (name === "craft_knowledge_semantic_review_packet") return packet;
+      return f.client.call(name, args);
+    } };
+    const transport: ModelTransport = { async complete(): Promise<ChatResult> {
+      modelCalls++;
+      return { text: '{"decision":"unclassified"}', model: "test-model", usage: null };
+    } };
+    const result = await runKnowledgeScenarioClassificationOnce({ client, providers: [provider], transport });
+    assert.deepEqual(result.outcomes, [{ claim_id: "claim-1", status: "skipped", reason: "trusted_claim_content_unavailable" }]);
+    assert.equal(modelCalls, 0);
+    assert.equal(f.calls.some(call => call.name === "craft_evaluation_model_ticket_issue"), false);
+  }
 });
 
 test("classification adds taxonomy metadata to reviewed Knowledge without changing review status", async () => {
@@ -71,6 +139,55 @@ test("classification uses the normalized project id for canonical scope model in
   const result = await runKnowledgeScenarioClassificationOnce({ client: f.client, providers: [provider], transport: f.transport });
   assert.equal((result.outcomes as JsonObject[])[0]?.status, "classified");
   assert.equal(f.calls.find(call => call.name === "craft_knowledge_scenario_list")?.args.scope, "project:project:canonical-project");
+});
+
+test("worker classification resolves and isolates project claims and passes the project root to its taxonomy", async () => {
+  const f = fixture();
+  const projectRoot = "/workspace/demo";
+  const client: KnowledgeClassificationClient = { async call(name, args) {
+    if (name === "craft_scope_identity_resolve_project") return { identity: { canonical_scope: { kind: "project", id: "demo" } } };
+    if (name === "craft_knowledge_claim_list") return { claims: [claim, { ...claim, id: "a-other-project", scope: "project:other" },
+      { ...claim, id: "z-global", scope: "global" }] };
+    return f.client.call(name, args);
+  } };
+  const result = await runKnowledgeScenarioClassificationOnce({ client, providers: [provider], transport: f.transport, project_root: projectRoot, max_claims: 1 });
+  assert.equal((result.outcomes as JsonObject[])[0]?.claim_id, claim.id);
+  assert.equal((result.outcomes as JsonObject[]).some(outcome => outcome.claim_id === "a-other-project"), false);
+  assert.deepEqual(f.calls.find(call => call.name === "craft_knowledge_scenario_list")?.args, { scope: claim.scope, project_root: projectRoot });
+  assert.equal(f.calls.find(call => call.name === "craft_evaluation_model_ticket_issue")?.args.project_root, projectRoot);
+  assert.equal(f.calls.find(call => call.name === "craft_knowledge_claim_save")?.args.project_root, projectRoot);
+  for (const canonicalScope of [{ kind: "global", id: "demo" }, { kind: "project" }, { kind: "project", id: "  " }]) {
+    const invalidIdentity: KnowledgeClassificationClient = { async call(name) {
+      if (name === "craft_scope_identity_resolve_project") return { identity: { canonical_scope: canonicalScope } };
+      throw new Error("invalid project identity must fail before queue access");
+    } };
+    await assert.rejects(runKnowledgeScenarioClassificationOnce({ client: invalidIdentity, providers: [provider], transport: f.transport, project_root: projectRoot }),
+      /canonical project scope/u);
+  }
+});
+
+test("worker classification accepts canonical project scopes and historical double-prefixed Claims", async () => {
+  const f = fixture();
+  const projectRoot = "/workspace/demo";
+  const canonicalClaim = { ...claim, id: "a-canonical", scope: "project:demo" };
+  const legacyClaim = { ...claim, id: "b-legacy", scope: "project:project:demo" };
+  const client: KnowledgeClassificationClient = { async call(name, args) {
+    if (name === "craft_scope_identity_resolve_project") return { identity: { canonical_scope: { kind: "project", id: "project:demo" } } };
+    if (name === "craft_knowledge_claim_list") return { claims: [canonicalClaim, legacyClaim, { ...claim, id: "other", scope: "project:other" }] };
+    if (name === "craft_knowledge_semantic_review_packet") return { status: "ready", packet: { claim: {
+      id: args?.claim_id, version: claim.version, content_digest: claim.content_digest, content: claimContent } } };
+    return f.client.call(name, args);
+  } };
+  const modelCalls: string[] = [];
+  const transport: ModelTransport = { async complete(_spec, request): Promise<ChatResult> {
+    modelCalls.push(String((request.body.messages as JsonObject[])[1]?.content));
+    return { text: '{"decision":"unclassified"}', model: "test-model", usage: null };
+  } };
+  const result = await runKnowledgeScenarioClassificationOnce({ client, providers: [provider], transport, project_root: projectRoot, max_claims: 2 });
+  assert.deepEqual((result.outcomes as JsonObject[]).map(item => item.claim_id), ["a-canonical", "b-legacy"]);
+  assert.equal(modelCalls.length, 2);
+  assert.deepEqual(f.calls.filter(call => call.name === "craft_knowledge_scenario_list").map(call => call.args.scope),
+    ["project:demo", "project:project:demo"]);
 });
 
 test("classification keeps a ready ticket retryable when the shared Host-call budget is exhausted", async () => {
@@ -99,7 +216,9 @@ test("uncertain output completes a content-free ticket without mutating the Clai
   const result = await runKnowledgeScenarioClassificationOnce({ client: f.client, providers: [provider], transport: f.transport });
   assert.equal((result.outcomes as JsonObject[])[0]?.status, "unclassified");
   assert.equal(f.calls.some(call => call.name === "craft_knowledge_claim_save"), false);
-  assert.equal(f.calls.at(-1)?.name, "craft_evaluation_model_ticket_complete");
+  assert.equal(f.calls.some(call => call.name === "craft_evaluation_model_ticket_complete"), true);
+  assert.equal(f.calls.some(call => call.name === "craft_trace_append" && call.args.event_kind === "classification.unclassified"), true);
+  assert.deepEqual(f.calls.filter(call => call.name === "craft_trace_finalize").map(call => call.args.status), ["completed"]);
 });
 
 test("completed classification tickets are not sent to the model again", async () => {
@@ -133,20 +252,63 @@ test("profile, empty queue, packet bounds, malformed output, and MCP failures fa
   const malformedResult = await runKnowledgeScenarioClassificationOnce({ client: malformed.client, providers: [provider], transport: malformed.transport });
   assert.equal((malformedResult.outcomes as JsonObject[])[0]?.status, "failed");
   assert.equal(malformed.calls.some(call => call.name === "craft_evaluation_model_ticket_complete"), false);
+  assert.equal(malformed.calls.some(call => call.name === "craft_trace_append" && call.args.event_kind === "classification.failed"), true);
+  assert.deepEqual(malformed.calls.filter(call => call.name === "craft_trace_finalize").map(call => call.args.status), ["failed"]);
   await assert.rejects(runKnowledgeScenarioClassificationOnce({ client: f.client, max_claims: 51 }), /between 1 and 50/u);
   await assert.rejects(runKnowledgeScenarioClassificationOnce({ client: { async call() { return { claims: null }; } } }), /must be an array/u);
 });
 
+test("model invocation failures are traced by class without persisting provider errors", async () => {
+  const f = fixture();
+  const transport: ModelTransport = { async complete() { throw new Error("private provider response body"); } };
+  const result = await runKnowledgeScenarioClassificationOnce({ client: f.client, providers: [provider], transport });
+  assert.equal((result.outcomes as JsonObject[])[0]?.failure_stage, "model_request");
+  const failure = f.calls.find(call => call.name === "craft_trace_append" && call.args.event_kind === "model.failed");
+  assert.equal((failure?.args.data as JsonObject).failure_kind, "Error");
+  assert.equal(JSON.stringify(failure).includes("private provider response body"), false);
+  assert.deepEqual(f.calls.filter(call => call.name === "craft_trace_finalize").map(call => call.args.status), ["failed"]);
+
+  const unsafe = fixture();
+  const unsafeName = new Error("private");
+  unsafeName.name = "private/path";
+  const unsafeTransport: ModelTransport = { async complete() { throw unsafeName; } };
+  const unsafeResult = await runKnowledgeScenarioClassificationOnce({ client: unsafe.client, providers: [provider], transport: unsafeTransport });
+  const unsafeFailure = unsafe.calls.find(call => call.name === "craft_trace_append" && call.args.event_kind === "model.failed");
+  assert.equal((unsafeFailure?.args.data as JsonObject).failure_kind, "ClassificationError");
+  assert.equal((unsafeResult.outcomes as JsonObject[])[0]?.failure_kind, "ClassificationError", "unsafe error names are sanitized in diagnostics");
+
+  const nonError = fixture();
+  const nonErrorTransport: ModelTransport = { async complete() { throw "private string failure"; } };
+  const nonErrorResult = await runKnowledgeScenarioClassificationOnce({ client: nonError.client, providers: [provider], transport: nonErrorTransport });
+  const nonErrorFailure = nonError.calls.find(call => call.name === "craft_trace_append" && call.args.event_kind === "model.failed");
+  assert.equal((nonErrorFailure?.args.data as JsonObject).failure_kind, "ClassificationError");
+  assert.equal((nonErrorResult.outcomes as JsonObject[])[0]?.failure_kind, "ClassificationError");
+});
+
+test("classification does not invoke the model when canonical Trace creation fails", async () => {
+  const f = fixture();
+  let modelCalls = 0;
+  const transport: ModelTransport = { async complete() { modelCalls += 1; return { text: "{}", model: "test-model", usage: null }; } };
+  const client: KnowledgeClassificationClient = { async call(name, args) {
+    if (name === "craft_trace_start") throw new TypeError("trace storage unavailable");
+    return f.client.call(name, args);
+  } };
+  const result = await runKnowledgeScenarioClassificationOnce({ client, providers: [provider], transport });
+  assert.equal(modelCalls, 0);
+  assert.equal((result.outcomes as JsonObject[])[0]?.failure_kind, "TypeError");
+  assert.equal(f.calls.some(call => call.name === "craft_knowledge_claim_save"), false);
+});
+
 test("oversized packets are closed without model calls and pre-ticket failures are isolated", async () => {
   const f = fixture();
-  const largeClaim = { ...claim, content: "x".repeat(13_000) };
   const largeClient: KnowledgeClassificationClient = { async call(name, args) {
-    if (name === "craft_knowledge_claim_list") return { claims: [largeClaim] };
+    if (name === "craft_knowledge_semantic_review_packet") return { status: "ready", packet: { claim: { id: claim.id, version: claim.version,
+      content_digest: claim.content_digest, content: "x".repeat(13_000) } } };
     return f.client.call(name, args);
   } };
   const large = await runKnowledgeScenarioClassificationOnce({ client: largeClient, providers: [provider], transport: f.transport });
   assert.equal((large.outcomes as JsonObject[])[0]?.status, "skipped");
-  assert.equal(f.calls.some(call => call.name === "craft_evaluation_model_ticket_complete"), true);
+  assert.equal(f.calls.some(call => call.name === "craft_evaluation_model_ticket_issue"), false);
   const broken: KnowledgeClassificationClient = { async call(name, args) {
     if (name === "craft_knowledge_claim_list") return { claims: [claim, { ...claim, id: "claim-2", scope: "project:demo" }] };
     if (name === "craft_knowledge_scenario_list") {
@@ -260,13 +422,13 @@ test("classifier validates every model and Claim boundary with safe defaults", a
   assert.equal((defaultTransportResult.outcomes as JsonObject[])[0]?.status, "failed", "default transport is used and missing credentials are contained");
   const nonErrorTransport: ModelTransport = { async complete(): Promise<ChatResult> { throw "private provider detail"; } };
   const nonError = await runKnowledgeScenarioClassificationOnce({ client: base.client, providers: [provider], transport: nonErrorTransport });
-  assert.equal((nonError.outcomes as JsonObject[])[0]?.failure_kind, "Error");
+  assert.equal((nonError.outcomes as JsonObject[])[0]?.failure_kind, "ClassificationError");
   const nonErrorTaxonomy: KnowledgeClassificationClient = { async call(name, args) {
     if (name === "craft_knowledge_scenario_list") throw "private taxonomy detail";
     return base.client.call(name, args);
   } };
   const failedBeforeTicket = await runKnowledgeScenarioClassificationOnce({ client: nonErrorTaxonomy, providers: [provider], transport: base.transport });
-  assert.equal((failedBeforeTicket.outcomes as JsonObject[])[0]?.failure_kind, "Error");
+  assert.equal((failedBeforeTicket.outcomes as JsonObject[])[0]?.failure_kind, "ClassificationError");
   assert.equal((failedBeforeTicket.outcomes as JsonObject[])[0]?.failure_stage, "taxonomy_list");
 
   for (const [failedTool, expectedStage] of [["craft_evaluation_model_ticket_issue", "ticket_issue"], ["craft_knowledge_claim_save", "claim_save"],
