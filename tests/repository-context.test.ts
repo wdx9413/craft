@@ -17,6 +17,7 @@ import { analyzePythonCheckpoint } from "../capability/craft-codebase/python-ana
 import { pythonFileUnitDigest } from "../capability/craft-codebase/python-incremental.ts";
 import { analyzeJavaCheckpoint } from "../capability/craft-codebase/java-analysis.ts";
 import { cacheLspDocumentSymbols, lspDocumentSymbolsDigest } from "../capability/craft-codebase/lsp-adapter.ts";
+import { ProjectGraphStore } from "../capability/craft-codebase/project-graph-store.ts";
 
 async function fixture() {
   const root = mkdtempSync(join(tmpdir(), "craft-repository-context-"));
@@ -27,6 +28,10 @@ async function fixture() {
   const service = new CraftService(store);
   const write = (path: string, content: string) => writeFileSync(join(repo, path), content);
   return { root, repo, store, service, write, git, close() { store.close(); rmSync(root, { recursive: true, force: true }); } };
+}
+function projectGraph(f: Awaited<ReturnType<typeof fixture>>, workspaceId: string): ProjectGraphStore {
+  const workspace = f.store.get("workspace", workspaceId);
+  return new ProjectGraphStore(String(workspace.root_path), workspaceId);
 }
 const result = async (server: McpServer, name: string, args: JsonObject) => {
   const response = await server.handle({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }) as any;
@@ -666,21 +671,22 @@ test("semantic onboarding persists a full graph in immutable bounded shards", as
     assert.equal(diagnostics[0]!.budget_limited, false);
     const index = f.store.get("codebase_index", String(result.index_id));
     assert(Number(index.source_file_count) === 1);
-    assert.equal(index.graph_storage, "sharded-v4");
+    assert.equal(index.graph_storage, "project-sharded-v5");
     assert(Number(index.node_count) > 10_000);
     assert((index.shard_ids as string[]).length > 1);
-    const shards = (index.shard_ids as string[]).map(id => f.store.get("codebase_index_shard", id));
+    const graphDirectory = join(f.repo, ".craft_data", "codebase", "indexes", String(result.workspace_id), "graph_records");
+    const shardIds = index.shard_ids as string[];
+    assert.equal(f.store.find("codebase_index_shard", shardIds[0]!), null);
+    const shards = shardIds.map(id => JSON.parse(readFileSync(join(graphDirectory, `${id}.json`), "utf8")) as JsonObject);
     assert.equal(shards.reduce((count, shard) => count + Number(shard.node_count), 0), index.node_count);
     const found = f.service.codebaseSymbolFind({ workspace_id: result.workspace_id, index_id: result.index_id, query: "symbol10000" });
     assert((found.symbols as JsonObject[]).some(node => node.name === "symbol10000"));
     const target = (f.service.codebaseSymbolFind({ workspace_id: result.workspace_id, index_id: result.index_id, query: "target" }).symbols as JsonObject[])[0]!;
     const callers = f.service.codebaseCallersFind({ workspace_id: result.workspace_id, index_id: result.index_id, symbol_id: target.id });
     assert((callers.callers as JsonObject[]).some(item => (item.caller as JsonObject).name === "caller"));
-    const originalGet = f.store.get.bind(f.store); const shardsRead = new Set<string>();
-    f.store.get = ((collection: string, id: string) => { if (collection === "codebase_index_shard") shardsRead.add(id); return originalGet(collection, id); }) as typeof f.store.get;
     const impact = f.service.codebaseImpactQuery({ workspace_id: result.workspace_id, index_id: result.index_id, node_id: target.id, max_depth: 1 });
     assert((impact.edges as JsonObject[]).some(edge => edge.kind === "calls"));
-    assert(shardsRead.size < (index.shard_ids as string[]).length, "impact reads only routed graph shards");
+    assert.equal(f.store.find("codebase_index_edge_route", String((index.edge_route_shards as JsonObject[])[0]!.id)), null);
   } finally { f.close(); }
 });
 
@@ -730,7 +736,8 @@ test("semantic onboarding incrementally refreshes changed modules and matches a 
     assert.deepEqual(actualNodes, sort(clean.nodes as JsonObject[]));
     assert.deepEqual(actualEdges, sort(clean.edges as JsonObject[]));
     const indexRecord = f.store.get("codebase_index", String(updated.index_id));
-    const storedEdges = (indexRecord.shard_ids as string[]).flatMap(id => f.store.get("codebase_index_shard", id).edges as JsonObject[]);
+    const graph = projectGraph(f, String(updated.workspace_id));
+    const storedEdges = (indexRecord.shard_ids as string[]).flatMap(id => graph.read(id).edges as JsonObject[]);
     const callOffset = callerText.lastIndexOf("source();");
     const callEdge = storedEdges.find(edge => edge.kind === "calls" && (edge.source_span as JsonObject).start_offset === callOffset);
     assert(callEdge, "the imported call should have a stored source span");
@@ -848,8 +855,9 @@ test("repository onboarding treats stale policy and incomplete workspace metadat
     const workspace = f.store.get("workspace", String(first.workspace_id));
     const legacyIndexId = `repository_index_${stableDigest({ workspaceId: first.workspace_id, depth: "semantic", checkpointId: state.checkpoint_id,
       state_revision: workspace.state_revision, policy: 9, adapter_config: state.adapter_config_digest }).slice(-24)}`;
-    for (const shardId of currentIndex.shard_ids as string[]) f.store.remove("codebase_index_shard", shardId);
-    for (const route of currentIndex.edge_route_shards as JsonObject[]) f.store.remove("codebase_index_edge_route", String(route.id));
+    const graph = projectGraph(f, String(first.workspace_id));
+    for (const shardId of currentIndex.shard_ids as string[]) rmSync(join(graph.directory, `${shardId}.json`));
+    for (const route of currentIndex.edge_route_shards as JsonObject[]) rmSync(join(graph.directory, `${String(route.id)}.json`));
     f.store.remove("codebase_index", String(first.index_id));
     f.store.save("codebase_index", legacyIndexId, { ...currentIndex, id: legacyIndexId });
     f.store.save("codebase_repository_state", stateId, { ...state, policy_version: 9, index_id: legacyIndexId });
@@ -858,7 +866,7 @@ test("repository onboarding treats stale policy and incomplete workspace metadat
     assert.equal(stalePolicy.reused, false);
     assert.notEqual(stalePolicy.index_id, legacyIndexId, "semantic metadata storage changes must rebuild an existing same-checkpoint index");
     const rebuiltIndex = f.store.get("codebase_index", String(stalePolicy.index_id));
-    const rebuiltSymbols = (rebuiltIndex.node_shard_ids as string[]).flatMap(id => f.store.get("codebase_index_shard", id).nodes as JsonObject[])
+    const rebuiltSymbols = (rebuiltIndex.node_shard_ids as string[]).flatMap(id => graph.read(id).nodes as JsonObject[])
       .filter(node => node.kind === "symbol");
     assert.equal(rebuiltSymbols.find(node => node.name === "source")?.declaration_kind, "function");
 
@@ -1029,9 +1037,21 @@ test("sharded graph queries fail closed when an immutable shard is altered", asy
     const result = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
     const index = f.store.get("codebase_index", String(result.index_id));
     const shardId = String((index.shard_ids as string[])[0]);
-    const shard = f.store.get("codebase_index_shard", shardId);
-    f.store.save("codebase_index_shard", shardId, { ...shard, edges: [{ kind: "calls" }] });
+    const graph = projectGraph(f, String(result.workspace_id));
+    const shard = graph.read(shardId);
+    writeFileSync(join(graph.directory, `${shardId}.json`), JSON.stringify({ ...shard, edges: [{ kind: "calls" }] }));
     assert.throws(() => f.service.codebaseSymbolFind({ workspace_id: result.workspace_id, index_id: result.index_id, query: "safe" }), /shard integrity/);
+  } finally { f.close(); }
+});
+
+test("project graph records are not read when workspace storage binding changes", async () => {
+  const f = await fixture();
+  try {
+    f.write("main.ts", "export function bound() { return true; }\n");
+    const result = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
+    const workspace = f.store.get("workspace", String(result.workspace_id));
+    f.store.save("workspace", String(result.workspace_id), { ...payload(workspace), snapshot_storage: "global" });
+    assert.throws(() => f.service.codebaseSymbolFind({ workspace_id: result.workspace_id, index_id: result.index_id, query: "bound" }), /storage is not enabled/u);
   } finally { f.close(); }
 });
 
@@ -1043,7 +1063,8 @@ test("edge route buckets deterministically sort multi-node adjacency and project
     const ensured = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
     const index = f.store.get("codebase_index", String(ensured.index_id));
     const routes = index.edge_route_shards as JsonObject[];
-    const routeRecords = routes.map(route => f.store.get("codebase_index_edge_route", String(route.id)));
+    const graph = projectGraph(f, String(ensured.workspace_id));
+    const routeRecords = routes.map(route => graph.read(String(route.id)));
     assert(routeRecords.some(route => Object.keys(route.incoming as JsonObject).length > 1));
     assert(routeRecords.some(route => Object.keys(route.outgoing as JsonObject).length > 1));
     const sameShardNodes = routeRecords.flatMap(route => {
@@ -1089,7 +1110,8 @@ test("semantic onboarding indexes Python calls, references and imports from the 
     assert.equal(result.status, "ready");
     const index = f.store.get("codebase_index", String(result.index_id));
     assert.equal(index.analyzer, "python-ast-static");
-    const shards = (index.shard_ids as string[]).map(id => f.store.get("codebase_index_shard", id));
+    const graph = projectGraph(f, String(result.workspace_id));
+    const shards = (index.shard_ids as string[]).map(id => graph.read(id));
     const nodes = shards.flatMap(shard => shard.nodes as JsonObject[]);
     const target = nodes.find(node => node.name === "target" && node.path === "pkg.py")!;
     const caller = nodes.find(node => node.name === "caller")!;
