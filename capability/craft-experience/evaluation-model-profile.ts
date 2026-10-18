@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
+import { resolve } from "node:path";
 import { canonicalJson, stableDigest } from "../../common/craft-common-base/src/digest.ts";
 import { credentialStatus, selectModel, type ModelProviderSpec, type ModelTier } from "../../common/craft-common-base/src/model-compat.ts";
 import { CraftStore, type JsonObject } from "../../common/craft-common-store-local/src/store.ts";
 import { scopeFromKey } from "../../common/craft-common-base/src/scope-policy.ts";
-import { knowledgeDirectoryForScope } from "../../core/project-knowledge-content.ts";
+import { knowledgeDirectoryForScope, projectRootForKnowledgeSource } from "../../core/project-knowledge-content.ts";
 import { listKnowledgeScenarios } from "../craft-knowledge/scenario-catalog.ts";
 
 const PURPOSES = new Set(["evaluation", "workflow_evolution", "knowledge_scenario_classification"]);
@@ -95,7 +96,19 @@ export class EvaluationModelProfileKernel {
           || Number(claim.version) !== Number(target.version) || claim.content_digest !== target.content_digest) return false;
         const scope = scopeFromKey(String(claim.scope));
         if (scope.kind !== "project" && scope.kind !== "global") return false;
-        return Number(listKnowledgeScenarios(knowledgeDirectoryForScope(this.store, scope.kind === "global" ? "global" : `project:${scope.id}`), scope.id, scope.kind).catalog_version) === Number(target.catalog_version);
+        const source = typeof claim.source_id === "string" ? this.store.find("knowledge_source", claim.source_id) : null;
+        if (!source || source.status !== "active" || source.trust === "untrusted") return false;
+        const contentPath = (claim.content_ref as JsonObject | undefined)?.path;
+        const projectRoot = typeof target.project_root === "string" ? target.project_root : projectRootForKnowledgeSource(source);
+        if (scope.kind === "project" && !projectRoot && typeof contentPath !== "string") return false;
+        let knowledgeDirectory: string;
+        try {
+          knowledgeDirectory = knowledgeDirectoryForScope(this.store, scope.kind === "global" ? "global" : `project:${scope.id}`, {
+            ...(typeof contentPath === "string" ? { reference_path: contentPath } : {}),
+            ...(projectRoot ? { project_root: projectRoot } : {}),
+          });
+        } catch { return false; }
+        return Number(listKnowledgeScenarios(knowledgeDirectory, scope.id, scope.kind).catalog_version) === Number(target.catalog_version);
       }
       if (target?.kind === "experience_scenario_classification_request") {
         if (ticket.purpose !== "workflow_evolution") return false;
@@ -252,11 +265,16 @@ export class EvaluationModelProfileKernel {
         || !source || source.status !== "active" || source.trust === "untrusted") {
         throw new Error("Knowledge scenario ticket requires an unclassified project or global Claim from an active trusted Source");
       }
+      const projectRoot = scope.kind === "project"
+        ? typeof args.project_root === "string" ? args.project_root : projectRootForKnowledgeSource(source)
+        : null;
       const knowledgeDirectory = knowledgeDirectoryForScope(this.store, scope.kind === "global" ? "global" : `project:${scope.id}`,
-        scope.kind === "project" && typeof args.project_root === "string" ? { project_root: args.project_root } : {});
+        projectRoot ? { project_root: projectRoot } : {});
+      const ticketProjectRoot = scope.kind === "project" ? projectRoot ?? resolve(knowledgeDirectory, "..", "..") : null;
       const catalog = listKnowledgeScenarios(knowledgeDirectory, scope.id, scope.kind);
       return { kind: "knowledge_scenario_classification", id: claim.id, version: claim.version,
-        content_digest: claim.content_digest, scope: claim.scope, catalog_version: catalog.catalog_version };
+        content_digest: claim.content_digest, scope: claim.scope, catalog_version: catalog.catalog_version,
+        ...(ticketProjectRoot ? { project_root: ticketProjectRoot } : {}) };
     }
     if (args.experience_scenario_classification_request_id !== undefined) {
       const requestId = text(args.experience_scenario_classification_request_id, "experience_scenario_classification_request_id");

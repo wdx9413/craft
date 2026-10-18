@@ -1,6 +1,6 @@
 import { existsSync, lstatSync, mkdirSync, realpathSync } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import type { CraftStore } from "../common/craft-common-store-local/src/store.ts";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import type { CraftStore, JsonObject } from "../common/craft-common-store-local/src/store.ts";
 import { stableDigest } from "./digest.ts";
 import { scopeFromKey } from "./scope-policy.ts";
 
@@ -8,6 +8,21 @@ export interface ProjectKnowledgeDirectoryOptions {
   readonly project_root?: string;
   readonly reference_path?: string;
   readonly create?: boolean;
+}
+
+/** Infer a project root only from a trusted Source locator with a known project layout. */
+export function projectRootForKnowledgeSource(source: JsonObject): string | null {
+  if (typeof source.locator !== "string") return null;
+  if (source.kind === "readme" || source.kind === "project_note") {
+    const path = resolve(source.locator);
+    try {
+      const stat = lstatSync(path);
+      if (stat.isSymbolicLink() || !stat.isFile() || source.kind === "readme" && basename(path) !== "README.md") return null;
+      return dirname(path);
+    } catch { return null; }
+  }
+  if (source.kind === "serena") return resolve(source.locator, "..", "..");
+  return null;
 }
 
 /** Bind Knowledge Markdown storage to the exact project path alias registered by Context. */

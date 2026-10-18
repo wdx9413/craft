@@ -1,3 +1,9 @@
+## v0.12.67（Knowledge Ticket 项目根目录解析）
+
+- Knowledge 分类 Ticket 列表依据 Claim 的可信 Source 定位场景目录；同一项目存在多个工作树别名且旧 Claim 指向全局 Markdown 时，仍能列出有效 Ticket。
+- Source 项目根推导逻辑收敛为 Knowledge 共享辅助函数，供摄取与 Ticket 场景校验复用。
+- 增加多路径别名和旧全局内容引用回归。
+
 ## v0.12.66（Knowledge Source 项目路径修复）
 
 - 项目 README Source 重摄取时，按已登记的 Source 根目录绑定项目 Knowledge 内容与场景目录，避免同一项目的多个工作树路径别名造成路径歧义。

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -163,7 +163,8 @@ test("Knowledge classification tickets track the live candidate and keep result 
     for (const [suffix, staleTarget] of staleTargets) f.store.create("evaluation_model_ticket", `stale-${suffix}`, {
       profile_id: profile.id, profile_version: profile.version, purpose: "knowledge_scenario_classification", status: "ready_for_adapter", target: staleTarget,
     });
-    assert.equal((kernel.ticketList({ purpose: "knowledge_scenario_classification" }).tickets as JsonObject[]).length, 3);
+    const preExistingListedTickets = kernel.ticketList({ purpose: "knowledge_scenario_classification" }).tickets as JsonObject[];
+    assert.equal(preExistingListedTickets.length, 3);
     assert.throws(() => kernel.ticketComplete({ ticket_id: ticket.id, result_digest: "bad" }), /SHA-256/u);
     const resultDigest = `sha256:${"a".repeat(64)}`;
     assert.throws(() => kernel.ticketComplete({ ticket_id: ticket.id, result_digest: resultDigest, trace_id: "missing-trace" }), /exact model and result Trace/u);
@@ -288,6 +289,76 @@ test("Knowledge classification tickets track the live candidate and keep result 
     f.store.create("evaluation_model_ticket", "evaluation-ticket", { profile_id: profile.id, profile_version: profile.version,
       purpose: "evaluation", status: "ready_for_adapter", target: { kind: "unknown" } });
     assert.equal((kernel.ticketList().tickets as JsonObject[]).some(item => item.id === "evaluation-ticket"), true);
+  } finally { await close(f); }
+});
+
+test("Knowledge Ticket listing resolves a legacy Claim through its registered Source when project aliases are ambiguous", async () => {
+  const f = await fixture();
+  try {
+    const readme = join(f.root, "README.md"); await writeFile(readme, "Registered project source.");
+    const secondRoot = join(f.root, "alternate-checkout"); await mkdir(secondRoot);
+    f.service.scopeAliasBind({ scope_kind: "project", scope_id: "project:demo", alias_kind: "path", alias: secondRoot });
+    f.store.create("knowledge_source", "legacy-project-source", { status: "active", trust: "verified", kind: "readme", locator: readme });
+    f.store.create("knowledge_claim", "legacy-project-claim", { status: "candidate", scope: "project:demo", version: 1,
+      content_digest: "sha256:legacy-project-claim", source_id: "legacy-project-source",
+      content_ref: { kind: "knowledge", path: join(tmpdir(), ".craft_data", "knowledge", "md", "legacy.md") } });
+    const kernel = new EvaluationModelProfileKernel(f.store, PROVIDER_CATALOG, { DASHSCOPE_API_KEY: "configured-for-test" });
+    const profile = kernel.save({ profile_id: "legacy-project-classifier", provider: "qwen", model: "qwen-plus",
+      purposes: ["knowledge_scenario_classification"], network_execution_enabled: true }).profile as JsonObject;
+    const ticket = kernel.issue({ profile_id: profile.id, purpose: "knowledge_scenario_classification", knowledge_claim_id: "legacy-project-claim",
+      project_root: f.root, input_ref: "craft-knowledge://claim/legacy-project-claim/v1/catalog/0",
+      output_contract_ref: "craft-knowledge-scenario-classification-v1" }).ticket as JsonObject;
+
+    const listed = kernel.ticketList({ purpose: "knowledge_scenario_classification" }).tickets as JsonObject[];
+    assert.equal(listed.some(item => item.id === ticket.id), true);
+
+    f.store.create("knowledge_claim", "project-claim-without-content-ref", { status: "candidate", scope: "project:demo", version: 1,
+      content_digest: "sha256:project-claim-without-content-ref", source_id: "legacy-project-source" });
+    const noContentRefTicket = kernel.issue({ profile_id: profile.id, purpose: "knowledge_scenario_classification", knowledge_claim_id: "project-claim-without-content-ref",
+      project_root: f.root, input_ref: "craft-knowledge://claim/project-claim-without-content-ref/v1/catalog/0",
+      output_contract_ref: "craft-knowledge-scenario-classification-v1" }).ticket as JsonObject;
+    f.store.create("knowledge_source", "custom-project-source", { status: "active", trust: "verified", kind: "external", locator: "external://project-source" });
+    f.store.create("knowledge_claim", "project-claim-with-custom-source", { status: "candidate", scope: "project:demo", version: 1,
+      content_digest: "sha256:project-claim-with-custom-source", source_id: "custom-project-source",
+      content_ref: { kind: "knowledge", path: join(f.root, ".craft_data", "knowledge", "md", "custom.md") } });
+    const customSourceTicket = kernel.issue({ profile_id: profile.id, purpose: "knowledge_scenario_classification", knowledge_claim_id: "project-claim-with-custom-source",
+      project_root: f.root, input_ref: "craft-knowledge://claim/project-claim-with-custom-source/v1/catalog/0",
+      output_contract_ref: "craft-knowledge-scenario-classification-v1" }).ticket as JsonObject;
+    const candidateCatalogVersion = Number((ticket.target as JsonObject).catalog_version);
+    f.store.create("knowledge_claim", "project-claim-without-resolvable-root", { status: "candidate", scope: "project:demo", version: 1,
+      content_digest: "sha256:project-claim-without-resolvable-root", source_id: "custom-project-source" });
+    f.store.create("evaluation_model_ticket", "ticket-without-resolvable-root", { profile_id: profile.id, profile_version: profile.version,
+      purpose: "knowledge_scenario_classification", status: "ready_for_adapter",
+      target: { kind: "knowledge_scenario_classification", id: "project-claim-without-resolvable-root", version: 1,
+        content_digest: "sha256:project-claim-without-resolvable-root", scope: "project:demo", catalog_version: candidateCatalogVersion } });
+    f.store.create("knowledge_claim", "project-claim-with-outside-content-path", { status: "candidate", scope: "project:demo", version: 1,
+      content_digest: "sha256:project-claim-with-outside-content-path", source_id: "custom-project-source",
+      content_ref: { kind: "knowledge", path: join(tmpdir(), "outside-project.md") } });
+    f.store.create("evaluation_model_ticket", "ticket-with-outside-content-path", { profile_id: profile.id, profile_version: profile.version,
+      purpose: "knowledge_scenario_classification", status: "ready_for_adapter",
+      target: { kind: "knowledge_scenario_classification", id: "project-claim-with-outside-content-path", version: 1,
+        content_digest: "sha256:project-claim-with-outside-content-path", scope: "project:demo", catalog_version: candidateCatalogVersion } });
+    for (const [id, sourceId, status, trust] of [
+      ["claim-without-source", undefined, "candidate", "verified"],
+      ["claim-with-revoked-source", "revoked-project-source", "candidate", "verified"],
+      ["claim-with-untrusted-source", "untrusted-project-source", "candidate", "untrusted"],
+    ] as const) {
+      if (sourceId) f.store.create("knowledge_source", sourceId, { status: id.includes("revoked") ? "revoked" : "active", trust,
+        kind: "readme", locator: readme });
+      f.store.create("knowledge_claim", id, { status, scope: "project:demo", version: 1, content_digest: `sha256:${id}`, ...(sourceId ? { source_id: sourceId } : {}) });
+      f.store.create("evaluation_model_ticket", `ticket-${id}`, { profile_id: profile.id, profile_version: profile.version,
+        purpose: "knowledge_scenario_classification", status: "ready_for_adapter",
+        target: { kind: "knowledge_scenario_classification", id, version: 1, content_digest: `sha256:${id}`,
+          scope: "project:demo", catalog_version: candidateCatalogVersion } });
+    }
+    const afterAdditionalCases = kernel.ticketList({ purpose: "knowledge_scenario_classification" }).tickets as JsonObject[];
+    assert.equal(afterAdditionalCases.some(item => item.id === noContentRefTicket.id), true);
+    assert.equal(afterAdditionalCases.some(item => item.id === customSourceTicket.id), true);
+    assert.equal(afterAdditionalCases.some(item => item.id === "ticket-without-resolvable-root"), false);
+    assert.equal(afterAdditionalCases.some(item => item.id === "ticket-with-outside-content-path"), false);
+    assert.equal(afterAdditionalCases.some(item => item.id === "ticket-claim-without-source"), false);
+    assert.equal(afterAdditionalCases.some(item => item.id === "ticket-claim-with-revoked-source"), false);
+    assert.equal(afterAdditionalCases.some(item => item.id === "ticket-claim-with-untrusted-source"), false);
   } finally { await close(f); }
 });
 

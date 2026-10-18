@@ -18,13 +18,13 @@
 import { randomUUID } from "node:crypto";
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync } from "node:fs";
-import { basename, dirname, join, relative, resolve, sep } from "node:path";
+import { join, relative, resolve, sep } from "node:path";
 import type { CraftStore, JsonObject } from "../../common/craft-common-store-local/src/store.ts";
 import { noCredentialAssignment, parseScope, text } from "../../common/craft-common-base/src/validation.ts";
 import { stableDigest, payload } from "../../common/craft-common-base/src/digest.ts";
+import { knowledgeDirectoryForScope, projectRootForKnowledgeSource } from "../../core/project-knowledge-content.ts";
 import { scopeEnvelope } from "../../common/craft-common-base/src/scope-policy.ts";
 import { updateKnowledgeScenarioClaim } from "./scenario-catalog.ts";
-import { knowledgeDirectoryForScope } from "../../core/project-knowledge-content.ts";
 
 const SOURCE_KINDS = new Set(["evidence_wiki", "serena", "kefu_wiki", "project_note", "readme", "custom"]);
 const TRUSTS = new Set(["untrusted", "bounded", "verified"]);
@@ -32,19 +32,6 @@ const ACCESS = new Set(["read_only", "proposal_only"]);
 const TRANSITIONS = new Set(["disabled", "revoked"]);
 const INGESTIBLE = new Set([".md", ".mdx", ".txt"]);
 function digest(value: string): string { return `sha256:${createHash("sha256").update(value).digest("hex")}`; }
-function projectRootForSource(source: JsonObject): string | null {
-  if (typeof source.locator !== "string") return null;
-  if (source.kind === "readme" || source.kind === "project_note") {
-    const path = resolve(source.locator);
-    try {
-      const stat = lstatSync(path);
-      if (stat.isSymbolicLink() || !stat.isFile() || source.kind === "readme" && basename(path) !== "README.md") return null;
-      return dirname(path);
-    } catch { return null; }
-  }
-  if (source.kind === "serena") return resolve(source.locator, "..", "..");
-  return null;
-}
 function within(root: string, candidate: string): boolean {
   const value = relative(root, candidate);
   return value === "" || (!value.startsWith(`..${sep}`) && value !== ".." && !value.split(sep).includes(".."));
@@ -154,7 +141,7 @@ export class KnowledgeSourceRegistry {
     if (typeof claim.scenario_key !== "string") return;
     const scope = String(claim.scope ?? "global");
     const contentPath = (claim.content_ref as JsonObject | undefined)?.path;
-    const projectRoot = projectRootForSource(source);
+    const projectRoot = projectRootForKnowledgeSource(source);
     updateKnowledgeScenarioClaim(knowledgeDirectoryForScope(this.store, scope, {
       ...(typeof contentPath === "string" ? { reference_path: contentPath } : {}),
       ...(projectRoot ? { project_root: projectRoot } : {}),
@@ -222,7 +209,7 @@ export class KnowledgeSourceRegistry {
   }
   private ingest(args: JsonObject): JsonObject {
     const source = this.store.get("knowledge_source", text(args.source_id, "source_id"));
-    const sourceProjectRoot = projectRootForSource(source);
+    const sourceProjectRoot = projectRootForKnowledgeSource(source);
     if (source.status !== "active" || source.access !== "read_only") throw new Error("Knowledge Source is unavailable for read-only ingest");
     const requestedRoot = resolve(text(args.root ?? source.locator, "root"));
     const registeredRoot = resolve(String(source.locator));
