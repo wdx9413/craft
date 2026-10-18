@@ -8,7 +8,7 @@ import test from "node:test";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftService } from "../core/service.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
-import { snapshotNodeKind } from "../core/workspace.ts";
+import { snapshotNodeKind, snapshotStatIfPresent } from "../core/workspace.ts";
 
 test("workspace checkpoints preserve a file-state timeline and require approval to restore", async () => {
   const root = join(tmpdir(), `craft-workspace-${process.pid}-${Date.now()}`);
@@ -63,11 +63,69 @@ test("rejects workspace roots, paths, and snapshots that escape the declared fil
     assert.throws(() => service.workspaceDiff({ workspace_id: "safe", from_checkpoint_id: "none", to_checkpoint_id: "none" }), /Unknown workspace_checkpoint/);
     store.create("workspace", "corrupt", { name: "Corrupt", root_path: worktree, include_paths: ["../outside"], state_revision: 1 });
     assert.throws(() => service.workspaceCheckpoint({ workspace_id: "corrupt", label: "corrupt" }), /escapes root/);
+    assert.throws(() => service.workspaceOpen({ workspace_id: "bad-storage", name: "Bad storage", root_path: worktree,
+      include_paths: ["."], snapshot_storage: "external" }), /snapshot_storage/);
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("repository checkpoints store project Codebase snapshots under the ignored project data root", async () => {
+  const root = join(tmpdir(), `craft-workspace-project-snapshot-${process.pid}-${Date.now()}`);
+  const worktree = join(root, "worktree");
+  const store = await new CraftStore(craftPaths(join(root, "craft"))).open();
+  const service = new CraftService(store);
+  try {
+    await mkdir(join(worktree, "src"), { recursive: true });
+    await writeFile(join(worktree, "src", "note.txt"), "project snapshot\n", "utf8");
+    service.workspaceOpen({ workspace_id: "repository_demo", name: "Repository", root_path: worktree,
+      include_paths: ["src"], snapshot_storage: "project_codebase" });
+    const expected = join(worktree, ".craft_data", "codebase", "snapshots", "repository_demo", "project_first");
+    await mkdir(join(expected, "src"), { recursive: true });
+    await writeFile(join(expected, "src", "note.txt"), "old snapshot\n", "utf8");
+    const checkpoint = service.workspaceCheckpoint({ workspace_id: "repository_demo", checkpoint_id: "project_first", label: "project" }).checkpoint as JsonObject;
+    assert.equal(checkpoint.snapshot_root, expected);
+    assert.equal(String(checkpoint.snapshot_root).startsWith(store.paths.runtimeDir), false);
+    assert.equal(await readFile(join(expected, "src", "note.txt"), "utf8"), "project snapshot\n");
+    await writeFile(join(worktree, "src", "note.txt"), "changed\n", "utf8");
+    const restored = service.workspaceRestore({ workspace_id: "repository_demo", checkpoint_id: "project_first", approved: true });
+    assert.equal((restored.workspace as JsonObject).latest_checkpoint_id, "project_first");
+    assert.equal(await readFile(join(worktree, "src", "note.txt"), "utf8"), "project snapshot\n");
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("rejects symlinked project Codebase snapshot directories and files", async () => {
+  const root = join(tmpdir(), `craft-workspace-project-snapshot-links-${process.pid}-${Date.now()}`);
+  const worktree = join(root, "worktree");
+  const outside = join(root, "outside");
+  const store = await new CraftStore(craftPaths(join(root, "craft"))).open();
+  const service = new CraftService(store);
+  try {
+    await mkdir(join(worktree, "src"), { recursive: true });
+    await mkdir(outside, { recursive: true });
+    await writeFile(join(worktree, "src", "note.txt"), "safe\n", "utf8");
+    service.workspaceOpen({ workspace_id: "repository_link", name: "Repository", root_path: worktree,
+      include_paths: ["src"], snapshot_storage: "project_codebase" });
+    await symlink(outside, join(worktree, ".craft_data"));
+    assert.throws(() => service.workspaceCheckpoint({ workspace_id: "repository_link", checkpoint_id: "linked_root", label: "linked" }), /unsafe directory/);
+    await rm(join(worktree, ".craft_data"));
+    const snapshotRoot = join(worktree, ".craft_data", "codebase", "snapshots", "repository_link", "linked_file");
+    await mkdir(snapshotRoot, { recursive: true });
+    await symlink(join(outside, "note.txt"), join(snapshotRoot, "src"));
+    assert.throws(() => service.workspaceCheckpoint({ workspace_id: "repository_link", checkpoint_id: "linked_file", label: "linked" }), /unsafe/);
+    await rm(snapshotRoot, { recursive: true, force: true });
+    await writeFile(join(worktree, "root.txt"), "safe\n", "utf8");
+    service.workspaceOpen({ workspace_id: "repository_file_link", name: "Repository file link", root_path: worktree,
+      include_paths: ["root.txt"], snapshot_storage: "project_codebase" });
+    const fileSnapshotRoot = join(worktree, ".craft_data", "codebase", "snapshots", "repository_file_link", "linked_file");
+    await mkdir(fileSnapshotRoot, { recursive: true });
+    await symlink(join(outside, "missing.txt"), join(fileSnapshotRoot, "root.txt"));
+    assert.throws(() => service.workspaceCheckpoint({ workspace_id: "repository_file_link", checkpoint_id: "linked_file", label: "linked" }), /unsafe/);
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 
 test("covers snapshot lifecycle boundaries and exposes its read-only state in the compact MCP surface", async () => {
   assert.throws(() => snapshotNodeKind({ isFile: () => false, isDirectory: () => false }, "special"), /regular files/);
+  assert.equal(snapshotStatIfPresent(join(tmpdir(), `craft-missing-snapshot-${process.pid}-${Date.now()}`)), undefined);
+  assert.throws(() => snapshotStatIfPresent("\0"), /path/i);
   const root = join(tmpdir(), `craft-workspace-lifecycle-${process.pid}-${Date.now()}`);
   const worktree = join(root, "worktree");
   const store = await new CraftStore(craftPaths(join(root, "craft"))).open();

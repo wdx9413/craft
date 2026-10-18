@@ -11,7 +11,7 @@ import { McpServer } from "../core/mcp.ts";
 import { repositoryRoot, repositoryFiles } from "../capability/craft-codebase/repository-files.ts";
 import { basicAnalysis } from "../capability/craft-codebase/basic-analysis.ts";
 import { CodebaseIndexKernel } from "../capability/craft-codebase/codebase-index.ts";
-import { stableDigest } from "../common/craft-common-base/src/digest.ts";
+import { payload, stableDigest } from "../common/craft-common-base/src/digest.ts";
 import { analyzeTypeScript } from "../capability/craft-codebase/typescript-analysis.ts";
 import { analyzePythonCheckpoint } from "../capability/craft-codebase/python-analysis.ts";
 import { pythonFileUnitDigest } from "../capability/craft-codebase/python-incremental.ts";
@@ -78,6 +78,29 @@ test("repository ensure reuses an index published while another ensure was analy
       assert.equal(second.index_id, first.index_id);
       assert.equal(calls, 2);
     } finally { workspace.freshness = originalFreshness; }
+  } finally { f.close(); }
+});
+
+test("repository ensure migrates legacy global checkpoints into the project Codebase data root", async () => {
+  const f = await fixture();
+  try {
+    f.write("main.ts", "export function legacySnapshot() { return true; }\n");
+    const first = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
+    const workspaceId = String(first.workspace_id);
+    const workspace = f.store.get("workspace", workspaceId);
+    const checkpointId = String(workspace.latest_checkpoint_id);
+    const checkpoint = f.store.get("workspace_checkpoint", checkpointId);
+    f.store.save("workspace", workspaceId, { ...payload(workspace), snapshot_storage: "global" });
+    f.store.save("workspace_checkpoint", checkpointId, { ...payload(checkpoint), snapshot_root: join(f.store.paths.runtimeDir, "workspaces", workspaceId, "snapshots", checkpointId) });
+
+    const migrated = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
+    const migratedCheckpoint = f.store.get("workspace_checkpoint", String(migrated.checkpoint_id));
+
+    assert.equal(migrated.status, "ready");
+    assert.notEqual(migrated.checkpoint_id, checkpointId);
+    assert.equal(migratedCheckpoint.snapshot_root, join(realpathSync(f.repo), ".craft_data", "codebase", "snapshots", workspaceId, String(migrated.checkpoint_id)));
+    assert.equal(f.store.get("workspace", workspaceId).snapshot_storage, "project_codebase");
+    assert.equal(f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" }).reused, true);
   } finally { f.close(); }
 });
 
@@ -840,8 +863,37 @@ test("repository onboarding treats stale policy and incomplete workspace metadat
     assert.equal(rebuiltSymbols.find(node => node.name === "source")?.declaration_kind, "function");
 
     const currentState = f.store.get("codebase_repository_state", stateId);
-    f.store.save("codebase_repository_state", stateId, { ...currentState, checkpoint_id: "" });
     const originalFind = f.store.find.bind(f.store);
+    let interceptWorkspaceWithState = true;
+    (f.store as unknown as { find: typeof f.store.find }).find = ((kind: string, id: string) => {
+      const value = originalFind(kind, id);
+      if (interceptWorkspaceWithState && kind === "workspace" && value) {
+        interceptWorkspaceWithState = false;
+        return { ...value, latest_checkpoint_id: undefined };
+      }
+      return value;
+    }) as typeof f.store.find;
+    try {
+      assert.equal(f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" }).reused, true);
+    } finally { f.store.find = originalFind; }
+
+    let interceptMissingMetadata = true;
+    (f.store as unknown as { find: typeof f.store.find }).find = ((kind: string, id: string) => {
+      if (interceptMissingMetadata && kind === "workspace") {
+        interceptMissingMetadata = false;
+        const value = originalFind(kind, id);
+        return value ? { ...value, latest_checkpoint_id: undefined } : value;
+      }
+      if (kind === "codebase_repository_state" && id === stateId) return undefined;
+      return originalFind(kind, id);
+    }) as typeof f.store.find;
+    try {
+      const rebuiltWithoutState = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
+      assert.equal(rebuiltWithoutState.status, "ready");
+      assert.equal(rebuiltWithoutState.reused, false);
+    } finally { f.store.find = originalFind; }
+
+    f.store.save("codebase_repository_state", stateId, { ...currentState, checkpoint_id: "" });
     let interceptWorkspace = true;
     (f.store as unknown as { find: typeof f.store.find }).find = ((kind: string, id: string) => {
       const value = originalFind(kind, id);
