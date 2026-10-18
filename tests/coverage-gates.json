@@ -1658,6 +1658,26 @@
       "branches": true
     },
     {
+      "name": "codebase-evaluation-source",
+      "include": [
+        "scripts/eval/codebase-evaluation-source.ts"
+      ],
+      "tests": [
+        "tests/codebase-evaluation-source.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "codebase-evaluation-source-policy",
+      "include": [
+        "scripts/eval/codebase-evaluation-source-policy.ts"
+      ],
+      "tests": [
+        "tests/codebase-evaluation-source-policy.test.ts"
+      ],
+      "branches": true
+    },
+    {
       "name": "codebase-retrieval-language-strata",
       "include": [
         "scripts/eval/codebase-retrieval-strata.ts"
