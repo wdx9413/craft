@@ -1,4 +1,6 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { executeHostProcess, type HostExecutor } from "../../core/host-driver.ts";
 import type { JsonObject } from "../../core/infrastructure/store.ts";
 import type { ChatRequest, ChatResult, ModelProviderSpec, ModelTransport } from "../../core/model-gateway.ts";
@@ -7,6 +9,17 @@ import { createFetchTransport } from "../../core/model-gateway.ts";
 const MODEL = "gpt-6-luna";
 const TIMEOUT_MS = 120_000;
 const OUTPUT_LIMIT = 65_536;
+const OUTPUT_SCHEMA_LIMIT = 16_384;
+
+function outputSchemaFrom(request: ChatRequest): JsonObject | null {
+  const value = request.body.codex_output_schema;
+  if (value === undefined) return null;
+  if (!value || typeof value !== "object" || Array.isArray(value) || (value as JsonObject).type !== "object") {
+    throw new Error("Codex Host output schema must be an object schema");
+  }
+  if (Buffer.byteLength(JSON.stringify(value), "utf8") > OUTPUT_SCHEMA_LIMIT) throw new Error("Codex Host output schema exceeds its bound");
+  return value as JsonObject;
+}
 
 function messagesFrom(request: ChatRequest): Array<{ role: string; content: string }> {
   const messages = request.body.messages;
@@ -55,15 +68,28 @@ export class CodexCliModelTransport implements ModelTransport {
     if (spec.provider !== "codex-cli" || !spec.host_managed_auth) throw new Error("Codex Host transport received an incompatible provider");
     if (request.body.model !== MODEL) throw new Error(`Codex Host model must be ${MODEL}`);
     const prompt = messagesFrom(request).map(message => `## ${message.role}\n${message.content}`).join("\n\n");
-    const argv = ["exec", "--ignore-user-config", "--ephemeral", "--sandbox", "read-only", "--skip-git-repo-check", "--model", MODEL, "--json", "-"];
-    const result = await this.executor({ executable: "codex", argv, cwd: tmpdir(), stdin: prompt, timeoutMs: TIMEOUT_MS, outputLimit: OUTPUT_LIMIT });
-    const parsed = parseEvents(result.stdout);
-    const completed = result.exitCode === 0 && result.signal === null && !result.timedOut && !result.cancelled && !result.outputLimited
-      && !parsed.invalid && !parsed.failed && parsed.terminal !== null && parsed.terminalLast && parsed.message !== null;
-    if (!completed) throw new Error(result.timedOut ? "Codex Host timed out" : result.outputLimited ? "Codex Host output exceeded its bound" : "Codex Host did not return one complete model response");
-    const usage = parsed.usage;
-    return { text: parsed.message!, model: MODEL, usage: usage && Number.isSafeInteger(usage.input_tokens) && Number.isSafeInteger(usage.output_tokens)
-      ? { input_tokens: Number(usage.input_tokens), output_tokens: Number(usage.output_tokens) } : null };
+    const schema = outputSchemaFrom(request);
+    let schemaDirectory: string | null = null;
+    try {
+      const argv = ["exec", "--ignore-user-config", "--ephemeral", "--sandbox", "read-only", "--skip-git-repo-check"];
+      if (schema) {
+        schemaDirectory = await mkdtemp(join(tmpdir(), "craft-learning-schema-"));
+        const schemaPath = join(schemaDirectory, "output-schema.json");
+        await writeFile(schemaPath, JSON.stringify(schema), { encoding: "utf8", flag: "wx", mode: 0o600 });
+        argv.push("--output-schema", schemaPath);
+      }
+      argv.push("--model", MODEL, "--json", "-");
+      const result = await this.executor({ executable: "codex", argv, cwd: tmpdir(), stdin: prompt, timeoutMs: TIMEOUT_MS, outputLimit: OUTPUT_LIMIT });
+      const parsed = parseEvents(result.stdout);
+      const completed = result.exitCode === 0 && result.signal === null && !result.timedOut && !result.cancelled && !result.outputLimited
+        && !parsed.invalid && !parsed.failed && parsed.terminal !== null && parsed.terminalLast && parsed.message !== null;
+      if (!completed) throw new Error(result.timedOut ? "Codex Host timed out" : result.outputLimited ? "Codex Host output exceeded its bound" : "Codex Host did not return one complete model response");
+      const usage = parsed.usage;
+      return { text: parsed.message!, model: MODEL, usage: usage && Number.isSafeInteger(usage.input_tokens) && Number.isSafeInteger(usage.output_tokens)
+        ? { input_tokens: Number(usage.input_tokens), output_tokens: Number(usage.output_tokens) } : null };
+    } finally {
+      if (schemaDirectory) await rm(schemaDirectory, { recursive: true, force: true });
+    }
   }
 }
 

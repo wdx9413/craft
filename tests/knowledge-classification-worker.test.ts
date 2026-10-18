@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { PROVIDER_CATALOG, type ChatResult, type ModelProviderSpec, type ModelTransport } from "../core/model-gateway.ts";
+import { PROVIDER_CATALOG, type ChatRequest, type ChatResult, type ModelProviderSpec, type ModelTransport } from "../core/model-gateway.ts";
 import type { JsonObject } from "../core/infrastructure/store.ts";
 import { runKnowledgeScenarioClassificationOnce, type KnowledgeClassificationClient } from "../deploy/experience-learning/knowledge-classification.ts";
 
@@ -13,8 +13,9 @@ const claimContent = "Builds run with pnpm.";
 const claim: JsonObject = { id: "claim-1", version: 1, status: "reviewed", scope: "project:demo", kind: "fact",
   content_digest: "sha256:claim", source_id: "source-1", evidence_ids: ["evidence-1"], tags: ["build"] };
 
-function fixture(modelText = '{"decision":"classified","scenario_key":"build.validation","scenario_definition":{"summary":"构建验证规则","applies_when":"适用于项目构建验收","excludes":"与构建无关的事实"},"coarse_scenario_key":"engineering","coarse_scenario_definition":{"summary":"工程主题","applies_when":"属于项目工程实践","excludes":"业务领域事实"}}', claimStatus = "reviewed", claimScope: string = String(claim.scope)) {
+function fixture(modelText = '{"decision":"classified","scenario_key":"build.validation","scenario_definition":{"summary":"构建验证规则","applies_when":"适用于项目构建验收","excludes":"与构建无关的事实"},"coarse_scenario_key":"engineering","coarse_scenario_definition":{"summary":"工程主题","applies_when":"属于项目工程实践","excludes":"业务领域事实"}}', claimStatus = "reviewed", claimScope: string = String(claim.scope), profileProvider: ModelProviderSpec = provider) {
   const calls: Array<{ name: string; args: JsonObject }> = [];
+  const requests: ChatRequest[] = [];
   const scopeKind = claimScope === "global" ? "global" : "project";
   const scopeId = scopeKind === "global" ? "global" : claimScope.split(":").slice(1).join(":");
   const scopeEnvelope = { applicability: { kind: scopeKind, id: scopeId },
@@ -27,8 +28,8 @@ function fixture(modelText = '{"decision":"classified","scenario_key":"build.val
       content_digest: claim.content_digest, content: claimContent }, evidence_fragments: [{ evidence_id: "evidence-1",
       content_digest: "sha256:evidence-1", content: claimContent }], source: { content_digest: "sha256:source" } }, packet_digest: "sha256:review-packet" };
     if (name === "craft_evaluation_model_profile_ensure_single") return { status: "ready_for_adapter", profile: { id: "profile-1", version: 1,
-      provider: "test", model: "test-model", max_attempts: 1, max_output_tokens: 256, temperature: 0 } };
-    if (name === "craft_evaluation_model_profile_get") return { profile: { id: "profile-1", version: 1, provider: "test", model: "test-model",
+      provider: profileProvider.provider, model: profileProvider.models.small ?? profileProvider.models.standard ?? "test-model", max_attempts: 1, max_output_tokens: 256, temperature: 0 } };
+    if (name === "craft_evaluation_model_profile_get") return { profile: { id: "profile-1", version: 1, provider: profileProvider.provider, model: profileProvider.models.small ?? profileProvider.models.standard ?? "test-model",
       max_attempts: 1, max_output_tokens: 256, temperature: 0 }, readiness: { status: "ready_for_adapter" } };
     if (name === "craft_knowledge_scenario_list") return { catalog_version: 3, scenarios: [{ scenario_key: "engineering", tier: "coarse", lifecycle: "active",
       definition: { summary: "工程主题", applies_when: "属于项目工程实践", excludes: "业务领域事实" } }] };
@@ -43,6 +44,7 @@ function fixture(modelText = '{"decision":"classified","scenario_key":"build.val
     throw new Error(`unexpected tool ${name}`);
   } };
   const transport: ModelTransport = { async complete(_spec, request): Promise<ChatResult> {
+    requests.push(request);
     const content = String((request.body.messages as JsonObject[])[1]?.content);
     assert.match(content, /Builds run with pnpm/u);
     assert.match(content, /engineering/u);
@@ -53,8 +55,23 @@ function fixture(modelText = '{"decision":"classified","scenario_key":"build.val
     assert.match(JSON.stringify((packet.evidence as JsonObject).fragments), /Builds run with pnpm\./u);
     return { text: modelText, model: "test-model", usage: { input_tokens: 10, output_tokens: 8 } };
   } };
-  return { client, calls, transport };
+  return { client, calls, requests, transport };
 }
+
+test("Knowledge Host requests attach strict response schemas for classification and Evidence review", async () => {
+  const codexProvider: ModelProviderSpec = { ...provider, provider: "codex-cli", label: "Codex CLI Host", api_key_env: "CODEX_CLI_AUTH_STORE",
+    models: { small: "gpt-6-luna" }, host_managed_auth: true };
+  for (const candidate of [false, true]) {
+    const f = fixture(candidate ? '{"review_decision":"supported"}' : undefined, candidate ? "candidate" : "reviewed", String(claim.scope), codexProvider);
+    await runKnowledgeScenarioClassificationOnce({ client: f.client, providers: [codexProvider], transport: f.transport });
+    const schema = f.requests[0]?.body.codex_output_schema as JsonObject | undefined;
+    assert.equal(schema?.type, "object");
+    const properties = schema?.properties as JsonObject;
+    if (candidate) assert.deepEqual((properties.review_decision as JsonObject).enum, ["supported", "needs_evidence", "rejected"]);
+    else assert.deepEqual((properties.decision as JsonObject).enum, ["classified", "unclassified"]);
+    assert.equal(f.requests[0]?.body.output_schema, undefined);
+  }
+});
 
 test("classification uses the current project catalog, writes a reviewed Claim label, and traces its ticket", async () => {
   const f = fixture();

@@ -1,3 +1,9 @@
+## v0.12.57（Knowledge Host 结构化输出）
+
+- Knowledge 分类与 Evidence 审核向 Codex Host 传递严格 JSON Schema，CLI 使用 `--output-schema` 限定响应；不同响应契约使用独立 schema。
+- Schema 只在系统临时目录以私有权限短暂写入，并在成功或失败后删除；模型回复仍不持久化。
+- 分类输入摘要升级契约版本，使旧失败记录不会阻止新输出约束下的受控重试；增加 Host 参数、schema 校验、清理和分类请求覆盖。
+
 ## v0.12.56（Knowledge 失败票据抑制）
 
 - Knowledge 模型完成后若分类或审核失败，只保存票据、输入摘要、失败阶段、受控错误码和时间；相同输入不再每轮重复发送，状态保存在 `~/.craft_data/knowledge/classification-attempts.json`。

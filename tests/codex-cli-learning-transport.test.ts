@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { tmpdir } from "node:os";
 import { CodexCliModelTransport, createLearningModelTransport } from "../deploy/experience-learning/codex-cli-transport.ts";
@@ -36,6 +37,44 @@ test("Codex CLI transport uses fixed model, isolated read-only ephemeral invocat
   assert.deepEqual(observed?.argv, ["exec", "--ignore-user-config", "--ephemeral", "--sandbox", "read-only", "--skip-git-repo-check", "--model", "gpt-6-luna", "--json", "-"]);
   assert.match(observed?.stdin ?? "", /## system\nReturn JSON\./u);
   assert.match(observed?.stdin ?? "", /## user\n\{\}/u);
+});
+
+test("Codex CLI transport supplies a bounded output schema through a private temporary file and removes it", async () => {
+  const schema = { type: "object", properties: { decision: { type: "string", enum: ["supported", "needs_evidence", "rejected"] } },
+    required: ["decision"], additionalProperties: false };
+  let schemaPath = "";
+  const transport = new CodexCliModelTransport(async value => {
+    const option = value.argv.indexOf("--output-schema");
+    assert.notEqual(option, -1);
+    schemaPath = value.argv[option + 1]!;
+    assert.deepEqual(JSON.parse(await readFile(schemaPath, "utf8")), schema);
+    return success();
+  });
+  const withSchema = { ...request, body: { ...request.body, codex_output_schema: schema } };
+  await transport.complete(provider, withSchema);
+  assert.match(schemaPath, /craft-learning-schema-[^/]+\/output-schema\.json$/u);
+  await assert.rejects(readFile(schemaPath, "utf8"));
+});
+
+test("Codex CLI transport removes the temporary schema when Host execution fails", async () => {
+  let schemaPath = "";
+  const transport = new CodexCliModelTransport(async value => {
+    schemaPath = value.argv[value.argv.indexOf("--output-schema") + 1]!;
+    throw new Error("Host execution failed");
+  });
+  await assert.rejects(transport.complete(provider, { ...request, body: { ...request.body, codex_output_schema: { type: "object" } } }), /Host execution failed/u);
+  await assert.rejects(readFile(schemaPath, "utf8"));
+});
+
+test("Codex CLI transport rejects malformed and oversized output schemas before spawning", async () => {
+  let calls = 0;
+  const transport = new CodexCliModelTransport(async () => { calls += 1; return success(); });
+  for (const schema of ["bad", [], { type: "array" }]) {
+    await assert.rejects(transport.complete(provider, { ...request, body: { ...request.body, codex_output_schema: schema } }), /output schema must be an object schema/u);
+  }
+  await assert.rejects(transport.complete(provider, { ...request, body: { ...request.body,
+    codex_output_schema: { type: "object", description: "x".repeat(16_384) } } }), /output schema exceeds its bound/u);
+  assert.equal(calls, 0);
 });
 
 test("Codex CLI transport returns no usage when CLI omits usage metadata", async () => {
