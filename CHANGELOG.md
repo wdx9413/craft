@@ -1,3 +1,9 @@
+## v0.12.66（Knowledge Source 项目路径修复）
+
+- 项目 README Source 重摄取时，按已登记的 Source 根目录绑定项目 Knowledge 内容与场景目录，避免同一项目的多个工作树路径别名造成路径歧义。
+- 旧 Claim 引用全局 Markdown 路径且没有场景键时，不再因无效目录更新阻断 Source 重摄取。
+- 增加旧全局内容路径、多项目路径别名和自定义 Source 的回归验证。
+
 ## v0.12.63（Knowledge Worker 项目根目录恢复）
 
 - 后台 Knowledge 分类 Worker 从项目 Claim 的精确 `.craft_data/knowledge/md` 内容路径推导项目根目录，继续使用项目隔离的场景目录和模型票据；全局 Claim 不推导项目根目录。

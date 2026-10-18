@@ -108,6 +108,84 @@ test("ingestion keeps unchanged review, invalidates edits/deletions, and exposes
   } finally { await f.close(); }
 });
 
+test("source revision invalidation resolves the owning project for legacy content paths", async () => {
+  for (const scenarioKey of [undefined, "legacy-source-scene"]) {
+    const f = await fixture();
+    try {
+      const projectRoot = join(f.root, "projects", "fixture");
+      const readme = join(projectRoot, "README.md"); await writeFile(readme, "First source revision.");
+      const sources = new KnowledgeSourceRegistry(f.store);
+      const source = sources.sourceRegister({ source_id: "legacy-global-content", kind: "readme", label: "Legacy source", ...f.scope,
+        locator: readme, content_digest: "fixture", trust: "bounded", access: "read_only" }).source as JsonObject;
+      const first = sources.sourceIngest({ source_id: source.id });
+      const claimId = (first.candidates as JsonObject[])[0]!.claim_id as string;
+      const prior = f.store.get("knowledge_claim", claimId);
+      const additionalProjectRoot = join(f.root, "projects", "fixture-alias"); await mkdir(additionalProjectRoot);
+      new CraftService(f.store).scopeAliasBind({ scope_kind: "project", scope_id: "project:fixture", alias_kind: "path", alias: additionalProjectRoot });
+      const globalContentRoot = join(f.root, "data", "knowledge", "md"); await mkdir(globalContentRoot, { recursive: true });
+      const oldContentPath = join(globalContentRoot, "legacy.md"); await writeFile(oldContentPath, "legacy content");
+      f.store.save("knowledge_claim", claimId, { ...payload(prior), content_ref: { path: oldContentPath },
+        ...(scenarioKey ? { scenario_key: scenarioKey } : {}) });
+      const legacyClaim = f.store.get("knowledge_claim", claimId);
+      assert.equal(legacyClaim.scenario_key, scenarioKey);
+      assert.equal((legacyClaim.content_ref as JsonObject).path, oldContentPath);
+      await writeFile(readme, "Changed source revision.");
+
+      const updated = sources.sourceIngest({ source_id: source.id });
+      assert.equal(updated.status, "completed");
+      assert.equal(updated.invalidated_documents, 1);
+      assert.equal(f.store.get("knowledge_claim", claimId).status, "stale");
+      if (scenarioKey) {
+        const catalog = JSON.parse(await readFile(join(f.root, "projects", "fixture", ".craft_data", "knowledge", "projects", "fixture", "knowledge-scenarios.json"), "utf8")) as JsonObject;
+        const scenario = (catalog.scenarios as JsonObject[]).find(item => item.scenario_key === scenarioKey);
+        assert.equal(((scenario?.claim_refs as JsonObject[])[0]?.status), "inactive");
+      }
+    } finally { await f.close(); }
+  }
+});
+
+test("custom Knowledge Sources continue to use the scoped project resolver", async () => {
+  const f = await fixture();
+  try {
+    const projectRoot = join(f.root, "projects", "fixture"), sourcePath = join(projectRoot, "custom.md");
+    await writeFile(sourcePath, "Custom source content.");
+    const sources = new KnowledgeSourceRegistry(f.store);
+    const source = sources.sourceRegister({ source_id: "custom-project-source", kind: "custom", label: "Custom source", ...f.scope,
+      locator: sourcePath, content_digest: "fixture", trust: "bounded", access: "read_only" }).source as JsonObject;
+    const result = sources.sourceIngest({ source_id: source.id });
+    assert.equal(result.status, "completed");
+    const candidate = (result.candidates as JsonObject[])[0]!;
+    const claim = f.store.get("knowledge_claim", String(candidate.claim_id));
+    assert.equal(String((claim.content_ref as JsonObject).path).includes(join(".craft_data", "knowledge", "md")), true);
+  } finally { await f.close(); }
+});
+
+test("project notes and Serena Sources bind Knowledge content to their owning project", async () => {
+  const f = await fixture();
+  try {
+    const projectRoot = join(f.root, "projects", "fixture");
+    const notePath = join(projectRoot, "project-notes.md"); await writeFile(notePath, "Project note content.");
+    const serenaRoot = join(projectRoot, ".serena", "memories"); await mkdir(serenaRoot, { recursive: true });
+    await writeFile(join(serenaRoot, "memory.md"), "Serena memory content.");
+    const sources = new KnowledgeSourceRegistry(f.store);
+    for (const [sourceId, kind, locator] of [
+      ["project-note-content", "project_note", notePath],
+      ["serena-memory-content", "serena", serenaRoot],
+    ]) {
+      const source = sources.sourceRegister({ source_id: sourceId, kind, label: sourceId, ...f.scope,
+        locator, content_digest: "fixture", trust: "bounded", access: "read_only" }).source as JsonObject;
+      const result = sources.sourceIngest({ source_id: source.id });
+      assert.equal(result.status, "completed");
+      const fragment = f.store.list("knowledge_fragment", 10, item => item.source_id === source.id)[0]!;
+      assert.equal(String((fragment.content_ref as JsonObject).path).includes(join(projectRoot, ".craft_data", "knowledge", "md")), true);
+    }
+
+    const unavailable = sources.sourceRegister({ source_id: "missing-readme", kind: "readme", label: "Missing README", ...f.scope,
+      locator: join(projectRoot, "README.md"), content_digest: "fixture", trust: "bounded", access: "read_only" }).source as JsonObject;
+    assert.equal(sources.sourceIngest({ source_id: unavailable.id }).status, "unavailable");
+  } finally { await f.close(); }
+});
+
 test("reingesting shared source fragments does not bump an unchanged candidate version", async () => {
   const f = await fixture();
   try {
