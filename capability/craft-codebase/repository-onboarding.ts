@@ -33,6 +33,20 @@ export interface RepositoryOnboardingPort {
   analyzeLsp?: (request: LspStdioRequest, timeoutMs: number) => JsonObject;
 }
 const REPOSITORY_INDEX_POLICY = 12;
+const SEMANTIC_RETRY_DELAY_MS = 5 * 60 * 1_000;
+
+function hasSemanticAdapterFailure(prior: JsonObject | null | undefined): boolean {
+  const diagnostics = Array.isArray((prior?.summary as JsonObject | undefined)?.diagnostics)
+    ? (prior!.summary as JsonObject).diagnostics as JsonObject[] : [];
+  return diagnostics.some(diagnostic => Array.isArray(diagnostic.degraded_languages)
+    && (diagnostic.degraded_languages as JsonObject[]).some(language => language.semantic_adapter_status === "unavailable"));
+}
+
+function repositoryStateReusable(prior: JsonObject | null | undefined): boolean {
+  if (typeof prior?.semantic_retry_after !== "string") return !hasSemanticAdapterFailure(prior);
+  const retryAfter = Date.parse(prior.semantic_retry_after);
+  return Number.isFinite(retryAfter) && retryAfter > Date.now();
+}
 
 function lspFailureDiagnostic(error: unknown): JsonObject {
   const message = error instanceof Error ? error.message : "";
@@ -154,7 +168,8 @@ function ensureRepositoryAttempt(service: RepositoryOnboardingPort, args: JsonOb
     const checkpointId = String(existingWorkspace.latest_checkpoint_id ?? "");
     const prior = service.store.find("codebase_repository_state", `${workspaceId}_${depth}`);
     const cachedIndex = prior ? service.store.find("codebase_index", String(prior.index_id)) : undefined;
-    if (prior?.checkpoint_id === checkpointId && prior.policy_version === REPOSITORY_INDEX_POLICY && prior.adapter_config_digest === lspConfig.digest && cachedIndex?.status === "ready")
+    if (prior?.checkpoint_id === checkpointId && prior.policy_version === REPOSITORY_INDEX_POLICY && prior.adapter_config_digest === lspConfig.digest
+      && cachedIndex?.status === "ready" && repositoryStateReusable(prior))
       return { ...base, status: "ready", index_id: prior.index_id, checkpoint_id: checkpointId, index_depth: depth, reused: true, omitted_files: selected.omitted, omitted_by_language: selected.omitted_by_language, summary: prior.summary };
   }
   // Parsing and per-file cache publication must not retain the checkpoint/index
@@ -171,6 +186,7 @@ function ensureRepositoryAttempt(service: RepositoryOnboardingPort, args: JsonOb
     && !pythonFiles.includes(file) && !javaFiles.includes(file));
   const degraded: JsonObject[] = [];
   const semanticAnalyses: JsonObject[] = [];
+  let semanticAdapterFailed = false;
   let semanticFileUnits: TypeScriptFileUnit[] = [];
   let pythonFileUnits: PythonFileUnit[] = [];
   let javaFileUnits: JavaFileUnit[] = [];
@@ -210,6 +226,7 @@ function ensureRepositoryAttempt(service: RepositoryOnboardingPort, args: JsonOb
           analyzer, analyzer_version: adapter.analyzer_version, adapter_config_digest: adapterConfigDigest })));
       }
       catch (error) {
+        semanticAdapterFailed = true;
         const failure = lspFailureDiagnostic(error);
         if (adapter.language === "go") {
           semanticAnalyses.push(basicAnalysis(service.store, workspaceId, languageFiles));
@@ -392,9 +409,13 @@ function ensureRepositoryAttempt(service: RepositoryOnboardingPort, args: JsonOb
     const stateId = `${workspaceId}_${depth}`;
     const prior = priorState;
     const cachedIndex = prior ? service.store.find("codebase_index", String(prior.index_id)) : undefined;
-    if (prior?.checkpoint_id === checkpointId && prior.policy_version === REPOSITORY_INDEX_POLICY && prior.adapter_config_digest === lspConfig.digest && cachedIndex?.status === "ready") return { ...base, status: "ready", index_id: prior.index_id, checkpoint_id: checkpointId, index_depth: depth, reused: true, omitted_files: selected.omitted, omitted_by_language: selected.omitted_by_language, summary: prior.summary };
+    if (prior?.checkpoint_id === checkpointId && prior.policy_version === REPOSITORY_INDEX_POLICY && prior.adapter_config_digest === lspConfig.digest
+      && cachedIndex?.status === "ready" && repositoryStateReusable(prior)) return { ...base, status: "ready", index_id: prior.index_id, checkpoint_id: checkpointId, index_depth: depth, reused: true, omitted_files: selected.omitted, omitted_by_language: selected.omitted_by_language, summary: prior.summary };
     // Restoring a checkpoint must not revive the stale index previously attached to it.
-    const indexId = `repository_index_${stableDigest({ workspaceId, depth, checkpointId, state_revision: workspace.state_revision, policy: REPOSITORY_INDEX_POLICY, adapter_config: lspConfig.digest }).slice(-24)}`;
+    const indexId = `repository_index_${stableDigest({ workspaceId, depth, checkpointId, state_revision: workspace.state_revision,
+      policy: REPOSITORY_INDEX_POLICY, adapter_config: lspConfig.digest,
+      ...(typeof priorState?.semantic_retry_after === "string" ? { semantic_retry_after: priorState.semantic_retry_after } : {}),
+      ...(hasSemanticAdapterFailure(priorState) && typeof priorState?.index_id === "string" ? { previous_index_id: priorState.index_id } : {}) }).slice(-24)}`;
     const built = analysis ? service.codebaseAnalysisImport({ workspace_id: workspaceId, checkpoint_id: checkpointId, index_id: indexId, analysis })
       : service.codebaseIndexBuild({ workspace_id: workspaceId, index_id: indexId, analyzer: "heuristic" });
     const index = built.index as JsonObject;
@@ -405,7 +426,9 @@ function ensureRepositoryAttempt(service: RepositoryOnboardingPort, args: JsonOb
     const summary = { analyzer: details.analyzer, certainty: details.certainty, supported_file_count: details.supported_file_count, unsupported_file_count: details.unsupported_file_count,
       omitted_files: selected.omitted, omitted_by_language: selected.omitted_by_language, diagnostic_count: diagnostics.length, diagnostics: diagnostics.slice(0, 10) };
     service.store.save("codebase_repository_state", stateId, { workspace_id: workspaceId, checkpoint_id: checkpointId, policy_version: REPOSITORY_INDEX_POLICY,
-      adapter_config_digest: lspConfig.digest, index_id: index.id, summary, ...(depth === "semantic" ? { typescript_path_set_digest: typeScriptPathSetDigest } : {}) });
+      adapter_config_digest: lspConfig.digest, index_id: index.id, summary,
+      ...(semanticAdapterFailed ? { semantic_retry_after: new Date(Date.now() + SEMANTIC_RETRY_DELAY_MS).toISOString() } : {}),
+      ...(depth === "semantic" ? { typescript_path_set_digest: typeScriptPathSetDigest } : {}) });
     if (depth === "semantic" && semanticFileUnits.length === semanticFiles.length) {
       const cacheableUnits = semanticFileUnits.filter(unit => unit.budget_limited === false);
       const livePaths = new Set(cacheableUnits.map(unit => unit.path));

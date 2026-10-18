@@ -1,6 +1,6 @@
 {
   "name": "dsh-craft-adapter",
-  "version": "0.12.52",
+  "version": "0.12.53",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

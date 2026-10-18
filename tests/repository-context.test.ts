@@ -181,6 +181,57 @@ test("semantic repository onboarding rebuilds adapter relations when only the tr
   } finally { f.close(); }
 });
 
+test("semantic repository onboarding retries failed adapters after cooldown and clears retry state on recovery", async () => {
+  const f = await fixture();
+  try {
+    const content = "package main\nfunc stable() {}\n";
+    f.write("main.go", content);
+    writeFileSync(join(f.store.paths.configDir, "codebase-lsp.json"), JSON.stringify({ schema_version: 1,
+      adapters: [{ language: "go", command: process.execPath }] }));
+    let fail = true;
+    const calls: JsonObject[] = [];
+    Object.assign(f.service, { analyzeLsp: (request: JsonObject) => {
+      calls.push(request);
+      if (fail) throw new Error("Unable to start configured language server");
+      const document = (request.documents as JsonObject[])[0]!;
+      const start = content.indexOf("stable");
+      return { format: "craft-static-analysis-v1", analyzer: "lsp-go", analyzer_version: "1", edges: [],
+        nodes: [{ id: "stable", kind: "symbol", path: "main.go", language: "go", name: "stable", source_digest: document.source_digest,
+          span: { start_offset: start, end_offset: start + 6 } }], diagnostics: { relations: "analyzed" } };
+    } });
+
+    const failed = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
+    const stateId = `${String(failed.workspace_id)}_semantic`;
+    const stateAfterFailure = f.store.get("codebase_repository_state", stateId)!;
+    assert.equal(failed.status, "ready");
+    assert.equal(JSON.stringify(failed.summary).includes("server_unavailable"), true);
+    assert.equal(typeof stateAfterFailure.semantic_retry_after, "string");
+    assert.equal(f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" }).reused, true);
+    assert.equal(calls.length, 1);
+
+    fail = false;
+    const legacyFailure = { ...stateAfterFailure };
+    delete legacyFailure.semantic_retry_after;
+    f.store.save("codebase_repository_state", stateId, legacyFailure);
+    const recovered = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
+    assert.equal(recovered.reused, false);
+    assert.notEqual(recovered.index_id, failed.index_id);
+    assert.equal((recovered.summary as JsonObject).analyzer, "lsp-go");
+    assert.equal(f.store.get("codebase_repository_state", stateId)!.semantic_retry_after, undefined);
+    assert.equal(calls.length, 2);
+
+    const recoveredState = f.store.get("codebase_repository_state", stateId)!;
+    f.store.save("codebase_repository_state", stateId, { ...recoveredState, semantic_retry_after: "2000-01-01T00:00:00.000Z" });
+    assert.equal(f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" }).reused, false);
+    assert.equal(calls.length, 3);
+
+    const retriedState = f.store.get("codebase_repository_state", stateId)!;
+    f.store.save("codebase_repository_state", stateId, { ...retriedState, semantic_retry_after: "invalid-timestamp" });
+    assert.equal(f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" }).reused, false);
+    assert.equal(calls.length, 4);
+  } finally { f.close(); }
+});
+
 test("LSP onboarding degrades without a worker entry and supports packaged JavaScript worker entries", async () => {
   const unavailable = await fixture();
   const previousEntry = process.argv[1];
