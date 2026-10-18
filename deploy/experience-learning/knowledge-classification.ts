@@ -221,8 +221,9 @@ export async function runKnowledgeScenarioClassificationOnce(deps: KnowledgeClas
           trust: "observed", operation_id: ticketId, model_fingerprint: modelFingerprint,
           error_class: failureKind, status: "failed",
           data: { failure_kind: failureKind, failure_stage: processingStage, ...(responseText ? { response_digest: stableDigest(responseText) } : {}) },
-          summary: "Knowledge classification attempt failed" });
-        await deps.client.call("craft_trace_finalize", { trace_id: traceId, status: "failed", summary: "Knowledge classification attempt failed" });
+          summary: `Knowledge classification attempt failed during ${processingStage}` });
+        await deps.client.call("craft_trace_finalize", { trace_id: traceId, status: "failed",
+          summary: `Knowledge classification attempt failed during ${processingStage}` });
       }
       outcomes.push({ claim_id: claim.id, ticket_id: ticketId, ...(traceId ? { trace_id: traceId } : {}), status: "failed",
         failure_kind: safeErrorClass(error), failure_stage: processingStage });
