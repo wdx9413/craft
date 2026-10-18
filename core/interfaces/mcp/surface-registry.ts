@@ -76,7 +76,7 @@ const DAILY_COMPONENT_TOOLS: Readonly<Record<string, readonly string[]>> = {
     "craft_component_readiness_get", "craft_component_diagnose", "craft_knowledge_bootstrap_install", "craft_knowledge_source_list",
     "craft_knowledge_source_register", "craft_knowledge_source_ingest", "craft_evidence_record", "craft_knowledge_search", "craft_knowledge_scenario_list", "craft_knowledge_scenario_migration_propose", "craft_knowledge_promotion_policy_get", "craft_knowledge_host_review", "craft_knowledge_support_record", "craft_knowledge_auto_review",
     "craft_knowledge_claim_save", "craft_knowledge_semantic_review_packet", "craft_knowledge_claim_list", "craft_evaluation_model_profile_ensure_single", "craft_evaluation_model_profile_get", "craft_evaluation_model_ticket_issue", "craft_evaluation_model_ticket_list", "craft_evaluation_model_ticket_complete", "craft_context_resolution_resolve", "craft_knowledge_memory_bundle",
-    "craft_scope_identity_resolve_project", "craft_decision_context_gate_open",
+    "craft_scope_identity_resolve_project", "craft_decision_context_gate_open", "craft_trace_start", "craft_trace_append", "craft_trace_finalize",
   ],
   "component-memory-daily": [
     "craft_memory_asset_inspect", "craft_memory_asset_restore",

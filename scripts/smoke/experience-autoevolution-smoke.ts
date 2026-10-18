@@ -246,6 +246,7 @@ try {
   let originalKnowledgeClaimStale = false;
   let revisedKnowledgeSupportCount = 0;
   let knowledgeIngestCallsAfterUpdate = 0;
+  let knowledgeClassificationEvents: JsonObject[] = [];
   let classifiedKnowledgeClaim = false;
   let tracedCalls = new Set<string>();
   let diagnostic: JsonObject = {};
@@ -269,6 +270,9 @@ try {
       knowledgeClaimPromoted = Boolean(promotedKnowledgeClaim);
       classifiedKnowledgeClaim = observed.list("knowledge_claim", 100, row => row.id === promotedKnowledgeClaim?.id && row.status === "reviewed"
         && row.scenario_key === "project.delivery.verification").length === 1;
+      knowledgeClassificationEvents = observed.list("trace_event", 10_000, row => row.actor === "knowledge-classification-worker")
+        .sort((a, b) => Number(a.sequence) - Number(b.sequence))
+        .map(({ event_kind, error_class, status, operation_id }) => ({ event_kind, error_class, status, operation_id }));
       knowledgeIngestCallsBeforeUpdate = observed.list("trace_event", 10_000, row => row.operation_id === "craft_knowledge_source_ingest").length;
       tracedCalls = new Set(observed.list("trace_event", 10_000, row => expectedCalls.has(String(row.operation_id))).map(row => String(row.operation_id)));
       diagnostic = { requests: observed.list("workflow_evolution_request", 20).map(({ id, lifecycle }) => ({ id, lifecycle })),
@@ -276,12 +280,14 @@ try {
         knowledge_classification_tickets: observed.list("evaluation_model_ticket", 100, row => row.purpose === "knowledge_scenario_classification")
           .map(({ id, status, target }) => ({ id, status, target })),
         knowledge_classification_calls: await knowledgeClassificationCallCount(),
+        knowledge_classification_events: knowledgeClassificationEvents,
         tickets: observed.list("evaluation_model_ticket", 20).map(({ id, lifecycle, readiness, target }) => ({ id, lifecycle, readiness, target })),
         procedures: observed.list("experience_procedure", 20).map(({ id, lifecycle, title, procedure_kind, routeable }) => ({ id, lifecycle, title, procedure_kind, routeable })),
         dispatches: observed.list("experience_evaluation_dispatch", 20).map(({ id, stage, status, reason }) => ({ id, stage, status, reason })),
         provider_calls: await providerCallCount(), knowledge_claim_promoted: knowledgeClaimPromoted, traced_calls: [...tracedCalls] };
     } finally { observed.close(); }
     if (routeable && evidenceCount === 4 && evidenceStages.size === 4 && runCount === 3 && knowledgeClaimPromoted && classifiedKnowledgeClaim
+      && knowledgeClassificationEvents.length === 3
       && tracedCalls.size === expectedCalls.size && await providerCallCount() === 1 && await knowledgeClassificationCallCount() > 0) break;
     await delay(100);
   }
@@ -292,6 +298,8 @@ try {
   assert.equal(runCount, 3, "Shadow, Held-out and Canary each execute the evaluator; automatic Signoff consumes their Evidence");
   assert(knowledgeClaimPromoted, "two independently registered verified Knowledge sources must auto-promote their shared Claim");
   assert(classifiedKnowledgeClaim, `the continuous Knowledge classifier must classify the reviewed Claim without changing its review status; state=${JSON.stringify(diagnostic)}; stderr=${childError}`);
+  assert.deepEqual(knowledgeClassificationEvents.map(event => event.event_kind), ["model.request", "model.completed", "classification.saved"],
+    "Knowledge classification must persist the model request, response and saved candidate Trace without content");
   assert((await knowledgeClassificationCallCount()) > 0, "the packaged learning worker must use its model to classify Knowledge");
   assert(existsSync(paths.knowledgeDatabaseFile), "Knowledge artifacts must persist in the central .craft_data/knowledge store");
   assert(isUnder(paths.knowledgeContentDir, (promotedKnowledgeClaim!.content_ref as JsonObject | undefined)?.path),

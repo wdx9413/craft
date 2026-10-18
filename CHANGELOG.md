@@ -1,3 +1,9 @@
+## v0.12.52（Knowledge 引用候选分类修复）
+
+- Knowledge 分类 Worker 可从引用型 Claim 获取并核验完整内容，再提交场景分类候选；模型输入仅包含脱敏后的有界内容，日志不记录 Claim 正文。
+- 覆盖项目 scope 的规范标识与历史别名，避免同一项目 Claim 因旧 scope 命名而漏分类。
+- 为持续 Worker 开放受限 Trace 写入工具，使请求、模型回执和候选保存留下可查询记录；集成验收覆盖自动分类、晋级和 Canary 再迭代。
+
 ## v0.12.51（启动内容索引限域）
 
 - CraftStore 启动重建内容索引时，仅扫描可能包含 Markdown 引用的知识、记忆和 Experience 记录，并逐行处理；避免遍历大型 trace/archive 历史并一次性载入内存。

@@ -52,6 +52,8 @@ test("standalone Knowledge daily surface exposes the model review packet needed 
   const knowledge = new Set(surfaceToolNames(productSurfaceOf("knowledge")));
   for (const name of ["craft_evidence_record", "craft_knowledge_claim_save", "craft_knowledge_semantic_review_packet", "craft_knowledge_host_review"])
     assert(knowledge.has(name), `Knowledge daily surface must expose ${name}`);
+  for (const name of ["craft_trace_start", "craft_trace_append", "craft_trace_finalize"])
+    assert(knowledge.has(name), `Knowledge daily surface must expose ${name} for auditable classification calls`);
 });
 
 test("internal component surfaces remain bounded independently from the complete context composition", () => {
@@ -229,7 +231,8 @@ test("portable Agent Plugins manifests contain only standard Skill and MCP contr
     assert.deepEqual(Object.keys(manifest).sort(), ["$schema", "description", "license", "name", "version"]);
     const mcp = JSON.parse(await readFile(join(root, "mcp.json"), "utf8"));
     assert.equal(mcp.$schema, "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json");
-    assert.deepEqual(mcp.mcpServers[product.name], { type: "stdio", command: "node", args: ["${PLUGIN_ROOT}/dist/plugin/craft-mcp.cjs", "--product", product.name.replace("craft-", "")] });
+    assert.deepEqual(mcp.mcpServers[product.name], { type: "stdio", command: "node", args: ["${PLUGIN_ROOT}/dist/plugin/craft-mcp.cjs", "--product", product.name.replace("craft-", "")],
+      ...(product.name === "craft-context" ? { env: { CRAFT_LEARNING_MODEL_HOST: "codex-cli" } } : {}) });
     assert.equal(await readFile(join(root, "skills", product.name, "SKILL.md"), "utf8"), await readFile(join(import.meta.dirname, "..", "skills", product.name, "SKILL.md"), "utf8"));
   }
 });
