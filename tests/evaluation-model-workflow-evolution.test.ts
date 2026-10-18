@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { stableDigest } from "../core/digest.ts";
 import { EvaluationModelProfileKernel } from "../capability/craft-experience/evaluation-model-profile.ts";
 import { validateGraphControl } from "../capability/craft-experience/procedure-graph.ts";
 import { McpServer, surfaceToolNames } from "../core/mcp.ts";
@@ -111,6 +112,11 @@ test("reserves a secret-free model profile and fails closed until explicit enabl
 test("Knowledge classification tickets track the live candidate and keep result records content free", async () => {
   const f = await fixture();
   try {
+    const knowledgeServer = new McpServer(f.service, "component-knowledge-daily");
+    const knowledgeTools = ((await knowledgeServer.handle({ id: "schema", method: "tools/list" }))?.result as JsonObject).tools as JsonObject[];
+    const completionSchema = knowledgeTools.find(item => item.name === "craft_evaluation_model_ticket_complete")?.inputSchema as JsonObject;
+    assert.deepEqual((completionSchema.properties as JsonObject).trace_id, { type: "string" });
+    assert.equal((completionSchema.required as string[]).includes("trace_id"), false, "Workflow tickets do not require a Knowledge Trace");
     f.store.create("knowledge_source", "source-1", { status: "active", trust: "verified" });
     f.store.create("knowledge_claim", "claim-1", { status: "candidate", scope: "project:demo", version: 1,
       content_digest: "sha256:claim", source_id: "source-1" });
@@ -154,16 +160,55 @@ test("Knowledge classification tickets track the live candidate and keep result 
     assert.equal((kernel.ticketList({ purpose: "knowledge_scenario_classification" }).tickets as JsonObject[]).length, 3);
     assert.throws(() => kernel.ticketComplete({ ticket_id: ticket.id, result_digest: "bad" }), /SHA-256/u);
     const resultDigest = `sha256:${"a".repeat(64)}`;
-    const completed = kernel.ticketComplete({ ticket_id: ticket.id, result_digest: resultDigest });
+    assert.throws(() => kernel.ticketComplete({ ticket_id: ticket.id, result_digest: resultDigest, trace_id: "missing-trace" }), /exact model and result Trace/u);
+    const bindKnowledgeTrace = (ticketValue: JsonObject, digest: string, traceId: string) => {
+      const ticketTarget = ticketValue.target as JsonObject;
+      const ticketProfile = f.store.get("evaluation_model_profile", String(ticketValue.profile_id), Number(ticketValue.profile_version));
+      const fingerprint = stableDigest({ provider: ticketProfile.provider, model: ticketProfile.model });
+      f.service.trace.start({ trace_id: traceId, task_id: `knowledge:${ticketTarget.id}`, operation_id: ticketValue.id, model_fingerprint: fingerprint });
+      f.service.trace.append({ trace_id: traceId, event_kind: "model.completed", actor: "adapter", source: "codex-cli-learning-transport",
+        trust: "observed", operation_id: ticketValue.id, model_fingerprint: fingerprint, data: {} });
+      f.service.trace.append({ trace_id: traceId, event_kind: "model.result_bound", actor: "knowledge-classification-worker", source: "craft-knowledge",
+        trust: "verified", operation_id: ticketValue.id, output_refs: [ticketTarget.id], data: { ticket_id: ticketValue.id, result_digest: digest } });
+      return traceId;
+    };
+    const traceId = bindKnowledgeTrace(ticket, resultDigest, "trace-knowledge-ticket");
+    const completed = kernel.ticketComplete({ ticket_id: ticket.id, result_digest: resultDigest, trace_id: traceId });
     assert.equal((completed.ticket as JsonObject).status, "completed");
     assert.equal((completed.ticket as JsonObject).result_digest, resultDigest);
+    assert.equal((completed.ticket as JsonObject).trace_id, traceId);
+    const differentValidTrace = bindKnowledgeTrace(ticket, resultDigest, "trace-knowledge-ticket-alt");
+    assert.throws(() => kernel.ticketComplete({ ticket_id: ticket.id, result_digest: resultDigest, trace_id: differentValidTrace }), /Trace conflicts/u);
     assert.equal((kernel.ticketList({ purpose: "knowledge_scenario_classification" }).tickets as JsonObject[]).length, 2);
     f.store.create("evaluation_model_ticket", "not-ready-ticket", { purpose: "knowledge_scenario_classification", status: "needs_credential" });
     assert.throws(() => kernel.ticketComplete({ ticket_id: "not-ready-ticket", result_digest: resultDigest }), /not ready for completion/u);
     const reviewedTicketId = String(reviewedTicket.id);
-    assert.equal(((kernel.ticketComplete({ ticket_id: reviewedTicketId, result_digest: resultDigest }).ticket as JsonObject).status), "completed");
-    assert.equal(((kernel.ticketComplete({ ticket_id: globalTicket.id, result_digest: resultDigest }).ticket as JsonObject).status), "completed");
-    assert.equal(kernel.ticketComplete({ ticket_id: ticket.id, result_digest: resultDigest }).idempotent, true);
+    const reviewedTarget = reviewedTicket.target as JsonObject;
+    const reviewedProfile = f.store.get("evaluation_model_profile", String(reviewedTicket.profile_id), Number(reviewedTicket.profile_version));
+    const reviewedFingerprint = stableDigest({ provider: reviewedProfile.provider, model: reviewedProfile.model });
+    f.service.trace.start({ trace_id: "trace-wrong-fingerprint", task_id: `knowledge:${reviewedTarget.id}`, operation_id: reviewedTicket.id,
+      model_fingerprint: "sha256:wrong" });
+    f.service.trace.append({ trace_id: "trace-wrong-fingerprint", event_kind: "model.completed", operation_id: reviewedTicket.id,
+      model_fingerprint: "sha256:wrong", data: {} });
+    f.service.trace.append({ trace_id: "trace-wrong-fingerprint", event_kind: "model.result_bound", actor: "knowledge-classification-worker",
+      source: "craft-knowledge", trust: "verified", operation_id: reviewedTicket.id, output_refs: [reviewedTarget.id],
+      data: { ticket_id: reviewedTicket.id, result_digest: resultDigest } });
+    assert.throws(() => kernel.ticketComplete({ ticket_id: reviewedTicketId, result_digest: resultDigest, trace_id: "trace-wrong-fingerprint" }), /exact model and result Trace/u);
+    f.service.trace.start({ trace_id: "trace-without-model", task_id: `knowledge:${reviewedTarget.id}`, operation_id: reviewedTicket.id,
+      model_fingerprint: reviewedFingerprint });
+    assert.throws(() => kernel.ticketComplete({ ticket_id: reviewedTicketId, result_digest: resultDigest, trace_id: "trace-without-model" }), /exact model and result Trace/u);
+    f.store.create("trace", "trace-invalid-count", { task_id: `knowledge:${reviewedTarget.id}`, operation_id: reviewedTicket.id,
+      model_fingerprint: reviewedFingerprint, event_count: "not-a-number" });
+    assert.throws(() => kernel.ticketComplete({ ticket_id: reviewedTicketId, result_digest: resultDigest, trace_id: "trace-invalid-count" }), /exact model and result Trace/u);
+    f.store.create("trace", "trace-excessive-count", { task_id: `knowledge:${reviewedTarget.id}`, operation_id: reviewedTicket.id,
+      model_fingerprint: reviewedFingerprint, event_count: 10_001 });
+    assert.throws(() => kernel.ticketComplete({ ticket_id: reviewedTicketId, result_digest: resultDigest, trace_id: "trace-excessive-count" }), /exact model and result Trace/u);
+    const reviewedTrace = bindKnowledgeTrace(reviewedTicket, resultDigest, "trace-reviewed-ticket");
+    const globalTrace = bindKnowledgeTrace(globalTicket, resultDigest, "trace-global-ticket");
+    assert.equal(((kernel.ticketComplete({ ticket_id: reviewedTicketId, result_digest: resultDigest, trace_id: reviewedTrace }).ticket as JsonObject).status), "completed");
+    assert.equal(((kernel.ticketComplete({ ticket_id: globalTicket.id, result_digest: resultDigest, trace_id: globalTrace }).ticket as JsonObject).status), "completed");
+    assert.equal(kernel.ticketComplete({ ticket_id: ticket.id, result_digest: resultDigest, trace_id: traceId }).idempotent, true);
+    assert.throws(() => kernel.ticketComplete({ ticket_id: ticket.id, result_digest: resultDigest, trace_id: "different-trace" }), /exact model and result Trace/u);
     assert.throws(() => kernel.ticketComplete({ ticket_id: ticket.id, result_digest: `sha256:${"b".repeat(64)}` }), /conflicts/u);
     f.store.create("evaluation_model_ticket", "foreign-ticket", { purpose: "other", status: "ready_for_adapter" });
     assert.throws(() => kernel.ticketComplete({ ticket_id: "foreign-ticket", result_digest: resultDigest }), /Knowledge classification or Workflow-evolution/u);
@@ -171,6 +216,52 @@ test("Knowledge classification tickets track the live candidate and keep result 
     assert.deepEqual((kernel.ticketList({ purpose: "knowledge_scenario_classification" }).tickets as JsonObject[]).map(item => item.id), []);
     assert.throws(() => kernel.issue({ profile_id: profile.id, purpose: "knowledge_scenario_classification", knowledge_claim_id: "missing",
       input_ref: "input", output_contract_ref: "contract" }));
+    f.store.create("knowledge_claim", "legacy-completed-claim", { status: "candidate", scope: "project:demo", version: 1,
+      content_digest: "sha256:legacy", source_id: "source-1" });
+    const legacyArgs = { profile_id: profile.id, purpose: "knowledge_scenario_classification", knowledge_claim_id: "legacy-completed-claim",
+      input_ref: "craft-knowledge://claim/legacy-completed-claim/v1/catalog/0", output_contract_ref: "craft-knowledge-scenario-classification-v1" };
+    const legacyTicket = kernel.issue(legacyArgs).ticket as JsonObject;
+    f.store.save("evaluation_model_ticket", String(legacyTicket.id), { ...legacyTicket, status: "completed", trace_id: "trace-legacy-invalid",
+      result_digest: "legacy-without-digest" });
+    const recovered = kernel.issue(legacyArgs);
+    assert.notEqual((recovered.ticket as JsonObject).id, legacyTicket.id);
+    assert.equal((recovered.ticket as JsonObject).status, "ready_for_adapter");
+    assert.equal((recovered.ticket as JsonObject).recovery_of, legacyTicket.id);
+    assert.equal(kernel.issue(legacyArgs).idempotent, true);
+    const retryOne = recovered.ticket as JsonObject;
+    f.store.save("evaluation_model_ticket", String(retryOne.id), { ...retryOne, status: "completed", result_digest: resultDigest });
+    const retryTwo = kernel.issue(legacyArgs).ticket as JsonObject;
+    assert.equal(retryTwo.recovery_attempt, 2);
+    const retryTwoTrace = bindKnowledgeTrace(retryTwo, resultDigest, "trace-recovery-ticket");
+    kernel.ticketComplete({ ticket_id: String(retryTwo.id), result_digest: resultDigest, trace_id: retryTwoTrace });
+    assert.equal((kernel.issue(legacyArgs).ticket as JsonObject).id, retryTwo.id,
+      "recovery resumes after an invalid completed retry and reuses the first verified retry");
+
+    f.store.create("knowledge_claim", "conflicting-recovery-claim", { status: "candidate", scope: "project:demo", version: 1,
+      content_digest: "sha256:conflict", source_id: "source-1" });
+    const conflictArgs = { ...legacyArgs, knowledge_claim_id: "conflicting-recovery-claim",
+      input_ref: "craft-knowledge://claim/conflicting-recovery-claim/v1/catalog/0" };
+    const conflictBase = kernel.issue(conflictArgs).ticket as JsonObject;
+    f.store.save("evaluation_model_ticket", String(conflictBase.id), { ...conflictBase, status: "completed", result_digest: "legacy" });
+    const conflictRetryId = `evaluation_model_ticket_retry_${stableDigest({ base_ticket_id: conflictBase.id,
+      identity_digest: conflictBase.identity_digest, attempt: 1 }).slice(-20)}`;
+    f.store.create("evaluation_model_ticket", conflictRetryId, { ...conflictBase, id: conflictRetryId, identity_digest: "sha256:wrong",
+      status: "completed", recovery_of: conflictBase.id, recovery_attempt: 1 });
+    assert.throws(() => kernel.issue(conflictArgs), /recovery idempotency conflict/u);
+
+    f.store.create("knowledge_claim", "exhausted-recovery-claim", { status: "candidate", scope: "project:demo", version: 1,
+      content_digest: "sha256:exhausted", source_id: "source-1" });
+    const exhaustedArgs = { ...legacyArgs, knowledge_claim_id: "exhausted-recovery-claim",
+      input_ref: "craft-knowledge://claim/exhausted-recovery-claim/v1/catalog/0" };
+    const exhaustedBase = kernel.issue(exhaustedArgs).ticket as JsonObject;
+    f.store.save("evaluation_model_ticket", String(exhaustedBase.id), { ...exhaustedBase, status: "completed", result_digest: "legacy" });
+    for (let attempt = 1; attempt <= 100; attempt += 1) {
+      const retryId = `evaluation_model_ticket_retry_${stableDigest({ base_ticket_id: exhaustedBase.id,
+        identity_digest: exhaustedBase.identity_digest, attempt }).slice(-20)}`;
+      f.store.create("evaluation_model_ticket", retryId, { ...exhaustedBase, id: retryId, status: "completed", result_digest: "legacy",
+        recovery_of: exhaustedBase.id, recovery_attempt: attempt });
+    }
+    assert.throws(() => kernel.issue(exhaustedArgs), /recovery attempt limit/u);
     for (const [claimId, claimValue] of [
       ["issue-rejected", { status: "rejected", scope: "project:demo", version: 1, content_digest: "sha256:rejected", source_id: "source-1" }],
       ["issue-classified", { status: "candidate", scenario_key: "known", scope: "project:demo", version: 1, content_digest: "sha256:classified", source_id: "source-1" }],

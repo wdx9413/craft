@@ -50,7 +50,7 @@ test("craft-context includes the complete published surfaces for Codebase, Knowl
 
 test("standalone Knowledge daily surface exposes the model review packet needed for automatic claim promotion", () => {
   const knowledge = new Set(surfaceToolNames(productSurfaceOf("knowledge")));
-  for (const name of ["craft_evidence_record", "craft_knowledge_claim_save", "craft_knowledge_semantic_review_packet", "craft_knowledge_host_review"])
+  for (const name of ["craft_evidence_record", "craft_knowledge_claim_save", "craft_knowledge_claim_review", "craft_knowledge_semantic_review_packet", "craft_knowledge_host_review"])
     assert(knowledge.has(name), `Knowledge daily surface must expose ${name}`);
   for (const name of ["craft_trace_start", "craft_trace_append", "craft_trace_finalize"])
     assert(knowledge.has(name), `Knowledge daily surface must expose ${name} for auditable classification calls`);

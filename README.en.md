@@ -2,7 +2,7 @@
 
 Workbench/Desktop presentation has moved to the sibling `craft-workbench/` project. Core serves APIs without UI by default; desktop release automation is paused. See [presentation separation](docs/technical/modules/presentation-separation.md).
 
-> Current release: v0.12.53. Craft is a general work runtime for people and AI. The default `craft` plugin includes Knowledge, Memory, Capability discovery, Skill Quality, and Workflow Evolution behind one shared control plane; each remains available as an optional standalone component. Interactive tasks keep using the current app as their embedded host; the Codex Context plugin starts a read-only `gpt-6-luna` CLI call only when a learning ticket is waiting, at most once per poll.
+> Current release: v0.12.54. Craft is a general work runtime for people and AI. The default `craft` plugin includes Knowledge, Memory, Capability discovery, Skill Quality, and Workflow Evolution behind one shared control plane; each remains available as an optional standalone component. Interactive tasks keep using the current app as their embedded host; the Codex Context plugin starts a read-only `gpt-6-luna` CLI call only when a learning ticket is waiting, at most once per poll.
 
 [中文](README.md) | [English](README.en.md)
 

@@ -117,9 +117,18 @@ export class EvaluationModelProfileKernel {
     if (!/^sha256:[a-f0-9]{64}$/u.test(resultDigest)) throw new Error("result_digest must be a SHA-256 digest");
     if (ticket.status === "completed") {
       if (ticket.result_digest !== resultDigest) throw new Error("Evaluation Model Ticket completion digest conflicts with its prior result");
+      const traceId = ticket.purpose === "knowledge_scenario_classification" ? text(args.trace_id, "trace_id") : undefined;
+      if (traceId && !this.knowledgeResultTraceMatches(ticket, traceId, resultDigest)) {
+        throw new Error("Knowledge classification ticket requires its exact model and result Trace before completion");
+      }
+      if (traceId && ticket.trace_id !== traceId) throw new Error("Knowledge classification ticket completion Trace conflicts with its prior result");
       return { ticket, idempotent: true };
     }
     if (ticket.status !== "ready_for_adapter") throw new Error("Evaluation Model Ticket is not ready for completion");
+    const traceId = ticket.purpose === "knowledge_scenario_classification" ? text(args.trace_id, "trace_id") : undefined;
+    if (traceId && !this.knowledgeResultTraceMatches(ticket, traceId, resultDigest)) {
+      throw new Error("Knowledge classification ticket requires its exact model and result Trace before completion");
+    }
     if (ticket.purpose === "workflow_evolution") {
       const target = ticket.target as JsonObject;
       const proposal = this.store.list("workflow_evolution_proposal", 1_000, (item) => item.model_ticket_id === ticket.id
@@ -129,7 +138,8 @@ export class EvaluationModelProfileKernel {
         throw new Error("Workflow-evolution ticket requires its exact submitted candidate before completion");
       }
     }
-    const completed = this.store.save("evaluation_model_ticket", ticketId, { ...ticket, status: "completed", result_digest: resultDigest, completed_at: new Date().toISOString() });
+    const completed = this.store.save("evaluation_model_ticket", ticketId, { ...ticket, status: "completed", result_digest: resultDigest,
+      ...(traceId ? { trace_id: traceId } : {}), completed_at: new Date().toISOString() });
     this.store.appendEvent(`evaluation-model:${ticket.profile_id}`, "evaluation_model.ticket_completed", { ticket_id: ticket.id, purpose: ticket.purpose, result_digest: resultDigest });
     return { ticket: completed, idempotent: completed === ticket };
   }
@@ -141,10 +151,65 @@ export class EvaluationModelProfileKernel {
     const target = this.target(args, purpose); const inputRef = text(args.input_ref, "input_ref"); const outputContractRef = text(args.output_contract_ref, "output_contract_ref");
     const identity = { profile_id: profile.id, profile_version: profile.version, profile_digest: profile.identity_digest, purpose, target, input_ref: inputRef, output_contract_ref: outputContractRef, content_stored: false, execution_authority: "adapter_only" };
     const ticketId = String(args.ticket_id ?? `evaluation_model_ticket_${stableDigest(identity).slice(-20)}`); const existing = this.store.find("evaluation_model_ticket", ticketId); const identityDigest = stableDigest(identity);
-    if (existing) { if (existing.identity_digest !== identityDigest) throw new Error("Evaluation Model Ticket idempotency conflict"); return { ticket: existing, readiness: this.readiness(profile), idempotent: true }; }
+    if (existing) {
+      if (existing.identity_digest !== identityDigest) throw new Error("Evaluation Model Ticket idempotency conflict");
+      if (purpose !== "knowledge_scenario_classification" || existing.status !== "completed" || this.knowledgeTicketCompletionVerified(existing)) {
+        return { ticket: existing, readiness: this.readiness(profile), idempotent: true };
+      }
+      return this.issueKnowledgeRecoveryTicket(ticketId, identity, identityDigest, profile);
+    }
     const readiness = this.readiness(profile); const ticket = this.store.create("evaluation_model_ticket", ticketId, { ...identity, identity_digest: identityDigest, status: readiness.status, next_action: readiness.next_action });
     this.store.appendEvent(`evaluation-model:${profile.id}`, "evaluation_model.ticket_issued", { ticket_id: ticket.id, purpose, target_kind: target.kind, target_id: target.id });
     return { ticket, readiness, idempotent: false };
+  }
+
+  private knowledgeTicketCompletionVerified(ticket: JsonObject): boolean {
+    return typeof ticket.trace_id === "string" && typeof ticket.result_digest === "string"
+      && this.knowledgeResultTraceMatches(ticket, ticket.trace_id, ticket.result_digest);
+  }
+
+  private knowledgeResultTraceMatches(ticket: JsonObject, traceId: string, resultDigest: string): boolean {
+    if (!/^sha256:[a-f0-9]{64}$/u.test(resultDigest)) return false;
+    const target = ticket.target as JsonObject | undefined;
+    const profile = this.store.find("evaluation_model_profile", String(ticket.profile_id), Number(ticket.profile_version));
+    const trace = this.store.find("trace", traceId);
+    if (ticket.purpose !== "knowledge_scenario_classification" || target?.kind !== "knowledge_scenario_classification"
+      || typeof target.id !== "string" || !profile || !trace || trace.task_id !== `knowledge:${target.id}` || trace.operation_id !== ticket.id) return false;
+    const expectedFingerprint = stableDigest({ provider: profile.provider, model: profile.model });
+    if (trace.model_fingerprint !== expectedFingerprint) return false;
+    const count = Number(trace.event_count);
+    if (!Number.isSafeInteger(count) || count < 2 || count > 10_000) return false;
+    const events = Array.from({ length: count }, (_, index) => this.store.find("trace_event", `${traceId}:${index + 1}`))
+      .filter((event): event is JsonObject => Boolean(event));
+    const modelEvent = events.find(event => event.event_kind === "model.completed" && event.operation_id === ticket.id
+      && event.model_fingerprint === expectedFingerprint);
+    const resultEvent = events.find(event => event.event_kind === "model.result_bound" && event.actor === "knowledge-classification-worker"
+      && event.source === "craft-knowledge" && event.trust === "verified" && event.operation_id === ticket.id
+      && Array.isArray(event.output_refs) && event.output_refs.includes(target.id)
+      && event.data_digest === stableDigest({ ticket_id: ticket.id, result_digest: resultDigest }));
+    return Boolean(modelEvent && resultEvent && Number(modelEvent.sequence) < Number(resultEvent.sequence));
+  }
+
+  private issueKnowledgeRecoveryTicket(baseTicketId: string, identity: JsonObject, identityDigest: string, profile: JsonObject): JsonObject {
+    const readiness = this.readiness(profile);
+    for (let attempt = 1; attempt <= 100; attempt += 1) {
+      const retryId = `evaluation_model_ticket_retry_${stableDigest({ base_ticket_id: baseTicketId, identity_digest: identityDigest, attempt }).slice(-20)}`;
+      const existing = this.store.find("evaluation_model_ticket", retryId);
+      if (existing) {
+        if (existing.identity_digest !== identityDigest) throw new Error("Evaluation Model Ticket recovery idempotency conflict");
+        if (existing.status !== "completed" || this.knowledgeTicketCompletionVerified(existing)) {
+          return { ticket: existing, readiness, idempotent: true, recovered_from: baseTicketId };
+        }
+        continue;
+      }
+      const ticket = this.store.create("evaluation_model_ticket", retryId, { ...identity, identity_digest: identityDigest,
+        status: readiness.status, next_action: readiness.next_action, recovery_of: baseTicketId, recovery_attempt: attempt });
+      this.store.appendEvent(`evaluation-model:${profile.id}`, "evaluation_model.ticket_reissued", { ticket_id: ticket.id,
+        purpose: ticket.purpose, target_kind: (ticket.target as JsonObject).kind, target_id: (ticket.target as JsonObject).id,
+        recovery_of: baseTicketId, recovery_attempt: attempt, reason: "completed_ticket_missing_verified_trace" });
+      return { ticket, readiness, idempotent: false, recovered_from: baseTicketId };
+    }
+    throw new Error("Evaluation Model Ticket recovery attempt limit reached");
   }
 
   private provider(value: unknown): ModelProviderSpec {

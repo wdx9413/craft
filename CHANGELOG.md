@@ -1,3 +1,9 @@
+## v0.12.54（Knowledge Ticket Trace 闭环）
+
+- Knowledge 分类与候选审核 Ticket 必须绑定真实 Host Trace，并验证模型完成和结果摘要；历史无可验证 Trace 的完成票据会重新发行恢复票据。
+- 候选 Claim 先由 Host 对有界 Evidence 分片做支持性审核，再进入既有 Knowledge 治理流程；不足或冲突的证据不会晋升。
+- 为 Ticket 恢复、Evidence 审核边界、异常结果和 Trace 绑定增加定向回归覆盖。
+
 ## v0.12.53（语义索引失败自动重试）
 
 - Codebase 的可信 LSP 语义分析失败时保留明确的 partial 回退，并记录 5 分钟重试时间；冷却期后自动重试，成功后清除重试标记。

@@ -272,7 +272,8 @@ try {
         && row.scenario_key === "project.delivery.verification").length === 1;
       knowledgeClassificationEvents = observed.list("trace_event", 10_000, row => row.actor === "knowledge-classification-worker")
         .sort((a, b) => Number(a.sequence) - Number(b.sequence))
-        .map(({ event_kind, error_class, status, operation_id }) => ({ event_kind, error_class, status, operation_id }));
+        .map(({ event_kind, error_class, status, operation_id, data }) => ({ event_kind, error_class, status, operation_id,
+          failure_stage: (data as JsonObject | undefined)?.failure_stage }));
       knowledgeIngestCallsBeforeUpdate = observed.list("trace_event", 10_000, row => row.operation_id === "craft_knowledge_source_ingest").length;
       tracedCalls = new Set(observed.list("trace_event", 10_000, row => expectedCalls.has(String(row.operation_id))).map(row => String(row.operation_id)));
       diagnostic = { requests: observed.list("workflow_evolution_request", 20).map(({ id, lifecycle }) => ({ id, lifecycle })),
@@ -298,7 +299,7 @@ try {
   assert.equal(runCount, 3, "Shadow, Held-out and Canary each execute the evaluator; automatic Signoff consumes their Evidence");
   assert(knowledgeClaimPromoted, "two independently registered verified Knowledge sources must auto-promote their shared Claim");
   assert(classifiedKnowledgeClaim, `the continuous Knowledge classifier must classify the reviewed Claim without changing its review status; state=${JSON.stringify(diagnostic)}; stderr=${childError}`);
-  assert.deepEqual(knowledgeClassificationEvents.map(event => event.event_kind), ["model.request", "model.completed", "classification.saved"],
+  assert.deepEqual(knowledgeClassificationEvents.map(event => event.event_kind), ["model.request", "model.completed", "classification.saved", "model.result_bound"],
     "Knowledge classification must persist the model request, response and saved candidate Trace without content");
   assert((await knowledgeClassificationCallCount()) > 0, "the packaged learning worker must use its model to classify Knowledge");
   assert(existsSync(paths.knowledgeDatabaseFile), "Knowledge artifacts must persist in the central .craft_data/knowledge store");

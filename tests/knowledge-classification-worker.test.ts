@@ -7,10 +7,10 @@ import { runKnowledgeScenarioClassificationOnce, type KnowledgeClassificationCli
 const provider: ModelProviderSpec = { provider: "test", label: "test", protocol: "openai-compatible", base_url: "https://example.invalid/v1",
   api_key_env: "TEST_KEY", chat_path: "/chat/completions", models: { standard: "test-model" }, cost_hint: 0, supports_tools: false };
 const claimContent = "Builds run with pnpm.";
-const claim: JsonObject = { id: "claim-1", version: 1, status: "candidate", scope: "project:demo", kind: "fact",
+const claim: JsonObject = { id: "claim-1", version: 1, status: "reviewed", scope: "project:demo", kind: "fact",
   content_digest: "sha256:claim", source_id: "source-1", evidence_ids: ["evidence-1"], tags: ["build"] };
 
-function fixture(modelText = '{"decision":"classified","scenario_key":"build.validation","scenario_definition":{"summary":"构建验证规则","applies_when":"适用于项目构建验收","excludes":"与构建无关的事实"},"coarse_scenario_key":"engineering","coarse_scenario_definition":{"summary":"工程主题","applies_when":"属于项目工程实践","excludes":"业务领域事实"}}', claimStatus = "candidate", claimScope: string = String(claim.scope)) {
+function fixture(modelText = '{"decision":"classified","scenario_key":"build.validation","scenario_definition":{"summary":"构建验证规则","applies_when":"适用于项目构建验收","excludes":"与构建无关的事实"},"coarse_scenario_key":"engineering","coarse_scenario_definition":{"summary":"工程主题","applies_when":"属于项目工程实践","excludes":"业务领域事实"}}', claimStatus = "reviewed", claimScope: string = String(claim.scope)) {
   const calls: Array<{ name: string; args: JsonObject }> = [];
   const scopeKind = claimScope === "global" ? "global" : "project";
   const scopeId = scopeKind === "global" ? "global" : claimScope.split(":").slice(1).join(":");
@@ -21,7 +21,8 @@ function fixture(modelText = '{"decision":"classified","scenario_key":"build.val
     if (name === "craft_scope_identity_resolve_project") return { identity: { canonical_scope: { kind: "project", id: scopeId } } };
     if (name === "craft_knowledge_claim_list") return { claims: [{ ...claim, status: claimStatus, scope: claimScope, scope_envelope: scopeEnvelope }] };
     if (name === "craft_knowledge_semantic_review_packet") return { status: "ready", packet: { claim: { id: claim.id, version: claim.version,
-      content_digest: claim.content_digest, content: claimContent } } };
+      content_digest: claim.content_digest, content: claimContent }, evidence_fragments: [{ evidence_id: "evidence-1",
+      content_digest: "sha256:evidence-1", content: claimContent }], source: { content_digest: "sha256:source" } }, packet_digest: "sha256:review-packet" };
     if (name === "craft_evaluation_model_profile_ensure_single") return { status: "ready_for_adapter", profile: { id: "profile-1", version: 1,
       provider: "test", model: "test-model", max_attempts: 1, max_output_tokens: 256, temperature: 0 } };
     if (name === "craft_evaluation_model_profile_get") return { profile: { id: "profile-1", version: 1, provider: "test", model: "test-model",
@@ -30,6 +31,9 @@ function fixture(modelText = '{"decision":"classified","scenario_key":"build.val
       definition: { summary: "工程主题", applies_when: "属于项目工程实践", excludes: "业务领域事实" } }] };
     if (name === "craft_evaluation_model_ticket_issue") return { ticket: { id: "ticket-1", status: "ready_for_adapter" } };
     if (name === "craft_knowledge_claim_save") return { claim: { id: "claim-1", version: 2 } };
+    if (name === "craft_knowledge_host_review") return { status: args.decision === "supported" ? "reviewed" : args.decision,
+      promoted: args.decision === "supported", claim: { id: claim.id, version: 2 } };
+    if (name === "craft_knowledge_claim_review") return { claim: { id: claim.id, status: args.status } };
     if (name === "craft_evaluation_model_ticket_complete") return { ticket: { id: "ticket-1", status: "completed" } };
     if (name === "craft_trace_start") return { trace: { id: "trace-classification-1" } };
     if (name === "craft_trace_append" || name === "craft_trace_finalize") return {};
@@ -42,12 +46,14 @@ function fixture(modelText = '{"decision":"classified","scenario_key":"build.val
     const packet = JSON.parse(content) as JsonObject;
     assert.equal(packet.scope, claimScope);
     assert.match(JSON.stringify(packet.taxonomy), /definition/u);
+    assert.equal((packet.evidence as JsonObject).included_fragment_count, 1);
+    assert.match(JSON.stringify((packet.evidence as JsonObject).fragments), /Builds run with pnpm\./u);
     return { text: modelText, model: "test-model", usage: { input_tokens: 10, output_tokens: 8 } };
   } };
   return { client, calls, transport };
 }
 
-test("classification uses the current project catalog, writes a candidate label, and completes its ticket", async () => {
+test("classification uses the current project catalog, writes a reviewed Claim label, and traces its ticket", async () => {
   const f = fixture();
   const result = await runKnowledgeScenarioClassificationOnce({ client: f.client, providers: [provider], transport: f.transport });
   assert.equal(result.processed, 1);
@@ -60,11 +66,74 @@ test("classification uses the current project catalog, writes a candidate label,
   assert.equal(saved?.scenario_key, "build.validation");
   assert.deepEqual(saved?.scenario_definition, { summary: "构建验证规则", applies_when: "适用于项目构建验收", excludes: "与构建无关的事实" });
   assert.equal(f.calls.find(call => call.name === "craft_evaluation_model_ticket_complete")?.args.ticket_id, "ticket-1");
+  assert.equal(f.calls.find(call => call.name === "craft_evaluation_model_ticket_complete")?.args.trace_id, "trace-classification-1");
   const traceEvents = f.calls.filter(call => call.name === "craft_trace_append");
-  assert.deepEqual(traceEvents.map(call => call.args.event_kind), ["model.request", "model.completed", "classification.saved"]);
+  assert.deepEqual(traceEvents.map(call => call.args.event_kind), ["model.request", "model.completed", "classification.saved", "model.result_bound"]);
   assert.equal(JSON.stringify(traceEvents).includes(claimContent), false, "Trace must not store the Claim body");
   assert.equal(JSON.stringify(traceEvents).includes("构建验证规则"), false, "Trace must not store the model response");
   assert.deepEqual(f.calls.filter(call => call.name === "craft_trace_finalize").map(call => call.args.status), ["completed"]);
+});
+
+test("candidate Claims receive an Evidence-bound Host review before scenario classification", async () => {
+  const f = fixture('{"review_decision":"supported"}', "candidate");
+  const result = await runKnowledgeScenarioClassificationOnce({ client: f.client, providers: [provider], transport: f.transport });
+  const outcome = (result.outcomes as JsonObject[])[0]!;
+  assert.equal(outcome.status, "reviewed");
+  assert.equal(outcome.review_decision, "supported");
+  assert.equal(outcome.promoted, true);
+  assert.deepEqual(f.calls.find(call => call.name === "craft_knowledge_host_review")?.args, {
+    claim_id: claim.id, host_kind: "codex-cli", host_run_key: "learning:ticket-1", model_ref: "test-model:knowledge-evidence-review",
+    source_digest: "sha256:source", packet_digest: "sha256:review-packet", decision: "supported", reason_code: "evidence_supports_claim",
+  });
+  assert.equal(f.calls.some(call => call.name === "craft_knowledge_claim_save"), false);
+  assert.equal(f.calls.find(call => call.name === "craft_evaluation_model_ticket_issue")?.args.output_contract_ref, "craft-knowledge-evidence-review-v1");
+  assert.deepEqual(f.calls.filter(call => call.name === "craft_trace_append").map(call => call.args.event_kind),
+    ["model.request", "model.completed", "knowledge.reviewed", "model.result_bound"]);
+  assert.equal(f.calls.find(call => call.name === "craft_evaluation_model_ticket_complete")?.args.trace_id, "trace-classification-1");
+});
+
+test("candidate review rejects malformed decisions and incomplete review packets", async () => {
+  for (const scenario of ["missing-decision", "missing-packet-digest"] as const) {
+    const f = fixture(scenario === "missing-decision" ? "{}" : '{"review_decision":"supported"}', "candidate");
+    if (scenario === "missing-packet-digest") {
+      const originalCall = f.client.call.bind(f.client);
+      f.client.call = async (name, args = {}) => {
+        const result = await originalCall(name, args);
+        if (name === "craft_knowledge_semantic_review_packet") {
+          const packet = result as JsonObject;
+          delete packet.packet_digest;
+        }
+        return result;
+      };
+    }
+    const result = await runKnowledgeScenarioClassificationOnce({ client: f.client, providers: [provider], transport: f.transport });
+    assert.equal((result.outcomes as JsonObject[])[0]?.status, "failed", `${scenario} must leave the ticket retryable`);
+    assert.equal(f.calls.some(call => call.name === "craft_evaluation_model_ticket_complete"), false);
+  }
+});
+
+test("candidate review tolerates Host review results without an embedded Claim or status", async () => {
+  const f = fixture('{"review_decision":"supported"}', "candidate");
+  const originalCall = f.client.call.bind(f.client);
+  f.client.call = async (name, args = {}) => name === "craft_knowledge_host_review" ? { promoted: false } : originalCall(name, args);
+  const result = await runKnowledgeScenarioClassificationOnce({ client: f.client, providers: [provider], transport: f.transport });
+  const outcome = (result.outcomes as JsonObject[])[0]!;
+  assert.equal(outcome.status, "supported");
+  assert.equal(outcome.claim_status, "stale");
+  assert.equal(outcome.promoted, false);
+  assert.equal(f.calls.some(call => call.name === "craft_knowledge_claim_review"), true);
+});
+
+test("uncertain and contradictory candidate reviews preserve non-promoted claim states", async () => {
+  for (const decision of ["needs_evidence", "rejected"]) {
+    const f = fixture(JSON.stringify({ review_decision: decision }), "candidate");
+    const result = await runKnowledgeScenarioClassificationOnce({ client: f.client, providers: [provider], transport: f.transport });
+    const outcome = (result.outcomes as JsonObject[])[0]!;
+    assert.equal(outcome.review_decision, decision);
+    assert.equal(outcome.promoted, false);
+    assert.equal(outcome.claim_status, decision === "rejected" ? "disputed" : "stale");
+    assert.equal(f.calls.some(call => call.name === "craft_knowledge_claim_review"), true);
+  }
 });
 
 test("classification redacts credential-shaped text from Claim and taxonomy fields before model dispatch", async () => {
@@ -77,7 +146,8 @@ test("classification redacts credential-shaped text from Claim and taxonomy fiel
     + "Unix /Users/alice.private/Documents/private-note Windows C:\\Users\\Alice\\Documents\\private-note";
   const client: KnowledgeClassificationClient = { async call(name, args) {
     if (name === "craft_knowledge_semantic_review_packet") return { status: "ready", packet: { claim: { id: claim.id, version: claim.version,
-      content_digest: claim.content_digest, content: secretClaim } } };
+      content_digest: claim.content_digest, content: claimContent }, evidence_fragments: [{ evidence_id: "evidence-1",
+      content_digest: "sha256:evidence-1", content: secretClaim }] } };
     if (name === "craft_knowledge_scenario_list") return { catalog_version: 3, scenarios: [{ scenario_key: "engineering", tier: "coarse", lifecycle: "active",
       definition: { summary: "password=\"taxonomy-secret value\"", applies_when: "项目工程实践", excludes: "业务事实" } }] };
     return f.client.call(name, args);
@@ -117,6 +187,27 @@ test("classification obtains Claim text only from the exact trusted evidence pac
     } };
     const result = await runKnowledgeScenarioClassificationOnce({ client, providers: [provider], transport });
     assert.deepEqual(result.outcomes, [{ claim_id: "claim-1", status: "skipped", reason: "trusted_claim_content_unavailable" }]);
+    assert.equal(modelCalls, 0);
+    assert.equal(f.calls.some(call => call.name === "craft_evaluation_model_ticket_issue"), false);
+  }
+});
+
+test("classification skips when its trusted packet contains no identifiable Evidence fragment", async () => {
+  for (const evidence_fragments of [[], [{ content_digest: "sha256:evidence-1", content: claimContent }],
+    [{ evidence_id: "evidence-1", content: claimContent }]]) {
+    const f = fixture();
+    const client: KnowledgeClassificationClient = { async call(name, args) {
+      if (name === "craft_knowledge_semantic_review_packet") return { status: "ready", packet: {
+        claim: { id: claim.id, version: claim.version, content_digest: claim.content_digest, content: claimContent }, evidence_fragments } };
+      return f.client.call(name, args);
+    } };
+    let modelCalls = 0;
+    const transport: ModelTransport = { async complete(): Promise<ChatResult> {
+      modelCalls++;
+      return { text: "{}", model: "test-model", usage: null };
+    } };
+    const result = await runKnowledgeScenarioClassificationOnce({ client, providers: [provider], transport });
+    assert.deepEqual(result.outcomes, [{ claim_id: "claim-1", status: "skipped", reason: "trusted_evidence_unavailable" }]);
     assert.equal(modelCalls, 0);
     assert.equal(f.calls.some(call => call.name === "craft_evaluation_model_ticket_issue"), false);
   }
@@ -175,7 +266,8 @@ test("worker classification accepts canonical project scopes and historical doub
     if (name === "craft_scope_identity_resolve_project") return { identity: { canonical_scope: { kind: "project", id: "project:demo" } } };
     if (name === "craft_knowledge_claim_list") return { claims: [canonicalClaim, legacyClaim, { ...claim, id: "other", scope: "project:other" }] };
     if (name === "craft_knowledge_semantic_review_packet") return { status: "ready", packet: { claim: {
-      id: args?.claim_id, version: claim.version, content_digest: claim.content_digest, content: claimContent } } };
+      id: args?.claim_id, version: claim.version, content_digest: claim.content_digest, content: claimContent }, evidence_fragments: [{ evidence_id: "evidence-1",
+      content_digest: "sha256:evidence-1", content: claimContent }] } };
     return f.client.call(name, args);
   } };
   const modelCalls: string[] = [];
@@ -204,7 +296,7 @@ test("classification keeps a ready ticket retryable when the shared Host-call bu
 });
 
 test("classification routes global Claims through the isolated global Knowledge taxonomy", async () => {
-  const f = fixture(undefined, "candidate", "global");
+  const f = fixture(undefined, "reviewed", "global");
   const result = await runKnowledgeScenarioClassificationOnce({ client: f.client, providers: [provider], transport: f.transport });
   assert.equal((result.outcomes as JsonObject[])[0]?.status, "classified");
   assert.equal(f.calls.find(call => call.name === "craft_knowledge_scenario_list")?.args.scope, "global");
@@ -303,7 +395,8 @@ test("oversized packets are closed without model calls and pre-ticket failures a
   const f = fixture();
   const largeClient: KnowledgeClassificationClient = { async call(name, args) {
     if (name === "craft_knowledge_semantic_review_packet") return { status: "ready", packet: { claim: { id: claim.id, version: claim.version,
-      content_digest: claim.content_digest, content: "x".repeat(13_000) } } };
+      content_digest: claim.content_digest, content: "x".repeat(13_000) }, evidence_fragments: [{ evidence_id: "evidence-1",
+      content_digest: "sha256:evidence-1", content: claimContent }] } };
     return f.client.call(name, args);
   } };
   const large = await runKnowledgeScenarioClassificationOnce({ client: largeClient, providers: [provider], transport: f.transport });
