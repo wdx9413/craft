@@ -28,12 +28,15 @@ export function checkpointManifestDigest(entries: readonly JsonObject[]): string
 export function readGitEvaluationState(root: string): GitEvaluationState {
   try {
     const revision = execFileSync("git", ["-C", root, "rev-parse", "HEAD"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], maxBuffer: GIT_MAX_BUFFER_BYTES }).trim();
-    const status = execFileSync("git", ["-C", root, "status", "--porcelain", "--untracked-files=all"],
-      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], maxBuffer: GIT_MAX_BUFFER_BYTES });
-    if (!status.length) return { revision, dirty: false, change_digest: null };
+    const status = execFileSync("git", ["-C", root, "status", "--porcelain", "-z", "--untracked-files=all"],
+      { encoding: "buffer", stdio: ["ignore", "pipe", "ignore"], maxBuffer: GIT_MAX_BUFFER_BYTES }).toString("utf8");
+    const relevantStatus = status.split("\0").filter(Boolean).filter(entry =>
+      !(entry.startsWith("?? ") && isProjectCraftDataPath(entry.slice(3))));
+    if (!relevantStatus.length) return { revision, dirty: false, change_digest: null };
     const patch = execFileSync("git", ["-C", root, "diff", "--binary", "HEAD"], { encoding: "buffer", stdio: ["ignore", "pipe", "ignore"], maxBuffer: GIT_MAX_BUFFER_BYTES });
     const untracked = execFileSync("git", ["-C", root, "ls-files", "--others", "--exclude-standard", "-z"],
-      { encoding: "buffer", stdio: ["ignore", "pipe", "ignore"], maxBuffer: GIT_MAX_BUFFER_BYTES }).toString("utf8").split("\0").filter(Boolean).sort();
+      { encoding: "buffer", stdio: ["ignore", "pipe", "ignore"], maxBuffer: GIT_MAX_BUFFER_BYTES }).toString("utf8").split("\0")
+      .filter(path => path && !isProjectCraftDataPath(path)).sort();
     const untrackedFingerprints = untracked.map(path => {
       const fullPath = join(root, path), metadata = lstatSync(fullPath);
       const contentDigest = metadata.isSymbolicLink() ? digestEvaluationMaterial(readlinkSync(fullPath)) : digestEvaluationMaterial(readFileSync(fullPath));
@@ -44,4 +47,8 @@ export function readGitEvaluationState(root: string): GitEvaluationState {
   } catch {
     return { revision: null, dirty: null, change_digest: null };
   }
+}
+
+function isProjectCraftDataPath(path: string): boolean {
+  return path.replaceAll("\\", "/").split("/").includes(".craft_data");
 }

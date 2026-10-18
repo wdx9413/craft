@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { codeContextCandidates, codeQueryTerms, rankCodeSymbols } from "../capability/craft-codebase/context-search.ts";
+import { CodeSymbolSearchIndex, codeContextCandidates, codeQueryTerms, rankCodeSymbols } from "../capability/craft-codebase/context-search.ts";
 import { lspDeclarationKind } from "../capability/craft-codebase/symbol-kind.ts";
 import type { JsonObject } from "../common/craft-common-store-local/src/store.ts";
 
@@ -60,6 +60,9 @@ test("Codebase query normalization expands identifiers and common task-language 
   for (const term of ["start", "multiple", "concurrent", "conversation"]) assert(conversationTask.includes(term));
   const simulationTask = codeQueryTerms("启动仿真任务的 HTTP 接口");
   for (const term of ["start", "simulation", "task", "http", "endpoint"]) assert(simulationTask.includes(term));
+  const userRoleCache = codeQueryTerms("load cached user role records");
+  for (const term of ["cache", "data", "query", "read"]) assert(userRoleCache.includes(term));
+  assert(codeQueryTerms("check whether a robot function is enabled").includes("open"));
   assert.equal(rankCodeSymbols([
     { ...symbol("conversation", "start_multiple_conversations", "scheduler/conversation_scheduler.py"), declaration_kind: "method" },
     { ...symbol("distractor", "can_handle", "scheduler/tool_operation_processor.py"), declaration_kind: "method" },
@@ -148,6 +151,39 @@ test("task verb matches disambiguate JavaScript functions from broader path and 
   const terms = codeQueryTerms("combine user and agent turns into simulated dialogue");
   assert(terms.includes("build") && terms.includes("simulation") && terms.includes("conversation"));
   assert.equal(rankCodeSymbols(dialogue, "combine user and agent turns into simulated dialogue", 3)[0]!.node.id, "target");
+});
+
+test("natural-language synonyms recover JavaScript app, token, and profile methods", () => {
+  const nodes = [
+    { ...symbol("app-id", "getPassportAppId", "kfp-home/src/store/userInfo.js"), declaration_kind: "function" },
+    { ...symbol("ticket", "getTokenByPassportSDK", "kfp-home/src/store/userInfo.js"), declaration_kind: "method" },
+    { ...symbol("init", "initTicket", "kfp-home/src/store/userInfo.js"), declaration_kind: "method" },
+    { ...symbol("bridge", "getTokenByBridge", "kfp-home/src/store/userInfo.js"), declaration_kind: "method" },
+    { ...symbol("profile", "getUserInfo", "kfp-home/src/store/userInfo.js"), declaration_kind: "method" },
+    { ...symbol("other", "getDriverInfo", "kfp-home/src/store/driverInfo.js"), declaration_kind: "method" },
+  ];
+
+  assert.equal(rankCodeSymbols(nodes, "determine passport application id from tenant in the current URL", 1)[0]!.node.id, "app-id");
+  assert.equal(rankCodeSymbols(nodes, "obtain a passport ticket using app id and role from URL parameters", 1)[0]!.node.id, "ticket");
+  assert.equal(rankCodeSymbols(nodes, "initialize the ticket from URL token or cookie", 1)[0]!.node.id, "init");
+  assert.equal(rankCodeSymbols(nodes, "fetch user token from the Didi bridge", 1)[0]!.node.id, "bridge");
+  assert.equal(rankCodeSymbols(nodes, "fetch the user profile and store uid role and phone", 1)[0]!.node.id, "profile");
+
+  const ticketFlow = [
+    { ...symbol("ticket", "getPassportTicket", "kfp-home/src/store/userInfo.js"), declaration_kind: "function" },
+    { ...symbol("login", "getUserTokenFromPassportLogin", "kfp-im/src/core/getUserToken.ts"), declaration_kind: "function" },
+    symbol("destructure", "{ source, token, ticket, passportAppId, passportRole, openid, oid, orderId, tenantId, countryCode, utcOffset }", "kfp-home/src/store/urlParams.js"),
+  ];
+  assert.equal(rankCodeSymbols(ticketFlow, "get the passport ticket from its cookie or load the Passport login script and receive a new ticket", 3)[0]!.node.id, "ticket");
+
+  const contextual = new CodeSymbolSearchIndex([
+    { ...symbol("bridge-wrapper", "getTokenByBridge", "kfp-home/src/store/userInfo.js"), declaration_kind: "method" },
+    { ...symbol("bridge-helper", "getUserInfo", "kfp-home/src/services/user.js"), declaration_kind: "method" },
+  ], new Map([
+    ["bridge-wrapper", "webviewUtil getUserInfo native bridge token"],
+    ["bridge-helper", "request user profile service"],
+  ]));
+  assert.equal(contextual.rank("fetch user token with webviewUtil getUserInfo from the Didi bridge", 2)[0]!.node.id, "bridge-wrapper");
 });
 
 test("task retrieval favors core business terms over generic test and API names, with bilingual plural matching", () => {

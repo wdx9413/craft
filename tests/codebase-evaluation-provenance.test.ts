@@ -38,6 +38,12 @@ test("evaluation provenance records clean and dirty Git states and marks non-Git
     assert.match(clean.revision ?? "", /^[0-9a-f]{40,64}$/u);
     assert.equal(clean.dirty, false);
     assert.equal(clean.change_digest, null);
+    const codebaseCache = join(repository, ".craft_data", "codebase", "cache.json");
+    mkdirSync(join(repository, ".craft_data", "codebase"), { recursive: true });
+    writeFileSync(codebaseCache, "first generated index\n");
+    assert.deepEqual(readGitEvaluationState(repository), clean);
+    writeFileSync(codebaseCache, "updated generated index\n");
+    assert.deepEqual(readGitEvaluationState(repository), clean);
     writeFileSync(join(repository, "changed.ts"), "export const changed = true;\n");
     const dirty = readGitEvaluationState(repository);
     assert.equal(dirty.revision, clean.revision);
@@ -45,6 +51,9 @@ test("evaluation provenance records clean and dirty Git states and marks non-Git
     assert.match(dirty.change_digest ?? "", /^[0-9a-f]{64}$/u);
     writeFileSync(join(repository, "changed.ts"), "export const changed = false;\n");
     assert.notEqual(readGitEvaluationState(repository).change_digest, dirty.change_digest);
+    const beforeCacheUpdate = readGitEvaluationState(repository).change_digest;
+    writeFileSync(codebaseCache, "another generated index revision\n");
+    assert.equal(readGitEvaluationState(repository).change_digest, beforeCacheUpdate);
     writeFileSync(join(root, "outside.txt"), "outside repository content");
     symlinkSync("../outside.txt", join(repository, "link.ts"));
     assert.notEqual(readGitEvaluationState(repository).change_digest, dirty.change_digest);
