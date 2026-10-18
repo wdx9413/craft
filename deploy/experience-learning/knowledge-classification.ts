@@ -1,6 +1,7 @@
 import { isAbsolute, resolve, sep } from "node:path";
 import { createFetchTransport, buildChatRequest, defineProvider, PROVIDER_CATALOG, type ChatMessage, type ModelProviderSpec, type ModelTransport } from "../../core/model-gateway.ts";
 import { stableDigest } from "../../core/digest.ts";
+import { dataRoot } from "../../core/infrastructure/paths.ts";
 import { CRAFT_RELEASE_VERSION } from "../../core/version.ts";
 import type { JsonObject } from "../../core/infrastructure/store.ts";
 import { recordKnowledgeClassificationFailure, shouldSuppressKnowledgeClassification } from "./knowledge-classification-state.ts";
@@ -104,6 +105,7 @@ function projectRootFromClaim(claim: JsonObject): string | undefined {
   if (typeof contentPath !== "string" || !contentPath.trim() || !isAbsolute(contentPath)) return undefined;
   const marker = `${sep}.craft_data${sep}knowledge${sep}md${sep}`;
   const normalizedPath = resolve(contentPath);
+  if (normalizedPath.startsWith(`${resolve(dataRoot(), "knowledge", "md")}${sep}`)) return undefined;
   const markerIndex = normalizedPath.lastIndexOf(marker);
   return markerIndex > 0 ? normalizedPath.slice(0, markerIndex) : undefined;
 }

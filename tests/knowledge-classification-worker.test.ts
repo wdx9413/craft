@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { PROVIDER_CATALOG, type ChatRequest, type ChatResult, type ModelProviderSpec, type ModelTransport } from "../core/model-gateway.ts";
+import { dataRoot } from "../core/infrastructure/paths.ts";
 import type { JsonObject } from "../core/infrastructure/store.ts";
 import { runKnowledgeScenarioClassificationOnce, type KnowledgeClassificationClient } from "../deploy/experience-learning/knowledge-classification.ts";
 
@@ -403,7 +404,8 @@ test("worker derives a project root from the exact project Knowledge content ref
 test("worker ignores incomplete or unrelated project Knowledge content paths when deriving a root", async () => {
   const invalidReferences: unknown[] = [undefined, null, [], {}, { path: 7 }, { path: "   " },
     { path: "relative/.craft_data/knowledge/md/claim.md" }, { path: "/outside/claim.md" },
-    { path: "/.craft_data/knowledge/md/claim.md" }];
+    { path: "/.craft_data/knowledge/md/claim.md" },
+    { path: join(dataRoot(), "knowledge", "md", "legacy-project-claim.md") }];
   for (const contentRef of invalidReferences) {
     const f = fixture();
     const projectClaim = { ...claim, ...(contentRef === undefined ? {} : { content_ref: contentRef }) } as JsonObject;

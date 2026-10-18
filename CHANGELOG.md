@@ -10,6 +10,11 @@
 - 项目 Claim 带有无法映射到项目根目录的旧内容引用时，Worker 将其作为受控跳过记录，继续处理其余 Claim。
 - 增加 Ticket 项目范围校验、旧引用跳过和分类分支覆盖回归。
 
+## v0.12.65（Knowledge 全局目录隔离）
+
+- 项目 Claim 若引用的是全局 `$CRAFT_DATA_DIR/knowledge/md` 内容，Worker 不再把用户主目录误识别为项目根；该 Claim 会受控跳过，其他可定位项目继续分类。
+- 增加全局内容路径隔离回归，Knowledge 分类覆盖率保持行、分支、函数 100%。
+
 ## v0.12.60（项目级 Knowledge 隔离）
 
 - 项目 Knowledge 正文改为写入各自项目的 `.craft_data/knowledge/md`；场景目录也归属该项目的 `.craft_data/knowledge`，不再落入全局数据目录。
