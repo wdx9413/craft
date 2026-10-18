@@ -344,6 +344,43 @@ test("LSP onboarding degrades without a worker entry and supports packaged JavaS
   }
 });
 
+test("Go LSP worker receives persistent cache directories under the project Codebase data root", async () => {
+  const f = await fixture();
+  const previousEntry = process.argv[1];
+  try {
+    const content = "package main\n\nfunc cacheEntry() int { return 1 }\n";
+    f.write("go.mod", "module example.test/go-cache\n\ngo 1.22\n");
+    f.write("main.go", content);
+    writeFileSync(join(f.store.paths.configDir, "codebase-lsp.json"), JSON.stringify({ schema_version: 1,
+      adapters: [{ language: "go", command: process.execPath, analyzer_version: "test-go-cache-1" }] }));
+    const workerPath = join(f.root, "go-cache-worker.cjs");
+    writeFileSync(workerPath, [
+      "let input = '';",
+      "process.stdin.setEncoding('utf8');",
+      "process.stdin.on('data', chunk => input += chunk);",
+      "process.stdin.on('end', () => {",
+      "  const request = JSON.parse(input);",
+      "  const document = request.documents[0];",
+      "  const start = document.content.indexOf('cacheEntry');",
+      "  process.stdout.write(JSON.stringify({ format: 'craft-static-analysis-v1', analyzer: request.analyzer, analyzer_version: request.analyzer_version, nodes: [{ id: 'cache_entry', kind: 'symbol', path: document.path, language: document.language, name: 'cacheEntry', source_digest: document.source_digest, span: { start_offset: start, end_offset: start + 10 } }], edges: [], diagnostics: { gopls_cache: process.env.GOPLSCACHE, go_build_cache: process.env.GOCACHE } }));",
+      "});",
+    ].join("\n"));
+    delete (f.service as unknown as { analyzeLsp?: unknown }).analyzeLsp;
+    process.argv[1] = workerPath;
+    const indexed = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
+    assert.equal(indexed.status, "ready");
+    const combined = ((indexed.summary as JsonObject).diagnostics as JsonObject[])[0]!;
+    const go = (combined.languages as JsonObject[]).find(item => item.analyzer === "lsp-go") as JsonObject;
+    assert(go, JSON.stringify(indexed.summary));
+    const projectCodebaseRoot = join(realpathSync(f.repo), ".craft_data", "codebase");
+    assert.equal((go.diagnostics as JsonObject).gopls_cache, join(projectCodebaseRoot, "gopls-cache"));
+    assert.equal((go.diagnostics as JsonObject).go_build_cache, join(projectCodebaseRoot, "go-build-cache"));
+  } finally {
+    process.argv[1] = previousEntry!;
+    f.close();
+  }
+});
+
 test("LSP worker failures retain safe request stage and protocol code in repository diagnostics", async () => {
   const f = await fixture();
   const previousEntry = process.argv[1];
