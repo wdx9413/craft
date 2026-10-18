@@ -23,6 +23,7 @@ const CODE_TERM_ALIASES: Record<string, readonly string[]> = {
   server: ["lsp"], callers: ["call"], implementations: ["implement"], definitions: ["definition"],
   routes: ["route"], shards: ["shard"], graph: ["index"], codebase: ["code", "repository", "workspace"],
   分析: ["analyze", "analysis"], 解析: ["parse", "analyze"], 检查: ["check", "analyze"], 语义: ["semantic"],
+  构造: ["get"], 默认: ["default", "defaults"], 请求: ["request", "http", "api"], 参数: ["param", "params", "parameter", "parameters"],
   索引: ["index"], 仓库: ["repository", "workspace"], 增量: ["incremental"], 重建: ["rebuild", "build"], 规划: ["plan"],
   入口: ["entry", "start"], 查找: ["find", "search"], 收集: ["collect"], 调用: ["call", "caller"], 引用: ["reference", "references"],
   实现: ["implement", "implementation"], 关系: ["relation", "relations"], 候选: ["candidate"], 影响: ["impact"], 依赖: ["dependency", "import"],
@@ -32,7 +33,7 @@ const CODE_TERM_ALIASES: Record<string, readonly string[]> = {
   combine: ["build", "merge", "find", "list"], merge: ["build", "combine"], simulated: ["simulate", "simulation"], 并发: ["concurrent", "concurrency", "parallel"], 多: ["multiple"],
   启动: ["start", "launch", "run"], 仿真: ["simulation", "simu"], 任务: ["task", "job"], 接口: ["api", "endpoint", "handler"],
 };
-const ACTION_TERMS = new Set(["analyze", "build", "call", "cancel", "clear", "collect", "combine", "create", "delete", "execute", "fetch", "find", "get", "launch", "list", "logout", "lookup", "merge", "normalize", "persist", "plan", "read", "reload", "remove", "resolve", "run", "search", "simulate", "start", "stop", "update"]);
+const ACTION_TERMS = new Set(["analyze", "build", "call", "cancel", "clear", "collect", "combine", "create", "decode", "delete", "execute", "extract", "fetch", "find", "get", "launch", "list", "logout", "lookup", "merge", "normalize", "persist", "plan", "read", "reload", "remove", "resolve", "run", "search", "simulate", "start", "stop", "update"]);
 const SYMBOL_ACTION_TERMS = new Set([...ACTION_TERMS]);
 const GENERIC_ACTION_TERMS = new Set(["build", "call", "create", "execute", "fetch", "get", "run", "start"]);
 const STRUCTURE_TERMS = new Set(["adapter", "agent", "client", "controller", "engine", "factory", "manager", "processor", "repository", "scheduler", "server", "service", "store", "worker"]);

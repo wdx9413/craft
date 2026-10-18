@@ -8,7 +8,7 @@ import test from "node:test";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftService } from "../core/service.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
-import { snapshotNodeKind, snapshotStatIfPresent } from "../core/workspace.ts";
+import { WorkspaceState, snapshotNodeKind, snapshotStatIfPresent } from "../core/workspace.ts";
 
 test("workspace checkpoints preserve a file-state timeline and require approval to restore", async () => {
   const root = join(tmpdir(), `craft-workspace-${process.pid}-${Date.now()}`);
@@ -89,6 +89,35 @@ test("repository checkpoints store project Codebase snapshots under the ignored 
     const restored = service.workspaceRestore({ workspace_id: "repository_demo", checkpoint_id: "project_first", approved: true });
     assert.equal((restored.workspace as JsonObject).latest_checkpoint_id, "project_first");
     assert.equal(await readFile(join(worktree, "src", "note.txt"), "utf8"), "project snapshot\n");
+    const second = service.workspaceCheckpoint({ workspace_id: "repository_demo", checkpoint_id: "project_second", label: "project second" }).checkpoint as JsonObject;
+    assert.equal(second.snapshot_root, join(worktree, ".craft_data", "codebase", "snapshots", "repository_demo", "project_second"));
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("workspace freshness reports missing checkpoints and added, changed, and deleted files", async () => {
+  const root = join(tmpdir(), `craft-workspace-freshness-${process.pid}-${Date.now()}`);
+  const worktree = join(root, "worktree");
+  const store = await new CraftStore(craftPaths(join(root, "craft"))).open();
+  const workspace = new WorkspaceState(store, store.paths);
+  try {
+    await mkdir(join(worktree, "src"), { recursive: true });
+    await writeFile(join(worktree, "src", "changed.txt"), "before\n", "utf8");
+    await writeFile(join(worktree, "src", "deleted.txt"), "remove\n", "utf8");
+    workspace.open({ workspace_id: "freshness", name: "Freshness", root_path: worktree, include_paths: ["src"] });
+    assert.deepEqual(workspace.freshness({ workspace_id: "freshness" }), {
+      status: "unavailable", reason: "checkpoint_required", changed_paths: [],
+    });
+    const checkpoint = workspace.checkpoint({ workspace_id: "freshness", label: "baseline" }).checkpoint as JsonObject;
+    assert.deepEqual(workspace.freshness({ workspace_id: "freshness" }), {
+      workspace_id: "freshness", checkpoint_id: checkpoint.id, status: "current", changed_paths: [],
+    });
+    await writeFile(join(worktree, "src", "changed.txt"), "after\n", "utf8");
+    await writeFile(join(worktree, "src", "added.txt"), "new\n", "utf8");
+    await rm(join(worktree, "src", "deleted.txt"));
+    assert.deepEqual(workspace.freshness({ workspace_id: "freshness" }), {
+      workspace_id: "freshness", checkpoint_id: checkpoint.id, status: "changed",
+      changed_paths: ["src/added.txt", "src/changed.txt", "src/deleted.txt"],
+    });
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 

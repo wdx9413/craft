@@ -8,8 +8,6 @@
     { "query": "start simulation API endpoint", "path": "service/http_server.py", "name": "start_simulation", "language": "python" },
     { "query": "resolve user role data path", "path": "service/http_server.py", "name": "resolve_user_role_data_path", "language": "python" },
     { "query": "load cached user role records", "path": "service/http_server.py", "name": "load_user_role_data", "language": "python" },
-    { "query": "normalize a row for the conversation viewer", "path": "eval_platform_frontend/src/pages/ConversationViewer.jsx", "name": "normalizeRow", "language": "javascript" },
-    { "query": "parse stored agent messages and normalize content types", "path": "eval_platform_frontend/src/pages/ConversationViewer.jsx", "name": "normalizeAgentMessages", "language": "javascript" },
     { "query": "decode base64 JSON input", "path": "main_wrapper.py", "name": "decode_base64_json", "language": "python" },
     { "query": "extract simulation request parameters", "path": "main_wrapper.py", "name": "extract_parameters", "language": "python" },
     { "query": "如何启动多组并发对话", "path": "scheduler/conversation_scheduler.py", "name": "start_multiple_conversations", "language": "python" },

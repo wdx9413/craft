@@ -1647,7 +1647,7 @@ test("aggregate MCP resolves bounded scope and code references while standalone 
   } finally { f.close(); }
 });
 
-test("context automatically ingests bounded project Knowledge into the central data root once", async () => {
+test("context automatically ingests bounded project Knowledge into project data once", async () => {
   const f = await fixture();
   try {
     f.write("README.md", "# Project knowledge\nUse the checked local verification command.\n");
@@ -1668,9 +1668,9 @@ test("context automatically ingests bounded project Knowledge into the central d
     assert.equal(sources.length, 3);
     assert(sources.every(source => source.trust === "bounded" && source.access === "read_only" && String(source.id).startsWith("project_autodiscovered_")));
     assert.equal(f.store.list("knowledge_fragment").length > 0, true);
-    const contentRoot = String(f.store.paths.knowledgeDir);
+    const contentRoot = join(realpathSync(f.repo), ".craft_data", "knowledge", "md");
     assert(sources.every(source => String(source.locator).startsWith(realpathSync(f.repo))));
-    assert(f.store.list("knowledge_fragment").every(fragment => String((fragment.content_ref as JsonObject).path).includes(contentRoot)));
+    assert(f.store.list("knowledge_fragment").every(fragment => String((fragment.content_ref as JsonObject).path).startsWith(contentRoot)));
     assert.equal(f.store.find("knowledge_source", "project_autodiscovered_invalid"), null);
     const again = await result(server, "craft_context_open", { project_root: f.repo, query: "project verification workflow", include_codebase: false });
     assert.equal((again.knowledge_source_discovery as JsonObject).sources_registered, 0);

@@ -1,0 +1,54 @@
+{
+  "cases": [
+    { "query": "build default gate request parameters from order user and URL state", "path": "kfp-home/src/store/gate.js", "name": "getGateDefaultParams", "language": "javascript" },
+    { "query": "构造 gate 请求的默认参数", "path": "kfp-home/src/store/gate.js", "name": "getGateDefaultParams", "language": "zh-en" },
+    { "query": "mark outgoing request with real business type metadata", "path": "kfp-home/src/store/gate.js", "name": "getRealBusinessType", "language": "javascript" }
+  ],
+  "call_graph_cases": [
+    {
+      "target_path": "kfp-home/src/store/gate.js",
+      "target_name": "getGateDefaultParams",
+      "callers": [
+        { "path": "kfp-home/src/store/gate.js", "name": "faqTraceReport" },
+        { "path": "kfp-home/src/store/gate.js", "name": "faqTryAccess" },
+        { "path": "kfp-home/src/store/gate.js", "name": "kfCenterDriverTraceReport" },
+        { "path": "kfp-home/src/store/gate.js", "name": "kfCenterDriverTryAccess" },
+        { "path": "kfp-home/src/store/gate.js", "name": "kfCenterPassengerServiceReport" },
+        { "path": "kfp-home/src/store/gate.js", "name": "kfCenterPassengerTraceReport" },
+        { "path": "kfp-home/src/store/gate.js", "name": "kfCenterPassengerTryAccess" },
+        { "path": "kfp-home/src/store/gate.js", "name": "progressDetailTraceReport" },
+        { "path": "kfp-home/src/store/gate.js", "name": "progressDetailTryAccess" },
+        { "path": "kfp-home/src/store/gate.js", "name": "progressListTraceReport" },
+        { "path": "kfp-home/src/store/gate.js", "name": "progressListTryAccess" },
+        { "path": "kfp-home/src/store/gate.js", "name": "searchServiceReport" },
+        { "path": "kfp-home/src/store/gate.js", "name": "searchTraceReport" },
+        { "path": "kfp-home/src/store/gate.js", "name": "searchTryAccess" }
+      ]
+    }
+  ],
+  "impact_cases": [
+    {
+      "target_path": "kfp-home/src/store/gate.js",
+      "target_name": "getGateDefaultParams",
+      "direction": "incoming",
+      "relation_kind": "calls",
+      "max_depth": 1,
+      "nodes": [
+        { "path": "kfp-home/src/store/gate.js", "name": "faqTraceReport" },
+        { "path": "kfp-home/src/store/gate.js", "name": "faqTryAccess" },
+        { "path": "kfp-home/src/store/gate.js", "name": "kfCenterDriverTraceReport" },
+        { "path": "kfp-home/src/store/gate.js", "name": "kfCenterDriverTryAccess" },
+        { "path": "kfp-home/src/store/gate.js", "name": "kfCenterPassengerServiceReport" },
+        { "path": "kfp-home/src/store/gate.js", "name": "kfCenterPassengerTraceReport" },
+        { "path": "kfp-home/src/store/gate.js", "name": "kfCenterPassengerTryAccess" },
+        { "path": "kfp-home/src/store/gate.js", "name": "progressDetailTraceReport" },
+        { "path": "kfp-home/src/store/gate.js", "name": "progressDetailTryAccess" },
+        { "path": "kfp-home/src/store/gate.js", "name": "progressListTraceReport" },
+        { "path": "kfp-home/src/store/gate.js", "name": "progressListTryAccess" },
+        { "path": "kfp-home/src/store/gate.js", "name": "searchServiceReport" },
+        { "path": "kfp-home/src/store/gate.js", "name": "searchTraceReport" },
+        { "path": "kfp-home/src/store/gate.js", "name": "searchTryAccess" }
+      ]
+    }
+  ]
+}

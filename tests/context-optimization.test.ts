@@ -16,6 +16,7 @@ async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-context-optimization-"));
   const store = await new CraftStore(craftPaths(root)).open(), writer = await new CraftStore(craftPaths(root)).open();
   const service = new CraftService(store);
+  service.scopeAliasBind({ scope_kind: "project", scope_id: "project:p", alias_kind: "path", alias: root });
   service.knowledgeSourceRegister({ source_id: "source", kind: "custom", label: "source", scope_kind: "project", scope_id: "p", locator: root, content_digest: "source", trust: "verified", access: "read_only" });
   return { root, store, writer, service, async close() { writer.close(); store.close(); await rm(root, { recursive: true, force: true }); } };
 }

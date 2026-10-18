@@ -95,7 +95,7 @@ test("reviewed Knowledge classification accepts canonical project identity and w
   } finally { await close(f); }
 });
 
-test("scenario metadata can be added to a reviewed source-ingested Claim without breaking its provenance identity", async () => {
+test("scenario metadata can be added to a reviewed source-ingested Claim without breaking its provenance identity", async t => {
   const f = await fixture();
   try {
     await bindProject(f, "canonical");
@@ -111,6 +111,11 @@ test("scenario metadata can be added to a reviewed source-ingested Claim without
       content_digest: `sha256:${createHash("sha256").update(content).digest("hex")}`, evidence_ids: [String(evidence.id)], valid_until: null };
     const contentRef = f.store.contentStore.writeSync({ kind: "knowledge", record_id: "ingested-reviewed", version: 1, scope, status: "candidate",
       sensitivity: "internal", source_id: "ingested-notes", body: content });
+    let bodyReads = 0;
+    const readContent = f.store.contentStore.readCompatSync.bind(f.store.contentStore);
+    t.mock.method(f.store.contentStore, "readCompatSync", function (ref: Parameters<typeof f.store.contentStore.readCompatSync>[0], expectedScope?: string) {
+      bodyReads += 1; return readContent(ref, expectedScope);
+    });
     f.store.create("knowledge_claim", "ingested-reviewed", { ...identity, identity_digest: stableDigest(identity), status: "candidate", review: null,
       content_ref: contentRef, ingest_generated: true, publication_allowed: false });
     f.service.knowledgeClaimReview({ claim_id: "ingested-reviewed", status: "reviewed", reviewer: "host-model", reason: "source verified" });
@@ -123,6 +128,16 @@ test("scenario metadata can be added to a reviewed source-ingested Claim without
     const replay = f.service.knowledgeClaimSave({ claim_id: "ingested-reviewed", kind: "fact", content, scope, scope_envelope: scopeEnvelope,
       source_id: "ingested-notes", evidence_ids: [String(evidence.id)], scenario_key: "project.scripts.package-manager" }).claim as JsonObject;
     assert.equal(replay.version, classified.version, "replaying an unchanged scene must not rewrite the Claim");
+    assert.throws(() => f.service.knowledgeClaimSave({ claim_id: "ingested-reviewed", kind: "fact", content: "Changed body must not reuse ingest identity.", scope, scope_envelope: scopeEnvelope,
+      source_id: "ingested-notes", evidence_ids: [String(evidence.id)], scenario_key: "project.scripts.package-manager" }), /idempotency conflict/u);
+    const legacyBody = f.store.contentStore.writeSync({ kind: "knowledge", record_id: "legacy-ingested-object-scope", version: 1, scope, status: "candidate",
+      sensitivity: "internal", source_id: "ingested-notes", body: content });
+    f.store.create("knowledge_claim", "legacy-ingested-object-scope", { kind: "fact", content_digest: `sha256:${createHash("sha256").update(content).digest("hex")}`,
+      scope: { kind: "project", id: "project:canonical" }, scope_envelope: scopeEnvelope, source_id: "ingested-notes", evidence_ids: [String(evidence.id)], tags: [],
+      valid_until: null, status: "candidate", identity_digest: "sha256:legacy", ingest_generated: true, content_ref: legacyBody });
+    assert.throws(() => f.service.knowledgeClaimSave({ claim_id: "legacy-ingested-object-scope", kind: "fact", content, scope, scope_envelope: scopeEnvelope,
+      source_id: "ingested-notes", evidence_ids: [String(evidence.id)], scenario_key: "project.scripts.package-manager" }), /idempotency conflict/u);
+    assert(bodyReads >= 4, "each ingested replay must validate the retained protected body");
   } finally { await close(f); }
 });
 

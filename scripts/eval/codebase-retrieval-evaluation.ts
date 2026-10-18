@@ -14,6 +14,7 @@ import { assertEvaluationStateStable, checkpointManifestDigest, digestEvaluation
 import { sourceContainsSymbolName } from "./codebase-evaluation-source.ts";
 import { isEvaluationNonProductionPath } from "./codebase-evaluation-source-policy.ts";
 import { CODEBASE_LSP_CONFIG } from "../../capability/craft-codebase/lsp-config.ts";
+import { persistCodebaseEvaluation } from "./codebase-evaluation-store.ts";
 
 type RetrievalCase = { query: string; path: string; name: string; language?: string };
 type CallGraphCase = { target_path: string; target_name: string; callers: Array<{ path: string; name: string }>;
@@ -338,7 +339,8 @@ try {
     direct_call_graph_cases: callGraphRows,
     multi_hop_impact_cases: multiHopImpactCases,
   };
-  console.log(JSON.stringify(summary, null, 2));
+  const evaluationRecordPath = persistCodebaseEvaluation(repository, summary);
+  console.log(JSON.stringify({ ...summary, evaluation_record_path: evaluationRecordPath }, null, 2));
   assert.equal(summary.evaluation_pass, true, "Codebase retrieval quality regressed below the fixed local acceptance thresholds");
 } finally {
   store.close();

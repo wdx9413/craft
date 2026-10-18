@@ -45,10 +45,23 @@ test("Codebase favors a matching architecture type for object queries while acti
   ], "normalize a row for the conversation viewer", 2)[0]!.node.id, "target");
 });
 
+test("Codebase ranks extraction and decoding functions for natural task queries", () => {
+  const wrapper = [
+    { ...symbol("decode", "decode_base64_json", "main_wrapper.py"), declaration_kind: "function" },
+    { ...symbol("extract", "extract_parameters", "main_wrapper.py"), declaration_kind: "function" },
+    { ...symbol("main", "main", "main_wrapper.py"), declaration_kind: "function" },
+    { ...symbol("parse", "parse_arguments", "main_wrapper.py"), declaration_kind: "function" },
+  ];
+  assert.equal(rankCodeSymbols(wrapper, "decode base64 JSON input", 4)[0]!.node.id, "decode");
+  assert.equal(rankCodeSymbols(wrapper, "extract simulation request parameters", 4)[0]!.node.id, "extract");
+});
+
 test("Codebase query normalization expands identifiers and common task-language variants", () => {
   const terms = codeQueryTerms("TypeScript semantic checker analyzer");
   assert(terms.includes("typescript") && terms.includes("type") && terms.includes("script"));
   assert(terms.includes("check") && terms.includes("analyze"));
+  const gateTerms = codeQueryTerms("构造 gate 请求的默认参数");
+  assert(gateTerms.includes("default") && gateTerms.includes("request") && gateTerms.includes("parameters"));
   assert(codeQueryTerms("delegate authentication checker constructor").includes("new"));
   assert(codeQueryTerms("LSP relation collector").includes("collect"));
   assert(codeQueryTerms("resolve definition by source offset").includes("find"));

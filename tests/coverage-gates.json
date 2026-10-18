@@ -1691,6 +1691,26 @@
       "branches": true
     },
     {
+      "name": "codebase-evaluation-store",
+      "include": [
+        "scripts/eval/codebase-evaluation-store.ts"
+      ],
+      "tests": [
+        "tests/codebase-evaluation-store.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "codebase-project-data-git-exclude",
+      "include": [
+        "capability/craft-codebase/project-data-git-exclude.ts"
+      ],
+      "tests": [
+        "tests/codebase-project-data-git-exclude.test.ts"
+      ],
+      "branches": true
+    },
+    {
       "name": "codebase-evaluation-source",
       "include": [
         "scripts/eval/codebase-evaluation-source.ts"

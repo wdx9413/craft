@@ -219,7 +219,7 @@ test("Knowledge SDK synchronizes expiration, source drift, documents and evidenc
     assert.equal(sdk.synchronize().count, 0);
     f.store.create("knowledge_document", "changed", { status: "changed", content_digest: "d" });
     f.store.create("knowledge_document", "current", { status: "current", content_digest: "d" });
-    f.store.create("knowledge_claim", "changed-document", { ...base, document_id: "changed", document_digest: "d" });
+    f.store.create("knowledge_claim", "changed-document", { ...base, document_id: "changed", document_digest: "d", content_ref: { path: "notes/reviewed.md" } });
     f.store.create("knowledge_claim", "wrong-digest", { ...base, document_id: "current", document_digest: "old" });
     f.store.create("knowledge_claim", "matching-document", { ...base, document_id: "current", document_digest: "d" });
     assert.equal(sdk.synchronize().count, 2);
@@ -231,7 +231,7 @@ test("required Knowledge and Memory refs do not depend on lexical relevance", as
   try {
     f.store.create("evidence", "proof", { confidence: "confirmed" });
     const sdk = new KnowledgeClaimGovernance(f.store);
-    sdk.knowledgeClaimSave({ claim_id: "claim", kind: "fact", content: "Mandatory unrelated detail", scope: `${f.scope.kind}:${f.scope.id}`, evidence_ids: ["proof"] });
+    sdk.knowledgeClaimSave({ claim_id: "claim", kind: "fact", content: "Mandatory unrelated detail", scope: `${f.scope.kind}:${f.scope.id}`, project_root: f.repo, evidence_ids: ["proof"] });
     const claim = sdk.knowledgeClaimReview({ claim_id: "claim", status: "reviewed", reviewer: "human", reason: "verified" }).claim as JsonObject;
     const requested = { member: "knowledge", id: claim.id, version: claim.version };
     const result = await f.service.contextOpen({ project_root: f.repo, query: "unmatched", include_codebase: false, required_refs: [requested] });

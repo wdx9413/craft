@@ -18,6 +18,7 @@ import { lspDocumentSymbolsDigest } from "./lsp-adapter.ts";
 import { CODEBASE_LSP_WORKER_FLAG } from "./lsp-worker.ts";
 import { stageLspSnapshotFiles } from "./lsp-snapshot-files.ts";
 import { ProjectAnalysisCache } from "./project-analysis-cache.ts";
+import { ensureProjectDataGitExcluded } from "./project-data-git-exclude.ts";
 import type { RepositoryContextFile } from "./repository-files.ts";
 import type { LspStdioRequest } from "./lsp-stdio-client.ts";
 export interface RepositoryOnboardingPort {
@@ -159,6 +160,7 @@ function ensureRepositoryAttempt(service: RepositoryOnboardingPort, args: JsonOb
   if (!isRepository) return { ...base, status: "skipped", reason: "not_repository" };
   if (args.index_depth !== undefined && !["basic", "semantic"].includes(String(args.index_depth))) throw new Error("index_depth must be basic or semantic");
   if (service.store.find("codebase_activation", `codebase_activation_${workspaceId}`)?.status === "disabled") return { ...base, status: "disabled", reason: "project_opt_out" };
+  ensureProjectDataGitExcluded(root);
   const analysisCache = new ProjectAnalysisCache(root, workspaceId);
   const selected = repositoryFiles(root);
   const lspConfig = readTrustedLspConfig(service.store.paths.configDir);

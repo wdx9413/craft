@@ -1,3 +1,10 @@
+## v0.12.68（Codebase 项目数据与检索评测）
+
+- 仓库快照、语义图分片、分析缓存和检索评测报告写入项目 `.craft_data/codebase/`；必要时只修改该仓库私有 `.git/info/exclude`，避免把生成数据提交到 Git。
+- 改进中英文任务描述的符号检索排序，并修正 Go 接口实现关系的范围识别。
+- 增加评测报告持久化、项目数据 Git 排除、缓存重建和关系图覆盖回归。
+- 修复跨平台适配器构建步骤。
+
 ## v0.12.67（Knowledge Ticket 项目根目录解析）
 
 - Knowledge 分类 Ticket 列表依据 Claim 的可信 Source 定位场景目录；同一项目存在多个工作树别名且旧 Claim 指向全局 Markdown 时，仍能列出有效 Ticket。

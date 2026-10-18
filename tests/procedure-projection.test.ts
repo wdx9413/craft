@@ -64,6 +64,16 @@ test("retired-scenario checks honor a pinned path alias and fail closed on ambig
   } finally { f.close(); rmSync(otherRoot, { recursive: true, force: true }); }
 });
 
+test("retired-scenario checks propagate unsafe project-data failures", async () => {
+  const f = await fixture();
+  const externalRoot = mkdtempSync(join(tmpdir(), "craft-procedure-linked-data-"));
+  try {
+    symlinkSync(externalRoot, join(f.root, ".craft_data"));
+    assert.throws(() => belongsToRetiredScenario(f.store, { scope: "project:project", scenario_signature: {
+      project: { kind: "project", id: "project" }, scenario_key: "engineering.tests" } }), /project data path must contain regular directories/u);
+  } finally { f.close(); rmSync(externalRoot, { recursive: true, force: true }); }
+});
+
 test("Skill export treats IDs as opaque keys, remains disabled and binds replay to source/version/content", async () => {
   const f = await fixture();
   try {
