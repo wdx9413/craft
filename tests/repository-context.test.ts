@@ -18,6 +18,7 @@ import { pythonFileUnitDigest } from "../capability/craft-codebase/python-increm
 import { analyzeJavaCheckpoint } from "../capability/craft-codebase/java-analysis.ts";
 import { cacheLspDocumentSymbols, lspDocumentSymbolsDigest } from "../capability/craft-codebase/lsp-adapter.ts";
 import { ProjectGraphStore } from "../capability/craft-codebase/project-graph-store.ts";
+import { ProjectAnalysisCache } from "../capability/craft-codebase/project-analysis-cache.ts";
 
 async function fixture() {
   const root = mkdtempSync(join(tmpdir(), "craft-repository-context-"));
@@ -33,6 +34,9 @@ function projectGraph(f: Awaited<ReturnType<typeof fixture>>, workspaceId: strin
   const workspace = f.store.get("workspace", workspaceId);
   return new ProjectGraphStore(String(workspace.root_path), workspaceId);
 }
+function projectAnalysis(f: Awaited<ReturnType<typeof fixture>>, workspaceId: string, kind: string, limit = 100): JsonObject[] {
+  return new ProjectAnalysisCache(f.repo, workspaceId).list(kind, limit);
+}
 const result = async (server: McpServer, name: string, args: JsonObject) => {
   const response = await server.handle({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }) as any;
   assert(!response.error, JSON.stringify(response)); assert(!response.result.isError, JSON.stringify(response));
@@ -46,6 +50,8 @@ test("repository auto onboarding reuses across clients, incrementally parses, de
     mkdirSync(join(f.repo, "src"));
     const first = f.service.codebaseRepositoryEnsure({ project_root: join(f.repo, "src") });
     assert.equal(first.status, "ready"); assert.equal(first.reused, false);
+    assert.equal(projectAnalysis(f, String(first.workspace_id), "codebase_file_analysis").length, 2);
+    assert.equal(f.store.list("codebase_file_analysis", 10, item => item.workspace_id === first.workspace_id).length, 0);
     const again = f.service.codebaseRepositoryEnsure({ project_root: f.repo }); assert.equal(again.index_id, first.index_id); assert.equal(again.reused, true);
     const anotherHost = new CraftService(f.store);
     assert.equal(anotherHost.codebaseRepositoryEnsure({ project_root: f.repo }).index_id, first.index_id);
@@ -55,6 +61,10 @@ test("repository auto onboarding reuses across clients, incrementally parses, de
     const matches = f.service.codebaseSymbolFind({ workspace_id: changed.workspace_id, index_id: changed.index_id, query: "gamma" }); assert.equal((matches.symbols as unknown[]).length, 1);
     assert.throws(() => f.service.codebaseSymbolFind({ workspace_id: first.workspace_id, index_id: first.index_id, query: "alpha" }), /stale/);
     const semantic = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" }); assert.equal(semantic.status, "ready");
+    assert.equal(projectAnalysis(f, String(semantic.workspace_id), "codebase_semantic_file_analysis").length, 1);
+    assert.equal(projectAnalysis(f, String(semantic.workspace_id), "codebase_python_file_analysis").length, 1);
+    assert.equal(f.store.list("codebase_semantic_file_analysis", 10, item => item.workspace_id === semantic.workspace_id).length, 0);
+    assert.equal(f.store.list("codebase_python_file_analysis", 10, item => item.workspace_id === semantic.workspace_id).length, 0);
     assert.equal(f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" }).reused, true);
     f.git("add", "."); f.git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "-qm", "fixture");
     const worktree = join(f.root, "worktree"); f.git("worktree", "add", "--detach", worktree);
@@ -125,6 +135,33 @@ test("semantic onboarding scans empty TypeScript and Python cache collections wi
     assert.equal(result.status, "ready");
     assert.equal(f.store.find("codebase_semantic_file_analysis", "other-workspace-ts")?.workspace_id, "other-workspace");
     assert.equal(f.store.find("codebase_python_file_analysis", "other-workspace-python")?.workspace_id, "other-workspace");
+  } finally { f.close(); }
+});
+
+test("repository analysis migrates validated legacy file caches into project Codebase storage", async () => {
+  const f = await fixture();
+  try {
+    f.write("main.ts", "export function legacyCache() { return 1; }\n");
+    const workspaceId = `repository_${stableDigest(realpathSync(f.repo)).slice(-24)}`;
+    const files = repositoryFiles(f.repo).files.filter(file => /^(?:tsx?|mts|cts|jsx?|mjs|cjs)$/u.test(file.language))
+      .map(file => ({ ...file, language: file.language === "tsx" ? "jsx" : file.language }));
+    const analyzed = analyzeTypeScript(files, { include_file_units: true });
+    const units = analyzed.file_units as JsonObject[];
+    assert.equal(units.length, 1);
+    const unit = units[0]!;
+    const cacheId = `codebase_semantic_file_${stableDigest({ workspaceId, path: unit.path }).slice(-24)}`;
+    f.store.save("codebase_semantic_file_analysis", cacheId, { workspace_id: workspaceId, ...unit });
+
+    const result = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
+
+    assert.equal(result.status, "ready");
+    assert.equal(f.store.find("codebase_semantic_file_analysis", cacheId), null);
+    const projectUnits = projectAnalysis(f, workspaceId, "codebase_semantic_file_analysis");
+    assert.equal(projectUnits.length, 1);
+    assert.equal(projectUnits[0]!.unit_digest, unit.unit_digest);
+    const diagnostics = ((result.summary as JsonObject).diagnostics as JsonObject[])[0]!;
+    const typescript = (diagnostics.languages as JsonObject[]).find(component => component.analyzer === "typescript-checker")!;
+    assert.equal((typescript.diagnostics as JsonObject).incremental_mode, "reuse");
   } finally { f.close(); }
 });
 
@@ -540,7 +577,7 @@ test("configured LSP reuses valid symbols, rejects corrupted caches and rebuilds
     assert.equal(first.status, "ready");
     assert.equal(requests.length, 1);
     assert.equal(requests[0]!.every(document => document.cached_symbols === undefined), true);
-    const firstUnits = f.store.list("codebase_lsp_file_analysis", 10, item => item.workspace_id === first.workspace_id);
+    const firstUnits = projectAnalysis(f, String(first.workspace_id), "codebase_lsp_file_analysis", 10);
     assert.equal(firstUnits.length, 2);
     assert.equal(JSON.stringify(firstUnits).includes(callerSource), false);
 
@@ -574,16 +611,17 @@ test("configured LSP reuses valid symbols, rejects corrupted caches and rebuilds
       node_id: changedCallerNode.id, relation_kind: "calls", direction: "outgoing" });
     assert.equal((((changedRelation.relations as JsonObject[])[0]?.to as JsonObject)?.name), "alternate");
 
-    const targetCache = f.store.list("codebase_lsp_file_analysis", 10, item => item.workspace_id === second.workspace_id)
+    const targetCache = projectAnalysis(f, String(second.workspace_id), "codebase_lsp_file_analysis", 10)
       .find(item => item.path === "src/target.cpp")!;
-    f.store.save("codebase_lsp_file_analysis", String(targetCache.id), { ...targetCache, cached_symbols_digest: "tampered" });
+    new ProjectAnalysisCache(f.repo, String(second.workspace_id)).save("codebase_lsp_file_analysis", String(targetCache.id),
+      { ...payload(targetCache), cached_symbols_digest: "tampered" });
     f.write("src/main.cpp", "int caller() { return target() + 3; }\n");
     const third = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
     assert.equal(third.status, "ready");
     assert.notEqual(third.index_id, second.index_id);
     const fourthDocuments = requests[3]!;
     assert.equal(fourthDocuments.find(document => document.path === "src/target.cpp")!.cached_symbols, undefined);
-    const refreshedTarget = f.store.list("codebase_lsp_file_analysis", 10, item => item.workspace_id === third.workspace_id)
+    const refreshedTarget = projectAnalysis(f, String(third.workspace_id), "codebase_lsp_file_analysis", 10)
       .find(item => item.path === "src/target.cpp")!;
     assert.equal(refreshedTarget.cached_symbols_digest, lspDocumentSymbolsDigest({ analyzer: "lsp-cpp", analyzer_version: "1",
       path: "src/target.cpp", language: "cpp", source_digest: String(refreshedTarget.source_digest), symbols: refreshedTarget.symbols }));
@@ -591,7 +629,7 @@ test("configured LSP reuses valid symbols, rejects corrupted caches and rebuilds
     rmSync(join(f.repo, "src/target.cpp"));
     const fifth = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
     assert.equal(fifth.status, "ready");
-    assert.deepEqual(f.store.list("codebase_lsp_file_analysis", 10, item => item.workspace_id === fifth.workspace_id).map(item => item.path), ["src/main.cpp"]);
+    assert.deepEqual(projectAnalysis(f, String(fifth.workspace_id), "codebase_lsp_file_analysis", 10).map(item => item.path), ["src/main.cpp"]);
   } finally { f.close(); }
 });
 
@@ -702,7 +740,7 @@ test("semantic onboarding incrementally refreshes changed modules and matches a 
     const firstIndex = f.store.get("codebase_index", String(first.index_id));
     const firstShardIds = firstIndex.shard_ids as string[];
     const firstRouteIds = (firstIndex.edge_route_shards as JsonObject[]).map(route => String(route.id));
-    const firstUnits = f.store.list("codebase_semantic_file_analysis", 10, item => item.workspace_id === first.workspace_id);
+    const firstUnits = projectAnalysis(f, String(first.workspace_id), "codebase_semantic_file_analysis", 10);
     assert.equal(firstUnits.length, 3);
     const firstVersions = new Map(firstUnits.map(unit => [String(unit.path), unit.version]));
 
@@ -726,7 +764,7 @@ test("semantic onboarding incrementally refreshes changed modules and matches a 
       .map(file => ({ ...file, language: file.language === "tsx" ? "jsx" : file.language }));
     const clean = analyzeTypeScript(currentFiles);
     const sort = (items: JsonObject[]) => [...items].sort((a, b) => String(a.id).localeCompare(String(b.id)));
-    const units = f.store.list("codebase_semantic_file_analysis", 10, item => item.workspace_id === updated.workspace_id);
+    const units = projectAnalysis(f, String(updated.workspace_id), "codebase_semantic_file_analysis", 10);
     const updatedVersions = new Map(units.map(unit => [String(unit.path), unit.version]));
     assert.notEqual(updatedVersions.get("a.ts"), firstVersions.get("a.ts"), "changed source unit must be persisted");
     assert.equal(updatedVersions.get("b.ts"), firstVersions.get("b.ts"), "unchanged importer facts must not be rewritten");
@@ -816,11 +854,11 @@ test("semantic onboarding reuses unchanged TypeScript facts and rebuilds when th
     const addedComponent = (addedCombined.languages as JsonObject[]).find(item => item.analyzer === "typescript-checker") as JsonObject;
     assert.equal((addedComponent.diagnostics as JsonObject).incremental_mode, "full");
     assert.equal((addedComponent.diagnostics as JsonObject).incremental_reason, "source_file_set_changed");
-    assert.equal(f.store.list("codebase_semantic_file_analysis", 10, item => item.workspace_id === first.workspace_id).length, 3);
+    assert.equal(projectAnalysis(f, String(first.workspace_id), "codebase_semantic_file_analysis", 10).length, 3);
     rmSync(join(f.repo, "added.ts"));
     const deleted = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
     assert.equal(deleted.status, "ready");
-    assert.equal(f.store.list("codebase_semantic_file_analysis", 10, item => item.workspace_id === first.workspace_id).length, 2);
+    assert.equal(projectAnalysis(f, String(first.workspace_id), "codebase_semantic_file_analysis", 10).length, 2);
   } finally { f.close(); }
 });
 
@@ -1138,7 +1176,7 @@ test("semantic onboarding incrementally refreshes Python importers and matches a
     f.write("pkg/view.py", "def unrelated():\n    return 3\n");
     const first = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
     assert.equal(first.status, "ready");
-    const firstUnits = f.store.list("codebase_python_file_analysis", 10, item => item.workspace_id === first.workspace_id);
+    const firstUnits = projectAnalysis(f, String(first.workspace_id), "codebase_python_file_analysis", 10);
     assert.equal(firstUnits.length, 3);
     const firstVersions = new Map(firstUnits.map(unit => [String(unit.path), unit.version]));
 
@@ -1154,7 +1192,7 @@ test("semantic onboarding incrementally refreshes Python importers and matches a
 
     const files = repositoryFiles(f.repo).files.filter(file => file.language === "py");
     const clean = analyzePythonCheckpoint(files, { includeFileUnits: true }).analysis!;
-    const units = f.store.list("codebase_python_file_analysis", 10, item => item.workspace_id === first.workspace_id);
+    const units = projectAnalysis(f, String(first.workspace_id), "codebase_python_file_analysis", 10);
     const updatedVersions = new Map(units.map(unit => [String(unit.path), unit.version]));
     assert.notEqual(updatedVersions.get("pkg/base.py"), firstVersions.get("pkg/base.py"), "changed Python unit must be persisted");
     assert.equal(updatedVersions.get("pkg/service.py"), firstVersions.get("pkg/service.py"), "unchanged importer facts must not be rewritten");
@@ -1186,7 +1224,7 @@ test("Python incremental budget overflow retries a full graph when per-file cach
     const summary = updated.summary as JsonObject;
     const python = ((summary.diagnostics as JsonObject[])[0].languages as JsonObject[]).find(item => item.analyzer === "python-ast-static") as JsonObject;
     assert.equal((python.diagnostics as JsonObject).incremental_mode, undefined);
-    assert.equal(f.store.list("codebase_python_file_analysis", 10, item => item.workspace_id === first.workspace_id).length, 2);
+    assert.equal(projectAnalysis(f, String(first.workspace_id), "codebase_python_file_analysis", 10).length, 2);
     assert(f.store.get("codebase_index", String(updated.index_id)));
   } finally { f.close(); }
 });
@@ -1215,7 +1253,7 @@ test("Python incremental results from a changed analyzer version trigger a full 
     const python = (((summary.diagnostics as JsonObject[])[0] as JsonObject).languages as JsonObject[])
       .find(item => item.analyzer === "python-ast-static") as JsonObject;
     assert.equal((python.diagnostics as JsonObject).incremental_reason, "analyzer_version_changed");
-    assert.equal(f.store.list("codebase_python_file_analysis", 10, item => item.workspace_id === first.workspace_id)[0].source_digest,
+    assert.equal(projectAnalysis(f, String(first.workspace_id), "codebase_python_file_analysis", 10)[0].source_digest,
       repositoryFiles(f.repo).files.find(file => file.path === "main.py")!.digest);
   } finally { f.close(); }
 });
@@ -1267,7 +1305,7 @@ test("Python full analyzer without file units imports its complete graph without
     }) });
     const result = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
     assert.equal(result.status, "ready");
-    assert.equal(f.store.list("codebase_python_file_analysis", 10, item => item.workspace_id === result.workspace_id).length, 1);
+    assert.equal(projectAnalysis(f, String(result.workspace_id), "codebase_python_file_analysis", 10).length, 1);
   } finally { f.close(); }
 });
 
@@ -1277,10 +1315,10 @@ test("Python file-set deletion removes stale per-file graph units", async () => 
     f.write("keep.py", "def keep():\n    return 1\n");
     f.write("remove.py", "def remove():\n    return 2\n");
     const first = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
-    assert.equal(f.store.list("codebase_python_file_analysis", 10, item => item.workspace_id === first.workspace_id).length, 2);
+    assert.equal(projectAnalysis(f, String(first.workspace_id), "codebase_python_file_analysis", 10).length, 2);
     rmSync(join(f.repo, "remove.py"));
     const updated = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
-    const cached = f.store.list("codebase_python_file_analysis", 10, item => item.workspace_id === first.workspace_id);
+    const cached = projectAnalysis(f, String(first.workspace_id), "codebase_python_file_analysis", 10);
     assert.equal(updated.status, "ready");
     assert.deepEqual(cached.map(item => item.path), ["keep.py"]);
   } finally { f.close(); }
@@ -1296,7 +1334,7 @@ test("empty Python file-unit output safely falls back with a diagnostic", async 
     } }) });
     const result = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
     assert.equal(result.status, "ready");
-    assert.equal(f.store.list("codebase_python_file_analysis", 10, item => item.workspace_id === result.workspace_id).length, 0);
+    assert.equal(projectAnalysis(f, String(result.workspace_id), "codebase_python_file_analysis", 10).length, 0);
     assert((result.summary as JsonObject).diagnostics instanceof Array);
     assert(((result.summary as JsonObject).diagnostics as JsonObject[]).some(item => item.reason === "analysis_empty_or_missing_file_units"));
   } finally { f.close(); }
@@ -1751,7 +1789,7 @@ test("Java onboarding reuses unaffected graph units and matches a fresh full ana
     } });
     const first = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
     assert.equal(first.status, "ready");
-    const firstUnits = f.store.list("codebase_java_file_analysis", 10, item => item.workspace_id === first.workspace_id);
+    const firstUnits = projectAnalysis(f, String(first.workspace_id), "codebase_java_file_analysis", 10);
     assert.equal(firstUnits.length, 4);
     assert.equal(firstUnits.find(unit => unit.path === "src/broken/Broken.java")!.incremental_safe, false);
     assert.equal(firstUnits.find(unit => unit.path === "src/c/Unrelated.java")!.incremental_safe, true);
@@ -1773,7 +1811,7 @@ test("Java onboarding reuses unaffected graph units and matches a fresh full ana
     const liveFiles = repositoryFiles(f.repo).files.filter(file => file.language === "java");
     const full = analyzeJavaCheckpoint(liveFiles).analysis!;
     const fullUnits = new Map((full.file_units as JsonObject[]).map(unit => [String(unit.path), String(unit.unit_digest)]));
-    const incrementalUnits = f.store.list("codebase_java_file_analysis", 10, item => item.workspace_id === first.workspace_id);
+    const incrementalUnits = projectAnalysis(f, String(first.workspace_id), "codebase_java_file_analysis", 10);
     assert.deepEqual(new Map(incrementalUnits.map(unit => [String(unit.path), String(unit.unit_digest)])), fullUnits);
     assert.equal(f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" }).reused, true);
   } finally { f.close(); }
@@ -1795,7 +1833,7 @@ test("Java budget-limited file units stay partial and never enter the incrementa
     const java = languages.find(item => item.analyzer === "jdk-compiler-tree")!.diagnostics as JsonObject;
     assert.equal(java.budget_limited, true);
     assert.equal(java.omitted_nodes, 1);
-    assert.equal(f.store.list("codebase_java_file_analysis", 10, item => item.workspace_id === indexed.workspace_id).length, 0);
+    assert.equal(projectAnalysis(f, String(indexed.workspace_id), "codebase_java_file_analysis", 10).length, 0);
   } finally { f.close(); }
 });
 
@@ -1822,7 +1860,7 @@ test("Java graph caches reuse across non-Java edits and fall back safely when in
     rmSync(join(reused.repo, "Main.java"));
     const deleted = reused.service.codebaseRepositoryEnsure({ project_root: reused.repo, index_depth: "semantic" });
     assert.equal(deleted.status, "ready");
-    assert.equal(reused.store.list("codebase_java_file_analysis", 10, item => item.workspace_id === first.workspace_id).length, 0);
+    assert.equal(projectAnalysis(reused, String(first.workspace_id), "codebase_java_file_analysis", 10).length, 0);
   } finally { reused.close(); }
 
   for (const fallback of ["graph", "unavailable", "unavailable_without_partial_diagnostic", "unmapped_errors"] as const) {
