@@ -1,6 +1,6 @@
 import { existsSync, lstatSync, readFileSync, realpathSync, constants } from "node:fs";
 import { accessSync } from "node:fs";
-import { isAbsolute, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import type { JsonObject } from "../../common/craft-common-store-local/src/store.ts";
 import { stableDigest } from "../../common/craft-common-base/src/digest.ts";
 
@@ -21,6 +21,11 @@ export const LSP_LANGUAGE_IDS: Readonly<Record<string, string>> = Object.freeze(
 
 export type TrustedLspAdapter = { language: string; command: string; args: string[]; analyzer_version: string; relations: string[]; max_documents: number; relation_symbol_limit: number; request_timeout_ms: number };
 export type TrustedLspConfig = { path: string; digest: string; adapters: TrustedLspAdapter[]; diagnostics: JsonObject[] };
+
+/** Keep Go language-server and compiler caches inside the owning project's Codebase data directory. */
+export function configuredLspWorkerEnvironment(language: string, codebaseDataRoot: string, inherited: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return language === "go" ? { ...inherited, GOPLSCACHE: join(codebaseDataRoot, "gopls-cache"), GOCACHE: join(codebaseDataRoot, "go-build-cache") } : inherited;
+}
 
 /** Read only the user-managed config; repository files can never register executables. */
 export function readTrustedLspConfig(configDir: string): TrustedLspConfig {

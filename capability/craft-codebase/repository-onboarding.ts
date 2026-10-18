@@ -13,7 +13,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { languageIdForFile, readTrustedLspConfig, type TrustedLspAdapter } from "./lsp-config.ts";
+import { configuredLspWorkerEnvironment, languageIdForFile, readTrustedLspConfig, type TrustedLspAdapter } from "./lsp-config.ts";
 import { lspDocumentSymbolsDigest } from "./lsp-adapter.ts";
 import { CODEBASE_LSP_WORKER_FLAG } from "./lsp-worker.ts";
 import { stageLspSnapshotFiles } from "./lsp-snapshot-files.ts";
@@ -68,7 +68,7 @@ function lspFailureDiagnostic(error: unknown): JsonObject {
 
 type LspSourceFile = { readonly path: string; readonly content: string; readonly digest: string; readonly cached_symbols?: JsonObject[]; readonly cached_symbols_digest?: string };
 
-function runConfiguredLsp(adapter: TrustedLspAdapter, files: readonly LspSourceFile[], service: RepositoryOnboardingPort,
+function runConfiguredLsp(adapter: TrustedLspAdapter, files: readonly LspSourceFile[], service: RepositoryOnboardingPort, repositoryRootPath: string,
   contextFiles: readonly RepositoryContextFile[] = []): JsonObject {
   const root = mkdtempSync(join(tmpdir(), "craft-codebase-lsp-"));
   try {
@@ -84,8 +84,9 @@ function runConfiguredLsp(adapter: TrustedLspAdapter, files: readonly LspSourceF
       const entry = process.argv[1];
       if (!entry) throw new Error("worker_unavailable");
       const entryArgs = entry.endsWith(".ts") ? ["--experimental-strip-types", entry, CODEBASE_LSP_WORKER_FLAG] : [entry, CODEBASE_LSP_WORKER_FLAG];
+      const env = configuredLspWorkerEnvironment(adapter.language, join(repositoryRootPath, ".craft_data", "codebase"));
       const output = execFileSync(process.execPath, entryArgs, { input: JSON.stringify(request), encoding: "utf8", timeout: 120_000,
-        maxBuffer: 96 * 1024 * 1024, shell: false, stdio: ["pipe", "pipe", "ignore"] });
+        maxBuffer: 96 * 1024 * 1024, shell: false, stdio: ["pipe", "pipe", "ignore"], env });
       result = JSON.parse(output) as JsonObject;
     }
     if (result.format === "craft-lsp-worker-failure-v1") {
@@ -242,7 +243,7 @@ function ensureRepositoryAttempt(service: RepositoryOnboardingPort, args: JsonOb
         return { ...file, cached_symbols: cached.symbols as JsonObject[], cached_symbols_digest: expectedDigest };
       });
       try {
-        const lspAnalysis = runConfiguredLsp(adapter, filesWithCache, service, adapterContextFiles);
+        const lspAnalysis = runConfiguredLsp(adapter, filesWithCache, service, root, adapterContextFiles);
         semanticAnalyses.push(lspAnalysis);
         if (Array.isArray(lspAnalysis.document_symbol_cache)) lspFileUnits.push(...(lspAnalysis.document_symbol_cache as JsonObject[]).map(unit => ({ ...unit,
           analyzer, analyzer_version: adapter.analyzer_version, adapter_config_digest: adapterConfigDigest })));
