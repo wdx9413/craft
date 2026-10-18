@@ -4,6 +4,12 @@
 - MCP 场景目录查询与模型票据工具公开可选 `project_root` 参数，避免 Worker 传参被工具契约丢弃。
 - 增加路径有效性、错误路径、工具 Schema 和真实 MCP 调用回归验证。
 
+## v0.12.64（Knowledge 项目票据校验闭环）
+
+- Knowledge 分类 Ticket 校验沿用 Worker 提供的已登记项目根目录；未登记根目录仍拒绝，确保场景目录隔离。
+- 项目 Claim 带有无法映射到项目根目录的旧内容引用时，Worker 将其作为受控跳过记录，继续处理其余 Claim。
+- 增加 Ticket 项目范围校验、旧引用跳过和分类分支覆盖回归。
+
 ## v0.12.60（项目级 Knowledge 隔离）
 
 - 项目 Knowledge 正文改为写入各自项目的 `.craft_data/knowledge/md`；场景目录也归属该项目的 `.craft_data/knowledge`，不再落入全局数据目录。

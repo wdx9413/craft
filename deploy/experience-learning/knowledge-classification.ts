@@ -144,6 +144,10 @@ export async function runKnowledgeScenarioClassificationOnce(deps: KnowledgeClas
   for (const claim of claims) {
     const scope = String(claim.scope);
     const projectRoot = claim.scope === "global" ? undefined : deps.project_root ?? projectRootFromClaim(claim);
+    if (claim.scope !== "global" && claim.content_ref !== undefined && claim.content_ref !== null && !deps.project_root && !projectRoot) {
+      outcomes.push({ claim_id: claim.id, status: "skipped", reason: "project_root_unavailable" });
+      continue;
+    }
     let taxonomyResult: JsonObject, taxonomy: JsonObject, packet: JsonObject, reviewPacket: JsonObject, reviewPacketDigest: string,
       ticketId: string, claimContent: string, preparationStage = "taxonomy_list";
     try {

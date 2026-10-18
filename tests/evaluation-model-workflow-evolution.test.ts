@@ -133,9 +133,12 @@ test("Knowledge classification tickets track the live candidate and keep result 
       purposes: ["knowledge_scenario_classification"], network_execution_enabled: true });
     const profile = saved.profile as JsonObject;
     const issued = kernel.issue({ profile_id: profile.id, purpose: "knowledge_scenario_classification", knowledge_claim_id: "claim-1",
-      input_ref: "craft-knowledge://claim/claim-1/v1/catalog/0", output_contract_ref: "craft-knowledge-scenario-classification-v1" });
+      project_root: f.root, input_ref: "craft-knowledge://claim/claim-1/v1/catalog/0", output_contract_ref: "craft-knowledge-scenario-classification-v1" });
     const ticket = issued.ticket as JsonObject;
     assert.equal(ticket.status, "ready_for_adapter");
+    assert.throws(() => kernel.issue({ profile_id: profile.id, purpose: "knowledge_scenario_classification", knowledge_claim_id: "claim-1",
+      project_root: tmpdir(), input_ref: "craft-knowledge://claim/claim-1/v1/catalog/0", output_contract_ref: "craft-knowledge-scenario-classification-v1" }),
+    /not registered/u, "ticket validation must reject a project root outside the Claim's registered scope");
     const reviewedTicket = kernel.issue({ profile_id: profile.id, purpose: "knowledge_scenario_classification", knowledge_claim_id: "reviewed-claim",
       input_ref: "craft-knowledge://claim/reviewed-claim/v1/catalog/0", output_contract_ref: "craft-knowledge-scenario-classification-v1" }).ticket as JsonObject;
     assert.equal(reviewedTicket.status, "ready_for_adapter");

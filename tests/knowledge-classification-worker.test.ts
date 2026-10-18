@@ -407,13 +407,17 @@ test("worker ignores incomplete or unrelated project Knowledge content paths whe
   for (const contentRef of invalidReferences) {
     const f = fixture();
     const projectClaim = { ...claim, ...(contentRef === undefined ? {} : { content_ref: contentRef }) } as JsonObject;
+    let taxonomyCalls = 0;
     const client: KnowledgeClassificationClient = { async call(name, args) {
       if (name === "craft_knowledge_claim_list") return { claims: [projectClaim] };
-      if (name === "craft_knowledge_scenario_list") assert.equal(args?.project_root, undefined);
+      if (name === "craft_knowledge_scenario_list") { taxonomyCalls += 1; assert.equal(args?.project_root, undefined); }
       return f.client.call(name, args);
     } };
     const result = await runKnowledgeScenarioClassificationOnce({ client, providers: [provider], transport: f.transport });
-    assert.equal((result.outcomes as JsonObject[])[0]?.status, "classified");
+    const hasReference = contentRef !== undefined && contentRef !== null;
+    assert.equal((result.outcomes as JsonObject[])[0]?.status, hasReference ? "skipped" : "classified");
+    if (hasReference) assert.equal((result.outcomes as JsonObject[])[0]?.reason, "project_root_unavailable");
+    assert.equal(taxonomyCalls, hasReference ? 0 : 1);
     assert.equal(f.calls.find(call => call.name === "craft_knowledge_scenario_list")?.args.project_root, undefined);
   }
 });

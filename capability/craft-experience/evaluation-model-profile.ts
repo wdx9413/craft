@@ -252,7 +252,9 @@ export class EvaluationModelProfileKernel {
         || !source || source.status !== "active" || source.trust === "untrusted") {
         throw new Error("Knowledge scenario ticket requires an unclassified project or global Claim from an active trusted Source");
       }
-      const catalog = listKnowledgeScenarios(knowledgeDirectoryForScope(this.store, scope.kind === "global" ? "global" : `project:${scope.id}`), scope.id, scope.kind);
+      const knowledgeDirectory = knowledgeDirectoryForScope(this.store, scope.kind === "global" ? "global" : `project:${scope.id}`,
+        scope.kind === "project" && typeof args.project_root === "string" ? { project_root: args.project_root } : {});
+      const catalog = listKnowledgeScenarios(knowledgeDirectory, scope.id, scope.kind);
       return { kind: "knowledge_scenario_classification", id: claim.id, version: claim.version,
         content_digest: claim.content_digest, scope: claim.scope, catalog_version: catalog.catalog_version };
     }
