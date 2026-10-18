@@ -2,6 +2,7 @@ import type { JsonObject } from "../infrastructure/store.ts";
 
 export type Tool = { name: string; description: string; inputSchema: JsonObject; annotations?: JsonObject };
 export type ParamType = "boolean" | "integer" | "number" | "object" | "array" | "string";
+export const CONTEXT_TOOL_INTENTS = ["recall", "knowledge", "memory", "experience", "code", "code-analysis"] as const;
 
 /**
  * Parameter types are inferred from the parameter *name*, not declared per tool. That
@@ -69,6 +70,10 @@ const schemaFor = (name: string): JsonObject => {
   if (OBJECT_PARAMS.includes(name)) return { type: "object" };
   if (ARRAY_PARAMS.includes(name)) return { type: "array" };
   return { type: "string" };
+};
+
+const ENUMS_BY_TOOL: Readonly<Record<string, Readonly<Record<string, readonly string[]>>>> = {
+  craft_context_tools_discover: { intent: CONTEXT_TOOL_INTENTS },
 };
 
 // Domain contracts override the legacy name heuristic. Keep ambiguous names local
@@ -157,7 +162,9 @@ const TYPES_BY_TOOL: Readonly<Record<string, Readonly<Record<string, ParamType>>
 };
 
 const objectSchema = (toolName: string, required: string[] = [], optional: string[] = []): JsonObject => ({ type: "object",
-  properties: Object.fromEntries([...required, ...optional].map((name) => [name, TYPES_BY_TOOL[toolName]?.[name] ? { type: TYPES_BY_TOOL[toolName][name] } : schemaFor(name)])), required,
+  properties: Object.fromEntries([...required, ...optional].map((name) => [name, ENUMS_BY_TOOL[toolName]?.[name]
+    ? { type: "string", enum: [...ENUMS_BY_TOOL[toolName][name]!] }
+    : TYPES_BY_TOOL[toolName]?.[name] ? { type: TYPES_BY_TOOL[toolName][name] } : schemaFor(name)])), required,
   additionalProperties: false });
 
 export const tool = (name: string, description: string, required: string[] = [], readOnly = false,

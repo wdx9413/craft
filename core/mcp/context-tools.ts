@@ -1,8 +1,11 @@
 import type { JsonObject } from "../infrastructure/store.ts";
+import { CraftOperationError } from "../operation-error.ts";
+import { CONTEXT_TOOL_INTENTS } from "./tool-schema.ts";
 import { ACTIVE_TOOLS } from "./tool-catalog.ts";
 import { estimateTokens } from "../token-budget.ts";
 
-const TASK_TOOLS: Record<string, string[]> = {
+type ContextToolIntent = typeof CONTEXT_TOOL_INTENTS[number];
+const TASK_TOOLS: Record<ContextToolIntent, string[]> = {
   recall: ["craft_context_open", "craft_context_resolution_feedback"],
   knowledge: ["craft_knowledge_search", "craft_knowledge_bootstrap_install", "craft_knowledge_source_list", "craft_knowledge_source_register", "craft_knowledge_source_ingest", "craft_knowledge_scenario_list", "craft_knowledge_scenario_retire", "craft_knowledge_scenario_migration_propose", "craft_evidence_record", "craft_knowledge_claim_save", "craft_knowledge_claim_get", "craft_knowledge_claim_list", "craft_knowledge_semantic_review_packet", "craft_knowledge_host_review", "craft_knowledge_auto_review", "craft_knowledge_promotion_policy_get", "craft_knowledge_evaluation_case_save", "craft_knowledge_evaluation_case_list", "craft_knowledge_evaluation_run", "craft_knowledge_evaluation_run_get", "craft_knowledge_evaluation_run_list"],
   memory: ["craft_memory_governance", "craft_memory_capture_observed_fact", "craft_memory_capture_user_statement", "craft_memory_candidate_review", "craft_memory_ledger_remember_approved", "craft_memory_ledger_get", "craft_memory_ledger_list", "craft_memory_ledger_transition", "craft_memory_conflict_list", "craft_memory_conflict_resolve", "craft_memory_maintenance_run", "craft_memory_session_finalize"],
@@ -14,8 +17,10 @@ const TASK_TOOLS: Record<string, string[]> = {
 /** Discovery is a small recommended subset. Existing Host tool registrations stay compatible. */
 export function discoverContextTools(args: JsonObject): JsonObject {
   const intent = String(args.intent ?? "recall");
-  if (!Object.hasOwn(TASK_TOOLS, intent)) throw new Error("Unsupported Context tool intent");
-  const names = new Set([...(TASK_TOOLS.recall!), ...TASK_TOOLS[intent]!]);
+  if (!Object.hasOwn(TASK_TOOLS, intent)) throw new CraftOperationError("INVALID_INPUT", "input_validation",
+    "Unsupported Context tool intent", { field: "intent", allowed: [...CONTEXT_TOOL_INTENTS] });
+  const selectedIntent = intent as ContextToolIntent;
+  const names = new Set([...(TASK_TOOLS.recall!), ...TASK_TOOLS[selectedIntent]!]);
   const tools = ACTIVE_TOOLS.filter(tool => names.has(tool.name));
   return { intent, tools, schema_estimated_tokens: estimateTokens(JSON.stringify(tools)), exact: false, changes_host_registration: false };
 }

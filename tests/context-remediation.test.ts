@@ -11,6 +11,8 @@ import { contextAssetRef, contextAssetKey, contextAssetMatches, requiredContextR
 import { ContextWorkingSetKernel } from "../core/context-working-set.ts";
 import { codeContextCandidates, codeQueryTerms } from "../capability/craft-codebase/context-search.ts";
 import { discoverContextTools } from "../core/mcp/context-tools.ts";
+import { toolParamTypeLists } from "../core/mcp/tool-schema.ts";
+import { TOOLS } from "../core/mcp.ts";
 import { ProcedurePlanner } from "../capability/craft-experience/procedure-composition.ts";
 import { activeProcedure, preserveProcedureRelease, selectedProcedure, updateProcedureRelease } from "../capability/craft-experience/procedure-release.ts";
 import { fixture as invocationFixture, scope, spec } from "./helpers/procedure-invocation-fixture.ts";
@@ -106,10 +108,13 @@ test("SQL scoped selection handles string/object scopes and predicates before hy
 });
 
 test("discovery and Chinese code matching are bounded hints", () => {
+  assert(Object.values(toolParamTypeLists()).every(names => names.length > 0));
   assert(codeQueryTerms("登录").includes("login")); assert.deepEqual(codeQueryTerms(""), []);
   const found = codeContextCandidates({ nodes: [{ id: "b", name: "loginUser", path: "b.ts" }, { id: "a", name: "loginUser", path: "a.ts" }, { id: "z", name: "other", path: "z.ts" }] }, "登录", 1);
   assert.equal((found.symbols as JsonObject[])[0]!.id, "a"); assert.equal(found.omitted_count, 1);
   assert.equal((codeContextCandidates({ nodes: [] }, "x").symbols as unknown[]).length, 0);
+  const discoveryIntentSchema = (((TOOLS.find(tool => tool.name === "craft_context_tools_discover")!.inputSchema.properties as JsonObject).intent) as JsonObject);
+  assert.deepEqual(discoveryIntentSchema.enum, ["recall", "knowledge", "memory", "experience", "code", "code-analysis"]);
   for (const intent of [undefined, "recall", "knowledge", "memory", "experience", "code", "code-analysis"]) { const discovery = discoverContextTools({ intent }); assert((discovery.tools as unknown[]).length > 0); assert(Number(discovery.schema_estimated_tokens) > 0); }
   assert((discoverContextTools({ intent: "experience" }).tools as JsonObject[]).some(tool => tool.name === "craft_experience_scenario_list"));
   assert((discoverContextTools({ intent: "experience" }).tools as JsonObject[]).some(tool => tool.name === "craft_learning_cycle_finalize"));
@@ -148,7 +153,12 @@ test("discovery and Chinese code matching are bounded hints", () => {
     "craft_codebase_data_flow_query", "craft_codebase_diagnostics_find"].sort());
   assert.equal((discoverContextTools({ intent: "code" }).schema_estimated_tokens as number)
     < (discoverContextTools({ intent: "code-analysis" }).schema_estimated_tokens as number), true);
-  assert.throws(() => discoverContextTools({ intent: "bad" }), /intent/);
+  assert.throws(() => discoverContextTools({ intent: "bad" }), (error: unknown) => {
+    const failure = error as { code?: string; stage?: string; safeDetails?: JsonObject };
+    assert.equal(failure.code, "INVALID_INPUT"); assert.equal(failure.stage, "input_validation");
+    assert.deepEqual(failure.safeDetails?.allowed, ["recall", "knowledge", "memory", "experience", "code", "code-analysis"]);
+    return true;
+  });
 });
 
 test("formal release survives candidate edits and failures while test planning remains read-only", async () => {

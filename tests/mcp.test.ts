@@ -37,6 +37,13 @@ test("MCP negotiates protocols, lists tools, dispatches every handler, and repor
     assert.equal((await server.handle({ id: 5, method: "tools/call", params: [] }))?.error instanceof Object, true);
     assert.equal((await server.handle({ id: 5, method: "tools/call", params: { name: "craft_info", arguments: [] } }))?.error instanceof Object, true);
     assert.equal(((await server.handle({ id: 5, method: "tools/call", params: { name: "craft_info" } }))?.result as Record<string, unknown>).isError, false);
+    const invalidDiscovery = await server.handle({ id: 6, method: "tools/call", params: { name: "craft_context_tools_discover", arguments: { intent: "knowledge evaluation" } } });
+    const invalidDiscoveryResult = invalidDiscovery?.result as Record<string, unknown>;
+    const invalidDiscoveryFailure = invalidDiscoveryResult.structuredContent as Record<string, unknown>;
+    assert.equal(invalidDiscoveryResult.isError, true);
+    assert.equal(invalidDiscoveryFailure.error_code, "INVALID_INPUT");
+    assert.equal(invalidDiscoveryFailure.stage, "input_validation");
+    assert.deepEqual((invalidDiscoveryFailure.details as Record<string, unknown>).allowed, ["recall", "knowledge", "memory", "experience", "code", "code-analysis"]);
     server.handlers.craft_throw_string = () => { throw "string failure"; };
     const stringFailure = await server.handle({ id: 5, method: "tools/call", params: { name: "craft_throw_string" } });
     assert.equal((((stringFailure?.result as Record<string, unknown>).content as Record<string, unknown>[])[0]).text, "string failure");
