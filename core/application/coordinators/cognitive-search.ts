@@ -6,6 +6,7 @@ import { contentReference } from "../../../common/craft-common-store-local/src/c
 import { scopeFromKey } from "../../../common/craft-common-base/src/scope-policy.ts";
 import { knowledgeScenarioIsActive, listKnowledgeScenarios, proposeKnowledgeScenarioMigration, retireKnowledgeScenario } from "../../../capability/craft-knowledge/scenario-catalog.ts";
 import { array, finiteInteger, object, text } from "../../validation.ts";
+import { knowledgeDirectoryForScope } from "../../project-knowledge-content.ts";
 
 /** Owns local diagnostic projections and the loop's governed Memory read path. */
 export class CognitiveSearchCoordinator {
@@ -40,8 +41,11 @@ export class CognitiveSearchCoordinator {
     const scenarioKind = scenarioParts[0] === "global" && scenarioParts.length === 1 ? "global"
       : scenarioParts[0] === "project" && scenarioParts.length > 1 ? "project" : null;
     const scenarioId = scenarioKind === "global" ? "global" : scenarioParts.slice(1).join(":");
+    const scenarioDirectory = scope && scenarioKind === "project"
+      ? knowledgeDirectoryForScope(this.store, scope, { ...(typeof args.project_root === "string" ? { project_root: args.project_root } : {}) })
+      : this.store.paths.knowledgeDir;
     const scenarioActive = scenarioKey === null || scenarioKind !== null
-      && knowledgeScenarioIsActive(this.store.paths.knowledgeDir, scenarioId, scenarioKey, scenarioKind);
+      && knowledgeScenarioIsActive(scenarioDirectory, scenarioId, scenarioKey, scenarioKind);
     const includeCandidates = args.include_candidates !== false;
     const terms = [...new Set(query.toLowerCase().match(/[\p{L}\p{N}_-]+/gu) ?? [])];
     const governed = this.store.list("knowledge_claim", 10_000).flatMap((claim) => {
@@ -59,7 +63,7 @@ export class CognitiveSearchCoordinator {
       if (claim.valid_until !== undefined && claim.valid_until !== null
         && (typeof claim.valid_until !== "string" || !Number.isFinite(Date.parse(claim.valid_until)) || Date.parse(claim.valid_until) < Date.now())) return [];
       if (claim.content_ref && !contentReference(claim.content_ref)) throw new Error("Knowledge content reference is invalid");
-      const content = contentReference(claim.content_ref) ? this.store.contentStore.readCompatSync(claim.content_ref).body : String(claim.content ?? "");
+      const content = contentReference(claim.content_ref) ? this.store.contentStore.readCompatSync(claim.content_ref, typeof claim.scope === "string" ? claim.scope : undefined).body : String(claim.content ?? "");
       const score = terms.reduce((total, term) => total + Number(`${content} ${Array.isArray(claim.tags) ? claim.tags.join(" ") : ""}`.toLowerCase().includes(term)), 0);
       return score > 0 ? [{ kind: "governed_claim", claim_id: claim.id, claim_version: claim.version, status: claim.status,
         scope: claim.scope, content, content_digest: claim.content_digest, evidence_ids: claim.evidence_ids,
@@ -83,7 +87,9 @@ export class CognitiveSearchCoordinator {
     const [kind, ...parts] = scope.split(":");
     if (kind === "global" && parts.length === 0) return { scope, ...listKnowledgeScenarios(this.store.paths.knowledgeDir, "global", "global") };
     if (kind !== "project" || !parts.length) throw new Error("Knowledge scenario catalog requires an explicit project or global scope");
-    return { scope, ...listKnowledgeScenarios(this.store.paths.knowledgeDir, parts.join(":"), "project") };
+    return { scope, ...listKnowledgeScenarios(knowledgeDirectoryForScope(this.store, scope, {
+      ...(typeof args.project_root === "string" ? { project_root: args.project_root } : {}),
+    }), parts.join(":"), "project") };
   }
 
   knowledgeScenarioRetire(args: JsonObject): JsonObject {
@@ -93,7 +99,9 @@ export class CognitiveSearchCoordinator {
       scenario_key: text(args.scenario_key, "scenario_key"), expected_catalog_version: finiteInteger(args.expected_catalog_version, "expected_catalog_version", 0, 0),
       request_id: text(args.request_id, "request_id"), reason: text(args.reason, "reason") });
     if (kind !== "project" || !parts.length) throw new Error("Knowledge scenario retirement requires an explicit project or global scope");
-    return retireKnowledgeScenario({ knowledge_dir: this.store.paths.knowledgeDir, project_id: parts.join(":"), scope_kind: "project",
+    return retireKnowledgeScenario({ knowledge_dir: knowledgeDirectoryForScope(this.store, scope, {
+      ...(typeof args.project_root === "string" ? { project_root: args.project_root } : {}),
+    }), project_id: parts.join(":"), scope_kind: "project",
       scenario_key: text(args.scenario_key, "scenario_key"), expected_catalog_version: finiteInteger(args.expected_catalog_version, "expected_catalog_version", 0, 0),
       request_id: text(args.request_id, "request_id"), reason: text(args.reason, "reason") });
   }
@@ -104,7 +112,9 @@ export class CognitiveSearchCoordinator {
     const globalScope = kind === "global" && parts.length === 0;
     if (!globalScope && (kind !== "project" || !parts.length)) throw new Error("Knowledge scenario migration requires an explicit project or global scope");
     if (!Array.isArray(args.source_keys) || !Array.isArray(args.targets)) throw new Error("Knowledge scenario migration sources and targets must be arrays");
-    return proposeKnowledgeScenarioMigration({ knowledge_dir: this.store.paths.knowledgeDir, project_id: globalScope ? "global" : parts.join(":"), scope_kind: globalScope ? "global" : "project",
+    return proposeKnowledgeScenarioMigration({ knowledge_dir: globalScope ? this.store.paths.knowledgeDir : knowledgeDirectoryForScope(this.store, scope, {
+      ...(typeof args.project_root === "string" ? { project_root: args.project_root } : {}),
+    }), project_id: globalScope ? "global" : parts.join(":"), scope_kind: globalScope ? "global" : "project",
       mode: text(args.mode, "mode") as "merge" | "split", source_keys: args.source_keys as string[], targets: args.targets as Array<{ scenario_key: string; definition: unknown }>,
       expected_catalog_version: finiteInteger(args.expected_catalog_version, "expected_catalog_version", 0, 0),
       request_id: text(args.request_id, "request_id"), reason: text(args.reason, "reason") });

@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, readdir, stat, symlink, unlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { CraftStore } from "../core/infrastructure/store.ts";
@@ -55,6 +55,32 @@ test("MarkdownContentStore writes self-describing content and verifies its diges
   assert.equal(content.readCompatSync({ ...rewritten, path: legacyPath }).body, "Rewritten knowledge");
   assert.throws(() => content.readCompatSync({ ...ref, path: join(f.root, "outside.md") }), /outside/);
   await f.store.close();
+});
+
+test("project Knowledge bodies stay inside the registered checkout and reject cross-project reads", async () => {
+  const f = await fixture();
+  try {
+    const other = await mkdtemp(join(tmpdir(), "craft-content-other-project-"));
+    f.service.scopeAliasBind({ scope_kind: "project", scope_id: "project:demo", alias_kind: "path", alias: f.root });
+    f.service.scopeAliasBind({ scope_kind: "project", scope_id: "project:other", alias_kind: "path", alias: other });
+    const ref = f.store.contentStore.writeSync({ kind: "knowledge", record_id: "project-claim", version: 1, scope: "project:demo",
+      status: "candidate", sensitivity: "internal", source_id: "project-source", body: "Project-only Knowledge." });
+    assert.ok(ref.path.startsWith(join(realpathSync(f.root), ".craft_data", "knowledge", "md")));
+    assert.equal(f.store.contentStore.readCompatSync(ref).body, "Project-only Knowledge.");
+    const { scope: _scope, ...legacyRef } = ref;
+    assert.equal(f.store.contentStore.readCompatSync(legacyRef, "project:demo").body, "Project-only Knowledge.");
+    assert.throws(() => f.store.contentStore.readCompatSync(legacyRef, "project:other"), /outside the canonical directory/u);
+    assert.throws(() => f.store.contentStore.readCompatSync({ ...legacyRef, scope: "project:other" }), /outside the canonical directory/u);
+    const clone = await mkdtemp(join(tmpdir(), "craft-content-project-clone-"));
+    f.service.scopeAliasBind({ scope_kind: "project", scope_id: "project:demo", alias_kind: "path", alias: clone });
+    assert.throws(() => f.store.contentStore.writeSync({ kind: "knowledge", record_id: "ambiguous-project-claim", version: 1,
+      scope: "project:demo", status: "candidate", sensitivity: "internal", source_id: "project-source", body: "Ambiguous project." }), /ambiguous/u);
+    const cloneRef = f.store.contentStore.writeSync({ kind: "knowledge", record_id: "clone-project-claim", version: 1, scope: "project:demo", project_root: clone,
+      status: "candidate", sensitivity: "internal", source_id: "project-source", body: "Clone-scoped Knowledge." });
+    assert.ok(cloneRef.path.startsWith(join(realpathSync(clone), ".craft_data", "knowledge", "md")));
+    await rm(other, { recursive: true, force: true });
+    await rm(clone, { recursive: true, force: true });
+  } finally { await f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
 test("content drift and unsafe identifiers fail closed", async () => {
@@ -132,6 +158,18 @@ test("content titles provide readable Unicode filenames without changing identit
   assert.equal((await content.write({ kind: "knowledge", record_id: "metadata-title", version: 1, title: "可读名称 / API", scope: "global", status: "active", sensitivity: "internal", source_id: "source", body: "body" })).title, "可读名称 / API");
   await writeFile(ref.path, withoutTitle, "utf8");
   assert.equal(content.writeSync({ kind: "knowledge", record_id: "metadata-title", version: 1, title: "可读名称 / API", scope: "global", status: "active", sensitivity: "internal", source_id: "source", body: "body" }).title, "可读名称 / API");
+  await f.store.close();
+});
+
+test("bound project Knowledge writes fail closed when the project path is not registered", async () => {
+  const f = await fixture();
+  const content = f.store.contentStore;
+  const { bindProjectKnowledgeContentDirectory } = await import("../core/project-knowledge-content.ts");
+  bindProjectKnowledgeContentDirectory(f.store);
+  assert.throws(() => content.writeSync({ kind: "knowledge", record_id: "unbound", version: 1, scope: "project:unbound",
+    status: "candidate", sensitivity: "internal", source_id: "source", body: "Project fact" }), /no registered project root/u);
+  await assert.rejects(content.write({ kind: "knowledge", record_id: "unbound-async", version: 1, scope: "project:unbound",
+    status: "candidate", sensitivity: "internal", source_id: "source", body: "Project fact" }), /no registered project root/u);
   await f.store.close();
 });
 
@@ -238,7 +276,7 @@ test("startup content indexes stream every content-bearing record family", async
   ] as const;
   for (const [recordKind, contentKind, id] of records) {
     const ref = f.store.contentStore.writeSync({ kind: contentKind, record_id: id, version: 1,
-      scope: "project:test", status: "candidate", sensitivity: "internal", source_id: "source:test", body: `Body ${id}` });
+      scope: "global", status: "candidate", sensitivity: "internal", source_id: "source:test", body: `Body ${id}` });
     f.store.create(recordKind, id, { content_ref: ref });
   }
   f.store.create("knowledge_claim", "claim-without-reference", { content_ref: null });

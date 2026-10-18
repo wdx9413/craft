@@ -13,6 +13,8 @@ import { payload } from "./digest.ts";
 import { text } from "./validation.ts";
 import { contentReference, type ContentRef } from "./infrastructure/content-store.ts";
 import { updateKnowledgeScenarioClaim } from "../capability/craft-knowledge/scenario-catalog.ts";
+import { scopeFromKey } from "../common/craft-common-base/src/scope-policy.ts";
+import { knowledgeDirectoryForScope } from "./project-knowledge-content.ts";
 
 type Verdict = "eligible" | "revalidation_required" | "rejected" | "already_reviewed";
 type Confidence = "bounded" | "confirmed";
@@ -36,7 +38,7 @@ function digest(value: unknown): string {
 function claimContentIsIntact(store: CraftStore, claim: JsonObject): boolean {
   if (typeof claim.content === "string") return true;
   if (!contentReference(claim.content_ref)) return false;
-  try { store.contentStore.readCompatSync(claim.content_ref); return true; } catch { return false; }
+  try { store.contentStore.readCompatSync(claim.content_ref, String(claim.scope)); return true; } catch { return false; }
 }
 
 /** Records a reproducible automated assessment without hiding its limits. */
@@ -85,7 +87,7 @@ export class KnowledgeAutoReviewKernel {
       if (!evidence || typeof evidence.fragment_id !== "string") continue;
       const fragment = this.store.find("knowledge_fragment", evidence.fragment_id); const ref = fragment?.content_ref;
       if (!fragment || !contentReference(ref)) continue;
-      try { fragments.push({ evidence_id: evidence.id, fragment_id: fragment.id, locator: fragment.locator, source_revision_id: fragment.source_revision_id, content_digest: fragment.content_digest, content: this.store.contentStore.readCompatSync(ref as ContentRef).body }); } catch { /* unavailable fragment remains unavailable */ }
+      try { fragments.push({ evidence_id: evidence.id, fragment_id: fragment.id, locator: fragment.locator, source_revision_id: fragment.source_revision_id, content_digest: fragment.content_digest, content: this.store.contentStore.readCompatSync(ref as ContentRef, String(claim.scope)).body }); } catch { /* unavailable fragment remains unavailable */ }
     }
     if (!fragments.length) return { status: "unavailable", reason: "evidence_fragment_unavailable", packet: null };
     // `CraftStore.record` materializes a valid content reference before this
@@ -173,6 +175,7 @@ export class KnowledgeAutoReviewKernel {
    */
   hostReview(args: JsonObject): JsonObject {
     const claim = this.store.get("knowledge_claim", text(args.claim_id, "claim_id"));
+    if (typeof claim.scope !== "string") throw new Error("Claim scope is required for Host review");
     const hostKind = text(args.host_kind ?? "codex", "host_kind");
     if (!/^[a-z][a-z0-9_-]{0,63}$/u.test(hostKind)) throw new Error("host_kind must be a bounded Host identifier");
     const hostRunKey = text(args.host_run_key, "host_run_key");
@@ -258,16 +261,21 @@ export class KnowledgeAutoReviewKernel {
         reviewed_at: new Date(now).toISOString(), automated: true, host_attested: true,
       },
     });
-    updateKnowledgeScenarioClaim(this.store.paths.knowledgeDir, reviewedClaim, "reviewed");
+    updateKnowledgeScenarioClaim(this.knowledgeDirectory(String(reviewedClaim.scope), reviewedClaim), reviewedClaim, "reviewed");
     return { review, evidence, claim: reviewedClaim, promoted: true, idempotent: existing !== null, status: "reviewed", blocking_reasons: [] };
   }
 
   assess(args: JsonObject = {}): JsonObject {
+    if (args.scope_kind === undefined || args.scope_id === undefined) throw new Error("scope_kind and scope_id are required");
+    const selectedScope = { kind: text(args.scope_kind, "scope_kind"), id: text(args.scope_id, "scope_id") };
     const claimIds = args.claim_ids === undefined
-      ? this.store.list("knowledge_claim", 10_000).map((claim) => String(claim.id))
+      ? this.store.list("knowledge_claim", 10_000, claim => this.claimMatchesScope(claim, selectedScope)).map((claim) => String(claim.id))
       : (() => {
         if (!Array.isArray(args.claim_ids) || !args.claim_ids.length) throw new Error("claim_ids must be a non-empty array");
-        return [...new Set(args.claim_ids.map((id) => text(id, "claim_ids")))].sort();
+        const ids = [...new Set(args.claim_ids.map((id) => text(id, "claim_ids")))].sort();
+        const claims = ids.map(id => this.store.get("knowledge_claim", id));
+        if (claims.some(claim => !this.claimMatchesScope(claim, selectedScope))) throw new Error("claim_ids must belong to the requested Knowledge scope");
+        return ids;
       })();
     const now = args.now === undefined ? Date.now() : Date.parse(text(args.now, "now"));
     if (!Number.isFinite(now)) throw new Error("now must be an ISO timestamp");
@@ -279,7 +287,22 @@ export class KnowledgeAutoReviewKernel {
     const summary = assessments.reduce<Record<string, number>>((counts, item) => {
       const verdict = String(item.verdict); counts[verdict] = (counts[verdict] ?? 0) + 1; return counts;
     }, {});
-    return { assessments, summary, auto_promote: autoPromote, policy, reviewer: "automated-promotion-policy" };
+    return { assessments, summary, auto_promote: autoPromote, policy, reviewer: "automated-promotion-policy", scope: selectedScope };
+  }
+
+  private claimMatchesScope(claim: JsonObject, expected: { kind: string; id: string }): boolean {
+    if (typeof claim.scope !== "string") return false;
+    try {
+      const actual = scopeFromKey(claim.scope);
+      return actual.kind === expected.kind && actual.id === expected.id;
+    } catch { return false; }
+  }
+
+  private knowledgeDirectory(scope: string, claim?: JsonObject): string {
+    const reference = claim?.content_ref as JsonObject | undefined;
+    return knowledgeDirectoryForScope(this.store, scope, {
+      ...(typeof reference?.path === "string" ? { reference_path: reference.path } : {}),
+    });
   }
 
   private assessOne(claimId: string, now: number, autoPromote: boolean, policy: PromotionPolicy): JsonObject {
@@ -297,7 +320,7 @@ export class KnowledgeAutoReviewKernel {
         const evidence = this.store.find("evidence", id);
         return evidence && ["bounded", "confirmed"].includes(String(evidence.confidence));
       });
-      if (String(claim.scope ?? "").startsWith("legacy:")) reasons.push("legacy_scope_requires_live_revalidation");
+      if (String(claim.scope).startsWith("legacy:")) reasons.push("legacy_scope_requires_live_revalidation");
       if (!sourceId) reasons.push("source_missing");
       else if (!source) reasons.push("source_not_registered");
       else if (source.status !== "active" || source.trust === "untrusted") reasons.push("source_not_trusted_active");
@@ -333,7 +356,7 @@ export class KnowledgeAutoReviewKernel {
     // auditable through both this review record and the normal Claim review field.
     if (autoPromote && policy.automatic && verdict === "eligible") {
       reviewedClaim = this.store.save("knowledge_claim", String(claim.id), { ...payload(claim), status: "reviewed", review: { reviewer: "automated-promotion-policy", source_digest: this.store.get("knowledge_source", String(claim.source_id)).content_digest, reason_digest: digest({ review_id: review.id, verdict, policy_id: policy.id, policy_revision: policy.revision }), reviewed_at: new Date(now).toISOString(), automated: true, policy_id: policy.id, policy_revision: policy.revision } });
-      updateKnowledgeScenarioClaim(this.store.paths.knowledgeDir, reviewedClaim, "reviewed");
+      updateKnowledgeScenarioClaim(this.knowledgeDirectory(String(reviewedClaim.scope), reviewedClaim), reviewedClaim, "reviewed");
     }
     return { claim_id: claim.id, claim_version: claim.version, verdict, reasons, review, claim: reviewedClaim ?? claim, promoted: reviewedClaim !== null, independent_support: independentSupportCount, required_independent_support: policy.minimum_independent_support, idempotent: existing !== null };
   }

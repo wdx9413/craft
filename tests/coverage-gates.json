@@ -1646,6 +1646,18 @@
         "tests/codebase-retrieval-strata.test.ts"
       ],
       "branches": true
+    },
+    {
+      "name": "project-knowledge-content",
+      "include": [
+        "core/project-knowledge-content.ts"
+      ],
+      "tests": [
+        "tests/project-knowledge-content.test.ts",
+        "tests/content-store.test.ts",
+        "tests/knowledge-promotion-policy.test.ts"
+      ],
+      "branches": true
     }
   ]
 }

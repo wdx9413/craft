@@ -22,6 +22,14 @@ test("the registry is a lossless re-index of every legacy tool", () => {
   }
 });
 
+test("Knowledge auto-review requires an explicit scope in its public tool contract", () => {
+  const entry = TOOLS.find((candidate) => candidate.name === "craft_knowledge_auto_review");
+  assert.ok(entry);
+  assert.deepEqual(entry.inputSchema.required, ["scope_kind", "scope_id"]);
+  assert.equal((entry.inputSchema.properties as Record<string, { type: string }>).scope_kind.type, "string");
+  assert.equal((entry.inputSchema.properties as Record<string, { type: string }>).scope_id.type, "string");
+});
+
 test("tool name parsing keeps multi-word resources and honours trailing verbs", () => {
   assert.deepEqual(parseToolName("craft_capability_search"), { resource: "capability", operation: "search" });
   assert.deepEqual(parseToolName("craft_default_route_execute"), { resource: "default_route", operation: "execute" });

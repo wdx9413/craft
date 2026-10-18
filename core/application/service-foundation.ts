@@ -1,4 +1,5 @@
 import { KnowledgeClaimGovernance } from "../../capability/craft-knowledge/claim-governance.ts";
+import { bindProjectKnowledgeContentDirectory } from "../project-knowledge-content.ts";
 import { Catalog } from "../catalog.ts";
 import { CraftStore, type JsonObject } from "../infrastructure/store.ts";
 import { CraftTelemetry, StoreTelemetrySink } from "../../common/craft-common-log/src/index.ts";
@@ -444,6 +445,7 @@ export abstract class ServiceFoundation {
     dockerSandbox = new DockerSandboxAdapter(), egressBroker = new TrustedEgressBroker(), hostOwnerId?: string,
     hostProfiles?: readonly HostProfile[], modelProviders?: readonly ModelProviderSpec[],
     modelTransport?: ModelTransport, traceArchiveBackends?: readonly TraceArchiveRuntimeBackend[]) {
+    bindProjectKnowledgeContentDirectory(store);
     this.store = store; this.catalog = new Catalog(store, semanticProvider); this.isolatedAdapter = isolatedAdapter;
     this.workspace = new WorkspaceState(store, store.paths);
     this.transaction = new TransactionCoordinator(store, this.workspace); this.trajectory = new TrajectoryCompiler(store);

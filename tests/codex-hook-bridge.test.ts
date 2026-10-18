@@ -21,7 +21,10 @@ async function fixture(models?: ReturnType<typeof defaultSettings>["models"]) {
     await writeFile(paths.settingsFile, JSON.stringify(settings));
   }
   const store = await new CraftStore(paths).open();
-  return { root, store, service: await CraftService.open(store) };
+  const service = await CraftService.open(store);
+  const projectScope = codexProjectScope(root)!;
+  service.scopeAliasBind({ scope_kind: "project", scope_id: projectScope.id, alias_kind: "path", alias: root });
+  return { root, store, service };
 }
 async function dispose(f: Awaited<ReturnType<typeof fixture>>) { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 
@@ -165,12 +168,13 @@ test("Hook signal sanitizer accepts only local edit or verification metadata", (
 test("Knowledge, Memory and Experience hooks resolve only their named Context member", async () => {
   const f = await fixture();
   try {
-    const scope = resolve("/project/craft");
+    const scope = f.root;
+    const canonicalScope = codexProjectScope(scope)!;
     f.service.knowledgeMemoryInstallBuiltins();
     const evidence = f.service.evidenceRecord({ evidence_id: "hook-evidence", source_type: "program", confidence: "confirmed", claim: "fixture" });
-    const claim = f.service.knowledgeClaimSave({ claim_id: "hook-claim", source_id: "builtin.evidence-wiki", kind: "rule", scope: `project:${scope}`, content: "Use a focused verification command.", evidence_ids: [evidence.id] }).claim as JsonObject;
+    const claim = f.service.knowledgeClaimSave({ claim_id: "hook-claim", source_id: "builtin.evidence-wiki", kind: "rule", scope: `project:${canonicalScope.id}`, content: "Use a focused verification command.", evidence_ids: [evidence.id] }).claim as JsonObject;
     f.service.knowledgeClaimReview({ claim_id: claim.id, status: "reviewed", reviewer: "fixture", reason: "verified" });
-    f.service.memoryLedgerRemember({ memory_id: "hook-memory", source_id: "builtin.evidence-wiki", kind: "preference", scope_kind: "project", scope_id: scope, content: "Prefer short feedback.", confidence: "bounded" });
+    f.service.memoryLedgerRemember({ memory_id: "hook-memory", source_id: "builtin.evidence-wiki", kind: "preference", scope_kind: "project", scope_id: canonicalScope.id, content: "Prefer short feedback.", confidence: "bounded" });
     const bridge = new CodexHookBridge(f.service);
     const knowledge = await bridge.handle("knowledge", { hook_event_name: "UserPromptSubmit", cwd: scope, prompt: "Which verification command should I use?" });
     assert.match(String(knowledge.additionalContext), /focused verification/u);
@@ -182,7 +186,6 @@ test("Knowledge, Memory and Experience hooks resolve only their named Context me
     assert(stored.some((item) => String(item.content).includes("无糖咖啡")));
     await bridge.handle("memory", { hook_event_name: "UserPromptSubmit", cwd: scope, session_id: "memory-session", prompt: "这句话不能被存成长期记忆" });
     assert.equal((f.service.memoryLedgerList({ scope_kind: "session", scope_id: "memory-session", include_history: true }).memories as JsonObject[]).length, 1);
-    const canonicalScope = codexProjectScope(scope)!;
     const procedureRef = f.store.contentStore.writeSync({ kind: "experience", folder: "prompts", record_id: "hook-procedure", version: 1, scope: `project:${canonicalScope.id}`, status: "routeable", sensitivity: "internal", source_id: "fixture", title: "终态验证", body: "# 终态验证\n\n先运行验证。" });
     f.store.create("experience_procedure", "hook-procedure", { scope: `project:${canonicalScope.id}`, lifecycle: "routeable", routeable: true, procedure_kind: "prompt", trigger: "verification", title: "终态验证", acceptance_ref: "acceptance:fixture", scenario_signature: { project: canonicalScope.id }, content_ref: procedureRef, content_digest: procedureRef.digest });
     const experience = await bridge.handle("experience", { hook_event_name: "UserPromptSubmit", cwd: scope, prompt: "Which verification command should I use?" });
@@ -205,10 +208,10 @@ test("Knowledge, Memory and Experience hooks resolve only their named Context me
 test("Context Hook resolves one shared receipt and records each component without duplicate recall", async () => {
   const f = await fixture();
   try {
-    const cwd = resolve("/project/craft"); const scope = codexProjectScope(cwd)!;
+    const cwd = f.root; const scope = codexProjectScope(cwd)!;
     f.service.knowledgeMemoryInstallBuiltins();
     const evidence = f.service.evidenceRecord({ source_type: "program", confidence: "confirmed", claim: "fixture" });
-    const claim = f.service.knowledgeClaimSave({ source_id: "builtin.evidence-wiki", kind: "rule", scope: `project:${cwd}`, content: "Run focused verification.", evidence_ids: [evidence.id] }).claim as JsonObject;
+    const claim = f.service.knowledgeClaimSave({ source_id: "builtin.evidence-wiki", kind: "rule", scope: `project:${scope.id}`, content: "Run focused verification.", evidence_ids: [evidence.id] }).claim as JsonObject;
     f.service.knowledgeClaimReview({ claim_id: claim.id, status: "reviewed", reviewer: "fixture", reason: "verified" });
     f.service.memoryLedgerRemember({ source_id: "builtin.evidence-wiki", kind: "preference", scope_kind: "project", scope_id: scope.id, content: "Prefer short feedback.", confidence: "bounded" });
     const bridge = new CodexHookBridge(f.service);

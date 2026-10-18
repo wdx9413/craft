@@ -29,7 +29,10 @@ export function installKnowledgeMemoryMethods(serviceClass: typeof CraftService)
     // Re-evaluate only claims produced by this trusted, registered-source read.
     // The existing local policy still enforces independent support, confidence,
     // scope, expiry and contradiction rules; ingestion never promotes legacy rows.
-    const automaticReview = claimIds.length ? this.knowledgeAutoReview({ claim_ids: claimIds }) : { assessments: [], summary: {}, auto_promote: false };
+    const sourceScope = (result.source as JsonObject | undefined)?.scope as JsonObject | undefined;
+    const automaticReview = claimIds.length && typeof sourceScope?.kind === "string" && typeof sourceScope.id === "string"
+      ? this.knowledgeAutoReview({ claim_ids: claimIds, scope_kind: sourceScope.kind, scope_id: sourceScope.id })
+      : { assessments: [], summary: {}, auto_promote: false, skipped: claimIds.length > 0 ? "source_scope_unavailable" : undefined };
     return { ...result, automatic_review: automaticReview };
   };
   serviceClass.prototype.memoryLedgerRemember = function (args) { return this.memoryLedger.remember(args); };

@@ -437,7 +437,7 @@ export class CraftStore {
     const payload = JSON.parse(String(row.payload_json)) as JsonObject;
     const record: JsonObject = { ...payload, id: row.id, version: row.version, created_at: row.created_at, updated_at: row.updated_at };
     if (hydrate && record.content_ref && (row.kind === "knowledge_claim" || row.kind === "memory_ledger" || row.kind === "episodic_memory" || row.kind === "semantic_memory")) {
-      try { record.content = this.contentStore.readCompatSync(record.content_ref as never).body; }
+      try { record.content = this.contentStore.readCompatSync(record.content_ref as never, typeof record.scope === "string" ? record.scope : undefined).body; }
       catch { record.content_unavailable = true; }
     }
     return record;

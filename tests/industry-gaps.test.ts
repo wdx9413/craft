@@ -25,6 +25,11 @@ const originalFetch = globalThis.fetch;
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-industry-")), store = await new CraftStore(craftPaths(join(root, "data"))).open();
+  const service = new CraftService(store);
+  for (const scopeId of ["fixture", "portable"]) {
+    const projectRoot = join(root, "projects", scopeId); await mkdir(projectRoot, { recursive: true });
+    service.scopeAliasBind({ scope_kind: "project", scope_id: `project:${scopeId}`, alias_kind: "path", alias: projectRoot });
+  }
   store.create("knowledge_source", "source", { status: "active", trust: "verified" });
   const context = new ContextResolutionKernel(store, [new KnowledgeContribution(store)]);
   const scope = { scope_kind: "project", scope_id: "fixture" };

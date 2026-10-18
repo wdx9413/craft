@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -15,7 +15,16 @@ async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-knowledge-memory-operability-"));
   const store = await new CraftStore(craftPaths(root)).open();
   const service = new CraftService(store);
-  return { root, store, service };
+  const result = { root, store, service };
+  await bindProject(result, "p");
+  return result;
+}
+
+async function bindProject(f: { root: string; service: CraftService }, scopeId: string): Promise<string> {
+  const projectRoot = join(f.root, "projects", scopeId);
+  await mkdir(projectRoot, { recursive: true });
+  f.service.scopeAliasBind({ scope_kind: "project", scope_id: `project:${scopeId}`, alias_kind: "path", alias: projectRoot });
+  return projectRoot;
 }
 
 async function close(f: Awaited<ReturnType<typeof fixture>>) {
@@ -68,6 +77,7 @@ test("reviewed knowledge contributes to a scoped Context receipt while candidate
 test("reviewed Knowledge classification accepts canonical project identity and writes its catalog under the normalized id", async () => {
   const f = await fixture();
   try {
+    const projectRoot = await bindProject(f, "canonical");
     f.service.knowledgeSourceRegister({ source_id: "canonical-notes", kind: "project_note", label: "Canonical project notes", trust: "verified",
       scope_kind: "project", scope_id: "project:canonical", locator: "notes.md", content_digest: `sha256:${"c".repeat(64)}` });
     const evidence = f.service.evidenceRecord({ claim: "Verified canonical project fact", source_type: "observation", confidence: "confirmed" });
@@ -80,7 +90,7 @@ test("reviewed Knowledge classification accepts canonical project identity and w
     assert.equal(classified.status, "reviewed");
     assert.equal(classified.scenario_key, "project.build.tooling");
     assert.equal(f.service.knowledgeScenarioList({ scope }).catalog_version, 1);
-    const catalog = JSON.parse(await readFile(join(f.root, "knowledge", "projects", "canonical", "knowledge-scenarios.json"), "utf8")) as JsonObject;
+    const catalog = JSON.parse(await readFile(join(projectRoot, ".craft_data", "knowledge", "projects", "canonical", "knowledge-scenarios.json"), "utf8")) as JsonObject;
     assert.equal((catalog.scenarios as JsonObject[])[0]?.scenario_key, "project.build.tooling");
   } finally { await close(f); }
 });
@@ -88,6 +98,7 @@ test("reviewed Knowledge classification accepts canonical project identity and w
 test("scenario metadata can be added to a reviewed source-ingested Claim without breaking its provenance identity", async () => {
   const f = await fixture();
   try {
+    await bindProject(f, "canonical");
     const scope = "project:project:canonical";
     const scopeEnvelope = { applicability: { kind: "project", id: "project:canonical" }, custody: { kind: "project", id: "project:canonical" },
       audience: { mode: "scoped", principal_ids: [] }, purpose: "fact", retention: "long_term", tenant_id: null };
@@ -150,7 +161,7 @@ test("model classified project Knowledge advances with trusted Source reviews an
       source_id: "notes", evidence_ids: [evidenceA.id] }).claim as JsonObject;
     assert.equal(corrected.version, Number(initialA.version) + 1);
     assert.equal(corrected.scenario_key, classification.scenario_key);
-    const taxonomyPath = join(f.root, "knowledge", "projects", "p", "knowledge-scenarios.json");
+    const taxonomyPath = join(f.root, "projects", "p", ".craft_data", "knowledge", "projects", "p", "knowledge-scenarios.json");
     const correctedCatalog = JSON.parse(await readFile(taxonomyPath, "utf8")) as JsonObject;
     const retiredName = (correctedCatalog.scenarios as JsonObject[]).find(item => item.scenario_key === "engineering.release.draft")!;
     assert.equal((retiredName.claim_refs as JsonObject[])[0]!.status, "inactive");
@@ -295,7 +306,7 @@ test("global Knowledge classification and scenario search stay isolated from pro
     assert.equal((projectSecond.scenario_catalog as JsonObject).status, "active");
 
     const globalPath = join(f.root, "knowledge", "global", "knowledge-scenarios.json");
-    const projectPath = join(f.root, "knowledge", "projects", "p", "knowledge-scenarios.json");
+    const projectPath = join(f.root, "projects", "p", ".craft_data", "knowledge", "projects", "p", "knowledge-scenarios.json");
     assert.equal(JSON.parse(await readFile(globalPath, "utf8")).catalog_version, 4);
     assert.equal(JSON.parse(await readFile(projectPath, "utf8")).catalog_version, 4);
     assert.deepEqual((f.service.knowledgeScenarioList({ scope: "global" }).scenarios as JsonObject[]).map(item => item.scenario_key), ["engineering.testing"]);
@@ -341,10 +352,8 @@ test("automated knowledge review records why legacy imports require live revalid
     f.service.knowledgeClaimSupportRecord({ claim_id: "current-claim", evidence_id: currentEvidence.id, observation_key: "session:fixture:one" });
     f.service.knowledgeClaimSupportRecord({ claim_id: "current-claim", evidence_id: secondCurrentEvidence.id, observation_key: "session:fixture:two" });
 
-    const review = f.service.knowledgeAutoReview({ claim_ids: ["legacy-claim", "current-claim"], auto_promote: true, now: "2026-09-20T00:00:00.000Z" });
-    const assessments = review.assessments as JsonObject[];
-    const legacyAssessment = assessments.find((item) => item.claim_id === "legacy-claim")!;
-    const currentAssessment = assessments.find((item) => item.claim_id === "current-claim")!;
+    const legacyAssessment = (f.service.knowledgeAutoReview({ scope_kind: "legacy", scope_id: "project", claim_ids: ["legacy-claim"], auto_promote: true, now: "2026-09-20T00:00:00.000Z" }).assessments as JsonObject[])[0]!;
+    const currentAssessment = (f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "p", claim_ids: ["current-claim"], auto_promote: true, now: "2026-09-20T00:00:00.000Z" }).assessments as JsonObject[])[0]!;
     assert.equal(legacyAssessment.verdict, "revalidation_required");
     assert.deepEqual(legacyAssessment.reasons, ["legacy_scope_requires_live_revalidation", "source_missing", "credible_evidence_missing", "independent_support_below_threshold"]);
     assert.equal(legacyAssessment.promoted, false);
@@ -352,7 +361,7 @@ test("automated knowledge review records why legacy imports require live revalid
     assert.equal(currentAssessment.verdict, "eligible");
     assert.equal(currentAssessment.promoted, true);
     assert.equal(f.store.get("knowledge_claim", "current-claim").status, "reviewed");
-    assert.equal((f.service.knowledgeAutoReview({ claim_ids: ["legacy-claim"], now: "2026-09-20T00:00:00.000Z" }).assessments as JsonObject[])[0]!.idempotent, true);
+    assert.equal((f.service.knowledgeAutoReview({ scope_kind: "legacy", scope_id: "project", claim_ids: ["legacy-claim"], now: "2026-09-20T00:00:00.000Z" }).assessments as JsonObject[])[0]!.idempotent, true);
     assert.throws(() => f.service.knowledgeClaimReview({ claim_id: "legacy-claim", status: "reviewed", reviewer: "human", reason: "trust old import" }), /bounded or confirmed Evidence/u);
   } finally { await close(f); }
 });

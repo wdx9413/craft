@@ -14,7 +14,8 @@ import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-evaluation-model-workflow-evolution-")); const store = await new CraftStore(craftPaths(root)).open();
-  const service = new CraftService(store); const evidence = service.evidenceRecord({ evidence_id: "confirmed", source_type: "program", confidence: "confirmed", claim: "sanitized outcome observed" });
+  const service = new CraftService(store); service.scopeAliasBind({ scope_kind: "project", scope_id: "project:demo", alias_kind: "path", alias: root });
+  const evidence = service.evidenceRecord({ evidence_id: "confirmed", source_type: "program", confidence: "confirmed", claim: "sanitized outcome observed" });
   return { root, store, service, evidence };
 }
 async function close(f: Awaited<ReturnType<typeof fixture>>) { f.store.close(); await rm(f.root, { recursive: true, force: true }); }

@@ -259,7 +259,7 @@ export class KnowledgeMemoryBundleKernel {
     const raw = payload(record);
     const portable = stripContentPath(raw) as JsonObject;
     const contentKind = CONTENT_KINDS[actualKind];
-    const contentBody = contentKind && contentReference(raw.content_ref) ? this.store.contentStore.readCompatSync(raw.content_ref).body : undefined;
+    const contentBody = contentKind && contentReference(raw.content_ref) ? this.store.contentStore.readCompatSync(raw.content_ref, typeof raw.scope === "string" ? raw.scope : undefined).body : undefined;
     const procedureDefinition = actualKind === "experience_procedure" && procedureDefinitionRef(raw.definition_ref)
       ? new ProcedureDefinitionStore(this.store.paths).read(raw.definition_ref) : undefined;
     const base = { kind: actualKind, id: String(record.id), version: Number(record.version), payload: portable,

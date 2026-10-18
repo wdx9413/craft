@@ -21,6 +21,7 @@ async function fixture() {
   const root = mkdtempSync(join(tmpdir(), "craft-context-fixes-")), repo = join(root, "repo"); mkdirSync(repo); execFileSync("git", ["-C", repo, "init", "-q"]);
   writeFileSync(join(repo, "login.ts"), "export function loginUser() { return true; }");
   const store = await new CraftStore(craftPaths(join(root, "data"))).open(), service = new CraftService(store); service.knowledgeMemoryInstallBuiltins();
+  service.scopeAliasBind({ scope_kind: "project", scope_id: "project:p", alias_kind: "path", alias: repo });
   const scope = (service.scopeIdentityResolveProject({ project_root: repo }).identity as JsonObject).canonical_scope as JsonObject;
   return { root, repo, store, service, scope, close() { store.close(); rmSync(root, { recursive: true, force: true }); } };
 }

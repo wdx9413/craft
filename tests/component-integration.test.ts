@@ -11,7 +11,9 @@ import { ProcedureDefinitionStore } from "../capability/craft-experience/procedu
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-component-integration-"));
   const store = await new CraftStore(craftPaths(root)).open();
-  return { root, store, service: await CraftService.open(store) };
+  const service = await CraftService.open(store);
+  service.scopeAliasBind({ scope_kind: "project", scope_id: "project:p", alias_kind: "path", alias: root });
+  return { root, store, service };
 }
 async function dispose(f: Awaited<ReturnType<typeof fixture>>) { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 
@@ -102,7 +104,7 @@ test("Knowledge promotes an ingested fact only after two independent verified so
         assert.equal(f.store.count("knowledge_claim_support"), 1);
         const duplicate = f.service.evidenceRecord({ evidence_id: "duplicate-source-evidence", source_type: "knowledge_fragment", confidence: "bounded", claim: "Copied text is still one source." });
         f.store.create("knowledge_claim_support", "duplicate-source-support", { claim_id: claimId, evidence_id: duplicate.id, observation_key: "knowledge-source:source-0", scope: "project:p", confidence: "bounded" });
-        const rechecked = f.service.knowledgeAutoReview({ claim_ids: [claimId] }).assessments as JsonObject[];
+        const rechecked = f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "p", claim_ids: [claimId] }).assessments as JsonObject[];
         assert.equal(rechecked[0]!.promoted, false);
         assert.equal(rechecked[0]!.independent_support, 1);
         const revokedSource = f.service.knowledgeSourceRegister({ source_id: "revoked-support-source", kind: "readme", label: "revoked corroboration", scope_kind: "project", scope_id: "p", locator: root, content_digest: "revoked-source", trust: "verified", access: "read_only" }).source as JsonObject;
@@ -110,7 +112,7 @@ test("Knowledge promotes an ingested fact only after two independent verified so
         f.store.save("evidence", String(revokedEvidence.id), { ...revokedEvidence, source_id: revokedSource.id });
         f.service.knowledgeClaimSupportRecord({ claim_id: claimId, evidence_id: revokedEvidence.id, observation_key: "knowledge-source:revoked-support-source", scope: "project:p" });
         f.service.knowledgeSourceTransition({ source_id: revokedSource.id, status: "revoked", reason: "fixture trust revoked" });
-        const revokedRecheck = f.service.knowledgeAutoReview({ claim_ids: [claimId] }).assessments as JsonObject[];
+        const revokedRecheck = f.service.knowledgeAutoReview({ scope_kind: "project", scope_id: "p", claim_ids: [claimId] }).assessments as JsonObject[];
         assert.equal(revokedRecheck[0]!.promoted, false);
         assert.equal(revokedRecheck[0]!.independent_support, 1);
       } else {
@@ -162,6 +164,9 @@ test("ingests only bounded readable files and makes stale reviewed claims explic
 test("automatic Knowledge review promotes only exact support from two active trusted Sources", async () => {
   const f = await fixture();
   try {
+    const projectRoot = join(f.root, "project-shared");
+    await mkdir(projectRoot);
+    f.service.scopeAliasBind({ scope_kind: "project", scope_id: "project:shared", alias_kind: "path", alias: projectRoot });
     const roots = [join(f.root, "source-a"), join(f.root, "source-b")];
     for (const root of roots) { await mkdir(root); await writeFile(join(root, "rule.md"), "Run focused verification before delivery.", "utf8"); }
     const sources = roots.map((root, index) => f.service.knowledgeSourceRegister({ source_id: `trusted-${index}`, kind: "readme", label: `trusted-${index}`, scope_kind: "project", scope_id: "shared", locator: root, content_digest: "registered", trust: "verified", access: "read_only" }).source as JsonObject);

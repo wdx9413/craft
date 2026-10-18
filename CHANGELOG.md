@@ -1,3 +1,9 @@
+## v0.12.60（项目级 Knowledge 隔离）
+
+- 项目 Knowledge 正文改为写入各自项目的 `.craft_data/knowledge/md`；场景目录也归属该项目的 `.craft_data/knowledge`，不再落入全局数据目录。
+- Knowledge 内容读取校验 Claim 范围；未登记项目路径时拒绝写入，防止不同项目串用全局目录。
+- 自动审核工具要求调用方提供明确范围；缺少范围或范围外 Claim 不会进入审核。同步更新 Context 工具说明与隔离、回归测试。
+
 ## v0.12.59（Knowledge 评测工具发现）
 
 - Context 的 Knowledge 工具发现新增固定评测用例保存、列表、执行与结果读取接口，允许 Agent 从统一入口建立和运行 Knowledge 检索评测。

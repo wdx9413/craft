@@ -1,0 +1,67 @@
+import { existsSync, lstatSync, mkdirSync, realpathSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import type { CraftStore } from "../common/craft-common-store-local/src/store.ts";
+import { stableDigest } from "./digest.ts";
+import { scopeFromKey } from "./scope-policy.ts";
+
+export interface ProjectKnowledgeDirectoryOptions {
+  readonly project_root?: string;
+  readonly reference_path?: string;
+  readonly create?: boolean;
+}
+
+/** Bind Knowledge Markdown storage to the exact project path alias registered by Context. */
+export function bindProjectKnowledgeContentDirectory(store: CraftStore): void {
+  store.contentStore.setProjectKnowledgeDirectoryResolver((scope, options) =>
+    projectKnowledgeContentDirectory(store, scope, options));
+}
+
+export function projectKnowledgeContentDirectory(store: CraftStore, scope: string,
+  options: ProjectKnowledgeDirectoryOptions = {}): string | null {
+  let parsed: ReturnType<typeof scopeFromKey>;
+  try { parsed = scopeFromKey(scope); } catch { return null; }
+  if (parsed.kind !== "project") return null;
+  const id = parsed.id.startsWith("project:") ? parsed.id : `project:${parsed.id}`;
+  if (!/^project:[A-Za-z0-9_-]{1,96}$/u.test(id)) return null;
+
+  const aliases = store.list("scope_alias", 10_000, item => item.status === "active" && item.alias_kind === "path"
+    && (item.scope as Record<string, unknown> | undefined)?.kind === "project"
+    && (item.scope as Record<string, unknown> | undefined)?.id === id)
+    .filter(item => typeof item.alias === "string" && isAbsolute(item.alias) && item.alias_digest === stableDigest(item.alias))
+    .map(item => { try { return realpathSync(item.alias as string); } catch { return ""; } })
+    .filter(Boolean);
+  const roots = [...new Set(aliases)];
+  const requested = options.project_root === undefined ? undefined : realpathSync(resolve(options.project_root));
+  if (requested && !roots.includes(requested)) throw new Error("Project root is not registered for this Knowledge scope");
+
+  const target = options.reference_path === undefined ? undefined : resolve(options.reference_path);
+  const matches = roots.filter(root => {
+    if (requested && requested !== root) return false;
+    if (!target) return true;
+    const path = relative(join(root, ".craft_data", "knowledge", "md"), target);
+    return path !== "" && path !== ".." && !path.startsWith(`..${sep}`);
+  });
+  if (target && !matches.length) return null;
+  if (matches.length > 1) throw new Error("Project root is ambiguous for this Knowledge scope");
+  const root = matches[0];
+  if (!root) return null;
+  if (!lstatSync(root).isDirectory()) throw new Error("Project root must be a directory");
+
+  const directory = join(root, ".craft_data", "knowledge", "md");
+  for (const path of [join(root, ".craft_data"), join(root, ".craft_data", "knowledge"), directory]) {
+    const exists = existsSync(path);
+    if (!exists && options.create) mkdirSync(path, { recursive: true, mode: 0o700 });
+    if (!exists && !options.create) continue;
+    const stat = lstatSync(path);
+    if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error("Project Knowledge content path must use regular directories");
+  }
+  return directory;
+}
+
+export function knowledgeDirectoryForScope(store: CraftStore, scope: string, options: ProjectKnowledgeDirectoryOptions = {}): string {
+  const parsed = scopeFromKey(scope);
+  const directory = projectKnowledgeContentDirectory(store, scope, { ...options, create: true })
+    ?? (options.reference_path ? projectKnowledgeContentDirectory(store, scope, { project_root: options.project_root, create: true }) : null);
+  if (parsed.kind === "project" && !directory) throw new Error("Project Knowledge scope has no registered project root");
+  return directory ? dirname(directory) : store.paths.knowledgeDir;
+}

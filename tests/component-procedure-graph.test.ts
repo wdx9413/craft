@@ -12,7 +12,9 @@ import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-procedure-graph-"));
   const store = await new CraftStore(craftPaths(root)).open();
-  return { root, store, service: new CraftService(store) };
+  const service = new CraftService(store);
+  service.scopeAliasBind({ scope_kind: "project", scope_id: "project:craft", alias_kind: "path", alias: root });
+  return { root, store, service };
 }
 async function dispose(f: Awaited<ReturnType<typeof fixture>>) { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 

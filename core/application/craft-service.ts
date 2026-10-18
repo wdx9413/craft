@@ -2849,7 +2849,7 @@ export class CraftService extends ServiceFoundation {
     const nextVersion = existing ? Number(existing.version) + 1 : 1;
     if (existing) {
       let current: string;
-      try { current = existing.content_ref ? this.store.contentStore.readCompatSync(existing.content_ref as never).body : await readFile(String(existing.file_path), "utf8"); }
+      try { current = existing.content_ref ? this.store.contentStore.readCompatSync(existing.content_ref as never, typeof existing.scope === "string" ? existing.scope : undefined).body : await readFile(String(existing.file_path), "utf8"); }
       catch { throw new Error("Wiki page file has unrecorded changes; refresh it before saving"); }
       if (valueDigest(current) !== existing.body_digest) throw new Error("Wiki page file has unrecorded changes; refresh it before saving");
     }
@@ -2895,14 +2895,14 @@ export class CraftService extends ServiceFoundation {
       if (claim.status !== "reviewed") { excluded.push({ claim_id: claim.id, reason: "not_reviewed" }); return []; }
       if (claim.valid_until && Date.parse(String(claim.valid_until)) < now) { excluded.push({ claim_id: claim.id, reason: "expired" }); return []; }
       if (claim.scope !== "global" && claim.scope !== scope) { excluded.push({ claim_id: claim.id, reason: "out_of_scope" }); return []; }
-      const claimContent = claim.content_ref ? this.store.contentStore.readCompatSync(claim.content_ref as never).body : String(claim.content ?? "");
+      const claimContent = claim.content_ref ? this.store.contentStore.readCompatSync(claim.content_ref as never, typeof claim.scope === "string" ? claim.scope : undefined).body : String(claim.content ?? "");
       const haystack = `${claimContent} ${(claim.tags as string[]).join(" ")}`.toLowerCase(); const score = terms.reduce((total, term) => total + Number(haystack.includes(term)), 0);
       if (!score) { excluded.push({ claim_id: claim.id, reason: "not_matched" }); return []; }
       return [{ claim, score }];
     }).sort((left, right) => right.score - left.score || String(left.claim.id).localeCompare(String(right.claim.id)));
     const included: JsonObject[] = []; let usedChars = 0;
     for (const item of matched) {
-      const rawContent = item.claim.content_ref ? this.store.contentStore.readCompatSync(item.claim.content_ref as never).body : item.claim.content;
+      const rawContent = item.claim.content_ref ? this.store.contentStore.readCompatSync(item.claim.content_ref as never, typeof item.claim.scope === "string" ? item.claim.scope : undefined).body : item.claim.content;
       const content = assertNoSecret(text(rawContent, "claim.content"), "claim.content"); const rendered = `[Knowledge ${item.claim.id}]\n${content}\nEvidence: ${(item.claim.evidence_ids as string[]).join(", ")}\n`;
       if (included.length >= maxItems || usedChars + rendered.length > maxChars) { excluded.push({ claim_id: item.claim.id, reason: "budget" }); continue; }
       usedChars += rendered.length; included.push({ claim_id: item.claim.id, claim_version: item.claim.version, content, evidence_ids: item.claim.evidence_ids, score: item.score, valid_until: item.claim.valid_until });

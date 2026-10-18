@@ -149,6 +149,6 @@ export class KnowledgeContribution implements ContextContributionProvider {
   private content(claim: JsonObject): string {
     if (typeof claim.content === "string") return claim.content;
     if (!contentReference(claim.content_ref)) throw new Error("Knowledge content reference is missing");
-    return this.store.contentStore.readCompatSync(claim.content_ref).body;
+    return this.store.contentStore.readCompatSync(claim.content_ref, typeof claim.scope === "string" ? claim.scope : undefined).body;
   }
 }

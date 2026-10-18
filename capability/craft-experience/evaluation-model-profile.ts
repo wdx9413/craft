@@ -3,6 +3,7 @@ import { canonicalJson, stableDigest } from "../../common/craft-common-base/src/
 import { credentialStatus, selectModel, type ModelProviderSpec, type ModelTier } from "../../common/craft-common-base/src/model-compat.ts";
 import { CraftStore, type JsonObject } from "../../common/craft-common-store-local/src/store.ts";
 import { scopeFromKey } from "../../common/craft-common-base/src/scope-policy.ts";
+import { knowledgeDirectoryForScope } from "../../core/project-knowledge-content.ts";
 import { listKnowledgeScenarios } from "../craft-knowledge/scenario-catalog.ts";
 
 const PURPOSES = new Set(["evaluation", "workflow_evolution", "knowledge_scenario_classification"]);
@@ -94,7 +95,7 @@ export class EvaluationModelProfileKernel {
           || Number(claim.version) !== Number(target.version) || claim.content_digest !== target.content_digest) return false;
         const scope = scopeFromKey(String(claim.scope));
         if (scope.kind !== "project" && scope.kind !== "global") return false;
-        return Number(listKnowledgeScenarios(this.store.paths.knowledgeDir, scope.id, scope.kind).catalog_version) === Number(target.catalog_version);
+        return Number(listKnowledgeScenarios(knowledgeDirectoryForScope(this.store, scope.kind === "global" ? "global" : `project:${scope.id}`), scope.id, scope.kind).catalog_version) === Number(target.catalog_version);
       }
       if (ticket.purpose === "evaluation") return true;
       if (ticket.purpose !== "workflow_evolution") return false;
@@ -239,7 +240,7 @@ export class EvaluationModelProfileKernel {
         || !source || source.status !== "active" || source.trust === "untrusted") {
         throw new Error("Knowledge scenario ticket requires an unclassified project or global Claim from an active trusted Source");
       }
-      const catalog = listKnowledgeScenarios(this.store.paths.knowledgeDir, scope.id, scope.kind);
+      const catalog = listKnowledgeScenarios(knowledgeDirectoryForScope(this.store, scope.kind === "global" ? "global" : `project:${scope.id}`), scope.id, scope.kind);
       return { kind: "knowledge_scenario_classification", id: claim.id, version: claim.version,
         content_digest: claim.content_digest, scope: claim.scope, catalog_version: catalog.catalog_version };
     }

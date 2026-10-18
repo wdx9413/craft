@@ -22,6 +22,8 @@ export interface ContentWriteInput {
   title?: string;
   /** Existing path used by source-aware migrations when a semantic rename is needed. */
   current_path?: string;
+  /** Project checkout whose private Knowledge directory owns this content. */
+  project_root?: string;
   /** Only Experience documents may select a managed, format-specific folder. */
   folder?: ExperienceFolder;
   /** Domain-owned scalar metadata that remains visible in the Markdown frontmatter. */
@@ -37,7 +39,13 @@ export interface ContentRef {
   bytes: number;
   format: "markdown";
   title: string;
+  /** Present on new references; callers may provide a legacy record's scope when reading. */
+  scope?: string;
 }
+
+export type ProjectKnowledgeContentDirectoryResolver = (scope: string, options: {
+  project_root?: string; reference_path?: string; create?: boolean;
+}) => string | null;
 
 export interface ContentManifest {
   schema_version: "craft.content.v1";
@@ -138,16 +146,22 @@ function idSuffix(recordId: string): string {
 
 export class MarkdownContentStore {
   readonly paths: CraftPaths;
+  #projectKnowledgeDirectory: ProjectKnowledgeContentDirectoryResolver | undefined;
   constructor(paths: CraftPaths) { this.paths = paths; }
 
-  pathFor(kind: ContentKind, recordId: string, version?: number, folder?: ExperienceFolder): string {
-    const directory = this.directory(kind, folder);
+  setProjectKnowledgeDirectoryResolver(resolver: ProjectKnowledgeContentDirectoryResolver): void {
+    this.#projectKnowledgeDirectory = resolver;
+  }
+
+  pathFor(kind: ContentKind, recordId: string, version?: number, folder?: ExperienceFolder, scope?: string, projectRoot?: string): string {
+    const directory = this.directory(kind, folder, scope, projectRoot, undefined, true);
     return join(directory, `${safeFileName(recordId)}${version === undefined ? "" : `.v${version}`}.md`);
   }
 
   /** Stable, human-readable path. The hash suffix keeps duplicate titles distinct. */
-  namedPathFor(kind: ContentKind, recordId: string, version: number | undefined, title: string, folder?: ExperienceFolder): string {
-    const directory = this.directory(kind, folder);
+  namedPathFor(kind: ContentKind, recordId: string, version: number | undefined, title: string, folder?: ExperienceFolder,
+    scope?: string, projectRoot?: string, referencePath?: string): string {
+    const directory = this.directory(kind, folder, scope, projectRoot, referencePath, true);
     safeFileName(recordId);
     return join(directory, `${titleSlug(title)}--${idSuffix(recordId)}${version === undefined ? "" : `.v${version}`}.md`);
   }
@@ -157,8 +171,8 @@ export class MarkdownContentStore {
     return join(directory, `${safeFileName(recordId)}${version === undefined ? "" : `.v${version}`}.md`);
   }
 
-  isCanonicalRef(ref: Pick<ContentRef, "kind" | "record_id" | "version" | "path">): boolean {
-    const directory = resolve(this.directory(ref.kind));
+  isCanonicalRef(ref: Pick<ContentRef, "kind" | "record_id" | "version" | "path" | "scope">): boolean {
+    const directory = resolve(this.directory(ref.kind, undefined, ref.scope, undefined, ref.path));
     const target = resolve(ref.path);
     const inDirectory = ref.kind === "experience"
       ? target.startsWith(`${directory}${sep}`)
@@ -170,14 +184,14 @@ export class MarkdownContentStore {
     if (!Number.isSafeInteger(input.version) || input.version < 1) throw new Error("Content version must be a positive integer");
     validateContentBody(input.body);
     const title = contentTitle(input.body, input.title, input.record_id);
-    const path = this.namedPathFor(input.kind, input.record_id, input.version, title, input.folder);
+    const path = this.namedPathFor(input.kind, input.record_id, input.version, title, input.folder, input.scope, input.project_root);
     await mkdir(resolve(path, ".."), { recursive: true });
     const digest = bodyDigest(input.body);
-    const existingPath = existsSync(path) ? path : this.findCanonicalPath(input.kind, input.record_id, input.version);
+    const existingPath = existsSync(path) ? path : this.findCanonicalPath(input.kind, input.record_id, input.version, input.scope, input.project_root);
     try {
       const existing = await this.readPath(existingPath ?? path);
       if (existing.manifest.record_id !== input.record_id || existing.manifest.record_kind !== input.kind) throw new Error("Content file identity conflict");
-      if (existing.manifest.body_digest === digest && existing.manifest.record_version === input.version) return this.ref(input.kind, input.record_id, input.version, existingPath!, digest, input.body, existing.manifest.title ?? title);
+      if (existing.manifest.body_digest === digest && existing.manifest.record_version === input.version) return this.ref(input.kind, input.record_id, input.version, existingPath!, digest, input.body, existing.manifest.title ?? title, input.scope);
       throw new Error("Content version already exists with different body");
     } catch (error) {
       if (!(error instanceof Error) || !/ENOENT|no such file/iu.test(error.message)) throw error;
@@ -187,20 +201,20 @@ export class MarkdownContentStore {
     const temporary = `${path}.${process.pid}.${Date.now()}.tmp`;
     await writeFile(temporary, raw, { encoding: "utf8", mode: 0o600 });
     await rename(temporary, path);
-    return this.ref(input.kind, input.record_id, input.version, path, digest, input.body, title);
+    return this.ref(input.kind, input.record_id, input.version, path, digest, input.body, title, input.scope);
   }
 
   writeSync(input: ContentWriteInput): ContentRef {
     if (!Number.isSafeInteger(input.version) || input.version < 1) throw new Error("Content version must be a positive integer");
     validateContentBody(input.body);
     const title = contentTitle(input.body, input.title, input.record_id);
-    const path = this.namedPathFor(input.kind, input.record_id, input.version, title, input.folder); mkdirSync(resolve(path, ".."), { recursive: true });
+    const path = this.namedPathFor(input.kind, input.record_id, input.version, title, input.folder, input.scope, input.project_root); mkdirSync(resolve(path, ".."), { recursive: true });
     const digest = bodyDigest(input.body);
-    const existingPath = existsSync(path) ? path : this.findCanonicalPath(input.kind, input.record_id, input.version);
+    const existingPath = existsSync(path) ? path : this.findCanonicalPath(input.kind, input.record_id, input.version, input.scope, input.project_root);
     try {
       const existing = parseDocument(readFileSync(existingPath ?? path, "utf8"));
       if (existing.manifest.record_id !== input.record_id || existing.manifest.record_kind !== input.kind) throw new Error("Content file identity conflict");
-      if (existing.manifest.body_digest === digest && existing.manifest.record_version === input.version) return this.ref(input.kind, input.record_id, input.version, existingPath!, digest, input.body, existing.manifest.title ?? title);
+      if (existing.manifest.body_digest === digest && existing.manifest.record_version === input.version) return this.ref(input.kind, input.record_id, input.version, existingPath!, digest, input.body, existing.manifest.title ?? title, input.scope);
       throw new Error("Content version already exists with different body");
     } catch (error) {
       if (!(error instanceof Error) || !/ENOENT|no such file/iu.test(error.message)) throw error;
@@ -208,7 +222,7 @@ export class MarkdownContentStore {
     const raw = this.serialize(this.manifest(input, digest), input.body);
     const temporary = `${path}.${process.pid}.${Date.now()}.tmp`;
     writeFileSync(temporary, raw, { encoding: "utf8", mode: 0o600 }); renameSync(temporary, path);
-    return this.ref(input.kind, input.record_id, input.version, path, digest, input.body, title);
+    return this.ref(input.kind, input.record_id, input.version, path, digest, input.body, title, input.scope);
   }
 
   /** Replace the body of an existing canonical document without changing its
@@ -218,10 +232,10 @@ export class MarkdownContentStore {
     if (!Number.isSafeInteger(input.version) || input.version < 1) throw new Error("Content version must be a positive integer");
     validateContentBody(input.body);
     const title = contentTitle(input.body, input.title, input.record_id);
-    const currentPath = input.current_path ?? this.findCanonicalPath(input.kind, input.record_id, input.version) ?? this.pathFor(input.kind, input.record_id, input.version, input.folder);
+    const currentPath = input.current_path ?? this.findCanonicalPath(input.kind, input.record_id, input.version, input.scope, input.project_root) ?? this.pathFor(input.kind, input.record_id, input.version, input.folder, input.scope, input.project_root);
     // Ordinary rewrites preserve the current path; source-aware migrations may
     // explicitly pass current_path to opt into a semantic filename rename.
-    const path = input.current_path ? this.namedPathFor(input.kind, input.record_id, input.version, title, input.folder ?? this.folderOf(input.kind, currentPath)) : currentPath;
+    const path = input.current_path ? this.namedPathFor(input.kind, input.record_id, input.version, title, input.folder ?? this.folderOf(input.kind, currentPath), input.scope, input.project_root, currentPath) : currentPath;
     const existing = parseDocument(readFileSync(currentPath, "utf8"));
     if (existing.manifest.record_id !== input.record_id || existing.manifest.record_kind !== input.kind
       || existing.manifest.record_version !== input.version) throw new Error("Content rewrite identity conflict");
@@ -230,21 +244,23 @@ export class MarkdownContentStore {
     writeFileSync(temporary, this.serialize(this.manifest(input, digest), input.body), { encoding: "utf8", mode: 0o600 });
     renameSync(temporary, path);
     if (resolve(currentPath) !== resolve(path)) unlinkSync(currentPath);
-    return this.ref(input.kind, input.record_id, input.version, path, digest, input.body, title);
+    return this.ref(input.kind, input.record_id, input.version, path, digest, input.body, title, input.scope);
   }
 
-  async read(ref: Pick<ContentRef, "kind" | "record_id" | "version" | "path" | "digest">): Promise<ContentReadResult> {
+  async read(ref: Pick<ContentRef, "kind" | "record_id" | "version" | "path" | "digest" | "scope">): Promise<ContentReadResult> {
     if (!this.isCanonicalRef(ref)) throw new Error("Content reference path is outside the canonical directory");
     const result = await this.readPath(ref.path);
-    if (result.manifest.record_id !== ref.record_id || result.manifest.record_kind !== ref.kind || result.manifest.record_version !== ref.version) throw new Error("Content reference metadata drifted");
+    if (result.manifest.record_id !== ref.record_id || result.manifest.record_kind !== ref.kind || result.manifest.record_version !== ref.version
+      || ref.scope !== undefined && result.manifest.scope !== ref.scope) throw new Error("Content reference metadata drifted");
     if (result.manifest.body_digest !== ref.digest || bodyDigest(result.body) !== ref.digest) throw new Error("Content body digest drifted");
     return result;
   }
 
-  readSync(ref: Pick<ContentRef, "kind" | "record_id" | "version" | "path" | "digest">): ContentReadResult {
+  readSync(ref: Pick<ContentRef, "kind" | "record_id" | "version" | "path" | "digest" | "scope">): ContentReadResult {
     if (!this.isCanonicalRef(ref)) throw new Error("Content reference path is outside the canonical directory");
     const result = parseDocument(readFileSync(ref.path, "utf8"));
-    if (result.manifest.record_id !== ref.record_id || result.manifest.record_kind !== ref.kind || result.manifest.record_version !== ref.version) throw new Error("Content reference metadata drifted");
+    if (result.manifest.record_id !== ref.record_id || result.manifest.record_kind !== ref.kind || result.manifest.record_version !== ref.version
+      || ref.scope !== undefined && result.manifest.scope !== ref.scope) throw new Error("Content reference metadata drifted");
     if (result.manifest.body_digest !== ref.digest || bodyDigest(result.body) !== ref.digest) throw new Error("Content body digest drifted");
     return result;
   }
@@ -252,20 +268,26 @@ export class MarkdownContentStore {
   /** Read a reference from the current location or the pre-v0.12.31 content
    * tree. Legacy reads are still digest-checked and are only a compatibility
    * bridge for migration; new writes always use the canonical domain path. */
-  readCompatSync(ref: Pick<ContentRef, "kind" | "record_id" | "version" | "path" | "digest">): ContentReadResult {
-    if (this.isCanonicalRef(ref)) return this.readSync(ref);
-    if (resolve(ref.path) !== resolve(this.legacyPathFor(ref.kind, ref.record_id, ref.version))) {
+  readCompatSync(ref: Pick<ContentRef, "kind" | "record_id" | "version" | "path" | "digest" | "scope">, expectedScope?: string): ContentReadResult {
+    const scopedRef = ref.scope === undefined && expectedScope ? { ...ref, scope: expectedScope } : ref;
+    if (this.isCanonicalRef(scopedRef)) return this.readSync(scopedRef);
+    const globalDirectory = resolve(this.directory(ref.kind));
+    const target = resolve(scopedRef.path);
+    const isLegacySharedProjectRef = scopedRef.kind === "knowledge" && scopedRef.scope?.startsWith("project:")
+      && (target === globalDirectory || target.startsWith(`${globalDirectory}${sep}`));
+    if (!isLegacySharedProjectRef && target !== resolve(this.legacyPathFor(scopedRef.kind, scopedRef.record_id, scopedRef.version))) {
       throw new Error("Content reference path is outside the canonical directory");
     }
-    const result = parseDocument(readFileSync(ref.path, "utf8"));
-    if (result.manifest.record_id !== ref.record_id || result.manifest.record_kind !== ref.kind || result.manifest.record_version !== ref.version) throw new Error("Content reference metadata drifted");
-    if (result.manifest.body_digest !== ref.digest || bodyDigest(result.body) !== ref.digest) throw new Error("Content body digest drifted");
+    const result = parseDocument(readFileSync(scopedRef.path, "utf8"));
+    if (result.manifest.record_id !== scopedRef.record_id || result.manifest.record_kind !== scopedRef.kind || result.manifest.record_version !== scopedRef.version
+      || scopedRef.scope !== undefined && result.manifest.scope !== scopedRef.scope) throw new Error("Content reference metadata drifted");
+    if (result.manifest.body_digest !== scopedRef.digest || bodyDigest(result.body) !== scopedRef.digest) throw new Error("Content body digest drifted");
     return result;
   }
 
   readUncheckedSync(path: string): ContentReadResult { return parseDocument(readFileSync(path, "utf8")); }
 
-  async verify(ref: Pick<ContentRef, "kind" | "record_id" | "version" | "path" | "digest">): Promise<ContentVerification> {
+  async verify(ref: Pick<ContentRef, "kind" | "record_id" | "version" | "path" | "digest" | "scope">): Promise<ContentVerification> {
     try { await this.read(ref); return { status: "verified", path: ref.path, digest: ref.digest }; }
     catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -273,7 +295,7 @@ export class MarkdownContentStore {
     }
   }
 
-  verifySync(ref: Pick<ContentRef, "kind" | "record_id" | "version" | "path" | "digest">): ContentVerification {
+  verifySync(ref: Pick<ContentRef, "kind" | "record_id" | "version" | "path" | "digest" | "scope">): ContentVerification {
     try { this.readSync(ref); return { status: "verified", path: ref.path, digest: ref.digest }; }
     catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -283,8 +305,8 @@ export class MarkdownContentStore {
 
   private async readPath(path: string): Promise<ContentReadResult> { return parseDocument(await readFile(path, "utf8")); }
 
-  private findCanonicalPath(kind: ContentKind, recordId: string, version: number): string | null {
-    const directory = this.directory(kind);
+  private findCanonicalPath(kind: ContentKind, recordId: string, version: number, scope?: string, projectRoot?: string): string | null {
+    const directory = this.directory(kind, undefined, scope, projectRoot, undefined, true);
     try {
       const suffix = `--${idSuffix(recordId)}.v${version}.md`;
       for (const path of this.files(directory, kind === "experience")) {
@@ -327,8 +349,8 @@ export class MarkdownContentStore {
     return base;
   }
 
-  private ref(kind: ContentKind, recordId: string, version: number, path: string, digest: string, body: string, title: string): ContentRef {
-    return { kind, record_id: recordId, version, path, digest, bytes: Buffer.byteLength(body, "utf8"), format: "markdown", title };
+  private ref(kind: ContentKind, recordId: string, version: number, path: string, digest: string, body: string, title: string, scope: string): ContentRef {
+    return { kind, record_id: recordId, version, path, digest, bytes: Buffer.byteLength(body, "utf8"), format: "markdown", title, scope };
   }
 
   private serialize(manifest: ContentManifest, body: string): string {
@@ -336,9 +358,16 @@ export class MarkdownContentStore {
     return `---\n${lines.join("\n")}\n---\n${body}`;
   }
 
-  private directory(kind: ContentKind, folder?: ExperienceFolder): string {
+  private directory(kind: ContentKind, folder?: ExperienceFolder, scope?: string, projectRoot?: string, referencePath?: string, writing = false): string {
     if (kind === "knowledge" || kind === "memory") {
       if (folder !== undefined) throw new Error("Only Experience content supports folders");
+      if (kind === "knowledge" && scope?.startsWith("project:")) {
+        const projectDirectory = this.#projectKnowledgeDirectory?.(scope, {
+          ...(projectRoot ? { project_root: projectRoot } : {}), ...(referencePath ? { reference_path: referencePath } : {}), ...(writing ? { create: true } : {}),
+        });
+        if (projectDirectory) return projectDirectory;
+        if (writing && this.#projectKnowledgeDirectory) throw new Error("Project Knowledge scope has no registered project root");
+      }
       return kind === "knowledge" ? this.paths.knowledgeContentDir : this.paths.memoryContentDir;
     }
     if (folder === undefined) return this.paths.experienceContentDir;

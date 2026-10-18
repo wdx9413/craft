@@ -24,6 +24,7 @@ import { noCredentialAssignment, parseScope, text } from "../../common/craft-com
 import { stableDigest, payload } from "../../common/craft-common-base/src/digest.ts";
 import { scopeEnvelope } from "../../common/craft-common-base/src/scope-policy.ts";
 import { updateKnowledgeScenarioClaim } from "./scenario-catalog.ts";
+import { knowledgeDirectoryForScope } from "../../core/project-knowledge-content.ts";
 
 const SOURCE_KINDS = new Set(["evidence_wiki", "serena", "kefu_wiki", "project_note", "readme", "custom"]);
 const TRUSTS = new Set(["untrusted", "bounded", "verified"]);
@@ -170,7 +171,9 @@ export class KnowledgeSourceRegistry {
     for (const claim of this.store.list("knowledge_claim", 100_000, item => item.source_id === source.id && typeof item.scenario_key === "string", false, { source_ids: [String(source.id)], document_ids: [] })) {
       // Transitions only disable or revoke a Source. Every scenario claim that
       // depends on it must leave the active catalog in either case.
-      updateKnowledgeScenarioClaim(this.store.paths.knowledgeDir, claim, "inactive");
+      updateKnowledgeScenarioClaim(knowledgeDirectoryForScope(this.store, String(claim.scope ?? "global"), {
+        ...((claim.content_ref as JsonObject | undefined)?.path ? { reference_path: String((claim.content_ref as JsonObject).path) } : {}),
+      }), claim, "inactive");
     }
     return { source: saved };
   }
@@ -252,7 +255,9 @@ export class KnowledgeSourceRegistry {
         const obsolete = claim.document_id ? invalid.has(String(claim.document_id)) : claim.source_revision_id !== revision.id;
         if (obsolete && ["reviewed", "candidate"].includes(String(claim.status))) {
           const stale = this.store.save("knowledge_claim", String(claim.id), { ...payload(claim), status: "stale", revalidation_required: true, stale_since_revision: revision.id });
-          updateKnowledgeScenarioClaim(this.store.paths.knowledgeDir, stale, "inactive");
+          updateKnowledgeScenarioClaim(knowledgeDirectoryForScope(this.store, String(stale.scope ?? "global"), {
+            ...((stale.content_ref as JsonObject | undefined)?.path ? { reference_path: String((stale.content_ref as JsonObject).path) } : {}),
+          }), stale, "inactive");
         }
       }
       const fragments: JsonObject[] = [], candidates: JsonObject[] = [];
