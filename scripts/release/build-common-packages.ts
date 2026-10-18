@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { cpSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { build } from "esbuild";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const packages = [
@@ -19,10 +20,17 @@ for (const relative of packages) {
   rmSync(outDir, { recursive: true, force: true });
   mkdirSync(outDir, { recursive: true });
   const sources = readdirSync(sourceDir).filter(file => file.endsWith(".ts")).map(file => join(sourceDir, file));
-  execFileSync(join(root, "node_modules/.bin/esbuild"), [
-    ...sources, "--bundle", "--packages=external", "--platform=node", "--format=esm", "--target=node23",
-    `--outbase=${sourceDir}`, `--outdir=${outDir}`,
-  ], { cwd: root, stdio: "inherit" });
+  await build({
+    entryPoints: sources,
+    bundle: true,
+    packages: "external",
+    platform: "node",
+    format: "esm",
+    target: "node23",
+    outbase: sourceDir,
+    outdir: outDir,
+    absWorkingDir: root,
+  });
   const declarations = join(root, "dist", relative, relative.startsWith("common/") ? "src" : "");
   for (const file of readdirSync(declarations).filter(file => file.endsWith(".d.ts"))) {
     const output = join(outDir, file);

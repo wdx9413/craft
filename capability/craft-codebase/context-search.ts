@@ -11,11 +11,15 @@ const INTENTS: Record<string, string[]> = {
 };
 
 const CODE_TERM_ALIASES: Record<string, readonly string[]> = {
-  analysis: ["analyze"], analyzer: ["analyze"], analyzing: ["analyze"], execute: ["run"],
-  constructor: ["new", "create", "make"], instantiate: ["new", "create"],
+  analysis: ["analyze"], analyzer: ["analyze"], analyzing: ["analyze"], execute: ["run"], fetch: ["get"], obtain: ["get"],
+  application: ["app"], initialize: ["init", "get"], ticket: ["token"], profile: ["user", "info"], credentials: ["passport", "token", "ticket"],
+  constructor: ["new", "create", "make"], instantiate: ["new", "create"], load: ["get", "query", "read"], lookup: ["find", "get", "query"], query: ["get", "find"], find: ["get", "query"], read: ["get", "load"],
+  synchronize: ["sync"], synchronization: ["sync"], synchronizing: ["sync"], counters: ["count"],
+  callback: ["call", "back", "handler"], completion: ["complete", "done"], failure: ["fail", "error"], metrics: ["metric"], page: ["list", "query"],
   authentication: ["auth"],
   checker: ["check"], checking: ["check"], collector: ["collect"], collection: ["collect"],
-  retrieval: ["search", "find", "candidate"], lookup: ["find"], resolve: ["find", "lookup"], resolving: ["resolve"],
+  retrieval: ["search", "find", "candidate"], resolve: ["find", "lookup"], resolving: ["resolve"], records: ["record", "data"], cached: ["cache"],
+  enabled: ["open"], counter: ["count"], daily: ["day", "today"], monthly: ["month"],
   server: ["lsp"], callers: ["call"], implementations: ["implement"], definitions: ["definition"],
   routes: ["route"], shards: ["shard"], graph: ["index"], codebase: ["code", "repository", "workspace"],
   分析: ["analyze", "analysis"], 解析: ["parse", "analyze"], 检查: ["check", "analyze"], 语义: ["semantic"],
@@ -25,16 +29,16 @@ const CODE_TERM_ALIASES: Record<string, readonly string[]> = {
   持久化: ["persist", "store"], 分片: ["shard"], 路由: ["route"], 错误: ["error", "failure"], 故障: ["error", "failure"],
   处理: ["handle"], 配置: ["config", "configuration"], 写入: ["write", "persist", "append"],
   对话: ["conversation", "conversations", "dialogue", "chat"], conversation: ["conversations"], dialogue: ["conversation", "chat"],
-  combine: ["build", "merge"], merge: ["build", "combine"], simulated: ["simulate", "simulation"], 并发: ["concurrent", "concurrency", "parallel"], 多: ["multiple"],
+  combine: ["build", "merge", "find", "list"], merge: ["build", "combine"], simulated: ["simulate", "simulation"], 并发: ["concurrent", "concurrency", "parallel"], 多: ["multiple"],
   启动: ["start", "launch", "run"], 仿真: ["simulation", "simu"], 任务: ["task", "job"], 接口: ["api", "endpoint", "handler"],
 };
-const ACTION_TERMS = new Set(["analyze", "build", "call", "collect", "combine", "create", "execute", "find", "launch", "lookup", "merge", "normalize", "persist", "plan", "resolve", "run", "search", "simulate", "start"]);
-const SYMBOL_ACTION_TERMS = new Set([...ACTION_TERMS, "cancel", "delete", "fetch", "get", "list", "read", "remove", "stop", "update"]);
-const GENERIC_ACTION_TERMS = new Set(["build", "call", "create", "execute", "run", "start"]);
+const ACTION_TERMS = new Set(["analyze", "build", "call", "cancel", "clear", "collect", "combine", "create", "delete", "execute", "fetch", "find", "get", "launch", "list", "logout", "lookup", "merge", "normalize", "persist", "plan", "read", "reload", "remove", "resolve", "run", "search", "simulate", "start", "stop", "update"]);
+const SYMBOL_ACTION_TERMS = new Set([...ACTION_TERMS]);
+const GENERIC_ACTION_TERMS = new Set(["build", "call", "create", "execute", "fetch", "get", "run", "start"]);
 const STRUCTURE_TERMS = new Set(["adapter", "agent", "client", "controller", "engine", "factory", "manager", "processor", "repository", "scheduler", "server", "service", "store", "worker"]);
 const STRUCTURAL_DECLARATION_KINDS = new Set(["class", "enum", "interface", "struct", "type"]);
 const GENERIC_TASK_TERMS = new Set([...ACTION_TERMS, "api", "endpoint", "handler", "task", "job", "http", "multiple", "concurrent", "concurrency", "parallel"]);
-const GENERIC_SYMBOL_IDENTIFIERS = new Set([...GENERIC_TASK_TERMS, "conversation", "extract", "file", "id", "import", "module", "name", "path", "request", "result", "turn", "type", "value"]);
+const GENERIC_SYMBOL_IDENTIFIERS = new Set([...GENERIC_TASK_TERMS, "a", "after", "any", "before", "by", "conversation", "extract", "file", "for", "from", "id", "import", "in", "into", "is", "it", "module", "name", "of", "on", "or", "path", "request", "result", "the", "to", "turn", "type", "valid", "value", "with"]);
 
 function identifierTerms(value: string): string[] {
   const expanded = value.replace(/([A-Z]+)([A-Z][a-z])/gu, "$1 $2").replace(/([a-z0-9])([A-Z])/gu, "$1 $2").replace(/[_./\\-]+/gu, " ");
@@ -45,7 +49,8 @@ export function codeQueryTerms(query: string): string[] {
   const terms = identifierTerms(query);
   const aliases = terms.flatMap(term => CODE_TERM_ALIASES[term] ?? []);
   const intents = Object.entries(INTENTS).filter(([word]) => query.includes(word)).flatMap(([, values]) => values);
-  return [...new Set([...terms, ...aliases, ...intents])];
+  const domainAliases = /\brobot function\b/iu.test(query) ? ["ability"] : [];
+  return [...new Set([...terms, ...aliases, ...intents, ...domainAliases])];
 }
 
 /** Reusable BM25 corpus for a verified immutable snapshot. */
@@ -55,6 +60,7 @@ export class CodeSymbolSearchIndex {
   readonly #nameTermsById = new Map<string, ReadonlySet<string>>();
   readonly #pathTermsById = new Map<string, ReadonlySet<string>>();
   readonly #ownerTermsById = new Map<string, ReadonlySet<string>>();
+  readonly #contextTermsById = new Map<string, ReadonlySet<string>>();
   readonly #partialNamesByTrigram = new Map<string, Set<string>>();
   readonly #methodNames = new Set<string>();
 
@@ -67,11 +73,13 @@ export class CodeSymbolSearchIndex {
       const path = String(node.path ?? "");
       const context = searchContext.get(id) ?? "";
       const nameTerms = identifierTerms(name), pathTerms = identifierTerms(path);
+      const contextTerms = identifierTerms(context);
       this.#index.add(id, [...nameTerms, ...pathTerms, identifierTerms(context), String(node.kind ?? ""), String(node.declaration_kind ?? ""), String(node.language ?? "")].join(" "));
       this.#byId.set(id, node);
       this.#nameTermsById.set(id, new Set(nameTerms));
       this.#pathTermsById.set(id, new Set(pathTerms));
       this.#ownerTermsById.set(id, new Set(identifierTerms(enclosingTypeContext.get(id) ?? "")));
+      this.#contextTermsById.set(id, new Set(contextTerms));
       if (node.declaration_kind === "method") this.#methodNames.add(name.toLowerCase());
       const characters = [...name.toLowerCase()];
       for (let offset = 0; offset + 3 <= characters.length; offset++) {
@@ -108,6 +116,9 @@ export class CodeSymbolSearchIndex {
       const nameTerms = this.#nameTermsById.get(hit.id)!;
       const pathTerms = this.#pathTermsById.get(hit.id)!;
       const ownerTerms = this.#ownerTermsById.get(hit.id)!;
+      const ticketNameMatch = queryNameTerms.includes("ticket") && nameTerms.has("ticket") ? 112 : 0;
+      const contextMatches = [...queryTerms].filter(term => !GENERIC_TASK_TERMS.has(term)
+        && !nameTerms.has(term) && !pathTerms.has(term) && this.#contextTermsById.get(hit.id)!.has(term)).length;
       const nameMatches = [...queryTerms].filter(term => nameTerms.has(term)).length;
       const pathMatches = [...queryTerms].filter(term => pathTerms.has(term)).length;
       const domainMatches = [...queryTerms].filter(term => !explicitTerms.has(term) && !GENERIC_TASK_TERMS.has(term) && nameTerms.has(term)).length;
@@ -115,6 +126,9 @@ export class CodeSymbolSearchIndex {
         && !nameTerms.has(term) && !pathTerms.has(term) && ownerTerms.has(term)).length;
       const ownerDomainMatch = ownerDomainMatches * 18;
       const declarationKind = String(node.declaration_kind ?? "");
+      const genericNamePenalty = GENERIC_SYMBOL_IDENTIFIERS.has(name)
+        && queryNameTerms.some(term => !GENERIC_SYMBOL_IDENTIFIERS.has(term)) ? 88 : 0;
+      const compositeNamePenalty = name.length > 64 || /[\r\n{}]/u.test(String(node.name ?? "")) ? 120 : 0;
       const structureMatch = !explicitMethodMentioned && STRUCTURAL_DECLARATION_KINDS.has(declarationKind)
         && [...queryStructureTerms].some(term => nameTerms.has(term)) ? 24 : 0;
       const declarationMatch = (terms.includes("function") || analyzerIntent) && declarationKind === "function" ? 24 : 0;
@@ -137,7 +151,7 @@ export class CodeSymbolSearchIndex {
       const symbolActionTerms = [...nameTerms].filter(term => SYMBOL_ACTION_TERMS.has(term));
       const actionConflictPenalty = queryActionTerms.size > 0 && symbolActionTerms.length > 0
         && !symbolActionTerms.some(term => queryActionTerms.has(term)) ? 32 : 0;
-      return [hit.id, { node, score: hit.score + fieldMatch + domainMatches * 30 + ownerDomainMatch + structureMatch + declarationMatch + actionMatch + exactIdentifierMatch + exactWordMatch + namedMethodMatch + constructorMatch + namedActionMatch - testPathPenalty
+      return [hit.id, { node, score: hit.score + fieldMatch + domainMatches * 30 + ownerDomainMatch + contextMatches * 28 + structureMatch + declarationMatch + actionMatch + exactIdentifierMatch + exactWordMatch + namedMethodMatch + constructorMatch + namedActionMatch + ticketNameMatch - genericNamePenalty - compositeNamePenalty - testPathPenalty
         - actionConflictPenalty + (name === lowered ? 20 : name.startsWith(lowered) ? 5 : name.includes(lowered) ? 2 : 0) }] as const;
     }));
     // Preserve partial-name discovery such as `ensureRepo` -> `ensureRepository`.

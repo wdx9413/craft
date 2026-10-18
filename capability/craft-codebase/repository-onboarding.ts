@@ -13,10 +13,11 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { languageIdForFile, readTrustedLspConfig, type TrustedLspAdapter } from "./lsp-config.ts";
+import { configuredLspWorkerEnvironment, languageIdForFile, readTrustedLspConfig, type TrustedLspAdapter } from "./lsp-config.ts";
 import { lspDocumentSymbolsDigest } from "./lsp-adapter.ts";
 import { CODEBASE_LSP_WORKER_FLAG } from "./lsp-worker.ts";
 import { stageLspSnapshotFiles } from "./lsp-snapshot-files.ts";
+import { ProjectAnalysisCache } from "./project-analysis-cache.ts";
 import type { RepositoryContextFile } from "./repository-files.ts";
 import type { LspStdioRequest } from "./lsp-stdio-client.ts";
 export interface RepositoryOnboardingPort {
@@ -67,7 +68,7 @@ function lspFailureDiagnostic(error: unknown): JsonObject {
 
 type LspSourceFile = { readonly path: string; readonly content: string; readonly digest: string; readonly cached_symbols?: JsonObject[]; readonly cached_symbols_digest?: string };
 
-function runConfiguredLsp(adapter: TrustedLspAdapter, files: readonly LspSourceFile[], service: RepositoryOnboardingPort,
+function runConfiguredLsp(adapter: TrustedLspAdapter, files: readonly LspSourceFile[], service: RepositoryOnboardingPort, repositoryRootPath: string,
   contextFiles: readonly RepositoryContextFile[] = []): JsonObject {
   const root = mkdtempSync(join(tmpdir(), "craft-codebase-lsp-"));
   try {
@@ -83,8 +84,9 @@ function runConfiguredLsp(adapter: TrustedLspAdapter, files: readonly LspSourceF
       const entry = process.argv[1];
       if (!entry) throw new Error("worker_unavailable");
       const entryArgs = entry.endsWith(".ts") ? ["--experimental-strip-types", entry, CODEBASE_LSP_WORKER_FLAG] : [entry, CODEBASE_LSP_WORKER_FLAG];
+      const env = configuredLspWorkerEnvironment(adapter.language, join(repositoryRootPath, ".craft_data", "codebase"));
       const output = execFileSync(process.execPath, entryArgs, { input: JSON.stringify(request), encoding: "utf8", timeout: 120_000,
-        maxBuffer: 96 * 1024 * 1024, shell: false, stdio: ["pipe", "pipe", "ignore"] });
+        maxBuffer: 96 * 1024 * 1024, shell: false, stdio: ["pipe", "pipe", "ignore"], env });
       result = JSON.parse(output) as JsonObject;
     }
     if (result.format === "craft-lsp-worker-failure-v1") {
@@ -112,6 +114,14 @@ function pythonCacheId(workspaceId: string, path: string): string {
 }
 function javaCacheId(workspaceId: string, path: string): string {
   return `codebase_java_file_${stableDigest({ workspaceId, path }).slice(-24)}`;
+}
+function analysisCacheRecords(cache: ProjectAnalysisCache, store: CraftStore, kind: string, workspaceId: string, limit: number): JsonObject[] {
+  const project = cache.list(kind, limit), projectIds = new Set(project.map(item => String(item.id)));
+  const legacy = store.list(kind, limit, item => item.workspace_id === workspaceId).filter(item => !projectIds.has(String(item.id)));
+  return [...legacy, ...project];
+}
+function removeLegacyAnalysisCache(store: CraftStore, kind: string, workspaceId: string): void {
+  for (const record of store.list(kind, 10_000, item => item.workspace_id === workspaceId)) store.remove(kind, String(record.id));
 }
 function pythonGraph(units: readonly PythonFileUnit[], mode: string, reason: string, parsedFileCount = mode === "reuse" ? 0 : units.length,
   reusedFileCount = mode === "reuse" ? units.length : 0): JsonObject {
@@ -149,6 +159,7 @@ function ensureRepositoryAttempt(service: RepositoryOnboardingPort, args: JsonOb
   if (!isRepository) return { ...base, status: "skipped", reason: "not_repository" };
   if (args.index_depth !== undefined && !["basic", "semantic"].includes(String(args.index_depth))) throw new Error("index_depth must be basic or semantic");
   if (service.store.find("codebase_activation", `codebase_activation_${workspaceId}`)?.status === "disabled") return { ...base, status: "disabled", reason: "project_opt_out" };
+  const analysisCache = new ProjectAnalysisCache(root, workspaceId);
   const selected = repositoryFiles(root);
   const lspConfig = readTrustedLspConfig(service.store.paths.configDir);
   const hasGoLspAdapter = lspConfig.adapters.some(adapter => adapter.language === "go");
@@ -163,9 +174,16 @@ function ensureRepositoryAttempt(service: RepositoryOnboardingPort, args: JsonOb
   // A current snapshot and policy can be returned without invoking language
   // analyzers. This is the common path for repeated Context calls.
   const existingWorkspace = service.store.find("workspace", workspaceId);
+  const existingState = service.store.find("codebase_repository_state", `${workspaceId}_${depth}`);
+  const projectCheckpoint = service.store.list("workspace_checkpoint", 1_000, item => item.workspace_id === workspaceId)
+    .find(item => item.snapshot_root === join(root, ".craft_data", "codebase", "snapshots", workspaceId, String(item.id)));
+  const snapshotCheckpointId = String(existingWorkspace?.latest_checkpoint_id || existingState?.checkpoint_id || projectCheckpoint?.id || "");
+  const existingCheckpoint = snapshotCheckpointId ? service.store.find("workspace_checkpoint", snapshotCheckpointId) : undefined;
+  const expectedExistingSnapshotRoot = join(root, ".craft_data", "codebase", "snapshots", workspaceId, snapshotCheckpointId);
   if (existingWorkspace && JSON.stringify(existingWorkspace.include_paths) === JSON.stringify(includes)
+    && existingWorkspace.snapshot_storage === "project_codebase" && existingCheckpoint?.snapshot_root === expectedExistingSnapshotRoot
     && service.workspace.freshness({ workspace_id: workspaceId }).status === "current") {
-    const checkpointId = String(existingWorkspace.latest_checkpoint_id ?? "");
+    const checkpointId = String(existingWorkspace.latest_checkpoint_id ?? existingState?.checkpoint_id ?? "");
     const prior = service.store.find("codebase_repository_state", `${workspaceId}_${depth}`);
     const cachedIndex = prior ? service.store.find("codebase_index", String(prior.index_id)) : undefined;
     if (prior?.checkpoint_id === checkpointId && prior.policy_version === REPOSITORY_INDEX_POLICY && prior.adapter_config_digest === lspConfig.digest
@@ -194,8 +212,13 @@ function ensureRepositoryAttempt(service: RepositoryOnboardingPort, args: JsonOb
   let cachedTypeScriptUnits: TypeScriptFileUnit[] = [];
   let cachedPythonUnits: PythonFileUnit[] = [];
   let cachedJavaUnits: JavaFileUnit[] = [];
+  if (depth === "semantic") {
+    cachedTypeScriptUnits = analysisCacheRecords(analysisCache, service.store, "codebase_semantic_file_analysis", workspaceId, 1_000) as TypeScriptFileUnit[];
+    cachedPythonUnits = analysisCacheRecords(analysisCache, service.store, "codebase_python_file_analysis", workspaceId, 1_000) as PythonFileUnit[];
+    cachedJavaUnits = analysisCacheRecords(analysisCache, service.store, "codebase_java_file_analysis", workspaceId, 2_000) as JavaFileUnit[];
+  }
   const cachedLspFileUnits = depth === "semantic"
-    ? service.store.list("codebase_lsp_file_analysis", 1_000, item => item.workspace_id === workspaceId) as JsonObject[] : [];
+    ? analysisCacheRecords(analysisCache, service.store, "codebase_lsp_file_analysis", workspaceId, 1_000) : [];
   if (selected.state === "ready" && depth === "semantic") {
     degraded.push(...lspConfig.diagnostics);
     if (hasGoLspAdapter && selected.files.some(file => file.language === "go") && selected.context_files_omitted > 0)
@@ -220,7 +243,7 @@ function ensureRepositoryAttempt(service: RepositoryOnboardingPort, args: JsonOb
         return { ...file, cached_symbols: cached.symbols as JsonObject[], cached_symbols_digest: expectedDigest };
       });
       try {
-        const lspAnalysis = runConfiguredLsp(adapter, filesWithCache, service, adapterContextFiles);
+        const lspAnalysis = runConfiguredLsp(adapter, filesWithCache, service, root, adapterContextFiles);
         semanticAnalyses.push(lspAnalysis);
         if (Array.isArray(lspAnalysis.document_symbol_cache)) lspFileUnits.push(...(lspAnalysis.document_symbol_cache as JsonObject[]).map(unit => ({ ...unit,
           analyzer, analyzer_version: adapter.analyzer_version, adapter_config_digest: adapterConfigDigest })));
@@ -229,7 +252,7 @@ function ensureRepositoryAttempt(service: RepositoryOnboardingPort, args: JsonOb
         semanticAdapterFailed = true;
         const failure = lspFailureDiagnostic(error);
         if (adapter.language === "go") {
-          semanticAnalyses.push(basicAnalysis(service.store, workspaceId, languageFiles));
+          semanticAnalyses.push(basicAnalysis(analysisCache, workspaceId, languageFiles));
           degraded.push({ language: "go", status: "partial", reason: failure.reason, semantic_adapter_status: "unavailable",
             failure_stage: failure.failure_stage, protocol_error_code: failure.protocol_error_code,
             fallback_analyzer: "craft-basic-symbols", relations: "not_analyzed" });
@@ -245,13 +268,12 @@ function ensureRepositoryAttempt(service: RepositoryOnboardingPort, args: JsonOb
     }
     const goFiles = selected.files.filter(file => file.language === "go" && !configuredLanguages.has("go"));
     if (goFiles.length) {
-      semanticAnalyses.push(basicAnalysis(service.store, workspaceId, goFiles));
+      semanticAnalyses.push(basicAnalysis(analysisCache, workspaceId, goFiles));
       degraded.push({ language: "go", status: "partial", reason: "no_semantic_adapter", fallback_analyzer: "craft-basic-symbols", relations: "not_analyzed" });
     }
     if (semanticFiles.length) {
       try {
         const files = semanticFiles.map(file => ({ ...file, language: file.language === "tsx" ? "jsx" : file.language }));
-        cachedTypeScriptUnits = service.store.list("codebase_semantic_file_analysis", 1_000, item => item.workspace_id === workspaceId) as TypeScriptFileUnit[];
         const cached = cachedTypeScriptUnits;
         const plan = planTypeScriptIncremental(files, cached, TYPESCRIPT_ANALYZER_VERSION,
           typeof priorState?.typescript_path_set_digest === "string" ? priorState.typescript_path_set_digest : undefined);
@@ -290,7 +312,6 @@ function ensureRepositoryAttempt(service: RepositoryOnboardingPort, args: JsonOb
       catch { degraded.push({ language: "typescript", status: "unavailable", reason: "analysis_failed" }); }
     }
     if (pythonFiles.length) {
-      cachedPythonUnits = service.store.list("codebase_python_file_analysis", 1_000, item => item.workspace_id === workspaceId) as PythonFileUnit[];
       const cached = cachedPythonUnits;
       const plan = planPythonIncremental(pythonFiles, cached);
       if (plan.mode === "reuse") {
@@ -339,7 +360,6 @@ function ensureRepositoryAttempt(service: RepositoryOnboardingPort, args: JsonOb
       }
     }
     if (javaFiles.length) {
-      cachedJavaUnits = service.store.list("codebase_java_file_analysis", 2_000, item => item.workspace_id === workspaceId) as JavaFileUnit[];
       const analyze = (includePaths: readonly string[]) => (service.analyzeJava ?? analyzeJavaCheckpoint)(javaFiles, { includePaths });
       const completeUnits = (units: unknown, paths: readonly string[]): units is JavaFileUnit[] => Array.isArray(units)
         && units.length === paths.length && new Set(units.map(unit => String((unit as JsonObject).path))).size === paths.length
@@ -384,7 +404,7 @@ function ensureRepositoryAttempt(service: RepositoryOnboardingPort, args: JsonOb
     }
   }
   const analysis = selected.state !== "ready" || selected.files.length === 0 ? undefined
-    : depth === "basic" ? basicAnalysis(service.store, workspaceId, selected.files)
+    : depth === "basic" ? basicAnalysis(analysisCache, workspaceId, selected.files)
     : combineLanguageAnalyses(semanticAnalyses, degraded);
   // Serialize cache/checkpoint publication across processes sharing this data space.
   const publish = () => service.store.transaction(() => {
@@ -393,10 +413,15 @@ function ensureRepositoryAttempt(service: RepositoryOnboardingPort, args: JsonOb
     if (selected.state === "disabled") return { ...base, status: "disabled", reason: "project_opt_out" };
     const old = service.store.find("workspace", workspaceId);
     if (!old && !includes.length) return { ...base, status: "empty", omitted_files: selected.omitted, omitted_by_language: selected.omitted_by_language };
-    if (!old) service.workspaceOpen({ workspace_id: workspaceId, root_path: root, include_paths: includes, name: root });
-    else if (JSON.stringify(old.include_paths) !== JSON.stringify(includes)) service.store.save("workspace", workspaceId, { ...payload(old), include_paths: includes });
+    if (!old) service.workspaceOpen({ workspace_id: workspaceId, root_path: root, include_paths: includes, name: root, snapshot_storage: "project_codebase" });
+    else if (JSON.stringify(old.include_paths) !== JSON.stringify(includes) || old.snapshot_storage !== "project_codebase")
+      service.store.save("workspace", workspaceId, { ...payload(old), include_paths: includes, snapshot_storage: "project_codebase" });
     const freshness = service.workspace.freshness({ workspace_id: workspaceId });
-    if (freshness.status !== "current") service.workspaceCheckpoint({ workspace_id: workspaceId, label: "automatic repository snapshot" });
+    const latestCheckpointId = String(service.store.get("workspace", workspaceId).latest_checkpoint_id ?? "");
+    const latestCheckpoint = latestCheckpointId ? service.store.find("workspace_checkpoint", latestCheckpointId) : undefined;
+    const expectedSnapshotRoot = join(root, ".craft_data", "codebase", "snapshots", workspaceId, latestCheckpointId);
+    if (freshness.status !== "current" || latestCheckpoint?.snapshot_root !== expectedSnapshotRoot)
+      service.workspaceCheckpoint({ workspace_id: workspaceId, label: "automatic repository snapshot" });
     const workspace = service.store.get("workspace", workspaceId);
     if (!activation) service.codebaseActivate({ workspace_id: workspaceId, actor: "repository-auto" });
     if (!includes.length) return { ...base, status: "empty", checkpoint_id: workspace.latest_checkpoint_id, omitted_files: selected.omitted, omitted_by_language: selected.omitted_by_language };
@@ -432,40 +457,56 @@ function ensureRepositoryAttempt(service: RepositoryOnboardingPort, args: JsonOb
     if (depth === "semantic" && semanticFileUnits.length === semanticFiles.length) {
       const cacheableUnits = semanticFileUnits.filter(unit => unit.budget_limited === false);
       const livePaths = new Set(cacheableUnits.map(unit => unit.path));
-      const oldUnits = semanticFiles.length ? cachedTypeScriptUnits : service.store.list("codebase_semantic_file_analysis", 1_000, item => item.workspace_id === workspaceId) as TypeScriptFileUnit[];
+      const oldUnits = cachedTypeScriptUnits;
       const oldByPath = new Map(oldUnits.map(unit => [unit.path, unit]));
       for (const oldUnit of oldUnits)
-        if (!livePaths.has(String(oldUnit.path))) service.store.remove("codebase_semantic_file_analysis", String(oldUnit.id));
-      for (const unit of cacheableUnits) if (oldByPath.get(unit.path)?.unit_digest !== unit.unit_digest)
-        service.store.save("codebase_semantic_file_analysis", typeScriptCacheId(workspaceId, unit.path), { workspace_id: workspaceId, ...unit });
+        if (!livePaths.has(String(oldUnit.path))) analysisCache.remove("codebase_semantic_file_analysis", String(oldUnit.id));
+      for (const unit of cacheableUnits) {
+        const id = typeScriptCacheId(workspaceId, unit.path);
+        if (oldByPath.get(unit.path)?.unit_digest !== unit.unit_digest || !analysisCache.find("codebase_semantic_file_analysis", id))
+          analysisCache.save("codebase_semantic_file_analysis", id, { ...payload(unit), workspace_id: workspaceId });
+      }
+      removeLegacyAnalysisCache(service.store, "codebase_semantic_file_analysis", workspaceId);
     }
     if (depth === "semantic" && pythonFileUnits.length === pythonFiles.length && pythonFileUnits.every(unit => unit.budget_limited === false)) {
       const livePaths = new Set(pythonFileUnits.map(unit => unit.path));
-      const oldUnits = pythonFiles.length ? cachedPythonUnits : service.store.list("codebase_python_file_analysis", 1_000, item => item.workspace_id === workspaceId) as PythonFileUnit[];
+      const oldUnits = cachedPythonUnits;
       const oldByPath = new Map(oldUnits.map(unit => [unit.path, unit]));
       for (const oldUnit of oldUnits)
-        if (!livePaths.has(String(oldUnit.path))) service.store.remove("codebase_python_file_analysis", String(oldUnit.id));
-      for (const unit of pythonFileUnits) if (oldByPath.get(unit.path)?.unit_digest !== unit.unit_digest)
-        service.store.save("codebase_python_file_analysis", pythonCacheId(workspaceId, unit.path), { workspace_id: workspaceId, ...unit });
+        if (!livePaths.has(String(oldUnit.path))) analysisCache.remove("codebase_python_file_analysis", String(oldUnit.id));
+      for (const unit of pythonFileUnits) {
+        const id = pythonCacheId(workspaceId, unit.path);
+        if (oldByPath.get(unit.path)?.unit_digest !== unit.unit_digest || !analysisCache.find("codebase_python_file_analysis", id))
+          analysisCache.save("codebase_python_file_analysis", id, { ...payload(unit), workspace_id: workspaceId });
+      }
+      removeLegacyAnalysisCache(service.store, "codebase_python_file_analysis", workspaceId);
     }
     if (depth === "semantic" && javaFileUnits.length === javaFiles.length && javaFileUnits.every(unit => unit.budget_limited === false)) {
       const livePaths = new Set(javaFileUnits.map(unit => unit.path));
-      const oldUnits = javaFiles.length ? cachedJavaUnits : service.store.list("codebase_java_file_analysis", 2_000, item => item.workspace_id === workspaceId) as JavaFileUnit[];
+      const oldUnits = cachedJavaUnits;
       const oldByPath = new Map(oldUnits.map(unit => [unit.path, unit]));
       for (const oldUnit of oldUnits) if (!livePaths.has(String(oldUnit.path)))
-        service.store.remove("codebase_java_file_analysis", String(oldUnit.id));
-      for (const unit of javaFileUnits) if (oldByPath.get(unit.path)?.unit_digest !== unit.unit_digest)
-        service.store.save("codebase_java_file_analysis", javaCacheId(workspaceId, unit.path), { workspace_id: workspaceId, ...unit });
+        analysisCache.remove("codebase_java_file_analysis", String(oldUnit.id));
+      for (const unit of javaFileUnits) {
+        const id = javaCacheId(workspaceId, unit.path);
+        if (oldByPath.get(unit.path)?.unit_digest !== unit.unit_digest || !analysisCache.find("codebase_java_file_analysis", id))
+          analysisCache.save("codebase_java_file_analysis", id, { ...payload(unit), workspace_id: workspaceId });
+      }
+      removeLegacyAnalysisCache(service.store, "codebase_java_file_analysis", workspaceId);
     }
     if (depth === "semantic") {
       const configuredLanguages = new Set(lspConfig.adapters.map(adapter => adapter.language));
       const livePaths = new Set(selected.files.map(file => `${languageIdForFile(file.path) ?? ""}\0${file.path}`));
-      for (const oldUnit of cachedLspFileUnits) if (!configuredLanguages.has(String(oldUnit.language))
-        || !livePaths.has(`${String(oldUnit.language)}\0${String(oldUnit.path)}`)) service.store.remove("codebase_lsp_file_analysis", String(oldUnit.id));
+      for (const oldUnit of cachedLspFileUnits) {
+        if (!configuredLanguages.has(String(oldUnit.language)) || !livePaths.has(`${String(oldUnit.language)}\0${String(oldUnit.path)}`))
+          analysisCache.remove("codebase_lsp_file_analysis", String(oldUnit.id));
+        else analysisCache.save("codebase_lsp_file_analysis", String(oldUnit.id), { ...payload(oldUnit), workspace_id: workspaceId });
+      }
       for (const unit of lspFileUnits) {
         const cacheId = lspCacheId(workspaceId, String(unit.language), String(unit.path));
-        service.store.save("codebase_lsp_file_analysis", cacheId, { workspace_id: workspaceId, ...unit });
+        analysisCache.save("codebase_lsp_file_analysis", cacheId, { ...payload(unit), workspace_id: workspaceId });
       }
+      removeLegacyAnalysisCache(service.store, "codebase_lsp_file_analysis", workspaceId);
     }
     return { ...base, status: "ready", index_id: index.id, checkpoint_id: checkpointId, index_depth: depth, reused: false, omitted_files: selected.omitted, omitted_by_language: selected.omitted_by_language,
       summary };

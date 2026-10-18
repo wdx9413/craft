@@ -10,7 +10,7 @@ import { CRAFT_RELEASE_VERSION } from "./version.ts";
  */
 export type ReleaseProduct = {
   readonly name: "craft" | "craft-context";
-  readonly surface: "full" | "component-context-complete";
+  readonly surface: "full" | "component-context-agent";
   readonly hookMember?: "context" | "knowledge" | "memory" | "experience";
   readonly category: "Productivity" | "Developer Tools";
   readonly external_marketplace: boolean;
@@ -18,7 +18,7 @@ export type ReleaseProduct = {
 
 export const RELEASE_PRODUCTS: readonly ReleaseProduct[] = [
   { name: "craft", surface: "full", category: "Productivity", external_marketplace: false },
-  { name: "craft-context", surface: "component-context-complete", hookMember: "context", category: "Developer Tools", external_marketplace: true },
+  { name: "craft-context", surface: "component-context-agent", hookMember: "context", category: "Developer Tools", external_marketplace: true },
 ];
 
 /** Compatibility data may be migrated once, but is never an installable product. */

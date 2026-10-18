@@ -11,12 +11,14 @@ import { McpServer } from "../core/mcp.ts";
 import { repositoryRoot, repositoryFiles } from "../capability/craft-codebase/repository-files.ts";
 import { basicAnalysis } from "../capability/craft-codebase/basic-analysis.ts";
 import { CodebaseIndexKernel } from "../capability/craft-codebase/codebase-index.ts";
-import { stableDigest } from "../common/craft-common-base/src/digest.ts";
+import { payload, stableDigest } from "../common/craft-common-base/src/digest.ts";
 import { analyzeTypeScript } from "../capability/craft-codebase/typescript-analysis.ts";
 import { analyzePythonCheckpoint } from "../capability/craft-codebase/python-analysis.ts";
 import { pythonFileUnitDigest } from "../capability/craft-codebase/python-incremental.ts";
 import { analyzeJavaCheckpoint } from "../capability/craft-codebase/java-analysis.ts";
 import { cacheLspDocumentSymbols, lspDocumentSymbolsDigest } from "../capability/craft-codebase/lsp-adapter.ts";
+import { ProjectGraphStore } from "../capability/craft-codebase/project-graph-store.ts";
+import { ProjectAnalysisCache } from "../capability/craft-codebase/project-analysis-cache.ts";
 
 async function fixture() {
   const root = mkdtempSync(join(tmpdir(), "craft-repository-context-"));
@@ -27,6 +29,13 @@ async function fixture() {
   const service = new CraftService(store);
   const write = (path: string, content: string) => writeFileSync(join(repo, path), content);
   return { root, repo, store, service, write, git, close() { store.close(); rmSync(root, { recursive: true, force: true }); } };
+}
+function projectGraph(f: Awaited<ReturnType<typeof fixture>>, workspaceId: string): ProjectGraphStore {
+  const workspace = f.store.get("workspace", workspaceId);
+  return new ProjectGraphStore(String(workspace.root_path), workspaceId);
+}
+function projectAnalysis(f: Awaited<ReturnType<typeof fixture>>, workspaceId: string, kind: string, limit = 100): JsonObject[] {
+  return new ProjectAnalysisCache(f.repo, workspaceId).list(kind, limit);
 }
 const result = async (server: McpServer, name: string, args: JsonObject) => {
   const response = await server.handle({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }) as any;
@@ -41,6 +50,8 @@ test("repository auto onboarding reuses across clients, incrementally parses, de
     mkdirSync(join(f.repo, "src"));
     const first = f.service.codebaseRepositoryEnsure({ project_root: join(f.repo, "src") });
     assert.equal(first.status, "ready"); assert.equal(first.reused, false);
+    assert.equal(projectAnalysis(f, String(first.workspace_id), "codebase_file_analysis").length, 2);
+    assert.equal(f.store.list("codebase_file_analysis", 10, item => item.workspace_id === first.workspace_id).length, 0);
     const again = f.service.codebaseRepositoryEnsure({ project_root: f.repo }); assert.equal(again.index_id, first.index_id); assert.equal(again.reused, true);
     const anotherHost = new CraftService(f.store);
     assert.equal(anotherHost.codebaseRepositoryEnsure({ project_root: f.repo }).index_id, first.index_id);
@@ -50,6 +61,10 @@ test("repository auto onboarding reuses across clients, incrementally parses, de
     const matches = f.service.codebaseSymbolFind({ workspace_id: changed.workspace_id, index_id: changed.index_id, query: "gamma" }); assert.equal((matches.symbols as unknown[]).length, 1);
     assert.throws(() => f.service.codebaseSymbolFind({ workspace_id: first.workspace_id, index_id: first.index_id, query: "alpha" }), /stale/);
     const semantic = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" }); assert.equal(semantic.status, "ready");
+    assert.equal(projectAnalysis(f, String(semantic.workspace_id), "codebase_semantic_file_analysis").length, 1);
+    assert.equal(projectAnalysis(f, String(semantic.workspace_id), "codebase_python_file_analysis").length, 1);
+    assert.equal(f.store.list("codebase_semantic_file_analysis", 10, item => item.workspace_id === semantic.workspace_id).length, 0);
+    assert.equal(f.store.list("codebase_python_file_analysis", 10, item => item.workspace_id === semantic.workspace_id).length, 0);
     assert.equal(f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" }).reused, true);
     f.git("add", "."); f.git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "-qm", "fixture");
     const worktree = join(f.root, "worktree"); f.git("worktree", "add", "--detach", worktree);
@@ -81,6 +96,29 @@ test("repository ensure reuses an index published while another ensure was analy
   } finally { f.close(); }
 });
 
+test("repository ensure migrates legacy global checkpoints into the project Codebase data root", async () => {
+  const f = await fixture();
+  try {
+    f.write("main.ts", "export function legacySnapshot() { return true; }\n");
+    const first = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
+    const workspaceId = String(first.workspace_id);
+    const workspace = f.store.get("workspace", workspaceId);
+    const checkpointId = String(workspace.latest_checkpoint_id);
+    const checkpoint = f.store.get("workspace_checkpoint", checkpointId);
+    f.store.save("workspace", workspaceId, { ...payload(workspace), snapshot_storage: "global" });
+    f.store.save("workspace_checkpoint", checkpointId, { ...payload(checkpoint), snapshot_root: join(f.store.paths.runtimeDir, "workspaces", workspaceId, "snapshots", checkpointId) });
+
+    const migrated = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
+    const migratedCheckpoint = f.store.get("workspace_checkpoint", String(migrated.checkpoint_id));
+
+    assert.equal(migrated.status, "ready");
+    assert.notEqual(migrated.checkpoint_id, checkpointId);
+    assert.equal(migratedCheckpoint.snapshot_root, join(realpathSync(f.repo), ".craft_data", "codebase", "snapshots", workspaceId, String(migrated.checkpoint_id)));
+    assert.equal(f.store.get("workspace", workspaceId).snapshot_storage, "project_codebase");
+    assert.equal(f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" }).reused, true);
+  } finally { f.close(); }
+});
+
 test("semantic onboarding scans empty TypeScript and Python cache collections without crossing workspace boundaries", async () => {
   const f = await fixture();
   try {
@@ -97,6 +135,33 @@ test("semantic onboarding scans empty TypeScript and Python cache collections wi
     assert.equal(result.status, "ready");
     assert.equal(f.store.find("codebase_semantic_file_analysis", "other-workspace-ts")?.workspace_id, "other-workspace");
     assert.equal(f.store.find("codebase_python_file_analysis", "other-workspace-python")?.workspace_id, "other-workspace");
+  } finally { f.close(); }
+});
+
+test("repository analysis migrates validated legacy file caches into project Codebase storage", async () => {
+  const f = await fixture();
+  try {
+    f.write("main.ts", "export function legacyCache() { return 1; }\n");
+    const workspaceId = `repository_${stableDigest(realpathSync(f.repo)).slice(-24)}`;
+    const files = repositoryFiles(f.repo).files.filter(file => /^(?:tsx?|mts|cts|jsx?|mjs|cjs)$/u.test(file.language))
+      .map(file => ({ ...file, language: file.language === "tsx" ? "jsx" : file.language }));
+    const analyzed = analyzeTypeScript(files, { include_file_units: true });
+    const units = analyzed.file_units as JsonObject[];
+    assert.equal(units.length, 1);
+    const unit = units[0]!;
+    const cacheId = `codebase_semantic_file_${stableDigest({ workspaceId, path: unit.path }).slice(-24)}`;
+    f.store.save("codebase_semantic_file_analysis", cacheId, { workspace_id: workspaceId, ...unit });
+
+    const result = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
+
+    assert.equal(result.status, "ready");
+    assert.equal(f.store.find("codebase_semantic_file_analysis", cacheId), null);
+    const projectUnits = projectAnalysis(f, workspaceId, "codebase_semantic_file_analysis");
+    assert.equal(projectUnits.length, 1);
+    assert.equal(projectUnits[0]!.unit_digest, unit.unit_digest);
+    const diagnostics = ((result.summary as JsonObject).diagnostics as JsonObject[])[0]!;
+    const typescript = (diagnostics.languages as JsonObject[]).find(component => component.analyzer === "typescript-checker")!;
+    assert.equal((typescript.diagnostics as JsonObject).incremental_mode, "reuse");
   } finally { f.close(); }
 });
 
@@ -276,6 +341,43 @@ test("LSP onboarding degrades without a worker entry and supports packaged JavaS
   } finally {
     process.argv[1] = previousEntry!;
     packaged.close();
+  }
+});
+
+test("Go LSP worker receives persistent cache directories under the project Codebase data root", async () => {
+  const f = await fixture();
+  const previousEntry = process.argv[1];
+  try {
+    const content = "package main\n\nfunc cacheEntry() int { return 1 }\n";
+    f.write("go.mod", "module example.test/go-cache\n\ngo 1.22\n");
+    f.write("main.go", content);
+    writeFileSync(join(f.store.paths.configDir, "codebase-lsp.json"), JSON.stringify({ schema_version: 1,
+      adapters: [{ language: "go", command: process.execPath, analyzer_version: "test-go-cache-1" }] }));
+    const workerPath = join(f.root, "go-cache-worker.cjs");
+    writeFileSync(workerPath, [
+      "let input = '';",
+      "process.stdin.setEncoding('utf8');",
+      "process.stdin.on('data', chunk => input += chunk);",
+      "process.stdin.on('end', () => {",
+      "  const request = JSON.parse(input);",
+      "  const document = request.documents[0];",
+      "  const start = document.content.indexOf('cacheEntry');",
+      "  process.stdout.write(JSON.stringify({ format: 'craft-static-analysis-v1', analyzer: request.analyzer, analyzer_version: request.analyzer_version, nodes: [{ id: 'cache_entry', kind: 'symbol', path: document.path, language: document.language, name: 'cacheEntry', source_digest: document.source_digest, span: { start_offset: start, end_offset: start + 10 } }], edges: [], diagnostics: { gopls_cache: process.env.GOPLSCACHE, go_build_cache: process.env.GOCACHE } }));",
+      "});",
+    ].join("\n"));
+    delete (f.service as unknown as { analyzeLsp?: unknown }).analyzeLsp;
+    process.argv[1] = workerPath;
+    const indexed = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
+    assert.equal(indexed.status, "ready");
+    const combined = ((indexed.summary as JsonObject).diagnostics as JsonObject[])[0]!;
+    const go = (combined.languages as JsonObject[]).find(item => item.analyzer === "lsp-go") as JsonObject;
+    assert(go, JSON.stringify(indexed.summary));
+    const projectCodebaseRoot = join(realpathSync(f.repo), ".craft_data", "codebase");
+    assert.equal((go.diagnostics as JsonObject).gopls_cache, join(projectCodebaseRoot, "gopls-cache"));
+    assert.equal((go.diagnostics as JsonObject).go_build_cache, join(projectCodebaseRoot, "go-build-cache"));
+  } finally {
+    process.argv[1] = previousEntry!;
+    f.close();
   }
 });
 
@@ -512,7 +614,7 @@ test("configured LSP reuses valid symbols, rejects corrupted caches and rebuilds
     assert.equal(first.status, "ready");
     assert.equal(requests.length, 1);
     assert.equal(requests[0]!.every(document => document.cached_symbols === undefined), true);
-    const firstUnits = f.store.list("codebase_lsp_file_analysis", 10, item => item.workspace_id === first.workspace_id);
+    const firstUnits = projectAnalysis(f, String(first.workspace_id), "codebase_lsp_file_analysis", 10);
     assert.equal(firstUnits.length, 2);
     assert.equal(JSON.stringify(firstUnits).includes(callerSource), false);
 
@@ -546,16 +648,17 @@ test("configured LSP reuses valid symbols, rejects corrupted caches and rebuilds
       node_id: changedCallerNode.id, relation_kind: "calls", direction: "outgoing" });
     assert.equal((((changedRelation.relations as JsonObject[])[0]?.to as JsonObject)?.name), "alternate");
 
-    const targetCache = f.store.list("codebase_lsp_file_analysis", 10, item => item.workspace_id === second.workspace_id)
+    const targetCache = projectAnalysis(f, String(second.workspace_id), "codebase_lsp_file_analysis", 10)
       .find(item => item.path === "src/target.cpp")!;
-    f.store.save("codebase_lsp_file_analysis", String(targetCache.id), { ...targetCache, cached_symbols_digest: "tampered" });
+    new ProjectAnalysisCache(f.repo, String(second.workspace_id)).save("codebase_lsp_file_analysis", String(targetCache.id),
+      { ...payload(targetCache), cached_symbols_digest: "tampered" });
     f.write("src/main.cpp", "int caller() { return target() + 3; }\n");
     const third = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
     assert.equal(third.status, "ready");
     assert.notEqual(third.index_id, second.index_id);
     const fourthDocuments = requests[3]!;
     assert.equal(fourthDocuments.find(document => document.path === "src/target.cpp")!.cached_symbols, undefined);
-    const refreshedTarget = f.store.list("codebase_lsp_file_analysis", 10, item => item.workspace_id === third.workspace_id)
+    const refreshedTarget = projectAnalysis(f, String(third.workspace_id), "codebase_lsp_file_analysis", 10)
       .find(item => item.path === "src/target.cpp")!;
     assert.equal(refreshedTarget.cached_symbols_digest, lspDocumentSymbolsDigest({ analyzer: "lsp-cpp", analyzer_version: "1",
       path: "src/target.cpp", language: "cpp", source_digest: String(refreshedTarget.source_digest), symbols: refreshedTarget.symbols }));
@@ -563,7 +666,7 @@ test("configured LSP reuses valid symbols, rejects corrupted caches and rebuilds
     rmSync(join(f.repo, "src/target.cpp"));
     const fifth = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
     assert.equal(fifth.status, "ready");
-    assert.deepEqual(f.store.list("codebase_lsp_file_analysis", 10, item => item.workspace_id === fifth.workspace_id).map(item => item.path), ["src/main.cpp"]);
+    assert.deepEqual(projectAnalysis(f, String(fifth.workspace_id), "codebase_lsp_file_analysis", 10).map(item => item.path), ["src/main.cpp"]);
   } finally { f.close(); }
 });
 
@@ -643,21 +746,22 @@ test("semantic onboarding persists a full graph in immutable bounded shards", as
     assert.equal(diagnostics[0]!.budget_limited, false);
     const index = f.store.get("codebase_index", String(result.index_id));
     assert(Number(index.source_file_count) === 1);
-    assert.equal(index.graph_storage, "sharded-v4");
+    assert.equal(index.graph_storage, "project-sharded-v5");
     assert(Number(index.node_count) > 10_000);
     assert((index.shard_ids as string[]).length > 1);
-    const shards = (index.shard_ids as string[]).map(id => f.store.get("codebase_index_shard", id));
+    const graphDirectory = join(f.repo, ".craft_data", "codebase", "indexes", String(result.workspace_id), "graph_records");
+    const shardIds = index.shard_ids as string[];
+    assert.equal(f.store.find("codebase_index_shard", shardIds[0]!), null);
+    const shards = shardIds.map(id => JSON.parse(readFileSync(join(graphDirectory, `${id}.json`), "utf8")) as JsonObject);
     assert.equal(shards.reduce((count, shard) => count + Number(shard.node_count), 0), index.node_count);
     const found = f.service.codebaseSymbolFind({ workspace_id: result.workspace_id, index_id: result.index_id, query: "symbol10000" });
     assert((found.symbols as JsonObject[]).some(node => node.name === "symbol10000"));
     const target = (f.service.codebaseSymbolFind({ workspace_id: result.workspace_id, index_id: result.index_id, query: "target" }).symbols as JsonObject[])[0]!;
     const callers = f.service.codebaseCallersFind({ workspace_id: result.workspace_id, index_id: result.index_id, symbol_id: target.id });
     assert((callers.callers as JsonObject[]).some(item => (item.caller as JsonObject).name === "caller"));
-    const originalGet = f.store.get.bind(f.store); const shardsRead = new Set<string>();
-    f.store.get = ((collection: string, id: string) => { if (collection === "codebase_index_shard") shardsRead.add(id); return originalGet(collection, id); }) as typeof f.store.get;
     const impact = f.service.codebaseImpactQuery({ workspace_id: result.workspace_id, index_id: result.index_id, node_id: target.id, max_depth: 1 });
     assert((impact.edges as JsonObject[]).some(edge => edge.kind === "calls"));
-    assert(shardsRead.size < (index.shard_ids as string[]).length, "impact reads only routed graph shards");
+    assert.equal(f.store.find("codebase_index_edge_route", String((index.edge_route_shards as JsonObject[])[0]!.id)), null);
   } finally { f.close(); }
 });
 
@@ -673,7 +777,7 @@ test("semantic onboarding incrementally refreshes changed modules and matches a 
     const firstIndex = f.store.get("codebase_index", String(first.index_id));
     const firstShardIds = firstIndex.shard_ids as string[];
     const firstRouteIds = (firstIndex.edge_route_shards as JsonObject[]).map(route => String(route.id));
-    const firstUnits = f.store.list("codebase_semantic_file_analysis", 10, item => item.workspace_id === first.workspace_id);
+    const firstUnits = projectAnalysis(f, String(first.workspace_id), "codebase_semantic_file_analysis", 10);
     assert.equal(firstUnits.length, 3);
     const firstVersions = new Map(firstUnits.map(unit => [String(unit.path), unit.version]));
 
@@ -697,7 +801,7 @@ test("semantic onboarding incrementally refreshes changed modules and matches a 
       .map(file => ({ ...file, language: file.language === "tsx" ? "jsx" : file.language }));
     const clean = analyzeTypeScript(currentFiles);
     const sort = (items: JsonObject[]) => [...items].sort((a, b) => String(a.id).localeCompare(String(b.id)));
-    const units = f.store.list("codebase_semantic_file_analysis", 10, item => item.workspace_id === updated.workspace_id);
+    const units = projectAnalysis(f, String(updated.workspace_id), "codebase_semantic_file_analysis", 10);
     const updatedVersions = new Map(units.map(unit => [String(unit.path), unit.version]));
     assert.notEqual(updatedVersions.get("a.ts"), firstVersions.get("a.ts"), "changed source unit must be persisted");
     assert.equal(updatedVersions.get("b.ts"), firstVersions.get("b.ts"), "unchanged importer facts must not be rewritten");
@@ -707,7 +811,8 @@ test("semantic onboarding incrementally refreshes changed modules and matches a 
     assert.deepEqual(actualNodes, sort(clean.nodes as JsonObject[]));
     assert.deepEqual(actualEdges, sort(clean.edges as JsonObject[]));
     const indexRecord = f.store.get("codebase_index", String(updated.index_id));
-    const storedEdges = (indexRecord.shard_ids as string[]).flatMap(id => f.store.get("codebase_index_shard", id).edges as JsonObject[]);
+    const graph = projectGraph(f, String(updated.workspace_id));
+    const storedEdges = (indexRecord.shard_ids as string[]).flatMap(id => graph.read(id).edges as JsonObject[]);
     const callOffset = callerText.lastIndexOf("source();");
     const callEdge = storedEdges.find(edge => edge.kind === "calls" && (edge.source_span as JsonObject).start_offset === callOffset);
     assert(callEdge, "the imported call should have a stored source span");
@@ -786,11 +891,11 @@ test("semantic onboarding reuses unchanged TypeScript facts and rebuilds when th
     const addedComponent = (addedCombined.languages as JsonObject[]).find(item => item.analyzer === "typescript-checker") as JsonObject;
     assert.equal((addedComponent.diagnostics as JsonObject).incremental_mode, "full");
     assert.equal((addedComponent.diagnostics as JsonObject).incremental_reason, "source_file_set_changed");
-    assert.equal(f.store.list("codebase_semantic_file_analysis", 10, item => item.workspace_id === first.workspace_id).length, 3);
+    assert.equal(projectAnalysis(f, String(first.workspace_id), "codebase_semantic_file_analysis", 10).length, 3);
     rmSync(join(f.repo, "added.ts"));
     const deleted = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
     assert.equal(deleted.status, "ready");
-    assert.equal(f.store.list("codebase_semantic_file_analysis", 10, item => item.workspace_id === first.workspace_id).length, 2);
+    assert.equal(projectAnalysis(f, String(first.workspace_id), "codebase_semantic_file_analysis", 10).length, 2);
   } finally { f.close(); }
 });
 
@@ -825,8 +930,9 @@ test("repository onboarding treats stale policy and incomplete workspace metadat
     const workspace = f.store.get("workspace", String(first.workspace_id));
     const legacyIndexId = `repository_index_${stableDigest({ workspaceId: first.workspace_id, depth: "semantic", checkpointId: state.checkpoint_id,
       state_revision: workspace.state_revision, policy: 9, adapter_config: state.adapter_config_digest }).slice(-24)}`;
-    for (const shardId of currentIndex.shard_ids as string[]) f.store.remove("codebase_index_shard", shardId);
-    for (const route of currentIndex.edge_route_shards as JsonObject[]) f.store.remove("codebase_index_edge_route", String(route.id));
+    const graph = projectGraph(f, String(first.workspace_id));
+    for (const shardId of currentIndex.shard_ids as string[]) rmSync(join(graph.directory, `${shardId}.json`));
+    for (const route of currentIndex.edge_route_shards as JsonObject[]) rmSync(join(graph.directory, `${String(route.id)}.json`));
     f.store.remove("codebase_index", String(first.index_id));
     f.store.save("codebase_index", legacyIndexId, { ...currentIndex, id: legacyIndexId });
     f.store.save("codebase_repository_state", stateId, { ...state, policy_version: 9, index_id: legacyIndexId });
@@ -835,13 +941,42 @@ test("repository onboarding treats stale policy and incomplete workspace metadat
     assert.equal(stalePolicy.reused, false);
     assert.notEqual(stalePolicy.index_id, legacyIndexId, "semantic metadata storage changes must rebuild an existing same-checkpoint index");
     const rebuiltIndex = f.store.get("codebase_index", String(stalePolicy.index_id));
-    const rebuiltSymbols = (rebuiltIndex.node_shard_ids as string[]).flatMap(id => f.store.get("codebase_index_shard", id).nodes as JsonObject[])
+    const rebuiltSymbols = (rebuiltIndex.node_shard_ids as string[]).flatMap(id => graph.read(id).nodes as JsonObject[])
       .filter(node => node.kind === "symbol");
     assert.equal(rebuiltSymbols.find(node => node.name === "source")?.declaration_kind, "function");
 
     const currentState = f.store.get("codebase_repository_state", stateId);
-    f.store.save("codebase_repository_state", stateId, { ...currentState, checkpoint_id: "" });
     const originalFind = f.store.find.bind(f.store);
+    let interceptWorkspaceWithState = true;
+    (f.store as unknown as { find: typeof f.store.find }).find = ((kind: string, id: string) => {
+      const value = originalFind(kind, id);
+      if (interceptWorkspaceWithState && kind === "workspace" && value) {
+        interceptWorkspaceWithState = false;
+        return { ...value, latest_checkpoint_id: undefined };
+      }
+      return value;
+    }) as typeof f.store.find;
+    try {
+      assert.equal(f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" }).reused, true);
+    } finally { f.store.find = originalFind; }
+
+    let interceptMissingMetadata = true;
+    (f.store as unknown as { find: typeof f.store.find }).find = ((kind: string, id: string) => {
+      if (interceptMissingMetadata && kind === "workspace") {
+        interceptMissingMetadata = false;
+        const value = originalFind(kind, id);
+        return value ? { ...value, latest_checkpoint_id: undefined } : value;
+      }
+      if (kind === "codebase_repository_state" && id === stateId) return undefined;
+      return originalFind(kind, id);
+    }) as typeof f.store.find;
+    try {
+      const rebuiltWithoutState = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
+      assert.equal(rebuiltWithoutState.status, "ready");
+      assert.equal(rebuiltWithoutState.reused, false);
+    } finally { f.store.find = originalFind; }
+
+    f.store.save("codebase_repository_state", stateId, { ...currentState, checkpoint_id: "" });
     let interceptWorkspace = true;
     (f.store as unknown as { find: typeof f.store.find }).find = ((kind: string, id: string) => {
       const value = originalFind(kind, id);
@@ -977,9 +1112,21 @@ test("sharded graph queries fail closed when an immutable shard is altered", asy
     const result = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
     const index = f.store.get("codebase_index", String(result.index_id));
     const shardId = String((index.shard_ids as string[])[0]);
-    const shard = f.store.get("codebase_index_shard", shardId);
-    f.store.save("codebase_index_shard", shardId, { ...shard, edges: [{ kind: "calls" }] });
+    const graph = projectGraph(f, String(result.workspace_id));
+    const shard = graph.read(shardId);
+    writeFileSync(join(graph.directory, `${shardId}.json`), JSON.stringify({ ...shard, edges: [{ kind: "calls" }] }));
     assert.throws(() => f.service.codebaseSymbolFind({ workspace_id: result.workspace_id, index_id: result.index_id, query: "safe" }), /shard integrity/);
+  } finally { f.close(); }
+});
+
+test("project graph records are not read when workspace storage binding changes", async () => {
+  const f = await fixture();
+  try {
+    f.write("main.ts", "export function bound() { return true; }\n");
+    const result = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
+    const workspace = f.store.get("workspace", String(result.workspace_id));
+    f.store.save("workspace", String(result.workspace_id), { ...payload(workspace), snapshot_storage: "global" });
+    assert.throws(() => f.service.codebaseSymbolFind({ workspace_id: result.workspace_id, index_id: result.index_id, query: "bound" }), /storage is not enabled/u);
   } finally { f.close(); }
 });
 
@@ -991,7 +1138,8 @@ test("edge route buckets deterministically sort multi-node adjacency and project
     const ensured = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
     const index = f.store.get("codebase_index", String(ensured.index_id));
     const routes = index.edge_route_shards as JsonObject[];
-    const routeRecords = routes.map(route => f.store.get("codebase_index_edge_route", String(route.id)));
+    const graph = projectGraph(f, String(ensured.workspace_id));
+    const routeRecords = routes.map(route => graph.read(String(route.id)));
     assert(routeRecords.some(route => Object.keys(route.incoming as JsonObject).length > 1));
     assert(routeRecords.some(route => Object.keys(route.outgoing as JsonObject).length > 1));
     const sameShardNodes = routeRecords.flatMap(route => {
@@ -1037,7 +1185,8 @@ test("semantic onboarding indexes Python calls, references and imports from the 
     assert.equal(result.status, "ready");
     const index = f.store.get("codebase_index", String(result.index_id));
     assert.equal(index.analyzer, "python-ast-static");
-    const shards = (index.shard_ids as string[]).map(id => f.store.get("codebase_index_shard", id));
+    const graph = projectGraph(f, String(result.workspace_id));
+    const shards = (index.shard_ids as string[]).map(id => graph.read(id));
     const nodes = shards.flatMap(shard => shard.nodes as JsonObject[]);
     const target = nodes.find(node => node.name === "target" && node.path === "pkg.py")!;
     const caller = nodes.find(node => node.name === "caller")!;
@@ -1064,7 +1213,7 @@ test("semantic onboarding incrementally refreshes Python importers and matches a
     f.write("pkg/view.py", "def unrelated():\n    return 3\n");
     const first = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
     assert.equal(first.status, "ready");
-    const firstUnits = f.store.list("codebase_python_file_analysis", 10, item => item.workspace_id === first.workspace_id);
+    const firstUnits = projectAnalysis(f, String(first.workspace_id), "codebase_python_file_analysis", 10);
     assert.equal(firstUnits.length, 3);
     const firstVersions = new Map(firstUnits.map(unit => [String(unit.path), unit.version]));
 
@@ -1080,7 +1229,7 @@ test("semantic onboarding incrementally refreshes Python importers and matches a
 
     const files = repositoryFiles(f.repo).files.filter(file => file.language === "py");
     const clean = analyzePythonCheckpoint(files, { includeFileUnits: true }).analysis!;
-    const units = f.store.list("codebase_python_file_analysis", 10, item => item.workspace_id === first.workspace_id);
+    const units = projectAnalysis(f, String(first.workspace_id), "codebase_python_file_analysis", 10);
     const updatedVersions = new Map(units.map(unit => [String(unit.path), unit.version]));
     assert.notEqual(updatedVersions.get("pkg/base.py"), firstVersions.get("pkg/base.py"), "changed Python unit must be persisted");
     assert.equal(updatedVersions.get("pkg/service.py"), firstVersions.get("pkg/service.py"), "unchanged importer facts must not be rewritten");
@@ -1112,7 +1261,7 @@ test("Python incremental budget overflow retries a full graph when per-file cach
     const summary = updated.summary as JsonObject;
     const python = ((summary.diagnostics as JsonObject[])[0].languages as JsonObject[]).find(item => item.analyzer === "python-ast-static") as JsonObject;
     assert.equal((python.diagnostics as JsonObject).incremental_mode, undefined);
-    assert.equal(f.store.list("codebase_python_file_analysis", 10, item => item.workspace_id === first.workspace_id).length, 2);
+    assert.equal(projectAnalysis(f, String(first.workspace_id), "codebase_python_file_analysis", 10).length, 2);
     assert(f.store.get("codebase_index", String(updated.index_id)));
   } finally { f.close(); }
 });
@@ -1141,7 +1290,7 @@ test("Python incremental results from a changed analyzer version trigger a full 
     const python = (((summary.diagnostics as JsonObject[])[0] as JsonObject).languages as JsonObject[])
       .find(item => item.analyzer === "python-ast-static") as JsonObject;
     assert.equal((python.diagnostics as JsonObject).incremental_reason, "analyzer_version_changed");
-    assert.equal(f.store.list("codebase_python_file_analysis", 10, item => item.workspace_id === first.workspace_id)[0].source_digest,
+    assert.equal(projectAnalysis(f, String(first.workspace_id), "codebase_python_file_analysis", 10)[0].source_digest,
       repositoryFiles(f.repo).files.find(file => file.path === "main.py")!.digest);
   } finally { f.close(); }
 });
@@ -1193,7 +1342,7 @@ test("Python full analyzer without file units imports its complete graph without
     }) });
     const result = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
     assert.equal(result.status, "ready");
-    assert.equal(f.store.list("codebase_python_file_analysis", 10, item => item.workspace_id === result.workspace_id).length, 1);
+    assert.equal(projectAnalysis(f, String(result.workspace_id), "codebase_python_file_analysis", 10).length, 1);
   } finally { f.close(); }
 });
 
@@ -1203,10 +1352,10 @@ test("Python file-set deletion removes stale per-file graph units", async () => 
     f.write("keep.py", "def keep():\n    return 1\n");
     f.write("remove.py", "def remove():\n    return 2\n");
     const first = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
-    assert.equal(f.store.list("codebase_python_file_analysis", 10, item => item.workspace_id === first.workspace_id).length, 2);
+    assert.equal(projectAnalysis(f, String(first.workspace_id), "codebase_python_file_analysis", 10).length, 2);
     rmSync(join(f.repo, "remove.py"));
     const updated = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
-    const cached = f.store.list("codebase_python_file_analysis", 10, item => item.workspace_id === first.workspace_id);
+    const cached = projectAnalysis(f, String(first.workspace_id), "codebase_python_file_analysis", 10);
     assert.equal(updated.status, "ready");
     assert.deepEqual(cached.map(item => item.path), ["keep.py"]);
   } finally { f.close(); }
@@ -1222,7 +1371,7 @@ test("empty Python file-unit output safely falls back with a diagnostic", async 
     } }) });
     const result = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
     assert.equal(result.status, "ready");
-    assert.equal(f.store.list("codebase_python_file_analysis", 10, item => item.workspace_id === result.workspace_id).length, 0);
+    assert.equal(projectAnalysis(f, String(result.workspace_id), "codebase_python_file_analysis", 10).length, 0);
     assert((result.summary as JsonObject).diagnostics instanceof Array);
     assert(((result.summary as JsonObject).diagnostics as JsonObject[]).some(item => item.reason === "analysis_empty_or_missing_file_units"));
   } finally { f.close(); }
@@ -1324,6 +1473,23 @@ test("source discovery honors ignores, excludes, disabled and bounded reads with
     assert.equal(balanced.omitted, 19);
     assert.deepEqual(balanced.omitted_by_language, { "typescript-javascript": 19 });
     assert.deepEqual(repositoryFiles(f.repo).files.map(file => [file.path, file.digest]), balanced.files.map(file => [file.path, file.digest]));
+  } finally { f.close(); }
+});
+
+test("repository source discovery never indexes project Craft data even when Git does not ignore it", async () => {
+  const f = await fixture();
+  try {
+    f.write("go.mod", "module example.com/project\n\ngo 1.23\n");
+    mkdirSync(join(f.repo, ".craft_data", "codebase", "runtime"), { recursive: true });
+    f.write(".craft_data/go.mod", "module example.com/private-data\n\ngo 1.23\n");
+    f.write(".craft_data/codebase/runtime/snapshot.go", "package snapshot\nfunc InternalSnapshot() {}\n");
+
+    const discovered = repositoryFiles(f.repo);
+
+    assert.deepEqual(discovered.files.map(file => file.path), []);
+    assert.deepEqual(discovered.context_files.map(file => file.path), ["go.mod"]);
+    assert.equal(discovered.omitted, 0);
+    assert.equal(discovered.context_files_omitted, 0);
   } finally { f.close(); }
 });
 
@@ -1677,7 +1843,7 @@ test("Java onboarding reuses unaffected graph units and matches a fresh full ana
     } });
     const first = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
     assert.equal(first.status, "ready");
-    const firstUnits = f.store.list("codebase_java_file_analysis", 10, item => item.workspace_id === first.workspace_id);
+    const firstUnits = projectAnalysis(f, String(first.workspace_id), "codebase_java_file_analysis", 10);
     assert.equal(firstUnits.length, 4);
     assert.equal(firstUnits.find(unit => unit.path === "src/broken/Broken.java")!.incremental_safe, false);
     assert.equal(firstUnits.find(unit => unit.path === "src/c/Unrelated.java")!.incremental_safe, true);
@@ -1699,7 +1865,7 @@ test("Java onboarding reuses unaffected graph units and matches a fresh full ana
     const liveFiles = repositoryFiles(f.repo).files.filter(file => file.language === "java");
     const full = analyzeJavaCheckpoint(liveFiles).analysis!;
     const fullUnits = new Map((full.file_units as JsonObject[]).map(unit => [String(unit.path), String(unit.unit_digest)]));
-    const incrementalUnits = f.store.list("codebase_java_file_analysis", 10, item => item.workspace_id === first.workspace_id);
+    const incrementalUnits = projectAnalysis(f, String(first.workspace_id), "codebase_java_file_analysis", 10);
     assert.deepEqual(new Map(incrementalUnits.map(unit => [String(unit.path), String(unit.unit_digest)])), fullUnits);
     assert.equal(f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" }).reused, true);
   } finally { f.close(); }
@@ -1721,7 +1887,7 @@ test("Java budget-limited file units stay partial and never enter the incrementa
     const java = languages.find(item => item.analyzer === "jdk-compiler-tree")!.diagnostics as JsonObject;
     assert.equal(java.budget_limited, true);
     assert.equal(java.omitted_nodes, 1);
-    assert.equal(f.store.list("codebase_java_file_analysis", 10, item => item.workspace_id === indexed.workspace_id).length, 0);
+    assert.equal(projectAnalysis(f, String(indexed.workspace_id), "codebase_java_file_analysis", 10).length, 0);
   } finally { f.close(); }
 });
 
@@ -1748,7 +1914,7 @@ test("Java graph caches reuse across non-Java edits and fall back safely when in
     rmSync(join(reused.repo, "Main.java"));
     const deleted = reused.service.codebaseRepositoryEnsure({ project_root: reused.repo, index_depth: "semantic" });
     assert.equal(deleted.status, "ready");
-    assert.equal(reused.store.list("codebase_java_file_analysis", 10, item => item.workspace_id === first.workspace_id).length, 0);
+    assert.equal(projectAnalysis(reused, String(first.workspace_id), "codebase_java_file_analysis", 10).length, 0);
   } finally { reused.close(); }
 
   for (const fallback of ["graph", "unavailable", "unavailable_without_partial_diagnostic", "unmapped_errors"] as const) {

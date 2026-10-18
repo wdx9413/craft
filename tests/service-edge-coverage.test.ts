@@ -6,13 +6,14 @@ import test from "node:test";
 import { CraftService } from "../core/service.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CRAFT_RELEASE_VERSION } from "../core/version.ts";
 
 test("service facades exercise defaults, compatibility views, and model validation", async () => {
   const root = await mkdtemp(join(tmpdir(), "craft-service-edge-"));
   const store = await new CraftStore(craftPaths(root)).open();
   const service = new CraftService(store);
   try {
-  assert.equal((service.workbenchResourceView() as JsonObject).version, "0.12.45");
+  assert.equal((service.workbenchResourceView() as JsonObject).version, CRAFT_RELEASE_VERSION);
     assert.throws(() => service.workbenchResourceCatalogView({ kind: "unknown", limit: 1 }), /kind must be/);
     assert.deepEqual((service.workbenchResourceCatalogView({ kind: "memory", limit: 2 }).items as unknown[]), []);
     assert.deepEqual((service.workbenchResourceCatalogView({ kind: "workflows", limit: 2 }).runs as unknown[]), []);

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { codeContextCandidates, codeQueryTerms, rankCodeSymbols } from "../capability/craft-codebase/context-search.ts";
+import { CodeSymbolSearchIndex, codeContextCandidates, codeQueryTerms, rankCodeSymbols } from "../capability/craft-codebase/context-search.ts";
 import { lspDeclarationKind } from "../capability/craft-codebase/symbol-kind.ts";
 import type { JsonObject } from "../common/craft-common-store-local/src/store.ts";
 
@@ -60,6 +60,16 @@ test("Codebase query normalization expands identifiers and common task-language 
   for (const term of ["start", "multiple", "concurrent", "conversation"]) assert(conversationTask.includes(term));
   const simulationTask = codeQueryTerms("启动仿真任务的 HTTP 接口");
   for (const term of ["start", "simulation", "task", "http", "endpoint"]) assert(simulationTask.includes(term));
+  const counterTask = codeQueryTerms("synchronize daily visit counters");
+  for (const term of ["sync", "today", "count"]) assert(counterTask.includes(term));
+  const callbackTask = codeQueryTerms("process experiment completion or failure callback and update metrics");
+  for (const term of ["complete", "fail", "call", "back", "metric"]) assert(callbackTask.includes(term));
+  assert(codeQueryTerms("page robot intention records").includes("list"));
+  assert(codeQueryTerms("combine remote flow definitions with locally persisted slot relations").includes("find"));
+  assert(codeQueryTerms("check whether a robot function is enabled").includes("ability"));
+  const userRoleCache = codeQueryTerms("load cached user role records");
+  for (const term of ["cache", "data", "query", "read"]) assert(userRoleCache.includes(term));
+  assert(codeQueryTerms("check whether a robot function is enabled").includes("open"));
   assert.equal(rankCodeSymbols([
     { ...symbol("conversation", "start_multiple_conversations", "scheduler/conversation_scheduler.py"), declaration_kind: "method" },
     { ...symbol("distractor", "can_handle", "scheduler/tool_operation_processor.py"), declaration_kind: "method" },
@@ -78,6 +88,23 @@ test("Codebase query normalization expands identifiers and common task-language 
     { ...symbol("constant", "TYPESCRIPT_ANALYZER_VERSION", "src/typescript-analysis.ts"), declaration_kind: "variable" },
   ], "analyzer", 2);
   assert.equal(analyzer[0]!.node.id, "function");
+});
+
+test("Codebase maps Go business task wording to sync, callback, list, and ability symbols", () => {
+  const go = [
+    { ...symbol("sync-target", "(*VisitCountService).SyncVisitCount", "logic/visitlogic/visit_count_update.go"), declaration_kind: "method", language: "go" },
+    { ...symbol("sync-distractor", "(*VisitCountService).GetUserLogVisitCountFromRedis", "logic/visitlogic/visit_count_search.go"), declaration_kind: "method", language: "go" },
+    { ...symbol("callback-target", "(*ModelTrainingService).TrainExperimentCallBack", "logic/modellogic/model_training_callback_service.go"), declaration_kind: "method", language: "go" },
+    { ...symbol("callback-distractor", "(*ModelTrainingService).UpdateTrainingMetrics", "logic/modellogic/model_training_callback_service.go"), declaration_kind: "method", language: "go" },
+    { ...symbol("list-target", "(*OptimusTaskService).FindSlotList", "logic/optimus/optimus_slot_query.go"), declaration_kind: "method", language: "go" },
+    { ...symbol("list-distractor", "(*OptimusTaskService).GetSlotRelations", "logic/optimus/optimus_slot_query.go"), declaration_kind: "method", language: "go" },
+    { ...symbol("ability-target", "(*FuncService).IsRobotAbilityOpened", "logic/funclogic/robot_func.go"), declaration_kind: "method", language: "go" },
+    { ...symbol("ability-distractor", "(*FuncService).IsRobotFunctionEnabled", "logic/funclogic/robot_func.go"), declaration_kind: "method", language: "go" },
+  ];
+  assert.equal(rankCodeSymbols(go, "synchronize daily visit counters from cache into database", 8)[0]!.node.id, "sync-target");
+  assert.equal(rankCodeSymbols(go, "process model experiment completion or failure callback and update training metrics", 8)[0]!.node.id, "callback-target");
+  assert.equal(rankCodeSymbols(go, "combine remote flow definitions with locally persisted slot relations", 8)[0]!.node.id, "list-target");
+  assert.equal(rankCodeSymbols(go, "check whether a robot function is enabled", 8)[0]!.node.id, "ability-target");
 });
 
 test("Codebase retrieval gives symbol names and paths priority over generic analyzer aliases", () => {
@@ -148,6 +175,39 @@ test("task verb matches disambiguate JavaScript functions from broader path and 
   const terms = codeQueryTerms("combine user and agent turns into simulated dialogue");
   assert(terms.includes("build") && terms.includes("simulation") && terms.includes("conversation"));
   assert.equal(rankCodeSymbols(dialogue, "combine user and agent turns into simulated dialogue", 3)[0]!.node.id, "target");
+});
+
+test("natural-language synonyms recover JavaScript app, token, and profile methods", () => {
+  const nodes = [
+    { ...symbol("app-id", "getPassportAppId", "kfp-home/src/store/userInfo.js"), declaration_kind: "function" },
+    { ...symbol("ticket", "getTokenByPassportSDK", "kfp-home/src/store/userInfo.js"), declaration_kind: "method" },
+    { ...symbol("init", "initTicket", "kfp-home/src/store/userInfo.js"), declaration_kind: "method" },
+    { ...symbol("bridge", "getTokenByBridge", "kfp-home/src/store/userInfo.js"), declaration_kind: "method" },
+    { ...symbol("profile", "getUserInfo", "kfp-home/src/store/userInfo.js"), declaration_kind: "method" },
+    { ...symbol("other", "getDriverInfo", "kfp-home/src/store/driverInfo.js"), declaration_kind: "method" },
+  ];
+
+  assert.equal(rankCodeSymbols(nodes, "determine passport application id from tenant in the current URL", 1)[0]!.node.id, "app-id");
+  assert.equal(rankCodeSymbols(nodes, "obtain a passport ticket using app id and role from URL parameters", 1)[0]!.node.id, "ticket");
+  assert.equal(rankCodeSymbols(nodes, "initialize the ticket from URL token or cookie", 1)[0]!.node.id, "init");
+  assert.equal(rankCodeSymbols(nodes, "fetch user token from the Didi bridge", 1)[0]!.node.id, "bridge");
+  assert.equal(rankCodeSymbols(nodes, "fetch the user profile and store uid role and phone", 1)[0]!.node.id, "profile");
+
+  const ticketFlow = [
+    { ...symbol("ticket", "getPassportTicket", "kfp-home/src/store/userInfo.js"), declaration_kind: "function" },
+    { ...symbol("login", "getUserTokenFromPassportLogin", "kfp-im/src/core/getUserToken.ts"), declaration_kind: "function" },
+    symbol("destructure", "{ source, token, ticket, passportAppId, passportRole, openid, oid, orderId, tenantId, countryCode, utcOffset }", "kfp-home/src/store/urlParams.js"),
+  ];
+  assert.equal(rankCodeSymbols(ticketFlow, "get the passport ticket from its cookie or load the Passport login script and receive a new ticket", 3)[0]!.node.id, "ticket");
+
+  const contextual = new CodeSymbolSearchIndex([
+    { ...symbol("bridge-wrapper", "getTokenByBridge", "kfp-home/src/store/userInfo.js"), declaration_kind: "method" },
+    { ...symbol("bridge-helper", "getUserInfo", "kfp-home/src/services/user.js"), declaration_kind: "method" },
+  ], new Map([
+    ["bridge-wrapper", "webviewUtil getUserInfo native bridge token"],
+    ["bridge-helper", "request user profile service"],
+  ]));
+  assert.equal(contextual.rank("fetch user token with webviewUtil getUserInfo from the Didi bridge", 2)[0]!.node.id, "bridge-wrapper");
 });
 
 test("task retrieval favors core business terms over generic test and API names, with bilingual plural matching", () => {

@@ -1,11 +1,16 @@
-import type { CraftStore, JsonObject } from "../../common/craft-common-store-local/src/store.ts";
+import type { JsonObject } from "../../common/craft-common-store-local/src/store.ts";
 import { stableDigest } from "../../common/craft-common-base/src/digest.ts";
 import type { RepositoryFile } from "./repository-files.ts";
 
 const ANALYZER_VERSION = "3";
 
+export interface BasicAnalysisCache {
+  find(kind: string, id: string): JsonObject | null;
+  save(kind: string, id: string, payload: JsonObject): JsonObject;
+}
+
 /** Durable per-file symbol cache; relations are deliberately left to semantic analyzers. */
-export function basicAnalysis(store: CraftStore, workspaceId: string, files: RepositoryFile[]): JsonObject {
+export function basicAnalysis(store: BasicAnalysisCache, workspaceId: string, files: RepositoryFile[]): JsonObject {
   const nodes: JsonObject[] = []; let analyzed = 0; let reused = 0; let omitted = 0;
   for (const file of files) {
     const cacheId = `codebase_file_${stableDigest({ workspaceId, path: file.path }).slice(-24)}`;

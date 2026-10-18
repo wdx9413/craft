@@ -14,6 +14,7 @@ import { lstatSync, readFileSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
 import { digestJson, stableDigest, stableDigestStreaming } from "../../common/craft-common-base/src/digest.ts";
 import { CraftStore, type JsonObject, type SaveEntry } from "../../common/craft-common-store-local/src/store.ts";
+import { ProjectGraphStore } from "./project-graph-store.ts";
 
 const ANALYZER = "builtin-regex-static-v1";
 const SOURCE_EXTENSIONS = new Set(["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"]);
@@ -26,6 +27,7 @@ const MAX_SHARD_BYTES = 1_000_000;
 const MAX_ROUTE_BYTES = 64 * 1024 * 1024;
 const MAX_ROUTE_SHARD_BYTES = 4 * 1024 * 1024;
 const CURRENT_GRAPH_STORAGE = "sharded-v4";
+const PROJECT_GRAPH_STORAGE = "project-sharded-v5";
 const SEARCH_CONTEXT_DECLARATION_KINDS = new Set(["function", "method", "class", "interface", "type", "enum", "struct"]);
 const SEARCH_CONTEXT_CONTAINER_KINDS = new Set(["class", "interface", "type", "enum", "struct"]);
 
@@ -132,7 +134,7 @@ function edgeRoutePayload(route: JsonObject): JsonObject {
     ...(route.locations === undefined ? {} : { locations: route.locations }) };
 }
 function edgeRouteMatches(index: JsonObject, route: JsonObject, bucket: string, digest: string): boolean {
-  const indexBindingValid = index.graph_storage === "sharded-v3" || index.graph_storage === "sharded-v4" ? route.index_id === undefined : route.index_id === index.id;
+  const indexBindingValid = index.graph_storage === "sharded-v3" || index.graph_storage === "sharded-v4" || index.graph_storage === PROJECT_GRAPH_STORAGE ? route.index_id === undefined : route.index_id === index.id;
   return indexBindingValid && route.bucket === bucket && route.route_digest === digest && stableDigestStreaming(edgeRoutePayload(route)) === digest;
 }
 function recordPayload(record: JsonObject): JsonObject {
@@ -141,7 +143,7 @@ function recordPayload(record: JsonObject): JsonObject {
 }
 function compareCodePoint(left: string, right: string): number { return left < right ? -1 : left > right ? 1 : 0; }
 function sorted<T extends { readonly id: string }>(items: readonly T[]): T[] { return [...items].sort((left, right) => compareCodePoint(left.id, right.id)); }
-function isShardedGraph(index: JsonObject): boolean { return ["sharded-v1", "sharded-v2", "sharded-v3", CURRENT_GRAPH_STORAGE].includes(String(index.graph_storage)); }
+function isShardedGraph(index: JsonObject): boolean { return ["sharded-v1", "sharded-v2", "sharded-v3", CURRENT_GRAPH_STORAGE, PROJECT_GRAPH_STORAGE].includes(String(index.graph_storage)); }
 function graphPayloadDigest(index: JsonObject, value: unknown): string {
   return index.graph_storage !== "sharded-v1" ? digestJson(value) : stableDigest(value);
 }
@@ -428,7 +430,7 @@ export class CodebaseIndexKernel {
       const descriptor = (index.edge_route_shards as EdgeRoute[]).find(item => item.bucket === bucket);
       if (!descriptor) candidates = [];
       else {
-        const route = this.store.get("codebase_index_edge_route", descriptor.id);
+        const route = this.graphRecord(index, "codebase_index_edge_route", descriptor.id);
         if (!edgeRouteMatches(index, route, bucket, descriptor.digest))
           throw new Error("Codebase source location route integrity failure");
         const shardIds = (route.locations as Record<string, unknown> | undefined)?.[path];
@@ -563,7 +565,7 @@ export class CodebaseIndexKernel {
       const routeBucket = edgeRouteBucket(locationRouteKey(path));
       const descriptor = (index.edge_route_shards as EdgeRoute[]).find(item => item.bucket === routeBucket);
       if (descriptor) {
-        const route = this.store.get("codebase_index_edge_route", descriptor.id);
+        const route = this.graphRecord(index, "codebase_index_edge_route", descriptor.id);
         if (!edgeRouteMatches(index, route, routeBucket, descriptor.digest))
           throw new Error("Codebase source location route integrity failure");
       if (route.locations === undefined) edges = this.loadEdges(index); // Legacy sharded indexes predate source-location routes.
@@ -659,7 +661,7 @@ export class CodebaseIndexKernel {
       graph_manifest_digest: index.graph_manifest_digest, seed_id: seedId, depth, limit, direction, relation_kind: relationKind ?? "all" }) : undefined;
     if (cacheKey) {
       const cached = this.#impactCache.get(cacheKey);
-      if (cached && this.impactDependencyDigest(cached.dependencies) === cached.fingerprint) {
+      if (cached && this.impactDependencyDigest(index, cached.dependencies) === cached.fingerprint) {
         this.#impactCache.delete(cacheKey); this.#impactCache.set(cacheKey, cached);
         return JSON.parse(JSON.stringify(cached.result)) as JsonObject;
       }
@@ -687,7 +689,7 @@ export class CodebaseIndexKernel {
       { seed_node_id: seed.id, max_depth: depth, direction, relation_kind: relationKind ?? "all", returned_node_ids: impacted.map((node) => node.id), returned_edge_ids: selected.map((edge) => edge.id), truncated },
       { candidate_only: true, seed, direction, relation_kind: relationKind ?? "all", max_depth: depth, truncated, nodes: impacted, edges: selected });
     if (cacheKey && dependencies.routes.size && dependencies.shards.size) {
-      const entry: ImpactCacheEntry = { fingerprint: this.impactDependencyDigest(dependencies), dependencies: { routes: new Set(dependencies.routes), shards: new Set(dependencies.shards) }, result: JSON.parse(JSON.stringify(result)) as JsonObject };
+      const entry: ImpactCacheEntry = { fingerprint: this.impactDependencyDigest(index, dependencies), dependencies: { routes: new Set(dependencies.routes), shards: new Set(dependencies.shards) }, result: JSON.parse(JSON.stringify(result)) as JsonObject };
       this.#impactCache.set(cacheKey, entry);
       while (this.#impactCache.size > 8) this.#impactCache.delete(this.#impactCache.keys().next().value as string);
     }
@@ -721,6 +723,14 @@ export class CodebaseIndexKernel {
     if (args.workspace_id !== undefined && args.workspace_id !== index.workspace_id) throw new Error("Index does not belong to requested workspace");
     const status = this.indexStatus(index, workspace); if (status.status !== "ready") throw new Error(`Codebase index is ${status.status}`);
     return { index, workspace };
+  }
+  private projectGraphStore(index: JsonObject): ProjectGraphStore {
+    const workspace = this.store.get("workspace", String(index.workspace_id));
+    if (workspace.snapshot_storage !== "project_codebase") throw new Error("Project Codebase graph storage is not enabled for this workspace");
+    return new ProjectGraphStore(String(workspace.root_path), String(workspace.id));
+  }
+  private graphRecord(index: JsonObject, kind: "codebase_index_shard" | "codebase_index_edge_route", id: string): JsonObject {
+    return index.graph_storage === PROJECT_GRAPH_STORAGE ? this.projectGraphStore(index).read(id) : this.store.get(kind, id);
   }
   private persistIndex(identity: JsonObject, indexId: string, sourceFileCount: number, analysis: JsonObject,
     rawNodes: readonly Node[], rawEdges: readonly Edge[], diagnostics: readonly JsonObject[]): JsonObject {
@@ -818,10 +828,18 @@ export class CodebaseIndexKernel {
     const edgeRouteShards = edgeRouteRecords.map(item => item.descriptor);
     const manifest = { location_route_version: 2, shard_ids: shardIds, shard_digests: shardDigests, node_shard_ids: nodeShardIds, edge_shard_ids: edgeShardIds,
       node_count: nodes.length, edge_count: edges.length, graph_digest: graphDigest, node_digest: nodeDigest, edge_digest: edgeDigest, edge_route_shards: edgeRouteShards };
+    const workspace = this.store.get("workspace", String(identity.workspace_id));
+    const projectGraphStore = workspace.snapshot_storage === "project_codebase" ? new ProjectGraphStore(String(workspace.root_path), String(identity.workspace_id)) : null;
     const immutableGraphRecords: SaveEntry[] = shards.map((shard, ordinal) => ({ kind: "codebase_index_shard", id: shardIds[ordinal]!, payload: {
       node_count: shard.nodes.length, edge_count: shard.edges.length, nodes: shard.nodes, edges: shard.edges, graph_digest: shardDigests[ordinal] } }));
+    if (projectGraphStore) {
+      for (const record of immutableGraphRecords) projectGraphStore.put(record.id, { ...record.payload, id: record.id, version: 1 });
+      for (const route of edgeRouteRecords) projectGraphStore.put(route.descriptor.id,
+        { ...route.payload, route_digest: route.descriptor.digest, id: route.descriptor.id, version: 1 });
+    }
     return this.store.transaction(() => {
-      const existingShards = new Map(this.store.findMany("codebase_index_shard", shardIds, false).map(record => [String(record.id), record]));
+      const existingShards = projectGraphStore ? new Map<string, JsonObject>()
+        : new Map(this.store.findMany("codebase_index_shard", shardIds, false).map(record => [String(record.id), record]));
       const newGraphRecords = immutableGraphRecords.filter(record => {
         const existing = existingShards.get(record.id);
         if (!existing) return true;
@@ -830,7 +848,8 @@ export class CodebaseIndexKernel {
         return false;
       });
       const routeIds = edgeRouteRecords.map(route => route.descriptor.id);
-      const existingRoutes = new Map(this.store.findMany("codebase_index_edge_route", routeIds, false).map(record => [String(record.id), record]));
+      const existingRoutes = projectGraphStore ? new Map<string, JsonObject>()
+        : new Map(this.store.findMany("codebase_index_edge_route", routeIds, false).map(record => [String(record.id), record]));
       const newRouteRecords = edgeRouteRecords.filter(route => {
         const existing = existingRoutes.get(route.descriptor.id);
         if (!existing) return true;
@@ -838,25 +857,26 @@ export class CodebaseIndexKernel {
         return false;
       }).map(route => ({ kind: "codebase_index_edge_route", id: route.descriptor.id,
         payload: { ...route.payload, route_digest: route.descriptor.digest } }));
-      this.store.createBatch([...newGraphRecords, ...newRouteRecords]);
+      if (!projectGraphStore) this.store.createBatch([...newGraphRecords, ...newRouteRecords]);
       for (const previous of this.store.list("codebase_index", 1_000, item => item.workspace_id === identity.workspace_id && item.status === "ready" && item.checkpoint_id !== identity.checkpoint_id))
         this.store.save("codebase_index", String(previous.id), { ...recordPayload(previous), status: "stale", stale_reason: "new_workspace_checkpoint" });
       return this.store.create("codebase_index", indexId, { ...identity, identity_digest: stableDigest(identity), status: "ready", source_file_count: sourceFileCount, analysis,
-        graph_storage: CURRENT_GRAPH_STORAGE, ...manifest, graph_manifest_digest: stableDigest(manifest),
+        graph_storage: projectGraphStore ? PROJECT_GRAPH_STORAGE : CURRENT_GRAPH_STORAGE, ...manifest, graph_manifest_digest: stableDigest(manifest),
         diagnostics, raw_content_stored: false });
     });
   }
   private loadNodes(index: JsonObject): Node[] {
     if (Array.isArray(index.nodes)) return index.nodes as Node[];
     const nodes = sorted(this.readShards(index, "nodes").flatMap(shard => shard.nodes as Node[]));
-    if (nodes.length !== index.node_count || (index.graph_storage === "sharded-v4"
+    if (nodes.length !== index.node_count || (index.graph_storage === "sharded-v4" || index.graph_storage === PROJECT_GRAPH_STORAGE
       ? componentShardDigest(index, "nodes") : graphPayloadDigest(index, nodes)) !== index.node_digest) throw new Error("Codebase node manifest digest mismatch");
     return nodes;
   }
   private symbolSearch(index: JsonObject): CodeSymbolSearchIndex {
     const shardIds = Array.isArray(index.node_shard_ids) ? index.node_shard_ids as string[] : [];
     const payloadDigest = shardIds.length
-      ? this.store.latestRecordsDigest("codebase_index_shard", shardIds)
+      ? index.graph_storage === PROJECT_GRAPH_STORAGE ? this.projectGraphStore(index).recordsDigest(shardIds)
+        : this.store.latestRecordsDigest("codebase_index_shard", shardIds)
       : stableDigest(Array.isArray(index.nodes) ? index.nodes : []);
     const fingerprint = stableDigest({ index_id: index.id, identity_digest: index.identity_digest, node_digest: index.node_digest,
       node_shard_ids: shardIds, shard_digests: index.shard_digests, payload_digest: payloadDigest });
@@ -908,8 +928,9 @@ export class CodebaseIndexKernel {
     }
     return { identifiers: contexts, enclosingTypes };
   }
-  private impactDependencyDigest(dependencies: ImpactDependencies): string {
+  private impactDependencyDigest(index: JsonObject, dependencies: ImpactDependencies): string {
     const routes = [...dependencies.routes].sort(), shards = [...dependencies.shards].sort();
+    if (index.graph_storage === PROJECT_GRAPH_STORAGE) return this.projectGraphStore(index).recordsDigest([...routes, ...shards]);
     return stableDigest({ routes: this.store.latestRecordsDigest("codebase_index_edge_route", routes),
       shards: this.store.latestRecordsDigest("codebase_index_shard", shards) });
   }
@@ -922,7 +943,7 @@ export class CodebaseIndexKernel {
     let route = cache.routes.get(bucket);
     if (!route) {
       cache.dependencies?.routes.add(descriptor.id);
-      route = this.store.get("codebase_index_edge_route", descriptor.id);
+      route = this.graphRecord(index, "codebase_index_edge_route", descriptor.id);
       const routePayload = edgeRoutePayload(route);
       if (!edgeRouteMatches(index, route, bucket, descriptor.digest))
         throw new Error("Codebase edge route integrity failure");
@@ -937,7 +958,7 @@ export class CodebaseIndexKernel {
   }
   private loadEdges(index: JsonObject): Edge[] {
     const edges = sorted(this.readShards(index, "edges").flatMap(shard => shard.edges as Edge[]));
-    if (edges.length !== index.edge_count || (index.graph_storage === "sharded-v4"
+    if (edges.length !== index.edge_count || (index.graph_storage === "sharded-v4" || index.graph_storage === PROJECT_GRAPH_STORAGE
       ? componentShardDigest(index, "edges") : graphPayloadDigest(index, edges)) !== index.edge_digest) throw new Error("Codebase edge manifest digest mismatch");
     return edges;
   }
@@ -950,7 +971,7 @@ export class CodebaseIndexKernel {
     const descriptor = (index.edge_route_shards as EdgeRoute[]).find(item => item.bucket === bucket);
     if (!descriptor) throw new Error("Codebase node is not in index");
     dependencies?.routes.add(descriptor.id);
-    const route = this.store.get("codebase_index_edge_route", descriptor.id);
+    const route = this.graphRecord(index, "codebase_index_edge_route", descriptor.id);
     const routePayload = edgeRoutePayload(route);
     if (!edgeRouteMatches(index, route, bucket, descriptor.digest))
       throw new Error("Codebase edge route integrity failure");
@@ -980,13 +1001,13 @@ export class CodebaseIndexKernel {
     const shardIds = index.shard_ids as string[]; const ordinal = shardIds.indexOf(id);
     if (ordinal < 0) throw new Error("Codebase graph shard routing is invalid");
     dependencies?.shards.add(id);
-    const shard = this.store.get("codebase_index_shard", id);
-    const ownershipValid = index.graph_storage === "sharded-v3" || index.graph_storage === "sharded-v4" ? shard.index_id === undefined && shard.ordinal === undefined
+    const shard = this.graphRecord(index, "codebase_index_shard", id);
+    const ownershipValid = index.graph_storage === "sharded-v3" || index.graph_storage === "sharded-v4" || index.graph_storage === PROJECT_GRAPH_STORAGE ? shard.index_id === undefined && shard.ordinal === undefined
       : shard.index_id === index.id && shard.ordinal === ordinal;
     if (!ownershipValid || !Array.isArray(shard.nodes) || !Array.isArray(shard.edges)
       || shard.graph_digest !== (index.shard_digests as string[])[ordinal] || shard.graph_digest !== graphPayloadDigest(index, { nodes: shard.nodes, edges: shard.edges }))
       throw new Error("Codebase graph shard integrity failure");
-    if ((index.graph_storage === "sharded-v3" || index.graph_storage === "sharded-v4") && id !== `codebase_shard_${String(shard.graph_digest).slice(-32)}`)
+    if ((index.graph_storage === "sharded-v3" || index.graph_storage === "sharded-v4" || index.graph_storage === PROJECT_GRAPH_STORAGE) && id !== `codebase_shard_${String(shard.graph_digest).slice(-32)}`)
       throw new Error("Codebase content shard address mismatch");
     return shard;
   }
@@ -1016,7 +1037,7 @@ export class CodebaseIndexKernel {
   private loadGraph(index: JsonObject): { nodes: Node[]; edges: Edge[] } {
     if (Array.isArray(index.nodes) && Array.isArray(index.edges)) return { nodes: index.nodes as Node[], edges: index.edges as Edge[] };
     const nodes = this.loadNodes(index), edges = this.loadEdges(index);
-    const graphDigest = index.graph_storage === "sharded-v4"
+    const graphDigest = index.graph_storage === "sharded-v4" || index.graph_storage === PROJECT_GRAPH_STORAGE
       ? digestJson({ node_digest: index.node_digest, edge_digest: index.edge_digest })
       : graphPayloadDigest(index, { nodes, edges });
     if (graphDigest !== index.graph_digest) throw new Error("Codebase graph manifest digest mismatch");

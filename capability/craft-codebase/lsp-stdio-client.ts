@@ -25,6 +25,10 @@ const MAX_DIAGNOSTICS_TOTAL = 2_000;
 const MAX_DIAGNOSTIC_MESSAGE_LENGTH = 2000;
 const TYPE_HIERARCHY_SYMBOL_KINDS = new Set([5, 10, 11, 23, 26]);
 const CALL_HIERARCHY_SYMBOL_KINDS = new Set([6, 9, 12]);
+// gopls reports implementing types from interface declarations. Ordinary
+// functions add no implementation edges, while method-position queries fail.
+const GO_IMPLEMENTATION_SYMBOL_KINDS = new Set([11]);
+const GO_TYPE_DEFINITION_SYMBOL_KINDS = new Set([5, 10, 11, 13, 23, 26]);
 const LSP_REQUEST_CONCURRENCY = 8;
 const DEFAULT_TIMEOUT_MS = 10_000;
 
@@ -230,6 +234,7 @@ export async function analyzeLspSnapshot(input: LspStdioRequest, timeoutMs = inp
           path: String(document.path), language: String(document.language), source_digest: String(document.source_digest), symbols }) });
     } else symbolCacheOmittedDocuments = documents.length;
     const requestedRelations = [...(input.relations ?? [])];
+    const goAnalyzer = input.analyzer === "lsp-go";
     const referencesAvailable = requestedRelations.includes("references") && supportsProvider(serverCapabilities?.referencesProvider);
     const callsAvailable = requestedRelations.includes("calls") && supportsProvider(serverCapabilities?.callHierarchyProvider);
     const implementationsAvailable = requestedRelations.includes("implementations") && supportsProvider(serverCapabilities?.implementationProvider);
@@ -308,13 +313,15 @@ export async function analyzeLspSnapshot(input: LspStdioRequest, timeoutMs = inp
             }
           }
         }
-        if (typeDefinitionsAvailable) {
+        if (typeDefinitionsAvailable && (!goAnalyzer || GO_TYPE_DEFINITION_SYMBOL_KINDS.has(Number(symbol.symbol_kind)))) {
           try {
             const result = await request("textDocument/typeDefinition", { textDocument: { uri }, position: selection });
             const locations = normalizeLocations(result);
             if (locations) relationTypeDefinitions.push({ symbol_id: symbol.id, locations });
             else failRelation("type_definition_invalid_result");
           } catch (error) { failRelation(`type_definition_request_failed_${safeFailureCode(error)}`); }
+        } else if (typeDefinitionsAvailable) {
+          relationCapabilityNotes.set("go_type_definition_ineligible_symbol_skipped", (relationCapabilityNotes.get("go_type_definition_ineligible_symbol_skipped") ?? 0) + 1);
         }
         if (definitionsAvailable) {
           try {
@@ -372,6 +379,10 @@ export async function analyzeLspSnapshot(input: LspStdioRequest, timeoutMs = inp
       }));
     }
     if (implementationsAvailable) for (const symbol of ordinaryRelationSymbols) {
+      if (goAnalyzer && !GO_IMPLEMENTATION_SYMBOL_KINDS.has(Number(symbol.symbol_kind))) {
+        relationCapabilityNotes.set("go_implementation_ineligible_symbol_skipped", (relationCapabilityNotes.get("go_implementation_ineligible_symbol_skipped") ?? 0) + 1);
+        continue;
+      }
       const { document, selection } = resolveLspSymbolPosition(input.documents, symbol);
       const uri = pathToFileURL(resolve(cwd, document.path)).href;
       try {

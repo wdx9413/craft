@@ -344,8 +344,11 @@ test("profile, empty queue, packet bounds, malformed output, and MCP failures fa
   const malformedResult = await runKnowledgeScenarioClassificationOnce({ client: malformed.client, providers: [provider], transport: malformed.transport });
   assert.equal((malformedResult.outcomes as JsonObject[])[0]?.status, "failed");
   assert.equal(malformed.calls.some(call => call.name === "craft_evaluation_model_ticket_complete"), false);
-  assert.equal(malformed.calls.some(call => call.name === "craft_trace_append" && call.args.event_kind === "classification.failed"), true);
-  assert.deepEqual(malformed.calls.filter(call => call.name === "craft_trace_finalize").map(call => call.args.status), ["failed"]);
+  const malformedFailure = malformed.calls.find(call => call.name === "craft_trace_append" && call.args.event_kind === "classification.failed");
+  assert.equal(malformedFailure?.args.summary, "Knowledge classification attempt failed during model_response");
+  const malformedFinalization = malformed.calls.find(call => call.name === "craft_trace_finalize");
+  assert.equal(malformedFinalization?.args.status, "failed");
+  assert.equal(malformedFinalization?.args.summary, "Knowledge classification attempt failed during model_response");
   await assert.rejects(runKnowledgeScenarioClassificationOnce({ client: f.client, max_claims: 51 }), /between 1 and 50/u);
   await assert.rejects(runKnowledgeScenarioClassificationOnce({ client: { async call() { return { claims: null }; } } }), /must be an array/u);
 });
@@ -357,8 +360,11 @@ test("model invocation failures are traced by class without persisting provider 
   assert.equal((result.outcomes as JsonObject[])[0]?.failure_stage, "model_request");
   const failure = f.calls.find(call => call.name === "craft_trace_append" && call.args.event_kind === "model.failed");
   assert.equal((failure?.args.data as JsonObject).failure_kind, "Error");
+  assert.equal(failure?.args.summary, "Knowledge classification attempt failed during model_request");
   assert.equal(JSON.stringify(failure).includes("private provider response body"), false);
-  assert.deepEqual(f.calls.filter(call => call.name === "craft_trace_finalize").map(call => call.args.status), ["failed"]);
+  const failedFinalization = f.calls.find(call => call.name === "craft_trace_finalize");
+  assert.equal(failedFinalization?.args.status, "failed");
+  assert.equal(failedFinalization?.args.summary, "Knowledge classification attempt failed during model_request");
 
   const unsafe = fixture();
   const unsafeName = new Error("private");

@@ -10,8 +10,9 @@ import { CraftService } from "../core/service.ts";
 import { McpServer } from "../core/mcp.ts";
 import { ContextResolutionKernel } from "../core/context-resolution.ts";
 import { KnowledgeContribution } from "../capability/craft-knowledge/contribution.ts";
-import { stableDigest } from "../core/digest.ts";
+import { payload, stableDigest } from "../core/digest.ts";
 import { bindRemoteIdentity } from "../deploy/components/server.ts";
+import { ProjectAnalysisCache } from "../capability/craft-codebase/project-analysis-cache.ts";
 
 async function fixture() {
   const root = mkdtempSync(join(tmpdir(), "craft-context-policy-")), repo = join(root, "repo");
@@ -176,8 +177,9 @@ test("Restored repository checkpoints rebuild stale indexes and legacy analyzer 
     writeFileSync(join(f.repo, "a.ts"), "export function beta() {}\n");
     f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
     f.service.workspaceRestore({ workspace_id: first.workspace_id, checkpoint_id: first.checkpoint_id, approved: true });
-    const cached = f.store.list("codebase_file_analysis")[0]!;
-    f.store.save("codebase_file_analysis", String(cached.id), { ...cached, analyzer_version: "legacy" });
+    const cache = new ProjectAnalysisCache(f.repo, String(first.workspace_id));
+    const cached = cache.list("codebase_file_analysis", 10)[0]!;
+    cache.save("codebase_file_analysis", String(cached.id), { ...payload(cached), analyzer_version: "legacy" });
     const restored = f.service.codebaseRepositoryEnsure({ project_root: f.repo });
     assert.equal(restored.status, "ready"); assert.equal(restored.reused, false); assert.notEqual(restored.index_id, first.index_id);
     const found = f.service.codebaseSymbolFind({ workspace_id: restored.workspace_id, index_id: restored.index_id, query: "alpha" });

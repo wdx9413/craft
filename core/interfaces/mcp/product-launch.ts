@@ -6,7 +6,7 @@
  */
 export const MCP_PRODUCT_SURFACES = {
   full: "syscall",
-  context: "component-context-complete",
+  context: "component-context-agent",
   knowledge: "component-knowledge-daily",
   memory: "component-memory-daily",
   experience: "component-experience-daily",

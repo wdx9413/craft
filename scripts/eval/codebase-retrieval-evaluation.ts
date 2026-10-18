@@ -9,7 +9,10 @@ import { craftPaths } from "../../core/infrastructure/paths.ts";
 import { CraftService } from "../../core/service.ts";
 import { scoreImpactSet, summarizeImpactCases, type ImpactCaseScore } from "./codebase-impact-evaluation.ts";
 import { summarizeRetrievalByLanguage } from "./codebase-retrieval-strata.ts";
+import { readCodebaseEvaluationSymbolNodes } from "./codebase-evaluation-graph.ts";
 import { assertEvaluationStateStable, checkpointManifestDigest, digestEvaluationMaterial, readGitEvaluationState } from "./codebase-evaluation-provenance.ts";
+import { sourceContainsSymbolName } from "./codebase-evaluation-source.ts";
+import { isEvaluationNonProductionPath } from "./codebase-evaluation-source-policy.ts";
 import { CODEBASE_LSP_CONFIG } from "../../capability/craft-codebase/lsp-config.ts";
 
 type RetrievalCase = { query: string; path: string; name: string; language?: string };
@@ -162,18 +165,17 @@ try {
   finally { process.argv[1] = previousEntry!; }
   assert.equal(ready.status, "ready", "evaluation repository must have a ready semantic index");
   const indexRecord = store.get("codebase_index", String(ready.index_id));
-  const nodes = (indexRecord.node_shard_ids as string[]).flatMap(id => store.get("codebase_index_shard", id).nodes as Record<string, unknown>[])
-    .filter(node => node.kind === "symbol");
+  const nodes = readCodebaseEvaluationSymbolNodes(store, repository, String(ready.workspace_id), indexRecord);
   const callGraphRows = callGraphCases.map(item => {
     const targets = service.codebaseSymbolFind({ workspace_id: ready.workspace_id, index_id: ready.index_id, query: item.target_name, limit: 100 })
       .symbols as Array<{ readonly id: string; readonly name: string; readonly path: string }>;
     const target = targets.find(symbol => symbol.path === item.target_path && symbol.name === item.target_name);
     const observed = new Set(target ? (service.codebaseCallersFind({ workspace_id: ready.workspace_id, index_id: ready.index_id,
       symbol_id: target.id, limit: 100 }).callers as Array<{ readonly caller: { readonly name: string; readonly path: string } }>).
-      map(({ caller }) => `${caller.path}\u0000${caller.name}`).filter(key => !/^(?:tests|scripts|plugins)\//u.test(key)) : []);
+      filter(({ caller }) => !isEvaluationNonProductionPath(caller.path)).map(({ caller }) => `${caller.path}\u0000${caller.name}`) : []);
     const impactObserved = new Set(target ? (service.codebaseImpactQuery({ workspace_id: ready.workspace_id, index_id: ready.index_id,
       node_id: target.id, direction: "incoming", relation_kind: "calls", max_depth: 1, limit: 100 }).nodes as Array<{ readonly id: string; readonly name: string; readonly path: string }>).
-      filter(node => node.id !== target.id && !/^(?:tests|scripts|plugins)\//u.test(node.path))
+      filter(node => node.id !== target.id && !isEvaluationNonProductionPath(node.path))
       .map(node => `${node.path}\u0000${node.name}`) : []);
     const expected = new Set(item.callers.map(caller => `${caller.path}\u0000${caller.name}`));
     const expectedImpact = new Set((item.impact_callers ?? item.callers).map(caller => `${caller.path}\u0000${caller.name}`));
@@ -203,7 +205,7 @@ try {
     const impact = target ? service.codebaseImpactQuery({ workspace_id: ready.workspace_id, index_id: ready.index_id,
       node_id: target.id, direction: item.direction, relation_kind: item.relation_kind, max_depth: item.max_depth, limit: 100 }) : undefined;
     const nodes = (impact?.nodes ?? []) as Array<{ readonly id: string; readonly name: string; readonly path: string }>;
-    const observed = nodes.filter(node => node.id !== target?.id && !/^(?:tests|scripts|plugins)\//u.test(node.path))
+    const observed = nodes.filter(node => node.id !== target?.id && !isEvaluationNonProductionPath(node.path))
       .map(node => `${node.path}\u0000${node.name}`);
     const impactNodeById = new Map(nodes.map(node => [node.id, node]));
     const observedEdges = ((impact?.edges ?? []) as Array<{ readonly kind: string; readonly from_node_id: string; readonly to_node_id: string }>).map(edge => {
@@ -259,7 +261,7 @@ try {
     }
     const sourceReadComplete = sourceRead !== undefined && sourceRead.truncated === false;
     const sourceReadVerified = sourceReadComplete && sourceRead?.path === item.path
-      && sourceRead?.source_digest === target?.symbol.source_digest && sourceReadText.includes(item.name);
+      && sourceRead?.source_digest === target?.symbol.source_digest && sourceContainsSymbolName(item.name, sourceReadText);
     return { ...item, baseline_rank: baselinePosition || null, rank: rank || null, explore_rank: exploreRank || null, default_explore_rank: defaultExploreRank || null,
       target_relation_count: target?.relations.length ?? 0, source_read_verified: sourceReadVerified,
       source_read_mode: sourceRead?.read_mode ?? null, source_read_complete: sourceReadComplete,

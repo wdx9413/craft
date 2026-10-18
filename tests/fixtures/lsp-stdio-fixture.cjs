@@ -6,6 +6,7 @@ let peakDocumentSymbols = 0;
 let completedDocumentSymbols = 0;
 let progressEnded = false;
 let activeImplementations = 0;
+const semanticRequests = [];
 const mode = process.argv[2] ?? "ok";
 const relationMode = mode.startsWith("relations");
 const semanticMode = mode.startsWith("relations-semantic");
@@ -131,6 +132,16 @@ process.stdin.on("data", chunk => {
         if (relationMode) {
           const lines = content.split("\n");
           const symbols = lines.flatMap((line, index) => {
+            if (mode === "relations-go-candidate-filter") {
+              const goDeclaration = /^\s*(?:func\s+(?:\([^)]*\)\s*)?(\w+)|const\s+(\w+)|var\s+(\w+)|type\s+(\w+)\s+(interface|struct)\b)/u.exec(line);
+              if (!goDeclaration) return [];
+              const name = goDeclaration[1] ?? goDeclaration[2] ?? goDeclaration[3] ?? goDeclaration[4];
+              const kind = goDeclaration[1] ? (line.includes("(") && line.indexOf("(") < line.indexOf(name) ? 6 : 12)
+                : goDeclaration[2] ? 14 : goDeclaration[3] ? 13 : goDeclaration[5] === "interface" ? 11 : 23;
+              const start = line.indexOf(name);
+              return [{ name, kind, ...(name === "WithoutRange" ? {} : { range: { start: { line: index, character: 0 }, end: { line: index, character: line.length } } }),
+                selectionRange: { start: { line: index, character: start }, end: { line: index, character: start + name.length } } }];
+            }
             const match = goMode ? /\bfunc\s+(?:\([^)]*\)\s*)?([A-Za-z_$][\w$]*)/u.exec(line)
               : semanticMode || mode.startsWith("relations-hierarchy") || mode === "relations-noncallable-call-error"
               ? /\b(class|interface|function|let|const)\s+([A-Za-z_$][\w$]*)/u.exec(line)
@@ -264,6 +275,13 @@ process.stdin.on("data", chunk => {
       send({ id: message.id, result: [] });
     } else if (message.method === "textDocument/implementation") {
       const uri = message.params.textDocument.uri, content = opened.get(uri) ?? "";
+      if (mode === "relations-go-candidate-filter") {
+        const line = content.split("\n")[message.params.position.line] ?? "";
+        semanticRequests.push({ method: "implementation", line: message.params.position.line, character: message.params.position.character, text: line });
+        if (line.startsWith("func ") && message.params.position.character !== 0 && !line.includes("WithoutRange")) { send({ id: message.id, error: { code: 0, message: "Go implementation query must start at func" } }); continue; }
+        send({ id: message.id, result: null });
+        continue;
+      }
       if (mode === "relations-semantic-implementation-order") {
         activeImplementations++;
         if (activeImplementations > 1) { activeImplementations--; send({ id: message.id, error: { code: -32603, message: "implementation requests overlapped" } }); continue; }
@@ -280,6 +298,12 @@ process.stdin.on("data", chunk => {
       } else send({ id: message.id, result: null });
     } else if (message.method === "textDocument/typeDefinition") {
       const uri = message.params.textDocument.uri, content = opened.get(uri) ?? "";
+      if (mode === "relations-go-candidate-filter") {
+        semanticRequests.push({ method: "typeDefinition", line: message.params.position.line, character: message.params.position.character,
+          text: content.split("\n")[message.params.position.line] ?? "" });
+        send({ id: message.id, result: [] });
+        continue;
+      }
       if (mode === "relations-semantic-error") { send({ id: message.id, error: { code: -32603, message: "private type definition failure" } }); continue; }
       if (mode === "relations-impl-invalid") send({ id: message.id, result: [{ uri }] });
       else if (semanticMode && content.split("\n")[message.params.position.line]?.includes("let model")) {
@@ -287,6 +311,7 @@ process.stdin.on("data", chunk => {
         send({ id: message.id, result: { uri, range: { start: { line, character: start }, end: { line, character: start + "Model".length } } } });
       } else send({ id: message.id, result: [] });
     } else if (message.method === "shutdown") {
+      if (mode === "relations-go-candidate-filter") require("node:fs").writeFileSync(process.argv[3], JSON.stringify(semanticRequests));
       if (mode === "shutdown-fast") process.stdout.write(encode({ id: message.id, result: null }), () => process.exit(0));
       else send({ id: message.id, result: null });
       if (mode === "nonzero") process.exitCode = 4;

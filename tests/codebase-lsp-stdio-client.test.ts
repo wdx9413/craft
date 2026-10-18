@@ -301,6 +301,30 @@ test("Go LSP outgoing calls import into snapshot-bound Codebase queries", async 
   } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
 });
 
+test("Go LSP limits implementation and type definition requests to compatible symbols", async () => {
+  const root = mkdtempSync(join(tmpdir(), "craft-lsp-go-candidate-filter-"));
+  const metricsPath = join(root, "requests.json");
+  const content = "package sample\nfunc Callable() {}\nfunc WithoutRange() {}\nconst Label = \"sample\"\nvar Payload = Label\ntype Port interface { Serve() }\ntype Concrete struct{}\n";
+  try {
+    const result = await analyzeLspSnapshot({ ...base(root, "relations-go-candidate-filter"), args: [fixturePath, "relations-go-candidate-filter", metricsPath],
+      analyzer: "lsp-go", documents: [{ path: "src/candidates.go", language: "go", content, source_digest: digest(content) }],
+      relations: ["implementations", "type_definitions"] });
+    const diagnostics = result.diagnostics as JsonObject;
+    const requests = JSON.parse(readFileSync(metricsPath, "utf8")) as Array<{ method: string; line: number; character: number; text: string }>;
+    assert.equal(diagnostics.relations, "analyzed", JSON.stringify(diagnostics));
+    assert.deepEqual(requests.filter(item => item.method === "implementation").map(item => [item.line, item.character, item.text]), [
+      [5, 5, "type Port interface { Serve() }"],
+    ]);
+    assert.deepEqual(requests.filter(item => item.method === "typeDefinition").map(item => item.text), [
+      "var Payload = Label", "type Port interface { Serve() }", "type Concrete struct{}",
+    ]);
+    assert.deepEqual(diagnostics.relation_capability_notes, [
+      { stage: "go_type_definition_ineligible_symbol_skipped", count: 3 },
+      { stage: "go_implementation_ineligible_symbol_skipped", count: 5 },
+    ]);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("stdio LSP stops requesting outgoing calls after the server reports MethodNotFound", async () => {
   const root = mkdtempSync(join(tmpdir(), "craft-lsp-outgoing-unsupported-"));
   const content = ["function target() {}", "function caller() { target(); }", ...Array.from({ length: 10 }, (_, index) => `function helper${index}() {}`)].join("\n") + "\n";

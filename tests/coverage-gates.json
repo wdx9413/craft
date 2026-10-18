@@ -39,6 +39,7 @@
         "capability/craft-codebase/java-analysis.ts",
         "capability/craft-codebase/java-incremental.ts",
         "capability/craft-codebase/repository-onboarding.ts",
+        "capability/craft-codebase/project-graph-store.ts",
         "capability/craft-experience/procedure-release.ts",
         "capability/craft-experience/graph-matching.ts",
         "core/mcp/context-tools.ts",
@@ -52,6 +53,7 @@
         "tests/context-remediation.test.ts",
         "tests/codebase-context-search.test.ts",
         "tests/repository-context.test.ts",
+        "tests/codebase-project-graph-store.test.ts",
         "tests/multi-language-analysis.test.ts",
         "tests/typescript-incremental.test.ts",
         "tests/python-incremental.test.ts",
@@ -1636,12 +1638,62 @@
       "branches": true
     },
     {
+      "name": "codebase-evaluation-graph",
+      "include": [
+        "scripts/eval/codebase-evaluation-graph.ts"
+      ],
+      "tests": [
+        "tests/codebase-evaluation-graph.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "codebase-evaluation-provenance",
+      "include": [
+        "scripts/eval/codebase-evaluation-provenance.ts"
+      ],
+      "tests": [
+        "tests/codebase-evaluation-provenance.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "codebase-evaluation-source",
+      "include": [
+        "scripts/eval/codebase-evaluation-source.ts"
+      ],
+      "tests": [
+        "tests/codebase-evaluation-source.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "codebase-evaluation-source-policy",
+      "include": [
+        "scripts/eval/codebase-evaluation-source-policy.ts"
+      ],
+      "tests": [
+        "tests/codebase-evaluation-source-policy.test.ts"
+      ],
+      "branches": true
+    },
+    {
       "name": "codebase-retrieval-language-strata",
       "include": [
         "scripts/eval/codebase-retrieval-strata.ts"
       ],
       "tests": [
         "tests/codebase-retrieval-strata.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "codebase-project-analysis-cache",
+      "include": [
+        "capability/craft-codebase/project-analysis-cache.ts"
+      ],
+      "tests": [
+        "tests/codebase-project-analysis-cache.test.ts"
       ],
       "branches": true
     }

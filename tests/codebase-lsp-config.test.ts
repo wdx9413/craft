@@ -3,7 +3,7 @@ import test from "node:test";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { languageIdForFile, MAX_LSP_DOCUMENTS, MAX_RELATION_SYMBOLS, readTrustedLspConfig } from "../capability/craft-codebase/lsp-config.ts";
+import { configuredLspWorkerEnvironment, languageIdForFile, MAX_LSP_DOCUMENTS, MAX_RELATION_SYMBOLS, readTrustedLspConfig } from "../capability/craft-codebase/lsp-config.ts";
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), "craft-lsp-config-")); mkdirSync(join(root, "config"));
@@ -81,4 +81,15 @@ test("trusted LSP configuration rejects malformed files and reports invalid adap
     write(f.dir, valid({ analyzer_version: "v2.1" })); assert.equal(readTrustedLspConfig(f.dir).adapters[0]?.analyzer_version, "v2.1");
     assert.equal(languageIdForFile("."), undefined);
   } finally { f.close(); }
+});
+
+test("Go worker caches stay in the owning Codebase data directory", () => {
+  const inherited = { PATH: "/usr/bin", GOPLSCACHE: "/host-gopls-cache", GOCACHE: "/host-go-build-cache" };
+  const go = configuredLspWorkerEnvironment("go", "/project/.craft_data/codebase", inherited);
+  assert.equal(go.GOPLSCACHE, "/project/.craft_data/codebase/gopls-cache");
+  assert.equal(go.GOCACHE, "/project/.craft_data/codebase/go-build-cache");
+  assert.equal(go.PATH, inherited.PATH);
+  assert.equal(inherited.GOPLSCACHE, "/host-gopls-cache");
+  assert.equal(inherited.GOCACHE, "/host-go-build-cache");
+  assert.equal(configuredLspWorkerEnvironment("cpp", "/project/.craft_data/codebase", inherited), inherited);
 });

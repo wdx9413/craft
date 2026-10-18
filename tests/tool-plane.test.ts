@@ -28,6 +28,7 @@ test("tool name parsing keeps multi-word resources and honours trailing verbs", 
   assert.deepEqual(parseToolName("craft_verified_work_loop_receipt"), { resource: "verified_work_loop", operation: "receipt" });
   assert.deepEqual(parseToolName("craft_memory_ledger_remember"), { resource: "memory_ledger", operation: "remember" });
   assert.deepEqual(parseToolName("craft_memory_ledger_transition"), { resource: "memory_ledger", operation: "transition" });
+  assert.deepEqual(parseToolName("craft_learning_cycle_finalize"), { resource: "learning_cycle", operation: "finalize" });
   assert.deepEqual(parseToolName("craft_info"), { resource: "info", operation: "info" });
   assert.deepEqual(parseToolName("craft_something_unknownsuffix"), { resource: "something_unknownsuffix", operation: "info" });
   assert.deepEqual(parseToolName("not_prefixed"), { resource: "not_prefixed", operation: "info" });
