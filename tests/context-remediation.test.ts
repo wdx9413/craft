@@ -393,8 +393,8 @@ test("legacy receipts, direct required validation and code query truncation rema
     assert(f.service.contextResolutionFeedback({ receipt_id: "legacy", outcome: "irrelevant" }).feedback);
     const ensured = f.service.codebaseRepositoryEnsure({ project_root: f.repo });
     const index = f.store.get("codebase_index", String(ensured.index_id));
-    const firstShard = f.store.get("codebase_index_shard", String((index.shard_ids as string[])[0]));
-    const node = (firstShard.nodes as JsonObject[])[0]!;
+    const found = f.service.codebaseSymbolFind({ index_id: index.id, workspace_id: index.workspace_id, query: "login" });
+    const node = (found.symbols as JsonObject[])[0]!;
     const ref = contextAssetRef("codebase", { ...node, version: 1, index_id: ensured.index_id, checkpoint_id: ensured.checkpoint_id }, f.scope);
     const requested = await f.service.contextOpen({ project_root: f.repo, query: "unmatched", required_refs: [ref] }); assert((requested.asset_refs as JsonObject[]).some(item => item.id === ref.id));
     f.store.create("memory_ledger", "required", { scope: f.scope, source_id: "builtin.evidence-wiki", status: "active", kind: "preference", sensitivity: "internal", content: "fixed", content_digest: stableDigest("fixed") });
