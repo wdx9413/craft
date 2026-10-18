@@ -1646,6 +1646,16 @@
         "tests/codebase-retrieval-strata.test.ts"
       ],
       "branches": true
+    },
+    {
+      "name": "codebase-project-analysis-cache",
+      "include": [
+        "capability/craft-codebase/project-analysis-cache.ts"
+      ],
+      "tests": [
+        "tests/codebase-project-analysis-cache.test.ts"
+      ],
+      "branches": true
     }
   ]
 }

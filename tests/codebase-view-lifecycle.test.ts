@@ -10,6 +10,7 @@ import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftService } from "../core/service.ts";
 import { repositoryFiles } from "../capability/craft-codebase/repository-files.ts";
 import { codeContextCandidates } from "../capability/craft-codebase/context-search.ts";
+import { ProjectAnalysisCache } from "../capability/craft-codebase/project-analysis-cache.ts";
 
 test("repository discovery accepts legal paths beginning with two dots", () => {
   const root = mkdtempSync(join(tmpdir(), "craft-dot-path-"));
@@ -76,7 +77,7 @@ test("analysis precedes repository publication and changing discovered source ca
   try {
     const original = service.workspaceOpen.bind(service);
     t.mock.method(service, "workspaceOpen", (args: JsonObject) => {
-      assert.equal(store.count("codebase_file_analysis"), 1);
+      assert.equal(new ProjectAnalysisCache(repo, String(args.workspace_id)).list("codebase_file_analysis", 10).length, 1);
       const result = original(args);
       writeFileSync(join(repo, "login.ts"), "export function changed() {}\n");
       return result;
