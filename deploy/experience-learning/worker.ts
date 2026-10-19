@@ -238,6 +238,7 @@ export class McpStdioClient implements ExperienceLearningClient {
     this.lines.on("line", line => this.receive(line));
     this.child.stderr.on("data", () => { /* MCP diagnostics stay out of the worker's machine-readable stdout. */ });
     this.child.on("error", error => this.failAll(error));
+    this.child.stdin.on("error", error => this.failAll(error));
     this.child.on("exit", code => this.failAll(new Error(`Craft MCP exited with code ${String(code)}`)));
   }
 
