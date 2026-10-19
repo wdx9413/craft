@@ -268,12 +268,12 @@ export async function runKnowledgeScenarioClassificationOnce(deps: KnowledgeClas
         const review = object(reviewResult, "Knowledge Host review result");
         const reviewedClaim = review.claim && typeof review.claim === "object" && !Array.isArray(review.claim) ? review.claim as JsonObject : {};
         const alreadyReviewed = review.status === "already_reviewed" || reviewedClaim.status === "reviewed";
-        const claimStatus = review.promoted === true || alreadyReviewed ? "reviewed" : reviewDecision === "rejected" ? "disputed" : "stale";
-        if (review.promoted !== true && !alreadyReviewed) {
+        const claimStatus = review.promoted === true || alreadyReviewed ? "reviewed"
+          : reviewDecision === "rejected" ? "disputed" : String(reviewedClaim.status ?? claim.status);
+        if (review.promoted !== true && !alreadyReviewed && claimStatus !== String(claim.status)) {
           processingStage = "claim_review";
           await deps.client.call("craft_knowledge_claim_review", { claim_id: claim.id, status: claimStatus,
-            reviewer: `${response.model}:knowledge-evidence-review`, reason: reviewDecision === "rejected"
-              ? "Evidence review found a direct contradiction." : "Evidence review requires refreshed or stronger Evidence." });
+            reviewer: `${response.model}:knowledge-evidence-review`, reason: "Evidence review found a direct contradiction." });
         }
         const reviewDigest = stableDigest({ claim_id: claim.id, claim_version: claim.version, packet_digest: reviewPacketDigest,
           source_digest: source.content_digest, decision: reviewDecision, status: review.status, claim_status: claimStatus, promoted: review.promoted === true });

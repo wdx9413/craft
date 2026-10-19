@@ -222,9 +222,9 @@ test("candidate review tolerates Host review results without an embedded Claim o
   const result = await runKnowledgeScenarioClassificationOnce({ client: f.client, providers: [provider], transport: f.transport });
   const outcome = (result.outcomes as JsonObject[])[0]!;
   assert.equal(outcome.status, "supported");
-  assert.equal(outcome.claim_status, "stale");
+  assert.equal(outcome.claim_status, "candidate");
   assert.equal(outcome.promoted, false);
-  assert.equal(f.calls.some(call => call.name === "craft_knowledge_claim_review"), true);
+  assert.equal(f.calls.some(call => call.name === "craft_knowledge_claim_review"), false);
 });
 
 test("uncertain and contradictory candidate reviews preserve non-promoted claim states", async () => {
@@ -234,8 +234,8 @@ test("uncertain and contradictory candidate reviews preserve non-promoted claim 
     const outcome = (result.outcomes as JsonObject[])[0]!;
     assert.equal(outcome.review_decision, decision);
     assert.equal(outcome.promoted, false);
-    assert.equal(outcome.claim_status, decision === "rejected" ? "disputed" : "stale");
-    assert.equal(f.calls.some(call => call.name === "craft_knowledge_claim_review"), true);
+    assert.equal(outcome.claim_status, decision === "rejected" ? "disputed" : "candidate");
+    assert.equal(f.calls.some(call => call.name === "craft_knowledge_claim_review"), decision === "rejected");
   }
 });
 
