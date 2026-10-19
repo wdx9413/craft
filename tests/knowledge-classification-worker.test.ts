@@ -14,7 +14,7 @@ const claimContent = "Builds run with pnpm.";
 const claim: JsonObject = { id: "claim-1", version: 1, status: "reviewed", scope: "project:demo", kind: "fact",
   content_digest: "sha256:claim", source_id: "source-1", evidence_ids: ["evidence-1"], tags: ["build"] };
 
-function fixture(modelText = '{"decision":"classified","scenario_key":"build.validation","scenario_definition":{"summary":"构建验证规则","applies_when":"适用于项目构建验收","excludes":"与构建无关的事实"},"coarse_scenario_key":"engineering","coarse_scenario_definition":{"summary":"工程主题","applies_when":"属于项目工程实践","excludes":"业务领域事实"}}', claimStatus = "reviewed", claimScope: string = String(claim.scope), profileProvider: ModelProviderSpec = provider) {
+function fixture(modelText = '{"decision":"classified","scenario_key":"build.validation","scenario_definition":{"summary":"构建验证规则","applies_when":"适用于项目构建验收","excludes":"与构建无关的事实"},"coarse_scenario_key":"engineering","coarse_scenario_definition":{"summary":"工程主题","applies_when":"属于项目工程实践","excludes":"业务领域事实"}}', claimStatus = "reviewed", claimScope: string = String(claim.scope), profileProvider: ModelProviderSpec = provider, contentRefPath?: string) {
   const calls: Array<{ name: string; args: JsonObject }> = [];
   const requests: ChatRequest[] = [];
   const scopeKind = claimScope === "global" ? "global" : "project";
@@ -24,7 +24,8 @@ function fixture(modelText = '{"decision":"classified","scenario_key":"build.val
   const client: KnowledgeClassificationClient = { async call(name, args = {}) {
     calls.push({ name, args });
     if (name === "craft_scope_identity_resolve_project") return { identity: { canonical_scope: { kind: "project", id: scopeId } } };
-    if (name === "craft_knowledge_claim_list") return { claims: [{ ...claim, status: claimStatus, scope: claimScope, scope_envelope: scopeEnvelope }] };
+    if (name === "craft_knowledge_claim_list") return { claims: [{ ...claim, status: claimStatus, scope: claimScope, scope_envelope: scopeEnvelope,
+      ...(contentRefPath ? { content_ref: { kind: "knowledge", path: contentRefPath } } : {}) }] };
     if (name === "craft_knowledge_semantic_review_packet") return { status: "ready", packet: { claim: { id: claim.id, version: claim.version,
       content_digest: claim.content_digest, content: claimContent }, evidence_fragments: [{ evidence_id: "evidence-1",
       content_digest: "sha256:evidence-1", content: claimContent }], source: { content_digest: "sha256:source" } }, packet_digest: "sha256:review-packet" };
@@ -407,6 +408,51 @@ test("worker derives a project root from the exact project Knowledge content ref
   assert.equal(f.calls.find(call => call.name === "craft_knowledge_scenario_list")?.args.project_root, projectRoot);
   assert.equal(f.calls.find(call => call.name === "craft_evaluation_model_ticket_issue")?.args.project_root, projectRoot);
   assert.equal(f.calls.find(call => call.name === "craft_knowledge_claim_save")?.args.project_root, projectRoot);
+});
+
+test("background classification skips temporary project roots before profile or model calls", async () => {
+  const temporaryRoot = await mkdtemp(join(tmpdir(), "craft-knowledge-classification-project-"));
+  try {
+    const f = fixture('{"review_decision":"supported"}', "candidate", String(claim.scope), provider,
+      join(temporaryRoot, ".craft_data", "knowledge", "md", "claim.md"));
+    const client: KnowledgeClassificationClient = { async call(name, args) {
+      if (name === "craft_knowledge_claim_list") return { claims: [
+        { ...claim, id: "temporary-root", status: "candidate", content_ref: { kind: "knowledge", path: join(tmpdir(), ".craft_data", "knowledge", "md", "claim.md") } },
+        { ...claim, id: "temporary-descendant", status: "candidate", content_ref: { kind: "knowledge", path: join(temporaryRoot, ".craft_data", "knowledge", "md", "claim.md") } },
+      ] };
+      return f.client.call(name, args);
+    } };
+    const result = await runKnowledgeScenarioClassificationOnce({ client, providers: [provider], transport: f.transport });
+    assert.equal(result.processed, 0);
+    assert.equal(result.skipped_temporary_count, 2);
+    assert.deepEqual(result.outcomes, []);
+    assert.equal(f.calls.some(call => call.name === "craft_evaluation_model_profile_ensure_single"), false);
+    assert.equal(f.requests.length, 0);
+  } finally { await rm(temporaryRoot, { recursive: true, force: true }); }
+});
+
+test("explicit project roots allow intentional classification inside a temporary worktree", async () => {
+  const temporaryRoot = await mkdtemp(join(tmpdir(), "craft-knowledge-classification-explicit-"));
+  try {
+    const f = fixture('{"review_decision":"supported"}', "candidate", String(claim.scope), provider,
+      join(temporaryRoot, ".craft_data", "knowledge", "md", "claim.md"));
+    const result = await runKnowledgeScenarioClassificationOnce({ client: f.client, providers: [provider], transport: f.transport, project_root: temporaryRoot });
+    assert.equal(result.processed, 1);
+    assert.equal(result.skipped_temporary_count, 0);
+    assert.equal((result.outcomes as JsonObject[])[0]?.status, "reviewed");
+    assert.equal(f.calls.some(call => call.name === "craft_evaluation_model_profile_ensure_single"), true);
+    assert.equal(f.requests.length, 1);
+  } finally { await rm(temporaryRoot, { recursive: true, force: true }); }
+});
+
+test("background classification still processes persistent project roots", async () => {
+  const projectRoot = process.cwd();
+  const f = fixture(undefined, "reviewed", String(claim.scope), provider,
+    join(projectRoot, ".craft_data", "knowledge", "md", "claim.md"));
+  const result = await runKnowledgeScenarioClassificationOnce({ client: f.client, providers: [provider], transport: f.transport });
+  assert.equal(result.processed, 1);
+  assert.equal(result.skipped_temporary_count, 0);
+  assert.equal((result.outcomes as JsonObject[])[0]?.status, "classified");
 });
 
 test("worker ignores incomplete or unrelated project Knowledge content paths when deriving a root", async () => {

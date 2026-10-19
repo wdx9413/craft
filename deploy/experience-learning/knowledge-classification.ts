@@ -1,4 +1,5 @@
 import { isAbsolute, resolve, sep } from "node:path";
+import { tmpdir } from "node:os";
 import { createFetchTransport, buildChatRequest, defineProvider, PROVIDER_CATALOG, type ChatMessage, type ModelProviderSpec, type ModelTransport } from "../../core/model-gateway.ts";
 import { stableDigest } from "../../core/digest.ts";
 import { dataRoot } from "../../core/infrastructure/paths.ts";
@@ -112,6 +113,12 @@ function projectRootFromClaim(claim: JsonObject): string | undefined {
   return markerIndex > 0 ? normalizedPath.slice(0, markerIndex) : undefined;
 }
 
+function isTemporaryProjectRoot(projectRoot: string): boolean {
+  const candidate = resolve(projectRoot);
+  const temporaryRoots = new Set([resolve(tmpdir()), resolve("/tmp"), resolve("/private/tmp")]);
+  return [...temporaryRoots].some(root => candidate === root || candidate.startsWith(`${root}${sep}`));
+}
+
 /** Classify bounded candidate and reviewed project/global Claims through audited tickets; uncertain Claims stay unclassified. */
 export async function runKnowledgeScenarioClassificationOnce(deps: KnowledgeClassificationDependencies): Promise<JsonObject> {
   const maxClaims = deps.max_claims ?? 8;
@@ -128,21 +135,31 @@ export async function runKnowledgeScenarioClassificationOnce(deps: KnowledgeClas
     projectScope = canonicalId.startsWith("project:") ? canonicalId : `project:${canonicalId}`;
   }
   const listed = await deps.client.call("craft_knowledge_claim_list", { limit: 1_000 });
-  const claims = (array(listed.claims, "claims") as JsonObject[])
+  const claimCandidates = (array(listed.claims, "claims") as JsonObject[])
     .filter(claim => (claim.status === "candidate" || claim.status === "reviewed") && typeof claim.scenario_key !== "string"
       && (String(claim.scope ?? "").startsWith("project:") || claim.scope === "global")
-      && (!projectScope || claim.scope === projectScope || claim.scope === `project:${projectScope}` || claim.scope === "global"))
-    .sort((a, b) => String(a.id).localeCompare(String(b.id))).slice(0, maxClaims);
-  if (!claims.length) return { processed: 0, outcomes: [] };
+      && (!projectScope || claim.scope === projectScope || claim.scope === `project:${projectScope}` || claim.scope === "global"));
+  let skippedTemporaryCount = 0;
+  const claims = claimCandidates.filter(claim => {
+    if (!deps.project_root && claim.scope !== "global") {
+      const projectRoot = projectRootFromClaim(claim);
+      if (projectRoot && isTemporaryProjectRoot(projectRoot)) {
+        skippedTemporaryCount += 1;
+        return false;
+      }
+    }
+    return true;
+  }).sort((a, b) => String(a.id).localeCompare(String(b.id))).slice(0, maxClaims);
+  if (!claims.length) return { processed: 0, outcomes: [], ...(skippedTemporaryCount > 0 ? { skipped_temporary_count: skippedTemporaryCount } : {}) };
   const profileResult = await deps.client.call("craft_evaluation_model_profile_ensure_single", { purpose: "knowledge_scenario_classification" });
-  if (profileResult.status !== "ready_for_adapter" || !profileResult.profile) return { processed: 0, outcomes: [], skipped: true, reason: profileResult.reason ?? profileResult.status ?? "model_profile_unavailable" };
+  if (profileResult.status !== "ready_for_adapter" || !profileResult.profile) return { processed: 0, outcomes: [], skipped: true, skipped_temporary_count: skippedTemporaryCount, reason: profileResult.reason ?? profileResult.status ?? "model_profile_unavailable" };
   const profile = object(profileResult.profile, "profile");
   const providerResult = await deps.client.call("craft_evaluation_model_profile_get", { profile_id: profile.id, version: profile.version });
   const ready = object(providerResult.readiness, "profile readiness");
-  if (ready.status !== "ready_for_adapter") return { processed: 0, outcomes: [], skipped: true, reason: ready.next_action ?? "model_profile_not_ready" };
+  if (ready.status !== "ready_for_adapter") return { processed: 0, outcomes: [], skipped: true, skipped_temporary_count: skippedTemporaryCount, reason: ready.next_action ?? "model_profile_not_ready" };
   const provider = (deps.providers ?? PROVIDER_CATALOG).find(item => item.provider === profile.provider)
     ?? (providerResult.provider ? defineProvider(object(providerResult.provider, "provider")) : undefined);
-  if (!provider) return { processed: 0, outcomes: [], skipped: true, reason: "provider_unavailable" };
+  if (!provider) return { processed: 0, outcomes: [], skipped: true, skipped_temporary_count: skippedTemporaryCount, reason: "provider_unavailable" };
   const outcomes: JsonObject[] = [];
   const transport = deps.transport ?? createFetchTransport({ maxAttempts: Number(profile.max_attempts ?? 1) });
   for (const claim of claims) {
@@ -365,7 +382,7 @@ export async function runKnowledgeScenarioClassificationOnce(deps: KnowledgeClas
         failure_kind: safeErrorClass(error), failure_stage: processingStage, failure_code: failureCode });
     }
   }
-  return { processed: outcomes.length, outcomes };
+  return { processed: outcomes.length, outcomes, skipped_temporary_count: skippedTemporaryCount };
 }
 
 async function bindKnowledgeTicketResult(client: KnowledgeClassificationClient, traceId: string, ticketId: string, claimId: string, resultDigest: string): Promise<void> {
