@@ -95,7 +95,7 @@ export class KnowledgeSourceRegistry {
       { relative_path: "AGENTS.md", kind: "project_note", label: "Project Agent Instructions" },
       { relative_path: ".serena/memories", kind: "serena", label: "Serena Project Memories" },
     ];
-    let registered = 0, ingested = 0, candidateCount = 0, skipped = 0, failedIngests = 0;
+    let registered = 0, ingested = 0, candidateCount = 0, skipped = 0, failedIngests = 0, reactivated = 0;
     const sourceRefs: string[] = [];
     for (const candidate of candidates) {
       const locator = join(root, candidate.relative_path);
@@ -118,6 +118,7 @@ export class KnowledgeSourceRegistry {
         locator: realLocator, content_digest: stableDigest({ schema: "craft.project-knowledge-source.v1", scope, path: candidate.relative_path }), trust: "bounded", access: "read_only" });
       sourceRefs.push(sourceId);
       if (result.idempotent !== true) {
+        if (result.reactivated === true) reactivated++;
         registered++;
         try {
           const output = this.sourceIngest({ source_id: sourceId, max_files: candidate.kind === "serena" ? 50 : 1 });
@@ -128,7 +129,32 @@ export class KnowledgeSourceRegistry {
         } catch { failedIngests++; /* One malformed project document must not prevent the other bounded Sources. */ }
       }
     }
-    return { status: "ready", sources_registered: registered, sources_ingested: ingested, candidates_created: candidateCount, skipped_sources: skipped, failed_ingests: failedIngests, source_refs: sourceRefs };
+    const disabled = this.disableMissingDiscoveredSources(scope, new Set(sourceRefs));
+    return { status: "ready", sources_registered: registered, sources_ingested: ingested, candidates_created: candidateCount,
+      skipped_sources: skipped, failed_ingests: failedIngests, sources_disabled: disabled, sources_reactivated: reactivated, source_refs: sourceRefs };
+  }
+
+  private disableMissingDiscoveredSources(scope: { kind: string; id: string }, currentSourceIds: Set<string>): number {
+    let disabled = 0;
+    for (const source of this.store.list("knowledge_source", 100_000, item => item.status === "active"
+      && String(item.id).startsWith("project_autodiscovered_")
+      && (item.scope as JsonObject | undefined)?.kind === scope.kind
+      && (item.scope as JsonObject | undefined)?.id === scope.id)) {
+      if (currentSourceIds.has(String(source.id)) || this.discoveredSourcePathIsUsable(source)) continue;
+      this.sourceTransition({ source_id: source.id, status: "disabled", reason: "autodiscovered_project_source_path_unavailable" });
+      const transitioned = this.store.get("knowledge_source", String(source.id));
+      this.store.save("knowledge_source", String(source.id), { ...payload(transitioned), automatic_transition: "project_source_path_unavailable" });
+      disabled++;
+    }
+    return disabled;
+  }
+
+  private discoveredSourcePathIsUsable(source: JsonObject): boolean {
+    if (typeof source.locator !== "string" || !source.locator) return false;
+    try {
+      const stat = lstatSync(source.locator);
+      return !stat.isSymbolicLink() && (source.kind === "serena" ? stat.isDirectory() : stat.isFile());
+    } catch { return false; }
   }
 
   private builtinLocator(sourceId: string, current: string, legacy: readonly string[]): string {
@@ -158,6 +184,12 @@ export class KnowledgeSourceRegistry {
     if (existing) {
       const legacyIdentity = { kind, label: identity.label, scope: sourceScope, locator: identity.locator, content_digest: identity.content_digest, trust, access };
       if (existing.identity_digest !== identityDigest && existing.identity_digest !== stableDigest(legacyIdentity)) throw new Error("Knowledge Source idempotency conflict");
+      if (existing.status === "disabled" && existing.automatic_transition === "project_source_path_unavailable"
+        && sourceId.startsWith("project_autodiscovered_") && this.discoveredSourcePathIsUsable(existing)) {
+        const reactivated = this.store.save("knowledge_source", sourceId, { ...payload(existing), status: "active",
+          automatic_transition: null, transition_reason_digest: stableDigest("autodiscovered_project_source_path_recovered") });
+        return { source: reactivated, idempotent: false, reactivated: true };
+      }
       return { source: existing, idempotent: true };
     }
     return { source: this.store.create("knowledge_source", sourceId, { ...identity, identity_digest: identityDigest, status: "active" }), idempotent: false };

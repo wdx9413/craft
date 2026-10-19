@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, writeFileSync, rmSync, symlinkSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, writeFileSync, rmSync, symlinkSync, unlinkSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
@@ -1676,6 +1676,57 @@ test("context automatically ingests bounded project Knowledge into project data 
     assert.equal((again.knowledge_source_discovery as JsonObject).sources_registered, 0);
     assert.equal(f.store.list("knowledge_source", 20, row => (row.scope as JsonObject).kind === scope.kind && (row.scope as JsonObject).id === scope.id).length, 3);
     assert.equal(f.store.list("telemetry_event", 100, row => row.operation === "project_source_discovery").length >= 2, true);
+  } finally { f.close(); }
+});
+
+test("project Knowledge discovery disables missing auto sources and reactivates them when restored", async () => {
+  const f = await fixture();
+  try {
+    f.write("README.md", "# Temporary project source\nA bounded fact for source recovery.\n");
+    mkdirSync(join(f.repo, ".serena", "memories"), { recursive: true });
+    f.write(".serena/memories/workflow.md", "# Workflow\nA temporary Serena source.\n");
+    const scope = ((f.service.scopeIdentityResolveProject({ project_root: f.repo }).identity as JsonObject).canonical_scope as JsonObject);
+    f.service.knowledgeSourceRegister({ source_id: "manual-source", kind: "custom", label: "Manual source", scope_kind: "project", scope_id: scope.id,
+      locator: join(f.root, "manual-source.md"), content_digest: "manual-source-digest", trust: "bounded", access: "read_only" });
+    f.store.create("knowledge_source", "project_autodiscovered_missing_locator", { scope, kind: "readme", status: "active", locator: "", trust: "bounded", access: "read_only" });
+    const first = f.service.knowledgeSources.discoverProjectSources({ project_root: f.repo, scope_kind: "project", scope_id: scope.id });
+    assert.equal(first.sources_registered, 2);
+    const sourceIds = first.source_refs as string[];
+    const readmeSourceId = sourceIds.find(id => f.store.get("knowledge_source", id).kind === "readme")!;
+    const serenaSourceId = sourceIds.find(id => f.store.get("knowledge_source", id).kind === "serena")!;
+    assert.equal(f.store.get("knowledge_source", "project_autodiscovered_missing_locator").status, "disabled");
+    rmSync(join(f.repo, "README.md"));
+    rmSync(join(f.repo, ".serena", "memories"), { recursive: true, force: true });
+
+    const missing = f.service.knowledgeSources.discoverProjectSources({ project_root: f.repo, scope_kind: "project", scope_id: scope.id });
+    assert.equal(missing.sources_disabled, 2);
+    assert.equal(f.store.get("knowledge_source", readmeSourceId).status, "disabled");
+    assert.equal(f.store.get("knowledge_source", serenaSourceId).status, "disabled");
+    assert.equal(f.store.get("knowledge_source", readmeSourceId).automatic_transition, "project_source_path_unavailable");
+    assert.equal(f.store.get("knowledge_source", "manual-source").status, "active");
+
+    f.write("README.md", "# Temporary project source\nA bounded fact for source recovery.\n");
+    mkdirSync(join(f.repo, ".serena", "memories"), { recursive: true });
+    f.write(".serena/memories/workflow.md", "# Workflow\nA temporary Serena source.\n");
+    const restored = f.service.knowledgeSources.discoverProjectSources({ project_root: f.repo, scope_kind: "project", scope_id: scope.id });
+    assert.equal(restored.sources_reactivated, 2);
+    assert.equal(restored.sources_ingested, 2);
+    assert.equal(f.store.get("knowledge_source", readmeSourceId).status, "active");
+    assert.equal(f.store.get("knowledge_source", readmeSourceId).automatic_transition, null);
+    assert.equal(f.store.get("knowledge_source", serenaSourceId).status, "active");
+
+    const outside = join(f.root, "outside-memories"); mkdirSync(outside);
+    rmSync(join(f.repo, ".serena", "memories"), { recursive: true, force: true });
+    symlinkSync(outside, join(f.repo, ".serena", "memories"));
+    const linked = f.service.knowledgeSources.discoverProjectSources({ project_root: f.repo, scope_kind: "project", scope_id: scope.id });
+    assert.equal(linked.sources_disabled, 1);
+    assert.equal(f.store.get("knowledge_source", serenaSourceId).status, "disabled");
+    unlinkSync(join(f.repo, ".serena", "memories"));
+    mkdirSync(join(f.repo, ".serena", "memories"), { recursive: true });
+    f.write(".serena/memories/workflow.md", "# Workflow\nA temporary Serena source.\n");
+    const unlinked = f.service.knowledgeSources.discoverProjectSources({ project_root: f.repo, scope_kind: "project", scope_id: scope.id });
+    assert.equal(unlinked.sources_reactivated, 1);
+    assert.equal(f.store.get("knowledge_source", serenaSourceId).status, "active");
   } finally { f.close(); }
 });
 
