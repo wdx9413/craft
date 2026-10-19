@@ -80,18 +80,18 @@ async function smoke(name: string): Promise<void> {
     const tools = listed.result.tools as Array<{ name: string; annotations?: { readOnlyHint?: boolean }; inputSchema?: { properties?: Record<string, { type?: string }> } }>;
     assert.equal(initialized.result.serverInfo.version, CRAFT_RELEASE_VERSION);
     assert(tools.length > 0);
+    if (name === "craft-context") assert(tools.length <= 90, `Context Agent exposes ${tools.length} tools; Host limit is 90`);
     assert(tools.some((tool) => tool.name === expectedDailyTool));
     assert(tools.some((tool) => tool.name === callTool));
     if (name === "craft-context") {
-      for (const required of ["craft_scope_identity_resolve_project", "craft_knowledge_scenario_list", "craft_memory_capture_observed_fact",
-        "craft_experience_scenario_list", "craft_procedure_plan", "craft_codebase_impact_query"]) {
-        assert(tools.some(tool => tool.name === required), `complete Context product is missing ${required}`);
+      for (const required of ["craft_context_tools_discover", "craft_memory_capture_observed_fact", "craft_run", "craft_codebase_impact_query"]) {
+        assert(tools.some(tool => tool.name === required), `Context Agent is missing ${required}`);
       }
       const discover = async (intent: string) => {
         const response = await request("tools/call", { name: "craft_context_tools_discover", arguments: { intent } }, timeoutMs);
         assert.equal(response.error, undefined, `Context ${intent} discovery failed: ${JSON.stringify(response.error)}`);
         assert.equal(response.result?.isError, false, `Context ${intent} discovery failed: ${JSON.stringify(response.result)}`);
-        return response.result.structuredContent as { tools: Array<{ name: string; annotations?: { readOnlyHint?: boolean } }>; schema_estimated_tokens: number };
+        return response.result.structuredContent as { tools: Array<{ name: string; annotations?: { readOnlyHint?: boolean }; syscall_route?: { tool: string } }>; schema_estimated_tokens: number };
       };
       const core = await discover("code"), analysis = await discover("code-analysis");
       const knowledge = await discover("knowledge"), experience = await discover("experience"), memory = await discover("memory");
@@ -107,6 +107,9 @@ async function smoke(name: string): Promise<void> {
         "craft_experience_learning_evaluation_run", "craft_experience_learning_evaluation_result",
         "craft_evaluation_model_profile_get", "craft_evaluation_model_ticket_list"])
         assert(experience.tools.some(tool => tool.name === required), `Experience discovery is missing ${required}`);
+      for (const profile of [knowledge, experience, memory]) {
+        assert(profile.tools.every(tool => tool.syscall_route?.tool === "craft_run"), "discovered operations must include an executable route");
+      }
       const names = (profile: typeof core) => profile.tools.filter((tool) => tool.name.startsWith("craft_codebase_")).map((tool) => tool.name).sort();
       assert.deepEqual(names(core), ["craft_codebase_callers_find", "craft_codebase_context_slice", "craft_codebase_impact_query",
         "craft_codebase_relations_find", "craft_codebase_symbol_explore", "craft_codebase_symbol_find", "craft_codebase_symbol_read",

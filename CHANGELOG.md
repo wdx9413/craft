@@ -1,3 +1,10 @@
+## v0.12.73（Context Host 工具面收敛）
+
+- Context 默认 MCP 工具从 233 项收敛到 46 项，低于 Host 的 90 项注册上限；Knowledge、Memory、Experience 操作通过按需发现和受限 `craft_run` 路由调用。
+- 路由按 Context 能力清单限制，并校验被路由工具的参数；内部学习 Worker 仍使用完整 Context 工具面。
+- 组件诊断识别精简路由模式，避免把可发现调用误判为 Host 缺少组件工具。
+- 增加真实 MCP 分发、路由边界、参数验证和精简工具面回归验证。
+
 ## v0.12.72（Knowledge 独立评测来源门禁）
 
 - Knowledge 检索评测只有在来源会话、任务、Evidence、脱敏状态和留出分区均可核验，且与被评 Claim 来源隔离时才具备评测资格。

@@ -53,7 +53,8 @@ export class ComponentReadinessKernel {
     const readiness = this.get({ component: name }, mountedComponent);
     const expected = REQUIRED_TOOLS[name];
     const observed = args.observed_tool_names === undefined ? null : toolNames(args.observed_tool_names);
-    const missing = observed === null ? [] : expected.filter((tool) => !observed.includes(tool));
+    const routed = observed !== null && observed.includes("craft_run") && observed.includes("craft_context_tools_discover");
+    const missing = observed === null ? [] : expected.filter((tool) => !observed.includes(tool) && !routed);
     const execution = this.executionProof(name, args.session_id);
     return {
       ...readiness,
@@ -64,6 +65,7 @@ export class ComponentReadinessKernel {
       expected_release: CRAFT_RELEASE_VERSION,
       expected_tools: expected,
       observed_tools_supplied: observed !== null,
+      tool_access_mode: observed === null ? "unobserved" : routed ? "syscall_discovery" : "direct",
       missing_tools: missing,
       host_attachment: observed === null ? "this_mcp_process_replied; compare this release with the Host cache when another conversation cannot see it"
         : missing.length ? "bundle_or_surface_mismatch" : "surface_matches",

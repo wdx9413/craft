@@ -52,7 +52,7 @@ test("worker supervisor starts one worker per free component and skips overlappi
     const stopExperience = await startWorker(f, { mode: "component-experience-daily", server_entrypoint: f.server, env: {}, spawn_process: spawnWorker });
     assert.equal(await startWorker(f, { mode: "component-experience-daily", server_entrypoint: f.server, env: {}, spawn_process: spawnWorker }), undefined);
     const stopKnowledge = await startWorker(f, { mode: "component-knowledge-daily", server_entrypoint: f.server, env: {}, spawn_process: spawnWorker });
-    const stopContext = await startWorker(f, { mode: "component-context-complete", server_entrypoint: f.server, env: {}, spawn_process: spawnWorker, on_skip: value => skips.push(value) });
+    const stopContext = await startWorker(f, { mode: "component-context-agent", server_entrypoint: f.server, env: {}, spawn_process: spawnWorker, on_skip: value => skips.push(value) });
     assert.equal(launches.length, 2);
     assert.deepEqual(skips, ["worker_already_running"]);
     assert.deepEqual(JSON.parse(launches[0]!.env.CRAFT_EXPERIENCE_MCP_ARGS!), [realpathSync(f.server), "--product", "experience"]);
@@ -60,8 +60,8 @@ test("worker supervisor starts one worker per free component and skips overlappi
     assert.deepEqual(JSON.parse(launches[1]!.env.CRAFT_EXPERIENCE_MCP_ARGS!), [realpathSync(f.server), "--product", "knowledge"]);
     assert.equal(launches[1]!.env.CRAFT_LEARNING_COMPONENTS, "knowledge");
     await Promise.all([stopExperience?.(), stopKnowledge?.()]);
-    const stopContextAfterRelease = await startWorker(f, { mode: "component-context-complete", server_entrypoint: f.server, env: {}, spawn_process: spawnWorker });
-    assert.deepEqual(JSON.parse(launches[2]!.env.CRAFT_EXPERIENCE_MCP_ARGS!), [realpathSync(f.server), "--product", "context"]);
+    const stopContextAfterRelease = await startWorker(f, { mode: "component-context-agent", server_entrypoint: f.server, env: {}, spawn_process: spawnWorker });
+    assert.deepEqual(JSON.parse(launches[2]!.env.CRAFT_EXPERIENCE_MCP_ARGS!), [realpathSync(f.server), "--surface", "component-context-complete"]);
     assert.equal(launches[2]!.env.CRAFT_LEARNING_COMPONENTS, "experience,knowledge");
     await stopContextAfterRelease?.();
     await stopContext?.();

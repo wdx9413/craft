@@ -15,6 +15,7 @@ import { createActionHandlers } from "../application/actions/action-handlers.ts"
 import type { McpHandler } from "./mcp/handler-types.js";
 import { ComponentTraceKernel, type ComponentTraceResult } from "../component-trace.ts";
 import { validateJsonSchema, type JsonValue } from "../json-schema.ts";
+import { CONTEXT_ROUTED_TOOL_NAMES } from "../mcp/context-tools.ts";
 export { COMPONENT_SURFACES, COMPONENT_SURFACE_NAMES, DOMAIN_SURFACE_NAMES, SURFACE_NAMES, SURFACE_RULES, domainSurfaceOf } from "./mcp/surface-registry.ts";
 
 export { TOOLS, ACTIVE_TOOLS } from "../mcp/tool-catalog.ts";
@@ -179,7 +180,7 @@ export class McpServer {
 
       // Standalone contracts are checked at the wire boundary, including calls
       // from clients that do not validate JSON Schema themselves.
-      if (this.mode.endsWith("-daily") || this.mode === "component-codebase") {
+      if (this.mode.endsWith("-daily") || this.mode === "component-codebase" || this.mode === "component-context-agent") {
         validateJsonSchema(supplied as JsonValue, this.tools.find((tool) => tool.name === name)!.inputSchema);
       }
       const result = SYSCALL_VERBS.includes(name)
@@ -234,8 +235,10 @@ export class McpServer {
     const resource = typeof args.resource === "string" && args.resource.trim() ? args.resource.trim() : "capability";
     const operation = typeof args.operation === "string" && args.operation.trim() ? args.operation.trim() : undefined;
     if (name === "craft_describe") {
-      if (args.resource === undefined) return catalogOf(TOOL_REGISTRY);
-      const described = resolveEntry(TOOL_REGISTRY, resource, operation, "info");
+      const registry = this.mode === "component-context-agent"
+        ? TOOL_REGISTRY.filter(entry => CONTEXT_ROUTED_TOOL_NAMES.has(entry.tool)) : TOOL_REGISTRY;
+      if (args.resource === undefined) return catalogOf(registry);
+      const described = resolveEntry(registry, resource, operation, "info");
       if (!described) {
         return { found: false, resource, operation: operation ?? null,
           hint: "Call craft_describe with no arguments for the full resource catalog." };
@@ -251,6 +254,11 @@ export class McpServer {
     const { resource: _resource, operation: _operation, args: nested, ...rest } = args;
     const forwarded: JsonObject = { ...rest,
       ...(nested && typeof nested === "object" && !Array.isArray(nested) ? nested as JsonObject : {}) };
+    if (this.mode === "component-context-agent") {
+      if (!CONTEXT_ROUTED_TOOL_NAMES.has(entry.tool)) throw new Error(`Craft operation is not available on the Context Agent surface: ${entry.tool}`);
+      const target = ACTIVE_TOOLS.find(tool => tool.name === entry.tool);
+      validateJsonSchema(forwarded as JsonValue, target!.inputSchema);
+    }
     return handler(forwarded);
   }
   private ok(requestId: unknown, result: JsonObject): JsonObject { return { jsonrpc: "2.0", id: requestId, result }; }

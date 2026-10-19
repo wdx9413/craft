@@ -467,6 +467,12 @@ test("component diagnosis distinguishes a reachable MCP process from a stale or 
     const current = f.service.componentDiagnose({ component: "experience", observed_tool_names: publishedTools });
     assert.equal(current.host_attachment, "surface_matches");
     assert.deepEqual(current.missing_tools, []);
+    const contextAgent = f.service.componentDiagnose({ component: "memory", observed_tool_names: ["craft_run", "craft_context_tools_discover"] });
+    assert.equal(contextAgent.host_attachment, "surface_matches");
+    assert.equal(contextAgent.tool_access_mode, "syscall_discovery");
+    assert.deepEqual(contextAgent.missing_tools, []);
+    const partialRoute = f.service.componentDiagnose({ component: "memory", observed_tool_names: ["craft_run"] });
+    assert.equal(partialRoute.host_attachment, "bundle_or_surface_mismatch");
     assert.match(String(f.service.componentDiagnose({ component: "memory" }).host_attachment), /this_mcp_process_replied/u);
     assert.throws(() => f.service.componentDiagnose({ component: "memory", observed_tool_names: [" "] }), /non-empty/u);
   } finally { await close(f); }

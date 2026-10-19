@@ -90,7 +90,6 @@ const DAILY_COMPONENT_TOOLS: Readonly<Record<string, readonly string[]>> = {
   // Diagnostic compatibility aliases remain on the explicit advanced surface.
   "component-experience-daily": [
     "craft_experience_scenario_list", "craft_experience_scenario_migration_propose", "craft_learning_cycle_finalize",
-    "craft_evaluation_model_profile_get", "craft_evaluation_model_ticket_list",
     "craft_component_readiness_get", "craft_evidence_record", "craft_experience_observe",
     "craft_experience_patterns_list", "craft_experience_procedure_draft", "craft_experience_procedure_submit", "craft_experience_procedure_get",
     "craft_experience_learning_request_get", "craft_experience_scenario_classification_request_get", "craft_experience_scenario_classification_request_complete",
@@ -104,7 +103,7 @@ const DAILY_COMPONENT_TOOLS: Readonly<Record<string, readonly string[]>> = {
 
 export const COMPONENT_SURFACE_NAMES: readonly string[] = Object.keys(COMPONENT_SURFACES);
 export const DOMAIN_SURFACE_NAMES: readonly string[] = SURFACE_RULES.map((rule) => rule.name);
-export const SURFACE_NAMES: readonly string[] = ["core", ...DOMAIN_SURFACE_NAMES, ...COMPONENT_SURFACE_NAMES, "syscall", "full"];
+export const SURFACE_NAMES: readonly string[] = ["core", ...DOMAIN_SURFACE_NAMES, ...COMPONENT_SURFACE_NAMES, "component-context-agent", "syscall", "full"];
 
 export type MountedComponent = "knowledge" | "memory" | "experience";
 
@@ -120,6 +119,17 @@ export function domainSurfaceOf(toolName: string): string {
 }
 
 export function surfaceToolNames(surface: string, activeTools: readonly Tool[], coreToolNames: ReadonlySet<string>): string[] {
+  if (surface === "component-context-agent") {
+    const names = new Set([
+      "craft_info", "craft_component_readiness_get", "craft_component_diagnose",
+      "craft_context_open", "craft_context_resolution_resolve", "craft_context_tools_discover",
+      "craft_knowledge_search", "craft_memory_capture_observed_fact", "craft_learning_cycle_finalize",
+    ]);
+    const codebase = COMPONENT_SURFACES["component-codebase"]!;
+    const direct = activeTools.filter(tool => names.has(tool.name) || codebase.test(tool.name)).map(tool => tool.name);
+    const passthrough = SYSCALL_PASSTHROUGH.filter(name => activeTools.some(tool => tool.name === name));
+    return [...new Set([...direct, ...SYSCALL_VERBS, ...passthrough])];
+  }
   if (surface === "component-context-complete") {
     const names = new Set(["craft_info", "craft_context_open", "craft_context_tools_discover", ...Object.values(DAILY_COMPONENT_TOOLS).flat()]);
     const components = ["component-knowledge", "component-memory", "component-experience", "component-codebase"] as const;

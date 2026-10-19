@@ -111,9 +111,10 @@ export function resolveLearningWorkerLaunch(serverEntrypoint: string, exists: (p
 }
 
 export async function startContextLearningWorker(options: LearningWorkerSupervisorOptions): Promise<(() => Promise<void>) | undefined> {
-  const components: Record<string, { product: string; learning: string }> = {
-    "component-context-daily": { product: "context", learning: "experience,knowledge" },
-    "component-context-complete": { product: "context", learning: "experience,knowledge" },
+  const components: Record<string, { product: string; surface?: string; learning: string }> = {
+    "component-context-agent": { product: "context", surface: "component-context-complete", learning: "experience,knowledge" },
+    "component-context-daily": { product: "context", surface: "component-context-complete", learning: "experience,knowledge" },
+    "component-context-complete": { product: "context", surface: "component-context-complete", learning: "experience,knowledge" },
     "component-knowledge-daily": { product: "knowledge", learning: "knowledge" },
     "component-experience-daily": { product: "experience", learning: "experience" },
   };
@@ -121,7 +122,8 @@ export async function startContextLearningWorker(options: LearningWorkerSupervis
   if (!component || options.env?.CRAFT_CONTINUOUS_LEARNING === "0") return undefined;
   const launch = options.server_entrypoint ? resolveLearningWorkerLaunch(options.server_entrypoint, options.exists) : null;
   if (!launch) { options.on_failure?.("worker_entrypoint_unavailable"); return undefined; }
-  const serverArgs = [...(launch.server_entrypoint.endsWith(".ts") ? ["--experimental-strip-types"] : []), launch.server_entrypoint, "--product", component.product];
+  const selection = component.surface ? ["--surface", component.surface] : ["--product", component.product];
+  const serverArgs = [...(launch.server_entrypoint.endsWith(".ts") ? ["--experimental-strip-types"] : []), launch.server_entrypoint, ...selection];
   const env = { ...options.env, CRAFT_CONTINUOUS_LEARNING: "0", CRAFT_EXPERIENCE_MCP_COMMAND: process.execPath,
     CRAFT_EXPERIENCE_MCP_ARGS: JSON.stringify(serverArgs), CRAFT_LEARNING_COMPONENTS: component.learning };
   const spawnProcess = options.spawn_process ?? spawn;

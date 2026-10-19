@@ -33,6 +33,10 @@ test("component diagnosis filters execution receipts by component, session and r
     const empty = kernel.diagnose({ component: "memory" });
     assert.equal((empty.execution_proof as JsonObject).status, "not_observed");
     assert.equal(empty.next_action, "run_one_real_host_turn_then_recheck_with_session_id");
+    const routed = kernel.diagnose({ component: "experience", observed_tool_names: ["craft_run", "craft_context_tools_discover"] });
+    assert.equal(routed.tool_access_mode, "syscall_discovery");
+    assert.deepEqual(routed.missing_tools, []);
+    assert.equal(routed.host_attachment, "surface_matches");
     assert.equal(kernel.diagnose({ component: "memory", observed_tool_names: [] }).host_attachment, "bundle_or_surface_mismatch");
     f.store.create("activation_proof_receipt", "stale", { component: "memory", session_id: "old", plugin_release: "legacy" });
     assert.equal((kernel.diagnose({ component: "memory", session_id: "old" }).execution_proof as JsonObject).status, "stale_plugin_or_receipt");
@@ -86,13 +90,16 @@ test("public standalone component products expose small daily paths while advanc
     assert(new McpServer(f.service, "component-memory").tools.length > new McpServer(f.service, productSurfaceOf("memory")).tools.length);
     assert(new McpServer(f.service, "component-experience").tools.length > new McpServer(f.service, productSurfaceOf("experience")).tools.length);
     const dailyExperience = new McpServer(f.service, productSurfaceOf("experience")).tools.map((tool) => tool.name);
+    assert(!dailyExperience.includes("craft_evaluation_model_profile_get"));
+    assert(!dailyExperience.includes("craft_evaluation_model_ticket_list"));
     const experienceServer = new McpServer(f.service, productSurfaceOf("experience"));
+    f.service.scopeAliasBind({ scope_kind: "project", scope_id: "project:project-a", alias_kind: "path", alias: f.root });
     assert.deepEqual(await experienceServer.handlers.craft_experience_scenario_list({ scope: "project:project-a" }), {
       scope: "project:project-a", catalog_version: 0, scenarios: [],
     });
     assert.throws(() => experienceServer.handlers.craft_experience_scenario_list({ scope: "global" }), /explicit project scope/u);
     const advancedExperience = new Set(new McpServer(f.service, "component-experience").tools.map((tool) => tool.name));
-    for (const name of ["craft_procedure_create", "craft_procedure_configuration_save", "craft_experience_graph_inspect",
+    for (const name of ["craft_evaluation_model_profile_get", "craft_evaluation_model_ticket_list", "craft_procedure_create", "craft_procedure_configuration_save", "craft_experience_graph_inspect",
       "craft_experience_graph_edit", "craft_experience_asset_restore"]) {
       assert(!dailyExperience.includes(name), `${name} belongs on the explicit advanced Experience surface`);
       assert(advancedExperience.has(name), `${name} must remain available on the advanced Experience surface`);
@@ -214,6 +221,7 @@ test("standalone readiness is scoped to the mounted component and cannot substit
 test("standalone Knowledge exposes Host-managed review without a separate model provider", async () => {
   const f = await fixture();
   try {
+    f.service.scopeAliasBind({ scope_kind: "project", scope_id: "project:demo", alias_kind: "path", alias: f.root });
     const knowledge = new McpServer(f.service, productSurfaceOf("knowledge"));
     await knowledge.handlers.craft_knowledge_source_register({ source_id: "host-source", kind: "project_note", label: "Host source", trust: "verified", scope_kind: "project", scope_id: "demo", locator: "README.md", content_digest: `sha256:${"a".repeat(64)}` });
     const evidence = await knowledge.handlers.craft_evidence_record({ evidence_id: "host-evidence", source_type: "observation", confidence: "bounded", claim: "fixture" }) as JsonObject;
