@@ -175,7 +175,9 @@ function toolNames(value: unknown): string[] {
   if (!Array.isArray(value)) throw new Error("observed_tool_names must be an array");
   const names = value.map((item) => {
     if (typeof item !== "string" || !item.trim()) throw new Error("observed_tool_names must contain non-empty strings");
-    return item;
+    const name = item.trim();
+    const namespaced = /^mcp__(craft_(?:context|knowledge|memory|experience))__(craft_[a-z0-9_]+)$/u.exec(name);
+    return namespaced?.[2] ?? name;
   });
   return [...new Set(names)].sort();
 }

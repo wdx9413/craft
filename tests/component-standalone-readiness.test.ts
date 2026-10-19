@@ -37,6 +37,17 @@ test("component diagnosis filters execution receipts by component, session and r
     assert.equal(routed.tool_access_mode, "syscall_discovery");
     assert.deepEqual(routed.missing_tools, []);
     assert.equal(routed.host_attachment, "surface_matches");
+    const namespacedRoute = kernel.diagnose({ component: "experience", observed_tool_names: [
+      "mcp__craft_context__craft_run", "mcp__craft_context__craft_context_tools_discover",
+    ] });
+    assert.equal(namespacedRoute.tool_access_mode, "syscall_discovery");
+    assert.deepEqual(namespacedRoute.missing_tools, []);
+    assert.equal(namespacedRoute.host_attachment, "surface_matches");
+    const unrelatedRoute = kernel.diagnose({ component: "experience", observed_tool_names: [
+      "mcp__other_server__craft_run", "mcp__other_server__craft_context_tools_discover",
+    ] });
+    assert.equal(unrelatedRoute.tool_access_mode, "direct");
+    assert.equal(unrelatedRoute.host_attachment, "bundle_or_surface_mismatch");
     assert.equal(kernel.diagnose({ component: "memory", observed_tool_names: [] }).host_attachment, "bundle_or_surface_mismatch");
     f.store.create("activation_proof_receipt", "stale", { component: "memory", session_id: "old", plugin_release: "legacy" });
     assert.equal((kernel.diagnose({ component: "memory", session_id: "old" }).execution_proof as JsonObject).status, "stale_plugin_or_receipt");
