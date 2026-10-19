@@ -17,7 +17,11 @@ readline.createInterface({ input: process.stdin }).on("line", line => {
     process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: request.id, result: { isError: true, content: [{ type: "text", text: "private fixture error" }] } })}\n`);
     return;
   }
-  const result = request.method === "initialize" ? { protocolVersion: "2025-11-25", capabilities: {}, serverInfo: { name: "fixture", version: "1" } }
+  const serverInfo = process.env.CRAFT_TEST_LEARNING_WORKER_MCP_SERVER_INFO === "missing" ? undefined : {
+    name: process.env.CRAFT_TEST_LEARNING_WORKER_MCP_SERVER_NAME ?? "fixture",
+    ...(process.env.CRAFT_TEST_LEARNING_WORKER_MCP_SERVER_VERSION === "missing" ? {} : { version: process.env.CRAFT_TEST_LEARNING_WORKER_MCP_SERVER_VERSION ?? "1" }),
+  };
+  const result = request.method === "initialize" ? { protocolVersion: "2025-11-25", capabilities: {}, ...(serverInfo ? { serverInfo } : {}) }
     : request.method === "tools/call" && request.params.name === "fixture_text" ? { content: [{ type: "text", text: "{\"ok\":true}" }] }
       : request.method === "tools/call" && request.params.name === "fixture_worker_environment" ? { structuredContent: { continuous_learning: process.env.CRAFT_CONTINUOUS_LEARNING ?? null } }
       : request.method === "tools/call" && request.params.name === "fixture_invalid_text" ? { content: [{ type: "text", text: "not-json" }] }

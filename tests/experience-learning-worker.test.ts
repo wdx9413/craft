@@ -9,6 +9,7 @@ import test from "node:test";
 import type { ChatResult, ModelProviderSpec, ModelTransport } from "../core/model-gateway.ts";
 import type { JsonObject } from "../core/infrastructure/store.ts";
 import { McpStdioClient, boundedPollInterval, learningComponents, learningPollInterval, learningWorkFound, mcpCommandOptions, runDistillationOnce, runEvaluationOnce, runLearningTick, runOnce, type ExperienceLearningClient } from "../deploy/experience-learning/worker.ts";
+import { CRAFT_RELEASE_VERSION } from "../core/version.ts";
 import { learningFailureKind, learningTickStatus } from "../deploy/experience-learning/learning-tick.ts";
 
 const provider: ModelProviderSpec = { provider: "test", label: "test", protocol: "openai-compatible", base_url: "https://example.invalid/v1",
@@ -646,6 +647,42 @@ test("MCP stdio client handles structured, text, tool-error and RPC-error respon
     await assert.rejects(client.call("fixture_rpc_error"), /fixture rpc error/u);
     await assert.rejects(client.call("fixture_rpc_error_empty"), /MCP request failed/u);
   } finally { client.close(); }
+});
+
+test("MCP stdio client refuses a stale Craft server before sending initialized notification", async () => {
+  const fixturePath = fileURLToPath(new URL("./fixtures/experience-learning-mcp-fixture.cjs", import.meta.url));
+  const keys = ["CRAFT_TEST_LEARNING_WORKER_MCP_SERVER_INFO", "CRAFT_TEST_LEARNING_WORKER_MCP_SERVER_NAME", "CRAFT_TEST_LEARNING_WORKER_MCP_SERVER_VERSION"] as const;
+  const previous = Object.fromEntries(keys.map(key => [key, process.env[key]]));
+  try {
+    process.env.CRAFT_TEST_LEARNING_WORKER_MCP_SERVER_NAME = "craft";
+    process.env.CRAFT_TEST_LEARNING_WORKER_MCP_SERVER_VERSION = CRAFT_RELEASE_VERSION;
+    const matching = new McpStdioClient(process.execPath, [fixturePath]);
+    try { await matching.initialize(); } finally { matching.close(); }
+
+    process.env.CRAFT_TEST_LEARNING_WORKER_MCP_SERVER_INFO = "missing";
+    const legacy = new McpStdioClient(process.execPath, [fixturePath]);
+    try { await legacy.initialize(); } finally { legacy.close(); }
+
+    delete process.env.CRAFT_TEST_LEARNING_WORKER_MCP_SERVER_INFO;
+    process.env.CRAFT_TEST_LEARNING_WORKER_MCP_SERVER_VERSION = "0.12.72";
+    const stale = new McpStdioClient(process.execPath, [fixturePath]);
+    try {
+      await assert.rejects(stale.initialize(), new RegExp(`Craft MCP version mismatch: worker ${CRAFT_RELEASE_VERSION}, server 0\\.12\\.72`, "u"));
+      await assert.rejects(stale.call("should_not_run"), /child is closed/u);
+    } finally { stale.close(); }
+
+    process.env.CRAFT_TEST_LEARNING_WORKER_MCP_SERVER_VERSION = "missing";
+    const unknownVersion = new McpStdioClient(process.execPath, [fixturePath]);
+    try {
+      await assert.rejects(unknownVersion.initialize(), new RegExp(`Craft MCP version mismatch: worker ${CRAFT_RELEASE_VERSION}, server unknown`, "u"));
+    } finally { unknownVersion.close(); }
+  } finally {
+    for (const key of keys) {
+      const value = previous[key];
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
 });
 
 test("standalone learning worker disables the supervised loop in its MCP child", async () => {

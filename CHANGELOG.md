@@ -1,3 +1,9 @@
+## v0.12.75（Worker MCP 版本握手）
+
+- Experience/Knowledge Worker 启动时校验 Craft MCP 的服务端版本；版本不符时关闭子进程并停止取任务，避免新 Worker 静默连接旧 MCP。
+- Worker MCP 客户端关闭后立即拒绝新请求，并保持重复关闭安全。
+- 增加匹配版本、缺失版本、旧版本和非 Craft 适配器回归覆盖。
+
 ## v0.12.73（Context Host 工具面收敛）
 
 - Context 默认 MCP 工具从 233 项收敛到 46 项，低于 Host 的 90 项注册上限；Knowledge、Memory、Experience 操作通过按需发现和受限 `craft_run` 路由调用。

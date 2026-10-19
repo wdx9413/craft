@@ -266,7 +266,12 @@ export class McpStdioClient implements ExperienceLearningClient {
   }
 
   async initialize(): Promise<void> {
-    await this.request("initialize", { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "craft-continuous-learning-worker", version: CRAFT_RELEASE_VERSION } });
+    const result = await this.request("initialize", { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "craft-continuous-learning-worker", version: CRAFT_RELEASE_VERSION } });
+    const serverInfo = result.serverInfo as JsonObject | undefined;
+    if (serverInfo?.name === "craft" && serverInfo.version !== CRAFT_RELEASE_VERSION) {
+      this.close();
+      throw new Error(`Craft MCP version mismatch: worker ${CRAFT_RELEASE_VERSION}, server ${String(serverInfo.version ?? "unknown")}`);
+    }
     this.child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`);
   }
 
@@ -283,7 +288,12 @@ export class McpStdioClient implements ExperienceLearningClient {
     throw new Error(`${name} returned no structured result`);
   }
 
-  close(): void { this.lines.close(); this.child.stdin.end(); this.child.kill(); }
+  close(): void {
+    this.closed = true;
+    this.lines.close();
+    if (!this.child.stdin.writableEnded) this.child.stdin.end();
+    if (this.child.exitCode === null && this.child.signalCode === null) this.child.kill();
+  }
 }
 
 async function main(): Promise<void> {
