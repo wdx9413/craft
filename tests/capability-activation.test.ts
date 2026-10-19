@@ -3,6 +3,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { assertCurrentReleaseVersion } from "./release-version.ts";
 import { McpServer } from "../core/mcp.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftService, VERSION } from "../core/service.ts";
@@ -53,6 +54,6 @@ test("logical capability content is pinned and audit detects reselection or drif
       const result = await mcp.handle({ id: name, method: "tools/call", params: { name, arguments: arguments_ } });
       assert.equal((result?.result as JsonObject).isError, false, name);
     }
-    assert.equal(VERSION, "0.12.45");
+    assertCurrentReleaseVersion(VERSION);
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });

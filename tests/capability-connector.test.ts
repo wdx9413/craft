@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { assertCurrentReleaseVersion } from "./release-version.ts";
 import { McpServer } from "../core/mcp.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftService, VERSION } from "../core/service.ts";
@@ -50,7 +51,7 @@ test("Capability Connectors require explicit source approval, retain only metada
     assert.equal((f.service.capabilityConnectorHealthRecord({ connector_id: builtin.id, status: "healthy", source_digest: builtin.metadata_digest, observed_by: "test" }).health as JsonObject).status, "healthy");
     assert.equal((f.service.capabilityConnectorList({ limit: 1 }).connectors as JsonObject[]).length, 1);
     assert.throws(() => f.service.capabilityConnectorList({ limit: 0 }), /between/);
-    assert.equal(VERSION, "0.12.45");
+    assertCurrentReleaseVersion(VERSION);
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 

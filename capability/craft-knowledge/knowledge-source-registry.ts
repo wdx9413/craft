@@ -22,6 +22,7 @@ import { join, relative, resolve, sep } from "node:path";
 import type { CraftStore, JsonObject } from "../../common/craft-common-store-local/src/store.ts";
 import { noCredentialAssignment, parseScope, text } from "../../common/craft-common-base/src/validation.ts";
 import { stableDigest, payload } from "../../common/craft-common-base/src/digest.ts";
+import { operationErrorCode } from "../../common/craft-common-log/src/operation.ts";
 import { knowledgeDirectoryForScope, projectRootForKnowledgeSource } from "../../core/project-knowledge-content.ts";
 import { scopeEnvelope } from "../../common/craft-common-base/src/scope-policy.ts";
 import { updateKnowledgeScenarioClaim } from "./scenario-catalog.ts";
@@ -129,24 +130,50 @@ export class KnowledgeSourceRegistry {
         } catch { failedIngests++; /* One malformed project document must not prevent the other bounded Sources. */ }
       }
     }
-    const disabled = this.disableMissingDiscoveredSources(scope, new Set(sourceRefs));
-    return { status: "ready", sources_registered: registered, sources_ingested: ingested, candidates_created: candidateCount,
-      skipped_sources: skipped, failed_ingests: failedIngests, sources_disabled: disabled, sources_reactivated: reactivated, source_refs: sourceRefs };
+    const transition = this.disableMissingDiscoveredSources(scope, new Set(sourceRefs));
+    return { status: transition.failed > 0 ? "partial" : "ready",
+      ...(transition.failed > 0 ? { reason: "source_transition_incomplete" } : {}),
+      sources_registered: registered, sources_ingested: ingested, candidates_created: candidateCount,
+      skipped_sources: skipped, failed_ingests: failedIngests, sources_disabled: transition.disabled,
+      sources_transition_failed: transition.failed, source_transition_failure_codes: transition.failure_codes,
+      sources_reactivated: reactivated, source_refs: sourceRefs };
   }
 
-  private disableMissingDiscoveredSources(scope: { kind: string; id: string }, currentSourceIds: Set<string>): number {
+  private disableMissingDiscoveredSources(scope: { kind: string; id: string }, currentSourceIds: Set<string>): { disabled: number; failed: number; failure_codes: string[] } {
     let disabled = 0;
+    const failed = new Set<string>();
+    const failureCodes = new Set<string>();
     for (const source of this.store.list("knowledge_source", 100_000, item => item.status === "active"
       && String(item.id).startsWith("project_autodiscovered_")
       && (item.scope as JsonObject | undefined)?.kind === scope.kind
       && (item.scope as JsonObject | undefined)?.id === scope.id)) {
       if (currentSourceIds.has(String(source.id)) || this.discoveredSourcePathIsUsable(source)) continue;
-      this.sourceTransition({ source_id: source.id, status: "disabled", reason: "autodiscovered_project_source_path_unavailable" });
-      const transitioned = this.store.get("knowledge_source", String(source.id));
-      this.store.save("knowledge_source", String(source.id), { ...payload(transitioned), automatic_transition: "project_source_path_unavailable" });
-      disabled++;
+      const sourceId = String(source.id);
+      let sourceDisabled = false;
+      try {
+        this.sourceTransition({ source_id: sourceId, status: "disabled", reason: "autodiscovered_project_source_path_unavailable" }, "project_source_path_unavailable");
+        sourceDisabled = true;
+      }
+      catch (error) {
+        // A failed scenario-catalog update must not keep an unavailable Source active or
+        // prevent the remaining Sources from being retired. The Source status is the
+        // retrieval boundary; the catalog cleanup can be retried by a later transition.
+        failed.add(sourceId);
+        failureCodes.add(operationErrorCode(error));
+        try {
+          const current = this.store.get("knowledge_source", sourceId);
+          this.store.save("knowledge_source", sourceId, { ...payload(current), status: "disabled",
+            automatic_transition: "project_source_path_unavailable",
+            transition_reason_digest: current.transition_reason_digest ?? stableDigest("autodiscovered_project_source_path_unavailable") });
+          sourceDisabled = true;
+        } catch (fallbackError) {
+          failed.add(sourceId);
+          failureCodes.add(operationErrorCode(fallbackError));
+        }
+      }
+      if (sourceDisabled) disabled++;
     }
-    return disabled;
+    return { disabled, failed: failed.size, failure_codes: [...failureCodes].sort() };
   }
 
   private discoveredSourcePathIsUsable(source: JsonObject): boolean {
@@ -207,10 +234,12 @@ export class KnowledgeSourceRegistry {
    * A Source is referenced by every Memory Ledger entry that cites it, so removing the record
    * would orphan that provenance. The transition keeps the record and the reason's digest.
    */
-  sourceTransition(args: JsonObject): JsonObject {
+  sourceTransition(args: JsonObject, automaticTransition?: string): JsonObject {
     const source = this.store.get("knowledge_source", text(args.source_id, "source_id")); const status = text(args.status, "status");
     if (!TRANSITIONS.has(status)) throw new Error("Knowledge Source status is unsupported");
-    const saved = this.store.save("knowledge_source", String(source.id), { ...payload(source), status, transition_reason_digest: stableDigest(noCredentialAssignment(text(args.reason, "reason"), "reason")) });
+    const saved = this.store.save("knowledge_source", String(source.id), { ...payload(source), status,
+      transition_reason_digest: stableDigest(noCredentialAssignment(text(args.reason, "reason"), "reason")),
+      ...(automaticTransition ? { automatic_transition: automaticTransition } : {}) });
     for (const claim of this.store.list("knowledge_claim", 100_000, item => item.source_id === source.id && typeof item.scenario_key === "string", false, { source_ids: [String(source.id)], document_ids: [] })) {
       // Transitions only disable or revoke a Source. Every scenario claim that
       // depends on it must leave the active catalog in either case.

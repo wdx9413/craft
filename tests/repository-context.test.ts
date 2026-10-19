@@ -1730,6 +1730,46 @@ test("project Knowledge discovery disables missing auto sources and reactivates 
   } finally { f.close(); }
 });
 
+test("project Knowledge discovery isolates automatic source transition failures", async () => {
+  const f = await fixture();
+  try {
+    const scope = ((f.service.scopeIdentityResolveProject({ project_root: f.repo }).identity as JsonObject).canonical_scope as JsonObject);
+    const sourceIds = ["project_autodiscovered_transition_failure", "project_autodiscovered_transition_followup",
+      "project_autodiscovered_transition_recovered", "project_autodiscovered_transition_unwritable"];
+    for (const source_id of sourceIds) f.store.create("knowledge_source", source_id, {
+      scope, kind: "readme", status: "active", locator: join(f.root, `${source_id}.md`), trust: "bounded", access: "read_only",
+    });
+    f.store.create("knowledge_claim", "claim_for_broken_catalog", { source_id: sourceIds[0], scenario_key: "stale-scene",
+      scope: `project:${scope.id}`, evidence_ids: [], status: "candidate" });
+    const projectId = String(scope.id).replace(/^project:/u, "");
+    mkdirSync(join(f.repo, ".craft_data", "knowledge", "projects", projectId, "knowledge-scenarios.json"), { recursive: true });
+    const save = f.store.save.bind(f.store);
+    Object.assign(f.store, { save(kind: string, id: string, data: JsonObject) {
+      if (kind === "knowledge_source" && id === sourceIds[3]) throw new Error("private persistence failure");
+      return save(kind, id, data);
+    } });
+    const transition = f.service.knowledgeSources.sourceTransition.bind(f.service.knowledgeSources);
+    Object.assign(f.service.knowledgeSources, { sourceTransition(args: JsonObject, automaticTransition?: string) {
+      if (args.source_id === sourceIds[2] || args.source_id === sourceIds[3]) throw new Error("private transition failure");
+      return transition(args, automaticTransition);
+    } });
+
+    const result = f.service.knowledgeSources.discoverProjectSources({ project_root: f.repo, scope_kind: "project", scope_id: scope.id });
+    assert.equal(result.status, "partial");
+    assert.equal(result.reason, "source_transition_incomplete");
+    assert.equal(result.sources_transition_failed, 3);
+    assert.deepEqual(result.source_transition_failure_codes, ["OPERATION_FAILED"]);
+    assert.equal(result.sources_disabled, 3);
+    for (const sourceId of sourceIds.slice(0, 3)) {
+      const source = f.store.get("knowledge_source", sourceId);
+      assert.equal(source.status, "disabled");
+      assert.equal(source.automatic_transition, "project_source_path_unavailable");
+    }
+    assert.equal(f.store.get("knowledge_source", sourceIds[3]).status, "active");
+    assert.equal(JSON.stringify(result).includes("non-regular"), false);
+  } finally { f.close(); }
+});
+
 test("project Knowledge discovery fails closed on unsafe roots and isolates individual ingest failures", async () => {
   const f = await fixture();
   try {

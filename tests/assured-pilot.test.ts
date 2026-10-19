@@ -4,6 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { assertCurrentReleaseVersion } from "./release-version.ts";
 import { McpServer } from "../core/mcp.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftService, VERSION } from "../core/service.ts";
@@ -53,7 +54,7 @@ test("binds sealed evaluation access, recovery evidence, trusted capability vers
       const response = await mcp.handle({ id: name, method: "tools/call", params: { name, arguments: args } });
       assert.equal((response?.result as JsonObject).isError, false, name);
     }
-    assert.equal(VERSION, "0.12.45");
+    assertCurrentReleaseVersion(VERSION);
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 

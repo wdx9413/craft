@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { assertCurrentReleaseVersion } from "./release-version.ts";
 import { McpServer } from "../core/mcp.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftService, VERSION } from "../core/service.ts";
@@ -172,4 +173,4 @@ test("the relation kernels are reachable over MCP with the craft_relation_* surf
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
-test("the running service version is the one under test", () => { assert.equal(VERSION, "0.12.45"); });
+test("the running service version is the one under test", () => { assertCurrentReleaseVersion(VERSION); });

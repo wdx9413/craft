@@ -4,6 +4,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { assertCurrentReleaseVersion } from "./release-version.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftService, VERSION } from "../core/service.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
@@ -74,7 +75,7 @@ test("Runtime Assurance attests real Host receipts, re-observation, write confor
     assert.throws(() => f.service.runtimeAssuranceAttest({ task_run_id: write.run.id, effect: "local_write", environment: write.environment, budget: write.budget, workspace_observation_id: writeObservation.id }), /preflight_id/);
     assert.equal((f.service.runtimeAssuranceAttest({ task_run_id: write.run.id, effect: "local_write", environment: write.environment, budget: write.budget, workspace_observation_id: writeObservation.id, preflight_id: preflight.id }).attestation as JsonObject).status, "verified");
     const state = f.service.runtimeAssuranceGet({ task_run_id: read.run.id }); assert.equal((state.attestations as JsonObject[]).length, 3); assert.equal((state.interventions as JsonObject[]).length, 3);
-    assert.equal(VERSION, "0.12.45");
+    assertCurrentReleaseVersion(VERSION);
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 

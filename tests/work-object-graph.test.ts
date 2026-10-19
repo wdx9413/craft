@@ -3,6 +3,7 @@ import { mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { assertCurrentReleaseVersion } from "./release-version.ts";
 import { McpServer } from "../core/mcp.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftService, VERSION } from "../core/service.ts";
@@ -16,7 +17,7 @@ test("shared object graphs invalidate dependents and prevent stale writes", asyn
   try {
     await mkdir(worktree, { recursive: true });
     const opened = service.workspaceOpen({ workspace_id: "ws", name: "Video", root_path: worktree, include_paths: ["assets"] });
-  assert.equal(VERSION, "0.12.45");
+  assertCurrentReleaseVersion(VERSION);
     assert.equal((opened.workspace as JsonObject).state_revision, 1);
     const brief = service.workObjectPut({ workspace_id: "ws", object_id: "brief", object_type: "brief", name: "人物设定",
       data: { character: "A" }, source_paths: ["assets/brief.md"], expected_state_revision: 1 }).object as JsonObject;

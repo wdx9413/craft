@@ -3,6 +3,7 @@ import { mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { assertCurrentReleaseVersion } from "./release-version.ts";
 import { McpServer } from "../core/mcp.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftService, VERSION } from "../core/service.ts";
@@ -12,7 +13,7 @@ test("control-plane budgets reserve and settle resources idempotently", async ()
   const root = join(tmpdir(), `craft-budget-${process.pid}-${Date.now()}`); const store = await new CraftStore(craftPaths(root)).open();
   const service = new CraftService(store);
   try {
-    assert.equal(VERSION, "0.12.45");
+    assertCurrentReleaseVersion(VERSION);
     const task = service.taskOpen({ title: "Budget trace", goal: "Trace control costs" }).task as JsonObject;
     const workflow = service.workflowSave({ workflow_id: "budget_workflow", name: "Budget workflow" });
     const trial = service.trialStart({ trial_id: "budget_trial", task_id: task.id, subject_type: "workflow",

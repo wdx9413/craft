@@ -9,6 +9,7 @@ import { ContextResolutionKernel } from "../core/context-resolution.ts";
 import { KeywordRetrievalPort, OpenAiCompatibleEmbeddingRetrievalPort } from "../core/retrieval-port.ts";
 import { McpServer } from "../core/mcp.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
+import { CRAFT_RELEASE_VERSION } from "../core/version.ts";
 import { CraftService, VERSION } from "../core/service.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { VerifiedWorkLoopKernel } from "../core/verified-work-loop.ts";
@@ -120,7 +121,7 @@ test("keeps Console and Agent mode as a mode-neutral plan over verified work", a
       const response = await mcp.handle({ id: name, method: "tools/call", params: { name, arguments: args } }); assert.equal((response?.result as JsonObject).isError, false, name);
     }
     assert.equal(new McpServer(f.service, "core").tools.some((tool) => tool.name === "craft_context_resolution_resolve"), true);
-    assert.equal(VERSION, "0.12.45");
+    assert.equal(VERSION, CRAFT_RELEASE_VERSION);
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 

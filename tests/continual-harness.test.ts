@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { assertCurrentReleaseVersion } from "./release-version.ts";
 import { ContinualHarnessKernel } from "../core/continual-harness.ts";
 import { McpServer } from "../core/mcp.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
@@ -171,6 +172,6 @@ test("keeps stateful compute and Sub-agent calls generic, receipt-bound and non-
     for (const name of ["craft_continual_harness_view_create", "craft_continual_harness_refine", "craft_continual_harness_submit", "craft_continual_harness_shadow", "craft_continual_harness_authorize_canary", "craft_continual_harness_observe_canary", "craft_continual_harness_rollback", "craft_continual_harness_signals", "craft_continual_harness_resolve", "craft_continual_harness_get", "craft_stateful_compute_host_register", "craft_stateful_compute_session_prepare", "craft_stateful_compute_dispatch", "craft_stateful_compute_observe", "craft_stateful_compute_delegate", "craft_stateful_compute_report", "craft_stateful_compute_cancel"]) {
       const failed = await full.handle({ id: name, method: "tools/call", params: { name, arguments: {} } }); assert.equal((failed?.result as JsonObject).isError, true, name);
     }
-    assert.equal(VERSION, "0.12.45");
+    assertCurrentReleaseVersion(VERSION);
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });

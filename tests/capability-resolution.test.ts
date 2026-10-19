@@ -3,6 +3,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { assertCurrentReleaseVersion } from "./release-version.ts";
 import { McpServer } from "../core/mcp.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftService, VERSION } from "../core/service.ts";
@@ -38,6 +39,6 @@ test("capability resolution loads only digest-pinned local documents as bounded 
     await assert.rejects(service.logicalActivationResolve({ plan_id: plan.id }), /digest drifted/);
     await service.sourceScan({ source_id: source.id });
     await assert.rejects(service.logicalActivationResolve({ plan_id: plan.id }), /stale/);
-    assert.equal(VERSION, "0.12.45");
+    assertCurrentReleaseVersion(VERSION);
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });

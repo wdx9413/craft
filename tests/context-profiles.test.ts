@@ -3,6 +3,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { assertCurrentReleaseVersion } from "./release-version.ts";
 import { McpServer } from "../core/mcp.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftService, VERSION } from "../core/service.ts";
@@ -91,6 +92,6 @@ test("bounded context profiles remain separate from generic task-graph execution
       arguments: { graph_id: "mcp_graph", node_id: "one", status: "done" } } });
     assert.equal((advanced?.result as JsonObject).isError, false);
     assert.equal(((service.contextProfileAssemble({ profile_id: "mcp_context", query: "anything" }).profile as JsonObject).id), "mcp_context");
-    assert.equal(VERSION, "0.12.45");
+    assertCurrentReleaseVersion(VERSION);
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });

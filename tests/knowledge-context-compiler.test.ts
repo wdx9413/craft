@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { assertCurrentReleaseVersion } from "./release-version.ts";
 import { McpServer } from "../core/mcp.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftService, VERSION } from "../core/service.ts";
@@ -21,6 +22,6 @@ test("knowledge context compilation uses only reviewed, current, scoped claims",
     const bounded = service.wikiContextCompile({ query: "alpha", scope: "project:a", max_items: 1, max_chars: 100 }); assert.equal((bounded.included as JsonObject[]).length, 1); assert.equal((bounded.excluded as JsonObject[]).some((item) => item.reason === "budget"), true);
     const receipt = service.wikiContextBundleGet({ bundle_id: "bundle", version: 1 }).bundle as JsonObject; assert.equal(receipt.claim_refs instanceof Array, true); assert.equal((service.wikiContextBundleList({ query: "bundle" }).bundles as JsonObject[]).some((item) => item.id === "bundle"), true);
     const mcp = new McpServer(service, "full"); for (const [name, arguments_] of [["craft_wiki_context_compile", { query: "alpha" }], ["craft_wiki_context_bundle_get", { bundle_id: "bundle" }], ["craft_wiki_context_bundle_list", {}]] as [string, JsonObject][]) { const result = await mcp.handle({ id: name, method: "tools/call", params: { name, arguments: arguments_ } }); assert.equal((result?.result as JsonObject).isError, false); }
-    assert.equal(VERSION, "0.12.45");
+    assertCurrentReleaseVersion(VERSION);
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });

@@ -3,6 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { assertCurrentReleaseVersion } from "./release-version.ts";
 import { McpServer } from "../core/mcp.ts";
 import { AgentEvalLabKernel } from "../core/agent-eval-lab.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
@@ -21,7 +22,7 @@ async function fixture() {
 
 test("distinguishes portable, guarded, isolated and external autonomy", async () => {
   const f = await fixture(); const { store, service } = f;
-  assert.equal(VERSION, "0.12.45");
+  assertCurrentReleaseVersion(VERSION);
   assert.throws(() => service.autonomyLadderDecide({ effect: "nope" }), /unsupported/);
   const read = service.autonomyLadderDecide({ decision_id: "read", effect: "read_only" }); assert.equal((read.decision as JsonObject).mode, "portable_read"); assert.equal(service.autonomyLadderDecide({ decision_id: "read", effect: "read_only" }).idempotent, true);
   assert.throws(() => service.autonomyLadderDecide({ effect: "local_write" }), /Workspace and approval/);

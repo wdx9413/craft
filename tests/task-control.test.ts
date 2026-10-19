@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { assertCurrentReleaseVersion } from "./release-version.ts";
 import { McpServer } from "../core/mcp.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftService, VERSION } from "../core/service.ts";
@@ -90,7 +91,7 @@ test("task control pins one task boundary and materializes a deterministic deliv
     assert.equal((view.contract as JsonObject).launch_id, launch.id); assert.equal((view.delivery_loop as JsonObject).action, "deliver");
     const home = f.service.homeView({ limit: 10 });
     assert.equal(((home.task_controls as JsonObject[])[0]).action, "deliver");
-    assert.equal(VERSION, "0.12.45");
+    assertCurrentReleaseVersion(VERSION);
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 

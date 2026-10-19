@@ -4,6 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { assertCurrentReleaseVersion } from "./release-version.ts";
 import { McpServer, surfaceToolNames } from "../core/mcp.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftService, VERSION } from "../core/service.ts";
@@ -71,7 +72,7 @@ test("grants only healthy, scoped, one-time remote read authority and records bo
     assert.throws(() => full.handlers.craft_federated_delegation_revoke({ grant_id: grant.id, reason: "late", evidence_ids: [f.confirmed.id] }), /Terminal/);
     assert.equal((await full.handlers.craft_federated_delegation_reconcile({ grant_id: grant.id })).idempotent, true);
     assert.equal((await full.handlers.craft_federated_delegation_get({ grant_id: grant.id })).grant !== undefined, true);
-    assert.equal(VERSION, "0.12.45");
+    assertCurrentReleaseVersion(VERSION);
   } finally { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
