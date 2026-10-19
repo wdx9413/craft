@@ -1,10 +1,9 @@
 {
   "name": "craft-work-governance",
-  "version": "0.12.77",
+  "version": "0.12.78",
   "description": "Governs substantial work with durable tasks, evidence, verification, and reusable workflows.",
   "author": {
-    "name": "wdx9413",
-    "email": "wdx9413@users.noreply.github.com"
+    "name": "wdx9413"
   },
   "agents": [
     "./agents/craft-work-governance.md"

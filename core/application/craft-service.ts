@@ -223,6 +223,7 @@ function validateModelInput(args: JsonObject, id: string): CraftModelConfig {
 }
 
 export class CraftService extends ServiceFoundation {
+  readonly contentLanguage: string;
   contextToolsDiscover(args: JsonObject): JsonObject { return discoverContextTools(args); }
   readonly workControl: WorkControl;
   readonly forgeDispatch: ForgeDispatchCoordinator;
@@ -234,9 +235,11 @@ export class CraftService extends ServiceFoundation {
   constructor(store: CraftStore, semanticProvider?: EmbeddingProvider, isolatedAdapter?: unknown,
     dockerSandbox?: unknown, egressBroker?: unknown, hostOwnerId?: string, hostProfiles?: readonly import("../host-registry.ts").HostProfile[],
     modelProviders?: readonly import("../model-gateway.ts").ModelProviderSpec[],
-    modelTransport?: import("../model-gateway.ts").ModelTransport, traceArchiveBackends?: readonly TraceArchiveRuntimeBackend[]) {
+    modelTransport?: import("../model-gateway.ts").ModelTransport, traceArchiveBackends?: readonly TraceArchiveRuntimeBackend[],
+    contentLanguage = "zh-CN") {
     super(store, semanticProvider, isolatedAdapter as never, dockerSandbox as never, egressBroker as never, hostOwnerId,
       hostProfiles, modelProviders, modelTransport, traceArchiveBackends);
+    this.contentLanguage = contentLanguage;
     this.workControl = new WorkControl(store, {
       prepare: (args) => this.verifiedWorkLoopPrepareInternal(args),
       advance: (args) => this.verifiedWorkLoopAdvanceInternal(args),
@@ -553,7 +556,8 @@ export class CraftService extends ServiceFoundation {
     const config = await loadConfig(store.paths);
     const semanticProvider = config?.semanticSearch ? new OpenAiCompatibleEmbeddingProvider(config.semanticSearch.provider) : undefined;
     const declared = hostProfilesFromConfig(config?.hostProfiles);
-    const service = new CraftService(store, semanticProvider, undefined, undefined, undefined, hostOwnerId, declared);
+    const service = new CraftService(store, semanticProvider, undefined, undefined, undefined, hostOwnerId, declared,
+      undefined, undefined, undefined, config?.contentLanguage ?? "zh-CN");
     try { service.trace.maintain(); } catch { /* Call capture reports telemetry failures without blocking business work. */ }
     return service;
   }
@@ -592,7 +596,7 @@ export class CraftService extends ServiceFoundation {
       "maintenance_component", "maintenance_failure", "attention_item", "work_launch", "work_delivery", "delivery_loop", "delivery_evaluation_case", "delivery_evaluation_comparison", "delivery_evaluation_run", "platform_execution_profile", "platform_execution_preflight", "platform_execution_probe", "platform_execution_conformance", "task_run", "task_run_state", "task_run_handoff", "task_benchmark", "task_benchmark_pair", "task_benchmark_canary_sample", "state_snapshot", "verified_work_loop", "verified_work_loop_receipt", "verified_work_loop_decision", "human_state_event", "work_loop_invalidation", "eval_campaign", "eval_campaign_slot", "eval_campaign_report", "managed_write_guard", "managed_write_settlement", "adaptive_harness_recommendation", "project_knowledge_discovery", "project_knowledge_resolution", "project_knowledge_proposal", "acceptance_plan", "acceptance_check", "acceptance_assessment", "acceptance_evaluator", "acceptance_evaluation_job", "verified_iteration", "iteration_attempt", "strategy_recommendation", "runtime_assurance_attestation", "runtime_intervention", "runtime_assurance_campaign",
       "trajectory_script_proposal", "verified_script_run", "knowledge_claim", "wiki_page", "knowledge_relation", "wiki_context_bundle", "wiki_skill_candidate", "knowledge_evaluation_case", "knowledge_evaluation_run", "wiki_candidate_evaluation_attestation", "wiki_candidate_publication_authorization", "wiki_candidate_publication_package", "guided_work_brief", "execution_safety_preflight", "wiki_candidate_local_import", "autonomy_ladder_decision", "workspace_observation", "work_coordinator", "agent_eval_lab", "agent_eval_attempt", "evaluation_program", "evaluation_program_run", "enterprise_identity_provider", "enterprise_principal", "enterprise_adapter_binding", "enterprise_access_ticket", "a2a_agent_trust", "a2a_collaboration_session", "a2a_delegation", "a2a_delegation_receipt", "federated_agent_health", "federated_delegation_grant", "federated_artifact_grant", "federated_remote_receipt", "federated_remote_incident", "harness_topology", "harness_topology_selection", "runtime_readiness_assessment", "sealed_evaluation_case", "sealed_evaluation_access", "runtime_recovery_drill", "assured_work_pilot", "project_brain", "project_goal", "project_decision", "project_material", "project_outcome", "project_experience", "work_session", "long_task_checkpoint", "trust_profile", "web_operation", "web_operation_receipt"];
     kinds.push("untrusted_content", "untrusted_extraction", "decision_projection");
-    return { version: VERSION, data_root: this.store.paths.root,
+    return { version: VERSION, data_root: this.store.paths.root, content_language: this.contentLanguage,
       // Components compare this content-free identity before assuming they
       // share one local ledger. It identifies only the configured data space.
       data_space_id: dataSpaceId(this.store.paths.root),

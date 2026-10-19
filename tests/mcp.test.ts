@@ -10,6 +10,7 @@ import type { JsonObject } from "../core/infrastructure/store.ts";
 import { CORE_TOOLS, DOMAIN_SURFACE_NAMES, McpServer, TOOLS, domainSurfaceOf, surfaceToolNames } from "../core/mcp.ts";
 import { serveMcpStdio } from "../core/mcp-stdio.ts";
 import { craftPaths } from "../core/infrastructure/paths.ts";
+import { initializeConfig } from "../core/config.ts";
 import { CraftService } from "../core/service.ts";
 import { CraftStore } from "../core/infrastructure/store.ts";
 import { CRAFT_RELEASE_VERSION } from "../core/version.ts";
@@ -27,7 +28,8 @@ test("MCP negotiates protocols, lists tools, dispatches every handler, and repor
   const root = join(tmpdir(), `craft-mcp-${process.pid}-${Date.now()}`);
   await mkdir(root, { recursive: true });
   const store = await new CraftStore(craftPaths(root)).open();
-  const server = new McpServer(new CraftService(store));
+  await initializeConfig({ mode: "agent", contentLanguage: "ja-JP" }, craftPaths(root));
+  const server = new McpServer(await CraftService.open(store));
   try {
     assert.equal((await server.handle(null))?.error instanceof Object, true);
     assert.equal((await server.handle({ jsonrpc: "1.0", id: 0, method: "ping" }))?.error instanceof Object, true);
@@ -36,7 +38,10 @@ test("MCP negotiates protocols, lists tools, dispatches every handler, and repor
     assert.equal(await server.handle({ method: "x" }), undefined);
     assert.equal(await server.handle({ id: 1, method: "notifications/initialized" }), undefined);
     assert.equal(await server.handle({ jsonrpc: "2.0", method: "ping" }), undefined);
-    assert.equal(((await server.handle({ id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } }))?.result as Record<string, unknown>).protocolVersion, "2025-06-18");
+    const initialized = (await server.handle({ id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } }))?.result as Record<string, unknown>;
+    assert.equal(initialized.protocolVersion, "2025-06-18");
+    assert.match(String(initialized.instructions), /Experience text.*ja-JP/u);
+    assert.match(String(initialized.instructions), /Preserve user-authored statements and source evidence verbatim/u);
     assert.equal(((await server.handle({ id: 1, method: "initialize" }))?.result as Record<string, unknown>).protocolVersion, "2025-11-25");
     assert.deepEqual((await server.handle({ id: 2, method: "ping" }))?.result, {});
     assert.equal((((await server.handle({ id: 3, method: "tools/list" }))?.result as Record<string, unknown>).tools as unknown[]).length, TOOLS.length);
@@ -46,6 +51,8 @@ test("MCP negotiates protocols, lists tools, dispatches every handler, and repor
     assert.equal((await server.handle({ id: 5, method: "tools/call", params: [] }))?.error instanceof Object, true);
     assert.equal((await server.handle({ id: 5, method: "tools/call", params: { name: "craft_info", arguments: [] } }))?.error instanceof Object, true);
     assert.equal(((await server.handle({ id: 5, method: "tools/call", params: { name: "craft_info" } }))?.result as Record<string, unknown>).isError, false);
+    const info = (await server.handle({ id: 6, method: "tools/call", params: { name: "craft_info" } }))?.result as Record<string, unknown>;
+    assert.equal((info.structuredContent as Record<string, unknown>).content_language, "ja-JP");
     const invalidDiscovery = await server.handle({ id: 6, method: "tools/call", params: { name: "craft_context_tools_discover", arguments: { intent: "knowledge evaluation" } } });
     const invalidDiscoveryResult = invalidDiscovery?.result as Record<string, unknown>;
     const invalidDiscoveryFailure = invalidDiscoveryResult.structuredContent as Record<string, unknown>;

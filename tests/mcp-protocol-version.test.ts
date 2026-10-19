@@ -79,6 +79,7 @@ test("a client that does not negotiate gets the preferred revision, not a downgr
   const response = await mcp.handle({ jsonrpc: "2.0", id: 1, method: "initialize" });
   const result = response?.result as JsonObject;
   assert.equal(result.protocolVersion, MCP_PREFERRED_PROTOCOL_VERSION);
+  assert.match(String(result.instructions), /\(zh-CN\)/u);
   assert.equal("downgraded" in result, false);
 });
 

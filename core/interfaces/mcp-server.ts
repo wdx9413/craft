@@ -15,6 +15,7 @@ import { createActionHandlers } from "../application/actions/action-handlers.ts"
 import type { McpHandler } from "./mcp/handler-types.js";
 import { ComponentTraceKernel, type ComponentTraceResult } from "../component-trace.ts";
 import { validateJsonSchema, type JsonValue } from "../json-schema.ts";
+import { generatedTextLanguageInstruction } from "../config.ts";
 import { CONTEXT_ROUTED_TOOL_NAMES } from "../mcp/context-tools.ts";
 export { COMPONENT_SURFACES, COMPONENT_SURFACE_NAMES, DOMAIN_SURFACE_NAMES, SURFACE_NAMES, SURFACE_RULES, domainSurfaceOf } from "./mcp/surface-registry.ts";
 
@@ -128,7 +129,8 @@ export class McpServer {
       // defect the declaration/implementation check now exists to catch.
       const negotiation = negotiateProtocolVersion((request.params as JsonObject | undefined)?.protocolVersion);
       const base = { protocolVersion: negotiation.negotiated, capabilities: { tools: {}, experimental: { "craft/runtime-fingerprint": this.fingerprint } },
-        serverInfo: { name: "craft", version: VERSION } };
+        serverInfo: { name: "craft", version: VERSION },
+        instructions: `For newly generated Knowledge, Memory, and Experience text, follow Craft's configured content language: ${generatedTextLanguageInstruction(this.service.contentLanguage)} Preserve user-authored statements and source evidence verbatim; keep stable IDs, keys, and JSON property names unchanged.` };
       // A downgrade is reported rather than hidden. This build does not speak
       // 2026-07-28, and silently answering 2025-11-25 made "the server does not
       // speak this revision" indistinguishable from "the server pretends to".
