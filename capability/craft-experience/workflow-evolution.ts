@@ -25,7 +25,10 @@ export class WorkflowEvolutionKernel {
     if (args.sanitized !== true || args.content_stored === true) throw new Error("Workflow Evolution observations must be sanitized and content-free");
     const evidenceIds = strings(args.evidence_ids, "evidence_ids", 1); for (const evidenceId of evidenceIds) this.assertEvidence(evidenceId);
     const outcome = text(args.outcome, "outcome"); if (!OUTCOMES.has(outcome)) throw new Error("Workflow Evolution outcome is unsupported");
-    const source = { kind: text(args.source_kind, "source_kind"), id: text(args.source_id, "source_id"), digest: text(args.source_digest, "source_digest"), scope: args.scope === undefined ? null : text(args.scope, "scope") };
+    const sourceSessionId = args.source_session_id === undefined ? null : text(args.source_session_id, "source_session_id");
+    if (sourceSessionId && (sourceSessionId.length > 256 || /[\r\n\0]/u.test(sourceSessionId))) throw new Error("source_session_id must be a bounded Host session identifier");
+    const source = { kind: text(args.source_kind, "source_kind"), id: text(args.source_id, "source_id"), digest: text(args.source_digest, "source_digest"),
+      ...(sourceSessionId ? { session_id: sourceSessionId } : {}), scope: args.scope === undefined ? null : text(args.scope, "scope") };
     let verification: JsonObject | null = null;
     if (args.verification !== undefined) {
       const receipt = args.verification as JsonObject;
@@ -75,6 +78,15 @@ export class WorkflowEvolutionKernel {
     if (observations.some((item) => item.scenario_key !== scenarioKey || item.lifecycle !== "accepted")) throw new Error("Workflow Evolution observations do not match the scenario");
     if (new Set(observations.map((item) => stableDigest(item.scenario_signature ?? { digest: stableDigest(String(item.scenario_key)), source: "legacy_scenario_key" }))).size !== 1) throw new Error("Workflow Evolution observations do not share a Scenario Signature");
     if (new Set(observations.map((item) => `${(item.source as JsonObject).kind}:${(item.source as JsonObject).id}:${(item.source as JsonObject).digest}`)).size < 2) throw new Error("Workflow Evolution requires independent source records");
+    const hostSources = observations.filter(item => String((item.source as JsonObject).kind).startsWith("host:"));
+    if (hostSources.length > 0) {
+      if (hostSources.some(item => typeof (item.source as JsonObject).session_id !== "string" || !(item.source as JsonObject).session_id)) {
+        throw new Error("Workflow Evolution Host observations require source session identifiers");
+      }
+      if (new Set(hostSources.map(item => String((item.source as JsonObject).session_id))).size !== hostSources.length) {
+        throw new Error("Workflow Evolution requires independent Host sessions");
+      }
+    }
     const axes = strings(args.design_axes, "design_axes", 1); if (axes.length > 2 || axes.some((axis) => !AXES.has(axis))) throw new Error("Workflow Evolution may change at most two supported design axes");
     const procedureKind = text(args.procedure_kind ?? "workflow", "procedure_kind"); if (!PROCEDURE_KINDS.has(procedureKind)) throw new Error("Workflow Evolution procedure_kind is unsupported");
     const graphEvidence = observations.some((item) => Array.isArray(item.execution_shape) && (item.execution_shape as unknown[]).some((shape) => ["branch", "parallel_join", "approval", "recovery", "compensation"].includes(String(shape))));

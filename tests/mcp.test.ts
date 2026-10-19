@@ -14,6 +14,15 @@ import { CraftService } from "../core/service.ts";
 import { CraftStore } from "../core/infrastructure/store.ts";
 import { CRAFT_RELEASE_VERSION } from "../core/version.ts";
 
+test("Experience MCP contract carries the exact source Host session identifier", () => {
+  const properties = (toolName: string) => {
+    const tool = TOOLS.find(item => item.name === toolName) as unknown as JsonObject | undefined;
+    return (tool?.inputSchema as JsonObject | undefined)?.properties as JsonObject | undefined;
+  };
+  assert.equal((properties("craft_learning_cycle_finalize")?.session_id as JsonObject | undefined)?.type, "string");
+  assert.equal((properties("craft_experience_observe")?.source_session_id as JsonObject | undefined)?.type, "string");
+});
+
 test("MCP negotiates protocols, lists tools, dispatches every handler, and reports errors", async () => {
   const root = join(tmpdir(), `craft-mcp-${process.pid}-${Date.now()}`);
   await mkdir(root, { recursive: true });

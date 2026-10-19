@@ -273,13 +273,14 @@ test("Experience hooks persist only redacted verified signals and propose after 
   try {
     const bridge = new CodexHookBridge(f.service); const cwd = f.root;
     for (const turn of ["one", "two"]) {
-      await bridge.handle("experience", { hook_event_name: "UserPromptSubmit", cwd, session_id: "session", turn_id: turn, prompt: "Implement a verified change" });
-      await bridge.handle("experience", { hook_event_name: "PostToolUse", cwd, session_id: "session", turn_id: turn, tool_name: "apply_patch", tool_input: { patch: "secret=abcdefghijklmnop" } });
-      await bridge.handle("experience", { hook_event_name: "PostToolUse", cwd, session_id: "session", turn_id: turn, tool_name: "Bash", tool_input: { command: "pnpm test" }, tool_response: { exit_code: 0 } });
-      await bridge.handle("experience", { hook_event_name: "Stop", cwd, session_id: "session", turn_id: turn, scenario_key: "coding.feature-implementation" });
+      const session_id = `session-${turn}`;
+      await bridge.handle("experience", { hook_event_name: "UserPromptSubmit", cwd, session_id, turn_id: turn, prompt: "Implement a verified change" });
+      await bridge.handle("experience", { hook_event_name: "PostToolUse", cwd, session_id, turn_id: turn, tool_name: "apply_patch", tool_input: { patch: "secret=abcdefghijklmnop" } });
+      await bridge.handle("experience", { hook_event_name: "PostToolUse", cwd, session_id, turn_id: turn, tool_name: "Bash", tool_input: { command: "pnpm test" }, tool_response: { exit_code: 0 } });
+      await bridge.handle("experience", { hook_event_name: "Stop", cwd, session_id, turn_id: turn, scenario_key: "coding.feature-implementation" });
     }
     for (const scenario_key of ["coding.feature-implementation", "bad scenario", "coding.other-scenario"]) {
-      await bridge.handle("experience", { hook_event_name: "Stop", cwd, session_id: "session", turn_id: "two", scenario_key });
+      await bridge.handle("experience", { hook_event_name: "Stop", cwd, session_id: "session-two", turn_id: "two", scenario_key });
     }
     const journals = f.store.list("codex_hook_turn", 10);
     assert.equal(journals.length, 2);
@@ -287,6 +288,7 @@ test("Experience hooks persist only redacted verified signals and propose after 
       .every(item => item.scenario_key === "coding.feature-implementation")));
     assert.doesNotMatch(JSON.stringify(journals), /abcdefghijklmnop|pnpm test/u);
     assert.equal(f.store.list("workflow_evolution_observation", 10).length, 2);
+    assert.deepEqual(f.store.list("workflow_evolution_observation", 10).map(item => (item.source as JsonObject).session_id).sort(), ["session-one", "session-two"]);
     const requests = f.store.list("workflow_evolution_request", 10);
     assert.equal(requests.length, 1);
     assert.equal(requests[0]!.procedure_kind, "workflow");
@@ -299,7 +301,7 @@ test("Experience hooks persist only redacted verified signals and propose after 
 test("explicit Experience scenario aligns a legacy journal with no signal array", async () => {
   const f = await fixture();
   try {
-    const bridge = new CodexHookBridge(f.service), base = { cwd: f.root, session_id: "legacy-scenario", turn_id: "turn" };
+    const bridge = new CodexHookBridge(f.service), base = { cwd: f.root, turn_id: "turn" };
     await bridge.handle("experience", { ...base, hook_event_name: "UserPromptSubmit", prompt: "verify a legacy turn" });
     await bridge.handle("experience", { ...base, hook_event_name: "PostToolUse", tool_name: "Edit" });
     await bridge.handle("experience", { ...base, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "pnpm test" }, tool_response: { exit_code: 0 } });
@@ -313,6 +315,7 @@ test("explicit Experience scenario aligns a legacy journal with no signal array"
     assert.deepEqual(finalized.signals, []);
     assert.equal(typeof finalized.closed_at, "string");
     assert.equal(f.store.list("workflow_evolution_observation", 10).length, 1);
+    assert.equal(((f.store.list("workflow_evolution_observation", 10)[0]!.source as JsonObject).session_id), undefined);
   } finally { await dispose(f); }
 });
 
@@ -329,15 +332,16 @@ test("project Experience scenario catalog uses exact mappings and leaves unmappe
     assert.equal(existsSync(join(f.store.paths.experienceDir, "projects", projectId, "experience-scenarios.json")), false);
     const bridge = new CodexHookBridge(f.service), base = { cwd: f.root, session_id: "catalog-session" };
     for (const turn_id of ["one", "two"]) {
-      await bridge.handle("experience", { ...base, turn_id, hook_event_name: "UserPromptSubmit", prompt: "make a verified project change" });
-      await bridge.handle("experience", { ...base, turn_id, hook_event_name: "PostToolUse", tool_name: "Edit" });
-      await bridge.handle("experience", { ...base, turn_id, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "pnpm test:focused" }, tool_response: { exit_code: 0 } });
+      const session_id = `catalog-${turn_id}`;
+      await bridge.handle("experience", { ...base, session_id, turn_id, hook_event_name: "UserPromptSubmit", prompt: "make a verified project change" });
+      await bridge.handle("experience", { ...base, session_id, turn_id, hook_event_name: "PostToolUse", tool_name: "Edit" });
+      await bridge.handle("experience", { ...base, session_id, turn_id, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "pnpm test:focused" }, tool_response: { exit_code: 0 } });
       const journal = f.store.list("codex_hook_turn", 10).find(item => item.turn_id === turn_id)!;
       assert.deepEqual((journal.signals as JsonObject[]).map(item => ({ kind: item.kind, outcome: item.outcome, scenario_key: item.scenario_key })), [
         { kind: "edit", outcome: "unknown", scenario_key: undefined }, { kind: "verification", outcome: "passed", scenario_key: "coding.test-failure-recovery" },
       ]);
       assert.equal(journal.scenario_key, "coding.test-failure-recovery");
-      await bridge.handle("experience", { ...base, turn_id, hook_event_name: "Stop" });
+      await bridge.handle("experience", { ...base, session_id, turn_id, hook_event_name: "Stop" });
     }
     const observations = f.store.list("workflow_evolution_observation", 10);
     assert.equal(observations.length, 2);
@@ -382,13 +386,14 @@ test("Experience scenario catalogs keep coarse and fine identities distinct thro
     await writeFile(catalogPath, JSON.stringify(catalog("engineering.change")));
     const bridge = new CodexHookBridge(f.service), base = { cwd: f.root, session_id: "hierarchical-scenarios" };
     for (const turn_id of ["one", "two"]) {
-      await bridge.handle("experience", { ...base, turn_id, hook_event_name: "UserPromptSubmit", prompt: "repair the type check" });
-      await bridge.handle("experience", { ...base, turn_id, hook_event_name: "PostToolUse", tool_name: "Edit" });
-      await bridge.handle("experience", { ...base, turn_id, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "pnpm test:focused" }, tool_response: { exit_code: 0 } });
+      const session_id = `hierarchical-${turn_id}`;
+      await bridge.handle("experience", { ...base, session_id, turn_id, hook_event_name: "UserPromptSubmit", prompt: "repair the type check" });
+      await bridge.handle("experience", { ...base, session_id, turn_id, hook_event_name: "PostToolUse", tool_name: "Edit" });
+      await bridge.handle("experience", { ...base, session_id, turn_id, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "pnpm test:focused" }, tool_response: { exit_code: 0 } });
       const turn = f.store.list("codex_hook_turn", 10).find(item => item.turn_id === turn_id)!;
       assert.equal(turn.scenario_key, "engineering.change.typescript-tests");
       assert.equal(turn.coarse_scenario_key, "engineering.change");
-      await bridge.handle("experience", { ...base, turn_id, hook_event_name: "Stop" });
+      await bridge.handle("experience", { ...base, session_id, turn_id, hook_event_name: "Stop" });
     }
     const observations = f.store.list("workflow_evolution_observation", 10);
     assert.equal(observations.length, 2);
@@ -577,7 +582,7 @@ test("MCP Host completion enters the same verified Experience proposal loop idem
     const receiptId = String((context.receipt as JsonObject).id);
     const verifierCommand = "pnpm test:feature";
     const verifierDigest = `sha256:${createHash("sha256").update(JSON.stringify(verifierCommand)).digest("hex")}`;
-    const call = async (taskId: string) => server.handle({ jsonrpc: "2.0", id: taskId, method: "tools/call", params: { name: "craft_learning_cycle_finalize", arguments: { host: "mcp_host", task_id: taskId, turn_id: "turn", context_receipt_id: receiptId, verified: true, verification_outcome: taskId === "task-one" ? "passed" : "failed", verification_ref: `test-run:${taskId}`, scenario_key: "coding.feature-implementation", scenario_definition: { summary: "实现功能并验证改动", applies_when: "项目代码发生变化且需要运行验收", excludes: "只读咨询或纯文档任务" }, coarse_scenario_key: "engineering.code-change", scenario_verifier_digest: verifierDigest } } }) as Promise<any>;
+    const call = async (taskId: string) => server.handle({ jsonrpc: "2.0", id: taskId, method: "tools/call", params: { name: "craft_learning_cycle_finalize", arguments: { host: "mcp_host", task_id: taskId, turn_id: "turn", session_id: `session-${taskId}`, context_receipt_id: receiptId, verified: true, verification_outcome: taskId === "task-one" ? "passed" : "failed", verification_ref: `test-run:${taskId}`, scenario_key: "coding.feature-implementation", scenario_definition: { summary: "实现功能并验证改动", applies_when: "项目代码发生变化且需要运行验收", excludes: "只读咨询或纯文档任务" }, coarse_scenario_key: "engineering.code-change", scenario_verifier_digest: verifierDigest } } }) as Promise<any>;
     const first = await call("task-one"); assert.equal(first.result.structuredContent.status, "observed");
     const replay = await call("task-one"); assert.equal(replay.result.structuredContent.idempotent, true);
     const second = await call("task-two"); assert.equal(second.result.structuredContent.status, "candidate_request");
@@ -675,6 +680,8 @@ test("MCP learning completion rejects unbound, malformed, or unverified terminal
     const receiptId = String((context.receipt as JsonObject).id);
     const base = { host: "mcp_host", task_id: "task", turn_id: "turn", context_receipt_id: receiptId, verified: true, verification_outcome: "passed", verification_ref: "test:verified", scenario_key: "coding.feature-implementation" };
     const call = (args: JsonObject) => server.handle({ jsonrpc: "2.0", id: "invalid", method: "tools/call", params: { name: "craft_learning_cycle_finalize", arguments: args } }) as Promise<any>;
+    assert.throws(() => f.service.learningCycleFinalize({ ...base, session_id: `session-${"x".repeat(257)}` }), /bounded Host session identifier/u);
+    assert.throws(() => f.service.learningCycleFinalize({ ...base, session_id: "bad\nsession" }), /bounded Host session identifier/u);
     assert.equal((await call({ ...base, context_receipt_id: String((context.pack_receipt as JsonObject).id), verified: false })).result.structuredContent.status, "ignored");
     for (const args of [{ ...base, host: "MCP" }, { ...base, verification_outcome: "unknown" }, { ...base, context_receipt_id: "missing" }, { ...base, verified: false }]) {
       const result = await call(args); assert.equal(result.result.isError, args.verified === false ? false : true);
@@ -796,12 +803,12 @@ test("MCP completion keeps unclassified task observations out of cross-task Expe
     assert.equal(afterRetirement.next_action, "stable_scenario_key_required_for_cross_task_learning");
     assert.equal(((afterRetirement.observation as JsonObject).scenario_signature as JsonObject).source, "legacy_scenario_key",
       "retired Experience scenes must retain only the unclassified legacy digest");
-    const fineOnly = f.service.learningCycleFinalize({ ...base, task_id: "parent-late-one", scenario_key: "engineering.parent-late" });
-    const sameTaskParentAdded = f.service.learningCycleFinalize({ ...base, task_id: "parent-late-one", scenario_key: "engineering.parent-late", coarse_scenario_key: "engineering" });
+    const fineOnly = f.service.learningCycleFinalize({ ...base, session_id: "parent-late-session-one", task_id: "parent-late-one", scenario_key: "engineering.parent-late" });
+    const sameTaskParentAdded = f.service.learningCycleFinalize({ ...base, session_id: "parent-late-session-one", task_id: "parent-late-one", scenario_key: "engineering.parent-late", coarse_scenario_key: "engineering" });
     assert.equal(sameTaskParentAdded.idempotent, true);
     assert.equal((sameTaskParentAdded.observation as JsonObject).id, (fineOnly.observation as JsonObject).id);
     assert.equal((sameTaskParentAdded.scenario_catalog as JsonObject).coarse_scenario_key, "engineering");
-    const parentAdded = f.service.learningCycleFinalize({ ...base, task_id: "parent-late-two", scenario_key: "engineering.parent-late", coarse_scenario_key: "engineering" });
+    const parentAdded = f.service.learningCycleFinalize({ ...base, session_id: "parent-late-session-two", task_id: "parent-late-two", scenario_key: "engineering.parent-late", coarse_scenario_key: "engineering" });
     assert.equal(parentAdded.status, "candidate_request");
     assert.equal((fineOnly.observation as JsonObject).scenario_key, (parentAdded.observation as JsonObject).scenario_key);
     assert.equal((fineOnly.observation as JsonObject).scenario_signature && ((fineOnly.observation as JsonObject).scenario_signature as JsonObject).coarse_scenario_key, undefined);
@@ -816,7 +823,7 @@ test("Host scene classification refines the same terminal observation before ind
   const f = await fixture();
   try {
     const context = await f.service.contextOpen({ project_root: f.root, query: "verified feature work", include_codebase: false });
-    const base = { host: "mcp_host", turn_id: "refine-turn-1", context_receipt_id: String((context.receipt as JsonObject).id), verified: true,
+    const base = { host: "mcp_host", session_id: "refine-session-one", turn_id: "refine-turn-1", context_receipt_id: String((context.receipt as JsonObject).id), verified: true,
       verification_outcome: "passed", verification_ref: "test:verified" };
     const unclassified = f.service.learningCycleFinalize({ ...base, task_id: "refine-task-1" });
     const original = unclassified.observation as JsonObject;
@@ -827,13 +834,14 @@ test("Host scene classification refines the same terminal observation before ind
     const legacyEvidenceMetadata = { ...(completionEvidence.metadata as JsonObject) };
     delete legacyEvidenceMetadata.terminal_identity_digest;
     f.store.save("evidence", completionEvidenceId, { ...completionEvidence, metadata: legacyEvidenceMetadata });
+    const legacyEvidence = f.service.evidenceRecord({ evidence_id: "legacy-refinement-evidence", source_type: "program", confidence: "confirmed", claim: "legacy observation evidence" });
     f.store.create("workflow_evolution_observation", "legacy-refinement", { scenario_key: "unclassified:legacy-refinement",
       scenario_signature: { schema: "craft.scenario-signature.v1", source: "unclassified" },
-      source: { kind: "host:mcp_host", id: "legacy-refinement-task", digest: "legacy-refinement-digest", scope: originalSource.scope },
-      outcome: "passed", evidence_ids: original.evidence_ids, sanitized: true, content_stored: false, lifecycle: "accepted", identity_digest: "legacy" });
+      source: { kind: "host:mcp_host", id: "legacy-refinement-task", digest: "legacy-refinement-digest", session_id: "legacy-refinement-session", scope: originalSource.scope },
+      outcome: "passed", evidence_ids: [legacyEvidence.id], sanitized: true, content_stored: false, lifecycle: "accepted", identity_digest: "legacy" });
     const legacyRefinement = f.service.workflowEvolutionObserve({ observation_id: "legacy-refinement", scenario_key: "scenario:legacy-refinement",
-      source_kind: "host:mcp_host", source_id: "legacy-refinement-task", source_digest: "legacy-refinement-digest", outcome: "passed", scope: originalSource.scope,
-      scenario_signature: { schema: "craft.scenario-signature.v1", scenario_key: "engineering.tests" }, evidence_ids: original.evidence_ids,
+      source_kind: "host:mcp_host", source_id: "legacy-refinement-task", source_session_id: "legacy-refinement-session", source_digest: "legacy-refinement-digest", outcome: "passed", scope: originalSource.scope,
+      scenario_signature: { schema: "craft.scenario-signature.v1", scenario_key: "engineering.tests" }, evidence_ids: [legacyEvidence.id],
       sanitized: true, content_stored: false });
     assert.equal(legacyRefinement.refined, true);
     assert.throws(() => f.service.workflowEvolutionObserve({ observation_id: original.id, scenario_key: "scenario:missing-classification",
@@ -848,9 +856,10 @@ test("Host scene classification refines the same terminal observation before ind
       scenario_signature: { schema: "craft.scenario-signature.v1", scenario_key: "engineering.tests" }, evidence_ids: original.evidence_ids,
       sanitized: true, content_stored: false }), /idempotency conflict/u);
     const verifiedInput = { observation_id: "verification-refinement", scenario_key: "unclassified:verification-refinement",
-      source_kind: "host:mcp_host", source_id: "verification-refinement-task", source_digest: "verification-refinement-digest", outcome: "passed",
+      source_kind: "host:mcp_host", source_id: "verification-refinement-task", source_session_id: "verification-refinement-session", source_digest: "verification-refinement-digest", outcome: "passed",
       scope: `project:${String(((context.receipt as JsonObject).scope as JsonObject).id)}`, scenario_signature: { schema: "craft.scenario-signature.v1", source: "unclassified" },
-      evidence_ids: original.evidence_ids, failure_type: "verified-run", verification: { contract_ref: "acceptance:test", workspace_revision: "revision:test",
+      evidence_ids: [String(f.service.evidenceRecord({ evidence_id: "verification-refinement-evidence", source_type: "program", confidence: "confirmed", claim: "verification refinement evidence" }).id)],
+      failure_type: "verified-run", verification: { contract_ref: "acceptance:test", workspace_revision: "revision:test",
         evidence_digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", producer: "test", started_at: "2026-10-17T00:00:00.000Z",
         completed_at: "2026-10-17T00:00:01.000Z", exit_code: 0 }, sanitized: true, content_stored: false };
     f.service.workflowEvolutionObserve(verifiedInput);
@@ -869,7 +878,7 @@ test("Host scene classification refines the same terminal observation before ind
     assert.equal((replay.observation as JsonObject).id, original.id);
     assert.equal(replay.idempotent, true);
     assert.throws(() => f.service.learningCycleFinalize({ ...base, task_id: "refine-task-1", scenario_key: "engineering.build" }), /idempotency conflict/u);
-    const independent = f.service.learningCycleFinalize({ ...base, turn_id: "refine-turn-2", task_id: "refine-task-2", scenario_key: "engineering.tests" });
+    const independent = f.service.learningCycleFinalize({ ...base, session_id: "refine-session-two", turn_id: "refine-turn-2", task_id: "refine-task-2", scenario_key: "engineering.tests" });
     assert.equal(independent.status, "candidate_request");
     assert.equal(f.store.list("workflow_evolution_observation", 10).length, 4);
   } finally { await dispose(f); }
@@ -881,15 +890,15 @@ test("verified repeated tasks create a pinned distillation ticket readable throu
     f.store.create("evaluation_model_profile", "experience-distiller", { provider: "qwen", model: "qwen-plus", lifecycle: "active",
       purposes: ["workflow_evolution"], network_execution_enabled: false, identity_digest: "profile-digest" });
     const context = await f.service.contextOpen({ project_root: f.root, query: "verified work", include_codebase: false });
-    const base = { host: "mcp_host", turn_id: "turn", context_receipt_id: String((context.receipt as JsonObject).id), verified: true,
+    const base = { host: "mcp_host", session_id: "distill-session-one", turn_id: "turn", context_receipt_id: String((context.receipt as JsonObject).id), verified: true,
       verification_outcome: "passed", verification_ref: "test:verification", scenario_key: "coding.distillation" };
     f.service.learningCycleFinalize({ ...base, task_id: "first" });
-    const finalized = f.service.learningCycleFinalize({ ...base, task_id: "second" });
+    const finalized = f.service.learningCycleFinalize({ ...base, session_id: "distill-session-two", task_id: "second" });
     assert.equal(finalized.status, "candidate_request");
     const ticket = finalized.model_ticket as JsonObject;
     assert.equal(ticket.status, "needs_enablement");
     f.store.save("evaluation_model_ticket", String(ticket.id), { ...ticket, next_action: null });
-    const replay = f.service.learningCycleFinalize({ ...base, task_id: "second" });
+    const replay = f.service.learningCycleFinalize({ ...base, session_id: "distill-session-two", task_id: "second" });
     assert.equal(replay.status, "candidate_request"); assert.equal(replay.idempotent, true);
     assert.equal(replay.distillation_mode, "current_host_model");
     assert.equal(replay.next_action, "current_host_model_reads_pinned_request_submits_candidate_then_runs_ordered_evaluation_gates");
@@ -905,7 +914,7 @@ test("verified repeated tasks create a pinned distillation ticket readable throu
     const submitted = f.service.workflowEvolutionProposalSubmit({ request_id: String((finalized.request as JsonObject).id), workflow_id: "distilled-workflow",
       name: "Verified completion", description: "Check the terminal verifier.", inputs: [], steps: [{ id: "verify", type: "assertion" }] });
     assert.equal((submitted.procedure as JsonObject).lifecycle, "candidate");
-    const afterSubmission = f.service.learningCycleFinalize({ ...base, task_id: "second" });
+    const afterSubmission = f.service.learningCycleFinalize({ ...base, session_id: "distill-session-two", task_id: "second" });
     assert.equal(afterSubmission.status, "candidate_submitted"); assert.equal(afterSubmission.idempotent, true);
   } finally { await dispose(f); }
 });
@@ -914,11 +923,11 @@ test("the current Host model can distill and submit a verified request without a
   const f = await fixture();
   try {
     const context = await f.service.contextOpen({ project_root: f.root, query: "verified repeated work", include_codebase: false });
-    const base = { host: "mcp_host", turn_id: "turn", context_receipt_id: String((context.receipt as JsonObject).id), verified: true,
+    const base = { host: "mcp_host", session_id: "host-distill-session-one", turn_id: "turn", context_receipt_id: String((context.receipt as JsonObject).id), verified: true,
       verification_outcome: "passed", verification_ref: "test:host-distillation", scenario_key: "coding.host-distillation",
       scenario_definition: { summary: "Deliver and verify a code change", applies_when: "The project changed and its verifier completed", excludes: "Read-only advice without a verified change" } };
     assert.equal(f.service.learningCycleFinalize({ ...base, task_id: "host-first" }).status, "observed");
-    const finalized = f.service.learningCycleFinalize({ ...base, task_id: "host-second" });
+    const finalized = f.service.learningCycleFinalize({ ...base, session_id: "host-distill-session-two", task_id: "host-second" });
     assert.equal(finalized.status, "candidate_request");
     assert.equal(finalized.model_ticket, null);
     assert.equal(finalized.distillation_mode, "current_host_model");
@@ -945,10 +954,10 @@ test("Codex learning Host gets a queued gpt-6-luna Experience ticket without Cra
   const f = await fixture();
   try {
     const context = await f.service.contextOpen({ project_root: f.root, query: "verified repeated work", include_codebase: false });
-    const base = { host: "mcp_host", turn_id: "codex-learning-turn", context_receipt_id: String((context.receipt as JsonObject).id),
+    const base = { host: "mcp_host", session_id: "codex-learning-session-one", turn_id: "codex-learning-turn", context_receipt_id: String((context.receipt as JsonObject).id),
       verified: true, verification_outcome: "passed", verification_ref: "test:codex-learning", scenario_key: "coding.codex-learning" };
     assert.equal(f.service.learningCycleFinalize({ ...base, task_id: "codex-first" }).status, "observed");
-    const finalized = f.service.learningCycleFinalize({ ...base, task_id: "codex-second" });
+    const finalized = f.service.learningCycleFinalize({ ...base, session_id: "codex-learning-session-two", task_id: "codex-second" });
     assert.equal(finalized.status, "candidate_request");
     const ticket = finalized.model_ticket as JsonObject;
     assert.equal(ticket.status, "ready_for_adapter");
@@ -973,10 +982,10 @@ test("a single configured Craft model bootstraps a bounded workflow evolution pr
     model: "small-test", apiKeyEnv: envName, supportsTools: false }]);
   try {
     const context = await f.service.contextOpen({ project_root: f.root, query: "verified work", include_codebase: false });
-    const base = { host: "mcp_host", turn_id: "turn", context_receipt_id: String((context.receipt as JsonObject).id), verified: true,
+    const base = { host: "mcp_host", session_id: "auto-profile-session-one", turn_id: "turn", context_receipt_id: String((context.receipt as JsonObject).id), verified: true,
       verification_outcome: "passed", verification_ref: "test:verification", scenario_key: "coding.auto-profile" };
     assert.equal(f.service.learningCycleFinalize({ ...base, task_id: "first" }).status, "observed");
-    const finalized = f.service.learningCycleFinalize({ ...base, task_id: "second" });
+    const finalized = f.service.learningCycleFinalize({ ...base, session_id: "auto-profile-session-two", task_id: "second" });
     assert.equal(finalized.status, "candidate_request");
     const ticket = finalized.model_ticket as JsonObject;
     assert.match(String(ticket.profile_id), /^evaluation_model_profile_auto_/u);
@@ -1262,7 +1271,7 @@ test("verified Hook tasks create a scoped classification ticket from a redacted 
     assert.equal(context.task_goal, "修复 Experience 场景分类触发链路");
     assert.equal(context.sanitized, true);
     assert.equal(context.content_stored, false);
-    const replay = f.service.learningCycleFinalize({ host: context.host, task_id: context.task_id, turn_id: context.turn_id,
+    const replay = f.service.learningCycleFinalize({ host: context.host, task_id: context.task_id, session_id: context.source_session_id, turn_id: context.turn_id,
       context_receipt_id: context.context_receipt_id, verified: true, verification_outcome: context.outcome,
       verification_ref: context.verification_ref, project_root: f.root, scenario_context: { task_goal: context.task_goal,
         effect_summary: context.effect_summary, sanitized: true, content_stored: false }, observed_paths: context.observed_paths,
@@ -1270,7 +1279,7 @@ test("verified Hook tasks create a scoped classification ticket from a redacted 
     assert.equal(replay.idempotent, true);
     const tamperedReference = f.store.find("experience_scenario_classification_request_ref", requestId)!;
     f.store.save("experience_scenario_classification_request_ref", requestId, { ...tamperedReference, identity_digest: "sha256:tampered" });
-    assert.throws(() => f.service.learningCycleFinalize({ host: context.host, task_id: context.task_id, turn_id: context.turn_id,
+    assert.throws(() => f.service.learningCycleFinalize({ host: context.host, task_id: context.task_id, session_id: context.source_session_id, turn_id: context.turn_id,
       context_receipt_id: context.context_receipt_id, verified: true, verification_outcome: context.outcome,
       verification_ref: context.verification_ref, project_root: f.root, scenario_context: { task_goal: context.task_goal,
         effect_summary: context.effect_summary, sanitized: true, content_stored: false }, observed_paths: context.observed_paths,
@@ -1283,7 +1292,7 @@ test("verified Hook tasks create a scoped classification ticket from a redacted 
     assert.throws(() => f.service.evaluationModelTicketComplete({ ticket_id: ticket.id, result_digest: resultDigest }), /exact resolved request/u);
     const requestContext = request.context as JsonObject;
     f.store.save("experience_scenario_classification_request_ref", requestId, { ...hookReference, identity_digest: "sha256:tampered" });
-    assert.throws(() => f.service.learningCycleFinalize({ host: requestContext.host, task_id: requestContext.task_id, turn_id: requestContext.turn_id,
+    assert.throws(() => f.service.learningCycleFinalize({ host: requestContext.host, task_id: requestContext.task_id, session_id: requestContext.source_session_id, turn_id: requestContext.turn_id,
       context_receipt_id: requestContext.context_receipt_id, verified: true, verification_outcome: requestContext.outcome,
       verification_ref: requestContext.verification_ref, project_root: f.root, scenario_context: {
         task_goal: requestContext.task_goal, effect_summary: requestContext.effect_summary, sanitized: true, content_stored: false },

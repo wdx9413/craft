@@ -147,6 +147,8 @@ export function installLearningCycleMethods(serviceClass: typeof CraftService): 
     const host = requiredText("host");
     if (!/^[a-z][a-z0-9_-]{0,63}$/u.test(host)) throw new Error("host must be a bounded Host identifier");
     const taskId = requiredText("task_id"), turnId = requiredText("turn_id"), receiptId = requiredText("context_receipt_id");
+    const sessionId = args.session_id === undefined ? null : requiredText("session_id");
+    if (sessionId && (sessionId.length > 256 || /[\r\n\0]/u.test(sessionId))) throw new Error("session_id must be a bounded Host session identifier");
     const outcome = requiredText("verification_outcome");
     if (outcome !== "passed" && outcome !== "failed") throw new Error("verification_outcome must be passed or failed");
     const verificationRef = requiredText("verification_ref");
@@ -192,7 +194,7 @@ export function installLearningCycleMethods(serviceClass: typeof CraftService): 
     // A Hook may finalize with its own task id before the Host model supplies
     // semantic classification. Reuse that one unclassified completion when
     // the later call is bound to the same terminal evidence and turn.
-    const terminalDigest = stableDigest({ host, turn_id: turnId, context_receipt_id: receipt.id,
+    const terminalDigest = stableDigest({ host, session_id: sessionId, turn_id: turnId, context_receipt_id: receipt.id,
       verification_ref_digest: stableDigest(verificationRef), outcome, scope });
     let effectiveTaskId = taskId;
     if (scenarioInput !== undefined || scenarioContext !== null) {
@@ -213,7 +215,7 @@ export function installLearningCycleMethods(serviceClass: typeof CraftService): 
       const priorTaskId = (prior?.source as JsonObject | undefined)?.id;
       if (typeof priorTaskId === "string") effectiveTaskId = priorTaskId;
     }
-    const identity = { host, task_id: effectiveTaskId, turn_id: turnId, context_receipt_id: receipt.id, verification_ref: verificationRef, outcome, scope };
+    const identity = { host, source_session_id: sessionId, task_id: effectiveTaskId, turn_id: turnId, context_receipt_id: receipt.id, verification_ref: verificationRef, outcome, scope };
     const sourceDigest = stableDigest(identity);
     // Outcomes belong to observations, not scenario identity. Otherwise a
     // successful and failed run could never be compared as one procedure.
@@ -223,10 +225,10 @@ export function installLearningCycleMethods(serviceClass: typeof CraftService): 
       ? { schema: "craft.scenario-signature.v1", project: scope, source: "unclassified" } : null);
     const scenarioKey = scenarioSignature ? `scenario:${stableDigest(scenarioSignature).slice(-24)}` : null;
     const evidenceId = `evidence_learning_cycle_${sourceDigest.slice(-20)}`;
-    const evidence = this.store.find("evidence", evidenceId) ?? this.evidenceRecord({ evidence_id: evidenceId, source_type: "host_completion_signal", confidence: "bounded", claim: `Host reported terminal verification ${outcome}.`, locator: `context-receipt:${receipt.id}`, metadata: { provenance: "host_completion_signal", terminal_identity_digest: terminalDigest, host, task_id: effectiveTaskId, turn_id: turnId, verification_ref_digest: stableDigest(verificationRef), context_receipt_id: receipt.id, content_stored: false } });
+    const evidence = this.store.find("evidence", evidenceId) ?? this.evidenceRecord({ evidence_id: evidenceId, source_type: "host_completion_signal", confidence: "bounded", claim: `Host reported terminal verification ${outcome}.`, locator: `context-receipt:${receipt.id}`, metadata: { provenance: "host_completion_signal", terminal_identity_digest: terminalDigest, host, ...(sessionId ? { source_session_id: sessionId } : {}), task_id: effectiveTaskId, turn_id: turnId, verification_ref_digest: stableDigest(verificationRef), context_receipt_id: receipt.id, content_stored: false } });
     const observationId = `workflow_evolution_observation_${sourceDigest.slice(-20)}`;
     const observedPaths = Array.isArray(args.observed_paths) ? args.observed_paths : [];
-    const observed = this.workflowEvolutionObserve({ observation_id: observationId, scenario_key: scenarioKey ?? `unclassified:${stableDigest({ scope, host }).slice(-24)}`, source_kind: `host:${host}`, source_id: effectiveTaskId, source_digest: stableDigest({ taskId: effectiveTaskId, turnId, outcome, verificationRef }), outcome, scope: observationScope, ...(observationSignature ? { scenario_signature: observationSignature } : {}), evidence_ids: [evidence.id], observed_paths: observedPaths, sanitized: true, content_stored: false });
+    const observed = this.workflowEvolutionObserve({ observation_id: observationId, scenario_key: scenarioKey ?? `unclassified:${stableDigest({ scope, host }).slice(-24)}`, source_kind: `host:${host}`, source_id: effectiveTaskId, ...(sessionId ? { source_session_id: sessionId } : {}), source_digest: stableDigest({ taskId: effectiveTaskId, turnId, outcome, verificationRef, source_session_id: sessionId }), outcome, scope: observationScope, ...(observationSignature ? { scenario_signature: observationSignature } : {}), evidence_ids: [evidence.id], observed_paths: observedPaths, sanitized: true, content_stored: false });
     const observationReplay = observed.idempotent === true;
     if (!scenarioKey) {
       let classificationRequest: JsonObject | null = null, ticket: JsonObject | null = null;
@@ -236,6 +238,7 @@ export function installLearningCycleMethods(serviceClass: typeof CraftService): 
         const requestId = `scenario_classification_${stableDigest({ observation_id: observationId }).slice(-24)}`;
         const saved = createExperienceScenarioClassificationRequest({ experience_dir: experienceDir, request_id: requestId, scope: projectScope,
           context: { ...scenarioContext, observed_paths: observedPaths, outcome, host, task_id: effectiveTaskId, turn_id: turnId,
+            ...(sessionId ? { source_session_id: sessionId } : {}),
             context_receipt_id: receipt.id, verification_ref: verificationRef, observation_id: observationId,
             ...(typeof verifierDigest === "string" ? { scenario_verifier_digest: verifierDigest } : {}),
             ...(projectRoot ? { project_root: projectRoot } : {}) } });
@@ -265,14 +268,15 @@ export function installLearningCycleMethods(serviceClass: typeof CraftService): 
         idempotent: observationReplay && (!classificationRequest || classificationRequestReplay) };
     }
     const observations = this.workflowEvolutionObservations({ scope: observationScope, scenario_key: scenarioKey, limit: 100 }).observations as JsonObject[];
-    const distinct = observations.filter(item => (item.source as JsonObject).id !== effectiveTaskId);
+    const distinct = observations.filter(item => (item.source as JsonObject).id !== effectiveTaskId && Boolean(sessionId)
+      && (item.source as JsonObject).session_id !== sessionId && typeof (item.source as JsonObject).session_id === "string");
     const taxonomy = recordExperienceScenario({ experience_dir: experienceDir!,
       project_id: projectScope!.slice("project:".length), scenario_key: scenario!, ...(coarseScenario ? { coarse_scenario_key: coarseScenario } : {}),
       ...(validatedScenarioDefinition ? { definition: validatedScenarioDefinition } : {}), ...(validatedCoarseScenarioDefinition ? { coarse_definition: validatedCoarseScenarioDefinition } : {}),
       observation_id: observationId, ...(typeof verifierDigest === "string" ? { verifier_digest: verifierDigest } : {}),
       verified_task_id: stableDigest({ host, task_id: taskId }) });
     if (!distinct.length) return { status: "observed", observation: observed.observation, evidence, request: null,
-      scenario_catalog: taxonomy, next_action: "await_an_independent_verified_task", idempotent: observationReplay };
+      scenario_catalog: taxonomy, next_action: sessionId ? "await_an_independent_verified_host_session" : "host_session_id_required_for_independent_learning", idempotent: observationReplay };
     const hypothesis = validatedScenarioDefinition
       ? `Distill a reusable Workflow for this fine scene. Summary: ${validatedScenarioDefinition.summary}. Applies when: ${validatedScenarioDefinition.applies_when}. Excludes: ${validatedScenarioDefinition.excludes}.`
       : "Require a recorded terminal verification before marking a task complete, and preserve failed verification for bounded recovery.";

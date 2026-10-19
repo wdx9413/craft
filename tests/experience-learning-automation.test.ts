@@ -165,3 +165,56 @@ test("candidate digest drift blocks result application and unresolved replay inp
     assert.throws(() => f.service.experienceLearningEvaluationResult({ dispatch_id: dispatch2.id }), /already resolved with different evidence/u);
   } finally { await f.close(); }
 });
+
+test("Host Experience proposals require distinct source sessions", async () => {
+  const f = await fixture();
+  try {
+    const observeHost = (scenario: string, task: string, session?: string) => {
+      const proof = f.service.evidenceRecord({ evidence_id: `proposal-proof-${task}`, source_type: "program", confidence: "confirmed", claim: "verified source" });
+      return f.service.workflowEvolutionObserve({ scenario_key: scenario, source_kind: "host:codex", source_id: task,
+        ...(session ? { source_session_id: session } : {}), source_digest: `digest-${task}`, outcome: "passed", scope,
+        scenario_signature: { schema: "craft.scenario-signature.v1", scenario_key: scenario }, evidence_ids: [proof.id],
+        sanitized: true, content_stored: false }).observation as JsonObject;
+    };
+    const propose = (scenario: string, observations: JsonObject[]) => f.service.workflowEvolutionPropose({ scenario_key: scenario,
+      observation_ids: observations.map(item => String(item.id)), hypothesis: "verify terminal outcomes", design_axes: ["orchestration"],
+      procedure_kind: "workflow", output_contract_ref: "acceptance:terminal-verification" });
+
+    for (const [index, source_session_id] of [`host-session-${"x".repeat(257)}`, "bad\nsession"].entries()) {
+      const proof = f.service.evidenceRecord({ evidence_id: `invalid-session-proof-${index}`, source_type: "program", confidence: "confirmed", claim: "verified source" });
+      assert.throws(() => f.service.workflowEvolutionObserve({ scenario_key: `session-boundary.invalid-${index}`, source_kind: "host:codex",
+        source_id: `invalid-session-task-${index}`, source_session_id, source_digest: `invalid-session-digest-${index}`, outcome: "passed", scope,
+        evidence_ids: [proof.id], sanitized: true, content_stored: false }), /bounded Host session identifier/u);
+    }
+
+    const missing = [observeHost("session-boundary.missing", "missing-one"), observeHost("session-boundary.missing", "missing-two")];
+    assert.throws(() => propose("session-boundary.missing", missing), /require source session identifiers/u);
+
+    const reused = [observeHost("session-boundary.reused", "reused-one", "same-host-session"),
+      observeHost("session-boundary.reused", "reused-two", "same-host-session")];
+    assert.throws(() => propose("session-boundary.reused", reused), /independent Host sessions/u);
+
+    const independent = [observeHost("session-boundary.independent", "independent-one", "host-session-one"),
+      observeHost("session-boundary.independent", "independent-two", "host-session-two")];
+    const proposed = propose("session-boundary.independent", independent);
+    assert.equal((proposed.request as JsonObject).lifecycle, "awaiting_model");
+    assert.deepEqual((proposed.request as JsonObject).observation_refs &&
+      ((proposed.request as JsonObject).observation_refs as JsonObject[]).map(item => (item.source as JsonObject).session_id).sort(),
+    ["host-session-one", "host-session-two"]);
+
+    const nonHost = ["archive-one", "archive-two"].map(task => {
+      const proof = f.service.evidenceRecord({ evidence_id: `proposal-proof-${task}`, source_type: "program", confidence: "confirmed", claim: "verified source" });
+      return f.service.workflowEvolutionObserve({ scenario_key: "session-boundary.non-host", source_kind: "archive:codex", source_id: task,
+        source_digest: `digest-${task}`, outcome: "passed", scope,
+        scenario_signature: { schema: "craft.scenario-signature.v1", scenario_key: "session-boundary.non-host" }, evidence_ids: [proof.id],
+        sanitized: true, content_stored: false }).observation as JsonObject;
+    });
+    assert.equal((propose("session-boundary.non-host", nonHost).request as JsonObject).lifecycle, "awaiting_model");
+
+    const unscopedProof = f.service.evidenceRecord({ evidence_id: "proposal-proof-unscoped", source_type: "program", confidence: "confirmed", claim: "verified source" });
+    const unscoped = f.service.workflowEvolutionObserve({ scenario_key: "session-boundary.unscoped", source_kind: "archive:codex",
+      source_id: "unscoped-task", source_digest: "unscoped-digest", outcome: "passed", evidence_ids: [unscopedProof.id],
+      sanitized: true, content_stored: false }).observation as JsonObject;
+    assert.equal((unscoped.source as JsonObject).scope, null);
+  } finally { await f.close(); }
+});

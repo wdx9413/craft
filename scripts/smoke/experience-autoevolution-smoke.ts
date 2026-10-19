@@ -469,8 +469,9 @@ try {
         const context = await service.contextOpen({ project_root: standaloneExperienceProject, query: "verified standalone scenario", include_codebase: false });
         const receiptId = String((context.receipt as JsonObject).id);
         const project = projectIdentityFromRoot(standaloneExperienceProject).canonical_scope as JsonObject;
-        for (const taskId of ["standalone-task-one", "standalone-task-two"]) {
-          const result = service.learningCycleFinalize({ host: "mcp_host", task_id: taskId, turn_id: `turn-${taskId}`, context_receipt_id: receiptId,
+        for (const [index, taskId] of ["standalone-task-one", "standalone-task-two"].entries()) {
+          const result = service.learningCycleFinalize({ host: "mcp_host", session_id: `standalone-session-${index + 1}`, task_id: taskId,
+            turn_id: `turn-${taskId}`, context_receipt_id: receiptId,
             verified: true, verification_outcome: "passed", verification_ref: `standalone:${taskId}`, scenario_key: "standalone-auto" });
           assert.equal(result.status, taskId.endsWith("two") ? "candidate_request" : "observed");
         }

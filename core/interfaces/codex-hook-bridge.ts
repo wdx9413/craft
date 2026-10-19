@@ -330,6 +330,7 @@ export class HookLearningCoordinator {
     const observedPaths = [...new Set(signals.filter(signal => signal.kind === "edit" && typeof signal.observed_path === "string")
       .map(signal => String(signal.observed_path)))].slice(0, 16);
     const finalized = this.service.learningCycleFinalize({ host: hookHost(input), task_id: String(journal.id), turn_id: String(journal.turn_id), context_receipt_id: journal.context_receipt_id,
+      ...(typeof input.session_id === "string" ? { session_id: input.session_id } : {}),
       verified: true, project_root: projectRoot, verification_outcome: journal.verification_outcome, verification_ref: stableDigest(journal.verification_receipts), ...(scenario ? { scenario_key: scenario } : {}),
       ...(taskGoal ? { scenario_context: { task_goal: taskGoal,
         effect_summary: `项目代码已修改并完成终态验证，结果为 ${String(journal.verification_outcome)}。`, sanitized: true, content_stored: false } } : {}),

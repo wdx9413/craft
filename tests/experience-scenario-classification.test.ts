@@ -7,7 +7,7 @@ import { runExperienceScenarioClassificationOnce, type ExperienceScenarioClassif
 const provider: ModelProviderSpec = { provider: "test", label: "Test", protocol: "openai-compatible", base_url: "https://example.invalid/v1",
   api_key_env: "TEST_KEY", chat_path: "/chat/completions", models: { standard: "test-model" }, cost_hint: 0, supports_tools: false };
 const context: JsonObject = { sanitized: true, content_stored: false, task_goal: "Repair validation", effect_summary: "TypeScript checks pass",
-  outcome: "passed", observed_paths: ["src/validation.ts"], verification_ref: "test:focused", host: "codex", task_id: "task-1", turn_id: "turn-1",
+  outcome: "passed", observed_paths: ["src/validation.ts"], verification_ref: "test:focused", host: "codex", task_id: "task-1", turn_id: "turn-1", source_session_id: "session-1",
   context_receipt_id: "receipt-1", observation_id: "workflow_evolution_observation_123", scenario_verifier_digest: "sha256:" + "a".repeat(64) };
 const definition = { summary: "Focused validation repair", applies_when: "A code change needs focused validation", excludes: "Documentation-only changes" };
 const classified = JSON.stringify({ decision: "classified", scenario_key: "validation.repair", scenario_definition: definition });
@@ -48,9 +48,21 @@ test("classifies a verified task and links the model decision through the normal
   assert.equal((result.outcomes as JsonObject[])[0]?.status, "classified");
   const finalize = f.calls.find(call => call.name === "craft_learning_cycle_finalize");
   assert.equal(finalize?.args.scenario_key, "validation.repair");
+  assert.equal(finalize?.args.session_id, "session-1");
   assert.equal(finalize?.args.expected_scenario_catalog_version, 0);
   assert.equal(f.calls.find(call => call.name === "craft_trace_append" && call.args.event_kind === "model.request")?.args.source, "model-transport:test");
   assert.deepEqual(f.calls.filter(call => call.name === "craft_trace_finalize").map(call => call.args.status), ["completed"]);
+});
+
+test("does not invent a session identifier for legacy classification requests", async () => {
+  const legacyContext = { ...context };
+  delete legacyContext.source_session_id;
+  const f = fixture({ request: { id: "scenario_classification_1", version: 1, status: "awaiting_model", context: legacyContext,
+    identity_digest: "sha256:" + "b".repeat(64) } });
+  const result = await runExperienceScenarioClassificationOnce({ client: f.client, providers: [provider], transport: f.transport });
+  assert.equal((result.outcomes as JsonObject[])[0]?.status, "classified");
+  const finalize = f.calls.find(call => call.name === "craft_learning_cycle_finalize");
+  assert.equal(Object.hasOwn(finalize?.args ?? {}, "session_id"), false);
 });
 
 test("keeps ambiguous verified work unclassified and records completion", async () => {

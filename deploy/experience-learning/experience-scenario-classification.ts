@@ -150,6 +150,7 @@ export async function runExperienceScenarioClassificationOnce(deps: ExperienceSc
         throw new Error("Experience classifier selected an unavailable coarse scenario");
       }
       const finalize = await deps.client.call("craft_learning_cycle_finalize", { host: context.host, task_id: context.task_id, turn_id: context.turn_id,
+        ...(typeof context.source_session_id === "string" ? { session_id: context.source_session_id } : {}),
         context_receipt_id: context.context_receipt_id, verified: true, verification_outcome: context.outcome,
         verification_ref: context.verification_ref, observed_paths: paths, scenario_verifier_digest: context.scenario_verifier_digest,
         scenario_key: decision.scenario_key, scenario_definition: decision.scenario_definition,
