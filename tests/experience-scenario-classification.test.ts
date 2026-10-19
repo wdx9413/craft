@@ -53,6 +53,11 @@ test("classifies a verified task and links the model decision through the normal
   assert.equal(finalize?.args.session_id, "session-1");
   assert.equal(finalize?.args.expected_scenario_catalog_version, 0);
   assert.equal(f.calls.find(call => call.name === "craft_trace_append" && call.args.event_kind === "model.request")?.args.source, "model-transport:test");
+  const modelCompleted = f.calls.find(call => call.name === "craft_trace_append" && call.args.event_kind === "model.completed");
+  assert.equal(modelCompleted?.args.source, "model-transport:test");
+  assert.deepEqual(modelCompleted?.args.usage, { input_tokens: 10, output_tokens: 20 });
+  assert.match(String((modelCompleted?.args.data as JsonObject | undefined)?.response_digest), /^sha256:[a-f0-9]{64}$/u);
+  assert.equal(Object.hasOwn(modelCompleted?.args ?? {}, "text"), false);
   assert.deepEqual(f.calls.filter(call => call.name === "craft_trace_finalize").map(call => call.args.status), ["completed"]);
 });
 

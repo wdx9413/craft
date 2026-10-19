@@ -130,10 +130,15 @@ export async function runExperienceScenarioClassificationOnce(deps: ExperienceSc
   let processingStage = "model_request";
   let responseDigest: string | null = null;
   try {
+    const modelStartedAt = Date.now();
     const result = await transport.complete(provider, buildChatRequest(provider, { model, messages,
       max_tokens: Math.min(Number(profile.max_output_tokens ?? 2_048), 2_048), temperature: Number(profile.temperature ?? 0) }));
     responseDigest = stableDigest(result.text);
     processingStage = "model_response";
+    await deps.client.call("craft_trace_append", { trace_id: traceId, event_kind: "model.completed", actor: "experience-learning-worker",
+      source: modelSource, trust: "observed", operation_id: ticketId, model_fingerprint: modelFingerprint,
+      duration_ms: Math.max(0, Date.now() - modelStartedAt), usage: result.usage ?? {},
+      data: { model: result.model, response_digest: responseDigest }, summary: "Codex Host returned a bounded Experience classification response" });
     const decision = parseDecision(result.text);
     processingStage = "classification_link";
     let observationId: string | null = null;
