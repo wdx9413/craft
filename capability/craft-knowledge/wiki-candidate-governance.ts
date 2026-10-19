@@ -36,7 +36,8 @@ export class WikiCandidateGovernanceKernel {
   private evaluationProof(candidate: JsonObject, candidateVersion: number, args: JsonObject): JsonObject {
     this.claimsCurrent(candidate);
     const knowledgeRun = this.store.get("knowledge_evaluation_run", text(args.knowledge_evaluation_run_id, "knowledge_evaluation_run_id"));
-    if ([knowledgeRun.status !== "eligible", Number((knowledgeRun.metrics as JsonObject).candidate_leaks) !== 0].some(Boolean)) throw new Error("Wiki candidate requires an eligible leak-free knowledge evaluation");
+    const knowledgeMetrics = knowledgeRun.metrics as JsonObject;
+    if ([knowledgeRun.status !== "eligible", Number(knowledgeMetrics.candidate_leaks) !== 0, knowledgeMetrics.provenance_eligible !== true].some(Boolean)) throw new Error("Wiki candidate requires an eligible leak-free knowledge evaluation with verified provenance");
     const evaluation = this.store.get("evaluation_run", text(args.evaluation_run_id, "evaluation_run_id"));
     if ([evaluation.split !== "held_out", evaluation.verdict !== "passed", evaluation.subject_type !== "wiki_skill_candidate", evaluation.subject_id !== candidate.id, Number(evaluation.subject_version) !== candidateVersion].some(Boolean)) throw new Error("Wiki candidate requires a passed held-out evaluation for its exact version");
     const signoff = this.store.get("signoff", text(args.signoff_id, "signoff_id"));

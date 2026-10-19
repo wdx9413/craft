@@ -135,6 +135,11 @@ test("discovery and Chinese code matching are bounded hints", () => {
     assert.equal((tool.inputSchema as JsonObject).type, "object");
   }
   assert.deepEqual((knowledgeTools.find(tool => tool.name === "craft_knowledge_evaluation_case_save")!.inputSchema as JsonObject).required, ["query", "expected_claim_ids"]);
+  const evaluationCaseProperties = (knowledgeTools.find(tool => tool.name === "craft_knowledge_evaluation_case_save")!.inputSchema as JsonObject).properties as JsonObject;
+  assert.equal((evaluationCaseProperties.source_evidence_ids as JsonObject).type, "array");
+  assert.equal((evaluationCaseProperties.sanitized as JsonObject).type, "boolean");
+  for (const field of ["source_session_id", "source_task_id", "evaluation_channel", "dataset_partition"])
+    assert.equal((evaluationCaseProperties[field] as JsonObject).type, "string");
   assert(Object.hasOwn((knowledgeTools.find(tool => tool.name === "craft_knowledge_evaluation_run")!.inputSchema as JsonObject).properties as JsonObject, "case_ids"));
   const memoryTools = discoverContextTools({ intent: "memory" }).tools as JsonObject[];
   for (const tool of ["craft_memory_capture_observed_fact", "craft_memory_ledger_get", "craft_memory_ledger_list", "craft_memory_ledger_transition",

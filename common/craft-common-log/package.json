@@ -1,6 +1,6 @@
 {
   "name": "craft-common-log",
-  "version": "0.12.71",
+  "version": "0.12.72",
   "description": "Content-free telemetry, evaluation and OTLP observability SDK",
   "type": "module",
   "main": "./dist/index.js",
@@ -36,8 +36,8 @@
     "node": ">=23"
   },
   "dependencies": {
-    "craft-common-store-local": "0.12.71",
-    "craft-common-base": "0.12.71",
+    "craft-common-store-local": "0.12.72",
+    "craft-common-base": "0.12.72",
     "@types/node": ">=23 <26"
   },
   "license": "MIT",
