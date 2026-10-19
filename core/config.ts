@@ -18,6 +18,7 @@ export interface DirectProvider {
 
 export interface CraftConfig {
   schemaVersion: 1;
+  contentLanguage: string;
   activeMode: CraftMode;
   initializedAt: string;
   updatedAt: string;
@@ -43,6 +44,7 @@ export interface InitInput {
   supervisorHosts?: CraftConfig["supervisor"]["hosts"];
   hostProfiles?: JsonObject[];
   semanticSearch?: CraftConfig["semanticSearch"];
+  contentLanguage?: string;
   now?: string;
 }
 
@@ -51,6 +53,22 @@ const RUNTIMES = new Set<RuntimeKind>([
   "direct-api", "codex-cli", "claude-code", "unconfigured",
 ]);
 const HOSTS = new Set(["codex-cli", "claude-code", "generic-mcp"]);
+
+function normalizeContentLanguage(value: unknown): string {
+  if (value === undefined) return "zh-CN";
+  if (typeof value !== "string" || !value.trim()) throw new Error("contentLanguage must be a valid BCP 47 language tag");
+  try {
+    return Intl.getCanonicalLocales(value.trim())[0]!;
+  } catch { /* Report one stable config error for malformed language tags. */ }
+  throw new Error("contentLanguage must be a valid BCP 47 language tag");
+}
+
+/** Keep generated prose in the configured language while preserving machine identifiers. */
+export function generatedTextLanguageInstruction(contentLanguage = "zh-CN"): string {
+  const canonical = normalizeContentLanguage(contentLanguage);
+  const language = new Intl.DisplayNames([canonical], { type: "language" }).of(canonical)!;
+  return `Write all human-readable generated text in ${language} (${canonical}). Keep JSON property names and stable keys unchanged.`;
+}
 
 async function exists(path: string): Promise<boolean> {
   try {
@@ -65,7 +83,7 @@ export async function loadConfig(paths = craftPaths()): Promise<CraftConfig | nu
   if (!await exists(paths.configFile)) return null;
   const parsed: unknown = JSON.parse(await readFile(paths.configFile, "utf8"));
   validateConfig(parsed);
-  return parsed;
+  return { ...(parsed as CraftConfig), contentLanguage: normalizeContentLanguage((parsed as Partial<CraftConfig>).contentLanguage) };
 }
 
 export async function initializeConfig(
@@ -79,6 +97,7 @@ export async function initializeConfig(
     ? input.runtimeKind || "unconfigured" : "unconfigured";
   const config: CraftConfig = {
     schemaVersion: 1,
+    contentLanguage: normalizeContentLanguage(input.contentLanguage),
     activeMode: input.mode,
     initializedAt: now,
     updatedAt: now,
@@ -121,6 +140,15 @@ export async function configureSemanticSearch(
   validateSemanticSearch(semanticSearch);
   const updated: CraftConfig = { ...current, updatedAt: now, ...(semanticSearch ? { semanticSearch } : {}) };
   if (!semanticSearch) delete updated.semanticSearch;
+  await atomicPrivateJson(paths.configFile, updated);
+  return updated;
+}
+
+export async function configureContentLanguage(contentLanguage: string, paths = craftPaths(), now = new Date().toISOString()): Promise<CraftConfig> {
+  const current = await loadConfig(paths);
+  if (!current) throw new Error("Craft is not initialized; run `craft init` first.");
+  const updated = { ...current, contentLanguage: normalizeContentLanguage(contentLanguage), updatedAt: now };
+  validateConfig(updated);
   await atomicPrivateJson(paths.configFile, updated);
   return updated;
 }
@@ -196,6 +224,7 @@ function validateConfig(value: unknown): asserts value is CraftConfig {
   if (config.schemaVersion !== 1 || !config.activeMode || !MODES.has(config.activeMode)) {
     throw new Error("Unsupported or invalid Craft config schema.");
   }
+  normalizeContentLanguage(config.contentLanguage);
   if (!config.runtime || !RUNTIMES.has(config.runtime.kind)) {
     throw new Error("Craft config has an invalid runtime.");
   }

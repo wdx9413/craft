@@ -1,3 +1,9 @@
+## v0.12.76（生成内容语言设置）
+
+- 在 `~/.craft_data/config/config.json` 增加 `contentLanguage`，默认 `zh-CN`，支持有效的 BCP 47 语言标签。
+- 新增 `craft config language <tag>`，并将配置传入 Knowledge 分类、Experience 场景分类和 Workflow 草案生成提示。
+- 明确保留 Memory 用户原文、来源原文、稳定场景键和 JSON 字段名，不自动翻译。
+
 ## v0.12.75（Worker MCP 版本握手）
 
 - Experience/Knowledge Worker 启动时校验 Craft MCP 的服务端版本；版本不符时关闭子进程并停止取任务，避免新 Worker 静默连接旧 MCP。

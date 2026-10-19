@@ -3,7 +3,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { configureSemanticSearch, initializeConfig, loadConfig, setMode, type InitInput } from "../core/config.ts";
+import { configureContentLanguage, configureSemanticSearch, generatedTextLanguageInstruction, initializeConfig, loadConfig, setMode, type InitInput } from "../core/config.ts";
 import { atomicPrivateJson, craftPaths, dataRoot, ensureLayout } from "../core/infrastructure/paths.ts";
 import type { JsonObject } from "../core/infrastructure/store.ts";
 
@@ -23,6 +23,7 @@ test("layout and provider config stay under the selected Craft root", async () =
       provider: { protocol: "openai-compatible", name: "Local", baseUrl: "https://api.example/v1", model: "m", apiKeyEnv: "MODEL_KEY" },
     }, paths);
     assert.equal(config.storage.database, join(root, "db", "craft.db"));
+    assert.equal(config.contentLanguage, "zh-CN");
     assert.equal(config.runtime.provider?.apiKeyEnv, "MODEL_KEY");
     assert.equal((await loadConfig(paths))?.activeMode, "agent");
     const raw = await readFile(paths.configFile, "utf8");
@@ -47,6 +48,27 @@ test("legacy database is detected but never moved implicitly", async () => {
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("generated content language is stored in config.json and accepts BCP 47 tags", async () => {
+  const root = await temporaryRoot();
+  const paths = craftPaths(root);
+  try {
+    await assert.rejects(() => configureContentLanguage("fr-CA", paths), /not initialized/u);
+    await initializeConfig({ mode: "provider", contentLanguage: "fr-ca", semanticSearch: {
+      provider: { protocol: "openai-compatible", name: "Embeddings", baseUrl: "https://embed.example/v1", model: "embed", apiKeyEnv: "EMBED_KEY", timeoutMs: 500 },
+    } }, paths);
+    assert.equal((await loadConfig(paths))?.contentLanguage, "fr-CA");
+    const updated = await configureContentLanguage("en-US", paths, "later");
+    assert.equal(updated.contentLanguage, "en-US");
+    assert.equal(JSON.parse(await readFile(paths.configFile, "utf8")).contentLanguage, "en-US");
+    assert.match(generatedTextLanguageInstruction(), /中文/u);
+    assert.match(generatedTextLanguageInstruction("fr-CA"), /français/u);
+    await assert.rejects(() => configureContentLanguage("not_a_locale", paths), /valid BCP 47/u);
+    await assert.rejects(() => initializeConfig({ mode: "provider", contentLanguage: "not_a_locale" }, paths), /valid BCP 47/u);
+    await assert.rejects(() => configureContentLanguage("", paths), /valid BCP 47/u);
+    await assert.rejects(() => initializeConfig({ mode: "provider", contentLanguage: 4 as never }, paths), /valid BCP 47/u);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
 
 test("all execution modes serialize their own configuration", async () => {

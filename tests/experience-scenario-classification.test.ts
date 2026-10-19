@@ -16,6 +16,7 @@ function fixture(options: { response?: string; ticket?: JsonObject | null; reque
   profileReadiness?: JsonObject; provider?: JsonObject | null; finalizeStatus?: string; throwOn?: string; throwName?: string;
   ticketResult?: JsonObject; completionEmpty?: boolean; throwRaw?: boolean; acquire?: boolean } = {}) {
   const calls: Array<{ name: string; args: JsonObject }> = [];
+  const requests: unknown[] = [];
   const client: ExperienceScenarioClassificationClient = { async call(name, args = {}) {
     calls.push({ name, args });
     if (options.throwOn === name) { if (options.throwRaw) throw "controlled failure"; throw Object.assign(new Error("controlled failure"), { name: options.throwName ?? "TypeError" }); }
@@ -34,11 +35,12 @@ function fixture(options: { response?: string; ticket?: JsonObject | null; reque
     throw new Error(`Unexpected tool ${name}`);
   } };
   const transport: ModelTransport = { acquireCall: () => options.acquire ?? true,
-    async complete(_spec, _request): Promise<ChatResult> {
+    async complete(_spec, request): Promise<ChatResult> {
       if (options.throwOn === "transport.complete") { if (options.throwRaw) throw "controlled failure"; throw Object.assign(new Error("controlled failure"), { name: options.throwName ?? "TypeError" }); }
+      requests.push(request);
       return { text: options.response ?? classified, model: "test-model", usage: { input_tokens: 10, output_tokens: 20 } };
     } };
-  return { client, transport, calls };
+  return { client, transport, calls, requests };
 }
 
 test("classifies a verified task and links the model decision through the normal finalize path", async () => {
@@ -52,6 +54,13 @@ test("classifies a verified task and links the model decision through the normal
   assert.equal(finalize?.args.expected_scenario_catalog_version, 0);
   assert.equal(f.calls.find(call => call.name === "craft_trace_append" && call.args.event_kind === "model.request")?.args.source, "model-transport:test");
   assert.deepEqual(f.calls.filter(call => call.name === "craft_trace_finalize").map(call => call.args.status), ["completed"]);
+});
+
+test("Experience scenario descriptions follow the configured output language", async () => {
+  const f = fixture();
+  await runExperienceScenarioClassificationOnce({ client: f.client, providers: [provider], transport: f.transport, contentLanguage: "en-US" });
+  const messages = ((f.requests[0] as { body: { messages: JsonObject[] } }).body.messages);
+  assert.match(String(messages[0]?.content), /English \(en-US\)/u);
 });
 
 test("does not invent a session identifier for legacy classification requests", async () => {

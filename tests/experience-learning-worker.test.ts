@@ -18,6 +18,7 @@ const provider: ModelProviderSpec = { provider: "test", label: "test", protocol:
 function fixture(modelText = JSON.stringify({ name: "Verified flow", description: "A bounded verified flow", inputs: ["project_root"],
   steps: [{ id: "inspect", type: "assertion", evaluator: "file_exists", path: ".", side_effect: "read_only" }] })) {
   const calls: Array<{ name: string; args: JsonObject }> = [];
+  const systemPrompts: string[] = [];
   let queued = true;
   const client: ExperienceLearningClient = { async call(name, args = {}) {
     calls.push({ name, args });
@@ -33,13 +34,15 @@ function fixture(modelText = JSON.stringify({ name: "Verified flow", description
     throw new Error(`unexpected tool ${name}`);
   } };
   const transport: ModelTransport = { async complete(_spec, request): Promise<ChatResult> {
+    const systemMessage = request.body.messages instanceof Array ? request.body.messages[0] as JsonObject : {};
+    systemPrompts.push(String(systemMessage.content));
     const userMessage = request.body.messages instanceof Array ? request.body.messages[1] as JsonObject : {};
     assert.match(String(userMessage.content), /build-check/u);
     assert.match(String(userMessage.content), /repair TypeScript validation/u);
     assert.match(String(userMessage.content), /documentation-only work/u);
     return { text: modelText, model: "test-model", usage: { input_tokens: 10, output_tokens: 20 } };
   } };
-  return { client, transport, calls };
+  return { client, transport, calls, systemPrompts };
 }
 
 test("distillation worker turns a ready ticket into a candidate and retries from the queue idempotently", async () => {
@@ -58,6 +61,12 @@ test("distillation worker turns a ready ticket into a candidate and retries from
   assert.match(String(completion?.args.result_digest), /^sha256:[a-f0-9]{64}$/u);
   assert.equal((await runDistillationOnce(deps)).processed, 0);
   assert.equal(f.calls.filter(call => call.name === "craft_experience_procedure_submit").length, 1);
+});
+
+test("Experience Workflow prose follows the configured output language", async () => {
+  const f = fixture();
+  await runDistillationOnce({ client: f.client, providers: [provider], transport: f.transport, contentLanguage: "en-US" });
+  assert.match(f.systemPrompts[0] ?? "", /English \(en-US\)/u);
 });
 
 test("distillation completion binds a content-free digest when the adapter omits proposal metadata", async () => {
@@ -610,7 +619,7 @@ test("worker exits when its MCP child dies so the supervisor can reconnect inste
   const dataDir = mkdtempSync(join(tmpdir(), "craft-learning-worker-dead-mcp-"));
   const child = spawn(process.execPath, ["--experimental-strip-types", workerPath], { env: {
     ...process.env, NODE_NO_WARNINGS: "1", CRAFT_DATA_DIR: dataDir, CRAFT_EXPERIENCE_MCP_COMMAND: process.execPath,
-    CRAFT_EXPERIENCE_MCP_ARGS: JSON.stringify([fixturePath]), CRAFT_TEST_LEARNING_WORKER_MCP_EXIT: "after_initialize",
+    CRAFT_EXPERIENCE_MCP_ARGS: JSON.stringify([fixturePath]), CRAFT_TEST_LEARNING_WORKER_MCP_EXIT: "after_first_call",
     CRAFT_EXPERIENCE_POLL_MS: "1000",
   }, stdio: ["ignore", "pipe", "pipe"] });
   let stdout = "", stderr = "";

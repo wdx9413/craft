@@ -58,5 +58,6 @@ readline.createInterface({ input: process.stdin }).on("line", line => {
   if (request.id !== undefined) {
     process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: request.id, result })}\n`);
     if (request.method === "initialize" && process.env.CRAFT_TEST_LEARNING_WORKER_MCP_EXIT === "after_initialize") setImmediate(() => process.exit(7));
+    if (request.method === "tools/call" && process.env.CRAFT_TEST_LEARNING_WORKER_MCP_EXIT === "after_first_call") setImmediate(() => process.exit(7));
   }
 });

@@ -8,7 +8,7 @@ import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { stdin, stdout } from "node:process";
 import { pathToFileURL } from "node:url";
-import { initializeConfig, loadConfig, setMode, type CraftMode, type DirectProvider,
+import { configureContentLanguage, initializeConfig, loadConfig, setMode, type CraftMode, type DirectProvider,
   type InitInput, type RuntimeKind, configureSemanticSearch } from "./config.ts";
 import { type EmbeddingProviderConfig } from "./semantic.ts";
 import { craftPaths } from "./infrastructure/paths.ts";
@@ -31,6 +31,7 @@ Usage:
   craft                         Start onboarding or open the active mode
   craft init [options]          Configure Craft
   craft config show             Print redacted configuration
+  craft config language <tag>   Set generated Knowledge and Experience text language
   craft doctor                  Check runtime, credentials, storage, and adapters
   craft migrate history [--apply]
                                 Plan (default) or explicitly apply legacy Knowledge/Experience repair
@@ -380,6 +381,11 @@ async function dispatchMain(args: string[]): Promise<void> {
   }
   if (args[0] === "config" && args[1] === "show") {
     stdout.write(`${JSON.stringify(publicConfig(await loadConfig(paths)), null, 2)}\n`);
+    return;
+  }
+  if (args[0] === "config" && args[1] === "language") {
+    if (!args[2]) throw new Error("config language requires a BCP 47 language tag, such as zh-CN or en-US.");
+    stdout.write(`${JSON.stringify(publicConfig(await configureContentLanguage(args[2], paths)), null, 2)}\n`);
     return;
   }
   if (args[0] === "mode") {

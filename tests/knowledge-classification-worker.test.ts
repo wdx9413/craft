@@ -95,6 +95,14 @@ test("classification uses the current project catalog, writes a reviewed Claim l
   assert.deepEqual(f.calls.filter(call => call.name === "craft_trace_finalize").map(call => call.args.status), ["completed"]);
 });
 
+test("Knowledge model prompt follows the configured output language", async () => {
+  const f = fixture();
+  await runKnowledgeScenarioClassificationOnce({ client: f.client, providers: [provider], transport: f.transport, contentLanguage: "en-US" });
+  const messages = f.requests[0]?.body.messages as JsonObject[];
+  assert.match(String(messages[0]?.content), /English \(en-US\)/u);
+  assert.match(String(messages[0]?.content), /Keep JSON property names and stable keys unchanged/u);
+});
+
 test("candidate Claims receive an Evidence-bound Host review before scenario classification", async () => {
   const f = fixture('{"review_decision":"supported"}', "candidate");
   const result = await runKnowledgeScenarioClassificationOnce({ client: f.client, providers: [provider], transport: f.transport });
