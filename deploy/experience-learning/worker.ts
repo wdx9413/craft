@@ -111,6 +111,21 @@ export function boundedPollInterval(value: string | undefined, fallback: number,
   const parsed = Number(value);
   return Number.isFinite(parsed) ? Math.max(minimum, Math.min(maximum, parsed)) : fallback;
 }
+
+/** Back off empty Experience polls without allowing new work to wait more than five minutes. */
+export function learningPollInterval(baseMs: number, idlePasses: number, maximumMs = Math.min(300_000, baseMs * 8)): number {
+  if (!Number.isSafeInteger(baseMs) || baseMs < 1 || !Number.isSafeInteger(idlePasses) || idlePasses < 0
+    || !Number.isSafeInteger(maximumMs) || maximumMs < baseMs) throw new Error("learning poll interval bounds are invalid");
+  return Math.min(maximumMs, baseMs * 2 ** Math.min(idlePasses, 10));
+}
+
+/** Work includes classification and evaluation even when no Workflow ticket was consumed. */
+export function learningWorkFound(result: JsonObject): boolean {
+  const evaluation = result.evaluation && typeof result.evaluation === "object" ? result.evaluation as JsonObject : null;
+  const classification = result.scenario_classification && typeof result.scenario_classification === "object"
+    ? result.scenario_classification as JsonObject : null;
+  return Number(result.processed ?? 0) > 0 || Number(evaluation?.processed ?? 0) > 0 || Number(classification?.processed ?? 0) > 0;
+}
 function parseModelJson(value: string): JsonObject {
   const source = value.trim().replace(/^```(?:json)?\s*/iu, "").replace(/\s*```$/u, "");
   let parsed: unknown;
@@ -282,6 +297,8 @@ async function main(): Promise<void> {
   const client = new McpStdioClient(command, args);
   let stopping = false;
   let lastKnowledgeSync = 0;
+  let idleExperiencePasses = 0;
+  let nextPollMs = pollMs;
   let wakePoll: (() => void) | null = null;
   const stop = () => { stopping = true; wakePoll?.(); };
   process.once("SIGINT", stop);
@@ -290,7 +307,7 @@ async function main(): Promise<void> {
     let timer: NodeJS.Timeout;
     const finish = () => { clearTimeout(timer); if (wakePoll === finish) wakePoll = null; resolve(); };
     wakePoll = finish;
-    timer = setTimeout(finish, pollMs);
+    timer = setTimeout(finish, nextPollMs);
   });
   try {
     await client.initialize();
@@ -298,6 +315,10 @@ async function main(): Promise<void> {
       const syncKnowledge = knowledgeEnabled && Date.now() - lastKnowledgeSync >= knowledgePollMs;
       const modelTransport = createLearningModelTransport(process.env.CRAFT_LEARNING_MODEL_HOST);
       const result = await runLearningTick({ client, ...(modelTransport ? { transport: modelTransport } : {}) }, syncKnowledge, components);
+      const idlePass = Number(experienceEnabled) * Number(!learningWorkFound(result));
+      idleExperiencePasses = idlePass * (idleExperiencePasses + 1);
+      const experienceNextPollMs = learningPollInterval(experiencePollMs, idleExperiencePasses);
+      nextPollMs = experienceNextPollMs * Number(experienceEnabled) + knowledgePollMs * Number(!experienceEnabled);
       const knowledge = result.knowledge as JsonObject | null;
       if (syncKnowledge && !knowledge?.failure_kind) lastKnowledgeSync = Date.now();
       const status = learningTickStatus(result, once);

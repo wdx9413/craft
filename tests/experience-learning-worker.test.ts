@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import type { ChatResult, ModelProviderSpec, ModelTransport } from "../core/model-gateway.ts";
 import type { JsonObject } from "../core/infrastructure/store.ts";
-import { McpStdioClient, boundedPollInterval, learningComponents, mcpCommandOptions, runDistillationOnce, runEvaluationOnce, runLearningTick, runOnce, type ExperienceLearningClient } from "../deploy/experience-learning/worker.ts";
+import { McpStdioClient, boundedPollInterval, learningComponents, learningPollInterval, learningWorkFound, mcpCommandOptions, runDistillationOnce, runEvaluationOnce, runLearningTick, runOnce, type ExperienceLearningClient } from "../deploy/experience-learning/worker.ts";
 import { learningFailureKind, learningTickStatus } from "../deploy/experience-learning/learning-tick.ts";
 
 const provider: ModelProviderSpec = { provider: "test", label: "test", protocol: "openai-compatible", base_url: "https://example.invalid/v1",
@@ -183,6 +183,22 @@ test("poll intervals clamp numeric settings and fall back for nonnumeric values"
   assert.equal(boundedPollInterval("0", 30, 1, 100), 1);
   assert.equal(boundedPollInterval("101", 30, 1, 100), 100);
   assert.equal(boundedPollInterval("45", 30, 1, 100), 45);
+});
+
+test("empty Experience passes back off to a bounded interval and any processed work resets it", () => {
+  assert.equal(learningPollInterval(30_000, 0), 30_000);
+  assert.equal(learningPollInterval(30_000, 1), 60_000);
+  assert.equal(learningPollInterval(30_000, 10), 240_000);
+  assert.equal(learningPollInterval(1_000, 20), 8_000);
+  assert.equal(learningPollInterval(1_000, 20, 60_000), 60_000);
+  assert.equal(learningWorkFound({ processed: 1 }), true);
+  assert.equal(learningWorkFound({ processed: 0, evaluation: { processed: 1 } }), true);
+  assert.equal(learningWorkFound({ processed: 0, scenario_classification: { processed: 1 } }), true);
+  assert.equal(learningWorkFound({ evaluation: { processed: 0 }, scenario_classification: { processed: 1 } }), true);
+  assert.equal(learningWorkFound({ processed: 0, evaluation: null, scenario_classification: {} }), false);
+  assert.throws(() => learningPollInterval(0, 1), /bounds are invalid/u);
+  assert.throws(() => learningPollInterval(30_000, -1), /bounds are invalid/u);
+  assert.throws(() => learningPollInterval(30_000, 1, 29_999), /bounds are invalid/u);
 });
 
 test("continuous learning tick contains transient Experience and Knowledge failures and recovers on the next pass", async () => {
@@ -523,6 +539,7 @@ test("long-lived worker survives one failed pass, completes the next pass, then 
     CRAFT_EXPERIENCE_POLL_MS: "1000", CRAFT_KNOWLEDGE_POLL_MS: "60000",
   }, stdio: ["ignore", "pipe", "pipe"] });
   const results: JsonObject[] = [];
+  const resultTimes: number[] = [];
   let stdout = "", stderr = "", buffered = "";
   let firstFailure = false;
   let resolveRecovered!: () => void, rejectRecovered!: (error: Error) => void;
@@ -536,6 +553,7 @@ test("long-lived worker survives one failed pass, completes the next pass, then 
       if (!line) continue;
       const result = JSON.parse(line) as JsonObject;
       results.push(result);
+      resultTimes.push(Date.now());
       const knowledge = result.knowledge as JsonObject | undefined;
       if (result.failure_kind === "Error" && knowledge?.failure_kind === "Error") firstFailure = true;
       if (firstFailure && results.length >= 2 && !result.failure_kind && knowledge?.sources_seen === 0) resolveRecovered();
@@ -554,6 +572,7 @@ test("long-lived worker survives one failed pass, completes the next pass, then 
     assert.equal(results[0]?.failure_kind, "Error");
     assert.equal((results[0]?.knowledge as JsonObject).failure_kind, "Error");
     assert.equal(results[1]?.failure_kind, undefined);
+    assert.ok(resultTimes[1]! - resultTimes[0]! >= 1_500, "an empty failed pass must increase the next poll interval");
     assert.deepEqual(results[1]?.knowledge, { sources_seen: 0, sources_selected: 0, outcomes: [], skipped_sources: 0, classification: { processed: 0, outcomes: [] } });
     assert.equal(stdout.includes("private fixture error"), false);
     assert.match(stderr, /Craft Experience learning pass failed \(Error\)\./u);
