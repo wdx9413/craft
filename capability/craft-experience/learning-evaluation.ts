@@ -51,7 +51,7 @@ export class ExperienceLearningEvaluation {
     if (retiredForEvaluation(this.store, procedure)) throw new Error("Experience scenario is retired; evaluation cannot execute");
     if (procedure.definition_digest !== dispatch.definition_digest) throw new Error("Experience evaluation candidate definition drifted");
     if (procedure.procedure_kind !== "workflow" || !procedureDefinitionRef(procedure.definition_ref)) return { dispatch, status: "awaiting_adapter", reason: "automatic_evaluator_supports_read_only_workflows_only" };
-    const definition = new ProcedureDefinitionStore(this.store.paths).read(procedure.definition_ref);
+    const definition = new ProcedureDefinitionStore(this.store).read(procedure.definition_ref);
     if (stableDigest(definition) !== procedure.definition_digest) throw new Error("Experience evaluation definition digest does not match the candidate");
     validateReadOnlyEvaluationSteps(definition.definition.steps);
     let baseline: { procedure: JsonObject; definition: ReturnType<ProcedureDefinitionStore["read"]> } | null = null;
@@ -59,7 +59,7 @@ export class ExperienceLearningEvaluation {
       const current = currentForEvaluation(this.store, String(procedure.id));
       if (!current || current.version !== dispatch.baseline_version) throw new Error("Canary baseline changed after this dispatch was created");
       if (current.procedure_kind !== "workflow" || !procedureDefinitionRef(current.definition_ref)) return { dispatch, status: "awaiting_adapter", reason: "canary_baseline_requires_external_adapter" };
-      const baselineDefinition = new ProcedureDefinitionStore(this.store.paths).read(current.definition_ref);
+      const baselineDefinition = new ProcedureDefinitionStore(this.store).read(current.definition_ref);
       validateReadOnlyEvaluationSteps(baselineDefinition.definition.steps);
       baseline = { procedure: current, definition: baselineDefinition };
     }

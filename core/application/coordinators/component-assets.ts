@@ -94,7 +94,7 @@ export class ComponentAssets {
     if (member === "experience") {
       const active = activeProcedure(this.store, String(current.id));
       details.release = { current_record_version: active?.version ?? null, test_record_version: current.lifecycle === "candidate" ? current.version : null };
-      details.configuration = procedureDefinitionRef(current.definition_ref) ? new ProcedureDefinitionStore(this.store.paths).read(current.definition_ref).definition : null;
+      details.configuration = procedureDefinitionRef(current.definition_ref) ? new ProcedureDefinitionStore(this.store).read(current.definition_ref).definition : null;
       details.invocations = this.store.list("procedure_invocation", 20, r => r.procedure_id === current.id && r.scope === current.scope).map(r => ({ id: r.id, lifecycle: r.lifecycle, procedure_version: r.procedure_version, definition_digest: r.definition_digest, subscenario_id: r.subscenario_id, graph_state: r.graph_state, dispatch_count: r.dispatch_count, max_dispatches: r.max_dispatches }));
       details.gates = this.store.list("experience_procedure_gate", 100, g => g.procedure_id === current.id);
       details.outcomes = this.store.list("procedure_invocation_outcome", 100, o => o.procedure_id === current.id && o.scope === current.scope);
@@ -124,7 +124,7 @@ export class ComponentAssets {
       else if (member === "memory") result = commands.memory({ candidate_id: newId, source_id: previous.source_id, kind: previous.kind, content: previous.content, scope_kind: args.scope_kind, scope_id: args.scope_id, scope_envelope: current.scope_envelope, sensitivity: current.sensitivity, confidence: "bounded", evidence_ids: previous.evidence_ids ?? [], topic: previous.topic || undefined, proposed_by: "version-restoration", auto_accept: false });
       else if (member === "experience") {
         if (!procedureDefinitionRef(previous.definition_ref)) throw new Error("Restoration requires a checked Procedure definition");
-        const definition = new ProcedureDefinitionStore(this.store.paths).read(previous.definition_ref);
+        const definition = new ProcedureDefinitionStore(this.store).read(previous.definition_ref);
         result = commands.experience({ ...args, procedure_id: newId, expected_version: undefined, scope: previous.scope, procedure_kind: definition.kind, definition: definition.definition, title: previous.title, scenario_id: (previous.scenario_signature as JsonObject).scenario_id ?? "restored", scope_envelope: current.scope_envelope });
       }
       else {

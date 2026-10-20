@@ -9,7 +9,8 @@ import { randomUUID } from "node:crypto";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { stableDigest } from "../../common/craft-common-base/src/digest.ts";
 import type { CraftPaths } from "../../common/craft-common-store-local/src/paths.ts";
-import type { JsonObject } from "../../common/craft-common-store-local/src/store.ts";
+import type { CraftStore, JsonObject } from "../../common/craft-common-store-local/src/store.ts";
+import { experienceDataDirectory } from "../../core/project-experience-directory.ts";
 
 export type ProcedureKind = "workflow" | "graph";
 
@@ -18,6 +19,7 @@ export interface ProcedureDefinitionRef {
   procedure_id: string;
   procedure_version: number;
   kind: ProcedureKind;
+  scope?: string;
   path: string;
   digest: string;
 }
@@ -46,14 +48,14 @@ function slug(value: string): string {
   return result || "untitled";
 }
 
-export function experienceGraphDirectory(paths: CraftPaths, id: string, legacy = false): string {
+export function experienceGraphDirectory(paths: CraftPaths, id: string, legacy = false, baseDirectory = paths.experienceDir): string {
   const portable = /^[a-z0-9][a-z0-9_-]{0,95}$/u.test(id) && !/^(?:con|prn|aux|nul|com[0-9]|lpt[0-9])$/iu.test(id);
-  return join(paths.experienceDir, "graph", !legacy && portable ? id : `${slug(id)}--${stableDigest(id).slice(-12)}`);
+  return join(baseDirectory, "graph", !legacy && portable ? id : `${slug(id)}--${stableDigest(id).slice(-12)}`);
 }
 
 /** Check every managed component, including the leaf; local data never follows links. */
-export function checkedExperiencePath(paths: CraftPaths, path: string, create = false): string {
-  const root = resolve(paths.experienceDir), target = resolve(path), part = relative(root, target);
+export function checkedExperiencePath(paths: CraftPaths, path: string, create = false, baseDirectory = paths.experienceDir): string {
+  const root = resolve(baseDirectory), target = resolve(path), part = relative(root, target);
   if (!part || part.startsWith("..") || isAbsolute(part)) throw new Error("Experience path is outside the managed directory");
   let current = root;
   for (const segment of ["", ...part.split(/[\\/]/u)]) {
@@ -83,17 +85,23 @@ function definition(value: unknown): ProcedureDefinition {
 
 /** Local, append-only JSON files. The database stores only the checked reference. */
 export class ProcedureDefinitionStore {
+  readonly store: CraftStore;
   readonly paths: CraftPaths;
-  constructor(paths: CraftPaths) { this.paths = paths; }
+  constructor(store: CraftStore) { this.store = store; this.paths = store.paths; }
+
+  private scopeDirectory(scope: string, create = false): string {
+    return experienceDataDirectory(this.store, scope, create);
+  }
 
   write(value: ProcedureDefinition, title: string, orphaned?: (path: string) => boolean): ProcedureDefinitionRef {
     const checked = definition(value);
     const canonical = JSON.stringify(checked, null, 2);
     const digest = stableDigest(checked);
-    const path = checkedExperiencePath(this.paths, join(experienceGraphDirectory(this.paths, checked.procedure_id), "versions", `${String(checked.procedure_version).padStart(6, "0")}.json`), true);
+    const baseDirectory = this.scopeDirectory(checked.scope, true);
+    const path = checkedExperiencePath(this.paths, join(experienceGraphDirectory(this.paths, checked.procedure_id, false, baseDirectory), "versions", `${String(checked.procedure_version).padStart(6, "0")}.json`), true, baseDirectory);
     let publish = false;
     try {
-      this.read({ format: "json", procedure_id: checked.procedure_id, procedure_version: checked.procedure_version, kind: checked.kind, path, digest });
+      this.read({ format: "json", procedure_id: checked.procedure_id, procedure_version: checked.procedure_version, kind: checked.kind, scope: checked.scope, path, digest });
     } catch (error) {
       if (!(error instanceof Error) || !/ENOENT|no such file/iu.test(error.message) && !(error.message === "Procedure definition digest drifted" && orphaned?.(path))) throw error;
       publish = true;
@@ -108,20 +116,26 @@ export class ProcedureDefinitionStore {
         throw error;
       }
     }
-    return { format: "json", procedure_id: checked.procedure_id, procedure_version: checked.procedure_version, kind: checked.kind, path, digest };
+    return { format: "json", procedure_id: checked.procedure_id, procedure_version: checked.procedure_version, kind: checked.kind, scope: checked.scope, path, digest };
   }
 
   read(ref: ProcedureDefinitionRef): ProcedureDefinition {
     const path = resolve(ref.path), legacyRoot = resolve(this.paths.experienceProcedureDir);
+    const baseDirectory = ref.scope === undefined ? this.paths.experienceDir : this.scopeDirectory(ref.scope, false);
     const filename = `${String(ref.procedure_version).padStart(6, "0")}.json`;
-    const canonical = join(experienceGraphDirectory(this.paths, ref.procedure_id), "versions", filename);
-    const previous = join(experienceGraphDirectory(this.paths, ref.procedure_id, true), "versions", filename);
-    if (path !== canonical && path !== previous && (!(path.startsWith(`${legacyRoot}/`) || path.startsWith(`${legacyRoot}\\`)) || !path.endsWith(`.v${ref.procedure_version}.json`))) throw new Error("Procedure definition path is outside the managed directory");
-    checkedExperiencePath(this.paths, path);
+    const canonical = join(experienceGraphDirectory(this.paths, ref.procedure_id, false, baseDirectory), "versions", filename);
+    const previous = join(experienceGraphDirectory(this.paths, ref.procedure_id, true, baseDirectory), "versions", filename);
+    const globalCanonical = join(experienceGraphDirectory(this.paths, ref.procedure_id), "versions", filename);
+    const globalPrevious = join(experienceGraphDirectory(this.paths, ref.procedure_id, true), "versions", filename);
+    const legacyFile = (path.startsWith(`${legacyRoot}/`) || path.startsWith(`${legacyRoot}\\`)) && path.endsWith(`.v${ref.procedure_version}.json`);
+    const globalLegacy = baseDirectory !== this.paths.experienceDir && (path === globalCanonical || path === globalPrevious || legacyFile);
+    if (path !== canonical && path !== previous && !globalLegacy && !(baseDirectory === this.paths.experienceDir && legacyFile)) throw new Error("Procedure definition path is outside the managed directory");
+    checkedExperiencePath(this.paths, path, false, globalLegacy ? this.paths.experienceDir : baseDirectory);
     const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("Procedure definition is invalid");
     const value = definition(parsed);
-    if (value.schema_version !== "craft.procedure.v1" || value.procedure_id !== ref.procedure_id || value.procedure_version !== ref.procedure_version || value.kind !== ref.kind) throw new Error("Procedure definition metadata drifted");
+    if (value.schema_version !== "craft.procedure.v1" || value.procedure_id !== ref.procedure_id || value.procedure_version !== ref.procedure_version || value.kind !== ref.kind
+      || ref.scope !== undefined && value.scope !== ref.scope) throw new Error("Procedure definition metadata drifted");
     if (stableDigest(value) !== ref.digest) throw new Error("Procedure definition digest drifted");
     return value;
   }
@@ -136,5 +150,6 @@ export function procedureDefinitionRef(value: unknown): value is ProcedureDefini
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const item = value as Record<string, unknown>;
   return item.format === "json" && typeof item.procedure_id === "string" && Number.isSafeInteger(item.procedure_version)
-    && (item.kind === "workflow" || item.kind === "graph") && typeof item.path === "string" && typeof item.digest === "string";
+    && (item.kind === "workflow" || item.kind === "graph") && (item.scope === undefined || typeof item.scope === "string")
+    && typeof item.path === "string" && typeof item.digest === "string";
 }

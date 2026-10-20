@@ -12,6 +12,7 @@ import { McpServer } from "../core/mcp.ts";
 import { productSurfaceOf } from "../core/interfaces/mcp/product-launch.ts";
 import { validateProcedureComposition } from "../capability/craft-experience/procedure-composition.ts";
 import { ProcedureDefinitionStore, type ProcedureDefinition, type ProcedureDefinitionRef } from "../capability/craft-experience/procedure-definition.ts";
+import { stableDigest as digest } from "../common/craft-common-base/src/digest.ts";
 
 function spec(): JsonObject {
   return { steps: [{ id: "review", type: "instruction", instruction: "Review the supplied diff; findings are a valid report.", side_effect: "read_only", requires: ["diff"], provides: ["report"] }], composition: {
@@ -22,6 +23,8 @@ function spec(): JsonObject {
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-composition-"));
   const store = await new CraftStore(craftPaths(root)).open();
+  store.create("scope_alias", "craft-project", { status: "active", scope: { kind: "project", id: "project:craft" },
+    alias_kind: "path", alias: root, alias_digest: digest(root) });
   const service = new CraftService(store), mcp = new McpServer(service, productSurfaceOf("experience"));
   store.create("evidence", "e", { confidence: "confirmed" });
   let n = 0;
@@ -164,7 +167,7 @@ test("plans fail closed for identity, scope, input, effects, evidence and integr
     const restrictive = f.create(spec(), { allowed_effects: ["local_write"] });
     assert.throws(() => f.service.experienceProcedurePlan(f.args(restrictive)), /effect denied/);
     const emptyLegacy = f.create({ inputs: null, steps: null });
-    const emptyDefinition = new ProcedureDefinitionStore(f.store.paths).read(emptyLegacy.definition_ref as unknown as ProcedureDefinitionRef);
+    const emptyDefinition = new ProcedureDefinitionStore(f.store).read(emptyLegacy.definition_ref as unknown as ProcedureDefinitionRef);
     assert.deepEqual(emptyDefinition.definition, { inputs: [], steps: [] });
     const legacy = f.create({ steps: [{ id: "review", type: "assertion" }] });
     assert.throws(() => f.service.experienceProcedurePlan(f.args(legacy)), /composition must be an object/);
@@ -184,7 +187,7 @@ test("child calls pin versions and digest, propagate permission limits and rejec
     f.service.experienceProcedureGate({ procedure_id: child.id, stage: "canary", passed: false, evidence_ids: ["e"] });
     assert.throws(() => f.service.experienceProcedurePlan(f.args(parent)), /revoked/);
     const mutable = f.create();
-    const definitions = new ProcedureDefinitionStore(f.store.paths);
+    const definitions = new ProcedureDefinitionStore(f.store);
     const definition = definitions.read(mutable.definition_ref as unknown as ProcedureDefinitionRef);
     const cyclic = { ...definition, procedure_version: 2, definition: composedCall(mutable) } as ProcedureDefinition;
     const ref = definitions.write(cyclic, "cyclic");

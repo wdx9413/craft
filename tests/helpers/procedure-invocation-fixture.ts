@@ -17,6 +17,10 @@ export const spec = (preconditions: string[] = []): JsonObject => ({
 export async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-invocation-"));
   const store = await new CraftStore(craftPaths(root)).open();
+  store.create("scope_alias", "project-root", { status: "active", scope: { kind: "project", id: scope },
+    alias_kind: "path", alias: root, alias_digest: stableDigest(root) });
+  store.create("scope_alias", "observed-project-root", { status: "active", scope: { kind: "project", id: "project:internet-product-engineering" },
+    alias_kind: "path", alias: root, alias_digest: stableDigest(root) });
   let service = new CraftService(store), n = 0;
   store.create("task", "task", { status: "active" });
   store.create("task_control_contract", "contract", { task_id: "task", allowed_effects: ["read_only", "local_write"] });
@@ -25,7 +29,7 @@ export async function fixture() {
   service.verifiedWorkLoops.create({ work_loop_id: "work", task_id: "task", task_run_id: "run", contract_id: "contract", snapshot_id: "before", goal: "Review changes" });
   function create(value = spec(), failureDisposition = "checkpoint_and_handoff"): JsonObject {
     const id = `p${++n}`;
-    const definition = new ProcedureDefinitionStore(store.paths).write({ schema_version: "craft.procedure.v1", procedure_id: id, procedure_version: 1, kind: "workflow", scope,
+    const definition = new ProcedureDefinitionStore(store).write({ schema_version: "craft.procedure.v1", procedure_id: id, procedure_version: 1, kind: "workflow", scope,
       trigger: "coding", preconditions: [], allowed_effects: ["read", "local_write"], acceptance_ref: "review-contract", failure_disposition: failureDisposition,
       scenario_signature: { domain: "coding" }, evidence_ids: ["source"], proposal_ref: { id: "proposal", version: 1 }, definition: value }, id);
     return store.create("experience_procedure", id, { scope, procedure_kind: "workflow", routeable: true, lifecycle: "routeable", definition_ref: definition, definition_digest: definition.digest });

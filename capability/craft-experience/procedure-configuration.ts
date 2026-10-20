@@ -52,7 +52,7 @@ export class ProcedureConfiguration {
       const design = this.store.save("procedure_configuration", id, { scope, title, definition_digest: stableDigest(definition), author: "user", status: "draft" });
       const envelope = scopeEnvelope(current?.scope_envelope ?? args.scope_envelope, scopeRef);
       if (!scopeAllows(envelope, scopeAccess(args))) throw new Error("Procedure configuration audience denied");
-      const ref = new ProcedureDefinitionStore(this.store.paths).write({ schema_version: "craft.procedure.v1", procedure_id: id, procedure_version: contentVersion, kind: kind as "workflow" | "graph", scope,
+      const ref = new ProcedureDefinitionStore(this.store).write({ schema_version: "craft.procedure.v1", procedure_id: id, procedure_version: contentVersion, kind: kind as "workflow" | "graph", scope,
         trigger: title, preconditions: [], allowed_effects: effects, acceptance_ref: `configuration:${id}`, failure_disposition: "checkpoint_and_handoff", scenario_signature: signature, evidence_ids: [],
         proposal_ref: { id: String(design.id), version: Number(design.version) }, provenance: "user_configuration", definition }, title,
       path => !this.store.rawRecords("experience_procedure").some(record => (record.payload.definition_ref as JsonObject | undefined)?.path === path));

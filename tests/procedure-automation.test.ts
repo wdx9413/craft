@@ -11,11 +11,14 @@ import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
 import { McpServer } from "../core/mcp.ts";
 import { CraftService } from "../core/service.ts";
 import { payload, stableDigest } from "../core/digest.ts";
+import { stableDigest as digest } from "../common/craft-common-base/src/digest.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-procedure-automation-"));
   const workspace = join(root, "workspace");
   const store = await new CraftStore(craftPaths(join(root, "data"))).open();
+  store.create("scope_alias", "automation-project", { status: "active", scope: { kind: "project", id: "project:automation" },
+    alias_kind: "path", alias: root, alias_digest: digest(root) });
   store.create("task", "automation-task", { status: "active" });
   store.create("capability_kit_activation", "automation-activation", { task_id: "automation-task", status: "active" });
   return { root, workspace, store, service: new CraftService(store) };
@@ -23,7 +26,7 @@ async function fixture() {
 const binding = { task_id: "automation-task", activation_id: "automation-activation" };
 
 async function routeableWorkflow(f: Awaited<ReturnType<typeof fixture>>, id: string, path: string, effects = ["read"], spec?: JsonObject) {
-  const definition = new ProcedureDefinitionStore(f.store.paths).write({
+  const definition = new ProcedureDefinitionStore(f.store).write({
     schema_version: "craft.procedure.v1", procedure_id: id, procedure_version: 1, kind: "workflow",
     scope: "project:automation", trigger: "verify generated artifact", preconditions: ["workspace exists"],
     allowed_effects: effects, acceptance_ref: "assertion:artifact", failure_disposition: "checkpoint_and_handoff",

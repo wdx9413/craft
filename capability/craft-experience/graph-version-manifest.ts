@@ -5,18 +5,21 @@ import type { CraftStore, JsonObject } from "../../common/craft-common-store-loc
 import { checkedExperiencePath, experienceGraphDirectory, ProcedureDefinitionStore, procedureDefinitionRef } from "./procedure-definition.ts";
 
 import { activeProcedure, updateProcedureRelease } from "./procedure-release.ts";
+import { experienceDataDirectory } from "../../core/project-experience-directory.ts";
 
 /** Recoverable two-field view of the ledger. Hand editing never activates a version. */
-export function syncGraphVersionManifest(store: CraftStore, id: string): JsonObject {
+export function syncGraphVersionManifest(store: CraftStore, id: string, scope?: string): JsonObject {
   try {
     return store.transaction(() => {
       const record = store.find("experience_procedure", id), ref = record?.definition_ref;
-      const version = procedureDefinitionRef(ref) ? new ProcedureDefinitionStore(store.paths).read(ref).procedure_version : null;
+      const version = procedureDefinitionRef(ref) ? new ProcedureDefinitionStore(store).read(ref).procedure_version : null;
       if (record) updateProcedureRelease(store, record);
       const active = record ? activeProcedure(store, id) : null;
-      const currentVersion = active && procedureDefinitionRef(active.definition_ref) ? new ProcedureDefinitionStore(store.paths).read(active.definition_ref).procedure_version : null;
+      const currentVersion = active && procedureDefinitionRef(active.definition_ref) ? new ProcedureDefinitionStore(store).read(active.definition_ref).procedure_version : null;
       const versions = { current_version: currentVersion, test_version: version === currentVersion ? null : version };
-      const path = checkedExperiencePath(store.paths, join(experienceGraphDirectory(store.paths, id), "graph.yml"), true);
+      const selectedScope = String(record?.scope ?? scope ?? "global");
+      const base = experienceDataDirectory(store, selectedScope, true);
+      const path = checkedExperiencePath(store.paths, join(experienceGraphDirectory(store.paths, id, false, base), "graph.yml"), true, base);
       const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
       try {
         writeFileSync(temporary, `current_version: ${versions.current_version}\ntest_version: ${versions.test_version}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });

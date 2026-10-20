@@ -130,7 +130,7 @@ export class ProcedurePlanner {
     }
     const evidence = bindings(args.precondition_evidence ?? {}, "precondition_evidence");
     const inputRefs = bindings(args.input_refs, "input_refs");
-    const definitions = new ProcedureDefinitionStore(this.store.paths);
+    const definitions = new ProcedureDefinitionStore(this.store);
     let count = 0;
     const compile = (selection: JsonObject, inputs: JsonObject, ancestors: string[], budgets: Set<string>[], path: string): JsonObject => {
       const id = text(selection.procedure_id, "procedure_id"), pinned = version(selection.procedure_version);

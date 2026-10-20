@@ -14,7 +14,7 @@ import { projectExperienceDirectory } from "../core/project-experience-directory
 async function fixture() {
   const root = mkdtempSync(join(tmpdir(), "craft-procedure-projection-"));
   const store = await new CraftStore(craftPaths(root)).open();
-  for (const id of ["project:project", "project:retire-project"]) store.create("scope_alias", `alias-${id}`, { status: "active", alias_kind: "path", alias: root,
+  for (const id of ["project:project", "project:retire-project", "project:test"]) store.create("scope_alias", `alias-${id}`, { status: "active", alias_kind: "path", alias: root,
     alias_digest: stableDigest(root), scope: { kind: "project", id } });
   const procedures = new ProcedureStore(store);
   store.create("evidence", "e", { confidence: "confirmed" });

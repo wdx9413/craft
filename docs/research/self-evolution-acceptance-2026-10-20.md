@@ -47,6 +47,16 @@
 - `.87` 的产物内容路径逻辑已在 Marketplace MCP 包中确认；本地 100% 覆盖率测试覆盖项目别名校验、按项目隔离和路径写入。真实候选正文与账本引用已在用户级 `~/.craft_data/knowledge/projects/{项目ID}/md/` 下逐项核验。
 - Marketplace 发布和新 Host 加载已验证；新 Host 下再次生成或读取候选、Knowledge 独立评测与自动晋升、Memory/Experience 生命周期及反馈仍未验证。
 
+## `.88` 项目路径修正、Host 刷新与当前样本状态（2026-10-21）
+
+- 源码 `main` 为 `1992b00015e4f3d8ce29da205524bd2ae5ec47dd`；Marketplace `main` 为 `b2d2c50`。`.88` 修正了 `.87` 中把项目 Knowledge 正文写进全局目录的问题。候选正文现在位于项目工作区的 `.craft_data/knowledge/md/`，但 Knowledge Claim 元数据仍在全局 `craft.db`，因此能力账本和项目数据尚未完全隔离。
+- `codex plugin list --marketplace craft-marketplace --json` 显示 `craft-context` 已安装并启用 `.88`；`codex mcp get craft-context` 指向远端 Marketplace 缓存中的 `.88` MCP 包。当前长会话的 MCP 工具仍返回 `.85`，表明该 Host 会话没有热替换已运行的 MCP 进程。
+- 新建的 Codex CLI Host（`codex exec --ephemeral --model gpt-6-luna`）只调用一次 `craft_info`，实际返回 `version=0.12.88`、`data_root=~/.craft_data`、`content_language=zh-CN`。本次调用用量为 56,466 输入、328 输出 token；它只验证 Host 加载版本，没有触发学习 Worker 或候选生成。
+- 该 Host 返回 204 条 Knowledge Claim、0 个 Knowledge Evaluation Case、0 个 Experience Pattern、0 个 Memory Item、0 个 Memory Usage Signal。这个计数来自主账本，不代表项目/全局目录隔离已经完成。
+- Codex 会话索引最新更新时间为 `2026-10-20T16:22:58.169Z`：644 个来源、5,068 个任务（4,971 完成、93 中止、4 个运行中）；5,067 个任务没有匹配终态 Evidence，1 个已核验任务在 `candidate_generation`，`held_out` 可评测任务为 0。分区总量为生成集 1,403、留出集 3,665；这只是按会话切分，不等于可用的有效评测集。
+- Knowledge 和 Experience Worker 的锁由 PID `74585` 持有；本机 `kill(pid, 0)` 检查确认该 PID 存活。为避免重复 Worker 写同一数据根，本轮没有再启动 Worker。沙箱拒绝 `ps` 进程详情查询，因此该进程实际加载的 MCP 版本尚未直接核实。
+- 结论：`.88` 新 Host 加载已证明，长期运行的 Host/MCP 会话仍旧；真实任务索引已证明，独立留出证据仍为 0；没有新增候选、评测、晋升或使用收益证据。
+
 ## 完整验收矩阵
 
 | 要求 | 当前证据与缺口 | 后续必须取得的证据 |

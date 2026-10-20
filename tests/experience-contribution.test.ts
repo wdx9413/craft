@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { ExperienceContribution } from "../capability/craft-experience/contribution.ts";
 import { ProcedureDefinitionStore } from "../capability/craft-experience/procedure-definition.ts";
+import { stableDigest as digest } from "../common/craft-common-base/src/digest.ts";
 import { CRAFT_CAPABILITIES } from "../core/capability-catalog.ts";
 import { buildCapabilityRegistry, CORE_KERNELS } from "../core/capability-protocol.ts";
 import { ContextResolutionKernel } from "../core/context-resolution.ts";
@@ -15,6 +16,8 @@ import { PROVIDER_CATALOG } from "../core/model-gateway.ts";
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-experience-contribution-"));
   const store = await new CraftStore(craftPaths(root)).open();
+  store.create("scope_alias", "project-p", { status: "active", scope: { kind: "project", id: "project:p" },
+    alias_kind: "path", alias: root, alias_digest: digest(root) });
   const core: Record<string, unknown> = { [CORE_KERNELS.store]: store, [CORE_KERNELS.modelProviders]: PROVIDER_CATALOG };
   return { root, store, core, contribution: new ExperienceContribution(store) };
 }
@@ -105,7 +108,7 @@ test("Fresh or candidate-only Experience produces an empty Context contribution"
 test("Experience describes a routeable Graph with its checked subscenario routes", async () => {
   const f = await fixture();
   try {
-    const definitionRef = new ProcedureDefinitionStore(f.store.paths).write({
+    const definitionRef = new ProcedureDefinitionStore(f.store).write({
       schema_version: "craft.procedure.v1", procedure_id: "graph-routes", procedure_version: 1, kind: "graph", scope: "project:p",
       trigger: "graph route", preconditions: [], allowed_effects: ["read_only"], acceptance_ref: "acceptance:graph",
       failure_disposition: "stop", scenario_signature: { project: "p", target_class: "fixture" }, evidence_ids: [],

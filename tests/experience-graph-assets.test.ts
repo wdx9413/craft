@@ -1,6 +1,6 @@
 import test, { mock } from "node:test";
 import assert from "node:assert/strict";
-import fs, { existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import fs, { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { syncBuiltinESMExports } from "node:module";
 import { fixture, scope, spec } from "./helpers/procedure-invocation-fixture.ts";
@@ -17,9 +17,10 @@ const workflow = (): JsonObject => ({ title: "Review", procedure_kind: "workflow
 test("readable English scene IDs are exact directory names and old hashed drafts/revisions stay usable", async () => {
   const f = await fixture();
   try {
-    const id = "product-development", plain = experienceGraphDirectory(f.store.paths, id), old = experienceGraphDirectory(f.store.paths, id, true);
-    assert.equal(plain, join(f.store.paths.experienceDir, "graph", id)); assert.notEqual(old, plain);
-    for (const unsafe of ["../outside", "CON", "con", "a/b", "a".repeat(97)]) assert.notEqual(experienceGraphDirectory(f.store.paths, unsafe), join(f.store.paths.experienceDir, "graph", unsafe));
+    const base = join(realpathSync(f.root), ".craft_data", "experience");
+    const id = "product-development", plain = experienceGraphDirectory(f.store.paths, id, false, base), old = experienceGraphDirectory(f.store.paths, id, true, base);
+    assert.equal(plain, join(base, "graph", id)); assert.notEqual(old, plain);
+    for (const unsafe of ["../outside", "CON", "con", "a/b", "a".repeat(97)]) assert.notEqual(experienceGraphDirectory(f.store.paths, unsafe, false, base), join(base, "graph", unsafe));
     const saved = f.service.experienceGraphEdit({ action: "save", graph_id: id, scope, configuration: config() });
     assert.equal(saved.path, join(plain, "draft.json"));
     renameSync(plain, old);
@@ -27,7 +28,7 @@ test("readable English scene IDs are exact directory names and old hashed drafts
     const submitted = f.service.experienceGraphEdit({ action: "submit", graph_id: id, scope, expected_draft_digest: draft.draft_digest }).procedure as JsonObject;
     const ref = submitted.definition_ref as JsonObject, filename = "000001.json", legacyRef = { ...ref, path: join(old, "versions", filename) };
     mkdirSync(join(old, "versions")); renameSync(String(ref.path), String(legacyRef.path));
-    const definitions = new ProcedureDefinitionStore(f.store.paths);
+    const definitions = new ProcedureDefinitionStore(f.store);
     assert.equal(definitions.read(legacyRef as never).procedure_id, id);
     assert.equal(definitions.migrate(legacyRef as never).path, join(plain, "versions", filename));
     assert.ok(existsSync(String(legacyRef.path)));
@@ -49,6 +50,7 @@ test("a scenario draft is discoverable, editable on disk and submitted as an imm
     assert.match(String(saved.path), /experience\/graph\/engineering\/draft.json$/);
     assert.equal(f.store.count("experience_procedure"), 0);
     assert.equal((inspect({ action: "list", scenario_id: "internet-product-engineering" }).drafts as JsonObject[]).length, 1);
+    assert.equal(inspect({ action: "list" }).data_root, join(realpathSync(f.root), ".craft_data", "experience"));
     assert.equal((inspect({ action: "list", scenario_id: "missing" }).drafts as JsonObject[]).length, 0);
     assert.equal((inspect({ action: "list", graph_id: "engineering" }).drafts as JsonObject[]).length, 1);
     assert.equal((inspect({ action: "list", graph_id: "missing" }).drafts as JsonObject[]).length, 0);
@@ -93,6 +95,20 @@ test("a scenario draft is discoverable, editable on disk and submitted as an imm
     assert.throws(() => edit({ action: "save", scope: "project:other", configuration: config() }), /scope/);
     assert.throws(() => inspect({ action: "unknown", graph_id: "engineering" }), /Unknown/);
     assert.throws(() => edit({ action: "unknown" }), /Unknown/);
+  } finally { await f.close(); }
+});
+
+test("graph matching only uses an explicitly selected scoped release and validates input keys", async () => {
+  const f = await fixture();
+  try {
+    const saved = f.service.procedureConfigurationSave({ scope, procedure_id: "matchable", title: "互联网产研", procedure_kind: "graph", definition: experienceGraphTemplate("internet-product-engineering") }).procedure as JsonObject;
+    const call = (extra: JsonObject = {}) => f.service.experienceGraphInspect({ action: "match", scope, graph_id: "matchable", query: "requirements", ...extra });
+    assert.throws(() => call(), /Graph release unavailable/);
+    assert.throws(() => call({ release_channel: "test", input_keys: "diff" }), /input_keys/);
+    const match = call({ release_channel: "test", input_keys: ["request"] });
+    assert.equal(match.procedure_version, saved.version);
+    assert.equal(match.execution_authorized, false);
+    assert.throws(() => f.service.experienceGraphInspect({ action: "unknown", scope, graph_id: "matchable" }), /Unknown Experience/);
   } finally { await f.close(); }
 });
 
@@ -159,13 +175,17 @@ test("legacy revisions copy idempotently and preserve pinned references and dige
   const f = await fixture();
   try {
     const p = f.create(), canonical = p.definition_ref as never;
-    const definitions = new ProcedureDefinitionStore(f.store.paths), value = definitions.read(canonical);
+    const definitions = new ProcedureDefinitionStore(f.store), value = definitions.read(canonical);
     const legacyPath = join(f.store.paths.experienceProcedureDir, "workflows", "old.v1.json"); mkdirSync(dirname(legacyPath), { recursive: true });
     writeFileSync(legacyPath, JSON.stringify(value));
     const legacy = { ...(p.definition_ref as JsonObject), path: legacyPath };
     f.store.save("experience_procedure", String(p.id), { ...p, definition_ref: legacy });
     const current = f.store.get("experience_procedure", String(p.id));
     assert.equal(definitions.read(legacy as never).procedure_id, p.id);
+    const noScopePath = join(f.store.paths.experienceProcedureDir, "workflows", "legacy-no-scope.v1.json");
+    writeFileSync(noScopePath, JSON.stringify(value));
+    const noScopeRef = { ...(p.definition_ref as JsonObject), scope: undefined, path: noScopePath };
+    assert.equal(definitions.read(noScopeRef as never).procedure_id, p.id);
     const migrate = (a: JsonObject = {}) => f.service.experienceGraphEdit({ action: "migrate", scope, graph_id: p.id, expected_version: current.version, ...a });
     assert.throws(() => migrate({ expected_version: 1 }), /version conflict/);
     assert.throws(() => f.service.experienceGraphEdit({ action: "migrate", scope, graph_id: "missing" }), /Unknown/);
@@ -189,7 +209,7 @@ test("legacy revisions copy idempotently and preserve pinned references and dige
 test("content publication checks failure recovery, stable ID paths and removed-edge impact", async () => {
   const f = await fixture();
   try {
-    const definitions = new ProcedureDefinitionStore(f.store.paths), p = f.create(), value = definitions.read(p.definition_ref as never);
+    const definitions = new ProcedureDefinitionStore(f.store), p = f.create(), value = definitions.read(p.definition_ref as never);
     for (const invalid of [null, [], "bad", { ...value, procedure_version: 0 }, { ...value, kind: "prompt" }]) assert.throws(() => definitions.write(invalid as never, "Unused title"), /invalid/);
     const leaf = definitions.write({ ...value, procedure_id: "🌿" }, "First title");
     assert.match(leaf.path, /graph\/untitled--/);
@@ -217,7 +237,7 @@ test("content publication checks failure recovery, stable ID paths and removed-e
 test("draft and immutable paths reject symlink escapes and direct version tampering", async () => {
   const f = await fixture();
   try {
-    const definitions = new ProcedureDefinitionStore(f.store.paths), p = f.create(), ref = p.definition_ref as JsonObject;
+    const definitions = new ProcedureDefinitionStore(f.store), p = f.create(), ref = p.definition_ref as JsonObject;
     const value = definitions.read(ref as never);
     assert.throws(() => checkedExperiencePath(f.store.paths, f.store.paths.experienceDir), /outside/);
     assert.throws(() => checkedExperiencePath(f.store.paths, join(f.root, "other.json")), /outside/);
@@ -229,7 +249,7 @@ test("draft and immutable paths reject symlink escapes and direct version tamper
     rmSync(String(ref.path)); symlinkSync(join(f.root, "missing.json"), String(ref.path));
     assert.throws(() => definitions.read(ref as never), /symbolic link/);
     rmSync(String(ref.path)); writeFileSync(String(ref.path), JSON.stringify(value));
-    const id = "escape", directory = experienceGraphDirectory(f.store.paths, id); symlinkSync(f.root, directory);
+    const id = "escape", directory = experienceGraphDirectory(f.store.paths, id, false, join(realpathSync(f.root), ".craft_data", "experience")); symlinkSync(f.root, directory);
     assert.throws(() => f.service.experienceGraphEdit({ action: "save", graph_id: id, scope, configuration: config() }), /symbolic link/);
     unlinkSync(directory); symlinkSync(join(f.root, "missing-directory"), directory);
     assert.throws(() => f.service.experienceGraphEdit({ action: "save", graph_id: id, scope, configuration: config() }), /EEXIST|symbolic link/);

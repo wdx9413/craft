@@ -46,7 +46,7 @@ function scopeRef(value: string): { kind: string; id: string } {
 export class ProcedureStore {
   readonly store: CraftStore;
   readonly definitions: ProcedureDefinitionStore;
-  constructor(store: CraftStore) { this.store = store; this.definitions = new ProcedureDefinitionStore(store.paths); }
+  constructor(store: CraftStore) { this.store = store; this.definitions = new ProcedureDefinitionStore(store); }
 
   /** Create a candidate Procedure from an existing bounded proposal record. */
   draft(args: JsonObject): JsonObject {

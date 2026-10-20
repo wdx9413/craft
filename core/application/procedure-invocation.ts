@@ -300,7 +300,7 @@ export class ProcedureInvocationKernel {
     for (const node of run.nodes as Node[]) {
       const procedure = selectedProcedure(this.store, String(node.procedure_id), run.release_channel);
       if (!procedure || run.release_channel !== "test" && (procedure.routeable !== true || procedure.lifecycle !== "routeable") || procedure.version !== node.procedure_version || procedure.definition_digest !== node.definition_digest) throw new Error("Procedure revoked or version drifted; replan required");
-      new ProcedureDefinitionStore(this.store.paths).read(procedure.definition_ref as ProcedureDefinitionRef);
+      new ProcedureDefinitionStore(this.store).read(procedure.definition_ref as ProcedureDefinitionRef);
     }
     this.access(run, args);
   }

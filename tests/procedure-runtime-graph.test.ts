@@ -25,11 +25,11 @@ test("failed configuration publication is retryable after a changed definition a
     assert.equal(f.store.find("experience_procedure", "interrupted"), null);
     const changed = spec(); (changed.steps as JsonObject[])[0]!.instruction = "Review the current diff";
     const procedure = f.service.procedureConfigurationSave({ ...args, definition: changed }).procedure as JsonObject;
-    const saved = new ProcedureDefinitionStore(f.store.paths).read(procedure.definition_ref as never);
+    const saved = new ProcedureDefinitionStore(f.store).read(procedure.definition_ref as never);
     assert.equal((saved.definition.steps as JsonObject[])[0]!.instruction, "Review the current diff");
-    assert.throws(() => new ProcedureDefinitionStore(f.store.paths).write({ ...saved, definition: spec() }, "Review"), /version already exists|digest drifted/);
-    assert.equal(((new ProcedureDefinitionStore(f.store.paths).read(procedure.definition_ref as never).definition.steps as JsonObject[])[0]!).instruction, "Review the current diff");
-    const foreign = new ProcedureDefinitionStore(f.store.paths).write({ ...saved, procedure_id: "claimed-path", procedure_version: 1, definition: spec() }, "Review");
+    assert.throws(() => new ProcedureDefinitionStore(f.store).write({ ...saved, definition: spec() }, "Review"), /version already exists|digest drifted/);
+    assert.equal(((new ProcedureDefinitionStore(f.store).read(procedure.definition_ref as never).definition.steps as JsonObject[])[0]!).instruction, "Review the current diff");
+    const foreign = new ProcedureDefinitionStore(f.store).write({ ...saved, procedure_id: "claimed-path", procedure_version: 1, definition: spec() }, "Review");
     f.store.create("experience_procedure", "foreign-owner", { definition_ref: foreign });
     assert.throws(() => f.service.procedureConfigurationSave({ ...args, procedure_id: "claimed-path", definition: changed }), /digest drifted/);
   } finally { await f.close(); }
@@ -261,7 +261,7 @@ test("evidence-backed graph proposals use the runtime contract and cannot silent
   const f = await fixture();
   try {
     f.store.create("evidence", "observed", { confidence: "confirmed" });
-    for (const id of ["one", "two"]) f.service.workflowEvolutionObserve({ observation_id: id, scenario_key: "internet-product-engineering", source_kind: "outcome", source_id: id, source_digest: id, outcome: "passed", evidence_ids: ["observed"], execution_shape: ["recovery"], sanitized: true });
+    for (const id of ["one", "two"]) f.service.workflowEvolutionObserve({ observation_id: id, scenario_key: "internet-product-engineering", source_kind: "outcome", source_id: id, source_digest: id, scope, outcome: "passed", evidence_ids: ["observed"], execution_shape: ["recovery"], sanitized: true });
     const mcp = new McpServer(f.service, "component-experience-daily"), call = async (name: string, args: JsonObject) => {
       const response = await mcp.handle({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } });
       assert.equal((response!.result as JsonObject).isError, false, JSON.stringify(response)); return (response!.result as JsonObject).structuredContent as JsonObject;
@@ -282,7 +282,7 @@ test("graph compilation enforces child bindings, public outputs, total expansion
   const f = await fixture(); let seq = 0;
   function routeable(value: JsonObject) {
     const id = `direct-graph-${++seq}`;
-    const ref = new ProcedureDefinitionStore(f.store.paths).write({ schema_version: "craft.procedure.v1", procedure_id: id, procedure_version: 1, kind: "graph", scope, trigger: "Fixture", preconditions: [], allowed_effects: ["read", "local_write"], acceptance_ref: "contract", failure_disposition: "checkpoint_and_handoff", scenario_signature: { scenario_id: "engineering" }, evidence_ids: [], proposal_ref: { id: "fixture", version: 1 }, definition: value }, id);
+    const ref = new ProcedureDefinitionStore(f.store).write({ schema_version: "craft.procedure.v1", procedure_id: id, procedure_version: 1, kind: "graph", scope, trigger: "Fixture", preconditions: [], allowed_effects: ["read", "local_write"], acceptance_ref: "contract", failure_disposition: "checkpoint_and_handoff", scenario_signature: { scenario_id: "engineering" }, evidence_ids: [], proposal_ref: { id: "fixture", version: 1 }, definition: value }, id);
     return f.store.create("experience_procedure", id, { scope, routeable: true, lifecycle: "routeable", definition_ref: ref, definition_digest: ref.digest });
   }
   function childNode(child: JsonObject, extra: JsonObject = {}) { return { id: "review", type: "subworkflow", side_effect: "read_only", requires: ["diff"], provides: ["report"], acceptance_ref: "review-contract", procedure_id: child.id, procedure_version: child.version, definition_digest: child.definition_digest, entry_id: "review", exit_id: "reviewed", input_bindings: { diff: "diff" }, output_bindings: { report: "report" }, ...extra }; }

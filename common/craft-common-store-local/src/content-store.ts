@@ -148,6 +148,7 @@ export class MarkdownContentStore {
   readonly paths: CraftPaths;
   #projectKnowledgeDirectory: ProjectKnowledgeContentDirectoryResolver | undefined;
   #projectMemoryDirectory: ProjectKnowledgeContentDirectoryResolver | undefined;
+  #projectExperienceDirectory: ProjectKnowledgeContentDirectoryResolver | undefined;
   constructor(paths: CraftPaths) { this.paths = paths; }
 
   setProjectKnowledgeDirectoryResolver(resolver: ProjectKnowledgeContentDirectoryResolver): void {
@@ -156,6 +157,10 @@ export class MarkdownContentStore {
 
   setProjectMemoryDirectoryResolver(resolver: ProjectKnowledgeContentDirectoryResolver): void {
     this.#projectMemoryDirectory = resolver;
+  }
+
+  setProjectExperienceDirectoryResolver(resolver: ProjectKnowledgeContentDirectoryResolver): void {
+    this.#projectExperienceDirectory = resolver;
   }
 
   pathFor(kind: ContentKind, recordId: string, version?: number, folder?: ExperienceFolder, scope?: string, projectRoot?: string): string {
@@ -278,7 +283,7 @@ export class MarkdownContentStore {
     if (this.isCanonicalRef(scopedRef)) return this.readSync(scopedRef);
     const globalDirectory = resolve(this.directory(ref.kind));
     const target = resolve(scopedRef.path);
-    const isLegacySharedProjectRef = (scopedRef.kind === "knowledge" || scopedRef.kind === "memory") && scopedRef.scope?.startsWith("project:")
+    const isLegacySharedProjectRef = (scopedRef.kind === "knowledge" || scopedRef.kind === "memory" || scopedRef.kind === "experience") && scopedRef.scope?.startsWith("project:")
       && (target === globalDirectory || target.startsWith(`${globalDirectory}${sep}`));
     if (!isLegacySharedProjectRef && target !== resolve(this.legacyPathFor(scopedRef.kind, scopedRef.record_id, scopedRef.version))) {
       throw new Error("Content reference path is outside the canonical directory");
@@ -388,15 +393,24 @@ export class MarkdownContentStore {
       }
       return kind === "knowledge" ? this.paths.knowledgeContentDir : this.paths.memoryContentDir;
     }
-    if (folder === undefined) return this.paths.experienceContentDir;
+    let directory = this.paths.experienceContentDir;
+    if (scope?.startsWith("project:")) {
+      const projectDirectory = this.#projectExperienceDirectory?.(scope, {
+        ...(projectRoot ? { project_root: projectRoot } : {}), ...(referencePath ? { reference_path: referencePath } : {}), ...(writing ? { create: true } : {}),
+      });
+      if (projectDirectory) directory = projectDirectory;
+      else if (writing && this.#projectExperienceDirectory) throw new Error("Project Experience scope has no registered project root");
+    }
+    if (folder === undefined) return directory;
     if (!["workflows", "graphs", "prompts"].includes(folder)) throw new Error("Experience content folder is unsupported");
-    return join(this.paths.experienceContentDir, folder);
+    return join(directory, folder);
   }
 
   private folderOf(kind: ContentKind, path: string): ExperienceFolder | undefined {
     if (kind !== "experience") return undefined;
-    const relative = resolve(path).slice(resolve(this.paths.experienceContentDir).length + 1).split(/[\\/]/u)[0];
-    return relative === "workflows" || relative === "graphs" || relative === "prompts" ? relative : undefined;
+    const parts = resolve(path).split(sep), markdownIndex = parts.findIndex((part, index) => part === "md" && parts.slice(0, index).lastIndexOf("experience") >= 0);
+    const folder = parts[markdownIndex + 1];
+    return folder === "workflows" || folder === "graphs" || folder === "prompts" ? folder : undefined;
   }
 }
 

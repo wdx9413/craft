@@ -13,6 +13,7 @@ import { CraftService } from "../core/application/craft-service.ts";
 import { ContentMigrationKernel } from "../core/content-migration.ts";
 import { MemoryConsolidationKernel } from "../core/memory-consolidation.ts";
 import { McpServer } from "../core/mcp.ts";
+import { stableDigest } from "../core/digest.ts";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-content-store-"));
@@ -193,6 +194,44 @@ test("Experience Markdown is stored by Procedure format while preserving one can
     assert.equal(contentReference({ ...graph, kind: "memory" }), true);
     assert.throws(() => content.pathFor("experience", "bad", 1, "other" as never), /folder is unsupported/u);
     assert.throws(() => content.writeSync({ kind: "knowledge", folder: "graphs", record_id: "bad", version: 1, scope: "project:craft", status: "candidate", sensitivity: "internal", source_id: "fixture", body: "bad" }), /Experience content supports folders/u);
+  } finally { await f.store.close(); }
+});
+
+test("bound project Experience content stays in the project tree and old shared refs remain readable", async () => {
+  const f = await fixture();
+  try {
+    f.store.create("scope_alias", "experience-project", { status: "active", alias_kind: "path", alias: f.root, alias_digest: stableDigest(f.root),
+      scope: { kind: "project", id: "project:craft" } });
+    const content = f.store.contentStore;
+    const project = content.writeSync({ kind: "experience", folder: "workflows", record_id: "project-flow", version: 1,
+      scope: "project:craft", project_root: f.root, status: "candidate", sensitivity: "internal", source_id: "fixture", body: "# Project flow" });
+    assert.equal(dirname(project.path), join(realpathSync(f.root), ".craft_data", "experience", "md", "workflows"));
+    assert.equal(content.readSync(project).body, "# Project flow");
+    const rewritten = content.rewriteSync({ kind: "experience", record_id: "project-flow", version: 1, current_path: project.path,
+      scope: "project:craft", status: "routeable", sensitivity: "internal", source_id: "fixture", title: "Project flow updated", body: "# Project flow updated" });
+    assert.equal(dirname(rewritten.path), dirname(project.path));
+    assert.equal(content.readSync(rewritten).body, "# Project flow updated");
+    assert.throws(() => content.writeSync({ kind: "experience", record_id: "unbound-flow", version: 1, scope: "project:unbound",
+      status: "candidate", sensitivity: "internal", source_id: "fixture", body: "# Unbound flow" }), /no registered project root/u);
+    const legacyStore = new MarkdownContentStore(f.paths);
+    const legacy = legacyStore.writeSync({ kind: "experience", folder: "workflows", record_id: "legacy-project-flow", version: 1,
+      scope: "project:craft", status: "candidate", sensitivity: "internal", source_id: "fixture", body: "# Legacy project flow" });
+    assert.equal(legacy.path.startsWith(f.paths.experienceContentDir), true);
+    assert.equal(content.readCompatSync(legacy, "project:craft").body, "# Legacy project flow");
+    const legacyPath = join(f.paths.experienceContentDir, "legacy-project-flow.md");
+    writeFileSync(legacyPath, readFileSync(legacy.path, "utf8"));
+    assert.equal(content.readCompatSync({ ...legacy, path: legacyPath }, "project:craft").body, "# Legacy project flow");
+    const memory = content.writeSync({ kind: "memory", record_id: "project-memory", version: 1, scope: "project:craft",
+      project_root: f.root, status: "active", sensitivity: "internal", source_id: "fixture", body: "Project memory" });
+    assert.equal(dirname(memory.path), join(realpathSync(f.root), ".craft_data", "memory", "md"));
+    assert.equal(content.readSync(memory).body, "Project memory");
+    assert.throws(() => content.writeSync({ kind: "memory", record_id: "unbound-memory", version: 1, scope: "project:unbound",
+      status: "active", sensitivity: "internal", source_id: "fixture", body: "Unbound memory" }), /no registered project root/u);
+    assert.match(content.pathFor("memory", "session-memory", undefined, undefined, "session:session-123"), /\/tmp\/.craft_data\/memory\/session-123\/md\/session-memory\.md$/u);
+    assert.throws(() => content.pathFor("memory", "invalid-session", undefined, undefined, "session:../escape"), /session_id/u);
+    const global = content.writeSync({ kind: "experience", record_id: "global-flow", version: 1, scope: "global",
+      status: "candidate", sensitivity: "internal", source_id: "fixture", body: "# Global flow" });
+    assert.equal(global.path.startsWith(f.paths.experienceContentDir), true);
   } finally { await f.store.close(); }
 });
 

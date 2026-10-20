@@ -264,7 +264,7 @@ export class KnowledgeMemoryBundleKernel {
     const contentKind = CONTENT_KINDS[actualKind];
     const contentBody = contentKind && contentReference(raw.content_ref) ? this.store.contentStore.readCompatSync(raw.content_ref, typeof raw.scope === "string" ? raw.scope : undefined).body : undefined;
     const procedureDefinition = actualKind === "experience_procedure" && procedureDefinitionRef(raw.definition_ref)
-      ? new ProcedureDefinitionStore(this.store.paths).read(raw.definition_ref) : undefined;
+      ? new ProcedureDefinitionStore(this.store).read(raw.definition_ref) : undefined;
     const base = { kind: actualKind, id: String(record.id), version: Number(record.version), payload: portable,
       ...(contentBody === undefined ? {} : { content_body: contentBody }),
       ...(procedureDefinition === undefined ? {} : { procedure_definition: procedureDefinition }) };
@@ -298,7 +298,7 @@ export class KnowledgeMemoryBundleKernel {
         // Promotion advances the record version, not its immutable JSON definition.
         if (entry.procedure_definition.procedure_id !== entry.id || entry.procedure_definition.procedure_version !== definitionRef.procedure_version
           || entry.procedure_definition.procedure_version > entry.version || stableDigest(entry.procedure_definition) !== definitionRef.digest) throw new Error("Data Bundle Procedure definition identity is invalid");
-        const ref = new ProcedureDefinitionStore(this.store.paths).write(entry.procedure_definition, String(next.title ?? entry.id));
+        const ref = new ProcedureDefinitionStore(this.store).write(entry.procedure_definition, String(next.title ?? entry.id));
         next.definition_ref = ref; next.definition_digest = ref.digest;
       } else if (procedureDefinitionRef(next.definition_ref)) {
         // Pre-structured bundles could only carry a machine-local absolute reference. Preserve

@@ -56,7 +56,7 @@ function declaredEffects(definition: ProcedureDefinition): Set<string> {
 export class ProcedureAutomationKernel {
   readonly store: CraftStore;
   readonly definitions: ProcedureDefinitionStore;
-  constructor(store: CraftStore) { this.store = store; this.definitions = new ProcedureDefinitionStore(store.paths); }
+  constructor(store: CraftStore) { this.store = store; this.definitions = new ProcedureDefinitionStore(store); }
 
   save(args: JsonObject): JsonObject {
     const procedure = this.routeableWorkflow(args.procedure_id);

@@ -102,7 +102,7 @@ export class ExperienceContribution implements ContextContributionProvider {
   /** The Gate state makes the Procedure projection safe for this bounded Context. */
   private describe(procedure: JsonObject): JsonObject {
     const definition = procedure.procedure_kind === "graph" && procedureDefinitionRef(procedure.definition_ref)
-      ? new ProcedureDefinitionStore(this.store.paths).read(procedure.definition_ref).definition : null;
+      ? new ProcedureDefinitionStore(this.store).read(procedure.definition_ref).definition : null;
     const control = definition?.graph_control as JsonObject | undefined;
     const routes = Array.isArray(control?.subscenarios) ? (control.subscenarios as JsonObject[]).map(s => ({ id: s.id, title: s.title, entry_id: s.entry_id, exit_id: s.exit_id })) : [];
     return {

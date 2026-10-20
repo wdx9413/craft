@@ -11,6 +11,7 @@ import { checkedExperiencePath, experienceGraphDirectory, ProcedureDefinitionSto
 import { ProcedureConfiguration, validateExperienceConfiguration } from "./procedure-configuration.ts";
 import { experienceGraphTemplate } from "./procedure-templates.ts";
 import { syncGraphVersionManifest } from "./graph-version-manifest.ts";
+import { experienceDataDirectory } from "../../core/project-experience-directory.ts";
 
 const rows = (value: unknown): JsonObject[] => Array.isArray(value) ? value as JsonObject[] : [];
 const templateId = "internet-product-engineering";
@@ -34,7 +35,7 @@ const schema: JsonObject = { $schema: "https://json-schema.org/draft/2020-12/sch
 export class ExperienceGraphAssets {
   readonly store: CraftStore;
   readonly definitions: ProcedureDefinitionStore;
-  constructor(store: CraftStore) { this.store = store; this.definitions = new ProcedureDefinitionStore(store.paths); }
+  constructor(store: CraftStore) { this.store = store; this.definitions = new ProcedureDefinitionStore(store); }
 
   private allowed(record: JsonObject, args: JsonObject): boolean {
     return record.scope === text(args.scope, "scope") && scopeAllows(scopeEnvelope(record.scope_envelope, scopeFromKey(String(record.scope))), scopeAccess(args));
@@ -42,20 +43,21 @@ export class ExperienceGraphAssets {
   private authorize(record: JsonObject, args: JsonObject): void {
     if (!this.allowed(record, args)) throw new Error("Experience graph scope or audience denied");
   }
-  private path(id: string, create = false): string {
-    const path = checkedExperiencePath(this.store.paths, join(experienceGraphDirectory(this.store.paths, id), "draft.json"));
-    const previous = join(experienceGraphDirectory(this.store.paths, id, true), "draft.json");
-    const selected = !existsSync(path) && existsSync(checkedExperiencePath(this.store.paths, previous)) ? previous : path;
-    return checkedExperiencePath(this.store.paths, selected, create);
+  private path(id: string, scope: string, create = false): string {
+    const base = experienceDataDirectory(this.store, scope, create);
+    const path = checkedExperiencePath(this.store.paths, join(experienceGraphDirectory(this.store.paths, id, false, base), "draft.json"), false, base);
+    const previous = join(experienceGraphDirectory(this.store.paths, id, true, base), "draft.json");
+    const selected = !existsSync(path) && existsSync(checkedExperiencePath(this.store.paths, previous, false, base)) ? previous : path;
+    return checkedExperiencePath(this.store.paths, selected, create, base);
   }
   private draft(id: string, args: JsonObject): JsonObject {
     const current = this.store.find("experience_procedure", id); if (current) this.authorize(current, args);
-    const path = this.path(id);
+    const path = this.path(id, String(args.scope));
     if (statSync(path).size > 1_000_000) throw new Error("Graph draft exceeds 1000000 bytes");
     const draft = object(JSON.parse(readFileSync(path, "utf8")), "draft");
     if (draft.schema_version !== "craft.experience.graph-draft.v1" || draft.graph_id !== id) throw new Error("Graph draft metadata drifted");
     this.authorize(draft, args);
-    return { draft, path, draft_digest: stableDigest(draft), ...syncGraphVersionManifest(this.store, id), execution_authorized: false };
+    return { draft, path, draft_digest: stableDigest(draft), ...syncGraphVersionManifest(this.store, id, String(args.scope)), execution_authorized: false };
   }
   private current(args: JsonObject): JsonObject {
     const current = this.store.get("experience_procedure", text(args.graph_id, "graph_id")); this.authorize(current, args);
@@ -109,9 +111,9 @@ export class ExperienceGraphAssets {
         next_tool: activeProcedure(this.store, String(p.id)) ? "craft_procedure_plan" : "craft_procedure_gate",
         record_version: p.version, content_version: (p.definition_ref as JsonObject).procedure_version, definition_digest: p.definition_digest, lifecycle: p.lifecycle,
         eligible_version: activeProcedure(this.store, String(p.id))?.version ?? null, definition_ref: p.definition_ref,
-        draft_path: this.path(String(p.id)), draft_exists: existsSync(this.path(String(p.id))), provenance: p.provenance ?? "learned", template_id: p.template_id ?? null, ...syncGraphVersionManifest(this.store, String(p.id)) })),
-        drafts: drafts.slice(0, limit).map(p => ({ graph_id: p.id, title: p.title, scenario_id: p.scenario_id, path: this.path(String(p.id)), saved_draft_digest: p.draft_digest, usage_status: "draft_not_submitted", next_tool: "craft_experience_graph_edit", next_action: "submit" })),
-        has_more: items.length > limit || drafts.length > limit, data_root: this.store.paths.root, scope: args.scope,
+        draft_path: this.path(String(p.id), String(p.scope)), draft_exists: existsSync(this.path(String(p.id), String(p.scope))), provenance: p.provenance ?? "learned", template_id: p.template_id ?? null, ...syncGraphVersionManifest(this.store, String(p.id), String(p.scope)) })),
+        drafts: drafts.slice(0, limit).map(p => ({ graph_id: p.id, title: p.title, scenario_id: p.scenario_id, path: this.path(String(p.id), String(p.scope)), saved_draft_digest: p.draft_digest, usage_status: "draft_not_submitted", next_tool: "craft_experience_graph_edit", next_action: "submit" })),
+        has_more: items.length > limit || drafts.length > limit, data_root: experienceDataDirectory(this.store, String(args.scope)), scope: args.scope,
         reason: items.length || drafts.length ? "inspect_asset_status" : "no_accessible_graph_in_scope", manifest_role: "derived_view_not_activation_config", execution_authorized: false };
     }
     const id = text(args.graph_id, "graph_id");
@@ -133,7 +135,7 @@ export class ExperienceGraphAssets {
     if (action !== "read") throw new Error("Unknown Experience graph inspection action");
     const selected = args.version === undefined ? current : this.store.get("experience_procedure", id, Number(args.version)); this.authorize(selected, args);
     if (!procedureDefinitionRef(selected.definition_ref)) throw new Error("Graph requires a checked JSON definition");
-    return { graph: selected, definition: this.definitions.read(selected.definition_ref), historical: selected.version !== current.version, ...syncGraphVersionManifest(this.store, id), execution_authorized: false };
+    return { graph: selected, definition: this.definitions.read(selected.definition_ref), historical: selected.version !== current.version, ...syncGraphVersionManifest(this.store, id, String(args.scope)), execution_authorized: false };
   }
 
   edit(args: JsonObject): JsonObject {
@@ -159,7 +161,7 @@ export class ExperienceGraphAssets {
       }
       if (action !== "save") throw new Error("Unknown Experience graph editing action");
       if (current ? args.expected_version !== current.version : args.expected_version !== undefined) throw new Error("Graph draft base version conflict");
-      const path = this.path(id, true);
+      const path = this.path(id, scope, true);
       if (existsSync(path) ? args.expected_draft_digest !== this.draft(id, args).draft_digest : args.expected_draft_digest !== undefined) throw new Error("Graph draft digest conflict; inspect the current draft");
       if (args.template_id !== undefined && (args.json !== undefined || args.configuration !== undefined)) throw new Error("Choose template or configuration, not both");
       const config = args.template_id === undefined ? this.input(args) : { title: "互联网产研", procedure_kind: "graph", definition: experienceGraphTemplate(text(args.template_id, "template_id")) };
@@ -178,6 +180,6 @@ export class ExperienceGraphAssets {
       this.store.save("experience_graph_draft", id, { scope, scope_envelope: envelope, title, scenario_id: scenarioId, path, draft_digest: digest });
       return { graph_id: id, path, draft_digest: digest, preview, execution_authorized: false };
     });
-    return { ...result, ...syncGraphVersionManifest(this.store, String(args.graph_id)) };
+    return { ...result, ...syncGraphVersionManifest(this.store, String(args.graph_id), String(args.scope)) };
   }
 }

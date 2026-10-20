@@ -39,7 +39,7 @@ export function installDurableExperienceMethods(serviceClass: typeof CraftServic
     const execute = (input: JsonObject): JsonObject => {
       const procedure = this.store.get("experience_procedure", String(input.procedure_id), Number(input.procedure_version));
       const reference = procedure.definition_ref as JsonObject;
-      const definition = new ProcedureDefinitionStore(this.store.paths).read(reference as never);
+      const definition = new ProcedureDefinitionStore(this.store).read(reference as never);
       if (definition.kind !== "workflow") throw new Error("Experience evaluator supports Workflow Procedures only");
       const sourceProposal = this.store.find("workflow_evolution_proposal", definition.proposal_ref.id, definition.proposal_ref.version);
       if (sourceProposal) {

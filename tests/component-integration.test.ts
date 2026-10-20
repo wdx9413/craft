@@ -219,7 +219,7 @@ test("exports replayable schema-3 bundles and turns merge collisions into candid
 test("portable bundles rehydrate Workflow JSON definitions under the receiving Experience domain", async () => {
   const source = await fixture(); const target = await fixture();
   try {
-    const definition = new ProcedureDefinitionStore(source.store.paths).write({
+    const definition = new ProcedureDefinitionStore(source.store).write({
       schema_version: "craft.procedure.v1", procedure_id: "portable-procedure", procedure_version: 1, kind: "workflow",
       scope: "project:p", trigger: "portable verification", preconditions: ["workspace ready"], allowed_effects: ["read"],
       acceptance_ref: "acceptance:fixture", failure_disposition: "checkpoint_and_handoff", scenario_signature: { project: "p", target_class: "fixture" },
@@ -234,7 +234,7 @@ test("portable bundles rehydrate Workflow JSON definitions under the receiving E
     const importedResult = target.service.knowledgeMemoryBundleImportApply({ bundle, approved: true });
     assert.equal((importedResult.graph_manifests as JsonObject[])[0]!.current_version, 1);
     const imported = target.store.get("experience_procedure", "portable-procedure");
-    const rehydrated = new ProcedureDefinitionStore(target.store.paths).read(imported.definition_ref as never);
+    const rehydrated = new ProcedureDefinitionStore(target.store).read(imported.definition_ref as never);
     assert.equal(rehydrated.definition.steps instanceof Array, true);
     assert.notEqual((imported.definition_ref as JsonObject).path, definition.path);
   } finally { await dispose(source); await dispose(target); }
