@@ -17,6 +17,11 @@
       "name": "craft-context",
       "source": "./plugins/craft-context",
       "description": "craft-context Skill and MCP"
+    },
+    {
+      "name": "craft-datasec",
+      "source": "./plugins/craft-datasec",
+      "description": "craft-datasec independent local redaction hooks"
     }
   ]
 }

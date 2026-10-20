@@ -1,0 +1,7 @@
+{
+  "hooks": {
+    "PreToolUse": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "node --disable-warning=ExperimentalWarning \"${PLUGIN_ROOT}/dist/hook.mjs\" codex PreToolUse", "timeout": 10 }] }],
+    "PostToolUse": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "node --disable-warning=ExperimentalWarning \"${PLUGIN_ROOT}/dist/hook.mjs\" codex PostToolUse", "timeout": 10 }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node --disable-warning=ExperimentalWarning \"${PLUGIN_ROOT}/dist/hook.mjs\" codex UserPromptSubmit", "timeout": 10 }] }]
+  }
+}

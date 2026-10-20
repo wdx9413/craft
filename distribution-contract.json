@@ -6,6 +6,13 @@
       "surface": "component-context-agent",
       "hook_member": "context",
       "category": "Developer Tools"
+    },
+    {
+      "name": "craft-datasec",
+      "surface": "standalone-hooks",
+      "hook_member": null,
+      "category": "Developer Tools",
+      "version": "0.1.0"
     }
   ]
 }

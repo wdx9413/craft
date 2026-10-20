@@ -10,10 +10,10 @@ const root = resolve(import.meta.dirname, "..");
 const json = (file: string) => JSON.parse(readFileSync(file, "utf8"));
 
 test("the compact Context Agent product negotiates through Codex, Claude and portable manifests", async () => {
-  assert.deepEqual(externalMarketplaceProducts().map(product => product.name), ["craft-context"]);
+  assert.deepEqual(externalMarketplaceProducts().map(product => product.name), ["craft-context", "craft-datasec"]);
   const data = mkdtempSync(join(tmpdir(), "craft-products-wire-"));
   try {
-    for (const product of externalMarketplaceProducts()) {
+    for (const product of externalMarketplaceProducts().filter(product => product.surface !== "standalone-hooks")) {
       const directory = join(root, "plugins", product.name); const selected = product.name.slice(6);
       const native = json(join(directory, ".mcp.json")).mcpServers[product.name];
       const claude = json(join(directory, ".claude-plugin/plugin.json")).mcpServers[product.name];
@@ -42,7 +42,7 @@ test("the compact Context Agent product negotiates through Codex, Claude and por
 });
 
 test("marketplace publishes one context plugin and keeps shared repository indexing deterministic", async () => {
-  assert.deepEqual(externalMarketplaceProducts().map(product => product.name), ["craft-context"]);
+  assert.deepEqual(externalMarketplaceProducts().map(product => product.name), ["craft-context", "craft-datasec"]);
   assert.equal(existsSync(join(root, "plugins", "craft-context", "dsh")), false, "DSH payloads are not part of the marketplace package");
   const temporary = mkdtempSync(join(tmpdir(), "craft-context-package-"));
   const repository = join(temporary, "repo"); mkdirSync(repository); execFileSync("git", ["-C", repository, "init", "-q"]); writeFileSync(join(repository, "a.ts"), "export function alpha() {}\n");
