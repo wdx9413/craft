@@ -38,6 +38,7 @@ readline.createInterface({ input: process.stdin }).on("line", line => {
               : request.method === "tools/call" && request.params.name === "craft_experience_learning_evaluation_dispatch_list" ? { isError: false, structuredContent: { dispatches: [], count: 0 }, content: [] }
                 : request.method === "tools/call" && request.params.name === "craft_knowledge_source_list" && failureMode === "knowledge_source_failure" ? { isError: false, structuredContent: { sources: [{ id: "fixture-source", status: "active", access: "read_only", trust: "verified" }] }, content: [] }
                 : request.method === "tools/call" && request.params.name === "craft_knowledge_source_list" ? { isError: false, structuredContent: { sources: [] }, content: [] }
+                : request.method === "tools/call" && request.params.name === "craft_learning_cycle_task_evidence_list" ? { isError: false, structuredContent: { evidence: JSON.parse(process.env.CRAFT_TEST_SESSION_EVIDENCE ?? "[]") }, content: [] }
                 : request.method === "tools/call" && request.params.name === "craft_knowledge_claim_list" ? { isError: false, structuredContent: { claims: [] }, content: [] }
                 : request.method === "tools/call" ? { isError: false, structuredContent: { tickets: [] }, content: [] }
                 : undefined;

@@ -14,6 +14,7 @@ import { defaultSettings } from "../core/settings.ts";
 import { stableDigest } from "../core/digest.ts";
 import { projectExperienceDirectory } from "../core/project-experience-directory.ts";
 import { sanitizedExperienceTaskGoal } from "../core/codex-hook-bridge.ts";
+import { codexTaskGoalDigest } from "../core/codex-task-prose.ts";
 
 async function fixture(models?: ReturnType<typeof defaultSettings>["models"]) {
   const root = await mkdtemp(join(tmpdir(), "craft-codex-hook-"));
@@ -593,6 +594,73 @@ test("MCP Host completion enters the same verified Experience proposal loop idem
     assert.match(String((second.result.structuredContent.request as JsonObject).hypothesis), /纯文档任务/u);
     assert.equal(f.store.list("workflow_evolution_observation", 10).length, 2);
     assert.equal(f.store.list("workflow_evolution_request", 10).length, 1);
+    const taskEvidence = f.service.learningCycleTaskEvidenceList({ session_ids: ["session-task-one", "session-task-two"] });
+    const verifiedEvidence = taskEvidence.evidence as JsonObject[];
+    assert.equal(verifiedEvidence.length, 2);
+    assert.deepEqual(verifiedEvidence.map(item => item.verification_outcome).sort(), ["failed", "passed"]);
+    assert.equal(verifiedEvidence.every(item => item.verified === true && item.content_stored === false && !Object.hasOwn(item, "verification_ref")), true);
+    const legacyEvidence = f.store.get("evidence", String(verifiedEvidence.find(item => item.session_id === "session-task-one")!.evidence_id));
+    const legacyMetadata = { ...(legacyEvidence.metadata as JsonObject) };
+    delete legacyMetadata.verification_outcome;
+    f.store.save("evidence", String(legacyEvidence.id), { ...legacyEvidence, metadata: legacyMetadata });
+    assert.deepEqual((f.service.learningCycleTaskEvidenceList({ session_ids: ["session-task-one"] }).evidence as JsonObject[])
+      .map(item => item.verification_outcome), ["passed"], "legacy result is recovered only from its exact sanitized linked observation");
+    f.service.evidenceRecord({ evidence_id: "evidence-bad-outcome", source_type: "host_completion_signal", confidence: "bounded",
+      claim: "Host reported terminal verification passed.", metadata: { provenance: "host_completion_signal", content_stored: false,
+        source_session_id: "session-task-one", host: "codex", turn_id: "bad-outcome-turn", task_id: "bad-outcome-task",
+        context_receipt_id: "receipt", verification_ref_digest: "digest", terminal_identity_digest: "terminal", verification_outcome: "failed" } });
+    assert.equal((f.service.learningCycleTaskEvidenceList({ session_ids: ["session-task-one"] }).evidence as JsonObject[]).length, 1);
+    f.service.evidenceRecord({ evidence_id: "evidence-orphan-valid-outcome", source_type: "host_completion_signal", confidence: "bounded",
+      claim: "Host reported terminal verification passed.", metadata: { provenance: "host_completion_signal", content_stored: false,
+        source_session_id: "session-task-one", host: "codex", turn_id: "orphan-turn", task_id: "task-one",
+        context_receipt_id: "receipt", verification_ref_digest: `sha256:${"c".repeat(64)}`, terminal_identity_digest: `sha256:${"d".repeat(64)}`, verification_outcome: "passed" } });
+    assert.equal((f.service.learningCycleTaskEvidenceList({ session_ids: ["session-task-one"] }).evidence as JsonObject[]).length, 1,
+      "a standalone Evidence record cannot verify a task without a linked Experience observation");
+    const originalEvidenceId = String(verifiedEvidence.find(item => item.session_id === "session-task-one")!.evidence_id);
+    f.store.create("workflow_evolution_observation", "empty-linked-observation", { source: { kind: "host:mcp_host", id: "empty-task", session_id: "session-task-one" },
+      outcome: "passed", evidence_ids: [], sanitized: true, content_stored: false });
+    f.store.create("workflow_evolution_observation", "malformed-linked-observation", { source: { kind: 1, id: 1, session_id: "session-task-one" },
+      outcome: "unknown", evidence_ids: [], sanitized: true, content_stored: false });
+    f.store.create("workflow_evolution_observation", "non-host-linked-observation", { source: { kind: "experience", id: "orphan-task", session_id: "session-task-one" },
+      outcome: "passed", evidence_ids: ["evidence-non-host"], sanitized: true, content_stored: false });
+    f.service.evidenceRecord({ evidence_id: "evidence-conflicting-metadata-outcome", source_type: "host_completion_signal", confidence: "bounded",
+      claim: "Host reported terminal verification failed.", metadata: { provenance: "host_completion_signal", content_stored: false,
+        source_session_id: "session-task-one", host: "codex", turn_id: "conflicting-metadata-turn", task_id: "conflicting-metadata-task",
+        context_receipt_id: "receipt", verification_ref_digest: "digest", terminal_identity_digest: "terminal", verification_outcome: "failed" } });
+    f.store.create("workflow_evolution_observation", "conflicting-metadata-observation", { source: { kind: "host:codex", id: "conflicting-metadata-task", session_id: "session-task-one" },
+      outcome: "passed", evidence_ids: ["evidence-conflicting-metadata-outcome"], sanitized: true, content_stored: false });
+    assert.equal((f.service.learningCycleTaskEvidenceList({ session_ids: ["session-task-one"] }).evidence as JsonObject[]).length, 1,
+      "Evidence metadata cannot override the linked Host observation outcome");
+    f.store.create("workflow_evolution_observation", "conflicting-linked-observation", { source: { kind: "host:mcp_host", id: "task-one", session_id: "session-task-one" },
+      outcome: "failed", evidence_ids: [originalEvidenceId], sanitized: true, content_stored: false });
+    assert.equal((f.service.learningCycleTaskEvidenceList({ session_ids: ["session-task-one"] }).evidence as JsonObject[]).length, 0,
+      "conflicting linked outcomes cannot verify the affected task");
+    const evidenceTool = await server.handle({ jsonrpc: "2.0", id: "task-evidence", method: "tools/call", params: { name: "craft_learning_cycle_task_evidence_list", arguments: { session_ids: ["session-task-one"] } } }) as any;
+    assert.equal(evidenceTool.result.structuredContent.evidence.length, 0);
+    assert.throws(() => f.service.learningCycleTaskEvidenceList({ session_ids: [] }), /bounded Host session identifiers/u);
+    assert.throws(() => f.service.learningCycleTaskEvidenceList({ session_ids: null }), /bounded Host session identifiers/u);
+    assert.throws(() => f.service.learningCycleTaskEvidenceList({ session_ids: "invalid" }), /bounded Host session identifiers/u);
+    assert.throws(() => f.service.learningCycleTaskEvidenceList({ session_ids: [""] }), /bounded Host session identifiers/u);
+    assert.throws(() => f.service.learningCycleTaskEvidenceList({ session_ids: Array.from({ length: 101 }, (_, index) => `session-${index}`) }), /bounded Host session identifiers/u);
+    assert.throws(() => f.service.learningCycleTaskEvidenceList({ session_ids: ["x".repeat(257)] }), /bounded Host session identifiers/u);
+    assert.throws(() => f.service.learningCycleTaskEvidenceList({ session_ids: ["session-task-one"], limit: 10_001 }), /limit/u);
+    assert.throws(() => f.service.learningCycleTaskEvidenceList({ session_ids: ["session-task-one"], limit: 0 }), /limit/u);
+    assert.throws(() => f.service.learningCycleTaskEvidenceList({ session_ids: ["session-task-one"], limit: 1.5 }), /limit/u);
+    assert.throws(() => f.service.learningCycleTaskEvidenceList({ session_ids: ["session-task-one"], limit: "10" }), /limit/u);
+    assert.equal(f.service.learningCycleTaskEvidenceList({ session_ids: ["session-task-one"], limit: 10 }).evidence_count, 0);
+    f.service.evidenceRecord({ evidence_id: "evidence-unknown-outcome", source_type: "host_completion_signal", confidence: "bounded",
+      claim: "Host reported a terminal outcome.", metadata: { provenance: "host_completion_signal", content_stored: false,
+        source_session_id: "session-unknown-outcome", host: "codex", turn_id: "unknown-outcome-turn", task_id: "unknown-outcome-task",
+        context_receipt_id: "receipt", verification_ref_digest: "digest", terminal_identity_digest: "terminal", verification_outcome: "unknown" } });
+    assert.equal(f.service.learningCycleTaskEvidenceList({ session_ids: ["session-unknown-outcome"] }).evidence_count, 0);
+    const unscopedEvidence = f.service.evidenceRecord({ evidence_id: "evidence-unscoped-host-task", source_type: "host_completion_signal", confidence: "bounded",
+      claim: "Host reported terminal verification passed.", metadata: { provenance: "host_completion_signal", content_stored: false,
+        source_session_id: "unscoped-session", host: "codex", turn_id: "unscoped-turn", task_id: "unscoped-task",
+        context_receipt_id: "receipt", verification_ref_digest: `sha256:${"a".repeat(64)}`, terminal_identity_digest: `sha256:${"b".repeat(64)}`, verification_outcome: "passed" } });
+    f.store.create("workflow_evolution_observation", "unscoped-host-observation", { source: { session_id: "unscoped-session", kind: "host:codex", id: "unscoped-task" },
+      outcome: "passed", evidence_ids: [unscopedEvidence.id], sanitized: true, content_stored: false });
+    const unscoped = (f.service.learningCycleTaskEvidenceList({ session_ids: ["unscoped-session"] }).evidence as JsonObject[])[0]!;
+    assert.equal(Object.hasOwn(unscoped, "project_scope_id"), false);
     const requestId = String((second.result.structuredContent.request as JsonObject).id);
     const trace = f.service.traceGet({ trace_id: second.result.structuredContent.trace_correlation.trace_id });
     assert((trace.events as JsonObject[]).some(event => event.event_kind === "component.call.completed" && (event.output_refs as string[]).includes(requestId)));
@@ -1108,6 +1176,10 @@ test("explicit stopped turns reject late signals and repeated learning, includin
     await bridge.handle("context", { ...base, hook_event_name: "Stop" });
     const closed = bridge.journal.find(base)!;
     assert(closed.closed_at);
+    const observed = f.store.list("context_feedback", 10).find(item => item.receipt_id === closed.context_receipt_id);
+    assert(observed, "Stop should record an automatic observation for the exact Context receipt");
+    assert.equal(observed.outcome, "unrated"); assert.equal(observed.usage_stage, "shown"); assert.equal(observed.turn_outcome, "passed");
+    assert.equal(observed.evidence_verified, false, "a successful Host turn must not be presented as causal Memory evidence");
     await bridge.handle("context", { ...base, hook_event_name: "PostToolUse", tool_name: "Edit" });
     await bridge.handle("context", { ...base, hook_event_name: "Stop" });
     assert.deepEqual(bridge.journal.find(base), closed);
@@ -1116,6 +1188,22 @@ test("explicit stopped turns reject late signals and repeated learning, includin
     await bridge.handle("context", { ...empty, hook_event_name: "Stop" });
     await bridge.handle("context", { ...empty, hook_event_name: "PostToolUse", tool_name: "Edit" });
     assert.deepEqual(bridge.journal.find(empty)!.signals, []);
+  } finally { await dispose(f); }
+});
+
+test("Context feedback failures remain fail-open and record only a safe diagnostic", async () => {
+  const f = await fixture();
+  try {
+    const bridge = new CodexHookBridge(f.service);
+    for (const [session_id, thrown, expectedType] of [["feedback-error", new TypeError("private feedback detail"), "TypeError"], ["feedback-value", "private feedback detail", "Error"]] as const) {
+      const base = { cwd: f.root, session_id, turn_id: "turn" };
+      await bridge.handle("context", { ...base, hook_event_name: "UserPromptSubmit", prompt: "Review this project change" });
+      f.service.contextResolutionFeedback = (() => { throw thrown; }) as typeof f.service.contextResolutionFeedback;
+      assert.deepEqual(await bridge.handle("context", { ...base, hook_event_name: "Stop" }), {});
+      const failure = f.store.events("codex-hook").filter(event => event.event_type === "codex_hook.failed" && (event.payload as JsonObject).event === "Stop").at(-1);
+      assert(failure);
+      assert.deepEqual(failure.payload, { member: "context", event: "Stop", error_type: expectedType });
+    }
   } finally { await dispose(f); }
 });
 
@@ -1212,6 +1300,16 @@ test("verified Hook tasks create a scoped classification ticket from a redacted 
     await bridge.handle("experience", { ...base, hook_event_name: "PostToolUse", tool_name: "Edit" });
     await bridge.handle("experience", { ...base, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "pnpm test:focused" }, tool_response: { exit_code: 0 } });
     await bridge.handle("experience", { ...base, hook_event_name: "Stop" });
+
+    const completionEvidence = f.store.list("evidence", 10, item => {
+      const metadata = item.metadata as JsonObject | undefined;
+      return metadata?.provenance === "host_completion_signal" && metadata.source_session_id === base.session_id && metadata.turn_id === base.turn_id;
+    })[0]!;
+    assert.equal((completionEvidence.metadata as JsonObject).task_goal_digest, codexTaskGoalDigest("修复 Experience 场景分类触发链路"));
+    assert.equal(JSON.stringify(completionEvidence.metadata).includes("修复 Experience"), false);
+    const evidenceBatch = f.service.learningCycleTaskEvidenceList({ session_ids: [String(base.session_id)] }).evidence as JsonObject[];
+    assert.equal(evidenceBatch[0]?.task_goal_digest, codexTaskGoalDigest("修复 Experience 场景分类触发链路"));
+    assert.equal(evidenceBatch[0]?.project_scope_id, codexProjectScope(f.root)?.id);
 
     const references = f.store.list("experience_scenario_classification_request_ref", 10);
     assert.equal(references.length, 2);

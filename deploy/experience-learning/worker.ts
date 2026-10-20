@@ -13,17 +13,42 @@ import { generatedTextLanguageInstruction, loadConfig } from "../../core/config.
 import { validateDistilledWorkflowSteps } from "./workflow-contract.ts";
 import { runKnowledgeSyncOnce, type KnowledgeLearningClient } from "./knowledge-sync.ts";
 import { runKnowledgeScenarioClassificationOnce } from "./knowledge-classification.ts";
+import { runSessionKnowledgeCandidateOnce } from "./session-knowledge-candidates.ts";
+import { runSessionKnowledgeEvaluationOnce } from "./session-knowledge-evaluation.ts";
+import { nextKnowledgeLearningStage, nextLearningPassOrder } from "./knowledge-stage-scheduler.ts";
 import { runExperienceScenarioClassificationOnce } from "./experience-scenario-classification.ts";
 import { createLearningModelTransport } from "./codex-cli-transport.ts";
 import { learningFailureKind, learningTickStatus, runLearningTick as runResilientLearningTick } from "./learning-tick.ts";
+import { codexSessionEvidenceBatch, commitCodexSessionEvidenceBatch, reconcileCodexSessionTaskEvidence, runCodexSessionCollectionOnce } from "../../core/codex-session-archive.ts";
+import { acquireLearningWorkerLocks } from "../../core/interfaces/learning-worker-supervisor.ts";
 
 export interface ExperienceLearningClient { call(name: string, args?: JsonObject): Promise<JsonObject> }
 export type LearningComponent = "experience" | "knowledge";
+
+async function collectCodexSessionsWithLock(client: ExperienceLearningClient): Promise<JsonObject> {
+  const release = await acquireLearningWorkerLocks(craftPaths(dataRoot()).runtimeDir, ["codex-session-collection"]);
+  if (!release) return { status: "skipped_locked", sessions_processed: 0, raw_content_stored: false };
+  try {
+    const collection = await runCodexSessionCollectionOnce();
+    const batch = await codexSessionEvidenceBatch();
+    const sessionIds = batch.session_ids as string[];
+    if (!sessionIds.length) return collection;
+    const lookup = await client.call("craft_learning_cycle_task_evidence_list", { session_ids: sessionIds, limit: 10_000 });
+    const reconciliation = await reconcileCodexSessionTaskEvidence(lookup.evidence);
+    const evidenceBatch = await commitCodexSessionEvidenceBatch(sessionIds);
+    return { ...collection, tasks_verified: Number(collection.tasks_verified) + Number(reconciliation.tasks_verified), evidence_reconciliation: reconciliation,
+      evidence_batch: evidenceBatch };
+  }
+  finally { await release(); }
+}
 export interface DistillationDependencies {
   client: ExperienceLearningClient;
   providers?: readonly ModelProviderSpec[];
   transport?: ModelTransport;
   contentLanguage?: string;
+  knowledge_stage_cursor_file?: string;
+  learning_pass_cursor_file?: string;
+  env?: NodeJS.ProcessEnv;
 }
 
 export async function runEvaluationOnce(client: ExperienceLearningClient): Promise<JsonObject> {
@@ -67,22 +92,49 @@ export function learningComponents(env: NodeJS.ProcessEnv = process.env): Learni
 }
 
 export async function runLearningTick(deps: DistillationDependencies, syncKnowledge = false,
-  components: readonly LearningComponent[] = ["experience", "knowledge"]): Promise<JsonObject> {
-  const config = await loadConfig(craftPaths(dataRoot()));
+  components: readonly LearningComponent[] = ["experience", "knowledge"],
+  runSessionCollection?: () => Promise<JsonObject>): Promise<JsonObject> {
+  const env = deps.env ?? process.env;
+  const paths = craftPaths(dataRoot(env));
+  const config = await loadConfig(paths);
   const configuredDeps = { ...deps, contentLanguage: deps.contentLanguage ?? config?.contentLanguage ?? "zh-CN" };
   const includesExperience = components.includes("experience"), includesKnowledge = components.includes("knowledge");
+  const passOrder = includesExperience && includesKnowledge
+    ? await nextLearningPassOrder(deps.learning_pass_cursor_file ?? join(paths.runtimeDir, "learning-pass-order.json"))
+    : includesKnowledge ? "knowledge_first" : "experience_first";
   return runResilientLearningTick({
+    pass_order: passOrder,
+    ...(runSessionCollection ? { run_session_collection: runSessionCollection } : {}),
     run_experience_pass: () => includesExperience ? runOnce(configuredDeps) : Promise.resolve({ processed: 0, outcomes: [], skipped: true }),
     run_knowledge_pass: async () => {
-      const ingestion = await runKnowledgeSyncOnce(deps.client as KnowledgeLearningClient);
-      let classification: JsonObject;
-      try { classification = await runKnowledgeScenarioClassificationOnce({ client: configuredDeps.client, providers: configuredDeps.providers, transport: configuredDeps.transport,
-        contentLanguage: configuredDeps.contentLanguage,
-        state_file: join(craftPaths(dataRoot()).knowledgeDir, "classification-attempts.json") }); }
-      catch (error) { classification = { status: "failed", failure_kind: learningFailureKind(error) }; }
-      return { ...ingestion, classification };
+      const ingestion = syncKnowledge ? await runKnowledgeSyncOnce(deps.client as KnowledgeLearningClient)
+        : { status: "not_due", processed: 0, content_stored: false, raw_content_stored: false };
+      const knowledgeDir = paths.knowledgeDir;
+      const stage = await nextKnowledgeLearningStage(deps.knowledge_stage_cursor_file ?? join(knowledgeDir, "learning-stage-cursor.json"),
+        runSessionCollection ? undefined : ["classification"]);
+      if (stage === "classification") {
+        let classification: JsonObject;
+        try { classification = await runKnowledgeScenarioClassificationOnce({ client: configuredDeps.client, providers: configuredDeps.providers, transport: configuredDeps.transport,
+          contentLanguage: configuredDeps.contentLanguage, state_file: join(knowledgeDir, "classification-attempts.json") }); }
+        catch (error) { classification = { status: "failed", failure_kind: learningFailureKind(error) }; }
+        return { ...ingestion, classification };
+      }
+      if (stage === "session_candidate") {
+        let taskCandidates: JsonObject;
+        try { taskCandidates = await runSessionKnowledgeCandidateOnce({ client: configuredDeps.client, providers: configuredDeps.providers,
+          transport: configuredDeps.transport, contentLanguage: configuredDeps.contentLanguage, env }); }
+        catch (error) { taskCandidates = { status: "failed", failure_kind: learningFailureKind(error), raw_content_stored: false }; }
+        return { ...ingestion, ...(taskCandidates.status !== "idle" && taskCandidates.status !== "skipped" ? { task_candidates: taskCandidates } : {}),
+          ...(taskCandidates.status === "failed" ? { failure_kind: taskCandidates.failure_kind } : {}) };
+      }
+      let evaluationCases: JsonObject;
+      try { evaluationCases = await runSessionKnowledgeEvaluationOnce({ client: configuredDeps.client, providers: configuredDeps.providers,
+        transport: configuredDeps.transport, contentLanguage: configuredDeps.contentLanguage, env }); }
+      catch (error) { evaluationCases = { status: "failed", failure_kind: learningFailureKind(error), raw_content_stored: false }; }
+      return { ...ingestion, ...(evaluationCases.status !== "idle" && evaluationCases.status !== "skipped" ? { evaluation_cases: evaluationCases } : {}),
+        ...(evaluationCases.status === "failed" ? { failure_kind: evaluationCases.failure_kind } : {}) };
     },
-  }, syncKnowledge && includesKnowledge);
+  }, includesKnowledge);
 }
 
 export function mcpCommandOptions(env: NodeJS.ProcessEnv = process.env): { command: string; args: string[] } {
@@ -330,7 +382,8 @@ async function main(): Promise<void> {
     do {
       const syncKnowledge = knowledgeEnabled && Date.now() - lastKnowledgeSync >= knowledgePollMs;
       const modelTransport = createLearningModelTransport(process.env.CRAFT_LEARNING_MODEL_HOST);
-      const result = await runLearningTick({ client, ...(modelTransport ? { transport: modelTransport } : {}) }, syncKnowledge, components);
+      const result = await runLearningTick({ client, ...(modelTransport ? { transport: modelTransport } : {}) }, syncKnowledge, components,
+        () => collectCodexSessionsWithLock(client));
       const idlePass = Number(experienceEnabled) * Number(!learningWorkFound(result));
       idleExperiencePasses = idlePass * (idleExperiencePasses + 1);
       const experienceNextPollMs = learningPollInterval(experiencePollMs, idleExperiencePasses);

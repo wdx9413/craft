@@ -17,6 +17,7 @@ import type { JsonObject } from "../infrastructure/store.ts";
 import { payload, stableDigest } from "../digest.ts";
 import { projectExperienceDirectory } from "../project-experience-directory.ts";
 import { deleteExperienceTaskGoal, readExperienceTaskGoal, storeExperienceTaskGoal } from "../experience-task-goals.ts";
+import { sanitizeCodexTaskGoal } from "../codex-task-prose.ts";
 import { CRAFT_RELEASE_VERSION } from "../version.ts";
 
 type ComponentHookMember = "knowledge" | "memory" | "experience";
@@ -91,15 +92,7 @@ export function automaticMemoryFact(prompt: unknown): string | null {
 
 /** Keep only a short, redacted task goal for project Experience classification. */
 export function sanitizedExperienceTaskGoal(value: unknown): string | null {
-  const source = text(value);
-  if (!source || source.length > 8_000 || SECRET.test(source)) return null;
-  const goal = source.split(/\r?\n/u, 1)[0]!
-    .replace(/```[\s\S]*?```/gu, " ").replace(/`[^`]*`/gu, " ")
-    .replace(/\[[^\]]{1,200}\]\(https?:\/\/[^)]+\)/gu, " ").replace(/https?:\/\/\S+/giu, " ")
-    .replace(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/gu, " ")
-    .replace(/(?:\/[\w.-]+){2,}|[A-Za-z]:\\(?:[^\\\s]+\\)*[^\\\s]*/gu, " ")
-    .replace(/\b[a-f0-9]{32,}\b/giu, " ").replace(/\s+/gu, " ").replace(/^\s*[#>*-]+\s*/u, "").trim().slice(0, 320).trim();
-  return goal.length >= 8 ? goal : null;
+  return sanitizeCodexTaskGoal(value);
 }
 
 function experienceTaskGoalArgs(service: CraftService, input: HookInput) {
@@ -484,14 +477,31 @@ export class CodexHookBridge {
       const result = this.learning.finalize(input);
       const goalArgs = experienceTaskGoalArgs(this.service, input);
       if (goalArgs) deleteExperienceTaskGoal(goalArgs);
+      this.recordObservedContextUse(input);
       this.journal.close(input);
       return result;
     }) : null;
+    if (member !== "experience") this.recordObservedContextUse(input);
     this.service.activationProofRecord({ host: hookHost(input), component: member, event: "Stop", session_id: text(input.session_id) ?? "unknown",
       turn_id: text(input.turn_id), memory_written: false, observation_written: finalized !== null,
       plugin_release: CRAFT_RELEASE_VERSION, hook_trusted: true, mcp_reachable: true });
     this.lifecycle(member, "Stop", input);
     return {};
+  }
+
+  /** Record that exact Context assets were shown and the turn's observed outcome, without calling them helpful. */
+  private recordObservedContextUse(input: HookInput): void {
+    const journal = this.journal.find(input);
+    if (!journal || typeof journal.context_receipt_id !== "string" || typeof journal.turn_id !== "string") return;
+    const turnOutcome = journal.verification_outcome === "passed" || journal.verification_outcome === "failed"
+      ? String(journal.verification_outcome) : "unverified";
+    try {
+      this.service.contextResolutionFeedback({ receipt_id: journal.context_receipt_id, outcome: "unrated", usage_stage: "shown",
+        turn_outcome: turnOutcome, feedback_id: `context_hook_observed_${stableDigest({ receipt_id: journal.context_receipt_id, turn_id: journal.turn_id }).slice(-24)}` });
+    } catch (error) {
+      this.service.store.appendEvent("codex-hook", "codex_hook.failed", { member: "context", event: "Stop",
+        error_type: error instanceof Error ? error.name : "Error" });
+    }
   }
 
   /**

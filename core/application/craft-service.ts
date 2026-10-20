@@ -3019,6 +3019,7 @@ export class CraftService extends ServiceFoundation {
       ...(args.source_evidence_ids === undefined ? {} : { source_evidence_ids: uniqueTextArray(args.source_evidence_ids, "source_evidence_ids") }),
       ...(args.evaluation_channel === undefined ? {} : { evaluation_channel: text(args.evaluation_channel, "evaluation_channel") }),
       ...(args.dataset_partition === undefined ? {} : { dataset_partition: text(args.dataset_partition, "dataset_partition") }),
+      ...(args.label_source === undefined ? {} : { label_source: text(args.label_source, "label_source") }),
       ...(args.sanitized === undefined ? {} : { sanitized: args.sanitized }),
     };
     const caseId = String(args.case_id ?? id("knowledge_evaluation_case")); const existing = this.store.find("knowledge_evaluation_case", caseId); const identity = { query, scope, expected_claim_ids: expected, ...provenance };

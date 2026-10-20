@@ -23,6 +23,7 @@ export function createActionHandlers(service: CraftService, mountedComponent?: C
       craft_context_tools_discover: service.contextToolsDiscover.bind(service),
       craft_context_open: (a) => service.contextOpen(a),
       craft_learning_cycle_finalize: (a) => service.learningCycleFinalize(a),
+      craft_learning_cycle_task_evidence_list: (a) => service.learningCycleTaskEvidenceList(a),
       craft_experience_learning_request_get: (a) => service.learningCycleRequestGet(a),
       craft_experience_scenario_classification_request_get: (a) => service.experienceScenarioClassificationRequestGet(a),
       craft_experience_scenario_classification_request_complete: (a) => service.experienceScenarioClassificationRequestComplete(a),

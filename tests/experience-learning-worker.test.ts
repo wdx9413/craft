@@ -1,19 +1,23 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import test from "node:test";
+import { after, default as test } from "node:test";
 import type { ChatResult, ModelProviderSpec, ModelTransport } from "../core/model-gateway.ts";
 import type { JsonObject } from "../core/infrastructure/store.ts";
 import { McpStdioClient, boundedPollInterval, learningComponents, learningPollInterval, learningWorkFound, mcpCommandOptions, runDistillationOnce, runEvaluationOnce, runLearningTick, runOnce, type ExperienceLearningClient } from "../deploy/experience-learning/worker.ts";
 import { CRAFT_RELEASE_VERSION } from "../core/version.ts";
 import { learningFailureKind, learningTickStatus } from "../deploy/experience-learning/learning-tick.ts";
+import { acquireLearningWorkerLocks } from "../core/interfaces/learning-worker-supervisor.ts";
 
 const provider: ModelProviderSpec = { provider: "test", label: "test", protocol: "openai-compatible", base_url: "https://example.invalid/v1",
   api_key_env: "TEST_KEY", chat_path: "/chat/completions", models: { standard: "test-model" }, cost_hint: 0, supports_tools: false };
+const directWorkerDataDir = mkdtempSync(join(tmpdir(), "craft-learning-worker-unit-data-"));
+const directWorkerEnv = { ...process.env, CRAFT_DATA_DIR: directWorkerDataDir };
+after(() => rmSync(directWorkerDataDir, { recursive: true, force: true }));
 
 function fixture(modelText = JSON.stringify({ name: "Verified flow", description: "A bounded verified flow", inputs: ["project_root"],
   steps: [{ id: "inspect", type: "assertion", evaluator: "file_exists", path: ".", side_effect: "read_only" }] })) {
@@ -43,6 +47,12 @@ function fixture(modelText = JSON.stringify({ name: "Verified flow", description
     return { text: modelText, model: "test-model", usage: { input_tokens: 10, output_tokens: 20 } };
   } };
   return { client, transport, calls, systemPrompts };
+}
+
+function emptySessionCollection(dataDir: string) {
+  return { status: "source_unavailable", sessions_seen: 0, sessions_pending: 0, sessions_processed: 0, bytes_processed: 0,
+    tasks_indexed: 0, tasks_completed: 0, tasks_aborted: 0, tasks_candidate_generation: 0, tasks_held_out: 0, tasks_with_user_input: 0, tasks_verified: 0, malformed_lines: 0,
+    raw_content_stored: false, state_file: join(dataDir, "runtime", "codex-session-collection.json") };
 }
 
 test("distillation worker turns a ready ticket into a candidate and retries from the queue idempotently", async () => {
@@ -228,7 +238,7 @@ test("continuous learning tick contains transient Experience and Knowledge failu
     if (name === "craft_knowledge_claim_list") return { claims: [] };
     throw new Error(`unexpected tool ${name}`);
   } };
-  const deps = { client, providers: [provider], transport: fixture().transport };
+  const deps = { client, providers: [provider], transport: fixture().transport, env: directWorkerEnv };
   const first = await runLearningTick(deps, true);
   assert.deepEqual(first, { processed: 0, outcomes: [], scenario_classification: { status: "failed", failure_kind: "TypeError" },
     failure_kind: "TypeError", evaluation: { processed: 0, outcomes: [] }, knowledge: { status: "failed", failure_kind: "Error" } });
@@ -240,20 +250,26 @@ test("continuous learning tick contains transient Experience and Knowledge failu
   assert.deepEqual(learningTickStatus(second, true), { diagnostics: "", exit_code: null });
   assert.equal(ticketAttempts, 4);
   assert.equal(sourceListAttempts, 2);
-  const experienceOnly = await runLearningTick(deps);
+  const experienceOnly = await runLearningTick(deps, false, ["experience"]);
   assert.equal(experienceOnly.knowledge, null);
   assert.deepEqual(learningTickStatus(experienceOnly, false), { diagnostics: "", exit_code: null });
+  const collected = await runLearningTick(deps, false, ["experience"], async () => ({ status: "completed", tasks_indexed: 2, raw_content_stored: false }));
+  assert.deepEqual(collected.session_collection, { status: "completed", tasks_indexed: 2, raw_content_stored: false });
+  const failedCollection = await runLearningTick(deps, false, ["experience"], async () => { throw new TypeError("private session path"); });
+  assert.deepEqual(failedCollection.session_collection, { status: "failed", failure_kind: "TypeError" });
+  assert.deepEqual(learningTickStatus(failedCollection, true), { diagnostics: "Craft Codex session collection failed (TypeError).\n", exit_code: 1 });
+  assert.equal(JSON.stringify(failedCollection).includes("private"), false);
   assert.equal((await runLearningTick(deps, true, ["experience"])).knowledge, null, "an Experience-only tick must not request Knowledge even when the timer is due");
   assert.equal(sourceListAttempts, 2);
   const unusualError = new Error("internal failure");
   unusualError.name = "provider/path private";
   const invalidNameClient: ExperienceLearningClient = { async call() { throw unusualError; } };
-  assert.equal((await runLearningTick({ client: invalidNameClient })).failure_kind, "Error");
+  assert.equal((await runLearningTick({ client: invalidNameClient, env: directWorkerEnv })).failure_kind, "Error");
   const knowledgeOnlyFailure = await runLearningTick({ client: { async call(name) {
     if (name === "craft_evaluation_model_ticket_list" || name === "craft_experience_learning_evaluation_dispatch_list") return { tickets: [], dispatches: [] };
     if (name === "craft_knowledge_source_list") throw new Error("private");
     return {};
-  } } }, true);
+  } }, env: directWorkerEnv }, true);
   assert.deepEqual(learningTickStatus(knowledgeOnlyFailure, true), { diagnostics: "Craft Knowledge learning pass failed (Error).\n", exit_code: 1 });
   assert.deepEqual(learningTickStatus({ processed: 0, knowledge: "malformed" }, false), { diagnostics: "", exit_code: null });
 });
@@ -291,7 +307,7 @@ test("Knowledge classification failures remain visible without dropping complete
     if (name === "craft_knowledge_claim_list") throw new TypeError("private classification failure");
     throw new Error(`unexpected tool ${name}`);
   } };
-  const result = await runLearningTick({ client }, true);
+  const result = await runLearningTick({ client, env: directWorkerEnv }, true);
   assert.deepEqual(result.knowledge, { sources_seen: 0, sources_selected: 0, outcomes: [], skipped_sources: 0,
     classification: { status: "failed", failure_kind: "TypeError" } });
   assert.deepEqual(learningTickStatus(result, true), { diagnostics: "Craft Knowledge scenario classification failed (TypeError).\n", exit_code: 1 });
@@ -338,7 +354,7 @@ test("standalone learning modes call only their mounted Knowledge or Experience 
     if (name === "craft_knowledge_claim_list") return { claims: [] };
     throw new Error(`unexpected tool ${name}`);
   } };
-  const deps = { client, providers: [provider], transport: fixture().transport };
+  const deps = { client, providers: [provider], transport: fixture().transport, env: directWorkerEnv };
   const experience = await runLearningTick(deps, true, ["experience"]);
   assert.deepEqual(experience, { processed: 0, outcomes: [], evaluation: { processed: 0, outcomes: [] }, knowledge: null });
   assert.deepEqual(calls, ["craft_evaluation_model_ticket_list", "craft_evaluation_model_ticket_list", "craft_experience_learning_evaluation_dispatch_list"]);
@@ -433,7 +449,7 @@ test("worker CLI negotiates real newline MCP stdio and completes one empty poll"
   const fixturePath = fileURLToPath(new URL("./fixtures/experience-learning-mcp-fixture.cjs", import.meta.url));
   const dataDir = mkdtempSync(join(tmpdir(), "craft-learning-worker-cli-"));
   const child = spawn(process.execPath, ["--experimental-strip-types", workerPath, "--once"], { env: {
-    ...process.env, NODE_NO_WARNINGS: "1", CRAFT_DATA_DIR: dataDir, CRAFT_EXPERIENCE_MCP_COMMAND: process.execPath, CRAFT_EXPERIENCE_MCP_ARGS: JSON.stringify([fixturePath]),
+    ...process.env, NODE_NO_WARNINGS: "1", CRAFT_DATA_DIR: dataDir, CODEX_HOME: join(dataDir, "codex-home"), CRAFT_EXPERIENCE_MCP_COMMAND: process.execPath, CRAFT_EXPERIENCE_MCP_ARGS: JSON.stringify([fixturePath]),
   }, stdio: ["ignore", "pipe", "pipe"] });
   let stdout = "", stderr = "";
   child.stdout.setEncoding("utf8").on("data", chunk => { stdout += chunk; });
@@ -443,7 +459,8 @@ test("worker CLI negotiates real newline MCP stdio and completes one empty poll"
     child.once("close", code => resolve(code ?? -1));
   });
   assert.equal(exitCode, 0, stderr);
-  assert.deepEqual(JSON.parse(stdout.trim()), { processed: 0, outcomes: [], evaluation: { processed: 0, outcomes: [] }, knowledge: { sources_seen: 0, sources_selected: 0, outcomes: [], skipped_sources: 0, classification: { processed: 0, outcomes: [] } } });
+  assert.deepEqual(JSON.parse(stdout.trim()), { processed: 0, outcomes: [], evaluation: { processed: 0, outcomes: [] }, session_collection: emptySessionCollection(dataDir),
+    knowledge: { sources_seen: 0, sources_selected: 0, outcomes: [], skipped_sources: 0, classification: { processed: 0, outcomes: [] } } });
   rmSync(dataDir, { recursive: true, force: true });
 });
 
@@ -452,7 +469,7 @@ test("worker selects the Codex Host transport for an empty poll without starting
   const fixturePath = fileURLToPath(new URL("./fixtures/experience-learning-mcp-fixture.cjs", import.meta.url));
   const dataDir = mkdtempSync(join(tmpdir(), "craft-learning-codex-host-empty-"));
   const child = spawn(process.execPath, ["--experimental-strip-types", workerPath, "--once"], { env: {
-    ...process.env, NODE_NO_WARNINGS: "1", CRAFT_DATA_DIR: dataDir, CRAFT_LEARNING_MODEL_HOST: "codex-cli",
+    ...process.env, NODE_NO_WARNINGS: "1", CRAFT_DATA_DIR: dataDir, CODEX_HOME: join(dataDir, "codex-home"), CRAFT_LEARNING_MODEL_HOST: "codex-cli",
     CRAFT_EXPERIENCE_MCP_COMMAND: process.execPath, CRAFT_EXPERIENCE_MCP_ARGS: JSON.stringify([fixturePath]),
   }, stdio: ["ignore", "pipe", "pipe"] });
   let stdout = "", stderr = "";
@@ -463,7 +480,8 @@ test("worker selects the Codex Host transport for an empty poll without starting
     child.once("close", code => resolve(code ?? -1));
   });
   assert.equal(exitCode, 0, stderr);
-  assert.deepEqual(JSON.parse(stdout.trim()), { processed: 0, outcomes: [], evaluation: { processed: 0, outcomes: [] }, knowledge: { sources_seen: 0, sources_selected: 0, outcomes: [], skipped_sources: 0, classification: { processed: 0, outcomes: [] } } });
+  assert.deepEqual(JSON.parse(stdout.trim()), { processed: 0, outcomes: [], evaluation: { processed: 0, outcomes: [] }, session_collection: emptySessionCollection(dataDir),
+    knowledge: { sources_seen: 0, sources_selected: 0, outcomes: [], skipped_sources: 0, classification: { processed: 0, outcomes: [] } } });
   rmSync(dataDir, { recursive: true, force: true });
 });
 
@@ -472,7 +490,7 @@ test("Knowledge-only worker CLI polls its mounted Knowledge product without Expe
   const fixturePath = fileURLToPath(new URL("./fixtures/experience-learning-mcp-fixture.cjs", import.meta.url));
   const dataDir = mkdtempSync(join(tmpdir(), "craft-knowledge-worker-cli-"));
   const child = spawn(process.execPath, ["--experimental-strip-types", workerPath, "--once"], { env: {
-    ...process.env, NODE_NO_WARNINGS: "1", CRAFT_DATA_DIR: dataDir, CRAFT_EXPERIENCE_MCP_COMMAND: process.execPath,
+    ...process.env, NODE_NO_WARNINGS: "1", CRAFT_DATA_DIR: dataDir, CODEX_HOME: join(dataDir, "codex-home"), CRAFT_EXPERIENCE_MCP_COMMAND: process.execPath,
     CRAFT_EXPERIENCE_MCP_ARGS: JSON.stringify([fixturePath]), CRAFT_LEARNING_COMPONENTS: "knowledge",
   }, stdio: ["ignore", "pipe", "pipe"] });
   let stdout = "", stderr = "";
@@ -483,9 +501,77 @@ test("Knowledge-only worker CLI polls its mounted Knowledge product without Expe
     child.once("close", code => resolve(code ?? -1));
   });
   assert.equal(exitCode, 0, stderr);
-  assert.deepEqual(JSON.parse(stdout.trim()), { processed: 0, outcomes: [], skipped: true,
+  assert.deepEqual(JSON.parse(stdout.trim()), { processed: 0, outcomes: [], skipped: true, session_collection: emptySessionCollection(dataDir),
     knowledge: { sources_seen: 0, sources_selected: 0, outcomes: [], skipped_sources: 0, classification: { processed: 0, outcomes: [] } } });
   rmSync(dataDir, { recursive: true, force: true });
+});
+
+test("Worker links archived task indexes to exact Host verification Evidence", async () => {
+  const workerPath = fileURLToPath(new URL("../deploy/experience-learning/worker.ts", import.meta.url));
+  const fixturePath = fileURLToPath(new URL("./fixtures/experience-learning-mcp-fixture.cjs", import.meta.url));
+  const dataDir = mkdtempSync(join(tmpdir(), "craft-session-evidence-worker-"));
+  const codexHome = join(dataDir, "codex-home"), sessions = join(codexHome, "sessions", "2026", "10");
+  mkdirSync(sessions, { recursive: true });
+  const sessionId = "session-evidence-worker", turnId = "turn-evidence-worker";
+  const records = [
+    { type: "session_meta", payload: { session_id: sessionId, cwd: dataDir } },
+    { type: "event_msg", payload: { type: "task_started", turn_id: turnId } },
+    { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "private source prompt" }] } },
+    { type: "response_item", payload: { type: "message", role: "assistant", phase: "final_answer", content: [{ type: "output_text", text: "private result text" }] } },
+    { type: "event_msg", payload: { type: "task_complete", turn_id: turnId } },
+  ];
+  writeFileSync(join(sessions, "session.jsonl"), `${records.map(record => JSON.stringify(record)).join("\n")}\n`);
+  const evidence = [{ evidence_id: "evidence-hook", host: "codex", session_id: sessionId, turn_id: turnId, task_id: "hook-task",
+    context_receipt_id: "receipt-hook", verification_ref_digest: `sha256:${"a".repeat(64)}`, terminal_identity_digest: `sha256:${"b".repeat(64)}`,
+    verification_outcome: "passed", verified: true, content_stored: false }];
+  const child = spawn(process.execPath, ["--experimental-strip-types", workerPath, "--once"], { env: {
+    ...process.env, NODE_NO_WARNINGS: "1", CRAFT_DATA_DIR: dataDir, CODEX_HOME: codexHome, CRAFT_EXPERIENCE_MCP_COMMAND: process.execPath,
+    CRAFT_EXPERIENCE_MCP_ARGS: JSON.stringify([fixturePath]), CRAFT_TEST_SESSION_EVIDENCE: JSON.stringify(evidence),
+  }, stdio: ["ignore", "pipe", "pipe"] });
+  let stdout = "", stderr = "";
+  child.stdout.setEncoding("utf8").on("data", chunk => { stdout += chunk; });
+  child.stderr.setEncoding("utf8").on("data", chunk => { stderr += chunk; });
+  try {
+    const exitCode = await new Promise<number>((resolve, reject) => {
+      child.once("error", reject);
+      child.once("close", code => resolve(code ?? -1));
+    });
+    assert.equal(exitCode, 0, stderr);
+    const result = JSON.parse(stdout.trim());
+    assert.equal(result.session_collection.tasks_verified, 1);
+    assert.equal(result.session_collection.evidence_reconciliation.tasks_verified, 1);
+    assert.deepEqual(result.session_collection.evidence_batch, { status: "advanced", sessions_queried: 1, cursor_stored: true, raw_content_stored: false });
+    const state = readFileSync(join(dataDir, "runtime", "codex-session-collection.json"), "utf8");
+    assert.match(state, /evidence-hook/u);
+    assert.doesNotMatch(state, /private source prompt|private result text/u);
+    assert.equal(JSON.parse(state).evidence_cursor_session_id, "session-evidence-worker");
+  } finally { rmSync(dataDir, { recursive: true, force: true }); }
+});
+
+test("Worker skips Codex session collection while another worker owns its lock", async () => {
+  const workerPath = fileURLToPath(new URL("../deploy/experience-learning/worker.ts", import.meta.url));
+  const fixturePath = fileURLToPath(new URL("./fixtures/experience-learning-mcp-fixture.cjs", import.meta.url));
+  const dataDir = mkdtempSync(join(tmpdir(), "craft-session-collection-locked-"));
+  const release = await acquireLearningWorkerLocks(join(dataDir, "runtime"), ["codex-session-collection"]);
+  assert.ok(release);
+  const child = spawn(process.execPath, ["--experimental-strip-types", workerPath, "--once"], { env: {
+    ...process.env, NODE_NO_WARNINGS: "1", CRAFT_DATA_DIR: dataDir, CODEX_HOME: join(dataDir, "codex-home"), CRAFT_EXPERIENCE_MCP_COMMAND: process.execPath,
+    CRAFT_EXPERIENCE_MCP_ARGS: JSON.stringify([fixturePath]),
+  }, stdio: ["ignore", "pipe", "pipe"] });
+  let stdout = "", stderr = "";
+  child.stdout.setEncoding("utf8").on("data", chunk => { stdout += chunk; });
+  child.stderr.setEncoding("utf8").on("data", chunk => { stderr += chunk; });
+  try {
+    const exitCode = await new Promise<number>((resolve, reject) => {
+      child.once("error", reject);
+      child.once("close", code => resolve(code ?? -1));
+    });
+    assert.equal(exitCode, 0, stderr);
+    assert.deepEqual(JSON.parse(stdout.trim()).session_collection, { status: "skipped_locked", sessions_processed: 0, raw_content_stored: false });
+  } finally {
+    await release();
+    rmSync(dataDir, { recursive: true, force: true });
+  }
 });
 
 test("worker CLI keeps polling components isolated, writes sanitized diagnostics and fails once mode", async () => {
@@ -493,7 +579,7 @@ test("worker CLI keeps polling components isolated, writes sanitized diagnostics
   const fixturePath = fileURLToPath(new URL("./fixtures/experience-learning-mcp-fixture.cjs", import.meta.url));
   const dataDir = mkdtempSync(join(tmpdir(), "craft-learning-worker-failure-"));
   const child = spawn(process.execPath, ["--experimental-strip-types", workerPath, "--once"], { env: {
-    ...process.env, CRAFT_DATA_DIR: dataDir, CRAFT_EXPERIENCE_MCP_COMMAND: process.execPath, CRAFT_EXPERIENCE_MCP_ARGS: JSON.stringify([fixturePath]),
+    ...process.env, CRAFT_DATA_DIR: dataDir, CODEX_HOME: join(dataDir, "codex-home"), CRAFT_EXPERIENCE_MCP_COMMAND: process.execPath, CRAFT_EXPERIENCE_MCP_ARGS: JSON.stringify([fixturePath]),
     CRAFT_TEST_LEARNING_WORKER_FAILURES: "both",
   }, stdio: ["ignore", "pipe", "pipe"] });
   let stdout = "", stderr = "";
@@ -520,7 +606,7 @@ test("worker CLI reports an individual Knowledge source failure on stderr and fa
   const dataDir = mkdtempSync(join(tmpdir(), "craft-knowledge-source-failure-"));
   try {
     const child = spawn(process.execPath, ["--experimental-strip-types", workerPath, "--once"], { env: {
-      ...process.env, NODE_NO_WARNINGS: "1", CRAFT_DATA_DIR: dataDir, CRAFT_EXPERIENCE_MCP_COMMAND: process.execPath,
+      ...process.env, NODE_NO_WARNINGS: "1", CRAFT_DATA_DIR: dataDir, CODEX_HOME: join(dataDir, "codex-home"), CRAFT_EXPERIENCE_MCP_COMMAND: process.execPath,
       CRAFT_EXPERIENCE_MCP_ARGS: JSON.stringify([fixturePath]), CRAFT_LEARNING_COMPONENTS: "knowledge",
       CRAFT_TEST_LEARNING_WORKER_FAILURES: "knowledge_source_failure",
     }, stdio: ["ignore", "pipe", "pipe"] });
@@ -544,7 +630,7 @@ test("long-lived worker survives one failed pass, completes the next pass, then 
   const fixturePath = fileURLToPath(new URL("./fixtures/experience-learning-mcp-fixture.cjs", import.meta.url));
   const dataDir = mkdtempSync(join(tmpdir(), "craft-learning-worker-recovery-"));
   const child = spawn(process.execPath, ["--experimental-strip-types", workerPath], { env: {
-    ...process.env, NODE_NO_WARNINGS: "1", CRAFT_DATA_DIR: dataDir, CRAFT_EXPERIENCE_MCP_COMMAND: process.execPath,
+    ...process.env, NODE_NO_WARNINGS: "1", CRAFT_DATA_DIR: dataDir, CODEX_HOME: join(dataDir, "codex-home"), CRAFT_EXPERIENCE_MCP_COMMAND: process.execPath,
     CRAFT_EXPERIENCE_MCP_ARGS: JSON.stringify([fixturePath]), CRAFT_TEST_LEARNING_WORKER_FAILURES: "recover_once",
     CRAFT_EXPERIENCE_POLL_MS: "1000", CRAFT_KNOWLEDGE_POLL_MS: "60000",
   }, stdio: ["ignore", "pipe", "pipe"] });
@@ -618,7 +704,7 @@ test("worker exits when its MCP child dies so the supervisor can reconnect inste
   const fixturePath = fileURLToPath(new URL("./fixtures/experience-learning-mcp-fixture.cjs", import.meta.url));
   const dataDir = mkdtempSync(join(tmpdir(), "craft-learning-worker-dead-mcp-"));
   const child = spawn(process.execPath, ["--experimental-strip-types", workerPath], { env: {
-    ...process.env, NODE_NO_WARNINGS: "1", CRAFT_DATA_DIR: dataDir, CRAFT_EXPERIENCE_MCP_COMMAND: process.execPath,
+    ...process.env, NODE_NO_WARNINGS: "1", CRAFT_DATA_DIR: dataDir, CODEX_HOME: join(dataDir, "codex-home"), CRAFT_EXPERIENCE_MCP_COMMAND: process.execPath,
     CRAFT_EXPERIENCE_MCP_ARGS: JSON.stringify([fixturePath]), CRAFT_TEST_LEARNING_WORKER_MCP_EXIT: "after_first_call",
     CRAFT_EXPERIENCE_POLL_MS: "1000",
   }, stdio: ["ignore", "pipe", "pipe"] });
@@ -767,7 +853,7 @@ test("polling worker exits cleanly after a termination signal", async () => {
   const fixturePath = fileURLToPath(new URL("./fixtures/experience-learning-mcp-fixture.cjs", import.meta.url));
   const dataDir = mkdtempSync(join(tmpdir(), "craft-learning-worker-poll-"));
   const child = spawn(process.execPath, ["--experimental-strip-types", workerPath], { env: {
-    ...process.env, CRAFT_DATA_DIR: dataDir, CRAFT_EXPERIENCE_MCP_COMMAND: process.execPath, CRAFT_EXPERIENCE_MCP_ARGS: JSON.stringify([fixturePath]), CRAFT_EXPERIENCE_POLL_MS: "1000",
+    ...process.env, CRAFT_DATA_DIR: dataDir, CODEX_HOME: join(dataDir, "codex-home"), CRAFT_EXPERIENCE_MCP_COMMAND: process.execPath, CRAFT_EXPERIENCE_MCP_ARGS: JSON.stringify([fixturePath]), CRAFT_EXPERIENCE_POLL_MS: "1000",
   }, stdio: ["ignore", "pipe", "pipe"] });
   let stdout = "", stderr = "", stopping = false;
   child.stdout.setEncoding("utf8").on("data", chunk => {
@@ -780,7 +866,8 @@ test("polling worker exits cleanly after a termination signal", async () => {
     child.once("close", code => resolve(code ?? -1));
   });
   assert.equal(exitCode, 0, stderr);
-  assert.deepEqual(JSON.parse(stdout.trim()), { processed: 0, outcomes: [], evaluation: { processed: 0, outcomes: [] }, knowledge: { sources_seen: 0, sources_selected: 0, outcomes: [], skipped_sources: 0, classification: { processed: 0, outcomes: [] } } });
+  assert.deepEqual(JSON.parse(stdout.trim()), { processed: 0, outcomes: [], evaluation: { processed: 0, outcomes: [] }, session_collection: emptySessionCollection(dataDir),
+    knowledge: { sources_seen: 0, sources_selected: 0, outcomes: [], skipped_sources: 0, classification: { processed: 0, outcomes: [] } } });
   rmSync(dataDir, { recursive: true, force: true });
 });
 
@@ -797,6 +884,48 @@ test("runOnce contains scenario-classification queue failures and continues eval
   assert.equal(result.failure_kind, "Error");
   assert.deepEqual(result.scenario_classification, { status: "failed", failure_kind: "Error" });
   assert.equal((result.evaluation as JsonObject).processed, 0);
+});
+
+test("Knowledge worker incrementally executes session candidate and held-out evaluation stages", async () => {
+  for (const stage of ["session_candidate", "session_evaluation"] as const) {
+    for (const malformedState of [false, true]) {
+      const dataDir = mkdtempSync(join(tmpdir(), "craft-knowledge-stage-worker-"));
+      const codexHome = join(dataDir, "codex-home");
+      const knowledgeDir = join(dataDir, "knowledge");
+      mkdirSync(join(codexHome, "sessions"), { recursive: true });
+      mkdirSync(knowledgeDir, { recursive: true });
+      const cursorPath = join(knowledgeDir, "learning-stage-cursor.json");
+      const stageCursor = stage === "session_candidate" ? 1 : 2;
+      writeFileSync(cursorPath, JSON.stringify({ schema: "craft.knowledge-learning-stage-cursor.v1", cursor: stageCursor }));
+      const stageStatePath = join(knowledgeDir, stage === "session_candidate" ? "session-candidate-state.json" : "session-evaluation-state.json");
+      if (malformedState) writeFileSync(stageStatePath, "invalid state");
+      const client: ExperienceLearningClient = { async call(name) { throw new Error(`unexpected MCP call ${name}`); } };
+      try {
+        const result = await runLearningTick({ client, env: { ...process.env, CRAFT_DATA_DIR: dataDir, CODEX_HOME: codexHome },
+          knowledge_stage_cursor_file: cursorPath }, false, ["knowledge"], async () => ({ status: "completed", tasks_indexed: 0 }));
+        assert.deepEqual(result.session_collection, { status: "completed", tasks_indexed: 0 });
+        const knowledge = result.knowledge as JsonObject;
+        assert.ok(knowledge);
+        if (malformedState) {
+          assert.equal(stage === "session_candidate" ? knowledge.task_candidates && (knowledge.task_candidates as JsonObject).status : knowledge.evaluation_cases && (knowledge.evaluation_cases as JsonObject).status, "failed");
+          assert.equal(knowledge.failure_kind, "SyntaxError");
+        } else {
+          assert.equal(knowledge.task_candidates, undefined);
+          assert.equal(knowledge.evaluation_cases, undefined);
+        }
+      } finally { rmSync(dataDir, { recursive: true, force: true }); }
+    }
+  }
+  const noOp: ExperienceLearningClient = { async call() { throw new Error("no component should call the Host"); } };
+  assert.equal((await runLearningTick({ client: noOp, contentLanguage: "en", env: directWorkerEnv }, false, [])).knowledge, null);
+  const configuredDataDir = mkdtempSync(join(tmpdir(), "craft-learning-worker-language-config-"));
+  try {
+    mkdirSync(join(configuredDataDir, "config"), { recursive: true });
+    writeFileSync(join(configuredDataDir, "config", "config.json"), JSON.stringify({ schemaVersion: 1, contentLanguage: "zh-CN", activeMode: "agent",
+      initializedAt: "2026-10-20T00:00:00.000Z", updatedAt: "2026-10-20T00:00:00.000Z", runtime: { kind: "unconfigured" }, supervisor: { hosts: [] },
+      storage: { database: join(configuredDataDir, "db", "craft.db"), capabilityIndex: join(configuredDataDir, "index", "capabilities.db") } }));
+    assert.equal((await runLearningTick({ client: noOp, env: { ...process.env, CRAFT_DATA_DIR: configuredDataDir } }, false, [])).knowledge, null);
+  } finally { rmSync(configuredDataDir, { recursive: true, force: true }); }
 });
 
 test("runOnce classifies a verified task before distillation while using one model call", async () => {

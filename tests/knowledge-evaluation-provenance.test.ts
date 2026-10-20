@@ -48,6 +48,8 @@ test("Only sanitized independent real-session held-out Knowledge cases are evalu
   assert.equal(assess({ ...base, evaluation_channel: "simulation" }).status, "simulated");
   assert.equal(assess({ ...base, dataset_partition: "development" }).status, "development_only");
   assert.equal(assess({ ...base, sanitized: false }).status, "unsanitized");
+  assert.equal(assess({ ...base, label_source: "model_candidate" }).status, "model_labeled");
+  assert.equal(assess({ ...base, label_source: "unsupported" }).status, "unsupported_provenance");
   assert.equal(assess({ ...base, source_evidence_ids: [] }).status, "missing_source_evidence");
   assert.equal(assess({ ...base, source_evidence_ids: [1] }).status, "unverified_source_evidence");
   assert.equal(assess(base, []).status, "unverified_source_evidence");

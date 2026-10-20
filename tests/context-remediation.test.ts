@@ -96,6 +96,21 @@ test("feedback attributes selected code and schedules correction without alterin
   } finally { f.close(); }
 });
 
+test("automatic Context observation stores shown usage and turn outcome without claiming helpfulness", async () => {
+  const f = await fixture();
+  try {
+    const pack = await f.service.contextOpen({ project_root: f.repo, query: "登录代码" }); const id = (pack.pack_receipt as JsonObject).id;
+    const observed = f.service.contextResolutionFeedback({ receipt_id: id, outcome: "unrated", usage_stage: "shown", turn_outcome: "passed", feedback_id: "hook-observation" });
+    const feedback = observed.feedback as JsonObject;
+    assert.equal(feedback.outcome, "unrated"); assert.equal(feedback.usage_stage, "shown"); assert.equal(feedback.turn_outcome, "passed");
+    assert.equal(feedback.evidence_verified, false); assert.equal(feedback.changes_source_status, false);
+    assert.equal(f.service.contextResolutionFeedback({ receipt_id: id, outcome: "unrated", usage_stage: "shown", turn_outcome: "passed", feedback_id: "hook-observation" }).idempotent, true);
+    assert.throws(() => f.service.contextResolutionFeedback({ receipt_id: id, outcome: "unrated", usage_stage: "used", turn_outcome: "passed" }), /Unrated automatic/u);
+    assert.throws(() => f.service.contextResolutionFeedback({ receipt_id: id, outcome: "unrated", usage_stage: "shown", turn_outcome: "unknown" }), /turn outcome/u);
+    assert.throws(() => f.service.contextResolutionFeedback({ receipt_id: id, outcome: "unknown" }), /Unsupported Context feedback outcome/u);
+  } finally { f.close(); }
+});
+
 test("SQL scoped selection handles string/object scopes and predicates before hydration", async () => {
   const f = await fixture();
   try {

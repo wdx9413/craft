@@ -316,7 +316,7 @@ export class ContextResolutionKernel {
     const receiptId = text(args.receipt_id, "receipt_id");
     const receipt = this.store.find("context_pack_receipt", receiptId) ?? this.store.get("context_resolution_receipt", receiptId);
     const outcome = text(args.outcome, "outcome");
-    if (!["helpful", "irrelevant", "incorrect", "stale"].includes(outcome)) throw new Error("Unsupported Context feedback outcome");
+    if (!["helpful", "irrelevant", "incorrect", "stale", "unrated"].includes(outcome)) throw new Error("Unsupported Context feedback outcome");
     const members = this.members(args.members);
     if (members && (!Array.isArray(receipt.members) || (receipt.members as string[]).some(member => !members.has(member as "knowledge" | "memory" | "experience")))) throw new Error("Feedback receipt belongs to another component");
     const evidenceIds = sortedUniqueList(args.evidence_ids, "evidence_ids"); evidenceIds.forEach(id => this.store.get("evidence", id));
@@ -341,7 +341,10 @@ export class ContextResolutionKernel {
       const count = args[key]; if (!Number.isSafeInteger(count) || Number(count) < 0) throw new Error("Host token measurement must contain non-negative integers");
       return [key, count];
     }));
-    const identity = { token_measurement: tokenMeasurement, token_provenance: "host_reported", asset_refs: refs, usage_stage: usageStage, evidence_verified: evidenceVerified, memory_refs: refs.filter(ref => ref.member === "memory").map(ref => ({ memory_id: ref.id, memory_version: ref.version, content_digest: ref.digest })), receipt_id: receipt.id, receipt_digest: receipt.identity_digest, scope: receipt.scope, outcome, evidence_ids: evidenceIds, provenance: "host_reported", changes_source_status: false };
+    const turnOutcome = args.turn_outcome === undefined ? null : text(args.turn_outcome, "turn_outcome");
+    if (turnOutcome !== null && !["passed", "failed", "abandoned", "unverified"].includes(turnOutcome)) throw new Error("Unsupported Context turn outcome");
+    if (outcome === "unrated" && (usageStage !== "shown" || turnOutcome === null)) throw new Error("Unrated automatic Context observations require shown usage and a turn outcome");
+    const identity = { token_measurement: tokenMeasurement, token_provenance: "host_reported", asset_refs: refs, usage_stage: usageStage, ...(turnOutcome ? { turn_outcome: turnOutcome } : {}), evidence_verified: evidenceVerified, memory_refs: refs.filter(ref => ref.member === "memory").map(ref => ({ memory_id: ref.id, memory_version: ref.version, content_digest: ref.digest })), receipt_id: receipt.id, receipt_digest: receipt.identity_digest, scope: receipt.scope, outcome, evidence_ids: evidenceIds, provenance: "host_reported", changes_source_status: false };
     const id = String(args.feedback_id ?? `context_feedback_${stableDigest(identity).slice(-24)}`); const existing = this.store.find("context_feedback", id);
     if (existing) { if (existing.identity_digest !== stableDigest(identity)) throw new Error("Context feedback idempotency conflict"); return { feedback: existing, idempotent: true }; }
     return this.store.transaction(() => {

@@ -3,9 +3,10 @@ import type { JsonObject } from "../../infrastructure/store.ts";
 import { payload, stableDigest } from "../../digest.ts";
 import { completeExperienceScenarioClassificationRequest, createExperienceScenarioClassificationRequest, experienceScenarioCanClassify, experienceScenarioIsRetired, getExperienceScenarioClassificationRequest, listExperienceScenarios, proposeExperienceScenarioMigration, recordExperienceScenario, retireExperienceScenario, validateExperienceScenarioDefinition } from "../../../capability/craft-experience/scenario-catalog.ts";
 import { projectExperienceDirectory, projectPathAliasDigest } from "../../project-experience-directory.ts";
+import { codexTaskGoalDigest } from "../../codex-task-prose.ts";
 
 declare module "../craft-service.ts" {
-  interface CraftService { learningCycleFinalize(args: JsonObject): JsonObject; learningCycleRequestGet(args: JsonObject): JsonObject; experienceScenarioList(args: JsonObject): JsonObject; experienceScenarioRetire(args: JsonObject): JsonObject; experienceScenarioMigrationPropose(args: JsonObject): JsonObject; experienceScenarioClassificationRequestGet(args: JsonObject): JsonObject; experienceScenarioClassificationRequestComplete(args: JsonObject): JsonObject; }
+  interface CraftService { learningCycleFinalize(args: JsonObject): JsonObject; learningCycleRequestGet(args: JsonObject): JsonObject; learningCycleTaskEvidenceList(args: JsonObject): JsonObject; experienceScenarioList(args: JsonObject): JsonObject; experienceScenarioRetire(args: JsonObject): JsonObject; experienceScenarioMigrationPropose(args: JsonObject): JsonObject; experienceScenarioClassificationRequestGet(args: JsonObject): JsonObject; experienceScenarioClassificationRequestComplete(args: JsonObject): JsonObject; }
 }
 
 const SECRET = /(?:api[_-]?key|authorization|cookie|password|secret|token)\s*[:=]\s*[^\s]{8,}/iu;
@@ -138,6 +139,57 @@ export function installLearningCycleMethods(serviceClass: typeof CraftService): 
     const observations = refs.map(ref => this.store.get("workflow_evolution_observation", String(ref.id), Number(ref.version)));
     return { request, observations, content_stored: false, execution_authority: false };
   };
+  serviceClass.prototype.learningCycleTaskEvidenceList = function (args) {
+    if (!Array.isArray(args.session_ids) || args.session_ids.length < 1 || args.session_ids.length > 100
+      || args.session_ids.some(id => typeof id !== "string" || !id.trim() || id.trim().length > 256 || /[\r\n\0]/u.test(id))) {
+      throw new Error("session_ids must contain 1 to 100 bounded Host session identifiers");
+    }
+    const sessionIds = new Set((args.session_ids as string[]).map(id => id.trim()));
+    const limit = args.limit === undefined ? 1_000 : args.limit;
+    if (!Number.isSafeInteger(limit) || Number(limit) < 1 || Number(limit) > 10_000) throw new Error("limit must be an integer between 1 and 10000");
+    const linkedOutcomes = new Map<string, Array<{ session_id: string; task_id: string; host: string; outcome: string }>>();
+    for (const observation of this.store.list("workflow_evolution_observation", Number(limit), item => {
+      const source = item.source as JsonObject | undefined;
+      return item.sanitized === true && item.content_stored === false && Array.isArray(item.evidence_ids)
+        && typeof source?.session_id === "string" && sessionIds.has(source.session_id);
+    })) {
+      const source = observation.source as JsonObject;
+      if (typeof source.id !== "string" || typeof source.kind !== "string" || !["passed", "failed"].includes(String(observation.outcome))) continue;
+      for (const evidenceId of observation.evidence_ids as string[]) {
+        const linked = linkedOutcomes.get(evidenceId) ?? [];
+        linked.push({ session_id: String(source.session_id), task_id: source.id, host: source.kind.startsWith("host:") ? source.kind.slice(5) : "",
+          outcome: String(observation.outcome) });
+        linkedOutcomes.set(evidenceId, linked);
+      }
+    }
+    const evidence = this.store.list("evidence", Number(limit), item => {
+      const metadata = item.metadata as JsonObject | undefined;
+      return metadata?.provenance === "host_completion_signal" && metadata.content_stored === false
+        && typeof metadata.source_session_id === "string" && sessionIds.has(metadata.source_session_id);
+    }).flatMap(item => {
+      const metadata = item.metadata as JsonObject;
+      if (typeof metadata.host !== "string" || !metadata.host.trim() || metadata.host.length > 64 || typeof metadata.turn_id !== "string" || !metadata.turn_id.trim()
+        || typeof metadata.task_id !== "string" || !metadata.task_id.trim()
+        || typeof metadata.context_receipt_id !== "string" || typeof metadata.verification_ref_digest !== "string"
+        || typeof metadata.terminal_identity_digest !== "string" || metadata.verification_outcome !== undefined
+          && metadata.verification_outcome !== "passed" && metadata.verification_outcome !== "failed"
+        || metadata.task_goal_digest !== undefined && (typeof metadata.task_goal_digest !== "string" || !/^sha256:[a-f0-9]{64}$/u.test(metadata.task_goal_digest))
+        || metadata.project_scope_id !== undefined && (typeof metadata.project_scope_id !== "string" || !/^project:[A-Za-z0-9_-]{1,96}$/u.test(metadata.project_scope_id))) return [];
+      const linked = (linkedOutcomes.get(String(item.id)) ?? []).filter(observation => observation.session_id === metadata.source_session_id
+        && observation.task_id === metadata.task_id && observation.host === metadata.host);
+      const linkedResults = new Set(linked.map(observation => observation.outcome));
+      if (linkedResults.size !== 1) return [];
+      const verificationOutcome = [...linkedResults][0]!;
+      if (metadata.verification_outcome !== undefined && metadata.verification_outcome !== verificationOutcome) return [];
+      return [{ evidence_id: item.id, host: metadata.host, session_id: metadata.source_session_id, turn_id: metadata.turn_id,
+        task_id: metadata.task_id, context_receipt_id: metadata.context_receipt_id,
+        verification_ref_digest: metadata.verification_ref_digest, terminal_identity_digest: metadata.terminal_identity_digest,
+        ...(typeof metadata.task_goal_digest === "string" ? { task_goal_digest: metadata.task_goal_digest } : {}),
+        ...(typeof metadata.project_scope_id === "string" ? { project_scope_id: metadata.project_scope_id } : {}),
+        verification_outcome: verificationOutcome, verified: true, content_stored: false }];
+    });
+    return { evidence, evidence_count: evidence.length, content_stored: false };
+  };
   serviceClass.prototype.learningCycleFinalize = function (args) {
     const requiredText = (key: string): string => {
       const value = args[key];
@@ -225,7 +277,7 @@ export function installLearningCycleMethods(serviceClass: typeof CraftService): 
       ? { schema: "craft.scenario-signature.v1", project: scope, source: "unclassified" } : null);
     const scenarioKey = scenarioSignature ? `scenario:${stableDigest(scenarioSignature).slice(-24)}` : null;
     const evidenceId = `evidence_learning_cycle_${sourceDigest.slice(-20)}`;
-    const evidence = this.store.find("evidence", evidenceId) ?? this.evidenceRecord({ evidence_id: evidenceId, source_type: "host_completion_signal", confidence: "bounded", claim: `Host reported terminal verification ${outcome}.`, locator: `context-receipt:${receipt.id}`, metadata: { provenance: "host_completion_signal", terminal_identity_digest: terminalDigest, host, ...(sessionId ? { source_session_id: sessionId } : {}), task_id: effectiveTaskId, turn_id: turnId, verification_ref_digest: stableDigest(verificationRef), context_receipt_id: receipt.id, content_stored: false } });
+    const evidence = this.store.find("evidence", evidenceId) ?? this.evidenceRecord({ evidence_id: evidenceId, source_type: "host_completion_signal", confidence: "bounded", claim: `Host reported terminal verification ${outcome}.`, locator: `context-receipt:${receipt.id}`, metadata: { provenance: "host_completion_signal", terminal_identity_digest: terminalDigest, host, ...(sessionId ? { source_session_id: sessionId } : {}), ...(projectScope ? { project_scope_id: projectScope } : {}), ...(scenarioContext ? { task_goal_digest: codexTaskGoalDigest(scenarioContext.task_goal) } : {}), task_id: effectiveTaskId, turn_id: turnId, verification_outcome: outcome, verification_ref_digest: stableDigest(verificationRef), context_receipt_id: receipt.id, content_stored: false } });
     const observationId = `workflow_evolution_observation_${sourceDigest.slice(-20)}`;
     const observedPaths = Array.isArray(args.observed_paths) ? args.observed_paths : [];
     const observed = this.workflowEvolutionObserve({ observation_id: observationId, scenario_key: scenarioKey ?? `unclassified:${stableDigest({ scope, host }).slice(-24)}`, source_kind: `host:${host}`, source_id: effectiveTaskId, ...(sessionId ? { source_session_id: sessionId } : {}), source_digest: stableDigest({ taskId: effectiveTaskId, turnId, outcome, verificationRef, source_session_id: sessionId }), outcome, scope: observationScope, ...(observationSignature ? { scenario_signature: observationSignature } : {}), evidence_ids: [evidence.id], observed_paths: observedPaths, sanitized: true, content_stored: false });

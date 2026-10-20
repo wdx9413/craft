@@ -45,7 +45,7 @@ const ARRAY_PARAMS = ["completed", "pending", "decisions", "artifacts", "steps",
   "allowed_side_effects", "approved_side_effects", "nodes", "artifact_ids", "evidence_ids",
   "trial_ids", "grade_ids", "pattern_ids", "failure_modes", "receipt_ids", "criteria", "acceptance_criteria", "allowed_extensions", "fields", "capability_requirements", "object_schemas", "components", "action_contracts", "bindings", "source_refs", "changes", "tags", "claim_ids", "evidence_ids", "expected_claim_ids", "case_ids",
   "allowed_operations", "allowed_effects", "require_approval_for", "operations", "subjects", "children", "trusted_hosts", "command_allowlist", "path_allowlist", "kinds", "effects", "allowed_kinds", "dependencies", "aliases", "assets", "asset_ids", "connector_ticket_ids", "artifact_ids", "final_artifact_ids", "evidence_ids", "gold_case_ids", "output_contract", "trial_ids", "include_paths", "affected_paths", "object_ids", "depends_on", "source_paths", "applies_to", "patches", "snapshot_refs", "triggers", "allowed_hosts", "allowed_actions", "approval_required_actions", "detected_instructions", "citations", "allowed_fields", "argv", "sources", "providers", "budget_ids", "recovery_item_ids", "memory_kinds", "object_types", "required_memory_ids", "required_object_ids", "benchmark_ids", "memory_ids", "source_ids", "document_ids", "paths", "state_paths", "turns", "messages", "events", "decisions", "constraints", "open_questions", "artifacts", "roles", "changed_paths", "observed_paths", "materials", "non_goals", "input_refs", "output_refs", "evidence_ids", "gold_case_ids", "contamination_flags", "trace_ids", "knowledge_refs", "capability_refs", "workflow_refs", "excluded_refs", "selection_rationale", "change_kinds", "platforms", "permissions", "required", "candidates", "required_artifacts", "required_evidence", "evidence_refs", "criteria",
-  "source_evidence_ids",
+  "source_evidence_ids", "session_ids",
   // Action gate: `guard` is an array of { field, op, value } clauses.
   "guard",
   // Evidence receipt: `proofs` is an array of observed proofs, `cross_checks` an array of
@@ -97,7 +97,7 @@ const TYPES_BY_TOOL: Readonly<Record<string, Readonly<Record<string, ParamType>>
   craft_context_open: { max_tokens: "integer", required_refs: "array", history_refs: "array", state_refs: "array", members: "array", principal_ids: "array", include_codebase: "boolean", include_global: "boolean", include_working_notes: "boolean" },
   craft_evidence_record: { confidence: "string" },
   craft_component_diagnose: { observed_tool_names: "array" },
-  craft_context_resolution_feedback: { injected_tokens: "integer", schema_tokens: "integer", history_tokens: "integer", asset_refs: "array", members: "array" },
+  craft_context_resolution_feedback: { injected_tokens: "integer", schema_tokens: "integer", history_tokens: "integer", asset_refs: "array", members: "array", turn_outcome: "string" },
   craft_retrieval_adapter_evaluate: { dataset: "object", metrics: "object" },
   craft_context_working_set_resolve: { required_refs: "array", history_refs: "array", state_refs: "array", members: "array" },
   craft_context_resolution_resolve: { required_refs: "array", members: "array", principal_ids: "array", include_global: "boolean", include_working_notes: "boolean", history_view: "boolean" },

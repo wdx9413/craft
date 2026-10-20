@@ -22,6 +22,8 @@ test("Experience MCP contract carries the exact source Host session identifier",
   };
   assert.equal((properties("craft_learning_cycle_finalize")?.session_id as JsonObject | undefined)?.type, "string");
   assert.equal((properties("craft_learning_cycle_finalize")?.observed_paths as JsonObject | undefined)?.type, "array");
+  assert.equal((properties("craft_learning_cycle_task_evidence_list")?.session_ids as JsonObject | undefined)?.type, "array");
+  assert.equal((properties("craft_learning_cycle_task_evidence_list")?.limit as JsonObject | undefined)?.type, "integer");
   assert.equal((properties("craft_experience_observe")?.source_session_id as JsonObject | undefined)?.type, "string");
 });
 

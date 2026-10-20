@@ -94,7 +94,7 @@ const SENSITIVE_MODEL_TEXT_PATTERNS = [
 ];
 
 /** Redact credentials and common personal identifiers throughout the bounded model packet before dispatch. */
-function redactKnowledgeModelText(value: unknown): unknown {
+export function redactKnowledgeModelText(value: unknown): unknown {
   if (typeof value === "string") return SENSITIVE_MODEL_TEXT_PATTERNS.reduce((text, pattern) => text.replace(pattern, "[REDACTED]"), value);
   if (Array.isArray(value)) return value.map(redactKnowledgeModelText);
   if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, redactKnowledgeModelText(item)]));

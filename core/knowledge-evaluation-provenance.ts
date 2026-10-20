@@ -6,6 +6,7 @@ export type KnowledgeEvaluationProvenanceStatus =
   | "unsupported_provenance"
   | "simulated"
   | "development_only"
+  | "model_labeled"
   | "unsanitized"
   | "missing_source_evidence"
   | "unverified_source_evidence"
@@ -60,6 +61,8 @@ export function assessKnowledgeEvaluationProvenance(
   if (item.evaluation_channel === "simulation") return { status: "simulated", evaluation_eligible: false };
   if (item.dataset_partition !== "held_out") return { status: "development_only", evaluation_eligible: false };
   if (item.sanitized !== true) return { status: "unsanitized", evaluation_eligible: false };
+  if (item.label_source !== undefined && !["model_candidate", "operator_asserted"].includes(String(item.label_source))) return { status: "unsupported_provenance", evaluation_eligible: false };
+  if (item.label_source === "model_candidate") return { status: "model_labeled", evaluation_eligible: false };
   if (!item.source_evidence_ids.length) return { status: "missing_source_evidence", evaluation_eligible: false };
 
   const sourceEvidenceById = new Map(sourceEvidence.map((evidence) => [String(evidence.id), evidence]));
