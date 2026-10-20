@@ -189,6 +189,44 @@ test("task without a successful test transcript is skipped before profile or mod
     assert.deepEqual(result, { status: "skipped", processed: 1, reason: "verifiable_test_result_unavailable", raw_content_stored: false });
     assert.equal(modelCalls, 0);
     assert.equal(fixture.calls.length, 0);
+    const saved = JSON.parse(await readFile(f.workerState, "utf8")) as JsonObject;
+    const skip = (saved.terminal_skips as Record<string, JsonObject>)[String(f.task.task_id)]!;
+    assert.equal(skip.reason_code, "verifiable_test_result_unavailable");
+    assert.equal(skip.source_ref_digest, stableDigest(f.task.source_ref));
+    assert.equal(JSON.stringify(saved).includes("依赖升级"), false);
+    assert.equal((await runSessionKnowledgeCandidateOnce({ client: fixture.client, providers: [provider], state_file: f.workerState,
+      archive_options: { sessions_root: f.sessions, state_file: f.state } })).status, "idle");
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("upgrades a legacy candidate state when recording a content-free terminal skip", async () => {
+  const f = await setup("candidate_generation", false);
+  try {
+    await mkdir(join(f.root, "knowledge"), { recursive: true });
+    await writeFile(f.workerState, JSON.stringify({ schema: "craft.knowledge-session-candidate-state.v1", processed_task_ids: [] }));
+    const fixture = workerClient();
+    assert.equal((await runSessionKnowledgeCandidateOnce({ client: fixture.client, state_file: f.workerState,
+      archive_options: { sessions_root: f.sessions, state_file: f.state } })).status, "skipped");
+    const saved = JSON.parse(await readFile(f.workerState, "utf8")) as JsonObject;
+    assert.deepEqual(saved.processed_task_ids, [f.task.task_id]);
+    assert.equal(((saved.terminal_skips as Record<string, JsonObject>)[String(f.task.task_id)]!).reason_code,
+      "verifiable_test_result_unavailable");
+    assert.equal(fixture.calls.length, 0);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("records a terminal skip when the verified excerpt has no structured artifact list", async () => {
+  const f = await setup();
+  try {
+    const fixture = workerClient();
+    const task = ((await codexSessionTaskBatch("candidate_generation", { state_file: f.state })).tasks as JsonObject[])[0]!;
+    const result = await runSessionKnowledgeCandidateOnce({ client: fixture.client, state_file: f.workerState,
+      read_excerpt: async () => ({ status: "ready", session_id: task.session_id, turn_id: task.turn_id,
+        project_scope_id: task.project_scope_id, verification_outcome: "passed", evidence_ids: task.verification_evidence_ids,
+        source_ref: task.source_ref, task_goal: "已验证的任务目标", task_result: "已验证的结果" }),
+      archive_options: { sessions_root: f.sessions, state_file: f.state } });
+    assert.equal(result.reason, "verifiable_test_result_unavailable");
+    assert.equal(fixture.calls.length, 0);
   } finally { await rm(f.root, { recursive: true, force: true }); }
 });
 
@@ -489,6 +527,10 @@ test("rejects malformed candidate state and refuses a symlinked state directory"
     await assert.rejects(runSessionKnowledgeCandidateOnce({ client: fixture.client, providers: [provider], transport: modelTransport("{}"),
       state_file: f.workerState, archive_options: { sessions_root: f.sessions, state_file: f.state } }), /state is invalid/u);
 
+    await writeFile(f.workerState, JSON.stringify({ schema: "craft.knowledge-session-candidate-state.v1", processed_task_ids: [], terminal_skips: { malformed: null } }));
+    await assert.rejects(runSessionKnowledgeCandidateOnce({ client: fixture.client, providers: [provider], transport: modelTransport("{}"),
+      state_file: f.workerState, archive_options: { sessions_root: f.sessions, state_file: f.state } }), /state is invalid/u);
+
     const index = JSON.parse(await readFile(f.state, "utf8")) as JsonObject;
     const task = Object.values(index.tasks as Record<string, JsonObject>)[0]!;
     task.project_scope_id = null;
@@ -520,6 +562,8 @@ test("skips a verified task missing project evidence metadata and returns bounde
     assert.equal(fixture.calls.length, 0);
     const saved = JSON.parse(await readFile(f.workerState, "utf8")) as JsonObject;
     assert.deepEqual(saved.processed_task_ids, [f.task.task_id]);
+    assert.equal(((saved.terminal_skips as Record<string, JsonObject>)[String(f.task.task_id)]!).reason_code,
+      "verified_project_evidence_incomplete");
   } finally { await rm(f.root, { recursive: true, force: true }); }
 });
 
@@ -536,6 +580,8 @@ test("skips a source that changes after indexing and leaves a content-free curso
     assert.equal(fixture.calls.length, 0);
     const saved = JSON.parse(await readFile(f.workerState, "utf8")) as JsonObject;
     assert.deepEqual(saved.processed_task_ids, [f.task.task_id]);
+    assert.equal(((saved.terminal_skips as Record<string, JsonObject>)[String(f.task.task_id)]!).reason_code,
+      "verified_task_excerpt_unavailable");
   } finally { await rm(f.root, { recursive: true, force: true }); }
 });
 
@@ -655,6 +701,16 @@ test("records a sanitized failed Trace and leaves the task available for retry",
       await assert.rejects(readFile(f.workerState, "utf8"), { code: "ENOENT" });
     } finally { await rm(f.root, { recursive: true, force: true }); }
   }
+  const missingEvidenceCase = await setup();
+  try {
+    const missingEvidence = workerClient();
+    await assert.rejects(runSessionKnowledgeCandidateOnce({ client: missingEvidence.client, providers: [provider],
+      transport: modelTransport(JSON.stringify({ decision: "candidate", kind: "rule", title: "依赖升级验证", content: "依赖升级后运行单测并检查锁文件。", tags: [] })),
+      record_verification_evidence: async () => null,
+      state_file: missingEvidenceCase.workerState, archive_options: { sessions_root: missingEvidenceCase.sessions, state_file: missingEvidenceCase.state } }), /verified test Evidence is unavailable/u);
+    assert.equal(missingEvidence.calls.some(call => call.name === "craft_trace_finalize" && call.args.status === "failed"), true);
+    await assert.rejects(readFile(missingEvidenceCase.workerState, "utf8"), { code: "ENOENT" });
+  } finally { await rm(missingEvidenceCase.root, { recursive: true, force: true }); }
   const f = await setup();
   try {
     const fixture = workerClient();

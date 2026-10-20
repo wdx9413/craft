@@ -18,7 +18,9 @@ const OUTPUT_SCHEMA = { type: "object", properties: {
 }, required: ["decision", "kind", "title", "content", "tags"], additionalProperties: false };
 const SECRET = /(?:api[_-]?key|authorization|cookie|password|secret|token)\s*[:=]\s*[^\s]{8,}/iu;
 
-interface CandidateState { processed_task_ids: string[] }
+type CandidateSkipReason = "verified_project_evidence_incomplete" | "verified_task_excerpt_unavailable" | "verifiable_test_result_unavailable";
+interface CandidateSkip { source_ref_digest: string; reason_code: CandidateSkipReason; recorded_at: string }
+interface CandidateState { processed_task_ids: string[]; terminal_skips: Record<string, CandidateSkip> }
 export interface SessionKnowledgeCandidateDependencies {
   client: ExperienceLearningClient;
   providers?: readonly ModelProviderSpec[];
@@ -26,6 +28,8 @@ export interface SessionKnowledgeCandidateDependencies {
   contentLanguage?: string;
   state_file?: string;
   archive_options?: CodexSessionCollectionOptions;
+  read_excerpt?: typeof readCodexSessionTaskExcerpt;
+  record_verification_evidence?: typeof recordSessionVerificationEvidence;
   env?: NodeJS.ProcessEnv;
 }
 
@@ -41,13 +45,22 @@ function readCandidateState(path: string): CandidateState {
     const stat = lstatSync(path);
     if (stat.isSymbolicLink() || !stat.isFile() || stat.size > 8 * 1024 * 1024) throw new Error("Knowledge session candidate state file is invalid");
     const value = JSON.parse(readFileSync(path, "utf8")) as JsonObject;
+    const skips = value.terminal_skips === undefined ? {} : value.terminal_skips;
     if (value.schema !== STATE_SCHEMA || !Array.isArray(value.processed_task_ids)
-      || value.processed_task_ids.length > 50_000 || value.processed_task_ids.some(id => typeof id !== "string" || !id.trim() || id.length > 160)) {
+      || value.processed_task_ids.length > 50_000 || value.processed_task_ids.some(id => typeof id !== "string" || !id.trim() || id.length > 160)
+      || !skips || typeof skips !== "object" || Array.isArray(skips) || Object.keys(skips).length > 50_000
+      || Object.entries(skips as Record<string, unknown>).some(([id, raw]) => {
+        const item = raw && typeof raw === "object" && !Array.isArray(raw) ? raw as JsonObject : null;
+        return !id.trim() || id.length > 160 || !item || typeof item.source_ref_digest !== "string"
+          || !/^sha256:[a-f0-9]{64}$/u.test(item.source_ref_digest)
+          || !["verified_project_evidence_incomplete", "verified_task_excerpt_unavailable", "verifiable_test_result_unavailable"].includes(String(item.reason_code))
+          || typeof item.recorded_at !== "string" || !Number.isFinite(Date.parse(item.recorded_at));
+      })) {
       throw new Error("Knowledge session candidate state is invalid");
     }
-    return { processed_task_ids: [...new Set(value.processed_task_ids as string[])] };
+    return { processed_task_ids: [...new Set(value.processed_task_ids as string[])], terminal_skips: skips as Record<string, CandidateSkip> };
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { processed_task_ids: [] };
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { processed_task_ids: [], terminal_skips: {} };
     throw error;
   }
 }
@@ -55,7 +68,14 @@ async function writeCandidateState(path: string, state: CandidateState): Promise
   const parent = dirname(path);
   try { if (lstatSync(parent).isSymbolicLink()) throw new Error("Knowledge session candidate state directory must not be a symbolic link"); }
   catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
-  await atomicPrivateJson(path, { schema: STATE_SCHEMA, processed_task_ids: state.processed_task_ids.slice(-50_000), updated_at: new Date().toISOString() });
+  await atomicPrivateJson(path, { schema: STATE_SCHEMA, processed_task_ids: state.processed_task_ids.slice(-50_000),
+    terminal_skips: Object.fromEntries(Object.entries(state.terminal_skips).slice(-50_000)), updated_at: new Date().toISOString() });
+}
+async function recordTerminalSkip(path: string, state: CandidateState, task: JsonObject, reason: CandidateSkipReason): Promise<void> {
+  const taskId = String(task.task_id);
+  state.processed_task_ids.push(taskId);
+  state.terminal_skips[taskId] = { source_ref_digest: stableDigest(task.source_ref), reason_code: reason, recorded_at: new Date().toISOString() };
+  await writeCandidateState(path, state);
 }
 function parseModelResult(value: string): JsonObject {
   let parsed: unknown;
@@ -93,20 +113,21 @@ export async function runSessionKnowledgeCandidateOnce(deps: SessionKnowledgeCan
     || !Array.isArray(task.verification_evidence_ids) || task.verification_evidence_ids.length === 0
     || typeof task.context_receipt_id !== "string" || typeof task.verification_ref_digest !== "string"
     || typeof task.terminal_identity_digest !== "string") {
-    state.processed_task_ids.push(String(task.task_id)); await writeCandidateState(path, state);
+    await recordTerminalSkip(path, state, task, "verified_project_evidence_incomplete");
     return { status: "skipped", processed: 1, reason: "verified_project_evidence_incomplete", raw_content_stored: false };
   }
-  const excerpt = await readCodexSessionTaskExcerpt(task.task_id, { ...deps.archive_options, expected_partition: "candidate_generation" }, deps.env);
+  const excerpt = await (deps.read_excerpt ?? readCodexSessionTaskExcerpt)(task.task_id,
+    { ...deps.archive_options, expected_partition: "candidate_generation" }, deps.env);
   const excerptEvidenceIds = Array.isArray(excerpt.evidence_ids) ? excerpt.evidence_ids : [];
   if (excerpt.status !== "ready" || excerpt.session_id !== task.session_id || excerpt.turn_id !== task.turn_id
     || excerpt.project_scope_id !== task.project_scope_id || excerpt.verification_outcome !== "passed"
     || JSON.stringify(excerptEvidenceIds) !== JSON.stringify(task.verification_evidence_ids)) {
-    state.processed_task_ids.push(String(task.task_id)); await writeCandidateState(path, state);
+    await recordTerminalSkip(path, state, task, "verified_task_excerpt_unavailable");
     return { status: "skipped", processed: 1, reason: "verified_task_excerpt_unavailable", raw_content_stored: false };
   }
   const verificationArtifacts = Array.isArray(excerpt.verification_artifacts) ? excerpt.verification_artifacts : [];
   if (!verificationArtifacts.length) {
-    state.processed_task_ids.push(String(task.task_id)); await writeCandidateState(path, state);
+    await recordTerminalSkip(path, state, task, "verifiable_test_result_unavailable");
     return { status: "skipped", processed: 1, reason: "verifiable_test_result_unavailable", raw_content_stored: false };
   }
   const profileResult = await deps.client.call("craft_evaluation_model_profile_ensure_single", { purpose: "knowledge_scenario_classification" });
@@ -153,7 +174,7 @@ export async function runSessionKnowledgeCandidateOnce(deps: SessionKnowledgeCan
       summary: "Codex Host 返回了结构化 Knowledge 候选结果" });
     candidate = validateCandidate(parseModelResult(response.text));
     if (candidate) {
-      const verificationEvidence = await recordSessionVerificationEvidence(deps.client, task, excerpt);
+      const verificationEvidence = await (deps.record_verification_evidence ?? recordSessionVerificationEvidence)(deps.client, task, excerpt);
       if (!verificationEvidence) throw new Error("verified test Evidence is unavailable");
       verificationEvidenceId = String(verificationEvidence.id);
       const saved = await deps.client.call("craft_knowledge_claim_save", { claim_id: `knowledge_claim_${stableDigest(task.task_id).slice(-24)}`,
