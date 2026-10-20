@@ -49,7 +49,7 @@ test("project Knowledge directory resolution validates scope, aliases, and pinne
 
     service.scopeAliasBind({ scope_kind: "project", scope_id: "project:demo", alias_kind: "path", alias: root });
     service.scopeAliasBind({ scope_kind: "project", scope_id: "project:missing", alias_kind: "path", alias: join(parent, "missing-root") });
-    const directory = join(store.paths.knowledgeDir, "projects", "demo", "md");
+    const directory = join(realpathSync(root), ".craft_data", "knowledge", "md");
     assert.equal(projectKnowledgeContentDirectory(store, "project:demo"), directory);
     assert.equal(projectKnowledgeContentDirectory(store, "project:project:demo"), directory);
     assert.equal(projectKnowledgeContentDirectory(store, "project:demo", { project_root: root }), directory);
@@ -65,7 +65,7 @@ test("project Knowledge directory resolution validates scope, aliases, and pinne
     const content = store.contentStore.writeSync({ kind: "knowledge", record_id: "claim-demo", version: 1, scope: "project:demo",
       status: "candidate", sensitivity: "internal", source_id: "test", title: "项目知识测试", body: "项目知识测试正文" });
     assert.equal(dirname(content.path), directory);
-    assert.equal(existsSync(join(root, ".craft_data")), false);
+    assert.equal(existsSync(join(root, ".craft_data")), true);
     assert.equal(projectKnowledgeContentDirectory(store, "project:demo"), directory);
     assert.equal(knowledgeDirectoryForScope(store, "project:demo", { reference_path: join(root, "legacy.md") }), dirname(directory));
     assert.equal(knowledgeDirectoryForScope(store, "project:demo"), dirname(directory));
@@ -93,12 +93,10 @@ test("project Knowledge directory creation rejects files and symlinked capabilit
     assert.throws(() => projectKnowledgeContentDirectory(store, "project:file"), /directory/u);
 
     service.scopeAliasBind({ scope_kind: "project", scope_id: "project:link", alias_kind: "path", alias: symlinkRoot });
-    const projectDir = join(store.paths.knowledgeDir, "projects", "link");
-    await mkdir(dirname(projectDir), { recursive: true });
-    await symlink(external, projectDir);
+    await symlink(external, join(symlinkRoot, ".craft_data"));
     assert.throws(() => projectKnowledgeContentDirectory(store, "project:link"), /regular directories/u);
     assert.throws(() => projectKnowledgeContentDirectory(store, "project:link", { create: true }), /regular directories/u);
-    assert.equal(existsSync(join(external, "md")), false);
+    assert.equal(existsSync(join(external, "knowledge")), false);
   } finally {
     store.close();
     await rm(parent, { recursive: true, force: true });

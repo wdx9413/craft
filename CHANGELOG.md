@@ -1,3 +1,8 @@
+## v0.12.88（项目 Knowledge 路径纠正）
+
+- 项目 Knowledge 正文恢复写入注册项目根目录下的 `.craft_data/knowledge/`，不再把项目产物写入全局 `~/.craft_data`。
+- 修复 `.87` 与最新项目数据目录约定不一致的问题；项目 Claim 元数据账本的物理分区仍需继续完成。
+
 ## v0.12.87（项目 Knowledge 数据归根）
 
 - 项目级 Knowledge 正文统一写入用户数据根目录 ~/.craft_data/knowledge/projects/{项目ID}/md；项目路径别名仍用于验证作用域，不再将产物写入工作区。

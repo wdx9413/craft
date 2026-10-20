@@ -25,7 +25,7 @@ export function projectRootForKnowledgeSource(source: JsonObject): string | null
   return null;
 }
 
-/** Bind project-scoped Knowledge to the user data root while validating its registered project alias. */
+/** Bind project-scoped Knowledge to the registered project's capability directory. */
 export function bindProjectKnowledgeContentDirectory(store: CraftStore): void {
   store.contentStore.setProjectKnowledgeDirectoryResolver((scope, options) =>
     projectKnowledgeContentDirectory(store, scope, options));
@@ -49,20 +49,21 @@ export function projectKnowledgeContentDirectory(store: CraftStore, scope: strin
   const requested = options.project_root === undefined ? undefined : realpathSync(resolve(options.project_root));
   if (requested && !roots.includes(requested)) throw new Error("Project root is not registered for this Knowledge scope");
 
-  const directory = join(store.paths.knowledgeDir, "projects", id.slice("project:".length), "md");
   const target = options.reference_path === undefined ? undefined : resolve(options.reference_path);
-  if (target) {
-    const path = relative(directory, target);
-    if (path === "" || path === ".." || path.startsWith(`..${sep}`)) return null;
-    return directory;
-  }
-  const matches = roots.filter(root => !requested || requested === root);
+  const matches = roots.filter(root => {
+    if (requested && requested !== root) return false;
+    if (!target) return true;
+    const path = relative(join(root, ".craft_data", "knowledge", "md"), target);
+    return path !== "" && path !== ".." && !path.startsWith(`..${sep}`);
+  });
+  if (target && !matches.length) return null;
   if (matches.length > 1) throw new Error("Project root is ambiguous for this Knowledge scope");
   const root = matches[0];
   if (!root) return null;
   if (!lstatSync(root).isDirectory()) throw new Error("Project root must be a directory");
 
-  for (const path of [store.paths.knowledgeDir, join(store.paths.knowledgeDir, "projects"), join(store.paths.knowledgeDir, "projects", id.slice("project:".length)), directory]) {
+  const directory = join(root, ".craft_data", "knowledge", "md");
+  for (const path of [join(root, ".craft_data"), join(root, ".craft_data", "knowledge"), directory]) {
     const exists = existsSync(path);
     if (!exists && options.create) mkdirSync(path, { recursive: true, mode: 0o700 });
     if (!exists && !options.create) continue;
