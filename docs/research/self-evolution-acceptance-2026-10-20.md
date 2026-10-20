@@ -57,6 +57,16 @@
 - Knowledge 和 Experience Worker 的锁由 PID `74585` 持有；本机 `kill(pid, 0)` 检查确认该 PID 存活。为避免重复 Worker 写同一数据根，本轮没有再启动 Worker。沙箱拒绝 `ps` 进程详情查询，因此该进程实际加载的 MCP 版本尚未直接核实。
 - 结论：`.88` 新 Host 加载已证明，长期运行的 Host/MCP 会话仍旧；真实任务索引已证明，独立留出证据仍为 0；没有新增候选、评测、晋升或使用收益证据。
 
+## `.89` Experience 项目路径、远端发布与真实 Host（2026-10-21）
+
+- 源码 `main` 提交 `1241207c0a9afa10328034e454d3235042023bd9`；Marketplace `main` 提交 `e16647d22099ac24919d4d620a2c1217ae97e332`。源码先推送，再从 GitHub codeload 固定 SHA 下载并构建；没有克隆仓库，也没有引用本地源码目录打包。Marketplace 校验 39 个载荷文件非空且无替换字符，远端归档与 Marketplace 的源文件同步检查通过。
+- `.89` 将项目 Experience 草稿、流程定义、图版本和 Markdown 正文按注册项目根目录写入 `.craft_data/experience/`；全局作用域继续使用 `~/.craft_data/experience/`。旧全局引用保留只读兼容。项目候选、观察、评测等结构化账本尚未分区，仍是剩余数据隔离工作。
+- 路径和流程定向测试 120 项通过。`content-store.ts`、`project-experience-directory.ts`、`procedure-definition.ts`、`graph-assets.ts`、`graph-version-manifest.ts` 的行、分支、函数覆盖率均为 100%；TypeScript 构建、插件包检查、版本检查和发布目录检查通过。
+- `codex plugin marketplace upgrade craft-marketplace` 成功。插件清单与 `codex mcp get craft-context` 指向 Marketplace 缓存中的 `0.12.89`。新建 `codex exec --ephemeral --model gpt-6-luna` Host 实际调用 `craft_info`，返回 `version=0.12.89`、`data_root=/Users/didi/.craft_data`、`content_language=zh-CN`。这次只核验 Host 加载，未触发候选生成或评测；用量为 141,867 输入（其中缓存 120,064）、939 输出 token，需降低验证成本。
+- 可见账本计数为 208 条 Knowledge Claim、0 个 Knowledge Evaluation Case、0 个 Experience Pattern、0 个 Memory Usage Signal。当前会话索引更新时间 `2026-10-20T16:48:56.665Z`：644 个来源、5,103 个任务（5,002 完成、96 中止、5 运行中）；生成集 1,403、留出集 3,700。仅 1 个任务有核验标记且处于生成集；留出集中有核验证据的独立任务为 0。以上无法支持效果评测或晋升。
+- 最近可查到的 Worker Trace `trace_ddb10daecd6d4eab9b6ea5634264d8a4` 在 `.89` 源码提交前完成，票据 `evaluation_model_ticket_84e6301a1e4aa960fd07` 使用 `codex-cli/gpt-6-luna`。Trace 有 `model.request`、`model.completed`、`knowledge.reviewed`、`model.result_bound`、`trace.finalized`，模型用量 22,544/17。目标 Claim 仍为第 1 版 `candidate`，`scenario_key` 为空，没有产生评测或晋升；因此这是有调用记录、但没有可见产物变化的失败闭环证据，不能算 `.89` 运行结果。
+- `.89` 发布提交之后，主账本没有新增 Knowledge Claim、Experience Observation/Pattern、评测用例或使用反馈记录。结论：远端发布和真实 Host 加载链已接通；真实学习产出链仍未证明，独立留出任务证据仍为 0。
+
 ## 完整验收矩阵
 
 | 要求 | 当前证据与缺口 | 后续必须取得的证据 |
