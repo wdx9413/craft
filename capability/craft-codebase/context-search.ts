@@ -40,6 +40,8 @@ const STRUCTURE_TERMS = new Set(["adapter", "agent", "client", "controller", "en
 const STRUCTURAL_DECLARATION_KINDS = new Set(["class", "enum", "interface", "struct", "type"]);
 const GENERIC_TASK_TERMS = new Set([...ACTION_TERMS, "api", "endpoint", "handler", "task", "job", "http", "multiple", "concurrent", "concurrency", "parallel"]);
 const GENERIC_SYMBOL_IDENTIFIERS = new Set([...GENERIC_TASK_TERMS, "a", "after", "any", "before", "by", "conversation", "extract", "file", "for", "from", "id", "import", "in", "into", "is", "it", "module", "name", "of", "on", "or", "path", "request", "result", "the", "to", "turn", "type", "valid", "value", "with"]);
+const CONTEXT_BM25_WEIGHT = 0.15;
+const CONTEXT_MATCH_SCORE = 8;
 
 function identifierTerms(value: string): string[] {
   const expanded = value.replace(/([A-Z]+)([A-Z][a-z])/gu, "$1 $2").replace(/([a-z0-9])([A-Z])/gu, "$1 $2").replace(/[_./\\-]+/gu, " ");
@@ -57,6 +59,7 @@ export function codeQueryTerms(query: string): string[] {
 /** Reusable BM25 corpus for a verified immutable snapshot. */
 export class CodeSymbolSearchIndex {
   readonly #index = new Bm25Index();
+  readonly #contextIndex = new Bm25Index();
   readonly #byId = new Map<string, JsonObject>();
   readonly #nameTermsById = new Map<string, ReadonlySet<string>>();
   readonly #pathTermsById = new Map<string, ReadonlySet<string>>();
@@ -75,7 +78,8 @@ export class CodeSymbolSearchIndex {
       const context = searchContext.get(id) ?? "";
       const nameTerms = identifierTerms(name), pathTerms = identifierTerms(path);
       const contextTerms = identifierTerms(context);
-      this.#index.add(id, [...nameTerms, ...pathTerms, identifierTerms(context), String(node.kind ?? ""), String(node.declaration_kind ?? ""), String(node.language ?? "")].join(" "));
+      this.#index.add(id, [...nameTerms, ...pathTerms, String(node.kind ?? ""), String(node.declaration_kind ?? ""), String(node.language ?? "")].join(" "));
+      if (contextTerms.length) this.#contextIndex.add(id, contextTerms.join(" "));
       this.#byId.set(id, node);
       this.#nameTermsById.set(id, new Set(nameTerms));
       this.#pathTermsById.set(id, new Set(pathTerms));
@@ -98,6 +102,7 @@ export class CodeSymbolSearchIndex {
     if (!queryText) return [];
     const terms = codeQueryTerms(queryText);
     const bm25 = this.#index.score(terms.join(" "));
+    const contextBm25 = new Map(this.#contextIndex.score(terms.join(" ")).map(hit => [hit.id, hit.score]));
     const queryTerms = new Set(terms);
     const queryActionTerms = new Set(terms.filter(term => SYMBOL_ACTION_TERMS.has(term)));
     const queryNameTerms = identifierTerms(queryText);
@@ -118,7 +123,7 @@ export class CodeSymbolSearchIndex {
       const pathTerms = this.#pathTermsById.get(hit.id)!;
       const ownerTerms = this.#ownerTermsById.get(hit.id)!;
       const ticketNameMatch = queryNameTerms.includes("ticket") && nameTerms.has("ticket") ? 112 : 0;
-      const contextMatches = [...queryTerms].filter(term => !GENERIC_TASK_TERMS.has(term)
+      const contextMatches = queryNameTerms.filter(term => !GENERIC_TASK_TERMS.has(term)
         && !nameTerms.has(term) && !pathTerms.has(term) && this.#contextTermsById.get(hit.id)!.has(term)).length;
       const nameMatches = [...queryTerms].filter(term => nameTerms.has(term)).length;
       const pathMatches = [...queryTerms].filter(term => pathTerms.has(term)).length;
@@ -130,6 +135,7 @@ export class CodeSymbolSearchIndex {
       const genericNamePenalty = GENERIC_SYMBOL_IDENTIFIERS.has(name)
         && queryNameTerms.some(term => !GENERIC_SYMBOL_IDENTIFIERS.has(term)) ? 88 : 0;
       const compositeNamePenalty = name.length > 64 || /[\r\n{}]/u.test(String(node.name ?? "")) ? 120 : 0;
+      const explicitContextMatches = [...queryCodeIdentifiers].filter(term => this.#contextTermsById.get(hit.id)!.has(term)).length;
       const structureMatch = !explicitMethodMentioned && STRUCTURAL_DECLARATION_KINDS.has(declarationKind)
         && [...queryStructureTerms].some(term => nameTerms.has(term)) ? 24 : 0;
       const declarationMatch = (terms.includes("function") || analyzerIntent) && declarationKind === "function" ? 24 : 0;
@@ -152,7 +158,7 @@ export class CodeSymbolSearchIndex {
       const symbolActionTerms = [...nameTerms].filter(term => SYMBOL_ACTION_TERMS.has(term));
       const actionConflictPenalty = queryActionTerms.size > 0 && symbolActionTerms.length > 0
         && !symbolActionTerms.some(term => queryActionTerms.has(term)) ? 32 : 0;
-      return [hit.id, { node, score: hit.score + fieldMatch + domainMatches * 30 + ownerDomainMatch + contextMatches * 28 + structureMatch + declarationMatch + actionMatch + exactIdentifierMatch + exactWordMatch + namedMethodMatch + constructorMatch + namedActionMatch + ticketNameMatch - genericNamePenalty - compositeNamePenalty - testPathPenalty
+      return [hit.id, { node, score: hit.score + (contextBm25.get(hit.id) ?? 0) * CONTEXT_BM25_WEIGHT + fieldMatch + domainMatches * 30 + ownerDomainMatch + contextMatches * CONTEXT_MATCH_SCORE + explicitContextMatches * 32 + structureMatch + declarationMatch + actionMatch + exactIdentifierMatch + exactWordMatch + namedMethodMatch + constructorMatch + namedActionMatch + ticketNameMatch - genericNamePenalty - compositeNamePenalty - testPathPenalty
         - actionConflictPenalty + (name === lowered ? 20 : name.startsWith(lowered) ? 5 : name.includes(lowered) ? 2 : 0) }] as const;
     }));
     // Preserve partial-name discovery such as `ensureRepo` -> `ensureRepository`.

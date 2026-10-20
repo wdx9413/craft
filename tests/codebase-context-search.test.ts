@@ -45,6 +45,33 @@ test("Codebase favors a matching architecture type for object queries while acti
   ], "normalize a row for the conversation viewer", 2)[0]!.node.id, "target");
 });
 
+test("Codebase keeps declaration-body context weaker than explicit symbol names", () => {
+  const roleSymbols = [
+    { ...symbol("role-loader", "load_user_role_data", "service/http_server.py"), declaration_kind: "function" },
+    { ...symbol("cache-info", "get_cache_info", "service/http_server.py"), declaration_kind: "function" },
+    { ...symbol("unrelated", "unrelated", "other.py"), declaration_kind: "function" },
+  ];
+  const roleContext = new Map([
+    ["role-loader", "load user role data user role records"],
+    ["cache-info", Array(8).fill("cache user role records data query read get load").join(" ")],
+    ["unrelated", "unrelated"],
+  ]);
+  assert.equal(new CodeSymbolSearchIndex(roleSymbols, roleContext).rank("load cached user role records", 3)[0]!.node.id, "role-loader");
+
+  const schedulerSymbols = [
+    { ...symbol("scheduler", "ConversationScheduler", "scheduler/conversation_scheduler.py"), declaration_kind: "class" },
+    { ...symbol("converter", "convert_file", "mock2dialogue.py"), declaration_kind: "function" },
+    { ...symbol("start", "start_multiple_conversations", "scheduler/conversation_scheduler.py"), declaration_kind: "method" },
+  ];
+  const schedulerContext = new Map([
+    ["scheduler", "ConversationScheduler scheduler conversation"],
+    ["converter", Array(8).fill("conversation dialogue simulation turn scheduler multi").join(" ")],
+    ["start", "start multiple conversations run conversation"],
+  ]);
+  assert.equal(new CodeSymbolSearchIndex(schedulerSymbols, schedulerContext)
+    .rank("conversation scheduler for multi-turn simulation", 3)[0]!.node.id, "scheduler");
+});
+
 test("Codebase ranks extraction and decoding functions for natural task queries", () => {
   const wrapper = [
     { ...symbol("decode", "decode_base64_json", "main_wrapper.py"), declaration_kind: "function" },
