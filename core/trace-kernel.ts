@@ -52,42 +52,46 @@ export class TraceKernel {
   constructor(store: CraftStore, archives: TraceArchiveStore = new LocalTraceArchiveStore(store.paths.logsDir)) { this.store = store; this.archives = archives; }
 
   start(args: JsonObject): JsonObject {
-    const taskId = text(args.task_id, "task_id");
-    const traceId = String(args.trace_id ?? `trace_${randomUUID().replaceAll("-", "")}`);
-    const identity = { task_id: taskId, launch_id: optional(args.launch_id), run_id: optional(args.run_id), trial_id: optional(args.trial_id), attempt_id: optional(args.attempt_id), operation_id: optional(args.operation_id), model_fingerprint: optional(args.model_fingerprint), environment_fingerprint: optional(args.environment_fingerprint), capability_fingerprint: optional(args.capability_fingerprint), policy_fingerprint: optional(args.policy_fingerprint) };
-    const identityDigest = stableDigest(identity);
-    const existing = this.store.find("trace", traceId);
-    if (existing) {
-      if (existing.identity_digest !== identityDigest) throw new Error("Trace idempotency conflict");
-      return { trace: existing, idempotent: true };
-    }
-    return { trace: this.store.create("trace", traceId, { schema: TRACE_SCHEMA_VERSION, schema_revision: TRACE_SCHEMA_REVISION, ...identity, ...(args.telemetry_only === true ? { telemetry_only: true } : {}), identity_digest: identityDigest, status: "running", next_sequence: 0, event_count: 0, started_at: new Date().toISOString(), metadata_digest: stableDigest(safeData(args.metadata, "metadata")) }), idempotent: false };
+    return this.store.transaction(() => {
+      const taskId = text(args.task_id, "task_id");
+      const traceId = String(args.trace_id ?? `trace_${randomUUID().replaceAll("-", "")}`);
+      const identity = { task_id: taskId, launch_id: optional(args.launch_id), run_id: optional(args.run_id), trial_id: optional(args.trial_id), attempt_id: optional(args.attempt_id), operation_id: optional(args.operation_id), model_fingerprint: optional(args.model_fingerprint), environment_fingerprint: optional(args.environment_fingerprint), capability_fingerprint: optional(args.capability_fingerprint), policy_fingerprint: optional(args.policy_fingerprint) };
+      const identityDigest = stableDigest(identity);
+      const existing = this.store.find("trace", traceId);
+      if (existing) {
+        if (existing.identity_digest !== identityDigest) throw new Error("Trace idempotency conflict");
+        return { trace: existing, idempotent: true };
+      }
+      return { trace: this.store.create("trace", traceId, { schema: TRACE_SCHEMA_VERSION, schema_revision: TRACE_SCHEMA_REVISION, ...identity, ...(args.telemetry_only === true ? { telemetry_only: true } : {}), identity_digest: identityDigest, status: "running", next_sequence: 0, event_count: 0, started_at: new Date().toISOString(), metadata_digest: stableDigest(safeData(args.metadata, "metadata")) }), idempotent: false };
+    });
   }
 
   append(args: JsonObject): JsonObject {
-    const traceId = text(args.trace_id, "trace_id");
-    const trace = this.store.get("trace", traceId);
-    if (TERMINAL.has(String(trace.status) as TraceStatus)) throw new Error("Cannot append to a terminal Trace");
-    const eventKind = text(args.event_kind ?? args.event_type, "event_kind");
-    const requestedEventId = args.event_id === undefined ? null : String(args.event_id);
-    const existingRequested = requestedEventId === null ? null : this.store.find("trace_event", requestedEventId);
-    const sequence = existingRequested ? Number(existingRequested.sequence) : args.sequence === undefined ? Number(trace.next_sequence) + 1 : Number(args.sequence);
-    if (!Number.isInteger(sequence) || (!existingRequested && sequence !== Number(trace.next_sequence) + 1)) throw new Error("Trace event sequence must be the next contiguous integer");
-    const trust = String(args.trust ?? (args.source === "human" ? "human" : "untrusted")) as TraceTrust;
-    if (!TRUST.has(trust)) throw new Error("Trace event trust is unsupported");
-    const eventId = requestedEventId ?? `${traceId}:${sequence}`;
-    const data = safeData(args.data, "data");
-    const identity = { trace_id: traceId, sequence, event_kind: eventKind, actor: String(args.actor ?? "system"), source: String(args.source ?? "craft"), trust, span_id: optional(args.span_id) ?? `${traceId}:span:${sequence}`, parent_span_id: optional(args.parent_span_id), operation_id: optional(args.operation_id), action_contract: args.action_contract === undefined ? null : safeData(args.action_contract, "action_contract"), state_before: args.state_before === undefined ? null : safeData(args.state_before, "state_before"), state_after: args.state_after === undefined ? null : safeData(args.state_after, "state_after"), input_refs: strings(args.input_refs, "input_refs"), output_refs: strings(args.output_refs, "output_refs"), capability_revision: optional(args.capability_revision), policy_revision: optional(args.policy_revision), model_fingerprint: optional(args.model_fingerprint), environment_fingerprint: optional(args.environment_fingerprint), workspace_before: optional(args.workspace_before), workspace_after: optional(args.workspace_after), usage: args.usage === undefined ? null : safeData(args.usage, "usage"), cost_usd: number(args.cost_usd, "cost_usd"), duration_ms: number(args.duration_ms, "duration_ms"), error_class: optional(args.error_class), status: optional(args.status), summary: optional(args.summary), data_digest: stableDigest(data), content_stored: false };
-    const eventDigest = stableDigest(identity);
-    const existing = existingRequested ?? this.store.find("trace_event", eventId);
-    if (existing) {
-      if (existing.event_digest !== eventDigest) throw new Error("Trace event idempotency conflict");
-      return { event: existing, trace, idempotent: true };
-    }
-    const event = this.store.create("trace_event", eventId, { schema: TRACE_SCHEMA_VERSION, schema_revision: TRACE_SCHEMA_REVISION, ...identity, event_digest: eventDigest, trace_id: traceId });
-    this.store.appendEvent(`trace:${traceId}`, eventKind, { event_id: event.id, trace_id: traceId, sequence, event_digest: eventDigest, trust, output_refs: identity.output_refs });
-    const savedTrace = this.store.save("trace", traceId, { ...payload(trace), next_sequence: sequence, event_count: Number(trace.event_count) + 1, last_event_id: event.id, last_event_at: event.created_at });
-    return { event, trace: savedTrace, idempotent: false };
+    return this.store.transaction(() => {
+      const traceId = text(args.trace_id, "trace_id");
+      const trace = this.store.get("trace", traceId);
+      if (TERMINAL.has(String(trace.status) as TraceStatus)) throw new Error("Cannot append to a terminal Trace");
+      const eventKind = text(args.event_kind ?? args.event_type, "event_kind");
+      const requestedEventId = args.event_id === undefined ? null : String(args.event_id);
+      const existingRequested = requestedEventId === null ? null : this.store.find("trace_event", requestedEventId);
+      const sequence = existingRequested ? Number(existingRequested.sequence) : args.sequence === undefined ? Number(trace.next_sequence) + 1 : Number(args.sequence);
+      if (!Number.isInteger(sequence) || (!existingRequested && sequence !== Number(trace.next_sequence) + 1)) throw new Error("Trace event sequence must be the next contiguous integer");
+      const trust = String(args.trust ?? (args.source === "human" ? "human" : "untrusted")) as TraceTrust;
+      if (!TRUST.has(trust)) throw new Error("Trace event trust is unsupported");
+      const eventId = requestedEventId ?? `${traceId}:${sequence}`;
+      const data = safeData(args.data, "data");
+      const identity = { trace_id: traceId, sequence, event_kind: eventKind, actor: String(args.actor ?? "system"), source: String(args.source ?? "craft"), trust, span_id: optional(args.span_id) ?? `${traceId}:span:${sequence}`, parent_span_id: optional(args.parent_span_id), operation_id: optional(args.operation_id), action_contract: args.action_contract === undefined ? null : safeData(args.action_contract, "action_contract"), state_before: args.state_before === undefined ? null : safeData(args.state_before, "state_before"), state_after: args.state_after === undefined ? null : safeData(args.state_after, "state_after"), input_refs: strings(args.input_refs, "input_refs"), output_refs: strings(args.output_refs, "output_refs"), capability_revision: optional(args.capability_revision), policy_revision: optional(args.policy_revision), model_fingerprint: optional(args.model_fingerprint), environment_fingerprint: optional(args.environment_fingerprint), workspace_before: optional(args.workspace_before), workspace_after: optional(args.workspace_after), usage: args.usage === undefined ? null : safeData(args.usage, "usage"), cost_usd: number(args.cost_usd, "cost_usd"), duration_ms: number(args.duration_ms, "duration_ms"), error_class: optional(args.error_class), status: optional(args.status), summary: optional(args.summary), data_digest: stableDigest(data), content_stored: false };
+      const eventDigest = stableDigest(identity);
+      const existing = existingRequested ?? this.store.find("trace_event", eventId);
+      if (existing) {
+        if (existing.event_digest !== eventDigest) throw new Error("Trace event idempotency conflict");
+        return { event: existing, trace, idempotent: true };
+      }
+      const event = this.store.create("trace_event", eventId, { schema: TRACE_SCHEMA_VERSION, schema_revision: TRACE_SCHEMA_REVISION, ...identity, event_digest: eventDigest, trace_id: traceId });
+      this.store.appendEvent(`trace:${traceId}`, eventKind, { event_id: event.id, trace_id: traceId, sequence, event_digest: eventDigest, trust, output_refs: identity.output_refs });
+      const savedTrace = this.store.save("trace", traceId, { ...payload(trace), next_sequence: sequence, event_count: Number(trace.event_count) + 1, last_event_id: event.id, last_event_at: event.created_at });
+      return { event, trace: savedTrace, idempotent: false };
+    });
   }
 
   observe(args: JsonObject): JsonObject {
@@ -109,12 +113,14 @@ export class TraceKernel {
   }
 
   finalize(args: JsonObject): JsonObject {
-    const traceId = text(args.trace_id, "trace_id"); const trace = this.store.get("trace", traceId); const status = text(args.status, "status") as TraceStatus;
-    if (!TERMINAL.has(status)) throw new Error("Trace final status is unsupported");
-    if (TERMINAL.has(String(trace.status) as TraceStatus)) return { trace, idempotent: true };
-    const event = this.append({ trace_id: traceId, event_kind: "trace.finalized", actor: "craft", source: "craft", trust: "verified", summary: text(args.summary, "summary"), status, data: {}, evidence_ids: strings(args.evidence_ids, "evidence_ids") });
-    const saved = this.store.save("trace", traceId, { ...payload(event.trace as JsonObject), status, finalized_at: new Date().toISOString(), verdict: optional(args.verdict), final_evidence_ids: strings(args.evidence_ids, "evidence_ids") });
-    return { trace: saved, event, idempotent: false };
+    return this.store.transaction(() => {
+      const traceId = text(args.trace_id, "trace_id"); const trace = this.store.get("trace", traceId); const status = text(args.status, "status") as TraceStatus;
+      if (!TERMINAL.has(status)) throw new Error("Trace final status is unsupported");
+      if (TERMINAL.has(String(trace.status) as TraceStatus)) return { trace, idempotent: true };
+      const event = this.append({ trace_id: traceId, event_kind: "trace.finalized", actor: "craft", source: "craft", trust: "verified", summary: text(args.summary, "summary"), status, data: {}, evidence_ids: strings(args.evidence_ids, "evidence_ids") });
+      const saved = this.store.save("trace", traceId, { ...payload(event.trace as JsonObject), status, finalized_at: new Date().toISOString(), verdict: optional(args.verdict), final_evidence_ids: strings(args.evidence_ids, "evidence_ids") });
+      return { trace: saved, event, idempotent: false };
+    });
   }
 
   get(args: JsonObject): JsonObject {

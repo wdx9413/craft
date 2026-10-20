@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { stableDigest } from "../core/digest.ts";
 import type { JsonObject } from "../core/infrastructure/store.ts";
 import { extractCodexSessionVerificationArtifacts, type CodexTaskTranscriptRecord } from "../core/codex-session-verification.ts";
 
@@ -7,6 +8,10 @@ const call = (id: string, input: unknown, name = "exec"): CodexTaskTranscriptRec
   payload: { type: "custom_tool_call", call_id: id, name, input } });
 const output = (id: string, text: unknown): CodexTaskTranscriptRecord => ({ record_type: "response_item",
   payload: { type: "custom_tool_call_output", call_id: id, output: text } });
+const completedCommand = (id: string, command: unknown, aggregated_output: unknown, overrides: JsonObject = {}): CodexTaskTranscriptRecord => ({
+  record_type: "event_msg", payload: { type: "item_completed", turn_id: "turn-a", item: { type: "CommandExecution", id, command,
+    aggregated_output, exit_code: 0, status: "completed", ...overrides } },
+});
 const successfulOutput = (summary: string) => [{ type: "text", text: "Process exited with code 0" }, { type: "text", text: summary }];
 
 test("accepts only paired, successful test-runner calls with a passing summary", () => {
@@ -55,4 +60,34 @@ test("bounds output parsing and limits returned artifacts", () => {
   assert.equal(extractCodexSessionVerificationArtifacts(records).length, 8);
   assert.deepEqual(extractCodexSessionVerificationArtifacts([call("text", "pnpm test"),
     output("text", "Process exited with code 0\nTests 1 passed (1)")]).length, 1);
+});
+
+test("accepts Codex structured CommandExecution completions without storing command or output text", () => {
+  const command = "pnpm test";
+  const summary = "Tests 12 passed (12)";
+  const artifacts = extractCodexSessionVerificationArtifacts([
+    completedCommand("command-1", command, summary),
+    completedCommand("ignored-event-id", command, summary, { id: undefined }),
+  ]);
+  assert.equal(artifacts.length, 2);
+  assert.deepEqual(artifacts[0], { runner: "javascript", command_digest: stableDigest(command), result_digest: stableDigest(summary),
+    call_digest: stableDigest("command-1"), exit_code: 0, summary_kind: "tests_passed", content_stored: false });
+  assert.doesNotMatch(JSON.stringify(artifacts), /pnpm test|Tests 12 passed/u);
+  const capped = extractCodexSessionVerificationArtifacts(Array.from({ length: 10 }, (_, index) =>
+    completedCommand(`command-${index}`, command, summary)));
+  assert.equal(capped.length, 8);
+});
+
+test("rejects incomplete, failed, non-test, and unsuccessful structured CommandExecution records", () => {
+  assert.deepEqual(extractCodexSessionVerificationArtifacts([
+    { record_type: "event_msg", payload: { type: "item_completed", item: null } },
+    { record_type: "event_msg", payload: { type: "item_completed", item: { type: "Other", command: "pnpm test",
+      aggregated_output: "Tests 1 passed (1)", exit_code: 0, status: "completed" } } },
+    completedCommand("non-test", "git status", "Tests 1 passed (1)"),
+    completedCommand("non-zero", "pnpm test", "Tests 1 passed (1)", { exit_code: 1 }),
+    completedCommand("failed-status", "pnpm test", "Tests 1 passed (1)", { status: "failed" }),
+    completedCommand("failed-output", "pnpm test", "Tests 1 failed (1)"),
+    completedCommand("missing-output", "pnpm test", null),
+    completedCommand("missing-exit", "pnpm test", "Tests 1 passed (1)", { exit_code: undefined }),
+  ]), []);
 });

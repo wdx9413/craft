@@ -468,6 +468,8 @@ test("binds only exact content-free terminal evidence to an archived task", asyn
   const f = await fixture();
   try {
     const records = f.turn("verified-turn", "请检查 api_key=not-a-real-key 并联系 user at company dot example", "结果已验证，文件为 /Users/didi/private/project。```private code```");
+    records.splice(2, 0, f.event({ type: "item_completed", turn_id: "verified-turn", item: { type: "CommandExecution", id: "test-command",
+      command: "pnpm test", aggregated_output: "Tests 2 passed (2)", exit_code: 0, status: "completed" } }));
     records.splice(3, 0, "", "not-json", JSON.stringify({ payload: { type: "missing_record_type" } }), JSON.stringify({ type: "unknown", payload: {} }));
     records.splice(records.length - 1, 0,
       f.response({ type: "message", role: "assistant", phase: "analysis", content: null }),
@@ -507,6 +509,8 @@ test("binds only exact content-free terminal evidence to an archived task", asyn
     assert.equal(excerpt.sanitized, true);
     assert.equal(excerpt.content_stored, false);
     assert.match(String(excerpt.task_goal), /\[已脱敏\]/u);
+    assert.equal((excerpt.verification_artifacts as Array<Record<string, unknown>>).length, 1);
+    assert.equal((excerpt.verification_artifacts as Array<Record<string, unknown>>)[0]!.runner, "javascript");
     assert.doesNotMatch(JSON.stringify(excerpt), /not-a-real-key|\/Users\/didi|private code/u);
     const excerptOptions = { sessions_root: f.sessions, state_file: f.state, expected_partition: savedState.tasks[taskId]!.dataset_partition } as const;
     await assert.rejects(readCodexSessionTaskExcerpt(null, excerptOptions), /task_id/u);

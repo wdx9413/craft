@@ -81,6 +81,10 @@ test("SDK Context reads and all scoped contributors emit spans without an MCP se
     for (const member of ["context", "knowledge", "memory", "experience"]) assert.ok(events.some(event => event.capability_id === member));
     assert.equal(new Set(events.map(event => event.trace_id)).size, 1);
     assert.ok(events.some(event => event.parent_span_id !== null));
+    const traceId = String(events[0]!.trace_id);
+    const trace = f.trace.get({ trace_id: traceId });
+    assert.equal((trace.trace as JsonObject).status, "completed");
+    assert.equal((trace.events as JsonObject[]).filter(event => event.event_kind === "trace.finalized").length, 1);
   } finally { await f.close(); }
 });
 

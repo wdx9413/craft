@@ -671,6 +671,8 @@ export async function readCodexSessionTaskExcerpt(taskIdValue: unknown, options:
     if (recordType === "response_item" && payload
       && (payloadType === "custom_tool_call" || payloadType === "custom_tool_call_output")) {
       verificationRecords.push({ record_type: "response_item", payload });
+    } else if (recordType === "event_msg" && payload && recordTurnId === task.turn_id && payloadType === "item_completed") {
+      verificationRecords.push({ record_type: "event_msg", payload });
     }
     if (recordType && payload && recordTurnId === task.turn_id && recordType !== "session_meta" && recordType !== "turn_context"
       && !(recordType === "event_msg" && payloadType === "task_started")) {

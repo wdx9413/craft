@@ -56,11 +56,37 @@ function successfulSummary(runner: string, output: string): boolean {
   return /(?:\bTests?\s+[1-9]\d*\s+passed\b|\bTest Files\s+[1-9]\d*\s+passed\b|^#\s*pass\s+[1-9]\d*\s*$)/imu.test(output);
 }
 
-/** Extract only digest-pinned success facts from paired Codex exec calls and outputs. */
+function artifact(runner: string, command: string, output: string, callId: string): JsonObject | null {
+  if (!successfulSummary(runner, output)) return null;
+  return { runner, command_digest: stableDigest(command), result_digest: stableDigest(output),
+    call_digest: stableDigest(callId), exit_code: 0, summary_kind: "tests_passed", content_stored: false };
+}
+
+/** Extract only digest-pinned success facts from exact Codex command completion records. */
 export function extractCodexSessionVerificationArtifacts(records: readonly CodexTaskTranscriptRecord[]): JsonObject[] {
   const calls = new Map<string, { runner: string; command_digest: string }>();
   const outputs = new Map<string, string>();
+  const artifacts: JsonObject[] = [];
   for (const record of records) {
+    if (record.record_type === "event_msg" && record.payload.type === "item_completed") {
+      const item = record.payload.item;
+      if (item && typeof item === "object" && !Array.isArray(item)) {
+        const commandItem = item as JsonObject;
+        if (commandItem.type === "CommandExecution") {
+          const command = commandItem.command;
+          const runner = testRunner(command);
+          const output = outputText(commandItem.aggregated_output);
+          const exitCode = commandItem.exit_code;
+          const callId = commandItem.id;
+          if (runner && commandItem.status === "completed" && exitCode === 0 && output) {
+            const itemArtifact = artifact(runner, String(command), output, typeof callId === "string" ? callId : stableDigest({ command, output }));
+            if (itemArtifact) artifacts.push(itemArtifact);
+          }
+        }
+      }
+      if (artifacts.length === 8) break;
+      continue;
+    }
     if (record.record_type !== "response_item") continue;
     const payload = record.payload;
     const callId = payload.call_id;
@@ -73,7 +99,6 @@ export function extractCodexSessionVerificationArtifacts(records: readonly Codex
       if (text) outputs.set(callId, text);
     }
   }
-  const artifacts: JsonObject[] = [];
   for (const [callId, call] of calls) {
     const output = outputs.get(callId);
     if (!output || !/Process exited with code 0\s*$/imu.test(output) || !successfulSummary(call.runner, output)) continue;
