@@ -86,7 +86,7 @@ function runConfiguredLsp(adapter: TrustedLspAdapter, files: readonly LspSourceF
       if (!entry) throw new Error("worker_unavailable");
       const entryArgs = entry.endsWith(".ts") ? ["--experimental-strip-types", entry, CODEBASE_LSP_WORKER_FLAG] : [entry, CODEBASE_LSP_WORKER_FLAG];
       const env = configuredLspWorkerEnvironment(adapter.language, join(repositoryRootPath, ".craft_data", "codebase"));
-      const output = execFileSync(process.execPath, entryArgs, { input: JSON.stringify(request), encoding: "utf8", timeout: 120_000,
+      const output = execFileSync(process.execPath, entryArgs, { cwd: root, input: JSON.stringify(request), encoding: "utf8", timeout: 120_000,
         maxBuffer: 96 * 1024 * 1024, shell: false, stdio: ["pipe", "pipe", "ignore"], env });
       result = JSON.parse(output) as JsonObject;
     }

@@ -400,9 +400,10 @@ test("Go LSP worker receives persistent cache directories under the project Code
       "process.stdin.on('data', chunk => input += chunk);",
       "process.stdin.on('end', () => {",
       "  const request = JSON.parse(input);",
+      "  const requestCwd = require('node:fs').realpathSync(request.cwd);",
       "  const document = request.documents[0];",
       "  const start = document.content.indexOf('cacheEntry');",
-      "  process.stdout.write(JSON.stringify({ format: 'craft-static-analysis-v1', analyzer: request.analyzer, analyzer_version: request.analyzer_version, nodes: [{ id: 'cache_entry', kind: 'symbol', path: document.path, language: document.language, name: 'cacheEntry', source_digest: document.source_digest, span: { start_offset: start, end_offset: start + 10 } }], edges: [], diagnostics: { gopls_cache: process.env.GOPLSCACHE, go_build_cache: process.env.GOCACHE } }));",
+      "  process.stdout.write(JSON.stringify({ format: 'craft-static-analysis-v1', analyzer: request.analyzer, analyzer_version: request.analyzer_version, nodes: [{ id: 'cache_entry', kind: 'symbol', path: document.path, language: document.language, name: 'cacheEntry', source_digest: document.source_digest, span: { start_offset: start, end_offset: start + 10 } }], edges: [], diagnostics: { gopls_cache: process.env.GOPLSCACHE, go_build_cache: process.env.GOCACHE, request_cwd: requestCwd, worker_cwd: process.cwd() } }));",
       "});",
     ].join("\n"));
     delete (f.service as unknown as { analyzeLsp?: unknown }).analyzeLsp;
@@ -415,6 +416,7 @@ test("Go LSP worker receives persistent cache directories under the project Code
     const projectCodebaseRoot = join(realpathSync(f.repo), ".craft_data", "codebase");
     assert.equal((go.diagnostics as JsonObject).gopls_cache, join(projectCodebaseRoot, "gopls-cache"));
     assert.equal((go.diagnostics as JsonObject).go_build_cache, join(projectCodebaseRoot, "go-build-cache"));
+    assert.equal((go.diagnostics as JsonObject).worker_cwd, (go.diagnostics as JsonObject).request_cwd);
   } finally {
     process.argv[1] = previousEntry!;
     f.close();
