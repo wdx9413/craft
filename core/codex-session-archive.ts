@@ -5,6 +5,7 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 import { atomicPrivateJson, craftPaths, dataRoot } from "../common/craft-common-store-local/src/paths.ts";
 import { projectIdentityFromRoot } from "./scope-identity.ts";
 import { codexTaskGoalDigest } from "./codex-task-prose.ts";
+import { extractCodexSessionVerificationArtifacts, type CodexTaskTranscriptRecord } from "./codex-session-verification.ts";
 import type { JsonObject } from "./infrastructure/store.ts";
 
 const STATE_SCHEMA = "craft.codex-session-collection.v1";
@@ -657,6 +658,7 @@ export async function readCodexSessionTaskExcerpt(taskIdValue: unknown, options:
   const lines = buffer.toString("utf8").split(/\r?\n/u);
   let rollingDigest = hash(`${task.session_id}\0${task.turn_id}`);
   let taskGoal: string | null = null, taskResult: string | null = null;
+  const verificationRecords: CodexTaskTranscriptRecord[] = [];
   for (const line of lines) {
     if (!line) continue;
     const lineBytes = Buffer.from(line);
@@ -666,6 +668,10 @@ export async function readCodexSessionTaskExcerpt(taskIdValue: unknown, options:
     const recordType = typeof record?.type === "string" ? record.type : "";
     const payloadType = typeof payload?.type === "string" ? payload.type : "";
     const recordTurnId = typeof payload?.turn_id === "string" ? payload.turn_id : task.turn_id;
+    if (recordType === "response_item" && payload
+      && (payloadType === "custom_tool_call" || payloadType === "custom_tool_call_output")) {
+      verificationRecords.push({ record_type: "response_item", payload });
+    }
     if (recordType && payload && recordTurnId === task.turn_id && recordType !== "session_meta" && recordType !== "turn_context"
       && !(recordType === "event_msg" && payloadType === "task_started")) {
       rollingDigest = hash(`${rollingDigest}\0${hash(lineBytes)}`);
@@ -677,8 +683,10 @@ export async function readCodexSessionTaskExcerpt(taskIdValue: unknown, options:
   }
   if (`sha256:${rollingDigest}` !== task.source_ref) return { status: "ineligible", reason: "task_source_digest_mismatch", raw_content_stored: false };
   if (!taskGoal || !taskResult) return { status: "ineligible", reason: "sanitized_task_summary_unavailable", raw_content_stored: false };
+  const verificationArtifacts = extractCodexSessionVerificationArtifacts(verificationRecords);
   return { status: "ready", task_id: task.task_id, session_id: task.session_id, turn_id: task.turn_id,
     project_scope_id: task.project_scope_id, dataset_partition: task.dataset_partition, dataset_split_version: task.dataset_split_version,
     source_ref: task.source_ref, evidence_ids: task.verification_evidence_ids ?? [], verification_outcome: task.verification_outcome,
-    task_goal: taskGoal, task_result: taskResult, sanitized: true, content_stored: false, raw_content_stored: false };
+    task_goal: taskGoal, task_result: taskResult, verification_artifacts: verificationArtifacts,
+    sanitized: true, content_stored: false, raw_content_stored: false };
 }

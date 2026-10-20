@@ -16,7 +16,7 @@ import type { ExperienceLearningClient } from "../deploy/experience-learning/wor
 const provider: ModelProviderSpec = { provider: "test", label: "test", protocol: "openai-compatible", base_url: "https://example.invalid/v1",
   api_key_env: "TEST_KEY", chat_path: "/chat/completions", models: { standard: "test-model" }, cost_hint: 0, supports_tools: false };
 
-async function setup(partition: "candidate_generation" | "held_out" = "candidate_generation") {
+async function setup(partition: "candidate_generation" | "held_out" = "candidate_generation", includeVerification = true) {
   const root = await mkdtemp(join(tmpdir(), "craft-session-knowledge-"));
   const project = join(root, "project"), sessions = join(root, "sessions"), state = join(root, "runtime", "sessions.json");
   const workerState = join(root, "knowledge", "session-candidates.json"), source = join(sessions, "session.jsonl");
@@ -26,9 +26,16 @@ async function setup(partition: "candidate_generation" | "held_out" = "candidate
   while ((Number.parseInt(createHash("sha256").update(sessionId).digest("hex").slice(0, 8), 16) % 5 === 0) !== (partition === "held_out")) sessionId += "x";
   const event = (payload: JsonObject) => JSON.stringify({ type: "event_msg", payload });
   const response = (payload: JsonObject) => JSON.stringify({ type: "response_item", payload });
+  const verification = includeVerification ? [
+    response({ type: "custom_tool_call", call_id: "verification-call", name: "exec", input: "pnpm test" }),
+    response({ type: "custom_tool_call_output", call_id: "verification-call", output: [
+      { type: "text", text: "Process exited with code 0" }, { type: "text", text: "Tests 1 passed (1)" },
+    ] }),
+  ] : [];
   const lines = [JSON.stringify({ type: "session_meta", payload: { session_id: sessionId, cwd: project } }),
     event({ type: "task_started", turn_id: "turn-1", started_at: "2026-10-20T00:00:00Z" }),
     response({ type: "message", role: "user", content: [{ type: "input_text", text: "整理项目依赖升级的验证流程" }] }),
+    ...verification,
     response({ type: "message", role: "assistant", phase: "final_answer", content: [{ type: "output_text", text: "本次已验证依赖升级后运行单测并检查锁文件" }] }),
     event({ type: "task_complete", turn_id: "turn-1", completed_at: "2026-10-20T00:01:00Z" })];
   await writeFile(source, `${lines.join("\n")}\n`);
@@ -58,6 +65,7 @@ function workerClient(overrides: Record<string, (args: JsonObject) => JsonObject
     if (name === "craft_evaluation_model_profile_get") return { readiness: { status: "ready_for_adapter" } };
     if (name === "craft_trace_start") return { trace: { id: "trace-session-task" } };
     if (name === "craft_trace_append" || name === "craft_trace_finalize") return {};
+    if (name === "craft_evidence_record") return { id: args.evidence_id, ...args };
     if (name === "craft_knowledge_claim_save") return { claim: { id: args.claim_id, status: "candidate" } };
     throw new Error(`unexpected tool ${name}`);
   } };
@@ -112,7 +120,10 @@ test("archived verified generation and held-out tasks remain usable once without
       assert.equal(seen.length, 1);
       const saved = fixture.calls.find(call => call.name === (partition === "candidate_generation" ? "craft_knowledge_claim_save" : "craft_knowledge_evaluation_case_save"))!;
       assert.equal(saved.args.scope, f.task.project_scope_id);
-      assert.deepEqual(saved.args.evidence_ids ?? saved.args.source_evidence_ids, ["evidence-session-task"]);
+      const evidenceIds = (saved.args.evidence_ids ?? saved.args.source_evidence_ids) as string[];
+      assert.equal(evidenceIds.length, 2);
+      assert(evidenceIds.includes("evidence-session-task"));
+      assert(fixture.calls.some(call => call.name === "craft_evidence_record" && call.args.confidence === "confirmed"));
       assert.equal((await run(deps)).status, "idle");
       assert.equal(seen.length, 1, "a relocation must not cause repeated model calls");
       const other = partition === "candidate_generation" ? runSessionKnowledgeEvaluationOnce : runSessionKnowledgeCandidateOnce;
@@ -134,10 +145,15 @@ test("creates one Chinese Knowledge candidate from a verified generation task an
     assert.equal(modelInputs.length, 1);
     const save = fixture.calls.find(call => call.name === "craft_knowledge_claim_save")!;
     assert.equal(save.args.scope, f.task.project_scope_id);
-    assert.deepEqual(save.args.evidence_ids, ["evidence-session-task"]);
+    assert.equal((save.args.evidence_ids as string[]).length, 2);
+    assert((save.args.evidence_ids as string[]).includes("evidence-session-task"));
+    const programEvidence = fixture.calls.find(call => call.name === "craft_evidence_record")!;
+    assert.equal(programEvidence.args.confidence, "confirmed");
+    assert.equal((programEvidence.args.metadata as JsonObject).content_stored, false);
     assert.equal(save.args.content, "依赖升级后应运行单测并检查锁文件。");
     const traceCalls = fixture.calls.filter(call => call.name === "craft_trace_append");
     assert.equal(traceCalls.length, 3);
+    assert((traceCalls.at(-1)!.args.output_refs as string[]).includes(String(programEvidence.args.evidence_id)));
     assert.equal(JSON.stringify(traceCalls).includes("本次已验证"), false);
     const savedState = await readFile(f.workerState, "utf8");
     assert.equal(savedState.includes("本次已验证"), false);
@@ -163,6 +179,19 @@ test("held-out sessions are never passed to candidate generation", async () => {
   } finally { await rm(f.root, { recursive: true, force: true }); }
 });
 
+test("task without a successful test transcript is skipped before profile or model calls", async () => {
+  const f = await setup("candidate_generation", false);
+  try {
+    const fixture = workerClient(); let modelCalls = 0;
+    const result = await runSessionKnowledgeCandidateOnce({ client: fixture.client, providers: [provider],
+      transport: { async complete() { modelCalls++; return { text: "{}", model: "test-model", usage: { input_tokens: 0, output_tokens: 0 } }; } },
+      state_file: f.workerState, archive_options: { sessions_root: f.sessions, state_file: f.state } });
+    assert.deepEqual(result, { status: "skipped", processed: 1, reason: "verifiable_test_result_unavailable", raw_content_stored: false });
+    assert.equal(modelCalls, 0);
+    assert.equal(fixture.calls.length, 0);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
 test("held-out task creates a separately labeled evaluation case and preserves ineligible provenance", async () => {
   const f = await setup("held_out");
   try {
@@ -178,14 +207,30 @@ test("held-out task creates a separately labeled evaluation case and preserves i
     assert.equal(result.status, "case_candidate_created"); assert.equal(result.evaluation_eligible, false);
     assert.equal(result.independent_adjudication_required, true); assert.equal(result.label_source, "model_candidate");
     const saved = fixture.calls.find(call => call.name === "craft_knowledge_evaluation_case_save")!;
-    assert.deepEqual(saved.args.expected_claim_ids, ["reviewed-claim"]); assert.deepEqual(saved.args.source_evidence_ids, ["evidence-session-task"]);
+    assert.deepEqual(saved.args.expected_claim_ids, ["reviewed-claim"]);
+    assert.equal((saved.args.source_evidence_ids as string[]).length, 2);
+    assert((saved.args.source_evidence_ids as string[]).includes("evidence-session-task"));
     assert.equal(saved.args.dataset_partition, "held_out"); assert.equal(saved.args.sanitized, true);
     assert.equal(saved.args.label_source, "model_candidate");
     const trace = fixture.calls.filter(call => call.name === "craft_trace_append");
     assert(trace.some(call => call.args.event_kind === "knowledge.evaluation_case_candidate"));
+    assert((trace.at(-1)!.args.output_refs as string[]).includes(String(fixture.calls.find(call => call.name === "craft_evidence_record")!.args.evidence_id)));
     assert.equal(JSON.stringify(trace).includes("本次已验证"), false);
     assert.equal((await runSessionKnowledgeEvaluationOnce({ client: fixture.client, providers: [provider], transport: modelTransport("{}"),
       state_file: f.workerState, archive_options: { sessions_root: f.sessions, state_file: f.state } })).status, "idle");
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("held-out task without successful test evidence does not call the model or create an evaluation case", async () => {
+  const f = await setup("held_out", false);
+  try {
+    const fixture = workerClient(); let modelCalls = 0;
+    const result = await runSessionKnowledgeEvaluationOnce({ client: fixture.client, providers: [provider],
+      transport: { async complete() { modelCalls++; return { text: "{}", model: "test-model", usage: { input_tokens: 0, output_tokens: 0 } }; } },
+      state_file: f.workerState, archive_options: { sessions_root: f.sessions, state_file: f.state } });
+    assert.deepEqual(result, { status: "skipped", processed: 1, reason: "verifiable_test_result_unavailable", raw_content_stored: false });
+    assert.equal(modelCalls, 0);
+    assert.equal(fixture.calls.length, 0);
   } finally { await rm(f.root, { recursive: true, force: true }); }
 });
 

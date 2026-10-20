@@ -9,6 +9,7 @@ import type { JsonObject } from "../../core/infrastructure/store.ts";
 import { codexSessionTaskBatch, readCodexSessionTaskExcerpt, type CodexSessionCollectionOptions } from "../../core/codex-session-archive.ts";
 import { redactKnowledgeModelText } from "./knowledge-classification.ts";
 import type { ExperienceLearningClient } from "./worker.ts";
+import { recordSessionVerificationEvidence } from "./session-verification-evidence.ts";
 
 const SCHEMA = "craft.knowledge-session-evaluation-state.v1";
 const OUTPUT_SCHEMA = { type: "object", properties: {
@@ -81,6 +82,11 @@ export async function runSessionKnowledgeEvaluationOnce(deps: SessionKnowledgeEv
     state.processed_task_ids.push(String(task.task_id)); await writeState(path, state);
     return { status: "skipped", processed: 1, reason: "held_out_excerpt_unavailable", raw_content_stored: false };
   }
+  const verificationArtifacts = Array.isArray(excerpt.verification_artifacts) ? excerpt.verification_artifacts : [];
+  if (!verificationArtifacts.length) {
+    state.processed_task_ids.push(String(task.task_id)); await writeState(path, state);
+    return { status: "skipped", processed: 1, reason: "verifiable_test_result_unavailable", raw_content_stored: false };
+  }
   const listed = await deps.client.call("craft_knowledge_claim_list", { limit: 1_000, scope_kind: "project", scope_id: task.project_scope_id.slice("project:".length) });
   const reviewed = (Array.isArray(listed.claims) ? listed.claims as JsonObject[] : []).filter(claim => claim.status === "reviewed" && claim.scope === task.project_scope_id).slice(0, 12);
   const claims: JsonObject[] = [];
@@ -104,7 +110,8 @@ export async function runSessionKnowledgeEvaluationOnce(deps: SessionKnowledgeEv
     ?? (detail.provider ? defineProvider(object(detail.provider, "Knowledge evaluation provider")) : undefined);
   if (!provider) return { status: "waiting_for_model", processed: 0, reason: "provider_unavailable", raw_content_stored: false };
   const packet = redactKnowledgeModelText({ query: excerpt.task_goal, task_result: excerpt.task_result,
-    reviewed_claims: claims, sanitized: true, source_content_stored: false }) as JsonObject;
+    reviewed_claims: claims, verification_artifacts: verificationArtifacts,
+    sanitized: true, source_content_stored: false }) as JsonObject;
   const inputDigest = stableDigest({ purpose: "knowledge_held_out_label.v1", task_id: task.task_id, packet });
   const fingerprint = stableDigest({ provider: provider.provider, model: profile.model });
   const system = `为独立留出会话生成待审标签。只从给定的已审核 Claim 中选择直接回答任务目标的 Claim，不得改写 Claim 或臆造标签；没有充分匹配时返回 skip。返回 JSON：decision 为 labeled 或 skip，expected_claim_ids 为所选 Claim ID 数组。该标签是模型候选，不是人工真值；来源证据资格由 Craft 后续独立判断。${generatedTextLanguageInstruction(deps.contentLanguage ?? "zh-CN")}`;
@@ -133,11 +140,14 @@ export async function runSessionKnowledgeEvaluationOnce(deps: SessionKnowledgeEv
     await deps.client.call("craft_trace_append", { trace_id: traceId, event_kind: "model.completed", actor: "knowledge-session-evaluation-worker",
       source: "codex-cli-learning-transport", trust: "observed", operation_id: String(task.task_id), model_fingerprint: fingerprint,
       usage: response.usage, data: { response_digest: stableDigest(response.text) }, summary: "Codex Host 返回了留出评测标签候选" });
-    let caseId: string | null = null, evaluationEligible: boolean | null = null;
+    let caseId: string | null = null, caseEvidenceId: string | null = null, evaluationEligible: boolean | null = null;
     if (output.decision === "labeled") {
+      const verificationEvidence = await recordSessionVerificationEvidence(deps.client, task, excerpt);
+      if (!verificationEvidence) throw new Error("held-out test Evidence is unavailable");
+      caseEvidenceId = String(verificationEvidence.id);
       const saved = await deps.client.call("craft_knowledge_evaluation_case_save", { case_id: `knowledge_case_${stableDigest(task.task_id).slice(-24)}`,
         query: String(redactKnowledgeModelText(excerpt.task_goal)), expected_claim_ids: output.expected_claim_ids as string[], scope: task.project_scope_id,
-        source_session_id: task.session_id, source_task_id: task.task_id, source_evidence_ids: evidenceIds,
+        source_session_id: task.session_id, source_task_id: task.task_id, source_evidence_ids: [...evidenceIds, caseEvidenceId],
         evaluation_channel: "real_session", dataset_partition: "held_out", label_source: "model_candidate", sanitized: true });
       const evaluationCase = object(saved.case, "saved Knowledge evaluation case"); caseId = String(evaluationCase.id);
       const run = await deps.client.call("craft_knowledge_evaluation_run", { run_id: `knowledge_run_${stableDigest({ case_id: caseId, now: new Date().toISOString() }).slice(-24)}`,
@@ -146,12 +156,13 @@ export async function runSessionKnowledgeEvaluationOnce(deps: SessionKnowledgeEv
       const metrics = runRecord.metrics && typeof runRecord.metrics === "object" ? runRecord.metrics as JsonObject : {};
       evaluationEligible = metrics.provenance_eligible === true;
     }
-    const resultDigest = stableDigest({ task_id: task.task_id, input_digest: inputDigest, case_id: caseId, decision: output.decision,
+    const resultDigest = stableDigest({ task_id: task.task_id, input_digest: inputDigest, case_id: caseId,
+      verification_evidence_id: caseEvidenceId, decision: output.decision,
       expected_claim_ids: output.expected_claim_ids, evaluation_eligible: evaluationEligible });
     await deps.client.call("craft_trace_append", { trace_id: traceId, event_kind: "knowledge.evaluation_case_candidate",
       actor: "knowledge-session-evaluation-worker", source: "craft-knowledge", trust: "observed", operation_id: String(task.task_id),
-      output_refs: caseId ? [caseId] : [], model_fingerprint: fingerprint,
-      data: { result_digest: resultDigest, case_id: caseId, label_source: "model_candidate", evaluation_eligible: evaluationEligible },
+      output_refs: [caseId, caseEvidenceId].filter((value): value is string => value !== null), model_fingerprint: fingerprint,
+      data: { result_digest: resultDigest, case_id: caseId, evidence_id: caseEvidenceId, label_source: "model_candidate", evaluation_eligible: evaluationEligible },
       summary: caseId ? "已建立待独立审定的留出评测案例" : "模型未找到充分匹配的已审核 Claim" });
     state.processed_task_ids.push(String(task.task_id)); await writeState(path, state);
     await deps.client.call("craft_trace_finalize", { trace_id: traceId, status: "completed", summary: "留出评测标签候选处理完成" });

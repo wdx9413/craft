@@ -8,6 +8,7 @@ import { generatedTextLanguageInstruction } from "../../core/config.ts";
 import type { JsonObject } from "../../core/infrastructure/store.ts";
 import { codexSessionTaskBatch, readCodexSessionTaskExcerpt, type CodexSessionCollectionOptions } from "../../core/codex-session-archive.ts";
 import type { ExperienceLearningClient } from "./worker.ts";
+import { recordSessionVerificationEvidence } from "./session-verification-evidence.ts";
 
 const STATE_SCHEMA = "craft.knowledge-session-candidate-state.v1";
 const OUTPUT_SCHEMA = { type: "object", properties: {
@@ -103,6 +104,11 @@ export async function runSessionKnowledgeCandidateOnce(deps: SessionKnowledgeCan
     state.processed_task_ids.push(String(task.task_id)); await writeCandidateState(path, state);
     return { status: "skipped", processed: 1, reason: "verified_task_excerpt_unavailable", raw_content_stored: false };
   }
+  const verificationArtifacts = Array.isArray(excerpt.verification_artifacts) ? excerpt.verification_artifacts : [];
+  if (!verificationArtifacts.length) {
+    state.processed_task_ids.push(String(task.task_id)); await writeCandidateState(path, state);
+    return { status: "skipped", processed: 1, reason: "verifiable_test_result_unavailable", raw_content_stored: false };
+  }
   const profileResult = await deps.client.call("craft_evaluation_model_profile_ensure_single", { purpose: "knowledge_scenario_classification" });
   if (profileResult.status !== "ready_for_adapter") return { status: "waiting_for_model", processed: 0,
     reason: String(profileResult.reason || "model_profile_not_ready"), raw_content_stored: false };
@@ -116,7 +122,8 @@ export async function runSessionKnowledgeCandidateOnce(deps: SessionKnowledgeCan
     ?? (detail.provider ? defineProvider(object(detail.provider, "Knowledge generation provider")) : undefined);
   if (!provider) return { status: "waiting_for_model", processed: 0, reason: "provider_unavailable", raw_content_stored: false };
   const packet = { project_scope_id: task.project_scope_id, task_goal: excerpt.task_goal, task_result: excerpt.task_result,
-    verification_outcome: excerpt.verification_outcome, evidence_count: excerptEvidenceIds.length, sanitized: true, content_stored: false };
+    verification_outcome: excerpt.verification_outcome, verification_artifacts: verificationArtifacts,
+    evidence_count: excerptEvidenceIds.length + 1, sanitized: true, content_stored: false };
   const inputDigest = stableDigest({ purpose: "knowledge_session_candidate_generation.v1", task_id: task.task_id, packet });
   const modelFingerprint = stableDigest({ provider: provider.provider, model: profile.model });
   const system = `从已验证的项目任务中提炼一条可复用、可独立核实的项目知识候选。仅依据输入中的任务目标和结果，不补充未观察到的事实；若没有稳定、可验证的知识，返回 decision=skip。返回一个 JSON 对象，字段为 decision、kind、title、content、tags。所有可读文字使用中文。不得写入会话细节、个人信息、密钥、路径或代码。候选只供后续独立证据评审，不代表事实已确认。${generatedTextLanguageInstruction(deps.contentLanguage ?? "zh-CN")}`;
@@ -137,7 +144,7 @@ export async function runSessionKnowledgeCandidateOnce(deps: SessionKnowledgeCan
   const request = buildChatRequest(provider, { model: String(profile.model), messages, max_tokens: Math.min(Number(profile.max_output_tokens ?? 1_024), 1_024), temperature: 0 });
   if (provider.provider === "codex-cli") request.body.codex_output_schema = OUTPUT_SCHEMA;
   let candidate: JsonObject | null;
-  let claimId: string | null = null;
+  let claimId: string | null = null, verificationEvidenceId: string | null = null;
   try {
     const response = await transport.complete(provider, request);
     await deps.client.call("craft_trace_append", { trace_id: traceId, event_kind: "model.completed", actor: "knowledge-session-candidate-worker",
@@ -146,17 +153,21 @@ export async function runSessionKnowledgeCandidateOnce(deps: SessionKnowledgeCan
       summary: "Codex Host 返回了结构化 Knowledge 候选结果" });
     candidate = validateCandidate(parseModelResult(response.text));
     if (candidate) {
+      const verificationEvidence = await recordSessionVerificationEvidence(deps.client, task, excerpt);
+      if (!verificationEvidence) throw new Error("verified test Evidence is unavailable");
+      verificationEvidenceId = String(verificationEvidence.id);
       const saved = await deps.client.call("craft_knowledge_claim_save", { claim_id: `knowledge_claim_${stableDigest(task.task_id).slice(-24)}`,
         kind: candidate.kind, title: candidate.title, content: candidate.content, scope: task.project_scope_id,
-        source_id: "builtin.evidence-wiki", evidence_ids: task.verification_evidence_ids, tags: candidate.tags });
+        source_id: "builtin.evidence-wiki", evidence_ids: [...task.verification_evidence_ids, verificationEvidenceId], tags: candidate.tags });
       const claim = object(saved.claim, "saved Knowledge Claim"); claimId = String(claim.id);
     }
-    const resultDigest = stableDigest({ task_id: task.task_id, input_digest: inputDigest, claim_id: claimId, decision: candidate ? "candidate" : "skip",
+    const resultDigest = stableDigest({ task_id: task.task_id, input_digest: inputDigest, claim_id: claimId,
+      verification_evidence_id: verificationEvidenceId, decision: candidate ? "candidate" : "skip",
       response_digest: stableDigest(response.text) });
     await deps.client.call("craft_trace_append", { trace_id: traceId, event_kind: candidate ? "knowledge.candidate_created" : "knowledge.candidate_skipped",
       actor: "knowledge-session-candidate-worker", source: "craft-knowledge", trust: "observed", operation_id: String(task.task_id),
-      output_refs: claimId ? [claimId] : [], model_fingerprint: modelFingerprint,
-      data: { result_digest: resultDigest, claim_id: claimId, decision: candidate ? "candidate" : "skip" },
+      output_refs: [claimId, verificationEvidenceId].filter((value): value is string => value !== null), model_fingerprint: modelFingerprint,
+      data: { result_digest: resultDigest, claim_id: claimId, evidence_id: verificationEvidenceId, decision: candidate ? "candidate" : "skip" },
       summary: candidate ? "已创建待独立证据评审的 Knowledge 候选" : "模型判定该任务没有稳定 Knowledge 候选" });
     state.processed_task_ids.push(String(task.task_id)); await writeCandidateState(path, state);
     await deps.client.call("craft_trace_finalize", { trace_id: traceId, status: "completed", summary: "Knowledge 任务候选生成完成" });
