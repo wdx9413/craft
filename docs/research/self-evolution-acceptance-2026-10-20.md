@@ -1,6 +1,6 @@
 # 自进化闭环验收记录（2026-10-20）
 
-完整目标仍未通过验收。本轮以当前 `0.12.85` 工作区为基线，覆盖全量会话采集、任务证据整理、独立评测集、Knowledge 闭环、Memory/Experience 生命周期、增量运行和使用反馈七项范围。已完成部分实现与代码级验证；真实任务闭环仍缺可核验任务证据，不能宣称自进化已跑通。
+完整目标仍未通过验收。本轮从 `0.12.85` 工作区开始改造，并发布 `0.12.86`，覆盖全量会话采集、任务证据整理、独立评测集、Knowledge 闭环、Memory/Experience 生命周期、增量运行和使用反馈七项范围。已完成部分实现与代码级验证；真实任务闭环仍缺可核验任务证据，不能宣称自进化已跑通。
 
 ## 本轮实现与证据
 
@@ -21,6 +21,14 @@
 - `.craft_data/codebase/coverage/session-archive/coverage-final.json`：修改模块覆盖率。
 
 运行数据均受 `.gitignore` 排除。报告中的统计为当次观察结果，不能替代后续运行的状态核查。
+
+## `.86` 远端发布与 Host 运行证据
+
+- 源码 `main` 提交 `8e4a8fa0c404e1b119e7d1cc393476b5f9a3f158`；Marketplace `main` 提交 `ac23f24`。Marketplace 载荷由 GitHub 上固定 SHA 的源码归档构建，`release.json` 记录了源码摘要 `sha256:268fc6245370c4887cca090f04b569a07ca870c1287c8d31ddcda846c52797f9`；同步校验通过，未使用本地源码路径。
+- `codex plugin marketplace upgrade craft-marketplace` 成功刷新远端缓存。`codex plugin list` 显示 `craft-context` 为 `0.12.86`；`codex mcp get craft-context` 指向 `~/.codex/plugins/cache/craft-marketplace/craft-context/0.12.86/dist/plugin/craft-mcp.cjs`。
+- 新启动的 `codex exec -m gpt-6-luna` 真实调用了 `craft_info`，返回版本 `0.12.86`、数据根目录 `~/.craft_data`、语言 `zh-CN`；这证明新 CLI 会话实际加载了新 MCP 包。该 Host 调用记录为 81,858 输入 token、144 输出 token，成本明显偏高，需缩减 Host 提示与 MCP 工具描述后再做额外模型验证。
+- Host 状态有 200 条 Knowledge Claim、0 个 Knowledge 评测用例、0 个 Experience Pattern、0 条 Memory 使用反馈。实际会话扫描为 `partial`：当次看到 633 个来源、索引 4,946 个任务（4,852 完成、90 中止，其余处于运行态），生成/留出分区为 1,403/3,543；两个来源仍增长，核验任务为 0，两侧可用任务也为 0。没有触发候选生成或晋升。
+- 真实运行证明了远端发布、Marketplace 刷新和新 Host 加载链；没有证明真实 Knowledge/Experience 产出、独立评测通过、自动晋升或使用后收益。
 
 ## 完整验收矩阵
 
