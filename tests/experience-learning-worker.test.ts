@@ -744,6 +744,21 @@ test("MCP stdio client handles structured, text, tool-error and RPC-error respon
   } finally { client.close(); }
 });
 
+test("MCP stdio client stops a child that never responds to a request", async () => {
+  const script = `const readline = require("node:readline");\nreadline.createInterface({ input: process.stdin }).on("line", line => {\n  const request = JSON.parse(line);\n  if (request.method === "initialize") process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: request.id, result: { protocolVersion: "2025-11-25", capabilities: {}, serverInfo: { name: "fixture", version: "1" } } }) + "\\n");\n});`;
+  const client = new McpStdioClient(process.execPath, ["-e", script], { request_timeout_ms: 500 });
+  try {
+    await client.initialize();
+    const childExited = new Promise<void>(resolve => client.child.once("exit", () => resolve()));
+    const request = client.call("fixture_never_responds");
+    await assert.rejects(Promise.race([request, new Promise<never>((_, reject) => setTimeout(() => reject(new Error("test observation timed out")), 1_500))]),
+      /MCP request timed out: tools\/call/u);
+    await childExited;
+    assert.equal(client.closed, true);
+    assert.equal(client.pending.size, 0);
+  } finally { client.close(); }
+});
+
 test("MCP stdio client refuses a stale Craft server before sending initialized notification", async () => {
   const fixturePath = fileURLToPath(new URL("./fixtures/experience-learning-mcp-fixture.cjs", import.meta.url));
   const keys = ["CRAFT_TEST_LEARNING_WORKER_MCP_SERVER_INFO", "CRAFT_TEST_LEARNING_WORKER_MCP_SERVER_NAME", "CRAFT_TEST_LEARNING_WORKER_MCP_SERVER_VERSION"] as const;
@@ -803,6 +818,18 @@ test("MCP stdio client rejects requests when the child command cannot start", as
 });
 
 test("MCP stdio client removes pending writes that fail and rejects requests when a child exits", async () => {
+  const nonErrorWriteThrow = new McpStdioClient(process.execPath, ["-e", "setInterval(() => {}, 1000)"]);
+  nonErrorWriteThrow.child.stdin.write = (() => { throw "fixture write failure"; }) as typeof nonErrorWriteThrow.child.stdin.write;
+  await assert.rejects(nonErrorWriteThrow.initialize(), /Craft MCP request write failed/u);
+  assert.equal(nonErrorWriteThrow.pending.size, 0);
+  nonErrorWriteThrow.close();
+
+  const writeThrow = new McpStdioClient(process.execPath, ["-e", "setInterval(() => {}, 1000)"]);
+  writeThrow.child.stdin.write = (() => { throw new Error("fixture stdin write threw"); }) as typeof writeThrow.child.stdin.write;
+  await assert.rejects(writeThrow.initialize(), /fixture stdin write threw/u);
+  assert.equal(writeThrow.pending.size, 0);
+  writeThrow.close();
+
   const writeFailure = new McpStdioClient(process.execPath, ["-e", "setInterval(() => {}, 1000)"]);
   const originalWrite = writeFailure.child.stdin.write.bind(writeFailure.child.stdin);
   writeFailure.child.stdin.write = ((chunk: string, callback?: (error?: Error | null) => void) => {

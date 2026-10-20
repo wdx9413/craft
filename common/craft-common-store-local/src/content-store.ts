@@ -147,10 +147,15 @@ function idSuffix(recordId: string): string {
 export class MarkdownContentStore {
   readonly paths: CraftPaths;
   #projectKnowledgeDirectory: ProjectKnowledgeContentDirectoryResolver | undefined;
+  #projectMemoryDirectory: ProjectKnowledgeContentDirectoryResolver | undefined;
   constructor(paths: CraftPaths) { this.paths = paths; }
 
   setProjectKnowledgeDirectoryResolver(resolver: ProjectKnowledgeContentDirectoryResolver): void {
     this.#projectKnowledgeDirectory = resolver;
+  }
+
+  setProjectMemoryDirectoryResolver(resolver: ProjectKnowledgeContentDirectoryResolver): void {
+    this.#projectMemoryDirectory = resolver;
   }
 
   pathFor(kind: ContentKind, recordId: string, version?: number, folder?: ExperienceFolder, scope?: string, projectRoot?: string): string {
@@ -273,7 +278,7 @@ export class MarkdownContentStore {
     if (this.isCanonicalRef(scopedRef)) return this.readSync(scopedRef);
     const globalDirectory = resolve(this.directory(ref.kind));
     const target = resolve(scopedRef.path);
-    const isLegacySharedProjectRef = scopedRef.kind === "knowledge" && scopedRef.scope?.startsWith("project:")
+    const isLegacySharedProjectRef = (scopedRef.kind === "knowledge" || scopedRef.kind === "memory") && scopedRef.scope?.startsWith("project:")
       && (target === globalDirectory || target.startsWith(`${globalDirectory}${sep}`));
     if (!isLegacySharedProjectRef && target !== resolve(this.legacyPathFor(scopedRef.kind, scopedRef.record_id, scopedRef.version))) {
       throw new Error("Content reference path is outside the canonical directory");
@@ -361,6 +366,19 @@ export class MarkdownContentStore {
   private directory(kind: ContentKind, folder?: ExperienceFolder, scope?: string, projectRoot?: string, referencePath?: string, writing = false): string {
     if (kind === "knowledge" || kind === "memory") {
       if (folder !== undefined) throw new Error("Only Experience content supports folders");
+      if (kind === "memory" && scope?.startsWith("project:")) {
+        const projectDirectory = this.#projectMemoryDirectory?.(scope, {
+          ...(projectRoot ? { project_root: projectRoot } : {}), ...(referencePath ? { reference_path: referencePath } : {}), ...(writing ? { create: true } : {}),
+        });
+        if (projectDirectory) return projectDirectory;
+        if (writing && this.#projectMemoryDirectory) throw new Error("Project Memory scope has no registered project root");
+      }
+      if (kind === "memory" && scope?.startsWith("session:")) {
+        const sessionId = scope.slice("session:".length);
+        if (!sessionId || sessionId.trim() !== sessionId || sessionId === "." || sessionId === ".." || /[/\\\x00-\x1f\x7f]/u.test(sessionId)
+          || Buffer.byteLength(sessionId, "utf8") > 255) throw new Error("session_id must be one bounded, safe directory name");
+        return join("/tmp", ".craft_data", "memory", sessionId, "md");
+      }
       if (kind === "knowledge" && scope?.startsWith("project:")) {
         const projectDirectory = this.#projectKnowledgeDirectory?.(scope, {
           ...(projectRoot ? { project_root: projectRoot } : {}), ...(referencePath ? { reference_path: referencePath } : {}), ...(writing ? { create: true } : {}),

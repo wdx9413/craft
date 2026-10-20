@@ -15,6 +15,7 @@ const MAX_TASK_EXCERPT_BYTES = 8 * 1024 * 1024;
 
 export interface CodexSessionCollectionOptions {
   readonly sessions_root?: string;
+  readonly archived_sessions_root?: string;
   readonly state_file?: string;
   readonly max_files?: number;
   readonly max_bytes?: number;
@@ -37,6 +38,7 @@ export interface CodexSessionTaskIndex {
   readonly tool_output_count: number;
   readonly source_ref: string;
   readonly source_path: string;
+  readonly source_root?: "archived_sessions";
   readonly source_start_byte: number;
   readonly source_end_byte: number;
   readonly task_goal_digest?: string;
@@ -179,7 +181,8 @@ function retainTask(state: SourceState, task: CodexSessionTaskIndex): void {
   if (!state.task_ids.includes(task.task_id)) state.task_ids.push(task.task_id);
 }
 
-function finalizeTurn(sourcePath: string, state: SourceState, tasks: Record<string, CodexSessionTaskIndex>, turn: ActiveTurn): void {
+function finalizeTurn(sourcePath: string, state: SourceState, tasks: Record<string, CodexSessionTaskIndex>, turn: ActiveTurn,
+  archived: boolean): void {
   const sessionId = state.session_id;
   if (!sessionId || !turn.user_input_seen) return;
   const taskId = taskKey(sessionId, turn.turn_id);
@@ -199,18 +202,26 @@ function finalizeTurn(sourcePath: string, state: SourceState, tasks: Record<stri
     tool_output_count: turn.tool_output_count,
     source_ref: `sha256:${turn.rolling_digest}`,
     source_path: sourcePath,
+    ...(archived ? { source_root: "archived_sessions" as const } : {}),
     source_start_byte: turn.source_start_byte,
     source_end_byte: turn.source_end_byte,
     ...(turn.task_goal_digest ? { task_goal_digest: turn.task_goal_digest } : {}),
     verification_status: "unverified",
     raw_content_stored: false,
   };
-  tasks[taskId] = task;
+  const previous = tasks[taskId];
+  // Archiving relocates identical bytes; it must not discard independently
+  // verified Evidence. Rewritten content or scope must qualify again.
+  tasks[taskId] = previous?.verification_status === "verified" && previous.source_ref === task.source_ref
+    && previous.project_scope_id === task.project_scope_id ? { ...task,
+      verification_status: previous.verification_status, verification_evidence_ids: previous.verification_evidence_ids,
+      verification_outcome: previous.verification_outcome, context_receipt_id: previous.context_receipt_id,
+      verification_ref_digest: previous.verification_ref_digest, terminal_identity_digest: previous.terminal_identity_digest } : task;
   retainTask(state, task);
 }
 
 function updateTurn(record: ParsedRecord | null, line: Buffer, offset: number, sourcePath: string,
-  state: SourceState, tasks: Record<string, CodexSessionTaskIndex>, scopeCache: Map<string, string>): void {
+  state: SourceState, tasks: Record<string, CodexSessionTaskIndex>, scopeCache: Map<string, string>, archived: boolean): void {
   if (!record || !record.type) return;
   const payload = object(record.payload);
   if (!payload) return;
@@ -240,7 +251,7 @@ function updateTurn(record: ParsedRecord | null, line: Buffer, offset: number, s
   if (recordType === "event_msg" && payloadType === "task_started") {
     const turnId = typeof payload.turn_id === "string" ? payload.turn_id : "";
     if (!turnId) return;
-    if (state.active_turn) finalizeTurn(sourcePath, state, tasks, state.active_turn);
+    if (state.active_turn) finalizeTurn(sourcePath, state, tasks, state.active_turn, archived);
     state.active_turn = activeTurn(state, turnId, offset);
     state.active_turn.started_at = typeof payload.started_at === "string" ? payload.started_at : null;
     return;
@@ -256,11 +267,11 @@ function updateTurn(record: ParsedRecord | null, line: Buffer, offset: number, s
   if (recordType === "event_msg" && payloadType === "task_complete") {
     turn.status = "completed";
     turn.completed_at = typeof payload.completed_at === "string" ? payload.completed_at : null;
-    finalizeTurn(sourcePath, state, tasks, turn);
+    finalizeTurn(sourcePath, state, tasks, turn, archived);
     state.active_turn = null;
   } else if (recordType === "event_msg" && payloadType === "turn_aborted") {
     turn.status = "aborted";
-    finalizeTurn(sourcePath, state, tasks, turn);
+    finalizeTurn(sourcePath, state, tasks, turn, archived);
     state.active_turn = null;
   } else if (recordType === "response_item") {
     if (payloadType === "message" && payload.role === "user") {
@@ -297,6 +308,7 @@ function validateState(value: unknown, now: string): CollectionState {
     if (!task || task.task_id !== id || typeof task.session_id !== "string" || typeof task.turn_id !== "string"
       || !["running", "completed", "aborted"].includes(String(task.status)) || typeof task.source_path !== "string"
       || typeof task.source_ref !== "string" || task.raw_content_stored !== false
+      || task.source_root !== undefined && task.source_root !== "archived_sessions"
       || task.verification_status !== "unverified" && task.verification_status !== "verified"
       || task.task_goal_digest !== undefined && (typeof task.task_goal_digest !== "string" || !/^sha256:[a-f0-9]{64}$/u.test(task.task_goal_digest))
       || task.verification_evidence_ids !== undefined && (!Array.isArray(task.verification_evidence_ids) || task.verification_evidence_ids.some(id => typeof id !== "string"))) throw new Error("Codex session task index is invalid");
@@ -371,17 +383,30 @@ function sourceRoot(options: CodexSessionCollectionOptions, env: NodeJS.ProcessE
   return resolve(options.sessions_root ?? join(codexHome, "sessions"));
 }
 
+function archiveRoot(options: CodexSessionCollectionOptions, env: NodeJS.ProcessEnv): string | null {
+  if (options.archived_sessions_root !== undefined) return resolve(options.archived_sessions_root);
+  // An explicitly scoped source must not silently authorize a sibling directory.
+  if (options.sessions_root !== undefined) return null;
+  return join(dirname(sourceRoot(options, env)), "archived_sessions");
+}
+
+function sourceKey(path: string, archived: boolean): string {
+  // NUL cannot occur in filenames, so archive and legacy active keys cannot collide.
+  return archived ? `archived_sessions\0${path}` : path;
+}
+
 function statePath(options: CodexSessionCollectionOptions, env: NodeJS.ProcessEnv): string {
   return resolve(options.state_file ?? join(craftPaths(dataRoot(env)).runtimeDir, "codex-session-collection.json"));
 }
 
-function removeSourceTasks(state: CollectionState, sourcePath: string, source: SourceState): void {
-  for (const id of source.task_ids) if (state.tasks[id]?.source_path === sourcePath) delete state.tasks[id];
+function removeSourceTasks(state: CollectionState, sourcePath: string, source: SourceState, archived: boolean): void {
+  for (const id of source.task_ids) if (state.tasks[id]?.source_path === sourcePath
+    && (state.tasks[id]?.source_root === "archived_sessions") === archived) delete state.tasks[id];
   source.task_ids = [];
 }
 
 function updateFile(bytes: Buffer, start: number, sourcePath: string, source: SourceState, state: CollectionState,
-  scopeCache: Map<string, string>): { next_offset: number; malformed_lines: number } {
+  scopeCache: Map<string, string>, archived: boolean): { next_offset: number; malformed_lines: number } {
   let lineStart = 0;
   let malformedLines = 0;
   while (lineStart < bytes.length) {
@@ -392,7 +417,7 @@ function updateFile(bytes: Buffer, start: number, sourcePath: string, source: So
     const absoluteOffset = start + lineStart;
     const parsed = recordFromLine(line);
     if (line.length > 0 && parsed === null) malformedLines++;
-    updateTurn(parsed, line, absoluteOffset, sourcePath, source, state.tasks, scopeCache);
+    updateTurn(parsed, line, absoluteOffset, sourcePath, source, state.tasks, scopeCache, archived);
     lineStart = lineEnd + 1;
   }
   return { next_offset: start + lineStart, malformed_lines: malformedLines };
@@ -407,21 +432,30 @@ export async function runCodexSessionCollectionOnce(options: CodexSessionCollect
   const maxFiles = validLimit(options.max_files, DEFAULT_MAX_FILES, 1, 500, "max_files");
   const maxBytes = validLimit(options.max_bytes, DEFAULT_MAX_BYTES, 1_024, 128 * 1024 * 1024, "max_bytes");
   const now = options.now ?? new Date().toISOString();
-  const root = sourceRoot(options, env), outputPath = statePath(options, env);
+  const outputPath = statePath(options, env);
   const state = await readState(outputPath, now);
-  const files = await listSessionFiles(root);
-  const rootReal = resolve(root);
-  const candidates: Array<{ path: string; relativePath: string; size: number; mtimeMs: number; prior: SourceState | null }> = [];
-  for (const path of files) {
+  const roots = [{ root: sourceRoot(options, env), archived: false }];
+  const archive = archiveRoot(options, env);
+  if (archive !== null) roots.push({ root: archive, archived: true });
+  const files: Array<{ path: string; root: string; archived: boolean }> = [];
+  for (const source of roots) for (const path of await listSessionFiles(source.root)) files.push({ ...source, path });
+  const availableSources = new Set(files.map(source => sourceKey(relative(source.root, source.path).split(sep).join("/"), source.archived)));
+  const candidates: Array<{ path: string; relativePath: string; key: string; archived: boolean; relocated: boolean; size: number; mtimeMs: number; prior: SourceState | null }> = [];
+  for (const { path, root, archived } of files) {
     const info = await stat(path);
-    const relativePath = relative(rootReal, path).split(sep).join("/");
-    const prior = state.sources[relativePath] ?? null;
-    if (prior && prior.size === info.size && prior.mtime_ms === info.mtimeMs && prior.processed_bytes >= info.size && prior.task_goal_digest_version === 1) continue;
-    candidates.push({ path, relativePath, size: info.size, mtimeMs: info.mtimeMs, prior });
+    const relativePath = relative(root, path).split(sep).join("/");
+    const key = sourceKey(relativePath, archived);
+    const prior = state.sources[key] ?? null;
+    const relocated = prior !== null && prior.task_ids.some(id => {
+      const task = state.tasks[id];
+      return task !== undefined && !availableSources.has(sourceKey(task.source_path, task.source_root === "archived_sessions"));
+    });
+    if (prior && !relocated && prior.size === info.size && prior.mtime_ms === info.mtimeMs && prior.processed_bytes >= info.size && prior.task_goal_digest_version === 1) continue;
+    candidates.push({ path, relativePath, key, archived, relocated, size: info.size, mtimeMs: info.mtimeMs, prior });
   }
   // Oldest sources first ensure a stream of newly-created sessions cannot
   // starve the historical archive. A growing source resumes from its offset.
-  candidates.sort((left, right) => left.mtimeMs - right.mtimeMs || left.relativePath.localeCompare(right.relativePath));
+  candidates.sort((left, right) => left.mtimeMs - right.mtimeMs || left.key.localeCompare(right.key));
 
   let bytesLeft = maxBytes, processedFiles = 0, processedBytes = 0, malformedLines = 0;
   const scopeCache = new Map<string, string>();
@@ -431,16 +465,16 @@ export async function runCodexSessionCollectionOnce(options: CodexSessionCollect
     const sourceChanged = previous !== null && (candidate.size < previous.size
       || candidate.size === previous.size && candidate.mtimeMs !== previous.mtime_ms);
     const backfillTaskGoalDigests = previous !== null && previous.task_goal_digest_version === undefined && !sourceChanged;
-    const shouldRestart = sourceChanged || backfillTaskGoalDigests;
+    const shouldRestart = sourceChanged || backfillTaskGoalDigests || candidate.relocated;
     const current: SourceState = shouldRestart || !previous
       ? { size: candidate.size, mtime_ms: candidate.mtimeMs, processed_bytes: 0, session_id: null, project_scope_id: null, active_turn: null, task_ids: [],
         task_goal_digest_version: backfillTaskGoalDigests ? 0 : 1 }
       : { ...previous, size: candidate.size, mtime_ms: candidate.mtimeMs };
-    if (shouldRestart && previous) removeSourceTasks(state, candidate.relativePath, previous);
+    if (shouldRestart && previous) removeSourceTasks(state, candidate.relativePath, previous, candidate.archived);
     const amount = Math.min(bytesLeft, Math.max(1, candidate.size - current.processed_bytes));
     const chunk = await readCodexSessionChunk(candidate.path, current.processed_bytes, candidate.size, amount);
     const oldOffset = current.processed_bytes;
-    const update = updateFile(chunk.bytes, oldOffset, candidate.relativePath, current, state, scopeCache);
+    const update = updateFile(chunk.bytes, oldOffset, candidate.relativePath, current, state, scopeCache, candidate.archived);
     const nextOffset = update.next_offset;
     malformedLines += update.malformed_lines;
     current.processed_bytes = nextOffset;
@@ -450,7 +484,7 @@ export async function runCodexSessionCollectionOnce(options: CodexSessionCollect
       // cannot split or lose an event.
       current.processed_bytes = oldOffset;
     }
-    state.sources[candidate.relativePath] = current;
+    state.sources[candidate.key] = current;
     processedFiles++;
     processedBytes += Math.max(0, current.processed_bytes - oldOffset);
     bytesLeft -= Math.max(1, chunk.bytes.length);
@@ -461,7 +495,7 @@ export async function runCodexSessionCollectionOnce(options: CodexSessionCollect
   await atomicPrivateJson(outputPath, state);
   const indexed = Object.values(state.tasks);
   const remaining = candidates.filter(candidate => {
-    const source = state.sources[candidate.relativePath];
+    const source = state.sources[candidate.key];
     return !source || source.size !== candidate.size || source.mtime_ms !== candidate.mtimeMs
       || source.processed_bytes < candidate.size;
   }).length;
@@ -597,7 +631,9 @@ export async function readCodexSessionTaskExcerpt(taskIdValue: unknown, options:
     || task.dataset_partition !== options.expected_partition) {
     return { status: "ineligible", reason: "task_not_verified_or_partition_mismatch", raw_content_stored: false };
   }
-  const root = sourceRoot(options, env), canonicalRoot = await realpath(root);
+  const root = task.source_root === "archived_sessions" ? archiveRoot(options, env) : sourceRoot(options, env);
+  if (root === null) return { status: "ineligible", reason: "task_source_root_unavailable", raw_content_stored: false };
+  const canonicalRoot = await realpath(root);
   if (task.source_path.startsWith("/") || task.source_path.split("/").some(part => !part || part === "." || part === "..")) {
     throw new Error("Codex task source reference is invalid");
   }

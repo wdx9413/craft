@@ -74,7 +74,7 @@ export class MemoryCapture {
     const observationIdentity = { content_digest: contentDigest, project_id: projectId, session_digest: digestJson(input.sessionId), kind: candidate.kind, topic: candidate.topic ?? "" };
     const observationId = `memory_observation_${digestJson(observationIdentity).slice(-32)}`;
     if (!this.memory.store.find("memory_observation", observationId)) this.memory.store.create("memory_observation", observationId, {
-      ...observationIdentity, evidence_ids: candidate.evidence_ids ?? [], observed_at: candidate.observed_at,
+      ...observationIdentity, scope: { kind: "project", id: projectId }, evidence_ids: candidate.evidence_ids ?? [], observed_at: candidate.observed_at,
       ...(typeof candidate.valid_until === "string" ? { valid_until: candidate.valid_until } : {}), content_free: true, status: "active",
     });
     const observations = this.memory.store.list("memory_observation", 10_000, row => row.status === "active"

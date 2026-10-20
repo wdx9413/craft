@@ -8,6 +8,7 @@ import test from "node:test";
 import { craftPaths } from "../core/infrastructure/paths.ts";
 import { CraftService } from "../core/service.ts";
 import { CraftStore, type JsonObject } from "../core/infrastructure/store.ts";
+import type { RepositoryState } from "../core/workspace-repository-state.ts";
 import { WorkspaceState, snapshotNodeKind, snapshotStatIfPresent } from "../core/workspace.ts";
 
 test("workspace checkpoints preserve a file-state timeline and require approval to restore", async () => {
@@ -118,6 +119,24 @@ test("workspace freshness reports missing checkpoints and added, changed, and de
       workspace_id: "freshness", checkpoint_id: checkpoint.id, status: "changed",
       changed_paths: ["src/added.txt", "src/changed.txt", "src/deleted.txt"],
     });
+  } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("workspace checkpoint fails when Git state changes while the snapshot is copied", async () => {
+  const root = join(tmpdir(), `craft-workspace-git-race-${process.pid}-${Date.now()}`);
+  const worktree = join(root, "worktree");
+  const store = await new CraftStore(craftPaths(join(root, "craft"))).open();
+  const states: RepositoryState[] = [
+    { root: worktree, branch: "main", revision: "revision-a", working_tree_digest: "clean" },
+    { root: worktree, branch: "other", revision: "revision-b", working_tree_digest: "clean" },
+  ];
+  const workspace = new WorkspaceState(store, store.paths, () => states.shift());
+  try {
+    await mkdir(join(worktree, "src"), { recursive: true });
+    await writeFile(join(worktree, "src", "source.ts"), "export const value = 1;\n", "utf8");
+    workspace.open({ workspace_id: "git-race", name: "Git race", root_path: worktree, include_paths: ["src"] });
+    assert.throws(() => workspace.checkpoint({ workspace_id: "git-race", label: "racing checkpoint" }), /repository state changed/u);
+    assert.equal(states.length, 0);
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 

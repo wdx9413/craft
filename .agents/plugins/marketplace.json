@@ -1,6 +1,6 @@
 {
   "name": "craft-marketplace",
-  "version": "0.12.85",
+  "version": "0.12.86",
   "interface": {
     "displayName": "Craft"
   },

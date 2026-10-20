@@ -22,3 +22,5 @@ The worker never stores model prompts or responses. A model response is only a c
 The automatic evaluator supports only linear Workflow assertions (`file_exists`, `json_value`, and `coverage_gate`). It does not run arbitrary shell commands. Missing or invalid scenario configuration leaves the dispatch awaiting an evaluator; Graph and Prompt candidates still require an external adapter. Memory's session/project/global capture and promotion run when the Host captures a classified fact; Hooks are optional. This learning loop does not copy conversation content or bypass Memory conflict and tier rules.
 
 The example deployment contract is [adapter.example.json](adapter.example.json). It contains no credentials or real reviewer/test-set references. Local protocol acceptance is `./scripts/experience/acceptance.sh`.
+
+Each worker-to-MCP request is bounded by `CRAFT_LEARNING_MCP_REQUEST_TIMEOUT_MS` (default 60 seconds, maximum 5 minutes). If a request stops responding, the worker rejects pending calls and stops its MCP child so the supervised process can exit and release its component locks.

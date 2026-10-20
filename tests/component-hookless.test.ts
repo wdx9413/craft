@@ -16,7 +16,7 @@ async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-hookless-"));
   const store = await new CraftStore(craftPaths(join(root, "data"))).open();
   const service = new CraftService(store);
-  for (const scopeId of ["demo", "recovery"]) {
+  for (const scopeId of ["demo", "recovery", "cas"]) {
     const projectRoot = join(root, "projects", scopeId);
     await mkdir(projectRoot, { recursive: true });
     service.scopeAliasBind({ scope_kind: "project", scope_id: `project:${scopeId}`, alias_kind: "path", alias: projectRoot });

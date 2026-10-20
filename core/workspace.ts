@@ -3,6 +3,7 @@ import { copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSy
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { CraftPaths } from "./infrastructure/paths.ts";
 import { CraftStore, type JsonObject } from "./infrastructure/store.ts";
+import { readRepositoryState, sameRepositoryState, type RepositoryState } from "./workspace-repository-state.ts";
 
 type SnapshotEntry = { path: string; digest: string; size_bytes: number };
 
@@ -102,7 +103,10 @@ function projectCodebaseSnapshotRoot(root: string, workspaceId: string, checkpoi
 export class WorkspaceState {
   readonly store: CraftStore;
   readonly paths: CraftPaths;
-  constructor(store: CraftStore, paths: CraftPaths) { this.store = store; this.paths = paths; }
+  private readonly readRepositoryState: (root: string) => RepositoryState | undefined;
+  constructor(store: CraftStore, paths: CraftPaths, repositoryStateReader = readRepositoryState) {
+    this.store = store; this.paths = paths; this.readRepositoryState = repositoryStateReader;
+  }
 
   open(args: JsonObject): JsonObject {
     const workspaceId = identifier(args.workspace_id, "workspace_id", "workspace");
@@ -127,11 +131,16 @@ export class WorkspaceState {
     const workspace = this.store.get("workspace", identifier(args.workspace_id, "workspace_id", "workspace"));
     if (!workspace.latest_checkpoint_id) return { status: "unavailable", reason: "checkpoint_required", changed_paths: [] };
     const checkpoint = this.checkpointFor(String(workspace.id), String(workspace.latest_checkpoint_id));
+    const repositoryStateBefore = this.readRepositoryState(String(workspace.root_path));
     const entries = (workspace.include_paths as string[]).flatMap((path) => files(String(workspace.root_path), path));
+    const repositoryStateAfter = this.readRepositoryState(String(workspace.root_path));
+    const repositoryChanged = !sameRepositoryState(repositoryStateBefore, repositoryStateAfter)
+      || !sameRepositoryState(repositoryStateAfter, checkpoint.repository_state);
     const before = new Map((checkpoint.entries as SnapshotEntry[]).map((entry) => [entry.path, entry.digest]));
     const after = new Map(entries.map((entry) => [entry.path, entry.digest]));
     const changed = [...new Set([...before.keys(), ...after.keys()])].filter((path) => before.get(path) !== after.get(path)).sort();
-    return { workspace_id: workspace.id, checkpoint_id: checkpoint.id, status: changed.length ? "changed" : "current", changed_paths: changed };
+    return { workspace_id: workspace.id, checkpoint_id: checkpoint.id, status: changed.length || repositoryChanged ? "changed" : "current",
+      changed_paths: changed, ...(repositoryChanged ? { repository_state_changed: true } : {}) };
   }
 
   checkpoint(args: JsonObject): JsonObject {
@@ -139,6 +148,7 @@ export class WorkspaceState {
     const workspace = this.store.get("workspace", workspaceId);
     const checkpointId = identifier(args.checkpoint_id, "checkpoint_id", "workspace_checkpoint");
     const root = requiredText(workspace.root_path, "workspace.root_path");
+    const repositoryStateBefore = this.readRepositoryState(root);
     const snapshotRoot = workspace.snapshot_storage === "project_codebase"
       ? projectCodebaseSnapshotRoot(root, workspaceId, checkpointId)
       : join(this.paths.runtimeDir, "workspaces", workspaceId, "snapshots", checkpointId);
@@ -146,8 +156,11 @@ export class WorkspaceState {
     if (new Set(entries.map((entry) => entry.path)).size !== entries.length) throw new Error("include_paths must not overlap");
     mkdirSync(snapshotRoot, { recursive: true, mode: 0o700 });
     copyEntries(root, snapshotRoot, entries);
+    const repositoryStateAfter = this.readRepositoryState(root);
+    if (!sameRepositoryState(repositoryStateBefore, repositoryStateAfter)) throw new Error("Git repository state changed during workspace checkpoint");
     const checkpoint = this.store.create("workspace_checkpoint", checkpointId, { workspace_id: workspaceId,
       label: requiredText(args.label, "label"), snapshot_root: snapshotRoot, entries,
+      ...(repositoryStateAfter ? { repository_state: repositoryStateAfter } : {}),
       state_revision: workspace.state_revision, artifact_ids: args.artifact_ids ?? [], evidence_ids: args.evidence_ids ?? [] });
     const saved = this.store.save("workspace", workspaceId, { ...recordPayload(workspace), latest_checkpoint_id: checkpointId });
     return { workspace: saved, checkpoint };

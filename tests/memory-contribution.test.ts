@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { CraftStore, type JsonObject } from "../common/craft-common-store-local/src/store.ts";
@@ -39,6 +39,10 @@ for (const [name, validity] of [
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-memory-contribution-"));
   const store = await new CraftStore(craftPaths(root)).open(), writer = await new CraftStore(craftPaths(root)).open();
+  const projectRoot = join(root, "project"); await mkdir(projectRoot);
+  store.create("scope_alias", "project-p", { scope, alias_kind: "path", alias: projectRoot, status: "active" });
+  const otherProjectRoot = join(root, "other-project"); await mkdir(otherProjectRoot);
+  store.create("scope_alias", "project-other", { scope: { kind: "project", id: "other" }, alias_kind: "path", alias: otherProjectRoot, status: "active" });
   store.create("knowledge_source", "source", { status: "active", trust: "verified", scope });
   const ledger = new MemoryLedgerKernel(store), reader = new MemoryContribution(store);
   const remember = (id: string, extra: JsonObject = {}) => ledger.remember({ memory_id: id, source_id: "source", kind: "preference", scope_kind: "project", scope_id: "p", content: `alpha ${id}`, observed_at: "2020-01-01T00:00:00Z", ...extra }).memory as JsonObject;
@@ -164,7 +168,7 @@ test("historical Memory receipts pin the Source of the returned version, not a n
     const result = await new ContextResolutionKernel(f.store).resolve({ ...request, as_of: "2021-01-01T00:00:00Z" });
     const receipt = result.receipt as JsonObject;
     assert.equal((result.items as JsonObject[])[0]!.source_id, "source");
-    assert.deepEqual((receipt.read_refs as JsonObject[]).map(ref => ref.id).sort(), ["history", "source"]);
+    assert.deepEqual((receipt.read_refs as JsonObject[]).map(ref => ref.id).sort(), ["history", "project-p", "source"]);
     const { assertContextReadCurrent } = await import("../core/context-access-guard.ts");
     f.writer.save("knowledge_source", "new-source", { status: "revoked", trust: "verified", scope });
     assertContextReadCurrent(f.store, receipt);

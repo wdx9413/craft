@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync, spawn } from "node:child_process";
@@ -13,8 +13,10 @@ import { assertContextReadCurrent, ContextAccessChangedError } from "../common/c
 async function fixture(count: number) {
   const root = mkdtempSync(join(tmpdir(), "craft-read-snapshot-"));
   const store = await new CraftStore(craftPaths(root)).open();
+  const projectRoot = join(root, "project"); mkdirSync(projectRoot);
+  store.create("scope_alias", "project-root", { scope: { kind: "project", id: "p" }, alias_kind: "path", alias: projectRoot, status: "active" });
   const ids = Array.from({ length: count }, (_, i) => `m${String(i).padStart(3, "0")}`);
-  store.saveBatch(ids.map(id => ({ kind: "memory_ledger", id, payload: { scope: { kind: "project", id: "p" }, status: "active", content: "alpha" } })));
+  for (const id of ids) store.create("memory_ledger", id, { scope: { kind: "project", id: "p" }, status: "active", content: "alpha" });
   return { root, store, ids, close() { store.close(); rmSync(root, { recursive: true, force: true }); } };
 }
 

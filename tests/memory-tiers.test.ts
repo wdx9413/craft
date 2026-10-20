@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 import test from "node:test";
 import type { JsonObject } from "../common/craft-common-store-local/src/store.ts";
 import { digestJson } from "../common/craft-common-base/src/digest.ts";
@@ -13,6 +14,8 @@ import { MemoryCapture } from "../capability/craft-memory/memory-capture.ts";
 test("Memory begins in a session, promotes by repeat counts, and archive removes only temporary content", async () => {
   const dataRoot = mkdtempSync(join(tmpdir(), "craft-memory-tiers-"));
   const projectRoots = ["project-a", "project-b", "project-c"].map(name => mkdtempSync(join(tmpdir(), `craft-${name}-`)));
+  const sessionIds = new Map<string, string>();
+  const sessionKey = (id: string) => { const existing = sessionIds.get(id); if (existing) return existing; const value = `${id}-${randomUUID().slice(0, 12)}`; sessionIds.set(id, value); return value; };
   const store = await new CraftStore(craftPaths(dataRoot)).open();
   const service = new CraftService(store);
   const ledgerFiles = service.memoryGovernance.ledger.files;
@@ -21,19 +24,20 @@ test("Memory begins in a session, promotes by repeat counts, and archive removes
     assert.throws(() => service.memoryCaptureObservedFact({ content: "Invalid scope kind", session_id: "scope-kind-mismatch", project_scope_id: "project-1", scope_kind: "user" }), /must start in session scope/u);
     assert.throws(() => service.memoryCaptureObservedFact({ content: "Invalid scope id", session_id: "scope-id-mismatch", project_scope_id: "project-1", scope_id: "another-session" }), /scope_id must match session_id/u);
     assert.throws(() => ledgerFiles.isSessionArchived(" "), /session_id must not be empty/u);
-    const implicitSession = service.memoryCaptureUserStatement({ content: "Implicit session scope", session_id: "implicit-session-scope", topic: "implicit-session" });
-    assert.deepEqual((implicitSession.candidate as JsonObject).scope, { kind: "session", id: "implicit-session-scope" });
-    assert.equal(existsSync(ledgerFiles.pathFor({ kind: "session", id: "implicit-session-scope" })!), true);
-    service.memorySessionArchive({ session_id: "implicit-session-scope" });
+    const implicitSessionId = sessionKey("implicit-session-scope");
+    const implicitSession = service.memoryCaptureUserStatement({ content: "Implicit session scope", session_id: implicitSessionId, topic: "implicit-session" });
+    assert.deepEqual((implicitSession.candidate as JsonObject).scope, { kind: "session", id: implicitSessionId });
+    assert.equal(existsSync(ledgerFiles.pathFor({ kind: "session", id: implicitSessionId })!), true);
+    service.memorySessionArchive({ session_id: implicitSessionId });
     projectRoots.forEach((root, index) => {
       const projectId = `project-${index + 1}`;
       store.create("scope_alias", `path-${projectId}`, { scope: { kind: "project", id: projectId }, alias_kind: "path", alias: root, status: "active" });
     });
 
-    const capture = (sessionId: string, projectId: string) => service.memoryCaptureUserStatement({
+    const capture = (inputSessionId: string, projectId: string) => { const sessionId = sessionKey(inputSessionId); return service.memoryCaptureUserStatement({
       content: "Prefer small diffs", kind: "preference", topic: "work-style", scope_kind: "session", scope_id: sessionId,
       session_id: sessionId, project_scope_id: projectId, project_root: projectRoots[Number(projectId.at(-1)) - 1], valid_until: "2999-01-01T00:00:00.000Z",
-    });
+    }); };
     assert.equal(ledgerFiles.pathFor({ kind: "global", id: "global" }), join(dataRoot, "memory", "memory.md"));
     assert.equal(ledgerFiles.pathFor({ kind: "user", id: "local" }), join(dataRoot, "memory", "memory.md"));
     assert.equal(ledgerFiles.pathFor({ kind: "project", id: "missing-project" }), null);
@@ -50,7 +54,7 @@ test("Memory begins in a session, promotes by repeat counts, and archive removes
     assert.throws(() => ledgerFiles.archiveSession(" "), /must not be empty/u);
     const first = capture("session-a1", "project-1");
     assert.equal((first.promotions as unknown[]).length, 0);
-    assert.equal(existsSync(ledgerFiles.pathFor({ kind: "session", id: "session-a1" })!), true);
+    assert.equal(existsSync(ledgerFiles.pathFor({ kind: "session", id: sessionKey("session-a1") })!), true);
     assert.equal((capture("session-a2", "project-1").promotions as Array<Record<string, unknown>>)[0]?.tier, "project");
     assert.equal((capture("session-a3", "project-1").promotions as unknown[]).length, 0);
     assert.equal(capture("session-a3", "project-1").already_retained, true);
@@ -67,19 +71,26 @@ test("Memory begins in a session, promotes by repeat counts, and archive removes
       && (row.scope as JsonObject | undefined)?.kind === "global")[0];
     assert.equal(retainedProject?.valid_until, "2999-01-01T00:00:00.000Z");
     assert.equal(retainedGlobal?.valid_until, "2999-01-01T00:00:00.000Z");
+    const retainedBodies = [retainedProject, retainedGlobal].map(record => {
+      assert.ok(record?.content_ref);
+      const reference = record.content_ref as JsonObject;
+      assert.equal(existsSync(String(reference.path)), true);
+      return store.contentStore.readCompatSync(reference as never).body;
+    });
+    assert.deepEqual(retainedBodies, ["Prefer small diffs", "Prefer small diffs"]);
 
-    const expiredCapture = (sessionId: string) => service.memoryCaptureUserStatement({ content: "Expired transient fact", kind: "preference", topic: "expired-fact",
+    const expiredCapture = (inputSessionId: string) => { const sessionId = sessionKey(inputSessionId); return service.memoryCaptureUserStatement({ content: "Expired transient fact", kind: "preference", topic: "expired-fact",
       scope_kind: "session", scope_id: sessionId, session_id: sessionId, project_scope_id: "project-1", project_root: projectRoots[0],
-      valid_until: "2000-01-01T00:00:00.000Z" });
+      valid_until: "2000-01-01T00:00:00.000Z" }); };
     assert.equal((expiredCapture("expired-session-1").promotions as unknown[]).length, 0);
     assert.equal((expiredCapture("expired-session-2").promotions as unknown[]).length, 0);
     const expiredObservations = store.list("memory_observation", 100, row => row.content_digest === digestJson("Expired transient fact"));
     assert.equal(expiredObservations.length, 2);
     assert.ok(expiredObservations.every(row => row.valid_until === "2000-01-01T00:00:00.000Z"));
 
-    const captureAnotherFact = (sessionId: string, projectId: string) => service.memoryCaptureObservedFact({ content: "Quartz fruit is locally preferred",
+    const captureAnotherFact = (inputSessionId: string, projectId: string) => { const sessionId = sessionKey(inputSessionId); return service.memoryCaptureObservedFact({ content: "Quartz fruit is locally preferred",
       kind: "preference", topic: "fruit-preference", scope_kind: "session", scope_id: sessionId, session_id: sessionId, project_scope_id: projectId,
-      project_root: projectRoots[Number(projectId.at(-1)) - 1] });
+      project_root: projectRoots[Number(projectId.at(-1)) - 1] }); };
     captureAnotherFact("session-na1", "project-1");
     assert.equal((captureAnotherFact("session-na2", "project-1").promotions as Array<Record<string, unknown>>)[0]?.tier, "project");
     captureAnotherFact("session-nb1", "project-2");
@@ -92,29 +103,37 @@ test("Memory begins in a session, promotes by repeat counts, and archive removes
     assert.match(readFileSync(projectFile, "utf8"), /Prefer small diffs/u);
     assert.match(readFileSync(globalFile, "utf8"), /Prefer small diffs/u);
 
-    const archived = service.memorySessionArchive({ session_id: "session-a1" });
+    const archivedId = sessionKey("session-a1");
+    const archived = service.memorySessionArchive({ session_id: archivedId });
     assert.equal(archived.content_deleted, true);
-    assert.equal(service.memorySessionArchive({ session_id: "session-a1" }).idempotent, true);
-    assert.equal(existsSync(ledgerFiles.pathFor({ kind: "session", id: "session-a1" })!), false);
-    assert.equal(store.listScoped("memory_ledger", [{ kind: "session", id: "session-a1" }], 100).length, 0);
+    assert.equal(service.memorySessionArchive({ session_id: archivedId }).idempotent, true);
+    assert.equal(existsSync(ledgerFiles.pathFor({ kind: "session", id: archivedId })!), false);
+    assert.equal(store.listScoped("memory_ledger", [{ kind: "session", id: archivedId }], 100).length, 0);
     assert.equal(store.list("memory_ledger", 100, row => row.status === "active" && (row.scope as Record<string, unknown>)?.kind === "global").length, 2);
+    assert.deepEqual([retainedProject, retainedGlobal].map(record => {
+      const reference = record?.content_ref as JsonObject;
+      assert.equal(existsSync(String(reference.path)), true);
+      return store.contentStore.readCompatSync(reference as never).body;
+    }), retainedBodies);
     const beforeArchivedReplay = { evidence: store.count("evidence"), candidates: store.count("memory_candidate"), ledger: store.count("memory_ledger") };
     const replayed = service.memoryCaptureObservedFact({ content: "Late event after archive", kind: "preference", topic: "late-event",
-      scope_kind: "session", scope_id: "session-a1", session_id: "session-a1", project_scope_id: "project-1", project_root: projectRoots[0] });
+      scope_kind: "session", scope_id: archivedId, session_id: archivedId, project_scope_id: "project-1", project_root: projectRoots[0] });
     assert.equal(replayed.status, "archived");
     assert.equal(replayed.next_action, "session_archive_is_terminal");
     assert.deepEqual({ evidence: store.count("evidence"), candidates: store.count("memory_candidate"), ledger: store.count("memory_ledger") }, beforeArchivedReplay);
-    assert.equal(existsSync(ledgerFiles.pathFor({ kind: "session", id: "session-a1" })!), false);
+    assert.equal(existsSync(ledgerFiles.pathFor({ kind: "session", id: archivedId })!), false);
 
-    store.create("memory_ledger", "hostile-path", { scope: { kind: "session", id: "hostile-session" }, status: "active", content_ref: { path: outside } });
-    store.create("memory_ledger", "missing-path", { scope: { kind: "session", id: "hostile-session" }, status: "active" });
-    store.create("memory_ledger", "gone-path", { scope: { kind: "session", id: "hostile-session" }, status: "active", content_ref: { path: join(store.paths.memoryContentDir, "gone.md") } });
-    service.memorySessionArchive({ session_id: "hostile-session" });
+    const hostileSession = sessionKey("hostile-session");
+    store.create("memory_ledger", "hostile-path", { scope: { kind: "session", id: hostileSession }, status: "active", content_ref: { path: outside } });
+    store.create("memory_ledger", "missing-path", { scope: { kind: "session", id: hostileSession }, status: "active" });
+    store.create("memory_ledger", "gone-path", { scope: { kind: "session", id: hostileSession }, status: "active", content_ref: { path: join(store.paths.memoryContentDir, "gone.md") } });
+    service.memorySessionArchive({ session_id: hostileSession });
     assert.equal(existsSync(outside), true);
     const invalidUnlinkPath = join(store.paths.memoryContentDir, "unlink-directory");
     mkdirSync(invalidUnlinkPath, { recursive: true });
-    store.create("memory_ledger", "invalid-unlink", { scope: { kind: "session", id: "invalid-unlink-session" }, status: "active", content_ref: { path: invalidUnlinkPath } });
-    assert.throws(() => service.memorySessionArchive({ session_id: "invalid-unlink-session" }));
+    const invalidUnlinkSession = sessionKey("invalid-unlink-session");
+    store.create("memory_ledger", "invalid-unlink", { scope: { kind: "session", id: invalidUnlinkSession }, status: "active", content_ref: { path: invalidUnlinkPath } });
+    assert.throws(() => service.memorySessionArchive({ session_id: invalidUnlinkSession }));
     rmSync(invalidUnlinkPath, { recursive: true, force: true });
     store.remove("memory_ledger", "invalid-unlink");
 
@@ -142,9 +161,11 @@ test("Memory begins in a session, promotes by repeat counts, and archive removes
     captureKernel.captureUserStatement({ content: "Local fallback scope", kind: "episodic", scope_kind: "user", topic: "local-fallback" });
     const globalFallback = captureKernel.captureUserStatement({ content: "Global fallback scope", kind: "episodic", scope_kind: "global", topic: "global-fallback" });
     assert.deepEqual((globalFallback.candidate as JsonObject).scope, { kind: "global", id: "global" });
-    const standaloneSession = captureKernel.captureUserStatement({ content: "Session without a project", kind: "episodic", scope_kind: "session", scope_id: "session-without-project", topic: "standalone-session" });
+    const standaloneSessionId = sessionKey("session-without-project");
+    const standaloneSession = captureKernel.captureUserStatement({ content: "Session without a project", kind: "episodic", scope_kind: "session", scope_id: standaloneSessionId, topic: "standalone-session" });
     assert.equal((standaloneSession.promotions as unknown[]).length, 0);
-    const projectWithoutRoot = captureKernel.captureUserStatement({ content: "Project session without explicit root", kind: "episodic", scope_kind: "session", scope_id: "project-session-without-root",
+    const noRootSessionId = sessionKey("project-session-without-root");
+    const projectWithoutRoot = captureKernel.captureUserStatement({ content: "Project session without explicit root", kind: "episodic", scope_kind: "session", scope_id: noRootSessionId,
       project_scope_id: "project-2", topic: "project-session-without-root" });
     assert.equal((projectWithoutRoot.promotions as unknown[]).length, 0);
     assert.deepEqual(captureKernel.promoteRepeatedFact({ sessionId: "invalid", projectId: "project-1", candidate: {} }), []);
@@ -262,7 +283,7 @@ test("Memory begins in a session, promotes by repeat counts, and archive removes
     assert.equal((confidenceBlocked[0]?.candidate as JsonObject).status, "conflict_pending");
     assert.equal(confidenceBlocked[0]?.auto_committed, false);
   } finally {
-    for (const sessionId of ["session-a1", "session-a2", "session-a3", "session-b1", "session-b2", "session-c1", "session-c2", "session-c3", "session-na1", "session-na2", "session-nb1", "session-nb2", "session-nc1", "session-nc2", "session-without-project", "project-session-without-root"]) ledgerFiles.archiveSession(sessionId);
+    for (const sessionId of ["session-a1", "session-a2", "session-a3", "session-b1", "session-b2", "session-c1", "session-c2", "session-c3", "session-na1", "session-na2", "session-nb1", "session-nb2", "session-nc1", "session-nc2", "expired-session-1", "expired-session-2", "hostile-session", "invalid-unlink-session", "session-without-project", "project-session-without-root"]) ledgerFiles.archiveSession(sessionKey(sessionId));
     store.close();
     rmSync(dataRoot, { recursive: true, force: true });
     projectRoots.forEach(root => rmSync(root, { recursive: true, force: true }));

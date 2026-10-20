@@ -109,7 +109,10 @@ export class KnowledgeMemoryBundleKernel {
     const fragments = this.store.list("knowledge_fragment", limit, (item) => revisionIds.has(String(item.source_revision_id)));
     const evidence = this.store.list("evidence", limit, (item) => evidenceIds.has(String(item.id)) || revisionIds.has(String(item.source_revision_id)));
     const sources = this.store.list("knowledge_source", limit, (item) => sourceIds.has(String(item.id)));
-    const aliases = this.store.list("scope_alias", limit, (item) => (item.scope as JsonObject | undefined)?.kind === scope.kind && (item.scope as JsonObject | undefined)?.id === scope.id);
+    // Path aliases belong to one machine. Exporting them can make the receiver
+    // resolve a project's Memory into the sender's path or make local roots ambiguous.
+    const aliases = this.store.list("scope_alias", limit, (item) => item.alias_kind !== "path"
+      && (item.scope as JsonObject | undefined)?.kind === scope.kind && (item.scope as JsonObject | undefined)?.id === scope.id);
     const identities = this.store.list("project_identity", limit, (item) => String(item.id) === scope.id);
     const memoryCandidates = this.store.list("memory_candidate", limit, (item) => exactScope(item.scope, scope));
     const usageSignals = this.store.list("memory_usage_signal", limit, (item) => exactScope(item.scope, scope));

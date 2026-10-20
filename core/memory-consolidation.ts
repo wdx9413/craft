@@ -17,6 +17,12 @@ function searchScope(value: unknown): { scope: string | null; skipped: boolean }
   }
   throw new Error("scope must be a string or scope object");
 }
+function storedScopeKey(value: unknown): string | null {
+  if (typeof value === "string") return value;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as JsonObject;
+  return typeof record.kind === "string" && typeof record.id === "string" ? `${record.kind}:${record.id}` : null;
+}
 const SECRET = /(?:api[_-]?key|authorization|cookie|password|passwd|secret|token)\s*[:=]\s*[^\s]{6,}/iu;
 
 export class MemoryConsolidationKernel {
@@ -53,7 +59,9 @@ export class MemoryConsolidationKernel {
     const memoryIds = Array.isArray(args.memory_ids) ? args.memory_ids.map((item) => text(item, "memory_ids")) : [];
     if (!memoryIds.length) throw new Error("memory_ids must contain at least one id");
     const memories = memoryIds.map((memoryId) => this.store.get("episodic_memory", memoryId));
-    const scope = text(args.scope ?? memories[0]!.scope, "scope");
+    const scopeResult = searchScope(args.scope ?? memories[0]!.scope ?? "task");
+    if (scopeResult.skipped || !scopeResult.scope) throw new Error("scope must identify one Memory partition");
+    const scope = scopeResult.scope;
     const content = text(args.content ?? memories.map((memory) => this.body(memory)).filter(Boolean).join("\n"), "content");
     if (SECRET.test(content)) throw new Error("Semantic memory content must not contain credentials or secrets");
     const semanticId = String(args.semantic_id ?? `semantic_memory_${randomUUID().replaceAll("-", "")}`);
@@ -85,7 +93,7 @@ export class MemoryConsolidationKernel {
       return { query, scope: null, results: [], skipped: true, reason: "scope_unavailable" };
     }
     const scope = resolvedScope.scope;
-    const memories = this.store.list("semantic_memory", 10_000, (item) => item.status === "active" && (scope === null || item.scope === scope));
+    const memories = this.store.list("semantic_memory", 10_000, (item) => item.status === "active" && (scope === null || storedScopeKey(item.scope) === scope));
     const results = memories.filter((item) => this.body(item).toLowerCase().includes(query))
       .map((item) => ({ ...item, content: this.body(item) }));
     return { query, results };

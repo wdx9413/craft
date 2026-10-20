@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import type { JsonObject } from "../../common/craft-common-store-local/src/store.ts";
 import { checkpointManifestDigest, readGitEvaluationState } from "../eval/codebase-evaluation-provenance.ts";
 import { CODEBASE_LSP_CONFIG } from "../../capability/craft-codebase/lsp-config.ts";
+import { ProjectGraphStore } from "../../capability/craft-codebase/project-graph-store.ts";
 import { repositoryFiles } from "../../capability/craft-codebase/repository-files.ts";
 import { CraftStore } from "../../core/infrastructure/store.ts";
 import { craftPaths } from "../../core/infrastructure/paths.ts";
@@ -89,7 +90,11 @@ function graphDigest(store: CraftStore, indexId: string): string {
 function graphDifference(store: CraftStore, leftIndexId: string, rightStore: CraftStore, rightIndexId: string): JsonObject {
   const material = (source: CraftStore, id: string): { nodes: JsonObject[]; edges: JsonObject[] } => {
     const index = source.get("codebase_index", id);
-    const shards = (index.shard_ids as string[]).map(shardId => source.get("codebase_index_shard", shardId));
+    const workspace = source.get("workspace", String(index.workspace_id));
+    const projectGraph = workspace.snapshot_storage === "project_codebase"
+      ? new ProjectGraphStore(String(workspace.root_path), String(workspace.id)) : null;
+    const shards = (index.shard_ids as string[]).map(shardId => projectGraph
+      ? projectGraph.read(shardId) : source.get("codebase_index_shard", shardId));
     return { nodes: shards.flatMap(shard => shard.nodes as JsonObject[]), edges: shards.flatMap(shard => shard.edges as JsonObject[]) };
   };
   const left = material(store, leftIndexId), right = material(rightStore, rightIndexId);

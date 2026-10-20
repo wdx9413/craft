@@ -203,6 +203,7 @@ test("formal release survives candidate edits and failures while test planning r
 test("standalone memory governance suggests rather than overwrites topics and confirms pinned entries", async () => {
   const f = await fixture();
   try {
+    f.service.scopeAliasBind({ scope_kind: "project", scope_id: "p", alias_kind: "path", alias: f.repo });
     const scope = { scope_kind: "project", scope_id: "p" };
     f.store.create("evidence", "user", { source_type: "human", confidence: "bounded" });
     const memory = f.service.memoryLedgerRemember({ ...scope, memory_id: "preference", source_id: "builtin.evidence-wiki", kind: "preference", content: "Prefer Python tools", topic: "language", evidence_ids: ["user"] }).memory as JsonObject;

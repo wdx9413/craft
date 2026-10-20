@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
@@ -13,6 +13,8 @@ import { MemoryMaintenanceKernel } from "../core/memory-maintenance.ts";
 async function fixture() {
   const root = mkdtempSync(join(tmpdir(), "craft-memory-commit-"));
   const store = await new CraftStore(craftPaths(root)).open();
+  const projectRoot = join(root, "project"); mkdirSync(projectRoot);
+  store.create("scope_alias", "project-p", { scope: { kind: "project", id: "p" }, alias_kind: "path", alias: projectRoot, status: "active" });
   const ledger = new MemoryLedgerKernel(store), governance = new MemoryGovernanceKernel(store, ledger);
   store.create("knowledge_source", "s", { status: "active", trust: "verified" });
   store.create("evidence", "e", { source_type: "human", confidence: "confirmed" });

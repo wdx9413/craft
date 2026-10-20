@@ -26,7 +26,7 @@ const originalFetch = globalThis.fetch;
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "craft-industry-")), store = await new CraftStore(craftPaths(join(root, "data"))).open();
   const service = new CraftService(store);
-  for (const scopeId of ["fixture", "portable"]) {
+  for (const scopeId of ["fixture", "portable", "other", "empty"]) {
     const projectRoot = join(root, "projects", scopeId); await mkdir(projectRoot, { recursive: true });
     service.scopeAliasBind({ scope_kind: "project", scope_id: `project:${scopeId}`, alias_kind: "path", alias: projectRoot });
   }

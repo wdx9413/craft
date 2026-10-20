@@ -5,6 +5,8 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
+import { ProjectAnalysisCache } from "../../capability/craft-codebase/project-analysis-cache.ts";
+import { ProjectGraphStore } from "../../capability/craft-codebase/project-graph-store.ts";
 import { planTypeScriptIncremental } from "../../capability/craft-codebase/typescript-incremental.ts";
 import { analyzeTypeScript, TYPESCRIPT_ANALYZER_VERSION, type TypeScriptAnalysisOptions } from "../../capability/craft-codebase/typescript-analysis.ts";
 import { repositoryFiles } from "../../capability/craft-codebase/repository-files.ts";
@@ -41,6 +43,24 @@ async function openStore(name: string): Promise<CraftStore> {
 function graphDigest(store: CraftStore, indexId: string): string {
   const index = store.get("codebase_index", indexId);
   return String(index.graph_digest);
+}
+function graphDiff(leftStore: CraftStore, leftIndexId: string, rightStore: CraftStore, rightIndexId: string) {
+  const read = (store: CraftStore, indexId: string) => {
+    const index = store.get("codebase_index", indexId);
+    const workspace = store.get("workspace", String(index.workspace_id));
+    const graph = new ProjectGraphStore(String(workspace.root_path), String(workspace.id));
+    const shards = (index.shard_ids as string[]).map(id => graph.read(id));
+    return { nodes: shards.flatMap(shard => shard.nodes as Record<string, unknown>[]), edges: shards.flatMap(shard => shard.edges as Record<string, unknown>[]) };
+  };
+  const left = read(leftStore, leftIndexId), right = read(rightStore, rightIndexId);
+  const compare = (a: Record<string, unknown>[], b: Record<string, unknown>[]) => {
+    const aById = new Map(a.map(item => [String(item.id), item])), bById = new Map(b.map(item => [String(item.id), item]));
+    return { left_count: a.length, right_count: b.length,
+      only_left: [...aById.keys()].filter(id => !bById.has(id)).slice(0, 5),
+      only_right: [...bById.keys()].filter(id => !aById.has(id)).slice(0, 5),
+      changed: [...aById.keys()].filter(id => bById.has(id) && JSON.stringify(aById.get(id)) !== JSON.stringify(bById.get(id))).slice(0, 5) };
+  };
+  return { nodes: compare(left.nodes, right.nodes), edges: compare(left.edges, right.edges) };
 }
 function median(values: readonly number[]): number {
   const ordered = [...values].sort((left, right) => left - right);
@@ -112,8 +132,8 @@ try {
     const changedPath = join(projectRoot, sourceFile.path);
     writeFileSync(changedPath, `${readFileSync(changedPath, "utf8")}\n// isolated incremental benchmark change ${round + 1}\n`);
     const changedSnapshot = repositoryFiles(projectRoot);
-    const cachedUnits = incrementalStore.list("codebase_semantic_file_analysis", 1_000,
-      item => item.workspace_id === initial.workspace_id);
+    const cachedUnits = new ProjectAnalysisCache(projectRoot, String(initial.workspace_id))
+      .list("codebase_semantic_file_analysis", 1_000);
     const repositoryState = incrementalStore.get("codebase_repository_state", `${String(initial.workspace_id)}_semantic`);
     const incrementalPlan = planTypeScriptIncremental(changedSnapshot.files
       .filter(file => /^(?:tsx?|mts|cts|jsx?|mjs|cjs)$/u.test(file.language))
@@ -135,11 +155,28 @@ try {
       const fullService = new CraftService(fullStore);
       const fullInstrument = instrument(fullService);
       const fullStart = performance.now();
-      const full = fullService.codebaseRepositoryEnsure({ project_root: projectRoot, index_depth: "semantic" });
+      const cleanProjectRoot = join(temporaryRoot, `clean-project-${round}`);
+      mkdirSync(cleanProjectRoot);
+      for (const file of benchmarkFiles) {
+        const destination = join(cleanProjectRoot, file.path);
+        mkdirSync(dirname(destination), { recursive: true });
+        writeFileSync(destination, readFileSync(join(projectRoot, file.path), "utf8"), { encoding: "utf8", flag: "wx" });
+      }
+      execFileSync("git", ["init", "--quiet", cleanProjectRoot]);
+      const full = fullService.codebaseRepositoryEnsure({ project_root: cleanProjectRoot, index_depth: "semantic" });
       const fullMs = Math.round(performance.now() - fullStart);
       assert.equal(full.status, "ready");
-      assert.equal(graphDigest(incrementalStore, String(incremental.index_id)), graphDigest(fullStore, String(full.index_id)),
-        `round ${round + 1} incremental graph must equal a clean full rebuild`);
+      const fullDiagnostics = (full.summary as Record<string, unknown>).diagnostics as Record<string, unknown>[];
+      const fullTypeScript = (fullDiagnostics[0]?.languages as Record<string, unknown>[] | undefined)
+        ?.find(language => language.analyzer === "typescript-checker")?.diagnostics as Record<string, unknown> | undefined;
+      assert.equal(fullTypeScript?.incremental_mode, "full", "isolated clean rebuild must not reuse the incremental project's cache");
+      if (graphDigest(incrementalStore, String(incremental.index_id)) !== graphDigest(fullStore, String(full.index_id))) {
+        console.log(JSON.stringify({ round: round + 1, changed_file: sourceFile.path,
+          incremental_graph: graphDigest(incrementalStore, String(incremental.index_id)),
+          clean_graph: graphDigest(fullStore, String(full.index_id)),
+          graph_difference: graphDiff(incrementalStore, String(incremental.index_id), fullStore, String(full.index_id)) }, null, 2));
+        assert.fail(`round ${round + 1} incremental graph must equal a clean full rebuild`);
+      }
       roundsResult.push({ round: round + 1, changed_file: sourceFile.path, incremental_update_ms: incrementalMs,
         clean_full_rebuild_ms: fullMs, incremental_mode: incrementalPlan.mode, incremental_reason: incrementalPlan.reason,
         affected_file_count: incrementalPlan.affected_paths.length, reused_file_count: incrementalPlan.reused_paths.length,

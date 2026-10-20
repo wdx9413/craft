@@ -63,6 +63,10 @@ export class MemoryGovernanceKernel {
     const kind = text(args.kind, "kind"); if (!KINDS.has(kind)) throw new Error("memory kind is unsupported");
     const scopeKind = text(args.scope_kind, "scope_kind"); if (!SCOPE_KINDS.has(scopeKind)) throw new Error("scope_kind is unsupported");
     const scopeId = text(args.scope_id, "scope_id"); const scope = { kind: scopeKind, id: scopeId }; const envelope = scopeEnvelope(args.scope_envelope, scope); const content = noSecret(text(args.content, "content"), "content");
+    if (scopeKind === "session") {
+      this.ledger.files.pathFor(scope);
+      if (this.ledger.files.isSessionArchived(scopeId)) throw new Error("Archived session Memory cannot be proposed");
+    }
     const confidence = text(args.confidence ?? "unverified", "confidence"); if (!CONFIDENCE.has(confidence)) throw new Error("confidence is unsupported");
     const ids = evidenceIds(args.evidence_ids); ids.forEach((e) => this.store.get("evidence", e));
     const sourceId = text(args.source_id, "source_id"); const source = this.store.get("knowledge_source", sourceId);
@@ -163,7 +167,7 @@ export class MemoryGovernanceKernel {
       if (memory.status !== "active" || args.expected_version !== memory.version) throw new Error("Memory confirmation version conflict or inactive entry");
       const ids = evidenceIds(args.evidence_ids);
       if (!ids.some(id => { const proof = this.store.get("evidence", id); return proof.source_type === "human" && ["bounded", "confirmed"].includes(String(proof.confidence)); })) throw new Error("Memory confirmation requires user Evidence");
-      const identity = { memory_id: memory.id, memory_version: memory.version, content_digest: memory.content_digest, evidence_ids: ids };
+      const identity = { memory_id: memory.id, memory_version: memory.version, content_digest: memory.content_digest, evidence_ids: ids, scope: memory.scope };
       const confirmationId = `memory_confirmation_${digest(identity).slice(-24)}`;
       return { confirmation: this.store.find("memory_confirmation", confirmationId) ?? this.store.create("memory_confirmation", confirmationId, identity), changes_content: false };
     });

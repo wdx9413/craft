@@ -13,6 +13,11 @@ async function fixture() {
   const store = await new CraftStore(craftPaths(root)).open();
   const service = await CraftService.open(store);
   service.scopeAliasBind({ scope_kind: "project", scope_id: "project:p", alias_kind: "path", alias: root });
+  for (const projectId of ["hybrid", "portable"]) {
+    const projectRoot = join(root, projectId);
+    await mkdir(projectRoot, { recursive: true });
+    service.scopeAliasBind({ scope_kind: "project", scope_id: `project:${projectId}`, alias_kind: "path", alias: projectRoot });
+  }
   return { root, store, service };
 }
 async function dispose(f: Awaited<ReturnType<typeof fixture>>) { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
@@ -201,6 +206,7 @@ test("exports replayable schema-3 bundles and turns merge collisions into candid
     source.service.memoryLedgerRemember({ memory_id: "portable", source_id: "builtin.evidence-wiki", kind: "preference", scope_kind: "project", scope_id: "project:portable", content: "Keep portable knowledge scoped.", confidence: "bounded" });
     const bundle = source.service.knowledgeMemoryBundleManage({ operation: "export", scope_kind: "project", scope_id: "project:portable", device_id: "laptop", export_id: "export-one", cursor: "cursor-1" }).bundle as JsonObject;
     assert.equal(bundle.schema_version, 3); assert.equal(bundle.device_id, "laptop");
+    assert.equal((bundle.records as JsonObject[]).some(entry => entry.kind === "scope_alias" && (entry.payload as JsonObject).alias_kind === "path"), false);
     assert.equal(target.service.knowledgeMemoryBundleManage({ operation: "verify", bundle }).valid, true);
     assert.equal((target.service.knowledgeMemoryBundleManage({ operation: "import_apply", import_id: "portable-import", approved: true, bundle }).import as JsonObject).merge_receipt instanceof Object, true);
     target.store.save("memory_ledger", "portable", { ...target.store.get("memory_ledger", "portable"), content_digest: "sha256:conflicting-local-record" });

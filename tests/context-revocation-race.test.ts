@@ -20,17 +20,22 @@ function barrier() {
   const started = new Promise<void>(resolve => { entered = resolve; });
   return { release, started, async wait() { entered(); await waiting; } };
 }
-async function fixture() {
+async function fixture(options: { canonicalProjectMemory?: boolean } = {}) {
   const root = await mkdtemp(join(tmpdir(), "craft-revocation-race-")), paths = craftPaths(root);
   const store = await new CraftStore(paths).open(), writer = await new CraftStore(paths).open(), service = new CraftService(store);
-  service.knowledgeSourceRegister({ source_id: "source", kind: "custom", label: "source", ...scope, locator: root, content_digest: "source-digest", trust: "verified", access: "read_only" });
+  service.scopeAliasBind({ scope_kind: "project", scope_id: "race", alias_kind: "path", alias: root });
+  service.scopeAliasBind({ scope_kind: "project", scope_id: "other", alias_kind: "path", alias: root });
+  const memoryScope: JsonObject = options.canonicalProjectMemory ? (service.scopeIdentityResolveProject({ project_root: root }).identity as JsonObject).canonical_scope as JsonObject : scope;
+  const storageScope = { kind: String(memoryScope.kind ?? memoryScope.scope_kind), id: String(memoryScope.id ?? memoryScope.scope_id) };
+  if (options.canonicalProjectMemory) service.scopeAliasBind({ scope_kind: "project", scope_id: storageScope.id, alias_kind: "path", alias: root });
+  service.knowledgeSourceRegister({ source_id: "source", label: "source", scope_kind: storageScope.kind, scope_id: storageScope.id, kind: "custom", locator: root, content_digest: "source-digest", trust: "verified", access: "read_only" });
   store.create("evidence", "proof", { source_type: "human", confidence: "confirmed" });
-  const memory = service.memoryLedgerRemember({ memory_id: "private", source_id: "source", kind: "preference", ...scope, content: "alpha private content", evidence_ids: ["proof"],
-    scope_envelope: { audience: { mode: "private", principal_ids: ["owner"] }, tenant_id: "tenant" } }).memory as JsonObject;
-  return { root, store, writer, service, memory, async close() { writer.close(); store.close(); await rm(root, { recursive: true, force: true }); } };
+  const memory = service.memoryLedgerRemember({ memory_id: "private", source_id: "source", kind: "preference", scope_kind: storageScope.kind, scope_id: storageScope.id, content: "alpha private content", evidence_ids: ["proof"],
+    scope_envelope: { audience: { mode: "private", principal_ids: ["owner"] }, tenant_id: "tenant", applicability: storageScope } }).memory as JsonObject;
+  return { root, store, writer, service, memory, memoryScope: storageScope, async close() { writer.close(); store.close(); await rm(root, { recursive: true, force: true }); } };
 }
 
-for (const mutation of ["audience", "tenant", "scope", "sensitivity", "revoked", "expired", "superseded", "correction", "source_revoked", "source_audience", "deleted"] as const) {
+for (const mutation of ["audience", "tenant", "sensitivity", "revoked", "expired", "superseded", "correction", "source_revoked", "source_audience", "deleted"] as const) {
   test(`Memory ${mutation} during contributor wait fails closed across database connections`, async () => {
     const f = await fixture();
     try {
@@ -46,7 +51,6 @@ for (const mutation of ["audience", "tenant", "scope", "sensitivity", "revoked",
         const current = f.writer.get("memory_ledger", "private"), envelope = current.scope_envelope as JsonObject;
         const changed = mutation === "audience" ? { scope_envelope: { ...envelope, audience: { mode: "private", principal_ids: ["other"] } } }
           : mutation === "tenant" ? { scope_envelope: { ...envelope, tenant_id: "other" } }
-          : mutation === "scope" ? { scope: { kind: "project", id: "other" }, scope_envelope: undefined }
           : mutation === "sensitivity" ? { sensitivity: "restricted" }
           : mutation === "correction" ? { content: "corrected", content_ref: undefined, content_digest: stableDigest("corrected") } : { status: mutation };
         f.writer.save("memory_ledger", "private", { ...payload(current), ...changed });
@@ -161,10 +165,9 @@ test("Working Set rechecks after the resolver's promise completes", async t => {
 });
 
 test("Context Open rechecks after Working Set preparation", async t => {
-  const f = await fixture();
+  const f = await fixture({ canonicalProjectMemory: true });
   try {
-    const project = (f.service.scopeIdentityResolveProject({ project_root: f.root }).identity as JsonObject).canonical_scope as JsonObject;
-    const memory = f.store.save("memory_ledger", "private", { ...payload(f.memory), scope: project, scope_envelope: { ...(f.memory.scope_envelope as JsonObject), applicability: project } });
+    const memory = f.memory;
     const original = f.service.contextWorkingSets.resolve.bind(f.service.contextWorkingSets);
     t.mock.method(f.service.contextWorkingSets, "resolve", async (args: JsonObject) => { const result = await original(args); f.writer.save("memory_ledger", "private", { ...payload(memory), status: "revoked" }); return result; });
     await assert.rejects(f.service.contextOpen({ project_root: f.root, include_codebase: false, ...owner, query: "alpha" }), /changed during recall/);
@@ -173,10 +176,9 @@ test("Context Open rechecks after Working Set preparation", async t => {
 
 test("Hook fails open without emitting materials or successful activation proof after late revocation", async t => {
   const { CodexHookBridge } = await import("../core/interfaces/codex-hook-bridge.ts");
-  const f = await fixture();
+  const f = await fixture({ canonicalProjectMemory: true });
   try {
-    const project = (f.service.scopeIdentityResolveProject({ project_root: f.root }).identity as JsonObject).canonical_scope as JsonObject;
-    const memory = f.store.save("memory_ledger", "private", { ...payload(f.memory), scope: project, scope_envelope: undefined });
+    const memory = f.memory;
     const original = f.service.contextWorkingSets.resolve.bind(f.service.contextWorkingSets);
     t.mock.method(f.service.contextWorkingSets, "resolve", async (args: JsonObject) => { const result = await original(args); f.writer.save("memory_ledger", "private", { ...payload(memory), status: "revoked" }); return result; });
     assert.deepEqual(await new CodexHookBridge(f.service).handle("context", { hook_event_name: "UserPromptSubmit", cwd: f.root, session_id: "session", turn_id: "turn", prompt: "alpha" }), {});

@@ -16,15 +16,17 @@ const scope = { scope_kind: "project", scope_id: "access-fixture" } as const;
 const privateEnvelope = { audience: { mode: "private", principal_ids: ["owner"] }, tenant_id: "tenant" };
 const owner = { principal_id: "owner", tenant_id: "tenant" };
 async function fixture() {
-  const root = await mkdtemp(join(tmpdir(), "craft-source-access-"));
+  const root = await mkdtemp(join(tmpdir(), "craft-source-access-")), otherRoot = await mkdtemp(join(tmpdir(), "craft-source-access-other-"));
   const store = await new CraftStore(craftPaths(root)).open(), service = new CraftService(store);
+  service.scopeAliasBind({ scope_kind: "project", scope_id: "project:access-fixture", alias_kind: "path", alias: root });
+  service.scopeAliasBind({ scope_kind: "project", scope_id: "project:other", alias_kind: "path", alias: otherRoot });
   const source = (id: string, extra: JsonObject = {}) => service.knowledgeSourceRegister({ source_id: id, kind: "custom", label: id, ...scope,
     locator: root, content_digest: "fixture", trust: "verified", access: "read_only", ...extra }).source as JsonObject;
   source("public"); source("private", { scope_envelope: privateEnvelope });
   store.create("evidence", "e", { source_type: "human", confidence: "confirmed" });
   const memory = (id: string, extra: JsonObject = {}) => service.memoryLedgerRemember({ memory_id: id, source_id: "public", kind: "preference", ...scope,
     content: `alpha ${id}`, evidence_ids: ["e"], ...extra }).memory as JsonObject;
-  return { store, service, source, memory, async close() { store.close(); await rm(root, { recursive: true, force: true }); } };
+  return { store, service, source, memory, async close() { store.close(); await Promise.all([rm(root, { recursive: true, force: true }), rm(otherRoot, { recursive: true, force: true })]); } };
 }
 
 test("Source audience gates Knowledge independently of derivative purpose and follows current source restrictions", async () => {
@@ -105,8 +107,8 @@ test("Ledger exact and scoped reads enforce current, historical and Source acces
     f.store.save("memory_ledger", "restricted", { ...payload(restricted), scope_envelope: { audience: { mode: "private", principal_ids: ["new-owner"] }, tenant_id: "tenant" } });
     assert.throws(() => f.service.memoryLedgerGet({ ...read, version: 1 }), /denied/);
     assert.throws(() => f.service.memoryLedgerGet({ ...read, principal_id: "new-owner", version: 1 }), /historical/);
-    f.store.save("memory_ledger", "restricted", { ...payload(restricted), scope: { kind: "project", id: "moved" }, scope_envelope: undefined });
-    assert.throws(() => f.service.memoryLedgerGet({ memory_id: "restricted", version: 1, allow_restricted: true }), /historical/);
+    assert.throws(() => f.store.save("memory_ledger", "restricted", { ...payload(restricted), scope: { kind: "project", id: "moved" }, scope_envelope: undefined }), /cannot change storage scope/u);
+    assert.throws(() => f.service.memoryLedgerGet({ memory_id: "restricted", version: 1, principal_id: "new-owner", tenant_id: "tenant", allow_restricted: true }), /historical/);
     f.memory("orphan", { source_id: "public" });
     const orphan = f.store.get("memory_ledger", "orphan"); f.store.save("memory_ledger", "orphan", { ...payload(orphan), source_id: "absent" });
     assert.throws(() => f.service.memoryLedgerGet({ memory_id: "orphan" }), /denied/);

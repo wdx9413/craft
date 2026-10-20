@@ -275,17 +275,22 @@ export async function runDistillationOnce(deps: DistillationDependencies): Promi
 }
 
 interface PendingRequest { resolve(value: JsonObject): void; reject(error: Error): void }
+const DEFAULT_MCP_REQUEST_TIMEOUT_MS = 60_000;
+const MAX_MCP_REQUEST_TIMEOUT_MS = 300_000;
 export class McpStdioClient implements ExperienceLearningClient {
   readonly child: ChildProcessWithoutNullStreams;
   readonly pending = new Map<number, PendingRequest>();
   readonly lines: ReturnType<typeof createInterface>;
+  readonly requestTimeoutMs: number;
   closed = false;
   nextId = 1;
 
-  constructor(command: string, args: string[]) {
+  constructor(command: string, args: string[], options: { request_timeout_ms?: number } = {}) {
     // This client is already the learning loop when launched standalone. Do
     // not let its MCP child start another supervised loop over the same data.
     this.child = spawn(command, args, { stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, CRAFT_CONTINUOUS_LEARNING: "0" } });
+    this.requestTimeoutMs = boundedPollInterval(options.request_timeout_ms === undefined
+      ? process.env.CRAFT_LEARNING_MCP_REQUEST_TIMEOUT_MS : String(options.request_timeout_ms), DEFAULT_MCP_REQUEST_TIMEOUT_MS, 1, MAX_MCP_REQUEST_TIMEOUT_MS);
     this.lines = createInterface({ input: this.child.stdout });
     this.lines.on("line", line => this.receive(line));
     this.child.stderr.on("data", () => { /* MCP diagnostics stay out of the worker's machine-readable stdout. */ });
@@ -316,10 +321,23 @@ export class McpStdioClient implements ExperienceLearningClient {
     if (this.closed) return Promise.reject(new Error("Craft MCP child is closed"));
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
-      this.child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`, error => {
-        if (error) { this.pending.delete(id); reject(error); }
+      let timer: NodeJS.Timeout;
+      this.pending.set(id, {
+        resolve: value => { clearTimeout(timer); resolve(value); },
+        reject: error => { clearTimeout(timer); reject(error); },
       });
+      timer = setTimeout(() => {
+        this.failAll(new Error(`MCP request timed out: ${method}`));
+        this.child.kill();
+      }, this.requestTimeoutMs);
+      try {
+        this.child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`, error => {
+          if (error) { const pending = this.pending.get(id); this.pending.delete(id); pending?.reject(error); }
+        });
+      } catch (error) {
+        const pending = this.pending.get(id); this.pending.delete(id);
+        pending?.reject(error instanceof Error ? error : new Error("Craft MCP request write failed"));
+      }
     });
   }
 
@@ -347,7 +365,7 @@ export class McpStdioClient implements ExperienceLearningClient {
   }
 
   close(): void {
-    this.closed = true;
+    if (!this.closed) this.failAll(new Error("Craft MCP child closed"));
     this.lines.close();
     if (!this.child.stdin.writableEnded) this.child.stdin.end();
     if (this.child.exitCode === null && this.child.signalCode === null) this.child.kill();

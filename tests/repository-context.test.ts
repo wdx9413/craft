@@ -77,6 +77,46 @@ test("repository auto onboarding reuses across clients, incrementally parses, de
   } finally { f.close(); }
 });
 
+test("repository freshness binds checkpoints to Git branch and commit even when source bytes are unchanged", async () => {
+  const f = await fixture();
+  try {
+    f.write("source.ts", "export const stable = 1;\n");
+    f.git("add", "source.ts");
+    f.git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "-qm", "base");
+    const initial = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
+    assert.equal(initial.status, "ready");
+    const workspaceId = String(initial.workspace_id);
+    const freshness = f.service.workspace as unknown as { freshness(args: JsonObject): JsonObject };
+    assert.equal(freshness.freshness({ workspace_id: workspaceId }).status, "current");
+    f.git("checkout", "-b", "same-tree");
+    const branchChanged = freshness.freshness({ workspace_id: workspaceId });
+    assert.equal(branchChanged.status, "changed");
+    assert.deepEqual(branchChanged.changed_paths, []);
+    assert.equal(branchChanged.repository_state_changed, true);
+    const branchIndex = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
+    assert.equal(branchIndex.status, "ready");
+    assert.notEqual(branchIndex.checkpoint_id, initial.checkpoint_id);
+    assert.notEqual(branchIndex.index_id, initial.index_id);
+    assert.equal(freshness.freshness({ workspace_id: workspaceId }).status, "current");
+    f.git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "--allow-empty", "-qm", "same tree new revision");
+    const revisionChanged = freshness.freshness({ workspace_id: workspaceId });
+    assert.equal(revisionChanged.status, "changed");
+    assert.deepEqual(revisionChanged.changed_paths, []);
+    assert.equal(revisionChanged.repository_state_changed, true);
+    const revisionIndex = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
+    assert.equal(revisionIndex.status, "ready");
+    assert.notEqual(revisionIndex.checkpoint_id, branchIndex.checkpoint_id);
+    assert.notEqual(revisionIndex.index_id, branchIndex.index_id);
+    f.write("source.ts", "export const stable = 2;\n");
+    const sourceChanged = freshness.freshness({ workspace_id: workspaceId });
+    assert.equal(sourceChanged.status, "changed");
+    assert.deepEqual(sourceChanged.changed_paths, ["source.ts"]);
+    const sourceIndex = f.service.codebaseRepositoryEnsure({ project_root: f.repo, index_depth: "semantic" });
+    assert.equal(sourceIndex.status, "ready");
+    assert.notEqual(sourceIndex.index_id, revisionIndex.index_id);
+  } finally { f.close(); }
+});
+
 test("repository ensure reuses an index published while another ensure was analyzing", async () => {
   const f = await fixture();
   try {

@@ -54,6 +54,10 @@ export class MemoryLedgerKernel {
     const kind = text(args.kind, "kind"); if (!MEMORY_KINDS.has(kind)) throw new Error("Memory kind is unsupported");
     const sensitivity = text(args.sensitivity ?? "internal", "sensitivity"); if (!SENSITIVITIES.has(sensitivity)) throw new Error("Memory sensitivity is unsupported");
     const memoryScope = parseScope(args); const envelope = scopeEnvelope(args.scope_envelope, memoryScope); const evidenceIds = sortedUniqueList(args.evidence_ids, "evidence_ids"); evidenceIds.forEach((item) => this.store.get("evidence", item));
+    if (memoryScope.kind === "session") {
+      this.files.pathFor(memoryScope);
+      if (this.files.isSessionArchived(memoryScope.id)) throw new Error("Archived session Memory cannot be written");
+    }
     const content = noCredentialAssignment(text(args.content, "content"), "content"); const confidence = text(args.confidence ?? "bounded", "confidence");
     if (!CONFIDENCES.has(confidence)) throw new Error("Memory confidence is unsupported");
     if ((kind === "procedural" || confidence === "confirmed") && !evidenceIds.length) throw new Error("Procedural or confirmed Memory requires Evidence");
@@ -89,7 +93,8 @@ export class MemoryLedgerKernel {
     }
     // The body lives in the content store; the record keeps the reference and the digest, so
     // the Ledger indexes memory rather than holding it, and a rewritten body is a drift error.
-    const contentRef = this.store.contentStore.writeSync({ kind: "memory", record_id: memoryId, version: 1, scope: `${memoryScope.kind}:${memoryScope.id}`, status: "active", sensitivity, source_id: String(source.id), body: content });
+    const contentRef = this.store.contentStore.writeSync({ kind: "memory", record_id: memoryId, version: 1, scope: `${memoryScope.kind}:${memoryScope.id}`, status: "active", sensitivity, source_id: String(source.id), body: content,
+      ...(typeof args.project_root === "string" ? { project_root: args.project_root } : {}) });
     const memory = this.store.create("memory_ledger", memoryId, { ...identity, content_ref: contentRef, identity_digest: identityDigest, status: "active", supersedes_id: null, contradiction_ids: [], derived_from_ids: [], ...(workingNote ? {} : { working_legacy_compatibility: kind === "working" }) });
     return { memory, projection: this.files.sync(memoryScope), idempotent: false };
   }

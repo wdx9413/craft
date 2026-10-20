@@ -12,6 +12,28 @@
   },
   "groups": [
     {
+      "name": "codex-session-provenance",
+      "include": [
+        "core/codex-session-archive.ts"
+      ],
+      "tests": [
+        "tests/codex-session-archive.test.ts",
+        "tests/session-knowledge-candidates.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "memory-session-storage",
+      "include": [
+        "capability/craft-memory/memory-files.ts"
+      ],
+      "tests": [
+        "tests/memory-session-storage.test.ts",
+        "tests/memory-tiers.test.ts"
+      ],
+      "branches": true
+    },
+    {
       "name": "context-revocation-race",
       "include": [
         "common/craft-common-store-local/src/context-access-guard.ts",
@@ -75,7 +97,8 @@
         "tests/codebase-view-lifecycle.test.ts",
         "tests/memory-contribution.test.ts",
         "tests/codebase-context-projection.test.ts",
-        "tests/memory-tiers.test.ts"
+        "tests/memory-tiers.test.ts",
+        "tests/memory-session-storage.test.ts"
       ],
       "branches": true
     },
@@ -152,6 +175,7 @@
       ],
       "tests": [
         "tests/store.test.ts",
+        "tests/memory-partition-store.test.ts",
         "tests/content-store.test.ts",
         "tests/store-migrations.test.ts",
         "tests/private-json.test.ts",
@@ -306,8 +330,9 @@
         "tests/coverage-fill.test.ts",
         "tests/remaining-branch-cases.test.ts",
         "tests/store-migrations.test.ts",
-      "tests/context-remediation.test.ts",
-      "tests/context-read-snapshot.test.ts"
+        "tests/context-remediation.test.ts",
+        "tests/context-read-snapshot.test.ts",
+        "tests/memory-partition-store.test.ts"
       ],
       "branches": true
     },
@@ -692,7 +717,8 @@
         "tests/context-revocation-race.test.ts",
         "tests/context-optimization.test.ts",
         "tests/context-read-snapshot.test.ts",
-        "tests/memory-contribution.test.ts"
+        "tests/memory-contribution.test.ts",
+        "tests/memory-session-storage.test.ts"
       ],
       "branches": true
     },
@@ -1127,6 +1153,7 @@
         "tests/agent-foundation.test.ts",
         "tests/component-procedure-graph.test.ts",
         "tests/observability-memory.test.ts",
+        "tests/memory-session-storage.test.ts",
         "tests/context-remediation.test.ts",
         "tests/memory-commit-optimization.test.ts",
         "tests/cognitive-write.test.ts"
@@ -1298,7 +1325,8 @@
         "tests/context-candidate-scope.test.ts",
         "tests/context-remediation.test.ts",
         "tests/context-optimization.test.ts",
-        "tests/context-read-snapshot.test.ts"
+        "tests/context-read-snapshot.test.ts",
+        "tests/memory-partition-store.test.ts"
       ],
       "branches": true
     },
@@ -1482,6 +1510,27 @@
         "tests/codebase-view-lifecycle.test.ts",
         "tests/context-working-set-budget.test.ts",
         "tests/codebase-context-projection.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "workspace-repository-state",
+      "include": [
+        "core/workspace-repository-state.ts"
+      ],
+      "tests": [
+        "tests/workspace-repository-state.test.ts"
+      ],
+      "branches": true
+    },
+    {
+      "name": "workspace-snapshot-repository-binding",
+      "include": [
+        "core/workspace.ts"
+      ],
+      "tests": [
+        "tests/workspace-checkpoints.test.ts",
+        "tests/repository-context.test.ts"
       ],
       "branches": true
     },

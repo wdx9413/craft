@@ -6,6 +6,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { JsonObject } from "../../common/craft-common-store-local/src/store.ts";
 import { checkpointManifestDigest, readGitEvaluationState } from "../eval/codebase-evaluation-provenance.ts";
+import { ProjectAnalysisCache } from "../../capability/craft-codebase/project-analysis-cache.ts";
 import { repositoryFiles } from "../../capability/craft-codebase/repository-files.ts";
 import { CraftStore } from "../../core/infrastructure/store.ts";
 import { craftPaths } from "../../core/infrastructure/paths.ts";
@@ -53,8 +54,8 @@ try {
   const incrementalService = new CraftService(incrementalStore);
   const initial = incrementalService.codebaseRepositoryEnsure({ project_root: projectRoot, index_depth: "semantic" });
   assert.equal(initial.status, "ready", JSON.stringify(initial));
-  const cachedUnits = incrementalStore.list("codebase_java_file_analysis", 2_000,
-    item => item.workspace_id === initial.workspace_id) as JsonObject[];
+  const analysisCache = new ProjectAnalysisCache(projectRoot, String(initial.workspace_id));
+  const cachedUnits = analysisCache.list("codebase_java_file_analysis", 2_000) as JsonObject[];
   assert.equal(cachedUnits.length, javaFiles.length, "initial analysis must cache every bounded Java file unit");
   const safeUnits = cachedUnits.filter(unit => unit.incremental_safe === true).sort((left, right) => String(left.path).localeCompare(String(right.path)));
   assert(safeUnits.length > 0, "real repository must have at least one safely reusable Java unit");

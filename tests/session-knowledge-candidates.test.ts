@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -86,6 +86,41 @@ async function evaluate(f: Awaited<ReturnType<typeof setup>>, client: Experience
   return runSessionKnowledgeEvaluationOnce({ client, providers: [provider], transport, state_file: f.workerState,
     archive_options: { sessions_root: f.sessions, state_file: f.state }, ...extra });
 }
+
+test("archived verified generation and held-out tasks remain usable once without mixing their roles", async () => {
+  for (const partition of ["candidate_generation", "held_out"] as const) {
+    const f = await setup(partition);
+    try {
+      const archive = join(f.root, "archived_sessions");
+      await mkdir(archive);
+      await rename(f.source, join(archive, "session.jsonl"));
+      const archiveOptions = { sessions_root: f.sessions, archived_sessions_root: archive, state_file: f.state };
+      const collection = await runCodexSessionCollectionOnce(archiveOptions);
+      assert.equal(collection.tasks_verified, 1);
+      const fixture = reviewedClaimClient(f.task.project_scope_id, {
+        craft_knowledge_evaluation_case_save: args => ({ case: { id: args.case_id, evaluation_eligible: false } }),
+        craft_knowledge_evaluation_run: () => ({ run: { id: "run", metrics: { provenance_eligible: false } } }),
+      });
+      const seen: string[] = [];
+      const transport = modelTransport(JSON.stringify(partition === "candidate_generation"
+        ? { decision: "candidate", kind: "rule", title: "依赖升级验证", content: "依赖升级后运行单测并检查锁文件。", tags: ["验证"] }
+        : { decision: "labeled", expected_claim_ids: ["reviewed-claim"] }), seen);
+      const deps = { client: fixture.client, providers: [provider], transport, state_file: f.workerState, archive_options: archiveOptions };
+      const run = partition === "candidate_generation" ? runSessionKnowledgeCandidateOnce : runSessionKnowledgeEvaluationOnce;
+      const result = await run(deps);
+      assert.equal(result.status, partition === "candidate_generation" ? "candidate_created" : "case_candidate_created");
+      assert.equal(seen.length, 1);
+      const saved = fixture.calls.find(call => call.name === (partition === "candidate_generation" ? "craft_knowledge_claim_save" : "craft_knowledge_evaluation_case_save"))!;
+      assert.equal(saved.args.scope, f.task.project_scope_id);
+      assert.deepEqual(saved.args.evidence_ids ?? saved.args.source_evidence_ids, ["evidence-session-task"]);
+      assert.equal((await run(deps)).status, "idle");
+      assert.equal(seen.length, 1, "a relocation must not cause repeated model calls");
+      const other = partition === "candidate_generation" ? runSessionKnowledgeEvaluationOnce : runSessionKnowledgeCandidateOnce;
+      assert.equal((await other({ ...deps, state_file: join(f.root, "knowledge", "other-partition.json") })).status, "idle");
+      assert.equal(seen.length, 1, "generation and held-out roles remain isolated after archiving");
+    } finally { await rm(f.root, { recursive: true, force: true }); }
+  }
+});
 
 test("creates one Chinese Knowledge candidate from a verified generation task and records a content-free Trace", async () => {
   const f = await setup();
