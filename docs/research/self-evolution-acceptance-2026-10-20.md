@@ -36,8 +36,16 @@
 - 用 `.86` 的 Knowledge Worker 和 Codex CLI Host `gpt-6-luna` 处理这一条任务，生成 Claim `knowledge_claim_b6ad3247dc8f8034c5688356`，中文标题为“Craft-context 作为唯一对外发布的组件插件”，状态为 `candidate`，绑定 1 条 Evidence。该过程没有评测用例，因此没有评测或晋升。
 - Trace `trace_8bb83fdfc9db44608dd3ea6e68a04b80` 记录 `model.request`、`model.completed`、`knowledge.candidate_created` 和 `trace.finalized` 四个事件；模型用量为 20,425 输入 token、167 输出 token。调用摘要与输出均以摘要和引用入账，`content_stored=false`。
 - 首次落盘检查发现 Claim 正文引用到了工作区 `.craft_data`。这不符合“最终数据统一在 `~/.craft_data`，能力和项目分层”的约束。已核对记录 ID、正文摘要和字节数，将该 Claim 正文迁至 `~/.craft_data/knowledge/projects/167c1c305f66e17dc5ec4f1c/md/`，更新账本引用并移除本轮生成的工作区副本。
-- 本地源码已修正项目 Knowledge 内容目录：仍使用注册的项目别名校验作用域，正式正文统一写入用户数据根目录。3 项针对性测试通过，`core/project-knowledge-content.ts` 行、函数、分支覆盖率均为 100%。该代码修复还未发布，当前 Host 仍是 `.86`；后续必须通过远端 Marketplace 发布后再验证新运行时。
+- 源码已修正项目 Knowledge 内容目录：仍使用注册的项目别名校验作用域，正式正文统一写入用户数据根目录。3 项针对性测试通过，`core/project-knowledge-content.ts` 行、函数、分支覆盖率均为 100%。该修复已发布为 `.87`，详细运行时证据见下节。
 - 这证明一条真实任务能够产生有来源和 Trace 的 Knowledge 候选；不证明留出评测、自动晋升、Memory/Experience 产出或持续收益。留出样本、Knowledge 评测用例、Experience Pattern 和 Memory 使用反馈仍不足。
+
+## `.87` 远端发布与新 Host 加载（2026-10-21）
+
+- 源码 `main` 提交 `a7963b01cee17b55010e9785b6e6e17f71bbe05b`；Marketplace `main` 提交 `7ae6e99`。Marketplace 使用 GitHub codeload 固定 SHA 归档构建；归档与该提交的 1,369 个 Git 跟踪文件逐项比较，缺失和内容差异均为 0。发布来源摘要为 `sha256:7768bfa89edce18d5e027a1bd879fbbf50d4f8fa780e4d6a068d2d397b32d988`。
+- `codex plugin marketplace upgrade craft-marketplace` 成功。插件清单显示 `craft-context` 为 `0.12.87`，来源是 GitHub Marketplace；`codex mcp get craft-context` 指向 `~/.codex/plugins/cache/craft-marketplace/craft-context/0.12.87/dist/plugin/craft-mcp.cjs`。
+- 直接对已安装 MCP 包执行初始化握手，返回 `serverInfo.version=0.12.87`、运行时指纹 `release=0.12.87`，输出语言规则为 `zh-CN`。这验证了新 MCP 进程实际启动了 `.87` 包。Context 组件工具面不提供 `craft_knowledge_claim_get`，因此本轮没有声称通过该 Host 工具读取了候选。
+- `.87` 的产物内容路径逻辑已在 Marketplace MCP 包中确认；本地 100% 覆盖率测试覆盖项目别名校验、按项目隔离和路径写入。真实候选正文与账本引用已在用户级 `~/.craft_data/knowledge/projects/{项目ID}/md/` 下逐项核验。
+- Marketplace 发布和新 Host 加载已验证；新 Host 下再次生成或读取候选、Knowledge 独立评测与自动晋升、Memory/Experience 生命周期及反馈仍未验证。
 
 ## 完整验收矩阵
 
@@ -45,7 +53,7 @@
 | --- | --- | --- |
 | 合格任务自动选择能力和流程 | 本轮真实来源没有可核验证据，未召回可用于自动选择的正式能力产物 | 分别运行合格真实任务，绑定 Context 回执、正确能力和实际执行流程 |
 | Codex CLI Host 确实调用 `gpt-6-luna` | 一条合格生成集任务触发真实调用；Trace 有请求、完成事件及 20,425/167 token 用量 | 为留出集建立独立有效样本，并测量多次运行的一致性与成本 |
-| 生成可追溯候选 | 已生成 1 条中文 Knowledge Claim 候选，绑定 Evidence 和已完成 Trace；正文已迁入 `~/.craft_data/knowledge/projects/{项目ID}/md/` | 新路径修复尚未发布；发布后从新 Host 再验证。需积累多条不同任务的候选及版本关系 |
+| 生成可追溯候选 | 已生成 1 条中文 Knowledge Claim 候选，绑定 Evidence 和已完成 Trace；正文已迁入 `~/.craft_data/knowledge/projects/{项目ID}/md/`；`.87` 已安装且实际 MCP 握手确认版本 | Context 面不含 Knowledge Claim 读取工具，因此新 Host 下的候选读取未直接验证；需积累多条不同任务的候选及版本关系 |
 | 独立评测 | 本轮验证归档前后按会话固定分区，两个消费者保持隔离 | 独立真实会话及任务证据，明确排除生成会话与同任务变体；模型标签候选不能当作真值 |
 | 晋升、降级、回滚、退出 | 本轮未取得真实生命周期证据 | 由独立评测驱动的状态转换和完整变更记录 |
 | 没有合格任务时不空转 | 空队列时 Worker 保持空闲的程序测试通过；这次仅在发现 1 条合格任务后调用 1 次模型 | 其他任务发现路径和 Experience Worker 的同等真实运行证据 |
@@ -53,7 +61,7 @@
 | Memory 三级阈值、冲突和退出 | 源码含两个独立会话及三个项目的阈值；本轮 65 项定向测试通过，覆盖原始会话唯一标识路径、旧哈希目录重建后清理、路径碰撞/符号链接保护、归档后阻止 MCP 直接写入，以及临时记忆清理时项目/全局正文保留。主库 83 条 Memory 目录行均有分区引用且无正文，全局库 79 条、当前项目库 4 条。以上仍不是用真实独立任务证明自动晋升、冲突、撤销和退出 | 真实独立会话/项目中的晋升、冲突、撤销和归档保留证据；崩溃恢复、并发写入及持续账本故障验证 |
 | Codebase 五语言、分支隔离和重索引 | 既有固定仓库证据：Go `skill-up@12deb53a19147704e3f547602962edf6d22e0c54` 经 `gopls` 分析 227 个文件，改单文件后分析 1 个、复用 226 个，增量图与干净重建一致；关系仍为 partial 且仅报告引用。Java `d-forge@a18ce57e47b207ba994c7efdff6c4eef03072152` 分析 1,115 个文件，改单文件后因不安全单元和反向依赖闭包重分析 974 个、复用 141 个，增量图一致；分析报告 100 个编译错误和未解析关系。Python `d-simu@6462cd6783fe1a7c03888e845dbe2f4f273f5313` 的真实控制流样本通过，14 个块、15 条边，`Await` 明确标为 partial。TS/JS 在当前 Craft 工作区快照（HEAD `960a66445607b1dc66c2c8bf220c58951c1be5ce`）的 853 个文件上运行两轮；增量图均与独立目录完整重建一致，影响 1/8 个文件、复用 852/845 个文件，中位用时 35.455/46.092 秒，速度比 1.30。此前 9 条边差异来自完整重建误用了增量项目缓存，现已隔离缓存并断言完整分析模式，旧结果作废。另新增仓库状态绑定：检查点保存 Git 根目录、分支、HEAD 和工作区状态摘要；真实 Git 集成测试证明同内容分支切换与空提交都会使旧快照失效，索引器随后重建；文件变更仍由内容校验发现。Git 元数据探测失败现在仅在无 `.git` 标记且 Git 返回非仓库状态时回退为非 Git；仓库标记存在、权限失败或 Git 不可用时均失败关闭。状态绑定模块 5 项测试通过，行、函数、分支覆盖率均为 100%；`core/workspace.ts` 与仓库上下文/检查点用例合并的 79 项测试通过，模块行、函数、分支覆盖率均为 100%，覆盖门禁已登记。持久语义索引刷新已完成：索引 `repository_index_24ae9145e90cd9e6bb7d4753` 绑定检查点 `workspace_checkpoint_78b0355d5387444ca7534780612dfb23`；支持 895/907 个文件，12 个不支持，关系图 261,277 条边且状态为 partial。独立复核确认 907/907 个当前文件摘要匹配，分支、HEAD 和工作区摘要都与检查点一致。JavaScript 单独使用同一固定 HEAD `960a66445607b1dc66c2c8bf220c58951c1be5ce` 的当前工作区，索引 21 个 JS 文件（17 个模块），修改 1 个模块后重分析 1 个、复用 20 个，增量图与全量图一致；仍有 301 条未解析关系。Craft 自身的 JS 样本较小，不能代表独立 JS 大型仓库。TypeScript 从 853 个文件中选取 844 个模块文件单独评测，修改 1 个文件、重分析 1 个、复用 843 个，增量图与全量图一致；模块图有 82,632 条未解析关系、622 个省略节点及 207,437 个省略边。另有 9 个全局/环境声明文件，包含它们的全仓库计划按规则退回全量分析，不能算增量通过。TS/JS 合并图有预算省略；五语言固定仓库完整评测及整体关系完整度尚缺 | 等当前索引重建完成后登记新检查点和真实文件/关系统计；为五种语言分别提供固定版本仓库评测、分支切换隔离与变更后重索引；报告关系完整度和限制；核验 Serena、GitNexus、CodeGraph 的 Agent 实践 |
 | 按能力、项目和全局隔离最终数据 | Memory 按作用域分区原型已有 65 项定向测试通过，并实查主库/全局库/项目库记录数为 83/79/4，主库 Memory 正文为 0。Knowledge、Experience 和 Codebase 账本仍未迁移；Memory 跨分区进程崩溃恢复、孤儿清理、并发故障注入尚未验证 | 补齐 Memory 分区崩溃恢复和并发验证；再迁移其余能力的正式账本；在项目与全局根核验最终正文路径、引用完整性、恢复和兼容读取 |
-| 增量覆盖率 100% 与远端版本绑定 | 项目 Knowledge 路径变更的行、函数、分支均 100%；TS/JS 两轮增量索引图与独立全量重建一致；既有 `.86` 远端 Host 调用和 Candidate Trace 可核验 | 发布路径修复后，通过远端 URL 更新 Marketplace，并核验新运行时实际版本及持久内容路径；其余完整矩阵仍未通过 |
+| 增量覆盖率 100% 与远端版本绑定 | 项目 Knowledge 路径变更的行、函数、分支均 100%；TS/JS 两轮增量索引图与独立全量重建一致；`.87` 远端 Marketplace 包及新 Host MCP 握手已核验；真实候选在全局根下摘要匹配 | 缺新 Host 对 Knowledge 正文的直接工具读取；Memory/Experience 的项目数据根边界及其完整生命周期仍需验证 |
 
 ## 接续顺序
 
