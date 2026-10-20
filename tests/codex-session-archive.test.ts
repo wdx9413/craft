@@ -308,6 +308,37 @@ test("assigns every turn from a held-out session to the same versioned split", a
   } finally { await rm(f.root, { recursive: true, force: true }); }
 });
 
+test("blocks the same project task goal from crossing candidate and held-out evaluation", async () => {
+  const f = await fixture();
+  try {
+    const goal = "修复跨会话重复任务的评测集泄漏";
+    await writeFile(f.file, [f.record("session_meta", { session_id: "session-14", cwd: f.project }),
+      ...f.turn("held-out-turn", goal)].join("\n") + "\n");
+    const candidateFile = join(f.sessions, "2026", "10", "candidate-session.jsonl");
+    await writeFile(candidateFile, [f.record("session_meta", { session_id: "session-1", cwd: f.project }),
+      ...f.turn("candidate-turn", goal)].join("\n") + "\n");
+    await runCodexSessionCollectionOnce({ sessions_root: f.sessions, state_file: f.state });
+    const state = JSON.parse(await readFile(f.state, "utf8")) as { tasks: Record<string, CodexSessionTaskIndex> };
+    const tasks = Object.values(state.tasks);
+    assert.equal(tasks.length, 2);
+    assert.notEqual(tasks[0]!.dataset_partition, tasks[1]!.dataset_partition);
+    assert.equal(tasks[0]!.task_goal_digest, tasks[1]!.task_goal_digest);
+    const evidence = tasks.map((task, index) => ({ evidence_id: `evidence-${index}`, session_id: task.session_id,
+      turn_id: task.turn_id, context_receipt_id: `receipt-${index}`, verification_ref_digest: `sha256:${String(index).repeat(64)}`,
+      terminal_identity_digest: `sha256:${String(index + 2).repeat(64)}`, verification_outcome: "passed", verified: true, content_stored: false }));
+    assert.equal((await reconcileCodexSessionTaskEvidence(evidence, { state_file: f.state })).tasks_verified, 2);
+
+    for (const task of tasks) {
+      const batch = await codexSessionTaskBatch(task.dataset_partition, { state_file: f.state });
+      assert.deepEqual(batch.tasks, []);
+      assert.equal(batch.excluded_cross_partition_task_goal_overlap, 1);
+      assert.equal((await readCodexSessionTaskExcerpt(task.task_id,
+        { sessions_root: f.sessions, state_file: f.state, expected_partition: task.dataset_partition })).reason,
+      "cross_partition_task_goal_overlap");
+    }
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
 test("indexes aborted tasks, tolerates sparse records and resolves repeated project scopes", async () => {
   const f = await fixture();
   try {

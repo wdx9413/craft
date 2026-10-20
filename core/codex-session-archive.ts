@@ -537,9 +537,14 @@ export async function codexSessionTaskBatch(partition: "candidate_generation" | 
   options: CodexSessionCollectionOptions = {}, env: NodeJS.ProcessEnv = process.env): Promise<JsonObject> {
   if (partition !== "candidate_generation" && partition !== "held_out") throw new Error("partition is unsupported");
   const state = await readState(statePath(options, env), options.now ?? new Date().toISOString());
-  const tasks = Object.values(state.tasks).filter(task => task.dataset_partition === partition && task.status === "completed"
+  const allTasks = Object.values(state.tasks);
+  const eligibleTasks = allTasks.filter(task => task.dataset_partition === partition && task.status === "completed"
     && task.verification_status === "verified" && task.assistant_final_seen && task.verification_evidence_ids?.length
-    && (partition !== "candidate_generation" || task.verification_outcome === "passed"))
+    && (partition !== "candidate_generation" || task.verification_outcome === "passed"));
+  const overlappingTasks = eligibleTasks.filter(task => task.task_goal_digest && task.project_scope_id
+    && allTasks.some(other => other.task_id !== task.task_id && other.project_scope_id === task.project_scope_id
+      && other.task_goal_digest === task.task_goal_digest && other.dataset_partition !== task.dataset_partition));
+  const tasks = eligibleTasks.filter(task => !overlappingTasks.includes(task))
     .sort((left, right) => String(left.completed_at ?? "").localeCompare(String(right.completed_at ?? "")) || left.task_id.localeCompare(right.task_id));
   return { tasks: tasks.map(task => ({ task_id: task.task_id, session_id: task.session_id, turn_id: task.turn_id,
     project_scope_id: task.project_scope_id, dataset_partition: task.dataset_partition, dataset_split_version: task.dataset_split_version,
@@ -547,7 +552,9 @@ export async function codexSessionTaskBatch(partition: "candidate_generation" | 
     verification_evidence_ids: task.verification_evidence_ids, verification_outcome: task.verification_outcome,
     context_receipt_id: task.context_receipt_id ?? null, verification_ref_digest: task.verification_ref_digest ?? null,
     terminal_identity_digest: task.terminal_identity_digest ?? null, source_ref: task.source_ref, completed_at: task.completed_at,
-    content_stored: false, raw_content_stored: false })), content_stored: false, raw_content_stored: false };
+    content_stored: false, raw_content_stored: false })),
+    excluded_cross_partition_task_goal_overlap: overlappingTasks.length,
+    content_stored: false, raw_content_stored: false };
 }
 
 /** Persist the last successfully queried session so newer Host Evidence cannot starve behind old archives. */
@@ -631,6 +638,11 @@ export async function readCodexSessionTaskExcerpt(taskIdValue: unknown, options:
   if (!task || task.status !== "completed" || task.verification_status !== "verified" || !task.assistant_final_seen
     || task.dataset_partition !== options.expected_partition) {
     return { status: "ineligible", reason: "task_not_verified_or_partition_mismatch", raw_content_stored: false };
+  }
+  if (task.task_goal_digest && task.project_scope_id && Object.values(state.tasks).some(other => other.task_id !== task.task_id
+    && other.project_scope_id === task.project_scope_id && other.task_goal_digest === task.task_goal_digest
+    && other.dataset_partition !== task.dataset_partition)) {
+    return { status: "ineligible", reason: "cross_partition_task_goal_overlap", raw_content_stored: false };
   }
   const root = task.source_root === "archived_sessions" ? archiveRoot(options, env) : sourceRoot(options, env);
   if (root === null) return { status: "ineligible", reason: "task_source_root_unavailable", raw_content_stored: false };
