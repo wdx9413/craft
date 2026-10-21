@@ -380,7 +380,22 @@ async function main(): Promise<void> {
   const experiencePollMs = boundedPollInterval(process.env.CRAFT_EXPERIENCE_POLL_MS, 30_000, 1_000, 300_000);
   const knowledgePollMs = boundedPollInterval(process.env.CRAFT_KNOWLEDGE_POLL_MS, 300_000, 60_000, 3_600_000);
   const pollMs = experienceEnabled ? experiencePollMs : knowledgePollMs;
-  const client = new McpStdioClient(command, args);
+  const inheritedLocks = new Set((process.env.CRAFT_LEARNING_COMPONENT_LOCKS_HELD ?? "").split(",").map(value => value.trim()).filter(Boolean));
+  const lockComponents = components.filter(component => !inheritedLocks.has(component));
+  let releaseWorkerLocks: (() => Promise<void>) | null = null;
+  if (lockComponents.length) {
+    try { releaseWorkerLocks = await acquireLearningWorkerLocks(craftPaths(dataRoot()).runtimeDir, lockComponents); }
+    catch (error) {
+      process.stderr.write(`Craft learning worker lock failed (${learningFailureKind(error)}).\n`);
+      process.exitCode = 1;
+      return;
+    }
+    if (!releaseWorkerLocks) {
+      process.stdout.write(`${JSON.stringify({ status: "skipped_locked", components: lockComponents })}\n`);
+      return;
+    }
+  }
+  let cleanupClient: McpStdioClient | null = null;
   let stopping = false;
   let lastKnowledgeSync = 0;
   let idleExperiencePasses = 0;
@@ -396,6 +411,8 @@ async function main(): Promise<void> {
     timer = setTimeout(finish, nextPollMs);
   });
   try {
+    const client = new McpStdioClient(command, args);
+    cleanupClient = client;
     await client.initialize();
     do {
       const syncKnowledge = knowledgeEnabled && Date.now() - lastKnowledgeSync >= knowledgePollMs;
@@ -416,7 +433,10 @@ async function main(): Promise<void> {
       if (client.closed) { process.exitCode = 1; break; }
       await waitForNextTick();
     } while (!stopping && !process.exitCode);
-  } finally { client.close(); }
+  } finally {
+    if (cleanupClient) cleanupClient.close();
+    await releaseWorkerLocks?.();
+  }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {

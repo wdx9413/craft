@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -51,7 +51,7 @@ function fixture(modelText = JSON.stringify({ name: "Verified flow", description
 
 function emptySessionCollection(dataDir: string) {
   return { status: "source_unavailable", sessions_seen: 0, sessions_pending: 0, sessions_processed: 0, bytes_processed: 0,
-    tasks_indexed: 0, tasks_completed: 0, tasks_aborted: 0, tasks_candidate_generation: 0, tasks_held_out: 0, tasks_with_user_input: 0, tasks_verified: 0, malformed_lines: 0,
+    tasks_indexed: 0, tasks_completed: 0, tasks_aborted: 0, tasks_candidate_generation: 0, tasks_held_out: 0, tasks_with_user_input: 0, tasks_verified: 0, tasks_with_test_evidence: 0, malformed_lines: 0,
     raw_content_stored: false, state_file: join(dataDir, "runtime", "codex-session-collection.json") };
 }
 
@@ -489,9 +489,12 @@ test("Knowledge-only worker CLI polls its mounted Knowledge product without Expe
   const workerPath = fileURLToPath(new URL("../deploy/experience-learning/worker.ts", import.meta.url));
   const fixturePath = fileURLToPath(new URL("./fixtures/experience-learning-mcp-fixture.cjs", import.meta.url));
   const dataDir = mkdtempSync(join(tmpdir(), "craft-knowledge-worker-cli-"));
+  const runtimeDir = join(dataDir, "runtime"); mkdirSync(runtimeDir, { recursive: true });
+  const lockPath = join(runtimeDir, "learning-worker-knowledge.lock.json");
+  writeFileSync(lockPath, JSON.stringify({ pid: process.pid, owner_id: "supervisor-owner" }));
   const child = spawn(process.execPath, ["--experimental-strip-types", workerPath, "--once"], { env: {
     ...process.env, NODE_NO_WARNINGS: "1", CRAFT_DATA_DIR: dataDir, CODEX_HOME: join(dataDir, "codex-home"), CRAFT_EXPERIENCE_MCP_COMMAND: process.execPath,
-    CRAFT_EXPERIENCE_MCP_ARGS: JSON.stringify([fixturePath]), CRAFT_LEARNING_COMPONENTS: "knowledge",
+    CRAFT_EXPERIENCE_MCP_ARGS: JSON.stringify([fixturePath]), CRAFT_LEARNING_COMPONENTS: "knowledge", CRAFT_LEARNING_COMPONENT_LOCKS_HELD: "knowledge",
   }, stdio: ["ignore", "pipe", "pipe"] });
   let stdout = "", stderr = "";
   child.stdout.setEncoding("utf8").on("data", chunk => { stdout += chunk; });
@@ -503,7 +506,74 @@ test("Knowledge-only worker CLI polls its mounted Knowledge product without Expe
   assert.equal(exitCode, 0, stderr);
   assert.deepEqual(JSON.parse(stdout.trim()), { processed: 0, outcomes: [], skipped: true, session_collection: emptySessionCollection(dataDir),
     knowledge: { sources_seen: 0, sources_selected: 0, outcomes: [], skipped_sources: 0, classification: { processed: 0, outcomes: [] } } });
+  assert.equal(JSON.parse(readFileSync(lockPath, "utf8")).owner_id, "supervisor-owner", "the child must leave its supervisor-owned lock untouched");
   rmSync(dataDir, { recursive: true, force: true });
+});
+
+test("one-shot worker skips MCP and model work when another process owns its component lock", async () => {
+  const workerPath = fileURLToPath(new URL("../deploy/experience-learning/worker.ts", import.meta.url));
+  const dataDir = mkdtempSync(join(tmpdir(), "craft-learning-worker-locked-"));
+  const runtimeDir = join(dataDir, "runtime"); mkdirSync(runtimeDir, { recursive: true });
+  writeFileSync(join(runtimeDir, "learning-worker-knowledge.lock.json"), JSON.stringify({ pid: process.pid, owner_id: "test-owner" }));
+  const child = spawn(process.execPath, ["--experimental-strip-types", workerPath, "--once"], { env: {
+    ...process.env, NODE_NO_WARNINGS: "1", CRAFT_DATA_DIR: dataDir, CRAFT_LEARNING_COMPONENTS: "knowledge",
+    CRAFT_EXPERIENCE_MCP_COMMAND: process.execPath, CRAFT_EXPERIENCE_MCP_ARGS: JSON.stringify(["/missing/must-not-start.cjs"]),
+  }, stdio: ["ignore", "pipe", "pipe"] });
+  let stdout = "", stderr = "";
+  child.stdout.setEncoding("utf8").on("data", chunk => { stdout += chunk; });
+  child.stderr.setEncoding("utf8").on("data", chunk => { stderr += chunk; });
+  try {
+    const exitCode = await new Promise<number>((resolve, reject) => {
+      child.once("error", reject);
+      child.once("close", code => resolve(code ?? -1));
+    });
+    assert.equal(exitCode, 0, stderr);
+    assert.deepEqual(JSON.parse(stdout.trim()), { status: "skipped_locked", components: ["knowledge"] });
+    assert.equal(stderr, "");
+  } finally { rmSync(dataDir, { recursive: true, force: true }); }
+});
+
+test("worker exits safely when it cannot create its component lock", async () => {
+  const workerPath = fileURLToPath(new URL("../deploy/experience-learning/worker.ts", import.meta.url));
+  const dataDir = mkdtempSync(join(tmpdir(), "craft-learning-worker-lock-error-"));
+  writeFileSync(join(dataDir, "runtime"), "not-a-directory");
+  const child = spawn(process.execPath, ["--experimental-strip-types", workerPath, "--once"], { env: {
+    ...process.env, NODE_NO_WARNINGS: "1", CRAFT_DATA_DIR: dataDir, CRAFT_LEARNING_COMPONENTS: "knowledge",
+  }, stdio: ["ignore", "pipe", "pipe"] });
+  let stdout = "", stderr = "";
+  child.stdout.setEncoding("utf8").on("data", chunk => { stdout += chunk; });
+  child.stderr.setEncoding("utf8").on("data", chunk => { stderr += chunk; });
+  try {
+    const exitCode = await new Promise<number>((resolve, reject) => {
+      child.once("error", reject);
+      child.once("close", code => resolve(code ?? -1));
+    });
+    assert.equal(exitCode, 1);
+    assert.equal(stdout, "");
+    assert.equal(stderr, "Craft learning worker lock failed (Error).\n");
+  } finally { rmSync(dataDir, { recursive: true, force: true }); }
+});
+
+test("worker releases its component lock when MCP process construction fails", async () => {
+  const workerPath = fileURLToPath(new URL("../deploy/experience-learning/worker.ts", import.meta.url));
+  const dataDir = mkdtempSync(join(tmpdir(), "craft-learning-worker-spawn-error-"));
+  const child = spawn(process.execPath, ["--experimental-strip-types", workerPath, "--once"], { env: {
+    ...process.env, NODE_NO_WARNINGS: "1", CRAFT_DATA_DIR: dataDir, CRAFT_LEARNING_COMPONENTS: "knowledge",
+    CRAFT_EXPERIENCE_MCP_COMMAND: process.execPath, CRAFT_EXPERIENCE_MCP_ARGS: JSON.stringify(["\0"]),
+  }, stdio: ["ignore", "pipe", "pipe"] });
+  let stdout = "", stderr = "";
+  child.stdout.setEncoding("utf8").on("data", chunk => { stdout += chunk; });
+  child.stderr.setEncoding("utf8").on("data", chunk => { stderr += chunk; });
+  try {
+    const exitCode = await new Promise<number>((resolve, reject) => {
+      child.once("error", reject);
+      child.once("close", code => resolve(code ?? -1));
+    });
+    assert.equal(exitCode, 1);
+    assert.equal(stdout, "");
+    assert.equal(stderr, "Craft learning worker failed (TypeError).\n");
+    assert.equal(existsSync(join(dataDir, "runtime", "learning-worker-knowledge.lock.json")), false);
+  } finally { rmSync(dataDir, { recursive: true, force: true }); }
 });
 
 test("Worker links archived task indexes to exact Host verification Evidence", async () => {
@@ -686,6 +756,7 @@ test("worker CLI sanitizes startup failures from a missing MCP executable", asyn
   const workerPath = fileURLToPath(new URL("../deploy/experience-learning/worker.ts", import.meta.url));
   const child = spawn(process.execPath, ["--experimental-strip-types", workerPath, "--once"], { env: {
     ...process.env, NODE_NO_WARNINGS: "1", CRAFT_EXPERIENCE_MCP_COMMAND: "/definitely/missing/craft-mcp", CRAFT_EXPERIENCE_POLL_MS: "1000",
+    CRAFT_LEARNING_COMPONENT_LOCKS_HELD: "experience,knowledge",
   }, stdio: ["ignore", "pipe", "pipe"] });
   let stdout = "", stderr = "";
   child.stdout.setEncoding("utf8").on("data", chunk => { stdout += chunk; });

@@ -57,12 +57,15 @@ test("worker supervisor starts one worker per free component and skips overlappi
     assert.deepEqual(skips, ["worker_already_running"]);
     assert.deepEqual(JSON.parse(launches[0]!.env.CRAFT_EXPERIENCE_MCP_ARGS!), [realpathSync(f.server), "--product", "experience"]);
     assert.equal(launches[0]!.env.CRAFT_LEARNING_COMPONENTS, "experience");
+    assert.equal(launches[0]!.env.CRAFT_LEARNING_COMPONENT_LOCKS_HELD, "experience");
     assert.deepEqual(JSON.parse(launches[1]!.env.CRAFT_EXPERIENCE_MCP_ARGS!), [realpathSync(f.server), "--product", "knowledge"]);
     assert.equal(launches[1]!.env.CRAFT_LEARNING_COMPONENTS, "knowledge");
+    assert.equal(launches[1]!.env.CRAFT_LEARNING_COMPONENT_LOCKS_HELD, "knowledge");
     await Promise.all([stopExperience?.(), stopKnowledge?.()]);
     const stopContextAfterRelease = await startWorker(f, { mode: "component-context-agent", server_entrypoint: f.server, env: {}, spawn_process: spawnWorker });
     assert.deepEqual(JSON.parse(launches[2]!.env.CRAFT_EXPERIENCE_MCP_ARGS!), [realpathSync(f.server), "--surface", "component-context-complete"]);
     assert.equal(launches[2]!.env.CRAFT_LEARNING_COMPONENTS, "experience,knowledge");
+    assert.equal(launches[2]!.env.CRAFT_LEARNING_COMPONENT_LOCKS_HELD, "experience,knowledge");
     await stopContextAfterRelease?.();
     await stopContext?.();
     assert.equal(await startWorker(f, { mode: "component-memory-daily", server_entrypoint: f.server, env: {} }), undefined);

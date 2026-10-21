@@ -125,7 +125,8 @@ export async function startContextLearningWorker(options: LearningWorkerSupervis
   const selection = component.surface ? ["--surface", component.surface] : ["--product", component.product];
   const serverArgs = [...(launch.server_entrypoint.endsWith(".ts") ? ["--experimental-strip-types"] : []), launch.server_entrypoint, ...selection];
   const env = { ...options.env, CRAFT_CONTINUOUS_LEARNING: "0", CRAFT_EXPERIENCE_MCP_COMMAND: process.execPath,
-    CRAFT_EXPERIENCE_MCP_ARGS: JSON.stringify(serverArgs), CRAFT_LEARNING_COMPONENTS: component.learning };
+    CRAFT_EXPERIENCE_MCP_ARGS: JSON.stringify(serverArgs), CRAFT_LEARNING_COMPONENTS: component.learning,
+    CRAFT_LEARNING_COMPONENT_LOCKS_HELD: component.learning };
   const spawnProcess = options.spawn_process ?? spawn;
   const timeout = options.shutdown_timeout_ms ?? 3_000;
   if (!Number.isSafeInteger(timeout) || timeout < 1 || timeout > 60_000) throw new Error("shutdown_timeout_ms must be between 1 and 60000");
