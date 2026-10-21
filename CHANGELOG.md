@@ -1,3 +1,8 @@
+## v0.12.96（Worker 并发执行保护）
+
+- 独立 Worker 按能力获取运行锁，避免同一轮学习任务重复执行和重复调用模型。
+- 由 MCP 守护进程管理的 Worker 复用父进程持有的锁；启动失败或退出时释放本进程持有的锁。
+
 ## v0.12.95（修复会话证据对账工具未挂载）
 
 - 将 `craft_learning_cycle_task_evidence_list` 仅挂载到 Context Worker 的完整内部 Surface；用户侧 Context Agent 工具面仍不暴露该内部接口。
