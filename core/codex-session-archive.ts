@@ -490,12 +490,14 @@ export async function runCodexSessionCollectionOnce(options: CodexSessionCollect
       || candidate.size === previous.size && candidate.mtimeMs !== previous.mtime_ms);
     const backfillTaskGoalDigests = previous !== null && previous.task_goal_digest_version === undefined && !sourceChanged;
     const backfillVerificationArtifacts = previous !== null && previous.verification_artifact_index_version !== 1 && !sourceChanged;
-    const shouldRestart = sourceChanged || backfillTaskGoalDigests || backfillVerificationArtifacts || candidate.relocated;
+    const restartVerificationBackfill = backfillVerificationArtifacts && previous.processed_bytes >= previous.size;
+    const shouldRestart = sourceChanged || backfillTaskGoalDigests || restartVerificationBackfill || candidate.relocated;
     const current: SourceState = shouldRestart || !previous
       ? { size: candidate.size, mtime_ms: candidate.mtimeMs, processed_bytes: 0, session_id: null, project_scope_id: null, active_turn: null, task_ids: [],
         task_goal_digest_version: backfillTaskGoalDigests ? 0 : 1,
         verification_artifact_index_version: backfillVerificationArtifacts ? 0 : 1 }
-      : { ...previous, size: candidate.size, mtime_ms: candidate.mtimeMs };
+      : { ...previous, size: candidate.size, mtime_ms: candidate.mtimeMs,
+        ...(backfillVerificationArtifacts ? { verification_artifact_index_version: 0 as const } : {}) };
     if (sourceChanged && previous) removeSourceTasks(state, candidate.relativePath, previous, candidate.archived);
     const amount = Math.min(bytesLeft, Math.max(1, candidate.size - current.processed_bytes));
     const chunk = await readCodexSessionChunk(candidate.path, current.processed_bytes, candidate.size, amount);

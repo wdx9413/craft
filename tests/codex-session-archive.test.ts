@@ -221,6 +221,35 @@ test("backfills transcript evidence from unchanged indexed sessions without losi
   } finally { await rm(f.root, { recursive: true, force: true }); }
 });
 
+test("resumes partial transcript-evidence backfill from its persisted byte cursor", async () => {
+  const f = await fixture();
+  try {
+    const turn = f.turn("partial-backfill-turn", "验证大日志回填游标", "大日志已按预算持续处理");
+    turn.splice(4, 0, ...Array.from({ length: 80 }, () => f.event({ type: "unrelated_progress", turn_id: "partial-backfill-turn" })));
+    await f.writeSession(turn);
+    const env = { CODEX_HOME: join(f.root, "codex"), CRAFT_DATA_DIR: join(f.root, "data") } as NodeJS.ProcessEnv;
+    const options = { sessions_root: f.sessions, state_file: f.state, max_files: 1, max_bytes: 1_024 };
+    await runCodexSessionCollectionOnce(options, env);
+    const prior = JSON.parse(await readFile(f.state, "utf8")) as { sources: Record<string, JsonObject> };
+    const source = Object.values(prior.sources)[0]!;
+    delete source.verification_artifact_index_version;
+    await writeFile(f.state, JSON.stringify(prior));
+
+    const first = await runCodexSessionCollectionOnce(options, env);
+    const afterFirst = JSON.parse(await readFile(f.state, "utf8")) as { sources: Record<string, JsonObject> };
+    const firstOffset = Number(Object.values(afterFirst.sources)[0]!.processed_bytes);
+    assert.equal(Object.values(afterFirst.sources)[0]!.verification_artifact_index_version, 0);
+    assert.equal(first.status, "partial");
+
+    const second = await runCodexSessionCollectionOnce(options, env);
+    const afterSecond = JSON.parse(await readFile(f.state, "utf8")) as { sources: Record<string, JsonObject> };
+    const secondSource = Object.values(afterSecond.sources)[0]!;
+    assert.equal(second.status, "partial");
+    assert.ok(Number(secondSource.processed_bytes) > firstOffset, "the next pass must continue after the first byte cursor");
+    assert.equal(secondSource.verification_artifact_index_version, 0, "the source remains marked as a resumable backfill until complete");
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
 test("resumes legacy active turns that predate transcript artifact accumulation", async () => {
   const f = await fixture();
   try {
