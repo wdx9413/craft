@@ -45,7 +45,9 @@ test("the internal Context worker retains the complete component surfaces", () =
   for (const name of ["craft_context_open", "craft_knowledge_source_register", "craft_knowledge_session_evidence_record", "craft_memory_ledger_transition", "craft_procedure_host_control", "craft_codebase_impact_query"])
     assert(context.has(name), `craft-context must expose ${name}`);
   assert(context.has("craft_knowledge_semantic_review_packet"), "craft-context must expose the exact Knowledge review packet");
+  assert(context.has("craft_learning_cycle_task_evidence_list"), "the Context learning worker must reconcile archived session evidence");
   assert(!context.has("craft_verified_work_loop_prepare"), "the component composition must not widen to the entire Craft runtime");
+  assert(!surfaceToolNames("component-context-agent").includes("craft_learning_cycle_task_evidence_list"), "the internal evidence query must stay off the user-facing Context Agent surface");
 });
 
 test("standalone Knowledge daily surface exposes the model review packet needed for automatic claim promotion", () => {
@@ -230,13 +232,15 @@ test("the knowledge and memory products can bootstrap provenance, persist bounde
     const service = new CraftService(store); const knowledge = new McpServer(service, "component-knowledge"); const memory = new McpServer(service, "component-memory");
     assert.equal(service.info().data_space_id, dataSpaceId(root));
     assert.notEqual(dataSpaceId(root), dataSpaceId(`${root}-other`));
+    const projectIdentity = service.scopeIdentityResolveProject({ project_root: root }).identity as JsonObject;
+    const project = projectIdentity.canonical_scope as JsonObject;
     await knowledge.handlers.craft_knowledge_bootstrap_install({});
     const remembered = await memory.handlers.craft_memory_ledger_remember({
-      memory_id: "context-memory", source_id: "builtin.evidence-wiki", kind: "working", scope_kind: "project", scope_id: "demo", content: "Keep changes incremental.", confidence: "bounded",
+      memory_id: "context-memory", source_id: "builtin.evidence-wiki", kind: "working", scope_kind: "project", scope_id: String(project.id), content: "Keep changes incremental.", confidence: "bounded",
     });
     assert.equal((remembered.memory as { id: string }).id, "context-memory");
     const resolved = await memory.handlers.craft_context_resolution_resolve({
-      receipt_id: "context-receipt", query: "incremental change", scope_kind: "project", scope_id: "demo", memory_ids: ["context-memory"], max_items: 3, max_chars: 200,
+      receipt_id: "context-receipt", query: "incremental change", scope_kind: "project", scope_id: String(project.id), memory_ids: ["context-memory"], max_items: 3, max_chars: 200,
     });
     assert.equal((resolved.receipt as { id: string }).id, "context-receipt");
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
@@ -277,6 +281,10 @@ test("component McpServer cannot call tools outside its mounted boundary", async
     assert(!server.tools.some((tool) => tool.name === "craft_verified_work_loop_prepare"));
     const response = await server.handle({ id: 1, method: "tools/call", params: { name: "craft_verified_work_loop_prepare", arguments: {} } });
     assert.equal((response?.error as { code: number }).code, -32602);
+    const contextWorker = new McpServer(new CraftService(store), "component-context-complete");
+    assert(contextWorker.tools.some((tool) => tool.name === "craft_learning_cycle_task_evidence_list"));
+    const contextAgent = new McpServer(new CraftService(store), "component-context-agent");
+    assert(!contextAgent.tools.some((tool) => tool.name === "craft_learning_cycle_task_evidence_list"));
   } finally { store.close(); await rm(root, { recursive: true, force: true }); }
 });
 

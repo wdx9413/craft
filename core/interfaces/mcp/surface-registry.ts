@@ -131,7 +131,7 @@ export function surfaceToolNames(surface: string, activeTools: readonly Tool[], 
     return [...new Set([...direct, ...SYSCALL_VERBS, ...passthrough])];
   }
   if (surface === "component-context-complete") {
-    const names = new Set(["craft_info", "craft_context_open", "craft_context_tools_discover", ...Object.values(DAILY_COMPONENT_TOOLS).flat()]);
+    const names = new Set(["craft_info", "craft_context_open", "craft_context_tools_discover", "craft_learning_cycle_task_evidence_list", ...Object.values(DAILY_COMPONENT_TOOLS).flat()]);
     const components = ["component-knowledge", "component-memory", "component-experience", "component-codebase"] as const;
     return activeTools.filter(tool => names.has(tool.name) || components.some(component => COMPONENT_SURFACES[component].test(tool.name))).map(tool => tool.name);
   }

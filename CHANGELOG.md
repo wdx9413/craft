@@ -1,3 +1,9 @@
+## v0.12.95（修复会话证据对账工具未挂载）
+
+- 将 `craft_learning_cycle_task_evidence_list` 仅挂载到 Context Worker 的完整内部 Surface；用户侧 Context Agent 工具面仍不暴露该内部接口。
+- 复现 `.94` Worker 的会话索引可写入、后续 Evidence 对账却收到 `Unknown tool`；新增边界回归测试，Surface 注册文件行、分支、函数覆盖率 100%。
+- 本版本发布后继续核验真实历史回填、Knowledge 候选/留出评测、Memory/Experience 晋升与使用反馈，不把本地模拟视为真实 Host 产出。
+
 ## v0.12.94（会话证据回填游标恢复）
 
 - 修复旧 Codex 会话的测试证据索引在分段回填时重复从文件头开始的问题；大日志按字节预算持续前进，避免历史任务长期饥饿。
