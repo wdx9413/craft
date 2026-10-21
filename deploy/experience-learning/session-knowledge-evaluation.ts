@@ -78,7 +78,8 @@ export async function runSessionKnowledgeEvaluationOnce(deps: SessionKnowledgeEv
   const excerpt = await (deps.read_excerpt ?? readCodexSessionTaskExcerpt)(task.task_id, { ...deps.archive_options, expected_partition: "held_out" }, deps.env);
   const evidenceIds = Array.isArray(excerpt.evidence_ids) ? excerpt.evidence_ids : [];
   if (excerpt.status !== "ready" || excerpt.session_id !== task.session_id || excerpt.turn_id !== task.turn_id
-    || excerpt.project_scope_id !== task.project_scope_id || JSON.stringify(evidenceIds) !== JSON.stringify(task.verification_evidence_ids)) {
+    || excerpt.project_scope_id !== task.project_scope_id || excerpt.verification_source !== task.verification_source
+    || JSON.stringify(evidenceIds) !== JSON.stringify(task.verification_evidence_ids)) {
     state.processed_task_ids.push(String(task.task_id)); await writeState(path, state);
     return { status: "skipped", processed: 1, reason: "held_out_excerpt_unavailable", raw_content_stored: false };
   }

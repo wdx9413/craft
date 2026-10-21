@@ -9,12 +9,22 @@ export interface CodexTaskTranscriptRecord {
 const MAX_COMMAND_CHARS = 16_000;
 const MAX_OUTPUT_CHARS = 1_000_000;
 
+function commandScript(commandValue: unknown): string | null {
+  if (typeof commandValue === "string") return commandValue;
+  if (!Array.isArray(commandValue) || commandValue.length !== 3
+    || !["/bin/zsh", "/usr/bin/zsh", "/bin/bash", "/usr/bin/bash", "zsh", "bash"].includes(String(commandValue[0]))
+    || commandValue[1] !== "-lc" || typeof commandValue[2] !== "string") return null;
+  return commandValue[2];
+}
+
 function testRunner(commandValue: unknown): string | null {
-  if (typeof commandValue !== "string" || !commandValue.trim() || commandValue.length > MAX_COMMAND_CHARS
-    || /[\r\n\0`$;|<>]/u.test(commandValue)) return null;
-  let command = commandValue.trim();
+  const commandInput = commandScript(commandValue);
+  if (!commandInput || !commandInput.trim() || commandInput.length > MAX_COMMAND_CHARS
+    || /[\r\n\0`$;|<>]/u.test(commandInput)) return null;
+  let command = commandInput.trim();
   const directoryChange = /^cd\s+(?:"[^"\r\n]+"|'[^'\r\n]+'|[^\s;&|]+)\s*&&\s*/u.exec(command);
   if (directoryChange) command = command.slice(directoryChange[0].length).trim();
+  if (/[;&|<>`$]/u.test(command)) return null;
   const patterns: ReadonlyArray<[string, RegExp]> = [
     ["javascript", /^(?:(?:pnpm|npm|yarn|bun)(?:\s+run)?\s+test(?::[a-z0-9:_-]+)?|(?:pnpm|npx|yarn|bun)\s+(?:exec\s+)?(?:vitest|jest)(?:\s+run)?)\b/iu],
     ["javascript", /^node\s+--test\b/iu],
@@ -74,12 +84,13 @@ export function extractCodexSessionVerificationArtifacts(records: readonly Codex
         const commandItem = item as JsonObject;
         if (commandItem.type === "CommandExecution") {
           const command = commandItem.command;
+          const script = commandScript(command);
           const runner = testRunner(command);
           const output = outputText(commandItem.aggregated_output);
           const exitCode = commandItem.exit_code;
           const callId = commandItem.id;
-          if (runner && commandItem.status === "completed" && exitCode === 0 && output) {
-            const itemArtifact = artifact(runner, String(command), output, typeof callId === "string" ? callId : stableDigest({ command, output }));
+          if (runner && script && commandItem.status === "completed" && exitCode === 0 && output) {
+            const itemArtifact = artifact(runner, script, output, typeof callId === "string" ? callId : stableDigest({ command, output }));
             if (itemArtifact) artifacts.push(itemArtifact);
           }
         }

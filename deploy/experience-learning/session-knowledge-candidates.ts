@@ -109,10 +109,13 @@ export async function runSessionKnowledgeCandidateOnce(deps: SessionKnowledgeCan
   const tasks = batch.tasks as JsonObject[];
   const task = tasks.find(item => typeof item.task_id === "string" && !state.processed_task_ids.includes(item.task_id));
   if (!task) return { status: "idle", processed: 0, verified_candidates_pending: 0, raw_content_stored: false };
+  const transcriptEvidence = task.verification_source === "session_test_log";
+  const contextEvidenceComplete = Array.isArray(task.verification_evidence_ids) && task.verification_evidence_ids.length > 0
+    && typeof task.context_receipt_id === "string" && typeof task.verification_ref_digest === "string" && typeof task.terminal_identity_digest === "string";
+  const transcriptEvidenceComplete = transcriptEvidence && typeof task.verification_artifact_digest === "string"
+    && Number.isSafeInteger(task.verification_artifact_count) && Number(task.verification_artifact_count) > 0;
   if (typeof task.project_scope_id !== "string" || !/^project:[A-Za-z0-9_-]{1,96}$/u.test(task.project_scope_id)
-    || !Array.isArray(task.verification_evidence_ids) || task.verification_evidence_ids.length === 0
-    || typeof task.context_receipt_id !== "string" || typeof task.verification_ref_digest !== "string"
-    || typeof task.terminal_identity_digest !== "string") {
+    || !contextEvidenceComplete && !transcriptEvidenceComplete) {
     await recordTerminalSkip(path, state, task, "verified_project_evidence_incomplete");
     return { status: "skipped", processed: 1, reason: "verified_project_evidence_incomplete", raw_content_stored: false };
   }
@@ -121,6 +124,7 @@ export async function runSessionKnowledgeCandidateOnce(deps: SessionKnowledgeCan
   const excerptEvidenceIds = Array.isArray(excerpt.evidence_ids) ? excerpt.evidence_ids : [];
   if (excerpt.status !== "ready" || excerpt.session_id !== task.session_id || excerpt.turn_id !== task.turn_id
     || excerpt.project_scope_id !== task.project_scope_id || excerpt.verification_outcome !== "passed"
+    || excerpt.verification_source !== task.verification_source
     || JSON.stringify(excerptEvidenceIds) !== JSON.stringify(task.verification_evidence_ids)) {
     await recordTerminalSkip(path, state, task, "verified_task_excerpt_unavailable");
     return { status: "skipped", processed: 1, reason: "verified_task_excerpt_unavailable", raw_content_stored: false };
@@ -145,6 +149,7 @@ export async function runSessionKnowledgeCandidateOnce(deps: SessionKnowledgeCan
   const packet = { project_scope_id: task.project_scope_id, task_goal: excerpt.task_goal, task_result: excerpt.task_result,
     verification_outcome: excerpt.verification_outcome, verification_artifacts: verificationArtifacts,
     evidence_count: excerptEvidenceIds.length + 1, sanitized: true, content_stored: false };
+  const taskEvidenceIds = Array.isArray(task.verification_evidence_ids) ? task.verification_evidence_ids.filter((id): id is string => typeof id === "string") : [];
   const inputDigest = stableDigest({ purpose: "knowledge_session_candidate_generation.v1", task_id: task.task_id, packet });
   const modelFingerprint = stableDigest({ provider: provider.provider, model: profile.model });
   const system = `从已验证的项目任务中提炼一条可复用、可独立核实的项目知识候选。仅依据输入中的任务目标和结果，不补充未观察到的事实；若没有稳定、可验证的知识，返回 decision=skip。返回一个 JSON 对象，字段为 decision、kind、title、content、tags。所有可读文字使用中文。不得写入会话细节、个人信息、密钥、路径或代码。候选只供后续独立证据评审，不代表事实已确认。${generatedTextLanguageInstruction(deps.contentLanguage ?? "zh-CN")}`;
@@ -179,7 +184,7 @@ export async function runSessionKnowledgeCandidateOnce(deps: SessionKnowledgeCan
       verificationEvidenceId = String(verificationEvidence.id);
       const saved = await deps.client.call("craft_knowledge_claim_save", { claim_id: `knowledge_claim_${stableDigest(task.task_id).slice(-24)}`,
         kind: candidate.kind, title: candidate.title, content: candidate.content, scope: task.project_scope_id,
-        source_id: String(verificationEvidence.source_id), evidence_ids: [...task.verification_evidence_ids, verificationEvidenceId], tags: candidate.tags });
+        source_id: String(verificationEvidence.source_id), evidence_ids: [...taskEvidenceIds, verificationEvidenceId], tags: candidate.tags });
       const claim = object(saved.claim, "saved Knowledge Claim"); claimId = String(claim.id);
     }
     const resultDigest = stableDigest({ task_id: task.task_id, input_digest: inputDigest, claim_id: claimId,

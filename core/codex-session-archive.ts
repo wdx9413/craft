@@ -13,6 +13,7 @@ const DEFAULT_MAX_FILES = 25;
 const DEFAULT_MAX_BYTES = 20 * 1024 * 1024;
 const MAX_LINE_BYTES = 64 * 1024 * 1024;
 const MAX_TASK_EXCERPT_BYTES = 8 * 1024 * 1024;
+const SHA256 = /^sha256:[a-f0-9]{64}$/u;
 
 export interface CodexSessionCollectionOptions {
   readonly sessions_root?: string;
@@ -46,6 +47,8 @@ export interface CodexSessionTaskIndex {
   readonly verification_status: "unverified" | "verified";
   readonly raw_content_stored: false;
   readonly verification_evidence_ids?: readonly string[];
+  readonly verification_artifact_digest?: string;
+  readonly verification_artifact_count?: number;
   readonly verification_outcome?: "passed" | "failed";
   readonly context_receipt_id?: string;
   readonly verification_ref_digest?: string;
@@ -72,6 +75,7 @@ interface ActiveTurn {
   source_start_byte: number;
   source_end_byte: number;
   rolling_digest: string;
+  verification_artifacts: JsonObject[];
 }
 
 interface SourceState {
@@ -83,6 +87,7 @@ interface SourceState {
   active_turn: ActiveTurn | null;
   task_ids: string[];
   task_goal_digest_version?: 0 | 1;
+  verification_artifact_index_version?: 0 | 1;
 }
 
 interface CollectionState {
@@ -160,7 +165,7 @@ function recordFromLine(line: Buffer): ParsedRecord | null {
 }
 
 function activeTurn(state: SourceState, turnId: string, offset: number): ActiveTurn {
-  if (state.active_turn?.turn_id === turnId) return state.active_turn;
+  if (state.active_turn?.turn_id === turnId) return { ...state.active_turn, verification_artifacts: state.active_turn.verification_artifacts ?? [] };
   return {
     turn_id: turnId,
     project_scope_id: state.project_scope_id,
@@ -175,6 +180,7 @@ function activeTurn(state: SourceState, turnId: string, offset: number): ActiveT
     source_start_byte: offset,
     source_end_byte: offset,
     rolling_digest: hash(`${state.session_id ?? "unknown"}\0${turnId}`),
+    verification_artifacts: [],
   };
 }
 
@@ -209,6 +215,8 @@ function finalizeTurn(sourcePath: string, state: SourceState, tasks: Record<stri
     ...(turn.task_goal_digest ? { task_goal_digest: turn.task_goal_digest } : {}),
     verification_status: "unverified",
     raw_content_stored: false,
+    ...(turn.verification_artifacts.length ? { verification_artifact_digest: `sha256:${hash(JSON.stringify(turn.verification_artifacts))}`,
+      verification_artifact_count: turn.verification_artifacts.length } : {}),
   };
   const previous = tasks[taskId];
   // Archiving relocates identical bytes; it must not discard independently
@@ -217,7 +225,9 @@ function finalizeTurn(sourcePath: string, state: SourceState, tasks: Record<stri
     && previous.project_scope_id === task.project_scope_id ? { ...task,
       verification_status: previous.verification_status, verification_evidence_ids: previous.verification_evidence_ids,
       verification_outcome: previous.verification_outcome, context_receipt_id: previous.context_receipt_id,
-      verification_ref_digest: previous.verification_ref_digest, terminal_identity_digest: previous.terminal_identity_digest } : task;
+      verification_ref_digest: previous.verification_ref_digest, terminal_identity_digest: previous.terminal_identity_digest,
+      ...(task.verification_artifact_digest ? { verification_artifact_digest: task.verification_artifact_digest,
+        verification_artifact_count: task.verification_artifact_count } : {}) } : task;
   retainTask(state, task);
 }
 
@@ -284,6 +294,14 @@ function updateTurn(record: ParsedRecord | null, line: Buffer, offset: number, s
     if (payloadType === "function_call_output" || payloadType === "custom_tool_call_output") turn.tool_output_count++;
   }
 
+  if (recordType === "event_msg" && payloadType === "item_completed") {
+    const artifacts = extractCodexSessionVerificationArtifacts([{ record_type: "event_msg", payload: payload as JsonObject }]);
+    for (const artifact of artifacts) {
+      if (turn.verification_artifacts.length >= 8) break;
+      if (!turn.verification_artifacts.some(existing => existing.call_digest === artifact.call_digest)) turn.verification_artifacts.push(artifact);
+    }
+  }
+
   if (state.active_turn?.turn_id === turn.turn_id) state.active_turn = turn;
 }
 
@@ -300,6 +318,7 @@ function validateState(value: unknown, now: string): CollectionState {
       || source.project_scope_id !== null && typeof source.project_scope_id !== "string"
       || source.active_turn !== null && !object(source.active_turn)
       || source.task_goal_digest_version !== undefined && source.task_goal_digest_version !== 0 && source.task_goal_digest_version !== 1
+      || source.verification_artifact_index_version !== undefined && source.verification_artifact_index_version !== 0 && source.verification_artifact_index_version !== 1
       || !Array.isArray(source.task_ids) || source.task_ids.some(id => typeof id !== "string")) throw new Error("Codex session collection source state is invalid");
     sources[path] = source as unknown as SourceState;
   }
@@ -312,6 +331,9 @@ function validateState(value: unknown, now: string): CollectionState {
       || task.source_root !== undefined && task.source_root !== "archived_sessions"
       || task.verification_status !== "unverified" && task.verification_status !== "verified"
       || task.task_goal_digest !== undefined && (typeof task.task_goal_digest !== "string" || !/^sha256:[a-f0-9]{64}$/u.test(task.task_goal_digest))
+      || task.verification_artifact_digest !== undefined && (typeof task.verification_artifact_digest !== "string" || !SHA256.test(task.verification_artifact_digest))
+      || task.verification_artifact_count !== undefined && (!Number.isSafeInteger(task.verification_artifact_count) || Number(task.verification_artifact_count) < 1 || Number(task.verification_artifact_count) > 8)
+      || (task.verification_artifact_digest === undefined) !== (task.verification_artifact_count === undefined)
       || task.verification_evidence_ids !== undefined && (!Array.isArray(task.verification_evidence_ids) || task.verification_evidence_ids.some(id => typeof id !== "string"))) throw new Error("Codex session task index is invalid");
     const normalized = task as unknown as CodexSessionTaskIndex;
     tasks[id] = { ...normalized,
@@ -451,7 +473,8 @@ export async function runCodexSessionCollectionOnce(options: CodexSessionCollect
       const task = state.tasks[id];
       return task !== undefined && !availableSources.has(sourceKey(task.source_path, task.source_root === "archived_sessions"));
     });
-    if (prior && !relocated && prior.size === info.size && prior.mtime_ms === info.mtimeMs && prior.processed_bytes >= info.size && prior.task_goal_digest_version === 1) continue;
+    if (prior && !relocated && prior.size === info.size && prior.mtime_ms === info.mtimeMs && prior.processed_bytes >= info.size
+      && prior.task_goal_digest_version === 1 && prior.verification_artifact_index_version === 1) continue;
     candidates.push({ path, relativePath, key, archived, relocated, size: info.size, mtimeMs: info.mtimeMs, prior });
   }
   // Oldest sources first ensure a stream of newly-created sessions cannot
@@ -466,12 +489,14 @@ export async function runCodexSessionCollectionOnce(options: CodexSessionCollect
     const sourceChanged = previous !== null && (candidate.size < previous.size
       || candidate.size === previous.size && candidate.mtimeMs !== previous.mtime_ms);
     const backfillTaskGoalDigests = previous !== null && previous.task_goal_digest_version === undefined && !sourceChanged;
-    const shouldRestart = sourceChanged || backfillTaskGoalDigests || candidate.relocated;
+    const backfillVerificationArtifacts = previous !== null && previous.verification_artifact_index_version !== 1 && !sourceChanged;
+    const shouldRestart = sourceChanged || backfillTaskGoalDigests || backfillVerificationArtifacts || candidate.relocated;
     const current: SourceState = shouldRestart || !previous
       ? { size: candidate.size, mtime_ms: candidate.mtimeMs, processed_bytes: 0, session_id: null, project_scope_id: null, active_turn: null, task_ids: [],
-        task_goal_digest_version: backfillTaskGoalDigests ? 0 : 1 }
+        task_goal_digest_version: backfillTaskGoalDigests ? 0 : 1,
+        verification_artifact_index_version: backfillVerificationArtifacts ? 0 : 1 }
       : { ...previous, size: candidate.size, mtime_ms: candidate.mtimeMs };
-    if (shouldRestart && previous) removeSourceTasks(state, candidate.relativePath, previous, candidate.archived);
+    if (sourceChanged && previous) removeSourceTasks(state, candidate.relativePath, previous, candidate.archived);
     const amount = Math.min(bytesLeft, Math.max(1, candidate.size - current.processed_bytes));
     const chunk = await readCodexSessionChunk(candidate.path, current.processed_bytes, candidate.size, amount);
     const oldOffset = current.processed_bytes;
@@ -480,6 +505,7 @@ export async function runCodexSessionCollectionOnce(options: CodexSessionCollect
     malformedLines += update.malformed_lines;
     current.processed_bytes = nextOffset;
     if (current.processed_bytes >= candidate.size) current.task_goal_digest_version = 1;
+    if (current.processed_bytes >= candidate.size) current.verification_artifact_index_version = 1;
     if (chunk.bytes.length === 0 && nextOffset === oldOffset && oldOffset < candidate.size) {
       // A final non-newline JSONL record is reread next pass so a later append
       // cannot split or lose an event.
@@ -513,6 +539,7 @@ export async function runCodexSessionCollectionOnce(options: CodexSessionCollect
     tasks_held_out: indexed.filter(task => task.dataset_partition === "held_out").length,
     tasks_with_user_input: indexed.filter(task => task.user_input_seen).length,
     tasks_verified: indexed.filter(task => task.verification_status === "verified").length,
+    tasks_with_test_evidence: indexed.filter(task => task.verification_artifact_count !== undefined).length,
     malformed_lines: malformedLines,
     raw_content_stored: false,
     state_file: outputPath,
@@ -538,9 +565,14 @@ export async function codexSessionTaskBatch(partition: "candidate_generation" | 
   if (partition !== "candidate_generation" && partition !== "held_out") throw new Error("partition is unsupported");
   const state = await readState(statePath(options, env), options.now ?? new Date().toISOString());
   const allTasks = Object.values(state.tasks);
-  const eligibleTasks = allTasks.filter(task => task.dataset_partition === partition && task.status === "completed"
-    && task.verification_status === "verified" && task.assistant_final_seen && task.verification_evidence_ids?.length
-    && (partition !== "candidate_generation" || task.verification_outcome === "passed"));
+  const eligibleTasks = allTasks.filter(task => {
+    const contextVerified = task.verification_status === "verified" && Boolean(task.verification_evidence_ids?.length);
+    const transcriptVerified = typeof task.verification_artifact_digest === "string"
+      && typeof task.verification_artifact_count === "number" && task.verification_artifact_count > 0;
+    const outcomePassed = task.verification_outcome === "passed" || transcriptVerified;
+    return task.dataset_partition === partition && task.status === "completed" && task.assistant_final_seen
+      && (contextVerified || transcriptVerified) && (partition !== "candidate_generation" || outcomePassed);
+  });
   const overlappingTasks = eligibleTasks.filter(task => task.task_goal_digest && task.project_scope_id
     && allTasks.some(other => other.task_id !== task.task_id && other.project_scope_id === task.project_scope_id
       && other.task_goal_digest === task.task_goal_digest && other.dataset_partition !== task.dataset_partition));
@@ -549,7 +581,10 @@ export async function codexSessionTaskBatch(partition: "candidate_generation" | 
   return { tasks: tasks.map(task => ({ task_id: task.task_id, session_id: task.session_id, turn_id: task.turn_id,
     project_scope_id: task.project_scope_id, dataset_partition: task.dataset_partition, dataset_split_version: task.dataset_split_version,
     task_goal_digest: task.task_goal_digest ?? null,
-    verification_evidence_ids: task.verification_evidence_ids, verification_outcome: task.verification_outcome,
+    verification_evidence_ids: task.verification_evidence_ids ?? [], verification_outcome: task.verification_outcome ?? "passed",
+    verification_source: task.verification_status === "verified" && task.verification_evidence_ids?.length ? "context_receipt" : "session_test_log",
+    verification_artifact_digest: task.verification_artifact_digest ?? null,
+    verification_artifact_count: task.verification_artifact_count ?? 0,
     context_receipt_id: task.context_receipt_id ?? null, verification_ref_digest: task.verification_ref_digest ?? null,
     terminal_identity_digest: task.terminal_identity_digest ?? null, source_ref: task.source_ref, completed_at: task.completed_at,
     content_stored: false, raw_content_stored: false })),
@@ -635,7 +670,10 @@ export async function readCodexSessionTaskExcerpt(taskIdValue: unknown, options:
   if (options.expected_partition !== "candidate_generation" && options.expected_partition !== "held_out") throw new Error("expected_partition is unsupported");
   const state = await readState(statePath(options, env), options.now ?? new Date().toISOString());
   const task = state.tasks[taskIdValue.trim()];
-  if (!task || task.status !== "completed" || task.verification_status !== "verified" || !task.assistant_final_seen
+  const contextVerified = task?.verification_status === "verified" && Boolean(task.verification_evidence_ids?.length);
+  const transcriptVerified = typeof task?.verification_artifact_digest === "string"
+    && typeof task.verification_artifact_count === "number" && task.verification_artifact_count > 0;
+  if (!task || task.status !== "completed" || (!contextVerified && !transcriptVerified) || !task.assistant_final_seen
     || task.dataset_partition !== options.expected_partition) {
     return { status: "ineligible", reason: "task_not_verified_or_partition_mismatch", raw_content_stored: false };
   }
@@ -698,9 +736,15 @@ export async function readCodexSessionTaskExcerpt(taskIdValue: unknown, options:
   if (`sha256:${rollingDigest}` !== task.source_ref) return { status: "ineligible", reason: "task_source_digest_mismatch", raw_content_stored: false };
   if (!taskGoal || !taskResult) return { status: "ineligible", reason: "sanitized_task_summary_unavailable", raw_content_stored: false };
   const verificationArtifacts = extractCodexSessionVerificationArtifacts(verificationRecords);
+  if (transcriptVerified && (verificationArtifacts.length !== task.verification_artifact_count
+    || `sha256:${hash(JSON.stringify(verificationArtifacts))}` !== task.verification_artifact_digest)) {
+    return { status: "ineligible", reason: "transcript_test_evidence_digest_mismatch", raw_content_stored: false };
+  }
   return { status: "ready", task_id: task.task_id, session_id: task.session_id, turn_id: task.turn_id,
     project_scope_id: task.project_scope_id, dataset_partition: task.dataset_partition, dataset_split_version: task.dataset_split_version,
-    source_ref: task.source_ref, evidence_ids: task.verification_evidence_ids ?? [], verification_outcome: task.verification_outcome,
+    source_ref: task.source_ref, evidence_ids: task.verification_evidence_ids ?? [],
+    verification_outcome: task.verification_outcome ?? (transcriptVerified ? "passed" : undefined),
+    verification_source: contextVerified ? "context_receipt" : "session_test_log",
     task_goal: taskGoal, task_result: taskResult, verification_artifacts: verificationArtifacts,
     sanitized: true, content_stored: false, raw_content_stored: false };
 }

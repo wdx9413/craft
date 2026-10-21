@@ -16,7 +16,8 @@ import type { ExperienceLearningClient } from "../deploy/experience-learning/wor
 const provider: ModelProviderSpec = { provider: "test", label: "test", protocol: "openai-compatible", base_url: "https://example.invalid/v1",
   api_key_env: "TEST_KEY", chat_path: "/chat/completions", models: { standard: "test-model" }, cost_hint: 0, supports_tools: false };
 
-async function setup(partition: "candidate_generation" | "held_out" = "candidate_generation", includeVerification = true) {
+async function setup(partition: "candidate_generation" | "held_out" = "candidate_generation", includeVerification = true,
+  includeContextEvidence = true, transcriptCommand = false) {
   const root = await mkdtemp(join(tmpdir(), "craft-session-knowledge-"));
   const project = join(root, "project"), sessions = join(root, "sessions"), state = join(root, "runtime", "sessions.json");
   const workerState = join(root, "knowledge", "session-candidates.json"), source = join(sessions, "session.jsonl");
@@ -32,10 +33,13 @@ async function setup(partition: "candidate_generation" | "held_out" = "candidate
       { type: "text", text: "Process exited with code 0" }, { type: "text", text: "Tests 1 passed (1)" },
     ] }),
   ] : [];
+  const transcriptVerification = transcriptCommand ? [event({ type: "item_completed", turn_id: "turn-1", item: { type: "CommandExecution", id: "command-1",
+    command: ["/bin/zsh", "-lc", `cd '${project}' && pnpm test`], aggregated_output: [{ type: "text", text: "Tests 1 passed (1)" }],
+    exit_code: 0, status: "completed" } })] : [];
   const lines = [JSON.stringify({ type: "session_meta", payload: { session_id: sessionId, cwd: project } }),
     event({ type: "task_started", turn_id: "turn-1", started_at: "2026-10-20T00:00:00Z" }),
     response({ type: "message", role: "user", content: [{ type: "input_text", text: "整理项目依赖升级的验证流程" }] }),
-    ...verification,
+    ...verification, ...transcriptVerification,
     response({ type: "message", role: "assistant", phase: "final_answer", content: [{ type: "output_text", text: "本次已验证依赖升级后运行单测并检查锁文件" }] }),
     event({ type: "task_complete", turn_id: "turn-1", completed_at: "2026-10-20T00:01:00Z" })];
   await writeFile(source, `${lines.join("\n")}\n`);
@@ -45,7 +49,7 @@ async function setup(partition: "candidate_generation" | "held_out" = "candidate
   const evidence = { evidence_id: "evidence-session-task", host: "codex-cli", session_id: sessionId, turn_id: "turn-1", task_id: task.task_id,
     context_receipt_id: "context-receipt", verification_ref_digest: `sha256:${"a".repeat(64)}`,
     terminal_identity_digest: `sha256:${"b".repeat(64)}`, verification_outcome: "passed", verified: true, content_stored: false };
-  await reconcileCodexSessionTaskEvidence([evidence], { sessions_root: sessions, state_file: state });
+  if (includeContextEvidence) await reconcileCodexSessionTaskEvidence([evidence], { sessions_root: sessions, state_file: state });
   return { root, project, sessions, state, workerState, source, task, sessionId };
 }
 
@@ -168,6 +172,24 @@ test("creates one Chinese Knowledge candidate from a verified generation task an
   } finally { await rm(f.root, { recursive: true, force: true }); }
 });
 
+test("creates a candidate from a transcript test result without requiring a Context receipt", async () => {
+  const f = await setup("candidate_generation", false, false, true);
+  try {
+    const fixture = workerClient(), modelInputs: string[] = [];
+    const result = await runSessionKnowledgeCandidateOnce({ client: fixture.client, providers: [provider], transport: modelTransport(
+      JSON.stringify({ decision: "candidate", kind: "rule", title: "依赖升级验证", content: "升级后运行单测并检查锁文件。", tags: ["验证"] }), modelInputs),
+      state_file: f.workerState, archive_options: { sessions_root: f.sessions, state_file: f.state } });
+    assert.equal(result.status, "candidate_created");
+    assert.equal(modelInputs.length, 1);
+    const save = fixture.calls.find(call => call.name === "craft_knowledge_claim_save")!;
+    assert.deepEqual(save.args.evidence_ids, ["evidence-session-program"]);
+    const evidence = fixture.calls.find(call => call.name === "craft_knowledge_session_evidence_record")!;
+    assert.equal(evidence.args.source_session_id, f.sessionId);
+    assert.equal((evidence.args.verification_artifacts as JsonObject[]).length, 1);
+    assert.equal(JSON.stringify(fixture.calls).includes("pnpm test"), false);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
 test("held-out sessions are never passed to candidate generation", async () => {
   const f = await setup("held_out");
   try {
@@ -226,7 +248,7 @@ test("records a terminal skip when the verified excerpt has no structured artifa
     const result = await runSessionKnowledgeCandidateOnce({ client: fixture.client, state_file: f.workerState,
       read_excerpt: async () => ({ status: "ready", session_id: task.session_id, turn_id: task.turn_id,
         project_scope_id: task.project_scope_id, verification_outcome: "passed", evidence_ids: task.verification_evidence_ids,
-        source_ref: task.source_ref, task_goal: "已验证的任务目标", task_result: "已验证的结果" }),
+        verification_source: task.verification_source, source_ref: task.source_ref, task_goal: "已验证的任务目标", task_result: "已验证的结果" }),
       archive_options: { sessions_root: f.sessions, state_file: f.state } });
     assert.equal(result.reason, "verifiable_test_result_unavailable");
     assert.equal(fixture.calls.length, 0);
@@ -259,6 +281,26 @@ test("held-out task creates a separately labeled evaluation case and preserves i
     assert.equal(JSON.stringify(trace).includes("本次已验证"), false);
     assert.equal((await runSessionKnowledgeEvaluationOnce({ client: fixture.client, providers: [provider], transport: modelTransport("{}"),
       state_file: f.workerState, archive_options: { sessions_root: f.sessions, state_file: f.state } })).status, "idle");
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("held-out transcript evidence creates a separate evaluation case without mixing generation evidence", async () => {
+  const f = await setup("held_out", false, false, true);
+  try {
+    const fixture = reviewedClaimClient(f.task.project_scope_id, {
+      craft_knowledge_evaluation_case_save: args => ({ case: { id: args.case_id, evaluation_eligible: false } }),
+      craft_knowledge_evaluation_run: () => ({ run: { id: "run-session-test", metrics: { provenance_eligible: false } } }),
+    });
+    const result = await runSessionKnowledgeEvaluationOnce({ client: fixture.client, providers: [provider],
+      transport: modelTransport(JSON.stringify({ decision: "labeled", expected_claim_ids: ["reviewed-claim"] })),
+      state_file: f.workerState, archive_options: { sessions_root: f.sessions, state_file: f.state } });
+    assert.equal(result.status, "case_candidate_created");
+    assert.equal(result.label_source, "model_candidate");
+    const saved = fixture.calls.find(call => call.name === "craft_knowledge_evaluation_case_save")!;
+    assert.deepEqual(saved.args.source_evidence_ids, ["evidence-session-program"]);
+    assert.equal(saved.args.dataset_partition, "held_out");
+    assert.equal(saved.args.source_session_id, f.sessionId);
+    assert.equal(fixture.calls.some(call => call.name === "craft_knowledge_session_evidence_record"), true);
   } finally { await rm(f.root, { recursive: true, force: true }); }
 });
 

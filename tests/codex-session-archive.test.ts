@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { codexTaskGoalDigest } from "../core/codex-task-prose.ts";
+import type { JsonObject } from "../core/infrastructure/store.ts";
 import type { CodexSessionTaskIndex } from "../core/codex-session-archive.ts";
 import { codexSessionEvidenceBatch, codexSessionTaskBatch, commitCodexSessionEvidenceBatch, readCodexSessionChunk, readCodexSessionTaskExcerpt, reconcileCodexSessionTaskEvidence, runCodexSessionCollectionOnce } from "../core/codex-session-archive.ts";
 
@@ -153,6 +154,112 @@ test("indexes completed turns incrementally without copying conversation text", 
     const partitioned = Object.values(JSON.parse(await readFile(f.state, "utf8")).tasks as Record<string, { dataset_partition: string; dataset_split_version: string }>);
     assert.equal(new Set(partitioned.map(task => task.dataset_partition)).size, 1);
     assert.equal(partitioned.every(task => task.dataset_split_version === "codex-session-split-v1"), true);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("indexes digest-only evidence from completed Codex shell test commands for its split batch", async () => {
+  const f = await fixture();
+  try {
+    const command = `cd '${f.project}' && pnpm test`;
+    const summary = "Tests 3 passed (3)";
+    const turn = f.turn("test-evidence-turn", "整理项目测试验证流程", "依赖调整后通过测试");
+    turn.splice(turn.length - 1, 0, ...Array.from({ length: 10 }, (_, index) => f.event({ type: "item_completed", turn_id: "test-evidence-turn",
+      item: { type: "CommandExecution", id: `command-${index}`, command: ["/bin/zsh", "-lc", command],
+        aggregated_output: [{ type: "text", text: summary }], exit_code: 0, status: "completed" } })));
+    await f.writeSession(turn);
+    const env = { CRAFT_DATA_DIR: join(f.root, "data") } as NodeJS.ProcessEnv;
+    const options = { sessions_root: f.sessions, state_file: f.state };
+    await runCodexSessionCollectionOnce(options, env);
+    const state = JSON.parse(await readFile(f.state, "utf8")) as { tasks: Record<string, CodexSessionTaskIndex> };
+    const task = Object.values(state.tasks)[0]!;
+    assert.equal(task.verification_status, "unverified", "transcript evidence remains distinct from a Context receipt");
+    assert.equal(task.verification_artifact_count, 8, "the archive retains only the first eight successful tests");
+    assert.match(String(task.verification_artifact_digest), /^sha256:[a-f0-9]{64}$/u);
+    assert.doesNotMatch(await readFile(f.state, "utf8"), /pnpm test|Tests 3 passed/u);
+    const batch = await codexSessionTaskBatch(task.dataset_partition, options, env);
+    const candidate = (batch.tasks as JsonObject[])[0]!;
+    assert.equal(candidate.task_id, task.task_id);
+    assert.equal(candidate.verification_source, "session_test_log");
+    assert.deepEqual(candidate.verification_evidence_ids, []);
+    const excerpt = await readCodexSessionTaskExcerpt(task.task_id,
+      { ...options, expected_partition: task.dataset_partition }, env);
+    assert.equal(excerpt.status, "ready");
+    assert.equal(excerpt.verification_source, "session_test_log");
+    assert.equal((excerpt.verification_artifacts as JsonObject[]).length, 8);
+    assert.equal(excerpt.raw_content_stored, false);
+
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("backfills transcript evidence from unchanged indexed sessions without losing Context verification", async () => {
+  const f = await fixture();
+  try {
+    const turn = f.turn("migrated-test-turn", "迁移会话索引并验证测试结果", "索引迁移后验证继续可追溯");
+    turn.splice(turn.length - 1, 0, f.event({ type: "item_completed", turn_id: "migrated-test-turn", item: { type: "CommandExecution",
+      id: "migration-test", command: ["/bin/zsh", "-lc", `cd '${f.project}' && pnpm test`], aggregated_output: "Tests 2 passed (2)",
+      exit_code: 0, status: "completed" } }));
+    await f.writeSession(turn);
+    const options = { sessions_root: f.sessions, state_file: f.state };
+    await runCodexSessionCollectionOnce(options);
+    await reconcileCodexSessionTaskEvidence([{ evidence_id: "context-evidence", session_id: "session-a", turn_id: "migrated-test-turn",
+      context_receipt_id: "context-receipt", verification_ref_digest: `sha256:${"a".repeat(64)}`,
+      terminal_identity_digest: `sha256:${"b".repeat(64)}`, verification_outcome: "passed", verified: true, content_stored: false }], options);
+    const prior = JSON.parse(await readFile(f.state, "utf8")) as { sources: Record<string, JsonObject>; tasks: Record<string, JsonObject> };
+    const source = Object.values(prior.sources)[0]!;
+    source.verification_artifact_index_version = 0;
+    const task = Object.values(prior.tasks)[0]!;
+    delete task.verification_artifact_digest;
+    delete task.verification_artifact_count;
+    await writeFile(f.state, JSON.stringify(prior));
+    const migration = await runCodexSessionCollectionOnce(options);
+    assert.equal(migration.sessions_processed, 1);
+    const updated = JSON.parse(await readFile(f.state, "utf8")) as { tasks: Record<string, CodexSessionTaskIndex> };
+    const result = Object.values(updated.tasks)[0]!;
+    assert.equal(result.verification_status, "verified");
+    assert.deepEqual(result.verification_evidence_ids, ["context-evidence"]);
+    assert.equal(result.verification_artifact_count, 1);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("resumes legacy active turns that predate transcript artifact accumulation", async () => {
+  const f = await fixture();
+  try {
+    await f.writeSession([f.event({ type: "task_started", turn_id: "legacy-active-turn" }),
+      f.response({ type: "message", role: "user", content: [{ type: "input_text", text: "继续验证项目测试结果" }] })]);
+    const options = { sessions_root: f.sessions, state_file: f.state };
+    await runCodexSessionCollectionOnce(options);
+    const state = JSON.parse(await readFile(f.state, "utf8")) as { sources: Record<string, JsonObject> };
+    const source = Object.values(state.sources)[0]!;
+    delete ((source.active_turn as JsonObject).verification_artifacts);
+    await writeFile(f.state, JSON.stringify(state));
+    await appendFile(f.file, [f.event({ type: "item_completed", turn_id: "legacy-active-turn", item: { type: "CommandExecution",
+      id: "legacy-test", command: ["/bin/zsh", "-lc", `cd '${f.project}' && pnpm test`], aggregated_output: "Tests 2 passed (2)",
+      exit_code: 0, status: "completed" } }), f.response({ type: "message", role: "assistant", phase: "final_answer",
+        content: [{ type: "output_text", text: "已完成测试验证并确认结果稳定" }] }),
+      f.event({ type: "task_complete", turn_id: "legacy-active-turn", completed_at: "2026-10-20T00:02:00Z" })].join("\n") + "\n");
+    await runCodexSessionCollectionOnce(options);
+    const resumed = JSON.parse(await readFile(f.state, "utf8")) as { tasks: Record<string, CodexSessionTaskIndex> };
+    assert.equal(Object.values(resumed.tasks)[0]?.verification_artifact_count, 1);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("rejects transcript evidence when its indexed digest no longer matches the source task", async () => {
+  const f = await fixture();
+  try {
+    const turn = f.turn("tampered-artifact-turn", "验证任务测试证据摘要", "测试结果已经确认通过");
+    turn.splice(turn.length - 1, 0, f.event({ type: "item_completed", turn_id: "tampered-artifact-turn", item: { type: "CommandExecution",
+      id: "digest-test", command: ["/bin/zsh", "-lc", `cd '${f.project}' && pnpm test`], aggregated_output: "Tests 2 passed (2)",
+      exit_code: 0, status: "completed" } }));
+    await f.writeSession(turn);
+    const options = { sessions_root: f.sessions, state_file: f.state };
+    await runCodexSessionCollectionOnce(options);
+    const state = JSON.parse(await readFile(f.state, "utf8")) as { tasks: Record<string, JsonObject> };
+    const task = Object.values(state.tasks)[0]!;
+    task.verification_artifact_digest = `sha256:${"c".repeat(64)}`;
+    await writeFile(f.state, JSON.stringify(state));
+    const excerpt = await readCodexSessionTaskExcerpt(task.task_id, { ...options, expected_partition: task.dataset_partition as "candidate_generation" | "held_out" });
+    assert.equal(excerpt.status, "ineligible");
+    assert.equal(excerpt.reason, "transcript_test_evidence_digest_mismatch");
   } finally { await rm(f.root, { recursive: true, force: true }); }
 });
 
@@ -511,7 +618,8 @@ test("binds only exact content-free terminal evidence to an archived task", asyn
     assert.equal(indexed.tasks_verified, 0);
     const taskId = Object.keys(JSON.parse(await readFile(f.state, "utf8")).tasks as Record<string, unknown>)[0]!;
     const taskBeforeVerification = await readCodexSessionTaskExcerpt(taskId, { sessions_root: f.sessions, state_file: f.state, expected_partition: "candidate_generation" });
-    assert.equal(taskBeforeVerification.status, "ineligible");
+    assert.equal(taskBeforeVerification.status, "ready", "an exact successful test event is independently attributable to the source task");
+    assert.equal(taskBeforeVerification.verification_source, "session_test_log");
     const batch = await codexSessionEvidenceBatch({ state_file: f.state });
     assert.deepEqual(batch.session_ids, ["session-a"]);
     const evidence = [{ evidence_id: "evidence-terminal", session_id: "session-a", turn_id: "verified-turn", task_id: "hook-task",
@@ -660,7 +768,7 @@ test("keeps legacy optional task provenance readable and fails closed when goal 
     await f.writeSession([...f.turn("verified-turn", "完成本轮已经验证的任务"), ...f.turn("pending-turn", "完成本轮等待验证任务")]);
     await runCodexSessionCollectionOnce({ sessions_root: f.sessions, state_file: f.state });
     const state = JSON.parse(await readFile(f.state, "utf8"));
-    const verified = Object.values(state.tasks as Record<string, { turn_id: string; task_goal_digest?: string; dataset_partition: "candidate_generation" | "held_out" }>).find(task => task.turn_id === "verified-turn")!;
+    const verified = Object.values(state.tasks as Record<string, { task_id: string; turn_id: string; task_goal_digest?: string; dataset_partition: "candidate_generation" | "held_out" }>).find(task => task.turn_id === "verified-turn")!;
     const pending = Object.values(state.tasks as Record<string, { turn_id: string; task_goal_digest?: string }>).find(task => task.turn_id === "pending-turn")!;
     const evidence = { evidence_id: "evidence-exact-only", session_id: "session-a", turn_id: "verified-turn",
       context_receipt_id: "receipt-legacy", verification_ref_digest: `sha256:${"a".repeat(64)}`,
@@ -678,6 +786,12 @@ test("keeps legacy optional task provenance readable and fails closed when goal 
     assert.equal(returned.context_receipt_id, null);
     assert.equal(returned.verification_ref_digest, null);
     assert.equal(returned.terminal_identity_digest, null);
+    delete verifiedRecord.verification_outcome;
+    await writeFile(f.state, JSON.stringify(persisted));
+    const excerpt = await readCodexSessionTaskExcerpt(verified.task_id, { sessions_root: f.sessions,
+      state_file: f.state, expected_partition: verified.dataset_partition });
+    assert.equal(excerpt.status, "ready");
+    assert.equal(excerpt.verification_outcome, undefined, "legacy verified records without an outcome remain readable");
     assert.equal(pending.task_goal_digest !== undefined, true);
     assert.equal((await reconcileCodexSessionTaskEvidence([], { state_file: f.state })).tasks_verified, 0);
   } finally { await rm(f.root, { recursive: true, force: true }); }

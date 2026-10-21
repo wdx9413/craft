@@ -78,6 +78,27 @@ test("accepts Codex structured CommandExecution completions without storing comm
   assert.equal(capped.length, 8);
 });
 
+test("unwraps only bounded login-shell command arrays used by Codex CommandExecution records", () => {
+  const command = "cd '/repo/craft' && pnpm test";
+  const summary = "Tests 12 passed (12)";
+  const artifacts = extractCodexSessionVerificationArtifacts([
+    completedCommand("wrapped-command", ["/bin/zsh", "-lc", command], summary),
+    completedCommand("bash-command", ["/bin/bash", "-lc", "go test ./..."], "ok example/pkg 0.01s"),
+  ]);
+  assert.deepEqual(artifacts.map(item => item.runner), ["javascript", "go"]);
+  assert.equal(artifacts[0]?.command_digest, stableDigest(command));
+  assert.doesNotMatch(JSON.stringify(artifacts), /\/repo\/craft|pnpm test|Tests 12 passed/u);
+});
+
+test("rejects unknown shell wrappers and chained commands after the test runner", () => {
+  assert.deepEqual(extractCodexSessionVerificationArtifacts([
+    completedCommand("unknown-shell", ["/tmp/zsh", "-lc", "pnpm test"], "Tests 1 passed (1)"),
+    completedCommand("chained-command", ["/bin/zsh", "-lc", "pnpm test && echo done"], "Tests 1 passed (1)"),
+    completedCommand("wrong-flags", ["/bin/zsh", "-c", "pnpm test"], "Tests 1 passed (1)"),
+    completedCommand("extra-argv", ["/bin/zsh", "-lc", "pnpm test", "extra"], "Tests 1 passed (1)"),
+  ]), []);
+});
+
 test("rejects incomplete, failed, non-test, and unsuccessful structured CommandExecution records", () => {
   assert.deepEqual(extractCodexSessionVerificationArtifacts([
     { record_type: "event_msg", payload: { type: "item_completed", item: null } },

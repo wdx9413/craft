@@ -307,10 +307,10 @@ try {
   assert(existsSync(paths.knowledgeDatabaseFile), "Knowledge artifacts must persist in the central .craft_data/knowledge store");
   assert(isUnder(join(projectRoot, ".craft_data", "knowledge", "md"), (promotedKnowledgeClaim!.content_ref as JsonObject | undefined)?.path),
     "Project-scoped Knowledge Markdown must stay under that project's .craft_data/knowledge/md directory");
-  assert(isUnder(paths.experienceContentDir, (routeable!.content_ref as JsonObject | undefined)?.path),
-    "Experience review content must stay under the central .craft_data/experience directory");
-  assert(isUnder(join(paths.experienceDir, "graph"), (routeable!.definition_ref as JsonObject | undefined)?.path),
-    "Experience executable definitions must stay under the central .craft_data/experience/graph directory");
+  assert(isUnder(join(projectRoot, ".craft_data", "experience", "md"), (routeable!.content_ref as JsonObject | undefined)?.path),
+    "Project-scoped Experience review content must stay under that project's .craft_data/experience/md directory");
+  assert(isUnder(join(projectRoot, ".craft_data", "experience", "graph"), (routeable!.definition_ref as JsonObject | undefined)?.path),
+    "Project-scoped Experience definitions must stay under that project's .craft_data/experience/graph directory");
   assert.deepEqual(tracedCalls, expectedCalls, "worker model, submission, evaluation and Knowledge calls must be traced");
   assert.equal(await providerCallCount(), 1, "the packaged worker must execute one model request against the local fixture");
 
@@ -508,10 +508,10 @@ try {
       assert.deepEqual(calls, new Set(expected), "Context Experience ticket, distillation, submission and evaluation calls must be traced");
       assert.equal(Number((JSON.parse(await readFile(standaloneExperienceState, "utf8")) as JsonObject).calls), 1,
         "Context Experience must send one bounded provider request to the local model fixture");
-      assert(isUnder(standalonePaths.experienceContentDir, (procedure!.content_ref as JsonObject | undefined)?.path),
-        "Context Experience review content must remain under .craft_data/experience");
-      assert(isUnder(join(standalonePaths.experienceDir, "graph"), (procedure!.definition_ref as JsonObject | undefined)?.path),
-        "Context Experience executable definition must remain under .craft_data/experience/graph");
+      assert(isUnder(join(standaloneExperienceProject, ".craft_data", "experience", "md"), (procedure!.content_ref as JsonObject | undefined)?.path),
+        "Project-scoped Context Experience review content must remain under the project's .craft_data/experience/md");
+      assert(isUnder(join(standaloneExperienceProject, ".craft_data", "experience", "graph"), (procedure!.definition_ref as JsonObject | undefined)?.path),
+        "Project-scoped Context Experience definitions must remain under the project's .craft_data/experience/graph");
       const releaseStore = await new CraftStore(standalonePaths).open();
       try { assert.equal(releaseStore.find("experience_release", String(procedure!.id))?.record_version, procedure!.version,
         "only the passing Canary may publish the current Experience release"); }
