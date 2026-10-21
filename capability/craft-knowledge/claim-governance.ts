@@ -6,6 +6,7 @@ import { KnowledgeSourceRegistry } from "./knowledge-source-registry.ts";
 import { claimReadable } from "./claim-access.ts";
 import { knowledgeScenarioCanClassify, updateKnowledgeScenarioClaim, validateKnowledgeScenarioDefinition } from "./scenario-catalog.ts";
 import { knowledgeDirectoryForScope } from "../../core/project-knowledge-content.ts";
+import { recordKnowledgeSessionEvidence } from "./session-evidence.ts";
 const KNOWLEDGE_KINDS = new Set(["fact", "rule", "decision", "term", "failure_mode"]);
 const KNOWLEDGE_STATUSES = new Set(["candidate", "reviewed", "disputed", "superseded", "expired", "stale"]);
 function id(prefix: string): string { return `${prefix}_${randomUUID().replaceAll("-", "")}`; }
@@ -62,6 +63,7 @@ export class KnowledgeClaimGovernance {
   readonly sources: KnowledgeSourceRegistry;
   readonly store: CraftStore;
   constructor(store: CraftStore) { this.store = store; this.sources = new KnowledgeSourceRegistry(store); }
+  knowledgeSessionEvidenceRecord(args: JsonObject): JsonObject { return recordKnowledgeSessionEvidence(this.store, args); }
   knowledgeClaimSave(args: JsonObject): JsonObject {
     const kind = text(args.kind, "kind"); if (!KNOWLEDGE_KINDS.has(kind)) throw new Error("Knowledge claim kind is unsupported");
     const content = assertNoSecret(document(args.content, "content"), "content"); const scope = String(args.scope ?? "global");

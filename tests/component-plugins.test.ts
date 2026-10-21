@@ -42,7 +42,7 @@ test("the internal Context worker retains the complete component surfaces", () =
     const missing = surfaceToolNames(component).filter(name => !context.has(name));
     assert.deepEqual(missing, [], `craft-context must include every ${component} tool`);
   }
-  for (const name of ["craft_context_open", "craft_knowledge_source_register", "craft_memory_ledger_transition", "craft_procedure_host_control", "craft_codebase_impact_query"])
+  for (const name of ["craft_context_open", "craft_knowledge_source_register", "craft_knowledge_session_evidence_record", "craft_memory_ledger_transition", "craft_procedure_host_control", "craft_codebase_impact_query"])
     assert(context.has(name), `craft-context must expose ${name}`);
   assert(context.has("craft_knowledge_semantic_review_packet"), "craft-context must expose the exact Knowledge review packet");
   assert(!context.has("craft_verified_work_loop_prepare"), "the component composition must not widen to the entire Craft runtime");

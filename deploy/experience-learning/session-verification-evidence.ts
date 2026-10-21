@@ -1,4 +1,3 @@
-import { stableDigest } from "../../core/digest.ts";
 import type { JsonObject } from "../../core/infrastructure/store.ts";
 import type { ExperienceLearningClient } from "./worker.ts";
 
@@ -12,17 +11,17 @@ export async function recordSessionVerificationEvidence(client: ExperienceLearni
   excerpt: JsonObject): Promise<JsonObject | null> {
   const artifacts = Array.isArray(excerpt.verification_artifacts) ? excerpt.verification_artifacts : [];
   if (!artifacts.length || typeof task.task_id !== "string" || typeof task.session_id !== "string" || typeof task.turn_id !== "string"
-    || typeof task.project_scope_id !== "string" || typeof excerpt.source_ref !== "string") return null;
-  const artifactDigest = stableDigest(artifacts);
-  const evidenceId = `evidence_codex_session_verification_${stableDigest({ task_id: task.task_id, artifact_digest: artifactDigest }).slice(-20)}`;
-  const saved = await client.call("craft_evidence_record", { evidence_id: evidenceId, source_type: "program", confidence: "confirmed",
-    claim: "归档任务的自动化测试命令已成功完成，结果摘要已核验。", locator: `codex-session-task:${task.task_id}`,
-    ...(typeof task.completed_at === "string" ? { observed_at: task.completed_at } : {}),
-    metadata: { provenance: "codex_session_program_verification", project_scope_id: task.project_scope_id,
-      source_session_id: task.session_id, task_id: task.task_id, turn_id: task.turn_id,
-      source_ref_digest: excerpt.source_ref, verification_artifact_digest: artifactDigest,
-      verification_artifacts: artifacts, content_stored: false, raw_content_stored: false } });
-  const evidence = object(saved.evidence ?? saved, "session verification Evidence");
-  if (evidence.id !== evidenceId) throw new Error("session verification Evidence id did not match the request");
+    || typeof task.project_scope_id !== "string" || typeof excerpt.source_ref !== "string" || excerpt.sanitized !== true
+    || typeof excerpt.task_goal !== "string" || typeof excerpt.task_result !== "string") return null;
+  const saved = await client.call("craft_knowledge_session_evidence_record", { scope: task.project_scope_id,
+    task_id: task.task_id, source_session_id: task.session_id, turn_id: task.turn_id, source_ref: excerpt.source_ref,
+    task_goal: excerpt.task_goal, task_result: excerpt.task_result, verification_artifacts: artifacts, sanitized: true,
+    ...(typeof task.completed_at === "string" ? { observed_at: task.completed_at } : {}) });
+  const evidence = object(saved.evidence, "session verification Evidence");
+  if (typeof evidence.id !== "string" || !evidence.id) throw new Error("session verification Evidence id is missing");
+  if (typeof saved.source_id !== "string" || typeof saved.fragment_id !== "string" || evidence.fragment_id !== saved.fragment_id
+    || evidence.source_id !== saved.source_id || saved.raw_content_stored !== false || saved.sanitized_content_stored !== true) {
+    throw new Error("session verification Evidence did not include its scoped Knowledge fragment");
+  }
   return evidence;
 }

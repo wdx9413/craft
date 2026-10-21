@@ -2842,6 +2842,7 @@ export class CraftService extends ServiceFoundation {
     return { recommendation, idempotent: false };
   }
   knowledgeClaimSave(args: JsonObject): JsonObject { return this.knowledgeClaims.knowledgeClaimSave(args); }
+  knowledgeSessionEvidenceRecord(args: JsonObject): JsonObject { return this.knowledgeClaims.knowledgeSessionEvidenceRecord(args); }
   knowledgeClaimGet(args: JsonObject): JsonObject { return this.knowledgeClaims.knowledgeClaimGet(args); }
   knowledgeClaimList(args: JsonObject): JsonObject { return this.knowledgeClaims.knowledgeClaimList(args); }
   knowledgeClaimReview(args: JsonObject): JsonObject { return this.knowledgeClaims.knowledgeClaimReview(args); }

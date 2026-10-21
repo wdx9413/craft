@@ -179,7 +179,7 @@ export async function runSessionKnowledgeCandidateOnce(deps: SessionKnowledgeCan
       verificationEvidenceId = String(verificationEvidence.id);
       const saved = await deps.client.call("craft_knowledge_claim_save", { claim_id: `knowledge_claim_${stableDigest(task.task_id).slice(-24)}`,
         kind: candidate.kind, title: candidate.title, content: candidate.content, scope: task.project_scope_id,
-        source_id: "builtin.evidence-wiki", evidence_ids: [...task.verification_evidence_ids, verificationEvidenceId], tags: candidate.tags });
+        source_id: String(verificationEvidence.source_id), evidence_ids: [...task.verification_evidence_ids, verificationEvidenceId], tags: candidate.tags });
       const claim = object(saved.claim, "saved Knowledge Claim"); claimId = String(claim.id);
     }
     const resultDigest = stableDigest({ task_id: task.task_id, input_digest: inputDigest, claim_id: claimId,

@@ -6,25 +6,26 @@ import type { ExperienceLearningClient } from "../deploy/experience-learning/wor
 
 const task: JsonObject = { task_id: "task-1", session_id: "session-1", turn_id: "turn-1", project_scope_id: "project:abc", completed_at: "2026-10-20T00:01:00Z" };
 const excerpt: JsonObject = { source_ref: `sha256:${"a".repeat(64)}`, verification_artifacts: [{ runner: "javascript", exit_code: 0,
-  command_digest: `sha256:${"b".repeat(64)}`, result_digest: `sha256:${"c".repeat(64)}`, content_stored: false }] };
+  command_digest: `sha256:${"b".repeat(64)}`, result_digest: `sha256:${"c".repeat(64)}`, call_digest: `sha256:${"d".repeat(64)}`, content_stored: false }],
+  task_goal: "Repair the Knowledge evidence path.", task_result: "The targeted check passed.", sanitized: true };
 
-test("records one deterministic sanitized program Evidence and accepts wrapped or direct responses", async () => {
-  for (const wrapped of [false, true]) {
-    const calls: Array<{ name: string; args: JsonObject }> = [];
-    const client: ExperienceLearningClient = { async call(name, args = {}) {
-      calls.push({ name, args });
-      return wrapped ? { evidence: { id: args.evidence_id } } : { id: args.evidence_id };
-    } };
-    const result = await recordSessionVerificationEvidence(client, task, excerpt);
-    assert(result);
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0]!.name, "craft_evidence_record");
-    assert.equal(calls[0]!.args.confidence, "confirmed");
-    assert.equal((calls[0]!.args.metadata as JsonObject).content_stored, false);
-    assert.equal(JSON.stringify(calls[0]!.args).includes("command_digest"), true);
-    assert.equal(JSON.stringify(calls[0]!.args).includes("pnpm test"), false);
-    assert.equal(result.id, calls[0]!.args.evidence_id);
-  }
+test("records a sanitized project Knowledge Evidence fragment from one verified session", async () => {
+  const calls: Array<{ name: string; args: JsonObject }> = [];
+  const client: ExperienceLearningClient = { async call(name, args = {}) {
+    calls.push({ name, args });
+    return { evidence: { id: "evidence-1", source_id: "source-1", fragment_id: "fragment-1" }, source_id: "source-1",
+      fragment_id: "fragment-1", sanitized_content_stored: true, raw_content_stored: false };
+  } };
+  const result = await recordSessionVerificationEvidence(client, task, excerpt);
+  assert(result);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]!.name, "craft_knowledge_session_evidence_record");
+  assert.equal(calls[0]!.args.scope, "project:abc");
+  assert.equal(calls[0]!.args.sanitized, true);
+  assert.equal((calls[0]!.args.verification_artifacts as JsonObject[])[0]!.content_stored, false);
+  assert.equal(JSON.stringify(calls[0]!.args).includes("The targeted check passed."), true);
+  assert.equal(JSON.stringify(calls[0]!.args).includes("pnpm test"), false);
+  assert.equal(result.id, "evidence-1");
 });
 
 test("does not write Evidence when task provenance or verification artifacts are incomplete", async () => {
@@ -37,21 +38,26 @@ test("does not write Evidence when task provenance or verification artifacts are
   }
   assert.equal(await recordSessionVerificationEvidence(client, task, { verification_artifacts: excerpt.verification_artifacts }), null);
   assert.equal(await recordSessionVerificationEvidence(client, task, { source_ref: excerpt.source_ref, verification_artifacts: "invalid" }), null);
+  assert.equal(await recordSessionVerificationEvidence(client, task, { ...excerpt, task_goal: undefined }), null);
+  assert.equal(await recordSessionVerificationEvidence(client, task, { ...excerpt, sanitized: false }), null);
   assert.equal(calls, 0);
 });
 
 test("uses deterministic evidence without inventing a timestamp when the source has none", async () => {
   let args: JsonObject | undefined;
-  const client: ExperienceLearningClient = { async call(_name, value = {}) { args = value; return { evidence: null, id: value.evidence_id }; } };
+  const client: ExperienceLearningClient = { async call(_name, value = {}) { args = value; return { evidence: { id: "evidence-no-time", source_id: "source-1", fragment_id: "fragment-1" },
+    source_id: "source-1", fragment_id: "fragment-1", sanitized_content_stored: true, raw_content_stored: false }; } };
   const withoutTimestamp = { ...task }; delete withoutTimestamp.completed_at;
   const saved = await recordSessionVerificationEvidence(client, withoutTimestamp, excerpt);
   assert(saved);
   assert.equal(args?.observed_at, undefined);
 });
 
-test("rejects an Evidence response with a different id", async () => {
-  const client: ExperienceLearningClient = { async call() { return { id: "wrong-id" }; } };
-  await assert.rejects(recordSessionVerificationEvidence(client, task, excerpt), /did not match/u);
+test("rejects an Evidence response without a durable fragment or stable source", async () => {
+  for (const evidence of [{ id: "evidence-only" }, { id: "" }, { id: 4 }]) {
+    const client: ExperienceLearningClient = { async call() { return { evidence, raw_content_stored: false }; } };
+    await assert.rejects(recordSessionVerificationEvidence(client, task, excerpt), evidence.id === "evidence-only" ? /fragment/u : /id is missing/u);
+  }
 });
 
 test("rejects malformed Evidence responses", async () => {

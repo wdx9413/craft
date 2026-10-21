@@ -65,7 +65,8 @@ function workerClient(overrides: Record<string, (args: JsonObject) => JsonObject
     if (name === "craft_evaluation_model_profile_get") return { readiness: { status: "ready_for_adapter" } };
     if (name === "craft_trace_start") return { trace: { id: "trace-session-task" } };
     if (name === "craft_trace_append" || name === "craft_trace_finalize") return {};
-    if (name === "craft_evidence_record") return { id: args.evidence_id, ...args };
+    if (name === "craft_knowledge_session_evidence_record") return { evidence: { id: "evidence-session-program", source_id: "source-session", fragment_id: "fragment-session" },
+      source_id: "source-session", fragment_id: "fragment-session", sanitized_content_stored: true, raw_content_stored: false };
     if (name === "craft_knowledge_claim_save") return { claim: { id: args.claim_id, status: "candidate" } };
     throw new Error(`unexpected tool ${name}`);
   } };
@@ -123,7 +124,7 @@ test("archived verified generation and held-out tasks remain usable once without
       const evidenceIds = (saved.args.evidence_ids ?? saved.args.source_evidence_ids) as string[];
       assert.equal(evidenceIds.length, 2);
       assert(evidenceIds.includes("evidence-session-task"));
-      assert(fixture.calls.some(call => call.name === "craft_evidence_record" && call.args.confidence === "confirmed"));
+      assert(fixture.calls.some(call => call.name === "craft_knowledge_session_evidence_record" && call.args.sanitized === true));
       assert.equal((await run(deps)).status, "idle");
       assert.equal(seen.length, 1, "a relocation must not cause repeated model calls");
       const other = partition === "candidate_generation" ? runSessionKnowledgeEvaluationOnce : runSessionKnowledgeCandidateOnce;
@@ -145,15 +146,17 @@ test("creates one Chinese Knowledge candidate from a verified generation task an
     assert.equal(modelInputs.length, 1);
     const save = fixture.calls.find(call => call.name === "craft_knowledge_claim_save")!;
     assert.equal(save.args.scope, f.task.project_scope_id);
+    assert.equal(save.args.source_id, "source-session");
     assert.equal((save.args.evidence_ids as string[]).length, 2);
     assert((save.args.evidence_ids as string[]).includes("evidence-session-task"));
-    const programEvidence = fixture.calls.find(call => call.name === "craft_evidence_record")!;
-    assert.equal(programEvidence.args.confidence, "confirmed");
-    assert.equal((programEvidence.args.metadata as JsonObject).content_stored, false);
+    const programEvidence = fixture.calls.find(call => call.name === "craft_knowledge_session_evidence_record")!;
+    assert.equal(programEvidence.args.sanitized, true);
+    assert.equal(programEvidence.args.source_session_id, f.task.session_id);
+    assert.equal((programEvidence.args.verification_artifacts as JsonObject[]).length, 1);
     assert.equal(save.args.content, "依赖升级后应运行单测并检查锁文件。");
     const traceCalls = fixture.calls.filter(call => call.name === "craft_trace_append");
     assert.equal(traceCalls.length, 3);
-    assert((traceCalls.at(-1)!.args.output_refs as string[]).includes(String(programEvidence.args.evidence_id)));
+    assert((traceCalls.at(-1)!.args.output_refs as string[]).includes("evidence-session-program"));
     assert.equal(JSON.stringify(traceCalls).includes("本次已验证"), false);
     const savedState = await readFile(f.workerState, "utf8");
     assert.equal(savedState.includes("本次已验证"), false);
@@ -252,7 +255,7 @@ test("held-out task creates a separately labeled evaluation case and preserves i
     assert.equal(saved.args.label_source, "model_candidate");
     const trace = fixture.calls.filter(call => call.name === "craft_trace_append");
     assert(trace.some(call => call.args.event_kind === "knowledge.evaluation_case_candidate"));
-    assert((trace.at(-1)!.args.output_refs as string[]).includes(String(fixture.calls.find(call => call.name === "craft_evidence_record")!.args.evidence_id)));
+    assert((trace.at(-1)!.args.output_refs as string[]).includes("evidence-session-program"));
     assert.equal(JSON.stringify(trace).includes("本次已验证"), false);
     assert.equal((await runSessionKnowledgeEvaluationOnce({ client: fixture.client, providers: [provider], transport: modelTransport("{}"),
       state_file: f.workerState, archive_options: { sessions_root: f.sessions, state_file: f.state } })).status, "idle");
