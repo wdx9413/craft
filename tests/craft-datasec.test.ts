@@ -24,7 +24,7 @@ test("independent Datasec is discoverable in release catalogs without joining th
   assert.equal(allReleaseProducts().length, 3);
   assert.deepEqual(externalMarketplaceProducts().map(product => product.name), ["craft-context", "craft-datasec"]);
   const contract = externalDistributionContract();
-  assert.equal(contract.products.find(product => product.name === "craft-datasec")!.version, "0.1.0");
+  assert.equal(contract.products.find(product => product.name === "craft-datasec")!.version, "0.1.1");
   assert.equal(contract.products.find(product => product.name === "craft-context")!.hook_member, "context");
   assert(releaseManifest().plugins.some(product => product.name === "craft-datasec"));
 });
@@ -173,13 +173,14 @@ for (const host of ["claude", "codex"] as const) {
       if (host === "codex") { assert.equal(result.continue, undefined); assert.equal(result.decision, "block"); }
     } finally { f.close(); }
   });
-  test(`${host} prompt rejection is local, quiet on clean input, and does not store the prompt`, () => {
+  test(`${host} prompts pass through without scanning, blocking, echoing or storing their content`, () => {
     const f = fixture();
     try {
       assert.deepEqual(run(host, "UserPromptSubmit", {}, f.root), {});
       assert.deepEqual(run(host, "UserPromptSubmit", { prompt: "read the file" }, f.root), {});
       const result = run(host, "UserPromptSubmit", { prompt: phone }, f.root);
-      assert.equal(result.decision, "block"); assert(!JSON.stringify(result).includes(phone)); assert(!existsSync(f.root));
+      assert.deepEqual(result, {}); assert(!existsSync(f.root));
+      assert.deepEqual(run(host, "UserPromptSubmit", { prompt: phone }, f.root, []), {});
     } finally { f.close(); }
   });
   test(`${host} safe calls are unchanged; binary Read, bad rules, missing identity and malformed events are guarded`, () => {
@@ -197,7 +198,7 @@ for (const host of ["claude", "codex"] as const) {
       assert(!JSON.stringify(failed).includes(phone)); assert.equal(failed.continue, false);
       assert(JSON.stringify(run(host, "PostToolUse", { tool_response: phone }, f.root, [])).includes(FAILURE));
       assert.equal(run(host, "PreToolUse", { hook_event_name: "bad" }, f.root).hookSpecificOutput.permissionDecision, "deny");
-      assert.equal(run(host, "UserPromptSubmit", { hook_event_name: "bad" }, f.root).decision, "block");
+      assert.deepEqual(run(host, "UserPromptSubmit", { hook_event_name: "bad" }, f.root), {});
     } finally { f.close(); }
   });
 }
@@ -234,7 +235,9 @@ test("process entry validates events/configuration and never echoes bad input or
       for (const event of ["PreToolUse", "UserPromptSubmit", "PostToolUse"]) {
         for (const raw of ["not-json", "null", "[]", "1"]) {
           const result = invoke([host, event], raw, f.root);
-          assert.equal(result.status, 0, result.stderr); assert(JSON.stringify(JSON.parse(result.stdout)).includes(FAILURE));
+          assert.equal(result.status, 0, result.stderr);
+          if (event === "UserPromptSubmit") assert.deepEqual(JSON.parse(result.stdout), {});
+          else assert(JSON.stringify(JSON.parse(result.stdout)).includes(FAILURE));
         }
       }
     }
@@ -250,6 +253,14 @@ test("process entry validates events/configuration and never echoes bad input or
       assert(JSON.parse(failed.stdout).systemMessage.includes(FAILURE)); assert(!failed.stdout.includes(phone));
     }
     assert(JSON.parse(invoke(["codex", "PreToolUse"], "{}", f.root, join(f.temp, "missing")).stdout).hookSpecificOutput.permissionDecision === "deny");
+    for (const host of ["claude", "codex"]) {
+      const prompt = JSON.stringify({ hook_event_name: "UserPromptSubmit", prompt: phone });
+      for (const configPath of [undefined, config, join(f.temp, "missing")]) {
+        const passed = invoke([host, "UserPromptSubmit"], prompt, f.root, configPath);
+        assert.equal(passed.status, 0, passed.stderr);
+        assert.deepEqual(JSON.parse(passed.stdout), {});
+      }
+    }
     const clean = invoke(["claude", "UserPromptSubmit"], JSON.stringify({ hook_event_name: "UserPromptSubmit" }));
     assert.deepEqual(JSON.parse(clean.stdout), {});
   } finally { f.close(); }
@@ -285,7 +296,7 @@ test("independent plugin builds and executes both packaged hook manifests withou
         assert(!handler.async); assert.equal(handler.timeout, 10);
         const variable = host === "claude" ? "CLAUDE_PLUGIN_ROOT" : "PLUGIN_ROOT";
         assert.equal(handler.command, `node --disable-warning=ExperimentalWarning "\${${variable}}/dist/hook.mjs" ${host} ${event}`);
-        const payload = JSON.stringify({ hook_event_name: event, session_id: "packaged", prompt: "clean", tool_response: { stdout: phone, stderr: "" } });
+        const payload = JSON.stringify({ hook_event_name: event, session_id: "packaged", prompt: phone, tool_response: { stdout: phone, stderr: "" } });
         const child = invoke([host, event], payload, f.root, undefined, true);
         assert.equal(child.status, 0, child.stderr); assert(!child.stdout.includes(phone)); JSON.parse(child.stdout);
       }

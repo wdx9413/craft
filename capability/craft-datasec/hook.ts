@@ -8,9 +8,8 @@ export interface HookInput { session_id?: string; hook_event_name?: string; tool
 export const FAILURE = "craft-datasec：本地脱敏失败，内容已隐藏。请检查本地规则和私有映射目录。";
 const BINARY = /\.(?:xls[xmb]?|xlt[xm]|pdf|png|jpe?g|gif|webp|bmp|svg|ico|zip|gz|tar|7z|docx?|pptx?|mp[34]|wav)$/i;
 const EDIT = /^(?:Edit|Write|MultiEdit|NotebookEdit|apply_patch)$/;
-function denied(event: Event, reason: string): object {
-  if (event === "PreToolUse") return { hookSpecificOutput: { hookEventName: event, permissionDecision: "deny", permissionDecisionReason: reason } };
-  return { decision: "block", reason };
+function denied(reason: string): object {
+  return { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: reason } };
 }
 export function hidden(host: Host, reason: string, replacement: Json): object {
   if (host === "claude") return { systemMessage: reason, hookSpecificOutput: { hookEventName: "PostToolUse", updatedToolOutput: replacement } };
@@ -37,20 +36,18 @@ export function handleHook(host: Host, event: Event, input: HookInput, root: str
   const getVault = () => vault ??= new TokenVault(root, input.session_id ?? "");
   const apply = (): object => {
     if (input.hook_event_name !== event) throw new Error("Mismatched hook event");
-    const sanitizer = new Sanitizer(rules, (name, text) => event === "UserPromptSubmit" ? "[redacted]" : getVault().token(name, text));
-    if (event === "UserPromptSubmit") {
-      sanitizer.text(input.prompt ?? "");
-      if (sanitizer.count) return denied(event, "craft-datasec：输入含敏感数据，已阻止发送。请先在本地替换敏感值后重发。普通 hook 无法改写原提示词。");
-      return {};
-    }
+    // Prompt hooks cannot replace the submitted text. Leave messages untouched,
+    // including rule matches and local failures, rather than blocking the user.
+    if (event === "UserPromptSubmit") return {};
+    const sanitizer = new Sanitizer(rules, (name, text) => getVault().token(name, text));
     if (event === "PreToolUse") {
       const args = input.tool_input ?? {};
       const name = input.tool_name ?? "";
       if (name === "Read" && typeof args === "object" && args !== null && !Array.isArray(args) && typeof args.file_path === "string" && BINARY.test(extname(args.file_path))) {
-        return denied(event, "craft-datasec：此文件不是受支持的纯文本，请先在本地导出纯文本并脱敏。");
+        return denied("craft-datasec：此文件不是受支持的纯文本，请先在本地导出纯文本并脱敏。");
       }
       if (!JSON.stringify(args).includes("[CRAFT_DATASEC_")) return {};
-      if (!EDIT.test(name)) return denied(event, "craft-datasec：占位符只允许在本地文件编辑工具中还原，不能自动用于命令或远程调用。");
+      if (!EDIT.test(name)) return denied("craft-datasec：占位符只允许在本地文件编辑工具中还原，不能自动用于命令或远程调用。");
       return { hookSpecificOutput: { hookEventName: event, permissionDecision: "allow", updatedInput: restore(args, getVault()) } };
     }
     if (input.tool_response === undefined) throw new Error("Missing tool result");
@@ -66,8 +63,10 @@ export function handleHook(host: Host, event: Event, input: HookInput, root: str
       // Preserve tool schema keys when possible. Never include exception text or the event payload.
       const replacement = input.tool_response ?? null;
       output = { ...hidden(host, FAILURE, blankResult(replacement)), continue: false, stopReason: FAILURE };
+    } else if (event === "UserPromptSubmit") {
+      output = {};
     } else {
-      output = denied(event, FAILURE);
+      output = denied(FAILURE);
     }
   }
   vault?.close();
