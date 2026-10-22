@@ -39,7 +39,9 @@ test("stores sanitized verification evidence as a project Knowledge fragment rea
       content: "定向验证通过。", scope: "project:demo", source_id: saved.source_id, evidence_ids: [evidence.id] }).claim as JsonObject;
     const packetResult = f.service.knowledgeSemanticReviewPacket({ claim_id: String(claim.id) });
     assert.equal(packetResult.status, "ready");
+    assert.equal(packetResult.claim_status, claim.status);
     const packet = packetResult.packet as JsonObject;
+    assert.equal("status" in (packet.claim as JsonObject), false, "lifecycle metadata is outside the canonical evidence packet");
     const fragments = packet.evidence_fragments as JsonObject[];
     assert.equal(fragments.length, 1);
     assert.match(String(fragments[0]!.content), /修复 Knowledge 证据链/u);

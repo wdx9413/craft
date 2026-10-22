@@ -98,7 +98,7 @@ export class KnowledgeAutoReviewKernel {
     const packet = { schema_version: "craft.knowledge-semantic-review.v1", claim: { id: claim.id, version: claim.version, kind: claim.kind, scope: claim.scope, content, content_digest: claim.content_digest },
       source: { id: source.id, version: source.version, content_digest: source.content_digest, trust: source.trust }, evidence_fragments: fragments,
       rubric: { supported: "Claim is directly supported by supplied fragments within the same scope.", contradicted: "Supplied fragments contradict the Claim.", insufficient: "Fragments do not establish the Claim or scope." } };
-    return { status: "ready", packet, packet_digest: digest(packet) };
+    return { status: "ready", claim_status: claim.status, packet, packet_digest: digest(packet) };
   }
 
   /** Optional OpenAI-compatible reviewer. Credentials are read only at call time. */

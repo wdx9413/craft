@@ -145,6 +145,11 @@ export async function startContextLearningWorker(options: LearningWorkerSupervis
     return undefined;
   }
   let child: ChildProcess | undefined, childEnded = true, stopping = false, restartTimer: NodeJS.Timeout | undefined, restartCount = 0;
+  let releasePromise: Promise<void> | undefined;
+  const releaseOwnership = (): Promise<void> => releasePromise ??= (async () => {
+    try { await releaseLocks?.(); }
+    catch { options.on_failure?.("worker_lock_release_failed"); }
+  })();
   const reportAndRestart = (reason: string) => {
     if (stopping) return;
     options.on_failure?.(reason);
@@ -153,6 +158,15 @@ export async function startContextLearningWorker(options: LearningWorkerSupervis
     restartTimer = setTimeout(() => { restartTimer = undefined; startChild(); }, delay);
   };
   const startChild = () => {
+    // A plugin upgrade may remove this server's old cache while it is alive.
+    // A child that cannot load its payload must not monopolize shared learning.
+    const exists = options.exists ?? existsSync;
+    if (!exists(launch.server_entrypoint) || !exists(launch.args[launch.args.length - 1]!)) {
+      stopping = true;
+      options.on_failure?.("worker_payload_removed");
+      void releaseOwnership();
+      return;
+    }
     let spawned: ChildProcess;
     try { spawned = spawnProcess(launch.entrypoint, launch.args, { stdio: ["ignore", "ignore", "inherit"], env }); }
     catch (error) {
@@ -177,7 +191,7 @@ export async function startContextLearningWorker(options: LearningWorkerSupervis
   };
   startChild();
   return async () => {
-    if (stopping) return;
+    if (stopping) { await releasePromise; return; }
     stopping = true;
     if (restartTimer) { clearTimeout(restartTimer); restartTimer = undefined; }
     try {
@@ -191,9 +205,6 @@ export async function startContextLearningWorker(options: LearningWorkerSupervis
           current.kill("SIGTERM");
         });
       }
-    } finally {
-      try { await releaseLocks?.(); }
-      catch { options.on_failure?.("worker_lock_release_failed"); }
-    }
+    } finally { await releaseOwnership(); }
   };
 }

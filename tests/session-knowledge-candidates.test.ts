@@ -8,7 +8,7 @@ import test from "node:test";
 import type { ChatResult, ModelProviderSpec, ModelTransport } from "../core/model-gateway.ts";
 import type { JsonObject } from "../core/infrastructure/store.ts";
 import { stableDigest } from "../core/digest.ts";
-import { codexSessionTaskBatch, reconcileCodexSessionTaskEvidence, runCodexSessionCollectionOnce } from "../core/codex-session-archive.ts";
+import { codexSessionTaskBatch, readCodexSessionTaskExcerpt, reconcileCodexSessionTaskEvidence, runCodexSessionCollectionOnce } from "../core/codex-session-archive.ts";
 import { runSessionKnowledgeCandidateOnce } from "../deploy/experience-learning/session-knowledge-candidates.ts";
 import { runSessionKnowledgeEvaluationOnce } from "../deploy/experience-learning/session-knowledge-evaluation.ts";
 import type { ExperienceLearningClient } from "../deploy/experience-learning/worker.ts";
@@ -90,7 +90,7 @@ function modelTransport(text: string, seen: string[] = []): ModelTransport {
 
 function reviewedClaimClient(scope: unknown, extra?: Record<string, (args: JsonObject) => JsonObject>) {
   return workerClient({ craft_knowledge_claim_list: () => ({ claims: [{ id: "reviewed-claim", status: "reviewed", scope }] }),
-    craft_knowledge_semantic_review_packet: () => ({ status: "ready", packet: { claim: { id: "reviewed-claim", status: "reviewed", title: "依赖升级验证", content: "依赖升级后运行单测。", tags: [] } } }),
+    craft_knowledge_semantic_review_packet: () => ({ status: "ready", claim_status: "reviewed", packet: { claim: { id: "reviewed-claim", title: "依赖升级验证", content: "依赖升级后运行单测。", tags: [] } } }),
     ...extra });
 }
 
@@ -260,7 +260,7 @@ test("held-out task creates a separately labeled evaluation case and preserves i
   try {
     const fixture = workerClient({
       craft_knowledge_claim_list: () => ({ claims: [{ id: "reviewed-claim", status: "reviewed", scope: f.task.project_scope_id }] }),
-      craft_knowledge_semantic_review_packet: () => ({ status: "ready", packet: { claim: { id: "reviewed-claim", status: "reviewed", title: "依赖升级验证", content: "依赖升级后运行单测并检查锁文件。", tags: ["依赖"] } } }),
+      craft_knowledge_semantic_review_packet: () => ({ status: "ready", claim_status: "reviewed", packet: { claim: { id: "reviewed-claim", title: "依赖升级验证", content: "依赖升级后运行单测并检查锁文件。", tags: ["依赖"] } } }),
       craft_knowledge_evaluation_case_save: args => ({ case: { id: args.case_id, evaluation_eligible: false, status: "unverified_source_evidence" } }),
       craft_knowledge_evaluation_run: () => ({ run: { id: "run", metrics: { provenance_eligible: false } } }),
     });
@@ -296,6 +296,9 @@ test("held-out transcript evidence creates a separate evaluation case without mi
       state_file: f.workerState, archive_options: { sessions_root: f.sessions, state_file: f.state } });
     assert.equal(result.status, "case_candidate_created");
     assert.equal(result.label_source, "model_candidate");
+    assert.equal(result.trace_id, "trace-session-task");
+    const state = JSON.parse(await readFile(f.workerState, "utf8")) as JsonObject;
+    assert.equal((state.trace_ids_by_task as JsonObject)[String(f.task.task_id)], "trace-session-task");
     const saved = fixture.calls.find(call => call.name === "craft_knowledge_evaluation_case_save")!;
     assert.deepEqual(saved.args.source_evidence_ids, ["evidence-session-program"]);
     assert.equal(saved.args.dataset_partition, "held_out");
@@ -325,13 +328,44 @@ test("held-out evaluation waits for reviewed Claims and rejects model labels out
       state_file: f.workerState, archive_options: { sessions_root: f.sessions, state_file: f.state } })).status, "waiting_for_reviewed_claims");
     const fixture = workerClient({
       craft_knowledge_claim_list: () => ({ claims: [{ id: "reviewed-claim", status: "reviewed", scope: f.task.project_scope_id }] }),
-      craft_knowledge_semantic_review_packet: () => ({ status: "ready", packet: { claim: { id: "reviewed-claim", status: "reviewed", content: "稳定验证规则。" } } }),
+      craft_knowledge_semantic_review_packet: () => ({ status: "ready", claim_status: "reviewed", packet: { claim: { id: "reviewed-claim", content: "稳定验证规则。" } } }),
     });
     await assert.rejects(runSessionKnowledgeEvaluationOnce({ client: fixture.client, providers: [provider], transport: modelTransport(
       JSON.stringify({ decision: "labeled", expected_claim_ids: ["not-reviewed"] })), state_file: f.workerState,
       archive_options: { sessions_root: f.sessions, state_file: f.state } }), /selected from reviewed Claims/u);
     assert(fixture.calls.some(call => call.name === "craft_trace_finalize" && call.args.status === "failed"));
   } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("held-out evaluation records only terminal Trace references and leaves failed evidence work retryable", async () => {
+  {
+    const f = await setup("held_out");
+    try {
+      const fixture = workerClient(); let modelCalls = 0;
+      const excerpt = await readCodexSessionTaskExcerpt(String(f.task.task_id), { sessions_root: f.sessions, state_file: f.state, expected_partition: "held_out" });
+      const result = await runSessionKnowledgeEvaluationOnce({ client: fixture.client, providers: [provider],
+        transport: { async complete() { modelCalls++; return { text: "{}", model: "test-model", usage: null }; } }, state_file: f.workerState,
+        archive_options: { sessions_root: f.sessions, state_file: f.state }, read_excerpt: async () => ({ ...excerpt, verification_artifacts: undefined }) });
+      assert.deepEqual(result, { status: "skipped", processed: 1, reason: "verifiable_test_result_unavailable", raw_content_stored: false });
+      assert.equal(modelCalls, 0);
+      const state = JSON.parse(await readFile(f.workerState, "utf8")) as JsonObject;
+      assert.deepEqual(state.trace_ids_by_task, {});
+    } finally { await rm(f.root, { recursive: true, force: true }); }
+  }
+  {
+    const f = await setup("held_out");
+    try {
+      const fixture = workerClient({ craft_knowledge_claim_list: () => ({ claims: [{ id: "reviewed-claim", status: "reviewed", scope: f.task.project_scope_id }] }),
+        craft_knowledge_semantic_review_packet: () => ({ status: "ready", claim_status: "reviewed", packet: { claim: { id: "reviewed-claim", content: "稳定规则" } } }) });
+      const excerpt = await readCodexSessionTaskExcerpt(String(f.task.task_id), { sessions_root: f.sessions, state_file: f.state, expected_partition: "held_out" });
+      const { task_goal: _taskGoal, ...missingGoal } = excerpt;
+      await assert.rejects(runSessionKnowledgeEvaluationOnce({ client: fixture.client, providers: [provider],
+        transport: { async complete() { return { text: JSON.stringify({ decision: "labeled", expected_claim_ids: ["reviewed-claim"] }), model: "test-model", usage: null }; } }, state_file: f.workerState,
+        archive_options: { sessions_root: f.sessions, state_file: f.state }, read_excerpt: async () => missingGoal }), /held-out test Evidence is unavailable/u);
+      await assert.rejects(readFile(f.workerState, "utf8"), (error: NodeJS.ErrnoException) => error.code === "ENOENT");
+      assert(fixture.calls.some(call => call.name === "craft_trace_finalize" && call.args.status === "failed"));
+    } finally { await rm(f.root, { recursive: true, force: true }); }
+  }
 });
 
 test("held-out evaluation is incremental across exact archive, readiness and source integrity gates", async () => {
@@ -464,9 +498,11 @@ test("held-out evaluator isolates exact Excerpt and reviewed Claim identities", 
     }
     const packetResults = [
       { status: "unavailable" },
-      { status: "ready", packet: { claim: { id: "other", status: "reviewed", content: "内容。" } } },
-      { status: "ready", packet: { claim: { id: "reviewed-claim", status: "candidate", content: "内容。" } } },
-      { status: "ready", packet: { claim: { id: "reviewed-claim", status: "reviewed", content: " " } } },
+      { status: "ready", packet: { claim: { id: "reviewed-claim", content: "缺少当前状态。" } } },
+      { status: "ready", claim_status: "revoked", packet: { claim: { id: "reviewed-claim", status: "reviewed", content: "旧状态不能覆盖撤销。" } } },
+      { status: "ready", claim_status: "reviewed", packet: { claim: { id: "other", content: "内容。" } } },
+      { status: "ready", claim_status: "candidate", packet: { claim: { id: "reviewed-claim", content: "内容。" } } },
+      { status: "ready", claim_status: "reviewed", packet: { claim: { id: "reviewed-claim", content: " " } } },
     ];
     for (const packetResult of packetResults) {
       const claims = reviewedClaimClient(f.task.project_scope_id, { craft_knowledge_semantic_review_packet: () => packetResult });
@@ -490,7 +526,7 @@ test("held-out evaluator records safe Trace failure for malformed profile and Tr
     let firstAppend = true;
     const appendClient = workerClient({
       craft_knowledge_claim_list: () => ({ claims: [{ id: "reviewed-claim", status: "reviewed", scope: f.task.project_scope_id }] }),
-      craft_knowledge_semantic_review_packet: () => ({ status: "ready", packet: { claim: { id: "reviewed-claim", status: "reviewed", content: "有效内容" } } }),
+      craft_knowledge_semantic_review_packet: () => ({ status: "ready", claim_status: "reviewed", packet: { claim: { id: "reviewed-claim", content: "有效内容" } } }),
       craft_trace_append: args => { if (firstAppend) { firstAppend = false; throw new Error("trace append unavailable"); } return {}; },
     });
     await assert.rejects(evaluate(f, appendClient.client, modelTransport("{}")), /trace append unavailable/u);

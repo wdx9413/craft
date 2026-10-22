@@ -17,7 +17,7 @@ const OUTPUT_SCHEMA = { type: "object", properties: {
   expected_claim_ids: { type: "array", items: { type: "string", minLength: 1, maxLength: 160 }, maxItems: 8 },
 }, required: ["decision", "expected_claim_ids"], additionalProperties: false };
 const SECRET = /(?:api[_-]?key|authorization|cookie|password|secret|token)\s*[:=]\s*[^\s]{8,}/iu;
-interface EvaluationState { processed_task_ids: string[] }
+interface EvaluationState { processed_task_ids: string[]; trace_ids_by_task: Record<string, string> }
 export interface SessionKnowledgeEvaluationDependencies {
   client: ExperienceLearningClient;
   providers?: readonly ModelProviderSpec[];
@@ -41,18 +41,23 @@ function readState(path: string): EvaluationState {
     const stat = lstatSync(path);
     if (stat.isSymbolicLink() || !stat.isFile() || stat.size > 8 * 1024 * 1024) throw new Error("Knowledge evaluation state file is invalid");
     const value = JSON.parse(readFileSync(path, "utf8")) as JsonObject;
+    const traces = value.trace_ids_by_task === undefined ? {} : value.trace_ids_by_task;
     if (value.schema !== SCHEMA || !Array.isArray(value.processed_task_ids) || value.processed_task_ids.length > 50_000
-      || value.processed_task_ids.some(id => typeof id !== "string" || !id.trim() || id.length > 160)) throw new Error("Knowledge evaluation state is invalid");
-    return { processed_task_ids: [...new Set(value.processed_task_ids as string[])] };
+      || value.processed_task_ids.some(id => typeof id !== "string" || !id.trim() || id.length > 160)
+      || !traces || typeof traces !== "object" || Array.isArray(traces) || Object.keys(traces).length > 50_000
+      || Object.entries(traces as Record<string, unknown>).some(([taskId, traceId]) => !taskId.trim() || taskId.length > 160
+        || typeof traceId !== "string" || !/^trace[-_][A-Za-z0-9_-]{1,160}$/u.test(traceId))) throw new Error("Knowledge evaluation state is invalid");
+    return { processed_task_ids: [...new Set(value.processed_task_ids as string[])], trace_ids_by_task: traces as Record<string, string> };
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { processed_task_ids: [] };
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { processed_task_ids: [], trace_ids_by_task: {} };
     throw error;
   }
 }
 async function writeState(path: string, state: EvaluationState): Promise<void> {
   try { if (lstatSync(dirname(path)).isSymbolicLink()) throw new Error("Knowledge evaluation state directory must not be a symbolic link"); }
   catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
-  await atomicPrivateJson(path, { schema: SCHEMA, processed_task_ids: state.processed_task_ids.slice(-50_000), updated_at: new Date().toISOString() });
+  await atomicPrivateJson(path, { schema: SCHEMA, processed_task_ids: state.processed_task_ids.slice(-50_000),
+    trace_ids_by_task: Object.fromEntries(Object.entries(state.trace_ids_by_task).slice(-50_000)), updated_at: new Date().toISOString() });
 }
 function parseOutput(value: string): JsonObject {
   let parsed: unknown;
@@ -95,7 +100,7 @@ export async function runSessionKnowledgeEvaluationOnce(deps: SessionKnowledgeEv
     const packetResult = await deps.client.call("craft_knowledge_semantic_review_packet", { claim_id: item.id });
     if (packetResult.status !== "ready") continue;
     const packet = object(packetResult.packet, "reviewed Claim packet"), claim = object(packet.claim, "reviewed Claim");
-    if (claim.id !== item.id || claim.status !== "reviewed" || typeof claim.content !== "string" || !claim.content.trim()) continue;
+    if (claim.id !== item.id || packetResult.claim_status !== "reviewed" || typeof claim.content !== "string" || !claim.content.trim()) continue;
     claims.push({ claim_id: String(claim.id), title: String(claim.title ?? ""), content: String(claim.content), tags: claim.tags ?? [] });
   }
   if (!claims.length) return { status: "waiting_for_reviewed_claims", processed: 0, reason: "no_reviewed_project_claims", raw_content_stored: false };
@@ -165,10 +170,11 @@ export async function runSessionKnowledgeEvaluationOnce(deps: SessionKnowledgeEv
       output_refs: [caseId, caseEvidenceId].filter((value): value is string => value !== null), model_fingerprint: fingerprint,
       data: { result_digest: resultDigest, case_id: caseId, evidence_id: caseEvidenceId, label_source: "model_candidate", evaluation_eligible: evaluationEligible },
       summary: caseId ? "已建立待独立审定的留出评测案例" : "模型未找到充分匹配的已审核 Claim" });
-    state.processed_task_ids.push(String(task.task_id)); await writeState(path, state);
     await deps.client.call("craft_trace_finalize", { trace_id: traceId, status: "completed", summary: "留出评测标签候选处理完成" });
+    state.processed_task_ids.push(String(task.task_id)); state.trace_ids_by_task[String(task.task_id)] = traceId;
+    await writeState(path, state);
     return { status: caseId ? "case_candidate_created" : "case_skipped", processed: 1, task_id: task.task_id, case_id: caseId,
-      label_source: "model_candidate", evaluation_eligible: evaluationEligible, independent_adjudication_required: Boolean(caseId), raw_content_stored: false };
+      trace_id: traceId, label_source: "model_candidate", evaluation_eligible: evaluationEligible, independent_adjudication_required: Boolean(caseId), raw_content_stored: false };
   } catch (error) {
     await deps.client.call("craft_trace_append", { trace_id: traceId, event_kind: "model.failed", actor: "knowledge-session-evaluation-worker",
       source: "craft-knowledge", trust: "observed", operation_id: String(task.task_id), model_fingerprint: fingerprint,

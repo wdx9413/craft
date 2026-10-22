@@ -330,6 +330,48 @@ test("worker supervisor contains asynchronous startup errors and nonzero exits",
   } finally { await f.close(); }
 });
 
+test("worker supervisor releases ownership when an upgrade removes its old payload", async () => {
+  for (const removed of ["server", "worker"]) {
+    const f = await fixture(), failures: string[] = [];
+    let launches = 0;
+    const child = new EventEmitter() as ChildProcess;
+    const spawnWorker = (() => { launches++; return child; }) as typeof import("node:child_process").spawn;
+    try {
+      const stop = await startWorker(f, { mode: "component-context-daily", server_entrypoint: f.server,
+        restart_base_delay_ms: 1, spawn_process: spawnWorker, on_failure: reason => failures.push(reason) });
+      await unlink(removed === "server" ? f.server : f.workerPath);
+      child.emit("exit", 1);
+      for (let attempt = 0; attempt < 50 && !failures.includes("worker_payload_removed"); attempt++) {
+        await new Promise(resolve => setTimeout(resolve, 2));
+      }
+      await stop?.(); await stop?.();
+      assert.equal(launches, 1, "a removed payload must not be restarted indefinitely");
+      assert.deepEqual(failures, ["worker_exit_1", "worker_payload_removed"]);
+      const release = await acquireLearningWorkerLocks(join(f.root, "runtime"), ["experience", "knowledge"]);
+      assert.ok(release, "another runtime must be able to acquire the released ownership");
+      await release();
+    } finally { await f.close(); }
+  }
+});
+
+test("concurrent supervisor stops retain ownership until the child exits", async () => {
+  const f = await fixture();
+  const child = new EventEmitter() as ChildProcess;
+  child.kill = () => true;
+  const spawnWorker = (() => child) as typeof import("node:child_process").spawn;
+  try {
+    const stop = await startWorker(f, { mode: "component-context-daily", server_entrypoint: f.server, spawn_process: spawnWorker });
+    const stopping = stop!();
+    await stop!();
+    assert.equal(await acquireLearningWorkerLocks(join(f.root, "runtime"), ["knowledge"]), null);
+    child.emit("exit", 0);
+    await stopping;
+    const release = await acquireLearningWorkerLocks(join(f.root, "runtime"), ["knowledge"]);
+    assert.ok(release);
+    await release();
+  } finally { await f.close(); }
+});
+
 test("worker supervisor restarts crashed workers with backoff and stops the replacement cleanly", async () => {
   const f = await fixture(), failures: string[] = [], children: Array<EventEmitter & { kill: (signal?: string) => boolean }> = [];
   try {
