@@ -34,7 +34,7 @@ test("Codex CLI transport uses fixed model, isolated read-only ephemeral invocat
   assert.equal(observed?.cwd, tmpdir());
   assert.equal(observed?.timeoutMs, 120_000);
   assert.equal(observed?.outputLimit, 65_536);
-  assert.deepEqual(observed?.argv, ["exec", "--ignore-user-config", "--ephemeral", "--sandbox", "read-only", "--skip-git-repo-check", "--model", "gpt-6-luna", "--json", "-"]);
+  assert.deepEqual(observed?.argv, ["exec", "--ignore-user-config", "--ephemeral", "--sandbox", "read-only", "--skip-git-repo-check", "-c", "skills.max_context_tokens=1", "-c", "features.shell_tool=false", "-c", "tools.view_image=false", "-c", 'web_search="disabled"', "--model", "gpt-6-luna", "--json", "-"]);
   assert.match(observed?.stdin ?? "", /## system\nReturn JSON\./u);
   assert.match(observed?.stdin ?? "", /## user\n\{\}/u);
 });
@@ -130,6 +130,31 @@ test("learning transport is opt-in and shares one call budget across Host and AP
   assert.equal(transport.acquireCall?.("qwen"), true);
   assert.equal(transport.acquireCall?.("codex-cli"), false);
   assert.equal(transport.acquireCall?.("another"), false);
+});
+
+test("Codex learning input is bounded before execution without truncating evidence", async () => {
+  let executions = 0;
+  const executor = async () => { executions++; return success(); };
+  for (const max_input_tokens of [0, -1, 1.5, 32_769, Number.NaN]) {
+    assert.throws(() => new CodexCliModelTransport(executor, { max_input_tokens }), /max_input_tokens/u);
+  }
+  const transport = new CodexCliModelTransport(executor, { max_input_tokens: 50 });
+  await assert.rejects(transport.complete(provider, { ...request, body: { ...request.body,
+    messages: [{ role: "user", content: "必须保留的证据。".repeat(100) }] } }),
+    (error: NodeJS.ErrnoException) => error.code === "ERR_CODEX_INPUT_BUDGET_EXCEEDED");
+  assert.equal(executions, 0);
+  await transport.complete(provider, request);
+  assert.equal(executions, 1);
+});
+
+test("Codex model-only tasks reject tool activity even when a final answer follows", async () => {
+  for (const type of ["command_execution", "mcp_tool_call", "web_search", "file_change", "unknown_tool"]) {
+    const event = JSON.stringify({ type: "item.started", item: { type } });
+    await assert.rejects(new CodexCliModelTransport(async () => ({ ...success(), stdout: event + "\n" + success().stdout })).complete(provider, request),
+      (error: NodeJS.ErrnoException) => error.code === "ERR_CODEX_HOST_RESPONSE_INVALID");
+  }
+  const event = JSON.stringify({ type: "item.completed", item: { type: "reasoning", text: "internal reasoning" } });
+  assert.equal((await new CodexCliModelTransport(async () => ({ ...success(), stdout: event + "\n" + success().stdout })).complete(provider, request)).model, "gpt-6-luna");
 });
 
 test("learning transport routes Codex Host and API profiles through their correct transports", async t => {

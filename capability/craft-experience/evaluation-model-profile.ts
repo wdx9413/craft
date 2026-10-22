@@ -43,9 +43,11 @@ export class EvaluationModelProfileKernel {
   readonly store: CraftStore;
   readonly providers: readonly ModelProviderSpec[];
   readonly env: NodeJS.ProcessEnv;
+  readonly traceReader: { get(args: JsonObject): JsonObject } | undefined;
 
-  constructor(store: CraftStore, providers: readonly ModelProviderSpec[], env: NodeJS.ProcessEnv = process.env) {
-    this.store = store; this.providers = providers; this.env = env;
+  constructor(store: CraftStore, providers: readonly ModelProviderSpec[], env: NodeJS.ProcessEnv = process.env,
+    traceReader?: { get(args: JsonObject): JsonObject }) {
+    this.store = store; this.providers = providers; this.env = env; this.traceReader = traceReader;
   }
 
   save(args: JsonObject): JsonObject {
@@ -137,20 +139,28 @@ export class EvaluationModelProfileKernel {
     if (!/^sha256:[a-f0-9]{64}$/u.test(resultDigest)) throw new Error("result_digest must be a SHA-256 digest");
     if (ticket.status === "completed") {
       if (ticket.result_digest !== resultDigest) throw new Error("Evaluation Model Ticket completion digest conflicts with its prior result");
-      const traceId = ticket.purpose === "knowledge_scenario_classification" ? text(args.trace_id, "trace_id") : undefined;
-      if (traceId && !this.knowledgeResultTraceMatches(ticket, traceId, resultDigest)) {
+      const traceId = ticket.purpose === "knowledge_scenario_classification" || args.trace_id !== undefined ? text(args.trace_id, "trace_id") : undefined;
+      if (traceId && ticket.purpose === "knowledge_scenario_classification" && !this.knowledgeResultTraceMatches(ticket, traceId, resultDigest)) {
         throw new Error("Knowledge classification ticket requires its exact model and result Trace before completion");
       }
-      if (traceId && ticket.trace_id !== traceId) throw new Error("Knowledge classification ticket completion Trace conflicts with its prior result");
+      if (traceId && ticket.trace_id !== traceId) throw new Error("Evaluation Model Ticket completion Trace conflicts with its prior result");
       return { ticket, idempotent: true };
     }
     if (ticket.status !== "ready_for_adapter") throw new Error("Evaluation Model Ticket is not ready for completion");
-    const traceId = ticket.purpose === "knowledge_scenario_classification" ? text(args.trace_id, "trace_id") : undefined;
-    if (traceId && !this.knowledgeResultTraceMatches(ticket, traceId, resultDigest)) {
+    const traceId = ticket.purpose === "knowledge_scenario_classification" || args.trace_id !== undefined ? text(args.trace_id, "trace_id") : undefined;
+    if (traceId && ticket.purpose === "knowledge_scenario_classification" && !this.knowledgeResultTraceMatches(ticket, traceId, resultDigest)) {
       throw new Error("Knowledge classification ticket requires its exact model and result Trace before completion");
     }
     if (ticket.purpose === "workflow_evolution") {
       const target = ticket.target as JsonObject;
+      if (traceId) {
+        const trace = this.store.find("trace", traceId);
+        const profile = this.store.get("evaluation_model_profile", String(ticket.profile_id), Number(ticket.profile_version));
+        if (!trace || trace.operation_id !== ticket.id || trace.task_id !== `experience:${target.id}`
+          || trace.model_fingerprint !== stableDigest({ provider: profile.provider, model: profile.model })) {
+          throw new Error("Experience ticket requires its exact model Trace");
+        }
+      }
       if (target.kind === "experience_scenario_classification_request") {
         const request = this.store.find("experience_scenario_classification_request_ref", String(target.id));
         if (!request || request.scope !== target.scope || !["classified", "unclassified"].includes(String(request.status))
@@ -198,14 +208,25 @@ export class EvaluationModelProfileKernel {
     if (!/^sha256:[a-f0-9]{64}$/u.test(resultDigest)) return false;
     const target = ticket.target as JsonObject | undefined;
     const profile = this.store.find("evaluation_model_profile", String(ticket.profile_id), Number(ticket.profile_version));
-    const trace = this.store.find("trace", traceId);
+    let trace = this.store.find("trace", traceId);
+    let archivedEvents: JsonObject[] | undefined;
+    if (!trace && this.store.find("trace_archive", traceId)) {
+      // An unreadable archive is an unavailable proof, not evidence that the model
+      // never ran. Propagate the error so issuance cannot silently replay the call.
+      if (!this.traceReader) throw new Error("Archived model Trace reader is unavailable");
+      const archived = this.traceReader.get({ trace_id: traceId });
+      if (!archived.trace || typeof archived.trace !== "object" || Array.isArray(archived.trace)
+        || !Array.isArray(archived.events) || (archived.trace as JsonObject).id !== traceId) throw new Error("Archived model Trace is malformed");
+      trace = archived.trace as JsonObject;
+      archivedEvents = archived.events as JsonObject[];
+    }
     if (ticket.purpose !== "knowledge_scenario_classification" || target?.kind !== "knowledge_scenario_classification"
       || typeof target.id !== "string" || !profile || !trace || trace.task_id !== `knowledge:${target.id}` || trace.operation_id !== ticket.id) return false;
     const expectedFingerprint = stableDigest({ provider: profile.provider, model: profile.model });
     if (trace.model_fingerprint !== expectedFingerprint) return false;
     const count = Number(trace.event_count);
     if (!Number.isSafeInteger(count) || count < 2 || count > 10_000) return false;
-    const events = Array.from({ length: count }, (_, index) => this.store.find("trace_event", `${traceId}:${index + 1}`))
+    const events = archivedEvents ?? Array.from({ length: count }, (_, index) => this.store.find("trace_event", `${traceId}:${index + 1}`))
       .filter((event): event is JsonObject => Boolean(event));
     const modelEvent = events.find(event => event.event_kind === "model.completed" && event.operation_id === ticket.id
       && event.model_fingerprint === expectedFingerprint);

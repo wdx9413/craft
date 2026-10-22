@@ -20,7 +20,7 @@ async function fixture() {
 }
 async function close(f: Awaited<ReturnType<typeof fixture>>) { f.store.close(); await rm(f.root, { recursive: true, force: true }); }
 function observation(service: CraftService, id: string, sourceId: string, outcome: string = "passed") {
-  return service.workflowEvolutionObserve({ observation_id: id, scenario_key: "support-refund", source_kind: "external_execution", source_id: sourceId, source_digest: `sha256:${sourceId}`, outcome, evidence_ids: ["confirmed"], sanitized: true, content_stored: false }).observation as JsonObject;
+  return service.workflowEvolutionObserve({ observation_id: id, scope: "project:demo", scenario_key: "support-refund", source_kind: "external_execution", source_id: sourceId, source_digest: `sha256:${sourceId}`, outcome, evidence_ids: ["confirmed"], sanitized: true, content_stored: false }).observation as JsonObject;
 }
 
 test("graph proposal retries compare validated control instead of silently changing it", async () => {
@@ -107,6 +107,70 @@ test("reserves a secret-free model profile and fails closed until explicit enabl
     f.store.create("evaluation_model_profile", "inactive", { provider: "qwen", lifecycle: "disabled", purposes: ["evaluation"] });
     assert.throws(() => kernel.issue({ profile_id: "inactive", purpose: "evaluation", campaign_dispatch_id: "issued-dispatch", input_ref: "case", output_contract_ref: "contract" }), /not active/);
     assert.throws(() => kernel.issue({ profile_id: evalProfile.id, purpose: "evaluation", campaign_dispatch_id: "missing", input_ref: "case", output_contract_ref: "contract" }), /Unknown/);
+  } finally { await close(f); }
+});
+
+test("Experience ticket completion retains the exact supplied model Trace", async () => {
+  const f = await fixture();
+  try {
+    const kernel = new EvaluationModelProfileKernel(f.store, PROVIDER_CATALOG);
+    const profile = kernel.save({ profile_id: "correlated-profile", provider: "qwen", model: "qwen-plus", purposes: ["workflow_evolution"] }).profile as JsonObject;
+    f.store.create("workflow_evolution_request", "correlated-request", { lifecycle: "draft_submitted", proposal_id: "correlated-proposal" });
+    f.store.create("workflow_evolution_proposal", "correlated-proposal", { model_ticket_id: "correlated-ticket", request_id: "correlated-request", request_version: 1 });
+    const ticket = f.store.create("evaluation_model_ticket", "correlated-ticket", { profile_id: profile.id, profile_version: profile.version,
+      purpose: "workflow_evolution", status: "ready_for_adapter", target: { kind: "workflow_evolution_request", id: "correlated-request", version: 1 } });
+    const completion = { ticket_id: ticket.id, result_digest: stableDigest("candidate"), trace_id: "correlated-trace" };
+    assert.throws(() => kernel.ticketComplete(completion), /exact model Trace/u);
+    const trace = { operation_id: ticket.id, task_id: "experience:correlated-request", model_fingerprint: stableDigest({ provider: profile.provider, model: profile.model }) };
+    for (const changes of [{ operation_id: "other" }, { task_id: "experience:other" }, { model_fingerprint: stableDigest("other") }]) {
+      f.store.save("trace", "correlated-trace", { ...trace, ...changes });
+      assert.throws(() => kernel.ticketComplete(completion), /exact model Trace/u);
+    }
+    f.store.save("trace", "correlated-trace", trace);
+    assert.equal((kernel.ticketComplete(completion).ticket as JsonObject).trace_id, "correlated-trace");
+    assert.equal(kernel.ticketComplete(completion).idempotent, true);
+    assert.throws(() => kernel.ticketComplete({ ...completion, trace_id: "other-trace" }), /Trace conflicts/u);
+  } finally { await close(f); }
+});
+
+test("archiving a completed model Trace does not reissue its Knowledge task", async () => {
+  const f = await fixture();
+  try {
+    const env = { DASHSCOPE_API_KEY: "configured-for-test" };
+    const kernel = new EvaluationModelProfileKernel(f.store, PROVIDER_CATALOG, env, f.service.trace);
+    const profile = kernel.save({ provider: "qwen", model: "qwen-plus", purposes: ["knowledge_scenario_classification"], network_execution_enabled: true }).profile as JsonObject;
+    f.store.create("knowledge_source", "archive-source", { status: "active", trust: "verified" });
+    f.store.create("knowledge_claim", "archive-claim", { status: "candidate", scope: "global", source_id: "archive-source", content_digest: "sha256:claim" });
+    const input = { profile_id: profile.id, purpose: "knowledge_scenario_classification", knowledge_claim_id: "archive-claim",
+      input_ref: "craft-knowledge://claim/archive-claim/v1/catalog/0", output_contract_ref: "craft-knowledge-scenario-classification-v1" };
+    const ticket = kernel.issue(input).ticket as JsonObject;
+    const fingerprint = stableDigest({ provider: profile.provider, model: profile.model });
+    const resultDigest = `sha256:${"a".repeat(64)}`, traceId = "archivable-model-call";
+    f.service.trace.start({ trace_id: traceId, task_id: "knowledge:archive-claim", operation_id: ticket.id, model_fingerprint: fingerprint });
+    f.service.trace.append({ trace_id: traceId, event_kind: "model.completed", operation_id: ticket.id, model_fingerprint: fingerprint });
+    f.service.trace.append({ trace_id: traceId, event_kind: "model.result_bound", actor: "knowledge-classification-worker", source: "craft-knowledge",
+      trust: "verified", operation_id: ticket.id, output_refs: ["archive-claim"], data: { ticket_id: ticket.id, result_digest: resultDigest } });
+    const completion = { ticket_id: ticket.id, trace_id: traceId, result_digest: resultDigest };
+    kernel.ticketComplete(completion);
+    f.service.trace.finalize({ trace_id: traceId, status: "completed", summary: "fixture classification complete" });
+    f.service.trace.retentionSweep({ now: "2030-01-01T00:00:00.000Z" });
+    assert.equal(f.store.find("trace", traceId), null);
+    assert.ok(f.store.find("trace_archive", traceId));
+    assert.equal(kernel.ticketComplete(completion).idempotent, true);
+    assert.equal((kernel.issue(input).ticket as JsonObject).id, ticket.id);
+    assert.equal((f.service.evaluationModelProfiles.issue(input).ticket as JsonObject).id, ticket.id,
+      "the assembled capability must use the configured core archive reader");
+    assert.throws(() => new EvaluationModelProfileKernel(f.store, PROVIDER_CATALOG, env).issue(input), /reader is unavailable/);
+    for (const response of [{}, { trace: "bad" }, { trace: [] }, { trace: {}, events: null }, { trace: { id: "other" }, events: [] }]) {
+      const malformed = new EvaluationModelProfileKernel(f.store, PROVIDER_CATALOG, env, { get: () => response });
+      assert.throws(() => malformed.issue(input), /Trace is malformed/);
+    }
+    const read = f.service.trace.archives.read;
+    f.service.trace.archives.read = () => { throw new Error("archive offline"); };
+    assert.throws(() => kernel.issue(input), /archive offline/);
+    assert.throws(() => kernel.ticketComplete(completion), /archive offline/);
+    f.service.trace.archives.read = read;
+    assert.equal(f.store.count("evaluation_model_ticket"), 1, "retention or read failure must not manufacture a recovery task");
   } finally { await close(f); }
 });
 
@@ -452,8 +516,9 @@ test("Experience classification tickets bind one awaiting project request throug
       purpose: "evaluation", status: "ready_for_adapter", target: ticket.target });
     assert.equal((kernel.ticketList().tickets as JsonObject[]).some(item => item.id === "wrong-purpose-scenario-ticket"), false);
     assert.throws(() => kernel.ticketComplete({ ticket_id: ticket.id, result_digest: resultDigest }), /exact resolved request/u);
-    f.store.save("experience_scenario_classification_request_ref", requestId, { ...f.store.find("experience_scenario_classification_request_ref", requestId), scope: "project:other" });
+    f.store.save("evaluation_model_ticket", String(ticket.id), { ...ticket, target: { ...ticket.target as JsonObject, scope: "project:other" } });
     assert.throws(() => kernel.ticketComplete({ ticket_id: ticket.id, result_digest: resultDigest }), /exact resolved request/u);
+    f.store.save("evaluation_model_ticket", String(ticket.id), { ...f.store.get("evaluation_model_ticket", String(ticket.id)), target: ticket.target });
     f.store.save("experience_scenario_classification_request_ref", requestId, { ...f.store.find("experience_scenario_classification_request_ref", requestId), scope, status: "awaiting_model" });
     assert.throws(() => kernel.ticketComplete({ ticket_id: ticket.id, result_digest: resultDigest }), /exact resolved request/u);
     f.store.save("experience_scenario_classification_request_ref", requestId, { ...f.store.find("experience_scenario_classification_request_ref", requestId), scope, status: "classified", result_digest: `sha256:${"c".repeat(64)}` });
@@ -479,8 +544,8 @@ test("evolves only independent sanitized evidence into a new draft Workflow and 
     assert.throws(() => f.service.workflowEvolutionObserve({ scenario_key: "x", source_kind: "external", source_id: "one", source_digest: "d", outcome: "passed", evidence_ids: [], sanitized: true }), /at least 1/);
     assert.throws(() => f.service.workflowEvolutionObserve({ scenario_key: "x", source_kind: "external", source_id: "one", source_digest: "d", outcome: "passed", evidence_ids: ["confirmed"], sanitized: true, content_stored: true }), /content-free/);
     const first = observation(f.service, "first", "source-one"); const second = observation(f.service, "second", "source-two", "failed");
-    assert.equal((f.service.workflowEvolutionObserve({ observation_id: "first", scenario_key: "support-refund", source_kind: "external_execution", source_id: "source-one", source_digest: "sha256:source-one", outcome: "passed", evidence_ids: ["confirmed"], sanitized: true }).idempotent), true);
-    assert.throws(() => f.service.workflowEvolutionObserve({ observation_id: "first", scenario_key: "support-refund", source_kind: "external_execution", source_id: "source-one", source_digest: "changed", outcome: "passed", evidence_ids: ["confirmed"], sanitized: true }), /idempotency/);
+    assert.equal((f.service.workflowEvolutionObserve({ observation_id: "first", scope: "project:demo", scenario_key: "support-refund", source_kind: "external_execution", source_id: "source-one", source_digest: "sha256:source-one", outcome: "passed", evidence_ids: ["confirmed"], sanitized: true }).idempotent), true);
+    assert.throws(() => f.service.workflowEvolutionObserve({ observation_id: "first", scope: "project:demo", scenario_key: "support-refund", source_kind: "external_execution", source_id: "source-one", source_digest: "changed", outcome: "passed", evidence_ids: ["confirmed"], sanitized: true }), /idempotency/);
     assert.equal((f.service.workflowEvolutionObservations({ scenario_key: "support-refund" }).observations as JsonObject[]).length, 2);
     assert.throws(() => f.service.workflowEvolutionPropose({ scenario_key: "support-refund", observation_ids: [first.id, first.id], hypothesis: "h", design_axes: ["tools"], output_contract_ref: "contract" }), /unique/);
     const duplicateSource = observation(f.service, "same-source", "source-one");
@@ -538,8 +603,8 @@ test("routes every reserved model and Workflow-evolution operation through the c
     assert.equal((profileDetails.profile as JsonObject).id, profile.id);
     assert.equal((profileDetails.provider as JsonObject).provider, "qwen");
     assert.equal(((await server.handlers.craft_evaluation_model_profile_list({ limit: 1 })).profiles as JsonObject[]).length, 1);
-    const first = (await server.handlers.craft_experience_observe({ observation_id: "mcp-first", scenario_key: "mcp-flow", source_kind: "customer_execution", source_id: "one", source_digest: "sha256:one", outcome: "passed", evidence_ids: ["confirmed"], sanitized: true })).observation as JsonObject;
-    const second = (await server.handlers.craft_experience_observe({ observation_id: "mcp-second", scenario_key: "mcp-flow", source_kind: "customer_execution", source_id: "two", source_digest: "sha256:two", outcome: "failed", evidence_ids: ["confirmed"], sanitized: true })).observation as JsonObject;
+    const first = (await server.handlers.craft_experience_observe({ observation_id: "mcp-first", scope: "project:demo", scenario_key: "mcp-flow", source_kind: "customer_execution", source_id: "one", source_digest: "sha256:one", outcome: "passed", evidence_ids: ["confirmed"], sanitized: true })).observation as JsonObject;
+    const second = (await server.handlers.craft_experience_observe({ observation_id: "mcp-second", scope: "project:demo", scenario_key: "mcp-flow", source_kind: "customer_execution", source_id: "two", source_digest: "sha256:two", outcome: "failed", evidence_ids: ["confirmed"], sanitized: true })).observation as JsonObject;
     assert.equal(((await server.handlers.craft_experience_patterns_list({ scenario_key: "mcp-flow" })).observations as JsonObject[]).length, 2);
     const request = (await server.handlers.craft_experience_procedure_draft({ request_id: "mcp-request", scenario_key: "mcp-flow", observation_ids: [first.id, second.id], hypothesis: "preserve the observed verification sequence", design_axes: ["orchestration"], output_contract_ref: "contract:mcp-workflow" })).request as JsonObject;
     const ticket = (await server.handlers.craft_evaluation_model_ticket_issue({ ticket_id: "mcp-ticket", profile_id: profile.id, purpose: "workflow_evolution", workflow_evolution_request_id: request.id, input_ref: "external:batch", output_contract_ref: "contract:mcp-workflow" })).ticket as JsonObject;

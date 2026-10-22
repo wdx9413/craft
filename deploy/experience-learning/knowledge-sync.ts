@@ -3,6 +3,7 @@ import { lstatSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { atomicPrivateJson, craftPaths, dataRoot } from "../../common/craft-common-store-local/src/paths.ts";
 import type { JsonObject } from "../../core/infrastructure/store.ts";
+import { operationErrorCode } from "../../common/craft-common-log/src/index.ts";
 
 export interface KnowledgeLearningClient { call(name: string, args?: JsonObject): Promise<JsonObject> }
 export interface KnowledgeSyncOptions {
@@ -142,7 +143,8 @@ export async function runKnowledgeSyncOnce(client: KnowledgeLearningClient, opti
       else delete sourceCursors[ref];
       outcomes.push(result.outcome);
     }
-    catch (error) { outcomes.push({ source_ref: sourceRef(sourceId), status: "failed", failure_kind: error instanceof Error ? error.name : "Error" }); }
+    catch (error) { outcomes.push({ source_ref: sourceRef(sourceId), status: "failed", failure_kind: error instanceof Error ? error.name : "Error",
+      failure_code: operationErrorCode(error) }); }
     await writeState(path, sourceId, sourceCursors);
   }
   return { sources_seen: sources.length, sources_selected: selected.length, outcomes,

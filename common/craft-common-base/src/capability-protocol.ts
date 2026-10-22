@@ -413,6 +413,7 @@ export const CORE_KERNELS = {
   store: "core.store",
   modelProviders: "core.model_providers",
   telemetry: "core.telemetry",
+  traceReader: "core.trace_reader",
 } as const;
 
 /**

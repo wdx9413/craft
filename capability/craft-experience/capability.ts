@@ -72,7 +72,8 @@ export const experienceCapability: CraftCapability = {
     registry.provide(EXPERIENCE_KERNELS.ledger, observedKernel(store, "experience", new ExperienceLedgerKernel(store)));
     registry.provide(EXPERIENCE_KERNELS.workflowEvolution, observedKernel(store, "experience", new WorkflowEvolutionKernel(store)));
     registry.provide(EXPERIENCE_KERNELS.procedures, observedKernel(store, "experience", new ProcedureStore(store)));
-    registry.provide(EXPERIENCE_KERNELS.modelProfiles, observedKernel(store, "experience", new EvaluationModelProfileKernel(store, providers)));
+    registry.provide(EXPERIENCE_KERNELS.modelProfiles, observedKernel(store, "experience", new EvaluationModelProfileKernel(store, providers,
+      process.env, registry.optional(CORE_KERNELS.traceReader))));
   },
   /**
    * Context receives only routeable Procedure projections. This keeps diagnostic learning useful

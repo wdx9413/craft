@@ -181,7 +181,7 @@ export async function runExperienceScenarioClassificationOnce(deps: ExperienceSc
     const completed = await deps.client.call("craft_experience_scenario_classification_request_complete", { request_id: requestId, scope,
       expected_version: request.version, status: decision.decision, result_digest: resultDigest,
       ...(typeof context.project_root === "string" ? { project_root: context.project_root } : {}) });
-    await deps.client.call("craft_evaluation_model_ticket_complete", { ticket_id: ticketId, result_digest: resultDigest });
+    await deps.client.call("craft_evaluation_model_ticket_complete", { ticket_id: ticketId, trace_id: traceId, result_digest: resultDigest });
     await deps.client.call("craft_trace_append", { trace_id: traceId, event_kind: decision.decision === "classified" ? "classification.linked" : "classification.unclassified",
       actor: "experience-learning-worker", source: "craft-experience", trust: "verified", operation_id: ticketId,
       ...(observationId ? { output_refs: [observationId] } : {}), data: { result_digest: resultDigest, scenario_key: decision.decision === "classified" ? decision.scenario_key : null,

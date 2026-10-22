@@ -446,7 +446,7 @@ test("explicit project roots allow intentional classification inside a temporary
 });
 
 test("background classification still processes persistent project roots", async () => {
-  const projectRoot = process.cwd();
+  const projectRoot = "/workspace/craft-persistent-project";
   const f = fixture(undefined, "reviewed", String(claim.scope), provider,
     join(projectRoot, ".craft_data", "knowledge", "md", "claim.md"));
   const result = await runKnowledgeScenarioClassificationOnce({ client: f.client, providers: [provider], transport: f.transport });

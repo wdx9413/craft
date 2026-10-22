@@ -82,7 +82,8 @@ export function learningTickStatus(result: JsonObject, once: boolean): { diagnos
     if (status === "partial") return [`Craft Knowledge source ${source} sync is partial; remaining pages will resume in a later pass.\n`];
     const kind = typeof outcome.failure_kind === "string" && /^[A-Za-z][A-Za-z0-9]{0,31}$/u.test(outcome.failure_kind)
       ? outcome.failure_kind : "Error";
-    return [`Craft Knowledge source ${source} sync failed (${kind}).\n`];
+    const code = typeof outcome.failure_code === "string" && /^(?:ERR_[A-Z_]+|[A-Z][A-Z_]{0,63})$/u.test(outcome.failure_code) ? ` [${outcome.failure_code}]` : "";
+    return [`Craft Knowledge source ${source} sync failed (${kind})${code}.\n`];
   }) : [];
   const diagnostics = [
     ...(sessionCollectionFailure ? [`Craft Codex session collection failed (${sessionCollectionFailure}).\n`] : []),

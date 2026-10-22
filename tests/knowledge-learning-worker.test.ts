@@ -10,6 +10,18 @@ import { runKnowledgeSyncOnce, type KnowledgeLearningClient } from "../deploy/ex
 const source = (id: string, patch: JsonObject = {}): JsonObject => ({ id, status: "active", access: "read_only", trust: "verified", ...patch });
 const sourceRef = (id: string): string => `sha256:${createHash("sha256").update(id).digest("hex")}`;
 
+test("Knowledge sync preserves stable failure codes without storing private error messages", async () => {
+  const root = tempDir();
+  try {
+    const result = await runKnowledgeSyncOnce({ async call(name) {
+      if (name === "craft_knowledge_source_list") return { sources: [source("a")] };
+      throw Object.assign(new Error("private source details"), { code: "ERR_MCP_INVALID_INPUT" });
+    } }, { state_file: join(root, "state.json") });
+    assert.equal((result.outcomes as JsonObject[])[0]!.failure_code, "ERR_MCP_INVALID_INPUT");
+    assert.equal(JSON.stringify(result).includes("private source details"), false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 function tempDir(): string { return mkdtempSync(join(tmpdir(), "craft-knowledge-worker-")); }
 
 test("Knowledge worker paginates bounded verified sources and rotates from central cursor state", async () => {
@@ -47,7 +59,7 @@ test("Knowledge worker logs a source failure without blocking the next source", 
     } };
     const first = await runKnowledgeSyncOnce(client, { state_file: stateFile, max_sources: 2 });
     assert.deepEqual(first.outcomes, [
-      { source_ref: sourceRef("a"), status: "failed", failure_kind: "TypeError" },
+      { source_ref: sourceRef("a"), status: "failed", failure_kind: "TypeError", failure_code: "INVALID_INPUT" },
       { source_ref: sourceRef("b"), status: "unknown", reason: null, pages: 1, processed_files: 0, candidates: 0, promoted: 0, has_more: false },
     ]);
     assert.equal(JSON.stringify(first).includes("local source path"), false);
@@ -101,7 +113,7 @@ test("Knowledge worker fails closed on malformed cursors, source lists and state
       return { status: "partial", has_more: true, next_cursor: null };
     } };
     const result = await runKnowledgeSyncOnce(malformedCursor, { state_file: stateFile, max_pages_per_source: 1 });
-    assert.deepEqual(result.outcomes, [{ source_ref: sourceRef("a"), status: "failed", failure_kind: "Error" }]);
+    assert.deepEqual(result.outcomes, [{ source_ref: sourceRef("a"), status: "failed", failure_kind: "Error", failure_code: "INVALID_INPUT" }]);
     const invalidList: KnowledgeLearningClient = { async call() { return {}; } };
     await assert.rejects(runKnowledgeSyncOnce(invalidList, { state_file: join(root, "other.json") }), /sources array/u);
     writeFileSync(stateFile, JSON.stringify({ schema: "wrong", last_source_id: null }));
@@ -162,7 +174,7 @@ test("Knowledge worker refuses symlinked state directories and contains non-Erro
       throw "opaque failure";
     } };
     const outcome = await runKnowledgeSyncOnce(throwingClient, { state_file: join(root, "state.json") });
-    assert.deepEqual(outcome.outcomes, [{ source_ref: sourceRef("a"), status: "failed", failure_kind: "Error" }]);
+    assert.deepEqual(outcome.outcomes, [{ source_ref: sourceRef("a"), status: "failed", failure_kind: "Error", failure_code: "OPERATION_FAILED" }]);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

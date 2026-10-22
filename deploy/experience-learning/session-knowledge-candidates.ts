@@ -20,7 +20,7 @@ const SECRET = /(?:api[_-]?key|authorization|cookie|password|secret|token)\s*[:=
 
 type CandidateSkipReason = "verified_project_evidence_incomplete" | "verified_task_excerpt_unavailable" | "verifiable_test_result_unavailable";
 interface CandidateSkip { source_ref_digest: string; reason_code: CandidateSkipReason; recorded_at: string }
-interface CandidateState { processed_task_ids: string[]; terminal_skips: Record<string, CandidateSkip> }
+interface CandidateState { processed_task_ids: string[]; terminal_skips: Record<string, CandidateSkip>; trace_ids_by_task: Record<string, string> }
 export interface SessionKnowledgeCandidateDependencies {
   client: ExperienceLearningClient;
   providers?: readonly ModelProviderSpec[];
@@ -46,9 +46,13 @@ function readCandidateState(path: string): CandidateState {
     if (stat.isSymbolicLink() || !stat.isFile() || stat.size > 8 * 1024 * 1024) throw new Error("Knowledge session candidate state file is invalid");
     const value = JSON.parse(readFileSync(path, "utf8")) as JsonObject;
     const skips = value.terminal_skips === undefined ? {} : value.terminal_skips;
+    const traces = value.trace_ids_by_task === undefined ? {} : value.trace_ids_by_task;
     if (value.schema !== STATE_SCHEMA || !Array.isArray(value.processed_task_ids)
       || value.processed_task_ids.length > 50_000 || value.processed_task_ids.some(id => typeof id !== "string" || !id.trim() || id.length > 160)
       || !skips || typeof skips !== "object" || Array.isArray(skips) || Object.keys(skips).length > 50_000
+      || !traces || typeof traces !== "object" || Array.isArray(traces) || Object.keys(traces).length > 50_000
+      || Object.entries(traces as Record<string, unknown>).some(([taskId, traceId]) => !taskId.trim() || taskId.length > 160
+        || typeof traceId !== "string" || !/^trace[-_][A-Za-z0-9_-]{1,160}$/u.test(traceId))
       || Object.entries(skips as Record<string, unknown>).some(([id, raw]) => {
         const item = raw && typeof raw === "object" && !Array.isArray(raw) ? raw as JsonObject : null;
         return !id.trim() || id.length > 160 || !item || typeof item.source_ref_digest !== "string"
@@ -58,9 +62,10 @@ function readCandidateState(path: string): CandidateState {
       })) {
       throw new Error("Knowledge session candidate state is invalid");
     }
-    return { processed_task_ids: [...new Set(value.processed_task_ids as string[])], terminal_skips: skips as Record<string, CandidateSkip> };
+    return { processed_task_ids: [...new Set(value.processed_task_ids as string[])], terminal_skips: skips as Record<string, CandidateSkip>,
+      trace_ids_by_task: traces as Record<string, string> };
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { processed_task_ids: [], terminal_skips: {} };
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { processed_task_ids: [], terminal_skips: {}, trace_ids_by_task: {} };
     throw error;
   }
 }
@@ -69,7 +74,8 @@ async function writeCandidateState(path: string, state: CandidateState): Promise
   try { if (lstatSync(parent).isSymbolicLink()) throw new Error("Knowledge session candidate state directory must not be a symbolic link"); }
   catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
   await atomicPrivateJson(path, { schema: STATE_SCHEMA, processed_task_ids: state.processed_task_ids.slice(-50_000),
-    terminal_skips: Object.fromEntries(Object.entries(state.terminal_skips).slice(-50_000)), updated_at: new Date().toISOString() });
+    terminal_skips: Object.fromEntries(Object.entries(state.terminal_skips).slice(-50_000)),
+    trace_ids_by_task: Object.fromEntries(Object.entries(state.trace_ids_by_task).slice(-50_000)), updated_at: new Date().toISOString() });
 }
 async function recordTerminalSkip(path: string, state: CandidateState, task: JsonObject, reason: CandidateSkipReason): Promise<void> {
   const taskId = String(task.task_id);
@@ -149,7 +155,7 @@ export async function runSessionKnowledgeCandidateOnce(deps: SessionKnowledgeCan
   const packet = { project_scope_id: task.project_scope_id, task_goal: excerpt.task_goal, task_result: excerpt.task_result,
     verification_outcome: excerpt.verification_outcome, verification_artifacts: verificationArtifacts,
     evidence_count: excerptEvidenceIds.length + 1, sanitized: true, content_stored: false };
-  const taskEvidenceIds = Array.isArray(task.verification_evidence_ids) ? task.verification_evidence_ids.filter((id): id is string => typeof id === "string") : [];
+  const taskEvidenceIds = task.verification_evidence_ids as string[];
   const inputDigest = stableDigest({ purpose: "knowledge_session_candidate_generation.v1", task_id: task.task_id, packet });
   const modelFingerprint = stableDigest({ provider: provider.provider, model: profile.model });
   const system = `从已验证的项目任务中提炼一条可复用、可独立核实的项目知识候选。仅依据输入中的任务目标和结果，不补充未观察到的事实；若没有稳定、可验证的知识，返回 decision=skip。返回一个 JSON 对象，字段为 decision、kind、title、content、tags。所有可读文字使用中文。不得写入会话细节、个人信息、密钥、路径或代码。候选只供后续独立证据评审，不代表事实已确认。${generatedTextLanguageInstruction(deps.contentLanguage ?? "zh-CN")}`;
@@ -195,8 +201,9 @@ export async function runSessionKnowledgeCandidateOnce(deps: SessionKnowledgeCan
       output_refs: [claimId, verificationEvidenceId].filter((value): value is string => value !== null), model_fingerprint: modelFingerprint,
       data: { result_digest: resultDigest, claim_id: claimId, evidence_id: verificationEvidenceId, decision: candidate ? "candidate" : "skip" },
       summary: candidate ? "已创建待独立证据评审的 Knowledge 候选" : "模型判定该任务没有稳定 Knowledge 候选" });
-    state.processed_task_ids.push(String(task.task_id)); await writeCandidateState(path, state);
     await deps.client.call("craft_trace_finalize", { trace_id: traceId, status: "completed", summary: "Knowledge 任务候选生成完成" });
+    state.processed_task_ids.push(String(task.task_id)); state.trace_ids_by_task[String(task.task_id)] = traceId;
+    await writeCandidateState(path, state);
   } catch (error) {
     await deps.client.call("craft_trace_append", { trace_id: traceId, event_kind: "model.failed", actor: "knowledge-session-candidate-worker",
       source: "craft-knowledge", trust: "observed", operation_id: String(task.task_id), model_fingerprint: modelFingerprint,

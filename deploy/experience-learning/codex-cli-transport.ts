@@ -5,11 +5,13 @@ import { executeHostProcess, type HostExecutor } from "../../core/host-driver.ts
 import type { JsonObject } from "../../core/infrastructure/store.ts";
 import type { ChatRequest, ChatResult, ModelProviderSpec, ModelTransport } from "../../core/model-gateway.ts";
 import { createFetchTransport } from "../../core/model-gateway.ts";
+import { estimateTokens } from "../../core/token-budget.ts";
 
 const MODEL = "gpt-6-luna";
 const TIMEOUT_MS = 120_000;
 const OUTPUT_LIMIT = 65_536;
 const OUTPUT_SCHEMA_LIMIT = 16_384;
+export const DEFAULT_LEARNING_INPUT_TOKEN_LIMIT = 8_192;
 
 function outputSchemaFrom(request: ChatRequest): JsonObject | null {
   const value = request.body.codex_output_schema;
@@ -48,15 +50,22 @@ function parseEvents(stdout: string): { invalid: boolean; message: string | null
   const usage = terminal?.usage && typeof terminal.usage === "object" && !Array.isArray(terminal.usage) ? terminal.usage as JsonObject : null;
   const message = messages.at(-1)?.item as JsonObject | undefined;
   return { invalid: false, message: typeof message?.text === "string" ? message.text : null, usage, terminal, terminalLast: events.at(-1) === terminal,
-    failed: events.some(event => event.type === "turn.failed" || event.type === "error") };
+    failed: events.some(event => event.type === "turn.failed" || event.type === "error"
+      || typeof event.type === "string" && event.type.startsWith("item.")
+        && !["agent_message", "reasoning"].includes(String((event.item as JsonObject | undefined)?.type))) };
 }
 
 /** Isolated Codex CLI transport for bounded evaluation tickets; one model call per worker tick. */
 export class CodexCliModelTransport implements ModelTransport {
   readonly executor: HostExecutor;
+  readonly maxInputTokens: number;
   private used = false;
 
-  constructor(executor: HostExecutor = executeHostProcess) { this.executor = executor; }
+  constructor(executor: HostExecutor = executeHostProcess, options: { max_input_tokens?: number } = {}) {
+    this.executor = executor;
+    this.maxInputTokens = options.max_input_tokens ?? DEFAULT_LEARNING_INPUT_TOKEN_LIMIT;
+    if (!Number.isSafeInteger(this.maxInputTokens) || this.maxInputTokens < 1 || this.maxInputTokens > 32_768) throw new Error("max_input_tokens must be between 1 and 32768");
+  }
 
   acquireCall(provider: string): boolean {
     if (provider !== "codex-cli" || this.used) return false;
@@ -68,10 +77,14 @@ export class CodexCliModelTransport implements ModelTransport {
     if (spec.provider !== "codex-cli" || !spec.host_managed_auth) throw new Error("Codex Host transport received an incompatible provider");
     if (request.body.model !== MODEL) throw new Error(`Codex Host model must be ${MODEL}`);
     const prompt = messagesFrom(request).map(message => `## ${message.role}\n${message.content}`).join("\n\n");
+    if (estimateTokens(prompt) > this.maxInputTokens) throw Object.assign(new Error("Codex Host business input exceeds its estimated token budget"), { code: "ERR_CODEX_INPUT_BUDGET_EXCEEDED" });
     const schema = outputSchemaFrom(request);
     let schemaDirectory: string | null = null;
     try {
       const argv = ["exec", "--ignore-user-config", "--ephemeral", "--sandbox", "read-only", "--skip-git-repo-check"];
+      // These tasks receive their complete evidence packet and do not use tools
+      // or an available-skills catalog. Keep the Host's safety rules intact.
+      argv.push("-c", "skills.max_context_tokens=1", "-c", "features.shell_tool=false", "-c", "tools.view_image=false", "-c", 'web_search="disabled"');
       if (schema) {
         schemaDirectory = await mkdtemp(join(tmpdir(), "craft-learning-schema-"));
         const schemaPath = join(schemaDirectory, "output-schema.json");
@@ -83,7 +96,8 @@ export class CodexCliModelTransport implements ModelTransport {
       const parsed = parseEvents(result.stdout);
       const completed = result.exitCode === 0 && result.signal === null && !result.timedOut && !result.cancelled && !result.outputLimited
         && !parsed.invalid && !parsed.failed && parsed.terminal !== null && parsed.terminalLast && parsed.message !== null;
-      if (!completed) throw new Error(result.timedOut ? "Codex Host timed out" : result.outputLimited ? "Codex Host output exceeded its bound" : "Codex Host did not return one complete model response");
+      if (!completed) throw Object.assign(new Error(result.timedOut ? "Codex Host timed out" : result.outputLimited ? "Codex Host output exceeded its bound" : "Codex Host did not return one complete model response"),
+        { code: result.timedOut ? "ERR_CODEX_HOST_TIMEOUT" : result.outputLimited ? "ERR_CODEX_OUTPUT_BUDGET_EXCEEDED" : "ERR_CODEX_HOST_RESPONSE_INVALID" });
       const usage = parsed.usage;
       return { text: parsed.message!, model: MODEL, usage: usage && Number.isSafeInteger(usage.input_tokens) && Number.isSafeInteger(usage.output_tokens)
         ? { input_tokens: Number(usage.input_tokens), output_tokens: Number(usage.output_tokens) } : null };

@@ -17,7 +17,7 @@ const OUTPUT_SCHEMA = { type: "object", properties: {
   expected_claim_ids: { type: "array", items: { type: "string", minLength: 1, maxLength: 160 }, maxItems: 8 },
 }, required: ["decision", "expected_claim_ids"], additionalProperties: false };
 const SECRET = /(?:api[_-]?key|authorization|cookie|password|secret|token)\s*[:=]\s*[^\s]{8,}/iu;
-interface EvaluationState { processed_task_ids: string[]; trace_ids_by_task: Record<string, string> }
+interface EvaluationState { processed_task_ids: string[]; trace_ids_by_task: Record<string, string>; last_attempted_task_id?: string }
 export interface SessionKnowledgeEvaluationDependencies {
   client: ExperienceLearningClient;
   providers?: readonly ModelProviderSpec[];
@@ -44,10 +44,11 @@ function readState(path: string): EvaluationState {
     const traces = value.trace_ids_by_task === undefined ? {} : value.trace_ids_by_task;
     if (value.schema !== SCHEMA || !Array.isArray(value.processed_task_ids) || value.processed_task_ids.length > 50_000
       || value.processed_task_ids.some(id => typeof id !== "string" || !id.trim() || id.length > 160)
+      || value.last_attempted_task_id !== undefined && (typeof value.last_attempted_task_id !== "string" || !value.last_attempted_task_id.trim() || value.last_attempted_task_id.length > 160)
       || !traces || typeof traces !== "object" || Array.isArray(traces) || Object.keys(traces).length > 50_000
       || Object.entries(traces as Record<string, unknown>).some(([taskId, traceId]) => !taskId.trim() || taskId.length > 160
         || typeof traceId !== "string" || !/^trace[-_][A-Za-z0-9_-]{1,160}$/u.test(traceId))) throw new Error("Knowledge evaluation state is invalid");
-    return { processed_task_ids: [...new Set(value.processed_task_ids as string[])], trace_ids_by_task: traces as Record<string, string> };
+    return { processed_task_ids: [...new Set(value.processed_task_ids as string[])], trace_ids_by_task: traces as Record<string, string>, last_attempted_task_id: value.last_attempted_task_id as string | undefined };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return { processed_task_ids: [], trace_ids_by_task: {} };
     throw error;
@@ -57,7 +58,8 @@ async function writeState(path: string, state: EvaluationState): Promise<void> {
   try { if (lstatSync(dirname(path)).isSymbolicLink()) throw new Error("Knowledge evaluation state directory must not be a symbolic link"); }
   catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
   await atomicPrivateJson(path, { schema: SCHEMA, processed_task_ids: state.processed_task_ids.slice(-50_000),
-    trace_ids_by_task: Object.fromEntries(Object.entries(state.trace_ids_by_task).slice(-50_000)), updated_at: new Date().toISOString() });
+    trace_ids_by_task: Object.fromEntries(Object.entries(state.trace_ids_by_task).slice(-50_000)),
+    last_attempted_task_id: state.last_attempted_task_id, updated_at: new Date().toISOString() });
 }
 function parseOutput(value: string): JsonObject {
   let parsed: unknown;
@@ -74,8 +76,15 @@ function safeFailureKind(error: unknown): string {
 export async function runSessionKnowledgeEvaluationOnce(deps: SessionKnowledgeEvaluationDependencies): Promise<JsonObject> {
   const path = evaluationStatePath(deps), state = readState(path);
   const batch = await codexSessionTaskBatch("held_out", deps.archive_options, deps.env);
-  const task = (batch.tasks as JsonObject[]).find(item => typeof item.task_id === "string" && !state.processed_task_ids.includes(item.task_id));
+  const pending = (batch.tasks as JsonObject[]).filter(item => typeof item.task_id === "string" && !state.processed_task_ids.includes(item.task_id));
+  const previous = pending.findIndex(item => item.task_id === state.last_attempted_task_id);
+  const task = pending[(previous + 1) % pending.length];
   if (!task) return { status: "idle", processed: 0, raw_content_stored: false };
+  // Advance before waiting or calling the model. An unavailable project must not
+  // starve later tasks, and pending tasks must remain eligible for a future retry.
+  if (state.last_attempted_task_id !== task.task_id) {
+    state.last_attempted_task_id = String(task.task_id); await writeState(path, state);
+  }
   if (typeof task.project_scope_id !== "string" || !/^project:[A-Za-z0-9_-]{1,96}$/u.test(task.project_scope_id)) {
     state.processed_task_ids.push(String(task.task_id)); await writeState(path, state);
     return { status: "skipped", processed: 1, reason: "held_out_provenance_incomplete", raw_content_stored: false };

@@ -245,31 +245,82 @@ export async function runDistillationOnce(deps: DistillationDependencies): Promi
       break;
     }
     const transport = deps.transport ?? createFetchTransport({ maxAttempts: Number(profile.max_attempts ?? 1) });
-    const chat = await transport.complete(provider, buildChatRequest(provider, { model: string(profile.model, "profile.model", 200),
-      messages, max_tokens: Number(profile.max_output_tokens ?? 4_096), temperature: Number(profile.temperature ?? 0) }));
-    const draft = parseModelJson(chat.text);
-    const workflowId = `experience_${stableDigest(requestId).slice(-20)}`;
-    const inputs = stringArray(draft.inputs, "inputs");
-    if (new Set(inputs).size !== inputs.length || inputs.some(value => !/^[A-Za-z_][A-Za-z0-9_]{0,63}$/u.test(value))) throw new Error("inputs must contain unique Workflow input names");
-    const steps = validateDistilledWorkflowSteps(draft.steps);
-    const result = await deps.client.call("craft_experience_procedure_submit", {
-      request_id: requestId, model_ticket_id: ticket.id, workflow_id: workflowId,
-      name: string(draft.name, "name", 160), description: string(draft.description, "description"),
-      inputs, steps,
-    });
-    const procedure = result.procedure ? object(result.procedure, "submitted procedure") : null;
-    const proposal = result.proposal ? object(result.proposal, "submitted proposal") : null;
-    await deps.client.call("craft_evaluation_model_ticket_complete", { ticket_id: ticket.id,
-      result_digest: stableDigest({ ticket_id: ticket.id, request_id: requestId, proposal_id: proposal?.id ?? null,
-        procedure_id: procedure?.id ?? null, procedure_digest: proposal?.identity_digest ?? null, status: "candidate_submitted" }) });
-    const firstDispatch = procedure && typeof procedure.id === "string"
-      ? await deps.client.call("craft_experience_learning_evaluation_dispatch", { procedure_id: procedure.id })
-      : null;
-    outcomes.push({ ticket_id: ticket.id, request_id: requestId, status: "candidate_submitted",
-      proposal_id: proposal?.id ?? null,
-      procedure_id: procedure?.id ?? null,
-      evaluation_dispatch_id: (firstDispatch?.dispatch as JsonObject | undefined)?.id ?? null,
-      evaluation_stage: (firstDispatch?.dispatch as JsonObject | undefined)?.stage ?? null });
+    const model = string(profile.model, "profile.model", 200);
+    const modelFingerprint = stableDigest({ provider: provider.provider, model });
+    const inputDigest = stableDigest({ purpose: "experience_workflow_distillation.v1", ticket_id: ticket.id,
+      request_id: requestId, request_version: request.version, input });
+    const started = object(await deps.client.call("craft_trace_start", { task_id: `experience:${requestId}`, operation_id: String(ticket.id),
+      model_fingerprint: modelFingerprint, capability_fingerprint: `craft-experience:${CRAFT_RELEASE_VERSION}`,
+      metadata: { purpose: "experience_workflow_distillation", request_id: requestId, request_version: request.version,
+        input_digest: inputDigest, content_stored: false } }), "Experience distillation Trace start");
+    const traceId = String(object(started.trace, "Experience distillation Trace").id ?? "");
+    if (!traceId) throw new Error("Experience distillation Trace has no id");
+    const modelSource = provider.provider === "codex-cli" ? "codex-cli-learning-transport" : "model-gateway";
+    let processingStage = "trace_request";
+    let responseDigest: string | null = null;
+    try {
+      await deps.client.call("craft_trace_append", { trace_id: traceId, event_kind: "model.request", actor: "experience-learning-worker",
+        source: modelSource, trust: "observed", operation_id: String(ticket.id), input_refs: [inputDigest], model_fingerprint: modelFingerprint,
+        data: { purpose: "experience_workflow_distillation", request_id: requestId, input_digest: inputDigest, content_stored: false },
+        summary: "已发送脱敏的独立任务观察摘要，用于形成 Experience 流程候选" });
+      processingStage = "model_request";
+      const chat = await transport.complete(provider, buildChatRequest(provider, { model,
+        messages, max_tokens: Number(profile.max_output_tokens ?? 4_096), temperature: Number(profile.temperature ?? 0) }));
+      responseDigest = stableDigest(chat.text);
+      await deps.client.call("craft_trace_append", { trace_id: traceId, event_kind: "model.completed", actor: "experience-learning-worker",
+        source: modelSource, trust: "observed", operation_id: String(ticket.id), model_fingerprint: modelFingerprint,
+        usage: chat.usage ?? {}, data: { model: chat.model, response_digest: responseDigest }, summary: "模型返回结构化 Experience 流程候选" });
+      processingStage = "candidate_validation";
+      const draft = parseModelJson(chat.text);
+      const workflowId = `experience_${stableDigest(requestId).slice(-20)}`;
+      const inputs = stringArray(draft.inputs, "inputs");
+      if (new Set(inputs).size !== inputs.length || inputs.some(value => !/^[A-Za-z_][A-Za-z0-9_]{0,63}$/u.test(value))) throw new Error("inputs must contain unique Workflow input names");
+      const steps = validateDistilledWorkflowSteps(draft.steps);
+      processingStage = "candidate_submit";
+      const result = await deps.client.call("craft_experience_procedure_submit", {
+        request_id: requestId, model_ticket_id: ticket.id, workflow_id: workflowId,
+        name: string(draft.name, "name", 160), description: string(draft.description, "description"),
+        inputs, steps,
+      });
+      const procedure = result.procedure ? object(result.procedure, "submitted procedure") : null;
+      const proposal = result.proposal ? object(result.proposal, "submitted proposal") : null;
+      const candidateDigest = stableDigest({ ticket_id: ticket.id, request_id: requestId, proposal_id: proposal?.id ?? null,
+        procedure_id: procedure?.id ?? null, procedure_digest: proposal?.identity_digest ?? null, response_digest: responseDigest,
+        status: "candidate_submitted" });
+      await deps.client.call("craft_trace_append", { trace_id: traceId, event_kind: "experience.candidate_submitted",
+        actor: "experience-learning-worker", source: "craft-experience", trust: "observed", operation_id: String(ticket.id),
+        output_refs: [proposal?.id, procedure?.id].filter((value): value is string => typeof value === "string"),
+        model_fingerprint: modelFingerprint,
+        data: { result_digest: candidateDigest, request_id: requestId, proposal_id: proposal?.id ?? null, procedure_id: procedure?.id ?? null,
+          response_digest: responseDigest, candidate_status: proposal?.id || procedure?.id ? "candidate" : "submitted_without_artifact" },
+        summary: "已提交待评测的 Experience 流程候选" });
+      const firstDispatch = procedure && typeof procedure.id === "string"
+        ? await deps.client.call("craft_experience_learning_evaluation_dispatch", { procedure_id: procedure.id })
+        : null;
+      const dispatch = firstDispatch?.dispatch && typeof firstDispatch.dispatch === "object" ? firstDispatch.dispatch as JsonObject : null;
+      if (dispatch) await deps.client.call("craft_trace_append", { trace_id: traceId, event_kind: "experience.evaluation_dispatched",
+        actor: "experience-learning-worker", source: "craft-experience", trust: "observed", operation_id: String(ticket.id),
+        output_refs: [dispatch.id].filter((value): value is string => typeof value === "string"), model_fingerprint: modelFingerprint,
+        data: { evaluation_dispatch_id: dispatch.id ?? null, evaluation_stage: dispatch.stage ?? null }, summary: "Experience 候选已进入首个评测阶段" });
+      processingStage = "ticket_complete";
+      await deps.client.call("craft_evaluation_model_ticket_complete", { ticket_id: ticket.id, trace_id: traceId, result_digest: candidateDigest });
+      await deps.client.call("craft_trace_finalize", { trace_id: traceId, status: "completed", summary: "Experience 流程候选提交与评测分发完成" });
+      outcomes.push({ ticket_id: ticket.id, request_id: requestId, trace_id: traceId, status: "candidate_submitted",
+        proposal_id: proposal?.id ?? null,
+        procedure_id: procedure?.id ?? null,
+        evaluation_dispatch_id: dispatch?.id ?? null,
+        evaluation_stage: dispatch?.stage ?? null });
+    } catch (error) {
+      const failureKind = safeWorkerErrorClass(error, "ExperienceError");
+      await deps.client.call("craft_trace_append", { trace_id: traceId,
+        event_kind: processingStage === "model_request" ? "model.failed" : "experience.candidate_failed",
+        actor: "experience-learning-worker", source: processingStage === "model_request" ? modelSource : "craft-experience",
+        trust: "observed", operation_id: String(ticket.id), model_fingerprint: modelFingerprint,
+        data: { failure_kind: failureKind, failure_stage: processingStage, input_digest: inputDigest,
+          ...(responseDigest ? { response_digest: responseDigest } : {}) }, summary: "Experience 流程候选链路失败，保留票据以便后续重试" });
+      await deps.client.call("craft_trace_finalize", { trace_id: traceId, status: "failed", summary: "Experience 流程候选链路未完成" });
+      throw error;
+    }
   }
   return { processed: outcomes.length, outcomes };
 }
@@ -355,7 +406,10 @@ export class McpStdioClient implements ExperienceLearningClient {
     const result = await this.request("tools/call", { name, arguments: args });
     if (result.isError === true) {
       const content = Array.isArray(result.content) ? result.content as JsonObject[] : [];
-      throw new Error(String(content[0]?.text ?? `${name} failed`));
+      const failure = result.structuredContent as JsonObject | undefined;
+      const code = failure?.error_code;
+      throw Object.assign(new Error(String(content[0]?.text ?? `${name} failed`)),
+        typeof code === "string" && /^[A-Z][A-Z_]{0,63}$/u.test(code) ? { code: `ERR_MCP_${code}` } : {});
     }
     if (result.structuredContent && typeof result.structuredContent === "object") return object(result.structuredContent, "MCP structuredContent");
     const content = Array.isArray(result.content) ? result.content as JsonObject[] : [];

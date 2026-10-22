@@ -28,6 +28,8 @@ readline.createInterface({ input: process.stdin }).on("line", line => {
         : request.method === "tools/call" && request.params.name === "fixture_non_text" ? { content: [{ type: "image", data: "hidden" }] }
         : request.method === "tools/call" && request.params.name === "fixture_empty" ? { content: [] }
           : request.method === "tools/call" && request.params.name === "fixture_tool_error" ? { isError: true, content: [{ type: "text", text: "fixture tool error" }] }
+        : request.method === "tools/call" && request.params.name === "fixture_tool_error_code" ? { isError: true, structuredContent: { error_code: "INVALID_INPUT" }, content: [{ type: "text", text: "fixture validation error" }] }
+        : request.method === "tools/call" && request.params.name === "fixture_tool_error_unsafe_code" ? { isError: true, structuredContent: { error_code: "secret\nvalue" }, content: [] }
         : request.method === "tools/call" && request.params.name === "fixture_tool_error_empty" ? { isError: true, content: [] }
         : request.method === "tools/call" && request.params.name === "fixture_tool_error_non_array" ? { isError: true, content: "invalid" }
         : request.method === "tools/call" && request.params.name === "fixture_bad_structured" ? { structuredContent: [] }

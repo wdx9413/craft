@@ -490,10 +490,13 @@ export abstract class ServiceFoundation {
     // environment they run in, then resolves what they built by name — so a capability
     // missing from `CRAFT_CAPABILITIES` fails here naming the kernel it owed, instead of
     // leaving an undefined property to surface at call time.
+    this.traceArchiveStorage = new TraceArchiveStorageKernel(store, traceArchiveBackends);
+    this.trace = new TraceKernel(store, this.traceArchiveStorage);
     const capabilities = buildCapabilityRegistry(CRAFT_CAPABILITIES, {
       [CORE_KERNELS.store]: store,
       [CORE_KERNELS.modelProviders]: this.modelProviders,
       [CORE_KERNELS.telemetry]: new CraftTelemetry(new StoreTelemetrySink(store)),
+      [CORE_KERNELS.traceReader]: this.trace,
     });
     this.knowledgeLaunch = capabilities.registry.require<KnowledgeBoundLaunchKernel>(KNOWLEDGE_KERNELS.boundLaunch);
     this.knowledgeWorkbench = capabilities.registry.require<KnowledgeWorkbenchKernel>(KNOWLEDGE_KERNELS.workbench);
@@ -606,8 +609,6 @@ export abstract class ServiceFoundation {
     this.metrics = new MetricsKernel(store);
     this.usage = new UsageKernel(store);
     this.intentCompiler = new IntentCompilerKernel(store);
-    this.traceArchiveStorage = new TraceArchiveStorageKernel(store, traceArchiveBackends);
-    this.trace = new TraceKernel(store, this.traceArchiveStorage);
     this.durableActionLoops = new DurableActionLoopKernel(store, this.trace);
     this.hostSessions = new HostSessionEventKernel(store, this.trace);
     this.outcomeObservers = new OutcomeObserverKernel(store, this.trace);

@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { after, default as test } from "node:test";
 import type { ChatResult, ModelProviderSpec, ModelTransport } from "../core/model-gateway.ts";
+import { PROVIDER_CATALOG } from "../core/model-gateway.ts";
 import type { JsonObject } from "../core/infrastructure/store.ts";
 import { McpStdioClient, boundedPollInterval, learningComponents, learningPollInterval, learningWorkFound, mcpCommandOptions, runDistillationOnce, runEvaluationOnce, runLearningTick, runOnce, type ExperienceLearningClient } from "../deploy/experience-learning/worker.ts";
 import { CRAFT_RELEASE_VERSION } from "../core/version.ts";
@@ -32,6 +33,9 @@ function fixture(modelText = JSON.stringify({ name: "Verified flow", description
     if (name === "craft_experience_learning_request_get") return { request: { id: "request-1", version: 1, lifecycle: "awaiting_model", procedure_kind: "workflow", scenario_key: "build-check", hypothesis: "Distill a reusable Workflow. Summary: repair TypeScript validation. Applies when: a code change requires a focused test. Excludes: documentation-only work.", design_axes: ["orchestration"], output_contract_ref: "acceptance:build" },
       observations: [{ outcome: "passed", sanitized: true, content_stored: false, execution_shape: ["inspect", "verify"], verification: { outcome: "passed" } },
         { outcome: "passed", sanitized: true, content_stored: false, execution_shape: ["inspect", "verify"], verification: { outcome: "passed" } }] };
+    if (name === "craft_trace_start") return { trace: { id: "trace-1" } };
+    if (name === "craft_trace_append") return { event: { id: `event-${calls.length}` } };
+    if (name === "craft_trace_finalize") return { trace: { id: args.trace_id, status: args.status } };
     if (name === "craft_experience_procedure_submit") { queued = false; return { proposal: { id: "proposal-1" }, procedure: { id: "procedure-1" } }; }
     if (name === "craft_evaluation_model_ticket_complete") return { ticket: { id: args.ticket_id, status: "completed" } };
     if (name === "craft_experience_learning_evaluation_dispatch") return { dispatch: { id: "dispatch-1", stage: "shadow" } };
@@ -60,7 +64,7 @@ test("distillation worker turns a ready ticket into a candidate and retries from
   const deps = { client: f.client, providers: [provider], transport: f.transport };
   const first = await runDistillationOnce(deps);
   assert.equal(first.processed, 1);
-  assert.deepEqual((first.outcomes as JsonObject[])[0], { ticket_id: "ticket-1", request_id: "request-1", status: "candidate_submitted", proposal_id: "proposal-1", procedure_id: "procedure-1", evaluation_dispatch_id: "dispatch-1", evaluation_stage: "shadow" });
+  assert.deepEqual((first.outcomes as JsonObject[])[0], { ticket_id: "ticket-1", request_id: "request-1", trace_id: "trace-1", status: "candidate_submitted", proposal_id: "proposal-1", procedure_id: "procedure-1", evaluation_dispatch_id: "dispatch-1", evaluation_stage: "shadow" });
   const submit = f.calls.find(call => call.name === "craft_experience_procedure_submit");
   assert.ok(submit);
   assert.equal(submit.args.model_ticket_id, "ticket-1");
@@ -68,9 +72,63 @@ test("distillation worker turns a ready ticket into a candidate and retries from
   assert.equal(submit.args.inputs instanceof Array && submit.args.inputs[0], "project_root");
   const completion = f.calls.find(call => call.name === "craft_evaluation_model_ticket_complete");
   assert.equal(completion?.args.ticket_id, "ticket-1");
+  assert.equal(completion?.args.trace_id, "trace-1");
   assert.match(String(completion?.args.result_digest), /^sha256:[a-f0-9]{64}$/u);
+  const traceEvents = f.calls.filter(call => call.name === "craft_trace_append").map(call => call.args.event_kind);
+  assert.deepEqual(traceEvents, ["model.request", "model.completed", "experience.candidate_submitted", "experience.evaluation_dispatched"]);
+  const submissionIndex = f.calls.findIndex(call => call.name === "craft_experience_procedure_submit");
+  const dispatchIndex = f.calls.findIndex(call => call.name === "craft_experience_learning_evaluation_dispatch");
+  const completionIndex = f.calls.findIndex(call => call.name === "craft_evaluation_model_ticket_complete");
+  assert.ok(submissionIndex < dispatchIndex && dispatchIndex < completionIndex, "the Ticket completes only after candidate submission and evaluation dispatch");
+  assert.deepEqual(f.calls.find(call => call.name === "craft_trace_finalize")?.args, { trace_id: "trace-1", status: "completed", summary: "Experience 流程候选提交与评测分发完成" });
   assert.equal((await runDistillationOnce(deps)).processed, 0);
   assert.equal(f.calls.filter(call => call.name === "craft_experience_procedure_submit").length, 1);
+});
+
+test("distillation records a safe failed Trace and leaves the model Ticket retryable", async () => {
+  const f = fixture();
+  const transport: ModelTransport = { async complete() { throw Object.assign(new Error("private model response"), { name: "TransportError" }); } };
+  await assert.rejects(runDistillationOnce({ client: f.client, providers: [provider], transport }), /private model response/u);
+  const failure = f.calls.find(call => call.name === "craft_trace_append" && call.args.event_kind === "model.failed");
+  const data = failure?.args.data as JsonObject;
+  assert.equal(data.failure_kind, "TransportError");
+  assert.equal(data.failure_stage, "model_request");
+  assert.match(String(data.input_digest), /^sha256:[a-f0-9]{64}$/u);
+  assert.doesNotMatch(JSON.stringify(failure), /private model response/u);
+  assert.equal(f.calls.some(call => call.name === "craft_evaluation_model_ticket_complete"), false);
+  assert.deepEqual(f.calls.find(call => call.name === "craft_trace_finalize")?.args, { trace_id: "trace-1", status: "failed", summary: "Experience 流程候选链路未完成" });
+});
+
+test("distillation requires a Trace ID before calling the model", async () => {
+  const f = fixture();
+  let modelCalls = 0;
+  const client: ExperienceLearningClient = { async call(name, args) {
+    if (name === "craft_trace_start") return { trace: {} };
+    return f.client.call(name, args);
+  } };
+  const transport: ModelTransport = { async complete() { modelCalls += 1; return { text: "{}", model: "test-model", usage: null }; } };
+  await assert.rejects(runDistillationOnce({ client, providers: [provider], transport }), /Trace has no id/u);
+  assert.equal(modelCalls, 0);
+  assert.equal(f.calls.some(call => call.name === "craft_evaluation_model_ticket_complete"), false);
+});
+
+test("distillation marks Codex Host calls in Trace and tolerates sparse dispatch metadata", async () => {
+  const f = fixture();
+  const codexProvider = PROVIDER_CATALOG.find(item => item.provider === "codex-cli")!;
+  const client: ExperienceLearningClient = { async call(name, args = {}) {
+    if (name === "craft_evaluation_model_profile_get") return { profile: { provider: "codex-cli", model: "gpt-6-luna", version: 1,
+      max_attempts: 1, max_output_tokens: 512, temperature: 0 }, readiness: { status: "ready_for_adapter" } };
+    if (name === "craft_experience_learning_evaluation_dispatch") return { dispatch: {} };
+    return f.client.call(name, args);
+  } };
+  const result = await runDistillationOnce({ client, providers: [codexProvider], transport: f.transport });
+  assert.equal(((result.outcomes as JsonObject[])[0]!).trace_id, "trace-1");
+  const request = f.calls.find(call => call.name === "craft_trace_append" && call.args.event_kind === "model.request");
+  assert.equal(request?.args.source, "codex-cli-learning-transport");
+  const evaluationEvent = f.calls.find(call => call.name === "craft_trace_append" && call.args.event_kind === "experience.evaluation_dispatched");
+  assert.deepEqual(evaluationEvent?.args.data, { evaluation_dispatch_id: null, evaluation_stage: null });
+  const completion = f.calls.find(call => call.name === "craft_evaluation_model_ticket_complete");
+  assert.equal(completion?.args.trace_id, "trace-1");
 });
 
 test("Experience Workflow prose follows the configured output language", async () => {
@@ -152,7 +210,7 @@ test("distillation handles missing provider outputs and sparse sanitized evidenc
     return { text: "```json\n{\"name\":\"Sparse result\",\"description\":\"No executable procedure returned\",\"inputs\":[],\"steps\":[{\"id\":\"inspect\",\"type\":\"assertion\",\"evaluator\":\"file_exists\",\"path\":\".\",\"side_effect\":\"read_only\"}]}\n```", model: "dynamic-model", usage: null };
   } };
   const result = await runDistillationOnce({ client, transport: sparseTransport });
-  assert.deepEqual(result.outcomes, [{ ticket_id: "ticket-1", request_id: "request-1", status: "candidate_submitted", proposal_id: null,
+  assert.deepEqual(result.outcomes, [{ ticket_id: "ticket-1", request_id: "request-1", trace_id: "trace-1", status: "candidate_submitted", proposal_id: null,
     procedure_id: null, evaluation_dispatch_id: null, evaluation_stage: null }]);
 
   const unavailable: ExperienceLearningClient = { async call(name, args) {
@@ -277,12 +335,12 @@ test("continuous learning tick contains transient Experience and Knowledge failu
 test("Knowledge source failures and partial pages are visible and make one-shot sync fail closed", () => {
   const digest = `sha256:${"a".repeat(64)}`;
   const result = { knowledge: { outcomes: [
-    { status: "failed", source_ref: digest, failure_kind: "TypeError", reason: "/private/source/path" },
-    { status: "failed", source_ref: "/private/source/path", failure_kind: "unsafe error name" },
+    { status: "failed", source_ref: digest, failure_kind: "TypeError", failure_code: "ERR_MCP_INVALID_INPUT", reason: "/private/source/path" },
+    { status: "failed", source_ref: "/private/source/path", failure_kind: "unsafe error name", failure_code: "/private/secret" },
     { status: "partial", source_ref: digest, reason: "/private/source/path" },
     { status: "completed", source_ref: digest }, null, [], "malformed",
   ] } } as JsonObject;
-  const expected = `Craft Knowledge source ${digest} sync failed (TypeError).\n`
+  const expected = `Craft Knowledge source ${digest} sync failed (TypeError) [ERR_MCP_INVALID_INPUT].\n`
     + "Craft Knowledge source unknown_source sync failed (Error).\n"
     + `Craft Knowledge source ${digest} sync is partial; remaining pages will resume in a later pass.\n`;
   assert.deepEqual(learningTickStatus(result, true), { diagnostics: expected, exit_code: 1 });
@@ -689,8 +747,8 @@ test("worker CLI reports an individual Knowledge source failure on stderr and fa
     });
     const sourceRef = `sha256:${createHash("sha256").update("fixture-source").digest("hex")}`;
     assert.equal(exitCode, 1, "one-shot Knowledge sync must report a source it could not ingest");
-    assert.deepEqual(JSON.parse(stdout.trim()).knowledge.outcomes, [{ source_ref: sourceRef, status: "failed", failure_kind: "Error" }]);
-    assert.match(stderr, new RegExp(`Craft Knowledge source ${sourceRef} sync failed \\(Error\\)\\.`));
+    assert.deepEqual(JSON.parse(stdout.trim()).knowledge.outcomes, [{ source_ref: sourceRef, status: "failed", failure_kind: "Error", failure_code: "OPERATION_FAILED" }]);
+    assert.match(stderr, /sync failed \(Error\) \[OPERATION_FAILED\]\./u);
     assert.equal(stderr.includes("private fixture error"), false, "source failures must be observable without exposing raw tool error text");
   } finally { rmSync(dataDir, { recursive: true, force: true }); }
 });
@@ -807,6 +865,9 @@ test("MCP stdio client handles structured, text, tool-error and RPC-error respon
     await assert.rejects(client.call("fixture_non_text"), /no structured result/u);
     await assert.rejects(client.call("fixture_empty"), /no structured result/u);
     await assert.rejects(client.call("fixture_tool_error"), /fixture tool error/u);
+    await assert.rejects(client.call("fixture_tool_error_code"), (error: NodeJS.ErrnoException) => error.code === "ERR_MCP_INVALID_INPUT");
+    await assert.rejects(client.call("fixture_tool_error_unsafe_code"), (error: NodeJS.ErrnoException) => error.code === undefined);
+
     await assert.rejects(client.call("fixture_tool_error_empty"), /fixture_tool_error_empty failed/u);
     await assert.rejects(client.call("fixture_tool_error_non_array"), /fixture_tool_error_non_array failed/u);
     await assert.rejects(client.call("fixture_bad_content"), /no structured result/u);

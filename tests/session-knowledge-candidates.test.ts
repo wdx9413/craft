@@ -165,6 +165,8 @@ test("creates one Chinese Knowledge candidate from a verified generation task an
     const savedState = await readFile(f.workerState, "utf8");
     assert.equal(savedState.includes("本次已验证"), false);
     assert.equal(savedState.includes(String(f.task.task_id)), true);
+    const state = JSON.parse(savedState) as JsonObject;
+    assert.equal((state.trace_ids_by_task as JsonObject)[String(f.task.task_id)], "trace-session-task");
     assert.deepEqual(await runSessionKnowledgeCandidateOnce({ client: fixture.client, providers: [provider], transport: modelTransport("{}"),
       state_file: f.workerState, archive_options: { sessions_root: f.sessions, state_file: f.state } }),
       { status: "idle", processed: 0, verified_candidates_pending: 0, raw_content_stored: false });
@@ -362,7 +364,10 @@ test("held-out evaluation records only terminal Trace references and leaves fail
       await assert.rejects(runSessionKnowledgeEvaluationOnce({ client: fixture.client, providers: [provider],
         transport: { async complete() { return { text: JSON.stringify({ decision: "labeled", expected_claim_ids: ["reviewed-claim"] }), model: "test-model", usage: null }; } }, state_file: f.workerState,
         archive_options: { sessions_root: f.sessions, state_file: f.state }, read_excerpt: async () => missingGoal }), /held-out test Evidence is unavailable/u);
-      await assert.rejects(readFile(f.workerState, "utf8"), (error: NodeJS.ErrnoException) => error.code === "ENOENT");
+      const state = JSON.parse(await readFile(f.workerState, "utf8"));
+      assert.deepEqual(state.processed_task_ids, []);
+      assert.deepEqual(state.trace_ids_by_task, {});
+      assert.equal(state.last_attempted_task_id, f.task.task_id);
       assert(fixture.calls.some(call => call.name === "craft_trace_finalize" && call.args.status === "failed"));
     } finally { await rm(f.root, { recursive: true, force: true }); }
   }
@@ -801,5 +806,40 @@ test("records a sanitized failed Trace and leaves the task available for retry",
     const failureEvent = fixture.calls.find(call => call.name === "craft_trace_append" && call.args.event_kind === "model.failed");
     assert.equal((failureEvent?.args.data as JsonObject).failure_kind, "Error");
     assert.equal(JSON.stringify(fixture.calls).includes("private string failure"), false);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+
+test("held-out tasks rotate past waiting projects without discarding pending work", async () => {
+  const f = await setup("held_out", false, false, true);
+  try {
+    let secondSession = "held-out-fairness";
+    while (Number.parseInt(createHash("sha256").update(secondSession).digest("hex").slice(0, 8), 16) % 5 !== 0) secondSession += "x";
+    const second = (await readFile(f.source, "utf8")).replaceAll(f.sessionId, secondSession);
+    await writeFile(join(f.sessions, "second.jsonl"), second);
+    await runCodexSessionCollectionOnce({ sessions_root: f.sessions, state_file: f.state });
+    const batch = await codexSessionTaskBatch("held_out", { state_file: f.state });
+    const tasks = batch.tasks as JsonObject[];
+    assert.equal(tasks.length, 2);
+    const noClaims = workerClient({ craft_knowledge_claim_list: () => ({ claims: [] }) });
+    const waiting = await evaluate(f, noClaims.client);
+    assert.equal(waiting.status, "waiting_for_reviewed_claims", JSON.stringify(waiting));
+    let state = JSON.parse(await readFile(f.workerState, "utf8"));
+    assert.equal(state.last_attempted_task_id, tasks[0]!.task_id);
+    assert.deepEqual(state.processed_task_ids, []);
+    const ready = reviewedClaimClient(f.task.project_scope_id);
+    const result = await evaluate(f, ready.client, modelTransport('{"decision":"skip","expected_claim_ids":[]}'));
+    assert.equal(result.task_id, tasks[1]!.task_id);
+    assert.equal(result.status, "case_skipped");
+    state = JSON.parse(await readFile(f.workerState, "utf8"));
+    assert.deepEqual(state.processed_task_ids, [tasks[1]!.task_id]);
+    assert.equal((await evaluate(f, noClaims.client)).status, "waiting_for_reviewed_claims");
+    assert.equal(JSON.parse(await readFile(f.workerState, "utf8")).last_attempted_task_id, tasks[0]!.task_id);
+    assert.equal(ready.calls.filter(call => call.name === "craft_trace_start").length, 1);
+    assert.equal(noClaims.calls.some(call => call.name === "craft_evaluation_model_profile_ensure_single"), false);
+    for (const cursor of [null, 1, "", " ", "x".repeat(161)]) {
+      await writeFile(f.workerState, JSON.stringify({ schema: "craft.knowledge-session-evaluation-state.v1", processed_task_ids: [], last_attempted_task_id: cursor }));
+      await assert.rejects(evaluate(f, noClaims.client), /state is invalid/u);
+    }
   } finally { await rm(f.root, { recursive: true, force: true }); }
 });
