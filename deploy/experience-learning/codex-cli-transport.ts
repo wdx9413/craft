@@ -52,7 +52,12 @@ function parseEvents(stdout: string): { invalid: boolean; message: string | null
   return { invalid: false, message: typeof message?.text === "string" ? message.text : null, usage, terminal, terminalLast: events.at(-1) === terminal,
     failed: events.some(event => event.type === "turn.failed" || event.type === "error"
       || typeof event.type === "string" && event.type.startsWith("item.")
-        && !["agent_message", "reasoning"].includes(String((event.item as JsonObject | undefined)?.type))) };
+        && !["agent_message", "reasoning"].includes(String((event.item as JsonObject | undefined)?.type))
+        // CLI 0.163 emits this intentional catalog omission as an error item.
+        // Only this exact notice is non-fatal; unknown settings and tool events fail.
+        && !(event.type === "item.completed" && (event.item as JsonObject | undefined)?.type === "error"
+          && /^Exceeded skills context budget\. All skill descriptions were removed and [0-9]{1,6} additional skills were not included in the model-visible skills list\.$/u
+            .test(String((event.item as JsonObject).message)))) };
 }
 
 /** Isolated Codex CLI transport for bounded evaluation tickets; one model call per worker tick. */
@@ -84,7 +89,7 @@ export class CodexCliModelTransport implements ModelTransport {
       const argv = ["exec", "--ignore-user-config", "--ephemeral", "--sandbox", "read-only", "--skip-git-repo-check"];
       // These tasks receive their complete evidence packet and do not use tools
       // or an available-skills catalog. Keep the Host's safety rules intact.
-      argv.push("-c", "skills.max_context_tokens=1", "-c", "features.shell_tool=false", "-c", "tools.view_image=false", "-c", 'web_search="disabled"');
+      argv.push("-c", "skills.max_context_tokens=1", "-c", "features.shell_tool=false", "-c", "features.view_image=false", "-c", 'web_search="disabled"');
       if (schema) {
         schemaDirectory = await mkdtemp(join(tmpdir(), "craft-learning-schema-"));
         const schemaPath = join(schemaDirectory, "output-schema.json");

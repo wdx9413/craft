@@ -34,7 +34,7 @@ test("Codex CLI transport uses fixed model, isolated read-only ephemeral invocat
   assert.equal(observed?.cwd, tmpdir());
   assert.equal(observed?.timeoutMs, 120_000);
   assert.equal(observed?.outputLimit, 65_536);
-  assert.deepEqual(observed?.argv, ["exec", "--ignore-user-config", "--ephemeral", "--sandbox", "read-only", "--skip-git-repo-check", "-c", "skills.max_context_tokens=1", "-c", "features.shell_tool=false", "-c", "tools.view_image=false", "-c", 'web_search="disabled"', "--model", "gpt-6-luna", "--json", "-"]);
+  assert.deepEqual(observed?.argv, ["exec", "--ignore-user-config", "--ephemeral", "--sandbox", "read-only", "--skip-git-repo-check", "-c", "skills.max_context_tokens=1", "-c", "features.shell_tool=false", "-c", "features.view_image=false", "-c", 'web_search="disabled"', "--model", "gpt-6-luna", "--json", "-"]);
   assert.match(observed?.stdin ?? "", /## system\nReturn JSON\./u);
   assert.match(observed?.stdin ?? "", /## user\n\{\}/u);
 });
@@ -179,4 +179,20 @@ test("learning transport routes Codex Host and API profiles through their correc
     if (oldKey === undefined) delete process.env.CRAFT_CODEX_LEARNING_TRANSPORT_TEST_KEY;
     else process.env.CRAFT_CODEX_LEARNING_TRANSPORT_TEST_KEY = oldKey;
   }
+});
+
+
+test("Codex catalog omission notice is accepted while configuration and other errors remain fatal", async () => {
+  const notice = "Exceeded skills context budget. All skill descriptions were removed and 94 additional skills were not included in the model-visible skills list.";
+  const withItem = (item: unknown, type = "item.completed") => ({ ...success(), stdout: JSON.stringify({ type, item }) + "\n" + success().stdout });
+  const result = await new CodexCliModelTransport(async () => withItem({ type: "error", message: notice })).complete(provider, request);
+  assert.equal(result.model, "gpt-6-luna");
+  assert.deepEqual(result.usage, { input_tokens: 9, output_tokens: 4 });
+  for (const item of [{ type: "error", message: "Codex is ignoring 1 unrecognized configuration setting." },
+    { type: "error", message: notice + " Extra error." }, { type: "error", message: "Model request failed" },
+    { type: "error" }, { type: "error", message: null }, { type: "unknown_tool", message: notice }]) {
+    await assert.rejects(new CodexCliModelTransport(async () => withItem(item)).complete(provider, request),
+      (error: NodeJS.ErrnoException) => error.code === "ERR_CODEX_HOST_RESPONSE_INVALID");
+  }
+  await assert.rejects(new CodexCliModelTransport(async () => withItem({ type: "error", message: notice }, "item.started")).complete(provider, request));
 });
