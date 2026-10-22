@@ -1772,6 +1772,29 @@ test("project Knowledge discovery disables missing auto sources and reactivates 
   } finally { f.close(); }
 });
 
+test("project Knowledge source cleanup does not enumerate the global Source list", async () => {
+  const f = await fixture();
+  try {
+    const scope = ((f.service.scopeIdentityResolveProject({ project_root: f.repo }).identity as JsonObject).canonical_scope as JsonObject);
+    const missing = (id: string, projectId: string) => f.store.create("knowledge_source", id, {
+      scope: { kind: "project", id: projectId }, kind: "readme", status: "active", locator: "", trust: "bounded", access: "read_only",
+    });
+    missing("project_autodiscovered_missing_here", String(scope.id));
+    missing("project_autodiscovered_missing_elsewhere", "other-project");
+    const originalList = f.store.list;
+    f.store.list = ((kind: string, ...args: unknown[]) => {
+      if (kind === "knowledge_source") throw new Error("global Knowledge Source enumeration");
+      return originalList.call(f.store, kind, ...args as [never]);
+    }) as typeof f.store.list;
+
+    const result = f.service.knowledgeSources.discoverProjectSources({ project_root: f.repo, scope_kind: "project", scope_id: scope.id });
+
+    assert.equal(result.sources_disabled, 1);
+    assert.equal(f.store.get("knowledge_source", "project_autodiscovered_missing_here").status, "disabled");
+    assert.equal(f.store.get("knowledge_source", "project_autodiscovered_missing_elsewhere").status, "active");
+  } finally { f.close(); }
+});
+
 test("project Knowledge discovery isolates automatic source transition failures", async () => {
   const f = await fixture();
   try {

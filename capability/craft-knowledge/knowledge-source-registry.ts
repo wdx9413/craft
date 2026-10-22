@@ -143,10 +143,8 @@ export class KnowledgeSourceRegistry {
     let disabled = 0;
     const failed = new Set<string>();
     const failureCodes = new Set<string>();
-    for (const source of this.store.list("knowledge_source", 100_000, item => item.status === "active"
-      && String(item.id).startsWith("project_autodiscovered_")
-      && (item.scope as JsonObject | undefined)?.kind === scope.kind
-      && (item.scope as JsonObject | undefined)?.id === scope.id)) {
+    for (const source of this.store.listScoped("knowledge_source", [scope], 100_000, item => item.status === "active"
+      && String(item.id).startsWith("project_autodiscovered_"))) {
       if (currentSourceIds.has(String(source.id)) || this.discoveredSourcePathIsUsable(source)) continue;
       const sourceId = String(source.id);
       let sourceDisabled = false;
