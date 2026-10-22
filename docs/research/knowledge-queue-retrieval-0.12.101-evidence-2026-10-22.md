@@ -23,3 +23,22 @@
 隔离候选 110 项相关测试通过；相对基线的增量 53 行、44 分支、4 函数全部覆盖。类型检查、七个公共和能力包构建、插件构建与打包、版本和目录检查、无 node_modules 的独立启动检查均通过。
 
 真实发布和运行结果核验后追加。完整五能力目标仍未完成：真实独立标签、项目/跨项目晋升退出、作用域数据隔离、Memory 三级记忆、Experience 收益与回退、Context 成本及性能、Codebase 五语言固定仓库评测继续保留验收。
+
+## 远端发布和真实验证
+
+源码 main `8ccc7962425b6b56248ce2d29ac9b5138ba3f02a`（代码提交 `3668f6cb57e29dc2d8cd09255f7a6716edd9a671`，随后仅修正证据文件日期）；Marketplace main `6450af488dc1f52e9ee2796eb60dd0b06eea3958`。均已普通推送和远端读回。从该固定远端源码归档重建并经远端 Marketplace 安装 `.101`；安装的 MCP/Hook/Worker 与 Marketplace 哈希一致。MCP SHA-256：`ac950e9d58cf42a32d146b9031d4ebad9981af1304cc9c03204ccb034dcbb6a0`。
+
+原样重跑已有案例：版本仍为 1，identity_digest 仍为 `sha256:72cbda9dec1a91265f3b322399114a0df05081c26248d53cf769ffef0c0aaaf1`；未修改查询、预期 Claim 或来源。新运行 `knowledge_run_lexical_replay_1792680552930`：recall=1、evidence_coverage=1、candidate_leaks=0，命中原预期 Claim。与旧运行 recall=0 对比可证明这一条案例的中文词法检索已修复；不能据一个模型候选标签案例宣称总体效果或独立准确率达标。provenance_eligible 仍 false，status 仍 insufficient，没有晋升。该次重跑不调用模型。
+
+随后正常持 Knowledge 拥有者锁，运行远端固定版本的实际分类函数，最多三批检查、共享最多一次模型调用。实际首批对现有候选 `knowledge_claim_from_knowledge_fragment_0a5861905c2db1d7164e75c4` 完成 `gpt-6-luna` 证据审核：
+
+- 业务输入估算 3871 token，CLI 实际 input_tokens=13950、output_tokens=129。业务估算不代表 Host 总输入成本。
+- 返回 needs_evidence，Claim 保留 candidate，promoted=false。没有为生成正式产物而放松证据门禁。
+- Trace `trace_92f4a13fc1c946259df8cd926306f635`：version=11、completed、9 个事件。通过精确 Trace 审计流取得真实事件 ID 后逐条只读回查，9 条事件均存在且序号连续；组件事件可使用自定义 ID，不能仅按 trace_id:sequence 推测所有事件 ID。
+- 票据 `evaluation_model_ticket_b6fd433fd3f41f6258ea` completed，保留同一 Trace 和结果 digest。
+
+再次启动新进程，用零模型预算核验持久队列：首项为上轮预算拒绝的 `knowledge_claim_from_knowledge_fragment_40eca7774f353a4f4216494f`，返回 model_call_budget_exhausted，未启动模型。持久 last_claim_id 保留在上轮已处理的 0a586... Claim，不把未执行项当作已执行。
+
+真实首批因现有数据变化已包含一条可审核新候选，因此本轮真实记录没有复现“前 8 条全部不可处理”的完整旧队形；该特定饥饿情形由先红后绿的 9 条任务回归证明。真实新进程记录证明了持久游标恢复与预算未执行项的保留。显式单轮函数验证仍不能冒充长期后台收益证明。
+
+运行日志及精确只读回查保存在 `/private/tmp/craft-knowledge-release-alpcav5c/`：`real-knowledge-pass.jsonl`、`real-queue-budget-check.jsonl`、`persisted-proof.json`、`installed-hashes.json`。
